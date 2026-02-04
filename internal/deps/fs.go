@@ -3,6 +3,7 @@ package deps
 import (
 	"io/fs"
 	"os"
+	"path/filepath"
 )
 
 // FileSystem defines operations for interacting with the filesystem
@@ -25,6 +26,8 @@ type FileSystem interface {
 	MkdirAll(path string, perm os.FileMode) error
 	// DirFS returns a filesystem rooted at the given directory
 	DirFS(dir string) fs.FS
+	// EvalSymlinks returns the path after evaluating any symbolic links
+	EvalSymlinks(path string) (string, error)
 }
 
 // RealFileSystem implements FileSystem using the real filesystem
@@ -68,4 +71,8 @@ func (f *RealFileSystem) MkdirAll(path string, perm os.FileMode) error {
 
 func (f *RealFileSystem) DirFS(dir string) fs.FS {
 	return os.DirFS(dir)
+}
+
+func (f *RealFileSystem) EvalSymlinks(path string) (string, error) {
+	return filepath.EvalSymlinks(path)
 }

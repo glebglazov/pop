@@ -309,6 +309,170 @@ func TestSaveWith(t *testing.T) {
 	}
 }
 
+func TestSortByRecencyWith_SymlinkResolution(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name         string
+		entries      []Entry
+		projects     []project.Project
+		symlinkMap   map[string]string // symlink path -> resolved path
+		expected     []string          // expected order of project names
+	}{
+		{
+			name: "matches history via symlink resolution",
+			entries: []Entry{
+				{Path: "/real/path/old", LastAccess: now.Add(-2 * time.Hour)},
+				{Path: "/real/path/recent", LastAccess: now},
+			},
+			projects: []project.Project{
+				{Name: "recent", Path: "/symlink/recent"},
+				{Name: "old", Path: "/symlink/old"},
+				{Name: "unvisited", Path: "/other"},
+			},
+			symlinkMap: map[string]string{
+				"/symlink/recent": "/real/path/recent",
+				"/symlink/old":    "/real/path/old",
+			},
+			expected: []string{"unvisited", "old", "recent"},
+		},
+		{
+			name: "direct path match takes precedence",
+			entries: []Entry{
+				{Path: "/direct/path", LastAccess: now},
+			},
+			projects: []project.Project{
+				{Name: "direct", Path: "/direct/path"},
+				{Name: "other", Path: "/other"},
+			},
+			symlinkMap: map[string]string{}, // no symlinks
+			expected:   []string{"other", "direct"},
+		},
+		{
+			name: "mixed symlink and direct matches",
+			entries: []Entry{
+				{Path: "/real/a", LastAccess: now.Add(-2 * time.Hour)},
+				{Path: "/direct/b", LastAccess: now.Add(-1 * time.Hour)},
+				{Path: "/real/c", LastAccess: now},
+			},
+			projects: []project.Project{
+				{Name: "c", Path: "/symlink/c"},
+				{Name: "b", Path: "/direct/b"},
+				{Name: "a", Path: "/symlink/a"},
+			},
+			symlinkMap: map[string]string{
+				"/symlink/a": "/real/a",
+				"/symlink/c": "/real/c",
+			},
+			expected: []string{"a", "b", "c"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &Deps{
+				FS: &deps.MockFileSystem{
+					EvalSymlinksFunc: func(path string) (string, error) {
+						if resolved, ok := tt.symlinkMap[path]; ok {
+							return resolved, nil
+						}
+						return path, nil
+					},
+				},
+			}
+
+			h := &History{Entries: tt.entries}
+			result := h.SortByRecencyWith(d, tt.projects)
+
+			if len(result) != len(tt.expected) {
+				t.Errorf("expected %d projects, got %d", len(tt.expected), len(result))
+				return
+			}
+
+			for i, p := range result {
+				if p.Name != tt.expected[i] {
+					t.Errorf("position %d: expected %q, got %q", i, tt.expected[i], p.Name)
+				}
+			}
+		})
+	}
+}
+
+func TestRemoveWith_SymlinkResolution(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name           string
+		entries        []Entry
+		removePath     string
+		symlinkMap     map[string]string
+		expectedPaths  []string // remaining paths after removal
+	}{
+		{
+			name: "removes by direct path",
+			entries: []Entry{
+				{Path: "/path/a", LastAccess: now},
+				{Path: "/path/b", LastAccess: now},
+			},
+			removePath:    "/path/a",
+			symlinkMap:    map[string]string{},
+			expectedPaths: []string{"/path/b"},
+		},
+		{
+			name: "removes by resolved symlink path",
+			entries: []Entry{
+				{Path: "/real/path", LastAccess: now},
+				{Path: "/other", LastAccess: now},
+			},
+			removePath: "/symlink/path",
+			symlinkMap: map[string]string{
+				"/symlink/path": "/real/path",
+			},
+			expectedPaths: []string{"/other"},
+		},
+		{
+			name: "no match - nothing removed",
+			entries: []Entry{
+				{Path: "/path/a", LastAccess: now},
+			},
+			removePath: "/nonexistent",
+			symlinkMap: map[string]string{
+				"/nonexistent": "/also/nonexistent",
+			},
+			expectedPaths: []string{"/path/a"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &Deps{
+				FS: &deps.MockFileSystem{
+					EvalSymlinksFunc: func(path string) (string, error) {
+						if resolved, ok := tt.symlinkMap[path]; ok {
+							return resolved, nil
+						}
+						return path, nil
+					},
+				},
+			}
+
+			h := &History{Entries: tt.entries}
+			h.RemoveWith(d, tt.removePath)
+
+			if len(h.Entries) != len(tt.expectedPaths) {
+				t.Errorf("expected %d entries, got %d", len(tt.expectedPaths), len(h.Entries))
+				return
+			}
+
+			for i, expected := range tt.expectedPaths {
+				if h.Entries[i].Path != expected {
+					t.Errorf("entry %d: expected path %q, got %q", i, expected, h.Entries[i].Path)
+				}
+			}
+		})
+	}
+}
+
 func TestTmuxSessionActivityWith(t *testing.T) {
 	tests := []struct {
 		name       string

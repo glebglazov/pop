@@ -184,8 +184,12 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			if result.Selected == nil {
 				os.Exit(1)
 			}
-			// Record selection in history
-			hist.Record(result.Selected.Path)
+			// Record selection in history (resolve symlinks for consistency)
+			recordPath := result.Selected.Path
+			if resolved, err := filepath.EvalSymlinks(recordPath); err == nil {
+				recordPath = resolved
+			}
+			hist.Record(recordPath)
 			hist.Save()
 			if printPath {
 				fmt.Println(result.Selected.Path)

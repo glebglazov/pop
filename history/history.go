@@ -123,8 +123,19 @@ func (h *History) Record(path string) {
 
 // Remove deletes a project from history
 func (h *History) Remove(path string) {
+	h.RemoveWith(defaultDeps, path)
+}
+
+// RemoveWith deletes a project from history using provided dependencies
+func (h *History) RemoveWith(d *Deps, path string) {
+	// Resolve symlinks for consistent lookup
+	resolvedPath := path
+	if resolved, err := d.FS.EvalSymlinks(path); err == nil {
+		resolvedPath = resolved
+	}
+
 	for i := range h.Entries {
-		if h.Entries[i].Path == path {
+		if h.Entries[i].Path == path || h.Entries[i].Path == resolvedPath {
 			h.Entries = append(h.Entries[:i], h.Entries[i+1:]...)
 			return
 		}
@@ -134,18 +145,37 @@ func (h *History) Remove(path string) {
 // SortByRecency sorts projects by recency (oldest first, most recent last)
 // Projects not in history are placed at the beginning, sorted alphabetically
 func (h *History) SortByRecency(projects []project.Project) []project.Project {
+	return h.SortByRecencyWith(defaultDeps, projects)
+}
+
+// SortByRecencyWith sorts projects by recency using provided dependencies
+func (h *History) SortByRecencyWith(d *Deps, projects []project.Project) []project.Project {
 	// Build lookup map
 	accessTimes := make(map[string]time.Time)
 	for _, e := range h.Entries {
 		accessTimes[e.Path] = e.LastAccess
 	}
 
+	// Helper to look up access time, resolving symlinks if needed
+	getAccessTime := func(path string) (time.Time, bool) {
+		if t, ok := accessTimes[path]; ok {
+			return t, true
+		}
+		// Try resolved path
+		if resolved, err := d.FS.EvalSymlinks(path); err == nil && resolved != path {
+			if t, ok := accessTimes[resolved]; ok {
+				return t, true
+			}
+		}
+		return time.Time{}, false
+	}
+
 	sorted := make([]project.Project, len(projects))
 	copy(sorted, projects)
 
 	sort.SliceStable(sorted, func(i, j int) bool {
-		ti, oki := accessTimes[sorted[i].Path]
-		tj, okj := accessTimes[sorted[j].Path]
+		ti, oki := getAccessTime(sorted[i].Path)
+		tj, okj := getAccessTime(sorted[j].Path)
 
 		if oki && okj {
 			// Both have history: older first (ascending order)

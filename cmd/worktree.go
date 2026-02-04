@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/project"
@@ -141,9 +142,13 @@ func showWorktreePicker(ctx *project.RepoContext) (ui.Result, error) {
 }
 
 func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {
-	// Record selection in history
+	// Record selection in history (resolve symlinks for consistency)
 	hist, _ := history.Load(history.DefaultHistoryPath())
-	hist.Record(item.Path)
+	recordPath := item.Path
+	if resolved, err := filepath.EvalSymlinks(recordPath); err == nil {
+		recordPath = resolved
+	}
+	hist.Record(recordPath)
 	hist.Save()
 
 	if switchSession {

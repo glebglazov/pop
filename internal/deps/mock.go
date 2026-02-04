@@ -27,15 +27,16 @@ func (m *MockGit) CommandInDir(dir string, args ...string) (string, error) {
 
 // MockFileSystem is a test double for FileSystem
 type MockFileSystem struct {
-	GetwdFunc       func() (string, error)
-	UserHomeDirFunc func() (string, error)
-	GetenvFunc      func(key string) string
-	StatFunc        func(path string) (os.FileInfo, error)
-	ReadDirFunc     func(path string) ([]os.DirEntry, error)
-	ReadFileFunc    func(path string) ([]byte, error)
-	WriteFileFunc   func(path string, data []byte, perm os.FileMode) error
-	MkdirAllFunc    func(path string, perm os.FileMode) error
-	DirFSFunc       func(dir string) fs.FS
+	GetwdFunc        func() (string, error)
+	UserHomeDirFunc  func() (string, error)
+	GetenvFunc       func(key string) string
+	StatFunc         func(path string) (os.FileInfo, error)
+	ReadDirFunc      func(path string) ([]os.DirEntry, error)
+	ReadFileFunc     func(path string) ([]byte, error)
+	WriteFileFunc    func(path string, data []byte, perm os.FileMode) error
+	MkdirAllFunc     func(path string, perm os.FileMode) error
+	DirFSFunc        func(dir string) fs.FS
+	EvalSymlinksFunc func(path string) (string, error)
 }
 
 func (m *MockFileSystem) Getwd() (string, error) {
@@ -99,6 +100,14 @@ func (m *MockFileSystem) DirFS(dir string) fs.FS {
 		return m.DirFSFunc(dir)
 	}
 	return nil
+}
+
+func (m *MockFileSystem) EvalSymlinks(path string) (string, error) {
+	if m.EvalSymlinksFunc != nil {
+		return m.EvalSymlinksFunc(path)
+	}
+	// Default: return path unchanged (no symlinks)
+	return path, nil
 }
 
 // MockTmux is a test double for Tmux
