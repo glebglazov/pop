@@ -90,12 +90,32 @@ func showWorktreePicker(ctx *project.RepoContext) (ui.Result, error) {
 		return ui.Result{Action: ui.ActionCancel}, fmt.Errorf("no worktrees found")
 	}
 
-	// Sort by tmux session activity
-	worktrees = history.SortWorktreesByActivity(worktrees, ctx)
+	// Load history and sort by recency (oldest first, most recent last)
+	hist, err := history.Load(history.DefaultHistoryPath())
+	if err != nil {
+		hist = &history.History{}
+	}
+
+	// Convert to Project for sorting, then back
+	projects := make([]project.Project, len(worktrees))
+	for i, wt := range worktrees {
+		projects[i] = project.Project{Name: wt.Name, Path: wt.Path}
+	}
+	projects = hist.SortByRecency(projects)
+
+	// Rebuild worktrees list in sorted order
+	pathToWorktree := make(map[string]project.Worktree)
+	for _, wt := range worktrees {
+		pathToWorktree[wt.Path] = wt
+	}
+	sortedWorktrees := make([]project.Worktree, len(projects))
+	for i, p := range projects {
+		sortedWorktrees[i] = pathToWorktree[p.Path]
+	}
 
 	// Convert to UI items
-	items := make([]ui.Item, len(worktrees))
-	for i, wt := range worktrees {
+	items := make([]ui.Item, len(sortedWorktrees))
+	for i, wt := range sortedWorktrees {
 		items[i] = ui.Item{
 			Name:    wt.Name,
 			Path:    wt.Path,
@@ -107,10 +127,16 @@ func showWorktreePicker(ctx *project.RepoContext) (ui.Result, error) {
 		ui.WithDelete(),
 		ui.WithNew(),
 		ui.WithContext(),
+		ui.WithCursorAtEnd(),
 	)
 }
 
 func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {
+	// Record selection in history
+	hist, _ := history.Load(history.DefaultHistoryPath())
+	hist.Record(item.Path)
+	hist.Save()
+
 	if switchSession {
 		return switchTmuxSession(ctx, item)
 	}
