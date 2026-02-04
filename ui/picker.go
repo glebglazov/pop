@@ -178,6 +178,34 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return p, nil
 
+		case key.Matches(msg, keys.HalfPageUp):
+			if len(p.filtered) > 0 {
+				half := p.height / 2
+				if half < 1 {
+					half = 1
+				}
+				p.cursor -= half
+				if p.cursor < 0 {
+					p.cursor = 0
+				}
+				p.adjustScroll()
+			}
+			return p, nil
+
+		case key.Matches(msg, keys.HalfPageDown):
+			if len(p.filtered) > 0 {
+				half := p.height / 2
+				if half < 1 {
+					half = 1
+				}
+				p.cursor += half
+				if p.cursor >= len(p.filtered) {
+					p.cursor = len(p.filtered) - 1
+				}
+				p.adjustScroll()
+			}
+			return p, nil
+
 		case key.Matches(msg, keys.Delete):
 			if p.showDelete && len(p.filtered) > 0 {
 				p.result = Result{
@@ -456,14 +484,16 @@ func Run(items []Item, opts ...PickerOption) (Result, error) {
 
 // Key bindings
 type keyMap struct {
-	Up          key.Binding
-	Down        key.Binding
-	Enter       key.Binding
-	Quit        key.Binding
-	Delete      key.Binding
-	ForceDelete key.Binding
-	New         key.Binding
-	KillSession key.Binding
+	Up           key.Binding
+	Down         key.Binding
+	HalfPageUp   key.Binding
+	HalfPageDown key.Binding
+	Enter        key.Binding
+	Quit         key.Binding
+	Delete       key.Binding
+	ForceDelete  key.Binding
+	New          key.Binding
+	KillSession  key.Binding
 }
 
 var keys = keyMap{
@@ -473,6 +503,12 @@ var keys = keyMap{
 	Down: key.NewBinding(
 		key.WithKeys("down", "ctrl+n"),
 	),
+	HalfPageUp: key.NewBinding(
+		key.WithKeys("ctrl+u"),
+	),
+	HalfPageDown: key.NewBinding(
+		key.WithKeys("ctrl+d"),
+	),
 	Enter: key.NewBinding(
 		key.WithKeys("enter"),
 	),
@@ -480,7 +516,7 @@ var keys = keyMap{
 		key.WithKeys("esc", "ctrl+c"),
 	),
 	Delete: key.NewBinding(
-		key.WithKeys("ctrl+d"),
+		key.WithKeys("backspace", "delete"),
 	),
 	ForceDelete: key.NewBinding(
 		key.WithKeys("ctrl+x"),
