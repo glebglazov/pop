@@ -120,6 +120,49 @@ func TestExpandProjectsWith(t *testing.T) {
 			},
 			expected: nil,
 		},
+		{
+			name:     "resolves symlinks to canonical paths",
+			projects: []string{"/symlink/project"},
+			setupFS: func() *deps.MockFileSystem {
+				return &deps.MockFileSystem{
+					EvalSymlinksFunc: func(path string) (string, error) {
+						if path == "/symlink/project" {
+							return "/real/project", nil
+						}
+						return path, nil
+					},
+					StatFunc: func(path string) (os.FileInfo, error) {
+						if path == "/real/project" {
+							return deps.MockFileInfo{IsDirVal: true}, nil
+						}
+						return nil, os.ErrNotExist
+					},
+				}
+			},
+			expected: []string{"/real/project"},
+		},
+		{
+			name:     "deduplicates symlinks pointing to same path",
+			projects: []string{"/symlink1/project", "/symlink2/project"},
+			setupFS: func() *deps.MockFileSystem {
+				return &deps.MockFileSystem{
+					EvalSymlinksFunc: func(path string) (string, error) {
+						// Both symlinks resolve to the same real path
+						if path == "/symlink1/project" || path == "/symlink2/project" {
+							return "/real/project", nil
+						}
+						return path, nil
+					},
+					StatFunc: func(path string) (os.FileInfo, error) {
+						if path == "/real/project" {
+							return deps.MockFileInfo{IsDirVal: true}, nil
+						}
+						return nil, os.ErrNotExist
+					},
+				}
+			},
+			expected: []string{"/real/project"},
+		},
 	}
 
 	for _, tt := range tests {

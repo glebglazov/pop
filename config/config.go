@@ -62,27 +62,33 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]string, error) {
 	var projects []string
 	seen := make(map[string]bool)
 
+	addProject := func(path string) {
+		if !seen[path] && isDirectoryWith(d, path) {
+			seen[path] = true
+			projects = append(projects, path)
+		}
+	}
+
 	for _, pattern := range c.Projects {
 		expanded := expandHomeWith(d, pattern)
 
 		// Check if it's a glob pattern
 		if strings.Contains(expanded, "*") {
-			matches, err := expandGlobWith(d, expanded)
+			// Resolve symlinks on the base path once, then use it for all matches
+			matches, err := expandGlobWithResolvedBase(d, expanded)
 			if err != nil {
 				continue // Skip invalid patterns
 			}
 			for _, match := range matches {
-				if !seen[match] && isDirectoryWith(d, match) {
-					seen[match] = true
-					projects = append(projects, match)
-				}
+				addProject(match)
 			}
 		} else {
-			// Exact path
-			if !seen[expanded] && isDirectoryWith(d, expanded) {
-				seen[expanded] = true
-				projects = append(projects, expanded)
+			// Exact path - resolve symlinks
+			resolved := expanded
+			if r, err := d.FS.EvalSymlinks(expanded); err == nil {
+				resolved = r
 			}
+			addProject(resolved)
 		}
 	}
 
@@ -98,20 +104,27 @@ func expandHomeWith(d *Deps, path string) string {
 	return path
 }
 
-// expandGlobWith expands a glob pattern to matching paths
-func expandGlobWith(d *Deps, pattern string) ([]string, error) {
+// expandGlobWithResolvedBase expands a glob pattern, resolving symlinks in the base path once
+func expandGlobWithResolvedBase(d *Deps, pattern string) ([]string, error) {
 	// Use doublestar for ** support
 	base, pat := doublestar.SplitPattern(pattern)
+
+	// Resolve symlinks in the base path once (e.g., ~/Dev -> /private/Dev)
+	resolvedBase := base
+	if r, err := d.FS.EvalSymlinks(base); err == nil {
+		resolvedBase = r
+	}
+
 	fsys := d.FS.DirFS(base)
 	matches, err := doublestar.Glob(fsys, pat)
 	if err != nil {
 		return nil, err
 	}
 
-	// Convert to absolute paths
+	// Convert to absolute paths using the resolved base
 	var results []string
 	for _, match := range matches {
-		results = append(results, filepath.Join(base, match))
+		results = append(results, filepath.Join(resolvedBase, match))
 	}
 	return results, nil
 }

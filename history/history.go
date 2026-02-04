@@ -76,7 +76,49 @@ func LoadWith(d *Deps, path string) (*History, error) {
 		return h, nil // Return empty history on parse error
 	}
 
+	// Dedupe entries by resolved path, keeping most recent timestamp
+	h.dedupeEntriesBy(d.FS.EvalSymlinks)
+
 	return h, nil
+}
+
+// dedupeEntriesBy merges entries that resolve to the same canonical path,
+// keeping the most recent timestamp for each
+func (h *History) dedupeEntriesBy(evalSymlinks func(string) (string, error)) {
+	type canonicalEntry struct {
+		resolvedPath string
+		lastAccess   time.Time
+	}
+
+	seen := make(map[string]*canonicalEntry)
+
+	for _, e := range h.Entries {
+		resolved := e.Path
+		if r, err := evalSymlinks(e.Path); err == nil {
+			resolved = r
+		}
+
+		if existing, ok := seen[resolved]; ok {
+			// Keep the more recent timestamp
+			if e.LastAccess.After(existing.lastAccess) {
+				existing.lastAccess = e.LastAccess
+			}
+		} else {
+			seen[resolved] = &canonicalEntry{
+				resolvedPath: resolved,
+				lastAccess:   e.LastAccess,
+			}
+		}
+	}
+
+	// Rebuild entries with canonical paths
+	h.Entries = make([]Entry, 0, len(seen))
+	for _, ce := range seen {
+		h.Entries = append(h.Entries, Entry{
+			Path:       ce.resolvedPath,
+			LastAccess: ce.lastAccess,
+		})
+	}
 }
 
 // Save writes history to disk
@@ -128,14 +170,8 @@ func (h *History) Remove(path string) {
 
 // RemoveWith deletes a project from history using provided dependencies
 func (h *History) RemoveWith(d *Deps, path string) {
-	// Resolve symlinks for consistent lookup
-	resolvedPath := path
-	if resolved, err := d.FS.EvalSymlinks(path); err == nil {
-		resolvedPath = resolved
-	}
-
 	for i := range h.Entries {
-		if h.Entries[i].Path == path || h.Entries[i].Path == resolvedPath {
+		if h.Entries[i].Path == path {
 			h.Entries = append(h.Entries[:i], h.Entries[i+1:]...)
 			return
 		}
@@ -156,16 +192,10 @@ func (h *History) SortByRecencyWith(d *Deps, projects []project.Project) []proje
 		accessTimes[e.Path] = e.LastAccess
 	}
 
-	// Helper to look up access time, resolving symlinks if needed
+	// Helper to look up access time
 	getAccessTime := func(path string) (time.Time, bool) {
 		if t, ok := accessTimes[path]; ok {
 			return t, true
-		}
-		// Try resolved path
-		if resolved, err := d.FS.EvalSymlinks(path); err == nil && resolved != path {
-			if t, ok := accessTimes[resolved]; ok {
-				return t, true
-			}
 		}
 		return time.Time{}, false
 	}

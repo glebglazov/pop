@@ -122,15 +122,9 @@ func runSelect(cmd *cobra.Command, args []string) error {
 	var expanded []project.ExpandedProject
 	for i := range paths {
 		for _, ep := range resultsByIndex[i] {
-			// Skip current directory if configured
-			if cfg.ExcludeCurrentDir {
-				epPath := ep.Path
-				if resolved, err := filepath.EvalSymlinks(epPath); err == nil {
-					epPath = resolved
-				}
-				if epPath == cwd {
-					continue
-				}
+			// Skip current directory if configured (ep.Path is already canonical)
+			if cfg.ExcludeCurrentDir && ep.Path == cwd {
+				continue
 			}
 			expanded = append(expanded, ep)
 		}
@@ -184,12 +178,8 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			if result.Selected == nil {
 				os.Exit(1)
 			}
-			// Record selection in history (resolve symlinks for consistency)
-			recordPath := result.Selected.Path
-			if resolved, err := filepath.EvalSymlinks(recordPath); err == nil {
-				recordPath = resolved
-			}
-			hist.Record(recordPath)
+			// Record selection in history (paths are already canonical from config)
+			hist.Record(result.Selected.Path)
 			hist.Save()
 			if tmuxCDPane != "" {
 				return sendCDToPane(tmuxCDPane, result.Selected.Path)
