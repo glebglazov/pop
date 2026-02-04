@@ -58,8 +58,10 @@ type Picker struct {
 	showContext     bool
 	showKillSession bool
 	cursorAtEnd     bool
-	savedCursor   int  // cursor position before filtering
-	wasFiltering  bool // whether we were filtering in the last update
+
+	// Cursor memory: remembers selected item per filter query
+	cursorMemory map[string]string // filter query -> selected item path
+	lastQuery    string            // previous filter query (to detect changes)
 }
 
 // PickerOption configures the picker
@@ -108,10 +110,11 @@ func NewPicker(items []Item, opts ...PickerOption) *Picker {
 	ti.Focus()
 
 	p := &Picker{
-		items:    items,
-		filtered: items,
-		input:    ti,
-		height:   10,
+		items:        items,
+		filtered:     items,
+		input:        ti,
+		height:       10,
+		cursorMemory: make(map[string]string),
 	}
 
 	for _, opt := range opts {
@@ -217,20 +220,17 @@ type fzfMatch struct {
 
 func (p *Picker) filter() {
 	query := p.input.Value()
-	isFiltering := query != ""
+	queryChanged := query != p.lastQuery
 
-	if !isFiltering {
+	// Save current selection before changing filter
+	if queryChanged && len(p.filtered) > 0 && p.cursor < len(p.filtered) {
+		p.cursorMemory[p.lastQuery] = p.filtered[p.cursor].Path
+	}
+
+	// Build filtered list
+	if query == "" {
 		p.filtered = p.items
-		// Restore cursor position when filter is cleared
-		if p.wasFiltering {
-			p.cursor = p.savedCursor
-		}
 	} else {
-		// Save cursor position when starting to filter
-		if !p.wasFiltering {
-			p.savedCursor = p.cursor
-		}
-
 		// Use fzf's algorithm for fuzzy matching
 		pattern := []rune(strings.ToLower(query))
 		slab := util.MakeSlab(100*1024, 2048)
@@ -253,11 +253,20 @@ func (p *Picker) filter() {
 		for i, m := range matches {
 			p.filtered[i] = m.item
 		}
-		// Keep cursor at the bottom (best match)
-		p.cursor = len(p.filtered) - 1
 	}
 
-	p.wasFiltering = isFiltering
+	// Position cursor
+	if queryChanged {
+		if rememberedPath, ok := p.cursorMemory[query]; ok {
+			// Restore cursor to remembered item for this query
+			p.cursor = p.findItemIndex(rememberedPath)
+		} else {
+			// First time seeing this query: cursor at best match (bottom)
+			p.cursor = len(p.filtered) - 1
+		}
+	}
+
+	p.lastQuery = query
 
 	// Ensure cursor is in bounds
 	if p.cursor >= len(p.filtered) {
@@ -266,6 +275,16 @@ func (p *Picker) filter() {
 	if p.cursor < 0 {
 		p.cursor = 0
 	}
+}
+
+// findItemIndex returns the index of the item with the given path, or -1 if not found
+func (p *Picker) findItemIndex(path string) int {
+	for i, item := range p.filtered {
+		if item.Path == path {
+			return i
+		}
+	}
+	return -1
 }
 
 func (p *Picker) View() string {

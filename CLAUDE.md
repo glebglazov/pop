@@ -52,6 +52,38 @@ The branch is stored in `ui.Item.Context` field. Display format follows `[branch
 - **Session Name Sanitization**: Replaces `.` and `:` with `_` for tmux compatibility
 - **History Sorting**: Unvisited projects first (alphabetical), then by access time (oldest→newest), cursor at end
 
+### Cursor Memory Behavior
+
+The picker remembers cursor position per filter query during a session. This allows users to navigate between different filters without losing their place.
+
+**Behavior:**
+1. When entering a filter for the **first time**, cursor positions at the best match (bottom of list)
+2. When user **moves cursor** while filtered, that selection is remembered for that filter query
+3. When **returning to the same filter**, cursor restores to the previously selected item
+4. When **clearing the filter** (empty query), cursor returns to the remembered position in the unfiltered list
+
+**Example scenario:**
+```
+Initial state (no filter):     Filter "a":                After moving cursor up:
+  zhw                            ab1                        ab1
+  ab1                            abl                        <cursor>abl
+  abl                            <cursor>abc                abc
+  tqr
+  <cursor>abc
+
+Clear filter:                  Re-apply filter "a":
+  zhw                            ab1
+  ab1                            <cursor>abl    <- remembered!
+  <cursor>abl  <- remembered!   abc
+  tqr
+  abc
+```
+
+**Implementation details:**
+- `cursorMemory map[string]string` maps filter query → selected item's Path
+- On query change: save current selection to memory, then restore from memory if available
+- Empty string `""` is a valid query key (represents unfiltered state)
+
 ### Configuration
 
 Config file: `~/.config/pop/config.toml` (respects XDG_CONFIG_HOME)
@@ -70,4 +102,4 @@ History file: `~/.local/share/pop/history.json` (respects XDG_DATA_HOME)
 - `charmbracelet/bubbletea` - TUI framework
 - `BurntSushi/toml` - Config parsing
 - `bmatcuk/doublestar` - Glob patterns
-- `sahilm/fuzzy` - Fuzzy matching
+- `junegunn/fzf` - Fuzzy matching (uses fzf's FuzzyMatchV2 algorithm)
