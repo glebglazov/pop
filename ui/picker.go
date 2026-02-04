@@ -182,11 +182,11 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, keys.HalfPageUp):
 			if len(p.filtered) > 0 {
-				half := p.height / 2
-				if half < 1 {
-					half = 1
+				page := p.height
+				if page < 1 {
+					page = 1
 				}
-				p.cursor -= half
+				p.cursor -= page
 				if p.cursor < 0 {
 					p.cursor = 0
 				}
@@ -196,11 +196,11 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, keys.HalfPageDown):
 			if len(p.filtered) > 0 {
-				half := p.height / 2
-				if half < 1 {
-					half = 1
+				page := p.height
+				if page < 1 {
+					page = 1
 				}
-				p.cursor += half
+				p.cursor += page
 				if p.cursor >= len(p.filtered) {
 					p.cursor = len(p.filtered) - 1
 				}
@@ -240,6 +240,11 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return p, tea.Quit
 			}
+
+		case key.Matches(msg, keys.ClearInput):
+			p.input.SetValue("")
+			p.filter()
+			return p, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -347,7 +352,7 @@ func (p *Picker) findItemIndex(path string) int {
 func (p *Picker) buildHints() string {
 	var hints []string
 
-	hints = append(hints, "↑/↓ navigate", "C-u/C-d half-page", "Enter select", "Esc quit")
+	hints = append(hints, "↑/↓ navigate", "C-b/C-f page", "C-u clear", "Enter select", "Esc quit")
 
 	if p.showKillSession {
 		hints = append(hints, "C-k kill session")
@@ -520,6 +525,7 @@ type keyMap struct {
 	ForceDelete  key.Binding
 	New          key.Binding
 	KillSession  key.Binding
+	ClearInput   key.Binding
 }
 
 var keys = keyMap{
@@ -530,10 +536,10 @@ var keys = keyMap{
 		key.WithKeys("down", "ctrl+n"),
 	),
 	HalfPageUp: key.NewBinding(
-		key.WithKeys("ctrl+u"),
+		key.WithKeys("ctrl+b"),
 	),
 	HalfPageDown: key.NewBinding(
-		key.WithKeys("ctrl+d"),
+		key.WithKeys("ctrl+f"),
 	),
 	Enter: key.NewBinding(
 		key.WithKeys("enter"),
@@ -552,6 +558,9 @@ var keys = keyMap{
 	),
 	KillSession: key.NewBinding(
 		key.WithKeys("ctrl+k"),
+	),
+	ClearInput: key.NewBinding(
+		key.WithKeys("alt+backspace", "ctrl+u"),
 	),
 }
 
