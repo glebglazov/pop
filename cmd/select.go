@@ -107,9 +107,25 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		resultsByIndex[r.index] = r.projects
 	}
 
+	// Get current directory to filter it out (resolve symlinks for proper comparison)
+	cwd, _ := os.Getwd()
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+
 	var expanded []project.ExpandedProject
 	for i := range paths {
-		expanded = append(expanded, resultsByIndex[i]...)
+		for _, ep := range resultsByIndex[i] {
+			// Skip current directory (resolve symlinks for proper comparison)
+			epPath := ep.Path
+			if resolved, err := filepath.EvalSymlinks(epPath); err == nil {
+				epPath = resolved
+			}
+			if epPath == cwd {
+				continue
+			}
+			expanded = append(expanded, ep)
+		}
 	}
 
 	// Load history and sort by recency (oldest first, most recent last)
