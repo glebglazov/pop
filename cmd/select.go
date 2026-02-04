@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var printPath bool
+var tmuxCDPane string
 
 var selectCmd = &cobra.Command{
 	Use:   "select",
@@ -31,7 +31,7 @@ Example tmux binding:
 
 func init() {
 	rootCmd.AddCommand(selectCmd)
-	selectCmd.Flags().BoolVarP(&printPath, "print", "p", false, "Print selected path instead of switching tmux session")
+	selectCmd.Flags().StringVar(&tmuxCDPane, "tmux-cd", "", "Send cd command to specified tmux pane instead of switching session")
 }
 
 func runSelect(cmd *cobra.Command, args []string) error {
@@ -191,9 +191,8 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			}
 			hist.Record(recordPath)
 			hist.Save()
-			if printPath {
-				fmt.Println(result.Selected.Path)
-				return nil
+			if tmuxCDPane != "" {
+				return sendCDToPane(tmuxCDPane, result.Selected.Path)
 			}
 			// Open tmux session
 			return openTmuxSession(result.Selected)
@@ -276,4 +275,9 @@ func killTmuxSession(name string) {
 	} else {
 		fmt.Fprintf(os.Stderr, "Killed session: %s\n", sessionName)
 	}
+}
+
+func sendCDToPane(paneID, path string) error {
+	cmd := exec.Command("tmux", "send-keys", "-t", paneID, fmt.Sprintf("cd %q", path), "Enter")
+	return cmd.Run()
 }
