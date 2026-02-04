@@ -15,6 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var printPath bool
+
 var selectCmd = &cobra.Command{
 	Use:   "select",
 	Short: "Select a project from configured directories",
@@ -29,6 +31,7 @@ Example tmux binding:
 
 func init() {
 	rootCmd.AddCommand(selectCmd)
+	selectCmd.Flags().BoolVarP(&printPath, "print", "p", false, "Print selected path instead of switching tmux session")
 }
 
 func runSelect(cmd *cobra.Command, args []string) error {
@@ -184,6 +187,10 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			// Record selection in history
 			hist.Record(result.Selected.Path)
 			hist.Save()
+			if printPath {
+				fmt.Println(result.Selected.Path)
+				return nil
+			}
 			// Open tmux session
 			return openTmuxSession(result.Selected)
 
