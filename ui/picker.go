@@ -49,6 +49,7 @@ type Picker struct {
 	filtered []Item
 	input    textinput.Model
 	cursor   int
+	scroll   int // scroll offset (index of first visible item)
 	height   int
 	width    int
 	result   Result
@@ -60,8 +61,14 @@ type Picker struct {
 	cursorAtEnd     bool
 
 	// Cursor memory: remembers selected item per filter query
-	cursorMemory map[string]string // filter query -> selected item path
-	lastQuery    string            // previous filter query (to detect changes)
+	cursorMemory map[string]cursorState // filter query -> cursor state
+	lastQuery    string                 // previous filter query (to detect changes)
+}
+
+// cursorState stores cursor position info for a filter query
+type cursorState struct {
+	path      string // selected item's path
+	screenPos int    // cursor position relative to visible area (0 = top of visible)
 }
 
 // PickerOption configures the picker
@@ -114,7 +121,7 @@ func NewPicker(items []Item, opts ...PickerOption) *Picker {
 		filtered:     items,
 		input:        ti,
 		height:       10,
-		cursorMemory: make(map[string]string),
+		cursorMemory: make(map[string]cursorState),
 	}
 
 	for _, opt := range opts {
@@ -128,6 +135,7 @@ func (p *Picker) Init() tea.Cmd {
 	if p.cursorAtEnd && len(p.filtered) > 0 {
 		p.cursor = len(p.filtered) - 1
 	}
+	p.adjustScroll()
 	return nil
 }
 
@@ -149,14 +157,24 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, tea.Quit
 
 		case key.Matches(msg, keys.Up):
-			if p.cursor > 0 {
-				p.cursor--
+			if len(p.filtered) > 0 {
+				if p.cursor > 0 {
+					p.cursor--
+				} else {
+					p.cursor = len(p.filtered) - 1 // wrap to bottom
+				}
+				p.adjustScroll()
 			}
 			return p, nil
 
 		case key.Matches(msg, keys.Down):
-			if p.cursor < len(p.filtered)-1 {
-				p.cursor++
+			if len(p.filtered) > 0 {
+				if p.cursor < len(p.filtered)-1 {
+					p.cursor++
+				} else {
+					p.cursor = 0 // wrap to top
+				}
+				p.adjustScroll()
 			}
 			return p, nil
 
@@ -222,9 +240,12 @@ func (p *Picker) filter() {
 	query := p.input.Value()
 	queryChanged := query != p.lastQuery
 
-	// Save current selection before changing filter
+	// Save current selection and screen position before changing filter
 	if queryChanged && len(p.filtered) > 0 && p.cursor < len(p.filtered) {
-		p.cursorMemory[p.lastQuery] = p.filtered[p.cursor].Path
+		p.cursorMemory[p.lastQuery] = cursorState{
+			path:      p.filtered[p.cursor].Path,
+			screenPos: p.cursor - p.scroll,
+		}
 	}
 
 	// Build filtered list
@@ -255,14 +276,17 @@ func (p *Picker) filter() {
 		}
 	}
 
-	// Position cursor
+	// Position cursor and scroll
 	if queryChanged {
-		if rememberedPath, ok := p.cursorMemory[query]; ok {
+		if state, ok := p.cursorMemory[query]; ok {
 			// Restore cursor to remembered item for this query
-			p.cursor = p.findItemIndex(rememberedPath)
+			p.cursor = p.findItemIndex(state.path)
+			// Restore relative screen position
+			p.scroll = p.cursor - state.screenPos
 		} else {
 			// First time seeing this query: cursor at best match (bottom)
 			p.cursor = len(p.filtered) - 1
+			p.scroll = 0 // will be adjusted below
 		}
 	}
 
@@ -275,6 +299,8 @@ func (p *Picker) filter() {
 	if p.cursor < 0 {
 		p.cursor = 0
 	}
+
+	p.adjustScroll()
 }
 
 // findItemIndex returns the index of the item with the given path, or -1 if not found
@@ -285,6 +311,38 @@ func (p *Picker) findItemIndex(path string) int {
 		}
 	}
 	return -1
+}
+
+// adjustScroll ensures the cursor is visible by adjusting scroll offset only when necessary
+func (p *Picker) adjustScroll() {
+	visible := p.height
+	if visible > len(p.filtered) {
+		visible = len(p.filtered)
+	}
+	if visible == 0 {
+		p.scroll = 0
+		return
+	}
+
+	// If cursor is above visible area, scroll up
+	if p.cursor < p.scroll {
+		p.scroll = p.cursor
+	}
+	// If cursor is below visible area, scroll down
+	if p.cursor >= p.scroll+visible {
+		p.scroll = p.cursor - visible + 1
+	}
+	// Ensure scroll doesn't go negative or too far
+	if p.scroll < 0 {
+		p.scroll = 0
+	}
+	maxScroll := len(p.filtered) - visible
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if p.scroll > maxScroll {
+		p.scroll = maxScroll
+	}
 }
 
 func (p *Picker) View() string {
@@ -303,11 +361,8 @@ func (p *Picker) View() string {
 		visible = len(p.filtered)
 	}
 
-	// Calculate scroll offset to keep cursor visible
-	start := 0
-	if p.cursor >= visible {
-		start = p.cursor - visible + 1
-	}
+	// Use stored scroll offset
+	start := p.scroll
 
 	// Add empty lines to push content to bottom
 	emptyLines := p.height - visible
