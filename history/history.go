@@ -3,15 +3,31 @@ package history
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 )
+
+// Deps holds external dependencies for the history package
+type Deps struct {
+	FS   deps.FileSystem
+	Tmux deps.Tmux
+}
+
+// DefaultDeps returns dependencies using real implementations
+func DefaultDeps() *Deps {
+	return &Deps{
+		FS:   deps.NewRealFileSystem(),
+		Tmux: deps.NewRealTmux(),
+	}
+}
+
+var defaultDeps = DefaultDeps()
 
 // Entry represents a history entry for a project
 type Entry struct {
@@ -27,18 +43,28 @@ type History struct {
 
 // DefaultHistoryPath returns the default history file path
 func DefaultHistoryPath() string {
-	if xdgData := os.Getenv("XDG_DATA_HOME"); xdgData != "" {
+	return DefaultHistoryPathWith(defaultDeps)
+}
+
+// DefaultHistoryPathWith returns the default history file path using provided dependencies
+func DefaultHistoryPathWith(d *Deps) string {
+	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
 		return filepath.Join(xdgData, "pop", "history.json")
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := d.FS.UserHomeDir()
 	return filepath.Join(home, ".local", "share", "pop", "history.json")
 }
 
 // Load reads history from the given path
 func Load(path string) (*History, error) {
+	return LoadWith(defaultDeps, path)
+}
+
+// LoadWith reads history using provided dependencies
+func LoadWith(d *Deps, path string) (*History, error) {
 	h := &History{path: path}
 
-	data, err := os.ReadFile(path)
+	data, err := d.FS.ReadFile(path)
 	if os.IsNotExist(err) {
 		return h, nil
 	}
@@ -55,8 +81,13 @@ func Load(path string) (*History, error) {
 
 // Save writes history to disk
 func (h *History) Save() error {
+	return h.SaveWith(defaultDeps)
+}
+
+// SaveWith writes history using provided dependencies
+func (h *History) SaveWith(d *Deps) error {
 	dir := filepath.Dir(h.path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := d.FS.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
@@ -65,7 +96,7 @@ func (h *History) Save() error {
 		return err
 	}
 
-	return os.WriteFile(h.path, data, 0644)
+	return d.FS.WriteFile(h.path, data, 0644)
 }
 
 // Record marks a project as accessed
@@ -137,15 +168,19 @@ func (h *History) SortByRecency(projects []project.Project) []project.Project {
 
 // TmuxSessionActivity returns a map of session name to activity timestamp
 func TmuxSessionActivity() map[string]int64 {
+	return TmuxSessionActivityWith(defaultDeps)
+}
+
+// TmuxSessionActivityWith returns session activity using provided dependencies
+func TmuxSessionActivityWith(d *Deps) map[string]int64 {
 	activity := make(map[string]int64)
 
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name} #{session_activity}")
-	out, err := cmd.Output()
+	out, err := d.Tmux.ListSessions()
 	if err != nil {
 		return activity
 	}
 
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
 			name := parts[0]

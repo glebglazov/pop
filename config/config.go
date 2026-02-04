@@ -1,13 +1,27 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/glebglazov/pop/internal/deps"
 )
+
+// Deps holds external dependencies for the config package
+type Deps struct {
+	FS deps.FileSystem
+}
+
+// DefaultDeps returns dependencies using real implementations
+func DefaultDeps() *Deps {
+	return &Deps{
+		FS: deps.NewRealFileSystem(),
+	}
+}
+
+var defaultDeps = DefaultDeps()
 
 type Config struct {
 	Projects          []string `toml:"projects"`
@@ -16,10 +30,15 @@ type Config struct {
 
 // DefaultConfigPath returns the default config file path
 func DefaultConfigPath() string {
-	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
+	return DefaultConfigPathWith(defaultDeps)
+}
+
+// DefaultConfigPathWith returns the default config file path using provided dependencies
+func DefaultConfigPathWith(d *Deps) string {
+	if xdgConfig := d.FS.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
 		return filepath.Join(xdgConfig, "pop", "config.toml")
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := d.FS.UserHomeDir()
 	return filepath.Join(home, ".config", "pop", "config.toml")
 }
 
@@ -35,27 +54,32 @@ func Load(path string) (*Config, error) {
 // ExpandProjects resolves all project paths from the config
 // Supports exact paths and glob patterns like ~/Dev/*/*
 func (c *Config) ExpandProjects() ([]string, error) {
+	return c.ExpandProjectsWith(defaultDeps)
+}
+
+// ExpandProjectsWith resolves all project paths using provided dependencies
+func (c *Config) ExpandProjectsWith(d *Deps) ([]string, error) {
 	var projects []string
 	seen := make(map[string]bool)
 
 	for _, pattern := range c.Projects {
-		expanded := expandHome(pattern)
+		expanded := expandHomeWith(d, pattern)
 
 		// Check if it's a glob pattern
 		if strings.Contains(expanded, "*") {
-			matches, err := expandGlob(expanded)
+			matches, err := expandGlobWith(d, expanded)
 			if err != nil {
 				continue // Skip invalid patterns
 			}
 			for _, match := range matches {
-				if !seen[match] && isDirectory(match) {
+				if !seen[match] && isDirectoryWith(d, match) {
 					seen[match] = true
 					projects = append(projects, match)
 				}
 			}
 		} else {
 			// Exact path
-			if !seen[expanded] && isDirectory(expanded) {
+			if !seen[expanded] && isDirectoryWith(d, expanded) {
 				seen[expanded] = true
 				projects = append(projects, expanded)
 			}
@@ -65,21 +89,21 @@ func (c *Config) ExpandProjects() ([]string, error) {
 	return projects, nil
 }
 
-// expandHome replaces ~ with the user's home directory
-func expandHome(path string) string {
+// expandHomeWith replaces ~ with the user's home directory
+func expandHomeWith(d *Deps, path string) string {
 	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
+		home, _ := d.FS.UserHomeDir()
 		return filepath.Join(home, path[2:])
 	}
 	return path
 }
 
-// expandGlob expands a glob pattern to matching paths
-func expandGlob(pattern string) ([]string, error) {
+// expandGlobWith expands a glob pattern to matching paths
+func expandGlobWith(d *Deps, pattern string) ([]string, error) {
 	// Use doublestar for ** support
-	base, pattern := doublestar.SplitPattern(pattern)
-	fsys := os.DirFS(base)
-	matches, err := doublestar.Glob(fsys, pattern)
+	base, pat := doublestar.SplitPattern(pattern)
+	fsys := d.FS.DirFS(base)
+	matches, err := doublestar.Glob(fsys, pat)
 	if err != nil {
 		return nil, err
 	}
@@ -92,8 +116,8 @@ func expandGlob(pattern string) ([]string, error) {
 	return results, nil
 }
 
-func isDirectory(path string) bool {
-	info, err := os.Stat(path)
+func isDirectoryWith(d *Deps, path string) bool {
+	info, err := d.FS.Stat(path)
 	if err != nil {
 		return false
 	}

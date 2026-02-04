@@ -1,11 +1,27 @@
 package project
 
 import (
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/glebglazov/pop/internal/deps"
 )
+
+// Deps holds external dependencies for the project package
+type Deps struct {
+	Git deps.Git
+	FS  deps.FileSystem
+}
+
+// DefaultDeps returns dependencies using real implementations
+func DefaultDeps() *Deps {
+	return &Deps{
+		Git: deps.NewRealGit(),
+		FS:  deps.NewRealFileSystem(),
+	}
+}
+
+var defaultDeps = DefaultDeps()
 
 // Project represents a project directory
 type Project struct {
@@ -36,9 +52,15 @@ type RepoContext struct {
 }
 
 // DetectRepoContext determines the git repo context from the current directory
+// Uses default dependencies
 func DetectRepoContext() (*RepoContext, error) {
+	return DetectRepoContextWith(defaultDeps)
+}
+
+// DetectRepoContextWith determines the git repo context using provided dependencies
+func DetectRepoContextWith(d *Deps) (*RepoContext, error) {
 	// Try to find bare repo root
-	if bareRoot := findBareRoot(); bareRoot != "" {
+	if bareRoot := findBareRootWith(d); bareRoot != "" {
 		return &RepoContext{
 			GitRoot:  bareRoot,
 			RepoName: filepath.Base(bareRoot),
@@ -47,9 +69,9 @@ func DetectRepoContext() (*RepoContext, error) {
 	}
 
 	// Check git-common-dir for worktree of bare repo
-	commonDir, err := gitCommand("rev-parse", "--git-common-dir")
+	commonDir, err := d.Git.Command("rev-parse", "--git-common-dir")
 	if err == nil && commonDir != "" {
-		isBare, _ := gitCommandInDir(commonDir, "config", "--get", "core.bare")
+		isBare, _ := d.Git.CommandInDir(commonDir, "config", "--get", "core.bare")
 		if isBare == "true" {
 			gitRoot := filepath.Dir(commonDir)
 			return &RepoContext{
@@ -61,7 +83,7 @@ func DetectRepoContext() (*RepoContext, error) {
 	}
 
 	// Regular repo
-	topLevel, err := gitCommand("rev-parse", "--show-toplevel")
+	topLevel, err := d.Git.Command("rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, err
 	}
@@ -74,12 +96,17 @@ func DetectRepoContext() (*RepoContext, error) {
 }
 
 // ListWorktrees returns all worktrees for the current repo context
+// Uses default dependencies
 func ListWorktrees(ctx *RepoContext) ([]Worktree, error) {
-	output, err := gitCommandInDir(ctx.GitRoot, "worktree", "list", "--porcelain")
+	return ListWorktreesWith(defaultDeps, ctx)
+}
+
+// ListWorktreesWith returns all worktrees using provided dependencies
+func ListWorktreesWith(d *Deps, ctx *RepoContext) ([]Worktree, error) {
+	output, err := d.Git.CommandInDir(ctx.GitRoot, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
-
 	return parseWorktrees(output), nil
 }
 
@@ -127,12 +154,12 @@ func TmuxSessionName(ctx *RepoContext, worktreeName string) string {
 	return name
 }
 
-func findBareRoot() string {
-	dir, _ := os.Getwd()
+func findBareRootWith(d *Deps) string {
+	dir, _ := d.FS.Getwd()
 	for dir != "/" {
 		gitDir := filepath.Join(dir, ".git")
-		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
-			isBare, _ := gitCommandInDir(dir, "config", "--get", "core.bare")
+		if info, err := d.FS.Stat(gitDir); err == nil && info.IsDir() {
+			isBare, _ := d.Git.CommandInDir(dir, "config", "--get", "core.bare")
 			if isBare == "true" {
 				return dir
 			}
@@ -142,42 +169,30 @@ func findBareRoot() string {
 	return ""
 }
 
-func gitCommand(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func gitCommandInDir(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 // HasWorktrees checks if a directory is a bare repo with worktrees (file-based, no git commands)
+// Uses default dependencies
 func HasWorktrees(path string) bool {
+	return HasWorktreesWith(defaultDeps, path)
+}
+
+// HasWorktreesWith checks if a directory is a bare repo with worktrees using provided dependencies
+func HasWorktreesWith(d *Deps, path string) bool {
 	// Check if .bare directory exists - this indicates a bare repo with worktrees
 	bareDir := filepath.Join(path, ".bare")
-	if info, err := os.Stat(bareDir); err == nil && info.IsDir() {
+	if info, err := d.FS.Stat(bareDir); err == nil && info.IsDir() {
 		return true
 	}
 
 	// Check if .git is a directory with worktrees/ subdirectory containing entries
 	// AND core.bare=true in config (to avoid false positives from stale worktree metadata)
 	gitDir := filepath.Join(path, ".git")
-	if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
-		if !isCoreBare(gitDir) {
+	if info, err := d.FS.Stat(gitDir); err == nil && info.IsDir() {
+		if !isCoreBareWith(d, gitDir) {
 			return false
 		}
 		gitWorktreesDir := filepath.Join(gitDir, "worktrees")
-		if info, err := os.Stat(gitWorktreesDir); err == nil && info.IsDir() {
-			entries, err := os.ReadDir(gitWorktreesDir)
+		if info, err := d.FS.Stat(gitWorktreesDir); err == nil && info.IsDir() {
+			entries, err := d.FS.ReadDir(gitWorktreesDir)
 			if err == nil && len(entries) > 0 {
 				return true
 			}
@@ -187,10 +202,10 @@ func HasWorktrees(path string) bool {
 	return false
 }
 
-// isCoreBare checks if core.bare=true in the git config file (without running git)
-func isCoreBare(gitDir string) bool {
+// isCoreBareWith checks if core.bare=true in the git config file (without running git)
+func isCoreBareWith(d *Deps, gitDir string) bool {
 	configPath := filepath.Join(gitDir, "config")
-	data, err := os.ReadFile(configPath)
+	data, err := d.FS.ReadFile(configPath)
 	if err != nil {
 		return false
 	}
@@ -216,10 +231,16 @@ func isCoreBare(gitDir string) bool {
 }
 
 // ListWorktreesForPath returns worktrees for a given project path (file-based, no git commands)
+// Uses default dependencies
 func ListWorktreesForPath(path string) ([]Worktree, error) {
+	return ListWorktreesForPathWith(defaultDeps, path)
+}
+
+// ListWorktreesForPathWith returns worktrees using provided dependencies
+func ListWorktreesForPathWith(d *Deps, path string) ([]Worktree, error) {
 	var worktrees []Worktree
 
-	entries, err := os.ReadDir(path)
+	entries, err := d.FS.ReadDir(path)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +254,7 @@ func ListWorktreesForPath(path string) ([]Worktree, error) {
 		gitFile := filepath.Join(wtPath, ".git")
 
 		// Check if .git is a file (not directory) - indicates a worktree
-		info, err := os.Stat(gitFile)
+		info, err := d.FS.Stat(gitFile)
 		if err != nil || info.IsDir() {
 			continue
 		}

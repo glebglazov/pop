@@ -1,9 +1,13 @@
 package history
 
 import (
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 )
 
@@ -160,5 +164,200 @@ func TestSortByRecency_DoesNotMutateOriginal(t *testing.T) {
 			t.Errorf("original was mutated: position %d changed from %q to %q",
 				i, originalOrder[i], p.Name)
 		}
+	}
+}
+
+func TestDefaultHistoryPathWith(t *testing.T) {
+	tests := []struct {
+		name     string
+		xdgData  string
+		userHome string
+		expected string
+	}{
+		{
+			name:     "uses XDG_DATA_HOME when set",
+			xdgData:  "/custom/data",
+			userHome: "/home/user",
+			expected: "/custom/data/pop/history.json",
+		},
+		{
+			name:     "falls back to ~/.local/share when XDG not set",
+			xdgData:  "",
+			userHome: "/home/user",
+			expected: "/home/user/.local/share/pop/history.json",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &Deps{
+				FS: &deps.MockFileSystem{
+					GetenvFunc: func(key string) string {
+						if key == "XDG_DATA_HOME" {
+							return tt.xdgData
+						}
+						return ""
+					},
+					UserHomeDirFunc: func() (string, error) {
+						return tt.userHome, nil
+					},
+				},
+			}
+
+			result := DefaultHistoryPathWith(d)
+
+			if result != tt.expected {
+				t.Errorf("DefaultHistoryPathWith() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoadWith(t *testing.T) {
+	tests := []struct {
+		name        string
+		fileContent string
+		fileErr     error
+		wantEntries int
+		wantErr     bool
+	}{
+		{
+			name:        "loads existing history",
+			fileContent: `{"entries":[{"path":"/project1","last_access":"2024-01-01T00:00:00Z"}]}`,
+			wantEntries: 1,
+		},
+		{
+			name:        "returns empty history when file not found",
+			fileErr:     os.ErrNotExist,
+			wantEntries: 0,
+		},
+		{
+			name:        "returns empty history on parse error",
+			fileContent: "invalid json",
+			wantEntries: 0,
+		},
+		{
+			name:    "returns error on read error",
+			fileErr: os.ErrPermission,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &Deps{
+				FS: &deps.MockFileSystem{
+					ReadFileFunc: func(path string) ([]byte, error) {
+						if tt.fileErr != nil {
+							return nil, tt.fileErr
+						}
+						return []byte(tt.fileContent), nil
+					},
+				},
+			}
+
+			h, err := LoadWith(d, "/test/history.json")
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("LoadWith() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr && len(h.Entries) != tt.wantEntries {
+				t.Errorf("got %d entries, want %d", len(h.Entries), tt.wantEntries)
+			}
+		})
+	}
+}
+
+func TestSaveWith(t *testing.T) {
+	var savedData []byte
+	var savedPath string
+
+	d := &Deps{
+		FS: &deps.MockFileSystem{
+			MkdirAllFunc: func(path string, perm os.FileMode) error {
+				return nil
+			},
+			WriteFileFunc: func(path string, data []byte, perm os.FileMode) error {
+				savedPath = path
+				savedData = data
+				return nil
+			},
+		},
+	}
+
+	h := &History{
+		path: "/test/dir/history.json",
+		Entries: []Entry{
+			{Path: "/project1", LastAccess: time.Now()},
+		},
+	}
+
+	err := h.SaveWith(d)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if savedPath != "/test/dir/history.json" {
+		t.Errorf("saved to wrong path: %s", savedPath)
+	}
+
+	if !strings.Contains(string(savedData), "/project1") {
+		t.Error("saved data doesn't contain expected content")
+	}
+}
+
+func TestTmuxSessionActivityWith(t *testing.T) {
+	tests := []struct {
+		name       string
+		tmuxOutput string
+		tmuxErr    error
+		expected   map[string]int64
+	}{
+		{
+			name:       "parses session activity",
+			tmuxOutput: "session1 1234567890\nsession2 1234567891",
+			expected: map[string]int64{
+				"session1": 1234567890,
+				"session2": 1234567891,
+			},
+		},
+		{
+			name:     "returns empty map on error",
+			tmuxErr:  fmt.Errorf("tmux error"),
+			expected: map[string]int64{},
+		},
+		{
+			name:       "handles empty output",
+			tmuxOutput: "",
+			expected:   map[string]int64{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &Deps{
+				Tmux: &deps.MockTmux{
+					ListSessionsFunc: func() (string, error) {
+						return tt.tmuxOutput, tt.tmuxErr
+					},
+				},
+			}
+
+			result := TmuxSessionActivityWith(d)
+
+			if len(result) != len(tt.expected) {
+				t.Errorf("got %d sessions, want %d", len(result), len(tt.expected))
+				return
+			}
+
+			for k, v := range tt.expected {
+				if result[k] != v {
+					t.Errorf("session %q activity = %d, want %d", k, result[k], v)
+				}
+			}
+		})
 	}
 }
