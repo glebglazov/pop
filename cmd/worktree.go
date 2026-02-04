@@ -76,6 +76,14 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 				fmt.Fprintf(os.Stderr, "Failed to create worktree: %v\n", err)
 			}
 			return nil // Exit after create
+
+		case ui.ActionReset:
+			if result.Selected != nil {
+				hist, _ := history.Load(history.DefaultHistoryPath())
+				hist.Remove(result.Selected.Path)
+				hist.Save()
+			}
+			// Continue loop to show picker again
 		}
 	}
 }
@@ -128,6 +136,7 @@ func showWorktreePicker(ctx *project.RepoContext) (ui.Result, error) {
 		ui.WithNew(),
 		ui.WithContext(),
 		ui.WithCursorAtEnd(),
+		ui.WithReset(),
 	)
 }
 

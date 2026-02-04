@@ -41,6 +41,7 @@ const (
 	ActionForceDelete
 	ActionNew
 	ActionKillSession
+	ActionReset
 )
 
 // Picker is a fuzzy-searchable list picker
@@ -58,6 +59,7 @@ type Picker struct {
 	showNew         bool
 	showContext     bool
 	showKillSession bool
+	showReset       bool
 	cursorAtEnd     bool
 
 	// Cursor memory: remembers selected item per filter query
@@ -99,6 +101,13 @@ func WithContext() PickerOption {
 func WithKillSession() PickerOption {
 	return func(p *Picker) {
 		p.showKillSession = true
+	}
+}
+
+// WithReset enables reset (remove from history) keybinding (ctrl+r)
+func WithReset() PickerOption {
+	return func(p *Picker) {
+		p.showReset = true
 	}
 }
 
@@ -241,6 +250,15 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, tea.Quit
 			}
 
+		case key.Matches(msg, keys.Reset):
+			if p.showReset && len(p.filtered) > 0 {
+				p.result = Result{
+					Selected: &p.filtered[p.cursor],
+					Action:   ActionReset,
+				}
+				return p, tea.Quit
+			}
+
 		case key.Matches(msg, keys.ClearInput):
 			p.input.SetValue("")
 			p.filter()
@@ -356,6 +374,9 @@ func (p *Picker) buildHints() string {
 
 	if p.showKillSession {
 		hints = append(hints, "C-k kill session")
+	}
+	if p.showReset {
+		hints = append(hints, "C-r reset")
 	}
 	if p.showDelete {
 		hints = append(hints, "⌫ delete")
@@ -525,6 +546,7 @@ type keyMap struct {
 	ForceDelete  key.Binding
 	New          key.Binding
 	KillSession  key.Binding
+	Reset        key.Binding
 	ClearInput   key.Binding
 }
 
@@ -558,6 +580,9 @@ var keys = keyMap{
 	),
 	KillSession: key.NewBinding(
 		key.WithKeys("ctrl+k"),
+	),
+	Reset: key.NewBinding(
+		key.WithKeys("ctrl+r"),
 	),
 	ClearInput: key.NewBinding(
 		key.WithKeys("alt+backspace", "ctrl+u"),

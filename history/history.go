@@ -90,6 +90,16 @@ func (h *History) Record(path string) {
 	}
 }
 
+// Remove deletes a project from history
+func (h *History) Remove(path string) {
+	for i := range h.Entries {
+		if h.Entries[i].Path == path {
+			h.Entries = append(h.Entries[:i], h.Entries[i+1:]...)
+			return
+		}
+	}
+}
+
 // SortByRecency sorts projects by recency (oldest first, most recent last)
 // Projects not in history are placed at the beginning, sorted alphabetically
 func (h *History) SortByRecency(projects []project.Project) []project.Project {

@@ -168,7 +168,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 
 	// Run picker loop
 	for {
-		result, err := ui.Run(items, ui.WithCursorAtEnd(), ui.WithKillSession())
+		result, err := ui.Run(items, ui.WithCursorAtEnd(), ui.WithKillSession(), ui.WithReset())
 		if err != nil {
 			return err
 		}
@@ -190,6 +190,27 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		case ui.ActionKillSession:
 			if result.Selected != nil {
 				killTmuxSession(result.Selected.Name)
+			}
+			// Continue loop to show picker again
+
+		case ui.ActionReset:
+			if result.Selected != nil {
+				hist.Remove(result.Selected.Path)
+				hist.Save()
+				// Re-sort items without this entry's history
+				projects := make([]project.Project, len(items))
+				for i, item := range items {
+					projects[i] = project.Project{Name: item.Name, Path: item.Path}
+				}
+				projects = hist.SortByRecency(projects)
+				for i, p := range projects {
+					for _, item := range items {
+						if item.Path == p.Path {
+							items[i] = item
+							break
+						}
+					}
+				}
 			}
 			// Continue loop to show picker again
 		}
