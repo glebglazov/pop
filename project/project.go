@@ -164,11 +164,21 @@ func gitCommandInDir(dir string, args ...string) (string, error) {
 func HasWorktrees(path string) bool {
 	// Check if .bare directory exists - this indicates a bare repo with worktrees
 	bareDir := filepath.Join(path, ".bare")
-	info, err := os.Stat(bareDir)
-	if err != nil || !info.IsDir() {
-		return false
+	if info, err := os.Stat(bareDir); err == nil && info.IsDir() {
+		return true
 	}
-	return true
+
+	// Check if .git is a directory with worktrees/ subdirectory containing entries
+	// This handles bare repos where .git dir itself is the bare repo (core.bare=true)
+	gitWorktreesDir := filepath.Join(path, ".git", "worktrees")
+	if info, err := os.Stat(gitWorktreesDir); err == nil && info.IsDir() {
+		entries, err := os.ReadDir(gitWorktreesDir)
+		if err == nil && len(entries) > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ListWorktreesForPath returns worktrees for a given project path (file-based, no git commands)
@@ -181,7 +191,7 @@ func ListWorktreesForPath(path string) ([]Worktree, error) {
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == ".bare" {
+		if !entry.IsDir() || entry.Name() == ".bare" || entry.Name() == ".git" {
 			continue
 		}
 
