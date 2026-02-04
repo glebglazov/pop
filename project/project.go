@@ -169,15 +169,49 @@ func HasWorktrees(path string) bool {
 	}
 
 	// Check if .git is a directory with worktrees/ subdirectory containing entries
-	// This handles bare repos where .git dir itself is the bare repo (core.bare=true)
-	gitWorktreesDir := filepath.Join(path, ".git", "worktrees")
-	if info, err := os.Stat(gitWorktreesDir); err == nil && info.IsDir() {
-		entries, err := os.ReadDir(gitWorktreesDir)
-		if err == nil && len(entries) > 0 {
-			return true
+	// AND core.bare=true in config (to avoid false positives from stale worktree metadata)
+	gitDir := filepath.Join(path, ".git")
+	if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+		if !isCoreBare(gitDir) {
+			return false
+		}
+		gitWorktreesDir := filepath.Join(gitDir, "worktrees")
+		if info, err := os.Stat(gitWorktreesDir); err == nil && info.IsDir() {
+			entries, err := os.ReadDir(gitWorktreesDir)
+			if err == nil && len(entries) > 0 {
+				return true
+			}
 		}
 	}
 
+	return false
+}
+
+// isCoreBare checks if core.bare=true in the git config file (without running git)
+func isCoreBare(gitDir string) bool {
+	configPath := filepath.Join(gitDir, "config")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return false
+	}
+
+	// Simple parsing: look for "bare = true" in [core] section
+	lines := strings.Split(string(data), "\n")
+	inCoreSection := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") {
+			inCoreSection = strings.HasPrefix(strings.ToLower(line), "[core]")
+			continue
+		}
+		if inCoreSection {
+			// Normalize and check for bare = true
+			normalized := strings.ReplaceAll(strings.ToLower(line), " ", "")
+			if normalized == "bare=true" {
+				return true
+			}
+		}
+	}
 	return false
 }
 
