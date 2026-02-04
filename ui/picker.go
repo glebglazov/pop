@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/cursor"
@@ -9,7 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/sahilm/fuzzy"
+	"github.com/junegunn/fzf/src/algo"
+	"github.com/junegunn/fzf/src/util"
 )
 
 // Item represents a selectable item in the picker
@@ -45,7 +47,6 @@ const (
 type Picker struct {
 	items    []Item
 	filtered []Item
-	matches  []fuzzy.Match
 	input    textinput.Model
 	cursor   int
 	height   int
@@ -208,13 +209,18 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, cmd
 }
 
+// fzfMatch holds an item with its fuzzy match score
+type fzfMatch struct {
+	item  Item
+	score int
+}
+
 func (p *Picker) filter() {
 	query := p.input.Value()
 	isFiltering := query != ""
 
 	if !isFiltering {
 		p.filtered = p.items
-		p.matches = nil
 		// Restore cursor position when filter is cleared
 		if p.wasFiltering {
 			p.cursor = p.savedCursor
@@ -225,17 +231,27 @@ func (p *Picker) filter() {
 			p.savedCursor = p.cursor
 		}
 
-		// Extract names for fuzzy matching
-		names := make([]string, len(p.items))
-		for i, item := range p.items {
-			names[i] = item.Name
+		// Use fzf's algorithm for fuzzy matching
+		pattern := []rune(strings.ToLower(query))
+		slab := util.MakeSlab(100*1024, 2048)
+
+		var matches []fzfMatch
+		for _, item := range p.items {
+			chars := util.ToChars([]byte(item.Name))
+			result, _ := algo.FuzzyMatchV2(false, true, true, &chars, pattern, false, slab)
+			if result.Score > 0 {
+				matches = append(matches, fzfMatch{item: item, score: result.Score})
+			}
 		}
 
-		p.matches = fuzzy.Find(query, names)
-		// Reverse order so best match is at the bottom
-		p.filtered = make([]Item, len(p.matches))
-		for i, match := range p.matches {
-			p.filtered[len(p.matches)-1-i] = p.items[match.Index]
+		// Sort by score (ascending, so best match ends up at the bottom)
+		sort.Slice(matches, func(i, j int) bool {
+			return matches[i].score < matches[j].score
+		})
+
+		p.filtered = make([]Item, len(matches))
+		for i, m := range matches {
+			p.filtered[i] = m.item
 		}
 		// Keep cursor at the bottom (best match)
 		p.cursor = len(p.filtered) - 1
