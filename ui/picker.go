@@ -113,7 +113,9 @@ func WithCursorAtEnd() PickerOption {
 func NewPicker(items []Item, opts ...PickerOption) *Picker {
 	ti := textinput.New()
 	ti.Prompt = "> "
-	ti.Cursor.SetMode(cursor.CursorHide)
+	ti.Cursor.SetMode(cursor.CursorStatic)
+	ti.Cursor.Style = lipgloss.NewStyle().Background(lipgloss.Color("white")).Foreground(lipgloss.Color("black"))
+	ti.Cursor.TextStyle = lipgloss.NewStyle().Background(lipgloss.Color("white")).Foreground(lipgloss.Color("black"))
 	ti.Focus()
 
 	p := &Picker{
@@ -469,7 +471,7 @@ func (p *Picker) View() string {
 	b.WriteString("┐\n")
 
 	inputView := p.input.View()
-	padding := innerWidth - len([]rune(inputView))
+	padding := innerWidth - lipgloss.Width(inputView)
 	if padding < 0 {
 		padding = 0
 	}
