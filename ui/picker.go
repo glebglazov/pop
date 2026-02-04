@@ -242,7 +242,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		p.width = msg.Width
-		p.height = msg.Height - 3 // Reserve space for input box (3 lines)
+		p.height = msg.Height - 4 // Reserve space for hints (1 line) + input box (3 lines)
 		if p.height < 3 {
 			p.height = 3
 		}
@@ -339,6 +339,25 @@ func (p *Picker) findItemIndex(path string) int {
 		}
 	}
 	return -1
+}
+
+// buildHints returns the hints string based on enabled features
+func (p *Picker) buildHints() string {
+	var hints []string
+
+	hints = append(hints, "↑/↓ navigate", "C-u/C-d half-page", "Enter select", "Esc quit")
+
+	if p.showKillSession {
+		hints = append(hints, "C-k kill session")
+	}
+	if p.showDelete {
+		hints = append(hints, "⌫ delete")
+	}
+	if p.showNew {
+		hints = append(hints, "C-n new")
+	}
+
+	return "  " + strings.Join(hints, " · ")
 }
 
 // adjustScroll ensures the cursor is visible by adjusting scroll offset only when necessary
@@ -438,7 +457,7 @@ func (p *Picker) View() string {
 		b.WriteString("\n")
 	}
 
-	// Input box at bottom
+	// Input box
 	boxWidth := p.width
 	if boxWidth < 20 {
 		boxWidth = 40
@@ -461,7 +480,12 @@ func (p *Picker) View() string {
 
 	b.WriteString("└")
 	b.WriteString(strings.Repeat("─", innerWidth))
-	b.WriteString("┘")
+	b.WriteString("┘\n")
+
+	// Hints line
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	hints := p.buildHints()
+	b.WriteString(hintStyle.Render(hints))
 
 	return b.String()
 }
