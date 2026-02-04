@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/glebglazov/pop/internal/deps"
@@ -231,6 +232,122 @@ func TestExpandHomeWith(t *testing.T) {
 
 			if result != tt.expected {
 				t.Errorf("expandHomeWith() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoadWorktreeCommands(t *testing.T) {
+	tests := []struct {
+		name           string
+		toml           string
+		expectedCmds   int
+		checkFirstCmd  func(t *testing.T, cmd WorktreeCommand)
+	}{
+		{
+			name: "loads single worktree command",
+			toml: `
+projects = ["~/Dev"]
+
+[[worktree.commands]]
+key = "ctrl-l"
+label = "cleanup"
+command = "echo cleanup"
+exit = true
+`,
+			expectedCmds: 1,
+			checkFirstCmd: func(t *testing.T, cmd WorktreeCommand) {
+				if cmd.Key != "ctrl-l" {
+					t.Errorf("Key = %q, want %q", cmd.Key, "ctrl-l")
+				}
+				if cmd.Label != "cleanup" {
+					t.Errorf("Label = %q, want %q", cmd.Label, "cleanup")
+				}
+				if cmd.Command != "echo cleanup" {
+					t.Errorf("Command = %q, want %q", cmd.Command, "echo cleanup")
+				}
+				if !cmd.Exit {
+					t.Error("Exit = false, want true")
+				}
+			},
+		},
+		{
+			name: "loads multiple worktree commands",
+			toml: `
+projects = ["~/Dev"]
+
+[[worktree.commands]]
+key = "ctrl-l"
+label = "cleanup"
+command = "echo cleanup"
+exit = true
+
+[[worktree.commands]]
+key = "ctrl-o"
+label = "open"
+command = "echo open"
+exit = false
+`,
+			expectedCmds: 2,
+			checkFirstCmd: func(t *testing.T, cmd WorktreeCommand) {
+				if cmd.Key != "ctrl-l" {
+					t.Errorf("Key = %q, want %q", cmd.Key, "ctrl-l")
+				}
+			},
+		},
+		{
+			name: "config without worktree section",
+			toml: `
+projects = ["~/Dev"]
+`,
+			expectedCmds: 0,
+			checkFirstCmd: nil,
+		},
+		{
+			name: "exit defaults to false",
+			toml: `
+projects = ["~/Dev"]
+
+[[worktree.commands]]
+key = "ctrl-t"
+label = "test"
+command = "echo test"
+`,
+			expectedCmds: 1,
+			checkFirstCmd: func(t *testing.T, cmd WorktreeCommand) {
+				if cmd.Exit {
+					t.Error("Exit = true, want false (default)")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temp config file
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
+				t.Fatalf("failed to write temp config: %v", err)
+			}
+
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+
+			// Check number of commands
+			var cmdCount int
+			if cfg.Worktree != nil {
+				cmdCount = len(cfg.Worktree.Commands)
+			}
+			if cmdCount != tt.expectedCmds {
+				t.Errorf("got %d commands, want %d", cmdCount, tt.expectedCmds)
+			}
+
+			// Check first command if expected
+			if tt.checkFirstCmd != nil && cmdCount > 0 {
+				tt.checkFirstCmd(t, cfg.Worktree.Commands[0])
 			}
 		})
 	}

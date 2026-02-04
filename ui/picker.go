@@ -25,10 +25,17 @@ func (i Item) FilterValue() string {
 	return i.Name
 }
 
+// CustomCommandResult holds info about a custom command to execute
+type CustomCommandResult struct {
+	Command string
+	Exit    bool
+}
+
 // Result holds the picker result
 type Result struct {
-	Selected *Item
-	Action   Action
+	Selected      *Item
+	Action        Action
+	CustomCommand *CustomCommandResult // set when Action == ActionCustomCommand
 }
 
 // Action represents what action the user wants to take
@@ -42,6 +49,7 @@ const (
 	ActionNew
 	ActionKillSession
 	ActionReset
+	ActionCustomCommand
 )
 
 // Picker is a fuzzy-searchable list picker
@@ -65,12 +73,31 @@ type Picker struct {
 	// Cursor memory: remembers selected item per filter query
 	cursorMemory map[string]cursorState // filter query -> cursor state
 	lastQuery    string                 // previous filter query (to detect changes)
+
+	// Custom commands
+	customCommands []CustomKeyBinding
 }
 
 // cursorState stores cursor position info for a filter query
 type cursorState struct {
 	path      string // selected item's path
 	screenPos int    // cursor position relative to visible area (0 = top of visible)
+}
+
+// CustomKeyBinding holds a custom key binding and its associated command
+type CustomKeyBinding struct {
+	Binding key.Binding
+	Command string
+	Label   string
+	Exit    bool
+}
+
+// CustomCommand defines a custom command to add to the picker
+type CustomCommand struct {
+	Key     string
+	Label   string
+	Command string
+	Exit    bool
 }
 
 // PickerOption configures the picker
@@ -115,6 +142,21 @@ func WithReset() PickerOption {
 func WithCursorAtEnd() PickerOption {
 	return func(p *Picker) {
 		p.cursorAtEnd = true
+	}
+}
+
+// WithCustomCommands adds custom key bindings and commands to the picker
+func WithCustomCommands(commands []CustomCommand) PickerOption {
+	return func(p *Picker) {
+		for _, cmd := range commands {
+			binding := key.NewBinding(key.WithKeys(cmd.Key))
+			p.customCommands = append(p.customCommands, CustomKeyBinding{
+				Binding: binding,
+				Command: cmd.Command,
+				Label:   cmd.Label,
+				Exit:    cmd.Exit,
+			})
+		}
 	}
 }
 
@@ -263,6 +305,24 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.input.SetValue("")
 			p.filter()
 			return p, nil
+
+		default:
+			// Check custom commands
+			for _, cc := range p.customCommands {
+				if key.Matches(msg, cc.Binding) {
+					p.result = Result{
+						Action: ActionCustomCommand,
+						CustomCommand: &CustomCommandResult{
+							Command: cc.Command,
+							Exit:    cc.Exit,
+						},
+					}
+					if len(p.filtered) > 0 {
+						p.result.Selected = &p.filtered[p.cursor]
+					}
+					return p, tea.Quit
+				}
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -385,7 +445,27 @@ func (p *Picker) buildHints() string {
 		hints = append(hints, "C-n new")
 	}
 
+	// Add custom command hints
+	for _, cc := range p.customCommands {
+		hints = append(hints, formatKeyHint(cc.Binding)+" "+cc.Label)
+	}
+
 	return "  " + strings.Join(hints, " · ")
+}
+
+// formatKeyHint converts a key binding to a display-friendly hint format
+func formatKeyHint(b key.Binding) string {
+	keys := b.Keys()
+	if len(keys) == 0 {
+		return ""
+	}
+	k := keys[0]
+	// Convert common key formats to hint format
+	k = strings.ReplaceAll(k, "ctrl+", "C-")
+	k = strings.ReplaceAll(k, "ctrl-", "C-")
+	k = strings.ReplaceAll(k, "alt+", "A-")
+	k = strings.ReplaceAll(k, "alt-", "A-")
+	return k
 }
 
 // adjustScroll ensures the cursor is visible by adjusting scroll offset only when necessary

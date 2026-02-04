@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
@@ -43,8 +45,23 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a git repository")
 	}
 
+	// Load config (optional, don't fail if missing)
+	var customCommands []ui.CustomCommand
+	if cfg, err := config.Load(config.DefaultConfigPath()); err == nil {
+		if cfg.Worktree != nil {
+			for _, wc := range cfg.Worktree.Commands {
+				customCommands = append(customCommands, ui.CustomCommand{
+					Key:     wc.Key,
+					Label:   wc.Label,
+					Command: wc.Command,
+					Exit:    wc.Exit,
+				})
+			}
+		}
+	}
+
 	for {
-		result, err := showWorktreePicker(ctx)
+		result, err := showWorktreePicker(ctx, customCommands)
 		if err != nil {
 			return err
 		}
@@ -71,12 +88,6 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			}
 			// Continue loop to show picker again
 
-		case ui.ActionNew:
-			if err := createWorktree(ctx); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to create worktree: %v\n", err)
-			}
-			return nil // Exit after create
-
 		case ui.ActionReset:
 			if result.Selected != nil {
 				hist, _ := history.Load(history.DefaultHistoryPath())
@@ -84,11 +95,20 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 				hist.Save()
 			}
 			// Continue loop to show picker again
+
+		case ui.ActionCustomCommand:
+			if result.CustomCommand != nil && result.Selected != nil {
+				executeCustomCommand(result.CustomCommand.Command, result.Selected, ctx)
+				if result.CustomCommand.Exit {
+					return nil
+				}
+			}
+			// Continue loop to show picker again (if exit = false)
 		}
 	}
 }
 
-func showWorktreePicker(ctx *project.RepoContext) (ui.Result, error) {
+func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.CustomCommand) (ui.Result, error) {
 	worktrees, err := project.ListWorktrees(ctx)
 	if err != nil {
 		return ui.Result{Action: ui.ActionCancel}, fmt.Errorf("failed to list worktrees: %w", err)
@@ -131,13 +151,17 @@ func showWorktreePicker(ctx *project.RepoContext) (ui.Result, error) {
 		}
 	}
 
-	return ui.Run(items,
+	opts := []ui.PickerOption{
 		ui.WithDelete(),
-		ui.WithNew(),
 		ui.WithContext(),
 		ui.WithCursorAtEnd(),
 		ui.WithReset(),
-	)
+	}
+	if len(customCommands) > 0 {
+		opts = append(opts, ui.WithCustomCommands(customCommands))
+	}
+
+	return ui.Run(items, opts...)
 }
 
 func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {
@@ -203,10 +227,22 @@ func deleteWorktree(path string, force bool) {
 	}
 }
 
-func createWorktree(ctx *project.RepoContext) error {
-	// This is a simplified version - can be expanded later
-	// For now, print instructions
-	fmt.Println("Creating new worktree...")
-	fmt.Println("Use: git worktree add <path> <branch>")
-	return nil
+func executeCustomCommand(command string, item *ui.Item, ctx *project.RepoContext) {
+	cmd := exec.Command("sh", "-c", command)
+
+	// Set environment variables
+	cmd.Env = append(os.Environ(),
+		"POP_WORKTREE_PATH="+item.Path,
+		"POP_WORKTREE_NAME="+filepath.Base(item.Path),
+		"POP_BRANCH="+item.Context,
+		"POP_REPO_ROOT="+ctx.GitRoot,
+	)
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Custom command failed: %v\n", err)
+	}
 }

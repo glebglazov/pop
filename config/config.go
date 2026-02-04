@@ -23,9 +23,23 @@ func DefaultDeps() *Deps {
 
 var defaultDeps = DefaultDeps()
 
+// WorktreeCommand defines a custom command for the worktree picker
+type WorktreeCommand struct {
+	Key     string `toml:"key"`     // Key binding (e.g., "ctrl-l")
+	Label   string `toml:"label"`   // Display label for hints
+	Command string `toml:"command"` // Shell command to execute
+	Exit    bool   `toml:"exit"`    // Whether to exit picker after execution
+}
+
+// WorktreeConfig holds worktree-specific configuration
+type WorktreeConfig struct {
+	Commands []WorktreeCommand `toml:"commands"`
+}
+
 type Config struct {
-	Projects          []string `toml:"projects"`
-	ExcludeCurrentDir bool     `toml:"exclude_current_dir"`
+	Projects          []string        `toml:"projects"`
+	ExcludeCurrentDir bool            `toml:"exclude_current_dir"`
+	Worktree          *WorktreeConfig `toml:"worktree"`
 }
 
 // DefaultConfigPath returns the default config file path
