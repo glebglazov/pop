@@ -28,6 +28,40 @@ go test ./history
 - **project/** - Domain models (Project, Worktree, RepoContext) and git operations
 - **history/** - JSON-based project access tracking for recency sorting
 - **ui/** - Bubbletea-based fuzzy picker TUI
+- **internal/deps/** - Interfaces and implementations for external dependencies (git, filesystem, tmux)
+
+### Testing Approach
+
+External dependencies (git commands, filesystem operations, tmux) are abstracted behind interfaces in `internal/deps/`. This enables fast, reliable unit tests without real system calls.
+
+**Pattern:**
+- Each package has a `Deps` struct holding its dependencies
+- `DefaultDeps()` returns real implementations for production
+- `*With(d *Deps, ...)` functions accept injected dependencies for testing
+- Wrapper functions (e.g., `DetectRepoContext()`) call the `*With` variant with default deps
+
+**Example:**
+```go
+// Production code calls the simple wrapper
+ctx, err := project.DetectRepoContext()
+
+// Tests inject mocks
+d := &project.Deps{
+    Git: &deps.MockGit{
+        CommandFunc: func(args ...string) (string, error) {
+            return "/mock/path", nil
+        },
+    },
+    FS: &deps.MockFileSystem{...},
+}
+ctx, err := project.DetectRepoContextWith(d)
+```
+
+**Available mocks in `internal/deps`:**
+- `MockGit` - git command execution
+- `MockFileSystem` - file/directory operations
+- `MockTmux` - tmux session management
+- `MockFileInfo`, `MockDirEntry` - test helpers for fs operations
 
 ### Key Workflows
 
