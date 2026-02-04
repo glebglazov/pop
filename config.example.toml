@@ -1,0 +1,11 @@
+# pop configuration
+# Place this file at ~/.config/pop/config.toml
+
+# List of project directories
+# Supports:
+#   - Exact paths: ~/.local/share/chezmoi
+#   - Glob patterns: ~/Dev/*/* (matches ~/Dev/personal/foo, ~/Dev/work/bar)
+projects = [
+    "~/.local/share/chezmoi",
+    "~/Dev/*/*",
+]
