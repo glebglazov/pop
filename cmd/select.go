@@ -107,22 +107,27 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		resultsByIndex[r.index] = r.projects
 	}
 
-	// Get current directory to filter it out (resolve symlinks for proper comparison)
-	cwd, _ := os.Getwd()
-	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-		cwd = resolved
+	// Get current directory for optional filtering (resolve symlinks for proper comparison)
+	var cwd string
+	if cfg.ExcludeCurrentDir {
+		cwd, _ = os.Getwd()
+		if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+			cwd = resolved
+		}
 	}
 
 	var expanded []project.ExpandedProject
 	for i := range paths {
 		for _, ep := range resultsByIndex[i] {
-			// Skip current directory (resolve symlinks for proper comparison)
-			epPath := ep.Path
-			if resolved, err := filepath.EvalSymlinks(epPath); err == nil {
-				epPath = resolved
-			}
-			if epPath == cwd {
-				continue
+			// Skip current directory if configured
+			if cfg.ExcludeCurrentDir {
+				epPath := ep.Path
+				if resolved, err := filepath.EvalSymlinks(epPath); err == nil {
+					epPath = resolved
+				}
+				if epPath == cwd {
+					continue
+				}
 			}
 			expanded = append(expanded, ep)
 		}

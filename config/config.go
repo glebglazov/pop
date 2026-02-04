@@ -10,7 +10,8 @@ import (
 )
 
 type Config struct {
-	Projects []string `toml:"projects"`
+	Projects          []string `toml:"projects"`
+	ExcludeCurrentDir bool     `toml:"exclude_current_dir"`
 }
 
 // DefaultConfigPath returns the default config file path
