@@ -197,24 +197,28 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			if result.Selected != nil {
 				hist.Remove(result.Selected.Path)
 				hist.Save()
-				// Re-sort items without this entry's history
-				projects := make([]project.Project, len(items))
-				for i, item := range items {
-					projects[i] = project.Project{Name: item.Name, Path: item.Path}
-				}
-				projects = hist.SortByRecency(projects)
-				for i, p := range projects {
-					for _, item := range items {
-						if item.Path == p.Path {
-							items[i] = item
-							break
-						}
-					}
-				}
+				items = sortItemsByHistory(items, hist)
 			}
 			// Continue loop to show picker again
 		}
 	}
+}
+
+func sortItemsByHistory(items []ui.Item, hist *history.History) []ui.Item {
+	projects := make([]project.Project, len(items))
+	for i, item := range items {
+		projects[i] = project.Project{Name: item.Name, Path: item.Path}
+	}
+	projects = hist.SortByRecency(projects)
+	pathToItem := make(map[string]ui.Item, len(items))
+	for _, item := range items {
+		pathToItem[item.Path] = item
+	}
+	sorted := make([]ui.Item, len(projects))
+	for i, p := range projects {
+		sorted[i] = pathToItem[p.Path]
+	}
+	return sorted
 }
 
 func openTmuxSession(item *ui.Item) error {
