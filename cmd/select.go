@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -43,7 +44,19 @@ func runSelect(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		// Config doesn't exist — run interactive init
+		d := defaultConfigureDeps()
+		d.ShowWelcome = true
+		if err := runConfigureWith(d); err != nil {
+			return err
+		}
+		cfg, err = config.Load(cfgPath)
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
 	}
 
 	// Expand project paths
