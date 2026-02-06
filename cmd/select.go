@@ -143,6 +143,9 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Disambiguate projects with the same name
+	project.DisambiguateNames(expanded)
+
 	// Load history and sort by recency (oldest first, most recent last)
 	hist, err := history.Load(history.DefaultHistoryPath())
 	if err != nil {
