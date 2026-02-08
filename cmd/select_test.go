@@ -8,6 +8,55 @@ import (
 	"github.com/glebglazov/pop/ui"
 )
 
+func TestLastNSegments(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		n        int
+		expected string
+	}{
+		{
+			name:     "single segment (n=1)",
+			path:     "/a/b/c/d",
+			n:        1,
+			expected: "d",
+		},
+		{
+			name:     "two segments",
+			path:     "/a/b/c/d",
+			n:        2,
+			expected: "c/d",
+		},
+		{
+			name:     "three segments",
+			path:     "/a/b/c/d",
+			n:        3,
+			expected: "b/c/d",
+		},
+		{
+			name:     "n=0 returns basename",
+			path:     "/a/b/c",
+			n:        0,
+			expected: "c",
+		},
+		{
+			name:     "n exceeds path depth",
+			path:     "/a/b",
+			n:        5,
+			expected: "a/b",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lastNSegments(tt.path, tt.n)
+			if result != tt.expected {
+				t.Errorf("lastNSegments(%q, %d) = %q, want %q", tt.path, tt.n, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestSanitizeSessionName(t *testing.T) {
 	tests := []struct {
 		name     string

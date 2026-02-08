@@ -59,7 +59,7 @@ func TestExpandProjectsWith(t *testing.T) {
 		name     string
 		projects []string
 		setupFS  func() *deps.MockFileSystem
-		expected []string
+		expected []ExpandedPath
 	}{
 		{
 			name:     "expands home directory",
@@ -77,7 +77,7 @@ func TestExpandProjectsWith(t *testing.T) {
 					},
 				}
 			},
-			expected: []string{"/home/user/projects/myapp"},
+			expected: []ExpandedPath{{Path: "/home/user/projects/myapp", GlobSegments: 0}},
 		},
 		{
 			name:     "filters non-directories",
@@ -95,7 +95,7 @@ func TestExpandProjectsWith(t *testing.T) {
 					},
 				}
 			},
-			expected: []string{"/projects/dir"},
+			expected: []ExpandedPath{{Path: "/projects/dir", GlobSegments: 0}},
 		},
 		{
 			name:     "deduplicates paths",
@@ -107,7 +107,7 @@ func TestExpandProjectsWith(t *testing.T) {
 					},
 				}
 			},
-			expected: []string{"/projects/app"},
+			expected: []ExpandedPath{{Path: "/projects/app", GlobSegments: 0}},
 		},
 		{
 			name:     "handles non-existent paths",
@@ -140,7 +140,7 @@ func TestExpandProjectsWith(t *testing.T) {
 					},
 				}
 			},
-			expected: []string{"/real/project"},
+			expected: []ExpandedPath{{Path: "/real/project", GlobSegments: 0}},
 		},
 		{
 			name:     "deduplicates symlinks pointing to same path",
@@ -162,7 +162,7 @@ func TestExpandProjectsWith(t *testing.T) {
 					},
 				}
 			},
-			expected: []string{"/real/project"},
+			expected: []ExpandedPath{{Path: "/real/project", GlobSegments: 0}},
 		},
 	}
 
@@ -183,8 +183,11 @@ func TestExpandProjectsWith(t *testing.T) {
 			}
 
 			for i, p := range result {
-				if p != tt.expected[i] {
-					t.Errorf("project[%d] = %q, want %q", i, p, tt.expected[i])
+				if p.Path != tt.expected[i].Path {
+					t.Errorf("project[%d].Path = %q, want %q", i, p.Path, tt.expected[i].Path)
+				}
+				if p.GlobSegments != tt.expected[i].GlobSegments {
+					t.Errorf("project[%d].GlobSegments = %d, want %d", i, p.GlobSegments, tt.expected[i].GlobSegments)
 				}
 			}
 		})
@@ -350,5 +353,118 @@ command = "echo test"
 				tt.checkFirstCmd(t, cfg.Worktree.Commands[0])
 			}
 		})
+	}
+}
+
+func TestUseGlobSegments(t *testing.T) {
+	tests := []struct {
+		name     string
+		toml     string
+		expected bool
+	}{
+		{
+			name:     "defaults to true when not set",
+			toml:     `projects = ["~/Dev"]`,
+			expected: true,
+		},
+		{
+			name:     "explicit true",
+			toml:     "projects = [\"~/Dev\"]\nuse_glob_segments_in_display_path = true",
+			expected: true,
+		},
+		{
+			name:     "explicit false",
+			toml:     "projects = [\"~/Dev\"]\nuse_glob_segments_in_display_path = false",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
+				t.Fatalf("failed to write config: %v", err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if cfg.UseGlobSegments() != tt.expected {
+				t.Errorf("UseGlobSegments() = %v, want %v", cfg.UseGlobSegments(), tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetDisambiguationStrategy(t *testing.T) {
+	tests := []struct {
+		name     string
+		toml     string
+		expected string
+	}{
+		{
+			name:     "defaults to first_unique_segment when not set",
+			toml:     `projects = ["~/Dev"]`,
+			expected: "first_unique_segment",
+		},
+		{
+			name:     "explicit first_unique_segment",
+			toml:     "projects = [\"~/Dev\"]\ndisambiguation_strategy = \"first_unique_segment\"",
+			expected: "first_unique_segment",
+		},
+		{
+			name:     "explicit full_path",
+			toml:     "projects = [\"~/Dev\"]\ndisambiguation_strategy = \"full_path\"",
+			expected: "full_path",
+		},
+		{
+			name:     "invalid value defaults to first_unique_segment",
+			toml:     "projects = [\"~/Dev\"]\ndisambiguation_strategy = \"bogus\"",
+			expected: "first_unique_segment",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
+				t.Fatalf("failed to write config: %v", err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if cfg.GetDisambiguationStrategy() != tt.expected {
+				t.Errorf("GetDisambiguationStrategy() = %q, want %q", cfg.GetDisambiguationStrategy(), tt.expected)
+			}
+		})
+	}
+}
+
+func TestExpandProjectsGlobSegments(t *testing.T) {
+	// Test that glob patterns produce correct GlobSegments count.
+	// This test uses the real filesystem with temp directories.
+	tmpDir := t.TempDir()
+
+	// Create: tmpDir/work/app, tmpDir/personal/app
+	os.MkdirAll(filepath.Join(tmpDir, "work", "app"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "personal", "app"), 0755)
+
+	cfg := &Config{Projects: []string{filepath.Join(tmpDir, "*", "*")}}
+	result, err := cfg.ExpandProjects()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result) != 2 {
+		t.Fatalf("got %d projects, want 2: %v", len(result), result)
+	}
+
+	for _, ep := range result {
+		if ep.GlobSegments != 2 {
+			t.Errorf("path %q: GlobSegments = %d, want 2", ep.Path, ep.GlobSegments)
+		}
 	}
 }

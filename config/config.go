@@ -37,9 +37,35 @@ type WorktreeConfig struct {
 }
 
 type Config struct {
-	Projects          []string        `toml:"projects"`
-	ExcludeCurrentDir bool            `toml:"exclude_current_dir"`
-	Worktree          *WorktreeConfig `toml:"worktree"`
+	Projects                     []string        `toml:"projects"`
+	ExcludeCurrentDir            bool            `toml:"exclude_current_dir"`
+	UseGlobSegmentsInDisplayPath *bool           `toml:"use_glob_segments_in_display_path"`
+	DisambiguationStrategy       string          `toml:"disambiguation_strategy"`
+	Worktree                     *WorktreeConfig `toml:"worktree"`
+}
+
+// ExpandedPath represents a resolved project path with metadata about how it was matched
+type ExpandedPath struct {
+	Path         string
+	GlobSegments int // number of path segments matched by glob; 0 for exact paths
+}
+
+// UseGlobSegments returns whether glob-matched segments should be included in display names.
+// Defaults to true when not explicitly set.
+func (c *Config) UseGlobSegments() bool {
+	if c.UseGlobSegmentsInDisplayPath == nil {
+		return true
+	}
+	return *c.UseGlobSegmentsInDisplayPath
+}
+
+// GetDisambiguationStrategy returns the configured disambiguation strategy.
+// Defaults to "first_unique_segment" when not set or invalid.
+func (c *Config) GetDisambiguationStrategy() string {
+	if c.DisambiguationStrategy == "full_path" {
+		return "full_path"
+	}
+	return "first_unique_segment"
 }
 
 // DefaultConfigPath returns the default config file path
@@ -67,19 +93,19 @@ func Load(path string) (*Config, error) {
 
 // ExpandProjects resolves all project paths from the config
 // Supports exact paths and glob patterns like ~/Dev/*/*
-func (c *Config) ExpandProjects() ([]string, error) {
+func (c *Config) ExpandProjects() ([]ExpandedPath, error) {
 	return c.ExpandProjectsWith(defaultDeps)
 }
 
 // ExpandProjectsWith resolves all project paths using provided dependencies
-func (c *Config) ExpandProjectsWith(d *Deps) ([]string, error) {
-	var projects []string
+func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
+	var projects []ExpandedPath
 	seen := make(map[string]bool)
 
-	addProject := func(path string) {
+	addProject := func(path string, globSegments int) {
 		if !seen[path] && isDirectoryWith(d, path) {
 			seen[path] = true
-			projects = append(projects, path)
+			projects = append(projects, ExpandedPath{Path: path, GlobSegments: globSegments})
 		}
 	}
 
@@ -94,7 +120,7 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]string, error) {
 				continue // Skip invalid patterns
 			}
 			for _, match := range matches {
-				addProject(match)
+				addProject(match.Path, match.GlobSegments)
 			}
 		} else {
 			// Exact path - resolve symlinks
@@ -102,7 +128,7 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]string, error) {
 			if r, err := d.FS.EvalSymlinks(expanded); err == nil {
 				resolved = r
 			}
-			addProject(resolved)
+			addProject(resolved, 0)
 		}
 	}
 
@@ -119,7 +145,7 @@ func expandHomeWith(d *Deps, path string) string {
 }
 
 // expandGlobWithResolvedBase expands a glob pattern, resolving symlinks in the base path once
-func expandGlobWithResolvedBase(d *Deps, pattern string) ([]string, error) {
+func expandGlobWithResolvedBase(d *Deps, pattern string) ([]ExpandedPath, error) {
 	// Use doublestar for ** support
 	base, pat := doublestar.SplitPattern(pattern)
 
@@ -136,9 +162,13 @@ func expandGlobWithResolvedBase(d *Deps, pattern string) ([]string, error) {
 	}
 
 	// Convert to absolute paths using the resolved base
-	var results []string
+	var results []ExpandedPath
 	for _, match := range matches {
-		results = append(results, filepath.Join(resolvedBase, match))
+		segments := len(strings.Split(match, "/"))
+		results = append(results, ExpandedPath{
+			Path:         filepath.Join(resolvedBase, match),
+			GlobSegments: segments,
+		})
 	}
 	return results, nil
 }

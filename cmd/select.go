@@ -80,18 +80,25 @@ func runSelect(cmd *cobra.Command, args []string) error {
 
 	for i, p := range paths {
 		wg.Add(1)
-		go func(idx int, path string) {
+		go func(idx int, ep config.ExpandedPath) {
 			defer wg.Done()
-			projectName := filepath.Base(path)
+
+			var displayName string
+			if ep.GlobSegments > 1 && cfg.UseGlobSegments() {
+				displayName = lastNSegments(ep.Path, ep.GlobSegments)
+			} else {
+				displayName = filepath.Base(ep.Path)
+			}
+			projectName := filepath.Base(ep.Path)
 			var projects []project.ExpandedProject
 
-			if project.HasWorktrees(path) {
+			if project.HasWorktrees(ep.Path) {
 				// Bare repo with worktrees - expand to individual worktrees
-				worktrees, err := project.ListWorktreesForPath(path)
+				worktrees, err := project.ListWorktreesForPath(ep.Path)
 				if err == nil {
 					for _, wt := range worktrees {
 						projects = append(projects, project.ExpandedProject{
-							Name:        projectName + "/" + wt.Name,
+							Name:        displayName + "/" + wt.Name,
 							Path:        wt.Path,
 							ProjectName: projectName,
 							IsWorktree:  true,
@@ -101,8 +108,8 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			} else {
 				// Regular project
 				projects = append(projects, project.ExpandedProject{
-					Name:        projectName,
-					Path:        path,
+					Name:        displayName,
+					Path:        ep.Path,
 					ProjectName: projectName,
 					IsWorktree:  false,
 				})
@@ -144,7 +151,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 	}
 
 	// Disambiguate projects with the same name
-	project.DisambiguateNames(expanded)
+	project.DisambiguateNames(expanded, cfg.GetDisambiguationStrategy())
 
 	// Load history and sort by recency (oldest first, most recent last)
 	hist, err := history.Load(history.DefaultHistoryPath())
@@ -290,4 +297,25 @@ func killTmuxSession(name string) {
 func sendCDToPane(paneID, path string) error {
 	cmd := exec.Command("tmux", "send-keys", "-t", paneID, fmt.Sprintf("cd %q", path), "Enter")
 	return cmd.Run()
+}
+
+// lastNSegments returns the last n segments of a path joined with "/".
+// For n=2 and path="/a/b/c/d", returns "c/d".
+// For n=1, equivalent to filepath.Base.
+// For n<=0, returns filepath.Base.
+func lastNSegments(path string, n int) string {
+	if n <= 1 {
+		return filepath.Base(path)
+	}
+	result := filepath.Base(path)
+	dir := filepath.Dir(path)
+	for i := 1; i < n; i++ {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		result = filepath.Base(dir) + "/" + result
+		dir = parent
+	}
+	return result
 }

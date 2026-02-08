@@ -6,16 +6,10 @@ import (
 )
 
 // DisambiguateNames modifies the Name field of ExpandedProjects that share
-// the same name by appending the first differing parent directory segment
-// in parentheses. For example, if two projects both named "myapp" live at
-// /work/frontend/myapp and /work/backend/myapp, they become
-// "myapp (frontend)" and "myapp (backend)".
-//
-// When no single ancestor level disambiguates all items (e.g., 4 items
-// where pairs collide at different levels), it falls back to compound
-// disambiguators like "myapp (work/frontend)".
-func DisambiguateNames(items []ExpandedProject) {
-	// Group indices by display name
+// the same name. The strategy parameter controls how disambiguation works:
+//   - "first_unique_segment": appends the first unique parent segment in parentheses
+//   - "full_path": prepends parent segments to the name until all are unique
+func DisambiguateNames(items []ExpandedProject, strategy string) {
 	groups := map[string][]int{}
 	for i, item := range items {
 		groups[item.Name] = append(groups[item.Name], i)
@@ -25,7 +19,11 @@ func DisambiguateNames(items []ExpandedProject) {
 		if len(indices) <= 1 {
 			continue
 		}
-		disambiguateGroup(items, indices)
+		if strategy == "full_path" {
+			disambiguateGroupFullPath(items, indices)
+		} else {
+			disambiguateGroup(items, indices)
+		}
 	}
 }
 
@@ -154,4 +152,52 @@ func splitParentSegments(dir string) []string {
 		dir = parent
 	}
 	return segments
+}
+
+// disambiguateGroupFullPath resolves name collisions by progressively prepending
+// parent directory segments to the display name. All items in the collision group
+// expand to the same depth. No parentheses are used.
+//
+// Example: items "d" at /a/b/c/d, /a/b/e/d, /a/x/c/d become "b/c/d", "b/e/d", "x/c/d"
+func disambiguateGroupFullPath(items []ExpandedProject, indices []int) {
+	type info struct {
+		index    int
+		segments []string // parent dir segments, innermost first
+	}
+
+	infos := make([]info, len(indices))
+	maxLevels := 0
+	for j, idx := range indices {
+		parent := parentDir(items[idx].Path, items[idx].Name)
+		segs := splitParentSegments(parent)
+		infos[j] = info{index: idx, segments: segs}
+		if len(segs) > maxLevels {
+			maxLevels = len(segs)
+		}
+	}
+
+	for level := 0; level < maxLevels; level++ {
+		for j := range infos {
+			if level < len(infos[j].segments) {
+				seg := infos[j].segments[level]
+				items[infos[j].index].Name = seg + "/" + items[infos[j].index].Name
+			}
+		}
+
+		// Check if all names in this group are now unique
+		counts := map[string]int{}
+		for j := range infos {
+			counts[items[infos[j].index].Name]++
+		}
+		allUnique := true
+		for _, count := range counts {
+			if count > 1 {
+				allUnique = false
+				break
+			}
+		}
+		if allUnique {
+			break
+		}
+	}
 }

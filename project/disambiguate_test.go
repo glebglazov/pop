@@ -100,11 +100,27 @@ func TestDisambiguateNames(t *testing.T) {
 			items: []ExpandedProject{},
 			expected: []string{},
 		},
+		{
+			name: "multi-segment glob names, collision across patterns",
+			items: []ExpandedProject{
+				{Name: "work/app", Path: "/Dev/work/app"},
+				{Name: "work/app", Path: "/Other/work/app"},
+			},
+			expected: []string{"work/app (Dev)", "work/app (Other)"},
+		},
+		{
+			name: "multi-segment glob names, no collision",
+			items: []ExpandedProject{
+				{Name: "work/app", Path: "/Dev/work/app"},
+				{Name: "personal/app", Path: "/Dev/personal/app"},
+			},
+			expected: []string{"work/app", "personal/app"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			DisambiguateNames(tt.items)
+			DisambiguateNames(tt.items, "first_unique_segment")
 
 			if len(tt.items) != len(tt.expected) {
 				t.Fatalf("expected %d items, got %d", len(tt.expected), len(tt.items))
@@ -135,6 +151,92 @@ func TestParentDir(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("parentDir(%q, %q) = %q, want %q", tt.path, tt.name, got, tt.expected)
 		}
+	}
+}
+
+func TestDisambiguateNamesFullPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		items    []ExpandedProject
+		expected []string
+	}{
+		{
+			name: "two items, differ at first parent",
+			items: []ExpandedProject{
+				{Name: "d", Path: "/a/b/c/d"},
+				{Name: "d", Path: "/x/y/z/d"},
+			},
+			expected: []string{"c/d", "z/d"},
+		},
+		{
+			name: "three items, all unique at first parent",
+			items: []ExpandedProject{
+				{Name: "app", Path: "/work/frontend/app"},
+				{Name: "app", Path: "/work/backend/app"},
+				{Name: "app", Path: "/work/mobile/app"},
+			},
+			expected: []string{"frontend/app", "backend/app", "mobile/app"},
+		},
+		{
+			name: "three items, need two levels - all expand to same depth",
+			items: []ExpandedProject{
+				{Name: "d", Path: "/a/b/c/d"},
+				{Name: "d", Path: "/a/b/e/d"},
+				{Name: "d", Path: "/a/x/c/d"},
+			},
+			expected: []string{"b/c/d", "b/e/d", "x/c/d"},
+		},
+		{
+			name: "four items needing two levels",
+			items: []ExpandedProject{
+				{Name: "d", Path: "/a/c/d"},
+				{Name: "d", Path: "/b/c/d"},
+				{Name: "d", Path: "/a/e/d"},
+				{Name: "d", Path: "/b/e/d"},
+			},
+			expected: []string{"a/c/d", "b/c/d", "a/e/d", "b/e/d"},
+		},
+		{
+			name: "no duplicates - no changes",
+			items: []ExpandedProject{
+				{Name: "alpha", Path: "/a/b/alpha"},
+				{Name: "beta", Path: "/x/y/beta"},
+			},
+			expected: []string{"alpha", "beta"},
+		},
+		{
+			name: "mixed duplicates and unique",
+			items: []ExpandedProject{
+				{Name: "app", Path: "/work/frontend/app"},
+				{Name: "lib", Path: "/work/shared/lib"},
+				{Name: "app", Path: "/personal/projects/app"},
+			},
+			expected: []string{"frontend/app", "lib", "projects/app"},
+		},
+		{
+			name: "multi-segment glob names with full_path",
+			items: []ExpandedProject{
+				{Name: "work/app", Path: "/Dev/work/app"},
+				{Name: "work/app", Path: "/Other/work/app"},
+			},
+			expected: []string{"Dev/work/app", "Other/work/app"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			DisambiguateNames(tt.items, "full_path")
+
+			if len(tt.items) != len(tt.expected) {
+				t.Fatalf("expected %d items, got %d", len(tt.expected), len(tt.items))
+			}
+
+			for i, item := range tt.items {
+				if item.Name != tt.expected[i] {
+					t.Errorf("item %d: expected Name=%q, got %q", i, tt.expected[i], item.Name)
+				}
+			}
+		})
 	}
 }
 
