@@ -36,27 +36,32 @@ type WorktreeConfig struct {
 	Commands []WorktreeCommand `toml:"commands"`
 }
 
-type Config struct {
-	Projects                     []string        `toml:"projects"`
-	ExcludeCurrentDir            bool            `toml:"exclude_current_dir"`
-	UseGlobSegmentsInDisplayPath *bool           `toml:"use_glob_segments_in_display_path"`
-	DisambiguationStrategy       string          `toml:"disambiguation_strategy"`
-	Worktree                     *WorktreeConfig `toml:"worktree"`
+// ProjectEntry represents a project configuration entry.
+type ProjectEntry struct {
+	Path         string `toml:"path"`
+	DisplayDepth int    `toml:"display_depth"` // number of path segments to show in display name; 0 means use default (1)
 }
 
-// ExpandedPath represents a resolved project path with metadata about how it was matched
+// GetDisplayDepth returns the effective display depth.
+// Returns 1 if not explicitly set (DisplayDepth == 0).
+func (p ProjectEntry) GetDisplayDepth() int {
+	if p.DisplayDepth <= 0 {
+		return 1
+	}
+	return p.DisplayDepth
+}
+
+type Config struct {
+	Projects               []ProjectEntry  `toml:"projects"`
+	ExcludeCurrentDir      bool            `toml:"exclude_current_dir"`
+	DisambiguationStrategy string          `toml:"disambiguation_strategy"`
+	Worktree               *WorktreeConfig `toml:"worktree"`
+}
+
+// ExpandedPath represents a resolved project path with display metadata
 type ExpandedPath struct {
 	Path         string
-	GlobSegments int // number of path segments matched by glob; 0 for exact paths
-}
-
-// UseGlobSegments returns whether glob-matched segments should be included in display names.
-// Defaults to true when not explicitly set.
-func (c *Config) UseGlobSegments() bool {
-	if c.UseGlobSegmentsInDisplayPath == nil {
-		return true
-	}
-	return *c.UseGlobSegmentsInDisplayPath
+	DisplayDepth int // number of path segments to show in display name
 }
 
 // GetDisambiguationStrategy returns the configured disambiguation strategy.
@@ -102,25 +107,25 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 	var projects []ExpandedPath
 	seen := make(map[string]bool)
 
-	addProject := func(path string, globSegments int) {
+	addProject := func(path string, displayDepth int) {
 		if !seen[path] && isDirectoryWith(d, path) {
 			seen[path] = true
-			projects = append(projects, ExpandedPath{Path: path, GlobSegments: globSegments})
+			projects = append(projects, ExpandedPath{Path: path, DisplayDepth: displayDepth})
 		}
 	}
 
-	for _, pattern := range c.Projects {
-		expanded := expandHomeWith(d, pattern)
+	for _, entry := range c.Projects {
+		expanded := expandHomeWith(d, entry.Path)
+		displayDepth := entry.GetDisplayDepth()
 
 		// Check if it's a glob pattern
 		if strings.Contains(expanded, "*") {
-			// Resolve symlinks on the base path once, then use it for all matches
-			matches, err := expandGlobWithResolvedBase(d, expanded)
+			matches, err := expandGlob(d, expanded)
 			if err != nil {
 				continue // Skip invalid patterns
 			}
 			for _, match := range matches {
-				addProject(match.Path, match.GlobSegments)
+				addProject(match, displayDepth)
 			}
 		} else {
 			// Exact path - resolve symlinks
@@ -128,7 +133,7 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 			if r, err := d.FS.EvalSymlinks(expanded); err == nil {
 				resolved = r
 			}
-			addProject(resolved, 0)
+			addProject(resolved, displayDepth)
 		}
 	}
 
@@ -144,8 +149,8 @@ func expandHomeWith(d *Deps, path string) string {
 	return path
 }
 
-// expandGlobWithResolvedBase expands a glob pattern, resolving symlinks in the base path once
-func expandGlobWithResolvedBase(d *Deps, pattern string) ([]ExpandedPath, error) {
+// expandGlob expands a glob pattern, resolving symlinks in the base path once
+func expandGlob(d *Deps, pattern string) ([]string, error) {
 	// Use doublestar for ** support
 	base, pat := doublestar.SplitPattern(pattern)
 
@@ -162,13 +167,9 @@ func expandGlobWithResolvedBase(d *Deps, pattern string) ([]ExpandedPath, error)
 	}
 
 	// Convert to absolute paths using the resolved base
-	var results []ExpandedPath
+	var results []string
 	for _, match := range matches {
-		segments := len(strings.Split(match, "/"))
-		results = append(results, ExpandedPath{
-			Path:         filepath.Join(resolvedBase, match),
-			GlobSegments: segments,
-		})
+		results = append(results, filepath.Join(resolvedBase, match))
 	}
 	return results, nil
 }

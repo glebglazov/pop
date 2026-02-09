@@ -88,8 +88,8 @@ func TestRunConfigure_FreshConfig(t *testing.T) {
 		t.Fatalf("failed to parse config: %v", err)
 	}
 
-	if len(cfg.Projects) != 1 || cfg.Projects[0] != "/fake/projects/*" {
-		t.Errorf("expected [/fake/projects/*], got %v", cfg.Projects)
+	if len(cfg.Projects) != 1 || cfg.Projects[0].Path != "/fake/projects/*" {
+		t.Errorf("expected [{/fake/projects/*}], got %v", cfg.Projects)
 	}
 }
 
@@ -97,7 +97,7 @@ func TestRunConfigure_ExistingConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.toml")
 
-	existingCfg := config.Config{Projects: []string{"~/existing/pattern"}}
+	existingCfg := config.Config{Projects: []config.ProjectEntry{{Path: "~/existing/pattern"}}}
 	data, _ := toml.Marshal(existingCfg)
 	if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
 		t.Fatalf("failed to write existing config: %v", err)
@@ -142,11 +142,11 @@ func TestRunConfigure_ExistingConfig(t *testing.T) {
 	if len(cfg.Projects) != 2 {
 		t.Fatalf("expected 2 projects, got %d: %v", len(cfg.Projects), cfg.Projects)
 	}
-	if cfg.Projects[0] != "~/existing/pattern" {
-		t.Errorf("expected first pattern ~/existing/pattern, got %s", cfg.Projects[0])
+	if cfg.Projects[0].Path != "~/existing/pattern" {
+		t.Errorf("expected first pattern ~/existing/pattern, got %s", cfg.Projects[0].Path)
 	}
-	if cfg.Projects[1] != "/new/projects/*" {
-		t.Errorf("expected second pattern /new/projects/*, got %s", cfg.Projects[1])
+	if cfg.Projects[1].Path != "/new/projects/*" {
+		t.Errorf("expected second pattern /new/projects/*, got %s", cfg.Projects[1].Path)
 	}
 }
 
@@ -154,7 +154,7 @@ func TestRunConfigure_ExistingConfigDecline(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.toml")
 
-	existingCfg := config.Config{Projects: []string{"~/existing/pattern"}}
+	existingCfg := config.Config{Projects: []config.ProjectEntry{{Path: "~/existing/pattern"}}}
 	data, _ := toml.Marshal(existingCfg)
 	if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
 		t.Fatalf("failed to write existing config: %v", err)
@@ -221,7 +221,7 @@ func TestRunConfigure_MultiplePatterns(t *testing.T) {
 	if len(cfg.Projects) != 2 {
 		t.Fatalf("expected 2 projects, got %d: %v", len(cfg.Projects), cfg.Projects)
 	}
-	if cfg.Projects[0] != "/first/dir/*" || cfg.Projects[1] != "/second/dir/*" {
+	if cfg.Projects[0].Path != "/first/dir/*" || cfg.Projects[1].Path != "/second/dir/*" {
 		t.Errorf("unexpected projects: %v", cfg.Projects)
 	}
 }

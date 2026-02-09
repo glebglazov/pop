@@ -84,7 +84,7 @@ func runConfigureWith(d *configureDeps) error {
 		fmt.Fprintf(d.Stdout, "Config found at %s\n", cfgPath)
 		fmt.Fprintf(d.Stdout, "Current patterns:\n")
 		for _, p := range cfg.Projects {
-			fmt.Fprintf(d.Stdout, "  - %s\n", p)
+			fmt.Fprintf(d.Stdout, "  - %s\n", p.Path)
 		}
 		fmt.Fprintln(d.Stdout)
 
@@ -111,7 +111,7 @@ func runConfigureWith(d *configureDeps) error {
 			fmt.Fprintf(d.Stdout, "  %s — found %d projects\n", pattern, count)
 		}
 
-		cfg.Projects = append(cfg.Projects, pattern)
+		cfg.Projects = append(cfg.Projects, config.ProjectEntry{Path: pattern})
 
 		if !confirm(scanner, d.Stdout, "Add another directory?") {
 			break
@@ -168,7 +168,7 @@ func confirmY(scanner *bufio.Scanner, w io.Writer, prompt string) bool {
 }
 
 func countMatches(pattern string) int {
-	tmp := &config.Config{Projects: []string{pattern}}
+	tmp := &config.Config{Projects: []config.ProjectEntry{{Path: pattern}}}
 	paths, err := tmp.ExpandProjects()
 	if err != nil {
 		return 0

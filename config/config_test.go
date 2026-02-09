@@ -57,13 +57,13 @@ func TestDefaultConfigPathWith(t *testing.T) {
 func TestExpandProjectsWith(t *testing.T) {
 	tests := []struct {
 		name     string
-		projects []string
+		projects []ProjectEntry
 		setupFS  func() *deps.MockFileSystem
 		expected []ExpandedPath
 	}{
 		{
 			name:     "expands home directory",
-			projects: []string{"~/projects/myapp"},
+			projects: []ProjectEntry{{Path: "~/projects/myapp"}},
 			setupFS: func() *deps.MockFileSystem {
 				return &deps.MockFileSystem{
 					UserHomeDirFunc: func() (string, error) {
@@ -77,11 +77,11 @@ func TestExpandProjectsWith(t *testing.T) {
 					},
 				}
 			},
-			expected: []ExpandedPath{{Path: "/home/user/projects/myapp", GlobSegments: 0}},
+			expected: []ExpandedPath{{Path: "/home/user/projects/myapp", DisplayDepth: 1}},
 		},
 		{
 			name:     "filters non-directories",
-			projects: []string{"/projects/file.txt", "/projects/dir"},
+			projects: []ProjectEntry{{Path: "/projects/file.txt"}, {Path: "/projects/dir"}},
 			setupFS: func() *deps.MockFileSystem {
 				return &deps.MockFileSystem{
 					StatFunc: func(path string) (os.FileInfo, error) {
@@ -95,11 +95,11 @@ func TestExpandProjectsWith(t *testing.T) {
 					},
 				}
 			},
-			expected: []ExpandedPath{{Path: "/projects/dir", GlobSegments: 0}},
+			expected: []ExpandedPath{{Path: "/projects/dir", DisplayDepth: 1}},
 		},
 		{
 			name:     "deduplicates paths",
-			projects: []string{"/projects/app", "/projects/app"},
+			projects: []ProjectEntry{{Path: "/projects/app"}, {Path: "/projects/app"}},
 			setupFS: func() *deps.MockFileSystem {
 				return &deps.MockFileSystem{
 					StatFunc: func(path string) (os.FileInfo, error) {
@@ -107,11 +107,11 @@ func TestExpandProjectsWith(t *testing.T) {
 					},
 				}
 			},
-			expected: []ExpandedPath{{Path: "/projects/app", GlobSegments: 0}},
+			expected: []ExpandedPath{{Path: "/projects/app", DisplayDepth: 1}},
 		},
 		{
 			name:     "handles non-existent paths",
-			projects: []string{"/projects/nonexistent"},
+			projects: []ProjectEntry{{Path: "/projects/nonexistent"}},
 			setupFS: func() *deps.MockFileSystem {
 				return &deps.MockFileSystem{
 					StatFunc: func(path string) (os.FileInfo, error) {
@@ -123,7 +123,7 @@ func TestExpandProjectsWith(t *testing.T) {
 		},
 		{
 			name:     "resolves symlinks to canonical paths",
-			projects: []string{"/symlink/project"},
+			projects: []ProjectEntry{{Path: "/symlink/project"}},
 			setupFS: func() *deps.MockFileSystem {
 				return &deps.MockFileSystem{
 					EvalSymlinksFunc: func(path string) (string, error) {
@@ -140,11 +140,11 @@ func TestExpandProjectsWith(t *testing.T) {
 					},
 				}
 			},
-			expected: []ExpandedPath{{Path: "/real/project", GlobSegments: 0}},
+			expected: []ExpandedPath{{Path: "/real/project", DisplayDepth: 1}},
 		},
 		{
 			name:     "deduplicates symlinks pointing to same path",
-			projects: []string{"/symlink1/project", "/symlink2/project"},
+			projects: []ProjectEntry{{Path: "/symlink1/project"}, {Path: "/symlink2/project"}},
 			setupFS: func() *deps.MockFileSystem {
 				return &deps.MockFileSystem{
 					EvalSymlinksFunc: func(path string) (string, error) {
@@ -162,7 +162,19 @@ func TestExpandProjectsWith(t *testing.T) {
 					},
 				}
 			},
-			expected: []ExpandedPath{{Path: "/real/project", GlobSegments: 0}},
+			expected: []ExpandedPath{{Path: "/real/project", DisplayDepth: 1}},
+		},
+		{
+			name:     "propagates display_depth",
+			projects: []ProjectEntry{{Path: "/projects/app", DisplayDepth: 3}},
+			setupFS: func() *deps.MockFileSystem {
+				return &deps.MockFileSystem{
+					StatFunc: func(path string) (os.FileInfo, error) {
+						return deps.MockFileInfo{IsDirVal: true}, nil
+					},
+				}
+			},
+			expected: []ExpandedPath{{Path: "/projects/app", DisplayDepth: 3}},
 		},
 	}
 
@@ -186,8 +198,8 @@ func TestExpandProjectsWith(t *testing.T) {
 				if p.Path != tt.expected[i].Path {
 					t.Errorf("project[%d].Path = %q, want %q", i, p.Path, tt.expected[i].Path)
 				}
-				if p.GlobSegments != tt.expected[i].GlobSegments {
-					t.Errorf("project[%d].GlobSegments = %d, want %d", i, p.GlobSegments, tt.expected[i].GlobSegments)
+				if p.DisplayDepth != tt.expected[i].DisplayDepth {
+					t.Errorf("project[%d].DisplayDepth = %d, want %d", i, p.DisplayDepth, tt.expected[i].DisplayDepth)
 				}
 			}
 		})
@@ -250,7 +262,7 @@ func TestLoadWorktreeCommands(t *testing.T) {
 		{
 			name: "loads single worktree command",
 			toml: `
-projects = ["~/Dev"]
+projects = [{ path = "~/Dev" }]
 
 [[worktree.commands]]
 key = "ctrl-l"
@@ -277,7 +289,7 @@ exit = true
 		{
 			name: "loads multiple worktree commands",
 			toml: `
-projects = ["~/Dev"]
+projects = [{ path = "~/Dev" }]
 
 [[worktree.commands]]
 key = "ctrl-l"
@@ -301,7 +313,7 @@ exit = false
 		{
 			name: "config without worktree section",
 			toml: `
-projects = ["~/Dev"]
+projects = [{ path = "~/Dev" }]
 `,
 			expectedCmds: 0,
 			checkFirstCmd: nil,
@@ -309,7 +321,7 @@ projects = ["~/Dev"]
 		{
 			name: "exit defaults to false",
 			toml: `
-projects = ["~/Dev"]
+projects = [{ path = "~/Dev" }]
 
 [[worktree.commands]]
 key = "ctrl-t"
@@ -356,26 +368,71 @@ command = "echo test"
 	}
 }
 
-func TestUseGlobSegments(t *testing.T) {
+func TestProjectEntry(t *testing.T) {
 	tests := []struct {
-		name     string
-		toml     string
-		expected bool
+		name          string
+		toml          string
+		expectedCount int
+		checkEntries  func(t *testing.T, entries []ProjectEntry)
 	}{
 		{
-			name:     "defaults to true when not set",
-			toml:     `projects = ["~/Dev"]`,
-			expected: true,
+			name:          "object entry with display_depth",
+			toml:          `projects = [{ path = "~/Dev/*/*", display_depth = 2 }]`,
+			expectedCount: 1,
+			checkEntries: func(t *testing.T, entries []ProjectEntry) {
+				if entries[0].Path != "~/Dev/*/*" {
+					t.Errorf("Path = %q, want %q", entries[0].Path, "~/Dev/*/*")
+				}
+				if entries[0].GetDisplayDepth() != 2 {
+					t.Errorf("GetDisplayDepth() = %d, want 2", entries[0].GetDisplayDepth())
+				}
+			},
 		},
 		{
-			name:     "explicit true",
-			toml:     "projects = [\"~/Dev\"]\nuse_glob_segments_in_display_path = true",
-			expected: true,
+			name:          "object entry without display_depth defaults to 1",
+			toml:          `projects = [{ path = "~/Dev/*" }]`,
+			expectedCount: 1,
+			checkEntries: func(t *testing.T, entries []ProjectEntry) {
+				if entries[0].Path != "~/Dev/*" {
+					t.Errorf("Path = %q, want %q", entries[0].Path, "~/Dev/*")
+				}
+				if entries[0].GetDisplayDepth() != 1 {
+					t.Errorf("GetDisplayDepth() = %d, want 1", entries[0].GetDisplayDepth())
+				}
+			},
 		},
 		{
-			name:     "explicit false",
-			toml:     "projects = [\"~/Dev\"]\nuse_glob_segments_in_display_path = false",
-			expected: false,
+			name: "multiple entries",
+			toml: `projects = [{ path = "~/simple/*" }, { path = "~/deep/*/*", display_depth = 2 }]`,
+			expectedCount: 2,
+			checkEntries: func(t *testing.T, entries []ProjectEntry) {
+				if entries[0].Path != "~/simple/*" {
+					t.Errorf("entries[0].Path = %q, want %q", entries[0].Path, "~/simple/*")
+				}
+				if entries[0].GetDisplayDepth() != 1 {
+					t.Errorf("entries[0].GetDisplayDepth() = %d, want 1", entries[0].GetDisplayDepth())
+				}
+				if entries[1].Path != "~/deep/*/*" {
+					t.Errorf("entries[1].Path = %q, want %q", entries[1].Path, "~/deep/*/*")
+				}
+				if entries[1].GetDisplayDepth() != 2 {
+					t.Errorf("entries[1].GetDisplayDepth() = %d, want 2", entries[1].GetDisplayDepth())
+				}
+			},
+		},
+		{
+			name: "array-of-tables syntax",
+			toml: `
+[[projects]]
+path = "~/Dev/*"
+display_depth = 3
+`,
+			expectedCount: 1,
+			checkEntries: func(t *testing.T, entries []ProjectEntry) {
+				if entries[0].GetDisplayDepth() != 3 {
+					t.Errorf("GetDisplayDepth() = %d, want 3", entries[0].GetDisplayDepth())
+				}
+			},
 		},
 	}
 
@@ -390,8 +447,11 @@ func TestUseGlobSegments(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Load() error: %v", err)
 			}
-			if cfg.UseGlobSegments() != tt.expected {
-				t.Errorf("UseGlobSegments() = %v, want %v", cfg.UseGlobSegments(), tt.expected)
+			if len(cfg.Projects) != tt.expectedCount {
+				t.Fatalf("got %d projects, want %d", len(cfg.Projects), tt.expectedCount)
+			}
+			if tt.checkEntries != nil {
+				tt.checkEntries(t, cfg.Projects)
 			}
 		})
 	}
@@ -405,22 +465,22 @@ func TestGetDisambiguationStrategy(t *testing.T) {
 	}{
 		{
 			name:     "defaults to first_unique_segment when not set",
-			toml:     `projects = ["~/Dev"]`,
+			toml:     `projects = [{ path = "~/Dev" }]`,
 			expected: "first_unique_segment",
 		},
 		{
 			name:     "explicit first_unique_segment",
-			toml:     "projects = [\"~/Dev\"]\ndisambiguation_strategy = \"first_unique_segment\"",
+			toml:     "projects = [{ path = \"~/Dev\" }]\ndisambiguation_strategy = \"first_unique_segment\"",
 			expected: "first_unique_segment",
 		},
 		{
 			name:     "explicit full_path",
-			toml:     "projects = [\"~/Dev\"]\ndisambiguation_strategy = \"full_path\"",
+			toml:     "projects = [{ path = \"~/Dev\" }]\ndisambiguation_strategy = \"full_path\"",
 			expected: "full_path",
 		},
 		{
 			name:     "invalid value defaults to first_unique_segment",
-			toml:     "projects = [\"~/Dev\"]\ndisambiguation_strategy = \"bogus\"",
+			toml:     "projects = [{ path = \"~/Dev\" }]\ndisambiguation_strategy = \"bogus\"",
 			expected: "first_unique_segment",
 		},
 	}
@@ -443,8 +503,8 @@ func TestGetDisambiguationStrategy(t *testing.T) {
 	}
 }
 
-func TestExpandProjectsGlobSegments(t *testing.T) {
-	// Test that glob patterns produce correct GlobSegments count.
+func TestExpandProjectsDisplayDepth(t *testing.T) {
+	// Test that display_depth is propagated through expansion.
 	// This test uses the real filesystem with temp directories.
 	tmpDir := t.TempDir()
 
@@ -452,7 +512,7 @@ func TestExpandProjectsGlobSegments(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "work", "app"), 0755)
 	os.MkdirAll(filepath.Join(tmpDir, "personal", "app"), 0755)
 
-	cfg := &Config{Projects: []string{filepath.Join(tmpDir, "*", "*")}}
+	cfg := &Config{Projects: []ProjectEntry{{Path: filepath.Join(tmpDir, "*", "*"), DisplayDepth: 2}}}
 	result, err := cfg.ExpandProjects()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -463,8 +523,8 @@ func TestExpandProjectsGlobSegments(t *testing.T) {
 	}
 
 	for _, ep := range result {
-		if ep.GlobSegments != 2 {
-			t.Errorf("path %q: GlobSegments = %d, want 2", ep.Path, ep.GlobSegments)
+		if ep.DisplayDepth != 2 {
+			t.Errorf("path %q: DisplayDepth = %d, want 2", ep.Path, ep.DisplayDepth)
 		}
 	}
 }

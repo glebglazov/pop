@@ -20,8 +20,8 @@ Or create `~/.config/pop/config.toml` manually:
 
 ```toml
 projects = [
-    "~/Dev/*/*",
-    "~/.local/share/chezmoi",
+    { path = "~/Dev/*/*", display_depth = 2 },
+    { path = "~/.local/share/chezmoi" },
 ]
 ```
 

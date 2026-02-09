@@ -83,12 +83,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		go func(idx int, ep config.ExpandedPath) {
 			defer wg.Done()
 
-			var displayName string
-			if ep.GlobSegments > 1 && cfg.UseGlobSegments() {
-				displayName = lastNSegments(ep.Path, ep.GlobSegments)
-			} else {
-				displayName = filepath.Base(ep.Path)
-			}
+			displayName := lastNSegments(ep.Path, ep.DisplayDepth)
 			projectName := filepath.Base(ep.Path)
 			var projects []project.ExpandedProject
 

@@ -123,10 +123,14 @@ Clear filter:                  Re-apply filter "a":
 Config file: `~/.config/pop/config.toml` (respects XDG_CONFIG_HOME)
 ```toml
 projects = [
-    "~/Dev/*/*",
-    "~/.local/share/chezmoi",
+    { path = "~/Dev/*/*", display_depth = 2 },
+    { path = "~/.local/share/chezmoi" },
 ]
 ```
+
+Each project entry is an object with:
+- `path` (required) — exact path or glob pattern
+- `display_depth` (optional, default 1) — number of trailing path segments to show in the picker display name. E.g. with depth 2, `/home/user/Dev/work/app` displays as `work/app`
 
 History file: `~/.local/share/pop/history.json` (respects XDG_DATA_HOME)
 
