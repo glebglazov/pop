@@ -11,29 +11,30 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/ui"
 )
 
-func mockPickDir(path string) func() (string, bool, error) {
-	return func() (string, bool, error) {
-		return path, false, nil
+func mockPickDir(path string, depth int) func() (ui.ConfigurePickerResult, error) {
+	return func() (ui.ConfigurePickerResult, error) {
+		return ui.ConfigurePickerResult{Path: path, DisplayDepth: depth}, nil
 	}
 }
 
-func mockPickDirCancelled() func() (string, bool, error) {
-	return func() (string, bool, error) {
-		return "", true, nil
+func mockPickDirCancelled() func() (ui.ConfigurePickerResult, error) {
+	return func() (ui.ConfigurePickerResult, error) {
+		return ui.ConfigurePickerResult{Cancelled: true}, nil
 	}
 }
 
-func mockPickDirSequence(paths ...string) func() (string, bool, error) {
+func mockPickDirSequence(entries ...ui.ConfigurePickerResult) func() (ui.ConfigurePickerResult, error) {
 	i := 0
-	return func() (string, bool, error) {
-		if i >= len(paths) {
-			return "", true, nil
+	return func() (ui.ConfigurePickerResult, error) {
+		if i >= len(entries) {
+			return ui.ConfigurePickerResult{Cancelled: true}, nil
 		}
-		path := paths[i]
+		entry := entries[i]
 		i++
-		return path, false, nil
+		return entry, nil
 	}
 }
 
@@ -62,7 +63,7 @@ func TestRunConfigure_FreshConfig(t *testing.T) {
 		FS:      realFSDeps(),
 		Stdin:   strings.NewReader("n\n"),
 		Stdout:  &output,
-		PickDir: mockPickDir("/fake/projects"),
+		PickDir: mockPickDir("/fake/projects/*", 1),
 	}
 
 	err := runConfigureWith(d)
@@ -113,7 +114,7 @@ func TestRunConfigure_ExistingConfig(t *testing.T) {
 		FS:      realFSDeps(),
 		Stdin:   strings.NewReader("y\nn\n"),
 		Stdout:  &output,
-		PickDir: mockPickDir("/new/projects"),
+		PickDir: mockPickDir("/new/projects/*", 1),
 	}
 
 	err := runConfigureWith(d)
@@ -197,10 +198,13 @@ func TestRunConfigure_MultiplePatterns(t *testing.T) {
 	// "y" to add another, then "n" to stop
 	var output bytes.Buffer
 	d := &configureDeps{
-		FS:      realFSDeps(),
-		Stdin:   strings.NewReader("y\nn\n"),
-		Stdout:  &output,
-		PickDir: mockPickDirSequence("/first/dir", "/second/dir"),
+		FS:     realFSDeps(),
+		Stdin:  strings.NewReader("y\nn\n"),
+		Stdout: &output,
+		PickDir: mockPickDirSequence(
+			ui.ConfigurePickerResult{Path: "/first/dir/*", DisplayDepth: 1},
+			ui.ConfigurePickerResult{Path: "/second/dir/*", DisplayDepth: 1},
+		),
 	}
 
 	err := runConfigureWith(d)
@@ -269,7 +273,7 @@ func TestRunConfigure_WriteFails(t *testing.T) {
 		},
 		Stdin:   strings.NewReader("n\n"),
 		Stdout:  &output,
-		PickDir: mockPickDir("/some/path"),
+		PickDir: mockPickDir("/some/path/*", 1),
 	}
 
 	err := runConfigureWith(d)
@@ -281,20 +285,77 @@ func TestRunConfigure_WriteFails(t *testing.T) {
 	}
 }
 
-func TestRunConfigure_TildePattern(t *testing.T) {
-	home, err := os.UserHomeDir()
+func TestRunConfigure_DisplayDepthInConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "pop", "config.toml")
+
+	oldCfgFile := cfgFile
+	cfgFile = cfgPath
+	defer func() { cfgFile = oldCfgFile }()
+
+	var output bytes.Buffer
+	d := &configureDeps{
+		FS:      realFSDeps(),
+		Stdin:   strings.NewReader("n\n"),
+		Stdout:  &output,
+		PickDir: mockPickDir("~/Dev/*/*", 2),
+	}
+
+	err := runConfigureWith(d)
 	if err != nil {
-		t.Skip("cannot get home dir")
+		t.Fatalf("runConfigureWith() error = %v", err)
 	}
 
-	got := toTildePattern(home + "/Dev/personal")
-	if got != "~/Dev/personal/*" {
-		t.Errorf("toTildePattern() = %q, want %q", got, "~/Dev/personal/*")
+	out := output.String()
+	if !strings.Contains(out, "(depth: 2)") {
+		t.Errorf("expected depth info in output, got: %s", out)
 	}
 
-	got = toTildePattern("/opt/projects")
-	if got != "/opt/projects/*" {
-		t.Errorf("toTildePattern() = %q, want %q", got, "/opt/projects/*")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	var cfg config.Config
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("failed to parse config: %v", err)
+	}
+
+	if len(cfg.Projects) != 1 {
+		t.Fatalf("expected 1 project, got %d", len(cfg.Projects))
+	}
+	if cfg.Projects[0].Path != "~/Dev/*/*" {
+		t.Errorf("expected path ~/Dev/*/*, got %s", cfg.Projects[0].Path)
+	}
+	if cfg.Projects[0].DisplayDepth != 2 {
+		t.Errorf("expected display_depth 2, got %d", cfg.Projects[0].DisplayDepth)
+	}
+}
+
+func TestRunConfigure_DisplayDepthDefaultNotShown(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "pop", "config.toml")
+
+	oldCfgFile := cfgFile
+	cfgFile = cfgPath
+	defer func() { cfgFile = oldCfgFile }()
+
+	var output bytes.Buffer
+	d := &configureDeps{
+		FS:      realFSDeps(),
+		Stdin:   strings.NewReader("n\n"),
+		Stdout:  &output,
+		PickDir: mockPickDir("~/Dev/*", 1),
+	}
+
+	err := runConfigureWith(d)
+	if err != nil {
+		t.Fatalf("runConfigureWith() error = %v", err)
+	}
+
+	out := output.String()
+	if strings.Contains(out, "depth:") {
+		t.Errorf("depth info should not appear for depth=1, got: %s", out)
 	}
 }
 

@@ -83,7 +83,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		go func(idx int, ep config.ExpandedPath) {
 			defer wg.Done()
 
-			displayName := lastNSegments(ep.Path, ep.DisplayDepth)
+			displayName := ui.LastNSegments(ep.Path, ep.DisplayDepth)
 			projectName := filepath.Base(ep.Path)
 			var projects []project.ExpandedProject
 
@@ -294,23 +294,3 @@ func sendCDToPane(paneID, path string) error {
 	return cmd.Run()
 }
 
-// lastNSegments returns the last n segments of a path joined with "/".
-// For n=2 and path="/a/b/c/d", returns "c/d".
-// For n=1, equivalent to filepath.Base.
-// For n<=0, returns filepath.Base.
-func lastNSegments(path string, n int) string {
-	if n <= 1 {
-		return filepath.Base(path)
-	}
-	result := filepath.Base(path)
-	dir := filepath.Dir(path)
-	for i := 1; i < n; i++ {
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		result = filepath.Base(dir) + "/" + result
-		dir = parent
-	}
-	return result
-}

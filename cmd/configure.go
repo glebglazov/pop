@@ -21,7 +21,7 @@ var configureCmd = &cobra.Command{
 	Long: `Interactively set up the pop config file by adding project directory patterns.
 
 If a config already exists, shows current patterns and offers to add more.
-Opens a directory picker to browse and select project directories.
+Opens a TUI for entering path patterns with tab completion and live preview.
 
 Example:
   pop configure`,
@@ -37,8 +37,8 @@ type configureDeps struct {
 	FS          deps.FileSystem
 	Stdin       io.Reader
 	Stdout      io.Writer
-	PickDir     func() (string, bool, error) // returns (path, cancelled, error)
-	ShowWelcome bool                          // show welcome message (when triggered from select)
+	PickDir     func() (ui.ConfigurePickerResult, error)
+	ShowWelcome bool // show welcome message (when triggered from select)
 }
 
 func defaultConfigureDeps() *configureDeps {
@@ -46,9 +46,20 @@ func defaultConfigureDeps() *configureDeps {
 		FS:     deps.NewRealFileSystem(),
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
-		PickDir: func() (string, bool, error) {
-			result, err := ui.RunDirPicker()
-			return result.Path, result.Cancelled, err
+		PickDir: func() (ui.ConfigurePickerResult, error) {
+			expandFn := func(pattern string) []string {
+				tmp := &config.Config{Projects: []config.ProjectEntry{{Path: pattern}}}
+				paths, err := tmp.ExpandProjects()
+				if err != nil {
+					return nil
+				}
+				result := make([]string, len(paths))
+				for i, p := range paths {
+					result[i] = p.Path
+				}
+				return result
+			}
+			return ui.RunConfigurePicker(expandFn)
 		},
 	}
 }
@@ -72,7 +83,7 @@ func runConfigureWith(d *configureDeps) error {
 
 	if d.ShowWelcome {
 		fmt.Fprintln(d.Stdout, "No config file found. Let's set one up!")
-		fmt.Fprintln(d.Stdout, "Browse to a directory whose children are your projects, then press Enter to select it.")
+		fmt.Fprintln(d.Stdout, "Enter a directory pattern (e.g. ~/Dev/*) to add your projects.")
 		fmt.Fprintln(d.Stdout, "You can re-run this later with: pop configure")
 		fmt.Fprintln(d.Stdout)
 		if !confirmY(scanner, d.Stdout, "Continue?") {
@@ -94,24 +105,31 @@ func runConfigureWith(d *configureDeps) error {
 	}
 
 	for {
-		path, cancelled, err := d.PickDir()
+		result, err := d.PickDir()
 		if err != nil {
 			return err
 		}
-		if cancelled || path == "" {
+		if result.Cancelled || result.Path == "" {
 			break
 		}
 
-		pattern := toTildePattern(path)
-
-		count := countMatches(pattern)
-		if count == 0 {
-			fmt.Fprintf(d.Stdout, "  %s — no projects found\n", pattern)
-		} else {
-			fmt.Fprintf(d.Stdout, "  %s — found %d projects\n", pattern, count)
+		entry := config.ProjectEntry{
+			Path:         result.Path,
+			DisplayDepth: result.DisplayDepth,
 		}
 
-		cfg.Projects = append(cfg.Projects, config.ProjectEntry{Path: pattern})
+		count := countMatches(entry.Path)
+		depthInfo := ""
+		if entry.DisplayDepth > 1 {
+			depthInfo = fmt.Sprintf(" (depth: %d)", entry.DisplayDepth)
+		}
+		if count == 0 {
+			fmt.Fprintf(d.Stdout, "  %s%s — no projects found\n", entry.Path, depthInfo)
+		} else {
+			fmt.Fprintf(d.Stdout, "  %s%s — found %d projects\n", entry.Path, depthInfo, count)
+		}
+
+		cfg.Projects = append(cfg.Projects, entry)
 
 		if !confirm(scanner, d.Stdout, "Add another directory?") {
 			break
@@ -139,16 +157,6 @@ func runConfigureWith(d *configureDeps) error {
 	fmt.Fprintf(d.Stdout, "\nConfig written to %s\n", cfgPath)
 
 	return nil
-}
-
-// toTildePattern converts an absolute path to a ~-prefixed glob pattern.
-// e.g. /Users/foo/Dev → ~/Dev/*
-func toTildePattern(absPath string) string {
-	home, err := os.UserHomeDir()
-	if err == nil && strings.HasPrefix(absPath, home) {
-		return "~" + absPath[len(home):] + "/*"
-	}
-	return absPath + "/*"
 }
 
 func confirm(scanner *bufio.Scanner, w io.Writer, prompt string) bool {

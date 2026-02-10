@@ -49,9 +49,9 @@ func TestLastNSegments(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := lastNSegments(tt.path, tt.n)
+			result := ui.LastNSegments(tt.path, tt.n)
 			if result != tt.expected {
-				t.Errorf("lastNSegments(%q, %d) = %q, want %q", tt.path, tt.n, result, tt.expected)
+				t.Errorf("LastNSegments(%q, %d) = %q, want %q", tt.path, tt.n, result, tt.expected)
 			}
 		})
 	}
