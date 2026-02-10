@@ -424,7 +424,7 @@ func (cp *ConfigurePicker) View() string {
 	var hints string
 	switch cp.phase {
 	case phasePath:
-		hints = "  Tab complete · Enter confirm · Esc cancel · try glob patterns like * or **"
+		hints = "  Tab complete · Enter confirm · Esc cancel · use * for glob patterns"
 	case phaseDepth:
 		hints = "  ↑/↓ adjust depth · Enter confirm · Esc back"
 	}

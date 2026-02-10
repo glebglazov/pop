@@ -503,6 +503,22 @@ func TestGetDisambiguationStrategy(t *testing.T) {
 	}
 }
 
+func TestExpandProjectsRejectsDoubleStarGlob(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create nested dirs that ** would match
+	os.MkdirAll(filepath.Join(tmpDir, "a", "b", "c"), 0755)
+
+	cfg := &Config{Projects: []ProjectEntry{{Path: filepath.Join(tmpDir, "**")}}}
+	result, err := cfg.ExpandProjects()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("got %d projects, want 0 (** patterns should be skipped)", len(result))
+	}
+}
+
 func TestExpandProjectsDisplayDepth(t *testing.T) {
 	// Test that display_depth is propagated through expansion.
 	// This test uses the real filesystem with temp directories.

@@ -118,7 +118,10 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 		expanded := expandHomeWith(d, entry.Path)
 		displayDepth := entry.GetDisplayDepth()
 
-		// Check if it's a glob pattern
+		// Check if it's a glob pattern (only single * allowed, not **)
+		if strings.Contains(expanded, "**") {
+			continue // Skip recursive glob patterns
+		}
 		if strings.Contains(expanded, "*") {
 			matches, err := expandGlob(d, expanded)
 			if err != nil {
