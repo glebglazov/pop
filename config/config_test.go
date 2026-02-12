@@ -567,6 +567,26 @@ func TestExpandProjectsDisplayDepth(t *testing.T) {
 	}
 }
 
+func TestExpandProjectsSkipsHiddenDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(tmpDir, "visible"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, ".hidden"), 0755)
+
+	cfg := &Config{Projects: []ProjectEntry{{Path: filepath.Join(tmpDir, "*")}}}
+	result, err := cfg.ExpandProjects()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result) != 1 {
+		t.Fatalf("got %d projects, want 1: %v", len(result), result)
+	}
+	if filepath.Base(result[0].Path) != "visible" {
+		t.Errorf("expected 'visible', got %q", filepath.Base(result[0].Path))
+	}
+}
+
 func TestRemoveSubsumedPaths(t *testing.T) {
 	tests := []struct {
 		name     string

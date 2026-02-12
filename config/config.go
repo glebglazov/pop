@@ -210,7 +210,7 @@ func expandGlobWithBase(d *Deps, pattern string) ([]string, string, error) {
 	}
 
 	fsys := d.FS.DirFS(base)
-	matches, err := doublestar.Glob(fsys, pat)
+	matches, err := doublestar.Glob(fsys, pat, doublestar.WithNoHidden())
 	if err != nil {
 		return nil, "", err
 	}
