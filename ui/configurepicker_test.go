@@ -1,11 +1,12 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func mockExpandFn(paths []string) func(string) []string {
@@ -25,12 +26,15 @@ func sendKeys(cp *ConfigurePicker, msgs ...tea.Msg) *ConfigurePicker {
 	return m.(*ConfigurePicker)
 }
 
-func keyMsg(key string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+func charKeyMsg(k string) tea.KeyPressMsg {
+	if len(k) == 1 {
+		return tea.KeyPressMsg{Code: rune(k[0]), Text: k}
+	}
+	return tea.KeyPressMsg{Text: k}
 }
 
-func specialKeyMsg(t tea.KeyType) tea.KeyMsg {
-	return tea.KeyMsg{Type: t}
+func specialKeyMsg(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code}
 }
 
 func TestConfigurePicker_PathPhase_TypeCharsUpdatesPreview(t *testing.T) {
@@ -39,9 +43,9 @@ func TestConfigurePicker_PathPhase_TypeCharsUpdatesPreview(t *testing.T) {
 
 	cp = sendKeys(cp,
 		tea.WindowSizeMsg{Width: 80, Height: 24},
-		keyMsg("~"),
-		keyMsg("/"),
-		keyMsg("D"),
+		charKeyMsg("~"),
+		charKeyMsg("/"),
+		charKeyMsg("D"),
 	)
 
 	if cp.phase != phasePath {
@@ -61,9 +65,9 @@ func TestConfigurePicker_PathPhase_EnterTransitionsToDepth(t *testing.T) {
 
 	cp = sendKeys(cp,
 		tea.WindowSizeMsg{Width: 80, Height: 24},
-		keyMsg("~"),
-		keyMsg("/"),
-		keyMsg("D"),
+		charKeyMsg("~"),
+		charKeyMsg("/"),
+		charKeyMsg("D"),
 		specialKeyMsg(tea.KeyEnter),
 	)
 
@@ -115,7 +119,7 @@ func TestConfigurePicker_DepthPhase_UpDownAdjustsDepth(t *testing.T) {
 	// Type something and enter to get to depth phase
 	cp = sendKeys(cp,
 		tea.WindowSizeMsg{Width: 80, Height: 24},
-		keyMsg("x"),
+		charKeyMsg("x"),
 		specialKeyMsg(tea.KeyEnter),
 	)
 
@@ -154,7 +158,7 @@ func TestConfigurePicker_DepthPhase_EnterConfirms(t *testing.T) {
 
 	cp = sendKeys(cp,
 		tea.WindowSizeMsg{Width: 80, Height: 24},
-		keyMsg("x"),
+		charKeyMsg("x"),
 		specialKeyMsg(tea.KeyEnter),
 		// Now in depth phase
 		specialKeyMsg(tea.KeyUp), // depth = 2
@@ -182,9 +186,9 @@ func TestConfigurePicker_DepthPhase_EscGoesBackToPath(t *testing.T) {
 
 	cp = sendKeys(cp,
 		tea.WindowSizeMsg{Width: 80, Height: 24},
-		keyMsg("m"),
-		keyMsg("y"),
-		keyMsg("p"),
+		charKeyMsg("m"),
+		charKeyMsg("y"),
+		charKeyMsg("p"),
 		specialKeyMsg(tea.KeyEnter),
 		// Now in depth phase
 		specialKeyMsg(tea.KeyUp), // depth = 2
@@ -213,11 +217,11 @@ func TestConfigurePicker_CursorMemoryAcrossPhases(t *testing.T) {
 	// Type "abcde", move cursor left twice (to position 3), then Enter
 	cp = sendKeys(cp,
 		tea.WindowSizeMsg{Width: 80, Height: 24},
-		keyMsg("a"),
-		keyMsg("b"),
-		keyMsg("c"),
-		keyMsg("d"),
-		keyMsg("e"),
+		charKeyMsg("a"),
+		charKeyMsg("b"),
+		charKeyMsg("c"),
+		charKeyMsg("d"),
+		charKeyMsg("e"),
 		specialKeyMsg(tea.KeyLeft),
 		specialKeyMsg(tea.KeyLeft),
 	)
@@ -272,10 +276,10 @@ func TestConfigurePicker_DepthPhase_CtrlCCancels(t *testing.T) {
 
 	cp = sendKeys(cp,
 		tea.WindowSizeMsg{Width: 80, Height: 24},
-		keyMsg("x"),
+		charKeyMsg("x"),
 		specialKeyMsg(tea.KeyEnter),
 		// Now in depth phase
-		tea.KeyMsg{Type: tea.KeyCtrlC},
+		tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl},
 	)
 
 	if !cp.cancelled {
@@ -289,10 +293,10 @@ func TestConfigurePicker_DepthPhase_IgnoresNonDigit(t *testing.T) {
 
 	cp = sendKeys(cp,
 		tea.WindowSizeMsg{Width: 80, Height: 24},
-		keyMsg("x"),
+		charKeyMsg("x"),
 		specialKeyMsg(tea.KeyEnter),
 		// Now in depth phase, input = "1"
-		keyMsg("a"), // should be ignored
+		charKeyMsg("a"), // should be ignored
 	)
 
 	if cp.input.Value() != "1" {
@@ -312,7 +316,7 @@ func TestConfigurePicker_TabCompletion(t *testing.T) {
 
 	// Type the temp dir path + "a"
 	for _, r := range tmpDir + "/a" {
-		cp = sendKeys(cp, keyMsg(string(r)))
+		cp = sendKeys(cp, charKeyMsg(string(r)))
 	}
 
 	// Press Tab
@@ -359,7 +363,7 @@ func TestConfigurePicker_TabCompletion_Symlinks(t *testing.T) {
 
 	// Type tmpDir + "/" to list all entries
 	for _, r := range tmpDir + "/" {
-		cp = sendKeys(cp, keyMsg(string(r)))
+		cp = sendKeys(cp, charKeyMsg(string(r)))
 	}
 
 	// Press Tab — should complete, and both realdir and syml should be candidates
@@ -394,7 +398,7 @@ func TestConfigurePicker_TabCompletion_AfterStar(t *testing.T) {
 
 	// Type "~/Dev/*"
 	for _, r := range "~/Dev/*" {
-		cp = sendKeys(cp, keyMsg(string(r)))
+		cp = sendKeys(cp, charKeyMsg(string(r)))
 	}
 
 	// Press Tab — should insert "/"
@@ -417,7 +421,7 @@ func TestConfigurePicker_TabCompletion_NoMatches(t *testing.T) {
 	cp := NewConfigurePicker(mockExpandFn(nil))
 
 	for _, r := range tmpDir + "/zzz_nonexistent" {
-		cp = sendKeys(cp, keyMsg(string(r)))
+		cp = sendKeys(cp, charKeyMsg(string(r)))
 	}
 
 	cp = sendKeys(cp, specialKeyMsg(tea.KeyTab))
@@ -434,10 +438,10 @@ func TestConfigurePicker_View_ShowsPreview(t *testing.T) {
 
 	cp = sendKeys(cp,
 		tea.WindowSizeMsg{Width: 60, Height: 20},
-		keyMsg("x"),
+		charKeyMsg("x"),
 	)
 
-	view := cp.View()
+	view := fmt.Sprint(cp.View())
 	if !containsText(view, "Preview:") {
 		t.Error("expected 'Preview:' in view")
 	}
@@ -455,12 +459,12 @@ func TestConfigurePicker_View_ShowsDepthInPreviewHeader(t *testing.T) {
 
 	cp = sendKeys(cp,
 		tea.WindowSizeMsg{Width: 60, Height: 20},
-		keyMsg("x"),
+		charKeyMsg("x"),
 		specialKeyMsg(tea.KeyEnter),
 		specialKeyMsg(tea.KeyUp), // depth = 2
 	)
 
-	view := cp.View()
+	view := fmt.Sprint(cp.View())
 	if !containsText(view, "depth: 2") {
 		t.Error("expected 'depth: 2' in view")
 	}

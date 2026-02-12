@@ -5,11 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
 )
@@ -187,9 +186,9 @@ func WithCustomCommands(commands []CustomCommand) PickerOption {
 func NewPicker(items []Item, opts ...PickerOption) *Picker {
 	ti := textinput.New()
 	ti.Prompt = "> "
-	ti.Cursor.SetMode(cursor.CursorStatic)
-	ti.Cursor.Style = lipgloss.NewStyle().Background(lipgloss.Color("white")).Foreground(lipgloss.Color("black"))
-	ti.Cursor.TextStyle = lipgloss.NewStyle().Background(lipgloss.Color("white")).Foreground(lipgloss.Color("black"))
+	styles := ti.Styles()
+	styles.Cursor.Blink = false
+	ti.SetStyles(styles)
 	ti.Focus()
 
 	p := &Picker{
@@ -217,7 +216,7 @@ func (p *Picker) Init() tea.Cmd {
 
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Help overlay: esc dismisses, all other keys are swallowed
 		if p.showHelp {
 			if key.Matches(msg, keys.Quit) {
@@ -505,27 +504,25 @@ func formatKeyHint(b key.Binding) string {
 }
 
 // isQuickAccessKey returns true if the key message is a quick access trigger
-func (p *Picker) isQuickAccessKey(msg tea.KeyMsg) bool {
+func (p *Picker) isQuickAccessKey(msg tea.KeyPressMsg) bool {
 	return p.quickAccessDigit(msg) >= 1
 }
 
 // quickAccessDigit extracts the digit (1-9) from a quick access key message.
 // Returns 0 if the key is not a valid quick access trigger.
-func (p *Picker) quickAccessDigit(msg tea.KeyMsg) int {
+func (p *Picker) quickAccessDigit(msg tea.KeyPressMsg) int {
+	if msg.Code < '1' || msg.Code > '9' {
+		return 0
+	}
+	digit := int(msg.Code - '0')
 	switch p.quickAccessModifier {
 	case "alt":
-		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Alt {
-			r := msg.Runes[0]
-			if r >= '1' && r <= '9' {
-				return int(r - '0')
-			}
+		if msg.Mod.Contains(tea.ModAlt) {
+			return digit
 		}
 	case "ctrl":
-		for i := 1; i <= 9; i++ {
-			b := key.NewBinding(key.WithKeys(fmt.Sprintf("ctrl+%d", i)))
-			if key.Matches(msg, b) {
-				return i
-			}
+		if msg.Mod.Contains(tea.ModCtrl) {
+			return digit
 		}
 	}
 	return 0
@@ -588,11 +585,17 @@ func (p *Picker) adjustScroll() {
 	}
 }
 
-func (p *Picker) View() string {
+func (p *Picker) View() tea.View {
+	var content string
 	if p.showHelp {
-		return p.viewHelp()
+		content = p.viewHelp()
+	} else {
+		content = p.viewNormal()
 	}
-	return p.viewNormal()
+	v := tea.NewView(content)
+	v.AltScreen = true
+	v.KeyboardEnhancements = tea.KeyboardEnhancements{}
+	return v
 }
 
 func (p *Picker) viewHelp() string {
@@ -818,7 +821,7 @@ func (p *Picker) Result() Result {
 // Run starts the picker and returns the result
 func Run(items []Item, opts ...PickerOption) (Result, error) {
 	p := NewPicker(items, opts...)
-	program := tea.NewProgram(p, tea.WithAltScreen())
+	program := tea.NewProgram(p)
 	m, err := program.Run()
 	if err != nil {
 		return Result{Action: ActionCancel}, err

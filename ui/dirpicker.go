@@ -6,11 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
 )
@@ -42,9 +41,9 @@ func NewDirPicker() *DirPicker {
 
 	ti := textinput.New()
 	ti.Prompt = "> "
-	ti.Cursor.SetMode(cursor.CursorStatic)
-	ti.Cursor.Style = lipgloss.NewStyle().Background(lipgloss.Color("white")).Foreground(lipgloss.Color("black"))
-	ti.Cursor.TextStyle = lipgloss.NewStyle().Background(lipgloss.Color("white")).Foreground(lipgloss.Color("black"))
+	styles := ti.Styles()
+	styles.Cursor.Blink = false
+	ti.SetStyles(styles)
 	ti.Focus()
 
 	dp := &DirPicker{
@@ -81,7 +80,7 @@ func (dp *DirPicker) Init() tea.Cmd {
 
 func (dp *DirPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, dirPickerKeys.Quit):
 			dp.cancelled = true
@@ -261,7 +260,7 @@ func (dp *DirPicker) displayPath() string {
 	return path
 }
 
-func (dp *DirPicker) View() string {
+func (dp *DirPicker) View() tea.View {
 	var b strings.Builder
 
 	selectedStyle := lipgloss.NewStyle().
@@ -348,7 +347,9 @@ func (dp *DirPicker) View() string {
 	hints := "  ↑/↓ navigate · Enter open · - back · C-a add · Esc cancel"
 	b.WriteString(hintStyle.Render(hints))
 
-	return b.String()
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	return v
 }
 
 // Result returns the directory picker result
@@ -362,7 +363,7 @@ func (dp *DirPicker) Result() DirPickerResult {
 // RunDirPicker launches the directory picker and returns the result
 func RunDirPicker() (DirPickerResult, error) {
 	dp := NewDirPicker()
-	program := tea.NewProgram(dp, tea.WithAltScreen())
+	program := tea.NewProgram(dp)
 	m, err := program.Run()
 	if err != nil {
 		return DirPickerResult{Cancelled: true}, err

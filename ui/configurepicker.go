@@ -8,11 +8,10 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // ConfigurePickerResult holds the result from the configure picker
@@ -57,9 +56,9 @@ type ConfigurePicker struct {
 func NewConfigurePicker(expandFn func(string) []string) *ConfigurePicker {
 	ti := textinput.New()
 	ti.Prompt = "> "
-	ti.Cursor.SetMode(cursor.CursorStatic)
-	ti.Cursor.Style = lipgloss.NewStyle().Background(lipgloss.Color("white")).Foreground(lipgloss.Color("black"))
-	ti.Cursor.TextStyle = lipgloss.NewStyle().Background(lipgloss.Color("white")).Foreground(lipgloss.Color("black"))
+	styles := ti.Styles()
+	styles.Cursor.Blink = false
+	ti.SetStyles(styles)
 	ti.Focus()
 
 	return &ConfigurePicker{
@@ -86,7 +85,7 @@ func (cp *ConfigurePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return cp, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch cp.phase {
 		case phasePath:
 			return cp.updatePathPhase(msg)
@@ -98,7 +97,7 @@ func (cp *ConfigurePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return cp, nil
 }
 
-func (cp *ConfigurePicker) updatePathPhase(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (cp *ConfigurePicker) updatePathPhase(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, configureKeys.Quit):
 		cp.cancelled = true
@@ -142,7 +141,7 @@ func (cp *ConfigurePicker) updatePathPhase(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	}
 }
 
-func (cp *ConfigurePicker) updateDepthPhase(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (cp *ConfigurePicker) updateDepthPhase(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, configureKeys.Quit):
 		cp.cancelled = true
@@ -181,8 +180,8 @@ func (cp *ConfigurePicker) updateDepthPhase(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 
 	default:
 		// Only allow digit input
-		if msg.Type == tea.KeyRunes {
-			for _, r := range msg.Runes {
+		if msg.Text != "" {
+			for _, r := range msg.Text {
 				if !unicode.IsDigit(r) {
 					return cp, nil
 				}
@@ -307,7 +306,7 @@ func (cp *ConfigurePicker) applyTabCompletion() {
 
 // View renders the configure picker
 
-func (cp *ConfigurePicker) View() string {
+func (cp *ConfigurePicker) View() tea.View {
 	var b strings.Builder
 
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -430,7 +429,9 @@ func (cp *ConfigurePicker) View() string {
 	}
 	b.WriteString(hintStyle.Render(hints))
 
-	return b.String()
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	return v
 }
 
 // Result returns the configure picker result after running
@@ -447,7 +448,7 @@ func (cp *ConfigurePicker) Result() ConfigurePickerResult {
 // RunConfigurePicker launches the configure picker and returns the result
 func RunConfigurePicker(expandFn func(string) []string) (ConfigurePickerResult, error) {
 	cp := NewConfigurePicker(expandFn)
-	program := tea.NewProgram(cp, tea.WithAltScreen())
+	program := tea.NewProgram(cp)
 	m, err := program.Run()
 	if err != nil {
 		return ConfigurePickerResult{Cancelled: true}, err

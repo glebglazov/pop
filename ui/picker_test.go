@@ -3,8 +3,8 @@ package ui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestFormatKeyHint(t *testing.T) {
@@ -129,8 +129,8 @@ func TestCustomCommandKeyMatching(t *testing.T) {
 	items := []Item{{Name: "test", Path: "/test"}}
 	picker := NewPicker(items, WithCustomCommands(commands))
 
-	// Simulate ctrl+o key press using tea.KeyMsg
-	msg := tea.KeyMsg{Type: tea.KeyCtrlO}
+	// Simulate ctrl+o key press
+	msg := tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}
 
 	// Check if binding matches
 	if len(picker.customCommands) == 0 {
@@ -153,13 +153,12 @@ func TestHelpOverlayToggle(t *testing.T) {
 		t.Fatal("showHelp should be false initially")
 	}
 
-	// ctrl+/ activates help
-	helpMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}, Alt: false}
-	// ctrl+/ is sent as a special key in bubbletea - try matching directly
+	// F1 activates help
+	helpMsg := tea.KeyPressMsg{Code: tea.KeyF1}
 	if key.Matches(helpMsg, keys.Help) {
 		picker.Update(helpMsg)
 		if !picker.showHelp {
-			t.Error("showHelp should be true after ctrl+/")
+			t.Error("showHelp should be true after F1")
 		}
 	} else {
 		// Manually set to test the rest of the flow
@@ -167,7 +166,7 @@ func TestHelpOverlayToggle(t *testing.T) {
 	}
 
 	// esc in help mode dismisses help (doesn't quit)
-	escMsg := tea.KeyMsg{Type: tea.KeyEscape}
+	escMsg := tea.KeyPressMsg{Code: tea.KeyEscape}
 	picker.Update(escMsg)
 	if picker.showHelp {
 		t.Error("showHelp should be false after esc in help mode")
@@ -188,13 +187,13 @@ func TestHelpOverlaySwallowsKeys(t *testing.T) {
 
 	// Arrow keys should be swallowed in help mode
 	origCursor := picker.cursor
-	picker.Update(tea.KeyMsg{Type: tea.KeyUp})
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if picker.cursor != origCursor {
 		t.Error("cursor should not change in help mode")
 	}
 
 	// Enter should be swallowed (should not quit)
-	_, cmd := picker.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := picker.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil {
 		t.Error("enter should be swallowed in help mode, should not produce a quit cmd")
 	}
@@ -210,7 +209,7 @@ func TestEscInNormalModeQuits(t *testing.T) {
 	picker := NewPicker(items)
 	picker.Init()
 
-	escMsg := tea.KeyMsg{Type: tea.KeyEscape}
+	escMsg := tea.KeyPressMsg{Code: tea.KeyEscape}
 	_, cmd := picker.Update(escMsg)
 
 	if picker.result.Action != ActionCancel {
@@ -228,7 +227,7 @@ func TestHelpViewRendersContent(t *testing.T) {
 	picker.height = 20
 	picker.showHelp = true
 
-	view := picker.View()
+	view := picker.viewHelp()
 
 	// Should contain base keybindings
 	if !containsSubstring(view, "Navigate") {
@@ -272,7 +271,7 @@ func TestHelpViewConditionalBindings(t *testing.T) {
 	picker.height = 20
 	picker.showHelp = true
 
-	view := picker.View()
+	view := picker.viewHelp()
 
 	if containsSubstring(view, "Kill tmux session") {
 		t.Error("help view should not contain Kill tmux session when disabled")
@@ -293,7 +292,7 @@ func TestHelpViewCustomCommands(t *testing.T) {
 	picker.height = 20
 	picker.showHelp = true
 
-	view := picker.View()
+	view := picker.viewHelp()
 
 	if !containsSubstring(view, "C-l") {
 		t.Error("help view should contain custom command key")
@@ -313,7 +312,7 @@ func TestQuickAccessAltDigitSelectsItem(t *testing.T) {
 	picker.Init()
 
 	// Static numbering: 1 = second from bottom (b), 2 = third from bottom (a)
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}, Alt: true}
+	msg := tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}
 	_, cmd := picker.Update(msg)
 	if cmd == nil {
 		t.Fatal("expected quit command")
@@ -337,7 +336,7 @@ func TestQuickAccessAltDigitSelectsSecondItem(t *testing.T) {
 	picker.Init()
 
 	// Static numbering: 2 = third from bottom (a)
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}, Alt: true}
+	msg := tea.KeyPressMsg{Code: '2', Mod: tea.ModAlt}
 	_, cmd := picker.Update(msg)
 	if cmd == nil {
 		t.Fatal("expected quit command")
@@ -357,7 +356,7 @@ func TestQuickAccessAltDigitOutOfRange(t *testing.T) {
 	picker.Init()
 
 	// Only 1 item above bottom, so alt+5 should do nothing
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}, Alt: true}
+	msg := tea.KeyPressMsg{Code: '5', Mod: tea.ModAlt}
 	_, cmd := picker.Update(msg)
 	if cmd != nil {
 		t.Error("expected no quit command for out-of-range quick access")
@@ -374,10 +373,10 @@ func TestQuickAccessStaticPositioning(t *testing.T) {
 	picker.Init()
 
 	// Move cursor up to "b"
-	picker.Update(tea.KeyMsg{Type: tea.KeyUp})
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 
 	// alt+1 should still select "b" (static: second from bottom), not "a"
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}, Alt: true}
+	msg := tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}
 	_, cmd := picker.Update(msg)
 	if cmd == nil {
 		t.Fatal("expected quit command")
@@ -397,7 +396,7 @@ func TestQuickAccessDisabledByDefault(t *testing.T) {
 	picker.Init()
 
 	// alt+1 should NOT trigger quick access when not enabled
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}, Alt: true}
+	msg := tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}
 	_, cmd := picker.Update(msg)
 	if cmd != nil {
 		t.Error("quick access should not work when not enabled")
@@ -414,7 +413,7 @@ func TestQuickAccessDisabledModifier(t *testing.T) {
 	picker.Init()
 
 	// alt+1 should NOT trigger quick access when disabled
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}, Alt: true}
+	msg := tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}
 	_, cmd := picker.Update(msg)
 	if cmd != nil {
 		t.Error("quick access should not work when disabled")
@@ -433,7 +432,7 @@ func TestQuickAccessNumbersRendered(t *testing.T) {
 	picker.height = 20
 	picker.Init()
 
-	view := picker.View()
+	view := picker.viewNormal()
 	// Items above cursor (ddd) should show ⌥1 for ccc, ⌥2 for bbb, ⌥3 for aaa
 	if !containsSubstring(view, "⌥1") {
 		t.Error("view should contain ⌥1 label")
@@ -453,7 +452,7 @@ func TestQuickAccessCtrlNumbersRendered(t *testing.T) {
 	picker.height = 20
 	picker.Init()
 
-	view := picker.View()
+	view := picker.viewNormal()
 	if !containsSubstring(view, "^1") {
 		t.Error("view should contain ^1 label for ctrl modifier")
 	}
@@ -471,7 +470,7 @@ func TestQuickAccessNoNumberOnBottomItem(t *testing.T) {
 	picker.height = 20
 	picker.Init()
 
-	view := picker.View()
+	view := picker.viewNormal()
 	if !containsSubstring(view, "⌥1") {
 		t.Error("view should contain ⌥1 for second from bottom")
 	}
@@ -487,7 +486,7 @@ func TestQuickAccessHelpOverlayAlt(t *testing.T) {
 	picker.height = 20
 	picker.showHelp = true
 
-	view := picker.View()
+	view := picker.viewHelp()
 	if !containsSubstring(view, "Quick select") {
 		t.Error("help view should contain Quick select entry")
 	}
@@ -503,7 +502,7 @@ func TestQuickAccessHelpOverlayCtrl(t *testing.T) {
 	picker.height = 20
 	picker.showHelp = true
 
-	view := picker.View()
+	view := picker.viewHelp()
 	if !containsSubstring(view, "Quick select") {
 		t.Error("help view should contain Quick select entry")
 	}
@@ -519,7 +518,7 @@ func TestQuickAccessHelpOverlayDisabled(t *testing.T) {
 	picker.height = 20
 	picker.showHelp = true
 
-	view := picker.View()
+	view := picker.viewHelp()
 	if containsSubstring(view, "Quick select") {
 		t.Error("help view should NOT contain Quick select when disabled")
 	}
