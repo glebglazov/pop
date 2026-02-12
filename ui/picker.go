@@ -805,10 +805,10 @@ func (p *Picker) viewNormal() string {
 		}
 	}
 
-	// Check if any visible item has an icon
+	// Check if any item has an icon (not just visible ones, to keep stable layout)
 	hasIcons := false
-	for j := start; j < start+visible && j < len(p.filtered); j++ {
-		if p.filtered[j].Icon != "" {
+	for j := range p.items {
+		if p.items[j].Icon != "" {
 			hasIcons = true
 			break
 		}
@@ -826,7 +826,7 @@ func (p *Picker) viewNormal() string {
 			line = " " + item.Name
 		}
 
-		// Prepend icon column when any visible item has an icon
+		// Prepend icon column when any item has an icon
 		if hasIcons {
 			if item.Icon != "" {
 				line = " " + item.Icon + line
