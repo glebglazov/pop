@@ -49,6 +49,7 @@ const (
 	ActionNew
 	ActionKillSession
 	ActionReset
+	ActionOpenWindow
 	ActionCustomCommand
 )
 
@@ -69,6 +70,7 @@ type Picker struct {
 	showContext     bool
 	showKillSession bool
 	showReset       bool
+	showOpenWindow  bool
 	cursorAtEnd     bool
 
 	// Quick access: modifier+digit to select items above cursor
@@ -139,6 +141,13 @@ func WithKillSession() PickerOption {
 func WithReset() PickerOption {
 	return func(p *Picker) {
 		p.showReset = true
+	}
+}
+
+// WithOpenWindow enables open-in-tmux-window keybinding (ctrl+o)
+func WithOpenWindow() PickerOption {
+	return func(p *Picker) {
+		p.showOpenWindow = true
 	}
 }
 
@@ -325,6 +334,15 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				p.result = Result{
 					Selected: &p.filtered[p.cursor],
 					Action:   ActionReset,
+				}
+				return p, tea.Quit
+			}
+
+		case key.Matches(msg, keys.OpenWindow):
+			if p.showOpenWindow && len(p.filtered) > 0 {
+				p.result = Result{
+					Selected: &p.filtered[p.cursor],
+					Action:   ActionOpenWindow,
 				}
 				return p, tea.Quit
 			}
@@ -599,6 +617,9 @@ func (p *Picker) viewHelp() string {
 	if p.showReset {
 		entries = append(entries, helpEntry{"C-r", "Reset history"})
 	}
+	if p.showOpenWindow {
+		entries = append(entries, helpEntry{"C-o", "Open in window"})
+	}
 	if p.showDelete {
 		entries = append(entries, helpEntry{"⌫", "Delete"})
 		entries = append(entries, helpEntry{"C-x", "Force delete"})
@@ -818,6 +839,7 @@ type keyMap struct {
 	New          key.Binding
 	KillSession  key.Binding
 	Reset        key.Binding
+	OpenWindow   key.Binding
 	ClearInput   key.Binding
 	Help         key.Binding
 }
@@ -855,6 +877,9 @@ var keys = keyMap{
 	),
 	Reset: key.NewBinding(
 		key.WithKeys("ctrl+r"),
+	),
+	OpenWindow: key.NewBinding(
+		key.WithKeys("ctrl+o"),
 	),
 	ClearInput: key.NewBinding(
 		key.WithKeys("alt+backspace", "ctrl+u"),
