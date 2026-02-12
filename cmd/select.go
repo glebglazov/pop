@@ -182,9 +182,14 @@ func runSelect(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run picker loop
+	inTmux := os.Getenv("TMUX") != ""
 	for {
 		quickAccessModifier := cfg.GetQuickAccessModifier()
-		result, err := ui.Run(items, ui.WithCursorAtEnd(), ui.WithKillSession(), ui.WithReset(), ui.WithQuickAccess(quickAccessModifier))
+		opts := []ui.PickerOption{ui.WithCursorAtEnd(), ui.WithKillSession(), ui.WithReset(), ui.WithQuickAccess(quickAccessModifier)}
+		if inTmux {
+			opts = append(opts, ui.WithOpenWindow())
+		}
+		result, err := ui.Run(items, opts...)
 		if err != nil {
 			return err
 		}
@@ -205,6 +210,14 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			}
 			// Open tmux session
 			return openTmuxSession(result.Selected)
+
+		case ui.ActionOpenWindow:
+			if result.Selected == nil {
+				os.Exit(1)
+			}
+			hist.Record(result.Selected.Path)
+			hist.Save()
+			return openTmuxWindow(result.Selected)
 
 		case ui.ActionKillSession:
 			if result.Selected != nil {
@@ -271,6 +284,33 @@ func openTmuxSession(item *ui.Item) error {
 		attachCmd.Stderr = os.Stderr
 		return attachCmd.Run()
 	}
+}
+
+func openTmuxWindow(item *ui.Item) error {
+	windowName := sanitizeSessionName(item.Name)
+
+	// Get current session name
+	out, err := exec.Command("tmux", "display-message", "-p", "#S").Output()
+	if err != nil {
+		return fmt.Errorf("failed to get current tmux session: %w", err)
+	}
+	session := strings.TrimSpace(string(out))
+
+	// Check if window with this name already exists
+	listOut, err := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_name}").Output()
+	if err != nil {
+		return fmt.Errorf("failed to list tmux windows: %w", err)
+	}
+
+	for _, name := range strings.Split(strings.TrimSpace(string(listOut)), "\n") {
+		if name == windowName {
+			// Window exists, switch to it
+			return exec.Command("tmux", "select-window", "-t", session+":"+windowName).Run()
+		}
+	}
+
+	// Create new window
+	return exec.Command("tmux", "new-window", "-t", session, "-n", windowName, "-c", item.Path).Run()
 }
 
 func sanitizeSessionName(name string) string {
