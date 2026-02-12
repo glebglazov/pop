@@ -62,8 +62,10 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	restoreCursorIdx := -1
 	for {
-		result, err := showWorktreePicker(ctx, customCommands, quickAccessModifier)
+		result, err := showWorktreePicker(ctx, customCommands, quickAccessModifier, restoreCursorIdx)
+		restoreCursorIdx = -1
 		if err != nil {
 			return err
 		}
@@ -90,6 +92,14 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			}
 			// Continue loop to show picker again
 
+		case ui.ActionKillSession:
+			if result.Selected != nil {
+				restoreCursorIdx = result.CursorIndex
+				sessionName := project.TmuxSessionName(ctx, result.Selected.Name)
+				killTmuxSessionByName(sessionName)
+			}
+			// Continue loop — showWorktreePicker refreshes session state
+
 		case ui.ActionReset:
 			if result.Selected != nil {
 				hist, _ := history.Load(history.DefaultHistoryPath())
@@ -110,7 +120,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.CustomCommand, quickAccessModifier string) (ui.Result, error) {
+func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.CustomCommand, quickAccessModifier string, initialCursorIdx int) (ui.Result, error) {
 	worktrees, err := project.ListWorktrees(ctx)
 	if err != nil {
 		return ui.Result{Action: ui.ActionCancel}, fmt.Errorf("failed to list worktrees: %w", err)
@@ -143,28 +153,44 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.CustomComm
 		sortedWorktrees[i] = pathToWorktree[p.Path]
 	}
 
-	// Convert to UI items
-	items := make([]ui.Item, len(sortedWorktrees))
-	for i, wt := range sortedWorktrees {
-		items[i] = ui.Item{
-			Name:    wt.Name,
-			Path:    wt.Path,
-			Context: wt.Branch,
-		}
-	}
+	// Convert to UI items with session icons
+	items := buildWorktreeItems(sortedWorktrees, ctx, history.TmuxSessionActivity())
 
 	opts := []ui.PickerOption{
 		ui.WithDelete(),
 		ui.WithContext(),
 		ui.WithCursorAtEnd(),
+		ui.WithKillSession(),
 		ui.WithReset(),
 		ui.WithQuickAccess(quickAccessModifier),
+		ui.WithIconLegend(
+			ui.IconLegend{Icon: iconDirSession, Desc: "Directory with tmux session"},
+		),
+	}
+	if initialCursorIdx >= 0 {
+		opts = append(opts, ui.WithInitialCursorIndex(initialCursorIdx))
 	}
 	if len(customCommands) > 0 {
 		opts = append(opts, ui.WithCustomCommands(customCommands))
 	}
 
 	return ui.Run(items, opts...)
+}
+
+func buildWorktreeItems(worktrees []project.Worktree, ctx *project.RepoContext, sessionActivity map[string]int64) []ui.Item {
+	items := make([]ui.Item, len(worktrees))
+	for i, wt := range worktrees {
+		items[i] = ui.Item{
+			Name:    wt.Name,
+			Path:    wt.Path,
+			Context: wt.Branch,
+		}
+		sessionName := project.TmuxSessionName(ctx, wt.Name)
+		if _, hasSession := sessionActivity[sessionName]; hasSession {
+			items[i].Icon = iconDirSession
+		}
+	}
+	return items
 }
 
 func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {

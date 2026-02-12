@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
@@ -171,23 +173,40 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		sortedExpanded[i] = pathToExpanded[p.Path]
 	}
 
-	// Convert to UI items
-	items := make([]ui.Item, len(sortedExpanded))
+	// Build base items (no icons, no sessions) — done once
+	baseItems := make([]ui.Item, len(sortedExpanded))
 	for i, ep := range sortedExpanded {
-		items[i] = ui.Item{
+		baseItems[i] = ui.Item{
 			Name:    ep.Name,
 			Path:    ep.Path,
-			Context: ep.ProjectName, // Store project name for session naming
+			Context: ep.ProjectName,
 		}
 	}
 
 	// Run picker loop
 	inTmux := os.Getenv("TMUX") != ""
+	restoreCursorIdx := -1
 	for {
+		// Refresh session state each iteration
+		items := buildSessionAwareItems(baseItems, hist)
+
 		quickAccessModifier := cfg.GetQuickAccessModifier()
-		opts := []ui.PickerOption{ui.WithCursorAtEnd(), ui.WithKillSession(), ui.WithReset(), ui.WithQuickAccess(quickAccessModifier)}
+		opts := []ui.PickerOption{
+			ui.WithCursorAtEnd(),
+			ui.WithKillSession(),
+			ui.WithReset(),
+			ui.WithQuickAccess(quickAccessModifier),
+			ui.WithIconLegend(
+				ui.IconLegend{Icon: iconDirSession, Desc: "Directory with tmux session"},
+				ui.IconLegend{Icon: iconStandaloneSession, Desc: "Standalone tmux session"},
+			),
+		}
 		if inTmux {
 			opts = append(opts, ui.WithOpenWindow())
+		}
+		if restoreCursorIdx >= 0 {
+			opts = append(opts, ui.WithInitialCursorIndex(restoreCursorIdx))
+			restoreCursorIdx = -1
 		}
 		result, err := ui.Run(items, opts...)
 		if err != nil {
@@ -202,18 +221,19 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			if result.Selected == nil {
 				os.Exit(1)
 			}
-			// Record selection in history (paths are already canonical from config)
+			if isStandaloneSession(*result.Selected) {
+				return switchToTmuxSession(standaloneSessionName(*result.Selected))
+			}
 			hist.Record(result.Selected.Path)
 			hist.Save()
 			if tmuxCDPane != "" {
 				return sendCDToPane(tmuxCDPane, result.Selected.Path)
 			}
-			// Open tmux session
 			return openTmuxSession(result.Selected)
 
 		case ui.ActionOpenWindow:
-			if result.Selected == nil {
-				os.Exit(1)
+			if result.Selected == nil || isStandaloneSession(*result.Selected) {
+				continue
 			}
 			hist.Record(result.Selected.Path)
 			hist.Save()
@@ -221,22 +241,27 @@ func runSelect(cmd *cobra.Command, args []string) error {
 
 		case ui.ActionKillSession:
 			if result.Selected != nil {
-				killTmuxSession(result.Selected.Name)
+				restoreCursorIdx = result.CursorIndex
+				if isStandaloneSession(*result.Selected) {
+					killTmuxSessionByName(standaloneSessionName(*result.Selected))
+				} else {
+					killTmuxSession(result.Selected.Name)
+				}
 			}
-			// Continue loop to show picker again
+			// Continue loop — session state refreshes automatically
 
 		case ui.ActionReset:
-			if result.Selected != nil {
+			if result.Selected != nil && !isStandaloneSession(*result.Selected) {
 				hist.Remove(result.Selected.Path)
 				hist.Save()
-				items = sortItemsByHistory(items, hist)
+				baseItems = sortBaseItemsByHistory(baseItems, hist)
 			}
-			// Continue loop to show picker again
+			// No-op for standalone sessions; continue loop
 		}
 	}
 }
 
-func sortItemsByHistory(items []ui.Item, hist *history.History) []ui.Item {
+func sortBaseItemsByHistory(items []ui.Item, hist *history.History) []ui.Item {
 	projects := make([]project.Project, len(items))
 	for i, item := range items {
 		projects[i] = project.Project{Name: item.Name, Path: item.Path}
@@ -250,6 +275,85 @@ func sortItemsByHistory(items []ui.Item, hist *history.History) []ui.Item {
 	for i, p := range projects {
 		sorted[i] = pathToItem[p.Path]
 	}
+	return sorted
+}
+
+func buildSessionAwareItems(baseItems []ui.Item, hist *history.History) []ui.Item {
+	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity())
+}
+
+func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sessionActivity map[string]int64) []ui.Item {
+	// Build set of session names that correspond to project items
+	projectSessionNames := make(map[string]bool)
+	for _, item := range baseItems {
+		sanitized := sanitizeSessionName(item.Name)
+		projectSessionNames[sanitized] = true
+	}
+
+	// Apply icons to project items that have active sessions
+	items := make([]ui.Item, len(baseItems))
+	copy(items, baseItems)
+	for i := range items {
+		sanitized := sanitizeSessionName(items[i].Name)
+		if _, hasSession := sessionActivity[sanitized]; hasSession {
+			items[i].Icon = iconDirSession
+		} else {
+			items[i].Icon = ""
+		}
+	}
+
+	// Add standalone sessions (not matching any project)
+	for sessionName := range sessionActivity {
+		if !projectSessionNames[sessionName] {
+			items = append(items, ui.Item{
+				Name: sessionName,
+				Path: tmuxSessionPathPrefix + sessionName,
+				Icon: iconStandaloneSession,
+			})
+		}
+	}
+
+	// Sort by unified timeline
+	return sortByUnifiedRecency(items, hist, sessionActivity)
+}
+
+func sortByUnifiedRecency(items []ui.Item, hist *history.History, sessionActivity map[string]int64) []ui.Item {
+	historyTimes := make(map[string]time.Time)
+	for _, e := range hist.Entries {
+		historyTimes[e.Path] = e.LastAccess
+	}
+
+	getAccessTime := func(item ui.Item) (time.Time, bool) {
+		if t, ok := historyTimes[item.Path]; ok {
+			return t, true
+		}
+		if isStandaloneSession(item) {
+			if ts, ok := sessionActivity[standaloneSessionName(item)]; ok {
+				return time.Unix(ts, 0), true
+			}
+		}
+		return time.Time{}, false
+	}
+
+	sorted := make([]ui.Item, len(items))
+	copy(sorted, items)
+
+	sort.SliceStable(sorted, func(i, j int) bool {
+		ti, oki := getAccessTime(sorted[i])
+		tj, okj := getAccessTime(sorted[j])
+
+		if oki && okj {
+			return ti.Before(tj)
+		}
+		if oki {
+			return false
+		}
+		if okj {
+			return true
+		}
+		return sorted[i].Name < sorted[j].Name
+	})
+
 	return sorted
 }
 

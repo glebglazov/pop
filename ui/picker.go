@@ -18,6 +18,7 @@ type Item struct {
 	Name    string // Display name
 	Path    string // Full path (returned on selection)
 	Context string // Additional context (e.g., branch name)
+	Icon    string // Optional icon displayed to the left of name
 }
 
 func (i Item) FilterValue() string {
@@ -34,6 +35,7 @@ type CustomCommandResult struct {
 type Result struct {
 	Selected      *Item
 	Action        Action
+	CursorIndex   int                  // cursor position at time of action
 	CustomCommand *CustomCommandResult // set when Action == ActionCustomCommand
 }
 
@@ -81,6 +83,18 @@ type Picker struct {
 
 	// Custom commands
 	customCommands []CustomKeyBinding
+
+	// Icon legend entries for help view
+	iconLegend []iconLegendEntry
+
+	// Initial cursor index override (-1 = not set)
+	initialCursorIdx int
+}
+
+// iconLegendEntry maps an icon to its description in the help view
+type iconLegendEntry struct {
+	icon string
+	desc string
 }
 
 // cursorState stores cursor position info for a filter query
@@ -167,6 +181,30 @@ func WithQuickAccess(modifier string) PickerOption {
 	}
 }
 
+// WithIconLegend adds icon descriptions to the help view.
+// Only icons that appear in the current item list are shown.
+func WithIconLegend(entries ...IconLegend) PickerOption {
+	return func(p *Picker) {
+		for _, e := range entries {
+			p.iconLegend = append(p.iconLegend, iconLegendEntry{icon: e.Icon, desc: e.Desc})
+		}
+	}
+}
+
+// IconLegend describes what an icon means in the help view
+type IconLegend struct {
+	Icon string
+	Desc string
+}
+
+// WithInitialCursorIndex sets the initial cursor position by index.
+// Takes priority over WithCursorAtEnd. Index is clamped to bounds.
+func WithInitialCursorIndex(idx int) PickerOption {
+	return func(p *Picker) {
+		p.initialCursorIdx = idx
+	}
+}
+
 // WithCustomCommands adds custom key bindings and commands to the picker
 func WithCustomCommands(commands []CustomCommand) PickerOption {
 	return func(p *Picker) {
@@ -192,11 +230,12 @@ func NewPicker(items []Item, opts ...PickerOption) *Picker {
 	ti.Focus()
 
 	p := &Picker{
-		items:        items,
-		filtered:     items,
-		input:        ti,
-		height:       10,
-		cursorMemory: make(map[string]cursorState),
+		items:            items,
+		filtered:         items,
+		input:            ti,
+		height:           10,
+		cursorMemory:     make(map[string]cursorState),
+		initialCursorIdx: -1,
 	}
 
 	for _, opt := range opts {
@@ -207,7 +246,12 @@ func NewPicker(items []Item, opts ...PickerOption) *Picker {
 }
 
 func (p *Picker) Init() tea.Cmd {
-	if p.cursorAtEnd && len(p.filtered) > 0 {
+	if p.initialCursorIdx >= 0 && len(p.filtered) > 0 {
+		p.cursor = p.initialCursorIdx
+		if p.cursor >= len(p.filtered) {
+			p.cursor = len(p.filtered) - 1
+		}
+	} else if p.cursorAtEnd && len(p.filtered) > 0 {
 		p.cursor = len(p.filtered) - 1
 	}
 	p.adjustScroll()
@@ -652,6 +696,22 @@ func (p *Picker) viewHelp() string {
 		entries = append(entries, helpEntry{formatKeyHint(cc.Binding), cc.Label})
 	}
 
+	// Icon legend: show entries for icons present in the item list
+	iconsSeen := make(map[string]bool)
+	for _, item := range p.items {
+		if item.Icon != "" {
+			iconsSeen[item.Icon] = true
+		}
+	}
+	if len(iconsSeen) > 0 {
+		entries = append(entries, helpEntry{"", ""}) // blank separator
+		for _, legend := range p.iconLegend {
+			if iconsSeen[legend.icon] {
+				entries = append(entries, helpEntry{legend.icon, legend.desc})
+			}
+		}
+	}
+
 	// Find max key display width for alignment
 	maxKeyWidth := 0
 	for _, e := range entries {
@@ -745,6 +805,15 @@ func (p *Picker) viewNormal() string {
 		}
 	}
 
+	// Check if any visible item has an icon
+	hasIcons := false
+	for j := start; j < start+visible && j < len(p.filtered); j++ {
+		if p.filtered[j].Icon != "" {
+			hasIcons = true
+			break
+		}
+	}
+
 	for i := start; i < start+visible && i < len(p.filtered); i++ {
 		item := p.filtered[i]
 
@@ -755,6 +824,15 @@ func (p *Picker) viewNormal() string {
 			line = " [" + item.Context + "]" + strings.Repeat(" ", contextPadding) + " " + item.Name
 		} else {
 			line = " " + item.Name
+		}
+
+		// Prepend icon column when any visible item has an icon
+		if hasIcons {
+			if item.Icon != "" {
+				line = " " + item.Icon + line
+			} else {
+				line = "  " + line
+			}
 		}
 
 		prefixWidth := len(p.quickAccessPadding())
@@ -825,6 +903,7 @@ func (p *Picker) viewNormal() string {
 
 // Result returns the picker result after running
 func (p *Picker) Result() Result {
+	p.result.CursorIndex = p.cursor
 	return p.result
 }
 

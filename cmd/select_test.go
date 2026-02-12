@@ -115,7 +115,190 @@ func TestSanitizeSessionName(t *testing.T) {
 	}
 }
 
-func TestSortItemsByHistory(t *testing.T) {
+func TestBuildSessionAwareItems(t *testing.T) {
+	now := time.Now()
+
+	t.Run("standalone sessions detected correctly", func(t *testing.T) {
+		baseItems := []ui.Item{
+			{Name: "app", Path: "/app"},
+			{Name: "api", Path: "/api"},
+		}
+		// Sessions: app matches project, api matches project, scratch and notes are standalone
+		sessionActivity := map[string]int64{
+			"app":     now.Unix(),
+			"api":     now.Unix(),
+			"scratch": now.Unix(),
+			"notes":   now.Unix(),
+		}
+		hist := &history.History{}
+
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity)
+
+		// Should have 4 items: 2 projects + 2 standalone
+		if len(result) != 4 {
+			t.Fatalf("got %d items, want 4", len(result))
+		}
+
+		standalone := 0
+		for _, item := range result {
+			if isStandaloneSession(item) {
+				standalone++
+			}
+		}
+		if standalone != 2 {
+			t.Errorf("got %d standalone sessions, want 2", standalone)
+		}
+	})
+
+	t.Run("icon assignment", func(t *testing.T) {
+		baseItems := []ui.Item{
+			{Name: "app", Path: "/app"},
+			{Name: "idle", Path: "/idle"},
+		}
+		sessionActivity := map[string]int64{
+			"app":     now.Unix(),
+			"scratch": now.Unix(),
+		}
+		hist := &history.History{}
+
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity)
+
+		iconByPath := make(map[string]string)
+		for _, item := range result {
+			iconByPath[item.Path] = item.Icon
+		}
+
+		if iconByPath["/app"] != iconDirSession {
+			t.Errorf("project with session: Icon = %q, want %q", iconByPath["/app"], iconDirSession)
+		}
+		if iconByPath["/idle"] != "" {
+			t.Errorf("project without session: Icon = %q, want empty", iconByPath["/idle"])
+		}
+		if iconByPath[tmuxSessionPathPrefix+"scratch"] != iconStandaloneSession {
+			t.Errorf("standalone session: Icon = %q, want %q", iconByPath[tmuxSessionPathPrefix+"scratch"], iconStandaloneSession)
+		}
+	})
+
+	t.Run("no sessions means no icons and no standalone items", func(t *testing.T) {
+		baseItems := []ui.Item{
+			{Name: "app", Path: "/app"},
+			{Name: "api", Path: "/api"},
+		}
+		sessionActivity := map[string]int64{}
+		hist := &history.History{}
+
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity)
+
+		if len(result) != 2 {
+			t.Fatalf("got %d items, want 2", len(result))
+		}
+		for _, item := range result {
+			if item.Icon != "" {
+				t.Errorf("item %q has Icon %q, want empty", item.Name, item.Icon)
+			}
+		}
+	})
+
+	t.Run("sanitized name matching", func(t *testing.T) {
+		// Project name "my.app" sanitizes to "my_app"
+		baseItems := []ui.Item{
+			{Name: "my.app", Path: "/my.app"},
+		}
+		// Session name "my_app" should match the sanitized project name
+		sessionActivity := map[string]int64{
+			"my_app": now.Unix(),
+		}
+		hist := &history.History{}
+
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity)
+
+		if len(result) != 1 {
+			t.Fatalf("got %d items, want 1 (session should match project)", len(result))
+		}
+		if result[0].Icon != iconDirSession {
+			t.Errorf("project with matching sanitized session: Icon = %q, want %q", result[0].Icon, iconDirSession)
+		}
+	})
+}
+
+func TestSortByUnifiedRecency(t *testing.T) {
+	t.Run("mixed items sort correctly", func(t *testing.T) {
+		items := []ui.Item{
+			{Name: "no-history", Path: "/no-history"},
+			{Name: "old-project", Path: "/old-project"},
+			{Name: "recent-session", Path: "tmux:recent-session"},
+		}
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/old-project", LastAccess: time.Unix(1000, 0)},
+			},
+		}
+		sessionActivity := map[string]int64{
+			"recent-session": 2000,
+		}
+
+		result := sortByUnifiedRecency(items, hist, sessionActivity)
+
+		// Expected: no-history first (alphabetical, no timestamp), old-project (ts=1000), recent-session (ts=2000)
+		expected := []string{"/no-history", "/old-project", "tmux:recent-session"}
+		for i, want := range expected {
+			if result[i].Path != want {
+				t.Errorf("result[%d].Path = %q, want %q", i, result[i].Path, want)
+			}
+		}
+	})
+
+	t.Run("sessions interleave with projects by timestamp", func(t *testing.T) {
+		items := []ui.Item{
+			{Name: "proj-old", Path: "/proj-old"},
+			{Name: "session-mid", Path: "tmux:session-mid"},
+			{Name: "proj-new", Path: "/proj-new"},
+		}
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/proj-old", LastAccess: time.Unix(1000, 0)},
+				{Path: "/proj-new", LastAccess: time.Unix(3000, 0)},
+			},
+		}
+		sessionActivity := map[string]int64{
+			"session-mid": 2000,
+		}
+
+		result := sortByUnifiedRecency(items, hist, sessionActivity)
+
+		expected := []string{"/proj-old", "tmux:session-mid", "/proj-new"}
+		for i, want := range expected {
+			if result[i].Path != want {
+				t.Errorf("result[%d].Path = %q, want %q", i, result[i].Path, want)
+			}
+		}
+	})
+
+	t.Run("multiple sessions sort by activity", func(t *testing.T) {
+		items := []ui.Item{
+			{Name: "older", Path: "tmux:older"},
+			{Name: "newer", Path: "tmux:newer"},
+			{Name: "middle", Path: "tmux:middle"},
+		}
+		hist := &history.History{}
+		sessionActivity := map[string]int64{
+			"older":  1000,
+			"middle": 2000,
+			"newer":  3000,
+		}
+
+		result := sortByUnifiedRecency(items, hist, sessionActivity)
+
+		expected := []string{"tmux:older", "tmux:middle", "tmux:newer"}
+		for i, want := range expected {
+			if result[i].Path != want {
+				t.Errorf("result[%d].Path = %q, want %q", i, result[i].Path, want)
+			}
+		}
+	})
+}
+
+func TestSortBaseItemsByHistory(t *testing.T) {
 	now := time.Now()
 
 	t.Run("no duplicates after resort changes order", func(t *testing.T) {
@@ -135,7 +318,7 @@ func TestSortItemsByHistory(t *testing.T) {
 			},
 		}
 
-		result := sortItemsByHistory(items, hist)
+		result := sortBaseItemsByHistory(items, hist)
 
 		// Expected: ddd (no history), abc (oldest), sss (newer)
 		expected := []string{"/ddd", "/abc", "/sss"}
@@ -170,7 +353,7 @@ func TestSortItemsByHistory(t *testing.T) {
 			},
 		}
 
-		result := sortItemsByHistory(items, hist)
+		result := sortBaseItemsByHistory(items, hist)
 
 		// "other" has no history -> goes first, "proj/wt1" has history -> goes second
 		if result[0].Path != "/other" || result[0].Context != "other" {
@@ -201,7 +384,7 @@ func TestSortItemsByHistory(t *testing.T) {
 			},
 		}
 
-		result := sortItemsByHistory(items, hist)
+		result := sortBaseItemsByHistory(items, hist)
 
 		if len(result) != 5 {
 			t.Fatalf("got %d items, want 5", len(result))
