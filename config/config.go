@@ -163,7 +163,30 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 		saveGlobCache(d, cachePath, cache)
 	}
 
-	return projects, nil
+	return removeSubsumedPaths(projects), nil
+}
+
+// removeSubsumedPaths filters out paths that are strict parents of other paths
+// in the set. This implements "more specific wins" — if both /a/b and /a/b/c
+// are in the list, /a/b is removed. Works transitively.
+func removeSubsumedPaths(paths []ExpandedPath) []ExpandedPath {
+	subsumed := make(map[string]bool)
+	for _, p := range paths {
+		for _, q := range paths {
+			if p.Path != q.Path && strings.HasPrefix(q.Path, p.Path+"/") {
+				subsumed[p.Path] = true
+				break
+			}
+		}
+	}
+
+	var result []ExpandedPath
+	for _, p := range paths {
+		if !subsumed[p.Path] {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 // expandHomeWith replaces ~ with the user's home directory

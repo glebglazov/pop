@@ -566,3 +566,160 @@ func TestExpandProjectsDisplayDepth(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveSubsumedPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []ExpandedPath
+		expected []ExpandedPath
+	}{
+		{
+			name:     "empty input",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name: "no overlap",
+			input: []ExpandedPath{
+				{Path: "/a", DisplayDepth: 1},
+				{Path: "/b", DisplayDepth: 1},
+				{Path: "/c", DisplayDepth: 1},
+			},
+			expected: []ExpandedPath{
+				{Path: "/a", DisplayDepth: 1},
+				{Path: "/b", DisplayDepth: 1},
+				{Path: "/c", DisplayDepth: 1},
+			},
+		},
+		{
+			name: "simple parent-child",
+			input: []ExpandedPath{
+				{Path: "/a", DisplayDepth: 1},
+				{Path: "/a/b", DisplayDepth: 2},
+			},
+			expected: []ExpandedPath{
+				{Path: "/a/b", DisplayDepth: 2},
+			},
+		},
+		{
+			name: "transitive subsumption",
+			input: []ExpandedPath{
+				{Path: "/a", DisplayDepth: 1},
+				{Path: "/a/b", DisplayDepth: 1},
+				{Path: "/a/b/c", DisplayDepth: 3},
+			},
+			expected: []ExpandedPath{
+				{Path: "/a/b/c", DisplayDepth: 3},
+			},
+		},
+		{
+			name: "multiple independent subsumptions",
+			input: []ExpandedPath{
+				{Path: "/a", DisplayDepth: 1},
+				{Path: "/a/x", DisplayDepth: 2},
+				{Path: "/b", DisplayDepth: 1},
+				{Path: "/b/y", DisplayDepth: 2},
+			},
+			expected: []ExpandedPath{
+				{Path: "/a/x", DisplayDepth: 2},
+				{Path: "/b/y", DisplayDepth: 2},
+			},
+		},
+		{
+			name: "no false positive on common prefix",
+			input: []ExpandedPath{
+				{Path: "/foo/bar", DisplayDepth: 1},
+				{Path: "/foo/barbaz", DisplayDepth: 1},
+			},
+			expected: []ExpandedPath{
+				{Path: "/foo/bar", DisplayDepth: 1},
+				{Path: "/foo/barbaz", DisplayDepth: 1},
+			},
+		},
+		{
+			name: "order independent — child before parent",
+			input: []ExpandedPath{
+				{Path: "/a/b", DisplayDepth: 2},
+				{Path: "/a", DisplayDepth: 1},
+			},
+			expected: []ExpandedPath{
+				{Path: "/a/b", DisplayDepth: 2},
+			},
+		},
+		{
+			name: "parent with multiple children",
+			input: []ExpandedPath{
+				{Path: "/proj", DisplayDepth: 1},
+				{Path: "/proj/v1", DisplayDepth: 2},
+				{Path: "/proj/v2", DisplayDepth: 2},
+			},
+			expected: []ExpandedPath{
+				{Path: "/proj/v1", DisplayDepth: 2},
+				{Path: "/proj/v2", DisplayDepth: 2},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := removeSubsumedPaths(tt.input)
+
+			if len(result) != len(tt.expected) {
+				t.Fatalf("got %d paths, want %d: %v", len(result), len(tt.expected), result)
+			}
+
+			for i, p := range result {
+				if p.Path != tt.expected[i].Path {
+					t.Errorf("result[%d].Path = %q, want %q", i, p.Path, tt.expected[i].Path)
+				}
+				if p.DisplayDepth != tt.expected[i].DisplayDepth {
+					t.Errorf("result[%d].DisplayDepth = %d, want %d", i, p.DisplayDepth, tt.expected[i].DisplayDepth)
+				}
+			}
+		})
+	}
+}
+
+func TestExpandProjectsSubsumption(t *testing.T) {
+	// Integration test: broad glob + specific glob with different display_depth
+	tmpDir := t.TempDir()
+
+	// Create: tmpDir/work/proj_a, tmpDir/personal/proj_c,
+	//         tmpDir/personal/proj_d/v1, tmpDir/personal/proj_d/v2
+	os.MkdirAll(filepath.Join(tmpDir, "work", "proj_a"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "personal", "proj_c"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "personal", "proj_d", "v1"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "personal", "proj_d", "v2"), 0755)
+
+	cfg := &Config{Projects: []ProjectEntry{
+		{Path: filepath.Join(tmpDir, "*", "*")},
+		{Path: filepath.Join(tmpDir, "personal", "proj_d", "*"), DisplayDepth: 2},
+	}}
+
+	result, err := cfg.ExpandProjects()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have: proj_a, proj_c, proj_d/v1, proj_d/v2 (NOT proj_d)
+	if len(result) != 4 {
+		t.Fatalf("got %d projects, want 4: %v", len(result), result)
+	}
+
+	// proj_d should NOT be in the results
+	for _, ep := range result {
+		if filepath.Base(ep.Path) == "proj_d" {
+			t.Errorf("proj_d should be subsumed but is present: %v", ep)
+		}
+	}
+
+	// Children should have display_depth = 2
+	for _, ep := range result {
+		dir := filepath.Base(filepath.Dir(ep.Path))
+		if dir == "proj_d" {
+			if ep.DisplayDepth != 2 {
+				t.Errorf("child %q: DisplayDepth = %d, want 2", ep.Path, ep.DisplayDepth)
+			}
+		}
+	}
+}
