@@ -116,6 +116,10 @@ func (c *Config) ExpandProjects() ([]ExpandedPath, error) {
 
 // ExpandProjectsWith resolves all project paths using provided dependencies
 func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
+	cachePath := DefaultCachePathWith(d)
+	cache := loadGlobCache(d, cachePath)
+	cacheModified := false
+
 	var projects []ExpandedPath
 	seen := make(map[string]bool)
 
@@ -135,7 +139,10 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 			continue // Skip recursive glob patterns
 		}
 		if strings.Contains(expanded, "*") {
-			matches, err := expandGlob(d, expanded)
+			matches, updated, err := expandGlobCached(d, expanded, cache)
+			if updated {
+				cacheModified = true
+			}
 			if err != nil {
 				continue // Skip invalid patterns
 			}
@@ -152,6 +159,10 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 		}
 	}
 
+	if cacheModified {
+		saveGlobCache(d, cachePath, cache)
+	}
+
 	return projects, nil
 }
 
@@ -164,9 +175,9 @@ func expandHomeWith(d *Deps, path string) string {
 	return path
 }
 
-// expandGlob expands a glob pattern, resolving symlinks in the base path once
-func expandGlob(d *Deps, pattern string) ([]string, error) {
-	// Use doublestar for ** support
+// expandGlobWithBase expands a glob pattern and returns both the matches
+// and the resolved base path (after symlink resolution).
+func expandGlobWithBase(d *Deps, pattern string) ([]string, string, error) {
 	base, pat := doublestar.SplitPattern(pattern)
 
 	// Resolve symlinks in the base path once (e.g., ~/Dev -> /private/Dev)
@@ -178,7 +189,7 @@ func expandGlob(d *Deps, pattern string) ([]string, error) {
 	fsys := d.FS.DirFS(base)
 	matches, err := doublestar.Glob(fsys, pat)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Convert to absolute paths using the resolved base
@@ -186,7 +197,7 @@ func expandGlob(d *Deps, pattern string) ([]string, error) {
 	for _, match := range matches {
 		results = append(results, filepath.Join(resolvedBase, match))
 	}
-	return results, nil
+	return results, resolvedBase, nil
 }
 
 func isDirectoryWith(d *Deps, path string) bool {
