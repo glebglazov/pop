@@ -519,6 +519,28 @@ func TestExpandProjectsRejectsDoubleStarGlob(t *testing.T) {
 	}
 }
 
+func TestGetQuickAccessModifier(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected string
+	}{
+		{"default empty", "", "alt"},
+		{"explicit alt", "alt", "alt"},
+		{"explicit ctrl", "ctrl", "ctrl"},
+		{"explicit disabled", "disabled", "disabled"},
+		{"invalid value", "foo", "alt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{QuickAccessModifier: tt.value}
+			if got := cfg.GetQuickAccessModifier(); got != tt.expected {
+				t.Errorf("GetQuickAccessModifier() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestExpandProjectsDisplayDepth(t *testing.T) {
 	// Test that display_depth is propagated through expansion.
 	// This test uses the real filesystem with temp directories.

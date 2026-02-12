@@ -302,3 +302,225 @@ func TestHelpViewCustomCommands(t *testing.T) {
 		t.Error("help view should contain custom command label")
 	}
 }
+
+func TestQuickAccessAltDigitSelectsItem(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.Init()
+
+	// Static numbering: 1 = second from bottom (b), 2 = third from bottom (a)
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}, Alt: true}
+	_, cmd := picker.Update(msg)
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	result := picker.Result()
+	if result.Action != ActionSelect {
+		t.Errorf("expected ActionSelect, got %v", result.Action)
+	}
+	if result.Selected.Path != "/b" {
+		t.Errorf("expected /b, got %s", result.Selected.Path)
+	}
+}
+
+func TestQuickAccessAltDigitSelectsSecondItem(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.Init()
+
+	// Static numbering: 2 = third from bottom (a)
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}, Alt: true}
+	_, cmd := picker.Update(msg)
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	result := picker.Result()
+	if result.Selected.Path != "/a" {
+		t.Errorf("expected /a, got %s", result.Selected.Path)
+	}
+}
+
+func TestQuickAccessAltDigitOutOfRange(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.Init()
+
+	// Only 1 item above bottom, so alt+5 should do nothing
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}, Alt: true}
+	_, cmd := picker.Update(msg)
+	if cmd != nil {
+		t.Error("expected no quit command for out-of-range quick access")
+	}
+}
+
+func TestQuickAccessStaticPositioning(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.Init()
+
+	// Move cursor up to "b"
+	picker.Update(tea.KeyMsg{Type: tea.KeyUp})
+
+	// alt+1 should still select "b" (static: second from bottom), not "a"
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}, Alt: true}
+	_, cmd := picker.Update(msg)
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	result := picker.Result()
+	if result.Selected.Path != "/b" {
+		t.Errorf("expected /b (static position), got %s", result.Selected.Path)
+	}
+}
+
+func TestQuickAccessDisabledByDefault(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+	}
+	picker := NewPicker(items, WithCursorAtEnd())
+	picker.Init()
+
+	// alt+1 should NOT trigger quick access when not enabled
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}, Alt: true}
+	_, cmd := picker.Update(msg)
+	if cmd != nil {
+		t.Error("quick access should not work when not enabled")
+	}
+}
+
+func TestQuickAccessDisabledModifier(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+	}
+	picker := NewPicker(items, WithQuickAccess("disabled"), WithCursorAtEnd())
+	picker.Init()
+
+	// alt+1 should NOT trigger quick access when disabled
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}, Alt: true}
+	_, cmd := picker.Update(msg)
+	if cmd != nil {
+		t.Error("quick access should not work when disabled")
+	}
+}
+
+func TestQuickAccessNumbersRendered(t *testing.T) {
+	items := []Item{
+		{Name: "aaa", Path: "/aaa"},
+		{Name: "bbb", Path: "/bbb"},
+		{Name: "ccc", Path: "/ccc"},
+		{Name: "ddd", Path: "/ddd"},
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	view := picker.View()
+	// Items above cursor (ddd) should show ⌥1 for ccc, ⌥2 for bbb, ⌥3 for aaa
+	if !containsSubstring(view, "⌥1") {
+		t.Error("view should contain ⌥1 label")
+	}
+	if !containsSubstring(view, "⌥3") {
+		t.Error("view should contain ⌥3 label")
+	}
+}
+
+func TestQuickAccessCtrlNumbersRendered(t *testing.T) {
+	items := []Item{
+		{Name: "aaa", Path: "/aaa"},
+		{Name: "bbb", Path: "/bbb"},
+	}
+	picker := NewPicker(items, WithQuickAccess("ctrl"), WithCursorAtEnd())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	view := picker.View()
+	if !containsSubstring(view, "^1") {
+		t.Error("view should contain ^1 label for ctrl modifier")
+	}
+}
+
+func TestQuickAccessNoNumberOnBottomItem(t *testing.T) {
+	items := []Item{
+		{Name: "aaa", Path: "/aaa"},
+		{Name: "bbb", Path: "/bbb"},
+		{Name: "ccc", Path: "/ccc"},
+	}
+	// Static numbering: aaa=⌥2, bbb=⌥1, ccc=no number (bottom item)
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	view := picker.View()
+	if !containsSubstring(view, "⌥1") {
+		t.Error("view should contain ⌥1 for second from bottom")
+	}
+	if !containsSubstring(view, "⌥2") {
+		t.Error("view should contain ⌥2 for third from bottom")
+	}
+}
+
+func TestQuickAccessHelpOverlayAlt(t *testing.T) {
+	items := []Item{{Name: "test", Path: "/test"}}
+	picker := NewPicker(items, WithQuickAccess("alt"))
+	picker.width = 60
+	picker.height = 20
+	picker.showHelp = true
+
+	view := picker.View()
+	if !containsSubstring(view, "Quick select") {
+		t.Error("help view should contain Quick select entry")
+	}
+	if !containsSubstring(view, "A-1..9") {
+		t.Error("help view should show A-1..9 key hint for alt modifier")
+	}
+}
+
+func TestQuickAccessHelpOverlayCtrl(t *testing.T) {
+	items := []Item{{Name: "test", Path: "/test"}}
+	picker := NewPicker(items, WithQuickAccess("ctrl"))
+	picker.width = 60
+	picker.height = 20
+	picker.showHelp = true
+
+	view := picker.View()
+	if !containsSubstring(view, "Quick select") {
+		t.Error("help view should contain Quick select entry")
+	}
+	if !containsSubstring(view, "C-1..9") {
+		t.Error("help view should show C-1..9 key hint for ctrl modifier")
+	}
+}
+
+func TestQuickAccessHelpOverlayDisabled(t *testing.T) {
+	items := []Item{{Name: "test", Path: "/test"}}
+	picker := NewPicker(items, WithQuickAccess("disabled"))
+	picker.width = 60
+	picker.height = 20
+	picker.showHelp = true
+
+	view := picker.View()
+	if containsSubstring(view, "Quick select") {
+		t.Error("help view should NOT contain Quick select when disabled")
+	}
+}

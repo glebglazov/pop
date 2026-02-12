@@ -55,6 +55,7 @@ type Config struct {
 	Projects               []ProjectEntry  `toml:"projects"`
 	ExcludeCurrentDir      bool            `toml:"exclude_current_dir"`
 	DisambiguationStrategy string          `toml:"disambiguation_strategy"`
+	QuickAccessModifier    string          `toml:"quick_access_modifier"`
 	Worktree               *WorktreeConfig `toml:"worktree"`
 }
 
@@ -71,6 +72,17 @@ func (c *Config) GetDisambiguationStrategy() string {
 		return "full_path"
 	}
 	return "first_unique_segment"
+}
+
+// GetQuickAccessModifier returns the configured quick access modifier.
+// Defaults to "alt" when not set or invalid.
+func (c *Config) GetQuickAccessModifier() string {
+	switch c.QuickAccessModifier {
+	case "alt", "ctrl", "disabled":
+		return c.QuickAccessModifier
+	default:
+		return "alt"
+	}
 }
 
 // DefaultConfigPath returns the default config file path

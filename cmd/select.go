@@ -183,7 +183,8 @@ func runSelect(cmd *cobra.Command, args []string) error {
 
 	// Run picker loop
 	for {
-		result, err := ui.Run(items, ui.WithCursorAtEnd(), ui.WithKillSession(), ui.WithReset())
+		quickAccessModifier := cfg.GetQuickAccessModifier()
+		result, err := ui.Run(items, ui.WithCursorAtEnd(), ui.WithKillSession(), ui.WithReset(), ui.WithQuickAccess(quickAccessModifier))
 		if err != nil {
 			return err
 		}

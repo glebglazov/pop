@@ -71,6 +71,9 @@ type Picker struct {
 	showReset       bool
 	cursorAtEnd     bool
 
+	// Quick access: modifier+digit to select items above cursor
+	quickAccessModifier string // "alt" (default), "ctrl", or "disabled"
+
 	// Cursor memory: remembers selected item per filter query
 	cursorMemory map[string]cursorState // filter query -> cursor state
 	lastQuery    string                 // previous filter query (to detect changes)
@@ -143,6 +146,16 @@ func WithReset() PickerOption {
 func WithCursorAtEnd() PickerOption {
 	return func(p *Picker) {
 		p.cursorAtEnd = true
+	}
+}
+
+// WithQuickAccess enables quick access shortcuts with the given modifier
+func WithQuickAccess(modifier string) PickerOption {
+	return func(p *Picker) {
+		if modifier == "" {
+			modifier = "alt"
+		}
+		p.quickAccessModifier = modifier
 	}
 }
 
@@ -321,6 +334,18 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.filter()
 			return p, nil
 
+		case p.isQuickAccessKey(msg):
+			n := p.quickAccessDigit(msg)
+			targetIdx := len(p.filtered) - 1 - n
+			if targetIdx >= 0 && targetIdx < len(p.filtered) {
+				p.result = Result{
+					Selected: &p.filtered[targetIdx],
+					Action:   ActionSelect,
+				}
+				return p, tea.Quit
+			}
+			return p, nil
+
 		default:
 			// Check custom commands
 			for _, cc := range p.customCommands {
@@ -461,6 +486,58 @@ func formatKeyHint(b key.Binding) string {
 	return k
 }
 
+// isQuickAccessKey returns true if the key message is a quick access trigger
+func (p *Picker) isQuickAccessKey(msg tea.KeyMsg) bool {
+	return p.quickAccessDigit(msg) >= 1
+}
+
+// quickAccessDigit extracts the digit (1-9) from a quick access key message.
+// Returns 0 if the key is not a valid quick access trigger.
+func (p *Picker) quickAccessDigit(msg tea.KeyMsg) int {
+	switch p.quickAccessModifier {
+	case "alt":
+		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Alt {
+			r := msg.Runes[0]
+			if r >= '1' && r <= '9' {
+				return int(r - '0')
+			}
+		}
+	case "ctrl":
+		for i := 1; i <= 9; i++ {
+			b := key.NewBinding(key.WithKeys(fmt.Sprintf("ctrl+%d", i)))
+			if key.Matches(msg, b) {
+				return i
+			}
+		}
+	}
+	return 0
+}
+
+// quickAccessLabel returns the display label for a quick access number (e.g., "^1", "⌥2")
+func (p *Picker) quickAccessLabel(n int) string {
+	switch p.quickAccessModifier {
+	case "ctrl":
+		return fmt.Sprintf("^%d ", n)
+	case "alt":
+		return fmt.Sprintf("⌥%d ", n)
+	default:
+		return "   "
+	}
+}
+
+// quickAccessPadding returns the blank padding matching quickAccessLabel width
+func (p *Picker) quickAccessPadding() string {
+	if p.quickAccessEnabled() {
+		return "   "
+	}
+	return "  "
+}
+
+// quickAccessEnabled returns true if quick access is active (not disabled or empty)
+func (p *Picker) quickAccessEnabled() bool {
+	return p.quickAccessModifier != "" && p.quickAccessModifier != "disabled"
+}
+
 // adjustScroll ensures the cursor is visible by adjusting scroll offset only when necessary
 func (p *Picker) adjustScroll() {
 	visible := p.height
@@ -528,6 +605,13 @@ func (p *Picker) viewHelp() string {
 	}
 	if p.showNew {
 		entries = append(entries, helpEntry{"C-n", "New"})
+	}
+
+	switch p.quickAccessModifier {
+	case "alt":
+		entries = append(entries, helpEntry{"A-1..9", "Quick select"})
+	case "ctrl":
+		entries = append(entries, helpEntry{"C-1..9", "Quick select"})
 	}
 
 	for _, cc := range p.customCommands {
@@ -639,19 +723,34 @@ func (p *Picker) viewNormal() string {
 			line = " " + item.Name
 		}
 
+		prefixWidth := len(p.quickAccessPadding())
+		distFromBottom := len(p.filtered) - 1 - i
+		hasNumber := p.quickAccessEnabled() && distFromBottom >= 1 && distFromBottom <= 9
+
 		if i == p.cursor {
 			// Selected: blue pipe + highlighted background
 			// Pad to full width for consistent highlight
 			if p.width > 0 {
-				padding := p.width - len([]rune(line)) - 2
+				padding := p.width - len([]rune(line)) - prefixWidth
 				if padding > 0 {
 					line += strings.Repeat(" ", padding)
 				}
 			}
-			b.WriteString(pipeStyle.Render("▌ "))
+			b.WriteString(pipeStyle.Render("▌"))
+			if hasNumber {
+				numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+				b.WriteString(numStyle.Render(fmt.Sprintf("%d", distFromBottom)))
+			} else {
+				b.WriteString(strings.Repeat(" ", prefixWidth-1))
+			}
 			b.WriteString(selectedStyle.Render(line))
 		} else {
-			b.WriteString("  ")
+			if hasNumber {
+				numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+				b.WriteString(numStyle.Render(p.quickAccessLabel(distFromBottom)))
+			} else {
+				b.WriteString(p.quickAccessPadding())
+			}
 			b.WriteString(line)
 		}
 		b.WriteString("\n")

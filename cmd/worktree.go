@@ -47,7 +47,9 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 	// Load config (optional, don't fail if missing)
 	var customCommands []ui.CustomCommand
+	quickAccessModifier := "alt"
 	if cfg, err := config.Load(config.DefaultConfigPath()); err == nil {
+		quickAccessModifier = cfg.GetQuickAccessModifier()
 		if cfg.Worktree != nil {
 			for _, wc := range cfg.Worktree.Commands {
 				customCommands = append(customCommands, ui.CustomCommand{
@@ -61,7 +63,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 
 	for {
-		result, err := showWorktreePicker(ctx, customCommands)
+		result, err := showWorktreePicker(ctx, customCommands, quickAccessModifier)
 		if err != nil {
 			return err
 		}
@@ -108,7 +110,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.CustomCommand) (ui.Result, error) {
+func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.CustomCommand, quickAccessModifier string) (ui.Result, error) {
 	worktrees, err := project.ListWorktrees(ctx)
 	if err != nil {
 		return ui.Result{Action: ui.ActionCancel}, fmt.Errorf("failed to list worktrees: %w", err)
@@ -156,6 +158,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.CustomComm
 		ui.WithContext(),
 		ui.WithCursorAtEnd(),
 		ui.WithReset(),
+		ui.WithQuickAccess(quickAccessModifier),
 	}
 	if len(customCommands) > 0 {
 		opts = append(opts, ui.WithCustomCommands(customCommands))
