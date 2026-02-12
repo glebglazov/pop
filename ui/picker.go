@@ -739,7 +739,7 @@ func (p *Picker) viewNormal() string {
 			b.WriteString(pipeStyle.Render("▌"))
 			if hasNumber {
 				numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-				b.WriteString(numStyle.Render(fmt.Sprintf("%d", distFromBottom)))
+				b.WriteString(numStyle.Render(fmt.Sprintf("%d ", distFromBottom)))
 			} else {
 				b.WriteString(strings.Repeat(" ", prefixWidth-1))
 			}
