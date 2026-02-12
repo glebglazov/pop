@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -52,6 +53,7 @@ func (p ProjectEntry) GetDisplayDepth() int {
 }
 
 type Config struct {
+	Includes               []string        `toml:"includes"`
 	Projects               []ProjectEntry  `toml:"projects"`
 	ExcludeCurrentDir      bool            `toml:"exclude_current_dir"`
 	DisambiguationStrategy string          `toml:"disambiguation_strategy"`
@@ -101,10 +103,31 @@ func DefaultConfigPathWith(d *Deps) string {
 
 // Load reads the config file from the given path
 func Load(path string) (*Config, error) {
+	return LoadWith(defaultDeps, path)
+}
+
+// LoadWith reads the config file using provided dependencies for ~ expansion
+func LoadWith(d *Deps, path string) (*Config, error) {
 	var cfg Config
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return nil, err
 	}
+
+	configDir := filepath.Dir(path)
+	for _, include := range cfg.Includes {
+		expanded := expandHomeWith(d, include)
+		if !filepath.IsAbs(expanded) {
+			expanded = filepath.Join(configDir, expanded)
+		}
+
+		var included Config
+		if _, err := toml.DecodeFile(expanded, &included); err != nil {
+			return nil, fmt.Errorf("loading include %q: %w", include, err)
+		}
+
+		cfg.Projects = append(cfg.Projects, included.Projects...)
+	}
+
 	return &cfg, nil
 }
 

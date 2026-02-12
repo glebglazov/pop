@@ -700,6 +700,219 @@ func TestRemoveSubsumedPaths(t *testing.T) {
 	}
 }
 
+func TestLoadIncludes(t *testing.T) {
+	t.Run("basic include merges projects", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("work.toml", `projects = [{ path = "~/Work/*" }]`)
+		configPath := writeFile("config.toml", `
+includes = ["work.toml"]
+projects = [{ path = "~/Personal/*" }]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if len(cfg.Projects) != 2 {
+			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
+		}
+		if cfg.Projects[0].Path != "~/Personal/*" {
+			t.Errorf("projects[0].Path = %q, want %q", cfg.Projects[0].Path, "~/Personal/*")
+		}
+		if cfg.Projects[1].Path != "~/Work/*" {
+			t.Errorf("projects[1].Path = %q, want %q", cfg.Projects[1].Path, "~/Work/*")
+		}
+	})
+
+	t.Run("multiple includes in order", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("a.toml", `projects = [{ path = "/a" }]`)
+		writeFile("b.toml", `projects = [{ path = "/b" }]`)
+		configPath := writeFile("config.toml", `
+includes = ["a.toml", "b.toml"]
+projects = [{ path = "/main" }]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if len(cfg.Projects) != 3 {
+			t.Fatalf("got %d projects, want 3", len(cfg.Projects))
+		}
+		expected := []string{"/main", "/a", "/b"}
+		for i, want := range expected {
+			if cfg.Projects[i].Path != want {
+				t.Errorf("projects[%d].Path = %q, want %q", i, cfg.Projects[i].Path, want)
+			}
+		}
+	})
+
+	t.Run("tilde expansion in include path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// Create the include file inside a "home" directory
+		homeDir := filepath.Join(tmpDir, "home")
+		os.MkdirAll(filepath.Join(homeDir, ".config", "pop"), 0755)
+
+		includePath := filepath.Join(homeDir, ".config", "pop", "extra.toml")
+		os.WriteFile(includePath, []byte(`projects = [{ path = "/extra" }]`), 0644)
+
+		configPath := filepath.Join(tmpDir, "config.toml")
+		os.WriteFile(configPath, []byte(`
+includes = ["~/.config/pop/extra.toml"]
+projects = [{ path = "/main" }]
+`), 0644)
+
+		d := &Deps{
+			FS: &deps.MockFileSystem{
+				UserHomeDirFunc: func() (string, error) {
+					return homeDir, nil
+				},
+			},
+		}
+
+		cfg, err := LoadWith(d, configPath)
+		if err != nil {
+			t.Fatalf("LoadWith() error: %v", err)
+		}
+		if len(cfg.Projects) != 2 {
+			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
+		}
+		if cfg.Projects[1].Path != "/extra" {
+			t.Errorf("projects[1].Path = %q, want %q", cfg.Projects[1].Path, "/extra")
+		}
+	})
+
+	t.Run("relative path resolved against config dir", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		subDir := filepath.Join(tmpDir, "conf")
+		os.MkdirAll(subDir, 0755)
+
+		os.WriteFile(filepath.Join(subDir, "extra.toml"), []byte(`projects = [{ path = "/extra" }]`), 0644)
+		configPath := filepath.Join(subDir, "config.toml")
+		os.WriteFile(configPath, []byte(`
+includes = ["extra.toml"]
+projects = [{ path = "/main" }]
+`), 0644)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if len(cfg.Projects) != 2 {
+			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
+		}
+	})
+
+	t.Run("missing include file returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		os.WriteFile(configPath, []byte(`
+includes = ["nonexistent.toml"]
+projects = [{ path = "/main" }]
+`), 0644)
+
+		_, err := Load(configPath)
+		if err == nil {
+			t.Fatal("expected error for missing include, got nil")
+		}
+	})
+
+	t.Run("included file scalar fields are ignored", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			os.WriteFile(p, []byte(content), 0644)
+			return p
+		}
+
+		writeFile("extra.toml", `
+exclude_current_dir = true
+disambiguation_strategy = "full_path"
+quick_access_modifier = "ctrl"
+projects = [{ path = "/extra" }]
+
+[[worktree.commands]]
+key = "ctrl-x"
+label = "test"
+command = "echo test"
+`)
+		configPath := writeFile("config.toml", `
+includes = ["extra.toml"]
+projects = [{ path = "/main" }]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		// Main config values should be preserved (defaults)
+		if cfg.ExcludeCurrentDir {
+			t.Error("ExcludeCurrentDir should be false (main config default)")
+		}
+		if cfg.GetDisambiguationStrategy() != "first_unique_segment" {
+			t.Errorf("DisambiguationStrategy = %q, want %q", cfg.GetDisambiguationStrategy(), "first_unique_segment")
+		}
+		if cfg.GetQuickAccessModifier() != "alt" {
+			t.Errorf("QuickAccessModifier = %q, want %q", cfg.GetQuickAccessModifier(), "alt")
+		}
+		if cfg.Worktree != nil {
+			t.Error("Worktree should be nil (from main config)")
+		}
+		// But projects should be merged
+		if len(cfg.Projects) != 2 {
+			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
+		}
+	})
+
+	t.Run("empty includes array works fine", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		os.WriteFile(configPath, []byte(`
+includes = []
+projects = [{ path = "/main" }]
+`), 0644)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if len(cfg.Projects) != 1 {
+			t.Fatalf("got %d projects, want 1", len(cfg.Projects))
+		}
+	})
+
+	t.Run("no includes field works fine", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		os.WriteFile(configPath, []byte(`projects = [{ path = "/main" }]`), 0644)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if len(cfg.Projects) != 1 {
+			t.Fatalf("got %d projects, want 1", len(cfg.Projects))
+		}
+	})
+}
+
 func TestExpandProjectsSubsumption(t *testing.T) {
 	// Integration test: broad glob + specific glob with different display_depth
 	tmpDir := t.TempDir()

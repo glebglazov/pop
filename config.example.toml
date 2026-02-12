@@ -1,6 +1,10 @@
 # pop configuration
 # Place this file at ~/.config/pop/config.toml
 
+# Include additional config files (only their projects entries are merged)
+# Paths support ~ expansion and are resolved relative to this config file
+# includes = ["work.toml", "~/Dev/personal.toml"]
+
 # List of project directories
 # Each entry is an object with:
 #   - path (required): exact path or glob pattern
