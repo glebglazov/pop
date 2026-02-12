@@ -363,7 +363,7 @@ func TestQuickAccessAltDigitOutOfRange(t *testing.T) {
 	}
 }
 
-func TestQuickAccessStaticPositioning(t *testing.T) {
+func TestQuickAccessCursorRelativePositioning(t *testing.T) {
 	items := []Item{
 		{Name: "a", Path: "/a"},
 		{Name: "b", Path: "/b"},
@@ -372,18 +372,18 @@ func TestQuickAccessStaticPositioning(t *testing.T) {
 	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
 	picker.Init()
 
-	// Move cursor up to "b"
+	// Move cursor up to "b" (index 1)
 	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 
-	// alt+1 should still select "b" (static: second from bottom), not "a"
+	// alt+1 should select item above cursor = "a" (cursor-relative)
 	msg := tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}
 	_, cmd := picker.Update(msg)
 	if cmd == nil {
 		t.Fatal("expected quit command")
 	}
 	result := picker.Result()
-	if result.Selected.Path != "/b" {
-		t.Errorf("expected /b (static position), got %s", result.Selected.Path)
+	if result.Selected.Path != "/a" {
+		t.Errorf("expected /a (above cursor), got %s", result.Selected.Path)
 	}
 }
 
@@ -521,5 +521,175 @@ func TestQuickAccessHelpOverlayDisabled(t *testing.T) {
 	view := picker.viewHelp()
 	if containsSubstring(view, "Quick select") {
 		t.Error("help view should NOT contain Quick select when disabled")
+	}
+}
+
+func TestQuickAccessCursorRelativeMovesWithCursor(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+		{Name: "d", Path: "/d"},
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.Init()
+
+	// Move cursor up twice: cursor now at index 1 (item "b")
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+
+	// alt+1 should select item above cursor = index 0 = "a"
+	msg := tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}
+	_, cmd := picker.Update(msg)
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	result := picker.Result()
+	if result.Selected.Path != "/a" {
+		t.Errorf("expected /a (above cursor), got %s", result.Selected.Path)
+	}
+}
+
+func TestQuickAccessCursorRelativeRendering(t *testing.T) {
+	items := []Item{
+		{Name: "aaa", Path: "/aaa"},
+		{Name: "bbb", Path: "/bbb"},
+		{Name: "ccc", Path: "/ccc"},
+		{Name: "ddd", Path: "/ddd"},
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	// Move cursor up to "ccc" (index 2)
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+
+	view := picker.viewNormal()
+	// Items above cursor (bbb=⌥1, aaa=⌥2) should have labels
+	if !containsSubstring(view, "⌥1") {
+		t.Error("view should contain ⌥1 for item above cursor")
+	}
+	if !containsSubstring(view, "⌥2") {
+		t.Error("view should contain ⌥2 for second item above cursor")
+	}
+}
+
+func TestQuickAccessNoNumbersBelowCursor(t *testing.T) {
+	items := []Item{
+		{Name: "aaa", Path: "/aaa"},
+		{Name: "bbb", Path: "/bbb"},
+		{Name: "ccc", Path: "/ccc"},
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	// Move cursor up to "bbb" (index 1)
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+
+	// alt+1 should select "aaa" (above cursor)
+	msg := tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}
+	_, cmd := picker.Update(msg)
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	if picker.Result().Selected.Path != "/aaa" {
+		t.Errorf("expected /aaa, got %s", picker.Result().Selected.Path)
+	}
+}
+
+func TestQuickAccessNearTopFewerShortcuts(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.Init()
+
+	// Move cursor to index 1 ("b") — only 1 item above
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+
+	// alt+1 should work (selects "a")
+	msg1 := tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}
+	_, cmd := picker.Update(msg1)
+	if cmd == nil {
+		t.Fatal("expected quit command for alt+1")
+	}
+	if picker.Result().Selected.Path != "/a" {
+		t.Errorf("expected /a, got %s", picker.Result().Selected.Path)
+	}
+}
+
+func TestQuickAccessNearTopOutOfRange(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.Init()
+
+	// Move cursor to index 1 ("b") — only 1 item above
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+
+	// alt+2 should do nothing (only 1 item above cursor)
+	msg2 := tea.KeyPressMsg{Code: '2', Mod: tea.ModAlt}
+	_, cmd := picker.Update(msg2)
+	if cmd != nil {
+		t.Error("expected no quit command for alt+2 with only 1 item above cursor")
+	}
+}
+
+func TestQuickAccessScrollMargin(t *testing.T) {
+	// Create 20 items
+	var items []Item
+	for i := 0; i < 20; i++ {
+		name := string(rune('a' + i))
+		items = append(items, Item{
+			Name: name,
+			Path: "/" + name,
+		})
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.height = 15
+	picker.Init()
+
+	// Move cursor up 4 times: cursor at index 15
+	for i := 0; i < 4; i++ {
+		picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	}
+
+	// Cursor at 15, scroll should show at least 9 items above cursor
+	// So scroll should be <= 15 - 9 = 6
+	if picker.scroll > 6 {
+		t.Errorf("expected scroll <= 6 for QA margin, got %d (cursor=%d)", picker.scroll, picker.cursor)
+	}
+}
+
+func TestQuickAccessScrollMarginNearTop(t *testing.T) {
+	// Create 20 items
+	var items []Item
+	for i := 0; i < 20; i++ {
+		name := string(rune('a' + i))
+		items = append(items, Item{
+			Name: name,
+			Path: "/" + name,
+		})
+	}
+	picker := NewPicker(items, WithQuickAccess("alt"), WithCursorAtEnd())
+	picker.height = 15
+	picker.Init()
+
+	// Move cursor to index 3 (near top)
+	for i := 0; i < 16; i++ {
+		picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	}
+
+	// Near top, scroll should be 0 (can't scroll further)
+	if picker.scroll != 0 {
+		t.Errorf("expected scroll = 0 near top, got %d (cursor=%d)", picker.scroll, picker.cursor)
 	}
 }

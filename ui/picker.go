@@ -353,7 +353,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case p.isQuickAccessKey(msg):
 			n := p.quickAccessDigit(msg)
-			targetIdx := len(p.filtered) - 1 - n
+			targetIdx := p.cursor - n
 			if targetIdx >= 0 && targetIdx < len(p.filtered) {
 				p.result = Result{
 					Selected: &p.filtered[targetIdx],
@@ -564,15 +564,25 @@ func (p *Picker) adjustScroll() {
 		return
 	}
 
-	// If cursor is above visible area, scroll up
-	if p.cursor < p.scroll {
-		p.scroll = p.cursor
+	// Determine scroll margin: when quick access is enabled, try to keep
+	// 9 items visible above cursor so QA-labeled items are on screen
+	margin := 0
+	if p.quickAccessEnabled() {
+		margin = 9
+		if margin >= visible {
+			margin = visible - 1
+		}
+	}
+
+	// If cursor is too close to top of visible area (within margin), scroll up
+	if p.cursor-p.scroll < margin {
+		p.scroll = p.cursor - margin
 	}
 	// If cursor is below visible area, scroll down
 	if p.cursor >= p.scroll+visible {
 		p.scroll = p.cursor - visible + 1
 	}
-	// Ensure scroll doesn't go negative or too far
+	// Clamp scroll bounds
 	if p.scroll < 0 {
 		p.scroll = 0
 	}
@@ -748,8 +758,8 @@ func (p *Picker) viewNormal() string {
 		}
 
 		prefixWidth := len(p.quickAccessPadding())
-		distFromBottom := len(p.filtered) - 1 - i
-		hasNumber := p.quickAccessEnabled() && distFromBottom >= 1 && distFromBottom <= 9
+		distFromCursor := p.cursor - i
+		hasNumber := p.quickAccessEnabled() && distFromCursor >= 1 && distFromCursor <= 9
 
 		if i == p.cursor {
 			// Selected: blue pipe + highlighted background
@@ -763,7 +773,7 @@ func (p *Picker) viewNormal() string {
 			b.WriteString(pipeStyle.Render("▌"))
 			if hasNumber {
 				numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-				b.WriteString(numStyle.Render(fmt.Sprintf("%d ", distFromBottom)))
+				b.WriteString(numStyle.Render(fmt.Sprintf("%d ", distFromCursor)))
 			} else {
 				b.WriteString(strings.Repeat(" ", prefixWidth-1))
 			}
@@ -771,7 +781,7 @@ func (p *Picker) viewNormal() string {
 		} else {
 			if hasNumber {
 				numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-				b.WriteString(numStyle.Render(p.quickAccessLabel(distFromBottom)))
+				b.WriteString(numStyle.Render(p.quickAccessLabel(distFromCursor)))
 			} else {
 				b.WriteString(p.quickAccessPadding())
 			}
