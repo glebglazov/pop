@@ -2,10 +2,10 @@
 # Place this file at ~/.config/pop/config.toml
 
 # List of project directories
-# Supports:
-#   - Exact paths: ~/.local/share/chezmoi
-#   - Glob patterns: ~/Dev/*/* (matches ~/Dev/personal/foo, ~/Dev/work/bar)
+# Each entry is an object with:
+#   - path (required): exact path or glob pattern
+#   - display_depth (optional, default 1): number of trailing path segments to show
 projects = [
-    "~/.local/share/chezmoi",
-    "~/Dev/*/*",
+    { path = "~/.local/share/chezmoi" },
+    { path = "~/Dev/*/*", display_depth = 2 },
 ]
