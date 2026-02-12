@@ -63,6 +63,7 @@ type Picker struct {
 	width    int
 	result   Result
 
+	showHelp        bool
 	showDelete      bool
 	showNew         bool
 	showContext     bool
@@ -195,6 +196,20 @@ func (p *Picker) Init() tea.Cmd {
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Help overlay: esc dismisses, all other keys are swallowed
+		if p.showHelp {
+			if key.Matches(msg, keys.Quit) {
+				p.showHelp = false
+			}
+			return p, nil
+		}
+
+		// Toggle help overlay
+		if key.Matches(msg, keys.Help) {
+			p.showHelp = true
+			return p, nil
+		}
+
 		switch {
 		case key.Matches(msg, keys.Quit):
 			p.result = Result{Action: ActionCancel}
@@ -428,29 +443,7 @@ func (p *Picker) findItemIndex(path string) int {
 
 // buildHints returns the hints string based on enabled features
 func (p *Picker) buildHints() string {
-	var hints []string
-
-	hints = append(hints, "↑/↓ navigate", "C-b/C-f page", "C-u clear", "Enter select", "Esc quit")
-
-	if p.showKillSession {
-		hints = append(hints, "C-k kill session")
-	}
-	if p.showReset {
-		hints = append(hints, "C-r reset")
-	}
-	if p.showDelete {
-		hints = append(hints, "⌫ delete")
-	}
-	if p.showNew {
-		hints = append(hints, "C-n new")
-	}
-
-	// Add custom command hints
-	for _, cc := range p.customCommands {
-		hints = append(hints, formatKeyHint(cc.Binding)+" "+cc.Label)
-	}
-
-	return "  " + strings.Join(hints, " · ")
+	return "  Enter select · Esc quit · F1 help"
 }
 
 // formatKeyHint converts a key binding to a display-friendly hint format
@@ -501,6 +494,105 @@ func (p *Picker) adjustScroll() {
 }
 
 func (p *Picker) View() string {
+	if p.showHelp {
+		return p.viewHelp()
+	}
+	return p.viewNormal()
+}
+
+func (p *Picker) viewHelp() string {
+	var b strings.Builder
+
+	type helpEntry struct {
+		key  string
+		desc string
+	}
+
+	entries := []helpEntry{
+		{"↑/↓ C-p/C-n", "Navigate"},
+		{"C-b/C-f", "Page up / down"},
+		{"C-u", "Clear filter"},
+		{"Enter", "Select"},
+		{"Esc", "Quit"},
+	}
+
+	if p.showKillSession {
+		entries = append(entries, helpEntry{"C-k", "Kill tmux session"})
+	}
+	if p.showReset {
+		entries = append(entries, helpEntry{"C-r", "Reset history"})
+	}
+	if p.showDelete {
+		entries = append(entries, helpEntry{"⌫", "Delete"})
+		entries = append(entries, helpEntry{"C-x", "Force delete"})
+	}
+	if p.showNew {
+		entries = append(entries, helpEntry{"C-n", "New"})
+	}
+
+	for _, cc := range p.customCommands {
+		entries = append(entries, helpEntry{formatKeyHint(cc.Binding), cc.Label})
+	}
+
+	// Find max key display width for alignment
+	maxKeyWidth := 0
+	for _, e := range entries {
+		if w := lipgloss.Width(e.key); w > maxKeyWidth {
+			maxKeyWidth = w
+		}
+	}
+
+	// Build help lines
+	var helpLines []string
+	for _, e := range entries {
+		padding := maxKeyWidth - lipgloss.Width(e.key)
+		helpLines = append(helpLines, "  "+e.key+strings.Repeat(" ", padding)+"   "+e.desc)
+	}
+
+	// Push content to bottom
+	emptyLines := p.height - len(helpLines)
+	for i := 0; i < emptyLines; i++ {
+		b.WriteString("\n")
+	}
+
+	for _, line := range helpLines {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	// Input box (same as normal mode but empty)
+	boxWidth := p.width
+	if boxWidth < 20 {
+		boxWidth = 40
+	}
+	innerWidth := boxWidth - 2
+
+	b.WriteString("┌")
+	b.WriteString(strings.Repeat("─", innerWidth))
+	b.WriteString("┐\n")
+
+	title := " Help"
+	titlePadding := innerWidth - len(title)
+	if titlePadding < 0 {
+		titlePadding = 0
+	}
+	b.WriteString("│")
+	b.WriteString(title)
+	b.WriteString(strings.Repeat(" ", titlePadding))
+	b.WriteString("│\n")
+
+	b.WriteString("└")
+	b.WriteString(strings.Repeat("─", innerWidth))
+	b.WriteString("┘\n")
+
+	// Hints line
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	b.WriteString(hintStyle.Render("  Esc back"))
+
+	return b.String()
+}
+
+func (p *Picker) viewNormal() string {
 	var b strings.Builder
 
 	// Styles
@@ -628,6 +720,7 @@ type keyMap struct {
 	KillSession  key.Binding
 	Reset        key.Binding
 	ClearInput   key.Binding
+	Help         key.Binding
 }
 
 var keys = keyMap{
@@ -666,6 +759,9 @@ var keys = keyMap{
 	),
 	ClearInput: key.NewBinding(
 		key.WithKeys("alt+backspace", "ctrl+u"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("f1"),
 	),
 }
 
