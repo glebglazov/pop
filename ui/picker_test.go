@@ -56,14 +56,14 @@ func TestFormatKeyHint(t *testing.T) {
 	}
 }
 
-func TestWithCustomCommands(t *testing.T) {
-	commands := []CustomCommand{
+func TestWithUserDefinedCommands(t *testing.T) {
+	commands := []UserDefinedCommand{
 		{Key: "ctrl-l", Label: "cleanup", Command: "echo cleanup", Exit: true},
 		{Key: "ctrl-o", Label: "open", Command: "echo open", Exit: false},
 	}
 
 	items := []Item{{Name: "test", Path: "/test"}}
-	picker := NewPicker(items, WithCustomCommands(commands))
+	picker := NewPicker(items, WithUserDefinedCommands(commands))
 
 	if len(picker.customCommands) != 2 {
 		t.Errorf("got %d custom commands, want 2", len(picker.customCommands))
@@ -121,13 +121,13 @@ func containsSubstringHelper(s, substr string) bool {
 	return false
 }
 
-func TestCustomCommandKeyMatching(t *testing.T) {
-	commands := []CustomCommand{
+func TestUserDefinedCommandKeyMatching(t *testing.T) {
+	commands := []UserDefinedCommand{
 		{Key: "ctrl+o", Label: "test", Command: "echo test", Exit: true},
 	}
 
 	items := []Item{{Name: "test", Path: "/test"}}
-	picker := NewPicker(items, WithCustomCommands(commands))
+	picker := NewPicker(items, WithUserDefinedCommands(commands))
 
 	// Simulate ctrl+o key press
 	msg := tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}
@@ -281,13 +281,13 @@ func TestHelpViewConditionalBindings(t *testing.T) {
 	}
 }
 
-func TestHelpViewCustomCommands(t *testing.T) {
-	commands := []CustomCommand{
+func TestHelpViewUserDefinedCommands(t *testing.T) {
+	commands := []UserDefinedCommand{
 		{Key: "ctrl+l", Label: "cleanup", Command: "echo cleanup", Exit: true},
 	}
 
 	items := []Item{{Name: "test", Path: "/test"}}
-	picker := NewPicker(items, WithCustomCommands(commands))
+	picker := NewPicker(items, WithUserDefinedCommands(commands))
 	picker.width = 60
 	picker.height = 20
 	picker.showHelp = true
@@ -691,5 +691,91 @@ func TestQuickAccessScrollMarginNearTop(t *testing.T) {
 	// Near top, scroll should be 0 (can't scroll further)
 	if picker.scroll != 0 {
 		t.Errorf("expected scroll = 0 near top, got %d (cursor=%d)", picker.scroll, picker.cursor)
+	}
+}
+
+func TestUserDefinedCommandOverridesDisabledBuiltin(t *testing.T) {
+	// ctrl+o is bound to OpenWindow, but OpenWindow is not enabled here.
+	// Custom command should work.
+	commands := []UserDefinedCommand{
+		{Key: "ctrl+o", Label: "custom open", Command: "echo open", Exit: true},
+	}
+	items := []Item{{Name: "test", Path: "/test"}}
+	picker := NewPicker(items, WithUserDefinedCommands(commands))
+	picker.Init()
+
+	msg := tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}
+	_, cmd := picker.Update(msg)
+
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	result := picker.Result()
+	if result.Action != ActionUserDefinedCommand {
+		t.Errorf("expected ActionUserDefinedCommand, got %v", result.Action)
+	}
+	if result.UserDefinedCommand == nil || result.UserDefinedCommand.Command != "echo open" {
+		t.Error("expected custom command result")
+	}
+}
+
+func TestUserDefinedCommandOverridesEnabledBuiltin(t *testing.T) {
+	// ctrl+k is bound to KillSession, and KillSession IS enabled.
+	// Custom command should still take priority.
+	commands := []UserDefinedCommand{
+		{Key: "ctrl+k", Label: "custom kill", Command: "echo kill", Exit: true},
+	}
+	items := []Item{{Name: "test", Path: "/test"}}
+	picker := NewPicker(items, WithKillSession(), WithUserDefinedCommands(commands))
+	picker.Init()
+
+	msg := tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}
+	_, cmd := picker.Update(msg)
+
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	result := picker.Result()
+	if result.Action != ActionUserDefinedCommand {
+		t.Errorf("expected ActionUserDefinedCommand, got %v (ActionKillSession=%v)", result.Action, ActionKillSession)
+	}
+}
+
+func TestHelpViewHidesOverriddenBuiltin(t *testing.T) {
+	commands := []UserDefinedCommand{
+		{Key: "ctrl+k", Label: "my custom cmd", Command: "echo x", Exit: true},
+	}
+	items := []Item{{Name: "test", Path: "/test"}}
+	picker := NewPicker(items, WithKillSession(), WithUserDefinedCommands(commands))
+	picker.width = 60
+	picker.height = 20
+	picker.showHelp = true
+
+	view := picker.viewHelp()
+
+	// Built-in "Kill tmux session" should NOT appear (overridden)
+	if containsSubstring(view, "Kill tmux session") {
+		t.Error("help view should not show overridden built-in 'Kill tmux session'")
+	}
+	// Custom command label should appear
+	if !containsSubstring(view, "my custom cmd") {
+		t.Error("help view should show custom command label")
+	}
+}
+
+func TestBuiltinWorksWhenNoOverride(t *testing.T) {
+	items := []Item{{Name: "test", Path: "/test"}}
+	picker := NewPicker(items, WithKillSession())
+	picker.Init()
+
+	msg := tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}
+	_, cmd := picker.Update(msg)
+
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	result := picker.Result()
+	if result.Action != ActionKillSession {
+		t.Errorf("expected ActionKillSession, got %v", result.Action)
 	}
 }

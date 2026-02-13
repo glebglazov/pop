@@ -26,8 +26,8 @@ func DefaultDeps() *Deps {
 
 var defaultDeps = DefaultDeps()
 
-// WorktreeCommand defines a custom command for the worktree picker
-type WorktreeCommand struct {
+// UserDefinedCommand defines a custom keybinding for a picker
+type UserDefinedCommand struct {
 	Key     string `toml:"key"`     // Key binding (e.g., "ctrl-l")
 	Label   string `toml:"label"`   // Display label for hints
 	Command string `toml:"command"` // Shell command to execute
@@ -36,7 +36,12 @@ type WorktreeCommand struct {
 
 // WorktreeConfig holds worktree-specific configuration
 type WorktreeConfig struct {
-	Commands []WorktreeCommand `toml:"commands"`
+	Commands []UserDefinedCommand `toml:"commands"`
+}
+
+// SelectConfig holds select-specific configuration
+type SelectConfig struct {
+	Commands []UserDefinedCommand `toml:"commands"`
 }
 
 // ProjectEntry represents a project configuration entry.
@@ -55,12 +60,14 @@ func (p ProjectEntry) GetDisplayDepth() int {
 }
 
 type Config struct {
-	Includes               []string        `toml:"includes"`
-	Projects               []ProjectEntry  `toml:"projects"`
-	ExcludeCurrentDir      bool            `toml:"exclude_current_dir"`
-	DisambiguationStrategy string          `toml:"disambiguation_strategy"`
-	QuickAccessModifier    string          `toml:"quick_access_modifier"`
-	Worktree               *WorktreeConfig `toml:"worktree"`
+	Includes               []string             `toml:"includes"`
+	Projects               []ProjectEntry       `toml:"projects"`
+	Commands               []UserDefinedCommand `toml:"commands"`
+	ExcludeCurrentDir      bool                 `toml:"exclude_current_dir"`
+	DisambiguationStrategy string               `toml:"disambiguation_strategy"`
+	QuickAccessModifier    string               `toml:"quick_access_modifier"`
+	Worktree               *WorktreeConfig      `toml:"worktree"`
+	Select                 *SelectConfig        `toml:"select"`
 
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
 }
@@ -89,6 +96,46 @@ func (c *Config) GetQuickAccessModifier() string {
 	default:
 		return "alt"
 	}
+}
+
+// CommandsForMode returns the effective custom commands for the given mode
+// ("select" or "worktree"). Section-specific commands override global ones
+// matched by key.
+func (c *Config) CommandsForMode(mode string) []UserDefinedCommand {
+	byKey := make(map[string]UserDefinedCommand)
+	for _, cmd := range c.Commands {
+		byKey[cmd.Key] = cmd
+	}
+
+	var sectionCmds []UserDefinedCommand
+	switch mode {
+	case "select":
+		if c.Select != nil {
+			sectionCmds = c.Select.Commands
+		}
+	case "worktree":
+		if c.Worktree != nil {
+			sectionCmds = c.Worktree.Commands
+		}
+	}
+	for _, cmd := range sectionCmds {
+		byKey[cmd.Key] = cmd
+	}
+
+	// Collect in stable order: global order first, then section-only additions
+	var result []UserDefinedCommand
+	seen := make(map[string]bool)
+	for _, cmd := range c.Commands {
+		result = append(result, byKey[cmd.Key])
+		seen[cmd.Key] = true
+	}
+	for _, cmd := range sectionCmds {
+		if !seen[cmd.Key] {
+			result = append(result, cmd)
+			seen[cmd.Key] = true
+		}
+	}
+	return result
 }
 
 // DefaultConfigPath returns the default config file path

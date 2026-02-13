@@ -25,8 +25,8 @@ func (i Item) FilterValue() string {
 	return i.Name
 }
 
-// CustomCommandResult holds info about a custom command to execute
-type CustomCommandResult struct {
+// UserDefinedCommandResult holds info about a custom command to execute
+type UserDefinedCommandResult struct {
 	Command string
 	Exit    bool
 }
@@ -36,7 +36,7 @@ type Result struct {
 	Selected      *Item
 	Action        Action
 	CursorIndex   int                  // cursor position at time of action
-	CustomCommand *CustomCommandResult // set when Action == ActionCustomCommand
+	UserDefinedCommand *UserDefinedCommandResult // set when Action == ActionUserDefinedCommand
 }
 
 // Action represents what action the user wants to take
@@ -51,7 +51,7 @@ const (
 	ActionKillSession
 	ActionReset
 	ActionOpenWindow
-	ActionCustomCommand
+	ActionUserDefinedCommand
 )
 
 // Picker is a fuzzy-searchable list picker
@@ -82,7 +82,7 @@ type Picker struct {
 	lastQuery    string                 // previous filter query (to detect changes)
 
 	// Custom commands
-	customCommands []CustomKeyBinding
+	customCommands []UserDefinedKeyBinding
 
 	// Icon legend entries for help view
 	iconLegend []iconLegendEntry
@@ -106,16 +106,16 @@ type cursorState struct {
 	screenPos int    // cursor position relative to visible area (0 = top of visible)
 }
 
-// CustomKeyBinding holds a custom key binding and its associated command
-type CustomKeyBinding struct {
+// UserDefinedKeyBinding holds a custom key binding and its associated command
+type UserDefinedKeyBinding struct {
 	Binding key.Binding
 	Command string
 	Label   string
 	Exit    bool
 }
 
-// CustomCommand defines a custom command to add to the picker
-type CustomCommand struct {
+// UserDefinedCommand defines a custom command to add to the picker
+type UserDefinedCommand struct {
 	Key     string
 	Label   string
 	Command string
@@ -208,12 +208,12 @@ func WithInitialCursorIndex(idx int) PickerOption {
 	}
 }
 
-// WithCustomCommands adds custom key bindings and commands to the picker
-func WithCustomCommands(commands []CustomCommand) PickerOption {
+// WithUserDefinedCommands adds custom key bindings and commands to the picker
+func WithUserDefinedCommands(commands []UserDefinedCommand) PickerOption {
 	return func(p *Picker) {
 		for _, cmd := range commands {
 			binding := key.NewBinding(key.WithKeys(cmd.Key))
-			p.customCommands = append(p.customCommands, CustomKeyBinding{
+			p.customCommands = append(p.customCommands, UserDefinedKeyBinding{
 				Binding: binding,
 				Command: cmd.Command,
 				Label:   cmd.Label,
@@ -349,6 +349,20 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return p, nil
 
+		case p.matchUserDefinedCommand(msg) != nil:
+			cc := p.matchUserDefinedCommand(msg)
+			p.result = Result{
+				Action: ActionUserDefinedCommand,
+				UserDefinedCommand: &UserDefinedCommandResult{
+					Command: cc.Command,
+					Exit:    cc.Exit,
+				},
+			}
+			if len(p.filtered) > 0 {
+				p.result.Selected = &p.filtered[p.cursor]
+			}
+			return p, tea.Quit
+
 		case key.Matches(msg, keys.Delete):
 			if p.showDelete && len(p.filtered) > 0 {
 				p.result = Result{
@@ -416,24 +430,6 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, tea.Quit
 			}
 			return p, nil
-
-		default:
-			// Check custom commands
-			for _, cc := range p.customCommands {
-				if key.Matches(msg, cc.Binding) {
-					p.result = Result{
-						Action: ActionCustomCommand,
-						CustomCommand: &CustomCommandResult{
-							Command: cc.Command,
-							Exit:    cc.Exit,
-						},
-					}
-					if len(p.filtered) > 0 {
-						p.result.Selected = &p.filtered[p.cursor]
-					}
-					return p, tea.Quit
-				}
-			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -557,6 +553,31 @@ func formatKeyHint(b key.Binding) string {
 	return k
 }
 
+// matchUserDefinedCommand returns the first user-defined command binding that
+// matches the given key message, or nil if none match.
+func (p *Picker) matchUserDefinedCommand(msg tea.KeyPressMsg) *UserDefinedKeyBinding {
+	for i := range p.customCommands {
+		if key.Matches(msg, p.customCommands[i].Binding) {
+			return &p.customCommands[i]
+		}
+	}
+	return nil
+}
+
+// isKeyOverridden returns true if any user-defined command uses one of the given keys.
+func (p *Picker) isKeyOverridden(builtinKeys ...string) bool {
+	for _, cc := range p.customCommands {
+		for _, ck := range cc.Binding.Keys() {
+			for _, bk := range builtinKeys {
+				if ck == bk {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // isQuickAccessKey returns true if the key message is a quick access trigger
 func (p *Picker) isQuickAccessKey(msg tea.KeyPressMsg) bool {
 	return p.quickAccessDigit(msg) >= 1
@@ -678,20 +699,22 @@ func (p *Picker) viewHelp() string {
 		{"Esc", "Quit"},
 	}
 
-	if p.showKillSession {
+	if p.showKillSession && !p.isKeyOverridden("ctrl+k") {
 		entries = append(entries, helpEntry{"C-k", "Kill tmux session"})
 	}
-	if p.showReset {
+	if p.showReset && !p.isKeyOverridden("ctrl+r") {
 		entries = append(entries, helpEntry{"C-r", "Reset history"})
 	}
-	if p.showOpenWindow {
+	if p.showOpenWindow && !p.isKeyOverridden("ctrl+o") {
 		entries = append(entries, helpEntry{"C-o", "Open in window"})
 	}
-	if p.showDelete {
+	if p.showDelete && !p.isKeyOverridden("backspace", "delete") {
 		entries = append(entries, helpEntry{"⌫", "Delete"})
+	}
+	if p.showDelete && !p.isKeyOverridden("ctrl+x") {
 		entries = append(entries, helpEntry{"C-x", "Force delete"})
 	}
-	if p.showNew {
+	if p.showNew && !p.isKeyOverridden("ctrl+n") {
 		entries = append(entries, helpEntry{"C-n", "New"})
 	}
 

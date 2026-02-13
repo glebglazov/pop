@@ -183,6 +183,17 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Load custom commands for select mode
+	var customCommands []ui.UserDefinedCommand
+	for _, cc := range cfg.CommandsForMode("select") {
+		customCommands = append(customCommands, ui.UserDefinedCommand{
+			Key:     cc.Key,
+			Label:   cc.Label,
+			Command: cc.Command,
+			Exit:    cc.Exit,
+		})
+	}
+
 	// Run picker loop
 	inTmux := os.Getenv("TMUX") != ""
 	restoreCursorIdx := -1
@@ -203,6 +214,9 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		}
 		if inTmux {
 			opts = append(opts, ui.WithOpenWindow())
+		}
+		if len(customCommands) > 0 {
+			opts = append(opts, ui.WithUserDefinedCommands(customCommands))
 		}
 		if len(cfg.Warnings) > 0 {
 			opts = append(opts, ui.WithWarnings(cfg.Warnings))
@@ -260,6 +274,14 @@ func runSelect(cmd *cobra.Command, args []string) error {
 				baseItems = sortBaseItemsByHistory(baseItems, hist)
 			}
 			// No-op for standalone sessions; continue loop
+
+		case ui.ActionUserDefinedCommand:
+			if result.UserDefinedCommand != nil && result.Selected != nil {
+				executeSelectCustomCommand(result.UserDefinedCommand.Command, result.Selected)
+				if result.UserDefinedCommand.Exit {
+					return nil
+				}
+			}
 		}
 	}
 }
@@ -434,6 +456,20 @@ func killTmuxSession(name string) {
 		fmt.Fprintf(os.Stderr, "Failed to kill session: %s\n", sessionName)
 	} else {
 		fmt.Fprintf(os.Stderr, "Killed session: %s\n", sessionName)
+	}
+}
+
+func executeSelectCustomCommand(command string, item *ui.Item) {
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Env = append(os.Environ(),
+		"POP_PATH="+item.Path,
+		"POP_NAME="+item.Name,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Custom command failed: %v\n", err)
 	}
 }
 

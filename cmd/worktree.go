@@ -46,21 +46,19 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load config (optional, don't fail if missing)
-	var customCommands []ui.CustomCommand
+	var customCommands []ui.UserDefinedCommand
 	var configWarnings []string
 	quickAccessModifier := "alt"
 	if cfg, err := config.Load(config.DefaultConfigPath()); err == nil {
 		quickAccessModifier = cfg.GetQuickAccessModifier()
 		configWarnings = cfg.Warnings
-		if cfg.Worktree != nil {
-			for _, wc := range cfg.Worktree.Commands {
-				customCommands = append(customCommands, ui.CustomCommand{
-					Key:     wc.Key,
-					Label:   wc.Label,
-					Command: wc.Command,
-					Exit:    wc.Exit,
-				})
-			}
+		for _, cc := range cfg.CommandsForMode("worktree") {
+			customCommands = append(customCommands, ui.UserDefinedCommand{
+				Key:     cc.Key,
+				Label:   cc.Label,
+				Command: cc.Command,
+				Exit:    cc.Exit,
+			})
 		}
 	}
 
@@ -110,10 +108,10 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			}
 			// Continue loop to show picker again
 
-		case ui.ActionCustomCommand:
-			if result.CustomCommand != nil && result.Selected != nil {
-				executeCustomCommand(result.CustomCommand.Command, result.Selected, ctx)
-				if result.CustomCommand.Exit {
+		case ui.ActionUserDefinedCommand:
+			if result.UserDefinedCommand != nil && result.Selected != nil {
+				executeCustomCommand(result.UserDefinedCommand.Command, result.Selected, ctx)
+				if result.UserDefinedCommand.Exit {
 					return nil
 				}
 			}
@@ -122,7 +120,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.CustomCommand, quickAccessModifier string, initialCursorIdx int, warnings []string) (ui.Result, error) {
+func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefinedCommand, quickAccessModifier string, initialCursorIdx int, warnings []string) (ui.Result, error) {
 	worktrees, err := project.ListWorktrees(ctx)
 	if err != nil {
 		return ui.Result{Action: ui.ActionCancel}, fmt.Errorf("failed to list worktrees: %w", err)
@@ -173,7 +171,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.CustomComm
 		opts = append(opts, ui.WithInitialCursorIndex(initialCursorIdx))
 	}
 	if len(customCommands) > 0 {
-		opts = append(opts, ui.WithCustomCommands(customCommands))
+		opts = append(opts, ui.WithUserDefinedCommands(customCommands))
 	}
 	if len(warnings) > 0 {
 		opts = append(opts, ui.WithWarnings(warnings))
@@ -266,6 +264,8 @@ func executeCustomCommand(command string, item *ui.Item, ctx *project.RepoContex
 
 	// Set environment variables
 	cmd.Env = append(os.Environ(),
+		"POP_PATH="+item.Path,
+		"POP_NAME="+filepath.Base(item.Path),
 		"POP_WORKTREE_PATH="+item.Path,
 		"POP_WORKTREE_NAME="+filepath.Base(item.Path),
 		"POP_BRANCH="+item.Context,

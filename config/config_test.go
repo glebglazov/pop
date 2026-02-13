@@ -252,12 +252,12 @@ func TestExpandHomeWith(t *testing.T) {
 	}
 }
 
-func TestLoadWorktreeCommands(t *testing.T) {
+func TestLoadUserDefinedCommands(t *testing.T) {
 	tests := []struct {
 		name           string
 		toml           string
 		expectedCmds   int
-		checkFirstCmd  func(t *testing.T, cmd WorktreeCommand)
+		checkFirstCmd  func(t *testing.T, cmd UserDefinedCommand)
 	}{
 		{
 			name: "loads single worktree command",
@@ -271,7 +271,7 @@ command = "echo cleanup"
 exit = true
 `,
 			expectedCmds: 1,
-			checkFirstCmd: func(t *testing.T, cmd WorktreeCommand) {
+			checkFirstCmd: func(t *testing.T, cmd UserDefinedCommand) {
 				if cmd.Key != "ctrl-l" {
 					t.Errorf("Key = %q, want %q", cmd.Key, "ctrl-l")
 				}
@@ -304,7 +304,7 @@ command = "echo open"
 exit = false
 `,
 			expectedCmds: 2,
-			checkFirstCmd: func(t *testing.T, cmd WorktreeCommand) {
+			checkFirstCmd: func(t *testing.T, cmd UserDefinedCommand) {
 				if cmd.Key != "ctrl-l" {
 					t.Errorf("Key = %q, want %q", cmd.Key, "ctrl-l")
 				}
@@ -329,7 +329,7 @@ label = "test"
 command = "echo test"
 `,
 			expectedCmds: 1,
-			checkFirstCmd: func(t *testing.T, cmd WorktreeCommand) {
+			checkFirstCmd: func(t *testing.T, cmd UserDefinedCommand) {
 				if cmd.Exit {
 					t.Error("Exit = true, want false (default)")
 				}
@@ -915,6 +915,140 @@ projects = [{ path = "/main" }]
 		}
 		if len(cfg.Projects) != 1 {
 			t.Fatalf("got %d projects, want 1", len(cfg.Projects))
+		}
+	})
+}
+
+func TestCommandsForMode(t *testing.T) {
+	t.Run("global only returned for both modes", func(t *testing.T) {
+		cfg := &Config{
+			Commands: []UserDefinedCommand{
+				{Key: "ctrl+o", Label: "global", Command: "echo global", Exit: true},
+			},
+		}
+
+		for _, mode := range []string{"select", "worktree"} {
+			cmds := cfg.CommandsForMode(mode)
+			if len(cmds) != 1 {
+				t.Errorf("mode %q: got %d commands, want 1", mode, len(cmds))
+				continue
+			}
+			if cmds[0].Label != "global" {
+				t.Errorf("mode %q: label = %q, want %q", mode, cmds[0].Label, "global")
+			}
+		}
+	})
+
+	t.Run("section overrides global by key", func(t *testing.T) {
+		cfg := &Config{
+			Commands: []UserDefinedCommand{
+				{Key: "ctrl+o", Label: "global", Command: "echo global"},
+			},
+			Worktree: &WorktreeConfig{
+				Commands: []UserDefinedCommand{
+					{Key: "ctrl+o", Label: "worktree", Command: "echo worktree"},
+				},
+			},
+		}
+
+		wt := cfg.CommandsForMode("worktree")
+		if len(wt) != 1 {
+			t.Fatalf("worktree: got %d commands, want 1", len(wt))
+		}
+		if wt[0].Label != "worktree" {
+			t.Errorf("worktree: label = %q, want %q", wt[0].Label, "worktree")
+		}
+
+		// Select should still get global
+		sel := cfg.CommandsForMode("select")
+		if len(sel) != 1 {
+			t.Fatalf("select: got %d commands, want 1", len(sel))
+		}
+		if sel[0].Label != "global" {
+			t.Errorf("select: label = %q, want %q", sel[0].Label, "global")
+		}
+	})
+
+	t.Run("section-only commands included", func(t *testing.T) {
+		cfg := &Config{
+			Worktree: &WorktreeConfig{
+				Commands: []UserDefinedCommand{
+					{Key: "ctrl+l", Label: "wt-only", Command: "echo wt"},
+				},
+			},
+		}
+
+		cmds := cfg.CommandsForMode("worktree")
+		if len(cmds) != 1 {
+			t.Fatalf("got %d commands, want 1", len(cmds))
+		}
+		if cmds[0].Label != "wt-only" {
+			t.Errorf("label = %q, want %q", cmds[0].Label, "wt-only")
+		}
+
+		// Select should get nothing
+		sel := cfg.CommandsForMode("select")
+		if len(sel) != 0 {
+			t.Errorf("select: got %d commands, want 0", len(sel))
+		}
+	})
+
+	t.Run("no commands returns empty", func(t *testing.T) {
+		cfg := &Config{}
+		cmds := cfg.CommandsForMode("worktree")
+		if len(cmds) != 0 {
+			t.Errorf("got %d commands, want 0", len(cmds))
+		}
+	})
+
+	t.Run("mixed override preserves order", func(t *testing.T) {
+		cfg := &Config{
+			Commands: []UserDefinedCommand{
+				{Key: "ctrl+o", Label: "global-o", Command: "echo o"},
+				{Key: "ctrl+k", Label: "global-k", Command: "echo k"},
+			},
+			Worktree: &WorktreeConfig{
+				Commands: []UserDefinedCommand{
+					{Key: "ctrl+o", Label: "wt-o", Command: "echo wt-o"},
+					{Key: "ctrl+l", Label: "wt-l", Command: "echo wt-l"},
+				},
+			},
+		}
+
+		cmds := cfg.CommandsForMode("worktree")
+		if len(cmds) != 3 {
+			t.Fatalf("got %d commands, want 3", len(cmds))
+		}
+		// Order: global keys first (ctrl+o overridden, ctrl+k kept), then section-only (ctrl+l)
+		if cmds[0].Label != "wt-o" {
+			t.Errorf("cmds[0].Label = %q, want %q", cmds[0].Label, "wt-o")
+		}
+		if cmds[1].Label != "global-k" {
+			t.Errorf("cmds[1].Label = %q, want %q", cmds[1].Label, "global-k")
+		}
+		if cmds[2].Label != "wt-l" {
+			t.Errorf("cmds[2].Label = %q, want %q", cmds[2].Label, "wt-l")
+		}
+	})
+
+	t.Run("select section works", func(t *testing.T) {
+		cfg := &Config{
+			Commands: []UserDefinedCommand{
+				{Key: "ctrl+o", Label: "global", Command: "echo global"},
+			},
+			Select: &SelectConfig{
+				Commands: []UserDefinedCommand{
+					{Key: "ctrl+o", Label: "select", Command: "echo select"},
+				},
+			},
+		}
+
+		cmds := cfg.CommandsForMode("select")
+		if len(cmds) != 1 {
+			t.Fatalf("got %d commands, want 1", len(cmds))
+		}
+		if cmds[0].Label != "select" {
+			t.Errorf("label = %q, want %q", cmds[0].Label, "select")
 		}
 	})
 }
