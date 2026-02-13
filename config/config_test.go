@@ -820,7 +820,7 @@ projects = [{ path = "/main" }]
 		}
 	})
 
-	t.Run("missing include file returns error", func(t *testing.T) {
+	t.Run("missing include file prints warning and continues", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.toml")
 		os.WriteFile(configPath, []byte(`
@@ -828,9 +828,15 @@ includes = ["nonexistent.toml"]
 projects = [{ path = "/main" }]
 `), 0644)
 
-		_, err := Load(configPath)
-		if err == nil {
-			t.Fatal("expected error for missing include, got nil")
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("expected no error for missing include, got: %v", err)
+		}
+		if len(cfg.Projects) != 1 || cfg.Projects[0].Path != "/main" {
+			t.Fatalf("expected 1 project from main config, got: %v", cfg.Projects)
+		}
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("expected 1 warning, got: %v", cfg.Warnings)
 		}
 	})
 

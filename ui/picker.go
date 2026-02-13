@@ -89,6 +89,9 @@ type Picker struct {
 
 	// Initial cursor index override (-1 = not set)
 	initialCursorIdx int
+
+	// Warnings to display in the picker
+	warnings []string
 }
 
 // iconLegendEntry maps an icon to its description in the help view
@@ -217,6 +220,13 @@ func WithCustomCommands(commands []CustomCommand) PickerOption {
 				Exit:    cmd.Exit,
 			})
 		}
+	}
+}
+
+// WithWarnings adds warning messages to display in the picker
+func WithWarnings(warnings []string) PickerOption {
+	return func(p *Picker) {
+		p.warnings = warnings
 	}
 }
 
@@ -892,6 +902,15 @@ func (p *Picker) viewNormal() string {
 	b.WriteString("└")
 	b.WriteString(strings.Repeat("─", innerWidth))
 	b.WriteString("┘\n")
+
+	// Warnings
+	if len(p.warnings) > 0 {
+		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // yellow/orange
+		for _, w := range p.warnings {
+			b.WriteString(warnStyle.Render("  ⚠ " + w))
+			b.WriteString("\n")
+		}
+	}
 
 	// Hints line
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))

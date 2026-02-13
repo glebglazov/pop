@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -59,6 +61,8 @@ type Config struct {
 	DisambiguationStrategy string          `toml:"disambiguation_strategy"`
 	QuickAccessModifier    string          `toml:"quick_access_modifier"`
 	Worktree               *WorktreeConfig `toml:"worktree"`
+
+	Warnings []string `toml:"-"` // non-serialized warnings from config loading
 }
 
 // ExpandedPath represents a resolved project path with display metadata
@@ -122,6 +126,10 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 
 		var included Config
 		if _, err := toml.DecodeFile(expanded, &included); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("include file %q not found, skipping", include))
+				continue
+			}
 			return nil, fmt.Errorf("loading include %q: %w", include, err)
 		}
 

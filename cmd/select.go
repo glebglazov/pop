@@ -204,6 +204,9 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		if inTmux {
 			opts = append(opts, ui.WithOpenWindow())
 		}
+		if len(cfg.Warnings) > 0 {
+			opts = append(opts, ui.WithWarnings(cfg.Warnings))
+		}
 		if restoreCursorIdx >= 0 {
 			opts = append(opts, ui.WithInitialCursorIndex(restoreCursorIdx))
 			restoreCursorIdx = -1
