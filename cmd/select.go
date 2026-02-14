@@ -127,20 +127,19 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		resultsByIndex[r.index] = r.projects
 	}
 
-	// Get current directory for optional filtering (resolve symlinks for proper comparison)
-	var cwd string
-	if cfg.ExcludeCurrentDir {
-		cwd, _ = os.Getwd()
-		if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-			cwd = resolved
+	// Get current tmux session name for optional exclusion
+	var excludedSessionNames map[string]bool
+	if cfg.ShouldExcludeCurrentSession() {
+		if currentSession := currentTmuxSession(); currentSession != "" {
+			excludedSessionNames = map[string]bool{currentSession: true}
 		}
 	}
 
 	var expanded []project.ExpandedProject
 	for i := range paths {
 		for _, ep := range resultsByIndex[i] {
-			// Skip current directory if configured (ep.Path is already canonical)
-			if cfg.ExcludeCurrentDir && ep.Path == cwd {
+			// Skip projects whose session name matches the current tmux session
+			if excludedSessionNames[sanitizeSessionName(ep.Name)] {
 				continue
 			}
 			expanded = append(expanded, ep)
@@ -199,7 +198,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 	restoreCursorIdx := -1
 	for {
 		// Refresh session state each iteration
-		items := buildSessionAwareItems(baseItems, hist)
+		items := buildSessionAwareItems(baseItems, hist, excludedSessionNames)
 
 		quickAccessModifier := cfg.GetQuickAccessModifier()
 		opts := []ui.PickerOption{
@@ -303,11 +302,11 @@ func sortBaseItemsByHistory(items []ui.Item, hist *history.History) []ui.Item {
 	return sorted
 }
 
-func buildSessionAwareItems(baseItems []ui.Item, hist *history.History) []ui.Item {
-	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity())
+func buildSessionAwareItems(baseItems []ui.Item, hist *history.History, excludedSessionNames map[string]bool) []ui.Item {
+	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity(), excludedSessionNames)
 }
 
-func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sessionActivity map[string]int64) []ui.Item {
+func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sessionActivity map[string]int64, excludedSessionNames map[string]bool) []ui.Item {
 	// Build set of session names that correspond to project items
 	projectSessionNames := make(map[string]bool)
 	for _, item := range baseItems {
@@ -327,9 +326,9 @@ func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sess
 		}
 	}
 
-	// Add standalone sessions (not matching any project)
+	// Add standalone sessions (not matching any project or excluded project)
 	for sessionName := range sessionActivity {
-		if !projectSessionNames[sessionName] {
+		if !projectSessionNames[sessionName] && !excludedSessionNames[sessionName] {
 			items = append(items, ui.Item{
 				Name: sessionName,
 				Path: tmuxSessionPathPrefix + sessionName,

@@ -63,7 +63,9 @@ type Config struct {
 	Includes               []string             `toml:"includes"`
 	Projects               []ProjectEntry       `toml:"projects"`
 	Commands               []UserDefinedCommand `toml:"commands"`
-	ExcludeCurrentDir      bool                 `toml:"exclude_current_dir"`
+	ExcludeCurrentSession  bool                 `toml:"exclude_current_session"`
+	// Deprecated: use ExcludeCurrentSession. TODO: remove after v1.0.
+	ExcludeCurrentDir bool `toml:"exclude_current_dir"`
 	DisambiguationStrategy string               `toml:"disambiguation_strategy"`
 	QuickAccessModifier    string               `toml:"quick_access_modifier"`
 	Worktree               *WorktreeConfig      `toml:"worktree"`
@@ -76,6 +78,12 @@ type Config struct {
 type ExpandedPath struct {
 	Path         string
 	DisplayDepth int // number of path segments to show in display name
+}
+
+// ShouldExcludeCurrentSession returns true if the current session should be
+// excluded from the picker. Supports both the new and deprecated config keys.
+func (c *Config) ShouldExcludeCurrentSession() bool {
+	return c.ExcludeCurrentSession || c.ExcludeCurrentDir
 }
 
 // GetDisambiguationStrategy returns the configured disambiguation strategy.

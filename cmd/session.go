@@ -15,6 +15,14 @@ const (
 	iconStandaloneSession = "□"
 )
 
+func currentTmuxSession() string {
+	out, err := exec.Command("tmux", "display-message", "-p", "#S").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func isStandaloneSession(item ui.Item) bool {
 	return strings.HasPrefix(item.Path, tmuxSessionPathPrefix)
 }

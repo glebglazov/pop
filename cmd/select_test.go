@@ -132,7 +132,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil)
 
 		// Should have 4 items: 2 projects + 2 standalone
 		if len(result) != 4 {
@@ -161,7 +161,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil)
 
 		iconByPath := make(map[string]string)
 		for _, item := range result {
@@ -187,7 +187,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		sessionActivity := map[string]int64{}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil)
 
 		if len(result) != 2 {
 			t.Fatalf("got %d items, want 2", len(result))
@@ -196,6 +196,36 @@ func TestBuildSessionAwareItems(t *testing.T) {
 			if item.Icon != "" {
 				t.Errorf("item %q has Icon %q, want empty", item.Name, item.Icon)
 			}
+		}
+	})
+
+	t.Run("excluded session names not shown as standalone", func(t *testing.T) {
+		// Simulate exclude_current_dir: "app" was removed from baseItems
+		// but its tmux session still exists
+		baseItems := []ui.Item{
+			{Name: "api", Path: "/api"},
+		}
+		sessionActivity := map[string]int64{
+			"app": now.Unix(), // session for excluded project
+			"api": now.Unix(),
+		}
+		excludedSessionNames := map[string]bool{
+			"app": true,
+		}
+		hist := &history.History{}
+
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, excludedSessionNames)
+
+		// Should have only 1 item: "api" with dir session icon
+		// "app" should NOT appear as standalone
+		if len(result) != 1 {
+			t.Fatalf("got %d items, want 1", len(result))
+		}
+		if result[0].Name != "api" {
+			t.Errorf("result[0].Name = %q, want %q", result[0].Name, "api")
+		}
+		if result[0].Icon != iconDirSession {
+			t.Errorf("result[0].Icon = %q, want %q", result[0].Icon, iconDirSession)
 		}
 	})
 
@@ -210,7 +240,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil)
 
 		if len(result) != 1 {
 			t.Fatalf("got %d items, want 1 (session should match project)", len(result))

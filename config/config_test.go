@@ -869,8 +869,8 @@ projects = [{ path = "/main" }]
 			t.Fatalf("Load() error: %v", err)
 		}
 		// Main config values should be preserved (defaults)
-		if cfg.ExcludeCurrentDir {
-			t.Error("ExcludeCurrentDir should be false (main config default)")
+		if cfg.ShouldExcludeCurrentSession() {
+			t.Error("ShouldExcludeCurrentSession() should be false (main config default)")
 		}
 		if cfg.GetDisambiguationStrategy() != "first_unique_segment" {
 			t.Errorf("DisambiguationStrategy = %q, want %q", cfg.GetDisambiguationStrategy(), "first_unique_segment")
@@ -1051,6 +1051,52 @@ func TestCommandsForMode(t *testing.T) {
 			t.Errorf("label = %q, want %q", cmds[0].Label, "select")
 		}
 	})
+}
+
+func TestShouldExcludeCurrentSession(t *testing.T) {
+	tests := []struct {
+		name     string
+		toml     string
+		expected bool
+	}{
+		{
+			name:     "new field set",
+			toml:     "exclude_current_session = true\nprojects = []",
+			expected: true,
+		},
+		{
+			name:     "deprecated field set",
+			toml:     "exclude_current_dir = true\nprojects = []",
+			expected: true,
+		},
+		{
+			name:     "neither set",
+			toml:     "projects = []",
+			expected: false,
+		},
+		{
+			name:     "both set",
+			toml:     "exclude_current_session = true\nexclude_current_dir = true\nprojects = []",
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
+				t.Fatalf("failed to write config: %v", err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if got := cfg.ShouldExcludeCurrentSession(); got != tt.expected {
+				t.Errorf("ShouldExcludeCurrentSession() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
 }
 
 func TestExpandProjectsSubsumption(t *testing.T) {
