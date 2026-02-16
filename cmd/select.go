@@ -19,6 +19,7 @@ import (
 )
 
 var tmuxCDPane string
+var noHistory bool
 
 var selectCmd = &cobra.Command{
 	Use:   "select",
@@ -35,6 +36,7 @@ Example tmux binding:
 func init() {
 	rootCmd.AddCommand(selectCmd)
 	selectCmd.Flags().StringVar(&tmuxCDPane, "tmux-cd", "", "Send cd command to specified tmux pane instead of switching session")
+	selectCmd.Flags().BoolVar(&noHistory, "no-history", false, "Do not record selection in history")
 }
 
 func runSelect(cmd *cobra.Command, args []string) error {
@@ -240,8 +242,10 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			if isStandaloneSession(*result.Selected) {
 				return switchToTmuxSession(standaloneSessionName(*result.Selected))
 			}
-			hist.Record(result.Selected.Path)
-			hist.Save()
+			if !noHistory {
+				hist.Record(result.Selected.Path)
+				hist.Save()
+			}
 			if tmuxCDPane != "" {
 				return sendCDToPane(tmuxCDPane, result.Selected.Path)
 			}
@@ -251,8 +255,10 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			if result.Selected == nil || isStandaloneSession(*result.Selected) {
 				continue
 			}
-			hist.Record(result.Selected.Path)
-			hist.Save()
+			if !noHistory {
+				hist.Record(result.Selected.Path)
+				hist.Save()
+			}
 			return openTmuxWindow(result.Selected)
 
 		case ui.ActionKillSession:
@@ -473,7 +479,7 @@ func executeSelectCustomCommand(command string, item *ui.Item) {
 }
 
 func sendCDToPane(paneID, path string) error {
-	cmd := exec.Command("tmux", "send-keys", "-t", paneID, fmt.Sprintf("cd %q", path), "Enter")
+	cmd := exec.Command("tmux", "send-keys", "-t", paneID, fmt.Sprintf("cd %q && clear", path), "Enter")
 	return cmd.Run()
 }
 
