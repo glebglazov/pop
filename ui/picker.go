@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/glebglazov/pop/debug"
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
 )
@@ -271,6 +272,8 @@ func (p *Picker) Init() tea.Cmd {
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		debug.Log("key: code=%d rune=%c mod=%v text=%q", msg.Code, msg.Code, msg.Mod, msg.Text)
+
 		// Help overlay: esc dismisses, all other keys are swallowed
 		if p.showHelp {
 			if key.Matches(msg, keys.Quit) {
@@ -462,10 +465,12 @@ func (p *Picker) filter() {
 
 	// Save current selection and screen position before changing filter
 	if queryChanged && len(p.filtered) > 0 && p.cursor < len(p.filtered) {
-		p.cursorMemory[p.lastQuery] = cursorState{
+		state := cursorState{
 			path:      p.filtered[p.cursor].Path,
 			screenPos: p.cursor - p.scroll,
 		}
+		p.cursorMemory[p.lastQuery] = state
+		debug.Log("filter: query %q -> %q, saving cursor for %q: path=%q screenPos=%d", p.lastQuery, query, p.lastQuery, state.path, state.screenPos)
 	}
 
 	// Build filtered list
@@ -500,13 +505,16 @@ func (p *Picker) filter() {
 	if queryChanged {
 		if state, ok := p.cursorMemory[query]; ok {
 			// Restore cursor to remembered item for this query
-			p.cursor = p.findItemIndex(state.path)
+			idx := p.findItemIndex(state.path)
+			debug.Log("filter: restoring cursor for %q: path=%q idx=%d screenPos=%d", query, state.path, idx, state.screenPos)
+			p.cursor = idx
 			// Restore relative screen position
 			p.scroll = p.cursor - state.screenPos
 		} else {
 			// First time seeing this query: cursor at best match (bottom)
 			p.cursor = len(p.filtered) - 1
 			p.scroll = 0 // will be adjusted below
+			debug.Log("filter: first time query %q, cursor at bottom (%d), %d items", query, p.cursor, len(p.filtered))
 		}
 	}
 
@@ -530,6 +538,7 @@ func (p *Picker) findItemIndex(path string) int {
 			return i
 		}
 	}
+	debug.Log("findItemIndex: path %q not found in %d filtered items", path, len(p.filtered))
 	return -1
 }
 

@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 
+	"github.com/glebglazov/pop/debug"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +23,9 @@ Configure your projects in ~/.config/pop/config.toml`,
 
 // Execute runs the root command
 func Execute() {
+	debug.Init()
+	defer debug.Close()
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
