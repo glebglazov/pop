@@ -247,9 +247,6 @@ func TestHelpViewRendersContent(t *testing.T) {
 	if !containsSubstring(view, "Delete") {
 		t.Error("help view should contain Delete")
 	}
-	if !containsSubstring(view, "Force delete") {
-		t.Error("help view should contain Force delete")
-	}
 
 	// Should show "Esc back" hint
 	if !containsSubstring(view, "Esc back") {
@@ -276,8 +273,8 @@ func TestHelpViewConditionalBindings(t *testing.T) {
 	if containsSubstring(view, "Kill tmux session") {
 		t.Error("help view should not contain Kill tmux session when disabled")
 	}
-	if containsSubstring(view, "Force delete") {
-		t.Error("help view should not contain Force delete when disabled")
+	if containsSubstring(view, "Delete") {
+		t.Error("help view should not contain Delete when disabled")
 	}
 }
 

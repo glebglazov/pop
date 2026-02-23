@@ -717,11 +717,11 @@ func (p *Picker) viewHelp() string {
 	if p.showOpenWindow && !p.isKeyOverridden("ctrl+o") {
 		entries = append(entries, helpEntry{"C-o", "Open in window"})
 	}
-	if p.showDelete && !p.isKeyOverridden("backspace", "delete") {
-		entries = append(entries, helpEntry{"⌫", "Delete"})
-	}
 	if p.showDelete && !p.isKeyOverridden("ctrl+x") {
-		entries = append(entries, helpEntry{"C-x", "Force delete"})
+		entries = append(entries, helpEntry{"C-x", "Delete"})
+	}
+	if p.showDelete && !p.isKeyOverridden("ctrl+X") {
+		entries = append(entries, helpEntry{"C-X", "Force delete"})
 	}
 	if p.showNew && !p.isKeyOverridden("ctrl+n") {
 		entries = append(entries, helpEntry{"C-n", "New"})
@@ -1007,10 +1007,10 @@ var keys = keyMap{
 		key.WithKeys("esc", "ctrl+c"),
 	),
 	Delete: key.NewBinding(
-		key.WithKeys("backspace", "delete"),
+		key.WithKeys("ctrl+x"),
 	),
 	ForceDelete: key.NewBinding(
-		key.WithKeys("ctrl+x"),
+		key.WithKeys("ctrl+X"),
 	),
 	New: key.NewBinding(
 		key.WithKeys("ctrl+n"),
