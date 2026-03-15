@@ -81,6 +81,15 @@ func hasAgentWindow(session string) bool {
 	return false
 }
 
+// isPaneDead checks if a pane's process has exited.
+func isPaneDead(paneID string) bool {
+	out, err := exec.Command("tmux", "display-message", "-t", paneID, "-p", "#{pane_dead}").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "1"
+}
+
 // --- create ---
 
 var paneCreateCmd = &cobra.Command{
@@ -98,15 +107,25 @@ func runPaneCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// If pane with this name exists and is alive, return it
+	// If it exists but is dead, kill it and recreate below
+	if existingID, err := findPane(session, name); err == nil {
+		if !isPaneDead(existingID) {
+			fmt.Println(existingID)
+			return nil
+		}
+		exec.Command("tmux", "kill-pane", "-t", existingID).Run()
+	}
+
 	var paneID string
 	if !hasAgentWindow(session) {
-		out, err := exec.Command("tmux", "new-window", "-P", "-F", "#{pane_id}", "-t", session, "-n", "agent", command).Output()
+		out, err := exec.Command("tmux", "new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", "agent", command).Output()
 		if err != nil {
 			return fmt.Errorf("failed to create agent window: %w", err)
 		}
 		paneID = strings.TrimSpace(string(out))
 	} else {
-		out, err := exec.Command("tmux", "split-window", "-P", "-F", "#{pane_id}", "-t", session+":agent", command).Output()
+		out, err := exec.Command("tmux", "split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":agent", command).Output()
 		if err != nil {
 			return fmt.Errorf("failed to create pane: %w", err)
 		}
@@ -114,11 +133,10 @@ func runPaneCreate(cmd *cobra.Command, args []string) error {
 		exec.Command("tmux", "select-layout", "-t", session+":agent", "tiled").Run()
 	}
 
-	// Set pane title and keep pane alive after command exits
 	if err := exec.Command("tmux", "select-pane", "-t", paneID, "-T", name).Run(); err != nil {
 		return fmt.Errorf("failed to set pane title: %w", err)
 	}
-	exec.Command("tmux", "set-option", "-t", paneID, "remain-on-exit", "on").Run()
+	exec.Command("tmux", "set-option", "-p", "-t", paneID, "remain-on-exit", "on").Run()
 
 	fmt.Println(paneID)
 	return nil

@@ -6,7 +6,7 @@ description: Manage named tmux panes for running dev servers, builds, and backgr
 
 You have access to `pop pane` for managing named tmux panes. Use this to run dev servers, builds, watchers, and other background processes in dedicated panes that you can monitor and interact with.
 
-All panes live in a shared "agent" window within the current tmux session. Pane names are unique per session.
+All panes live in a shared "agent" window within the current tmux session. Pane names are unique per session. Panes are created in the background without stealing focus.
 
 ## Commands
 
@@ -17,7 +17,9 @@ pop pane create <name> "<command>"
 Creates a named pane running the given command. Prints the tmux pane ID.
 - First pane creates the "agent" window
 - Subsequent panes split and auto-tile
-- Pane persists after command exits (remain-on-exit)
+- Pane stays open after command exits so you can read the output
+- **Idempotent**: if a pane with that name is already running, returns its ID
+- **Auto-recreate**: if a pane with that name exists but its command has exited, kills it and creates a fresh one
 
 ### Find a pane
 ```bash
@@ -74,18 +76,25 @@ sleep 2
 pop pane capture server  # check for "ready" or "listening" in output
 ```
 
-### Run a command and check its result
+### Run a short-lived command and read its output
 ```bash
 pop pane create build "npm run build"
 sleep 5
-pop pane capture build  # check for errors
+pop pane capture build  # check for errors — pane stays open after exit
 pop pane kill build     # clean up when done
 ```
 
-### Restart a process
+### Re-run a command (auto-recreate)
 ```bash
-pop pane send server C-c          # stop current process
-pop pane send server "npm start" Enter  # restart
+pop pane create build "npm run build"   # first run
+# ... time passes, build finishes (pane stays with output) ...
+pop pane create build "npm run build"   # detects dead pane, kills it, creates fresh one
+```
+
+### Restart a long-running process
+```bash
+pop pane send server C-c                      # stop current process
+pop pane send server "npm start" Enter        # restart
 ```
 
 ### Check what's running
@@ -94,10 +103,18 @@ pop pane list                    # see all active panes
 pop pane capture server          # see server output
 ```
 
+### Idempotent setup (safe to call multiple times)
+```bash
+pop pane create server "npm run dev"      # creates if not running
+pop pane create db "docker compose up"    # creates if not running
+pop pane create server "npm run dev"      # already running — returns existing ID
+```
+
 ## Guidelines
 
 - Always give panes descriptive names (`server`, `db`, `tests`, `build`)
-- Check if a pane already exists with `pop pane find` before creating
-- Clean up panes with `pop pane kill` when done
+- `create` is idempotent — safe to call repeatedly for the same name
+- Dead panes are auto-recreated on next `create` call
 - Use `pop pane capture` to check process output rather than guessing
 - Send `C-c` before killing if you need a graceful shutdown
+- Clean up panes with `pop pane kill` when done
