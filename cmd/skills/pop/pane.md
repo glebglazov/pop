@@ -56,7 +56,7 @@ pop pane send app y Enter                    # answer a yes/no prompt
 ```bash
 pop pane capture <name>
 ```
-Prints the pane's visible content plus 500 lines of scrollback. Includes ANSI color codes.
+Prints the pane's visible content plus 50 lines of scrollback. ANSI codes are stripped for clean output.
 
 ### Kill a pane
 ```bash

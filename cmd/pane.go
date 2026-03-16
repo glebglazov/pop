@@ -336,13 +336,13 @@ var paneCaptureCmd = &cobra.Command{
 	Short: "Capture and print pane content",
 	Long: `Capture the named pane's content and print it to stdout.
 
-Includes the visible screen plus 500 lines of scrollback history.
-Output contains ANSI color codes from the pane.
+Includes the visible screen plus 50 lines of scrollback history.
+ANSI color codes are stripped for clean, token-efficient output.
 
 Works on both live and dead panes (remain-on-exit keeps the content
 available after the command exits).
 
-Uses tmux capture-pane with -e (ANSI escapes) and -S -500 (scrollback).`,
+Uses tmux capture-pane with -S -50 (scrollback).`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPaneCapture,
 }
@@ -360,7 +360,7 @@ func runPaneCapture(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	out, err := exec.Command("tmux", "capture-pane", "-p", "-e", "-S", "-500", "-t", paneID).Output()
+	out, err := exec.Command("tmux", "capture-pane", "-p", "-S", "-50", "-t", paneID).Output()
 	if err != nil {
 		return fmt.Errorf("failed to capture pane %q: %w", name, err)
 	}
