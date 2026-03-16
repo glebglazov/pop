@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -107,6 +108,16 @@ func runPaneCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Determine project directory so the pane's shell starts there,
+	// allowing direnv and other shell hooks to initialize naturally.
+	dir := paneProject
+	if dir == "" {
+		dir, err = os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get working directory: %w", err)
+		}
+	}
+
 	// If pane with this name exists and is alive, return it
 	// If it exists but is dead, kill it and recreate below
 	if existingID, err := findPane(session, name); err == nil {
@@ -117,15 +128,18 @@ func runPaneCreate(cmd *cobra.Command, args []string) error {
 		exec.Command("tmux", "kill-pane", "-t", existingID).Run()
 	}
 
+	// Create pane with an interactive shell (no command) in the project
+	// directory. The shell's rc files run, which triggers direnv and any
+	// other hooks so environment variables are loaded before the command.
 	var paneID string
 	if !hasAgentWindow(session) {
-		out, err := exec.Command("tmux", "new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", "agent", command).Output()
+		out, err := exec.Command("tmux", "new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", "agent", "-c", dir).Output()
 		if err != nil {
 			return fmt.Errorf("failed to create agent window: %w", err)
 		}
 		paneID = strings.TrimSpace(string(out))
 	} else {
-		out, err := exec.Command("tmux", "split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":agent", command).Output()
+		out, err := exec.Command("tmux", "split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":agent", "-c", dir).Output()
 		if err != nil {
 			return fmt.Errorf("failed to create pane: %w", err)
 		}
@@ -137,6 +151,9 @@ func runPaneCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to set pane title: %w", err)
 	}
 	exec.Command("tmux", "set-option", "-p", "-t", paneID, "remain-on-exit", "on").Run()
+
+	// Send the command to the shell after it has initialized
+	exec.Command("tmux", "send-keys", "-t", paneID, command, "Enter").Run()
 
 	fmt.Println(paneID)
 	return nil
