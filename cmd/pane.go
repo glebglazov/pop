@@ -96,8 +96,24 @@ func isPaneDead(paneID string) bool {
 var paneCreateCmd = &cobra.Command{
 	Use:   "create <name> <command>",
 	Short: "Create a named pane in the agent window",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runPaneCreate,
+	Long: `Create a named pane running the given command in the "agent" window.
+
+The pane starts an interactive shell in the project directory (respecting
+direnv and other shell hooks), then sends the command to it.
+
+Behavior:
+  - Idempotent: if a pane with <name> is already running, prints its ID
+  - Auto-recreate: if the pane exists but its command has exited, kills
+    it and creates a fresh one
+  - Background: does not steal focus from your current window
+  - Remain-on-exit: pane stays open after the command finishes so you
+    can read its output
+
+Uses tmux new-window/split-window to create panes, select-pane -T to
+set the title, and send-keys to dispatch the command after the shell
+initializes.`,
+	Args: cobra.ExactArgs(2),
+	RunE: runPaneCreate,
 }
 
 func runPaneCreate(cmd *cobra.Command, args []string) error {
@@ -164,8 +180,15 @@ func runPaneCreate(cmd *cobra.Command, args []string) error {
 var paneKillCmd = &cobra.Command{
 	Use:   "kill <name>",
 	Short: "Kill a named pane",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runPaneKill,
+	Long: `Kill the named pane in the agent window.
+
+Remaining panes are automatically re-tiled. If this is the last pane,
+the agent window is destroyed.
+
+Uses tmux kill-pane to destroy the pane and select-layout tiled to
+rebalance the remaining panes.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPaneKill,
 }
 
 func runPaneKill(cmd *cobra.Command, args []string) error {
@@ -196,8 +219,17 @@ func runPaneKill(cmd *cobra.Command, args []string) error {
 var paneFindCmd = &cobra.Command{
 	Use:   "find <name>",
 	Short: "Find a named pane and print its pane ID",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runPaneFind,
+	Long: `Find a pane by name and print its tmux pane ID (e.g., %5).
+
+Returns a non-zero exit code if the pane doesn't exist, so you can use
+this to check whether a pane is running:
+
+  pop pane find server && echo "running" || echo "not found"
+
+Uses tmux list-panes with #{pane_title} to match panes by name in the
+agent window.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPaneFind,
 }
 
 func runPaneFind(cmd *cobra.Command, args []string) error {
@@ -222,8 +254,18 @@ func runPaneFind(cmd *cobra.Command, args []string) error {
 var paneListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all named panes in the agent window",
-	Args:  cobra.NoArgs,
-	RunE:  runPaneList,
+	Long: `List all panes in the agent window as tab-separated lines:
+
+  <title>\t<pane_id>
+
+Example output:
+  server	%5
+  db	%6
+  logs	%7
+
+Uses tmux list-panes with #{pane_title} and #{pane_id} format variables.`,
+	Args: cobra.NoArgs,
+	RunE: runPaneList,
 }
 
 func runPaneList(cmd *cobra.Command, args []string) error {
@@ -248,10 +290,20 @@ var paneSendCmd = &cobra.Command{
 	Short: "Send literal keys to a named pane",
 	Long: `Send literal keys to a named pane via tmux send-keys.
 
-Keys are passed directly to tmux. Examples:
+Each argument after <name> is passed as a separate key to tmux. Keys
+are NOT auto-terminated with Enter — include it explicitly if needed.
+
+Examples:
   pop pane send server "npm run dev" Enter   # type command and press Enter
-  pop pane send server C-c                   # send Ctrl+C
-  pop pane send server q                     # send literal "q"`,
+  pop pane send server C-c                   # send Ctrl+C (interrupt)
+  pop pane send server C-d                   # send Ctrl+D (EOF)
+  pop pane send server C-l                   # send Ctrl+L (clear screen)
+  pop pane send server q                     # send literal "q"
+  pop pane send server Up Enter              # re-run last command
+
+Tmux special key names: Enter, Escape, Space, Tab, Up, Down, Left,
+Right, BSpace, DC (delete), End, Home, IC (insert), NPage (page down),
+PPage (page up), F1-F12, C-<key> (ctrl), M-<key> (alt).`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: runPaneSend,
 }
@@ -282,8 +334,17 @@ func runPaneSend(cmd *cobra.Command, args []string) error {
 var paneCaptureCmd = &cobra.Command{
 	Use:   "capture <name>",
 	Short: "Capture and print pane content",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runPaneCapture,
+	Long: `Capture the named pane's content and print it to stdout.
+
+Includes the visible screen plus 500 lines of scrollback history.
+Output contains ANSI color codes from the pane.
+
+Works on both live and dead panes (remain-on-exit keeps the content
+available after the command exits).
+
+Uses tmux capture-pane with -e (ANSI escapes) and -S -500 (scrollback).`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPaneCapture,
 }
 
 func runPaneCapture(cmd *cobra.Command, args []string) error {
