@@ -33,7 +33,6 @@ func Init() {
 	}
 
 	logger = log.New(file, "", log.Ltime|log.Lmicroseconds)
-	logger.Printf("=== pop debug log started ===")
 }
 
 // Log writes a formatted message to the debug log. No-op if logging is disabled.
