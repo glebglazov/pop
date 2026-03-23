@@ -77,7 +77,8 @@ type Config struct {
 // ExpandedPath represents a resolved project path with display metadata
 type ExpandedPath struct {
 	Path         string
-	DisplayDepth int // number of path segments to show in display name
+	DisplayDepth int  // number of path segments to show in display name
+	Explicit     bool // true if the path was listed explicitly (not from a glob)
 }
 
 // ShouldExcludeCurrentSession returns true if the current session should be
@@ -209,10 +210,10 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 	var projects []ExpandedPath
 	seen := make(map[string]bool)
 
-	addProject := func(path string, displayDepth int) {
+	addProject := func(path string, displayDepth int, explicit bool) {
 		if !seen[path] && isDirectoryWith(d, path) {
 			seen[path] = true
-			projects = append(projects, ExpandedPath{Path: path, DisplayDepth: displayDepth})
+			projects = append(projects, ExpandedPath{Path: path, DisplayDepth: displayDepth, Explicit: explicit})
 		}
 	}
 
@@ -233,7 +234,7 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 				continue // Skip invalid patterns
 			}
 			for _, match := range matches {
-				addProject(match, displayDepth)
+				addProject(match, displayDepth, false)
 			}
 		} else {
 			// Exact path - resolve symlinks
@@ -241,7 +242,7 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 			if r, err := d.FS.EvalSymlinks(expanded); err == nil {
 				resolved = r
 			}
-			addProject(resolved, displayDepth)
+			addProject(resolved, displayDepth, true)
 		}
 	}
 
@@ -255,9 +256,13 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 // removeSubsumedPaths filters out paths that are strict parents of other paths
 // in the set. This implements "more specific wins" — if both /a/b and /a/b/c
 // are in the list, /a/b is removed. Works transitively.
+// Explicitly listed paths (not from globs) are never subsumed.
 func removeSubsumedPaths(paths []ExpandedPath) []ExpandedPath {
 	subsumed := make(map[string]bool)
 	for _, p := range paths {
+		if p.Explicit {
+			continue
+		}
 		for _, q := range paths {
 			if p.Path != q.Path && strings.HasPrefix(q.Path, p.Path+"/") {
 				subsumed[p.Path] = true

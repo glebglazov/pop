@@ -776,3 +776,54 @@ func TestBuiltinWorksWhenNoOverride(t *testing.T) {
 		t.Errorf("expected ActionKillSession, got %v", result.Action)
 	}
 }
+
+func typeInPicker(p *Picker, s string) {
+	for _, ch := range s {
+		p.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+	}
+}
+
+func TestFilterCaseInsensitive(t *testing.T) {
+	items := []Item{
+		{Name: "Dev", Path: "/dev"},
+		{Name: "app_server", Path: "/app"},
+		{Name: "Backstage", Path: "/backstage"},
+	}
+	picker := NewPicker(items, WithCursorAtEnd())
+	picker.Init()
+
+	typeInPicker(picker, "dev")
+
+	found := false
+	for _, item := range picker.filtered {
+		if item.Path == "/dev" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'Dev' in filtered results for query 'dev', got: %v", picker.filtered)
+	}
+}
+
+func TestFilterCaseInsensitiveUppercaseQuery(t *testing.T) {
+	items := []Item{
+		{Name: "dev", Path: "/dev"},
+		{Name: "app_server", Path: "/app"},
+	}
+	picker := NewPicker(items, WithCursorAtEnd())
+	picker.Init()
+
+	typeInPicker(picker, "Dev")
+
+	found := false
+	for _, item := range picker.filtered {
+		if item.Path == "/dev" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'dev' in filtered results for query 'Dev', got: %v", picker.filtered)
+	}
+}

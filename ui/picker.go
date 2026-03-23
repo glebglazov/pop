@@ -483,7 +483,7 @@ func (p *Picker) filter() {
 
 		var matches []fzfMatch
 		for _, item := range p.items {
-			chars := util.ToChars([]byte(item.Name))
+			chars := util.ToChars([]byte(strings.ToLower(item.Name)))
 			result, _ := algo.FuzzyMatchV2(false, true, true, &chars, pattern, false, slab)
 			if result.Score > 0 {
 				matches = append(matches, fzfMatch{item: item, score: result.Score})

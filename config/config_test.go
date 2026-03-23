@@ -678,6 +678,27 @@ func TestRemoveSubsumedPaths(t *testing.T) {
 				{Path: "/proj/v2", DisplayDepth: 2},
 			},
 		},
+		{
+			name: "explicit parent not subsumed",
+			input: []ExpandedPath{
+				{Path: "/a", DisplayDepth: 1, Explicit: true},
+				{Path: "/a/b", DisplayDepth: 2},
+			},
+			expected: []ExpandedPath{
+				{Path: "/a", DisplayDepth: 1, Explicit: true},
+				{Path: "/a/b", DisplayDepth: 2},
+			},
+		},
+		{
+			name: "non-explicit parent still subsumed",
+			input: []ExpandedPath{
+				{Path: "/a", DisplayDepth: 1},
+				{Path: "/a/b", DisplayDepth: 2},
+			},
+			expected: []ExpandedPath{
+				{Path: "/a/b", DisplayDepth: 2},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -694,6 +715,9 @@ func TestRemoveSubsumedPaths(t *testing.T) {
 				}
 				if p.DisplayDepth != tt.expected[i].DisplayDepth {
 					t.Errorf("result[%d].DisplayDepth = %d, want %d", i, p.DisplayDepth, tt.expected[i].DisplayDepth)
+				}
+				if p.Explicit != tt.expected[i].Explicit {
+					t.Errorf("result[%d].Explicit = %v, want %v", i, p.Explicit, tt.expected[i].Explicit)
 				}
 			}
 		})
