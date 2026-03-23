@@ -40,7 +40,7 @@ func init() {
 }
 
 func runSelect(cmd *cobra.Command, args []string) error {
-	ensureMonitorDaemon()
+	go ensureMonitorDaemon()
 
 	// Load config
 	cfgPath := cfgFile
