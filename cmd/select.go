@@ -40,6 +40,8 @@ func init() {
 }
 
 func runSelect(cmd *cobra.Command, args []string) error {
+	ensureMonitorDaemon()
+
 	// Load config
 	cfgPath := cfgFile
 	if cfgPath == "" {
