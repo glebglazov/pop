@@ -10,6 +10,7 @@ build:
 
 install: build
 	cp -f pop $(PREFIX)/bin/pop
+	codesign --force --sign - $(PREFIX)/bin/pop
 
 test:
 	go test ./...
