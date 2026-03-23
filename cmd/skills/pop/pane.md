@@ -138,3 +138,4 @@ Run `pop pane --help` or `pop pane <subcommand> --help` to see full usage detail
 - Use `send` to interact with processes: answer prompts, send Ctrl-C, type commands
 - Send `C-c` before killing if you need a graceful shutdown
 - Clean up panes with `pop pane kill` when done
+- **Run processes in the foreground, not daemon mode.** The pane itself is already a background context — there's no need to double-detach. Running in daemon mode (e.g. `docker compose up -d`, `npm start &`) hides the output from the pane, which means `pop pane capture` returns nothing useful and you lose the ability to monitor logs, spot errors, or interact with the process. Use `docker compose up` (no `-d`), not `docker compose up -d`.
