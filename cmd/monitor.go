@@ -164,6 +164,11 @@ func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
 
 	status := monitor.PaneStatus(args[1])
 
+	// Don't flag a pane the user is already looking at
+	if status == monitor.StatusNeedsAttention && paneID == activeTmuxPane() {
+		return nil
+	}
+
 	statePath := monitor.DefaultStatePath()
 	state, err := monitor.Load(statePath)
 	if err != nil {
@@ -185,20 +190,23 @@ func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
 	return state.Save()
 }
 
-// --- mark-read ---
-
-var markReadSession string
-
-var monitorMarkReadCmd = &cobra.Command{
-	Use:    "mark-read [pane_id]",
-	Short:  "Mark a pane or session as read (called by tmux hook)",
-	Args:   cobra.MaximumNArgs(1),
-	Hidden: true,
-	RunE:   runMonitorMarkRead,
+// activeTmuxPane returns the pane ID of the currently active pane.
+func activeTmuxPane() string {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{pane_id}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
-func init() {
-	monitorMarkReadCmd.Flags().StringVar(&markReadSession, "session", "", "Mark all panes in this session as read")
+// --- mark-read ---
+
+var monitorMarkReadCmd = &cobra.Command{
+	Use:    "mark-read <pane_id>",
+	Short:  "Mark a pane as read (called by tmux hook)",
+	Args:   cobra.ExactArgs(1),
+	Hidden: true,
+	RunE:   runMonitorMarkRead,
 }
 
 func runMonitorMarkRead(cmd *cobra.Command, args []string) error {
@@ -211,31 +219,14 @@ func runMonitorMarkRead(cmd *cobra.Command, args []string) error {
 		return nil // silently ignore — called from tmux hook
 	}
 
-	changed := false
-
-	if markReadSession != "" {
-		// Mark all panes in the session as read
-		for _, entry := range state.Panes {
-			if entry.Session == markReadSession && entry.Status == monitor.StatusNeedsAttention {
-				debug.Log("[mark-read] session=%s pane=%s: needs_attention → unknown", markReadSession, entry.PaneID)
-				entry.Status = monitor.StatusRead
-				changed = true
-			}
-		}
-	} else if len(args) > 0 {
-		// Mark a specific pane as read
-		entry, ok := state.Panes[args[0]]
-		if !ok {
-			return nil
-		}
-		if entry.Status == monitor.StatusNeedsAttention {
-			debug.Log("[mark-read] pane=%s: needs_attention → read", args[0])
-			entry.Status = monitor.StatusRead
-			changed = true
-		}
+	entry, ok := state.Panes[args[0]]
+	if !ok {
+		return nil
 	}
 
-	if changed {
+	if entry.Status == monitor.StatusNeedsAttention {
+		debug.Log("[mark-read] pane=%s: needs_attention → read", args[0])
+		entry.Status = monitor.StatusRead
 		return state.Save()
 	}
 	return nil
@@ -247,7 +238,7 @@ func runMonitorMarkRead(cmd *cobra.Command, args []string) error {
 var tmuxMarkReadHooks = map[string]string{
 	"after-select-pane":      `run-shell "pop monitor mark-read #{pane_id} 2>/dev/null || true"`,
 	"session-window-changed": `run-shell "pop monitor mark-read #{pane_id} 2>/dev/null || true"`,
-	"client-session-changed": `run-shell "pop monitor mark-read --session #{session_name} 2>/dev/null || true"`,
+	"client-session-changed": `run-shell "pop monitor mark-read #{pane_id} 2>/dev/null || true"`,
 }
 
 var monitorStartCmd = &cobra.Command{
@@ -269,14 +260,29 @@ func runMonitorStart(cmd *cobra.Command, args []string) error {
 	return monitor.RunDaemon(statePath, pidPath)
 }
 
-// installTmuxMarkReadHooks idempotently adds mark-read hooks to tmux
+// installTmuxMarkReadHooks removes any existing pop hooks and installs current ones.
 func installTmuxMarkReadHooks() {
+	uninstallTmuxMarkReadHooks()
 	for event, hookCmd := range tmuxMarkReadHooks {
-		out, _ := exec.Command("tmux", "show-hooks", "-g", event).Output()
-		if strings.Contains(string(out), "pop monitor mark-read") {
+		exec.Command("tmux", "set-hook", "-ga", event, hookCmd).Run()
+	}
+}
+
+// uninstallTmuxMarkReadHooks removes all pop-related tmux hooks,
+// leaving other hooks intact. Parses indexed entries like "event[0] cmd".
+func uninstallTmuxMarkReadHooks() {
+	out, _ := exec.Command("tmux", "show-hooks", "-g").Output()
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, "pop monitor") {
 			continue
 		}
-		exec.Command("tmux", "set-hook", "-ga", event, hookCmd).Run()
+		// Line format: "event[N] command..."
+		bracketEnd := strings.Index(line, "]")
+		if bracketEnd == -1 {
+			continue
+		}
+		indexed := line[:bracketEnd+1]
+		exec.Command("tmux", "set-hook", "-gu", indexed).Run()
 	}
 }
 
