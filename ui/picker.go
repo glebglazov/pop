@@ -115,6 +115,7 @@ type Picker struct {
 	attentionCursor  int
 	attentionScroll  int
 	attentionPreview string
+	attentionTitle   string
 	previewFunc      func(paneID string) string
 }
 
@@ -501,15 +502,20 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Back):
+		if len(p.items) == 0 {
+			// Standalone attention mode — quit
+			p.result = Result{Action: ActionCancel}
+			return p, tea.Quit
+		}
 		p.attentionMode = false
 		return p, nil
 
 	case key.Matches(msg, keys.Quit):
-		if msg.Code == 0x1b { // esc only — go back, don't quit
+		if msg.Code == 0x1b && len(p.items) > 0 { // esc — go back to normal view
 			p.attentionMode = false
 			return p, nil
 		}
-		// ctrl+c — full quit
+		// esc in standalone mode or ctrl+c — quit
 		p.result = Result{Action: ActionCancel}
 		return p, tea.Quit
 
@@ -952,10 +958,13 @@ func (p *Picker) viewAttention() string {
 	// Reserve 1 line for hints + 1 line for header
 	listHeight := p.height + 2 // viewNormal reserves 4 lines; we need 1 for hints + 1 for header
 
-	// Header: session name in left panel
-	currentPane := p.attentionPanes[p.attentionCursor]
+	// Header in left panel
 	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-	headerText := truncateString(currentPane.Session, leftWidth-1)
+	headerText := p.attentionPanes[p.attentionCursor].Session
+	if p.attentionTitle != "" {
+		headerText = p.attentionTitle
+	}
+	headerText = truncateString(headerText, leftWidth-1)
 	headerPadding := leftWidth - len([]rune(headerText)) - 1
 	if headerPadding < 0 {
 		headerPadding = 0
@@ -1190,6 +1199,21 @@ func (p *Picker) viewNormal() string {
 func (p *Picker) Result() Result {
 	p.result.CursorIndex = p.cursor
 	return p.result
+}
+
+// RunAttention starts the picker directly in the attention sub-view.
+// Returns the selected pane (ActionSwitchToPane) or cancel.
+func RunAttention(title string, panes []AttentionPane, previewFn func(string) string) (Result, error) {
+	p := NewPicker(nil, WithAttentionPanes(panes, previewFn))
+	p.attentionMode = true
+	p.attentionTitle = title
+	p.fetchAttentionPreview()
+	program := tea.NewProgram(p)
+	m, err := program.Run()
+	if err != nil {
+		return Result{Action: ActionCancel}, err
+	}
+	return m.(*Picker).Result(), nil
 }
 
 // Run starts the picker and returns the result
