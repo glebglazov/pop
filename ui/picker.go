@@ -1007,7 +1007,7 @@ func (p *Picker) viewAttention() string {
 		b.WriteString(strings.Repeat(" ", leftWidth))
 		b.WriteString(sepStyle.Render("│"))
 		b.WriteString(rightContent)
-		b.WriteString("\n")
+		b.WriteString("\x1b[0m\n")
 	}
 
 	// Render list rows alongside preview
@@ -1040,10 +1040,11 @@ func (p *Picker) viewAttention() string {
 			rightContent = truncateString(previewLines[previewIdx], rightWidth)
 		}
 
+		b.WriteString("\x1b[0m") // reset before left panel
 		b.WriteString(left)
 		b.WriteString(sepStyle.Render("│"))
 		b.WriteString(rightContent)
-		b.WriteString("\n")
+		b.WriteString("\x1b[0m\n")
 	}
 
 	// Hints
@@ -1053,14 +1054,30 @@ func (p *Picker) viewAttention() string {
 }
 
 func truncateString(s string, maxWidth int) string {
-	runes := []rune(s)
-	if len(runes) <= maxWidth {
-		return s
-	}
 	if maxWidth <= 0 {
 		return ""
 	}
-	return string(runes[:maxWidth])
+	visibleWidth := 0
+	inEscape := false
+	lastSafe := 0
+	for i, r := range s {
+		if inEscape {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEscape = false
+			}
+			continue
+		}
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if visibleWidth >= maxWidth {
+			return s[:lastSafe]
+		}
+		visibleWidth++
+		lastSafe = i + len(string(r))
+	}
+	return s
 }
 
 func (p *Picker) viewNormal() string {

@@ -112,11 +112,11 @@ func tmuxPaneCommands() map[string]string {
 
 // capturePanePreview captures the last 50 lines of a tmux pane for preview display
 func capturePanePreview(paneID string) string {
-	out, err := exec.Command("tmux", "capture-pane", "-p", "-S", "-50", "-t", paneID).Output()
+	out, err := exec.Command("tmux", "capture-pane", "-p", "-e", "-S", "-50", "-t", paneID).Output()
 	if err != nil {
 		return ""
 	}
-	return ui.StripANSI(string(out))
+	return string(out)
 }
 
 func killTmuxSessionByName(sessionName string) {
