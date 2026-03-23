@@ -304,8 +304,6 @@ func (p *Picker) Init() tea.Cmd {
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		debug.Log("key: code=%d rune=%c mod=%v text=%q", msg.Code, msg.Code, msg.Mod, msg.Text)
-
 		// Help overlay: esc dismisses, all other keys are swallowed
 		if p.showHelp {
 			if key.Matches(msg, keys.Quit) {
