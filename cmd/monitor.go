@@ -154,15 +154,20 @@ var monitorSetStatusCmd = &cobra.Command{
 }
 
 func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
+	debug.Init()
+	defer debug.Close()
+
 	paneID := args[0]
 	if paneID == "" {
 		return nil
 	}
 
 	status := monitor.PaneStatus(args[1])
+	debug.Log("[set-status] %s: hook invoked with %s", paneID, status)
 
 	// Don't flag a pane the user is already looking at
 	if status == monitor.StatusNeedsAttention && paneID == activeTmuxPane() {
+		debug.Log("[set-status] %s: skipped (pane is active)", paneID)
 		return nil
 	}
 
