@@ -9,10 +9,18 @@ import (
 var logger *log.Logger
 var file *os.File
 
+// defaultLogPath is set at compile time via -ldflags when building with DEBUG=true.
+// When set, logging is enabled by default without needing POP_LOG.
+var defaultLogPath string
+
 // Init initializes the debug logger. If POP_LOG is set, logs are written
-// to that file. Otherwise, all log calls are no-ops.
+// to that file. If the binary was built with DEBUG=true, logs go to the
+// compiled-in default path. Otherwise, all log calls are no-ops.
 func Init() {
 	path := os.Getenv("POP_LOG")
+	if path == "" {
+		path = defaultLogPath
+	}
 	if path == "" {
 		return
 	}
