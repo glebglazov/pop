@@ -113,6 +113,7 @@ func ListWorktreesWith(d *Deps, ctx *RepoContext) ([]Worktree, error) {
 func parseWorktrees(output string) []Worktree {
 	var worktrees []Worktree
 	var current Worktree
+	isBare := false
 
 	for _, line := range strings.Split(output, "\n") {
 		switch {
@@ -124,16 +125,19 @@ func parseWorktrees(output string) []Worktree {
 			current.Branch = strings.TrimPrefix(branch, "refs/heads/")
 		case line == "detached":
 			current.Branch = "detached"
+		case line == "bare":
+			isBare = true
 		case line == "":
-			if current.Path != "" && current.Name != ".bare" {
+			if current.Path != "" && current.Name != ".bare" && !isBare {
 				worktrees = append(worktrees, current)
 			}
 			current = Worktree{}
+			isBare = false
 		}
 	}
 
 	// Handle last entry if no trailing newline
-	if current.Path != "" && current.Name != ".bare" {
+	if current.Path != "" && current.Name != ".bare" && !isBare {
 		worktrees = append(worktrees, current)
 	}
 

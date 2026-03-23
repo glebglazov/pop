@@ -99,6 +99,23 @@ branch refs/heads/master`,
 				{Name: "main", Path: "/path/to/main", Branch: "master"},
 			},
 		},
+		{
+			name: "filters out bare root with normal name",
+			input: `worktree /projects/game_server
+bare
+
+worktree /projects/game_server/alfa
+branch refs/heads/alfa
+
+worktree /projects/game_server/main
+branch refs/heads/master
+
+`,
+			expected: []Worktree{
+				{Name: "alfa", Path: "/projects/game_server/alfa", Branch: "alfa"},
+				{Name: "main", Path: "/projects/game_server/main", Branch: "master"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
