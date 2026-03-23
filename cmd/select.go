@@ -40,8 +40,6 @@ func init() {
 }
 
 func runSelect(cmd *cobra.Command, args []string) error {
-	go ensureMonitorDaemon()
-
 	// Load config
 	cfgPath := cfgFile
 	if cfgPath == "" {
@@ -63,6 +61,10 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
+	}
+
+	if cfg.Monitor {
+		go ensureMonitorDaemon()
 	}
 
 	// Expand project paths
@@ -202,22 +204,27 @@ func runSelect(cmd *cobra.Command, args []string) error {
 	restoreCursorIdx := -1
 	for {
 		// Refresh session state each iteration
-		items := buildSessionAwareItems(baseItems, hist, excludedSessionNames)
+		items := buildSessionAwareItems(baseItems, hist, excludedSessionNames, cfg.Monitor)
 
 		quickAccessModifier := cfg.GetQuickAccessModifier()
+		iconLegends := []ui.IconLegend{
+			{Icon: iconDirSession, Desc: "Directory with tmux session"},
+			{Icon: iconStandaloneSession, Desc: "Standalone tmux session"},
+		}
+		if cfg.Monitor {
+			iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent needs attention"})
+		}
 		opts := []ui.PickerOption{
 			ui.WithCursorAtEnd(),
 			ui.WithKillSession(),
 			ui.WithReset(),
 			ui.WithQuickAccess(quickAccessModifier),
-			ui.WithIconLegend(
-				ui.IconLegend{Icon: iconDirSession, Desc: "Directory with tmux session"},
-				ui.IconLegend{Icon: iconStandaloneSession, Desc: "Standalone tmux session"},
-				ui.IconLegend{Icon: iconAttention, Desc: "Agent needs attention"},
-			),
+			ui.WithIconLegend(iconLegends...),
 		}
-		if attentionPanes := buildAttentionPanes(); len(attentionPanes) > 0 {
-			opts = append(opts, ui.WithAttentionPanes(attentionPanes, capturePanePreview))
+		if cfg.Monitor {
+			if attentionPanes := buildAttentionPanes(); len(attentionPanes) > 0 {
+				opts = append(opts, ui.WithAttentionPanes(attentionPanes, capturePanePreview))
+			}
 		}
 		if inTmux {
 			opts = append(opts, ui.WithOpenWindow())
@@ -320,8 +327,12 @@ func sortBaseItemsByHistory(items []ui.Item, hist *history.History) []ui.Item {
 	return sorted
 }
 
-func buildSessionAwareItems(baseItems []ui.Item, hist *history.History, excludedSessionNames map[string]bool) []ui.Item {
-	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity(), excludedSessionNames, monitorAttentionSessions())
+func buildSessionAwareItems(baseItems []ui.Item, hist *history.History, excludedSessionNames map[string]bool, monitorEnabled bool) []ui.Item {
+	var attentionSessions map[string]bool
+	if monitorEnabled {
+		attentionSessions = monitorAttentionSessions()
+	}
+	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity(), excludedSessionNames, attentionSessions)
 }
 
 func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sessionActivity map[string]int64, excludedSessionNames map[string]bool, attentionSessions map[string]bool) []ui.Item {

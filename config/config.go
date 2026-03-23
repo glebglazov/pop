@@ -68,6 +68,7 @@ type Config struct {
 	ExcludeCurrentDir bool `toml:"exclude_current_dir"`
 	DisambiguationStrategy string               `toml:"disambiguation_strategy"`
 	QuickAccessModifier    string               `toml:"quick_access_modifier"`
+	Monitor                bool                 `toml:"monitor"`
 	Worktree               *WorktreeConfig      `toml:"worktree"`
 	Select                 *SelectConfig        `toml:"select"`
 
