@@ -1,7 +1,6 @@
 package monitor
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,6 +18,9 @@ const pollInterval = 5 * time.Second
 
 // RunDaemon runs the monitoring loop in the foreground.
 // Writes PID file on start, removes on exit.
+// The daemon only handles cleanup (dead panes, unknown sources)
+// and active-pane auto-read. State transitions are driven by
+// Claude Code hooks calling `pop monitor set-status`.
 func RunDaemon(statePath, pidPath string) error {
 	return RunDaemonWith(DefaultDeps(), statePath, pidPath)
 }
@@ -38,16 +40,13 @@ func RunDaemonWith(d *Deps, statePath, pidPath string) error {
 
 	fmt.Printf("Monitor daemon started (PID %d, polling every %s)\n", os.Getpid(), pollInterval)
 
-	// Track previous pane content for change detection
-	prevContent := make(map[string]string)
-
 	// Run first tick immediately
-	pollOnce(d, statePath, prevContent)
+	pollOnce(d, statePath)
 
 	for {
 		select {
 		case <-ticker.C:
-			pollOnce(d, statePath, prevContent)
+			pollOnce(d, statePath)
 		case sig := <-sigCh:
 			fmt.Printf("\nReceived %s, shutting down\n", sig)
 			return nil
@@ -55,7 +54,7 @@ func RunDaemonWith(d *Deps, statePath, pidPath string) error {
 	}
 }
 
-func pollOnce(d *Deps, statePath string, prevContent map[string]string) {
+func pollOnce(d *Deps, statePath string) {
 	state, err := LoadWith(d, statePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load state: %v\n", err)
@@ -70,10 +69,10 @@ func pollOnce(d *Deps, statePath string, prevContent map[string]string) {
 	livePanes := liveTmuxPanes()
 
 	for paneID, entry := range state.Panes {
-		// Drop panes with unrecognized source (e.g., renamed source constants)
+		// Drop panes with unrecognized source
 		if !IsKnownSource(entry.Source) {
+			debug.Log("[monitor] %s: deregistered (unknown source %q)", paneID, entry.Source)
 			delete(state.Panes, paneID)
-			delete(prevContent, paneID)
 			changed = true
 			continue
 		}
@@ -81,70 +80,16 @@ func pollOnce(d *Deps, statePath string, prevContent map[string]string) {
 		// Check if pane still exists in tmux
 		info, alive := livePanes[paneID]
 		if !alive {
+			debug.Log("[monitor] %s: deregistered (pane dead)", paneID)
 			delete(state.Panes, paneID)
-			delete(prevContent, paneID)
 			changed = true
 			continue
 		}
 
 		// If user is actively looking at this pane, treat as read
-		if info.active {
-			if entry.Status == StatusNeedsAttention {
-				debug.Log("[monitor] %s: %s → read (pane is active)", paneID, entry.Status)
-				entry.Status = StatusRead
-				entry.UpdatedAt = time.Now()
-				changed = true
-			}
-			prevContent[paneID] = "" // reset so next poll after leaving doesn't see a stale diff
-			continue
-		}
-
-		// Capture pane content
-		content, err := capturePaneContent(paneID)
-		if err != nil {
-			delete(state.Panes, paneID)
-			delete(prevContent, paneID)
-			changed = true
-			continue
-		}
-
-		// Detect state using current and previous content
-		detector := DetectorForSource(entry.Source)
-		prev := prevContent[paneID]
-		detectedStatus := detector.Detect(content, prev)
-		contentChanged := prev != "" && content != prev
-		contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))[:8]
-		prevHash := ""
-		if prev != "" {
-			prevHash = fmt.Sprintf("%x", sha256.Sum256([]byte(prev)))[:8]
-		}
-		prevContent[paneID] = content
-
-		newStatus := detectedStatus
-
-		// If it was working and now stopped producing output,
-		// that means it finished — treat as needs attention
-		if entry.Status == StatusWorking && newStatus == StatusUnknown {
-			debug.Log("[monitor] %s: working→unknown promoted to needs_attention", paneID)
-			newStatus = StatusNeedsAttention
-		}
-
-		// needs_attention is sticky — only exits when content starts
-		// changing again (user interacted, agent started working)
-		if entry.Status == StatusNeedsAttention && newStatus == StatusUnknown {
-			newStatus = StatusNeedsAttention
-		}
-
-		// read is sticky — user acknowledged the pane, don't re-trigger
-		// needs_attention until content changes (agent starts working again)
-		if entry.Status == StatusRead && (newStatus == StatusUnknown || newStatus == StatusNeedsAttention) {
-			newStatus = StatusRead
-		}
-
-		if newStatus != entry.Status {
-			debug.Log("[monitor] %s: %s → %s (detected=%s, contentChanged=%v, hash=%s→%s)",
-				paneID, entry.Status, newStatus, detectedStatus, contentChanged, prevHash, contentHash)
-			entry.Status = newStatus
+		if info.active && entry.Status == StatusNeedsAttention {
+			debug.Log("[monitor] %s: %s → read (pane is active)", paneID, entry.Status)
+			entry.Status = StatusRead
 			entry.UpdatedAt = time.Now()
 			changed = true
 		}
@@ -177,15 +122,6 @@ func liveTmuxPanes() map[string]paneInfo {
 		}
 	}
 	return panes
-}
-
-// capturePaneContent captures the last N lines of a pane
-func capturePaneContent(paneID string) (string, error) {
-	out, err := exec.Command("tmux", "capture-pane", "-p", "-S", "-20", "-t", paneID).Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
 }
 
 // StopDaemon sends SIGTERM to the daemon process

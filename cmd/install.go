@@ -94,7 +94,19 @@ func runInstallSkills() error {
 	return nil
 }
 
-const popHookCommand = "pop monitor register $TMUX_PANE --source claude-code 2>/dev/null || true"
+// popHooks defines all Claude Code hooks needed for monitoring.
+// Each entry maps a hook event to a hook config (matcher + command).
+var popHooks = []struct {
+	event   string
+	matcher string
+	command string
+}{
+	{"SessionStart", "startup", "pop monitor register $TMUX_PANE --source claude-code 2>/dev/null || true"},
+	{"UserPromptSubmit", "", "pop monitor set-status $TMUX_PANE working 2>/dev/null || true"},
+	{"PreToolUse", "", "pop monitor set-status $TMUX_PANE working 2>/dev/null || true"},
+	{"Stop", "", "pop monitor set-status $TMUX_PANE needs_attention 2>/dev/null || true"},
+	{"Notification", "", "pop monitor set-status $TMUX_PANE needs_attention 2>/dev/null || true"},
+}
 
 func runInstallHooks() error {
 	home, err := os.UserHomeDir()
@@ -115,48 +127,42 @@ func runInstallHooks() error {
 		return fmt.Errorf("failed to read %s: %w", settingsPath, err)
 	}
 
-	// Build the hook entry we want to add
-	popHook := map[string]interface{}{
-		"matcher": "startup",
-		"hooks": []interface{}{
-			map[string]interface{}{
-				"type":    "command",
-				"command": popHookCommand,
-			},
-		},
-	}
-
-	// Get or create hooks.SessionStart
+	// Get or create hooks object
 	hooks, _ := settings["hooks"].(map[string]interface{})
 	if hooks == nil {
 		hooks = make(map[string]interface{})
 		settings["hooks"] = hooks
 	}
 
-	sessionStartRaw, _ := hooks["SessionStart"].([]interface{})
+	installed := 0
+	for _, h := range popHooks {
+		hookEntry := map[string]interface{}{
+			"hooks": []interface{}{
+				map[string]interface{}{
+					"type":    "command",
+					"command": h.command,
+				},
+			},
+		}
+		if h.matcher != "" {
+			hookEntry["matcher"] = h.matcher
+		}
 
-	// Check if our hook is already installed
-	for _, entry := range sessionStartRaw {
-		entryMap, ok := entry.(map[string]interface{})
-		if !ok {
+		// Check if already installed
+		eventHooks, _ := hooks[h.event].([]interface{})
+		if containsPopHook(eventHooks, h.command) {
 			continue
 		}
-		innerHooks, _ := entryMap["hooks"].([]interface{})
-		for _, h := range innerHooks {
-			hMap, ok := h.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if cmd, _ := hMap["command"].(string); cmd == popHookCommand {
-				fmt.Println("Hook already installed in " + settingsPath)
-				return nil
-			}
-		}
+
+		eventHooks = append(eventHooks, hookEntry)
+		hooks[h.event] = eventHooks
+		installed++
 	}
 
-	// Append our hook
-	sessionStartRaw = append(sessionStartRaw, popHook)
-	hooks["SessionStart"] = sessionStartRaw
+	if installed == 0 {
+		fmt.Println("All hooks already installed in " + settingsPath)
+		return nil
+	}
 
 	// Write back
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
@@ -170,13 +176,32 @@ func runInstallHooks() error {
 	if err := enc.Encode(settings); err != nil {
 		return fmt.Errorf("failed to serialize settings: %w", err)
 	}
-	out := buf.Bytes()
 
-	if err := os.WriteFile(settingsPath, out, 0644); err != nil {
+	if err := os.WriteFile(settingsPath, buf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", settingsPath, err)
 	}
 
-	fmt.Printf("Hook installed in %s\n", settingsPath)
-	fmt.Println("Claude Code will auto-register panes for monitoring on startup.")
+	fmt.Printf("Installed %d hook(s) in %s\n", installed, settingsPath)
 	return nil
+}
+
+// containsPopHook checks if any hook entry contains the given command string
+func containsPopHook(entries []interface{}, command string) bool {
+	for _, entry := range entries {
+		entryMap, ok := entry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		innerHooks, _ := entryMap["hooks"].([]interface{})
+		for _, h := range innerHooks {
+			hMap, ok := h.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if cmd, _ := hMap["command"].(string); cmd == command {
+				return true
+			}
+		}
+	}
+	return false
 }

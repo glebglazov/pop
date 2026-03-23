@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/monitor"
@@ -25,6 +26,7 @@ func init() {
 	monitorCmd.AddCommand(monitorStopCmd)
 	monitorCmd.AddCommand(monitorStatusCmd)
 	monitorCmd.AddCommand(monitorDeregisterCmd)
+	monitorCmd.AddCommand(monitorSetStatusCmd)
 	monitorCmd.AddCommand(monitorMarkReadCmd)
 	monitorCmd.AddCommand(monitorHookSetupCmd)
 	monitorRegisterCmd.Flags().StringVar(&monitorSource, "source", "", "Source tool type (e.g., claude-code)")
@@ -144,6 +146,45 @@ func runMonitorDeregister(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// --- set-status ---
+
+var monitorSetStatusCmd = &cobra.Command{
+	Use:    "set-status <pane_id> <status>",
+	Short:  "Set pane status (called by Claude Code hooks)",
+	Args:   cobra.ExactArgs(2),
+	Hidden: true,
+	RunE:   runMonitorSetStatus,
+}
+
+func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
+	paneID := args[0]
+	if paneID == "" {
+		return nil
+	}
+
+	status := monitor.PaneStatus(args[1])
+
+	statePath := monitor.DefaultStatePath()
+	state, err := monitor.Load(statePath)
+	if err != nil {
+		return nil // silently ignore — called from hook
+	}
+
+	entry, ok := state.Panes[paneID]
+	if !ok {
+		return nil // not registered
+	}
+
+	if entry.Status == status {
+		return nil // no change
+	}
+
+	debug.Log("[set-status] %s: %s → %s", paneID, entry.Status, status)
+	entry.Status = status
+	entry.UpdatedAt = time.Now()
+	return state.Save()
+}
+
 // --- mark-read ---
 
 var markReadSession string
@@ -188,8 +229,8 @@ func runMonitorMarkRead(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		if entry.Status == monitor.StatusNeedsAttention {
-			debug.Log("[mark-read] pane=%s: needs_attention → unknown", args[0])
-			entry.Status = monitor.StatusUnknown
+			debug.Log("[mark-read] pane=%s: needs_attention → read", args[0])
+			entry.Status = monitor.StatusRead
 			changed = true
 		}
 	}
