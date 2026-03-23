@@ -164,6 +164,17 @@ func (s *State) SessionsNeedingAttention() map[string]bool {
 	return result
 }
 
+// PanesNeedingAttention returns all pane entries with StatusNeedsAttention
+func (s *State) PanesNeedingAttention() []*PaneEntry {
+	var result []*PaneEntry
+	for _, entry := range s.Panes {
+		if entry.Status == StatusNeedsAttention {
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
 // IsDaemonRunning checks if the daemon process is alive by reading the PID file
 // and sending signal 0 to the process
 func IsDaemonRunning(pidPath string) bool {

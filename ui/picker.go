@@ -14,6 +14,13 @@ import (
 	"github.com/junegunn/fzf/src/util"
 )
 
+// Shared styles used across view methods
+var (
+	selectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("237")).Foreground(lipgloss.Color("255"))
+	pipeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	hintStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+)
+
 // Item represents a selectable item in the picker
 type Item struct {
 	Name    string // Display name
@@ -53,7 +60,15 @@ const (
 	ActionReset
 	ActionOpenWindow
 	ActionUserDefinedCommand
+	ActionSwitchToPane
 )
+
+// AttentionPane represents a pane that needs user attention
+type AttentionPane struct {
+	PaneID  string
+	Session string
+	Name    string
+}
 
 // Picker is a fuzzy-searchable list picker
 type Picker struct {
@@ -93,6 +108,14 @@ type Picker struct {
 
 	// Warnings to display in the picker
 	warnings []string
+
+	// Attention sub-view
+	attentionMode    bool
+	attentionPanes   []AttentionPane
+	attentionCursor  int
+	attentionScroll  int
+	attentionPreview string
+	previewFunc      func(paneID string) string
 }
 
 // iconLegendEntry maps an icon to its description in the help view
@@ -231,6 +254,15 @@ func WithWarnings(warnings []string) PickerOption {
 	}
 }
 
+// WithAttentionPanes enables the attention sub-view with the given panes and preview function.
+// The preview function is called with a pane ID and should return the pane's content.
+func WithAttentionPanes(panes []AttentionPane, fn func(string) string) PickerOption {
+	return func(p *Picker) {
+		p.attentionPanes = panes
+		p.previewFunc = fn
+	}
+}
+
 // NewPicker creates a new picker with the given items
 func NewPicker(items []Item, opts ...PickerOption) *Picker {
 	ti := textinput.New()
@@ -286,6 +318,11 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, keys.Help) {
 			p.showHelp = true
 			return p, nil
+		}
+
+		// Attention sub-view: handle keys when in attention mode
+		if p.attentionMode {
+			return p.updateAttention(msg)
 		}
 
 		switch {
@@ -433,6 +470,15 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, tea.Quit
 			}
 			return p, nil
+
+		case key.Matches(msg, keys.Attention):
+			if len(p.attentionPanes) > 0 {
+				p.attentionMode = true
+				p.attentionCursor = 0
+				p.attentionScroll = 0
+				p.fetchAttentionPreview()
+				return p, nil
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -451,6 +497,78 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	p.filter()
 
 	return p, cmd
+}
+
+// updateAttention handles key events when in attention sub-view mode
+func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, keys.Back):
+		p.attentionMode = false
+		return p, nil
+
+	case key.Matches(msg, keys.Quit):
+		if msg.Code == 0x1b { // esc only — go back, don't quit
+			p.attentionMode = false
+			return p, nil
+		}
+		// ctrl+c — full quit
+		p.result = Result{Action: ActionCancel}
+		return p, tea.Quit
+
+	case key.Matches(msg, keys.Enter):
+		if len(p.attentionPanes) > 0 {
+			pane := p.attentionPanes[p.attentionCursor]
+			p.result = Result{
+				Selected: &Item{Name: pane.Name, Path: pane.PaneID},
+				Action:   ActionSwitchToPane,
+			}
+			return p, tea.Quit
+		}
+
+	case key.Matches(msg, keys.Up):
+		if len(p.attentionPanes) > 0 {
+			if p.attentionCursor > 0 {
+				p.attentionCursor--
+			} else {
+				p.attentionCursor = len(p.attentionPanes) - 1
+			}
+			p.adjustAttentionScroll()
+			p.fetchAttentionPreview()
+		}
+		return p, nil
+
+	case key.Matches(msg, keys.Down):
+		if len(p.attentionPanes) > 0 {
+			if p.attentionCursor < len(p.attentionPanes)-1 {
+				p.attentionCursor++
+			} else {
+				p.attentionCursor = 0
+			}
+			p.adjustAttentionScroll()
+			p.fetchAttentionPreview()
+		}
+		return p, nil
+	}
+	return p, nil
+}
+
+// fetchAttentionPreview calls the preview function for the currently selected attention pane
+func (p *Picker) fetchAttentionPreview() {
+	if p.previewFunc == nil || len(p.attentionPanes) == 0 {
+		p.attentionPreview = ""
+		return
+	}
+	p.attentionPreview = p.previewFunc(p.attentionPanes[p.attentionCursor].PaneID)
+}
+
+// adjustAttentionScroll ensures the attention cursor is visible
+func (p *Picker) adjustAttentionScroll() {
+	if p.attentionCursor < p.attentionScroll {
+		p.attentionScroll = p.attentionCursor
+	}
+	if p.attentionCursor >= p.attentionScroll+p.height {
+		p.attentionScroll = p.attentionCursor - p.height + 1
+	}
 }
 
 // fzfMatch holds an item with its fuzzy match score
@@ -544,7 +662,11 @@ func (p *Picker) findItemIndex(path string) int {
 
 // buildHints returns the hints string based on enabled features
 func (p *Picker) buildHints() string {
-	return "  Enter select · Esc quit · F1 help"
+	hints := "  Enter select · Esc quit · F1 help"
+	if len(p.attentionPanes) > 0 {
+		hints += " · → attention"
+	}
+	return hints
 }
 
 // formatKeyHint converts a key binding to a display-friendly hint format
@@ -683,6 +805,8 @@ func (p *Picker) View() tea.View {
 	var content string
 	if p.showHelp {
 		content = p.viewHelp()
+	} else if p.attentionMode {
+		content = p.viewAttention()
 	} else {
 		content = p.viewNormal()
 	}
@@ -806,21 +930,134 @@ func (p *Picker) viewHelp() string {
 	b.WriteString("┘\n")
 
 	// Hints line
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	b.WriteString(hintStyle.Render("  Esc back"))
 
 	return b.String()
 }
 
-func (p *Picker) viewNormal() string {
+func (p *Picker) viewAttention() string {
 	var b strings.Builder
 
-	// Styles
-	selectedStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("237")).
-		Foreground(lipgloss.Color("255"))
-	pipeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39")) // Blue
+	sepStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("238"))
+
+	// Layout: left panel (pane list) + separator + right panel (preview)
+	leftWidth := p.width * 3 / 10
+	if leftWidth < 15 {
+		leftWidth = 15
+	}
+	rightWidth := p.width - leftWidth - 1 // 1 for separator
+	if rightWidth < 10 {
+		rightWidth = 10
+	}
+
+	// Reserve 1 line for hints + 1 line for header
+	listHeight := p.height + 2 // viewNormal reserves 4 lines; we need 1 for hints + 1 for header
+
+	// Header: session name in left panel
+	currentPane := p.attentionPanes[p.attentionCursor]
+	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
+	headerText := truncateString(currentPane.Session, leftWidth-1)
+	headerPadding := leftWidth - len([]rune(headerText)) - 1
+	if headerPadding < 0 {
+		headerPadding = 0
+	}
+	b.WriteString(headerStyle.Render(" " + headerText))
+	b.WriteString(strings.Repeat(" ", headerPadding))
+	b.WriteString(sepStyle.Render("│"))
+	b.WriteString("\n")
+
+	// Build preview lines
+	previewLines := strings.Split(p.attentionPreview, "\n")
+	// Trim trailing empty lines
+	for len(previewLines) > 0 && strings.TrimSpace(previewLines[len(previewLines)-1]) == "" {
+		previewLines = previewLines[:len(previewLines)-1]
+	}
+
+	// Visible attention panes
+	visible := listHeight
+	if visible > len(p.attentionPanes) {
+		visible = len(p.attentionPanes)
+	}
+
+	start := p.attentionScroll
+
+	// For preview: show last lines that fit (push to bottom like main view)
+	previewStart := 0
+	if len(previewLines) > listHeight {
+		previewStart = len(previewLines) - listHeight
+	}
+
+	// Empty lines to push list content to bottom
+	emptyLines := listHeight - visible
+	for i := 0; i < emptyLines; i++ {
+		// Empty left panel + separator + preview line
+		previewIdx := previewStart + i
+		rightContent := ""
+		if previewIdx < len(previewLines) {
+			rightContent = truncateString(previewLines[previewIdx], rightWidth)
+		}
+		b.WriteString(strings.Repeat(" ", leftWidth))
+		b.WriteString(sepStyle.Render("│"))
+		b.WriteString(rightContent)
+		b.WriteString("\n")
+	}
+
+	// Render list rows alongside preview
+	for i := 0; i < visible; i++ {
+		listIdx := start + i
+		previewIdx := previewStart + emptyLines + i
+
+		// Left panel: pane list item
+		var left string
+		pane := p.attentionPanes[listIdx]
+		name := truncateString(pane.Name, leftWidth-3) // 3 for prefix
+
+		if listIdx == p.attentionCursor {
+			padding := leftWidth - len([]rune(name)) - 3
+			if padding < 0 {
+				padding = 0
+			}
+			left = pipeStyle.Render("▌") + selectedStyle.Render(" "+name+strings.Repeat(" ", padding))
+		} else {
+			padding := leftWidth - len([]rune(name)) - 2
+			if padding < 0 {
+				padding = 0
+			}
+			left = "  " + name + strings.Repeat(" ", padding)
+		}
+
+		// Right panel: preview content
+		rightContent := ""
+		if previewIdx < len(previewLines) {
+			rightContent = truncateString(previewLines[previewIdx], rightWidth)
+		}
+
+		b.WriteString(left)
+		b.WriteString(sepStyle.Render("│"))
+		b.WriteString(rightContent)
+		b.WriteString("\n")
+	}
+
+	// Hints
+	b.WriteString(hintStyle.Render("  ← back · Enter switch · Esc cancel"))
+
+	return b.String()
+}
+
+func truncateString(s string, maxWidth int) string {
+	runes := []rune(s)
+	if len(runes) <= maxWidth {
+		return s
+	}
+	if maxWidth <= 0 {
+		return ""
+	}
+	return string(runes[:maxWidth])
+}
+
+func (p *Picker) viewNormal() string {
+	var b strings.Builder
 
 	// Items
 	visible := p.height
@@ -945,7 +1182,6 @@ func (p *Picker) viewNormal() string {
 	}
 
 	// Hints line
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	hints := p.buildHints()
 	b.WriteString(hintStyle.Render(hints))
 
@@ -985,6 +1221,8 @@ type keyMap struct {
 	OpenWindow   key.Binding
 	ClearInput   key.Binding
 	Help         key.Binding
+	Attention    key.Binding
+	Back         key.Binding
 }
 
 var keys = keyMap{
@@ -1029,6 +1267,12 @@ var keys = keyMap{
 	),
 	Help: key.NewBinding(
 		key.WithKeys("f1"),
+	),
+	Attention: key.NewBinding(
+		key.WithKeys("right"),
+	),
+	Back: key.NewBinding(
+		key.WithKeys("left"),
 	),
 }
 

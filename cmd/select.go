@@ -214,6 +214,9 @@ func runSelect(cmd *cobra.Command, args []string) error {
 				ui.IconLegend{Icon: iconAttention, Desc: "Agent needs attention"},
 			),
 		}
+		if attentionPanes := buildAttentionPanes(); len(attentionPanes) > 0 {
+			opts = append(opts, ui.WithAttentionPanes(attentionPanes, capturePanePreview))
+		}
 		if inTmux {
 			opts = append(opts, ui.WithOpenWindow())
 		}
@@ -241,7 +244,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 				os.Exit(1)
 			}
 			if isStandaloneSession(*result.Selected) {
-				return switchToTmuxSession(standaloneSessionName(*result.Selected))
+				return switchToTmuxTarget(standaloneSessionName(*result.Selected))
 			}
 			if !noHistory {
 				hist.Record(result.Selected.Path)
@@ -280,6 +283,12 @@ func runSelect(cmd *cobra.Command, args []string) error {
 				baseItems = sortBaseItemsByHistory(baseItems, hist)
 			}
 			// No-op for standalone sessions; continue loop
+
+		case ui.ActionSwitchToPane:
+			if result.Selected != nil {
+				// Path contains the pane ID; switch tmux to that pane
+				return switchToTmuxTarget(result.Selected.Path)
+			}
 
 		case ui.ActionUserDefinedCommand:
 			if result.UserDefinedCommand != nil && result.Selected != nil {
