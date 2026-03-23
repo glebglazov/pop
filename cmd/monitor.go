@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/glebglazov/pop/debug"
@@ -284,6 +286,48 @@ func uninstallTmuxMarkReadHooks() {
 		indexed := line[:bracketEnd+1]
 		exec.Command("tmux", "set-hook", "-gu", indexed).Run()
 	}
+}
+
+// ensureMonitorDaemon ensures a monitor daemon is running with the current binary.
+// Restarts if the binary is newer than the running daemon.
+// Called automatically by `pop select`.
+func ensureMonitorDaemon() {
+	pidPath := monitor.DefaultPIDPath()
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+
+	if monitor.IsDaemonRunning(pidPath) {
+		if !binaryNewerThanPID(exe, pidPath) {
+			return // daemon is up to date
+		}
+		_ = monitor.StopDaemon(pidPath)
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	cmd := exec.Command(exe, "monitor", "start")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+	_ = cmd.Start()
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
+	}
+}
+
+// binaryNewerThanPID returns true if the binary was modified after the PID file was written
+func binaryNewerThanPID(exePath, pidPath string) bool {
+	exeInfo, err := os.Stat(exePath)
+	if err != nil {
+		return true
+	}
+	pidInfo, err := os.Stat(pidPath)
+	if err != nil {
+		return true
+	}
+	return exeInfo.ModTime().After(pidInfo.ModTime())
 }
 
 // --- stop ---
