@@ -132,7 +132,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
 
 		// Should have 4 items: 2 projects + 2 standalone
 		if len(result) != 4 {
@@ -161,7 +161,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
 
 		iconByPath := make(map[string]string)
 		for _, item := range result {
@@ -187,7 +187,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		sessionActivity := map[string]int64{}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
 
 		if len(result) != 2 {
 			t.Fatalf("got %d items, want 2", len(result))
@@ -214,7 +214,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, excludedSessionNames)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, excludedSessionNames, nil)
 
 		// Should have only 1 item: "api" with dir session icon
 		// "app" should NOT appear as standalone
@@ -240,13 +240,88 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
 
 		if len(result) != 1 {
 			t.Fatalf("got %d items, want 1 (session should match project)", len(result))
 		}
 		if result[0].Icon != iconDirSession {
 			t.Errorf("project with matching sanitized session: Icon = %q, want %q", result[0].Icon, iconDirSession)
+		}
+	})
+}
+
+func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
+	now := time.Now()
+
+	t.Run("attention overrides session icon for project", func(t *testing.T) {
+		baseItems := []ui.Item{
+			{Name: "app", Path: "/app"},
+			{Name: "api", Path: "/api"},
+		}
+		sessionActivity := map[string]int64{
+			"app": now.Unix(),
+			"api": now.Unix(),
+		}
+		attentionSessions := map[string]bool{
+			"app": true,
+		}
+		hist := &history.History{}
+
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, attentionSessions)
+
+		iconByPath := make(map[string]string)
+		for _, item := range result {
+			iconByPath[item.Path] = item.Icon
+		}
+
+		if iconByPath["/app"] != iconAttention {
+			t.Errorf("project with attention: Icon = %q, want %q", iconByPath["/app"], iconAttention)
+		}
+		if iconByPath["/api"] != iconDirSession {
+			t.Errorf("project without attention: Icon = %q, want %q", iconByPath["/api"], iconDirSession)
+		}
+	})
+
+	t.Run("attention overrides standalone session icon", func(t *testing.T) {
+		baseItems := []ui.Item{}
+		sessionActivity := map[string]int64{
+			"scratch": now.Unix(),
+			"notes":   now.Unix(),
+		}
+		attentionSessions := map[string]bool{
+			"scratch": true,
+		}
+		hist := &history.History{}
+
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, attentionSessions)
+
+		iconByPath := make(map[string]string)
+		for _, item := range result {
+			iconByPath[item.Path] = item.Icon
+		}
+
+		if iconByPath[tmuxSessionPathPrefix+"scratch"] != iconAttention {
+			t.Errorf("standalone with attention: Icon = %q, want %q", iconByPath[tmuxSessionPathPrefix+"scratch"], iconAttention)
+		}
+		if iconByPath[tmuxSessionPathPrefix+"notes"] != iconStandaloneSession {
+			t.Errorf("standalone without attention: Icon = %q, want %q", iconByPath[tmuxSessionPathPrefix+"notes"], iconStandaloneSession)
+		}
+	})
+
+	t.Run("nil attention sessions does not affect icons", func(t *testing.T) {
+		baseItems := []ui.Item{
+			{Name: "app", Path: "/app"},
+		}
+		sessionActivity := map[string]int64{
+			"app": now.Unix(),
+		}
+		hist := &history.History{}
+
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
+
+		if result[0].Icon != iconDirSession {
+			t.Errorf("nil attention: Icon = %q, want %q", result[0].Icon, iconDirSession)
 		}
 	})
 }

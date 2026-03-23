@@ -1,0 +1,189 @@
+package monitor
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/glebglazov/pop/internal/deps"
+)
+
+// Source identifies the tool type running in a monitored pane
+type Source string
+
+const (
+	SourceClaudeCode Source = "claude-code"
+)
+
+// PaneStatus represents the detected state of a monitored pane
+type PaneStatus string
+
+const (
+	StatusWorking        PaneStatus = "working"
+	StatusNeedsAttention PaneStatus = "needs_attention"
+	StatusRead           PaneStatus = "read"
+	StatusUnknown        PaneStatus = "unknown"
+)
+
+// PaneEntry represents a single monitored pane
+type PaneEntry struct {
+	PaneID    string     `json:"pane_id"`
+	Session   string     `json:"session"`
+	Source    Source      `json:"source"`
+	Status    PaneStatus `json:"status"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// State holds the full monitor state
+type State struct {
+	Panes map[string]*PaneEntry `json:"panes"`
+	path  string
+}
+
+// Deps holds external dependencies for the monitor package
+type Deps struct {
+	FS deps.FileSystem
+}
+
+// DefaultDeps returns dependencies using real implementations
+func DefaultDeps() *Deps {
+	return &Deps{
+		FS: deps.NewRealFileSystem(),
+	}
+}
+
+var defaultDeps = DefaultDeps()
+
+// DefaultStatePath returns the default monitor state file path
+func DefaultStatePath() string {
+	return DefaultStatePathWith(defaultDeps)
+}
+
+// DefaultStatePathWith returns the default monitor state file path using provided dependencies
+func DefaultStatePathWith(d *Deps) string {
+	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
+		return filepath.Join(xdgData, "pop", "monitor.json")
+	}
+	home, _ := d.FS.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "pop", "monitor.json")
+}
+
+// DefaultPIDPath returns the default daemon PID file path
+func DefaultPIDPath() string {
+	return DefaultPIDPathWith(defaultDeps)
+}
+
+// DefaultPIDPathWith returns the default daemon PID file path using provided dependencies
+func DefaultPIDPathWith(d *Deps) string {
+	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
+		return filepath.Join(xdgData, "pop", "monitor.pid")
+	}
+	home, _ := d.FS.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "pop", "monitor.pid")
+}
+
+// Load reads monitor state from disk
+func Load(path string) (*State, error) {
+	return LoadWith(defaultDeps, path)
+}
+
+// LoadWith reads monitor state using provided dependencies
+func LoadWith(d *Deps, path string) (*State, error) {
+	s := &State{
+		Panes: make(map[string]*PaneEntry),
+		path:  path,
+	}
+
+	data, err := d.FS.ReadFile(path)
+	if os.IsNotExist(err) {
+		return s, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal(data, s); err != nil {
+		return s, nil
+	}
+	if s.Panes == nil {
+		s.Panes = make(map[string]*PaneEntry)
+	}
+
+	return s, nil
+}
+
+// Save writes monitor state to disk
+func (s *State) Save() error {
+	return s.SaveWith(defaultDeps)
+}
+
+// SaveWith writes monitor state using provided dependencies
+func (s *State) SaveWith(d *Deps) error {
+	dir := filepath.Dir(s.path)
+	if err := d.FS.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return d.FS.WriteFile(s.path, data, 0644)
+}
+
+// Register adds a pane to monitoring
+func (s *State) Register(paneID, session string, source Source) {
+	s.Panes[paneID] = &PaneEntry{
+		PaneID:    paneID,
+		Session:   session,
+		Source:    source,
+		Status:    StatusUnknown,
+		UpdatedAt: time.Now(),
+	}
+}
+
+// Deregister removes a pane from monitoring
+func (s *State) Deregister(paneID string) {
+	delete(s.Panes, paneID)
+}
+
+// SessionsNeedingAttention returns session names that have at least one pane
+// in StatusNeedsAttention
+func (s *State) SessionsNeedingAttention() map[string]bool {
+	result := make(map[string]bool)
+	for _, entry := range s.Panes {
+		if entry.Status == StatusNeedsAttention {
+			result[entry.Session] = true
+		}
+	}
+	return result
+}
+
+// IsDaemonRunning checks if the daemon process is alive by reading the PID file
+// and sending signal 0 to the process
+func IsDaemonRunning(pidPath string) bool {
+	return IsDaemonRunningWith(defaultDeps, pidPath)
+}
+
+// IsDaemonRunningWith checks daemon liveness using provided dependencies
+func IsDaemonRunningWith(d *Deps, pidPath string) bool {
+	data, err := d.FS.ReadFile(pidPath)
+	if err != nil {
+		return false
+	}
+	pidStr := strings.TrimSpace(string(data))
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return process.Signal(syscall.Signal(0)) == nil
+}

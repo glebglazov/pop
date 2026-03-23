@@ -211,6 +211,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			ui.WithIconLegend(
 				ui.IconLegend{Icon: iconDirSession, Desc: "Directory with tmux session"},
 				ui.IconLegend{Icon: iconStandaloneSession, Desc: "Standalone tmux session"},
+				ui.IconLegend{Icon: iconAttention, Desc: "Agent needs attention"},
 			),
 		}
 		if inTmux {
@@ -309,10 +310,10 @@ func sortBaseItemsByHistory(items []ui.Item, hist *history.History) []ui.Item {
 }
 
 func buildSessionAwareItems(baseItems []ui.Item, hist *history.History, excludedSessionNames map[string]bool) []ui.Item {
-	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity(), excludedSessionNames)
+	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity(), excludedSessionNames, monitorAttentionSessions())
 }
 
-func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sessionActivity map[string]int64, excludedSessionNames map[string]bool) []ui.Item {
+func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sessionActivity map[string]int64, excludedSessionNames map[string]bool, attentionSessions map[string]bool) []ui.Item {
 	// Build set of session names that correspond to project items
 	projectSessionNames := make(map[string]bool)
 	for _, item := range baseItems {
@@ -332,13 +333,27 @@ func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sess
 		}
 	}
 
+	// Override icons for sessions needing attention
+	if attentionSessions != nil {
+		for i := range items {
+			sanitized := sanitizeSessionName(items[i].Name)
+			if attentionSessions[sanitized] {
+				items[i].Icon = iconAttention
+			}
+		}
+	}
+
 	// Add standalone sessions (not matching any project or excluded project)
 	for sessionName := range sessionActivity {
 		if !projectSessionNames[sessionName] && !excludedSessionNames[sessionName] {
+			icon := iconStandaloneSession
+			if attentionSessions != nil && attentionSessions[sessionName] {
+				icon = iconAttention
+			}
 			items = append(items, ui.Item{
 				Name: sessionName,
 				Path: tmuxSessionPathPrefix + sessionName,
-				Icon: iconStandaloneSession,
+				Icon: icon,
 			})
 		}
 	}

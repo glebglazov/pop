@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -13,6 +14,7 @@ const (
 	tmuxSessionPathPrefix = "tmux:"
 	iconDirSession        = "■"
 	iconStandaloneSession = "□"
+	iconAttention         = "!"
 )
 
 func currentTmuxSession() string {
@@ -41,6 +43,23 @@ func switchToTmuxSession(sessionName string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// monitorAttentionSessions returns sessions needing attention,
+// or nil if the daemon is not running
+func monitorAttentionSessions() map[string]bool {
+	pidPath := monitor.DefaultPIDPath()
+	if !monitor.IsDaemonRunning(pidPath) {
+		return nil
+	}
+
+	statePath := monitor.DefaultStatePath()
+	state, err := monitor.Load(statePath)
+	if err != nil {
+		return nil
+	}
+
+	return state.SessionsNeedingAttention()
 }
 
 func killTmuxSessionByName(sessionName string) {
