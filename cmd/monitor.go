@@ -302,8 +302,16 @@ func ensureMonitorDaemon() {
 		if !binaryNewerThanPID(exe, pidPath) {
 			return // daemon is up to date
 		}
+		// Signal old daemon to stop; it will clean up its PID file on exit
 		_ = monitor.StopDaemon(pidPath)
-		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Wait for old PID file to be released (up to 500ms)
+	for range 10 {
+		if !monitor.IsDaemonRunning(pidPath) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	cmd := exec.Command(exe, "monitor", "start")
