@@ -18,9 +18,9 @@ const pollInterval = 5 * time.Second
 
 // RunDaemon runs the monitoring loop in the foreground.
 // Writes PID file on start, removes on exit.
-// The daemon only handles cleanup (dead panes, unknown sources)
-// and active-pane auto-read. State transitions are driven by
-// Claude Code hooks calling `pop monitor set-status`.
+// The daemon only handles cleanup (dead panes) and active-pane
+// auto-read. State transitions are driven by hooks calling
+// `pop monitor set-status`.
 func RunDaemon(statePath, pidPath string) error {
 	return RunDaemonWith(DefaultDeps(), statePath, pidPath)
 }
@@ -69,18 +69,10 @@ func pollOnce(d *Deps, statePath string) {
 	livePanes := liveTmuxPanes()
 
 	for paneID, entry := range state.Panes {
-		// Drop panes with unrecognized source
-		if !IsKnownSource(entry.Source) {
-			debug.Log("[monitor] %s: deregistered (unknown source %q)", paneID, entry.Source)
-			delete(state.Panes, paneID)
-			changed = true
-			continue
-		}
-
 		// Check if pane still exists in tmux
 		info, alive := livePanes[paneID]
 		if !alive {
-			debug.Log("[monitor] %s: deregistered (pane dead)", paneID)
+			debug.Log("[monitor] %s (session=%s): deregistered (pane dead)", paneID, entry.Session)
 			delete(state.Panes, paneID)
 			changed = true
 			continue
@@ -88,7 +80,7 @@ func pollOnce(d *Deps, statePath string) {
 
 		// If user is actively looking at this pane, treat as read
 		if info.active && entry.Status == StatusNeedsAttention {
-			debug.Log("[monitor] %s: %s → read (pane is active)", paneID, entry.Status)
+			debug.Log("[monitor] %s (session=%s): %s → read (pane is active)", paneID, entry.Session, entry.Status)
 			entry.Status = StatusRead
 			entry.UpdatedAt = time.Now()
 			changed = true

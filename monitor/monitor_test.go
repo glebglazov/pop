@@ -98,7 +98,7 @@ func TestLoadWith(t *testing.T) {
 		},
 		{
 			name:      "loads existing state",
-			content:   `{"panes":{"%5":{"pane_id":"%5","session":"myproject","source":"claude-code","status":"working","updated_at":"2024-01-01T00:00:00Z"}}}`,
+			content:   `{"panes":{"%5":{"pane_id":"%5","session":"myproject","status":"working","updated_at":"2024-01-01T00:00:00Z"}}}`,
 			wantPanes: 1,
 		},
 		{
@@ -159,7 +159,6 @@ func TestLoadWith_RoundTrip(t *testing.T) {
 			"%5": {
 				PaneID:  "%5",
 				Session: "myproject",
-				Source:  SourceClaudeCode,
 				Status:  StatusWorking,
 			},
 		},
@@ -187,9 +186,6 @@ func TestLoadWith_RoundTrip(t *testing.T) {
 	if entry.Session != "myproject" {
 		t.Errorf("session = %q, want %q", entry.Session, "myproject")
 	}
-	if entry.Source != SourceClaudeCode {
-		t.Errorf("source = %q, want %q", entry.Source, SourceClaudeCode)
-	}
 	if entry.Status != StatusWorking {
 		t.Errorf("status = %q, want %q", entry.Status, StatusWorking)
 	}
@@ -214,7 +210,7 @@ func TestSaveWith(t *testing.T) {
 
 	s := &State{
 		Panes: map[string]*PaneEntry{
-			"%5": {PaneID: "%5", Session: "test", Source: SourceClaudeCode, Status: StatusWorking},
+			"%5": {PaneID: "%5", Session: "test", Status: StatusWorking},
 		},
 		path: "/test/dir/monitor.json",
 	}
@@ -236,7 +232,7 @@ func TestRegister(t *testing.T) {
 	s := &State{Panes: make(map[string]*PaneEntry)}
 
 	// Register new pane
-	s.Register("%5", "myproject", SourceClaudeCode)
+	s.Register("%5", "myproject")
 
 	if len(s.Panes) != 1 {
 		t.Fatalf("got %d panes, want 1", len(s.Panes))
@@ -250,7 +246,7 @@ func TestRegister(t *testing.T) {
 	}
 
 	// Overwrite existing
-	s.Register("%5", "other-project", SourceClaudeCode)
+	s.Register("%5", "other-project")
 	if len(s.Panes) != 1 {
 		t.Fatalf("got %d panes after overwrite, want 1", len(s.Panes))
 	}

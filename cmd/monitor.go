@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var monitorSource string
 var deregisterAll bool
 
 var monitorCmd = &cobra.Command{
@@ -31,8 +30,6 @@ func init() {
 	monitorCmd.AddCommand(monitorSetStatusCmd)
 	monitorCmd.AddCommand(monitorMarkReadCmd)
 	monitorCmd.AddCommand(monitorHookSetupCmd)
-	monitorRegisterCmd.Flags().StringVar(&monitorSource, "source", "", "Source tool type (e.g., claude-code)")
-	monitorRegisterCmd.MarkFlagRequired("source")
 	monitorDeregisterCmd.Flags().BoolVar(&deregisterAll, "all", false, "Deregister all panes")
 }
 
@@ -53,7 +50,7 @@ var monitorHookSetupCmd = &cobra.Command{
         "hooks": [
           {
             "type": "command",
-            "command": "pop monitor register $TMUX_PANE --source claude-code 2>/dev/null || true"
+            "command": "pop monitor register $TMUX_PANE 2>/dev/null || true"
           }
         ]
       }
@@ -79,8 +76,6 @@ func runMonitorRegister(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	source := monitor.Source(monitorSource)
-
 	session, err := tmuxPaneSession(paneID)
 	if err != nil {
 		return fmt.Errorf("failed to determine session for pane %s: %w", paneID, err)
@@ -92,7 +87,7 @@ func runMonitorRegister(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	state.Register(paneID, session, source)
+	state.Register(paneID, session)
 	return state.Save()
 }
 
@@ -186,7 +181,7 @@ func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
 		return nil // no change
 	}
 
-	debug.Log("[set-status] %s: %s → %s", paneID, entry.Status, status)
+	debug.Log("[set-status] %s (session=%s): %s → %s", paneID, entry.Session, entry.Status, status)
 	entry.Status = status
 	entry.UpdatedAt = time.Now()
 	return state.Save()
@@ -227,7 +222,7 @@ func runMonitorMarkRead(cmd *cobra.Command, args []string) error {
 	}
 
 	if entry.Status == monitor.StatusNeedsAttention {
-		debug.Log("[mark-read] pane=%s: needs_attention → read", args[0])
+		debug.Log("[mark-read] %s (session=%s): needs_attention → read", args[0], entry.Session)
 		entry.Status = monitor.StatusRead
 		return state.Save()
 	}
@@ -383,8 +378,8 @@ func runMonitorStatus(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\nMonitored panes (%d):\n", len(state.Panes))
 	for _, entry := range state.Panes {
-		fmt.Printf("  %s  session=%s  source=%s  status=%s  updated=%s\n",
-			entry.PaneID, entry.Session, entry.Source, entry.Status,
+		fmt.Printf("  %s  session=%s  status=%s  updated=%s\n",
+			entry.PaneID, entry.Session, entry.Status,
 			entry.UpdatedAt.Format("15:04:05"))
 	}
 	return nil

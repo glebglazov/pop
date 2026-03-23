@@ -12,13 +12,6 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 )
 
-// Source identifies the tool type running in a monitored pane
-type Source string
-
-const (
-	SourceClaudeCode Source = "claude-code"
-)
-
 // PaneStatus represents the detected state of a monitored pane
 type PaneStatus string
 
@@ -33,7 +26,6 @@ const (
 type PaneEntry struct {
 	PaneID    string     `json:"pane_id"`
 	Session   string     `json:"session"`
-	Source    Source      `json:"source"`
 	Status    PaneStatus `json:"status"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
@@ -137,11 +129,10 @@ func (s *State) SaveWith(d *Deps) error {
 }
 
 // Register adds a pane to monitoring
-func (s *State) Register(paneID, session string, source Source) {
+func (s *State) Register(paneID, session string) {
 	s.Panes[paneID] = &PaneEntry{
 		PaneID:    paneID,
 		Session:   session,
-		Source:    source,
 		Status:    StatusUnknown,
 		UpdatedAt: time.Now(),
 	}
