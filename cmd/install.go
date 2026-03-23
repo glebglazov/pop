@@ -1,12 +1,13 @@
 package cmd
 
 import (
-	"embed"
 	"bytes"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -134,7 +135,16 @@ func runInstallHooks() error {
 		settings["hooks"] = hooks
 	}
 
-	installed := 0
+	// Remove any existing pop hooks before installing current ones
+	for event, val := range hooks {
+		eventHooks, ok := val.([]interface{})
+		if !ok {
+			continue
+		}
+		hooks[event] = removePopHooks(eventHooks)
+	}
+
+	// Install current hooks
 	for _, h := range popHooks {
 		hookEntry := map[string]interface{}{
 			"hooks": []interface{}{
@@ -148,20 +158,9 @@ func runInstallHooks() error {
 			hookEntry["matcher"] = h.matcher
 		}
 
-		// Check if already installed
 		eventHooks, _ := hooks[h.event].([]interface{})
-		if containsPopHook(eventHooks, h.command) {
-			continue
-		}
-
 		eventHooks = append(eventHooks, hookEntry)
 		hooks[h.event] = eventHooks
-		installed++
-	}
-
-	if installed == 0 {
-		fmt.Println("All hooks already installed in " + settingsPath)
-		return nil
 	}
 
 	// Write back
@@ -181,26 +180,35 @@ func runInstallHooks() error {
 		return fmt.Errorf("failed to write %s: %w", settingsPath, err)
 	}
 
-	fmt.Printf("Installed %d hook(s) in %s\n", installed, settingsPath)
+	fmt.Printf("Installed %d hook(s) in %s\n", len(popHooks), settingsPath)
 	return nil
 }
 
-// containsPopHook checks if any hook entry contains the given command string
-func containsPopHook(entries []interface{}, command string) bool {
+// removePopHooks filters out hook entries whose commands contain "pop monitor"
+func removePopHooks(entries []interface{}) []interface{} {
+	var result []interface{}
 	for _, entry := range entries {
-		entryMap, ok := entry.(map[string]interface{})
+		if !isPopHook(entry) {
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+// isPopHook returns true if any command in the hook entry contains "pop monitor"
+func isPopHook(entry interface{}) bool {
+	entryMap, ok := entry.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	innerHooks, _ := entryMap["hooks"].([]interface{})
+	for _, h := range innerHooks {
+		hMap, ok := h.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		innerHooks, _ := entryMap["hooks"].([]interface{})
-		for _, h := range innerHooks {
-			hMap, ok := h.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if cmd, _ := hMap["command"].(string); cmd == command {
-				return true
-			}
+		if cmd, _ := hMap["command"].(string); strings.Contains(cmd, "pop monitor") {
+			return true
 		}
 	}
 	return false
