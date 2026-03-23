@@ -69,20 +69,9 @@ func pollOnce(d *Deps, statePath string) {
 	livePanes := liveTmuxPanes()
 
 	for paneID, entry := range state.Panes {
-		// Check if pane still exists in tmux
-		info, alive := livePanes[paneID]
-		if !alive {
+		if !livePanes[paneID] {
 			debug.Log("[monitor] %s (session=%s): deregistered (pane dead)", paneID, entry.Session)
 			delete(state.Panes, paneID)
-			changed = true
-			continue
-		}
-
-		// If user is actively looking at this pane, treat as read
-		if info.active && entry.Status == StatusNeedsAttention {
-			debug.Log("[monitor] %s (session=%s): %s → read (pane is active)", paneID, entry.Session, entry.Status)
-			entry.Status = StatusRead
-			entry.UpdatedAt = time.Now()
 			changed = true
 		}
 	}
@@ -94,23 +83,16 @@ func pollOnce(d *Deps, statePath string) {
 	}
 }
 
-// paneInfo holds liveness and activity state for a tmux pane
-type paneInfo struct {
-	alive  bool
-	active bool
-}
-
-// liveTmuxPanes returns info about all panes across all sessions
-func liveTmuxPanes() map[string]paneInfo {
-	out, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_active}").Output()
+// liveTmuxPanes returns the set of pane IDs that exist across all sessions
+func liveTmuxPanes() map[string]bool {
+	out, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}").Output()
 	if err != nil {
 		return nil
 	}
-	panes := make(map[string]paneInfo)
+	panes := make(map[string]bool)
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			panes[parts[0]] = paneInfo{alive: true, active: parts[1] == "1"}
+		if line != "" {
+			panes[line] = true
 		}
 	}
 	return panes

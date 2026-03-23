@@ -165,12 +165,6 @@ func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
 	status := monitor.PaneStatus(args[1])
 	debug.Log("[set-status] %s: hook invoked with %s", paneID, status)
 
-	// Don't flag a pane the user is already looking at
-	if status == monitor.StatusNeedsAttention && paneID == activeTmuxPane() {
-		debug.Log("[set-status] %s: skipped (pane is active)", paneID)
-		return nil
-	}
-
 	statePath := monitor.DefaultStatePath()
 	state, err := monitor.Load(statePath)
 	if err != nil {
@@ -192,14 +186,6 @@ func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
 	return state.Save()
 }
 
-// activeTmuxPane returns the pane ID of the currently active pane.
-func activeTmuxPane() string {
-	out, err := exec.Command("tmux", "display-message", "-p", "#{pane_id}").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
 
 // --- mark-read ---
 
@@ -244,10 +230,11 @@ var tmuxMarkReadHooks = map[string]string{
 }
 
 var monitorStartCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start the monitoring daemon (foreground)",
-	Args:  cobra.NoArgs,
-	RunE:  runMonitorStart,
+	Use:    "start",
+	Short:  "Start the monitoring daemon (foreground)",
+	Args:   cobra.NoArgs,
+	Hidden: true,
+	RunE:   runMonitorStart,
 }
 
 func runMonitorStart(cmd *cobra.Command, args []string) error {
@@ -341,10 +328,11 @@ func binaryNewerThanPID(exePath, pidPath string) bool {
 // --- stop ---
 
 var monitorStopCmd = &cobra.Command{
-	Use:   "stop",
-	Short: "Stop the monitoring daemon",
-	Args:  cobra.NoArgs,
-	RunE:  runMonitorStop,
+	Use:    "stop",
+	Short:  "Stop the monitoring daemon",
+	Args:   cobra.NoArgs,
+	Hidden: true,
+	RunE:   runMonitorStop,
 }
 
 func runMonitorStop(cmd *cobra.Command, args []string) error {
