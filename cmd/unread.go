@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/glebglazov/pop/history"
+	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -21,7 +23,11 @@ func init() {
 
 func runUnread(cmd *cobra.Command, args []string) error {
 	panes := buildUnreadPanes()
-	result, err := ui.RunAttention("unread", panes, capturePanePreview)
+	var opts []ui.PickerOption
+	if note := workingCountNote(); note != "" {
+		opts = append(opts, ui.WithAttentionEmptyNote(note))
+	}
+	result, err := ui.RunAttention("unread", panes, capturePanePreview, buildUnreadPanes, opts...)
 	if err != nil {
 		return err
 	}
@@ -42,6 +48,26 @@ func runUnread(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func workingCountNote() string {
+	state := loadMonitorState()
+	if state == nil {
+		return ""
+	}
+	count := 0
+	for _, e := range state.Panes {
+		if e.Status == monitor.StatusWorking {
+			count++
+		}
+	}
+	if count == 0 {
+		return ""
+	}
+	if count == 1 {
+		return "1 pane still working"
+	}
+	return fmt.Sprintf("%d panes still working", count)
 }
 
 func buildUnreadPanes() []ui.AttentionPane {

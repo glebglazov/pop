@@ -115,8 +115,10 @@ type Picker struct {
 	attentionCursor  int
 	attentionScroll  int
 	attentionPreview string
-	attentionTitle   string
-	previewFunc      func(paneID string) string
+	attentionTitle    string
+	attentionEmptyNote string
+	previewFunc       func(paneID string) string
+	reloadFunc        func() []AttentionPane
 }
 
 // iconLegendEntry maps an icon to its description in the help view
@@ -261,6 +263,20 @@ func WithAttentionPanes(panes []AttentionPane, fn func(string) string) PickerOpt
 	return func(p *Picker) {
 		p.attentionPanes = panes
 		p.previewFunc = fn
+	}
+}
+
+// WithAttentionEmptyNote sets a note line shown below the "No panes need attention" message.
+func WithAttentionEmptyNote(note string) PickerOption {
+	return func(p *Picker) {
+		p.attentionEmptyNote = note
+	}
+}
+
+// WithAttentionReload sets a function that reloads attention panes when "r" is pressed in the empty state.
+func WithAttentionReload(fn func() []AttentionPane) PickerOption {
+	return func(p *Picker) {
+		p.reloadFunc = fn
 	}
 }
 
@@ -551,6 +567,15 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				p.attentionCursor = 0
 			}
 			p.adjustAttentionScroll()
+			p.fetchAttentionPreview()
+		}
+		return p, nil
+
+	case key.Matches(msg, keys.Reload):
+		if len(p.attentionPanes) == 0 && p.reloadFunc != nil {
+			p.attentionPanes = p.reloadFunc()
+			p.attentionCursor = 0
+			p.attentionScroll = 0
 			p.fetchAttentionPreview()
 		}
 		return p, nil
@@ -968,8 +993,16 @@ func (p *Picker) viewAttention() string {
 			eb.WriteString("\n")
 		}
 		eb.WriteString(msgStyle.Render("  No panes need attention"))
+		if p.attentionEmptyNote != "" {
+			eb.WriteString("\n")
+			eb.WriteString(hintStyle.Render("  " + p.attentionEmptyNote))
+		}
 		eb.WriteString("\n")
-		eb.WriteString(hintStyle.Render("  Enter or Esc to dismiss"))
+		hint := "  Enter or Esc to dismiss"
+		if p.reloadFunc != nil {
+			hint += " · r to reload"
+		}
+		eb.WriteString(hintStyle.Render(hint))
 		return eb.String()
 	}
 
@@ -1235,8 +1268,8 @@ func (p *Picker) Result() Result {
 
 // RunAttention starts the picker directly in the attention sub-view.
 // Returns the selected pane (ActionSwitchToPane) or cancel.
-func RunAttention(title string, panes []AttentionPane, previewFn func(string) string) (Result, error) {
-	p := NewPicker(nil, WithAttentionPanes(panes, previewFn))
+func RunAttention(title string, panes []AttentionPane, previewFn func(string) string, reloadFn func() []AttentionPane, opts ...PickerOption) (Result, error) {
+	p := NewPicker(nil, append([]PickerOption{WithAttentionPanes(panes, previewFn), WithAttentionReload(reloadFn)}, opts...)...)
 	p.attentionMode = true
 	p.attentionTitle = title
 	p.fetchAttentionPreview()
@@ -1277,6 +1310,7 @@ type keyMap struct {
 	Help         key.Binding
 	Attention    key.Binding
 	Back         key.Binding
+	Reload       key.Binding
 }
 
 var keys = keyMap{
@@ -1327,6 +1361,9 @@ var keys = keyMap{
 	),
 	Back: key.NewBinding(
 		key.WithKeys("left"),
+	),
+	Reload: key.NewBinding(
+		key.WithKeys("r"),
 	),
 }
 
