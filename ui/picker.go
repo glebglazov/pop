@@ -1379,6 +1379,10 @@ func RunAttention(title string, panes []AttentionPane, cb AttentionCallbacks, re
 	p := NewPicker(nil, append([]PickerOption{WithAttentionPanes(panes, cb), WithAttentionReload(reloadFn)}, opts...)...)
 	p.attentionMode = true
 	p.attentionTitle = title
+	if len(panes) > 0 {
+		p.attentionCursor = len(panes) - 1
+	}
+	p.adjustAttentionScroll()
 	p.fetchAttentionPreview()
 	program := tea.NewProgram(p)
 	m, err := program.Run()
