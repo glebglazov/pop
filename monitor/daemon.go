@@ -20,7 +20,7 @@ const pollInterval = 5 * time.Second
 // Writes PID file on start, removes on exit.
 // The daemon only handles cleanup (dead panes) and active-pane
 // auto-read. State transitions are driven by hooks calling
-// `pop monitor set-status`.
+// `pop pane set-status`.
 func RunDaemon(statePath, pidPath string) error {
 	return RunDaemonWith(DefaultDeps(), statePath, pidPath)
 }

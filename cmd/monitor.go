@@ -8,40 +8,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/spf13/cobra"
 )
 
-var monitorCmd = &cobra.Command{
-	Use:   "monitor",
-	Short: "Monitor agent panes for attention",
-}
-
 func init() {
-	rootCmd.AddCommand(monitorCmd)
-	monitorCmd.AddCommand(monitorRegisterCmd)
-	monitorCmd.AddCommand(monitorStartCmd)
-	monitorCmd.AddCommand(monitorStopCmd)
-	monitorCmd.AddCommand(monitorStatusCmd)
-	monitorCmd.AddCommand(monitorSetStatusCmd)
-	monitorCmd.AddCommand(monitorMarkReadCmd)
-}
-
-// --- register ---
-
-var monitorRegisterCmd = &cobra.Command{
-	Use:    "register <pane_id>",
-	Short:  "Register a tmux pane for monitoring",
-	Args:   cobra.ExactArgs(1),
-	Hidden: true,
-	RunE:   runMonitorRegister,
-}
-
-func runMonitorRegister(cmd *cobra.Command, args []string) error {
-	// No-op: kept for backward compatibility with existing hook configurations.
-	// Registration now happens lazily in set-status when a pane is first seen.
-	return nil
+	paneCmd.AddCommand(paneMonitorStartCmd)
+	paneCmd.AddCommand(paneMonitorStopCmd)
+	paneCmd.AddCommand(paneMonitorStatusCmd)
 }
 
 // tmuxPaneSession returns the session name for a given pane ID
@@ -64,152 +38,49 @@ func isActiveTmuxPane(paneID string) bool {
 	return strings.TrimSpace(string(out)) == "1 1 1"
 }
 
-// --- set-status ---
+// --- monitor-start ---
 
-var monitorSetStatusCmd = &cobra.Command{
-	Use:    "set-status [pane_id] <status>",
-	Short:  "Set pane status (called by Claude Code hooks)",
-	Args:   cobra.RangeArgs(1, 2),
-	Hidden: true,
-	RunE:   runMonitorSetStatus,
+// tmux hooks for auto-read: event name → hook command
+var tmuxAutoReadHooks = map[string]string{
+	"after-select-pane":      `run-shell "pop pane set-status #{pane_id} read 2>/dev/null || true"`,
+	"session-window-changed": `run-shell "pop pane set-status #{pane_id} read 2>/dev/null || true"`,
+	"client-session-changed": `run-shell "pop pane set-status #{pane_id} read 2>/dev/null || true"`,
 }
 
-func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
-	debug.Init()
-	defer debug.Close()
-
-	var paneID string
-	var status monitor.PaneStatus
-	if len(args) == 2 {
-		paneID = args[0]
-		status = monitor.PaneStatus(args[1])
-	} else {
-		paneID = os.Getenv("TMUX_PANE")
-		status = monitor.PaneStatus(args[0])
-	}
-	if paneID == "" {
-		return nil
-	}
-	debug.Log("[set-status] %s: hook invoked with %s", paneID, status)
-
-	// If the user is already looking at the pane, treat needs_attention as
-	// read — they can see the output in real time, so there's nothing to flag.
-	if status == monitor.StatusNeedsAttention && isActiveTmuxPane(paneID) {
-		debug.Log("[set-status] %s: needs_attention on active pane — downgrading to read", paneID)
-		status = monitor.StatusRead
-	}
-
-	statePath := monitor.DefaultStatePath()
-	state, err := monitor.Load(statePath)
-	if err != nil {
-		return nil // silently ignore — called from hook
-	}
-
-	entry, ok := state.Panes[paneID]
-	if !ok {
-		// Auto-register: look up the tmux session for this pane
-		session, err := tmuxPaneSession(paneID)
-		if err != nil {
-			debug.Log("[set-status] %s: failed to look up session, skipping: %v", paneID, err)
-			return nil
-		}
-		debug.Log("[set-status] %s: auto-registering in session=%s with status=%s", paneID, session, status)
-		state.Panes[paneID] = &monitor.PaneEntry{
-			PaneID:    paneID,
-			Session:   session,
-			Status:    status,
-			UpdatedAt: time.Now(),
-		}
-		return state.Save()
-	}
-
-	if entry.Status == status {
-		return nil // no change
-	}
-
-	debug.Log("[set-status] %s (session=%s): %s → %s", paneID, entry.Session, entry.Status, status)
-	entry.Status = status
-	entry.UpdatedAt = time.Now()
-	return state.Save()
-}
-
-
-// --- mark-read ---
-
-var monitorMarkReadCmd = &cobra.Command{
-	Use:    "mark-read <pane_id>",
-	Short:  "Mark a pane as read (called by tmux hook)",
-	Args:   cobra.ExactArgs(1),
-	Hidden: true,
-	RunE:   runMonitorMarkRead,
-}
-
-func runMonitorMarkRead(cmd *cobra.Command, args []string) error {
-	debug.Init()
-	defer debug.Close()
-
-	statePath := monitor.DefaultStatePath()
-	state, err := monitor.Load(statePath)
-	if err != nil {
-		return nil // silently ignore — called from tmux hook
-	}
-
-	entry, ok := state.Panes[args[0]]
-	if !ok {
-		return nil
-	}
-
-	if entry.Status == monitor.StatusNeedsAttention {
-		debug.Log("[mark-read] %s (session=%s): needs_attention → read", args[0], entry.Session)
-		entry.Status = monitor.StatusRead
-		return state.Save()
-	}
-	return nil
-}
-
-// --- start ---
-
-// tmux hooks for mark-read: event name → hook command
-var tmuxMarkReadHooks = map[string]string{
-	"after-select-pane":      `run-shell "pop monitor mark-read #{pane_id} 2>/dev/null || true"`,
-	"session-window-changed": `run-shell "pop monitor mark-read #{pane_id} 2>/dev/null || true"`,
-	"client-session-changed": `run-shell "pop monitor mark-read #{pane_id} 2>/dev/null || true"`,
-}
-
-var monitorStartCmd = &cobra.Command{
-	Use:    "start",
-	Short:  "Start the monitoring daemon (foreground)",
+var paneMonitorStartCmd = &cobra.Command{
+	Use:    "monitor-start",
+	Short:  "Start the pane monitoring daemon (foreground)",
 	Args:   cobra.NoArgs,
 	Hidden: true,
-	RunE:   runMonitorStart,
+	RunE:   runPaneMonitorStart,
 }
 
-func runMonitorStart(cmd *cobra.Command, args []string) error {
+func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 	pidPath := monitor.DefaultPIDPath()
 	if monitor.IsDaemonRunning(pidPath) {
 		return fmt.Errorf("daemon is already running (PID file: %s)", pidPath)
 	}
 
-	installTmuxMarkReadHooks()
+	installTmuxAutoReadHooks()
 
 	statePath := monitor.DefaultStatePath()
 	return monitor.RunDaemon(statePath, pidPath)
 }
 
-// installTmuxMarkReadHooks removes any existing pop hooks and installs current ones.
-func installTmuxMarkReadHooks() {
-	uninstallTmuxMarkReadHooks()
-	for event, hookCmd := range tmuxMarkReadHooks {
+// installTmuxAutoReadHooks removes any existing pop hooks and installs current ones.
+func installTmuxAutoReadHooks() {
+	uninstallTmuxAutoReadHooks()
+	for event, hookCmd := range tmuxAutoReadHooks {
 		exec.Command("tmux", "set-hook", "-ga", event, hookCmd).Run()
 	}
 }
 
-// uninstallTmuxMarkReadHooks removes all pop-related tmux hooks,
+// uninstallTmuxAutoReadHooks removes all pop-related tmux hooks,
 // leaving other hooks intact. Parses indexed entries like "event[0] cmd".
-func uninstallTmuxMarkReadHooks() {
+func uninstallTmuxAutoReadHooks() {
 	out, _ := exec.Command("tmux", "show-hooks", "-g").Output()
 	for _, line := range strings.Split(string(out), "\n") {
-		if !strings.Contains(line, "pop monitor") {
+		if !strings.Contains(line, "pop pane set-status") && !strings.Contains(line, "pop monitor") {
 			continue
 		}
 		// Line format: "event[N] command..."
@@ -248,7 +119,7 @@ func ensureMonitorDaemon() {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	cmd := exec.Command(exe, "monitor", "start")
+	cmd := exec.Command(exe, "pane", "monitor-start")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -272,31 +143,32 @@ func binaryNewerThanPID(exePath, pidPath string) bool {
 	return exeInfo.ModTime().After(pidInfo.ModTime())
 }
 
-// --- stop ---
+// --- monitor-stop ---
 
-var monitorStopCmd = &cobra.Command{
-	Use:    "stop",
-	Short:  "Stop the monitoring daemon",
+var paneMonitorStopCmd = &cobra.Command{
+	Use:    "monitor-stop",
+	Short:  "Stop the pane monitoring daemon",
 	Args:   cobra.NoArgs,
 	Hidden: true,
-	RunE:   runMonitorStop,
+	RunE:   runPaneMonitorStop,
 }
 
-func runMonitorStop(cmd *cobra.Command, args []string) error {
+func runPaneMonitorStop(cmd *cobra.Command, args []string) error {
 	pidPath := monitor.DefaultPIDPath()
 	return monitor.StopDaemon(pidPath)
 }
 
-// --- status ---
+// --- monitor-status ---
 
-var monitorStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show monitor state (debug)",
-	Args:  cobra.NoArgs,
-	RunE:  runMonitorStatus,
+var paneMonitorStatusCmd = &cobra.Command{
+	Use:    "monitor-status",
+	Short:  "Show pane monitor state (debug)",
+	Args:   cobra.NoArgs,
+	Hidden: true,
+	RunE:   runPaneMonitorStatus,
 }
 
-func runMonitorStatus(cmd *cobra.Command, args []string) error {
+func runPaneMonitorStatus(cmd *cobra.Command, args []string) error {
 	pidPath := monitor.DefaultPIDPath()
 	running := monitor.IsDaemonRunning(pidPath)
 	if running {

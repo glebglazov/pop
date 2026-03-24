@@ -6,7 +6,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/monitor"
 	"github.com/spf13/cobra"
 )
 
@@ -33,6 +36,7 @@ func init() {
 	paneCmd.AddCommand(paneListCmd)
 	paneCmd.AddCommand(paneSendCmd)
 	paneCmd.AddCommand(paneCaptureCmd)
+	paneCmd.AddCommand(paneSetStatusCmd)
 }
 
 // resolveSession returns the tmux session name to operate on.
@@ -367,4 +371,96 @@ func runPaneCapture(cmd *cobra.Command, args []string) error {
 
 	fmt.Print(string(out))
 	return nil
+}
+
+// --- set-status ---
+
+var paneSetStatusCmd = &cobra.Command{
+	Use:   "set-status [pane_id] <status>",
+	Short: "Set pane monitoring status",
+	Long: `Set the monitoring status of a tmux pane.
+
+If pane_id is omitted, uses $TMUX_PANE from the environment.
+The pane is auto-registered on first status change.
+
+Valid statuses: working, needs_attention, read.
+
+State transitions:
+  working → needs_attention   Agent stopped or sent a notification
+  working → read              No-op (already not flagged)
+  needs_attention → read      User has seen the output
+  needs_attention → working   Agent resumed work
+  read → working              Agent resumed work
+
+Special behavior:
+  If the pane is currently active (visible to the user) and the
+  requested status is needs_attention, it is downgraded to read
+  automatically — the user is already looking at it.`,
+	Args:   cobra.RangeArgs(1, 2),
+	Hidden: true,
+	RunE:   runPaneSetStatus,
+}
+
+func runPaneSetStatus(cmd *cobra.Command, args []string) error {
+	debug.Init()
+	defer debug.Close()
+
+	var paneID string
+	var status monitor.PaneStatus
+	if len(args) == 2 {
+		paneID = args[0]
+		status = monitor.PaneStatus(args[1])
+	} else {
+		paneID = os.Getenv("TMUX_PANE")
+		status = monitor.PaneStatus(args[0])
+	}
+	if paneID == "" {
+		return nil
+	}
+	debug.Log("[set-status] %s: invoked with %s", paneID, status)
+
+	// If the user is already looking at the pane, treat needs_attention as
+	// read — they can see the output in real time, so there's nothing to flag.
+	if status == monitor.StatusNeedsAttention && isActiveTmuxPane(paneID) {
+		debug.Log("[set-status] %s: needs_attention on active pane — downgrading to read", paneID)
+		status = monitor.StatusRead
+	}
+
+	statePath := monitor.DefaultStatePath()
+	state, err := monitor.Load(statePath)
+	if err != nil {
+		return nil // silently ignore — called from hook
+	}
+
+	entry, ok := state.Panes[paneID]
+	if !ok {
+		// Auto-register: look up the tmux session for this pane
+		session, err := tmuxPaneSession(paneID)
+		if err != nil {
+			debug.Log("[set-status] %s: failed to look up session, skipping: %v", paneID, err)
+			return nil
+		}
+		debug.Log("[set-status] %s: auto-registering in session=%s with status=%s", paneID, session, status)
+		state.Panes[paneID] = &monitor.PaneEntry{
+			PaneID:    paneID,
+			Session:   session,
+			Status:    status,
+			UpdatedAt: time.Now(),
+		}
+		return state.Save()
+	}
+
+	// read only transitions from needs_attention (not from working)
+	if status == monitor.StatusRead && entry.Status != monitor.StatusNeedsAttention {
+		return nil
+	}
+
+	if entry.Status == status {
+		return nil // no change
+	}
+
+	debug.Log("[set-status] %s (session=%s): %s → %s", paneID, entry.Session, entry.Status, status)
+	entry.Status = status
+	entry.UpdatedAt = time.Now()
+	return state.Save()
 }

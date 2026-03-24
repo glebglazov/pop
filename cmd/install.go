@@ -102,10 +102,10 @@ var popHooks = []struct {
 	matcher string
 	command string
 }{
-	{"UserPromptSubmit", "", "pop monitor set-status working 2>/dev/null || true"},
-	{"PreToolUse", "", "pop monitor set-status working 2>/dev/null || true"},
-	{"Stop", "", "pop monitor set-status needs_attention 2>/dev/null || true"},
-	{"Notification", "", "pop monitor set-status needs_attention 2>/dev/null || true"},
+	{"UserPromptSubmit", "", "pop pane set-status working 2>/dev/null || true"},
+	{"PreToolUse", "", "pop pane set-status working 2>/dev/null || true"},
+	{"Stop", "", "pop pane set-status needs_attention 2>/dev/null || true"},
+	{"Notification", "", "pop pane set-status needs_attention 2>/dev/null || true"},
 }
 
 func runInstallHooks() error {
@@ -183,7 +183,7 @@ func runInstallHooks() error {
 	return nil
 }
 
-// removePopHooks filters out hook entries whose commands contain "pop monitor"
+// removePopHooks filters out hook entries whose commands contain pop monitoring commands
 func removePopHooks(entries []interface{}) []interface{} {
 	var result []interface{}
 	for _, entry := range entries {
@@ -194,7 +194,7 @@ func removePopHooks(entries []interface{}) []interface{} {
 	return result
 }
 
-// isPopHook returns true if any command in the hook entry contains "pop monitor"
+// isPopHook returns true if any command in the hook entry contains pop monitoring commands
 func isPopHook(entry interface{}) bool {
 	entryMap, ok := entry.(map[string]interface{})
 	if !ok {
@@ -206,7 +206,7 @@ func isPopHook(entry interface{}) bool {
 		if !ok {
 			continue
 		}
-		if cmd, _ := hMap["command"].(string); strings.Contains(cmd, "pop monitor") {
+		if cmd, _ := hMap["command"].(string); strings.Contains(cmd, "pop monitor") || strings.Contains(cmd, "pop pane set-status") {
 			return true
 		}
 	}
