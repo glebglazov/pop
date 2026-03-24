@@ -16,7 +16,7 @@ const (
 	tmuxSessionPathPrefix = "tmux:"
 	iconDirSession        = "■"
 	iconStandaloneSession = "□"
-	iconAttention         = "!"
+	iconAttention         = ui.IconAttention
 )
 
 func currentTmuxSession() string {

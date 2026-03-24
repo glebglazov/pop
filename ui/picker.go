@@ -27,6 +27,10 @@ func spinnerTick() tea.Cmd {
 	})
 }
 
+// IconAttention is the icon used to mark items that have panes needing attention.
+// Used by the picker to gate the right-arrow attention sub-view.
+const IconAttention = "!"
+
 // Shared styles used across view methods
 var (
 	selectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("237")).Foreground(lipgloss.Color("255"))
@@ -540,12 +544,15 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, nil
 
 		case key.Matches(msg, keys.Attention):
-			if len(p.attentionPanes) > 0 {
-				p.attentionMode = true
-				p.attentionCursor = 0
-				p.attentionScroll = 0
-				p.fetchAttentionPreview()
-				return p, nil
+			if len(p.attentionPanes) > 0 && len(p.filtered) > 0 {
+				// Only enter attention mode if the selected item has the attention icon
+				if p.filtered[p.cursor].Icon == IconAttention {
+					p.attentionMode = true
+					p.attentionCursor = 0
+					p.attentionScroll = 0
+					p.fetchAttentionPreview()
+					return p, nil
+				}
 			}
 		}
 
