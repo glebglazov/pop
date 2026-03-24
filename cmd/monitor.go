@@ -133,11 +133,11 @@ func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
 	status := monitor.PaneStatus(args[1])
 	debug.Log("[set-status] %s: hook invoked with %s", paneID, status)
 
-	// If the pane is currently active, don't mark it as needs_attention —
-	// the user is already looking at it.
+	// If the user is already looking at the pane, treat needs_attention as
+	// read — they can see the output in real time, so there's nothing to flag.
 	if status == monitor.StatusNeedsAttention && isActiveTmuxPane(paneID) {
-		debug.Log("[set-status] %s: skipping needs_attention — pane is active", paneID)
-		return nil
+		debug.Log("[set-status] %s: needs_attention on active pane — downgrading to read", paneID)
+		status = monitor.StatusRead
 	}
 
 	statePath := monitor.DefaultStatePath()
