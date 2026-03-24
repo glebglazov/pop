@@ -63,9 +63,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if cfg.Monitor {
-		go ensureMonitorDaemon()
-	}
+	go ensureMonitorDaemon()
 
 	// Expand project paths
 	paths, err := cfg.ExpandProjects()
@@ -204,14 +202,14 @@ func runSelect(cmd *cobra.Command, args []string) error {
 	restoreCursorIdx := -1
 	for {
 		// Refresh session state each iteration
-		items := buildSessionAwareItems(baseItems, hist, excludedSessionNames, cfg.Monitor)
+		items := buildSessionAwareItems(baseItems, hist, excludedSessionNames, cfg.AttentionNotificationsEnabled())
 
 		quickAccessModifier := cfg.GetQuickAccessModifier()
 		iconLegends := []ui.IconLegend{
 			{Icon: iconDirSession, Desc: "Directory with tmux session"},
 			{Icon: iconStandaloneSession, Desc: "Standalone tmux session"},
 		}
-		if cfg.Monitor {
+		if cfg.AttentionNotificationsEnabled() {
 			iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent needs attention"})
 		}
 		opts := []ui.PickerOption{
@@ -221,7 +219,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			ui.WithQuickAccess(quickAccessModifier),
 			ui.WithIconLegend(iconLegends...),
 		}
-		if cfg.Monitor {
+		if cfg.AttentionNotificationsEnabled() {
 			if attentionPanes := buildAttentionPanes(); len(attentionPanes) > 0 {
 				opts = append(opts, ui.WithAttentionPanes(attentionPanes, capturePanePreview))
 			}
