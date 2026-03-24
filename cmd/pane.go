@@ -392,6 +392,11 @@ State transitions:
   needs_attention → working   Agent resumed work
   read → working              Agent resumed work
 
+Auto-registration:
+  If the pane is not yet tracked, it is auto-registered on the first
+  call with working or needs_attention. A read status on an untracked
+  pane is a no-op — there is nothing to mark as read.
+
 Special behavior:
   If the pane is currently active (visible to the user) and the
   requested status is needs_attention, it is downgraded to read
@@ -417,7 +422,12 @@ func runPaneSetStatus(cmd *cobra.Command, args []string) error {
 	if paneID == "" {
 		return nil
 	}
-	debug.Log("[set-status] %s: invoked with %s", paneID, status)
+
+	// read is high-frequency and usually a no-op — skip logging entirely
+	// to avoid noise. Only log when we actually change state (below).
+	if status != monitor.StatusRead {
+		debug.Log("[set-status] %s: invoked with %s", paneID, status)
+	}
 
 	// If the user is already looking at the pane, treat needs_attention as
 	// read — they can see the output in real time, so there's nothing to flag.
@@ -434,6 +444,10 @@ func runPaneSetStatus(cmd *cobra.Command, args []string) error {
 
 	entry, ok := state.Panes[paneID]
 	if !ok {
+		// Only auto-register for actionable statuses
+		if status == monitor.StatusRead {
+			return nil
+		}
 		// Auto-register: look up the tmux session for this pane
 		session, err := tmuxPaneSession(paneID)
 		if err != nil {
