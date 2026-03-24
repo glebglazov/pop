@@ -523,7 +523,7 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if len(p.attentionPanes) > 0 {
 			pane := p.attentionPanes[p.attentionCursor]
 			p.result = Result{
-				Selected: &Item{Name: pane.Name, Path: pane.PaneID},
+				Selected: &Item{Name: pane.Name, Path: pane.PaneID, Context: pane.Session},
 				Action:   ActionSwitchToPane,
 			}
 			return p, tea.Quit

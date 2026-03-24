@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,12 @@ func runUnread(cmd *cobra.Command, args []string) error {
 	switch result.Action {
 	case ui.ActionSwitchToPane:
 		if result.Selected != nil {
+			hist, _ := history.Load(history.DefaultHistoryPath())
+			if hist == nil {
+				hist = &history.History{}
+			}
+			hist.Record(sessionHistoryPath(result.Selected.Context, hist))
+			hist.Save()
 			return switchToTmuxTarget(result.Selected.Path)
 		}
 	case ui.ActionCancel:

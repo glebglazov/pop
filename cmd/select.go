@@ -293,7 +293,21 @@ func runSelect(cmd *cobra.Command, args []string) error {
 
 		case ui.ActionSwitchToPane:
 			if result.Selected != nil {
-				// Path contains the pane ID; switch tmux to that pane
+				if !noHistory {
+					sessionName := result.Selected.Context
+					var histPath string
+					for _, item := range items {
+						if sanitizeSessionName(item.Name) == sessionName {
+							histPath = item.Path
+							break
+						}
+					}
+					if histPath == "" {
+						histPath = sessionHistoryPath(sessionName, hist)
+					}
+					hist.Record(histPath)
+					hist.Save()
+				}
 				return switchToTmuxTarget(result.Selected.Path)
 			}
 

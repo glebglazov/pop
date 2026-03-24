@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
+	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/ui"
 )
@@ -111,6 +113,18 @@ func tmuxPaneCommands() map[string]string {
 }
 
 // capturePanePreview captures the last 50 lines of a tmux pane for preview display
+// sessionHistoryPath returns the history path to record for a given tmux session name.
+// It searches existing history entries for one whose sanitized base name matches,
+// falling back to tmux:<sessionName> for standalone sessions.
+func sessionHistoryPath(sessionName string, hist *history.History) string {
+	for _, e := range hist.Entries {
+		if sanitizeSessionName(filepath.Base(e.Path)) == sessionName {
+			return e.Path
+		}
+	}
+	return tmuxSessionPathPrefix + sessionName
+}
+
 func capturePanePreview(paneID string) string {
 	out, err := exec.Command("tmux", "capture-pane", "-p", "-e", "-S", "-50", "-t", paneID).Output()
 	if err != nil {
