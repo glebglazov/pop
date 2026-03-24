@@ -49,9 +49,11 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	var customCommands []ui.UserDefinedCommand
 	var configWarnings []string
 	quickAccessModifier := "alt"
+	attentionEnabled := false
 	if cfg, err := config.Load(config.DefaultConfigPath()); err == nil {
 		quickAccessModifier = cfg.GetQuickAccessModifier()
 		configWarnings = cfg.Warnings
+		attentionEnabled = cfg.AttentionNotificationsEnabled("worktree")
 		for _, cc := range cfg.CommandsForMode("worktree") {
 			customCommands = append(customCommands, ui.UserDefinedCommand{
 				Key:     cc.Key,
@@ -64,7 +66,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 	restoreCursorIdx := -1
 	for {
-		result, err := showWorktreePicker(ctx, customCommands, quickAccessModifier, restoreCursorIdx, configWarnings)
+		result, err := showWorktreePicker(ctx, customCommands, quickAccessModifier, restoreCursorIdx, configWarnings, attentionEnabled)
 		restoreCursorIdx = -1
 		if err != nil {
 			return err
@@ -108,6 +110,11 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			}
 			// Continue loop to show picker again
 
+		case ui.ActionSwitchToPane:
+			if result.Selected != nil {
+				return switchToTmuxTarget(result.Selected.Path)
+			}
+
 		case ui.ActionUserDefinedCommand:
 			if result.UserDefinedCommand != nil && result.Selected != nil {
 				executeCustomCommand(result.UserDefinedCommand.Command, result.Selected, ctx)
@@ -120,7 +127,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefinedCommand, quickAccessModifier string, initialCursorIdx int, warnings []string) (ui.Result, error) {
+func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefinedCommand, quickAccessModifier string, initialCursorIdx int, warnings []string, attentionEnabled bool) (ui.Result, error) {
 	worktrees, err := project.ListWorktrees(ctx)
 	if err != nil {
 		return ui.Result{Action: ui.ActionCancel}, fmt.Errorf("failed to list worktrees: %w", err)
@@ -156,6 +163,22 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	// Convert to UI items with session icons
 	items := buildWorktreeItems(sortedWorktrees, ctx, history.TmuxSessionActivity())
 
+	iconLegends := []ui.IconLegend{
+		{Icon: iconDirSession, Desc: "Directory with tmux session"},
+	}
+	if attentionEnabled {
+		iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent needs attention"})
+		// Apply attention icons to worktree items
+		attentionSessions := monitorAttentionSessions()
+		if attentionSessions != nil {
+			for i := range items {
+				sessionName := project.TmuxSessionName(ctx, items[i].Name)
+				if attentionSessions[sessionName] {
+					items[i].Icon = iconAttention
+				}
+			}
+		}
+	}
 	opts := []ui.PickerOption{
 		ui.WithDelete(),
 		ui.WithContext(),
@@ -163,9 +186,12 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		ui.WithKillSession(),
 		ui.WithReset(),
 		ui.WithQuickAccess(quickAccessModifier),
-		ui.WithIconLegend(
-			ui.IconLegend{Icon: iconDirSession, Desc: "Directory with tmux session"},
-		),
+		ui.WithIconLegend(iconLegends...),
+	}
+	if attentionEnabled {
+		if attentionPanes := buildAttentionPanes(); len(attentionPanes) > 0 {
+			opts = append(opts, ui.WithAttentionPanes(attentionPanes, capturePanePreview))
+		}
 	}
 	if initialCursorIdx >= 0 {
 		opts = append(opts, ui.WithInitialCursorIndex(initialCursorIdx))

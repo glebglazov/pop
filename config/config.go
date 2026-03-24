@@ -36,7 +36,8 @@ type UserDefinedCommand struct {
 
 // WorktreeConfig holds worktree-specific configuration
 type WorktreeConfig struct {
-	Commands []UserDefinedCommand `toml:"commands"`
+	Commands                      []UserDefinedCommand `toml:"commands"`
+	AttentionNotificationsEnabled bool                 `toml:"attention_notifications_enabled"`
 }
 
 // SelectConfig holds select-specific configuration
@@ -109,12 +110,22 @@ func (c *Config) GetQuickAccessModifier() string {
 }
 
 // AttentionNotificationsEnabled returns whether attention notifications are
-// enabled in select mode. Defaults to false.
-func (c *Config) AttentionNotificationsEnabled() bool {
-	if c.Select == nil {
+// enabled for the given mode ("select" or "worktree"). Defaults to false.
+func (c *Config) AttentionNotificationsEnabled(mode string) bool {
+	switch mode {
+	case "select":
+		if c.Select == nil {
+			return false
+		}
+		return c.Select.AttentionNotificationsEnabled
+	case "worktree":
+		if c.Worktree == nil {
+			return false
+		}
+		return c.Worktree.AttentionNotificationsEnabled
+	default:
 		return false
 	}
-	return c.Select.AttentionNotificationsEnabled
 }
 
 // CommandsForMode returns the effective custom commands for the given mode
