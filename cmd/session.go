@@ -133,6 +133,28 @@ func capturePanePreview(paneID string) string {
 	return string(out)
 }
 
+// markPaneRead marks a pane as read in the monitor state
+func markPaneRead(paneID string) {
+	state := loadMonitorState()
+	if state == nil {
+		return
+	}
+	entry, ok := state.Panes[paneID]
+	if !ok {
+		return
+	}
+	entry.Status = monitor.StatusRead
+	state.Save()
+}
+
+// attentionCallbacks returns the standard callbacks for attention sub-views
+func attentionCallbacks() ui.AttentionCallbacks {
+	return ui.AttentionCallbacks{
+		Preview:  capturePanePreview,
+		MarkRead: markPaneRead,
+	}
+}
+
 func killTmuxSessionByName(sessionName string) {
 	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
 	if err := cmd.Run(); err != nil {

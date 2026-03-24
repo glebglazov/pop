@@ -27,7 +27,7 @@ func runUnread(cmd *cobra.Command, args []string) error {
 	if note := workingCountNote(); note != "" {
 		opts = append(opts, ui.WithAttentionEmptyNote(note))
 	}
-	result, err := ui.RunAttention("unread", panes, capturePanePreview, buildUnreadPanes, opts...)
+	result, err := ui.RunAttention("unread", panes, attentionCallbacks(), buildUnreadPanes, opts...)
 	if err != nil {
 		return err
 	}

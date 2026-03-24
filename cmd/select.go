@@ -221,7 +221,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		}
 		if cfg.AttentionNotificationsEnabled("select") {
 			if attentionPanes := buildAttentionPanes(); len(attentionPanes) > 0 {
-				opts = append(opts, ui.WithAttentionPanes(attentionPanes, capturePanePreview))
+				opts = append(opts, ui.WithAttentionPanes(attentionPanes, attentionCallbacks()))
 			}
 		}
 		if inTmux {
@@ -310,6 +310,10 @@ func runSelect(cmd *cobra.Command, args []string) error {
 				}
 				return switchToTmuxTarget(result.Selected.Path)
 			}
+
+		case ui.ActionRefresh:
+			restoreCursorIdx = result.CursorIndex
+			// Continue loop — items rebuild with fresh attention state
 
 		case ui.ActionUserDefinedCommand:
 			if result.UserDefinedCommand != nil && result.Selected != nil {

@@ -61,6 +61,7 @@ const (
 	ActionOpenWindow
 	ActionUserDefinedCommand
 	ActionSwitchToPane
+	ActionRefresh
 )
 
 // AttentionPane represents a pane that needs user attention
@@ -114,11 +115,13 @@ type Picker struct {
 	attentionPanes   []AttentionPane
 	attentionCursor  int
 	attentionScroll  int
-	attentionPreview string
-	attentionTitle    string
+	attentionPreview   string
+	attentionTitle     string
 	attentionEmptyNote string
-	previewFunc       func(paneID string) string
-	reloadFunc        func() []AttentionPane
+	attentionDirty     bool
+	previewFunc        func(paneID string) string
+	reloadFunc         func() []AttentionPane
+	markReadFunc       func(paneID string)
 }
 
 // iconLegendEntry maps an icon to its description in the help view
@@ -257,12 +260,18 @@ func WithWarnings(warnings []string) PickerOption {
 	}
 }
 
-// WithAttentionPanes enables the attention sub-view with the given panes and preview function.
-// The preview function is called with a pane ID and should return the pane's content.
-func WithAttentionPanes(panes []AttentionPane, fn func(string) string) PickerOption {
+// AttentionCallbacks holds callback functions for the attention sub-view.
+type AttentionCallbacks struct {
+	Preview  func(paneID string) string // returns pane content for preview
+	MarkRead func(paneID string)        // marks a pane as read
+}
+
+// WithAttentionPanes enables the attention sub-view with the given panes and callbacks.
+func WithAttentionPanes(panes []AttentionPane, cb AttentionCallbacks) PickerOption {
 	return func(p *Picker) {
 		p.attentionPanes = panes
-		p.previewFunc = fn
+		p.previewFunc = cb.Preview
+		p.markReadFunc = cb.MarkRead
 	}
 }
 
@@ -519,8 +528,11 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Back):
 		if len(p.items) == 0 {
-			// Standalone attention mode — quit
 			p.result = Result{Action: ActionCancel}
+			return p, tea.Quit
+		}
+		if p.attentionDirty {
+			p.result = Result{Action: ActionRefresh}
 			return p, tea.Quit
 		}
 		p.attentionMode = false
@@ -528,6 +540,10 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Quit):
 		if msg.Code == 0x1b && len(p.items) > 0 { // esc — go back to normal view
+			if p.attentionDirty {
+				p.result = Result{Action: ActionRefresh}
+				return p, tea.Quit
+			}
 			p.attentionMode = false
 			return p, nil
 		}
@@ -576,6 +592,29 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			p.attentionPanes = p.reloadFunc()
 			p.attentionCursor = 0
 			p.attentionScroll = 0
+			p.fetchAttentionPreview()
+		}
+		return p, nil
+
+	case key.Matches(msg, keys.Reset):
+		if len(p.attentionPanes) > 0 && p.markReadFunc != nil {
+			pane := p.attentionPanes[p.attentionCursor]
+			p.markReadFunc(pane.PaneID)
+			p.attentionDirty = true
+			// Remove from list
+			p.attentionPanes = append(p.attentionPanes[:p.attentionCursor], p.attentionPanes[p.attentionCursor+1:]...)
+			if len(p.attentionPanes) == 0 {
+				if len(p.items) == 0 {
+					p.result = Result{Action: ActionCancel}
+					return p, tea.Quit
+				}
+				p.result = Result{Action: ActionRefresh}
+				return p, tea.Quit
+			}
+			if p.attentionCursor >= len(p.attentionPanes) {
+				p.attentionCursor = 0
+			}
+			p.adjustAttentionScroll()
 			p.fetchAttentionPreview()
 		}
 		return p, nil
@@ -836,7 +875,7 @@ func (p *Picker) View() tea.View {
 	var content string
 	if p.showHelp {
 		content = p.viewHelp()
-	} else if p.attentionMode {
+	} else if p.attentionMode && len(p.attentionPanes) > 0 {
 		content = p.viewAttention()
 	} else {
 		content = p.viewNormal()
@@ -1096,7 +1135,7 @@ func (p *Picker) viewAttention() string {
 	}
 
 	// Hints
-	b.WriteString(hintStyle.Render("  ← back · Enter switch · Esc cancel"))
+	b.WriteString(hintStyle.Render("  ← back · Enter switch · C-r mark read · Esc cancel"))
 
 	return b.String()
 }
@@ -1268,8 +1307,8 @@ func (p *Picker) Result() Result {
 
 // RunAttention starts the picker directly in the attention sub-view.
 // Returns the selected pane (ActionSwitchToPane) or cancel.
-func RunAttention(title string, panes []AttentionPane, previewFn func(string) string, reloadFn func() []AttentionPane, opts ...PickerOption) (Result, error) {
-	p := NewPicker(nil, append([]PickerOption{WithAttentionPanes(panes, previewFn), WithAttentionReload(reloadFn)}, opts...)...)
+func RunAttention(title string, panes []AttentionPane, cb AttentionCallbacks, reloadFn func() []AttentionPane, opts ...PickerOption) (Result, error) {
+	p := NewPicker(nil, append([]PickerOption{WithAttentionPanes(panes, cb), WithAttentionReload(reloadFn)}, opts...)...)
 	p.attentionMode = true
 	p.attentionTitle = title
 	p.fetchAttentionPreview()
