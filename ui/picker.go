@@ -27,6 +27,15 @@ func spinnerTick() tea.Cmd {
 	})
 }
 
+// reloadTickMsg triggers a periodic reload of attention panes
+type reloadTickMsg struct{}
+
+func reloadTick() tea.Cmd {
+	return tea.Tick(5*time.Second, func(time.Time) tea.Msg {
+		return reloadTickMsg{}
+	})
+}
+
 // IconAttention is the icon used to mark items that have panes needing attention.
 // Used by the picker to gate the right-arrow attention sub-view.
 const IconAttention = "!"
@@ -360,10 +369,14 @@ func (p *Picker) Init() tea.Cmd {
 		p.cursor = len(p.filtered) - 1
 	}
 	p.adjustScroll()
+	var cmds []tea.Cmd
 	if p.hasWorkingPanes() {
-		return spinnerTick()
+		cmds = append(cmds, spinnerTick())
 	}
-	return nil
+	if p.reloadFunc != nil {
+		cmds = append(cmds, reloadTick())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -372,6 +385,18 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.spinnerFrame = (p.spinnerFrame + 1) % len(spinnerFrames)
 		if p.hasWorkingPanes() {
 			return p, spinnerTick()
+		}
+		return p, nil
+	case reloadTickMsg:
+		if p.reloadFunc != nil {
+			hadWorking := p.hasWorkingPanes()
+			p.reloadAttentionPanes()
+			cmds := []tea.Cmd{reloadTick()}
+			// Start spinner if reload introduced working panes
+			if !hadWorking && p.hasWorkingPanes() {
+				cmds = append(cmds, spinnerTick())
+			}
+			return p, tea.Batch(cmds...)
 		}
 		return p, nil
 	}
@@ -675,6 +700,42 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return p, nil
 	}
 	return p, nil
+}
+
+// reloadAttentionPanes refreshes the attention pane list from the reload function,
+// preserving the cursor on the same pane when possible.
+func (p *Picker) reloadAttentionPanes() {
+	if p.reloadFunc == nil {
+		return
+	}
+	// Remember current selection
+	var selectedPaneID string
+	if p.attentionCursor < len(p.attentionPanes) {
+		selectedPaneID = p.attentionPanes[p.attentionCursor].PaneID
+	}
+
+	p.attentionPanes = p.reloadFunc()
+
+	// Try to restore cursor to the same pane
+	restored := false
+	if selectedPaneID != "" {
+		for i, pane := range p.attentionPanes {
+			if pane.PaneID == selectedPaneID {
+				p.attentionCursor = i
+				restored = true
+				break
+			}
+		}
+	}
+	if !restored {
+		if len(p.attentionPanes) > 0 {
+			p.attentionCursor = len(p.attentionPanes) - 1
+		} else {
+			p.attentionCursor = 0
+		}
+	}
+	p.adjustAttentionScroll()
+	p.fetchAttentionPreview()
 }
 
 // fetchAttentionPreview calls the preview function for the currently selected attention pane
