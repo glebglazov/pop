@@ -114,9 +114,9 @@ func runMonitorDeregister(cmd *cobra.Command, args []string) error {
 // --- set-status ---
 
 var monitorSetStatusCmd = &cobra.Command{
-	Use:    "set-status <pane_id> <status>",
+	Use:    "set-status [pane_id] <status>",
 	Short:  "Set pane status (called by Claude Code hooks)",
-	Args:   cobra.ExactArgs(2),
+	Args:   cobra.RangeArgs(1, 2),
 	Hidden: true,
 	RunE:   runMonitorSetStatus,
 }
@@ -125,12 +125,18 @@ func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
 	debug.Init()
 	defer debug.Close()
 
-	paneID := args[0]
+	var paneID string
+	var status monitor.PaneStatus
+	if len(args) == 2 {
+		paneID = args[0]
+		status = monitor.PaneStatus(args[1])
+	} else {
+		paneID = os.Getenv("TMUX_PANE")
+		status = monitor.PaneStatus(args[0])
+	}
 	if paneID == "" {
 		return nil
 	}
-
-	status := monitor.PaneStatus(args[1])
 	debug.Log("[set-status] %s: hook invoked with %s", paneID, status)
 
 	// If the user is already looking at the pane, treat needs_attention as

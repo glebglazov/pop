@@ -102,10 +102,10 @@ var popHooks = []struct {
 	matcher string
 	command string
 }{
-	{"UserPromptSubmit", "", "pop monitor set-status $TMUX_PANE working 2>/dev/null || true"},
-	{"PreToolUse", "", "pop monitor set-status $TMUX_PANE working 2>/dev/null || true"},
-	{"Stop", "", "pop monitor set-status $TMUX_PANE needs_attention 2>/dev/null || true"},
-	{"Notification", "", "pop monitor set-status $TMUX_PANE needs_attention 2>/dev/null || true"},
+	{"UserPromptSubmit", "", "pop monitor set-status working 2>/dev/null || true"},
+	{"PreToolUse", "", "pop monitor set-status working 2>/dev/null || true"},
+	{"Stop", "", "pop monitor set-status needs_attention 2>/dev/null || true"},
+	{"Notification", "", "pop monitor set-status needs_attention 2>/dev/null || true"},
 }
 
 func runInstallHooks() error {
