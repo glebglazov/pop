@@ -29,65 +29,7 @@ func init() {
 	monitorCmd.AddCommand(monitorDeregisterCmd)
 	monitorCmd.AddCommand(monitorSetStatusCmd)
 	monitorCmd.AddCommand(monitorMarkReadCmd)
-	monitorCmd.AddCommand(monitorHookSetupCmd)
 	monitorDeregisterCmd.Flags().BoolVar(&deregisterAll, "all", false, "Deregister all panes")
-}
-
-// --- hook-setup ---
-
-var monitorHookSetupCmd = &cobra.Command{
-	Use:   "hook-setup",
-	Short: "Print Claude Code hook configuration for monitoring",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(`Add the following to ~/.claude/settings.json:
-
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "pop monitor set-status $TMUX_PANE working 2>/dev/null || true"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "pop monitor set-status $TMUX_PANE needs_attention 2>/dev/null || true"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "pop monitor set-status $TMUX_PANE needs_attention 2>/dev/null || true"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "pop monitor set-status $TMUX_PANE working 2>/dev/null || true"
-          }
-        ]
-      }
-    ]
-  }
-}`)
-		return nil
-	},
 }
 
 // --- register ---
