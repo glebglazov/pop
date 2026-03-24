@@ -1,16 +1,21 @@
 ---
-description: Manage long-running processes and interactive terminals via named tmux panes. A friendly wrapper around tmux — use it whenever you need to run a process in the background, monitor its output, send it input, or interact with a TUI. Covers dev servers, builds, watchers, REPLs, test runners, log tailing, docker containers, and anything else you'd run in a terminal. Run `pop pane --help` to discover all available subcommands.
+description: Manage long-running processes and interactive terminals via named tmux panes. A friendly wrapper around tmux — use it whenever you need to run a process in the background, monitor its output, send it input, or interact with a TUI. Covers dev servers, builds, watchers, REPLs, test runners, log tailing, docker containers, and anything else you'd run in a terminal. Also use this when you need to test or debug programs in a real shell environment — write a script, run it in a pane, capture output, send interactive input, and iterate. Whenever your task involves running something and then inspecting what happened, or sending keystrokes to a running program, reach for pop pane. Run `pop pane --help` to discover all available subcommands.
 ---
 
 # pop pane — Named Tmux Pane Management
 
 ## Why use this
 
-Running commands inline with Bash works for short-lived tasks, but many workflows need processes that persist: dev servers, file watchers, database containers, test suites in watch mode. `pop pane` gives you **named, persistent tmux panes** that you can create, monitor, interact with, and clean up — all without losing focus on your current work.
+`pop pane` gives you **named, persistent tmux panes** — real interactive shell sessions you can create, script against, and clean up by name. Each pane is a full shell with your rc files and environment loaded, running in the background without stealing focus.
 
-Because this wraps tmux, you get the full power of tmux send-keys: you can type into running processes, answer interactive prompts, navigate TUIs, send Ctrl-C to stop things gracefully, and pipe arbitrary input — all by name rather than by pane ID.
+Two main use cases:
 
-All panes live in a shared "agent" window within the current tmux session. Pane names are unique per session. Panes are created in the background without stealing focus.
+1. **Long-running processes**: dev servers, file watchers, database containers, test suites in watch mode — anything that needs to persist while you keep working.
+2. **Testing and debugging in a real shell**: run scripts, test CLI tools, interact with programs step by step, and capture output to verify behavior. Unlike the Bash tool (which runs commands in isolation), panes give you a persistent shell with state that carries across commands — environment variables, directory changes, shell history, and running processes all survive between `send` calls.
+
+Because this wraps tmux `send-keys`, you can type into running processes, answer interactive prompts, navigate TUIs, send Ctrl-C, and pipe arbitrary input — all by name rather than by pane ID.
+
+All panes live in a shared "agent" window within the current tmux session. Pane names are unique per session.
 
 ## Commands
 
@@ -125,17 +130,112 @@ pop pane create db "docker compose up"    # creates if not running
 pop pane create server "npm run dev"      # already running — returns existing ID
 ```
 
+## Testing & Debugging Workflows
+
+Panes are real shells — use them as a feedback loop for testing programs, scripts, and CLI tools. The pattern is always: send a command, capture output, decide what to do next.
+
+### Run a script and verify its output
+```bash
+pop pane create test "bash"
+pop pane send test "./my_script.sh" Enter
+sleep 2
+pop pane capture test  # read stdout/stderr to verify behavior
+```
+
+### Check exit codes
+There's no built-in exit code query — use `echo $?` right after the command:
+```bash
+pop pane create test "bash"
+pop pane send test "./might_fail.sh" Enter
+sleep 2
+pop pane send test "echo EXIT_CODE=\$?" Enter
+sleep 1
+pop pane capture test  # look for EXIT_CODE=0 (or non-zero)
+```
+
+### Test a CLI tool with different arguments
+```bash
+pop pane create test "bash"
+pop pane send test "mytool --input foo.csv --format json" Enter
+sleep 1
+pop pane capture test  # check output
+pop pane send test "mytool --input bar.csv --format csv" Enter
+sleep 1
+pop pane capture test  # check second run
+pop pane kill test
+```
+
+### Interactive debugging — step through a program
+```bash
+pop pane create debug "python3 -m pdb my_script.py"
+sleep 1
+pop pane capture debug    # see where it stopped
+pop pane send debug "n" Enter   # next line
+pop pane capture debug
+pop pane send debug "p some_var" Enter  # inspect a variable
+pop pane capture debug
+pop pane send debug "c" Enter   # continue
+pop pane capture debug    # see final output
+pop pane kill debug
+```
+
+### Write a test script, run it, iterate
+When you need to run something more complex than a one-liner, write a script first, then execute it in a pane:
+```bash
+# 1. Write the test script to a file (using Write tool or Bash)
+# 2. Run it
+pop pane create test "bash /tmp/test_something.sh"
+sleep 3
+pop pane capture test  # read results
+# 3. If something is wrong, fix the script, then re-run:
+pop pane create test "bash /tmp/test_something.sh"  # auto-recreates dead pane
+```
+
+### Test a server end-to-end
+```bash
+# Start the server
+pop pane create server "npm run dev"
+sleep 3
+pop pane capture server  # verify it's listening
+
+# Hit it from another pane
+pop pane create client "bash"
+pop pane send client "curl -s http://localhost:3000/api/health" Enter
+sleep 1
+pop pane capture client  # check the response
+
+# Clean up
+pop pane kill client
+pop pane kill server
+```
+
+### Send multi-line input to a program
+For programs expecting multi-line input (configs, heredocs, paste buffers), send each line separately:
+```bash
+pop pane create editor "python3"
+sleep 1
+pop pane send editor "data = {" Enter
+pop pane send editor "    'name': 'test'," Enter
+pop pane send editor "    'value': 42," Enter
+pop pane send editor "}" Enter
+pop pane send editor "print(data)" Enter
+pop pane capture editor
+```
+
 ## Discoverability
 
 Run `pop pane --help` or `pop pane <subcommand> --help` to see full usage details and flags. Run `pop --help` to see other `pop` commands beyond pane management.
 
 ## Guidelines
 
-- Always give panes descriptive names (`server`, `db`, `tests`, `build`, `repl`)
+- Always give panes descriptive names (`server`, `db`, `tests`, `build`, `repl`, `test`, `debug`)
 - `create` is idempotent — safe to call repeatedly for the same name
 - Dead panes are auto-recreated on next `create` call
 - Use `pop pane capture` to check process output rather than guessing
 - Use `send` to interact with processes: answer prompts, send Ctrl-C, type commands
 - Send `C-c` before killing if you need a graceful shutdown
 - Clean up panes with `pop pane kill` when done
+- **For testing, prefer panes over the Bash tool** when you need persistent shell state, interactive input, or want to test how a program behaves in a real terminal environment. The Bash tool is still fine for simple, self-contained commands.
+- **Check exit codes explicitly** with `echo $?` after a command — there's no built-in exit code query.
+- **Use `sleep` between `send` and `capture`** to give commands time to produce output. Short commands need 1-2s, builds and servers may need longer.
 - **Run processes in the foreground, not daemon mode.** The pane itself is already a background context — there's no need to double-detach. Running in daemon mode (e.g. `docker compose up -d`, `npm start &`) hides the output from the pane, which means `pop pane capture` returns nothing useful and you lose the ability to monitor logs, spot errors, or interact with the process. Use `docker compose up` (no `-d`), not `docker compose up -d`.
