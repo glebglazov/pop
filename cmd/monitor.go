@@ -93,10 +93,11 @@ var monitorHookSetupCmd = &cobra.Command{
 // --- register ---
 
 var monitorRegisterCmd = &cobra.Command{
-	Use:   "register <pane_id>",
-	Short: "Register a tmux pane for monitoring",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runMonitorRegister,
+	Use:    "register <pane_id>",
+	Short:  "Register a tmux pane for monitoring",
+	Args:   cobra.ExactArgs(1),
+	Hidden: true,
+	RunE:   runMonitorRegister,
 }
 
 func runMonitorRegister(cmd *cobra.Command, args []string) error {
