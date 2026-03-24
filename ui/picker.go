@@ -675,10 +675,6 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Reset):
 		if len(p.attentionPanes) > 0 && p.markReadFunc != nil {
 			pane := p.attentionPanes[p.attentionCursor]
-			// Only allow mark-read on needs_attention panes, not working ones
-			if pane.Status == AttentionWorking {
-				return p, nil
-			}
 			p.markReadFunc(pane.PaneID)
 			p.attentionDirty = true
 			// Remove from list
