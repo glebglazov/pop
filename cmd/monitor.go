@@ -13,8 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var deregisterAll bool
-
 var monitorCmd = &cobra.Command{
 	Use:   "monitor",
 	Short: "Monitor agent panes for attention",
@@ -26,10 +24,8 @@ func init() {
 	monitorCmd.AddCommand(monitorStartCmd)
 	monitorCmd.AddCommand(monitorStopCmd)
 	monitorCmd.AddCommand(monitorStatusCmd)
-	monitorCmd.AddCommand(monitorDeregisterCmd)
 	monitorCmd.AddCommand(monitorSetStatusCmd)
 	monitorCmd.AddCommand(monitorMarkReadCmd)
-	monitorDeregisterCmd.Flags().BoolVar(&deregisterAll, "all", false, "Deregister all panes")
 }
 
 // --- register ---
@@ -66,49 +62,6 @@ func isActiveTmuxPane(paneID string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(out)) == "1 1 1"
-}
-
-// --- deregister ---
-
-var monitorDeregisterCmd = &cobra.Command{
-	Use:   "deregister [pane_id]",
-	Short: "Deregister a pane from monitoring",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runMonitorDeregister,
-}
-
-func runMonitorDeregister(cmd *cobra.Command, args []string) error {
-	statePath := monitor.DefaultStatePath()
-	state, err := monitor.Load(statePath)
-	if err != nil {
-		return err
-	}
-
-	if deregisterAll {
-		count := len(state.Panes)
-		state.Panes = make(map[string]*monitor.PaneEntry)
-		if err := state.Save(); err != nil {
-			return err
-		}
-		fmt.Printf("Deregistered %d pane(s)\n", count)
-		return nil
-	}
-
-	if len(args) == 0 {
-		return fmt.Errorf("provide a pane_id or use --all")
-	}
-
-	paneID := args[0]
-	if _, ok := state.Panes[paneID]; !ok {
-		return fmt.Errorf("pane %s not registered", paneID)
-	}
-
-	state.Deregister(paneID)
-	if err := state.Save(); err != nil {
-		return err
-	}
-	fmt.Printf("Deregistered %s\n", paneID)
-	return nil
 }
 
 // --- set-status ---
