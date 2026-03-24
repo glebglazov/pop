@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/glebglazov/pop/history"
@@ -22,11 +21,6 @@ func init() {
 
 func runUnread(cmd *cobra.Command, args []string) error {
 	panes := buildUnreadPanes()
-	if len(panes) == 0 {
-		fmt.Println("No panes need attention")
-		return nil
-	}
-
 	result, err := ui.RunAttention("unread", panes, capturePanePreview)
 	if err != nil {
 		return err

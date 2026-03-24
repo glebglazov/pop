@@ -520,14 +520,16 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return p, tea.Quit
 
 	case key.Matches(msg, keys.Enter):
-		if len(p.attentionPanes) > 0 {
-			pane := p.attentionPanes[p.attentionCursor]
-			p.result = Result{
-				Selected: &Item{Name: pane.Name, Path: pane.PaneID, Context: pane.Session},
-				Action:   ActionSwitchToPane,
-			}
+		if len(p.attentionPanes) == 0 {
+			p.result = Result{Action: ActionCancel}
 			return p, tea.Quit
 		}
+		pane := p.attentionPanes[p.attentionCursor]
+		p.result = Result{
+			Selected: &Item{Name: pane.Name, Path: pane.PaneID, Context: pane.Session},
+			Action:   ActionSwitchToPane,
+		}
+		return p, tea.Quit
 
 	case key.Matches(msg, keys.Up):
 		if len(p.attentionPanes) > 0 {
@@ -957,6 +959,19 @@ func (p *Picker) viewAttention() string {
 
 	// Reserve 1 line for hints + 1 line for header
 	listHeight := p.height + 2 // viewNormal reserves 4 lines; we need 1 for hints + 1 for header
+
+	// Empty panes: show dismissable message
+	if len(p.attentionPanes) == 0 {
+		msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+		var eb strings.Builder
+		for i := 0; i < p.height; i++ {
+			eb.WriteString("\n")
+		}
+		eb.WriteString(msgStyle.Render("  No panes need attention"))
+		eb.WriteString("\n")
+		eb.WriteString(hintStyle.Render("  Enter or Esc to dismiss"))
+		return eb.String()
+	}
 
 	// Header in left panel
 	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
