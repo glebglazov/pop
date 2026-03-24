@@ -57,14 +57,15 @@ func tmuxPaneSession(paneID string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// isActiveTmuxPane returns true if the given pane is the currently active pane
-// in the currently attached client.
+// isActiveTmuxPane returns true if the given pane is visible to the user:
+// active in its window, the window is active in its session, and the session
+// is attached to a client.
 func isActiveTmuxPane(paneID string) bool {
-	out, err := exec.Command("tmux", "display-message", "-p", "#{pane_id}").Output()
+	out, err := exec.Command("tmux", "display-message", "-t", paneID, "-p", "#{pane_active} #{window_active} #{session_attached}").Output()
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(out)) == paneID
+	return strings.TrimSpace(string(out)) == "1 1 1"
 }
 
 // --- deregister ---
