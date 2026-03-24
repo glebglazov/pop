@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -13,6 +14,18 @@ import (
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
 )
+
+// spinnerFrames are the animation frames for working panes
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// spinnerTickMsg is sent periodically to advance the spinner animation
+type spinnerTickMsg struct{}
+
+func spinnerTick() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+		return spinnerTickMsg{}
+	})
+}
 
 // Shared styles used across view methods
 var (
@@ -64,11 +77,20 @@ const (
 	ActionRefresh
 )
 
+// AttentionStatus indicates why a pane appears in the attention view
+type AttentionStatus int
+
+const (
+	AttentionNeedsAttention AttentionStatus = iota
+	AttentionWorking
+)
+
 // AttentionPane represents a pane that needs user attention
 type AttentionPane struct {
 	PaneID  string
 	Session string
 	Name    string
+	Status  AttentionStatus
 }
 
 // Picker is a fuzzy-searchable list picker
@@ -122,6 +144,7 @@ type Picker struct {
 	previewFunc        func(paneID string) string
 	reloadFunc         func() []AttentionPane
 	markReadFunc       func(paneID string)
+	spinnerFrame       int // current spinner animation frame
 }
 
 // iconLegendEntry maps an icon to its description in the help view
@@ -314,6 +337,15 @@ func NewPicker(items []Item, opts ...PickerOption) *Picker {
 	return p
 }
 
+func (p *Picker) hasWorkingPanes() bool {
+	for _, pane := range p.attentionPanes {
+		if pane.Status == AttentionWorking {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Picker) Init() tea.Cmd {
 	if p.initialCursorIdx >= 0 && len(p.filtered) > 0 {
 		p.cursor = p.initialCursorIdx
@@ -324,10 +356,22 @@ func (p *Picker) Init() tea.Cmd {
 		p.cursor = len(p.filtered) - 1
 	}
 	p.adjustScroll()
+	if p.hasWorkingPanes() {
+		return spinnerTick()
+	}
 	return nil
 }
 
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg.(type) {
+	case spinnerTickMsg:
+		p.spinnerFrame = (p.spinnerFrame + 1) % len(spinnerFrames)
+		if p.hasWorkingPanes() {
+			return p, spinnerTick()
+		}
+		return p, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		// Help overlay: esc dismisses, all other keys are swallowed
@@ -599,6 +643,10 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Reset):
 		if len(p.attentionPanes) > 0 && p.markReadFunc != nil {
 			pane := p.attentionPanes[p.attentionCursor]
+			// Only allow mark-read on needs_attention panes, not working ones
+			if pane.Status == AttentionWorking {
+				return p, nil
+			}
 			p.markReadFunc(pane.PaneID)
 			p.attentionDirty = true
 			// Remove from list
@@ -1031,7 +1079,7 @@ func (p *Picker) viewAttention() string {
 		for i := 0; i < p.height; i++ {
 			eb.WriteString("\n")
 		}
-		eb.WriteString(msgStyle.Render("  No panes need attention"))
+		eb.WriteString(msgStyle.Render("  No active panes"))
 		if p.attentionEmptyNote != "" {
 			eb.WriteString("\n")
 			eb.WriteString(hintStyle.Render("  " + p.attentionEmptyNote))
@@ -1097,28 +1145,42 @@ func (p *Picker) viewAttention() string {
 		b.WriteString("\x1b[0m\n")
 	}
 
+	// Status icon styles
+	attentionIconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // red
+	workingIconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))   // orange/yellow
+
 	// Render list rows alongside preview
 	for i := 0; i < visible; i++ {
 		listIdx := start + i
 		previewIdx := previewStart + emptyLines + i
 
-		// Left panel: pane list item
+		// Left panel: pane list item with status icon
 		var left string
 		pane := p.attentionPanes[listIdx]
-		name := truncateString(pane.Name, leftWidth-3) // 3 for prefix
+
+		// Status icon: 2 visual chars (icon + space)
+		var icon string
+		if pane.Status == AttentionWorking {
+			icon = workingIconStyle.Render(spinnerFrames[p.spinnerFrame]) + " "
+		} else {
+			icon = attentionIconStyle.Render("●") + " "
+		}
+
+		// Account for icon (2 chars) + prefix (1 for cursor pipe or 2 for spaces)
+		name := truncateString(pane.Name, leftWidth-5) // 1 pipe + 1 space + 2 icon + name
 
 		if listIdx == p.attentionCursor {
-			padding := leftWidth - len([]rune(name)) - 3
+			padding := leftWidth - len([]rune(name)) - 5
 			if padding < 0 {
 				padding = 0
 			}
-			left = pipeStyle.Render("▌") + selectedStyle.Render(" "+name+strings.Repeat(" ", padding))
+			left = pipeStyle.Render("▌") + selectedStyle.Render(" "+icon+name+strings.Repeat(" ", padding))
 		} else {
-			padding := leftWidth - len([]rune(name)) - 2
+			padding := leftWidth - len([]rune(name)) - 4 // 2 spaces + 2 icon
 			if padding < 0 {
 				padding = 0
 			}
-			left = "  " + name + strings.Repeat(" ", padding)
+			left = "  " + icon + name + strings.Repeat(" ", padding)
 		}
 
 		// Right panel: preview content
@@ -1135,7 +1197,13 @@ func (p *Picker) viewAttention() string {
 	}
 
 	// Hints
-	b.WriteString(hintStyle.Render("  ← back · Enter switch · C-r mark read · Esc cancel"))
+	var hints string
+	if len(p.items) > 0 {
+		hints = "  ← back · Enter switch · C-r mark read · Esc cancel"
+	} else {
+		hints = "  Enter switch · C-r mark read · Esc quit"
+	}
+	b.WriteString(hintStyle.Render(hints))
 
 	return b.String()
 }

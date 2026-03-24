@@ -91,6 +91,7 @@ func buildAttentionPanes() []ui.AttentionPane {
 			PaneID:  entry.PaneID,
 			Session: entry.Session,
 			Name:    name,
+			Status:  ui.AttentionNeedsAttention,
 		})
 	}
 	return panes
