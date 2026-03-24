@@ -987,7 +987,7 @@ func (p *Picker) View() tea.View {
 	var content string
 	if p.showHelp {
 		content = p.viewHelp()
-	} else if p.attentionMode && len(p.attentionPanes) > 0 {
+	} else if p.attentionMode {
 		content = p.viewAttention()
 	} else {
 		content = p.viewNormal()
@@ -1136,11 +1136,16 @@ func (p *Picker) viewAttention() string {
 	// Reserve 1 line for hints + 1 line for header
 	listHeight := p.height + 2 // viewNormal reserves 4 lines; we need 1 for hints + 1 for header
 
-	// Empty panes: show dismissable message
+	// Empty panes: show title + dismissable message
 	if len(p.attentionPanes) == 0 {
+		headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 		msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 		var eb strings.Builder
-		for i := 0; i < p.height; i++ {
+		if p.attentionTitle != "" {
+			eb.WriteString(headerStyle.Render(" " + p.attentionTitle))
+			eb.WriteString("\n")
+		}
+		for i := 0; i < p.height-1; i++ {
 			eb.WriteString("\n")
 		}
 		eb.WriteString(msgStyle.Render("  No active panes"))
