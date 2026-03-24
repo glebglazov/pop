@@ -114,6 +114,16 @@ func tmuxPaneSession(paneID string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// isActiveTmuxPane returns true if the given pane is the currently active pane
+// in the currently attached client.
+func isActiveTmuxPane(paneID string) bool {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{pane_id}").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == paneID
+}
+
 // --- deregister ---
 
 var monitorDeregisterCmd = &cobra.Command{
@@ -178,6 +188,13 @@ func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
 
 	status := monitor.PaneStatus(args[1])
 	debug.Log("[set-status] %s: hook invoked with %s", paneID, status)
+
+	// If the pane is currently active, don't mark it as needs_attention —
+	// the user is already looking at it.
+	if status == monitor.StatusNeedsAttention && isActiveTmuxPane(paneID) {
+		debug.Log("[set-status] %s: skipping needs_attention — pane is active", paneID)
+		return nil
+	}
 
 	statePath := monitor.DefaultStatePath()
 	state, err := monitor.Load(statePath)
