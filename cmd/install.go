@@ -24,14 +24,14 @@ var installCmd = &cobra.Command{
 	Long: `Install pop integrations for other tools.
 
   --skills    Install Claude Code skills to ~/.claude/commands/pop/
-  --hooks     Install Claude Code hooks for monitor auto-registration`,
+  --hooks     Install Claude Code hooks for pane monitoring`,
 	RunE: runInstall,
 }
 
 func init() {
 	rootCmd.AddCommand(installCmd)
 	installCmd.Flags().BoolVar(&installSkills, "skills", false, "Install Claude Code skills to ~/.claude/commands/pop/")
-	installCmd.Flags().BoolVar(&installHooks, "hooks", false, "Install Claude Code hooks for monitor auto-registration")
+	installCmd.Flags().BoolVar(&installHooks, "hooks", false, "Install Claude Code hooks for pane monitoring")
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
@@ -102,7 +102,6 @@ var popHooks = []struct {
 	matcher string
 	command string
 }{
-	{"SessionStart", "startup", "pop monitor register $TMUX_PANE 2>/dev/null || true"},
 	{"UserPromptSubmit", "", "pop monitor set-status $TMUX_PANE working 2>/dev/null || true"},
 	{"PreToolUse", "", "pop monitor set-status $TMUX_PANE working 2>/dev/null || true"},
 	{"Stop", "", "pop monitor set-status $TMUX_PANE needs_attention 2>/dev/null || true"},

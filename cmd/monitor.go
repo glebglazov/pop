@@ -37,20 +37,49 @@ func init() {
 
 var monitorHookSetupCmd = &cobra.Command{
 	Use:   "hook-setup",
-	Short: "Print Claude Code hook configuration for auto-registration",
+	Short: "Print Claude Code hook configuration for monitoring",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println(`Add the following to ~/.claude/settings.json:
 
 {
   "hooks": {
-    "SessionStart": [
+    "PreToolUse": [
       {
-        "matcher": "startup",
         "hooks": [
           {
             "type": "command",
-            "command": "pop monitor register $TMUX_PANE 2>/dev/null || true"
+            "command": "pop monitor set-status $TMUX_PANE working 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pop monitor set-status $TMUX_PANE needs_attention 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pop monitor set-status $TMUX_PANE needs_attention 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pop monitor set-status $TMUX_PANE working 2>/dev/null || true"
           }
         ]
       }
@@ -71,24 +100,9 @@ var monitorRegisterCmd = &cobra.Command{
 }
 
 func runMonitorRegister(cmd *cobra.Command, args []string) error {
-	paneID := args[0]
-	if paneID == "" {
-		return nil
-	}
-
-	session, err := tmuxPaneSession(paneID)
-	if err != nil {
-		return fmt.Errorf("failed to determine session for pane %s: %w", paneID, err)
-	}
-
-	statePath := monitor.DefaultStatePath()
-	state, err := monitor.Load(statePath)
-	if err != nil {
-		return err
-	}
-
-	state.Register(paneID, session)
-	return state.Save()
+	// No-op: kept for backward compatibility with existing hook configurations.
+	// Registration now happens lazily in set-status when a pane is first seen.
+	return nil
 }
 
 // tmuxPaneSession returns the session name for a given pane ID
@@ -173,7 +187,20 @@ func runMonitorSetStatus(cmd *cobra.Command, args []string) error {
 
 	entry, ok := state.Panes[paneID]
 	if !ok {
-		return nil // not registered
+		// Auto-register: look up the tmux session for this pane
+		session, err := tmuxPaneSession(paneID)
+		if err != nil {
+			debug.Log("[set-status] %s: failed to look up session, skipping: %v", paneID, err)
+			return nil
+		}
+		debug.Log("[set-status] %s: auto-registering in session=%s with status=%s", paneID, session, status)
+		state.Panes[paneID] = &monitor.PaneEntry{
+			PaneID:    paneID,
+			Session:   session,
+			Status:    status,
+			UpdatedAt: time.Now(),
+		}
+		return state.Save()
 	}
 
 	if entry.Status == status {
