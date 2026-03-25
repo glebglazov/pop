@@ -103,7 +103,7 @@ func buildDashboardPanes() []ui.AttentionPane {
 		ui.AttentionWorking:         1,
 		ui.AttentionNeedsAttention:  2,
 	}
-	sort.SliceStable(panes, func(i, j int) bool {
+	sort.Slice(panes, func(i, j int) bool {
 		oi, oj := statusOrder[panes[i].Status], statusOrder[panes[j].Status]
 		if oi != oj {
 			return oi < oj
@@ -114,8 +114,11 @@ func buildDashboardPanes() []ui.AttentionPane {
 		if ti != tj {
 			return ti < tj
 		}
-		// Fallback: alphabetical by session name
-		return panes[i].Session < panes[j].Session
+		// Fallback: alphabetical by session name, then pane ID for full determinism
+		if panes[i].Session != panes[j].Session {
+			return panes[i].Session < panes[j].Session
+		}
+		return panes[i].PaneID < panes[j].PaneID
 	})
 
 	return panes
