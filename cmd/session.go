@@ -117,11 +117,31 @@ func tmuxPaneCommands() map[string]string {
 // sessionHistoryPath returns the history path to record for a given tmux session name.
 // It searches existing history entries for one whose sanitized base name matches,
 // falling back to tmux:<sessionName> for standalone sessions.
+//
+// Session names for worktrees are formed as "<displayName>/<worktreeName>", so
+// filepath.Base alone only captures the last component. We first try an exact
+// base match, then fall back to matching the base against the last slash-separated
+// component of the session name (e.g. "worktrees-and-stuff" from
+// "game_server/worktrees-and-stuff").
 func sessionHistoryPath(sessionName string, hist *history.History) string {
+	// Last component of the session name (after the final slash, if any)
+	lastComponent := sessionName
+	if i := strings.LastIndex(sessionName, "/"); i >= 0 {
+		lastComponent = sessionName[i+1:]
+	}
+
+	var partialMatch string
 	for _, e := range hist.Entries {
-		if sanitizeSessionName(filepath.Base(e.Path)) == sessionName {
-			return e.Path
+		sanitizedBase := sanitizeSessionName(filepath.Base(e.Path))
+		if sanitizedBase == sessionName {
+			return e.Path // exact match
 		}
+		if partialMatch == "" && sanitizedBase == lastComponent {
+			partialMatch = e.Path // partial match — keep scanning for an exact one
+		}
+	}
+	if partialMatch != "" {
+		return partialMatch
 	}
 	return tmuxSessionPathPrefix + sessionName
 }

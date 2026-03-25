@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/monitor"
@@ -123,16 +124,28 @@ func buildDashboardPanes() []ui.AttentionPane {
 // sessionAccessTime returns the access timestamp for a session.
 // It matches the session name against history entries by checking if the
 // sanitized base name of a history path matches the session name.
+// For worktree sessions (e.g. "game_server/worktrees-and-stuff"), the base
+// only captures the last component, so we also try matching against the last
+// slash-separated component of the session name as a fallback.
 func sessionAccessTime(session string, hist *history.History, accessTimes map[string]int64) int64 {
 	if hist == nil {
 		return 0
 	}
+	lastComponent := session
+	if i := strings.LastIndex(session, "/"); i >= 0 {
+		lastComponent = session[i+1:]
+	}
+	var partial int64
 	for _, e := range hist.Entries {
-		if sanitizeSessionName(pathBase(e.Path)) == session {
+		sanitizedBase := sanitizeSessionName(pathBase(e.Path))
+		if sanitizedBase == session {
 			return e.LastAccess.Unix()
 		}
+		if partial == 0 && sanitizedBase == lastComponent {
+			partial = e.LastAccess.Unix()
+		}
 	}
-	return 0
+	return partial
 }
 
 // pathBase returns the last element of a path, handling the tmux: prefix
