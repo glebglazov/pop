@@ -12,7 +12,7 @@ import (
 
 var dashboardCmd = &cobra.Command{
 	Use:   "dashboard",
-	Short: "Show active agent panes (working and needs attention)",
+	Short: "Show all monitored agent panes",
 	Args:  cobra.NoArgs,
 	RunE:  runDashboard,
 }
@@ -52,7 +52,7 @@ func buildDashboardPanes() []ui.AttentionPane {
 		return nil
 	}
 
-	entries := state.PanesActive()
+	entries := state.PanesAll()
 	if len(entries) == 0 {
 		return nil
 	}
@@ -76,9 +76,14 @@ func buildDashboardPanes() []ui.AttentionPane {
 			name = entry.Session + " " + entry.PaneID + " (" + cmd + ")"
 		}
 
-		status := ui.AttentionWorking
-		if entry.Status == monitor.StatusNeedsAttention {
+		var status ui.AttentionStatus
+		switch entry.Status {
+		case monitor.StatusNeedsAttention:
 			status = ui.AttentionNeedsAttention
+		case monitor.StatusWorking:
+			status = ui.AttentionWorking
+		default:
+			status = ui.AttentionIdle
 		}
 
 		panes = append(panes, ui.AttentionPane{
@@ -89,22 +94,24 @@ func buildDashboardPanes() []ui.AttentionPane {
 		})
 	}
 
-	// Sort: working panes first (top), needs_attention at bottom (closer to cursor).
-	// Within needs_attention: sort by history recency (most recent last = closest to cursor).
-	// Within working: sort by session name for stability.
+	// Sort: idle first (top/far from cursor), working in the middle,
+	// needs_attention at bottom (closest to cursor).
+	// Within each group: sort by history recency (most recent last = closest to cursor).
+	statusOrder := map[ui.AttentionStatus]int{
+		ui.AttentionIdle:            0,
+		ui.AttentionWorking:         1,
+		ui.AttentionNeedsAttention:  2,
+	}
 	sort.SliceStable(panes, func(i, j int) bool {
-		si, sj := panes[i].Status, panes[j].Status
-		if si != sj {
-			// Working (1) before NeedsAttention (0) — working sorts to top
-			return si > sj
+		oi, oj := statusOrder[panes[i].Status], statusOrder[panes[j].Status]
+		if oi != oj {
+			return oi < oj
 		}
-		if si == ui.AttentionNeedsAttention {
-			// Within needs_attention: sort by session history recency (ascending = oldest first)
-			ti := sessionAccessTime(panes[i].Session, hist, accessTimes)
-			tj := sessionAccessTime(panes[j].Session, hist, accessTimes)
-			if ti != tj {
-				return ti < tj
-			}
+		// Within same status group: sort by history recency (ascending = oldest first)
+		ti := sessionAccessTime(panes[i].Session, hist, accessTimes)
+		tj := sessionAccessTime(panes[j].Session, hist, accessTimes)
+		if ti != tj {
+			return ti < tj
 		}
 		// Fallback: alphabetical by session name
 		return panes[i].Session < panes[j].Session

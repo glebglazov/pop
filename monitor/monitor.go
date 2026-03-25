@@ -162,6 +162,15 @@ func (s *State) PanesActive() []*PaneEntry {
 	return result
 }
 
+// PanesAll returns all pane entries regardless of status
+func (s *State) PanesAll() []*PaneEntry {
+	result := make([]*PaneEntry, 0, len(s.Panes))
+	for _, entry := range s.Panes {
+		result = append(result, entry)
+	}
+	return result
+}
+
 // IsDaemonRunning checks if the daemon process is alive by reading the PID file
 // and sending signal 0 to the process
 func IsDaemonRunning(pidPath string) bool {

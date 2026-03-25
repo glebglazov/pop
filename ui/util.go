@@ -22,6 +22,7 @@ var (
 	colorSeparator  = lipgloss.Color("238")
 	colorAttention  = lipgloss.Color("196")
 	colorWorking    = lipgloss.Color("214")
+	colorIdle       = lipgloss.Color("241")
 
 	selectedStyle = lipgloss.NewStyle().Background(colorSelected).Foreground(colorSelectedFg)
 	pipeStyle     = lipgloss.NewStyle().Foreground(colorAccent)

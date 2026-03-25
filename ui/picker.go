@@ -88,6 +88,7 @@ type AttentionStatus int
 const (
 	AttentionNeedsAttention AttentionStatus = iota
 	AttentionWorking
+	AttentionIdle
 )
 
 // AttentionPane represents a pane that needs user attention
@@ -1126,6 +1127,7 @@ func (p *Picker) viewAttention() string {
 	// Status icon styles
 	attentionIconStyle := lipgloss.NewStyle().Foreground(colorAttention)
 	workingIconStyle := lipgloss.NewStyle().Foreground(colorWorking)
+	idleIconStyle := lipgloss.NewStyle().Foreground(colorIdle)
 
 	// Render list rows alongside preview
 	for i := 0; i < visible; i++ {
@@ -1138,10 +1140,13 @@ func (p *Picker) viewAttention() string {
 
 		// Status icon: 2 visual chars (icon + space)
 		var icon string
-		if pane.Status == AttentionWorking {
+		switch pane.Status {
+		case AttentionWorking:
 			icon = workingIconStyle.Render(spinnerFrames[p.spinnerFrame]) + " "
-		} else {
+		case AttentionNeedsAttention:
 			icon = attentionIconStyle.Render("●") + " "
+		case AttentionIdle:
+			icon = idleIconStyle.Render("●") + " "
 		}
 
 		// Account for icon (2 chars) + prefix (1 for cursor pipe or 2 for spaces)
