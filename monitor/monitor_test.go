@@ -263,6 +263,149 @@ func TestSessionsNeedingAttention_Empty(t *testing.T) {
 	}
 }
 
+func TestPanesNeedingAttention(t *testing.T) {
+	tests := []struct {
+		name     string
+		panes    map[string]*PaneEntry
+		expected int
+	}{
+		{
+			name: "filters only needs_attention",
+			panes: map[string]*PaneEntry{
+				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
+				"%2": {PaneID: "%2", Status: StatusWorking},
+				"%3": {PaneID: "%3", Status: StatusRead},
+				"%4": {PaneID: "%4", Status: StatusNeedsAttention},
+			},
+			expected: 2,
+		},
+		{
+			name:     "empty panes",
+			panes:    map[string]*PaneEntry{},
+			expected: 0,
+		},
+		{
+			name:     "nil panes",
+			panes:    nil,
+			expected: 0,
+		},
+		{
+			name: "no attention panes",
+			panes: map[string]*PaneEntry{
+				"%1": {PaneID: "%1", Status: StatusWorking},
+				"%2": {PaneID: "%2", Status: StatusRead},
+			},
+			expected: 0,
+		},
+		{
+			name: "all attention",
+			panes: map[string]*PaneEntry{
+				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
+				"%2": {PaneID: "%2", Status: StatusNeedsAttention},
+			},
+			expected: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &State{Panes: tt.panes}
+			result := s.PanesNeedingAttention()
+			if len(result) != tt.expected {
+				t.Errorf("got %d panes, want %d", len(result), tt.expected)
+			}
+			for _, p := range result {
+				if p.Status != StatusNeedsAttention {
+					t.Errorf("pane %s has status %s, want %s", p.PaneID, p.Status, StatusNeedsAttention)
+				}
+			}
+		})
+	}
+}
+
+func TestPanesActive(t *testing.T) {
+	tests := []struct {
+		name     string
+		panes    map[string]*PaneEntry
+		expected int
+	}{
+		{
+			name: "filters attention and working",
+			panes: map[string]*PaneEntry{
+				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
+				"%2": {PaneID: "%2", Status: StatusWorking},
+				"%3": {PaneID: "%3", Status: StatusRead},
+				"%4": {PaneID: "%4", Status: StatusUnknown},
+			},
+			expected: 2,
+		},
+		{
+			name:     "empty panes",
+			panes:    map[string]*PaneEntry{},
+			expected: 0,
+		},
+		{
+			name: "only read and unknown",
+			panes: map[string]*PaneEntry{
+				"%1": {PaneID: "%1", Status: StatusRead},
+				"%2": {PaneID: "%2", Status: StatusUnknown},
+			},
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &State{Panes: tt.panes}
+			result := s.PanesActive()
+			if len(result) != tt.expected {
+				t.Errorf("got %d panes, want %d", len(result), tt.expected)
+			}
+			for _, p := range result {
+				if p.Status != StatusNeedsAttention && p.Status != StatusWorking {
+					t.Errorf("pane %s has status %s, want attention or working", p.PaneID, p.Status)
+				}
+			}
+		})
+	}
+}
+
+func TestPanesAll(t *testing.T) {
+	tests := []struct {
+		name     string
+		panes    map[string]*PaneEntry
+		expected int
+	}{
+		{
+			name: "returns all panes",
+			panes: map[string]*PaneEntry{
+				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
+				"%2": {PaneID: "%2", Status: StatusWorking},
+				"%3": {PaneID: "%3", Status: StatusRead},
+			},
+			expected: 3,
+		},
+		{
+			name:     "empty panes returns empty slice",
+			panes:    map[string]*PaneEntry{},
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &State{Panes: tt.panes}
+			result := s.PanesAll()
+			if result == nil {
+				t.Fatal("PanesAll() returned nil, want non-nil slice")
+			}
+			if len(result) != tt.expected {
+				t.Errorf("got %d panes, want %d", len(result), tt.expected)
+			}
+		})
+	}
+}
+
 func TestIsDaemonRunningWith(t *testing.T) {
 	tests := []struct {
 		name     string

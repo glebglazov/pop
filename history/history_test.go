@@ -312,6 +312,182 @@ func TestSaveWith(t *testing.T) {
 // Note: Symlink resolution is now done at config expansion time (the source),
 // so history functions work with canonical paths only. Tests verify direct path matching.
 
+func TestRecord(t *testing.T) {
+	t.Run("adds new entry", func(t *testing.T) {
+		h := &History{}
+		h.Record("/home/user/project-a")
+
+		if len(h.Entries) != 1 {
+			t.Fatalf("got %d entries, want 1", len(h.Entries))
+		}
+		if h.Entries[0].Path != "/home/user/project-a" {
+			t.Errorf("path = %q, want %q", h.Entries[0].Path, "/home/user/project-a")
+		}
+		if h.Entries[0].LastAccess.IsZero() {
+			t.Error("LastAccess is zero, want non-zero")
+		}
+	})
+
+	t.Run("updates existing entry", func(t *testing.T) {
+		h := &History{
+			Entries: []Entry{
+				{Path: "/home/user/project-a", LastAccess: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)},
+				{Path: "/home/user/project-b", LastAccess: time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC)},
+			},
+		}
+		h.Record("/home/user/project-a")
+
+		if len(h.Entries) != 2 {
+			t.Fatalf("got %d entries, want 2 (should not duplicate)", len(h.Entries))
+		}
+		if h.Entries[0].LastAccess.Year() == 2020 {
+			t.Error("LastAccess was not updated")
+		}
+	})
+
+	t.Run("preserves other entries", func(t *testing.T) {
+		original := time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC)
+		h := &History{
+			Entries: []Entry{
+				{Path: "/home/user/project-a"},
+				{Path: "/home/user/project-b", LastAccess: original},
+			},
+		}
+		h.Record("/home/user/project-a")
+
+		if h.Entries[1].LastAccess != original {
+			t.Error("other entry's LastAccess was modified")
+		}
+	})
+}
+
+func TestRemoveWith(t *testing.T) {
+	tests := []struct {
+		name     string
+		entries  []Entry
+		remove   string
+		expected []string
+	}{
+		{
+			name: "removes existing entry",
+			entries: []Entry{
+				{Path: "/a"},
+				{Path: "/b"},
+				{Path: "/c"},
+			},
+			remove:   "/b",
+			expected: []string{"/a", "/c"},
+		},
+		{
+			name: "no-op for missing entry",
+			entries: []Entry{
+				{Path: "/a"},
+				{Path: "/b"},
+			},
+			remove:   "/x",
+			expected: []string{"/a", "/b"},
+		},
+		{
+			name:     "empty history",
+			entries:  nil,
+			remove:   "/a",
+			expected: nil,
+		},
+		{
+			name: "removes only first match",
+			entries: []Entry{
+				{Path: "/a"},
+				{Path: "/b"},
+				{Path: "/a"},
+			},
+			remove:   "/a",
+			expected: []string{"/b", "/a"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &History{Entries: tt.entries}
+			h.RemoveWith(DefaultDeps(), tt.remove)
+
+			if len(h.Entries) != len(tt.expected) {
+				t.Fatalf("got %d entries, want %d", len(h.Entries), len(tt.expected))
+			}
+			for i, exp := range tt.expected {
+				if h.Entries[i].Path != exp {
+					t.Errorf("entry[%d].Path = %q, want %q", i, h.Entries[i].Path, exp)
+				}
+			}
+		})
+	}
+}
+
+func TestDedupeEntriesBy(t *testing.T) {
+	t.Run("merges entries with same canonical path keeping latest timestamp", func(t *testing.T) {
+		older := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+		newer := time.Date(2025, 6, 15, 0, 0, 0, 0, time.UTC)
+
+		h := &History{
+			Entries: []Entry{
+				{Path: "/symlink/project", LastAccess: older},
+				{Path: "/real/project", LastAccess: newer},
+			},
+		}
+
+		// Both paths resolve to /real/project
+		h.dedupeEntriesBy(func(path string) (string, error) {
+			return "/real/project", nil
+		})
+
+		if len(h.Entries) != 1 {
+			t.Fatalf("got %d entries, want 1", len(h.Entries))
+		}
+		if h.Entries[0].Path != "/real/project" {
+			t.Errorf("path = %q, want /real/project", h.Entries[0].Path)
+		}
+		if h.Entries[0].LastAccess != newer {
+			t.Errorf("LastAccess = %v, want %v (newer)", h.Entries[0].LastAccess, newer)
+		}
+	})
+
+	t.Run("keeps entries with distinct canonical paths", func(t *testing.T) {
+		h := &History{
+			Entries: []Entry{
+				{Path: "/project-a"},
+				{Path: "/project-b"},
+			},
+		}
+
+		h.dedupeEntriesBy(func(path string) (string, error) {
+			return path, nil // identity — no symlinks
+		})
+
+		if len(h.Entries) != 2 {
+			t.Fatalf("got %d entries, want 2", len(h.Entries))
+		}
+	})
+
+	t.Run("uses original path on eval error", func(t *testing.T) {
+		h := &History{
+			Entries: []Entry{
+				{Path: "/broken-link"},
+				{Path: "/working"},
+			},
+		}
+
+		h.dedupeEntriesBy(func(path string) (string, error) {
+			if path == "/broken-link" {
+				return "", fmt.Errorf("no such file")
+			}
+			return path, nil
+		})
+
+		if len(h.Entries) != 2 {
+			t.Fatalf("got %d entries, want 2", len(h.Entries))
+		}
+	})
+}
+
 func TestTmuxSessionActivityWith(t *testing.T) {
 	tests := []struct {
 		name       string

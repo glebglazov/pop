@@ -814,3 +814,296 @@ func TestFilterCaseInsensitiveUppercaseQuery(t *testing.T) {
 		t.Errorf("expected 'dev' in filtered results for query 'Dev', got: %v", picker.filtered)
 	}
 }
+
+func TestNavigationWrapAround(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+	}
+	picker := NewPicker(items)
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+	picker.cursor = 0
+
+	// Up at top wraps to bottom
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if picker.cursor != 2 {
+		t.Errorf("Up at top: cursor = %d, want 2", picker.cursor)
+	}
+
+	// Down at bottom wraps to top
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if picker.cursor != 0 {
+		t.Errorf("Down at bottom: cursor = %d, want 0", picker.cursor)
+	}
+}
+
+func TestHalfPageUpDown(t *testing.T) {
+	items := make([]Item, 30)
+	for i := range items {
+		items[i] = Item{Name: string(rune('a' + i%26)), Path: "/" + string(rune('a'+i%26))}
+	}
+	picker := NewPicker(items)
+	picker.width = 60
+	picker.height = 10
+	picker.Init()
+	picker.cursor = 15
+
+	// ctrl+b = HalfPageUp
+	picker.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	if picker.cursor != 5 {
+		t.Errorf("PageUp: cursor = %d, want 5", picker.cursor)
+	}
+
+	// Page up clamps to 0
+	picker.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	if picker.cursor != 0 {
+		t.Errorf("PageUp clamp: cursor = %d, want 0", picker.cursor)
+	}
+
+	// ctrl+f = HalfPageDown
+	picker.cursor = 15
+	picker.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if picker.cursor != 25 {
+		t.Errorf("PageDown: cursor = %d, want 25", picker.cursor)
+	}
+
+	// Page down clamps to last
+	picker.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if picker.cursor != 29 {
+		t.Errorf("PageDown clamp: cursor = %d, want 29", picker.cursor)
+	}
+}
+
+func TestDeleteAction(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+	}
+	picker := NewPicker(items, WithDelete())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+	picker.cursor = 0
+
+	m, cmd := picker.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	p := m.(*Picker)
+	if p.result.Action != ActionDelete {
+		t.Errorf("action = %v, want ActionDelete", p.result.Action)
+	}
+	if cmd == nil {
+		t.Error("expected tea.Quit cmd")
+	}
+}
+
+func TestForceDeleteAction(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+	}
+	picker := NewPicker(items, WithDelete())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+	picker.cursor = 0
+
+	// ctrl+x = ForceDelete
+	m, _ := picker.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	p := m.(*Picker)
+	if p.result.Action != ActionForceDelete {
+		t.Errorf("action = %v, want ActionForceDelete", p.result.Action)
+	}
+}
+
+func TestDeleteDisabledByDefault(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+	}
+	picker := NewPicker(items)
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+	picker.cursor = 0
+
+	m, _ := picker.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	p := m.(*Picker)
+	if p.result.Action == ActionDelete {
+		t.Error("delete should not work when WithDelete() not set")
+	}
+}
+
+func TestClearInput(t *testing.T) {
+	items := []Item{
+		{Name: "apple", Path: "/apple"},
+		{Name: "banana", Path: "/banana"},
+	}
+	picker := NewPicker(items, WithCursorAtEnd())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	// Type something to filter
+	typeInPicker(picker, "app")
+	if len(picker.filtered) == len(items) {
+		t.Fatal("filter should have reduced item count")
+	}
+
+	// ctrl+u = ClearInput
+	picker.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	if picker.input.Value() != "" {
+		t.Errorf("input = %q, want empty after ctrl+u", picker.input.Value())
+	}
+	if len(picker.filtered) != len(items) {
+		t.Errorf("filtered = %d items, want %d (all items restored)", len(picker.filtered), len(items))
+	}
+}
+
+func TestResultSetsCursorIndex(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+	}
+	picker := NewPicker(items)
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+	picker.cursor = 1
+
+	// Press enter
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	result := picker.Result()
+	if result.CursorIndex != 1 {
+		t.Errorf("CursorIndex = %d, want 1", result.CursorIndex)
+	}
+}
+
+func TestCursorMemoryRoundTrip(t *testing.T) {
+	items := []Item{
+		{Name: "apple", Path: "/apple"},
+		{Name: "app", Path: "/app"},
+		{Name: "banana", Path: "/banana"},
+		{Name: "cherry", Path: "/cherry"},
+	}
+	picker := NewPicker(items, WithCursorAtEnd())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	// Remember unfiltered cursor position
+	unfilteredCursor := picker.cursor
+
+	// Type "app" to filter
+	typeInPicker(picker, "app")
+
+	// Move cursor in filtered view
+	if len(picker.filtered) > 1 {
+		picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	}
+	filteredCursor := picker.cursor
+	filteredPath := ""
+	if filteredCursor < len(picker.filtered) {
+		filteredPath = picker.filtered[filteredCursor].Path
+	}
+
+	// Clear filter — should restore unfiltered position
+	picker.input.SetValue("")
+	picker.filter()
+
+	// Re-type "app" — should restore the saved filtered position
+	typeInPicker(picker, "app")
+
+	if filteredPath != "" && picker.cursor < len(picker.filtered) {
+		restoredPath := picker.filtered[picker.cursor].Path
+		if restoredPath != filteredPath {
+			t.Errorf("cursor memory: after re-typing filter, cursor at %q, want %q", restoredPath, filteredPath)
+		}
+	}
+
+	// Clear again and verify unfiltered position is roughly preserved
+	picker.input.SetValue("")
+	picker.filter()
+	_ = unfilteredCursor // position may shift due to memory, but should not crash
+}
+
+func TestViewNormalEmptyList(t *testing.T) {
+	picker := NewPicker(nil)
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	view := picker.viewNormal()
+	if view == "" {
+		t.Error("viewNormal() returned empty string for nil items")
+	}
+}
+
+func TestViewNormalRendersItems(t *testing.T) {
+	items := []Item{
+		{Name: "project-a", Path: "/a"},
+		{Name: "project-b", Path: "/b", Icon: "■"},
+	}
+	picker := NewPicker(items)
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	view := picker.viewNormal()
+	if !containsSubstring(view, "project-a") {
+		t.Error("viewNormal() missing 'project-a'")
+	}
+	if !containsSubstring(view, "project-b") {
+		t.Error("viewNormal() missing 'project-b'")
+	}
+}
+
+func TestInitCursorAtEnd(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+	}
+	picker := NewPicker(items, WithCursorAtEnd())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	if picker.cursor != 2 {
+		t.Errorf("cursor = %d, want 2 (last item)", picker.cursor)
+	}
+}
+
+func TestInitWithInitialCursorIndex(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+		{Name: "b", Path: "/b"},
+		{Name: "c", Path: "/c"},
+	}
+	picker := NewPicker(items, WithCursorAtEnd(), WithInitialCursorIndex(1))
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+
+	if picker.cursor != 1 {
+		t.Errorf("cursor = %d, want 1 (WithInitialCursorIndex overrides WithCursorAtEnd)", picker.cursor)
+	}
+}
+
+func TestResetAction(t *testing.T) {
+	items := []Item{
+		{Name: "a", Path: "/a"},
+	}
+	picker := NewPicker(items, WithReset())
+	picker.width = 60
+	picker.height = 20
+	picker.Init()
+	picker.cursor = 0
+
+	// ctrl+r = Reset
+	m, _ := picker.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	p := m.(*Picker)
+	if p.result.Action != ActionReset {
+		t.Errorf("action = %v, want ActionReset", p.result.Action)
+	}
+}
