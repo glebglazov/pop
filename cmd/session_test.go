@@ -421,6 +421,38 @@ func TestSwitchToTmuxTargetWith_InTmux(t *testing.T) {
 	}
 }
 
+func TestSwitchToTmuxTargetAndZoomWith_InTmux(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+
+	var gotArgs []string
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			gotArgs = args
+			return "", nil
+		},
+	}
+
+	err := switchToTmuxTargetAndZoomWith(tmux, "%5")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Single tmux invocation: switch-client -t %5 ; if-shell ... resize-pane -Z
+	expected := []string{
+		"switch-client", "-t", "%5", ";",
+		"if-shell", "-F", "#{!=:#{window_zoomed_flag},1}",
+		"resize-pane -Z",
+	}
+	if len(gotArgs) != len(expected) {
+		t.Fatalf("expected args %v, got %v", expected, gotArgs)
+	}
+	for i := range expected {
+		if gotArgs[i] != expected[i] {
+			t.Errorf("arg[%d]: got %q, want %q", i, gotArgs[i], expected[i])
+		}
+	}
+}
+
 func TestUnmonitorPaneWith(t *testing.T) {
 	t.Run("removes pane from state", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{

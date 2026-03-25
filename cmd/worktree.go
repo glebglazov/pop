@@ -113,7 +113,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 		case ui.ActionSwitchToPane:
 			if result.Selected != nil {
-				return switchToTmuxTarget(result.Selected.Path)
+				return switchToTmuxTargetAndZoom(result.Selected.Path)
 			}
 
 		case ui.ActionRefresh:

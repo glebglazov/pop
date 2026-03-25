@@ -38,7 +38,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 			}
 			hist.Record(sessionHistoryPath(result.Selected.Context, hist))
 			hist.Save()
-			return switchToTmuxTarget(result.Selected.Path)
+			return switchToTmuxTargetAndZoom(result.Selected.Path)
 		}
 	case ui.ActionCancel:
 		os.Exit(1)

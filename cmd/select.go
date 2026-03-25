@@ -309,7 +309,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 					hist.Record(histPath)
 					hist.Save()
 				}
-				return switchToTmuxTarget(result.Selected.Path)
+				return switchToTmuxTargetAndZoom(result.Selected.Path)
 			}
 
 		case ui.ActionRefresh:

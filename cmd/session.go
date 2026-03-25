@@ -61,6 +61,34 @@ func switchToTmuxTargetWith(tmux deps.Tmux, target string) error {
 	return cmd.Run()
 }
 
+// switchToTmuxTargetAndZoom switches to a tmux pane and zooms it
+func switchToTmuxTargetAndZoom(target string) error {
+	return switchToTmuxTargetAndZoomWith(defaultTmux, target)
+}
+
+func switchToTmuxTargetAndZoomWith(tmux deps.Tmux, target string) error {
+	inTmux := os.Getenv("TMUX") != ""
+	if inTmux {
+		// Single tmux invocation: switch to pane and zoom it if not already zoomed
+		_, err := tmux.Command(
+			"switch-client", "-t", target, ";",
+			"if-shell", "-F", "#{!=:#{window_zoomed_flag},1}",
+			"resize-pane -Z",
+		)
+		return err
+	}
+	// Outside tmux: zoom before attaching since attach takes over stdio
+	tmux.Command(
+		"if-shell", "-t", target, "-F", "#{!=:#{window_zoomed_flag},1}",
+		"resize-pane -Z",
+	)
+	cmd := exec.Command("tmux", "attach-session", "-t", target)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // loadMonitorState returns the monitor state if the daemon is running, or nil otherwise
 func loadMonitorState() *monitor.State {
 	return loadMonitorStateWith(monitor.DefaultDeps())
