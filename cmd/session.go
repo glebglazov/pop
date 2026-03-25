@@ -50,12 +50,16 @@ func switchToTmuxTarget(target string) error {
 
 // loadMonitorState returns the monitor state if the daemon is running, or nil otherwise
 func loadMonitorState() *monitor.State {
-	pidPath := monitor.DefaultPIDPath()
-	if !monitor.IsDaemonRunning(pidPath) {
+	return loadMonitorStateWith(monitor.DefaultDeps())
+}
+
+func loadMonitorStateWith(d *monitor.Deps) *monitor.State {
+	pidPath := monitor.DefaultPIDPathWith(d)
+	if !monitor.IsDaemonRunningWith(d, pidPath) {
 		return nil
 	}
-	statePath := monitor.DefaultStatePath()
-	state, err := monitor.Load(statePath)
+	statePath := monitor.DefaultStatePathWith(d)
+	state, err := monitor.LoadWith(d, statePath)
 	if err != nil {
 		return nil
 	}
@@ -65,7 +69,11 @@ func loadMonitorState() *monitor.State {
 // monitorAttentionSessions returns sessions needing attention,
 // or nil if the daemon is not running
 func monitorAttentionSessions() map[string]bool {
-	state := loadMonitorState()
+	return monitorAttentionSessionsWith(monitor.DefaultDeps())
+}
+
+func monitorAttentionSessionsWith(d *monitor.Deps) map[string]bool {
+	state := loadMonitorStateWith(d)
 	if state == nil {
 		return nil
 	}
@@ -156,7 +164,11 @@ func capturePanePreview(paneID string) string {
 
 // markPaneRead marks a pane as read in the monitor state
 func markPaneRead(paneID string) {
-	state := loadMonitorState()
+	markPaneReadWith(monitor.DefaultDeps(), paneID)
+}
+
+func markPaneReadWith(d *monitor.Deps, paneID string) {
+	state := loadMonitorStateWith(d)
 	if state == nil {
 		return
 	}
@@ -165,17 +177,21 @@ func markPaneRead(paneID string) {
 		return
 	}
 	entry.Status = monitor.StatusRead
-	state.Save()
+	state.SaveWith(d)
 }
 
 // unmonitorPane removes a pane from the monitor state entirely
 func unmonitorPane(paneID string) {
-	state := loadMonitorState()
+	unmonitorPaneWith(monitor.DefaultDeps(), paneID)
+}
+
+func unmonitorPaneWith(d *monitor.Deps, paneID string) {
+	state := loadMonitorStateWith(d)
 	if state == nil {
 		return
 	}
 	delete(state.Panes, paneID)
-	state.Save()
+	state.SaveWith(d)
 }
 
 // attentionCallbacks returns the standard callbacks for attention sub-views

@@ -109,7 +109,25 @@ var popHooks = []struct {
 }
 
 func runInstallHooks() error {
-	home, err := os.UserHomeDir()
+	return runInstallHooksWith(os.UserHomeDir, os.ReadFile, os.WriteFile, os.MkdirAll, os.Stdout)
+}
+
+type installHooksDeps struct {
+	userHomeDir func() (string, error)
+	readFile    func(string) ([]byte, error)
+	writeFile   func(string, []byte, os.FileMode) error
+	mkdirAll    func(string, os.FileMode) error
+	stdout      *os.File
+}
+
+func runInstallHooksWith(
+	userHomeDir func() (string, error),
+	readFile func(string) ([]byte, error),
+	writeFile func(string, []byte, os.FileMode) error,
+	mkdirAll func(string, os.FileMode) error,
+	stdout *os.File,
+) error {
+	home, err := userHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
@@ -118,7 +136,7 @@ func runInstallHooks() error {
 
 	// Load existing settings or start fresh
 	settings := make(map[string]interface{})
-	data, err := os.ReadFile(settingsPath)
+	data, err := readFile(settingsPath)
 	if err == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {
 			return fmt.Errorf("failed to parse %s: %w", settingsPath, err)
@@ -163,7 +181,7 @@ func runInstallHooks() error {
 	}
 
 	// Write back
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
+	if err := mkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -175,11 +193,13 @@ func runInstallHooks() error {
 		return fmt.Errorf("failed to serialize settings: %w", err)
 	}
 
-	if err := os.WriteFile(settingsPath, buf.Bytes(), 0644); err != nil {
+	if err := writeFile(settingsPath, buf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", settingsPath, err)
 	}
 
-	fmt.Printf("Installed %d hook(s) in %s\n", len(popHooks), settingsPath)
+	if stdout != nil {
+		fmt.Fprintf(stdout, "Installed %d hook(s) in %s\n", len(popHooks), settingsPath)
+	}
 	return nil
 }
 

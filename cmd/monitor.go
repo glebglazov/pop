@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/spf13/cobra"
 )
@@ -132,11 +134,15 @@ func ensureMonitorDaemon() {
 
 // binaryNewerThanPID returns true if the binary was modified after the PID file was written
 func binaryNewerThanPID(exePath, pidPath string) bool {
-	exeInfo, err := os.Stat(exePath)
+	return binaryNewerThanPIDWith(deps.NewRealFileSystem(), exePath, pidPath)
+}
+
+func binaryNewerThanPIDWith(fs deps.FileSystem, exePath, pidPath string) bool {
+	exeInfo, err := fs.Stat(exePath)
 	if err != nil {
 		return true
 	}
-	pidInfo, err := os.Stat(pidPath)
+	pidInfo, err := fs.Stat(pidPath)
 	if err != nil {
 		return true
 	}
@@ -169,28 +175,32 @@ var paneMonitorStatusCmd = &cobra.Command{
 }
 
 func runPaneMonitorStatus(cmd *cobra.Command, args []string) error {
-	pidPath := monitor.DefaultPIDPath()
-	running := monitor.IsDaemonRunning(pidPath)
+	return runPaneMonitorStatusWith(monitor.DefaultDeps(), os.Stdout)
+}
+
+func runPaneMonitorStatusWith(d *monitor.Deps, w io.Writer) error {
+	pidPath := monitor.DefaultPIDPathWith(d)
+	running := monitor.IsDaemonRunningWith(d, pidPath)
 	if running {
-		fmt.Println("Daemon: running")
+		fmt.Fprintln(w, "Daemon: running")
 	} else {
-		fmt.Println("Daemon: stopped")
+		fmt.Fprintln(w, "Daemon: stopped")
 	}
 
-	statePath := monitor.DefaultStatePath()
-	state, err := monitor.Load(statePath)
+	statePath := monitor.DefaultStatePathWith(d)
+	state, err := monitor.LoadWith(d, statePath)
 	if err != nil {
 		return err
 	}
 
 	if len(state.Panes) == 0 {
-		fmt.Println("No monitored panes")
+		fmt.Fprintln(w, "No monitored panes")
 		return nil
 	}
 
-	fmt.Printf("\nMonitored panes (%d):\n", len(state.Panes))
+	fmt.Fprintf(w, "\nMonitored panes (%d):\n", len(state.Panes))
 	for _, entry := range state.Panes {
-		fmt.Printf("  %s  session=%s  status=%s  updated=%s\n",
+		fmt.Fprintf(w, "  %s  session=%s  status=%s  updated=%s\n",
 			entry.PaneID, entry.Session, entry.Status,
 			entry.UpdatedAt.Format("15:04:05"))
 	}
