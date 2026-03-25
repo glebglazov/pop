@@ -1,6 +1,15 @@
 package ui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// containsSubstring checks if s contains substr, stripping ANSI codes first.
+func containsSubstring(s, substr string) bool {
+	s = StripANSI(s)
+	return strings.Contains(s, substr)
+}
 
 func TestLastNSegments(t *testing.T) {
 	tests := []struct {

@@ -9,9 +9,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/junegunn/fzf/src/algo"
-	"github.com/junegunn/fzf/src/util"
 )
 
 // DirPickerResult holds the result from the directory picker
@@ -39,12 +36,7 @@ type DirPicker struct {
 func NewDirPicker() *DirPicker {
 	home, _ := os.UserHomeDir()
 
-	ti := textinput.New()
-	ti.Prompt = "> "
-	styles := ti.Styles()
-	styles.Cursor.Blink = false
-	ti.SetStyles(styles)
-	ti.Focus()
+	ti := newTextInput()
 
 	dp := &DirPicker{
 		currentDir: home,
@@ -184,29 +176,7 @@ func (dp *DirPicker) applyFilter() {
 	if query == "" {
 		dp.filtered = append(base, dp.entries...)
 	} else {
-		pattern := []rune(strings.ToLower(query))
-		slab := util.MakeSlab(100*1024, 2048)
-
-		type match struct {
-			name  string
-			score int
-		}
-		var matches []match
-		for _, name := range dp.entries {
-			chars := util.ToChars([]byte(name))
-			result, _ := algo.FuzzyMatchV2(false, true, true, &chars, pattern, false, slab)
-			if result.Score > 0 {
-				matches = append(matches, match{name: name, score: result.Score})
-			}
-		}
-		sort.Slice(matches, func(i, j int) bool {
-			return matches[i].score < matches[j].score
-		})
-
-		dp.filtered = base
-		for _, m := range matches {
-			dp.filtered = append(dp.filtered, m.name)
-		}
+		dp.filtered = append(base, fuzzyMatch(query, dp.entries)...)
 	}
 
 	if dp.cursor >= len(dp.filtered) {
@@ -219,30 +189,7 @@ func (dp *DirPicker) applyFilter() {
 }
 
 func (dp *DirPicker) adjustScroll() {
-	visible := dp.height
-	if visible > len(dp.filtered) {
-		visible = len(dp.filtered)
-	}
-	if visible == 0 {
-		dp.scroll = 0
-		return
-	}
-	if dp.cursor < dp.scroll {
-		dp.scroll = dp.cursor
-	}
-	if dp.cursor >= dp.scroll+visible {
-		dp.scroll = dp.cursor - visible + 1
-	}
-	if dp.scroll < 0 {
-		dp.scroll = 0
-	}
-	maxScroll := len(dp.filtered) - visible
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if dp.scroll > maxScroll {
-		dp.scroll = maxScroll
-	}
+	dp.scroll = adjustScroll(dp.cursor, dp.scroll, dp.height, len(dp.filtered), 0)
 }
 
 func (dp *DirPicker) cursorToEnd() {
@@ -262,17 +209,6 @@ func (dp *DirPicker) displayPath() string {
 
 func (dp *DirPicker) View() tea.View {
 	var b strings.Builder
-
-	selectedStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("237")).
-		Foreground(lipgloss.Color("255"))
-	pipeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39"))
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
-	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39")).
-		Bold(true)
 
 	// Header: current path
 	b.WriteString("  ")
@@ -318,32 +254,8 @@ func (dp *DirPicker) View() tea.View {
 		b.WriteString("\n")
 	}
 
-	// Input box
-	boxWidth := dp.width
-	if boxWidth < 20 {
-		boxWidth = 40
-	}
-	innerWidth := boxWidth - 2
+	writeInputBox(&b, dp.width, dp.input.View())
 
-	b.WriteString("┌")
-	b.WriteString(strings.Repeat("─", innerWidth))
-	b.WriteString("┐\n")
-
-	inputView := dp.input.View()
-	padding := innerWidth - lipgloss.Width(inputView)
-	if padding < 0 {
-		padding = 0
-	}
-	b.WriteString("│")
-	b.WriteString(inputView)
-	b.WriteString(strings.Repeat(" ", padding))
-	b.WriteString("│\n")
-
-	b.WriteString("└")
-	b.WriteString(strings.Repeat("─", innerWidth))
-	b.WriteString("┘\n")
-
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	hints := "  ↑/↓ navigate · Enter open · - back · C-a add · Esc cancel"
 	b.WriteString(hintStyle.Render(hints))
 

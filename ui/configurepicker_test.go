@@ -442,13 +442,13 @@ func TestConfigurePicker_View_ShowsPreview(t *testing.T) {
 	)
 
 	view := fmt.Sprint(cp.View())
-	if !containsText(view, "Preview:") {
+	if !containsSubstring(view, "Preview:") {
 		t.Error("expected 'Preview:' in view")
 	}
-	if !containsText(view, "foo") {
+	if !containsSubstring(view, "foo") {
 		t.Error("expected 'foo' in preview")
 	}
-	if !containsText(view, "bar") {
+	if !containsSubstring(view, "bar") {
 		t.Error("expected 'bar' in preview")
 	}
 }
@@ -465,25 +465,8 @@ func TestConfigurePicker_View_ShowsDepthInPreviewHeader(t *testing.T) {
 	)
 
 	view := fmt.Sprint(cp.View())
-	if !containsText(view, "depth: 2") {
+	if !containsSubstring(view, "depth: 2") {
 		t.Error("expected 'depth: 2' in view")
 	}
 }
 
-func containsText(s, substr string) bool {
-	// Strip ANSI codes for comparison
-	return len(s) > 0 && contains(s, substr)
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

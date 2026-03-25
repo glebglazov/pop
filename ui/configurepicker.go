@@ -54,12 +54,7 @@ type ConfigurePicker struct {
 
 // NewConfigurePicker creates a new configure picker with the given expand function
 func NewConfigurePicker(expandFn func(string) []string) *ConfigurePicker {
-	ti := textinput.New()
-	ti.Prompt = "> "
-	styles := ti.Styles()
-	styles.Cursor.Blink = false
-	ti.SetStyles(styles)
-	ti.Focus()
+	ti := newTextInput()
 
 	return &ConfigurePicker{
 		phase:    phasePath,
@@ -309,10 +304,7 @@ func (cp *ConfigurePicker) applyTabCompletion() {
 func (cp *ConfigurePicker) View() tea.View {
 	var b strings.Builder
 
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	previewStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	previewStyle := lipgloss.NewStyle().Foreground(colorPreview)
 
 	// Phase-specific top hint
 	switch cp.phase {
@@ -394,30 +386,7 @@ func (cp *ConfigurePicker) View() tea.View {
 		b.WriteString("\n")
 	}
 
-	// Input box
-	boxWidth := cp.width
-	if boxWidth < 20 {
-		boxWidth = 40
-	}
-	innerWidth := boxWidth - 2
-
-	b.WriteString("┌")
-	b.WriteString(strings.Repeat("─", innerWidth))
-	b.WriteString("┐\n")
-
-	inputView := cp.input.View()
-	padding := innerWidth - lipgloss.Width(inputView)
-	if padding < 0 {
-		padding = 0
-	}
-	b.WriteString("│")
-	b.WriteString(inputView)
-	b.WriteString(strings.Repeat(" ", padding))
-	b.WriteString("│\n")
-
-	b.WriteString("└")
-	b.WriteString(strings.Repeat("─", innerWidth))
-	b.WriteString("┘\n")
+	writeInputBox(&b, cp.width, cp.input.View())
 
 	// Key hints
 	var hints string

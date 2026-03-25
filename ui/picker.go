@@ -40,13 +40,6 @@ func reloadTick() tea.Cmd {
 // Used by the picker to gate the right-arrow attention sub-view.
 const IconAttention = "!"
 
-// Shared styles used across view methods
-var (
-	selectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("237")).Foreground(lipgloss.Color("255"))
-	pipeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
-	hintStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-)
-
 // Item represents a selectable item in the picker
 type Item struct {
 	Name    string // Display name
@@ -327,12 +320,7 @@ func WithAttentionReload(fn func() []AttentionPane) PickerOption {
 
 // NewPicker creates a new picker with the given items
 func NewPicker(items []Item, opts ...PickerOption) *Picker {
-	ti := textinput.New()
-	ti.Prompt = "> "
-	styles := ti.Styles()
-	styles.Cursor.Blink = false
-	ti.SetStyles(styles)
-	ti.Focus()
+	ti := newTextInput()
 
 	p := &Picker{
 		items:            items,
@@ -790,7 +778,6 @@ func (p *Picker) filter() {
 			}
 		}
 
-		// Sort by score (ascending, so best match ends up at the bottom)
 		sort.Slice(matches, func(i, j int) bool {
 			return matches[i].score < matches[j].score
 		})
@@ -941,46 +928,12 @@ func (p *Picker) quickAccessEnabled() bool {
 	return p.quickAccessModifier != "" && p.quickAccessModifier != "disabled"
 }
 
-// adjustScroll ensures the cursor is visible by adjusting scroll offset only when necessary
 func (p *Picker) adjustScroll() {
-	visible := p.height
-	if visible > len(p.filtered) {
-		visible = len(p.filtered)
-	}
-	if visible == 0 {
-		p.scroll = 0
-		return
-	}
-
-	// Determine scroll margin: when quick access is enabled, try to keep
-	// 9 items visible above cursor so QA-labeled items are on screen
 	margin := 0
 	if p.quickAccessEnabled() {
 		margin = 9
-		if margin >= visible {
-			margin = visible - 1
-		}
 	}
-
-	// If cursor is too close to top of visible area (within margin), scroll up
-	if p.cursor-p.scroll < margin {
-		p.scroll = p.cursor - margin
-	}
-	// If cursor is below visible area, scroll down
-	if p.cursor >= p.scroll+visible {
-		p.scroll = p.cursor - visible + 1
-	}
-	// Clamp scroll bounds
-	if p.scroll < 0 {
-		p.scroll = 0
-	}
-	maxScroll := len(p.filtered) - visible
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if p.scroll > maxScroll {
-		p.scroll = maxScroll
-	}
+	p.scroll = adjustScroll(p.cursor, p.scroll, p.height, len(p.filtered), margin)
 }
 
 func (p *Picker) View() tea.View {
@@ -1086,30 +1039,7 @@ func (p *Picker) viewHelp() string {
 		b.WriteString("\n")
 	}
 
-	// Input box (same as normal mode but empty)
-	boxWidth := p.width
-	if boxWidth < 20 {
-		boxWidth = 40
-	}
-	innerWidth := boxWidth - 2
-
-	b.WriteString("┌")
-	b.WriteString(strings.Repeat("─", innerWidth))
-	b.WriteString("┐\n")
-
-	title := " Help"
-	titlePadding := innerWidth - len(title)
-	if titlePadding < 0 {
-		titlePadding = 0
-	}
-	b.WriteString("│")
-	b.WriteString(title)
-	b.WriteString(strings.Repeat(" ", titlePadding))
-	b.WriteString("│\n")
-
-	b.WriteString("└")
-	b.WriteString(strings.Repeat("─", innerWidth))
-	b.WriteString("┘\n")
+	writeInputBox(&b, p.width, " Help")
 
 	// Hints line
 	b.WriteString(hintStyle.Render("  Esc back"))
@@ -1121,7 +1051,7 @@ func (p *Picker) viewAttention() string {
 	var b strings.Builder
 
 	sepStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("238"))
+		Foreground(colorSeparator)
 
 	// Layout: left panel (pane list) + separator + right panel (preview)
 	leftWidth := p.width * 3 / 10
@@ -1138,8 +1068,7 @@ func (p *Picker) viewAttention() string {
 
 	// Empty panes: show title + dismissable message
 	if len(p.attentionPanes) == 0 {
-		headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-		msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+		msgStyle := lipgloss.NewStyle().Foreground(colorDim)
 		var eb strings.Builder
 		if p.attentionTitle != "" {
 			eb.WriteString(headerStyle.Render(" " + p.attentionTitle))
@@ -1163,7 +1092,6 @@ func (p *Picker) viewAttention() string {
 	}
 
 	// Header in left panel
-	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 	headerText := p.attentionPanes[p.attentionCursor].Session
 	if p.attentionTitle != "" {
 		headerText = p.attentionTitle
@@ -1215,8 +1143,8 @@ func (p *Picker) viewAttention() string {
 	}
 
 	// Status icon styles
-	attentionIconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // red
-	workingIconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))   // orange/yellow
+	attentionIconStyle := lipgloss.NewStyle().Foreground(colorAttention)
+	workingIconStyle := lipgloss.NewStyle().Foreground(colorWorking)
 
 	// Render list rows alongside preview
 	for i := 0; i < visible; i++ {
@@ -1377,16 +1305,14 @@ func (p *Picker) viewNormal() string {
 			}
 			b.WriteString(pipeStyle.Render("▌"))
 			if hasNumber {
-				numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-				b.WriteString(numStyle.Render(fmt.Sprintf("%d ", distFromCursor)))
+				b.WriteString(dimStyle.Render(fmt.Sprintf("%d ", distFromCursor)))
 			} else {
 				b.WriteString(strings.Repeat(" ", prefixWidth-1))
 			}
 			b.WriteString(selectedStyle.Render(line))
 		} else {
 			if hasNumber {
-				numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-				b.WriteString(numStyle.Render(p.quickAccessLabel(distFromCursor)))
+				b.WriteString(dimStyle.Render(p.quickAccessLabel(distFromCursor)))
 			} else {
 				b.WriteString(p.quickAccessPadding())
 			}
@@ -1395,34 +1321,11 @@ func (p *Picker) viewNormal() string {
 		b.WriteString("\n")
 	}
 
-	// Input box
-	boxWidth := p.width
-	if boxWidth < 20 {
-		boxWidth = 40
-	}
-	innerWidth := boxWidth - 2
-
-	b.WriteString("┌")
-	b.WriteString(strings.Repeat("─", innerWidth))
-	b.WriteString("┐\n")
-
-	inputView := p.input.View()
-	padding := innerWidth - lipgloss.Width(inputView)
-	if padding < 0 {
-		padding = 0
-	}
-	b.WriteString("│")
-	b.WriteString(inputView)
-	b.WriteString(strings.Repeat(" ", padding))
-	b.WriteString("│\n")
-
-	b.WriteString("└")
-	b.WriteString(strings.Repeat("─", innerWidth))
-	b.WriteString("┘\n")
+	writeInputBox(&b, p.width, p.input.View())
 
 	// Warnings
 	if len(p.warnings) > 0 {
-		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // yellow/orange
+		warnStyle := lipgloss.NewStyle().Foreground(colorWorking)
 		for _, w := range p.warnings {
 			b.WriteString(warnStyle.Render("  ⚠ " + w))
 			b.WriteString("\n")
