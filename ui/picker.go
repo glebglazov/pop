@@ -149,6 +149,7 @@ type Picker struct {
 	previewFunc        func(paneID string) string
 	reloadFunc         func() []AttentionPane
 	markReadFunc       func(paneID string)
+	unmonitorFunc      func(paneID string)
 	spinnerFrame       int // current spinner animation frame
 }
 
@@ -283,8 +284,9 @@ func WithWarnings(warnings []string) PickerOption {
 
 // AttentionCallbacks holds callback functions for the attention sub-view.
 type AttentionCallbacks struct {
-	Preview  func(paneID string) string // returns pane content for preview
-	MarkRead func(paneID string)        // marks a pane as read
+	Preview   func(paneID string) string // returns pane content for preview
+	MarkRead  func(paneID string)        // marks a pane as read
+	Unmonitor func(paneID string)        // removes a pane from monitor state
 }
 
 // WithAttentionPanes enables the attention sub-view with the given panes and callbacks.
@@ -293,6 +295,7 @@ func WithAttentionPanes(panes []AttentionPane, cb AttentionCallbacks) PickerOpti
 		p.attentionPanes = panes
 		p.previewFunc = cb.Preview
 		p.markReadFunc = cb.MarkRead
+		p.unmonitorFunc = cb.Unmonitor
 	}
 }
 
@@ -652,6 +655,28 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			p.markReadFunc(pane.PaneID)
 			p.attentionDirty = true
 			// Remove from list
+			p.attentionPanes = append(p.attentionPanes[:p.attentionCursor], p.attentionPanes[p.attentionCursor+1:]...)
+			if len(p.attentionPanes) == 0 {
+				if len(p.items) == 0 {
+					p.result = Result{Action: ActionCancel}
+					return p, tea.Quit
+				}
+				p.result = Result{Action: ActionRefresh}
+				return p, tea.Quit
+			}
+			if p.attentionCursor >= len(p.attentionPanes) {
+				p.attentionCursor = 0
+			}
+			p.adjustAttentionScroll()
+			p.fetchAttentionPreview()
+		}
+		return p, nil
+
+	case key.Matches(msg, keys.ForceDelete):
+		if len(p.attentionPanes) > 0 && p.unmonitorFunc != nil {
+			pane := p.attentionPanes[p.attentionCursor]
+			p.unmonitorFunc(pane.PaneID)
+			p.attentionDirty = true
 			p.attentionPanes = append(p.attentionPanes[:p.attentionCursor], p.attentionPanes[p.attentionCursor+1:]...)
 			if len(p.attentionPanes) == 0 {
 				if len(p.items) == 0 {
@@ -1182,9 +1207,9 @@ func (p *Picker) viewAttention() string {
 	// Hints
 	var hints string
 	if len(p.items) > 0 {
-		hints = "  ← back · Enter switch · C-r mark read · Esc cancel"
+		hints = "  ← back · Enter switch · C-r mark read · C-x unmonitor · Esc cancel"
 	} else {
-		hints = "  Enter switch · C-r mark read · Esc quit"
+		hints = "  Enter switch · C-r mark read · C-x unmonitor · Esc quit"
 	}
 	b.WriteString(hintStyle.Render(hints))
 

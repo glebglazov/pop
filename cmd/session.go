@@ -148,11 +148,22 @@ func markPaneRead(paneID string) {
 	state.Save()
 }
 
+// unmonitorPane removes a pane from the monitor state entirely
+func unmonitorPane(paneID string) {
+	state := loadMonitorState()
+	if state == nil {
+		return
+	}
+	delete(state.Panes, paneID)
+	state.Save()
+}
+
 // attentionCallbacks returns the standard callbacks for attention sub-views
 func attentionCallbacks() ui.AttentionCallbacks {
 	return ui.AttentionCallbacks{
-		Preview:  capturePanePreview,
-		MarkRead: markPaneRead,
+		Preview:   capturePanePreview,
+		MarkRead:  markPaneRead,
+		Unmonitor: unmonitorPane,
 	}
 }
 
