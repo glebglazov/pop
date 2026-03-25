@@ -173,3 +173,93 @@ func TestRunPaneMonitorStatusWith(t *testing.T) {
 	})
 }
 
+func TestTmuxPaneSessionWith(t *testing.T) {
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			if args[0] == "display-message" {
+				return "project-a", nil
+			}
+			return "", nil
+		},
+	}
+
+	session, err := tmuxPaneSessionWith(tmux, "%1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if session != "project-a" {
+		t.Errorf("got %q, want %q", session, "project-a")
+	}
+}
+
+func TestIsActiveTmuxPaneWith(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "active pane",
+			output:   "1 1 1",
+			expected: true,
+		},
+		{
+			name:     "inactive pane",
+			output:   "0 1 1",
+			expected: false,
+		},
+		{
+			name:     "detached session",
+			output:   "1 1 0",
+			expected: false,
+		},
+		{
+			name:     "error returns false",
+			err:      fmt.Errorf("pane not found"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmux := &deps.MockTmux{
+				CommandFunc: func(args ...string) (string, error) {
+					return tt.output, tt.err
+				},
+			}
+			result := isActiveTmuxPaneWith(tmux, "%1")
+			if result != tt.expected {
+				t.Errorf("got %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestUninstallTmuxAutoReadHooksWith(t *testing.T) {
+	var removedHooks []string
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			if args[0] == "show-hooks" {
+				return "after-select-pane[0] run-shell \"pop pane set-status #{pane_id} read\"\n" +
+					"after-select-pane[1] run-shell \"echo other hook\"\n" +
+					"session-window-changed[0] run-shell \"pop monitor check\"\n", nil
+			}
+			if args[0] == "set-hook" && args[1] == "-gu" {
+				removedHooks = append(removedHooks, args[2])
+			}
+			return "", nil
+		},
+	}
+
+	uninstallTmuxAutoReadHooksWith(tmux)
+
+	if len(removedHooks) != 2 {
+		t.Fatalf("removed %d hooks, want 2", len(removedHooks))
+	}
+	// Should remove the pop hooks but not "echo other hook"
+	if removedHooks[0] != "after-select-pane[0]" && removedHooks[0] != "session-window-changed[0]" {
+		t.Errorf("unexpected removed hook: %q", removedHooks[0])
+	}
+}
+

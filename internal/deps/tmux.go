@@ -7,6 +7,9 @@ import (
 
 // Tmux defines operations for interacting with tmux
 type Tmux interface {
+	// Command runs tmux with the given arguments and returns the trimmed output.
+	// This is the generic entry point — all tmux operations can go through here.
+	Command(args ...string) (string, error)
 	// HasSession checks if a session exists
 	HasSession(name string) bool
 	// NewSession creates a new detached session
@@ -26,6 +29,15 @@ type RealTmux struct{}
 
 func NewRealTmux() *RealTmux {
 	return &RealTmux{}
+}
+
+func (t *RealTmux) Command(args ...string) (string, error) {
+	cmd := exec.Command("tmux", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (t *RealTmux) HasSession(name string) bool {

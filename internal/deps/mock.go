@@ -112,12 +112,20 @@ func (m *MockFileSystem) EvalSymlinks(path string) (string, error) {
 
 // MockTmux is a test double for Tmux
 type MockTmux struct {
+	CommandFunc       func(args ...string) (string, error)
 	HasSessionFunc    func(name string) bool
 	NewSessionFunc    func(name, dir string) error
 	SwitchClientFunc  func(name string) error
 	AttachSessionFunc func(name string) error
 	KillSessionFunc   func(name string) error
 	ListSessionsFunc  func() (string, error)
+}
+
+func (m *MockTmux) Command(args ...string) (string, error) {
+	if m.CommandFunc != nil {
+		return m.CommandFunc(args...)
+	}
+	return "", nil
 }
 
 func (m *MockTmux) HasSession(name string) bool {

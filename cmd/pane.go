@@ -3,12 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/spf13/cobra"
 )
@@ -43,16 +43,22 @@ func init() {
 // If --project is set, derives session name from path and ensures session exists.
 // Otherwise uses the current tmux session.
 func resolveSession() (string, error) {
+	return resolveSessionWith(defaultTmux)
+}
+
+func resolveSessionWith(tmux deps.Tmux) (string, error) {
 	if paneProject != "" {
 		name := sanitizeSessionName(filepath.Base(paneProject))
-		if err := exec.Command("tmux", "has-session", "-t="+name).Run(); err != nil {
-			if err := exec.Command("tmux", "new-session", "-ds", name, "-c", paneProject).Run(); err != nil {
+		_, err := tmux.Command("has-session", "-t="+name)
+		if err != nil {
+			_, err := tmux.Command("new-session", "-ds", name, "-c", paneProject)
+			if err != nil {
 				return "", fmt.Errorf("failed to create session %q: %w", name, err)
 			}
 		}
 		return name, nil
 	}
-	session := currentTmuxSession()
+	session := currentTmuxSessionWith(tmux)
 	if session == "" {
 		return "", fmt.Errorf("not inside a tmux session (use --project to target one)")
 	}
@@ -62,11 +68,15 @@ func resolveSession() (string, error) {
 // findPane finds a pane by title in the given session's "agent" window.
 // Returns the pane_id (e.g., "%5") or error if not found.
 func findPane(session, name string) (string, error) {
-	out, err := exec.Command("tmux", "list-panes", "-t", session+":agent", "-F", "#{pane_title}|#{pane_id}").Output()
+	return findPaneWith(defaultTmux, session, name)
+}
+
+func findPaneWith(tmux deps.Tmux, session, name string) (string, error) {
+	out, err := tmux.Command("list-panes", "-t", session+":agent", "-F", "#{pane_title}|#{pane_id}")
 	if err != nil {
 		return "", fmt.Errorf("no agent window in session %q", session)
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		parts := strings.SplitN(line, "|", 2)
 		if len(parts) == 2 && parts[0] == name {
 			return parts[1], nil
@@ -77,8 +87,12 @@ func findPane(session, name string) (string, error) {
 
 // hasAgentWindow checks if the "agent" window exists in the given session.
 func hasAgentWindow(session string) bool {
-	out, _ := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_name}").Output()
-	for _, w := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	return hasAgentWindowWith(defaultTmux, session)
+}
+
+func hasAgentWindowWith(tmux deps.Tmux, session string) bool {
+	out, _ := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
+	for _, w := range strings.Split(out, "\n") {
 		if w == "agent" {
 			return true
 		}
@@ -88,11 +102,15 @@ func hasAgentWindow(session string) bool {
 
 // isPaneDead checks if a pane's process has exited.
 func isPaneDead(paneID string) bool {
-	out, err := exec.Command("tmux", "display-message", "-t", paneID, "-p", "#{pane_dead}").Output()
+	return isPaneDeadWith(defaultTmux, paneID)
+}
+
+func isPaneDeadWith(tmux deps.Tmux, paneID string) bool {
+	out, err := tmux.Command("display-message", "-t", paneID, "-p", "#{pane_dead}")
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(out)) == "1"
+	return out == "1"
 }
 
 // --- create ---
@@ -121,9 +139,11 @@ initializes.`,
 }
 
 func runPaneCreate(cmd *cobra.Command, args []string) error {
-	name, command := args[0], args[1]
+	return runPaneCreateWith(defaultTmux, args[0], args[1])
+}
 
-	session, err := resolveSession()
+func runPaneCreateWith(tmux deps.Tmux, name, command string) error {
+	session, err := resolveSessionWith(tmux)
 	if err != nil {
 		return err
 	}
@@ -140,40 +160,40 @@ func runPaneCreate(cmd *cobra.Command, args []string) error {
 
 	// If pane with this name exists and is alive, return it
 	// If it exists but is dead, kill it and recreate below
-	if existingID, err := findPane(session, name); err == nil {
-		if !isPaneDead(existingID) {
+	if existingID, err := findPaneWith(tmux, session, name); err == nil {
+		if !isPaneDeadWith(tmux, existingID) {
 			fmt.Println(existingID)
 			return nil
 		}
-		exec.Command("tmux", "kill-pane", "-t", existingID).Run()
+		tmux.Command("kill-pane", "-t", existingID)
 	}
 
 	// Create pane with an interactive shell (no command) in the project
 	// directory. The shell's rc files run, which triggers direnv and any
 	// other hooks so environment variables are loaded before the command.
 	var paneID string
-	if !hasAgentWindow(session) {
-		out, err := exec.Command("tmux", "new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", "agent", "-c", dir).Output()
+	if !hasAgentWindowWith(tmux, session) {
+		out, err := tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", "agent", "-c", dir)
 		if err != nil {
 			return fmt.Errorf("failed to create agent window: %w", err)
 		}
-		paneID = strings.TrimSpace(string(out))
+		paneID = out
 	} else {
-		out, err := exec.Command("tmux", "split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":agent", "-c", dir).Output()
+		out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":agent", "-c", dir)
 		if err != nil {
 			return fmt.Errorf("failed to create pane: %w", err)
 		}
-		paneID = strings.TrimSpace(string(out))
-		exec.Command("tmux", "select-layout", "-t", session+":agent", "tiled").Run()
+		paneID = out
+		tmux.Command("select-layout", "-t", session+":agent", "tiled")
 	}
 
-	if err := exec.Command("tmux", "select-pane", "-t", paneID, "-T", name).Run(); err != nil {
+	if _, err := tmux.Command("select-pane", "-t", paneID, "-T", name); err != nil {
 		return fmt.Errorf("failed to set pane title: %w", err)
 	}
-	exec.Command("tmux", "set-option", "-p", "-t", paneID, "remain-on-exit", "on").Run()
+	tmux.Command("set-option", "-p", "-t", paneID, "remain-on-exit", "on")
 
 	// Send the command to the shell after it has initialized
-	exec.Command("tmux", "send-keys", "-t", paneID, command, "Enter").Run()
+	tmux.Command("send-keys", "-t", paneID, command, "Enter")
 
 	fmt.Println(paneID)
 	return nil
@@ -196,24 +216,26 @@ rebalance the remaining panes.`,
 }
 
 func runPaneKill(cmd *cobra.Command, args []string) error {
-	name := args[0]
+	return runPaneKillWith(defaultTmux, args[0])
+}
 
-	session, err := resolveSession()
+func runPaneKillWith(tmux deps.Tmux, name string) error {
+	session, err := resolveSessionWith(tmux)
 	if err != nil {
 		return err
 	}
 
-	paneID, err := findPane(session, name)
+	paneID, err := findPaneWith(tmux, session, name)
 	if err != nil {
 		return err
 	}
 
-	if err := exec.Command("tmux", "kill-pane", "-t", paneID).Run(); err != nil {
+	if _, err := tmux.Command("kill-pane", "-t", paneID); err != nil {
 		return fmt.Errorf("failed to kill pane %q: %w", name, err)
 	}
 
 	// Re-tile remaining panes if agent window still exists
-	exec.Command("tmux", "select-layout", "-t", session+":agent", "tiled").Run()
+	tmux.Command("select-layout", "-t", session+":agent", "tiled")
 
 	return nil
 }
@@ -273,17 +295,21 @@ Uses tmux list-panes with #{pane_title} and #{pane_id} format variables.`,
 }
 
 func runPaneList(cmd *cobra.Command, args []string) error {
-	session, err := resolveSession()
+	return runPaneListWith(defaultTmux)
+}
+
+func runPaneListWith(tmux deps.Tmux) error {
+	session, err := resolveSessionWith(tmux)
 	if err != nil {
 		return err
 	}
 
-	out, err := exec.Command("tmux", "list-panes", "-t", session+":agent", "-F", "#{pane_title}\t#{pane_id}").Output()
+	out, err := tmux.Command("list-panes", "-t", session+":agent", "-F", "#{pane_title}\t#{pane_id}")
 	if err != nil {
 		return fmt.Errorf("no agent window in session %q", session)
 	}
 
-	fmt.Print(string(out))
+	fmt.Println(out)
 	return nil
 }
 
@@ -313,21 +339,22 @@ PPage (page up), F1-F12, C-<key> (ctrl), M-<key> (alt).`,
 }
 
 func runPaneSend(cmd *cobra.Command, args []string) error {
-	name := args[0]
-	keys := args[1:]
+	return runPaneSendWith(defaultTmux, args[0], args[1:])
+}
 
-	session, err := resolveSession()
+func runPaneSendWith(tmux deps.Tmux, name string, keys []string) error {
+	session, err := resolveSessionWith(tmux)
 	if err != nil {
 		return err
 	}
 
-	paneID, err := findPane(session, name)
+	paneID, err := findPaneWith(tmux, session, name)
 	if err != nil {
 		return err
 	}
 
 	tmuxArgs := append([]string{"send-keys", "-t", paneID}, keys...)
-	if err := exec.Command("tmux", tmuxArgs...).Run(); err != nil {
+	if _, err := tmux.Command(tmuxArgs...); err != nil {
 		return fmt.Errorf("failed to send keys to pane %q: %w", name, err)
 	}
 	return nil
@@ -352,24 +379,26 @@ Uses tmux capture-pane with -S -50 (scrollback).`,
 }
 
 func runPaneCapture(cmd *cobra.Command, args []string) error {
-	name := args[0]
+	return runPaneCaptureWith(defaultTmux, args[0])
+}
 
-	session, err := resolveSession()
+func runPaneCaptureWith(tmux deps.Tmux, name string) error {
+	session, err := resolveSessionWith(tmux)
 	if err != nil {
 		return err
 	}
 
-	paneID, err := findPane(session, name)
+	paneID, err := findPaneWith(tmux, session, name)
 	if err != nil {
 		return err
 	}
 
-	out, err := exec.Command("tmux", "capture-pane", "-p", "-S", "-50", "-t", paneID).Output()
+	out, err := tmux.Command("capture-pane", "-p", "-S", "-50", "-t", paneID)
 	if err != nil {
 		return fmt.Errorf("failed to capture pane %q: %w", name, err)
 	}
 
-	fmt.Print(string(out))
+	fmt.Println(out)
 	return nil
 }
 
@@ -407,6 +436,10 @@ Special behavior:
 }
 
 func runPaneSetStatus(cmd *cobra.Command, args []string) error {
+	return runPaneSetStatusWith(defaultTmux, args)
+}
+
+func runPaneSetStatusWith(tmux deps.Tmux, args []string) error {
 	debug.Init()
 	defer debug.Close()
 
@@ -442,7 +475,7 @@ func runPaneSetStatus(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		// Auto-register: look up the tmux session for this pane
-		session, err := tmuxPaneSession(paneID)
+		session, err := tmuxPaneSessionWith(tmux, paneID)
 		if err != nil {
 			debug.Log("[set-status] %s: failed to look up session, skipping: %v", paneID, err)
 			return nil
@@ -464,7 +497,7 @@ func runPaneSetStatus(cmd *cobra.Command, args []string) error {
 
 	// If the user is already looking at the pane, treat needs_attention as
 	// read — they can see the output in real time, so there's nothing to flag.
-	if status == monitor.StatusNeedsAttention && isActiveTmuxPane(paneID) {
+	if status == monitor.StatusNeedsAttention && isActiveTmuxPaneWith(tmux, paneID) {
 		debug.Log("[set-status] %s: needs_attention on active pane — downgrading to read", paneID)
 		status = monitor.StatusRead
 	}

@@ -299,6 +299,128 @@ func TestMarkPaneReadWith(t *testing.T) {
 	})
 }
 
+func TestCurrentTmuxSessionWith(t *testing.T) {
+	t.Run("returns session name", func(t *testing.T) {
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				if args[0] == "display-message" {
+					return "my-session", nil
+				}
+				return "", nil
+			},
+		}
+		result := currentTmuxSessionWith(tmux)
+		if result != "my-session" {
+			t.Errorf("got %q, want %q", result, "my-session")
+		}
+	})
+
+	t.Run("returns empty on error", func(t *testing.T) {
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				return "", fmt.Errorf("not in tmux")
+			},
+		}
+		result := currentTmuxSessionWith(tmux)
+		if result != "" {
+			t.Errorf("got %q, want empty", result)
+		}
+	})
+}
+
+func TestTmuxPaneCommandsWith(t *testing.T) {
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			if args[0] == "list-panes" {
+				return "%1 zsh\n%2 node\n%3 vim", nil
+			}
+			return "", nil
+		},
+	}
+
+	result := tmuxPaneCommandsWith(tmux)
+	if len(result) != 3 {
+		t.Fatalf("got %d entries, want 3", len(result))
+	}
+	if result["%1"] != "zsh" {
+		t.Errorf("%%1 = %q, want %q", result["%1"], "zsh")
+	}
+	if result["%2"] != "node" {
+		t.Errorf("%%2 = %q, want %q", result["%2"], "node")
+	}
+}
+
+func TestCapturePanePreviewWith(t *testing.T) {
+	t.Run("returns pane content", func(t *testing.T) {
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				if args[0] == "capture-pane" {
+					return "line 1\nline 2\nline 3", nil
+				}
+				return "", nil
+			},
+		}
+		result := capturePanePreviewWith(tmux, "%5")
+		if result != "line 1\nline 2\nline 3" {
+			t.Errorf("got %q", result)
+		}
+	})
+
+	t.Run("returns empty on error", func(t *testing.T) {
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				return "", fmt.Errorf("pane not found")
+			},
+		}
+		result := capturePanePreviewWith(tmux, "%99")
+		if result != "" {
+			t.Errorf("got %q, want empty", result)
+		}
+	})
+}
+
+func TestKillTmuxSessionByNameWith(t *testing.T) {
+	var killedSession string
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			if args[0] == "kill-session" {
+				killedSession = args[2] // "-t", sessionName
+				return "", nil
+			}
+			return "", nil
+		},
+	}
+
+	killTmuxSessionByNameWith(tmux, "my-session")
+	if killedSession != "my-session" {
+		t.Errorf("killed %q, want %q", killedSession, "my-session")
+	}
+}
+
+func TestSwitchToTmuxTargetWith_InTmux(t *testing.T) {
+	// Set TMUX env to simulate being inside tmux
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+
+	var switchedTo string
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			if args[0] == "switch-client" {
+				switchedTo = args[2]
+				return "", nil
+			}
+			return "", nil
+		},
+	}
+
+	err := switchToTmuxTargetWith(tmux, "target-session")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if switchedTo != "target-session" {
+		t.Errorf("switched to %q, want %q", switchedTo, "target-session")
+	}
+}
+
 func TestUnmonitorPaneWith(t *testing.T) {
 	t.Run("removes pane from state", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{

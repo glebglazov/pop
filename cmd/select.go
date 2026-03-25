@@ -13,6 +13,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
@@ -441,63 +442,60 @@ func sortByUnifiedRecency(items []ui.Item, hist *history.History, sessionActivit
 }
 
 func openTmuxSession(item *ui.Item) error {
-	// Session name: use the display name (project/worktree or just project)
-	sessionName := sanitizeSessionName(item.Name)
+	return openTmuxSessionWith(defaultTmux, item)
+}
 
-	// Check if we're in tmux
+func openTmuxSessionWith(tmux deps.Tmux, item *ui.Item) error {
+	sessionName := sanitizeSessionName(item.Name)
 	inTmux := os.Getenv("TMUX") != ""
 
-	// Check if session exists
-	checkCmd := exec.Command("tmux", "has-session", "-t="+sessionName)
-	sessionExists := checkCmd.Run() == nil
+	_, err := tmux.Command("has-session", "-t="+sessionName)
+	sessionExists := err == nil
 
 	if !sessionExists {
-		// Create new session
-		newCmd := exec.Command("tmux", "new-session", "-ds", sessionName, "-c", item.Path)
-		if err := newCmd.Run(); err != nil {
+		if _, err := tmux.Command("new-session", "-ds", sessionName, "-c", item.Path); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
 	}
 
 	if inTmux {
-		// Switch to session
-		switchCmd := exec.Command("tmux", "switch-client", "-t", sessionName)
-		return switchCmd.Run()
-	} else {
-		// Attach to session
-		attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
-		attachCmd.Stdin = os.Stdin
-		attachCmd.Stdout = os.Stdout
-		attachCmd.Stderr = os.Stderr
-		return attachCmd.Run()
+		_, err := tmux.Command("switch-client", "-t", sessionName)
+		return err
 	}
+	// attach-session needs stdio wired — cannot go through the generic Command
+	attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	attachCmd.Stdin = os.Stdin
+	attachCmd.Stdout = os.Stdout
+	attachCmd.Stderr = os.Stderr
+	return attachCmd.Run()
 }
 
 func openTmuxWindow(item *ui.Item) error {
+	return openTmuxWindowWith(defaultTmux, item)
+}
+
+func openTmuxWindowWith(tmux deps.Tmux, item *ui.Item) error {
 	windowName := sanitizeSessionName(item.Name)
 
-	// Get current session name
-	out, err := exec.Command("tmux", "display-message", "-p", "#S").Output()
+	session, err := tmux.Command("display-message", "-p", "#S")
 	if err != nil {
 		return fmt.Errorf("failed to get current tmux session: %w", err)
 	}
-	session := strings.TrimSpace(string(out))
 
-	// Check if window with this name already exists
-	listOut, err := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_name}").Output()
+	listOut, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
 	if err != nil {
 		return fmt.Errorf("failed to list tmux windows: %w", err)
 	}
 
-	for _, name := range strings.Split(strings.TrimSpace(string(listOut)), "\n") {
+	for _, name := range strings.Split(listOut, "\n") {
 		if name == windowName {
-			// Window exists, switch to it
-			return exec.Command("tmux", "select-window", "-t", session+":"+windowName).Run()
+			_, err := tmux.Command("select-window", "-t", session+":"+windowName)
+			return err
 		}
 	}
 
-	// Create new window
-	return exec.Command("tmux", "new-window", "-t", session, "-n", windowName, "-c", item.Path).Run()
+	_, err = tmux.Command("new-window", "-t", session, "-n", windowName, "-c", item.Path)
+	return err
 }
 
 func sanitizeSessionName(name string) string {
@@ -508,9 +506,13 @@ func sanitizeSessionName(name string) string {
 }
 
 func killTmuxSession(name string) {
+	killTmuxSessionWith(defaultTmux, name)
+}
+
+func killTmuxSessionWith(tmux deps.Tmux, name string) {
 	sessionName := sanitizeSessionName(name)
-	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
-	if err := cmd.Run(); err != nil {
+	_, err := tmux.Command("kill-session", "-t", sessionName)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to kill session: %s\n", sessionName)
 	} else {
 		fmt.Fprintf(os.Stderr, "Killed session: %s\n", sessionName)
@@ -532,7 +534,11 @@ func executeSelectCustomCommand(command string, item *ui.Item) {
 }
 
 func sendCDToPane(paneID, path string) error {
-	cmd := exec.Command("tmux", "send-keys", "-t", paneID, fmt.Sprintf("cd %q && clear", path), "Enter")
-	return cmd.Run()
+	return sendCDToPaneWith(defaultTmux, paneID, path)
+}
+
+func sendCDToPaneWith(tmux deps.Tmux, paneID, path string) error {
+	_, err := tmux.Command("send-keys", "-t", paneID, fmt.Sprintf("cd %q && clear", path), "Enter")
+	return err
 }
 

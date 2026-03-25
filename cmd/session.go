@@ -8,9 +8,12 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/history"
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/ui"
 )
+
+var defaultTmux deps.Tmux = deps.NewRealTmux()
 
 const (
 	tmuxSessionPathPrefix = "tmux:"
@@ -20,11 +23,15 @@ const (
 )
 
 func currentTmuxSession() string {
-	out, err := exec.Command("tmux", "display-message", "-p", "#S").Output()
+	return currentTmuxSessionWith(defaultTmux)
+}
+
+func currentTmuxSessionWith(tmux deps.Tmux) string {
+	out, err := tmux.Command("display-message", "-p", "#S")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return out
 }
 
 func isStandaloneSession(item ui.Item) bool {
@@ -37,10 +44,16 @@ func standaloneSessionName(item ui.Item) string {
 
 // switchToTmuxTarget switches to or attaches to a tmux target (session name or pane ID)
 func switchToTmuxTarget(target string) error {
+	return switchToTmuxTargetWith(defaultTmux, target)
+}
+
+func switchToTmuxTargetWith(tmux deps.Tmux, target string) error {
 	inTmux := os.Getenv("TMUX") != ""
 	if inTmux {
-		return exec.Command("tmux", "switch-client", "-t", target).Run()
+		_, err := tmux.Command("switch-client", "-t", target)
+		return err
 	}
+	// attach-session needs stdio wired — cannot go through the generic Command
 	cmd := exec.Command("tmux", "attach-session", "-t", target)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -107,12 +120,16 @@ func buildAttentionPanes() []ui.AttentionPane {
 
 // tmuxPaneCommands returns a map of pane ID → current command for all panes
 func tmuxPaneCommands() map[string]string {
-	out, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_current_command}").Output()
+	return tmuxPaneCommandsWith(defaultTmux)
+}
+
+func tmuxPaneCommandsWith(tmux deps.Tmux) map[string]string {
+	out, err := tmux.Command("list-panes", "-a", "-F", "#{pane_id} #{pane_current_command}")
 	if err != nil {
 		return nil
 	}
 	result := make(map[string]string)
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		parts := strings.SplitN(line, " ", 2)
 		if len(parts) == 2 {
 			result[parts[0]] = parts[1]
@@ -155,11 +172,15 @@ func sessionHistoryPath(sessionName string, hist *history.History) string {
 }
 
 func capturePanePreview(paneID string) string {
-	out, err := exec.Command("tmux", "capture-pane", "-p", "-e", "-S", "-50", "-t", paneID).Output()
+	return capturePanePreviewWith(defaultTmux, paneID)
+}
+
+func capturePanePreviewWith(tmux deps.Tmux, paneID string) string {
+	out, err := tmux.Command("capture-pane", "-p", "-e", "-S", "-50", "-t", paneID)
 	if err != nil {
 		return ""
 	}
-	return string(out)
+	return out
 }
 
 // markPaneRead marks a pane as read in the monitor state
@@ -204,8 +225,12 @@ func attentionCallbacks() ui.AttentionCallbacks {
 }
 
 func killTmuxSessionByName(sessionName string) {
-	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
-	if err := cmd.Run(); err != nil {
+	killTmuxSessionByNameWith(defaultTmux, sessionName)
+}
+
+func killTmuxSessionByNameWith(tmux deps.Tmux, sessionName string) {
+	_, err := tmux.Command("kill-session", "-t", sessionName)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to kill session: %s\n", sessionName)
 	} else {
 		fmt.Fprintf(os.Stderr, "Killed session: %s\n", sessionName)

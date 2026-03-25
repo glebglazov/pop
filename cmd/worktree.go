@@ -8,6 +8,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
@@ -241,35 +242,32 @@ func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {
 }
 
 func switchTmuxSession(ctx *project.RepoContext, item *ui.Item) error {
-	sessionName := project.TmuxSessionName(ctx, item.Name)
+	return switchTmuxSessionWith(defaultTmux, ctx, item)
+}
 
-	// Check if we're in tmux
+func switchTmuxSessionWith(tmux deps.Tmux, ctx *project.RepoContext, item *ui.Item) error {
+	sessionName := project.TmuxSessionName(ctx, item.Name)
 	inTmux := os.Getenv("TMUX") != ""
 
-	// Check if session exists
-	checkCmd := exec.Command("tmux", "has-session", "-t="+sessionName)
-	sessionExists := checkCmd.Run() == nil
+	_, err := tmux.Command("has-session", "-t="+sessionName)
+	sessionExists := err == nil
 
 	if !sessionExists {
-		// Create new session
-		newCmd := exec.Command("tmux", "new-session", "-ds", sessionName, "-c", item.Path)
-		if err := newCmd.Run(); err != nil {
+		if _, err := tmux.Command("new-session", "-ds", sessionName, "-c", item.Path); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
 	}
 
 	if inTmux {
-		// Switch to session
-		switchCmd := exec.Command("tmux", "switch-client", "-t", sessionName)
-		return switchCmd.Run()
-	} else {
-		// Attach to session
-		attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
-		attachCmd.Stdin = os.Stdin
-		attachCmd.Stdout = os.Stdout
-		attachCmd.Stderr = os.Stderr
-		return attachCmd.Run()
+		_, err := tmux.Command("switch-client", "-t", sessionName)
+		return err
 	}
+	// attach-session needs stdio wired — cannot go through the generic Command
+	attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	attachCmd.Stdin = os.Stdin
+	attachCmd.Stdout = os.Stdout
+	attachCmd.Stderr = os.Stderr
+	return attachCmd.Run()
 }
 
 func deleteWorktree(path string, force bool) {

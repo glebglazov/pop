@@ -22,22 +22,26 @@ func init() {
 
 // tmuxPaneSession returns the session name for a given pane ID
 func tmuxPaneSession(paneID string) (string, error) {
-	out, err := exec.Command("tmux", "display-message", "-t", paneID, "-p", "#{session_name}").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
+	return tmuxPaneSessionWith(defaultTmux, paneID)
+}
+
+func tmuxPaneSessionWith(tmux deps.Tmux, paneID string) (string, error) {
+	return tmux.Command("display-message", "-t", paneID, "-p", "#{session_name}")
 }
 
 // isActiveTmuxPane returns true if the given pane is visible to the user:
 // active in its window, the window is active in its session, and the session
 // is attached to a client.
 func isActiveTmuxPane(paneID string) bool {
-	out, err := exec.Command("tmux", "display-message", "-t", paneID, "-p", "#{pane_active} #{window_active} #{session_attached}").Output()
+	return isActiveTmuxPaneWith(defaultTmux, paneID)
+}
+
+func isActiveTmuxPaneWith(tmux deps.Tmux, paneID string) bool {
+	out, err := tmux.Command("display-message", "-t", paneID, "-p", "#{pane_active} #{window_active} #{session_attached}")
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(out)) == "1 1 1"
+	return out == "1 1 1"
 }
 
 // --- monitor-start ---
@@ -71,17 +75,25 @@ func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 
 // installTmuxAutoReadHooks removes any existing pop hooks and installs current ones.
 func installTmuxAutoReadHooks() {
-	uninstallTmuxAutoReadHooks()
+	installTmuxAutoReadHooksWith(defaultTmux)
+}
+
+func installTmuxAutoReadHooksWith(tmux deps.Tmux) {
+	uninstallTmuxAutoReadHooksWith(tmux)
 	for event, hookCmd := range tmuxAutoReadHooks {
-		exec.Command("tmux", "set-hook", "-ga", event, hookCmd).Run()
+		tmux.Command("set-hook", "-ga", event, hookCmd)
 	}
 }
 
 // uninstallTmuxAutoReadHooks removes all pop-related tmux hooks,
 // leaving other hooks intact. Parses indexed entries like "event[0] cmd".
 func uninstallTmuxAutoReadHooks() {
-	out, _ := exec.Command("tmux", "show-hooks", "-g").Output()
-	for _, line := range strings.Split(string(out), "\n") {
+	uninstallTmuxAutoReadHooksWith(defaultTmux)
+}
+
+func uninstallTmuxAutoReadHooksWith(tmux deps.Tmux) {
+	out, _ := tmux.Command("show-hooks", "-g")
+	for _, line := range strings.Split(out, "\n") {
 		if !strings.Contains(line, "pop pane set-status") && !strings.Contains(line, "pop monitor") {
 			continue
 		}
@@ -91,7 +103,7 @@ func uninstallTmuxAutoReadHooks() {
 			continue
 		}
 		indexed := line[:bracketEnd+1]
-		exec.Command("tmux", "set-hook", "-gu", indexed).Run()
+		tmux.Command("set-hook", "-gu", indexed)
 	}
 }
 
