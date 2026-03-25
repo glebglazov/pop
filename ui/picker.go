@@ -612,7 +612,7 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return p, tea.Quit
 
-	case key.Matches(msg, keys.Up):
+	case key.Matches(msg, keys.AttentionUp):
 		if len(p.attentionPanes) > 0 {
 			if p.attentionCursor > 0 {
 				p.attentionCursor--
@@ -624,7 +624,7 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 
-	case key.Matches(msg, keys.Down):
+	case key.Matches(msg, keys.AttentionDown):
 		if len(p.attentionPanes) > 0 {
 			if p.attentionCursor < len(p.attentionPanes)-1 {
 				p.attentionCursor++
@@ -1371,9 +1371,11 @@ type keyMap struct {
 	OpenWindow   key.Binding
 	ClearInput   key.Binding
 	Help         key.Binding
-	Attention    key.Binding
-	Back         key.Binding
-	Reload       key.Binding
+	Attention      key.Binding
+	Back           key.Binding
+	Reload         key.Binding
+	AttentionUp    key.Binding
+	AttentionDown  key.Binding
 }
 
 var keys = keyMap{
@@ -1424,6 +1426,12 @@ var keys = keyMap{
 	),
 	Reload: key.NewBinding(
 		key.WithKeys("r"),
+	),
+	AttentionUp: key.NewBinding(
+		key.WithKeys("up", "ctrl+p", "k"),
+	),
+	AttentionDown: key.NewBinding(
+		key.WithKeys("down", "ctrl+n", "j"),
 	),
 }
 
