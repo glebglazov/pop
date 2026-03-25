@@ -429,13 +429,6 @@ func runPaneSetStatus(cmd *cobra.Command, args []string) error {
 		debug.Log("[set-status] %s: invoked with %s", paneID, status)
 	}
 
-	// If the user is already looking at the pane, treat needs_attention as
-	// read — they can see the output in real time, so there's nothing to flag.
-	if status == monitor.StatusNeedsAttention && isActiveTmuxPane(paneID) {
-		debug.Log("[set-status] %s: needs_attention on active pane — downgrading to read", paneID)
-		status = monitor.StatusRead
-	}
-
 	statePath := monitor.DefaultStatePath()
 	state, err := monitor.Load(statePath)
 	if err != nil {
@@ -467,6 +460,13 @@ func runPaneSetStatus(cmd *cobra.Command, args []string) error {
 	// read only transitions from needs_attention (not from working)
 	if status == monitor.StatusRead && entry.Status != monitor.StatusNeedsAttention {
 		return nil
+	}
+
+	// If the user is already looking at the pane, treat needs_attention as
+	// read — they can see the output in real time, so there's nothing to flag.
+	if status == monitor.StatusNeedsAttention && isActiveTmuxPane(paneID) {
+		debug.Log("[set-status] %s: needs_attention on active pane — downgrading to read", paneID)
+		status = monitor.StatusRead
 	}
 
 	if entry.Status == status {
