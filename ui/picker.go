@@ -74,7 +74,6 @@ const (
 	ActionCancel
 	ActionDelete
 	ActionForceDelete
-	ActionNew
 	ActionKillSession
 	ActionReset
 	ActionOpenWindow
@@ -112,7 +111,6 @@ type Picker struct {
 
 	showHelp        bool
 	showDelete      bool
-	showNew         bool
 	showContext     bool
 	showKillSession bool
 	showReset       bool
@@ -188,13 +186,6 @@ type PickerOption func(*Picker)
 func WithDelete() PickerOption {
 	return func(p *Picker) {
 		p.showDelete = true
-	}
-}
-
-// WithNew enables new item keybinding
-func WithNew() PickerOption {
-	return func(p *Picker) {
-		p.showNew = true
 	}
 }
 
@@ -503,12 +494,6 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Selected: &p.filtered[p.cursor],
 					Action:   ActionForceDelete,
 				}
-				return p, tea.Quit
-			}
-
-		case key.Matches(msg, keys.New):
-			if p.showNew {
-				p.result = Result{Action: ActionNew}
 				return p, tea.Quit
 			}
 
@@ -982,10 +967,6 @@ func (p *Picker) viewHelp() string {
 	if p.showDelete && !p.isKeyOverridden("ctrl+x") {
 		entries = append(entries, helpEntry{"C-x", "Force delete"})
 	}
-	if p.showNew && !p.isKeyOverridden("ctrl+n") {
-		entries = append(entries, helpEntry{"C-n", "New"})
-	}
-
 	switch p.quickAccessModifier {
 	case "alt":
 		entries = append(entries, helpEntry{"A-1..9", "Quick select"})
@@ -1385,7 +1366,6 @@ type keyMap struct {
 	Quit         key.Binding
 	Delete       key.Binding
 	ForceDelete  key.Binding
-	New          key.Binding
 	KillSession  key.Binding
 	Reset        key.Binding
 	OpenWindow   key.Binding
@@ -1421,9 +1401,6 @@ var keys = keyMap{
 	ForceDelete: key.NewBinding(
 		key.WithKeys("ctrl+x"),
 	),
-	New: key.NewBinding(
-		key.WithKeys("ctrl+n"),
-	),
 	KillSession: key.NewBinding(
 		key.WithKeys("ctrl+k"),
 	),
@@ -1450,10 +1427,3 @@ var keys = keyMap{
 	),
 }
 
-// Confirm shows a simple yes/no confirmation
-func Confirm(prompt string) (bool, error) {
-	fmt.Printf("%s [y/N]: ", prompt)
-	var response string
-	fmt.Scanln(&response)
-	return strings.ToLower(response) == "y", nil
-}

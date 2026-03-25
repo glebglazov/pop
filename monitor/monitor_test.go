@@ -228,50 +228,6 @@ func TestSaveWith(t *testing.T) {
 	}
 }
 
-func TestRegister(t *testing.T) {
-	s := &State{Panes: make(map[string]*PaneEntry)}
-
-	// Register new pane
-	s.Register("%5", "myproject")
-
-	if len(s.Panes) != 1 {
-		t.Fatalf("got %d panes, want 1", len(s.Panes))
-	}
-	entry := s.Panes["%5"]
-	if entry.Session != "myproject" {
-		t.Errorf("session = %q, want %q", entry.Session, "myproject")
-	}
-	if entry.Status != StatusUnknown {
-		t.Errorf("status = %q, want %q", entry.Status, StatusUnknown)
-	}
-
-	// Overwrite existing
-	s.Register("%5", "other-project")
-	if len(s.Panes) != 1 {
-		t.Fatalf("got %d panes after overwrite, want 1", len(s.Panes))
-	}
-	if s.Panes["%5"].Session != "other-project" {
-		t.Errorf("session after overwrite = %q, want %q", s.Panes["%5"].Session, "other-project")
-	}
-}
-
-func TestDeregister(t *testing.T) {
-	s := &State{
-		Panes: map[string]*PaneEntry{
-			"%5": {PaneID: "%5", Session: "test"},
-		},
-	}
-
-	// Deregister existing
-	s.Deregister("%5")
-	if len(s.Panes) != 0 {
-		t.Errorf("got %d panes after deregister, want 0", len(s.Panes))
-	}
-
-	// Deregister non-existent — no panic
-	s.Deregister("%99")
-}
-
 func TestSessionsNeedingAttention(t *testing.T) {
 	s := &State{
 		Panes: map[string]*PaneEntry{

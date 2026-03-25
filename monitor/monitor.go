@@ -128,21 +128,6 @@ func (s *State) SaveWith(d *Deps) error {
 	return d.FS.WriteFile(s.path, data, 0644)
 }
 
-// Register adds a pane to monitoring
-func (s *State) Register(paneID, session string) {
-	s.Panes[paneID] = &PaneEntry{
-		PaneID:    paneID,
-		Session:   session,
-		Status:    StatusUnknown,
-		UpdatedAt: time.Now(),
-	}
-}
-
-// Deregister removes a pane from monitoring
-func (s *State) Deregister(paneID string) {
-	delete(s.Panes, paneID)
-}
-
 // SessionsNeedingAttention returns session names that have at least one pane
 // in StatusNeedsAttention
 func (s *State) SessionsNeedingAttention() map[string]bool {

@@ -252,31 +252,3 @@ func TmuxSessionActivityWith(d *Deps) map[string]int64 {
 	return activity
 }
 
-// SortWorktreesByActivity sorts worktrees by tmux session activity
-func SortWorktreesByActivity(worktrees []project.Worktree, ctx *project.RepoContext) []project.Worktree {
-	activity := TmuxSessionActivity()
-
-	sorted := make([]project.Worktree, len(worktrees))
-	copy(sorted, worktrees)
-
-	sort.SliceStable(sorted, func(i, j int) bool {
-		si := project.TmuxSessionName(ctx, sorted[i].Name)
-		sj := project.TmuxSessionName(ctx, sorted[j].Name)
-
-		ai, oki := activity[si]
-		aj, okj := activity[sj]
-
-		if oki && okj {
-			return ai > aj
-		}
-		if oki {
-			return true
-		}
-		if okj {
-			return false
-		}
-		return sorted[i].Name < sorted[j].Name
-	})
-
-	return sorted
-}
