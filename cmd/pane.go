@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
@@ -427,7 +428,8 @@ Auto-registration:
   pane is a no-op — there is nothing to mark as read.
 
 Special behavior:
-  If the pane is currently active (visible to the user) and the
+  When [pane_monitoring] dismiss_attention_in_active_pane = true,
+  if the pane is currently active (visible to the user) and the
   requested status is needs_attention, it is downgraded to read
   automatically — the user is already looking at it.`,
 	Args:   cobra.RangeArgs(1, 2),
@@ -436,10 +438,14 @@ Special behavior:
 }
 
 func runPaneSetStatus(cmd *cobra.Command, args []string) error {
-	return runPaneSetStatusWith(defaultTmux, args)
+	cfg, _ := config.Load(config.DefaultConfigPath())
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	return runPaneSetStatusWith(defaultTmux, cfg, args)
 }
 
-func runPaneSetStatusWith(tmux deps.Tmux, args []string) error {
+func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, args []string) error {
 	debug.Init()
 	defer debug.Close()
 
@@ -495,9 +501,9 @@ func runPaneSetStatusWith(tmux deps.Tmux, args []string) error {
 		return nil
 	}
 
-	// If the user is already looking at the pane, treat needs_attention as
-	// read — they can see the output in real time, so there's nothing to flag.
-	if status == monitor.StatusNeedsAttention && isActiveTmuxPaneWith(tmux, paneID) {
+	// If configured, treat needs_attention as read when the user is already
+	// looking at the pane — they can see the output in real time.
+	if cfg.DismissAttentionInActivePane() && status == monitor.StatusNeedsAttention && isActiveTmuxPaneWith(tmux, paneID) {
 		debug.Log("[set-status] %s: needs_attention on active pane — downgrading to read", paneID)
 		status = monitor.StatusRead
 	}

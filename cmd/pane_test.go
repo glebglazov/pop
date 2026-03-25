@@ -1,10 +1,15 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/monitor"
 )
 
 func TestFindPaneWith(t *testing.T) {
@@ -182,4 +187,108 @@ func TestResolveSessionWith_NoProjectNotInTmux(t *testing.T) {
 	if err == nil {
 		t.Error("expected error when not in tmux and no --project")
 	}
+}
+
+func setupStateFile(t *testing.T, paneID string, status monitor.PaneStatus) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	state := &monitor.State{
+		Panes: map[string]*monitor.PaneEntry{
+			paneID: {PaneID: paneID, Session: "test", Status: status},
+		},
+	}
+	data, _ := json.Marshal(state)
+	if err := os.WriteFile(filepath.Join(stateDir, "monitor.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(stateDir, "monitor.json")
+}
+
+func loadState(t *testing.T, path string) *monitor.State {
+	t.Helper()
+	state, err := monitor.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
+	activeTmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			// isActiveTmuxPaneWith checks display-message
+			if args[0] == "display-message" {
+				return "1 1 1", nil
+			}
+			return "", nil
+		},
+	}
+
+	t.Run("default config does not downgrade on active pane", func(t *testing.T) {
+		statePath := setupStateFile(t, "%1", monitor.StatusWorking)
+		cfg := &config.Config{}
+
+		err := runPaneSetStatusWith(activeTmux, cfg, []string{"%1", "needs_attention"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		state := loadState(t, statePath)
+		if state.Panes["%1"].Status != monitor.StatusNeedsAttention {
+			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusNeedsAttention)
+		}
+	})
+
+	t.Run("dismiss_attention_in_active_pane downgrades to read", func(t *testing.T) {
+		statePath := setupStateFile(t, "%1", monitor.StatusWorking)
+		cfg := &config.Config{
+			PaneMonitoring: &config.PaneMonitoringConfig{
+				DismissAttentionInActivePane: true,
+			},
+		}
+
+		err := runPaneSetStatusWith(activeTmux, cfg, []string{"%1", "needs_attention"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		state := loadState(t, statePath)
+		if state.Panes["%1"].Status != monitor.StatusRead {
+			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusRead)
+		}
+	})
+
+	t.Run("dismiss_attention_in_active_pane no effect on inactive pane", func(t *testing.T) {
+		inactiveTmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				if args[0] == "display-message" {
+					return "0 1 1", nil // pane not active
+				}
+				return "", nil
+			},
+		}
+		statePath := setupStateFile(t, "%1", monitor.StatusWorking)
+		cfg := &config.Config{
+			PaneMonitoring: &config.PaneMonitoringConfig{
+				DismissAttentionInActivePane: true,
+			},
+		}
+
+		err := runPaneSetStatusWith(inactiveTmux, cfg, []string{"%1", "needs_attention"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		state := loadState(t, statePath)
+		if state.Panes["%1"].Status != monitor.StatusNeedsAttention {
+			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusNeedsAttention)
+		}
+	})
 }

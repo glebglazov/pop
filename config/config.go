@@ -34,6 +34,11 @@ type UserDefinedCommand struct {
 	Exit    bool   `toml:"exit"`    // Whether to exit picker after execution
 }
 
+// PaneMonitoringConfig holds pane monitoring configuration
+type PaneMonitoringConfig struct {
+	DismissAttentionInActivePane bool `toml:"dismiss_attention_in_active_pane"`
+}
+
 // WorktreeConfig holds worktree-specific configuration
 type WorktreeConfig struct {
 	Commands                      []UserDefinedCommand `toml:"commands"`
@@ -70,8 +75,9 @@ type Config struct {
 	ExcludeCurrentDir bool `toml:"exclude_current_dir"`
 	DisambiguationStrategy string               `toml:"disambiguation_strategy"`
 	QuickAccessModifier    string               `toml:"quick_access_modifier"`
-	Worktree               *WorktreeConfig      `toml:"worktree"`
-	Select                 *SelectConfig        `toml:"select"`
+	Worktree               *WorktreeConfig       `toml:"worktree"`
+	Select                 *SelectConfig         `toml:"select"`
+	PaneMonitoring         *PaneMonitoringConfig `toml:"pane_monitoring"`
 
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
 }
@@ -107,6 +113,16 @@ func (c *Config) GetQuickAccessModifier() string {
 	default:
 		return "alt"
 	}
+}
+
+// DismissAttentionInActivePane returns whether needs_attention status should
+// be automatically downgraded to read when the pane is currently active.
+// Defaults to false.
+func (c *Config) DismissAttentionInActivePane() bool {
+	if c.PaneMonitoring == nil {
+		return false
+	}
+	return c.PaneMonitoring.DismissAttentionInActivePane
 }
 
 // AttentionNotificationsEnabled returns whether attention notifications are
