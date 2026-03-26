@@ -158,7 +158,12 @@ func runInstallHooksWith(
 		if !ok {
 			continue
 		}
-		hooks[event] = removePopHooks(eventHooks)
+		cleaned := removePopHooks(eventHooks)
+		if len(cleaned) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = cleaned
+		}
 	}
 
 	// Install current hooks

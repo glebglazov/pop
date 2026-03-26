@@ -302,6 +302,53 @@ func TestRunInstallHooksWith_ReplacesOldPopHooks(t *testing.T) {
 	}
 }
 
+func TestRunInstallHooksWith_RemovesStaleEventKeys(t *testing.T) {
+	// Simulate a previously installed hook event (e.g. SessionStart) that no longer
+	// exists in popHooks. After re-install, the event key should be deleted entirely
+	// rather than left as null in the JSON.
+	existing := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"SessionStart": []interface{}{
+				map[string]interface{}{
+					"hooks": []interface{}{
+						map[string]interface{}{
+							"type":    "command",
+							"command": "pop pane set-status working 2>/dev/null || true",
+						},
+					},
+				},
+			},
+		},
+	}
+	existingJSON, _ := json.Marshal(existing)
+
+	var savedData []byte
+
+	err := runInstallHooksWith(
+		func() (string, error) { return "/mock/home", nil },
+		func(path string) ([]byte, error) { return existingJSON, nil },
+		func(path string, data []byte, perm os.FileMode) error {
+			savedData = data
+			return nil
+		},
+		func(path string, perm os.FileMode) error { return nil },
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var settings map[string]interface{}
+	json.Unmarshal(savedData, &settings)
+
+	hooks := settings["hooks"].(map[string]interface{})
+
+	// SessionStart should be completely gone, not null
+	if val, exists := hooks["SessionStart"]; exists {
+		t.Errorf("expected SessionStart to be deleted, got %v", val)
+	}
+}
+
 func TestRunInstallHooksWith_WriteError(t *testing.T) {
 	err := runInstallHooksWith(
 		func() (string, error) { return "/mock/home", nil },
