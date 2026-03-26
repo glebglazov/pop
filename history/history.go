@@ -119,6 +119,10 @@ func (h *History) dedupeEntriesBy(evalSymlinks func(string) (string, error)) {
 			LastAccess: ce.lastAccess,
 		})
 	}
+	// Sort for deterministic order — map iteration above is randomized
+	sort.Slice(h.Entries, func(i, j int) bool {
+		return h.Entries[i].Path < h.Entries[j].Path
+	})
 }
 
 // Save writes history to disk
