@@ -229,6 +229,24 @@ func markPaneReadWith(d *monitor.Deps, paneID string) {
 	state.SaveWith(d)
 }
 
+// markPaneAttention marks a pane as needs-attention in the monitor state
+func markPaneAttention(paneID string) {
+	markPaneAttentionWith(monitor.DefaultDeps(), paneID)
+}
+
+func markPaneAttentionWith(d *monitor.Deps, paneID string) {
+	state := loadMonitorStateWith(d)
+	if state == nil {
+		return
+	}
+	entry, ok := state.Panes[paneID]
+	if !ok {
+		return
+	}
+	entry.Status = monitor.StatusNeedsAttention
+	state.SaveWith(d)
+}
+
 // unmonitorPane removes a pane from the monitor state entirely
 func unmonitorPane(paneID string) {
 	unmonitorPaneWith(monitor.DefaultDeps(), paneID)
@@ -246,9 +264,10 @@ func unmonitorPaneWith(d *monitor.Deps, paneID string) {
 // attentionCallbacks returns the standard callbacks for attention sub-views
 func attentionCallbacks() ui.AttentionCallbacks {
 	return ui.AttentionCallbacks{
-		Preview:   capturePanePreview,
-		MarkRead:  markPaneRead,
-		Unmonitor: unmonitorPane,
+		Preview:       capturePanePreview,
+		MarkRead:      markPaneRead,
+		MarkAttention: markPaneAttention,
+		Unmonitor:     unmonitorPane,
 	}
 }
 

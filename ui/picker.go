@@ -149,6 +149,7 @@ type Picker struct {
 	previewFunc        func(paneID string) string
 	reloadFunc         func() []AttentionPane
 	markReadFunc       func(paneID string)
+	markAttentionFunc  func(paneID string)
 	unmonitorFunc      func(paneID string)
 	spinnerFrame       int // current spinner animation frame
 }
@@ -284,9 +285,10 @@ func WithWarnings(warnings []string) PickerOption {
 
 // AttentionCallbacks holds callback functions for the attention sub-view.
 type AttentionCallbacks struct {
-	Preview   func(paneID string) string // returns pane content for preview
-	MarkRead  func(paneID string)        // marks a pane as read
-	Unmonitor func(paneID string)        // removes a pane from monitor state
+	Preview       func(paneID string) string // returns pane content for preview
+	MarkRead      func(paneID string)        // marks a pane as read
+	MarkAttention func(paneID string)        // marks a pane as needs-attention
+	Unmonitor     func(paneID string)        // removes a pane from monitor state
 }
 
 // WithAttentionPanes enables the attention sub-view with the given panes and callbacks.
@@ -295,6 +297,7 @@ func WithAttentionPanes(panes []AttentionPane, cb AttentionCallbacks) PickerOpti
 		p.attentionPanes = panes
 		p.previewFunc = cb.Preview
 		p.markReadFunc = cb.MarkRead
+		p.markAttentionFunc = cb.MarkAttention
 		p.unmonitorFunc = cb.Unmonitor
 	}
 }
@@ -564,6 +567,9 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if p.height < 3 {
 			p.height = 3
 		}
+		if p.attentionMode {
+			p.adjustAttentionScroll()
+		}
 	}
 
 	// Update text input
@@ -651,22 +657,29 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Reset):
 		if len(p.attentionPanes) > 0 && p.markReadFunc != nil {
-			pane := p.attentionPanes[p.attentionCursor]
+			pane := &p.attentionPanes[p.attentionCursor]
 			p.markReadFunc(pane.PaneID)
-			p.attentionDirty = true
-			// Remove from list
-			p.attentionPanes = append(p.attentionPanes[:p.attentionCursor], p.attentionPanes[p.attentionCursor+1:]...)
-			if len(p.attentionPanes) == 0 {
-				if len(p.items) == 0 {
-					p.result = Result{Action: ActionCancel}
-					return p, tea.Quit
-				}
-				p.result = Result{Action: ActionRefresh}
-				return p, tea.Quit
-			}
+			pane.Status = AttentionIdle
+			p.sortAttentionPanes()
 			if p.attentionCursor >= len(p.attentionPanes) {
-				p.attentionCursor = 0
+				p.attentionCursor = len(p.attentionPanes) - 1
 			}
+			p.attentionDirty = true
+			p.adjustAttentionScroll()
+			p.fetchAttentionPreview()
+		}
+		return p, nil
+
+	case key.Matches(msg, keys.MarkAttention):
+		if len(p.attentionPanes) > 0 && p.markAttentionFunc != nil {
+			pane := &p.attentionPanes[p.attentionCursor]
+			p.markAttentionFunc(pane.PaneID)
+			pane.Status = AttentionNeedsAttention
+			p.sortAttentionPanes()
+			if p.attentionCursor >= len(p.attentionPanes) {
+				p.attentionCursor = len(p.attentionPanes) - 1
+			}
+			p.attentionDirty = true
 			p.adjustAttentionScroll()
 			p.fetchAttentionPreview()
 		}
@@ -731,6 +744,27 @@ func (p *Picker) reloadAttentionPanes() {
 	}
 	p.adjustAttentionScroll()
 	p.fetchAttentionPreview()
+}
+
+// sortAttentionPanes performs a stable sort of attention panes by status group:
+// idle (top) → working (middle) → needs_attention (bottom, closest to cursor).
+func (p *Picker) sortAttentionPanes() {
+	sort.SliceStable(p.attentionPanes, func(i, j int) bool {
+		return attentionStatusOrder(p.attentionPanes[i].Status) < attentionStatusOrder(p.attentionPanes[j].Status)
+	})
+}
+
+func attentionStatusOrder(s AttentionStatus) int {
+	switch s {
+	case AttentionIdle:
+		return 0
+	case AttentionWorking:
+		return 1
+	case AttentionNeedsAttention:
+		return 2
+	default:
+		return 0
+	}
 }
 
 // fetchAttentionPreview calls the preview function for the currently selected attention pane
@@ -1121,12 +1155,14 @@ func (p *Picker) viewAttention() string {
 	}
 
 	// Visible attention panes
-	visible := listHeight
-	if visible > len(p.attentionPanes) {
-		visible = len(p.attentionPanes)
-	}
-
 	start := p.attentionScroll
+	if start > len(p.attentionPanes) {
+		start = len(p.attentionPanes)
+	}
+	visible := listHeight
+	if visible > len(p.attentionPanes)-start {
+		visible = len(p.attentionPanes) - start
+	}
 
 	// For preview: show last lines that fit (push to bottom like main view)
 	previewStart := 0
@@ -1207,9 +1243,9 @@ func (p *Picker) viewAttention() string {
 	// Hints
 	var hints string
 	if len(p.items) > 0 {
-		hints = "  ← back · Enter switch · C-r mark read · C-x unmonitor · Esc cancel"
+		hints = "  ← back · Enter switch · C-a attention · C-r mark read · C-x unmonitor · Esc cancel"
 	} else {
-		hints = "  Enter switch · C-r mark read · C-x unmonitor · Esc quit"
+		hints = "  Enter switch · C-a attention · C-r mark read · C-x unmonitor · Esc quit"
 	}
 	b.WriteString(hintStyle.Render(hints))
 
@@ -1402,6 +1438,7 @@ type keyMap struct {
 	ClearInput   key.Binding
 	Help         key.Binding
 	Attention      key.Binding
+	MarkAttention  key.Binding
 	Back           key.Binding
 	Reload         key.Binding
 	AttentionUp    key.Binding
@@ -1450,6 +1487,9 @@ var keys = keyMap{
 	),
 	Attention: key.NewBinding(
 		key.WithKeys("right"),
+	),
+	MarkAttention: key.NewBinding(
+		key.WithKeys("ctrl+a"),
 	),
 	Back: key.NewBinding(
 		key.WithKeys("left"),
