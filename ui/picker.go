@@ -778,11 +778,24 @@ func (p *Picker) fetchAttentionPreview() {
 
 // adjustAttentionScroll ensures the attention cursor is visible
 func (p *Picker) adjustAttentionScroll() {
+	listHeight := p.height + 2 // match viewAttention's visible row count
+	if listHeight <= 0 {
+		listHeight = 1
+	}
+	// Don't scroll past what's needed to fill the viewport
+	maxScroll := len(p.attentionPanes) - listHeight
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if p.attentionScroll > maxScroll {
+		p.attentionScroll = maxScroll
+	}
+	// Ensure cursor is visible
 	if p.attentionCursor < p.attentionScroll {
 		p.attentionScroll = p.attentionCursor
 	}
-	if p.attentionCursor >= p.attentionScroll+p.height {
-		p.attentionScroll = p.attentionCursor - p.height + 1
+	if p.attentionCursor >= p.attentionScroll+listHeight {
+		p.attentionScroll = p.attentionCursor - listHeight + 1
 	}
 }
 
