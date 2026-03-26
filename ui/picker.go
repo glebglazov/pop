@@ -31,7 +31,7 @@ func spinnerTick() tea.Cmd {
 type reloadTickMsg struct{}
 
 func reloadTick() tea.Cmd {
-	return tea.Tick(5*time.Second, func(time.Time) tea.Msg {
+	return tea.Tick(1*time.Second, func(time.Time) tea.Msg {
 		return reloadTickMsg{}
 	})
 }
