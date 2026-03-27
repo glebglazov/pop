@@ -247,6 +247,24 @@ func markPaneAttentionWith(d *monitor.Deps, paneID string) {
 	state.SaveWith(d)
 }
 
+// togglePaneFollow toggles the following flag on a pane
+func togglePaneFollow(paneID string) {
+	togglePaneFollowWith(monitor.DefaultDeps(), paneID)
+}
+
+func togglePaneFollowWith(d *monitor.Deps, paneID string) {
+	state := loadMonitorStateWith(d)
+	if state == nil {
+		return
+	}
+	entry, ok := state.Panes[paneID]
+	if !ok {
+		return
+	}
+	entry.Following = !entry.Following
+	state.SaveWith(d)
+}
+
 // unmonitorPane removes a pane from the monitor state entirely
 func unmonitorPane(paneID string) {
 	unmonitorPaneWith(monitor.DefaultDeps(), paneID)
@@ -267,6 +285,7 @@ func attentionCallbacks() ui.AttentionCallbacks {
 		Preview:       capturePanePreview,
 		MarkRead:      markPaneRead,
 		MarkAttention: markPaneAttention,
+		ToggleFollow:  togglePaneFollow,
 		Unmonitor:     unmonitorPane,
 	}
 }

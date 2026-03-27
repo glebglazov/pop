@@ -191,6 +191,71 @@ func TestLoadWith_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestFollowingFieldRoundTrip(t *testing.T) {
+	var savedData []byte
+
+	d := &Deps{
+		FS: &deps.MockFileSystem{
+			MkdirAllFunc: func(path string, perm os.FileMode) error {
+				return nil
+			},
+			WriteFileFunc: func(path string, data []byte, perm os.FileMode) error {
+				savedData = data
+				return nil
+			},
+			ReadFileFunc: func(path string) ([]byte, error) {
+				return savedData, nil
+			},
+		},
+	}
+
+	s := &State{
+		Panes: map[string]*PaneEntry{
+			"%5": {PaneID: "%5", Session: "proj", Status: StatusWorking, Following: true},
+			"%6": {PaneID: "%6", Session: "proj2", Status: StatusRead, Following: false},
+		},
+		path: "/test/monitor.json",
+	}
+
+	if err := s.SaveWith(d); err != nil {
+		t.Fatalf("SaveWith() error = %v", err)
+	}
+
+	loaded, err := LoadWith(d, "/test/monitor.json")
+	if err != nil {
+		t.Fatalf("LoadWith() error = %v", err)
+	}
+
+	if !loaded.Panes["%5"].Following {
+		t.Error("pane %5: Following should be true after round-trip")
+	}
+	if loaded.Panes["%6"].Following {
+		t.Error("pane %6: Following should be false after round-trip")
+	}
+}
+
+func TestFollowingFieldBackwardCompat(t *testing.T) {
+	// JSON without "following" field should default to false
+	jsonData := `{"panes":{"%5":{"pane_id":"%5","session":"proj","status":"working","updated_at":"2024-01-01T00:00:00Z"}}}`
+
+	d := &Deps{
+		FS: &deps.MockFileSystem{
+			ReadFileFunc: func(path string) ([]byte, error) {
+				return []byte(jsonData), nil
+			},
+		},
+	}
+
+	loaded, err := LoadWith(d, "/test/monitor.json")
+	if err != nil {
+		t.Fatalf("LoadWith() error = %v", err)
+	}
+
+	if loaded.Panes["%5"].Following {
+		t.Error("pane %5: Following should default to false for old JSON")
+	}
+}
+
 func TestSaveWith(t *testing.T) {
 	var savedData []byte
 	var savedPath string

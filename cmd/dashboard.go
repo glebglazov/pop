@@ -88,10 +88,11 @@ func buildDashboardPanes() []ui.AttentionPane {
 		}
 
 		panes = append(panes, ui.AttentionPane{
-			PaneID:  entry.PaneID,
-			Session: entry.Session,
-			Name:    name,
-			Status:  status,
+			PaneID:    entry.PaneID,
+			Session:   entry.Session,
+			Name:      name,
+			Status:    status,
+			Following: entry.Following,
 		})
 	}
 
