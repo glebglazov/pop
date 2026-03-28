@@ -48,9 +48,9 @@ func isActiveTmuxPaneWith(tmux deps.Tmux, paneID string) bool {
 
 // tmux hooks for auto-read: event name → hook command
 var tmuxAutoReadHooks = map[string]string{
-	"after-select-pane":      `run-shell "pop pane set-status #{pane_id} read 2>/dev/null || true"`,
-	"session-window-changed": `run-shell "pop pane set-status #{pane_id} read 2>/dev/null || true"`,
-	"client-session-changed": `run-shell "pop pane set-status #{pane_id} read 2>/dev/null || true"`,
+	"after-select-pane":      `run-shell "pop pane set-status --source tmux-global #{pane_id} read 2>/dev/null || true"`,
+	"session-window-changed": `run-shell "pop pane set-status --source tmux-global #{pane_id} read 2>/dev/null || true"`,
+	"client-session-changed": `run-shell "pop pane set-status --source tmux-global #{pane_id} read 2>/dev/null || true"`,
 }
 
 var paneMonitorStartCmd = &cobra.Command{

@@ -36,7 +36,8 @@ type UserDefinedCommand struct {
 
 // PaneMonitoringConfig holds pane monitoring configuration
 type PaneMonitoringConfig struct {
-	DismissAttentionInActivePane bool `toml:"dismiss_attention_in_active_pane"`
+	DismissAttentionInActivePane bool     `toml:"dismiss_attention_in_active_pane"`
+	IgnoreStatusFrom             []string `toml:"ignore_status_from"`
 }
 
 // DashboardConfig holds dashboard-specific configuration
@@ -141,6 +142,20 @@ func (c *Config) DismissAttentionInActivePane() bool {
 		return false
 	}
 	return c.PaneMonitoring.DismissAttentionInActivePane
+}
+
+// ShouldIgnoreStatusFrom returns whether set-status calls from the given source
+// should be ignored.
+func (c *Config) ShouldIgnoreStatusFrom(source string) bool {
+	if c.PaneMonitoring == nil {
+		return false
+	}
+	for _, s := range c.PaneMonitoring.IgnoreStatusFrom {
+		if s == source {
+			return true
+		}
+	}
+	return false
 }
 
 // CurrentPaneAlwaysUnderCursor returns whether the dashboard should place the

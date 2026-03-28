@@ -235,7 +235,7 @@ func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
 		statePath := setupStateFile(t, "%1", monitor.StatusWorking)
 		cfg := &config.Config{}
 
-		err := runPaneSetStatusWith(activeTmux, cfg, []string{"%1", "needs_attention"})
+		err := runPaneSetStatusWith(activeTmux, cfg, "", []string{"%1", "needs_attention"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -254,7 +254,7 @@ func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
 			},
 		}
 
-		err := runPaneSetStatusWith(activeTmux, cfg, []string{"%1", "needs_attention"})
+		err := runPaneSetStatusWith(activeTmux, cfg, "", []string{"%1", "needs_attention"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -281,7 +281,7 @@ func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
 			},
 		}
 
-		err := runPaneSetStatusWith(inactiveTmux, cfg, []string{"%1", "needs_attention"})
+		err := runPaneSetStatusWith(inactiveTmux, cfg, "", []string{"%1", "needs_attention"})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -51,6 +51,11 @@ projects = [
 # Automatically downgrade needs_attention to read when the pane is currently
 # active (visible and focused). Useful if you're already watching the output.
 # dismiss_attention_in_active_pane = false
+#
+# Ignore set-status calls from specific sources. The tmux global hooks pass
+# --source tmux-global. Set this to disable auto-read on tmux navigation
+# while still allowing explicit reads from the dashboard.
+# ignore_status_from = ["tmux-global"]
 
 # [dashboard]
 # When true, the pane from which `pop dashboard` was triggered is always placed

@@ -40,6 +40,8 @@ func init() {
 }
 
 func runWorktree(cmd *cobra.Command, args []string) error {
+	go ensureMonitorDaemon()
+
 	// Detect repo context
 	ctx, err := project.DetectRepoContext()
 	if err != nil {

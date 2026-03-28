@@ -38,6 +38,7 @@ func init() {
 	paneCmd.AddCommand(paneSendCmd)
 	paneCmd.AddCommand(paneCaptureCmd)
 	paneCmd.AddCommand(paneSetStatusCmd)
+	paneSetStatusCmd.Flags().String("source", "", "source identifier for filtering (e.g. tmux-global)")
 }
 
 // resolveSession returns the tmux session name to operate on.
@@ -442,10 +443,11 @@ func runPaneSetStatus(cmd *cobra.Command, args []string) error {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	return runPaneSetStatusWith(defaultTmux, cfg, args)
+	source, _ := cmd.Flags().GetString("source")
+	return runPaneSetStatusWith(defaultTmux, cfg, source, args)
 }
 
-func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, args []string) error {
+func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, args []string) error {
 	debug.Init()
 	defer debug.Close()
 
@@ -458,6 +460,10 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, args []string) err
 		paneID = os.Getenv("TMUX_PANE")
 		status = monitor.PaneStatus(args[0])
 	}
+	if source != "" && cfg.ShouldIgnoreStatusFrom(source) {
+		return nil
+	}
+
 	if paneID == "" {
 		return nil
 	}
