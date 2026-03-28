@@ -19,3 +19,7 @@ projects = [
 # under the cursor. If the pane is not monitored, it appears as an idle entry
 # without being registered in the monitor state.
 # current_pane_always_under_cursor = false
+#
+# Sort criteria chain. Each criterion is applied in order; the first that
+# distinguishes two panes wins. Available: "status", "last_visit_at", "alphabetical"
+# sort_criteria = ["status", "last_visit_at", "alphabetical"]

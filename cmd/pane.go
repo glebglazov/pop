@@ -496,9 +496,12 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, args []string) err
 		return state.Save()
 	}
 
-	// read only transitions from needs_attention (not from working)
-	if status == monitor.StatusRead && entry.Status != monitor.StatusNeedsAttention {
-		return nil
+	// For read status: always record the visit, but only transition from needs_attention
+	if status == monitor.StatusRead {
+		entry.LastVisited = time.Now()
+		if entry.Status != monitor.StatusNeedsAttention {
+			return state.Save()
+		}
 	}
 
 	// If configured, treat needs_attention as read when the user is already

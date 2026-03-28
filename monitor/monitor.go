@@ -24,11 +24,12 @@ const (
 
 // PaneEntry represents a single monitored pane
 type PaneEntry struct {
-	PaneID    string     `json:"pane_id"`
-	Session   string     `json:"session"`
-	Status    PaneStatus `json:"status"`
-	Following bool       `json:"following,omitempty"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	PaneID      string     `json:"pane_id"`
+	Session     string     `json:"session"`
+	Status      PaneStatus `json:"status"`
+	Following   bool       `json:"following,omitempty"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	LastVisited time.Time  `json:"last_visited,omitempty"`
 }
 
 // State holds the full monitor state

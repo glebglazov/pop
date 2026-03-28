@@ -2,59 +2,10 @@ package cmd
 
 import (
 	"testing"
-	"time"
 
-	"github.com/glebglazov/pop/history"
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/ui"
 )
-
-func TestPathBase(t *testing.T) {
-	tests := []struct {
-		name     string
-		path     string
-		expected string
-	}{
-		{
-			name:     "regular path",
-			path:     "/home/user/project",
-			expected: "project",
-		},
-		{
-			name:     "tmux prefix path without slash",
-			path:     "tmux:scratch",
-			expected: "tmux:scratch",
-		},
-		{
-			name:     "tmux prefix path with slash",
-			path:     "tmux:project/worktree",
-			expected: "worktree",
-		},
-		{
-			name:     "no slashes",
-			path:     "standalone",
-			expected: "standalone",
-		},
-		{
-			name:     "trailing slash stripped externally",
-			path:     "/a/b/c",
-			expected: "c",
-		},
-		{
-			name:     "single segment with leading slash",
-			path:     "/root",
-			expected: "root",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := pathBase(tt.path)
-			if result != tt.expected {
-				t.Errorf("pathBase(%q) = %q, want %q", tt.path, result, tt.expected)
-			}
-		})
-	}
-}
 
 func TestPositionCurrentPane(t *testing.T) {
 	t.Run("untracked pane is injected at end", func(t *testing.T) {
@@ -167,59 +118,86 @@ func TestPositionCurrentPane(t *testing.T) {
 	})
 }
 
-func TestSessionAccessTime(t *testing.T) {
-	now := time.Now()
-	hist := &history.History{
-		Entries: []history.Entry{
-			{Path: "/home/user/my.project", LastAccess: now.Add(-2 * time.Hour)},
-			{Path: "/home/user/game_server", LastAccess: now.Add(-1 * time.Hour)},
-		},
+func TestSortDashboardPanes(t *testing.T) {
+	panes := func() []ui.AttentionPane {
+		return []ui.AttentionPane{
+			{PaneID: "%1", Session: "alpha", Status: ui.AttentionWorking},
+			{PaneID: "%2", Session: "beta", Status: ui.AttentionNeedsAttention},
+			{PaneID: "%3", Session: "gamma", Status: ui.AttentionIdle},
+		}
 	}
 
-	tests := []struct {
-		name     string
-		session  string
-		hist     *history.History
-		expected int64
-	}{
-		{
-			name:     "exact match via sanitized base",
-			session:  "my_project", // sanitize turns . into _
-			hist:     hist,
-			expected: now.Add(-2 * time.Hour).Unix(),
-		},
-		{
-			name:     "exact match without sanitization",
-			session:  "game_server",
-			hist:     hist,
-			expected: now.Add(-1 * time.Hour).Unix(),
-		},
-		{
-			name:     "no match returns zero",
-			session:  "nonexistent",
-			hist:     hist,
-			expected: 0,
-		},
-		{
-			name:     "nil history returns zero",
-			session:  "anything",
-			hist:     nil,
-			expected: 0,
-		},
-		{
-			name:     "worktree session partial match",
-			session:  "repo/game_server",
-			hist:     hist,
-			expected: now.Add(-1 * time.Hour).Unix(),
-		},
-	}
+	t.Run("default criteria: status, last_visit_at, alphabetical", func(t *testing.T) {
+		p := panes()
+		lastVisited := map[string]int64{"%1": 100, "%2": 200, "%3": 300}
+		sortDashboardPanes(p, lastVisited, config.DefaultSortCriteria)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := sessionAccessTime(tt.session, tt.hist, nil)
-			if result != tt.expected {
-				t.Errorf("sessionAccessTime(%q) = %d, want %d", tt.session, result, tt.expected)
-			}
-		})
-	}
+		// Status groups: idle(%3)=0, working(%1)=1, needs_attention(%2)=2
+		if p[0].PaneID != "%3" {
+			t.Errorf("pane[0]: expected %%3 (idle), got %s", p[0].PaneID)
+		}
+		if p[1].PaneID != "%1" {
+			t.Errorf("pane[1]: expected %%1 (working), got %s", p[1].PaneID)
+		}
+		if p[2].PaneID != "%2" {
+			t.Errorf("pane[2]: expected %%2 (needs_attention), got %s", p[2].PaneID)
+		}
+	})
+
+	t.Run("last_visit_at only", func(t *testing.T) {
+		p := panes()
+		lastVisited := map[string]int64{"%1": 300, "%2": 100, "%3": 200}
+		sortDashboardPanes(p, lastVisited, []string{config.SortByLastVisitAt})
+
+		// Ascending by visit time: %2(100), %3(200), %1(300)
+		if p[0].PaneID != "%2" {
+			t.Errorf("pane[0]: expected %%2 (oldest visit), got %s", p[0].PaneID)
+		}
+		if p[1].PaneID != "%3" {
+			t.Errorf("pane[1]: expected %%3, got %s", p[1].PaneID)
+		}
+		if p[2].PaneID != "%1" {
+			t.Errorf("pane[2]: expected %%1 (newest visit), got %s", p[2].PaneID)
+		}
+	})
+
+	t.Run("same status, different visit times", func(t *testing.T) {
+		p := []ui.AttentionPane{
+			{PaneID: "%1", Session: "a", Status: ui.AttentionWorking},
+			{PaneID: "%2", Session: "b", Status: ui.AttentionWorking},
+			{PaneID: "%3", Session: "c", Status: ui.AttentionWorking},
+		}
+		lastVisited := map[string]int64{"%1": 300, "%2": 100, "%3": 200}
+		sortDashboardPanes(p, lastVisited, config.DefaultSortCriteria)
+
+		// All same status, so last_visit_at breaks tie: %2(100), %3(200), %1(300)
+		if p[0].PaneID != "%2" {
+			t.Errorf("pane[0]: expected %%2, got %s", p[0].PaneID)
+		}
+		if p[1].PaneID != "%3" {
+			t.Errorf("pane[1]: expected %%3, got %s", p[1].PaneID)
+		}
+		if p[2].PaneID != "%1" {
+			t.Errorf("pane[2]: expected %%1, got %s", p[2].PaneID)
+		}
+	})
+
+	t.Run("alphabetical fallback when no visit data", func(t *testing.T) {
+		p := []ui.AttentionPane{
+			{PaneID: "%1", Session: "gamma", Status: ui.AttentionIdle},
+			{PaneID: "%2", Session: "alpha", Status: ui.AttentionIdle},
+			{PaneID: "%3", Session: "beta", Status: ui.AttentionIdle},
+		}
+		sortDashboardPanes(p, nil, config.DefaultSortCriteria)
+
+		if p[0].Session != "alpha" {
+			t.Errorf("pane[0]: expected alpha, got %s", p[0].Session)
+		}
+		if p[1].Session != "beta" {
+			t.Errorf("pane[1]: expected beta, got %s", p[1].Session)
+		}
+		if p[2].Session != "gamma" {
+			t.Errorf("pane[2]: expected gamma, got %s", p[2].Session)
+		}
+	})
 }

@@ -41,8 +41,19 @@ type PaneMonitoringConfig struct {
 
 // DashboardConfig holds dashboard-specific configuration
 type DashboardConfig struct {
-	CurrentPaneAlwaysUnderCursor bool `toml:"current_pane_always_under_cursor"`
+	CurrentPaneAlwaysUnderCursor bool     `toml:"current_pane_always_under_cursor"`
+	SortCriteria                 []string `toml:"sort_criteria"`
 }
+
+// Valid sort criteria for the dashboard
+const (
+	SortByStatus      = "status"
+	SortByLastVisitAt = "last_visit_at"
+	SortByAlphabetical = "alphabetical"
+)
+
+// DefaultSortCriteria is the default sort order for the dashboard
+var DefaultSortCriteria = []string{SortByStatus, SortByLastVisitAt, SortByAlphabetical}
 
 // WorktreeConfig holds worktree-specific configuration
 type WorktreeConfig struct {
@@ -138,6 +149,15 @@ func (c *Config) CurrentPaneAlwaysUnderCursor() bool {
 		return false
 	}
 	return c.Dashboard.CurrentPaneAlwaysUnderCursor
+}
+
+// DashboardSortCriteria returns the configured sort criteria for the dashboard.
+// Defaults to [status, last_visit_at, alphabetical].
+func (c *Config) DashboardSortCriteria() []string {
+	if c.Dashboard == nil || len(c.Dashboard.SortCriteria) == 0 {
+		return DefaultSortCriteria
+	}
+	return c.Dashboard.SortCriteria
 }
 
 // AttentionNotificationsEnabled returns whether attention notifications are

@@ -3,7 +3,6 @@ package cmd
 import (
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
@@ -37,8 +36,10 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	sortCriteria := cfg.DashboardSortCriteria()
+
 	buildPanes := func() []ui.AttentionPane {
-		return buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession)
+		return buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession, sortCriteria)
 	}
 
 	panes := buildPanes()
@@ -66,10 +67,10 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 }
 
 func buildDashboardPanes() []ui.AttentionPane {
-	return buildDashboardPanesWithCurrentPane("", "")
+	return buildDashboardPanesWithCurrentPane("", "", config.DefaultSortCriteria)
 }
 
-func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string) []ui.AttentionPane {
+func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string, sortCriteria []string) []ui.AttentionPane {
 	state := loadMonitorState()
 	if state == nil {
 		return nil
@@ -81,15 +82,6 @@ func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string
 	}
 
 	paneCommands := tmuxPaneCommands()
-
-	// Load history for sorting needs_attention panes by recency
-	hist, _ := history.Load(history.DefaultHistoryPath())
-	accessTimes := make(map[string]int64)
-	if hist != nil {
-		for _, e := range hist.Entries {
-			accessTimes[e.Path] = e.LastAccess.Unix()
-		}
-	}
 
 	// Build panes with status
 	panes := make([]ui.AttentionPane, 0, len(entries))
@@ -118,37 +110,58 @@ func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string
 		})
 	}
 
-	// Sort: idle first (top/far from cursor), working in the middle,
-	// needs_attention at bottom (closest to cursor).
-	// Within each group: sort by history recency (most recent last = closest to cursor).
-	statusOrder := map[ui.AttentionStatus]int{
-		ui.AttentionIdle:            0,
-		ui.AttentionWorking:         1,
-		ui.AttentionNeedsAttention:  2,
+	// Build per-pane last-visited timestamps from monitor state
+	paneLastVisited := make(map[string]int64)
+	for _, entry := range entries {
+		if !entry.LastVisited.IsZero() {
+			paneLastVisited[entry.PaneID] = entry.LastVisited.Unix()
+		}
 	}
-	sort.Slice(panes, func(i, j int) bool {
-		oi, oj := statusOrder[panes[i].Status], statusOrder[panes[j].Status]
-		if oi != oj {
-			return oi < oj
-		}
-		// Within same status group: sort by history recency (ascending = oldest first)
-		ti := sessionAccessTime(panes[i].Session, hist, accessTimes)
-		tj := sessionAccessTime(panes[j].Session, hist, accessTimes)
-		if ti != tj {
-			return ti < tj
-		}
-		// Fallback: alphabetical by session name, then pane ID for full determinism
-		if panes[i].Session != panes[j].Session {
-			return panes[i].Session < panes[j].Session
-		}
-		return panes[i].PaneID < panes[j].PaneID
-	})
+
+	sortDashboardPanes(panes, paneLastVisited, sortCriteria)
 
 	if currentPaneID != "" {
 		panes = positionCurrentPane(panes, currentPaneID, currentPaneSession, paneCommands)
 	}
 
 	return panes
+}
+
+// sortDashboardPanes sorts panes according to the configured criteria chain.
+// Each criterion is applied in order; the first one that distinguishes two
+// panes wins. All criteria sort ascending (oldest/lowest first), so the
+// most-recent / highest-priority items end up at the bottom (closest to cursor).
+func sortDashboardPanes(panes []ui.AttentionPane, paneLastVisited map[string]int64, criteria []string) {
+	statusOrder := map[ui.AttentionStatus]int{
+		ui.AttentionIdle:           0,
+		ui.AttentionWorking:        1,
+		ui.AttentionNeedsAttention: 2,
+	}
+
+	sort.SliceStable(panes, func(i, j int) bool {
+		for _, c := range criteria {
+			switch c {
+			case config.SortByStatus:
+				oi, oj := statusOrder[panes[i].Status], statusOrder[panes[j].Status]
+				if oi != oj {
+					return oi < oj
+				}
+			case config.SortByLastVisitAt:
+				vi, vj := paneLastVisited[panes[i].PaneID], paneLastVisited[panes[j].PaneID]
+				if vi != vj {
+					return vi < vj
+				}
+			case config.SortByAlphabetical:
+				if panes[i].Session != panes[j].Session {
+					return panes[i].Session < panes[j].Session
+				}
+				if panes[i].PaneID != panes[j].PaneID {
+					return panes[i].PaneID < panes[j].PaneID
+				}
+			}
+		}
+		return false
+	})
 }
 
 // positionCurrentPane ensures the current pane is at the end of the list
@@ -188,39 +201,3 @@ func positionCurrentPane(panes []ui.AttentionPane, currentPaneID, session string
 	})
 }
 
-// sessionAccessTime returns the access timestamp for a session.
-// It matches the session name against history entries by checking if the
-// sanitized base name of a history path matches the session name.
-// For worktree sessions (e.g. "game_server/worktrees-and-stuff"), the base
-// only captures the last component, so we also try matching against the last
-// slash-separated component of the session name as a fallback.
-func sessionAccessTime(session string, hist *history.History, accessTimes map[string]int64) int64 {
-	if hist == nil {
-		return 0
-	}
-	lastComponent := session
-	if i := strings.LastIndex(session, "/"); i >= 0 {
-		lastComponent = session[i+1:]
-	}
-	var partial int64
-	for _, e := range hist.Entries {
-		sanitizedBase := sanitizeSessionName(pathBase(e.Path))
-		if sanitizedBase == session {
-			return e.LastAccess.Unix()
-		}
-		if partial == 0 && sanitizedBase == lastComponent {
-			partial = e.LastAccess.Unix()
-		}
-	}
-	return partial
-}
-
-// pathBase returns the last element of a path, handling the tmux: prefix
-func pathBase(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			return path[i+1:]
-		}
-	}
-	return path
-}
