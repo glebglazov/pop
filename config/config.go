@@ -39,6 +39,11 @@ type PaneMonitoringConfig struct {
 	DismissAttentionInActivePane bool `toml:"dismiss_attention_in_active_pane"`
 }
 
+// DashboardConfig holds dashboard-specific configuration
+type DashboardConfig struct {
+	CurrentPaneAlwaysUnderCursor bool `toml:"current_pane_always_under_cursor"`
+}
+
 // WorktreeConfig holds worktree-specific configuration
 type WorktreeConfig struct {
 	Commands                      []UserDefinedCommand `toml:"commands"`
@@ -78,6 +83,7 @@ type Config struct {
 	Worktree               *WorktreeConfig       `toml:"worktree"`
 	Select                 *SelectConfig         `toml:"select"`
 	PaneMonitoring         *PaneMonitoringConfig `toml:"pane_monitoring"`
+	Dashboard              *DashboardConfig      `toml:"dashboard"`
 
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
 }
@@ -123,6 +129,15 @@ func (c *Config) DismissAttentionInActivePane() bool {
 		return false
 	}
 	return c.PaneMonitoring.DismissAttentionInActivePane
+}
+
+// CurrentPaneAlwaysUnderCursor returns whether the dashboard should place the
+// current tmux pane under the cursor. Defaults to false.
+func (c *Config) CurrentPaneAlwaysUnderCursor() bool {
+	if c.Dashboard == nil {
+		return false
+	}
+	return c.Dashboard.CurrentPaneAlwaysUnderCursor
 }
 
 // AttentionNotificationsEnabled returns whether attention notifications are

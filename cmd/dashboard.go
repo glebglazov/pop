@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/ui"
@@ -23,8 +24,25 @@ func init() {
 }
 
 func runDashboard(cmd *cobra.Command, args []string) error {
-	panes := buildDashboardPanes()
-	result, err := ui.RunAttention("dashboard", panes, attentionCallbacks(), buildDashboardPanes)
+	cfg, _ := config.Load(config.DefaultConfigPath())
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	var currentPaneID, currentPaneSession string
+	if cfg.CurrentPaneAlwaysUnderCursor() {
+		currentPaneID, _ = defaultTmux.Command("display-message", "-p", "#{pane_id}")
+		if currentPaneID != "" {
+			currentPaneSession, _ = tmuxPaneSessionWith(defaultTmux, currentPaneID)
+		}
+	}
+
+	buildPanes := func() []ui.AttentionPane {
+		return buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession)
+	}
+
+	panes := buildPanes()
+	result, err := ui.RunAttention("dashboard", panes, attentionCallbacks(), buildPanes)
 	if err != nil {
 		return err
 	}
@@ -48,13 +66,17 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 }
 
 func buildDashboardPanes() []ui.AttentionPane {
+	return buildDashboardPanesWithCurrentPane("", "")
+}
+
+func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string) []ui.AttentionPane {
 	state := loadMonitorState()
 	if state == nil {
 		return nil
 	}
 
 	entries := state.PanesAll()
-	if len(entries) == 0 {
+	if len(entries) == 0 && currentPaneID == "" {
 		return nil
 	}
 
@@ -122,7 +144,48 @@ func buildDashboardPanes() []ui.AttentionPane {
 		return panes[i].PaneID < panes[j].PaneID
 	})
 
+	if currentPaneID != "" {
+		panes = positionCurrentPane(panes, currentPaneID, currentPaneSession, paneCommands)
+	}
+
 	return panes
+}
+
+// positionCurrentPane ensures the current pane is at the end of the list
+// (under the cursor). If the pane is already in the list, it is moved to the
+// end. If not, it is injected as an idle (unmonitored) entry.
+func positionCurrentPane(panes []ui.AttentionPane, currentPaneID, session string, paneCommands map[string]string) []ui.AttentionPane {
+	idx := -1
+	for i, p := range panes {
+		if p.PaneID == currentPaneID {
+			idx = i
+			break
+		}
+	}
+
+	if idx >= 0 {
+		if idx == len(panes)-1 {
+			return panes
+		}
+		current := panes[idx]
+		result := make([]ui.AttentionPane, 0, len(panes))
+		result = append(result, panes[:idx]...)
+		result = append(result, panes[idx+1:]...)
+		result = append(result, current)
+		return result
+	}
+
+	// Not in list — inject as idle
+	name := session + " " + currentPaneID
+	if cmd, ok := paneCommands[currentPaneID]; ok {
+		name = session + " " + currentPaneID + " (" + cmd + ")"
+	}
+	return append(panes, ui.AttentionPane{
+		PaneID:  currentPaneID,
+		Session: session,
+		Name:    name,
+		Status:  ui.AttentionIdle,
+	})
 }
 
 // sessionAccessTime returns the access timestamp for a session.

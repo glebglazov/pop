@@ -13,3 +13,9 @@ projects = [
     { path = "~/.local/share/chezmoi" },
     { path = "~/Dev/*/*", display_depth = 2 },
 ]
+
+# [dashboard]
+# When true, the pane from which `pop dashboard` was triggered is always placed
+# under the cursor. If the pane is not monitored, it appears as an idle entry
+# without being registered in the monitor state.
+# current_pane_always_under_cursor = false
