@@ -1358,9 +1358,9 @@ func (p *Picker) viewAttention() string {
 	// Hints
 	var hints string
 	if len(p.items) > 0 {
-		hints = "  F view · ← back · Enter switch · C-a attention · C-f follow · C-r read · C-x unmonitor · Esc cancel"
+		hints = "  f view · ← back · Enter switch · C-a attention · C-f follow · C-r read · C-x unmonitor · Esc cancel"
 	} else {
-		hints = "  F view · Enter switch · C-a attention · C-f follow · C-r read · C-x unmonitor · Esc quit"
+		hints = "  f view · Enter switch · C-a attention · C-f follow · C-r read · C-x unmonitor · Esc quit"
 	}
 	b.WriteString(hintStyle.Render(hints))
 
@@ -1612,7 +1612,7 @@ var keys = keyMap{
 		key.WithKeys("ctrl+f"),
 	),
 	ToggleFollowView: key.NewBinding(
-		key.WithKeys("F"),
+		key.WithKeys("f"),
 	),
 	Back: key.NewBinding(
 		key.WithKeys("left"),
