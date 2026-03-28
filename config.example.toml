@@ -14,6 +14,44 @@ projects = [
     { path = "~/Dev/*/*", display_depth = 2 },
 ]
 
+# Global custom keybindings for the picker
+# Section-specific commands ([select] or [worktree]) override global ones matched by key
+# commands = [
+#     { key = "ctrl-l", label = "logs", command = "tail -f app.log", exit = false },
+# ]
+
+# Exclude the current tmux session from the picker
+# exclude_current_session = false
+
+# How to disambiguate projects with the same display name
+# Options: "first_unique_segment" (default), "full_path"
+# disambiguation_strategy = "first_unique_segment"
+
+# Modifier key for quick-access number shortcuts (1-9) in the picker
+# Options: "alt" (default), "ctrl", "disabled"
+# quick_access_modifier = "alt"
+
+# [select]
+# Select-specific custom keybindings (override global commands matched by key)
+# commands = [
+#     { key = "ctrl-l", label = "logs", command = "tail -f app.log", exit = false },
+# ]
+# Show desktop notifications when a pane needs attention while in select view
+# attention_notifications_enabled = false
+
+# [worktree]
+# Worktree-specific custom keybindings (override global commands matched by key)
+# commands = [
+#     { key = "ctrl-l", label = "logs", command = "tail -f app.log", exit = false },
+# ]
+# Show desktop notifications when a pane needs attention while in worktree view
+# attention_notifications_enabled = false
+
+# [pane_monitoring]
+# Automatically downgrade needs_attention to read when the pane is currently
+# active (visible and focused). Useful if you're already watching the output.
+# dismiss_attention_in_active_pane = false
+
 # [dashboard]
 # When true, the pane from which `pop dashboard` was triggered is always placed
 # under the cursor. If the pane is not monitored, it appears as an idle entry
