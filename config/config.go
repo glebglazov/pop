@@ -47,13 +47,14 @@ type DashboardConfig struct {
 
 // Valid sort criteria for the dashboard
 const (
-	SortByStatus      = "status"
-	SortByLastVisitAt = "last_visit_at"
-	SortByAlphabetical = "alphabetical"
+	SortByStatus              = "status"
+	SortByPaneLastVisitAt     = "pane_last_visit_at"
+	SortBySessionLastVisitAt  = "session_last_visit_at"
+	SortByAlphabetical        = "alphabetical"
 )
 
 // DefaultSortCriteria is the default sort order for the dashboard
-var DefaultSortCriteria = []string{SortByStatus, SortByLastVisitAt, SortByAlphabetical}
+var DefaultSortCriteria = []string{SortByStatus, SortByPaneLastVisitAt, SortByAlphabetical}
 
 // WorktreeConfig holds worktree-specific configuration
 type WorktreeConfig struct {
@@ -152,7 +153,7 @@ func (c *Config) CurrentPaneAlwaysUnderCursor() bool {
 }
 
 // DashboardSortCriteria returns the configured sort criteria for the dashboard.
-// Defaults to [status, last_visit_at, alphabetical].
+// Defaults to [status, pane_last_visit_at, alphabetical].
 func (c *Config) DashboardSortCriteria() []string {
 	if c.Dashboard == nil || len(c.Dashboard.SortCriteria) == 0 {
 		return DefaultSortCriteria

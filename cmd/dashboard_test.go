@@ -127,10 +127,10 @@ func TestSortDashboardPanes(t *testing.T) {
 		}
 	}
 
-	t.Run("default criteria: status, last_visit_at, alphabetical", func(t *testing.T) {
+	t.Run("default criteria: status, pane_last_visit_at, alphabetical", func(t *testing.T) {
 		p := panes()
 		lastVisited := map[string]int64{"%1": 100, "%2": 200, "%3": 300}
-		sortDashboardPanes(p, lastVisited, config.DefaultSortCriteria)
+		sortDashboardPanes(p, lastVisited, nil, config.DefaultSortCriteria)
 
 		// Status groups: idle(%3)=0, working(%1)=1, needs_attention(%2)=2
 		if p[0].PaneID != "%3" {
@@ -144,10 +144,10 @@ func TestSortDashboardPanes(t *testing.T) {
 		}
 	})
 
-	t.Run("last_visit_at only", func(t *testing.T) {
+	t.Run("pane_last_visit_at only", func(t *testing.T) {
 		p := panes()
 		lastVisited := map[string]int64{"%1": 300, "%2": 100, "%3": 200}
-		sortDashboardPanes(p, lastVisited, []string{config.SortByLastVisitAt})
+		sortDashboardPanes(p, lastVisited, nil, []string{config.SortByPaneLastVisitAt})
 
 		// Ascending by visit time: %2(100), %3(200), %1(300)
 		if p[0].PaneID != "%2" {
@@ -161,16 +161,33 @@ func TestSortDashboardPanes(t *testing.T) {
 		}
 	})
 
-	t.Run("same status, different visit times", func(t *testing.T) {
+	t.Run("session_last_visit_at only", func(t *testing.T) {
+		p := panes()
+		sessionActivity := map[string]int64{"alpha": 300, "beta": 100, "gamma": 200}
+		sortDashboardPanes(p, nil, sessionActivity, []string{config.SortBySessionLastVisitAt})
+
+		// Ascending by session activity: beta(100), gamma(200), alpha(300)
+		if p[0].Session != "beta" {
+			t.Errorf("pane[0]: expected beta (oldest), got %s", p[0].Session)
+		}
+		if p[1].Session != "gamma" {
+			t.Errorf("pane[1]: expected gamma, got %s", p[1].Session)
+		}
+		if p[2].Session != "alpha" {
+			t.Errorf("pane[2]: expected alpha (newest), got %s", p[2].Session)
+		}
+	})
+
+	t.Run("same status, different pane visit times", func(t *testing.T) {
 		p := []ui.AttentionPane{
 			{PaneID: "%1", Session: "a", Status: ui.AttentionWorking},
 			{PaneID: "%2", Session: "b", Status: ui.AttentionWorking},
 			{PaneID: "%3", Session: "c", Status: ui.AttentionWorking},
 		}
 		lastVisited := map[string]int64{"%1": 300, "%2": 100, "%3": 200}
-		sortDashboardPanes(p, lastVisited, config.DefaultSortCriteria)
+		sortDashboardPanes(p, lastVisited, nil, config.DefaultSortCriteria)
 
-		// All same status, so last_visit_at breaks tie: %2(100), %3(200), %1(300)
+		// All same status, so pane_last_visit_at breaks tie: %2(100), %3(200), %1(300)
 		if p[0].PaneID != "%2" {
 			t.Errorf("pane[0]: expected %%2, got %s", p[0].PaneID)
 		}
@@ -188,7 +205,7 @@ func TestSortDashboardPanes(t *testing.T) {
 			{PaneID: "%2", Session: "alpha", Status: ui.AttentionIdle},
 			{PaneID: "%3", Session: "beta", Status: ui.AttentionIdle},
 		}
-		sortDashboardPanes(p, nil, config.DefaultSortCriteria)
+		sortDashboardPanes(p, nil, nil, config.DefaultSortCriteria)
 
 		if p[0].Session != "alpha" {
 			t.Errorf("pane[0]: expected alpha, got %s", p[0].Session)

@@ -21,5 +21,6 @@ projects = [
 # current_pane_always_under_cursor = false
 #
 # Sort criteria chain. Each criterion is applied in order; the first that
-# distinguishes two panes wins. Available: "status", "last_visit_at", "alphabetical"
-# sort_criteria = ["status", "last_visit_at", "alphabetical"]
+# distinguishes two panes wins. Available: "status", "pane_last_visit_at",
+# "session_last_visit_at", "alphabetical"
+# sort_criteria = ["status", "pane_last_visit_at", "alphabetical"]
