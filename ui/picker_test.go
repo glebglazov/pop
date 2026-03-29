@@ -1176,3 +1176,729 @@ func TestRebuildAttentionViewPreservesCursor(t *testing.T) {
 		}
 	})
 }
+
+func TestTruncateString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxWidth int
+		expected string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			maxWidth: 10,
+			expected: "",
+		},
+		{
+			name:     "zero width",
+			input:    "hello",
+			maxWidth: 0,
+			expected: "",
+		},
+		{
+			name:     "negative width",
+			input:    "hello",
+			maxWidth: -1,
+			expected: "",
+		},
+		{
+			name:     "string within width",
+			input:    "hello",
+			maxWidth: 10,
+			expected: "hello",
+		},
+		{
+			name:     "string at exact width",
+			input:    "hello",
+			maxWidth: 5,
+			expected: "hello",
+		},
+		{
+			name:     "string exceeds width",
+			input:    "hello world",
+			maxWidth: 5,
+			expected: "hello",
+		},
+		{
+			name:     "ANSI escape not counted toward width",
+			input:    "\x1b[31mhello\x1b[0m",
+			maxWidth: 5,
+			expected: "\x1b[31mhello\x1b[0m",
+		},
+		{
+			name:     "ANSI escape with truncation",
+			input:    "\x1b[31mhello world\x1b[0m",
+			maxWidth: 5,
+			expected: "\x1b[31mhello",
+		},
+		{
+			name:     "multiple ANSI escapes",
+			input:    "\x1b[1m\x1b[31mhi\x1b[0m",
+			maxWidth: 2,
+			expected: "\x1b[1m\x1b[31mhi\x1b[0m",
+		},
+		{
+			name:     "width of 1",
+			input:    "abc",
+			maxWidth: 1,
+			expected: "a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncateString(tt.input, tt.maxWidth)
+			if result != tt.expected {
+				t.Errorf("truncateString(%q, %d) = %q, want %q", tt.input, tt.maxWidth, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestAttentionStatusOrder(t *testing.T) {
+	// Verify the sort contract: idle < working < needs_attention
+	idle := attentionStatusOrder(AttentionIdle)
+	working := attentionStatusOrder(AttentionWorking)
+	attention := attentionStatusOrder(AttentionNeedsAttention)
+
+	if idle >= working {
+		t.Errorf("idle (%d) should be less than working (%d)", idle, working)
+	}
+	if working >= attention {
+		t.Errorf("working (%d) should be less than attention (%d)", working, attention)
+	}
+}
+
+func TestSortAttentionPanes(t *testing.T) {
+	panes := []AttentionPane{
+		{PaneID: "%1", Status: AttentionNeedsAttention},
+		{PaneID: "%2", Status: AttentionIdle},
+		{PaneID: "%3", Status: AttentionWorking},
+		{PaneID: "%4", Status: AttentionIdle},
+	}
+	p := NewPicker(nil, WithAttentionPanes(panes, AttentionCallbacks{}))
+	p.sortAttentionPanes()
+
+	// Expected order: idle, idle, working, needs_attention
+	expectedIDs := []string{"%2", "%4", "%3", "%1"}
+	for i, want := range expectedIDs {
+		if p.attentionPanes[i].PaneID != want {
+			t.Errorf("attentionPanes[%d].PaneID = %s, want %s", i, p.attentionPanes[i].PaneID, want)
+		}
+	}
+	// attentionAllPanes should also be sorted
+	for i, want := range expectedIDs {
+		if p.attentionAllPanes[i].PaneID != want {
+			t.Errorf("attentionAllPanes[%d].PaneID = %s, want %s", i, p.attentionAllPanes[i].PaneID, want)
+		}
+	}
+}
+
+func TestUpdateAllPanesStatus(t *testing.T) {
+	panes := []AttentionPane{
+		{PaneID: "%1", Status: AttentionIdle},
+		{PaneID: "%2", Status: AttentionWorking},
+	}
+	p := NewPicker(nil, WithAttentionPanes(panes, AttentionCallbacks{}))
+
+	p.updateAllPanesStatus("%1", AttentionNeedsAttention)
+	if p.attentionAllPanes[0].Status != AttentionNeedsAttention {
+		t.Errorf("status = %d, want AttentionNeedsAttention", p.attentionAllPanes[0].Status)
+	}
+	// %2 should be unchanged
+	if p.attentionAllPanes[1].Status != AttentionWorking {
+		t.Errorf("status = %d, want AttentionWorking", p.attentionAllPanes[1].Status)
+	}
+
+	// Non-existent pane ID should be a no-op
+	p.updateAllPanesStatus("%99", AttentionIdle)
+	if p.attentionAllPanes[0].Status != AttentionNeedsAttention {
+		t.Errorf("status changed for non-matching pane")
+	}
+}
+
+// helper to create a picker in attention mode with test panes
+func newAttentionPicker(panes []AttentionPane, cb AttentionCallbacks, items []Item) *Picker {
+	p := NewPicker(items, WithAttentionPanes(panes, cb))
+	p.attentionMode = true
+	p.attentionCursor = 0
+	p.width = 80
+	p.height = 24
+	return p
+}
+
+func TestUpdateAttention_Back(t *testing.T) {
+	panes := []AttentionPane{
+		{PaneID: "%1", Session: "s1", Name: "p1"},
+	}
+
+	t.Run("back with items exits attention mode", func(t *testing.T) {
+		items := []Item{{Name: "proj", Path: "/proj"}}
+		p := newAttentionPicker(panes, AttentionCallbacks{}, items)
+		msg := tea.KeyPressMsg{Code: tea.KeyLeft}
+
+		_, cmd := p.Update(msg)
+		if cmd != nil {
+			t.Error("expected nil cmd")
+		}
+		if p.attentionMode {
+			t.Error("expected attentionMode = false")
+		}
+	})
+
+	t.Run("back with no items quits with cancel", func(t *testing.T) {
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		msg := tea.KeyPressMsg{Code: tea.KeyLeft}
+
+		_, cmd := p.Update(msg)
+		if cmd == nil {
+			t.Fatal("expected quit cmd")
+		}
+		if p.result.Action != ActionCancel {
+			t.Errorf("action = %d, want ActionCancel", p.result.Action)
+		}
+	})
+
+	t.Run("back with dirty state quits with refresh", func(t *testing.T) {
+		items := []Item{{Name: "proj", Path: "/proj"}}
+		p := newAttentionPicker(panes, AttentionCallbacks{}, items)
+		p.attentionDirty = true
+		msg := tea.KeyPressMsg{Code: tea.KeyLeft}
+
+		_, cmd := p.Update(msg)
+		if cmd == nil {
+			t.Fatal("expected quit cmd")
+		}
+		if p.result.Action != ActionRefresh {
+			t.Errorf("action = %d, want ActionRefresh", p.result.Action)
+		}
+	})
+}
+
+func TestUpdateAttention_Quit(t *testing.T) {
+	panes := []AttentionPane{
+		{PaneID: "%1", Session: "s1", Name: "p1"},
+	}
+
+	t.Run("esc with items goes back to normal", func(t *testing.T) {
+		items := []Item{{Name: "proj", Path: "/proj"}}
+		p := newAttentionPicker(panes, AttentionCallbacks{}, items)
+		msg := tea.KeyPressMsg{Code: 0x1b} // esc
+
+		_, cmd := p.Update(msg)
+		if cmd != nil {
+			t.Error("expected nil cmd")
+		}
+		if p.attentionMode {
+			t.Error("expected attentionMode = false")
+		}
+	})
+
+	t.Run("ctrl+c always quits", func(t *testing.T) {
+		items := []Item{{Name: "proj", Path: "/proj"}}
+		p := newAttentionPicker(panes, AttentionCallbacks{}, items)
+		msg := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+
+		_, cmd := p.Update(msg)
+		if cmd == nil {
+			t.Fatal("expected quit cmd")
+		}
+		if p.result.Action != ActionCancel {
+			t.Errorf("action = %d, want ActionCancel", p.result.Action)
+		}
+	})
+
+	t.Run("esc in standalone mode quits", func(t *testing.T) {
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		msg := tea.KeyPressMsg{Code: 0x1b} // esc
+
+		_, cmd := p.Update(msg)
+		if cmd == nil {
+			t.Fatal("expected quit cmd")
+		}
+		if p.result.Action != ActionCancel {
+			t.Errorf("action = %d, want ActionCancel", p.result.Action)
+		}
+	})
+}
+
+func TestUpdateAttention_Enter(t *testing.T) {
+	t.Run("enter selects current pane", func(t *testing.T) {
+		panes := []AttentionPane{
+			{PaneID: "%1", Session: "s1", Name: "p1"},
+			{PaneID: "%2", Session: "s2", Name: "p2"},
+		}
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		p.attentionCursor = 1
+		msg := tea.KeyPressMsg{Code: tea.KeyEnter}
+
+		_, cmd := p.Update(msg)
+		if cmd == nil {
+			t.Fatal("expected quit cmd")
+		}
+		if p.result.Action != ActionSwitchToPane {
+			t.Errorf("action = %d, want ActionSwitchToPane", p.result.Action)
+		}
+		if p.result.Selected.Path != "%2" {
+			t.Errorf("selected path = %s, want %%2", p.result.Selected.Path)
+		}
+		if p.result.Selected.Context != "s2" {
+			t.Errorf("selected context = %s, want s2", p.result.Selected.Context)
+		}
+	})
+
+	t.Run("enter with no panes cancels", func(t *testing.T) {
+		p := newAttentionPicker(nil, AttentionCallbacks{}, nil)
+		p.attentionPanes = nil
+		msg := tea.KeyPressMsg{Code: tea.KeyEnter}
+
+		_, cmd := p.Update(msg)
+		if cmd == nil {
+			t.Fatal("expected quit cmd")
+		}
+		if p.result.Action != ActionCancel {
+			t.Errorf("action = %d, want ActionCancel", p.result.Action)
+		}
+	})
+}
+
+func TestUpdateAttention_Navigation(t *testing.T) {
+	panes := []AttentionPane{
+		{PaneID: "%1", Session: "s1", Name: "p1"},
+		{PaneID: "%2", Session: "s2", Name: "p2"},
+		{PaneID: "%3", Session: "s3", Name: "p3"},
+	}
+
+	t.Run("up moves cursor up", func(t *testing.T) {
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		p.attentionCursor = 2
+		msg := tea.KeyPressMsg{Code: tea.KeyUp}
+		p.Update(msg)
+		if p.attentionCursor != 1 {
+			t.Errorf("cursor = %d, want 1", p.attentionCursor)
+		}
+	})
+
+	t.Run("up wraps around to end", func(t *testing.T) {
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		p.attentionCursor = 0
+		msg := tea.KeyPressMsg{Code: tea.KeyUp}
+		p.Update(msg)
+		if p.attentionCursor != 2 {
+			t.Errorf("cursor = %d, want 2", p.attentionCursor)
+		}
+	})
+
+	t.Run("down moves cursor down", func(t *testing.T) {
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		p.attentionCursor = 0
+		msg := tea.KeyPressMsg{Code: tea.KeyDown}
+		p.Update(msg)
+		if p.attentionCursor != 1 {
+			t.Errorf("cursor = %d, want 1", p.attentionCursor)
+		}
+	})
+
+	t.Run("down wraps around to start", func(t *testing.T) {
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		p.attentionCursor = 2
+		msg := tea.KeyPressMsg{Code: tea.KeyDown}
+		p.Update(msg)
+		if p.attentionCursor != 0 {
+			t.Errorf("cursor = %d, want 0", p.attentionCursor)
+		}
+	})
+}
+
+func TestUpdateAttention_Reset(t *testing.T) {
+	var readPaneID string
+	panes := []AttentionPane{
+		{PaneID: "%1", Status: AttentionNeedsAttention},
+		{PaneID: "%2", Status: AttentionWorking},
+	}
+	cb := AttentionCallbacks{
+		MarkRead: func(paneID string) { readPaneID = paneID },
+	}
+	p := newAttentionPicker(panes, cb, nil)
+	p.attentionCursor = 0
+	msg := tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
+	p.Update(msg)
+
+	if readPaneID != "%1" {
+		t.Errorf("markReadFunc called with %s, want %%1", readPaneID)
+	}
+	if p.attentionPanes[0].Status == AttentionNeedsAttention {
+		t.Error("expected pane status to change from NeedsAttention")
+	}
+	if !p.attentionDirty {
+		t.Error("expected attentionDirty = true")
+	}
+}
+
+func TestUpdateAttention_MarkAttention(t *testing.T) {
+	var markedPaneID string
+	panes := []AttentionPane{
+		{PaneID: "%1", Status: AttentionIdle},
+	}
+	cb := AttentionCallbacks{
+		MarkAttention: func(paneID string) { markedPaneID = paneID },
+	}
+	p := newAttentionPicker(panes, cb, nil)
+	msg := tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}
+	p.Update(msg)
+
+	if markedPaneID != "%1" {
+		t.Errorf("markAttentionFunc called with %s, want %%1", markedPaneID)
+	}
+	if p.attentionPanes[0].Status != AttentionNeedsAttention {
+		t.Errorf("status = %d, want AttentionNeedsAttention", p.attentionPanes[0].Status)
+	}
+	if !p.attentionDirty {
+		t.Error("expected attentionDirty = true")
+	}
+}
+
+func TestUpdateAttention_FollowPane(t *testing.T) {
+	var toggledPaneID string
+	panes := []AttentionPane{
+		{PaneID: "%1", Following: false},
+	}
+	cb := AttentionCallbacks{
+		ToggleFollow: func(paneID string) { toggledPaneID = paneID },
+	}
+
+	t.Run("toggle follow on", func(t *testing.T) {
+		p := newAttentionPicker(panes, cb, nil)
+		msg := tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+		p.Update(msg)
+
+		if toggledPaneID != "%1" {
+			t.Errorf("toggleFollowFunc called with %s, want %%1", toggledPaneID)
+		}
+		if !p.attentionPanes[0].Following {
+			t.Error("expected Following = true")
+		}
+		if !p.attentionAllPanes[0].Following {
+			t.Error("expected allPanes Following = true")
+		}
+		if !p.attentionDirty {
+			t.Error("expected attentionDirty = true")
+		}
+	})
+
+	t.Run("unfollow in following view rebuilds", func(t *testing.T) {
+		followPanes := []AttentionPane{
+			{PaneID: "%1", Following: true},
+			{PaneID: "%2", Following: true},
+		}
+		p := newAttentionPicker(followPanes, cb, nil)
+		p.attentionFollowing = true
+		p.rebuildAttentionView()
+		p.attentionCursor = 0
+
+		msg := tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+		p.Update(msg)
+
+		// %1 was unfollowed; in following view it should be removed
+		if len(p.attentionPanes) != 1 {
+			t.Errorf("attentionPanes len = %d, want 1", len(p.attentionPanes))
+		}
+	})
+
+	t.Run("unfollow clears note", func(t *testing.T) {
+		var clearedNote string
+		notePanes := []AttentionPane{
+			{PaneID: "%1", Following: true, Note: "test note"},
+		}
+		noteCb := AttentionCallbacks{
+			ToggleFollow: func(paneID string) {},
+			SetNote:      func(paneID, note string) { clearedNote = note },
+		}
+		p := newAttentionPicker(notePanes, noteCb, nil)
+		msg := tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+		p.Update(msg)
+
+		if p.attentionPanes[0].Note != "" {
+			t.Errorf("note = %q, want empty", p.attentionPanes[0].Note)
+		}
+		if clearedNote != "" {
+			t.Errorf("setNoteFunc called with %q, want empty", clearedNote)
+		}
+	})
+}
+
+func TestUpdateAttention_ToggleFollowView(t *testing.T) {
+	panes := []AttentionPane{
+		{PaneID: "%1", Following: true},
+		{PaneID: "%2", Following: false},
+	}
+	p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+
+	// Toggle to following view
+	msg := tea.KeyPressMsg{Code: 'f', Text: "f"}
+	p.Update(msg)
+
+	if !p.attentionFollowing {
+		t.Error("expected attentionFollowing = true")
+	}
+	// Only followed panes should be visible
+	if len(p.attentionPanes) != 1 {
+		t.Errorf("attentionPanes len = %d, want 1", len(p.attentionPanes))
+	}
+
+	// Toggle back
+	p.Update(msg)
+	if p.attentionFollowing {
+		t.Error("expected attentionFollowing = false")
+	}
+	if len(p.attentionPanes) != 2 {
+		t.Errorf("attentionPanes len = %d, want 2", len(p.attentionPanes))
+	}
+}
+
+func TestUpdateAttention_ForceDelete(t *testing.T) {
+	var unmonitoredID string
+	panes := []AttentionPane{
+		{PaneID: "%1", Session: "s1"},
+		{PaneID: "%2", Session: "s2"},
+		{PaneID: "%3", Session: "s3"},
+	}
+	cb := AttentionCallbacks{
+		Unmonitor: func(paneID string) { unmonitoredID = paneID },
+	}
+
+	t.Run("delete removes pane and stays in view", func(t *testing.T) {
+		p := newAttentionPicker(panes, cb, nil)
+		p.attentionCursor = 1
+		msg := tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}
+		_, cmd := p.Update(msg)
+
+		if cmd != nil {
+			t.Error("expected nil cmd (not quit)")
+		}
+		if unmonitoredID != "%2" {
+			t.Errorf("unmonitorFunc called with %s, want %%2", unmonitoredID)
+		}
+		if len(p.attentionPanes) != 2 {
+			t.Errorf("attentionPanes len = %d, want 2", len(p.attentionPanes))
+		}
+		if len(p.attentionAllPanes) != 2 {
+			t.Errorf("attentionAllPanes len = %d, want 2", len(p.attentionAllPanes))
+		}
+	})
+
+	t.Run("delete last pane with items quits with refresh", func(t *testing.T) {
+		singlePane := []AttentionPane{{PaneID: "%1"}}
+		items := []Item{{Name: "proj", Path: "/proj"}}
+		p := newAttentionPicker(singlePane, cb, items)
+		msg := tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}
+		_, cmd := p.Update(msg)
+
+		if cmd == nil {
+			t.Fatal("expected quit cmd")
+		}
+		if p.result.Action != ActionRefresh {
+			t.Errorf("action = %d, want ActionRefresh", p.result.Action)
+		}
+	})
+
+	t.Run("delete last pane standalone quits with cancel", func(t *testing.T) {
+		singlePane := []AttentionPane{{PaneID: "%1"}}
+		p := newAttentionPicker(singlePane, cb, nil)
+		msg := tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}
+		_, cmd := p.Update(msg)
+
+		if cmd == nil {
+			t.Fatal("expected quit cmd")
+		}
+		if p.result.Action != ActionCancel {
+			t.Errorf("action = %d, want ActionCancel", p.result.Action)
+		}
+	})
+}
+
+func TestUpdateAttention_Reload(t *testing.T) {
+	reloadCalled := false
+	newPanes := []AttentionPane{
+		{PaneID: "%10", Session: "new"},
+	}
+	cb := AttentionCallbacks{}
+
+	t.Run("reload when empty and reloadFunc set", func(t *testing.T) {
+		p := newAttentionPicker(nil, cb, nil)
+		p.attentionPanes = nil
+		p.attentionAllPanes = nil
+		p.reloadFunc = func() []AttentionPane {
+			reloadCalled = true
+			return newPanes
+		}
+
+		msg := tea.KeyPressMsg{Code: 'r', Text: "r"}
+		p.Update(msg)
+
+		if !reloadCalled {
+			t.Error("expected reloadFunc to be called")
+		}
+		if len(p.attentionPanes) != 1 {
+			t.Errorf("attentionPanes len = %d, want 1", len(p.attentionPanes))
+		}
+	})
+
+	t.Run("reload does nothing when panes exist", func(t *testing.T) {
+		reloadCalled = false
+		existingPanes := []AttentionPane{{PaneID: "%1"}}
+		p := newAttentionPicker(existingPanes, cb, nil)
+		p.reloadFunc = func() []AttentionPane {
+			reloadCalled = true
+			return newPanes
+		}
+
+		msg := tea.KeyPressMsg{Code: 'r', Text: "r"}
+		p.Update(msg)
+
+		if reloadCalled {
+			t.Error("reloadFunc should not be called when panes exist")
+		}
+	})
+}
+
+func TestUpdateAttention_EditNote(t *testing.T) {
+	panes := []AttentionPane{
+		{PaneID: "%1", Note: "old note"},
+	}
+	cb := AttentionCallbacks{
+		SetNote: func(paneID, note string) {},
+	}
+	p := newAttentionPicker(panes, cb, nil)
+
+	// Press N to enter edit mode
+	msg := tea.KeyPressMsg{Code: 'N', Text: "N"}
+	p.Update(msg)
+
+	if !p.editingNote {
+		t.Error("expected editingNote = true")
+	}
+
+	// Esc exits edit mode
+	escMsg := tea.KeyPressMsg{Code: 0x1b}
+	p.Update(escMsg)
+
+	if p.editingNote {
+		t.Error("expected editingNote = false after esc")
+	}
+}
+
+func TestUpdateAttention_EditNoteSave(t *testing.T) {
+	var savedPaneID, savedNote string
+	var followToggled bool
+	panes := []AttentionPane{
+		{PaneID: "%1", Following: false, Note: ""},
+	}
+	cb := AttentionCallbacks{
+		SetNote:      func(paneID, note string) { savedPaneID = paneID; savedNote = note },
+		ToggleFollow: func(paneID string) { followToggled = true },
+	}
+	p := newAttentionPicker(panes, cb, nil)
+
+	// Enter edit mode
+	p.Update(tea.KeyPressMsg{Code: 'N', Text: "N"})
+	// Type some text
+	p.noteInput.SetValue("my note")
+	// Press enter to save
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if p.editingNote {
+		t.Error("expected editingNote = false after save")
+	}
+	if savedPaneID != "%1" {
+		t.Errorf("saved pane = %s, want %%1", savedPaneID)
+	}
+	if savedNote != "my note" {
+		t.Errorf("saved note = %q, want %q", savedNote, "my note")
+	}
+	if !followToggled {
+		t.Error("expected auto-follow on note save")
+	}
+	if !p.attentionDirty {
+		t.Error("expected attentionDirty = true")
+	}
+}
+
+func TestReloadAttentionPanes(t *testing.T) {
+	t.Run("preserves cursor on same pane", func(t *testing.T) {
+		panes := []AttentionPane{
+			{PaneID: "%1", Session: "s1"},
+			{PaneID: "%2", Session: "s2"},
+			{PaneID: "%3", Session: "s3"},
+		}
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		p.attentionCursor = 1 // on %2
+
+		p.reloadFunc = func() []AttentionPane {
+			return []AttentionPane{
+				{PaneID: "%3", Session: "s3"},
+				{PaneID: "%1", Session: "s1"},
+				{PaneID: "%2", Session: "s2"},
+			}
+		}
+		p.reloadAttentionPanes()
+
+		if p.attentionPanes[p.attentionCursor].PaneID != "%2" {
+			t.Errorf("cursor on %s, want %%2", p.attentionPanes[p.attentionCursor].PaneID)
+		}
+	})
+
+	t.Run("cursor moves to last when pane removed", func(t *testing.T) {
+		panes := []AttentionPane{
+			{PaneID: "%1", Session: "s1"},
+			{PaneID: "%2", Session: "s2"},
+		}
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		p.attentionCursor = 1 // on %2
+
+		p.reloadFunc = func() []AttentionPane {
+			return []AttentionPane{
+				{PaneID: "%1", Session: "s1"},
+				{PaneID: "%3", Session: "s3"},
+			}
+		}
+		p.reloadAttentionPanes()
+
+		// %2 gone, cursor should go to last (index 1)
+		if p.attentionCursor != 1 {
+			t.Errorf("cursor = %d, want 1", p.attentionCursor)
+		}
+	})
+
+	t.Run("cursor is 0 when reloaded list is empty", func(t *testing.T) {
+		panes := []AttentionPane{
+			{PaneID: "%1", Session: "s1"},
+		}
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		p.attentionCursor = 0
+
+		p.reloadFunc = func() []AttentionPane {
+			return nil
+		}
+		p.reloadAttentionPanes()
+
+		if p.attentionCursor != 0 {
+			t.Errorf("cursor = %d, want 0", p.attentionCursor)
+		}
+	})
+
+	t.Run("no-op when reloadFunc is nil", func(t *testing.T) {
+		panes := []AttentionPane{
+			{PaneID: "%1", Session: "s1"},
+		}
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		p.reloadFunc = nil
+		p.attentionCursor = 0
+
+		p.reloadAttentionPanes() // should not panic
+		if len(p.attentionPanes) != 1 {
+			t.Errorf("panes changed unexpectedly: len = %d", len(p.attentionPanes))
+		}
+	})
+}

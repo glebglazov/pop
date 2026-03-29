@@ -220,6 +220,149 @@ func loadState(t *testing.T, path string) *monitor.State {
 	return state
 }
 
+func TestRunPaneCreateWith(t *testing.T) {
+	// Save and restore paneProject (used by resolveSessionWith)
+	oldProject := paneProject
+	defer func() { paneProject = oldProject }()
+	paneProject = "/home/user/project"
+
+	t.Run("returns existing alive pane", func(t *testing.T) {
+		var cmds []string
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				cmds = append(cmds, args[0])
+				switch args[0] {
+				case "has-session":
+					return "", nil
+				case "list-panes":
+					return "mypane|%5", nil
+				case "display-message":
+					return "0", nil // not dead
+				}
+				return "", nil
+			},
+		}
+
+		err := runPaneCreateWith(tmux, "mypane", "echo hi")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Should NOT have created a window or split
+		for _, c := range cmds {
+			if c == "new-window" || c == "split-window" {
+				t.Errorf("should not call %s for alive pane", c)
+			}
+		}
+	})
+
+	t.Run("kills dead pane and recreates with new-window", func(t *testing.T) {
+		var killed, created bool
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "has-session":
+					return "", nil
+				case "list-panes":
+					if killed {
+						return "", fmt.Errorf("no agent window")
+					}
+					return "mypane|%5", nil
+				case "display-message":
+					return "1", nil // dead pane
+				case "kill-pane":
+					killed = true
+					return "", nil
+				case "list-windows":
+					return "main", nil // no agent window
+				case "new-window":
+					created = true
+					return "%10", nil
+				case "select-pane":
+					return "", nil
+				}
+				return "", nil
+			},
+		}
+
+		err := runPaneCreateWith(tmux, "mypane", "echo hi")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !killed {
+			t.Error("expected dead pane to be killed")
+		}
+		if !created {
+			t.Error("expected new-window to be called")
+		}
+	})
+
+	t.Run("uses split-window when agent window exists", func(t *testing.T) {
+		var splitCalled, tiledCalled bool
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "has-session":
+					return "", nil
+				case "list-panes":
+					return "", fmt.Errorf("no agent window") // pane not found
+				case "list-windows":
+					return "main\nagent", nil // agent window exists
+				case "split-window":
+					splitCalled = true
+					return "%10", nil
+				case "select-layout":
+					tiledCalled = true
+					return "", nil
+				case "select-pane":
+					return "", nil
+				}
+				return "", nil
+			},
+		}
+
+		err := runPaneCreateWith(tmux, "mypane", "echo hi")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !splitCalled {
+			t.Error("expected split-window to be called")
+		}
+		if !tiledCalled {
+			t.Error("expected select-layout tiled to be called")
+		}
+	})
+
+	t.Run("uses new-window when no agent window", func(t *testing.T) {
+		var newWindowCalled bool
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "has-session":
+					return "", nil
+				case "list-panes":
+					return "", fmt.Errorf("no pane") // not found
+				case "list-windows":
+					return "main", nil // no agent window
+				case "new-window":
+					newWindowCalled = true
+					return "%10", nil
+				case "select-pane":
+					return "", nil
+				}
+				return "", nil
+			},
+		}
+
+		err := runPaneCreateWith(tmux, "mypane", "echo hi")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !newWindowCalled {
+			t.Error("expected new-window to be called")
+		}
+	})
+}
+
 func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
 	activeTmux := &deps.MockTmux{
 		CommandFunc: func(args ...string) (string, error) {

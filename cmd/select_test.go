@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/history"
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -506,6 +507,100 @@ func TestSortBaseItemsByHistory(t *testing.T) {
 		// ccc should be first (no history)
 		if result[0].Path != "/ccc" {
 			t.Errorf("result[0].Path = %q, want /ccc", result[0].Path)
+		}
+	})
+}
+
+func TestOpenTmuxWindowWith(t *testing.T) {
+	t.Run("selects existing window", func(t *testing.T) {
+		var selectedWindow string
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "display-message":
+					return "mysession", nil
+				case "list-windows":
+					return "main\nmyproject\nlogs", nil
+				case "select-window":
+					selectedWindow = args[2]
+					return "", nil
+				}
+				return "", nil
+			},
+		}
+
+		item := &ui.Item{Name: "myproject", Path: "/home/user/myproject"}
+		err := openTmuxWindowWith(tmux, item)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if selectedWindow != "mysession:myproject" {
+			t.Errorf("selected window = %q, want %q", selectedWindow, "mysession:myproject")
+		}
+	})
+
+	t.Run("creates new window when not found", func(t *testing.T) {
+		var newWindowName, newWindowDir string
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "display-message":
+					return "mysession", nil
+				case "list-windows":
+					return "main\nlogs", nil // no "myproject"
+				case "new-window":
+					for i, a := range args {
+						if a == "-n" && i+1 < len(args) {
+							newWindowName = args[i+1]
+						}
+						if a == "-c" && i+1 < len(args) {
+							newWindowDir = args[i+1]
+						}
+					}
+					return "", nil
+				}
+				return "", nil
+			},
+		}
+
+		item := &ui.Item{Name: "myproject", Path: "/home/user/myproject"}
+		err := openTmuxWindowWith(tmux, item)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if newWindowName != "myproject" {
+			t.Errorf("window name = %q, want %q", newWindowName, "myproject")
+		}
+		if newWindowDir != "/home/user/myproject" {
+			t.Errorf("window dir = %q, want %q", newWindowDir, "/home/user/myproject")
+		}
+	})
+
+	t.Run("sanitizes window name with dots", func(t *testing.T) {
+		var selectedWindow string
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "display-message":
+					return "mysession", nil
+				case "list-windows":
+					return "my_project", nil // sanitized name exists
+				case "select-window":
+					selectedWindow = args[2]
+					return "", nil
+				}
+				return "", nil
+			},
+		}
+
+		item := &ui.Item{Name: "my.project", Path: "/home/user/my.project"}
+		err := openTmuxWindowWith(tmux, item)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Name should be sanitized: dots → underscores
+		if selectedWindow != "mysession:my_project" {
+			t.Errorf("selected window = %q, want %q", selectedWindow, "mysession:my_project")
 		}
 	})
 }

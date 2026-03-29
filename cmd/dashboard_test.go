@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -215,6 +217,126 @@ func TestSortDashboardPanes(t *testing.T) {
 		}
 		if p[2].Session != "gamma" {
 			t.Errorf("pane[2]: expected gamma, got %s", p[2].Session)
+		}
+	})
+}
+
+func TestPathBase(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		expected string
+	}{
+		{"simple path", "/home/user/project", "project"},
+		{"no slash", "project", "project"},
+		{"trailing slash path", "/a/b/c", "c"},
+		{"single segment with slash", "/project", "project"},
+		{"root", "/", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := pathBase(tt.path)
+			if result != tt.expected {
+				t.Errorf("pathBase(%q) = %q, want %q", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSessionAccessTime(t *testing.T) {
+	now := time.Now()
+
+	t.Run("nil history returns 0", func(t *testing.T) {
+		result := sessionAccessTime("myproject", nil)
+		if result != 0 {
+			t.Errorf("expected 0, got %d", result)
+		}
+	})
+
+	t.Run("exact match on sanitized base name", func(t *testing.T) {
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/home/user/myproject", LastAccess: now},
+			},
+		}
+		result := sessionAccessTime("myproject", hist)
+		if result != now.Unix() {
+			t.Errorf("expected %d, got %d", now.Unix(), result)
+		}
+	})
+
+	t.Run("exact match with dots sanitized", func(t *testing.T) {
+		// sanitizeSessionName replaces . with _
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/home/user/my.project", LastAccess: now},
+			},
+		}
+		// Session name has dots sanitized to underscores
+		result := sessionAccessTime("my_project", hist)
+		if result != now.Unix() {
+			t.Errorf("expected %d, got %d", now.Unix(), result)
+		}
+	})
+
+	t.Run("partial match on last component of session", func(t *testing.T) {
+		// Session is "work/myproject", last component is "myproject"
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/home/user/myproject", LastAccess: now},
+			},
+		}
+		result := sessionAccessTime("work/myproject", hist)
+		if result != now.Unix() {
+			t.Errorf("expected %d (partial match), got %d", now.Unix(), result)
+		}
+	})
+
+	t.Run("exact match takes priority over partial", func(t *testing.T) {
+		earlier := now.Add(-1 * time.Hour)
+		// sanitizeSessionName(pathBase(path)) must equal the full session name for an exact match.
+		// For session "work/myproject", an exact match would need a path whose
+		// sanitized base is "work/myproject" — which can't happen since pathBase strips parents.
+		// So test exact-vs-partial with a simple session name instead:
+		// Entries are scanned in order; exact match on first entry returns immediately.
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/other/myproject", LastAccess: earlier}, // exact match (pathBase = "myproject")
+				{Path: "/home/myproject", LastAccess: now},      // also exact match, but won't be reached
+			},
+		}
+		result := sessionAccessTime("myproject", hist)
+		// Should return the first exact match
+		if result != earlier.Unix() {
+			t.Errorf("expected %d (first exact match), got %d", earlier.Unix(), result)
+		}
+	})
+
+	t.Run("partial match used when no exact match", func(t *testing.T) {
+		// Session is "work/myproject" — no path will produce this as sanitizedBase.
+		// But lastComponent is "myproject", so partial matching kicks in.
+		earlier := now.Add(-1 * time.Hour)
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/other/different", LastAccess: now},       // no match
+				{Path: "/home/myproject", LastAccess: earlier},    // partial match on lastComponent
+			},
+		}
+		result := sessionAccessTime("work/myproject", hist)
+		if result != earlier.Unix() {
+			t.Errorf("expected %d (partial match), got %d", earlier.Unix(), result)
+		}
+	})
+
+	t.Run("no match returns 0", func(t *testing.T) {
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/home/user/other", LastAccess: now},
+			},
+		}
+		result := sessionAccessTime("myproject", hist)
+		if result != 0 {
+			t.Errorf("expected 0, got %d", result)
 		}
 	})
 }
