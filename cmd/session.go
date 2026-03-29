@@ -211,6 +211,25 @@ func capturePanePreviewWith(tmux deps.Tmux, paneID string) string {
 	return out
 }
 
+// dismissAttentionPane transitions a pane from needs_attention to read.
+// Unlike markPaneRead, this is a no-op for panes in other states.
+func dismissAttentionPane(paneID string) {
+	dismissAttentionPaneWith(monitor.DefaultDeps(), paneID)
+}
+
+func dismissAttentionPaneWith(d *monitor.Deps, paneID string) {
+	state := loadMonitorStateWith(d)
+	if state == nil {
+		return
+	}
+	entry, ok := state.Panes[paneID]
+	if !ok || entry.Status != monitor.StatusNeedsAttention {
+		return
+	}
+	entry.Status = monitor.StatusRead
+	state.SaveWith(d)
+}
+
 // markPaneRead marks a pane as read in the monitor state
 func markPaneRead(paneID string) {
 	markPaneReadWith(monitor.DefaultDeps(), paneID)
