@@ -727,6 +727,9 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.ToggleFollowView):
 		p.attentionFollowing = !p.attentionFollowing
 		p.rebuildAttentionView()
+		if p.hasWorkingPanes() {
+			return p, spinnerTick()
+		}
 		return p, nil
 
 	case key.Matches(msg, keys.ForceDelete):
@@ -835,6 +838,12 @@ func (p *Picker) updateAllPanesStatus(paneID string, status AttentionStatus) {
 // rebuildAttentionView filters attentionAllPanes into attentionPanes
 // based on the current view mode, clamping cursor to bounds.
 func (p *Picker) rebuildAttentionView() {
+	// Remember currently selected pane to restore cursor after rebuild
+	var selectedPaneID string
+	if p.attentionCursor >= 0 && p.attentionCursor < len(p.attentionPanes) {
+		selectedPaneID = p.attentionPanes[p.attentionCursor].PaneID
+	}
+
 	if p.attentionFollowing {
 		filtered := make([]AttentionPane, 0)
 		for _, pane := range p.attentionAllPanes {
@@ -847,11 +856,25 @@ func (p *Picker) rebuildAttentionView() {
 		p.attentionPanes = make([]AttentionPane, len(p.attentionAllPanes))
 		copy(p.attentionPanes, p.attentionAllPanes)
 	}
-	if p.attentionCursor >= len(p.attentionPanes) {
-		p.attentionCursor = len(p.attentionPanes) - 1
+
+	// Try to restore cursor to the same pane
+	restored := false
+	if selectedPaneID != "" {
+		for i, pane := range p.attentionPanes {
+			if pane.PaneID == selectedPaneID {
+				p.attentionCursor = i
+				restored = true
+				break
+			}
+		}
 	}
-	if p.attentionCursor < 0 {
-		p.attentionCursor = 0
+	if !restored {
+		if p.attentionCursor >= len(p.attentionPanes) {
+			p.attentionCursor = len(p.attentionPanes) - 1
+		}
+		if p.attentionCursor < 0 {
+			p.attentionCursor = 0
+		}
 	}
 	p.adjustAttentionScroll()
 	p.fetchAttentionPreview()

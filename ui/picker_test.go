@@ -1107,3 +1107,72 @@ func TestResetAction(t *testing.T) {
 		t.Errorf("action = %v, want ActionReset", p.result.Action)
 	}
 }
+
+func TestRebuildAttentionViewPreservesCursor(t *testing.T) {
+	panes := []AttentionPane{
+		{PaneID: "%1", Session: "alpha", Following: true},
+		{PaneID: "%2", Session: "beta", Following: false},
+		{PaneID: "%3", Session: "gamma", Following: true},
+	}
+
+	t.Run("cursor preserved switching to following mode", func(t *testing.T) {
+		p := NewPicker(nil, WithAttentionPanes(panes, AttentionCallbacks{}))
+		p.attentionCursor = 2 // on %3 (following=true)
+
+		p.attentionFollowing = true
+		p.rebuildAttentionView()
+
+		// %3 should still be under cursor, now at index 1 in filtered list [%1, %3]
+		if p.attentionCursor != 1 {
+			t.Errorf("cursor = %d, want 1", p.attentionCursor)
+		}
+		if p.attentionPanes[p.attentionCursor].PaneID != "%3" {
+			t.Errorf("pane = %s, want %%3", p.attentionPanes[p.attentionCursor].PaneID)
+		}
+	})
+
+	t.Run("cursor preserved switching back to normal mode", func(t *testing.T) {
+		p := NewPicker(nil, WithAttentionPanes(panes, AttentionCallbacks{}))
+		// Simulate being in following mode with cursor on %1
+		p.attentionFollowing = true
+		p.rebuildAttentionView()
+		p.attentionCursor = 0 // on %1 in filtered list [%1, %3]
+
+		p.attentionFollowing = false
+		p.rebuildAttentionView()
+
+		// %1 should still be under cursor, at index 0 in full list
+		if p.attentionPanes[p.attentionCursor].PaneID != "%1" {
+			t.Errorf("pane = %s, want %%1", p.attentionPanes[p.attentionCursor].PaneID)
+		}
+	})
+
+	t.Run("cursor clamped when pane not in new view", func(t *testing.T) {
+		p := NewPicker(nil, WithAttentionPanes(panes, AttentionCallbacks{}))
+		p.attentionCursor = 1 // on %2 (following=false)
+
+		p.attentionFollowing = true
+		p.rebuildAttentionView()
+
+		// %2 is not followed, cursor should clamp to valid range [%1, %3]
+		if p.attentionCursor < 0 || p.attentionCursor >= len(p.attentionPanes) {
+			t.Errorf("cursor = %d, out of range [0, %d)", p.attentionCursor, len(p.attentionPanes))
+		}
+	})
+
+	t.Run("cursor clamped on empty following view", func(t *testing.T) {
+		noFollow := []AttentionPane{
+			{PaneID: "%1", Session: "alpha", Following: false},
+			{PaneID: "%2", Session: "beta", Following: false},
+		}
+		p := NewPicker(nil, WithAttentionPanes(noFollow, AttentionCallbacks{}))
+		p.attentionCursor = 1
+
+		p.attentionFollowing = true
+		p.rebuildAttentionView()
+
+		if p.attentionCursor != 0 {
+			t.Errorf("cursor = %d, want 0 for empty view", p.attentionCursor)
+		}
+	})
+}
