@@ -45,11 +45,21 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		return buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession, sortCriteria)
 	}
 
+	// Restore following mode from monitor state
+	var opts []ui.PickerOption
+	state := loadMonitorState()
+	if state != nil && state.DashboardFollowing {
+		opts = append(opts, ui.WithAttentionFollowing(true))
+	}
+
 	panes := buildPanes()
-	result, err := ui.RunAttention("dashboard", panes, attentionCallbacks(), buildPanes)
+	result, err := ui.RunAttention("dashboard", panes, attentionCallbacks(), buildPanes, opts...)
 	if err != nil {
 		return err
 	}
+
+	// Persist following mode for next dashboard open
+	saveDashboardFollowing(result.AttentionFollowing)
 
 	switch result.Action {
 	case ui.ActionSwitchToPane:
@@ -68,6 +78,18 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func saveDashboardFollowing(following bool) {
+	state := loadMonitorState()
+	if state == nil {
+		return
+	}
+	if state.DashboardFollowing == following {
+		return
+	}
+	state.DashboardFollowing = following
+	state.SaveWith(monitor.DefaultDeps())
 }
 
 func buildDashboardPanes() []ui.AttentionPane {

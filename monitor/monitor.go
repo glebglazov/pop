@@ -34,8 +34,9 @@ type PaneEntry struct {
 
 // State holds the full monitor state
 type State struct {
-	Panes map[string]*PaneEntry `json:"panes"`
-	path  string
+	Panes             map[string]*PaneEntry `json:"panes"`
+	DashboardFollowing bool                  `json:"dashboard_following,omitempty"`
+	path              string
 }
 
 // Deps holds external dependencies for the monitor package

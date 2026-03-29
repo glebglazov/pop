@@ -60,10 +60,11 @@ type UserDefinedCommandResult struct {
 
 // Result holds the picker result
 type Result struct {
-	Selected      *Item
-	Action        Action
-	CursorIndex   int                  // cursor position at time of action
+	Selected           *Item
+	Action             Action
+	CursorIndex        int                      // cursor position at time of action
 	UserDefinedCommand *UserDefinedCommandResult // set when Action == ActionUserDefinedCommand
+	AttentionFollowing bool                      // whether following mode was active
 }
 
 // Action represents what action the user wants to take
@@ -321,6 +322,13 @@ func WithAttentionEmptyNote(note string) PickerOption {
 func WithAttentionReload(fn func() []AttentionPane) PickerOption {
 	return func(p *Picker) {
 		p.reloadFunc = fn
+	}
+}
+
+// WithAttentionFollowing sets the initial following mode for the attention view.
+func WithAttentionFollowing(following bool) PickerOption {
+	return func(p *Picker) {
+		p.attentionFollowing = following
 	}
 }
 
@@ -1504,6 +1512,7 @@ func (p *Picker) viewNormal() string {
 // Result returns the picker result after running
 func (p *Picker) Result() Result {
 	p.result.CursorIndex = p.cursor
+	p.result.AttentionFollowing = p.attentionFollowing
 	return p.result
 }
 
@@ -1513,8 +1522,11 @@ func RunAttention(title string, panes []AttentionPane, cb AttentionCallbacks, re
 	p := NewPicker(nil, append([]PickerOption{WithAttentionPanes(panes, cb), WithAttentionReload(reloadFn)}, opts...)...)
 	p.attentionMode = true
 	p.attentionTitle = title
-	if len(panes) > 0 {
-		p.attentionCursor = len(panes) - 1
+	if p.attentionFollowing {
+		p.rebuildAttentionView()
+	}
+	if len(p.attentionPanes) > 0 {
+		p.attentionCursor = len(p.attentionPanes) - 1
 	}
 	p.adjustAttentionScroll()
 	p.fetchAttentionPreview()
