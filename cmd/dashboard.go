@@ -47,7 +47,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 
 	// Restore following mode from monitor state
 	var opts []ui.PickerOption
-	state := loadMonitorState()
+	state := loadMonitorStateAlways()
 	if state != nil && state.DashboardFollowing {
 		opts = append(opts, ui.WithAttentionFollowing(true))
 	}
@@ -81,7 +81,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 }
 
 func saveDashboardFollowing(following bool) {
-	state := loadMonitorState()
+	state := loadMonitorStateAlways()
 	if state == nil {
 		return
 	}
@@ -97,7 +97,7 @@ func buildDashboardPanes() []ui.AttentionPane {
 }
 
 func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string, sortCriteria []string) []ui.AttentionPane {
-	state := loadMonitorState()
+	state := loadMonitorStateAlways()
 	if state == nil {
 		return nil
 	}

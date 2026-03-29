@@ -108,6 +108,17 @@ func loadMonitorStateWith(d *monitor.Deps) *monitor.State {
 	return state
 }
 
+// loadMonitorStateAlways loads the monitor state from disk regardless of daemon status.
+// Used by the dashboard which needs state even during daemon restarts.
+func loadMonitorStateAlways() *monitor.State {
+	statePath := monitor.DefaultStatePath()
+	state, err := monitor.Load(statePath)
+	if err != nil {
+		return nil
+	}
+	return state
+}
+
 // monitorAttentionSessions returns sessions needing attention,
 // or nil if the daemon is not running
 func monitorAttentionSessions() map[string]bool {
