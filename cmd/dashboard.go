@@ -113,7 +113,9 @@ func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string
 	panes := make([]ui.AttentionPane, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Session + " " + entry.PaneID
-		if cmd, ok := paneCommands[entry.PaneID]; ok {
+		if entry.Note != "" {
+			name = entry.Session + " " + entry.PaneID + " [" + entry.Note + "]"
+		} else if cmd, ok := paneCommands[entry.PaneID]; ok {
 			name = entry.Session + " " + entry.PaneID + " (" + cmd + ")"
 		}
 
@@ -131,6 +133,7 @@ func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string
 			PaneID:    entry.PaneID,
 			Session:   entry.Session,
 			Name:      name,
+			Note:      entry.Note,
 			Status:    status,
 			Following: entry.Following,
 		})

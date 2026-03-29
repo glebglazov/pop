@@ -99,6 +99,7 @@ type AttentionPane struct {
 	Name      string
 	Status    AttentionStatus
 	Following bool
+	Note      string
 }
 
 // Picker is a fuzzy-searchable list picker
@@ -156,7 +157,12 @@ type Picker struct {
 	markAttentionFunc  func(paneID string)
 	toggleFollowFunc   func(paneID string)
 	unmonitorFunc      func(paneID string)
+	setNoteFunc        func(paneID, note string)
 	spinnerFrame       int // current spinner animation frame
+
+	// Note editing state
+	editingNote bool
+	noteInput   textinput.Model
 }
 
 // iconLegendEntry maps an icon to its description in the help view
@@ -295,6 +301,7 @@ type AttentionCallbacks struct {
 	MarkAttention func(paneID string)        // marks a pane as needs-attention
 	ToggleFollow  func(paneID string)        // toggles following flag
 	Unmonitor     func(paneID string)        // removes a pane from monitor state
+	SetNote       func(paneID, note string)  // sets note on a pane
 }
 
 // WithAttentionPanes enables the attention sub-view with the given panes and callbacks.
@@ -308,6 +315,7 @@ func WithAttentionPanes(panes []AttentionPane, cb AttentionCallbacks) PickerOpti
 		p.markAttentionFunc = cb.MarkAttention
 		p.toggleFollowFunc = cb.ToggleFollow
 		p.unmonitorFunc = cb.Unmonitor
+		p.setNoteFunc = cb.SetNote
 	}
 }
 
@@ -600,6 +608,44 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updateAttention handles key events when in attention sub-view mode
 func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Note editing mode: capture all keys
+	if p.editingNote {
+		switch {
+		case key.Matches(msg, keys.Quit): // Esc/Ctrl+C
+			p.editingNote = false
+			return p, nil
+		case key.Matches(msg, keys.Enter):
+			note := strings.TrimSpace(p.noteInput.Value())
+			pane := &p.attentionPanes[p.attentionCursor]
+			// Auto-follow on save if not already
+			if !pane.Following && p.toggleFollowFunc != nil {
+				p.toggleFollowFunc(pane.PaneID)
+				pane.Following = true
+				for i := range p.attentionAllPanes {
+					if p.attentionAllPanes[i].PaneID == pane.PaneID {
+						p.attentionAllPanes[i].Following = true
+						break
+					}
+				}
+			}
+			p.setNoteFunc(pane.PaneID, note)
+			pane.Note = note
+			for i := range p.attentionAllPanes {
+				if p.attentionAllPanes[i].PaneID == pane.PaneID {
+					p.attentionAllPanes[i].Note = note
+					break
+				}
+			}
+			p.attentionDirty = true
+			p.editingNote = false
+			return p, nil
+		default:
+			var cmd tea.Cmd
+			p.noteInput, cmd = p.noteInput.Update(msg)
+			return p, cmd
+		}
+	}
+
 	switch {
 	case key.Matches(msg, keys.Back):
 		if len(p.items) == 0 {
@@ -709,10 +755,16 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			pane := &p.attentionPanes[p.attentionCursor]
 			p.toggleFollowFunc(pane.PaneID)
 			pane.Following = !pane.Following
+			// Clear note when unfollowing
+			if !pane.Following && pane.Note != "" && p.setNoteFunc != nil {
+				p.setNoteFunc(pane.PaneID, "")
+				pane.Note = ""
+			}
 			// Update source-of-truth list
 			for i := range p.attentionAllPanes {
 				if p.attentionAllPanes[i].PaneID == pane.PaneID {
 					p.attentionAllPanes[i].Following = pane.Following
+					p.attentionAllPanes[i].Note = pane.Note
 					break
 				}
 			}
@@ -729,6 +781,17 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		p.rebuildAttentionView()
 		if p.hasWorkingPanes() {
 			return p, spinnerTick()
+		}
+		return p, nil
+
+	case key.Matches(msg, keys.EditNote):
+		if len(p.attentionPanes) > 0 && p.setNoteFunc != nil {
+			pane := p.attentionPanes[p.attentionCursor]
+			p.editingNote = true
+			p.noteInput = textinput.New()
+			p.noteInput.Prompt = "note: "
+			p.noteInput.SetValue(pane.Note)
+			p.noteInput.Focus()
 		}
 		return p, nil
 
@@ -1410,14 +1473,18 @@ func (p *Picker) viewAttention() string {
 		b.WriteString("\x1b[0m\n")
 	}
 
-	// Hints
-	var hints string
-	if len(p.items) > 0 {
-		hints = "  f view · ← back · Enter switch · C-a attention · C-f follow · C-r read · C-x unmonitor · Esc cancel"
+	// Hints or note input
+	if p.editingNote {
+		b.WriteString("  " + p.noteInput.View())
 	} else {
-		hints = "  f view · Enter switch · C-a attention · C-f follow · C-r read · C-x unmonitor · Esc quit"
+		var hints string
+		if len(p.items) > 0 {
+			hints = "  f view · ← back · Enter switch · C-a attention · C-f follow · C-r read · C-x unmonitor · Esc cancel"
+		} else {
+			hints = "  f view · Enter switch · C-a attention · C-f follow · C-r read · C-x unmonitor · Esc quit"
+		}
+		b.WriteString(hintStyle.Render(hints))
 	}
-	b.WriteString(hintStyle.Render(hints))
 
 	return b.String()
 }
@@ -1619,6 +1686,7 @@ type keyMap struct {
 	Reload         key.Binding
 	AttentionUp    key.Binding
 	AttentionDown  key.Binding
+	EditNote       key.Binding
 }
 
 var keys = keyMap{
@@ -1684,6 +1752,9 @@ var keys = keyMap{
 	),
 	AttentionDown: key.NewBinding(
 		key.WithKeys("down", "ctrl+n", "j"),
+	),
+	EditNote: key.NewBinding(
+		key.WithKeys("N"),
 	),
 }
 

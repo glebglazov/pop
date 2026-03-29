@@ -28,6 +28,7 @@ type PaneEntry struct {
 	Session     string     `json:"session"`
 	Status      PaneStatus `json:"status"`
 	Following   bool       `json:"following,omitempty"`
+	Note        string     `json:"note,omitempty"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	LastVisited time.Time  `json:"last_visited,omitempty"`
 }

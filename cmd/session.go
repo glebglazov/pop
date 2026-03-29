@@ -299,6 +299,24 @@ func togglePaneFollowWith(d *monitor.Deps, paneID string) {
 	state.SaveWith(d)
 }
 
+// setPaneNote sets the note on a pane in the monitor state
+func setPaneNote(paneID, note string) {
+	setPaneNoteWith(monitor.DefaultDeps(), paneID, note)
+}
+
+func setPaneNoteWith(d *monitor.Deps, paneID, note string) {
+	state := loadMonitorStateWith(d)
+	if state == nil {
+		return
+	}
+	entry, ok := state.Panes[paneID]
+	if !ok {
+		return
+	}
+	entry.Note = note
+	state.SaveWith(d)
+}
+
 // unmonitorPane removes a pane from the monitor state entirely
 func unmonitorPane(paneID string) {
 	unmonitorPaneWith(monitor.DefaultDeps(), paneID)
@@ -321,6 +339,7 @@ func attentionCallbacks() ui.AttentionCallbacks {
 		MarkAttention: markPaneAttention,
 		ToggleFollow:  togglePaneFollow,
 		Unmonitor:     unmonitorPane,
+		SetNote:       setPaneNote,
 	}
 }
 
