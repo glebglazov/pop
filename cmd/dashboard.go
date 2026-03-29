@@ -178,7 +178,9 @@ func sortDashboardPanes(panes []ui.AttentionPane, paneLastVisited map[string]int
 				}
 			}
 		}
-		return false
+		// Implicit final tiebreaker: pane ID for deterministic order
+		// (PanesAll iterates a map, so input order is non-deterministic)
+		return panes[i].PaneID < panes[j].PaneID
 	})
 }
 
