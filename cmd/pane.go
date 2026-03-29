@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/spf13/cobra"
@@ -39,6 +41,7 @@ func init() {
 	paneCmd.AddCommand(paneCaptureCmd)
 	paneCmd.AddCommand(paneSetStatusCmd)
 	paneSetStatusCmd.Flags().String("source", "", "source identifier for filtering (e.g. tmux-global)")
+	paneCmd.AddCommand(paneStatusCmd)
 }
 
 // resolveSession returns the tmux session name to operate on.
@@ -525,4 +528,57 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 	entry.Status = status
 	entry.UpdatedAt = time.Now()
 	return state.Save()
+}
+
+// --- status ---
+
+var paneStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show monitor state for all tracked panes",
+	Args:  cobra.NoArgs,
+	RunE:  runPaneStatus,
+}
+
+func runPaneStatus(cmd *cobra.Command, args []string) error {
+	state := loadMonitorState()
+	if state == nil {
+		fmt.Fprintln(os.Stderr, "monitor daemon is not running")
+		return nil
+	}
+
+	entries := state.PanesAll()
+	if len(entries) == 0 {
+		fmt.Println("no tracked panes")
+		return nil
+	}
+
+	// Also load pop history for session_last_visit_at
+	hist, _ := history.Load(history.DefaultHistoryPath())
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "PANE\tSESSION\tSTATUS\tFOLLOWING\tUPDATED_AT\tLAST_VISITED\tSESSION_LAST_VISIT")
+	for _, entry := range entries {
+		lastVisited := "-"
+		if !entry.LastVisited.IsZero() {
+			lastVisited = entry.LastVisited.Format("2006-01-02 15:04:05")
+		}
+		sessionVisit := "-"
+		if ts := sessionAccessTime(entry.Session, hist); ts > 0 {
+			sessionVisit = time.Unix(ts, 0).Format("2006-01-02 15:04:05")
+		}
+		following := ""
+		if entry.Following {
+			following = "yes"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			entry.PaneID,
+			entry.Session,
+			entry.Status,
+			following,
+			entry.UpdatedAt.Format("2006-01-02 15:04:05"),
+			lastVisited,
+			sessionVisit,
+		)
+	}
+	return w.Flush()
 }

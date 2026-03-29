@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
@@ -223,10 +224,13 @@ func dismissAttentionPaneWith(d *monitor.Deps, paneID string) {
 		return
 	}
 	entry, ok := state.Panes[paneID]
-	if !ok || entry.Status != monitor.StatusNeedsAttention {
+	if !ok {
 		return
 	}
-	entry.Status = monitor.StatusRead
+	entry.LastVisited = time.Now()
+	if entry.Status == monitor.StatusNeedsAttention {
+		entry.Status = monitor.StatusRead
+	}
 	state.SaveWith(d)
 }
 
