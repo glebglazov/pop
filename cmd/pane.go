@@ -556,7 +556,7 @@ func runPaneStatus(cmd *cobra.Command, args []string) error {
 	hist, _ := history.Load(history.DefaultHistoryPath())
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "PANE\tSESSION\tSTATUS\tFOLLOWING\tUPDATED_AT\tLAST_VISITED\tSESSION_LAST_VISIT")
+	fmt.Fprintln(w, "PANE\tSESSION\tSTATUS\tFOLLOWING\tUPDATED_AT\tPANE_LAST_VISITED\tSESSION_LAST_VISIT")
 	for _, entry := range entries {
 		lastVisited := "-"
 		if !entry.LastVisited.IsZero() {
