@@ -1284,6 +1284,30 @@ func (p *Picker) viewAttention() string {
 	b.WriteString(headerStyle.Render(" " + headerText))
 	b.WriteString(strings.Repeat(" ", headerPadding))
 	b.WriteString(sepStyle.Render("│"))
+
+	// Right header: pane name anchored to top-right, pin after name
+	pane := p.attentionPanes[p.attentionCursor]
+	paneName := pane.Name
+	pinSuffix := ""
+	pinVisualWidth := 0
+	if pane.Following {
+		pinSuffix = " 📌"
+		pinVisualWidth = 3 // space(1) + pin emoji(2 cells)
+	}
+	// Truncate name to fit, leaving room for pin
+	maxNameWidth := rightWidth - pinVisualWidth
+	if maxNameWidth < 0 {
+		maxNameWidth = 0
+	}
+	paneName = truncateString(paneName, maxNameWidth)
+	rightHeader := paneName + pinSuffix
+	rightHeaderVisualLen := len([]rune(paneName)) + pinVisualWidth
+	rightPadding := rightWidth - rightHeaderVisualLen
+	if rightPadding < 0 {
+		rightPadding = 0
+	}
+	b.WriteString(strings.Repeat(" ", rightPadding))
+	b.WriteString(headerStyle.Render(rightHeader))
 	b.WriteString("\n")
 
 	// Build preview lines
