@@ -43,8 +43,8 @@ func TestPositionCurrentPane(t *testing.T) {
 		if result[2].Status != ui.AttentionIdle {
 			t.Errorf("pane[2] status: expected idle, got %d", result[2].Status)
 		}
-		if result[2].Name != "abc %3 (zsh)" {
-			t.Errorf("pane[2] name: expected %q, got %q", "abc %3 (zsh)", result[2].Name)
+		if result[2].Name != "abc (%3, zsh)" {
+			t.Errorf("pane[2] name: expected %q, got %q", "abc (%3, zsh)", result[2].Name)
 		}
 	})
 
@@ -100,8 +100,8 @@ func TestPositionCurrentPane(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("expected 2 panes, got %d", len(result))
 		}
-		if result[1].Name != "myproject %9" {
-			t.Errorf("pane[1] name: expected %q, got %q", "myproject %9", result[1].Name)
+		if result[1].Name != "myproject (%9)" {
+			t.Errorf("pane[1] name: expected %q, got %q", "myproject (%9)", result[1].Name)
 		}
 	})
 

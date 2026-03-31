@@ -112,11 +112,13 @@ func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string
 	// Build panes with status
 	panes := make([]ui.AttentionPane, 0, len(entries))
 	for _, entry := range entries {
-		name := entry.Session + " " + entry.PaneID
+		var name string
 		if entry.Note != "" {
-			name = entry.Session + " " + entry.PaneID + " [" + entry.Note + "]"
+			name = entry.Session + " (" + entry.Note + ")"
 		} else if cmd, ok := paneCommands[entry.PaneID]; ok {
-			name = entry.Session + " " + entry.PaneID + " (" + cmd + ")"
+			name = entry.Session + " (" + entry.PaneID + ", " + cmd + ")"
+		} else {
+			name = entry.Session + " (" + entry.PaneID + ")"
 		}
 
 		var status ui.AttentionStatus
@@ -234,9 +236,9 @@ func positionCurrentPane(panes []ui.AttentionPane, currentPaneID, session string
 	}
 
 	// Not in list — inject as idle
-	name := session + " " + currentPaneID
+	name := session + " (" + currentPaneID + ")"
 	if cmd, ok := paneCommands[currentPaneID]; ok {
-		name = session + " " + currentPaneID + " (" + cmd + ")"
+		name = session + " (" + currentPaneID + ", " + cmd + ")"
 	}
 	return append(panes, ui.AttentionPane{
 		PaneID:  currentPaneID,
