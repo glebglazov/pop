@@ -96,7 +96,10 @@ func hasAgentWindow(session string) bool {
 }
 
 func hasAgentWindowWith(tmux deps.Tmux, session string) bool {
-	out, _ := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
+	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
+	if err != nil {
+		debug.Error("hasAgentWindow %s: %v", session, err)
+	}
 	for _, w := range strings.Split(out, "\n") {
 		if w == "agent" {
 			return true
@@ -170,7 +173,9 @@ func runPaneCreateWith(tmux deps.Tmux, name, command string) error {
 			fmt.Println(existingID)
 			return nil
 		}
-		tmux.Command("kill-pane", "-t", existingID)
+		if _, err := tmux.Command("kill-pane", "-t", existingID); err != nil {
+			debug.Error("pane create: kill dead pane %s: %v", existingID, err)
+		}
 	}
 
 	// Create pane with an interactive shell (no command) in the project
@@ -189,16 +194,22 @@ func runPaneCreateWith(tmux deps.Tmux, name, command string) error {
 			return fmt.Errorf("failed to create pane: %w", err)
 		}
 		paneID = out
-		tmux.Command("select-layout", "-t", session+":agent", "tiled")
+		if _, err := tmux.Command("select-layout", "-t", session+":agent", "tiled"); err != nil {
+			debug.Error("pane create: select-layout: %v", err)
+		}
 	}
 
 	if _, err := tmux.Command("select-pane", "-t", paneID, "-T", name); err != nil {
 		return fmt.Errorf("failed to set pane title: %w", err)
 	}
-	tmux.Command("set-option", "-p", "-t", paneID, "remain-on-exit", "on")
+	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "remain-on-exit", "on"); err != nil {
+		debug.Error("pane create: set remain-on-exit %s: %v", paneID, err)
+	}
 
 	// Send the command to the shell after it has initialized
-	tmux.Command("send-keys", "-t", paneID, command, "Enter")
+	if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
+		debug.Error("pane create: send-keys %s: %v", paneID, err)
+	}
 
 	fmt.Println(paneID)
 	return nil
@@ -240,7 +251,9 @@ func runPaneKillWith(tmux deps.Tmux, name string) error {
 	}
 
 	// Re-tile remaining panes if agent window still exists
-	tmux.Command("select-layout", "-t", session+":agent", "tiled")
+	if _, err := tmux.Command("select-layout", "-t", session+":agent", "tiled"); err != nil {
+		debug.Error("pane kill: select-layout: %v", err)
+	}
 
 	return nil
 }
@@ -442,7 +455,10 @@ Special behavior:
 }
 
 func runPaneSetStatus(cmd *cobra.Command, args []string) error {
-	cfg, _ := config.Load(config.DefaultConfigPath())
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Error("pane set-status: load config: %v", err)
+	}
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
@@ -480,7 +496,8 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 	statePath := monitor.DefaultStatePath()
 	state, err := monitor.Load(statePath)
 	if err != nil {
-		return nil // silently ignore — called from hook
+		debug.Error("pane set-status: load state: %v", err)
+		return nil // called from hook
 	}
 
 	entry, ok := state.Panes[paneID]
@@ -492,7 +509,7 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 		// Auto-register: look up the tmux session for this pane
 		session, err := tmuxPaneSessionWith(tmux, paneID)
 		if err != nil {
-			debug.Log("[set-status] %s: failed to look up session, skipping: %v", paneID, err)
+			debug.Error("[set-status] %s: failed to look up session, skipping: %v", paneID, err)
 			return nil
 		}
 		debug.Log("[set-status] %s: auto-registering in session=%s with status=%s", paneID, session, status)
@@ -553,7 +570,10 @@ func runPaneStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Also load pop history for session_last_visit_at
-	hist, _ := history.Load(history.DefaultHistoryPath())
+	hist, err := history.Load(history.DefaultHistoryPath())
+	if err != nil {
+		debug.Error("pane status: load history: %v", err)
+	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "PANE\tSESSION\tSTATUS\tFOLLOWING\tUPDATED_AT\tPANE_LAST_VISITED\tSESSION_LAST_VISIT")

@@ -57,6 +57,7 @@ func RunDaemonWith(d *Deps, statePath, pidPath string) error {
 func pollOnce(d *Deps, statePath string) {
 	state, err := LoadWith(d, statePath)
 	if err != nil {
+		debug.Error("pollOnce: load state: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to load state: %v\n", err)
 		return
 	}
@@ -78,6 +79,7 @@ func pollOnce(d *Deps, statePath string) {
 
 	if changed {
 		if err := state.SaveWith(d); err != nil {
+			debug.Error("pollOnce: save state: %v", err)
 			fmt.Fprintf(os.Stderr, "Failed to save state: %v\n", err)
 		}
 	}
@@ -87,6 +89,7 @@ func pollOnce(d *Deps, statePath string) {
 func liveTmuxPanes() map[string]bool {
 	out, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}").Output()
 	if err != nil {
+		debug.Error("liveTmuxPanes: %v", err)
 		return nil
 	}
 	panes := make(map[string]bool)

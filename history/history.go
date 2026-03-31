@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 )
@@ -51,7 +52,10 @@ func DefaultHistoryPathWith(d *Deps) string {
 	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
 		return filepath.Join(xdgData, "pop", "history.json")
 	}
-	home, _ := d.FS.UserHomeDir()
+	home, err := d.FS.UserHomeDir()
+	if err != nil {
+		debug.Error("DefaultHistoryPath: UserHomeDir: %v", err)
+	}
 	return filepath.Join(home, ".local", "share", "pop", "history.json")
 }
 
@@ -73,6 +77,7 @@ func LoadWith(d *Deps, path string) (*History, error) {
 	}
 
 	if err := json.Unmarshal(data, h); err != nil {
+		debug.Error("history.Load %s: unmarshal: %v", path, err)
 		return h, nil // Return empty history on parse error
 	}
 
@@ -248,7 +253,10 @@ func TmuxSessionActivityWith(d *Deps) map[string]int64 {
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
 			name := parts[0]
-			ts, _ := strconv.ParseInt(parts[1], 10, 64)
+			ts, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil {
+				debug.Error("TmuxSessionActivity: parse timestamp %q: %v", parts[1], err)
+			}
 			activity[name] = ts
 		}
 	}

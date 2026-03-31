@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
 )
 
@@ -64,7 +65,10 @@ func DefaultStatePathWith(d *Deps) string {
 	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
 		return filepath.Join(xdgData, "pop", "monitor.json")
 	}
-	home, _ := d.FS.UserHomeDir()
+	home, err := d.FS.UserHomeDir()
+	if err != nil {
+		debug.Error("DefaultStatePath: UserHomeDir: %v", err)
+	}
 	return filepath.Join(home, ".local", "share", "pop", "monitor.json")
 }
 
@@ -78,7 +82,10 @@ func DefaultPIDPathWith(d *Deps) string {
 	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
 		return filepath.Join(xdgData, "pop", "monitor.pid")
 	}
-	home, _ := d.FS.UserHomeDir()
+	home, err := d.FS.UserHomeDir()
+	if err != nil {
+		debug.Error("DefaultPIDPath: UserHomeDir: %v", err)
+	}
 	return filepath.Join(home, ".local", "share", "pop", "monitor.pid")
 }
 
@@ -103,6 +110,7 @@ func LoadWith(d *Deps, path string) (*State, error) {
 	}
 
 	if err := json.Unmarshal(data, s); err != nil {
+		debug.Error("monitor.Load %s: unmarshal: %v", path, err)
 		return s, nil
 	}
 	if s.Panes == nil {

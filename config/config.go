@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
 )
 
@@ -245,7 +246,10 @@ func DefaultConfigPathWith(d *Deps) string {
 	if xdgConfig := d.FS.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
 		return filepath.Join(xdgConfig, "pop", "config.toml")
 	}
-	home, _ := d.FS.UserHomeDir()
+	home, err := d.FS.UserHomeDir()
+	if err != nil {
+		debug.Error("DefaultConfigPath: UserHomeDir: %v", err)
+	}
 	return filepath.Join(home, ".config", "pop", "config.toml")
 }
 
@@ -371,7 +375,10 @@ func removeSubsumedPaths(paths []ExpandedPath) []ExpandedPath {
 // expandHomeWith replaces ~ with the user's home directory
 func expandHomeWith(d *Deps, path string) string {
 	if strings.HasPrefix(path, "~/") {
-		home, _ := d.FS.UserHomeDir()
+		home, err := d.FS.UserHomeDir()
+		if err != nil {
+			debug.Error("expandHome: UserHomeDir: %v", err)
+		}
 		return filepath.Join(home, path[2:])
 	}
 	return path

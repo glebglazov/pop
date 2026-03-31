@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/ui"
@@ -26,16 +27,26 @@ func init() {
 func runDashboard(cmd *cobra.Command, args []string) error {
 	go ensureMonitorDaemon()
 
-	cfg, _ := config.Load(config.DefaultConfigPath())
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Error("dashboard: load config: %v", err)
+	}
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
 
 	var currentPaneID, currentPaneSession string
 	if cfg.CurrentPaneAlwaysUnderCursor() {
-		currentPaneID, _ = defaultTmux.Command("display-message", "-p", "#{pane_id}")
+		var err error
+		currentPaneID, err = defaultTmux.Command("display-message", "-p", "#{pane_id}")
+		if err != nil {
+			debug.Error("dashboard: get current pane ID: %v", err)
+		}
 		if currentPaneID != "" {
-			currentPaneSession, _ = tmuxPaneSessionWith(defaultTmux, currentPaneID)
+			currentPaneSession, err = tmuxPaneSessionWith(defaultTmux, currentPaneID)
+			if err != nil {
+				debug.Error("dashboard: get pane session for %s: %v", currentPaneID, err)
+			}
 		}
 	}
 
@@ -64,12 +75,17 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	switch result.Action {
 	case ui.ActionSwitchToPane:
 		if result.Selected != nil {
-			hist, _ := history.Load(history.DefaultHistoryPath())
+			hist, err := history.Load(history.DefaultHistoryPath())
+			if err != nil {
+				debug.Error("dashboard: load history: %v", err)
+			}
 			if hist == nil {
 				hist = &history.History{}
 			}
 			hist.Record(sessionHistoryPath(result.Selected.Context, hist))
-			hist.Save()
+			if err := hist.Save(); err != nil {
+				debug.Error("dashboard: save history: %v", err)
+			}
 			dismissAttentionPane(result.Selected.Path)
 			return switchToTmuxTargetAndZoom(result.Selected.Path)
 		}
@@ -89,7 +105,9 @@ func saveDashboardFollowing(following bool) {
 		return
 	}
 	state.DashboardFollowing = following
-	state.SaveWith(monitor.DefaultDeps())
+	if err := state.SaveWith(monitor.DefaultDeps()); err != nil {
+		debug.Error("saveDashboardFollowing: save: %v", err)
+	}
 }
 
 func buildDashboardPanes() []ui.AttentionPane {
@@ -150,7 +168,10 @@ func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string
 	}
 
 	// Build per-session last-visit timestamps from pop history
-	hist, _ := history.Load(history.DefaultHistoryPath())
+	hist, err := history.Load(history.DefaultHistoryPath())
+	if err != nil {
+		debug.Error("buildDashboardPanes: load history: %v", err)
+	}
 	sessionLastVisit := make(map[string]int64)
 	for _, p := range panes {
 		if _, ok := sessionLastVisit[p.Session]; !ok {

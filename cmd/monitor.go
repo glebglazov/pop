@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/spf13/cobra"
@@ -81,7 +82,9 @@ func installTmuxAutoReadHooks() {
 func installTmuxAutoReadHooksWith(tmux deps.Tmux) {
 	uninstallTmuxAutoReadHooksWith(tmux)
 	for event, hookCmd := range tmuxAutoReadHooks {
-		tmux.Command("set-hook", "-ga", event, hookCmd)
+		if _, err := tmux.Command("set-hook", "-ga", event, hookCmd); err != nil {
+			debug.Error("installTmuxAutoReadHooks: set-hook %s: %v", event, err)
+		}
 	}
 }
 
@@ -92,7 +95,10 @@ func uninstallTmuxAutoReadHooks() {
 }
 
 func uninstallTmuxAutoReadHooksWith(tmux deps.Tmux) {
-	out, _ := tmux.Command("show-hooks", "-g")
+	out, err := tmux.Command("show-hooks", "-g")
+	if err != nil {
+		debug.Error("uninstallTmuxAutoReadHooks: show-hooks: %v", err)
+	}
 	for _, line := range strings.Split(out, "\n") {
 		if !strings.Contains(line, "pop pane set-status") && !strings.Contains(line, "pop monitor") {
 			continue
@@ -103,7 +109,9 @@ func uninstallTmuxAutoReadHooksWith(tmux deps.Tmux) {
 			continue
 		}
 		indexed := line[:bracketEnd+1]
-		tmux.Command("set-hook", "-gu", indexed)
+		if _, err := tmux.Command("set-hook", "-gu", indexed); err != nil {
+			debug.Error("uninstallTmuxAutoReadHooks: unset %s: %v", indexed, err)
+		}
 	}
 }
 
@@ -114,6 +122,7 @@ func ensureMonitorDaemon() {
 	pidPath := monitor.DefaultPIDPath()
 	exe, err := os.Executable()
 	if err != nil {
+		debug.Error("ensureMonitorDaemon: os.Executable: %v", err)
 		return
 	}
 
@@ -122,7 +131,9 @@ func ensureMonitorDaemon() {
 			return // daemon is up to date
 		}
 		// Signal old daemon to stop; it will clean up its PID file on exit
-		_ = monitor.StopDaemon(pidPath)
+		if err := monitor.StopDaemon(pidPath); err != nil {
+			debug.Error("ensureMonitorDaemon: stop old daemon: %v", err)
+		}
 	}
 
 	// Wait for old PID file to be released (up to 500ms)
@@ -138,9 +149,13 @@ func ensureMonitorDaemon() {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
-	_ = cmd.Start()
+	if err := cmd.Start(); err != nil {
+		debug.Error("ensureMonitorDaemon: start daemon: %v", err)
+	}
 	if cmd.Process != nil {
-		_ = cmd.Process.Release()
+		if err := cmd.Process.Release(); err != nil {
+			debug.Error("ensureMonitorDaemon: release process: %v", err)
+		}
 	}
 }
 

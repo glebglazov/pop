@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
@@ -256,7 +257,9 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			}
 			if !noHistory {
 				hist.Record(result.Selected.Path)
-				hist.Save()
+				if err := hist.Save(); err != nil {
+					debug.Error("select: save history: %v", err)
+				}
 			}
 			if tmuxCDPane != "" {
 				return sendCDToPane(tmuxCDPane, result.Selected.Path)
@@ -269,7 +272,9 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			}
 			if !noHistory {
 				hist.Record(result.Selected.Path)
-				hist.Save()
+				if err := hist.Save(); err != nil {
+					debug.Error("select: save history: %v", err)
+				}
 			}
 			return openTmuxWindow(result.Selected)
 
@@ -287,7 +292,9 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		case ui.ActionReset:
 			if result.Selected != nil && !isStandaloneSession(*result.Selected) {
 				hist.Remove(result.Selected.Path)
-				hist.Save()
+				if err := hist.Save(); err != nil {
+					debug.Error("select: save history: %v", err)
+				}
 				baseItems = sortBaseItemsByHistory(baseItems, hist)
 			}
 			// No-op for standalone sessions; continue loop
@@ -307,7 +314,9 @@ func runSelect(cmd *cobra.Command, args []string) error {
 						histPath = sessionHistoryPath(sessionName, hist)
 					}
 					hist.Record(histPath)
-					hist.Save()
+					if err := hist.Save(); err != nil {
+						debug.Error("select: save history: %v", err)
+					}
 				}
 				return switchToTmuxTargetAndZoom(result.Selected.Path)
 			}
@@ -513,6 +522,7 @@ func killTmuxSessionWith(tmux deps.Tmux, name string) {
 	sessionName := sanitizeSessionName(name)
 	_, err := tmux.Command("kill-session", "-t", sessionName)
 	if err != nil {
+		debug.Error("killTmuxSession %s: %v", sessionName, err)
 		fmt.Fprintf(os.Stderr, "Failed to kill session: %s\n", sessionName)
 	} else {
 		fmt.Fprintf(os.Stderr, "Killed session: %s\n", sessionName)
@@ -529,6 +539,7 @@ func executeSelectCustomCommand(command string, item *ui.Item) {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	if err := cmd.Run(); err != nil {
+		debug.Error("select: custom command %q: %v", command, err)
 		fmt.Fprintf(os.Stderr, "Custom command failed: %v\n", err)
 	}
 }

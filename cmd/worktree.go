@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
@@ -107,9 +108,14 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 		case ui.ActionReset:
 			if result.Selected != nil {
-				hist, _ := history.Load(history.DefaultHistoryPath())
+				hist, err := history.Load(history.DefaultHistoryPath())
+				if err != nil {
+					debug.Error("worktree: load history: %v", err)
+				}
 				hist.Remove(result.Selected.Path)
-				hist.Save()
+				if err := hist.Save(); err != nil {
+					debug.Error("worktree: save history: %v", err)
+				}
 			}
 			// Continue loop to show picker again
 
@@ -231,9 +237,14 @@ func buildWorktreeItems(worktrees []project.Worktree, ctx *project.RepoContext, 
 
 func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {
 	// Record selection in history (paths from git are already canonical)
-	hist, _ := history.Load(history.DefaultHistoryPath())
+	hist, err := history.Load(history.DefaultHistoryPath())
+	if err != nil {
+		debug.Error("worktree: load history: %v", err)
+	}
 	hist.Record(item.Path)
-	hist.Save()
+	if err := hist.Save(); err != nil {
+		debug.Error("worktree: save history: %v", err)
+	}
 
 	if switchSession {
 		return switchTmuxSession(ctx, item)
@@ -283,6 +294,7 @@ func deleteWorktree(path string, force bool) {
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
+		debug.Error("deleteWorktree %s: %v: %s", path, err, output)
 		fmt.Fprintf(os.Stderr, "Failed to delete worktree: %s\n%s\n", path, output)
 	} else {
 		fmt.Fprintf(os.Stderr, "Deleted: %s\n", path)
@@ -307,6 +319,7 @@ func executeCustomCommand(command string, item *ui.Item, ctx *project.RepoContex
 	cmd.Stdin = os.Stdin
 
 	if err := cmd.Run(); err != nil {
+		debug.Error("worktree: custom command %q: %v", command, err)
 		fmt.Fprintf(os.Stderr, "Custom command failed: %v\n", err)
 	}
 }

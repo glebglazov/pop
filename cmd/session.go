@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
@@ -30,6 +31,7 @@ func currentTmuxSession() string {
 func currentTmuxSessionWith(tmux deps.Tmux) string {
 	out, err := tmux.Command("display-message", "-p", "#S")
 	if err != nil {
+		debug.Error("currentTmuxSession: %v", err)
 		return ""
 	}
 	return out
@@ -79,10 +81,12 @@ func switchToTmuxTargetAndZoomWith(tmux deps.Tmux, target string) error {
 		return err
 	}
 	// Outside tmux: zoom before attaching since attach takes over stdio
-	tmux.Command(
+	if _, err := tmux.Command(
 		"if-shell", "-t", target, "-F", "#{!=:#{window_zoomed_flag},1}",
 		"resize-pane -Z",
-	)
+	); err != nil {
+		debug.Error("switchToTmuxTargetAndZoom: pre-attach zoom: %v", err)
+	}
 	cmd := exec.Command("tmux", "attach-session", "-t", target)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -103,6 +107,7 @@ func loadMonitorStateWith(d *monitor.Deps) *monitor.State {
 	statePath := monitor.DefaultStatePathWith(d)
 	state, err := monitor.LoadWith(d, statePath)
 	if err != nil {
+		debug.Error("loadMonitorState: %v", err)
 		return nil
 	}
 	return state
@@ -114,6 +119,7 @@ func loadMonitorStateAlways() *monitor.State {
 	statePath := monitor.DefaultStatePath()
 	state, err := monitor.Load(statePath)
 	if err != nil {
+		debug.Error("loadMonitorStateAlways: %v", err)
 		return nil
 	}
 	return state
@@ -218,6 +224,7 @@ func capturePanePreview(paneID string) string {
 func capturePanePreviewWith(tmux deps.Tmux, paneID string) string {
 	out, err := tmux.Command("capture-pane", "-p", "-e", "-S", "-50", "-t", paneID)
 	if err != nil {
+		debug.Error("capturePanePreview %s: %v", paneID, err)
 		return ""
 	}
 	return out
@@ -242,7 +249,9 @@ func dismissAttentionPaneWith(d *monitor.Deps, paneID string) {
 	if entry.Status == monitor.StatusNeedsAttention {
 		entry.Status = monitor.StatusRead
 	}
-	state.SaveWith(d)
+	if err := state.SaveWith(d); err != nil {
+		debug.Error("dismissAttentionPane %s: save: %v", paneID, err)
+	}
 }
 
 // markPaneRead marks a pane as read in the monitor state
@@ -260,7 +269,9 @@ func markPaneReadWith(d *monitor.Deps, paneID string) {
 		return
 	}
 	entry.Status = monitor.StatusRead
-	state.SaveWith(d)
+	if err := state.SaveWith(d); err != nil {
+		debug.Error("markPaneRead %s: save: %v", paneID, err)
+	}
 }
 
 // markPaneAttention marks a pane as needs-attention in the monitor state
@@ -278,7 +289,9 @@ func markPaneAttentionWith(d *monitor.Deps, paneID string) {
 		return
 	}
 	entry.Status = monitor.StatusNeedsAttention
-	state.SaveWith(d)
+	if err := state.SaveWith(d); err != nil {
+		debug.Error("markPaneAttention %s: save: %v", paneID, err)
+	}
 }
 
 // togglePaneFollow toggles the following flag on a pane
@@ -296,7 +309,9 @@ func togglePaneFollowWith(d *monitor.Deps, paneID string) {
 		return
 	}
 	entry.Following = !entry.Following
-	state.SaveWith(d)
+	if err := state.SaveWith(d); err != nil {
+		debug.Error("togglePaneFollow %s: save: %v", paneID, err)
+	}
 }
 
 // setPaneNote sets the note on a pane in the monitor state
@@ -314,7 +329,9 @@ func setPaneNoteWith(d *monitor.Deps, paneID, note string) {
 		return
 	}
 	entry.Note = note
-	state.SaveWith(d)
+	if err := state.SaveWith(d); err != nil {
+		debug.Error("setPaneNote %s: save: %v", paneID, err)
+	}
 }
 
 // unmonitorPane removes a pane from the monitor state entirely
@@ -328,7 +345,9 @@ func unmonitorPaneWith(d *monitor.Deps, paneID string) {
 		return
 	}
 	delete(state.Panes, paneID)
-	state.SaveWith(d)
+	if err := state.SaveWith(d); err != nil {
+		debug.Error("unmonitorPane %s: save: %v", paneID, err)
+	}
 }
 
 // attentionCallbacks returns the standard callbacks for attention sub-views
@@ -350,6 +369,7 @@ func killTmuxSessionByName(sessionName string) {
 func killTmuxSessionByNameWith(tmux deps.Tmux, sessionName string) {
 	_, err := tmux.Command("kill-session", "-t", sessionName)
 	if err != nil {
+		debug.Error("killTmuxSessionByName %s: %v", sessionName, err)
 		fmt.Fprintf(os.Stderr, "Failed to kill session: %s\n", sessionName)
 	} else {
 		fmt.Fprintf(os.Stderr, "Killed session: %s\n", sessionName)

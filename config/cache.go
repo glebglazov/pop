@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/glebglazov/pop/debug"
 )
 
 // GlobCacheEntry stores cached results for a single glob pattern
@@ -39,7 +40,10 @@ func DefaultCachePathWith(d *Deps) string {
 	if xdgCache := d.FS.Getenv("XDG_CACHE_HOME"); xdgCache != "" {
 		return filepath.Join(xdgCache, "pop", "glob_cache.json")
 	}
-	home, _ := d.FS.UserHomeDir()
+	home, err := d.FS.UserHomeDir()
+	if err != nil {
+		debug.Error("DefaultCachePath: UserHomeDir: %v", err)
+	}
 	return filepath.Join(home, ".cache", "pop", "glob_cache.json")
 }
 
@@ -49,11 +53,15 @@ func loadGlobCache(d *Deps, path string) *GlobCache {
 
 	data, err := d.FS.ReadFile(path)
 	if err != nil {
+		debug.Error("loadGlobCache: read %s: %v", path, err)
 		return cache
 	}
 
 	var loaded GlobCache
 	if err := json.Unmarshal(data, &loaded); err != nil || loaded.Version != 1 {
+		if err != nil {
+			debug.Error("loadGlobCache: unmarshal %s: %v", path, err)
+		}
 		return cache
 	}
 
@@ -68,15 +76,19 @@ func loadGlobCache(d *Deps, path string) *GlobCache {
 func saveGlobCache(d *Deps, path string, cache *GlobCache) {
 	dir := filepath.Dir(path)
 	if err := d.FS.MkdirAll(dir, 0755); err != nil {
+		debug.Error("saveGlobCache: mkdir %s: %v", dir, err)
 		return
 	}
 
 	data, err := json.MarshalIndent(cache, "", "  ")
 	if err != nil {
+		debug.Error("saveGlobCache: marshal: %v", err)
 		return
 	}
 
-	d.FS.WriteFile(path, data, 0644)
+	if err := d.FS.WriteFile(path, data, 0644); err != nil {
+		debug.Error("saveGlobCache: write %s: %v", path, err)
+	}
 }
 
 // isCacheEntryValid checks if a cached glob entry is still valid by comparing

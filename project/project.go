@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
 )
 
@@ -71,7 +72,10 @@ func DetectRepoContextWith(d *Deps) (*RepoContext, error) {
 	// Check git-common-dir for worktree of bare repo
 	commonDir, err := d.Git.Command("rev-parse", "--git-common-dir")
 	if err == nil && commonDir != "" {
-		isBare, _ := d.Git.CommandInDir(commonDir, "config", "--get", "core.bare")
+		isBare, err := d.Git.CommandInDir(commonDir, "config", "--get", "core.bare")
+		if err != nil {
+			debug.Error("DetectRepoContext: git config core.bare: %v", err)
+		}
 		if isBare == "true" {
 			gitRoot := filepath.Dir(commonDir)
 			return &RepoContext{
@@ -159,11 +163,17 @@ func TmuxSessionName(ctx *RepoContext, worktreeName string) string {
 }
 
 func findBareRootWith(d *Deps) string {
-	dir, _ := d.FS.Getwd()
+	dir, err := d.FS.Getwd()
+	if err != nil {
+		debug.Error("findBareRoot: Getwd: %v", err)
+	}
 	for dir != "/" {
 		gitDir := filepath.Join(dir, ".git")
 		if info, err := d.FS.Stat(gitDir); err == nil && info.IsDir() {
-			isBare, _ := d.Git.CommandInDir(dir, "config", "--get", "core.bare")
+			isBare, err := d.Git.CommandInDir(dir, "config", "--get", "core.bare")
+			if err != nil {
+				debug.Error("findBareRoot: git config core.bare in %s: %v", dir, err)
+			}
 			if isBare == "true" {
 				return dir
 			}

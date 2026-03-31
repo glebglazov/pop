@@ -27,6 +27,7 @@ func Execute() {
 	defer debug.Close()
 
 	if err := rootCmd.Execute(); err != nil {
+		debug.Error("%v", err)
 		os.Exit(1)
 	}
 }
