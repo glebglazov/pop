@@ -10,7 +10,7 @@ build:
 
 install: build
 	cp -f pop $(PREFIX)/bin/pop
-	codesign --force --sign - $(PREFIX)/bin/pop
+	command -v codesign >/dev/null 2>&1 && codesign --force --sign - $(PREFIX)/bin/pop || true
 
 test:
 	go test ./...
