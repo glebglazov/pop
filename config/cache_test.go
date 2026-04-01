@@ -557,6 +557,67 @@ func TestExpandProjectsWith_CacheMiss_MtimeChanged(t *testing.T) {
 	}
 }
 
+func TestExpandGlobCached_EmptyResultsNotCached(t *testing.T) {
+	now := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	d := &Deps{
+		FS: &deps.MockFileSystem{
+			StatFunc: func(path string) (os.FileInfo, error) {
+				if path == "/home/user/dev" {
+					return deps.MockFileInfo{IsDirVal: true, ModTimeVal: now}, nil
+				}
+				return nil, os.ErrNotExist
+			},
+			EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
+			DirFSFunc: func(dir string) fs.FS {
+				return &deps.MockFS{Dirs: map[string][]string{".": {}}}
+			},
+		},
+	}
+
+	cache := &GlobCache{Version: 1, Entries: make(map[string]GlobCacheEntry)}
+
+	// First call: empty directory, should return nothing
+	matches, updated, err := expandGlobCached(d, "/home/user/dev/*", cache)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Errorf("got %d matches, want 0", len(matches))
+	}
+	if !updated {
+		t.Error("expected updated=true")
+	}
+
+	// Empty results should NOT be stored in cache
+	if _, ok := cache.Entries["/home/user/dev/*"]; ok {
+		t.Error("empty glob results should not be cached")
+	}
+
+	// Second call with a populated directory should re-glob (not return stale empty)
+	laterTime := now.Add(time.Hour)
+	d.FS = &deps.MockFileSystem{
+		StatFunc: func(path string) (os.FileInfo, error) {
+			if path == "/home/user/dev" {
+				return deps.MockFileInfo{IsDirVal: true, ModTimeVal: laterTime}, nil
+			}
+			return nil, os.ErrNotExist
+		},
+		EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
+		DirFSFunc: func(dir string) fs.FS {
+			return &deps.MockFS{Dirs: map[string][]string{".": {"project1"}}}
+		},
+	}
+
+	matches, _, err = expandGlobCached(d, "/home/user/dev/*", cache)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(matches) != 1 || matches[0] != "/home/user/dev/project1" {
+		t.Errorf("got matches %v, want [/home/user/dev/project1]", matches)
+	}
+}
+
 func TestExpandProjectsWith_ExactPathsSkipCache(t *testing.T) {
 	d := &Deps{
 		FS: &deps.MockFileSystem{

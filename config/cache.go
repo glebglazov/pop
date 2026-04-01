@@ -122,6 +122,14 @@ func expandGlobCached(d *Deps, pattern string, cache *GlobCache) ([]string, bool
 		return nil, true, err
 	}
 
+	// Don't cache empty results — the directory may not exist yet or may be
+	// temporarily empty. Re-globbing is cheap and avoids stale empty entries
+	// that depend on mtime detection to recover.
+	if len(matches) == 0 {
+		delete(cache.Entries, pattern)
+		return nil, true, nil
+	}
+
 	// Determine the pattern portion (after base split)
 	_, pat := doublestar.SplitPattern(pattern)
 
