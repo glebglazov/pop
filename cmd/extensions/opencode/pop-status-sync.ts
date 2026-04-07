@@ -2,32 +2,72 @@
  * pop-status-sync
  *
  * opencode plugin that keeps the surrounding pop tmux pane's status in sync
- * with the agent's lifecycle. Two states:
- *   - working          → opencode is busy (user submitted input, or a tool is running)
- *   - needs_attention  → opencode is idle, awaiting the user
+ * with the agent's lifecycle:
+ *   - working         → opencode is busy (a tool is running / agent is mid-turn)
+ *   - needs_attention → opencode finished a turn, awaiting the user
+ *
+ * `idle` is also sent on plugin load and on session.created/deleted, but only
+ * as housekeeping: `pop pane set-status idle` is a no-op for untracked panes,
+ * so it cannot pollute the dashboard. For already-tracked panes it clears any
+ * stale "working" status left over from a crashed previous run.
  *
  * Installed by `pop integrate opencode` to ~/.config/opencode/plugins/pop-status-sync.ts.
  */
 
 export const PopStatusSync = async ({ $ }) => {
-	const setStatus = (status: "working" | "needs_attention") => {
+	const setStatus = (status: "idle" | "working" | "needs_attention") => {
 		// Fire-and-forget; swallow errors so a missing `pop` binary never
 		// breaks the agent.
 		$`pop pane set-status ${status}`.catch(() => {});
+	};
+
+	// Clear any stale "working" status left over from a previous run of the
+	// plugin in this pane. Pop ignores this for untracked panes, so it cannot
+	// register a brand-new pane and skew the dashboard sort.
+	setStatus("idle");
+
+	// Dedupe redundant transitions: `tool.execute.before` (named hook) and
+	// `session.status` (event handler) can both fire for the same busy period,
+	// but the named hook arrives first so we get a snappier transition.
+	let working = false;
+	const markWorking = () => {
+		if (!working) {
+			working = true;
+			setStatus("working");
+		}
+	};
+	const markNeedsAttention = () => {
+		working = false;
+		setStatus("needs_attention");
+	};
+	const markIdle = () => {
+		working = false;
+		setStatus("idle");
 	};
 
 	return {
 		event: async ({ event }) => {
 			switch (event.type) {
 			case "session.created":
-			case "session.idle":
-				setStatus("needs_attention");
+			case "session.deleted":
+				// Housekeeping only — see top-of-file note about `idle`.
+				markIdle();
 				break;
-			case "tool.execute.before":
-			case "tui.prompt.append":
-				setStatus("working");
+			case "session.idle":
+				// Agent finished a turn — flag the user.
+				markNeedsAttention();
+				break;
+			case "session.status":
+				if (event.properties.status.type === "busy") {
+					markWorking();
+				} else if (event.properties.status.type === "idle") {
+					markNeedsAttention();
+				}
 				break;
 			}
+		},
+		"tool.execute.before": () => {
+			markWorking();
 		},
 	};
 };
