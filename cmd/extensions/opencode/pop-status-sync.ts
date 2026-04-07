@@ -17,24 +17,17 @@ export const PopStatusSync = async ({ $ }) => {
 	};
 
 	return {
-		// User submitted input → working
-		"tui.prompt.append": async () => {
-			setStatus("working");
-		},
-
-		// Tool execution starting → working
-		"tool.execute.before": async () => {
-			setStatus("working");
-		},
-
-		// Agent became idle → needs_attention
-		"session.idle": async () => {
-			setStatus("needs_attention");
-		},
-
-		// Session started → reset to idle
-		"session.created": async () => {
-			setStatus("needs_attention");
+		event: async ({ event }) => {
+			switch (event.type) {
+			case "session.created":
+			case "session.idle":
+				setStatus("needs_attention");
+				break;
+			case "tool.execute.before":
+			case "tui.prompt.append":
+				setStatus("working");
+				break;
+			}
 		},
 	};
 };
