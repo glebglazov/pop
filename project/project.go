@@ -77,7 +77,12 @@ func DetectRepoContextWith(d *Deps) (*RepoContext, error) {
 			debug.Error("DetectRepoContext: git config core.bare: %v", err)
 		}
 		if isBare == "true" {
-			gitRoot := filepath.Dir(commonDir)
+			// For standard bare repos, commonDir IS the repo root.
+			// For bare repos with a .git subdirectory, commonDir points to .git.
+			gitRoot := commonDir
+			if filepath.Base(commonDir) == ".git" {
+				gitRoot = filepath.Dir(commonDir)
+			}
 			return &RepoContext{
 				GitRoot:  gitRoot,
 				RepoName: filepath.Base(gitRoot),

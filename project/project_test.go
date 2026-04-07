@@ -225,6 +225,52 @@ func TestDetectRepoContextWith_BareRepo(t *testing.T) {
 	}
 }
 
+func TestDetectRepoContextWith_StandardBareRepo(t *testing.T) {
+	// Standard bare repo layout: repo dir IS the git dir (no .git subdirectory).
+	// User is in a linked worktree outside the bare repo tree.
+	// findBareRootWith fails (no .git dir in parents), falls through to --git-common-dir.
+	// git-common-dir returns the bare repo path itself (not a .git subpath).
+	d := &Deps{
+		Git: &deps.MockGit{
+			CommandFunc: func(args ...string) (string, error) {
+				if len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir" {
+					return "/repos/game_server.git", nil
+				}
+				return "", fmt.Errorf("not needed")
+			},
+			CommandInDirFunc: func(dir string, args ...string) (string, error) {
+				if len(args) >= 2 && args[0] == "config" && args[1] == "--get" {
+					return "true", nil
+				}
+				return "", nil
+			},
+		},
+		FS: &deps.MockFileSystem{
+			GetwdFunc: func() (string, error) {
+				return "/external/worktree/feature-branch", nil
+			},
+			StatFunc: func(path string) (os.FileInfo, error) {
+				// No .git directory anywhere in parent chain
+				return nil, os.ErrNotExist
+			},
+		},
+	}
+
+	ctx, err := DetectRepoContextWith(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ctx.IsBare {
+		t.Error("expected IsBare to be true")
+	}
+	if ctx.GitRoot != "/repos/game_server.git" {
+		t.Errorf("expected GitRoot '/repos/game_server.git', got %q", ctx.GitRoot)
+	}
+	if ctx.RepoName != "game_server.git" {
+		t.Errorf("expected RepoName 'game_server.git', got %q", ctx.RepoName)
+	}
+}
+
 func TestDetectRepoContextWith_RegularRepo(t *testing.T) {
 	d := &Deps{
 		Git: &deps.MockGit{
