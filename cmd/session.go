@@ -230,8 +230,9 @@ func capturePanePreviewWith(tmux deps.Tmux, paneID string) string {
 	return out
 }
 
-// dismissAttentionPane transitions a pane from needs_attention to read.
-// Unlike markPaneRead, this is a no-op for panes in other states.
+// dismissAttentionPane transitions a pane from needs_attention to idle and
+// records the visit time. Unlike markPaneRead, the status flip is a no-op for
+// panes in other states (the visit time is still recorded).
 func dismissAttentionPane(paneID string) {
 	dismissAttentionPaneWith(monitor.DefaultDeps(), paneID)
 }
@@ -247,14 +248,16 @@ func dismissAttentionPaneWith(d *monitor.Deps, paneID string) {
 	}
 	entry.LastVisited = time.Now()
 	if entry.Status == monitor.StatusNeedsAttention {
-		entry.Status = monitor.StatusRead
+		entry.Status = monitor.StatusIdle
 	}
 	if err := state.SaveWith(d); err != nil {
 		debug.Error("dismissAttentionPane %s: save: %v", paneID, err)
 	}
 }
 
-// markPaneRead marks a pane as read in the monitor state
+// markPaneRead marks a pane as idle in the monitor state. The function name
+// is kept for historical reasons; "read" was renamed to "idle" but callers
+// were not updated to minimize churn.
 func markPaneRead(paneID string) {
 	markPaneReadWith(monitor.DefaultDeps(), paneID)
 }
@@ -268,7 +271,7 @@ func markPaneReadWith(d *monitor.Deps, paneID string) {
 	if !ok {
 		return
 	}
-	entry.Status = monitor.StatusRead
+	entry.Status = monitor.StatusIdle
 	if err := state.SaveWith(d); err != nil {
 		debug.Error("markPaneRead %s: save: %v", paneID, err)
 	}

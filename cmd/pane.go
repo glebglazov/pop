@@ -428,26 +428,29 @@ var paneSetStatusCmd = &cobra.Command{
 	Long: `Set the monitoring status of a tmux pane.
 
 If pane_id is omitted, uses $TMUX_PANE from the environment.
-The pane is auto-registered on first status change.
+The pane is auto-registered on the first call with any status.
 
-Valid statuses: working, needs_attention, read.
+Valid statuses: working, needs_attention, idle.
+"read" is accepted as a deprecated alias for "idle".
 
 State transitions:
-  working → needs_attention   Agent stopped or sent a notification
-  working → read              No-op (already not flagged)
-  needs_attention → read      User has seen the output
-  needs_attention → working   Agent resumed work
-  read → working              Agent resumed work
+  working         → needs_attention   Agent stopped or sent a notification
+  working         → idle              User has seen the output / agent calm
+  needs_attention → idle              User has seen the output
+  needs_attention → working           Agent resumed work
+  idle            → working           Agent resumed work
+  idle            → needs_attention   Agent has output
 
 Auto-registration:
   If the pane is not yet tracked, it is auto-registered on the first
-  call with working or needs_attention. A read status on an untracked
-  pane is a no-op — there is nothing to mark as read.
+  call with any status. The new entry is seeded with LastVisited=now
+  so it sorts to the bottom of its status group in the dashboard
+  (closest to the cursor).
 
 Special behavior:
   When [pane_monitoring] dismiss_attention_in_active_pane = true,
   if the pane is currently active (visible to the user) and the
-  requested status is needs_attention, it is downgraded to read
+  requested status is needs_attention, it is downgraded to idle
   automatically — the user is already looking at it.`,
 	Args:   cobra.RangeArgs(1, 2),
 	Hidden: true,
@@ -471,13 +474,18 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 	defer debug.Close()
 
 	var paneID string
-	var status monitor.PaneStatus
+	var rawStatus string
 	if len(args) == 2 {
 		paneID = args[0]
-		status = monitor.PaneStatus(args[1])
+		rawStatus = args[1]
 	} else {
 		paneID = os.Getenv("TMUX_PANE")
-		status = monitor.PaneStatus(args[0])
+		rawStatus = args[0]
+	}
+	// Normalize the deprecated "read" alias to the canonical "idle".
+	status := monitor.PaneStatus(rawStatus)
+	if status == "read" {
+		status = monitor.StatusIdle
 	}
 	if source != "" && cfg.ShouldIgnoreStatusFrom(source) {
 		return nil
@@ -487,9 +495,10 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 		return nil
 	}
 
-	// read is high-frequency and usually a no-op — skip logging entirely
-	// to avoid noise. Only log when we actually change state (below).
-	if status != monitor.StatusRead {
+	// idle is high-frequency (agent integrations call it eagerly on plugin
+	// load and on every session.idle / agent_end event) — skip logging to
+	// avoid noise. Only log when we actually change state (below).
+	if status != monitor.StatusIdle {
 		debug.Log("[set-status] %s: invoked with %s", paneID, status)
 	}
 
@@ -502,43 +511,55 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 
 	entry, ok := state.Panes[paneID]
 	if !ok {
-		// Only auto-register for actionable statuses
-		if status == monitor.StatusRead {
-			return nil
-		}
-		// Auto-register: look up the tmux session for this pane
+		// Auto-register: look up the tmux session for this pane.
 		session, err := tmuxPaneSessionWith(tmux, paneID)
 		if err != nil {
 			debug.Error("[set-status] %s: failed to look up session, skipping: %v", paneID, err)
 			return nil
 		}
 		debug.Log("[set-status] %s: auto-registering in session=%s with status=%s", paneID, session, status)
+		now := time.Now()
 		state.Panes[paneID] = &monitor.PaneEntry{
 			PaneID:    paneID,
 			Session:   session,
 			Status:    status,
-			UpdatedAt: time.Now(),
+			UpdatedAt: now,
+			// Seed LastVisited so the pane sorts to the bottom of its
+			// status group (closest to the cursor) on first appearance,
+			// rather than the top (farthest from the cursor) which is
+			// what an unset zero-value would do under the ascending
+			// sort in cmd/dashboard.go:sortDashboardPanes.
+			LastVisited: now,
 		}
 		return state.Save()
 	}
 
-	// For read status: always record the visit, but only transition from needs_attention
-	if status == monitor.StatusRead {
+	// For idle: always record the visit. Unlike the old "read" semantics
+	// (which short-circuited and refused to transition working → read),
+	// the merged idle should actually update the status field too — this
+	// is what lets agent integrations clear a stale "working" status left
+	// over from a crashed previous run by calling setStatus("idle") on
+	// plugin load.
+	visitedNow := false
+	if status == monitor.StatusIdle {
 		entry.LastVisited = time.Now()
-		if entry.Status != monitor.StatusNeedsAttention {
-			return state.Save()
-		}
+		visitedNow = true
 	}
 
-	// If configured, treat needs_attention as read when the user is already
+	// If configured, treat needs_attention as idle when the user is already
 	// looking at the pane — they can see the output in real time.
 	if cfg.DismissAttentionInActivePane() && status == monitor.StatusNeedsAttention && isActiveTmuxPaneWith(tmux, paneID) {
-		debug.Log("[set-status] %s: needs_attention on active pane — downgrading to read", paneID)
-		status = monitor.StatusRead
+		debug.Log("[set-status] %s: needs_attention on active pane — downgrading to idle", paneID)
+		status = monitor.StatusIdle
 	}
 
 	if entry.Status == status {
-		return nil // no change
+		// Status unchanged. If we just updated LastVisited, still persist
+		// the change so the dashboard sort sees the new visit time.
+		if visitedNow {
+			return state.Save()
+		}
+		return nil
 	}
 
 	debug.Log("[set-status] %s (session=%s): %s → %s", paneID, entry.Session, entry.Status, status)

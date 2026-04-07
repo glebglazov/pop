@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
@@ -363,6 +364,163 @@ func TestRunPaneCreateWith(t *testing.T) {
 	})
 }
 
+func TestRunPaneSetStatusWith_IdleAutoRegistersWithSeededLastVisited(t *testing.T) {
+	// `set-status idle` on an untracked pane must auto-register it (so
+	// agent integrations like opencode/pi that eagerly call setStatus("idle")
+	// on plugin load can make their pane appear in the dashboard right
+	// away) AND seed LastVisited to "now" so the new entry sorts to the
+	// bottom of the idle group (closest to the cursor) instead of the top.
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			return "test-session", nil
+		},
+	}
+	cfg := &config.Config{}
+
+	before := time.Now()
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%9", "idle"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	after := time.Now()
+
+	state := loadState(t, statePath)
+	entry, ok := state.Panes["%9"]
+	if !ok {
+		t.Fatal("expected %9 to be auto-registered after idle")
+	}
+	if entry.Status != monitor.StatusIdle {
+		t.Errorf("status = %q, want %q", entry.Status, monitor.StatusIdle)
+	}
+	if entry.LastVisited.Before(before) || entry.LastVisited.After(after) {
+		t.Errorf("LastVisited = %v, want between %v and %v", entry.LastVisited, before, after)
+	}
+}
+
+func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
+	// "read" is the deprecated CLI alias for "idle". Calling
+	// `set-status read` must behave identically to `set-status idle` —
+	// auto-register and persist as monitor.StatusIdle, never as a
+	// freestanding "read" status.
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			return "test-session", nil
+		},
+	}
+	cfg := &config.Config{}
+
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%5", "read"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	state := loadState(t, statePath)
+	entry, ok := state.Panes["%5"]
+	if !ok {
+		t.Fatal("expected %5 to be auto-registered after read alias")
+	}
+	if entry.Status != monitor.StatusIdle {
+		t.Errorf("status = %q, want %q (read should be normalized to idle)", entry.Status, monitor.StatusIdle)
+	}
+}
+
+func TestRunPaneSetStatusWith_AutoRegisterSeedsLastVisited(t *testing.T) {
+	// On first registration, LastVisited must be seeded to "now" so the
+	// new pane sorts to the bottom of its status group in the dashboard
+	// (closest to the cursor). Without this, the zero-value LastVisited
+	// would sort the pane to the top of its group (farthest from the
+	// cursor) under the ascending sort in sortDashboardPanes.
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			return "test-session", nil
+		},
+	}
+	cfg := &config.Config{}
+
+	before := time.Now()
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%7", "working"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	after := time.Now()
+
+	state := loadState(t, statePath)
+	entry, ok := state.Panes["%7"]
+	if !ok {
+		t.Fatal("expected %7 to be auto-registered")
+	}
+	if entry.LastVisited.IsZero() {
+		t.Errorf("expected LastVisited to be seeded on auto-register, got zero value")
+	}
+	if entry.LastVisited.Before(before) || entry.LastVisited.After(after) {
+		t.Errorf("LastVisited = %v, want between %v and %v", entry.LastVisited, before, after)
+	}
+}
+
+func TestRunPaneSetStatusWith_IdleUpdatesRegisteredPane(t *testing.T) {
+	// The flip side of IdleDoesNotAutoRegister: a pane that IS already
+	// tracked should still be transitioned to idle. This is what lets the
+	// extensions clear a stale "working" status (e.g. left over from a
+	// crashed previous run) by calling setStatus("idle") on plugin load.
+	statePath := setupStateFile(t, "%1", monitor.StatusWorking)
+
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			return "test", nil
+		},
+	}
+	cfg := &config.Config{}
+
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%1", "idle"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	state := loadState(t, statePath)
+	entry, ok := state.Panes["%1"]
+	if !ok {
+		t.Fatal("expected %1 to remain in state")
+	}
+	if entry.Status != monitor.StatusIdle {
+		t.Errorf("got status %q, want %q", entry.Status, monitor.StatusIdle)
+	}
+}
+
 func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
 	activeTmux := &deps.MockTmux{
 		CommandFunc: func(args ...string) (string, error) {
@@ -403,8 +561,8 @@ func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
 		}
 
 		state := loadState(t, statePath)
-		if state.Panes["%1"].Status != monitor.StatusRead {
-			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusRead)
+		if state.Panes["%1"].Status != monitor.StatusIdle {
+			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusIdle)
 		}
 	})
 

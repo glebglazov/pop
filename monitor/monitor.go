@@ -19,8 +19,14 @@ type PaneStatus string
 const (
 	StatusWorking        PaneStatus = "working"
 	StatusNeedsAttention PaneStatus = "needs_attention"
-	StatusRead           PaneStatus = "read"
+	StatusIdle           PaneStatus = "idle"
 	StatusUnknown        PaneStatus = "unknown"
+
+	// legacyStatusRead is the old name for StatusIdle, accepted as a CLI
+	// alias and migrated transparently when loading state files written
+	// by older versions of pop. Kept unexported because new code should
+	// always use StatusIdle directly.
+	legacyStatusRead PaneStatus = "read"
 )
 
 // PaneEntry represents a single monitored pane
@@ -36,9 +42,9 @@ type PaneEntry struct {
 
 // State holds the full monitor state
 type State struct {
-	Panes             map[string]*PaneEntry `json:"panes"`
+	Panes              map[string]*PaneEntry `json:"panes"`
 	DashboardFollowing bool                  `json:"dashboard_following,omitempty"`
-	path              string
+	path               string
 }
 
 // Deps holds external dependencies for the monitor package
@@ -115,6 +121,16 @@ func LoadWith(d *Deps, path string) (*State, error) {
 	}
 	if s.Panes == nil {
 		s.Panes = make(map[string]*PaneEntry)
+	}
+
+	// Migrate legacy "read" status to "idle". The two were merged: "idle"
+	// is the canonical name and "read" is kept only as a CLI alias and a
+	// state-file alias for backwards compat. Rewriting in-memory means the
+	// next state.Save() will persist the corrected value.
+	for _, entry := range s.Panes {
+		if entry.Status == legacyStatusRead {
+			entry.Status = StatusIdle
+		}
 	}
 
 	return s, nil

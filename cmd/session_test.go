@@ -278,8 +278,8 @@ func TestMarkPaneReadWith(t *testing.T) {
 		if !ok {
 			t.Fatal("pane %1 not found after mark read")
 		}
-		if entry.Status != monitor.StatusRead {
-			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusRead)
+		if entry.Status != monitor.StatusIdle {
+			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusIdle)
 		}
 	})
 
@@ -483,7 +483,7 @@ func TestUnmonitorPaneWith(t *testing.T) {
 }
 
 func TestDismissAttentionPaneWith(t *testing.T) {
-	t.Run("transitions needs_attention to read and sets LastVisited", func(t *testing.T) {
+	t.Run("transitions needs_attention to idle and sets LastVisited", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
 			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusNeedsAttention},
 		})
@@ -495,8 +495,8 @@ func TestDismissAttentionPaneWith(t *testing.T) {
 			t.Fatal("expected non-nil state")
 		}
 		entry := state.Panes["%1"]
-		if entry.Status != monitor.StatusRead {
-			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusRead)
+		if entry.Status != monitor.StatusIdle {
+			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusIdle)
 		}
 		if entry.LastVisited.IsZero() {
 			t.Error("expected LastVisited to be set")
@@ -537,7 +537,7 @@ func TestDismissAttentionPaneWith(t *testing.T) {
 func TestMarkPaneAttentionWith(t *testing.T) {
 	t.Run("marks pane as needs_attention", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
-			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusRead},
+			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusIdle},
 		})
 
 		markPaneAttentionWith(d, "%1")
@@ -551,7 +551,7 @@ func TestMarkPaneAttentionWith(t *testing.T) {
 
 	t.Run("no-op for unknown pane", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
-			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusRead},
+			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusIdle},
 		})
 		markPaneAttentionWith(d, "%99") // should not panic
 	})

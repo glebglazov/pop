@@ -212,7 +212,7 @@ func TestFollowingFieldRoundTrip(t *testing.T) {
 	s := &State{
 		Panes: map[string]*PaneEntry{
 			"%5": {PaneID: "%5", Session: "proj", Status: StatusWorking, Following: true},
-			"%6": {PaneID: "%6", Session: "proj2", Status: StatusRead, Following: false},
+			"%6": {PaneID: "%6", Session: "proj2", Status: StatusIdle, Following: false},
 		},
 		path: "/test/monitor.json",
 	}
@@ -231,6 +231,42 @@ func TestFollowingFieldRoundTrip(t *testing.T) {
 	}
 	if loaded.Panes["%6"].Following {
 		t.Error("pane %6: Following should be false after round-trip")
+	}
+}
+
+func TestLoadMigratesLegacyReadStatusToIdle(t *testing.T) {
+	// State files written by older versions of pop used "read" as a
+	// distinct status. The two were merged: "idle" is the canonical
+	// name. LoadWith must transparently rewrite "read" entries to
+	// "idle" in memory so the rest of the codebase only ever sees the
+	// canonical value.
+	jsonData := `{"panes":{
+		"%1":{"pane_id":"%1","session":"old-proj","status":"read","updated_at":"2024-01-01T00:00:00Z"},
+		"%2":{"pane_id":"%2","session":"new-proj","status":"idle","updated_at":"2024-01-01T00:00:00Z"},
+		"%3":{"pane_id":"%3","session":"work-proj","status":"working","updated_at":"2024-01-01T00:00:00Z"}
+	}}`
+
+	d := &Deps{
+		FS: &deps.MockFileSystem{
+			ReadFileFunc: func(path string) ([]byte, error) {
+				return []byte(jsonData), nil
+			},
+		},
+	}
+
+	loaded, err := LoadWith(d, "/test/monitor.json")
+	if err != nil {
+		t.Fatalf("LoadWith() error = %v", err)
+	}
+
+	if got := loaded.Panes["%1"].Status; got != StatusIdle {
+		t.Errorf("legacy 'read' entry: status = %q, want %q", got, StatusIdle)
+	}
+	if got := loaded.Panes["%2"].Status; got != StatusIdle {
+		t.Errorf("'idle' entry: status = %q, want %q", got, StatusIdle)
+	}
+	if got := loaded.Panes["%3"].Status; got != StatusWorking {
+		t.Errorf("'working' entry: status = %q, want %q (must not be touched)", got, StatusWorking)
 	}
 }
 
@@ -339,7 +375,7 @@ func TestPanesNeedingAttention(t *testing.T) {
 			panes: map[string]*PaneEntry{
 				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
 				"%2": {PaneID: "%2", Status: StatusWorking},
-				"%3": {PaneID: "%3", Status: StatusRead},
+				"%3": {PaneID: "%3", Status: StatusIdle},
 				"%4": {PaneID: "%4", Status: StatusNeedsAttention},
 			},
 			expected: 2,
@@ -358,7 +394,7 @@ func TestPanesNeedingAttention(t *testing.T) {
 			name: "no attention panes",
 			panes: map[string]*PaneEntry{
 				"%1": {PaneID: "%1", Status: StatusWorking},
-				"%2": {PaneID: "%2", Status: StatusRead},
+				"%2": {PaneID: "%2", Status: StatusIdle},
 			},
 			expected: 0,
 		},
@@ -399,7 +435,7 @@ func TestPanesActive(t *testing.T) {
 			panes: map[string]*PaneEntry{
 				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
 				"%2": {PaneID: "%2", Status: StatusWorking},
-				"%3": {PaneID: "%3", Status: StatusRead},
+				"%3": {PaneID: "%3", Status: StatusIdle},
 				"%4": {PaneID: "%4", Status: StatusUnknown},
 			},
 			expected: 2,
@@ -410,9 +446,9 @@ func TestPanesActive(t *testing.T) {
 			expected: 0,
 		},
 		{
-			name: "only read and unknown",
+			name: "only idle and unknown",
 			panes: map[string]*PaneEntry{
-				"%1": {PaneID: "%1", Status: StatusRead},
+				"%1": {PaneID: "%1", Status: StatusIdle},
 				"%2": {PaneID: "%2", Status: StatusUnknown},
 			},
 			expected: 0,
@@ -446,7 +482,7 @@ func TestPanesAll(t *testing.T) {
 			panes: map[string]*PaneEntry{
 				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
 				"%2": {PaneID: "%2", Status: StatusWorking},
-				"%3": {PaneID: "%3", Status: StatusRead},
+				"%3": {PaneID: "%3", Status: StatusIdle},
 			},
 			expected: 3,
 		},
