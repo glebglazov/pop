@@ -1,5 +1,5 @@
 ---
-description: Manage long-running processes and interactive terminals via named tmux panes. A friendly wrapper around tmux — use it whenever you need to run a process in the background, monitor its output, send it input, or interact with a TUI. Covers dev servers, builds, watchers, REPLs, test runners, log tailing, docker containers, and anything else you'd run in a terminal. Also use this when you need to test or debug programs in a real shell environment — write a script, run it in a pane, capture output, send interactive input, and iterate. Whenever your task involves running something and then inspecting what happened, or sending keystrokes to a running program, reach for pop pane. Run `pop pane --help` to discover all available subcommands.
+description: Manage long-running processes and interactive terminals via named tmux panes, and control pop's pane attention/working status. A friendly wrapper around tmux — use it whenever you need to run a process in the background, monitor its output, send it input, or interact with a TUI. Covers dev servers, builds, watchers, REPLs, test runners, log tailing, docker containers, and anything else you'd run in a terminal. Also use this when you need to test or debug programs in a real shell environment — write a script, run it in a pane, capture output, send interactive input, and iterate. Whenever your task involves running something and then inspecting what happened, sending keystrokes to a running program, or marking another pane as needing attention, reach for pop pane. Run `pop pane --help` to discover all available subcommands.
 ---
 
 # pop pane — Named Tmux Pane Management
@@ -68,6 +68,34 @@ Prints the pane's visible content plus 50 lines of scrollback. ANSI codes are st
 pop pane kill <name>
 ```
 Kills the pane. Remaining panes re-tile automatically.
+
+### Set pane status
+```bash
+pop pane set-status <pane_id> <status>
+```
+Marks a tmux pane in the pop monitor as `working`, `needs_attention`, or `read`. Pane status drives the dashboard (`pop dashboard`) and the unread/attention indicators in the picker.
+
+If you omit `<pane_id>`, the command reads `$TMUX_PANE` from the environment, so it operates on whatever pane it was invoked from. From an agent, you almost always want to pass an explicit pane id.
+
+Statuses:
+- `working` — actively in use; the agent or process is busy
+- `needs_attention` — has output the user should look at
+- `read` — user has acknowledged it (resets the attention flag)
+
+You normally don't have to call this manually — running `pop integrate <agent>` installs hooks/extensions that keep the agent's own pane status in sync. Reach for `set-status` directly when:
+
+- You spawned a long-running process in another pane and want to flag it for attention once it finishes:
+  ```bash
+  ID=$(pop pane create build "npm run build")
+  # ... poll the pane until the build is done ...
+  pop pane set-status "$ID" needs_attention
+  ```
+- You want to clear the attention flag on a pane after acknowledging its output:
+  ```bash
+  pop pane set-status "$ID" read
+  ```
+
+To discover which panes exist and their current ids, use `pop pane list`. To see the full monitor table including each pane's current status, use `pop pane status`.
 
 ## Cross-project targeting
 
