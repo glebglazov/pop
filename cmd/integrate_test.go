@@ -484,7 +484,7 @@ func TestIntegratePi_WritesExtensionAtCorrectPath(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	extPath := filepath.Join("/h", ".pi", "agent", "extensions", "pop-pane-status.ts")
+	extPath := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
 	contents, ok := fs.files[extPath]
 	if !ok {
 		t.Fatalf("expected extension at %s, files: %v", extPath, sortedKeys(fs.files))
@@ -586,7 +586,7 @@ func TestIntegratePi_OverwritesPriorSkillDirectory(t *testing.T) {
 
 func TestIntegratePi_ExtensionWriteError(t *testing.T) {
 	fs := newFakeFS()
-	extPath := filepath.Join("/h", ".pi", "agent", "extensions", "pop-pane-status.ts")
+	extPath := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
 	fs.writeErr[extPath] = errors.New("disk full")
 
 	err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "pi")
@@ -617,5 +617,131 @@ func TestIntegratePi_SkillWriteError(t *testing.T) {
 
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "pi"); err == nil {
 		t.Fatal("expected error from skill write failure")
+	}
+}
+
+// ----- integrateOpencode: directory structure --------------------------------
+
+func TestIntegrateOpencode_WritesPluginAtCorrectPath(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	pluginPath := filepath.Join("/h", ".config", "opencode", "plugins", "pop-status-sync.ts")
+	contents, ok := fs.files[pluginPath]
+	if !ok {
+		t.Fatalf("expected plugin at %s, files: %v", pluginPath, sortedKeys(fs.files))
+	}
+	if !bytes.Contains(contents, []byte(`$` + "`" + `pop pane set-status`)) {
+		t.Error("plugin content does not look like the pop status-sync TS file")
+	}
+	if !bytes.Equal(contents, opencodeExtensionFile) {
+		t.Error("plugin on disk should match the embedded source byte-for-byte")
+	}
+}
+
+func TestIntegrateOpencode_WritesSkillFiles(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// For each embedded source skill, expect a file at
+	//   ~/.config/opencode/agent/pop-<basename>.md
+	skillEntries, _ := skillFiles.ReadDir("skills/pop")
+	for _, entry := range skillEntries {
+		if entry.IsDir() {
+			continue
+		}
+		base := strings.TrimSuffix(entry.Name(), ".md")
+		opencodeName := "pop-" + base
+		skillFile := filepath.Join("/h", ".config", "opencode", "agent", opencodeName+".md")
+
+		if _, ok := fs.files[skillFile]; !ok {
+			t.Errorf("expected skill file at %s, files: %v", skillFile, sortedKeys(fs.files))
+		}
+	}
+}
+
+func TestIntegrateOpencode_DoesNotWriteOutsideOpencodeTree(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for path := range fs.files {
+		if !strings.HasPrefix(path, "/h/.config/opencode/") {
+			t.Errorf("opencode integration wrote a file outside ~/.config/opencode: %s", path)
+		}
+	}
+}
+
+func TestIntegrateOpencode_OverwritesPriorPlugin(t *testing.T) {
+	// Pre-seed a stale plugin file and verify it gets overwritten.
+	fs := newFakeFS()
+	pluginPath := filepath.Join("/h", ".config", "opencode", "plugins", "pop-status-sync.ts")
+	fs.files[pluginPath] = []byte("old plugin content")
+
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !bytes.Equal(fs.files[pluginPath], opencodeExtensionFile) {
+		t.Error("plugin file should have been overwritten with embedded content")
+	}
+}
+
+func TestIntegrateOpencode_PluginWriteError(t *testing.T) {
+	fs := newFakeFS()
+	pluginPath := filepath.Join("/h", ".config", "opencode", "plugins", "pop-status-sync.ts")
+	fs.writeErr[pluginPath] = errors.New("disk full")
+
+	err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode")
+	if err == nil {
+		t.Fatal("expected error from plugin write failure")
+	}
+	if !strings.Contains(err.Error(), "disk full") {
+		t.Errorf("expected wrapped error to mention disk full, got %v", err)
+	}
+}
+
+func TestIntegrateOpencode_SkillWriteError(t *testing.T) {
+	fs := newFakeFS()
+	// Fail the first skill write we attempt.
+	skillEntries, _ := skillFiles.ReadDir("skills/pop")
+	var first string
+	for _, entry := range skillEntries {
+		if !entry.IsDir() {
+			base := strings.TrimSuffix(entry.Name(), ".md")
+			first = filepath.Join("/h", ".config", "opencode", "agent", "pop-"+base+".md")
+			break
+		}
+	}
+	if first == "" {
+		t.Skip("no embedded skills to test against")
+	}
+	fs.writeErr[first] = os.ErrPermission
+
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err == nil {
+		t.Fatal("expected error from skill write failure")
+	}
+}
+
+func TestIntegrateOpencode_CreatesAgentDirectory(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	agentDir := filepath.Join("/h", ".config", "opencode", "agent")
+	if !fs.dirs[agentDir] {
+		t.Errorf("expected mkdirAll of %s", agentDir)
+	}
+}
+
+func TestIntegrateOpencode_AgentNameIsCaseInsensitive(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "OpEnCoDe"); err != nil {
+		t.Errorf("expected case-insensitive agent matching, got error: %v", err)
 	}
 }

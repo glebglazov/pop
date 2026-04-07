@@ -16,8 +16,11 @@ import (
 //go:embed skills/pop/*.md
 var skillFiles embed.FS
 
-//go:embed extensions/pi/pop-pane-status.ts
+//go:embed extensions/pi/pop-status-sync.ts
 var piExtensionFile []byte
+
+//go:embed extensions/opencode/pop-status-sync.ts
+var opencodeExtensionFile []byte
 
 // integrateDeps holds the filesystem operations the integrate command depends
 // on. Production code uses defaultIntegrateDeps; tests inject mocks.
@@ -51,13 +54,16 @@ Supported agents:
             monitoring hooks in ~/.claude/settings.json.
   pi        Install skills at ~/.pi/agent/skills/pop-<name>/SKILL.md and a
             pane monitoring extension at
-            ~/.pi/agent/extensions/pop-pane-status.ts.
+            ~/.pi/agent/extensions/pop-status-sync.ts.
+  opencode  Install skills at ~/.config/opencode/agent/pop-<name>.md and a
+            pane monitoring plugin at
+            ~/.config/opencode/plugins/pop-status-sync.ts.
 
 Re-running the command for an agent is idempotent: existing pop integration
 files for that agent are replaced with the current versions, and unrelated
 hooks/skills are preserved.`,
 	Args:      cobra.ExactArgs(1),
-	ValidArgs: []string{"claude", "pi"},
+	ValidArgs: []string{"claude", "pi", "opencode"},
 	RunE:      runIntegrate,
 }
 
@@ -75,8 +81,10 @@ func runIntegrateWith(d *integrateDeps, agent string) error {
 		return integrateClaude(d)
 	case "pi":
 		return integratePi(d)
+	case "opencode":
+		return integrateOpencode(d)
 	default:
-		return fmt.Errorf("unknown agent %q (expected: claude, pi)", agent)
+		return fmt.Errorf("unknown agent %q (expected: claude, pi, opencode)", agent)
 	}
 }
 
@@ -241,7 +249,7 @@ func installPiExtension(d *integrateDeps, home string) error {
 	if err := d.mkdirAll(extDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create %s: %w", extDir, err)
 	}
-	extPath := filepath.Join(extDir, "pop-pane-status.ts")
+	extPath := filepath.Join(extDir, "pop-status-sync.ts")
 	if err := d.writeFile(extPath, piExtensionFile, 0o644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", extPath, err)
 	}
@@ -322,6 +330,72 @@ func injectFrontmatterName(content, name string) string {
 	// Otherwise insert `name:` directly after the opening `---`.
 	out := append([]string{lines[0], "name: " + name}, lines[1:]...)
 	return strings.Join(out, "\n")
+}
+
+// ----- Opencode integration --------------------------------------------------
+
+func integrateOpencode(d *integrateDeps) error {
+	home, err := d.userHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	if err := installOpencodePlugin(d, home); err != nil {
+		return err
+	}
+	if err := installOpencodeSkills(d, home); err != nil {
+		return err
+	}
+	return nil
+}
+
+// installOpencodePlugin writes the embedded opencode plugin TypeScript file.
+// Opencode auto-discovers any *.ts file under ~/.config/opencode/plugins/ at startup.
+func installOpencodePlugin(d *integrateDeps, home string) error {
+	pluginDir := filepath.Join(home, ".config", "opencode", "plugins")
+	if err := d.mkdirAll(pluginDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", pluginDir, err)
+	}
+	pluginPath := filepath.Join(pluginDir, "pop-status-sync.ts")
+	if err := d.writeFile(pluginPath, opencodeExtensionFile, 0o644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", pluginPath, err)
+	}
+	if d.stdout != nil {
+		fmt.Fprintf(d.stdout, "Installed opencode plugin at %s\n", pluginPath)
+	}
+	return nil
+}
+
+// installOpencodeSkills writes each embedded skill as an opencode agent markdown
+// file under ~/.config/opencode/agent/pop-<basename>.md.
+func installOpencodeSkills(d *integrateDeps, home string) error {
+	entries, err := skillFiles.ReadDir("skills/pop")
+	if err != nil {
+		return fmt.Errorf("failed to read embedded skills: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := skillFiles.ReadFile("skills/pop/" + entry.Name())
+		if err != nil {
+			return fmt.Errorf("failed to read skill %s: %w", entry.Name(), err)
+		}
+		base := strings.TrimSuffix(entry.Name(), ".md")
+		opencodeName := "pop-" + base
+		agentDir := filepath.Join(home, ".config", "opencode", "agent")
+		if err := d.mkdirAll(agentDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", agentDir, err)
+		}
+		dest := filepath.Join(agentDir, opencodeName+".md")
+		if err := d.writeFile(dest, data, 0o644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", dest, err)
+		}
+		if d.stdout != nil {
+			fmt.Fprintf(d.stdout, "  installed opencode agent %s\n", opencodeName)
+		}
+	}
+	return nil
 }
 
 // ----- Shared helpers --------------------------------------------------------

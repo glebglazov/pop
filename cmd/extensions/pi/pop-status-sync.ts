@@ -1,12 +1,12 @@
 /**
- * pop-pane-status
+ * pop-status-sync
  *
  * pi extension that keeps the surrounding pop tmux pane's status in sync with
  * the agent's lifecycle. Two states:
  *   - working          → pi is busy (user submitted input, or a tool is running)
  *   - needs_attention  → pi is idle, awaiting the user
  *
- * Installed by `pop integrate pi` to ~/.pi/agent/extensions/pop-pane-status.ts.
+ * Installed by `pop integrate pi` to ~/.pi/agent/extensions/pop-status-sync.ts.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
