@@ -22,8 +22,43 @@ It integrates with tmux to provide popup-based fuzzy selection of:
   - Git worktrees in the current repository
 
 Configure your projects in ~/.config/pop/config.toml`,
+	Version:       buildVersion(),
 	SilenceUsage:  true,
 	SilenceErrors: true,
+}
+
+// buildVersion reads VCS stamps embedded by `go build` and returns a short
+// commit SHA, optionally suffixed with "-dirty" and the commit timestamp.
+func buildVersion() string {
+	info, ok := runtimedebug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	var rev, when string
+	var dirty bool
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.time":
+			when = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return "dev"
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if dirty {
+		rev += "-dirty"
+	}
+	if when != "" {
+		return rev + " (" + when + ")"
+	}
+	return rev
 }
 
 // Execute runs the root command
