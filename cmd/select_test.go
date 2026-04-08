@@ -1,11 +1,17 @@
 package cmd
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -603,4 +609,230 @@ func TestOpenTmuxWindowWith(t *testing.T) {
 			t.Errorf("selected window = %q, want %q", selectedWindow, "mysession:my_project")
 		}
 	})
+}
+
+// --- expandProjectsWith tests --------------------------------------------
+
+// mockProject describes one project-path entry for buildExpandDeps.
+type mockProject struct {
+	path        string
+	hasWorktree bool     // if true, the path is treated as a bare repo via a .bare dir
+	worktrees   []string // worktree dir names under path (only when hasWorktree)
+	readDirErr  error    // if non-nil, ReadDir on path fails (only when hasWorktree)
+	statPanic   bool     // if true, Stat on path/.bare panics
+}
+
+// buildExpandDeps constructs a project.Deps backed by MockFileSystem that
+// satisfies HasWorktreesWith + ListWorktreesForPathWith for the given mocks.
+func buildExpandDeps(projects []mockProject) *project.Deps {
+	statMap := make(map[string]os.FileInfo)
+	readDirMap := make(map[string][]os.DirEntry)
+	readDirErrs := make(map[string]error)
+	panicStatPaths := make(map[string]bool)
+
+	for _, mp := range projects {
+		if mp.statPanic {
+			panicStatPaths[filepath.Join(mp.path, ".bare")] = true
+			continue
+		}
+		if mp.hasWorktree {
+			statMap[filepath.Join(mp.path, ".bare")] = deps.MockFileInfo{NameVal: ".bare", IsDirVal: true}
+			if mp.readDirErr != nil {
+				readDirErrs[mp.path] = mp.readDirErr
+				continue
+			}
+			var entries []os.DirEntry
+			for _, wt := range mp.worktrees {
+				entries = append(entries, deps.MockDirEntry{NameVal: wt, IsDirVal: true})
+				// Each worktree must have a .git *file* (not dir) to be recognised.
+				statMap[filepath.Join(mp.path, wt, ".git")] = deps.MockFileInfo{NameVal: ".git", IsDirVal: false}
+			}
+			readDirMap[mp.path] = entries
+		}
+		// Regular projects: no statMap entry → HasWorktreesWith returns false
+		// and the goroutine treats the path as a plain directory.
+	}
+
+	return &project.Deps{
+		Git: &deps.MockGit{},
+		FS: &deps.MockFileSystem{
+			StatFunc: func(path string) (os.FileInfo, error) {
+				if panicStatPaths[path] {
+					panic("intentional test panic on " + path)
+				}
+				if info, ok := statMap[path]; ok {
+					return info, nil
+				}
+				return nil, os.ErrNotExist
+			},
+			ReadDirFunc: func(path string) ([]os.DirEntry, error) {
+				if err, ok := readDirErrs[path]; ok {
+					return nil, err
+				}
+				if entries, ok := readDirMap[path]; ok {
+					return entries, nil
+				}
+				return nil, os.ErrNotExist
+			},
+		},
+	}
+}
+
+// expandedNames returns the Name field of every ExpandedProject, sorted for
+// deterministic comparison (goroutine ordering within expandProjectsWith is
+// preserved per path but multiple test projects may interleave).
+func expandedNames(projects []project.ExpandedProject) []string {
+	out := make([]string, len(projects))
+	for i, p := range projects {
+		out[i] = p.Name
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestExpandProjectsWith_AllRegularSucceeds(t *testing.T) {
+	paths := []config.ExpandedPath{
+		{Path: "/home/user/proj-a", DisplayDepth: 1},
+		{Path: "/home/user/proj-b", DisplayDepth: 1},
+		{Path: "/home/user/proj-c", DisplayDepth: 1},
+	}
+	d := buildExpandDeps(nil) // none are bare — default path returns ErrNotExist
+
+	expanded, failed := expandProjectsWith(d, paths)
+
+	if len(failed) != 0 {
+		t.Errorf("expected no failures, got %v", failed)
+	}
+	got := expandedNames(expanded)
+	want := []string{"proj-a", "proj-b", "proj-c"}
+	if !equalStrings(got, want) {
+		t.Errorf("expanded names = %v, want %v", got, want)
+	}
+}
+
+func TestExpandProjectsWith_BareRepoExpandsWorktrees(t *testing.T) {
+	paths := []config.ExpandedPath{
+		{Path: "/home/user/bare-proj", DisplayDepth: 1},
+	}
+	d := buildExpandDeps([]mockProject{
+		{
+			path:        "/home/user/bare-proj",
+			hasWorktree: true,
+			worktrees:   []string{"feature-x", "main"},
+		},
+	})
+
+	expanded, failed := expandProjectsWith(d, paths)
+
+	if len(failed) != 0 {
+		t.Errorf("expected no failures, got %v", failed)
+	}
+	got := expandedNames(expanded)
+	want := []string{"bare-proj/feature-x", "bare-proj/main"}
+	if !equalStrings(got, want) {
+		t.Errorf("expanded names = %v, want %v", got, want)
+	}
+	// All entries should be flagged as worktrees
+	for _, p := range expanded {
+		if !p.IsWorktree {
+			t.Errorf("expected IsWorktree=true for %q", p.Name)
+		}
+	}
+}
+
+func TestExpandProjectsWith_PartialFailureKeepsGoodProjects(t *testing.T) {
+	paths := []config.ExpandedPath{
+		{Path: "/home/user/good-a", DisplayDepth: 1},
+		{Path: "/home/user/broken-bare", DisplayDepth: 1},
+		{Path: "/home/user/good-b", DisplayDepth: 1},
+	}
+	d := buildExpandDeps([]mockProject{
+		{
+			path:        "/home/user/broken-bare",
+			hasWorktree: true,
+			readDirErr:  errors.New("permission denied"),
+		},
+	})
+
+	expanded, failed := expandProjectsWith(d, paths)
+
+	// Good projects survive
+	got := expandedNames(expanded)
+	want := []string{"good-a", "good-b"}
+	if !equalStrings(got, want) {
+		t.Errorf("expanded names = %v, want %v", got, want)
+	}
+
+	// Broken project is reported by its base name
+	if len(failed) != 1 || failed[0] != "broken-bare" {
+		t.Errorf("failed = %v, want [broken-bare]", failed)
+	}
+}
+
+func TestExpandProjectsWith_AllFailedReturnsEmpty(t *testing.T) {
+	paths := []config.ExpandedPath{
+		{Path: "/home/user/broken-1", DisplayDepth: 1},
+		{Path: "/home/user/broken-2", DisplayDepth: 1},
+	}
+	d := buildExpandDeps([]mockProject{
+		{path: "/home/user/broken-1", hasWorktree: true, readDirErr: errors.New("io error")},
+		{path: "/home/user/broken-2", hasWorktree: true, readDirErr: errors.New("io error")},
+	})
+
+	expanded, failed := expandProjectsWith(d, paths)
+
+	if len(expanded) != 0 {
+		t.Errorf("expected zero expanded projects, got %d", len(expanded))
+	}
+	if len(failed) != 2 {
+		t.Errorf("expected 2 failures, got %v", failed)
+	}
+}
+
+func TestExpandProjectsWith_PanicIsCapturedAsFailure(t *testing.T) {
+	paths := []config.ExpandedPath{
+		{Path: "/home/user/exploding", DisplayDepth: 1},
+		{Path: "/home/user/fine", DisplayDepth: 1},
+	}
+	d := buildExpandDeps([]mockProject{
+		{path: "/home/user/exploding", statPanic: true},
+	})
+
+	// Must not crash the test process — recover inside the goroutine catches it.
+	expanded, failed := expandProjectsWith(d, paths)
+
+	// The non-panicking project still expands successfully
+	got := expandedNames(expanded)
+	want := []string{"fine"}
+	if !equalStrings(got, want) {
+		t.Errorf("expanded names = %v, want %v", got, want)
+	}
+
+	// The panicking project is reported as a failure
+	if len(failed) != 1 || failed[0] != "exploding" {
+		t.Errorf("failed = %v, want [exploding]", failed)
+	}
+}
+
+func TestExpandProjectsWith_EmptyInput(t *testing.T) {
+	d := buildExpandDeps(nil)
+	expanded, failed := expandProjectsWith(d, nil)
+	if len(expanded) != 0 {
+		t.Errorf("expected zero expanded, got %d", len(expanded))
+	}
+	if len(failed) != 0 {
+		t.Errorf("expected zero failed, got %v", failed)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

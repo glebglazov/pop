@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	runtimedebug "runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -77,71 +78,10 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no projects found. Check your config at %s", cfgPath)
 	}
 
-	// Expand projects, showing worktrees for bare repos (parallel)
-	type expandResult struct {
-		index    int
-		path     string // source path (for error messages)
-		projects []project.ExpandedProject
-		err      error
-	}
-
-	results := make(chan expandResult, len(paths))
-	var wg sync.WaitGroup
-
-	for i, p := range paths {
-		wg.Add(1)
-		go func(idx int, ep config.ExpandedPath) {
-			defer wg.Done()
-
-			displayName := ui.LastNSegments(ep.Path, ep.DisplayDepth)
-			projectName := filepath.Base(ep.Path)
-			var projects []project.ExpandedProject
-			var expandErr error
-
-			if project.HasWorktrees(ep.Path) {
-				// Bare repo with worktrees - expand to individual worktrees
-				worktrees, err := project.ListWorktreesForPath(ep.Path)
-				if err != nil {
-					expandErr = err
-				} else {
-					for _, wt := range worktrees {
-						projects = append(projects, project.ExpandedProject{
-							Name:        displayName + "/" + wt.Name,
-							Path:        wt.Path,
-							ProjectName: projectName,
-							IsWorktree:  true,
-						})
-					}
-				}
-			} else {
-				// Regular project
-				projects = append(projects, project.ExpandedProject{
-					Name:        displayName,
-					Path:        ep.Path,
-					ProjectName: projectName,
-					IsWorktree:  false,
-				})
-			}
-
-			results <- expandResult{index: idx, path: ep.Path, projects: projects, err: expandErr}
-		}(i, p)
-	}
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	// Collect results maintaining original order
-	resultsByIndex := make(map[int][]project.ExpandedProject)
-	var expansionErrors []string
-	for r := range results {
-		resultsByIndex[r.index] = r.projects
-		if r.err != nil {
-			debug.Error("select: expand %q: %v", r.path, r.err)
-			expansionErrors = append(expansionErrors, filepath.Base(r.path))
-		}
-	}
+	// Expand projects, showing worktrees for bare repos (parallel).
+	// Per-project errors and panics are captured so one bad project can't
+	// crash the whole select flow.
+	expanded, expansionErrors := expandProjects(paths)
 
 	// Get current tmux session name for optional exclusion
 	var excludedSessionNames map[string]bool
@@ -150,16 +90,14 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			excludedSessionNames = map[string]bool{currentSession: true}
 		}
 	}
-
-	var expanded []project.ExpandedProject
-	for i := range paths {
-		for _, ep := range resultsByIndex[i] {
-			// Skip projects whose session name matches the current tmux session
-			if excludedSessionNames[sanitizeSessionName(ep.Name)] {
-				continue
+	if len(excludedSessionNames) > 0 {
+		filtered := expanded[:0]
+		for _, ep := range expanded {
+			if !excludedSessionNames[sanitizeSessionName(ep.Name)] {
+				filtered = append(filtered, ep)
 			}
-			expanded = append(expanded, ep)
 		}
+		expanded = filtered
 	}
 
 	// If every single project failed to expand, we can't start normal
@@ -573,3 +511,98 @@ func sendCDToPaneWith(tmux deps.Tmux, paneID, path string) error {
 	return err
 }
 
+// expandProjects runs expandProjectsWith using the default project dependencies.
+func expandProjects(paths []config.ExpandedPath) ([]project.ExpandedProject, []string) {
+	return expandProjectsWith(project.DefaultDeps(), paths)
+}
+
+// expandProjectsWith expands each configured path into one or more ExpandedProjects
+// in parallel. Bare repos with worktrees are expanded to individual worktrees;
+// regular directories become a single entry. The returned slice preserves the
+// input order. failedNames contains filepath.Base of any paths whose expansion
+// errored or panicked — expansion of other paths continues in both cases.
+func expandProjectsWith(d *project.Deps, paths []config.ExpandedPath) (expanded []project.ExpandedProject, failedNames []string) {
+	type expandResult struct {
+		index    int
+		path     string
+		projects []project.ExpandedProject
+		err      error
+	}
+
+	results := make(chan expandResult, len(paths))
+	var wg sync.WaitGroup
+
+	for i, p := range paths {
+		wg.Add(1)
+		go func(idx int, ep config.ExpandedPath) {
+			defer wg.Done()
+
+			var (
+				projects  []project.ExpandedProject
+				expandErr error
+			)
+
+			// Recover from panics inside the goroutine so one bad project
+			// can't crash the whole process. The panic becomes an error
+			// on the result channel and flows through the existing error
+			// handling below.
+			defer func() {
+				if r := recover(); r != nil {
+					expandErr = fmt.Errorf("panic expanding %s: %v", ep.Path, r)
+					debug.Error("expandProjects: panic on %q: %v\n%s", ep.Path, r, runtimedebug.Stack())
+				}
+				results <- expandResult{index: idx, path: ep.Path, projects: projects, err: expandErr}
+			}()
+
+			displayName := ui.LastNSegments(ep.Path, ep.DisplayDepth)
+			projectName := filepath.Base(ep.Path)
+
+			if project.HasWorktreesWith(d, ep.Path) {
+				// Bare repo with worktrees - expand to individual worktrees
+				worktrees, err := project.ListWorktreesForPathWith(d, ep.Path)
+				if err != nil {
+					expandErr = err
+					return
+				}
+				for _, wt := range worktrees {
+					projects = append(projects, project.ExpandedProject{
+						Name:        displayName + "/" + wt.Name,
+						Path:        wt.Path,
+						ProjectName: projectName,
+						IsWorktree:  true,
+					})
+				}
+			} else {
+				// Regular project
+				projects = append(projects, project.ExpandedProject{
+					Name:        displayName,
+					Path:        ep.Path,
+					ProjectName: projectName,
+					IsWorktree:  false,
+				})
+			}
+		}(i, p)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results maintaining original order
+	resultsByIndex := make(map[int][]project.ExpandedProject, len(paths))
+	for r := range results {
+		resultsByIndex[r.index] = r.projects
+		if r.err != nil {
+			debug.Error("expandProjects: %q: %v", r.path, r.err)
+			failedNames = append(failedNames, filepath.Base(r.path))
+		}
+	}
+
+	// Flatten in original order
+	for i := range paths {
+		expanded = append(expanded, resultsByIndex[i]...)
+	}
+
+	return expanded, failedNames
+}

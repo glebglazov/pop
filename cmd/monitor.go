@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	runtimedebug "runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -158,7 +159,16 @@ func uninstallTmuxAutoReadHooksWith(tmux deps.Tmux) {
 // ensureMonitorDaemon ensures a monitor daemon is running with the current binary.
 // Restarts if the binary is newer than the running daemon.
 // Called automatically by `pop select`.
+//
+// Always invoked in a background goroutine, so panics here must not crash the
+// parent process — a failed daemon startup is non-fatal for the picker flow.
 func ensureMonitorDaemon() {
+	defer func() {
+		if r := recover(); r != nil {
+			debug.Error("ensureMonitorDaemon: panic: %v\n%s", r, runtimedebug.Stack())
+		}
+	}()
+
 	pidPath := monitor.DefaultPIDPath()
 	exe, err := os.Executable()
 	if err != nil {
