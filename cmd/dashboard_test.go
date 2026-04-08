@@ -1,13 +1,98 @@
 package cmd
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
+	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/ui"
 )
+
+// TestBuildDashboardPanes_OnlyAgenticPanes is the end-to-end guard against
+// the "all tmux panes show as idle on dashboard" regression. It drives state
+// through the same code path the real tmux hooks and agent extensions use
+// (runPaneSetStatusWith) and then asserts that buildDashboardPanesWithCurrentPane
+// surfaces ONLY panes that have been actively claimed by an agent — never
+// the panes the user has merely navigated to.
+func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			return "some-session", nil
+		},
+	}
+	cfg := &config.Config{}
+
+	// 1. Simulate the tmux-global auto-read hook firing as the user
+	//    navigates through a handful of panes. None of these are
+	//    agentic — they must NOT appear on the dashboard.
+	for _, paneID := range []string{"%10", "%11", "%12", "%13"} {
+		if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", []string{paneID, "read"}); err != nil {
+			t.Fatalf("tmux-global hook for %s: %v", paneID, err)
+		}
+	}
+
+	// 2. Simulate an opencode plugin eagerly sending idle on plugin
+	//    load for its own pane (%20). This is the "housekeeping" idle
+	//    the extension top-of-file contract documents — it must also
+	//    not register the pane.
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%20", "idle"}); err != nil {
+		t.Fatalf("opencode housekeeping idle: %v", err)
+	}
+
+	// 3. Simulate a real agent claim: claude hook fires working on its
+	//    pane (%7). Pi extension fires needs_attention on its pane (%8).
+	//    Both must register and appear on the dashboard.
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%7", "working"}); err != nil {
+		t.Fatalf("claude working: %v", err)
+	}
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%8", "needs_attention"}); err != nil {
+		t.Fatalf("pi needs_attention: %v", err)
+	}
+
+	// Build the dashboard exactly as runDashboard would.
+	panes := buildDashboardPanesWithCurrentPane("", "", config.DefaultSortCriteria)
+
+	if len(panes) != 2 {
+		t.Fatalf("expected 2 agentic panes on dashboard, got %d: %+v", len(panes), panes)
+	}
+
+	got := map[string]ui.AttentionStatus{}
+	for _, p := range panes {
+		got[p.PaneID] = p.Status
+	}
+	if s, ok := got["%7"]; !ok || s != ui.AttentionWorking {
+		t.Errorf("%%7: got status %v (present=%v), want AttentionWorking", s, ok)
+	}
+	if s, ok := got["%8"]; !ok || s != ui.AttentionNeedsAttention {
+		t.Errorf("%%8: got status %v (present=%v), want AttentionNeedsAttention", s, ok)
+	}
+
+	// Extra belt-and-braces: the non-agentic panes must be absent.
+	for _, paneID := range []string{"%10", "%11", "%12", "%13", "%20"} {
+		if _, ok := got[paneID]; ok {
+			t.Errorf("non-agentic pane %s leaked onto dashboard", paneID)
+		}
+	}
+}
 
 func TestPositionCurrentPane(t *testing.T) {
 	t.Run("untracked pane is injected at end", func(t *testing.T) {

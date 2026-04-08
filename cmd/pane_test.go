@@ -364,12 +364,23 @@ func TestRunPaneCreateWith(t *testing.T) {
 	})
 }
 
-func TestRunPaneSetStatusWith_IdleAutoRegistersWithSeededLastVisited(t *testing.T) {
-	// `set-status idle` on an untracked pane must auto-register it (so
-	// agent integrations like opencode/pi that eagerly call setStatus("idle")
-	// on plugin load can make their pane appear in the dashboard right
-	// away) AND seed LastVisited to "now" so the new entry sorts to the
-	// bottom of the idle group (closest to the cursor) instead of the top.
+func TestRunPaneSetStatusWith_IdleDoesNotAutoRegister(t *testing.T) {
+	// `set-status idle` on an untracked pane must be a no-op: the pane is
+	// NOT added to the monitor state and therefore does NOT appear on the
+	// dashboard.
+	//
+	// This is critical because:
+	//   1. The tmux-global auto-read hook (see cmd/monitor.go) fires
+	//      `pop pane set-status --source tmux-global <pane> read` on every
+	//      pane navigation. If idle auto-registered, every pane the user
+	//      ever visits would pollute the dashboard as an idle entry.
+	//   2. Agent extensions (opencode, pi) eagerly send idle on plugin
+	//      load as housekeeping to clear stale "working" from crashed
+	//      runs. Their top-of-file contract explicitly promises that this
+	//      cannot register new panes.
+	//
+	// Only "agentic" statuses (working / needs_attention) — which only
+	// agent integrations ever send — register a new pane.
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
 	stateDir := filepath.Join(dir, "pop")
@@ -390,19 +401,94 @@ func TestRunPaneSetStatusWith_IdleAutoRegistersWithSeededLastVisited(t *testing.
 	}
 	cfg := &config.Config{}
 
-	before := time.Now()
 	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%9", "idle"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	after := time.Now()
 
 	state := loadState(t, statePath)
-	entry, ok := state.Panes["%9"]
+	if _, ok := state.Panes["%9"]; ok {
+		t.Fatalf("expected %%9 to NOT be auto-registered on idle, but it is: %+v", state.Panes["%9"])
+	}
+	if len(state.Panes) != 0 {
+		t.Errorf("expected empty state, got %d pane(s)", len(state.Panes))
+	}
+}
+
+func TestRunPaneSetStatusWith_TmuxGlobalHookDoesNotPolluteDashboard(t *testing.T) {
+	// Simulates the exact scenario that was polluting the dashboard:
+	// the tmux-global auto-read hook (installed by `pop pane monitor-start`)
+	// fires `pop pane set-status --source tmux-global <pane> read` on every
+	// pane-select/window-change/client-session-change. Running this on a
+	// handful of random pane IDs must NOT add any entries to the monitor
+	// state — the dashboard should stay empty until an actual agent
+	// extension claims one of those panes.
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			return "some-session", nil
+		},
+	}
+	cfg := &config.Config{}
+
+	// Simulate user navigating through a bunch of panes. The hook fires
+	// "read" (normalized to idle) with --source tmux-global for each one.
+	for _, paneID := range []string{"%1", "%2", "%3", "%4", "%42"} {
+		if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", []string{paneID, "read"}); err != nil {
+			t.Fatalf("unexpected error for %s: %v", paneID, err)
+		}
+	}
+
+	state := loadState(t, statePath)
+	if len(state.Panes) != 0 {
+		t.Fatalf("expected dashboard state to stay empty after tmux-global hooks fired, got %d pane(s): %+v", len(state.Panes), state.Panes)
+	}
+
+	// Now simulate an agent extension claiming %2 with a "working" status.
+	// That single pane — and only that one — should appear in the state.
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%2", "working"}); err != nil {
+		t.Fatalf("unexpected error claiming %%2: %v", err)
+	}
+
+	state = loadState(t, statePath)
+	if len(state.Panes) != 1 {
+		t.Fatalf("expected exactly 1 registered pane, got %d: %+v", len(state.Panes), state.Panes)
+	}
+	entry, ok := state.Panes["%2"]
 	if !ok {
-		t.Fatal("expected %9 to be auto-registered after idle")
+		t.Fatalf("expected %%2 to be the registered pane, got: %+v", state.Panes)
+	}
+	if entry.Status != monitor.StatusWorking {
+		t.Errorf("status = %q, want %q", entry.Status, monitor.StatusWorking)
+	}
+
+	// A subsequent tmux-global idle on %2 (already registered) should
+	// update LastVisited but keep the pane in state — this is the
+	// legitimate auto-read path.
+	before := time.Now()
+	if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", []string{"%2", "read"}); err != nil {
+		t.Fatalf("unexpected error on auto-read: %v", err)
+	}
+	after := time.Now()
+
+	state = loadState(t, statePath)
+	entry, ok = state.Panes["%2"]
+	if !ok {
+		t.Fatal("expected %2 to remain registered after auto-read")
 	}
 	if entry.Status != monitor.StatusIdle {
-		t.Errorf("status = %q, want %q", entry.Status, monitor.StatusIdle)
+		t.Errorf("status after auto-read = %q, want %q", entry.Status, monitor.StatusIdle)
 	}
 	if entry.LastVisited.Before(before) || entry.LastVisited.After(after) {
 		t.Errorf("LastVisited = %v, want between %v and %v", entry.LastVisited, before, after)
@@ -411,9 +497,10 @@ func TestRunPaneSetStatusWith_IdleAutoRegistersWithSeededLastVisited(t *testing.
 
 func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	// "read" is the deprecated CLI alias for "idle". Calling
-	// `set-status read` must behave identically to `set-status idle` —
-	// auto-register and persist as monitor.StatusIdle, never as a
-	// freestanding "read" status.
+	// `set-status read` must behave identically to `set-status idle`:
+	//   - on an untracked pane: no-op (does NOT auto-register)
+	//   - on an already-tracked pane: updates status to idle and
+	//     refreshes LastVisited
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
 	stateDir := filepath.Join(dir, "pop")
@@ -421,8 +508,15 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 		t.Fatal(err)
 	}
 	statePath := filepath.Join(stateDir, "monitor.json")
-	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
-	data, _ := json.Marshal(emptyState)
+	// Pre-register %5 as working to prove that "read" still updates
+	// tracked panes. Pre-register nothing for %6 to prove that "read"
+	// does NOT register new ones.
+	seedState := &monitor.State{
+		Panes: map[string]*monitor.PaneEntry{
+			"%5": {PaneID: "%5", Session: "test-session", Status: monitor.StatusWorking},
+		},
+	}
+	data, _ := json.Marshal(seedState)
 	if err := os.WriteFile(statePath, data, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -434,14 +528,23 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	}
 	cfg := &config.Config{}
 
+	// Untracked pane: "read" must be a no-op.
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%6", "read"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	state := loadState(t, statePath)
+	if _, ok := state.Panes["%6"]; ok {
+		t.Fatal("expected %6 to remain untracked after read alias")
+	}
+
+	// Tracked pane: "read" must transition it to idle.
 	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%5", "read"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	state := loadState(t, statePath)
+	state = loadState(t, statePath)
 	entry, ok := state.Panes["%5"]
 	if !ok {
-		t.Fatal("expected %5 to be auto-registered after read alias")
+		t.Fatal("expected %5 to remain tracked")
 	}
 	if entry.Status != monitor.StatusIdle {
 		t.Errorf("status = %q, want %q (read should be normalized to idle)", entry.Status, monitor.StatusIdle)

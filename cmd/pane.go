@@ -443,9 +443,15 @@ State transitions:
 
 Auto-registration:
   If the pane is not yet tracked, it is auto-registered on the first
-  call with any status. The new entry is seeded with LastVisited=now
-  so it sorts to the bottom of its status group in the dashboard
-  (closest to the cursor).
+  call with an "agentic" status (working or needs_attention). A call
+  with status "idle" on an untracked pane is a no-op — idle is only
+  used by agent extensions for housekeeping and by the tmux-global
+  auto-read hook, neither of which should register brand-new panes
+  in the dashboard. Only panes that an extension has actively claimed
+  via working/needs_attention qualify as "agentic" and are displayed.
+
+  The new entry is seeded with LastVisited=now so it sorts to the
+  bottom of its status group in the dashboard (closest to the cursor).
 
 Special behavior:
   When [pane_monitoring] dismiss_attention_in_active_pane = true,
@@ -511,6 +517,20 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 
 	entry, ok := state.Panes[paneID]
 	if !ok {
+		// Only "agentic" statuses (working / needs_attention) register new
+		// panes in the monitor state. idle is deliberately a no-op for
+		// untracked panes:
+		//   - The tmux-global auto-read hook fires on every pane navigation
+		//     and would otherwise pollute the dashboard with every pane the
+		//     user visits (showing them all as idle).
+		//   - Agent extensions (opencode, pi) eagerly send idle on plugin
+		//     load as housekeeping to clear stale "working" from crashed
+		//     runs; they rely on this no-op to avoid skewing the dashboard.
+		// The dashboard should only surface panes that an extension has
+		// actively claimed by sending working or needs_attention.
+		if status == monitor.StatusIdle {
+			return nil
+		}
 		// Auto-register: look up the tmux session for this pane.
 		session, err := tmuxPaneSessionWith(tmux, paneID)
 		if err != nil {
