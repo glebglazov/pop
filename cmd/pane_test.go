@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -190,6 +191,38 @@ func TestResolveSessionWith_NoProjectNotInTmux(t *testing.T) {
 	}
 }
 
+// newPaneInfoMockTmux builds a MockTmux that responds to the tmux
+// display-message calls made by auto-registration in runPaneSetStatusWith.
+// paneInfo maps pane ID → "session\tpane_current_command"; unknown panes
+// return an error (matching tmux's behavior for non-existent panes).
+func newPaneInfoMockTmux(paneInfo map[string]string) *deps.MockTmux {
+	return &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			if len(args) >= 5 && args[0] == "display-message" && args[1] == "-t" {
+				paneID := args[2]
+				// Format string argument comes after -p.
+				format := args[4]
+				info, ok := paneInfo[paneID]
+				if !ok {
+					return "", fmt.Errorf("pane not found: %s", paneID)
+				}
+				switch format {
+				case "#{session_name}\t#{pane_current_command}":
+					return info, nil
+				case "#{session_name}":
+					// Caller only wants the session; strip the command.
+					parts := strings.SplitN(info, "\t", 2)
+					return parts[0], nil
+				case "#{pane_active} #{window_active} #{session_attached}":
+					// Inactive by default — no dismiss downgrade.
+					return "0 0 0", nil
+				}
+			}
+			return "", nil
+		},
+	}
+}
+
 func setupStateFile(t *testing.T, paneID string, status monitor.PaneStatus) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -364,12 +397,11 @@ func TestRunPaneCreateWith(t *testing.T) {
 	})
 }
 
-func TestRunPaneSetStatusWith_IdleAutoRegistersWithSeededLastVisited(t *testing.T) {
-	// `set-status idle` on an untracked pane must auto-register it (so
-	// agent integrations like opencode/pi that eagerly call setStatus("idle")
-	// on plugin load can make their pane appear in the dashboard right
-	// away) AND seed LastVisited to "now" so the new entry sorts to the
-	// bottom of the idle group (closest to the cursor) instead of the top.
+func TestRunPaneSetStatusWith_IdleSkipsPlainShellPanes(t *testing.T) {
+	// `set-status idle` on an untracked pane whose foreground process is a
+	// plain shell (zsh/bash/fish/...) must be a no-op. The tmux-global
+	// auto-read hook fires on every pane navigation and would otherwise
+	// fill the dashboard with every shell pane the user ever visits.
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
 	stateDir := filepath.Join(dir, "pop")
@@ -383,37 +415,158 @@ func TestRunPaneSetStatusWith_IdleAutoRegistersWithSeededLastVisited(t *testing.
 		t.Fatal(err)
 	}
 
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			return "test-session", nil
-		},
+	tmux := newPaneInfoMockTmux(map[string]string{
+		"%9":  "test-session\tzsh",
+		"%10": "test-session\tbash",
+		"%11": "test-session\tfish",
+		"%12": "test-session\t-zsh", // login shell marker
+	})
+	cfg := &config.Config{}
+
+	for _, paneID := range []string{"%9", "%10", "%11", "%12"} {
+		if err := runPaneSetStatusWith(tmux, cfg, "", []string{paneID, "idle"}); err != nil {
+			t.Fatalf("unexpected error for %s: %v", paneID, err)
+		}
 	}
+
+	state := loadState(t, statePath)
+	if len(state.Panes) != 0 {
+		t.Fatalf("expected empty state (shell panes must not register), got %d pane(s): %+v", len(state.Panes), state.Panes)
+	}
+}
+
+func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
+	// The complement of IdleSkipsPlainShellPanes: when an agent extension
+	// fires its housekeeping `set-status idle` on plugin load, the pane IS
+	// running the agent (opencode, claude, pi, node, ...), not a bare
+	// shell. Those panes must be auto-registered right away so they show
+	// up on the dashboard as idle immediately, even before the agent sends
+	// its first working / needs_attention update.
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmux := newPaneInfoMockTmux(map[string]string{
+		"%20": "proj-a\topencode",
+		"%21": "proj-b\tclaude",
+		"%22": "proj-c\tpi",
+		"%23": "proj-d\tnode", // node/bun runtimes count as agentic too
+	})
 	cfg := &config.Config{}
 
 	before := time.Now()
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%9", "idle"}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	for _, paneID := range []string{"%20", "%21", "%22", "%23"} {
+		if err := runPaneSetStatusWith(tmux, cfg, "", []string{paneID, "idle"}); err != nil {
+			t.Fatalf("unexpected error for %s: %v", paneID, err)
+		}
 	}
 	after := time.Now()
 
 	state := loadState(t, statePath)
-	entry, ok := state.Panes["%9"]
-	if !ok {
-		t.Fatal("expected %9 to be auto-registered after idle")
+	if len(state.Panes) != 4 {
+		t.Fatalf("expected 4 registered panes, got %d: %+v", len(state.Panes), state.Panes)
 	}
-	if entry.Status != monitor.StatusIdle {
-		t.Errorf("status = %q, want %q", entry.Status, monitor.StatusIdle)
+	for _, paneID := range []string{"%20", "%21", "%22", "%23"} {
+		entry, ok := state.Panes[paneID]
+		if !ok {
+			t.Errorf("expected %s to be auto-registered on idle (agent pane)", paneID)
+			continue
+		}
+		if entry.Status != monitor.StatusIdle {
+			t.Errorf("%s: status = %q, want %q", paneID, entry.Status, monitor.StatusIdle)
+		}
+		if entry.LastVisited.Before(before) || entry.LastVisited.After(after) {
+			t.Errorf("%s: LastVisited = %v, want between %v and %v", paneID, entry.LastVisited, before, after)
+		}
 	}
-	if entry.LastVisited.Before(before) || entry.LastVisited.After(after) {
-		t.Errorf("LastVisited = %v, want between %v and %v", entry.LastVisited, before, after)
+}
+
+func TestRunPaneSetStatusWith_TmuxGlobalHookSelectivelyRegistersAgentPanes(t *testing.T) {
+	// Simulates the tmux-global auto-read hook firing as the user navigates
+	// through a mix of pane types:
+	//   - %1, %2:   plain shell panes (zsh, fish) — must NOT register
+	//   - %3:       a pane running opencode — SHOULD register (agentic)
+	//   - %4:       a pane running vim (editor, not an agent) — must NOT
+	//               register (anything non-shell, non-agent is up to the
+	//               blacklist; we deliberately do not maintain a whitelist,
+	//               so vim IS treated as agentic and will register)
+	//
+	// Wait — since our blacklist only covers shells, vim counts as agentic
+	// too. That is the intentional tradeoff: no whitelist to maintain, and
+	// the user can always manually unmonitor a false positive. The test
+	// just locks in the documented behavior.
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmux := newPaneInfoMockTmux(map[string]string{
+		"%1": "some-session\tzsh",
+		"%2": "some-session\tfish",
+		"%3": "some-session\topencode",
+		"%4": "some-session\tvim",
+	})
+	cfg := &config.Config{}
+
+	for _, paneID := range []string{"%1", "%2", "%3", "%4"} {
+		if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", []string{paneID, "read"}); err != nil {
+			t.Fatalf("unexpected error for %s: %v", paneID, err)
+		}
+	}
+
+	state := loadState(t, statePath)
+	// Shell panes must not be in state.
+	for _, shellPane := range []string{"%1", "%2"} {
+		if _, ok := state.Panes[shellPane]; ok {
+			t.Errorf("shell pane %s was auto-registered by tmux-global hook: %+v", shellPane, state.Panes[shellPane])
+		}
+	}
+	// Non-shell panes must be in state as idle.
+	for _, agentPane := range []string{"%3", "%4"} {
+		entry, ok := state.Panes[agentPane]
+		if !ok {
+			t.Errorf("non-shell pane %s was not auto-registered by tmux-global hook", agentPane)
+			continue
+		}
+		if entry.Status != monitor.StatusIdle {
+			t.Errorf("%s: status = %q, want %q", agentPane, entry.Status, monitor.StatusIdle)
+		}
+	}
+
+	// And an agent claim still works: an opencode plugin calling
+	// `set-status working` on its pane must transition %3 from idle.
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%3", "working"}); err != nil {
+		t.Fatalf("unexpected error on working claim: %v", err)
+	}
+	state = loadState(t, statePath)
+	if state.Panes["%3"].Status != monitor.StatusWorking {
+		t.Errorf("%%3 after working: got %q, want %q", state.Panes["%3"].Status, monitor.StatusWorking)
 	}
 }
 
 func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	// "read" is the deprecated CLI alias for "idle". Calling
-	// `set-status read` must behave identically to `set-status idle` —
-	// auto-register and persist as monitor.StatusIdle, never as a
-	// freestanding "read" status.
+	// `set-status read` must behave identically to `set-status idle`:
+	//   - on an untracked shell pane: no-op (does NOT auto-register)
+	//   - on an untracked agent pane: auto-registers as idle
+	//   - on an already-tracked pane: updates status to idle
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
 	stateDir := filepath.Join(dir, "pop")
@@ -421,30 +574,58 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 		t.Fatal(err)
 	}
 	statePath := filepath.Join(stateDir, "monitor.json")
-	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
-	data, _ := json.Marshal(emptyState)
+	// Pre-register %5 as working to prove that "read" still updates
+	// tracked panes.
+	seedState := &monitor.State{
+		Panes: map[string]*monitor.PaneEntry{
+			"%5": {PaneID: "%5", Session: "test-session", Status: monitor.StatusWorking},
+		},
+	}
+	data, _ := json.Marshal(seedState)
 	if err := os.WriteFile(statePath, data, 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			return "test-session", nil
-		},
-	}
+	tmux := newPaneInfoMockTmux(map[string]string{
+		"%5": "test-session\tclaude", // already tracked; command irrelevant
+		"%6": "test-session\tzsh",    // untracked plain shell → must stay out
+		"%7": "test-session\tclaude", // untracked agent → must register
+	})
 	cfg := &config.Config{}
 
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%5", "read"}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Untracked shell pane: "read" must be a no-op.
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%6", "read"}); err != nil {
+		t.Fatalf("unexpected error for %%6: %v", err)
+	}
+	state := loadState(t, statePath)
+	if _, ok := state.Panes["%6"]; ok {
+		t.Fatal("expected %6 (zsh) to remain untracked after read alias")
 	}
 
-	state := loadState(t, statePath)
-	entry, ok := state.Panes["%5"]
+	// Untracked agent pane: "read" must auto-register as idle.
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%7", "read"}); err != nil {
+		t.Fatalf("unexpected error for %%7: %v", err)
+	}
+	state = loadState(t, statePath)
+	entry, ok := state.Panes["%7"]
 	if !ok {
-		t.Fatal("expected %5 to be auto-registered after read alias")
+		t.Fatal("expected %7 (claude) to be auto-registered after read alias")
 	}
 	if entry.Status != monitor.StatusIdle {
-		t.Errorf("status = %q, want %q (read should be normalized to idle)", entry.Status, monitor.StatusIdle)
+		t.Errorf("%%7 status = %q, want %q", entry.Status, monitor.StatusIdle)
+	}
+
+	// Already-tracked pane: "read" must transition it to idle.
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%5", "read"}); err != nil {
+		t.Fatalf("unexpected error for %%5: %v", err)
+	}
+	state = loadState(t, statePath)
+	entry, ok = state.Panes["%5"]
+	if !ok {
+		t.Fatal("expected %5 to remain tracked")
+	}
+	if entry.Status != monitor.StatusIdle {
+		t.Errorf("%%5 status = %q, want %q (read should be normalized to idle)", entry.Status, monitor.StatusIdle)
 	}
 }
 
@@ -467,11 +648,9 @@ func TestRunPaneSetStatusWith_AutoRegisterSeedsLastVisited(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			return "test-session", nil
-		},
-	}
+	tmux := newPaneInfoMockTmux(map[string]string{
+		"%7": "test-session\tclaude",
+	})
 	cfg := &config.Config{}
 
 	before := time.Now()

@@ -1,13 +1,132 @@
 package cmd
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
+	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/ui"
 )
+
+// TestBuildDashboardPanes_OnlyAgenticPanes is the end-to-end guard against
+// the "all tmux panes show as idle on dashboard" regression. It drives state
+// through the same code path the real tmux hooks and agent extensions use
+// (runPaneSetStatusWith) and then asserts that buildDashboardPanesWithCurrentPane
+// surfaces ONLY panes whose foreground process is NOT a plain shell. Agent
+// panes (opencode, claude, pi, ...) appear immediately — even when their
+// very first status update is idle — while plain zsh/fish/bash panes the
+// user merely navigates through stay out of the dashboard.
+func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock tmux knows each pane's session and foreground command.
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			if len(args) >= 5 && args[0] == "display-message" && args[1] == "-t" {
+				paneID := args[2]
+				format := args[4]
+				paneInfo := map[string]string{
+					"%10": "proj-a\tzsh",      // plain shell
+					"%11": "proj-a\tfish",     // plain shell
+					"%12": "proj-b\tbash",     // plain shell
+					"%13": "proj-b\t-zsh",     // login shell
+					"%20": "proj-c\topencode", // agent (housekeeping idle)
+					"%7":  "proj-d\tclaude",   // agent (claim via working)
+					"%8":  "proj-e\tpi",       // agent (claim via needs_attention)
+				}
+				info, ok := paneInfo[paneID]
+				if !ok {
+					return "", os.ErrNotExist
+				}
+				switch format {
+				case "#{session_name}\t#{pane_current_command}":
+					return info, nil
+				case "#{session_name}":
+					parts := strings.SplitN(info, "\t", 2)
+					return parts[0], nil
+				case "#{pane_active} #{window_active} #{session_attached}":
+					return "0 0 0", nil
+				}
+			}
+			// list-panes for tmuxPaneCommands in dashboard build
+			if len(args) >= 1 && args[0] == "list-panes" {
+				return "", nil
+			}
+			return "", nil
+		},
+	}
+	cfg := &config.Config{}
+
+	// 1. User navigates through 4 plain-shell panes. The tmux-global
+	//    auto-read hook fires read/idle for each. None must register.
+	for _, paneID := range []string{"%10", "%11", "%12", "%13"} {
+		if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", []string{paneID, "read"}); err != nil {
+			t.Fatalf("tmux-global hook for %s: %v", paneID, err)
+		}
+	}
+
+	// 2. opencode plugin eagerly sends idle on load for its pane (%20).
+	//    Because %20 is running opencode (not a shell), it MUST register
+	//    right away as idle — this is the change the user asked for.
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%20", "idle"}); err != nil {
+		t.Fatalf("opencode housekeeping idle: %v", err)
+	}
+
+	// 3. Real agent claims: claude fires working on %7, pi fires
+	//    needs_attention on %8. Both register.
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%7", "working"}); err != nil {
+		t.Fatalf("claude working: %v", err)
+	}
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%8", "needs_attention"}); err != nil {
+		t.Fatalf("pi needs_attention: %v", err)
+	}
+
+	// Build the dashboard exactly as runDashboard would.
+	panes := buildDashboardPanesWithCurrentPane("", "", config.DefaultSortCriteria)
+
+	if len(panes) != 3 {
+		t.Fatalf("expected 3 agentic panes on dashboard, got %d: %+v", len(panes), panes)
+	}
+
+	got := map[string]ui.AttentionStatus{}
+	for _, p := range panes {
+		got[p.PaneID] = p.Status
+	}
+	if s, ok := got["%20"]; !ok || s != ui.AttentionIdle {
+		t.Errorf("%%20 (opencode): got status %v (present=%v), want AttentionIdle", s, ok)
+	}
+	if s, ok := got["%7"]; !ok || s != ui.AttentionWorking {
+		t.Errorf("%%7 (claude): got status %v (present=%v), want AttentionWorking", s, ok)
+	}
+	if s, ok := got["%8"]; !ok || s != ui.AttentionNeedsAttention {
+		t.Errorf("%%8 (pi): got status %v (present=%v), want AttentionNeedsAttention", s, ok)
+	}
+
+	// Plain shell panes must be absent from the dashboard.
+	for _, paneID := range []string{"%10", "%11", "%12", "%13"} {
+		if _, ok := got[paneID]; ok {
+			t.Errorf("plain shell pane %s leaked onto dashboard", paneID)
+		}
+	}
+}
 
 func TestPositionCurrentPane(t *testing.T) {
 	t.Run("untracked pane is injected at end", func(t *testing.T) {

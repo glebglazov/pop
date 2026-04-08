@@ -30,6 +30,46 @@ func tmuxPaneSessionWith(tmux deps.Tmux, paneID string) (string, error) {
 	return tmux.Command("display-message", "-t", paneID, "-p", "#{session_name}")
 }
 
+// tmuxPaneInfoWith returns the session name and the current foreground
+// command running in the given pane in a single tmux round-trip. Used by
+// auto-registration in pane set-status, which needs both to decide whether
+// a pane is agentic (not a plain shell) before adding it to the dashboard.
+func tmuxPaneInfoWith(tmux deps.Tmux, paneID string) (session, cmdName string, err error) {
+	out, err := tmux.Command("display-message", "-t", paneID, "-p", "#{session_name}\t#{pane_current_command}")
+	if err != nil {
+		return "", "", err
+	}
+	parts := strings.SplitN(out, "\t", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("unexpected display-message output: %q", out)
+	}
+	return parts[0], parts[1], nil
+}
+
+// plainShellCommands lists the foreground process names that pop treats as
+// "just a shell prompt" — panes running these are NOT auto-registered on
+// an idle status update, since neither the tmux-global auto-read hook nor
+// an agent-extension housekeeping idle should cause a bare shell to show
+// up on the dashboard.
+var plainShellCommands = map[string]bool{
+	"zsh":  true,
+	"bash": true,
+	"fish": true,
+	"sh":   true,
+	"dash": true,
+	"ksh":  true,
+	"tcsh": true,
+	"csh":  true,
+}
+
+// isPlainShellCommand reports whether the given tmux pane_current_command
+// is a plain interactive shell (zsh, bash, fish, ...). Matching is done on
+// the basename with any leading dash (login-shell marker) stripped.
+func isPlainShellCommand(cmdName string) bool {
+	cmdName = strings.TrimPrefix(cmdName, "-")
+	return plainShellCommands[cmdName]
+}
+
 // isActiveTmuxPane returns true if the given pane is visible to the user:
 // active in its window, the window is active in its session, and the session
 // is attached to a client.

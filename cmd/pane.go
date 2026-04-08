@@ -443,9 +443,18 @@ State transitions:
 
 Auto-registration:
   If the pane is not yet tracked, it is auto-registered on the first
-  call with any status. The new entry is seeded with LastVisited=now
-  so it sorts to the bottom of its status group in the dashboard
-  (closest to the cursor).
+  call — with one exception: a call with status "idle" on a pane
+  that is currently running a plain shell (zsh, bash, fish, sh, ...)
+  is a no-op. This keeps the dashboard focused on agentic panes and
+  prevents the tmux-global auto-read hook and housekeeping idle calls
+  from registering every pane the user navigates to.
+
+  working and needs_attention always auto-register (they only ever
+  come from agent integrations, which have already proven the pane
+  is agentic).
+
+  The new entry is seeded with LastVisited=now so it sorts to the
+  bottom of its status group in the dashboard (closest to the cursor).
 
 Special behavior:
   When [pane_monitoring] dismiss_attention_in_active_pane = true,
@@ -511,13 +520,29 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 
 	entry, ok := state.Panes[paneID]
 	if !ok {
-		// Auto-register: look up the tmux session for this pane.
-		session, err := tmuxPaneSessionWith(tmux, paneID)
+		// Auto-register: look up the session (and, for idle, also the
+		// current command so we can skip plain shell panes).
+		session, cmdName, err := tmuxPaneInfoWith(tmux, paneID)
 		if err != nil {
-			debug.Error("[set-status] %s: failed to look up session, skipping: %v", paneID, err)
+			debug.Error("[set-status] %s: failed to look up pane info, skipping: %v", paneID, err)
 			return nil
 		}
-		debug.Log("[set-status] %s: auto-registering in session=%s with status=%s", paneID, session, status)
+		// For idle specifically, filter out plain shell panes. Both the
+		// tmux-global auto-read hook and the agent-extension housekeeping
+		// idle fire very frequently; without this filter, every pane the
+		// user navigates to would appear on the dashboard as idle. By
+		// checking the pane's current command we let opencode/claude/pi
+		// (and anything else non-shell) register immediately, while a
+		// pane still sitting at a bare zsh / fish / bash / sh prompt
+		// stays out of the dashboard until an agent actually runs there.
+		//
+		// working and needs_attention are never filtered: they only ever
+		// come from agent integrations, so the caller has already proven
+		// the pane is agentic.
+		if status == monitor.StatusIdle && isPlainShellCommand(cmdName) {
+			return nil
+		}
+		debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s", paneID, session, cmdName, status)
 		now := time.Now()
 		state.Panes[paneID] = &monitor.PaneEntry{
 			PaneID:    paneID,
