@@ -1,5 +1,9 @@
 # Development Plan: Opencode Integration for Pop
 
+> **Note:** This is a historical planning doc. The status name `needs_attention`
+> mentioned throughout was later renamed to `unread`. The transitions and
+> semantics are otherwise unchanged.
+
 ## Overview
 
 Add `pop integrate opencode` command to install pop lifecycle hooks and skills for the opencode AI coding agent, similar to existing integrations for Claude and Pi.

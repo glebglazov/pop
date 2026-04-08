@@ -136,7 +136,7 @@ func monitorAttentionSessionsWith(d *monitor.Deps) map[string]bool {
 	if state == nil {
 		return nil
 	}
-	return state.SessionsNeedingAttention()
+	return state.SessionsWithUnread()
 }
 
 // buildAttentionPanes returns attention panes for the picker sub-view
@@ -146,7 +146,7 @@ func buildAttentionPanes() []ui.AttentionPane {
 		return nil
 	}
 
-	entries := state.PanesNeedingAttention()
+	entries := state.PanesUnread()
 	paneCommands := tmuxPaneCommands()
 	panes := make([]ui.AttentionPane, 0, len(entries))
 	for _, entry := range entries {
@@ -158,7 +158,7 @@ func buildAttentionPanes() []ui.AttentionPane {
 			PaneID:  entry.PaneID,
 			Session: entry.Session,
 			Name:    name,
-			Status:  ui.AttentionNeedsAttention,
+			Status:  ui.AttentionUnread,
 		})
 	}
 	return panes
@@ -230,14 +230,14 @@ func capturePanePreviewWith(tmux deps.Tmux, paneID string) string {
 	return out
 }
 
-// dismissAttentionPane transitions a pane from needs_attention to idle and
-// records the visit time. Unlike markPaneRead, the status flip is a no-op for
-// panes in other states (the visit time is still recorded).
-func dismissAttentionPane(paneID string) {
-	dismissAttentionPaneWith(monitor.DefaultDeps(), paneID)
+// dismissUnreadPane transitions a pane from unread to idle and records the
+// visit time. Unlike markPaneRead, the status flip is a no-op for panes in
+// other states (the visit time is still recorded).
+func dismissUnreadPane(paneID string) {
+	dismissUnreadPaneWith(monitor.DefaultDeps(), paneID)
 }
 
-func dismissAttentionPaneWith(d *monitor.Deps, paneID string) {
+func dismissUnreadPaneWith(d *monitor.Deps, paneID string) {
 	state := loadMonitorStateWith(d)
 	if state == nil {
 		return
@@ -247,11 +247,11 @@ func dismissAttentionPaneWith(d *monitor.Deps, paneID string) {
 		return
 	}
 	entry.LastVisited = time.Now()
-	if entry.Status == monitor.StatusNeedsAttention {
+	if entry.Status == monitor.StatusUnread {
 		entry.Status = monitor.StatusIdle
 	}
 	if err := state.SaveWith(d); err != nil {
-		debug.Error("dismissAttentionPane %s: save: %v", paneID, err)
+		debug.Error("dismissUnreadPane %s: save: %v", paneID, err)
 	}
 }
 
@@ -277,12 +277,12 @@ func markPaneReadWith(d *monitor.Deps, paneID string) {
 	}
 }
 
-// markPaneAttention marks a pane as needs-attention in the monitor state
-func markPaneAttention(paneID string) {
-	markPaneAttentionWith(monitor.DefaultDeps(), paneID)
+// markPaneUnread marks a pane as unread in the monitor state
+func markPaneUnread(paneID string) {
+	markPaneUnreadWith(monitor.DefaultDeps(), paneID)
 }
 
-func markPaneAttentionWith(d *monitor.Deps, paneID string) {
+func markPaneUnreadWith(d *monitor.Deps, paneID string) {
 	state := loadMonitorStateWith(d)
 	if state == nil {
 		return
@@ -291,9 +291,9 @@ func markPaneAttentionWith(d *monitor.Deps, paneID string) {
 	if !ok {
 		return
 	}
-	entry.Status = monitor.StatusNeedsAttention
+	entry.Status = monitor.StatusUnread
 	if err := state.SaveWith(d); err != nil {
-		debug.Error("markPaneAttention %s: save: %v", paneID, err)
+		debug.Error("markPaneUnread %s: save: %v", paneID, err)
 	}
 }
 
@@ -356,12 +356,12 @@ func unmonitorPaneWith(d *monitor.Deps, paneID string) {
 // attentionCallbacks returns the standard callbacks for attention sub-views
 func attentionCallbacks() ui.AttentionCallbacks {
 	return ui.AttentionCallbacks{
-		Preview:       capturePanePreview,
-		MarkRead:      markPaneRead,
-		MarkAttention: markPaneAttention,
-		ToggleFollow:  togglePaneFollow,
-		Unmonitor:     unmonitorPane,
-		SetNote:       setPaneNote,
+		Preview:      capturePanePreview,
+		MarkRead:     markPaneRead,
+		MarkUnread:   markPaneUnread,
+		ToggleFollow: togglePaneFollow,
+		Unmonitor:    unmonitorPane,
+		SetNote:      setPaneNote,
 	}
 }
 

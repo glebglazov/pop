@@ -99,8 +99,8 @@ var popHooks = []struct {
 }{
 	{"UserPromptSubmit", "pop pane set-status working 2>/dev/null || true"},
 	{"PreToolUse", "pop pane set-status working 2>/dev/null || true"},
-	{"Stop", "pop pane set-status needs_attention 2>/dev/null || true"},
-	{"Notification", "pop pane set-status needs_attention 2>/dev/null || true"},
+	{"Stop", "pop pane set-status unread 2>/dev/null || true"},
+	{"Notification", "pop pane set-status unread 2>/dev/null || true"},
 }
 
 func integrateClaude(d *integrateDeps) error {

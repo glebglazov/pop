@@ -57,7 +57,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	if cfg, err := config.Load(config.DefaultConfigPath()); err == nil {
 		quickAccessModifier = cfg.GetQuickAccessModifier()
 		configWarnings = cfg.Warnings
-		attentionEnabled = cfg.AttentionNotificationsEnabled("worktree")
+		attentionEnabled = cfg.UnreadNotificationsEnabled("worktree")
 		for _, cc := range cfg.CommandsForMode("worktree") {
 			customCommands = append(customCommands, ui.UserDefinedCommand{
 				Key:     cc.Key,
@@ -180,7 +180,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		{Icon: iconDirSession, Desc: "Directory with tmux session"},
 	}
 	if attentionEnabled {
-		iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent needs attention"})
+		iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent has unread output"})
 		// Apply attention icons to worktree items
 		attentionSessions := monitorAttentionSessions()
 		if attentionSessions != nil {

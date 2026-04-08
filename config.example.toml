@@ -36,21 +36,21 @@ projects = [
 # commands = [
 #     { key = "ctrl-l", label = "logs", command = "tail -f app.log", exit = false },
 # ]
-# Show desktop notifications when a pane needs attention while in select view
-# attention_notifications_enabled = false
+# Show desktop notifications when a pane becomes unread while in select view
+# unread_notifications_enabled = false
 
 # [worktree]
 # Worktree-specific custom keybindings (override global commands matched by key)
 # commands = [
 #     { key = "ctrl-l", label = "logs", command = "tail -f app.log", exit = false },
 # ]
-# Show desktop notifications when a pane needs attention while in worktree view
-# attention_notifications_enabled = false
+# Show desktop notifications when a pane becomes unread while in worktree view
+# unread_notifications_enabled = false
 
 # [pane_monitoring]
-# Automatically downgrade needs_attention to read when the pane is currently
+# Automatically downgrade unread to idle when the pane is currently
 # active (visible and focused). Useful if you're already watching the output.
-# dismiss_attention_in_active_pane = false
+# dismiss_unread_in_active_pane = false
 #
 # Ignore set-status calls from specific sources. The tmux global hooks pass
 # --source tmux-global. Set this to disable auto-read on tmux navigation

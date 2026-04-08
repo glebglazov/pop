@@ -3,8 +3,8 @@
  *
  * opencode plugin that keeps the surrounding pop tmux pane's status in sync
  * with the agent's lifecycle:
- *   - working         → opencode is busy (a tool is running / agent is mid-turn)
- *   - needs_attention → opencode finished a turn, awaiting the user
+ *   - working → opencode is busy (a tool is running / agent is mid-turn)
+ *   - unread  → opencode finished a turn, awaiting the user
  *
  * `idle` is also sent on plugin load and on session.created/deleted, but only
  * as housekeeping: `pop pane set-status idle` is a no-op for untracked panes,
@@ -15,7 +15,7 @@
  */
 
 export const PopStatusSync = async ({ $ }) => {
-	const setStatus = (status: "idle" | "working" | "needs_attention") => {
+	const setStatus = (status: "idle" | "working" | "unread") => {
 		// Fire-and-forget; swallow errors so a missing `pop` binary never
 		// breaks the agent.
 		$`pop pane set-status ${status}`.catch(() => {});
@@ -36,9 +36,9 @@ export const PopStatusSync = async ({ $ }) => {
 			setStatus("working");
 		}
 	};
-	const markNeedsAttention = () => {
+	const markUnread = () => {
 		working = false;
-		setStatus("needs_attention");
+		setStatus("unread");
 	};
 	const markIdle = () => {
 		working = false;
@@ -55,13 +55,13 @@ export const PopStatusSync = async ({ $ }) => {
 				break;
 			case "session.idle":
 				// Agent finished a turn — flag the user.
-				markNeedsAttention();
+				markUnread();
 				break;
 			case "session.status":
 				if (event.properties.status.type === "busy") {
 					markWorking();
 				} else if (event.properties.status.type === "idle") {
-					markNeedsAttention();
+					markUnread();
 				}
 				break;
 			}

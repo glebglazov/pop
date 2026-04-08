@@ -3,8 +3,8 @@
  *
  * pi extension that keeps the surrounding pop tmux pane's status in sync with
  * the agent's lifecycle:
- *   - working         → pi is busy (user submitted input, or a tool is running)
- *   - needs_attention → pi finished a turn, awaiting the user
+ *   - working → pi is busy (user submitted input, or a tool is running)
+ *   - unread  → pi finished a turn, awaiting the user
  *
  * `idle` is also sent on `session_start`, but only as housekeeping: pop
  * ignores `set-status idle` for untracked panes, so it cannot pollute the
@@ -17,7 +17,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
-	const setStatus = (status: "working" | "needs_attention" | "idle") => {
+	const setStatus = (status: "working" | "unread" | "idle") => {
 		// Fire-and-forget; swallow errors so a missing `pop` binary never
 		// breaks the agent.
 		pi.exec("pop", ["pane", "set-status", status]).catch(() => {});
@@ -37,9 +37,9 @@ export default function (pi: ExtensionAPI) {
 		return undefined;
 	});
 
-	// Stop → needs_attention (agent finished a turn — flag the user)
+	// Stop → unread (agent finished a turn — flag the user)
 	pi.on("agent_end", async () => {
-		setStatus("needs_attention");
+		setStatus("unread");
 	});
 
 	// Housekeeping: clear any stale "working" status left over from a

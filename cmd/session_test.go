@@ -237,7 +237,7 @@ func TestLoadMonitorStateWith(t *testing.T) {
 func TestMonitorAttentionSessionsWith(t *testing.T) {
 	t.Run("returns sessions needing attention", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
-			"%1": {PaneID: "%1", Session: "proj-a", Status: monitor.StatusNeedsAttention},
+			"%1": {PaneID: "%1", Session: "proj-a", Status: monitor.StatusUnread},
 			"%2": {PaneID: "%2", Session: "proj-b", Status: monitor.StatusWorking},
 		})
 
@@ -263,7 +263,7 @@ func TestMonitorAttentionSessionsWith(t *testing.T) {
 func TestMarkPaneReadWith(t *testing.T) {
 	t.Run("marks pane as read", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
-			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusNeedsAttention},
+			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusUnread},
 			"%2": {PaneID: "%2", Session: "proj", Status: monitor.StatusWorking},
 		})
 
@@ -456,7 +456,7 @@ func TestSwitchToTmuxTargetAndZoomWith_InTmux(t *testing.T) {
 func TestUnmonitorPaneWith(t *testing.T) {
 	t.Run("removes pane from state", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
-			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusNeedsAttention},
+			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusUnread},
 			"%2": {PaneID: "%2", Session: "proj", Status: monitor.StatusWorking},
 		})
 
@@ -482,13 +482,13 @@ func TestUnmonitorPaneWith(t *testing.T) {
 	})
 }
 
-func TestDismissAttentionPaneWith(t *testing.T) {
-	t.Run("transitions needs_attention to idle and sets LastVisited", func(t *testing.T) {
+func TestDismissUnreadPaneWith(t *testing.T) {
+	t.Run("transitions unread to idle and sets LastVisited", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
-			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusNeedsAttention},
+			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusUnread},
 		})
 
-		dismissAttentionPaneWith(d, "%1")
+		dismissUnreadPaneWith(d, "%1")
 
 		state := loadMonitorStateWith(d)
 		if state == nil {
@@ -503,12 +503,12 @@ func TestDismissAttentionPaneWith(t *testing.T) {
 		}
 	})
 
-	t.Run("does not change status if not needs_attention", func(t *testing.T) {
+	t.Run("does not change status if not unread", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
 			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusWorking},
 		})
 
-		dismissAttentionPaneWith(d, "%1")
+		dismissUnreadPaneWith(d, "%1")
 
 		state := loadMonitorStateWith(d)
 		entry := state.Panes["%1"]
@@ -517,35 +517,35 @@ func TestDismissAttentionPaneWith(t *testing.T) {
 		}
 		// LastVisited should still be set
 		if entry.LastVisited.IsZero() {
-			t.Error("expected LastVisited to be set even for non-attention pane")
+			t.Error("expected LastVisited to be set even for non-unread pane")
 		}
 	})
 
 	t.Run("no-op for unknown pane", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
-			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusNeedsAttention},
+			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusUnread},
 		})
-		dismissAttentionPaneWith(d, "%99") // should not panic
+		dismissUnreadPaneWith(d, "%99") // should not panic
 	})
 
 	t.Run("no-op when daemon not running", func(t *testing.T) {
 		d := mockMonitorDepsNotRunning()
-		dismissAttentionPaneWith(d, "%1") // should not panic
+		dismissUnreadPaneWith(d, "%1") // should not panic
 	})
 }
 
-func TestMarkPaneAttentionWith(t *testing.T) {
-	t.Run("marks pane as needs_attention", func(t *testing.T) {
+func TestMarkPaneUnreadWith(t *testing.T) {
+	t.Run("marks pane as unread", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
 			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusIdle},
 		})
 
-		markPaneAttentionWith(d, "%1")
+		markPaneUnreadWith(d, "%1")
 
 		state := loadMonitorStateWith(d)
 		entry := state.Panes["%1"]
-		if entry.Status != monitor.StatusNeedsAttention {
-			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusNeedsAttention)
+		if entry.Status != monitor.StatusUnread {
+			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusUnread)
 		}
 	})
 
@@ -553,12 +553,12 @@ func TestMarkPaneAttentionWith(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
 			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusIdle},
 		})
-		markPaneAttentionWith(d, "%99") // should not panic
+		markPaneUnreadWith(d, "%99") // should not panic
 	})
 
 	t.Run("no-op when daemon not running", func(t *testing.T) {
 		d := mockMonitorDepsNotRunning()
-		markPaneAttentionWith(d, "%1") // should not panic
+		markPaneUnreadWith(d, "%1") // should not panic
 	})
 }
 

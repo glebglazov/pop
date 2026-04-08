@@ -73,26 +73,28 @@ Kills the pane. Remaining panes re-tile automatically.
 ```bash
 pop pane set-status <pane_id> <status>
 ```
-Marks a tmux pane in the pop monitor as `working`, `needs_attention`, or `read`. Pane status drives the dashboard (`pop dashboard`) and the unread/attention indicators in the picker.
+Marks a tmux pane in the pop monitor as `working`, `unread`, or `idle`. Pane status drives the dashboard (`pop dashboard`) and the unread indicators in the picker.
 
 If you omit `<pane_id>`, the command reads `$TMUX_PANE` from the environment, so it operates on whatever pane it was invoked from. From an agent, you almost always want to pass an explicit pane id.
 
 Statuses:
 - `working` — actively in use; the agent or process is busy
-- `needs_attention` — has output the user should look at
-- `read` — user has acknowledged it (resets the attention flag)
+- `unread` — has output the user should look at
+- `idle` — nothing new to see (the user has acknowledged it, or there's just nothing happening)
+
+The deprecated names `needs_attention` (→ `unread`) and `read` (→ `idle`) are still accepted as CLI aliases for backwards compat.
 
 You normally don't have to call this manually — running `pop integrate <agent>` installs hooks/extensions that keep the agent's own pane status in sync. Reach for `set-status` directly when:
 
-- You spawned a long-running process in another pane and want to flag it for attention once it finishes:
+- You spawned a long-running process in another pane and want to flag it as unread once it finishes:
   ```bash
   ID=$(pop pane create build "npm run build")
   # ... poll the pane until the build is done ...
-  pop pane set-status "$ID" needs_attention
+  pop pane set-status "$ID" unread
   ```
-- You want to clear the attention flag on a pane after acknowledging its output:
+- You want to clear the unread flag on a pane after acknowledging its output:
   ```bash
-  pop pane set-status "$ID" read
+  pop pane set-status "$ID" idle
   ```
 
 To discover which panes exist and their current ids, use `pop pane list`. To see the full monitor table including each pane's current status, use `pop pane status`.

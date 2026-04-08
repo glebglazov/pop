@@ -50,7 +50,7 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 					"%13": "proj-b\t-zsh",     // login shell
 					"%20": "proj-c\topencode", // agent (housekeeping idle)
 					"%7":  "proj-d\tclaude",   // agent (claim via working)
-					"%8":  "proj-e\tpi",       // agent (claim via needs_attention)
+					"%8":  "proj-e\tpi",       // agent (claim via unread)
 				}
 				info, ok := paneInfo[paneID]
 				if !ok {
@@ -91,12 +91,12 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 	}
 
 	// 3. Real agent claims: claude fires working on %7, pi fires
-	//    needs_attention on %8. Both register.
+	//    unread on %8. Both register.
 	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%7", "working"}); err != nil {
 		t.Fatalf("claude working: %v", err)
 	}
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%8", "needs_attention"}); err != nil {
-		t.Fatalf("pi needs_attention: %v", err)
+	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%8", "unread"}); err != nil {
+		t.Fatalf("pi unread: %v", err)
 	}
 
 	// Build the dashboard exactly as runDashboard would.
@@ -116,8 +116,8 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 	if s, ok := got["%7"]; !ok || s != ui.AttentionWorking {
 		t.Errorf("%%7 (claude): got status %v (present=%v), want AttentionWorking", s, ok)
 	}
-	if s, ok := got["%8"]; !ok || s != ui.AttentionNeedsAttention {
-		t.Errorf("%%8 (pi): got status %v (present=%v), want AttentionNeedsAttention", s, ok)
+	if s, ok := got["%8"]; !ok || s != ui.AttentionUnread {
+		t.Errorf("%%8 (pi): got status %v (present=%v), want AttentionUnread", s, ok)
 	}
 
 	// Plain shell panes must be absent from the dashboard.
@@ -130,13 +130,13 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 
 func TestPositionCurrentPane(t *testing.T) {
 	t.Run("untracked pane is injected at end", func(t *testing.T) {
-		// Scenario: monitored panes are pop (working) and vcdr (needs-attention),
+		// Scenario: monitored panes are pop (working) and vcdr (unread),
 		// current pane is "abc" which is not monitored.
-		// After normal sort: pop (working=1), vcdr (needs_attention=2)
+		// After normal sort: pop (working=1), vcdr (unread=2)
 		// Expected: pop, vcdr, abc (under cursor at end)
 		panes := []ui.AttentionPane{
 			{PaneID: "%1", Session: "pop", Name: "pop %1", Status: ui.AttentionWorking},
-			{PaneID: "%2", Session: "vcdr", Name: "vcdr %2", Status: ui.AttentionNeedsAttention},
+			{PaneID: "%2", Session: "vcdr", Name: "vcdr %2", Status: ui.AttentionUnread},
 		}
 		paneCommands := map[string]string{"%3": "zsh"}
 
@@ -168,13 +168,13 @@ func TestPositionCurrentPane(t *testing.T) {
 	})
 
 	t.Run("tracked pane is moved to end", func(t *testing.T) {
-		// Scenario: monitored panes are pop (working) and vcdr (needs-attention),
+		// Scenario: monitored panes are pop (working) and vcdr (unread),
 		// current pane is pop's pane (%1).
-		// After normal sort: pop (working=1), vcdr (needs_attention=2)
+		// After normal sort: pop (working=1), vcdr (unread=2)
 		// Expected: vcdr, pop (under cursor at end)
 		panes := []ui.AttentionPane{
 			{PaneID: "%1", Session: "pop", Name: "pop %1", Status: ui.AttentionWorking},
-			{PaneID: "%2", Session: "vcdr", Name: "vcdr %2", Status: ui.AttentionNeedsAttention},
+			{PaneID: "%2", Session: "vcdr", Name: "vcdr %2", Status: ui.AttentionUnread},
 		}
 
 		result := positionCurrentPane(panes, "%1", "pop", nil)
@@ -193,7 +193,7 @@ func TestPositionCurrentPane(t *testing.T) {
 	t.Run("pane already at end is not moved", func(t *testing.T) {
 		panes := []ui.AttentionPane{
 			{PaneID: "%1", Session: "pop", Name: "pop %1", Status: ui.AttentionWorking},
-			{PaneID: "%2", Session: "vcdr", Name: "vcdr %2", Status: ui.AttentionNeedsAttention},
+			{PaneID: "%2", Session: "vcdr", Name: "vcdr %2", Status: ui.AttentionUnread},
 		}
 
 		result := positionCurrentPane(panes, "%2", "vcdr", nil)
@@ -243,7 +243,7 @@ func TestSortDashboardPanes(t *testing.T) {
 	panes := func() []ui.AttentionPane {
 		return []ui.AttentionPane{
 			{PaneID: "%1", Session: "alpha", Status: ui.AttentionWorking},
-			{PaneID: "%2", Session: "beta", Status: ui.AttentionNeedsAttention},
+			{PaneID: "%2", Session: "beta", Status: ui.AttentionUnread},
 			{PaneID: "%3", Session: "gamma", Status: ui.AttentionIdle},
 		}
 	}
@@ -253,7 +253,7 @@ func TestSortDashboardPanes(t *testing.T) {
 		lastVisited := map[string]int64{"%1": 100, "%2": 200, "%3": 300}
 		sortDashboardPanes(p, lastVisited, nil, config.DefaultSortCriteria)
 
-		// Status groups: idle(%3)=0, working(%1)=1, needs_attention(%2)=2
+		// Status groups: idle(%3)=0, working(%1)=1, unread(%2)=2
 		if p[0].PaneID != "%3" {
 			t.Errorf("pane[0]: expected %%3 (idle), got %s", p[0].PaneID)
 		}
@@ -261,7 +261,7 @@ func TestSortDashboardPanes(t *testing.T) {
 			t.Errorf("pane[1]: expected %%1 (working), got %s", p[1].PaneID)
 		}
 		if p[2].PaneID != "%2" {
-			t.Errorf("pane[2]: expected %%2 (needs_attention), got %s", p[2].PaneID)
+			t.Errorf("pane[2]: expected %%2 (unread), got %s", p[2].PaneID)
 		}
 	})
 

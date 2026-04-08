@@ -86,7 +86,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 			if err := hist.Save(); err != nil {
 				debug.Error("dashboard: save history: %v", err)
 			}
-			dismissAttentionPane(result.Selected.Path)
+			dismissUnreadPane(result.Selected.Path)
 			return switchToTmuxTargetAndZoom(result.Selected.Path)
 		}
 	case ui.ActionCancel:
@@ -141,8 +141,8 @@ func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string
 
 		var status ui.AttentionStatus
 		switch entry.Status {
-		case monitor.StatusNeedsAttention:
-			status = ui.AttentionNeedsAttention
+		case monitor.StatusUnread:
+			status = ui.AttentionUnread
 		case monitor.StatusWorking:
 			status = ui.AttentionWorking
 		default:
@@ -194,9 +194,9 @@ func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string
 // most-recent / highest-priority items end up at the bottom (closest to cursor).
 func sortDashboardPanes(panes []ui.AttentionPane, paneLastVisited map[string]int64, sessionLastVisit map[string]int64, criteria []string) {
 	statusOrder := map[ui.AttentionStatus]int{
-		ui.AttentionIdle:           0,
-		ui.AttentionWorking:        1,
-		ui.AttentionNeedsAttention: 2,
+		ui.AttentionIdle:    0,
+		ui.AttentionWorking: 1,
+		ui.AttentionUnread:  2,
 	}
 
 	sort.SliceStable(panes, func(i, j int) bool {

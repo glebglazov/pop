@@ -270,6 +270,42 @@ func TestLoadMigratesLegacyReadStatusToIdle(t *testing.T) {
 	}
 }
 
+func TestLoadMigratesLegacyNeedsAttentionStatusToUnread(t *testing.T) {
+	// State files written by older versions of pop used "needs_attention"
+	// as the status name. It was renamed to "unread" for consistency with
+	// the user-facing read/unread mental model. LoadWith must transparently
+	// rewrite legacy entries in memory so the rest of the codebase only
+	// ever sees the canonical value.
+	jsonData := `{"panes":{
+		"%1":{"pane_id":"%1","session":"old-proj","status":"needs_attention","updated_at":"2024-01-01T00:00:00Z"},
+		"%2":{"pane_id":"%2","session":"new-proj","status":"unread","updated_at":"2024-01-01T00:00:00Z"},
+		"%3":{"pane_id":"%3","session":"work-proj","status":"working","updated_at":"2024-01-01T00:00:00Z"}
+	}}`
+
+	d := &Deps{
+		FS: &deps.MockFileSystem{
+			ReadFileFunc: func(path string) ([]byte, error) {
+				return []byte(jsonData), nil
+			},
+		},
+	}
+
+	loaded, err := LoadWith(d, "/test/monitor.json")
+	if err != nil {
+		t.Fatalf("LoadWith() error = %v", err)
+	}
+
+	if got := loaded.Panes["%1"].Status; got != StatusUnread {
+		t.Errorf("legacy 'needs_attention' entry: status = %q, want %q", got, StatusUnread)
+	}
+	if got := loaded.Panes["%2"].Status; got != StatusUnread {
+		t.Errorf("'unread' entry: status = %q, want %q", got, StatusUnread)
+	}
+	if got := loaded.Panes["%3"].Status; got != StatusWorking {
+		t.Errorf("'working' entry: status = %q, want %q (must not be touched)", got, StatusWorking)
+	}
+}
+
 func TestFollowingFieldBackwardCompat(t *testing.T) {
 	// JSON without "following" field should default to false
 	jsonData := `{"panes":{"%5":{"pane_id":"%5","session":"proj","status":"working","updated_at":"2024-01-01T00:00:00Z"}}}`
@@ -329,18 +365,18 @@ func TestSaveWith(t *testing.T) {
 	}
 }
 
-func TestSessionsNeedingAttention(t *testing.T) {
+func TestSessionsWithUnread(t *testing.T) {
 	s := &State{
 		Panes: map[string]*PaneEntry{
-			"%1": {PaneID: "%1", Session: "project-a", Status: StatusNeedsAttention},
+			"%1": {PaneID: "%1", Session: "project-a", Status: StatusUnread},
 			"%2": {PaneID: "%2", Session: "project-a", Status: StatusWorking},
 			"%3": {PaneID: "%3", Session: "project-b", Status: StatusWorking},
-			"%4": {PaneID: "%4", Session: "project-c", Status: StatusNeedsAttention},
+			"%4": {PaneID: "%4", Session: "project-c", Status: StatusUnread},
 			"%5": {PaneID: "%5", Session: "project-d", Status: StatusUnknown},
 		},
 	}
 
-	result := s.SessionsNeedingAttention()
+	result := s.SessionsWithUnread()
 
 	if len(result) != 2 {
 		t.Fatalf("got %d sessions, want 2", len(result))
@@ -356,27 +392,27 @@ func TestSessionsNeedingAttention(t *testing.T) {
 	}
 }
 
-func TestSessionsNeedingAttention_Empty(t *testing.T) {
+func TestSessionsWithUnread_Empty(t *testing.T) {
 	s := &State{Panes: make(map[string]*PaneEntry)}
-	result := s.SessionsNeedingAttention()
+	result := s.SessionsWithUnread()
 	if len(result) != 0 {
 		t.Errorf("got %d sessions, want 0", len(result))
 	}
 }
 
-func TestPanesNeedingAttention(t *testing.T) {
+func TestPanesUnread(t *testing.T) {
 	tests := []struct {
 		name     string
 		panes    map[string]*PaneEntry
 		expected int
 	}{
 		{
-			name: "filters only needs_attention",
+			name: "filters only unread",
 			panes: map[string]*PaneEntry{
-				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
+				"%1": {PaneID: "%1", Status: StatusUnread},
 				"%2": {PaneID: "%2", Status: StatusWorking},
 				"%3": {PaneID: "%3", Status: StatusIdle},
-				"%4": {PaneID: "%4", Status: StatusNeedsAttention},
+				"%4": {PaneID: "%4", Status: StatusUnread},
 			},
 			expected: 2,
 		},
@@ -391,7 +427,7 @@ func TestPanesNeedingAttention(t *testing.T) {
 			expected: 0,
 		},
 		{
-			name: "no attention panes",
+			name: "no unread panes",
 			panes: map[string]*PaneEntry{
 				"%1": {PaneID: "%1", Status: StatusWorking},
 				"%2": {PaneID: "%2", Status: StatusIdle},
@@ -399,10 +435,10 @@ func TestPanesNeedingAttention(t *testing.T) {
 			expected: 0,
 		},
 		{
-			name: "all attention",
+			name: "all unread",
 			panes: map[string]*PaneEntry{
-				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
-				"%2": {PaneID: "%2", Status: StatusNeedsAttention},
+				"%1": {PaneID: "%1", Status: StatusUnread},
+				"%2": {PaneID: "%2", Status: StatusUnread},
 			},
 			expected: 2,
 		},
@@ -411,13 +447,13 @@ func TestPanesNeedingAttention(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &State{Panes: tt.panes}
-			result := s.PanesNeedingAttention()
+			result := s.PanesUnread()
 			if len(result) != tt.expected {
 				t.Errorf("got %d panes, want %d", len(result), tt.expected)
 			}
 			for _, p := range result {
-				if p.Status != StatusNeedsAttention {
-					t.Errorf("pane %s has status %s, want %s", p.PaneID, p.Status, StatusNeedsAttention)
+				if p.Status != StatusUnread {
+					t.Errorf("pane %s has status %s, want %s", p.PaneID, p.Status, StatusUnread)
 				}
 			}
 		})
@@ -431,9 +467,9 @@ func TestPanesActive(t *testing.T) {
 		expected int
 	}{
 		{
-			name: "filters attention and working",
+			name: "filters unread and working",
 			panes: map[string]*PaneEntry{
-				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
+				"%1": {PaneID: "%1", Status: StatusUnread},
 				"%2": {PaneID: "%2", Status: StatusWorking},
 				"%3": {PaneID: "%3", Status: StatusIdle},
 				"%4": {PaneID: "%4", Status: StatusUnknown},
@@ -463,8 +499,8 @@ func TestPanesActive(t *testing.T) {
 				t.Errorf("got %d panes, want %d", len(result), tt.expected)
 			}
 			for _, p := range result {
-				if p.Status != StatusNeedsAttention && p.Status != StatusWorking {
-					t.Errorf("pane %s has status %s, want attention or working", p.PaneID, p.Status)
+				if p.Status != StatusUnread && p.Status != StatusWorking {
+					t.Errorf("pane %s has status %s, want unread or working", p.PaneID, p.Status)
 				}
 			}
 		})
@@ -480,7 +516,7 @@ func TestPanesAll(t *testing.T) {
 		{
 			name: "returns all panes",
 			panes: map[string]*PaneEntry{
-				"%1": {PaneID: "%1", Status: StatusNeedsAttention},
+				"%1": {PaneID: "%1", Status: StatusUnread},
 				"%2": {PaneID: "%2", Status: StatusWorking},
 				"%3": {PaneID: "%3", Status: StatusIdle},
 			},

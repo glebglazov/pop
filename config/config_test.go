@@ -1166,3 +1166,78 @@ func TestExpandProjectsSubsumption(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadDeprecatedUnreadRenameKeys verifies that the old attention-era
+// config keys are still honored (so users don't lose behavior on upgrade)
+// and that a deprecation warning is emitted for each one encountered.
+func TestLoadDeprecatedUnreadRenameKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	os.WriteFile(configPath, []byte(`
+[pane_monitoring]
+dismiss_attention_in_active_pane = true
+
+[select]
+attention_notifications_enabled = true
+
+[worktree]
+attention_notifications_enabled = true
+`), 0644)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	// Accessors should honor the legacy keys.
+	if !cfg.DismissUnreadInActivePane() {
+		t.Error("DismissUnreadInActivePane() = false, want true (legacy key should be honored)")
+	}
+	if !cfg.UnreadNotificationsEnabled("select") {
+		t.Error("UnreadNotificationsEnabled(select) = false, want true (legacy key should be honored)")
+	}
+	if !cfg.UnreadNotificationsEnabled("worktree") {
+		t.Error("UnreadNotificationsEnabled(worktree) = false, want true (legacy key should be honored)")
+	}
+
+	// One deprecation warning per legacy key present.
+	if len(cfg.Warnings) != 3 {
+		t.Fatalf("expected 3 deprecation warnings, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+	}
+}
+
+// TestLoadNewUnreadKeys verifies that the new canonical keys work and emit
+// no warnings.
+func TestLoadNewUnreadKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	os.WriteFile(configPath, []byte(`
+[pane_monitoring]
+dismiss_unread_in_active_pane = true
+
+[select]
+unread_notifications_enabled = true
+
+[worktree]
+unread_notifications_enabled = true
+`), 0644)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if !cfg.DismissUnreadInActivePane() {
+		t.Error("DismissUnreadInActivePane() = false, want true")
+	}
+	if !cfg.UnreadNotificationsEnabled("select") {
+		t.Error("UnreadNotificationsEnabled(select) = false, want true")
+	}
+	if !cfg.UnreadNotificationsEnabled("worktree") {
+		t.Error("UnreadNotificationsEnabled(worktree) = false, want true")
+	}
+
+	if len(cfg.Warnings) != 0 {
+		t.Errorf("expected no warnings, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+	}
+}

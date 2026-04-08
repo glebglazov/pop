@@ -87,7 +87,7 @@ const (
 type AttentionStatus int
 
 const (
-	AttentionNeedsAttention AttentionStatus = iota
+	AttentionUnread AttentionStatus = iota
 	AttentionWorking
 	AttentionIdle
 )
@@ -154,7 +154,7 @@ type Picker struct {
 	previewFunc        func(paneID string) string
 	reloadFunc         func() []AttentionPane
 	markReadFunc       func(paneID string)
-	markAttentionFunc  func(paneID string)
+	markUnreadFunc     func(paneID string)
 	toggleFollowFunc   func(paneID string)
 	unmonitorFunc      func(paneID string)
 	setNoteFunc        func(paneID, note string)
@@ -296,12 +296,12 @@ func WithWarnings(warnings []string) PickerOption {
 
 // AttentionCallbacks holds callback functions for the attention sub-view.
 type AttentionCallbacks struct {
-	Preview       func(paneID string) string // returns pane content for preview
-	MarkRead      func(paneID string)        // marks a pane as read
-	MarkAttention func(paneID string)        // marks a pane as needs-attention
-	ToggleFollow  func(paneID string)        // toggles following flag
-	Unmonitor     func(paneID string)        // removes a pane from monitor state
-	SetNote       func(paneID, note string)  // sets note on a pane
+	Preview      func(paneID string) string // returns pane content for preview
+	MarkRead     func(paneID string)        // marks a pane as read
+	MarkUnread   func(paneID string)        // marks a pane as unread
+	ToggleFollow func(paneID string)        // toggles following flag
+	Unmonitor    func(paneID string)        // removes a pane from monitor state
+	SetNote      func(paneID, note string)  // sets note on a pane
 }
 
 // WithAttentionPanes enables the attention sub-view with the given panes and callbacks.
@@ -312,7 +312,7 @@ func WithAttentionPanes(panes []AttentionPane, cb AttentionCallbacks) PickerOpti
 		copy(p.attentionPanes, panes)
 		p.previewFunc = cb.Preview
 		p.markReadFunc = cb.MarkRead
-		p.markAttentionFunc = cb.MarkAttention
+		p.markUnreadFunc = cb.MarkUnread
 		p.toggleFollowFunc = cb.ToggleFollow
 		p.unmonitorFunc = cb.Unmonitor
 		p.setNoteFunc = cb.SetNote
@@ -734,12 +734,12 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 
-	case key.Matches(msg, keys.MarkAttention):
-		if len(p.attentionPanes) > 0 && p.markAttentionFunc != nil {
+	case key.Matches(msg, keys.MarkUnread):
+		if len(p.attentionPanes) > 0 && p.markUnreadFunc != nil {
 			pane := &p.attentionPanes[p.attentionCursor]
-			p.markAttentionFunc(pane.PaneID)
-			pane.Status = AttentionNeedsAttention
-			p.updateAllPanesStatus(pane.PaneID, AttentionNeedsAttention)
+			p.markUnreadFunc(pane.PaneID)
+			pane.Status = AttentionUnread
+			p.updateAllPanesStatus(pane.PaneID, AttentionUnread)
 			p.sortAttentionPanes()
 			if p.attentionCursor >= len(p.attentionPanes) {
 				p.attentionCursor = len(p.attentionPanes) - 1
@@ -865,7 +865,7 @@ func (p *Picker) reloadAttentionPanes() {
 }
 
 // sortAttentionPanes performs a stable sort of attention panes by status group:
-// idle (top) → working (middle) → needs_attention (bottom, closest to cursor).
+// idle (top) → working (middle) → unread (bottom, closest to cursor).
 func (p *Picker) sortAttentionPanes() {
 	sort.SliceStable(p.attentionAllPanes, func(i, j int) bool {
 		return attentionStatusOrder(p.attentionAllPanes[i].Status) < attentionStatusOrder(p.attentionAllPanes[j].Status)
@@ -881,7 +881,7 @@ func attentionStatusOrder(s AttentionStatus) int {
 		return 0
 	case AttentionWorking:
 		return 1
-	case AttentionNeedsAttention:
+	case AttentionUnread:
 		return 2
 	default:
 		return 0
@@ -1430,7 +1430,7 @@ func (p *Picker) viewAttention() string {
 		switch pane.Status {
 		case AttentionWorking:
 			icon = workingIconStyle.Render(spinnerFrames[p.spinnerFrame])
-		case AttentionNeedsAttention:
+		case AttentionUnread:
 			icon = attentionIconStyle.Render("●")
 		case AttentionIdle:
 			icon = idleIconStyle.Render("●")
@@ -1679,7 +1679,7 @@ type keyMap struct {
 	ClearInput   key.Binding
 	Help         key.Binding
 	Attention        key.Binding
-	MarkAttention    key.Binding
+	MarkUnread       key.Binding
 	FollowPane       key.Binding
 	ToggleFollowView key.Binding
 	Back             key.Binding
@@ -1732,7 +1732,7 @@ var keys = keyMap{
 	Attention: key.NewBinding(
 		key.WithKeys("right"),
 	),
-	MarkAttention: key.NewBinding(
+	MarkUnread: key.NewBinding(
 		key.WithKeys("ctrl+a"),
 	),
 	FollowPane: key.NewBinding(

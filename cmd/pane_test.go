@@ -441,7 +441,7 @@ func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
 	// running the agent (opencode, claude, pi, node, ...), not a bare
 	// shell. Those panes must be auto-registered right away so they show
 	// up on the dashboard as idle immediately, even before the agent sends
-	// its first working / needs_attention update.
+	// its first working / unread update.
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
 	stateDir := filepath.Join(dir, "pop")
@@ -700,7 +700,7 @@ func TestRunPaneSetStatusWith_IdleUpdatesRegisteredPane(t *testing.T) {
 	}
 }
 
-func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
+func TestRunPaneSetStatusWith_DismissUnreadInActivePane(t *testing.T) {
 	activeTmux := &deps.MockTmux{
 		CommandFunc: func(args ...string) (string, error) {
 			// isActiveTmuxPaneWith checks display-message
@@ -715,26 +715,26 @@ func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
 		statePath := setupStateFile(t, "%1", monitor.StatusWorking)
 		cfg := &config.Config{}
 
-		err := runPaneSetStatusWith(activeTmux, cfg, "", []string{"%1", "needs_attention"})
+		err := runPaneSetStatusWith(activeTmux, cfg, "", []string{"%1", "unread"})
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		state := loadState(t, statePath)
-		if state.Panes["%1"].Status != monitor.StatusNeedsAttention {
-			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusNeedsAttention)
+		if state.Panes["%1"].Status != monitor.StatusUnread {
+			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusUnread)
 		}
 	})
 
-	t.Run("dismiss_attention_in_active_pane downgrades to read", func(t *testing.T) {
+	t.Run("dismiss_unread_in_active_pane downgrades to idle", func(t *testing.T) {
 		statePath := setupStateFile(t, "%1", monitor.StatusWorking)
 		cfg := &config.Config{
 			PaneMonitoring: &config.PaneMonitoringConfig{
-				DismissAttentionInActivePane: true,
+				DismissUnreadInActivePane: true,
 			},
 		}
 
-		err := runPaneSetStatusWith(activeTmux, cfg, "", []string{"%1", "needs_attention"})
+		err := runPaneSetStatusWith(activeTmux, cfg, "", []string{"%1", "unread"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -745,7 +745,7 @@ func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
 		}
 	})
 
-	t.Run("dismiss_attention_in_active_pane no effect on inactive pane", func(t *testing.T) {
+	t.Run("dismiss_unread_in_active_pane no effect on inactive pane", func(t *testing.T) {
 		inactiveTmux := &deps.MockTmux{
 			CommandFunc: func(args ...string) (string, error) {
 				if args[0] == "display-message" {
@@ -757,18 +757,45 @@ func TestRunPaneSetStatusWith_DismissAttentionInActivePane(t *testing.T) {
 		statePath := setupStateFile(t, "%1", monitor.StatusWorking)
 		cfg := &config.Config{
 			PaneMonitoring: &config.PaneMonitoringConfig{
-				DismissAttentionInActivePane: true,
+				DismissUnreadInActivePane: true,
 			},
 		}
 
-		err := runPaneSetStatusWith(inactiveTmux, cfg, "", []string{"%1", "needs_attention"})
+		err := runPaneSetStatusWith(inactiveTmux, cfg, "", []string{"%1", "unread"})
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		state := loadState(t, statePath)
-		if state.Panes["%1"].Status != monitor.StatusNeedsAttention {
-			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusNeedsAttention)
+		if state.Panes["%1"].Status != monitor.StatusUnread {
+			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusUnread)
 		}
 	})
+}
+
+// TestRunPaneSetStatusWith_LegacyNeedsAttentionAlias verifies that the
+// deprecated "needs_attention" string is still accepted as an alias for
+// "unread". This keeps agent plugins installed from older pop versions
+// working without requiring users to re-run `pop integrate`.
+func TestRunPaneSetStatusWith_LegacyNeedsAttentionAlias(t *testing.T) {
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			if args[0] == "display-message" {
+				return "0 1 1", nil // pane not active
+			}
+			return "", nil
+		},
+	}
+	statePath := setupStateFile(t, "%1", monitor.StatusWorking)
+	cfg := &config.Config{}
+
+	err := runPaneSetStatusWith(tmux, cfg, "", []string{"%1", "needs_attention"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state := loadState(t, statePath)
+	if got := state.Panes["%1"].Status; got != monitor.StatusUnread {
+		t.Errorf("legacy 'needs_attention' alias: got %q, want %q", got, monitor.StatusUnread)
+	}
 }

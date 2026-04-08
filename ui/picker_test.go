@@ -1257,22 +1257,22 @@ func TestTruncateString(t *testing.T) {
 }
 
 func TestAttentionStatusOrder(t *testing.T) {
-	// Verify the sort contract: idle < working < needs_attention
+	// Verify the sort contract: idle < working < unread
 	idle := attentionStatusOrder(AttentionIdle)
 	working := attentionStatusOrder(AttentionWorking)
-	attention := attentionStatusOrder(AttentionNeedsAttention)
+	unread := attentionStatusOrder(AttentionUnread)
 
 	if idle >= working {
 		t.Errorf("idle (%d) should be less than working (%d)", idle, working)
 	}
-	if working >= attention {
-		t.Errorf("working (%d) should be less than attention (%d)", working, attention)
+	if working >= unread {
+		t.Errorf("working (%d) should be less than unread (%d)", working, unread)
 	}
 }
 
 func TestSortAttentionPanes(t *testing.T) {
 	panes := []AttentionPane{
-		{PaneID: "%1", Status: AttentionNeedsAttention},
+		{PaneID: "%1", Status: AttentionUnread},
 		{PaneID: "%2", Status: AttentionIdle},
 		{PaneID: "%3", Status: AttentionWorking},
 		{PaneID: "%4", Status: AttentionIdle},
@@ -1280,7 +1280,7 @@ func TestSortAttentionPanes(t *testing.T) {
 	p := NewPicker(nil, WithAttentionPanes(panes, AttentionCallbacks{}))
 	p.sortAttentionPanes()
 
-	// Expected order: idle, idle, working, needs_attention
+	// Expected order: idle, idle, working, unread
 	expectedIDs := []string{"%2", "%4", "%3", "%1"}
 	for i, want := range expectedIDs {
 		if p.attentionPanes[i].PaneID != want {
@@ -1302,9 +1302,9 @@ func TestUpdateAllPanesStatus(t *testing.T) {
 	}
 	p := NewPicker(nil, WithAttentionPanes(panes, AttentionCallbacks{}))
 
-	p.updateAllPanesStatus("%1", AttentionNeedsAttention)
-	if p.attentionAllPanes[0].Status != AttentionNeedsAttention {
-		t.Errorf("status = %d, want AttentionNeedsAttention", p.attentionAllPanes[0].Status)
+	p.updateAllPanesStatus("%1", AttentionUnread)
+	if p.attentionAllPanes[0].Status != AttentionUnread {
+		t.Errorf("status = %d, want AttentionUnread", p.attentionAllPanes[0].Status)
 	}
 	// %2 should be unchanged
 	if p.attentionAllPanes[1].Status != AttentionWorking {
@@ -1313,7 +1313,7 @@ func TestUpdateAllPanesStatus(t *testing.T) {
 
 	// Non-existent pane ID should be a no-op
 	p.updateAllPanesStatus("%99", AttentionIdle)
-	if p.attentionAllPanes[0].Status != AttentionNeedsAttention {
+	if p.attentionAllPanes[0].Status != AttentionUnread {
 		t.Errorf("status changed for non-matching pane")
 	}
 }
@@ -1514,7 +1514,7 @@ func TestUpdateAttention_Navigation(t *testing.T) {
 func TestUpdateAttention_Reset(t *testing.T) {
 	var readPaneID string
 	panes := []AttentionPane{
-		{PaneID: "%1", Status: AttentionNeedsAttention},
+		{PaneID: "%1", Status: AttentionUnread},
 		{PaneID: "%2", Status: AttentionWorking},
 	}
 	cb := AttentionCallbacks{
@@ -1528,31 +1528,31 @@ func TestUpdateAttention_Reset(t *testing.T) {
 	if readPaneID != "%1" {
 		t.Errorf("markReadFunc called with %s, want %%1", readPaneID)
 	}
-	if p.attentionPanes[0].Status == AttentionNeedsAttention {
-		t.Error("expected pane status to change from NeedsAttention")
+	if p.attentionPanes[0].Status == AttentionUnread {
+		t.Error("expected pane status to change from Unread")
 	}
 	if !p.attentionDirty {
 		t.Error("expected attentionDirty = true")
 	}
 }
 
-func TestUpdateAttention_MarkAttention(t *testing.T) {
+func TestUpdateAttention_MarkUnread(t *testing.T) {
 	var markedPaneID string
 	panes := []AttentionPane{
 		{PaneID: "%1", Status: AttentionIdle},
 	}
 	cb := AttentionCallbacks{
-		MarkAttention: func(paneID string) { markedPaneID = paneID },
+		MarkUnread: func(paneID string) { markedPaneID = paneID },
 	}
 	p := newAttentionPicker(panes, cb, nil)
 	msg := tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}
 	p.Update(msg)
 
 	if markedPaneID != "%1" {
-		t.Errorf("markAttentionFunc called with %s, want %%1", markedPaneID)
+		t.Errorf("markUnreadFunc called with %s, want %%1", markedPaneID)
 	}
-	if p.attentionPanes[0].Status != AttentionNeedsAttention {
-		t.Errorf("status = %d, want AttentionNeedsAttention", p.attentionPanes[0].Status)
+	if p.attentionPanes[0].Status != AttentionUnread {
+		t.Errorf("status = %d, want AttentionUnread", p.attentionPanes[0].Status)
 	}
 	if !p.attentionDirty {
 		t.Error("expected attentionDirty = true")

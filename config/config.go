@@ -37,6 +37,9 @@ type UserDefinedCommand struct {
 
 // PaneMonitoringConfig holds pane monitoring configuration
 type PaneMonitoringConfig struct {
+	DismissUnreadInActivePane bool `toml:"dismiss_unread_in_active_pane"`
+	// Deprecated: use DismissUnreadInActivePane. The old key is read for
+	// backwards compat; a warning is emitted when it is present.
 	DismissAttentionInActivePane bool     `toml:"dismiss_attention_in_active_pane"`
 	IgnoreStatusFrom             []string `toml:"ignore_status_from"`
 }
@@ -60,14 +63,20 @@ var DefaultSortCriteria = []string{SortByStatus, SortByPaneLastVisitAt, SortByAl
 
 // WorktreeConfig holds worktree-specific configuration
 type WorktreeConfig struct {
-	Commands                      []UserDefinedCommand `toml:"commands"`
-	AttentionNotificationsEnabled bool                 `toml:"attention_notifications_enabled"`
+	Commands                   []UserDefinedCommand `toml:"commands"`
+	UnreadNotificationsEnabled bool                 `toml:"unread_notifications_enabled"`
+	// Deprecated: use UnreadNotificationsEnabled. The old key is read for
+	// backwards compat; a warning is emitted when it is present.
+	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled"`
 }
 
 // SelectConfig holds select-specific configuration
 type SelectConfig struct {
-	Commands                      []UserDefinedCommand `toml:"commands"`
-	AttentionNotificationsEnabled bool                 `toml:"attention_notifications_enabled"`
+	Commands                   []UserDefinedCommand `toml:"commands"`
+	UnreadNotificationsEnabled bool                 `toml:"unread_notifications_enabled"`
+	// Deprecated: use UnreadNotificationsEnabled. The old key is read for
+	// backwards compat; a warning is emitted when it is present.
+	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled"`
 }
 
 // ProjectEntry represents a project configuration entry.
@@ -135,14 +144,15 @@ func (c *Config) GetQuickAccessModifier() string {
 	}
 }
 
-// DismissAttentionInActivePane returns whether needs_attention status should
-// be automatically downgraded to read when the pane is currently active.
+// DismissUnreadInActivePane returns whether unread status should be
+// automatically downgraded to idle when the pane is currently active.
+// Supports both the new and deprecated config keys.
 // Defaults to false.
-func (c *Config) DismissAttentionInActivePane() bool {
+func (c *Config) DismissUnreadInActivePane() bool {
 	if c.PaneMonitoring == nil {
 		return false
 	}
-	return c.PaneMonitoring.DismissAttentionInActivePane
+	return c.PaneMonitoring.DismissUnreadInActivePane || c.PaneMonitoring.DismissAttentionInActivePane
 }
 
 // ShouldIgnoreStatusFrom returns whether set-status calls from the given source
@@ -177,20 +187,21 @@ func (c *Config) DashboardSortCriteria() []string {
 	return c.Dashboard.SortCriteria
 }
 
-// AttentionNotificationsEnabled returns whether attention notifications are
-// enabled for the given mode ("select" or "worktree"). Defaults to false.
-func (c *Config) AttentionNotificationsEnabled(mode string) bool {
+// UnreadNotificationsEnabled returns whether unread notifications are
+// enabled for the given mode ("select" or "worktree"). Supports both the
+// new and deprecated config keys. Defaults to false.
+func (c *Config) UnreadNotificationsEnabled(mode string) bool {
 	switch mode {
 	case "select":
 		if c.Select == nil {
 			return false
 		}
-		return c.Select.AttentionNotificationsEnabled
+		return c.Select.UnreadNotificationsEnabled || c.Select.AttentionNotificationsEnabled
 	case "worktree":
 		if c.Worktree == nil {
 			return false
 		}
-		return c.Worktree.AttentionNotificationsEnabled
+		return c.Worktree.UnreadNotificationsEnabled || c.Worktree.AttentionNotificationsEnabled
 	default:
 		return false
 	}
@@ -263,6 +274,17 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	var cfg Config
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return nil, err
+	}
+
+	// Deprecation warnings for the needs_attention → unread rename.
+	if cfg.PaneMonitoring != nil && cfg.PaneMonitoring.DismissAttentionInActivePane {
+		cfg.Warnings = append(cfg.Warnings, "[pane_monitoring] dismiss_attention_in_active_pane is deprecated; rename to dismiss_unread_in_active_pane")
+	}
+	if cfg.Select != nil && cfg.Select.AttentionNotificationsEnabled {
+		cfg.Warnings = append(cfg.Warnings, "[select] attention_notifications_enabled is deprecated; rename to unread_notifications_enabled")
+	}
+	if cfg.Worktree != nil && cfg.Worktree.AttentionNotificationsEnabled {
+		cfg.Warnings = append(cfg.Warnings, "[worktree] attention_notifications_enabled is deprecated; rename to unread_notifications_enabled")
 	}
 
 	configDir := filepath.Dir(path)

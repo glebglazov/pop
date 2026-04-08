@@ -17,16 +17,22 @@ import (
 type PaneStatus string
 
 const (
-	StatusWorking        PaneStatus = "working"
-	StatusNeedsAttention PaneStatus = "needs_attention"
-	StatusIdle           PaneStatus = "idle"
-	StatusUnknown        PaneStatus = "unknown"
+	StatusWorking PaneStatus = "working"
+	StatusUnread  PaneStatus = "unread"
+	StatusIdle    PaneStatus = "idle"
+	StatusUnknown PaneStatus = "unknown"
 
 	// legacyStatusRead is the old name for StatusIdle, accepted as a CLI
 	// alias and migrated transparently when loading state files written
 	// by older versions of pop. Kept unexported because new code should
 	// always use StatusIdle directly.
 	legacyStatusRead PaneStatus = "read"
+
+	// legacyStatusNeedsAttention is the old name for StatusUnread, accepted
+	// as a CLI alias and migrated transparently when loading state files
+	// written by older versions of pop. Kept unexported because new code
+	// should always use StatusUnread directly.
+	legacyStatusNeedsAttention PaneStatus = "needs_attention"
 )
 
 // PaneEntry represents a single monitored pane
@@ -123,13 +129,18 @@ func LoadWith(d *Deps, path string) (*State, error) {
 		s.Panes = make(map[string]*PaneEntry)
 	}
 
-	// Migrate legacy "read" status to "idle". The two were merged: "idle"
-	// is the canonical name and "read" is kept only as a CLI alias and a
-	// state-file alias for backwards compat. Rewriting in-memory means the
-	// next state.Save() will persist the corrected value.
+	// Migrate legacy status names to their canonical forms:
+	//   "read"            → "idle"   (merged statuses; "read" is only a CLI/state alias now)
+	//   "needs_attention" → "unread" (rename for consistency with user mental model)
+	// Rewriting in-memory means the next state.Save() will persist the
+	// corrected value. The legacy names remain accepted via CLI alias so
+	// installed agent plugins that emit the old strings keep working.
 	for _, entry := range s.Panes {
 		if entry.Status == legacyStatusRead {
 			entry.Status = StatusIdle
+		}
+		if entry.Status == legacyStatusNeedsAttention {
+			entry.Status = StatusUnread
 		}
 	}
 
@@ -156,34 +167,34 @@ func (s *State) SaveWith(d *Deps) error {
 	return d.FS.WriteFile(s.path, data, 0644)
 }
 
-// SessionsNeedingAttention returns session names that have at least one pane
-// in StatusNeedsAttention
-func (s *State) SessionsNeedingAttention() map[string]bool {
+// SessionsWithUnread returns session names that have at least one pane
+// in StatusUnread
+func (s *State) SessionsWithUnread() map[string]bool {
 	result := make(map[string]bool)
 	for _, entry := range s.Panes {
-		if entry.Status == StatusNeedsAttention {
+		if entry.Status == StatusUnread {
 			result[entry.Session] = true
 		}
 	}
 	return result
 }
 
-// PanesNeedingAttention returns all pane entries with StatusNeedsAttention
-func (s *State) PanesNeedingAttention() []*PaneEntry {
+// PanesUnread returns all pane entries with StatusUnread
+func (s *State) PanesUnread() []*PaneEntry {
 	var result []*PaneEntry
 	for _, entry := range s.Panes {
-		if entry.Status == StatusNeedsAttention {
+		if entry.Status == StatusUnread {
 			result = append(result, entry)
 		}
 	}
 	return result
 }
 
-// PanesActive returns all pane entries with StatusNeedsAttention or StatusWorking
+// PanesActive returns all pane entries with StatusUnread or StatusWorking
 func (s *State) PanesActive() []*PaneEntry {
 	var result []*PaneEntry
 	for _, entry := range s.Panes {
-		if entry.Status == StatusNeedsAttention || entry.Status == StatusWorking {
+		if entry.Status == StatusUnread || entry.Status == StatusWorking {
 			result = append(result, entry)
 		}
 	}

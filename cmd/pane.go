@@ -430,16 +430,17 @@ var paneSetStatusCmd = &cobra.Command{
 If pane_id is omitted, uses $TMUX_PANE from the environment.
 The pane is auto-registered on the first call with any status.
 
-Valid statuses: working, needs_attention, idle.
+Valid statuses: working, unread, idle.
+"needs_attention" is accepted as a deprecated alias for "unread".
 "read" is accepted as a deprecated alias for "idle".
 
 State transitions:
-  working         → needs_attention   Agent stopped or sent a notification
-  working         → idle              User has seen the output / agent calm
-  needs_attention → idle              User has seen the output
-  needs_attention → working           Agent resumed work
-  idle            → working           Agent resumed work
-  idle            → needs_attention   Agent has output
+  working → unread    Agent stopped or sent a notification
+  working → idle      User has seen the output / agent calm
+  unread  → idle      User has seen the output
+  unread  → working   Agent resumed work
+  idle    → working   Agent resumed work
+  idle    → unread    Agent has output
 
 Auto-registration:
   If the pane is not yet tracked, it is auto-registered on the first
@@ -449,18 +450,17 @@ Auto-registration:
   prevents the tmux-global auto-read hook and housekeeping idle calls
   from registering every pane the user navigates to.
 
-  working and needs_attention always auto-register (they only ever
-  come from agent integrations, which have already proven the pane
-  is agentic).
+  working and unread always auto-register (they only ever come from
+  agent integrations, which have already proven the pane is agentic).
 
   The new entry is seeded with LastVisited=now so it sorts to the
   bottom of its status group in the dashboard (closest to the cursor).
 
 Special behavior:
-  When [pane_monitoring] dismiss_attention_in_active_pane = true,
+  When [pane_monitoring] dismiss_unread_in_active_pane = true,
   if the pane is currently active (visible to the user) and the
-  requested status is needs_attention, it is downgraded to idle
-  automatically — the user is already looking at it.`,
+  requested status is unread, it is downgraded to idle automatically
+  — the user is already looking at it.`,
 	Args:   cobra.RangeArgs(1, 2),
 	Hidden: true,
 	RunE:   runPaneSetStatus,
@@ -491,10 +491,15 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 		paneID = os.Getenv("TMUX_PANE")
 		rawStatus = args[0]
 	}
-	// Normalize the deprecated "read" alias to the canonical "idle".
+	// Normalize deprecated status aliases to their canonical names.
+	// "read" → "idle" and "needs_attention" → "unread" are accepted so
+	// agent plugins installed from older pop versions keep working.
 	status := monitor.PaneStatus(rawStatus)
 	if status == "read" {
 		status = monitor.StatusIdle
+	}
+	if status == "needs_attention" {
+		status = monitor.StatusUnread
 	}
 	if source != "" && cfg.ShouldIgnoreStatusFrom(source) {
 		return nil
@@ -536,8 +541,8 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 		// pane still sitting at a bare zsh / fish / bash / sh prompt
 		// stays out of the dashboard until an agent actually runs there.
 		//
-		// working and needs_attention are never filtered: they only ever
-		// come from agent integrations, so the caller has already proven
+		// working and unread are never filtered: they only ever come
+		// from agent integrations, so the caller has already proven
 		// the pane is agentic.
 		if status == monitor.StatusIdle && isPlainShellCommand(cmdName) {
 			return nil
@@ -571,10 +576,10 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 		visitedNow = true
 	}
 
-	// If configured, treat needs_attention as idle when the user is already
+	// If configured, treat unread as idle when the user is already
 	// looking at the pane — they can see the output in real time.
-	if cfg.DismissAttentionInActivePane() && status == monitor.StatusNeedsAttention && isActiveTmuxPaneWith(tmux, paneID) {
-		debug.Log("[set-status] %s: needs_attention on active pane — downgrading to idle", paneID)
+	if cfg.DismissUnreadInActivePane() && status == monitor.StatusUnread && isActiveTmuxPaneWith(tmux, paneID) {
+		debug.Log("[set-status] %s: unread on active pane — downgrading to idle", paneID)
 		status = monitor.StatusIdle
 	}
 
