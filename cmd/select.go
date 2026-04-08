@@ -80,7 +80,9 @@ func runSelect(cmd *cobra.Command, args []string) error {
 	// Expand projects, showing worktrees for bare repos (parallel)
 	type expandResult struct {
 		index    int
+		path     string // source path (for error messages)
 		projects []project.ExpandedProject
+		err      error
 	}
 
 	results := make(chan expandResult, len(paths))
@@ -94,11 +96,14 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			displayName := ui.LastNSegments(ep.Path, ep.DisplayDepth)
 			projectName := filepath.Base(ep.Path)
 			var projects []project.ExpandedProject
+			var expandErr error
 
 			if project.HasWorktrees(ep.Path) {
 				// Bare repo with worktrees - expand to individual worktrees
 				worktrees, err := project.ListWorktreesForPath(ep.Path)
-				if err == nil {
+				if err != nil {
+					expandErr = err
+				} else {
 					for _, wt := range worktrees {
 						projects = append(projects, project.ExpandedProject{
 							Name:        displayName + "/" + wt.Name,
@@ -118,7 +123,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 				})
 			}
 
-			results <- expandResult{index: idx, projects: projects}
+			results <- expandResult{index: idx, path: ep.Path, projects: projects, err: expandErr}
 		}(i, p)
 	}
 
@@ -129,8 +134,13 @@ func runSelect(cmd *cobra.Command, args []string) error {
 
 	// Collect results maintaining original order
 	resultsByIndex := make(map[int][]project.ExpandedProject)
+	var expansionErrors []string
 	for r := range results {
 		resultsByIndex[r.index] = r.projects
+		if r.err != nil {
+			debug.Error("select: expand %q: %v", r.path, r.err)
+			expansionErrors = append(expansionErrors, filepath.Base(r.path))
+		}
 	}
 
 	// Get current tmux session name for optional exclusion
@@ -150,6 +160,12 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			}
 			expanded = append(expanded, ep)
 		}
+	}
+
+	// If every single project failed to expand, we can't start normal
+	// handling — surface the failure instead of showing an empty picker.
+	if len(expanded) == 0 && len(expansionErrors) > 0 {
+		return fmt.Errorf("failed to expand any projects: %d errors (see ~/.local/share/pop/pop.log for details)", len(expansionErrors))
 	}
 
 	// Disambiguate projects with the same name
@@ -232,8 +248,12 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		if len(customCommands) > 0 {
 			opts = append(opts, ui.WithUserDefinedCommands(customCommands))
 		}
-		if len(cfg.Warnings) > 0 {
-			opts = append(opts, ui.WithWarnings(cfg.Warnings))
+		warnings := cfg.Warnings
+		if len(expansionErrors) > 0 {
+			warnings = append(warnings, fmt.Sprintf("%d project(s) failed to expand: %s (see pop.log)", len(expansionErrors), strings.Join(expansionErrors, ", ")))
+		}
+		if len(warnings) > 0 {
+			opts = append(opts, ui.WithWarnings(warnings))
 		}
 		if restoreCursorIdx >= 0 {
 			opts = append(opts, ui.WithInitialCursorIndex(restoreCursorIdx))

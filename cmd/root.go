@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
+	runtimedebug "runtime/debug"
 
 	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +22,8 @@ It integrates with tmux to provide popup-based fuzzy selection of:
   - Git worktrees in the current repository
 
 Configure your projects in ~/.config/pop/config.toml`,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 // Execute runs the root command
@@ -26,8 +31,20 @@ func Execute() {
 	debug.Init()
 	defer debug.Close()
 
+	// Recover from panics so the stack trace can be shown in the error screen
+	// (and logged) instead of vanishing with the popup.
+	defer func() {
+		if r := recover(); r != nil {
+			trace := string(runtimedebug.Stack())
+			debug.Error("panic: %v\n%s", r, trace)
+			ui.ShowError(fmt.Errorf("panic: %v", r), trace)
+			os.Exit(1)
+		}
+	}()
+
 	if err := rootCmd.Execute(); err != nil {
 		debug.Error("%v", err)
+		ui.ShowError(err, "")
 		os.Exit(1)
 	}
 }
