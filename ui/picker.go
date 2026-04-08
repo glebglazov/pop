@@ -80,6 +80,11 @@ const (
 	ActionOpenWindow
 	ActionUserDefinedCommand
 	ActionSwitchToPane
+	// ActionSwitchToPaneKeepUnread is like ActionSwitchToPane but tells the
+	// caller not to mutate the pane's monitor state. Used by the "peek"
+	// keybind in the attention view so users can open a pane for a quick
+	// look without dismissing its unread flag.
+	ActionSwitchToPaneKeepUnread
 	ActionRefresh
 )
 
@@ -681,6 +686,22 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		p.result = Result{
 			Selected: &Item{Name: pane.Name, Path: pane.PaneID, Context: pane.Session},
 			Action:   ActionSwitchToPane,
+		}
+		return p, tea.Quit
+
+	case key.Matches(msg, keys.PeekPane):
+		// "Peek" — open the pane without mutating its monitor state.
+		// Unlike Enter (which calls dismissUnreadPane on the caller side),
+		// this action signals the caller to leave Status and LastVisited
+		// untouched. Used for "I just want to glance at this without
+		// clearing the unread flag."
+		if len(p.attentionPanes) == 0 {
+			return p, nil
+		}
+		pane := p.attentionPanes[p.attentionCursor]
+		p.result = Result{
+			Selected: &Item{Name: pane.Name, Path: pane.PaneID, Context: pane.Session},
+			Action:   ActionSwitchToPaneKeepUnread,
 		}
 		return p, tea.Quit
 
@@ -1680,6 +1701,7 @@ type keyMap struct {
 	Help         key.Binding
 	Attention        key.Binding
 	MarkUnread       key.Binding
+	PeekPane         key.Binding
 	FollowPane       key.Binding
 	ToggleFollowView key.Binding
 	Back             key.Binding
@@ -1734,6 +1756,13 @@ var keys = keyMap{
 	),
 	MarkUnread: key.NewBinding(
 		key.WithKeys("ctrl+a"),
+	),
+	PeekPane: key.NewBinding(
+		// shift+enter works on terminals supporting the Kitty keyboard
+		// protocol (kitty, WezTerm, ghostty, foot, iTerm2 recent, Alacritty
+		// 0.13+) under tmux with `set -s extended-keys on`. `p` is the
+		// universal fallback — "p" for "peek".
+		key.WithKeys("shift+enter", "p"),
 	),
 	FollowPane: key.NewBinding(
 		key.WithKeys("ctrl+f"),

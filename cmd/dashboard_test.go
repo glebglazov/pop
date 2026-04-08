@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -456,6 +457,119 @@ func TestSessionAccessTime(t *testing.T) {
 		result := sessionAccessTime("myproject", hist)
 		if result != 0 {
 			t.Errorf("expected 0, got %d", result)
+		}
+	})
+}
+
+// TestHandleDashboardSwitch verifies the contract between the two switch
+// actions and the monitor state:
+//
+//   - Normal switch (dismissUnread=true) MUST flip an unread pane to idle
+//     and MUST stamp LastVisited, matching the long-standing Enter behavior.
+//   - Peek (dismissUnread=false) MUST leave the monitor state completely
+//     untouched — no status flip, no LastVisited update — so the pane
+//     continues to appear as unread in the dashboard even after the user
+//     has glanced at its content.
+//
+// Both actions record the session in pop's history for recency tracking in
+// `pop select` (a separate store from monitor state).
+func TestHandleDashboardSwitch(t *testing.T) {
+	setup := func(t *testing.T) (statePath string, initialVisited time.Time) {
+		t.Helper()
+		dir := t.TempDir()
+		t.Setenv("XDG_DATA_HOME", dir)
+		t.Setenv("HOME", dir) // ensures history.DefaultHistoryPath stays inside tmp
+		stateDir := filepath.Join(dir, "pop")
+		if err := os.MkdirAll(stateDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		statePath = filepath.Join(stateDir, "monitor.json")
+
+		// Write a fake PID file pointing at the current test process so
+		// IsDaemonRunningWith (which sends signal 0 to the PID) considers
+		// the daemon alive. Without this, dismissUnreadPane silently
+		// no-ops and the test can't verify status mutation.
+		pidPath := filepath.Join(stateDir, "monitor.pid")
+		if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		initialVisited = time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+		state := &monitor.State{Panes: map[string]*monitor.PaneEntry{
+			"%1": {
+				PaneID:      "%1",
+				Session:     "proj",
+				Status:      monitor.StatusUnread,
+				LastVisited: initialVisited,
+			},
+		}}
+		data, _ := json.Marshal(state)
+		if err := os.WriteFile(statePath, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		return statePath, initialVisited
+	}
+
+	loadPane := func(t *testing.T, statePath, paneID string) *monitor.PaneEntry {
+		t.Helper()
+		state, err := monitor.Load(statePath)
+		if err != nil {
+			t.Fatalf("monitor.Load: %v", err)
+		}
+		entry, ok := state.Panes[paneID]
+		if !ok {
+			t.Fatalf("pane %s missing from state", paneID)
+		}
+		return entry
+	}
+
+	t.Run("normal switch dismisses unread and stamps LastVisited", func(t *testing.T) {
+		statePath, initialVisited := setup(t)
+		result := ui.Result{
+			Selected: &ui.Item{Name: "proj (%1)", Path: "%1", Context: "proj"},
+			Action:   ui.ActionSwitchToPane,
+		}
+
+		got := handleDashboardSwitch(result, true)
+		if got != "%1" {
+			t.Errorf("return = %q, want %q", got, "%1")
+		}
+
+		entry := loadPane(t, statePath, "%1")
+		if entry.Status != monitor.StatusIdle {
+			t.Errorf("status = %q, want %q (dismiss should have flipped it)", entry.Status, monitor.StatusIdle)
+		}
+		if !entry.LastVisited.After(initialVisited) {
+			t.Errorf("LastVisited = %v, want something after %v", entry.LastVisited, initialVisited)
+		}
+	})
+
+	t.Run("peek leaves monitor state untouched", func(t *testing.T) {
+		statePath, initialVisited := setup(t)
+		result := ui.Result{
+			Selected: &ui.Item{Name: "proj (%1)", Path: "%1", Context: "proj"},
+			Action:   ui.ActionSwitchToPaneKeepUnread,
+		}
+
+		got := handleDashboardSwitch(result, false)
+		if got != "%1" {
+			t.Errorf("return = %q, want %q", got, "%1")
+		}
+
+		entry := loadPane(t, statePath, "%1")
+		if entry.Status != monitor.StatusUnread {
+			t.Errorf("status = %q, want %q (peek must not flip status)", entry.Status, monitor.StatusUnread)
+		}
+		if !entry.LastVisited.Equal(initialVisited) {
+			t.Errorf("LastVisited = %v, want %v (peek must not update LastVisited)", entry.LastVisited, initialVisited)
+		}
+	})
+
+	t.Run("nil selected returns empty string", func(t *testing.T) {
+		setup(t)
+		result := ui.Result{Selected: nil, Action: ui.ActionSwitchToPane}
+		if got := handleDashboardSwitch(result, true); got != "" {
+			t.Errorf("got %q, want empty string", got)
 		}
 	})
 }

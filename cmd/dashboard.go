@@ -74,26 +74,50 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 
 	switch result.Action {
 	case ui.ActionSwitchToPane:
-		if result.Selected != nil {
-			hist, err := history.Load(history.DefaultHistoryPath())
-			if err != nil {
-				debug.Error("dashboard: load history: %v", err)
-			}
-			if hist == nil {
-				hist = &history.History{}
-			}
-			hist.Record(sessionHistoryPath(result.Selected.Context, hist))
-			if err := hist.Save(); err != nil {
-				debug.Error("dashboard: save history: %v", err)
-			}
-			dismissUnreadPane(result.Selected.Path)
-			return switchToTmuxTargetAndZoom(result.Selected.Path)
+		if target := handleDashboardSwitch(result, true); target != "" {
+			return switchToTmuxTargetAndZoom(target)
+		}
+	case ui.ActionSwitchToPaneKeepUnread:
+		if target := handleDashboardSwitch(result, false); target != "" {
+			return switchToTmuxTargetAndZoom(target)
 		}
 	case ui.ActionCancel:
 		os.Exit(1)
 	}
 
 	return nil
+}
+
+// handleDashboardSwitch performs the post-picker bookkeeping for a dashboard
+// switch result: records the session in pop's history, and — if dismissUnread
+// is true — flips the pane's monitor status from unread to idle. Returns the
+// pane ID the caller should switch into, or empty string when nothing should
+// happen.
+//
+// dismissUnread distinguishes the two switch actions:
+//   - true  (Enter / ActionSwitchToPane):         clear the unread flag.
+//   - false (peek / ActionSwitchToPaneKeepUnread): leave monitor state
+//     untouched so the pane remains unread in the dashboard even after
+//     the user glances at it.
+func handleDashboardSwitch(result ui.Result, dismissUnread bool) string {
+	if result.Selected == nil {
+		return ""
+	}
+	hist, err := history.Load(history.DefaultHistoryPath())
+	if err != nil {
+		debug.Error("dashboard: load history: %v", err)
+	}
+	if hist == nil {
+		hist = &history.History{}
+	}
+	hist.Record(sessionHistoryPath(result.Selected.Context, hist))
+	if err := hist.Save(); err != nil {
+		debug.Error("dashboard: save history: %v", err)
+	}
+	if dismissUnread {
+		dismissUnreadPane(result.Selected.Path)
+	}
+	return result.Selected.Path
 }
 
 func saveDashboardFollowing(following bool) {

@@ -1463,6 +1463,54 @@ func TestUpdateAttention_Enter(t *testing.T) {
 	})
 }
 
+func TestUpdateAttention_PeekPane(t *testing.T) {
+	// Verifies that the "peek" keybind (shift+enter or the `p` fallback)
+	// produces ActionSwitchToPaneKeepUnread and populates Selected. The
+	// caller — cmd/dashboard.go — is responsible for interpreting this
+	// action as "switch into the pane but do not mutate monitor state."
+	t.Run("peek with fallback p key selects current pane", func(t *testing.T) {
+		panes := []AttentionPane{
+			{PaneID: "%1", Session: "s1", Name: "p1"},
+			{PaneID: "%2", Session: "s2", Name: "p2"},
+		}
+		p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+		p.attentionCursor = 1
+		msg := tea.KeyPressMsg{Code: 'p'}
+
+		_, cmd := p.Update(msg)
+		if cmd == nil {
+			t.Fatal("expected quit cmd")
+		}
+		if p.result.Action != ActionSwitchToPaneKeepUnread {
+			t.Errorf("action = %d, want ActionSwitchToPaneKeepUnread", p.result.Action)
+		}
+		if p.result.Selected == nil {
+			t.Fatal("expected Selected to be populated")
+		}
+		if p.result.Selected.Path != "%2" {
+			t.Errorf("selected path = %s, want %%2", p.result.Selected.Path)
+		}
+		if p.result.Selected.Context != "s2" {
+			t.Errorf("selected context = %s, want s2", p.result.Selected.Context)
+		}
+	})
+
+	t.Run("peek with no panes is a no-op", func(t *testing.T) {
+		p := newAttentionPicker(nil, AttentionCallbacks{}, nil)
+		p.attentionPanes = nil
+		msg := tea.KeyPressMsg{Code: 'p'}
+
+		_, cmd := p.Update(msg)
+		if cmd != nil {
+			t.Errorf("expected no cmd, got %v", cmd)
+		}
+		// Result should remain its zero value (no action).
+		if p.result.Action == ActionSwitchToPaneKeepUnread {
+			t.Error("peek with no panes should not produce ActionSwitchToPaneKeepUnread")
+		}
+	})
+}
+
 func TestUpdateAttention_Navigation(t *testing.T) {
 	panes := []AttentionPane{
 		{PaneID: "%1", Session: "s1", Name: "p1"},
