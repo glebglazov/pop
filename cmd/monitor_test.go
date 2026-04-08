@@ -192,6 +192,92 @@ func TestTmuxPaneSessionWith(t *testing.T) {
 	}
 }
 
+func TestTmuxPaneInfoWith(t *testing.T) {
+	t.Run("parses tab-separated session and command", func(t *testing.T) {
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				if args[0] == "display-message" {
+					return "project-a\topencode", nil
+				}
+				return "", nil
+			},
+		}
+		session, cmdName, err := tmuxPaneInfoWith(tmux, "%1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if session != "project-a" {
+			t.Errorf("session = %q, want %q", session, "project-a")
+		}
+		if cmdName != "opencode" {
+			t.Errorf("cmdName = %q, want %q", cmdName, "opencode")
+		}
+	})
+
+	t.Run("propagates tmux errors", func(t *testing.T) {
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				return "", fmt.Errorf("pane not found")
+			},
+		}
+		_, _, err := tmuxPaneInfoWith(tmux, "%nope")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("errors on malformed output", func(t *testing.T) {
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				return "no-tab-here", nil
+			},
+		}
+		_, _, err := tmuxPaneInfoWith(tmux, "%1")
+		if err == nil {
+			t.Error("expected error on malformed output, got nil")
+		}
+	})
+}
+
+func TestIsPlainShellCommand(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		// Shells — should be skipped.
+		{"zsh", true},
+		{"bash", true},
+		{"fish", true},
+		{"sh", true},
+		{"dash", true},
+		{"ksh", true},
+		{"tcsh", true},
+		{"csh", true},
+		// Login-shell marker.
+		{"-zsh", true},
+		{"-bash", true},
+		{"-fish", true},
+		// Agents / non-shells — should NOT be treated as shells.
+		{"opencode", false},
+		{"claude", false},
+		{"pi", false},
+		{"node", false},
+		{"bun", false},
+		{"python", false},
+		{"vim", false},
+		{"nvim", false},
+		{"less", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			if got := isPlainShellCommand(tt.cmd); got != tt.want {
+				t.Errorf("isPlainShellCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsActiveTmuxPaneWith(t *testing.T) {
 	tests := []struct {
 		name     string
