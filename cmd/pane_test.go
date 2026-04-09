@@ -424,7 +424,7 @@ func TestRunPaneSetStatusWith_IdleSkipsPlainShellPanes(t *testing.T) {
 	cfg := &config.Config{}
 
 	for _, paneID := range []string{"%9", "%10", "%11", "%12"} {
-		if err := runPaneSetStatusWith(tmux, cfg, "", []string{paneID, "idle"}); err != nil {
+		if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{paneID, "idle"}); err != nil {
 			t.Fatalf("unexpected error for %s: %v", paneID, err)
 		}
 	}
@@ -465,7 +465,7 @@ func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
 
 	before := time.Now()
 	for _, paneID := range []string{"%20", "%21", "%22", "%23"} {
-		if err := runPaneSetStatusWith(tmux, cfg, "", []string{paneID, "idle"}); err != nil {
+		if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{paneID, "idle"}); err != nil {
 			t.Fatalf("unexpected error for %s: %v", paneID, err)
 		}
 	}
@@ -490,20 +490,9 @@ func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
 	}
 }
 
-func TestRunPaneSetStatusWith_TmuxGlobalHookSelectivelyRegistersAgentPanes(t *testing.T) {
-	// Simulates the tmux-global auto-read hook firing as the user navigates
-	// through a mix of pane types:
-	//   - %1, %2:   plain shell panes (zsh, fish) — must NOT register
-	//   - %3:       a pane running opencode — SHOULD register (agentic)
-	//   - %4:       a pane running vim (editor, not an agent) — must NOT
-	//               register (anything non-shell, non-agent is up to the
-	//               blacklist; we deliberately do not maintain a whitelist,
-	//               so vim IS treated as agentic and will register)
-	//
-	// Wait — since our blacklist only covers shells, vim counts as agentic
-	// too. That is the intentional tradeoff: no whitelist to maintain, and
-	// the user can always manually unmonitor a false positive. The test
-	// just locks in the documented behavior.
+func TestRunPaneSetStatusWith_NoRegisterFlag(t *testing.T) {
+	// --no-register prevents auto-registration of untracked panes but
+	// still allows status updates on already-tracked panes.
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
 	stateDir := filepath.Join(dir, "pop")
@@ -511,53 +500,44 @@ func TestRunPaneSetStatusWith_TmuxGlobalHookSelectivelyRegistersAgentPanes(t *te
 		t.Fatal(err)
 	}
 	statePath := filepath.Join(stateDir, "monitor.json")
-	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
-	data, _ := json.Marshal(emptyState)
+	seedState := &monitor.State{
+		Panes: map[string]*monitor.PaneEntry{
+			"%3": {PaneID: "%3", Session: "some-session", Status: monitor.StatusWorking},
+		},
+	}
+	data, _ := json.Marshal(seedState)
 	if err := os.WriteFile(statePath, data, 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	tmux := newPaneInfoMockTmux(map[string]string{
 		"%1": "some-session\tzsh",
-		"%2": "some-session\tfish",
 		"%3": "some-session\topencode",
 		"%4": "some-session\tvim",
 	})
 	cfg := &config.Config{}
 
-	for _, paneID := range []string{"%1", "%2", "%3", "%4"} {
-		if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", []string{paneID, "read"}); err != nil {
+	// Untracked panes with --no-register: must not register (any command).
+	for _, paneID := range []string{"%1", "%4"} {
+		if err := runPaneSetStatusWith(tmux, cfg, "", true, []string{paneID, "read"}); err != nil {
 			t.Fatalf("unexpected error for %s: %v", paneID, err)
 		}
 	}
-
 	state := loadState(t, statePath)
-	// Shell panes must not be in state.
-	for _, shellPane := range []string{"%1", "%2"} {
-		if _, ok := state.Panes[shellPane]; ok {
-			t.Errorf("shell pane %s was auto-registered by tmux-global hook: %+v", shellPane, state.Panes[shellPane])
-		}
+	if _, ok := state.Panes["%1"]; ok {
+		t.Error("--no-register registered untracked shell pane %1")
 	}
-	// Non-shell panes must be in state as idle.
-	for _, agentPane := range []string{"%3", "%4"} {
-		entry, ok := state.Panes[agentPane]
-		if !ok {
-			t.Errorf("non-shell pane %s was not auto-registered by tmux-global hook", agentPane)
-			continue
-		}
-		if entry.Status != monitor.StatusIdle {
-			t.Errorf("%s: status = %q, want %q", agentPane, entry.Status, monitor.StatusIdle)
-		}
+	if _, ok := state.Panes["%4"]; ok {
+		t.Error("--no-register registered untracked vim pane %4")
 	}
 
-	// And an agent claim still works: an opencode plugin calling
-	// `set-status working` on its pane must transition %3 from idle.
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%3", "working"}); err != nil {
-		t.Fatalf("unexpected error on working claim: %v", err)
+	// Tracked pane with --no-register: must still update status.
+	if err := runPaneSetStatusWith(tmux, cfg, "", true, []string{"%3", "idle"}); err != nil {
+		t.Fatalf("unexpected error for %%3: %v", err)
 	}
 	state = loadState(t, statePath)
-	if state.Panes["%3"].Status != monitor.StatusWorking {
-		t.Errorf("%%3 after working: got %q, want %q", state.Panes["%3"].Status, monitor.StatusWorking)
+	if state.Panes["%3"].Status != monitor.StatusIdle {
+		t.Errorf("%%3 status = %q, want %q (--no-register should still update tracked panes)", state.Panes["%3"].Status, monitor.StatusIdle)
 	}
 }
 
@@ -594,7 +574,7 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	cfg := &config.Config{}
 
 	// Untracked shell pane: "read" must be a no-op.
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%6", "read"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%6", "read"}); err != nil {
 		t.Fatalf("unexpected error for %%6: %v", err)
 	}
 	state := loadState(t, statePath)
@@ -603,7 +583,7 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	}
 
 	// Untracked agent pane: "read" must auto-register as idle.
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%7", "read"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%7", "read"}); err != nil {
 		t.Fatalf("unexpected error for %%7: %v", err)
 	}
 	state = loadState(t, statePath)
@@ -616,7 +596,7 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	}
 
 	// Already-tracked pane: "read" must transition it to idle.
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%5", "read"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%5", "read"}); err != nil {
 		t.Fatalf("unexpected error for %%5: %v", err)
 	}
 	state = loadState(t, statePath)
@@ -654,7 +634,7 @@ func TestRunPaneSetStatusWith_AutoRegisterSeedsLastVisited(t *testing.T) {
 	cfg := &config.Config{}
 
 	before := time.Now()
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%7", "working"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%7", "working"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	after := time.Now()
@@ -686,7 +666,7 @@ func TestRunPaneSetStatusWith_IdleUpdatesRegisteredPane(t *testing.T) {
 	}
 	cfg := &config.Config{}
 
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%1", "idle"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%1", "idle"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -715,7 +695,7 @@ func TestRunPaneSetStatusWith_DismissUnreadInActivePane(t *testing.T) {
 		statePath := setupStateFile(t, "%1", monitor.StatusWorking)
 		cfg := &config.Config{}
 
-		err := runPaneSetStatusWith(activeTmux, cfg, "", []string{"%1", "unread"})
+		err := runPaneSetStatusWith(activeTmux, cfg, "", false, []string{"%1", "unread"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -734,7 +714,7 @@ func TestRunPaneSetStatusWith_DismissUnreadInActivePane(t *testing.T) {
 			},
 		}
 
-		err := runPaneSetStatusWith(activeTmux, cfg, "", []string{"%1", "unread"})
+		err := runPaneSetStatusWith(activeTmux, cfg, "", false, []string{"%1", "unread"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -761,7 +741,7 @@ func TestRunPaneSetStatusWith_DismissUnreadInActivePane(t *testing.T) {
 			},
 		}
 
-		err := runPaneSetStatusWith(inactiveTmux, cfg, "", []string{"%1", "unread"})
+		err := runPaneSetStatusWith(inactiveTmux, cfg, "", false, []string{"%1", "unread"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -789,7 +769,7 @@ func TestRunPaneSetStatusWith_LegacyNeedsAttentionAlias(t *testing.T) {
 	statePath := setupStateFile(t, "%1", monitor.StatusWorking)
 	cfg := &config.Config{}
 
-	err := runPaneSetStatusWith(tmux, cfg, "", []string{"%1", "needs_attention"})
+	err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%1", "needs_attention"})
 	if err != nil {
 		t.Fatal(err)
 	}

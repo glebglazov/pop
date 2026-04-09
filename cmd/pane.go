@@ -41,6 +41,7 @@ func init() {
 	paneCmd.AddCommand(paneCaptureCmd)
 	paneCmd.AddCommand(paneSetStatusCmd)
 	paneSetStatusCmd.Flags().String("source", "", "source identifier for filtering (e.g. tmux-global)")
+	paneSetStatusCmd.Flags().Bool("no-register", false, "only update already-tracked panes, never auto-register new ones")
 	paneCmd.AddCommand(paneStatusCmd)
 }
 
@@ -475,10 +476,11 @@ func runPaneSetStatus(cmd *cobra.Command, args []string) error {
 		cfg = &config.Config{}
 	}
 	source, _ := cmd.Flags().GetString("source")
-	return runPaneSetStatusWith(defaultTmux, cfg, source, args)
+	noRegister, _ := cmd.Flags().GetBool("no-register")
+	return runPaneSetStatusWith(defaultTmux, cfg, source, noRegister, args)
 }
 
-func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, args []string) error {
+func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noRegister bool, args []string) error {
 	debug.Init()
 	defer debug.Close()
 
@@ -525,6 +527,9 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, arg
 
 	entry, ok := state.Panes[paneID]
 	if !ok {
+		if noRegister {
+			return nil
+		}
 		// Auto-register: look up the session (and, for idle, also the
 		// current command so we can skip plain shell panes).
 		session, cmdName, err := tmuxPaneInfoWith(tmux, paneID)

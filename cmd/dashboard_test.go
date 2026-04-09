@@ -79,7 +79,7 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 	// 1. User navigates through 4 plain-shell panes. The tmux-global
 	//    auto-read hook fires read/idle for each. None must register.
 	for _, paneID := range []string{"%10", "%11", "%12", "%13"} {
-		if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", []string{paneID, "read"}); err != nil {
+		if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", true, []string{paneID, "read"}); err != nil {
 			t.Fatalf("tmux-global hook for %s: %v", paneID, err)
 		}
 	}
@@ -87,16 +87,16 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 	// 2. opencode plugin eagerly sends idle on load for its pane (%20).
 	//    Because %20 is running opencode (not a shell), it MUST register
 	//    right away as idle — this is the change the user asked for.
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%20", "idle"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%20", "idle"}); err != nil {
 		t.Fatalf("opencode housekeeping idle: %v", err)
 	}
 
 	// 3. Real agent claims: claude fires working on %7, pi fires
 	//    unread on %8. Both register.
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%7", "working"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%7", "working"}); err != nil {
 		t.Fatalf("claude working: %v", err)
 	}
-	if err := runPaneSetStatusWith(tmux, cfg, "", []string{"%8", "unread"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%8", "unread"}); err != nil {
 		t.Fatalf("pi unread: %v", err)
 	}
 
