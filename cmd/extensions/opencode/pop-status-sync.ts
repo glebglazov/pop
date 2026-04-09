@@ -15,10 +15,13 @@
  */
 
 export const PopStatusSync = async ({ $ }) => {
+	const paneID = process.env.TMUX_PANE;
+	if (!paneID) return {};
+
 	const setStatus = (status: "idle" | "working" | "unread") => {
 		// Fire-and-forget; swallow errors so a missing `pop` binary never
 		// breaks the agent.
-		$`pop pane set-status ${status}`.catch(() => {});
+		$`pop pane set-status ${paneID} ${status}`.catch(() => {});
 	};
 
 	// Clear any stale "working" status left over from a previous run of the

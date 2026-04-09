@@ -337,7 +337,7 @@ func TestIntegrateClaude_FreshSettings(t *testing.T) {
 	if !ok {
 		t.Fatal("missing hooks key in settings")
 	}
-	for _, event := range []string{"UserPromptSubmit", "PreToolUse", "Stop", "Notification"} {
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "Stop", "Notification"} {
 		entries, ok := hooks[event].([]interface{})
 		if !ok || len(entries) == 0 {
 			t.Errorf("missing hooks for event %q", event)
@@ -432,13 +432,13 @@ func TestIntegrateClaude_ReplacesOldPopHooks(t *testing.T) {
 
 func TestIntegrateClaude_RemovesStaleEventKeys(t *testing.T) {
 	// A previously installed pop hook on an event we no longer manage
-	// (here: SessionStart) should be cleaned up entirely on re-install,
+	// (here: PostToolUse) should be cleaned up entirely on re-install,
 	// not left as a null/empty entry.
 	fs := newFakeFS()
 	settingsPath := filepath.Join("/h", ".claude", "settings.json")
 	existing := map[string]interface{}{
 		"hooks": map[string]interface{}{
-			"SessionStart": []interface{}{
+			"PostToolUse": []interface{}{
 				map[string]interface{}{
 					"hooks": []interface{}{
 						map[string]interface{}{
@@ -460,8 +460,8 @@ func TestIntegrateClaude_RemovesStaleEventKeys(t *testing.T) {
 	var settings map[string]interface{}
 	json.Unmarshal(fs.files[settingsPath], &settings)
 	hooks := settings["hooks"].(map[string]interface{})
-	if val, exists := hooks["SessionStart"]; exists {
-		t.Errorf("expected SessionStart to be deleted, got %v", val)
+	if val, exists := hooks["PostToolUse"]; exists {
+		t.Errorf("expected PostToolUse to be deleted, got %v", val)
 	}
 }
 

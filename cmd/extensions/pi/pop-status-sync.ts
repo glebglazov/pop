@@ -17,10 +17,13 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
+	const paneID = process.env.TMUX_PANE;
+	if (!paneID) return;
+
 	const setStatus = (status: "working" | "unread" | "idle") => {
 		// Fire-and-forget; swallow errors so a missing `pop` binary never
 		// breaks the agent.
-		pi.exec("pop", ["pane", "set-status", status]).catch(() => {});
+		pi.exec("pop", ["pane", "set-status", paneID, status]).catch(() => {});
 	};
 
 	// UserPromptSubmit → working

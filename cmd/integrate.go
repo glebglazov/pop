@@ -97,6 +97,7 @@ var popHooks = []struct {
 	event   string
 	command string
 }{
+	{"SessionStart", "pop pane set-status idle 2>/dev/null || true"},
 	{"UserPromptSubmit", "pop pane set-status working 2>/dev/null || true"},
 	{"PreToolUse", "pop pane set-status working 2>/dev/null || true"},
 	{"Stop", "pop pane set-status unread 2>/dev/null || true"},
