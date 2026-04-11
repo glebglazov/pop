@@ -42,31 +42,125 @@ func init() {
 	selectCmd.Flags().BoolVar(&noHistory, "no-history", false, "Do not record selection in history")
 }
 
+// SelectDeps holds dependencies for the select command.
+// See docs/rfc-select-deps.md for rationale.
+type SelectDeps struct {
+	// Core dependencies
+	Tmux    deps.Tmux
+	Project *project.Deps
+
+	// Data loading
+	LoadConfig  func() (*config.Config, error)
+	LoadHistory func() (*history.History, error)
+
+	// Picker — the critical testing seam
+	RunPicker func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error)
+
+	// Session state
+	SessionActivity    func() map[string]int64
+	AttentionSessions  func() map[string]bool
+	AttentionPanes     func() []ui.AttentionPane
+	AttentionCallbacks func() ui.AttentionCallbacks
+
+	// Side effects (take deps.Tmux as first arg to match *With signatures)
+	OpenSession      func(tmux deps.Tmux, item *ui.Item) error
+	OpenWindow       func(tmux deps.Tmux, item *ui.Item) error
+	KillSession      func(tmux deps.Tmux, name string)
+	SendCDToPane     func(tmux deps.Tmux, paneID, path string) error
+	SwitchToTarget   func(tmux deps.Tmux, target string) error
+	SwitchAndZoom    func(tmux deps.Tmux, target string) error
+	RunCustomCommand func(command string, item *ui.Item)
+	// EnsureSystemState synchronously runs integration checks and kicks off
+	// the monitor daemon in a goroutine. Returns warnings for the picker.
+	EnsureSystemState func() []string
+	RunConfigure      func() error
+
+	// Environment
+	InTmux         func() bool
+	CurrentSession func(tmux deps.Tmux) string
+
+	// CLI flags (populated by cobra handler before calling RunSelect)
+	TMuxCDPane string
+	NoHistory  bool
+}
+
+// DefaultSelectDeps returns SelectDeps wired to real production implementations.
+func DefaultSelectDeps() *SelectDeps {
+	return &SelectDeps{
+		Tmux:    defaultTmux,
+		Project: project.DefaultDeps(),
+
+		LoadConfig: func() (*config.Config, error) {
+			cfgPath := cfgFile
+			if cfgPath == "" {
+				cfgPath = config.DefaultConfigPath()
+			}
+			return config.Load(cfgPath)
+		},
+		LoadHistory: func() (*history.History, error) {
+			return history.Load(history.DefaultHistoryPath())
+		},
+
+		RunPicker: ui.Run,
+
+		SessionActivity:    history.TmuxSessionActivity,
+		AttentionSessions:  monitorAttentionSessions,
+		AttentionPanes:     buildAttentionPanes,
+		AttentionCallbacks: attentionCallbacks,
+
+		OpenSession:       openTmuxSessionWith,
+		OpenWindow:        openTmuxWindowWith,
+		KillSession:       killTmuxSessionWith,
+		SendCDToPane:      sendCDToPaneWith,
+		SwitchToTarget:    switchToTmuxTargetWith,
+		SwitchAndZoom:     switchToTmuxTargetAndZoomWith,
+		RunCustomCommand:  executeSelectCustomCommand,
+		EnsureSystemState: ensureSystemState,
+		RunConfigure: func() error {
+			cd := defaultConfigureDeps()
+			cd.ShowWelcome = true
+			return runConfigureWith(cd)
+		},
+
+		InTmux:         func() bool { return os.Getenv("TMUX") != "" },
+		CurrentSession: currentTmuxSessionWith,
+	}
+}
+
 func runSelect(cmd *cobra.Command, args []string) error {
-	// Load config
+	d := DefaultSelectDeps()
+	d.TMuxCDPane = tmuxCDPane
+	d.NoHistory = noHistory
+	return RunSelect(d)
+}
+
+// RunSelect runs the select command with the given dependencies.
+// It orchestrates config loading, project expansion, history sorting,
+// the picker loop, and action dispatch.
+func RunSelect(d *SelectDeps) error {
+	// cfgPath is resolved only for the "no projects found" diagnostic message;
+	// LoadConfig hides how the config is actually loaded.
 	cfgPath := cfgFile
 	if cfgPath == "" {
 		cfgPath = config.DefaultConfigPath()
 	}
 
-	cfg, err := config.Load(cfgPath)
+	cfg, err := d.LoadConfig()
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 		// Config doesn't exist — run interactive init
-		d := defaultConfigureDeps()
-		d.ShowWelcome = true
-		if err := runConfigureWith(d); err != nil {
+		if err := d.RunConfigure(); err != nil {
 			return err
 		}
-		cfg, err = config.Load(cfgPath)
+		cfg, err = d.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 	}
 
-	systemWarnings := ensureSystemState()
+	systemWarnings := d.EnsureSystemState()
 
 	// Expand project paths
 	paths, err := cfg.ExpandProjects()
@@ -81,12 +175,12 @@ func runSelect(cmd *cobra.Command, args []string) error {
 	// Expand projects, showing worktrees for bare repos (parallel).
 	// Per-project errors and panics are captured so one bad project can't
 	// crash the whole select flow.
-	expanded, expansionErrors := expandProjects(paths)
+	expanded, expansionErrors := expandProjectsWith(d.Project, paths)
 
 	// Get current tmux session name for optional exclusion
 	var excludedSessionNames map[string]bool
 	if cfg.ShouldExcludeCurrentSession() {
-		if currentSession := currentTmuxSession(); currentSession != "" {
+		if currentSession := d.CurrentSession(d.Tmux); currentSession != "" {
 			excludedSessionNames = map[string]bool{currentSession: true}
 		}
 	}
@@ -110,7 +204,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 	project.DisambiguateNames(expanded, cfg.GetDisambiguationStrategy())
 
 	// Load history and sort by recency (oldest first, most recent last)
-	hist, err := history.Load(history.DefaultHistoryPath())
+	hist, err := d.LoadHistory()
 	if err != nil {
 		hist = &history.History{}
 	}
@@ -154,11 +248,15 @@ func runSelect(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run picker loop
-	inTmux := os.Getenv("TMUX") != ""
+	inTmux := d.InTmux()
 	restoreCursorIdx := -1
 	for {
 		// Refresh session state each iteration
-		items := buildSessionAwareItems(baseItems, hist, excludedSessionNames, cfg.UnreadNotificationsEnabled("select"))
+		var attention map[string]bool
+		if cfg.UnreadNotificationsEnabled("select") {
+			attention = d.AttentionSessions()
+		}
+		items := buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention)
 
 		quickAccessModifier := cfg.GetQuickAccessModifier()
 		iconLegends := []ui.IconLegend{
@@ -176,8 +274,8 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			ui.WithIconLegend(iconLegends...),
 		}
 		if cfg.UnreadNotificationsEnabled("select") {
-			if attentionPanes := buildAttentionPanes(); len(attentionPanes) > 0 {
-				opts = append(opts, ui.WithAttentionPanes(attentionPanes, attentionCallbacks()))
+			if attentionPanes := d.AttentionPanes(); len(attentionPanes) > 0 {
+				opts = append(opts, ui.WithAttentionPanes(attentionPanes, d.AttentionCallbacks()))
 			}
 		}
 		if inTmux {
@@ -198,52 +296,52 @@ func runSelect(cmd *cobra.Command, args []string) error {
 			opts = append(opts, ui.WithInitialCursorIndex(restoreCursorIdx))
 			restoreCursorIdx = -1
 		}
-		result, err := ui.Run(items, opts...)
+		result, err := d.RunPicker(items, opts...)
 		if err != nil {
 			return err
 		}
 
 		switch result.Action {
 		case ui.ActionCancel:
-			os.Exit(1)
+			return nil
 
 		case ui.ActionSelect:
 			if result.Selected == nil {
-				os.Exit(1)
+				return nil
 			}
 			if isStandaloneSession(*result.Selected) {
-				return switchToTmuxTarget(standaloneSessionName(*result.Selected))
+				return d.SwitchToTarget(d.Tmux, standaloneSessionName(*result.Selected))
 			}
-			if !noHistory {
+			if !d.NoHistory {
 				hist.Record(result.Selected.Path)
 				if err := hist.Save(); err != nil {
 					debug.Error("select: save history: %v", err)
 				}
 			}
-			if tmuxCDPane != "" {
-				return sendCDToPane(tmuxCDPane, result.Selected.Path)
+			if d.TMuxCDPane != "" {
+				return d.SendCDToPane(d.Tmux, d.TMuxCDPane, result.Selected.Path)
 			}
-			return openTmuxSession(result.Selected)
+			return d.OpenSession(d.Tmux, result.Selected)
 
 		case ui.ActionOpenWindow:
 			if result.Selected == nil || isStandaloneSession(*result.Selected) {
 				continue
 			}
-			if !noHistory {
+			if !d.NoHistory {
 				hist.Record(result.Selected.Path)
 				if err := hist.Save(); err != nil {
 					debug.Error("select: save history: %v", err)
 				}
 			}
-			return openTmuxWindow(result.Selected)
+			return d.OpenWindow(d.Tmux, result.Selected)
 
 		case ui.ActionKillSession:
 			if result.Selected != nil {
 				restoreCursorIdx = result.CursorIndex
 				if isStandaloneSession(*result.Selected) {
-					killTmuxSessionByName(standaloneSessionName(*result.Selected))
+					d.KillSession(d.Tmux, standaloneSessionName(*result.Selected))
 				} else {
-					killTmuxSession(result.Selected.Name)
+					d.KillSession(d.Tmux, result.Selected.Name)
 				}
 			}
 			// Continue loop — session state refreshes automatically
@@ -260,7 +358,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 
 		case ui.ActionSwitchToPane:
 			if result.Selected != nil {
-				if !noHistory {
+				if !d.NoHistory {
 					sessionName := result.Selected.Context
 					var histPath string
 					for _, item := range items {
@@ -277,7 +375,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 						debug.Error("select: save history: %v", err)
 					}
 				}
-				return switchToTmuxTargetAndZoom(result.Selected.Path)
+				return d.SwitchAndZoom(d.Tmux, result.Selected.Path)
 			}
 
 		case ui.ActionRefresh:
@@ -286,7 +384,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 
 		case ui.ActionUserDefinedCommand:
 			if result.UserDefinedCommand != nil && result.Selected != nil {
-				executeSelectCustomCommand(result.UserDefinedCommand.Command, result.Selected)
+				d.RunCustomCommand(result.UserDefinedCommand.Command, result.Selected)
 				if result.UserDefinedCommand.Exit {
 					return nil
 				}

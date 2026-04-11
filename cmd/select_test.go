@@ -836,3 +836,197 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// scriptedPicker returns a RunPicker function that calls each fn in sequence
+// on successive picker iterations. Each fn receives the actual items passed
+// to the picker so results can reference items[N] directly. When the sequence
+// is exhausted, the function returns ActionCancel to terminate loops cleanly.
+// Modeled on mockPickDirSequence in configure_test.go.
+func scriptedPicker(fns ...func(items []ui.Item) ui.Result) func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+	i := 0
+	return func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		if i >= len(fns) {
+			return ui.Result{Action: ui.ActionCancel}, nil
+		}
+		fn := fns[i]
+		i++
+		return fn(items), nil
+	}
+}
+
+// testSelectDeps returns a SelectDeps with no-op defaults safe for tests.
+// Callers should override only the fields their test cares about.
+//
+// History and cache paths are sandboxed via t.Setenv so tests do not touch
+// the user's real history, config, or cache files. LoadConfig returns a
+// config pointing at a fresh t.TempDir, which cfg.ExpandProjects resolves
+// to exactly one item (not a bare repo, no worktrees) — enough for the
+// picker loop to reach its first iteration.
+func testSelectDeps(t *testing.T) *SelectDeps {
+	t.Helper()
+
+	// Sandbox XDG_* paths for defense in depth — any code that touches
+	// history.DefaultHistoryPath, monitor state, or glob cache will be
+	// redirected to a throwaway location.
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(xdg, "cache"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(xdg, "config"))
+
+	// Default project directory — a real tmpdir so cfg.ExpandProjects
+	// produces exactly one entry. Tests that need more items can override
+	// LoadConfig.
+	projectDir := t.TempDir()
+
+	return &SelectDeps{
+		Tmux: &deps.MockTmux{},
+		Project: &project.Deps{
+			Git: &deps.MockGit{},
+			FS:  &deps.MockFileSystem{},
+		},
+
+		LoadConfig: func() (*config.Config, error) {
+			return &config.Config{
+				Projects: []config.ProjectEntry{{Path: projectDir}},
+			}, nil
+		},
+		LoadHistory: func() (*history.History, error) {
+			// Bind to a sandbox path so any hist.Save() writes to the tmpdir.
+			return history.Load(filepath.Join(xdg, "pop", "history.json"))
+		},
+
+		RunPicker: func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+			return ui.Result{Action: ui.ActionCancel}, nil
+		},
+
+		SessionActivity:    func() map[string]int64 { return nil },
+		AttentionSessions:  func() map[string]bool { return nil },
+		AttentionPanes:     func() []ui.AttentionPane { return nil },
+		AttentionCallbacks: func() ui.AttentionCallbacks { return ui.AttentionCallbacks{} },
+
+		OpenSession:       func(tmux deps.Tmux, item *ui.Item) error { return nil },
+		OpenWindow:        func(tmux deps.Tmux, item *ui.Item) error { return nil },
+		KillSession:       func(tmux deps.Tmux, name string) {},
+		SendCDToPane:      func(tmux deps.Tmux, paneID, path string) error { return nil },
+		SwitchToTarget:    func(tmux deps.Tmux, target string) error { return nil },
+		SwitchAndZoom:     func(tmux deps.Tmux, target string) error { return nil },
+		RunCustomCommand:  func(command string, item *ui.Item) {},
+		EnsureSystemState: func() []string { return nil },
+		RunConfigure:      func() error { return nil },
+
+		InTmux:         func() bool { return false },
+		CurrentSession: func(tmux deps.Tmux) string { return "" },
+	}
+}
+
+func TestRunSelect_ActionSelectRecordsHistory(t *testing.T) {
+	var openedItem *ui.Item
+	var hist *history.History
+
+	d := testSelectDeps(t)
+	// Capture the history object the loop sees, so we can inspect entries
+	// after RunSelect returns.
+	origLoadHistory := d.LoadHistory
+	d.LoadHistory = func() (*history.History, error) {
+		h, err := origLoadHistory()
+		hist = h
+		return h, err
+	}
+	d.RunPicker = scriptedPicker(func(items []ui.Item) ui.Result {
+		return ui.Result{
+			Action:      ui.ActionSelect,
+			Selected:    &items[0],
+			CursorIndex: 0,
+		}
+	})
+	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error {
+		openedItem = item
+		return nil
+	}
+
+	if err := RunSelect(d); err != nil {
+		t.Fatalf("RunSelect: %v", err)
+	}
+
+	if openedItem == nil {
+		t.Fatal("expected OpenSession to be called")
+	}
+	if hist == nil {
+		t.Fatal("LoadHistory was not called")
+	}
+	if len(hist.Entries) != 1 {
+		t.Fatalf("expected 1 history entry, got %d", len(hist.Entries))
+	}
+	// The path recorded in history must match the path passed to OpenSession.
+	// Both should be the canonical form produced by config.ExpandProjects
+	// (which resolves symlinks — on macOS, /var/folders/... becomes
+	// /private/var/folders/...), so asserting they agree is the
+	// load-bearing invariant without hardcoding a canonical form.
+	if hist.Entries[0].Path != openedItem.Path {
+		t.Errorf("history recorded %q but OpenSession opened %q — paths disagree",
+			hist.Entries[0].Path, openedItem.Path)
+	}
+}
+
+func TestRunSelect_ActionKillSessionContinuesLoop(t *testing.T) {
+	var killedNames []string
+	var pickerCalls int
+
+	d := testSelectDeps(t)
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		pickerCalls++
+		switch pickerCalls {
+		case 1:
+			return ui.Result{
+				Action:      ui.ActionKillSession,
+				Selected:    &items[0],
+				CursorIndex: 7,
+			}, nil
+		case 2:
+			return ui.Result{Action: ui.ActionCancel}, nil
+		default:
+			t.Fatalf("picker called %d times, expected at most 2", pickerCalls)
+			return ui.Result{}, nil
+		}
+	}
+	d.KillSession = func(tmux deps.Tmux, name string) {
+		killedNames = append(killedNames, name)
+	}
+
+	if err := RunSelect(d); err != nil {
+		t.Fatalf("RunSelect: %v", err)
+	}
+
+	if pickerCalls != 2 {
+		t.Errorf("picker called %d times, want 2 (kill → cancel)", pickerCalls)
+	}
+	if len(killedNames) != 1 {
+		t.Fatalf("expected 1 kill, got %d: %v", len(killedNames), killedNames)
+	}
+}
+
+func TestRunSelect_ActionCancelExitsCleanly(t *testing.T) {
+	var pickerCalls int
+	openCalled := false
+
+	d := testSelectDeps(t)
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		pickerCalls++
+		return ui.Result{Action: ui.ActionCancel}, nil
+	}
+	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error {
+		openCalled = true
+		return nil
+	}
+
+	if err := RunSelect(d); err != nil {
+		t.Fatalf("RunSelect on ActionCancel: unexpected error %v", err)
+	}
+
+	if pickerCalls != 1 {
+		t.Errorf("picker called %d times, want 1", pickerCalls)
+	}
+	if openCalled {
+		t.Error("OpenSession called on cancel path — expected no-op")
+	}
+}
