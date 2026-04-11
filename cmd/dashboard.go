@@ -25,7 +25,7 @@ func init() {
 }
 
 func runDashboard(cmd *cobra.Command, args []string) error {
-	go ensureMonitorDaemon()
+	systemWarnings := ensureSystemState()
 
 	cfg, err := config.Load(config.DefaultConfigPath())
 	if err != nil {
@@ -61,6 +61,9 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	state := loadMonitorStateAlways()
 	if state != nil && state.DashboardFollowing {
 		opts = append(opts, ui.WithAttentionFollowing(true))
+	}
+	if len(systemWarnings) > 0 {
+		opts = append(opts, ui.WithWarnings(systemWarnings))
 	}
 
 	panes := buildPanes()

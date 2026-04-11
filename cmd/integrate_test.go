@@ -745,3 +745,586 @@ func TestIntegrateOpencode_AgentNameIsCaseInsensitive(t *testing.T) {
 		t.Errorf("expected case-insensitive agent matching, got error: %v", err)
 	}
 }
+
+// ----- dry-run deps (withDryRun) ---------------------------------------------
+
+// installViaFake runs a real install against the given fake FS, used by
+// dry-run tests to seed "what an installed agent looks like on disk".
+func installViaFake(t *testing.T, fs *fakeFS, home, agent string) {
+	t.Helper()
+	if err := runIntegrateWith(fakeDeps(home, fs, io.Discard), agent); err != nil {
+		t.Fatalf("seed install %s: %v", agent, err)
+	}
+}
+
+func TestDryRun_NoInstallation(t *testing.T) {
+	// Empty fake FS: no pop artifacts for any agent. Every dry-run should
+	// report neither installed nor changed.
+	for _, agent := range []string{"claude", "pi", "opencode"} {
+		t.Run(agent, func(t *testing.T) {
+			fs := newFakeFS()
+			d := withDryRun(fakeDeps("/h", fs, io.Discard))
+			if err := runIntegrateWith(d, agent); err != nil {
+				t.Fatalf("dry-run: %v", err)
+			}
+			if d.installed {
+				t.Errorf("expected installed=false on empty FS")
+			}
+			if d.changed {
+				t.Errorf("expected changed=false on empty FS")
+			}
+			// Dry-run must not have mutated the fake FS.
+			if len(fs.files) != 0 {
+				t.Errorf("dry-run wrote files: %v", sortedKeys(fs.files))
+			}
+		})
+	}
+}
+
+func TestDryRun_InstalledAndCurrent(t *testing.T) {
+	// Seed the FS with a real install, then dry-run against the same FS.
+	// Every agent should report installed=true, changed=false.
+	for _, agent := range []string{"claude", "pi", "opencode"} {
+		t.Run(agent, func(t *testing.T) {
+			fs := newFakeFS()
+			installViaFake(t, fs, "/h", agent)
+
+			d := withDryRun(fakeDeps("/h", fs, io.Discard))
+			if err := runIntegrateWith(d, agent); err != nil {
+				t.Fatalf("dry-run: %v", err)
+			}
+			if !d.installed {
+				t.Errorf("expected installed=true after seed install")
+			}
+			if d.changed {
+				t.Errorf("expected changed=false when bytes match embedded content")
+			}
+		})
+	}
+}
+
+func TestDryRun_InstalledAndStale(t *testing.T) {
+	// Seed a real install, then corrupt one file so the dry-run should
+	// detect stale content and report changed=true.
+	cases := []struct {
+		agent     string
+		stalePath string // relative to /h
+	}{
+		{
+			agent:     "claude",
+			stalePath: filepath.Join(".claude", "commands", "pop", "pane.md"),
+		},
+		{
+			agent:     "pi",
+			stalePath: filepath.Join(".pi", "agent", "extensions", "pop-status-sync.ts"),
+		},
+		{
+			agent:     "opencode",
+			stalePath: filepath.Join(".config", "opencode", "plugins", "pop-status-sync.ts"),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.agent, func(t *testing.T) {
+			fs := newFakeFS()
+			installViaFake(t, fs, "/h", tc.agent)
+
+			fullPath := filepath.Join("/h", tc.stalePath)
+			if _, exists := fs.files[fullPath]; !exists {
+				t.Fatalf("seed install did not produce %s; update the test fixture", fullPath)
+			}
+			fs.files[fullPath] = []byte("stale bytes that differ from embedded content")
+
+			d := withDryRun(fakeDeps("/h", fs, io.Discard))
+			if err := runIntegrateWith(d, tc.agent); err != nil {
+				t.Fatalf("dry-run: %v", err)
+			}
+			if !d.installed {
+				t.Errorf("expected installed=true after seed install")
+			}
+			if !d.changed {
+				t.Errorf("expected changed=true when %s has stale bytes", tc.stalePath)
+			}
+		})
+	}
+}
+
+func TestDryRun_ClaudeSettingsNotRewrittenWhenHooksCurrent(t *testing.T) {
+	// After a real install, re-running in dry-run must report the settings
+	// file as installed but unchanged. This is the critical "no formatting
+	// churn" case for claude — the main reason the dry-run exists.
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	settingsPath := filepath.Join("/h", ".claude", "settings.json")
+	before := append([]byte{}, fs.files[settingsPath]...)
+
+	d := withDryRun(fakeDeps("/h", fs, io.Discard))
+	if err := runIntegrateWith(d, "claude"); err != nil {
+		t.Fatalf("dry-run claude: %v", err)
+	}
+
+	if !d.installed {
+		t.Error("expected installed=true (settings.json contains pop hooks)")
+	}
+	if d.changed {
+		t.Error("expected changed=false when hooks are already current")
+	}
+	if !bytes.Equal(before, fs.files[settingsPath]) {
+		t.Error("dry-run must not mutate settings.json")
+	}
+}
+
+func TestDryRun_ClaudeInstalledDetectedViaSettingsHooks(t *testing.T) {
+	// Claude's settings.json is the only install target that cannot be
+	// detected by writeFile presence alone (it exists for every claude user).
+	// Verify the installClaudeHooks nudge correctly sets installed=true when
+	// existing pop hooks are found — even though the commands/pop/ directory
+	// contains the current, unchanged skill files.
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	// Delete the commands dir so only settings.json remains as a signal.
+	commandsDir := filepath.Join("/h", ".claude", "commands", "pop")
+	for path := range fs.files {
+		if strings.HasPrefix(path, commandsDir+string(filepath.Separator)) {
+			delete(fs.files, path)
+		}
+	}
+
+	d := withDryRun(fakeDeps("/h", fs, io.Discard))
+	if err := runIntegrateWith(d, "claude"); err != nil {
+		t.Fatalf("dry-run claude: %v", err)
+	}
+
+	if !d.installed {
+		t.Error("expected installed=true detected via pop hooks in settings.json")
+	}
+}
+
+// ----- ensureIntegrationsForRevisionWith -------------------------------------
+
+// seedState writes a state.json with the given revision into XDG_DATA_HOME.
+// The caller must have set XDG_DATA_HOME via t.Setenv before calling.
+func seedState(t *testing.T, rev string) {
+	t.Helper()
+	if err := saveAppState(&appState{BuildRevision: rev}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+}
+
+// readStateRevision returns the build_revision currently in state.json, or
+// empty string if the file is missing.
+func readStateRevision(t *testing.T) string {
+	t.Helper()
+	return loadAppState().BuildRevision
+}
+
+// fakeFactories returns a pair of (dry, real) integrateDeps constructors
+// that share a single fake FS at the given home directory.
+func fakeFactories(home string, fs *fakeFS) (dry, real func() *integrateDeps) {
+	dry = func() *integrateDeps {
+		return withDryRun(fakeDeps(home, fs, io.Discard))
+	}
+	real = func() *integrateDeps {
+		return fakeDeps(home, fs, io.Discard)
+	}
+	return dry, real
+}
+
+func TestEnsureIntegrations_SkipsOnDevBuild(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	dry, real := fakeFactories("/h", fs)
+
+	warnings := ensureIntegrationsForRevisionWith("dev", dry, real)
+	if warnings != nil {
+		t.Errorf("expected nil warnings for dev build, got %v", warnings)
+	}
+	if readStateRevision(t) != "" {
+		t.Error("dev build must not stamp state.json")
+	}
+}
+
+func TestEnsureIntegrations_SkipsWhenRevisionMatches(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	seedState(t, "abc123")
+
+	calls := 0
+	fs := newFakeFS()
+	dry := func() *integrateDeps {
+		calls++
+		return withDryRun(fakeDeps("/h", fs, io.Discard))
+	}
+	real := func() *integrateDeps {
+		t.Fatal("real deps factory must not be called when revision matches")
+		return nil
+	}
+
+	warnings := ensureIntegrationsForRevisionWith("abc123", dry, real)
+	if warnings != nil {
+		t.Errorf("expected nil warnings, got %v", warnings)
+	}
+	if calls != 0 {
+		t.Errorf("expected 0 dry-run calls when revision matches, got %d", calls)
+	}
+}
+
+func TestEnsureIntegrations_SkipsUninstalledAgents(t *testing.T) {
+	// No agents installed: ensureIntegrations should do nothing, return no
+	// warnings, and stamp the new revision.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	realCalls := 0
+	dry := func() *integrateDeps {
+		return withDryRun(fakeDeps("/h", fs, io.Discard))
+	}
+	real := func() *integrateDeps {
+		realCalls++
+		return fakeDeps("/h", fs, io.Discard)
+	}
+
+	warnings := ensureIntegrationsForRevisionWith("rev1", dry, real)
+	if warnings != nil {
+		t.Errorf("expected nil warnings for no-install case, got %v", warnings)
+	}
+	if realCalls != 0 {
+		t.Errorf("expected no real install calls, got %d", realCalls)
+	}
+	if got := readStateRevision(t); got != "rev1" {
+		t.Errorf("state.json revision = %q, want %q", got, "rev1")
+	}
+}
+
+func TestEnsureIntegrations_UpdatesStaleAgent(t *testing.T) {
+	// Seed claude as installed-but-stale; pi and opencode uninstalled.
+	// ensureIntegrations should run the real install for claude only and
+	// stamp state.json.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	// Corrupt one file so claude shows as changed.
+	stalePath := filepath.Join("/h", ".claude", "commands", "pop", "pane.md")
+	if _, exists := fs.files[stalePath]; !exists {
+		t.Fatalf("seed install did not produce %s", stalePath)
+	}
+	fs.files[stalePath] = []byte("STALE")
+
+	dry, real := fakeFactories("/h", fs)
+
+	warnings := ensureIntegrationsForRevisionWith("rev2", dry, real)
+	if warnings != nil {
+		t.Errorf("expected no warnings on successful update, got %v", warnings)
+	}
+	// File should now match embedded content again.
+	embedded, err := skillFiles.ReadFile("skills/pop/pane.md")
+	if err != nil {
+		t.Fatalf("read embedded pane.md: %v", err)
+	}
+	if !bytes.Equal(fs.files[stalePath], embedded) {
+		t.Errorf("stale file was not updated to embedded bytes")
+	}
+	if got := readStateRevision(t); got != "rev2" {
+		t.Errorf("state.json revision = %q, want %q", got, "rev2")
+	}
+}
+
+func TestEnsureIntegrations_RetriesOnFailure(t *testing.T) {
+	// Seed claude as installed-but-stale, then inject a write error for the
+	// real install. ensureIntegrations should return a warning and leave
+	// state.json unstamped so the next launch retries.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	stalePath := filepath.Join("/h", ".claude", "commands", "pop", "pane.md")
+	fs.files[stalePath] = []byte("STALE")
+
+	// Inject a write error on the file we're about to update.
+	fs.writeErr[stalePath] = errors.New("simulated write failure")
+
+	dry, real := fakeFactories("/h", fs)
+	warnings := ensureIntegrationsForRevisionWith("rev3", dry, real)
+
+	if len(warnings) == 0 {
+		t.Fatal("expected a warning for claude update failure")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "claude") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a warning mentioning claude, got %v", warnings)
+	}
+	if got := readStateRevision(t); got != "" {
+		t.Errorf("state.json must not be stamped on failure; got revision %q", got)
+	}
+}
+
+func TestEnsureIntegrations_PartialFailureDoesNotStamp(t *testing.T) {
+	// Seed claude AND pi as installed-but-stale. Let claude update succeed
+	// but fail pi. state.json must not be stamped.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+	installViaFake(t, fs, "/h", "pi")
+
+	// Make claude stale.
+	clauseStale := filepath.Join("/h", ".claude", "commands", "pop", "pane.md")
+	fs.files[clauseStale] = []byte("STALE")
+
+	// Make pi stale AND fail its write.
+	piExtPath := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
+	fs.files[piExtPath] = []byte("STALE PI EXT")
+	fs.writeErr[piExtPath] = errors.New("pi write failure")
+
+	dry, real := fakeFactories("/h", fs)
+	warnings := ensureIntegrationsForRevisionWith("rev4", dry, real)
+
+	// claude should have updated cleanly.
+	embedded, _ := skillFiles.ReadFile("skills/pop/pane.md")
+	if !bytes.Equal(fs.files[clauseStale], embedded) {
+		t.Error("claude stale file should have been updated")
+	}
+	// pi should have produced a warning.
+	if len(warnings) == 0 {
+		t.Fatal("expected warning for pi failure")
+	}
+	foundPi := false
+	for _, w := range warnings {
+		if strings.Contains(w, "pi") {
+			foundPi = true
+			break
+		}
+	}
+	if !foundPi {
+		t.Errorf("expected warning mentioning pi, got %v", warnings)
+	}
+	// state.json must NOT be stamped: next launch retries.
+	if got := readStateRevision(t); got != "" {
+		t.Errorf("state.json must not be stamped on partial failure; got %q", got)
+	}
+}
+
+// ----- appState load/save ----------------------------------------------------
+
+func TestAppState_LoadMissingReturnsEmpty(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	s := loadAppState()
+	if s == nil {
+		t.Fatal("loadAppState returned nil for missing file; want empty struct")
+	}
+	if s.BuildRevision != "" {
+		t.Errorf("BuildRevision = %q, want empty", s.BuildRevision)
+	}
+}
+
+func TestAppState_LoadCorruptReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	popDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(popDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(popDir, "state.json"), []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := loadAppState()
+	if s.BuildRevision != "" {
+		t.Errorf("corrupt state.json should produce empty revision, got %q", s.BuildRevision)
+	}
+}
+
+func TestAppState_SaveThenLoadRoundTrip(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	if err := saveAppState(&appState{BuildRevision: "deadbeef"}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got := loadAppState()
+	if got.BuildRevision != "deadbeef" {
+		t.Errorf("round-trip revision = %q, want %q", got.BuildRevision, "deadbeef")
+	}
+}
+
+// ----- runIntegrateUpdateExistingWith (pop integrate --update-existing) -----
+
+func TestUpdateExisting_SilentOnNoInstallations(t *testing.T) {
+	// No agents installed anywhere: the command should print nothing and
+	// stamp state.json with the current revision (so the runtime fast-path
+	// has nothing to do on the next launch either).
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	dry, real := fakeFactories("/h", fs)
+
+	var stdout, stderr bytes.Buffer
+	err := runIntegrateUpdateExistingWith("rev1", dry, real, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected silent stdout, got %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("expected silent stderr, got %q", stderr.String())
+	}
+	if got := readStateRevision(t); got != "rev1" {
+		t.Errorf("state.json revision = %q, want %q", got, "rev1")
+	}
+}
+
+func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
+	// Seed claude + pi as installed-but-stale. Both should update; stdout
+	// should get one line per updated agent in the declaration order of
+	// integrationAgents (claude, pi, opencode). opencode isn't installed
+	// and must not appear.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+	installViaFake(t, fs, "/h", "pi")
+
+	// Make both stale.
+	clauseStale := filepath.Join("/h", ".claude", "commands", "pop", "pane.md")
+	fs.files[clauseStale] = []byte("STALE claude")
+	piStale := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
+	fs.files[piStale] = []byte("STALE pi")
+
+	dry, real := fakeFactories("/h", fs)
+
+	var stdout, stderr bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev2", dry, real, &stdout, &stderr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "✓ Updated claude integration\n✓ Updated pi integration\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("expected no warnings, got %q", stderr.String())
+	}
+	if got := readStateRevision(t); got != "rev2" {
+		t.Errorf("state.json revision = %q, want %q", got, "rev2")
+	}
+}
+
+func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
+	// Seed claude at the exact embedded content. Dry-run sees installed but
+	// not changed → no updates, no warnings, stamp state.json anyway.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	dry, real := fakeFactories("/h", fs)
+	var stdout, stderr bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev3", dry, real, &stdout, &stderr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected silent stdout on up-to-date install, got %q", stdout.String())
+	}
+	if got := readStateRevision(t); got != "rev3" {
+		t.Errorf("state.json revision = %q, want %q", got, "rev3")
+	}
+}
+
+func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
+	// Seed claude stale, inject a write failure on the target. The command
+	// should print the warning to stderr, leave stdout empty (nothing
+	// actually updated), and NOT stamp state.json so the next runtime
+	// check retries.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	stalePath := filepath.Join("/h", ".claude", "commands", "pop", "pane.md")
+	fs.files[stalePath] = []byte("STALE")
+	fs.writeErr[stalePath] = errors.New("simulated failure")
+
+	dry, real := fakeFactories("/h", fs)
+	var stdout, stderr bytes.Buffer
+	err := runIntegrateUpdateExistingWith("rev4", dry, real, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("expected nil error (non-fatal), got %v", err)
+	}
+
+	// Nothing successfully updated.
+	if stdout.Len() != 0 {
+		t.Errorf("expected no success lines, got stdout %q", stdout.String())
+	}
+	// Warning for claude.
+	if !strings.Contains(stderr.String(), "claude") {
+		t.Errorf("expected stderr to mention claude, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "⚠") {
+		t.Errorf("expected warning prefix in stderr, got %q", stderr.String())
+	}
+	// state.json must not be stamped on failure.
+	if got := readStateRevision(t); got != "" {
+		t.Errorf("state.json must not be stamped on failure; got %q", got)
+	}
+}
+
+func TestUpdateExisting_DevRevisionDoesNotStamp(t *testing.T) {
+	// A "dev" revision should never stamp state.json (matches the runtime
+	// behavior where dev builds are unreliable as staleness markers).
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	dry, real := fakeFactories("/h", fs)
+
+	var stdout, stderr bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("dev", dry, real, &stdout, &stderr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := readStateRevision(t); got != "" {
+		t.Errorf("dev revision must not stamp state.json, got %q", got)
+	}
+}
+
+// ----- integrate command argument parsing for --update-existing -------------
+
+func TestIntegrateCmd_UpdateExistingWithAgentArgIsError(t *testing.T) {
+	// The Args validator should reject passing an agent together with
+	// --update-existing. Temporarily set the package-level flag so the
+	// validator sees the same state as a real invocation.
+	prev := integrateUpdateExisting
+	integrateUpdateExisting = true
+	t.Cleanup(func() { integrateUpdateExisting = prev })
+
+	err := integrateCmd.Args(integrateCmd, []string{"claude"})
+	if err == nil {
+		t.Fatal("expected error when --update-existing is combined with an agent argument")
+	}
+	if !strings.Contains(err.Error(), "--update-existing") {
+		t.Errorf("error should mention --update-existing, got %q", err.Error())
+	}
+}
+
+func TestIntegrateCmd_UpdateExistingWithNoArgsIsOK(t *testing.T) {
+	prev := integrateUpdateExisting
+	integrateUpdateExisting = true
+	t.Cleanup(func() { integrateUpdateExisting = prev })
+
+	if err := integrateCmd.Args(integrateCmd, []string{}); err != nil {
+		t.Errorf("expected no error for --update-existing with no args, got %v", err)
+	}
+}
+
+func TestIntegrateCmd_WithoutFlagRequiresExactlyOneArg(t *testing.T) {
+	prev := integrateUpdateExisting
+	integrateUpdateExisting = false
+	t.Cleanup(func() { integrateUpdateExisting = prev })
+
+	if err := integrateCmd.Args(integrateCmd, []string{}); err == nil {
+		t.Error("expected error when no agent argument is provided")
+	}
+	if err := integrateCmd.Args(integrateCmd, []string{"claude"}); err != nil {
+		t.Errorf("expected no error for single agent arg, got %v", err)
+	}
+	if err := integrateCmd.Args(integrateCmd, []string{"claude", "pi"}); err == nil {
+		t.Error("expected error when more than one agent is provided")
+	}
+}

@@ -27,6 +27,22 @@ Configure your projects in ~/.config/pop/config.toml`,
 	SilenceErrors: true,
 }
 
+// buildRevision returns the raw VCS revision embedded by `go build`, or "dev"
+// if no revision is available (e.g. `go run`, or a binary built without VCS
+// stamping). Used by the auto-update integrations path as a staleness marker.
+func buildRevision() string {
+	info, ok := runtimedebug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" {
+			return s.Value
+		}
+	}
+	return "dev"
+}
+
 // buildVersion reads VCS stamps embedded by `go build` and returns a short
 // commit SHA, optionally suffixed with "-dirty" and the commit timestamp.
 func buildVersion() string {
@@ -34,20 +50,19 @@ func buildVersion() string {
 	if !ok {
 		return "unknown"
 	}
-	var rev, when string
+	rev := buildRevision()
+	if rev == "dev" {
+		return "dev"
+	}
+	var when string
 	var dirty bool
 	for _, s := range info.Settings {
 		switch s.Key {
-		case "vcs.revision":
-			rev = s.Value
 		case "vcs.time":
 			when = s.Value
 		case "vcs.modified":
 			dirty = s.Value == "true"
 		}
-	}
-	if rev == "" {
-		return "dev"
 	}
 	if len(rev) > 12 {
 		rev = rev[:12]

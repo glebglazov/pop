@@ -11,6 +11,7 @@ build:
 install: build
 	cp -f pop $(PREFIX)/bin/pop
 	command -v codesign >/dev/null 2>&1 && codesign --force --sign - $(PREFIX)/bin/pop || true
+	$(PREFIX)/bin/pop integrate --update-existing || true
 
 test:
 	go test ./...

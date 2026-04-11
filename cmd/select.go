@@ -66,7 +66,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	go ensureMonitorDaemon()
+	systemWarnings := ensureSystemState()
 
 	// Expand project paths
 	paths, err := cfg.ExpandProjects()
@@ -190,6 +190,7 @@ func runSelect(cmd *cobra.Command, args []string) error {
 		if len(expansionErrors) > 0 {
 			warnings = append(warnings, fmt.Sprintf("%d project(s) failed to expand: %s (see pop.log)", len(expansionErrors), strings.Join(expansionErrors, ", ")))
 		}
+		warnings = append(warnings, systemWarnings...)
 		if len(warnings) > 0 {
 			opts = append(opts, ui.WithWarnings(warnings))
 		}

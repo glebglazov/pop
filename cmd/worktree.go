@@ -41,7 +41,7 @@ func init() {
 }
 
 func runWorktree(cmd *cobra.Command, args []string) error {
-	go ensureMonitorDaemon()
+	systemWarnings := ensureSystemState()
 
 	// Detect repo context
 	ctx, err := project.DetectRepoContext()
@@ -67,6 +67,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			})
 		}
 	}
+	configWarnings = append(configWarnings, systemWarnings...)
 
 	restoreCursorIdx := -1
 	for {
