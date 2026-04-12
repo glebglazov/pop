@@ -54,7 +54,7 @@ func TestDefaultSocketPathWith(t *testing.T) {
 }
 
 func TestSocketRoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortSocketDir(t)
 	sockPath := filepath.Join(dir, "test.sock")
 
 	handler := func(req Request) Response {
@@ -85,7 +85,7 @@ func TestSocketRoundTrip(t *testing.T) {
 }
 
 func TestSocketRoundTrip_HandlerError(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortSocketDir(t)
 	sockPath := filepath.Join(dir, "test.sock")
 
 	handler := func(req Request) Response {
@@ -111,7 +111,7 @@ func TestSocketRoundTrip_HandlerError(t *testing.T) {
 }
 
 func TestSocketRoundTrip_AllFields(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortSocketDir(t)
 	sockPath := filepath.Join(dir, "test.sock")
 
 	var received Request
@@ -153,7 +153,7 @@ func TestSocketRoundTrip_AllFields(t *testing.T) {
 }
 
 func TestSocketMultipleRequests(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortSocketDir(t)
 	sockPath := filepath.Join(dir, "test.sock")
 
 	count := 0
@@ -195,7 +195,7 @@ func TestSendRequest_NoSocket(t *testing.T) {
 }
 
 func TestCleanStaleSocket(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortSocketDir(t)
 	sockPath := filepath.Join(dir, "stale.sock")
 
 	// Create a stale socket file (not listening)
@@ -217,7 +217,7 @@ func TestCleanStaleSocket(t *testing.T) {
 }
 
 func TestCleanStaleSocket_ActiveSocket(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortSocketDir(t)
 	sockPath := filepath.Join(dir, "active.sock")
 
 	ln, err := net.Listen("unix", sockPath)
@@ -240,7 +240,7 @@ func TestCleanStaleSocket_NoFile(t *testing.T) {
 }
 
 func TestListenAndServe_CreatesDirectory(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortSocketDir(t)
 	sockPath := filepath.Join(dir, "nested", "dir", "pop.sock")
 
 	handler := func(req Request) Response { return Response{OK: true} }
@@ -257,7 +257,7 @@ func TestListenAndServe_CreatesDirectory(t *testing.T) {
 }
 
 func TestSendRequest_Timeout(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortSocketDir(t)
 	sockPath := filepath.Join(dir, "slow.sock")
 
 	// Create a listener that accepts but never responds
@@ -287,6 +287,19 @@ func TestSendRequest_Timeout(t *testing.T) {
 	if elapsed > 5*time.Second {
 		t.Errorf("timeout took %v, expected ~2s", elapsed)
 	}
+}
+
+// shortSocketDir creates a temp directory with a short path to stay within
+// the 108-char unix socket path limit on macOS. t.TempDir() paths include
+// the full test name which can easily exceed the limit.
+func shortSocketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "pop-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
 }
 
 // mockFS is a minimal mock for DefaultSocketPathWith tests.
