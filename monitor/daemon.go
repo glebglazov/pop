@@ -55,6 +55,10 @@ func RunDaemonWith(d *Deps, statePath, pidPath string) error {
 }
 
 func pollOnce(d *Deps, statePath string) {
+	pollOnceWith(d, statePath, liveTmuxPanes)
+}
+
+func pollOnceWith(d *Deps, statePath string, livePanesFunc func() map[string]bool) {
 	state, err := LoadWith(d, statePath)
 	if err != nil {
 		debug.Error("pollOnce: load state: %v", err)
@@ -67,7 +71,12 @@ func pollOnce(d *Deps, statePath string) {
 	}
 
 	changed := false
-	livePanes := liveTmuxPanes()
+	livePanes := livePanesFunc()
+	if livePanes == nil {
+		// tmux list-panes failed — can't determine which panes are alive.
+		// Bail out rather than treating every registered pane as dead.
+		return
+	}
 
 	for paneID, entry := range state.Panes {
 		if !livePanes[paneID] {

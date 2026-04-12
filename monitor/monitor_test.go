@@ -1,10 +1,12 @@
 package monitor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
 )
@@ -607,5 +609,111 @@ func TestIsDaemonRunningWith_CurrentProcess(t *testing.T) {
 	result := IsDaemonRunningWith(d, "/test/monitor.pid")
 	if !result {
 		t.Errorf("IsDaemonRunningWith() = false for current PID %d, want true", pid)
+	}
+}
+
+func TestPollOnce_NilLivePanesPreservesPanes(t *testing.T) {
+	// When liveTmuxPanes returns nil (tmux error), pollOnce must not
+	// delete any registered panes. This was the root cause of panes
+	// disappearing after daemon restarts.
+	now := time.Now()
+	initialState := &State{
+		Panes: map[string]*PaneEntry{
+			"%1": {PaneID: "%1", Session: "proj-a", Status: StatusWorking, UpdatedAt: now},
+			"%2": {PaneID: "%2", Session: "proj-b", Status: StatusUnread, UpdatedAt: now},
+		},
+	}
+	stateBytes, err := json.MarshalIndent(initialState, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stored := make(map[string][]byte)
+	stored["/test/monitor.json"] = stateBytes
+
+	d := &Deps{
+		FS: &deps.MockFileSystem{
+			ReadFileFunc: func(path string) ([]byte, error) {
+				data, ok := stored[path]
+				if !ok {
+					return nil, os.ErrNotExist
+				}
+				return data, nil
+			},
+			WriteFileFunc: func(path string, data []byte, _ os.FileMode) error {
+				stored[path] = data
+				return nil
+			},
+			MkdirAllFunc: func(string, os.FileMode) error { return nil },
+		},
+	}
+
+	// Simulate tmux failure: livePanesFunc returns nil
+	pollOnceWith(d, "/test/monitor.json", func() map[string]bool {
+		return nil
+	})
+
+	// Reload state and verify panes are untouched
+	reloaded, err := LoadWith(d, "/test/monitor.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Panes) != 2 {
+		t.Fatalf("expected 2 panes after nil livePanes, got %d", len(reloaded.Panes))
+	}
+	if reloaded.Panes["%1"] == nil || reloaded.Panes["%2"] == nil {
+		t.Fatalf("expected panes %%1 and %%2 to survive, got %v", reloaded.Panes)
+	}
+}
+
+func TestPollOnce_DeadPanesRemoved(t *testing.T) {
+	// Normal case: panes not in livePanes set should be cleaned up.
+	now := time.Now()
+	initialState := &State{
+		Panes: map[string]*PaneEntry{
+			"%1": {PaneID: "%1", Session: "proj-a", Status: StatusWorking, UpdatedAt: now},
+			"%2": {PaneID: "%2", Session: "proj-b", Status: StatusUnread, UpdatedAt: now},
+			"%3": {PaneID: "%3", Session: "proj-c", Status: StatusIdle, UpdatedAt: now},
+		},
+	}
+	stateBytes, err := json.MarshalIndent(initialState, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stored := make(map[string][]byte)
+	stored["/test/monitor.json"] = stateBytes
+
+	d := &Deps{
+		FS: &deps.MockFileSystem{
+			ReadFileFunc: func(path string) ([]byte, error) {
+				data, ok := stored[path]
+				if !ok {
+					return nil, os.ErrNotExist
+				}
+				return data, nil
+			},
+			WriteFileFunc: func(path string, data []byte, _ os.FileMode) error {
+				stored[path] = data
+				return nil
+			},
+			MkdirAllFunc: func(string, os.FileMode) error { return nil },
+		},
+	}
+
+	// Only %1 is alive; %2 and %3 are dead
+	pollOnceWith(d, "/test/monitor.json", func() map[string]bool {
+		return map[string]bool{"%1": true}
+	})
+
+	reloaded, err := LoadWith(d, "/test/monitor.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Panes) != 1 {
+		t.Fatalf("expected 1 pane after cleanup, got %d", len(reloaded.Panes))
+	}
+	if reloaded.Panes["%1"] == nil {
+		t.Fatal("expected pane %1 to survive")
 	}
 }
