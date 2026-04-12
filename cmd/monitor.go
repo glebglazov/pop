@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
@@ -112,7 +113,114 @@ func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 	installTmuxAutoReadHooks()
 
 	statePath := monitor.DefaultStatePath()
-	return monitor.RunDaemon(statePath, pidPath)
+	socketPath := monitor.DefaultSocketPath()
+	handler := buildSetStatusHandler(defaultTmux, statePath)
+	return monitor.RunDaemon(statePath, pidPath, socketPath, handler)
+}
+
+// buildSetStatusHandler returns a RequestHandler that applies the full
+// set-status business logic. The handler loads config and state from disk
+// on each call — no in-memory cache for V1.
+func buildSetStatusHandler(tmux deps.Tmux, statePath string) monitor.RequestHandler {
+	return func(req monitor.Request) monitor.Response {
+		debug.Init()
+		defer debug.Close()
+
+		paneID := req.PaneID
+		status := monitor.PaneStatus(req.Status)
+		source := req.Source
+		noRegister := req.NoRegister
+
+		// Normalize deprecated aliases.
+		if status == "read" {
+			status = monitor.StatusIdle
+		}
+		if status == "needs_attention" {
+			status = monitor.StatusUnread
+		}
+
+		cfg, err := config.Load(config.DefaultConfigPath())
+		if err != nil {
+			debug.Error("handler set-status: load config: %v", err)
+		}
+		if cfg == nil {
+			cfg = &config.Config{}
+		}
+
+		if source != "" && cfg.ShouldIgnoreStatusFrom(source) {
+			return monitor.Response{OK: true}
+		}
+
+		if paneID == "" {
+			return monitor.Response{OK: true}
+		}
+
+		if status != monitor.StatusIdle {
+			debug.Log("[set-status] %s: invoked with %s", paneID, status)
+		}
+
+		state, err := monitor.Load(statePath)
+		if err != nil {
+			debug.Error("handler set-status: load state: %v", err)
+			return monitor.Response{OK: false, Error: "load state: " + err.Error()}
+		}
+
+		entry, ok := state.Panes[paneID]
+		if !ok {
+			if noRegister {
+				return monitor.Response{OK: true}
+			}
+			session, cmdName, err := tmuxPaneInfoWith(tmux, paneID)
+			if err != nil {
+				debug.Error("[set-status] %s: failed to look up pane info, skipping: %v", paneID, err)
+				return monitor.Response{OK: true}
+			}
+			if status == monitor.StatusIdle && isPlainShellCommand(cmdName) {
+				return monitor.Response{OK: true}
+			}
+			debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s", paneID, session, cmdName, status)
+			now := time.Now()
+			state.Panes[paneID] = &monitor.PaneEntry{
+				PaneID:      paneID,
+				Session:     session,
+				Status:      status,
+				UpdatedAt:   now,
+				LastVisited: now,
+			}
+			if err := state.Save(); err != nil {
+				return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+			}
+			return monitor.Response{OK: true}
+		}
+
+		visitedNow := false
+		if status == monitor.StatusIdle {
+			entry.LastVisited = time.Now()
+			visitedNow = true
+		}
+
+		if cfg.DismissUnreadInActivePane() && status == monitor.StatusUnread && isActiveTmuxPaneWith(tmux, paneID) {
+			debug.Log("[set-status] %s: unread on active pane — downgrading to idle", paneID)
+			status = monitor.StatusIdle
+		}
+
+		if entry.Status == status {
+			if visitedNow {
+				if err := state.Save(); err != nil {
+					return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+				}
+			}
+			return monitor.Response{OK: true}
+		}
+
+		debug.Log("[set-status] %s (session=%s): %s → %s", paneID, entry.Session, entry.Status, status)
+		entry.Status = status
+		entry.UpdatedAt = time.Now()
+		if err := state.Save(); err != nil {
+			return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+		}
+		return monitor.Response{OK: true}
+	}
 }
 
 // installTmuxAutoReadHooks removes any existing pop hooks and installs current ones.

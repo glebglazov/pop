@@ -101,6 +101,25 @@ func DefaultPIDPathWith(d *Deps) string {
 	return filepath.Join(home, ".local", "share", "pop", "monitor.pid")
 }
 
+// DefaultSocketPath returns the default daemon unix socket path
+func DefaultSocketPath() string {
+	return DefaultSocketPathWith(defaultDeps)
+}
+
+// DefaultSocketPathWith returns the default daemon unix socket path using provided dependencies.
+// The socket lives in a "run" subdirectory so the directory can be volume-mounted
+// into containers without exposing config or state files.
+func DefaultSocketPathWith(d *Deps) string {
+	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
+		return filepath.Join(xdgData, "pop", "run", "pop.sock")
+	}
+	home, err := d.FS.UserHomeDir()
+	if err != nil {
+		debug.Error("DefaultSocketPath: UserHomeDir: %v", err)
+	}
+	return filepath.Join(home, ".local", "share", "pop", "run", "pop.sock")
+}
+
 // Load reads monitor state from disk
 func Load(path string) (*State, error) {
 	return LoadWith(defaultDeps, path)

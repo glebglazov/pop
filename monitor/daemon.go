@@ -2,12 +2,14 @@ package monitor
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,16 +23,42 @@ const pollInterval = 5 * time.Second
 // The daemon only handles cleanup (dead panes) and active-pane
 // auto-read. State transitions are driven by hooks calling
 // `pop pane set-status`.
-func RunDaemon(statePath, pidPath string) error {
-	return RunDaemonWith(DefaultDeps(), statePath, pidPath)
+func RunDaemon(statePath, pidPath, socketPath string, handler RequestHandler) error {
+	return RunDaemonWith(DefaultDeps(), statePath, pidPath, socketPath, handler)
 }
 
-// RunDaemonWith runs the monitoring loop using provided dependencies
-func RunDaemonWith(d *Deps, statePath, pidPath string) error {
+// RunDaemonWith runs the monitoring loop using provided dependencies.
+// It starts a unix socket listener for incoming status commands and
+// runs the dead-pane poll loop. A mutex serializes all state mutations
+// (socket handler + poll cleanup).
+func RunDaemonWith(d *Deps, statePath, pidPath, socketPath string, handler RequestHandler) error {
 	if err := writePIDFile(d, pidPath); err != nil {
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 	defer removePIDFile(d, pidPath)
+
+	var mu sync.Mutex
+
+	// Wrap handler so socket requests and poll are serialized.
+	guardedHandler := func(req Request) Response {
+		mu.Lock()
+		defer mu.Unlock()
+		return handler(req)
+	}
+
+	var ln net.Listener
+	if socketPath != "" {
+		var err error
+		ln, err = ListenAndServe(socketPath, guardedHandler)
+		if err != nil {
+			return fmt.Errorf("failed to start socket server: %w", err)
+		}
+		defer func() {
+			ln.Close()
+			os.Remove(socketPath)
+		}()
+		fmt.Printf("Socket listening on %s\n", socketPath)
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -41,12 +69,18 @@ func RunDaemonWith(d *Deps, statePath, pidPath string) error {
 	fmt.Printf("Monitor daemon started (PID %d, polling every %s)\n", os.Getpid(), pollInterval)
 
 	// Run first tick immediately
-	pollOnce(d, statePath)
+	guardedPollOnce := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		pollOnce(d, statePath)
+	}
+
+	guardedPollOnce()
 
 	for {
 		select {
 		case <-ticker.C:
-			pollOnce(d, statePath)
+			guardedPollOnce()
 		case sig := <-sigCh:
 			fmt.Printf("\nReceived %s, shutting down\n", sig)
 			return nil
