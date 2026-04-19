@@ -42,6 +42,7 @@ type PaneMonitoringConfig struct {
 	// backwards compat; a warning is emitted when it is present.
 	DismissAttentionInActivePane bool     `toml:"dismiss_attention_in_active_pane"`
 	IgnoreStatusFrom             []string `toml:"ignore_status_from"`
+	TCPServer                    bool     `toml:"tcp_server"`
 }
 
 // DashboardConfig holds dashboard-specific configuration
@@ -176,6 +177,16 @@ func (c *Config) CurrentPaneAlwaysUnderCursor() bool {
 		return false
 	}
 	return c.Dashboard.CurrentPaneAlwaysUnderCursor
+}
+
+// PaneMonitoringTCPServer returns whether the monitor daemon should bind a TCP
+// listener for IPC. When false, `pane set-status` writes state directly
+// instead of dialing the daemon. Defaults to false.
+func (c *Config) PaneMonitoringTCPServer() bool {
+	if c.PaneMonitoring == nil {
+		return false
+	}
+	return c.PaneMonitoring.TCPServer
 }
 
 // DashboardSortCriteria returns the configured sort criteria for the dashboard.

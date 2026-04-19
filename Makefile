@@ -13,7 +13,10 @@ install: build
 	command -v codesign >/dev/null 2>&1 && codesign --force --sign - $(PREFIX)/bin/pop || true
 	$(PREFIX)/bin/pop integrate --update-existing || true
 
+install-dev:
+	$(MAKE) install DEBUG=1
+
 test:
 	go test ./...
 
-.PHONY: build install test
+.PHONY: build install install-dev test

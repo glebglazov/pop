@@ -4,13 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"net"
-	"os"
-	"path/filepath"
 
 	"github.com/glebglazov/pop/debug"
 )
 
-// Request represents a command sent over the unix socket.
+// Request represents a command sent over the TCP socket.
 type Request struct {
 	Cmd        string `json:"cmd"`
 	PaneID     string `json:"pane_id"`
@@ -19,7 +17,7 @@ type Request struct {
 	NoRegister bool   `json:"no_register,omitempty"`
 }
 
-// Response is the daemon's reply to a socket request.
+// Response is the daemon's reply to a request.
 type Response struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
@@ -28,20 +26,11 @@ type Response struct {
 // RequestHandler processes a single request and returns a response.
 type RequestHandler func(req Request) Response
 
-// ListenAndServe creates a unix socket at socketPath and dispatches
-// incoming requests to handler. Returns the listener so the caller
-// can close it during shutdown. The accept loop runs in a background
-// goroutine.
-func ListenAndServe(socketPath string, handler RequestHandler) (net.Listener, error) {
-	if err := cleanStaleSocket(socketPath); err != nil {
-		return nil, err
-	}
-
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0755); err != nil {
-		return nil, err
-	}
-
-	ln, err := net.Listen("unix", socketPath)
+// ListenAndServe binds a TCP listener at addr and dispatches incoming
+// requests to handler. Returns the listener so the caller can close it
+// during shutdown. The accept loop runs in a background goroutine.
+func ListenAndServe(addr string, handler RequestHandler) (net.Listener, error) {
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -66,19 +55,33 @@ func acceptLoop(ln net.Listener, handler RequestHandler) {
 func handleConn(conn net.Conn, handler RequestHandler) {
 	defer conn.Close()
 
+	remote := conn.RemoteAddr().String()
+
 	scanner := bufio.NewScanner(conn)
 	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			debug.Log("tcp %s: scan error: %v", remote, err)
+		} else {
+			debug.Log("tcp %s: empty request", remote)
+		}
 		return
 	}
 
+	raw := scanner.Bytes()
+	debug.Log("tcp %s: recv %d bytes: %s", remote, len(raw), raw)
+
 	var req Request
-	if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
-		debug.Error("socket: unmarshal request: %v", err)
+	if err := json.Unmarshal(raw, &req); err != nil {
+		debug.Error("tcp %s: unmarshal request: %v (payload=%q)", remote, err, raw)
 		writeResponse(conn, Response{OK: false, Error: "invalid request"})
 		return
 	}
 
+	debug.Log("tcp %s: req cmd=%s pane=%s status=%s source=%s no_register=%v",
+		remote, req.Cmd, req.PaneID, req.Status, req.Source, req.NoRegister)
+
 	resp := handler(req)
+	debug.Log("tcp %s: resp ok=%v err=%q", remote, resp.OK, resp.Error)
 	writeResponse(conn, resp)
 }
 
@@ -90,20 +93,4 @@ func writeResponse(conn net.Conn, resp Response) {
 	}
 	data = append(data, '\n')
 	conn.Write(data)
-}
-
-// cleanStaleSocket removes a leftover socket file if no daemon owns it.
-func cleanStaleSocket(socketPath string) error {
-	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
-		return nil
-	}
-	// Socket file exists — try connecting to see if a daemon is listening.
-	conn, err := net.Dial("unix", socketPath)
-	if err == nil {
-		conn.Close()
-		// Something is already listening — don't remove.
-		return &net.OpError{Op: "listen", Net: "unix", Addr: &net.UnixAddr{Name: socketPath}, Err: os.ErrExist}
-	}
-	// Stale socket — remove it.
-	return os.Remove(socketPath)
 }

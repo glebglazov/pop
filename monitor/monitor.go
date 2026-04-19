@@ -101,23 +101,24 @@ func DefaultPIDPathWith(d *Deps) string {
 	return filepath.Join(home, ".local", "share", "pop", "monitor.pid")
 }
 
-// DefaultSocketPath returns the default daemon unix socket path
-func DefaultSocketPath() string {
-	return DefaultSocketPathWith(defaultDeps)
+// defaultMonitorAddr is the TCP address the daemon binds by default.
+// Loopback-only so the port is not exposed beyond the host. Port 57341
+// picked from the IANA dynamic range (49152-65535) to minimize collisions.
+const defaultMonitorAddr = "127.0.0.1:57341"
+
+// DefaultAddr returns the TCP address the monitor daemon listens on.
+// Override with the POP_MONITOR_ADDR env var (e.g. "0.0.0.0:57341" to
+// allow container-to-host connections via host.docker.internal).
+func DefaultAddr() string {
+	return DefaultAddrWith(defaultDeps)
 }
 
-// DefaultSocketPathWith returns the default daemon unix socket path using provided dependencies.
-// The socket lives in a "run" subdirectory so the directory can be volume-mounted
-// into containers without exposing config or state files.
-func DefaultSocketPathWith(d *Deps) string {
-	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
-		return filepath.Join(xdgData, "pop", "run", "pop.sock")
+// DefaultAddrWith returns the TCP address using provided dependencies.
+func DefaultAddrWith(d *Deps) string {
+	if v := d.FS.Getenv("POP_MONITOR_ADDR"); v != "" {
+		return v
 	}
-	home, err := d.FS.UserHomeDir()
-	if err != nil {
-		debug.Error("DefaultSocketPath: UserHomeDir: %v", err)
-	}
-	return filepath.Join(home, ".local", "share", "pop", "run", "pop.sock")
+	return defaultMonitorAddr
 }
 
 // Load reads monitor state from disk

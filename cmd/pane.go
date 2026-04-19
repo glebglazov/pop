@@ -503,16 +503,23 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noR
 		return nil
 	}
 
+	// TCP server is opt-in via [pane_monitoring] tcp_server. When disabled,
+	// skip the dial entirely and write state directly — no daemon round-trip,
+	// no "connection refused" fallback noise in the debug log.
+	if !cfg.PaneMonitoringTCPServer() {
+		return runPaneSetStatusDirect(tmux, cfg, paneID, rawStatus, source, noRegister)
+	}
+
 	req := monitor.Request{
 		Cmd:        "set-status",
 		PaneID:     paneID,
 		Status:     rawStatus,
-		Source:      source,
+		Source:     source,
 		NoRegister: noRegister,
 	}
 
-	socketPath := monitor.DefaultSocketPath()
-	resp, err := monitor.SendRequest(socketPath, req)
+	addr := monitor.DefaultAddr()
+	resp, err := monitor.SendRequest(addr, req)
 	if err != nil {
 		debug.Error("pane set-status: socket send failed, falling back to direct write: %v", err)
 		// Ensure daemon is starting for next call.

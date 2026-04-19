@@ -113,9 +113,19 @@ func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 	installTmuxAutoReadHooks()
 
 	statePath := monitor.DefaultStatePath()
-	socketPath := monitor.DefaultSocketPath()
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Error("monitor-start: load config: %v", err)
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	addr := ""
+	if cfg.PaneMonitoringTCPServer() {
+		addr = monitor.DefaultAddr()
+	}
 	handler := buildSetStatusHandler(defaultTmux, statePath)
-	return monitor.RunDaemon(statePath, pidPath, socketPath, handler)
+	return monitor.RunDaemon(statePath, pidPath, addr, handler)
 }
 
 // buildSetStatusHandler returns a RequestHandler that applies the full

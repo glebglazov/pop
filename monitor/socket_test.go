@@ -4,29 +4,25 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
-func TestDefaultSocketPathWith(t *testing.T) {
+func TestDefaultAddrWith(t *testing.T) {
 	tests := []struct {
 		name     string
-		xdgData  string
-		userHome string
+		envVal   string
 		expected string
 	}{
 		{
-			name:     "uses XDG_DATA_HOME when set",
-			xdgData:  "/custom/data",
-			userHome: "/home/user",
-			expected: "/custom/data/pop/run/pop.sock",
+			name:     "uses POP_MONITOR_ADDR when set",
+			envVal:   "0.0.0.0:12345",
+			expected: "0.0.0.0:12345",
 		},
 		{
-			name:     "falls back to ~/.local/share when XDG not set",
-			xdgData:  "",
-			userHome: "/home/user",
-			expected: "/home/user/.local/share/pop/run/pop.sock",
+			name:     "falls back to default when env empty",
+			envVal:   "",
+			expected: defaultMonitorAddr,
 		},
 	}
 
@@ -35,17 +31,14 @@ func TestDefaultSocketPathWith(t *testing.T) {
 			d := &Deps{
 				FS: &mockFS{
 					getenv: func(key string) string {
-						if key == "XDG_DATA_HOME" {
-							return tt.xdgData
+						if key == "POP_MONITOR_ADDR" {
+							return tt.envVal
 						}
 						return ""
 					},
-					userHomeDir: func() (string, error) {
-						return tt.userHome, nil
-					},
 				},
 			}
-			result := DefaultSocketPathWith(d)
+			result := DefaultAddrWith(d)
 			if result != tt.expected {
 				t.Errorf("got %q, want %q", result, tt.expected)
 			}
@@ -53,10 +46,19 @@ func TestDefaultSocketPathWith(t *testing.T) {
 	}
 }
 
-func TestSocketRoundTrip(t *testing.T) {
-	dir := shortSocketDir(t)
-	sockPath := filepath.Join(dir, "test.sock")
+// startTestServer spins up ListenAndServe on an ephemeral port and returns
+// the actual bound address. Cleanup closes the listener.
+func startTestServer(t *testing.T, handler RequestHandler) string {
+	t.Helper()
+	ln, err := ListenAndServe("127.0.0.1:0", handler)
+	if err != nil {
+		t.Fatalf("ListenAndServe: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	return ln.Addr().String()
+}
 
+func TestSocketRoundTrip(t *testing.T) {
 	handler := func(req Request) Response {
 		if req.Cmd != "set-status" {
 			return Response{OK: false, Error: "unknown cmd"}
@@ -64,18 +66,14 @@ func TestSocketRoundTrip(t *testing.T) {
 		return Response{OK: true}
 	}
 
-	ln, err := ListenAndServe(sockPath, handler)
-	if err != nil {
-		t.Fatalf("ListenAndServe: %v", err)
-	}
-	defer ln.Close()
+	addr := startTestServer(t, handler)
 
 	req := Request{
 		Cmd:    "set-status",
 		PaneID: "%42",
 		Status: "working",
 	}
-	resp, err := SendRequest(sockPath, req)
+	resp, err := SendRequest(addr, req)
 	if err != nil {
 		t.Fatalf("SendRequest: %v", err)
 	}
@@ -85,20 +83,13 @@ func TestSocketRoundTrip(t *testing.T) {
 }
 
 func TestSocketRoundTrip_HandlerError(t *testing.T) {
-	dir := shortSocketDir(t)
-	sockPath := filepath.Join(dir, "test.sock")
-
 	handler := func(req Request) Response {
 		return Response{OK: false, Error: "something broke"}
 	}
 
-	ln, err := ListenAndServe(sockPath, handler)
-	if err != nil {
-		t.Fatalf("ListenAndServe: %v", err)
-	}
-	defer ln.Close()
+	addr := startTestServer(t, handler)
 
-	resp, err := SendRequest(sockPath, Request{Cmd: "set-status", PaneID: "%1", Status: "working"})
+	resp, err := SendRequest(addr, Request{Cmd: "set-status", PaneID: "%1", Status: "working"})
 	if err != nil {
 		t.Fatalf("SendRequest: %v", err)
 	}
@@ -111,20 +102,13 @@ func TestSocketRoundTrip_HandlerError(t *testing.T) {
 }
 
 func TestSocketRoundTrip_AllFields(t *testing.T) {
-	dir := shortSocketDir(t)
-	sockPath := filepath.Join(dir, "test.sock")
-
 	var received Request
 	handler := func(req Request) Response {
 		received = req
 		return Response{OK: true}
 	}
 
-	ln, err := ListenAndServe(sockPath, handler)
-	if err != nil {
-		t.Fatalf("ListenAndServe: %v", err)
-	}
-	defer ln.Close()
+	addr := startTestServer(t, handler)
 
 	req := Request{
 		Cmd:        "set-status",
@@ -133,7 +117,7 @@ func TestSocketRoundTrip_AllFields(t *testing.T) {
 		Source:     "tmux-global",
 		NoRegister: true,
 	}
-	_, err = SendRequest(sockPath, req)
+	_, err := SendRequest(addr, req)
 	if err != nil {
 		t.Fatalf("SendRequest: %v", err)
 	}
@@ -153,23 +137,16 @@ func TestSocketRoundTrip_AllFields(t *testing.T) {
 }
 
 func TestSocketMultipleRequests(t *testing.T) {
-	dir := shortSocketDir(t)
-	sockPath := filepath.Join(dir, "test.sock")
-
 	count := 0
 	handler := func(req Request) Response {
 		count++
 		return Response{OK: true}
 	}
 
-	ln, err := ListenAndServe(sockPath, handler)
-	if err != nil {
-		t.Fatalf("ListenAndServe: %v", err)
-	}
-	defer ln.Close()
+	addr := startTestServer(t, handler)
 
 	for i := range 10 {
-		resp, err := SendRequest(sockPath, Request{
+		resp, err := SendRequest(addr, Request{
 			Cmd:    "set-status",
 			PaneID: "%1",
 			Status: "working",
@@ -187,81 +164,25 @@ func TestSocketMultipleRequests(t *testing.T) {
 	}
 }
 
-func TestSendRequest_NoSocket(t *testing.T) {
-	_, err := SendRequest("/nonexistent/pop.sock", Request{Cmd: "set-status"})
-	if err == nil {
-		t.Fatal("expected error when socket doesn't exist")
-	}
-}
-
-func TestCleanStaleSocket(t *testing.T) {
-	dir := shortSocketDir(t)
-	sockPath := filepath.Join(dir, "stale.sock")
-
-	// Create a stale socket file (not listening)
-	ln, err := net.Listen("unix", sockPath)
+func TestSendRequest_NoServer(t *testing.T) {
+	// Grab an ephemeral port then close it, so the address is guaranteed
+	// unbound for the duration of the test.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+	addr := ln.Addr().String()
 	ln.Close()
-	// Socket file still exists but nobody is listening
 
-	err = cleanStaleSocket(sockPath)
-	if err != nil {
-		t.Fatalf("cleanStaleSocket: %v", err)
-	}
-
-	if _, err := os.Stat(sockPath); !os.IsNotExist(err) {
-		t.Error("stale socket file should have been removed")
-	}
-}
-
-func TestCleanStaleSocket_ActiveSocket(t *testing.T) {
-	dir := shortSocketDir(t)
-	sockPath := filepath.Join(dir, "active.sock")
-
-	ln, err := net.Listen("unix", sockPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-
-	err = cleanStaleSocket(sockPath)
+	_, err = SendRequest(addr, Request{Cmd: "set-status"})
 	if err == nil {
-		t.Fatal("expected error when socket is active")
-	}
-}
-
-func TestCleanStaleSocket_NoFile(t *testing.T) {
-	err := cleanStaleSocket("/nonexistent/pop.sock")
-	if err != nil {
-		t.Fatalf("expected nil error for nonexistent socket, got: %v", err)
-	}
-}
-
-func TestListenAndServe_CreatesDirectory(t *testing.T) {
-	dir := shortSocketDir(t)
-	sockPath := filepath.Join(dir, "nested", "dir", "pop.sock")
-
-	handler := func(req Request) Response { return Response{OK: true} }
-
-	ln, err := ListenAndServe(sockPath, handler)
-	if err != nil {
-		t.Fatalf("ListenAndServe: %v", err)
-	}
-	defer ln.Close()
-
-	if _, err := os.Stat(filepath.Dir(sockPath)); os.IsNotExist(err) {
-		t.Error("expected directory to be created")
+		t.Fatal("expected error when no server is listening")
 	}
 }
 
 func TestSendRequest_Timeout(t *testing.T) {
-	dir := shortSocketDir(t)
-	sockPath := filepath.Join(dir, "slow.sock")
-
-	// Create a listener that accepts but never responds
-	ln, err := net.Listen("unix", sockPath)
+	// Accept but never respond — client should hit its read deadline.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,13 +193,12 @@ func TestSendRequest_Timeout(t *testing.T) {
 		if err != nil {
 			return
 		}
-		// Hold connection open, never respond
 		time.Sleep(10 * time.Second)
 		conn.Close()
 	}()
 
 	start := time.Now()
-	_, err = SendRequest(sockPath, Request{Cmd: "set-status", PaneID: "%1", Status: "working"})
+	_, err = SendRequest(ln.Addr().String(), Request{Cmd: "set-status", PaneID: "%1", Status: "working"})
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -289,32 +209,24 @@ func TestSendRequest_Timeout(t *testing.T) {
 	}
 }
 
-// shortSocketDir creates a temp directory with a short path to stay within
-// the 108-char unix socket path limit on macOS. t.TempDir() paths include
-// the full test name which can easily exceed the limit.
-func shortSocketDir(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "pop-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	return dir
-}
-
-// mockFS is a minimal mock for DefaultSocketPathWith tests.
+// mockFS is a minimal mock for DefaultAddrWith tests.
 type mockFS struct {
 	getenv      func(string) string
 	userHomeDir func() (string, error)
 }
 
-func (m *mockFS) Getwd() (string, error)                              { return "", nil }
-func (m *mockFS) UserHomeDir() (string, error)                        { return m.userHomeDir() }
-func (m *mockFS) Getenv(key string) string                            { return m.getenv(key) }
-func (m *mockFS) Stat(string) (os.FileInfo, error)                    { return nil, nil }
-func (m *mockFS) ReadDir(string) ([]os.DirEntry, error)               { return nil, nil }
-func (m *mockFS) ReadFile(string) ([]byte, error)                     { return nil, nil }
-func (m *mockFS) WriteFile(string, []byte, os.FileMode) error         { return nil }
-func (m *mockFS) MkdirAll(string, os.FileMode) error                  { return nil }
-func (m *mockFS) DirFS(string) fs.FS                                  { return nil }
-func (m *mockFS) EvalSymlinks(string) (string, error)                 { return "", nil }
+func (m *mockFS) Getwd() (string, error) { return "", nil }
+func (m *mockFS) UserHomeDir() (string, error) {
+	if m.userHomeDir == nil {
+		return "", nil
+	}
+	return m.userHomeDir()
+}
+func (m *mockFS) Getenv(key string) string                    { return m.getenv(key) }
+func (m *mockFS) Stat(string) (os.FileInfo, error)            { return nil, nil }
+func (m *mockFS) ReadDir(string) ([]os.DirEntry, error)       { return nil, nil }
+func (m *mockFS) ReadFile(string) ([]byte, error)             { return nil, nil }
+func (m *mockFS) WriteFile(string, []byte, os.FileMode) error { return nil }
+func (m *mockFS) MkdirAll(string, os.FileMode) error          { return nil }
+func (m *mockFS) DirFS(string) fs.FS                          { return nil }
+func (m *mockFS) EvalSymlinks(string) (string, error)         { return "", nil }

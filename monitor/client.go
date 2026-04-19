@@ -10,9 +10,9 @@ import (
 
 const clientTimeout = 2 * time.Second
 
-// SendRequest connects to the daemon socket, sends req, and returns the response.
-func SendRequest(socketPath string, req Request) (Response, error) {
-	conn, err := net.DialTimeout("unix", socketPath, clientTimeout)
+// SendRequest dials the daemon TCP address, sends req, and returns the response.
+func SendRequest(addr string, req Request) (Response, error) {
+	conn, err := net.DialTimeout("tcp", addr, clientTimeout)
 	if err != nil {
 		return Response{}, fmt.Errorf("connect to daemon: %w", err)
 	}

@@ -23,15 +23,15 @@ const pollInterval = 5 * time.Second
 // The daemon only handles cleanup (dead panes) and active-pane
 // auto-read. State transitions are driven by hooks calling
 // `pop pane set-status`.
-func RunDaemon(statePath, pidPath, socketPath string, handler RequestHandler) error {
-	return RunDaemonWith(DefaultDeps(), statePath, pidPath, socketPath, handler)
+func RunDaemon(statePath, pidPath, addr string, handler RequestHandler) error {
+	return RunDaemonWith(DefaultDeps(), statePath, pidPath, addr, handler)
 }
 
 // RunDaemonWith runs the monitoring loop using provided dependencies.
-// It starts a unix socket listener for incoming status commands and
-// runs the dead-pane poll loop. A mutex serializes all state mutations
+// It starts a TCP listener for incoming status commands and runs the
+// dead-pane poll loop. A mutex serializes all state mutations
 // (socket handler + poll cleanup).
-func RunDaemonWith(d *Deps, statePath, pidPath, socketPath string, handler RequestHandler) error {
+func RunDaemonWith(d *Deps, statePath, pidPath, addr string, handler RequestHandler) error {
 	if err := writePIDFile(d, pidPath); err != nil {
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
@@ -47,17 +47,14 @@ func RunDaemonWith(d *Deps, statePath, pidPath, socketPath string, handler Reque
 	}
 
 	var ln net.Listener
-	if socketPath != "" {
+	if addr != "" {
 		var err error
-		ln, err = ListenAndServe(socketPath, guardedHandler)
+		ln, err = ListenAndServe(addr, guardedHandler)
 		if err != nil {
-			return fmt.Errorf("failed to start socket server: %w", err)
+			return fmt.Errorf("failed to start TCP server: %w", err)
 		}
-		defer func() {
-			ln.Close()
-			os.Remove(socketPath)
-		}()
-		fmt.Printf("Socket listening on %s\n", socketPath)
+		defer ln.Close()
+		fmt.Printf("Monitor listening on %s\n", ln.Addr())
 	}
 
 	sigCh := make(chan os.Signal, 1)
