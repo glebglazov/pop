@@ -209,16 +209,30 @@ func HasWorktreesWith(d *Deps, path string) bool {
 		if !isCoreBareWith(d, gitDir) {
 			return false
 		}
-		gitWorktreesDir := filepath.Join(gitDir, "worktrees")
-		if info, err := d.FS.Stat(gitWorktreesDir); err == nil && info.IsDir() {
-			entries, err := d.FS.ReadDir(gitWorktreesDir)
-			if err == nil && len(entries) > 0 {
-				return true
-			}
-		}
+		return hasNonEmptyWorktreesDir(d, gitDir)
+	}
+
+	// Check if path itself is a top-level bare repo (git clone --bare layout) with
+	// worktrees/ subdirectory containing entries AND core.bare=true in config
+	if isCoreBareWith(d, path) {
+		return hasNonEmptyWorktreesDir(d, path)
 	}
 
 	return false
+}
+
+// hasNonEmptyWorktreesDir reports whether <basePath>/worktrees exists and contains entries.
+func hasNonEmptyWorktreesDir(d *Deps, basePath string) bool {
+	worktreesDir := filepath.Join(basePath, "worktrees")
+	info, err := d.FS.Stat(worktreesDir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	entries, err := d.FS.ReadDir(worktreesDir)
+	if err != nil {
+		return false
+	}
+	return len(entries) > 0
 }
 
 // isCoreBareWith checks if core.bare=true in the git config file (without running git)
