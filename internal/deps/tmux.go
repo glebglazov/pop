@@ -20,7 +20,8 @@ type Tmux interface {
 	AttachSession(name string) error
 	// KillSession kills a session
 	KillSession(name string) error
-	// ListSessions returns session info in "name activity" format per line
+	// ListSessions returns session info in "name\tactivity" format per line.
+	// Tab delimiter is used because session names may contain spaces.
 	ListSessions() (string, error)
 }
 
@@ -68,7 +69,7 @@ func (t *RealTmux) KillSession(name string) error {
 }
 
 func (t *RealTmux) ListSessions() (string, error) {
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name} #{session_activity}")
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}\t#{session_activity}")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err

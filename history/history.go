@@ -250,10 +250,12 @@ func TmuxSessionActivityWith(d *Deps) map[string]int64 {
 	}
 
 	for _, line := range strings.Split(out, "\n") {
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
+		// Split on tab so session names containing spaces (e.g. disambiguated
+		// names like "rails (work)") stay intact.
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 {
 			name := parts[0]
-			ts, err := strconv.ParseInt(parts[1], 10, 64)
+			ts, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
 			if err != nil {
 				debug.Error("TmuxSessionActivity: parse timestamp %q: %v", parts[1], err)
 			}

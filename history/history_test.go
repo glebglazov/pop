@@ -497,10 +497,18 @@ func TestTmuxSessionActivityWith(t *testing.T) {
 	}{
 		{
 			name:       "parses session activity",
-			tmuxOutput: "session1 1234567890\nsession2 1234567891",
+			tmuxOutput: "session1\t1234567890\nsession2\t1234567891",
 			expected: map[string]int64{
 				"session1": 1234567890,
 				"session2": 1234567891,
+			},
+		},
+		{
+			name:       "preserves spaces in session names",
+			tmuxOutput: "rails (work)\t1234567890\nrails (mixed)\t1234567891",
+			expected: map[string]int64{
+				"rails (work)":  1234567890,
+				"rails (mixed)": 1234567891,
 			},
 		},
 		{
