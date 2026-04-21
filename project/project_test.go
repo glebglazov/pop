@@ -400,6 +400,56 @@ func TestHasWorktreesWith(t *testing.T) {
 			},
 			expected: false,
 		},
+		{
+			// git clone --bare layout: bare repo files at path root, no .bare subdir,
+			// no .git subdir, config has core.bare=true, worktrees/ sits at root.
+			name: "top-level bare repo with worktrees",
+			setupFS: func() *deps.MockFileSystem {
+				return &deps.MockFileSystem{
+					StatFunc: func(path string) (os.FileInfo, error) {
+						switch path {
+						case "/project/.bare", "/project/.git":
+							return nil, os.ErrNotExist
+						case "/project/worktrees":
+							return deps.MockFileInfo{IsDirVal: true}, nil
+						}
+						return nil, os.ErrNotExist
+					},
+					ReadDirFunc: func(path string) ([]os.DirEntry, error) {
+						if path == "/project/worktrees" {
+							return []os.DirEntry{
+								deps.MockDirEntry{NameVal: "base", IsDirVal: true},
+							}, nil
+						}
+						return nil, nil
+					},
+					ReadFileFunc: func(path string) ([]byte, error) {
+						if path == "/project/config" {
+							return []byte("[core]\n\tbare = true\n"), nil
+						}
+						return nil, os.ErrNotExist
+					},
+				}
+			},
+			expected: true,
+		},
+		{
+			name: "top-level bare repo without worktrees dir",
+			setupFS: func() *deps.MockFileSystem {
+				return &deps.MockFileSystem{
+					StatFunc: func(path string) (os.FileInfo, error) {
+						return nil, os.ErrNotExist
+					},
+					ReadFileFunc: func(path string) ([]byte, error) {
+						if path == "/project/config" {
+							return []byte("[core]\n\tbare = true\n"), nil
+						}
+						return nil, os.ErrNotExist
+					},
+				}
+			},
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
