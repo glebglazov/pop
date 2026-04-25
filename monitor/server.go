@@ -15,6 +15,9 @@ type Request struct {
 	Status     string `json:"status"`
 	Source     string `json:"source,omitempty"`
 	NoRegister bool   `json:"no_register,omitempty"`
+	// Following is used by the "set-following" command. A pointer so that
+	// the absent-vs-false distinction survives JSON round-tripping.
+	Following *bool `json:"following,omitempty"`
 }
 
 // Response is the daemon's reply to a request.

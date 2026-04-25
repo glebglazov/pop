@@ -43,6 +43,8 @@ func init() {
 	paneSetStatusCmd.Flags().String("source", "", "source identifier for filtering (e.g. tmux-global)")
 	paneSetStatusCmd.Flags().Bool("no-register", false, "only update already-tracked panes, never auto-register new ones")
 	paneCmd.AddCommand(paneStatusCmd)
+	paneCmd.AddCommand(paneFollowCmd)
+	paneCmd.AddCommand(paneUnfollowCmd)
 }
 
 // resolveSession returns the tmux session name to operate on.
@@ -658,4 +660,136 @@ func runPaneStatus(cmd *cobra.Command, args []string) error {
 		)
 	}
 	return w.Flush()
+}
+
+// --- follow / unfollow ---
+
+var paneFollowCmd = &cobra.Command{
+	Use:   "follow <name|pane_id>",
+	Short: "Mark a pane as followed",
+	Long: `Mark a tracked pane as followed.
+
+Followed panes show up in pop's "following" attention view (toggle with F
+in the picker). If the argument starts with '%' it is treated as a tmux
+pane_id; otherwise it is resolved as a pane name in the agent window of
+the current session (or --project's session).
+
+Untracked panes are auto-registered as idle.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPaneSetFollow(args[0], true)
+	},
+}
+
+var paneUnfollowCmd = &cobra.Command{
+	Use:   "unfollow <name|pane_id>",
+	Short: "Clear the followed mark on a pane",
+	Long: `Clear the followed mark on a tracked pane.
+
+Also clears any user note attached to the pane, matching the picker's
+behavior. Unfollowing an untracked pane is a no-op.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPaneSetFollow(args[0], false)
+	},
+}
+
+func runPaneSetFollow(arg string, follow bool) error {
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Error("pane follow: load config: %v", err)
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	return runPaneSetFollowWith(defaultTmux, cfg, arg, follow)
+}
+
+func runPaneSetFollowWith(tmux deps.Tmux, cfg *config.Config, arg string, follow bool) error {
+	debug.Init()
+	defer debug.Close()
+
+	paneID, err := resolvePaneArg(tmux, arg)
+	if err != nil {
+		return err
+	}
+
+	// Daemon path when TCP server is enabled — keeps writes serialized
+	// with set-status under the daemon's mutex. Fall through to a direct
+	// write on connect failure (cold start), the same pattern set-status
+	// uses.
+	if cfg.PaneMonitoringTCPServer() {
+		resp, err := monitor.SendRequest(monitor.DefaultAddr(), monitor.Request{
+			Cmd:       "set-following",
+			PaneID:    paneID,
+			Following: &follow,
+		})
+		if err == nil {
+			if !resp.OK {
+				return fmt.Errorf("%s", resp.Error)
+			}
+			return nil
+		}
+		debug.Error("pane follow: socket send failed, falling back to direct write: %v", err)
+		go ensureMonitorDaemon()
+	}
+
+	return runPaneSetFollowDirect(tmux, paneID, follow)
+}
+
+// runPaneSetFollowDirect mirrors handleSetFollowing for the cold-start path
+// (or when the TCP server is disabled). Kept in sync with the daemon handler.
+func runPaneSetFollowDirect(tmux deps.Tmux, paneID string, follow bool) error {
+	state, err := monitor.Load(monitor.DefaultStatePath())
+	if err != nil {
+		return fmt.Errorf("load monitor state: %w", err)
+	}
+
+	entry, ok := state.Panes[paneID]
+	if !ok {
+		if !follow {
+			return nil
+		}
+		session, _, err := tmuxPaneInfoWith(tmux, paneID)
+		if err != nil {
+			return fmt.Errorf("look up pane %s: %w", paneID, err)
+		}
+		debug.Log("[set-following] %s: auto-registering in session=%s with following=true (direct)", paneID, session)
+		now := time.Now()
+		state.Panes[paneID] = &monitor.PaneEntry{
+			PaneID:      paneID,
+			Session:     session,
+			Status:      monitor.StatusIdle,
+			Following:   true,
+			UpdatedAt:   now,
+			LastVisited: now,
+		}
+		return state.Save()
+	}
+
+	if entry.Following == follow {
+		return nil
+	}
+	debug.Log("[set-following] %s (session=%s): %v → %v (direct)", paneID, entry.Session, entry.Following, follow)
+	entry.Following = follow
+	entry.UpdatedAt = time.Now()
+	if !follow {
+		entry.Note = ""
+	}
+	return state.Save()
+}
+
+// resolvePaneArg accepts a tmux pane_id ("%N") verbatim, or a pane name to
+// look up in the current/--project session's agent window. Mirrors the
+// kill/send/capture pattern but admits raw pane IDs for use from scripts
+// that already know them.
+func resolvePaneArg(tmux deps.Tmux, arg string) (string, error) {
+	if strings.HasPrefix(arg, "%") {
+		return arg, nil
+	}
+	session, err := resolveSessionWith(tmux)
+	if err != nil {
+		return "", err
+	}
+	return findPaneWith(tmux, session, arg)
 }

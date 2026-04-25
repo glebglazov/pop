@@ -779,3 +779,227 @@ func TestRunPaneSetStatusWith_LegacyNeedsAttentionAlias(t *testing.T) {
 		t.Errorf("legacy 'needs_attention' alias: got %q, want %q", got, monitor.StatusUnread)
 	}
 }
+
+// --- follow / unfollow ---
+
+func TestResolvePaneArg(t *testing.T) {
+	t.Run("returns pane_id verbatim when prefixed with %", func(t *testing.T) {
+		// Should not call into tmux at all.
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				t.Errorf("unexpected tmux call for raw pane_id: %v", args)
+				return "", nil
+			},
+		}
+		got, err := resolvePaneArg(tmux, "%42")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "%42" {
+			t.Errorf("got %q, want %%42", got)
+		}
+	})
+
+	t.Run("resolves name via findPane in current session", func(t *testing.T) {
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				// resolveSessionWith → currentTmuxSessionWith calls
+				// `display-message -p #S` to get the current session.
+				if args[0] == "display-message" && len(args) >= 3 && args[1] == "-p" && args[2] == "#S" {
+					return "session-x", nil
+				}
+				if args[0] == "list-panes" {
+					return "myagent|%5\nother|%6", nil
+				}
+				return "", nil
+			},
+		}
+		got, err := resolvePaneArg(tmux, "myagent")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "%5" {
+			t.Errorf("got %q, want %%5", got)
+		}
+	})
+}
+
+func TestRunPaneSetFollowDirect_AutoRegistersOnFollow(t *testing.T) {
+	// follow on an untracked pane auto-registers it as idle+following.
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmux := newPaneInfoMockTmux(map[string]string{
+		"%7": "proj-a\topencode",
+	})
+
+	before := time.Now()
+	if err := runPaneSetFollowDirect(tmux, "%7", true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	after := time.Now()
+
+	state := loadState(t, statePath)
+	entry, ok := state.Panes["%7"]
+	if !ok {
+		t.Fatalf("expected %%7 to be auto-registered")
+	}
+	if !entry.Following {
+		t.Error("expected Following = true")
+	}
+	if entry.Status != monitor.StatusIdle {
+		t.Errorf("auto-registered status = %q, want idle", entry.Status)
+	}
+	if entry.Session != "proj-a" {
+		t.Errorf("session = %q, want proj-a", entry.Session)
+	}
+	if entry.LastVisited.Before(before) || entry.LastVisited.After(after) {
+		t.Errorf("LastVisited = %v, want between %v and %v", entry.LastVisited, before, after)
+	}
+}
+
+func TestRunPaneSetFollowDirect_UnfollowOnUntrackedIsNoop(t *testing.T) {
+	// Unfollowing an untracked pane is a no-op — no auto-registration,
+	// no error. Absence already implies "not followed".
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Tmux must NOT be queried — that would mean we tried to register.
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			t.Errorf("unexpected tmux call on unfollow no-op: %v", args)
+			return "", nil
+		},
+	}
+
+	if err := runPaneSetFollowDirect(tmux, "%7", false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	state := loadState(t, statePath)
+	if len(state.Panes) != 0 {
+		t.Errorf("expected empty state, got %d entries", len(state.Panes))
+	}
+}
+
+func TestRunPaneSetFollowDirect_TogglesTrackedPane(t *testing.T) {
+	// follow then unfollow on a tracked pane flips the flag without
+	// touching status; unfollowing also clears any note.
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	seed := &monitor.State{
+		Panes: map[string]*monitor.PaneEntry{
+			"%3": {
+				PaneID:  "%3",
+				Session: "proj-b",
+				Status:  monitor.StatusWorking,
+				Note:    "watch the deploy",
+			},
+		},
+	}
+	data, _ := json.Marshal(seed)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// No tmux calls expected for already-tracked panes.
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			t.Errorf("unexpected tmux call for tracked pane: %v", args)
+			return "", nil
+		},
+	}
+
+	// follow=true
+	if err := runPaneSetFollowDirect(tmux, "%3", true); err != nil {
+		t.Fatalf("follow: unexpected error: %v", err)
+	}
+	state := loadState(t, statePath)
+	entry := state.Panes["%3"]
+	if !entry.Following {
+		t.Error("after follow: expected Following = true")
+	}
+	if entry.Status != monitor.StatusWorking {
+		t.Errorf("after follow: status changed to %q, want unchanged 'working'", entry.Status)
+	}
+	if entry.Note != "watch the deploy" {
+		t.Errorf("after follow: note = %q, want unchanged", entry.Note)
+	}
+
+	// follow=false
+	if err := runPaneSetFollowDirect(tmux, "%3", false); err != nil {
+		t.Fatalf("unfollow: unexpected error: %v", err)
+	}
+	state = loadState(t, statePath)
+	entry = state.Panes["%3"]
+	if entry.Following {
+		t.Error("after unfollow: expected Following = false")
+	}
+	if entry.Note != "" {
+		t.Errorf("after unfollow: note = %q, want cleared", entry.Note)
+	}
+}
+
+func TestRunPaneSetFollowDirect_NoOpWhenAlreadyAtTargetState(t *testing.T) {
+	// If Following already matches the target, the entry is not rewritten
+	// (UpdatedAt should not bump). Verifies the early-return path.
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	originalUpdatedAt := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	seed := &monitor.State{
+		Panes: map[string]*monitor.PaneEntry{
+			"%4": {
+				PaneID:    "%4",
+				Session:   "proj-c",
+				Status:    monitor.StatusIdle,
+				Following: true,
+				UpdatedAt: originalUpdatedAt,
+			},
+		},
+	}
+	data, _ := json.Marshal(seed)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmux := &deps.MockTmux{}
+	if err := runPaneSetFollowDirect(tmux, "%4", true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	state := loadState(t, statePath)
+	if !state.Panes["%4"].UpdatedAt.Equal(originalUpdatedAt) {
+		t.Errorf("UpdatedAt was bumped on no-op follow: %v != %v",
+			state.Panes["%4"].UpdatedAt, originalUpdatedAt)
+	}
+}

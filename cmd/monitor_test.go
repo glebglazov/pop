@@ -322,6 +322,180 @@ func TestIsActiveTmuxPaneWith(t *testing.T) {
 	}
 }
 
+func TestBuildMonitorHandler_DispatchesByCmd(t *testing.T) {
+	dir := t.TempDir()
+	statePath := dir + "/monitor.json"
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := buildMonitorHandler(&deps.MockTmux{}, statePath)
+
+	t.Run("unknown command returns error", func(t *testing.T) {
+		resp := handler(monitor.Request{Cmd: "definitely-not-a-real-command", PaneID: "%1"})
+		if resp.OK {
+			t.Error("expected OK=false for unknown command")
+		}
+		if !strings.Contains(resp.Error, "unknown command") {
+			t.Errorf("error = %q, want containing 'unknown command'", resp.Error)
+		}
+	})
+
+	t.Run("empty cmd is treated as set-status (backward compat)", func(t *testing.T) {
+		// Empty cmd should not produce "unknown command".
+		resp := handler(monitor.Request{Cmd: "", PaneID: ""})
+		if !resp.OK {
+			t.Errorf("expected OK=true for empty pane_id (set-status no-op), got error %q", resp.Error)
+		}
+	})
+}
+
+func TestHandleSetFollowing(t *testing.T) {
+	t.Run("rejects request without pane_id", func(t *testing.T) {
+		statePath := setupEmptyState(t)
+		follow := true
+		resp := handleSetFollowing(&deps.MockTmux{}, statePath, monitor.Request{
+			Cmd:       "set-following",
+			Following: &follow,
+		})
+		if resp.OK {
+			t.Error("expected OK=false")
+		}
+		if !strings.Contains(resp.Error, "pane_id") {
+			t.Errorf("error = %q, want containing 'pane_id'", resp.Error)
+		}
+	})
+
+	t.Run("rejects request with nil following", func(t *testing.T) {
+		statePath := setupEmptyState(t)
+		resp := handleSetFollowing(&deps.MockTmux{}, statePath, monitor.Request{
+			Cmd:    "set-following",
+			PaneID: "%1",
+		})
+		if resp.OK {
+			t.Error("expected OK=false")
+		}
+		if !strings.Contains(resp.Error, "following") {
+			t.Errorf("error = %q, want containing 'following'", resp.Error)
+		}
+	})
+
+	t.Run("auto-registers untracked pane on follow=true", func(t *testing.T) {
+		statePath := setupEmptyState(t)
+		tmux := newPaneInfoMockTmux(map[string]string{
+			"%8": "proj-x\tclaude",
+		})
+		follow := true
+		resp := handleSetFollowing(tmux, statePath, monitor.Request{
+			Cmd:       "set-following",
+			PaneID:    "%8",
+			Following: &follow,
+		})
+		if !resp.OK {
+			t.Fatalf("unexpected error: %s", resp.Error)
+		}
+		state := loadStateFromPath(t, statePath)
+		entry, ok := state.Panes["%8"]
+		if !ok {
+			t.Fatalf("expected %%8 to be auto-registered")
+		}
+		if !entry.Following {
+			t.Error("expected Following = true")
+		}
+		if entry.Status != monitor.StatusIdle {
+			t.Errorf("status = %q, want idle", entry.Status)
+		}
+		if entry.Session != "proj-x" {
+			t.Errorf("session = %q, want proj-x", entry.Session)
+		}
+	})
+
+	t.Run("unfollow on untracked pane is a no-op", func(t *testing.T) {
+		statePath := setupEmptyState(t)
+		// Tmux must not be called.
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				t.Errorf("unexpected tmux call: %v", args)
+				return "", nil
+			},
+		}
+		follow := false
+		resp := handleSetFollowing(tmux, statePath, monitor.Request{
+			Cmd:       "set-following",
+			PaneID:    "%9",
+			Following: &follow,
+		})
+		if !resp.OK {
+			t.Errorf("expected OK=true, got error %q", resp.Error)
+		}
+		state := loadStateFromPath(t, statePath)
+		if len(state.Panes) != 0 {
+			t.Errorf("expected empty state, got %d entries", len(state.Panes))
+		}
+	})
+
+	t.Run("unfollow clears note on tracked pane", func(t *testing.T) {
+		dir := t.TempDir()
+		statePath := dir + "/monitor.json"
+		seed := &monitor.State{
+			Panes: map[string]*monitor.PaneEntry{
+				"%2": {
+					PaneID:    "%2",
+					Session:   "proj-y",
+					Status:    monitor.StatusIdle,
+					Following: true,
+					Note:      "remember to check this",
+				},
+			},
+		}
+		data, _ := json.Marshal(seed)
+		if err := os.WriteFile(statePath, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		follow := false
+		resp := handleSetFollowing(&deps.MockTmux{}, statePath, monitor.Request{
+			Cmd:       "set-following",
+			PaneID:    "%2",
+			Following: &follow,
+		})
+		if !resp.OK {
+			t.Fatalf("unexpected error: %s", resp.Error)
+		}
+		state := loadStateFromPath(t, statePath)
+		entry := state.Panes["%2"]
+		if entry.Following {
+			t.Error("expected Following = false")
+		}
+		if entry.Note != "" {
+			t.Errorf("note = %q, want cleared", entry.Note)
+		}
+	})
+}
+
+func setupEmptyState(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	statePath := dir + "/monitor.json"
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	return statePath
+}
+
+func loadStateFromPath(t *testing.T, path string) *monitor.State {
+	t.Helper()
+	state, err := monitor.Load(path)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	return state
+}
+
 func TestUninstallTmuxAutoReadHooksWith(t *testing.T) {
 	var removedHooks []string
 	tmux := &deps.MockTmux{

@@ -124,113 +124,187 @@ func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 	if cfg.PaneMonitoringTCPServer() {
 		addr = monitor.DefaultAddr()
 	}
-	handler := buildSetStatusHandler(defaultTmux, statePath)
+	handler := buildMonitorHandler(defaultTmux, statePath)
 	return monitor.RunDaemon(statePath, pidPath, addr, handler)
 }
 
-// buildSetStatusHandler returns a RequestHandler that applies the full
-// set-status business logic. The handler loads config and state from disk
-// on each call — no in-memory cache for V1.
-func buildSetStatusHandler(tmux deps.Tmux, statePath string) monitor.RequestHandler {
+// buildMonitorHandler returns a RequestHandler that dispatches by req.Cmd.
+// Each branch loads config and state from disk on every call — no in-memory
+// cache for V1. An empty Cmd is treated as "set-status" for backward
+// compatibility with older clients.
+func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandler {
 	return func(req monitor.Request) monitor.Response {
 		debug.Init()
 		defer debug.Close()
 
-		paneID := req.PaneID
-		status := monitor.PaneStatus(req.Status)
-		source := req.Source
-		noRegister := req.NoRegister
-
-		// Normalize deprecated aliases.
-		if status == "read" {
-			status = monitor.StatusIdle
+		switch req.Cmd {
+		case "", "set-status":
+			return handleSetStatus(tmux, statePath, req)
+		case "set-following":
+			return handleSetFollowing(tmux, statePath, req)
+		default:
+			return monitor.Response{OK: false, Error: "unknown command: " + req.Cmd}
 		}
-		if status == "needs_attention" {
-			status = monitor.StatusUnread
-		}
+	}
+}
 
-		cfg, err := config.Load(config.DefaultConfigPath())
+// handleSetStatus applies the set-status business logic. Extracted from
+// buildMonitorHandler so each command is independently testable.
+func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) monitor.Response {
+	paneID := req.PaneID
+	status := monitor.PaneStatus(req.Status)
+	source := req.Source
+	noRegister := req.NoRegister
+
+	// Normalize deprecated aliases.
+	if status == "read" {
+		status = monitor.StatusIdle
+	}
+	if status == "needs_attention" {
+		status = monitor.StatusUnread
+	}
+
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Error("handler set-status: load config: %v", err)
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	if source != "" && cfg.ShouldIgnoreStatusFrom(source) {
+		return monitor.Response{OK: true}
+	}
+
+	if paneID == "" {
+		return monitor.Response{OK: true}
+	}
+
+	if status != monitor.StatusIdle {
+		debug.Log("[set-status] %s: invoked with %s", paneID, status)
+	}
+
+	state, err := monitor.Load(statePath)
+	if err != nil {
+		debug.Error("handler set-status: load state: %v", err)
+		return monitor.Response{OK: false, Error: "load state: " + err.Error()}
+	}
+
+	entry, ok := state.Panes[paneID]
+	if !ok {
+		if noRegister {
+			return monitor.Response{OK: true}
+		}
+		session, cmdName, err := tmuxPaneInfoWith(tmux, paneID)
 		if err != nil {
-			debug.Error("handler set-status: load config: %v", err)
-		}
-		if cfg == nil {
-			cfg = &config.Config{}
-		}
-
-		if source != "" && cfg.ShouldIgnoreStatusFrom(source) {
+			debug.Error("[set-status] %s: failed to look up pane info, skipping: %v", paneID, err)
 			return monitor.Response{OK: true}
 		}
-
-		if paneID == "" {
+		if status == monitor.StatusIdle && isPlainShellCommand(cmdName) {
 			return monitor.Response{OK: true}
 		}
-
-		if status != monitor.StatusIdle {
-			debug.Log("[set-status] %s: invoked with %s", paneID, status)
+		debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s", paneID, session, cmdName, status)
+		now := time.Now()
+		state.Panes[paneID] = &monitor.PaneEntry{
+			PaneID:      paneID,
+			Session:     session,
+			Status:      status,
+			UpdatedAt:   now,
+			LastVisited: now,
 		}
-
-		state, err := monitor.Load(statePath)
-		if err != nil {
-			debug.Error("handler set-status: load state: %v", err)
-			return monitor.Response{OK: false, Error: "load state: " + err.Error()}
-		}
-
-		entry, ok := state.Panes[paneID]
-		if !ok {
-			if noRegister {
-				return monitor.Response{OK: true}
-			}
-			session, cmdName, err := tmuxPaneInfoWith(tmux, paneID)
-			if err != nil {
-				debug.Error("[set-status] %s: failed to look up pane info, skipping: %v", paneID, err)
-				return monitor.Response{OK: true}
-			}
-			if status == monitor.StatusIdle && isPlainShellCommand(cmdName) {
-				return monitor.Response{OK: true}
-			}
-			debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s", paneID, session, cmdName, status)
-			now := time.Now()
-			state.Panes[paneID] = &monitor.PaneEntry{
-				PaneID:      paneID,
-				Session:     session,
-				Status:      status,
-				UpdatedAt:   now,
-				LastVisited: now,
-			}
-			if err := state.Save(); err != nil {
-				return monitor.Response{OK: false, Error: "save state: " + err.Error()}
-			}
-			return monitor.Response{OK: true}
-		}
-
-		visitedNow := false
-		if status == monitor.StatusIdle {
-			entry.LastVisited = time.Now()
-			visitedNow = true
-		}
-
-		if cfg.DismissUnreadInActivePane() && status == monitor.StatusUnread && isActiveTmuxPaneWith(tmux, paneID) {
-			debug.Log("[set-status] %s: unread on active pane — downgrading to idle", paneID)
-			status = monitor.StatusIdle
-		}
-
-		if entry.Status == status {
-			if visitedNow {
-				if err := state.Save(); err != nil {
-					return monitor.Response{OK: false, Error: "save state: " + err.Error()}
-				}
-			}
-			return monitor.Response{OK: true}
-		}
-
-		debug.Log("[set-status] %s (session=%s): %s → %s", paneID, entry.Session, entry.Status, status)
-		entry.Status = status
-		entry.UpdatedAt = time.Now()
 		if err := state.Save(); err != nil {
 			return monitor.Response{OK: false, Error: "save state: " + err.Error()}
 		}
 		return monitor.Response{OK: true}
 	}
+
+	visitedNow := false
+	if status == monitor.StatusIdle {
+		entry.LastVisited = time.Now()
+		visitedNow = true
+	}
+
+	if cfg.DismissUnreadInActivePane() && status == monitor.StatusUnread && isActiveTmuxPaneWith(tmux, paneID) {
+		debug.Log("[set-status] %s: unread on active pane — downgrading to idle", paneID)
+		status = monitor.StatusIdle
+	}
+
+	if entry.Status == status {
+		if visitedNow {
+			if err := state.Save(); err != nil {
+				return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+			}
+		}
+		return monitor.Response{OK: true}
+	}
+
+	debug.Log("[set-status] %s (session=%s): %s → %s", paneID, entry.Session, entry.Status, status)
+	entry.Status = status
+	entry.UpdatedAt = time.Now()
+	if err := state.Save(); err != nil {
+		return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+	}
+	return monitor.Response{OK: true}
+}
+
+// handleSetFollowing toggles a pane's Following flag. Untracked panes are
+// auto-registered (status=idle) so the user can mark a pane as followed from
+// the CLI without having to set-status first; unfollowing an untracked pane
+// is a no-op since the absence already implies "not followed". Unfollowing
+// also clears any user note on the pane, mirroring the picker's behavior.
+func handleSetFollowing(tmux deps.Tmux, statePath string, req monitor.Request) monitor.Response {
+	if req.PaneID == "" {
+		return monitor.Response{OK: false, Error: "missing pane_id"}
+	}
+	if req.Following == nil {
+		return monitor.Response{OK: false, Error: "missing following field"}
+	}
+	follow := *req.Following
+
+	state, err := monitor.Load(statePath)
+	if err != nil {
+		debug.Error("handler set-following: load state: %v", err)
+		return monitor.Response{OK: false, Error: "load state: " + err.Error()}
+	}
+
+	entry, ok := state.Panes[req.PaneID]
+	if !ok {
+		if !follow {
+			return monitor.Response{OK: true}
+		}
+		session, _, err := tmuxPaneInfoWith(tmux, req.PaneID)
+		if err != nil {
+			return monitor.Response{OK: false, Error: "look up pane: " + err.Error()}
+		}
+		debug.Log("[set-following] %s: auto-registering in session=%s with following=true", req.PaneID, session)
+		now := time.Now()
+		state.Panes[req.PaneID] = &monitor.PaneEntry{
+			PaneID:      req.PaneID,
+			Session:     session,
+			Status:      monitor.StatusIdle,
+			Following:   true,
+			UpdatedAt:   now,
+			LastVisited: now,
+		}
+		if err := state.Save(); err != nil {
+			return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+		}
+		return monitor.Response{OK: true}
+	}
+
+	if entry.Following == follow {
+		return monitor.Response{OK: true}
+	}
+	debug.Log("[set-following] %s (session=%s): %v → %v", req.PaneID, entry.Session, entry.Following, follow)
+	entry.Following = follow
+	entry.UpdatedAt = time.Now()
+	if !follow {
+		entry.Note = ""
+	}
+	if err := state.Save(); err != nil {
+		return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+	}
+	return monitor.Response{OK: true}
 }
 
 // installTmuxAutoReadHooks removes any existing pop hooks and installs current ones.
