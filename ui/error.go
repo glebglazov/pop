@@ -32,8 +32,7 @@ var (
 			Foreground(colorAttention).
 			Bold(true)
 
-	errorMessageStyle = lipgloss.NewStyle().
-				Foreground(colorSelectedFg)
+	errorMessageStyle = lipgloss.NewStyle()
 
 	errorTraceStyle = lipgloss.NewStyle().
 			Foreground(colorDim)
