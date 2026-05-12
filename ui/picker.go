@@ -1472,7 +1472,7 @@ func (p *Picker) viewAttention() string {
 			if padding < 0 {
 				padding = 0
 			}
-			left = pipeStyle.Render("▌") + selectedStyle.Render(" "+icon+name+strings.Repeat(" ", padding))
+			left = pipeStyle.Render("▌") + " " + icon + name + strings.Repeat(" ", padding)
 		} else {
 			padding := leftWidth - len([]rune(name)) - iconWidth - 2 // 2 spaces + icon
 			if padding < 0 {
@@ -1600,21 +1600,13 @@ func (p *Picker) viewNormal() string {
 		hasNumber := p.quickAccessEnabled() && distFromCursor >= 1 && distFromCursor <= 9
 
 		if i == p.cursor {
-			// Selected: blue pipe + highlighted background
-			// Pad to full width for consistent highlight
-			if p.width > 0 {
-				padding := p.width - len([]rune(line)) - prefixWidth
-				if padding > 0 {
-					line += strings.Repeat(" ", padding)
-				}
-			}
 			b.WriteString(pipeStyle.Render("▌"))
 			if hasNumber {
 				b.WriteString(dimStyle.Render(fmt.Sprintf("%d ", distFromCursor)))
 			} else {
 				b.WriteString(strings.Repeat(" ", prefixWidth-1))
 			}
-			b.WriteString(selectedStyle.Render(line))
+			b.WriteString(line)
 		} else {
 			if hasNumber {
 				b.WriteString(dimStyle.Render(p.quickAccessLabel(distFromCursor)))

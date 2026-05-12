@@ -14,18 +14,15 @@ import (
 
 // Shared color constants used across picker views
 var (
-	colorSelected   = lipgloss.Color("237")
-	colorSelectedFg = lipgloss.Color("255")
-	colorAccent     = lipgloss.Color("39")
-	colorDim        = lipgloss.Color("241")
-	colorPreview    = lipgloss.Color("252")
-	colorSeparator  = lipgloss.Color("238")
-	colorAttention  = lipgloss.Color("196")
-	colorWorking    = lipgloss.Color("214")
-	colorIdle       = lipgloss.Color("241")
+	colorAccent    = lipgloss.Color("39")
+	colorDim       = lipgloss.Color("241")
+	colorPreview   = lipgloss.Color("252")
+	colorSeparator = lipgloss.Color("238")
+	colorAttention = lipgloss.Color("196")
+	colorWorking   = lipgloss.Color("214")
+	colorIdle      = lipgloss.Color("241")
 
-	selectedStyle = lipgloss.NewStyle().Background(colorSelected).Foreground(colorSelectedFg)
-	pipeStyle     = lipgloss.NewStyle().Foreground(colorAccent)
+	pipeStyle = lipgloss.NewStyle().Foreground(colorAccent)
 	hintStyle     = lipgloss.NewStyle().Foreground(colorDim)
 	dimStyle      = lipgloss.NewStyle().Foreground(colorDim)
 	headerStyle   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
