@@ -397,49 +397,11 @@ func TestRunPaneCreateWith(t *testing.T) {
 	})
 }
 
-func TestRunPaneSetStatusWith_IdleSkipsPlainShellPanes(t *testing.T) {
-	// `set-status idle` on an untracked pane whose foreground process is a
-	// plain shell (zsh/bash/fish/...) must be a no-op. The tmux-global
-	// auto-read hook fires on every pane navigation and would otherwise
-	// fill the dashboard with every shell pane the user ever visits.
-	dir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dir)
-	stateDir := filepath.Join(dir, "pop")
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	statePath := filepath.Join(stateDir, "monitor.json")
-	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
-	data, _ := json.Marshal(emptyState)
-	if err := os.WriteFile(statePath, data, 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tmux := newPaneInfoMockTmux(map[string]string{
-		"%9":  "test-session\tzsh",
-		"%10": "test-session\tbash",
-		"%11": "test-session\tfish",
-		"%12": "test-session\t-zsh", // login shell marker
-	})
-	cfg := &config.Config{}
-
-	for _, paneID := range []string{"%9", "%10", "%11", "%12"} {
-		if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{paneID, "idle"}); err != nil {
-			t.Fatalf("unexpected error for %s: %v", paneID, err)
-		}
-	}
-
-	state := loadState(t, statePath)
-	if len(state.Panes) != 0 {
-		t.Fatalf("expected empty state (shell panes must not register), got %d pane(s): %+v", len(state.Panes), state.Panes)
-	}
-}
-
 func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
-	// The complement of IdleSkipsPlainShellPanes: when an agent extension
-	// fires its housekeeping `set-status idle` on plugin load, the pane IS
-	// running the agent (opencode, claude, pi, node, ...), not a bare
-	// shell. Those panes must be auto-registered right away so they show
+	// When an agent extension fires its housekeeping `set-status idle` on
+	// plugin load, the pane IS running the agent (opencode, claude, pi,
+	// node, ...), not a bare shell. Those panes must be auto-registered
+	// right away so they show
 	// up on the dashboard as idle immediately, even before the agent sends
 	// its first working / unread update.
 	dir := t.TempDir()
@@ -544,8 +506,7 @@ func TestRunPaneSetStatusWith_NoRegisterFlag(t *testing.T) {
 func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	// "read" is the deprecated CLI alias for "idle". Calling
 	// `set-status read` must behave identically to `set-status idle`:
-	//   - on an untracked shell pane: no-op (does NOT auto-register)
-	//   - on an untracked agent pane: auto-registers as idle
+	//   - on an untracked pane: auto-registers as idle
 	//   - on an already-tracked pane: updates status to idle
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
@@ -568,18 +529,22 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 
 	tmux := newPaneInfoMockTmux(map[string]string{
 		"%5": "test-session\tclaude", // already tracked; command irrelevant
-		"%6": "test-session\tzsh",    // untracked plain shell → must stay out
-		"%7": "test-session\tclaude", // untracked agent → must register
+		"%6": "test-session\tzsh",    // untracked → must register as idle
+		"%7": "test-session\tclaude", // untracked → must register as idle
 	})
 	cfg := &config.Config{}
 
-	// Untracked shell pane: "read" must be a no-op.
+	// Untracked pane: "read" must auto-register as idle.
 	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%6", "read"}); err != nil {
 		t.Fatalf("unexpected error for %%6: %v", err)
 	}
 	state := loadState(t, statePath)
-	if _, ok := state.Panes["%6"]; ok {
-		t.Fatal("expected %6 (zsh) to remain untracked after read alias")
+	entry, ok := state.Panes["%6"]
+	if !ok {
+		t.Fatal("expected %6 (zsh) to be auto-registered after read alias")
+	}
+	if entry.Status != monitor.StatusIdle {
+		t.Errorf("%%6 status = %q, want %q", entry.Status, monitor.StatusIdle)
 	}
 
 	// Untracked agent pane: "read" must auto-register as idle.
@@ -587,7 +552,7 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 		t.Fatalf("unexpected error for %%7: %v", err)
 	}
 	state = loadState(t, statePath)
-	entry, ok := state.Panes["%7"]
+	entry, ok = state.Panes["%7"]
 	if !ok {
 		t.Fatal("expected %7 (claude) to be auto-registered after read alias")
 	}

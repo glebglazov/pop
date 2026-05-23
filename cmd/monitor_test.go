@@ -239,45 +239,6 @@ func TestTmuxPaneInfoWith(t *testing.T) {
 	})
 }
 
-func TestIsPlainShellCommand(t *testing.T) {
-	tests := []struct {
-		cmd  string
-		want bool
-	}{
-		// Shells — should be skipped.
-		{"zsh", true},
-		{"bash", true},
-		{"fish", true},
-		{"sh", true},
-		{"dash", true},
-		{"ksh", true},
-		{"tcsh", true},
-		{"csh", true},
-		// Login-shell marker.
-		{"-zsh", true},
-		{"-bash", true},
-		{"-fish", true},
-		// Agents / non-shells — should NOT be treated as shells.
-		{"opencode", false},
-		{"claude", false},
-		{"pi", false},
-		{"node", false},
-		{"bun", false},
-		{"python", false},
-		{"vim", false},
-		{"nvim", false},
-		{"less", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.cmd, func(t *testing.T) {
-			if got := isPlainShellCommand(tt.cmd); got != tt.want {
-				t.Errorf("isPlainShellCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestIsActiveTmuxPaneWith(t *testing.T) {
 	tests := []struct {
 		name     string

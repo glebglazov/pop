@@ -6,9 +6,7 @@
  *   - working → opencode is busy (a tool is running / agent is mid-turn)
  *   - unread  → opencode finished a turn, awaiting the user
  *
- * `idle` is also sent on plugin load and on session.created/deleted, but only
- * as housekeeping: `pop pane set-status idle` is a no-op for untracked panes,
- * so it cannot pollute the dashboard. For already-tracked panes it clears any
+ * `idle` is sent on plugin load and on session.created/deleted to clear any
  * stale "working" status left over from a crashed previous run.
  *
  * Installed by `pop integrate opencode` to ~/.config/opencode/plugins/pop-status-sync.ts.
@@ -24,9 +22,7 @@ export const PopStatusSync = async ({ $ }) => {
 		$`pop pane set-status ${paneID} ${status}`.catch(() => {});
 	};
 
-	// Clear any stale "working" status left over from a previous run of the
-	// plugin in this pane. Pop ignores this for untracked panes, so it cannot
-	// register a brand-new pane and skew the dashboard sort.
+	// Clear any stale "working" status left over from a previous run.
 	setStatus("idle");
 
 	// Dedupe redundant transitions: `tool.execute.before` (named hook) and
@@ -53,7 +49,7 @@ export const PopStatusSync = async ({ $ }) => {
 			switch (event.type) {
 			case "session.created":
 			case "session.deleted":
-				// Housekeeping only — see top-of-file note about `idle`.
+				// Housekeeping — clear stale status.
 				markIdle();
 				break;
 			case "session.idle":

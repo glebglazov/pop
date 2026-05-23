@@ -447,17 +447,11 @@ State transitions:
 
 Auto-registration:
   If the pane is not yet tracked, it is auto-registered on the first
-  call — with one exception: a call with status "idle" on a pane
-  that is currently running a plain shell (zsh, bash, fish, sh, ...)
-  is a no-op. This keeps the dashboard focused on agentic panes and
-  prevents the tmux-global auto-read hook and housekeeping idle calls
-  from registering every pane the user navigates to.
-
-  working and unread always auto-register (they only ever come from
-  agent integrations, which have already proven the pane is agentic).
-
-  The new entry is seeded with LastVisited=now so it sorts to the
+  call. The new entry is seeded with LastVisited=now so it sorts to the
   bottom of its status group in the dashboard (closest to the cursor).
+
+  Callers that do not want to register new panes (e.g. tmux-global
+  auto-read hooks) should pass --no-register.
 
 Special behavior:
   When [pane_monitoring] dismiss_unread_in_active_pane = true,
@@ -565,9 +559,6 @@ func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatu
 		session, cmdName, err := tmuxPaneInfoWith(tmux, paneID)
 		if err != nil {
 			debug.Error("[set-status] %s: failed to look up pane info, skipping: %v", paneID, err)
-			return nil
-		}
-		if status == monitor.StatusIdle && isPlainShellCommand(cmdName) {
 			return nil
 		}
 		debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s (direct)", paneID, session, cmdName, status)

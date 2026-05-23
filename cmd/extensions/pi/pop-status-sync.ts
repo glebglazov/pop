@@ -6,9 +6,7 @@
  *   - working → pi is busy (user submitted input, or a tool is running)
  *   - unread  → pi finished a turn, awaiting the user
  *
- * `idle` is also sent on `session_start`, but only as housekeeping: pop
- * ignores `set-status idle` for untracked panes, so it cannot pollute the
- * dashboard. For already-tracked panes it clears any stale "working" status
+ * `idle` is sent on `session_start` to clear any stale "working" status
  * left over from a crashed previous run.
  *
  * Installed by `pop integrate pi` to ~/.pi/agent/extensions/pop-status-sync.ts.
