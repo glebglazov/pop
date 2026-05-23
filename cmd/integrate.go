@@ -128,6 +128,7 @@ var integrateCmd = &cobra.Command{
 Supported agents:
   claude    Install slash commands at ~/.claude/commands/pop/ and pane
             monitoring hooks in ~/.claude/settings.json.
+  codex     Install pane monitoring hooks in ~/.codex/hooks.json.
   pi        Install skills at ~/.pi/agent/skills/pop-<name>/SKILL.md and a
             pane monitoring extension at
             ~/.pi/agent/extensions/pop-status-sync.ts.
@@ -152,11 +153,11 @@ after copying a new binary into place.`,
 			return nil
 		}
 		if len(args) != 1 {
-			return fmt.Errorf("requires exactly 1 argument: agent name (claude, pi, or opencode)")
+			return fmt.Errorf("requires exactly 1 argument: agent name (claude, codex, pi, or opencode)")
 		}
 		return nil
 	},
-	ValidArgs: []string{"claude", "pi", "opencode"},
+	ValidArgs: []string{"claude", "codex", "pi", "opencode"},
 	RunE:      runIntegrate,
 }
 
@@ -177,24 +178,28 @@ func runIntegrateWith(d *integrateDeps, agent string) error {
 	switch strings.ToLower(agent) {
 	case "claude":
 		return integrateClaude(d)
+	case "codex":
+		return integrateCodex(d)
 	case "pi":
 		return integratePi(d)
 	case "opencode":
 		return integrateOpencode(d)
 	default:
-		return fmt.Errorf("unknown agent %q (expected: claude, pi, opencode)", agent)
+		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode)", agent)
 	}
 }
 
 // ----- Claude integration ----------------------------------------------------
 
+type hookSpec struct {
+	event   string
+	command string
+}
+
 // popHooks defines the hook commands installed into Claude's settings.json.
 // Each entry is a (event, command) pair; the matcher is left empty so the
 // hook fires for every tool / event.
-var popHooks = []struct {
-	event   string
-	command string
-}{
+var popHooks = []hookSpec{
 	{"SessionStart", "pop pane set-status idle 2>/dev/null || true"},
 	{"UserPromptSubmit", "pop pane set-status working 2>/dev/null || true"},
 	{"PreToolUse", "pop pane set-status working 2>/dev/null || true"},
@@ -257,7 +262,10 @@ func installClaudeCommands(d *integrateDeps, home string) error {
 // (matched via isPopHook) so re-running the command is idempotent.
 func installClaudeHooks(d *integrateDeps, home string) error {
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	return installJSONHooks(d, settingsPath, popHooks)
+}
 
+func installJSONHooks(d *integrateDeps, settingsPath string, hooksToInstall []hookSpec) error {
 	settings := make(map[string]interface{})
 	data, err := d.readFile(settingsPath)
 	if err == nil {
@@ -295,7 +303,7 @@ func installClaudeHooks(d *integrateDeps, home string) error {
 		}
 	}
 
-	for _, h := range popHooks {
+	for _, h := range hooksToInstall {
 		hookEntry := map[string]interface{}{
 			"hooks": []interface{}{
 				map[string]interface{}{
@@ -326,9 +334,33 @@ func installClaudeHooks(d *integrateDeps, home string) error {
 	}
 
 	if d.stdout != nil {
-		fmt.Fprintf(d.stdout, "Installed %d hook(s) in %s\n", len(popHooks), settingsPath)
+		fmt.Fprintf(d.stdout, "Installed %d hook(s) in %s\n", len(hooksToInstall), settingsPath)
 	}
 	return nil
+}
+
+// ----- Codex integration -----------------------------------------------------
+
+var codexPopHooks = []hookSpec{
+	{"SessionStart", "pop pane set-status idle 2>/dev/null || true"},
+	{"UserPromptSubmit", "pop pane set-status working 2>/dev/null || true"},
+	{"PreToolUse", "pop pane set-status working 2>/dev/null || true"},
+	{"PermissionRequest", "pop pane set-status unread 2>/dev/null || true"},
+	{"Stop", "pop pane set-status unread 2>/dev/null || true"},
+}
+
+func integrateCodex(d *integrateDeps) error {
+	home, err := d.userHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	return installCodexHooks(d, home)
+}
+
+func installCodexHooks(d *integrateDeps, home string) error {
+	hooksPath := filepath.Join(home, ".codex", "hooks.json")
+	return installJSONHooks(d, hooksPath, codexPopHooks)
 }
 
 // ----- Pi integration --------------------------------------------------------
@@ -531,7 +563,7 @@ func isPopHook(entry interface{}) bool {
 		if !ok {
 			continue
 		}
-		if cmd, _ := hMap["command"].(string); strings.Contains(cmd, "pop monitor") || strings.Contains(cmd, "pop pane set-status") {
+		if cmd, _ := hMap["command"].(string); strings.Contains(cmd, "pop monitor") || strings.Contains(cmd, "pop pane set-status") || strings.Contains(cmd, "pop-status") {
 			return true
 		}
 	}
@@ -600,7 +632,7 @@ func saveAppState(s *appState) error {
 // integrationAgents is the hardcoded list of agents that ensureIntegrations
 // checks on each startup. Small enough that a registry is overkill; changes
 // here must also update the integrateCmd ValidArgs list.
-var integrationAgents = []string{"claude", "pi", "opencode"}
+var integrationAgents = []string{"claude", "codex", "pi", "opencode"}
 
 // ensureIntegrations checks whether installed agent integrations are stale
 // against the currently running binary's VCS revision and updates any that

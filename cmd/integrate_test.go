@@ -476,6 +476,155 @@ func TestIntegrateClaude_WriteError(t *testing.T) {
 	}
 }
 
+// ----- integrateCodex: hooks.json -------------------------------------------
+
+func TestIntegrateCodex_WritesHooksJSON(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
+	if _, ok := fs.files[hooksPath]; !ok {
+		t.Fatalf("expected hooks.json at %s, files: %v", hooksPath, sortedKeys(fs.files))
+	}
+	if !fs.dirs[filepath.Dir(hooksPath)] {
+		t.Errorf("expected mkdirAll of %s", filepath.Dir(hooksPath))
+	}
+}
+
+func TestIntegrateCodex_FreshHooks(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
+	var settings map[string]interface{}
+	if err := json.Unmarshal(fs.files[hooksPath], &settings); err != nil {
+		t.Fatalf("failed to parse hooks.json: %v", err)
+	}
+
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing hooks key")
+	}
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop"} {
+		entries, ok := hooks[event].([]interface{})
+		if !ok || len(entries) == 0 {
+			t.Errorf("missing hooks for event %q", event)
+		}
+	}
+}
+
+func TestIntegrateCodex_PreservesExistingHooks(t *testing.T) {
+	fs := newFakeFS()
+	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
+	existing := map[string]interface{}{
+		"customKey": "customValue",
+		"hooks": map[string]interface{}{
+			"UserPromptSubmit": []interface{}{
+				map[string]interface{}{
+					"hooks": []interface{}{
+						map[string]interface{}{"type": "command", "command": "echo user hook"},
+					},
+				},
+			},
+		},
+	}
+	raw, _ := json.Marshal(existing)
+	fs.files[hooksPath] = raw
+
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var settings map[string]interface{}
+	json.Unmarshal(fs.files[hooksPath], &settings)
+
+	if settings["customKey"] != "customValue" {
+		t.Error("customKey was not preserved")
+	}
+	hooks := settings["hooks"].(map[string]interface{})
+	entries := hooks["UserPromptSubmit"].([]interface{})
+	if len(entries) < 2 {
+		t.Errorf("expected user hook + pop hook on UserPromptSubmit, got %d entries", len(entries))
+	}
+}
+
+func TestIntegrateCodex_ReplacesOldPopHooks(t *testing.T) {
+	fs := newFakeFS()
+	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
+	existing := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"Stop": []interface{}{
+				map[string]interface{}{
+					"hooks": []interface{}{
+						map[string]interface{}{
+							"type":    "command",
+							"command": "~/.local/bin/pop-status unread",
+						},
+					},
+				},
+				map[string]interface{}{
+					"hooks": []interface{}{
+						map[string]interface{}{"type": "command", "command": "echo keep me"},
+					},
+				},
+			},
+		},
+	}
+	raw, _ := json.Marshal(existing)
+	fs.files[hooksPath] = raw
+
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var settings map[string]interface{}
+	json.Unmarshal(fs.files[hooksPath], &settings)
+
+	hooks := settings["hooks"].(map[string]interface{})
+	stopHooks := hooks["Stop"].([]interface{})
+	popCount, userCount := 0, 0
+	for _, h := range stopHooks {
+		if isPopHook(h) {
+			popCount++
+		} else {
+			userCount++
+		}
+	}
+	if userCount != 1 {
+		t.Errorf("expected 1 user hook preserved, got %d", userCount)
+	}
+	if popCount != 1 {
+		t.Errorf("expected exactly 1 freshly installed pop hook, got %d", popCount)
+	}
+}
+
+func TestIntegrateCodex_DoesNotWriteOutsideCodexTree(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for path := range fs.files {
+		if !strings.HasPrefix(path, "/h/.codex/") {
+			t.Errorf("codex integration wrote a file outside ~/.codex: %s", path)
+		}
+	}
+}
+
+func TestIntegrateCodex_WriteError(t *testing.T) {
+	fs := newFakeFS()
+	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
+	fs.writeErr[hooksPath] = os.ErrPermission
+
+	err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex")
+	if err == nil {
+		t.Fatal("expected error from hooks write failure")
+	}
+}
+
 // ----- integratePi: directory structure --------------------------------------
 
 func TestIntegratePi_WritesExtensionAtCorrectPath(t *testing.T) {
@@ -633,7 +782,7 @@ func TestIntegrateOpencode_WritesPluginAtCorrectPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected plugin at %s, files: %v", pluginPath, sortedKeys(fs.files))
 	}
-	if !bytes.Contains(contents, []byte(`$` + "`" + `pop pane set-status`)) {
+	if !bytes.Contains(contents, []byte(`$`+"`"+`pop pane set-status`)) {
 		t.Error("plugin content does not look like the pop status-sync TS file")
 	}
 	if !bytes.Equal(contents, opencodeExtensionFile) {
@@ -760,7 +909,7 @@ func installViaFake(t *testing.T, fs *fakeFS, home, agent string) {
 func TestDryRun_NoInstallation(t *testing.T) {
 	// Empty fake FS: no pop artifacts for any agent. Every dry-run should
 	// report neither installed nor changed.
-	for _, agent := range []string{"claude", "pi", "opencode"} {
+	for _, agent := range []string{"claude", "codex", "pi", "opencode"} {
 		t.Run(agent, func(t *testing.T) {
 			fs := newFakeFS()
 			d := withDryRun(fakeDeps("/h", fs, io.Discard))
@@ -784,7 +933,7 @@ func TestDryRun_NoInstallation(t *testing.T) {
 func TestDryRun_InstalledAndCurrent(t *testing.T) {
 	// Seed the FS with a real install, then dry-run against the same FS.
 	// Every agent should report installed=true, changed=false.
-	for _, agent := range []string{"claude", "pi", "opencode"} {
+	for _, agent := range []string{"claude", "codex", "pi", "opencode"} {
 		t.Run(agent, func(t *testing.T) {
 			fs := newFakeFS()
 			installViaFake(t, fs, "/h", agent)
@@ -815,6 +964,10 @@ func TestDryRun_InstalledAndStale(t *testing.T) {
 			stalePath: filepath.Join(".claude", "commands", "pop", "pane.md"),
 		},
 		{
+			agent:     "codex",
+			stalePath: filepath.Join(".codex", "hooks.json"),
+		},
+		{
 			agent:     "pi",
 			stalePath: filepath.Join(".pi", "agent", "extensions", "pop-status-sync.ts"),
 		},
@@ -833,7 +986,11 @@ func TestDryRun_InstalledAndStale(t *testing.T) {
 			if _, exists := fs.files[fullPath]; !exists {
 				t.Fatalf("seed install did not produce %s; update the test fixture", fullPath)
 			}
-			fs.files[fullPath] = []byte("stale bytes that differ from embedded content")
+			if tc.agent == "codex" {
+				fs.files[fullPath] = []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"~/.local/bin/pop-status unread"}]}]}}`)
+			} else {
+				fs.files[fullPath] = []byte("stale bytes that differ from embedded content")
+			}
 
 			d := withDryRun(fakeDeps("/h", fs, io.Discard))
 			if err := runIntegrateWith(d, tc.agent); err != nil {
@@ -1179,8 +1336,8 @@ func TestUpdateExisting_SilentOnNoInstallations(t *testing.T) {
 func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
 	// Seed claude + pi as installed-but-stale. Both should update; stdout
 	// should get one line per updated agent in the declaration order of
-	// integrationAgents (claude, pi, opencode). opencode isn't installed
-	// and must not appear.
+	// integrationAgents (claude, codex, pi, opencode). codex and opencode
+	// aren't installed and must not appear.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
