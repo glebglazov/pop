@@ -76,3 +76,38 @@ exit = true
 ```
 
 Available environment variables: `POP_WORKTREE_PATH`, `POP_WORKTREE_NAME`, `POP_BRANCH`, `POP_REPO_ROOT`.
+
+## Dashboard
+
+`pop dashboard` shows all tracked tmux panes sorted by status and last-visit time. Switch between them with fuzzy search.
+
+| Key | Action |
+|-----|--------|
+| `enter` | Switch to pane (mark as read) |
+| `shift-enter` | Peek pane (keep unread) |
+| `ctrl-r` | Toggle read/unread |
+| `ctrl-f` | Toggle follow |
+
+## Pane monitoring
+
+`pop` can track which tmux panes need attention:
+
+```bash
+# Mark a pane as working / unread / idle
+pop pane set-status %1 working
+pop pane set-status %1 unread
+pop pane set-status %1 idle
+
+# Record a manual visit (updates last-visit time)
+pop pane visit %1
+```
+
+### Auto-visit tracking
+
+To automatically record pane visits when you switch between them, add to `~/.tmux.conf`:
+
+```bash
+set -g focus-events on
+```
+
+The monitor daemon installs a `pane-focus-in` hook that calls `pop pane visit` on every pane switch. Without `focus-events on`, tmux does not fire this hook and visits are not tracked automatically.
