@@ -436,6 +436,68 @@ func TestHandleSetFollowing(t *testing.T) {
 	})
 }
 
+func TestHandleVisit(t *testing.T) {
+	t.Run("rejects request without pane_id", func(t *testing.T) {
+		statePath := setupEmptyState(t)
+		resp := handleVisit(statePath, monitor.Request{Cmd: "visit"})
+		if resp.OK {
+			t.Error("expected OK=false")
+		}
+		if !strings.Contains(resp.Error, "pane_id") {
+			t.Errorf("error = %q, want containing 'pane_id'", resp.Error)
+		}
+	})
+
+	t.Run("no-op on untracked pane", func(t *testing.T) {
+		statePath := setupEmptyState(t)
+		// Tmux must not be called.
+		resp := handleVisit(statePath, monitor.Request{
+			Cmd:    "visit",
+			PaneID: "%99",
+		})
+		if !resp.OK {
+			t.Errorf("expected OK=true, got error %q", resp.Error)
+		}
+		state := loadStateFromPath(t, statePath)
+		if len(state.Panes) != 0 {
+			t.Errorf("expected empty state, got %d entries", len(state.Panes))
+		}
+	})
+
+	t.Run("updates LastVisited on tracked pane", func(t *testing.T) {
+		dir := t.TempDir()
+		statePath := dir + "/monitor.json"
+		before := time.Now().Add(-1 * time.Hour)
+		seed := &monitor.State{
+			Panes: map[string]*monitor.PaneEntry{
+				"%3": {
+					PaneID:      "%3",
+					Session:     "proj-z",
+					Status:      monitor.StatusIdle,
+					LastVisited: before,
+				},
+			},
+		}
+		data, _ := json.Marshal(seed)
+		if err := os.WriteFile(statePath, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		resp := handleVisit(statePath, monitor.Request{
+			Cmd:    "visit",
+			PaneID: "%3",
+		})
+		if !resp.OK {
+			t.Fatalf("unexpected error: %s", resp.Error)
+		}
+		state := loadStateFromPath(t, statePath)
+		entry := state.Panes["%3"]
+		if !entry.LastVisited.After(before) {
+			t.Errorf("LastVisited = %v, want after %v", entry.LastVisited, before)
+		}
+	})
+}
+
 func setupEmptyState(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

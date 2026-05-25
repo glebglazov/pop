@@ -45,6 +45,7 @@ func init() {
 	paneCmd.AddCommand(paneStatusCmd)
 	paneCmd.AddCommand(paneFollowCmd)
 	paneCmd.AddCommand(paneUnfollowCmd)
+	paneCmd.AddCommand(paneVisitCmd)
 }
 
 // resolveSession returns the tmux session name to operate on.
@@ -767,6 +768,82 @@ func runPaneSetFollowDirect(tmux deps.Tmux, paneID string, follow bool) error {
 	if !follow {
 		entry.Note = ""
 	}
+	return state.Save()
+}
+
+// --- visit ---
+
+var paneVisitCmd = &cobra.Command{
+	Use:   "visit [pane_id]",
+	Short: "Record a visit to a tracked pane",
+	Long: `Record that the user has visited a tracked pane.
+
+Updates the pane's LastVisited timestamp in the monitor state.
+Untracked panes are silently ignored (no auto-registration).
+
+If pane_id is omitted, uses $TMUX_PANE from the environment.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runPaneVisit,
+}
+
+func runPaneVisit(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Error("pane visit: load config: %v", err)
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	return runPaneVisitWith(defaultTmux, cfg, args)
+}
+
+func runPaneVisitWith(tmux deps.Tmux, cfg *config.Config, args []string) error {
+	debug.Init()
+	defer debug.Close()
+
+	paneID := os.Getenv("TMUX_PANE")
+	if len(args) > 0 {
+		paneID = args[0]
+	}
+	if paneID == "" {
+		return nil
+	}
+
+	// TCP server is opt-in via [pane_monitoring] tcp_server.
+	if !cfg.PaneMonitoringTCPServer() {
+		return runPaneVisitDirect(paneID)
+	}
+
+	resp, err := monitor.SendRequest(monitor.DefaultAddr(), monitor.Request{
+		Cmd:    "visit",
+		PaneID: paneID,
+	})
+	if err != nil {
+		debug.Error("pane visit: socket send failed, falling back to direct write: %v", err)
+		go ensureMonitorDaemon()
+		return runPaneVisitDirect(paneID)
+	}
+
+	if !resp.OK {
+		debug.Error("pane visit: daemon error: %s", resp.Error)
+	}
+	return nil
+}
+
+// runPaneVisitDirect is the fallback path when the daemon socket is
+// unavailable. Updates LastVisited only for already-tracked panes.
+func runPaneVisitDirect(paneID string) error {
+	state, err := monitor.Load(monitor.DefaultStatePath())
+	if err != nil {
+		return fmt.Errorf("load monitor state: %w", err)
+	}
+
+	entry, ok := state.Panes[paneID]
+	if !ok {
+		return nil
+	}
+
+	entry.LastVisited = time.Now()
 	return state.Save()
 }
 

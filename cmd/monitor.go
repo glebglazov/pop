@@ -70,6 +70,7 @@ var tmuxAutoReadHooks = map[string]string{
 	"after-select-pane":      `run-shell "pop pane set-status --source tmux-global --no-register #{pane_id} read 2>/dev/null || true"`,
 	"session-window-changed": `run-shell "pop pane set-status --source tmux-global --no-register #{pane_id} read 2>/dev/null || true"`,
 	"client-session-changed": `run-shell "pop pane set-status --source tmux-global --no-register #{pane_id} read 2>/dev/null || true"`,
+	"pane-focus-in":          `run-shell "pop pane visit #{pane_id} 2>/dev/null || true"`,
 }
 
 var paneMonitorStartCmd = &cobra.Command{
@@ -118,6 +119,8 @@ func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandle
 			return handleSetStatus(tmux, statePath, req)
 		case "set-following":
 			return handleSetFollowing(tmux, statePath, req)
+		case "visit":
+			return handleVisit(statePath, req)
 		default:
 			return monitor.Response{OK: false, Error: "unknown command: " + req.Cmd}
 		}
@@ -280,6 +283,32 @@ func handleSetFollowing(tmux deps.Tmux, statePath string, req monitor.Request) m
 	return monitor.Response{OK: true}
 }
 
+// handleVisit records that a pane was visited by the user. Only tracked panes
+// are updated; untracked panes are silently ignored (no auto-registration).
+func handleVisit(statePath string, req monitor.Request) monitor.Response {
+	if req.PaneID == "" {
+		return monitor.Response{OK: false, Error: "missing pane_id"}
+	}
+
+	state, err := monitor.Load(statePath)
+	if err != nil {
+		debug.Error("handler visit: load state: %v", err)
+		return monitor.Response{OK: false, Error: "load state: " + err.Error()}
+	}
+
+	entry, ok := state.Panes[req.PaneID]
+	if !ok {
+		// Untracked pane — no-op per design.
+		return monitor.Response{OK: true}
+	}
+
+	entry.LastVisited = time.Now()
+	if err := state.Save(); err != nil {
+		return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+	}
+	return monitor.Response{OK: true}
+}
+
 // installTmuxAutoReadHooks removes any existing pop hooks and installs current ones.
 func installTmuxAutoReadHooks() {
 	installTmuxAutoReadHooksWith(defaultTmux)
@@ -306,7 +335,7 @@ func uninstallTmuxAutoReadHooksWith(tmux deps.Tmux) {
 		debug.Error("uninstallTmuxAutoReadHooks: show-hooks: %v", err)
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if !strings.Contains(line, "pop pane set-status") && !strings.Contains(line, "pop monitor") {
+		if !strings.Contains(line, "pop pane set-status") && !strings.Contains(line, "pop pane visit") && !strings.Contains(line, "pop monitor") {
 			continue
 		}
 		// Line format: "event[N] command..."
