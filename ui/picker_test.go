@@ -1560,13 +1560,15 @@ func TestUpdateAttention_Navigation(t *testing.T) {
 }
 
 func TestUpdateAttention_Reset(t *testing.T) {
-	var readPaneID string
+	var readPaneID, unreadPaneID string
 	panes := []AttentionPane{
 		{PaneID: "%1", Status: AttentionUnread},
 		{PaneID: "%2", Status: AttentionWorking},
+		{PaneID: "%3", Status: AttentionIdle},
 	}
 	cb := AttentionCallbacks{
-		MarkRead: func(paneID string) { readPaneID = paneID },
+		MarkRead:   func(paneID string) { readPaneID = paneID },
+		MarkUnread: func(paneID string) { unreadPaneID = paneID },
 	}
 	p := newAttentionPicker(panes, cb, nil)
 	p.attentionCursor = 0
@@ -1581,6 +1583,19 @@ func TestUpdateAttention_Reset(t *testing.T) {
 	}
 	if !p.attentionDirty {
 		t.Error("expected attentionDirty = true")
+	}
+
+	// Toggle idle -> unread
+	p.attentionCursor = 1 // %3 is at index 1 after first sort (idle group: %1, %3)
+	readPaneID = ""
+	p.Update(msg)
+
+	if unreadPaneID != "%3" {
+		t.Errorf("markUnreadFunc called with %s, want %%3", unreadPaneID)
+	}
+	// After second sort, %3 moves to end (unread group)
+	if p.attentionPanes[2].Status != AttentionUnread {
+		t.Error("expected idle pane status to change to Unread")
 	}
 }
 

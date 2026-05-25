@@ -740,11 +740,17 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return p, nil
 
 	case key.Matches(msg, keys.Reset):
-		if len(p.attentionPanes) > 0 && p.markReadFunc != nil {
+		if len(p.attentionPanes) > 0 && p.markReadFunc != nil && p.markUnreadFunc != nil {
 			pane := &p.attentionPanes[p.attentionCursor]
-			p.markReadFunc(pane.PaneID)
-			pane.Status = AttentionIdle
-			p.updateAllPanesStatus(pane.PaneID, AttentionIdle)
+			if pane.Status == AttentionIdle {
+				p.markUnreadFunc(pane.PaneID)
+				pane.Status = AttentionUnread
+				p.updateAllPanesStatus(pane.PaneID, AttentionUnread)
+			} else {
+				p.markReadFunc(pane.PaneID)
+				pane.Status = AttentionIdle
+				p.updateAllPanesStatus(pane.PaneID, AttentionIdle)
+			}
 			p.sortAttentionPanes()
 			if p.attentionCursor >= len(p.attentionPanes) {
 				p.attentionCursor = len(p.attentionPanes) - 1
