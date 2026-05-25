@@ -1572,7 +1572,7 @@ func TestUpdateAttention_Reset(t *testing.T) {
 	}
 	p := newAttentionPicker(panes, cb, nil)
 	p.attentionCursor = 0
-	msg := tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
+	msg := tea.KeyPressMsg{Code: 'r', Text: "r"}
 	p.Update(msg)
 
 	if readPaneID != "%1" {
@@ -1633,7 +1633,7 @@ func TestUpdateAttention_FollowPane(t *testing.T) {
 
 	t.Run("toggle follow on", func(t *testing.T) {
 		p := newAttentionPicker(panes, cb, nil)
-		msg := tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+		msg := tea.KeyPressMsg{Code: 'f', Text: "f"}
 		p.Update(msg)
 
 		if toggledPaneID != "%1" {
@@ -1660,7 +1660,7 @@ func TestUpdateAttention_FollowPane(t *testing.T) {
 		p.rebuildAttentionView()
 		p.attentionCursor = 0
 
-		msg := tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+		msg := tea.KeyPressMsg{Code: 'f', Text: "f"}
 		p.Update(msg)
 
 		// %1 was unfollowed; in following view it should be removed
@@ -1679,7 +1679,7 @@ func TestUpdateAttention_FollowPane(t *testing.T) {
 			SetNote:      func(paneID, note string) { clearedNote = note },
 		}
 		p := newAttentionPicker(notePanes, noteCb, nil)
-		msg := tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+		msg := tea.KeyPressMsg{Code: 'f', Text: "f"}
 		p.Update(msg)
 
 		if p.attentionPanes[0].Note != "" {
@@ -1699,7 +1699,7 @@ func TestUpdateAttention_ToggleFollowView(t *testing.T) {
 	p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
 
 	// Toggle to following view
-	msg := tea.KeyPressMsg{Code: 'f', Text: "f"}
+	msg := tea.KeyPressMsg{Code: 'F', Text: "F"}
 	p.Update(msg)
 
 	if !p.attentionFollowing {
@@ -1734,7 +1734,7 @@ func TestUpdateAttention_ForceDelete(t *testing.T) {
 	t.Run("delete removes pane and stays in view", func(t *testing.T) {
 		p := newAttentionPicker(panes, cb, nil)
 		p.attentionCursor = 1
-		msg := tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}
+		msg := tea.KeyPressMsg{Code: 'x', Text: "x"}
 		_, cmd := p.Update(msg)
 
 		if cmd != nil {
@@ -1755,7 +1755,7 @@ func TestUpdateAttention_ForceDelete(t *testing.T) {
 		singlePane := []AttentionPane{{PaneID: "%1"}}
 		items := []Item{{Name: "proj", Path: "/proj"}}
 		p := newAttentionPicker(singlePane, cb, items)
-		msg := tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}
+		msg := tea.KeyPressMsg{Code: 'x', Text: "x"}
 		_, cmd := p.Update(msg)
 
 		if cmd == nil {
@@ -1769,7 +1769,7 @@ func TestUpdateAttention_ForceDelete(t *testing.T) {
 	t.Run("delete last pane standalone quits with cancel", func(t *testing.T) {
 		singlePane := []AttentionPane{{PaneID: "%1"}}
 		p := newAttentionPicker(singlePane, cb, nil)
-		msg := tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}
+		msg := tea.KeyPressMsg{Code: 'x', Text: "x"}
 		_, cmd := p.Update(msg)
 
 		if cmd == nil {
@@ -1777,51 +1777,6 @@ func TestUpdateAttention_ForceDelete(t *testing.T) {
 		}
 		if p.result.Action != ActionCancel {
 			t.Errorf("action = %d, want ActionCancel", p.result.Action)
-		}
-	})
-}
-
-func TestUpdateAttention_Reload(t *testing.T) {
-	reloadCalled := false
-	newPanes := []AttentionPane{
-		{PaneID: "%10", Session: "new"},
-	}
-	cb := AttentionCallbacks{}
-
-	t.Run("reload when empty and reloadFunc set", func(t *testing.T) {
-		p := newAttentionPicker(nil, cb, nil)
-		p.attentionPanes = nil
-		p.attentionAllPanes = nil
-		p.reloadFunc = func() []AttentionPane {
-			reloadCalled = true
-			return newPanes
-		}
-
-		msg := tea.KeyPressMsg{Code: 'r', Text: "r"}
-		p.Update(msg)
-
-		if !reloadCalled {
-			t.Error("expected reloadFunc to be called")
-		}
-		if len(p.attentionPanes) != 1 {
-			t.Errorf("attentionPanes len = %d, want 1", len(p.attentionPanes))
-		}
-	})
-
-	t.Run("reload does nothing when panes exist", func(t *testing.T) {
-		reloadCalled = false
-		existingPanes := []AttentionPane{{PaneID: "%1"}}
-		p := newAttentionPicker(existingPanes, cb, nil)
-		p.reloadFunc = func() []AttentionPane {
-			reloadCalled = true
-			return newPanes
-		}
-
-		msg := tea.KeyPressMsg{Code: 'r', Text: "r"}
-		p.Update(msg)
-
-		if reloadCalled {
-			t.Error("reloadFunc should not be called when panes exist")
 		}
 	})
 }

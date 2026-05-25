@@ -585,17 +585,6 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return p, nil
 
-		case key.Matches(msg, keys.Attention):
-			if len(p.attentionPanes) > 0 && len(p.filtered) > 0 {
-				// Only enter attention mode if the selected item has the attention icon
-				if p.filtered[p.cursor].Icon == IconAttention {
-					p.attentionMode = true
-					p.attentionCursor = 0
-					p.attentionScroll = 0
-					p.fetchAttentionPreview()
-					return p, nil
-				}
-			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -737,17 +726,7 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 
-	case key.Matches(msg, keys.Reload):
-		if len(p.attentionPanes) == 0 && p.reloadFunc != nil {
-			p.attentionAllPanes = p.reloadFunc()
-			p.rebuildAttentionView()
-			p.attentionCursor = 0
-			p.attentionScroll = 0
-			p.fetchAttentionPreview()
-		}
-		return p, nil
-
-	case key.Matches(msg, keys.Reset):
+	case key.Matches(msg, keys.ToggleReadIdle):
 		if len(p.attentionPanes) > 0 && p.markReadFunc != nil && p.markUnreadFunc != nil {
 			pane := &p.attentionPanes[p.attentionCursor]
 			if pane.Status == AttentionIdle {
@@ -830,7 +809,7 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 
-	case key.Matches(msg, keys.ForceDelete):
+	case key.Matches(msg, keys.Unmonitor):
 		if len(p.attentionPanes) > 0 && p.unmonitorFunc != nil {
 			pane := p.attentionPanes[p.attentionCursor]
 			p.unmonitorFunc(pane.PaneID)
@@ -1100,11 +1079,7 @@ func (p *Picker) findItemIndex(path string) int {
 
 // buildHints returns the hints string based on enabled features
 func (p *Picker) buildHints() string {
-	hints := "  Enter select · Esc quit · F1 help"
-	if len(p.attentionPanes) > 0 {
-		hints += " · → attention"
-	}
-	return hints
+	return "  Enter select · Esc quit · F1 help"
 }
 
 // formatKeyHint converts a key binding to a display-friendly hint format
@@ -1514,9 +1489,9 @@ func (p *Picker) viewAttention() string {
 	} else {
 		var hints string
 		if len(p.items) > 0 {
-			hints = "  f view · ← back · Enter switch · C-a attention · C-f follow · C-r read · C-x unmonitor · Esc cancel"
+			hints = "  Enter open and read · Shift+Enter open · r toggle read/idle · f follow · x unmonitor · F follow view · ← back · Esc cancel"
 		} else {
-			hints = "  f view · Enter switch · C-a attention · C-f follow · C-r read · C-x unmonitor · Esc quit"
+			hints = "  Enter open and read · Shift+Enter open · r toggle read/idle · f follow · x unmonitor · F follow view · Esc quit"
 		}
 		b.WriteString(hintStyle.Render(hints))
 	}
@@ -1713,13 +1688,13 @@ type keyMap struct {
 	OpenWindow       key.Binding
 	ClearInput       key.Binding
 	Help             key.Binding
-	Attention        key.Binding
 	MarkUnread       key.Binding
 	PeekPane         key.Binding
 	FollowPane       key.Binding
 	ToggleFollowView key.Binding
+	Unmonitor        key.Binding
+	ToggleReadIdle   key.Binding
 	Back             key.Binding
-	Reload           key.Binding
 	AttentionUp      key.Binding
 	AttentionDown    key.Binding
 	EditNote         key.Binding
@@ -1765,9 +1740,6 @@ var keys = keyMap{
 	Help: key.NewBinding(
 		key.WithKeys("f1"),
 	),
-	Attention: key.NewBinding(
-		key.WithKeys("right"),
-	),
 	MarkUnread: key.NewBinding(
 		key.WithKeys("ctrl+a"),
 	),
@@ -1779,16 +1751,19 @@ var keys = keyMap{
 		key.WithKeys("shift+enter", "p"),
 	),
 	FollowPane: key.NewBinding(
-		key.WithKeys("ctrl+f"),
+		key.WithKeys("f"),
 	),
 	ToggleFollowView: key.NewBinding(
-		key.WithKeys("f"),
+		key.WithKeys("F"),
+	),
+	Unmonitor: key.NewBinding(
+		key.WithKeys("x"),
+	),
+	ToggleReadIdle: key.NewBinding(
+		key.WithKeys("r"),
 	),
 	Back: key.NewBinding(
 		key.WithKeys("left"),
-	),
-	Reload: key.NewBinding(
-		key.WithKeys("r"),
 	),
 	AttentionUp: key.NewBinding(
 		key.WithKeys("up", "ctrl+p", "k"),
