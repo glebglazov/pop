@@ -48,15 +48,23 @@ type PaneMonitoringConfig struct {
 // DashboardConfig holds dashboard-specific configuration
 type DashboardConfig struct {
 	CurrentPaneAlwaysUnderCursor bool     `toml:"current_pane_always_under_cursor"`
+	CursorPosition               string   `toml:"cursor_position"`
 	SortCriteria                 []string `toml:"sort_criteria"`
 }
 
-// Valid sort criteria for the dashboard
+// Valid dashboard cursor position strategies.
 const (
-	SortByStatus              = "status"
-	SortByPaneLastVisitAt     = "pane_last_visit_at"
-	SortBySessionLastVisitAt  = "session_last_visit_at"
-	SortByAlphabetical        = "alphabetical"
+	DashboardCursorCurrentRegistered = "current_registered"
+	DashboardCursorCurrentAny        = "current_any"
+	DashboardCursorFirstActive       = "first_active"
+)
+
+// Valid sort criteria for the dashboard.
+const (
+	SortByStatus             = "status"
+	SortByPaneLastVisitAt    = "pane_last_visit_at"
+	SortBySessionLastVisitAt = "session_last_visit_at"
+	SortByAlphabetical       = "alphabetical"
 )
 
 // DefaultSortCriteria is the default sort order for the dashboard
@@ -96,14 +104,14 @@ func (p ProjectEntry) GetDisplayDepth() int {
 }
 
 type Config struct {
-	Includes               []string             `toml:"includes"`
-	Projects               []ProjectEntry       `toml:"projects"`
-	Commands               []UserDefinedCommand `toml:"commands"`
-	ExcludeCurrentSession  bool                 `toml:"exclude_current_session"`
+	Includes              []string             `toml:"includes"`
+	Projects              []ProjectEntry       `toml:"projects"`
+	Commands              []UserDefinedCommand `toml:"commands"`
+	ExcludeCurrentSession bool                 `toml:"exclude_current_session"`
 	// Deprecated: use ExcludeCurrentSession. TODO: remove after v1.0.
-	ExcludeCurrentDir bool `toml:"exclude_current_dir"`
-	DisambiguationStrategy string               `toml:"disambiguation_strategy"`
-	QuickAccessModifier    string               `toml:"quick_access_modifier"`
+	ExcludeCurrentDir      bool                  `toml:"exclude_current_dir"`
+	DisambiguationStrategy string                `toml:"disambiguation_strategy"`
+	QuickAccessModifier    string                `toml:"quick_access_modifier"`
 	Worktree               *WorktreeConfig       `toml:"worktree"`
 	Select                 *SelectConfig         `toml:"select"`
 	PaneMonitoring         *PaneMonitoringConfig `toml:"pane_monitoring"`
@@ -177,6 +185,24 @@ func (c *Config) CurrentPaneAlwaysUnderCursor() bool {
 		return false
 	}
 	return c.Dashboard.CurrentPaneAlwaysUnderCursor
+}
+
+// DashboardCursorPosition returns the configured initial cursor strategy.
+// Defaults to current_registered. The deprecated current_pane_always_under_cursor
+// boolean maps to current_any only when cursor_position is not set.
+func (c *Config) DashboardCursorPosition() string {
+	if c.Dashboard == nil {
+		return DashboardCursorCurrentRegistered
+	}
+	switch c.Dashboard.CursorPosition {
+	case DashboardCursorCurrentRegistered, DashboardCursorCurrentAny, DashboardCursorFirstActive:
+		return c.Dashboard.CursorPosition
+	case "":
+		if c.Dashboard.CurrentPaneAlwaysUnderCursor {
+			return DashboardCursorCurrentAny
+		}
+	}
+	return DashboardCursorCurrentRegistered
 }
 
 // PaneMonitoringTCPServer returns whether the monitor daemon should bind a TCP

@@ -254,10 +254,10 @@ func TestExpandHomeWith(t *testing.T) {
 
 func TestLoadUserDefinedCommands(t *testing.T) {
 	tests := []struct {
-		name           string
-		toml           string
-		expectedCmds   int
-		checkFirstCmd  func(t *testing.T, cmd UserDefinedCommand)
+		name          string
+		toml          string
+		expectedCmds  int
+		checkFirstCmd func(t *testing.T, cmd UserDefinedCommand)
 	}{
 		{
 			name: "loads single worktree command",
@@ -315,7 +315,7 @@ exit = false
 			toml: `
 projects = [{ path = "~/Dev" }]
 `,
-			expectedCmds: 0,
+			expectedCmds:  0,
 			checkFirstCmd: nil,
 		},
 		{
@@ -402,8 +402,8 @@ func TestProjectEntry(t *testing.T) {
 			},
 		},
 		{
-			name: "multiple entries",
-			toml: `projects = [{ path = "~/simple/*" }, { path = "~/deep/*/*", display_depth = 2 }]`,
+			name:          "multiple entries",
+			toml:          `projects = [{ path = "~/simple/*" }, { path = "~/deep/*/*", display_depth = 2 }]`,
 			expectedCount: 2,
 			checkEntries: func(t *testing.T, entries []ProjectEntry) {
 				if entries[0].Path != "~/simple/*" {
@@ -1239,5 +1239,59 @@ unread_notifications_enabled = true
 
 	if len(cfg.Warnings) != 0 {
 		t.Errorf("expected no warnings, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+	}
+}
+
+func TestDashboardCursorPosition(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{
+			name: "default",
+			cfg:  Config{},
+			want: DashboardCursorCurrentRegistered,
+		},
+		{
+			name: "explicit current registered",
+			cfg:  Config{Dashboard: &DashboardConfig{CursorPosition: DashboardCursorCurrentRegistered}},
+			want: DashboardCursorCurrentRegistered,
+		},
+		{
+			name: "explicit current any",
+			cfg:  Config{Dashboard: &DashboardConfig{CursorPosition: DashboardCursorCurrentAny}},
+			want: DashboardCursorCurrentAny,
+		},
+		{
+			name: "explicit first active",
+			cfg:  Config{Dashboard: &DashboardConfig{CursorPosition: DashboardCursorFirstActive}},
+			want: DashboardCursorFirstActive,
+		},
+		{
+			name: "invalid falls back to default",
+			cfg:  Config{Dashboard: &DashboardConfig{CursorPosition: "later_maybe"}},
+			want: DashboardCursorCurrentRegistered,
+		},
+		{
+			name: "legacy boolean maps to current any",
+			cfg:  Config{Dashboard: &DashboardConfig{CurrentPaneAlwaysUnderCursor: true}},
+			want: DashboardCursorCurrentAny,
+		},
+		{
+			name: "explicit cursor position takes precedence over legacy boolean",
+			cfg: Config{Dashboard: &DashboardConfig{
+				CurrentPaneAlwaysUnderCursor: true,
+				CursorPosition:               DashboardCursorFirstActive,
+			}},
+			want: DashboardCursorFirstActive,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.DashboardCursorPosition(); got != tt.want {
+				t.Errorf("DashboardCursorPosition() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

@@ -341,6 +341,66 @@ func TestSortDashboardPanes(t *testing.T) {
 	})
 }
 
+func TestDashboardInitialPaneID(t *testing.T) {
+	panes := []ui.AttentionPane{
+		{PaneID: "%1", Session: "idle-old", Status: ui.AttentionIdle},
+		{PaneID: "%2", Session: "idle-new", Status: ui.AttentionIdle},
+		{PaneID: "%3", Session: "working-old", Status: ui.AttentionWorking},
+		{PaneID: "%4", Session: "working-new", Status: ui.AttentionWorking},
+		{PaneID: "%5", Session: "unread-old", Status: ui.AttentionUnread},
+		{PaneID: "%6", Session: "unread-new", Status: ui.AttentionUnread},
+	}
+	lastVisited := map[string]int64{
+		"%1": 100,
+		"%2": 600,
+		"%3": 200,
+		"%4": 700,
+		"%5": 300,
+		"%6": 800,
+	}
+
+	t.Run("current_registered selects current pane when present", func(t *testing.T) {
+		got := dashboardInitialPaneID(panes, lastVisited, "%3", config.DashboardCursorCurrentRegistered)
+		if got != "%3" {
+			t.Errorf("got %s, want %%3", got)
+		}
+	})
+
+	t.Run("current_registered falls back when current pane is absent", func(t *testing.T) {
+		got := dashboardInitialPaneID(panes, lastVisited, "%9", config.DashboardCursorCurrentRegistered)
+		if got != "" {
+			t.Errorf("got %s, want empty before caller fallback", got)
+		}
+		fallback := dashboardInitialPaneID(panes, lastVisited, "", config.DashboardCursorFirstActive)
+		if fallback != "%6" {
+			t.Errorf("fallback got %s, want %%6", fallback)
+		}
+	})
+
+	t.Run("first_active picks bottommost unread", func(t *testing.T) {
+		got := dashboardInitialPaneID(panes, lastVisited, "", config.DashboardCursorFirstActive)
+		if got != "%6" {
+			t.Errorf("got %s, want %%6", got)
+		}
+	})
+
+	t.Run("first_active falls back to bottommost working", func(t *testing.T) {
+		withoutUnread := panes[:4]
+		got := dashboardInitialPaneID(withoutUnread, lastVisited, "", config.DashboardCursorFirstActive)
+		if got != "%4" {
+			t.Errorf("got %s, want %%4", got)
+		}
+	})
+
+	t.Run("first_active falls back to most recently visited", func(t *testing.T) {
+		onlyIdle := panes[:2]
+		got := dashboardInitialPaneID(onlyIdle, lastVisited, "", config.DashboardCursorFirstActive)
+		if got != "%2" {
+			t.Errorf("got %s, want %%2", got)
+		}
+	})
+}
+
 func TestPathBase(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -438,8 +498,8 @@ func TestSessionAccessTime(t *testing.T) {
 		earlier := now.Add(-1 * time.Hour)
 		hist := &history.History{
 			Entries: []history.Entry{
-				{Path: "/other/different", LastAccess: now},       // no match
-				{Path: "/home/myproject", LastAccess: earlier},    // partial match on lastComponent
+				{Path: "/other/different", LastAccess: now},    // no match
+				{Path: "/home/myproject", LastAccess: earlier}, // partial match on lastComponent
 			},
 		}
 		result := sessionAccessTime("work/myproject", hist)

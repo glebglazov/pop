@@ -58,10 +58,10 @@ projects = [
 # ignore_status_from = ["tmux-global"]
 
 # [dashboard]
-# When true, the pane from which `pop dashboard` was triggered is always placed
-# under the cursor. If the pane is not monitored, it appears as an idle entry
-# without being registered in the monitor state.
-# current_pane_always_under_cursor = false
+# Initial cursor strategy. Available: "current_registered", "current_any",
+# "first_active". "current_any" adds the current pane as a virtual idle entry
+# when it is not monitored, without registering it in the monitor state.
+# cursor_position = "current_registered"
 #
 # Sort criteria chain. Each criterion is applied in order; the first that
 # distinguishes two panes wins. Available: "status", "pane_last_visit_at",

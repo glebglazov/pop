@@ -4,6 +4,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
@@ -35,8 +36,9 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		cfg = &config.Config{}
 	}
 
+	cursorPosition := cfg.DashboardCursorPosition()
 	var currentPaneID, currentPaneSession string
-	if cfg.CurrentPaneAlwaysUnderCursor() {
+	if cursorPosition == config.DashboardCursorCurrentRegistered || cursorPosition == config.DashboardCursorCurrentAny {
 		var err error
 		currentPaneID, err = defaultTmux.Command("display-message", "-p", "#{pane_id}")
 		if err != nil {
@@ -53,7 +55,8 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	sortCriteria := cfg.DashboardSortCriteria()
 
 	buildPanes := func() []ui.AttentionPane {
-		return buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession, sortCriteria)
+		panes, _ := buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosition, sortCriteria)
+		return panes
 	}
 
 	// Restore following mode from monitor state
@@ -66,7 +69,10 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		opts = append(opts, ui.WithWarnings(systemWarnings))
 	}
 
-	panes := buildPanes()
+	panes, initialPaneID := buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosition, sortCriteria)
+	if initialPaneID != "" {
+		opts = append(opts, ui.WithInitialAttentionPane(initialPaneID))
+	}
 	result, err := ui.RunAttention("dashboard", panes, attentionCallbacks(), buildPanes, opts...)
 	if err != nil {
 		return err
@@ -138,18 +144,24 @@ func saveDashboardFollowing(following bool) {
 }
 
 func buildDashboardPanes() []ui.AttentionPane {
-	return buildDashboardPanesWithCurrentPane("", "", config.DefaultSortCriteria)
+	panes, _ := buildDashboardPanesWithCursor("", "", config.DashboardCursorFirstActive, config.DefaultSortCriteria)
+	return panes
 }
 
 func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string, sortCriteria []string) []ui.AttentionPane {
+	panes, _ := buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, config.DashboardCursorCurrentAny, sortCriteria)
+	return panes
+}
+
+func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosition string, sortCriteria []string) ([]ui.AttentionPane, string) {
 	state := loadMonitorStateAlways()
 	if state == nil {
-		return nil
+		return nil, ""
 	}
 
 	entries := state.PanesAll()
 	if len(entries) == 0 && currentPaneID == "" {
-		return nil
+		return nil, ""
 	}
 
 	paneCommands := tmuxPaneCommands()
@@ -188,9 +200,18 @@ func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string
 
 	// Build per-pane last-visited timestamps from monitor state
 	paneLastVisited := make(map[string]int64)
+	registered := make(map[string]bool)
 	for _, entry := range entries {
+		registered[entry.PaneID] = true
 		if !entry.LastVisited.IsZero() {
 			paneLastVisited[entry.PaneID] = entry.LastVisited.Unix()
+		}
+	}
+
+	if cursorPosition == config.DashboardCursorCurrentAny && currentPaneID != "" {
+		paneLastVisited[currentPaneID] = time.Now().Unix()
+		if !registered[currentPaneID] {
+			panes = append(panes, virtualDashboardPane(currentPaneID, currentPaneSession, paneCommands))
 		}
 	}
 
@@ -208,11 +229,12 @@ func buildDashboardPanesWithCurrentPane(currentPaneID, currentPaneSession string
 
 	sortDashboardPanes(panes, paneLastVisited, sessionLastVisit, sortCriteria)
 
-	if currentPaneID != "" {
-		panes = positionCurrentPane(panes, currentPaneID, currentPaneSession, paneCommands)
+	initialPaneID := dashboardInitialPaneID(panes, paneLastVisited, currentPaneID, cursorPosition)
+	if initialPaneID == "" && cursorPosition != config.DashboardCursorFirstActive {
+		initialPaneID = dashboardInitialPaneID(panes, paneLastVisited, "", config.DashboardCursorFirstActive)
 	}
 
-	return panes
+	return panes, initialPaneID
 }
 
 // sortDashboardPanes sorts panes according to the configured criteria chain.
@@ -296,6 +318,66 @@ func positionCurrentPane(panes []ui.AttentionPane, currentPaneID, session string
 	})
 }
 
+func virtualDashboardPane(currentPaneID, session string, paneCommands map[string]string) ui.AttentionPane {
+	name := session + " (" + currentPaneID + ")"
+	if cmd, ok := paneCommands[currentPaneID]; ok {
+		name = session + " (" + currentPaneID + ", " + cmd + ")"
+	}
+	return ui.AttentionPane{
+		PaneID:  currentPaneID,
+		Session: session,
+		Name:    name,
+		Status:  ui.AttentionIdle,
+	}
+}
+
+func dashboardInitialPaneID(panes []ui.AttentionPane, paneLastVisited map[string]int64, currentPaneID, cursorPosition string) string {
+	switch cursorPosition {
+	case config.DashboardCursorCurrentRegistered, config.DashboardCursorCurrentAny:
+		if currentPaneID == "" {
+			return ""
+		}
+		for _, pane := range panes {
+			if pane.PaneID == currentPaneID {
+				return currentPaneID
+			}
+		}
+		return ""
+	case config.DashboardCursorFirstActive:
+		if paneID := lastPaneWithStatus(panes, ui.AttentionUnread); paneID != "" {
+			return paneID
+		}
+		if paneID := lastPaneWithStatus(panes, ui.AttentionWorking); paneID != "" {
+			return paneID
+		}
+		return mostRecentlyVisitedPane(panes, paneLastVisited)
+	default:
+		return ""
+	}
+}
+
+func lastPaneWithStatus(panes []ui.AttentionPane, status ui.AttentionStatus) string {
+	for i := len(panes) - 1; i >= 0; i-- {
+		if panes[i].Status == status {
+			return panes[i].PaneID
+		}
+	}
+	return ""
+}
+
+func mostRecentlyVisitedPane(panes []ui.AttentionPane, paneLastVisited map[string]int64) string {
+	var paneID string
+	var lastVisited int64
+	for _, pane := range panes {
+		visited := paneLastVisited[pane.PaneID]
+		if visited > lastVisited {
+			paneID = pane.PaneID
+			lastVisited = visited
+		}
+	}
+	return paneID
+}
+
 // sessionAccessTime returns the pop history access timestamp for a session.
 // It matches the session name against history entries by checking if the
 // sanitized base name of a history path matches the session name.
@@ -329,4 +411,3 @@ func pathBase(path string) string {
 	}
 	return path
 }
-

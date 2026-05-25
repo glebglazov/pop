@@ -62,7 +62,7 @@ type UserDefinedCommandResult struct {
 type Result struct {
 	Selected           *Item
 	Action             Action
-	CursorIndex        int                      // cursor position at time of action
+	CursorIndex        int                       // cursor position at time of action
 	UserDefinedCommand *UserDefinedCommandResult // set when Action == ActionUserDefinedCommand
 	AttentionFollowing bool                      // whether following mode was active
 }
@@ -146,24 +146,25 @@ type Picker struct {
 	warnings []string
 
 	// Attention sub-view
-	attentionMode      bool
-	attentionPanes     []AttentionPane
-	attentionAllPanes  []AttentionPane // full list (source of truth for dashboard)
-	attentionFollowing bool            // true = showing followed-only view
-	attentionCursor  int
-	attentionScroll  int
-	attentionPreview   string
-	attentionTitle     string
-	attentionEmptyNote string
-	attentionDirty     bool
-	previewFunc        func(paneID string) string
-	reloadFunc         func() []AttentionPane
-	markReadFunc       func(paneID string)
-	markUnreadFunc     func(paneID string)
-	toggleFollowFunc   func(paneID string)
-	unmonitorFunc      func(paneID string)
-	setNoteFunc        func(paneID, note string)
-	spinnerFrame       int // current spinner animation frame
+	attentionMode          bool
+	attentionPanes         []AttentionPane
+	attentionAllPanes      []AttentionPane // full list (source of truth for dashboard)
+	attentionFollowing     bool            // true = showing followed-only view
+	attentionCursor        int
+	attentionScroll        int
+	attentionInitialPaneID string
+	attentionPreview       string
+	attentionTitle         string
+	attentionEmptyNote     string
+	attentionDirty         bool
+	previewFunc            func(paneID string) string
+	reloadFunc             func() []AttentionPane
+	markReadFunc           func(paneID string)
+	markUnreadFunc         func(paneID string)
+	toggleFollowFunc       func(paneID string)
+	unmonitorFunc          func(paneID string)
+	setNoteFunc            func(paneID, note string)
+	spinnerFrame           int // current spinner animation frame
 
 	// Note editing state
 	editingNote bool
@@ -274,6 +275,13 @@ type IconLegend struct {
 func WithInitialCursorIndex(idx int) PickerOption {
 	return func(p *Picker) {
 		p.initialCursorIdx = idx
+	}
+}
+
+// WithInitialAttentionPane selects the initial dashboard cursor by pane ID.
+func WithInitialAttentionPane(paneID string) PickerOption {
+	return func(p *Picker) {
+		p.attentionInitialPaneID = paneID
 	}
 }
 
@@ -1660,6 +1668,14 @@ func RunAttention(title string, panes []AttentionPane, cb AttentionCallbacks, re
 	}
 	if len(p.attentionPanes) > 0 {
 		p.attentionCursor = len(p.attentionPanes) - 1
+		if p.attentionInitialPaneID != "" {
+			for i, pane := range p.attentionPanes {
+				if pane.PaneID == p.attentionInitialPaneID {
+					p.attentionCursor = i
+					break
+				}
+			}
+		}
 	}
 	p.adjustAttentionScroll()
 	p.fetchAttentionPreview()
@@ -1684,29 +1700,29 @@ func Run(items []Item, opts ...PickerOption) (Result, error) {
 
 // Key bindings
 type keyMap struct {
-	Up           key.Binding
-	Down         key.Binding
-	HalfPageUp   key.Binding
-	HalfPageDown key.Binding
-	Enter        key.Binding
-	Quit         key.Binding
-	Delete       key.Binding
-	ForceDelete  key.Binding
-	KillSession  key.Binding
-	Reset        key.Binding
-	OpenWindow   key.Binding
-	ClearInput   key.Binding
-	Help         key.Binding
+	Up               key.Binding
+	Down             key.Binding
+	HalfPageUp       key.Binding
+	HalfPageDown     key.Binding
+	Enter            key.Binding
+	Quit             key.Binding
+	Delete           key.Binding
+	ForceDelete      key.Binding
+	KillSession      key.Binding
+	Reset            key.Binding
+	OpenWindow       key.Binding
+	ClearInput       key.Binding
+	Help             key.Binding
 	Attention        key.Binding
 	MarkUnread       key.Binding
 	PeekPane         key.Binding
 	FollowPane       key.Binding
 	ToggleFollowView key.Binding
 	Back             key.Binding
-	Reload         key.Binding
-	AttentionUp    key.Binding
-	AttentionDown  key.Binding
-	EditNote       key.Binding
+	Reload           key.Binding
+	AttentionUp      key.Binding
+	AttentionDown    key.Binding
+	EditNote         key.Binding
 }
 
 var keys = keyMap{
@@ -1784,4 +1800,3 @@ var keys = keyMap{
 		key.WithKeys("N"),
 	),
 }
-
