@@ -95,6 +95,7 @@ const (
 	AttentionUnread AttentionStatus = iota
 	AttentionWorking
 	AttentionIdle
+	AttentionVirtual
 )
 
 // AttentionPane represents a pane that needs user attention
@@ -729,6 +730,9 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.ToggleReadIdle):
 		if len(p.attentionPanes) > 0 && p.markReadFunc != nil && p.markUnreadFunc != nil {
 			pane := &p.attentionPanes[p.attentionCursor]
+			if pane.Status == AttentionVirtual {
+				return p, nil
+			}
 			if pane.Status == AttentionIdle {
 				p.markUnreadFunc(pane.PaneID)
 				pane.Status = AttentionUnread
@@ -751,6 +755,9 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.MarkUnread):
 		if len(p.attentionPanes) > 0 && p.markUnreadFunc != nil {
 			pane := &p.attentionPanes[p.attentionCursor]
+			if pane.Status == AttentionVirtual {
+				return p, nil
+			}
 			p.markUnreadFunc(pane.PaneID)
 			pane.Status = AttentionUnread
 			p.updateAllPanesStatus(pane.PaneID, AttentionUnread)
@@ -767,6 +774,9 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.FollowPane):
 		if len(p.attentionPanes) > 0 && p.toggleFollowFunc != nil {
 			pane := &p.attentionPanes[p.attentionCursor]
+			if pane.Status == AttentionVirtual {
+				return p, nil
+			}
 			p.toggleFollowFunc(pane.PaneID)
 			pane.Following = !pane.Following
 			// Clear note when unfollowing
@@ -801,6 +811,9 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.EditNote):
 		if len(p.attentionPanes) > 0 && p.setNoteFunc != nil {
 			pane := p.attentionPanes[p.attentionCursor]
+			if pane.Status == AttentionVirtual {
+				return p, nil
+			}
 			p.editingNote = true
 			p.noteInput = textinput.New()
 			p.noteInput.Prompt = "note: "
@@ -812,6 +825,9 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Unmonitor):
 		if len(p.attentionPanes) > 0 && p.unmonitorFunc != nil {
 			pane := p.attentionPanes[p.attentionCursor]
+			if pane.Status == AttentionVirtual {
+				return p, nil
+			}
 			p.unmonitorFunc(pane.PaneID)
 			p.attentionDirty = true
 			// Remove from source-of-truth list
@@ -891,7 +907,7 @@ func (p *Picker) sortAttentionPanes() {
 
 func attentionStatusOrder(s AttentionStatus) int {
 	switch s {
-	case AttentionIdle:
+	case AttentionIdle, AttentionVirtual:
 		return 0
 	case AttentionWorking:
 		return 1
@@ -1438,6 +1454,8 @@ func (p *Picker) viewAttention() string {
 		// Status icon: 2 visual chars (icon + space), or 3 with pin (icon + pin + space)
 		var icon string
 		switch pane.Status {
+		case AttentionVirtual:
+			icon = idleIconStyle.Render("○")
 		case AttentionWorking:
 			icon = workingIconStyle.Render(spinnerFrames[p.spinnerFrame])
 		case AttentionUnread:

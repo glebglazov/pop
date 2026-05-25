@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -1258,10 +1259,14 @@ func TestTruncateString(t *testing.T) {
 
 func TestAttentionStatusOrder(t *testing.T) {
 	// Verify the sort contract: idle < working < unread
+	virtual := attentionStatusOrder(AttentionVirtual)
 	idle := attentionStatusOrder(AttentionIdle)
 	working := attentionStatusOrder(AttentionWorking)
 	unread := attentionStatusOrder(AttentionUnread)
 
+	if virtual != idle {
+		t.Errorf("virtual (%d) should sort with idle (%d)", virtual, idle)
+	}
 	if idle >= working {
 		t.Errorf("idle (%d) should be less than working (%d)", idle, working)
 	}
@@ -1599,6 +1604,33 @@ func TestUpdateAttention_Reset(t *testing.T) {
 	}
 }
 
+func TestUpdateAttention_VirtualPaneReadActionsAreNoop(t *testing.T) {
+	var readPaneID, unreadPaneID string
+	panes := []AttentionPane{
+		{PaneID: "%1", Status: AttentionVirtual},
+	}
+	cb := AttentionCallbacks{
+		MarkRead:   func(paneID string) { readPaneID = paneID },
+		MarkUnread: func(paneID string) { unreadPaneID = paneID },
+	}
+	p := newAttentionPicker(panes, cb, nil)
+
+	p.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+
+	if readPaneID != "" {
+		t.Errorf("markReadFunc called with %s, want no call", readPaneID)
+	}
+	if unreadPaneID != "" {
+		t.Errorf("markUnreadFunc called with %s, want no call", unreadPaneID)
+	}
+	if p.attentionPanes[0].Status != AttentionVirtual {
+		t.Errorf("status = %d, want AttentionVirtual", p.attentionPanes[0].Status)
+	}
+	if p.attentionDirty {
+		t.Error("expected attentionDirty = false")
+	}
+}
+
 func TestUpdateAttention_MarkUnread(t *testing.T) {
 	var markedPaneID string
 	panes := []AttentionPane{
@@ -1619,6 +1651,20 @@ func TestUpdateAttention_MarkUnread(t *testing.T) {
 	}
 	if !p.attentionDirty {
 		t.Error("expected attentionDirty = true")
+	}
+}
+
+func TestAttentionVirtualPaneIcon(t *testing.T) {
+	panes := []AttentionPane{
+		{PaneID: "%1", Session: "s1", Name: "virtual", Status: AttentionVirtual},
+		{PaneID: "%2", Session: "s2", Name: "idle", Status: AttentionIdle},
+	}
+	p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
+
+	view := p.View().Content
+
+	if !strings.Contains(view, "○") {
+		t.Fatal("expected virtual pane to render hollow circle icon")
 	}
 }
 

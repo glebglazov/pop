@@ -160,8 +160,8 @@ func TestPositionCurrentPane(t *testing.T) {
 		if result[2].Session != "abc" {
 			t.Errorf("pane[2] session: expected abc, got %s", result[2].Session)
 		}
-		if result[2].Status != ui.AttentionIdle {
-			t.Errorf("pane[2] status: expected idle, got %d", result[2].Status)
+		if result[2].Status != ui.AttentionVirtual {
+			t.Errorf("pane[2] status: expected virtual, got %d", result[2].Status)
 		}
 		if result[2].Name != "abc (%3, zsh)" {
 			t.Errorf("pane[2] name: expected %q, got %q", "abc (%3, zsh)", result[2].Name)
@@ -236,6 +236,9 @@ func TestPositionCurrentPane(t *testing.T) {
 		}
 		if result[0].Session != "abc" {
 			t.Errorf("pane[0] session: expected abc, got %s", result[0].Session)
+		}
+		if result[0].Status != ui.AttentionVirtual {
+			t.Errorf("pane[0] status: expected virtual, got %d", result[0].Status)
 		}
 	})
 }

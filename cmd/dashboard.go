@@ -244,6 +244,7 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 func sortDashboardPanes(panes []ui.AttentionPane, paneLastVisited map[string]int64, sessionLastVisit map[string]int64, criteria []string) {
 	statusOrder := map[ui.AttentionStatus]int{
 		ui.AttentionIdle:    0,
+		ui.AttentionVirtual: 0,
 		ui.AttentionWorking: 1,
 		ui.AttentionUnread:  2,
 	}
@@ -283,7 +284,7 @@ func sortDashboardPanes(panes []ui.AttentionPane, paneLastVisited map[string]int
 
 // positionCurrentPane ensures the current pane is at the end of the list
 // (under the cursor). If the pane is already in the list, it is moved to the
-// end. If not, it is injected as an idle (unmonitored) entry.
+// end. If not, it is injected as a virtual (unmonitored) entry.
 func positionCurrentPane(panes []ui.AttentionPane, currentPaneID, session string, paneCommands map[string]string) []ui.AttentionPane {
 	idx := -1
 	for i, p := range panes {
@@ -305,7 +306,7 @@ func positionCurrentPane(panes []ui.AttentionPane, currentPaneID, session string
 		return result
 	}
 
-	// Not in list — inject as idle
+	// Not in list — inject as virtual
 	name := session + " (" + currentPaneID + ")"
 	if cmd, ok := paneCommands[currentPaneID]; ok {
 		name = session + " (" + currentPaneID + ", " + cmd + ")"
@@ -314,7 +315,7 @@ func positionCurrentPane(panes []ui.AttentionPane, currentPaneID, session string
 		PaneID:  currentPaneID,
 		Session: session,
 		Name:    name,
-		Status:  ui.AttentionIdle,
+		Status:  ui.AttentionVirtual,
 	})
 }
 
@@ -327,7 +328,7 @@ func virtualDashboardPane(currentPaneID, session string, paneCommands map[string
 		PaneID:  currentPaneID,
 		Session: session,
 		Name:    name,
-		Status:  ui.AttentionIdle,
+		Status:  ui.AttentionVirtual,
 	}
 }
 
