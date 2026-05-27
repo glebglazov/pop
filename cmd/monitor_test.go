@@ -471,9 +471,9 @@ func TestHandleVisit(t *testing.T) {
 		seed := &monitor.State{
 			Panes: map[string]*monitor.PaneEntry{
 				"%3": {
-					PaneID:      "%3",
-					Session:     "proj-z",
-					Status:      monitor.StatusIdle,
+					PaneID:       "%3",
+					Session:      "proj-z",
+					Status:       monitor.StatusIdle,
 					LastActiveAt: before,
 				},
 			},
@@ -545,4 +545,3 @@ func TestUninstallTmuxAutoReadHooksWith(t *testing.T) {
 		t.Errorf("unexpected removed hook: %q", removedHooks[0])
 	}
 }
-

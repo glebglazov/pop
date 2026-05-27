@@ -560,9 +560,9 @@ func TestHandleDashboardSwitch(t *testing.T) {
 		initialVisited = time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 		state := &monitor.State{Panes: map[string]*monitor.PaneEntry{
 			"%1": {
-				PaneID:      "%1",
-				Session:     "proj",
-				Status:      monitor.StatusUnread,
+				PaneID:       "%1",
+				Session:      "proj",
+				Status:       monitor.StatusUnread,
 				LastActiveAt: initialVisited,
 			},
 		}}
