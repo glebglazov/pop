@@ -690,7 +690,7 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.PeekPane):
 		// "Peek" — open the pane without mutating its monitor state.
 		// Unlike Enter (which calls dismissUnreadPane on the caller side),
-		// this action signals the caller to leave Status and LastVisited
+		// this action signals the caller to leave Status and LastActiveAt
 		// untouched. Used for "I just want to glance at this without
 		// clearing the unread flag."
 		if len(p.attentionPanes) == 0 {

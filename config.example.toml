@@ -64,6 +64,6 @@ projects = [
 # cursor_position = "current_registered"
 #
 # Sort criteria chain. Each criterion is applied in order; the first that
-# distinguishes two panes wins. Available: "status", "pane_last_visit_at",
+# distinguishes two panes wins. Available: "status", "pane_last_active_at",
 # "session_last_visit_at", "alphabetical"
-# sort_criteria = ["status", "pane_last_visit_at", "alphabetical"]
+# sort_criteria = ["status", "pane_last_active_at", "alphabetical"]

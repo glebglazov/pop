@@ -483,7 +483,7 @@ func TestUnmonitorPaneWith(t *testing.T) {
 }
 
 func TestDismissUnreadPaneWith(t *testing.T) {
-	t.Run("transitions unread to idle and sets LastVisited", func(t *testing.T) {
+	t.Run("transitions unread to idle and sets LastActiveAt", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
 			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusUnread},
 		})
@@ -498,8 +498,8 @@ func TestDismissUnreadPaneWith(t *testing.T) {
 		if entry.Status != monitor.StatusIdle {
 			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusIdle)
 		}
-		if entry.LastVisited.IsZero() {
-			t.Error("expected LastVisited to be set")
+		if entry.LastActiveAt.IsZero() {
+			t.Error("expected LastActiveAt to be set")
 		}
 	})
 
@@ -515,9 +515,9 @@ func TestDismissUnreadPaneWith(t *testing.T) {
 		if entry.Status != monitor.StatusWorking {
 			t.Errorf("status = %q, want %q (should not change)", entry.Status, monitor.StatusWorking)
 		}
-		// LastVisited should still be set
-		if entry.LastVisited.IsZero() {
-			t.Error("expected LastVisited to be set even for non-unread pane")
+		// LastActiveAt should still be set
+		if entry.LastActiveAt.IsZero() {
+			t.Error("expected LastActiveAt to be set even for non-unread pane")
 		}
 	})
 

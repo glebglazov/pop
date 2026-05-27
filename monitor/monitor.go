@@ -37,13 +37,33 @@ const (
 
 // PaneEntry represents a single monitored pane
 type PaneEntry struct {
-	PaneID      string     `json:"pane_id"`
-	Session     string     `json:"session"`
-	Status      PaneStatus `json:"status"`
-	Following   bool       `json:"following,omitempty"`
-	Note        string     `json:"note,omitempty"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	LastVisited time.Time  `json:"last_visited,omitempty"`
+	PaneID       string     `json:"pane_id"`
+	Session      string     `json:"session"`
+	Status       PaneStatus `json:"status"`
+	Following    bool       `json:"following,omitempty"`
+	Note         string     `json:"note,omitempty"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	LastActiveAt time.Time  `json:"last_active_at,omitempty"`
+}
+
+// UnmarshalJSON implements backward-compatible deserialization: older state
+// files written with the "last_visited" key are transparently migrated to
+// "last_active_at". When both keys are present, "last_active_at" wins.
+func (p *PaneEntry) UnmarshalJSON(data []byte) error {
+	type Alias PaneEntry
+	aux := &struct {
+		LastVisited time.Time `json:"last_visited"`
+		*Alias
+	}{
+		Alias: (*Alias)(p),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if !aux.LastVisited.IsZero() && p.LastActiveAt.IsZero() {
+		p.LastActiveAt = aux.LastVisited
+	}
+	return nil
 }
 
 // State holds the full monitor state

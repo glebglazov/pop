@@ -62,13 +62,17 @@ const (
 // Valid sort criteria for the dashboard.
 const (
 	SortByStatus             = "status"
-	SortByPaneLastVisitAt    = "pane_last_visit_at"
+	SortByPaneLastActiveAt   = "pane_last_active_at"
 	SortBySessionLastVisitAt = "session_last_visit_at"
 	SortByAlphabetical       = "alphabetical"
+
+	// Deprecated: use SortByPaneLastActiveAt. Kept for backward compat with
+	// existing config files that reference "pane_last_visit_at".
+	SortByPaneLastVisitAt = "pane_last_visit_at"
 )
 
 // DefaultSortCriteria is the default sort order for the dashboard
-var DefaultSortCriteria = []string{SortByStatus, SortByPaneLastVisitAt, SortByAlphabetical}
+var DefaultSortCriteria = []string{SortByStatus, SortByPaneLastActiveAt, SortByAlphabetical}
 
 // WorktreeConfig holds worktree-specific configuration
 type WorktreeConfig struct {
@@ -216,7 +220,7 @@ func (c *Config) PaneMonitoringTCPServer() bool {
 }
 
 // DashboardSortCriteria returns the configured sort criteria for the dashboard.
-// Defaults to [status, pane_last_visit_at, alphabetical].
+// Defaults to [status, pane_last_active_at, alphabetical].
 func (c *Config) DashboardSortCriteria() []string {
 	if c.Dashboard == nil || len(c.Dashboard.SortCriteria) == 0 {
 		return DefaultSortCriteria

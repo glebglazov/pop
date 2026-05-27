@@ -246,7 +246,7 @@ func dismissUnreadPaneWith(d *monitor.Deps, paneID string) {
 	if !ok {
 		return
 	}
-	entry.LastVisited = time.Now()
+	entry.LastActiveAt = time.Now()
 	if entry.Status == monitor.StatusUnread {
 		entry.Status = monitor.StatusIdle
 	}

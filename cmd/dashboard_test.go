@@ -252,10 +252,10 @@ func TestSortDashboardPanes(t *testing.T) {
 		}
 	}
 
-	t.Run("default criteria: status, pane_last_visit_at, alphabetical", func(t *testing.T) {
+	t.Run("default criteria: status, pane_last_active_at, alphabetical", func(t *testing.T) {
 		p := panes()
-		lastVisited := map[string]int64{"%1": 100, "%2": 200, "%3": 300}
-		sortDashboardPanes(p, lastVisited, nil, config.DefaultSortCriteria)
+		lastActiveAt := map[string]int64{"%1": 100, "%2": 200, "%3": 300}
+		sortDashboardPanes(p, lastActiveAt, nil, config.DefaultSortCriteria)
 
 		// Status groups: idle(%3)=0, working(%1)=1, unread(%2)=2
 		if p[0].PaneID != "%3" {
@@ -269,10 +269,10 @@ func TestSortDashboardPanes(t *testing.T) {
 		}
 	})
 
-	t.Run("pane_last_visit_at only", func(t *testing.T) {
+	t.Run("pane_last_active_at only", func(t *testing.T) {
 		p := panes()
-		lastVisited := map[string]int64{"%1": 300, "%2": 100, "%3": 200}
-		sortDashboardPanes(p, lastVisited, nil, []string{config.SortByPaneLastVisitAt})
+		lastActiveAt := map[string]int64{"%1": 300, "%2": 100, "%3": 200}
+		sortDashboardPanes(p, lastActiveAt, nil, []string{config.SortByPaneLastActiveAt})
 
 		// Ascending by visit time: %2(100), %3(200), %1(300)
 		if p[0].PaneID != "%2" {
@@ -309,10 +309,10 @@ func TestSortDashboardPanes(t *testing.T) {
 			{PaneID: "%2", Session: "b", Status: ui.AttentionWorking},
 			{PaneID: "%3", Session: "c", Status: ui.AttentionWorking},
 		}
-		lastVisited := map[string]int64{"%1": 300, "%2": 100, "%3": 200}
-		sortDashboardPanes(p, lastVisited, nil, config.DefaultSortCriteria)
+		lastActiveAt := map[string]int64{"%1": 300, "%2": 100, "%3": 200}
+		sortDashboardPanes(p, lastActiveAt, nil, config.DefaultSortCriteria)
 
-		// All same status, so pane_last_visit_at breaks tie: %2(100), %3(200), %1(300)
+		// All same status, so pane_last_active_at breaks tie: %2(100), %3(200), %1(300)
 		if p[0].PaneID != "%2" {
 			t.Errorf("pane[0]: expected %%2, got %s", p[0].PaneID)
 		}
@@ -353,7 +353,7 @@ func TestDashboardInitialPaneID(t *testing.T) {
 		{PaneID: "%5", Session: "unread-old", Status: ui.AttentionUnread},
 		{PaneID: "%6", Session: "unread-new", Status: ui.AttentionUnread},
 	}
-	lastVisited := map[string]int64{
+	lastActiveAt := map[string]int64{
 		"%1": 100,
 		"%2": 600,
 		"%3": 200,
@@ -363,25 +363,25 @@ func TestDashboardInitialPaneID(t *testing.T) {
 	}
 
 	t.Run("current_registered selects current pane when present", func(t *testing.T) {
-		got := dashboardInitialPaneID(panes, lastVisited, "%3", config.DashboardCursorCurrentRegistered)
+		got := dashboardInitialPaneID(panes, lastActiveAt, "%3", config.DashboardCursorCurrentRegistered)
 		if got != "%3" {
 			t.Errorf("got %s, want %%3", got)
 		}
 	})
 
 	t.Run("current_registered falls back when current pane is absent", func(t *testing.T) {
-		got := dashboardInitialPaneID(panes, lastVisited, "%9", config.DashboardCursorCurrentRegistered)
+		got := dashboardInitialPaneID(panes, lastActiveAt, "%9", config.DashboardCursorCurrentRegistered)
 		if got != "" {
 			t.Errorf("got %s, want empty before caller fallback", got)
 		}
-		fallback := dashboardInitialPaneID(panes, lastVisited, "", config.DashboardCursorFirstActive)
+		fallback := dashboardInitialPaneID(panes, lastActiveAt, "", config.DashboardCursorFirstActive)
 		if fallback != "%6" {
 			t.Errorf("fallback got %s, want %%6", fallback)
 		}
 	})
 
 	t.Run("first_active picks bottommost unread", func(t *testing.T) {
-		got := dashboardInitialPaneID(panes, lastVisited, "", config.DashboardCursorFirstActive)
+		got := dashboardInitialPaneID(panes, lastActiveAt, "", config.DashboardCursorFirstActive)
 		if got != "%6" {
 			t.Errorf("got %s, want %%6", got)
 		}
@@ -389,7 +389,7 @@ func TestDashboardInitialPaneID(t *testing.T) {
 
 	t.Run("first_active falls back to bottommost working", func(t *testing.T) {
 		withoutUnread := panes[:4]
-		got := dashboardInitialPaneID(withoutUnread, lastVisited, "", config.DashboardCursorFirstActive)
+		got := dashboardInitialPaneID(withoutUnread, lastActiveAt, "", config.DashboardCursorFirstActive)
 		if got != "%4" {
 			t.Errorf("got %s, want %%4", got)
 		}
@@ -397,7 +397,7 @@ func TestDashboardInitialPaneID(t *testing.T) {
 
 	t.Run("first_active falls back to most recently visited", func(t *testing.T) {
 		onlyIdle := panes[:2]
-		got := dashboardInitialPaneID(onlyIdle, lastVisited, "", config.DashboardCursorFirstActive)
+		got := dashboardInitialPaneID(onlyIdle, lastActiveAt, "", config.DashboardCursorFirstActive)
 		if got != "%2" {
 			t.Errorf("got %s, want %%2", got)
 		}
@@ -528,9 +528,9 @@ func TestSessionAccessTime(t *testing.T) {
 // actions and the monitor state:
 //
 //   - Normal switch (dismissUnread=true) MUST flip an unread pane to idle
-//     and MUST stamp LastVisited, matching the long-standing Enter behavior.
+//     and MUST stamp LastActiveAt, matching the long-standing Enter behavior.
 //   - Peek (dismissUnread=false) MUST leave the monitor state completely
-//     untouched — no status flip, no LastVisited update — so the pane
+//     untouched — no status flip, no LastActiveAt update — so the pane
 //     continues to appear as unread in the dashboard even after the user
 //     has glanced at its content.
 //
@@ -563,7 +563,7 @@ func TestHandleDashboardSwitch(t *testing.T) {
 				PaneID:      "%1",
 				Session:     "proj",
 				Status:      monitor.StatusUnread,
-				LastVisited: initialVisited,
+				LastActiveAt: initialVisited,
 			},
 		}}
 		data, _ := json.Marshal(state)
@@ -586,7 +586,7 @@ func TestHandleDashboardSwitch(t *testing.T) {
 		return entry
 	}
 
-	t.Run("normal switch dismisses unread and stamps LastVisited", func(t *testing.T) {
+	t.Run("normal switch dismisses unread and stamps LastActiveAt", func(t *testing.T) {
 		statePath, initialVisited := setup(t)
 		result := ui.Result{
 			Selected: &ui.Item{Name: "proj (%1)", Path: "%1", Context: "proj"},
@@ -602,8 +602,8 @@ func TestHandleDashboardSwitch(t *testing.T) {
 		if entry.Status != monitor.StatusIdle {
 			t.Errorf("status = %q, want %q (dismiss should have flipped it)", entry.Status, monitor.StatusIdle)
 		}
-		if !entry.LastVisited.After(initialVisited) {
-			t.Errorf("LastVisited = %v, want something after %v", entry.LastVisited, initialVisited)
+		if !entry.LastActiveAt.After(initialVisited) {
+			t.Errorf("LastActiveAt = %v, want something after %v", entry.LastActiveAt, initialVisited)
 		}
 	})
 
@@ -623,8 +623,8 @@ func TestHandleDashboardSwitch(t *testing.T) {
 		if entry.Status != monitor.StatusUnread {
 			t.Errorf("status = %q, want %q (peek must not flip status)", entry.Status, monitor.StatusUnread)
 		}
-		if !entry.LastVisited.Equal(initialVisited) {
-			t.Errorf("LastVisited = %v, want %v (peek must not update LastVisited)", entry.LastVisited, initialVisited)
+		if !entry.LastActiveAt.Equal(initialVisited) {
+			t.Errorf("LastActiveAt = %v, want %v (peek must not update LastActiveAt)", entry.LastActiveAt, initialVisited)
 		}
 	})
 

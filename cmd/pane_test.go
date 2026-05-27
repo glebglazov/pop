@@ -446,8 +446,8 @@ func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
 		if entry.Status != monitor.StatusIdle {
 			t.Errorf("%s: status = %q, want %q", paneID, entry.Status, monitor.StatusIdle)
 		}
-		if entry.LastVisited.Before(before) || entry.LastVisited.After(after) {
-			t.Errorf("%s: LastVisited = %v, want between %v and %v", paneID, entry.LastVisited, before, after)
+		if entry.LastActiveAt.Before(before) || entry.LastActiveAt.After(after) {
+			t.Errorf("%s: LastActiveAt = %v, want between %v and %v", paneID, entry.LastActiveAt, before, after)
 		}
 	}
 }
@@ -574,10 +574,10 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	}
 }
 
-func TestRunPaneSetStatusWith_AutoRegisterSeedsLastVisited(t *testing.T) {
-	// On first registration, LastVisited must be seeded to "now" so the
+func TestRunPaneSetStatusWith_AutoRegisterSeedsLastActiveAt(t *testing.T) {
+	// On first registration, LastActiveAt must be seeded to "now" so the
 	// new pane sorts to the bottom of its status group in the dashboard
-	// (closest to the cursor). Without this, the zero-value LastVisited
+	// (closest to the cursor). Without this, the zero-value LastActiveAt
 	// would sort the pane to the top of its group (farthest from the
 	// cursor) under the ascending sort in sortDashboardPanes.
 	dir := t.TempDir()
@@ -609,11 +609,11 @@ func TestRunPaneSetStatusWith_AutoRegisterSeedsLastVisited(t *testing.T) {
 	if !ok {
 		t.Fatal("expected %7 to be auto-registered")
 	}
-	if entry.LastVisited.IsZero() {
-		t.Errorf("expected LastVisited to be seeded on auto-register, got zero value")
+	if entry.LastActiveAt.IsZero() {
+		t.Errorf("expected LastActiveAt to be seeded on auto-register, got zero value")
 	}
-	if entry.LastVisited.Before(before) || entry.LastVisited.After(after) {
-		t.Errorf("LastVisited = %v, want between %v and %v", entry.LastVisited, before, after)
+	if entry.LastActiveAt.Before(before) || entry.LastActiveAt.After(after) {
+		t.Errorf("LastActiveAt = %v, want between %v and %v", entry.LastActiveAt, before, after)
 	}
 }
 
@@ -828,8 +828,8 @@ func TestRunPaneSetFollowDirect_AutoRegistersOnFollow(t *testing.T) {
 	if entry.Session != "proj-a" {
 		t.Errorf("session = %q, want proj-a", entry.Session)
 	}
-	if entry.LastVisited.Before(before) || entry.LastVisited.After(after) {
-		t.Errorf("LastVisited = %v, want between %v and %v", entry.LastVisited, before, after)
+	if entry.LastActiveAt.Before(before) || entry.LastActiveAt.After(after) {
+		t.Errorf("LastActiveAt = %v, want between %v and %v", entry.LastActiveAt, before, after)
 	}
 }
 

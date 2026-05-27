@@ -464,7 +464,7 @@ func TestHandleVisit(t *testing.T) {
 		}
 	})
 
-	t.Run("updates LastVisited on tracked pane", func(t *testing.T) {
+	t.Run("updates LastActiveAt on tracked pane", func(t *testing.T) {
 		dir := t.TempDir()
 		statePath := dir + "/monitor.json"
 		before := time.Now().Add(-1 * time.Hour)
@@ -474,7 +474,7 @@ func TestHandleVisit(t *testing.T) {
 					PaneID:      "%3",
 					Session:     "proj-z",
 					Status:      monitor.StatusIdle,
-					LastVisited: before,
+					LastActiveAt: before,
 				},
 			},
 		}
@@ -492,8 +492,8 @@ func TestHandleVisit(t *testing.T) {
 		}
 		state := loadStateFromPath(t, statePath)
 		entry := state.Panes["%3"]
-		if !entry.LastVisited.After(before) {
-			t.Errorf("LastVisited = %v, want after %v", entry.LastVisited, before)
+		if !entry.LastActiveAt.After(before) {
+			t.Errorf("LastActiveAt = %v, want after %v", entry.LastActiveAt, before)
 		}
 	})
 }

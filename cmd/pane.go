@@ -448,7 +448,7 @@ State transitions:
 
 Auto-registration:
   If the pane is not yet tracked, it is auto-registered on the first
-  call. The new entry is seeded with LastVisited=now so it sorts to the
+  call. The new entry is seeded with LastActiveAt=now so it sorts to the
   bottom of its status group in the dashboard (closest to the cursor).
 
   Callers that do not want to register new panes (e.g. tmux-global
@@ -565,18 +565,18 @@ func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatu
 		debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s (direct)", paneID, session, cmdName, status)
 		now := time.Now()
 		state.Panes[paneID] = &monitor.PaneEntry{
-			PaneID:      paneID,
-			Session:     session,
-			Status:      status,
-			UpdatedAt:   now,
-			LastVisited: now,
+			PaneID:       paneID,
+			Session:      session,
+			Status:       status,
+			UpdatedAt:    now,
+			LastActiveAt: now,
 		}
 		return state.Save()
 	}
 
 	visitedNow := false
 	if status == monitor.StatusIdle {
-		entry.LastVisited = time.Now()
+		entry.LastActiveAt = time.Now()
 		visitedNow = true
 	}
 
@@ -627,11 +627,11 @@ func runPaneStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "PANE\tSESSION\tSTATUS\tFOLLOWING\tUPDATED_AT\tPANE_LAST_VISITED\tSESSION_LAST_VISIT")
+	fmt.Fprintln(w, "PANE\tSESSION\tSTATUS\tFOLLOWING\tUPDATED_AT\tPANE_LAST_ACTIVE_AT\tSESSION_LAST_VISIT")
 	for _, entry := range entries {
-		lastVisited := "-"
-		if !entry.LastVisited.IsZero() {
-			lastVisited = entry.LastVisited.Format("2006-01-02 15:04:05")
+		lastActiveAt := "-"
+		if !entry.LastActiveAt.IsZero() {
+			lastActiveAt = entry.LastActiveAt.Format("2006-01-02 15:04:05")
 		}
 		sessionVisit := "-"
 		if ts := sessionAccessTime(entry.Session, hist); ts > 0 {
@@ -647,7 +647,7 @@ func runPaneStatus(cmd *cobra.Command, args []string) error {
 			entry.Status,
 			following,
 			entry.UpdatedAt.Format("2006-01-02 15:04:05"),
-			lastVisited,
+			lastActiveAt,
 			sessionVisit,
 		)
 	}
@@ -749,12 +749,12 @@ func runPaneSetFollowDirect(tmux deps.Tmux, paneID string, follow bool) error {
 		debug.Log("[set-following] %s: auto-registering in session=%s with following=true (direct)", paneID, session)
 		now := time.Now()
 		state.Panes[paneID] = &monitor.PaneEntry{
-			PaneID:      paneID,
-			Session:     session,
-			Status:      monitor.StatusIdle,
-			Following:   true,
-			UpdatedAt:   now,
-			LastVisited: now,
+			PaneID:       paneID,
+			Session:      session,
+			Status:       monitor.StatusIdle,
+			Following:    true,
+			UpdatedAt:    now,
+			LastActiveAt: now,
 		}
 		return state.Save()
 	}
@@ -778,7 +778,7 @@ var paneVisitCmd = &cobra.Command{
 	Short: "Record a visit to a tracked pane",
 	Long: `Record that the user has visited a tracked pane.
 
-Updates the pane's LastVisited timestamp in the monitor state.
+Updates the pane's LastActiveAt timestamp in the monitor state.
 Untracked panes are silently ignored (no auto-registration).
 
 If pane_id is omitted, uses $TMUX_PANE from the environment.`,
@@ -831,7 +831,7 @@ func runPaneVisitWith(tmux deps.Tmux, cfg *config.Config, args []string) error {
 }
 
 // runPaneVisitDirect is the fallback path when the daemon socket is
-// unavailable. Updates LastVisited only for already-tracked panes.
+// unavailable. Updates LastActiveAt only for already-tracked panes.
 func runPaneVisitDirect(paneID string) error {
 	state, err := monitor.Load(monitor.DefaultStatePath())
 	if err != nil {
@@ -843,7 +843,7 @@ func runPaneVisitDirect(paneID string) error {
 		return nil
 	}
 
-	entry.LastVisited = time.Now()
+	entry.LastActiveAt = time.Now()
 	return state.Save()
 }
 

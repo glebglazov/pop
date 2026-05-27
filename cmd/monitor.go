@@ -182,11 +182,11 @@ func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) moni
 		debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s", paneID, session, cmdName, status)
 		now := time.Now()
 		state.Panes[paneID] = &monitor.PaneEntry{
-			PaneID:      paneID,
-			Session:     session,
-			Status:      status,
-			UpdatedAt:   now,
-			LastVisited: now,
+			PaneID:       paneID,
+			Session:      session,
+			Status:       status,
+			UpdatedAt:    now,
+			LastActiveAt: now,
 		}
 		if err := state.Save(); err != nil {
 			return monitor.Response{OK: false, Error: "save state: " + err.Error()}
@@ -196,7 +196,7 @@ func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) moni
 
 	visitedNow := false
 	if status == monitor.StatusIdle {
-		entry.LastVisited = time.Now()
+		entry.LastActiveAt = time.Now()
 		visitedNow = true
 	}
 
@@ -255,12 +255,12 @@ func handleSetFollowing(tmux deps.Tmux, statePath string, req monitor.Request) m
 		debug.Log("[set-following] %s: auto-registering in session=%s with following=true", req.PaneID, session)
 		now := time.Now()
 		state.Panes[req.PaneID] = &monitor.PaneEntry{
-			PaneID:      req.PaneID,
-			Session:     session,
-			Status:      monitor.StatusIdle,
-			Following:   true,
-			UpdatedAt:   now,
-			LastVisited: now,
+			PaneID:       req.PaneID,
+			Session:      session,
+			Status:       monitor.StatusIdle,
+			Following:    true,
+			UpdatedAt:    now,
+			LastActiveAt: now,
 		}
 		if err := state.Save(); err != nil {
 			return monitor.Response{OK: false, Error: "save state: " + err.Error()}
@@ -302,7 +302,7 @@ func handleVisit(statePath string, req monitor.Request) monitor.Response {
 		return monitor.Response{OK: true}
 	}
 
-	entry.LastVisited = time.Now()
+	entry.LastActiveAt = time.Now()
 	if err := state.Save(); err != nil {
 		return monitor.Response{OK: false, Error: "save state: " + err.Error()}
 	}

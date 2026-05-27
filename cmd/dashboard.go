@@ -198,18 +198,18 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 		})
 	}
 
-	// Build per-pane last-visited timestamps from monitor state
-	paneLastVisited := make(map[string]int64)
+	// Build per-pane last-active timestamps from monitor state
+	paneLastActiveAt := make(map[string]int64)
 	registered := make(map[string]bool)
 	for _, entry := range entries {
 		registered[entry.PaneID] = true
-		if !entry.LastVisited.IsZero() {
-			paneLastVisited[entry.PaneID] = entry.LastVisited.Unix()
+		if !entry.LastActiveAt.IsZero() {
+			paneLastActiveAt[entry.PaneID] = entry.LastActiveAt.Unix()
 		}
 	}
 
 	if cursorPosition == config.DashboardCursorCurrentAny && currentPaneID != "" {
-		paneLastVisited[currentPaneID] = time.Now().Unix()
+		paneLastActiveAt[currentPaneID] = time.Now().Unix()
 		if !registered[currentPaneID] {
 			panes = append(panes, virtualDashboardPane(currentPaneID, currentPaneSession, paneCommands))
 		}
@@ -227,11 +227,11 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 		}
 	}
 
-	sortDashboardPanes(panes, paneLastVisited, sessionLastVisit, sortCriteria)
+	sortDashboardPanes(panes, paneLastActiveAt, sessionLastVisit, sortCriteria)
 
-	initialPaneID := dashboardInitialPaneID(panes, paneLastVisited, currentPaneID, cursorPosition)
+	initialPaneID := dashboardInitialPaneID(panes, paneLastActiveAt, currentPaneID, cursorPosition)
 	if initialPaneID == "" && cursorPosition != config.DashboardCursorFirstActive {
-		initialPaneID = dashboardInitialPaneID(panes, paneLastVisited, "", config.DashboardCursorFirstActive)
+		initialPaneID = dashboardInitialPaneID(panes, paneLastActiveAt, "", config.DashboardCursorFirstActive)
 	}
 
 	return panes, initialPaneID
@@ -241,7 +241,7 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 // Each criterion is applied in order; the first one that distinguishes two
 // panes wins. All criteria sort ascending (oldest/lowest first), so the
 // most-recent / highest-priority items end up at the bottom (closest to cursor).
-func sortDashboardPanes(panes []ui.AttentionPane, paneLastVisited map[string]int64, sessionLastVisit map[string]int64, criteria []string) {
+func sortDashboardPanes(panes []ui.AttentionPane, paneLastActiveAt map[string]int64, sessionLastVisit map[string]int64, criteria []string) {
 	statusOrder := map[ui.AttentionStatus]int{
 		ui.AttentionIdle:    0,
 		ui.AttentionVirtual: 0,
@@ -257,8 +257,8 @@ func sortDashboardPanes(panes []ui.AttentionPane, paneLastVisited map[string]int
 				if oi != oj {
 					return oi < oj
 				}
-			case config.SortByPaneLastVisitAt:
-				vi, vj := paneLastVisited[panes[i].PaneID], paneLastVisited[panes[j].PaneID]
+			case config.SortByPaneLastActiveAt, config.SortByPaneLastVisitAt:
+				vi, vj := paneLastActiveAt[panes[i].PaneID], paneLastActiveAt[panes[j].PaneID]
 				if vi != vj {
 					return vi < vj
 				}
@@ -332,7 +332,7 @@ func virtualDashboardPane(currentPaneID, session string, paneCommands map[string
 	}
 }
 
-func dashboardInitialPaneID(panes []ui.AttentionPane, paneLastVisited map[string]int64, currentPaneID, cursorPosition string) string {
+func dashboardInitialPaneID(panes []ui.AttentionPane, paneLastActiveAt map[string]int64, currentPaneID, cursorPosition string) string {
 	switch cursorPosition {
 	case config.DashboardCursorCurrentRegistered, config.DashboardCursorCurrentAny:
 		if currentPaneID == "" {
@@ -351,7 +351,7 @@ func dashboardInitialPaneID(panes []ui.AttentionPane, paneLastVisited map[string
 		if paneID := lastPaneWithStatus(panes, ui.AttentionWorking); paneID != "" {
 			return paneID
 		}
-		return mostRecentlyVisitedPane(panes, paneLastVisited)
+		return mostRecentlyActivePane(panes, paneLastActiveAt)
 	default:
 		return ""
 	}
@@ -366,14 +366,14 @@ func lastPaneWithStatus(panes []ui.AttentionPane, status ui.AttentionStatus) str
 	return ""
 }
 
-func mostRecentlyVisitedPane(panes []ui.AttentionPane, paneLastVisited map[string]int64) string {
+func mostRecentlyActivePane(panes []ui.AttentionPane, paneLastActiveAt map[string]int64) string {
 	var paneID string
-	var lastVisited int64
+	var lastActive int64
 	for _, pane := range panes {
-		visited := paneLastVisited[pane.PaneID]
-		if visited > lastVisited {
+		activeAt := paneLastActiveAt[pane.PaneID]
+		if activeAt > lastActive {
 			paneID = pane.PaneID
-			lastVisited = visited
+			lastActive = activeAt
 		}
 	}
 	return paneID
