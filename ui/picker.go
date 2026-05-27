@@ -1167,20 +1167,20 @@ func (p *Picker) quickAccessDigit(msg tea.KeyPressMsg) int {
 func (p *Picker) quickAccessLabel(n int) string {
 	switch p.quickAccessModifier {
 	case "ctrl":
-		return fmt.Sprintf("^%d ", n)
+		return fmt.Sprintf("^%d", n)
 	case "alt":
-		return fmt.Sprintf("⌥%d ", n)
+		return fmt.Sprintf("⌥%d", n)
 	default:
-		return "   "
+		return "  "
 	}
 }
 
 // quickAccessPadding returns the blank padding matching quickAccessLabel width
 func (p *Picker) quickAccessPadding() string {
 	if p.quickAccessEnabled() {
-		return "   "
+		return "  "
 	}
-	return "  "
+	return " "
 }
 
 // quickAccessEnabled returns true if quick access is active (not disabled or empty)
@@ -1479,7 +1479,7 @@ func (p *Picker) viewAttention() string {
 			if padding < 0 {
 				padding = 0
 			}
-			left = pipeStyle.Render("▌") + " " + icon + name + strings.Repeat(" ", padding)
+			left = indicatorStyle.Render("█") + " " + icon + name + strings.Repeat(" ", padding)
 		} else {
 			padding := leftWidth - len([]rune(name)) - iconWidth - 2 // 2 spaces + icon
 			if padding < 0 {
@@ -1607,12 +1607,8 @@ func (p *Picker) viewNormal() string {
 		hasNumber := p.quickAccessEnabled() && distFromCursor >= 1 && distFromCursor <= 9
 
 		if i == p.cursor {
-			b.WriteString(pipeStyle.Render("▌"))
-			if hasNumber {
-				b.WriteString(dimStyle.Render(fmt.Sprintf("%d ", distFromCursor)))
-			} else {
-				b.WriteString(strings.Repeat(" ", prefixWidth-1))
-			}
+			b.WriteString(strings.Repeat(" ", prefixWidth-1))
+			b.WriteString(indicatorStyle.Render("█"))
 			b.WriteString(line)
 		} else {
 			if hasNumber {

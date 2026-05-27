@@ -22,10 +22,10 @@ var (
 	colorWorking   = lipgloss.Color("214")
 	colorIdle      = lipgloss.Color("241")
 
-	pipeStyle = lipgloss.NewStyle().Foreground(colorAccent)
-	hintStyle     = lipgloss.NewStyle().Foreground(colorDim)
-	dimStyle      = lipgloss.NewStyle().Foreground(colorDim)
-	headerStyle   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	indicatorStyle = lipgloss.NewStyle().Foreground(colorAccent)
+	hintStyle      = lipgloss.NewStyle().Foreground(colorDim)
+	dimStyle       = lipgloss.NewStyle().Foreground(colorDim)
+	headerStyle    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 )
 
 // newTextInput creates a consistently configured text input for all pickers.
