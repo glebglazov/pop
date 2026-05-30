@@ -135,6 +135,8 @@ Supported agents:
   opencode  Install skills at ~/.config/opencode/agent/pop-<name>.md and a
             pane monitoring plugin at
             ~/.config/opencode/plugins/pop-status-sync.ts.
+  cursor    Install skills at ~/.cursor/skills/pop-<name>/SKILL.md and pane
+            monitoring hooks in ~/.cursor/hooks.json.
 
 Re-running the command for an agent is idempotent: existing pop integration
 files for that agent are replaced with the current versions, and unrelated
@@ -153,11 +155,11 @@ after copying a new binary into place.`,
 			return nil
 		}
 		if len(args) != 1 {
-			return fmt.Errorf("requires exactly 1 argument: agent name (claude, codex, pi, or opencode)")
+			return fmt.Errorf("requires exactly 1 argument: agent name (claude, codex, pi, opencode, or cursor)")
 		}
 		return nil
 	},
-	ValidArgs: []string{"claude", "codex", "pi", "opencode"},
+	ValidArgs: []string{"claude", "codex", "pi", "opencode", "cursor"},
 	RunE:      runIntegrate,
 }
 
@@ -184,8 +186,10 @@ func runIntegrateWith(d *integrateDeps, agent string) error {
 		return integratePi(d)
 	case "opencode":
 		return integrateOpencode(d)
+	case "cursor":
+		return integrateCursor(d)
 	default:
-		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode)", agent)
+		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
 	}
 }
 
@@ -536,6 +540,148 @@ func installOpencodeSkills(d *integrateDeps, home string) error {
 	return nil
 }
 
+// ----- Cursor integration ----------------------------------------------------
+
+type cursorHookSpec struct {
+	event   string
+	command string
+}
+
+// cursorPopHooks defines the hook commands installed into Cursor's hooks.json.
+// Event names follow the Cursor CLI hooks schema (camelCase).
+var cursorPopHooks = []cursorHookSpec{
+	{"sessionStart", "pop pane set-status idle 2>/dev/null || true"},
+	{"beforeSubmitPrompt", "pop pane set-status working 2>/dev/null || true"},
+	{"preToolUse", "pop pane set-status working 2>/dev/null || true"},
+	{"stop", "pop pane set-status unread 2>/dev/null || true"},
+}
+
+func integrateCursor(d *integrateDeps) error {
+	home, err := d.userHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	if err := installCursorHooks(d, home); err != nil {
+		return err
+	}
+	if err := installCursorSkills(d, home); err != nil {
+		return err
+	}
+	return nil
+}
+
+// installCursorHooks merges pop's hook entries into ~/.cursor/hooks.json,
+// preserving any unrelated existing hooks. Old pop hooks are removed first
+// (matched via isCursorPopHook) so re-running the command is idempotent.
+func installCursorHooks(d *integrateDeps, home string) error {
+	hooksPath := filepath.Join(home, ".cursor", "hooks.json")
+
+	settings := make(map[string]interface{})
+	data, err := d.readFile(hooksPath)
+	if err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("failed to parse %s: %w", hooksPath, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read %s: %w", hooksPath, err)
+	}
+
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	if hooks == nil {
+		hooks = make(map[string]interface{})
+		settings["hooks"] = hooks
+	}
+
+	if _, ok := settings["version"]; !ok {
+		settings["version"] = 1
+	}
+
+	for event, val := range hooks {
+		eventHooks, ok := val.([]interface{})
+		if !ok {
+			continue
+		}
+		cleaned := removeCursorPopHooks(eventHooks)
+		if d.DryRun && len(cleaned) < len(eventHooks) {
+			d.installed = true
+		}
+		if len(cleaned) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = cleaned
+		}
+	}
+
+	for _, h := range cursorPopHooks {
+		hookEntry := map[string]interface{}{
+			"command": h.command,
+		}
+		eventHooks, _ := hooks[h.event].([]interface{})
+		eventHooks = append(eventHooks, hookEntry)
+		hooks[h.event] = eventHooks
+	}
+
+	if err := d.mkdirAll(filepath.Dir(hooksPath), 0o755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	buf := &bytes.Buffer{}
+	enc := json.NewEncoder(buf)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(settings); err != nil {
+		return fmt.Errorf("failed to serialize hooks: %w", err)
+	}
+
+	if err := d.writeFile(hooksPath, buf.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", hooksPath, err)
+	}
+
+	if d.stdout != nil {
+		fmt.Fprintf(d.stdout, "Installed %d hook(s) in %s\n", len(cursorPopHooks), hooksPath)
+	}
+	return nil
+}
+
+// installCursorSkills writes each embedded skill as a Cursor skill directory
+// under ~/.cursor/skills/pop-<basename>/SKILL.md. Cursor requires the
+// frontmatter `name` field to match the parent directory; we inject it on
+// install so the source files stay agent-agnostic.
+func installCursorSkills(d *integrateDeps, home string) error {
+	entries, err := skillFiles.ReadDir("skills/pop")
+	if err != nil {
+		return fmt.Errorf("failed to read embedded skills: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := skillFiles.ReadFile("skills/pop/" + entry.Name())
+		if err != nil {
+			return fmt.Errorf("failed to read skill %s: %w", entry.Name(), err)
+		}
+		base := strings.TrimSuffix(entry.Name(), ".md")
+		cursorName := "pop-" + base
+		dir := filepath.Join(home, ".cursor", "skills", cursorName)
+		if err := d.removeAll(dir); err != nil {
+			return fmt.Errorf("failed to clean %s: %w", dir, err)
+		}
+		if err := d.mkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", dir, err)
+		}
+		dest := filepath.Join(dir, "SKILL.md")
+		content := injectFrontmatterName(string(data), cursorName)
+		if err := d.writeFile(dest, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", dest, err)
+		}
+		if d.stdout != nil {
+			fmt.Fprintf(d.stdout, "  installed cursor skill %s\n", cursorName)
+		}
+	}
+	return nil
+}
+
 // ----- Shared helpers --------------------------------------------------------
 
 // removePopHooks filters out hook entries whose commands look like pop
@@ -551,7 +697,7 @@ func removePopHooks(entries []interface{}) []interface{} {
 }
 
 // isPopHook returns true if any command in the hook entry references one of
-// the pop pane-monitoring commands.
+// the pop pane-monitoring commands. Handles the nested Claude/Codex format.
 func isPopHook(entry interface{}) bool {
 	entryMap, ok := entry.(map[string]interface{})
 	if !ok {
@@ -563,11 +709,40 @@ func isPopHook(entry interface{}) bool {
 		if !ok {
 			continue
 		}
-		if cmd, _ := hMap["command"].(string); strings.Contains(cmd, "pop monitor") || strings.Contains(cmd, "pop pane set-status") || strings.Contains(cmd, "pop-status") {
+		if cmd, _ := hMap["command"].(string); isPopHookCommand(cmd) {
 			return true
 		}
 	}
 	return false
+}
+
+// removeCursorPopHooks filters out Cursor-format hook entries whose commands
+// look like pop monitoring commands.
+func removeCursorPopHooks(entries []interface{}) []interface{} {
+	var result []interface{}
+	for _, entry := range entries {
+		if !isCursorPopHook(entry) {
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+// isCursorPopHook returns true if a Cursor-format hook entry references one
+// of the pop pane-monitoring commands.
+func isCursorPopHook(entry interface{}) bool {
+	entryMap, ok := entry.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	cmd, _ := entryMap["command"].(string)
+	return isPopHookCommand(cmd)
+}
+
+func isPopHookCommand(cmd string) bool {
+	return strings.Contains(cmd, "pop monitor") ||
+		strings.Contains(cmd, "pop pane set-status") ||
+		strings.Contains(cmd, "pop-status")
 }
 
 // ----- App state (state.json) ------------------------------------------------
@@ -632,7 +807,7 @@ func saveAppState(s *appState) error {
 // integrationAgents is the hardcoded list of agents that ensureIntegrations
 // checks on each startup. Small enough that a registry is overkill; changes
 // here must also update the integrateCmd ValidArgs list.
-var integrationAgents = []string{"claude", "codex", "pi", "opencode"}
+var integrationAgents = []string{"claude", "codex", "pi", "opencode", "cursor"}
 
 // ensureIntegrations checks whether installed agent integrations are stale
 // against the currently running binary's VCS revision and updates any that

@@ -895,6 +895,243 @@ func TestIntegrateOpencode_AgentNameIsCaseInsensitive(t *testing.T) {
 	}
 }
 
+// ----- integrateCursor: hooks.json + skills ----------------------------------
+
+func TestIntegrateCursor_WritesHooksJSON(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
+	if _, ok := fs.files[hooksPath]; !ok {
+		t.Fatalf("expected hooks.json at %s, files: %v", hooksPath, sortedKeys(fs.files))
+	}
+	if !fs.dirs[filepath.Dir(hooksPath)] {
+		t.Errorf("expected mkdirAll of %s", filepath.Dir(hooksPath))
+	}
+}
+
+func TestIntegrateCursor_FreshHooks(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
+	var settings map[string]interface{}
+	if err := json.Unmarshal(fs.files[hooksPath], &settings); err != nil {
+		t.Fatalf("failed to parse hooks.json: %v", err)
+	}
+
+	if settings["version"] != float64(1) {
+		t.Errorf("version = %v, want 1", settings["version"])
+	}
+
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing hooks key")
+	}
+	for _, event := range []string{"sessionStart", "beforeSubmitPrompt", "preToolUse", "stop"} {
+		entries, ok := hooks[event].([]interface{})
+		if !ok || len(entries) == 0 {
+			t.Errorf("missing hooks for event %q", event)
+		}
+	}
+}
+
+func TestIntegrateCursor_PreservesExistingHooks(t *testing.T) {
+	fs := newFakeFS()
+	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
+	existing := map[string]interface{}{
+		"version": 1,
+		"customKey": "customValue",
+		"hooks": map[string]interface{}{
+			"beforeSubmitPrompt": []interface{}{
+				map[string]interface{}{"command": "echo user hook"},
+			},
+		},
+	}
+	raw, _ := json.Marshal(existing)
+	fs.files[hooksPath] = raw
+
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var settings map[string]interface{}
+	json.Unmarshal(fs.files[hooksPath], &settings)
+
+	if settings["customKey"] != "customValue" {
+		t.Error("customKey was not preserved")
+	}
+	hooks := settings["hooks"].(map[string]interface{})
+	entries := hooks["beforeSubmitPrompt"].([]interface{})
+	if len(entries) < 2 {
+		t.Errorf("expected user hook + pop hook on beforeSubmitPrompt, got %d entries", len(entries))
+	}
+}
+
+func TestIntegrateCursor_ReplacesOldPopHooks(t *testing.T) {
+	fs := newFakeFS()
+	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
+	existing := map[string]interface{}{
+		"version": 1,
+		"hooks": map[string]interface{}{
+			"stop": []interface{}{
+				map[string]interface{}{
+					"command": "~/.local/bin/pop-status unread",
+				},
+				map[string]interface{}{
+					"command": "echo keep me",
+				},
+			},
+		},
+	}
+	raw, _ := json.Marshal(existing)
+	fs.files[hooksPath] = raw
+
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var settings map[string]interface{}
+	json.Unmarshal(fs.files[hooksPath], &settings)
+
+	hooks := settings["hooks"].(map[string]interface{})
+	stopHooks := hooks["stop"].([]interface{})
+	popCount, userCount := 0, 0
+	for _, h := range stopHooks {
+		if isCursorPopHook(h) {
+			popCount++
+		} else {
+			userCount++
+		}
+	}
+	if userCount != 1 {
+		t.Errorf("expected 1 user hook preserved, got %d", userCount)
+	}
+	if popCount != 1 {
+		t.Errorf("expected exactly 1 freshly installed pop hook, got %d", popCount)
+	}
+}
+
+func TestIntegrateCursor_DoesNotWriteOutsideCursorTree(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for path := range fs.files {
+		if !strings.HasPrefix(path, "/h/.cursor/") {
+			t.Errorf("cursor integration wrote a file outside ~/.cursor: %s", path)
+		}
+	}
+}
+
+func TestIntegrateCursor_WriteError(t *testing.T) {
+	fs := newFakeFS()
+	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
+	fs.writeErr[hooksPath] = os.ErrPermission
+
+	err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor")
+	if err == nil {
+		t.Fatal("expected error from hooks write failure")
+	}
+}
+
+func TestIntegrateCursor_WritesSkillDirectoryStructure(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	skillEntries, _ := skillFiles.ReadDir("skills/pop")
+	for _, entry := range skillEntries {
+		if entry.IsDir() {
+			continue
+		}
+		base := strings.TrimSuffix(entry.Name(), ".md")
+		cursorName := "pop-" + base
+		dir := filepath.Join("/h", ".cursor", "skills", cursorName)
+		skillFile := filepath.Join(dir, "SKILL.md")
+
+		if !fs.dirs[dir] {
+			t.Errorf("expected mkdirAll of %s", dir)
+		}
+		if _, ok := fs.files[skillFile]; !ok {
+			t.Errorf("expected skill at %s", skillFile)
+		}
+	}
+}
+
+func TestIntegrateCursor_SkillFrontmatterName(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	skillEntries, _ := skillFiles.ReadDir("skills/pop")
+	for _, entry := range skillEntries {
+		if entry.IsDir() {
+			continue
+		}
+		base := strings.TrimSuffix(entry.Name(), ".md")
+		cursorName := "pop-" + base
+		path := filepath.Join("/h", ".cursor", "skills", cursorName, "SKILL.md")
+		content := string(fs.files[path])
+		wantLine := "name: " + cursorName
+		if !strings.Contains(content, wantLine) {
+			t.Errorf("skill %s missing frontmatter %q", path, wantLine)
+		}
+	}
+}
+
+func TestIntegrateCursor_RemovesStaleSkillFiles(t *testing.T) {
+	fs := newFakeFS()
+	stalePath := filepath.Join("/h", ".cursor", "skills", "pop-pane", "stale.md")
+	fs.files[stalePath] = []byte("stale")
+
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, ok := fs.files[stalePath]; ok {
+		t.Error("stale skill file should have been removed")
+	}
+	freshPath := filepath.Join("/h", ".cursor", "skills", "pop-pane", "SKILL.md")
+	if _, ok := fs.files[freshPath]; !ok {
+		t.Errorf("expected fresh skill at %s", freshPath)
+	}
+}
+
+func TestIntegrateCursor_SkillWriteError(t *testing.T) {
+	fs := newFakeFS()
+	skillEntries, _ := skillFiles.ReadDir("skills/pop")
+	var first string
+	for _, entry := range skillEntries {
+		if !entry.IsDir() {
+			base := strings.TrimSuffix(entry.Name(), ".md")
+			first = filepath.Join("/h", ".cursor", "skills", "pop-"+base, "SKILL.md")
+			break
+		}
+	}
+	if first == "" {
+		t.Skip("no embedded skills to test against")
+	}
+	fs.writeErr[first] = os.ErrPermission
+
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err == nil {
+		t.Fatal("expected error from skill write failure")
+	}
+}
+
+func TestIntegrateCursor_AgentNameIsCaseInsensitive(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "CuRsOr"); err != nil {
+		t.Errorf("expected case-insensitive agent matching, got error: %v", err)
+	}
+}
+
 // ----- dry-run deps (withDryRun) ---------------------------------------------
 
 // installViaFake runs a real install against the given fake FS, used by
@@ -909,7 +1146,7 @@ func installViaFake(t *testing.T, fs *fakeFS, home, agent string) {
 func TestDryRun_NoInstallation(t *testing.T) {
 	// Empty fake FS: no pop artifacts for any agent. Every dry-run should
 	// report neither installed nor changed.
-	for _, agent := range []string{"claude", "codex", "pi", "opencode"} {
+	for _, agent := range []string{"claude", "codex", "pi", "opencode", "cursor"} {
 		t.Run(agent, func(t *testing.T) {
 			fs := newFakeFS()
 			d := withDryRun(fakeDeps("/h", fs, io.Discard))
@@ -933,7 +1170,7 @@ func TestDryRun_NoInstallation(t *testing.T) {
 func TestDryRun_InstalledAndCurrent(t *testing.T) {
 	// Seed the FS with a real install, then dry-run against the same FS.
 	// Every agent should report installed=true, changed=false.
-	for _, agent := range []string{"claude", "codex", "pi", "opencode"} {
+	for _, agent := range []string{"claude", "codex", "pi", "opencode", "cursor"} {
 		t.Run(agent, func(t *testing.T) {
 			fs := newFakeFS()
 			installViaFake(t, fs, "/h", agent)
@@ -975,6 +1212,10 @@ func TestDryRun_InstalledAndStale(t *testing.T) {
 			agent:     "opencode",
 			stalePath: filepath.Join(".config", "opencode", "plugins", "pop-status-sync.ts"),
 		},
+		{
+			agent:     "cursor",
+			stalePath: filepath.Join(".cursor", "hooks.json"),
+		},
 	}
 
 	for _, tc := range cases {
@@ -986,9 +1227,12 @@ func TestDryRun_InstalledAndStale(t *testing.T) {
 			if _, exists := fs.files[fullPath]; !exists {
 				t.Fatalf("seed install did not produce %s; update the test fixture", fullPath)
 			}
-			if tc.agent == "codex" {
+			switch tc.agent {
+			case "codex":
 				fs.files[fullPath] = []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"~/.local/bin/pop-status unread"}]}]}}`)
-			} else {
+			case "cursor":
+				fs.files[fullPath] = []byte(`{"version":1,"hooks":{"stop":[{"command":"~/.local/bin/pop-status unread"}]}}`)
+			default:
 				fs.files[fullPath] = []byte("stale bytes that differ from embedded content")
 			}
 
