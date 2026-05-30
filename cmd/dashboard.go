@@ -99,7 +99,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 
 // handleDashboardSwitch performs the post-picker bookkeeping for a dashboard
 // switch result: records the session in pop's history, and — if dismissUnread
-// is true — flips the pane's monitor status from unread to idle. Returns the
+// is true — flips the pane's monitor status from unread to clear. Returns the
 // pane ID the caller should switch into, or empty string when nothing should
 // happen.
 //
@@ -178,7 +178,7 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 		case monitor.StatusWorking:
 			status = ui.AttentionWorking
 		default:
-			status = ui.AttentionIdle
+			status = ui.AttentionClear
 		}
 
 		panes = append(panes, ui.AttentionPane{
@@ -236,7 +236,7 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 // most-recent / highest-priority items end up at the bottom (closest to cursor).
 func sortDashboardPanes(panes []ui.AttentionPane, paneLastActiveAt map[string]int64, sessionLastVisit map[string]int64, criteria []string) {
 	statusOrder := map[ui.AttentionStatus]int{
-		ui.AttentionIdle:    0,
+		ui.AttentionClear:    0,
 		ui.AttentionVirtual: 0,
 		ui.AttentionWorking: 1,
 		ui.AttentionUnread:  2,

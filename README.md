@@ -93,10 +93,10 @@ Available environment variables: `POP_WORKTREE_PATH`, `POP_WORKTREE_NAME`, `POP_
 `pop` can track which tmux panes need attention:
 
 ```bash
-# Mark a pane as working / unread / idle
+# Mark a pane as working / unread / clear
 pop pane set-status %1 working
 pop pane set-status %1 unread
-pop pane set-status %1 idle
+pop pane set-status %1 clear
 
 # Record a manual visit (updates last-visit time)
 pop pane visit %1

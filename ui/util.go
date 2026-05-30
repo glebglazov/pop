@@ -20,7 +20,7 @@ var (
 	colorSeparator = lipgloss.Color("238")
 	colorAttention = lipgloss.Color("196")
 	colorWorking   = lipgloss.Color("214")
-	colorIdle      = lipgloss.Color("241")
+	colorClear     = lipgloss.Color("241")
 
 	indicatorStyle = lipgloss.NewStyle().Foreground(colorAccent)
 	hintStyle      = lipgloss.NewStyle().Foreground(colorDim)

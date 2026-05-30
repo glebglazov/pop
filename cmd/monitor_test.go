@@ -365,8 +365,8 @@ func TestHandleSetFollowing(t *testing.T) {
 		if !entry.Following {
 			t.Error("expected Following = true")
 		}
-		if entry.Status != monitor.StatusIdle {
-			t.Errorf("status = %q, want idle", entry.Status)
+		if entry.Status != monitor.StatusClear {
+			t.Errorf("status = %q, want clear", entry.Status)
 		}
 		if entry.Session != "proj-x" {
 			t.Errorf("session = %q, want proj-x", entry.Session)
@@ -405,7 +405,7 @@ func TestHandleSetFollowing(t *testing.T) {
 				"%2": {
 					PaneID:    "%2",
 					Session:   "proj-y",
-					Status:    monitor.StatusIdle,
+					Status:    monitor.StatusClear,
 					Following: true,
 					Note:      "remember to check this",
 				},
@@ -473,7 +473,7 @@ func TestHandleVisit(t *testing.T) {
 				"%3": {
 					PaneID:       "%3",
 					Session:      "proj-z",
-					Status:       monitor.StatusIdle,
+					Status:       monitor.StatusClear,
 					LastActiveAt: before,
 				},
 			},

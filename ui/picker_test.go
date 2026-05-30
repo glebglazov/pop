@@ -1260,7 +1260,7 @@ func TestTruncateString(t *testing.T) {
 func TestAttentionStatusOrder(t *testing.T) {
 	// Verify the sort contract: idle < working < unread
 	virtual := attentionStatusOrder(AttentionVirtual)
-	idle := attentionStatusOrder(AttentionIdle)
+	idle := attentionStatusOrder(AttentionClear)
 	working := attentionStatusOrder(AttentionWorking)
 	unread := attentionStatusOrder(AttentionUnread)
 
@@ -1278,9 +1278,9 @@ func TestAttentionStatusOrder(t *testing.T) {
 func TestSortAttentionPanes(t *testing.T) {
 	panes := []AttentionPane{
 		{PaneID: "%1", Status: AttentionUnread},
-		{PaneID: "%2", Status: AttentionIdle},
+		{PaneID: "%2", Status: AttentionClear},
 		{PaneID: "%3", Status: AttentionWorking},
-		{PaneID: "%4", Status: AttentionIdle},
+		{PaneID: "%4", Status: AttentionClear},
 	}
 	p := NewPicker(nil, WithAttentionPanes(panes, AttentionCallbacks{}))
 	p.sortAttentionPanes()
@@ -1302,7 +1302,7 @@ func TestSortAttentionPanes(t *testing.T) {
 
 func TestUpdateAllPanesStatus(t *testing.T) {
 	panes := []AttentionPane{
-		{PaneID: "%1", Status: AttentionIdle},
+		{PaneID: "%1", Status: AttentionClear},
 		{PaneID: "%2", Status: AttentionWorking},
 	}
 	p := NewPicker(nil, WithAttentionPanes(panes, AttentionCallbacks{}))
@@ -1317,7 +1317,7 @@ func TestUpdateAllPanesStatus(t *testing.T) {
 	}
 
 	// Non-existent pane ID should be a no-op
-	p.updateAllPanesStatus("%99", AttentionIdle)
+	p.updateAllPanesStatus("%99", AttentionClear)
 	if p.attentionAllPanes[0].Status != AttentionUnread {
 		t.Errorf("status changed for non-matching pane")
 	}
@@ -1569,7 +1569,7 @@ func TestUpdateAttention_Reset(t *testing.T) {
 	panes := []AttentionPane{
 		{PaneID: "%1", Status: AttentionUnread},
 		{PaneID: "%2", Status: AttentionWorking},
-		{PaneID: "%3", Status: AttentionIdle},
+		{PaneID: "%3", Status: AttentionClear},
 	}
 	cb := AttentionCallbacks{
 		MarkRead:   func(paneID string) { readPaneID = paneID },
@@ -1634,7 +1634,7 @@ func TestUpdateAttention_VirtualPaneReadActionsAreNoop(t *testing.T) {
 func TestUpdateAttention_MarkUnread(t *testing.T) {
 	var markedPaneID string
 	panes := []AttentionPane{
-		{PaneID: "%1", Status: AttentionIdle},
+		{PaneID: "%1", Status: AttentionClear},
 	}
 	cb := AttentionCallbacks{
 		MarkUnread: func(paneID string) { markedPaneID = paneID },
@@ -1657,7 +1657,7 @@ func TestUpdateAttention_MarkUnread(t *testing.T) {
 func TestAttentionVirtualPaneIcon(t *testing.T) {
 	panes := []AttentionPane{
 		{PaneID: "%1", Session: "s1", Name: "virtual", Status: AttentionVirtual},
-		{PaneID: "%2", Session: "s2", Name: "idle", Status: AttentionIdle},
+		{PaneID: "%2", Session: "s2", Name: "idle", Status: AttentionClear},
 	}
 	p := newAttentionPicker(panes, AttentionCallbacks{}, nil)
 

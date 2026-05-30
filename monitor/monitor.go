@@ -19,13 +19,13 @@ type PaneStatus string
 const (
 	StatusWorking PaneStatus = "working"
 	StatusUnread  PaneStatus = "unread"
-	StatusIdle    PaneStatus = "idle"
+	StatusClear   PaneStatus = "clear"
 	StatusUnknown PaneStatus = "unknown"
 
-	// legacyStatusRead is the old name for StatusIdle, accepted as a CLI
-	// alias and migrated transparently when loading state files written
-	// by older versions of pop. Kept unexported because new code should
-	// always use StatusIdle directly.
+	// legacyStatusIdle and legacyStatusRead are deprecated aliases for
+	// StatusClear, accepted at the CLI boundary and migrated when loading
+	// state files written by older versions of pop.
+	legacyStatusIdle PaneStatus = "idle"
 	legacyStatusRead PaneStatus = "read"
 
 	// legacyStatusNeedsAttention is the old name for StatusUnread, accepted
@@ -171,18 +171,13 @@ func LoadWith(d *Deps, path string) (*State, error) {
 	}
 
 	// Migrate legacy status names to their canonical forms:
-	//   "read"            → "idle"   (merged statuses; "read" is only a CLI/state alias now)
-	//   "needs_attention" → "unread" (rename for consistency with user mental model)
+	//   "idle", "read"    → "clear"
+	//   "needs_attention" → "unread"
 	// Rewriting in-memory means the next state.Save() will persist the
 	// corrected value. The legacy names remain accepted via CLI alias so
 	// installed agent plugins that emit the old strings keep working.
 	for _, entry := range s.Panes {
-		if entry.Status == legacyStatusRead {
-			entry.Status = StatusIdle
-		}
-		if entry.Status == legacyStatusNeedsAttention {
-			entry.Status = StatusUnread
-		}
+		entry.Status = normalizeStatus(entry.Status)
 	}
 
 	return s, nil

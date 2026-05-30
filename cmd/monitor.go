@@ -131,17 +131,9 @@ func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandle
 // buildMonitorHandler so each command is independently testable.
 func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) monitor.Response {
 	paneID := req.PaneID
-	status := monitor.PaneStatus(req.Status)
+	status := monitor.NormalizeStatus(req.Status)
 	source := req.Source
 	noRegister := req.NoRegister
-
-	// Normalize deprecated aliases.
-	if status == "read" {
-		status = monitor.StatusIdle
-	}
-	if status == "needs_attention" {
-		status = monitor.StatusUnread
-	}
 
 	cfg, err := config.Load(config.DefaultConfigPath())
 	if err != nil {
@@ -159,7 +151,7 @@ func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) moni
 		return monitor.Response{OK: true}
 	}
 
-	if status != monitor.StatusIdle {
+	if status != monitor.StatusClear {
 		debug.Log("[set-status] %s: invoked with %s", paneID, status)
 	}
 
@@ -199,14 +191,14 @@ func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) moni
 	applyPaneLabel(entry, req.Label)
 
 	visitedNow := false
-	if status == monitor.StatusIdle {
+	if status == monitor.StatusClear {
 		entry.LastActiveAt = time.Now()
 		visitedNow = true
 	}
 
 	if cfg.DismissUnreadInActivePane() && status == monitor.StatusUnread && isActiveTmuxPaneWith(tmux, paneID) {
-		debug.Log("[set-status] %s: unread on active pane — downgrading to idle", paneID)
-		status = monitor.StatusIdle
+		debug.Log("[set-status] %s: unread on active pane — downgrading to clear", paneID)
+		status = monitor.StatusClear
 	}
 
 	if entry.Status == status {
@@ -228,7 +220,7 @@ func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) moni
 }
 
 // handleSetFollowing toggles a pane's Following flag. Untracked panes are
-// auto-registered (status=idle) so the user can mark a pane as followed from
+// auto-registered (status=clear) so the user can mark a pane as followed from
 // the CLI without having to set-status first; unfollowing an untracked pane
 // is a no-op since the absence already implies "not followed". Unfollowing
 // also clears any user note on the pane, mirroring the picker's behavior.
@@ -261,7 +253,7 @@ func handleSetFollowing(tmux deps.Tmux, statePath string, req monitor.Request) m
 		state.Panes[req.PaneID] = &monitor.PaneEntry{
 			PaneID:       req.PaneID,
 			Session:      session,
-			Status:       monitor.StatusIdle,
+			Status:       monitor.StatusClear,
 			Following:    true,
 			UpdatedAt:    now,
 			LastActiveAt: now,

@@ -94,7 +94,7 @@ type AttentionStatus int
 const (
 	AttentionUnread AttentionStatus = iota
 	AttentionWorking
-	AttentionIdle
+	AttentionClear
 	AttentionVirtual
 )
 
@@ -733,14 +733,14 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if pane.Status == AttentionVirtual {
 				return p, nil
 			}
-			if pane.Status == AttentionIdle {
+			if pane.Status == AttentionClear {
 				p.markUnreadFunc(pane.PaneID)
 				pane.Status = AttentionUnread
 				p.updateAllPanesStatus(pane.PaneID, AttentionUnread)
 			} else {
 				p.markReadFunc(pane.PaneID)
-				pane.Status = AttentionIdle
-				p.updateAllPanesStatus(pane.PaneID, AttentionIdle)
+				pane.Status = AttentionClear
+				p.updateAllPanesStatus(pane.PaneID, AttentionClear)
 			}
 			p.sortAttentionPanes()
 			if p.attentionCursor >= len(p.attentionPanes) {
@@ -895,7 +895,7 @@ func (p *Picker) reloadAttentionPanes() {
 }
 
 // sortAttentionPanes performs a stable sort of attention panes by status group:
-// idle (top) → working (middle) → unread (bottom, closest to cursor).
+// clear (top) → working (middle) → unread (bottom, closest to cursor).
 func (p *Picker) sortAttentionPanes() {
 	sort.SliceStable(p.attentionAllPanes, func(i, j int) bool {
 		return attentionStatusOrder(p.attentionAllPanes[i].Status) < attentionStatusOrder(p.attentionAllPanes[j].Status)
@@ -907,7 +907,7 @@ func (p *Picker) sortAttentionPanes() {
 
 func attentionStatusOrder(s AttentionStatus) int {
 	switch s {
-	case AttentionIdle, AttentionVirtual:
+	case AttentionClear, AttentionVirtual:
 		return 0
 	case AttentionWorking:
 		return 1
@@ -1440,7 +1440,7 @@ func (p *Picker) viewAttention() string {
 	// Status icon styles
 	attentionIconStyle := lipgloss.NewStyle().Foreground(colorAttention)
 	workingIconStyle := lipgloss.NewStyle().Foreground(colorWorking)
-	idleIconStyle := lipgloss.NewStyle().Foreground(colorIdle)
+	clearIconStyle := lipgloss.NewStyle().Foreground(colorClear)
 
 	// Render list rows alongside preview
 	for i := 0; i < visible; i++ {
@@ -1455,13 +1455,13 @@ func (p *Picker) viewAttention() string {
 		var icon string
 		switch pane.Status {
 		case AttentionVirtual:
-			icon = idleIconStyle.Render("○")
+			icon = clearIconStyle.Render("○")
 		case AttentionWorking:
 			icon = workingIconStyle.Render(spinnerFrames[p.spinnerFrame])
 		case AttentionUnread:
 			icon = attentionIconStyle.Render("●")
-		case AttentionIdle:
-			icon = idleIconStyle.Render("●")
+		case AttentionClear:
+			icon = clearIconStyle.Render("●")
 		}
 		iconWidth := 2 // icon + trailing space
 		if pane.Following {
@@ -1507,9 +1507,9 @@ func (p *Picker) viewAttention() string {
 	} else {
 		var hints string
 		if len(p.items) > 0 {
-			hints = "  Enter open and read · Shift+Enter open · r toggle read/idle · f follow · x unmonitor · F follow view · ← back · Esc cancel"
+			hints = "  Enter open and read · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel"
 		} else {
-			hints = "  Enter open and read · Shift+Enter open · r toggle read/idle · f follow · x unmonitor · F follow view · Esc quit"
+			hints = "  Enter open and read · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · Esc quit"
 		}
 		b.WriteString(hintStyle.Render(hints))
 	}

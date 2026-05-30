@@ -73,16 +73,16 @@ Kills the pane. Remaining panes re-tile automatically.
 ```bash
 pop pane set-status <pane_id> <status>
 ```
-Marks a tmux pane in the pop monitor as `working`, `unread`, or `idle`. Pane status drives the dashboard (`pop dashboard`) and the unread indicators in the picker.
+Marks a tmux pane in the pop monitor as `working`, `unread`, or `clear`. Pane status drives the dashboard (`pop dashboard`) and the unread indicators in the picker.
 
 If you omit `<pane_id>`, the command reads `$TMUX_PANE` from the environment, so it operates on whatever pane it was invoked from. From an agent, you almost always want to pass an explicit pane id.
 
 Statuses:
 - `working` — actively in use; the agent or process is busy
 - `unread` — has output the user should look at
-- `idle` — nothing new to see (the user has acknowledged it, or there's just nothing happening)
+- `clear` — no attention required (acknowledged, or nothing new pending)
 
-The deprecated names `needs_attention` (→ `unread`) and `read` (→ `idle`) are still accepted as CLI aliases for backwards compat.
+The deprecated names `needs_attention` (→ `unread`), `idle`, and `read` (→ `clear`) are still accepted as CLI aliases for backwards compat.
 
 You normally don't have to call this manually — running `pop integrate <agent>` installs hooks/extensions that keep the agent's own pane status in sync. Reach for `set-status` directly when:
 
@@ -94,7 +94,7 @@ You normally don't have to call this manually — running `pop integrate <agent>
   ```
 - You want to clear the unread flag on a pane after acknowledging its output:
   ```bash
-  pop pane set-status "$ID" idle
+  pop pane set-status "$ID" clear
   ```
 
 To discover which panes exist and their current ids, use `pop pane list`. To see the full monitor table including each pane's current status, use `pop pane status`.

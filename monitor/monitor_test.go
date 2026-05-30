@@ -214,7 +214,7 @@ func TestFollowingFieldRoundTrip(t *testing.T) {
 	s := &State{
 		Panes: map[string]*PaneEntry{
 			"%5": {PaneID: "%5", Session: "proj", Status: StatusWorking, Following: true},
-			"%6": {PaneID: "%6", Session: "proj2", Status: StatusIdle, Following: false},
+			"%6": {PaneID: "%6", Session: "proj2", Status: StatusClear, Following: false},
 		},
 		path: "/test/monitor.json",
 	}
@@ -236,12 +236,10 @@ func TestFollowingFieldRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLoadMigratesLegacyReadStatusToIdle(t *testing.T) {
-	// State files written by older versions of pop used "read" as a
-	// distinct status. The two were merged: "idle" is the canonical
-	// name. LoadWith must transparently rewrite "read" entries to
-	// "idle" in memory so the rest of the codebase only ever sees the
-	// canonical value.
+func TestLoadMigratesLegacyClearStatuses(t *testing.T) {
+	// State files written by older versions of pop used "read" or "idle".
+	// LoadWith must transparently rewrite them to "clear" in memory so the
+	// rest of the codebase only ever sees the canonical value.
 	jsonData := `{"panes":{
 		"%1":{"pane_id":"%1","session":"old-proj","status":"read","updated_at":"2024-01-01T00:00:00Z"},
 		"%2":{"pane_id":"%2","session":"new-proj","status":"idle","updated_at":"2024-01-01T00:00:00Z"},
@@ -261,11 +259,11 @@ func TestLoadMigratesLegacyReadStatusToIdle(t *testing.T) {
 		t.Fatalf("LoadWith() error = %v", err)
 	}
 
-	if got := loaded.Panes["%1"].Status; got != StatusIdle {
-		t.Errorf("legacy 'read' entry: status = %q, want %q", got, StatusIdle)
+	if got := loaded.Panes["%1"].Status; got != StatusClear {
+		t.Errorf("legacy 'read' entry: status = %q, want %q", got, StatusClear)
 	}
-	if got := loaded.Panes["%2"].Status; got != StatusIdle {
-		t.Errorf("'idle' entry: status = %q, want %q", got, StatusIdle)
+	if got := loaded.Panes["%2"].Status; got != StatusClear {
+		t.Errorf("'idle' entry: status = %q, want %q", got, StatusClear)
 	}
 	if got := loaded.Panes["%3"].Status; got != StatusWorking {
 		t.Errorf("'working' entry: status = %q, want %q (must not be touched)", got, StatusWorking)
@@ -413,7 +411,7 @@ func TestPanesUnread(t *testing.T) {
 			panes: map[string]*PaneEntry{
 				"%1": {PaneID: "%1", Status: StatusUnread},
 				"%2": {PaneID: "%2", Status: StatusWorking},
-				"%3": {PaneID: "%3", Status: StatusIdle},
+				"%3": {PaneID: "%3", Status: StatusClear},
 				"%4": {PaneID: "%4", Status: StatusUnread},
 			},
 			expected: 2,
@@ -432,7 +430,7 @@ func TestPanesUnread(t *testing.T) {
 			name: "no unread panes",
 			panes: map[string]*PaneEntry{
 				"%1": {PaneID: "%1", Status: StatusWorking},
-				"%2": {PaneID: "%2", Status: StatusIdle},
+				"%2": {PaneID: "%2", Status: StatusClear},
 			},
 			expected: 0,
 		},
@@ -473,7 +471,7 @@ func TestPanesActive(t *testing.T) {
 			panes: map[string]*PaneEntry{
 				"%1": {PaneID: "%1", Status: StatusUnread},
 				"%2": {PaneID: "%2", Status: StatusWorking},
-				"%3": {PaneID: "%3", Status: StatusIdle},
+				"%3": {PaneID: "%3", Status: StatusClear},
 				"%4": {PaneID: "%4", Status: StatusUnknown},
 			},
 			expected: 2,
@@ -486,7 +484,7 @@ func TestPanesActive(t *testing.T) {
 		{
 			name: "only idle and unknown",
 			panes: map[string]*PaneEntry{
-				"%1": {PaneID: "%1", Status: StatusIdle},
+				"%1": {PaneID: "%1", Status: StatusClear},
 				"%2": {PaneID: "%2", Status: StatusUnknown},
 			},
 			expected: 0,
@@ -520,7 +518,7 @@ func TestPanesAll(t *testing.T) {
 			panes: map[string]*PaneEntry{
 				"%1": {PaneID: "%1", Status: StatusUnread},
 				"%2": {PaneID: "%2", Status: StatusWorking},
-				"%3": {PaneID: "%3", Status: StatusIdle},
+				"%3": {PaneID: "%3", Status: StatusClear},
 			},
 			expected: 3,
 		},
@@ -673,7 +671,7 @@ func TestPollOnce_DeadPanesRemoved(t *testing.T) {
 		Panes: map[string]*PaneEntry{
 			"%1": {PaneID: "%1", Session: "proj-a", Status: StatusWorking, UpdatedAt: now},
 			"%2": {PaneID: "%2", Session: "proj-b", Status: StatusUnread, UpdatedAt: now},
-			"%3": {PaneID: "%3", Session: "proj-c", Status: StatusIdle, UpdatedAt: now},
+			"%3": {PaneID: "%3", Session: "proj-c", Status: StatusClear, UpdatedAt: now},
 		},
 	}
 	stateBytes, err := json.MarshalIndent(initialState, "", "  ")

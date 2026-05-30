@@ -111,8 +111,8 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 	for _, p := range panes {
 		got[p.PaneID] = p.Status
 	}
-	if s, ok := got["%20"]; !ok || s != ui.AttentionIdle {
-		t.Errorf("%%20 (opencode): got status %v (present=%v), want AttentionIdle", s, ok)
+	if s, ok := got["%20"]; !ok || s != ui.AttentionClear {
+		t.Errorf("%%20 (opencode): got status %v (present=%v), want AttentionClear", s, ok)
 	}
 	if s, ok := got["%7"]; !ok || s != ui.AttentionWorking {
 		t.Errorf("%%7 (claude): got status %v (present=%v), want AttentionWorking", s, ok)
@@ -248,7 +248,7 @@ func TestSortDashboardPanes(t *testing.T) {
 		return []ui.AttentionPane{
 			{PaneID: "%1", Session: "alpha", Status: ui.AttentionWorking},
 			{PaneID: "%2", Session: "beta", Status: ui.AttentionUnread},
-			{PaneID: "%3", Session: "gamma", Status: ui.AttentionIdle},
+			{PaneID: "%3", Session: "gamma", Status: ui.AttentionClear},
 		}
 	}
 
@@ -326,9 +326,9 @@ func TestSortDashboardPanes(t *testing.T) {
 
 	t.Run("alphabetical fallback when no visit data", func(t *testing.T) {
 		p := []ui.AttentionPane{
-			{PaneID: "%1", Session: "gamma", Status: ui.AttentionIdle},
-			{PaneID: "%2", Session: "alpha", Status: ui.AttentionIdle},
-			{PaneID: "%3", Session: "beta", Status: ui.AttentionIdle},
+			{PaneID: "%1", Session: "gamma", Status: ui.AttentionClear},
+			{PaneID: "%2", Session: "alpha", Status: ui.AttentionClear},
+			{PaneID: "%3", Session: "beta", Status: ui.AttentionClear},
 		}
 		sortDashboardPanes(p, nil, nil, config.DefaultSortCriteria)
 
@@ -346,8 +346,8 @@ func TestSortDashboardPanes(t *testing.T) {
 
 func TestDashboardInitialPaneID(t *testing.T) {
 	panes := []ui.AttentionPane{
-		{PaneID: "%1", Session: "idle-old", Status: ui.AttentionIdle},
-		{PaneID: "%2", Session: "idle-new", Status: ui.AttentionIdle},
+		{PaneID: "%1", Session: "idle-old", Status: ui.AttentionClear},
+		{PaneID: "%2", Session: "idle-new", Status: ui.AttentionClear},
 		{PaneID: "%3", Session: "working-old", Status: ui.AttentionWorking},
 		{PaneID: "%4", Session: "working-new", Status: ui.AttentionWorking},
 		{PaneID: "%5", Session: "unread-old", Status: ui.AttentionUnread},
@@ -599,8 +599,8 @@ func TestHandleDashboardSwitch(t *testing.T) {
 		}
 
 		entry := loadPane(t, statePath, "%1")
-		if entry.Status != monitor.StatusIdle {
-			t.Errorf("status = %q, want %q (dismiss should have flipped it)", entry.Status, monitor.StatusIdle)
+		if entry.Status != monitor.StatusClear {
+			t.Errorf("status = %q, want %q (dismiss should have flipped it)", entry.Status, monitor.StatusClear)
 		}
 		if !entry.LastActiveAt.After(initialVisited) {
 			t.Errorf("LastActiveAt = %v, want something after %v", entry.LastActiveAt, initialVisited)

@@ -230,7 +230,7 @@ func capturePanePreviewWith(tmux deps.Tmux, paneID string) string {
 	return out
 }
 
-// dismissUnreadPane transitions a pane from unread to idle and records the
+// dismissUnreadPane transitions a pane from unread to clear and records the
 // visit time. Unlike markPaneRead, the status flip is a no-op for panes in
 // other states (the visit time is still recorded).
 func dismissUnreadPane(paneID string) {
@@ -248,15 +248,15 @@ func dismissUnreadPaneWith(d *monitor.Deps, paneID string) {
 	}
 	entry.LastActiveAt = time.Now()
 	if entry.Status == monitor.StatusUnread {
-		entry.Status = monitor.StatusIdle
+		entry.Status = monitor.StatusClear
 	}
 	if err := state.SaveWith(d); err != nil {
 		debug.Error("dismissUnreadPane %s: save: %v", paneID, err)
 	}
 }
 
-// markPaneRead marks a pane as idle in the monitor state. The function name
-// is kept for historical reasons; "read" was renamed to "idle" but callers
+// markPaneRead marks a pane as clear in the monitor state. The function name
+// is kept for historical reasons; "read" was renamed to "clear" but callers
 // were not updated to minimize churn.
 func markPaneRead(paneID string) {
 	markPaneReadWith(monitor.DefaultDeps(), paneID)
@@ -271,7 +271,7 @@ func markPaneReadWith(d *monitor.Deps, paneID string) {
 	if !ok {
 		return
 	}
-	entry.Status = monitor.StatusIdle
+	entry.Status = monitor.StatusClear
 	if err := state.SaveWith(d); err != nil {
 		debug.Error("markPaneRead %s: save: %v", paneID, err)
 	}

@@ -48,7 +48,7 @@ projects = [
 # unread_notifications_enabled = false
 
 # [pane_monitoring]
-# Automatically downgrade unread to idle when the pane is currently
+# Automatically downgrade unread to clear when the pane is currently
 # active (visible and focused). Useful if you're already watching the output.
 # dismiss_unread_in_active_pane = false
 #
@@ -59,7 +59,7 @@ projects = [
 
 # [dashboard]
 # Initial cursor strategy. Available: "current_registered", "current_any",
-# "first_active". "current_any" adds the current pane as a virtual idle entry
+# "first_active". "current_any" adds the current pane as a virtual clear entry
 # when it is not monitored, without registering it in the monitor state.
 # cursor_position = "current_registered"
 #

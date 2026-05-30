@@ -435,17 +435,17 @@ var paneSetStatusCmd = &cobra.Command{
 If pane_id is omitted, uses $TMUX_PANE from the environment.
 The pane is auto-registered on the first call with any status.
 
-Valid statuses: working, unread, idle.
+Valid statuses: working, unread, clear.
 "needs_attention" is accepted as a deprecated alias for "unread".
-"read" is accepted as a deprecated alias for "idle".
+"idle" and "read" are accepted as deprecated aliases for "clear".
 
 State transitions:
   working → unread    Agent stopped or sent a notification
-  working → idle      User has seen the output / agent calm
-  unread  → idle      User has seen the output
+  working → clear     User has seen the output / agent calm
+  unread  → clear     User has seen the output
   unread  → working   Agent resumed work
-  idle    → working   Agent resumed work
-  idle    → unread    Agent has output
+  clear   → working   Agent resumed work
+  clear   → unread    Agent has output
 
 Auto-registration:
   If the pane is not yet tracked, it is auto-registered on the first
@@ -463,7 +463,7 @@ Auto-registration:
 Special behavior:
   When [pane_monitoring] dismiss_unread_in_active_pane = true,
   if the pane is currently active (visible to the user) and the
-  requested status is unread, it is downgraded to idle automatically
+  requested status is unread, it is downgraded to clear automatically
   — the user is already looking at it.`,
 	Args:   cobra.RangeArgs(1, 2),
 	Hidden: true,
@@ -541,15 +541,9 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noR
 // runPaneSetStatusDirect is the fallback path used when the daemon socket
 // is unavailable (cold start). Contains the same logic as the daemon handler.
 func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatus, source string, noRegister bool, label string) error {
-	status := monitor.PaneStatus(rawStatus)
-	if status == "read" {
-		status = monitor.StatusIdle
-	}
-	if status == "needs_attention" {
-		status = monitor.StatusUnread
-	}
+	status := monitor.NormalizeStatus(rawStatus)
 
-	if status != monitor.StatusIdle {
+	if status != monitor.StatusClear {
 		debug.Log("[set-status] %s: invoked with %s (direct)", paneID, status)
 	}
 
@@ -587,14 +581,14 @@ func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatu
 	applyPaneLabel(entry, label)
 
 	visitedNow := false
-	if status == monitor.StatusIdle {
+	if status == monitor.StatusClear {
 		entry.LastActiveAt = time.Now()
 		visitedNow = true
 	}
 
 	if cfg.DismissUnreadInActivePane() && status == monitor.StatusUnread && isActiveTmuxPaneWith(tmux, paneID) {
-		debug.Log("[set-status] %s: unread on active pane — downgrading to idle (direct)", paneID)
-		status = monitor.StatusIdle
+		debug.Log("[set-status] %s: unread on active pane — downgrading to clear (direct)", paneID)
+		status = monitor.StatusClear
 	}
 
 	if entry.Status == status {
@@ -678,7 +672,7 @@ in the picker). If the argument starts with '%' it is treated as a tmux
 pane_id; otherwise it is resolved as a pane name in the agent window of
 the current session (or --project's session).
 
-Untracked panes are auto-registered as idle.`,
+Untracked panes are auto-registered as clear.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPaneSetFollow(args[0], true)
@@ -763,7 +757,7 @@ func runPaneSetFollowDirect(tmux deps.Tmux, paneID string, follow bool) error {
 		state.Panes[paneID] = &monitor.PaneEntry{
 			PaneID:       paneID,
 			Session:      session,
-			Status:       monitor.StatusIdle,
+			Status:       monitor.StatusClear,
 			Following:    true,
 			UpdatedAt:    now,
 			LastActiveAt: now,

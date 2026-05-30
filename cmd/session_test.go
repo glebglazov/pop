@@ -278,8 +278,8 @@ func TestMarkPaneReadWith(t *testing.T) {
 		if !ok {
 			t.Fatal("pane %1 not found after mark read")
 		}
-		if entry.Status != monitor.StatusIdle {
-			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusIdle)
+		if entry.Status != monitor.StatusClear {
+			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusClear)
 		}
 	})
 
@@ -495,8 +495,8 @@ func TestDismissUnreadPaneWith(t *testing.T) {
 			t.Fatal("expected non-nil state")
 		}
 		entry := state.Panes["%1"]
-		if entry.Status != monitor.StatusIdle {
-			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusIdle)
+		if entry.Status != monitor.StatusClear {
+			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusClear)
 		}
 		if entry.LastActiveAt.IsZero() {
 			t.Error("expected LastActiveAt to be set")
@@ -537,7 +537,7 @@ func TestDismissUnreadPaneWith(t *testing.T) {
 func TestMarkPaneUnreadWith(t *testing.T) {
 	t.Run("marks pane as unread", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
-			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusIdle},
+			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusClear},
 		})
 
 		markPaneUnreadWith(d, "%1")
@@ -551,7 +551,7 @@ func TestMarkPaneUnreadWith(t *testing.T) {
 
 	t.Run("no-op for unknown pane", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
-			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusIdle},
+			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusClear},
 		})
 		markPaneUnreadWith(d, "%99") // should not panic
 	})

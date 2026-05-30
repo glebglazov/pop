@@ -158,7 +158,7 @@ func (c *Config) GetQuickAccessModifier() string {
 }
 
 // DismissUnreadInActivePane returns whether unread status should be
-// automatically downgraded to idle when the pane is currently active.
+// automatically downgraded to clear when the pane is currently active.
 // Supports both the new and deprecated config keys.
 // Defaults to false.
 func (c *Config) DismissUnreadInActivePane() bool {

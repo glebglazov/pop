@@ -82,7 +82,7 @@ _Avoid_: Hook, plugin (when you mean the whole setup, not a single file)
 
 ## Flagged ambiguities
 
-**Clear vs idle/read** — Domain term is **Clear**. The CLI still accepts `idle` and `read` as deprecated aliases; code and docs may say "idle" until renamed.
+**Clear vs idle/read** — Domain term is **Clear**. The CLI accepts `idle` and `read` as deprecated aliases; persisted state uses `"clear"`.
 
 **Dashboard vs monitor** — **Monitor** maintains the monitored set; **Dashboard** presents it. Code uses both names loosely (`monitor` package, `dashboard` command); use domain terms when writing docs or discussing behavior.
 

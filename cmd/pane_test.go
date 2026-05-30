@@ -443,8 +443,8 @@ func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
 			t.Errorf("expected %s to be auto-registered on idle (agent pane)", paneID)
 			continue
 		}
-		if entry.Status != monitor.StatusIdle {
-			t.Errorf("%s: status = %q, want %q", paneID, entry.Status, monitor.StatusIdle)
+		if entry.Status != monitor.StatusClear {
+			t.Errorf("%s: status = %q, want %q", paneID, entry.Status, monitor.StatusClear)
 		}
 		if entry.LastActiveAt.Before(before) || entry.LastActiveAt.After(after) {
 			t.Errorf("%s: LastActiveAt = %v, want between %v and %v", paneID, entry.LastActiveAt, before, after)
@@ -498,8 +498,8 @@ func TestRunPaneSetStatusWith_NoRegisterFlag(t *testing.T) {
 		t.Fatalf("unexpected error for %%3: %v", err)
 	}
 	state = loadState(t, statePath)
-	if state.Panes["%3"].Status != monitor.StatusIdle {
-		t.Errorf("%%3 status = %q, want %q (--no-register should still update tracked panes)", state.Panes["%3"].Status, monitor.StatusIdle)
+	if state.Panes["%3"].Status != monitor.StatusClear {
+		t.Errorf("%%3 status = %q, want %q (--no-register should still update tracked panes)", state.Panes["%3"].Status, monitor.StatusClear)
 	}
 }
 
@@ -543,8 +543,8 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	if !ok {
 		t.Fatal("expected %6 (zsh) to be auto-registered after read alias")
 	}
-	if entry.Status != monitor.StatusIdle {
-		t.Errorf("%%6 status = %q, want %q", entry.Status, monitor.StatusIdle)
+	if entry.Status != monitor.StatusClear {
+		t.Errorf("%%6 status = %q, want %q", entry.Status, monitor.StatusClear)
 	}
 
 	// Untracked agent pane: "read" must auto-register as idle.
@@ -556,8 +556,8 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	if !ok {
 		t.Fatal("expected %7 (claude) to be auto-registered after read alias")
 	}
-	if entry.Status != monitor.StatusIdle {
-		t.Errorf("%%7 status = %q, want %q", entry.Status, monitor.StatusIdle)
+	if entry.Status != monitor.StatusClear {
+		t.Errorf("%%7 status = %q, want %q", entry.Status, monitor.StatusClear)
 	}
 
 	// Already-tracked pane: "read" must transition it to idle.
@@ -569,8 +569,8 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	if !ok {
 		t.Fatal("expected %5 to remain tracked")
 	}
-	if entry.Status != monitor.StatusIdle {
-		t.Errorf("%%5 status = %q, want %q (read should be normalized to idle)", entry.Status, monitor.StatusIdle)
+	if entry.Status != monitor.StatusClear {
+		t.Errorf("%%5 status = %q, want %q (read should be normalized to idle)", entry.Status, monitor.StatusClear)
 	}
 }
 
@@ -640,8 +640,8 @@ func TestRunPaneSetStatusWith_IdleUpdatesRegisteredPane(t *testing.T) {
 	if !ok {
 		t.Fatal("expected %1 to remain in state")
 	}
-	if entry.Status != monitor.StatusIdle {
-		t.Errorf("got status %q, want %q", entry.Status, monitor.StatusIdle)
+	if entry.Status != monitor.StatusClear {
+		t.Errorf("got status %q, want %q", entry.Status, monitor.StatusClear)
 	}
 }
 
@@ -685,8 +685,8 @@ func TestRunPaneSetStatusWith_DismissUnreadInActivePane(t *testing.T) {
 		}
 
 		state := loadState(t, statePath)
-		if state.Panes["%1"].Status != monitor.StatusIdle {
-			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusIdle)
+		if state.Panes["%1"].Status != monitor.StatusClear {
+			t.Errorf("got %q, want %q", state.Panes["%1"].Status, monitor.StatusClear)
 		}
 	})
 
@@ -860,8 +860,8 @@ func TestRunPaneSetFollowDirect_AutoRegistersOnFollow(t *testing.T) {
 	if !entry.Following {
 		t.Error("expected Following = true")
 	}
-	if entry.Status != monitor.StatusIdle {
-		t.Errorf("auto-registered status = %q, want idle", entry.Status)
+	if entry.Status != monitor.StatusClear {
+		t.Errorf("auto-registered status = %q, want clear", entry.Status)
 	}
 	if entry.Session != "proj-a" {
 		t.Errorf("session = %q, want proj-a", entry.Session)
@@ -984,7 +984,7 @@ func TestRunPaneSetFollowDirect_NoOpWhenAlreadyAtTargetState(t *testing.T) {
 			"%4": {
 				PaneID:    "%4",
 				Session:   "proj-c",
-				Status:    monitor.StatusIdle,
+				Status:    monitor.StatusClear,
 				Following: true,
 				UpdatedAt: originalUpdatedAt,
 			},
