@@ -34,9 +34,11 @@ Example tmux binding:
 }
 
 var switchSession bool
+var worktreeYankTarget string
 
 func init() {
 	worktreeCmd.Flags().BoolVarP(&switchSession, "switch", "s", false, "Switch tmux session instead of printing path")
+	worktreeCmd.Flags().StringVar(&worktreeYankTarget, "yank-target", "", "Send yanked path to specified tmux pane instead of system clipboard")
 	rootCmd.AddCommand(worktreeCmd)
 }
 
@@ -123,6 +125,19 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		case ui.ActionRefresh:
 			restoreCursorIdx = result.CursorIndex
 			// Continue loop — items rebuild with fresh attention state
+
+		case ui.ActionYankPath:
+			if result.Selected == nil {
+				return nil
+			}
+			paneID := worktreeYankTarget
+			if paneID == "" {
+				paneID = os.Getenv("TMUX_PANE")
+			}
+			if paneID == "" {
+				return fmt.Errorf("yank target pane not set — pass --yank-target or run inside tmux")
+			}
+			return yankPathToPaneWith(defaultTmux, paneID, result.Selected.Path)
 
 		case ui.ActionUserDefinedCommand:
 			if result.UserDefinedCommand != nil && result.Selected != nil {

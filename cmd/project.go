@@ -22,6 +22,7 @@ import (
 )
 
 var tmuxCDPane string
+var yankTarget string
 var noHistory bool
 
 var projectCmd = &cobra.Command{
@@ -49,8 +50,10 @@ func init() {
 	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(selectCmd)
 	projectCmd.Flags().StringVar(&tmuxCDPane, "tmux-cd", "", "Send cd command to specified tmux pane instead of switching session")
+	projectCmd.Flags().StringVar(&yankTarget, "yank-target", "", "Send yanked path to specified tmux pane instead of system clipboard")
 	projectCmd.Flags().BoolVar(&noHistory, "no-history", false, "Do not record selection in history")
 	selectCmd.Flags().StringVar(&tmuxCDPane, "tmux-cd", "", "Send cd command to specified tmux pane instead of switching session")
+	selectCmd.Flags().StringVar(&yankTarget, "yank-target", "", "Send yanked path to specified tmux pane instead of system clipboard")
 	selectCmd.Flags().BoolVar(&noHistory, "no-history", false, "Do not record selection in history")
 }
 
@@ -77,6 +80,7 @@ type ProjectDeps struct {
 	OpenWindow       func(tmux deps.Tmux, item *ui.Item) error
 	KillSession      func(tmux deps.Tmux, name string)
 	SendCDToPane     func(tmux deps.Tmux, paneID, path string) error
+	YankPathToPane   func(tmux deps.Tmux, paneID, path string) error
 	SwitchToTarget   func(tmux deps.Tmux, target string) error
 	SwitchAndZoom    func(tmux deps.Tmux, target string) error
 	RunCustomCommand func(command string, item *ui.Item)
@@ -91,6 +95,7 @@ type ProjectDeps struct {
 
 	// CLI flags (populated by cobra handler before calling RunProject)
 	TMuxCDPane string
+	YankTarget string
 	NoHistory  bool
 }
 
@@ -120,6 +125,7 @@ func DefaultProjectDeps() *ProjectDeps {
 		OpenWindow:        openTmuxWindowWith,
 		KillSession:       killTmuxSessionWith,
 		SendCDToPane:      sendCDToPaneWith,
+		YankPathToPane:    yankPathToPaneWith,
 		SwitchToTarget:    switchToTmuxTargetWith,
 		SwitchAndZoom:     switchToTmuxTargetAndZoomWith,
 		RunCustomCommand:  executeProjectCustomCommand,
@@ -138,6 +144,7 @@ func DefaultProjectDeps() *ProjectDeps {
 func runProject(cmd *cobra.Command, args []string) error {
 	d := DefaultProjectDeps()
 	d.TMuxCDPane = tmuxCDPane
+	d.YankTarget = yankTarget
 	d.NoHistory = noHistory
 	return RunProject(d)
 }
@@ -337,6 +344,19 @@ func RunProject(d *ProjectDeps) error {
 				}
 			}
 			return d.OpenWindow(d.Tmux, result.Selected)
+
+		case ui.ActionYankPath:
+			if result.Selected == nil {
+				return nil
+			}
+			paneID := d.YankTarget
+			if paneID == "" {
+				paneID = os.Getenv("TMUX_PANE")
+			}
+			if paneID == "" {
+				return fmt.Errorf("yank target pane not set — pass --yank-target or run inside tmux")
+			}
+			return d.YankPathToPane(d.Tmux, paneID, result.Selected.Path)
 
 		case ui.ActionKillSession:
 			if result.Selected != nil {
@@ -588,6 +608,11 @@ func sendCDToPane(paneID, path string) error {
 
 func sendCDToPaneWith(tmux deps.Tmux, paneID, path string) error {
 	_, err := tmux.Command("send-keys", "-t", paneID, fmt.Sprintf("cd %q && clear", path), "Enter")
+	return err
+}
+
+func yankPathToPaneWith(tmux deps.Tmux, paneID, path string) error {
+	_, err := tmux.Command("send-keys", "-t", paneID, path)
 	return err
 }
 

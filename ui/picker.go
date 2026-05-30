@@ -56,6 +56,7 @@ const (
 	ActionOpenWindow
 	ActionUserDefinedCommand
 	ActionRefresh
+	ActionYankPath
 )
 
 // Picker is a fuzzy-searchable list picker
@@ -400,6 +401,15 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, tea.Quit
 			}
 
+		case key.Matches(msg, keys.YankPath):
+			if len(p.filtered) > 0 {
+				p.result = Result{
+					Selected: &p.filtered[p.cursor],
+					Action:   ActionYankPath,
+				}
+				return p, tea.Quit
+			}
+
 		case key.Matches(msg, keys.ClearInput):
 			p.input.SetValue("")
 			p.filter()
@@ -669,6 +679,7 @@ func (p *Picker) viewHelp() string {
 	if p.showDelete && !p.isKeyOverridden("ctrl+d") {
 		entries = append(entries, helpEntry{"C-d", "Delete"})
 	}
+	entries = append(entries, helpEntry{"C-y", "Yank path to pane"})
 	if p.showDelete && !p.isKeyOverridden("ctrl+x") {
 		entries = append(entries, helpEntry{"C-x", "Force delete"})
 	}
@@ -887,6 +898,7 @@ type keyMap struct {
 	OpenWindow        key.Binding
 	ClearInput        key.Binding
 	Help              key.Binding
+	YankPath          key.Binding
 }
 
 var keys = keyMap{
@@ -928,5 +940,8 @@ var keys = keyMap{
 	),
 	Help: key.NewBinding(
 		key.WithKeys("f1"),
+	),
+	YankPath: key.NewBinding(
+		key.WithKeys("ctrl+y"),
 	),
 }
