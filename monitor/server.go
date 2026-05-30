@@ -13,6 +13,7 @@ type Request struct {
 	Cmd        string `json:"cmd"`
 	PaneID     string `json:"pane_id"`
 	Status     string `json:"status"`
+	Label      string `json:"label,omitempty"`
 	Source     string `json:"source,omitempty"`
 	NoRegister bool   `json:"no_register,omitempty"`
 	// Following is used by the "set-following" command. A pointer so that

@@ -42,6 +42,7 @@ func init() {
 	paneCmd.AddCommand(paneSetStatusCmd)
 	paneSetStatusCmd.Flags().String("source", "", "source identifier for filtering (e.g. tmux-global)")
 	paneSetStatusCmd.Flags().Bool("no-register", false, "only update already-tracked panes, never auto-register new ones")
+	paneSetStatusCmd.Flags().String("label", "", "display label for dashboard (e.g. cursor, claude); overrides tmux pane_current_command")
 	paneCmd.AddCommand(paneStatusCmd)
 	paneCmd.AddCommand(paneFollowCmd)
 	paneCmd.AddCommand(paneUnfollowCmd)
@@ -451,6 +452,11 @@ Auto-registration:
   call. The new entry is seeded with LastActiveAt=now so it sorts to the
   bottom of its status group in the dashboard (closest to the cursor).
 
+  Use --label to override the dashboard display (e.g. --label cursor).
+  By default the label comes from tmux pane_current_command, which is
+  often misleading for Node-based agents (shows "node" instead of the
+  agent name).
+
   Callers that do not want to register new panes (e.g. tmux-global
   auto-read hooks) should pass --no-register.
 
@@ -474,10 +480,11 @@ func runPaneSetStatus(cmd *cobra.Command, args []string) error {
 	}
 	source, _ := cmd.Flags().GetString("source")
 	noRegister, _ := cmd.Flags().GetBool("no-register")
-	return runPaneSetStatusWith(defaultTmux, cfg, source, noRegister, args)
+	label, _ := cmd.Flags().GetString("label")
+	return runPaneSetStatusWith(defaultTmux, cfg, source, noRegister, label, args)
 }
 
-func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noRegister bool, args []string) error {
+func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noRegister bool, label string, args []string) error {
 	debug.Init()
 	defer debug.Close()
 
@@ -504,13 +511,14 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noR
 	// skip the dial entirely and write state directly — no daemon round-trip,
 	// no "connection refused" fallback noise in the debug log.
 	if !cfg.PaneMonitoringTCPServer() {
-		return runPaneSetStatusDirect(tmux, cfg, paneID, rawStatus, source, noRegister)
+		return runPaneSetStatusDirect(tmux, cfg, paneID, rawStatus, source, noRegister, label)
 	}
 
 	req := monitor.Request{
 		Cmd:        "set-status",
 		PaneID:     paneID,
 		Status:     rawStatus,
+		Label:      label,
 		Source:     source,
 		NoRegister: noRegister,
 	}
@@ -521,7 +529,7 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noR
 		debug.Error("pane set-status: socket send failed, falling back to direct write: %v", err)
 		// Ensure daemon is starting for next call.
 		go ensureMonitorDaemon()
-		return runPaneSetStatusDirect(tmux, cfg, paneID, rawStatus, source, noRegister)
+		return runPaneSetStatusDirect(tmux, cfg, paneID, rawStatus, source, noRegister, label)
 	}
 
 	if !resp.OK {
@@ -532,7 +540,7 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noR
 
 // runPaneSetStatusDirect is the fallback path used when the daemon socket
 // is unavailable (cold start). Contains the same logic as the daemon handler.
-func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatus, source string, noRegister bool) error {
+func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatus, source string, noRegister bool, label string) error {
 	status := monitor.PaneStatus(rawStatus)
 	if status == "read" {
 		status = monitor.StatusIdle
@@ -564,15 +572,19 @@ func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatu
 		}
 		debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s (direct)", paneID, session, cmdName, status)
 		now := time.Now()
-		state.Panes[paneID] = &monitor.PaneEntry{
+		entry := &monitor.PaneEntry{
 			PaneID:       paneID,
 			Session:      session,
 			Status:       status,
 			UpdatedAt:    now,
 			LastActiveAt: now,
 		}
+		applyPaneLabel(entry, label)
+		state.Panes[paneID] = entry
 		return state.Save()
 	}
+
+	applyPaneLabel(entry, label)
 
 	visitedNow := false
 	if status == monitor.StatusIdle {

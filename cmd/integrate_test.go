@@ -938,6 +938,10 @@ func TestIntegrateCursor_FreshHooks(t *testing.T) {
 			t.Errorf("missing hooks for event %q", event)
 		}
 	}
+	firstHook := hooks["sessionStart"].([]interface{})[0].(map[string]interface{})
+	if cmd := firstHook["command"].(string); !strings.Contains(cmd, "--label cursor") {
+		t.Errorf("sessionStart hook = %q, want --label cursor", cmd)
+	}
 }
 
 func TestIntegrateCursor_PreservesExistingHooks(t *testing.T) {

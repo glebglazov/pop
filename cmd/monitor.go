@@ -181,18 +181,22 @@ func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) moni
 		}
 		debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s", paneID, session, cmdName, status)
 		now := time.Now()
-		state.Panes[paneID] = &monitor.PaneEntry{
+		entry := &monitor.PaneEntry{
 			PaneID:       paneID,
 			Session:      session,
 			Status:       status,
 			UpdatedAt:    now,
 			LastActiveAt: now,
 		}
+		applyPaneLabel(entry, req.Label)
+		state.Panes[paneID] = entry
 		if err := state.Save(); err != nil {
 			return monitor.Response{OK: false, Error: "save state: " + err.Error()}
 		}
 		return monitor.Response{OK: true}
 	}
+
+	applyPaneLabel(entry, req.Label)
 
 	visitedNow := false
 	if status == monitor.StatusIdle {

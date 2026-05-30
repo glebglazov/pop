@@ -169,14 +169,7 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 	// Build panes with status
 	panes := make([]ui.AttentionPane, 0, len(entries))
 	for _, entry := range entries {
-		var name string
-		if entry.Note != "" {
-			name = entry.Session + " (" + entry.Note + ")"
-		} else if cmd, ok := paneCommands[entry.PaneID]; ok {
-			name = entry.Session + " (" + entry.PaneID + ", " + cmd + ")"
-		} else {
-			name = entry.Session + " (" + entry.PaneID + ")"
-		}
+		name := paneAttentionName(entry, paneCommands)
 
 		var status ui.AttentionStatus
 		switch entry.Status {
@@ -411,4 +404,31 @@ func pathBase(path string) string {
 		}
 	}
 	return path
+}
+
+// applyPaneLabel stores an optional display label on a pane entry. Hooks pass
+// --label so the dashboard shows "cursor" instead of tmux's pane_current_command
+// (often "node" for Node-based agents).
+func applyPaneLabel(entry *monitor.PaneEntry, label string) {
+	if label != "" {
+		entry.Label = label
+	}
+}
+
+// paneProcessLabel returns the process label shown in dashboard names.
+func paneProcessLabel(entry *monitor.PaneEntry, paneCommands map[string]string) string {
+	if entry.Label != "" {
+		return entry.Label
+	}
+	return paneCommands[entry.PaneID]
+}
+
+func paneAttentionName(entry *monitor.PaneEntry, paneCommands map[string]string) string {
+	if entry.Note != "" {
+		return entry.Session + " (" + entry.Note + ")"
+	}
+	if cmd := paneProcessLabel(entry, paneCommands); cmd != "" {
+		return entry.Session + " (" + entry.PaneID + ", " + cmd + ")"
+	}
+	return entry.Session + " (" + entry.PaneID + ")"
 }

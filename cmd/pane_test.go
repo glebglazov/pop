@@ -427,7 +427,7 @@ func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
 
 	before := time.Now()
 	for _, paneID := range []string{"%20", "%21", "%22", "%23"} {
-		if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{paneID, "idle"}); err != nil {
+		if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{paneID, "idle"}); err != nil {
 			t.Fatalf("unexpected error for %s: %v", paneID, err)
 		}
 	}
@@ -481,7 +481,7 @@ func TestRunPaneSetStatusWith_NoRegisterFlag(t *testing.T) {
 
 	// Untracked panes with --no-register: must not register (any command).
 	for _, paneID := range []string{"%1", "%4"} {
-		if err := runPaneSetStatusWith(tmux, cfg, "", true, []string{paneID, "read"}); err != nil {
+		if err := runPaneSetStatusWith(tmux, cfg, "", true, "", []string{paneID, "read"}); err != nil {
 			t.Fatalf("unexpected error for %s: %v", paneID, err)
 		}
 	}
@@ -494,7 +494,7 @@ func TestRunPaneSetStatusWith_NoRegisterFlag(t *testing.T) {
 	}
 
 	// Tracked pane with --no-register: must still update status.
-	if err := runPaneSetStatusWith(tmux, cfg, "", true, []string{"%3", "idle"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", true, "", []string{"%3", "idle"}); err != nil {
 		t.Fatalf("unexpected error for %%3: %v", err)
 	}
 	state = loadState(t, statePath)
@@ -535,7 +535,7 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	cfg := &config.Config{}
 
 	// Untracked pane: "read" must auto-register as idle.
-	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%6", "read"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%6", "read"}); err != nil {
 		t.Fatalf("unexpected error for %%6: %v", err)
 	}
 	state := loadState(t, statePath)
@@ -548,7 +548,7 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	}
 
 	// Untracked agent pane: "read" must auto-register as idle.
-	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%7", "read"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%7", "read"}); err != nil {
 		t.Fatalf("unexpected error for %%7: %v", err)
 	}
 	state = loadState(t, statePath)
@@ -561,7 +561,7 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 	}
 
 	// Already-tracked pane: "read" must transition it to idle.
-	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%5", "read"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%5", "read"}); err != nil {
 		t.Fatalf("unexpected error for %%5: %v", err)
 	}
 	state = loadState(t, statePath)
@@ -599,7 +599,7 @@ func TestRunPaneSetStatusWith_AutoRegisterSeedsLastActiveAt(t *testing.T) {
 	cfg := &config.Config{}
 
 	before := time.Now()
-	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%7", "working"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%7", "working"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	after := time.Now()
@@ -631,7 +631,7 @@ func TestRunPaneSetStatusWith_IdleUpdatesRegisteredPane(t *testing.T) {
 	}
 	cfg := &config.Config{}
 
-	if err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%1", "idle"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%1", "idle"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -660,7 +660,7 @@ func TestRunPaneSetStatusWith_DismissUnreadInActivePane(t *testing.T) {
 		statePath := setupStateFile(t, "%1", monitor.StatusWorking)
 		cfg := &config.Config{}
 
-		err := runPaneSetStatusWith(activeTmux, cfg, "", false, []string{"%1", "unread"})
+		err := runPaneSetStatusWith(activeTmux, cfg, "", false, "", []string{"%1", "unread"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -679,7 +679,7 @@ func TestRunPaneSetStatusWith_DismissUnreadInActivePane(t *testing.T) {
 			},
 		}
 
-		err := runPaneSetStatusWith(activeTmux, cfg, "", false, []string{"%1", "unread"})
+		err := runPaneSetStatusWith(activeTmux, cfg, "", false, "", []string{"%1", "unread"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -706,7 +706,7 @@ func TestRunPaneSetStatusWith_DismissUnreadInActivePane(t *testing.T) {
 			},
 		}
 
-		err := runPaneSetStatusWith(inactiveTmux, cfg, "", false, []string{"%1", "unread"})
+		err := runPaneSetStatusWith(inactiveTmux, cfg, "", false, "", []string{"%1", "unread"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -734,7 +734,7 @@ func TestRunPaneSetStatusWith_LegacyNeedsAttentionAlias(t *testing.T) {
 	statePath := setupStateFile(t, "%1", monitor.StatusWorking)
 	cfg := &config.Config{}
 
-	err := runPaneSetStatusWith(tmux, cfg, "", false, []string{"%1", "needs_attention"})
+	err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%1", "needs_attention"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -742,6 +742,44 @@ func TestRunPaneSetStatusWith_LegacyNeedsAttentionAlias(t *testing.T) {
 	state := loadState(t, statePath)
 	if got := state.Panes["%1"].Status; got != monitor.StatusUnread {
 		t.Errorf("legacy 'needs_attention' alias: got %q, want %q", got, monitor.StatusUnread)
+	}
+}
+
+func TestRunPaneSetStatusWith_StoresLabel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "monitor.json")
+	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
+	data, _ := json.Marshal(emptyState)
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmux := newPaneInfoMockTmux(map[string]string{
+		"%9": "proj-x\tnode",
+	})
+	cfg := &config.Config{}
+
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, "cursor", []string{"%9", "idle"}); err != nil {
+		t.Fatal(err)
+	}
+
+	state := loadState(t, statePath)
+	entry := state.Panes["%9"]
+	if entry == nil {
+		t.Fatal("expected pane to be registered")
+	}
+	if entry.Label != "cursor" {
+		t.Errorf("label = %q, want cursor", entry.Label)
+	}
+
+	name := paneAttentionName(entry, map[string]string{"%9": "node"})
+	if name != "proj-x (%9, cursor)" {
+		t.Errorf("dashboard name = %q, want proj-x (%%9, cursor)", name)
 	}
 }
 

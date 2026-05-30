@@ -550,10 +550,10 @@ type cursorHookSpec struct {
 // cursorPopHooks defines the hook commands installed into Cursor's hooks.json.
 // Event names follow the Cursor CLI hooks schema (camelCase).
 var cursorPopHooks = []cursorHookSpec{
-	{"sessionStart", "pop pane set-status idle 2>/dev/null || true"},
-	{"beforeSubmitPrompt", "pop pane set-status working 2>/dev/null || true"},
-	{"preToolUse", "pop pane set-status working 2>/dev/null || true"},
-	{"stop", "pop pane set-status unread 2>/dev/null || true"},
+	{"sessionStart", "pop pane set-status idle --label cursor 2>/dev/null || true"},
+	{"beforeSubmitPrompt", "pop pane set-status working --label cursor 2>/dev/null || true"},
+	{"preToolUse", "pop pane set-status working --label cursor 2>/dev/null || true"},
+	{"stop", "pop pane set-status unread --label cursor 2>/dev/null || true"},
 }
 
 func integrateCursor(d *integrateDeps) error {

@@ -40,6 +40,7 @@ type PaneEntry struct {
 	PaneID       string     `json:"pane_id"`
 	Session      string     `json:"session"`
 	Status       PaneStatus `json:"status"`
+	Label        string     `json:"label,omitempty"`
 	Following    bool       `json:"following,omitempty"`
 	Note         string     `json:"note,omitempty"`
 	UpdatedAt    time.Time  `json:"updated_at"`

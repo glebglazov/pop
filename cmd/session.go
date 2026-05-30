@@ -151,7 +151,7 @@ func buildAttentionPanes() []ui.AttentionPane {
 	panes := make([]ui.AttentionPane, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.PaneID
-		if cmd, ok := paneCommands[entry.PaneID]; ok {
+		if cmd := paneProcessLabel(entry, paneCommands); cmd != "" {
 			name = entry.PaneID + " (" + cmd + ")"
 		}
 		panes = append(panes, ui.AttentionPane{
