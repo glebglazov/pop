@@ -397,12 +397,12 @@ func TestRunPaneCreateWith(t *testing.T) {
 	})
 }
 
-func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
-	// When an agent extension fires its housekeeping `set-status idle` on
+func TestRunPaneSetStatusWith_ClearRegistersAgentPanes(t *testing.T) {
+	// When an agent extension fires its housekeeping `set-status clear` on
 	// plugin load, the pane IS running the agent (opencode, claude, pi,
 	// node, ...), not a bare shell. Those panes must be auto-registered
 	// right away so they show
-	// up on the dashboard as idle immediately, even before the agent sends
+	// up on the dashboard as clear immediately, even before the agent sends
 	// its first working / unread update.
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
@@ -427,7 +427,7 @@ func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
 
 	before := time.Now()
 	for _, paneID := range []string{"%20", "%21", "%22", "%23"} {
-		if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{paneID, "idle"}); err != nil {
+		if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{paneID, "clear"}); err != nil {
 			t.Fatalf("unexpected error for %s: %v", paneID, err)
 		}
 	}
@@ -440,7 +440,7 @@ func TestRunPaneSetStatusWith_IdleRegistersAgentPanes(t *testing.T) {
 	for _, paneID := range []string{"%20", "%21", "%22", "%23"} {
 		entry, ok := state.Panes[paneID]
 		if !ok {
-			t.Errorf("expected %s to be auto-registered on idle (agent pane)", paneID)
+			t.Errorf("expected %s to be auto-registered on clear (agent pane)", paneID)
 			continue
 		}
 		if entry.Status != monitor.StatusClear {
@@ -503,11 +503,11 @@ func TestRunPaneSetStatusWith_NoRegisterFlag(t *testing.T) {
 	}
 }
 
-func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
-	// "read" is the deprecated CLI alias for "idle". Calling
-	// `set-status read` must behave identically to `set-status idle`:
-	//   - on an untracked pane: auto-registers as idle
-	//   - on an already-tracked pane: updates status to idle
+func TestRunPaneSetStatusWith_ReadIsAliasForClear(t *testing.T) {
+	// "read" is a deprecated CLI alias for "clear". Calling
+	// `set-status read` must behave identically to `set-status clear`:
+	//   - on an untracked pane: auto-registers as clear
+	//   - on an already-tracked pane: updates status to clear
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
 	stateDir := filepath.Join(dir, "pop")
@@ -529,12 +529,12 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 
 	tmux := newPaneInfoMockTmux(map[string]string{
 		"%5": "test-session\tclaude", // already tracked; command irrelevant
-		"%6": "test-session\tzsh",    // untracked → must register as idle
-		"%7": "test-session\tclaude", // untracked → must register as idle
+		"%6": "test-session\tzsh",    // untracked → must register as clear
+		"%7": "test-session\tclaude", // untracked → must register as clear
 	})
 	cfg := &config.Config{}
 
-	// Untracked pane: "read" must auto-register as idle.
+	// Untracked pane: "read" must auto-register as clear.
 	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%6", "read"}); err != nil {
 		t.Fatalf("unexpected error for %%6: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 		t.Errorf("%%6 status = %q, want %q", entry.Status, monitor.StatusClear)
 	}
 
-	// Untracked agent pane: "read" must auto-register as idle.
+	// Untracked agent pane: "read" must auto-register as clear.
 	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%7", "read"}); err != nil {
 		t.Fatalf("unexpected error for %%7: %v", err)
 	}
@@ -560,7 +560,7 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 		t.Errorf("%%7 status = %q, want %q", entry.Status, monitor.StatusClear)
 	}
 
-	// Already-tracked pane: "read" must transition it to idle.
+	// Already-tracked pane: "read" must transition it to clear.
 	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%5", "read"}); err != nil {
 		t.Fatalf("unexpected error for %%5: %v", err)
 	}
@@ -570,7 +570,7 @@ func TestRunPaneSetStatusWith_ReadIsAliasForIdle(t *testing.T) {
 		t.Fatal("expected %5 to remain tracked")
 	}
 	if entry.Status != monitor.StatusClear {
-		t.Errorf("%%5 status = %q, want %q (read should be normalized to idle)", entry.Status, monitor.StatusClear)
+		t.Errorf("%%5 status = %q, want %q (read should be normalized to clear)", entry.Status, monitor.StatusClear)
 	}
 }
 
@@ -617,11 +617,11 @@ func TestRunPaneSetStatusWith_AutoRegisterSeedsLastActiveAt(t *testing.T) {
 	}
 }
 
-func TestRunPaneSetStatusWith_IdleUpdatesRegisteredPane(t *testing.T) {
-	// The flip side of IdleDoesNotAutoRegister: a pane that IS already
-	// tracked should still be transitioned to idle. This is what lets the
+func TestRunPaneSetStatusWith_ClearUpdatesRegisteredPane(t *testing.T) {
+	// A pane that IS already tracked should still be transitioned to clear.
+	// This is what lets the
 	// extensions clear a stale "working" status (e.g. left over from a
-	// crashed previous run) by calling setStatus("idle") on plugin load.
+	// crashed previous run) by calling setStatus("clear") on plugin load.
 	statePath := setupStateFile(t, "%1", monitor.StatusWorking)
 
 	tmux := &deps.MockTmux{
@@ -631,7 +631,7 @@ func TestRunPaneSetStatusWith_IdleUpdatesRegisteredPane(t *testing.T) {
 	}
 	cfg := &config.Config{}
 
-	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%1", "idle"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%1", "clear"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -671,7 +671,7 @@ func TestRunPaneSetStatusWith_DismissUnreadInActivePane(t *testing.T) {
 		}
 	})
 
-	t.Run("dismiss_unread_in_active_pane downgrades to idle", func(t *testing.T) {
+	t.Run("dismiss_unread_in_active_pane downgrades to clear", func(t *testing.T) {
 		statePath := setupStateFile(t, "%1", monitor.StatusWorking)
 		cfg := &config.Config{
 			PaneMonitoring: &config.PaneMonitoringConfig{
@@ -764,7 +764,7 @@ func TestRunPaneSetStatusWith_StoresLabel(t *testing.T) {
 	})
 	cfg := &config.Config{}
 
-	if err := runPaneSetStatusWith(tmux, cfg, "", false, "cursor", []string{"%9", "idle"}); err != nil {
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, "cursor", []string{"%9", "clear"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -828,7 +828,7 @@ func TestResolvePaneArg(t *testing.T) {
 }
 
 func TestRunPaneSetFollowDirect_AutoRegistersOnFollow(t *testing.T) {
-	// follow on an untracked pane auto-registers it as idle+following.
+	// follow on an untracked pane auto-registers it as clear+following.
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
 	stateDir := filepath.Join(dir, "pop")

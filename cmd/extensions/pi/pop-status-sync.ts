@@ -6,7 +6,7 @@
  *   - working → pi is busy (user submitted input, or a tool is running)
  *   - unread  → pi finished a turn, awaiting the user
  *
- * `idle` is sent on `session_start` to clear any stale "working" status
+ * `clear` is sent on `session_start` to clear any stale "working" status
  * left over from a crashed previous run.
  *
  * Installed by `pop integrate pi` to ~/.pi/agent/extensions/pop-status-sync.ts.
@@ -18,7 +18,7 @@ export default function (pi: ExtensionAPI) {
 	const paneID = process.env.TMUX_PANE;
 	if (!paneID) return;
 
-	const setStatus = (status: "working" | "unread" | "idle") => {
+	const setStatus = (status: "working" | "unread" | "clear") => {
 		// Fire-and-forget; swallow errors so a missing `pop` binary never
 		// breaks the agent.
 		pi.exec("pop", ["pane", "set-status", paneID, status]).catch(() => {});
@@ -45,9 +45,8 @@ export default function (pi: ExtensionAPI) {
 
 	// Housekeeping: clear any stale "working" status left over from a
 	// previous run on session start, so a freshly resumed pane isn't stuck
-	// "working". Pop treats `idle` as a no-op for untracked panes, so this
-	// cannot register a brand-new pane and skew the dashboard sort.
+	// "working".
 	pi.on("session_start", async () => {
-		setStatus("idle");
+		setStatus("clear");
 	});
 }

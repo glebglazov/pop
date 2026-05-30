@@ -6,7 +6,7 @@
  *   - working → opencode is busy (a tool is running / agent is mid-turn)
  *   - unread  → opencode finished a turn, awaiting the user
  *
- * `idle` is sent on plugin load and on session.created/deleted to clear any
+ * `clear` is sent on plugin load and on session.created/deleted to clear any
  * stale "working" status left over from a crashed previous run.
  *
  * Installed by `pop integrate opencode` to ~/.config/opencode/plugins/pop-status-sync.ts.
@@ -16,14 +16,14 @@ export const PopStatusSync = async ({ $ }) => {
 	const paneID = process.env.TMUX_PANE;
 	if (!paneID) return {};
 
-	const setStatus = (status: "idle" | "working" | "unread") => {
+	const setStatus = (status: "clear" | "working" | "unread") => {
 		// Fire-and-forget; swallow errors so a missing `pop` binary never
 		// breaks the agent.
 		$`pop pane set-status ${paneID} ${status}`.catch(() => {});
 	};
 
 	// Clear any stale "working" status left over from a previous run.
-	setStatus("idle");
+	setStatus("clear");
 
 	// Dedupe redundant transitions: `tool.execute.before` (named hook) and
 	// `session.status` (event handler) can both fire for the same busy period,
@@ -39,9 +39,9 @@ export const PopStatusSync = async ({ $ }) => {
 		working = false;
 		setStatus("unread");
 	};
-	const markIdle = () => {
+	const markClear = () => {
 		working = false;
-		setStatus("idle");
+		setStatus("clear");
 	};
 
 	return {
@@ -50,7 +50,7 @@ export const PopStatusSync = async ({ $ }) => {
 			case "session.created":
 			case "session.deleted":
 				// Housekeeping — clear stale status.
-				markIdle();
+					markClear();
 				break;
 			case "session.idle":
 				// Agent finished a turn — flag the user.

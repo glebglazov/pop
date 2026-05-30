@@ -458,7 +458,7 @@ Auto-registration:
   agent name).
 
   Callers that do not want to register new panes (e.g. tmux-global
-  auto-read hooks) should pass --no-register.
+  auto-clear hooks) should pass --no-register.
 
 Special behavior:
   When [pane_monitoring] dismiss_unread_in_active_pane = true,

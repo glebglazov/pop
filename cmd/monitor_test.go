@@ -519,7 +519,7 @@ func loadStateFromPath(t *testing.T, path string) *monitor.State {
 	return state
 }
 
-func TestUninstallTmuxAutoReadHooksWith(t *testing.T) {
+func TestUninstallTmuxAutoClearHooksWith(t *testing.T) {
 	var removedHooks []string
 	tmux := &deps.MockTmux{
 		CommandFunc: func(args ...string) (string, error) {
@@ -535,7 +535,7 @@ func TestUninstallTmuxAutoReadHooksWith(t *testing.T) {
 		},
 	}
 
-	uninstallTmuxAutoReadHooksWith(tmux)
+	uninstallTmuxAutoClearHooksWith(tmux)
 
 	if len(removedHooks) != 2 {
 		t.Fatalf("removed %d hooks, want 2", len(removedHooks))

@@ -83,9 +83,9 @@ Available environment variables: `POP_WORKTREE_PATH`, `POP_WORKTREE_NAME`, `POP_
 
 | Key | Action |
 |-----|--------|
-| `enter` | Switch to pane (mark as read) |
+| `enter` | Switch to pane (mark as clear) |
 | `shift-enter` | Peek pane (keep unread) |
-| `ctrl-r` | Toggle read/unread |
+| `ctrl-r` | Toggle clear/unread |
 | `ctrl-f` | Toggle follow |
 
 ## Pane monitoring

@@ -204,7 +204,7 @@ type hookSpec struct {
 // Each entry is a (event, command) pair; the matcher is left empty so the
 // hook fires for every tool / event.
 var popHooks = []hookSpec{
-	{"SessionStart", "pop pane set-status idle 2>/dev/null || true"},
+	{"SessionStart", "pop pane set-status clear 2>/dev/null || true"},
 	{"UserPromptSubmit", "pop pane set-status working 2>/dev/null || true"},
 	{"PreToolUse", "pop pane set-status working 2>/dev/null || true"},
 	{"Stop", "pop pane set-status unread 2>/dev/null || true"},
@@ -346,7 +346,7 @@ func installJSONHooks(d *integrateDeps, settingsPath string, hooksToInstall []ho
 // ----- Codex integration -----------------------------------------------------
 
 var codexPopHooks = []hookSpec{
-	{"SessionStart", "pop pane set-status idle 2>/dev/null || true"},
+	{"SessionStart", "pop pane set-status clear 2>/dev/null || true"},
 	{"UserPromptSubmit", "pop pane set-status working 2>/dev/null || true"},
 	{"PreToolUse", "pop pane set-status working 2>/dev/null || true"},
 	{"PermissionRequest", "pop pane set-status unread 2>/dev/null || true"},
@@ -550,7 +550,7 @@ type cursorHookSpec struct {
 // cursorPopHooks defines the hook commands installed into Cursor's hooks.json.
 // Event names follow the Cursor CLI hooks schema (camelCase).
 var cursorPopHooks = []cursorHookSpec{
-	{"sessionStart", "pop pane set-status idle --label cursor 2>/dev/null || true"},
+	{"sessionStart", "pop pane set-status clear --label cursor 2>/dev/null || true"},
 	{"beforeSubmitPrompt", "pop pane set-status working --label cursor 2>/dev/null || true"},
 	{"preToolUse", "pop pane set-status working --label cursor 2>/dev/null || true"},
 	{"stop", "pop pane set-status unread --label cursor 2>/dev/null || true"},

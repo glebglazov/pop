@@ -260,23 +260,23 @@ func TestMonitorAttentionSessionsWith(t *testing.T) {
 	})
 }
 
-func TestMarkPaneReadWith(t *testing.T) {
-	t.Run("marks pane as read", func(t *testing.T) {
+func TestMarkPaneClearWith(t *testing.T) {
+	t.Run("marks pane as clear", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
 			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusUnread},
 			"%2": {PaneID: "%2", Session: "proj", Status: monitor.StatusWorking},
 		})
 
-		markPaneReadWith(d, "%1")
+		markPaneClearWith(d, "%1")
 
 		// Reload state to verify the write
 		state := loadMonitorStateWith(d)
 		if state == nil {
-			t.Fatal("expected non-nil state after mark read")
+			t.Fatal("expected non-nil state after mark clear")
 		}
 		entry, ok := state.Panes["%1"]
 		if !ok {
-			t.Fatal("pane %1 not found after mark read")
+			t.Fatal("pane %1 not found after mark clear")
 		}
 		if entry.Status != monitor.StatusClear {
 			t.Errorf("status = %q, want %q", entry.Status, monitor.StatusClear)
@@ -289,13 +289,13 @@ func TestMarkPaneReadWith(t *testing.T) {
 		})
 
 		// Should not panic or error
-		markPaneReadWith(d, "%99")
+		markPaneClearWith(d, "%99")
 	})
 
 	t.Run("no-op when daemon not running", func(t *testing.T) {
 		d := mockMonitorDepsNotRunning()
 		// Should not panic
-		markPaneReadWith(d, "%1")
+		markPaneClearWith(d, "%1")
 	})
 }
 
@@ -483,7 +483,7 @@ func TestUnmonitorPaneWith(t *testing.T) {
 }
 
 func TestDismissUnreadPaneWith(t *testing.T) {
-	t.Run("transitions unread to idle and sets LastActiveAt", func(t *testing.T) {
+	t.Run("transitions unread to clear and sets LastActiveAt", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
 			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusUnread},
 		})

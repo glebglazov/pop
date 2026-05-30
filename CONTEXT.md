@@ -42,6 +42,10 @@ _Avoid_: Needs attention
 No attention is required — either you've acknowledged the pane or nothing new is pending.
 _Avoid_: Idle, read
 
+**Active pane**:
+A pane currently visible to the user in tmux. A pane may be **Active** regardless of whether its status is **Working**, **Unread**, or **Clear**.
+_Avoid_: Working pane, focused pane
+
 **Dashboard**:
 The presentation of the monitored set of panes — a browsable view of registered panes, their status, and visit times. `pop dashboard` opens this view.
 _Avoid_: Monitor (when you mean the tracking mechanism, not the view)
@@ -51,7 +55,7 @@ The subsystem that maintains the monitored set of registered panes — tracking 
 _Avoid_: Dashboard (when you mean the view, not the mechanism)
 
 **Agentic pane**:
-A pane running an AI coding agent or its runtime (e.g. Claude, OpenCode, Pi). These panes self-register with the monitor via integrations and appear on the dashboard. Plain shell panes are not agentic and are not registered unless you explicitly track them.
+A pane running an AI coding agent or its runtime (e.g. Claude, OpenCode, Pi). Integrations cause these panes to self-register with the **Monitor**; other panes may also be tracked explicitly.
 _Avoid_: Agent pane, bot pane
 
 ### Pickers
@@ -65,7 +69,7 @@ The fuzzy-search picker in `pop worktree` for choosing, creating, or deleting gi
 _Avoid_: Repo picker
 
 **History**:
-The persisted record of projects you've accessed, with timestamps. Used for recency sorting in the project picker and visit ordering on the dashboard.
+The persisted record of projects you've selected, with timestamps.
 _Avoid_: Recents, access log
 
 **Unread view**:
@@ -77,22 +81,25 @@ Recording interaction with a pane — focus, switch, or an explicit `pop pane vi
 _Avoid_: Acknowledgment, last seen
 
 **Following**:
-A dashboard-scoped way to mark a pane for ongoing interest. Followed panes persist across sessions; following mode filters the dashboard to show only followed panes.
+A dashboard-scoped mark for ongoing interest in a tracked pane. The mark persists across dashboard openings while the pane exists; following mode filters the dashboard to show only followed panes.
 _Avoid_: Pin, watch
 
 **Integration**:
 An agent setup that connects a coding tool (Claude, Pi, OpenCode) to the monitor, so its pane self-reports status. Installed via `pop integrate <agent>`.
 _Avoid_: Hook, plugin (when you mean the whole setup, not a single file)
 
-## Flagged ambiguities
+## Deprecated aliases
 
-**Clear vs idle/read** — Domain term is **Clear**. The CLI accepts `idle` and `read` as deprecated aliases; persisted state uses `"clear"`.
+- `idle`, `read` → **Clear**
+- `needs_attention` → **Unread**
+
+## Flagged ambiguities
 
 **Dashboard vs monitor** — **Monitor** maintains the monitored set; **Dashboard** presents it. Code uses both names loosely (`monitor` package, `dashboard` command); use domain terms when writing docs or discussing behavior.
 
-**Unread vs needs_attention** — Domain term is **Unread**. `needs_attention` is a deprecated CLI alias.
+**Visit vs status change** — A **Visit** records interaction with a pane without changing its status. Changing a pane to **Clear** records that no attention is required. Some navigation actions intentionally do both.
 
-**Visit vs clear** — **Visit** records interaction (updates last-active time). **Clear** is a status meaning no attention is required. Switching to an unread pane on the dashboard typically both visits and clears it.
+**Active vs working** — An **Active pane** is currently visible to the user. A **Working** pane has an agent or process actively running. A pane may be either, both, or neither.
 
 ## Example dialogue
 
@@ -106,7 +113,7 @@ _Avoid_: Hook, plugin (when you mean the whole setup, not a single file)
 >
 > **Dev:** My Claude pane finished — the integration marked it Unread. Do I visit it or clear it?
 >
-> **Expert:** Different things. **Unread** is the status — something needs your attention. A **visit** records that you interacted with the pane. When you switch to it on the **dashboard**, that typically clears it to **Clear**.
+> **Expert:** Different things. **Unread** is the status — something needs your attention. A **visit** records that you interacted with the pane without changing its status. When you switch to it on the **dashboard**, that typically also clears it to **Clear**.
 >
 > **Dev:** Is the dashboard the same as the monitor?
 >
@@ -119,4 +126,3 @@ _Avoid_: Hook, plugin (when you mean the whole setup, not a single file)
 > **Dev:** I want to keep an eye on one agent even when it's Clear.
 >
 > **Expert:** **Following** on the dashboard. Toggle follow on the pane, then use following mode to filter to just followed panes.
-

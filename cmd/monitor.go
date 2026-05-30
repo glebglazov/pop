@@ -34,8 +34,7 @@ func tmuxPaneSessionWith(tmux deps.Tmux, paneID string) (string, error) {
 
 // tmuxPaneInfoWith returns the session name and the current foreground
 // command running in the given pane in a single tmux round-trip. Used by
-// auto-registration in pane set-status, which needs both to decide whether
-// a pane is agentic (not a plain shell) before adding it to the dashboard.
+// auto-registration in pane set-status for the pane's session and debug log.
 func tmuxPaneInfoWith(tmux deps.Tmux, paneID string) (session, cmdName string, err error) {
 	out, err := tmux.Command("display-message", "-t", paneID, "-p", "#{session_name}\t#{pane_current_command}")
 	if err != nil {
@@ -65,11 +64,11 @@ func isActiveTmuxPaneWith(tmux deps.Tmux, paneID string) bool {
 
 // --- monitor-start ---
 
-// tmux hooks for auto-read: event name → hook command
-var tmuxAutoReadHooks = map[string]string{
-	"after-select-pane":      `run-shell "pop pane set-status --source tmux-global --no-register #{pane_id} read 2>/dev/null || true"`,
-	"session-window-changed": `run-shell "pop pane set-status --source tmux-global --no-register #{pane_id} read 2>/dev/null || true"`,
-	"client-session-changed": `run-shell "pop pane set-status --source tmux-global --no-register #{pane_id} read 2>/dev/null || true"`,
+// tmux hooks for auto-clear: event name → hook command
+var tmuxAutoClearHooks = map[string]string{
+	"after-select-pane":      `run-shell "pop pane set-status --source tmux-global --no-register #{pane_id} clear 2>/dev/null || true"`,
+	"session-window-changed": `run-shell "pop pane set-status --source tmux-global --no-register #{pane_id} clear 2>/dev/null || true"`,
+	"client-session-changed": `run-shell "pop pane set-status --source tmux-global --no-register #{pane_id} clear 2>/dev/null || true"`,
 	"pane-focus-in":          `run-shell "pop pane visit #{pane_id} 2>/dev/null || true"`,
 }
 
@@ -87,7 +86,7 @@ func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("daemon is already running (PID file: %s)", pidPath)
 	}
 
-	installTmuxAutoReadHooks()
+	installTmuxAutoClearHooks()
 
 	statePath := monitor.DefaultStatePath()
 	cfg, err := config.Load(config.DefaultConfigPath())
@@ -305,30 +304,30 @@ func handleVisit(statePath string, req monitor.Request) monitor.Response {
 	return monitor.Response{OK: true}
 }
 
-// installTmuxAutoReadHooks removes any existing pop hooks and installs current ones.
-func installTmuxAutoReadHooks() {
-	installTmuxAutoReadHooksWith(defaultTmux)
+// installTmuxAutoClearHooks removes any existing pop hooks and installs current ones.
+func installTmuxAutoClearHooks() {
+	installTmuxAutoClearHooksWith(defaultTmux)
 }
 
-func installTmuxAutoReadHooksWith(tmux deps.Tmux) {
-	uninstallTmuxAutoReadHooksWith(tmux)
-	for event, hookCmd := range tmuxAutoReadHooks {
+func installTmuxAutoClearHooksWith(tmux deps.Tmux) {
+	uninstallTmuxAutoClearHooksWith(tmux)
+	for event, hookCmd := range tmuxAutoClearHooks {
 		if _, err := tmux.Command("set-hook", "-ga", event, hookCmd); err != nil {
-			debug.Error("installTmuxAutoReadHooks: set-hook %s: %v", event, err)
+			debug.Error("installTmuxAutoClearHooks: set-hook %s: %v", event, err)
 		}
 	}
 }
 
-// uninstallTmuxAutoReadHooks removes all pop-related tmux hooks,
+// uninstallTmuxAutoClearHooks removes all pop-related tmux hooks,
 // leaving other hooks intact. Parses indexed entries like "event[0] cmd".
-func uninstallTmuxAutoReadHooks() {
-	uninstallTmuxAutoReadHooksWith(defaultTmux)
+func uninstallTmuxAutoClearHooks() {
+	uninstallTmuxAutoClearHooksWith(defaultTmux)
 }
 
-func uninstallTmuxAutoReadHooksWith(tmux deps.Tmux) {
+func uninstallTmuxAutoClearHooksWith(tmux deps.Tmux) {
 	out, err := tmux.Command("show-hooks", "-g")
 	if err != nil {
-		debug.Error("uninstallTmuxAutoReadHooks: show-hooks: %v", err)
+		debug.Error("uninstallTmuxAutoClearHooks: show-hooks: %v", err)
 	}
 	for _, line := range strings.Split(out, "\n") {
 		if !strings.Contains(line, "pop pane set-status") && !strings.Contains(line, "pop pane visit") && !strings.Contains(line, "pop monitor") {
@@ -341,7 +340,7 @@ func uninstallTmuxAutoReadHooksWith(tmux deps.Tmux) {
 		}
 		indexed := line[:bracketEnd+1]
 		if _, err := tmux.Command("set-hook", "-gu", indexed); err != nil {
-			debug.Error("uninstallTmuxAutoReadHooks: unset %s: %v", indexed, err)
+			debug.Error("uninstallTmuxAutoClearHooks: unset %s: %v", indexed, err)
 		}
 	}
 }

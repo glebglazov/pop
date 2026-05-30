@@ -231,7 +231,7 @@ func capturePanePreviewWith(tmux deps.Tmux, paneID string) string {
 }
 
 // dismissUnreadPane transitions a pane from unread to clear and records the
-// visit time. Unlike markPaneRead, the status flip is a no-op for panes in
+// visit time. Unlike markPaneClear, the status flip is a no-op for panes in
 // other states (the visit time is still recorded).
 func dismissUnreadPane(paneID string) {
 	dismissUnreadPaneWith(monitor.DefaultDeps(), paneID)
@@ -255,14 +255,12 @@ func dismissUnreadPaneWith(d *monitor.Deps, paneID string) {
 	}
 }
 
-// markPaneRead marks a pane as clear in the monitor state. The function name
-// is kept for historical reasons; "read" was renamed to "clear" but callers
-// were not updated to minimize churn.
-func markPaneRead(paneID string) {
-	markPaneReadWith(monitor.DefaultDeps(), paneID)
+// markPaneClear marks a pane as clear in the monitor state.
+func markPaneClear(paneID string) {
+	markPaneClearWith(monitor.DefaultDeps(), paneID)
 }
 
-func markPaneReadWith(d *monitor.Deps, paneID string) {
+func markPaneClearWith(d *monitor.Deps, paneID string) {
 	state := loadMonitorStateWith(d)
 	if state == nil {
 		return
@@ -273,7 +271,7 @@ func markPaneReadWith(d *monitor.Deps, paneID string) {
 	}
 	entry.Status = monitor.StatusClear
 	if err := state.SaveWith(d); err != nil {
-		debug.Error("markPaneRead %s: save: %v", paneID, err)
+		debug.Error("markPaneClear %s: save: %v", paneID, err)
 	}
 }
 
@@ -357,7 +355,7 @@ func unmonitorPaneWith(d *monitor.Deps, paneID string) {
 func attentionCallbacks() ui.AttentionCallbacks {
 	return ui.AttentionCallbacks{
 		Preview:      capturePanePreview,
-		MarkRead:     markPaneRead,
+		MarkClear:    markPaneClear,
 		MarkUnread:   markPaneUnread,
 		ToggleFollow: togglePaneFollow,
 		Unmonitor:    unmonitorPane,

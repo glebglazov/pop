@@ -1258,17 +1258,17 @@ func TestTruncateString(t *testing.T) {
 }
 
 func TestAttentionStatusOrder(t *testing.T) {
-	// Verify the sort contract: idle < working < unread
+	// Verify the sort contract: clear < working < unread
 	virtual := attentionStatusOrder(AttentionVirtual)
-	idle := attentionStatusOrder(AttentionClear)
+	clear := attentionStatusOrder(AttentionClear)
 	working := attentionStatusOrder(AttentionWorking)
 	unread := attentionStatusOrder(AttentionUnread)
 
-	if virtual != idle {
-		t.Errorf("virtual (%d) should sort with idle (%d)", virtual, idle)
+	if virtual != clear {
+		t.Errorf("virtual (%d) should sort with clear (%d)", virtual, clear)
 	}
-	if idle >= working {
-		t.Errorf("idle (%d) should be less than working (%d)", idle, working)
+	if clear >= working {
+		t.Errorf("clear (%d) should be less than working (%d)", clear, working)
 	}
 	if working >= unread {
 		t.Errorf("working (%d) should be less than unread (%d)", working, unread)
@@ -1285,7 +1285,7 @@ func TestSortAttentionPanes(t *testing.T) {
 	p := NewPicker(nil, WithAttentionPanes(panes, AttentionCallbacks{}))
 	p.sortAttentionPanes()
 
-	// Expected order: idle, idle, working, unread
+	// Expected order: clear, clear, working, unread
 	expectedIDs := []string{"%2", "%4", "%3", "%1"}
 	for i, want := range expectedIDs {
 		if p.attentionPanes[i].PaneID != want {
@@ -1565,14 +1565,14 @@ func TestUpdateAttention_Navigation(t *testing.T) {
 }
 
 func TestUpdateAttention_Reset(t *testing.T) {
-	var readPaneID, unreadPaneID string
+	var clearPaneID, unreadPaneID string
 	panes := []AttentionPane{
 		{PaneID: "%1", Status: AttentionUnread},
 		{PaneID: "%2", Status: AttentionWorking},
 		{PaneID: "%3", Status: AttentionClear},
 	}
 	cb := AttentionCallbacks{
-		MarkRead:   func(paneID string) { readPaneID = paneID },
+		MarkClear:  func(paneID string) { clearPaneID = paneID },
 		MarkUnread: func(paneID string) { unreadPaneID = paneID },
 	}
 	p := newAttentionPicker(panes, cb, nil)
@@ -1580,8 +1580,8 @@ func TestUpdateAttention_Reset(t *testing.T) {
 	msg := tea.KeyPressMsg{Code: 'r', Text: "r"}
 	p.Update(msg)
 
-	if readPaneID != "%1" {
-		t.Errorf("markReadFunc called with %s, want %%1", readPaneID)
+	if clearPaneID != "%1" {
+		t.Errorf("markClearFunc called with %s, want %%1", clearPaneID)
 	}
 	if p.attentionPanes[0].Status == AttentionUnread {
 		t.Error("expected pane status to change from Unread")
@@ -1590,9 +1590,9 @@ func TestUpdateAttention_Reset(t *testing.T) {
 		t.Error("expected attentionDirty = true")
 	}
 
-	// Toggle idle -> unread
-	p.attentionCursor = 1 // %3 is at index 1 after first sort (idle group: %1, %3)
-	readPaneID = ""
+	// Toggle clear -> unread
+	p.attentionCursor = 1 // %3 is at index 1 after first sort (clear group: %1, %3)
+	clearPaneID = ""
 	p.Update(msg)
 
 	if unreadPaneID != "%3" {
@@ -1600,25 +1600,25 @@ func TestUpdateAttention_Reset(t *testing.T) {
 	}
 	// After second sort, %3 moves to end (unread group)
 	if p.attentionPanes[2].Status != AttentionUnread {
-		t.Error("expected idle pane status to change to Unread")
+		t.Error("expected clear pane status to change to Unread")
 	}
 }
 
-func TestUpdateAttention_VirtualPaneReadActionsAreNoop(t *testing.T) {
-	var readPaneID, unreadPaneID string
+func TestUpdateAttention_VirtualPaneClearActionsAreNoop(t *testing.T) {
+	var clearPaneID, unreadPaneID string
 	panes := []AttentionPane{
 		{PaneID: "%1", Status: AttentionVirtual},
 	}
 	cb := AttentionCallbacks{
-		MarkRead:   func(paneID string) { readPaneID = paneID },
+		MarkClear:  func(paneID string) { clearPaneID = paneID },
 		MarkUnread: func(paneID string) { unreadPaneID = paneID },
 	}
 	p := newAttentionPicker(panes, cb, nil)
 
 	p.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
-	if readPaneID != "" {
-		t.Errorf("markReadFunc called with %s, want no call", readPaneID)
+	if clearPaneID != "" {
+		t.Errorf("markClearFunc called with %s, want no call", clearPaneID)
 	}
 	if unreadPaneID != "" {
 		t.Errorf("markUnreadFunc called with %s, want no call", unreadPaneID)

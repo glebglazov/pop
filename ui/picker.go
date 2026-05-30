@@ -160,7 +160,7 @@ type Picker struct {
 	attentionDirty         bool
 	previewFunc            func(paneID string) string
 	reloadFunc             func() []AttentionPane
-	markReadFunc           func(paneID string)
+	markClearFunc          func(paneID string)
 	markUnreadFunc         func(paneID string)
 	toggleFollowFunc       func(paneID string)
 	unmonitorFunc          func(paneID string)
@@ -311,7 +311,7 @@ func WithWarnings(warnings []string) PickerOption {
 // AttentionCallbacks holds callback functions for the attention sub-view.
 type AttentionCallbacks struct {
 	Preview      func(paneID string) string // returns pane content for preview
-	MarkRead     func(paneID string)        // marks a pane as read
+	MarkClear    func(paneID string)        // marks a pane as clear
 	MarkUnread   func(paneID string)        // marks a pane as unread
 	ToggleFollow func(paneID string)        // toggles following flag
 	Unmonitor    func(paneID string)        // removes a pane from monitor state
@@ -325,7 +325,7 @@ func WithAttentionPanes(panes []AttentionPane, cb AttentionCallbacks) PickerOpti
 		p.attentionPanes = make([]AttentionPane, len(panes))
 		copy(p.attentionPanes, panes)
 		p.previewFunc = cb.Preview
-		p.markReadFunc = cb.MarkRead
+		p.markClearFunc = cb.MarkClear
 		p.markUnreadFunc = cb.MarkUnread
 		p.toggleFollowFunc = cb.ToggleFollow
 		p.unmonitorFunc = cb.Unmonitor
@@ -727,8 +727,8 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 
-	case key.Matches(msg, keys.ToggleReadIdle):
-		if len(p.attentionPanes) > 0 && p.markReadFunc != nil && p.markUnreadFunc != nil {
+	case key.Matches(msg, keys.ToggleClearUnread):
+		if len(p.attentionPanes) > 0 && p.markClearFunc != nil && p.markUnreadFunc != nil {
 			pane := &p.attentionPanes[p.attentionCursor]
 			if pane.Status == AttentionVirtual {
 				return p, nil
@@ -738,7 +738,7 @@ func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				pane.Status = AttentionUnread
 				p.updateAllPanesStatus(pane.PaneID, AttentionUnread)
 			} else {
-				p.markReadFunc(pane.PaneID)
+				p.markClearFunc(pane.PaneID)
 				pane.Status = AttentionClear
 				p.updateAllPanesStatus(pane.PaneID, AttentionClear)
 			}
@@ -1507,9 +1507,9 @@ func (p *Picker) viewAttention() string {
 	} else {
 		var hints string
 		if len(p.items) > 0 {
-			hints = "  Enter open and read · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel"
+			hints = "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel"
 		} else {
-			hints = "  Enter open and read · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · Esc quit"
+			hints = "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · Esc quit"
 		}
 		b.WriteString(hintStyle.Render(hints))
 	}
@@ -1689,29 +1689,29 @@ func Run(items []Item, opts ...PickerOption) (Result, error) {
 
 // Key bindings
 type keyMap struct {
-	Up               key.Binding
-	Down             key.Binding
-	HalfPageUp       key.Binding
-	HalfPageDown     key.Binding
-	Enter            key.Binding
-	Quit             key.Binding
-	Delete           key.Binding
-	ForceDelete      key.Binding
-	KillSession      key.Binding
-	Reset            key.Binding
-	OpenWindow       key.Binding
-	ClearInput       key.Binding
-	Help             key.Binding
-	MarkUnread       key.Binding
-	PeekPane         key.Binding
-	FollowPane       key.Binding
-	ToggleFollowView key.Binding
-	Unmonitor        key.Binding
-	ToggleReadIdle   key.Binding
-	Back             key.Binding
-	AttentionUp      key.Binding
-	AttentionDown    key.Binding
-	EditNote         key.Binding
+	Up                key.Binding
+	Down              key.Binding
+	HalfPageUp        key.Binding
+	HalfPageDown      key.Binding
+	Enter             key.Binding
+	Quit              key.Binding
+	Delete            key.Binding
+	ForceDelete       key.Binding
+	KillSession       key.Binding
+	Reset             key.Binding
+	OpenWindow        key.Binding
+	ClearInput        key.Binding
+	Help              key.Binding
+	MarkUnread        key.Binding
+	PeekPane          key.Binding
+	FollowPane        key.Binding
+	ToggleFollowView  key.Binding
+	Unmonitor         key.Binding
+	ToggleClearUnread key.Binding
+	Back              key.Binding
+	AttentionUp       key.Binding
+	AttentionDown     key.Binding
+	EditNote          key.Binding
 }
 
 var keys = keyMap{
@@ -1773,7 +1773,7 @@ var keys = keyMap{
 	Unmonitor: key.NewBinding(
 		key.WithKeys("x"),
 	),
-	ToggleReadIdle: key.NewBinding(
+	ToggleClearUnread: key.NewBinding(
 		key.WithKeys("r"),
 	),
 	Back: key.NewBinding(

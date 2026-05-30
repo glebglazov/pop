@@ -17,12 +17,12 @@ import (
 )
 
 // TestBuildDashboardPanes_OnlyAgenticPanes is the end-to-end guard against
-// the "all tmux panes show as idle on dashboard" regression. It drives state
+// the "all tmux panes show as clear on dashboard" regression. It drives state
 // through the same code path the real tmux hooks and agent extensions use
 // (runPaneSetStatusWith) and then asserts that buildDashboardPanesWithCurrentPane
 // surfaces ONLY panes whose foreground process is NOT a plain shell. Agent
 // panes (opencode, claude, pi, ...) appear immediately — even when their
-// very first status update is idle — while plain zsh/fish/bash panes the
+// very first status update is clear — while plain zsh/fish/bash panes the
 // user merely navigates through stay out of the dashboard.
 func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 	dir := t.TempDir()
@@ -49,7 +49,7 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 					"%11": "proj-a\tfish",     // plain shell
 					"%12": "proj-b\tbash",     // plain shell
 					"%13": "proj-b\t-zsh",     // login shell
-					"%20": "proj-c\topencode", // agent (housekeeping idle)
+					"%20": "proj-c\topencode", // agent (housekeeping clear)
 					"%7":  "proj-d\tclaude",   // agent (claim via working)
 					"%8":  "proj-e\tpi",       // agent (claim via unread)
 				}
@@ -77,18 +77,18 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 	cfg := &config.Config{}
 
 	// 1. User navigates through 4 plain-shell panes. The tmux-global
-	//    auto-read hook fires read/idle for each. None must register.
+	//    auto-clear hook fires clear for each. None must register.
 	for _, paneID := range []string{"%10", "%11", "%12", "%13"} {
-		if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", true, "", []string{paneID, "read"}); err != nil {
+		if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", true, "", []string{paneID, "clear"}); err != nil {
 			t.Fatalf("tmux-global hook for %s: %v", paneID, err)
 		}
 	}
 
-	// 2. opencode plugin eagerly sends idle on load for its pane (%20).
+	// 2. opencode plugin eagerly sends clear on load for its pane (%20).
 	//    Because %20 is running opencode (not a shell), it MUST register
-	//    right away as idle — this is the change the user asked for.
-	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%20", "idle"}); err != nil {
-		t.Fatalf("opencode housekeeping idle: %v", err)
+	//    right away as clear — this is the change the user asked for.
+	if err := runPaneSetStatusWith(tmux, cfg, "", false, "", []string{"%20", "clear"}); err != nil {
+		t.Fatalf("opencode housekeeping clear: %v", err)
 	}
 
 	// 3. Real agent claims: claude fires working on %7, pi fires
@@ -527,7 +527,7 @@ func TestSessionAccessTime(t *testing.T) {
 // TestHandleDashboardSwitch verifies the contract between the two switch
 // actions and the monitor state:
 //
-//   - Normal switch (dismissUnread=true) MUST flip an unread pane to idle
+//   - Normal switch (dismissUnread=true) MUST flip an unread pane to clear
 //     and MUST stamp LastActiveAt, matching the long-standing Enter behavior.
 //   - Peek (dismissUnread=false) MUST leave the monitor state completely
 //     untouched — no status flip, no LastActiveAt update — so the pane
