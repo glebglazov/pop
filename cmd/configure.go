@@ -38,7 +38,7 @@ type configureDeps struct {
 	Stdin       io.Reader
 	Stdout      io.Writer
 	PickDir     func() (ui.ConfigurePickerResult, error)
-	ShowWelcome bool // show welcome message (when triggered from select)
+	ShowWelcome bool // show welcome message (when triggered from project command)
 }
 
 func defaultConfigureDeps() *configureDeps {

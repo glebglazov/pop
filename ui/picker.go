@@ -71,7 +71,7 @@ type Result struct {
 type Action int
 
 const (
-	ActionSelect Action = iota
+	ActionConfirm Action = iota
 	ActionCancel
 	ActionDelete
 	ActionForceDelete
@@ -455,7 +455,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(p.filtered) > 0 {
 				p.result = Result{
 					Selected: &p.filtered[p.cursor],
-					Action:   ActionSelect,
+					Action:   ActionConfirm,
 				}
 			}
 			return p, tea.Quit
@@ -580,7 +580,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if targetIdx >= 0 && targetIdx < len(p.filtered) {
 				p.result = Result{
 					Selected: &p.filtered[targetIdx],
-					Action:   ActionSelect,
+					Action:   ActionConfirm,
 				}
 				return p, tea.Quit
 			}
@@ -1095,7 +1095,7 @@ func (p *Picker) findItemIndex(path string) int {
 
 // buildHints returns the hints string based on enabled features
 func (p *Picker) buildHints() string {
-	return "  Enter select · Esc quit · F1 help"
+	return "  Enter open · Esc quit · F1 help"
 }
 
 // formatKeyHint converts a key binding to a display-friendly hint format
@@ -1203,7 +1203,7 @@ func (p *Picker) View() tea.View {
 	} else if p.attentionMode {
 		content = p.viewAttention()
 	} else {
-		content = p.viewNormal()
+		content = p.viewProject()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
@@ -1320,7 +1320,7 @@ func (p *Picker) viewAttention() string {
 	}
 
 	// Reserve 1 line for hints + 1 line for header
-	listHeight := p.height + 2 // viewNormal reserves 4 lines; we need 1 for hints + 1 for header
+	listHeight := p.height + 2 // viewProject reserves 4 lines; we need 1 for hints + 1 for header
 
 	// Empty panes: show title + dismissable message
 	if len(p.attentionPanes) == 0 {
@@ -1544,7 +1544,7 @@ func truncateString(s string, maxWidth int) string {
 	return s
 }
 
-func (p *Picker) viewNormal() string {
+func (p *Picker) viewProject() string {
 	var b strings.Builder
 
 	// Items

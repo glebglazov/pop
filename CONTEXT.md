@@ -5,8 +5,12 @@ A CLI for navigating between development directories and their tmux sessions. Po
 ## Language
 
 **Project**:
-A directory on disk that pop knows about — either listed explicitly in config or matched by a glob pattern. Selecting a project is the primary action in `pop select`; attaching to or creating a tmux session follows from that choice.
+A directory on disk that pop knows about — either listed explicitly in config or matched by a glob pattern. Choosing a project in the project picker is the primary workflow; attaching to or creating a tmux session follows from that choice.
 _Avoid_: Folder, workspace, session (when you mean the directory itself)
+
+**Project command**:
+The `pop project` entry point — opens the project picker. Project-specific config lives in `[project]`. `pop select` and `[select]` are deprecated aliases; remove at the next major release. The CLI alias is hidden (not shown in help) and emits no runtime warning; the config alias emits a load-time warning.
+_Avoid_: Select command, normal mode
 
 **Session**:
 The tmux session pop creates or attaches to when you select a project. Its name is derived from the project path.
@@ -53,8 +57,8 @@ _Avoid_: Agent pane, bot pane
 ### Pickers
 
 **Project picker**:
-The fuzzy-search picker in `pop select` for choosing a project, worktree, or standalone session.
-_Avoid_: Session picker, normal mode
+The fuzzy-search picker opened by the project command — for choosing a project, worktree, or standalone session.
+_Avoid_: Session picker, select view, normal mode
 
 **Worktree picker**:
 The fuzzy-search picker in `pop worktree` for choosing, creating, or deleting git worktrees in the current repository.
@@ -85,8 +89,6 @@ _Avoid_: Hook, plugin (when you mean the whole setup, not a single file)
 **Clear vs idle/read** — Domain term is **Clear**. The CLI accepts `idle` and `read` as deprecated aliases; persisted state uses `"clear"`.
 
 **Dashboard vs monitor** — **Monitor** maintains the monitored set; **Dashboard** presents it. Code uses both names loosely (`monitor` package, `dashboard` command); use domain terms when writing docs or discussing behavior.
-
-**Project picker naming** — Code calls this "normal" mode (`viewNormal`). Domain term is **Project picker**.
 
 **Unread vs needs_attention** — Domain term is **Unread**. `needs_attention` is a deprecated CLI alias.
 

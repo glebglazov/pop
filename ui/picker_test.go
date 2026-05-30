@@ -101,8 +101,8 @@ func TestBuildHintsShowsHelp(t *testing.T) {
 	if !containsSubstring(hints, "F1 help") {
 		t.Errorf("hints should contain help shortcut, got: %q", hints)
 	}
-	if !containsSubstring(hints, "Enter select") {
-		t.Errorf("hints should contain Enter select, got: %q", hints)
+	if !containsSubstring(hints, "Enter open") {
+		t.Errorf("hints should contain Enter open, got: %q", hints)
 	}
 	if !containsSubstring(hints, "Esc quit") {
 		t.Errorf("hints should contain Esc quit, got: %q", hints)
@@ -303,8 +303,8 @@ func TestQuickAccessAltDigitSelectsItem(t *testing.T) {
 		t.Fatal("expected quit command")
 	}
 	result := picker.Result()
-	if result.Action != ActionSelect {
-		t.Errorf("expected ActionSelect, got %v", result.Action)
+	if result.Action != ActionConfirm {
+		t.Errorf("expected ActionConfirm, got %v", result.Action)
 	}
 	if result.Selected.Path != "/b" {
 		t.Errorf("expected /b, got %s", result.Selected.Path)
@@ -417,7 +417,7 @@ func TestQuickAccessNumbersRendered(t *testing.T) {
 	picker.height = 20
 	picker.Init()
 
-	view := picker.viewNormal()
+	view := picker.viewProject()
 	// Items above cursor (ddd) should show ⌥1 for ccc, ⌥2 for bbb, ⌥3 for aaa
 	if !containsSubstring(view, "⌥1") {
 		t.Error("view should contain ⌥1 label")
@@ -437,7 +437,7 @@ func TestQuickAccessCtrlNumbersRendered(t *testing.T) {
 	picker.height = 20
 	picker.Init()
 
-	view := picker.viewNormal()
+	view := picker.viewProject()
 	if !containsSubstring(view, "^1") {
 		t.Error("view should contain ^1 label for ctrl modifier")
 	}
@@ -455,7 +455,7 @@ func TestQuickAccessNoNumberOnBottomItem(t *testing.T) {
 	picker.height = 20
 	picker.Init()
 
-	view := picker.viewNormal()
+	view := picker.viewProject()
 	if !containsSubstring(view, "⌥1") {
 		t.Error("view should contain ⌥1 for second from bottom")
 	}
@@ -550,7 +550,7 @@ func TestQuickAccessCursorRelativeRendering(t *testing.T) {
 	// Move cursor up to "ccc" (index 2)
 	picker.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 
-	view := picker.viewNormal()
+	view := picker.viewProject()
 	// Items above cursor (bbb=⌥1, aaa=⌥2) should have labels
 	if !containsSubstring(view, "⌥1") {
 		t.Error("view should contain ⌥1 for item above cursor")
@@ -1034,9 +1034,9 @@ func TestViewNormalEmptyList(t *testing.T) {
 	picker.height = 20
 	picker.Init()
 
-	view := picker.viewNormal()
+	view := picker.viewProject()
 	if view == "" {
-		t.Error("viewNormal() returned empty string for nil items")
+		t.Error("viewProject() returned empty string for nil items")
 	}
 }
 
@@ -1050,12 +1050,12 @@ func TestViewNormalRendersItems(t *testing.T) {
 	picker.height = 20
 	picker.Init()
 
-	view := picker.viewNormal()
+	view := picker.viewProject()
 	if !containsSubstring(view, "project-a") {
-		t.Error("viewNormal() missing 'project-a'")
+		t.Error("viewProject() missing 'project-a'")
 	}
 	if !containsSubstring(view, "project-b") {
-		t.Error("viewNormal() missing 'project-b'")
+		t.Error("viewProject() missing 'project-b'")
 	}
 }
 

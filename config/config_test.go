@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/glebglazov/pop/internal/deps"
@@ -951,7 +952,7 @@ func TestCommandsForMode(t *testing.T) {
 			},
 		}
 
-		for _, mode := range []string{"select", "worktree"} {
+		for _, mode := range []string{"project", "select", "worktree"} {
 			cmds := cfg.CommandsForMode(mode)
 			if len(cmds) != 1 {
 				t.Errorf("mode %q: got %d commands, want 1", mode, len(cmds))
@@ -983,13 +984,18 @@ func TestCommandsForMode(t *testing.T) {
 			t.Errorf("worktree: label = %q, want %q", wt[0].Label, "worktree")
 		}
 
-		// Select should still get global
-		sel := cfg.CommandsForMode("select")
-		if len(sel) != 1 {
-			t.Fatalf("select: got %d commands, want 1", len(sel))
+		// Project mode should still get global
+		proj := cfg.CommandsForMode("project")
+		if len(proj) != 1 {
+			t.Fatalf("project: got %d commands, want 1", len(proj))
 		}
-		if sel[0].Label != "global" {
-			t.Errorf("select: label = %q, want %q", sel[0].Label, "global")
+		if proj[0].Label != "global" {
+			t.Errorf("project: label = %q, want %q", proj[0].Label, "global")
+		}
+		// Deprecated alias still works
+		sel := cfg.CommandsForMode("select")
+		if len(sel) != 1 || sel[0].Label != "global" {
+			t.Errorf("select alias: got %#v, want global command", sel)
 		}
 	})
 
@@ -1010,10 +1016,10 @@ func TestCommandsForMode(t *testing.T) {
 			t.Errorf("label = %q, want %q", cmds[0].Label, "wt-only")
 		}
 
-		// Select should get nothing
-		sel := cfg.CommandsForMode("select")
-		if len(sel) != 0 {
-			t.Errorf("select: got %d commands, want 0", len(sel))
+		// Project mode should get nothing
+		proj := cfg.CommandsForMode("project")
+		if len(proj) != 0 {
+			t.Errorf("project: got %d commands, want 0", len(proj))
 		}
 	})
 
@@ -1055,14 +1061,35 @@ func TestCommandsForMode(t *testing.T) {
 		}
 	})
 
-	t.Run("select section works", func(t *testing.T) {
+	t.Run("project section works", func(t *testing.T) {
 		cfg := &Config{
 			Commands: []UserDefinedCommand{
 				{Key: "ctrl+o", Label: "global", Command: "echo global"},
 			},
-			Select: &SelectConfig{
+			Project: &ProjectConfig{
 				Commands: []UserDefinedCommand{
-					{Key: "ctrl+o", Label: "select", Command: "echo select"},
+					{Key: "ctrl+o", Label: "project", Command: "echo project"},
+				},
+			},
+		}
+
+		cmds := cfg.CommandsForMode("project")
+		if len(cmds) != 1 {
+			t.Fatalf("got %d commands, want 1", len(cmds))
+		}
+		if cmds[0].Label != "project" {
+			t.Errorf("label = %q, want %q", cmds[0].Label, "project")
+		}
+	})
+
+	t.Run("deprecated select section works", func(t *testing.T) {
+		cfg := &Config{
+			Commands: []UserDefinedCommand{
+				{Key: "ctrl+o", Label: "global", Command: "echo global"},
+			},
+			Select: &ProjectConfig{
+				Commands: []UserDefinedCommand{
+					{Key: "ctrl+o", Label: "legacy", Command: "echo legacy"},
 				},
 			},
 		}
@@ -1071,8 +1098,8 @@ func TestCommandsForMode(t *testing.T) {
 		if len(cmds) != 1 {
 			t.Fatalf("got %d commands, want 1", len(cmds))
 		}
-		if cmds[0].Label != "select" {
-			t.Errorf("label = %q, want %q", cmds[0].Label, "select")
+		if cmds[0].Label != "legacy" {
+			t.Errorf("label = %q, want %q", cmds[0].Label, "legacy")
 		}
 	})
 }
@@ -1193,16 +1220,55 @@ attention_notifications_enabled = true
 	if !cfg.DismissUnreadInActivePane() {
 		t.Error("DismissUnreadInActivePane() = false, want true (legacy key should be honored)")
 	}
+	if !cfg.UnreadNotificationsEnabled("project") {
+		t.Error("UnreadNotificationsEnabled(project) = false, want true (legacy key should be honored)")
+	}
 	if !cfg.UnreadNotificationsEnabled("select") {
-		t.Error("UnreadNotificationsEnabled(select) = false, want true (legacy key should be honored)")
+		t.Error("UnreadNotificationsEnabled(select) = false, want true (deprecated mode alias should be honored)")
 	}
 	if !cfg.UnreadNotificationsEnabled("worktree") {
 		t.Error("UnreadNotificationsEnabled(worktree) = false, want true (legacy key should be honored)")
 	}
 
-	// One deprecation warning per legacy key present.
-	if len(cfg.Warnings) != 3 {
-		t.Fatalf("expected 3 deprecation warnings, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+	// One deprecation warning per legacy key present, plus [select] section rename.
+	if len(cfg.Warnings) != 4 {
+		t.Fatalf("expected 4 deprecation warnings, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+	}
+}
+
+// TestLoadDeprecatedSelectSection verifies that [select] is still honored and
+// emits a deprecation warning.
+func TestLoadDeprecatedSelectSection(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	os.WriteFile(configPath, []byte(`
+projects = []
+
+[select]
+unread_notifications_enabled = true
+`), 0644)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if !cfg.UnreadNotificationsEnabled("project") {
+		t.Error("UnreadNotificationsEnabled(project) = false, want true")
+	}
+	if cfg.Project == nil {
+		t.Fatal("expected [select] to populate Project config")
+	}
+
+	found := false
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w, "[select] is deprecated") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected [select] deprecation warning, got: %v", cfg.Warnings)
 	}
 }
 
@@ -1215,7 +1281,7 @@ func TestLoadNewUnreadKeys(t *testing.T) {
 [pane_monitoring]
 dismiss_unread_in_active_pane = true
 
-[select]
+[project]
 unread_notifications_enabled = true
 
 [worktree]
@@ -1230,8 +1296,8 @@ unread_notifications_enabled = true
 	if !cfg.DismissUnreadInActivePane() {
 		t.Error("DismissUnreadInActivePane() = false, want true")
 	}
-	if !cfg.UnreadNotificationsEnabled("select") {
-		t.Error("UnreadNotificationsEnabled(select) = false, want true")
+	if !cfg.UnreadNotificationsEnabled("project") {
+		t.Error("UnreadNotificationsEnabled(project) = false, want true")
 	}
 	if !cfg.UnreadNotificationsEnabled("worktree") {
 		t.Error("UnreadNotificationsEnabled(worktree) = false, want true")

@@ -347,7 +347,7 @@ func uninstallTmuxAutoReadHooksWith(tmux deps.Tmux) {
 }
 
 // ensureSystemState runs the startup side-effects shared by the interactive
-// TUI entry points (select, worktree, dashboard):
+// TUI entry points (project, worktree, dashboard):
 //
 //  1. Synchronously updates any stale agent integrations, so warnings for
 //     integration failures are visible on the very first picker render.
@@ -365,7 +365,7 @@ func ensureSystemState() []string {
 
 // ensureMonitorDaemon ensures a monitor daemon is running with the current binary.
 // Restarts if the binary is newer than the running daemon.
-// Called automatically by `pop select`.
+// Called automatically by `pop project`.
 //
 // Always invoked in a background goroutine, so panics here must not crash the
 // parent process — a failed daemon startup is non-fatal for the picker flow.

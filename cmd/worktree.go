@@ -81,7 +81,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		case ui.ActionCancel:
 			os.Exit(1)
 
-		case ui.ActionSelect:
+		case ui.ActionConfirm:
 			if result.Selected == nil {
 				os.Exit(1)
 			}

@@ -15,7 +15,7 @@ projects = [
 ]
 
 # Global custom keybindings for the picker
-# Section-specific commands ([select] or [worktree]) override global ones matched by key
+# Section-specific commands ([project] or [worktree]) override global ones matched by key
 # commands = [
 #     { key = "ctrl-l", label = "logs", command = "tail -f app.log", exit = false },
 # ]
@@ -31,12 +31,12 @@ projects = [
 # Options: "alt" (default), "ctrl", "disabled"
 # quick_access_modifier = "alt"
 
-# [select]
-# Select-specific custom keybindings (override global commands matched by key)
+# [project]
+# Project-picker custom keybindings (override global commands matched by key)
 # commands = [
 #     { key = "ctrl-l", label = "logs", command = "tail -f app.log", exit = false },
 # ]
-# Show desktop notifications when a pane becomes unread while in select view
+# Show desktop notifications when a pane becomes unread while in the project picker
 # unread_notifications_enabled = false
 
 # [worktree]

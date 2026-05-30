@@ -14,7 +14,7 @@ make install  # installs to ~/.local/bin
 
 ## Setup
 
-Run `pop select` — on first run it will walk you through picking your project directories interactively.
+Run `pop project` — on first run it will walk you through picking your project directories interactively.
 
 Or create `~/.config/pop/config.toml` manually:
 
@@ -29,19 +29,19 @@ Add a tmux binding for quick access:
 
 ```bash
 # ~/.tmux.conf
-bind-key p display-popup -E -w 60% -h 60% 'pop select'
+bind-key p display-popup -E -w 60% -h 60% 'pop project'
 bind-key P display-popup -E -w 60% -h 60% 'cd "$(pop worktree)" && exec $SHELL'
 ```
 
 ## Commands
 
-### `pop select`
+### `pop project`
 
 Fuzzy-pick a project and switch to its tmux session. Bare git repos are automatically expanded into their worktrees.
 
 | Key | Action |
 |-----|--------|
-| `enter` | Select project |
+| `enter` | Open project |
 | `ctrl-k` | Kill tmux session |
 | `ctrl-r` | Remove from history |
 | `ctrl-u` | Clear filter |
@@ -54,7 +54,7 @@ Fuzzy-pick a worktree in the current repo. Prints the selected path (useful for 
 
 | Key | Action |
 |-----|--------|
-| `enter` | Select worktree |
+| `enter` | Open worktree |
 | `ctrl-d` | Delete worktree |
 | `ctrl-x` | Force delete worktree |
 | `ctrl-n` | Create new worktree |

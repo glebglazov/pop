@@ -854,7 +854,7 @@ func scriptedPicker(fns ...func(items []ui.Item) ui.Result) func(items []ui.Item
 	}
 }
 
-// testSelectDeps returns a SelectDeps with no-op defaults safe for tests.
+// testProjectDeps returns a ProjectDeps with no-op defaults safe for tests.
 // Callers should override only the fields their test cares about.
 //
 // History and cache paths are sandboxed via t.Setenv so tests do not touch
@@ -862,7 +862,7 @@ func scriptedPicker(fns ...func(items []ui.Item) ui.Result) func(items []ui.Item
 // config pointing at a fresh t.TempDir, which cfg.ExpandProjects resolves
 // to exactly one item (not a bare repo, no worktrees) — enough for the
 // picker loop to reach its first iteration.
-func testSelectDeps(t *testing.T) *SelectDeps {
+func testProjectDeps(t *testing.T) *ProjectDeps {
 	t.Helper()
 
 	// Sandbox XDG_* paths for defense in depth — any code that touches
@@ -878,7 +878,7 @@ func testSelectDeps(t *testing.T) *SelectDeps {
 	// LoadConfig.
 	projectDir := t.TempDir()
 
-	return &SelectDeps{
+	return &ProjectDeps{
 		Tmux: &deps.MockTmux{},
 		Project: &project.Deps{
 			Git: &deps.MockGit{},
@@ -919,13 +919,13 @@ func testSelectDeps(t *testing.T) *SelectDeps {
 	}
 }
 
-func TestRunSelect_ActionSelectRecordsHistory(t *testing.T) {
+func TestRunProject_ActionConfirmRecordsHistory(t *testing.T) {
 	var openedItem *ui.Item
 	var hist *history.History
 
-	d := testSelectDeps(t)
+	d := testProjectDeps(t)
 	// Capture the history object the loop sees, so we can inspect entries
-	// after RunSelect returns.
+	// after RunProject returns.
 	origLoadHistory := d.LoadHistory
 	d.LoadHistory = func() (*history.History, error) {
 		h, err := origLoadHistory()
@@ -934,7 +934,7 @@ func TestRunSelect_ActionSelectRecordsHistory(t *testing.T) {
 	}
 	d.RunPicker = scriptedPicker(func(items []ui.Item) ui.Result {
 		return ui.Result{
-			Action:      ui.ActionSelect,
+			Action:      ui.ActionConfirm,
 			Selected:    &items[0],
 			CursorIndex: 0,
 		}
@@ -944,8 +944,8 @@ func TestRunSelect_ActionSelectRecordsHistory(t *testing.T) {
 		return nil
 	}
 
-	if err := RunSelect(d); err != nil {
-		t.Fatalf("RunSelect: %v", err)
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
 	}
 
 	if openedItem == nil {
@@ -968,11 +968,11 @@ func TestRunSelect_ActionSelectRecordsHistory(t *testing.T) {
 	}
 }
 
-func TestRunSelect_ActionKillSessionContinuesLoop(t *testing.T) {
+func TestRunProject_ActionKillSessionContinuesLoop(t *testing.T) {
 	var killedNames []string
 	var pickerCalls int
 
-	d := testSelectDeps(t)
+	d := testProjectDeps(t)
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
 		pickerCalls++
 		switch pickerCalls {
@@ -993,8 +993,8 @@ func TestRunSelect_ActionKillSessionContinuesLoop(t *testing.T) {
 		killedNames = append(killedNames, name)
 	}
 
-	if err := RunSelect(d); err != nil {
-		t.Fatalf("RunSelect: %v", err)
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
 	}
 
 	if pickerCalls != 2 {
@@ -1005,11 +1005,11 @@ func TestRunSelect_ActionKillSessionContinuesLoop(t *testing.T) {
 	}
 }
 
-func TestRunSelect_ActionCancelExitsCleanly(t *testing.T) {
+func TestRunProject_ActionCancelExitsCleanly(t *testing.T) {
 	var pickerCalls int
 	openCalled := false
 
-	d := testSelectDeps(t)
+	d := testProjectDeps(t)
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
 		pickerCalls++
 		return ui.Result{Action: ui.ActionCancel}, nil
@@ -1019,8 +1019,8 @@ func TestRunSelect_ActionCancelExitsCleanly(t *testing.T) {
 		return nil
 	}
 
-	if err := RunSelect(d); err != nil {
-		t.Fatalf("RunSelect on ActionCancel: unexpected error %v", err)
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject on ActionCancel: unexpected error %v", err)
 	}
 
 	if pickerCalls != 1 {

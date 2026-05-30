@@ -83,8 +83,8 @@ type WorktreeConfig struct {
 	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled"`
 }
 
-// SelectConfig holds select-specific configuration
-type SelectConfig struct {
+// ProjectConfig holds project-picker-specific configuration
+type ProjectConfig struct {
 	Commands                   []UserDefinedCommand `toml:"commands"`
 	UnreadNotificationsEnabled bool                 `toml:"unread_notifications_enabled"`
 	// Deprecated: use UnreadNotificationsEnabled. The old key is read for
@@ -117,7 +117,9 @@ type Config struct {
 	DisambiguationStrategy string                `toml:"disambiguation_strategy"`
 	QuickAccessModifier    string                `toml:"quick_access_modifier"`
 	Worktree               *WorktreeConfig       `toml:"worktree"`
-	Select                 *SelectConfig         `toml:"select"`
+	Project                *ProjectConfig        `toml:"project"`
+	// Deprecated: use Project. TODO: remove at next major release.
+	Select                 *ProjectConfig        `toml:"select"`
 	PaneMonitoring         *PaneMonitoringConfig `toml:"pane_monitoring"`
 	Dashboard              *DashboardConfig      `toml:"dashboard"`
 
@@ -228,16 +230,25 @@ func (c *Config) DashboardSortCriteria() []string {
 	return c.Dashboard.SortCriteria
 }
 
+func (c *Config) projectConfig() *ProjectConfig {
+	if c.Project != nil {
+		return c.Project
+	}
+	return c.Select
+}
+
 // UnreadNotificationsEnabled returns whether unread notifications are
-// enabled for the given mode ("select" or "worktree"). Supports both the
-// new and deprecated config keys. Defaults to false.
+// enabled for the given mode ("project" or "worktree"). "select" is accepted
+// as a deprecated alias for "project". Supports both the new and deprecated
+// config keys. Defaults to false.
 func (c *Config) UnreadNotificationsEnabled(mode string) bool {
 	switch mode {
-	case "select":
-		if c.Select == nil {
+	case "project", "select":
+		pc := c.projectConfig()
+		if pc == nil {
 			return false
 		}
-		return c.Select.UnreadNotificationsEnabled || c.Select.AttentionNotificationsEnabled
+		return pc.UnreadNotificationsEnabled || pc.AttentionNotificationsEnabled
 	case "worktree":
 		if c.Worktree == nil {
 			return false
@@ -249,8 +260,8 @@ func (c *Config) UnreadNotificationsEnabled(mode string) bool {
 }
 
 // CommandsForMode returns the effective custom commands for the given mode
-// ("select" or "worktree"). Section-specific commands override global ones
-// matched by key.
+// ("project" or "worktree"). "select" is accepted as a deprecated alias for
+// "project". Section-specific commands override global ones matched by key.
 func (c *Config) CommandsForMode(mode string) []UserDefinedCommand {
 	byKey := make(map[string]UserDefinedCommand)
 	for _, cmd := range c.Commands {
@@ -259,9 +270,9 @@ func (c *Config) CommandsForMode(mode string) []UserDefinedCommand {
 
 	var sectionCmds []UserDefinedCommand
 	switch mode {
-	case "select":
-		if c.Select != nil {
-			sectionCmds = c.Select.Commands
+	case "project", "select":
+		if pc := c.projectConfig(); pc != nil {
+			sectionCmds = pc.Commands
 		}
 	case "worktree":
 		if c.Worktree != nil {
@@ -317,11 +328,26 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		return nil, err
 	}
 
+	selectSectionUsed := cfg.Select != nil
+	if selectSectionUsed {
+		cfg.Warnings = append(cfg.Warnings, "[select] is deprecated; rename to [project]")
+		if cfg.Project == nil {
+			cfg.Project = cfg.Select
+		}
+	}
+
 	// Deprecation warnings for the needs_attention → unread rename.
 	if cfg.PaneMonitoring != nil && cfg.PaneMonitoring.DismissAttentionInActivePane {
 		cfg.Warnings = append(cfg.Warnings, "[pane_monitoring] dismiss_attention_in_active_pane is deprecated; rename to dismiss_unread_in_active_pane")
 	}
-	if cfg.Select != nil && cfg.Select.AttentionNotificationsEnabled {
+	if pc := cfg.projectConfig(); pc != nil && pc.AttentionNotificationsEnabled {
+		section := "[project]"
+		if selectSectionUsed && cfg.Select == pc {
+			section = "[select]"
+		}
+		cfg.Warnings = append(cfg.Warnings, section+" attention_notifications_enabled is deprecated; rename to unread_notifications_enabled")
+	}
+	if cfg.Select != nil && cfg.Select != cfg.Project && cfg.Select.AttentionNotificationsEnabled {
 		cfg.Warnings = append(cfg.Warnings, "[select] attention_notifications_enabled is deprecated; rename to unread_notifications_enabled")
 	}
 	if cfg.Worktree != nil && cfg.Worktree.AttentionNotificationsEnabled {

@@ -24,27 +24,39 @@ import (
 var tmuxCDPane string
 var noHistory bool
 
-var selectCmd = &cobra.Command{
-	Use:   "select",
-	Short: "Select a project from configured directories",
-	Long: `Opens a fuzzy picker to select a project.
+var projectCmd = &cobra.Command{
+	Use:   "project",
+	Short: "Open the project picker",
+	Long: `Opens the project picker to choose a project, worktree, or standalone session.
 Projects with git worktrees are expanded to show individual worktrees.
-Selecting a project opens or switches to a tmux session.
+Choosing a project opens or switches to a tmux session.
 
 Example tmux binding:
-  bind-key p display-popup -E -w 60% -h 60% 'pop select'`,
-	RunE: runSelect,
+  bind-key p display-popup -E -w 60% -h 60% 'pop project'`,
+	RunE: runProject,
+}
+
+// Deprecated: use `pop project` instead. Hidden alias for existing
+// keybindings. TODO: remove at next major release.
+var selectCmd = &cobra.Command{
+	Use:    "select",
+	Short:  "Open the project picker (alias for project)",
+	Hidden: true,
+	RunE:   runProject,
 }
 
 func init() {
+	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(selectCmd)
+	projectCmd.Flags().StringVar(&tmuxCDPane, "tmux-cd", "", "Send cd command to specified tmux pane instead of switching session")
+	projectCmd.Flags().BoolVar(&noHistory, "no-history", false, "Do not record selection in history")
 	selectCmd.Flags().StringVar(&tmuxCDPane, "tmux-cd", "", "Send cd command to specified tmux pane instead of switching session")
 	selectCmd.Flags().BoolVar(&noHistory, "no-history", false, "Do not record selection in history")
 }
 
-// SelectDeps holds dependencies for the select command.
+// ProjectDeps holds dependencies for the project command.
 // See docs/rfc-select-deps.md for rationale.
-type SelectDeps struct {
+type ProjectDeps struct {
 	// Core dependencies
 	Tmux    deps.Tmux
 	Project *project.Deps
@@ -79,14 +91,14 @@ type SelectDeps struct {
 	InTmux         func() bool
 	CurrentSession func(tmux deps.Tmux) string
 
-	// CLI flags (populated by cobra handler before calling RunSelect)
+	// CLI flags (populated by cobra handler before calling RunProject)
 	TMuxCDPane string
 	NoHistory  bool
 }
 
-// DefaultSelectDeps returns SelectDeps wired to real production implementations.
-func DefaultSelectDeps() *SelectDeps {
-	return &SelectDeps{
+// DefaultProjectDeps returns ProjectDeps wired to real production implementations.
+func DefaultProjectDeps() *ProjectDeps {
+	return &ProjectDeps{
 		Tmux:    defaultTmux,
 		Project: project.DefaultDeps(),
 
@@ -114,7 +126,7 @@ func DefaultSelectDeps() *SelectDeps {
 		SendCDToPane:      sendCDToPaneWith,
 		SwitchToTarget:    switchToTmuxTargetWith,
 		SwitchAndZoom:     switchToTmuxTargetAndZoomWith,
-		RunCustomCommand:  executeSelectCustomCommand,
+		RunCustomCommand:  executeProjectCustomCommand,
 		EnsureSystemState: ensureSystemState,
 		RunConfigure: func() error {
 			cd := defaultConfigureDeps()
@@ -127,17 +139,17 @@ func DefaultSelectDeps() *SelectDeps {
 	}
 }
 
-func runSelect(cmd *cobra.Command, args []string) error {
-	d := DefaultSelectDeps()
+func runProject(cmd *cobra.Command, args []string) error {
+	d := DefaultProjectDeps()
 	d.TMuxCDPane = tmuxCDPane
 	d.NoHistory = noHistory
-	return RunSelect(d)
+	return RunProject(d)
 }
 
-// RunSelect runs the select command with the given dependencies.
+// RunProject runs the project command with the given dependencies.
 // It orchestrates config loading, project expansion, history sorting,
 // the picker loop, and action dispatch.
-func RunSelect(d *SelectDeps) error {
+func RunProject(d *ProjectDeps) error {
 	// cfgPath is resolved only for the "no projects found" diagnostic message;
 	// LoadConfig hides how the config is actually loaded.
 	cfgPath := cfgFile
@@ -174,7 +186,7 @@ func RunSelect(d *SelectDeps) error {
 
 	// Expand projects, showing worktrees for bare repos (parallel).
 	// Per-project errors and panics are captured so one bad project can't
-	// crash the whole select flow.
+	// crash the whole project flow.
 	expanded, expansionErrors := expandProjectsWith(d.Project, paths)
 
 	// Get current tmux session name for optional exclusion
@@ -236,9 +248,9 @@ func RunSelect(d *SelectDeps) error {
 		}
 	}
 
-	// Load custom commands for select mode
+	// Load custom commands for project picker mode
 	var customCommands []ui.UserDefinedCommand
-	for _, cc := range cfg.CommandsForMode("select") {
+	for _, cc := range cfg.CommandsForMode("project") {
 		customCommands = append(customCommands, ui.UserDefinedCommand{
 			Key:     cc.Key,
 			Label:   cc.Label,
@@ -253,7 +265,7 @@ func RunSelect(d *SelectDeps) error {
 	for {
 		// Refresh session state each iteration
 		var attention map[string]bool
-		if cfg.UnreadNotificationsEnabled("select") {
+		if cfg.UnreadNotificationsEnabled("project") {
 			attention = d.AttentionSessions()
 		}
 		items := buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention)
@@ -263,7 +275,7 @@ func RunSelect(d *SelectDeps) error {
 			{Icon: iconDirSession, Desc: "Directory with tmux session"},
 			{Icon: iconStandaloneSession, Desc: "Standalone tmux session"},
 		}
-		if cfg.UnreadNotificationsEnabled("select") {
+		if cfg.UnreadNotificationsEnabled("project") {
 			iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent has unread output"})
 		}
 		opts := []ui.PickerOption{
@@ -273,7 +285,7 @@ func RunSelect(d *SelectDeps) error {
 			ui.WithQuickAccess(quickAccessModifier),
 			ui.WithIconLegend(iconLegends...),
 		}
-		if cfg.UnreadNotificationsEnabled("select") {
+		if cfg.UnreadNotificationsEnabled("project") {
 			if attentionPanes := d.AttentionPanes(); len(attentionPanes) > 0 {
 				opts = append(opts, ui.WithAttentionPanes(attentionPanes, d.AttentionCallbacks()))
 			}
@@ -305,7 +317,7 @@ func RunSelect(d *SelectDeps) error {
 		case ui.ActionCancel:
 			return nil
 
-		case ui.ActionSelect:
+		case ui.ActionConfirm:
 			if result.Selected == nil {
 				return nil
 			}
@@ -315,7 +327,7 @@ func RunSelect(d *SelectDeps) error {
 			if !d.NoHistory {
 				hist.Record(result.Selected.Path)
 				if err := hist.Save(); err != nil {
-					debug.Error("select: save history: %v", err)
+					debug.Error("project: save history: %v", err)
 				}
 			}
 			if d.TMuxCDPane != "" {
@@ -330,7 +342,7 @@ func RunSelect(d *SelectDeps) error {
 			if !d.NoHistory {
 				hist.Record(result.Selected.Path)
 				if err := hist.Save(); err != nil {
-					debug.Error("select: save history: %v", err)
+					debug.Error("project: save history: %v", err)
 				}
 			}
 			return d.OpenWindow(d.Tmux, result.Selected)
@@ -350,7 +362,7 @@ func RunSelect(d *SelectDeps) error {
 			if result.Selected != nil && !isStandaloneSession(*result.Selected) {
 				hist.Remove(result.Selected.Path)
 				if err := hist.Save(); err != nil {
-					debug.Error("select: save history: %v", err)
+					debug.Error("project: save history: %v", err)
 				}
 				baseItems = sortBaseItemsByHistory(baseItems, hist)
 			}
@@ -372,7 +384,7 @@ func RunSelect(d *SelectDeps) error {
 					}
 					hist.Record(histPath)
 					if err := hist.Save(); err != nil {
-						debug.Error("select: save history: %v", err)
+						debug.Error("project: save history: %v", err)
 					}
 				}
 				return d.SwitchAndZoom(d.Tmux, result.Selected.Path)
@@ -586,7 +598,7 @@ func killTmuxSessionWith(tmux deps.Tmux, name string) {
 	}
 }
 
-func executeSelectCustomCommand(command string, item *ui.Item) {
+func executeProjectCustomCommand(command string, item *ui.Item) {
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Env = append(os.Environ(),
 		"POP_PATH="+item.Path,
@@ -596,7 +608,7 @@ func executeSelectCustomCommand(command string, item *ui.Item) {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	if err := cmd.Run(); err != nil {
-		debug.Error("select: custom command %q: %v", command, err)
+		debug.Error("project: custom command %q: %v", command, err)
 		fmt.Fprintf(os.Stderr, "Custom command failed: %v\n", err)
 	}
 }

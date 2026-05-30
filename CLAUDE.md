@@ -23,7 +23,7 @@ go test ./history
 
 ### Package Structure
 
-- **cmd/** - Cobra CLI commands (`select`, `worktree`)
+- **cmd/** - Cobra CLI commands (`project`, `worktree`)
 - **config/** - TOML config loading and glob pattern expansion
 - **project/** - Domain models (Project, Worktree, RepoContext) and git operations
 - **history/** - JSON-based project access tracking for recency sorting
@@ -65,7 +65,7 @@ ctx, err := project.DetectRepoContextWith(d)
 
 ### Key Workflows
 
-**`pop select`**: Loads config → expands project paths (parallel worktree detection for bare repos) → sorts by history recency → displays picker → creates/attaches tmux session
+**`pop project`**: Loads config → expands project paths (parallel worktree detection for bare repos) → sorts by history recency → displays picker → creates/attaches tmux session
 
 **`pop worktree`**: Detects repo context → lists worktrees via `git worktree list --porcelain` → sorts by tmux activity → displays picker with delete/create actions
 
