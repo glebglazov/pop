@@ -839,18 +839,8 @@ func runPaneVisitWith(tmux deps.Tmux, cfg *config.Config, args []string) error {
 // runPaneVisitDirect is the fallback path when the daemon socket is
 // unavailable. Updates LastActiveAt only for already-tracked panes.
 func runPaneVisitDirect(paneID string) error {
-	state, err := monitor.Load(monitor.DefaultStatePath())
-	if err != nil {
-		return fmt.Errorf("load monitor state: %w", err)
-	}
-
-	entry, ok := state.Panes[paneID]
-	if !ok {
-		return nil
-	}
-
-	entry.LastActiveAt = time.Now()
-	return state.Save()
+	store := monitor.DefaultStore()
+	return store.RecordVisit(paneID)
 }
 
 // resolvePaneArg accepts a tmux pane_id ("%N") verbatim, or a pane name to

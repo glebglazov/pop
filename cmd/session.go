@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
@@ -205,136 +204,38 @@ func capturePanePreviewWith(tmux deps.Tmux, paneID string) string {
 	return out
 }
 
-// dismissUnreadPane transitions a pane from unread to clear and records the
-// visit time. Unlike markPaneClear, the status flip is a no-op for panes in
-// other states (the visit time is still recorded).
-func dismissUnreadPane(paneID string) {
-	dismissUnreadPaneWith(monitor.DefaultDeps(), paneID)
-}
-
-func dismissUnreadPaneWith(d *monitor.Deps, paneID string) {
-	state := loadMonitorStateWith(d)
-	if state == nil {
-		return
-	}
-	entry, ok := state.Panes[paneID]
-	if !ok {
-		return
-	}
-	entry.LastActiveAt = time.Now()
-	if entry.Status == monitor.StatusUnread {
-		entry.Status = monitor.StatusClear
-	}
-	if err := state.SaveWith(d); err != nil {
-		debug.Error("dismissUnreadPane %s: save: %v", paneID, err)
-	}
-}
-
-// markPaneClear marks a pane as clear in the monitor state.
-func markPaneClear(paneID string) {
-	markPaneClearWith(monitor.DefaultDeps(), paneID)
-}
-
-func markPaneClearWith(d *monitor.Deps, paneID string) {
-	state := loadMonitorStateWith(d)
-	if state == nil {
-		return
-	}
-	entry, ok := state.Panes[paneID]
-	if !ok {
-		return
-	}
-	entry.Status = monitor.StatusClear
-	if err := state.SaveWith(d); err != nil {
-		debug.Error("markPaneClear %s: save: %v", paneID, err)
-	}
-}
-
-// markPaneUnread marks a pane as unread in the monitor state
-func markPaneUnread(paneID string) {
-	markPaneUnreadWith(monitor.DefaultDeps(), paneID)
-}
-
-func markPaneUnreadWith(d *monitor.Deps, paneID string) {
-	state := loadMonitorStateWith(d)
-	if state == nil {
-		return
-	}
-	entry, ok := state.Panes[paneID]
-	if !ok {
-		return
-	}
-	entry.Status = monitor.StatusUnread
-	if err := state.SaveWith(d); err != nil {
-		debug.Error("markPaneUnread %s: save: %v", paneID, err)
-	}
-}
-
-// togglePaneFollow toggles the following flag on a pane
-func togglePaneFollow(paneID string) {
-	togglePaneFollowWith(monitor.DefaultDeps(), paneID)
-}
-
-func togglePaneFollowWith(d *monitor.Deps, paneID string) {
-	state := loadMonitorStateWith(d)
-	if state == nil {
-		return
-	}
-	entry, ok := state.Panes[paneID]
-	if !ok {
-		return
-	}
-	entry.Following = !entry.Following
-	if err := state.SaveWith(d); err != nil {
-		debug.Error("togglePaneFollow %s: save: %v", paneID, err)
-	}
-}
-
-// setPaneNote sets the note on a pane in the monitor state
-func setPaneNote(paneID, note string) {
-	setPaneNoteWith(monitor.DefaultDeps(), paneID, note)
-}
-
-func setPaneNoteWith(d *monitor.Deps, paneID, note string) {
-	state := loadMonitorStateWith(d)
-	if state == nil {
-		return
-	}
-	entry, ok := state.Panes[paneID]
-	if !ok {
-		return
-	}
-	entry.Note = note
-	if err := state.SaveWith(d); err != nil {
-		debug.Error("setPaneNote %s: save: %v", paneID, err)
-	}
-}
-
-// unmonitorPane removes a pane from the monitor state entirely
-func unmonitorPane(paneID string) {
-	unmonitorPaneWith(monitor.DefaultDeps(), paneID)
-}
-
-func unmonitorPaneWith(d *monitor.Deps, paneID string) {
-	state := loadMonitorStateWith(d)
-	if state == nil {
-		return
-	}
-	delete(state.Panes, paneID)
-	if err := state.SaveWith(d); err != nil {
-		debug.Error("unmonitorPane %s: save: %v", paneID, err)
-	}
-}
-
-// attentionCallbacks returns the standard callbacks for attention sub-views
+// attentionCallbacks returns the standard callbacks for attention sub-views.
+// All monitor mutations are concentrated through a single Store to eliminate
+// the duplicated load-find-mutate-save pattern.
 func attentionCallbacks() ui.AttentionCallbacks {
+	store := monitor.DefaultStore()
 	return ui.AttentionCallbacks{
-		Preview:      capturePanePreview,
-		MarkClear:    markPaneClear,
-		MarkUnread:   markPaneUnread,
-		ToggleFollow: togglePaneFollow,
-		Unmonitor:    unmonitorPane,
-		SetNote:      setPaneNote,
+		Preview: capturePanePreview,
+		MarkClear: func(paneID string) {
+			if err := store.MarkClear(paneID); err != nil {
+				debug.Error("markPaneClear %s: %v", paneID, err)
+			}
+		},
+		MarkUnread: func(paneID string) {
+			if err := store.MarkUnread(paneID); err != nil {
+				debug.Error("markPaneUnread %s: %v", paneID, err)
+			}
+		},
+		ToggleFollow: func(paneID string) {
+			if err := store.ToggleFollow(paneID); err != nil {
+				debug.Error("togglePaneFollow %s: %v", paneID, err)
+			}
+		},
+		Unmonitor: func(paneID string) {
+			if err := store.Remove(paneID); err != nil {
+				debug.Error("unmonitorPane %s: %v", paneID, err)
+			}
+		},
+		SetNote: func(paneID, note string) {
+			if err := store.SetNote(paneID, note); err != nil {
+				debug.Error("setPaneNote %s: %v", paneID, err)
+			}
+		},
 	}
 }
 

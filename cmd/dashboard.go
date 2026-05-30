@@ -124,7 +124,10 @@ func handleDashboardSwitch(result ui.DashboardResult, dismissUnread bool) string
 		debug.Error("dashboard: save history: %v", err)
 	}
 	if dismissUnread {
-		dismissUnreadPane(result.Selected.PaneID)
+		store := monitor.DefaultStore()
+		if err := store.DismissUnread(result.Selected.PaneID); err != nil {
+			debug.Error("dashboard dismiss-unread %s: %v", result.Selected.PaneID, err)
+		}
 	}
 	return result.Selected.PaneID
 }
