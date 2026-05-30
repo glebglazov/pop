@@ -120,11 +120,6 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			}
 			// Continue loop to show picker again
 
-		case ui.ActionSwitchToPane:
-			if result.Selected != nil {
-				return switchToTmuxTargetAndZoom(result.Selected.Path)
-			}
-
 		case ui.ActionRefresh:
 			restoreCursorIdx = result.CursorIndex
 			// Continue loop — items rebuild with fresh attention state
@@ -201,11 +196,6 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		ui.WithReset(),
 		ui.WithQuickAccess(quickAccessModifier),
 		ui.WithIconLegend(iconLegends...),
-	}
-	if attentionEnabled {
-		if attentionPanes := buildAttentionPanes(); len(attentionPanes) > 0 {
-			opts = append(opts, ui.WithAttentionPanes(attentionPanes, attentionCallbacks()))
-		}
 	}
 	if initialCursorIdx >= 0 {
 		opts = append(opts, ui.WithInitialCursorIndex(initialCursorIdx))

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -15,29 +14,7 @@ import (
 	"github.com/junegunn/fzf/src/util"
 )
 
-// spinnerFrames are the animation frames for working panes
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
-// spinnerTickMsg is sent periodically to advance the spinner animation
-type spinnerTickMsg struct{}
-
-func spinnerTick() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-		return spinnerTickMsg{}
-	})
-}
-
-// reloadTickMsg triggers a periodic reload of attention panes
-type reloadTickMsg struct{}
-
-func reloadTick() tea.Cmd {
-	return tea.Tick(1*time.Second, func(time.Time) tea.Msg {
-		return reloadTickMsg{}
-	})
-}
-
 // IconAttention is the icon used to mark items that have panes needing attention.
-// Used by the picker to gate the right-arrow attention sub-view.
 const IconAttention = "!"
 
 // Item represents a selectable item in the picker
@@ -64,7 +41,6 @@ type Result struct {
 	Action             Action
 	CursorIndex        int                       // cursor position at time of action
 	UserDefinedCommand *UserDefinedCommandResult // set when Action == ActionUserDefinedCommand
-	AttentionFollowing bool                      // whether following mode was active
 }
 
 // Action represents what action the user wants to take
@@ -79,34 +55,8 @@ const (
 	ActionReset
 	ActionOpenWindow
 	ActionUserDefinedCommand
-	ActionSwitchToPane
-	// ActionSwitchToPaneKeepUnread is like ActionSwitchToPane but tells the
-	// caller not to mutate the pane's monitor state. Used by the "peek"
-	// keybind in the attention view so users can open a pane for a quick
-	// look without dismissing its unread flag.
-	ActionSwitchToPaneKeepUnread
 	ActionRefresh
 )
-
-// AttentionStatus indicates why a pane appears in the attention view
-type AttentionStatus int
-
-const (
-	AttentionUnread AttentionStatus = iota
-	AttentionWorking
-	AttentionClear
-	AttentionVirtual
-)
-
-// AttentionPane represents a pane that needs user attention
-type AttentionPane struct {
-	PaneID    string
-	Session   string
-	Name      string
-	Status    AttentionStatus
-	Following bool
-	Note      string
-}
 
 // Picker is a fuzzy-searchable list picker
 type Picker struct {
@@ -145,31 +95,6 @@ type Picker struct {
 
 	// Warnings to display in the picker
 	warnings []string
-
-	// Attention sub-view
-	attentionMode          bool
-	attentionPanes         []AttentionPane
-	attentionAllPanes      []AttentionPane // full list (source of truth for dashboard)
-	attentionFollowing     bool            // true = showing followed-only view
-	attentionCursor        int
-	attentionScroll        int
-	attentionInitialPaneID string
-	attentionPreview       string
-	attentionTitle         string
-	attentionEmptyNote     string
-	attentionDirty         bool
-	previewFunc            func(paneID string) string
-	reloadFunc             func() []AttentionPane
-	markClearFunc          func(paneID string)
-	markUnreadFunc         func(paneID string)
-	toggleFollowFunc       func(paneID string)
-	unmonitorFunc          func(paneID string)
-	setNoteFunc            func(paneID, note string)
-	spinnerFrame           int // current spinner animation frame
-
-	// Note editing state
-	editingNote bool
-	noteInput   textinput.Model
 }
 
 // iconLegendEntry maps an icon to its description in the help view
@@ -279,13 +204,6 @@ func WithInitialCursorIndex(idx int) PickerOption {
 	}
 }
 
-// WithInitialAttentionPane selects the initial dashboard cursor by pane ID.
-func WithInitialAttentionPane(paneID string) PickerOption {
-	return func(p *Picker) {
-		p.attentionInitialPaneID = paneID
-	}
-}
-
 // WithUserDefinedCommands adds custom key bindings and commands to the picker
 func WithUserDefinedCommands(commands []UserDefinedCommand) PickerOption {
 	return func(p *Picker) {
@@ -305,52 +223,6 @@ func WithUserDefinedCommands(commands []UserDefinedCommand) PickerOption {
 func WithWarnings(warnings []string) PickerOption {
 	return func(p *Picker) {
 		p.warnings = warnings
-	}
-}
-
-// AttentionCallbacks holds callback functions for the attention sub-view.
-type AttentionCallbacks struct {
-	Preview      func(paneID string) string // returns pane content for preview
-	MarkClear    func(paneID string)        // marks a pane as clear
-	MarkUnread   func(paneID string)        // marks a pane as unread
-	ToggleFollow func(paneID string)        // toggles following flag
-	Unmonitor    func(paneID string)        // removes a pane from monitor state
-	SetNote      func(paneID, note string)  // sets note on a pane
-}
-
-// WithAttentionPanes enables the attention sub-view with the given panes and callbacks.
-func WithAttentionPanes(panes []AttentionPane, cb AttentionCallbacks) PickerOption {
-	return func(p *Picker) {
-		p.attentionAllPanes = panes
-		p.attentionPanes = make([]AttentionPane, len(panes))
-		copy(p.attentionPanes, panes)
-		p.previewFunc = cb.Preview
-		p.markClearFunc = cb.MarkClear
-		p.markUnreadFunc = cb.MarkUnread
-		p.toggleFollowFunc = cb.ToggleFollow
-		p.unmonitorFunc = cb.Unmonitor
-		p.setNoteFunc = cb.SetNote
-	}
-}
-
-// WithAttentionEmptyNote sets a note line shown below the "No panes need attention" message.
-func WithAttentionEmptyNote(note string) PickerOption {
-	return func(p *Picker) {
-		p.attentionEmptyNote = note
-	}
-}
-
-// WithAttentionReload sets a function that reloads attention panes when "r" is pressed in the empty state.
-func WithAttentionReload(fn func() []AttentionPane) PickerOption {
-	return func(p *Picker) {
-		p.reloadFunc = fn
-	}
-}
-
-// WithAttentionFollowing sets the initial following mode for the attention view.
-func WithAttentionFollowing(following bool) PickerOption {
-	return func(p *Picker) {
-		p.attentionFollowing = following
 	}
 }
 
@@ -374,15 +246,6 @@ func NewPicker(items []Item, opts ...PickerOption) *Picker {
 	return p
 }
 
-func (p *Picker) hasWorkingPanes() bool {
-	for _, pane := range p.attentionPanes {
-		if pane.Status == AttentionWorking {
-			return true
-		}
-	}
-	return false
-}
-
 func (p *Picker) Init() tea.Cmd {
 	if p.initialCursorIdx >= 0 && len(p.filtered) > 0 {
 		p.cursor = p.initialCursorIdx
@@ -393,37 +256,10 @@ func (p *Picker) Init() tea.Cmd {
 		p.cursor = len(p.filtered) - 1
 	}
 	p.adjustScroll()
-	var cmds []tea.Cmd
-	if p.hasWorkingPanes() {
-		cmds = append(cmds, spinnerTick())
-	}
-	if p.reloadFunc != nil {
-		cmds = append(cmds, reloadTick())
-	}
-	return tea.Batch(cmds...)
+	return nil
 }
 
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg.(type) {
-	case spinnerTickMsg:
-		p.spinnerFrame = (p.spinnerFrame + 1) % len(spinnerFrames)
-		if p.hasWorkingPanes() {
-			return p, spinnerTick()
-		}
-		return p, nil
-	case reloadTickMsg:
-		if p.reloadFunc != nil {
-			hadWorking := p.hasWorkingPanes()
-			p.reloadAttentionPanes()
-			cmds := []tea.Cmd{reloadTick()}
-			// Start spinner if reload introduced working panes
-			if !hadWorking && p.hasWorkingPanes() {
-				cmds = append(cmds, spinnerTick())
-			}
-			return p, tea.Batch(cmds...)
-		}
-		return p, nil
-	}
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -439,11 +275,6 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, keys.Help) {
 			p.showHelp = true
 			return p, nil
-		}
-
-		// Attention sub-view: handle keys when in attention mode
-		if p.attentionMode {
-			return p.updateAttention(msg)
 		}
 
 		switch {
@@ -594,9 +425,6 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if p.height < 3 {
 			p.height = 3
 		}
-		if p.attentionMode {
-			p.adjustAttentionScroll()
-		}
 	}
 
 	// Update text input
@@ -607,402 +435,6 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	p.filter()
 
 	return p, cmd
-}
-
-// updateAttention handles key events when in attention sub-view mode
-func (p *Picker) updateAttention(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// Note editing mode: capture all keys
-	if p.editingNote {
-		switch {
-		case key.Matches(msg, keys.Quit): // Esc/Ctrl+C
-			p.editingNote = false
-			return p, nil
-		case key.Matches(msg, keys.Enter):
-			note := strings.TrimSpace(p.noteInput.Value())
-			pane := &p.attentionPanes[p.attentionCursor]
-			// Auto-follow on save if not already
-			if !pane.Following && p.toggleFollowFunc != nil {
-				p.toggleFollowFunc(pane.PaneID)
-				pane.Following = true
-				for i := range p.attentionAllPanes {
-					if p.attentionAllPanes[i].PaneID == pane.PaneID {
-						p.attentionAllPanes[i].Following = true
-						break
-					}
-				}
-			}
-			p.setNoteFunc(pane.PaneID, note)
-			pane.Note = note
-			for i := range p.attentionAllPanes {
-				if p.attentionAllPanes[i].PaneID == pane.PaneID {
-					p.attentionAllPanes[i].Note = note
-					break
-				}
-			}
-			p.attentionDirty = true
-			p.editingNote = false
-			return p, nil
-		default:
-			var cmd tea.Cmd
-			p.noteInput, cmd = p.noteInput.Update(msg)
-			return p, cmd
-		}
-	}
-
-	switch {
-	case key.Matches(msg, keys.Back):
-		if len(p.items) == 0 {
-			p.result = Result{Action: ActionCancel}
-			return p, tea.Quit
-		}
-		if p.attentionDirty {
-			p.result = Result{Action: ActionRefresh}
-			return p, tea.Quit
-		}
-		p.attentionMode = false
-		return p, nil
-
-	case key.Matches(msg, keys.Quit):
-		if msg.Code == 0x1b && len(p.items) > 0 { // esc — go back to normal view
-			if p.attentionDirty {
-				p.result = Result{Action: ActionRefresh}
-				return p, tea.Quit
-			}
-			p.attentionMode = false
-			return p, nil
-		}
-		// esc in standalone mode or ctrl+c — quit
-		p.result = Result{Action: ActionCancel}
-		return p, tea.Quit
-
-	case key.Matches(msg, keys.Enter):
-		if len(p.attentionPanes) == 0 {
-			p.result = Result{Action: ActionCancel}
-			return p, tea.Quit
-		}
-		pane := p.attentionPanes[p.attentionCursor]
-		p.result = Result{
-			Selected: &Item{Name: pane.Name, Path: pane.PaneID, Context: pane.Session},
-			Action:   ActionSwitchToPane,
-		}
-		return p, tea.Quit
-
-	case key.Matches(msg, keys.PeekPane):
-		// "Peek" — open the pane without mutating its monitor state.
-		// Unlike Enter (which calls dismissUnreadPane on the caller side),
-		// this action signals the caller to leave Status and LastActiveAt
-		// untouched. Used for "I just want to glance at this without
-		// clearing the unread flag."
-		if len(p.attentionPanes) == 0 {
-			return p, nil
-		}
-		pane := p.attentionPanes[p.attentionCursor]
-		p.result = Result{
-			Selected: &Item{Name: pane.Name, Path: pane.PaneID, Context: pane.Session},
-			Action:   ActionSwitchToPaneKeepUnread,
-		}
-		return p, tea.Quit
-
-	case key.Matches(msg, keys.AttentionUp):
-		if len(p.attentionPanes) > 0 {
-			if p.attentionCursor > 0 {
-				p.attentionCursor--
-			} else {
-				p.attentionCursor = len(p.attentionPanes) - 1
-			}
-			p.adjustAttentionScroll()
-			p.fetchAttentionPreview()
-		}
-		return p, nil
-
-	case key.Matches(msg, keys.AttentionDown):
-		if len(p.attentionPanes) > 0 {
-			if p.attentionCursor < len(p.attentionPanes)-1 {
-				p.attentionCursor++
-			} else {
-				p.attentionCursor = 0
-			}
-			p.adjustAttentionScroll()
-			p.fetchAttentionPreview()
-		}
-		return p, nil
-
-	case key.Matches(msg, keys.ToggleClearUnread):
-		if len(p.attentionPanes) > 0 && p.markClearFunc != nil && p.markUnreadFunc != nil {
-			pane := &p.attentionPanes[p.attentionCursor]
-			if pane.Status == AttentionVirtual {
-				return p, nil
-			}
-			if pane.Status == AttentionClear {
-				p.markUnreadFunc(pane.PaneID)
-				pane.Status = AttentionUnread
-				p.updateAllPanesStatus(pane.PaneID, AttentionUnread)
-			} else {
-				p.markClearFunc(pane.PaneID)
-				pane.Status = AttentionClear
-				p.updateAllPanesStatus(pane.PaneID, AttentionClear)
-			}
-			p.sortAttentionPanes()
-			if p.attentionCursor >= len(p.attentionPanes) {
-				p.attentionCursor = len(p.attentionPanes) - 1
-			}
-			p.attentionDirty = true
-			p.adjustAttentionScroll()
-			p.fetchAttentionPreview()
-		}
-		return p, nil
-
-	case key.Matches(msg, keys.MarkUnread):
-		if len(p.attentionPanes) > 0 && p.markUnreadFunc != nil {
-			pane := &p.attentionPanes[p.attentionCursor]
-			if pane.Status == AttentionVirtual {
-				return p, nil
-			}
-			p.markUnreadFunc(pane.PaneID)
-			pane.Status = AttentionUnread
-			p.updateAllPanesStatus(pane.PaneID, AttentionUnread)
-			p.sortAttentionPanes()
-			if p.attentionCursor >= len(p.attentionPanes) {
-				p.attentionCursor = len(p.attentionPanes) - 1
-			}
-			p.attentionDirty = true
-			p.adjustAttentionScroll()
-			p.fetchAttentionPreview()
-		}
-		return p, nil
-
-	case key.Matches(msg, keys.FollowPane):
-		if len(p.attentionPanes) > 0 && p.toggleFollowFunc != nil {
-			pane := &p.attentionPanes[p.attentionCursor]
-			if pane.Status == AttentionVirtual {
-				return p, nil
-			}
-			p.toggleFollowFunc(pane.PaneID)
-			pane.Following = !pane.Following
-			// Clear note when unfollowing
-			if !pane.Following && pane.Note != "" && p.setNoteFunc != nil {
-				p.setNoteFunc(pane.PaneID, "")
-				pane.Note = ""
-			}
-			// Update source-of-truth list
-			for i := range p.attentionAllPanes {
-				if p.attentionAllPanes[i].PaneID == pane.PaneID {
-					p.attentionAllPanes[i].Following = pane.Following
-					p.attentionAllPanes[i].Note = pane.Note
-					break
-				}
-			}
-			p.attentionDirty = true
-			// If in following view and we just unfollowed, rebuild to remove it
-			if p.attentionFollowing && !pane.Following {
-				p.rebuildAttentionView()
-			}
-		}
-		return p, nil
-
-	case key.Matches(msg, keys.ToggleFollowView):
-		p.attentionFollowing = !p.attentionFollowing
-		p.rebuildAttentionView()
-		if p.hasWorkingPanes() {
-			return p, spinnerTick()
-		}
-		return p, nil
-
-	case key.Matches(msg, keys.EditNote):
-		if len(p.attentionPanes) > 0 && p.setNoteFunc != nil {
-			pane := p.attentionPanes[p.attentionCursor]
-			if pane.Status == AttentionVirtual {
-				return p, nil
-			}
-			p.editingNote = true
-			p.noteInput = textinput.New()
-			p.noteInput.Prompt = "note: "
-			p.noteInput.SetValue(pane.Note)
-			p.noteInput.Focus()
-		}
-		return p, nil
-
-	case key.Matches(msg, keys.Unmonitor):
-		if len(p.attentionPanes) > 0 && p.unmonitorFunc != nil {
-			pane := p.attentionPanes[p.attentionCursor]
-			if pane.Status == AttentionVirtual {
-				return p, nil
-			}
-			p.unmonitorFunc(pane.PaneID)
-			p.attentionDirty = true
-			// Remove from source-of-truth list
-			for i := range p.attentionAllPanes {
-				if p.attentionAllPanes[i].PaneID == pane.PaneID {
-					p.attentionAllPanes = append(p.attentionAllPanes[:i], p.attentionAllPanes[i+1:]...)
-					break
-				}
-			}
-			p.attentionPanes = append(p.attentionPanes[:p.attentionCursor], p.attentionPanes[p.attentionCursor+1:]...)
-			if len(p.attentionPanes) == 0 {
-				if len(p.items) == 0 {
-					p.result = Result{Action: ActionCancel}
-					return p, tea.Quit
-				}
-				p.result = Result{Action: ActionRefresh}
-				return p, tea.Quit
-			}
-			if p.attentionCursor >= len(p.attentionPanes) {
-				p.attentionCursor = 0
-			}
-			p.adjustAttentionScroll()
-			p.fetchAttentionPreview()
-		}
-		return p, nil
-	}
-	return p, nil
-}
-
-// reloadAttentionPanes refreshes the attention pane list from the reload function,
-// preserving the cursor on the same pane when possible.
-func (p *Picker) reloadAttentionPanes() {
-	if p.reloadFunc == nil {
-		return
-	}
-	// Remember current selection
-	var selectedPaneID string
-	if p.attentionCursor < len(p.attentionPanes) {
-		selectedPaneID = p.attentionPanes[p.attentionCursor].PaneID
-	}
-
-	p.attentionAllPanes = p.reloadFunc()
-	p.rebuildAttentionView()
-
-	// Try to restore cursor to the same pane
-	restored := false
-	if selectedPaneID != "" {
-		for i, pane := range p.attentionPanes {
-			if pane.PaneID == selectedPaneID {
-				p.attentionCursor = i
-				restored = true
-				break
-			}
-		}
-	}
-	if !restored {
-		if len(p.attentionPanes) > 0 {
-			p.attentionCursor = len(p.attentionPanes) - 1
-		} else {
-			p.attentionCursor = 0
-		}
-	}
-	p.adjustAttentionScroll()
-	p.fetchAttentionPreview()
-}
-
-// sortAttentionPanes performs a stable sort of attention panes by status group:
-// clear (top) → working (middle) → unread (bottom, closest to cursor).
-func (p *Picker) sortAttentionPanes() {
-	sort.SliceStable(p.attentionAllPanes, func(i, j int) bool {
-		return attentionStatusOrder(p.attentionAllPanes[i].Status) < attentionStatusOrder(p.attentionAllPanes[j].Status)
-	})
-	sort.SliceStable(p.attentionPanes, func(i, j int) bool {
-		return attentionStatusOrder(p.attentionPanes[i].Status) < attentionStatusOrder(p.attentionPanes[j].Status)
-	})
-}
-
-func attentionStatusOrder(s AttentionStatus) int {
-	switch s {
-	case AttentionClear, AttentionVirtual:
-		return 0
-	case AttentionWorking:
-		return 1
-	case AttentionUnread:
-		return 2
-	default:
-		return 0
-	}
-}
-
-// updateAllPanesStatus syncs a status change to the attentionAllPanes source-of-truth list.
-func (p *Picker) updateAllPanesStatus(paneID string, status AttentionStatus) {
-	for i := range p.attentionAllPanes {
-		if p.attentionAllPanes[i].PaneID == paneID {
-			p.attentionAllPanes[i].Status = status
-			break
-		}
-	}
-}
-
-// rebuildAttentionView filters attentionAllPanes into attentionPanes
-// based on the current view mode, clamping cursor to bounds.
-func (p *Picker) rebuildAttentionView() {
-	// Remember currently selected pane to restore cursor after rebuild
-	var selectedPaneID string
-	if p.attentionCursor >= 0 && p.attentionCursor < len(p.attentionPanes) {
-		selectedPaneID = p.attentionPanes[p.attentionCursor].PaneID
-	}
-
-	if p.attentionFollowing {
-		filtered := make([]AttentionPane, 0)
-		for _, pane := range p.attentionAllPanes {
-			if pane.Following {
-				filtered = append(filtered, pane)
-			}
-		}
-		p.attentionPanes = filtered
-	} else {
-		p.attentionPanes = make([]AttentionPane, len(p.attentionAllPanes))
-		copy(p.attentionPanes, p.attentionAllPanes)
-	}
-
-	// Try to restore cursor to the same pane
-	restored := false
-	if selectedPaneID != "" {
-		for i, pane := range p.attentionPanes {
-			if pane.PaneID == selectedPaneID {
-				p.attentionCursor = i
-				restored = true
-				break
-			}
-		}
-	}
-	if !restored {
-		if p.attentionCursor >= len(p.attentionPanes) {
-			p.attentionCursor = len(p.attentionPanes) - 1
-		}
-		if p.attentionCursor < 0 {
-			p.attentionCursor = 0
-		}
-	}
-	p.adjustAttentionScroll()
-	p.fetchAttentionPreview()
-}
-
-// fetchAttentionPreview calls the preview function for the currently selected attention pane
-func (p *Picker) fetchAttentionPreview() {
-	if p.previewFunc == nil || len(p.attentionPanes) == 0 {
-		p.attentionPreview = ""
-		return
-	}
-	p.attentionPreview = p.previewFunc(p.attentionPanes[p.attentionCursor].PaneID)
-}
-
-// adjustAttentionScroll ensures the attention cursor is visible
-func (p *Picker) adjustAttentionScroll() {
-	listHeight := p.height + 2 // match viewAttention's visible row count
-	if listHeight <= 0 {
-		listHeight = 1
-	}
-	// Don't scroll past what's needed to fill the viewport
-	maxScroll := len(p.attentionPanes) - listHeight
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if p.attentionScroll > maxScroll {
-		p.attentionScroll = maxScroll
-	}
-	// Ensure cursor is visible
-	if p.attentionCursor < p.attentionScroll {
-		p.attentionScroll = p.attentionCursor
-	}
-	if p.attentionCursor >= p.attentionScroll+listHeight {
-		p.attentionScroll = p.attentionCursor - listHeight + 1
-	}
 }
 
 // fzfMatch holds an item with its fuzzy match score
@@ -1200,8 +632,6 @@ func (p *Picker) View() tea.View {
 	var content string
 	if p.showHelp {
 		content = p.viewHelp()
-	} else if p.attentionMode {
-		content = p.viewAttention()
 	} else {
 		content = p.viewProject()
 	}
@@ -1299,220 +729,6 @@ func (p *Picker) viewHelp() string {
 
 	// Hints line
 	b.WriteString(hintStyle.Render("  Esc back"))
-
-	return b.String()
-}
-
-func (p *Picker) viewAttention() string {
-	var b strings.Builder
-
-	sepStyle := lipgloss.NewStyle().
-		Foreground(colorSeparator)
-
-	// Layout: left panel (pane list) + separator + right panel (preview)
-	leftWidth := p.width * 3 / 10
-	if leftWidth < 15 {
-		leftWidth = 15
-	}
-	rightWidth := p.width - leftWidth - 1 // 1 for separator
-	if rightWidth < 10 {
-		rightWidth = 10
-	}
-
-	// Reserve 1 line for hints + 1 line for header
-	listHeight := p.height + 2 // viewProject reserves 4 lines; we need 1 for hints + 1 for header
-
-	// Empty panes: show title + dismissable message
-	if len(p.attentionPanes) == 0 {
-		msgStyle := lipgloss.NewStyle().Foreground(colorDim)
-		var eb strings.Builder
-		headerText := p.attentionTitle
-		if p.attentionFollowing {
-			headerText += " · following"
-		} else {
-			headerText += " · normal"
-		}
-		eb.WriteString(headerStyle.Render(" " + headerText))
-		eb.WriteString("\n")
-		for i := 0; i < p.height-1; i++ {
-			eb.WriteString("\n")
-		}
-		if p.attentionFollowing {
-			eb.WriteString(msgStyle.Render("  No followed panes"))
-		} else {
-			eb.WriteString(msgStyle.Render("  No active panes"))
-		}
-		if p.attentionEmptyNote != "" {
-			eb.WriteString("\n")
-			eb.WriteString(hintStyle.Render("  " + p.attentionEmptyNote))
-		}
-		eb.WriteString("\n")
-		hint := "  F toggle view · Enter or Esc to dismiss"
-		if p.reloadFunc != nil {
-			hint += " · r to reload"
-		}
-		eb.WriteString(hintStyle.Render(hint))
-		return eb.String()
-	}
-
-	// Header in left panel
-	headerText := p.attentionPanes[p.attentionCursor].Session
-	if p.attentionTitle != "" {
-		headerText = p.attentionTitle
-	}
-	if p.attentionFollowing {
-		headerText += " · following"
-	} else {
-		headerText += " · normal"
-	}
-	headerText = truncateString(headerText, leftWidth-1)
-	headerPadding := leftWidth - len([]rune(headerText)) - 1
-	if headerPadding < 0 {
-		headerPadding = 0
-	}
-	b.WriteString(headerStyle.Render(" " + headerText))
-	b.WriteString(strings.Repeat(" ", headerPadding))
-	b.WriteString(sepStyle.Render("│"))
-
-	// Right header: pane name anchored to top-right, pin after name
-	pane := p.attentionPanes[p.attentionCursor]
-	paneName := pane.Name
-	pinSuffix := ""
-	pinVisualWidth := 0
-	if pane.Following {
-		pinSuffix = " 📌"
-		pinVisualWidth = 3 // space(1) + pin emoji(2 cells)
-	}
-	// Truncate name to fit, leaving room for pin
-	maxNameWidth := rightWidth - pinVisualWidth
-	if maxNameWidth < 0 {
-		maxNameWidth = 0
-	}
-	paneName = truncateString(paneName, maxNameWidth)
-	rightHeader := paneName + pinSuffix
-	rightHeaderVisualLen := len([]rune(paneName)) + pinVisualWidth
-	rightPadding := rightWidth - rightHeaderVisualLen
-	if rightPadding < 0 {
-		rightPadding = 0
-	}
-	b.WriteString(strings.Repeat(" ", rightPadding))
-	b.WriteString(headerStyle.Render(rightHeader))
-	b.WriteString("\n")
-
-	// Build preview lines
-	previewLines := strings.Split(p.attentionPreview, "\n")
-	// Trim trailing empty lines
-	for len(previewLines) > 0 && strings.TrimSpace(previewLines[len(previewLines)-1]) == "" {
-		previewLines = previewLines[:len(previewLines)-1]
-	}
-
-	// Visible attention panes
-	start := p.attentionScroll
-	if start > len(p.attentionPanes) {
-		start = len(p.attentionPanes)
-	}
-	visible := listHeight
-	if visible > len(p.attentionPanes)-start {
-		visible = len(p.attentionPanes) - start
-	}
-
-	// For preview: show last lines that fit (push to bottom like main view)
-	previewStart := 0
-	if len(previewLines) > listHeight {
-		previewStart = len(previewLines) - listHeight
-	}
-
-	// Empty lines to push list content to bottom
-	emptyLines := listHeight - visible
-	for i := 0; i < emptyLines; i++ {
-		// Empty left panel + separator + preview line
-		previewIdx := previewStart + i
-		rightContent := ""
-		if previewIdx < len(previewLines) {
-			rightContent = truncateString(previewLines[previewIdx], rightWidth)
-		}
-		b.WriteString(strings.Repeat(" ", leftWidth))
-		b.WriteString(sepStyle.Render("│"))
-		b.WriteString(rightContent)
-		b.WriteString("\x1b[0m\n")
-	}
-
-	// Status icon styles
-	attentionIconStyle := lipgloss.NewStyle().Foreground(colorAttention)
-	workingIconStyle := lipgloss.NewStyle().Foreground(colorWorking)
-	clearIconStyle := lipgloss.NewStyle().Foreground(colorClear)
-
-	// Render list rows alongside preview
-	for i := 0; i < visible; i++ {
-		listIdx := start + i
-		previewIdx := previewStart + emptyLines + i
-
-		// Left panel: pane list item with status icon
-		var left string
-		pane := p.attentionPanes[listIdx]
-
-		// Status icon: 2 visual chars (icon + space), or 3 with pin (icon + pin + space)
-		var icon string
-		switch pane.Status {
-		case AttentionVirtual:
-			icon = clearIconStyle.Render("○")
-		case AttentionWorking:
-			icon = workingIconStyle.Render(spinnerFrames[p.spinnerFrame])
-		case AttentionUnread:
-			icon = attentionIconStyle.Render("●")
-		case AttentionClear:
-			icon = clearIconStyle.Render("●")
-		}
-		iconWidth := 2 // icon + trailing space
-		if pane.Following {
-			icon += "📌"
-			iconWidth = 4 // icon + pin(2) + trailing space
-		}
-		icon += " "
-
-		// Account for icon width + prefix (1 for cursor pipe or 2 for spaces)
-		nameWidth := leftWidth - iconWidth - 3 // 1 pipe + 1 space + icon + name (selected)
-		name := truncateString(pane.Name, nameWidth)
-
-		if listIdx == p.attentionCursor {
-			padding := leftWidth - len([]rune(name)) - iconWidth - 3
-			if padding < 0 {
-				padding = 0
-			}
-			left = indicatorStyle.Render("█") + " " + icon + name + strings.Repeat(" ", padding)
-		} else {
-			padding := leftWidth - len([]rune(name)) - iconWidth - 2 // 2 spaces + icon
-			if padding < 0 {
-				padding = 0
-			}
-			left = "  " + icon + name + strings.Repeat(" ", padding)
-		}
-
-		// Right panel: preview content
-		rightContent := ""
-		if previewIdx < len(previewLines) {
-			rightContent = truncateString(previewLines[previewIdx], rightWidth)
-		}
-
-		b.WriteString("\x1b[0m") // reset before left panel
-		b.WriteString(left)
-		b.WriteString(sepStyle.Render("│"))
-		b.WriteString(rightContent)
-		b.WriteString("\x1b[0m\n")
-	}
-
-	// Hints or note input
-	if p.editingNote {
-		b.WriteString("  " + p.noteInput.View())
-	} else {
-		var hints string
-		if len(p.items) > 0 {
-			hints = "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel"
-		} else {
-			hints = "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · Esc quit"
-		}
-		b.WriteString(hintStyle.Render(hints))
-	}
 
 	return b.String()
 }
@@ -1642,38 +858,7 @@ func (p *Picker) viewProject() string {
 // Result returns the picker result after running
 func (p *Picker) Result() Result {
 	p.result.CursorIndex = p.cursor
-	p.result.AttentionFollowing = p.attentionFollowing
 	return p.result
-}
-
-// RunAttention starts the picker directly in the attention sub-view.
-// Returns the selected pane (ActionSwitchToPane) or cancel.
-func RunAttention(title string, panes []AttentionPane, cb AttentionCallbacks, reloadFn func() []AttentionPane, opts ...PickerOption) (Result, error) {
-	p := NewPicker(nil, append([]PickerOption{WithAttentionPanes(panes, cb), WithAttentionReload(reloadFn)}, opts...)...)
-	p.attentionMode = true
-	p.attentionTitle = title
-	if p.attentionFollowing {
-		p.rebuildAttentionView()
-	}
-	if len(p.attentionPanes) > 0 {
-		p.attentionCursor = len(p.attentionPanes) - 1
-		if p.attentionInitialPaneID != "" {
-			for i, pane := range p.attentionPanes {
-				if pane.PaneID == p.attentionInitialPaneID {
-					p.attentionCursor = i
-					break
-				}
-			}
-		}
-	}
-	p.adjustAttentionScroll()
-	p.fetchAttentionPreview()
-	program := tea.NewProgram(p)
-	m, err := program.Run()
-	if err != nil {
-		return Result{Action: ActionCancel}, err
-	}
-	return m.(*Picker).Result(), nil
 }
 
 // Run starts the picker and returns the result
@@ -1702,16 +887,6 @@ type keyMap struct {
 	OpenWindow        key.Binding
 	ClearInput        key.Binding
 	Help              key.Binding
-	MarkUnread        key.Binding
-	PeekPane          key.Binding
-	FollowPane        key.Binding
-	ToggleFollowView  key.Binding
-	Unmonitor         key.Binding
-	ToggleClearUnread key.Binding
-	Back              key.Binding
-	AttentionUp       key.Binding
-	AttentionDown     key.Binding
-	EditNote          key.Binding
 }
 
 var keys = keyMap{
@@ -1753,39 +928,5 @@ var keys = keyMap{
 	),
 	Help: key.NewBinding(
 		key.WithKeys("f1"),
-	),
-	MarkUnread: key.NewBinding(
-		key.WithKeys("ctrl+a"),
-	),
-	PeekPane: key.NewBinding(
-		// shift+enter works on terminals supporting the Kitty keyboard
-		// protocol (kitty, WezTerm, ghostty, foot, iTerm2 recent, Alacritty
-		// 0.13+) under tmux with `set -s extended-keys on`. `p` is the
-		// universal fallback — "p" for "peek".
-		key.WithKeys("shift+enter", "p"),
-	),
-	FollowPane: key.NewBinding(
-		key.WithKeys("f"),
-	),
-	ToggleFollowView: key.NewBinding(
-		key.WithKeys("F"),
-	),
-	Unmonitor: key.NewBinding(
-		key.WithKeys("x"),
-	),
-	ToggleClearUnread: key.NewBinding(
-		key.WithKeys("r"),
-	),
-	Back: key.NewBinding(
-		key.WithKeys("left"),
-	),
-	AttentionUp: key.NewBinding(
-		key.WithKeys("up", "ctrl+p", "k"),
-	),
-	AttentionDown: key.NewBinding(
-		key.WithKeys("down", "ctrl+n", "j"),
-	),
-	EditNote: key.NewBinding(
-		key.WithKeys("N"),
 	),
 }

@@ -71,8 +71,6 @@ type ProjectDeps struct {
 	// Session state
 	SessionActivity    func() map[string]int64
 	AttentionSessions  func() map[string]bool
-	AttentionPanes     func() []ui.AttentionPane
-	AttentionCallbacks func() ui.AttentionCallbacks
 
 	// Side effects (take deps.Tmux as first arg to match *With signatures)
 	OpenSession      func(tmux deps.Tmux, item *ui.Item) error
@@ -117,8 +115,6 @@ func DefaultProjectDeps() *ProjectDeps {
 
 		SessionActivity:    history.TmuxSessionActivity,
 		AttentionSessions:  monitorAttentionSessions,
-		AttentionPanes:     buildAttentionPanes,
-		AttentionCallbacks: attentionCallbacks,
 
 		OpenSession:       openTmuxSessionWith,
 		OpenWindow:        openTmuxWindowWith,
@@ -285,11 +281,6 @@ func RunProject(d *ProjectDeps) error {
 			ui.WithQuickAccess(quickAccessModifier),
 			ui.WithIconLegend(iconLegends...),
 		}
-		if cfg.UnreadNotificationsEnabled("project") {
-			if attentionPanes := d.AttentionPanes(); len(attentionPanes) > 0 {
-				opts = append(opts, ui.WithAttentionPanes(attentionPanes, d.AttentionCallbacks()))
-			}
-		}
 		if inTmux {
 			opts = append(opts, ui.WithOpenWindow())
 		}
@@ -367,28 +358,6 @@ func RunProject(d *ProjectDeps) error {
 				baseItems = sortBaseItemsByHistory(baseItems, hist)
 			}
 			// No-op for standalone sessions; continue loop
-
-		case ui.ActionSwitchToPane:
-			if result.Selected != nil {
-				if !d.NoHistory {
-					sessionName := result.Selected.Context
-					var histPath string
-					for _, item := range items {
-						if sanitizeSessionName(item.Name) == sessionName {
-							histPath = item.Path
-							break
-						}
-					}
-					if histPath == "" {
-						histPath = sessionHistoryPath(sessionName, hist)
-					}
-					hist.Record(histPath)
-					if err := hist.Save(); err != nil {
-						debug.Error("project: save history: %v", err)
-					}
-				}
-				return d.SwitchAndZoom(d.Tmux, result.Selected.Path)
-			}
 
 		case ui.ActionRefresh:
 			restoreCursorIdx = result.CursorIndex

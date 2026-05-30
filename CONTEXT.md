@@ -72,8 +72,8 @@ _Avoid_: Repo picker
 The persisted record of projects you've selected, with timestamps.
 _Avoid_: Recents, access log
 
-**Unread view**:
-The sub-view in the project picker (entered via `→` on sessions with unread panes) for quickly jumping to unread panes without opening the dashboard.
+**Unread view** (removed):
+Previously a sub-view in the project picker (entered via `→`) for quickly jumping to unread panes. Removed — unread panes are now only accessible via the **Dashboard**.
 _Avoid_: Attention view, triage view
 
 **Visit**:

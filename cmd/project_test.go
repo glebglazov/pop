@@ -901,8 +901,6 @@ func testProjectDeps(t *testing.T) *ProjectDeps {
 
 		SessionActivity:    func() map[string]int64 { return nil },
 		AttentionSessions:  func() map[string]bool { return nil },
-		AttentionPanes:     func() []ui.AttentionPane { return nil },
-		AttentionCallbacks: func() ui.AttentionCallbacks { return ui.AttentionCallbacks{} },
 
 		OpenSession:       func(tmux deps.Tmux, item *ui.Item) error { return nil },
 		OpenWindow:        func(tmux deps.Tmux, item *ui.Item) error { return nil },

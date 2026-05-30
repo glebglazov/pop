@@ -139,31 +139,6 @@ func monitorAttentionSessionsWith(d *monitor.Deps) map[string]bool {
 	return state.SessionsWithUnread()
 }
 
-// buildAttentionPanes returns attention panes for the picker sub-view
-func buildAttentionPanes() []ui.AttentionPane {
-	state := loadMonitorState()
-	if state == nil {
-		return nil
-	}
-
-	entries := state.PanesUnread()
-	paneCommands := tmuxPaneCommands()
-	panes := make([]ui.AttentionPane, 0, len(entries))
-	for _, entry := range entries {
-		name := entry.PaneID
-		if cmd := paneProcessLabel(entry, paneCommands); cmd != "" {
-			name = entry.PaneID + " (" + cmd + ")"
-		}
-		panes = append(panes, ui.AttentionPane{
-			PaneID:  entry.PaneID,
-			Session: entry.Session,
-			Name:    name,
-			Status:  ui.AttentionUnread,
-		})
-	}
-	return panes
-}
-
 // tmuxPaneCommands returns a map of pane ID → current command for all panes
 func tmuxPaneCommands() map[string]string {
 	return tmuxPaneCommandsWith(defaultTmux)

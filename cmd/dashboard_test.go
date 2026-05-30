@@ -588,9 +588,9 @@ func TestHandleDashboardSwitch(t *testing.T) {
 
 	t.Run("normal switch dismisses unread and stamps LastActiveAt", func(t *testing.T) {
 		statePath, initialVisited := setup(t)
-		result := ui.Result{
-			Selected: &ui.Item{Name: "proj (%1)", Path: "%1", Context: "proj"},
-			Action:   ui.ActionSwitchToPane,
+		result := ui.DashboardResult{
+			Selected: &ui.AttentionPane{PaneID: "%1", Session: "proj", Name: "proj (%1)"},
+			Action:   ui.DashboardActionConfirm,
 		}
 
 		got := handleDashboardSwitch(result, true)
@@ -609,9 +609,9 @@ func TestHandleDashboardSwitch(t *testing.T) {
 
 	t.Run("peek leaves monitor state untouched", func(t *testing.T) {
 		statePath, initialVisited := setup(t)
-		result := ui.Result{
-			Selected: &ui.Item{Name: "proj (%1)", Path: "%1", Context: "proj"},
-			Action:   ui.ActionSwitchToPaneKeepUnread,
+		result := ui.DashboardResult{
+			Selected: &ui.AttentionPane{PaneID: "%1", Session: "proj", Name: "proj (%1)"},
+			Action:   ui.DashboardActionPeek,
 		}
 
 		got := handleDashboardSwitch(result, false)
@@ -630,7 +630,7 @@ func TestHandleDashboardSwitch(t *testing.T) {
 
 	t.Run("nil selected returns empty string", func(t *testing.T) {
 		setup(t)
-		result := ui.Result{Selected: nil, Action: ui.ActionSwitchToPane}
+		result := ui.DashboardResult{Selected: nil, Action: ui.DashboardActionConfirm}
 		if got := handleDashboardSwitch(result, true); got != "" {
 			t.Errorf("got %q, want empty string", got)
 		}

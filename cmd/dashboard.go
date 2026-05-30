@@ -60,37 +60,37 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	// Restore following mode from monitor state
-	var opts []ui.PickerOption
+	var opts []ui.DashboardOption
 	state := loadMonitorStateAlways()
 	if state != nil && state.DashboardFollowing {
-		opts = append(opts, ui.WithAttentionFollowing(true))
+		opts = append(opts, ui.WithFollowing(true))
 	}
 	if len(systemWarnings) > 0 {
-		opts = append(opts, ui.WithWarnings(systemWarnings))
+		opts = append(opts, ui.WithDashboardWarnings(systemWarnings))
 	}
 
 	panes, initialPaneID := buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosition, sortCriteria)
 	if initialPaneID != "" {
-		opts = append(opts, ui.WithInitialAttentionPane(initialPaneID))
+		opts = append(opts, ui.WithInitialPaneID(initialPaneID))
 	}
-	result, err := ui.RunAttention("dashboard", panes, attentionCallbacks(), buildPanes, opts...)
+	result, err := ui.RunDashboard("dashboard", panes, attentionCallbacks(), buildPanes, opts...)
 	if err != nil {
 		return err
 	}
 
 	// Persist following mode for next dashboard open
-	saveDashboardFollowing(result.AttentionFollowing)
+	saveDashboardFollowing(result.Following)
 
 	switch result.Action {
-	case ui.ActionSwitchToPane:
+	case ui.DashboardActionConfirm:
 		if target := handleDashboardSwitch(result, true); target != "" {
 			return switchToTmuxTargetAndZoom(target)
 		}
-	case ui.ActionSwitchToPaneKeepUnread:
+	case ui.DashboardActionPeek:
 		if target := handleDashboardSwitch(result, false); target != "" {
 			return switchToTmuxTargetAndZoom(target)
 		}
-	case ui.ActionCancel:
+	case ui.DashboardActionCancel:
 		os.Exit(1)
 	}
 
@@ -108,7 +108,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 //   - false (peek / ActionSwitchToPaneKeepUnread): leave monitor state
 //     untouched so the pane remains unread in the dashboard even after
 //     the user glances at it.
-func handleDashboardSwitch(result ui.Result, dismissUnread bool) string {
+func handleDashboardSwitch(result ui.DashboardResult, dismissUnread bool) string {
 	if result.Selected == nil {
 		return ""
 	}
@@ -119,14 +119,14 @@ func handleDashboardSwitch(result ui.Result, dismissUnread bool) string {
 	if hist == nil {
 		hist = &history.History{}
 	}
-	hist.Record(sessionHistoryPath(result.Selected.Context, hist))
+	hist.Record(sessionHistoryPath(result.Selected.Session, hist))
 	if err := hist.Save(); err != nil {
 		debug.Error("dashboard: save history: %v", err)
 	}
 	if dismissUnread {
-		dismissUnreadPane(result.Selected.Path)
+		dismissUnreadPane(result.Selected.PaneID)
 	}
-	return result.Selected.Path
+	return result.Selected.PaneID
 }
 
 func saveDashboardFollowing(following bool) {
