@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -233,6 +234,7 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 	if err != nil {
 		debug.Error("buildDashboardPanes: load history: %v", err)
 	}
+
 	sessionLastVisit := make(map[string]int64)
 	for _, p := range panes {
 		if _, ok := sessionLastVisit[p.Session]; !ok {
@@ -405,7 +407,10 @@ func sessionAccessTime(session string, hist *history.History) int64 {
 	}
 	var partial int64
 	for _, e := range hist.Entries {
-		entrySession := historyEntrySessionName(e.Path)
+		// Fast path: derive session name from path base without git calls.
+		// This is approximate for bare-repo worktrees (repo/worktree vs worktree)
+		// but correct for all regular repos and fast enough for dashboard sorting.
+		entrySession := sanitizeSessionName(filepath.Base(e.Path))
 		if entrySession == session {
 			return e.LastAccess.Unix()
 		}

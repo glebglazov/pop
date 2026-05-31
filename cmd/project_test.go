@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,11 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
 )
+
+// testItem creates a ui.Item with SessionName pre-computed from the path base.
+func testItem(name, path string) ui.Item {
+	return ui.Item{Name: name, Path: path, SessionName: sanitizeSessionName(filepath.Base(path))}
+}
 
 func TestLastNSegments(t *testing.T) {
 	tests := []struct {
@@ -127,8 +133,8 @@ func TestBuildSessionAwareItems(t *testing.T) {
 
 	t.Run("standalone sessions detected correctly", func(t *testing.T) {
 		baseItems := []ui.Item{
-			{Name: "app", Path: "/app"},
-			{Name: "api", Path: "/api"},
+			testItem("app", "/app"),
+			testItem("api", "/api"),
 		}
 		// Sessions: app matches project, api matches project, scratch and notes are standalone
 		sessionActivity := map[string]int64{
@@ -159,8 +165,8 @@ func TestBuildSessionAwareItems(t *testing.T) {
 
 	t.Run("icon assignment", func(t *testing.T) {
 		baseItems := []ui.Item{
-			{Name: "app", Path: "/app"},
-			{Name: "idle", Path: "/idle"},
+			testItem("app", "/app"),
+			testItem("idle", "/idle"),
 		}
 		sessionActivity := map[string]int64{
 			project.SessionName("/app"): now.Unix(),
@@ -188,8 +194,8 @@ func TestBuildSessionAwareItems(t *testing.T) {
 
 	t.Run("no sessions means no icons and no standalone items", func(t *testing.T) {
 		baseItems := []ui.Item{
-			{Name: "app", Path: "/app"},
-			{Name: "api", Path: "/api"},
+			testItem("app", "/app"),
+			testItem("api", "/api"),
 		}
 		sessionActivity := map[string]int64{}
 		hist := &history.History{}
@@ -210,7 +216,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		// Simulate exclude_current_dir: "app" was removed from baseItems
 		// but its tmux session still exists
 		baseItems := []ui.Item{
-			{Name: "api", Path: "/api"},
+			testItem("api", "/api"),
 		}
 		sessionActivity := map[string]int64{
 			project.SessionName("/app"): now.Unix(), // session for excluded project
@@ -239,7 +245,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 	t.Run("sanitized name matching", func(t *testing.T) {
 		// Project name "my.app" sanitizes to "my_app"
 		baseItems := []ui.Item{
-			{Name: "my.app", Path: "/my.app"},
+			testItem("my.app", "/my.app"),
 		}
 		// Session name "my_app" should match SessionName(path), not the display label
 		sessionActivity := map[string]int64{
@@ -260,7 +266,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 	t.Run("session icon matches SessionName for top-level project", func(t *testing.T) {
 		// Display label differs from session name (e.g. display_depth > 1)
 		baseItems := []ui.Item{
-			{Name: "user/myapp", Path: "/home/user/myapp"},
+			testItem("user/myapp", "/home/user/myapp"),
 		}
 		sessionActivity := map[string]int64{
 			project.SessionName("/home/user/myapp"): now.Unix(),
@@ -281,7 +287,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 	t.Run("session icon matches SessionName for bare-repo worktree", func(t *testing.T) {
 		// Picker shows display_depth label; session name is repo/worktree
 		baseItems := []ui.Item{
-			{Name: "projects/myrepo/feature", Path: "/projects/myrepo/feature"},
+			testItem("projects/myrepo/feature", "/projects/myrepo/feature"),
 		}
 		sessionActivity := map[string]int64{
 			project.SessionName("/projects/myrepo/feature"): now.Unix(),
@@ -305,8 +311,8 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 
 	t.Run("attention overrides session icon for project", func(t *testing.T) {
 		baseItems := []ui.Item{
-			{Name: "app", Path: "/app"},
-			{Name: "api", Path: "/api"},
+			testItem("app", "/app"),
+			testItem("api", "/api"),
 		}
 		sessionActivity := map[string]int64{
 			project.SessionName("/app"): now.Unix(),
@@ -360,7 +366,7 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 
 	t.Run("nil attention sessions does not affect icons", func(t *testing.T) {
 		baseItems := []ui.Item{
-			{Name: "app", Path: "/app"},
+			testItem("app", "/app"),
 		}
 		sessionActivity := map[string]int64{
 			project.SessionName("/app"): now.Unix(),
@@ -572,7 +578,8 @@ func TestOpenTmuxSessionWith(t *testing.T) {
 			},
 		}
 
-		item := &ui.Item{Name: "user/myapp", Path: "/home/user/myapp"}
+		ti := testItem("user/myapp", "/home/user/myapp")
+		item := &ti
 		if err := openTmuxSessionWith(tmux, item); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -594,7 +601,8 @@ func TestOpenTmuxSessionWith(t *testing.T) {
 			},
 		}
 
-		item := &ui.Item{Name: "projects/myrepo/feature", Path: "/projects/myrepo/feature"}
+		ti := testItem("projects/myrepo/feature", "/projects/myrepo/feature")
+		item := &ti
 		if err := openTmuxSessionWith(tmux, item); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1120,5 +1128,32 @@ func TestRunProject_ActionCancelExitsCleanly(t *testing.T) {
 	}
 	if openCalled {
 		t.Error("OpenSession called on cancel path — expected no-op")
+	}
+}
+
+// TestRunProject_NoGitCallsDuringPickerOpen asserts that opening the project
+// picker does not invoke git commands. Regression guard for the session-module
+// change that called project.SessionName (which runs git) inside hot loops
+// (icon matching, exclusion filtering, etc.), causing 200+ subprocess
+// invocations on every open.
+func TestRunProject_NoGitCallsDuringPickerOpen(t *testing.T) {
+	gitCalls := 0
+	d := testProjectDeps(t)
+	d.Project.Git = &deps.MockGit{
+		CommandInDirFunc: func(dir string, args ...string) (string, error) {
+			gitCalls++
+			return "", fmt.Errorf("unexpected git call: %v in %s", args, dir)
+		},
+	}
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		return ui.Result{Action: ui.ActionCancel}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+
+	if gitCalls > 0 {
+		t.Errorf("picker open triggered %d git call(s); expected 0 — SessionName should be pre-computed during expansion", gitCalls)
 	}
 }

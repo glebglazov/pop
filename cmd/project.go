@@ -215,7 +215,7 @@ func RunProject(d *ProjectDeps) error {
 	if len(excludedSessionNames) > 0 {
 		filtered := expanded[:0]
 		for _, ep := range expanded {
-			if !excludedSessionNames[project.SessionName(ep.Path)] {
+			if !excludedSessionNames[ep.SessionName] {
 				filtered = append(filtered, ep)
 			}
 		}
@@ -258,9 +258,10 @@ func RunProject(d *ProjectDeps) error {
 	baseItems := make([]ui.Item, len(sortedExpanded))
 	for i, ep := range sortedExpanded {
 		baseItems[i] = ui.Item{
-			Name:    ep.Name,
-			Path:    ep.Path,
-			Context: ep.ProjectName,
+			Name:        ep.Name,
+			Path:        ep.Path,
+			Context:     ep.ProjectName,
+			SessionName: ep.SessionName,
 		}
 	}
 
@@ -377,7 +378,7 @@ func RunProject(d *ProjectDeps) error {
 				if isStandaloneSession(*result.Selected) {
 					d.KillSession(d.Tmux, standaloneSessionName(*result.Selected))
 				} else {
-					d.KillSession(d.Tmux, project.SessionName(result.Selected.Path))
+					d.KillSession(d.Tmux, result.Selected.SessionName)
 				}
 			}
 			// Continue loop — session state refreshes automatically
@@ -436,15 +437,14 @@ func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sess
 	// Build set of session names that correspond to project items
 	projectSessionNames := make(map[string]bool)
 	for _, item := range baseItems {
-		projectSessionNames[project.SessionName(item.Path)] = true
+		projectSessionNames[item.SessionName] = true
 	}
 
 	// Apply icons to project items that have active sessions
 	items := make([]ui.Item, len(baseItems))
 	copy(items, baseItems)
 	for i := range items {
-		sessionName := project.SessionName(items[i].Path)
-		if _, hasSession := sessionActivity[sessionName]; hasSession {
+		if _, hasSession := sessionActivity[items[i].SessionName]; hasSession {
 			items[i].Icon = iconDirSession
 		} else {
 			items[i].Icon = ""
@@ -454,8 +454,7 @@ func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sess
 	// Override icons for sessions needing attention
 	if attentionSessions != nil {
 		for i := range items {
-			sessionName := project.SessionName(items[i].Path)
-			if attentionSessions[sessionName] {
+			if attentionSessions[items[i].SessionName] {
 				items[i].Icon = iconAttention
 			}
 		}
@@ -528,7 +527,7 @@ func openTmuxSessionWith(tmux deps.Tmux, item *ui.Item) error {
 	return session.AttachWith(&session.Deps{
 		Tmux:   tmux,
 		InTmux: func() bool { return os.Getenv("TMUX") != "" },
-	}, project.SessionName(item.Path), item.Path)
+	}, item.SessionName, item.Path)
 }
 
 func openTmuxWindow(item *ui.Item) error {
@@ -663,12 +662,14 @@ func expandProjectsWith(d *project.Deps, paths []config.ExpandedPath) (expanded 
 					expandErr = err
 					return
 				}
+				ctx := &project.RepoContext{RepoName: projectName, IsBare: true}
 				for _, wt := range worktrees {
 					projects = append(projects, project.ExpandedProject{
 						Name:        displayName + "/" + wt.Name,
 						Path:        wt.Path,
 						ProjectName: projectName,
 						IsWorktree:  true,
+						SessionName: project.TmuxSessionName(ctx, wt.Name),
 					})
 				}
 			} else {
@@ -678,6 +679,7 @@ func expandProjectsWith(d *project.Deps, paths []config.ExpandedPath) (expanded 
 					Path:        ep.Path,
 					ProjectName: projectName,
 					IsWorktree:  false,
+					SessionName: project.TmuxSessionName(&project.RepoContext{IsBare: false}, filepath.Base(ep.Path)),
 				})
 			}
 		}(i, p)

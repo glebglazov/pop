@@ -345,4 +345,5 @@ type ExpandedProject struct {
 	Path        string // Full path to the project/worktree
 	ProjectName string // Base project name
 	IsWorktree  bool   // Whether this is a worktree of a bare repo
+	SessionName string // Pre-computed tmux session name
 }

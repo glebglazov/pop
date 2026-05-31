@@ -94,11 +94,11 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 		switch result.Action {
 		case ui.ActionCancel:
-			os.Exit(1)
+			return nil
 
 		case ui.ActionConfirm:
 			if result.Selected == nil {
-				os.Exit(1)
+				return nil
 			}
 			return handleWorktreeSelect(ctx, result.Selected)
 

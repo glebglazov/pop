@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
@@ -183,11 +184,32 @@ func sessionHistoryPath(sessionName string, hist *history.History) string {
 	return tmuxSessionPathPrefix + sessionName
 }
 
+var (
+	historySessionNameCache   = make(map[string]string)
+	historySessionNameCacheMu sync.Mutex
+)
+
 func historyEntrySessionName(path string) string {
-	if strings.HasPrefix(path, tmuxSessionPathPrefix) {
-		return strings.TrimPrefix(path, tmuxSessionPathPrefix)
+	historySessionNameCacheMu.Lock()
+	if name, ok := historySessionNameCache[path]; ok {
+		historySessionNameCacheMu.Unlock()
+		return name
 	}
-	return project.SessionName(path)
+	historySessionNameCacheMu.Unlock()
+
+	if strings.HasPrefix(path, tmuxSessionPathPrefix) {
+		name := strings.TrimPrefix(path, tmuxSessionPathPrefix)
+		historySessionNameCacheMu.Lock()
+		historySessionNameCache[path] = name
+		historySessionNameCacheMu.Unlock()
+		return name
+	}
+
+	name := project.SessionName(path)
+	historySessionNameCacheMu.Lock()
+	historySessionNameCache[path] = name
+	historySessionNameCacheMu.Unlock()
+	return name
 }
 
 func capturePanePreview(paneID string) string {

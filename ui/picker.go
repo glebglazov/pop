@@ -19,10 +19,11 @@ const IconAttention = "!"
 
 // Item represents a selectable item in the picker
 type Item struct {
-	Name    string // Display name
-	Path    string // Full path (returned on selection)
-	Context string // Additional context (e.g., branch name)
-	Icon    string // Optional icon displayed to the left of name
+	Name        string // Display name
+	Path        string // Full path (returned on selection)
+	Context     string // Additional context (e.g., branch name)
+	Icon        string // Optional icon displayed to the left of name
+	SessionName string // Pre-computed tmux session name
 }
 
 func (i Item) FilterValue() string {

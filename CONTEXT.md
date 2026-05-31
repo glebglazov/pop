@@ -271,7 +271,7 @@ _Avoid_: Malformed Issue set
 
 **Active vs working** — An **Active pane** is currently visible to the user. A **Working** pane has an agent or process actively running. A pane may be either, both, or neither.
 
-**Session attach refactor** — Architecture work consolidates ensure-exists + attach mechanics and centralizes **Session name** building from git repo context. All entry points share the same name function.
+**Session name derivation trade-off** — `project.SessionName` is the single source of truth for exact session names (bare-repo worktrees, regular repos, non-git paths). It calls git commands and is correct for all entry points that create, attach to, or kill sessions. The **dashboard** deliberately uses a fast string-only approximation (`sanitizeSessionName(filepath.Base(path))`) for history matching because exact derivation is too slow for a frequently-opened popup. The approximation is identical for regular repos and non-git paths; it only differs for bare-repo worktrees where the exact name is `repo/worktree`. See ADR 0005.
 
 ## Example dialogue
 
