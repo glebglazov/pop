@@ -233,10 +233,10 @@ func TestStore_Remove(t *testing.T) {
 }
 
 func TestStore_RecordVisit(t *testing.T) {
-	t.Run("updates LastActiveAt on tracked pane", func(t *testing.T) {
+	t.Run("updates LastActiveAt on tracked pane without changing status", func(t *testing.T) {
 		before := time.Now().Add(-1 * time.Hour)
 		d, saved := mockStoreDeps(map[string]*PaneEntry{
-			"%1": {PaneID: "%1", Session: "proj", LastActiveAt: before},
+			"%1": {PaneID: "%1", Session: "proj", Status: StatusWorking, LastActiveAt: before},
 		})
 		store := NewStore("/mock/data/pop/monitor.json", d)
 
@@ -247,6 +247,9 @@ func TestStore_RecordVisit(t *testing.T) {
 		state := reloadStateFromSaved(t, *saved)
 		if !state.Panes["%1"].LastActiveAt.After(before) {
 			t.Errorf("LastActiveAt = %v, want after %v", state.Panes["%1"].LastActiveAt, before)
+		}
+		if state.Panes["%1"].Status != StatusWorking {
+			t.Errorf("status = %q, want %q (should not change)", state.Panes["%1"].Status, StatusWorking)
 		}
 	})
 

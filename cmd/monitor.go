@@ -158,21 +158,10 @@ func handleVisit(statePath string, req monitor.Request) monitor.Response {
 		return monitor.Response{OK: false, Error: "missing pane_id"}
 	}
 
-	state, err := monitor.Load(statePath)
-	if err != nil {
-		debug.Error("handler visit: load state: %v", err)
-		return monitor.Response{OK: false, Error: "load state: " + err.Error()}
-	}
-
-	entry, ok := state.Panes[req.PaneID]
-	if !ok {
-		// Untracked pane — no-op per design.
-		return monitor.Response{OK: true}
-	}
-
-	entry.LastActiveAt = time.Now()
-	if err := state.Save(); err != nil {
-		return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+	store := monitor.NewStore(statePath, nil)
+	if err := store.RecordVisit(req.PaneID); err != nil {
+		debug.Error("handler visit: %v", err)
+		return monitor.Response{OK: false, Error: err.Error()}
 	}
 	return monitor.Response{OK: true}
 }

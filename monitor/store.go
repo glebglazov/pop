@@ -89,11 +89,18 @@ func (s *Store) Remove(paneID string) error {
 	return state.SaveWith(s.deps)
 }
 
-// RecordVisit updates a pane's LastActiveAt to now. No-op if pane not found.
+// RecordVisit updates a tracked pane's LastActiveAt to now without changing
+// status. Untracked panes are silently ignored (never auto-register).
 func (s *Store) RecordVisit(paneID string) error {
-	return s.UpdatePane(paneID, func(entry *PaneEntry) {
-		entry.LastActiveAt = time.Now()
-	})
+	return s.upsert(paneID,
+		func() (*PaneEntry, bool) {
+			return nil, false
+		},
+		func(entry *PaneEntry) bool {
+			entry.LastActiveAt = time.Now()
+			return true
+		},
+	)
 }
 
 // DismissUnread transitions a pane from Unread to Clear and records the

@@ -488,6 +488,61 @@ func TestSetFollowing_HandlerAndDirectParity(t *testing.T) {
 	}
 }
 
+func TestVisit_HandlerAndDirectParity(t *testing.T) {
+	before := time.Now().Add(-1 * time.Hour)
+
+	tests := []struct {
+		name    string
+		initial map[string]*monitor.PaneEntry
+		req     monitor.Request
+	}{
+		{
+			name:    "no-op on untracked pane",
+			initial: map[string]*monitor.PaneEntry{},
+			req: monitor.Request{
+				Cmd:    "visit",
+				PaneID: "%99",
+			},
+		},
+		{
+			name: "updates LastActiveAt on tracked pane",
+			initial: map[string]*monitor.PaneEntry{
+				"%3": {
+					PaneID:       "%3",
+					Session:      "proj-z",
+					Status:       monitor.StatusUnread,
+					LastActiveAt: before,
+				},
+			},
+			req: monitor.Request{
+				Cmd:    "visit",
+				PaneID: "%3",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handlerPath, _ := seedMonitorStateDir(t, clonePaneMap(tt.initial))
+			directPath, dataHome := seedMonitorStateDir(t, clonePaneMap(tt.initial))
+
+			resp := handleVisit(handlerPath, tt.req)
+			if !resp.OK {
+				t.Fatalf("handler error: %s", resp.Error)
+			}
+
+			t.Setenv("XDG_DATA_HOME", dataHome)
+			if err := runPaneVisitDirect(tt.req.PaneID); err != nil {
+				t.Fatalf("direct error: %v", err)
+			}
+
+			handlerState := loadStateFromPath(t, handlerPath)
+			directState := loadStateFromPath(t, directPath)
+			assertPaneStatesMatch(t, handlerState, directState)
+		})
+	}
+}
+
 func TestSetStatus_HandlerAndDirectParity(t *testing.T) {
 	tests := []struct {
 		name    string
