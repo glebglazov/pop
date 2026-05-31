@@ -171,17 +171,11 @@ func shellCompBody(output string) string {
 	return output
 }
 
+// writeCompletionThoughts creates a valid Issue set (no PRD pairing required).
 func writeCompletionThoughts(t *testing.T, dir, stem string, issueIDs []string) {
 	t.Helper()
-	prdPath := filepath.Join(dir, "thoughts/prds", stem+".md")
-	if err := os.MkdirAll(filepath.Dir(prdPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte("# "+stem+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	if len(issueIDs) == 0 {
-		return
+		issueIDs = []string{"01-a"}
 	}
 	issueDir := filepath.Join(dir, "thoughts/issues", stem)
 	if err := os.MkdirAll(issueDir, 0o755); err != nil {

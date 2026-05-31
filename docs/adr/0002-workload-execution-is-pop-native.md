@@ -19,6 +19,6 @@ The initial personal workflow keeps `thoughts/` ignored and machine-local. Force
 
 ## Consequences
 
-The initial implementation must cover single-issue execution and sequential PRD draining directly in Go. Parallel execution and automatic worktree creation are deferred.
+The initial implementation must cover single-issue execution and sequential Issue-set draining directly in Go. Parallel execution and automatic worktree creation are deferred.
 
 Future team-shared workload definitions may require revisiting local-only artifact handling. Until then, tests should lock down AFK eligibility, local bookkeeping, and implementation-only commits.

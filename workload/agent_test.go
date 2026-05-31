@@ -59,10 +59,13 @@ func TestResolveAgentCommandUnknownPreset(t *testing.T) {
 }
 
 func TestBuildAgentPromptAbsolutePaths(t *testing.T) {
-	prompt := BuildAgentPrompt("/abs/issues/01-a.md", "/abs/prds/feature.md", "/abs/runtime")
-	for _, want := range []string{"/abs/issues/01-a.md", "/abs/prds/feature.md", "/abs/runtime", "index.json", "Do NOT make git commits"} {
+	prompt := BuildAgentPrompt("/abs/issues/01-a.md", "/abs/runtime")
+	for _, want := range []string{"/abs/issues/01-a.md", "/abs/runtime", "index.json", "Do NOT make git commits", "optional context references"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
 		}
+	}
+	if strings.Contains(prompt, "Parent PRD") {
+		t.Fatalf("prompt must not synthesize a PRD path:\n%s", prompt)
 	}
 }

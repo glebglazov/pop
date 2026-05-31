@@ -196,8 +196,6 @@ func TestDefinitionOverridePreservesExactDirectory(t *testing.T) {
 func TestSetPrioritySignedAndStableTies(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", root)
-	writeFile(t, filepath.Join(root, "thoughts/prds/a.md"), "# A\n")
-	writeFile(t, filepath.Join(root, "thoughts/prds/b.md"), "# B\n")
 	setupManifest(t, root, "a", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -212,7 +210,7 @@ func TestSetPrioritySignedAndStableTies(t *testing.T) {
 	}
 	state := &GlobalState{
 		Version: StateVersion,
-		Workloads: map[string]*WorkloadEntry{canon: {PRDs: []RegisteredPRD{
+		Workloads: map[string]*WorkloadEntry{canon: {IssueSets: []RegisteredIssueSet{
 			{ID: "a", Priority: 0},
 			{ID: "b", Priority: 0},
 		}}},
@@ -237,7 +235,7 @@ func TestSetPrioritySignedAndStableTies(t *testing.T) {
 
 	var activeIDs []string
 	for _, row := range result.Refresh.Rows {
-		if row.Status == StatusReady || row.Status == StatusBlocked || row.Status == StatusFailed || row.Status == StatusUnplanned || row.Status == StatusMalformed {
+		if row.Status == StatusReady || row.Status == StatusBlocked || row.Status == StatusFailed || row.Status == StatusMalformed {
 			activeIDs = append(activeIDs, row.ID)
 		}
 	}
@@ -249,7 +247,9 @@ func TestSetPrioritySignedAndStableTies(t *testing.T) {
 func TestSetPriorityRejectsInvalidPRDIdentifier(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", root)
-	writeFile(t, filepath.Join(root, "thoughts/prds/feature.md"), "# Feature\n")
+	setupManifest(t, root, "feature", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
 
 	if _, err := RefreshWith(DefaultDeps(), root, DefaultStatePath()); err != nil {
 		t.Fatal(err)
@@ -287,8 +287,6 @@ func TestMarkAutoPickSkipsNonRunnableHigherPriority(t *testing.T) {
 
 func TestRefreshMarksAutoPickInRender(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "thoughts/prds/blocked.md"), "# Blocked\n")
-	writeFile(t, filepath.Join(root, "thoughts/prds/ready.md"), "# Ready\n")
 	setupManifest(t, root, "blocked", []Issue{
 		{ID: "01-hitl", File: "01-hitl.md", Title: "H", Type: "HITL", Status: "open"},
 	})
@@ -303,7 +301,7 @@ func TestRefreshMarksAutoPickInRender(t *testing.T) {
 	}
 	state := &GlobalState{
 		Version: StateVersion,
-		Workloads: map[string]*WorkloadEntry{canon: {PRDs: []RegisteredPRD{
+		Workloads: map[string]*WorkloadEntry{canon: {IssueSets: []RegisteredIssueSet{
 			{ID: "blocked", Priority: 10},
 			{ID: "ready", Priority: 0},
 		}}},
@@ -330,7 +328,9 @@ func TestDefinitionOverrideUsesCanonicalPathAsStateKey(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", root)
 	defRoot := filepath.Join(root, "planning")
-	writeFile(t, filepath.Join(defRoot, "thoughts/prds/x.md"), "# X\n")
+	setupManifest(t, defRoot, "x", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
 
 	d := DefaultDeps()
 	result, err := RefreshWith(d, defRoot, DefaultStatePath())

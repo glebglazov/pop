@@ -189,19 +189,17 @@ func parseStateLockMetadata(data []byte) (*StateLockMetadata, error) {
 func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *GlobalState, added *[]string) {
 	entry := state.Entry(defPath)
 	registered := state.RegisteredIDs(defPath)
-	for stem, prdPath := range disc.PRDs {
-		if _, ok := registered[stem]; ok {
+	for id := range disc.Manifests {
+		if _, ok := registered[id]; ok {
 			continue
 		}
-		title := ExtractPRDTitle(d, prdPath)
-		entry.PRDs = append(entry.PRDs, RegisteredPRD{
-			ID:       stem,
+		entry.IssueSets = append(entry.IssueSets, RegisteredIssueSet{
+			ID:       id,
 			Priority: 0,
-			Title:    title,
 		})
-		registered[stem] = len(entry.PRDs) - 1
+		registered[id] = len(entry.IssueSets) - 1
 		if added != nil {
-			*added = append(*added, stem)
+			*added = append(*added, id)
 		}
 	}
 }

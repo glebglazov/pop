@@ -98,8 +98,6 @@ func TestRunPRDSingleConfirmation(t *testing.T) {
 func TestRunPRDTargetedPRD(t *testing.T) {
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	writeFile(t, filepath.Join(root, "thoughts/prds/high.md"), "# High\n")
-	writeFile(t, filepath.Join(root, "thoughts/prds/low.md"), "# Low\n")
 	setupManifest(t, root, "high", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -218,8 +216,6 @@ func TestRunPRDOperationalStopOnCommitFailure(t *testing.T) {
 func TestRunPRDDoesNotContinueIntoAnotherPRD(t *testing.T) {
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	writeFile(t, filepath.Join(root, "thoughts/prds/one.md"), "# One\n")
-	writeFile(t, filepath.Join(root, "thoughts/prds/two.md"), "# Two\n")
 	setupManifest(t, root, "one", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -366,7 +362,6 @@ func setupRunPRDFixture(t *testing.T, stem string, issues []Issue) *runPRDFixtur
 	t.Helper()
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	writeFile(t, filepath.Join(root, "thoughts/prds", stem+".md"), "# Demo\n")
 	setupManifest(t, root, stem, issues)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	if _, err := RefreshWith(DefaultDeps(), root, DefaultStatePath()); err != nil {

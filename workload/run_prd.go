@@ -173,7 +173,7 @@ func RunPRDWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 			dirtyCheckpointed = true
 		}
 
-		prompt := BuildAgentPrompt(sel.IssuePath, sel.PRDPath, runtimePath)
+		prompt := BuildAgentPrompt(sel.IssuePath, runtimePath)
 		name, args, err := ResolveAgentCommand(opts.AgentPreset, opts.AgentCmd, prompt, runtimePath)
 		if err != nil {
 			return nil, exitErr(ExitSetup, "%v", err)

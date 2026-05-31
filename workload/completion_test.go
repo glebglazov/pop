@@ -97,7 +97,7 @@ func TestCompletionDoesNotPersistWorkloadState(t *testing.T) {
 	seed := &GlobalState{
 		Version: StateVersion,
 		Workloads: map[string]*WorkloadEntry{
-			canon: {PRDs: []RegisteredPRD{{ID: "existing", Priority: 0}}},
+			canon: {IssueSets: []RegisteredIssueSet{{ID: "existing", Priority: 0}}},
 		},
 		path: statePath,
 	}
@@ -149,11 +149,11 @@ func TestCompletionUnreadableDiscoveryReturnsEmptyWithoutError(t *testing.T) {
 	}
 	root := t.TempDir()
 	writeCompletionPRD(t, root, "a")
-	prdDir := filepath.Join(root, "thoughts/prds")
-	if err := os.Chmod(prdDir, 0o000); err != nil {
+	issueDir := filepath.Join(root, "thoughts/issues")
+	if err := os.Chmod(issueDir, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(prdDir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(issueDir, 0o755) })
 
 	oldWd, _ := os.Getwd()
 	if err := os.Chdir(root); err != nil {
@@ -170,20 +170,16 @@ func TestCompletionUnreadableDiscoveryReturnsEmptyWithoutError(t *testing.T) {
 	}
 }
 
+// writeCompletionPRD creates a minimal valid Issue set (no PRD pairing required).
 func writeCompletionPRD(t *testing.T, dir, stem string) {
 	t.Helper()
-	path := filepath.Join(dir, "thoughts/prds", stem+".md")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("# "+stem+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeCompletionFixture(t, dir, stem, []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
 }
 
 func writeCompletionFixture(t *testing.T, root, stem string, issues []Issue) {
 	t.Helper()
-	writeCompletionPRD(t, root, stem)
 	issueDir := filepath.Join(root, "thoughts/issues", stem)
 	for _, issue := range issues {
 		path := filepath.Join(issueDir, issue.File)

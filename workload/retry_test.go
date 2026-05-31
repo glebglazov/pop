@@ -305,7 +305,6 @@ func TestSelectIssueSkipsFailedPRDInAutomaticSelection(t *testing.T) {
 
 func TestFailedRowMultipleResetHints(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "thoughts/prds/failed-prd.md"), "# Failed\n")
 	setupManifest(t, root, "failed-prd", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "failed"},

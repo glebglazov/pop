@@ -9,16 +9,15 @@ import (
 
 const StateVersion = 1
 
-// RegisteredPRD is persisted registration metadata for a PRD.
-type RegisteredPRD struct {
+// RegisteredIssueSet is persisted registration metadata for an Issue set.
+type RegisteredIssueSet struct {
 	ID       string `json:"id"`
 	Priority int    `json:"priority"`
-	Title    string `json:"title,omitempty"`
 }
 
-// WorkloadEntry holds registered PRDs for one definition path.
+// WorkloadEntry holds registered Issue sets for one definition path.
 type WorkloadEntry struct {
-	PRDs []RegisteredPRD `json:"prds"`
+	IssueSets []RegisteredIssueSet `json:"issue_sets"`
 }
 
 // GlobalState is the machine-local workload state file.
@@ -95,20 +94,20 @@ func (s *GlobalState) SaveWith(d *Deps) error {
 // Entry returns the workload entry for a definition path, creating it if needed.
 func (s *GlobalState) Entry(defPath string) *WorkloadEntry {
 	if s.Workloads[defPath] == nil {
-		s.Workloads[defPath] = &WorkloadEntry{PRDs: nil}
+		s.Workloads[defPath] = &WorkloadEntry{IssueSets: nil}
 	}
 	return s.Workloads[defPath]
 }
 
-// RegisteredIDs returns a set of registered PRD IDs for a definition path.
+// RegisteredIDs returns a set of registered Issue-set IDs for a definition path.
 func (s *GlobalState) RegisteredIDs(defPath string) map[string]int {
 	entry := s.Workloads[defPath]
 	result := make(map[string]int)
 	if entry == nil {
 		return result
 	}
-	for i, prd := range entry.PRDs {
-		result[prd.ID] = i
+	for i, set := range entry.IssueSets {
+		result[set.ID] = i
 	}
 	return result
 }

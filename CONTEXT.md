@@ -99,95 +99,99 @@ _Avoid_: Hook, plugin (when you mean the whole setup, not a single file)
 ### Workloads
 
 **Workload**:
-A machine-local schedule of PRDs whose issues can be executed by an agent. A workload decides which PRD to draw work from next; it does not replace the local issue manifests or their execution rules.
-_Avoid_: Issue manifest, project dashboard
+A machine-local schedule of Issue sets whose issues can be executed by an agent. A workload decides which Issue set to draw work from next; it does not replace the local Issue sets or their execution rules.
+_Avoid_: Issue set, project dashboard
 
-**PRD registration**:
-A PRD entering a workload so pop may select issues from it. Pop automatically registers discovered PRD documents and reports newly registered PRDs to the user. Registration metadata, the PRD, and its issue manifest remain machine-local.
+**Issue set**:
+The local `thoughts/issues/<id>/index.json` manifest and its sibling issue markdown files. An Issue set is the schedulable unit of a workload. Its directory name is its canonical identifier and display label; there is no separate Issue-set title. It may be created from a PRD, a grilling session, or another planning workflow; PRD existence is irrelevant to workload scheduling and execution.
+_Avoid_: PRD, workload
+
+**Issue set registration**:
+An Issue set entering a workload so pop may select issues from it. Pop automatically registers discovered Issue sets and reports newly registered Issue sets to the user. Registration metadata and Issue set artifacts remain machine-local.
 _Avoid_: Import, tracking
 
 **Workload definition path**:
-The directory where pop discovers a workload's PRD documents and issue manifests. Discovery scans only `thoughts/prds/*.md` and `thoughts/issues/*/index.json` beneath this directory. It defaults to the selected project's path and may be overridden for a command. The definition path may be a designated worktree and must not be inferred from a repository's shared git directory.
+The directory where pop discovers a workload's Issue sets. Discovery scans only `thoughts/issues/*/index.json` beneath this directory. It defaults to the selected project's path and may be overridden for a command. The definition path may be a designated worktree and must not be inferred from a repository's shared git directory.
 _Avoid_: Shared git root, runtime path, project root
 
 **Workload runtime path**:
 The git checkout from which issue execution starts. It defaults to the selected project's path and may be overridden for a command. Pop resolves it to the checkout root and uses that root for the agent working directory, dirty-tree preflight, staging, commits, and the Runtime execution lock. Workload artifacts remain under the separate Workload definition path. Durable workload path configuration is deferred until worktree-oriented execution needs it.
 _Avoid_: Definition path, shared git root
 
-**Dirty runtime override**:
-An explicit opt-in allowing workload execution to start from a dirty runtime checkout. The executor captures the existing dirty state in a separate implementation commit before invoking the agent, then proceeds from a clean baseline. The command must warn before proceeding.
-_Avoid_: Clean runtime checkout, automatic resume
+**Dirty runtime strategy**:
+An explicit opt-in controlling how workload execution starts from a dirty runtime checkout. `continue` starts execution without modifying the existing dirty state and is the default when the option is present without a value; after successful issue completion, the normal implementation commit intentionally includes both pre-existing and agent changes. `commit-and-continue` captures the existing dirty state in a separate implementation commit before invoking the agent. `stash-and-continue` stashes tracked and untracked changes but not ignored files, prints the stash reference when one is created, and leaves restoration to the user; an empty stash does not prevent execution. Without an explicit strategy, execution requires a clean runtime checkout. The command must warn before proceeding. Run issues applies the chosen strategy once before draining its selected Issue set.
+_Avoid_: Clean runtime checkout, automatic stash restoration
 
 **Implementation commit**:
 A commit created by the workload executor from runtime-checkout changes. After successful issue completion, the executor stages all runtime changes and commits them with an issue-derived subject and the agent summary as body. Workload artifacts remain local and unstaged.
 _Avoid_: Workload artifact update, progress record
 
 **Issue manifest**:
-The local `index.json` produced for a PRD by the to-issues workflow. It remains the source of truth for issue eligibility and completion.
+The `index.json` within an Issue set. It remains the source of truth for issue eligibility and completion.
 _Avoid_: Workload, dashboard
 
-**Unplanned PRD**:
-A discovered PRD document for which no paired issue manifest has been generated. Pairing uses the PRD document basename and an issue-manifest folder with the same name.
-_Avoid_: Blocked PRD, missing PRD
-
-**Orphan issue manifest**:
-An issue manifest whose paired PRD document is missing. This is malformed workload input and must be reported as a Malformed row rather than silently registered. It does not prevent valid PRDs in the same workload from executing.
-_Avoid_: Unplanned PRD
+**Issue parent reference**:
+Optional planning context written inside an issue markdown file, such as a `## Parent` section pointing to a PRD or another artifact. An issue may be self-contained. Pop does not require, synthesize, validate, or interpret parent references.
+_Avoid_: Required PRD pairing, Issue set identity
 
 **Workload project resolution**:
 Choosing the project path for a workload command. A unique project display-name match may be selected explicitly; ambiguous names must be rejected with candidate paths. A direct path may be supplied as an escape hatch. When neither is supplied, the current directory is used.
 _Avoid_: Worktree discovery, workload definition path
 
-**PRD priority**:
-A numeric workload value used to choose between ready PRDs. Newly registered PRDs start at priority `0`. Higher priority wins; equal-priority PRDs retain workload list order.
+**Issue set priority**:
+A numeric workload value used to choose between ready Issue sets. Newly registered Issue sets start at priority `0`. Higher priority wins; equal-priority Issue sets retain workload list order.
 _Avoid_: Issue dependency, issue-manifest order
 
-**PRD workload status**:
-The status derived from a discovered PRD document and its paired issue manifest whenever a workload command runs. An **Unplanned** PRD has no issue manifest; a **Ready** PRD has at least one eligible issue; a **Done** PRD has only done issues; a **Failed** PRD has at least one failed issue; a **Blocked** PRD is unfinished but has no eligible issue. The workload does not persist a separate completion flag, so artifact changes naturally affect the next derived status.
-_Avoid_: Pane status, persisted PRD completion
+**Issue set workload status**:
+The status derived from a discovered Issue set whenever a workload command runs. A **Ready** Issue set has at least one eligible issue; a **Done** Issue set has only done issues; a **Failed** Issue set has at least one failed issue; a **Blocked** Issue set is unfinished but has no eligible issue. The workload does not persist a separate completion flag, so artifact changes naturally affect the next derived status.
+_Avoid_: Pane status, persisted Issue set completion
 
 **Next issue**:
-Selecting and executing one issue from the highest-priority Ready PRD. Non-runnable PRDs are reported and skipped; among Ready PRDs, equal priority retains workload list order.
-_Avoid_: First registered PRD, highest-priority PRD regardless of status
+Selecting and executing one issue from the highest-priority Ready Issue set. Non-runnable Issue sets are reported and skipped; among Ready Issue sets, equal priority retains workload list order.
+_Avoid_: First registered Issue set, highest-priority Issue set regardless of status
 
 **Workload executor**:
 The mechanism that runs a selected issue through an agent, verifies completion, updates the issue manifest and progress record locally, and commits implementation changes.
 _Avoid_: Workload scheduler
 
 **Run issue**:
-Executing exactly one eligible issue from a Ready PRD. By default pop chooses the PRD using workload priority; an explicit PRD may be targeted without bypassing readiness rules. An explicit issue may be targeted within an explicit PRD without bypassing Open status, AFK type, or dependency rules.
+Executing exactly one eligible issue from a Ready Issue set. By default pop chooses the Issue set using workload priority; an explicit Issue set may be targeted without bypassing readiness rules. An explicit issue may be targeted within an explicit Issue set without bypassing Open status, AFK type, or dependency rules.
 _Avoid_: Next issue
 
-**Run PRD**:
-Sequentially executing eligible issues from one Ready PRD until it becomes Done, Blocked, or Failed. By default pop chooses the PRD using workload priority; an explicit PRD may be targeted without bypassing readiness rules. It does not continue into another PRD.
-_Avoid_: Run all, next PRD
+**Run issues**:
+Sequentially executing eligible issues from one Ready Issue set until it becomes Done, Blocked, or Failed. By default pop chooses the Issue set using workload priority; an explicit Issue set may be targeted without bypassing readiness rules. It does not continue into another Issue set.
+_Avoid_: Run all, next Issue set, Run PRD
 
 **Agent preset**:
 A named headless agent command known to the workload executor. An explicit agent command may override a preset. The executor appends its generated prompt as the final positional argument and disconnects stdin.
 _Avoid_: Integration
 
+**Agent quota reporting**:
+Displaying subscription quota remaining in a provider-specific rolling window, such as a five-hour limit. This is deferred until agent CLIs expose supported headless status interfaces. Token totals, private authentication-file access, undocumented endpoints, and interactive-terminal scraping are not substitutes for quota reporting.
+_Avoid_: Token usage, API cost
+
 **Issue attempt**:
-One agent invocation for an issue. The workload executor retries an unsuccessful issue up to the configured maximum, defaulting to three attempts. Exhaustion marks the issue Failed, records the attempt count and reason locally, and stops Run PRD.
-_Avoid_: PRD retry, issue dependency
+One agent invocation for an issue. The workload executor retries an unsuccessful issue up to the configured maximum, defaulting to three attempts. Exhaustion marks the issue Failed, records the attempt count and reason locally, and stops Run issues.
+_Avoid_: Issue set retry, issue dependency
 
 **Issue attempt timeout**:
 The maximum duration for one issue attempt, defaulting to 30 minutes and configurable per command. When exceeded, the workload executor terminates the agent process group, preserves partial changes, marks the issue Failed locally, appends a Failed progress record, and stops immediately without further retries. A deliberate retry requires an Issue reset.
-_Avoid_: PRD timeout, interruption
+_Avoid_: Issue set timeout, interruption
 
-**Human-blocked PRD**:
-A PRD with unfinished issues but no eligible AFK issue because human-in-the-loop work must happen first. Run Issue and Run PRD report the condition and stop; the workload executor never automatically runs HITL issues.
-_Avoid_: Failed PRD, unplanned PRD
+**Human-blocked Issue set**:
+An Issue set with unfinished issues but no eligible AFK issue because human-in-the-loop work must happen first. Run issue and Run issues report the condition and stop; the workload executor never automatically runs HITL issues.
+_Avoid_: Failed Issue set
 
 **Workload artifact**:
-A machine-local PRD document, issue markdown file, issue manifest, or progress record beneath `thoughts/`. The workload executor updates workload artifacts locally but does not stage or commit them with implementation changes.
+A machine-local planning document, issue markdown file, issue manifest, or progress record beneath `thoughts/`. The workload executor updates workload artifacts locally but does not stage or commit them with implementation changes.
 _Avoid_: Implementation change, workload state
 
 **No-op issue completion**:
-A successful issue execution that produces no staged implementation change. The workload executor marks the issue Done locally, appends progress, reports that no implementation commit was created, and allows Run PRD to continue.
+A successful issue execution that produces no staged implementation change. The workload executor marks the issue Done locally, appends progress, reports that no implementation commit was created, and allows Run issues to continue.
 _Avoid_: Failed issue, empty commit
 
 **Exhausted issue**:
-An issue that remains unsuccessful after its maximum attempts. The workload executor marks it Failed locally, preserves any partial implementation changes for inspection, does not commit them, and stops Run PRD.
+An issue that remains unsuccessful after its maximum attempts. The workload executor marks it Failed locally, preserves any partial implementation changes for inspection, does not commit them, and stops Run issues.
 _Avoid_: No-op issue completion, reverted issue
 
 **Interrupted issue**:
@@ -196,7 +200,7 @@ _Avoid_: Exhausted issue, failed issue
 
 **Issue reset**:
 Explicitly returning one Failed issue to Open so it may be attempted again. Reset removes the recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit.
-_Avoid_: PRD reset, automatic retry
+_Avoid_: Issue set reset, automatic retry
 
 **Progress record**:
 The append-only local `progress.txt` history beside an issue manifest. It records terminal Done and Failed outcomes plus explicit issue resets. Intermediate attempts are streamed during execution but are not appended.
@@ -206,45 +210,45 @@ _Avoid_: Workload state, agent output log
 The machine-readable ending emitted by an agent after an issue attempt. Success requires a zero agent exit status, a summary block followed by `TASK_COMPLETE`, and every acceptance-criteria checkbox in the issue markdown checked. Failure may end with `TASK_FAILED: <reason>`.
 _Avoid_: Agent exit code, progress record
 
-**Malformed PRD**:
-A discovered PRD whose paired issue manifest or issue markdown files violate the workload contract. This includes an issue with persisted `in_progress` status: the synchronous workload executor does not use that status because it could become stale after a crash. Malformed PRDs are reported in the workload status table and skipped during automatic selection; the workload executor never spawns an agent for them.
-_Avoid_: Unplanned PRD, blocked PRD, orphan issue manifest
+**Malformed Issue set**:
+A discovered Issue set whose issue manifest or issue markdown files violate the workload contract. This includes an issue with persisted `in_progress` status: the synchronous workload executor does not use that status because it could become stale after a crash. Malformed Issue sets are reported in the workload status table and skipped during automatic selection; the workload executor never spawns an agent for them.
+_Avoid_: Blocked Issue set
 
 **Workload state**:
-The machine-local persisted record of workloads and their registered PRDs. A workload is keyed by its canonical definition path; its PRDs are stored in registration order with display metadata and priority. Workload state does not duplicate derived PRD completion.
+The machine-local persisted record of workloads and their registered Issue sets. A workload is keyed by its canonical definition path; its Issue sets are stored in registration order with priority. Workload state does not duplicate derived Issue set completion.
 _Avoid_: Workload artifact, issue manifest
 
 **Runtime execution lock**:
-A machine-local lock held while Run Issue or Run PRD executes for a canonical workload runtime path. It prevents concurrent workload execution in one checkout while allowing unrelated projects or isolated runtime worktrees to execute concurrently. Non-execution workload commands remain available. Lock metadata records the executor PID; a dead PID is reported and replaced as a stale lock.
+A machine-local lock held while Run issue or Run issues executes for a canonical workload runtime path. It prevents concurrent workload execution in one checkout while allowing unrelated projects or isolated runtime worktrees to execute concurrently. Non-execution workload commands remain available. Lock metadata records the executor PID; a dead PID is reported and replaced as a stale lock.
 _Avoid_: Global workload lock, project-name lock
 
 **Workload status table**:
-The non-interactive summary printed by the workload status command after discovery refresh. Missing PRDs appear first as stale registrations, followed by Done PRDs. Remaining discovered PRDs then appear in scheduler order: descending priority with stable registration order for ties, so the user can read the active queue top-to-bottom to understand which Ready work will be selected first. The automatically selected Ready PRD is marked explicitly. Before execution, the actual Run target is also marked; when an explicit PRD override differs from the automatic selection, the table shows both markers on their respective rows. An interactive workload dashboard is deferred until the table workflow is exercised.
+The non-interactive summary printed by the workload status command after discovery refresh. Missing Issue sets appear first as stale registrations, followed by Done Issue sets. Remaining discovered Issue sets then appear in scheduler order: descending priority with stable registration order for ties, so the user can read the active queue top-to-bottom to understand which Ready work will be selected first. The automatically selected Ready Issue set is marked explicitly. Before execution, the actual Run target is also marked; when an explicit Issue set override differs from the automatic selection, the table shows both markers on their respective rows. An interactive workload dashboard is deferred until the table workflow is exercised.
 _Avoid_: Dashboard
 
 **Execution confirmation**:
-The human gate before Run Issue or Run PRD spawns an agent. Pop prints the refreshed workload status table with the selected PRD marked and asks for `y/n` confirmation. Run PRD asks once before draining its selected PRD, not before each issue. An explicit `--yes` (`-y`) option bypasses the prompt for unattended use. Non-interactive execution without that option fails rather than waiting for input.
+The human gate before Run issue or Run issues spawns an agent. Pop prints the refreshed workload status table with the selected Issue set marked and asks for `y/n` confirmation. Run issues asks once before draining its selected Issue set, not before each issue. An explicit `--yes` (`-y`) option bypasses the prompt for unattended use. Non-interactive execution without that option fails rather than waiting for input.
 _Avoid_: HITL issue, issue reset
 
 **Workload execution exit status**:
-The process result exposed by Run Issue and Run PRD: `0` for completed work or a declined confirmation, `1` for execution failure, timeout, malformed target, commit failure, or a live Runtime execution lock, `2` when no runnable issue exists, `3` for usage, configuration, or project-resolution errors, and `130` for interruption.
-_Avoid_: PRD workload status, agent exit code
+The process result exposed by Run issue and Run issues: `0` for completed work or a declined confirmation, `1` for execution failure, timeout, malformed target, commit failure, or a live Runtime execution lock, `2` when no runnable issue exists, `3` for usage, configuration, or project-resolution errors, and `130` for interruption.
+_Avoid_: Issue set workload status, agent exit code
 
 **Workload status exit status**:
 The process result exposed by the workload status command. Rendering a resolved workload succeeds even when rows are Malformed, Failed, or Blocked; non-zero is reserved for failures that prevent workload resolution or rendering.
 _Avoid_: Workload execution exit status
 
 **Workload identifier**:
-An exact CLI reference to a PRD filename stem or an issue-manifest issue ID. Workload commands do not interpret titles, prefixes, fuzzy matches, or markdown filenames as identifiers. Invalid identifiers are rejected with valid candidates.
+An exact CLI reference to an Issue set directory name or an issue-manifest issue ID. Workload commands do not interpret titles, prefixes, fuzzy matches, or markdown filenames as identifiers. Invalid identifiers are rejected with valid candidates.
 _Avoid_: Display title, filename
 
 **Workload shell completion**:
-Read-only shell tab completion for workload subcommands, project names, PRD identifiers, issue identifiers, agent presets, and path flags. Completion may scan local workload artifacts but must not auto-register PRDs, persist workload state, or print warnings.
+Read-only shell tab completion for workload subcommands, project names, Issue set identifiers, issue identifiers, agent presets, and path flags. Completion may scan local workload artifacts but must not auto-register Issue sets, persist workload state, or print warnings.
 _Avoid_: Shell autosuggestion, discovery refresh
 
-**Missing PRD**:
-A locally registered PRD whose document is no longer present beneath the workload definition path. Its registration, priority, and list order are preserved in case the document returns. It is skipped during execution and shown before all discovered PRDs in the workload status table so active work remains grouped toward the end for a future terminal UI.
-_Avoid_: Unplanned PRD, malformed PRD
+**Missing Issue set**:
+A locally registered Issue set whose manifest is no longer present beneath the workload definition path. Its registration, priority, and list order are preserved in case the Issue set returns. It is skipped during execution and shown before all discovered Issue sets in the workload status table so active work remains grouped toward the end for a future terminal UI.
+_Avoid_: Malformed Issue set
 
 ## Deprecated aliases
 

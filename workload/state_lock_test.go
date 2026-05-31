@@ -145,7 +145,7 @@ func TestUpdateGlobalStateRemovesLockAfterWrite(t *testing.T) {
 	d := DefaultDeps()
 
 	err := UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-		state.Entry("/project/a").PRDs = append(state.Entry("/project/a").PRDs, RegisteredPRD{ID: "a", Priority: 0})
+		state.Entry("/project/a").IssueSets = append(state.Entry("/project/a").IssueSets, RegisteredIssueSet{ID: "a", Priority: 0})
 		return nil
 	})
 	if err != nil {
@@ -161,7 +161,7 @@ func TestUpdateGlobalStateRemovesLockAfterWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Workloads["/project/a"].PRDs) != 1 {
+	if len(state.Workloads["/project/a"].IssueSets) != 1 {
 		t.Fatalf("state = %#v", state.Workloads["/project/a"])
 	}
 }
@@ -174,7 +174,7 @@ func TestUpdateGlobalStateMergePreservesOtherProjects(t *testing.T) {
 	initial := &GlobalState{
 		Version: StateVersion,
 		Workloads: map[string]*WorkloadEntry{
-			"/project/a": {PRDs: []RegisteredPRD{{ID: "keep", Priority: 5, Title: "Keep"}}},
+			"/project/a": {IssueSets: []RegisteredIssueSet{{ID: "keep", Priority: 5}}},
 		},
 		path: statePath,
 	}
@@ -183,7 +183,7 @@ func TestUpdateGlobalStateMergePreservesOtherProjects(t *testing.T) {
 	}
 
 	err := UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-		state.Entry("/project/b").PRDs = append(state.Entry("/project/b").PRDs, RegisteredPRD{ID: "new", Priority: 3})
+		state.Entry("/project/b").IssueSets = append(state.Entry("/project/b").IssueSets, RegisteredIssueSet{ID: "new", Priority: 3})
 		return nil
 	})
 	if err != nil {
@@ -195,11 +195,11 @@ func TestUpdateGlobalStateMergePreservesOtherProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := state.Workloads["/project/a"]
-	if a == nil || len(a.PRDs) != 1 || a.PRDs[0].ID != "keep" || a.PRDs[0].Priority != 5 {
+	if a == nil || len(a.IssueSets) != 1 || a.IssueSets[0].ID != "keep" || a.IssueSets[0].Priority != 5 {
 		t.Fatalf("project a = %#v", a)
 	}
 	b := state.Workloads["/project/b"]
-	if b == nil || len(b.PRDs) != 1 || b.PRDs[0].ID != "new" {
+	if b == nil || len(b.IssueSets) != 1 || b.IssueSets[0].ID != "new" {
 		t.Fatalf("project b = %#v", b)
 	}
 }
@@ -260,8 +260,12 @@ func TestConcurrentDistinctProjectUpdates(t *testing.T) {
 
 	defA := filepath.Join(root, "project-a")
 	defB := filepath.Join(root, "project-b")
-	writeFile(t, filepath.Join(defA, "thoughts/prds/a-feature.md"), "# A\n")
-	writeFile(t, filepath.Join(defB, "thoughts/prds/b-feature.md"), "# B\n")
+	setupManifest(t, defA, "a-feature", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	setupManifest(t, defB, "b-feature", []Issue{
+		{ID: "01-b", File: "01-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
 
 	canonA, err := CanonicalDefinitionPath(defA)
 	if err != nil {
@@ -303,10 +307,10 @@ func TestConcurrentDistinctProjectUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Workloads[canonA].PRDs) != 1 || state.Workloads[canonA].PRDs[0].ID != "a-feature" {
+	if len(state.Workloads[canonA].IssueSets) != 1 || state.Workloads[canonA].IssueSets[0].ID != "a-feature" {
 		t.Fatalf("project a = %#v", state.Workloads[canonA])
 	}
-	if len(state.Workloads[canonB].PRDs) != 1 || state.Workloads[canonB].PRDs[0].ID != "b-feature" {
+	if len(state.Workloads[canonB].IssueSets) != 1 || state.Workloads[canonB].IssueSets[0].ID != "b-feature" {
 		t.Fatalf("project b = %#v", state.Workloads[canonB])
 	}
 }
@@ -318,8 +322,9 @@ func TestRefreshConcurrentRegistrationAndPriority(t *testing.T) {
 
 	defA := filepath.Join(root, "project-a")
 	defB := filepath.Join(root, "project-b")
-	writeFile(t, filepath.Join(defA, "thoughts/prds/a-feature.md"), "# A\n")
-	writeFile(t, filepath.Join(defB, "thoughts/prds/b-feature.md"), "# B\n")
+	setupManifest(t, defA, "a-feature", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
 	setupManifest(t, defB, "b-feature", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -337,7 +342,7 @@ func TestRefreshConcurrentRegistrationAndPriority(t *testing.T) {
 	seed := &GlobalState{
 		Version: StateVersion,
 		Workloads: map[string]*WorkloadEntry{
-			canonB: {PRDs: []RegisteredPRD{{ID: "b-feature", Priority: 0}}},
+			canonB: {IssueSets: []RegisteredIssueSet{{ID: "b-feature", Priority: 0}}},
 		},
 		path: statePath,
 	}
@@ -370,10 +375,10 @@ func TestRefreshConcurrentRegistrationAndPriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Workloads[canonA].PRDs) != 1 || state.Workloads[canonA].PRDs[0].ID != "a-feature" {
+	if len(state.Workloads[canonA].IssueSets) != 1 || state.Workloads[canonA].IssueSets[0].ID != "a-feature" {
 		t.Fatalf("project a = %#v", state.Workloads[canonA])
 	}
-	if len(state.Workloads[canonB].PRDs) != 1 || state.Workloads[canonB].PRDs[0].Priority != 42 {
+	if len(state.Workloads[canonB].IssueSets) != 1 || state.Workloads[canonB].IssueSets[0].Priority != 42 {
 		t.Fatalf("project b = %#v", state.Workloads[canonB])
 	}
 }
@@ -401,7 +406,9 @@ func TestRefreshEmptyInspectionDoesNotCreateStateOrLock(t *testing.T) {
 
 func TestRefreshReadOnlyDoesNotRewriteExistingState(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "thoughts/prds/existing.md"), "# Existing\n")
+	setupManifest(t, root, "existing", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
 	statePath := filepath.Join(root, "state.json")
 	canon, err := CanonicalDefinitionPath(root)
 	if err != nil {
@@ -412,7 +419,7 @@ func TestRefreshReadOnlyDoesNotRewriteExistingState(t *testing.T) {
 	seed := &GlobalState{
 		Version: StateVersion,
 		Workloads: map[string]*WorkloadEntry{
-			canon: {PRDs: []RegisteredPRD{{ID: "existing", Priority: 0}}},
+			canon: {IssueSets: []RegisteredIssueSet{{ID: "existing", Priority: 0}}},
 		},
 		path: statePath,
 	}

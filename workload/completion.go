@@ -46,12 +46,12 @@ func CompleteProjectNamesWith(d *Deps, pd *project.Deps, loadConfig func(string)
 	return names, nil
 }
 
-// CompletePRDStems returns discovered PRD filename stems for shell completion.
+// CompletePRDStems returns discovered Issue-set identifiers for shell completion.
 func CompletePRDStems(input CompletionInput) ([]string, error) {
 	return CompletePRDStemsWith(defaultDeps, project.DefaultDeps(), config.Load, input)
 }
 
-// CompletePRDStemsWith returns discovered PRD stems using injected dependencies.
+// CompletePRDStemsWith returns discovered Issue-set identifiers using injected dependencies.
 func CompletePRDStemsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) ([]string, error) {
 	defPath, err := resolveCompletionDefinitionPath(d, pd, loadConfig, input)
 	if err != nil || defPath == "" {
@@ -62,16 +62,16 @@ func CompletePRDStemsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*c
 	if err != nil {
 		return nil, err
 	}
-	if disc.PRDDirErr != nil {
+	if disc.IssueDirErr != nil {
 		return nil, nil
 	}
 
-	stems := make([]string, 0, len(disc.PRDs))
-	for stem := range disc.PRDs {
-		stems = append(stems, stem)
+	ids := make([]string, 0, len(disc.Manifests))
+	for id := range disc.Manifests {
+		ids = append(ids, id)
 	}
-	sort.Strings(stems)
-	return stems, nil
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // CompleteIssueIDs returns manifest issue IDs for the selected PRD.

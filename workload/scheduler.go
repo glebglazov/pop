@@ -7,11 +7,10 @@ import (
 	"strings"
 )
 
-// Selection is the PRD and issue chosen for execution.
+// Selection is the Issue set and issue chosen for execution.
 type Selection struct {
 	PRDID      string
 	IssueID    string
-	PRDPath    string
 	IssuePath  string
 	IssueFile  string
 	Manifest   *Manifest
@@ -67,8 +66,6 @@ func selectExplicitPRD(refresh *RefreshResult, prdID string) (string, error) {
 		return "", exitErr(ExitNoRunnable, "PRD %q is malformed", prdID)
 	case StatusMissing:
 		return "", exitErr(ExitNoRunnable, "PRD %q is missing", prdID)
-	case StatusUnplanned:
-		return "", exitErr(ExitNoRunnable, "PRD %q is unplanned", prdID)
 	case StatusReady:
 		return prdID, nil
 	default:
@@ -148,8 +145,6 @@ func selectExplicit(refresh *RefreshResult, manifests map[string]*Manifest, prdI
 		return nil, exitErr(ExitNoRunnable, "PRD %q is malformed", prdID)
 	case StatusMissing:
 		return nil, exitErr(ExitNoRunnable, "PRD %q is missing", prdID)
-	case StatusUnplanned:
-		return nil, exitErr(ExitNoRunnable, "PRD %q is unplanned", prdID)
 	}
 
 	if issueID == "" {
@@ -193,11 +188,9 @@ func selectExplicitIssue(prdID string, m *Manifest, issueID string) (*Selection,
 		}
 	}
 
-	prdPath := discoverPRDPath(m)
 	return &Selection{
 		PRDID:      prdID,
 		IssueID:    issueID,
-		PRDPath:    prdPath,
 		IssuePath:  filepath.Join(m.Dir, issue.File),
 		IssueFile:  issue.File,
 		Manifest:   m,
@@ -211,11 +204,9 @@ func firstEligibleIssue(prdID string, m *Manifest) (*Selection, error) {
 		if !isEligible(m, issue) {
 			continue
 		}
-		prdPath := discoverPRDPath(m)
 		return &Selection{
 			PRDID:      prdID,
 			IssueID:    issue.ID,
-			PRDPath:    prdPath,
 			IssuePath:  filepath.Join(m.Dir, issue.File),
 			IssueFile:  issue.File,
 			Manifest:   m,
@@ -224,11 +215,6 @@ func firstEligibleIssue(prdID string, m *Manifest) (*Selection, error) {
 		}, nil
 	}
 	return nil, exitErr(ExitNoRunnable, "PRD %q has no eligible AFK issue", prdID)
-}
-
-func discoverPRDPath(m *Manifest) string {
-	defPath := filepath.Dir(filepath.Dir(m.Dir))
-	return filepath.Join(defPath, prdsSubdir, m.Stem+".md")
 }
 
 func unknownPRDTargetMessage(refresh *RefreshResult, prdID string) string {

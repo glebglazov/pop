@@ -315,7 +315,6 @@ func TestRunIssueSeparateRuntimePath(t *testing.T) {
 	initExecutorGitRepo(t, defRoot)
 	initExecutorGitRepo(t, runtimeRoot)
 
-	writeFile(t, filepath.Join(defRoot, "thoughts/prds/demo.md"), "# Demo\n")
 	setupManifest(t, defRoot, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -422,7 +421,6 @@ func setupExecutorFixture(t *testing.T, interactive bool) *execFixture {
 	t.Helper()
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	writeFile(t, filepath.Join(root, "thoughts/prds/demo.md"), "# Demo\n")
 	setupManifest(t, root, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})

@@ -52,7 +52,7 @@ func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 			return err
 		}
 		oldPriority = old
-		entry.PRDs[idx].Priority = priority
+		entry.IssueSets[idx].Priority = priority
 		return nil
 	})
 	if err != nil {
@@ -73,19 +73,19 @@ func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 }
 
 func findRegisteredPRD(entry *WorkloadEntry, prdID string) (int, int, error) {
-	if entry == nil || len(entry.PRDs) == 0 {
+	if entry == nil || len(entry.IssueSets) == 0 {
 		return -1, 0, unknownPRDError(prdID, nil)
 	}
 
-	for i, prd := range entry.PRDs {
-		if prd.ID == prdID {
-			return i, prd.Priority, nil
+	for i, set := range entry.IssueSets {
+		if set.ID == prdID {
+			return i, set.Priority, nil
 		}
 	}
 
-	ids := make([]string, len(entry.PRDs))
-	for i, prd := range entry.PRDs {
-		ids[i] = prd.ID
+	ids := make([]string, len(entry.IssueSets))
+	for i, set := range entry.IssueSets {
+		ids[i] = set.ID
 	}
 	return -1, 0, unknownPRDError(prdID, ids)
 }

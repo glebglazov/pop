@@ -17,18 +17,11 @@ import (
 
 func TestWorkloadStatusExitSuccessWithMalformedRows(t *testing.T) {
 	root := t.TempDir()
-	prdPath := filepath.Join(root, "thoughts/prds/bad.md")
-	if err := os.MkdirAll(filepath.Dir(prdPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	issueDir := filepath.Join(root, "thoughts/issues/bad")
 	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(issueDir, "index.json"), []byte(`not json`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte("# Bad\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -62,14 +55,14 @@ func TestWorkloadStatusUnreadableDiscoveryFails(t *testing.T) {
 		t.Skip("chmod tests unreliable as root")
 	}
 	root := t.TempDir()
-	prdDir := filepath.Join(root, "thoughts/prds")
-	if err := os.MkdirAll(prdDir, 0o755); err != nil {
+	issueDir := filepath.Join(root, "thoughts/issues")
+	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(prdDir, 0o000); err != nil {
+	if err := os.Chmod(issueDir, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(prdDir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(issueDir, 0o755) })
 
 	workloadProject = ""
 	workloadPath = ""
@@ -103,10 +96,6 @@ func TestWorkloadSetPriorityRefreshesTable(t *testing.T) {
 		workloadDefPath = ""
 	})
 
-	prdPath := filepath.Join(root, "thoughts/prds/feature.md")
-	if err := os.MkdirAll(filepath.Dir(prdPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	issueDir := filepath.Join(root, "thoughts/issues/feature")
 	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -116,9 +105,6 @@ func TestWorkloadSetPriorityRefreshesTable(t *testing.T) {
 	}
 	manifest := `{"issues":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}]}`
 	if err := os.WriteFile(filepath.Join(issueDir, "index.json"), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte("# Feature\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -149,13 +135,7 @@ func TestWorkloadSetPriorityRefreshesTable(t *testing.T) {
 func TestWorkloadStatusUsesDefinitionOverride(t *testing.T) {
 	root := t.TempDir()
 	defDir := filepath.Join(root, "planning")
-	prdPath := filepath.Join(defDir, "thoughts/prds/a.md")
-	if err := os.MkdirAll(filepath.Dir(prdPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte("# A\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeWorkloadThoughts(t, defDir, "a")
 
 	workloadProject = ""
 	workloadPath = root
@@ -214,13 +194,18 @@ func TestWorkloadResolveByProjectName(t *testing.T) {
 	}
 }
 
+// writeWorkloadThoughts creates a minimal valid Issue set (no PRD pairing required).
 func writeWorkloadThoughts(t *testing.T, dir, stem string) {
 	t.Helper()
-	prdPath := filepath.Join(dir, "thoughts/prds", stem+".md")
-	if err := os.MkdirAll(filepath.Dir(prdPath), 0o755); err != nil {
+	issueDir := filepath.Join(dir, "thoughts/issues", stem)
+	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(prdPath, []byte("# "+stem+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(issueDir, "01-a.md"), []byte("## Acceptance criteria\n\n- [ ] ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"issues":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}]}`
+	if err := os.WriteFile(filepath.Join(issueDir, "index.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

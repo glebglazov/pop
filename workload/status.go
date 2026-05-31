@@ -11,7 +11,6 @@ type PRDStatus string
 const (
 	StatusMissing   PRDStatus = "MISSING"
 	StatusDone      PRDStatus = "DONE"
-	StatusUnplanned PRDStatus = "UNPLANNED"
 	StatusMalformed PRDStatus = "MALFORMED"
 	StatusFailed    PRDStatus = "FAILED"
 	StatusReady     PRDStatus = "READY"
@@ -31,14 +30,13 @@ type Row struct {
 	MalformedSummary string
 	DetailErrors     []string
 	RegIndex         int
-	IsOrphan         bool
 	AutoPick         bool
 }
 
-// DeriveStatus computes PRD status from discovery and manifest validation.
+// DeriveStatus computes Issue-set status from manifest validation.
 func DeriveStatus(m *Manifest) PRDStatus {
 	if m == nil {
-		return StatusUnplanned
+		return StatusMalformed
 	}
 	if !m.Valid {
 		return StatusMalformed
@@ -108,10 +106,7 @@ func isEligible(m *Manifest, issue Issue) bool {
 
 // BuildProgress returns compact progress text for a row.
 func BuildProgress(m *Manifest, status PRDStatus) string {
-	switch status {
-	case StatusUnplanned:
-		return "no issues"
-	case StatusMissing:
+	if status == StatusMissing {
 		return ""
 	}
 
@@ -200,10 +195,7 @@ func BuildFailedInfo(stem string, m *Manifest) (ids []string, hints []string) {
 }
 
 // MalformedSummary returns a compact malformed summary for table display.
-func MalformedSummary(m *Manifest, orphan bool) string {
-	if orphan {
-		return "orphan manifest"
-	}
+func MalformedSummary(m *Manifest) string {
 	if m == nil {
 		return "malformed"
 	}

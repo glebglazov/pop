@@ -18,7 +18,7 @@ type RefreshResult struct {
 	RuntimeLock      *RuntimeLockStatus
 }
 
-// Refresh discovers workloads, auto-registers PRDs, and builds table rows.
+// Refresh discovers workloads, auto-registers Issue sets, and builds table rows.
 func Refresh(defPath string) (*RefreshResult, error) {
 	return RefreshWith(defaultDeps, defPath, DefaultStatePath())
 }
@@ -34,9 +34,6 @@ func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if disc.PRDDirErr != nil {
-		return nil, disc.PRDDirErr
-	}
 	if disc.IssueDirErr != nil {
 		return nil, disc.IssueDirErr
 	}
@@ -48,8 +45,8 @@ func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
 
 	registered := state.RegisteredIDs(canon)
 	needsSave := false
-	for stem := range disc.PRDs {
-		if _, ok := registered[stem]; !ok {
+	for id := range disc.Manifests {
+		if _, ok := registered[id]; !ok {
 			needsSave = true
 			break
 		}
@@ -91,11 +88,10 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 	var missing, done, active []Row
 
 	entry := state.Workloads[defPath]
-	discovered := make(map[string]bool)
 
 	if entry != nil {
-		for i, reg := range entry.PRDs {
-			if _, ok := disc.PRDs[reg.ID]; !ok {
+		for i, reg := range entry.IssueSets {
+			if _, ok := disc.Manifests[reg.ID]; !ok {
 				missing = append(missing, Row{
 					ID:           reg.ID,
 					Status:       StatusMissing,
@@ -105,8 +101,7 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 				})
 				continue
 			}
-			discovered[reg.ID] = true
-			row := buildPRDRow(reg, manifests[reg.ID], i, false)
+			row := buildPRDRow(reg, manifests[reg.ID], i)
 			switch row.Status {
 			case StatusDone:
 				done = append(done, row)
@@ -127,33 +122,13 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 		return active[i].RegIndex < active[j].RegIndex
 	})
 
-	var orphans []Row
-	for stem := range disc.Manifests {
-		if disc.PRDs[stem] != "" {
-			continue
-		}
-		m := manifests[stem]
-		orphans = append(orphans, Row{
-			ID:               stem,
-			Status:           StatusMalformed,
-			PriorityShow:     "-",
-			MalformedSummary: MalformedSummary(m, true),
-			DetailErrors:     orphanDetailErrors(stem),
-			IsOrphan:         true,
-		})
-	}
-	sort.Slice(orphans, func(i, j int) bool {
-		return orphans[i].ID < orphans[j].ID
-	})
-
 	rows := append([]Row{}, missing...)
 	rows = append(rows, done...)
 	rows = append(rows, active...)
-	rows = append(rows, orphans...)
 	return rows
 }
 
-func buildPRDRow(reg RegisteredPRD, m *Manifest, regIndex int, orphan bool) Row {
+func buildPRDRow(reg RegisteredIssueSet, m *Manifest, regIndex int) Row {
 	status := DeriveStatus(m)
 	row := Row{
 		ID:           reg.ID,
@@ -161,12 +136,6 @@ func buildPRDRow(reg RegisteredPRD, m *Manifest, regIndex int, orphan bool) Row 
 		Priority:     reg.Priority,
 		PriorityShow: fmt.Sprintf("%d", reg.Priority),
 		RegIndex:     regIndex,
-		IsOrphan:     orphan,
-	}
-
-	if status == StatusUnplanned {
-		row.Progress = BuildProgress(nil, status)
-		return row
 	}
 
 	row.Progress = BuildProgress(m, status)
@@ -177,7 +146,7 @@ func buildPRDRow(reg RegisteredPRD, m *Manifest, regIndex int, orphan bool) Row 
 		row.FailedIssues, row.ResetHints = BuildFailedInfo(reg.ID, m)
 	}
 	if status == StatusMalformed {
-		row.MalformedSummary = MalformedSummary(m, orphan)
+		row.MalformedSummary = MalformedSummary(m)
 		if m != nil {
 			row.DetailErrors = append([]string{}, m.Errors...)
 		}
@@ -185,16 +154,10 @@ func buildPRDRow(reg RegisteredPRD, m *Manifest, regIndex int, orphan bool) Row 
 	return row
 }
 
-func orphanDetailErrors(stem string) []string {
-	return []string{
-		fmt.Sprintf("no paired PRD at %s/%s.md", prdsSubdir, stem),
-	}
-}
-
 // Render writes the status table and diagnostics to w.
 func Render(w io.Writer, result *RefreshResult) {
 	if len(result.NewRegistrations) > 0 {
-		fmt.Fprintf(w, "Registered new PRD(s): %s\n\n", strings.Join(result.NewRegistrations, ", "))
+		fmt.Fprintf(w, "Registered new Issue set(s): %s\n\n", strings.Join(result.NewRegistrations, ", "))
 	}
 
 	if len(result.Rows) == 0 {
@@ -216,7 +179,7 @@ func formatTable(rows []Row) string {
 	)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", idW, "PRD", stW, "STATUS", prW, "PRI", "DETAILS")
+	fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", idW, "ISSUE SET", stW, "STATUS", prW, "PRI", "DETAILS")
 	fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", idW, strings.Repeat("-", idW), stW, strings.Repeat("-", stW), prW, strings.Repeat("-", prW), strings.Repeat("-", detailW))
 
 	for _, row := range rows {
@@ -232,9 +195,7 @@ func formatTable(rows []Row) string {
 func rowDetail(row Row) string {
 	switch row.Status {
 	case StatusMissing:
-		return "registered PRD document missing"
-	case StatusUnplanned:
-		return row.Progress
+		return "registered Issue set missing"
 	case StatusMalformed:
 		return row.MalformedSummary
 	case StatusFailed:
