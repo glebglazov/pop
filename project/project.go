@@ -194,6 +194,17 @@ func TmuxSessionName(ctx *RepoContext, worktreeName string) string {
 	return sanitizeSessionName(name)
 }
 
+// FastSessionName returns a best-effort session name from a path without
+// calling git. It uses the directory base name with tmux-safe sanitization.
+//
+// For regular repos and non-git paths this is identical to SessionName.
+// For bare-repo worktrees the exact name is repo/worktree; this returns
+// only worktree. Use it only for fuzzy/bulk matching (dashboard history
+// sorting, test helpers) where speed matters more than exactness.
+func FastSessionName(path string) string {
+	return sanitizeSessionName(filepath.Base(path))
+}
+
 func sanitizeSessionName(name string) string {
 	name = strings.ReplaceAll(name, ".", "_")
 	name = strings.ReplaceAll(name, ":", "_")

@@ -1,6 +1,6 @@
 # Dashboard history matching uses approximate session names for speed
 
-The dashboard's `sessionAccessTime` function derives session names from history entry paths using `sanitizeSessionName(filepath.Base(path))` instead of `project.SessionName(path)`. The latter calls git commands (`rev-parse`, `config`, walking `.git` directories) to determine whether a path is a bare-repo worktree, a regular-repo worktree, or a plain directory. For a typical history of ~20 entries and a dashboard with ~10 panes, the git-based approach triggers 200+ subprocess invocations on every dashboard open, making the picker feel sluggish (≈1.8s).
+The dashboard's `sessionAccessTime` function derives session names from history entry paths using `project.FastSessionName(path)` instead of `project.SessionName(path)`. The latter calls git commands (`rev-parse`, `config`, walking `.git` directories) to determine whether a path is a bare-repo worktree, a regular-repo worktree, or a plain directory. For a typical history of ~20 entries and a dashboard with ~10 panes, the git-based approach triggers 200+ subprocess invocations on every dashboard open, making the picker feel sluggish (≈1.8s).
 
 ## Why
 
@@ -8,7 +8,7 @@ The dashboard's `sessionAccessTime` function derives session names from history 
 
 ## The Approximation
 
-`sanitizeSessionName(filepath.Base(path))` returns the directory base name with dots and colons replaced. For regular repos and non-git paths, this is identical to `project.SessionName`. For bare-repo worktrees, the exact session name is `repoName/worktreeName`, while the approximation yields only `worktreeName`. The dashboard falls back to last-component matching anyway (`lastComponent == worktreeName`), so the approximation only affects exact-match short-circuiting for bare-repo worktrees. In practice this means two bare-repo worktrees with the same worktree folder name but different repo names may share a session-last-visit timestamp in dashboard sorting. This is a minor ordering imprecision, not a functional bug.
+`project.FastSessionName(path)` returns `sanitizeSessionName(filepath.Base(path))` — the directory base name with dots and colons replaced. This is a pure string operation; no git commands, no filesystem walks. For regular repos and non-git paths, this is identical to `project.SessionName`. For bare-repo worktrees, the exact session name is `repoName/worktreeName`, while the approximation yields only `worktreeName`. The dashboard falls back to last-component matching anyway (`lastComponent == worktreeName`), so the approximation only affects exact-match short-circuiting for bare-repo worktrees. In practice this means two bare-repo worktrees with the same worktree folder name but different repo names may share a session-last-visit timestamp in dashboard sorting. This is a minor ordering imprecision, not a functional bug.
 
 ## Considered Options
 

@@ -3,13 +3,13 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/session"
 	"github.com/glebglazov/pop/ui"
 )
@@ -186,13 +186,8 @@ func historyEntrySessionName(path string) string {
 	if strings.HasPrefix(path, tmuxSessionPathPrefix) {
 		return strings.TrimPrefix(path, tmuxSessionPathPrefix)
 	}
-	// Fast approximation: path base + sanitize instead of project.SessionName.
-	// project.SessionName runs git commands which is too slow for history
-	// matching in frequently-opened popups. For regular repos and non-git
-	// paths this is exact; for bare-repo worktrees the exact name is
-	// repo/worktree but we fall back to last-component matching anyway.
-	// See ADR 0005.
-	return sanitizeSessionName(filepath.Base(path))
+	// FastSessionName avoids git commands; see ADR 0005.
+	return project.FastSessionName(path)
 }
 
 func capturePanePreview(paneID string) string {

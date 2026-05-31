@@ -16,9 +16,10 @@ import (
 	"github.com/glebglazov/pop/ui"
 )
 
-// testItem creates a ui.Item with SessionName pre-computed from the path base.
+// testItem creates a ui.Item with SessionName pre-computed using the same
+// fast approximation the dashboard uses (project.FastSessionName).
 func testItem(name, path string) ui.Item {
-	return ui.Item{Name: name, Path: path, SessionName: sanitizeSessionName(filepath.Base(path))}
+	return ui.Item{Name: name, Path: path, SessionName: project.FastSessionName(path)}
 }
 
 func TestLastNSegments(t *testing.T) {
