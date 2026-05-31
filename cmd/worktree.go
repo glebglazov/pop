@@ -17,6 +17,17 @@ import (
 
 var worktreeCmd = &cobra.Command{
 	Use:   "worktree",
+	Short: "Manage worktree picker commands",
+	Long: `Manage worktree picker commands.
+
+Use "pop worktree dashboard" to open the picker.`,
+	// Deprecated compatibility path: use `pop worktree dashboard` instead.
+	// TODO: remove the direct picker invocation at the next major CLI change.
+	RunE: runWorktree,
+}
+
+var worktreeDashboardCmd = &cobra.Command{
+	Use:   "dashboard",
 	Short: "Select a git worktree in the current repository",
 	Long: `Opens a fuzzy picker to select a git worktree.
 Must be run from within a git repository.
@@ -29,7 +40,7 @@ Keybindings:
   esc      - cancel
 
 Example tmux binding:
-  bind-key P display-popup -E -w 60% -h 60% 'cd "$(pop worktree)" && exec $SHELL'`,
+  bind-key P display-popup -E -w 60% -h 60% 'cd "$(pop worktree dashboard)" && exec $SHELL'`,
 	RunE: runWorktree,
 }
 
@@ -37,8 +48,9 @@ var switchSession bool
 var worktreeYankTarget string
 
 func init() {
-	worktreeCmd.Flags().BoolVarP(&switchSession, "switch", "s", false, "Switch tmux session instead of printing path")
-	worktreeCmd.Flags().StringVar(&worktreeYankTarget, "yank-target", "", "Send yanked path to specified tmux pane instead of system clipboard")
+	worktreeCmd.PersistentFlags().BoolVarP(&switchSession, "switch", "s", false, "Switch tmux session instead of printing path")
+	worktreeCmd.PersistentFlags().StringVar(&worktreeYankTarget, "yank-target", "", "Send yanked path to specified tmux pane instead of system clipboard")
+	worktreeCmd.AddCommand(worktreeDashboardCmd)
 	rootCmd.AddCommand(worktreeCmd)
 }
 

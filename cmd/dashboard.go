@@ -14,14 +14,31 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var dashboardCmd = &cobra.Command{
+var monitorCmd = &cobra.Command{
+	Use:   "monitor",
+	Short: "Monitor agent panes",
+}
+
+var monitorDashboardCmd = &cobra.Command{
 	Use:   "dashboard",
 	Short: "Show all monitored agent panes",
 	Args:  cobra.NoArgs,
 	RunE:  runDashboard,
 }
 
+// Deprecated: use `pop monitor dashboard` instead. Hidden compatibility alias
+// for existing keybindings. TODO: remove at the next major CLI change.
+var dashboardCmd = &cobra.Command{
+	Use:    "dashboard",
+	Short:  "Show all monitored agent panes (alias for monitor dashboard)",
+	Args:   cobra.NoArgs,
+	Hidden: true,
+	RunE:   runDashboard,
+}
+
 func init() {
+	rootCmd.AddCommand(monitorCmd)
+	monitorCmd.AddCommand(monitorDashboardCmd)
 	rootCmd.AddCommand(dashboardCmd)
 }
 
@@ -239,7 +256,7 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 // most-recent / highest-priority items end up at the bottom (closest to cursor).
 func sortDashboardPanes(panes []ui.AttentionPane, paneLastActiveAt map[string]int64, sessionLastVisit map[string]int64, criteria []string) {
 	statusOrder := map[ui.AttentionStatus]int{
-		ui.AttentionClear:    0,
+		ui.AttentionClear:   0,
 		ui.AttentionVirtual: 0,
 		ui.AttentionWorking: 1,
 		ui.AttentionUnread:  2,

@@ -4,7 +4,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Deprecated: use `pop dashboard` instead. Kept as a hidden alias so
+// Deprecated: use `pop monitor dashboard` instead. Kept as a hidden alias so
 // existing keybindings and scripts that call `pop unread` keep working.
 var unreadCmd = &cobra.Command{
 	Use:    "unread",

@@ -65,9 +65,9 @@ ctx, err := project.DetectRepoContextWith(d)
 
 ### Key Workflows
 
-**`pop project`**: Loads config → expands project paths (parallel worktree detection for bare repos) → sorts by history recency → displays picker → creates/attaches tmux session
+**`pop project dashboard`**: Loads config → expands project paths (parallel worktree detection for bare repos) → sorts by history recency → displays picker → creates/attaches tmux session
 
-**`pop worktree`**: Detects repo context → lists worktrees via `git worktree list --porcelain` → sorts by tmux activity → displays picker with delete/create actions
+**`pop worktree dashboard`**: Detects repo context → lists worktrees via `git worktree list --porcelain` → sorts by tmux activity → displays picker with delete/create actions
 
 ### Worktree Branch Display
 

@@ -226,7 +226,7 @@ func ensureSystemState() []string {
 
 // ensureMonitorDaemon ensures a monitor daemon is running with the current binary.
 // Restarts if the binary is newer than the running daemon.
-// Called automatically by `pop project`.
+// Called automatically by `pop project dashboard`.
 //
 // Always invoked in a background goroutine, so panics here must not crash the
 // parent process — a failed daemon startup is non-fatal for the picker flow.

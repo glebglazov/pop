@@ -14,7 +14,7 @@ make install  # installs to ~/.local/bin
 
 ## Setup
 
-Run `pop project` — on first run it will walk you through picking your project directories interactively.
+Run `pop project dashboard` - on first run it will walk you through picking your project directories interactively.
 
 Or create `~/.config/pop/config.toml` manually:
 
@@ -29,13 +29,13 @@ Add a tmux binding for quick access:
 
 ```bash
 # ~/.tmux.conf
-bind-key p display-popup -E -w 60% -h 60% 'pop project'
-bind-key P display-popup -E -w 60% -h 60% 'cd "$(pop worktree)" && exec $SHELL'
+bind-key p display-popup -E -w 60% -h 60% 'pop project dashboard'
+bind-key P display-popup -E -w 60% -h 60% 'cd "$(pop worktree dashboard)" && exec $SHELL'
 ```
 
 ## Commands
 
-### `pop project`
+### `pop project dashboard`
 
 Fuzzy-pick a project and switch to its tmux session. Bare git repos are automatically expanded into their worktrees.
 
@@ -48,7 +48,7 @@ Fuzzy-pick a project and switch to its tmux session. Bare git repos are automati
 
 Flag: `--tmux-cd <pane>` — send `cd` to a tmux pane instead of switching session.
 
-### `pop worktree`
+### `pop worktree dashboard`
 
 Fuzzy-pick a worktree in the current repo. Prints the selected path (useful for `cd`).
 
@@ -79,7 +79,9 @@ Available environment variables: `POP_WORKTREE_PATH`, `POP_WORKTREE_NAME`, `POP_
 
 ## Dashboard
 
-`pop dashboard` shows all tracked tmux panes sorted by status and last-visit time. Switch between them with fuzzy search.
+`pop monitor dashboard` shows all tracked tmux panes sorted by status and last-visit time. Switch between them with fuzzy search.
+
+The old `pop dashboard` form remains available temporarily as a hidden compatibility alias and will be removed at the next major CLI change.
 
 | Key | Action |
 |-----|--------|

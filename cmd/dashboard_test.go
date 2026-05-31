@@ -535,7 +535,7 @@ func TestSessionAccessTime(t *testing.T) {
 //     has glanced at its content.
 //
 // Both actions record the session in pop's history for recency tracking in
-// `pop project` (a separate store from monitor state).
+// `pop project dashboard` (a separate store from monitor state).
 func TestHandleDashboardSwitch(t *testing.T) {
 	setup := func(t *testing.T) (statePath string, initialVisited time.Time) {
 		t.Helper()

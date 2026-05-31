@@ -27,21 +27,32 @@ var noHistory bool
 
 var projectCmd = &cobra.Command{
 	Use:   "project",
+	Short: "Manage project picker commands",
+	Long: `Manage project picker commands.
+
+Use "pop project dashboard" to open the picker.`,
+	// Deprecated compatibility path: use `pop project dashboard` instead.
+	// TODO: remove the direct picker invocation at the next major CLI change.
+	RunE: runProject,
+}
+
+var projectDashboardCmd = &cobra.Command{
+	Use:   "dashboard",
 	Short: "Open the project picker",
 	Long: `Opens the project picker to choose a project, worktree, or standalone session.
 Projects with git worktrees are expanded to show individual worktrees.
 Choosing a project opens or switches to a tmux session.
 
 Example tmux binding:
-  bind-key p display-popup -E -w 60% -h 60% 'pop project'`,
+  bind-key p display-popup -E -w 60% -h 60% 'pop project dashboard'`,
 	RunE: runProject,
 }
 
-// Deprecated: use `pop project` instead. Hidden alias for existing
+// Deprecated: use `pop project dashboard` instead. Hidden alias for existing
 // keybindings. TODO: remove at next major release.
 var selectCmd = &cobra.Command{
 	Use:    "select",
-	Short:  "Open the project picker (alias for project)",
+	Short:  "Open the project picker (alias for project dashboard)",
 	Hidden: true,
 	RunE:   runProject,
 }
@@ -49,9 +60,10 @@ var selectCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(selectCmd)
-	projectCmd.Flags().StringVar(&tmuxCDPane, "tmux-cd", "", "Send cd command to specified tmux pane instead of switching session")
-	projectCmd.Flags().StringVar(&yankTarget, "yank-target", "", "Send yanked path to specified tmux pane instead of system clipboard")
-	projectCmd.Flags().BoolVar(&noHistory, "no-history", false, "Do not record selection in history")
+	projectCmd.AddCommand(projectDashboardCmd)
+	projectCmd.PersistentFlags().StringVar(&tmuxCDPane, "tmux-cd", "", "Send cd command to specified tmux pane instead of switching session")
+	projectCmd.PersistentFlags().StringVar(&yankTarget, "yank-target", "", "Send yanked path to specified tmux pane instead of system clipboard")
+	projectCmd.PersistentFlags().BoolVar(&noHistory, "no-history", false, "Do not record selection in history")
 	selectCmd.Flags().StringVar(&tmuxCDPane, "tmux-cd", "", "Send cd command to specified tmux pane instead of switching session")
 	selectCmd.Flags().StringVar(&yankTarget, "yank-target", "", "Send yanked path to specified tmux pane instead of system clipboard")
 	selectCmd.Flags().BoolVar(&noHistory, "no-history", false, "Do not record selection in history")
@@ -72,8 +84,8 @@ type ProjectDeps struct {
 	RunPicker func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error)
 
 	// Session state
-	SessionActivity    func() map[string]int64
-	AttentionSessions  func() map[string]bool
+	SessionActivity   func() map[string]int64
+	AttentionSessions func() map[string]bool
 
 	// Side effects (take deps.Tmux as first arg to match *With signatures)
 	OpenSession      func(tmux deps.Tmux, item *ui.Item) error
@@ -118,8 +130,8 @@ func DefaultProjectDeps() *ProjectDeps {
 
 		RunPicker: ui.Run,
 
-		SessionActivity:    history.TmuxSessionActivity,
-		AttentionSessions:  monitorAttentionSessions,
+		SessionActivity:   history.TmuxSessionActivity,
+		AttentionSessions: monitorAttentionSessions,
 
 		OpenSession:       openTmuxSessionWith,
 		OpenWindow:        openTmuxWindowWith,
