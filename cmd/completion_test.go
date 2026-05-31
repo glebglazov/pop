@@ -76,9 +76,43 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "thoughts/issues/svc/01-a.md", "thoughts/issues/svc/02-b.md")
 	})
 
+	t.Run("run issue positional omits IDs", func(t *testing.T) {
+		out := shellCompNoDesc(t, "workload", "run-issue")
+		assertShellCompContains(t, out, "thoughts/issues/svc", "thoughts/issues/svc/01-a.md")
+		assertShellCompOmitsExact(t, out, "svc", "01-a")
+	})
+
+	t.Run("run issue positional dot path", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "workload", "run-issue", "./")
+		assertShellCompContains(t, out, "./thoughts/issues/svc/01-a.md")
+	})
+
+	t.Run("run issues positional path only", func(t *testing.T) {
+		out := shellCompNoDesc(t, "workload", "run-issues")
+		assertShellCompContains(t, out, "thoughts/issues/svc")
+		assertShellCompOmitsExact(t, out, "svc")
+	})
+
+	t.Run("run issues positional dot path", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "workload", "run-issues", "./")
+		assertShellCompContains(t, out, "./thoughts/issues/svc")
+	})
+
 	t.Run("reset issue positional path", func(t *testing.T) {
 		out := shellCompNoDescCompleting(t, "workload", "reset-issue", "thoughts/issues/svc/")
 		assertShellCompContains(t, out, "thoughts/issues/svc/01-a.md", "thoughts/issues/svc/02-b.md")
+	})
+
+	t.Run("reset issue positional omits IDs", func(t *testing.T) {
+		out := shellCompNoDesc(t, "workload", "reset-issue")
+		assertShellCompContains(t, out, "thoughts/issues/svc", "thoughts/issues/svc/01-a.md")
+		assertShellCompOmitsExact(t, out, "svc", "01-a")
+	})
+
+	t.Run("set priority positional IDs", func(t *testing.T) {
+		out := shellCompNoDesc(t, "workload", "set-priority")
+		assertShellCompContains(t, out, "svc")
+		assertShellCompOmits(t, out, "thoughts/issues/svc")
 	})
 
 	t.Run("agent presets", func(t *testing.T) {
@@ -163,6 +197,18 @@ func assertShellCompOmits(t *testing.T, output string, items ...string) {
 	for _, item := range items {
 		if strings.Contains(body, item) {
 			t.Fatalf("unexpected %q in completion output:\n%s", item, output)
+		}
+	}
+}
+
+func assertShellCompOmitsExact(t *testing.T, output string, items ...string) {
+	t.Helper()
+	lines := strings.Split(shellCompBody(output), "\n")
+	for _, item := range items {
+		for _, line := range lines {
+			if line == item {
+				t.Fatalf("unexpected %q in completion output:\n%s", item, output)
+			}
 		}
 	}
 }

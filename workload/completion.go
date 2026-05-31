@@ -61,16 +61,48 @@ func CompleteIssueSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) 
 		return nil, nil
 	}
 
-	if completionLooksPathLike(toComplete) {
-		return issueSetPathCompletions(refresh, toComplete), nil
-	}
-
 	ids := make([]string, 0, len(refresh.Manifests))
 	for id := range refresh.Manifests {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	return ids, nil
+}
+
+// CompleteIssueSetPaths returns CWD-relative discovered Issue-set paths for shell completion.
+func CompleteIssueSetPaths(input CompletionInput, toComplete string) ([]string, error) {
+	return CompleteIssueSetPathsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
+}
+
+// CompleteIssueSetPathsWith returns CWD-relative discovered Issue-set paths using injected dependencies.
+func CompleteIssueSetPathsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
+	_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
+	if err != nil || refresh == nil {
+		return nil, err
+	}
+	cwd, err := cwdOrDefault(d, input.CWD)
+	if err != nil {
+		return nil, err
+	}
+	return issueSetPathCompletionsFromCWD(refresh, cwd, toComplete), nil
+}
+
+// CompleteIssuePaths returns CWD-relative discovered issue markdown paths for shell completion.
+func CompleteIssuePaths(input CompletionInput, toComplete string) ([]string, error) {
+	return CompleteIssuePathsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
+}
+
+// CompleteIssuePathsWith returns CWD-relative discovered issue markdown paths using injected dependencies.
+func CompleteIssuePathsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
+	_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
+	if err != nil || refresh == nil {
+		return nil, err
+	}
+	cwd, err := cwdOrDefault(d, input.CWD)
+	if err != nil {
+		return nil, err
+	}
+	return issuePathCompletionsFromCWD(refresh, cwd, toComplete), nil
 }
 
 // CompleteIssueIDs returns manifest issue IDs for the selected Issue set.

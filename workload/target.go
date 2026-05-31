@@ -285,6 +285,65 @@ func issueSetPathCompletions(refresh *RefreshResult, toComplete string) []string
 	return out
 }
 
+func issueSetPathCompletionsFromCWD(refresh *RefreshResult, cwd, toComplete string) []string {
+	if refresh == nil || refresh.Manifests == nil {
+		return nil
+	}
+	var out []string
+	for _, m := range refresh.Manifests {
+		if m == nil {
+			continue
+		}
+		candidate, err := filepath.Rel(cwd, m.Dir)
+		if err != nil {
+			continue
+		}
+		candidate = completionPathStyle(filepath.ToSlash(candidate), toComplete)
+		if strings.HasPrefix(candidate, filepath.ToSlash(toComplete)) {
+			out = append(out, candidate)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func issuePathCompletionsFromCWD(refresh *RefreshResult, cwd, toComplete string) []string {
+	if refresh == nil || refresh.Manifests == nil {
+		return nil
+	}
+	var out []string
+	for _, m := range refresh.Manifests {
+		if m == nil {
+			continue
+		}
+		dir, err := filepath.Rel(cwd, m.Dir)
+		if err != nil {
+			continue
+		}
+		dir = filepath.ToSlash(dir)
+		styledDir := completionPathStyle(dir, toComplete)
+		if strings.HasPrefix(styledDir, filepath.ToSlash(toComplete)) {
+			out = append(out, styledDir)
+		}
+		for _, issue := range m.Issues {
+			candidate := filepath.ToSlash(filepath.Join(dir, issue.File))
+			candidate = completionPathStyle(candidate, toComplete)
+			if strings.HasPrefix(candidate, filepath.ToSlash(toComplete)) {
+				out = append(out, candidate)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func completionPathStyle(candidate, toComplete string) string {
+	if strings.HasPrefix(filepath.ToSlash(toComplete), "./") && candidate != "." && !strings.HasPrefix(candidate, "../") {
+		return "./" + candidate
+	}
+	return candidate
+}
+
 func issuePathCompletions(refresh *RefreshResult, issueSetRaw, cwd, toComplete string) []string {
 	if refresh == nil {
 		return nil
