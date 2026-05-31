@@ -18,6 +18,10 @@ import (
 
 var paneProject string
 
+// paneOnSocketSendFailed is invoked when a daemon socket send fails so the
+// next call can reach a running daemon. Tests may replace it to observe the hook.
+var paneOnSocketSendFailed = func() { go ensureMonitorDaemon() }
+
 var paneCmd = &cobra.Command{
 	Use:   "pane",
 	Short: "Manage named tmux panes",
@@ -528,7 +532,7 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noR
 	if err != nil {
 		debug.Error("pane set-status: socket send failed, falling back to direct write: %v", err)
 		// Ensure daemon is starting for next call.
-		go ensureMonitorDaemon()
+		paneOnSocketSendFailed()
 		return runPaneSetStatusDirect(tmux, cfg, paneID, rawStatus, source, noRegister, label)
 	}
 
@@ -686,7 +690,7 @@ func runPaneSetFollowWith(tmux deps.Tmux, cfg *config.Config, arg string, follow
 			return nil
 		}
 		debug.Error("pane follow: socket send failed, falling back to direct write: %v", err)
-		go ensureMonitorDaemon()
+		paneOnSocketSendFailed()
 	}
 
 	return runPaneSetFollowDirect(tmux, paneID, follow)
@@ -748,7 +752,7 @@ func runPaneVisitWith(tmux deps.Tmux, cfg *config.Config, args []string) error {
 	})
 	if err != nil {
 		debug.Error("pane visit: socket send failed, falling back to direct write: %v", err)
-		go ensureMonitorDaemon()
+		paneOnSocketSendFailed()
 		return runPaneVisitDirect(paneID)
 	}
 

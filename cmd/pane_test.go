@@ -3,11 +3,14 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
 )
@@ -393,6 +396,136 @@ func TestRunPaneCreateWith(t *testing.T) {
 			t.Error("expected new-window to be called")
 		}
 	})
+}
+
+// --- set-status dispatch ---
+
+func startMonitorTestServer(t *testing.T, handler monitor.RequestHandler) string {
+	t.Helper()
+	ln, err := monitor.ListenAndServe("127.0.0.1:0", handler)
+	if err != nil {
+		t.Fatalf("ListenAndServe: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	return ln.Addr().String()
+}
+
+func tcpServerEnabledCfg() *config.Config {
+	return &config.Config{
+		PaneMonitoring: &config.PaneMonitoringConfig{TCPServer: true},
+	}
+}
+
+func TestRunPaneSetStatusWith_IgnoresConfiguredSource(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	cfg := &config.Config{
+		PaneMonitoring: &config.PaneMonitoringConfig{
+			IgnoreStatusFrom: []string{"tmux-global"},
+			TCPServer:        true,
+		},
+	}
+
+	tmuxCalled := false
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			tmuxCalled = true
+			return "", nil
+		},
+	}
+
+	if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", false, "", []string{"%1", "working"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tmuxCalled {
+		t.Error("expected no tmux calls when source is ignored")
+	}
+
+	statePath := filepath.Join(dir, "pop", "monitor.json")
+	if _, err := os.Stat(statePath); err == nil {
+		state := loadState(t, statePath)
+		if len(state.Panes) != 0 {
+			t.Errorf("expected empty state, got %d panes", len(state.Panes))
+		}
+	}
+}
+
+func TestRunPaneSetStatusWith_SocketSuccessSkipsDirect(t *testing.T) {
+	var handlerCalled bool
+	addr := startMonitorTestServer(t, func(req monitor.Request) monitor.Response {
+		handlerCalled = true
+		return monitor.Response{OK: true}
+	})
+	t.Setenv("POP_MONITOR_ADDR", addr)
+
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	directWouldCallTmux := false
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			directWouldCallTmux = true
+			return "", fmt.Errorf("direct path should not run")
+		},
+	}
+
+	if err := runPaneSetStatusWith(tmux, tcpServerEnabledCfg(), "", false, "", []string{"%7", "working"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !handlerCalled {
+		t.Error("expected daemon handler to receive request")
+	}
+	if directWouldCallTmux {
+		t.Error("expected socket success without direct fallback")
+	}
+
+	statePath := filepath.Join(dir, "pop", "monitor.json")
+	if _, err := os.Stat(statePath); err == nil {
+		state := loadState(t, statePath)
+		if len(state.Panes) != 0 {
+			t.Errorf("expected no local state write on socket path, got %d panes", len(state.Panes))
+		}
+	}
+}
+
+func TestRunPaneSetStatusWith_SocketFailureFallsBackAndStartsDaemon(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	t.Setenv("POP_MONITOR_ADDR", addr)
+
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	daemonStarted := make(chan struct{}, 1)
+	oldHook := paneOnSocketSendFailed
+	paneOnSocketSendFailed = func() { daemonStarted <- struct{}{} }
+	t.Cleanup(func() { paneOnSocketSendFailed = oldHook })
+
+	tmux := newPaneInfoMockTmux(map[string]string{"%7": "sess\tcmd"})
+	if err := runPaneSetStatusWith(tmux, tcpServerEnabledCfg(), "", false, "", []string{"%7", "working"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case <-daemonStarted:
+	case <-time.After(time.Second):
+		t.Fatal("expected daemon startup hook after socket failure")
+	}
+
+	state := loadState(t, filepath.Join(dir, "pop", "monitor.json"))
+	entry, ok := state.Panes["%7"]
+	if !ok {
+		t.Fatal("expected direct fallback to register pane")
+	}
+	if entry.Status != monitor.StatusWorking {
+		t.Errorf("status = %q, want %q", entry.Status, monitor.StatusWorking)
+	}
 }
 
 // --- follow / unfollow ---

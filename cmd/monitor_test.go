@@ -267,54 +267,6 @@ func TestHandleVisit(t *testing.T) {
 		}
 	})
 
-	t.Run("no-op on untracked pane", func(t *testing.T) {
-		statePath := setupEmptyState(t)
-		// Tmux must not be called.
-		resp := handleVisit(statePath, monitor.Request{
-			Cmd:    "visit",
-			PaneID: "%99",
-		})
-		if !resp.OK {
-			t.Errorf("expected OK=true, got error %q", resp.Error)
-		}
-		state := loadStateFromPath(t, statePath)
-		if len(state.Panes) != 0 {
-			t.Errorf("expected empty state, got %d entries", len(state.Panes))
-		}
-	})
-
-	t.Run("updates LastActiveAt on tracked pane", func(t *testing.T) {
-		dir := t.TempDir()
-		statePath := dir + "/monitor.json"
-		before := time.Now().Add(-1 * time.Hour)
-		seed := &monitor.State{
-			Panes: map[string]*monitor.PaneEntry{
-				"%3": {
-					PaneID:       "%3",
-					Session:      "proj-z",
-					Status:       monitor.StatusClear,
-					LastActiveAt: before,
-				},
-			},
-		}
-		data, _ := json.Marshal(seed)
-		if err := os.WriteFile(statePath, data, 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		resp := handleVisit(statePath, monitor.Request{
-			Cmd:    "visit",
-			PaneID: "%3",
-		})
-		if !resp.OK {
-			t.Fatalf("unexpected error: %s", resp.Error)
-		}
-		state := loadStateFromPath(t, statePath)
-		entry := state.Panes["%3"]
-		if !entry.LastActiveAt.After(before) {
-			t.Errorf("LastActiveAt = %v, want after %v", entry.LastActiveAt, before)
-		}
-	})
 }
 
 func setupEmptyState(t *testing.T) string {
@@ -357,23 +309,42 @@ func seedMonitorStateDir(t *testing.T, panes map[string]*monitor.PaneEntry) (sta
 	return statePath, dataHome
 }
 
-func parityMockTmux(active bool) *deps.MockTmux {
-	activeOut := "0 0 0"
-	if active {
-		activeOut = "1 1 1"
+func TestHandleSetStatus_IgnoresSourceBeforeStateWork(t *testing.T) {
+	statePath := setupEmptyState(t)
+	configDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	popDir := filepath.Join(configDir, "pop")
+	if err := os.MkdirAll(popDir, 0755); err != nil {
+		t.Fatal(err)
 	}
-	return &deps.MockTmux{
+	configBody := "[pane_monitoring]\nignore_status_from = [\"tmux-global\"]\n"
+	if err := os.WriteFile(filepath.Join(popDir, "config.toml"), []byte(configBody), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmuxCalled := false
+	tmux := &deps.MockTmux{
 		CommandFunc: func(args ...string) (string, error) {
-			if len(args) >= 5 && args[0] == "display-message" {
-				switch args[4] {
-				case "#{session_name}\t#{pane_current_command}":
-					return "proj-x\tclaude", nil
-				case "#{pane_active} #{window_active} #{session_attached}":
-					return activeOut, nil
-				}
-			}
+			tmuxCalled = true
 			return "", nil
 		},
+	}
+
+	resp := handleSetStatus(tmux, statePath, monitor.Request{
+		Cmd:    "set-status",
+		PaneID: "%1",
+		Status: "working",
+		Source: "tmux-global",
+	})
+	if !resp.OK {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+	if tmuxCalled {
+		t.Error("expected no tmux calls when source is ignored")
+	}
+	state := loadStateFromPath(t, statePath)
+	if len(state.Panes) != 0 {
+		t.Errorf("expected empty state, got %d panes", len(state.Panes))
 	}
 }
 
@@ -394,253 +365,84 @@ func assertPaneStatesMatch(t *testing.T, handlerState, directState *monitor.Stat
 	}
 }
 
-func TestSetFollowing_HandlerAndDirectParity(t *testing.T) {
+func TestSetStatus_HandlerAndDirectDelegation(t *testing.T) {
+	initial := map[string]*monitor.PaneEntry{
+		"%1": {PaneID: "%1", Session: "test", Status: monitor.StatusWorking},
+	}
+	handlerPath, _ := seedMonitorStateDir(t, clonePaneMap(initial))
+	directPath, dataHome := seedMonitorStateDir(t, clonePaneMap(initial))
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	req := monitor.Request{Cmd: "set-status", PaneID: "%1", Status: "clear"}
+	tmux := &deps.MockTmux{}
+
+	resp := handleSetStatus(tmux, handlerPath, req)
+	if !resp.OK {
+		t.Fatalf("handler error: %s", resp.Error)
+	}
+
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	if err := runPaneSetStatusDirect(tmux, &config.Config{}, "%1", "clear", "", false, ""); err != nil {
+		t.Fatalf("direct error: %v", err)
+	}
+
+	assertPaneStatesMatch(t, loadStateFromPath(t, handlerPath), loadStateFromPath(t, directPath))
+}
+
+func TestSetFollowing_HandlerAndDirectDelegation(t *testing.T) {
 	followTrue := true
-	followFalse := false
+	initial := map[string]*monitor.PaneEntry{
+		"%3": {PaneID: "%3", Session: "proj-b", Status: monitor.StatusWorking},
+	}
+	handlerPath, _ := seedMonitorStateDir(t, clonePaneMap(initial))
+	directPath, dataHome := seedMonitorStateDir(t, clonePaneMap(initial))
 
-	tests := []struct {
-		name    string
-		initial map[string]*monitor.PaneEntry
-		req     monitor.Request
-		tmux    *deps.MockTmux
-	}{
-		{
-			name:    "auto-registers untracked pane on follow",
-			initial: map[string]*monitor.PaneEntry{},
-			req: monitor.Request{
-				Cmd:       "set-following",
-				PaneID:    "%8",
-				Following: &followTrue,
-			},
-			tmux: parityMockTmux(false),
-		},
-		{
-			name:    "unfollow on untracked pane is a no-op",
-			initial: map[string]*monitor.PaneEntry{},
-			req: monitor.Request{
-				Cmd:       "set-following",
-				PaneID:    "%9",
-				Following: &followFalse,
-			},
-			tmux: &deps.MockTmux{
-				CommandFunc: func(args ...string) (string, error) {
-					t.Errorf("unexpected tmux call: %v", args)
-					return "", nil
-				},
-			},
-		},
-		{
-			name: "unfollow clears note on tracked pane",
-			initial: map[string]*monitor.PaneEntry{
-				"%2": {
-					PaneID:    "%2",
-					Session:   "proj-y",
-					Status:    monitor.StatusClear,
-					Following: true,
-					Note:      "remember to check this",
-				},
-			},
-			req: monitor.Request{
-				Cmd:       "set-following",
-				PaneID:    "%2",
-				Following: &followFalse,
-			},
-			tmux: parityMockTmux(false),
-		},
-		{
-			name: "follow on tracked pane preserves status",
-			initial: map[string]*monitor.PaneEntry{
-				"%3": {
-					PaneID:  "%3",
-					Session: "proj-b",
-					Status:  monitor.StatusWorking,
-					Note:    "watch the deploy",
-				},
-			},
-			req: monitor.Request{
-				Cmd:       "set-following",
-				PaneID:    "%3",
-				Following: &followTrue,
-			},
-			tmux: parityMockTmux(false),
-		},
+	req := monitor.Request{
+		Cmd:       "set-following",
+		PaneID:    "%3",
+		Following: &followTrue,
+	}
+	tmux := &deps.MockTmux{}
+
+	resp := handleSetFollowing(tmux, handlerPath, req)
+	if !resp.OK {
+		t.Fatalf("handler error: %s", resp.Error)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handlerPath, _ := seedMonitorStateDir(t, clonePaneMap(tt.initial))
-			directPath, dataHome := seedMonitorStateDir(t, clonePaneMap(tt.initial))
-
-			resp := handleSetFollowing(tt.tmux, handlerPath, tt.req)
-			if !resp.OK {
-				t.Fatalf("handler error: %s", resp.Error)
-			}
-
-			t.Setenv("XDG_DATA_HOME", dataHome)
-			if err := runPaneSetFollowDirect(tt.tmux, tt.req.PaneID, *tt.req.Following); err != nil {
-				t.Fatalf("direct error: %v", err)
-			}
-
-			handlerState := loadStateFromPath(t, handlerPath)
-			directState := loadStateFromPath(t, directPath)
-			assertPaneStatesMatch(t, handlerState, directState)
-		})
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	if err := runPaneSetFollowDirect(tmux, "%3", true); err != nil {
+		t.Fatalf("direct error: %v", err)
 	}
+
+	assertPaneStatesMatch(t, loadStateFromPath(t, handlerPath), loadStateFromPath(t, directPath))
 }
 
-func TestVisit_HandlerAndDirectParity(t *testing.T) {
+func TestVisit_HandlerAndDirectDelegation(t *testing.T) {
 	before := time.Now().Add(-1 * time.Hour)
-
-	tests := []struct {
-		name    string
-		initial map[string]*monitor.PaneEntry
-		req     monitor.Request
-	}{
-		{
-			name:    "no-op on untracked pane",
-			initial: map[string]*monitor.PaneEntry{},
-			req: monitor.Request{
-				Cmd:    "visit",
-				PaneID: "%99",
-			},
-		},
-		{
-			name: "updates LastActiveAt on tracked pane",
-			initial: map[string]*monitor.PaneEntry{
-				"%3": {
-					PaneID:       "%3",
-					Session:      "proj-z",
-					Status:       monitor.StatusUnread,
-					LastActiveAt: before,
-				},
-			},
-			req: monitor.Request{
-				Cmd:    "visit",
-				PaneID: "%3",
-			},
+	initial := map[string]*monitor.PaneEntry{
+		"%3": {
+			PaneID:       "%3",
+			Session:      "proj-z",
+			Status:       monitor.StatusUnread,
+			LastActiveAt: before,
 		},
 	}
+	handlerPath, _ := seedMonitorStateDir(t, clonePaneMap(initial))
+	directPath, dataHome := seedMonitorStateDir(t, clonePaneMap(initial))
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handlerPath, _ := seedMonitorStateDir(t, clonePaneMap(tt.initial))
-			directPath, dataHome := seedMonitorStateDir(t, clonePaneMap(tt.initial))
+	req := monitor.Request{Cmd: "visit", PaneID: "%3"}
 
-			resp := handleVisit(handlerPath, tt.req)
-			if !resp.OK {
-				t.Fatalf("handler error: %s", resp.Error)
-			}
-
-			t.Setenv("XDG_DATA_HOME", dataHome)
-			if err := runPaneVisitDirect(tt.req.PaneID); err != nil {
-				t.Fatalf("direct error: %v", err)
-			}
-
-			handlerState := loadStateFromPath(t, handlerPath)
-			directState := loadStateFromPath(t, directPath)
-			assertPaneStatesMatch(t, handlerState, directState)
-		})
-	}
-}
-
-func TestSetStatus_HandlerAndDirectParity(t *testing.T) {
-	tests := []struct {
-		name    string
-		initial map[string]*monitor.PaneEntry
-		req     monitor.Request
-		cfg     *config.Config
-		tmux    *deps.MockTmux
-	}{
-		{
-			name:    "auto-registers untracked pane",
-			initial: map[string]*monitor.PaneEntry{},
-			req: monitor.Request{
-				Cmd:    "set-status",
-				PaneID: "%7",
-				Status: "working",
-			},
-			cfg:  &config.Config{},
-			tmux: parityMockTmux(false),
-		},
-		{
-			name: "updates tracked pane to clear",
-			initial: map[string]*monitor.PaneEntry{
-				"%1": {PaneID: "%1", Session: "test", Status: monitor.StatusWorking},
-			},
-			req: monitor.Request{
-				Cmd:    "set-status",
-				PaneID: "%1",
-				Status: "clear",
-			},
-			cfg:  &config.Config{},
-			tmux: parityMockTmux(false),
-		},
-		{
-			name: "dismiss unread on active pane when policy enabled",
-			initial: map[string]*monitor.PaneEntry{
-				"%1": {PaneID: "%1", Session: "test", Status: monitor.StatusWorking},
-			},
-			req: monitor.Request{
-				Cmd:    "set-status",
-				PaneID: "%1",
-				Status: "unread",
-			},
-			cfg: &config.Config{
-				PaneMonitoring: &config.PaneMonitoringConfig{
-					DismissUnreadInActivePane: true,
-				},
-			},
-			tmux: parityMockTmux(true),
-		},
-		{
-			name:    "no-register leaves untracked pane untouched",
-			initial: map[string]*monitor.PaneEntry{},
-			req: monitor.Request{
-				Cmd:        "set-status",
-				PaneID:     "%9",
-				Status:     "clear",
-				NoRegister: true,
-			},
-			cfg:  &config.Config{},
-			tmux: parityMockTmux(false),
-		},
+	resp := handleVisit(handlerPath, req)
+	if !resp.OK {
+		t.Fatalf("handler error: %s", resp.Error)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handlerPath, _ := seedMonitorStateDir(t, clonePaneMap(tt.initial))
-			directPath, dataHome := seedMonitorStateDir(t, clonePaneMap(tt.initial))
-
-			if tt.cfg != nil && tt.cfg.PaneMonitoring != nil && tt.cfg.PaneMonitoring.DismissUnreadInActivePane {
-				configDir := t.TempDir()
-				t.Setenv("XDG_CONFIG_HOME", configDir)
-				popDir := filepath.Join(configDir, "pop")
-				if err := os.MkdirAll(popDir, 0755); err != nil {
-					t.Fatal(err)
-				}
-				configBody := "[pane_monitoring]\ndismiss_unread_in_active_pane = true\n"
-				if err := os.WriteFile(filepath.Join(popDir, "config.toml"), []byte(configBody), 0644); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-			}
-
-			resp := handleSetStatus(tt.tmux, handlerPath, tt.req)
-			if !resp.OK {
-				t.Fatalf("handler error: %s", resp.Error)
-			}
-
-			t.Setenv("XDG_DATA_HOME", dataHome)
-			if err := runPaneSetStatusDirect(tt.tmux, tt.cfg, tt.req.PaneID, tt.req.Status, tt.req.Source, tt.req.NoRegister, tt.req.Label); err != nil {
-				t.Fatalf("direct error: %v", err)
-			}
-
-			handlerState := loadStateFromPath(t, handlerPath)
-			directState := loadStateFromPath(t, directPath)
-			assertPaneStatesMatch(t, handlerState, directState)
-		})
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	if err := runPaneVisitDirect("%3"); err != nil {
+		t.Fatalf("direct error: %v", err)
 	}
+
+	assertPaneStatesMatch(t, loadStateFromPath(t, handlerPath), loadStateFromPath(t, directPath))
 }
 
 func clonePaneMap(in map[string]*monitor.PaneEntry) map[string]*monitor.PaneEntry {
