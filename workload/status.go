@@ -2,6 +2,7 @@ package workload
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -188,7 +189,7 @@ func BuildFailedInfo(stem string, m *Manifest) (ids []string, hints []string) {
 	for _, issue := range m.Issues {
 		if issue.Status == "failed" {
 			ids = append(ids, issue.ID)
-			hints = append(hints, fmt.Sprintf("pop workload reset-issue --issue-set %s --issue %s", stem, issue.ID))
+			hints = append(hints, fmt.Sprintf("pop workload reset-issue %s", path.Join("thoughts/issues", stem, issue.File)))
 		}
 	}
 	return ids, hints

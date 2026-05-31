@@ -76,6 +76,11 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "thoughts/issues/svc/01-a.md", "thoughts/issues/svc/02-b.md")
 	})
 
+	t.Run("reset issue positional path", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "workload", "reset-issue", "thoughts/issues/svc/")
+		assertShellCompContains(t, out, "thoughts/issues/svc/01-a.md", "thoughts/issues/svc/02-b.md")
+	})
+
 	t.Run("agent presets", func(t *testing.T) {
 		out := shellCompNoDesc(t, "workload", "run-issue", "--agent")
 		for _, preset := range []string{"claude", "codex", "cursor", "opencode", "pi"} {

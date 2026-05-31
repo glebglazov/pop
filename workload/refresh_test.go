@@ -203,7 +203,7 @@ func TestRenderDiagnostics(t *testing.T) {
 func TestFailedRowResetHints(t *testing.T) {
 	root := t.TempDir()
 	setupManifest(t, root, "failed-prd", []Issue{
-		{ID: "01-broken", File: "01-broken.md", Title: "B", Type: "AFK", Status: "failed"},
+		{ID: "01-broken", File: "repair-broken.md", Title: "B", Type: "AFK", Status: "failed"},
 	})
 
 	result, err := RefreshWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
@@ -213,7 +213,7 @@ func TestFailedRowResetHints(t *testing.T) {
 	if len(result.Rows) != 1 || result.Rows[0].Status != StatusFailed {
 		t.Fatalf("rows = %#v", result.Rows)
 	}
-	if len(result.Rows[0].ResetHints) != 1 || !strings.Contains(result.Rows[0].ResetHints[0], "reset-issue --issue-set failed-prd --issue 01-broken") {
+	if len(result.Rows[0].ResetHints) != 1 || result.Rows[0].ResetHints[0] != "pop workload reset-issue thoughts/issues/failed-prd/repair-broken.md" {
 		t.Fatalf("reset hints = %v", result.Rows[0].ResetHints)
 	}
 

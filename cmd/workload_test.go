@@ -400,6 +400,34 @@ func TestRunIssueCmdRejectsMoreThanOnePositional(t *testing.T) {
 	}
 }
 
+func TestResetIssueCmdRequiresOnePositional(t *testing.T) {
+	for _, args := range [][]string{nil, {"one", "two"}} {
+		if err := workloadResetIssueCmd.Args(workloadResetIssueCmd, args); err == nil {
+			t.Fatalf("args %v should fail as a usage error", args)
+		}
+	}
+}
+
+func TestResetIssueCmdTargetsRelativeIssuePath(t *testing.T) {
+	root := setupRunIssueCmdFixture(t)
+	resetWorkloadFlags()
+	t.Cleanup(resetWorkloadFlags)
+
+	manifestPath := filepath.Join(root, "thoughts/issues/demo/index.json")
+	manifest := `{"issues":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"failed","failed_after":2}]}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	if err := runWorkloadResetIssueWith(workload.DefaultDeps(), &stdout, "thoughts/issues/demo/01-a.md"); err != nil {
+		t.Fatalf("relative issue path failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Reset issue demo/01-a to open") {
+		t.Fatalf("missing canonical success output:\n%s", stdout.String())
+	}
+}
+
 func TestRunIssuesCmdTargetsDotFromIssueSetDirectory(t *testing.T) {
 	root := setupRunIssueCmdFixture(t)
 	resetWorkloadFlags()
@@ -448,17 +476,14 @@ func TestWorkloadCommandSurfaceUsesIssueSetVocabulary(t *testing.T) {
 		t.Fatal("removed run-prd alias is still registered")
 	}
 
-	for _, sub := range []string{"reset-issue"} {
-		c := names[sub]
-		if c == nil {
-			t.Fatalf("%s command is not registered", sub)
-		}
-		if c.Flags().Lookup("issue-set") == nil {
-			t.Fatalf("%s missing --issue-set flag", sub)
-		}
-		if c.Flags().Lookup("prd") != nil {
-			t.Fatalf("%s still exposes removed --prd flag", sub)
-		}
+	if names["reset-issue"] == nil {
+		t.Fatal("reset-issue command is not registered")
+	}
+	if names["reset-issue"].Flags().Lookup("issue-set") != nil {
+		t.Fatal("reset-issue still exposes removed --issue-set flag")
+	}
+	if names["reset-issue"].Flags().Lookup("issue") != nil {
+		t.Fatal("reset-issue still exposes removed --issue flag")
 	}
 	if names["run-issue"].Flags().Lookup("issue-set") != nil {
 		t.Fatal("run-issue still exposes removed --issue-set flag")

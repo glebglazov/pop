@@ -15,18 +15,16 @@ import (
 )
 
 var (
-	workloadProject       string
-	workloadPath          string
-	workloadDefPath       string
-	workloadRuntimePath   string
-	workloadResetIssueSet string
-	workloadResetIssue    string
-	workloadAgentPreset   string
-	workloadAgentCmd      string
-	workloadRunYes        bool
-	workloadAllowDirty    workload.DirtyRuntimeStrategy
-	workloadMaxTries      int
-	workloadTimeout       string
+	workloadProject     string
+	workloadPath        string
+	workloadDefPath     string
+	workloadRuntimePath string
+	workloadAgentPreset string
+	workloadAgentCmd    string
+	workloadRunYes      bool
+	workloadAllowDirty  workload.DirtyRuntimeStrategy
+	workloadMaxTries    int
+	workloadTimeout     string
 )
 
 var workloadCmd = &cobra.Command{
@@ -63,9 +61,9 @@ var workloadRunIssuesCmd = &cobra.Command{
 }
 
 var workloadResetIssueCmd = &cobra.Command{
-	Use:   "reset-issue",
+	Use:   "reset-issue ISSUE_PATH",
 	Short: "Reset one failed issue back to open",
-	Args:  cobra.NoArgs,
+	Args:  cobra.ExactArgs(1),
 	Run:   runWorkloadResetIssue,
 }
 
@@ -98,9 +96,6 @@ func init() {
 	workloadRunIssuesCmd.Flags().IntVar(&workloadMaxTries, "max-tries", workload.DefaultMaxTries, "Maximum started attempts per issue")
 	workloadRunIssuesCmd.Flags().StringVar(&workloadTimeout, "timeout", "30m", "Maximum duration per attempt")
 	workloadRunIssuesCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
-
-	workloadResetIssueCmd.Flags().StringVar(&workloadResetIssueSet, "issue-set", "", "Target Issue set by identifier or CWD-relative path")
-	workloadResetIssueCmd.Flags().StringVar(&workloadResetIssue, "issue", "", "Target issue by identifier, markdown filename, or CWD-relative path")
 }
 
 func workloadResolveInput() workload.ResolveInput {
@@ -220,20 +215,19 @@ func runWorkloadRunIssuesWith(d *workload.Deps, stdout, stderr io.Writer, stdin 
 }
 
 func runWorkloadResetIssue(cmd *cobra.Command, args []string) {
-	err := runWorkloadResetIssueWith(workload.DefaultDeps(), os.Stdout)
+	err := runWorkloadResetIssueWith(workload.DefaultDeps(), os.Stdout, args[0])
 	handleWorkloadExit(err)
 }
 
-func runWorkloadResetIssueWith(d *workload.Deps, w io.Writer) error {
+func runWorkloadResetIssueWith(d *workload.Deps, w io.Writer, issuePath string) error {
 	result, err := workload.ResetIssueWith(d, workloadProjectDeps(), workloadConfigLoad, workload.ResetIssueOptions{
 		ResolveInput: workloadResolveInput(),
-		IssueSetID:   workloadResetIssueSet,
-		IssueID:      workloadResetIssue,
+		IssuePath:    issuePath,
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Reset issue %s/%s to open\n\n", workloadResetIssueSet, workloadResetIssue)
+	fmt.Fprintf(w, "Reset issue %s/%s to open\n\n", result.IssueSetID, result.IssueID)
 	workload.Render(w, result.Refresh)
 	return nil
 }

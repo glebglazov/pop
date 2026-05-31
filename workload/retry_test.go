@@ -211,11 +211,13 @@ func TestResetIssueReturnsFailedToOpen(t *testing.T) {
 
 	result, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssueSetID:   "demo",
-		IssueID:      "01-a",
+		IssuePath:    "thoughts/issues/demo/01-a.md",
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if result.IssueSetID != "demo" || result.IssueID != "01-a" {
+		t.Fatalf("reset target = %s/%s", result.IssueSetID, result.IssueID)
 	}
 	assertIssueOpen(t, env, "01-a")
 	assertProgressContains(t, env, "RESET")
@@ -228,8 +230,7 @@ func TestResetIssueRequiresFailed(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	_, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssueSetID:   "demo",
-		IssueID:      "01-a",
+		IssuePath:    "thoughts/issues/demo/01-a.md",
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 }
@@ -246,8 +247,7 @@ func TestResetIssueProgressBeforeManifest(t *testing.T) {
 
 	_, err := ResetIssueWith(d, nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssueSetID:   "demo",
-		IssueID:      "01-a",
+		IssuePath:    "thoughts/issues/demo/01-a.md",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -268,8 +268,7 @@ func TestResetIssueFailureManualRepair(t *testing.T) {
 
 	_, err := ResetIssueWith(d, nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssueSetID:   "demo",
-		IssueID:      "01-a",
+		IssuePath:    "thoughts/issues/demo/01-a.md",
 	})
 	assertExitCode(t, err, ExitOperational)
 	if !strings.Contains(err.Error(), "manual repair required") {

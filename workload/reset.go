@@ -2,7 +2,6 @@ package workload
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -11,13 +10,14 @@ import (
 // ResetIssueOptions configures resetting one failed issue.
 type ResetIssueOptions struct {
 	ResolveInput
-	IssueSetID string
-	IssueID    string
+	IssuePath string
 }
 
 // ResetIssueResult is the outcome of resetting a failed issue.
 type ResetIssueResult struct {
-	Refresh *RefreshResult
+	IssueSetID string
+	IssueID    string
+	Refresh    *RefreshResult
 }
 
 // ResetIssue returns one failed issue to open status.
@@ -27,10 +27,6 @@ func ResetIssue(opts ResetIssueOptions) (*ResetIssueResult, error) {
 
 // ResetIssueWith resets a failed issue using injected dependencies.
 func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts ResetIssueOptions) (*ResetIssueResult, error) {
-	if strings.TrimSpace(opts.IssueSetID) == "" && strings.TrimSpace(opts.IssueID) == "" {
-		return nil, exitErr(ExitSetup, "reset-issue requires --issue-set and --issue")
-	}
-
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -42,12 +38,12 @@ func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	issueSetID, issueID, err := ResolveWorkloadTargets(d, refresh, opts.CWD, opts.IssueSetID, opts.IssueID)
+	issueSetID, issueID, err := ResolveIssueTarget(d, refresh, opts.CWD, opts.IssuePath)
 	if err != nil {
 		return nil, err
 	}
 	if issueSetID == "" || issueID == "" {
-		return nil, exitErr(ExitSetup, "reset-issue requires --issue-set and --issue")
+		return nil, exitErr(ExitSetup, "reset-issue requires an issue path")
 	}
 
 	m := refresh.Manifests[issueSetID]
@@ -90,5 +86,5 @@ func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, exitErr(ExitOperational, "refresh after reset: %v", err)
 	}
 
-	return &ResetIssueResult{Refresh: afterRefresh}, nil
+	return &ResetIssueResult{IssueSetID: issueSetID, IssueID: issueID, Refresh: afterRefresh}, nil
 }

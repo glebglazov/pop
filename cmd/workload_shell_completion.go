@@ -25,15 +25,13 @@ func registerWorkloadShellCompletions() {
 
 	_ = workloadCmd.RegisterFlagCompletionFunc("project", completeWorkloadProjects)
 
-	_ = workloadResetIssueCmd.RegisterFlagCompletionFunc("issue-set", completeWorkloadIssueSets)
-	_ = workloadResetIssueCmd.RegisterFlagCompletionFunc("issue", completeWorkloadIssues)
-
 	for _, cmd := range []*cobra.Command{workloadRunIssueCmd, workloadRunIssuesCmd} {
 		_ = cmd.RegisterFlagCompletionFunc("agent", completeWorkloadAgents)
 	}
 
 	workloadSetPriorityCmd.ValidArgsFunction = completeWorkloadSetPriorityArgs
 	workloadRunIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
+	workloadResetIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
 }
 
 func registerWorkloadPathFlagCompletions() {
