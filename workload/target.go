@@ -92,23 +92,37 @@ func matchIssueFileField(m *Manifest, fileName string) (string, error) {
 	return "", exitErr(ExitNoRunnable, "%s", unknownIssueMessage(m, base))
 }
 
-// ResolveIssueSetTarget normalizes a Workload target reference to an Issue set identifier.
-func ResolveIssueSetTarget(d *Deps, refresh *RefreshResult, cwd, raw string) (string, error) {
+func resolveIssueSetIdentifier(refresh *RefreshResult, raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
 	}
 
-	if !isPathLike(raw) {
-		if findRow(refresh, raw) != nil {
+	if findRow(refresh, raw) != nil {
+		return raw, nil
+	}
+	if refresh.Manifests != nil {
+		if _, ok := refresh.Manifests[raw]; ok {
 			return raw, nil
 		}
-		if refresh.Manifests != nil {
-			if _, ok := refresh.Manifests[raw]; ok {
-				return raw, nil
-			}
-		}
-		return "", exitErr(ExitNoRunnable, "%s", unknownIssueSetTargetMessage(refresh, raw))
+	}
+	return "", exitErr(ExitNoRunnable, "%s", unknownIssueSetTargetMessage(refresh, raw))
+}
+
+func resolveIssueSetReference(d *Deps, refresh *RefreshResult, cwd, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if !isPathLike(raw) {
+		return resolveIssueSetIdentifier(refresh, raw)
+	}
+	return resolveIssueSetPath(d, refresh, cwd, raw)
+}
+
+func resolveIssueSetPath(d *Deps, refresh *RefreshResult, cwd, raw string) (string, error) {
+	if filepath.IsAbs(expandHome(d, raw)) {
+		return "", exitErr(ExitSetup, "Issue set target %q must be a CWD-relative path", raw)
 	}
 
 	abs, err := absFromCWD(d, cwd, raw)
@@ -120,6 +134,18 @@ func ResolveIssueSetTarget(d *Deps, refresh *RefreshResult, cwd, raw string) (st
 		return id, nil
 	}
 	return "", exitErr(ExitNoRunnable, "%s", unknownIssueSetTargetMessage(refresh, raw))
+}
+
+// ResolveIssueSetTarget normalizes a CWD-relative Issue set path to its identifier.
+func ResolveIssueSetTarget(d *Deps, refresh *RefreshResult, cwd, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if !isPathLike(raw) || filepath.IsAbs(expandHome(d, raw)) {
+		return "", exitErr(ExitSetup, "Issue set target %q must be a CWD-relative path", raw)
+	}
+	return resolveIssueSetPath(d, refresh, cwd, raw)
 }
 
 func resolveIssueFromPath(d *Deps, refresh *RefreshResult, cwd, raw string) (issueSetID, issueID string, ok bool, err error) {
@@ -159,7 +185,7 @@ func ResolveWorkloadTargets(d *Deps, refresh *RefreshResult, cwd, issueSetRaw, i
 			return "", "", resolveErr
 		}
 		if ok {
-			resolvedSet, resolveErr := ResolveIssueSetTarget(d, refresh, cwd, issueSetRaw)
+			resolvedSet, resolveErr := resolveIssueSetReference(d, refresh, cwd, issueSetRaw)
 			if resolveErr != nil {
 				return "", "", resolveErr
 			}
@@ -171,7 +197,7 @@ func ResolveWorkloadTargets(d *Deps, refresh *RefreshResult, cwd, issueSetRaw, i
 		return "", "", exitErr(ExitNoRunnable, "%s", unknownIssueSetTargetMessage(refresh, issueRaw))
 	}
 
-	issueSetID, err = ResolveIssueSetTarget(d, refresh, cwd, issueSetRaw)
+	issueSetID, err = resolveIssueSetReference(d, refresh, cwd, issueSetRaw)
 	if err != nil {
 		return "", "", err
 	}
@@ -266,7 +292,7 @@ func issuePathCompletions(refresh *RefreshResult, issueSetRaw, cwd, toComplete s
 		return issueSetPathCompletions(refresh, toComplete)
 	}
 
-	issueSetID, _ := ResolveIssueSetTarget(defaultDeps, refresh, cwd, issueSetRaw)
+	issueSetID, _ := resolveIssueSetReference(defaultDeps, refresh, cwd, issueSetRaw)
 	if issueSetID == "" {
 		return nil
 	}

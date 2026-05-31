@@ -11,10 +11,10 @@ import (
 
 // SetPriorityResult is the outcome of updating one Issue-set priority.
 type SetPriorityResult struct {
-	Refresh      *RefreshResult
-	IssueSetID        string
-	OldPriority  int
-	NewPriority  int
+	Refresh     *RefreshResult
+	IssueSetID  string
+	OldPriority int
+	NewPriority int
 }
 
 // SetPriority updates one registered Issue-set priority and refreshes the table rows.
@@ -39,7 +39,7 @@ func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		return nil, err
 	}
 
-	resolvedIssueSetID, err := ResolveIssueSetTarget(d, refresh, input.CWD, issueSetID)
+	resolvedIssueSetID, err := resolveIssueSetIdentifier(refresh, issueSetID)
 	if err != nil {
 		return nil, err
 	}

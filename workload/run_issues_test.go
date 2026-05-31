@@ -165,7 +165,7 @@ func TestRunIssueSetTargetedIssueSet(t *testing.T) {
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkIssue: true, summary: "targeted"})
 	env := &runIssueSetFixture{root: root}
 	opts := env.runIssueSetOpts(true, agent, nil)
-	opts.IssueSetOverride = "high"
+	opts.IssueSetOverride = "thoughts/issues/high"
 
 	result, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
@@ -296,7 +296,7 @@ func TestRunIssueSetFailedIssueSetRejected(t *testing.T) {
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
 	opts := env.runIssueSetOpts(true, agent, nil)
-	opts.IssueSetOverride = "demo"
+	opts.IssueSetOverride = "thoughts/issues/demo"
 
 	_, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)

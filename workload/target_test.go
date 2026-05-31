@@ -3,10 +3,11 @@ package workload
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestResolveIssueSetTargetBareAndPath(t *testing.T) {
+func TestResolveIssueSetTargetPathAndDot(t *testing.T) {
 	root := t.TempDir()
 	setupManifest(t, root, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -20,12 +21,7 @@ func TestResolveIssueSetTargetBareAndPath(t *testing.T) {
 
 	refresh := refreshFixture(t, root)
 
-	id, err := ResolveIssueSetTarget(DefaultDeps(), refresh, root, "demo")
-	if err != nil || id != "demo" {
-		t.Fatalf("bare id = %q err=%v", id, err)
-	}
-
-	id, err = ResolveIssueSetTarget(DefaultDeps(), refresh, root, "thoughts/issues/demo")
+	id, err := ResolveIssueSetTarget(DefaultDeps(), refresh, root, "thoughts/issues/demo")
 	if err != nil || id != "demo" {
 		t.Fatalf("tree path = %q err=%v", id, err)
 	}
@@ -37,6 +33,19 @@ func TestResolveIssueSetTargetBareAndPath(t *testing.T) {
 	id, err = ResolveIssueSetTarget(DefaultDeps(), refresh, issueDir, ".")
 	if err != nil || id != "demo" {
 		t.Fatalf("dot path = %q err=%v", id, err)
+	}
+}
+
+func TestResolveIssueSetTargetRejectsNonRelativeReferences(t *testing.T) {
+	root := t.TempDir()
+	setupManifest(t, root, "demo", nil)
+	refresh := refreshFixture(t, root)
+
+	for _, raw := range []string{"demo", filepath.Join(root, "thoughts/issues/demo")} {
+		_, err := ResolveIssueSetTarget(DefaultDeps(), refresh, root, raw)
+		if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
+			t.Fatalf("ResolveIssueSetTarget(%q) error = %v", raw, err)
+		}
 	}
 }
 
@@ -54,6 +63,9 @@ func TestResolveIssueSetTargetRejectsUnknownPath(t *testing.T) {
 	_, err := ResolveIssueSetTarget(DefaultDeps(), refresh, root, "thoughts/issues/missing")
 	if err == nil {
 		t.Fatal("expected unknown Issue set error")
+	}
+	if !strings.Contains(err.Error(), "valid: demo") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

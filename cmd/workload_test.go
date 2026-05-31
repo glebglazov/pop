@@ -299,7 +299,6 @@ func TestRunIssueCmdDeclinedIsSuccess(t *testing.T) {
 	workloadPath = ""
 	workloadDefPath = ""
 	workloadRunIssueIssueSet = ""
-	workloadRunIssuesIssueSet = ""
 	workloadRunIssue = ""
 	workloadAgentPreset = ""
 	workloadAgentCmd = agent
@@ -326,7 +325,7 @@ func TestRunIssuesCmdDeclinedIsSuccess(t *testing.T) {
 	t.Cleanup(resetWorkloadFlags)
 
 	var stdout bytes.Buffer
-	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"))
+	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "")
 	if err != nil {
 		t.Fatalf("declined should succeed: %v", err)
 	}
@@ -334,6 +333,57 @@ func TestRunIssuesCmdDeclinedIsSuccess(t *testing.T) {
 		t.Fatalf("missing pre-run table:\n%s", stdout.String())
 	}
 	_ = root
+}
+
+func TestRunIssuesCmdTargetsRelativeIssueSetPath(t *testing.T) {
+	root := setupRunIssueCmdFixture(t)
+	resetWorkloadFlags()
+	t.Cleanup(resetWorkloadFlags)
+
+	var stdout bytes.Buffer
+	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "thoughts/issues/demo")
+	if err != nil {
+		t.Fatalf("relative Issue set path failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "AUTO RUN") {
+		t.Fatalf("missing targeted pre-run table:\n%s", stdout.String())
+	}
+	_ = root
+}
+
+func TestRunIssuesCmdTargetsDotFromIssueSetDirectory(t *testing.T) {
+	root := setupRunIssueCmdFixture(t)
+	resetWorkloadFlags()
+	t.Cleanup(resetWorkloadFlags)
+
+	if err := os.Chdir(filepath.Join(root, "thoughts/issues/demo")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), ".")
+	if err != nil {
+		t.Fatalf("dot Issue set path failed: %v", err)
+	}
+}
+
+func TestRunIssuesCmdRejectsNonRelativeIssueSetPaths(t *testing.T) {
+	root := setupRunIssueCmdFixture(t)
+	resetWorkloadFlags()
+	t.Cleanup(resetWorkloadFlags)
+
+	for _, target := range []string{"demo", filepath.Join(root, "thoughts/issues/demo")} {
+		err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), target)
+		if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
+			t.Fatalf("target %q error = %v", target, err)
+		}
+	}
+}
+
+func TestRunIssuesCmdRejectsMoreThanOnePositional(t *testing.T) {
+	err := workloadRunIssuesCmd.Args(workloadRunIssuesCmd, []string{"one", "two"})
+	if err == nil {
+		t.Fatal("expected usage error")
+	}
 }
 
 func TestWorkloadCommandSurfaceUsesIssueSetVocabulary(t *testing.T) {
@@ -349,7 +399,7 @@ func TestWorkloadCommandSurfaceUsesIssueSetVocabulary(t *testing.T) {
 		t.Fatal("removed run-prd alias is still registered")
 	}
 
-	for _, sub := range []string{"run-issue", "run-issues", "reset-issue"} {
+	for _, sub := range []string{"run-issue", "reset-issue"} {
 		c := names[sub]
 		if c == nil {
 			t.Fatalf("%s command is not registered", sub)
@@ -360,6 +410,9 @@ func TestWorkloadCommandSurfaceUsesIssueSetVocabulary(t *testing.T) {
 		if c.Flags().Lookup("prd") != nil {
 			t.Fatalf("%s still exposes removed --prd flag", sub)
 		}
+	}
+	if names["run-issues"].Flags().Lookup("issue-set") != nil {
+		t.Fatal("run-issues still exposes removed --issue-set flag")
 	}
 }
 
@@ -412,7 +465,6 @@ func resetWorkloadFlags() {
 	workloadPath = ""
 	workloadDefPath = ""
 	workloadRunIssueIssueSet = ""
-	workloadRunIssuesIssueSet = ""
 	workloadRunIssue = ""
 	workloadAgentPreset = ""
 	workloadAgentCmd = ""

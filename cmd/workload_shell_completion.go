@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	workloadCompletionDeps       = func() *workload.Deps { return workload.DefaultDeps() }
+	workloadCompletionDeps        = func() *workload.Deps { return workload.DefaultDeps() }
 	workloadCompletionProjectDeps = func() *project.Deps { return project.DefaultDeps() }
 	workloadCompletionConfigLoad  = func(path string) (*config.Config, error) { return config.Load(path) }
 )
@@ -27,7 +27,6 @@ func registerWorkloadShellCompletions() {
 
 	for _, cmd := range []*cobra.Command{
 		workloadRunIssueCmd,
-		workloadRunIssuesCmd,
 		workloadResetIssueCmd,
 	} {
 		_ = cmd.RegisterFlagCompletionFunc("issue-set", completeWorkloadIssueSets)

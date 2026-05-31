@@ -159,11 +159,11 @@ The mechanism that runs a selected issue through an agent, verifies completion, 
 _Avoid_: Workload scheduler
 
 **Run issue**:
-Executing exactly one eligible issue from a Ready Issue set. By default pop chooses the Issue set using workload priority; an explicit Issue set may be targeted without bypassing readiness rules. An explicit issue may be targeted with `--issue-set`, with a spanning **Workload target reference** that implies the Issue set, or with both when they agree. Targeting still requires Open status, AFK type, and satisfied dependencies.
+Executing exactly one eligible issue from a Ready Issue set. By default pop chooses the Issue set using workload priority. When a positional argument is supplied, it must be a CWD-relative path to the issue markdown file; bare issue identifiers and absolute paths are rejected. A bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. Targeting still requires Open status, AFK type, and satisfied dependencies.
 _Avoid_: Next issue
 
 **Run issues**:
-Sequentially executing eligible issues from one Ready Issue set until it becomes Done, Blocked, or Failed. By default pop chooses the Issue set using workload priority; an explicit Issue set may be targeted without bypassing readiness rules. It does not continue into another Issue set.
+Sequentially executing eligible issues from one Ready Issue set until it becomes Done, Blocked, or Failed. By default pop chooses the Issue set using workload priority. When a positional argument is supplied, it must be a CWD-relative path to the Issue set directory; bare Issue set identifiers, absolute paths, and non-relative reference forms are rejected. It does not continue into another Issue set.
 _Avoid_: Run all, next Issue set, Run PRD
 
 **Agent preset**:
@@ -203,7 +203,7 @@ An issue whose active agent process was terminated by user interruption or proce
 _Avoid_: Exhausted issue, failed issue
 
 **Issue reset**:
-Explicitly returning one Failed issue to Open so it may be attempted again. Reset removes the recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit.
+Explicitly returning one Failed issue to Open so it may be attempted again. The reset command requires a CWD-relative path positional argument to the issue markdown file; bare issue identifiers and absolute paths are rejected. A bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. Reset removes the recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit. The workload status table prints copy-paste reset hints using the canonical path `thoughts/issues/<id>/<file>.md` from the workload definition root.
 _Avoid_: Issue set reset, automatic retry
 
 **Progress record**:
@@ -247,11 +247,11 @@ The canonical name of an Issue set — its directory name under `thoughts/issues
 _Avoid_: Display title, filename, path
 
 **Workload target reference**:
-A CLI value that identifies an Issue set or issue on workload commands — whether passed as `--issue-set`, `--issue`, or a positional Issue-set argument. It may be a **Workload identifier** or a path resolved from the current working directory. An Issue-set path points at an Issue set directory or at `thoughts/issues/<id>`. Any CWD-relative or absolute path is valid when its resolved directory matches a discovered Issue set under the active workload, including bare identifiers and `.` when the shell is already inside that directory. An issue path may be Issue-set-relative (`01-a.md`), span from the current working directory through an Issue set (`thoughts/issues/<id>/01-a.md`), or remain a bare issue ID. Issue-set-relative issue paths require an explicit `--issue-set` or a spanning path. A spanning issue path may omit `--issue-set` when it resolves unambiguously to one discovered Issue set. Pop normalizes every accepted reference to the canonical Issue set and issue identifiers before selection. Bare issue values match manifest **id**; path-like issue values and `.md` suffixes match manifest **file**. Resolved paths must match an Issue set discovered under the command’s workload definition path; paths outside that discovery are rejected. When both `--issue-set` and a spanning `--issue` path are supplied, they must resolve to the same Issue set or the command is rejected. Rejection messages list valid **Workload identifiers** only, not example paths. Titles, prefixes, fuzzy matches, and unresolved paths are rejected.
+A CWD-relative path that identifies an Issue set directory or issue markdown file on Run issue, Run issues, and Issue reset. Run issue and Run issues accept an optional positional argument; Issue reset requires one. Bare **Workload identifiers**, absolute paths, and other non-relative forms are rejected. A bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. A reference may point at an Issue set directory, at `thoughts/issues/<id>`, or at an issue markdown file beneath a discovered Issue set, including `.` when the shell is already inside that Issue set directory. Pop normalizes every accepted reference to the canonical Issue set and issue identifiers before selection. Resolved paths must match an Issue set discovered under the command's workload definition path; paths outside that discovery are rejected. When the argument is not a relative path form — including bare **Workload identifiers** and absolute paths — rejection explains that a relative path is required. When a relative path fails to resolve, rejection lists valid **Workload identifiers** only, not example paths. Titles, prefixes, fuzzy matches, and unresolved paths are rejected.
 _Avoid_: Workload identifier, shell completion candidate
 
 **Workload shell completion**:
-Read-only shell tab completion for workload subcommands, project names, Issue-set and issue **Workload target references**, agent presets, and path flags. Completion offers bare canonical identifiers when the typed prefix has no path separators; once the prefix looks path-like (`./`, `../`, or `thoughts/`), completion switches to CWD-relative path segments and issue markdown files under discovered Issue sets. Completion may scan local workload artifacts but must not auto-register Issue sets, persist workload state, or print warnings.
+Read-only shell tab completion for workload subcommands, project names, **Workload target reference** paths, agent presets, and path flags. Positional completion on Run issue, Run issues, and Issue reset offers CWD-relative path segments only — such as `thoughts/issues/<id>/` prefixes and `./` or `../` — not bare **Workload identifiers**. Set-priority still completes bare Issue set identifiers for its ISSUE_SET positional. Completion may scan local workload artifacts but must not auto-register Issue sets, persist workload state, or print warnings.
 _Avoid_: Shell autosuggestion, discovery refresh
 
 **Missing Issue set**:

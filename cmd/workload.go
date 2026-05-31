@@ -15,21 +15,20 @@ import (
 )
 
 var (
-	workloadProject           string
-	workloadPath              string
-	workloadDefPath           string
-	workloadRuntimePath       string
-	workloadRunIssueIssueSet  string
-	workloadRunIssuesIssueSet string
-	workloadRunIssue          string
-	workloadResetIssueSet     string
-	workloadResetIssue        string
-	workloadAgentPreset       string
-	workloadAgentCmd          string
-	workloadRunYes            bool
-	workloadAllowDirty        workload.DirtyRuntimeStrategy
-	workloadMaxTries          int
-	workloadTimeout           string
+	workloadProject          string
+	workloadPath             string
+	workloadDefPath          string
+	workloadRuntimePath      string
+	workloadRunIssueIssueSet string
+	workloadRunIssue         string
+	workloadResetIssueSet    string
+	workloadResetIssue       string
+	workloadAgentPreset      string
+	workloadAgentCmd         string
+	workloadRunYes           bool
+	workloadAllowDirty       workload.DirtyRuntimeStrategy
+	workloadMaxTries         int
+	workloadTimeout          string
 )
 
 var workloadCmd = &cobra.Command{
@@ -59,9 +58,9 @@ var workloadRunIssueCmd = &cobra.Command{
 }
 
 var workloadRunIssuesCmd = &cobra.Command{
-	Use:   "run-issues",
+	Use:   "run-issues [ISSUE_SET_PATH]",
 	Short: "Sequentially drain eligible AFK issues from one Issue set",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MaximumNArgs(1),
 	Run:   runWorkloadRunIssues,
 }
 
@@ -95,7 +94,6 @@ func init() {
 	workloadRunIssueCmd.Flags().StringVar(&workloadTimeout, "timeout", "30m", "Maximum duration per attempt")
 	workloadRunIssueCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
 
-	workloadRunIssuesCmd.Flags().StringVar(&workloadRunIssuesIssueSet, "issue-set", "", "Target Issue set by identifier or CWD-relative path")
 	workloadRunIssuesCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
 	workloadRunIssuesCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue, commit-and-continue, stash-and-continue")
 	workloadRunIssuesCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
@@ -193,18 +191,22 @@ func runWorkloadRunIssueWith(d *workload.Deps, stdout, stderr io.Writer, stdin i
 }
 
 func runWorkloadRunIssues(cmd *cobra.Command, args []string) {
-	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin)
+	var issueSetPath string
+	if len(args) > 0 {
+		issueSetPath = args[0]
+	}
+	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, issueSetPath)
 	handleWorkloadExit(err)
 }
 
-func runWorkloadRunIssuesWith(d *workload.Deps, stdout, stderr io.Writer, stdin io.Reader) error {
+func runWorkloadRunIssuesWith(d *workload.Deps, stdout, stderr io.Writer, stdin io.Reader, issueSetPath string) error {
 	timeout, err := time.ParseDuration(workloadTimeout)
 	if err != nil {
 		return fmt.Errorf("workload run-issues: invalid --timeout %q: %w", workloadTimeout, err)
 	}
 	_, err = workload.RunIssueSetWith(d, workloadProjectDeps(), workloadConfigLoad, workload.RunIssueSetOptions{
 		ResolveInput:     workloadResolveInput(),
-		IssueSetOverride: workloadRunIssuesIssueSet,
+		IssueSetOverride: issueSetPath,
 		AgentPreset:      workloadAgentPreset,
 		AgentCmd:         workloadAgentCmd,
 		AllowDirty:       workloadAllowDirty,
