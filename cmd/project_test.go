@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -132,10 +133,10 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		// Sessions: app matches project, api matches project, scratch and notes are standalone
 		sessionActivity := map[string]int64{
-			"app":     now.Unix(),
-			"api":     now.Unix(),
-			"scratch": now.Unix(),
-			"notes":   now.Unix(),
+			project.SessionName("/app"): now.Unix(),
+			project.SessionName("/api"): now.Unix(),
+			"scratch":                   now.Unix(),
+			"notes":                     now.Unix(),
 		}
 		hist := &history.History{}
 
@@ -163,8 +164,8 @@ func TestBuildSessionAwareItems(t *testing.T) {
 			{Name: "idle", Path: "/idle"},
 		}
 		sessionActivity := map[string]int64{
-			"app":     now.Unix(),
-			"scratch": now.Unix(),
+			project.SessionName("/app"): now.Unix(),
+			"scratch":                   now.Unix(),
 		}
 		hist := &history.History{}
 
@@ -213,11 +214,11 @@ func TestBuildSessionAwareItems(t *testing.T) {
 			{Name: "api", Path: "/api"},
 		}
 		sessionActivity := map[string]int64{
-			"app": now.Unix(), // session for excluded project
-			"api": now.Unix(),
+			project.SessionName("/app"): now.Unix(), // session for excluded project
+			project.SessionName("/api"): now.Unix(),
 		}
 		excludedSessionNames := map[string]bool{
-			"app": true,
+			project.SessionName("/app"): true,
 		}
 		hist := &history.History{}
 
@@ -241,9 +242,9 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		baseItems := []ui.Item{
 			{Name: "my.app", Path: "/my.app"},
 		}
-		// Session name "my_app" should match the sanitized project name
+		// Session name "my_app" should match SessionName(path), not the display label
 		sessionActivity := map[string]int64{
-			"my_app": now.Unix(),
+			project.SessionName("/my.app"): now.Unix(),
 		}
 		hist := &history.History{}
 
@@ -254,6 +255,48 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		if result[0].Icon != iconDirSession {
 			t.Errorf("project with matching sanitized session: Icon = %q, want %q", result[0].Icon, iconDirSession)
+		}
+	})
+
+	t.Run("session icon matches SessionName for top-level project", func(t *testing.T) {
+		// Display label differs from session name (e.g. display_depth > 1)
+		baseItems := []ui.Item{
+			{Name: "user/myapp", Path: "/home/user/myapp"},
+		}
+		sessionActivity := map[string]int64{
+			project.SessionName("/home/user/myapp"): now.Unix(),
+		}
+		hist := &history.History{}
+
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
+
+		if len(result) != 1 {
+			t.Fatalf("got %d items, want 1", len(result))
+		}
+		if result[0].Icon != iconDirSession {
+			t.Errorf("Icon = %q, want %q (should match SessionName(path), not display label %q)",
+				result[0].Icon, iconDirSession, baseItems[0].Name)
+		}
+	})
+
+	t.Run("session icon matches SessionName for bare-repo worktree", func(t *testing.T) {
+		// Picker shows display_depth label; session name is repo/worktree
+		baseItems := []ui.Item{
+			{Name: "projects/myrepo/feature", Path: "/projects/myrepo/feature"},
+		}
+		sessionActivity := map[string]int64{
+			project.SessionName("/projects/myrepo/feature"): now.Unix(),
+		}
+		hist := &history.History{}
+
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
+
+		if len(result) != 1 {
+			t.Fatalf("got %d items, want 1", len(result))
+		}
+		if result[0].Icon != iconDirSession {
+			t.Errorf("Icon = %q, want %q (should match SessionName(path), not display label %q)",
+				result[0].Icon, iconDirSession, baseItems[0].Name)
 		}
 	})
 }
@@ -267,11 +310,11 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 			{Name: "api", Path: "/api"},
 		}
 		sessionActivity := map[string]int64{
-			"app": now.Unix(),
-			"api": now.Unix(),
+			project.SessionName("/app"): now.Unix(),
+			project.SessionName("/api"): now.Unix(),
 		}
 		attentionSessions := map[string]bool{
-			"app": true,
+			project.SessionName("/app"): true,
 		}
 		hist := &history.History{}
 
@@ -321,7 +364,7 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 			{Name: "app", Path: "/app"},
 		}
 		sessionActivity := map[string]int64{
-			"app": now.Unix(),
+			project.SessionName("/app"): now.Unix(),
 		}
 		hist := &history.History{}
 
@@ -513,6 +556,74 @@ func TestSortBaseItemsByHistory(t *testing.T) {
 		// ccc should be first (no history)
 		if result[0].Path != "/ccc" {
 			t.Errorf("result[0].Path = %q, want /ccc", result[0].Path)
+		}
+	})
+}
+
+func TestOpenTmuxSessionWith(t *testing.T) {
+	t.Run("top-level project uses SessionName from path", func(t *testing.T) {
+		t.Setenv("TMUX", "1")
+
+		var sessionUsed string
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "has-session":
+					return "", fmt.Errorf("no session")
+				case "new-session":
+					for i, a := range args {
+						if a == "-ds" && i+1 < len(args) {
+							sessionUsed = args[i+1]
+						}
+					}
+					return "", nil
+				case "switch-client":
+					return "", nil
+				}
+				return "", nil
+			},
+		}
+
+		item := &ui.Item{Name: "user/myapp", Path: "/home/user/myapp"}
+		if err := openTmuxSessionWith(tmux, item); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := project.SessionName("/home/user/myapp")
+		if sessionUsed != want {
+			t.Errorf("session name = %q, want %q (from SessionName(path), not display label)", sessionUsed, want)
+		}
+	})
+
+	t.Run("bare-repo worktree uses SessionName from path", func(t *testing.T) {
+		t.Setenv("TMUX", "1")
+
+		var sessionUsed string
+		tmux := &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "has-session":
+					return "", fmt.Errorf("no session")
+				case "new-session":
+					for i, a := range args {
+						if a == "-ds" && i+1 < len(args) {
+							sessionUsed = args[i+1]
+						}
+					}
+					return "", nil
+				case "switch-client":
+					return "", nil
+				}
+				return "", nil
+			},
+		}
+
+		item := &ui.Item{Name: "projects/myrepo/feature", Path: "/projects/myrepo/feature"}
+		if err := openTmuxSessionWith(tmux, item); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := project.SessionName("/projects/myrepo/feature")
+		if sessionUsed != want {
+			t.Errorf("session name = %q, want %q (from SessionName(path), not display label)", sessionUsed, want)
 		}
 	})
 }
@@ -969,12 +1080,14 @@ func TestRunProject_ActionConfirmRecordsHistory(t *testing.T) {
 func TestRunProject_ActionKillSessionContinuesLoop(t *testing.T) {
 	var killedNames []string
 	var pickerCalls int
+	var selectedPath string
 
 	d := testProjectDeps(t)
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
 		pickerCalls++
 		switch pickerCalls {
 		case 1:
+			selectedPath = items[0].Path
 			return ui.Result{
 				Action:      ui.ActionKillSession,
 				Selected:    &items[0],
@@ -1000,6 +1113,10 @@ func TestRunProject_ActionKillSessionContinuesLoop(t *testing.T) {
 	}
 	if len(killedNames) != 1 {
 		t.Fatalf("expected 1 kill, got %d: %v", len(killedNames), killedNames)
+	}
+	if killedNames[0] != project.SessionName(selectedPath) {
+		t.Errorf("killed session %q, want SessionName(%q) = %q",
+			killedNames[0], selectedPath, project.SessionName(selectedPath))
 	}
 }
 

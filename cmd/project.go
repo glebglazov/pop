@@ -214,7 +214,7 @@ func RunProject(d *ProjectDeps) error {
 	if len(excludedSessionNames) > 0 {
 		filtered := expanded[:0]
 		for _, ep := range expanded {
-			if !excludedSessionNames[sanitizeSessionName(ep.Name)] {
+			if !excludedSessionNames[project.SessionName(ep.Path)] {
 				filtered = append(filtered, ep)
 			}
 		}
@@ -376,7 +376,7 @@ func RunProject(d *ProjectDeps) error {
 				if isStandaloneSession(*result.Selected) {
 					d.KillSession(d.Tmux, standaloneSessionName(*result.Selected))
 				} else {
-					d.KillSession(d.Tmux, result.Selected.Name)
+					d.KillSession(d.Tmux, project.SessionName(result.Selected.Path))
 				}
 			}
 			// Continue loop — session state refreshes automatically
@@ -435,16 +435,15 @@ func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sess
 	// Build set of session names that correspond to project items
 	projectSessionNames := make(map[string]bool)
 	for _, item := range baseItems {
-		sanitized := sanitizeSessionName(item.Name)
-		projectSessionNames[sanitized] = true
+		projectSessionNames[project.SessionName(item.Path)] = true
 	}
 
 	// Apply icons to project items that have active sessions
 	items := make([]ui.Item, len(baseItems))
 	copy(items, baseItems)
 	for i := range items {
-		sanitized := sanitizeSessionName(items[i].Name)
-		if _, hasSession := sessionActivity[sanitized]; hasSession {
+		sessionName := project.SessionName(items[i].Path)
+		if _, hasSession := sessionActivity[sessionName]; hasSession {
 			items[i].Icon = iconDirSession
 		} else {
 			items[i].Icon = ""
@@ -454,8 +453,8 @@ func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sess
 	// Override icons for sessions needing attention
 	if attentionSessions != nil {
 		for i := range items {
-			sanitized := sanitizeSessionName(items[i].Name)
-			if attentionSessions[sanitized] {
+			sessionName := project.SessionName(items[i].Path)
+			if attentionSessions[sessionName] {
 				items[i].Icon = iconAttention
 			}
 		}
@@ -525,7 +524,7 @@ func openTmuxSession(item *ui.Item) error {
 }
 
 func openTmuxSessionWith(tmux deps.Tmux, item *ui.Item) error {
-	sessionName := sanitizeSessionName(item.Name)
+	sessionName := project.SessionName(item.Path)
 	inTmux := os.Getenv("TMUX") != ""
 
 	_, err := tmux.Command("has-session", "-t="+sessionName)
