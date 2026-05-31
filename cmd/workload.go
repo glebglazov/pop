@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,9 +14,14 @@ import (
 )
 
 var (
-	workloadProject string
-	workloadPath    string
-	workloadDefPath string
+	workloadProject     string
+	workloadPath        string
+	workloadDefPath     string
+	workloadRunPRD      string
+	workloadRunIssue    string
+	workloadAgentPreset string
+	workloadAgentCmd    string
+	workloadRunYes      bool
 )
 
 var workloadCmd = &cobra.Command{
@@ -37,14 +43,28 @@ var workloadSetPriorityCmd = &cobra.Command{
 	RunE:  runWorkloadSetPriority,
 }
 
+var workloadRunIssueCmd = &cobra.Command{
+	Use:   "run-issue",
+	Short: "Execute one eligible AFK issue through a coding agent",
+	Args:  cobra.NoArgs,
+	Run:   runWorkloadRunIssue,
+}
+
 func init() {
 	rootCmd.AddCommand(workloadCmd)
 	workloadCmd.AddCommand(workloadStatusCmd)
 	workloadCmd.AddCommand(workloadSetPriorityCmd)
+	workloadCmd.AddCommand(workloadRunIssueCmd)
 
 	workloadCmd.PersistentFlags().StringVar(&workloadProject, "project", "", "Select project by exact picker-visible name")
 	workloadCmd.PersistentFlags().StringVar(&workloadPath, "path", "", "Select project by path (normalized to git checkout root)")
 	workloadCmd.PersistentFlags().StringVar(&workloadDefPath, "workload-definition-path", "", "Exact workload definition directory (not normalized to git root)")
+
+	workloadRunIssueCmd.Flags().StringVar(&workloadRunPRD, "prd", "", "Target PRD by exact identifier")
+	workloadRunIssueCmd.Flags().StringVar(&workloadRunIssue, "issue", "", "Target issue by exact identifier (requires --prd)")
+	workloadRunIssueCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
+	workloadRunIssueCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
+	workloadRunIssueCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
 }
 
 func workloadResolveInput() workload.ResolveInput {
@@ -96,6 +116,41 @@ func runWorkloadSetPriorityWith(d *workload.Deps, w io.Writer, prdID, priorityAr
 	fmt.Fprintf(w, "Updated priority for %s: %d -> %d\n\n", result.PRDID, result.OldPriority, result.NewPriority)
 	workload.Render(w, result.Refresh)
 	return nil
+}
+
+func runWorkloadRunIssue(cmd *cobra.Command, args []string) {
+	err := runWorkloadRunIssueWith(workload.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin)
+	handleWorkloadExit(err)
+}
+
+func runWorkloadRunIssueWith(d *workload.Deps, stdout, stderr io.Writer, stdin io.Reader) error {
+	_, err := workload.RunIssueWith(d, workloadProjectDeps(), workloadConfigLoad, workload.RunIssueOptions{
+		ResolveInput:  workloadResolveInput(),
+		PRDOverride:   workloadRunPRD,
+		IssueOverride: workloadRunIssue,
+		AgentPreset:   workloadAgentPreset,
+		AgentCmd:      workloadAgentCmd,
+		Yes:           workloadRunYes,
+		ConfirmIn:     stdin,
+		ConfirmOut:    stderr,
+		Output:        stdout,
+	})
+	return err
+}
+
+func handleWorkloadExit(err error) {
+	if err == nil {
+		return
+	}
+	var exitErr *workload.ExitError
+	if errors.As(err, &exitErr) {
+		if exitErr.Err != nil {
+			fmt.Fprintln(os.Stderr, exitErr.Err)
+		}
+		os.Exit(exitErr.Code)
+	}
+	fmt.Fprintln(os.Stderr, err)
+	os.Exit(workload.ExitSetup)
 }
 
 func workloadProjectDeps() *project.Deps {

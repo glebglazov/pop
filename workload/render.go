@@ -9,10 +9,11 @@ import (
 
 // RefreshResult is the outcome of a workload status refresh.
 type RefreshResult struct {
-	DefinitionPath string
+	DefinitionPath   string
 	NewRegistrations []string
-	Rows           []Row
-	NeedsSave      bool
+	Rows             []Row
+	Manifests        map[string]*Manifest
+	NeedsSave        bool
 }
 
 // Refresh discovers workloads, auto-registers PRDs, and builds table rows.
@@ -77,6 +78,7 @@ func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
 	result := &RefreshResult{
 		DefinitionPath:   canon,
 		NewRegistrations: newRegs,
+		Manifests:        manifests,
 		NeedsSave:        needsSave,
 	}
 	result.Rows = buildRows(state, canon, disc, manifests)
