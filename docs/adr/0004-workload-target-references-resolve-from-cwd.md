@@ -1,14 +1,18 @@
 # Workload target references resolve from the current working directory
 
-Workload commands accept **Workload target references** — bare **Workload identifiers** or CWD-relative paths — for `--issue-set`, `--issue`, and positional Issue-set arguments. Pop normalizes every accepted reference to canonical Issue set and issue identifiers before selection. Resolved Issue-set directories must match discovery under the command's workload definition path.
+Run issue, Run issues, and Issue reset accept positional **Workload target references** only. Run issue and Run issues each accept an optional positional path override; Issue reset requires a positional issue path. These commands do not expose `--issue-set` or `--issue` targeting flags. Pop normalizes every accepted reference to canonical Issue set and issue identifiers before selection. Resolved paths must match discovery under the command's workload definition path.
 
-Issue-set paths may be bare identifiers, conventional tree paths such as `thoughts/issues/<id>`, or any other path that resolves from the shell's current directory to a discovered Issue set directory. Issue paths may be bare manifest IDs, Issue-set-relative markdown filenames, or spanning paths such as `thoughts/issues/<id>/<file>.md`. Bare values match manifest **id**; path-like values and `.md` suffixes match manifest **file**. Issue-set-relative issue paths require an explicit `--issue-set` or a spanning path; a spanning path may omit `--issue-set` when it resolves unambiguously. When both flags are supplied, they must agree. Rejection messages list valid Workload identifiers only.
+Positional targeting is path-only. Run issues accepts a CWD-relative path to a discovered Issue set directory, such as `thoughts/issues/<id>` or `.` when the shell is already inside the directory. Run issue and Issue reset accept a CWD-relative path to an issue markdown file beneath a discovered Issue set, such as `thoughts/issues/<id>/<file>.md`. A bare filename is accepted when it resolves from the current directory to such a markdown file. Bare **Workload identifiers**, absolute paths, titles, prefixes, fuzzy matches, unresolved paths, and other non-relative forms are rejected.
 
-Shell completion stays context-sensitive: bare identifiers by default; path segments and markdown files once the typed prefix looks path-like.
+Rejection messages have two tiers. When input is not a relative path form, the error explains that a relative path is required. When a relative path fails to resolve, the error lists valid **Workload identifiers** only, not example paths.
+
+Shell completion for Run issue, Run issues, and Issue reset positional arguments offers CWD-relative path segments only, including `./` and `../`; it does not offer bare identifiers. Set-priority remains unchanged: its `ISSUE_SET` positional argument accepts and completes bare Issue set identifiers.
+
+The **Workload status table** prints failed-issue reset hints in the canonical copy-paste form `pop workload reset-issue thoughts/issues/<id>/<file>.md`, relative to the workload definition root.
 
 ## Why
 
-Developers often target workload work from editor paths or tab completion copied from the repository tree. Requiring bare identifiers forces mental translation from `thoughts/issues/demo/01-a.md` to `demo` and `01-a` on every invocation.
+Developers often target workload work from editor paths or tab completion copied from the repository tree. Path-only positional targeting makes those commands predictable: their syntax matches the artifact being selected and avoids a separate flag vocabulary.
 
 Anchoring resolution to the current working directory matches other pop path flags and fits the common case of running workload commands from a project checkout root. Requiring paths to be relative to the workload definition path would break when the shell is elsewhere, and would duplicate the meaning of `--workload-definition-path` in a confusing way.
 
@@ -18,15 +22,15 @@ Discovery match remains mandatory so relative paths are ergonomic sugar for know
 
 - **Definition-path anchor.** Rejected: paths would ignore the shell directory, surprise users who pass tree paths from their checkout, and blur the boundary between "where artifacts live" and "how I point at them from the CLI."
 - **Definition path first, then CWD fallback.** Rejected: two anchors make errors harder to reason about and scripts non-deterministic without an explicit `--workload-definition-path`.
-- **CWD anchor with discovery match (chosen).** Accept any path that resolves from the shell to a discovered Issue set or manifest issue; reject paths outside that discovery.
+- **CWD anchor with discovery match (chosen).** Accept a relative path that resolves from the shell to a discovered Issue set or manifest issue of the kind expected by the command; reject paths outside that discovery.
 - **Trust any directory with a valid manifest.** Rejected: would bypass registration, priority, and workload state keyed by definition path.
 
 ## Consequences
 
-Workload commands need a shared resolver that canonicalizes CWD-relative paths, maps them onto discovered Issue sets and manifest entries, and preserves today's bare-identifier behavior.
+Workload commands need a shared resolver that canonicalizes CWD-relative paths and maps them onto discovered Issue sets and manifest entries. Run issue, Run issues, and Issue reset deliberately reject bare identifiers; Set-priority continues to use a bare Issue set identifier.
 
-Shell completion must observe the typed prefix to switch between identifier completion and path-segment completion without mutating workload state.
+Shell completion for run and reset positionals must return path segments without mutating workload state. Set-priority completion remains identifier-based.
 
-Scripts that relied on bare identifiers continue to work unchanged. Scripts that pass tree paths become CWD-dependent; CI and automation should `cd` to a known directory or keep using bare identifiers.
+Scripts for run and reset commands must pass relative paths and become CWD-dependent; CI and automation should `cd` to a known directory before invoking them. Set-priority scripts that pass bare identifiers continue to work unchanged.
 
 Future team-shared workload definitions do not change this decision: the anchor is how CLI input is interpreted, not where artifacts are stored.
