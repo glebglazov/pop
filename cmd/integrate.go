@@ -553,6 +553,7 @@ var cursorPopHooks = []cursorHookSpec{
 	{"sessionStart", "pop pane set-status clear --label cursor 2>/dev/null || true"},
 	{"beforeSubmitPrompt", "pop pane set-status working --label cursor 2>/dev/null || true"},
 	{"preToolUse", "pop pane set-status working --label cursor 2>/dev/null || true"},
+	{"afterAgentResponse", "pop pane set-status unread --label cursor 2>/dev/null || true"},
 	{"stop", "pop pane set-status unread --label cursor 2>/dev/null || true"},
 }
 

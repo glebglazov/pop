@@ -932,7 +932,7 @@ func TestIntegrateCursor_FreshHooks(t *testing.T) {
 	if !ok {
 		t.Fatal("missing hooks key")
 	}
-	for _, event := range []string{"sessionStart", "beforeSubmitPrompt", "preToolUse", "stop"} {
+	for _, event := range []string{"sessionStart", "beforeSubmitPrompt", "preToolUse", "afterAgentResponse", "stop"} {
 		entries, ok := hooks[event].([]interface{})
 		if !ok || len(entries) == 0 {
 			t.Errorf("missing hooks for event %q", event)
