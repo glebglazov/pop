@@ -363,6 +363,34 @@ func TestWorkloadCommandSurfaceUsesIssueSetVocabulary(t *testing.T) {
 	}
 }
 
+func TestWorkloadAllowDirtyFlagAcceptsOptionalStrategies(t *testing.T) {
+	t.Cleanup(resetWorkloadFlags)
+	for _, command := range []*cobra.Command{workloadRunIssueCmd, workloadRunIssuesCmd} {
+		flag := command.Flags().Lookup("allow-dirty")
+		if flag == nil {
+			t.Fatalf("%s missing --allow-dirty", command.Name())
+		}
+		if flag.NoOptDefVal != string(workload.DirtyRuntimeContinue) {
+			t.Fatalf("%s bare --allow-dirty = %q", command.Name(), flag.NoOptDefVal)
+		}
+		if err := command.Flags().Parse([]string{"--allow-dirty"}); err != nil {
+			t.Fatalf("%s rejected bare --allow-dirty: %v", command.Name(), err)
+		}
+		if workloadAllowDirty != workload.DirtyRuntimeContinue {
+			t.Fatalf("%s bare --allow-dirty parsed as %q", command.Name(), workloadAllowDirty)
+		}
+		for _, strategy := range workload.ValidDirtyRuntimeStrategies() {
+			if err := command.Flags().Parse([]string{"--allow-dirty=" + strategy}); err != nil {
+				t.Fatalf("%s rejected %q: %v", command.Name(), strategy, err)
+			}
+		}
+		err := command.Flags().Parse([]string{"--allow-dirty=invalid"})
+		if err == nil || !strings.Contains(err.Error(), "continue, commit-and-continue, stash-and-continue") {
+			t.Fatalf("%s invalid strategy error = %v", command.Name(), err)
+		}
+	}
+}
+
 func TestRunIssueCmdNonInteractiveFails(t *testing.T) {
 	root := setupRunIssueCmdFixture(t)
 	agent := writeRunIssueFakeAgent(t, root)
@@ -389,6 +417,7 @@ func resetWorkloadFlags() {
 	workloadAgentPreset = ""
 	workloadAgentCmd = ""
 	workloadRunYes = false
+	workloadAllowDirty = workload.DirtyRuntimeReject
 }
 
 func setupRunIssueCmdFixture(t *testing.T) string {

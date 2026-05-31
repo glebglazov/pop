@@ -16,24 +16,24 @@ const issueSetConfirmPrompt = "Run Issue set? [y/N]: "
 type RunIssueSetOptions struct {
 	ResolveInput
 	IssueSetOverride string
-	AgentPreset   string
-	AgentCmd      string
-	AllowDirty    bool
-	MaxTries      int
-	Timeout       time.Duration
-	Yes           bool
-	ConfirmIn     io.Reader
-	ConfirmOut    io.Writer
-	Output        io.Writer
+	AgentPreset      string
+	AgentCmd         string
+	AllowDirty       DirtyRuntimeStrategy
+	MaxTries         int
+	Timeout          time.Duration
+	Yes              bool
+	ConfirmIn        io.Reader
+	ConfirmOut       io.Writer
+	Output           io.Writer
 }
 
 // RunIssueSetResult is the outcome of a run-issues invocation.
 type RunIssueSetResult struct {
-	IssueSetID         string
+	IssueSetID    string
 	Completed     []*RunIssueResult
 	Refresh       *RefreshResult
 	Declined      bool
-	IssueSetDone       bool
+	IssueSetDone  bool
 	BlockedReason string
 }
 
@@ -46,6 +46,9 @@ func RunIssueSet(opts RunIssueSetOptions) (*RunIssueSetResult, error) {
 func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts RunIssueSetOptions) (*RunIssueSetResult, error) {
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
+	}
+	if err := validateDirtyRuntimeStrategy(opts.AllowDirty); err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
@@ -73,7 +76,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	if err != nil {
 		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
 	}
-	if dirty && !opts.AllowDirty {
+	if dirty && opts.AllowDirty == DirtyRuntimeReject {
 		return nil, exitErr(ExitOperational, "runtime checkout is dirty; commit or stash changes before execution")
 	}
 
@@ -86,8 +89,8 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		out = os.Stdout
 	}
 
-	if dirty && opts.AllowDirty {
-		fmt.Fprintln(confirmOut, "Warning: runtime checkout has uncommitted changes; a capturing dirty state checkpoint commit will be created before execution.")
+	if dirty {
+		warnDirtyRuntimeStrategy(confirmOut, opts.AllowDirty)
 	}
 
 	displayRows := cloneRows(refresh.Rows)
@@ -123,7 +126,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}
 
 	result := &RunIssueSetResult{IssueSetID: issueSetID}
-	dirtyCheckpointed := false
+	dirtyStrategyApplied := false
 
 	for {
 		currentRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
@@ -166,11 +169,11 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 			}
 		}
 
-		if dirty && opts.AllowDirty && !dirtyCheckpointed {
-			if err := checkpointDirtyRuntime(d, runtimePath, sel.IssueSetID, sel.IssueID); err != nil {
-				return nil, exitErr(ExitOperational, "dirty-state checkpoint: %v", err)
+		if dirty && !dirtyStrategyApplied {
+			if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.IssueSetID, sel.IssueID, opts.AllowDirty, confirmOut); err != nil {
+				return nil, exitErr(ExitOperational, "dirty-runtime strategy: %v", err)
 			}
-			dirtyCheckpointed = true
+			dirtyStrategyApplied = true
 		}
 
 		prompt := BuildAgentPrompt(sel.IssuePath, runtimePath)

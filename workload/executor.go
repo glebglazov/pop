@@ -16,24 +16,56 @@ import (
 )
 
 const (
-	DefaultMaxTries         = 3
-	DefaultAttemptTimeout   = 30 * time.Minute
+	DefaultMaxTries       = 3
+	DefaultAttemptTimeout = 30 * time.Minute
+
+	DirtyRuntimeReject            DirtyRuntimeStrategy = ""
+	DirtyRuntimeContinue          DirtyRuntimeStrategy = "continue"
+	DirtyRuntimeCommitAndContinue DirtyRuntimeStrategy = "commit-and-continue"
+	DirtyRuntimeStashAndContinue  DirtyRuntimeStrategy = "stash-and-continue"
 )
+
+// DirtyRuntimeStrategy controls how a dirty runtime checkout is prepared for execution.
+type DirtyRuntimeStrategy string
+
+// Set validates and assigns a dirty-runtime strategy for Cobra flag parsing.
+func (s *DirtyRuntimeStrategy) Set(value string) error {
+	switch DirtyRuntimeStrategy(value) {
+	case DirtyRuntimeContinue, DirtyRuntimeCommitAndContinue, DirtyRuntimeStashAndContinue:
+		*s = DirtyRuntimeStrategy(value)
+		return nil
+	default:
+		return fmt.Errorf("invalid dirty-runtime strategy %q; valid candidates: %s", value, strings.Join(ValidDirtyRuntimeStrategies(), ", "))
+	}
+}
+
+func (s DirtyRuntimeStrategy) String() string { return string(s) }
+
+func (s DirtyRuntimeStrategy) Type() string { return "dirty-runtime-strategy" }
+
+// ValidDirtyRuntimeStrategies returns the accepted --allow-dirty values.
+func ValidDirtyRuntimeStrategies() []string {
+	return []string{
+		string(DirtyRuntimeContinue),
+		string(DirtyRuntimeCommitAndContinue),
+		string(DirtyRuntimeStashAndContinue),
+	}
+}
 
 // RunIssueOptions configures a single-issue execution.
 type RunIssueOptions struct {
 	ResolveInput
-	IssueSetOverride   string
-	IssueOverride string
-	AgentPreset   string
-	AgentCmd      string
-	AllowDirty    bool
-	MaxTries      int
-	Timeout       time.Duration
-	Yes           bool
-	ConfirmIn     io.Reader
-	ConfirmOut    io.Writer
-	Output        io.Writer
+	IssueSetOverride string
+	IssueOverride    string
+	AgentPreset      string
+	AgentCmd         string
+	AllowDirty       DirtyRuntimeStrategy
+	MaxTries         int
+	Timeout          time.Duration
+	Yes              bool
+	ConfirmIn        io.Reader
+	ConfirmOut       io.Writer
+	Output           io.Writer
 }
 
 // RunIssueResult is the outcome of a successful or declined run-issue.
@@ -64,6 +96,9 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
 	}
+	if err := validateDirtyRuntimeStrategy(opts.AllowDirty); err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
 
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
@@ -90,7 +125,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	if err != nil {
 		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
 	}
-	if dirty && !opts.AllowDirty {
+	if dirty && opts.AllowDirty == DirtyRuntimeReject {
 		return nil, exitErr(ExitOperational, "runtime checkout is dirty; commit or stash changes before execution")
 	}
 
@@ -103,8 +138,8 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 		out = os.Stdout
 	}
 
-	if dirty && opts.AllowDirty {
-		fmt.Fprintln(confirmOut, "Warning: runtime checkout has uncommitted changes; a capturing dirty state checkpoint commit will be created before execution.")
+	if dirty {
+		warnDirtyRuntimeStrategy(confirmOut, opts.AllowDirty)
 	}
 
 	displayRows := cloneRows(refresh.Rows)
@@ -130,9 +165,9 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	}
 	defer lock.Release()
 
-	if dirty && opts.AllowDirty {
-		if err := checkpointDirtyRuntime(d, runtimePath, sel.IssueSetID, sel.IssueID); err != nil {
-			return nil, exitErr(ExitOperational, "dirty-state checkpoint: %v", err)
+	if dirty {
+		if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.IssueSetID, sel.IssueID, opts.AllowDirty, confirmOut); err != nil {
+			return nil, exitErr(ExitOperational, "dirty-runtime strategy: %v", err)
 		}
 	}
 
@@ -399,6 +434,38 @@ func runtimeIsDirty(d *Deps, runtimePath string) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
+func validateDirtyRuntimeStrategy(strategy DirtyRuntimeStrategy) error {
+	if strategy == DirtyRuntimeReject {
+		return nil
+	}
+	var parsed DirtyRuntimeStrategy
+	return parsed.Set(string(strategy))
+}
+
+func warnDirtyRuntimeStrategy(w io.Writer, strategy DirtyRuntimeStrategy) {
+	switch strategy {
+	case DirtyRuntimeContinue:
+		fmt.Fprintln(w, "Warning: runtime checkout has uncommitted changes; continuing without modifying the baseline.")
+	case DirtyRuntimeCommitAndContinue:
+		fmt.Fprintln(w, "Warning: runtime checkout has uncommitted changes; a capturing dirty state checkpoint commit will be created before execution.")
+	case DirtyRuntimeStashAndContinue:
+		fmt.Fprintln(w, "Warning: runtime checkout has uncommitted changes; tracked and untracked changes will be stashed before execution. Restore the stash manually when ready.")
+	}
+}
+
+func applyDirtyRuntimeStrategy(d *Deps, runtimePath, issueSetID, issueID string, strategy DirtyRuntimeStrategy, out io.Writer) error {
+	switch strategy {
+	case DirtyRuntimeContinue:
+		return nil
+	case DirtyRuntimeCommitAndContinue:
+		return checkpointDirtyRuntime(d, runtimePath, issueSetID, issueID)
+	case DirtyRuntimeStashAndContinue:
+		return stashDirtyRuntime(d, runtimePath, out)
+	default:
+		return validateDirtyRuntimeStrategy(strategy)
+	}
+}
+
 func checkpointDirtyRuntime(d *Deps, runtimePath, issueSetID, issueID string) error {
 	if _, err := d.Git.CommandInDir(runtimePath, "add", "-A"); err != nil {
 		return err
@@ -416,6 +483,19 @@ func checkpointDirtyRuntime(d *Deps, runtimePath, issueSetID, issueID string) er
 		_, _ = d.Git.CommandInDir(runtimePath, "reset")
 		return err
 	}
+	return nil
+}
+
+func stashDirtyRuntime(d *Deps, runtimePath string, out io.Writer) error {
+	before, _ := d.Git.CommandInDir(runtimePath, "rev-parse", "--verify", "refs/stash")
+	if _, err := d.Git.CommandInDir(runtimePath, "stash", "push", "--include-untracked"); err != nil {
+		return err
+	}
+	after, err := d.Git.CommandInDir(runtimePath, "rev-parse", "--verify", "refs/stash")
+	if err != nil || strings.TrimSpace(after) == strings.TrimSpace(before) {
+		return nil
+	}
+	fmt.Fprintln(out, "Created stash: stash@{0}. Restore it manually when ready.")
 	return nil
 }
 

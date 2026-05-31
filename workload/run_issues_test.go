@@ -95,6 +95,54 @@ func TestRunIssueSetSingleConfirmation(t *testing.T) {
 	}
 }
 
+func TestRunIssueSetDirtyRejection(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	writeFile(t, filepath.Join(env.root, "partial.txt"), "pending\n")
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+
+	_, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, nil))
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "dirty") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunIssueSetAppliesDirtyStrategyOnceBeforeDrain(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	writeFile(t, filepath.Join(env.root, "partial.txt"), "stash once\n")
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkIssue: true, summary: "done"})
+
+	stashPushes := 0
+	git := &deps.MockGit{
+		CommandInDirFunc: func(dir string, args ...string) (string, error) {
+			if len(args) >= 2 && args[0] == "stash" && args[1] == "push" {
+				stashPushes++
+			}
+			return realGitInDir(dir, args...)
+		},
+	}
+	d := env.deps()
+	d.Git = git
+	opts := env.runIssueSetOpts(true, agent, nil)
+	opts.AllowDirty = DirtyRuntimeStashAndContinue
+
+	result, err := RunIssueSetWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if len(result.Completed) != 2 {
+		t.Fatalf("completed = %d", len(result.Completed))
+	}
+	if stashPushes != 1 {
+		t.Fatalf("stash pushes = %d, want 1", stashPushes)
+	}
+}
+
 func TestRunIssueSetTargetedIssueSet(t *testing.T) {
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)

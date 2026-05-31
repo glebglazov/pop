@@ -27,7 +27,7 @@ var (
 	workloadAgentPreset       string
 	workloadAgentCmd          string
 	workloadRunYes            bool
-	workloadAllowDirty        bool
+	workloadAllowDirty        workload.DirtyRuntimeStrategy
 	workloadMaxTries          int
 	workloadTimeout           string
 )
@@ -87,7 +87,8 @@ func init() {
 	workloadRunIssueCmd.Flags().StringVar(&workloadRunIssueIssueSet, "issue-set", "", "Target Issue set by exact identifier")
 	workloadRunIssueCmd.Flags().StringVar(&workloadRunIssue, "issue", "", "Target issue by exact identifier (requires --issue-set)")
 	workloadRunIssueCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
-	workloadRunIssueCmd.Flags().BoolVar(&workloadAllowDirty, "allow-dirty", false, "Checkpoint dirty runtime state before execution")
+	workloadRunIssueCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue, commit-and-continue, stash-and-continue")
+	workloadRunIssueCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 	workloadRunIssueCmd.Flags().IntVar(&workloadMaxTries, "max-tries", workload.DefaultMaxTries, "Maximum started attempts per issue")
@@ -96,7 +97,8 @@ func init() {
 
 	workloadRunIssuesCmd.Flags().StringVar(&workloadRunIssuesIssueSet, "issue-set", "", "Target Issue set by exact identifier")
 	workloadRunIssuesCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
-	workloadRunIssuesCmd.Flags().BoolVar(&workloadAllowDirty, "allow-dirty", false, "Checkpoint dirty runtime state before execution")
+	workloadRunIssuesCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue, commit-and-continue, stash-and-continue")
+	workloadRunIssuesCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
 	workloadRunIssuesCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
 	workloadRunIssuesCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 	workloadRunIssuesCmd.Flags().IntVar(&workloadMaxTries, "max-tries", workload.DefaultMaxTries, "Maximum started attempts per issue")

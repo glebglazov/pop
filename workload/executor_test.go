@@ -107,9 +107,9 @@ func TestRunIssueAgentFailureExitCode(t *testing.T) {
 func TestRunIssueMissingSentinelFails(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
-		changeFile: "impl.txt",
-		changeData: "x\n",
-		checkIssue: true,
+		changeFile:   "impl.txt",
+		changeData:   "x\n",
+		checkIssue:   true,
 		skipSentinel: true,
 	})
 
@@ -238,7 +238,7 @@ func TestRunIssueAllowDirtyCheckpoint(t *testing.T) {
 	})
 
 	opts := env.runOpts(true, agent)
-	opts.AllowDirty = true
+	opts.AllowDirty = DirtyRuntimeCommitAndContinue
 	var notice bytes.Buffer
 	opts.ConfirmOut = &notice
 
@@ -260,6 +260,99 @@ func TestRunIssueAllowDirtyCheckpoint(t *testing.T) {
 	}
 	if result.CommitSHA == "" {
 		t.Fatal("expected implementation commit after agent")
+	}
+}
+
+func TestRunIssueAllowDirtyContinueIncludesExistingChangesInImplementationCommit(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	writeFile(t, filepath.Join(env.root, "partial.txt"), "resume me\n")
+
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		changeFile: "impl.txt",
+		changeData: "done\n",
+		checkIssue: true,
+		summary:    "finished resumed work",
+	})
+
+	opts := env.runOpts(true, agent)
+	opts.AllowDirty = DirtyRuntimeContinue
+	var notice bytes.Buffer
+	opts.ConfirmOut = &notice
+
+	result, err := RunIssueWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !strings.Contains(notice.String(), "continuing without modifying the baseline") {
+		t.Fatalf("missing continue warning:\n%s", notice.String())
+	}
+	if result.CommitSHA == "" {
+		t.Fatal("expected implementation commit")
+	}
+	files, _ := env.deps().Git.CommandInDir(env.root, "show", "--format=", "--name-only", "HEAD")
+	if !strings.Contains(files, "partial.txt") || !strings.Contains(files, "impl.txt") {
+		t.Fatalf("implementation commit did not include resumed and agent changes:\n%s", files)
+	}
+	subjectLog, _ := env.deps().Git.CommandInDir(env.root, "log", "--format=%s")
+	if strings.Contains(subjectLog, "capturing dirty state") {
+		t.Fatalf("continue unexpectedly created checkpoint:\n%s", subjectLog)
+	}
+}
+
+func TestRunIssueAllowDirtyStashLeavesCreatedStashForUser(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	writeFile(t, filepath.Join(env.root, "partial.txt"), "stash me\n")
+
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		changeFile: "impl.txt",
+		changeData: "done\n",
+		checkIssue: true,
+		summary:    "worked from clean checkout",
+	})
+
+	opts := env.runOpts(true, agent)
+	opts.AllowDirty = DirtyRuntimeStashAndContinue
+	var notice bytes.Buffer
+	opts.ConfirmOut = &notice
+
+	if _, err := RunIssueWith(env.deps(), nil, nil, opts); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !strings.Contains(notice.String(), "Created stash: stash@{0}") {
+		t.Fatalf("missing stash reference:\n%s", notice.String())
+	}
+	stashes, _ := env.deps().Git.CommandInDir(env.root, "stash", "list")
+	if !strings.Contains(stashes, "stash@{0}") {
+		t.Fatalf("stash was not retained:\n%s", stashes)
+	}
+	if _, err := os.Stat(filepath.Join(env.root, "partial.txt")); !os.IsNotExist(err) {
+		t.Fatalf("stashed file was restored unexpectedly: %v", err)
+	}
+}
+
+func TestRunIssueAllowDirtyStashContinuesWhenGitCreatesNoStash(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	writeFile(t, filepath.Join(env.root, "partial.txt"), "still present\n")
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkIssue: true, summary: "continued"})
+
+	git := &deps.MockGit{
+		CommandInDirFunc: func(dir string, args ...string) (string, error) {
+			if len(args) >= 2 && args[0] == "stash" && args[1] == "push" {
+				return "No local changes to save", nil
+			}
+			if len(args) >= 3 && args[0] == "rev-parse" && args[2] == "refs/stash" {
+				return "", fmt.Errorf("no stash")
+			}
+			return realGitInDir(dir, args...)
+		},
+	}
+	d := env.deps()
+	d.Git = git
+	opts := env.runOpts(true, agent)
+	opts.AllowDirty = DirtyRuntimeStashAndContinue
+
+	if _, err := RunIssueWith(d, nil, nil, opts); err != nil {
+		t.Fatalf("run failed: %v", err)
 	}
 }
 
@@ -286,10 +379,10 @@ func TestRunIssueDirtyCheckpointFailureDoesNotInvokeAgent(t *testing.T) {
 	d.Git = git
 
 	opts := env.runOpts(true, agent)
-	opts.AllowDirty = true
+	opts.AllowDirty = DirtyRuntimeCommitAndContinue
 	_, err := RunIssueWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "dirty-state checkpoint") {
+	if !strings.Contains(err.Error(), "dirty-runtime strategy") {
 		t.Fatalf("err = %v", err)
 	}
 
