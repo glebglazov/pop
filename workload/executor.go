@@ -116,7 +116,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	fmt.Fprintln(out)
 	Render(out, &displayRefresh)
 
-	confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes)
+	confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes, issueConfirmPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -346,12 +346,14 @@ func cloneRows(rows []Row) []Row {
 	return out
 }
 
+const issueConfirmPrompt = "Run issue? [y/N]: "
+
 // NonInteractiveReader marks explicit non-interactive confirmation input (for tests and automation).
 type NonInteractiveReader struct{}
 
 func (NonInteractiveReader) Read([]byte) (int, error) { return 0, io.EOF }
 
-func confirmExecution(in io.Reader, out io.Writer, yes bool) (bool, error) {
+func confirmExecution(in io.Reader, out io.Writer, yes bool, prompt string) (bool, error) {
 	if yes {
 		return true, nil
 	}
@@ -365,7 +367,10 @@ func confirmExecution(in io.Reader, out io.Writer, yes bool) (bool, error) {
 	if !interactive {
 		return false, exitErr(ExitOperational, "non-interactive execution requires --yes or -y")
 	}
-	fmt.Fprintf(out, "Run issue? [y/N]: ")
+	if prompt == "" {
+		prompt = issueConfirmPrompt
+	}
+	fmt.Fprintf(out, "%s", prompt)
 	var answer string
 	if _, err := fmt.Fscanln(in, &answer); err != nil && err != io.EOF {
 		return false, exitErr(ExitOperational, "read confirmation: %v", err)

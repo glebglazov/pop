@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
 )
@@ -414,6 +415,7 @@ type fakeAgentConfig struct {
 	summary      string
 	exitCode     int
 	skipSentinel bool
+	sleepFor     time.Duration
 }
 
 func setupExecutorFixture(t *testing.T, interactive bool) *execFixture {
@@ -459,6 +461,9 @@ func writeFakeAgent(t *testing.T, root string, cfg fakeAgentConfig) string {
 	b.WriteString("ISSUE=$(printf '%s' \"$1\" | sed -n 's|^You are implementing the issue at: ||p' | head -1)\n")
 	if cfg.changeFile != "" {
 		fmt.Fprintf(&b, "printf %q >> %q\n", cfg.changeData, cfg.changeFile)
+	}
+	if cfg.sleepFor > 0 {
+		fmt.Fprintf(&b, "sleep %g\n", cfg.sleepFor.Seconds())
 	}
 	if cfg.checkIssue {
 		b.WriteString("if [ -n \"$ISSUE\" ] && [ -f \"$ISSUE\" ]; then\n")

@@ -19,6 +19,82 @@ type Selection struct {
 	IssueIndex int
 }
 
+// SelectPRD chooses the PRD to drain using the same readiness and failed-PRD
+// gates as SelectIssue, without selecting an issue.
+func SelectPRD(refresh *RefreshResult, prdOverride string) (string, error) {
+	if prdOverride != "" {
+		return selectExplicitPRD(refresh, prdOverride)
+	}
+	return selectAutomaticPRD(refresh)
+}
+
+func selectAutomaticPRD(refresh *RefreshResult) (string, error) {
+	manifests := refresh.Manifests
+	if manifests == nil {
+		manifests = make(map[string]*Manifest)
+	}
+	for _, row := range refresh.Rows {
+		if row.Status != StatusReady {
+			continue
+		}
+		m := manifests[row.ID]
+		if m == nil || !m.Valid {
+			continue
+		}
+		if _, err := firstEligibleIssue(row.ID, m); err != nil {
+			continue
+		}
+		return row.ID, nil
+	}
+	return "", exitErr(ExitNoRunnable, "no runnable work")
+}
+
+func selectExplicitPRD(refresh *RefreshResult, prdID string) (string, error) {
+	row := findRow(refresh, prdID)
+	if row == nil {
+		return "", exitErr(ExitNoRunnable, "%s", unknownPRDTargetMessage(refresh, prdID))
+	}
+
+	m := refresh.Manifests[prdID]
+	if m == nil {
+		return "", exitErr(ExitNoRunnable, "PRD %q has no issue manifest", prdID)
+	}
+
+	switch row.Status {
+	case StatusFailed:
+		return "", exitErr(ExitNoRunnable, "PRD %q has failed issues; reset required before execution", prdID)
+	case StatusMalformed:
+		return "", exitErr(ExitNoRunnable, "PRD %q is malformed", prdID)
+	case StatusMissing:
+		return "", exitErr(ExitNoRunnable, "PRD %q is missing", prdID)
+	case StatusUnplanned:
+		return "", exitErr(ExitNoRunnable, "PRD %q is unplanned", prdID)
+	case StatusReady:
+		return prdID, nil
+	default:
+		return "", exitErr(ExitNoRunnable, "PRD %q is %s: %s", prdID, strings.ToLower(string(row.Status)), row.BlockedReason)
+	}
+}
+
+// SelectIssueInPRD chooses the first eligible AFK issue in manifest-array order
+// for one PRD.
+func SelectIssueInPRD(refresh *RefreshResult, prdID string) (*Selection, error) {
+	m := refresh.Manifests[prdID]
+	if m == nil {
+		return nil, exitErr(ExitNoRunnable, "PRD %q has no issue manifest", prdID)
+	}
+	return firstEligibleIssue(prdID, m)
+}
+
+func findRow(refresh *RefreshResult, prdID string) *Row {
+	for i := range refresh.Rows {
+		if refresh.Rows[i].ID == prdID {
+			return &refresh.Rows[i]
+		}
+	}
+	return nil
+}
+
 // SelectIssue chooses the next issue to run from a refreshed workload.
 func SelectIssue(refresh *RefreshResult, prdOverride, issueOverride string) (*Selection, error) {
 	if issueOverride != "" && prdOverride == "" {
@@ -55,13 +131,7 @@ func selectAutomatic(refresh *RefreshResult, manifests map[string]*Manifest) (*S
 }
 
 func selectExplicit(refresh *RefreshResult, manifests map[string]*Manifest, prdID, issueID string) (*Selection, error) {
-	var row *Row
-	for i := range refresh.Rows {
-		if refresh.Rows[i].ID == prdID {
-			row = &refresh.Rows[i]
-			break
-		}
-	}
+	row := findRow(refresh, prdID)
 	if row == nil {
 		return nil, exitErr(ExitNoRunnable, "%s", unknownPRDTargetMessage(refresh, prdID))
 	}
