@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -407,10 +406,7 @@ func sessionAccessTime(session string, hist *history.History) int64 {
 	}
 	var partial int64
 	for _, e := range hist.Entries {
-		// Fast path: derive session name from path base without git calls.
-		// This is approximate for bare-repo worktrees (repo/worktree vs worktree)
-		// but correct for all regular repos and fast enough for dashboard sorting.
-		entrySession := sanitizeSessionName(filepath.Base(e.Path))
+		entrySession := historyEntrySessionName(e.Path)
 		if entrySession == session {
 			return e.LastAccess.Unix()
 		}

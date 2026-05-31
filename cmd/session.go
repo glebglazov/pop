@@ -3,14 +3,13 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
-	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/session"
 	"github.com/glebglazov/pop/ui"
 )
@@ -62,10 +61,9 @@ func switchToTmuxTargetAndZoom(target string) error {
 func switchToTmuxTargetAndZoomWith(tmux deps.Tmux, target string) error {
 	d := sessionDeps(tmux)
 	if d.InTmux() {
-		if err := session.SwitchTargetWith(d, target); err != nil {
-			return err
-		}
+		// Single tmux invocation: switch to pane and zoom it if not already zoomed
 		_, err := tmux.Command(
+			"switch-client", "-t", target, ";",
 			"if-shell", "-F", "#{!=:#{window_zoomed_flag},1}",
 			"resize-pane -Z",
 		)
@@ -184,32 +182,17 @@ func sessionHistoryPath(sessionName string, hist *history.History) string {
 	return tmuxSessionPathPrefix + sessionName
 }
 
-var (
-	historySessionNameCache   = make(map[string]string)
-	historySessionNameCacheMu sync.Mutex
-)
-
 func historyEntrySessionName(path string) string {
-	historySessionNameCacheMu.Lock()
-	if name, ok := historySessionNameCache[path]; ok {
-		historySessionNameCacheMu.Unlock()
-		return name
-	}
-	historySessionNameCacheMu.Unlock()
-
 	if strings.HasPrefix(path, tmuxSessionPathPrefix) {
-		name := strings.TrimPrefix(path, tmuxSessionPathPrefix)
-		historySessionNameCacheMu.Lock()
-		historySessionNameCache[path] = name
-		historySessionNameCacheMu.Unlock()
-		return name
+		return strings.TrimPrefix(path, tmuxSessionPathPrefix)
 	}
-
-	name := project.SessionName(path)
-	historySessionNameCacheMu.Lock()
-	historySessionNameCache[path] = name
-	historySessionNameCacheMu.Unlock()
-	return name
+	// Fast approximation: path base + sanitize instead of project.SessionName.
+	// project.SessionName runs git commands which is too slow for history
+	// matching in frequently-opened popups. For regular repos and non-git
+	// paths this is exact; for bare-repo worktrees the exact name is
+	// repo/worktree but we fall back to last-component matching anyway.
+	// See ADR 0005.
+	return sanitizeSessionName(filepath.Base(path))
 }
 
 func capturePanePreview(paneID string) string {

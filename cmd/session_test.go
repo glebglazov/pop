@@ -381,11 +381,11 @@ func TestSwitchToTmuxTargetWith_InTmux(t *testing.T) {
 func TestSwitchToTmuxTargetAndZoomWith_InTmux(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
 
-	var switchedTo string
+	var switchClientCalled bool
 	var gotArgs []string
 	tmux := &deps.MockTmux{
 		SwitchClientFunc: func(name string) error {
-			switchedTo = name
+			switchClientCalled = true
 			return nil
 		},
 		CommandFunc: func(args ...string) (string, error) {
@@ -398,16 +398,17 @@ func TestSwitchToTmuxTargetAndZoomWith_InTmux(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if switchedTo != "%5" {
-		t.Errorf("switched to %q, want %q", switchedTo, "%5")
+	if switchClientCalled {
+		t.Error("SwitchClient called — expected single chained Command with switch-client and zoom")
 	}
 
 	expected := []string{
+		"switch-client", "-t", "%5", ";",
 		"if-shell", "-F", "#{!=:#{window_zoomed_flag},1}",
 		"resize-pane -Z",
 	}
 	if len(gotArgs) != len(expected) {
-		t.Fatalf("expected zoom args %v, got %v", expected, gotArgs)
+		t.Fatalf("expected args %v, got %v", expected, gotArgs)
 	}
 	for i := range expected {
 		if gotArgs[i] != expected[i] {
