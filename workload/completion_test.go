@@ -22,7 +22,7 @@ func TestCompleteIssueSetIDsFromDiscovery(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	stems, err := CompleteIssueSetIDs(CompletionInput{})
+	stems, err := CompleteIssueSetIDs(CompletionInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,12 +44,12 @@ func TestCompleteIssueIDsRequiresIssueSet(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	empty, err := CompleteIssueIDs(CompletionInput{})
+	empty, err := CompleteIssueIDs(CompletionInput{}, "")
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("without PRD: ids=%#v err=%v", empty, err)
 	}
 
-	ids, err := CompleteIssueIDs(CompletionInput{IssueSet: "feature"})
+	ids, err := CompleteIssueIDs(CompletionInput{IssueSet: "feature"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestCompletionDoesNotPersistWorkloadState(t *testing.T) {
 	var notices bytes.Buffer
 	d.NoticeOut = &notices
 
-	stems, err := CompleteIssueSetIDsWith(d, project.DefaultDeps(), config.Load, CompletionInput{})
+	stems, err := CompleteIssueSetIDsWith(d, project.DefaultDeps(), config.Load, CompletionInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestCompletionUnreadableDiscoveryReturnsEmptyWithoutError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	stems, err := CompleteIssueSetIDs(CompletionInput{})
+	stems, err := CompleteIssueSetIDs(CompletionInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestCompleteIssueSetIDsUsesDefinitionOverride(t *testing.T) {
 	stems, err := CompleteIssueSetIDs(CompletionInput{
 		Path:               root,
 		DefinitionOverride: defDir,
-	})
+	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestCompleteIssueIDsScopedToSelectedIssueSet(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	ids, err := CompleteIssueIDs(CompletionInput{IssueSet: "two"})
+	ids, err := CompleteIssueIDs(CompletionInput{IssueSet: "two"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,8 +258,8 @@ func TestCompletionNeverWritesProgress(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	_, _ = CompleteIssueSetIDs(CompletionInput{})
-	_, _ = CompleteIssueIDs(CompletionInput{IssueSet: "demo"})
+	_, _ = CompleteIssueSetIDs(CompletionInput{}, "")
+	_, _ = CompleteIssueIDs(CompletionInput{IssueSet: "demo"}, "")
 
 	progressPath := filepath.Join(root, "thoughts/issues/demo/progress.txt")
 	if _, err := os.Stat(progressPath); !os.IsNotExist(err) {
@@ -279,7 +279,7 @@ func TestCompleteIssueSetIDsDoesNotRegisterInStateFile(t *testing.T) {
 
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 
-	if _, err := CompleteIssueSetIDs(CompletionInput{}); err != nil {
+	if _, err := CompleteIssueSetIDs(CompletionInput{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	statePath := DefaultStatePath()
@@ -300,7 +300,7 @@ func TestCompleteIssueSetIDsSorted(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	stems, err := CompleteIssueSetIDs(CompletionInput{})
+	stems, err := CompleteIssueSetIDs(CompletionInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

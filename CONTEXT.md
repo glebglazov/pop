@@ -155,7 +155,7 @@ The mechanism that runs a selected issue through an agent, verifies completion, 
 _Avoid_: Workload scheduler
 
 **Run issue**:
-Executing exactly one eligible issue from a Ready Issue set. By default pop chooses the Issue set using workload priority; an explicit Issue set may be targeted without bypassing readiness rules. An explicit issue may be targeted within an explicit Issue set without bypassing Open status, AFK type, or dependency rules.
+Executing exactly one eligible issue from a Ready Issue set. By default pop chooses the Issue set using workload priority; an explicit Issue set may be targeted without bypassing readiness rules. An explicit issue may be targeted with `--issue-set`, with a spanning **Workload target reference** that implies the Issue set, or with both when they agree. Targeting still requires Open status, AFK type, and satisfied dependencies.
 _Avoid_: Next issue
 
 **Run issues**:
@@ -239,11 +239,15 @@ The process result exposed by the workload status command. Rendering a resolved 
 _Avoid_: Workload execution exit status
 
 **Workload identifier**:
-An exact CLI reference to an Issue set directory name or an issue-manifest issue ID. Workload commands do not interpret titles, prefixes, fuzzy matches, or markdown filenames as identifiers. Invalid identifiers are rejected with valid candidates.
-_Avoid_: Display title, filename
+The canonical name of an Issue set — its directory name under `thoughts/issues/` — or an issue-manifest issue ID. These identifiers drive scheduling, state, and display.
+_Avoid_: Display title, filename, path
+
+**Workload target reference**:
+A CLI value that identifies an Issue set or issue on workload commands — whether passed as `--issue-set`, `--issue`, or a positional Issue-set argument. It may be a **Workload identifier** or a path resolved from the current working directory. An Issue-set path points at an Issue set directory or at `thoughts/issues/<id>`. Any CWD-relative or absolute path is valid when its resolved directory matches a discovered Issue set under the active workload, including bare identifiers and `.` when the shell is already inside that directory. An issue path may be Issue-set-relative (`01-a.md`), span from the current working directory through an Issue set (`thoughts/issues/<id>/01-a.md`), or remain a bare issue ID. Issue-set-relative issue paths require an explicit `--issue-set` or a spanning path. A spanning issue path may omit `--issue-set` when it resolves unambiguously to one discovered Issue set. Pop normalizes every accepted reference to the canonical Issue set and issue identifiers before selection. Bare issue values match manifest **id**; path-like issue values and `.md` suffixes match manifest **file**. Resolved paths must match an Issue set discovered under the command’s workload definition path; paths outside that discovery are rejected. When both `--issue-set` and a spanning `--issue` path are supplied, they must resolve to the same Issue set or the command is rejected. Rejection messages list valid **Workload identifiers** only, not example paths. Titles, prefixes, fuzzy matches, and unresolved paths are rejected.
+_Avoid_: Workload identifier, shell completion candidate
 
 **Workload shell completion**:
-Read-only shell tab completion for workload subcommands, project names, Issue set identifiers, issue identifiers, agent presets, and path flags. Completion may scan local workload artifacts but must not auto-register Issue sets, persist workload state, or print warnings.
+Read-only shell tab completion for workload subcommands, project names, Issue-set and issue **Workload target references**, agent presets, and path flags. Completion offers bare canonical identifiers when the typed prefix has no path separators; once the prefix looks path-like (`./`, `../`, or `thoughts/`), completion switches to CWD-relative path segments and issue markdown files under discovered Issue sets. Completion may scan local workload artifacts but must not auto-register Issue sets, persist workload state, or print warnings.
 _Avoid_: Shell autosuggestion, discovery refresh
 
 **Missing Issue set**:

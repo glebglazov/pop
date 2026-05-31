@@ -84,8 +84,8 @@ func init() {
 	workloadCmd.PersistentFlags().StringVar(&workloadPath, "path", "", "Select project by path (normalized to git checkout root)")
 	workloadCmd.PersistentFlags().StringVar(&workloadDefPath, "workload-definition-path", "", "Exact workload definition directory (not normalized to git root)")
 
-	workloadRunIssueCmd.Flags().StringVar(&workloadRunIssueIssueSet, "issue-set", "", "Target Issue set by exact identifier")
-	workloadRunIssueCmd.Flags().StringVar(&workloadRunIssue, "issue", "", "Target issue by exact identifier (requires --issue-set)")
+	workloadRunIssueCmd.Flags().StringVar(&workloadRunIssueIssueSet, "issue-set", "", "Target Issue set by identifier or CWD-relative path")
+	workloadRunIssueCmd.Flags().StringVar(&workloadRunIssue, "issue", "", "Target issue by identifier, markdown filename, or CWD-relative path")
 	workloadRunIssueCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
 	workloadRunIssueCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue, commit-and-continue, stash-and-continue")
 	workloadRunIssueCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
@@ -95,7 +95,7 @@ func init() {
 	workloadRunIssueCmd.Flags().StringVar(&workloadTimeout, "timeout", "30m", "Maximum duration per attempt")
 	workloadRunIssueCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
 
-	workloadRunIssuesCmd.Flags().StringVar(&workloadRunIssuesIssueSet, "issue-set", "", "Target Issue set by exact identifier")
+	workloadRunIssuesCmd.Flags().StringVar(&workloadRunIssuesIssueSet, "issue-set", "", "Target Issue set by identifier or CWD-relative path")
 	workloadRunIssuesCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
 	workloadRunIssuesCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue, commit-and-continue, stash-and-continue")
 	workloadRunIssuesCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
@@ -105,8 +105,8 @@ func init() {
 	workloadRunIssuesCmd.Flags().StringVar(&workloadTimeout, "timeout", "30m", "Maximum duration per attempt")
 	workloadRunIssuesCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
 
-	workloadResetIssueCmd.Flags().StringVar(&workloadResetIssueSet, "issue-set", "", "Target Issue set by exact identifier")
-	workloadResetIssueCmd.Flags().StringVar(&workloadResetIssue, "issue", "", "Target issue by exact identifier")
+	workloadResetIssueCmd.Flags().StringVar(&workloadResetIssueSet, "issue-set", "", "Target Issue set by identifier or CWD-relative path")
+	workloadResetIssueCmd.Flags().StringVar(&workloadResetIssue, "issue", "", "Target issue by identifier, markdown filename, or CWD-relative path")
 }
 
 func workloadResolveInput() workload.ResolveInput {

@@ -2,6 +2,7 @@ package workload
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -26,7 +27,7 @@ func ResetIssue(opts ResetIssueOptions) (*ResetIssueResult, error) {
 
 // ResetIssueWith resets a failed issue using injected dependencies.
 func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts ResetIssueOptions) (*ResetIssueResult, error) {
-	if opts.IssueSetID == "" || opts.IssueID == "" {
+	if strings.TrimSpace(opts.IssueSetID) == "" && strings.TrimSpace(opts.IssueID) == "" {
 		return nil, exitErr(ExitSetup, "reset-issue requires --issue-set and --issue")
 	}
 
@@ -41,31 +42,39 @@ func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	m := refresh.Manifests[opts.IssueSetID]
+	issueSetID, issueID, err := ResolveWorkloadTargets(d, refresh, opts.CWD, opts.IssueSetID, opts.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	if issueSetID == "" || issueID == "" {
+		return nil, exitErr(ExitSetup, "reset-issue requires --issue-set and --issue")
+	}
+
+	m := refresh.Manifests[issueSetID]
 	if m == nil {
-		return nil, exitErr(ExitNoRunnable, "Issue set %q has no issue manifest", opts.IssueSetID)
+		return nil, exitErr(ExitNoRunnable, "Issue set %q has no issue manifest", issueSetID)
 	}
 	if !m.Valid {
-		return nil, exitErr(ExitNoRunnable, "Issue set %q is malformed", opts.IssueSetID)
+		return nil, exitErr(ExitNoRunnable, "Issue set %q is malformed", issueSetID)
 	}
 
 	idx := -1
 	for i, issue := range m.Issues {
-		if issue.ID == opts.IssueID {
+		if issue.ID == issueID {
 			idx = i
 			break
 		}
 	}
 	if idx < 0 {
-		return nil, exitErr(ExitNoRunnable, "%s", unknownIssueMessage(m, opts.IssueID))
+		return nil, exitErr(ExitNoRunnable, "%s", unknownIssueMessage(m, issueID))
 	}
 
 	issue := m.Issues[idx]
 	if issue.Status != "failed" {
-		return nil, exitErr(ExitNoRunnable, "issue %q is %s; reset requires a failed issue", opts.IssueID, issue.Status)
+		return nil, exitErr(ExitNoRunnable, "issue %q is %s; reset requires a failed issue", issueID, issue.Status)
 	}
 
-	summary := fmt.Sprintf("reset %s/%s to open", opts.IssueSetID, opts.IssueID)
+	summary := fmt.Sprintf("reset %s/%s to open", issueSetID, issueID)
 	if err := AppendProgress(d, m.Dir, issue.File, "RESET", summary); err != nil {
 		return nil, manualRepairErr(err)
 	}

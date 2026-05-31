@@ -67,6 +67,7 @@ func completeWorkloadIssueSets(cmd *cobra.Command, args []string, toComplete str
 		workloadCompletionProjectDeps(),
 		workloadCompletionConfigLoad,
 		completionInputFromCmd(cmd),
+		toComplete,
 	)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -80,6 +81,7 @@ func completeWorkloadIssues(cmd *cobra.Command, args []string, toComplete string
 		workloadCompletionProjectDeps(),
 		workloadCompletionConfigLoad,
 		completionInputFromCmd(cmd),
+		toComplete,
 	)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp

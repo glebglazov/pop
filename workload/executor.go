@@ -116,7 +116,12 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	sel, err := SelectIssue(refresh, opts.IssueSetOverride, opts.IssueOverride)
+	issueSetID, issueID, err := ResolveWorkloadTargets(d, refresh, opts.CWD, opts.IssueSetOverride, opts.IssueOverride)
+	if err != nil {
+		return nil, err
+	}
+
+	sel, err := SelectIssue(refresh, issueSetID, issueID)
 	if err != nil {
 		return nil, err
 	}

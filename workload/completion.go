@@ -47,27 +47,26 @@ func CompleteProjectNamesWith(d *Deps, pd *project.Deps, loadConfig func(string)
 }
 
 // CompleteIssueSetIDs returns discovered Issue-set identifiers for shell completion.
-func CompleteIssueSetIDs(input CompletionInput) ([]string, error) {
-	return CompleteIssueSetIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input)
+func CompleteIssueSetIDs(input CompletionInput, toComplete string) ([]string, error) {
+	return CompleteIssueSetIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
 }
 
 // CompleteIssueSetIDsWith returns discovered Issue-set identifiers using injected dependencies.
-func CompleteIssueSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) ([]string, error) {
-	defPath, err := resolveCompletionDefinitionPath(d, pd, loadConfig, input)
+func CompleteIssueSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
+	defPath, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
 	if err != nil || defPath == "" {
 		return nil, err
 	}
-
-	disc, err := DiscoverWith(d, defPath)
-	if err != nil {
-		return nil, err
-	}
-	if disc.IssueDirErr != nil {
+	if refresh == nil {
 		return nil, nil
 	}
 
-	ids := make([]string, 0, len(disc.Manifests))
-	for id := range disc.Manifests {
+	if completionLooksPathLike(toComplete) {
+		return issueSetPathCompletions(refresh, toComplete), nil
+	}
+
+	ids := make([]string, 0, len(refresh.Manifests))
+	for id := range refresh.Manifests {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -75,41 +74,51 @@ func CompleteIssueSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) 
 }
 
 // CompleteIssueIDs returns manifest issue IDs for the selected Issue set.
-func CompleteIssueIDs(input CompletionInput) ([]string, error) {
-	return CompleteIssueIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input)
+func CompleteIssueIDs(input CompletionInput, toComplete string) ([]string, error) {
+	return CompleteIssueIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
 }
 
 // CompleteIssueIDsWith returns manifest issue IDs using injected dependencies.
-func CompleteIssueIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) ([]string, error) {
+func CompleteIssueIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
+	if completionLooksPathLike(toComplete) {
+		_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
+		if err != nil || refresh == nil {
+			return nil, err
+		}
+		return issuePathCompletions(refresh, input.IssueSet, input.CWD, toComplete), nil
+	}
+
 	if strings.TrimSpace(input.IssueSet) == "" {
 		return nil, nil
 	}
 
+	_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
+	if err != nil || refresh == nil {
+		return nil, err
+	}
+
+	return issuePathCompletions(refresh, input.IssueSet, input.CWD, toComplete), nil
+}
+
+func completionRefreshContext(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) (string, *RefreshResult, error) {
 	defPath, err := resolveCompletionDefinitionPath(d, pd, loadConfig, input)
 	if err != nil || defPath == "" {
-		return nil, err
+		return "", nil, err
 	}
 
 	disc, err := DiscoverWith(d, defPath)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	if disc.IssueDirErr != nil {
-		return nil, nil
+		return defPath, nil, nil
 	}
 
-	manifestPath, ok := disc.Manifests[input.IssueSet]
-	if !ok {
-		return nil, nil
+	refresh := &RefreshResult{Manifests: make(map[string]*Manifest, len(disc.Manifests))}
+	for stem, manifestPath := range disc.Manifests {
+		refresh.Manifests[stem] = LoadManifest(d, stem, manifestPath)
 	}
-
-	m := LoadManifest(d, input.IssueSet, manifestPath)
-	ids := make([]string, len(m.Issues))
-	for i, issue := range m.Issues {
-		ids[i] = issue.ID
-	}
-	sort.Strings(ids)
-	return ids, nil
+	return defPath, refresh, nil
 }
 
 func resolveCompletionDefinitionPath(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) (string, error) {

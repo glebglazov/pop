@@ -34,20 +34,30 @@ func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}
 
 	statePath := DefaultStatePathWith(d)
+	refresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
+	if err != nil {
+		return nil, err
+	}
+
+	resolvedIssueSetID, err := ResolveIssueSetTarget(d, refresh, input.CWD, issueSetID)
+	if err != nil {
+		return nil, err
+	}
+
 	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		return nil, err
 	}
 
 	entry := state.Workloads[resolved.DefinitionPath]
-	if _, _, err := findRegisteredIssueSet(entry, issueSetID); err != nil {
+	if _, _, err := findRegisteredIssueSet(entry, resolvedIssueSetID); err != nil {
 		return nil, err
 	}
 
 	var oldPriority int
 	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
 		entry := state.Workloads[resolved.DefinitionPath]
-		idx, old, err := findRegisteredIssueSet(entry, issueSetID)
+		idx, old, err := findRegisteredIssueSet(entry, resolvedIssueSetID)
 		if err != nil {
 			return err
 		}
@@ -59,14 +69,14 @@ func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		return nil, err
 	}
 
-	refresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
+	refresh, err = RefreshWith(d, resolved.DefinitionPath, statePath)
 	if err != nil {
 		return nil, err
 	}
 
 	return &SetPriorityResult{
 		Refresh:     refresh,
-		IssueSetID:       issueSetID,
+		IssueSetID:  resolvedIssueSetID,
 		OldPriority: oldPriority,
 		NewPriority: priority,
 	}, nil
