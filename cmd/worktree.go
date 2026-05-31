@@ -11,6 +11,7 @@ import (
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/session"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -277,28 +278,10 @@ func switchTmuxSession(item *ui.Item) error {
 }
 
 func switchTmuxSessionWith(tmux deps.Tmux, item *ui.Item) error {
-	sessionName := project.SessionName(item.Path)
-	inTmux := os.Getenv("TMUX") != ""
-
-	_, err := tmux.Command("has-session", "-t="+sessionName)
-	sessionExists := err == nil
-
-	if !sessionExists {
-		if _, err := tmux.Command("new-session", "-ds", sessionName, "-c", item.Path); err != nil {
-			return fmt.Errorf("failed to create tmux session: %w", err)
-		}
-	}
-
-	if inTmux {
-		_, err := tmux.Command("switch-client", "-t", sessionName)
-		return err
-	}
-	// attach-session needs stdio wired — cannot go through the generic Command
-	attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
-	attachCmd.Stdin = os.Stdin
-	attachCmd.Stdout = os.Stdout
-	attachCmd.Stderr = os.Stderr
-	return attachCmd.Run()
+	return session.AttachWith(&session.Deps{
+		Tmux:   tmux,
+		InTmux: func() bool { return os.Getenv("TMUX") != "" },
+	}, project.SessionName(item.Path), item.Path)
 }
 
 func deleteWorktree(path string, force bool) {

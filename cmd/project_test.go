@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -566,21 +565,10 @@ func TestOpenTmuxSessionWith(t *testing.T) {
 
 		var sessionUsed string
 		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				switch args[0] {
-				case "has-session":
-					return "", fmt.Errorf("no session")
-				case "new-session":
-					for i, a := range args {
-						if a == "-ds" && i+1 < len(args) {
-							sessionUsed = args[i+1]
-						}
-					}
-					return "", nil
-				case "switch-client":
-					return "", nil
-				}
-				return "", nil
+			HasSessionFunc: func(name string) bool { return false },
+			NewSessionFunc: func(name, dir string) error {
+				sessionUsed = name
+				return nil
 			},
 		}
 
@@ -599,21 +587,10 @@ func TestOpenTmuxSessionWith(t *testing.T) {
 
 		var sessionUsed string
 		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				switch args[0] {
-				case "has-session":
-					return "", fmt.Errorf("no session")
-				case "new-session":
-					for i, a := range args {
-						if a == "-ds" && i+1 < len(args) {
-							sessionUsed = args[i+1]
-						}
-					}
-					return "", nil
-				case "switch-client":
-					return "", nil
-				}
-				return "", nil
+			HasSessionFunc: func(name string) bool { return false },
+			NewSessionFunc: func(name, dir string) error {
+				sessionUsed = name
+				return nil
 			},
 		}
 

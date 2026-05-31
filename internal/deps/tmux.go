@@ -1,6 +1,7 @@
 package deps
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -58,8 +59,9 @@ func (t *RealTmux) SwitchClient(name string) error {
 
 func (t *RealTmux) AttachSession(name string) error {
 	cmd := exec.Command("tmux", "attach-session", "-t", name)
-	// Note: In real usage, stdin/stdout/stderr are connected
-	// This basic implementation is for the interface contract
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
