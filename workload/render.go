@@ -80,6 +80,7 @@ func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
 		NeedsSave:        needsSave,
 	}
 	result.Rows = buildRows(state, canon, disc, manifests)
+	MarkAutoPick(result.Rows)
 	return result, nil
 }
 

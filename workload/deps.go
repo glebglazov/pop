@@ -6,12 +6,16 @@ import (
 
 // Deps holds external dependencies for the workload package.
 type Deps struct {
-	FS deps.FileSystem
+	FS  deps.FileSystem
+	Git deps.Git
 }
 
 // DefaultDeps returns dependencies using real implementations.
 func DefaultDeps() *Deps {
-	return &Deps{FS: deps.NewRealFileSystem()}
+	return &Deps{
+		FS:  deps.NewRealFileSystem(),
+		Git: deps.NewRealGit(),
+	}
 }
 
 var defaultDeps = DefaultDeps()

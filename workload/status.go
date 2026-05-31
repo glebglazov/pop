@@ -32,6 +32,7 @@ type Row struct {
 	DetailErrors     []string
 	RegIndex         int
 	IsOrphan         bool
+	AutoPick         bool
 }
 
 // DeriveStatus computes PRD status from discovery and manifest validation.
