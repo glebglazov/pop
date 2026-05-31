@@ -9,17 +9,17 @@ import (
 	"github.com/glebglazov/pop/project"
 )
 
-// SetPriorityResult is the outcome of updating one PRD priority.
+// SetPriorityResult is the outcome of updating one Issue-set priority.
 type SetPriorityResult struct {
 	Refresh      *RefreshResult
-	PRDID        string
+	IssueSetID        string
 	OldPriority  int
 	NewPriority  int
 }
 
-// SetPriority updates one registered PRD priority and refreshes the table rows.
-func SetPriority(input ResolveInput, prdID string, priority int) (*SetPriorityResult, error) {
-	return SetPriorityWith(defaultDeps, projectDefaultDeps(), config.Load, input, prdID, priority)
+// SetPriority updates one registered Issue-set priority and refreshes the table rows.
+func SetPriority(input ResolveInput, issueSetID string, priority int) (*SetPriorityResult, error) {
+	return SetPriorityWith(defaultDeps, projectDefaultDeps(), config.Load, input, issueSetID, priority)
 }
 
 func projectDefaultDeps() *project.Deps {
@@ -27,7 +27,7 @@ func projectDefaultDeps() *project.Deps {
 }
 
 // SetPriorityWith updates priority using injected dependencies.
-func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input ResolveInput, prdID string, priority int) (*SetPriorityResult, error) {
+func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input ResolveInput, issueSetID string, priority int) (*SetPriorityResult, error) {
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, input)
 	if err != nil {
 		return nil, err
@@ -40,14 +40,14 @@ func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}
 
 	entry := state.Workloads[resolved.DefinitionPath]
-	if _, _, err := findRegisteredPRD(entry, prdID); err != nil {
+	if _, _, err := findRegisteredIssueSet(entry, issueSetID); err != nil {
 		return nil, err
 	}
 
 	var oldPriority int
 	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
 		entry := state.Workloads[resolved.DefinitionPath]
-		idx, old, err := findRegisteredPRD(entry, prdID)
+		idx, old, err := findRegisteredIssueSet(entry, issueSetID)
 		if err != nil {
 			return err
 		}
@@ -66,19 +66,19 @@ func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 
 	return &SetPriorityResult{
 		Refresh:     refresh,
-		PRDID:       prdID,
+		IssueSetID:       issueSetID,
 		OldPriority: oldPriority,
 		NewPriority: priority,
 	}, nil
 }
 
-func findRegisteredPRD(entry *WorkloadEntry, prdID string) (int, int, error) {
+func findRegisteredIssueSet(entry *WorkloadEntry, issueSetID string) (int, int, error) {
 	if entry == nil || len(entry.IssueSets) == 0 {
-		return -1, 0, unknownPRDError(prdID, nil)
+		return -1, 0, unknownIssueSetError(issueSetID, nil)
 	}
 
 	for i, set := range entry.IssueSets {
-		if set.ID == prdID {
+		if set.ID == issueSetID {
 			return i, set.Priority, nil
 		}
 	}
@@ -87,13 +87,13 @@ func findRegisteredPRD(entry *WorkloadEntry, prdID string) (int, int, error) {
 	for i, set := range entry.IssueSets {
 		ids[i] = set.ID
 	}
-	return -1, 0, unknownPRDError(prdID, ids)
+	return -1, 0, unknownIssueSetError(issueSetID, ids)
 }
 
-func unknownPRDError(id string, candidates []string) error {
+func unknownIssueSetError(id string, candidates []string) error {
 	if len(candidates) == 0 {
-		return fmt.Errorf("unknown PRD %q (no registered PRDs)", id)
+		return fmt.Errorf("unknown Issue set %q (no registered Issue sets)", id)
 	}
 	sort.Strings(candidates)
-	return fmt.Errorf("unknown PRD %q; valid: %s", id, strings.Join(candidates, ", "))
+	return fmt.Errorf("unknown Issue set %q; valid: %s", id, strings.Join(candidates, ", "))
 }

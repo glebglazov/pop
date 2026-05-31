@@ -5,22 +5,22 @@ import (
 	"strings"
 )
 
-// PRDStatus is a derived workload status for one PRD row.
-type PRDStatus string
+// IssueSetStatus is a derived workload status for one Issue-set row.
+type IssueSetStatus string
 
 const (
-	StatusMissing   PRDStatus = "MISSING"
-	StatusDone      PRDStatus = "DONE"
-	StatusMalformed PRDStatus = "MALFORMED"
-	StatusFailed    PRDStatus = "FAILED"
-	StatusReady     PRDStatus = "READY"
-	StatusBlocked   PRDStatus = "BLOCKED"
+	StatusMissing   IssueSetStatus = "MISSING"
+	StatusDone      IssueSetStatus = "DONE"
+	StatusMalformed IssueSetStatus = "MALFORMED"
+	StatusFailed    IssueSetStatus = "FAILED"
+	StatusReady     IssueSetStatus = "READY"
+	StatusBlocked   IssueSetStatus = "BLOCKED"
 )
 
 // Row is one line in the workload status table.
 type Row struct {
 	ID               string
-	Status           PRDStatus
+	Status           IssueSetStatus
 	Priority         int
 	PriorityShow     string
 	Progress         string
@@ -34,7 +34,7 @@ type Row struct {
 }
 
 // DeriveStatus computes Issue-set status from manifest validation.
-func DeriveStatus(m *Manifest) PRDStatus {
+func DeriveStatus(m *Manifest) IssueSetStatus {
 	if m == nil {
 		return StatusMalformed
 	}
@@ -105,7 +105,7 @@ func isEligible(m *Manifest, issue Issue) bool {
 }
 
 // BuildProgress returns compact progress text for a row.
-func BuildProgress(m *Manifest, status PRDStatus) string {
+func BuildProgress(m *Manifest, status IssueSetStatus) string {
 	if status == StatusMissing {
 		return ""
 	}
@@ -143,7 +143,7 @@ func BuildProgress(m *Manifest, status PRDStatus) string {
 	return strings.Join(parts, ", ")
 }
 
-// BuildBlockedReason explains why a PRD is blocked.
+// BuildBlockedReason explains why an Issue set is blocked.
 func BuildBlockedReason(m *Manifest) string {
 	if m == nil || !m.Valid {
 		return ""
@@ -188,7 +188,7 @@ func BuildFailedInfo(stem string, m *Manifest) (ids []string, hints []string) {
 	for _, issue := range m.Issues {
 		if issue.Status == "failed" {
 			ids = append(ids, issue.ID)
-			hints = append(hints, fmt.Sprintf("pop workload reset-issue --prd %s --issue %s", stem, issue.ID))
+			hints = append(hints, fmt.Sprintf("pop workload reset-issue --issue-set %s --issue %s", stem, issue.ID))
 		}
 	}
 	return ids, hints

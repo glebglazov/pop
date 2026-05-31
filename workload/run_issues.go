@@ -10,12 +10,12 @@ import (
 	"github.com/glebglazov/pop/project"
 )
 
-const prdConfirmPrompt = "Run PRD? [y/N]: "
+const issueSetConfirmPrompt = "Run Issue set? [y/N]: "
 
-// RunPRDOptions configures sequential PRD draining.
-type RunPRDOptions struct {
+// RunIssueSetOptions configures sequential Issue-set draining.
+type RunIssueSetOptions struct {
 	ResolveInput
-	PRDOverride string
+	IssueSetOverride string
 	AgentPreset   string
 	AgentCmd      string
 	AllowDirty    bool
@@ -27,23 +27,23 @@ type RunPRDOptions struct {
 	Output        io.Writer
 }
 
-// RunPRDResult is the outcome of a run-prd invocation.
-type RunPRDResult struct {
-	PRDID         string
+// RunIssueSetResult is the outcome of a run-issues invocation.
+type RunIssueSetResult struct {
+	IssueSetID         string
 	Completed     []*RunIssueResult
 	Refresh       *RefreshResult
 	Declined      bool
-	PRDDone       bool
+	IssueSetDone       bool
 	BlockedReason string
 }
 
-// RunPRD drains one PRD sequentially through eligible AFK issues.
-func RunPRD(opts RunPRDOptions) (*RunPRDResult, error) {
-	return RunPRDWith(defaultDeps, project.DefaultDeps(), config.Load, opts)
+// RunIssueSet drains one Issue set sequentially through eligible AFK issues.
+func RunIssueSet(opts RunIssueSetOptions) (*RunIssueSetResult, error) {
+	return RunIssueSetWith(defaultDeps, project.DefaultDeps(), config.Load, opts)
 }
 
-// RunPRDWith drains one PRD using injected dependencies.
-func RunPRDWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts RunPRDOptions) (*RunPRDResult, error) {
+// RunIssueSetWith drains one Issue set using injected dependencies.
+func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts RunIssueSetOptions) (*RunIssueSetResult, error) {
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
 	}
@@ -64,7 +64,7 @@ func RunPRDWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	prdID, err := SelectPRD(refresh, opts.PRDOverride)
+	issueSetID, err := SelectIssueSet(refresh, opts.IssueSetOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -92,19 +92,19 @@ func RunPRDWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 
 	displayRows := cloneRows(refresh.Rows)
 	MarkAutoPick(displayRows)
-	MarkRunTarget(displayRows, prdID)
+	MarkRunTarget(displayRows, issueSetID)
 	displayRefresh := *refresh
 	displayRefresh.Rows = displayRows
 
 	fmt.Fprintln(out)
 	Render(out, &displayRefresh)
 
-	confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes, prdConfirmPrompt)
+	confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes, issueSetConfirmPrompt)
 	if err != nil {
 		return nil, err
 	}
 	if !confirmed {
-		return &RunPRDResult{PRDID: prdID, Refresh: refresh, Declined: true}, nil
+		return &RunIssueSetResult{IssueSetID: issueSetID, Refresh: refresh, Declined: true}, nil
 	}
 
 	lock, err := AcquireRuntimeLock(d, runtimePath, confirmOut)
@@ -122,7 +122,7 @@ func RunPRDWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 		timeout = DefaultAttemptTimeout
 	}
 
-	result := &RunPRDResult{PRDID: prdID}
+	result := &RunIssueSetResult{IssueSetID: issueSetID}
 	dirtyCheckpointed := false
 
 	for {
@@ -131,17 +131,17 @@ func RunPRDWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 			return nil, exitErr(ExitOperational, "refresh before issue selection: %v", err)
 		}
 
-		sel, selErr := SelectIssueInPRD(currentRefresh, prdID)
+		sel, selErr := SelectIssueInSet(currentRefresh, issueSetID)
 		if selErr != nil {
-			row := findRow(currentRefresh, prdID)
+			row := findRow(currentRefresh, issueSetID)
 			if row == nil {
 				return nil, selErr
 			}
 			result.Refresh = currentRefresh
 			switch row.Status {
 			case StatusDone:
-				result.PRDDone = true
-				finishRunPRD(out, opts.Yes, result)
+				result.IssueSetDone = true
+				finishRunIssueSet(out, opts.Yes, result)
 				return result, nil
 			case StatusBlocked:
 				result.BlockedReason = row.BlockedReason
@@ -149,25 +149,25 @@ func RunPRDWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 					fmt.Fprintln(out)
 					Render(out, currentRefresh)
 				} else {
-					printPRDSummary(out, result)
+					printIssueSetSummary(out, result)
 				}
 				if result.BlockedReason != "" {
-					return nil, exitErr(ExitNoRunnable, "PRD %q blocked: %s", prdID, result.BlockedReason)
+					return nil, exitErr(ExitNoRunnable, "Issue set %q blocked: %s", issueSetID, result.BlockedReason)
 				}
-				return nil, exitErr(ExitNoRunnable, "PRD %q has no eligible AFK issue", prdID)
+				return nil, exitErr(ExitNoRunnable, "Issue set %q has no eligible AFK issue", issueSetID)
 			case StatusFailed:
 				if !opts.Yes {
 					fmt.Fprintln(out)
 					Render(out, currentRefresh)
 				}
-				return nil, exitErr(ExitOperational, "PRD %q has failed issues", prdID)
+				return nil, exitErr(ExitOperational, "Issue set %q has failed issues", issueSetID)
 			default:
 				return nil, selErr
 			}
 		}
 
 		if dirty && opts.AllowDirty && !dirtyCheckpointed {
-			if err := checkpointDirtyRuntime(d, runtimePath, sel.PRDID, sel.IssueID); err != nil {
+			if err := checkpointDirtyRuntime(d, runtimePath, sel.IssueSetID, sel.IssueID); err != nil {
 				return nil, exitErr(ExitOperational, "dirty-state checkpoint: %v", err)
 			}
 			dirtyCheckpointed = true
@@ -199,23 +199,23 @@ func RunPRDWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 	}
 }
 
-func finishRunPRD(out io.Writer, yes bool, result *RunPRDResult) {
+func finishRunIssueSet(out io.Writer, yes bool, result *RunIssueSetResult) {
 	if yes {
-		printPRDSummary(out, result)
+		printIssueSetSummary(out, result)
 		return
 	}
 	fmt.Fprintln(out)
 	Render(out, result.Refresh)
 }
 
-func printPRDSummary(w io.Writer, result *RunPRDResult) {
-	if result.PRDDone {
-		fmt.Fprintf(w, "Completed PRD %s (%d issue(s))\n", result.PRDID, len(result.Completed))
+func printIssueSetSummary(w io.Writer, result *RunIssueSetResult) {
+	if result.IssueSetDone {
+		fmt.Fprintf(w, "Completed Issue set %s (%d issue(s))\n", result.IssueSetID, len(result.Completed))
 		return
 	}
 	if result.BlockedReason != "" {
-		fmt.Fprintf(w, "PRD %s blocked: %s\n", result.PRDID, result.BlockedReason)
+		fmt.Fprintf(w, "Issue set %s blocked: %s\n", result.IssueSetID, result.BlockedReason)
 		return
 	}
-	fmt.Fprintf(w, "PRD %s stopped after %d issue(s)\n", result.PRDID, len(result.Completed))
+	fmt.Fprintf(w, "Issue set %s stopped after %d issue(s)\n", result.IssueSetID, len(result.Completed))
 }

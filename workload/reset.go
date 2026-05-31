@@ -10,8 +10,8 @@ import (
 // ResetIssueOptions configures resetting one failed issue.
 type ResetIssueOptions struct {
 	ResolveInput
-	PRDID   string
-	IssueID string
+	IssueSetID string
+	IssueID    string
 }
 
 // ResetIssueResult is the outcome of resetting a failed issue.
@@ -26,8 +26,8 @@ func ResetIssue(opts ResetIssueOptions) (*ResetIssueResult, error) {
 
 // ResetIssueWith resets a failed issue using injected dependencies.
 func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts ResetIssueOptions) (*ResetIssueResult, error) {
-	if opts.PRDID == "" || opts.IssueID == "" {
-		return nil, exitErr(ExitSetup, "reset-issue requires --prd and --issue")
+	if opts.IssueSetID == "" || opts.IssueID == "" {
+		return nil, exitErr(ExitSetup, "reset-issue requires --issue-set and --issue")
 	}
 
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
@@ -41,12 +41,12 @@ func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	m := refresh.Manifests[opts.PRDID]
+	m := refresh.Manifests[opts.IssueSetID]
 	if m == nil {
-		return nil, exitErr(ExitNoRunnable, "PRD %q has no issue manifest", opts.PRDID)
+		return nil, exitErr(ExitNoRunnable, "Issue set %q has no issue manifest", opts.IssueSetID)
 	}
 	if !m.Valid {
-		return nil, exitErr(ExitNoRunnable, "PRD %q is malformed", opts.PRDID)
+		return nil, exitErr(ExitNoRunnable, "Issue set %q is malformed", opts.IssueSetID)
 	}
 
 	idx := -1
@@ -65,7 +65,7 @@ func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, exitErr(ExitNoRunnable, "issue %q is %s; reset requires a failed issue", opts.IssueID, issue.Status)
 	}
 
-	summary := fmt.Sprintf("reset %s/%s to open", opts.PRDID, opts.IssueID)
+	summary := fmt.Sprintf("reset %s/%s to open", opts.IssueSetID, opts.IssueID)
 	if err := AppendProgress(d, m.Dir, issue.File, "RESET", summary); err != nil {
 		return nil, manualRepairErr(err)
 	}

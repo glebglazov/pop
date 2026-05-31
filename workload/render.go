@@ -101,7 +101,7 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 				})
 				continue
 			}
-			row := buildPRDRow(reg, manifests[reg.ID], i)
+			row := buildIssueSetRow(reg, manifests[reg.ID], i)
 			switch row.Status {
 			case StatusDone:
 				done = append(done, row)
@@ -128,7 +128,7 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 	return rows
 }
 
-func buildPRDRow(reg RegisteredIssueSet, m *Manifest, regIndex int) Row {
+func buildIssueSetRow(reg RegisteredIssueSet, m *Manifest, regIndex int) Row {
 	status := DeriveStatus(m)
 	row := Row{
 		ID:           reg.ID,

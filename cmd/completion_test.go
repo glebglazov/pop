@@ -72,12 +72,12 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 	})
 
 	t.Run("prd", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "run-issue", "--prd")
+		out := shellCompNoDesc(t, "workload", "run-issue", "--issue-set")
 		assertShellCompContains(t, out, "svc")
 	})
 
 	t.Run("issue scoped to prd", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "run-issue", "--prd", "svc", "--issue")
+		out := shellCompNoDesc(t, "workload", "run-issue", "--issue-set", "svc", "--issue")
 		assertShellCompContains(t, out, "01-a", "02-b")
 		assertShellCompOmits(t, out, "99-z")
 	})
@@ -91,7 +91,7 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 
 	t.Run("subcommands", func(t *testing.T) {
 		out := shellCompNoDesc(t, "workload")
-		for _, sub := range []string{"status", "set-priority", "run-issue", "run-prd", "reset-issue"} {
+		for _, sub := range []string{"status", "set-priority", "run-issue", "run-issues", "reset-issue"} {
 			assertShellCompContains(t, out, sub)
 		}
 	})
@@ -109,7 +109,7 @@ func TestWorkloadCompletionReadOnly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	_ = shellCompNoDesc(t, "workload", "run-issue", "--prd")
+	_ = shellCompNoDesc(t, "workload", "run-issue", "--issue-set")
 
 	statePath := filepath.Join(root, "pop", "workloads-state.json")
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {

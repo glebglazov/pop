@@ -15,7 +15,7 @@ type CompletionInput struct {
 	Path               string
 	DefinitionOverride string
 	CWD                string
-	PRD                string
+	IssueSet           string
 }
 
 // CompleteProjectNames returns picker-visible project names for shell completion.
@@ -46,13 +46,13 @@ func CompleteProjectNamesWith(d *Deps, pd *project.Deps, loadConfig func(string)
 	return names, nil
 }
 
-// CompletePRDStems returns discovered Issue-set identifiers for shell completion.
-func CompletePRDStems(input CompletionInput) ([]string, error) {
-	return CompletePRDStemsWith(defaultDeps, project.DefaultDeps(), config.Load, input)
+// CompleteIssueSetIDs returns discovered Issue-set identifiers for shell completion.
+func CompleteIssueSetIDs(input CompletionInput) ([]string, error) {
+	return CompleteIssueSetIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input)
 }
 
-// CompletePRDStemsWith returns discovered Issue-set identifiers using injected dependencies.
-func CompletePRDStemsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) ([]string, error) {
+// CompleteIssueSetIDsWith returns discovered Issue-set identifiers using injected dependencies.
+func CompleteIssueSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) ([]string, error) {
 	defPath, err := resolveCompletionDefinitionPath(d, pd, loadConfig, input)
 	if err != nil || defPath == "" {
 		return nil, err
@@ -74,14 +74,14 @@ func CompletePRDStemsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*c
 	return ids, nil
 }
 
-// CompleteIssueIDs returns manifest issue IDs for the selected PRD.
+// CompleteIssueIDs returns manifest issue IDs for the selected Issue set.
 func CompleteIssueIDs(input CompletionInput) ([]string, error) {
 	return CompleteIssueIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input)
 }
 
 // CompleteIssueIDsWith returns manifest issue IDs using injected dependencies.
 func CompleteIssueIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) ([]string, error) {
-	if strings.TrimSpace(input.PRD) == "" {
+	if strings.TrimSpace(input.IssueSet) == "" {
 		return nil, nil
 	}
 
@@ -98,12 +98,12 @@ func CompleteIssueIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*c
 		return nil, nil
 	}
 
-	manifestPath, ok := disc.Manifests[input.PRD]
+	manifestPath, ok := disc.Manifests[input.IssueSet]
 	if !ok {
 		return nil, nil
 	}
 
-	m := LoadManifest(d, input.PRD, manifestPath)
+	m := LoadManifest(d, input.IssueSet, manifestPath)
 	ids := make([]string, len(m.Issues))
 	for i, issue := range m.Issues {
 		ids[i] = issue.ID

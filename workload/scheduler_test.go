@@ -27,12 +27,12 @@ func TestSelectIssueAutomaticPriorityOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sel.PRDID != "high" || sel.IssueID != "02-b" {
-		t.Fatalf("selection = %s/%s, want high/02-b", sel.PRDID, sel.IssueID)
+	if sel.IssueSetID != "high" || sel.IssueID != "02-b" {
+		t.Fatalf("selection = %s/%s, want high/02-b", sel.IssueSetID, sel.IssueID)
 	}
 }
 
-func TestSelectIssueExplicitRequiresPRD(t *testing.T) {
+func TestSelectIssueExplicitRequiresIssueSet(t *testing.T) {
 	_, err := SelectIssue(&RefreshResult{}, "", "01-a")
 	if err == nil {
 		t.Fatal("expected error")
@@ -84,7 +84,7 @@ func TestSelectIssueExplicitRejectsDoneFailedHITLBlocked(t *testing.T) {
 	}
 }
 
-func TestSelectIssueExplicitPRDOverride(t *testing.T) {
+func TestSelectIssueExplicitIssueSetOverride(t *testing.T) {
 	refresh := &RefreshResult{
 		Rows: []Row{
 			{ID: "auto", Status: StatusReady, Priority: 10},
@@ -104,12 +104,12 @@ func TestSelectIssueExplicitPRDOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sel.PRDID != "target" {
-		t.Fatalf("prd = %q", sel.PRDID)
+	if sel.IssueSetID != "target" {
+		t.Fatalf("prd = %q", sel.IssueSetID)
 	}
 }
 
-func TestSelectIssueFailedPRDRejected(t *testing.T) {
+func TestSelectIssueFailedIssueSetRejected(t *testing.T) {
 	refresh := &RefreshResult{
 		Rows: []Row{{ID: "broken", Status: StatusFailed, Priority: 10}},
 		Manifests: map[string]*Manifest{

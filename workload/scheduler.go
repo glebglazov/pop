@@ -9,7 +9,7 @@ import (
 
 // Selection is the Issue set and issue chosen for execution.
 type Selection struct {
-	PRDID      string
+	IssueSetID string
 	IssueID    string
 	IssuePath  string
 	IssueFile  string
@@ -18,16 +18,16 @@ type Selection struct {
 	IssueIndex int
 }
 
-// SelectPRD chooses the PRD to drain using the same readiness and failed-PRD
+// SelectIssueSet chooses the Issue set to drain using the same readiness and failed-set
 // gates as SelectIssue, without selecting an issue.
-func SelectPRD(refresh *RefreshResult, prdOverride string) (string, error) {
-	if prdOverride != "" {
-		return selectExplicitPRD(refresh, prdOverride)
+func SelectIssueSet(refresh *RefreshResult, issueSetOverride string) (string, error) {
+	if issueSetOverride != "" {
+		return selectExplicitIssueSet(refresh, issueSetOverride)
 	}
-	return selectAutomaticPRD(refresh)
+	return selectAutomaticIssueSet(refresh)
 }
 
-func selectAutomaticPRD(refresh *RefreshResult) (string, error) {
+func selectAutomaticIssueSet(refresh *RefreshResult) (string, error) {
 	manifests := refresh.Manifests
 	if manifests == nil {
 		manifests = make(map[string]*Manifest)
@@ -48,44 +48,44 @@ func selectAutomaticPRD(refresh *RefreshResult) (string, error) {
 	return "", exitErr(ExitNoRunnable, "no runnable work")
 }
 
-func selectExplicitPRD(refresh *RefreshResult, prdID string) (string, error) {
-	row := findRow(refresh, prdID)
+func selectExplicitIssueSet(refresh *RefreshResult, issueSetID string) (string, error) {
+	row := findRow(refresh, issueSetID)
 	if row == nil {
-		return "", exitErr(ExitNoRunnable, "%s", unknownPRDTargetMessage(refresh, prdID))
+		return "", exitErr(ExitNoRunnable, "%s", unknownIssueSetTargetMessage(refresh, issueSetID))
 	}
 
-	m := refresh.Manifests[prdID]
+	m := refresh.Manifests[issueSetID]
 	if m == nil {
-		return "", exitErr(ExitNoRunnable, "PRD %q has no issue manifest", prdID)
+		return "", exitErr(ExitNoRunnable, "Issue set %q has no issue manifest", issueSetID)
 	}
 
 	switch row.Status {
 	case StatusFailed:
-		return "", exitErr(ExitNoRunnable, "PRD %q has failed issues; reset required before execution", prdID)
+		return "", exitErr(ExitNoRunnable, "Issue set %q has failed issues; reset required before execution", issueSetID)
 	case StatusMalformed:
-		return "", exitErr(ExitNoRunnable, "PRD %q is malformed", prdID)
+		return "", exitErr(ExitNoRunnable, "Issue set %q is malformed", issueSetID)
 	case StatusMissing:
-		return "", exitErr(ExitNoRunnable, "PRD %q is missing", prdID)
+		return "", exitErr(ExitNoRunnable, "Issue set %q is missing", issueSetID)
 	case StatusReady:
-		return prdID, nil
+		return issueSetID, nil
 	default:
-		return "", exitErr(ExitNoRunnable, "PRD %q is %s: %s", prdID, strings.ToLower(string(row.Status)), row.BlockedReason)
+		return "", exitErr(ExitNoRunnable, "Issue set %q is %s: %s", issueSetID, strings.ToLower(string(row.Status)), row.BlockedReason)
 	}
 }
 
-// SelectIssueInPRD chooses the first eligible AFK issue in manifest-array order
-// for one PRD.
-func SelectIssueInPRD(refresh *RefreshResult, prdID string) (*Selection, error) {
-	m := refresh.Manifests[prdID]
+// SelectIssueInSet chooses the first eligible AFK issue in manifest-array order
+// for one Issue set.
+func SelectIssueInSet(refresh *RefreshResult, issueSetID string) (*Selection, error) {
+	m := refresh.Manifests[issueSetID]
 	if m == nil {
-		return nil, exitErr(ExitNoRunnable, "PRD %q has no issue manifest", prdID)
+		return nil, exitErr(ExitNoRunnable, "Issue set %q has no issue manifest", issueSetID)
 	}
-	return firstEligibleIssue(prdID, m)
+	return firstEligibleIssue(issueSetID, m)
 }
 
-func findRow(refresh *RefreshResult, prdID string) *Row {
+func findRow(refresh *RefreshResult, issueSetID string) *Row {
 	for i := range refresh.Rows {
-		if refresh.Rows[i].ID == prdID {
+		if refresh.Rows[i].ID == issueSetID {
 			return &refresh.Rows[i]
 		}
 	}
@@ -93,9 +93,9 @@ func findRow(refresh *RefreshResult, prdID string) *Row {
 }
 
 // SelectIssue chooses the next issue to run from a refreshed workload.
-func SelectIssue(refresh *RefreshResult, prdOverride, issueOverride string) (*Selection, error) {
-	if issueOverride != "" && prdOverride == "" {
-		return nil, exitErr(ExitSetup, "explicit --issue requires --prd")
+func SelectIssue(refresh *RefreshResult, issueSetOverride, issueOverride string) (*Selection, error) {
+	if issueOverride != "" && issueSetOverride == "" {
+		return nil, exitErr(ExitSetup, "explicit --issue requires --issue-set")
 	}
 
 	manifests := refresh.Manifests
@@ -103,8 +103,8 @@ func SelectIssue(refresh *RefreshResult, prdOverride, issueOverride string) (*Se
 		manifests = make(map[string]*Manifest)
 	}
 
-	if prdOverride != "" {
-		return selectExplicit(refresh, manifests, prdOverride, issueOverride)
+	if issueSetOverride != "" {
+		return selectExplicit(refresh, manifests, issueSetOverride, issueOverride)
 	}
 	return selectAutomatic(refresh, manifests)
 }
@@ -127,37 +127,37 @@ func selectAutomatic(refresh *RefreshResult, manifests map[string]*Manifest) (*S
 	return nil, exitErr(ExitNoRunnable, "no runnable work")
 }
 
-func selectExplicit(refresh *RefreshResult, manifests map[string]*Manifest, prdID, issueID string) (*Selection, error) {
-	row := findRow(refresh, prdID)
+func selectExplicit(refresh *RefreshResult, manifests map[string]*Manifest, issueSetID, issueID string) (*Selection, error) {
+	row := findRow(refresh, issueSetID)
 	if row == nil {
-		return nil, exitErr(ExitNoRunnable, "%s", unknownPRDTargetMessage(refresh, prdID))
+		return nil, exitErr(ExitNoRunnable, "%s", unknownIssueSetTargetMessage(refresh, issueSetID))
 	}
 
-	m := manifests[prdID]
+	m := manifests[issueSetID]
 	if m == nil {
-		return nil, exitErr(ExitNoRunnable, "PRD %q has no issue manifest", prdID)
+		return nil, exitErr(ExitNoRunnable, "Issue set %q has no issue manifest", issueSetID)
 	}
 
 	switch row.Status {
 	case StatusFailed:
-		return nil, exitErr(ExitNoRunnable, "PRD %q has failed issues; reset required before execution", prdID)
+		return nil, exitErr(ExitNoRunnable, "Issue set %q has failed issues; reset required before execution", issueSetID)
 	case StatusMalformed:
-		return nil, exitErr(ExitNoRunnable, "PRD %q is malformed", prdID)
+		return nil, exitErr(ExitNoRunnable, "Issue set %q is malformed", issueSetID)
 	case StatusMissing:
-		return nil, exitErr(ExitNoRunnable, "PRD %q is missing", prdID)
+		return nil, exitErr(ExitNoRunnable, "Issue set %q is missing", issueSetID)
 	}
 
 	if issueID == "" {
 		if row.Status != StatusReady {
-			return nil, exitErr(ExitNoRunnable, "PRD %q is %s: %s", prdID, strings.ToLower(string(row.Status)), row.BlockedReason)
+			return nil, exitErr(ExitNoRunnable, "Issue set %q is %s: %s", issueSetID, strings.ToLower(string(row.Status)), row.BlockedReason)
 		}
-		return firstEligibleIssue(prdID, m)
+		return firstEligibleIssue(issueSetID, m)
 	}
 
-	return selectExplicitIssue(prdID, m, issueID)
+	return selectExplicitIssue(issueSetID, m, issueID)
 }
 
-func selectExplicitIssue(prdID string, m *Manifest, issueID string) (*Selection, error) {
+func selectExplicitIssue(issueSetID string, m *Manifest, issueID string) (*Selection, error) {
 	idx := -1
 	for i, issue := range m.Issues {
 		if issue.ID == issueID {
@@ -189,7 +189,7 @@ func selectExplicitIssue(prdID string, m *Manifest, issueID string) (*Selection,
 	}
 
 	return &Selection{
-		PRDID:      prdID,
+		IssueSetID: issueSetID,
 		IssueID:    issueID,
 		IssuePath:  filepath.Join(m.Dir, issue.File),
 		IssueFile:  issue.File,
@@ -199,13 +199,13 @@ func selectExplicitIssue(prdID string, m *Manifest, issueID string) (*Selection,
 	}, nil
 }
 
-func firstEligibleIssue(prdID string, m *Manifest) (*Selection, error) {
+func firstEligibleIssue(issueSetID string, m *Manifest) (*Selection, error) {
 	for i, issue := range m.Issues {
 		if !isEligible(m, issue) {
 			continue
 		}
 		return &Selection{
-			PRDID:      prdID,
+			IssueSetID: issueSetID,
 			IssueID:    issue.ID,
 			IssuePath:  filepath.Join(m.Dir, issue.File),
 			IssueFile:  issue.File,
@@ -214,10 +214,10 @@ func firstEligibleIssue(prdID string, m *Manifest) (*Selection, error) {
 			IssueIndex: i,
 		}, nil
 	}
-	return nil, exitErr(ExitNoRunnable, "PRD %q has no eligible AFK issue", prdID)
+	return nil, exitErr(ExitNoRunnable, "Issue set %q has no eligible AFK issue", issueSetID)
 }
 
-func unknownPRDTargetMessage(refresh *RefreshResult, prdID string) string {
+func unknownIssueSetTargetMessage(refresh *RefreshResult, issueSetID string) string {
 	var ids []string
 	for _, row := range refresh.Rows {
 		if row.Status != StatusMissing {
@@ -226,9 +226,9 @@ func unknownPRDTargetMessage(refresh *RefreshResult, prdID string) string {
 	}
 	sort.Strings(ids)
 	if len(ids) == 0 {
-		return fmt.Sprintf("unknown PRD %q", prdID)
+		return fmt.Sprintf("unknown Issue set %q", issueSetID)
 	}
-	return fmt.Sprintf("unknown PRD %q; valid: %s", prdID, strings.Join(ids, ", "))
+	return fmt.Sprintf("unknown Issue set %q; valid: %s", issueSetID, strings.Join(ids, ", "))
 }
 
 func unknownIssueMessage(m *Manifest, issueID string) string {
@@ -240,7 +240,7 @@ func unknownIssueMessage(m *Manifest, issueID string) string {
 	return fmt.Sprintf("unknown issue %q; valid: %s", issueID, strings.Join(ids, ", "))
 }
 
-// MarkAutoPick marks the highest-priority runnable PRD row with AUTO.
+// MarkAutoPick marks the highest-priority runnable Issue-set row with AUTO.
 // Non-runnable higher-priority rows are skipped.
 func MarkAutoPick(rows []Row) {
 	for i := range rows {
@@ -253,10 +253,10 @@ func MarkAutoPick(rows []Row) {
 	}
 }
 
-// MarkRunTarget marks the selected PRD row with RUN, combining with AUTO when applicable.
-func MarkRunTarget(rows []Row, prdID string) {
+// MarkRunTarget marks the selected Issue-set row with RUN, combining with AUTO when applicable.
+func MarkRunTarget(rows []Row, issueSetID string) {
 	for i := range rows {
-		if rows[i].ID != prdID {
+		if rows[i].ID != issueSetID {
 			continue
 		}
 		if rows[i].AutoPick {

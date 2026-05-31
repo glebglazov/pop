@@ -105,11 +105,11 @@ func allAcceptanceChecked(data []byte) bool {
 }
 
 // CommitSubject returns the implementation commit subject for an issue.
-func CommitSubject(prdID, issueID string) string {
-	return fmt.Sprintf("workload(%s): %s", prdID, issueID)
+func CommitSubject(issueSetID, issueID string) string {
+	return fmt.Sprintf("workload(%s): %s", issueSetID, issueID)
 }
 
 // DirtyCheckpointSubject returns the checkpoint commit subject for dirty runtime state.
-func DirtyCheckpointSubject(prdID, issueID string) string {
-	return fmt.Sprintf("workload(%s): %s capturing dirty state", prdID, issueID)
+func DirtyCheckpointSubject(issueSetID, issueID string) string {
+	return fmt.Sprintf("workload(%s): %s capturing dirty state", issueSetID, issueID)
 }

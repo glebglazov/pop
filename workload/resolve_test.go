@@ -244,7 +244,7 @@ func TestSetPrioritySignedAndStableTies(t *testing.T) {
 	}
 }
 
-func TestSetPriorityRejectsInvalidPRDIdentifier(t *testing.T) {
+func TestSetPriorityRejectsInvalidIssueSetIdentifier(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", root)
 	setupManifest(t, root, "feature", []Issue{

@@ -13,6 +13,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/workload"
+	"github.com/spf13/cobra"
 )
 
 func TestWorkloadStatusExitSuccessWithMalformedRows(t *testing.T) {
@@ -297,8 +298,8 @@ func TestRunIssueCmdDeclinedIsSuccess(t *testing.T) {
 	workloadProject = ""
 	workloadPath = ""
 	workloadDefPath = ""
-	workloadRunIssuePRD = ""
-	workloadRunPRD = ""
+	workloadRunIssueIssueSet = ""
+	workloadRunIssuesIssueSet = ""
 	workloadRunIssue = ""
 	workloadAgentPreset = ""
 	workloadAgentCmd = agent
@@ -314,6 +315,52 @@ func TestRunIssueCmdDeclinedIsSuccess(t *testing.T) {
 		t.Fatalf("missing pre-run table:\n%s", stdout.String())
 	}
 	_ = root
+}
+
+func TestRunIssuesCmdDeclinedIsSuccess(t *testing.T) {
+	root := setupRunIssueCmdFixture(t)
+	agent := writeRunIssueFakeAgent(t, root)
+
+	resetWorkloadFlags()
+	workloadAgentCmd = agent
+	t.Cleanup(resetWorkloadFlags)
+
+	var stdout bytes.Buffer
+	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"))
+	if err != nil {
+		t.Fatalf("declined should succeed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "AUTO RUN") {
+		t.Fatalf("missing pre-run table:\n%s", stdout.String())
+	}
+	_ = root
+}
+
+func TestWorkloadCommandSurfaceUsesIssueSetVocabulary(t *testing.T) {
+	names := map[string]*cobra.Command{}
+	for _, c := range workloadCmd.Commands() {
+		names[c.Name()] = c
+	}
+
+	if _, ok := names["run-issues"]; !ok {
+		t.Fatal("run-issues command is not registered")
+	}
+	if _, ok := names["run-prd"]; ok {
+		t.Fatal("removed run-prd alias is still registered")
+	}
+
+	for _, sub := range []string{"run-issue", "run-issues", "reset-issue"} {
+		c := names[sub]
+		if c == nil {
+			t.Fatalf("%s command is not registered", sub)
+		}
+		if c.Flags().Lookup("issue-set") == nil {
+			t.Fatalf("%s missing --issue-set flag", sub)
+		}
+		if c.Flags().Lookup("prd") != nil {
+			t.Fatalf("%s still exposes removed --prd flag", sub)
+		}
+	}
 }
 
 func TestRunIssueCmdNonInteractiveFails(t *testing.T) {
@@ -336,8 +383,8 @@ func resetWorkloadFlags() {
 	workloadProject = ""
 	workloadPath = ""
 	workloadDefPath = ""
-	workloadRunIssuePRD = ""
-	workloadRunPRD = ""
+	workloadRunIssueIssueSet = ""
+	workloadRunIssuesIssueSet = ""
 	workloadRunIssue = ""
 	workloadAgentPreset = ""
 	workloadAgentCmd = ""

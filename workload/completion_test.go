@@ -11,10 +11,10 @@ import (
 	"github.com/glebglazov/pop/project"
 )
 
-func TestCompletePRDStemsFromDiscovery(t *testing.T) {
+func TestCompleteIssueSetIDsFromDiscovery(t *testing.T) {
 	root := t.TempDir()
-	writeCompletionPRD(t, root, "alpha")
-	writeCompletionPRD(t, root, "beta")
+	writeCompletionIssueSet(t, root, "alpha")
+	writeCompletionIssueSet(t, root, "beta")
 
 	oldWd, _ := os.Getwd()
 	if err := os.Chdir(root); err != nil {
@@ -22,7 +22,7 @@ func TestCompletePRDStemsFromDiscovery(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	stems, err := CompletePRDStems(CompletionInput{})
+	stems, err := CompleteIssueSetIDs(CompletionInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestCompletePRDStemsFromDiscovery(t *testing.T) {
 	}
 }
 
-func TestCompleteIssueIDsRequiresPRD(t *testing.T) {
+func TestCompleteIssueIDsRequiresIssueSet(t *testing.T) {
 	root := t.TempDir()
 	writeCompletionFixture(t, root, "feature", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -49,7 +49,7 @@ func TestCompleteIssueIDsRequiresPRD(t *testing.T) {
 		t.Fatalf("without PRD: ids=%#v err=%v", empty, err)
 	}
 
-	ids, err := CompleteIssueIDs(CompletionInput{PRD: "feature"})
+	ids, err := CompleteIssueIDs(CompletionInput{IssueSet: "feature"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestCompleteProjectNamesUsesPickerVisibleNames(t *testing.T) {
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeCompletionPRD(t, projectDir, "svc")
+	writeCompletionIssueSet(t, projectDir, "svc")
 
 	cfgPath := filepath.Join(root, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("projects = [{ path = \""+projectDir+"\" }]\n"), 0o644); err != nil {
@@ -84,8 +84,8 @@ func TestCompleteProjectNamesUsesPickerVisibleNames(t *testing.T) {
 
 func TestCompletionDoesNotPersistWorkloadState(t *testing.T) {
 	root := t.TempDir()
-	writeCompletionPRD(t, root, "existing")
-	writeCompletionPRD(t, root, "new-prd")
+	writeCompletionIssueSet(t, root, "existing")
+	writeCompletionIssueSet(t, root, "new-prd")
 
 	statePath := filepath.Join(root, "state.json")
 	canon, err := CanonicalDefinitionPath(root)
@@ -120,7 +120,7 @@ func TestCompletionDoesNotPersistWorkloadState(t *testing.T) {
 	var notices bytes.Buffer
 	d.NoticeOut = &notices
 
-	stems, err := CompletePRDStemsWith(d, project.DefaultDeps(), config.Load, CompletionInput{})
+	stems, err := CompleteIssueSetIDsWith(d, project.DefaultDeps(), config.Load, CompletionInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestCompletionUnreadableDiscoveryReturnsEmptyWithoutError(t *testing.T) {
 		t.Skip("chmod tests unreliable as root")
 	}
 	root := t.TempDir()
-	writeCompletionPRD(t, root, "a")
+	writeCompletionIssueSet(t, root, "a")
 	issueDir := filepath.Join(root, "thoughts/issues")
 	if err := os.Chmod(issueDir, 0o000); err != nil {
 		t.Fatal(err)
@@ -161,7 +161,7 @@ func TestCompletionUnreadableDiscoveryReturnsEmptyWithoutError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	stems, err := CompletePRDStems(CompletionInput{})
+	stems, err := CompleteIssueSetIDs(CompletionInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,8 +170,8 @@ func TestCompletionUnreadableDiscoveryReturnsEmptyWithoutError(t *testing.T) {
 	}
 }
 
-// writeCompletionPRD creates a minimal valid Issue set (no PRD pairing required).
-func writeCompletionPRD(t *testing.T, dir, stem string) {
+// writeCompletionIssueSet creates a minimal valid Issue set (no PRD pairing required).
+func writeCompletionIssueSet(t *testing.T, dir, stem string) {
 	t.Helper()
 	writeCompletionFixture(t, dir, stem, []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -193,12 +193,12 @@ func writeCompletionFixture(t *testing.T, root, stem string, issues []Issue) {
 	writeManifest(t, issueDir, issues)
 }
 
-func TestCompletePRDStemsUsesDefinitionOverride(t *testing.T) {
+func TestCompleteIssueSetIDsUsesDefinitionOverride(t *testing.T) {
 	root := t.TempDir()
 	defDir := filepath.Join(root, "planning")
-	writeCompletionPRD(t, defDir, "planned")
+	writeCompletionIssueSet(t, defDir, "planned")
 
-	stems, err := CompletePRDStems(CompletionInput{
+	stems, err := CompleteIssueSetIDs(CompletionInput{
 		Path:               root,
 		DefinitionOverride: defDir,
 	})
@@ -210,7 +210,7 @@ func TestCompletePRDStemsUsesDefinitionOverride(t *testing.T) {
 	}
 }
 
-func TestCompleteIssueIDsScopedToSelectedPRD(t *testing.T) {
+func TestCompleteIssueIDsScopedToSelectedIssueSet(t *testing.T) {
 	root := t.TempDir()
 	writeCompletionFixture(t, root, "one", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -225,7 +225,7 @@ func TestCompleteIssueIDsScopedToSelectedPRD(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	ids, err := CompleteIssueIDs(CompletionInput{PRD: "two"})
+	ids, err := CompleteIssueIDs(CompletionInput{IssueSet: "two"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,8 +258,8 @@ func TestCompletionNeverWritesProgress(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	_, _ = CompletePRDStems(CompletionInput{})
-	_, _ = CompleteIssueIDs(CompletionInput{PRD: "demo"})
+	_, _ = CompleteIssueSetIDs(CompletionInput{})
+	_, _ = CompleteIssueIDs(CompletionInput{IssueSet: "demo"})
 
 	progressPath := filepath.Join(root, "thoughts/issues/demo/progress.txt")
 	if _, err := os.Stat(progressPath); !os.IsNotExist(err) {
@@ -267,9 +267,9 @@ func TestCompletionNeverWritesProgress(t *testing.T) {
 	}
 }
 
-func TestCompletePRDStemsDoesNotRegisterInStateFile(t *testing.T) {
+func TestCompleteIssueSetIDsDoesNotRegisterInStateFile(t *testing.T) {
 	root := t.TempDir()
-	writeCompletionPRD(t, root, "fresh")
+	writeCompletionIssueSet(t, root, "fresh")
 
 	oldWd, _ := os.Getwd()
 	if err := os.Chdir(root); err != nil {
@@ -279,7 +279,7 @@ func TestCompletePRDStemsDoesNotRegisterInStateFile(t *testing.T) {
 
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 
-	if _, err := CompletePRDStems(CompletionInput{}); err != nil {
+	if _, err := CompleteIssueSetIDs(CompletionInput{}); err != nil {
 		t.Fatal(err)
 	}
 	statePath := DefaultStatePath()
@@ -288,10 +288,10 @@ func TestCompletePRDStemsDoesNotRegisterInStateFile(t *testing.T) {
 	}
 }
 
-func TestCompletePRDStemsSorted(t *testing.T) {
+func TestCompleteIssueSetIDsSorted(t *testing.T) {
 	root := t.TempDir()
 	for _, stem := range []string{"charlie", "alpha", "bravo"} {
-		writeCompletionPRD(t, root, stem)
+		writeCompletionIssueSet(t, root, stem)
 	}
 
 	oldWd, _ := os.Getwd()
@@ -300,7 +300,7 @@ func TestCompletePRDStemsSorted(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	stems, err := CompletePRDStems(CompletionInput{})
+	stems, err := CompleteIssueSetIDs(CompletionInput{})
 	if err != nil {
 		t.Fatal(err)
 	}

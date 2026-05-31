@@ -23,7 +23,7 @@ const (
 // RunIssueOptions configures a single-issue execution.
 type RunIssueOptions struct {
 	ResolveInput
-	PRDOverride   string
+	IssueSetOverride   string
 	IssueOverride string
 	AgentPreset   string
 	AgentCmd      string
@@ -81,7 +81,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	sel, err := SelectIssue(refresh, opts.PRDOverride, opts.IssueOverride)
+	sel, err := SelectIssue(refresh, opts.IssueSetOverride, opts.IssueOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 
 	displayRows := cloneRows(refresh.Rows)
 	MarkAutoPick(displayRows)
-	MarkRunTarget(displayRows, sel.PRDID)
+	MarkRunTarget(displayRows, sel.IssueSetID)
 	displayRefresh := *refresh
 	displayRefresh.Rows = displayRows
 
@@ -131,7 +131,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	defer lock.Release()
 
 	if dirty && opts.AllowDirty {
-		if err := checkpointDirtyRuntime(d, runtimePath, sel.PRDID, sel.IssueID); err != nil {
+		if err := checkpointDirtyRuntime(d, runtimePath, sel.IssueSetID, sel.IssueID); err != nil {
 			return nil, exitErr(ExitOperational, "dirty-state checkpoint: %v", err)
 		}
 	}
@@ -251,7 +251,7 @@ func completeSuccessfulIssue(d *Deps, sel *Selection, runtimePath, summary strin
 	}
 
 	if hasChanges {
-		sha, err := createImplementationCommit(d, runtimePath, sel.PRDID, sel.IssueID, summary)
+		sha, err := createImplementationCommit(d, runtimePath, sel.IssueSetID, sel.IssueID, summary)
 		if err != nil {
 			return nil, exitErr(ExitOperational, "implementation commit: %v", err)
 		}
@@ -399,7 +399,7 @@ func runtimeIsDirty(d *Deps, runtimePath string) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
-func checkpointDirtyRuntime(d *Deps, runtimePath, prdID, issueID string) error {
+func checkpointDirtyRuntime(d *Deps, runtimePath, issueSetID, issueID string) error {
 	if _, err := d.Git.CommandInDir(runtimePath, "add", "-A"); err != nil {
 		return err
 	}
@@ -411,7 +411,7 @@ func checkpointDirtyRuntime(d *Deps, runtimePath, prdID, issueID string) error {
 	if strings.TrimSpace(staged) == "" {
 		return nil
 	}
-	subject := DirtyCheckpointSubject(prdID, issueID)
+	subject := DirtyCheckpointSubject(issueSetID, issueID)
 	if _, err := d.Git.CommandInDir(runtimePath, "commit", "-m", subject); err != nil {
 		_, _ = d.Git.CommandInDir(runtimePath, "reset")
 		return err
@@ -427,7 +427,7 @@ func runtimeHasChanges(d *Deps, runtimePath string) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
-func createImplementationCommit(d *Deps, runtimePath, prdID, issueID, summary string) (string, error) {
+func createImplementationCommit(d *Deps, runtimePath, issueSetID, issueID, summary string) (string, error) {
 	if _, err := d.Git.CommandInDir(runtimePath, "add", "-A"); err != nil {
 		return "", err
 	}
@@ -438,7 +438,7 @@ func createImplementationCommit(d *Deps, runtimePath, prdID, issueID, summary st
 	if strings.TrimSpace(staged) == "" {
 		return "", nil
 	}
-	subject := CommitSubject(prdID, issueID)
+	subject := CommitSubject(issueSetID, issueID)
 	if _, err := d.Git.CommandInDir(runtimePath, "commit", "-m", subject, "-m", summary); err != nil {
 		return "", err
 	}
@@ -458,7 +458,7 @@ func finalizeIssueDone(d *Deps, sel *Selection, summary string) error {
 }
 
 func printConciseSummary(w io.Writer, result *RunIssueResult) {
-	fmt.Fprintf(w, "Completed %s/%s\n", result.Selection.PRDID, result.Selection.IssueID)
+	fmt.Fprintf(w, "Completed %s/%s\n", result.Selection.IssueSetID, result.Selection.IssueID)
 	if result.NoOp {
 		fmt.Fprintln(w, "No implementation commit (verified no-op)")
 	} else if result.CommitSHA != "" {

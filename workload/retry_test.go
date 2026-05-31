@@ -211,7 +211,7 @@ func TestResetIssueReturnsFailedToOpen(t *testing.T) {
 
 	result, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		PRDID:        "demo",
+		IssueSetID:   "demo",
 		IssueID:      "01-a",
 	})
 	if err != nil {
@@ -228,7 +228,7 @@ func TestResetIssueRequiresFailed(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	_, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		PRDID:        "demo",
+		IssueSetID:   "demo",
 		IssueID:      "01-a",
 	})
 	assertExitCode(t, err, ExitNoRunnable)
@@ -246,7 +246,7 @@ func TestResetIssueProgressBeforeManifest(t *testing.T) {
 
 	_, err := ResetIssueWith(d, nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		PRDID:        "demo",
+		IssueSetID:   "demo",
 		IssueID:      "01-a",
 	})
 	if err != nil {
@@ -268,7 +268,7 @@ func TestResetIssueFailureManualRepair(t *testing.T) {
 
 	_, err := ResetIssueWith(d, nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		PRDID:        "demo",
+		IssueSetID:   "demo",
 		IssueID:      "01-a",
 	})
 	assertExitCode(t, err, ExitOperational)
@@ -279,7 +279,7 @@ func TestResetIssueFailureManualRepair(t *testing.T) {
 	assertIssueFailed(t, env, "01-a", 2)
 }
 
-func TestSelectIssueSkipsFailedPRDInAutomaticSelection(t *testing.T) {
+func TestSelectIssueSkipsFailedIssueSetInAutomaticSelection(t *testing.T) {
 	refresh := &RefreshResult{
 		Rows: []Row{
 			{ID: "failed", Status: StatusFailed, Priority: 100},
@@ -298,8 +298,8 @@ func TestSelectIssueSkipsFailedPRDInAutomaticSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sel.PRDID != "ready" {
-		t.Fatalf("selected %q, want ready", sel.PRDID)
+	if sel.IssueSetID != "ready" {
+		t.Fatalf("selected %q, want ready", sel.IssueSetID)
 	}
 }
 

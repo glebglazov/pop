@@ -14,8 +14,8 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 )
 
-func TestRunPRDDrainsMultipleAFKIssuesInOrder(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetDrainsMultipleAFKIssuesInOrder(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
@@ -27,11 +27,11 @@ func TestRunPRDDrainsMultipleAFKIssuesInOrder(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	result, err := RunPRDWith(env.deps(), nil, nil, env.runPRDOpts(true, agent, &buf))
+	result, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, &buf))
 	if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
-	if !result.PRDDone || len(result.Completed) != 2 {
+	if !result.IssueSetDone || len(result.Completed) != 2 {
 		t.Fatalf("result = %#v", result)
 	}
 	if result.Completed[0].Selection.IssueID != "01-a" || result.Completed[1].Selection.IssueID != "02-b" {
@@ -41,14 +41,14 @@ func TestRunPRDDrainsMultipleAFKIssuesInOrder(t *testing.T) {
 	assertIssueDone(t, env.execFixture(), "02-b")
 }
 
-func TestRunPRDSequentialDependencyUnblocking(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetSequentialDependencyUnblocking(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkIssue: true, summary: "ok"})
 
-	result, err := RunPRDWith(env.deps(), nil, nil, env.runPRDOpts(true, agent, nil))
+	result, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, nil))
 	if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
@@ -58,14 +58,14 @@ func TestRunPRDSequentialDependencyUnblocking(t *testing.T) {
 	assertIssueDone(t, env.execFixture(), "02-b")
 }
 
-func TestRunPRDNoOpContinuation(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetNoOpContinuation(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkIssue: true, summary: "verified"})
 
-	result, err := RunPRDWith(env.deps(), nil, nil, env.runPRDOpts(true, agent, nil))
+	result, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,28 +74,28 @@ func TestRunPRDNoOpContinuation(t *testing.T) {
 	}
 }
 
-func TestRunPRDSingleConfirmation(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetSingleConfirmation(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkIssue: true, summary: "ok"})
 
 	var confirmOut bytes.Buffer
-	opts := env.runPRDOpts(false, agent, nil)
+	opts := env.runIssueSetOpts(false, agent, nil)
 	opts.ConfirmIn = strings.NewReader("y\n")
 	opts.ConfirmOut = &confirmOut
 
-	_, err := RunPRDWith(env.deps(), nil, nil, opts)
+	_, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(confirmOut.String(), "Run PRD?") != 1 {
+	if strings.Count(confirmOut.String(), "Run Issue set?") != 1 {
 		t.Fatalf("expected one confirmation prompt:\n%s", confirmOut.String())
 	}
 }
 
-func TestRunPRDTargetedPRD(t *testing.T) {
+func TestRunIssueSetTargetedIssueSet(t *testing.T) {
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
 	setupManifest(t, root, "high", []Issue{
@@ -115,45 +115,45 @@ func TestRunPRDTargetedPRD(t *testing.T) {
 	_ = refresh
 
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkIssue: true, summary: "targeted"})
-	env := &runPRDFixture{root: root}
-	opts := env.runPRDOpts(true, agent, nil)
-	opts.PRDOverride = "high"
+	env := &runIssueSetFixture{root: root}
+	opts := env.runIssueSetOpts(true, agent, nil)
+	opts.IssueSetOverride = "high"
 
-	result, err := RunPRDWith(env.deps(), nil, nil, opts)
+	result, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.PRDID != "high" || len(result.Completed) != 1 || result.Completed[0].Selection.IssueID != "01-a" {
+	if result.IssueSetID != "high" || len(result.Completed) != 1 || result.Completed[0].Selection.IssueID != "01-a" {
 		t.Fatalf("result = %#v", result)
 	}
 }
 
-func TestRunPRDBlockedStopsWithReason(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetBlockedStopsWithReason(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkIssue: true, summary: "first done"})
 
-	_, err := RunPRDWith(env.deps(), nil, nil, env.runPRDOpts(true, agent, nil))
+	_, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, nil))
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "HITL") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestRunPRDHITLOnlyPRDRejectedAtSelection(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetHITLOnlyIssueSetRejectedAtSelection(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-hitl", File: "01-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
 
-	_, err := RunPRDWith(env.deps(), nil, nil, env.runPRDOpts(true, agent, nil))
+	_, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, nil))
 	assertExitCode(t, err, ExitNoRunnable)
 }
 
-func TestRunPRDFailedIssueStopsDrain(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetFailedIssueStopsDrain(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
@@ -162,16 +162,16 @@ func TestRunPRDFailedIssueStopsDrain(t *testing.T) {
 		{exitCode: 1},
 	})
 
-	opts := env.runPRDOpts(true, agent, nil)
+	opts := env.runIssueSetOpts(true, agent, nil)
 	opts.MaxTries = 1
-	_, err := RunPRDWith(env.deps(), nil, nil, opts)
+	_, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
 	assertIssueDone(t, env.execFixture(), "01-a")
 	assertIssueFailed(t, env.execFixture(), "02-b", 1)
 }
 
-func TestRunPRDTimeoutPropagation(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetTimeoutPropagation(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
@@ -179,16 +179,16 @@ func TestRunPRDTimeoutPropagation(t *testing.T) {
 		sleepFor: 200 * time.Millisecond,
 	})
 
-	opts := env.runPRDOpts(true, agent, nil)
+	opts := env.runIssueSetOpts(true, agent, nil)
 	opts.Timeout = 50 * time.Millisecond
 	opts.MaxTries = 1
-	_, err := RunPRDWith(env.deps(), nil, nil, opts)
+	_, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
 	assertIssueFailed(t, env.execFixture(), "01-a", 1)
 }
 
-func TestRunPRDOperationalStopOnCommitFailure(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetOperationalStopOnCommitFailure(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
@@ -208,12 +208,12 @@ func TestRunPRDOperationalStopOnCommitFailure(t *testing.T) {
 	d := env.deps()
 	d.Git = git
 
-	_, err := RunPRDWith(d, nil, nil, env.runPRDOpts(true, agent, nil))
+	_, err := RunIssueSetWith(d, nil, nil, env.runIssueSetOpts(true, agent, nil))
 	assertExitCode(t, err, ExitOperational)
 	assertIssueOpen(t, env.execFixture(), "01-a")
 }
 
-func TestRunPRDDoesNotContinueIntoAnotherPRD(t *testing.T) {
+func TestRunIssueSetDoesNotContinueIntoAnotherIssueSet(t *testing.T) {
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
 	setupManifest(t, root, "one", []Issue{
@@ -231,42 +231,42 @@ func TestRunPRDDoesNotContinueIntoAnotherPRD(t *testing.T) {
 	}
 
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkIssue: true, summary: "one only"})
-	env := &runPRDFixture{root: root}
-	result, err := RunPRDWith(env.deps(), nil, nil, env.runPRDOpts(true, agent, nil))
+	env := &runIssueSetFixture{root: root}
+	result, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.PRDDone || result.PRDID != "two" || len(result.Completed) != 1 {
+	if !result.IssueSetDone || result.IssueSetID != "two" || len(result.Completed) != 1 {
 		t.Fatalf("result = %#v", result)
 	}
 	assertIssueOpen(t, &execFixture{root: root}, "01-x")
 }
 
-func TestRunPRDFailedPRDRejected(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetFailedIssueSetRejected(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
-	opts := env.runPRDOpts(true, agent, nil)
-	opts.PRDOverride = "demo"
+	opts := env.runIssueSetOpts(true, agent, nil)
+	opts.IssueSetOverride = "demo"
 
-	_, err := RunPRDWith(env.deps(), nil, nil, opts)
+	_, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
 }
 
-func TestRunPRDYesPrintsConciseSummary(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetYesPrintsConciseSummary(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkIssue: true, summary: "ok"})
 
 	var buf bytes.Buffer
-	_, err := RunPRDWith(env.deps(), nil, nil, env.runPRDOpts(true, agent, &buf))
+	_, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, &buf))
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "Completed demo/01-a") || !strings.Contains(out, "Completed PRD demo") {
+	if !strings.Contains(out, "Completed demo/01-a") || !strings.Contains(out, "Completed Issue set demo") {
 		t.Fatalf("missing concise summary:\n%s", out)
 	}
 	if strings.Count(out, "STATUS") != 1 {
@@ -274,17 +274,17 @@ func TestRunPRDYesPrintsConciseSummary(t *testing.T) {
 	}
 }
 
-func TestRunPRDInteractivePrintsRefreshedTable(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetInteractivePrintsRefreshedTable(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkIssue: true, summary: "ok"})
 
 	var buf bytes.Buffer
-	opts := env.runPRDOpts(false, agent, &buf)
+	opts := env.runIssueSetOpts(false, agent, &buf)
 	opts.ConfirmIn = strings.NewReader("y\n")
 
-	_, err := RunPRDWith(env.deps(), nil, nil, opts)
+	_, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,15 +293,15 @@ func TestRunPRDInteractivePrintsRefreshedTable(t *testing.T) {
 	}
 }
 
-func TestRunPRDDeclinedConfirmation(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetDeclinedConfirmation(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
-	opts := env.runPRDOpts(false, agent, nil)
+	opts := env.runIssueSetOpts(false, agent, nil)
 	opts.ConfirmIn = strings.NewReader("n\n")
 
-	result, err := RunPRDWith(env.deps(), nil, nil, opts)
+	result, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,25 +310,25 @@ func TestRunPRDDeclinedConfirmation(t *testing.T) {
 	}
 }
 
-func TestRunPRDInterruptionPropagation(t *testing.T) {
-	env := setupRunPRDFixture(t, "demo", []Issue{
+func TestRunIssueSetInterruptionPropagation(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	agent := writeSlowAgent(t, env.root, 10*time.Second)
 
-	opts := env.runPRDOpts(true, agent, nil)
+	opts := env.runIssueSetOpts(true, agent, nil)
 	opts.Timeout = time.Minute
 	go func() {
 		time.Sleep(150 * time.Millisecond)
 		_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
 	}()
 
-	_, err := RunPRDWith(env.deps(), nil, nil, opts)
+	_, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitInterrupted)
 	assertIssueOpen(t, env.execFixture(), "01-a")
 }
 
-func TestSelectPRDAutomaticAndExplicit(t *testing.T) {
+func TestSelectIssueSetAutomaticAndExplicit(t *testing.T) {
 	refresh := &RefreshResult{
 		Rows: []Row{
 			{ID: "auto", Status: StatusReady, Priority: 10},
@@ -344,21 +344,21 @@ func TestSelectPRDAutomaticAndExplicit(t *testing.T) {
 		},
 	}
 
-	id, err := SelectPRD(refresh, "")
+	id, err := SelectIssueSet(refresh, "")
 	if err != nil || id != "auto" {
 		t.Fatalf("auto = %q, err = %v", id, err)
 	}
-	id, err = SelectPRD(refresh, "target")
+	id, err = SelectIssueSet(refresh, "target")
 	if err != nil || id != "target" {
 		t.Fatalf("target = %q, err = %v", id, err)
 	}
 }
 
-type runPRDFixture struct {
+type runIssueSetFixture struct {
 	root string
 }
 
-func setupRunPRDFixture(t *testing.T, stem string, issues []Issue) *runPRDFixture {
+func setupRunIssueSetFixture(t *testing.T, stem string, issues []Issue) *runIssueSetFixture {
 	t.Helper()
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
@@ -367,10 +367,10 @@ func setupRunPRDFixture(t *testing.T, stem string, issues []Issue) *runPRDFixtur
 	if _, err := RefreshWith(DefaultDeps(), root, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
-	return &runPRDFixture{root: root}
+	return &runIssueSetFixture{root: root}
 }
 
-func (e *runPRDFixture) deps() *Deps {
+func (e *runIssueSetFixture) deps() *Deps {
 	return &Deps{
 		FS:     deps.NewRealFileSystem(),
 		Git:    deps.NewRealGit(),
@@ -378,12 +378,12 @@ func (e *runPRDFixture) deps() *Deps {
 	}
 }
 
-func (e *runPRDFixture) execFixture() *execFixture {
+func (e *runIssueSetFixture) execFixture() *execFixture {
 	return &execFixture{root: e.root}
 }
 
-func (e *runPRDFixture) runPRDOpts(yes bool, agentCmd string, out io.Writer) RunPRDOptions {
-	opts := RunPRDOptions{
+func (e *runIssueSetFixture) runIssueSetOpts(yes bool, agentCmd string, out io.Writer) RunIssueSetOptions {
+	opts := RunIssueSetOptions{
 		ResolveInput: ResolveInput{CWD: e.root},
 		AgentCmd:     agentCmd,
 		Yes:          yes,
