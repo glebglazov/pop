@@ -35,6 +35,28 @@ func TestResolveAgentCommandDefaultClaude(t *testing.T) {
 	}
 }
 
+func TestResolveAgentCommandCursor(t *testing.T) {
+	name, args, err := ResolveAgentCommand("cursor", "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "cursor-agent" {
+		t.Fatalf("name = %q, want cursor-agent", name)
+	}
+	wantPrefix := []string{"-p", "--force", "--trust", "--workspace", "/tmp/runtime"}
+	if len(args) < len(wantPrefix)+1 {
+		t.Fatalf("args = %v", args)
+	}
+	for i, want := range wantPrefix {
+		if args[i] != want {
+			t.Fatalf("args[%d] = %q, want %q (full: %v)", i, args[i], want, args)
+		}
+	}
+	if args[len(args)-1] != "prompt text" {
+		t.Fatalf("last arg = %q", args[len(args)-1])
+	}
+}
+
 func TestResolveAgentCommandCustom(t *testing.T) {
 	name, args, err := ResolveAgentCommand("", "fake-agent --verbose", "prompt", "/tmp/runtime")
 	if err != nil {

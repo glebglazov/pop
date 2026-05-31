@@ -9,7 +9,7 @@ import (
 var agentPresets = map[string][]string{
 	"claude":   {"claude", "--dangerously-skip-permissions", "-p"},
 	"opencode": {"opencode", "run"},
-	"cursor":   {"cursor", "agent", "--print", "--force", "--trust"},
+	"cursor":   {"cursor-agent", "-p", "--force", "--trust"},
 	"codex":    {"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
 	"pi":       {"pi", "-p"},
 }
