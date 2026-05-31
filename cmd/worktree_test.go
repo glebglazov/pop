@@ -7,21 +7,15 @@ import (
 )
 
 func TestBuildWorktreeItems(t *testing.T) {
-	ctx := &project.RepoContext{
-		RepoName: "myrepo",
-		IsBare:   true,
-	}
-
 	t.Run("worktree with active session gets icon", func(t *testing.T) {
 		worktrees := []project.Worktree{
 			{Name: "feature", Path: "/repo/feature", Branch: "feature-branch"},
 		}
-		// Session name for bare repo: "myrepo/feature"
 		sessionActivity := map[string]int64{
-			"myrepo/feature": 1000,
+			project.SessionName("/repo/feature"): 1000,
 		}
 
-		items := buildWorktreeItems(worktrees, ctx, sessionActivity)
+		items := buildWorktreeItems(worktrees, sessionActivity)
 
 		if len(items) != 1 {
 			t.Fatalf("got %d items, want 1", len(items))
@@ -40,7 +34,7 @@ func TestBuildWorktreeItems(t *testing.T) {
 		}
 		sessionActivity := map[string]int64{}
 
-		items := buildWorktreeItems(worktrees, ctx, sessionActivity)
+		items := buildWorktreeItems(worktrees, sessionActivity)
 
 		if items[0].Icon != "" {
 			t.Errorf("Icon = %q, want empty", items[0].Icon)
@@ -53,10 +47,10 @@ func TestBuildWorktreeItems(t *testing.T) {
 			{Name: "idle", Path: "/repo/idle", Branch: "dev"},
 		}
 		sessionActivity := map[string]int64{
-			"myrepo/active": 1000,
+			project.SessionName("/repo/active"): 1000,
 		}
 
-		items := buildWorktreeItems(worktrees, ctx, sessionActivity)
+		items := buildWorktreeItems(worktrees, sessionActivity)
 
 		if len(items) != 2 {
 			t.Fatalf("got %d items, want 2", len(items))
@@ -69,20 +63,15 @@ func TestBuildWorktreeItems(t *testing.T) {
 		}
 	})
 
-	t.Run("non-bare repo session name", func(t *testing.T) {
-		nonBareCtx := &project.RepoContext{
-			RepoName: "myrepo",
-			IsBare:   false,
-		}
+	t.Run("session icon matches SessionName for path", func(t *testing.T) {
 		worktrees := []project.Worktree{
 			{Name: "feature", Path: "/repo/feature", Branch: "feature-branch"},
 		}
-		// Non-bare: session name is just the worktree name
 		sessionActivity := map[string]int64{
-			"feature": 1000,
+			project.SessionName("/repo/feature"): 1000,
 		}
 
-		items := buildWorktreeItems(worktrees, nonBareCtx, sessionActivity)
+		items := buildWorktreeItems(worktrees, sessionActivity)
 
 		if items[0].Icon != iconDirSession {
 			t.Errorf("Icon = %q, want %q", items[0].Icon, iconDirSession)

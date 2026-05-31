@@ -142,6 +142,140 @@ branch refs/heads/master
 	}
 }
 
+func TestSessionNameWith(t *testing.T) {
+	bareRepoGit := func() *deps.MockGit {
+		return &deps.MockGit{
+			CommandInDirFunc: func(dir string, args ...string) (string, error) {
+				if len(args) >= 2 && args[0] == "rev-parse" {
+					return "", fmt.Errorf("not in git dir")
+				}
+				if len(args) >= 2 && args[0] == "config" && args[1] == "--get" {
+					return "true", nil
+				}
+				return "", nil
+			},
+		}
+	}
+	bareRepoFS := func(repoRoot string) *deps.MockFileSystem {
+		return &deps.MockFileSystem{
+			StatFunc: func(path string) (os.FileInfo, error) {
+				if path == repoRoot+"/.git" {
+					return deps.MockFileInfo{IsDirVal: true}, nil
+				}
+				return nil, os.ErrNotExist
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		deps     *Deps
+		path     string
+		expected string
+	}{
+		{
+			name: "bare repo worktree",
+			deps: &Deps{
+				Git: bareRepoGit(),
+				FS:  bareRepoFS("/projects/myrepo"),
+			},
+			path:     "/projects/myrepo/feature",
+			expected: "myrepo/feature",
+		},
+		{
+			name: "non-bare worktree",
+			deps: &Deps{
+				Git: &deps.MockGit{
+					CommandInDirFunc: func(dir string, args ...string) (string, error) {
+						if len(args) >= 2 && args[0] == "rev-parse" {
+							if args[1] == "--git-common-dir" {
+								return ".git", nil
+							}
+							if args[1] == "--show-toplevel" {
+								return "/projects/regular-repo", nil
+							}
+						}
+						if len(args) >= 2 && args[0] == "config" && args[1] == "--get" {
+							return "false", nil
+						}
+						return "", nil
+					},
+				},
+				FS: &deps.MockFileSystem{
+					StatFunc: func(path string) (os.FileInfo, error) {
+						return nil, os.ErrNotExist
+					},
+				},
+			},
+			path:     "/projects/regular-repo/feature",
+			expected: "feature",
+		},
+		{
+			name: "main checkout",
+			deps: &Deps{
+				Git: &deps.MockGit{
+					CommandInDirFunc: func(dir string, args ...string) (string, error) {
+						if len(args) >= 2 && args[0] == "rev-parse" {
+							if args[1] == "--git-common-dir" {
+								return ".git", nil
+							}
+							if args[1] == "--show-toplevel" {
+								return "/projects/regular-repo", nil
+							}
+						}
+						if len(args) >= 2 && args[0] == "config" && args[1] == "--get" {
+							return "false", nil
+						}
+						return "", nil
+					},
+				},
+				FS: &deps.MockFileSystem{
+					StatFunc: func(path string) (os.FileInfo, error) {
+						return nil, os.ErrNotExist
+					},
+				},
+			},
+			path:     "/projects/regular-repo",
+			expected: "regular-repo",
+		},
+		{
+			name: "non-git directory",
+			deps: &Deps{
+				Git: &deps.MockGit{
+					CommandInDirFunc: func(dir string, args ...string) (string, error) {
+						return "", fmt.Errorf("not a git repository")
+					},
+				},
+				FS: &deps.MockFileSystem{
+					StatFunc: func(path string) (os.FileInfo, error) {
+						return nil, os.ErrNotExist
+					},
+				},
+			},
+			path:     "/tmp/not-a-repo",
+			expected: "not-a-repo",
+		},
+		{
+			name: "sanitizes dots and colons in bare repo worktree",
+			deps: &Deps{
+				Git: bareRepoGit(),
+				FS:  bareRepoFS("/projects/my.project"),
+			},
+			path:     "/projects/my.project/feature:1",
+			expected: "my_project/feature_1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SessionNameWith(tt.deps, tt.path)
+			if result != tt.expected {
+				t.Errorf("SessionNameWith() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestTmuxSessionName(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -188,11 +322,10 @@ func TestTmuxSessionName(t *testing.T) {
 func TestDetectRepoContextWith_BareRepo(t *testing.T) {
 	d := &Deps{
 		Git: &deps.MockGit{
-			CommandFunc: func(args ...string) (string, error) {
-				// rev-parse --git-common-dir fails (not in worktree)
-				return "", fmt.Errorf("not in git dir")
-			},
 			CommandInDirFunc: func(dir string, args ...string) (string, error) {
+				if len(args) >= 2 && args[0] == "rev-parse" {
+					return "", fmt.Errorf("not in git dir")
+				}
 				if len(args) >= 2 && args[0] == "config" && args[1] == "--get" {
 					return "true", nil
 				}
@@ -232,17 +365,14 @@ func TestDetectRepoContextWith_StandardBareRepo(t *testing.T) {
 	// git-common-dir returns the bare repo path itself (not a .git subpath).
 	d := &Deps{
 		Git: &deps.MockGit{
-			CommandFunc: func(args ...string) (string, error) {
+			CommandInDirFunc: func(dir string, args ...string) (string, error) {
 				if len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir" {
 					return "/repos/game_server.git", nil
 				}
-				return "", fmt.Errorf("not needed")
-			},
-			CommandInDirFunc: func(dir string, args ...string) (string, error) {
 				if len(args) >= 2 && args[0] == "config" && args[1] == "--get" {
 					return "true", nil
 				}
-				return "", nil
+				return "", fmt.Errorf("not needed")
 			},
 		},
 		FS: &deps.MockFileSystem{
@@ -274,7 +404,7 @@ func TestDetectRepoContextWith_StandardBareRepo(t *testing.T) {
 func TestDetectRepoContextWith_RegularRepo(t *testing.T) {
 	d := &Deps{
 		Git: &deps.MockGit{
-			CommandFunc: func(args ...string) (string, error) {
+			CommandInDirFunc: func(dir string, args ...string) (string, error) {
 				if len(args) >= 2 && args[0] == "rev-parse" {
 					if args[1] == "--git-common-dir" {
 						return ".git", nil // not a bare repo worktree
@@ -283,11 +413,10 @@ func TestDetectRepoContextWith_RegularRepo(t *testing.T) {
 						return "/projects/regular-repo", nil
 					}
 				}
+				if len(args) >= 2 && args[0] == "config" && args[1] == "--get" {
+					return "false", nil
+				}
 				return "", nil
-			},
-			CommandInDirFunc: func(dir string, args ...string) (string, error) {
-				// core.bare check returns false
-				return "false", nil
 			},
 		},
 		FS: &deps.MockFileSystem{

@@ -60,8 +60,19 @@ func DetectRepoContext() (*RepoContext, error) {
 
 // DetectRepoContextWith determines the git repo context using provided dependencies
 func DetectRepoContextWith(d *Deps) (*RepoContext, error) {
+	cwd, err := d.FS.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	return DetectRepoContextFromPathWith(d, cwd)
+}
+
+// DetectRepoContextFromPathWith determines git repo context for a checkout path
+func DetectRepoContextFromPathWith(d *Deps, path string) (*RepoContext, error) {
+	path = filepath.Clean(path)
+
 	// Try to find bare repo root
-	if bareRoot := findBareRootWith(d); bareRoot != "" {
+	if bareRoot := findBareRootWith(d, path); bareRoot != "" {
 		return &RepoContext{
 			GitRoot:  bareRoot,
 			RepoName: filepath.Base(bareRoot),
@@ -70,11 +81,11 @@ func DetectRepoContextWith(d *Deps) (*RepoContext, error) {
 	}
 
 	// Check git-common-dir for worktree of bare repo
-	commonDir, err := d.Git.Command("rev-parse", "--git-common-dir")
+	commonDir, err := d.Git.CommandInDir(path, "rev-parse", "--git-common-dir")
 	if err == nil && commonDir != "" {
 		isBare, err := d.Git.CommandInDir(commonDir, "config", "--get", "core.bare")
 		if err != nil {
-			debug.Error("DetectRepoContext: git config core.bare: %v", err)
+			debug.Error("DetectRepoContextFromPath: git config core.bare: %v", err)
 		}
 		if isBare == "true" {
 			// For standard bare repos, commonDir IS the repo root.
@@ -92,7 +103,7 @@ func DetectRepoContextWith(d *Deps) (*RepoContext, error) {
 	}
 
 	// Regular repo
-	topLevel, err := d.Git.Command("rev-parse", "--show-toplevel")
+	topLevel, err := d.Git.CommandInDir(path, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +113,25 @@ func DetectRepoContextWith(d *Deps) (*RepoContext, error) {
 		RepoName: filepath.Base(topLevel),
 		IsBare:   false,
 	}, nil
+}
+
+// SessionName returns the sanitized tmux session name for a checkout path.
+// Uses default dependencies.
+func SessionName(path string) string {
+	return SessionNameWith(defaultDeps, path)
+}
+
+// SessionNameWith returns the sanitized tmux session name using provided dependencies.
+// Bare-repo worktrees use repoName/worktreeFolderName; non-bare worktrees use the
+// worktree folder name; non-git paths fall back to the directory base name.
+func SessionNameWith(d *Deps, path string) string {
+	path = filepath.Clean(path)
+	worktreeName := filepath.Base(path)
+	ctx, err := DetectRepoContextFromPathWith(d, path)
+	if err != nil {
+		return sanitizeSessionName(worktreeName)
+	}
+	return TmuxSessionName(ctx, worktreeName)
 }
 
 // ListWorktrees returns all worktrees for the current repo context
@@ -161,16 +191,24 @@ func TmuxSessionName(ctx *RepoContext, worktreeName string) string {
 	} else {
 		name = worktreeName
 	}
-	// Replace dots and colons with underscores for tmux compatibility
+	return sanitizeSessionName(name)
+}
+
+func sanitizeSessionName(name string) string {
 	name = strings.ReplaceAll(name, ".", "_")
 	name = strings.ReplaceAll(name, ":", "_")
 	return name
 }
 
-func findBareRootWith(d *Deps) string {
-	dir, err := d.FS.Getwd()
-	if err != nil {
-		debug.Error("findBareRoot: Getwd: %v", err)
+func findBareRootWith(d *Deps, startDir string) string {
+	dir := startDir
+	if dir == "" {
+		var err error
+		dir, err = d.FS.Getwd()
+		if err != nil {
+			debug.Error("findBareRoot: Getwd: %v", err)
+			return ""
+		}
 	}
 	for dir != "/" {
 		gitDir := filepath.Join(dir, ".git")

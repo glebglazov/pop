@@ -116,7 +116,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		case ui.ActionKillSession:
 			if result.Selected != nil {
 				restoreCursorIdx = result.CursorIndex
-				sessionName := project.TmuxSessionName(ctx, result.Selected.Name)
+				sessionName := project.SessionName(result.Selected.Path)
 				killTmuxSessionByName(sessionName)
 			}
 			// Continue loop — showWorktreePicker refreshes session state
@@ -197,7 +197,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	}
 
 	// Convert to UI items with session icons
-	items := buildWorktreeItems(sortedWorktrees, ctx, history.TmuxSessionActivity())
+	items := buildWorktreeItems(sortedWorktrees, history.TmuxSessionActivity())
 
 	iconLegends := []ui.IconLegend{
 		{Icon: iconDirSession, Desc: "Directory with tmux session"},
@@ -208,7 +208,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		attentionSessions := monitorAttentionSessions()
 		if attentionSessions != nil {
 			for i := range items {
-				sessionName := project.TmuxSessionName(ctx, items[i].Name)
+				sessionName := project.SessionName(items[i].Path)
 				if attentionSessions[sessionName] {
 					items[i].Icon = iconAttention
 				}
@@ -237,7 +237,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	return ui.Run(items, opts...)
 }
 
-func buildWorktreeItems(worktrees []project.Worktree, ctx *project.RepoContext, sessionActivity map[string]int64) []ui.Item {
+func buildWorktreeItems(worktrees []project.Worktree, sessionActivity map[string]int64) []ui.Item {
 	items := make([]ui.Item, len(worktrees))
 	for i, wt := range worktrees {
 		items[i] = ui.Item{
@@ -245,7 +245,7 @@ func buildWorktreeItems(worktrees []project.Worktree, ctx *project.RepoContext, 
 			Path:    wt.Path,
 			Context: wt.Branch,
 		}
-		sessionName := project.TmuxSessionName(ctx, wt.Name)
+		sessionName := project.SessionName(wt.Path)
 		if _, hasSession := sessionActivity[sessionName]; hasSession {
 			items[i].Icon = iconDirSession
 		}
@@ -265,19 +265,19 @@ func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {
 	}
 
 	if switchSession {
-		return switchTmuxSession(ctx, item)
+		return switchTmuxSession(item)
 	}
 	// Print path for shell integration
 	fmt.Println(item.Path)
 	return nil
 }
 
-func switchTmuxSession(ctx *project.RepoContext, item *ui.Item) error {
-	return switchTmuxSessionWith(defaultTmux, ctx, item)
+func switchTmuxSession(item *ui.Item) error {
+	return switchTmuxSessionWith(defaultTmux, item)
 }
 
-func switchTmuxSessionWith(tmux deps.Tmux, ctx *project.RepoContext, item *ui.Item) error {
-	sessionName := project.TmuxSessionName(ctx, item.Name)
+func switchTmuxSessionWith(tmux deps.Tmux, item *ui.Item) error {
+	sessionName := project.SessionName(item.Path)
 	inTmux := os.Getenv("TMUX") != ""
 
 	_, err := tmux.Command("has-session", "-t="+sessionName)
