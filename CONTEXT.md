@@ -55,8 +55,16 @@ The subsystem that maintains the monitored set of registered panes — tracking 
 _Avoid_: Dashboard (when you mean the view, not the mechanism)
 
 **Agentic pane**:
-A pane running an AI coding agent or its runtime (e.g. Claude, OpenCode, Pi). Integrations cause these panes to self-register with the **Monitor**; other panes may also be tracked explicitly.
+A pane running an AI coding agent or its runtime (e.g. Claude, OpenCode, Pi). Integrations cause these panes to register with the **Monitor**; other panes may also be tracked explicitly.
 _Avoid_: Agent pane, bot pane
+
+**Registration**:
+A pane entering the **Monitor**'s tracked set. A pane is **tracked** once registered; untracked panes are outside pop's domain.
+_Avoid_: Tracking (when you mean the act of entering the set, not the ongoing state)
+
+**Auto-registration**:
+**Registration** that happens as a side effect of an untracked pane's first report, rather than an explicit add — the common path for **agentic panes** via **integrations**. The trigger differs by report: reporting a status auto-registers the pane unless registration is suppressed; setting **Following** auto-registers only when following (never when unfollowing); a **Visit** never auto-registers.
+_Avoid_: Self-registration (same event seen from the agent's side; prefer auto-registration)
 
 ### Pickers
 
