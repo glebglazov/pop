@@ -193,7 +193,7 @@ func BuildFailedInfo(stem string, m *Manifest) (ids []string, hints []string) {
 	for _, issue := range m.Issues {
 		if issue.Status == "failed" {
 			ids = append(ids, issue.ID)
-			hints = append(hints, fmt.Sprintf("pop workload reset-issue %s %s", stem, issue.ID))
+			hints = append(hints, fmt.Sprintf("pop workload reset-issue --prd %s --issue %s", stem, issue.ID))
 		}
 	}
 	return ids, hints

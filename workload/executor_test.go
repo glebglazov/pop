@@ -96,8 +96,11 @@ func TestRunIssueAgentFailureExitCode(t *testing.T) {
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{exitCode: 1})
 
 	d := env.deps()
-	_, err := RunIssueWith(d, nil, nil, env.runOpts(true, agent))
+	opts := env.runOpts(true, agent)
+	opts.MaxTries = 1
+	_, err := RunIssueWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
+	assertIssueFailed(t, env, "01-a", 1)
 }
 
 func TestRunIssueMissingSentinelFails(t *testing.T) {
@@ -110,8 +113,11 @@ func TestRunIssueMissingSentinelFails(t *testing.T) {
 	})
 
 	d := env.deps()
-	_, err := RunIssueWith(d, nil, nil, env.runOpts(true, agent))
+	opts := env.runOpts(true, agent)
+	opts.MaxTries = 1
+	_, err := RunIssueWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
+	assertIssueFailed(t, env, "01-a", 1)
 }
 
 func TestRunIssueCommitFailurePreservesOpenIssue(t *testing.T) {
@@ -514,6 +520,24 @@ func assertIssueOpen(t *testing.T, env *execFixture, issueID string) {
 			t.Fatalf("issue %s status = %q, want open", issueID, issue.Status)
 		}
 	}
+}
+
+func assertIssueFailed(t *testing.T, env *execFixture, issueID string, failedAfter int) {
+	t.Helper()
+	m := LoadManifest(DefaultDeps(), "demo", filepath.Join(env.root, "thoughts/issues/demo/index.json"))
+	for _, issue := range m.Issues {
+		if issue.ID != issueID {
+			continue
+		}
+		if issue.Status != "failed" {
+			t.Fatalf("issue %s status = %q, want failed", issueID, issue.Status)
+		}
+		if issue.FailedAfter == nil || *issue.FailedAfter != failedAfter {
+			t.Fatalf("issue %s failed_after = %v, want %d", issueID, issue.FailedAfter, failedAfter)
+		}
+		return
+	}
+	t.Fatalf("issue %s not found", issueID)
 }
 
 func assertProgressContains(t *testing.T, env *execFixture, parts ...string) {

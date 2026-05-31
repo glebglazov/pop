@@ -210,7 +210,7 @@ func TestFailedRowResetHints(t *testing.T) {
 	if len(result.Rows) != 1 || result.Rows[0].Status != StatusFailed {
 		t.Fatalf("rows = %#v", result.Rows)
 	}
-	if len(result.Rows[0].ResetHints) != 1 || !strings.Contains(result.Rows[0].ResetHints[0], "reset-issue failed-prd 01-broken") {
+	if len(result.Rows[0].ResetHints) != 1 || !strings.Contains(result.Rows[0].ResetHints[0], "reset-issue --prd failed-prd --issue 01-broken") {
 		t.Fatalf("reset hints = %v", result.Rows[0].ResetHints)
 	}
 

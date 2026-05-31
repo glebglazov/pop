@@ -6,10 +6,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
+)
+
+const (
+	DefaultMaxTries         = 3
+	DefaultAttemptTimeout   = 30 * time.Minute
 )
 
 // RunIssueOptions configures a single-issue execution.
@@ -20,6 +28,8 @@ type RunIssueOptions struct {
 	AgentPreset   string
 	AgentCmd      string
 	AllowDirty    bool
+	MaxTries      int
+	Timeout       time.Duration
 	Yes           bool
 	ConfirmIn     io.Reader
 	ConfirmOut    io.Writer
@@ -28,12 +38,20 @@ type RunIssueOptions struct {
 
 // RunIssueResult is the outcome of a successful or declined run-issue.
 type RunIssueResult struct {
-	Selection  *Selection
-	Refresh    *RefreshResult
-	Declined   bool
-	NoOp       bool
-	CommitSHA  string
+	Selection    *Selection
+	Refresh      *RefreshResult
+	Declined     bool
+	NoOp         bool
+	CommitSHA    string
 	AgentSummary string
+}
+
+type attemptOutcome struct {
+	output      string
+	exitCode    int
+	timedOut    bool
+	interrupted bool
+	runErr      error
 }
 
 // RunIssue executes one workload issue through an agent.
@@ -124,51 +142,23 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	agentOut, exitCode, runErr := runAgent(d, runtimePath, out, name, args)
-	if runErr != nil {
-		return nil, exitErr(ExitOperational, "agent execution: %v", runErr)
+	maxTries := opts.MaxTries
+	if maxTries <= 0 {
+		maxTries = DefaultMaxTries
 	}
-	if exitCode != 0 {
-		return nil, exitErr(ExitOperational, "agent exited with status %d", exitCode)
-	}
-
-	issueData, err := d.FS.ReadFile(sel.IssuePath)
-	if err != nil {
-		return nil, exitErr(ExitOperational, "read issue markdown: %v", err)
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultAttemptTimeout
 	}
 
-	assessment := AssessCompletion(agentOut, issueData)
-	if !assessment.Complete {
-		reason := assessment.FailedReason
-		if reason == "" {
-			reason = "agent output did not satisfy completion contract"
+	result, execErr := executeIssueAttempts(d, sel, runtimePath, out, name, args, maxTries, timeout)
+	if execErr != nil {
+		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
+		if refreshErr == nil && !opts.Yes {
+			fmt.Fprintln(out)
+			Render(out, afterRefresh)
 		}
-		return nil, exitErr(ExitOperational, "%s", reason)
-	}
-
-	hasChanges, err := runtimeHasChanges(d, runtimePath)
-	if err != nil {
-		return nil, exitErr(ExitOperational, "check runtime changes: %v", err)
-	}
-
-	result := &RunIssueResult{
-		Selection:    sel,
-		Refresh:      refresh,
-		AgentSummary: assessment.Summary,
-	}
-
-	if hasChanges {
-		sha, err := createImplementationCommit(d, runtimePath, sel.PRDID, sel.IssueID, assessment.Summary)
-		if err != nil {
-			return nil, exitErr(ExitOperational, "implementation commit: %v", err)
-		}
-		result.CommitSHA = sha
-	} else {
-		result.NoOp = true
-	}
-
-	if err := finalizeIssueDone(d, sel, assessment.Summary); err != nil {
-		return nil, exitErr(ExitOperational, "local bookkeeping: %v", err)
+		return result, execErr
 	}
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
@@ -185,6 +175,169 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	}
 
 	return result, nil
+}
+
+func executeIssueAttempts(d *Deps, sel *Selection, runtimePath string, out io.Writer, name string, args []string, maxTries int, timeout time.Duration) (*RunIssueResult, error) {
+	for attempt := 1; attempt <= maxTries; attempt++ {
+		fmt.Fprintf(out, "Attempt %d/%d\n", attempt, maxTries)
+
+		agentOut, outcome, err := runAgentAttempt(d, runtimePath, out, timeout, name, args...)
+		if err != nil {
+			return nil, exitErr(ExitOperational, "agent execution: %v", err)
+		}
+		if outcome.interrupted {
+			return nil, exitErr(ExitInterrupted, "interrupted")
+		}
+		if outcome.timedOut {
+			summary := fmt.Sprintf("timed out after %s on attempt %d", timeout, attempt)
+			if err := finalizeIssueFailed(d, sel, attempt, summary); err != nil {
+				return nil, manualRepairErr(err)
+			}
+			return nil, exitErr(ExitOperational, "issue timed out after %d started attempt(s)", attempt)
+		}
+		if outcome.runErr != nil {
+			return nil, exitErr(ExitOperational, "agent execution: %v", outcome.runErr)
+		}
+
+		issueData, err := d.FS.ReadFile(sel.IssuePath)
+		if err != nil {
+			return nil, exitErr(ExitOperational, "read issue markdown: %v", err)
+		}
+
+		assessment, reason := assessAttempt(agentOut, outcome.exitCode, issueData)
+		if assessment.Complete {
+			return completeSuccessfulIssue(d, sel, runtimePath, assessment.Summary)
+		}
+
+		fmt.Fprintf(out, "Attempt %d failed: %s\n", attempt, reason)
+		if attempt < maxTries {
+			fmt.Fprintln(out, "Retrying with preserved changes...")
+			continue
+		}
+
+		summary := fmt.Sprintf("failed after %d attempts: %s", maxTries, reason)
+		if err := finalizeIssueFailed(d, sel, maxTries, summary); err != nil {
+			return nil, manualRepairErr(err)
+		}
+		return nil, exitErr(ExitOperational, "%s", summary)
+	}
+	return nil, exitErr(ExitOperational, "unexpected attempt loop exit")
+}
+
+func assessAttempt(agentOut string, exitCode int, issueData []byte) (Assessment, string) {
+	if exitCode != 0 {
+		return Assessment{}, fmt.Sprintf("agent exited with status %d", exitCode)
+	}
+	assessment := AssessCompletion(agentOut, issueData)
+	if assessment.Complete {
+		return assessment, ""
+	}
+	reason := assessment.FailedReason
+	if reason == "" {
+		reason = "agent output did not satisfy completion contract"
+	}
+	return assessment, reason
+}
+
+func completeSuccessfulIssue(d *Deps, sel *Selection, runtimePath, summary string) (*RunIssueResult, error) {
+	hasChanges, err := runtimeHasChanges(d, runtimePath)
+	if err != nil {
+		return nil, exitErr(ExitOperational, "check runtime changes: %v", err)
+	}
+
+	result := &RunIssueResult{
+		Selection:    sel,
+		AgentSummary: summary,
+	}
+
+	if hasChanges {
+		sha, err := createImplementationCommit(d, runtimePath, sel.PRDID, sel.IssueID, summary)
+		if err != nil {
+			return nil, exitErr(ExitOperational, "implementation commit: %v", err)
+		}
+		result.CommitSHA = sha
+	} else {
+		result.NoOp = true
+	}
+
+	if err := finalizeIssueDone(d, sel, summary); err != nil {
+		return nil, manualRepairErr(err)
+	}
+	return result, nil
+}
+
+func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout time.Duration, name string, args ...string) (string, *attemptOutcome, error) {
+	var capture bytes.Buffer
+	mw := io.MultiWriter(liveOut, &capture)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	proc, err := d.Runner.Start(ctx, runtimePath, mw, mw, name, args...)
+	if err != nil {
+		return "", nil, err
+	}
+
+	outcome := &attemptOutcome{}
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	done := make(chan waitResult, 1)
+	go func() {
+		code, waitErr := proc.Wait()
+		done <- waitResult{exitCode: code, err: waitErr}
+	}()
+
+	timeoutCh := time.After(timeout)
+
+	waitForDone := func() {
+		r := <-done
+		outcome.exitCode = r.exitCode
+		if r.err != nil && r.exitCode == 0 {
+			outcome.runErr = r.err
+		}
+	}
+
+	select {
+	case sig := <-sigCh:
+		_ = sig
+		outcome.interrupted = true
+		terminateProcessGroup(proc, syscall.SIGTERM)
+		grace := time.NewTimer(signalGracePeriod)
+		select {
+		case <-done:
+			grace.Stop()
+		case <-grace.C:
+			terminateProcessGroup(proc, syscall.SIGKILL)
+			<-done
+		}
+	case <-timeoutCh:
+		outcome.timedOut = true
+		terminateProcessGroup(proc, syscall.SIGKILL)
+		waitForDone()
+	case r := <-done:
+		outcome.exitCode = r.exitCode
+		if r.err != nil && r.exitCode == 0 {
+			outcome.runErr = r.err
+		}
+	}
+
+	return capture.String(), outcome, nil
+}
+
+func finalizeIssueFailed(d *Deps, sel *Selection, attemptsStarted int, summary string) error {
+	if err := AppendProgress(d, sel.Manifest.Dir, sel.IssueFile, "FAILED", summary); err != nil {
+		return fmt.Errorf("append progress: %w", err)
+	}
+	sel.Manifest.Issues[sel.IssueIndex].Status = "failed"
+	failedAfter := attemptsStarted
+	sel.Manifest.Issues[sel.IssueIndex].FailedAfter = &failedAfter
+	return WriteManifestAtomic(d, sel.Manifest)
+}
+
+func manualRepairErr(err error) *ExitError {
+	return exitErr(ExitOperational, "local bookkeeping failed; manual repair required: %v", err)
 }
 
 func cloneRows(rows []Row) []Row {
@@ -259,14 +412,6 @@ func checkpointDirtyRuntime(d *Deps, runtimePath, prdID, issueID string) error {
 		return err
 	}
 	return nil
-}
-
-func runAgent(d *Deps, runtimePath string, liveOut io.Writer, name string, args []string) (string, int, error) {
-	var capture bytes.Buffer
-	mw := io.MultiWriter(liveOut, &capture)
-	ctx := context.Background()
-	exitCode, err := d.Runner.Run(ctx, runtimePath, mw, mw, name, args...)
-	return capture.String(), exitCode, err
 }
 
 func runtimeHasChanges(d *Deps, runtimePath string) (bool, error) {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -20,10 +21,14 @@ var (
 	workloadRuntimePath string
 	workloadRunPRD      string
 	workloadRunIssue    string
+	workloadResetPRD    string
+	workloadResetIssue  string
 	workloadAgentPreset string
 	workloadAgentCmd    string
 	workloadRunYes      bool
 	workloadAllowDirty  bool
+	workloadMaxTries    int
+	workloadTimeout     string
 )
 
 var workloadCmd = &cobra.Command{
@@ -52,11 +57,19 @@ var workloadRunIssueCmd = &cobra.Command{
 	Run:   runWorkloadRunIssue,
 }
 
+var workloadResetIssueCmd = &cobra.Command{
+	Use:   "reset-issue",
+	Short: "Reset one failed issue back to open",
+	Args:  cobra.NoArgs,
+	Run:   runWorkloadResetIssue,
+}
+
 func init() {
 	rootCmd.AddCommand(workloadCmd)
 	workloadCmd.AddCommand(workloadStatusCmd)
 	workloadCmd.AddCommand(workloadSetPriorityCmd)
 	workloadCmd.AddCommand(workloadRunIssueCmd)
+	workloadCmd.AddCommand(workloadResetIssueCmd)
 
 	workloadCmd.PersistentFlags().StringVar(&workloadProject, "project", "", "Select project by exact picker-visible name")
 	workloadCmd.PersistentFlags().StringVar(&workloadPath, "path", "", "Select project by path (normalized to git checkout root)")
@@ -68,7 +81,12 @@ func init() {
 	workloadRunIssueCmd.Flags().BoolVar(&workloadAllowDirty, "allow-dirty", false, "Checkpoint dirty runtime state before execution")
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
+	workloadRunIssueCmd.Flags().IntVar(&workloadMaxTries, "max-tries", workload.DefaultMaxTries, "Maximum started attempts per issue")
+	workloadRunIssueCmd.Flags().StringVar(&workloadTimeout, "timeout", "30m", "Maximum duration per attempt")
 	workloadRunIssueCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
+
+	workloadResetIssueCmd.Flags().StringVar(&workloadResetPRD, "prd", "", "Target PRD by exact identifier")
+	workloadResetIssueCmd.Flags().StringVar(&workloadResetIssue, "issue", "", "Target issue by exact identifier")
 }
 
 func workloadResolveInput() workload.ResolveInput {
@@ -133,19 +151,44 @@ func runWorkloadRunIssue(cmd *cobra.Command, args []string) {
 }
 
 func runWorkloadRunIssueWith(d *workload.Deps, stdout, stderr io.Writer, stdin io.Reader) error {
-	_, err := workload.RunIssueWith(d, workloadProjectDeps(), workloadConfigLoad, workload.RunIssueOptions{
+	timeout, err := time.ParseDuration(workloadTimeout)
+	if err != nil {
+		return fmt.Errorf("workload run-issue: invalid --timeout %q: %w", workloadTimeout, err)
+	}
+	_, err = workload.RunIssueWith(d, workloadProjectDeps(), workloadConfigLoad, workload.RunIssueOptions{
 		ResolveInput:  workloadResolveInput(),
 		PRDOverride:   workloadRunPRD,
 		IssueOverride: workloadRunIssue,
 		AgentPreset:   workloadAgentPreset,
 		AgentCmd:      workloadAgentCmd,
 		AllowDirty:    workloadAllowDirty,
+		MaxTries:      workloadMaxTries,
+		Timeout:       timeout,
 		Yes:           workloadRunYes,
 		ConfirmIn:     stdin,
 		ConfirmOut:    stderr,
 		Output:        stdout,
 	})
 	return err
+}
+
+func runWorkloadResetIssue(cmd *cobra.Command, args []string) {
+	err := runWorkloadResetIssueWith(workload.DefaultDeps(), os.Stdout)
+	handleWorkloadExit(err)
+}
+
+func runWorkloadResetIssueWith(d *workload.Deps, w io.Writer) error {
+	result, err := workload.ResetIssueWith(d, workloadProjectDeps(), workloadConfigLoad, workload.ResetIssueOptions{
+		ResolveInput: workloadResolveInput(),
+		PRDID:        workloadResetPRD,
+		IssueID:      workloadResetIssue,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Reset issue %s/%s to open\n\n", workloadResetPRD, workloadResetIssue)
+	workload.Render(w, result.Refresh)
+	return nil
 }
 
 func handleWorkloadExit(err error) {
