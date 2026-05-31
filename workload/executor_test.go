@@ -62,6 +62,41 @@ func TestRunIssueNoOpCompletion(t *testing.T) {
 	assertIssueDone(t, env, "01-a")
 }
 
+func TestRunIssueTargetsEligibleIssuePath(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	setupManifest(t, env.root, "target", []Issue{
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	if _, err := RefreshWith(DefaultDeps(), env.root, DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		checkIssue: true,
+		summary:    "targeted issue",
+	})
+
+	opts := env.runOpts(true, agent)
+	opts.IssuePathOverride = "thoughts/issues/target/02-b.md"
+	result, err := RunIssueWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.IssueSetID != "target" || result.Selection.IssueID != "02-b" {
+		t.Fatalf("selection = %s/%s", result.Selection.IssueSetID, result.Selection.IssueID)
+	}
+}
+
+func TestRunIssueRejectsBareManifestID(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	opts := env.runOpts(true, "")
+	opts.IssuePathOverride = "01-a"
+
+	_, err := RunIssueWith(env.deps(), nil, nil, opts)
+	if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestRunIssueDeclinedConfirmation(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})

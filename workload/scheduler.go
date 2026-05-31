@@ -95,7 +95,7 @@ func findRow(refresh *RefreshResult, issueSetID string) *Row {
 // SelectIssue chooses the next issue to run from a refreshed workload.
 func SelectIssue(refresh *RefreshResult, issueSetOverride, issueOverride string) (*Selection, error) {
 	if issueOverride != "" && issueSetOverride == "" {
-		return nil, exitErr(ExitSetup, "explicit --issue requires --issue-set")
+		return nil, exitErr(ExitSetup, "explicit issue requires an Issue set")
 	}
 
 	manifests := refresh.Manifests

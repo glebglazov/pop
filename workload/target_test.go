@@ -91,6 +91,53 @@ func TestResolveWorkloadTargetsSpanningIssuePath(t *testing.T) {
 	}
 }
 
+func TestResolveIssueTargetPathAndBareFilename(t *testing.T) {
+	root := t.TempDir()
+	setupManifest(t, root, "demo", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	refresh := refreshFixture(t, root)
+
+	setID, issueID, err := ResolveIssueTarget(DefaultDeps(), refresh, root, "thoughts/issues/demo/01-a.md")
+	if err != nil || setID != "demo" || issueID != "01-a" {
+		t.Fatalf("tree path = %s/%s err=%v", setID, issueID, err)
+	}
+
+	issueDir := filepath.Join(root, "thoughts/issues/demo")
+	setID, issueID, err = ResolveIssueTarget(DefaultDeps(), refresh, issueDir, "01-a.md")
+	if err != nil || setID != "demo" || issueID != "01-a" {
+		t.Fatalf("bare filename = %s/%s err=%v", setID, issueID, err)
+	}
+}
+
+func TestResolveIssueTargetRejectsNonRelativeReferences(t *testing.T) {
+	root := t.TempDir()
+	setupManifest(t, root, "demo", []Issue{
+		{ID: "add-auth", File: "01-add-auth.md", Title: "Auth", Type: "AFK", Status: "open"},
+	})
+	refresh := refreshFixture(t, root)
+
+	for _, raw := range []string{"add-auth", filepath.Join(root, "thoughts/issues/demo/01-add-auth.md")} {
+		_, _, err := ResolveIssueTarget(DefaultDeps(), refresh, root, raw)
+		if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
+			t.Fatalf("ResolveIssueTarget(%q) error = %v", raw, err)
+		}
+	}
+}
+
+func TestResolveIssueTargetRejectsUnknownRelativePathWithWorkloadIdentifiers(t *testing.T) {
+	root := t.TempDir()
+	setupManifest(t, root, "demo", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	refresh := refreshFixture(t, root)
+
+	_, _, err := ResolveIssueTarget(DefaultDeps(), refresh, root, "thoughts/issues/missing/01-a.md")
+	if err == nil || !strings.Contains(err.Error(), "valid: demo") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestResolveWorkloadTargetsIssueSetRelativeFile(t *testing.T) {
 	root := t.TempDir()
 	setupManifest(t, root, "demo", []Issue{

@@ -71,15 +71,9 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "svc")
 	})
 
-	t.Run("prd", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "run-issue", "--issue-set")
-		assertShellCompContains(t, out, "svc")
-	})
-
-	t.Run("issue scoped to prd", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "run-issue", "--issue-set", "svc", "--issue")
-		assertShellCompContains(t, out, "01-a", "02-b")
-		assertShellCompOmits(t, out, "99-z")
+	t.Run("run issue positional path", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "workload", "run-issue", "thoughts/issues/svc/")
+		assertShellCompContains(t, out, "thoughts/issues/svc/01-a.md", "thoughts/issues/svc/02-b.md")
 	})
 
 	t.Run("agent presets", func(t *testing.T) {
@@ -109,7 +103,7 @@ func TestWorkloadCompletionReadOnly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	_ = shellCompNoDesc(t, "workload", "run-issue", "--issue-set")
+	_ = shellCompNoDescCompleting(t, "workload", "run-issue", "thoughts/")
 
 	statePath := filepath.Join(root, "pop", "workloads-state.json")
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
@@ -128,13 +122,22 @@ func shellCompNoDesc(t *testing.T, args ...string) string {
 	t.Helper()
 	allArgs := append([]string{cobra.ShellCompNoDescRequestCmd}, args...)
 	allArgs = append(allArgs, "")
+	return executeShellComp(t, allArgs)
+}
 
+func shellCompNoDescCompleting(t *testing.T, args ...string) string {
+	t.Helper()
+	return executeShellComp(t, append([]string{cobra.ShellCompNoDescRequestCmd}, args...))
+}
+
+func executeShellComp(t *testing.T, allArgs []string) string {
+	t.Helper()
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(io.Discard)
 	rootCmd.SetArgs(allArgs)
 	if _, err := rootCmd.ExecuteC(); err != nil {
-		t.Fatalf("shell comp %v: %v", args, err)
+		t.Fatalf("shell comp %v: %v", allArgs, err)
 	}
 	return buf.String()
 }

@@ -25,13 +25,7 @@ func registerWorkloadShellCompletions() {
 
 	_ = workloadCmd.RegisterFlagCompletionFunc("project", completeWorkloadProjects)
 
-	for _, cmd := range []*cobra.Command{
-		workloadRunIssueCmd,
-		workloadResetIssueCmd,
-	} {
-		_ = cmd.RegisterFlagCompletionFunc("issue-set", completeWorkloadIssueSets)
-	}
-	_ = workloadRunIssueCmd.RegisterFlagCompletionFunc("issue", completeWorkloadIssues)
+	_ = workloadResetIssueCmd.RegisterFlagCompletionFunc("issue-set", completeWorkloadIssueSets)
 	_ = workloadResetIssueCmd.RegisterFlagCompletionFunc("issue", completeWorkloadIssues)
 
 	for _, cmd := range []*cobra.Command{workloadRunIssueCmd, workloadRunIssuesCmd} {
@@ -39,6 +33,7 @@ func registerWorkloadShellCompletions() {
 	}
 
 	workloadSetPriorityCmd.ValidArgsFunction = completeWorkloadSetPriorityArgs
+	workloadRunIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
 }
 
 func registerWorkloadPathFlagCompletions() {
@@ -97,6 +92,13 @@ func completeWorkloadSetPriorityArgs(cmd *cobra.Command, args []string, toComple
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	return completeWorkloadIssueSets(cmd, args, toComplete)
+}
+
+func completeWorkloadRunIssueArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeWorkloadIssues(cmd, args, toComplete)
 }
 
 func completionInputFromCmd(cmd *cobra.Command) workload.CompletionInput {

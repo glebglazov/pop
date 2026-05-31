@@ -15,20 +15,18 @@ import (
 )
 
 var (
-	workloadProject          string
-	workloadPath             string
-	workloadDefPath          string
-	workloadRuntimePath      string
-	workloadRunIssueIssueSet string
-	workloadRunIssue         string
-	workloadResetIssueSet    string
-	workloadResetIssue       string
-	workloadAgentPreset      string
-	workloadAgentCmd         string
-	workloadRunYes           bool
-	workloadAllowDirty       workload.DirtyRuntimeStrategy
-	workloadMaxTries         int
-	workloadTimeout          string
+	workloadProject       string
+	workloadPath          string
+	workloadDefPath       string
+	workloadRuntimePath   string
+	workloadResetIssueSet string
+	workloadResetIssue    string
+	workloadAgentPreset   string
+	workloadAgentCmd      string
+	workloadRunYes        bool
+	workloadAllowDirty    workload.DirtyRuntimeStrategy
+	workloadMaxTries      int
+	workloadTimeout       string
 )
 
 var workloadCmd = &cobra.Command{
@@ -51,9 +49,9 @@ var workloadSetPriorityCmd = &cobra.Command{
 }
 
 var workloadRunIssueCmd = &cobra.Command{
-	Use:   "run-issue",
+	Use:   "run-issue [ISSUE_PATH]",
 	Short: "Execute one eligible AFK issue through a coding agent",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MaximumNArgs(1),
 	Run:   runWorkloadRunIssue,
 }
 
@@ -83,8 +81,6 @@ func init() {
 	workloadCmd.PersistentFlags().StringVar(&workloadPath, "path", "", "Select project by path (normalized to git checkout root)")
 	workloadCmd.PersistentFlags().StringVar(&workloadDefPath, "workload-definition-path", "", "Exact workload definition directory (not normalized to git root)")
 
-	workloadRunIssueCmd.Flags().StringVar(&workloadRunIssueIssueSet, "issue-set", "", "Target Issue set by identifier or CWD-relative path")
-	workloadRunIssueCmd.Flags().StringVar(&workloadRunIssue, "issue", "", "Target issue by identifier, markdown filename, or CWD-relative path")
 	workloadRunIssueCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
 	workloadRunIssueCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue, commit-and-continue, stash-and-continue")
 	workloadRunIssueCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
@@ -164,28 +160,31 @@ func runWorkloadSetPriorityWith(d *workload.Deps, w io.Writer, issueSetID, prior
 }
 
 func runWorkloadRunIssue(cmd *cobra.Command, args []string) {
-	err := runWorkloadRunIssueWith(workload.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin)
+	var issuePath string
+	if len(args) > 0 {
+		issuePath = args[0]
+	}
+	err := runWorkloadRunIssueWith(workload.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, issuePath)
 	handleWorkloadExit(err)
 }
 
-func runWorkloadRunIssueWith(d *workload.Deps, stdout, stderr io.Writer, stdin io.Reader) error {
+func runWorkloadRunIssueWith(d *workload.Deps, stdout, stderr io.Writer, stdin io.Reader, issuePath string) error {
 	timeout, err := time.ParseDuration(workloadTimeout)
 	if err != nil {
 		return fmt.Errorf("workload run-issue: invalid --timeout %q: %w", workloadTimeout, err)
 	}
 	_, err = workload.RunIssueWith(d, workloadProjectDeps(), workloadConfigLoad, workload.RunIssueOptions{
-		ResolveInput:     workloadResolveInput(),
-		IssueSetOverride: workloadRunIssueIssueSet,
-		IssueOverride:    workloadRunIssue,
-		AgentPreset:      workloadAgentPreset,
-		AgentCmd:         workloadAgentCmd,
-		AllowDirty:       workloadAllowDirty,
-		MaxTries:         workloadMaxTries,
-		Timeout:          timeout,
-		Yes:              workloadRunYes,
-		ConfirmIn:        stdin,
-		ConfirmOut:       stderr,
-		Output:           stdout,
+		ResolveInput:      workloadResolveInput(),
+		IssuePathOverride: issuePath,
+		AgentPreset:       workloadAgentPreset,
+		AgentCmd:          workloadAgentCmd,
+		AllowDirty:        workloadAllowDirty,
+		MaxTries:          workloadMaxTries,
+		Timeout:           timeout,
+		Yes:               workloadRunYes,
+		ConfirmIn:         stdin,
+		ConfirmOut:        stderr,
+		Output:            stdout,
 	})
 	return err
 }

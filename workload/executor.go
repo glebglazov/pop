@@ -55,17 +55,16 @@ func ValidDirtyRuntimeStrategies() []string {
 // RunIssueOptions configures a single-issue execution.
 type RunIssueOptions struct {
 	ResolveInput
-	IssueSetOverride string
-	IssueOverride    string
-	AgentPreset      string
-	AgentCmd         string
-	AllowDirty       DirtyRuntimeStrategy
-	MaxTries         int
-	Timeout          time.Duration
-	Yes              bool
-	ConfirmIn        io.Reader
-	ConfirmOut       io.Writer
-	Output           io.Writer
+	IssuePathOverride string
+	AgentPreset       string
+	AgentCmd          string
+	AllowDirty        DirtyRuntimeStrategy
+	MaxTries          int
+	Timeout           time.Duration
+	Yes               bool
+	ConfirmIn         io.Reader
+	ConfirmOut        io.Writer
+	Output            io.Writer
 }
 
 // RunIssueResult is the outcome of a successful or declined run-issue.
@@ -116,7 +115,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	issueSetID, issueID, err := ResolveWorkloadTargets(d, refresh, opts.CWD, opts.IssueSetOverride, opts.IssueOverride)
+	issueSetID, issueID, err := ResolveIssueTarget(d, refresh, opts.CWD, opts.IssuePathOverride)
 	if err != nil {
 		return nil, err
 	}

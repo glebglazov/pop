@@ -148,6 +148,26 @@ func ResolveIssueSetTarget(d *Deps, refresh *RefreshResult, cwd, raw string) (st
 	return resolveIssueSetPath(d, refresh, cwd, raw)
 }
 
+// ResolveIssueTarget normalizes a CWD-relative issue markdown path to canonical identifiers.
+func ResolveIssueTarget(d *Deps, refresh *RefreshResult, cwd, raw string) (issueSetID, issueID string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", nil
+	}
+	if !isIssueFileReference(raw) || filepath.IsAbs(expandHome(d, raw)) {
+		return "", "", exitErr(ExitSetup, "issue target %q must be a CWD-relative path", raw)
+	}
+
+	issueSetID, issueID, ok, err := resolveIssueFromPath(d, refresh, cwd, raw)
+	if err != nil {
+		return "", "", err
+	}
+	if ok {
+		return issueSetID, issueID, nil
+	}
+	return "", "", exitErr(ExitNoRunnable, "%s", unknownIssueSetTargetMessage(refresh, raw))
+}
+
 func resolveIssueFromPath(d *Deps, refresh *RefreshResult, cwd, raw string) (issueSetID, issueID string, ok bool, err error) {
 	abs, err := absFromCWD(d, cwd, raw)
 	if err != nil {
