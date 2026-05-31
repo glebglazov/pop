@@ -13,6 +13,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
+	"github.com/glebglazov/pop/project"
 )
 
 func TestFindPaneWith(t *testing.T) {
@@ -128,15 +129,15 @@ func TestResolveSessionWith_WithProject(t *testing.T) {
 
 	var createdSession string
 	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "has-session" {
-				return "", fmt.Errorf("no such session") // session doesn't exist
+		HasSessionFunc: func(name string) bool {
+			return false
+		},
+		NewSessionFunc: func(name, dir string) error {
+			createdSession = name
+			if dir != paneProject {
+				t.Errorf("new session dir = %q, want %q", dir, paneProject)
 			}
-			if args[0] == "new-session" {
-				createdSession = args[2] // "-ds", name
-				return "", nil
-			}
-			return "", nil
+			return nil
 		},
 	}
 
@@ -144,11 +145,12 @@ func TestResolveSessionWith_WithProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if session != "my_project" { // dots sanitized to underscores
-		t.Errorf("got %q, want %q", session, "my_project")
+	want := project.SessionName(paneProject)
+	if session != want {
+		t.Errorf("got %q, want %q", session, want)
 	}
-	if createdSession != "my_project" {
-		t.Errorf("created session %q, want %q", createdSession, "my_project")
+	if createdSession != want {
+		t.Errorf("created session %q, want %q", createdSession, want)
 	}
 }
 
@@ -158,11 +160,8 @@ func TestResolveSessionWith_ExistingSession(t *testing.T) {
 	paneProject = "/home/user/project"
 
 	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "has-session" {
-				return "", nil // session exists
-			}
-			return "", nil
+		HasSessionFunc: func(name string) bool {
+			return name == project.SessionName(paneProject)
 		},
 	}
 
@@ -170,8 +169,9 @@ func TestResolveSessionWith_ExistingSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if session != "project" {
-		t.Errorf("got %q, want %q", session, "project")
+	want := project.SessionName(paneProject)
+	if session != want {
+		t.Errorf("got %q, want %q", session, want)
 	}
 }
 

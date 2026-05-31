@@ -393,8 +393,8 @@ func mostRecentlyActivePane(panes []ui.AttentionPane, paneLastActiveAt map[strin
 }
 
 // sessionAccessTime returns the pop history access timestamp for a session.
-// It matches the session name against history entries by checking if the
-// sanitized base name of a history path matches the session name.
+// It matches the session name against history entries using the same Session
+// name rules as project/worktree pickers.
 func sessionAccessTime(session string, hist *history.History) int64 {
 	if hist == nil {
 		return 0
@@ -405,25 +405,15 @@ func sessionAccessTime(session string, hist *history.History) int64 {
 	}
 	var partial int64
 	for _, e := range hist.Entries {
-		sanitizedBase := sanitizeSessionName(pathBase(e.Path))
-		if sanitizedBase == session {
+		entrySession := historyEntrySessionName(e.Path)
+		if entrySession == session {
 			return e.LastAccess.Unix()
 		}
-		if partial == 0 && sanitizedBase == lastComponent {
+		if partial == 0 && entrySession == lastComponent {
 			partial = e.LastAccess.Unix()
 		}
 	}
 	return partial
-}
-
-// pathBase returns the last element of a path, handling the tmux: prefix
-func pathBase(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			return path[i+1:]
-		}
-	}
-	return path
 }
 
 // applyPaneLabel stores an optional display label on a pane entry. Hooks pass

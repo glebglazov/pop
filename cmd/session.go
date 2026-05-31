@@ -3,13 +3,13 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/session"
 	"github.com/glebglazov/pop/ui"
 )
@@ -154,16 +154,14 @@ func tmuxPaneCommandsWith(tmux deps.Tmux) map[string]string {
 
 // capturePanePreview captures the last 50 lines of a tmux pane for preview display
 // sessionHistoryPath returns the history path to record for a given tmux session name.
-// It searches existing history entries for one whose sanitized base name matches,
+// It searches existing history entries for one whose Session name matches,
 // falling back to tmux:<sessionName> for standalone sessions.
 //
-// Session names for worktrees are formed as "<displayName>/<worktreeName>", so
-// filepath.Base alone only captures the last component. We first try an exact
-// base match, then fall back to matching the base against the last slash-separated
+// Bare-repo sessions use "repo/worktree" names; we first try an exact
+// SessionName match, then fall back to matching the last slash-separated
 // component of the session name (e.g. "worktrees-and-stuff" from
 // "game_server/worktrees-and-stuff").
 func sessionHistoryPath(sessionName string, hist *history.History) string {
-	// Last component of the session name (after the final slash, if any)
 	lastComponent := sessionName
 	if i := strings.LastIndex(sessionName, "/"); i >= 0 {
 		lastComponent = sessionName[i+1:]
@@ -171,18 +169,25 @@ func sessionHistoryPath(sessionName string, hist *history.History) string {
 
 	var partialMatch string
 	for _, e := range hist.Entries {
-		sanitizedBase := sanitizeSessionName(filepath.Base(e.Path))
-		if sanitizedBase == sessionName {
-			return e.Path // exact match
+		entrySession := historyEntrySessionName(e.Path)
+		if entrySession == sessionName {
+			return e.Path
 		}
-		if partialMatch == "" && sanitizedBase == lastComponent {
-			partialMatch = e.Path // partial match — keep scanning for an exact one
+		if partialMatch == "" && entrySession == lastComponent {
+			partialMatch = e.Path
 		}
 	}
 	if partialMatch != "" {
 		return partialMatch
 	}
 	return tmuxSessionPathPrefix + sessionName
+}
+
+func historyEntrySessionName(path string) string {
+	if strings.HasPrefix(path, tmuxSessionPathPrefix) {
+		return strings.TrimPrefix(path, tmuxSessionPathPrefix)
+	}
+	return project.SessionName(path)
 }
 
 func capturePanePreview(paneID string) string {

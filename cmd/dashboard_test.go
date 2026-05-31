@@ -404,28 +404,6 @@ func TestDashboardInitialPaneID(t *testing.T) {
 	})
 }
 
-func TestPathBase(t *testing.T) {
-	tests := []struct {
-		name     string
-		path     string
-		expected string
-	}{
-		{"simple path", "/home/user/project", "project"},
-		{"no slash", "project", "project"},
-		{"trailing slash path", "/a/b/c", "c"},
-		{"single segment with slash", "/project", "project"},
-		{"root", "/", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := pathBase(tt.path)
-			if result != tt.expected {
-				t.Errorf("pathBase(%q) = %q, want %q", tt.path, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestSessionAccessTime(t *testing.T) {
 	now := time.Now()
 
@@ -477,15 +455,11 @@ func TestSessionAccessTime(t *testing.T) {
 
 	t.Run("exact match takes priority over partial", func(t *testing.T) {
 		earlier := now.Add(-1 * time.Hour)
-		// sanitizeSessionName(pathBase(path)) must equal the full session name for an exact match.
-		// For session "work/myproject", an exact match would need a path whose
-		// sanitized base is "work/myproject" — which can't happen since pathBase strips parents.
-		// So test exact-vs-partial with a simple session name instead:
 		// Entries are scanned in order; exact match on first entry returns immediately.
 		hist := &history.History{
 			Entries: []history.Entry{
-				{Path: "/other/myproject", LastAccess: earlier}, // exact match (pathBase = "myproject")
-				{Path: "/home/myproject", LastAccess: now},      // also exact match, but won't be reached
+				{Path: "/other/myproject", LastAccess: earlier},
+				{Path: "/home/myproject", LastAccess: now},
 			},
 		}
 		result := sessionAccessTime("myproject", hist)
@@ -496,8 +470,7 @@ func TestSessionAccessTime(t *testing.T) {
 	})
 
 	t.Run("partial match used when no exact match", func(t *testing.T) {
-		// Session is "work/myproject" — no path will produce this as sanitizedBase.
-		// But lastComponent is "myproject", so partial matching kicks in.
+		// Session is "work/myproject"; lastComponent "myproject" matches SessionName of the entry path.
 		earlier := now.Add(-1 * time.Hour)
 		hist := &history.History{
 			Entries: []history.Entry{

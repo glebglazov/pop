@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -13,6 +12,8 @@ import (
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
+	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/session"
 	"github.com/spf13/cobra"
 )
 
@@ -62,13 +63,9 @@ func resolveSession() (string, error) {
 
 func resolveSessionWith(tmux deps.Tmux) (string, error) {
 	if paneProject != "" {
-		name := sanitizeSessionName(filepath.Base(paneProject))
-		_, err := tmux.Command("has-session", "-t="+name)
-		if err != nil {
-			_, err := tmux.Command("new-session", "-ds", name, "-c", paneProject)
-			if err != nil {
-				return "", fmt.Errorf("failed to create session %q: %w", name, err)
-			}
+		name := project.SessionName(paneProject)
+		if err := session.EnsureWith(sessionDeps(tmux), name, paneProject); err != nil {
+			return "", err
 		}
 		return name, nil
 	}

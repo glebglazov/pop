@@ -109,6 +109,55 @@ func TestAttachWith_NewSessionInTmux(t *testing.T) {
 	}
 }
 
+func TestEnsureWith_ExistingSession(t *testing.T) {
+	var log attachCallLog
+	d := &Deps{
+		Tmux: log.mock(true),
+	}
+
+	if err := EnsureWith(d, "my-session", "/proj"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(log.hasSession) != 1 || log.hasSession[0] != "my-session" {
+		t.Errorf("HasSession calls = %v, want [my-session]", log.hasSession)
+	}
+	if len(log.newSession) != 0 {
+		t.Errorf("NewSession called %d times, want 0", len(log.newSession))
+	}
+	if len(log.switchClient) != 0 {
+		t.Errorf("SwitchClient called %d times, want 0", len(log.switchClient))
+	}
+	if len(log.attach) != 0 {
+		t.Errorf("AttachSession called %d times, want 0", len(log.attach))
+	}
+}
+
+func TestEnsureWith_NewSession(t *testing.T) {
+	var log attachCallLog
+	d := &Deps{
+		Tmux: log.mock(false),
+	}
+
+	if err := EnsureWith(d, "new-session", "/new/proj"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(log.hasSession) != 1 {
+		t.Errorf("HasSession calls = %d, want 1", len(log.hasSession))
+	}
+	if len(log.newSession) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(log.newSession))
+	}
+	if log.newSession[0][0] != "new-session" || log.newSession[0][1] != "/new/proj" {
+		t.Errorf("NewSession args = %v, want [new-session /new/proj]", log.newSession[0])
+	}
+	if len(log.switchClient) != 0 {
+		t.Errorf("SwitchClient called %d times, want 0", len(log.switchClient))
+	}
+	if len(log.attach) != 0 {
+		t.Errorf("AttachSession called %d times, want 0", len(log.attach))
+	}
+}
+
 func TestAttachWith_NewSessionOutsideTmux(t *testing.T) {
 	var log attachCallLog
 	d := &Deps{
