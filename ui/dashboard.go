@@ -112,7 +112,9 @@ type Dashboard struct {
 
 	warnings []string
 
-	initialPaneID string
+	initialPaneID        string
+	protectedPaneID      string
+	protectedCursorIndex int
 }
 
 // DashboardOption configures the dashboard
@@ -149,11 +151,11 @@ func WithEmptyNote(note string) DashboardOption {
 // NewDashboard creates a new dashboard with the given panes and callbacks
 func NewDashboard(panes []AttentionPane, cb AttentionCallbacks, reloadFn func() []AttentionPane, opts ...DashboardOption) *Dashboard {
 	d := &Dashboard{
-		allPanes:     panes,
-		panes:        make([]AttentionPane, len(panes)),
-		height:       10,
-		previewFunc:  cb.Preview,
-		reloadFunc:   reloadFn,
+		allPanes:         panes,
+		panes:            make([]AttentionPane, len(panes)),
+		height:           10,
+		previewFunc:      cb.Preview,
+		reloadFunc:       reloadFn,
 		markClearFunc:    cb.MarkClear,
 		markUnreadFunc:   cb.MarkUnread,
 		toggleFollowFunc: cb.ToggleFollow,
@@ -322,6 +324,7 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, dashboardKeys.Up):
 			if len(d.panes) > 0 {
+				d.clearProtectedPane()
 				if d.cursor > 0 {
 					d.cursor--
 				} else {
@@ -334,6 +337,7 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, dashboardKeys.Down):
 			if len(d.panes) > 0 {
+				d.clearProtectedPane()
 				if d.cursor < len(d.panes)-1 {
 					d.cursor++
 				} else {
@@ -350,6 +354,7 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if pane.Status == AttentionVirtual {
 					return d, nil
 				}
+				d.protectSelectedPane()
 				if pane.Status == AttentionClear {
 					d.markUnreadFunc(pane.PaneID)
 					pane.Status = AttentionUnread
@@ -375,6 +380,7 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if pane.Status == AttentionVirtual {
 					return d, nil
 				}
+				d.protectSelectedPane()
 				d.markUnreadFunc(pane.PaneID)
 				pane.Status = AttentionUnread
 				d.updateAllPanesStatus(pane.PaneID, AttentionUnread)
@@ -524,6 +530,7 @@ func (d *Dashboard) sortPanes() {
 	sort.SliceStable(d.panes, func(i, j int) bool {
 		return attentionStatusOrder(d.panes[i].Status) < attentionStatusOrder(d.panes[j].Status)
 	})
+	d.pinProtectedPane()
 }
 
 func attentionStatusOrder(s AttentionStatus) int {
@@ -549,6 +556,53 @@ func (d *Dashboard) updateAllPanesStatus(paneID string, status AttentionStatus) 
 	}
 }
 
+// protectSelectedPane anchors a row mutated in place until the user navigates
+// away. Reloads may continue to reorder the surrounding rows.
+func (d *Dashboard) protectSelectedPane() {
+	if d.cursor < 0 || d.cursor >= len(d.panes) {
+		return
+	}
+	d.protectedPaneID = d.panes[d.cursor].PaneID
+	d.protectedCursorIndex = d.cursor
+}
+
+func (d *Dashboard) clearProtectedPane() {
+	d.protectedPaneID = ""
+	d.protectedCursorIndex = 0
+}
+
+// pinProtectedPane moves the protected pane back to its anchored row after a
+// sort or reload. It returns false when no protected pane remains visible.
+func (d *Dashboard) pinProtectedPane() bool {
+	if d.protectedPaneID == "" {
+		return false
+	}
+
+	protectedIndex := -1
+	for i, pane := range d.panes {
+		if pane.PaneID == d.protectedPaneID {
+			protectedIndex = i
+			break
+		}
+	}
+	if protectedIndex < 0 {
+		d.clearProtectedPane()
+		return false
+	}
+
+	protected := d.panes[protectedIndex]
+	d.panes = append(d.panes[:protectedIndex], d.panes[protectedIndex+1:]...)
+	anchor := d.protectedCursorIndex
+	if anchor > len(d.panes) {
+		anchor = len(d.panes)
+	}
+	d.panes = append(d.panes, AttentionPane{})
+	copy(d.panes[anchor+1:], d.panes[anchor:])
+	d.panes[anchor] = protected
+	d.cursor = anchor
+	return true
+}
+
 // rebuildView filters allPanes into panes based on the current view mode.
 func (d *Dashboard) rebuildView() {
 	var selectedPaneID string
@@ -567,6 +621,12 @@ func (d *Dashboard) rebuildView() {
 	} else {
 		d.panes = make([]AttentionPane, len(d.allPanes))
 		copy(d.panes, d.allPanes)
+	}
+
+	if d.pinProtectedPane() {
+		d.adjustScroll()
+		d.fetchPreview()
+		return
 	}
 
 	restored := false

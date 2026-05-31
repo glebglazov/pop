@@ -312,6 +312,24 @@ func TestDashboardToggleClearUnread(t *testing.T) {
 		}
 	})
 
+	t.Run("r keeps mutated pane under cursor after status sort", func(t *testing.T) {
+		d := newDashboard(panes, cb)
+		d.cursor = 0 // %1 unread moves from the unread group to the clear group
+		m, _ := d.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+		d = m.(*Dashboard)
+		if d.cursor != 0 {
+			t.Errorf("cursor = %d, want 0", d.cursor)
+		}
+		if d.panes[d.cursor].PaneID != "%1" {
+			t.Errorf("cursor on %s, want %%1", d.panes[d.cursor].PaneID)
+		}
+		m, _ = d.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		d = m.(*Dashboard)
+		if d.protectedPaneID != "" {
+			t.Errorf("protectedPaneID = %q, want empty after navigation", d.protectedPaneID)
+		}
+	})
+
 	t.Run("r on virtual is no-op", func(t *testing.T) {
 		virtualPanes := []AttentionPane{
 			{PaneID: "%1", Session: "s1", Status: AttentionVirtual},
@@ -459,8 +477,8 @@ func TestDashboardToggleFollowView(t *testing.T) {
 
 func TestDashboardUnmonitor(t *testing.T) {
 	cb := AttentionCallbacks{
-		Unmonitor: func(paneID string) {},
-		MarkClear: func(paneID string) {},
+		Unmonitor:  func(paneID string) {},
+		MarkClear:  func(paneID string) {},
 		MarkUnread: func(paneID string) {},
 	}
 
@@ -672,6 +690,40 @@ func TestDashboardReload(t *testing.T) {
 		}
 		if len(d.panes) != 0 {
 			t.Errorf("panes len = %d, want 0", len(d.panes))
+		}
+	})
+
+	t.Run("keeps mutated row anchored across reload with updated last_active_at order", func(t *testing.T) {
+		panes := []AttentionPane{
+			{PaneID: "%1", Session: "s1"},
+			{PaneID: "%2", Session: "s2"},
+			{PaneID: "%3", Session: "s3"},
+		}
+		d := newDashboard(panes, AttentionCallbacks{
+			MarkUnread: func(paneID string) {},
+		})
+		d.cursor = 1 // protect %2 at the middle row
+		m, _ := d.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+		d = m.(*Dashboard)
+		d.reloadFunc = func() []AttentionPane {
+			// The reload function supplies normal sorted order after updated
+			// last_active_at values move the surrounding panes.
+			return []AttentionPane{
+				{PaneID: "%3", Session: "s3"},
+				{PaneID: "%1", Session: "s1"},
+				{PaneID: "%2", Session: "s2", Status: AttentionUnread},
+			}
+		}
+		m, _ = d.Update(reloadTickMsg{})
+		d = m.(*Dashboard)
+		want := []string{"%3", "%2", "%1"}
+		for i, pane := range d.panes {
+			if pane.PaneID != want[i] {
+				t.Errorf("panes[%d] = %s, want %s", i, pane.PaneID, want[i])
+			}
+		}
+		if d.cursor != 1 || d.panes[d.cursor].PaneID != "%2" {
+			t.Errorf("cursor = %d on %s, want 1 on %%2", d.cursor, d.panes[d.cursor].PaneID)
 		}
 	})
 }
