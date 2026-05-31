@@ -16,8 +16,5 @@ func AttachWith(d *Deps, name, path string) error {
 		}
 	}
 
-	if d.InTmux() {
-		return d.Tmux.SwitchClient(name)
-	}
-	return d.Tmux.AttachSession(name)
+	return SwitchTargetWith(d, name)
 }

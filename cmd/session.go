@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
+	"github.com/glebglazov/pop/session"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -50,17 +50,7 @@ func switchToTmuxTarget(target string) error {
 }
 
 func switchToTmuxTargetWith(tmux deps.Tmux, target string) error {
-	inTmux := os.Getenv("TMUX") != ""
-	if inTmux {
-		_, err := tmux.Command("switch-client", "-t", target)
-		return err
-	}
-	// attach-session needs stdio wired — cannot go through the generic Command
-	cmd := exec.Command("tmux", "attach-session", "-t", target)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return session.SwitchTargetWith(sessionDeps(tmux), target)
 }
 
 // switchToTmuxTargetAndZoom switches to a tmux pane and zooms it
@@ -69,11 +59,12 @@ func switchToTmuxTargetAndZoom(target string) error {
 }
 
 func switchToTmuxTargetAndZoomWith(tmux deps.Tmux, target string) error {
-	inTmux := os.Getenv("TMUX") != ""
-	if inTmux {
-		// Single tmux invocation: switch to pane and zoom it if not already zoomed
+	d := sessionDeps(tmux)
+	if d.InTmux() {
+		if err := session.SwitchTargetWith(d, target); err != nil {
+			return err
+		}
 		_, err := tmux.Command(
-			"switch-client", "-t", target, ";",
 			"if-shell", "-F", "#{!=:#{window_zoomed_flag},1}",
 			"resize-pane -Z",
 		)
@@ -86,11 +77,14 @@ func switchToTmuxTargetAndZoomWith(tmux deps.Tmux, target string) error {
 	); err != nil {
 		debug.Error("switchToTmuxTargetAndZoom: pre-attach zoom: %v", err)
 	}
-	cmd := exec.Command("tmux", "attach-session", "-t", target)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return session.SwitchTargetWith(d, target)
+}
+
+func sessionDeps(tmux deps.Tmux) *session.Deps {
+	return &session.Deps{
+		Tmux:   tmux,
+		InTmux: func() bool { return os.Getenv("TMUX") != "" },
+	}
 }
 
 // loadMonitorState returns the monitor state if the daemon is running, or nil otherwise

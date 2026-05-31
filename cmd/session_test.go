@@ -359,17 +359,13 @@ func TestKillTmuxSessionByNameWith(t *testing.T) {
 }
 
 func TestSwitchToTmuxTargetWith_InTmux(t *testing.T) {
-	// Set TMUX env to simulate being inside tmux
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
 
 	var switchedTo string
 	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "switch-client" {
-				switchedTo = args[2]
-				return "", nil
-			}
-			return "", nil
+		SwitchClientFunc: func(name string) error {
+			switchedTo = name
+			return nil
 		},
 	}
 
@@ -385,8 +381,13 @@ func TestSwitchToTmuxTargetWith_InTmux(t *testing.T) {
 func TestSwitchToTmuxTargetAndZoomWith_InTmux(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
 
+	var switchedTo string
 	var gotArgs []string
 	tmux := &deps.MockTmux{
+		SwitchClientFunc: func(name string) error {
+			switchedTo = name
+			return nil
+		},
 		CommandFunc: func(args ...string) (string, error) {
 			gotArgs = args
 			return "", nil
@@ -397,15 +398,16 @@ func TestSwitchToTmuxTargetAndZoomWith_InTmux(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if switchedTo != "%5" {
+		t.Errorf("switched to %q, want %q", switchedTo, "%5")
+	}
 
-	// Single tmux invocation: switch-client -t %5 ; if-shell ... resize-pane -Z
 	expected := []string{
-		"switch-client", "-t", "%5", ";",
 		"if-shell", "-F", "#{!=:#{window_zoomed_flag},1}",
 		"resize-pane -Z",
 	}
 	if len(gotArgs) != len(expected) {
-		t.Fatalf("expected args %v, got %v", expected, gotArgs)
+		t.Fatalf("expected zoom args %v, got %v", expected, gotArgs)
 	}
 	for i := range expected {
 		if gotArgs[i] != expected[i] {
