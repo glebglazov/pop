@@ -40,13 +40,22 @@ func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}
 
 	entry := state.Workloads[resolved.DefinitionPath]
-	idx, oldPriority, err := findRegisteredPRD(entry, prdID)
-	if err != nil {
+	if _, _, err := findRegisteredPRD(entry, prdID); err != nil {
 		return nil, err
 	}
 
-	entry.PRDs[idx].Priority = priority
-	if err := state.SaveWith(d); err != nil {
+	var oldPriority int
+	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
+		entry := state.Workloads[resolved.DefinitionPath]
+		idx, old, err := findRegisteredPRD(entry, prdID)
+		if err != nil {
+			return err
+		}
+		oldPriority = old
+		entry.PRDs[idx].Priority = priority
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 

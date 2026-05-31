@@ -1,6 +1,8 @@
 package workload
 
 import (
+	"io"
+
 	"github.com/glebglazov/pop/internal/deps"
 )
 
@@ -10,6 +12,7 @@ type Deps struct {
 	Git          deps.Git
 	Runner       CommandRunner
 	ProcessAlive func(pid int) bool
+	NoticeOut    io.Writer
 }
 
 // DefaultDeps returns dependencies using real implementations.

@@ -46,28 +46,27 @@ func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
 		return nil, err
 	}
 
-	entry := state.Entry(canon)
 	registered := state.RegisteredIDs(canon)
+	needsSave := false
+	for stem := range disc.PRDs {
+		if _, ok := registered[stem]; !ok {
+			needsSave = true
+			break
+		}
+	}
 
 	var newRegs []string
-	for stem, prdPath := range disc.PRDs {
-		if _, ok := registered[stem]; ok {
-			continue
-		}
-		title := ExtractPRDTitle(d, prdPath)
-		entry.PRDs = append(entry.PRDs, RegisteredPRD{
-			ID:       stem,
-			Priority: 0,
-			Title:    title,
-		})
-		registered[stem] = len(entry.PRDs) - 1
-		newRegs = append(newRegs, stem)
-	}
-	sort.Strings(newRegs)
-
-	needsSave := len(newRegs) > 0
 	if needsSave {
-		if err := state.SaveWith(d); err != nil {
+		err := UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
+			mergeNewRegistrations(d, canon, disc, state, &newRegs)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		sort.Strings(newRegs)
+		state, err = LoadGlobalStateWith(d, statePath)
+		if err != nil {
 			return nil, err
 		}
 	}
