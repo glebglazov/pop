@@ -539,7 +539,7 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noR
 }
 
 // runPaneSetStatusDirect is the fallback path used when the daemon socket
-// is unavailable (cold start). Contains the same logic as the daemon handler.
+// is unavailable (cold start).
 func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatus, source string, noRegister bool, label string) error {
 	status := monitor.NormalizeStatus(rawStatus)
 
@@ -547,61 +547,18 @@ func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatu
 		debug.Log("[set-status] %s: invoked with %s (direct)", paneID, status)
 	}
 
-	statePath := monitor.DefaultStatePath()
-	state, err := monitor.Load(statePath)
+	store := monitor.NewStore(monitor.DefaultStatePath(), nil)
+	err := store.ReportStatus(tmux, monitor.ReportStatusInput{
+		PaneID:                paneID,
+		Status:                status,
+		Label:                 label,
+		NoRegister:            noRegister,
+		DismissUnreadInActive: cfg.DismissUnreadInActivePane(),
+	})
 	if err != nil {
-		debug.Error("pane set-status: load state: %v", err)
-		return nil
+		debug.Error("pane set-status: %v", err)
 	}
-
-	entry, ok := state.Panes[paneID]
-	if !ok {
-		if noRegister {
-			return nil
-		}
-		session, cmdName, err := tmuxPaneInfoWith(tmux, paneID)
-		if err != nil {
-			debug.Error("[set-status] %s: failed to look up pane info, skipping: %v", paneID, err)
-			return nil
-		}
-		debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s (direct)", paneID, session, cmdName, status)
-		now := time.Now()
-		entry := &monitor.PaneEntry{
-			PaneID:       paneID,
-			Session:      session,
-			Status:       status,
-			UpdatedAt:    now,
-			LastActiveAt: now,
-		}
-		applyPaneLabel(entry, label)
-		state.Panes[paneID] = entry
-		return state.Save()
-	}
-
-	applyPaneLabel(entry, label)
-
-	visitedNow := false
-	if status == monitor.StatusClear {
-		entry.LastActiveAt = time.Now()
-		visitedNow = true
-	}
-
-	if cfg.DismissUnreadInActivePane() && status == monitor.StatusUnread && isActiveTmuxPaneWith(tmux, paneID) {
-		debug.Log("[set-status] %s: unread on active pane — downgrading to clear (direct)", paneID)
-		status = monitor.StatusClear
-	}
-
-	if entry.Status == status {
-		if visitedNow {
-			return state.Save()
-		}
-		return nil
-	}
-
-	debug.Log("[set-status] %s (session=%s): %s → %s (direct)", paneID, entry.Session, entry.Status, status)
-	entry.Status = status
-	entry.UpdatedAt = time.Now()
-	return state.Save()
+	return err
 }
 
 // --- status ---
@@ -748,7 +705,7 @@ func runPaneSetFollowDirect(tmux deps.Tmux, paneID string, follow bool) error {
 		if !follow {
 			return nil
 		}
-		session, _, err := tmuxPaneInfoWith(tmux, paneID)
+		session, _, err := monitor.TmuxPaneInfo(tmux, paneID)
 		if err != nil {
 			return fmt.Errorf("look up pane %s: %w", paneID, err)
 		}

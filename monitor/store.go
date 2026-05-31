@@ -2,7 +2,20 @@ package monitor
 
 import (
 	"time"
+
+	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/internal/deps"
 )
+
+// ReportStatusInput carries a pane status report and resolved policy values.
+// Policy is resolved in the command layer; monitor stays config-free.
+type ReportStatusInput struct {
+	PaneID                string
+	Status                PaneStatus
+	Label                 string
+	NoRegister            bool
+	DismissUnreadInActive bool
+}
 
 // Store provides a transactional interface for mutating monitor state.
 // All persistence (load, find, mutate, save) is concentrated behind one
@@ -98,4 +111,96 @@ func (s *Store) DismissUnread(paneID string) error {
 // DefaultStore returns a Store using the default state path and deps.
 func DefaultStore() *Store {
 	return NewStore(DefaultStatePath(), nil)
+}
+
+// upsert loads state, finds or registers the pane, applies mutations, and saves.
+// register returns an entry and ok; ok=false means do not register (no-op).
+// mutate returns whether the state file must be saved.
+func (s *Store) upsert(
+	paneID string,
+	register func() (*PaneEntry, bool),
+	mutate func(*PaneEntry) bool,
+) error {
+	state, err := LoadWith(s.deps, s.path)
+	if err != nil {
+		return err
+	}
+
+	entry, ok := state.Panes[paneID]
+	if !ok {
+		newEntry, shouldRegister := register()
+		if !shouldRegister {
+			return nil
+		}
+		state.Panes[paneID] = newEntry
+		return state.SaveWith(s.deps)
+	}
+
+	if !mutate(entry) {
+		return nil
+	}
+	return state.SaveWith(s.deps)
+}
+
+// ReportStatus applies the full status transition rule: auto-register an
+// untracked pane unless registration is suppressed; apply label; record visit
+// time when clearing; downgrade Unread to Clear when the pane is active and
+// DismissUnreadInActive is true; no-op when the reported status already matches
+// (but still save if visit time was updated).
+func (s *Store) ReportStatus(tmux deps.Tmux, in ReportStatusInput) error {
+	status := in.Status
+
+	return s.upsert(in.PaneID,
+		func() (*PaneEntry, bool) {
+			if in.NoRegister {
+				return nil, false
+			}
+			session, cmdName, err := TmuxPaneInfo(tmux, in.PaneID)
+			if err != nil {
+				debug.Error("[set-status] %s: failed to look up pane info, skipping: %v", in.PaneID, err)
+				return nil, false
+			}
+			debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s", in.PaneID, session, cmdName, status)
+			now := time.Now()
+			entry := &PaneEntry{
+				PaneID:       in.PaneID,
+				Session:      session,
+				Status:       status,
+				UpdatedAt:    now,
+				LastActiveAt: now,
+			}
+			applyLabel(entry, in.Label)
+			return entry, true
+		},
+		func(entry *PaneEntry) bool {
+			applyLabel(entry, in.Label)
+
+			visitedNow := false
+			if status == StatusClear {
+				entry.LastActiveAt = time.Now()
+				visitedNow = true
+			}
+
+			effectiveStatus := status
+			if in.DismissUnreadInActive && status == StatusUnread && IsActiveTmuxPane(tmux, in.PaneID) {
+				debug.Log("[set-status] %s: unread on active pane — downgrading to clear", in.PaneID)
+				effectiveStatus = StatusClear
+			}
+
+			if entry.Status == effectiveStatus {
+				return visitedNow
+			}
+
+			debug.Log("[set-status] %s (session=%s): %s → %s", in.PaneID, entry.Session, entry.Status, effectiveStatus)
+			entry.Status = effectiveStatus
+			entry.UpdatedAt = time.Now()
+			return true
+		},
+	)
+}
+
+func applyLabel(entry *PaneEntry, label string) {
+	if label != "" {
+		entry.Label = label
+	}
 }

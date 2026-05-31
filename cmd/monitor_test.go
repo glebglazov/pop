@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
 )
@@ -189,97 +191,6 @@ func TestTmuxPaneSessionWith(t *testing.T) {
 	}
 	if session != "project-a" {
 		t.Errorf("got %q, want %q", session, "project-a")
-	}
-}
-
-func TestTmuxPaneInfoWith(t *testing.T) {
-	t.Run("parses tab-separated session and command", func(t *testing.T) {
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				if args[0] == "display-message" {
-					return "project-a\topencode", nil
-				}
-				return "", nil
-			},
-		}
-		session, cmdName, err := tmuxPaneInfoWith(tmux, "%1")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if session != "project-a" {
-			t.Errorf("session = %q, want %q", session, "project-a")
-		}
-		if cmdName != "opencode" {
-			t.Errorf("cmdName = %q, want %q", cmdName, "opencode")
-		}
-	})
-
-	t.Run("propagates tmux errors", func(t *testing.T) {
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				return "", fmt.Errorf("pane not found")
-			},
-		}
-		_, _, err := tmuxPaneInfoWith(tmux, "%nope")
-		if err == nil {
-			t.Error("expected error, got nil")
-		}
-	})
-
-	t.Run("errors on malformed output", func(t *testing.T) {
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				return "no-tab-here", nil
-			},
-		}
-		_, _, err := tmuxPaneInfoWith(tmux, "%1")
-		if err == nil {
-			t.Error("expected error on malformed output, got nil")
-		}
-	})
-}
-
-func TestIsActiveTmuxPaneWith(t *testing.T) {
-	tests := []struct {
-		name     string
-		output   string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "active pane",
-			output:   "1 1 1",
-			expected: true,
-		},
-		{
-			name:     "inactive pane",
-			output:   "0 1 1",
-			expected: false,
-		},
-		{
-			name:     "detached session",
-			output:   "1 1 0",
-			expected: false,
-		},
-		{
-			name:     "error returns false",
-			err:      fmt.Errorf("pane not found"),
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmux := &deps.MockTmux{
-				CommandFunc: func(args ...string) (string, error) {
-					return tt.output, tt.err
-				},
-			}
-			result := isActiveTmuxPaneWith(tmux, "%1")
-			if result != tt.expected {
-				t.Errorf("got %v, want %v", result, tt.expected)
-			}
-		})
 	}
 }
 
@@ -517,6 +428,174 @@ func loadStateFromPath(t *testing.T, path string) *monitor.State {
 		t.Fatalf("load state: %v", err)
 	}
 	return state
+}
+
+func seedMonitorStateDir(t *testing.T, panes map[string]*monitor.PaneEntry) (statePath, dataHome string) {
+	t.Helper()
+	dir := t.TempDir()
+	dataHome = dir
+	stateDir := filepath.Join(dir, "pop")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	statePath = filepath.Join(stateDir, "monitor.json")
+	if panes == nil {
+		panes = map[string]*monitor.PaneEntry{}
+	}
+	data, _ := json.Marshal(&monitor.State{Panes: panes})
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	return statePath, dataHome
+}
+
+func parityMockTmux(active bool) *deps.MockTmux {
+	activeOut := "0 0 0"
+	if active {
+		activeOut = "1 1 1"
+	}
+	return &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			if len(args) >= 5 && args[0] == "display-message" {
+				switch args[4] {
+				case "#{session_name}\t#{pane_current_command}":
+					return "proj-x\tclaude", nil
+				case "#{pane_active} #{window_active} #{session_attached}":
+					return activeOut, nil
+				}
+			}
+			return "", nil
+		},
+	}
+}
+
+func assertPaneStatesMatch(t *testing.T, handlerState, directState *monitor.State) {
+	t.Helper()
+	if len(handlerState.Panes) != len(directState.Panes) {
+		t.Fatalf("pane count: handler=%d direct=%d", len(handlerState.Panes), len(directState.Panes))
+	}
+	for id, he := range handlerState.Panes {
+		de, ok := directState.Panes[id]
+		if !ok {
+			t.Fatalf("pane %s in handler state but missing from direct state", id)
+		}
+		if he.Status != de.Status || he.Session != de.Session || he.Label != de.Label ||
+			he.Following != de.Following || he.Note != de.Note {
+			t.Errorf("pane %s: handler=%+v direct=%+v", id, he, de)
+		}
+	}
+}
+
+func TestSetStatus_HandlerAndDirectParity(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial map[string]*monitor.PaneEntry
+		req     monitor.Request
+		cfg     *config.Config
+		tmux    *deps.MockTmux
+	}{
+		{
+			name:    "auto-registers untracked pane",
+			initial: map[string]*monitor.PaneEntry{},
+			req: monitor.Request{
+				Cmd:    "set-status",
+				PaneID: "%7",
+				Status: "working",
+			},
+			cfg:  &config.Config{},
+			tmux: parityMockTmux(false),
+		},
+		{
+			name: "updates tracked pane to clear",
+			initial: map[string]*monitor.PaneEntry{
+				"%1": {PaneID: "%1", Session: "test", Status: monitor.StatusWorking},
+			},
+			req: monitor.Request{
+				Cmd:    "set-status",
+				PaneID: "%1",
+				Status: "clear",
+			},
+			cfg:  &config.Config{},
+			tmux: parityMockTmux(false),
+		},
+		{
+			name: "dismiss unread on active pane when policy enabled",
+			initial: map[string]*monitor.PaneEntry{
+				"%1": {PaneID: "%1", Session: "test", Status: monitor.StatusWorking},
+			},
+			req: monitor.Request{
+				Cmd:    "set-status",
+				PaneID: "%1",
+				Status: "unread",
+			},
+			cfg: &config.Config{
+				PaneMonitoring: &config.PaneMonitoringConfig{
+					DismissUnreadInActivePane: true,
+				},
+			},
+			tmux: parityMockTmux(true),
+		},
+		{
+			name:    "no-register leaves untracked pane untouched",
+			initial: map[string]*monitor.PaneEntry{},
+			req: monitor.Request{
+				Cmd:        "set-status",
+				PaneID:     "%9",
+				Status:     "clear",
+				NoRegister: true,
+			},
+			cfg:  &config.Config{},
+			tmux: parityMockTmux(false),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handlerPath, _ := seedMonitorStateDir(t, clonePaneMap(tt.initial))
+			directPath, dataHome := seedMonitorStateDir(t, clonePaneMap(tt.initial))
+
+			if tt.cfg != nil && tt.cfg.PaneMonitoring != nil && tt.cfg.PaneMonitoring.DismissUnreadInActivePane {
+				configDir := t.TempDir()
+				t.Setenv("XDG_CONFIG_HOME", configDir)
+				popDir := filepath.Join(configDir, "pop")
+				if err := os.MkdirAll(popDir, 0755); err != nil {
+					t.Fatal(err)
+				}
+				configBody := "[pane_monitoring]\ndismiss_unread_in_active_pane = true\n"
+				if err := os.WriteFile(filepath.Join(popDir, "config.toml"), []byte(configBody), 0644); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			}
+
+			resp := handleSetStatus(tt.tmux, handlerPath, tt.req)
+			if !resp.OK {
+				t.Fatalf("handler error: %s", resp.Error)
+			}
+
+			t.Setenv("XDG_DATA_HOME", dataHome)
+			if err := runPaneSetStatusDirect(tt.tmux, tt.cfg, tt.req.PaneID, tt.req.Status, tt.req.Source, tt.req.NoRegister, tt.req.Label); err != nil {
+				t.Fatalf("direct error: %v", err)
+			}
+
+			handlerState := loadStateFromPath(t, handlerPath)
+			directState := loadStateFromPath(t, directPath)
+			assertPaneStatesMatch(t, handlerState, directState)
+		})
+	}
+}
+
+func clonePaneMap(in map[string]*monitor.PaneEntry) map[string]*monitor.PaneEntry {
+	if in == nil {
+		return map[string]*monitor.PaneEntry{}
+	}
+	out := make(map[string]*monitor.PaneEntry, len(in))
+	for id, e := range in {
+		copied := *e
+		out[id] = &copied
+	}
+	return out
 }
 
 func TestUninstallTmuxAutoClearHooksWith(t *testing.T) {

@@ -32,36 +32,6 @@ func tmuxPaneSessionWith(tmux deps.Tmux, paneID string) (string, error) {
 	return tmux.Command("display-message", "-t", paneID, "-p", "#{session_name}")
 }
 
-// tmuxPaneInfoWith returns the session name and the current foreground
-// command running in the given pane in a single tmux round-trip. Used by
-// auto-registration in pane set-status for the pane's session and debug log.
-func tmuxPaneInfoWith(tmux deps.Tmux, paneID string) (session, cmdName string, err error) {
-	out, err := tmux.Command("display-message", "-t", paneID, "-p", "#{session_name}\t#{pane_current_command}")
-	if err != nil {
-		return "", "", err
-	}
-	parts := strings.SplitN(out, "\t", 2)
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("unexpected display-message output: %q", out)
-	}
-	return parts[0], parts[1], nil
-}
-
-// isActiveTmuxPane returns true if the given pane is visible to the user:
-// active in its window, the window is active in its session, and the session
-// is attached to a client.
-func isActiveTmuxPane(paneID string) bool {
-	return isActiveTmuxPaneWith(defaultTmux, paneID)
-}
-
-func isActiveTmuxPaneWith(tmux deps.Tmux, paneID string) bool {
-	out, err := tmux.Command("display-message", "-t", paneID, "-p", "#{pane_active} #{window_active} #{session_attached}")
-	if err != nil {
-		return false
-	}
-	return out == "1 1 1"
-}
-
 // --- monitor-start ---
 
 // tmux hooks for auto-clear: event name → hook command
@@ -129,11 +99,6 @@ func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandle
 // handleSetStatus applies the set-status business logic. Extracted from
 // buildMonitorHandler so each command is independently testable.
 func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) monitor.Response {
-	paneID := req.PaneID
-	status := monitor.NormalizeStatus(req.Status)
-	source := req.Source
-	noRegister := req.NoRegister
-
 	cfg, err := config.Load(config.DefaultConfigPath())
 	if err != nil {
 		debug.Error("handler set-status: load config: %v", err)
@@ -142,78 +107,29 @@ func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) moni
 		cfg = &config.Config{}
 	}
 
-	if source != "" && cfg.ShouldIgnoreStatusFrom(source) {
+	if req.Source != "" && cfg.ShouldIgnoreStatusFrom(req.Source) {
 		return monitor.Response{OK: true}
 	}
 
-	if paneID == "" {
+	if req.PaneID == "" {
 		return monitor.Response{OK: true}
 	}
 
+	status := monitor.NormalizeStatus(req.Status)
 	if status != monitor.StatusClear {
-		debug.Log("[set-status] %s: invoked with %s", paneID, status)
+		debug.Log("[set-status] %s: invoked with %s", req.PaneID, status)
 	}
 
-	state, err := monitor.Load(statePath)
-	if err != nil {
-		debug.Error("handler set-status: load state: %v", err)
-		return monitor.Response{OK: false, Error: "load state: " + err.Error()}
-	}
-
-	entry, ok := state.Panes[paneID]
-	if !ok {
-		if noRegister {
-			return monitor.Response{OK: true}
-		}
-		session, cmdName, err := tmuxPaneInfoWith(tmux, paneID)
-		if err != nil {
-			debug.Error("[set-status] %s: failed to look up pane info, skipping: %v", paneID, err)
-			return monitor.Response{OK: true}
-		}
-		debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s", paneID, session, cmdName, status)
-		now := time.Now()
-		entry := &monitor.PaneEntry{
-			PaneID:       paneID,
-			Session:      session,
-			Status:       status,
-			UpdatedAt:    now,
-			LastActiveAt: now,
-		}
-		applyPaneLabel(entry, req.Label)
-		state.Panes[paneID] = entry
-		if err := state.Save(); err != nil {
-			return monitor.Response{OK: false, Error: "save state: " + err.Error()}
-		}
-		return monitor.Response{OK: true}
-	}
-
-	applyPaneLabel(entry, req.Label)
-
-	visitedNow := false
-	if status == monitor.StatusClear {
-		entry.LastActiveAt = time.Now()
-		visitedNow = true
-	}
-
-	if cfg.DismissUnreadInActivePane() && status == monitor.StatusUnread && isActiveTmuxPaneWith(tmux, paneID) {
-		debug.Log("[set-status] %s: unread on active pane — downgrading to clear", paneID)
-		status = monitor.StatusClear
-	}
-
-	if entry.Status == status {
-		if visitedNow {
-			if err := state.Save(); err != nil {
-				return monitor.Response{OK: false, Error: "save state: " + err.Error()}
-			}
-		}
-		return monitor.Response{OK: true}
-	}
-
-	debug.Log("[set-status] %s (session=%s): %s → %s", paneID, entry.Session, entry.Status, status)
-	entry.Status = status
-	entry.UpdatedAt = time.Now()
-	if err := state.Save(); err != nil {
-		return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+	store := monitor.NewStore(statePath, nil)
+	if err := store.ReportStatus(tmux, monitor.ReportStatusInput{
+		PaneID:                req.PaneID,
+		Status:                status,
+		Label:                 req.Label,
+		NoRegister:            req.NoRegister,
+		DismissUnreadInActive: cfg.DismissUnreadInActivePane(),
+	}); err != nil {
+		debug.Error("handler set-status: %v", err)
+		return monitor.Response{OK: false, Error: err.Error()}
 	}
 	return monitor.Response{OK: true}
 }
@@ -243,7 +159,7 @@ func handleSetFollowing(tmux deps.Tmux, statePath string, req monitor.Request) m
 		if !follow {
 			return monitor.Response{OK: true}
 		}
-		session, _, err := tmuxPaneInfoWith(tmux, req.PaneID)
+		session, _, err := monitor.TmuxPaneInfo(tmux, req.PaneID)
 		if err != nil {
 			return monitor.Response{OK: false, Error: "look up pane: " + err.Error()}
 		}
