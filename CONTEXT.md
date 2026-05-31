@@ -13,11 +13,15 @@ The `pop project` entry point — opens the project picker. Project-specific con
 _Avoid_: Select command, normal mode
 
 **Session**:
-The tmux session pop creates or attaches to when you select a project. Its name is derived from the project path.
+The tmux session pop creates or attaches to when you select a project or worktree. One project maps to one session; selecting it puts you in that session (creating it first if needed).
 _Avoid_: Project (when you mean the tmux session, not the directory)
 
+**Session name**:
+The sanitized tmux identifier pop uses to refer to a **Session**. Each checkout path has exactly one session name, built the same way everywhere from git repo context — not from config or picker display labels. For a worktree in a bare repo, `repoName/worktreeFolderName`. For a worktree in a non-bare repo, the worktree folder name. When the path is not a git checkout, the directory base name. Dots and colons are replaced for tmux compatibility. Works for any checkout path pop can resolve, including paths outside configured projects. **Standalone sessions** use tmux's existing name as-is.
+_Avoid_: Config display name, display_depth, raw absolute path
+
 **Standalone session**:
-A tmux session that appears in the picker but has no corresponding project in config. Pop discovers these from tmux directly.
+A tmux session that appears in the picker but has no corresponding project in config. Pop discovers these from tmux directly; its **Session name** is whatever tmux already uses.
 _Avoid_: Orphan session, external session
 
 **Worktree**:
@@ -266,6 +270,8 @@ _Avoid_: Malformed Issue set
 **Visit vs status change** — A **Visit** records interaction with a pane without changing its status. Changing a pane to **Clear** records that no attention is required. Some navigation actions intentionally do both.
 
 **Active vs working** — An **Active pane** is currently visible to the user. A **Working** pane has an agent or process actively running. A pane may be either, both, or neither.
+
+**Session attach refactor** — Architecture work consolidates ensure-exists + attach mechanics and centralizes **Session name** building from git repo context. All entry points share the same name function.
 
 ## Example dialogue
 
