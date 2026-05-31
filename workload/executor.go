@@ -19,6 +19,7 @@ type RunIssueOptions struct {
 	IssueOverride string
 	AgentPreset   string
 	AgentCmd      string
+	AllowDirty    bool
 	Yes           bool
 	ConfirmIn     io.Reader
 	ConfirmOut    io.Writer
@@ -51,7 +52,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	runtimePath, err := NormalizeProjectPathWith(d, resolved.ProjectPath)
+	runtimePath, err := ResolveRuntimePathWith(d, resolved.ProjectPath, opts.RuntimeOverride)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
@@ -67,8 +68,12 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 		return nil, err
 	}
 
-	if err := requireCleanRuntime(d, runtimePath); err != nil {
-		return nil, err
+	dirty, err := runtimeIsDirty(d, runtimePath)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
+	}
+	if dirty && !opts.AllowDirty {
+		return nil, exitErr(ExitOperational, "runtime checkout is dirty; commit or stash changes before execution")
 	}
 
 	confirmOut := opts.ConfirmOut
@@ -78,6 +83,10 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	out := opts.Output
 	if out == nil {
 		out = os.Stdout
+	}
+
+	if dirty && opts.AllowDirty {
+		fmt.Fprintln(confirmOut, "Warning: runtime checkout has uncommitted changes; a capturing dirty state checkpoint commit will be created before execution.")
 	}
 
 	displayRows := cloneRows(refresh.Rows)
@@ -95,6 +104,18 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	}
 	if !confirmed {
 		return &RunIssueResult{Selection: sel, Refresh: refresh, Declined: true}, nil
+	}
+
+	lock, err := AcquireRuntimeLock(d, runtimePath, confirmOut)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
+
+	if dirty && opts.AllowDirty {
+		if err := checkpointDirtyRuntime(d, runtimePath, sel.PRDID, sel.IssueID); err != nil {
+			return nil, exitErr(ExitOperational, "dirty-state checkpoint: %v", err)
+		}
 	}
 
 	prompt := BuildAgentPrompt(sel.IssuePath, sel.PRDPath, runtimePath)
@@ -212,13 +233,30 @@ func isInteractive(r io.Reader) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-func requireCleanRuntime(d *Deps, runtimePath string) error {
+func runtimeIsDirty(d *Deps, runtimePath string) (bool, error) {
 	out, err := d.Git.CommandInDir(runtimePath, "status", "--porcelain")
 	if err != nil {
-		return exitErr(ExitSetup, "runtime git status: %v", err)
+		return false, err
 	}
-	if strings.TrimSpace(out) != "" {
-		return exitErr(ExitOperational, "runtime checkout is dirty; commit or stash changes before execution")
+	return strings.TrimSpace(out) != "", nil
+}
+
+func checkpointDirtyRuntime(d *Deps, runtimePath, prdID, issueID string) error {
+	if _, err := d.Git.CommandInDir(runtimePath, "add", "-A"); err != nil {
+		return err
+	}
+	staged, err := d.Git.CommandInDir(runtimePath, "diff", "--cached", "--name-only")
+	if err != nil {
+		_, _ = d.Git.CommandInDir(runtimePath, "reset")
+		return err
+	}
+	if strings.TrimSpace(staged) == "" {
+		return nil
+	}
+	subject := DirtyCheckpointSubject(prdID, issueID)
+	if _, err := d.Git.CommandInDir(runtimePath, "commit", "-m", subject); err != nil {
+		_, _ = d.Git.CommandInDir(runtimePath, "reset")
+		return err
 	}
 	return nil
 }

@@ -207,6 +207,174 @@ func TestRunIssueNoRunnableWork(t *testing.T) {
 	assertExitCode(t, err, ExitNoRunnable)
 }
 
+func TestRunIssueDirtyRejection(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	writeFile(t, filepath.Join(env.root, "dirty.txt"), "pending\n")
+
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+	_, err := RunIssueWith(env.deps(), nil, nil, env.runOpts(true, agent))
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "dirty") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunIssueAllowDirtyCheckpoint(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	writeFile(t, filepath.Join(env.root, "partial.txt"), "resume me\n")
+
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		changeFile: "impl.txt",
+		changeData: "done\n",
+		checkIssue: true,
+		summary:    "finished after checkpoint",
+	})
+
+	opts := env.runOpts(true, agent)
+	opts.AllowDirty = true
+	var notice bytes.Buffer
+	opts.ConfirmOut = &notice
+
+	result, err := RunIssueWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !strings.Contains(notice.String(), "Warning:") {
+		t.Fatalf("missing dirty warning:\n%s", notice.String())
+	}
+
+	subjectLog, _ := env.deps().Git.CommandInDir(env.root, "log", "--format=%s")
+	if !strings.Contains(subjectLog, "capturing dirty state") {
+		t.Fatalf("checkpoint subject missing from log:\n%s", subjectLog)
+	}
+	status, _ := env.deps().Git.CommandInDir(env.root, "status", "--porcelain")
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("runtime not clean before agent: %q", status)
+	}
+	if result.CommitSHA == "" {
+		t.Fatal("expected implementation commit after agent")
+	}
+}
+
+func TestRunIssueDirtyCheckpointFailureDoesNotInvokeAgent(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	writeFile(t, filepath.Join(env.root, "partial.txt"), "resume me\n")
+
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		changeFile: "impl.txt",
+		changeData: "should-not-run\n",
+		checkIssue: true,
+		summary:    "unused",
+	})
+
+	git := &deps.MockGit{
+		CommandInDirFunc: func(dir string, args ...string) (string, error) {
+			if len(args) >= 3 && args[0] == "commit" && strings.Contains(args[2], "capturing dirty state") {
+				return "", fmt.Errorf("checkpoint commit rejected")
+			}
+			return realGitInDir(dir, args...)
+		},
+	}
+	d := env.deps()
+	d.Git = git
+
+	opts := env.runOpts(true, agent)
+	opts.AllowDirty = true
+	_, err := RunIssueWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "dirty-state checkpoint") {
+		t.Fatalf("err = %v", err)
+	}
+
+	status, _ := realGitInDir(env.root, "status", "--porcelain")
+	if !strings.Contains(status, "partial.txt") {
+		t.Fatalf("working tree changed unexpectedly:\n%s", status)
+	}
+	if strings.Contains(status, "impl.txt") {
+		t.Fatal("agent should not have run")
+	}
+}
+
+func TestRunIssueSeparateRuntimePath(t *testing.T) {
+	root := t.TempDir()
+	defRoot := filepath.Join(root, "definition")
+	runtimeRoot := filepath.Join(root, "runtime")
+	if err := os.MkdirAll(defRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(runtimeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initExecutorGitRepo(t, defRoot)
+	initExecutorGitRepo(t, runtimeRoot)
+
+	writeFile(t, filepath.Join(defRoot, "thoughts/prds/demo.md"), "# Demo\n")
+	setupManifest(t, defRoot, "demo", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	if _, err := RefreshWith(DefaultDeps(), defRoot, DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := writeFakeAgent(t, runtimeRoot, fakeAgentConfig{
+		changeFile: "impl.txt",
+		changeData: "in runtime\n",
+		checkIssue: true,
+		summary:    "runtime work",
+	})
+
+	env := &execFixture{root: defRoot}
+	opts := RunIssueOptions{
+		ResolveInput: ResolveInput{
+			CWD:             defRoot,
+			RuntimeOverride: runtimeRoot,
+		},
+		AgentCmd: agent,
+		Yes:      true,
+	}
+	_, err := RunIssueWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeRoot, "impl.txt")); err != nil {
+		t.Fatalf("implementation not in runtime checkout: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(defRoot, "impl.txt")); !os.IsNotExist(err) {
+		t.Fatal("implementation leaked into definition checkout")
+	}
+}
+
+func TestRunIssueRejectsNonGitRuntimePath(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+	opts := env.runOpts(true, agent)
+	opts.RuntimeOverride = filepath.Join(env.root, "not-git")
+
+	_, err := RunIssueWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitSetup)
+}
+
+func TestRunIssueReleasesRuntimeLockAfterExecution(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		checkIssue: true,
+		summary:    "locked run",
+	})
+
+	d := env.deps()
+	opts := env.runOpts(true, agent)
+	_, err := RunIssueWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lockPath := RuntimeLockPathFor(d, env.root)
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("lock not released after execution: %v", err)
+	}
+}
+
 func TestRunIssueBookkeepingOrder(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{

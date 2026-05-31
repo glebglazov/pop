@@ -5,6 +5,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 )
 
 // RefreshResult is the outcome of a workload status refresh.
@@ -14,6 +15,7 @@ type RefreshResult struct {
 	Rows             []Row
 	Manifests        map[string]*Manifest
 	NeedsSave        bool
+	RuntimeLock      *RuntimeLockStatus
 }
 
 // Refresh discovers workloads, auto-registers PRDs, and builds table rows.
@@ -202,6 +204,7 @@ func Render(w io.Writer, result *RefreshResult) {
 	}
 
 	fmt.Fprintln(w, formatTable(result.Rows))
+	renderRuntimeLock(w, result.RuntimeLock)
 	renderDiagnostics(w, result.Rows)
 }
 
@@ -251,6 +254,25 @@ func rowDetail(row Row) string {
 		return row.Progress
 	default:
 		return row.Progress
+	}
+}
+
+func renderRuntimeLock(w io.Writer, lock *RuntimeLockStatus) {
+	if lock == nil || lock.RuntimePath == "" {
+		return
+	}
+	fmt.Fprintln(w)
+	switch {
+	case lock.Malformed:
+		fmt.Fprintf(w, "Runtime execution lock (best effort): malformed lock file for %s\n", lock.RuntimePath)
+	case lock.Metadata != nil && lock.Locked:
+		fmt.Fprintf(w, "Runtime execution lock (best effort): PID %d since %s at %s\n",
+			lock.Metadata.PID,
+			lock.Metadata.StartedAt.Format(time.RFC3339),
+			lock.Metadata.RuntimePath,
+		)
+	default:
+		fmt.Fprintf(w, "Runtime execution lock (best effort): idle at %s\n", lock.RuntimePath)
 	}
 }
 

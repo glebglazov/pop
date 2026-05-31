@@ -17,11 +17,13 @@ var (
 	workloadProject     string
 	workloadPath        string
 	workloadDefPath     string
+	workloadRuntimePath string
 	workloadRunPRD      string
 	workloadRunIssue    string
 	workloadAgentPreset string
 	workloadAgentCmd    string
 	workloadRunYes      bool
+	workloadAllowDirty  bool
 )
 
 var workloadCmd = &cobra.Command{
@@ -62,6 +64,8 @@ func init() {
 
 	workloadRunIssueCmd.Flags().StringVar(&workloadRunPRD, "prd", "", "Target PRD by exact identifier")
 	workloadRunIssueCmd.Flags().StringVar(&workloadRunIssue, "issue", "", "Target issue by exact identifier (requires --prd)")
+	workloadRunIssueCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
+	workloadRunIssueCmd.Flags().BoolVar(&workloadAllowDirty, "allow-dirty", false, "Checkpoint dirty runtime state before execution")
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 	workloadRunIssueCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
@@ -72,6 +76,7 @@ func workloadResolveInput() workload.ResolveInput {
 		ProjectName:        workloadProject,
 		Path:               workloadPath,
 		DefinitionOverride: workloadDefPath,
+		RuntimeOverride:    workloadRuntimePath,
 	}
 }
 
@@ -92,6 +97,10 @@ func runWorkloadStatusWith(d *workload.Deps, w io.Writer) error {
 	result, err := workload.RefreshWith(d, resolved.DefinitionPath, workload.DefaultStatePathWith(d))
 	if err != nil {
 		return fmt.Errorf("workload status: %w", err)
+	}
+
+	if runtimePath, err := workload.ResolveRuntimePathWith(d, resolved.ProjectPath, ""); err == nil {
+		result.RuntimeLock = workload.ReadRuntimeLockStatus(d, runtimePath)
 	}
 
 	workload.Render(w, result)
@@ -130,6 +139,7 @@ func runWorkloadRunIssueWith(d *workload.Deps, stdout, stderr io.Writer, stdin i
 		IssueOverride: workloadRunIssue,
 		AgentPreset:   workloadAgentPreset,
 		AgentCmd:      workloadAgentCmd,
+		AllowDirty:    workloadAllowDirty,
 		Yes:           workloadRunYes,
 		ConfirmIn:     stdin,
 		ConfirmOut:    stderr,

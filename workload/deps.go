@@ -6,9 +6,10 @@ import (
 
 // Deps holds external dependencies for the workload package.
 type Deps struct {
-	FS     deps.FileSystem
-	Git    deps.Git
-	Runner CommandRunner
+	FS           deps.FileSystem
+	Git          deps.Git
+	Runner       CommandRunner
+	ProcessAlive func(pid int) bool
 }
 
 // DefaultDeps returns dependencies using real implementations.

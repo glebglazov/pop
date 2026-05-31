@@ -225,6 +225,66 @@ func writeWorkloadThoughts(t *testing.T, dir, stem string) {
 	}
 }
 
+func TestWorkloadStatusShowsRuntimeLock(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoCmd(t, root)
+	writeWorkloadThoughts(t, root, "demo")
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	if _, err := workload.RefreshWith(workload.DefaultDeps(), root, workload.DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+
+	d := workload.DefaultDeps()
+	runtimePath, err := workload.ResolveRuntimePathWith(d, root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := workload.AcquireRuntimeLock(d, runtimePath, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+
+	workloadProject = ""
+	workloadPath = ""
+	workloadDefPath = ""
+	t.Cleanup(resetWorkloadFlags)
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	var buf bytes.Buffer
+	if err := runWorkloadStatusWith(d, &buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Runtime execution lock") || !strings.Contains(out, "PID") {
+		t.Fatalf("missing lock rendering:\n%s", out)
+	}
+}
+
+func initGitRepoCmd(t *testing.T, root string) {
+	t.Helper()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	for _, args := range [][]string{
+		{"config", "user.email", "test@test"},
+		{"config", "user.name", "test"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = root
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatal(err, string(out))
+		}
+	}
+}
+
 func TestHandleWorkloadExitMapsCodes(t *testing.T) {
 	tests := []struct {
 		err  error

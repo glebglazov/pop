@@ -368,6 +368,80 @@ func TestResolveByPathFlag(t *testing.T) {
 	pathEqual(t, root, resolved.ProjectPath)
 }
 
+func TestNormalizeRuntimePathToGitRoot(t *testing.T) {
+	root := t.TempDir()
+	initGitRepo(t, root)
+	subdir := filepath.Join(root, "pkg", "nested")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	normalized, err := NormalizeRuntimePath(subdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathEqual(t, root, normalized)
+}
+
+func TestNormalizeRuntimePathRejectsNonGit(t *testing.T) {
+	root := t.TempDir()
+	_, err := NormalizeRuntimePath(root)
+	if err == nil {
+		t.Fatal("expected non-git rejection")
+	}
+	if !strings.Contains(err.Error(), "not a git checkout") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveRuntimePathDefaultsToProjectPath(t *testing.T) {
+	root := t.TempDir()
+	initGitRepo(t, root)
+
+	runtime, err := ResolveRuntimePath(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathEqual(t, root, runtime)
+}
+
+func TestResolveRuntimePathOverrideIndependentOfDefinition(t *testing.T) {
+	root := t.TempDir()
+	initGitRepo(t, root)
+	runtimeRepo := filepath.Join(root, "runtime")
+	if err := os.MkdirAll(runtimeRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, runtimeRepo)
+
+	defDir := filepath.Join(root, "planning")
+	if err := os.MkdirAll(defDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	d := DefaultDeps()
+	pd := project.DefaultDeps()
+	resolved, err := ResolvePathsWith(d, pd, func(string) (*config.Config, error) {
+		return nil, os.ErrNotExist
+	}, ResolveInput{
+		Path:               root,
+		DefinitionOverride: defDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathEqual(t, defDir, resolved.DefinitionPath)
+
+	runtime, err := ResolveRuntimePathWith(d, resolved.ProjectPath, runtimeRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathEqual(t, runtimeRepo, runtime)
+	if runtime == resolved.DefinitionPath {
+		t.Fatal("runtime should differ from definition path")
+	}
+}
+
 func TestResolveWithMockGitOutsideRepo(t *testing.T) {
 	d := &Deps{
 		FS: &deps.MockFileSystem{

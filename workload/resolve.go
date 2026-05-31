@@ -15,6 +15,7 @@ type ResolveInput struct {
 	ProjectName        string
 	Path               string
 	DefinitionOverride string
+	RuntimeOverride    string
 	CWD                string
 }
 
@@ -131,6 +132,39 @@ func NormalizeProjectPathWith(d *Deps, path string) (string, error) {
 		return canonicalAbsPath(d, topLevel)
 	}
 	return canon, nil
+}
+
+// NormalizeRuntimePath canonicalizes a path to its git checkout root.
+func NormalizeRuntimePath(path string) (string, error) {
+	return NormalizeRuntimePathWith(defaultDeps, path)
+}
+
+// NormalizeRuntimePathWith canonicalizes a runtime path to its git checkout root.
+// Non-git paths are rejected.
+func NormalizeRuntimePathWith(d *Deps, path string) (string, error) {
+	canon, err := canonicalAbsPath(d, path)
+	if err != nil {
+		return "", err
+	}
+
+	topLevel, err := d.Git.CommandInDir(canon, "rev-parse", "--show-toplevel")
+	if err != nil || strings.TrimSpace(topLevel) == "" {
+		return "", fmt.Errorf("runtime path %q is not a git checkout", path)
+	}
+	return canonicalAbsPath(d, topLevel)
+}
+
+// ResolveRuntimePath returns the canonical runtime checkout root.
+func ResolveRuntimePath(projectPath, override string) (string, error) {
+	return ResolveRuntimePathWith(defaultDeps, projectPath, override)
+}
+
+// ResolveRuntimePathWith resolves the runtime checkout root from project path and override.
+func ResolveRuntimePathWith(d *Deps, projectPath, override string) (string, error) {
+	if override != "" {
+		return NormalizeRuntimePathWith(d, override)
+	}
+	return NormalizeRuntimePathWith(d, projectPath)
 }
 
 func canonicalAbsPath(d *Deps, path string) (string, error) {
