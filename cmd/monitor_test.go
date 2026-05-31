@@ -253,98 +253,6 @@ func TestHandleSetFollowing(t *testing.T) {
 			t.Errorf("error = %q, want containing 'following'", resp.Error)
 		}
 	})
-
-	t.Run("auto-registers untracked pane on follow=true", func(t *testing.T) {
-		statePath := setupEmptyState(t)
-		tmux := newPaneInfoMockTmux(map[string]string{
-			"%8": "proj-x\tclaude",
-		})
-		follow := true
-		resp := handleSetFollowing(tmux, statePath, monitor.Request{
-			Cmd:       "set-following",
-			PaneID:    "%8",
-			Following: &follow,
-		})
-		if !resp.OK {
-			t.Fatalf("unexpected error: %s", resp.Error)
-		}
-		state := loadStateFromPath(t, statePath)
-		entry, ok := state.Panes["%8"]
-		if !ok {
-			t.Fatalf("expected %%8 to be auto-registered")
-		}
-		if !entry.Following {
-			t.Error("expected Following = true")
-		}
-		if entry.Status != monitor.StatusClear {
-			t.Errorf("status = %q, want clear", entry.Status)
-		}
-		if entry.Session != "proj-x" {
-			t.Errorf("session = %q, want proj-x", entry.Session)
-		}
-	})
-
-	t.Run("unfollow on untracked pane is a no-op", func(t *testing.T) {
-		statePath := setupEmptyState(t)
-		// Tmux must not be called.
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				t.Errorf("unexpected tmux call: %v", args)
-				return "", nil
-			},
-		}
-		follow := false
-		resp := handleSetFollowing(tmux, statePath, monitor.Request{
-			Cmd:       "set-following",
-			PaneID:    "%9",
-			Following: &follow,
-		})
-		if !resp.OK {
-			t.Errorf("expected OK=true, got error %q", resp.Error)
-		}
-		state := loadStateFromPath(t, statePath)
-		if len(state.Panes) != 0 {
-			t.Errorf("expected empty state, got %d entries", len(state.Panes))
-		}
-	})
-
-	t.Run("unfollow clears note on tracked pane", func(t *testing.T) {
-		dir := t.TempDir()
-		statePath := dir + "/monitor.json"
-		seed := &monitor.State{
-			Panes: map[string]*monitor.PaneEntry{
-				"%2": {
-					PaneID:    "%2",
-					Session:   "proj-y",
-					Status:    monitor.StatusClear,
-					Following: true,
-					Note:      "remember to check this",
-				},
-			},
-		}
-		data, _ := json.Marshal(seed)
-		if err := os.WriteFile(statePath, data, 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		follow := false
-		resp := handleSetFollowing(&deps.MockTmux{}, statePath, monitor.Request{
-			Cmd:       "set-following",
-			PaneID:    "%2",
-			Following: &follow,
-		})
-		if !resp.OK {
-			t.Fatalf("unexpected error: %s", resp.Error)
-		}
-		state := loadStateFromPath(t, statePath)
-		entry := state.Panes["%2"]
-		if entry.Following {
-			t.Error("expected Following = false")
-		}
-		if entry.Note != "" {
-			t.Errorf("note = %q, want cleared", entry.Note)
-		}
-	})
 }
 
 func TestHandleVisit(t *testing.T) {
@@ -483,6 +391,100 @@ func assertPaneStatesMatch(t *testing.T, handlerState, directState *monitor.Stat
 			he.Following != de.Following || he.Note != de.Note {
 			t.Errorf("pane %s: handler=%+v direct=%+v", id, he, de)
 		}
+	}
+}
+
+func TestSetFollowing_HandlerAndDirectParity(t *testing.T) {
+	followTrue := true
+	followFalse := false
+
+	tests := []struct {
+		name    string
+		initial map[string]*monitor.PaneEntry
+		req     monitor.Request
+		tmux    *deps.MockTmux
+	}{
+		{
+			name:    "auto-registers untracked pane on follow",
+			initial: map[string]*monitor.PaneEntry{},
+			req: monitor.Request{
+				Cmd:       "set-following",
+				PaneID:    "%8",
+				Following: &followTrue,
+			},
+			tmux: parityMockTmux(false),
+		},
+		{
+			name:    "unfollow on untracked pane is a no-op",
+			initial: map[string]*monitor.PaneEntry{},
+			req: monitor.Request{
+				Cmd:       "set-following",
+				PaneID:    "%9",
+				Following: &followFalse,
+			},
+			tmux: &deps.MockTmux{
+				CommandFunc: func(args ...string) (string, error) {
+					t.Errorf("unexpected tmux call: %v", args)
+					return "", nil
+				},
+			},
+		},
+		{
+			name: "unfollow clears note on tracked pane",
+			initial: map[string]*monitor.PaneEntry{
+				"%2": {
+					PaneID:    "%2",
+					Session:   "proj-y",
+					Status:    monitor.StatusClear,
+					Following: true,
+					Note:      "remember to check this",
+				},
+			},
+			req: monitor.Request{
+				Cmd:       "set-following",
+				PaneID:    "%2",
+				Following: &followFalse,
+			},
+			tmux: parityMockTmux(false),
+		},
+		{
+			name: "follow on tracked pane preserves status",
+			initial: map[string]*monitor.PaneEntry{
+				"%3": {
+					PaneID:  "%3",
+					Session: "proj-b",
+					Status:  monitor.StatusWorking,
+					Note:    "watch the deploy",
+				},
+			},
+			req: monitor.Request{
+				Cmd:       "set-following",
+				PaneID:    "%3",
+				Following: &followTrue,
+			},
+			tmux: parityMockTmux(false),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handlerPath, _ := seedMonitorStateDir(t, clonePaneMap(tt.initial))
+			directPath, dataHome := seedMonitorStateDir(t, clonePaneMap(tt.initial))
+
+			resp := handleSetFollowing(tt.tmux, handlerPath, tt.req)
+			if !resp.OK {
+				t.Fatalf("handler error: %s", resp.Error)
+			}
+
+			t.Setenv("XDG_DATA_HOME", dataHome)
+			if err := runPaneSetFollowDirect(tt.tmux, tt.req.PaneID, *tt.req.Following); err != nil {
+				t.Fatalf("direct error: %v", err)
+			}
+
+			handlerState := loadStateFromPath(t, handlerPath)
+			directState := loadStateFromPath(t, directPath)
+			assertPaneStatesMatch(t, handlerState, directState)
+		})
 	}
 }
 

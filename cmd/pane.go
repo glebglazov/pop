@@ -692,46 +692,11 @@ func runPaneSetFollowWith(tmux deps.Tmux, cfg *config.Config, arg string, follow
 	return runPaneSetFollowDirect(tmux, paneID, follow)
 }
 
-// runPaneSetFollowDirect mirrors handleSetFollowing for the cold-start path
-// (or when the TCP server is disabled). Kept in sync with the daemon handler.
+// runPaneSetFollowDirect is the fallback path used when the daemon socket
+// is unavailable (cold start).
 func runPaneSetFollowDirect(tmux deps.Tmux, paneID string, follow bool) error {
-	state, err := monitor.Load(monitor.DefaultStatePath())
-	if err != nil {
-		return fmt.Errorf("load monitor state: %w", err)
-	}
-
-	entry, ok := state.Panes[paneID]
-	if !ok {
-		if !follow {
-			return nil
-		}
-		session, _, err := monitor.TmuxPaneInfo(tmux, paneID)
-		if err != nil {
-			return fmt.Errorf("look up pane %s: %w", paneID, err)
-		}
-		debug.Log("[set-following] %s: auto-registering in session=%s with following=true (direct)", paneID, session)
-		now := time.Now()
-		state.Panes[paneID] = &monitor.PaneEntry{
-			PaneID:       paneID,
-			Session:      session,
-			Status:       monitor.StatusClear,
-			Following:    true,
-			UpdatedAt:    now,
-			LastActiveAt: now,
-		}
-		return state.Save()
-	}
-
-	if entry.Following == follow {
-		return nil
-	}
-	debug.Log("[set-following] %s (session=%s): %v → %v (direct)", paneID, entry.Session, entry.Following, follow)
-	entry.Following = follow
-	entry.UpdatedAt = time.Now()
-	if !follow {
-		entry.Note = ""
-	}
-	return state.Save()
+	store := monitor.NewStore(monitor.DefaultStatePath(), nil)
+	return store.SetFollowing(tmux, paneID, follow)
 }
 
 // --- visit ---

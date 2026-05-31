@@ -134,11 +134,7 @@ func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) moni
 	return monitor.Response{OK: true}
 }
 
-// handleSetFollowing toggles a pane's Following flag. Untracked panes are
-// auto-registered (status=clear) so the user can mark a pane as followed from
-// the CLI without having to set-status first; unfollowing an untracked pane
-// is a no-op since the absence already implies "not followed". Unfollowing
-// also clears any user note on the pane, mirroring the picker's behavior.
+// handleSetFollowing toggles a pane's Following flag via the monitor Store.
 func handleSetFollowing(tmux deps.Tmux, statePath string, req monitor.Request) monitor.Response {
 	if req.PaneID == "" {
 		return monitor.Response{OK: false, Error: "missing pane_id"}
@@ -146,50 +142,11 @@ func handleSetFollowing(tmux deps.Tmux, statePath string, req monitor.Request) m
 	if req.Following == nil {
 		return monitor.Response{OK: false, Error: "missing following field"}
 	}
-	follow := *req.Following
 
-	state, err := monitor.Load(statePath)
-	if err != nil {
-		debug.Error("handler set-following: load state: %v", err)
-		return monitor.Response{OK: false, Error: "load state: " + err.Error()}
-	}
-
-	entry, ok := state.Panes[req.PaneID]
-	if !ok {
-		if !follow {
-			return monitor.Response{OK: true}
-		}
-		session, _, err := monitor.TmuxPaneInfo(tmux, req.PaneID)
-		if err != nil {
-			return monitor.Response{OK: false, Error: "look up pane: " + err.Error()}
-		}
-		debug.Log("[set-following] %s: auto-registering in session=%s with following=true", req.PaneID, session)
-		now := time.Now()
-		state.Panes[req.PaneID] = &monitor.PaneEntry{
-			PaneID:       req.PaneID,
-			Session:      session,
-			Status:       monitor.StatusClear,
-			Following:    true,
-			UpdatedAt:    now,
-			LastActiveAt: now,
-		}
-		if err := state.Save(); err != nil {
-			return monitor.Response{OK: false, Error: "save state: " + err.Error()}
-		}
-		return monitor.Response{OK: true}
-	}
-
-	if entry.Following == follow {
-		return monitor.Response{OK: true}
-	}
-	debug.Log("[set-following] %s (session=%s): %v → %v", req.PaneID, entry.Session, entry.Following, follow)
-	entry.Following = follow
-	entry.UpdatedAt = time.Now()
-	if !follow {
-		entry.Note = ""
-	}
-	if err := state.Save(); err != nil {
-		return monitor.Response{OK: false, Error: "save state: " + err.Error()}
+	store := monitor.NewStore(statePath, nil)
+	if err := store.SetFollowing(tmux, req.PaneID, *req.Following); err != nil {
+		debug.Error("handler set-following: %v", err)
+		return monitor.Response{OK: false, Error: err.Error()}
 	}
 	return monitor.Response{OK: true}
 }

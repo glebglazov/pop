@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/glebglazov/pop/debug"
@@ -203,4 +204,50 @@ func applyLabel(entry *PaneEntry, label string) {
 	if label != "" {
 		entry.Label = label
 	}
+}
+
+// SetFollowing applies the following transition rule: auto-register an
+// untracked pane only when following (never when unfollowing); no-op when
+// the following value already matches; on unfollow, clear any attached note;
+// update timestamp on change.
+func (s *Store) SetFollowing(tmux deps.Tmux, paneID string, follow bool) error {
+	var registerErr error
+	err := s.upsert(paneID,
+		func() (*PaneEntry, bool) {
+			if !follow {
+				return nil, false
+			}
+			session, _, err := TmuxPaneInfo(tmux, paneID)
+			if err != nil {
+				registerErr = fmt.Errorf("look up pane: %w", err)
+				return nil, false
+			}
+			debug.Log("[set-following] %s: auto-registering in session=%s with following=true", paneID, session)
+			now := time.Now()
+			return &PaneEntry{
+				PaneID:       paneID,
+				Session:      session,
+				Status:       StatusClear,
+				Following:    true,
+				UpdatedAt:    now,
+				LastActiveAt: now,
+			}, true
+		},
+		func(entry *PaneEntry) bool {
+			if entry.Following == follow {
+				return false
+			}
+			debug.Log("[set-following] %s (session=%s): %v → %v", paneID, entry.Session, entry.Following, follow)
+			entry.Following = follow
+			entry.UpdatedAt = time.Now()
+			if !follow {
+				entry.Note = ""
+			}
+			return true
+		},
+	)
+	if registerErr != nil {
+		return registerErr
+	}
+	return err
 }
