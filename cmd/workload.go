@@ -67,6 +67,13 @@ var workloadResetIssueCmd = &cobra.Command{
 	Run:   runWorkloadResetIssue,
 }
 
+var workloadCompleteIssueCmd = &cobra.Command{
+	Use:   "complete-issue ISSUE_PATH",
+	Short: "Manually mark one issue done without running an agent",
+	Args:  cobra.ExactArgs(1),
+	Run:   runWorkloadCompleteIssue,
+}
+
 func init() {
 	rootCmd.AddCommand(workloadCmd)
 	workloadCmd.AddCommand(workloadStatusCmd)
@@ -74,6 +81,7 @@ func init() {
 	workloadCmd.AddCommand(workloadRunIssueCmd)
 	workloadCmd.AddCommand(workloadRunIssuesCmd)
 	workloadCmd.AddCommand(workloadResetIssueCmd)
+	workloadCmd.AddCommand(workloadCompleteIssueCmd)
 
 	workloadCmd.PersistentFlags().StringVar(&workloadProject, "project", "", "Select project by exact picker-visible name")
 	workloadCmd.PersistentFlags().StringVar(&workloadPath, "path", "", "Select project by path (normalized to git checkout root)")
@@ -228,6 +236,24 @@ func runWorkloadResetIssueWith(d *workload.Deps, w io.Writer, issuePath string) 
 		return err
 	}
 	fmt.Fprintf(w, "Reset issue %s/%s to open\n\n", result.IssueSetID, result.IssueID)
+	workload.Render(w, result.Refresh)
+	return nil
+}
+
+func runWorkloadCompleteIssue(cmd *cobra.Command, args []string) {
+	err := runWorkloadCompleteIssueWith(workload.DefaultDeps(), os.Stdout, args[0])
+	handleWorkloadExit(err)
+}
+
+func runWorkloadCompleteIssueWith(d *workload.Deps, w io.Writer, issuePath string) error {
+	result, err := workload.CompleteIssueWith(d, workloadProjectDeps(), workloadConfigLoad, workload.CompleteIssueOptions{
+		ResolveInput: workloadResolveInput(),
+		IssuePath:    issuePath,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Completed issue %s/%s\n\n", result.IssueSetID, result.IssueID)
 	workload.Render(w, result.Refresh)
 	return nil
 }

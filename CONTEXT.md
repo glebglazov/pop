@@ -102,6 +102,41 @@ _Avoid_: Hook, plugin (when you mean the whole setup, not a single file)
 
 ### Workloads
 
+#### Lifecycle
+
+This overview relates the terms defined below; read it before changing workload behaviour. It is a domain model, not an implementation guide.
+
+An **issue** moves between four statuses. The executor drives the solid transitions; the human drives the dashed ones through manual override commands.
+
+```
+                  Run issue / Run issues (agent success)
+        open ──────────────────────────────────────────▶ done
+         │ ▲                                              ▲ ▲
+         │ │ Issue reset                       Complete   │ │ Complete
+         │ └──────────── failed ◀── attempt ───┐ issue ───┘ │  issue
+         │                  │   exhaustion/timeout           │
+         │ Skip issue       │ Issue reset                    │
+         ▼                  ▼                                │
+      skipped ─────────────┴────────────────────────────────┘
+              Issue reset (skipped → open) / Complete issue (skipped → done)
+```
+
+- An issue is **eligible** when it is `open`, type AFK, and every `blocked_by` prerequisite is satisfied. A prerequisite counts as satisfied when it is `done` **or** `skipped` — a Skipped issue unblocks its dependents even though it was deferred, not completed.
+- HITL issues are never eligible; the executor never runs them.
+- `complete-issue`, `skip-issue`, and `reset-issue` are the only manual overrides; each moves exactly one issue and bypasses the agent.
+
+An **Issue set**'s status is derived from its issues, in this precedence:
+
+```
+all issues done ............................. DONE
+any issue failed ............................ FAILED
+has an eligible AFK issue ................... READY      ← Run issues drains these
+every issue done or skipped, ≥1 skipped ..... DEFERRED   ← conclude or reopen later
+otherwise (unfinished, none eligible) ....... BLOCKED    ← Human-blocked: HITL or undone dependency
+```
+
+(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets. Run issues stops when its set reaches DONE, FAILED, BLOCKED, or DEFERRED, and at a BLOCKED HITL gate advises the recovery paths (complete, edit-and-rerun, or skip).
+
 **Workload**:
 A machine-local schedule of Issue sets whose issues can be executed by an agent. A workload decides which Issue set to draw work from next; it does not replace the local Issue sets or their execution rules.
 _Avoid_: Issue set, project dashboard
@@ -183,7 +218,7 @@ The maximum duration for one issue attempt, defaulting to 30 minutes and configu
 _Avoid_: Issue set timeout, interruption
 
 **Human-blocked Issue set**:
-An Issue set with unfinished issues but no eligible AFK issue because human-in-the-loop work must happen first. Run issue and Run issues report the condition and stop; the workload executor never automatically runs HITL issues.
+An Issue set with unfinished issues but no eligible AFK issue because human-in-the-loop work must happen first. Run issue and Run issues report the condition and stop; the workload executor never automatically runs HITL issues. On stopping, pop advises the recovery paths for the blocking HITL issue: Complete issue once the human work is done, edit the issue file and re-run, or skip the issue to defer it and unblock its dependents (Skipped issue). The blocked row also shows a copy-paste complete hint, symmetric with the reset hint on Failed rows.
 _Avoid_: Failed Issue set
 
 **Workload artifact**:
@@ -203,11 +238,23 @@ An issue whose active agent process was terminated by user interruption or proce
 _Avoid_: Exhausted issue, failed issue
 
 **Issue reset**:
-Explicitly returning one Failed issue to Open so it may be attempted again. The reset command requires a CWD-relative path positional argument to the issue markdown file; bare issue identifiers and absolute paths are rejected. A bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. Reset removes the recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit. The workload status table prints copy-paste reset hints using the canonical path `thoughts/issues/<id>/<file>.md` from the workload definition root.
+Explicitly returning one Failed or Skipped issue to Open so it may be attempted again. The reset command requires a CWD-relative path positional argument to the issue markdown file; bare issue identifiers and absolute paths are rejected. A bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. Reset removes any recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit. The workload status table prints copy-paste reset hints using the canonical path `thoughts/issues/<id>/<file>.md` from the workload definition root.
 _Avoid_: Issue set reset, automatic retry
 
+**Complete issue**:
+Manually marking one Open, Failed, or Skipped issue Done without running an agent, regardless of issue type. Used primarily to clear a human-in-the-loop issue after the human performs the work, to conclude a Skipped issue once its deferred verification is satisfied, and also valid for finishing an AFK or Failed issue by hand. The command requires a CWD-relative path positional argument to the issue markdown file; bare issue identifiers and absolute paths are rejected, and a bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. All `blocked_by` dependencies must be Done. It bypasses the Completion sentinel — it does not verify acceptance criteria, does not prompt for confirmation, and does not stage or commit implementation changes; the human owns and commits that work. It appends a local COMPLETE progress record noting the prior state.
+_Avoid_: Completion sentinel, no-op issue completion, run issue
+
+**Skipped issue**:
+An issue the human deliberately set aside via skip-issue, recorded with the `skipped` status. Skipping accepts only an Open issue of any type and is the deadlock breaker when a human-in-the-loop issue cannot be verified until its own follow-up issues complete. A Skipped issue is never selected for execution, yet — unlike an Open dependency — it satisfies `blocked_by` for its dependents, so downstream issues become eligible against a deliberately deferred, not completed, prerequisite. The command mirrors Issue reset targeting and appends a local SKIP progress record. A Skipped issue later resolves through Complete issue (to Done) or Issue reset (to Open).
+_Avoid_: Exhausted issue, interrupted issue, blocked issue
+
+**Deferred Issue set**:
+An Issue set in which every issue is Done or Skipped and at least one is Skipped, so no runnable, failed, or open work remains but the set is not Done. Run issue and Run issues stop cleanly reporting the deferral rather than an error, and automatic selection passes over it like a Done set so it never blocks the queue. The workload status table keeps it visible with its skipped count so the human remembers to conclude or reopen the Skipped issues. A set with any still-Open issue, including an Open HITL issue, is Ready or Human-blocked rather than Deferred.
+_Avoid_: Done Issue set, Human-blocked Issue set
+
 **Progress record**:
-The append-only local `progress.txt` history beside an issue manifest. It records terminal Done and Failed outcomes plus explicit issue resets. Intermediate attempts are streamed during execution but are not appended.
+The append-only local `progress.txt` history beside an issue manifest. It records terminal Done and Failed outcomes, explicit issue resets, and manual completions. Intermediate attempts are streamed during execution but are not appended.
 _Avoid_: Workload state, agent output log
 
 **Completion sentinel**:

@@ -428,6 +428,36 @@ func TestResetIssueCmdTargetsRelativeIssuePath(t *testing.T) {
 	}
 }
 
+func TestCompleteIssueCmdRequiresOnePositional(t *testing.T) {
+	for _, args := range [][]string{nil, {"one", "two"}} {
+		if err := workloadCompleteIssueCmd.Args(workloadCompleteIssueCmd, args); err == nil {
+			t.Fatalf("args %v should fail as a usage error", args)
+		}
+	}
+}
+
+func TestCompleteIssueCmdTargetsRelativeIssuePath(t *testing.T) {
+	root := setupRunIssueCmdFixture(t)
+	resetWorkloadFlags()
+	t.Cleanup(resetWorkloadFlags)
+
+	var stdout bytes.Buffer
+	if err := runWorkloadCompleteIssueWith(workload.DefaultDeps(), &stdout, "thoughts/issues/demo/01-a.md"); err != nil {
+		t.Fatalf("relative issue path failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Completed issue demo/01-a") {
+		t.Fatalf("missing canonical success output:\n%s", stdout.String())
+	}
+	manifestPath := filepath.Join(root, "thoughts/issues/demo/index.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"status": "done"`) {
+		t.Fatalf("issue not marked done:\n%s", data)
+	}
+}
+
 func TestRunIssuesCmdTargetsDotFromIssueSetDirectory(t *testing.T) {
 	root := setupRunIssueCmdFixture(t)
 	resetWorkloadFlags()
