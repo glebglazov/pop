@@ -15,6 +15,7 @@ const (
 	StatusMalformed IssueSetStatus = "MALFORMED"
 	StatusFailed    IssueSetStatus = "FAILED"
 	StatusReady     IssueSetStatus = "READY"
+	StatusDeferred  IssueSetStatus = "DEFERRED"
 	StatusBlocked   IssueSetStatus = "BLOCKED"
 )
 
@@ -51,7 +52,44 @@ func DeriveStatus(m *Manifest) IssueSetStatus {
 	if hasEligibleIssue(m) {
 		return StatusReady
 	}
+	if isDeferred(m) {
+		return StatusDeferred
+	}
 	return StatusBlocked
+}
+
+// isDeferred reports whether every issue is Done or Skipped with at least one
+// Skipped. A still-Open issue (AFK or HITL) leaves the set Ready or Blocked,
+// never Deferred (see ADR 0006).
+func isDeferred(m *Manifest) bool {
+	if len(m.Issues) == 0 {
+		return false
+	}
+	anySkipped := false
+	for _, issue := range m.Issues {
+		switch issue.Status {
+		case "skipped":
+			anySkipped = true
+		case "done":
+		default:
+			return false
+		}
+	}
+	return anySkipped
+}
+
+// SkippedIssueIDs returns the IDs of skipped issues in manifest-array order.
+func SkippedIssueIDs(m *Manifest) []string {
+	if m == nil {
+		return nil
+	}
+	var ids []string
+	for _, issue := range m.Issues {
+		if issue.Status == "skipped" {
+			ids = append(ids, issue.ID)
+		}
+	}
+	return ids
 }
 
 func allDone(m *Manifest) bool {

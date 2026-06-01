@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/config"
@@ -31,10 +32,12 @@ type RunIssueSetOptions struct {
 type RunIssueSetResult struct {
 	IssueSetID    string
 	Completed     []*RunIssueResult
-	Refresh       *RefreshResult
-	Declined      bool
-	IssueSetDone  bool
-	BlockedReason string
+	Refresh          *RefreshResult
+	Declined         bool
+	IssueSetDone     bool
+	IssueSetDeferred bool
+	SkippedIssues    []string
+	BlockedReason    string
 }
 
 // RunIssueSet drains one Issue set sequentially through eligible AFK issues.
@@ -151,6 +154,11 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 				result.IssueSetDone = true
 				finishRunIssueSet(out, opts.Yes, result)
 				return result, nil
+			case StatusDeferred:
+				result.IssueSetDeferred = true
+				result.SkippedIssues = SkippedIssueIDs(currentRefresh.Manifests[issueSetID])
+				finishRunIssueSet(out, opts.Yes, result)
+				return result, nil
 			case StatusBlocked:
 				result.BlockedReason = row.BlockedReason
 				if !opts.Yes {
@@ -214,11 +222,25 @@ func finishRunIssueSet(out io.Writer, yes bool, result *RunIssueSetResult) {
 	}
 	fmt.Fprintln(out)
 	Render(out, result.Refresh)
+	if result.IssueSetDeferred {
+		fmt.Fprintln(out, deferralMessage(result))
+	}
+}
+
+func deferralMessage(result *RunIssueSetResult) string {
+	if len(result.SkippedIssues) > 0 {
+		return fmt.Sprintf("Issue set %s deferred: skipped %s", result.IssueSetID, strings.Join(result.SkippedIssues, ", "))
+	}
+	return fmt.Sprintf("Issue set %s deferred", result.IssueSetID)
 }
 
 func printIssueSetSummary(w io.Writer, result *RunIssueSetResult) {
 	if result.IssueSetDone {
 		fmt.Fprintf(w, "Completed Issue set %s (%d issue(s))\n", result.IssueSetID, len(result.Completed))
+		return
+	}
+	if result.IssueSetDeferred {
+		fmt.Fprintln(w, deferralMessage(result))
 		return
 	}
 	if result.BlockedReason != "" {

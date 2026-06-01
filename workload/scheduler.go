@@ -66,7 +66,7 @@ func selectExplicitIssueSet(refresh *RefreshResult, issueSetID string) (string, 
 		return "", exitErr(ExitNoRunnable, "Issue set %q is malformed", issueSetID)
 	case StatusMissing:
 		return "", exitErr(ExitNoRunnable, "Issue set %q is missing", issueSetID)
-	case StatusReady:
+	case StatusReady, StatusDeferred:
 		return issueSetID, nil
 	default:
 		return "", exitErr(ExitNoRunnable, "Issue set %q is %s: %s", issueSetID, strings.ToLower(string(row.Status)), row.BlockedReason)

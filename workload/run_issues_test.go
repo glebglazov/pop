@@ -376,6 +376,37 @@ func TestRunIssueSetInterruptionPropagation(t *testing.T) {
 	assertIssueOpen(t, env.execFixture(), "01-a")
 }
 
+func TestRunIssueSetStopsCleanlyOnDeferred(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-skip", File: "02-skip.md", Title: "Skip", Type: "HITL", Status: "skipped"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkIssue: true, summary: "ok"})
+
+	var buf bytes.Buffer
+	result, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, &buf))
+	if err != nil {
+		t.Fatalf("run failed (deferred should not error): %v", err)
+	}
+	if !result.IssueSetDeferred {
+		t.Fatalf("result = %#v, want IssueSetDeferred", result)
+	}
+	if result.IssueSetDone {
+		t.Fatal("deferred set must not be reported as done")
+	}
+	if len(result.Completed) != 1 {
+		t.Fatalf("completed = %d, want 1", len(result.Completed))
+	}
+	if len(result.SkippedIssues) != 1 || result.SkippedIssues[0] != "02-skip" {
+		t.Fatalf("skipped issues = %v, want [02-skip]", result.SkippedIssues)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "deferred") || !strings.Contains(out, "02-skip") {
+		t.Fatalf("missing deferral message:\n%s", out)
+	}
+	assertIssueDone(t, env.execFixture(), "01-a")
+}
+
 func TestSelectIssueSetAutomaticAndExplicit(t *testing.T) {
 	refresh := &RefreshResult{
 		Rows: []Row{
