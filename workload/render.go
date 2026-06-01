@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+const (
+	ansiBold  = "\033[1m"
+	ansiReset = "\033[0m"
+)
+
 // RefreshResult is the outcome of a workload status refresh.
 type RefreshResult struct {
 	DefinitionPath   string
@@ -190,7 +195,15 @@ func formatTable(rows []Row) string {
 		if len(detail) > detailW {
 			detail = detail[:detailW-3] + "..."
 		}
-		fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", idW, row.ID, stW, string(row.Status), prW, row.PriorityShow, detail)
+		id := row.ID
+		if row.RunTarget {
+			id = "▶ " + id
+		}
+		line := fmt.Sprintf("%-*s  %-*s  %-*s  %s", idW, id, stW, string(row.Status), prW, row.PriorityShow, detail)
+		if row.RunTarget {
+			line = ansiBold + line + ansiReset
+		}
+		fmt.Fprintln(&b, line)
 	}
 	return b.String()
 }
@@ -261,5 +274,37 @@ func renderDiagnostics(w io.Writer, rows []Row) {
 		for _, err := range row.DetailErrors {
 			fmt.Fprintf(w, "    - %s\n", err)
 		}
+	}
+}
+
+// RenderIssueList writes the issues in one Issue set before confirmation.
+func RenderIssueList(w io.Writer, issueSetID string, m *Manifest) {
+	if m == nil || !m.Valid {
+		return
+	}
+	fmt.Fprintf(w, "\nIssues in %s:\n", issueSetID)
+	for _, issue := range m.Issues {
+		sym := issueSymbol(m, issue)
+		fmt.Fprintf(w, "  %s %s  %s  %s  %s\n", sym, issue.ID, issue.Type, issue.Status, issue.Title)
+	}
+	fmt.Fprintln(w)
+}
+
+func issueSymbol(m *Manifest, issue Issue) string {
+	switch issue.Status {
+	case "done":
+		return "✓"
+	case "failed", "skipped":
+		return "⊘"
+	case "open":
+		if issue.Type == "HITL" && blockersResolved(m, issue) {
+			return "◐"
+		}
+		if isEligible(m, issue) {
+			return "▶"
+		}
+		return "○"
+	default:
+		return "○"
 	}
 }

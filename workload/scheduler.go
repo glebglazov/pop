@@ -261,6 +261,7 @@ func MarkRunTarget(rows []Row, issueSetID string) {
 		if rows[i].ID != issueSetID {
 			continue
 		}
+		rows[i].RunTarget = true
 		if rows[i].AutoPick {
 			rows[i].PriorityShow = fmt.Sprintf("%d AUTO RUN", rows[i].Priority)
 		} else {

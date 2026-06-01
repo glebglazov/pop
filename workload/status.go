@@ -34,6 +34,7 @@ type Row struct {
 	DetailErrors     []string
 	RegIndex         int
 	AutoPick         bool
+	RunTarget        bool
 }
 
 // DeriveStatus computes Issue-set status from manifest validation.

@@ -110,6 +110,10 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	fmt.Fprintln(out)
 	Render(out, &displayRefresh)
 
+	if m := displayRefresh.Manifests[issueSetID]; m != nil {
+		RenderIssueList(out, issueSetID, m)
+	}
+
 	confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes, issueSetConfirmPrompt)
 	if err != nil {
 		return nil, err
