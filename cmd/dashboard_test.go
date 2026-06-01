@@ -497,6 +497,32 @@ func TestSessionAccessTime(t *testing.T) {
 	})
 }
 
+// TestSessionAccessTimeIssuesNoGitCalls guards the monitor dashboard against
+// reintroducing the per-history-entry git-call storm that commit 6d7bd3d
+// eliminated (≈1.8s → 0.02s). Matching session names against history must go
+// through project.FastSessionName (pure string; see ADR 0005), not
+// project.SessionName, which spawns git subprocesses per entry. Scanning the
+// whole history must cost zero git calls regardless of entry count.
+func TestSessionAccessTimeIssuesNoGitCalls(t *testing.T) {
+	now := time.Now()
+	hist := &history.History{}
+	for i := 0; i < 20; i++ {
+		hist.Entries = append(hist.Entries, history.Entry{
+			Path:       fmt.Sprintf("/home/user/proj-%d", i),
+			LastAccess: now,
+		})
+	}
+
+	gitCalls, restore := countingGitDeps(t)
+	// "no match" forces a full scan of every entry — the worst case.
+	sessionAccessTime("nonexistent-session", hist)
+	restore()
+
+	if *gitCalls != 0 {
+		t.Errorf("sessionAccessTime issued %d git calls for %d history entries, want 0 (per-entry git derivation regressed)", *gitCalls, len(hist.Entries))
+	}
+}
+
 // TestHandleDashboardSwitch verifies the contract between the two switch
 // actions and the monitor state:
 //

@@ -24,6 +24,16 @@ func DefaultDeps() *Deps {
 
 var defaultDeps = DefaultDeps()
 
+// SetDefaultDeps swaps the package-global dependencies used by the wrapper
+// functions (SessionName, DetectRepoContext, etc.) and returns a function that
+// restores the previous value. It exists so tests can observe or count the git
+// and filesystem calls those wrappers make. Not for production use.
+func SetDefaultDeps(d *Deps) (restore func()) {
+	prev := defaultDeps
+	defaultDeps = d
+	return func() { defaultDeps = prev }
+}
+
 // Project represents a project directory
 type Project struct {
 	Name string

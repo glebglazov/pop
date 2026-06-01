@@ -198,7 +198,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	}
 
 	// Convert to UI items with session icons
-	items := buildWorktreeItems(sortedWorktrees, history.TmuxSessionActivity())
+	items := buildWorktreeItems(ctx, sortedWorktrees, history.TmuxSessionActivity())
 
 	iconLegends := []ui.IconLegend{
 		{Icon: iconDirSession, Desc: "Directory with tmux session"},
@@ -209,7 +209,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		attentionSessions := monitorAttentionSessions()
 		if attentionSessions != nil {
 			for i := range items {
-				sessionName := project.SessionName(items[i].Path)
+				sessionName := project.TmuxSessionName(ctx, items[i].Name)
 				if attentionSessions[sessionName] {
 					items[i].Icon = iconAttention
 				}
@@ -238,7 +238,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	return ui.Run(items, opts...)
 }
 
-func buildWorktreeItems(worktrees []project.Worktree, sessionActivity map[string]int64) []ui.Item {
+func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, sessionActivity map[string]int64) []ui.Item {
 	items := make([]ui.Item, len(worktrees))
 	for i, wt := range worktrees {
 		items[i] = ui.Item{
@@ -246,7 +246,7 @@ func buildWorktreeItems(worktrees []project.Worktree, sessionActivity map[string
 			Path:    wt.Path,
 			Context: wt.Branch,
 		}
-		sessionName := project.SessionName(wt.Path)
+		sessionName := project.TmuxSessionName(ctx, wt.Name)
 		if _, hasSession := sessionActivity[sessionName]; hasSession {
 			items[i].Icon = iconDirSession
 		}
