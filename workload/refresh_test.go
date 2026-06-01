@@ -237,6 +237,15 @@ func TestBlockedReasonInTable(t *testing.T) {
 	if result.Rows[0].BlockedReason != "HITL: 01-hitl" {
 		t.Fatalf("blocked reason = %q", result.Rows[0].BlockedReason)
 	}
+	if result.Rows[0].CompleteHint != "pop workload complete-issue thoughts/issues/blocked/01-hitl.md" {
+		t.Fatalf("complete hint = %q", result.Rows[0].CompleteHint)
+	}
+
+	var buf bytes.Buffer
+	Render(&buf, result)
+	if !strings.Contains(buf.String(), "complete: pop workload complete-issue") {
+		t.Fatalf("output missing inline complete hint:\n%s", buf.String())
+	}
 }
 
 func TestUnreadableDiscoveryDoesNotMutateState(t *testing.T) {

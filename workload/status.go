@@ -29,6 +29,7 @@ type Row struct {
 	BlockedReason    string
 	FailedIssues     []string
 	ResetHints       []string
+	CompleteHint     string
 	MalformedSummary string
 	DetailErrors     []string
 	RegIndex         int
@@ -227,6 +228,22 @@ func BuildBlockedReason(m *Manifest) string {
 	return "no eligible AFK issue"
 }
 
+// BlockingHITLIssue returns the open HITL issue whose blockers are all resolved
+// — the issue that holds a Human-blocked Issue set at a human-in-the-loop gate.
+// Returns nil when no such issue exists.
+func BlockingHITLIssue(m *Manifest) *Issue {
+	if m == nil || !m.Valid {
+		return nil
+	}
+	for i := range m.Issues {
+		issue := m.Issues[i]
+		if issue.Status == "open" && issue.Type == "HITL" && blockersResolved(m, issue) {
+			return &m.Issues[i]
+		}
+	}
+	return nil
+}
+
 func blockersResolved(m *Manifest, issue Issue) bool {
 	for _, blocker := range issue.BlockedBy {
 		if !blockerSatisfied(m, blocker) {
@@ -234,6 +251,27 @@ func blockersResolved(m *Manifest, issue Issue) bool {
 		}
 	}
 	return true
+}
+
+// issuePathHint returns the canonical copy-paste path to an issue file,
+// relative to the workload definition root (see ADR 0004).
+func issuePathHint(stem, file string) string {
+	return path.Join("thoughts/issues", stem, file)
+}
+
+// resetIssueHint returns the copy-paste reset-issue command for an issue file.
+func resetIssueHint(stem, file string) string {
+	return fmt.Sprintf("pop workload reset-issue %s", issuePathHint(stem, file))
+}
+
+// completeIssueHint returns the copy-paste complete-issue command for an issue file.
+func completeIssueHint(stem, file string) string {
+	return fmt.Sprintf("pop workload complete-issue %s", issuePathHint(stem, file))
+}
+
+// skipIssueHint returns the copy-paste skip-issue command for an issue file.
+func skipIssueHint(stem, file string) string {
+	return fmt.Sprintf("pop workload skip-issue %s", issuePathHint(stem, file))
 }
 
 // BuildFailedInfo returns failed issue IDs and reset command hints.
@@ -244,7 +282,7 @@ func BuildFailedInfo(stem string, m *Manifest) (ids []string, hints []string) {
 	for _, issue := range m.Issues {
 		if issue.Status == "failed" {
 			ids = append(ids, issue.ID)
-			hints = append(hints, fmt.Sprintf("pop workload reset-issue %s", path.Join("thoughts/issues", stem, issue.File)))
+			hints = append(hints, resetIssueHint(stem, issue.File))
 		}
 	}
 	return ids, hints

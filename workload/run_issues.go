@@ -167,6 +167,9 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 				} else {
 					printIssueSetSummary(out, result)
 				}
+				if hitl := BlockingHITLIssue(currentRefresh.Manifests[issueSetID]); hitl != nil {
+					printHITLGateAdvice(out, issueSetID, hitl)
+				}
 				if result.BlockedReason != "" {
 					return nil, exitErr(ExitNoRunnable, "Issue set %q blocked: %s", issueSetID, result.BlockedReason)
 				}
@@ -176,6 +179,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 					fmt.Fprintln(out)
 					Render(out, currentRefresh)
 				}
+				printFailedStopAdvice(out, issueSetID, currentRefresh.Manifests[issueSetID])
 				return nil, exitErr(ExitOperational, "Issue set %q has failed issues", issueSetID)
 			default:
 				return nil, selErr
@@ -204,6 +208,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 					fmt.Fprintln(out)
 					Render(out, afterRefresh)
 				}
+				printFailedStopAdvice(out, issueSetID, afterRefresh.Manifests[issueSetID])
 			}
 			return result, execErr
 		}

@@ -141,6 +141,9 @@ func buildIssueSetRow(reg RegisteredIssueSet, m *Manifest, regIndex int) Row {
 	row.Progress = BuildProgress(m, status)
 	if status == StatusBlocked {
 		row.BlockedReason = BuildBlockedReason(m)
+		if hitl := BlockingHITLIssue(m); hitl != nil {
+			row.CompleteHint = completeIssueHint(reg.ID, hitl.File)
+		}
 	}
 	if status == StatusFailed {
 		row.FailedIssues, row.ResetHints = BuildFailedInfo(reg.ID, m)
@@ -208,10 +211,14 @@ func rowDetail(row Row) string {
 		}
 		return strings.Join(parts, " — ")
 	case StatusBlocked:
+		parts := []string{row.Progress}
 		if row.BlockedReason != "" {
-			return row.Progress + " — " + row.BlockedReason
+			parts = append(parts, row.BlockedReason)
 		}
-		return row.Progress
+		if row.CompleteHint != "" {
+			parts = append(parts, "complete: "+row.CompleteHint)
+		}
+		return strings.Join(parts, " — ")
 	default:
 		return row.Progress
 	}

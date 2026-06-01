@@ -190,6 +190,51 @@ func TestRunIssueSetBlockedStopsWithReason(t *testing.T) {
 	}
 }
 
+func TestRunIssueSetHITLGatePrintsRecoveryAdvice(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkIssue: true, summary: "first done"})
+
+	var buf bytes.Buffer
+	_, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, &buf))
+	assertExitCode(t, err, ExitNoRunnable)
+
+	out := buf.String()
+	for _, want := range []string{
+		"Human-blocked: demo/02-hitl",
+		"pop workload complete-issue thoughts/issues/demo/02-hitl.md",
+		"edit thoughts/issues/demo/02-hitl.md",
+		"pop workload skip-issue thoughts/issues/demo/02-hitl.md",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("advice missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunIssueSetFailedStopMentionsCompleteAndReset(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeSequentialFakeAgent(t, env.root, []fakeAgentStep{{exitCode: 1}})
+
+	var buf bytes.Buffer
+	opts := env.runIssueSetOpts(true, agent, &buf)
+	opts.MaxTries = 1
+	_, err := RunIssueSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+
+	out := buf.String()
+	if !strings.Contains(out, "pop workload reset-issue thoughts/issues/demo/01-a.md") {
+		t.Fatalf("advice missing reset hint:\n%s", out)
+	}
+	if !strings.Contains(out, "pop workload complete-issue thoughts/issues/demo/01-a.md") {
+		t.Fatalf("advice missing complete hint:\n%s", out)
+	}
+}
+
 func TestRunIssueSetHITLOnlyIssueSetRejectedAtSelection(t *testing.T) {
 	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-hitl", File: "01-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
