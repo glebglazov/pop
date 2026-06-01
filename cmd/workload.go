@@ -62,7 +62,7 @@ var workloadRunIssuesCmd = &cobra.Command{
 
 var workloadResetIssueCmd = &cobra.Command{
 	Use:   "reset-issue ISSUE_PATH",
-	Short: "Reset one failed issue back to open",
+	Short: "Reset one failed or skipped issue back to open",
 	Args:  cobra.ExactArgs(1),
 	Run:   runWorkloadResetIssue,
 }

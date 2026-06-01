@@ -233,6 +233,28 @@ func TestResetIssueRequiresFailed(t *testing.T) {
 		IssuePath:    "thoughts/issues/demo/01-a.md",
 	})
 	assertExitCode(t, err, ExitNoRunnable)
+	if !strings.Contains(err.Error(), "failed or skipped") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResetIssueSkippedToOpen(t *testing.T) {
+	env := setupCustomIssueFixture(t, []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "HITL", Status: "skipped"},
+	})
+
+	result, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		IssuePath:    "thoughts/issues/demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IssueSetID != "demo" || result.IssueID != "01-a" {
+		t.Fatalf("reset target = %s/%s", result.IssueSetID, result.IssueID)
+	}
+	assertIssueOpen(t, env, "01-a")
+	assertProgressContains(t, env, "RESET", "was skipped")
 }
 
 func TestResetIssueProgressBeforeManifest(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"github.com/glebglazov/pop/project"
 )
 
-// ResetIssueOptions configures resetting one failed issue.
+// ResetIssueOptions configures resetting one failed or skipped issue.
 type ResetIssueOptions struct {
 	ResolveInput
 	IssuePath string
@@ -20,7 +20,7 @@ type ResetIssueResult struct {
 	Refresh    *RefreshResult
 }
 
-// ResetIssue returns one failed issue to open status.
+// ResetIssue returns one failed or skipped issue to open status.
 func ResetIssue(opts ResetIssueOptions) (*ResetIssueResult, error) {
 	return ResetIssueWith(defaultDeps, project.DefaultDeps(), config.Load, opts)
 }
@@ -66,11 +66,12 @@ func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	}
 
 	issue := m.Issues[idx]
-	if issue.Status != "failed" {
-		return nil, exitErr(ExitNoRunnable, "issue %q is %s; reset requires a failed issue", issueID, issue.Status)
+	if issue.Status != "failed" && issue.Status != "skipped" {
+		return nil, exitErr(ExitNoRunnable, "issue %q is %s; reset requires a failed or skipped issue", issueID, issue.Status)
 	}
 
-	summary := fmt.Sprintf("reset %s/%s to open", issueSetID, issueID)
+	priorStatus := issue.Status
+	summary := fmt.Sprintf("reset %s/%s to open (was %s)", issueSetID, issueID, priorStatus)
 	if err := AppendProgress(d, m.Dir, issue.File, "RESET", summary); err != nil {
 		return nil, manualRepairErr(err)
 	}

@@ -67,6 +67,38 @@ func TestCompleteIssueFailedToDone(t *testing.T) {
 	assertProgressContains(t, env, "COMPLETE", "was failed")
 }
 
+func TestCompleteIssueSkippedToDone(t *testing.T) {
+	env := setupCustomIssueFixture(t, []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "HITL", Status: "skipped"},
+	})
+
+	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		IssuePath:    "thoughts/issues/demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssueDone(t, env, "01-a")
+	assertProgressContains(t, env, "COMPLETE", "was skipped")
+}
+
+func TestCompleteIssueSkippedBlockedByUndoneRejected(t *testing.T) {
+	env := setupCustomIssueFixture(t, []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "HITL", Status: "skipped", BlockedBy: []string{"01-a"}},
+	})
+
+	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		IssuePath:    "thoughts/issues/demo/02-b.md",
+	})
+	assertExitCode(t, err, ExitNoRunnable)
+	if !strings.Contains(err.Error(), "blocked by 01-a") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestCompleteIssueAlreadyDoneRejected(t *testing.T) {
 	env := setupCustomIssueFixture(t, []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
