@@ -84,6 +84,18 @@ func issueDone(m *Manifest, id string) bool {
 	return false
 }
 
+// blockerSatisfied reports whether a blocked_by prerequisite is satisfied.
+// A Skipped issue is deliberately set aside, not completed, yet it satisfies
+// blocked_by so its dependents can proceed (see ADR 0006).
+func blockerSatisfied(m *Manifest, id string) bool {
+	for _, issue := range m.Issues {
+		if issue.ID == id {
+			return issue.Status == "done" || issue.Status == "skipped"
+		}
+	}
+	return false
+}
+
 func hasEligibleIssue(m *Manifest) bool {
 	for _, issue := range m.Issues {
 		if isEligible(m, issue) {
@@ -98,7 +110,7 @@ func isEligible(m *Manifest, issue Issue) bool {
 		return false
 	}
 	for _, blocker := range issue.BlockedBy {
-		if !issueDone(m, blocker) {
+		if !blockerSatisfied(m, blocker) {
 			return false
 		}
 	}
@@ -115,13 +127,15 @@ func BuildProgress(m *Manifest, status IssueSetStatus) string {
 		return ""
 	}
 
-	done, open, failed, hitl := 0, 0, 0, 0
+	done, open, failed, hitl, skipped := 0, 0, 0, 0, 0
 	for _, issue := range m.Issues {
 		switch issue.Status {
 		case "done":
 			done++
 		case "failed":
 			failed++
+		case "skipped":
+			skipped++
 		case "open":
 			if issue.Type == "HITL" {
 				hitl++
@@ -140,6 +154,9 @@ func BuildProgress(m *Manifest, status IssueSetStatus) string {
 	}
 	if hitl > 0 {
 		parts = append(parts, fmt.Sprintf("%d HITL", hitl))
+	}
+	if skipped > 0 {
+		parts = append(parts, fmt.Sprintf("%d skipped", skipped))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -164,7 +181,7 @@ func BuildBlockedReason(m *Manifest) string {
 			continue
 		}
 		for _, blocker := range issue.BlockedBy {
-			if !issueDone(m, blocker) {
+			if !blockerSatisfied(m, blocker) {
 				return fmt.Sprintf("blocked by %s", blocker)
 			}
 		}
@@ -174,7 +191,7 @@ func BuildBlockedReason(m *Manifest) string {
 
 func blockersResolved(m *Manifest, issue Issue) bool {
 	for _, blocker := range issue.BlockedBy {
-		if !issueDone(m, blocker) {
+		if !blockerSatisfied(m, blocker) {
 			return false
 		}
 	}

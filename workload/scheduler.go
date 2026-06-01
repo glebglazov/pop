@@ -175,6 +175,8 @@ func selectExplicitIssue(issueSetID string, m *Manifest, issueID string) (*Selec
 		return nil, exitErr(ExitNoRunnable, "issue %q is already done", issueID)
 	case "failed":
 		return nil, exitErr(ExitNoRunnable, "issue %q failed; reset required", issueID)
+	case "skipped":
+		return nil, exitErr(ExitNoRunnable, "issue %q is skipped", issueID)
 	}
 	if issue.Type == "HITL" {
 		return nil, exitErr(ExitNoRunnable, "issue %q is HITL", issueID)
@@ -183,7 +185,7 @@ func selectExplicitIssue(issueSetID string, m *Manifest, issueID string) (*Selec
 		return nil, exitErr(ExitNoRunnable, "issue %q is not AFK", issueID)
 	}
 	for _, blocker := range issue.BlockedBy {
-		if !issueDone(m, blocker) {
+		if !blockerSatisfied(m, blocker) {
 			return nil, exitErr(ExitNoRunnable, "issue %q blocked by %s", issueID, blocker)
 		}
 	}

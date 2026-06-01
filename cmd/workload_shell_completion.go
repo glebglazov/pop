@@ -34,6 +34,7 @@ func registerWorkloadShellCompletions() {
 	workloadRunIssuesCmd.ValidArgsFunction = completeWorkloadRunIssuesArgs
 	workloadResetIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
 	workloadCompleteIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
+	workloadSkipIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
 }
 
 func registerWorkloadPathFlagCompletions() {

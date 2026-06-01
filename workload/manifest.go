@@ -11,7 +11,7 @@ import (
 
 var (
 	allowedIssueTypes    = map[string]bool{"AFK": true, "HITL": true}
-	allowedIssueStatuses = map[string]bool{"open": true, "done": true, "failed": true}
+	allowedIssueStatuses = map[string]bool{"open": true, "done": true, "failed": true, "skipped": true}
 	acHeaderPattern      = regexp.MustCompile(`(?i)^##\s+Acceptance criteria\s*$`)
 	checkboxPattern      = regexp.MustCompile(`^-\s+\[[ xX]\]`)
 )

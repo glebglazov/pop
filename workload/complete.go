@@ -71,7 +71,7 @@ func CompleteIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 	}
 
 	for _, blocker := range issue.BlockedBy {
-		if !issueDone(m, blocker) {
+		if !blockerSatisfied(m, blocker) {
 			return nil, exitErr(ExitNoRunnable, "issue %q blocked by %s; complete it first", issueID, blocker)
 		}
 	}

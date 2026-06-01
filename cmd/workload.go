@@ -74,6 +74,13 @@ var workloadCompleteIssueCmd = &cobra.Command{
 	Run:   runWorkloadCompleteIssue,
 }
 
+var workloadSkipIssueCmd = &cobra.Command{
+	Use:   "skip-issue ISSUE_PATH",
+	Short: "Defer one open issue to skipped, unblocking its dependents",
+	Args:  cobra.ExactArgs(1),
+	Run:   runWorkloadSkipIssue,
+}
+
 func init() {
 	rootCmd.AddCommand(workloadCmd)
 	workloadCmd.AddCommand(workloadStatusCmd)
@@ -82,6 +89,7 @@ func init() {
 	workloadCmd.AddCommand(workloadRunIssuesCmd)
 	workloadCmd.AddCommand(workloadResetIssueCmd)
 	workloadCmd.AddCommand(workloadCompleteIssueCmd)
+	workloadCmd.AddCommand(workloadSkipIssueCmd)
 
 	workloadCmd.PersistentFlags().StringVar(&workloadProject, "project", "", "Select project by exact picker-visible name")
 	workloadCmd.PersistentFlags().StringVar(&workloadPath, "path", "", "Select project by path (normalized to git checkout root)")
@@ -254,6 +262,24 @@ func runWorkloadCompleteIssueWith(d *workload.Deps, w io.Writer, issuePath strin
 		return err
 	}
 	fmt.Fprintf(w, "Completed issue %s/%s\n\n", result.IssueSetID, result.IssueID)
+	workload.Render(w, result.Refresh)
+	return nil
+}
+
+func runWorkloadSkipIssue(cmd *cobra.Command, args []string) {
+	err := runWorkloadSkipIssueWith(workload.DefaultDeps(), os.Stdout, args[0])
+	handleWorkloadExit(err)
+}
+
+func runWorkloadSkipIssueWith(d *workload.Deps, w io.Writer, issuePath string) error {
+	result, err := workload.SkipIssueWith(d, workloadProjectDeps(), workloadConfigLoad, workload.SkipIssueOptions{
+		ResolveInput: workloadResolveInput(),
+		IssuePath:    issuePath,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Skipped issue %s/%s\n\n", result.IssueSetID, result.IssueID)
 	workload.Render(w, result.Refresh)
 	return nil
 }
