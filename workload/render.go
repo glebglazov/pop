@@ -283,6 +283,7 @@ func RenderIssueList(w io.Writer, issueSetID string, m *Manifest) {
 		return
 	}
 	fmt.Fprintf(w, "\nIssues in %s:\n", issueSetID)
+	fmt.Fprintln(w, "  Legend: → runnable  ○ blocked  ◐ needs human  ✓ done  ⊘ failed/skipped")
 	for _, issue := range m.Issues {
 		sym := issueSymbol(m, issue)
 		fmt.Fprintf(w, "  %s %s  %s  %s  %s\n", sym, issue.ID, issue.Type, issue.Status, issue.Title)
@@ -301,7 +302,7 @@ func issueSymbol(m *Manifest, issue Issue) string {
 			return "◐"
 		}
 		if isEligible(m, issue) {
-			return "▶"
+			return "→"
 		}
 		return "○"
 	default:
