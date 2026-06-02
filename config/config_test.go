@@ -55,6 +55,61 @@ func TestDefaultConfigPathWith(t *testing.T) {
 	}
 }
 
+func TestWorkloadAgentOutput(t *testing.T) {
+	tests := []struct {
+		name  string
+		cfg   *Config
+		agent string
+		want  string
+	}{
+		{name: "nil config", want: "auto"},
+		{name: "missing section", cfg: &Config{}, want: "auto"},
+		{name: "empty value", cfg: &Config{Workload: &WorkloadConfig{}}, want: "auto"},
+		{
+			name:  "configured text",
+			cfg:   &Config{Workload: &WorkloadConfig{Agents: map[string]WorkloadAgentConfig{"claude": {Output: "text"}}}},
+			agent: "claude",
+			want:  "text",
+		},
+		{
+			name:  "other agent remains auto",
+			cfg:   &Config{Workload: &WorkloadConfig{Agents: map[string]WorkloadAgentConfig{"claude": {Output: "text"}}}},
+			agent: "cursor",
+			want:  "auto",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.WorkloadAgentOutput(tt.agent); got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadWorkloadAgentOutput(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[workload.agents.claude]
+output = "text"
+
+[workload.agents.cursor]
+output = "auto"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.WorkloadAgentOutput("claude"); got != "text" {
+		t.Fatalf("claude output = %q, want text", got)
+	}
+	if got := cfg.WorkloadAgentOutput("cursor"); got != "auto" {
+		t.Fatalf("cursor output = %q, want auto", got)
+	}
+}
+
 func TestExpandProjectsWith(t *testing.T) {
 	tests := []struct {
 		name     string

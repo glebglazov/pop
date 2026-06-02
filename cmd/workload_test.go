@@ -576,6 +576,7 @@ func resetWorkloadFlags() {
 	workloadDefPath = ""
 	workloadAgentPreset = ""
 	workloadAgentCmd = ""
+	workloadAgentOutput = ""
 	workloadRunYes = false
 	workloadAllowDirty = workload.DirtyRuntimeContinue
 }

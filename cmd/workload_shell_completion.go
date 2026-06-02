@@ -27,6 +27,7 @@ func registerWorkloadShellCompletions() {
 
 	for _, cmd := range []*cobra.Command{workloadRunIssueCmd, workloadRunIssuesCmd} {
 		_ = cmd.RegisterFlagCompletionFunc("agent", completeWorkloadAgents)
+		_ = cmd.RegisterFlagCompletionFunc("agent-output", completeWorkloadAgentOutputs)
 	}
 
 	workloadSetPriorityCmd.ValidArgsFunction = completeWorkloadSetPriorityArgs
@@ -100,6 +101,10 @@ func completeWorkloadIssuePaths(cmd *cobra.Command, args []string, toComplete st
 
 func completeWorkloadAgents(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	return filterShellCompletions(workload.ValidAgentPresets(), toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeWorkloadAgentOutputs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return filterShellCompletions(workload.ValidAgentOutputModes(), toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
 func completeWorkloadSetPriorityArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

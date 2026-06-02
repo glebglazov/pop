@@ -92,6 +92,16 @@ type ProjectConfig struct {
 	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled"`
 }
 
+// WorkloadConfig holds workload-execution configuration.
+type WorkloadConfig struct {
+	Agents map[string]WorkloadAgentConfig `toml:"agents"`
+}
+
+// WorkloadAgentConfig holds configuration for one workload agent preset.
+type WorkloadAgentConfig struct {
+	Output string `toml:"output"`
+}
+
 // ProjectEntry represents a project configuration entry.
 type ProjectEntry struct {
 	Path         string `toml:"path"`
@@ -113,17 +123,31 @@ type Config struct {
 	Commands              []UserDefinedCommand `toml:"commands"`
 	ExcludeCurrentSession bool                 `toml:"exclude_current_session"`
 	// Deprecated: use ExcludeCurrentSession. TODO: remove after v1.0.
-	ExcludeCurrentDir      bool                  `toml:"exclude_current_dir"`
-	DisambiguationStrategy string                `toml:"disambiguation_strategy"`
-	QuickAccessModifier    string                `toml:"quick_access_modifier"`
-	Worktree               *WorktreeConfig       `toml:"worktree"`
-	Project                *ProjectConfig        `toml:"project"`
+	ExcludeCurrentDir      bool            `toml:"exclude_current_dir"`
+	DisambiguationStrategy string          `toml:"disambiguation_strategy"`
+	QuickAccessModifier    string          `toml:"quick_access_modifier"`
+	Worktree               *WorktreeConfig `toml:"worktree"`
+	Project                *ProjectConfig  `toml:"project"`
 	// Deprecated: use Project. TODO: remove at next major release.
-	Select                 *ProjectConfig        `toml:"select"`
-	PaneMonitoring         *PaneMonitoringConfig `toml:"pane_monitoring"`
-	Dashboard              *DashboardConfig      `toml:"dashboard"`
+	Select         *ProjectConfig        `toml:"select"`
+	PaneMonitoring *PaneMonitoringConfig `toml:"pane_monitoring"`
+	Dashboard      *DashboardConfig      `toml:"dashboard"`
+	Workload       *WorkloadConfig       `toml:"workload"`
 
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
+}
+
+// WorkloadAgentOutput returns the configured output mode for one agent preset.
+// Defaults to "auto"; validation is owned by the workload executor.
+func (c *Config) WorkloadAgentOutput(agent string) string {
+	if c == nil || c.Workload == nil {
+		return "auto"
+	}
+	agentConfig, ok := c.Workload.Agents[agent]
+	if !ok || agentConfig.Output == "" {
+		return "auto"
+	}
+	return agentConfig.Output
 }
 
 // ExpandedPath represents a resolved project path with display metadata

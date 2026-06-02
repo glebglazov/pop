@@ -135,7 +135,7 @@ every issue done or skipped, ≥1 skipped ..... DEFERRED   ← conclude or reope
 otherwise (unfinished, none eligible) ....... BLOCKED    ← Human-blocked: HITL or undone dependency
 ```
 
-(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets. Run issues stops when its set reaches DONE, FAILED, BLOCKED, or DEFERRED, and at a BLOCKED HITL gate advises the recovery paths (complete, edit-and-rerun, or skip).
+(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets. Run issues stops when its set reaches DONE, FAILED, BLOCKED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing issue status. At a BLOCKED HITL gate it advises the recovery paths (complete, edit-and-rerun, or skip).
 
 **Workload**:
 A machine-local schedule of Issue sets whose issues can be executed by an agent. A workload decides which Issue set to draw work from next; it does not replace the local Issue sets or their execution rules.
@@ -198,16 +198,32 @@ Executing exactly one eligible issue from a Ready Issue set. By default pop choo
 _Avoid_: Next issue
 
 **Run issues**:
-Sequentially executing eligible issues from one Ready Issue set until it becomes Done, Blocked, or Failed. By default pop chooses the Issue set using workload priority. When a positional argument is supplied, it must be a CWD-relative path to the Issue set directory; bare Issue set identifiers, absolute paths, and non-relative reference forms are rejected. It does not continue into another Issue set.
+Sequentially executing eligible issues from one Ready Issue set until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly. By default pop chooses the Issue set using workload priority. When a positional argument is supplied, it must be a CWD-relative path to the Issue set directory; bare Issue set identifiers, absolute paths, and non-relative reference forms are rejected. It does not continue into another Issue set.
 _Avoid_: Run all, next Issue set, Run PRD
 
 **Agent preset**:
 A named headless agent command known to the workload executor. An explicit agent command may override a preset. The executor appends its generated prompt as the final positional argument and disconnects stdin.
 _Avoid_: Integration
 
+**Agent output adapter**:
+The preset-specific interpretation of an agent's headless output. An adapter may recover completion text or detect an **Agent quota pause** from a structured protocol; when it cannot interpret the output, the original text remains subject to the normal **Completion sentinel** contract.
+_Avoid_: Universal JSON protocol, agent integration
+
+**Agent output mode**:
+Controls whether one Agent preset uses its Agent output adapter or a plain-text compatibility fallback. Plain-text mode disables adapter capabilities such as Agent quota detection.
+_Avoid_: Agent quota reporting, universal JSON protocol
+
 **Agent quota reporting**:
-Displaying subscription quota remaining in a provider-specific rolling window, such as a five-hour limit. This is deferred until agent CLIs expose supported headless status interfaces. Token totals, private authentication-file access, undocumented endpoints, and interactive-terminal scraping are not substitutes for quota reporting.
+Proactively displaying subscription quota remaining in a provider-specific rolling window, such as a five-hour limit. This is separate from **Agent quota detection** and remains deferred until each agent CLI exposes a supported headless status interface. Token totals, private authentication-file access, undocumented endpoints, and interactive-terminal scraping are not substitutes for quota reporting.
 _Avoid_: Token usage, API cost
+
+**Agent quota detection**:
+Identifying from an Agent output adapter that an issue attempt stopped because the agent allowance is exhausted. Detection is preset-specific and relies on a stable headless signal. A detected quota pause stops Run issue or Run issues cleanly without retrying, leaves the issue Open, preserves partial runtime changes, and does not append a progress record. It is not a Failed, Skipped, or Interrupted issue. Proactively reporting remaining allowance is the separate **Agent quota reporting** concern.
+_Avoid_: Agent quota reporting, failed issue, skipped issue
+
+**Agent quota pause**:
+The clean stop produced by Agent quota detection. It leaves the current issue Open and preserves its partial runtime changes, so a later Run issue or Run issues invocation may resume work after allowance returns.
+_Avoid_: Exhausted issue, Interrupted issue, Failed issue
 
 **Issue attempt**:
 One agent invocation for an issue. The workload executor retries an unsuccessful issue up to the configured maximum, defaulting to three attempts. Exhaustion marks the issue Failed, records the attempt count and reason locally, and stops Run issues.
@@ -340,8 +356,12 @@ _Avoid_: Malformed Issue set
 >
 > **Dev:** I saw a `!` in the project picker and pressed `→`. Is that the dashboard?
 >
-> **Expert:** That's the **unread view** — a quick triage shortcut scoped to one session's unread panes. The full **dashboard** shows all registered panes across sessions.
+> **Expert:** No. The old **unread view** was removed. Open the **dashboard** to browse registered panes and their attention state.
 >
 > **Dev:** I want to keep an eye on one agent even when it's Clear.
 >
 > **Expert:** **Following** on the dashboard. Toggle follow on the pane, then use following mode to filter to just followed panes.
+>
+> **Dev:** What if a workload agent changes its structured output and pop cannot interpret it?
+>
+> **Expert:** Its **Agent output adapter** falls back to the original text, which still has to satisfy the normal **Completion sentinel** contract. An **Agent quota pause** is different: when the adapter recognizes one, the issue stays Open and Run issues stops cleanly.

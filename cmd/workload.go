@@ -21,6 +21,7 @@ var (
 	workloadRuntimePath string
 	workloadAgentPreset string
 	workloadAgentCmd    string
+	workloadAgentOutput workload.AgentOutputMode
 	workloadRunYes      bool
 	workloadAllowDirty  workload.DirtyRuntimeStrategy = workload.DirtyRuntimeContinue
 	workloadMaxTries    int
@@ -100,6 +101,7 @@ func init() {
 	workloadRunIssueCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
+	workloadRunIssueCmd.Flags().Var(&workloadAgentOutput, "agent-output", "Agent output mode: auto (default), text")
 	workloadRunIssueCmd.Flags().IntVar(&workloadMaxTries, "max-tries", workload.DefaultMaxTries, "Maximum started attempts per issue")
 	workloadRunIssueCmd.Flags().StringVar(&workloadTimeout, "timeout", "30m", "Maximum duration per attempt")
 	workloadRunIssueCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
@@ -109,6 +111,7 @@ func init() {
 	workloadRunIssuesCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
 	workloadRunIssuesCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
 	workloadRunIssuesCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
+	workloadRunIssuesCmd.Flags().Var(&workloadAgentOutput, "agent-output", "Agent output mode: auto (default), text")
 	workloadRunIssuesCmd.Flags().IntVar(&workloadMaxTries, "max-tries", workload.DefaultMaxTries, "Maximum started attempts per issue")
 	workloadRunIssuesCmd.Flags().StringVar(&workloadTimeout, "timeout", "30m", "Maximum duration per attempt")
 	workloadRunIssuesCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
@@ -190,6 +193,7 @@ func runWorkloadRunIssueWith(d *workload.Deps, stdout, stderr io.Writer, stdin i
 		IssuePathOverride: issuePath,
 		AgentPreset:       workloadAgentPreset,
 		AgentCmd:          workloadAgentCmd,
+		AgentOutput:       workloadAgentOutput,
 		AllowDirty:        workloadAllowDirty,
 		MaxTries:          workloadMaxTries,
 		Timeout:           timeout,
@@ -220,6 +224,7 @@ func runWorkloadRunIssuesWith(d *workload.Deps, stdout, stderr io.Writer, stdin 
 		IssueSetOverride: issueSetPath,
 		AgentPreset:      workloadAgentPreset,
 		AgentCmd:         workloadAgentCmd,
+		AgentOutput:      workloadAgentOutput,
 		AllowDirty:       workloadAllowDirty,
 		MaxTries:         workloadMaxTries,
 		Timeout:          timeout,

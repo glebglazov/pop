@@ -23,6 +23,10 @@ projects = [
     { path = "~/Dev/*/*", display_depth = 2 },
     { path = "~/.local/share/chezmoi" },
 ]
+
+[workload.agents.claude]
+# Use "text" as a compatibility fallback if an agent's structured output fails.
+output = "auto"
 ```
 
 Add a tmux binding for quick access:

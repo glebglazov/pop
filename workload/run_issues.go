@@ -19,6 +19,7 @@ type RunIssueSetOptions struct {
 	IssueSetOverride string
 	AgentPreset      string
 	AgentCmd         string
+	AgentOutput      AgentOutputMode
 	AllowDirty       DirtyRuntimeStrategy
 	MaxTries         int
 	Timeout          time.Duration
@@ -38,6 +39,8 @@ type RunIssueSetResult struct {
 	IssueSetDeferred bool
 	SkippedIssues    []string
 	BlockedReason    string
+	QuotaPaused      bool
+	PauseReason      string
 }
 
 // RunIssueSet drains one Issue set sequentially through eligible AFK issues.
@@ -49,6 +52,14 @@ func RunIssueSet(opts RunIssueSetOptions) (*RunIssueSetResult, error) {
 func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts RunIssueSetOptions) (*RunIssueSetResult, error) {
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
+	}
+	agentOutput := AgentOutputAuto
+	if opts.AgentCmd == "" {
+		var err error
+		agentOutput, err = resolveAgentOutputMode(loadConfig, opts.AgentPreset, opts.AgentOutput)
+		if err != nil {
+			return nil, exitErr(ExitSetup, "%v", err)
+		}
 	}
 	if err := validateDirtyRuntimeStrategy(opts.AllowDirty); err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -198,12 +209,12 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		}
 
 		prompt := BuildAgentPrompt(sel.IssuePath, runtimePath)
-		name, args, err := ResolveAgentCommand(opts.AgentPreset, opts.AgentCmd, prompt, runtimePath)
+		invocation, err := ResolveAgentInvocationWithMode(opts.AgentPreset, opts.AgentCmd, prompt, runtimePath, agentOutput)
 		if err != nil {
 			return nil, issueExitErr(sel, ExitSetup, "%v", err)
 		}
 
-		issueResult, execErr := executeIssueAttempts(d, sel, runtimePath, out, name, args, maxTries, timeout)
+		issueResult, execErr := executeIssueAttempts(d, sel, runtimePath, out, invocation, maxTries, timeout)
 		if execErr != nil {
 			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 			if refreshErr == nil {
@@ -215,6 +226,13 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 				printFailedStopAdvice(out, issueSetID, afterRefresh.Manifests[issueSetID])
 			}
 			return result, execErr
+		}
+		if issueResult.QuotaPaused {
+			result.QuotaPaused = true
+			result.PauseReason = issueResult.PauseReason
+			result.Refresh = currentRefresh
+			printIssueSetSummary(out, result)
+			return result, nil
 		}
 
 		result.Completed = append(result.Completed, issueResult)
@@ -252,6 +270,10 @@ func printIssueSetSummary(w io.Writer, result *RunIssueSetResult) {
 	}
 	if result.BlockedReason != "" {
 		out.line(ansiYellow, "Issue set %s blocked: %s", result.IssueSetID, result.BlockedReason)
+		return
+	}
+	if result.QuotaPaused {
+		out.line(ansiYellow, "Issue set %s paused after %d completed issue(s): agent quota exhausted", result.IssueSetID, len(result.Completed))
 		return
 	}
 	fmt.Fprintf(out, "Issue set %s stopped after %d issue(s)\n", result.IssueSetID, len(result.Completed))

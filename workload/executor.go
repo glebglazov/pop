@@ -57,6 +57,7 @@ type RunIssueOptions struct {
 	IssuePathOverride string
 	AgentPreset       string
 	AgentCmd          string
+	AgentOutput       AgentOutputMode
 	AllowDirty        DirtyRuntimeStrategy
 	MaxTries          int
 	Timeout           time.Duration
@@ -72,6 +73,8 @@ type RunIssueResult struct {
 	Refresh      *RefreshResult
 	Declined     bool
 	NoOp         bool
+	QuotaPaused  bool
+	PauseReason  string
 	CommitSHA    string
 	AgentSummary string
 }
@@ -93,6 +96,14 @@ func RunIssue(opts RunIssueOptions) (*RunIssueResult, error) {
 func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts RunIssueOptions) (*RunIssueResult, error) {
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
+	}
+	agentOutput := AgentOutputAuto
+	if opts.AgentCmd == "" {
+		var err error
+		agentOutput, err = resolveAgentOutputMode(loadConfig, opts.AgentPreset, opts.AgentOutput)
+		if err != nil {
+			return nil, exitErr(ExitSetup, "%v", err)
+		}
 	}
 	if err := validateDirtyRuntimeStrategy(opts.AllowDirty); err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -175,7 +186,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	}
 
 	prompt := BuildAgentPrompt(sel.IssuePath, runtimePath)
-	name, args, err := ResolveAgentCommand(opts.AgentPreset, opts.AgentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentInvocationWithMode(opts.AgentPreset, opts.AgentCmd, prompt, runtimePath, agentOutput)
 	if err != nil {
 		return nil, issueExitErr(sel, ExitSetup, "%v", err)
 	}
@@ -189,7 +200,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 		timeout = DefaultAttemptTimeout
 	}
 
-	result, execErr := executeIssueAttempts(d, sel, runtimePath, out, name, args, maxTries, timeout)
+	result, execErr := executeIssueAttempts(d, sel, runtimePath, out, invocation, maxTries, timeout)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil && !opts.Yes {
@@ -213,14 +224,14 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	return result, nil
 }
 
-func executeIssueAttempts(d *Deps, sel *Selection, runtimePath string, out io.Writer, name string, args []string, maxTries int, timeout time.Duration) (*RunIssueResult, error) {
+func executeIssueAttempts(d *Deps, sel *Selection, runtimePath string, out io.Writer, invocation *AgentInvocation, maxTries int, timeout time.Duration) (*RunIssueResult, error) {
 	display := outputFor(out)
 	display.line(ansiBold+ansiCyan, "━━ Running issue %s/%s: %s", sel.IssueSetID, sel.IssueID, sel.Issue.Title)
 	for attempt := 1; attempt <= maxTries; attempt++ {
 		display.line(ansiDim, "   Attempt %d/%d", attempt, maxTries)
 		display.line(ansiDim, "── Agent output ────────────────────────────────────────")
 
-		agentOut, outcome, err := runAgentAttempt(d, runtimePath, out, timeout, name, args...)
+		agentOut, outcome, err := runAgentAttempt(d, runtimePath, out, timeout, invocation)
 		if err != nil {
 			display.line(ansiRed, "✗ Agent failed to start for %s/%s", sel.IssueSetID, sel.IssueID)
 			return nil, issueExitErr(sel, ExitOperational, "agent execution: %v", err)
@@ -239,13 +250,23 @@ func executeIssueAttempts(d *Deps, sel *Selection, runtimePath string, out io.Wr
 		if outcome.runErr != nil {
 			return nil, issueExitErr(sel, ExitOperational, "agent execution: %v", outcome.runErr)
 		}
+		agentResult := NormalizeAgentOutput(invocation.OutputFormat, agentOut)
+		if agentResult.QuotaPause != nil {
+			display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.IssueSetID, sel.IssueID)
+			display.line(ansiYellow, "  %s", agentResult.QuotaPause.Reason)
+			return &RunIssueResult{
+				Selection:   sel,
+				QuotaPaused: true,
+				PauseReason: agentResult.QuotaPause.Reason,
+			}, nil
+		}
 
 		issueData, err := d.FS.ReadFile(sel.IssuePath)
 		if err != nil {
 			return nil, issueExitErr(sel, ExitOperational, "read issue markdown: %v", err)
 		}
 
-		assessment, reason := assessAttempt(agentOut, outcome.exitCode, issueData)
+		assessment, reason := assessAttempt(agentResult.Output, outcome.exitCode, issueData)
 		if assessment.Complete {
 			result, err := completeSuccessfulIssue(d, sel, runtimePath, assessment.Summary)
 			if err != nil {
@@ -316,14 +337,17 @@ func completeSuccessfulIssue(d *Deps, sel *Selection, runtimePath, summary strin
 	return result, nil
 }
 
-func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout time.Duration, name string, args ...string) (string, *attemptOutcome, error) {
+func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout time.Duration, invocation *AgentInvocation) (string, *attemptOutcome, error) {
 	var capture bytes.Buffer
-	mw := io.MultiWriter(liveOut, &capture)
+	var agentOut io.Writer = &capture
+	if invocation.OutputFormat == AgentOutputPlain {
+		agentOut = io.MultiWriter(liveOut, &capture)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	proc, err := d.Runner.Start(ctx, runtimePath, mw, mw, name, args...)
+	proc, err := d.Runner.Start(ctx, runtimePath, agentOut, agentOut, invocation.Name, invocation.Args...)
 	if err != nil {
 		return "", nil, err
 	}
@@ -373,7 +397,13 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 		}
 	}
 
-	return capture.String(), outcome, nil
+	raw := capture.String()
+	if invocation.OutputFormat != AgentOutputPlain {
+		if normalized := NormalizeAgentOutput(invocation.OutputFormat, raw); normalized.QuotaPause == nil {
+			RenderAgentOutput(liveOut, invocation.OutputFormat, raw)
+		}
+	}
+	return raw, outcome, nil
 }
 
 func finalizeIssueFailed(d *Deps, sel *Selection, attemptsStarted int, summary string) error {

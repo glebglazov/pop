@@ -65,6 +65,38 @@ func TestRunIssueExhaustedRetriesMarkFailed(t *testing.T) {
 	}
 }
 
+func TestRunIssueClaudeQuotaPauseLeavesIssueOpenWithoutRetry(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	counterPath := installClaudeQuotaAgent(t, env.root)
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 3
+	var buf bytes.Buffer
+	opts.Output = &buf
+
+	result, err := RunIssueWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.QuotaPaused || !strings.Contains(result.PauseReason, "weekly limit") {
+		t.Fatalf("result = %#v", result)
+	}
+	assertIssueOpen(t, env, "01-a")
+	if got := strings.TrimSpace(string(mustReadFile(t, counterPath))); got != "1" {
+		t.Fatalf("started attempts = %q, want 1", got)
+	}
+	if _, err := os.Stat(filepath.Join(env.root, "thoughts/issues/demo/progress.txt")); !os.IsNotExist(err) {
+		t.Fatalf("quota pause wrote progress: %v", err)
+	}
+	if strings.Contains(buf.String(), "{\"type\"") {
+		t.Fatalf("quota pause rendered raw JSONL:\n%s", buf.String())
+	}
+	if got := strings.Count(buf.String(), "You've hit your weekly limit"); got != 1 {
+		t.Fatalf("quota reason rendered %d times, want 1:\n%s", got, buf.String())
+	}
+}
+
 func TestRunIssueConfigurableMaxTries(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	var calls int32
@@ -82,6 +114,35 @@ func TestRunIssueConfigurableMaxTries(t *testing.T) {
 		t.Fatalf("started attempts = %d, want 5", got)
 	}
 	assertIssueFailed(t, env, "01-a", 5)
+}
+
+func installClaudeQuotaAgent(t *testing.T, root string) string {
+	t.Helper()
+	dir := filepath.Join(root, ".agent-bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	counterPath := filepath.Join(dir, "claude.count")
+	script := "#!/bin/sh\n" +
+		"COUNT=0\n" +
+		"if [ -f " + counterPath + " ]; then COUNT=$(cat " + counterPath + "); fi\n" +
+		"echo $((COUNT + 1)) > " + counterPath + "\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"result\":\"You'\"'\"'ve hit your weekly limit · resets Mon 12:00am\"}'\n"
+	writeFile(t, filepath.Join(dir, "claude"), script)
+	if err := os.Chmod(filepath.Join(dir, "claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return counterPath
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestRunIssueTimeoutMarksFailedWithoutRetry(t *testing.T) {

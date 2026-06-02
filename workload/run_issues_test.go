@@ -262,6 +262,33 @@ func TestRunIssueSetFailedIssueStopsDrain(t *testing.T) {
 	assertIssueFailed(t, env.execFixture(), "02-b", 1)
 }
 
+func TestRunIssueSetClaudeQuotaPauseStopsCleanly(t *testing.T) {
+	env := setupRunIssueSetFixture(t, "demo", []Issue{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	counterPath := installClaudeQuotaAgent(t, env.root)
+	var buf bytes.Buffer
+	opts := env.runIssueSetOpts(true, "", &buf)
+	opts.AgentPreset = "claude"
+
+	result, err := RunIssueSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.QuotaPaused || len(result.Completed) != 0 {
+		t.Fatalf("result = %#v", result)
+	}
+	assertIssueOpen(t, env.execFixture(), "01-a")
+	assertIssueOpen(t, env.execFixture(), "02-b")
+	if got := strings.TrimSpace(string(mustReadFile(t, counterPath))); got != "1" {
+		t.Fatalf("started attempts = %q, want 1", got)
+	}
+	if !strings.Contains(buf.String(), "Issue set demo paused") {
+		t.Fatalf("missing pause summary:\n%s", buf.String())
+	}
+}
+
 func TestRunIssueSetTimeoutPropagation(t *testing.T) {
 	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
