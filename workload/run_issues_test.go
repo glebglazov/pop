@@ -95,18 +95,17 @@ func TestRunIssueSetSingleConfirmation(t *testing.T) {
 	}
 }
 
-func TestRunIssueSetDirtyRejection(t *testing.T) {
+func TestRunIssueSetDirtyNonInteractiveRejection(t *testing.T) {
 	env := setupRunIssueSetFixture(t, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	writeFile(t, filepath.Join(env.root, "partial.txt"), "pending\n")
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
 
-	_, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, nil))
+	opts := env.runIssueSetOpts(false, agent, nil)
+	opts.ConfirmIn = NonInteractiveReader{}
+	_, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "dirty") {
-		t.Fatalf("err = %v", err)
-	}
 }
 
 func TestRunIssueSetAppliesDirtyStrategyOnceBeforeDrain(t *testing.T) {
@@ -205,7 +204,7 @@ func TestRunIssueSetHITLGatePrintsRecoveryAdvice(t *testing.T) {
 	for _, want := range []string{
 		"Human-blocked: demo/02-hitl",
 		"pop workload complete-issue thoughts/issues/demo/02-hitl.md",
-		"edit thoughts/issues/demo/02-hitl.md",
+		"$EDITOR thoughts/issues/demo/02-hitl.md && pop workload run-issues",
 		"pop workload skip-issue thoughts/issues/demo/02-hitl.md",
 	} {
 		if !strings.Contains(out, want) {

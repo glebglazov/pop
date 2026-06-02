@@ -53,6 +53,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	if err := validateDirtyRuntimeStrategy(opts.AllowDirty); err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
+	strategy := resolveDirtyRuntimeStrategy(opts.AllowDirty)
 
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
@@ -84,9 +85,6 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	if err != nil {
 		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
 	}
-	if dirty && opts.AllowDirty == DirtyRuntimeReject {
-		return nil, exitErr(ExitOperational, "runtime checkout is dirty; commit or stash changes before execution")
-	}
 
 	confirmOut := opts.ConfirmOut
 	if confirmOut == nil {
@@ -95,10 +93,6 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	out := opts.Output
 	if out == nil {
 		out = os.Stdout
-	}
-
-	if dirty {
-		warnDirtyRuntimeStrategy(confirmOut, opts.AllowDirty)
 	}
 
 	displayRows := cloneRows(refresh.Rows)
@@ -112,6 +106,12 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 
 	if m := displayRefresh.Manifests[issueSetID]; m != nil {
 		RenderIssueList(out, issueSetID, m)
+	}
+
+	if dirty {
+		if err := reportDirtyRuntime(d, confirmOut, runtimePath, strategy); err != nil {
+			return nil, exitErr(ExitSetup, "runtime git status: %v", err)
+		}
 	}
 
 	confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes, issueSetConfirmPrompt)
@@ -191,7 +191,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		}
 
 		if dirty && !dirtyStrategyApplied {
-			if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.IssueSetID, sel.IssueID, opts.AllowDirty, confirmOut); err != nil {
+			if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.IssueSetID, sel.IssueID, strategy, confirmOut); err != nil {
 				return nil, exitErr(ExitOperational, "dirty-runtime strategy: %v", err)
 			}
 			dirtyStrategyApplied = true

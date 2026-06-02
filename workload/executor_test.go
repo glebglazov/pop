@@ -249,15 +249,43 @@ func TestRunIssueNoRunnableWork(t *testing.T) {
 	assertExitCode(t, err, ExitNoRunnable)
 }
 
-func TestRunIssueDirtyRejection(t *testing.T) {
+func TestRunIssueDirtyNonInteractiveRejection(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	writeFile(t, filepath.Join(env.root, "dirty.txt"), "pending\n")
 
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
-	_, err := RunIssueWith(env.deps(), nil, nil, env.runOpts(true, agent))
+	opts := env.runOpts(false, agent)
+	opts.ConfirmIn = NonInteractiveReader{}
+	_, err := RunIssueWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "dirty") {
-		t.Fatalf("err = %v", err)
+}
+
+func TestRunIssueDirtyDefaultContinuesWithConfirmation(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	writeFile(t, filepath.Join(env.root, "partial.txt"), "resume\n")
+
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		changeFile: "impl.txt",
+		changeData: "done\n",
+		checkIssue: true,
+		summary:    "ok",
+	})
+
+	opts := env.runOpts(false, agent)
+	opts.ConfirmIn = strings.NewReader("y\n")
+	var notice bytes.Buffer
+	opts.ConfirmOut = &notice
+	// AllowDirty left unset; the default resolves to continue.
+
+	result, err := RunIssueWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !strings.Contains(notice.String(), "Runtime checkout has uncommitted changes") {
+		t.Fatalf("missing dirty status report:\n%s", notice.String())
+	}
+	if result.CommitSHA == "" {
+		t.Fatal("expected implementation commit")
 	}
 }
 
@@ -281,8 +309,8 @@ func TestRunIssueAllowDirtyCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
-	if !strings.Contains(notice.String(), "Warning:") {
-		t.Fatalf("missing dirty warning:\n%s", notice.String())
+	if !strings.Contains(notice.String(), "Strategy commit-and-continue") {
+		t.Fatalf("missing dirty strategy notice:\n%s", notice.String())
 	}
 
 	subjectLog, _ := env.deps().Git.CommandInDir(env.root, "log", "--format=%s")
@@ -318,8 +346,8 @@ func TestRunIssueAllowDirtyContinueIncludesExistingChangesInImplementationCommit
 	if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
-	if !strings.Contains(notice.String(), "continuing without modifying the baseline") {
-		t.Fatalf("missing continue warning:\n%s", notice.String())
+	if !strings.Contains(notice.String(), "Strategy continue") {
+		t.Fatalf("missing continue notice:\n%s", notice.String())
 	}
 	if result.CommitSHA == "" {
 		t.Fatal("expected implementation commit")

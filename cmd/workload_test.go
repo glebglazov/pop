@@ -577,7 +577,7 @@ func resetWorkloadFlags() {
 	workloadAgentPreset = ""
 	workloadAgentCmd = ""
 	workloadRunYes = false
-	workloadAllowDirty = workload.DirtyRuntimeReject
+	workloadAllowDirty = workload.DirtyRuntimeContinue
 }
 
 func setupRunIssueCmdFixture(t *testing.T) string {

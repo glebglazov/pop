@@ -19,7 +19,6 @@ const (
 	DefaultMaxTries       = 3
 	DefaultAttemptTimeout = 30 * time.Minute
 
-	DirtyRuntimeReject            DirtyRuntimeStrategy = ""
 	DirtyRuntimeContinue          DirtyRuntimeStrategy = "continue"
 	DirtyRuntimeCommitAndContinue DirtyRuntimeStrategy = "commit-and-continue"
 	DirtyRuntimeStashAndContinue  DirtyRuntimeStrategy = "stash-and-continue"
@@ -98,6 +97,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	if err := validateDirtyRuntimeStrategy(opts.AllowDirty); err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
+	strategy := resolveDirtyRuntimeStrategy(opts.AllowDirty)
 
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
@@ -129,9 +129,6 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	if err != nil {
 		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
 	}
-	if dirty && opts.AllowDirty == DirtyRuntimeReject {
-		return nil, exitErr(ExitOperational, "runtime checkout is dirty; commit or stash changes before execution")
-	}
 
 	confirmOut := opts.ConfirmOut
 	if confirmOut == nil {
@@ -142,10 +139,6 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 		out = os.Stdout
 	}
 
-	if dirty {
-		warnDirtyRuntimeStrategy(confirmOut, opts.AllowDirty)
-	}
-
 	displayRows := cloneRows(refresh.Rows)
 	MarkAutoPick(displayRows)
 	MarkRunTarget(displayRows, sel.IssueSetID)
@@ -154,6 +147,12 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 
 	fmt.Fprintln(out)
 	Render(out, &displayRefresh)
+
+	if dirty {
+		if err := reportDirtyRuntime(d, confirmOut, runtimePath, strategy); err != nil {
+			return nil, exitErr(ExitSetup, "runtime git status: %v", err)
+		}
+	}
 
 	confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes, issueConfirmPrompt)
 	if err != nil {
@@ -170,7 +169,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	defer lock.Release()
 
 	if dirty {
-		if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.IssueSetID, sel.IssueID, opts.AllowDirty, confirmOut); err != nil {
+		if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.IssueSetID, sel.IssueID, strategy, confirmOut); err != nil {
 			return nil, exitErr(ExitOperational, "dirty-runtime strategy: %v", err)
 		}
 	}
@@ -438,23 +437,52 @@ func runtimeIsDirty(d *Deps, runtimePath string) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
+// resolveDirtyRuntimeStrategy treats an unset strategy as the continue default.
+func resolveDirtyRuntimeStrategy(strategy DirtyRuntimeStrategy) DirtyRuntimeStrategy {
+	if strategy == "" {
+		return DirtyRuntimeContinue
+	}
+	return strategy
+}
+
 func validateDirtyRuntimeStrategy(strategy DirtyRuntimeStrategy) error {
-	if strategy == DirtyRuntimeReject {
+	if strategy == "" {
 		return nil
 	}
 	var parsed DirtyRuntimeStrategy
 	return parsed.Set(string(strategy))
 }
 
-func warnDirtyRuntimeStrategy(w io.Writer, strategy DirtyRuntimeStrategy) {
+// dirtyStrategyEffect describes, in one sentence, what the strategy will do to a
+// dirty runtime checkout. Surfaced in the dirty-runtime confirmation.
+func dirtyStrategyEffect(strategy DirtyRuntimeStrategy) string {
 	switch strategy {
-	case DirtyRuntimeContinue:
-		fmt.Fprintln(w, "Warning: runtime checkout has uncommitted changes; continuing without modifying the baseline.")
 	case DirtyRuntimeCommitAndContinue:
-		fmt.Fprintln(w, "Warning: runtime checkout has uncommitted changes; a capturing dirty state checkpoint commit will be created before execution.")
+		return "Strategy commit-and-continue: a checkpoint commit capturing this dirty state will be created before execution."
 	case DirtyRuntimeStashAndContinue:
-		fmt.Fprintln(w, "Warning: runtime checkout has uncommitted changes; tracked and untracked changes will be stashed before execution. Restore the stash manually when ready.")
+		return "Strategy stash-and-continue: tracked and untracked changes will be stashed before execution; restore the stash manually when ready."
+	default:
+		return "Strategy continue: execution proceeds without modifying these changes."
 	}
+}
+
+// reportDirtyRuntime prints git status for the dirty runtime checkout followed by
+// the chosen strategy's effect, so the operator can confirm with full context.
+func reportDirtyRuntime(d *Deps, w io.Writer, runtimePath string, strategy DirtyRuntimeStrategy) error {
+	status, err := d.Git.CommandInDir(runtimePath, "status")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Runtime checkout has uncommitted changes:")
+	fmt.Fprintln(w)
+	fmt.Fprint(w, status)
+	if !strings.HasSuffix(status, "\n") {
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, dirtyStrategyEffect(strategy))
+	return nil
 }
 
 func applyDirtyRuntimeStrategy(d *Deps, runtimePath, issueSetID, issueID string, strategy DirtyRuntimeStrategy, out io.Writer) error {

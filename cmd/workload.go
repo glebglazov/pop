@@ -22,7 +22,7 @@ var (
 	workloadAgentPreset string
 	workloadAgentCmd    string
 	workloadRunYes      bool
-	workloadAllowDirty  workload.DirtyRuntimeStrategy
+	workloadAllowDirty  workload.DirtyRuntimeStrategy = workload.DirtyRuntimeContinue
 	workloadMaxTries    int
 	workloadTimeout     string
 )
@@ -96,7 +96,7 @@ func init() {
 	workloadCmd.PersistentFlags().StringVar(&workloadDefPath, "workload-definition-path", "", "Exact workload definition directory (not normalized to git root)")
 
 	workloadRunIssueCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
-	workloadRunIssueCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue, commit-and-continue, stash-and-continue")
+	workloadRunIssueCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
 	workloadRunIssueCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
@@ -105,7 +105,7 @@ func init() {
 	workloadRunIssueCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
 
 	workloadRunIssuesCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
-	workloadRunIssuesCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue, commit-and-continue, stash-and-continue")
+	workloadRunIssuesCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
 	workloadRunIssuesCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
 	workloadRunIssuesCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
 	workloadRunIssuesCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")

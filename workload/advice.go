@@ -13,9 +13,12 @@ func printHITLGateAdvice(w io.Writer, stem string, issue *Issue) {
 	hint := issuePathHint(stem, issue.File)
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Human-blocked: %s/%s needs human work before the set can continue. Options:\n", stem, issue.ID)
-	fmt.Fprintf(w, "  finish by hand: %s\n", completeIssueHint(stem, issue.File))
-	fmt.Fprintf(w, "  edit & re-run:  edit %s, then pop workload run-issues\n", hint)
-	fmt.Fprintf(w, "  defer it:       %s\n", skipIssueHint(stem, issue.File))
+	fmt.Fprintln(w, "  finish by hand:")
+	fmt.Fprintf(w, "                  %s\n", completeIssueHint(stem, issue.File))
+	fmt.Fprintln(w, "  edit & re-run:")
+	fmt.Fprintf(w, "                  $EDITOR %s && pop workload run-issues\n", hint)
+	fmt.Fprintln(w, "  defer it:")
+	fmt.Fprintf(w, "                  %s\n", skipIssueHint(stem, issue.File))
 }
 
 // printFailedStopAdvice prints recovery options for the failed issues in a set
@@ -39,7 +42,9 @@ func printFailedStopAdvice(w io.Writer, stem string, m *Manifest) {
 	fmt.Fprintln(w, "Failed: clear the failure and re-run, or finish by hand. Options:")
 	for _, issue := range failed {
 		fmt.Fprintf(w, "  %s/%s\n", stem, issue.ID)
-		fmt.Fprintf(w, "    re-run:         %s\n", resetIssueHint(stem, issue.File))
-		fmt.Fprintf(w, "    finish by hand: %s\n", completeIssueHint(stem, issue.File))
+		fmt.Fprintln(w, "    re-run:")
+		fmt.Fprintf(w, "                    %s\n", resetIssueHint(stem, issue.File))
+		fmt.Fprintln(w, "    finish by hand:")
+		fmt.Fprintf(w, "                    %s\n", completeIssueHint(stem, issue.File))
 	}
 }
