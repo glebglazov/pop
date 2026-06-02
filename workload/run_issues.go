@@ -30,8 +30,8 @@ type RunIssueSetOptions struct {
 
 // RunIssueSetResult is the outcome of a run-issues invocation.
 type RunIssueSetResult struct {
-	IssueSetID    string
-	Completed     []*RunIssueResult
+	IssueSetID       string
+	Completed        []*RunIssueResult
 	Refresh          *RefreshResult
 	Declined         bool
 	IssueSetDone     bool
@@ -192,7 +192,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 
 		if dirty && !dirtyStrategyApplied {
 			if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.IssueSetID, sel.IssueID, strategy, confirmOut); err != nil {
-				return nil, exitErr(ExitOperational, "dirty-runtime strategy: %v", err)
+				return nil, issueExitErr(sel, ExitOperational, "dirty-runtime strategy: %v", err)
 			}
 			dirtyStrategyApplied = true
 		}
@@ -200,7 +200,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		prompt := BuildAgentPrompt(sel.IssuePath, runtimePath)
 		name, args, err := ResolveAgentCommand(opts.AgentPreset, opts.AgentCmd, prompt, runtimePath)
 		if err != nil {
-			return nil, exitErr(ExitSetup, "%v", err)
+			return nil, issueExitErr(sel, ExitSetup, "%v", err)
 		}
 
 		issueResult, execErr := executeIssueAttempts(d, sel, runtimePath, out, name, args, maxTries, timeout)
@@ -218,9 +218,6 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		}
 
 		result.Completed = append(result.Completed, issueResult)
-		if opts.Yes {
-			printConciseSummary(out, issueResult)
-		}
 	}
 }
 
@@ -244,17 +241,18 @@ func deferralMessage(result *RunIssueSetResult) string {
 }
 
 func printIssueSetSummary(w io.Writer, result *RunIssueSetResult) {
+	out := outputFor(w)
 	if result.IssueSetDone {
-		fmt.Fprintf(w, "Completed Issue set %s (%d issue(s))\n", result.IssueSetID, len(result.Completed))
+		out.line(ansiGreen, "✓ Completed Issue set %s (%d issue(s))", result.IssueSetID, len(result.Completed))
 		return
 	}
 	if result.IssueSetDeferred {
-		fmt.Fprintln(w, deferralMessage(result))
+		out.line(ansiYellow, "%s", deferralMessage(result))
 		return
 	}
 	if result.BlockedReason != "" {
-		fmt.Fprintf(w, "Issue set %s blocked: %s\n", result.IssueSetID, result.BlockedReason)
+		out.line(ansiYellow, "Issue set %s blocked: %s", result.IssueSetID, result.BlockedReason)
 		return
 	}
-	fmt.Fprintf(w, "Issue set %s stopped after %d issue(s)\n", result.IssueSetID, len(result.Completed))
+	fmt.Fprintf(out, "Issue set %s stopped after %d issue(s)\n", result.IssueSetID, len(result.Completed))
 }

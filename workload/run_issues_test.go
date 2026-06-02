@@ -302,6 +302,9 @@ func TestRunIssueSetOperationalStopOnCommitFailure(t *testing.T) {
 
 	_, err := RunIssueSetWith(d, nil, nil, env.runIssueSetOpts(true, agent, nil))
 	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "issue demo/01-a") {
+		t.Fatalf("error missing issue reference: %v", err)
+	}
 	assertIssueOpen(t, env.execFixture(), "01-a")
 }
 
@@ -358,6 +361,21 @@ func TestRunIssueSetYesPrintsConciseSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
+	for _, want := range []string{
+		"━━ Running issue demo/01-a: A",
+		"   Attempt 1/3",
+		"── Agent output",
+		"── Agent finished for demo/01-a",
+		"✓ Completed demo/01-a",
+		"✓ Completed Issue set demo",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "\033[") {
+		t.Fatalf("redirected output contains ANSI:\n%q", out)
+	}
 	if !strings.Contains(out, "Completed demo/01-a") || !strings.Contains(out, "Completed Issue set demo") {
 		t.Fatalf("missing concise summary:\n%s", out)
 	}

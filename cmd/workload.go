@@ -165,7 +165,8 @@ func runWorkloadSetPriorityWith(d *workload.Deps, w io.Writer, issueSetID, prior
 		return fmt.Errorf("workload set-priority: %w", err)
 	}
 
-	fmt.Fprintf(w, "Updated priority for %s: %d -> %d\n\n", result.IssueSetID, result.OldPriority, result.NewPriority)
+	workload.RenderPriorityUpdate(w, result.IssueSetID, result.OldPriority, result.NewPriority)
+	fmt.Fprintln(w)
 	workload.Render(w, result.Refresh)
 	return nil
 }
@@ -243,7 +244,8 @@ func runWorkloadResetIssueWith(d *workload.Deps, w io.Writer, issuePath string) 
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Reset issue %s/%s to open\n\n", result.IssueSetID, result.IssueID)
+	workload.RenderIssueReset(w, result.IssueSetID, result.IssueID)
+	fmt.Fprintln(w)
 	workload.Render(w, result.Refresh)
 	return nil
 }
@@ -261,7 +263,8 @@ func runWorkloadCompleteIssueWith(d *workload.Deps, w io.Writer, issuePath strin
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Completed issue %s/%s\n\n", result.IssueSetID, result.IssueID)
+	workload.RenderIssueComplete(w, result.IssueSetID, result.IssueID)
+	fmt.Fprintln(w)
 	workload.Render(w, result.Refresh)
 	return nil
 }
@@ -279,7 +282,8 @@ func runWorkloadSkipIssueWith(d *workload.Deps, w io.Writer, issuePath string) e
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Skipped issue %s/%s\n\n", result.IssueSetID, result.IssueID)
+	workload.RenderIssueSkip(w, result.IssueSetID, result.IssueID)
+	fmt.Fprintln(w)
 	workload.Render(w, result.Refresh)
 	return nil
 }

@@ -14,9 +14,9 @@ import (
 var ErrStateLockBusy = errors.New("workload state update in progress")
 
 const (
-	stateLockRetries     = 100
-	stateLockRetryDelay  = 5 * time.Millisecond
-	stateLockFileName    = "workloads-state.lock"
+	stateLockRetries    = 100
+	stateLockRetryDelay = 5 * time.Millisecond
+	stateLockFileName   = "workloads-state.lock"
 )
 
 // StateLockMetadata is persisted in the global workload state lock file.
@@ -104,6 +104,7 @@ func acquireStateLock(d *Deps, noticeOut io.Writer, retried bool) (*StateLock, e
 	if noticeOut == nil {
 		noticeOut = io.Discard
 	}
+	out := outputFor(noticeOut)
 
 	lockPath := StateLockPathWith(d)
 	lockDir := filepath.Dir(lockPath)
@@ -139,7 +140,7 @@ func acquireStateLock(d *Deps, noticeOut io.Writer, retried bool) (*StateLock, e
 
 	existing, readErr := d.FS.ReadFile(lockPath)
 	if readErr != nil {
-		fmt.Fprintf(noticeOut, "Removing unreadable workload state lock at %s\n", lockPath)
+		out.line(ansiYellow, "Removing unreadable workload state lock at %s", lockPath)
 		_ = os.Remove(lockPath)
 		if retried {
 			return nil, fmt.Errorf("acquire workload state lock after recovery: %w", readErr)
@@ -149,7 +150,7 @@ func acquireStateLock(d *Deps, noticeOut io.Writer, retried bool) (*StateLock, e
 
 	existingMeta, parseErr := parseStateLockMetadata(existing)
 	if parseErr != nil {
-		fmt.Fprintf(noticeOut, "Removing malformed workload state lock at %s\n", lockPath)
+		out.line(ansiYellow, "Removing malformed workload state lock at %s", lockPath)
 		_ = os.Remove(lockPath)
 		if retried {
 			return nil, fmt.Errorf("acquire workload state lock after recovery: %w", parseErr)
@@ -165,7 +166,7 @@ func acquireStateLock(d *Deps, noticeOut io.Writer, retried bool) (*StateLock, e
 		)
 	}
 
-	fmt.Fprintf(noticeOut, "Removing stale workload state lock (PID %d no longer running)\n", existingMeta.PID)
+	out.line(ansiYellow, "Removing stale workload state lock (PID %d no longer running)", existingMeta.PID)
 	if removeErr := os.Remove(lockPath); removeErr != nil && !os.IsNotExist(removeErr) {
 		return nil, fmt.Errorf("remove stale workload state lock: %w", removeErr)
 	}

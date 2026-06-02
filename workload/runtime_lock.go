@@ -92,6 +92,7 @@ func acquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer, retrie
 	if noticeOut == nil {
 		noticeOut = io.Discard
 	}
+	out := outputFor(noticeOut)
 	lockDir := RuntimeLockDirWith(d)
 	if err := d.FS.MkdirAll(lockDir, 0o755); err != nil {
 		return nil, exitErr(ExitOperational, "create runtime lock directory: %v", err)
@@ -127,7 +128,7 @@ func acquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer, retrie
 
 	existing, readErr := d.FS.ReadFile(lockPath)
 	if readErr != nil {
-		fmt.Fprintf(noticeOut, "Removing unreadable runtime execution lock at %s\n", lockPath)
+		out.line(ansiYellow, "Removing unreadable runtime execution lock at %s", lockPath)
 		_ = os.Remove(lockPath)
 		if retried {
 			return nil, exitErr(ExitOperational, "acquire runtime lock after recovery: %v", readErr)
@@ -137,7 +138,7 @@ func acquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer, retrie
 
 	existingMeta, parseErr := parseRuntimeLockMetadata(existing)
 	if parseErr != nil {
-		fmt.Fprintf(noticeOut, "Removing malformed runtime execution lock at %s\n", lockPath)
+		out.line(ansiYellow, "Removing malformed runtime execution lock at %s", lockPath)
 		_ = os.Remove(lockPath)
 		if retried {
 			return nil, exitErr(ExitOperational, "acquire runtime lock after recovery: %v", parseErr)
@@ -154,7 +155,7 @@ func acquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer, retrie
 		)
 	}
 
-	fmt.Fprintf(noticeOut, "Removing stale runtime execution lock (PID %d no longer running)\n", existingMeta.PID)
+	out.line(ansiYellow, "Removing stale runtime execution lock (PID %d no longer running)", existingMeta.PID)
 	if removeErr := os.Remove(lockPath); removeErr != nil && !os.IsNotExist(removeErr) {
 		return nil, exitErr(ExitOperational, "remove stale runtime lock: %v", removeErr)
 	}

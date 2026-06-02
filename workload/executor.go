@@ -170,14 +170,14 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 
 	if dirty {
 		if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.IssueSetID, sel.IssueID, strategy, confirmOut); err != nil {
-			return nil, exitErr(ExitOperational, "dirty-runtime strategy: %v", err)
+			return nil, issueExitErr(sel, ExitOperational, "dirty-runtime strategy: %v", err)
 		}
 	}
 
 	prompt := BuildAgentPrompt(sel.IssuePath, runtimePath)
 	name, args, err := ResolveAgentCommand(opts.AgentPreset, opts.AgentCmd, prompt, runtimePath)
 	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
+		return nil, issueExitErr(sel, ExitSetup, "%v", err)
 	}
 
 	maxTries := opts.MaxTries
@@ -201,13 +201,11 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
 	if err != nil {
-		return nil, exitErr(ExitOperational, "refresh after completion: %v", err)
+		return nil, issueExitErr(sel, ExitOperational, "refresh after completion: %v", err)
 	}
 	result.Refresh = afterRefresh
 
-	if opts.Yes {
-		printConciseSummary(out, result)
-	} else {
+	if !opts.Yes {
 		fmt.Fprintln(out)
 		Render(out, afterRefresh)
 	}
@@ -216,50 +214,64 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 }
 
 func executeIssueAttempts(d *Deps, sel *Selection, runtimePath string, out io.Writer, name string, args []string, maxTries int, timeout time.Duration) (*RunIssueResult, error) {
+	display := outputFor(out)
+	display.line(ansiBold+ansiCyan, "━━ Running issue %s/%s: %s", sel.IssueSetID, sel.IssueID, sel.Issue.Title)
 	for attempt := 1; attempt <= maxTries; attempt++ {
-		fmt.Fprintf(out, "Attempt %d/%d\n", attempt, maxTries)
+		display.line(ansiDim, "   Attempt %d/%d", attempt, maxTries)
+		display.line(ansiDim, "── Agent output ────────────────────────────────────────")
 
 		agentOut, outcome, err := runAgentAttempt(d, runtimePath, out, timeout, name, args...)
 		if err != nil {
-			return nil, exitErr(ExitOperational, "agent execution: %v", err)
+			display.line(ansiRed, "✗ Agent failed to start for %s/%s", sel.IssueSetID, sel.IssueID)
+			return nil, issueExitErr(sel, ExitOperational, "agent execution: %v", err)
 		}
+		display.line(ansiDim, "── Agent finished for %s/%s ───────────────────────────", sel.IssueSetID, sel.IssueID)
 		if outcome.interrupted {
-			return nil, exitErr(ExitInterrupted, "interrupted")
+			return nil, issueExitErr(sel, ExitInterrupted, "interrupted")
 		}
 		if outcome.timedOut {
 			summary := fmt.Sprintf("timed out after %s on attempt %d", timeout, attempt)
 			if err := finalizeIssueFailed(d, sel, attempt, summary); err != nil {
-				return nil, manualRepairErr(err)
+				return nil, issueExitErr(sel, ExitOperational, "%v", manualRepairErr(err))
 			}
-			return nil, exitErr(ExitOperational, "issue timed out after %d started attempt(s)", attempt)
+			return nil, issueExitErr(sel, ExitOperational, "timed out after %d started attempt(s)", attempt)
 		}
 		if outcome.runErr != nil {
-			return nil, exitErr(ExitOperational, "agent execution: %v", outcome.runErr)
+			return nil, issueExitErr(sel, ExitOperational, "agent execution: %v", outcome.runErr)
 		}
 
 		issueData, err := d.FS.ReadFile(sel.IssuePath)
 		if err != nil {
-			return nil, exitErr(ExitOperational, "read issue markdown: %v", err)
+			return nil, issueExitErr(sel, ExitOperational, "read issue markdown: %v", err)
 		}
 
 		assessment, reason := assessAttempt(agentOut, outcome.exitCode, issueData)
 		if assessment.Complete {
-			return completeSuccessfulIssue(d, sel, runtimePath, assessment.Summary)
+			result, err := completeSuccessfulIssue(d, sel, runtimePath, assessment.Summary)
+			if err != nil {
+				return nil, issueExitErr(sel, ExitOperational, "%v", err)
+			}
+			printConciseSummary(out, result)
+			return result, nil
 		}
 
-		fmt.Fprintf(out, "Attempt %d failed: %s\n", attempt, reason)
+		display.line(ansiRed, "✗ Attempt %d/%d failed: %s", attempt, maxTries, reason)
 		if attempt < maxTries {
-			fmt.Fprintln(out, "Retrying with preserved changes...")
+			display.line(ansiYellow, "↻ Retrying with preserved changes...")
 			continue
 		}
 
 		summary := fmt.Sprintf("failed after %d attempts: %s", maxTries, reason)
 		if err := finalizeIssueFailed(d, sel, maxTries, summary); err != nil {
-			return nil, manualRepairErr(err)
+			return nil, issueExitErr(sel, ExitOperational, "%v", manualRepairErr(err))
 		}
-		return nil, exitErr(ExitOperational, "%s", summary)
+		return nil, issueExitErr(sel, ExitOperational, "%s", summary)
 	}
-	return nil, exitErr(ExitOperational, "unexpected attempt loop exit")
+	return nil, issueExitErr(sel, ExitOperational, "unexpected attempt loop exit")
+}
+
+func issueExitErr(sel *Selection, code int, format string, args ...any) *ExitError {
+	return exitErr(code, "issue %s/%s: %s", sel.IssueSetID, sel.IssueID, fmt.Sprintf(format, args...))
 }
 
 func assessAttempt(agentOut string, exitCode int, issueData []byte) (Assessment, string) {
@@ -408,7 +420,8 @@ func confirmExecution(in io.Reader, out io.Writer, yes bool, prompt string) (boo
 	if prompt == "" {
 		prompt = issueConfirmPrompt
 	}
-	fmt.Fprintf(out, "%s", prompt)
+	display := outputFor(out)
+	fmt.Fprintf(display, "%s", display.styled(ansiCyan, prompt))
 	var answer string
 	if _, err := fmt.Fscanln(in, &answer); err != nil && err != io.EOF {
 		return false, exitErr(ExitOperational, "read confirmation: %v", err)
@@ -473,15 +486,16 @@ func reportDirtyRuntime(d *Deps, w io.Writer, runtimePath string, strategy Dirty
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Runtime checkout has uncommitted changes:")
-	fmt.Fprintln(w)
-	fmt.Fprint(w, status)
+	out := outputFor(w)
+	fmt.Fprintln(out)
+	out.line(ansiYellow, "Runtime checkout has uncommitted changes:")
+	fmt.Fprintln(out)
+	fmt.Fprint(out, status)
 	if !strings.HasSuffix(status, "\n") {
-		fmt.Fprintln(w)
+		fmt.Fprintln(out)
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, dirtyStrategyEffect(strategy))
+	fmt.Fprintln(out)
+	out.line(ansiYellow, "%s", dirtyStrategyEffect(strategy))
 	return nil
 }
 
@@ -527,7 +541,7 @@ func stashDirtyRuntime(d *Deps, runtimePath string, out io.Writer) error {
 	if err != nil || strings.TrimSpace(after) == strings.TrimSpace(before) {
 		return nil
 	}
-	fmt.Fprintln(out, "Created stash: stash@{0}. Restore it manually when ready.")
+	outputFor(out).line(ansiYellow, "Created stash: stash@{0}. Restore it manually when ready.")
 	return nil
 }
 
@@ -570,11 +584,12 @@ func finalizeIssueDone(d *Deps, sel *Selection, summary string) error {
 }
 
 func printConciseSummary(w io.Writer, result *RunIssueResult) {
-	fmt.Fprintf(w, "Completed %s/%s\n", result.Selection.IssueSetID, result.Selection.IssueID)
+	out := outputFor(w)
+	out.line(ansiGreen, "✓ Completed %s/%s", result.Selection.IssueSetID, result.Selection.IssueID)
 	if result.NoOp {
-		fmt.Fprintln(w, "No implementation commit (verified no-op)")
+		fmt.Fprintln(out, "  No implementation commit (verified no-op)")
 	} else if result.CommitSHA != "" {
-		fmt.Fprintf(w, "Implementation commit: %s\n", result.CommitSHA[:min(12, len(result.CommitSHA))])
+		fmt.Fprintf(out, "  Implementation commit: %s\n", result.CommitSHA[:min(12, len(result.CommitSHA))])
 	}
 }
 

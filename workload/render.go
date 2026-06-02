@@ -8,11 +8,6 @@ import (
 	"time"
 )
 
-const (
-	ansiBold  = "\033[1m"
-	ansiReset = "\033[0m"
-)
-
 // RefreshResult is the outcome of a workload status refresh.
 type RefreshResult struct {
 	DefinitionPath   string
@@ -164,21 +159,30 @@ func buildIssueSetRow(reg RegisteredIssueSet, m *Manifest, regIndex int) Row {
 
 // Render writes the status table and diagnostics to w.
 func Render(w io.Writer, result *RefreshResult) {
+	render(outputFor(w), result)
+}
+
+func render(out *output, result *RefreshResult) {
 	if len(result.NewRegistrations) > 0 {
-		fmt.Fprintf(w, "Registered new Issue set(s): %s\n\n", strings.Join(result.NewRegistrations, ", "))
+		out.line(ansiCyan, "Registered new Issue set(s): %s", strings.Join(result.NewRegistrations, ", "))
+		fmt.Fprintln(out)
 	}
 
 	if len(result.Rows) == 0 {
-		fmt.Fprintf(w, "No workloads at %s\n", result.DefinitionPath)
+		fmt.Fprintf(out, "No workloads at %s\n", result.DefinitionPath)
 		return
 	}
 
-	fmt.Fprintln(w, formatTable(result.Rows))
-	renderRuntimeLock(w, result.RuntimeLock)
-	renderDiagnostics(w, result.Rows)
+	fmt.Fprintln(out, formatTableWithOutput(out, result.Rows))
+	renderRuntimeLock(out, result.RuntimeLock)
+	renderDiagnostics(out, result.Rows)
 }
 
 func formatTable(rows []Row) string {
+	return formatTableWithOutput(outputFor(io.Discard), rows)
+}
+
+func formatTableWithOutput(out *output, rows []Row) string {
 	const (
 		idW     = 28
 		stW     = 10
@@ -201,7 +205,9 @@ func formatTable(rows []Row) string {
 		}
 		line := fmt.Sprintf("%-*s  %-*s  %-*s  %s", idW, id, stW, string(row.Status), prW, row.PriorityShow, detail)
 		if row.RunTarget {
-			line = ansiBold + line + ansiReset
+			line = out.styled(ansiBold+ansiCyan, line)
+		} else {
+			line = out.styled(statusStyle(row.Status), line)
 		}
 		fmt.Fprintln(&b, line)
 	}
@@ -241,18 +247,22 @@ func renderRuntimeLock(w io.Writer, lock *RuntimeLockStatus) {
 	if lock == nil || lock.RuntimePath == "" {
 		return
 	}
-	fmt.Fprintln(w)
+	out := outputFor(w)
+	if styled, ok := w.(*output); ok {
+		out = styled
+	}
+	fmt.Fprintln(out)
 	switch {
 	case lock.Malformed:
-		fmt.Fprintf(w, "Runtime execution lock (best effort): malformed lock file for %s\n", lock.RuntimePath)
+		out.line(ansiYellow, "Runtime execution lock (best effort): malformed lock file for %s", lock.RuntimePath)
 	case lock.Metadata != nil && lock.Locked:
-		fmt.Fprintf(w, "Runtime execution lock (best effort): PID %d since %s at %s\n",
+		out.line(ansiYellow, "Runtime execution lock (best effort): PID %d since %s at %s",
 			lock.Metadata.PID,
 			lock.Metadata.StartedAt.Format(time.RFC3339),
 			lock.Metadata.RuntimePath,
 		)
 	default:
-		fmt.Fprintf(w, "Runtime execution lock (best effort): idle at %s\n", lock.RuntimePath)
+		out.line(ansiDim, "Runtime execution lock (best effort): idle at %s", lock.RuntimePath)
 	}
 }
 
@@ -267,28 +277,51 @@ func renderDiagnostics(w io.Writer, rows []Row) {
 		return
 	}
 
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Malformed diagnostics:")
+	out := outputFor(w)
+	if styled, ok := w.(*output); ok {
+		out = styled
+	}
+	fmt.Fprintln(out)
+	out.line(ansiRed, "Malformed diagnostics:")
 	for _, row := range detailRows {
-		fmt.Fprintf(w, "  %s:\n", row.ID)
+		fmt.Fprintf(out, "  %s:\n", row.ID)
 		for _, err := range row.DetailErrors {
-			fmt.Fprintf(w, "    - %s\n", err)
+			fmt.Fprintf(out, "    - %s\n", err)
 		}
 	}
 }
 
 // RenderIssueList writes the issues in one Issue set before confirmation.
 func RenderIssueList(w io.Writer, issueSetID string, m *Manifest) {
+	renderIssueList(outputFor(w), issueSetID, m)
+}
+
+func renderIssueList(out *output, issueSetID string, m *Manifest) {
 	if m == nil || !m.Valid {
 		return
 	}
-	fmt.Fprintf(w, "\nIssues in %s:\n", issueSetID)
-	fmt.Fprintln(w, "  Legend: → runnable  ○ blocked  ◐ needs human  ✓ done  ⊘ failed/skipped")
+	fmt.Fprintf(out, "\nIssues in %s:\n", issueSetID)
+	fmt.Fprintln(out, "  Legend: → runnable  ○ blocked  ◐ needs human  ✓ done  ⊘ failed/skipped")
 	for _, issue := range m.Issues {
 		sym := issueSymbol(m, issue)
-		fmt.Fprintf(w, "  %s %s  %s  %s  %s\n", sym, issue.ID, issue.Type, issue.Status, issue.Title)
+		fmt.Fprintf(out, "  %s\n", out.styled(issueStyle(m, issue), fmt.Sprintf("%s %s  %s  %s  %s", sym, issue.ID, issue.Type, issue.Status, issue.Title)))
 	}
-	fmt.Fprintln(w)
+	fmt.Fprintln(out)
+}
+
+func issueStyle(m *Manifest, issue Issue) string {
+	switch issue.Status {
+	case "done":
+		return ansiGreen
+	case "failed":
+		return ansiRed
+	case "skipped":
+		return ansiYellow
+	}
+	if issue.Type == "HITL" || !isEligible(m, issue) {
+		return ansiYellow
+	}
+	return ansiCyan
 }
 
 func issueSymbol(m *Manifest, issue Issue) string {
