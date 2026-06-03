@@ -18,6 +18,8 @@ func lineRendererFor(format AgentOutputFormat, color bool) lineRenderer {
 	switch format {
 	case AgentOutputClaudeStreamJSON:
 		return claudeLineRenderer(color)
+	case AgentOutputCursorStreamJSON:
+		return cursorLineRenderer(color)
 	case AgentOutputCodexJSONL:
 		return codexLineRenderer(color)
 	case AgentOutputOpenCodeJSON:
