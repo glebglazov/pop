@@ -72,7 +72,7 @@ var agentPresets = map[string][]string{
 	"opencode": {"opencode", "run"},
 	"cursor":   {"cursor-agent", "-p", "--force", "--trust"},
 	"codex":    {"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
-	"pi":       {"pi", "-p"},
+	"pi":       {"pi", "-p", "--no-extensions", "--no-skills"},
 }
 
 // ValidAgentPresets returns sorted preset names.

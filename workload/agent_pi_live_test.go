@@ -124,6 +124,18 @@ func TestPiLineRendererSkipsThinkingAndLifecycle(t *testing.T) {
 	}
 }
 
+func TestPiLineRendererAssistantErrorMessage(t *testing.T) {
+	render := piLineRenderer(false)
+	line := `{"type":"message_end","message":{"role":"assistant","errorMessage":"400 Error from provider"}}`
+	got, handled := render([]byte(line))
+	if !handled {
+		t.Fatal("assistant error message should be handled")
+	}
+	if got != "400 Error from provider\n" {
+		t.Fatalf("got %q, want error line", got)
+	}
+}
+
 func TestPiLineRendererNonJSONUnhandled(t *testing.T) {
 	render := piLineRenderer(false)
 	got, handled := render([]byte("zoxide: detected a possible configuration issue."))

@@ -2,6 +2,7 @@ package workload
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -13,7 +14,7 @@ func normalizeCursorStreamJSON(raw string) AgentResult {
 // prose is INCREMENTAL: each "assistant" event carries only a delta chunk in
 // message.content[].text, so deltas are emitted raw with NO newline framing
 // (the divergence from claude, which frames terminal-per-message text). A
-// tool_call with subtype "started" emits a dim "→ <tool.case> <hint>" tick;
+// tool_call with subtype "started" emits a dim "→ <toolName> <hint>" tick;
 // "completed" is skipped to avoid double ticks. system/user/result and unknown
 // types render nothing; non-JSON lines are reported unhandled so the writer
 // passes them through raw.
@@ -34,14 +35,7 @@ func cursorLineRenderer(color bool) lineRenderer {
 					Text string `json:"text"`
 				} `json:"content"`
 			} `json:"message"`
-			ToolCall struct {
-				Tool struct {
-					Case  string `json:"case"`
-					Value struct {
-						Args json.RawMessage `json:"args"`
-					} `json:"value"`
-				} `json:"tool"`
-			} `json:"tool_call"`
+			ToolCall json.RawMessage `json:"tool_call"`
 		}
 		if err := json.Unmarshal(line, &event); err != nil {
 			return "", false
@@ -59,17 +53,57 @@ func cursorLineRenderer(color bool) lineRenderer {
 			if event.Subtype != "started" {
 				return "", true
 			}
-			return dim(cursorToolTick(event.ToolCall.Tool.Case, event.ToolCall.Tool.Value.Args)) + "\n", true
+			toolName, args := cursorToolCall(event.ToolCall)
+			if toolName == "" {
+				return "", true
+			}
+			return dim(cursorToolTick(toolName, args)) + "\n", true
 		default:
 			return "", true
 		}
 	}
 }
 
-// cursorToolTick formats a compact "→ <case> hint" line. The tool name is the
-// oneof case (e.g. readToolCall, shellToolCall) and the hint probes args.
-func cursorToolTick(toolCase string, args json.RawMessage) string {
-	tick := "→ " + toolCase
+func cursorToolCall(raw json.RawMessage) (string, json.RawMessage) {
+	if len(raw) == 0 {
+		return "", nil
+	}
+
+	var legacy struct {
+		Tool struct {
+			Case  string `json:"case"`
+			Value struct {
+				Args json.RawMessage `json:"args"`
+			} `json:"value"`
+		} `json:"tool"`
+	}
+	if err := json.Unmarshal(raw, &legacy); err == nil && legacy.Tool.Case != "" {
+		return legacy.Tool.Case, legacy.Tool.Value.Args
+	}
+
+	var keyed map[string]struct {
+		Args json.RawMessage `json:"args"`
+	}
+	if err := json.Unmarshal(raw, &keyed); err != nil {
+		return "", nil
+	}
+	names := make([]string, 0, len(keyed))
+	for name := range keyed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if name != "" {
+			return name, keyed[name].Args
+		}
+	}
+	return "", nil
+}
+
+// cursorToolTick formats a compact "→ <toolName> hint" line. The tool name is
+// the oneof case (e.g. readToolCall, shellToolCall) and the hint probes args.
+func cursorToolTick(toolName string, args json.RawMessage) string {
+	tick := "→ " + toolName
 	hint := cursorToolHint(args)
 	if hint != "" {
 		tick += " " + hint

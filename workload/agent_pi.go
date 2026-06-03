@@ -46,9 +46,9 @@ func normalizePiJSONL(raw string) AgentResult {
 // piLineRenderer renders pi-jsonl events live. Assistant prose streams
 // incrementally: text_delta sub-events emit their raw delta with no trailing
 // newline and a single newline is emitted on text_end. tool_execution_start
-// emits a dim "→ toolName hint" tick. thinking_* and all lifecycle/framing
-// events render nothing; non-JSON lines are reported as unhandled so the
-// writer passes them through raw.
+// emits a dim "→ toolName hint" tick. Assistant error messages are surfaced
+// live; thinking_* and other lifecycle/framing events render nothing. Non-JSON
+// lines are reported as unhandled so the writer passes them through raw.
 func piLineRenderer(color bool) lineRenderer {
 	dim := func(s string) string {
 		if !color {
@@ -65,6 +65,10 @@ func piLineRenderer(color bool) lineRenderer {
 				Type  string `json:"type"`
 				Delta string `json:"delta"`
 			} `json:"assistantMessageEvent"`
+			Message struct {
+				Role         string `json:"role"`
+				ErrorMessage string `json:"errorMessage"`
+			} `json:"message"`
 		}
 		if err := json.Unmarshal(line, &event); err != nil {
 			return "", false
@@ -81,6 +85,11 @@ func piLineRenderer(color bool) lineRenderer {
 			}
 		case "tool_execution_start":
 			return dim(piToolTick(event.ToolName, event.Args)) + "\n", true
+		case "message_end":
+			if event.Message.Role == "assistant" && event.Message.ErrorMessage != "" {
+				return event.Message.ErrorMessage + "\n", true
+			}
+			return "", true
 		default:
 			return "", true
 		}

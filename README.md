@@ -69,6 +69,17 @@ Flag: `-s, --switch` — switch tmux session instead of printing path.
 
 Interactively add project directories to your config.
 
+## Live Agent Smoke
+
+To exercise workload execution against real agent CLIs, run the opt-in smoke script:
+
+```bash
+scripts/live-workload-agent-smoke.sh codex
+make live-agent-smoke AGENTS="codex claude"
+```
+
+It creates disposable git repos with a temporary Issue set and runs `pop workload run-issues` using each selected agent preset. This can consume agent quota and depends on local CLI authentication, so it is not part of normal tests.
+
 ## Custom worktree commands
 
 ```toml

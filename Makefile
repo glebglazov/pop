@@ -19,4 +19,11 @@ install-dev:
 test:
 	go test ./...
 
-.PHONY: build install install-dev test
+live-agent-smoke:
+	@if [ -z "$(AGENTS)" ]; then \
+		echo 'usage: make live-agent-smoke AGENTS="codex claude"'; \
+		exit 64; \
+	fi
+	scripts/live-workload-agent-smoke.sh $(AGENTS)
+
+.PHONY: build install install-dev test live-agent-smoke

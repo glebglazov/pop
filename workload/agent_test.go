@@ -64,6 +64,25 @@ func TestResolveAgentCommandCursor(t *testing.T) {
 	}
 }
 
+func TestResolveAgentCommandPiHermetic(t *testing.T) {
+	name, args, err := ResolveAgentCommand("pi", "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "pi" {
+		t.Fatalf("name = %q, want pi", name)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"--no-extensions", "--no-skills", "--mode json"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("pi args missing %q: %v", want, args)
+		}
+	}
+	if args[len(args)-1] != "prompt text" {
+		t.Fatalf("last arg = %q", args[len(args)-1])
+	}
+}
+
 func TestResolveAgentCommandCustom(t *testing.T) {
 	name, args, err := ResolveAgentCommand("", "fake-agent --verbose", "prompt", "/tmp/runtime")
 	if err != nil {

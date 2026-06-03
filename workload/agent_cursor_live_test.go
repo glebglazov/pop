@@ -62,6 +62,18 @@ func TestCursorLineRendererToolTickStartedPathHint(t *testing.T) {
 	}
 }
 
+func TestCursorLineRendererToolTickStartedKeyedLiveShape(t *testing.T) {
+	render := cursorLineRenderer(false)
+	line := `{"type":"tool_call","subtype":"started","call_id":"c1","tool_call":{"readToolCall":{"args":{"path":"/tmp/probe/hello.txt"}}},"session_id":"s"}`
+	got, handled := render([]byte(line))
+	if !handled {
+		t.Fatal("tool_call started event should be handled")
+	}
+	if got != "→ readToolCall /tmp/probe/hello.txt\n" {
+		t.Fatalf("got %q, want %q", got, "→ readToolCall /tmp/probe/hello.txt\n")
+	}
+}
+
 func TestCursorLineRendererToolTickShellCommandHint(t *testing.T) {
 	render := cursorLineRenderer(false)
 	line := `{"type":"tool_call","subtype":"started","tool_call":{"tool":{"case":"shellToolCall","value":{"args":{"command":"ls -la"}}}}}`
