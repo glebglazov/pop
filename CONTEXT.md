@@ -206,11 +206,11 @@ A named headless agent command known to the workload executor. An explicit agent
 _Avoid_: Integration
 
 **Agent output adapter**:
-The preset-specific interpretation of an agent's headless output. An adapter may recover completion text or detect an **Agent quota pause** from a structured protocol; when it cannot interpret the output, the original text remains subject to the normal **Completion sentinel** contract.
+The preset-specific interpretation of an agent's headless output. An adapter may recover completion text or detect an **Agent quota pause** from a structured protocol; when it cannot interpret the output, the original text remains subject to the normal **Completion sentinel** contract. An adapter may also render the agent's activity live as it streams — assistant prose plus a compact tick per tool use — so a structured run shows progress instead of going silent until it ends. Live rendering is cosmetic: the captured raw output, not the rendered view, remains the source of truth for completion assessment and quota detection.
 _Avoid_: Universal JSON protocol, agent integration
 
 **Agent output mode**:
-Controls whether one Agent preset uses its Agent output adapter or a plain-text compatibility fallback. Plain-text mode disables adapter capabilities such as Agent quota detection.
+Controls whether one Agent preset uses its Agent output adapter or a plain-text compatibility fallback. In adapter mode the agent's activity is rendered live as it streams; plain-text mode passes the agent's raw output through untouched and disables adapter capabilities such as Agent quota detection.
 _Avoid_: Agent quota reporting, universal JSON protocol
 
 **Agent quota reporting**:

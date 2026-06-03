@@ -340,8 +340,12 @@ func completeSuccessfulIssue(d *Deps, sel *Selection, runtimePath, summary strin
 func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout time.Duration, invocation *AgentInvocation) (string, *attemptOutcome, error) {
 	var capture bytes.Buffer
 	var agentOut io.Writer = &capture
+	var liveWriter *liveRenderWriter
 	if invocation.OutputFormat == AgentOutputPlain {
 		agentOut = io.MultiWriter(liveOut, &capture)
+	} else if render := lineRendererFor(invocation.OutputFormat, outputFor(liveOut).color); render != nil {
+		liveWriter = newLiveRenderWriter(liveOut, &capture, render)
+		agentOut = liveWriter
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -397,8 +401,14 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 		}
 	}
 
+	if liveWriter != nil {
+		liveWriter.Flush()
+	}
+
 	raw := capture.String()
-	if invocation.OutputFormat != AgentOutputPlain {
+	// Formats rendered live already streamed to liveOut; only the silently
+	// captured formats still need the post-hoc dump.
+	if invocation.OutputFormat != AgentOutputPlain && liveWriter == nil {
 		if normalized := NormalizeAgentOutput(invocation.OutputFormat, raw); normalized.QuotaPause == nil {
 			RenderAgentOutput(liveOut, invocation.OutputFormat, raw)
 		}
