@@ -20,6 +20,8 @@ func lineRendererFor(format AgentOutputFormat, color bool) lineRenderer {
 		return claudeLineRenderer(color)
 	case AgentOutputOpenCodeJSON:
 		return openCodeLineRenderer(color)
+	case AgentOutputPiJSONL:
+		return piLineRenderer(color)
 	default:
 		return nil
 	}
