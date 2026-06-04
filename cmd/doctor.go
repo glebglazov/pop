@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
@@ -48,7 +47,9 @@ type doctorDeps struct {
 	monitorDaemonStartable    func() bool
 	loadMonitorState          func() (*monitor.State, error)
 	paneSessionAddressable    func() (string, error)
-	intendedAgentStatusWiring func() ([]doctorAgentStatusWiring, error)
+	agentIntent               func() (*doctorAgentIntentReport, error)
+	explicitAgentContext      func() []string
+	agentExecutableAvailable  func(string) bool
 	resolveWorkloadRuntime    func() (string, error)
 	workloadArtifactIgnored   func(runtimePath, probePath string) (bool, error)
 }
@@ -89,15 +90,17 @@ func defaultDoctorDeps() *doctorDeps {
 			return monitor.Load(monitor.DefaultStatePath())
 		},
 		paneSessionAddressable: defaultPaneSessionAddressable,
-		intendedAgentStatusWiring: func() ([]doctorAgentStatusWiring, error) {
+		agentIntent: func() (*doctorAgentIntentReport, error) {
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return nil, err
 			}
-			return doctorIntendedAgentStatusWiring(defaultIntegrateDeps(), home)
+			return doctorDetectAgentIntent(defaultIntegrateDeps(), home, config.Load, nil, doctorAgentExecutableAvailable)
 		},
-		resolveWorkloadRuntime:  defaultDoctorResolveWorkloadRuntime,
-		workloadArtifactIgnored: defaultDoctorWorkloadArtifactIgnored,
+		explicitAgentContext:     func() []string { return nil },
+		agentExecutableAvailable: doctorAgentExecutableAvailable,
+		resolveWorkloadRuntime:   defaultDoctorResolveWorkloadRuntime,
+		workloadArtifactIgnored:  defaultDoctorWorkloadArtifactIgnored,
 	}
 }
 
@@ -138,6 +141,21 @@ type doctorAgentStatusWiring struct {
 	agent  string
 	state  componentStateInfo
 	detail string
+}
+
+type doctorAgentIntent struct {
+	agent   string
+	sources []string
+}
+
+type doctorAgentSuggestion struct {
+	agent  string
+	reason string
+}
+
+type doctorAgentIntentReport struct {
+	intended    []doctorAgentIntent
+	suggestions []doctorAgentSuggestion
 }
 
 var doctorCmd = &cobra.Command{
@@ -190,11 +208,16 @@ var canonicalDoctorCommands = []string{
 // reads; a failure here means the report itself could not be produced (a
 // non-zero exit), not an unhealthy finding.
 func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
+	intent, err := d.agentIntent()
+	if err != nil {
+		return nil, err
+	}
+	doctorMergeExplicitAgentContext(intent, d.explicitAgentContext())
 	report := &doctorReport{
 		families: []doctorFamilyReport{
 			familyReport("pop project", doctorProjectChecks(d)),
 			familyReport("pop worktree", doctorWorktreeChecks(d)),
-			familyReport("pop monitor", doctorMonitorChecks(d)),
+			familyReport("pop monitor", doctorMonitorChecks(d, intent)),
 			familyReport("pop pane", doctorPaneChecks(d)),
 			familyReport("pop workload", doctorWorkloadChecks(d)),
 		},
@@ -204,8 +227,9 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
-	var integrationChecks []doctorCheck
-	for _, agent := range integrationAgents {
+	integrationChecks := doctorIntegrateIntentChecks(intent)
+	for _, intended := range intent.intended {
+		agent := intended.agent
 		for _, comp := range integrationCatalog {
 			state, err := doctorComponentState(d.integrate, home, comp.id, agent)
 			if err != nil {
@@ -214,6 +238,7 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 			integrationChecks = append(integrationChecks, doctorIntegrationCheck(agent, comp.id, state))
 		}
 	}
+	integrationChecks = append(integrationChecks, doctorIntegrateSuggestionChecks(intent)...)
 	report.families = append(report.families, familyReport("pop integrate", integrationChecks))
 	return report, nil
 }
@@ -453,7 +478,7 @@ func defaultPaneSessionAddressable() (string, error) {
 	return "target project sessions can be addressed with --project", nil
 }
 
-func doctorMonitorChecks(d *doctorDeps) []doctorCheck {
+func doctorMonitorChecks(d *doctorDeps, intent *doctorAgentIntentReport) []doctorCheck {
 	checks := []doctorCheck{}
 
 	state, err := d.loadMonitorState()
@@ -507,7 +532,7 @@ func doctorMonitorChecks(d *doctorDeps) []doctorCheck {
 		})
 	}
 
-	wiring, err := d.intendedAgentStatusWiring()
+	wiring, err := doctorIntendedAgentStatusWiring(d.integrate, intent)
 	if err != nil {
 		checks = append(checks, doctorCheck{
 			label:  "intended agent status wiring",
@@ -568,16 +593,14 @@ func doctorIntendedAgentStatusWiringCheck(wiring []doctorAgentStatusWiring) (doc
 	}
 }
 
-func doctorIntendedAgentStatusWiring(d *integrateDeps, home string) ([]doctorAgentStatusWiring, error) {
+func doctorIntendedAgentStatusWiring(d *integrateDeps, intent *doctorAgentIntentReport) ([]doctorAgentStatusWiring, error) {
+	home, err := d.userHomeDir()
+	if err != nil {
+		return nil, err
+	}
 	var out []doctorAgentStatusWiring
-	for _, agent := range integrationAgents {
-		intended, err := doctorAgentStatusWiringIntended(d, home, agent)
-		if err != nil {
-			return nil, err
-		}
-		if !intended {
-			continue
-		}
+	for _, intended := range intent.intended {
+		agent := intended.agent
 		state, err := doctorComponentState(d, home, ComponentStatusWiring, agent)
 		if err != nil {
 			return nil, err
@@ -587,29 +610,168 @@ func doctorIntendedAgentStatusWiring(d *integrateDeps, home string) ([]doctorAge
 	return out, nil
 }
 
-func doctorAgentStatusWiringIntended(d *integrateDeps, home, agent string) (bool, error) {
-	var path string
-	switch strings.ToLower(agent) {
-	case "claude":
-		path = filepath.Join(home, ".claude", "settings.json")
-	case "codex":
-		path = filepath.Join(home, ".codex", "hooks.json")
-	case "cursor":
-		path = filepath.Join(home, ".cursor", "hooks.json")
-	case "pi":
-		path = filepath.Join(home, ".pi", "agent", "extensions", "pop-status-sync.ts")
-	case "opencode":
-		path = filepath.Join(home, ".config", "opencode", "plugins", "pop-status-sync.ts")
-	default:
-		return false, nil
-	}
-	if _, err := d.lstatMode(path); err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
+func doctorDetectAgentIntent(d *integrateDeps, home string, loadConfig func(string) (*config.Config, error), explicit []string, executableAvailable func(string) bool) (*doctorAgentIntentReport, error) {
+	report := &doctorAgentIntentReport{}
+	intentByAgent := map[string]int{}
+	addIntent := func(agent, source string) {
+		agent = strings.ToLower(agent)
+		if !knownIntegrationAgent(agent) {
+			return
 		}
-		return false, err
+		idx, ok := intentByAgent[agent]
+		if !ok {
+			report.intended = append(report.intended, doctorAgentIntent{agent: agent})
+			idx = len(report.intended) - 1
+			intentByAgent[agent] = idx
+		}
+		if source != "" && !stringSliceContains(report.intended[idx].sources, source) {
+			report.intended[idx].sources = append(report.intended[idx].sources, source)
+		}
 	}
-	return true, nil
+
+	if loadConfig != nil {
+		cfg, err := loadConfig(config.DefaultConfigPath())
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("load workload config for agent intent: %w", err)
+			}
+		} else if cfg != nil && cfg.Workload != nil {
+			for agent := range cfg.Workload.Agents {
+				addIntent(agent, "workload config")
+			}
+		}
+	}
+
+	doctorMergeExplicitAgentContext(report, explicit)
+
+	for _, agent := range integrationAgents {
+		for _, comp := range integrationCatalog {
+			if comp.id == ComponentWorkloadGitignore {
+				continue
+			}
+			state, err := doctorComponentState(d, home, comp.id, agent)
+			if err != nil {
+				return nil, err
+			}
+			switch state.kind {
+			case stateInstalledCurrent, stateStale:
+				addIntent(agent, "pop-owned integration artifacts")
+			}
+		}
+	}
+
+	for _, agent := range integrationAgents {
+		if _, ok := intentByAgent[agent]; ok {
+			continue
+		}
+		if executableAvailable != nil && executableAvailable(agent) {
+			report.suggestions = append(report.suggestions, doctorAgentSuggestion{
+				agent:  agent,
+				reason: "agent executable is available on PATH but no Pop intent was detected",
+			})
+		}
+	}
+
+	return report, nil
+}
+
+func doctorMergeExplicitAgentContext(report *doctorAgentIntentReport, agents []string) {
+	if report == nil {
+		return
+	}
+	intentByAgent := map[string]int{}
+	for i := range report.intended {
+		intentByAgent[report.intended[i].agent] = i
+	}
+	for _, agent := range agents {
+		agent = strings.ToLower(agent)
+		if !knownIntegrationAgent(agent) {
+			continue
+		}
+		idx, ok := intentByAgent[agent]
+		if !ok {
+			report.intended = append(report.intended, doctorAgentIntent{agent: agent})
+			idx = len(report.intended) - 1
+			intentByAgent[agent] = idx
+		}
+		if !stringSliceContains(report.intended[idx].sources, "explicit command context") {
+			report.intended[idx].sources = append(report.intended[idx].sources, "explicit command context")
+		}
+	}
+}
+
+func knownIntegrationAgent(agent string) bool {
+	for _, candidate := range integrationAgents {
+		if candidate == strings.ToLower(agent) {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContains(items []string, item string) bool {
+	for _, existing := range items {
+		if existing == item {
+			return true
+		}
+	}
+	return false
+}
+
+var doctorAgentExecutables = map[string]string{
+	"claude":   "claude",
+	"codex":    "codex",
+	"cursor":   "cursor-agent",
+	"opencode": "opencode",
+	"pi":       "pi",
+}
+
+func doctorAgentExecutableAvailable(agent string) bool {
+	exe, ok := doctorAgentExecutables[strings.ToLower(agent)]
+	if !ok {
+		return false
+	}
+	_, err := exec.LookPath(exe)
+	return err == nil
+}
+
+func doctorIntegrateIntentChecks(intent *doctorAgentIntentReport) []doctorCheck {
+	if intent == nil || len(intent.intended) == 0 {
+		return []doctorCheck{{
+			label:  "intended agent setup repair path",
+			status: doctorStatusOK,
+			detail: "no intended agents detected; available agents are suggestions only",
+		}}
+	}
+	var agents []string
+	for _, intended := range intent.intended {
+		source := strings.Join(intended.sources, ", ")
+		if source == "" {
+			source = "detected intent"
+		}
+		agents = append(agents, fmt.Sprintf("%s (%s)", intended.agent, source))
+	}
+	return []doctorCheck{{
+		label:  "intended agent setup repair path",
+		status: doctorStatusOK,
+		detail: fmt.Sprintf("can inspect and repair intended agent setup through pop integrate for: %s", strings.Join(agents, "; ")),
+	}}
+}
+
+func doctorIntegrateSuggestionChecks(intent *doctorAgentIntentReport) []doctorCheck {
+	if intent == nil {
+		return nil
+	}
+	var checks []doctorCheck
+	for _, suggestion := range intent.suggestions {
+		checks = append(checks, doctorCheck{
+			label:      fmt.Sprintf("%s available agent suggestion", suggestion.agent),
+			status:     doctorStatusNA,
+			detail:     suggestion.reason,
+			nextAction: integrateInvocation(suggestion.agent, ComponentStatusWiring),
+		})
+	}
+	return checks
 }
 
 func doctorBoolCheck(label string, ok bool, failDetail, okDetail, nextAction string) doctorCheck {

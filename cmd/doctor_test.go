@@ -55,9 +55,11 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 		paneSessionAddressable: func() (string, error) {
 			return "current tmux session \"app\" is addressable", nil
 		},
-		intendedAgentStatusWiring: func() ([]doctorAgentStatusWiring, error) {
-			return []doctorAgentStatusWiring{{agent: "claude", state: componentStateInfo{kind: stateInstalledCurrent}}}, nil
+		agentIntent: func() (*doctorAgentIntentReport, error) {
+			return &doctorAgentIntentReport{}, nil
 		},
+		explicitAgentContext:     func() []string { return nil },
+		agentExecutableAvailable: func(string) bool { return false },
 		resolveWorkloadRuntime: func() (string, error) {
 			return "/repo/app", nil
 		},
@@ -70,6 +72,16 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 			}
 			return true, nil
 		},
+	}
+}
+
+func setDoctorIntent(d *doctorDeps, agents ...string) {
+	d.agentIntent = func() (*doctorAgentIntentReport, error) {
+		report := &doctorAgentIntentReport{}
+		for _, agent := range agents {
+			report.intended = append(report.intended, doctorAgentIntent{agent: agent, sources: []string{"test intent"}})
+		}
+		return report, nil
 	}
 }
 
@@ -126,9 +138,28 @@ func workloadIgnoreCheck(t *testing.T, report *doctorReport) doctorCheck {
 	return check
 }
 
+func doctorIntentByAgent(report *doctorAgentIntentReport, agent string) (doctorAgentIntent, bool) {
+	for _, intent := range report.intended {
+		if intent.agent == agent {
+			return intent, true
+		}
+	}
+	return doctorAgentIntent{}, false
+}
+
+func doctorSuggestionByAgent(report *doctorAgentIntentReport, agent string) (doctorAgentSuggestion, bool) {
+	for _, suggestion := range report.suggestions {
+		if suggestion.agent == agent {
+			return suggestion, true
+		}
+	}
+	return doctorAgentSuggestion{}, false
+}
+
 func TestDoctorReportsCanonicalCommandFamilies(t *testing.T) {
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	setDoctorIntent(d, "claude")
 	report, err := buildDoctorReport(d)
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
@@ -147,6 +178,7 @@ func TestDoctorReportsCanonicalCommandFamilies(t *testing.T) {
 func TestDoctorNestedChecksAreGenericAndActionable(t *testing.T) {
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	setDoctorIntent(d, "claude")
 	report, err := buildDoctorReport(d)
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
@@ -177,6 +209,7 @@ func TestDoctorReadOnlyConflictCheck(t *testing.T) {
 	fs.files[conflictPath] = []byte("my own skill")
 
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	setDoctorIntent(d, "claude")
 	report, err := buildDoctorReport(d)
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
@@ -214,6 +247,7 @@ func TestDoctorStaleComponentIsPartialCheck(t *testing.T) {
 	fs.files[renderFile] = []byte("drifted content not matching the embedded source")
 
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	setDoctorIntent(d, "claude")
 	report, err := buildDoctorReport(d)
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
@@ -236,6 +270,186 @@ func TestDoctorStaleComponentIsPartialCheck(t *testing.T) {
 	if check.nextAction != "pop integrate claude --pane-skill" {
 		t.Fatalf("nextAction = %q, want pane-skill integrate command", check.nextAction)
 	}
+}
+
+func TestDoctorDerivesIntendedAgentsFromWorkloadConfiguration(t *testing.T) {
+	fs := newFakeFS()
+	d := fakeDeps(installerHome, fs, nil)
+
+	intent, err := doctorDetectAgentIntent(d, installerHome, func(string) (*config.Config, error) {
+		return &config.Config{Workload: &config.WorkloadConfig{Agents: map[string]config.WorkloadAgentConfig{
+			"cursor": {Output: "text"},
+		}}}, nil
+	}, nil, func(string) bool { return false })
+	if err != nil {
+		t.Fatalf("doctorDetectAgentIntent: %v", err)
+	}
+	got, ok := doctorIntentByAgent(intent, "cursor")
+	if !ok {
+		t.Fatalf("configured workload agent was not intended: %+v", intent)
+	}
+	if !stringSliceContains(got.sources, "workload config") {
+		t.Fatalf("intent sources = %v, want workload config", got.sources)
+	}
+}
+
+func TestDoctorDerivesIntendedAgentsFromInstalledPopArtifactsAndHooks(t *testing.T) {
+	fs := newFakeFS()
+	claudeStatusWired(fs)
+	if err := installFileComponent(fakeDeps(installerHome, fs, nil), installerHome, ComponentPaneSkill, "pi"); err != nil {
+		t.Fatalf("install pi pane skill: %v", err)
+	}
+
+	intent, err := doctorDetectAgentIntent(fakeDeps(installerHome, fs, nil), installerHome, func(string) (*config.Config, error) {
+		return nil, os.ErrNotExist
+	}, nil, func(string) bool { return false })
+	if err != nil {
+		t.Fatalf("doctorDetectAgentIntent: %v", err)
+	}
+	for _, agent := range []string{"claude", "pi"} {
+		got, ok := doctorIntentByAgent(intent, agent)
+		if !ok {
+			t.Fatalf("%s was not intended from Pop artifacts/hooks: %+v", agent, intent)
+		}
+		if !stringSliceContains(got.sources, "pop-owned integration artifacts") {
+			t.Fatalf("%s sources = %v, want pop-owned integration artifacts", agent, got.sources)
+		}
+	}
+}
+
+func TestDoctorDerivesIntendedAgentsFromExplicitCommandContext(t *testing.T) {
+	intent, err := doctorDetectAgentIntent(fakeDeps(installerHome, newFakeFS(), nil), installerHome, func(string) (*config.Config, error) {
+		return nil, os.ErrNotExist
+	}, []string{"opencode"}, func(string) bool { return false })
+	if err != nil {
+		t.Fatalf("doctorDetectAgentIntent: %v", err)
+	}
+	got, ok := doctorIntentByAgent(intent, "opencode")
+	if !ok {
+		t.Fatalf("explicit command context agent was not intended: %+v", intent)
+	}
+	if !stringSliceContains(got.sources, "explicit command context") {
+		t.Fatalf("intent sources = %v, want explicit command context", got.sources)
+	}
+}
+
+func TestDoctorPathOnlyAgentsAreSuggestionsAndDoNotAffectReadiness(t *testing.T) {
+	fs := newFakeFS()
+	detectDeps := fakeDeps(installerHome, fs, nil)
+	intent, err := doctorDetectAgentIntent(detectDeps, installerHome, func(string) (*config.Config, error) {
+		return nil, os.ErrNotExist
+	}, nil, func(agent string) bool { return agent == "codex" })
+	if err != nil {
+		t.Fatalf("doctorDetectAgentIntent: %v", err)
+	}
+	if _, ok := doctorIntentByAgent(intent, "codex"); ok {
+		t.Fatalf("PATH-only codex should not be intended: %+v", intent)
+	}
+	if _, ok := doctorSuggestionByAgent(intent, "codex"); !ok {
+		t.Fatalf("PATH-only codex should be a suggestion: %+v", intent)
+	}
+
+	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	d.agentIntent = func() (*doctorAgentIntentReport, error) { return intent, nil }
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	integrate, ok := familyByCommand(report, "pop integrate")
+	if !ok {
+		t.Fatalf("missing pop integrate family")
+	}
+	if integrate.status != doctorStatusOK {
+		t.Fatalf("PATH-only suggestion changed integrate status to %s: %+v", integrate.status, integrate)
+	}
+	suggestion, ok := checkByLabel(integrate, "codex available agent suggestion")
+	if !ok {
+		t.Fatalf("missing PATH-only suggestion check")
+	}
+	if suggestion.status != doctorStatusNA || suggestion.nextAction != "pop integrate codex" {
+		t.Fatalf("suggestion = %+v, want N/A with integrate command", suggestion)
+	}
+}
+
+func TestDoctorPathOnlyConflictIsNotReportedWithoutIntent(t *testing.T) {
+	fs := newFakeFS()
+	conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
+	fs.files[conflictPath] = []byte("user-owned skill")
+	intent, err := doctorDetectAgentIntent(fakeDeps(installerHome, fs, nil), installerHome, func(string) (*config.Config, error) {
+		return nil, os.ErrNotExist
+	}, nil, func(agent string) bool { return agent == "claude" })
+	if err != nil {
+		t.Fatalf("doctorDetectAgentIntent: %v", err)
+	}
+	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	d.agentIntent = func() (*doctorAgentIntentReport, error) { return intent, nil }
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	integrate, _ := familyByCommand(report, "pop integrate")
+	if _, ok := checkByLabel(integrate, "claude pane-skill"); ok {
+		t.Fatalf("PATH-only conflict should not produce agent-specific readiness check: %+v", integrate.checks)
+	}
+	if integrate.status != doctorStatusOK {
+		t.Fatalf("PATH-only conflict changed integrate status to %s: %+v", integrate.status, integrate)
+	}
+}
+
+func TestDoctorIntendedAgentsReportConflictStaleAndUnsupportedComponents(t *testing.T) {
+	t.Run("conflict", func(t *testing.T) {
+		fs := newFakeFS()
+		conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
+		fs.files[conflictPath] = []byte("user-owned skill")
+		d := readOnlyDoctorDeps(t, fs, true, true, true)
+		setDoctorIntent(d, "claude")
+
+		report, err := buildDoctorReport(d)
+		if err != nil {
+			t.Fatalf("buildDoctorReport: %v", err)
+		}
+		integrate, _ := familyByCommand(report, "pop integrate")
+		check, ok := checkByLabel(integrate, "claude pane-skill")
+		if !ok || check.status != doctorStatusBlocked {
+			t.Fatalf("conflict check = %+v, ok=%v", check, ok)
+		}
+	})
+
+	t.Run("stale", func(t *testing.T) {
+		fs := newFakeFS()
+		if err := installFileComponent(fakeDeps(installerHome, fs, nil), installerHome, ComponentPaneSkill, "claude"); err != nil {
+			t.Fatalf("install pane skill: %v", err)
+		}
+		renderFile, _, _ := paneSkillPaths()
+		fs.files[renderFile] = []byte("stale")
+		d := readOnlyDoctorDeps(t, fs, true, true, true)
+		setDoctorIntent(d, "claude")
+
+		report, err := buildDoctorReport(d)
+		if err != nil {
+			t.Fatalf("buildDoctorReport: %v", err)
+		}
+		integrate, _ := familyByCommand(report, "pop integrate")
+		check, ok := checkByLabel(integrate, "claude pane-skill")
+		if !ok || check.status != doctorStatusPartial || !strings.Contains(check.detail, "stale") {
+			t.Fatalf("stale check = %+v, ok=%v", check, ok)
+		}
+	})
+
+	t.Run("unsupported", func(t *testing.T) {
+		d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+		setDoctorIntent(d, "codex")
+
+		report, err := buildDoctorReport(d)
+		if err != nil {
+			t.Fatalf("buildDoctorReport: %v", err)
+		}
+		integrate, _ := familyByCommand(report, "pop integrate")
+		check, ok := checkByLabel(integrate, "codex workload-skills")
+		if !ok || check.status != doctorStatusNA || !strings.Contains(check.detail, "does not support") {
+			t.Fatalf("unsupported check = %+v, ok=%v", check, ok)
+		}
+	})
 }
 
 func TestDoctorHealthyCoreFamiliesRenderOK(t *testing.T) {
@@ -837,21 +1051,7 @@ func TestDoctorMonitorPartialOnlyForMixedIntendedAgentStatusWiring(t *testing.T)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-			d.intendedAgentStatusWiring = func() ([]doctorAgentStatusWiring, error) { return tt.wiring, nil }
-
-			report, err := buildDoctorReport(d)
-			if err != nil {
-				t.Fatalf("buildDoctorReport: %v", err)
-			}
-			family, ok := familyByCommand(report, "pop monitor")
-			if !ok {
-				t.Fatalf("missing pop monitor family")
-			}
-			if family.status != tt.wantStatus {
-				t.Fatalf("monitor status = %s, want %s (%s)", family.status, tt.wantStatus, family.reason)
-			}
-			check, ok := checkByLabel(family, "intended agent status wiring")
+			check, ok := doctorIntendedAgentStatusWiringCheck(tt.wiring)
 			if !ok {
 				t.Fatalf("missing intended agent status wiring check")
 			}
