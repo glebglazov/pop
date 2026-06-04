@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
@@ -42,6 +44,10 @@ type doctorDeps struct {
 	detectRepoContext         func() (*project.RepoContext, error)
 	listWorktrees             func(*project.RepoContext) ([]project.Worktree, error)
 	daemonRunning             func() bool
+	monitorDaemonStartable    func() bool
+	loadMonitorState          func() (*monitor.State, error)
+	paneSessionAddressable    func() (string, error)
+	intendedAgentStatusWiring func() ([]doctorAgentStatusWiring, error)
 }
 
 func defaultDoctorDeps() *doctorDeps {
@@ -67,6 +73,25 @@ func defaultDoctorDeps() *doctorDeps {
 		listWorktrees:          project.ListWorktrees,
 		daemonRunning: func() bool {
 			return monitor.IsDaemonRunning(monitor.DefaultPIDPath())
+		},
+		monitorDaemonStartable: func() bool {
+			exe, err := os.Executable()
+			if err != nil {
+				return false
+			}
+			info, err := os.Stat(exe)
+			return err == nil && !info.IsDir()
+		},
+		loadMonitorState: func() (*monitor.State, error) {
+			return monitor.Load(monitor.DefaultStatePath())
+		},
+		paneSessionAddressable: defaultPaneSessionAddressable,
+		intendedAgentStatusWiring: func() ([]doctorAgentStatusWiring, error) {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, err
+			}
+			return doctorIntendedAgentStatusWiring(defaultIntegrateDeps(), home)
 		},
 	}
 }
@@ -102,6 +127,12 @@ type doctorFamilyReport struct {
 
 type doctorReport struct {
 	families []doctorFamilyReport
+}
+
+type doctorAgentStatusWiring struct {
+	agent  string
+	state  componentStateInfo
+	detail string
 }
 
 var doctorCmd = &cobra.Command{
@@ -158,12 +189,8 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 		families: []doctorFamilyReport{
 			familyReport("pop project", doctorProjectChecks(d)),
 			familyReport("pop worktree", doctorWorktreeChecks(d)),
-			familyReport("pop monitor", []doctorCheck{
-				doctorBoolCheck("monitor daemon running", d.daemonRunning(), "monitor daemon is not running", "", "pop monitor"),
-			}),
-			familyReport("pop pane", []doctorCheck{
-				doctorBoolCheck("tmux available", d.tmuxAvailable(), "tmux executable was not found", "", ""),
-			}),
+			familyReport("pop monitor", doctorMonitorChecks(d)),
+			familyReport("pop pane", doctorPaneChecks(d)),
 			familyReport("pop workload", []doctorCheck{
 				{label: "workload-specific checks", status: doctorStatusNA, detail: "no workload-specific readiness checks yet"},
 			}),
@@ -285,6 +312,226 @@ func doctorWorktreeChecks(d *doctorDeps) []doctorCheck {
 		detail: fmt.Sprintf("%d linked worktree(s) listed", len(worktrees)),
 	})
 	return checks
+}
+
+func doctorPaneChecks(d *doctorDeps) []doctorCheck {
+	tmuxAvailable := d.tmuxAvailable()
+	checks := []doctorCheck{
+		doctorBoolCheck("tmux available", tmuxAvailable, "tmux executable was not found", "", ""),
+	}
+	if !tmuxAvailable {
+		return checks
+	}
+
+	detail, err := d.paneSessionAddressable()
+	if err != nil {
+		checks = append(checks, doctorCheck{
+			label:  "pane target session addressable",
+			status: doctorStatusBlocked,
+			detail: err.Error(),
+		})
+	} else {
+		checks = append(checks, doctorCheck{
+			label:  "pane target session addressable",
+			status: doctorStatusOK,
+			detail: detail,
+		})
+	}
+
+	if _, err := d.loadMonitorState(); err != nil {
+		checks = append(checks, doctorCheck{
+			label:  "monitor fallback writes",
+			status: doctorStatusBlocked,
+			detail: fmt.Sprintf("monitor state is not readable for direct fallback writes: %v", err),
+		})
+	} else {
+		checks = append(checks, doctorCheck{
+			label:  "monitor fallback writes",
+			status: doctorStatusOK,
+			detail: "direct status writes can use monitor state",
+		})
+	}
+	return checks
+}
+
+func defaultPaneSessionAddressable() (string, error) {
+	if current := currentTmuxSession(); current != "" {
+		return fmt.Sprintf("current tmux session %q is addressable", current), nil
+	}
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		return "", fmt.Errorf("not inside a tmux session and no target project config is available")
+	}
+	if cfg == nil {
+		return "", fmt.Errorf("not inside a tmux session and no target project config is available")
+	}
+	paths, err := cfg.ExpandProjects()
+	if err != nil {
+		return "", fmt.Errorf("not inside a tmux session and configured projects could not be expanded: %v", err)
+	}
+	if len(paths) == 0 {
+		return "", fmt.Errorf("not inside a tmux session and no target project is configured")
+	}
+	return "target project sessions can be addressed with --project", nil
+}
+
+func doctorMonitorChecks(d *doctorDeps) []doctorCheck {
+	checks := []doctorCheck{}
+
+	state, err := d.loadMonitorState()
+	if err != nil {
+		checks = append(checks, doctorCheck{
+			label:  "monitor state readable",
+			status: doctorStatusBlocked,
+			detail: fmt.Sprintf("failed to read monitor state: %v", err),
+		})
+	} else {
+		checks = append(checks, doctorCheck{
+			label:  "monitor state readable",
+			status: doctorStatusOK,
+			detail: fmt.Sprintf("%d tracked pane(s)", len(state.Panes)),
+		})
+	}
+
+	switch {
+	case d.daemonRunning():
+		checks = append(checks, doctorCheck{
+			label:  "monitor daemon usable",
+			status: doctorStatusOK,
+			detail: "daemon is running",
+		})
+	case d.monitorDaemonStartable():
+		checks = append(checks, doctorCheck{
+			label:  "monitor daemon usable",
+			status: doctorStatusOK,
+			detail: "daemon is stopped; normal pop startup can start it",
+		})
+	default:
+		checks = append(checks, doctorCheck{
+			label:      "monitor daemon usable",
+			status:     doctorStatusBlocked,
+			detail:     "daemon is stopped and normal pop startup cannot start it",
+			nextAction: "pop project",
+		})
+	}
+
+	if d.tmuxAvailable() {
+		checks = append(checks, doctorCheck{
+			label:  "automatic visit/status quality",
+			status: doctorStatusOK,
+			detail: "tmux is available for pane discovery, cleanup, and visit hooks",
+		})
+	} else {
+		checks = append(checks, doctorCheck{
+			label:  "automatic visit/status quality",
+			status: doctorStatusDegraded,
+			detail: "tmux unavailable; monitor state can be used but automatic pane tracking quality is reduced",
+		})
+	}
+
+	wiring, err := d.intendedAgentStatusWiring()
+	if err != nil {
+		checks = append(checks, doctorCheck{
+			label:  "intended agent status wiring",
+			status: doctorStatusDegraded,
+			detail: fmt.Sprintf("failed to inspect intended agent wiring: %v", err),
+		})
+		return checks
+	}
+	if check, ok := doctorIntendedAgentStatusWiringCheck(wiring); ok {
+		checks = append(checks, check)
+	}
+
+	return checks
+}
+
+func doctorIntendedAgentStatusWiringCheck(wiring []doctorAgentStatusWiring) (doctorCheck, bool) {
+	if len(wiring) == 0 {
+		return doctorCheck{
+			label:  "intended agent status wiring",
+			status: doctorStatusOK,
+			detail: "no intended agents detected",
+		}, true
+	}
+
+	var ok, needsAttention []string
+	for _, w := range wiring {
+		switch w.state.kind {
+		case stateInstalledCurrent:
+			ok = append(ok, w.agent)
+		case stateConflict:
+			needsAttention = append(needsAttention, w.agent+" (conflicting)")
+		case stateStale:
+			needsAttention = append(needsAttention, w.agent+" (stale)")
+		default:
+			needsAttention = append(needsAttention, w.agent+" (missing)")
+		}
+	}
+
+	switch {
+	case len(ok) > 0 && len(needsAttention) > 0:
+		return doctorCheck{
+			label:  "intended agent status wiring",
+			status: doctorStatusPartial,
+			detail: fmt.Sprintf("wired: %s; missing, stale, or conflicting: %s", strings.Join(ok, ", "), strings.Join(needsAttention, ", ")),
+		}, true
+	case len(ok) == 0 && len(needsAttention) > 0:
+		return doctorCheck{
+			label:  "intended agent status wiring",
+			status: doctorStatusDegraded,
+			detail: fmt.Sprintf("no intended agent status wiring is currently usable; missing, stale, or conflicting: %s", strings.Join(needsAttention, ", ")),
+		}, true
+	default:
+		return doctorCheck{
+			label:  "intended agent status wiring",
+			status: doctorStatusOK,
+			detail: fmt.Sprintf("wired for intended agent(s): %s", strings.Join(ok, ", ")),
+		}, true
+	}
+}
+
+func doctorIntendedAgentStatusWiring(d *integrateDeps, home string) ([]doctorAgentStatusWiring, error) {
+	var out []doctorAgentStatusWiring
+	for _, agent := range integrationAgents {
+		intended, err := doctorAgentStatusWiringIntended(d, home, agent)
+		if err != nil {
+			return nil, err
+		}
+		if !intended {
+			continue
+		}
+		state, err := doctorComponentState(d, home, ComponentStatusWiring, agent)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, doctorAgentStatusWiring{agent: agent, state: state})
+	}
+	return out, nil
+}
+
+func doctorAgentStatusWiringIntended(d *integrateDeps, home, agent string) (bool, error) {
+	var path string
+	switch strings.ToLower(agent) {
+	case "claude":
+		path = filepath.Join(home, ".claude", "settings.json")
+	case "codex":
+		path = filepath.Join(home, ".codex", "hooks.json")
+	case "cursor":
+		path = filepath.Join(home, ".cursor", "hooks.json")
+	case "pi":
+		path = filepath.Join(home, ".pi", "agent", "extensions", "pop-status-sync.ts")
+	case "opencode":
+		path = filepath.Join(home, ".config", "opencode", "plugins", "pop-status-sync.ts")
+	default:
+		return false, nil
+	}
+	if _, err := d.lstatMode(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func doctorBoolCheck(label string, ok bool, failDetail, okDetail, nextAction string) doctorCheck {

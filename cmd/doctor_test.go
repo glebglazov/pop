@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
 )
 
@@ -45,7 +46,17 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 		listWorktrees: func(*project.RepoContext) ([]project.Worktree, error) {
 			return []project.Worktree{{Name: "feature", Path: "/repo/app-feature"}}, nil
 		},
-		daemonRunning: func() bool { return daemon },
+		daemonRunning:          func() bool { return daemon },
+		monitorDaemonStartable: func() bool { return true },
+		loadMonitorState: func() (*monitor.State, error) {
+			return &monitor.State{Panes: map[string]*monitor.PaneEntry{}}, nil
+		},
+		paneSessionAddressable: func() (string, error) {
+			return "current tmux session \"app\" is addressable", nil
+		},
+		intendedAgentStatusWiring: func() ([]doctorAgentStatusWiring, error) {
+			return []doctorAgentStatusWiring{{agent: "claude", state: componentStateInfo{kind: stateInstalledCurrent}}}, nil
+		},
 	}
 }
 
@@ -425,7 +436,7 @@ func TestDoctorWorktreeReadinessBlocksOutsideGit(t *testing.T) {
 	}
 }
 
-func TestDoctorDaemonDownIsBlockedButExitsZero(t *testing.T) {
+func TestDoctorDaemonStoppedButStartableIsOKAndExitsZero(t *testing.T) {
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, false)
 	out := &bytes.Buffer{}
@@ -433,11 +444,215 @@ func TestDoctorDaemonDownIsBlockedButExitsZero(t *testing.T) {
 		t.Fatalf("doctor must exit 0 on render success even when unhealthy: %v", err)
 	}
 	s := out.String()
-	if !strings.Contains(s, "Blocked   pop monitor    monitor daemon is not running") {
-		t.Fatalf("daemon-down should report blocked monitor family:\n%s", s)
+	if !strings.Contains(s, "OK        pop monitor    ready") {
+		t.Fatalf("startable daemon-down should report OK monitor family:\n%s", s)
 	}
-	if !strings.Contains(s, "(next: pop monitor)") {
-		t.Fatalf("daemon-down should carry a next action:\n%s", s)
+	if !strings.Contains(s, "daemon is stopped; normal pop startup can start it") {
+		t.Fatalf("daemon-down should explain normal startup path:\n%s", s)
+	}
+	if !strings.Contains(s, "OK        pop pane       ready") {
+		t.Fatalf("daemon-down should not block pane readiness:\n%s", s)
+	}
+}
+
+func TestDoctorPaneBlocksWhenTmuxUnavailable(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), false, true, true)
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop pane")
+	if !ok {
+		t.Fatalf("missing pop pane family")
+	}
+	if family.status != doctorStatusBlocked {
+		t.Fatalf("pane status = %s, want %s", family.status, doctorStatusBlocked)
+	}
+	check, ok := checkByLabel(family, "tmux available")
+	if !ok {
+		t.Fatalf("missing tmux available check")
+	}
+	if check.status != doctorStatusBlocked || !strings.Contains(check.detail, "tmux executable") {
+		t.Fatalf("tmux check = %+v, want blocked unavailable detail", check)
+	}
+}
+
+func TestDoctorPaneOKWhenProjectTargetSessionAddressable(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, false)
+	d.paneSessionAddressable = func() (string, error) {
+		return "target project sessions can be addressed with --project", nil
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop pane")
+	if !ok {
+		t.Fatalf("missing pop pane family")
+	}
+	if family.status != doctorStatusOK {
+		t.Fatalf("pane status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+	}
+	check, ok := checkByLabel(family, "pane target session addressable")
+	if !ok {
+		t.Fatalf("missing pane target session addressable check")
+	}
+	if check.status != doctorStatusOK || !strings.Contains(check.detail, "--project") {
+		t.Fatalf("session check = %+v, want OK project target detail", check)
+	}
+}
+
+func TestDoctorPaneNotBlockedByStoppedUnstartableMonitorDaemon(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, false)
+	d.monitorDaemonStartable = func() bool { return false }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	pane, ok := familyByCommand(report, "pop pane")
+	if !ok {
+		t.Fatalf("missing pop pane family")
+	}
+	if pane.status != doctorStatusOK {
+		t.Fatalf("pane status = %s, want %s (%s)", pane.status, doctorStatusOK, pane.reason)
+	}
+	monitorFamily, ok := familyByCommand(report, "pop monitor")
+	if !ok {
+		t.Fatalf("missing pop monitor family")
+	}
+	if monitorFamily.status != doctorStatusBlocked {
+		t.Fatalf("monitor status = %s, want %s", monitorFamily.status, doctorStatusBlocked)
+	}
+}
+
+func TestDoctorMonitorBlocksWhenStateUnreadable(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.loadMonitorState = func() (*monitor.State, error) {
+		return nil, errors.New("permission denied")
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop monitor")
+	if !ok {
+		t.Fatalf("missing pop monitor family")
+	}
+	if family.status != doctorStatusBlocked {
+		t.Fatalf("monitor status = %s, want %s", family.status, doctorStatusBlocked)
+	}
+	if !strings.Contains(family.reason, "permission denied") {
+		t.Fatalf("blocked reason should name unreadable state: %q", family.reason)
+	}
+}
+
+func TestDoctorMonitorDegradedWhenAutomaticTrackingQualityReduced(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), false, true, true)
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop monitor")
+	if !ok {
+		t.Fatalf("missing pop monitor family")
+	}
+	if family.status != doctorStatusDegraded {
+		t.Fatalf("monitor status = %s, want %s (%s)", family.status, doctorStatusDegraded, family.reason)
+	}
+	check, ok := checkByLabel(family, "automatic visit/status quality")
+	if !ok {
+		t.Fatalf("missing automatic visit/status quality check")
+	}
+	if check.status != doctorStatusDegraded || !strings.Contains(check.detail, "automatic pane tracking quality is reduced") {
+		t.Fatalf("quality check = %+v, want degraded tracking detail", check)
+	}
+}
+
+func TestDoctorMonitorPartialOnlyForMixedIntendedAgentStatusWiring(t *testing.T) {
+	tests := []struct {
+		name       string
+		wiring     []doctorAgentStatusWiring
+		wantStatus doctorStatus
+	}{
+		{
+			name: "all intended agents wired",
+			wiring: []doctorAgentStatusWiring{
+				{agent: "claude", state: componentStateInfo{kind: stateInstalledCurrent}},
+				{agent: "codex", state: componentStateInfo{kind: stateInstalledCurrent}},
+			},
+			wantStatus: doctorStatusOK,
+		},
+		{
+			name: "no intended agents wired",
+			wiring: []doctorAgentStatusWiring{
+				{agent: "claude", state: componentStateInfo{kind: stateNotInstalled}},
+				{agent: "codex", state: componentStateInfo{kind: stateNotInstalled}},
+			},
+			wantStatus: doctorStatusDegraded,
+		},
+		{
+			name: "mixed intended agents",
+			wiring: []doctorAgentStatusWiring{
+				{agent: "claude", state: componentStateInfo{kind: stateInstalledCurrent}},
+				{agent: "codex", state: componentStateInfo{kind: stateNotInstalled}},
+			},
+			wantStatus: doctorStatusPartial,
+		},
+		{
+			name: "mixed intended agents with stale wiring",
+			wiring: []doctorAgentStatusWiring{
+				{agent: "claude", state: componentStateInfo{kind: stateInstalledCurrent}},
+				{agent: "codex", state: componentStateInfo{kind: stateStale}},
+			},
+			wantStatus: doctorStatusPartial,
+		},
+		{
+			name: "mixed intended agents with conflicting wiring",
+			wiring: []doctorAgentStatusWiring{
+				{agent: "claude", state: componentStateInfo{kind: stateInstalledCurrent}},
+				{agent: "codex", state: componentStateInfo{kind: stateConflict, conflictPath: "/home/me/.codex/hooks.json"}},
+			},
+			wantStatus: doctorStatusPartial,
+		},
+		{
+			name: "no usable intended agents because wiring conflicts",
+			wiring: []doctorAgentStatusWiring{
+				{agent: "claude", state: componentStateInfo{kind: stateConflict, conflictPath: "/home/me/.claude/settings.json"}},
+				{agent: "codex", state: componentStateInfo{kind: stateConflict, conflictPath: "/home/me/.codex/hooks.json"}},
+			},
+			wantStatus: doctorStatusDegraded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+			d.intendedAgentStatusWiring = func() ([]doctorAgentStatusWiring, error) { return tt.wiring, nil }
+
+			report, err := buildDoctorReport(d)
+			if err != nil {
+				t.Fatalf("buildDoctorReport: %v", err)
+			}
+			family, ok := familyByCommand(report, "pop monitor")
+			if !ok {
+				t.Fatalf("missing pop monitor family")
+			}
+			if family.status != tt.wantStatus {
+				t.Fatalf("monitor status = %s, want %s (%s)", family.status, tt.wantStatus, family.reason)
+			}
+			check, ok := checkByLabel(family, "intended agent status wiring")
+			if !ok {
+				t.Fatalf("missing intended agent status wiring check")
+			}
+			if check.status != tt.wantStatus {
+				t.Fatalf("wiring check status = %s, want %s", check.status, tt.wantStatus)
+			}
+		})
 	}
 }
 
