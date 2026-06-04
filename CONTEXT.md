@@ -77,12 +77,16 @@ The fuzzy-search picker opened by the project command — for choosing a project
 _Avoid_: Session picker, select view, normal mode
 
 **Worktree picker**:
-The fuzzy-search picker in `pop worktree` for choosing, creating, or deleting git worktrees in the current repository.
+The fuzzy-search picker in `pop worktree` for choosing or deleting git worktrees in the current repository. Worktree creation is not built in; it belongs to user-defined commands, which hand the new path back via **Switch**. Deleting a worktree also removes its **History** entry; its tmux session is left alone (killing it stays an explicit, separate action).
 _Avoid_: Repo picker
 
 **History**:
-The persisted record of projects you've selected, with timestamps.
+The persisted record of projects you've selected or switched to, with timestamps.
 _Avoid_: Recents, access log
+
+**Switch**:
+Attaching to — or creating, then attaching to — the session for a path, recording it in **History**. The non-picker entry point (`pop project switch <dir>`), used by external tooling (e.g. worktree-creation scripts) so out-of-band paths still land in **History**.
+_Avoid_: Open, jump
 
 **Unread view** (removed):
 Previously a sub-view in the project picker (entered via `→`) for quickly jumping to unread panes. Removed — unread panes are now only accessible via the **Dashboard**.

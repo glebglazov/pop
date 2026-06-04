@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 )
@@ -101,6 +104,89 @@ func TestBuildWorktreeItems(t *testing.T) {
 			t.Errorf("Icon = %q, want %q", items[0].Icon, iconDirSession)
 		}
 	})
+}
+
+func TestRemoveFromHistoryWith(t *testing.T) {
+	histJSON := `{"entries":[
+		{"path":"/repo/feature","last_access":"2026-06-01T10:00:00Z"},
+		{"path":"/repo/main","last_access":"2026-06-02T10:00:00Z"}
+	]}`
+
+	t.Run("removes deleted worktree entry and saves", func(t *testing.T) {
+		var written []byte
+		d := &history.Deps{
+			FS: &deps.MockFileSystem{
+				ReadFileFunc: func(path string) ([]byte, error) { return []byte(histJSON), nil },
+				WriteFileFunc: func(path string, data []byte, perm os.FileMode) error {
+					written = data
+					return nil
+				},
+			},
+		}
+
+		removeFromHistoryWith(d, "/mock/history.json", "/repo/feature")
+
+		if written == nil {
+			t.Fatal("history was not saved")
+		}
+		var saved history.History
+		if err := json.Unmarshal(written, &saved); err != nil {
+			t.Fatal(err)
+		}
+		if len(saved.Entries) != 1 || saved.Entries[0].Path != "/repo/main" {
+			t.Errorf("saved entries = %+v, want only /repo/main", saved.Entries)
+		}
+	})
+
+	t.Run("load failure skips save", func(t *testing.T) {
+		var saveCalled bool
+		d := &history.Deps{
+			FS: &deps.MockFileSystem{
+				ReadFileFunc: func(path string) ([]byte, error) { return nil, os.ErrPermission },
+				WriteFileFunc: func(path string, data []byte, perm os.FileMode) error {
+					saveCalled = true
+					return nil
+				},
+			},
+		}
+
+		removeFromHistoryWith(d, "/mock/history.json", "/repo/feature")
+
+		if saveCalled {
+			t.Error("history saved despite load failure")
+		}
+	})
+
+	t.Run("missing entry still saves without change", func(t *testing.T) {
+		var written []byte
+		d := &history.Deps{
+			FS: &deps.MockFileSystem{
+				ReadFileFunc: func(path string) ([]byte, error) { return []byte(histJSON), nil },
+				WriteFileFunc: func(path string, data []byte, perm os.FileMode) error {
+					written = data
+					return nil
+				},
+			},
+		}
+
+		removeFromHistoryWith(d, "/mock/history.json", "/repo/unknown")
+
+		var saved history.History
+		if err := json.Unmarshal(written, &saved); err != nil {
+			t.Fatal(err)
+		}
+		if len(saved.Entries) != 2 {
+			t.Errorf("saved %d entries, want 2 untouched", len(saved.Entries))
+		}
+	})
+}
+
+func TestWorktreeHelpHasNoPhantomCreateBinding(t *testing.T) {
+	// ctrl-n is cursor-down in the picker; a create binding never shipped.
+	// Guard against the stale help line returning.
+	if strings.Contains(worktreeDashboardCmd.Long, "ctrl-n") {
+		t.Error("worktree dashboard help advertises ctrl-n, which is not a create binding")
+	}
 }
 
 // TestBuildWorktreeItemsIssuesNoGitCalls guards against reintroducing the

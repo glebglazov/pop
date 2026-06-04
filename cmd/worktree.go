@@ -37,7 +37,6 @@ Keybindings:
   enter    - switch to worktree (prints path or switches tmux session)
   ctrl-d   - delete worktree
   ctrl-x   - force delete worktree
-  ctrl-n   - create new worktree
   esc      - cancel
 
 Example tmux binding:
@@ -124,14 +123,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 		case ui.ActionReset:
 			if result.Selected != nil {
-				hist, err := history.Load(history.DefaultHistoryPath())
-				if err != nil {
-					debug.Error("worktree: load history: %v", err)
-				}
-				hist.Remove(result.Selected.Path)
-				if err := hist.Save(); err != nil {
-					debug.Error("worktree: save history: %v", err)
-				}
+				removeFromHistory(result.Selected.Path)
 			}
 			// Continue loop to show picker again
 
@@ -297,8 +289,30 @@ func deleteWorktree(path string, force bool) {
 	if err != nil {
 		debug.Error("deleteWorktree %s: %v: %s", path, err, output)
 		fmt.Fprintf(os.Stderr, "Failed to delete worktree: %s\n%s\n", path, output)
-	} else {
-		fmt.Fprintf(os.Stderr, "Deleted: %s\n", path)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "Deleted: %s\n", path)
+	// Worktree is gone — drop its history entry so it no longer skews
+	// recency sorting or session-name matching. The tmux session (if any)
+	// is left alone; killing it stays an explicit, separate action.
+	removeFromHistory(path)
+}
+
+// removeFromHistory deletes path from project history, logging (not
+// propagating) failures — history cleanup must never block the picker loop.
+func removeFromHistory(path string) {
+	removeFromHistoryWith(history.DefaultDeps(), history.DefaultHistoryPath(), path)
+}
+
+func removeFromHistoryWith(d *history.Deps, histPath, path string) {
+	hist, err := history.LoadWith(d, histPath)
+	if err != nil {
+		debug.Error("worktree: load history: %v", err)
+		return
+	}
+	hist.RemoveWith(d, path)
+	if err := hist.SaveWith(d); err != nil {
+		debug.Error("worktree: save history: %v", err)
 	}
 }
 
