@@ -12,13 +12,12 @@ import (
 )
 
 // `pop doctor` is the read-only readiness report (PRD: Doctor). It prints the
-// three core checks (tmux present, config loads, monitor daemon running) and a
-// per-agent table of Integration component states. Doctor adds no state logic
-// of its own: every component state is computed through the same check seams
-// the wizard and removal paths use (the catalog support matrix, the render
-// engine, the link installer's ownership/staleness checks, and the gitignore
-// presence check). It never installs or repairs — actionable rows simply carry
-// the copy-paste `pop integrate` command that fixes them.
+// canonical command families and their nested checks. Doctor adds no state
+// logic of its own: every Integration component state is computed through the
+// same read paths the wizard and removal paths use (the catalog support matrix,
+// the render engine, the link installer's ownership/staleness checks, and the
+// gitignore presence check). It never installs or repairs — actionable checks
+// simply carry the copy-paste `pop integrate` command that fixes them.
 //
 // Exit status mirrors `workload status`: it reflects rendering success, not the
 // health findings. A machine with everything broken still exits 0; only a
@@ -56,40 +55,51 @@ func defaultDoctorDeps() *doctorDeps {
 	}
 }
 
-// doctorCoreCheck is one core-readiness line.
-type doctorCoreCheck struct {
-	label  string
-	ok     bool
-	detail string
+// doctorStatus is the readiness state for a command family or nested check.
+type doctorStatus string
+
+const (
+	doctorStatusOK       doctorStatus = "OK"
+	doctorStatusPartial  doctorStatus = "Partial"
+	doctorStatusDegraded doctorStatus = "Degraded"
+	doctorStatusBlocked  doctorStatus = "Blocked"
+	doctorStatusNA       doctorStatus = "N/A"
+)
+
+// doctorCheck is one nested assessment under a command family. It is generic
+// to the command family, not to agents; Integration checks happen to include
+// agent names in their labels because the underlying artifacts are per-agent.
+type doctorCheck struct {
+	label      string
+	status     doctorStatus
+	detail     string
+	nextAction string
 }
 
-// doctorComponentRow is one (agent, component) cell of the state table, with
-// the copy-paste fix command for actionable states (empty otherwise).
-type doctorComponentRow struct {
-	agent     string
-	component ComponentID
-	state     componentStateInfo
-	fix       string
+// doctorFamilyReport is the readiness report for one canonical command family.
+type doctorFamilyReport struct {
+	command string
+	status  doctorStatus
+	reason  string
+	checks  []doctorCheck
 }
 
 type doctorReport struct {
-	core []doctorCoreCheck
-	rows []doctorComponentRow
+	families []doctorFamilyReport
 }
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Report pop readiness and per-agent integration component states",
+	Short: "Report pop command-family readiness",
 	Long: `Report pop's readiness on this machine — strictly read-only.
 
-Doctor prints three core checks (tmux available, config loads, monitor daemon
-running) followed by a per-agent table of Integration component states:
-installed-current, stale, not installed, conflict, or not supported. Every
-state is computed from pop's existing check seams — the component catalog, the
+Doctor prints the canonical command families (project, worktree, monitor,
+pane, workload, integrate) and nested checks for each family. Integration
+state is computed from pop's existing read paths — the component catalog, the
 render engine, the link installer's ownership checks, and the gitignore
 presence check — so doctor never installs, repairs, or writes anything.
 
-Each actionable row carries the copy-paste command that fixes it (an
+Each actionable check carries the copy-paste command that fixes it (an
 ` + "`pop integrate`" + ` invocation). Doctor always exits 0 when it succeeds in
 rendering the report; the exit status reflects rendering, not the findings.`,
 	Args: cobra.NoArgs,
@@ -113,36 +123,123 @@ func runDoctorWith(d *doctorDeps, w io.Writer) error {
 	return nil
 }
 
-// buildDoctorReport assembles the core checks and the per-agent component-state
-// table. It performs only reads; a failure here means the report itself could
-// not be produced (a non-zero exit), not an unhealthy finding.
-func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
-	report := &doctorReport{}
+// canonicalDoctorCommands is the ordered family model for Doctor. The strings
+// are the command-family names Doctor reports and future slices extend.
+var canonicalDoctorCommands = []string{
+	"pop project",
+	"pop worktree",
+	"pop monitor",
+	"pop pane",
+	"pop workload",
+	"pop integrate",
+}
 
-	report.core = append(report.core, doctorCoreCheck{label: "tmux available", ok: d.tmuxAvailable()})
+// buildDoctorReport assembles command-family readiness. It performs only
+// reads; a failure here means the report itself could not be produced (a
+// non-zero exit), not an unhealthy finding.
+func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 	cfgOK, cfgDetail := d.configCheck()
-	report.core = append(report.core, doctorCoreCheck{label: "config loads", ok: cfgOK, detail: cfgDetail})
-	report.core = append(report.core, doctorCoreCheck{label: "monitor daemon running", ok: d.daemonRunning()})
+	report := &doctorReport{
+		families: []doctorFamilyReport{
+			familyReport("pop project", []doctorCheck{
+				doctorBoolCheck("config loads", cfgOK, "blocked: "+cfgDetail, cfgDetail, ""),
+			}),
+			familyReport("pop worktree", []doctorCheck{
+				{label: "worktree-specific checks", status: doctorStatusNA, detail: "no worktree-specific readiness checks yet"},
+			}),
+			familyReport("pop monitor", []doctorCheck{
+				doctorBoolCheck("monitor daemon running", d.daemonRunning(), "monitor daemon is not running", "", "pop monitor"),
+			}),
+			familyReport("pop pane", []doctorCheck{
+				doctorBoolCheck("tmux available", d.tmuxAvailable(), "tmux executable was not found", "", ""),
+			}),
+			familyReport("pop workload", []doctorCheck{
+				{label: "workload-specific checks", status: doctorStatusNA, detail: "no workload-specific readiness checks yet"},
+			}),
+		},
+	}
 
 	home, err := d.integrate.userHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
+	var integrationChecks []doctorCheck
 	for _, agent := range integrationAgents {
 		for _, comp := range integrationCatalog {
 			state, err := doctorComponentState(d.integrate, home, comp.id, agent)
 			if err != nil {
 				return nil, err
 			}
-			report.rows = append(report.rows, doctorComponentRow{
-				agent:     agent,
-				component: comp.id,
-				state:     state,
-				fix:       doctorFix(agent, comp.id, state),
-			})
+			integrationChecks = append(integrationChecks, doctorIntegrationCheck(agent, comp.id, state))
 		}
 	}
+	report.families = append(report.families, familyReport("pop integrate", integrationChecks))
 	return report, nil
+}
+
+func doctorBoolCheck(label string, ok bool, failDetail, okDetail, nextAction string) doctorCheck {
+	if ok {
+		return doctorCheck{label: label, status: doctorStatusOK, detail: okDetail}
+	}
+	return doctorCheck{label: label, status: doctorStatusBlocked, detail: failDetail, nextAction: nextAction}
+}
+
+func familyReport(command string, checks []doctorCheck) doctorFamilyReport {
+	status, reason := aggregateDoctorStatus(checks)
+	return doctorFamilyReport{
+		command: command,
+		status:  status,
+		reason:  reason,
+		checks:  checks,
+	}
+}
+
+func aggregateDoctorStatus(checks []doctorCheck) (doctorStatus, string) {
+	if len(checks) == 0 {
+		return doctorStatusNA, "no checks defined"
+	}
+	priority := map[doctorStatus]int{
+		doctorStatusOK:       0,
+		doctorStatusNA:       1,
+		doctorStatusPartial:  2,
+		doctorStatusDegraded: 3,
+		doctorStatusBlocked:  4,
+	}
+	worst := doctorStatusOK
+	reason := ""
+	allNA := true
+	for _, check := range checks {
+		if check.status != doctorStatusNA {
+			allNA = false
+		}
+		if priority[check.status] > priority[worst] {
+			worst = check.status
+			reason = doctorStatusReason(check)
+		}
+	}
+	if allNA {
+		return doctorStatusNA, doctorStatusReason(checks[0])
+	}
+	if worst == doctorStatusNA {
+		return doctorStatusOK, ""
+	}
+	if worst != doctorStatusOK && reason == "" {
+		reason = "non-OK check has no detail"
+	}
+	return worst, reason
+}
+
+func doctorStatusReason(check doctorCheck) string {
+	if check.status == doctorStatusOK {
+		return ""
+	}
+	if check.detail != "" {
+		return check.detail
+	}
+	if check.nextAction != "" {
+		return check.nextAction
+	}
+	return fmt.Sprintf("%s is %s", check.label, check.status)
 }
 
 // doctorComponentState computes a component's state for an agent by composing
@@ -206,10 +303,11 @@ func integrateInvocation(agent string, id ComponentID) string {
 	return fmt.Sprintf("pop integrate %s", agent)
 }
 
-// doctorFix returns the copy-paste fix command for an actionable row, or "" for
-// a healthy (installed-current) or not-supported row. A conflict is resolved by
-// removing the unowned entry and re-running integrate, so its command leads with
-// that removal (ADR 0011 conflict resolution: remove, then re-integrate).
+// doctorFix returns the copy-paste fix command for an actionable check, or ""
+// for a healthy (installed-current) or not-supported check. A conflict is
+// resolved by removing the unowned entry and re-running integrate, so its
+// command leads with that removal (ADR 0011 conflict resolution: remove, then
+// re-integrate).
 func doctorFix(agent string, id ComponentID, state componentStateInfo) string {
 	switch state.kind {
 	case stateNotInstalled, stateStale:
@@ -221,7 +319,49 @@ func doctorFix(agent string, id ComponentID, state componentStateInfo) string {
 	}
 }
 
-// doctorStateLabel renders a component state for the table.
+func doctorIntegrationCheck(agent string, id ComponentID, state componentStateInfo) doctorCheck {
+	check := doctorCheck{
+		label:      fmt.Sprintf("%s %s", agent, id),
+		status:     doctorStatusFromComponent(state.kind),
+		detail:     doctorComponentDetail(agent, id, state),
+		nextAction: doctorFix(agent, id, state),
+	}
+	return check
+}
+
+func doctorStatusFromComponent(kind componentStateKind) doctorStatus {
+	switch kind {
+	case stateInstalledCurrent:
+		return doctorStatusOK
+	case stateStale, stateNotInstalled:
+		return doctorStatusPartial
+	case stateConflict:
+		return doctorStatusBlocked
+	case stateNotSupported:
+		return doctorStatusNA
+	default:
+		return doctorStatusDegraded
+	}
+}
+
+func doctorComponentDetail(agent string, id ComponentID, state componentStateInfo) string {
+	switch state.kind {
+	case stateInstalledCurrent:
+		return doctorStateLabel(state.kind)
+	case stateStale:
+		return fmt.Sprintf("%s %s is stale", agent, id)
+	case stateNotInstalled:
+		return fmt.Sprintf("%s %s is not installed", agent, id)
+	case stateConflict:
+		return fmt.Sprintf("%s %s conflicts at %s", agent, id, state.conflictPath)
+	case stateNotSupported:
+		return fmt.Sprintf("%s does not support %s", agent, id)
+	default:
+		return fmt.Sprintf("%s %s state is unknown", agent, id)
+	}
+}
+
+// doctorStateLabel renders a component state for check details.
 func doctorStateLabel(kind componentStateKind) string {
 	switch kind {
 	case stateInstalledCurrent:
@@ -240,34 +380,22 @@ func doctorStateLabel(kind componentStateKind) string {
 }
 
 func renderDoctorReport(w io.Writer, report *doctorReport) {
-	fmt.Fprintln(w, "Core readiness:")
-	for _, c := range report.core {
-		mark := "ok"
-		if !c.ok {
-			mark = "FAIL"
-		}
-		if c.detail != "" {
-			fmt.Fprintf(w, "  [%-4s] %s (%s)\n", mark, c.label, c.detail)
+	fmt.Fprintln(w, "Command-family readiness:")
+	for _, family := range report.families {
+		if family.reason != "" {
+			fmt.Fprintf(w, "\n%s: %s (%s)\n", family.command, family.status, family.reason)
 		} else {
-			fmt.Fprintf(w, "  [%-4s] %s\n", mark, c.label)
+			fmt.Fprintf(w, "\n%s: %s\n", family.command, family.status)
 		}
-	}
-
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Agent integrations:")
-
-	const (
-		agentW = 10
-		compW  = 22
-		stateW = 19
-	)
-	fmt.Fprintf(w, "  %-*s%-*s%-*s%s\n", agentW, "AGENT", compW, "COMPONENT", stateW, "STATE", "FIX")
-	for _, r := range report.rows {
-		fmt.Fprintf(w, "  %-*s%-*s%-*s%s\n",
-			agentW, r.agent,
-			compW, string(r.component),
-			stateW, doctorStateLabel(r.state.kind),
-			r.fix,
-		)
+		for _, check := range family.checks {
+			fmt.Fprintf(w, "  [%-8s] %s", check.status, check.label)
+			if check.detail != "" {
+				fmt.Fprintf(w, " - %s", check.detail)
+			}
+			if check.nextAction != "" {
+				fmt.Fprintf(w, " (next: %s)", check.nextAction)
+			}
+			fmt.Fprintln(w)
+		}
 	}
 }

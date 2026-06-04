@@ -76,10 +76,16 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "thoughts/issues/svc/01-a.md", "thoughts/issues/svc/02-b.md")
 	})
 
-	t.Run("run issue positional omits IDs", func(t *testing.T) {
+	t.Run("run issue positional defaults to Issue set IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "workload", "run-issue")
-		assertShellCompContains(t, out, "thoughts/issues/svc", "thoughts/issues/svc/01-a.md")
-		assertShellCompOmitsExact(t, out, "svc", "01-a")
+		assertShellCompContains(t, out, "svc")
+		assertShellCompOmits(t, out, "thoughts/issues/svc")
+		assertShellCompOmitsExact(t, out, "01-a")
+	})
+
+	t.Run("run issue positional issue set relative path", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "workload", "run-issue", "svc/")
+		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
 	})
 
 	t.Run("run issue positional dot path", func(t *testing.T) {
@@ -87,8 +93,14 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "./thoughts/issues/svc/01-a.md")
 	})
 
-	t.Run("run issues positional path only", func(t *testing.T) {
+	t.Run("run issues positional defaults to Issue set IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "workload", "run-issues")
+		assertShellCompContains(t, out, "svc")
+		assertShellCompOmits(t, out, "thoughts/issues/svc")
+	})
+
+	t.Run("run issues positional thoughts prefix expands path", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "workload", "run-issues", "th")
 		assertShellCompContains(t, out, "thoughts/issues/svc")
 		assertShellCompOmitsExact(t, out, "svc")
 	})

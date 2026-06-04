@@ -36,16 +36,19 @@ func TestResolveIssueSetTargetPathAndDot(t *testing.T) {
 	}
 }
 
-func TestResolveIssueSetTargetRejectsNonRelativeReferences(t *testing.T) {
+func TestResolveIssueSetTargetAcceptsIdentifier(t *testing.T) {
 	root := t.TempDir()
 	setupManifest(t, root, "demo", nil)
 	refresh := refreshFixture(t, root)
 
-	for _, raw := range []string{"demo", filepath.Join(root, "thoughts/issues/demo")} {
-		_, err := ResolveIssueSetTarget(DefaultDeps(), refresh, root, raw)
-		if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
-			t.Fatalf("ResolveIssueSetTarget(%q) error = %v", raw, err)
-		}
+	id, err := ResolveIssueSetTarget(DefaultDeps(), refresh, root, "demo")
+	if err != nil || id != "demo" {
+		t.Fatalf("identifier = %q err=%v", id, err)
+	}
+
+	_, err = ResolveIssueSetTarget(DefaultDeps(), refresh, root, filepath.Join(root, "thoughts/issues/demo"))
+	if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
+		t.Fatalf("absolute path error = %v", err)
 	}
 }
 
@@ -110,18 +113,31 @@ func TestResolveIssueTargetPathAndBareFilename(t *testing.T) {
 	}
 }
 
-func TestResolveIssueTargetRejectsNonRelativeReferences(t *testing.T) {
+func TestResolveIssueTargetAcceptsIssueSetIdentifierAndRelativeFile(t *testing.T) {
 	root := t.TempDir()
 	setupManifest(t, root, "demo", []Issue{
 		{ID: "add-auth", File: "01-add-auth.md", Title: "Auth", Type: "AFK", Status: "open"},
 	})
 	refresh := refreshFixture(t, root)
 
-	for _, raw := range []string{"add-auth", filepath.Join(root, "thoughts/issues/demo/01-add-auth.md")} {
-		_, _, err := ResolveIssueTarget(DefaultDeps(), refresh, root, raw)
-		if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
-			t.Fatalf("ResolveIssueTarget(%q) error = %v", raw, err)
-		}
+	setID, issueID, err := ResolveIssueTarget(DefaultDeps(), refresh, root, "demo")
+	if err != nil || setID != "demo" || issueID != "" {
+		t.Fatalf("identifier = %s/%s err=%v", setID, issueID, err)
+	}
+
+	setID, issueID, err = ResolveIssueTarget(DefaultDeps(), refresh, root, "demo/01-add-auth.md")
+	if err != nil || setID != "demo" || issueID != "add-auth" {
+		t.Fatalf("relative file = %s/%s err=%v", setID, issueID, err)
+	}
+
+	_, _, err = ResolveIssueTarget(DefaultDeps(), refresh, root, "add-auth")
+	if err == nil || !strings.Contains(err.Error(), "valid: demo") {
+		t.Fatalf("issue ID error = %v", err)
+	}
+
+	_, _, err = ResolveIssueTarget(DefaultDeps(), refresh, root, filepath.Join(root, "thoughts/issues/demo/01-add-auth.md"))
+	if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
+		t.Fatalf("absolute path error = %v", err)
 	}
 }
 

@@ -12,6 +12,10 @@ _Avoid_: Folder, workspace, session (when you mean the directory itself)
 The `pop project` entry point — opens the project picker. Project-specific config lives in `[project]`. `pop select` and `[select]` are deprecated aliases; remove at the next major release. The CLI alias is hidden (not shown in help) and emits no runtime warning; the config alias emits a load-time warning.
 _Avoid_: Select command, normal mode
 
+**Project readiness**:
+The **Doctor status** of the `pop project` command family. It depends on tmux availability, loadable project configuration, and at least one selectable project, worktree, or standalone session. A missing config file is not Blocked by itself because `pop project` can enter the first-run configure flow; an existing but invalid config is Blocked.
+_Avoid_: Config existence check
+
 **Session**:
 The tmux session pop creates or attaches to when you select a project or worktree. One project maps to one session; selecting it puts you in that session (creating it first if needed).
 _Avoid_: Project (when you mean the tmux session, not the directory)
@@ -51,12 +55,16 @@ A pane currently visible to the user in tmux. A pane may be **Active** regardles
 _Avoid_: Working pane, focused pane
 
 **Dashboard**:
-The presentation of the monitored set of panes — a browsable view of registered panes, their status, and visit times. `pop dashboard` opens this view.
+The presentation of the monitored set of panes — a browsable view of registered panes, their status, and visit times. `pop monitor dashboard` opens this view; `pop dashboard` is only a hidden compatibility alias.
 _Avoid_: Monitor (when you mean the tracking mechanism, not the view)
 
 **Monitor**:
 The subsystem that maintains the monitored set of registered panes — tracking status, visit times, and notes via daemon, state, and tmux hooks. Agent integrations report into the monitor; the dashboard reads from it. Exposed via `pop pane monitor-start`, `monitor-stop`, and `monitor-status`.
 _Avoid_: Dashboard (when you mean the view, not the mechanism)
+
+**Monitor readiness**:
+The **Doctor status** of the `pop monitor` command family. It depends on tmux availability, a running or startable monitor daemon, readable monitor state, tmux focus-event/hook support for visit tracking, and status wiring for agents in **Doctor intent**. Missing or broken setup for only some intended agents is Partial; monitor operation with limited automatic visit or status quality is Degraded; inability to run the daemon or read monitor state is Blocked.
+_Avoid_: Agent integration table
 
 **Agentic pane**:
 A pane running an AI coding agent or its runtime (e.g. Claude, OpenCode, Pi). Integrations cause these panes to register with the **Monitor**; other panes may also be tracked explicitly.
@@ -89,8 +97,20 @@ The automatic re-render of already-installed **Integration components** when the
 _Avoid_: Auto-install, update prompt
 
 **Doctor**:
-The readiness report opened by `pop doctor`: core checks (tmux, config, monitor daemon) plus a per-agent table of **Integration component** states — installed-current, stale, not installed, conflict, or not supported. Read-only; it never installs or repairs.
+The readiness report opened by `pop doctor`: a top-level command-family view of whether Pop's user-facing workflows can run on this machine. Its canonical first-pass families are `pop project`, `pop worktree`, `pop monitor`, `pop pane`, `pop workload`, and `pop integrate`; hidden or deprecated aliases are not top-level families. Doctor drills into subcommands or agent-specific integration state only where they explain a degraded or unavailable workflow. Read-only; it never installs or repairs.
 _Avoid_: Integrate status, health subcommand
+
+**Doctor status**:
+The aggregate readiness state for one command family in **Doctor**. OK means the family's core workflow should run; Partial means the family is available through some configured variants but unavailable through others, most commonly agent-specific support or setup; Degraded means the core workflow can run but a relevant optional capability is missing, stale, conflicting, or otherwise limited; Blocked means the core workflow cannot run; N/A means the family intentionally does not apply in the current environment. Partial, Degraded, and Blocked statuses must name the concrete reason.
+_Avoid_: Health score, severity level
+
+**Doctor rendering**:
+The terminal presentation of **Doctor**. It should be visually scannable with ANSI color and stable ASCII/Unicode-safe status labels rather than emoji or custom pictograms; alignment must remain reliable in plain terminals, logs, and CI output. The primary structure is one row per top-level command family, with terse assessment checks printed directly beneath that family when they explain how the status was reached.
+_Avoid_: Emoji health report, decorative symbols
+
+**Doctor intent**:
+The set of variants Doctor has reason to evaluate for a command family. Doctor reports missing or broken agent-specific setup only for agents the user appears to use through Pop configuration, installed Pop artifacts, or an explicit command context; unsupported but unused agents are suggestions, not reasons for Partial or Degraded status. Agent intent is inferred first from workload configuration, then from Pop-owned integration artifacts or Pop hooks/extensions already present, and only then from explicit command context. Merely having an agent executable installed is a suggestion, not intent.
+_Avoid_: Supported agents matrix, all possible integrations
 
 **Integration conflict**:
 A skill already present at an agent's skill location under an embedded skill's name (with or without the `pop-` prefix) that pop does not own. Pop never installs over, removes, or refreshes a conflicting skill; the wizard and health check report the conflict and leave resolution to the user.
@@ -113,6 +133,10 @@ _Avoid_: Session picker, select view, normal mode
 **Worktree picker**:
 The fuzzy-search picker in `pop worktree` for choosing or deleting git worktrees in the current repository. Worktree creation is not built in; it belongs to user-defined commands, which hand the new path back via **Switch**. Deleting a worktree also removes its **History** entry; its tmux session is left alone (killing it stays an explicit, separate action).
 _Avoid_: Repo picker
+
+**Worktree readiness**:
+The **Doctor status** of the `pop worktree` command family. It depends on being able to identify the current Git repository and list its worktrees. A repository with no linked worktrees is still OK; the absence of worktrees is content, not a readiness failure.
+_Avoid_: Worktree count health
 
 **History**:
 The persisted record of projects you've selected or switched to, with timestamps.
@@ -180,6 +204,10 @@ otherwise (unfinished, none eligible) ....... BLOCKED    ← Human-blocked: HITL
 A machine-local schedule of Issue sets whose issues can be executed by an agent. A workload decides which Issue set to draw work from next; it does not replace the local Issue sets or their execution rules.
 _Avoid_: Issue set, project dashboard
 
+**Workload readiness**:
+The **Doctor status** of the `pop workload` command family. Because the workload feature is aimed at Git projects and its central workflow is agent execution from a **Workload runtime path**, Doctor reports `pop workload` as Blocked when no Git runtime checkout can be resolved, even if read-only workload status rendering could still inspect local artifacts.
+_Avoid_: Workload status availability
+
 **Issue set**:
 The local `thoughts/issues/<id>/index.json` manifest and its sibling issue markdown files. An Issue set is the schedulable unit of a workload. Its directory name is its canonical identifier and display label; there is no separate Issue-set title. It may be created from a PRD, a grilling session, or another planning workflow; PRD existence is irrelevant to workload scheduling and execution.
 _Avoid_: PRD, workload
@@ -233,11 +261,11 @@ The mechanism that runs a selected issue through an agent, verifies completion, 
 _Avoid_: Workload scheduler
 
 **Run issue**:
-Executing exactly one eligible issue from a Ready Issue set. By default pop chooses the Issue set using workload priority. When a positional argument is supplied, it must be a CWD-relative path to the issue markdown file; bare issue identifiers and absolute paths are rejected. A bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. Targeting still requires Open status, AFK type, and satisfied dependencies.
+Executing exactly one eligible issue from a Ready Issue set. By default pop chooses the Issue set using workload priority. When a positional argument names an Issue set, either as a bare Issue set identifier or a CWD-relative Issue set path, pop runs the next eligible issue from that set. When the argument names an issue markdown file, either as a CWD-relative path, an Issue-set-relative file reference such as `<issue-set>/<file>.md`, or a bare filename from inside the Issue set directory, pop targets that issue. Bare issue identifiers and absolute paths are rejected. Targeting still requires Open status, AFK type, and satisfied dependencies.
 _Avoid_: Next issue
 
 **Run issues**:
-Sequentially executing eligible issues from one Ready Issue set until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly. By default pop chooses the Issue set using workload priority. When a positional argument is supplied, it must be a CWD-relative path to the Issue set directory; bare Issue set identifiers, absolute paths, and non-relative reference forms are rejected. It does not continue into another Issue set.
+Sequentially executing eligible issues from one Ready Issue set until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly. By default pop chooses the Issue set using workload priority. When a positional argument is supplied, it may be a bare Issue set identifier or a CWD-relative path to the Issue set directory. Absolute paths are rejected. It does not continue into another Issue set.
 _Avoid_: Run all, next Issue set, Run PRD
 
 **Agent preset**:
@@ -279,6 +307,10 @@ _Avoid_: Failed Issue set
 **Workload artifact**:
 A machine-local planning document, issue markdown file, issue manifest, or progress record beneath `thoughts/`. The workload executor updates workload artifacts locally but does not stage or commit them with implementation changes.
 _Avoid_: Implementation change, workload state
+
+**Workload artifact ignore coverage**:
+The effective Git behavior that keeps **Workload artifacts** out of implementation commits. Doctor treats this as covered when Git reports that `thoughts/` would be ignored in the relevant **Workload runtime path**, regardless of whether the ignore comes from a repository ignore file, `.git/info/exclude`, a configured excludes file, Git's default global ignore file, or Pop's own workload-gitignore install step. If no Git runtime checkout can be resolved, workload execution is Blocked and ignore coverage is not applicable. Doctor must disclose the probe it used to make this assessment.
+_Avoid_: Workload gitignore installed, global gitignore configured
 
 **No-op issue completion**:
 A successful issue execution that produces no staged implementation change. The workload executor marks the issue Done locally, appends progress, reports that no implementation commit was created, and allows Run issues to continue.
@@ -349,11 +381,11 @@ The canonical name of an Issue set — its directory name under `thoughts/issues
 _Avoid_: Display title, filename, path
 
 **Workload target reference**:
-A CWD-relative path that identifies an Issue set directory or issue markdown file on Run issue, Run issues, and Issue reset. Run issue and Run issues accept an optional positional argument; Issue reset requires one. Bare **Workload identifiers**, absolute paths, and other non-relative forms are rejected. A bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. A reference may point at an Issue set directory, at `thoughts/issues/<id>`, or at an issue markdown file beneath a discovered Issue set, including `.` when the shell is already inside that Issue set directory. Pop normalizes every accepted reference to the canonical Issue set and issue identifiers before selection. Resolved paths must match an Issue set discovered under the command's workload definition path; paths outside that discovery are rejected. When the argument is not a relative path form — including bare **Workload identifiers** and absolute paths — rejection explains that a relative path is required. When a relative path fails to resolve, rejection lists valid **Workload identifiers** only, not example paths. Titles, prefixes, fuzzy matches, and unresolved paths are rejected.
-_Avoid_: Workload identifier, shell completion candidate
+An argument that identifies an Issue set directory or issue markdown file on Run issue, Run issues, Issue reset, Complete issue, or Skip issue. Run issue and Run issues accept an optional positional argument; Issue reset, Complete issue, and Skip issue require one. Run issue and Run issues accept bare Issue set identifiers as Issue set targets; Run issue also accepts an Issue-set-relative file reference such as `<issue-set>/<file>.md`. A bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. CWD-relative paths may point at an Issue set directory, at `thoughts/issues/<id>`, or at an issue markdown file beneath a discovered Issue set, including `.` when the shell is already inside that Issue set directory. Pop normalizes every accepted reference to the canonical Issue set and issue identifiers before selection. Resolved paths must match an Issue set discovered under the command's workload definition path; paths outside that discovery are rejected. Absolute paths, bare issue identifiers, titles, prefixes, fuzzy matches, and unresolved paths are rejected.
+_Avoid_: Shell completion candidate
 
 **Workload shell completion**:
-Read-only shell tab completion for workload subcommands, project names, **Workload target reference** paths, agent presets, and path flags. Positional completion on Run issue, Run issues, and Issue reset offers CWD-relative path segments only — such as `thoughts/issues/<id>/` prefixes and `./` or `../` — not bare **Workload identifiers**. Set-priority still completes bare Issue set identifiers for its ISSUE_SET positional. Completion may scan local workload artifacts but must not auto-register Issue sets, persist workload state, or print warnings.
+Read-only shell tab completion for workload subcommands, project names, **Workload target references**, agent presets, and path flags. Positional completion on Run issue and Run issues offers bare Issue set identifiers by default; when the in-progress word is path-like, including a `thoughts/` prefix, it offers CWD-relative path segments. Run issue also completes Issue-set-relative issue files after an Issue set identifier and slash, such as `<issue-set>/<file>.md`. Issue reset, Complete issue, and Skip issue complete issue-file paths only. Set-priority completes bare Issue set identifiers for its ISSUE_SET positional. Completion may scan local workload artifacts but must not auto-register Issue sets, persist workload state, or print warnings.
 _Avoid_: Shell autosuggestion, discovery refresh
 
 **Missing Issue set**:

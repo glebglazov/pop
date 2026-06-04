@@ -99,6 +99,34 @@ func completeWorkloadIssuePaths(cmd *cobra.Command, args []string, toComplete st
 	return filterShellCompletions(paths, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
+func completeWorkloadIssueSetTargets(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	targets, err := workload.CompleteIssueSetTargetsWith(
+		workloadCompletionDeps(),
+		workloadCompletionProjectDeps(),
+		workloadCompletionConfigLoad,
+		completionInputFromCmd(cmd),
+		toComplete,
+	)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return filterShellCompletions(targets, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeWorkloadIssueTargets(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	targets, err := workload.CompleteIssueTargetsWith(
+		workloadCompletionDeps(),
+		workloadCompletionProjectDeps(),
+		workloadCompletionConfigLoad,
+		completionInputFromCmd(cmd),
+		toComplete,
+	)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return filterShellCompletions(targets, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
 func completeWorkloadAgents(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	return filterShellCompletions(workload.ValidAgentPresets(), toComplete), cobra.ShellCompDirectiveNoFileComp
 }
@@ -118,14 +146,14 @@ func completeWorkloadRunIssueArgs(cmd *cobra.Command, args []string, toComplete 
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeWorkloadIssuePaths(cmd, args, toComplete)
+	return completeWorkloadIssueTargets(cmd, args, toComplete)
 }
 
 func completeWorkloadRunIssuesArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeWorkloadIssueSetPaths(cmd, args, toComplete)
+	return completeWorkloadIssueSetTargets(cmd, args, toComplete)
 }
 
 func completionInputFromCmd(cmd *cobra.Command) workload.CompletionInput {

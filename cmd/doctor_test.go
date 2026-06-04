@@ -9,9 +9,8 @@ import (
 )
 
 // readOnlyDoctorDeps wires a doctorDeps over a fakeFS with injectable core
-// checks. Every write seam fails the test: doctor is strictly read-only, so a
-// write under any state combination is a bug (acceptance: "Doctor performs no
-// writes under any state combination").
+// checks. Every write operation fails the test because doctor is strictly
+// read-only.
 func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doctorDeps {
 	t.Helper()
 	base := fakeDeps(installerHome, fs, nil)
@@ -32,81 +31,109 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 	}
 }
 
-// claudeStatusWired writes a settings.json carrying a pop hook so claude's
-// status-wiring component reads as installed.
 func claudeStatusWired(fs *fakeFS) {
 	settings := filepath.Join(installerHome, ".claude", "settings.json")
 	fs.files[settings] = []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"pop pane set-status unread 2>/dev/null || true"}]}]}}`)
 }
 
-// rowLine returns the table line for a given agent/component, or "" if absent.
-func rowLine(out, agent, component string) string {
-	for _, ln := range strings.Split(out, "\n") {
-		fields := strings.Fields(ln)
-		if len(fields) >= 2 && fields[0] == agent && fields[1] == component {
-			return ln
+func familyByCommand(report *doctorReport, command string) (doctorFamilyReport, bool) {
+	for _, family := range report.families {
+		if family.command == command {
+			return family, true
 		}
 	}
-	return ""
+	return doctorFamilyReport{}, false
 }
 
-// TestDoctorHealthy: all core checks pass and an installed-current component
-// renders without a fix command.
-func TestDoctorHealthy(t *testing.T) {
-	fs := newFakeFS()
-	claudeStatusWired(fs)
-
-	d := readOnlyDoctorDeps(t, fs, true, true, true)
-	out := &bytes.Buffer{}
-	if err := runDoctorWith(d, out); err != nil {
-		t.Fatalf("doctor: %v", err)
-	}
-	s := out.String()
-
-	for _, label := range []string{"tmux available", "config loads", "monitor daemon running"} {
-		if !strings.Contains(s, label) {
-			t.Fatalf("core check %q missing from output:\n%s", label, s)
+func checkByLabel(family doctorFamilyReport, label string) (doctorCheck, bool) {
+	for _, check := range family.checks {
+		if check.label == label {
+			return check, true
 		}
 	}
-	if strings.Contains(s, "[FAIL]") {
-		t.Fatalf("healthy machine should report no FAIL core checks:\n%s", s)
-	}
-
-	line := rowLine(s, "claude", "status-wiring")
-	if !strings.Contains(line, "installed-current") {
-		t.Fatalf("claude status-wiring should be installed-current:\n%s", s)
-	}
-	// Healthy rows carry no fix command.
-	if strings.Contains(line, "pop integrate") {
-		t.Fatalf("installed-current row must not carry a fix command: %q", line)
-	}
+	return doctorCheck{}, false
 }
 
-// TestDoctorNotInstalledCarriesFix: a fresh machine reports not-installed rows
-// with the copy-paste integrate command.
-func TestDoctorNotInstalledCarriesFix(t *testing.T) {
+func TestDoctorReportsCanonicalCommandFamilies(t *testing.T) {
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
-	out := &bytes.Buffer{}
-	if err := runDoctorWith(d, out); err != nil {
-		t.Fatalf("doctor: %v", err)
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	s := out.String()
 
-	line := rowLine(s, "claude", "pane-skill")
-	if !strings.Contains(line, "not installed") {
-		t.Fatalf("claude pane-skill should be not installed:\n%s", s)
+	if len(report.families) != len(canonicalDoctorCommands) {
+		t.Fatalf("family count = %d, want %d", len(report.families), len(canonicalDoctorCommands))
 	}
-	if !strings.Contains(line, "pop integrate claude --pane-skill") {
-		t.Fatalf("not-installed row must carry the fix command: %q", line)
+	for i, want := range canonicalDoctorCommands {
+		if got := report.families[i].command; got != want {
+			t.Fatalf("family[%d] = %q, want %q", i, got, want)
+		}
 	}
 }
 
-// TestDoctorStale: an installed pane skill whose render tree drifted from the
-// embedded source reports stale and carries the refresh command.
-func TestDoctorStale(t *testing.T) {
+func TestDoctorNestedChecksAreGenericAndActionable(t *testing.T) {
 	fs := newFakeFS()
-	// Install the pane skill for real, then drift the render tree on disk.
+	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+
+	integrate, ok := familyByCommand(report, "pop integrate")
+	if !ok {
+		t.Fatalf("missing pop integrate family")
+	}
+	check, ok := checkByLabel(integrate, "claude pane-skill")
+	if !ok {
+		t.Fatalf("missing claude pane-skill check")
+	}
+	if check.status != doctorStatusPartial {
+		t.Fatalf("check status = %s, want %s", check.status, doctorStatusPartial)
+	}
+	if check.detail == "" {
+		t.Fatalf("non-OK check must carry detail")
+	}
+	if check.nextAction != "pop integrate claude --pane-skill" {
+		t.Fatalf("nextAction = %q, want pane-skill integrate command", check.nextAction)
+	}
+}
+
+func TestDoctorReadOnlyConflictCheck(t *testing.T) {
+	fs := newFakeFS()
+	conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
+	fs.files[conflictPath] = []byte("my own skill")
+
+	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+
+	integrate, ok := familyByCommand(report, "pop integrate")
+	if !ok {
+		t.Fatalf("missing pop integrate family")
+	}
+	check, ok := checkByLabel(integrate, "claude pane-skill")
+	if !ok {
+		t.Fatalf("missing claude pane-skill check")
+	}
+	if check.status != doctorStatusBlocked {
+		t.Fatalf("check status = %s, want %s", check.status, doctorStatusBlocked)
+	}
+	if !strings.Contains(check.detail, conflictPath) {
+		t.Fatalf("blocked detail must name conflict path: %q", check.detail)
+	}
+	if !strings.Contains(check.nextAction, conflictPath) || !strings.Contains(check.nextAction, "pop integrate claude --pane-skill") {
+		t.Fatalf("blocked next action must remove path and re-integrate: %q", check.nextAction)
+	}
+	if string(fs.files[conflictPath]) != "my own skill" {
+		t.Fatalf("doctor modified the user's own file")
+	}
+}
+
+func TestDoctorStaleComponentIsPartialCheck(t *testing.T) {
+	fs := newFakeFS()
 	setup := fakeDeps(installerHome, fs, nil)
 	if err := installFileComponent(setup, installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("pre-install: %v", err)
@@ -115,28 +142,33 @@ func TestDoctorStale(t *testing.T) {
 	fs.files[renderFile] = []byte("drifted content not matching the embedded source")
 
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
-	out := &bytes.Buffer{}
-	if err := runDoctorWith(d, out); err != nil {
-		t.Fatalf("doctor: %v", err)
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	s := out.String()
 
-	line := rowLine(s, "claude", "pane-skill")
-	if !strings.Contains(line, "stale") {
-		t.Fatalf("claude pane-skill should be stale:\n%s", s)
+	integrate, ok := familyByCommand(report, "pop integrate")
+	if !ok {
+		t.Fatalf("missing pop integrate family")
 	}
-	if !strings.Contains(line, "pop integrate claude --pane-skill") {
-		t.Fatalf("stale row must carry the fix command: %q", line)
+	check, ok := checkByLabel(integrate, "claude pane-skill")
+	if !ok {
+		t.Fatalf("missing claude pane-skill check")
+	}
+	if check.status != doctorStatusPartial {
+		t.Fatalf("check status = %s, want %s", check.status, doctorStatusPartial)
+	}
+	if !strings.Contains(check.detail, "stale") {
+		t.Fatalf("stale check should carry concrete detail: %q", check.detail)
+	}
+	if check.nextAction != "pop integrate claude --pane-skill" {
+		t.Fatalf("nextAction = %q, want pane-skill integrate command", check.nextAction)
 	}
 }
 
-// TestDoctorConflict: a same-named entry pop does not own reports conflict and
-// the fix command removes the conflicting path before re-integrating.
-func TestDoctorConflict(t *testing.T) {
+func TestDoctorHealthyCoreFamiliesRenderOK(t *testing.T) {
 	fs := newFakeFS()
-	conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
-	fs.files[conflictPath] = []byte("my own skill")
-
+	claudeStatusWired(fs)
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
 	out := &bytes.Buffer{}
 	if err := runDoctorWith(d, out); err != nil {
@@ -144,42 +176,21 @@ func TestDoctorConflict(t *testing.T) {
 	}
 	s := out.String()
 
-	line := rowLine(s, "claude", "pane-skill")
-	if !strings.Contains(line, "conflict") {
-		t.Fatalf("claude pane-skill should be a conflict:\n%s", s)
+	for _, line := range []string{
+		"pop project: OK",
+		"pop monitor: OK",
+		"pop pane: OK",
+	} {
+		if !strings.Contains(s, line) {
+			t.Fatalf("output missing %q:\n%s", line, s)
+		}
 	}
-	if !strings.Contains(line, conflictPath) || !strings.Contains(line, "pop integrate claude --pane-skill") {
-		t.Fatalf("conflict fix must name the path and the re-integrate command: %q", line)
-	}
-	// The user's own file is never touched (no-write guards would have fired).
-	if string(fs.files[conflictPath]) != "my own skill" {
-		t.Fatalf("doctor modified the user's own file")
-	}
-}
-
-// TestDoctorNotSupported: codex cannot host the pane skill, so its row reports
-// not supported and carries no fix command.
-func TestDoctorNotSupported(t *testing.T) {
-	fs := newFakeFS()
-	d := readOnlyDoctorDeps(t, fs, true, true, true)
-	out := &bytes.Buffer{}
-	if err := runDoctorWith(d, out); err != nil {
-		t.Fatalf("doctor: %v", err)
-	}
-	s := out.String()
-
-	line := rowLine(s, "codex", "pane-skill")
-	if !strings.Contains(line, "not supported") {
-		t.Fatalf("codex pane-skill should be not supported:\n%s", s)
-	}
-	if strings.Contains(line, "pop integrate") {
-		t.Fatalf("not-supported row must not carry a fix command: %q", line)
+	if strings.Contains(s, "[Blocked ] tmux available") {
+		t.Fatalf("healthy tmux check should not be blocked:\n%s", s)
 	}
 }
 
-// TestDoctorDaemonDown: a stopped daemon reports FAIL on the core check, and
-// doctor still exits 0 (rendering succeeded — exit status ignores findings).
-func TestDoctorDaemonDown(t *testing.T) {
+func TestDoctorDaemonDownIsBlockedButExitsZero(t *testing.T) {
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, false)
 	out := &bytes.Buffer{}
@@ -187,35 +198,76 @@ func TestDoctorDaemonDown(t *testing.T) {
 		t.Fatalf("doctor must exit 0 on render success even when unhealthy: %v", err)
 	}
 	s := out.String()
-
-	var daemonLine string
-	for _, ln := range strings.Split(s, "\n") {
-		if strings.Contains(ln, "monitor daemon running") {
-			daemonLine = ln
-			break
-		}
+	if !strings.Contains(s, "pop monitor: Blocked (monitor daemon is not running)") {
+		t.Fatalf("daemon-down should report blocked monitor family:\n%s", s)
 	}
-	if daemonLine == "" || !strings.Contains(daemonLine, "FAIL") {
-		t.Fatalf("daemon-down should report FAIL on the monitor daemon check:\n%s", s)
+	if !strings.Contains(s, "(next: pop monitor)") {
+		t.Fatalf("daemon-down should carry a next action:\n%s", s)
 	}
 }
 
-// TestDoctorCoversAllAgents: the table includes a row for every agent and every
-// catalog component (acceptance: per-agent table covering all five agents).
-func TestDoctorCoversAllAgents(t *testing.T) {
-	fs := newFakeFS()
-	d := readOnlyDoctorDeps(t, fs, true, true, true)
-	out := &bytes.Buffer{}
-	if err := runDoctorWith(d, out); err != nil {
-		t.Fatalf("doctor: %v", err)
+func TestDoctorStatusAggregation(t *testing.T) {
+	tests := []struct {
+		name       string
+		checks     []doctorCheck
+		wantStatus doctorStatus
+		wantReason string
+	}{
+		{
+			name: "ok",
+			checks: []doctorCheck{
+				{label: "a", status: doctorStatusOK},
+				{label: "b", status: doctorStatusOK},
+			},
+			wantStatus: doctorStatusOK,
+		},
+		{
+			name: "partial",
+			checks: []doctorCheck{
+				{label: "a", status: doctorStatusOK},
+				{label: "b", status: doctorStatusPartial, detail: "component missing"},
+			},
+			wantStatus: doctorStatusPartial,
+			wantReason: "component missing",
+		},
+		{
+			name: "degraded",
+			checks: []doctorCheck{
+				{label: "a", status: doctorStatusPartial, detail: "component missing"},
+				{label: "b", status: doctorStatusDegraded, detail: "state unknown"},
+			},
+			wantStatus: doctorStatusDegraded,
+			wantReason: "state unknown",
+		},
+		{
+			name: "blocked",
+			checks: []doctorCheck{
+				{label: "a", status: doctorStatusDegraded, detail: "state unknown"},
+				{label: "b", status: doctorStatusBlocked, detail: "conflict exists"},
+			},
+			wantStatus: doctorStatusBlocked,
+			wantReason: "conflict exists",
+		},
+		{
+			name: "na",
+			checks: []doctorCheck{
+				{label: "a", status: doctorStatusNA, detail: "not supported"},
+				{label: "b", status: doctorStatusNA, detail: "not applicable"},
+			},
+			wantStatus: doctorStatusNA,
+			wantReason: "not supported",
+		},
 	}
-	s := out.String()
 
-	for _, agent := range integrationAgents {
-		for _, comp := range integrationCatalog {
-			if rowLine(s, agent, string(comp.id)) == "" {
-				t.Fatalf("missing table row for %s / %s:\n%s", agent, comp.id, s)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotStatus, gotReason := aggregateDoctorStatus(tt.checks)
+			if gotStatus != tt.wantStatus {
+				t.Fatalf("status = %s, want %s", gotStatus, tt.wantStatus)
 			}
-		}
+			if gotReason != tt.wantReason {
+				t.Fatalf("reason = %q, want %q", gotReason, tt.wantReason)
+			}
+		})
 	}
 }

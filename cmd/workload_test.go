@@ -380,16 +380,31 @@ func TestRunIssueCmdTargetsBareFilenameFromIssueSetDirectory(t *testing.T) {
 	}
 }
 
-func TestRunIssueCmdRejectsNonRelativeIssuePaths(t *testing.T) {
+func TestRunIssueCmdTargetsIssueSetIdentifier(t *testing.T) {
 	root := setupRunIssueCmdFixture(t)
 	resetWorkloadFlags()
 	t.Cleanup(resetWorkloadFlags)
 
-	for _, target := range []string{"01-a", filepath.Join(root, "thoughts/issues/demo/01-a.md")} {
-		err := runWorkloadRunIssueWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), target)
-		if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
-			t.Fatalf("target %q error = %v", target, err)
-		}
+	err := runWorkloadRunIssueWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo")
+	if err != nil {
+		t.Fatalf("Issue set identifier failed: %v", err)
+	}
+	_ = root
+}
+
+func TestRunIssueCmdRejectsInvalidIssueTargets(t *testing.T) {
+	root := setupRunIssueCmdFixture(t)
+	resetWorkloadFlags()
+	t.Cleanup(resetWorkloadFlags)
+
+	err := runWorkloadRunIssueWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "01-a")
+	if err == nil || !strings.Contains(err.Error(), "valid: demo") {
+		t.Fatalf("bare issue ID error = %v", err)
+	}
+
+	err = runWorkloadRunIssueWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), filepath.Join(root, "thoughts/issues/demo/01-a.md"))
+	if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
+		t.Fatalf("absolute path error = %v", err)
 	}
 }
 
@@ -473,16 +488,26 @@ func TestRunIssuesCmdTargetsDotFromIssueSetDirectory(t *testing.T) {
 	}
 }
 
-func TestRunIssuesCmdRejectsNonRelativeIssueSetPaths(t *testing.T) {
+func TestRunIssuesCmdTargetsIssueSetIdentifier(t *testing.T) {
 	root := setupRunIssueCmdFixture(t)
 	resetWorkloadFlags()
 	t.Cleanup(resetWorkloadFlags)
 
-	for _, target := range []string{"demo", filepath.Join(root, "thoughts/issues/demo")} {
-		err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), target)
-		if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
-			t.Fatalf("target %q error = %v", target, err)
-		}
+	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo")
+	if err != nil {
+		t.Fatalf("Issue set identifier failed: %v", err)
+	}
+	_ = root
+}
+
+func TestRunIssuesCmdRejectsAbsoluteIssueSetPath(t *testing.T) {
+	root := setupRunIssueCmdFixture(t)
+	resetWorkloadFlags()
+	t.Cleanup(resetWorkloadFlags)
+
+	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), filepath.Join(root, "thoughts/issues/demo"))
+	if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
+		t.Fatalf("absolute path error = %v", err)
 	}
 }
 

@@ -87,6 +87,19 @@ func CompleteIssueSetPathsWith(d *Deps, pd *project.Deps, loadConfig func(string
 	return issueSetPathCompletionsFromCWD(refresh, cwd, toComplete), nil
 }
 
+// CompleteIssueSetTargets returns Issue set identifiers by default and CWD-relative Issue-set paths for path-like input.
+func CompleteIssueSetTargets(input CompletionInput, toComplete string) ([]string, error) {
+	return CompleteIssueSetTargetsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
+}
+
+// CompleteIssueSetTargetsWith returns Issue set target candidates using injected dependencies.
+func CompleteIssueSetTargetsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
+	if completionLooksPathLike(toComplete) {
+		return CompleteIssueSetPathsWith(d, pd, loadConfig, input, toComplete)
+	}
+	return CompleteIssueSetIDsWith(d, pd, loadConfig, input, toComplete)
+}
+
 // CompleteIssuePaths returns CWD-relative discovered issue markdown paths for shell completion.
 func CompleteIssuePaths(input CompletionInput, toComplete string) ([]string, error) {
 	return CompleteIssuePathsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
@@ -103,6 +116,27 @@ func CompleteIssuePathsWith(d *Deps, pd *project.Deps, loadConfig func(string) (
 		return nil, err
 	}
 	return issuePathCompletionsFromCWD(refresh, cwd, toComplete), nil
+}
+
+// CompleteIssueTargets returns Issue set identifiers by default and CWD-relative Issue paths for path-like input.
+func CompleteIssueTargets(input CompletionInput, toComplete string) ([]string, error) {
+	return CompleteIssueTargetsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
+}
+
+// CompleteIssueTargetsWith returns Run issue target candidates using injected dependencies.
+func CompleteIssueTargetsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
+	_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
+	if err != nil || refresh == nil {
+		return nil, err
+	}
+	if completionLooksPathLike(toComplete) {
+		cwd, err := cwdOrDefault(d, input.CWD)
+		if err != nil {
+			return nil, err
+		}
+		return issuePathCompletionsFromCWD(refresh, cwd, toComplete), nil
+	}
+	return issueTargetIdentifierCompletions(refresh, toComplete), nil
 }
 
 // CompleteIssueIDs returns manifest issue IDs for the selected Issue set.

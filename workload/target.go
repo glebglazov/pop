@@ -120,6 +120,29 @@ func resolveIssueSetReference(d *Deps, refresh *RefreshResult, cwd, raw string) 
 	return resolveIssueSetPath(d, refresh, cwd, raw)
 }
 
+func resolveIssueSetRelativeIssue(refresh *RefreshResult, raw string) (issueSetID, issueID string, ok bool, err error) {
+	raw = strings.TrimSpace(filepath.ToSlash(raw))
+	if raw == "" || strings.HasPrefix(raw, "./") || strings.HasPrefix(raw, "../") || strings.HasPrefix(raw, "thoughts/") {
+		return "", "", false, nil
+	}
+	head, tail, found := strings.Cut(raw, "/")
+	if !found {
+		return "", "", false, nil
+	}
+	issueSetID, err = resolveIssueSetIdentifier(refresh, head)
+	if err != nil {
+		return "", "", false, nil
+	}
+	if tail == "" {
+		return issueSetID, "", true, nil
+	}
+	issueID, err = matchIssueFileField(refresh.Manifests[issueSetID], tail)
+	if err != nil {
+		return "", "", true, err
+	}
+	return issueSetID, issueID, true, nil
+}
+
 func resolveIssueSetPath(d *Deps, refresh *RefreshResult, cwd, raw string) (string, error) {
 	if filepath.IsAbs(expandHome(d, raw)) {
 		return "", exitErr(ExitSetup, "Issue set target %q must be a CWD-relative path", raw)
@@ -136,29 +159,48 @@ func resolveIssueSetPath(d *Deps, refresh *RefreshResult, cwd, raw string) (stri
 	return "", exitErr(ExitNoRunnable, "%s", unknownIssueSetTargetMessage(refresh, raw))
 }
 
-// ResolveIssueSetTarget normalizes a CWD-relative Issue set path to its identifier.
+// ResolveIssueSetTarget normalizes an Issue set identifier or CWD-relative path to its identifier.
 func ResolveIssueSetTarget(d *Deps, refresh *RefreshResult, cwd, raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
 	}
-	if !isPathLike(raw) || filepath.IsAbs(expandHome(d, raw)) {
+	if filepath.IsAbs(expandHome(d, raw)) {
 		return "", exitErr(ExitSetup, "Issue set target %q must be a CWD-relative path", raw)
 	}
-	return resolveIssueSetPath(d, refresh, cwd, raw)
+	return resolveIssueSetReference(d, refresh, cwd, raw)
 }
 
-// ResolveIssueTarget normalizes a CWD-relative issue markdown path to canonical identifiers.
+// ResolveIssueTarget normalizes an Issue set identifier, Issue set path, or issue markdown path to canonical identifiers.
 func ResolveIssueTarget(d *Deps, refresh *RefreshResult, cwd, raw string) (issueSetID, issueID string, err error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", "", nil
 	}
-	if !isIssueFileReference(raw) || filepath.IsAbs(expandHome(d, raw)) {
+	if filepath.IsAbs(expandHome(d, raw)) {
 		return "", "", exitErr(ExitSetup, "issue target %q must be a CWD-relative path", raw)
 	}
+	if !isIssueFileReference(raw) {
+		issueSetID, err = resolveIssueSetIdentifier(refresh, raw)
+		return issueSetID, "", err
+	}
 
-	issueSetID, issueID, ok, err := resolveIssueFromPath(d, refresh, cwd, raw)
+	issueSetID, issueID, ok, err := resolveIssueSetRelativeIssue(refresh, raw)
+	if err != nil || ok {
+		return issueSetID, issueID, err
+	}
+
+	if isPathLike(raw) {
+		abs, absErr := absFromCWD(d, cwd, raw)
+		if absErr != nil {
+			return "", "", exitErr(ExitSetup, "resolve issue path: %v", absErr)
+		}
+		if issueSetID := matchIssueSetDir(refresh, abs); issueSetID != "" {
+			return issueSetID, "", nil
+		}
+	}
+
+	issueSetID, issueID, ok, err = resolveIssueFromPath(d, refresh, cwd, raw)
 	if err != nil {
 		return "", "", err
 	}
@@ -254,10 +296,11 @@ func completionLooksPathLike(toComplete string) bool {
 	if toComplete == "" {
 		return false
 	}
-	if strings.HasPrefix(toComplete, "./") || strings.HasPrefix(toComplete, "../") {
+	slash := filepath.ToSlash(toComplete)
+	if strings.HasPrefix(slash, "./") || strings.HasPrefix(slash, "../") {
 		return true
 	}
-	return strings.Contains(toComplete, "thoughts/")
+	return strings.Contains(slash, "thoughts/") || strings.HasPrefix("thoughts/", slash)
 }
 
 func issueSetDirPrefix(issueSetID string) string {
@@ -335,6 +378,38 @@ func issuePathCompletionsFromCWD(refresh *RefreshResult, cwd, toComplete string)
 	}
 	sort.Strings(out)
 	return out
+}
+
+func issueTargetIdentifierCompletions(refresh *RefreshResult, toComplete string) []string {
+	if refresh == nil || refresh.Manifests == nil {
+		return nil
+	}
+	slash := filepath.ToSlash(toComplete)
+	if head, _, found := strings.Cut(slash, "/"); found {
+		m := refresh.Manifests[head]
+		if m == nil {
+			return nil
+		}
+		prefix := head + "/"
+		var out []string
+		for _, issue := range m.Issues {
+			candidate := prefix + issue.File
+			if strings.HasPrefix(candidate, slash) {
+				out = append(out, candidate)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	var ids []string
+	for id := range refresh.Manifests {
+		if strings.HasPrefix(id, slash) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func completionPathStyle(candidate, toComplete string) string {
