@@ -53,6 +53,11 @@ type integrateDeps struct {
 	removeAll   func(string) error
 	stdout      io.Writer
 
+	// stdin is the wizard's prompt input. Production uses os.Stdin; tests
+	// supply a scripted reader. Nil disables prompting (declines every step),
+	// which keeps the dry-run/refresh deps inert.
+	stdin io.Reader
+
 	// File-based component installer (link installer, ADR 0011). dataDir
 	// resolves pop's data directory root (the parent of integrations/);
 	// symlink/readlink/lstatMode manage the agent-location symlinks and the
@@ -84,6 +89,7 @@ func defaultIntegrateDeps() *integrateDeps {
 		mkdirAll:    os.MkdirAll,
 		removeAll:   os.RemoveAll,
 		stdout:      os.Stdout,
+		stdin:       os.Stdin,
 		dataDir:     popDataDir,
 		symlink:     os.Symlink,
 		readlink:    os.Readlink,
@@ -215,6 +221,13 @@ skills) are separate opt-ins selected with component flags:
                 Supported for claude, pi, and cursor only; reported as not
                 supported for opencode and codex (no degraded install).
 
+Run in a terminal with no component flags to launch the interactive
+Integration wizard: it installs the core status wiring (no prompt), then
+walks one explained y/n step per supported opt-in component — the pane skill
+and the workload planning skills, with a global-gitignore sub-step inside the
+workload step. Declining any step skips it; re-run anytime to add or remove
+components.
+
 Component flags select an exact set: the status wiring plus exactly the
 requested components, with no prompting. A non-interactive run with no
 component flags fails rather than installing a default.
@@ -340,8 +353,10 @@ func stdinIsInteractive() bool {
 //     either a TTY or non-interactively.
 //   - Without flags, non-interactively: fail loudly and install nothing, so
 //     nothing lands by surprise default.
-//   - Without flags, interactively: install only the status wiring (the
-//     slice-01 wiring-only behavior) until the wizard slice lands.
+//   - Without flags, interactively: run the Integration wizard — install the
+//     core status wiring, then walk one explained y/n step per supported opt-in
+//     component (gitignore as a sub-step of the workload step), closing with a
+//     note that re-running adds or removes components.
 func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID, interactive bool) error {
 	agent = strings.ToLower(agent)
 
@@ -364,8 +379,8 @@ func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID
 		if !interactive {
 			return fmt.Errorf("no component flags given: refusing to install a default non-interactively (pass e.g. --pane-skill)")
 		}
-		// Bare interactive invocation: status wiring only until the wizard lands.
-		return core.install(d, home, agent)
+		// Bare interactive invocation: run the Integration wizard.
+		return runIntegrateWizard(d, home, agent)
 	}
 
 	// Pre-flight: every requested opt-in must be supported by this agent before
