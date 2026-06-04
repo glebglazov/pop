@@ -152,10 +152,18 @@ func TestRunIssueTimeoutMarksFailedWithoutRetry(t *testing.T) {
 	opts := env.runOpts(true, agent)
 	opts.MaxTries = 3
 	opts.Timeout = 100 * time.Millisecond
+	var buf bytes.Buffer
+	opts.Output = &buf
 	_, err := RunIssueWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "timed out") {
+	if !strings.Contains(err.Error(), "timed out after 100ms on attempt 1") {
 		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(buf.String(), "Agent killed (timeout) for demo/01-a") {
+		t.Fatalf("missing kill banner:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "✗ Attempt 1/3 timed out after 100ms") {
+		t.Fatalf("missing timeout failure line:\n%s", buf.String())
 	}
 	assertIssueFailed(t, env, "01-a", 1)
 	assertProgressContains(t, env, "FAILED", "timed out")

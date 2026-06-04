@@ -236,16 +236,21 @@ func executeIssueAttempts(d *Deps, sel *Selection, runtimePath string, out io.Wr
 			display.line(ansiRed, "✗ Agent failed to start for %s/%s", sel.IssueSetID, sel.IssueID)
 			return nil, issueExitErr(sel, ExitOperational, "agent execution: %v", err)
 		}
-		display.line(ansiDim, "── Agent finished for %s/%s ───────────────────────────", sel.IssueSetID, sel.IssueID)
+		if outcome.timedOut {
+			display.line(ansiDim, "── Agent killed (timeout) for %s/%s ───────────────────", sel.IssueSetID, sel.IssueID)
+		} else {
+			display.line(ansiDim, "── Agent finished for %s/%s ───────────────────────────", sel.IssueSetID, sel.IssueID)
+		}
 		if outcome.interrupted {
 			return nil, issueExitErr(sel, ExitInterrupted, "interrupted")
 		}
 		if outcome.timedOut {
 			summary := fmt.Sprintf("timed out after %s on attempt %d", timeout, attempt)
+			display.line(ansiRed, "✗ Attempt %d/%d timed out after %s", attempt, maxTries, timeout)
 			if err := finalizeIssueFailed(d, sel, attempt, summary); err != nil {
 				return nil, issueExitErr(sel, ExitOperational, "%v", manualRepairErr(err))
 			}
-			return nil, issueExitErr(sel, ExitOperational, "timed out after %d started attempt(s)", attempt)
+			return nil, issueExitErr(sel, ExitOperational, "%s", summary)
 		}
 		if outcome.runErr != nil {
 			return nil, issueExitErr(sel, ExitOperational, "agent execution: %v", outcome.runErr)
