@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -60,6 +61,44 @@ func TestRunIntegrateComponentsInteractiveNoFlagsWiringOnly(t *testing.T) {
 	}
 	if len(fs.symlinks) != 0 {
 		t.Fatalf("no skill should be installed on the bare path, got %v", fs.symlinks)
+	}
+}
+
+// TestRunIntegrateComponentsPaneSkillNewAgents: --pane-skill installs the core
+// status wiring plus the symlinked pane-skill artifact for pi, cursor, and
+// opencode through the same render-tree-plus-symlink path.
+func TestRunIntegrateComponentsPaneSkillNewAgents(t *testing.T) {
+	for _, a := range paneSkillAgents() {
+		t.Run(a.name, func(t *testing.T) {
+			fs := newFakeFS()
+			d := fakeDeps(installerHome, fs, nil)
+
+			if err := runIntegrateComponents(d, a.name, []ComponentID{ComponentPaneSkill}, false); err != nil {
+				t.Fatalf("runIntegrateComponents(%s): %v", a.name, err)
+			}
+			if fs.symlinks[a.linkDest] != a.linkTarget {
+				t.Fatalf("pane skill not symlinked for %s: %q -> %q", a.name, a.linkDest, fs.symlinks[a.linkDest])
+			}
+		})
+	}
+}
+
+// TestRunIntegrateComponentsCodexPaneSkillNotSupported: `pop integrate codex
+// --pane-skill` reports not-supported and installs nothing — not even the core
+// status wiring.
+func TestRunIntegrateComponentsCodexPaneSkillNotSupported(t *testing.T) {
+	fs := newFakeFS()
+	d := fakeDeps(installerHome, fs, nil)
+
+	err := runIntegrateComponents(d, "codex", []ComponentID{ComponentPaneSkill}, false)
+	if err == nil {
+		t.Fatalf("expected not-supported error for codex --pane-skill")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("error should report not supported, got: %v", err)
+	}
+	if len(fs.files) != 0 || len(fs.symlinks) != 0 {
+		t.Fatalf("nothing should be installed: files=%v symlinks=%v", sortedKeys(fs.files), fs.symlinks)
 	}
 }
 

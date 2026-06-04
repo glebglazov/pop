@@ -71,9 +71,10 @@ func agentSet(agents ...string) map[string]bool {
 // later slices) consumes the catalog rather than hardcoding component
 // knowledge. Adding a future component means adding an entry here.
 //
-// Support matrix: opencode and codex cannot host the skill components
-// (pane-skill, workload-skills) — they are reported as not-supported rather
-// than receiving a degraded install. See ADR 0010.
+// Support matrix: codex cannot host either skill component; opencode hosts the
+// pane skill (in its flat single-file form) but not the workload planning
+// skills. Unsupported pairs are reported as not-supported rather than receiving
+// a degraded install. See ADR 0010.
 var integrationCatalog = []integrationComponent{
 	{
 		id:       ComponentStatusWiring,
@@ -82,7 +83,7 @@ var integrationCatalog = []integrationComponent{
 	},
 	{
 		id:       ComponentPaneSkill,
-		supports: agentSet("claude", "pi", "cursor"),
+		supports: agentSet("claude", "pi", "cursor", "opencode"),
 		sources:  []string{"skills/pop/pane.md"},
 	},
 	{

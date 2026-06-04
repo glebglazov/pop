@@ -59,12 +59,16 @@ func renderSkillComponent(comp integrationComponent, agent string) (map[string][
 //
 // claude, pi, and cursor host skills as directories: `<skillName>/SKILL.md`
 // with the frontmatter `name` injected so the body matches the directory name.
-// (Only claude is wired through the installer in this slice; pi and cursor
-// share the identical layout and are wired in a later slice.)
+//
+// opencode hosts skills as a flat single file `<skillName>.md` — it has no
+// skill-directory layout, so the content is emitted verbatim (no name
+// injection; the file name itself carries the identity).
 func renderSkillFile(agent, skillName, content string) (rel, rendered string, err error) {
 	switch agent {
 	case "claude", "pi", "cursor":
 		return skillName + "/SKILL.md", injectFrontmatterName(content, skillName), nil
+	case "opencode":
+		return skillName + ".md", content, nil
 	default:
 		return "", "", fmt.Errorf("agent %q has no skill render layout", agent)
 	}

@@ -37,6 +37,64 @@ func TestRenderPaneSkillClaude(t *testing.T) {
 	}
 }
 
+// TestRenderPaneSkillSkillDirAgents pins the pane skill's rendered tree for the
+// agents that host skills as directories (pi, cursor) — identical layout to
+// claude: a single `pop-pane/SKILL.md` entry with the frontmatter name injected.
+func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
+	src, err := skillFiles.ReadFile("skills/pop/pane.md")
+	if err != nil {
+		t.Fatalf("read embedded source: %v", err)
+	}
+	want := injectFrontmatterName(string(src), "pop-pane")
+
+	for _, agent := range []string{"pi", "cursor"} {
+		t.Run(agent, func(t *testing.T) {
+			tree, err := renderComponent(ComponentPaneSkill, agent)
+			if err != nil {
+				t.Fatalf("renderComponent(%s): %v", agent, err)
+			}
+			if len(tree) != 1 {
+				t.Fatalf("expected 1 entry, got %d: %v", len(tree), keysOf(tree))
+			}
+			got, ok := tree["pop-pane/SKILL.md"]
+			if !ok {
+				t.Fatalf("missing pop-pane/SKILL.md; tree has %v", keysOf(tree))
+			}
+			if string(got) != want {
+				t.Fatalf("rendered bytes mismatch:\n got: %q\nwant: %q", string(got), want)
+			}
+			if !strings.Contains(string(got), "\nname: pop-pane\n") {
+				t.Fatalf("rendered SKILL.md missing injected name: %q", string(got))
+			}
+		})
+	}
+}
+
+// TestRenderPaneSkillOpencode pins the pane skill's rendered tree for opencode:
+// a single flat `pop-pane.md` entry whose bytes are the embedded source
+// verbatim — opencode has no skill-directory layout and requires no name
+// injection (the file name carries the identity).
+func TestRenderPaneSkillOpencode(t *testing.T) {
+	tree, err := renderComponent(ComponentPaneSkill, "opencode")
+	if err != nil {
+		t.Fatalf("renderComponent(opencode): %v", err)
+	}
+	if len(tree) != 1 {
+		t.Fatalf("expected 1 entry, got %d: %v", len(tree), keysOf(tree))
+	}
+	got, ok := tree["pop-pane.md"]
+	if !ok {
+		t.Fatalf("missing pop-pane.md; tree has %v", keysOf(tree))
+	}
+	src, err := skillFiles.ReadFile("skills/pop/pane.md")
+	if err != nil {
+		t.Fatalf("read embedded source: %v", err)
+	}
+	if string(got) != string(src) {
+		t.Fatalf("opencode render should be verbatim source:\n got: %q\nwant: %q", string(got), string(src))
+	}
+}
+
 // TestRenderCaseInsensitiveAgent confirms the agent name is normalized.
 func TestRenderCaseInsensitiveAgent(t *testing.T) {
 	tree, err := renderComponent(ComponentPaneSkill, "Claude")
@@ -51,10 +109,13 @@ func TestRenderCaseInsensitiveAgent(t *testing.T) {
 // TestRenderUnsupportedAgent confirms unsupported (agent, component) pairs error
 // rather than producing a degraded tree.
 func TestRenderUnsupportedAgent(t *testing.T) {
-	for _, agent := range []string{"opencode", "codex"} {
-		if _, err := renderComponent(ComponentPaneSkill, agent); err == nil {
-			t.Fatalf("expected error rendering pane skill for %q", agent)
-		}
+	if _, err := renderComponent(ComponentPaneSkill, "codex"); err == nil {
+		t.Fatalf("expected error rendering pane skill for codex")
+	}
+	// Workload skills remain unsupported for opencode even though the pane
+	// skill is now supported there.
+	if _, err := renderComponent(ComponentWorkloadSkills, "opencode"); err == nil {
+		t.Fatalf("expected error rendering workload skills for opencode")
 	}
 }
 

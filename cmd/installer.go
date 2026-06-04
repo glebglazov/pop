@@ -134,7 +134,9 @@ func ownership(d *integrateDeps, dest, integrationsRoot string) (exists, owned b
 
 // agentSkillDir returns the directory at the agent's location where pop's skill
 // entries are symlinked. claude switched from slash commands to skills, so its
-// location is the skills directory (not commands/pop).
+// location is the skills directory (not commands/pop). opencode hosts skills as
+// flat single files under its agent directory, so the symlinked entry there is
+// a `pop-<name>.md` file rather than a skill directory.
 func agentSkillDir(home, agent string) (string, error) {
 	switch strings.ToLower(agent) {
 	case "claude":
@@ -143,6 +145,8 @@ func agentSkillDir(home, agent string) (string, error) {
 		return filepath.Join(home, ".pi", "agent", "skills"), nil
 	case "cursor":
 		return filepath.Join(home, ".cursor", "skills"), nil
+	case "opencode":
+		return filepath.Join(home, ".config", "opencode", "agent"), nil
 	default:
 		return "", fmt.Errorf("agent %q has no skill location", agent)
 	}

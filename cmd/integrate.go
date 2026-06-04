@@ -172,8 +172,10 @@ changes no agent behavior. Skills (the pane skill and the workload planning
 skills) are separate opt-ins selected with component flags:
 
   --pane-skill  Also install the pane skill, which lets the agent drive tmux
-                panes. For claude it lands as a skill at ~/.claude/skills/pop-pane
-                (a symlink into pop's data directory).
+                panes. It lands as a symlink into pop's data directory: a skill
+                directory for claude, pi, and cursor (e.g.
+                ~/.claude/skills/pop-pane) and a flat file for opencode
+                (~/.config/opencode/agent/pop-pane.md). Not supported for codex.
 
 Component flags select an exact set: the status wiring plus exactly the
 requested components, with no prompting. A non-interactive run with no
@@ -279,11 +281,10 @@ func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID
 		return core.install(d, home, agent)
 	}
 
-	// Explicit flags select an exact set: the core wiring plus the requested
-	// opt-in components.
-	if err := core.install(d, home, agent); err != nil {
-		return err
-	}
+	// Pre-flight: every requested opt-in must be supported by this agent before
+	// anything is installed. This makes an unsupported pair (e.g.
+	// `pop integrate codex --pane-skill`) report not-supported and install
+	// nothing — not even the core status wiring.
 	for _, id := range optins {
 		comp, ok := lookupComponent(id)
 		if !ok {
@@ -292,6 +293,14 @@ func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID
 		if !comp.supported(agent) {
 			return fmt.Errorf("component %q is not supported for agent %q", id, agent)
 		}
+	}
+
+	// Explicit flags select an exact set: the core wiring plus the requested
+	// opt-in components.
+	if err := core.install(d, home, agent); err != nil {
+		return err
+	}
+	for _, id := range optins {
 		if err := installFileComponent(d, home, id, agent); err != nil {
 			return err
 		}

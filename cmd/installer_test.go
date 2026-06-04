@@ -116,6 +116,162 @@ func TestInstallFileComponentLegacyClaudeCommandRemoved(t *testing.T) {
 	}
 }
 
+// paneSkillAgent describes the canonical pane-skill install layout for one
+// agent: where the rendered file lands under the data dir, the agent-location
+// symlink and its target, the legacy copy-mode entry to migrate, and the
+// expected rendered bytes.
+type paneSkillAgent struct {
+	name       string
+	renderFile string
+	linkDest   string
+	linkTarget string
+	wantBytes  []byte
+	// legacyDir/legacyFile model a pre-symlink copy-mode install at the agent
+	// location. Skill-directory agents (pi, cursor) had a real directory with a
+	// SKILL.md inside; opencode had a single flat file. Exactly one shape is
+	// set per agent.
+	legacyDir  string
+	legacyFile string
+}
+
+// paneSkillAgents returns the install layout for every agent newly wired in
+// this slice (pi, cursor, opencode), derived from installerHome.
+func paneSkillAgents() []paneSkillAgent {
+	src, _ := skillFiles.ReadFile("skills/pop/pane.md")
+	skillDirBytes := []byte(injectFrontmatterName(string(src), "pop-pane"))
+
+	dataRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations")
+
+	piRoot := filepath.Join(dataRoot, "pi", "pane-skill")
+	curRoot := filepath.Join(dataRoot, "cursor", "pane-skill")
+	ocRoot := filepath.Join(dataRoot, "opencode", "pane-skill")
+
+	piDest := filepath.Join(installerHome, ".pi", "agent", "skills", "pop-pane")
+	curDest := filepath.Join(installerHome, ".cursor", "skills", "pop-pane")
+	ocDest := filepath.Join(installerHome, ".config", "opencode", "agent", "pop-pane.md")
+
+	return []paneSkillAgent{
+		{
+			name:       "pi",
+			renderFile: filepath.Join(piRoot, "pop-pane", "SKILL.md"),
+			linkDest:   piDest,
+			linkTarget: filepath.Join(piRoot, "pop-pane"),
+			wantBytes:  skillDirBytes,
+			legacyDir:  piDest,
+		},
+		{
+			name:       "cursor",
+			renderFile: filepath.Join(curRoot, "pop-pane", "SKILL.md"),
+			linkDest:   curDest,
+			linkTarget: filepath.Join(curRoot, "pop-pane"),
+			wantBytes:  skillDirBytes,
+			legacyDir:  curDest,
+		},
+		{
+			name:       "opencode",
+			renderFile: filepath.Join(ocRoot, "pop-pane.md"),
+			linkDest:   ocDest,
+			linkTarget: filepath.Join(ocRoot, "pop-pane.md"),
+			wantBytes:  src,
+			legacyFile: ocDest,
+		},
+	}
+}
+
+// TestInstallFileComponentInstallNewAgents covers the clean install for pi,
+// cursor, and opencode: the rendered tree lands under the data dir and the
+// agent location is a symlink into it (a skill directory for pi/cursor, a flat
+// file for opencode).
+func TestInstallFileComponentInstallNewAgents(t *testing.T) {
+	for _, a := range paneSkillAgents() {
+		t.Run(a.name, func(t *testing.T) {
+			fs := newFakeFS()
+			d := fakeDeps(installerHome, fs, nil)
+
+			if err := installFileComponent(d, installerHome, ComponentPaneSkill, a.name); err != nil {
+				t.Fatalf("installFileComponent(%s): %v", a.name, err)
+			}
+
+			data, ok := fs.files[a.renderFile]
+			if !ok {
+				t.Fatalf("render file not written: %s (have %v)", a.renderFile, sortedKeys(fs.files))
+			}
+			if string(data) != string(a.wantBytes) {
+				t.Fatalf("render bytes mismatch for %s:\n got: %q\nwant: %q", a.name, string(data), string(a.wantBytes))
+			}
+			if fs.symlinks[a.linkDest] != a.linkTarget {
+				t.Fatalf("symlink %q = %q, want %q", a.linkDest, fs.symlinks[a.linkDest], a.linkTarget)
+			}
+		})
+	}
+}
+
+// TestInstallFileComponentIdempotentNewAgents covers re-running for pi, cursor,
+// and opencode: a single symlink to the same target, nothing duplicated.
+func TestInstallFileComponentIdempotentNewAgents(t *testing.T) {
+	for _, a := range paneSkillAgents() {
+		t.Run(a.name, func(t *testing.T) {
+			fs := newFakeFS()
+			d := fakeDeps(installerHome, fs, nil)
+
+			for i := 0; i < 2; i++ {
+				if err := installFileComponent(d, installerHome, ComponentPaneSkill, a.name); err != nil {
+					t.Fatalf("install pass %d (%s): %v", i, a.name, err)
+				}
+			}
+			if len(fs.symlinks) != 1 {
+				t.Fatalf("expected exactly 1 symlink, got %d: %v", len(fs.symlinks), fs.symlinks)
+			}
+			if fs.symlinks[a.linkDest] != a.linkTarget {
+				t.Fatalf("symlink %q = %q, want %q", a.linkDest, fs.symlinks[a.linkDest], a.linkTarget)
+			}
+		})
+	}
+}
+
+// TestInstallFileComponentMigrationNewAgents covers a pre-existing copy-mode
+// install being replaced by a symlink: a real skill directory for pi/cursor, a
+// real flat file for opencode. Both live under the pop- name prefix at the
+// agent location, so ownership recognizes them as pop-owned and migrates them.
+func TestInstallFileComponentMigrationNewAgents(t *testing.T) {
+	for _, a := range paneSkillAgents() {
+		t.Run(a.name, func(t *testing.T) {
+			fs := newFakeFS()
+			d := fakeDeps(installerHome, fs, nil)
+
+			if a.legacyDir != "" {
+				fs.dirs[a.legacyDir] = true
+				fs.files[filepath.Join(a.legacyDir, "SKILL.md")] = []byte("old copy-mode body")
+			}
+			if a.legacyFile != "" {
+				fs.files[a.legacyFile] = []byte("old copy-mode body")
+			}
+
+			if err := installFileComponent(d, installerHome, ComponentPaneSkill, a.name); err != nil {
+				t.Fatalf("installFileComponent(%s): %v", a.name, err)
+			}
+
+			if a.legacyDir != "" {
+				if fs.dirs[a.legacyDir] {
+					t.Fatalf("copy-mode directory not removed: %s", a.legacyDir)
+				}
+				if _, ok := fs.files[filepath.Join(a.legacyDir, "SKILL.md")]; ok {
+					t.Fatalf("copy-mode file not removed under %s", a.legacyDir)
+				}
+			}
+			if a.legacyFile != "" {
+				// The flat copy-mode file is replaced by a symlink at the same path.
+				if _, ok := fs.files[a.legacyFile]; ok {
+					t.Fatalf("copy-mode file not removed: %s", a.legacyFile)
+				}
+			}
+			if fs.symlinks[a.linkDest] != a.linkTarget {
+				t.Fatalf("expected migration to symlink %q -> %q, got %q", a.linkDest, a.linkTarget, fs.symlinks[a.linkDest])
+			}
+		})
+	}
+}
+
 // TestInstallFileComponentConflictSkipped covers ownership detection via the
 // symlink target: an entry that is a symlink pointing OUTSIDE pop's render tree
 // is not owned by pop and is left untouched.
