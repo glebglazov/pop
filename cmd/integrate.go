@@ -143,11 +143,15 @@ func withDryRun(base *integrateDeps) *integrateDeps {
 		getenv:      base.getenv,
 		DryRun:      true,
 	}
-	// The link installer is not exercised on the dry-run/refresh path in this
-	// slice; provide inert implementations so the deps shape is complete.
+	// File-component refresh inspects the link installer's render tree and the
+	// agent-location symlinks to decide installed/stale/conflict, so the dry-run
+	// deps pass through the base's read-only link seams (readlink, lstatMode,
+	// dataDir is already copied above). symlink is the sole write op on this
+	// path and stays a no-op — checks never create links, and any real refresh
+	// runs through the separate real deps.
 	d.symlink = func(string, string) error { return nil }
-	d.readlink = func(string) (string, error) { return "", os.ErrNotExist }
-	d.lstatMode = func(string) (os.FileMode, error) { return 0, os.ErrNotExist }
+	d.readlink = base.readlink
+	d.lstatMode = base.lstatMode
 	// writeFile compares the proposed bytes against what's on disk.
 	// Existing file → installed; different content → changed.
 	// Missing file → neither (creating new files on an agent that isn't
@@ -849,38 +853,44 @@ func saveAppState(s *appState) error {
 // here must also update the integrateCmd ValidArgs list.
 var integrationAgents = []string{"claude", "codex", "pi", "opencode", "cursor"}
 
-// ensureIntegrations checks whether installed agent integrations are stale
-// against the currently running binary's VCS revision and updates any that
-// need it. Returns warnings to surface in the picker for any failures.
+// ensureIntegrations checks whether installed integration components are stale
+// against the currently running binary's VCS revision and refreshes any that
+// need it, per (agent, component) pair. Returns warnings to surface in the
+// picker for any failures.
 //
 // Behavior:
 //   - "dev" builds (no VCS revision) are skipped entirely — nothing to track.
 //   - state.json is read once; if its revision matches the current binary,
 //     nothing runs (the common fast path after first check on a given build).
-//   - For each agent, a dry-run install reports whether it's installed and
-//     whether the current bytes match the embedded ones. Installed+stale
-//     triggers a real install; anything else is a no-op.
+//   - For each (agent, component) pair the refresh asks whether the component
+//     is installed and stale. Installed+stale triggers a re-render; an absent
+//     component is never added, and conflict and not-supported pairs are
+//     skipped silently.
 //   - state.json is stamped with the current revision only when every stale
-//     agent updated successfully. Partial failures leave the old revision
-//     in place so the next launch retries.
-//   - Warnings are returned only for agents that are demonstrably installed
-//     but failed to check or update. Non-installed agents are silent.
+//     component refreshed successfully. Partial failures leave the old
+//     revision in place so the next launch retries.
+//   - Warnings are returned only for components demonstrably installed but
+//     failing to check or update. Everything else is silent.
 func ensureIntegrations() []string {
 	return ensureIntegrationsForRevision(buildRevision())
 }
 
 // integrationUpdateResult reports what updateStaleIntegrations did during
 // one pass: which agents were actually refreshed (Updated) and which
-// warnings should be surfaced (Warnings).
+// warnings should be surfaced (Warnings). Updated lists each agent at most
+// once even when several of its components refreshed, so the packaging path
+// keeps its one-line-per-agent output convention.
 type integrationUpdateResult struct {
 	Updated  []string
 	Warnings []string
 }
 
-// updateStaleIntegrations is the pure core of the auto-update flow. For each
-// configured agent it runs a dry-run install (via newDry) to detect whether
-// the agent is installed and whether its content is stale, and — if both
-// are true — runs a real install (via newReal) to refresh it.
+// updateStaleIntegrations is the pure core of the per-component refresh flow.
+// For every (agent, component) pair in the catalog it asks: is the component
+// installed for this agent and stale against the embedded sources? Only an
+// installed-and-stale pair is re-rendered; absent components are never added,
+// and conflict and not-supported combinations are skipped silently. An agent
+// is recorded in Updated when at least one of its components refreshed.
 //
 // The function does not read or write state.json, does not gate on the
 // binary revision, and does not emit output. Callers layer those behaviors
@@ -889,36 +899,130 @@ func updateStaleIntegrations(newDry, newReal func() *integrateDeps) integrationU
 	var result integrationUpdateResult
 
 	for _, agent := range integrationAgents {
-		// Dry-run first to determine installed/changed state.
-		dryDeps := newDry()
-		if err := runIntegrateWith(dryDeps, agent); err != nil {
-			debug.Error("updateStaleIntegrations: dry-run %s: %v", agent, err)
-			// Only warn if the agent is known to be installed — errors
-			// for uninstalled agents are noise.
-			if dryDeps.installed {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("failed to check %s integration: %v", agent, err))
+		agentUpdated := false
+		for _, comp := range integrationCatalog {
+			updated, warning := refreshComponent(newDry, newReal, agent, comp.id)
+			if warning != "" {
+				result.Warnings = append(result.Warnings, warning)
 			}
-			continue
+			if updated {
+				agentUpdated = true
+			}
 		}
-
-		if !dryDeps.installed || !dryDeps.changed {
-			continue // not installed, or already up to date
+		if agentUpdated {
+			result.Updated = append(result.Updated, agent)
+			debug.Log("updateStaleIntegrations: updated %s integration", agent)
 		}
-
-		// Agent is installed and stale — do the real install.
-		realDeps := newReal()
-		realDeps.stdout = nil // auto-update runs silently on success
-		if err := runIntegrateWith(realDeps, agent); err != nil {
-			debug.Error("updateStaleIntegrations: update %s: %v", agent, err)
-			result.Warnings = append(result.Warnings, fmt.Sprintf("failed to update %s integration (see pop.log)", agent))
-			continue
-		}
-
-		result.Updated = append(result.Updated, agent)
-		debug.Log("updateStaleIntegrations: updated %s integration", agent)
 	}
 
 	return result
+}
+
+// refreshComponent refreshes a single (agent, component) pair if it is
+// installed and stale, returning whether it refreshed and any warning to
+// surface. A component not supported by the agent is skipped silently (no
+// warning) — the same treatment a conflict or an absent component gets. The
+// status wiring and the file-based skills are refreshed through their own
+// staleness seams; the gitignore step has no binary-versioned content and so
+// is never refreshed (it is configured-or-not, never stale).
+func refreshComponent(newDry, newReal func() *integrateDeps, agent string, id ComponentID) (updated bool, warning string) {
+	comp, ok := lookupComponent(id)
+	if !ok {
+		return false, ""
+	}
+	if !comp.supported(agent) {
+		return false, "" // not supported — skip silently, never a degraded install
+	}
+	switch id {
+	case ComponentStatusWiring:
+		return refreshStatusWiring(newDry, newReal, agent)
+	case ComponentWorkloadGitignore:
+		return false, "" // no versioned content: never stale, never added by refresh
+	default:
+		return refreshFileComponent(newDry, newReal, agent, id)
+	}
+}
+
+// refreshStatusWiring refreshes the status-wiring component for an agent. It
+// dry-runs the install to learn installed/changed state and, only when both
+// hold, performs the real install. Warnings are returned solely for an agent
+// demonstrably installed but failing to check or update; an uninstalled agent
+// is silent. This preserves the original ensure-integrations contract.
+func refreshStatusWiring(newDry, newReal func() *integrateDeps, agent string) (updated bool, warning string) {
+	dryDeps := newDry()
+	if err := runIntegrateWith(dryDeps, agent); err != nil {
+		debug.Error("refreshStatusWiring: dry-run %s: %v", agent, err)
+		if dryDeps.installed {
+			return false, fmt.Sprintf("failed to check %s integration: %v", agent, err)
+		}
+		return false, ""
+	}
+	if !dryDeps.installed || !dryDeps.changed {
+		return false, "" // not installed, or already up to date
+	}
+
+	realDeps := newReal()
+	realDeps.stdout = nil // refresh runs silently on success
+	if err := runIntegrateWith(realDeps, agent); err != nil {
+		debug.Error("refreshStatusWiring: update %s: %v", agent, err)
+		return false, fmt.Sprintf("failed to update %s integration (see pop.log)", agent)
+	}
+	return true, ""
+}
+
+// refreshFileComponent refreshes a file-based skill component for an agent. It
+// inspects the link installer's render tree and the agent-location symlinks
+// (through the read-only dry-run deps) to decide:
+//
+//   - conflict (an unowned entry shadows pop's) → skip silently;
+//   - not installed → skip (refresh never adds an opted-out component);
+//   - installed but current → no-op;
+//   - installed and stale → re-render and re-link via installFileComponent,
+//     which also migrates any lingering copy-mode artifact to a symlink.
+//
+// Warnings follow the status-wiring contract: only an installed component that
+// fails its staleness check or its re-install warns; everything else is silent.
+func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, id ComponentID) (updated bool, warning string) {
+	checkDeps := newDry()
+	home, err := checkDeps.userHomeDir()
+	if err != nil {
+		debug.Error("refreshFileComponent: home %s/%s: %v", agent, id, err)
+		return false, "" // can't resolve home — treat as not actionable
+	}
+
+	if _, conflict, err := componentConflict(checkDeps, home, id, agent); err != nil {
+		debug.Error("refreshFileComponent: conflict check %s/%s: %v", agent, id, err)
+		return false, ""
+	} else if conflict {
+		return false, "" // an unowned entry shadows pop's — skip silently
+	}
+
+	installed, err := fileComponentInstalled(checkDeps, home, id, agent)
+	if err != nil {
+		debug.Error("refreshFileComponent: installed check %s/%s: %v", agent, id, err)
+		return false, ""
+	}
+	if !installed {
+		return false, "" // never add an opted-out component
+	}
+
+	stale, err := fileComponentStale(checkDeps, home, id, agent)
+	if err != nil {
+		debug.Error("refreshFileComponent: stale check %s/%s: %v", agent, id, err)
+		// Installed but the check failed — warn (installed-but-failing).
+		return false, fmt.Sprintf("failed to check %s %s integration: %v", agent, id, err)
+	}
+	if !stale {
+		return false, "" // installed and current
+	}
+
+	realDeps := newReal()
+	realDeps.stdout = nil // refresh runs silently on success
+	if err := installFileComponent(realDeps, home, id, agent); err != nil {
+		debug.Error("refreshFileComponent: update %s/%s: %v", agent, id, err)
+		return false, fmt.Sprintf("failed to update %s %s integration (see pop.log)", agent, id)
+	}
+	return true, ""
 }
 
 // stampRevisionIfSuccess writes the given revision to state.json, but only

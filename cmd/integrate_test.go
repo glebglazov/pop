@@ -1365,6 +1365,209 @@ func TestEnsureIntegrations_PartialFailureDoesNotStamp(t *testing.T) {
 	}
 }
 
+// ----- per-component refresh -------------------------------------------------
+
+// seedFileComponent runs a real install of a file-based component against the
+// fake FS so refresh tests start from an installed-and-current state.
+func seedFileComponent(t *testing.T, fs *fakeFS, home string, id ComponentID, agent string) {
+	t.Helper()
+	if err := installFileComponent(fakeDeps(home, fs, io.Discard), home, id, agent); err != nil {
+		t.Fatalf("seed install %s/%s: %v", agent, id, err)
+	}
+}
+
+// claudePaneRenderFile is the rendered SKILL.md path for claude's pane skill
+// under the fake FS data dir — the file refresh tests corrupt to force stale.
+func claudePaneRenderFile(home string) string {
+	return filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-pane", "SKILL.md")
+}
+
+func claudePaneLink(home string) string {
+	return filepath.Join(home, ".claude", "skills", "pop-pane")
+}
+
+func TestEnsureIntegrations_RefreshesStaleFileComponent(t *testing.T) {
+	// Seed claude's pane skill as installed, then corrupt the rendered bytes so
+	// the component reads as stale. Refresh on a new revision should re-render
+	// it, record claude as updated, and stamp state.json.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
+
+	renderFile := claudePaneRenderFile("/h")
+	want := append([]byte{}, fs.files[renderFile]...)
+	if len(want) == 0 {
+		t.Fatalf("seed did not render %s", renderFile)
+	}
+	fs.files[renderFile] = []byte("stale skill body")
+
+	dry, real := fakeFactories("/h", fs)
+	warnings := ensureIntegrationsForRevisionWith("rev-fc1", dry, real)
+	if warnings != nil {
+		t.Errorf("expected no warnings on successful file-component refresh, got %v", warnings)
+	}
+	if !bytes.Equal(fs.files[renderFile], want) {
+		t.Errorf("stale pane-skill render not refreshed:\n got %q\nwant %q", fs.files[renderFile], want)
+	}
+	if got := readStateRevision(t); got != "rev-fc1" {
+		t.Errorf("state.json revision = %q, want %q", got, "rev-fc1")
+	}
+}
+
+func TestEnsureIntegrations_NeverAddsUninstalledFileComponent(t *testing.T) {
+	// Nothing installed for any agent. Refresh must add nothing — no render
+	// files, no symlinks — and still stamp the revision (a clean no-op pass).
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+
+	dry, real := fakeFactories("/h", fs)
+	warnings := ensureIntegrationsForRevisionWith("rev-fc2", dry, real)
+	if warnings != nil {
+		t.Errorf("expected no warnings, got %v", warnings)
+	}
+	if len(fs.symlinks) != 0 {
+		t.Errorf("refresh must never add a component: created symlinks %v", fs.symlinks)
+	}
+	if len(fs.files) != 0 {
+		t.Errorf("refresh must never add a component: wrote files %v", sortedKeys(fs.files))
+	}
+	if got := readStateRevision(t); got != "rev-fc2" {
+		t.Errorf("state.json revision = %q, want %q", got, "rev-fc2")
+	}
+}
+
+func TestEnsureIntegrations_LeavesCurrentFileComponentUntouched(t *testing.T) {
+	// An installed-and-current file component must not be touched by refresh:
+	// no warnings, and the agent is not reported as updated.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
+
+	link := claudePaneLink("/h")
+	targetBefore := fs.symlinks[link]
+
+	result := updateStaleIntegrations(fakeFactories("/h", fs))
+	if len(result.Warnings) != 0 {
+		t.Errorf("expected no warnings for current component, got %v", result.Warnings)
+	}
+	for _, a := range result.Updated {
+		if a == "claude" {
+			t.Errorf("claude reported updated though its components are current")
+		}
+	}
+	if fs.symlinks[link] != targetBefore {
+		t.Errorf("current component's symlink was rewritten: %q -> %q", targetBefore, fs.symlinks[link])
+	}
+}
+
+func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
+	// An unowned entry shadowing pop's skill (the bare `pane` name) is an
+	// Integration conflict. Refresh must skip it silently — no update, no
+	// warning, and no symlink written over the user's entry.
+	fs := newFakeFS()
+	conflict := filepath.Join("/h", ".claude", "skills", "pane")
+	fs.dirs[conflict] = true
+
+	dry, real := fakeFactories("/h", fs)
+	updated, warning := refreshComponent(dry, real, "claude", ComponentPaneSkill)
+	if updated {
+		t.Errorf("expected no update on conflict")
+	}
+	if warning != "" {
+		t.Errorf("conflict must be silent, got warning %q", warning)
+	}
+	if len(fs.symlinks) != 0 {
+		t.Errorf("conflict must not write a symlink, got %v", fs.symlinks)
+	}
+}
+
+func TestRefreshComponent_SkipsNotSupportedSilently(t *testing.T) {
+	// codex hosts neither skill component. Refresh of an unsupported pair must
+	// be a silent no-op regardless of on-disk state.
+	fs := newFakeFS()
+	dry, real := fakeFactories("/h", fs)
+
+	for _, id := range []ComponentID{ComponentPaneSkill, ComponentWorkloadSkills} {
+		updated, warning := refreshComponent(dry, real, "codex", id)
+		if updated || warning != "" {
+			t.Errorf("codex/%s: expected silent no-op, got updated=%v warning=%q", id, updated, warning)
+		}
+	}
+}
+
+func TestRefreshComponent_GitignoreNeverRefreshed(t *testing.T) {
+	// The gitignore step has no binary-versioned content, so refresh never
+	// touches it: configured-or-not, never stale, never added.
+	fs := newFakeFS()
+	dry, real := fakeFactories("/h", fs)
+
+	updated, warning := refreshComponent(dry, real, "claude", ComponentWorkloadGitignore)
+	if updated || warning != "" {
+		t.Errorf("gitignore: expected silent no-op, got updated=%v warning=%q", updated, warning)
+	}
+}
+
+func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
+	// A pre-symlink copy-mode install (a real `pop-pane` directory at the agent
+	// location, no render tree under the data dir) is pop-owned but stale.
+	// Refresh must migrate it to a symlink into the freshly rendered tree.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+
+	link := claudePaneLink("/h")
+	fs.dirs[link] = true
+	copyFile := filepath.Join(link, "SKILL.md")
+	fs.files[copyFile] = []byte("old copy-mode body")
+
+	dry, real := fakeFactories("/h", fs)
+	warnings := ensureIntegrationsForRevisionWith("rev-fc3", dry, real)
+	if warnings != nil {
+		t.Errorf("expected no warnings on migration, got %v", warnings)
+	}
+	if _, ok := fs.files[copyFile]; ok {
+		t.Errorf("copy-mode file not removed during migration: %s", copyFile)
+	}
+	if fs.dirs[link] {
+		t.Errorf("copy-mode directory not removed during migration: %s", link)
+	}
+	target := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-pane")
+	if fs.symlinks[link] != target {
+		t.Errorf("expected migration to symlink %q -> %q, got %q", link, target, fs.symlinks[link])
+	}
+	renderFile := claudePaneRenderFile("/h")
+	if _, ok := fs.files[renderFile]; !ok {
+		t.Errorf("render tree not written during migration: %s", renderFile)
+	}
+	if got := readStateRevision(t); got != "rev-fc3" {
+		t.Errorf("state.json revision = %q, want %q", got, "rev-fc3")
+	}
+}
+
+func TestUpdateExisting_RefreshesFileComponentPerAgent(t *testing.T) {
+	// The packaging path refreshes file components too, keeping its one-line-
+	// per-agent output. Seed claude's pane skill stale; the update-existing run
+	// should print exactly one "Updated claude" line and stamp the revision.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
+	fs.files[claudePaneRenderFile("/h")] = []byte("stale skill body")
+
+	dry, real := fakeFactories("/h", fs)
+	var stdout, stderr bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev-fc4", dry, real, &stdout, &stderr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, want := stdout.String(), "✓ Updated claude integration\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("expected no warnings, got %q", stderr.String())
+	}
+	if got := readStateRevision(t); got != "rev-fc4" {
+		t.Errorf("state.json revision = %q, want %q", got, "rev-fc4")
+	}
+}
+
 // ----- appState load/save ----------------------------------------------------
 
 func TestAppState_LoadMissingReturnsEmpty(t *testing.T) {
