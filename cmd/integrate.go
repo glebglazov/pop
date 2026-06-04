@@ -52,6 +52,15 @@ type integrateDeps struct {
 	removeAll   func(string) error
 	stdout      io.Writer
 
+	// File-based component installer (link installer, ADR 0011). dataDir
+	// resolves pop's data directory root (the parent of integrations/);
+	// symlink/readlink/lstatMode manage the agent-location symlinks and the
+	// ownership check.
+	dataDir   func() (string, error)
+	symlink   func(target, link string) error
+	readlink  func(string) (string, error)
+	lstatMode func(string) (os.FileMode, error)
+
 	// Dry-run mode: set DryRun=true to turn writeFile into a comparator.
 	// `installed` and `changed` are output fields filled in during the run.
 	DryRun    bool
@@ -67,7 +76,30 @@ func defaultIntegrateDeps() *integrateDeps {
 		mkdirAll:    os.MkdirAll,
 		removeAll:   os.RemoveAll,
 		stdout:      os.Stdout,
+		dataDir:     popDataDir,
+		symlink:     os.Symlink,
+		readlink:    os.Readlink,
+		lstatMode: func(p string) (os.FileMode, error) {
+			fi, err := os.Lstat(p)
+			if err != nil {
+				return 0, err
+			}
+			return fi.Mode(), nil
+		},
 	}
+}
+
+// popDataDir returns pop's data directory root, respecting XDG_DATA_HOME.
+// File-based integration artifacts live under <dataDir>/integrations/.
+func popDataDir() (string, error) {
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return filepath.Join(xdg, "pop"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "share", "pop"), nil
 }
 
 // dryRunIntegrateDeps returns an integrateDeps that reports what would change
@@ -84,8 +116,14 @@ func withDryRun(base *integrateDeps) *integrateDeps {
 	d := &integrateDeps{
 		userHomeDir: base.userHomeDir,
 		readFile:    base.readFile,
+		dataDir:     base.dataDir,
 		DryRun:      true,
 	}
+	// The link installer is not exercised on the dry-run/refresh path in this
+	// slice; provide inert implementations so the deps shape is complete.
+	d.symlink = func(string, string) error { return nil }
+	d.readlink = func(string) (string, error) { return "", os.ErrNotExist }
+	d.lstatMode = func(string) (os.FileMode, error) { return 0, os.ErrNotExist }
 	// writeFile compares the proposed bytes against what's on disk.
 	// Existing file → installed; different content → changed.
 	// Missing file → neither (creating new files on an agent that isn't
@@ -120,6 +158,10 @@ func withDryRun(base *integrateDeps) *integrateDeps {
 // embedded content instead of installing for a specific agent.
 var integrateUpdateExisting bool
 
+// integratePaneSkill is the --pane-skill component flag. When set, the pane
+// skill is installed for the agent alongside the core status wiring.
+var integratePaneSkill bool
+
 var integrateCmd = &cobra.Command{
 	Use:   "integrate [agent]",
 	Short: "Install pop status wiring for a coding agent",
@@ -127,7 +169,15 @@ var integrateCmd = &cobra.Command{
 
 The status wiring makes the agent report pane status to pop's monitor; it
 changes no agent behavior. Skills (the pane skill and the workload planning
-skills) are separate opt-ins and are not installed by this command.
+skills) are separate opt-ins selected with component flags:
+
+  --pane-skill  Also install the pane skill, which lets the agent drive tmux
+                panes. For claude it lands as a skill at ~/.claude/skills/pop-pane
+                (a symlink into pop's data directory).
+
+Component flags select an exact set: the status wiring plus exactly the
+requested components, with no prompting. A non-interactive run with no
+component flags fails rather than installing a default.
 
 Supported agents:
   claude    Install pane monitoring hooks in ~/.claude/settings.json.
@@ -166,6 +216,8 @@ after copying a new binary into place.`,
 func init() {
 	integrateCmd.Flags().BoolVar(&integrateUpdateExisting, "update-existing", false,
 		"Refresh already-installed agent integrations to match the current binary (no agent argument)")
+	integrateCmd.Flags().BoolVar(&integratePaneSkill, "pane-skill", false,
+		"Install the pane skill (lets the agent drive tmux panes) alongside the status wiring")
 	rootCmd.AddCommand(integrateCmd)
 }
 
@@ -173,7 +225,78 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 	if integrateUpdateExisting {
 		return runIntegrateUpdateExisting()
 	}
-	return runIntegrateWith(defaultIntegrateDeps(), args[0])
+	var optins []ComponentID
+	if integratePaneSkill {
+		optins = append(optins, ComponentPaneSkill)
+	}
+	return runIntegrateComponents(defaultIntegrateDeps(), args[0], optins, stdinIsInteractive())
+}
+
+// stdinIsInteractive reports whether stdin is a terminal. Mirrors the workload
+// execution-confirmation detection: a non-terminal stdin (pipe, redirect, CI)
+// is treated as non-interactive.
+func stdinIsInteractive() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+// runIntegrateComponents is the entry point for `pop integrate <agent>` with
+// the per-component consent contract (ADR 0010):
+//
+//   - With explicit component flags (optins non-empty): install the core
+//     status wiring plus exactly the requested components, no prompting, in
+//     either a TTY or non-interactively.
+//   - Without flags, non-interactively: fail loudly and install nothing, so
+//     nothing lands by surprise default.
+//   - Without flags, interactively: install only the status wiring (the
+//     slice-01 wiring-only behavior) until the wizard slice lands.
+func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID, interactive bool) error {
+	agent = strings.ToLower(agent)
+
+	core, ok := lookupComponent(ComponentStatusWiring)
+	if !ok {
+		return fmt.Errorf("status-wiring component missing from catalog")
+	}
+	// The status-wiring support set is exactly the known agents, so this
+	// doubles as the unknown-agent guard.
+	if !core.supported(agent) {
+		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
+	}
+
+	home, err := d.userHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	if len(optins) == 0 {
+		if !interactive {
+			return fmt.Errorf("no component flags given: refusing to install a default non-interactively (pass e.g. --pane-skill)")
+		}
+		// Bare interactive invocation: status wiring only until the wizard lands.
+		return core.install(d, home, agent)
+	}
+
+	// Explicit flags select an exact set: the core wiring plus the requested
+	// opt-in components.
+	if err := core.install(d, home, agent); err != nil {
+		return err
+	}
+	for _, id := range optins {
+		comp, ok := lookupComponent(id)
+		if !ok {
+			return fmt.Errorf("unknown component %q", id)
+		}
+		if !comp.supported(agent) {
+			return fmt.Errorf("component %q is not supported for agent %q", id, agent)
+		}
+		if err := installFileComponent(d, home, id, agent); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // runIntegrateWith installs the status-wiring component for the given agent.

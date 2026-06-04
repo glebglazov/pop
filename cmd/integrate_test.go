@@ -26,8 +26,9 @@ const staleClaudeSettings = `{"hooks":{"Stop":[{"hooks":[{"type":"command","comm
 type fakeFS struct {
 	files     map[string][]byte
 	dirs      map[string]bool
-	readErr   map[string]error // path → error to return from readFile
-	writeErr  map[string]error // path → error to return from writeFile
+	symlinks  map[string]string // link path → target
+	readErr   map[string]error  // path → error to return from readFile
+	writeErr  map[string]error  // path → error to return from writeFile
 	mkdirErr  map[string]error
 	removeErr map[string]error
 }
@@ -36,6 +37,7 @@ func newFakeFS() *fakeFS {
 	return &fakeFS{
 		files:     map[string][]byte{},
 		dirs:      map[string]bool{},
+		symlinks:  map[string]string{},
 		readErr:   map[string]error{},
 		writeErr:  map[string]error{},
 		mkdirErr:  map[string]error{},
@@ -75,12 +77,51 @@ func (f *fakeFS) removeAll(path string) error {
 		return err
 	}
 	delete(f.dirs, path)
+	delete(f.symlinks, path)
+	prefix := path + string(filepath.Separator)
 	for k := range f.files {
-		if k == path || strings.HasPrefix(k, path+string(filepath.Separator)) {
+		if k == path || strings.HasPrefix(k, prefix) {
 			delete(f.files, k)
 		}
 	}
+	for k := range f.dirs {
+		if strings.HasPrefix(k, prefix) {
+			delete(f.dirs, k)
+		}
+	}
+	for k := range f.symlinks {
+		if strings.HasPrefix(k, prefix) {
+			delete(f.symlinks, k)
+		}
+	}
 	return nil
+}
+
+func (f *fakeFS) symlink(target, link string) error {
+	f.symlinks[link] = target
+	return nil
+}
+
+func (f *fakeFS) readlink(link string) (string, error) {
+	target, ok := f.symlinks[link]
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	return target, nil
+}
+
+// lstatMode reports the mode bits for an entry without following symlinks.
+func (f *fakeFS) lstatMode(path string) (os.FileMode, error) {
+	if _, ok := f.symlinks[path]; ok {
+		return os.ModeSymlink, nil
+	}
+	if _, ok := f.files[path]; ok {
+		return 0, nil
+	}
+	if f.dirs[path] {
+		return os.ModeDir, nil
+	}
+	return 0, os.ErrNotExist
 }
 
 // fakeDeps wires a fakeFS into the integrateDeps shape.
@@ -92,6 +133,10 @@ func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 		mkdirAll:    fs.mkdirAll,
 		removeAll:   fs.removeAll,
 		stdout:      stdout,
+		dataDir:     func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
+		symlink:     fs.symlink,
+		readlink:    fs.readlink,
+		lstatMode:   fs.lstatMode,
 	}
 }
 
