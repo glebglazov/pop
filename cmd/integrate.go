@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-//go:embed skills/pop/*.md
+//go:embed all:skills/pop
 var skillFiles embed.FS
 
 //go:embed extensions/pi/pop-status-sync.ts
@@ -162,6 +162,11 @@ var integrateUpdateExisting bool
 // skill is installed for the agent alongside the core status wiring.
 var integratePaneSkill bool
 
+// integrateWorkloadSkills is the --workload-skills component flag. When set,
+// the workload planning skills (grill-with-docs, to-prd, to-issues) are
+// installed for the agent alongside the core status wiring.
+var integrateWorkloadSkills bool
+
 var integrateCmd = &cobra.Command{
 	Use:   "integrate [agent]",
 	Short: "Install pop status wiring for a coding agent",
@@ -176,6 +181,15 @@ skills) are separate opt-ins selected with component flags:
                 directory for claude, pi, and cursor (e.g.
                 ~/.claude/skills/pop-pane) and a flat file for opencode
                 (~/.config/opencode/agent/pop-pane.md). Not supported for codex.
+
+  --workload-skills
+                Also install the workload planning skills (grill-with-docs,
+                to-prd, to-issues), each as a multi-file skill directory
+                symlinked into pop's data directory (e.g.
+                ~/.claude/skills/pop-grill-with-docs/). grill-with-docs ships
+                with its companion format documents so its references resolve.
+                Supported for claude, pi, and cursor only; reported as not
+                supported for opencode and codex (no degraded install).
 
 Component flags select an exact set: the status wiring plus exactly the
 requested components, with no prompting. A non-interactive run with no
@@ -220,6 +234,8 @@ func init() {
 		"Refresh already-installed agent integrations to match the current binary (no agent argument)")
 	integrateCmd.Flags().BoolVar(&integratePaneSkill, "pane-skill", false,
 		"Install the pane skill (lets the agent drive tmux panes) alongside the status wiring")
+	integrateCmd.Flags().BoolVar(&integrateWorkloadSkills, "workload-skills", false,
+		"Install the workload planning skills (grill-with-docs, to-prd, to-issues) alongside the status wiring")
 	rootCmd.AddCommand(integrateCmd)
 }
 
@@ -230,6 +246,9 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 	var optins []ComponentID
 	if integratePaneSkill {
 		optins = append(optins, ComponentPaneSkill)
+	}
+	if integrateWorkloadSkills {
+		optins = append(optins, ComponentWorkloadSkills)
 	}
 	return runIntegrateComponents(defaultIntegrateDeps(), args[0], optins, stdinIsInteractive())
 }

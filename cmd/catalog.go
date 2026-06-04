@@ -89,6 +89,14 @@ var integrationCatalog = []integrationComponent{
 	{
 		id:       ComponentWorkloadSkills,
 		supports: agentSet("claude", "pi", "cursor"),
+		// Each source is a skill directory (SKILL.md plus any companion
+		// documents). grill-with-docs ships two companion format files that
+		// must ride alongside its body so its relative references resolve.
+		sources: []string{
+			"skills/pop/grill-with-docs",
+			"skills/pop/to-prd",
+			"skills/pop/to-issues",
+		},
 	},
 	{
 		id:       ComponentWorkloadGitignore,
