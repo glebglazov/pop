@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/project"
 )
 
 // readOnlyDoctorDeps wires a doctorDeps over a fakeFS with injectable core
@@ -21,11 +25,25 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 	return &doctorDeps{
 		integrate:     base,
 		tmuxAvailable: func() bool { return tmux },
-		configCheck: func() (bool, string) {
+		loadProjectConfig: func() (*config.Config, error) {
 			if cfgOK {
-				return true, "/cfg/config.toml"
+				return &config.Config{}, nil
 			}
-			return false, "/cfg/config.toml: not found"
+			return nil, errors.New("/cfg/config.toml: not found")
+		},
+		projectConfigureAvailable: func() bool { return true },
+		expandProjectConfig: func(*config.Config) ([]config.ExpandedPath, error) {
+			return []config.ExpandedPath{{Path: "/repo/app", Explicit: true}}, nil
+		},
+		expandProjects: func([]config.ExpandedPath) ([]project.ExpandedProject, []string) {
+			return []project.ExpandedProject{{Name: "app", Path: "/repo/app", SessionName: "app"}}, nil
+		},
+		projectSessionActivity: func() map[string]int64 { return nil },
+		detectRepoContext: func() (*project.RepoContext, error) {
+			return &project.RepoContext{GitRoot: "/repo/app", RepoName: "app"}, nil
+		},
+		listWorktrees: func(*project.RepoContext) ([]project.Worktree, error) {
+			return []project.Worktree{{Name: "feature", Path: "/repo/app-feature"}}, nil
 		},
 		daemonRunning: func() bool { return daemon },
 	}
@@ -187,6 +205,223 @@ func TestDoctorHealthyCoreFamiliesRenderOK(t *testing.T) {
 	}
 	if strings.Contains(s, "Blocked   tmux available") {
 		t.Fatalf("healthy tmux check should not be blocked:\n%s", s)
+	}
+}
+
+func TestDoctorProjectReadinessReportsSelectableSourcesOK(t *testing.T) {
+	tests := []struct {
+		name     string
+		paths    []config.ExpandedPath
+		expanded []project.ExpandedProject
+		sessions map[string]int64
+	}{
+		{
+			name:  "configured project",
+			paths: []config.ExpandedPath{{Path: "/repo/app", Explicit: true}},
+			expanded: []project.ExpandedProject{{
+				Name:        "app",
+				Path:        "/repo/app",
+				ProjectName: "app",
+				SessionName: "app",
+			}},
+		},
+		{
+			name:  "configured worktree",
+			paths: []config.ExpandedPath{{Path: "/repo/app", Explicit: true}},
+			expanded: []project.ExpandedProject{{
+				Name:        "app/feature",
+				Path:        "/repo/app-feature",
+				ProjectName: "app",
+				IsWorktree:  true,
+				SessionName: "app/feature",
+			}},
+		},
+		{
+			name:     "standalone tmux session",
+			sessions: map[string]int64{"scratch": 1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+			d.expandProjectConfig = func(*config.Config) ([]config.ExpandedPath, error) { return tt.paths, nil }
+			d.expandProjects = func([]config.ExpandedPath) ([]project.ExpandedProject, []string) { return tt.expanded, nil }
+			d.projectSessionActivity = func() map[string]int64 { return tt.sessions }
+
+			report, err := buildDoctorReport(d)
+			if err != nil {
+				t.Fatalf("buildDoctorReport: %v", err)
+			}
+			family, ok := familyByCommand(report, "pop project")
+			if !ok {
+				t.Fatalf("missing pop project family")
+			}
+			if family.status != doctorStatusOK {
+				t.Fatalf("project status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+			}
+		})
+	}
+}
+
+func TestDoctorProjectMissingConfigUsesFirstRunConfigurePath(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.loadProjectConfig = func() (*config.Config, error) { return nil, os.ErrNotExist }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop project")
+	if !ok {
+		t.Fatalf("missing pop project family")
+	}
+	if family.status == doctorStatusBlocked {
+		t.Fatalf("missing config should not block when configure is available: %+v", family)
+	}
+	check, ok := checkByLabel(family, "project config")
+	if !ok {
+		t.Fatalf("missing project config check")
+	}
+	if check.status != doctorStatusPartial || check.nextAction != "pop configure" {
+		t.Fatalf("config check = %+v, want Partial with pop configure next action", check)
+	}
+}
+
+func TestDoctorProjectInvalidConfigBlocks(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.loadProjectConfig = func() (*config.Config, error) { return nil, errors.New("invalid TOML") }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop project")
+	if !ok {
+		t.Fatalf("missing pop project family")
+	}
+	if family.status != doctorStatusBlocked {
+		t.Fatalf("project status = %s, want %s", family.status, doctorStatusBlocked)
+	}
+	if !strings.Contains(family.reason, "invalid TOML") {
+		t.Fatalf("blocked reason should name invalid config: %q", family.reason)
+	}
+}
+
+func TestDoctorProjectNoConfiguredProjectsBlocks(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.expandProjectConfig = func(*config.Config) ([]config.ExpandedPath, error) { return nil, nil }
+	d.expandProjects = func([]config.ExpandedPath) ([]project.ExpandedProject, []string) { return nil, nil }
+	d.projectSessionActivity = func() map[string]int64 { return nil }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop project")
+	if !ok {
+		t.Fatalf("missing pop project family")
+	}
+	if family.status != doctorStatusBlocked {
+		t.Fatalf("project status = %s, want %s", family.status, doctorStatusBlocked)
+	}
+	if !strings.Contains(family.reason, "no configured projects") {
+		t.Fatalf("blocked reason should explain no selectable paths: %q", family.reason)
+	}
+}
+
+func TestDoctorProjectAllConfiguredExpansionFailuresBlock(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.expandProjectConfig = func(*config.Config) ([]config.ExpandedPath, error) {
+		return []config.ExpandedPath{{Path: "/repo/app", Explicit: true}}, nil
+	}
+	d.expandProjects = func([]config.ExpandedPath) ([]project.ExpandedProject, []string) {
+		return nil, []string{"app"}
+	}
+	d.projectSessionActivity = func() map[string]int64 { return nil }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop project")
+	if !ok {
+		t.Fatalf("missing pop project family")
+	}
+	if family.status != doctorStatusBlocked {
+		t.Fatalf("project status = %s, want %s", family.status, doctorStatusBlocked)
+	}
+	if !strings.Contains(family.reason, "failed to discover any selectable") {
+		t.Fatalf("blocked reason should explain expansion failure: %q", family.reason)
+	}
+}
+
+func TestDoctorWorktreeReadinessOKWithListedWorktrees(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.detectRepoContext = func() (*project.RepoContext, error) {
+		return &project.RepoContext{GitRoot: "/repo/app", RepoName: "app"}, nil
+	}
+	d.listWorktrees = func(*project.RepoContext) ([]project.Worktree, error) {
+		return []project.Worktree{{Name: "feature", Path: "/repo/app-feature", Branch: "feature"}}, nil
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop worktree")
+	if !ok {
+		t.Fatalf("missing pop worktree family")
+	}
+	if family.status != doctorStatusOK {
+		t.Fatalf("worktree status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+	}
+}
+
+func TestDoctorWorktreeReadinessOKWithZeroLinkedWorktrees(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.detectRepoContext = func() (*project.RepoContext, error) {
+		return &project.RepoContext{GitRoot: "/repo/app", RepoName: "app"}, nil
+	}
+	d.listWorktrees = func(*project.RepoContext) ([]project.Worktree, error) { return nil, nil }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop worktree")
+	if !ok {
+		t.Fatalf("missing pop worktree family")
+	}
+	if family.status != doctorStatusOK {
+		t.Fatalf("worktree status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+	}
+	check, ok := checkByLabel(family, "worktrees listed")
+	if !ok {
+		t.Fatalf("missing worktrees listed check")
+	}
+	if check.status != doctorStatusOK || !strings.Contains(check.detail, "0 linked") {
+		t.Fatalf("list check = %+v, want OK zero-linked detail", check)
+	}
+}
+
+func TestDoctorWorktreeReadinessBlocksOutsideGit(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.detectRepoContext = func() (*project.RepoContext, error) { return nil, errors.New("not git") }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop worktree")
+	if !ok {
+		t.Fatalf("missing pop worktree family")
+	}
+	if family.status != doctorStatusBlocked {
+		t.Fatalf("worktree status = %s, want %s", family.status, doctorStatusBlocked)
+	}
+	if !strings.Contains(family.reason, "not in a git repository") {
+		t.Fatalf("blocked reason should explain outside-git context: %q", family.reason)
 	}
 }
 

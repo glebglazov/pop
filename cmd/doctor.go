@@ -1,13 +1,16 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/monitor"
+	"github.com/glebglazov/pop/project"
 	"github.com/spf13/cobra"
 )
 
@@ -29,10 +32,16 @@ import (
 // tests can compose healthy and unhealthy machines without a real tmux,
 // config file, or daemon.
 type doctorDeps struct {
-	integrate     *integrateDeps
-	tmuxAvailable func() bool
-	configCheck   func() (ok bool, detail string)
-	daemonRunning func() bool
+	integrate                 *integrateDeps
+	tmuxAvailable             func() bool
+	loadProjectConfig         func() (*config.Config, error)
+	projectConfigureAvailable func() bool
+	expandProjectConfig       func(*config.Config) ([]config.ExpandedPath, error)
+	expandProjects            func([]config.ExpandedPath) ([]project.ExpandedProject, []string)
+	projectSessionActivity    func() map[string]int64
+	detectRepoContext         func() (*project.RepoContext, error)
+	listWorktrees             func(*project.RepoContext) ([]project.Worktree, error)
+	daemonRunning             func() bool
 }
 
 func defaultDoctorDeps() *doctorDeps {
@@ -42,13 +51,20 @@ func defaultDoctorDeps() *doctorDeps {
 			_, err := exec.LookPath("tmux")
 			return err == nil
 		},
-		configCheck: func() (bool, string) {
+		loadProjectConfig: func() (*config.Config, error) {
 			path := config.DefaultConfigPath()
-			if _, err := config.Load(path); err != nil {
-				return false, fmt.Sprintf("%s: %v", path, err)
-			}
-			return true, path
+			return config.Load(path)
 		},
+		projectConfigureAvailable: func() bool { return true },
+		expandProjectConfig: func(cfg *config.Config) ([]config.ExpandedPath, error) {
+			return cfg.ExpandProjects()
+		},
+		expandProjects: func(paths []config.ExpandedPath) ([]project.ExpandedProject, []string) {
+			return expandProjectsWith(project.DefaultDeps(), paths)
+		},
+		projectSessionActivity: historyTmuxSessionActivity,
+		detectRepoContext:      project.DetectRepoContext,
+		listWorktrees:          project.ListWorktrees,
 		daemonRunning: func() bool {
 			return monitor.IsDaemonRunning(monitor.DefaultPIDPath())
 		},
@@ -138,15 +154,10 @@ var canonicalDoctorCommands = []string{
 // reads; a failure here means the report itself could not be produced (a
 // non-zero exit), not an unhealthy finding.
 func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
-	cfgOK, cfgDetail := d.configCheck()
 	report := &doctorReport{
 		families: []doctorFamilyReport{
-			familyReport("pop project", []doctorCheck{
-				doctorBoolCheck("config loads", cfgOK, "blocked: "+cfgDetail, cfgDetail, ""),
-			}),
-			familyReport("pop worktree", []doctorCheck{
-				{label: "worktree-specific checks", status: doctorStatusNA, detail: "no worktree-specific readiness checks yet"},
-			}),
+			familyReport("pop project", doctorProjectChecks(d)),
+			familyReport("pop worktree", doctorWorktreeChecks(d)),
 			familyReport("pop monitor", []doctorCheck{
 				doctorBoolCheck("monitor daemon running", d.daemonRunning(), "monitor daemon is not running", "", "pop monitor"),
 			}),
@@ -175,6 +186,105 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 	}
 	report.families = append(report.families, familyReport("pop integrate", integrationChecks))
 	return report, nil
+}
+
+func historyTmuxSessionActivity() map[string]int64 {
+	return history.TmuxSessionActivity()
+}
+
+func doctorProjectChecks(d *doctorDeps) []doctorCheck {
+	checks := []doctorCheck{
+		doctorBoolCheck("tmux available", d.tmuxAvailable(), "tmux executable was not found", "", ""),
+	}
+
+	cfg, err := d.loadProjectConfig()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) && d.projectConfigureAvailable() {
+			checks = append(checks, doctorCheck{
+				label:      "project config",
+				status:     doctorStatusPartial,
+				detail:     "config missing; first-run configure is available",
+				nextAction: "pop configure",
+			})
+			return checks
+		}
+		checks = append(checks, doctorCheck{
+			label:  "project config",
+			status: doctorStatusBlocked,
+			detail: fmt.Sprintf("failed to load config: %v", err),
+		})
+		return checks
+	}
+	checks = append(checks, doctorCheck{label: "project config", status: doctorStatusOK, detail: "config loads"})
+
+	paths, err := d.expandProjectConfig(cfg)
+	if err != nil {
+		checks = append(checks, doctorCheck{
+			label:  "selectable projects and sessions",
+			status: doctorStatusBlocked,
+			detail: fmt.Sprintf("failed to expand configured projects: %v", err),
+		})
+		return checks
+	}
+
+	expanded, failed := d.expandProjects(paths)
+	standaloneSessions := len(d.projectSessionActivity())
+	selectable := len(expanded) + standaloneSessions
+	if selectable == 0 {
+		detail := "no configured projects or standalone sessions discovered"
+		if len(paths) > 0 && len(failed) > 0 {
+			detail = fmt.Sprintf("failed to discover any selectable configured projects: %d errors", len(failed))
+		}
+		checks = append(checks, doctorCheck{
+			label:  "selectable projects and sessions",
+			status: doctorStatusBlocked,
+			detail: detail,
+		})
+		return checks
+	}
+
+	detail := fmt.Sprintf("%d selectable project/session path(s) discovered", selectable)
+	if len(failed) > 0 {
+		detail = fmt.Sprintf("%s; %d configured project(s) failed to expand", detail, len(failed))
+	}
+	checks = append(checks, doctorCheck{
+		label:  "selectable projects and sessions",
+		status: doctorStatusOK,
+		detail: detail,
+	})
+	return checks
+}
+
+func doctorWorktreeChecks(d *doctorDeps) []doctorCheck {
+	ctx, err := d.detectRepoContext()
+	if err != nil {
+		return []doctorCheck{{
+			label:  "git repository detected",
+			status: doctorStatusBlocked,
+			detail: "not in a git repository",
+		}}
+	}
+
+	checks := []doctorCheck{{
+		label:  "git repository detected",
+		status: doctorStatusOK,
+		detail: ctx.GitRoot,
+	}}
+	worktrees, err := d.listWorktrees(ctx)
+	if err != nil {
+		checks = append(checks, doctorCheck{
+			label:  "worktrees listed",
+			status: doctorStatusBlocked,
+			detail: fmt.Sprintf("failed to list worktrees: %v", err),
+		})
+		return checks
+	}
+	checks = append(checks, doctorCheck{
+		label:  "worktrees listed",
+		status: doctorStatusOK,
+		detail: fmt.Sprintf("%d linked worktree(s) listed", len(worktrees)),
+	})
+	return checks
 }
 
 func doctorBoolCheck(label string, ok bool, failDetail, okDetail, nextAction string) doctorCheck {
