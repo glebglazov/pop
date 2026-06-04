@@ -253,6 +253,44 @@ after copying a new binary into place.`,
 	RunE:      runIntegrate,
 }
 
+// integrateRemoveCmd is the removal form of integrate: `pop integrate remove
+// <agent> [component...]`. With no component identifiers it removes every pop
+// component currently installed for the agent; with identifiers it removes
+// exactly that set. Only pop-owned artifacts are deleted (ADR 0011): the
+// workload-gitignore step is report-only, and a same-named entry pop does not
+// own is left untouched and reported.
+var integrateRemoveCmd = &cobra.Command{
+	Use:   "remove <agent> [component...]",
+	Short: "Remove pop integration components for an agent",
+	Long: `Remove pop integration components for an agent.
+
+With no component identifiers, every pop component currently installed for the
+agent is removed. With identifiers, exactly that set is removed. Valid
+identifiers: status-wiring, pane-skill, workload-skills, workload-gitignore.
+
+Removal only ever deletes artifacts pop owns: status wiring strips pop's hook
+entries while preserving unrelated hooks (claude, codex, cursor) or deletes the
+pop-owned status-sync extension (pi, opencode); file-based skills delete only
+pop-owned symlinks and their render-tree entries — a same-named entry pop does
+not own is left untouched and reported. The workload-gitignore step is
+report-only: pop never edits your global git excludes file, it prints the line
+to remove manually.`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("requires an agent name (claude, codex, pi, opencode, or cursor)")
+		}
+		return nil
+	},
+	ValidArgs: []string{"claude", "codex", "pi", "opencode", "cursor"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var ids []ComponentID
+		for _, a := range args[1:] {
+			ids = append(ids, ComponentID(a))
+		}
+		return runIntegrateRemoveComponents(defaultIntegrateDeps(), args[0], ids)
+	},
+}
+
 func init() {
 	integrateCmd.Flags().BoolVar(&integrateUpdateExisting, "update-existing", false,
 		"Refresh already-installed agent integrations to match the current binary (no agent argument)")
@@ -262,6 +300,7 @@ func init() {
 		"Install the workload planning skills (grill-with-docs, to-prd, to-issues) alongside the status wiring")
 	integrateCmd.Flags().BoolVar(&integrateWorkloadGitignore, "workload-gitignore", false,
 		"Append the thoughts/ line to your global git excludes file (global effect; never mutates git config)")
+	integrateCmd.AddCommand(integrateRemoveCmd)
 	rootCmd.AddCommand(integrateCmd)
 }
 
