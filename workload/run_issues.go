@@ -183,7 +183,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 					printIssueSetSummary(out, result)
 				}
 				if hitl := BlockingHITLIssue(currentRefresh.Manifests[issueSetID]); hitl != nil {
-					printHITLGateAdvice(out, issueSetID, hitl)
+					printHITLGateAdvice(d, out, issueSetID, currentRefresh.Manifests[issueSetID].Dir, hitl)
 				}
 				if result.BlockedReason != "" {
 					return nil, exitErr(ExitNoRunnable, "Issue set %q blocked: %s", issueSetID, result.BlockedReason)

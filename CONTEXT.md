@@ -127,6 +127,7 @@ An **issue** moves between four statuses. The executor drives the solid transiti
 
 - An issue is **eligible** when it is `open`, type AFK, and every `blocked_by` prerequisite is satisfied. A prerequisite counts as satisfied when it is `done` **or** `skipped` — a Skipped issue unblocks its dependents even though it was deferred, not completed.
 - HITL issues are never eligible; the executor never runs them.
+- A HITL issue contains only human work — verification, decisions, manual checks. Agent-doable prep (building the artifact to verify) belongs in a separate AFK issue that the HITL issue is blocked by; a HITL issue describing software to build is mis-typed.
 - `complete-issue`, `skip-issue`, and `reset-issue` are the only manual overrides; each moves exactly one issue and bypasses the agent.
 
 An **Issue set**'s status is derived from its issues, in this precedence:
@@ -238,7 +239,7 @@ The maximum duration for one issue attempt, defaulting to 30 minutes and configu
 _Avoid_: Issue set timeout, interruption
 
 **Human-blocked Issue set**:
-An Issue set with unfinished issues but no eligible AFK issue because human-in-the-loop work must happen first. Run issue and Run issues report the condition and stop; the workload executor never automatically runs HITL issues. On stopping, pop advises the recovery paths for the blocking HITL issue: Complete issue once the human work is done, edit the issue file and re-run, or skip the issue to defer it and unblock its dependents (Skipped issue). The blocked row also shows a copy-paste complete hint, symmetric with the reset hint on Failed rows.
+An Issue set with unfinished issues but no eligible AFK issue because human-in-the-loop work must happen first. Run issue and Run issues report the condition and stop; the workload executor never automatically runs HITL issues. On stopping, pop prints the blocking issue body verbatim — the human sees what to do without opening the file — and advises the recovery paths for the blocking HITL issue: Complete issue once the human work is done, edit the issue file and re-run, or skip the issue to defer it and unblock its dependents (Skipped issue). The blocked row also shows a copy-paste complete hint, symmetric with the reset hint on Failed rows.
 _Avoid_: Failed Issue set
 
 **Workload artifact**:
