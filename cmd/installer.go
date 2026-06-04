@@ -70,16 +70,18 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		dest := filepath.Join(agentDir, name)
 		target := filepath.Join(renderRoot, name)
 
-		exists, owned, err := ownership(d, dest, integrationsRoot)
+		// Integration conflict check (ADR 0011): a same-named entry pop does
+		// not own — under the embedded skill's canonical `pop-` name OR the bare
+		// (prefix-stripped) form — is never touched. The skill is skipped:
+		// never overwritten, never removed, never refreshed. Non-conflicting
+		// skills in the same run still install.
+		conflictPath, conflict, err := skillConflict(d, agentDir, name, integrationsRoot)
 		if err != nil {
 			return fmt.Errorf("failed to check ownership of %s: %w", dest, err)
 		}
-		// A same-named entry pop does not own is never overwritten — full
-		// Integration conflict reporting lands in a later slice; here we simply
-		// refuse to clobber a user's file.
-		if exists && !owned {
+		if conflict {
 			if d.stdout != nil {
-				fmt.Fprintf(d.stdout, "  skipped %s (not owned by pop)\n", dest)
+				fmt.Fprintf(d.stdout, "  skipped %s: %s exists and is not owned by pop — remove it and re-run integrate to install pop's version\n", name, conflictPath)
 			}
 			continue
 		}
@@ -130,6 +132,42 @@ func ownership(d *integrateDeps, dest, integrationsRoot string) (exists, owned b
 		return true, inTree, nil
 	}
 	return true, strings.HasPrefix(filepath.Base(dest), "pop-"), nil
+}
+
+// skillConflict reports whether installing the render-tree entry `name` into
+// agentDir would collide with a skill pop does not own. The match is
+// prefix-insensitive: the embedded skill's canonical name is `pop-<base>`, but
+// a hand-written skill could sit under that exact name OR under the bare
+// `<base>` form, and either shadows pop's version. Both candidate locations are
+// checked; the first existing entry that pop does not own is the conflict.
+//
+// A pop-owned entry (a symlink resolving into pop's render tree, or a legacy
+// `pop-` copy-mode directory eligible for migration) is never a conflict, so
+// re-install and refresh proceed normally.
+func skillConflict(d *integrateDeps, agentDir, name, integrationsRoot string) (conflictPath string, conflict bool, err error) {
+	for _, cand := range conflictCandidates(name) {
+		p := filepath.Join(agentDir, cand)
+		exists, owned, err := ownership(d, p, integrationsRoot)
+		if err != nil {
+			return "", false, err
+		}
+		if exists && !owned {
+			return p, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// conflictCandidates returns the entry names a render-tree entry can collide
+// with at the agent location: the canonical `pop-` form as rendered, plus the
+// bare form with the prefix stripped (e.g. `pop-pane` → `pane`, `pop-pane.md`
+// → `pane.md`). Render-tree names are always `pop-` prefixed; a name without
+// the prefix yields only itself.
+func conflictCandidates(name string) []string {
+	if bare := strings.TrimPrefix(name, "pop-"); bare != name {
+		return []string{name, bare}
+	}
+	return []string{name}
 }
 
 // agentSkillDir returns the directory at the agent's location where pop's skill

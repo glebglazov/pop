@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -329,5 +331,179 @@ func TestOwnership(t *testing.T) {
 	fs.dirs[other] = true
 	if exists, owned, err := ownership(d, other, integrationsRoot); err != nil || !exists || owned {
 		t.Fatalf("foreign dir: exists=%v owned=%v err=%v", exists, owned, err)
+	}
+}
+
+// TestConflictCandidates pins the prefix-insensitive candidate expansion: a
+// render-tree name yields both its canonical `pop-` form and the bare form, so
+// a hand-written skill under either name is caught.
+func TestConflictCandidates(t *testing.T) {
+	tests := []struct {
+		name string
+		want []string
+	}{
+		{"pop-pane", []string{"pop-pane", "pane"}},
+		{"pop-pane.md", []string{"pop-pane.md", "pane.md"}},
+		{"pop-grill-with-docs", []string{"pop-grill-with-docs", "grill-with-docs"}},
+		{"no-prefix", []string{"no-prefix"}},
+	}
+	for _, tt := range tests {
+		got := conflictCandidates(tt.name)
+		if len(got) != len(tt.want) {
+			t.Fatalf("conflictCandidates(%q) = %v, want %v", tt.name, got, tt.want)
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Fatalf("conflictCandidates(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		}
+	}
+}
+
+// TestInstallFileComponentConflictReportsPathAndResolution covers a same-named
+// non-pop-owned skill (a user's real directory under the bare name): the skill
+// is skipped — never overwritten, never removed — and the report names the
+// conflicting path and states the resolution step.
+func TestInstallFileComponentConflictReportsPathAndResolution(t *testing.T) {
+	fs := newFakeFS()
+	out := &bytes.Buffer{}
+	d := fakeDeps(installerHome, fs, out)
+
+	_, linkDest, _ := paneSkillPaths()
+	// A user's own skill, a real directory pop does not own, under the bare
+	// name (the prefix-stripped form of pop's pop-pane).
+	bareDest := filepath.Join(filepath.Dir(linkDest), "pane")
+	fs.dirs[bareDest] = true
+	userFile := filepath.Join(bareDest, "SKILL.md")
+	fs.files[userFile] = []byte("hand-written skill")
+
+	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+		t.Fatalf("installFileComponent: %v", err)
+	}
+
+	// Never overwritten, never removed.
+	if string(fs.files[userFile]) != "hand-written skill" {
+		t.Fatalf("user skill was modified: %q", fs.files[userFile])
+	}
+	if !fs.dirs[bareDest] {
+		t.Fatalf("user skill directory was removed: %s", bareDest)
+	}
+	// Skipped: pop must not link its version into the agent dir.
+	if _, linked := fs.symlinks[linkDest]; linked {
+		t.Fatalf("conflict skill was installed anyway: %q", fs.symlinks[linkDest])
+	}
+
+	report := out.String()
+	if !strings.Contains(report, bareDest) {
+		t.Fatalf("report does not name the conflicting path %q: %q", bareDest, report)
+	}
+	if !strings.Contains(report, "not owned by pop") || !strings.Contains(report, "re-run integrate") {
+		t.Fatalf("report does not state the resolution step: %q", report)
+	}
+}
+
+// TestInstallFileComponentConflictPrefixInsensitive covers the prefix-insensitive
+// match: a non-pop entry under the bare name (`pane`) OR the canonical prefixed
+// name (`pop-pane`) both block the install. The bare-name conflict is a user's
+// real directory; the prefixed-name conflict is a foreign symlink (a real
+// pop- entry is a pop-owned copy-mode install, eligible for migration, not a
+// conflict).
+func TestInstallFileComponentConflictPrefixInsensitive(t *testing.T) {
+	_, linkDest, _ := paneSkillPaths()
+	agentDir := filepath.Dir(linkDest)
+	bareDest := filepath.Join(agentDir, "pane")
+
+	cases := []struct {
+		name  string
+		setup func(fs *fakeFS) string // returns the conflicting path
+	}{
+		{"bare form", func(fs *fakeFS) string {
+			fs.dirs[bareDest] = true
+			fs.files[filepath.Join(bareDest, "SKILL.md")] = []byte("mine")
+			return bareDest
+		}},
+		{"prefixed form", func(fs *fakeFS) string {
+			fs.symlinks[linkDest] = "/somewhere/else/pop-pane"
+			return linkDest
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := newFakeFS()
+			out := &bytes.Buffer{}
+			d := fakeDeps(installerHome, fs, out)
+
+			conflict := tc.setup(fs)
+
+			if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+				t.Fatalf("installFileComponent: %v", err)
+			}
+
+			// The agent-location link must not point into pop's render tree.
+			if target := fs.symlinks[linkDest]; strings.Contains(target, "integrations") {
+				t.Fatalf("install proceeded despite %s conflict at %s (linked %q)", tc.name, conflict, target)
+			}
+			if !strings.Contains(out.String(), conflict) {
+				t.Fatalf("report does not name conflict %q: %q", conflict, out.String())
+			}
+		})
+	}
+}
+
+// TestInstallFileComponentPartialSetInstall covers a conflict on one skill of a
+// multi-skill component skipping only that skill while the rest install. The
+// workload-skills component renders three skill directories for claude; a
+// non-pop entry at one of them must not block the other two.
+func TestInstallFileComponentPartialSetInstall(t *testing.T) {
+	fs := newFakeFS()
+	out := &bytes.Buffer{}
+	d := fakeDeps(installerHome, fs, out)
+
+	skillsDir := filepath.Join(installerHome, ".claude", "skills")
+	conflictDest := filepath.Join(skillsDir, "pop-to-prd")
+	// User's own skill at the bare name of one workload skill.
+	bareConflict := filepath.Join(skillsDir, "to-issues")
+	fs.dirs[bareConflict] = true
+	fs.files[filepath.Join(bareConflict, "SKILL.md")] = []byte("mine")
+
+	if err := installFileComponent(d, installerHome, ComponentWorkloadSkills, "claude"); err != nil {
+		t.Fatalf("installFileComponent: %v", err)
+	}
+
+	// The conflicting skill (to-issues, via its bare form) is skipped.
+	if _, linked := fs.symlinks[filepath.Join(skillsDir, "pop-to-issues")]; linked {
+		t.Fatalf("conflicting skill pop-to-issues was installed despite bare conflict")
+	}
+	// The other two skills install normally.
+	for _, name := range []string{"pop-grill-with-docs", "pop-to-prd"} {
+		dest := filepath.Join(skillsDir, name)
+		if _, linked := fs.symlinks[dest]; !linked {
+			t.Fatalf("non-conflicting skill %s was not installed: %v", name, fs.symlinks)
+		}
+	}
+	_ = conflictDest
+}
+
+// TestInstallFileComponentOwnershipExemption covers that a pop-owned symlink is
+// never treated as a conflict: re-install rewrites it and refresh proceeds,
+// even with the bare-name location also pointing into pop's render tree.
+func TestInstallFileComponentOwnershipExemption(t *testing.T) {
+	fs := newFakeFS()
+	out := &bytes.Buffer{}
+	d := fakeDeps(installerHome, fs, out)
+
+	_, linkDest, linkTarget := paneSkillPaths()
+	// Pre-existing pop-owned symlink at the canonical location.
+	fs.symlinks[linkDest] = linkTarget
+
+	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+		t.Fatalf("installFileComponent: %v", err)
+	}
+
+	if fs.symlinks[linkDest] != linkTarget {
+		t.Fatalf("pop-owned symlink not preserved/rewritten: %q", fs.symlinks[linkDest])
+	}
+	if strings.Contains(out.String(), "not owned by pop") {
+		t.Fatalf("pop-owned symlink reported as conflict: %q", out.String())
 	}
 }
