@@ -13,6 +13,7 @@ import (
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/workload"
 	"github.com/spf13/cobra"
 )
 
@@ -48,6 +49,8 @@ type doctorDeps struct {
 	loadMonitorState          func() (*monitor.State, error)
 	paneSessionAddressable    func() (string, error)
 	intendedAgentStatusWiring func() ([]doctorAgentStatusWiring, error)
+	resolveWorkloadRuntime    func() (string, error)
+	workloadArtifactIgnored   func(runtimePath, probePath string) (bool, error)
 }
 
 func defaultDoctorDeps() *doctorDeps {
@@ -93,6 +96,8 @@ func defaultDoctorDeps() *doctorDeps {
 			}
 			return doctorIntendedAgentStatusWiring(defaultIntegrateDeps(), home)
 		},
+		resolveWorkloadRuntime:  defaultDoctorResolveWorkloadRuntime,
+		workloadArtifactIgnored: defaultDoctorWorkloadArtifactIgnored,
 	}
 }
 
@@ -191,9 +196,7 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 			familyReport("pop worktree", doctorWorktreeChecks(d)),
 			familyReport("pop monitor", doctorMonitorChecks(d)),
 			familyReport("pop pane", doctorPaneChecks(d)),
-			familyReport("pop workload", []doctorCheck{
-				{label: "workload-specific checks", status: doctorStatusNA, detail: "no workload-specific readiness checks yet"},
-			}),
+			familyReport("pop workload", doctorWorkloadChecks(d)),
 		},
 	}
 
@@ -352,6 +355,81 @@ func doctorPaneChecks(d *doctorDeps) []doctorCheck {
 		})
 	}
 	return checks
+}
+
+const doctorWorkloadIgnoreProbe = "thoughts/.pop-workload-doctor-probe"
+
+func doctorWorkloadChecks(d *doctorDeps) []doctorCheck {
+	runtimePath, err := d.resolveWorkloadRuntime()
+	if err != nil {
+		return []doctorCheck{
+			{
+				label:  "git runtime checkout resolved",
+				status: doctorStatusBlocked,
+				detail: fmt.Sprintf("no git runtime checkout resolved from command context: %v", err),
+			},
+			{
+				label:  "workload artifact ignore coverage",
+				status: doctorStatusNA,
+				detail: "not assessed because no git runtime checkout was resolved",
+			},
+		}
+	}
+
+	checks := []doctorCheck{{
+		label:  "git runtime checkout resolved",
+		status: doctorStatusOK,
+		detail: runtimePath,
+	}}
+
+	ignored, err := d.workloadArtifactIgnored(runtimePath, doctorWorkloadIgnoreProbe)
+	method := fmt.Sprintf("git check-ignore --quiet -- %s", doctorWorkloadIgnoreProbe)
+	if err != nil {
+		checks = append(checks, doctorCheck{
+			label:  "workload artifact ignore coverage",
+			status: doctorStatusBlocked,
+			detail: fmt.Sprintf("%s failed in %s: %v", method, runtimePath, err),
+		})
+		return checks
+	}
+	if ignored {
+		checks = append(checks, doctorCheck{
+			label:  "workload artifact ignore coverage",
+			status: doctorStatusOK,
+			detail: fmt.Sprintf("effective Git ignore covers representative artifact %q via %s", doctorWorkloadIgnoreProbe, method),
+		})
+		return checks
+	}
+
+	checks = append(checks, doctorCheck{
+		label:      "workload artifact ignore coverage",
+		status:     doctorStatusPartial,
+		detail:     fmt.Sprintf("effective Git ignore does not cover representative artifact %q; add %s to an effective Git ignore source", doctorWorkloadIgnoreProbe, gitignoreLine),
+		nextAction: "add thoughts/ to .gitignore, .git/info/exclude, or run pop integrate claude --workload-gitignore",
+	})
+	return checks
+}
+
+func defaultDoctorResolveWorkloadRuntime() (string, error) {
+	d := workload.DefaultDeps()
+	resolved, err := workload.ResolvePathsWith(d, workloadProjectDeps(), workloadConfigLoad, workloadResolveInput())
+	if err != nil {
+		return "", err
+	}
+	return workload.ResolveRuntimePathWith(d, resolved.ProjectPath, workloadRuntimePath)
+}
+
+func defaultDoctorWorkloadArtifactIgnored(runtimePath, probePath string) (bool, error) {
+	cmd := exec.Command("git", "-C", runtimePath, "check-ignore", "--quiet", "--", probePath)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 func defaultPaneSessionAddressable() (string, error) {
