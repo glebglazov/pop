@@ -7,8 +7,8 @@ import (
 
 // ComponentID is the stable identifier of an Integration component. These
 // strings are part of pop's external contract: later slices use them for
-// non-interactive component flags, removal targets, and Doctor's per-agent
-// state table, so they must not change once shipped. The catalog test pins
+// non-interactive component flags, removal targets, and Doctor's supporting
+// evidence reads, so they must not change once shipped. The catalog test pins
 // the exact values.
 type ComponentID string
 

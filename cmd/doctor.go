@@ -18,11 +18,10 @@ import (
 
 // `pop doctor` is the read-only readiness report (PRD: Doctor). It prints the
 // canonical command families and their nested checks. Doctor adds no state
-// logic of its own: every Integration component state is computed through the
-// same read paths the wizard and removal paths use (the catalog support matrix,
-// the render engine, the link installer's ownership/staleness checks, and the
-// gitignore presence check). It never installs or repairs — actionable checks
-// simply carry the copy-paste `pop integrate` command that fixes them.
+// logic of its own: where a family needs agent or integration evidence, it
+// computes that evidence through the same read paths the wizard and removal
+// paths use. It never installs or repairs — actionable checks simply carry the
+// copy-paste command that fixes them.
 //
 // Exit status mirrors `workload status`: it reflects rendering success, not the
 // health findings. A machine with everything broken still exits 0; only a
@@ -116,8 +115,8 @@ const (
 )
 
 // doctorCheck is one nested assessment under a command family. It is generic
-// to the command family, not to agents; Integration checks happen to include
-// agent names in their labels because the underlying artifacts are per-agent.
+// to the command family, not to an agent/component matrix; checks include agent
+// names only when a family needs that evidence to explain readiness.
 type doctorCheck struct {
 	label      string
 	status     doctorStatus
@@ -164,14 +163,14 @@ var doctorCmd = &cobra.Command{
 	Long: `Report pop's readiness on this machine — strictly read-only.
 
 Doctor prints the canonical command families (project, worktree, monitor,
-pane, workload, integrate) and nested checks for each family. Integration
-state is computed from pop's existing read paths — the component catalog, the
-render engine, the link installer's ownership checks, and the gitignore
-presence check — so doctor never installs, repairs, or writes anything.
+pane, workload, integrate) and nested checks for each family. When a family
+depends on agent setup, Doctor reads Pop's existing integration evidence to
+explain that family's readiness; it does not present a support matrix or
+per-agent component inventory as the report.
 
-Each actionable check carries the copy-paste command that fixes it (an
-` + "`pop integrate`" + ` invocation). Doctor always exits 0 when it succeeds in
-rendering the report; the exit status reflects rendering, not the findings.`,
+Each actionable check carries a copy-paste command that fixes it. Doctor
+always exits 0 when it succeeds in rendering the report; the exit status
+reflects rendering, not the findings.`,
 	Args: cobra.NoArgs,
 	RunE: runDoctor,
 }
@@ -223,21 +222,7 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 		},
 	}
 
-	home, err := d.integrate.userHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
-	}
 	integrationChecks := doctorIntegrateIntentChecks(intent)
-	for _, intended := range intent.intended {
-		agent := intended.agent
-		for _, comp := range integrationCatalog {
-			state, err := doctorComponentState(d.integrate, home, comp.id, agent)
-			if err != nil {
-				return nil, err
-			}
-			integrationChecks = append(integrationChecks, doctorIntegrationCheck(agent, comp.id, state))
-		}
-	}
 	integrationChecks = append(integrationChecks, doctorIntegrateSuggestionChecks(intent)...)
 	report.families = append(report.families, familyReport("pop integrate", integrationChecks))
 	return report, nil
@@ -898,82 +883,6 @@ func integrateInvocation(agent string, id ComponentID) string {
 		return fmt.Sprintf("pop integrate %s %s", agent, flag)
 	}
 	return fmt.Sprintf("pop integrate %s", agent)
-}
-
-// doctorFix returns the copy-paste fix command for an actionable check, or ""
-// for a healthy (installed-current) or not-supported check. A conflict is
-// resolved by removing the unowned entry and re-running integrate, so its
-// command leads with that removal (ADR 0011 conflict resolution: remove, then
-// re-integrate).
-func doctorFix(agent string, id ComponentID, state componentStateInfo) string {
-	switch state.kind {
-	case stateNotInstalled, stateStale:
-		return integrateInvocation(agent, id)
-	case stateConflict:
-		return fmt.Sprintf("rm %s && %s", state.conflictPath, integrateInvocation(agent, id))
-	default:
-		return ""
-	}
-}
-
-func doctorIntegrationCheck(agent string, id ComponentID, state componentStateInfo) doctorCheck {
-	check := doctorCheck{
-		label:      fmt.Sprintf("%s %s", agent, id),
-		status:     doctorStatusFromComponent(state.kind),
-		detail:     doctorComponentDetail(agent, id, state),
-		nextAction: doctorFix(agent, id, state),
-	}
-	return check
-}
-
-func doctorStatusFromComponent(kind componentStateKind) doctorStatus {
-	switch kind {
-	case stateInstalledCurrent:
-		return doctorStatusOK
-	case stateStale, stateNotInstalled:
-		return doctorStatusPartial
-	case stateConflict:
-		return doctorStatusBlocked
-	case stateNotSupported:
-		return doctorStatusNA
-	default:
-		return doctorStatusDegraded
-	}
-}
-
-func doctorComponentDetail(agent string, id ComponentID, state componentStateInfo) string {
-	switch state.kind {
-	case stateInstalledCurrent:
-		return doctorStateLabel(state.kind)
-	case stateStale:
-		return fmt.Sprintf("%s %s is stale", agent, id)
-	case stateNotInstalled:
-		return fmt.Sprintf("%s %s is not installed", agent, id)
-	case stateConflict:
-		return fmt.Sprintf("%s %s conflicts at %s", agent, id, state.conflictPath)
-	case stateNotSupported:
-		return fmt.Sprintf("%s does not support %s", agent, id)
-	default:
-		return fmt.Sprintf("%s %s state is unknown", agent, id)
-	}
-}
-
-// doctorStateLabel renders a component state for check details.
-func doctorStateLabel(kind componentStateKind) string {
-	switch kind {
-	case stateInstalledCurrent:
-		return "installed-current"
-	case stateStale:
-		return "stale"
-	case stateNotInstalled:
-		return "not installed"
-	case stateConflict:
-		return "conflict"
-	case stateNotSupported:
-		return "not supported"
-	default:
-		return "unknown"
-	}
 }
 
 const (

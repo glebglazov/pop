@@ -175,22 +175,21 @@ func TestDoctorReportsCanonicalCommandFamilies(t *testing.T) {
 	}
 }
 
-func TestDoctorNestedChecksAreGenericAndActionable(t *testing.T) {
-	fs := newFakeFS()
-	d := readOnlyDoctorDeps(t, fs, true, true, true)
-	setDoctorIntent(d, "claude")
+func TestDoctorNestedChecksAreCommandFamilyScopedAndActionable(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.loadProjectConfig = func() (*config.Config, error) { return nil, os.ErrNotExist }
 	report, err := buildDoctorReport(d)
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
 
-	integrate, ok := familyByCommand(report, "pop integrate")
+	project, ok := familyByCommand(report, "pop project")
 	if !ok {
-		t.Fatalf("missing pop integrate family")
+		t.Fatalf("missing pop project family")
 	}
-	check, ok := checkByLabel(integrate, "claude pane-skill")
+	check, ok := checkByLabel(project, "project config")
 	if !ok {
-		t.Fatalf("missing claude pane-skill check")
+		t.Fatalf("missing project config check")
 	}
 	if check.status != doctorStatusPartial {
 		t.Fatalf("check status = %s, want %s", check.status, doctorStatusPartial)
@@ -198,12 +197,12 @@ func TestDoctorNestedChecksAreGenericAndActionable(t *testing.T) {
 	if check.detail == "" {
 		t.Fatalf("non-OK check must carry detail")
 	}
-	if check.nextAction != "pop integrate claude --pane-skill" {
-		t.Fatalf("nextAction = %q, want pane-skill integrate command", check.nextAction)
+	if check.nextAction != "pop configure" {
+		t.Fatalf("nextAction = %q, want pop configure", check.nextAction)
 	}
 }
 
-func TestDoctorReadOnlyConflictCheck(t *testing.T) {
+func TestDoctorDoesNotRenderPaneSkillConflictAsPrimaryIntegrateRow(t *testing.T) {
 	fs := newFakeFS()
 	conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
 	fs.files[conflictPath] = []byte("my own skill")
@@ -219,25 +218,22 @@ func TestDoctorReadOnlyConflictCheck(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing pop integrate family")
 	}
-	check, ok := checkByLabel(integrate, "claude pane-skill")
+	if _, ok := checkByLabel(integrate, "claude pane-skill"); ok {
+		t.Fatalf("pane-skill conflict should not be rendered as a primary integrate row: %+v", integrate.checks)
+	}
+	check, ok := checkByLabel(integrate, "intended agent setup repair path")
 	if !ok {
-		t.Fatalf("missing claude pane-skill check")
+		t.Fatalf("missing intended agent setup repair path")
 	}
-	if check.status != doctorStatusBlocked {
-		t.Fatalf("check status = %s, want %s", check.status, doctorStatusBlocked)
-	}
-	if !strings.Contains(check.detail, conflictPath) {
-		t.Fatalf("blocked detail must name conflict path: %q", check.detail)
-	}
-	if !strings.Contains(check.nextAction, conflictPath) || !strings.Contains(check.nextAction, "pop integrate claude --pane-skill") {
-		t.Fatalf("blocked next action must remove path and re-integrate: %q", check.nextAction)
+	if check.status != doctorStatusOK || !strings.Contains(check.detail, "claude") {
+		t.Fatalf("repair path check = %+v, want OK detail naming intended agent", check)
 	}
 	if string(fs.files[conflictPath]) != "my own skill" {
 		t.Fatalf("doctor modified the user's own file")
 	}
 }
 
-func TestDoctorStaleComponentIsPartialCheck(t *testing.T) {
+func TestDoctorDoesNotRenderStalePaneSkillAsPrimaryIntegrateRow(t *testing.T) {
 	fs := newFakeFS()
 	setup := fakeDeps(installerHome, fs, nil)
 	if err := installFileComponent(setup, installerHome, ComponentPaneSkill, "claude"); err != nil {
@@ -257,18 +253,11 @@ func TestDoctorStaleComponentIsPartialCheck(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing pop integrate family")
 	}
-	check, ok := checkByLabel(integrate, "claude pane-skill")
-	if !ok {
-		t.Fatalf("missing claude pane-skill check")
+	if _, ok := checkByLabel(integrate, "claude pane-skill"); ok {
+		t.Fatalf("stale pane-skill should not be rendered as a primary integrate row: %+v", integrate.checks)
 	}
-	if check.status != doctorStatusPartial {
-		t.Fatalf("check status = %s, want %s", check.status, doctorStatusPartial)
-	}
-	if !strings.Contains(check.detail, "stale") {
-		t.Fatalf("stale check should carry concrete detail: %q", check.detail)
-	}
-	if check.nextAction != "pop integrate claude --pane-skill" {
-		t.Fatalf("nextAction = %q, want pane-skill integrate command", check.nextAction)
+	if integrate.status != doctorStatusOK {
+		t.Fatalf("stale optional pane-skill should not drive integrate family readiness: %+v", integrate)
 	}
 }
 
@@ -396,60 +385,38 @@ func TestDoctorPathOnlyConflictIsNotReportedWithoutIntent(t *testing.T) {
 	}
 }
 
-func TestDoctorIntendedAgentsReportConflictStaleAndUnsupportedComponents(t *testing.T) {
-	t.Run("conflict", func(t *testing.T) {
-		fs := newFakeFS()
-		conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
-		fs.files[conflictPath] = []byte("user-owned skill")
-		d := readOnlyDoctorDeps(t, fs, true, true, true)
-		setDoctorIntent(d, "claude")
+func TestDoctorUsesAgentComponentStateOnlyAsSupportingEvidence(t *testing.T) {
+	fs := newFakeFS()
+	claudeStatusWired(fs)
+	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	setDoctorIntent(d, "claude", "codex")
 
-		report, err := buildDoctorReport(d)
-		if err != nil {
-			t.Fatalf("buildDoctorReport: %v", err)
-		}
-		integrate, _ := familyByCommand(report, "pop integrate")
-		check, ok := checkByLabel(integrate, "claude pane-skill")
-		if !ok || check.status != doctorStatusBlocked {
-			t.Fatalf("conflict check = %+v, ok=%v", check, ok)
-		}
-	})
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
 
-	t.Run("stale", func(t *testing.T) {
-		fs := newFakeFS()
-		if err := installFileComponent(fakeDeps(installerHome, fs, nil), installerHome, ComponentPaneSkill, "claude"); err != nil {
-			t.Fatalf("install pane skill: %v", err)
-		}
-		renderFile, _, _ := paneSkillPaths()
-		fs.files[renderFile] = []byte("stale")
-		d := readOnlyDoctorDeps(t, fs, true, true, true)
-		setDoctorIntent(d, "claude")
+	monitorFamily, ok := familyByCommand(report, "pop monitor")
+	if !ok {
+		t.Fatalf("missing pop monitor family")
+	}
+	wiring, ok := checkByLabel(monitorFamily, "intended agent status wiring")
+	if !ok {
+		t.Fatalf("missing intended agent status wiring check")
+	}
+	if wiring.status != doctorStatusPartial || !strings.Contains(wiring.detail, "wired: claude") || !strings.Contains(wiring.detail, "codex (missing)") {
+		t.Fatalf("wiring check = %+v, want partial supporting evidence for intended agents", wiring)
+	}
 
-		report, err := buildDoctorReport(d)
-		if err != nil {
-			t.Fatalf("buildDoctorReport: %v", err)
+	integrate, ok := familyByCommand(report, "pop integrate")
+	if !ok {
+		t.Fatalf("missing pop integrate family")
+	}
+	for _, oldLabel := range []string{"claude status-wiring", "claude pane-skill", "codex workload-skills"} {
+		if _, ok := checkByLabel(integrate, oldLabel); ok {
+			t.Fatalf("old component-grid row %q should not be rendered in integrate family: %+v", oldLabel, integrate.checks)
 		}
-		integrate, _ := familyByCommand(report, "pop integrate")
-		check, ok := checkByLabel(integrate, "claude pane-skill")
-		if !ok || check.status != doctorStatusPartial || !strings.Contains(check.detail, "stale") {
-			t.Fatalf("stale check = %+v, ok=%v", check, ok)
-		}
-	})
-
-	t.Run("unsupported", func(t *testing.T) {
-		d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-		setDoctorIntent(d, "codex")
-
-		report, err := buildDoctorReport(d)
-		if err != nil {
-			t.Fatalf("buildDoctorReport: %v", err)
-		}
-		integrate, _ := familyByCommand(report, "pop integrate")
-		check, ok := checkByLabel(integrate, "codex workload-skills")
-		if !ok || check.status != doctorStatusNA || !strings.Contains(check.detail, "does not support") {
-			t.Fatalf("unsupported check = %+v, ok=%v", check, ok)
-		}
-	})
+	}
 }
 
 func TestDoctorHealthyCoreFamiliesRenderOK(t *testing.T) {
@@ -1074,7 +1041,8 @@ func TestRenderDoctorReportPinsRepresentativeFamilyOutput(t *testing.T) {
 			{label: "issue manifest readable", status: doctorStatusDegraded, detail: "manifest read returned inconsistent state"},
 		}),
 		familyReport("pop integrate", []doctorCheck{
-			{label: "claude pane-skill", status: doctorStatusBlocked, detail: "claude pane-skill conflicts at /home/me/.claude/skills/pane", nextAction: "rm /home/me/.claude/skills/pane && pop integrate claude --pane-skill"},
+			{label: "intended agent setup repair path", status: doctorStatusOK, detail: "can inspect and repair intended agent setup through pop integrate for: claude (workload config)"},
+			{label: "codex available agent suggestion", status: doctorStatusNA, detail: "agent executable is available on PATH but no Pop intent was detected", nextAction: "pop integrate codex"},
 		}),
 	}}
 
@@ -1090,8 +1058,9 @@ Partial   pop pane       tmux executable was not found
   Partial   tmux available - tmux executable was not found (next: brew install tmux)
 Degraded  pop workload   manifest read returned inconsistent state
   Degraded  issue manifest readable - manifest read returned inconsistent state
-Blocked   pop integrate  claude pane-skill conflicts at /home/me/.claude/skills/pane
-  Blocked   claude pane-skill - claude pane-skill conflicts at /home/me/.claude/skills/pane (next: rm /home/me/.claude/skills/pane && pop integrate claude --pane-skill)
+OK        pop integrate  ready
+  OK        intended agent setup repair path - can inspect and repair intended agent setup through pop integrate for: claude (workload config)
+  N/A       codex available agent suggestion - agent executable is available on PATH but no Pop intent was detected (next: pop integrate codex)
 `
 	if out.String() != want {
 		t.Fatalf("rendered doctor report mismatch:\nwant:\n%s\ngot:\n%s", want, out.String())

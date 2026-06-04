@@ -69,6 +69,10 @@ Flag: `-s, --switch` — switch tmux session instead of printing path.
 
 Interactively add project directories to your config.
 
+### `pop doctor`
+
+Print a read-only command-family readiness report for `pop project`, `pop worktree`, `pop monitor`, `pop pane`, `pop workload`, and `pop integrate`. Doctor explains degraded or blocked workflows with nested checks and next actions; it uses agent integration state only as supporting evidence when a command family depends on it.
+
 ## Live Agent Smoke
 
 To exercise workload execution against real agent CLIs, run the opt-in smoke script:

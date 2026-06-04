@@ -6,8 +6,9 @@ import (
 )
 
 // TestCatalog_StableIdentifiers pins the component identifier strings. They are
-// part of pop's external contract (component flags, removal targets, Doctor
-// rows), so a change here is a deliberate breaking change, not a refactor.
+// part of pop's external contract (component flags, removal targets, and
+// Doctor evidence reads), so a change here is a deliberate breaking change,
+// not a refactor.
 func TestCatalog_StableIdentifiers(t *testing.T) {
 	want := map[ComponentID]bool{
 		"status-wiring":      true,
