@@ -70,6 +70,40 @@ _Avoid_: Tracking (when you mean the act of entering the set, not the ongoing st
 **Registration** that happens as a side effect of an untracked pane's first report, rather than an explicit add — the common path for **agentic panes** via **integrations**. The trigger differs by report: reporting a status auto-registers the pane unless registration is suppressed; setting **Following** auto-registers only when following (never when unfollowing); a **Visit** never auto-registers.
 _Avoid_: Self-registration (same event seen from the agent's side; prefer auto-registration)
 
+### Agent integrations
+
+**Agent integration**:
+The per-agent wiring that makes a coding agent report pane status into the **Monitor** — hooks or an agent extension installed by `pop integrate`. Plumbing only: an agent integration never adds skills or other behavior-changing files to the agent.
+_Avoid_: Skill install, setup, framework
+
+**Integration component**:
+An individually consented unit `pop integrate` can install for one agent: the status wiring (core), the **Pane skill**, or the **Workload planning skills** with their gitignore step. Running integrate implies consent to the status wiring only; every other component is an explicit per-component opt-in.
+_Avoid_: Bundle, default install
+
+**Integration wizard**:
+The re-entrant interactive flow of `pop integrate <agent>`. It shows each **Integration component**'s current state, explains what the component brings before asking, and may be re-run at any time to add or remove components. Non-interactive runs require explicit component flags; without them they fail rather than installing a default.
+_Avoid_: One-shot installer, setup command
+
+**Integration refresh**:
+The automatic re-render of already-installed **Integration components** when the pop binary changes. Refresh never adds components the user did not opt into, never prompts, and leaves uninstalled agents alone.
+_Avoid_: Auto-install, update prompt
+
+**Doctor**:
+The readiness report opened by `pop doctor`: core checks (tmux, config, monitor daemon) plus a per-agent table of **Integration component** states — installed-current, stale, not installed, conflict, or not supported. Read-only; it never installs or repairs.
+_Avoid_: Integrate status, health subcommand
+
+**Integration conflict**:
+A skill already present at an agent's skill location under an embedded skill's name (with or without the `pop-` prefix) that pop does not own. Pop never installs over, removes, or refreshes a conflicting skill; the wizard and health check report the conflict and leave resolution to the user.
+_Avoid_: Stale integration, collision overwrite
+
+**Pane skill**:
+The embedded skill that teaches an agent to drive `pop pane`. An opt-in **Integration component**; pane monitoring works without it.
+_Avoid_: Agent integration, hooks
+
+**Workload planning skills**:
+The embedded, pop-independent skills (grill-with-docs, to-prd, to-issues) whose output feeds Issue sets. Versioned with the pop binary and installed only by explicit opt-in; pop's workload scheduling and execution do not depend on them being installed.
+_Avoid_: Workload framework, workload skills bundle, agent integration
+
 ### Pickers
 
 **Project picker**:

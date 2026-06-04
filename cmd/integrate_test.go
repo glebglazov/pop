@@ -12,6 +12,13 @@ import (
 	"testing"
 )
 
+// staleClaudeSettings is a settings.json body carrying an old-style pop hook.
+// The pop marker makes the dry-run report the agent as installed; the bytes
+// differ from the current serialization so it is also reported as stale. Used
+// by the refresh tests now that claude's status wiring lives only in
+// settings.json (no skill files on the default path).
+const staleClaudeSettings = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"~/.local/bin/pop-status unread"}]}]}}`
+
 // ----- Fake filesystem -------------------------------------------------------
 
 // fakeFS is a tiny in-memory filesystem used to drive integrateDeps in tests.
@@ -277,35 +284,25 @@ func TestRunIntegrateWith_AgentNameIsCaseInsensitive(t *testing.T) {
 
 // ----- integrateClaude: directory structure ----------------------------------
 
-func TestIntegrateClaude_WritesExactDirectoryLayout(t *testing.T) {
+func TestIntegrateClaude_WritesOnlyStatusWiring(t *testing.T) {
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Embedded skill files should be written as ~/.claude/commands/pop/<name>.md
-	skillEntries, _ := skillFiles.ReadDir("skills/pop")
-	for _, entry := range skillEntries {
-		if entry.IsDir() {
-			continue
-		}
-		want := filepath.Join("/h", ".claude", "commands", "pop", entry.Name())
-		if _, ok := fs.files[want]; !ok {
-			t.Errorf("expected skill at %s, files written: %v", want, sortedKeys(fs.files))
-		}
-	}
-
-	// settings.json should be written.
+	// settings.json (the status wiring) should be written.
 	settingsPath := filepath.Join("/h", ".claude", "settings.json")
 	if _, ok := fs.files[settingsPath]; !ok {
 		t.Errorf("expected settings.json at %s", settingsPath)
 	}
 
-	// Commands directory should have been removeAll'd before recreation
-	// (cleaning step). The mkdirAll for the commands dir should be present.
-	commandsDir := filepath.Join("/h", ".claude", "commands", "pop")
-	if !fs.dirs[commandsDir] {
-		t.Errorf("expected mkdirAll of %s", commandsDir)
+	// The default integrate path installs no skill files: nothing should land
+	// under ~/.claude/commands/.
+	commandsDir := filepath.Join("/h", ".claude", "commands")
+	for path := range fs.files {
+		if strings.HasPrefix(path, commandsDir+string(filepath.Separator)) {
+			t.Errorf("default integrate path wrote a skill file: %s", path)
+		}
 	}
 }
 
@@ -646,54 +643,18 @@ func TestIntegratePi_WritesExtensionAtCorrectPath(t *testing.T) {
 	}
 }
 
-func TestIntegratePi_WritesSkillDirectoryStructure(t *testing.T) {
+func TestIntegratePi_WritesNoSkillFiles(t *testing.T) {
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "pi"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// For each embedded source skill, expect a directory at
-	//   ~/.pi/agent/skills/pop-<basename>/
-	// containing a SKILL.md file.
-	skillEntries, _ := skillFiles.ReadDir("skills/pop")
-	for _, entry := range skillEntries {
-		if entry.IsDir() {
-			continue
-		}
-		base := strings.TrimSuffix(entry.Name(), ".md")
-		piName := "pop-" + base
-		dir := filepath.Join("/h", ".pi", "agent", "skills", piName)
-		skillFile := filepath.Join(dir, "SKILL.md")
-
-		if !fs.dirs[dir] {
-			t.Errorf("expected mkdirAll of %s", dir)
-		}
-		if _, ok := fs.files[skillFile]; !ok {
-			t.Errorf("expected skill file at %s, files: %v", skillFile, sortedKeys(fs.files))
-		}
-	}
-}
-
-func TestIntegratePi_InjectsFrontmatterName(t *testing.T) {
-	fs := newFakeFS()
-	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "pi"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Every installed pi skill must have a `name:` field that matches its
-	// parent directory (per the Agent Skills spec pi enforces).
-	skillEntries, _ := skillFiles.ReadDir("skills/pop")
-	for _, entry := range skillEntries {
-		if entry.IsDir() {
-			continue
-		}
-		base := strings.TrimSuffix(entry.Name(), ".md")
-		piName := "pop-" + base
-		path := filepath.Join("/h", ".pi", "agent", "skills", piName, "SKILL.md")
-		content := string(fs.files[path])
-		wantLine := "name: " + piName
-		if !strings.Contains(content, wantLine) {
-			t.Errorf("expected %q in %s frontmatter, got:\n%s", wantLine, path, content)
+	// The default integrate path installs only the status-sync extension; no
+	// skill directories should be created under ~/.pi/agent/skills/.
+	skillsDir := filepath.Join("/h", ".pi", "agent", "skills")
+	for path := range fs.files {
+		if strings.HasPrefix(path, skillsDir+string(filepath.Separator)) {
+			t.Errorf("default integrate path wrote a pi skill file: %s", path)
 		}
 	}
 }
@@ -710,29 +671,6 @@ func TestIntegratePi_DoesNotWriteOutsidePiTree(t *testing.T) {
 	}
 }
 
-func TestIntegratePi_OverwritesPriorSkillDirectory(t *testing.T) {
-	// Pre-seed a stale file inside the pop-pane skill directory and verify
-	// it gets cleaned out when re-installing — guards against rename rot.
-	fs := newFakeFS()
-	stalePath := filepath.Join("/h", ".pi", "agent", "skills", "pop-pane", "stale.md")
-	fs.files[stalePath] = []byte("old garbage")
-
-	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "pi"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if _, exists := fs.files[stalePath]; exists {
-		t.Errorf("stale file %s should have been removed by removeAll, files: %v",
-			stalePath, sortedKeys(fs.files))
-	}
-
-	// Fresh SKILL.md should be present.
-	freshPath := filepath.Join("/h", ".pi", "agent", "skills", "pop-pane", "SKILL.md")
-	if _, ok := fs.files[freshPath]; !ok {
-		t.Errorf("expected fresh SKILL.md at %s", freshPath)
-	}
-}
-
 func TestIntegratePi_ExtensionWriteError(t *testing.T) {
 	fs := newFakeFS()
 	extPath := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
@@ -744,28 +682,6 @@ func TestIntegratePi_ExtensionWriteError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "disk full") {
 		t.Errorf("expected wrapped error to mention disk full, got %v", err)
-	}
-}
-
-func TestIntegratePi_SkillWriteError(t *testing.T) {
-	fs := newFakeFS()
-	// Fail the first SKILL.md write we attempt.
-	skillEntries, _ := skillFiles.ReadDir("skills/pop")
-	var first string
-	for _, entry := range skillEntries {
-		if !entry.IsDir() {
-			base := strings.TrimSuffix(entry.Name(), ".md")
-			first = filepath.Join("/h", ".pi", "agent", "skills", "pop-"+base, "SKILL.md")
-			break
-		}
-	}
-	if first == "" {
-		t.Skip("no embedded skills to test against")
-	}
-	fs.writeErr[first] = os.ErrPermission
-
-	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "pi"); err == nil {
-		t.Fatal("expected error from skill write failure")
 	}
 }
 
@@ -790,25 +706,18 @@ func TestIntegrateOpencode_WritesPluginAtCorrectPath(t *testing.T) {
 	}
 }
 
-func TestIntegrateOpencode_WritesSkillFiles(t *testing.T) {
+func TestIntegrateOpencode_WritesNoSkillFiles(t *testing.T) {
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// For each embedded source skill, expect a file at
-	//   ~/.config/opencode/agent/pop-<basename>.md
-	skillEntries, _ := skillFiles.ReadDir("skills/pop")
-	for _, entry := range skillEntries {
-		if entry.IsDir() {
-			continue
-		}
-		base := strings.TrimSuffix(entry.Name(), ".md")
-		opencodeName := "pop-" + base
-		skillFile := filepath.Join("/h", ".config", "opencode", "agent", opencodeName+".md")
-
-		if _, ok := fs.files[skillFile]; !ok {
-			t.Errorf("expected skill file at %s, files: %v", skillFile, sortedKeys(fs.files))
+	// The default integrate path installs only the status-sync plugin; no
+	// agent skill markdown should land under ~/.config/opencode/agent/.
+	agentDir := filepath.Join("/h", ".config", "opencode", "agent")
+	for path := range fs.files {
+		if strings.HasPrefix(path, agentDir+string(filepath.Separator)) {
+			t.Errorf("default integrate path wrote an opencode skill file: %s", path)
 		}
 	}
 }
@@ -851,40 +760,6 @@ func TestIntegrateOpencode_PluginWriteError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "disk full") {
 		t.Errorf("expected wrapped error to mention disk full, got %v", err)
-	}
-}
-
-func TestIntegrateOpencode_SkillWriteError(t *testing.T) {
-	fs := newFakeFS()
-	// Fail the first skill write we attempt.
-	skillEntries, _ := skillFiles.ReadDir("skills/pop")
-	var first string
-	for _, entry := range skillEntries {
-		if !entry.IsDir() {
-			base := strings.TrimSuffix(entry.Name(), ".md")
-			first = filepath.Join("/h", ".config", "opencode", "agent", "pop-"+base+".md")
-			break
-		}
-	}
-	if first == "" {
-		t.Skip("no embedded skills to test against")
-	}
-	fs.writeErr[first] = os.ErrPermission
-
-	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err == nil {
-		t.Fatal("expected error from skill write failure")
-	}
-}
-
-func TestIntegrateOpencode_CreatesAgentDirectory(t *testing.T) {
-	fs := newFakeFS()
-	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	agentDir := filepath.Join("/h", ".config", "opencode", "agent")
-	if !fs.dirs[agentDir] {
-		t.Errorf("expected mkdirAll of %s", agentDir)
 	}
 }
 
@@ -1043,89 +918,19 @@ func TestIntegrateCursor_WriteError(t *testing.T) {
 	}
 }
 
-func TestIntegrateCursor_WritesSkillDirectoryStructure(t *testing.T) {
+func TestIntegrateCursor_WritesNoSkillFiles(t *testing.T) {
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	skillEntries, _ := skillFiles.ReadDir("skills/pop")
-	for _, entry := range skillEntries {
-		if entry.IsDir() {
-			continue
+	// The default integrate path installs only the hooks; no skill
+	// directories should be created under ~/.cursor/skills/.
+	skillsDir := filepath.Join("/h", ".cursor", "skills")
+	for path := range fs.files {
+		if strings.HasPrefix(path, skillsDir+string(filepath.Separator)) {
+			t.Errorf("default integrate path wrote a cursor skill file: %s", path)
 		}
-		base := strings.TrimSuffix(entry.Name(), ".md")
-		cursorName := "pop-" + base
-		dir := filepath.Join("/h", ".cursor", "skills", cursorName)
-		skillFile := filepath.Join(dir, "SKILL.md")
-
-		if !fs.dirs[dir] {
-			t.Errorf("expected mkdirAll of %s", dir)
-		}
-		if _, ok := fs.files[skillFile]; !ok {
-			t.Errorf("expected skill at %s", skillFile)
-		}
-	}
-}
-
-func TestIntegrateCursor_SkillFrontmatterName(t *testing.T) {
-	fs := newFakeFS()
-	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	skillEntries, _ := skillFiles.ReadDir("skills/pop")
-	for _, entry := range skillEntries {
-		if entry.IsDir() {
-			continue
-		}
-		base := strings.TrimSuffix(entry.Name(), ".md")
-		cursorName := "pop-" + base
-		path := filepath.Join("/h", ".cursor", "skills", cursorName, "SKILL.md")
-		content := string(fs.files[path])
-		wantLine := "name: " + cursorName
-		if !strings.Contains(content, wantLine) {
-			t.Errorf("skill %s missing frontmatter %q", path, wantLine)
-		}
-	}
-}
-
-func TestIntegrateCursor_RemovesStaleSkillFiles(t *testing.T) {
-	fs := newFakeFS()
-	stalePath := filepath.Join("/h", ".cursor", "skills", "pop-pane", "stale.md")
-	fs.files[stalePath] = []byte("stale")
-
-	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if _, ok := fs.files[stalePath]; ok {
-		t.Error("stale skill file should have been removed")
-	}
-	freshPath := filepath.Join("/h", ".cursor", "skills", "pop-pane", "SKILL.md")
-	if _, ok := fs.files[freshPath]; !ok {
-		t.Errorf("expected fresh skill at %s", freshPath)
-	}
-}
-
-func TestIntegrateCursor_SkillWriteError(t *testing.T) {
-	fs := newFakeFS()
-	skillEntries, _ := skillFiles.ReadDir("skills/pop")
-	var first string
-	for _, entry := range skillEntries {
-		if !entry.IsDir() {
-			base := strings.TrimSuffix(entry.Name(), ".md")
-			first = filepath.Join("/h", ".cursor", "skills", "pop-"+base, "SKILL.md")
-			break
-		}
-	}
-	if first == "" {
-		t.Skip("no embedded skills to test against")
-	}
-	fs.writeErr[first] = os.ErrPermission
-
-	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err == nil {
-		t.Fatal("expected error from skill write failure")
 	}
 }
 
@@ -1202,7 +1007,7 @@ func TestDryRun_InstalledAndStale(t *testing.T) {
 	}{
 		{
 			agent:     "claude",
-			stalePath: filepath.Join(".claude", "commands", "pop", "pane.md"),
+			stalePath: filepath.Join(".claude", "settings.json"),
 		},
 		{
 			agent:     "codex",
@@ -1232,6 +1037,8 @@ func TestDryRun_InstalledAndStale(t *testing.T) {
 				t.Fatalf("seed install did not produce %s; update the test fixture", fullPath)
 			}
 			switch tc.agent {
+			case "claude":
+				fs.files[fullPath] = []byte(staleClaudeSettings)
 			case "codex":
 				fs.files[fullPath] = []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"~/.local/bin/pop-status unread"}]}]}}`)
 			case "cursor":
@@ -1284,18 +1091,10 @@ func TestDryRun_ClaudeInstalledDetectedViaSettingsHooks(t *testing.T) {
 	// Claude's settings.json is the only install target that cannot be
 	// detected by writeFile presence alone (it exists for every claude user).
 	// Verify the installClaudeHooks nudge correctly sets installed=true when
-	// existing pop hooks are found — even though the commands/pop/ directory
-	// contains the current, unchanged skill files.
+	// existing pop hooks are found. settings.json is the sole status-wiring
+	// artifact now that skills are off the default path.
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
-
-	// Delete the commands dir so only settings.json remains as a signal.
-	commandsDir := filepath.Join("/h", ".claude", "commands", "pop")
-	for path := range fs.files {
-		if strings.HasPrefix(path, commandsDir+string(filepath.Separator)) {
-			delete(fs.files, path)
-		}
-	}
 
 	d := withDryRun(fakeDeps("/h", fs, io.Discard))
 	if err := runIntegrateWith(d, "claude"); err != nil {
@@ -1409,12 +1208,14 @@ func TestEnsureIntegrations_UpdatesStaleAgent(t *testing.T) {
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
-	// Corrupt one file so claude shows as changed.
-	stalePath := filepath.Join("/h", ".claude", "commands", "pop", "pane.md")
+	// Corrupt the settings.json so claude's status wiring shows as stale:
+	// an old-style pop hook marks it installed, but the bytes differ from the
+	// current serialization so the dry-run reports changed.
+	stalePath := filepath.Join("/h", ".claude", "settings.json")
 	if _, exists := fs.files[stalePath]; !exists {
 		t.Fatalf("seed install did not produce %s", stalePath)
 	}
-	fs.files[stalePath] = []byte("STALE")
+	fs.files[stalePath] = []byte(staleClaudeSettings)
 
 	dry, real := fakeFactories("/h", fs)
 
@@ -1422,13 +1223,13 @@ func TestEnsureIntegrations_UpdatesStaleAgent(t *testing.T) {
 	if warnings != nil {
 		t.Errorf("expected no warnings on successful update, got %v", warnings)
 	}
-	// File should now match embedded content again.
-	embedded, err := skillFiles.ReadFile("skills/pop/pane.md")
-	if err != nil {
-		t.Fatalf("read embedded pane.md: %v", err)
+	// Settings should now carry the current pop hooks and the stale marker
+	// should be gone.
+	if bytes.Contains(fs.files[stalePath], []byte("pop-status unread")) {
+		t.Errorf("stale claude hook was not refreshed")
 	}
-	if !bytes.Equal(fs.files[stalePath], embedded) {
-		t.Errorf("stale file was not updated to embedded bytes")
+	if !bytes.Contains(fs.files[stalePath], []byte("pop pane set-status clear")) {
+		t.Errorf("claude settings not updated to current hooks")
 	}
 	if got := readStateRevision(t); got != "rev2" {
 		t.Errorf("state.json revision = %q, want %q", got, "rev2")
@@ -1443,8 +1244,8 @@ func TestEnsureIntegrations_RetriesOnFailure(t *testing.T) {
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
-	stalePath := filepath.Join("/h", ".claude", "commands", "pop", "pane.md")
-	fs.files[stalePath] = []byte("STALE")
+	stalePath := filepath.Join("/h", ".claude", "settings.json")
+	fs.files[stalePath] = []byte(staleClaudeSettings)
 
 	// Inject a write error on the file we're about to update.
 	fs.writeErr[stalePath] = errors.New("simulated write failure")
@@ -1479,8 +1280,8 @@ func TestEnsureIntegrations_PartialFailureDoesNotStamp(t *testing.T) {
 	installViaFake(t, fs, "/h", "pi")
 
 	// Make claude stale.
-	clauseStale := filepath.Join("/h", ".claude", "commands", "pop", "pane.md")
-	fs.files[clauseStale] = []byte("STALE")
+	clauseStale := filepath.Join("/h", ".claude", "settings.json")
+	fs.files[clauseStale] = []byte(staleClaudeSettings)
 
 	// Make pi stale AND fail its write.
 	piExtPath := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
@@ -1491,8 +1292,7 @@ func TestEnsureIntegrations_PartialFailureDoesNotStamp(t *testing.T) {
 	warnings := ensureIntegrationsForRevisionWith("rev4", dry, real)
 
 	// claude should have updated cleanly.
-	embedded, _ := skillFiles.ReadFile("skills/pop/pane.md")
-	if !bytes.Equal(fs.files[clauseStale], embedded) {
+	if !bytes.Contains(fs.files[clauseStale], []byte("pop pane set-status clear")) {
 		t.Error("claude stale file should have been updated")
 	}
 	// pi should have produced a warning.
@@ -1592,8 +1392,8 @@ func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
 	installViaFake(t, fs, "/h", "pi")
 
 	// Make both stale.
-	clauseStale := filepath.Join("/h", ".claude", "commands", "pop", "pane.md")
-	fs.files[clauseStale] = []byte("STALE claude")
+	clauseStale := filepath.Join("/h", ".claude", "settings.json")
+	fs.files[clauseStale] = []byte(staleClaudeSettings)
 	piStale := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
 	fs.files[piStale] = []byte("STALE pi")
 
@@ -1645,8 +1445,8 @@ func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
-	stalePath := filepath.Join("/h", ".claude", "commands", "pop", "pane.md")
-	fs.files[stalePath] = []byte("STALE")
+	stalePath := filepath.Join("/h", ".claude", "settings.json")
+	fs.files[stalePath] = []byte(staleClaudeSettings)
 	fs.writeErr[stalePath] = errors.New("simulated failure")
 
 	dry, real := fakeFactories("/h", fs)

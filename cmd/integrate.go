@@ -122,25 +122,25 @@ var integrateUpdateExisting bool
 
 var integrateCmd = &cobra.Command{
 	Use:   "integrate [agent]",
-	Short: "Install pop integrations for a coding agent",
-	Long: `Install pop integrations (skills + pane-status hooks) for a coding agent.
+	Short: "Install pop status wiring for a coding agent",
+	Long: `Install pop's status wiring for a coding agent.
+
+The status wiring makes the agent report pane status to pop's monitor; it
+changes no agent behavior. Skills (the pane skill and the workload planning
+skills) are separate opt-ins and are not installed by this command.
 
 Supported agents:
-  claude    Install slash commands at ~/.claude/commands/pop/ and pane
-            monitoring hooks in ~/.claude/settings.json.
+  claude    Install pane monitoring hooks in ~/.claude/settings.json.
   codex     Install pane monitoring hooks in ~/.codex/hooks.json.
-  pi        Install skills at ~/.pi/agent/skills/pop-<name>/SKILL.md and a
-            pane monitoring extension at
+  pi        Install a pane monitoring extension at
             ~/.pi/agent/extensions/pop-status-sync.ts.
-  opencode  Install skills at ~/.config/opencode/agent/pop-<name>.md and a
-            pane monitoring plugin at
+  opencode  Install a pane monitoring plugin at
             ~/.config/opencode/plugins/pop-status-sync.ts.
-  cursor    Install skills at ~/.cursor/skills/pop-<name>/SKILL.md and pane
-            monitoring hooks in ~/.cursor/hooks.json.
+  cursor    Install pane monitoring hooks in ~/.cursor/hooks.json.
 
-Re-running the command for an agent is idempotent: existing pop integration
-files for that agent are replaced with the current versions, and unrelated
-hooks/skills are preserved.
+Re-running the command for an agent is idempotent: existing pop status wiring
+for that agent is refreshed to the current version, and unrelated hooks are
+preserved.
 
 With --update-existing, no agent argument is expected: pop detects which
 agents are already integrated and refreshes them to the current binary's
@@ -176,21 +176,31 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 	return runIntegrateWith(defaultIntegrateDeps(), args[0])
 }
 
+// runIntegrateWith installs the status-wiring component for the given agent.
+//
+// Bare `pop integrate <agent>` installs only the status wiring — the core
+// component implied by the integrate verb (ADR 0010). The pane skill and the
+// workload planning skills are explicit opt-ins landed by later slices, so no
+// skill files are written on this path. Component knowledge comes from the
+// catalog; this function does not hardcode the agent fan-out.
 func runIntegrateWith(d *integrateDeps, agent string) error {
-	switch strings.ToLower(agent) {
-	case "claude":
-		return integrateClaude(d)
-	case "codex":
-		return integrateCodex(d)
-	case "pi":
-		return integratePi(d)
-	case "opencode":
-		return integrateOpencode(d)
-	case "cursor":
-		return integrateCursor(d)
-	default:
+	agent = strings.ToLower(agent)
+
+	comp, ok := lookupComponent(ComponentStatusWiring)
+	if !ok {
+		return fmt.Errorf("status-wiring component missing from catalog")
+	}
+	// The status-wiring support set is exactly the known agents, so this
+	// doubles as the unknown-agent guard.
+	if !comp.supported(agent) {
 		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
 	}
+
+	home, err := d.userHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return comp.install(d, home, agent)
 }
 
 // ----- Claude integration ----------------------------------------------------
@@ -209,56 +219,6 @@ var popHooks = []hookSpec{
 	{"PreToolUse", "pop pane set-status working 2>/dev/null || true"},
 	{"Stop", "pop pane set-status unread 2>/dev/null || true"},
 	{"Notification", "pop pane set-status unread 2>/dev/null || true"},
-}
-
-func integrateClaude(d *integrateDeps) error {
-	home, err := d.userHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	if err := installClaudeCommands(d, home); err != nil {
-		return err
-	}
-	if err := installClaudeHooks(d, home); err != nil {
-		return err
-	}
-	return nil
-}
-
-// installClaudeCommands writes the embedded skills as Claude slash commands
-// under ~/.claude/commands/pop/. The directory is wiped first so removed
-// skills do not linger.
-func installClaudeCommands(d *integrateDeps, home string) error {
-	commandsDir := filepath.Join(home, ".claude", "commands", "pop")
-	if err := d.removeAll(commandsDir); err != nil {
-		return fmt.Errorf("failed to clean %s: %w", commandsDir, err)
-	}
-	if err := d.mkdirAll(commandsDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create %s: %w", commandsDir, err)
-	}
-
-	entries, err := skillFiles.ReadDir("skills/pop")
-	if err != nil {
-		return fmt.Errorf("failed to read embedded skills: %w", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		data, err := skillFiles.ReadFile("skills/pop/" + entry.Name())
-		if err != nil {
-			return fmt.Errorf("failed to read skill %s: %w", entry.Name(), err)
-		}
-		dest := filepath.Join(commandsDir, entry.Name())
-		if err := d.writeFile(dest, data, 0o644); err != nil {
-			return fmt.Errorf("failed to write %s: %w", dest, err)
-		}
-		if d.stdout != nil {
-			fmt.Fprintf(d.stdout, "  installed /pop:%s\n", strings.TrimSuffix(entry.Name(), ".md"))
-		}
-	}
-	return nil
 }
 
 // installClaudeHooks merges pop's hook entries into ~/.claude/settings.json,
@@ -353,36 +313,12 @@ var codexPopHooks = []hookSpec{
 	{"Stop", "pop pane set-status unread 2>/dev/null || true"},
 }
 
-func integrateCodex(d *integrateDeps) error {
-	home, err := d.userHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	return installCodexHooks(d, home)
-}
-
 func installCodexHooks(d *integrateDeps, home string) error {
 	hooksPath := filepath.Join(home, ".codex", "hooks.json")
 	return installJSONHooks(d, hooksPath, codexPopHooks)
 }
 
 // ----- Pi integration --------------------------------------------------------
-
-func integratePi(d *integrateDeps) error {
-	home, err := d.userHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	if err := installPiExtension(d, home); err != nil {
-		return err
-	}
-	if err := installPiSkills(d, home); err != nil {
-		return err
-	}
-	return nil
-}
 
 // installPiExtension writes the embedded pi extension TypeScript file. Pi
 // auto-discovers any *.ts file under ~/.pi/agent/extensions/ at startup.
@@ -397,46 +333,6 @@ func installPiExtension(d *integrateDeps, home string) error {
 	}
 	if d.stdout != nil {
 		fmt.Fprintf(d.stdout, "Installed pi extension at %s\n", extPath)
-	}
-	return nil
-}
-
-// installPiSkills writes each embedded skill as a pi skill directory under
-// ~/.pi/agent/skills/pop-<basename>/SKILL.md. Pi requires the frontmatter
-// `name` field to match the parent directory; we inject it on install so the
-// source files stay agent-agnostic.
-func installPiSkills(d *integrateDeps, home string) error {
-	entries, err := skillFiles.ReadDir("skills/pop")
-	if err != nil {
-		return fmt.Errorf("failed to read embedded skills: %w", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		data, err := skillFiles.ReadFile("skills/pop/" + entry.Name())
-		if err != nil {
-			return fmt.Errorf("failed to read skill %s: %w", entry.Name(), err)
-		}
-		base := strings.TrimSuffix(entry.Name(), ".md")
-		piName := "pop-" + base
-		dir := filepath.Join(home, ".pi", "agent", "skills", piName)
-		// Wipe any prior install of this exact skill so a renamed file does
-		// not leave a stale SKILL.md behind.
-		if err := d.removeAll(dir); err != nil {
-			return fmt.Errorf("failed to clean %s: %w", dir, err)
-		}
-		if err := d.mkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("failed to create %s: %w", dir, err)
-		}
-		dest := filepath.Join(dir, "SKILL.md")
-		content := injectFrontmatterName(string(data), piName)
-		if err := d.writeFile(dest, []byte(content), 0o644); err != nil {
-			return fmt.Errorf("failed to write %s: %w", dest, err)
-		}
-		if d.stdout != nil {
-			fmt.Fprintf(d.stdout, "  installed pi skill %s\n", piName)
-		}
 	}
 	return nil
 }
@@ -476,21 +372,6 @@ func injectFrontmatterName(content, name string) string {
 
 // ----- Opencode integration --------------------------------------------------
 
-func integrateOpencode(d *integrateDeps) error {
-	home, err := d.userHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	if err := installOpencodePlugin(d, home); err != nil {
-		return err
-	}
-	if err := installOpencodeSkills(d, home); err != nil {
-		return err
-	}
-	return nil
-}
-
 // installOpencodePlugin writes the embedded opencode plugin TypeScript file.
 // Opencode auto-discovers any *.ts file under ~/.config/opencode/plugins/ at startup.
 func installOpencodePlugin(d *integrateDeps, home string) error {
@@ -504,38 +385,6 @@ func installOpencodePlugin(d *integrateDeps, home string) error {
 	}
 	if d.stdout != nil {
 		fmt.Fprintf(d.stdout, "Installed opencode plugin at %s\n", pluginPath)
-	}
-	return nil
-}
-
-// installOpencodeSkills writes each embedded skill as an opencode agent markdown
-// file under ~/.config/opencode/agent/pop-<basename>.md.
-func installOpencodeSkills(d *integrateDeps, home string) error {
-	entries, err := skillFiles.ReadDir("skills/pop")
-	if err != nil {
-		return fmt.Errorf("failed to read embedded skills: %w", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		data, err := skillFiles.ReadFile("skills/pop/" + entry.Name())
-		if err != nil {
-			return fmt.Errorf("failed to read skill %s: %w", entry.Name(), err)
-		}
-		base := strings.TrimSuffix(entry.Name(), ".md")
-		opencodeName := "pop-" + base
-		agentDir := filepath.Join(home, ".config", "opencode", "agent")
-		if err := d.mkdirAll(agentDir, 0o755); err != nil {
-			return fmt.Errorf("failed to create %s: %w", agentDir, err)
-		}
-		dest := filepath.Join(agentDir, opencodeName+".md")
-		if err := d.writeFile(dest, data, 0o644); err != nil {
-			return fmt.Errorf("failed to write %s: %w", dest, err)
-		}
-		if d.stdout != nil {
-			fmt.Fprintf(d.stdout, "  installed opencode agent %s\n", opencodeName)
-		}
 	}
 	return nil
 }
@@ -555,21 +404,6 @@ var cursorPopHooks = []cursorHookSpec{
 	{"preToolUse", "pop pane set-status working --label cursor 2>/dev/null || true"},
 	{"afterAgentResponse", "pop pane set-status unread --label cursor 2>/dev/null || true"},
 	{"stop", "pop pane set-status unread --label cursor 2>/dev/null || true"},
-}
-
-func integrateCursor(d *integrateDeps) error {
-	home, err := d.userHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	if err := installCursorHooks(d, home); err != nil {
-		return err
-	}
-	if err := installCursorSkills(d, home); err != nil {
-		return err
-	}
-	return nil
 }
 
 // installCursorHooks merges pop's hook entries into ~/.cursor/hooks.json,
@@ -641,44 +475,6 @@ func installCursorHooks(d *integrateDeps, home string) error {
 
 	if d.stdout != nil {
 		fmt.Fprintf(d.stdout, "Installed %d hook(s) in %s\n", len(cursorPopHooks), hooksPath)
-	}
-	return nil
-}
-
-// installCursorSkills writes each embedded skill as a Cursor skill directory
-// under ~/.cursor/skills/pop-<basename>/SKILL.md. Cursor requires the
-// frontmatter `name` field to match the parent directory; we inject it on
-// install so the source files stay agent-agnostic.
-func installCursorSkills(d *integrateDeps, home string) error {
-	entries, err := skillFiles.ReadDir("skills/pop")
-	if err != nil {
-		return fmt.Errorf("failed to read embedded skills: %w", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		data, err := skillFiles.ReadFile("skills/pop/" + entry.Name())
-		if err != nil {
-			return fmt.Errorf("failed to read skill %s: %w", entry.Name(), err)
-		}
-		base := strings.TrimSuffix(entry.Name(), ".md")
-		cursorName := "pop-" + base
-		dir := filepath.Join(home, ".cursor", "skills", cursorName)
-		if err := d.removeAll(dir); err != nil {
-			return fmt.Errorf("failed to clean %s: %w", dir, err)
-		}
-		if err := d.mkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("failed to create %s: %w", dir, err)
-		}
-		dest := filepath.Join(dir, "SKILL.md")
-		content := injectFrontmatterName(string(data), cursorName)
-		if err := d.writeFile(dest, []byte(content), 0o644); err != nil {
-			return fmt.Errorf("failed to write %s: %w", dest, err)
-		}
-		if d.stdout != nil {
-			fmt.Fprintf(d.stdout, "  installed cursor skill %s\n", cursorName)
-		}
 	}
 	return nil
 }
