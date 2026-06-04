@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -61,6 +62,13 @@ type integrateDeps struct {
 	readlink  func(string) (string, error)
 	lstatMode func(string) (os.FileMode, error)
 
+	// Gitignore step (ADR 0010 global-config sub-consent). gitConfig reads a
+	// git config value (used read-only for core.excludesfile; git config is
+	// never mutated); getenv resolves environment variables (XDG_CONFIG_HOME)
+	// for git's default global ignore path.
+	gitConfig func(key string) (string, error)
+	getenv    func(string) string
+
 	// Dry-run mode: set DryRun=true to turn writeFile into a comparator.
 	// `installed` and `changed` are output fields filled in during the run.
 	DryRun    bool
@@ -86,6 +94,14 @@ func defaultIntegrateDeps() *integrateDeps {
 			}
 			return fi.Mode(), nil
 		},
+		gitConfig: func(key string) (string, error) {
+			out, err := exec.Command("git", "config", "--get", key).Output()
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(string(out)), nil
+		},
+		getenv: os.Getenv,
 	}
 }
 
@@ -117,6 +133,8 @@ func withDryRun(base *integrateDeps) *integrateDeps {
 		userHomeDir: base.userHomeDir,
 		readFile:    base.readFile,
 		dataDir:     base.dataDir,
+		gitConfig:   base.gitConfig,
+		getenv:      base.getenv,
 		DryRun:      true,
 	}
 	// The link installer is not exercised on the dry-run/refresh path in this
@@ -166,6 +184,12 @@ var integratePaneSkill bool
 // the workload planning skills (grill-with-docs, to-prd, to-issues) are
 // installed for the agent alongside the core status wiring.
 var integrateWorkloadSkills bool
+
+// integrateWorkloadGitignore is the --workload-gitignore component flag. When
+// set, the global-gitignore sub-step is applied (the thoughts/ ignore line is
+// appended to the resolved global excludes file). Its effect is global and
+// agent-independent; the agent argument only anchors the command form.
+var integrateWorkloadGitignore bool
 
 var integrateCmd = &cobra.Command{
 	Use:   "integrate [agent]",
@@ -236,6 +260,8 @@ func init() {
 		"Install the pane skill (lets the agent drive tmux panes) alongside the status wiring")
 	integrateCmd.Flags().BoolVar(&integrateWorkloadSkills, "workload-skills", false,
 		"Install the workload planning skills (grill-with-docs, to-prd, to-issues) alongside the status wiring")
+	integrateCmd.Flags().BoolVar(&integrateWorkloadGitignore, "workload-gitignore", false,
+		"Append the thoughts/ line to your global git excludes file (global effect; never mutates git config)")
 	rootCmd.AddCommand(integrateCmd)
 }
 
@@ -249,6 +275,9 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 	}
 	if integrateWorkloadSkills {
 		optins = append(optins, ComponentWorkloadSkills)
+	}
+	if integrateWorkloadGitignore {
+		optins = append(optins, ComponentWorkloadGitignore)
 	}
 	return runIntegrateComponents(defaultIntegrateDeps(), args[0], optins, stdinIsInteractive())
 }
@@ -320,6 +349,15 @@ func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID
 		return err
 	}
 	for _, id := range optins {
+		comp, _ := lookupComponent(id)
+		// A component carrying its own install func (the gitignore step) is
+		// applied directly; file-based components go through the link installer.
+		if comp.install != nil {
+			if err := comp.install(d, home, agent); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := installFileComponent(d, home, id, agent); err != nil {
 			return err
 		}

@@ -137,6 +137,11 @@ func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 		symlink:     fs.symlink,
 		readlink:    fs.readlink,
 		lstatMode:   fs.lstatMode,
+		// Gitignore-step defaults: no core.excludesfile and no XDG override, so
+		// the target resolves to <home>/.config/git/ignore. Gitignore tests
+		// override these to exercise the other resolutions.
+		gitConfig: func(string) (string, error) { return "", os.ErrNotExist },
+		getenv:    func(string) string { return "" },
 	}
 }
 

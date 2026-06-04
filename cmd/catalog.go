@@ -38,10 +38,11 @@ const (
 // identifier, the set of agents that can host it, the embedded source paths it
 // renders from, and (once wired) the installer that applies it for an agent.
 //
-// Components whose install is nil are declared for identifier and
-// support-matrix stability but their install path is landed by a later slice
-// (the render engine and wizard). Only ComponentStatusWiring is wired in this
-// slice; it is the sole component the bare integrate path installs.
+// A non-nil install applies the component directly (status wiring; the
+// gitignore step, whose effect is global and agent-independent). File-based
+// components leave install nil and go through the link installer, driven by
+// their sources. ComponentStatusWiring is the sole component the bare integrate
+// path installs; the rest are explicit opt-ins.
 type integrationComponent struct {
 	id       ComponentID
 	supports map[string]bool
@@ -101,6 +102,7 @@ var integrationCatalog = []integrationComponent{
 	{
 		id:       ComponentWorkloadGitignore,
 		supports: agentSet("claude", "codex", "pi", "opencode", "cursor"),
+		install:  installGitignore,
 	},
 }
 
