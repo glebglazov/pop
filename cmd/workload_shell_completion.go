@@ -33,9 +33,9 @@ func registerWorkloadShellCompletions() {
 	workloadSetPriorityCmd.ValidArgsFunction = completeWorkloadSetPriorityArgs
 	workloadRunIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
 	workloadRunIssuesCmd.ValidArgsFunction = completeWorkloadRunIssuesArgs
-	workloadResetIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
-	workloadCompleteIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
-	workloadSkipIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
+	workloadResetIssueCmd.ValidArgsFunction = completeWorkloadIssuePathArgs
+	workloadCompleteIssueCmd.ValidArgsFunction = completeWorkloadIssuePathArgs
+	workloadSkipIssueCmd.ValidArgsFunction = completeWorkloadIssuePathArgs
 }
 
 func registerWorkloadPathFlagCompletions() {
@@ -147,6 +147,13 @@ func completeWorkloadRunIssueArgs(cmd *cobra.Command, args []string, toComplete 
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	return completeWorkloadIssueTargets(cmd, args, toComplete)
+}
+
+func completeWorkloadIssuePathArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeWorkloadIssuePaths(cmd, args, toComplete)
 }
 
 func completeWorkloadRunIssuesArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

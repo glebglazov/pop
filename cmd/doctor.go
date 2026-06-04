@@ -379,23 +379,83 @@ func doctorStateLabel(kind componentStateKind) string {
 	}
 }
 
+const (
+	doctorANSIReset  = "\033[0m"
+	doctorANSIBold   = "\033[1m"
+	doctorANSIDim    = "\033[2m"
+	doctorANSIRed    = "\033[31m"
+	doctorANSIGreen  = "\033[32m"
+	doctorANSIYellow = "\033[33m"
+	doctorANSICyan   = "\033[36m"
+)
+
 func renderDoctorReport(w io.Writer, report *doctorReport) {
-	fmt.Fprintln(w, "Command-family readiness:")
+	color := doctorColorEnabled(w)
+	fmt.Fprintln(w, doctorStyled(color, doctorANSIBold, "Command-family readiness"))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "STATUS    COMMAND        SUMMARY")
 	for _, family := range report.families {
-		if family.reason != "" {
-			fmt.Fprintf(w, "\n%s: %s (%s)\n", family.command, family.status, family.reason)
-		} else {
-			fmt.Fprintf(w, "\n%s: %s\n", family.command, family.status)
-		}
+		fmt.Fprintf(
+			w,
+			"%s  %-13s  %s\n",
+			doctorStatusCell(color, family.status),
+			family.command,
+			doctorFamilySummary(family),
+		)
 		for _, check := range family.checks {
-			fmt.Fprintf(w, "  [%-8s] %s", check.status, check.label)
+			line := fmt.Sprintf("  %s  %s", doctorStatusCell(color, check.status), check.label)
 			if check.detail != "" {
-				fmt.Fprintf(w, " - %s", check.detail)
+				line += fmt.Sprintf(" - %s", check.detail)
 			}
 			if check.nextAction != "" {
-				fmt.Fprintf(w, " (next: %s)", check.nextAction)
+				line += fmt.Sprintf(" (next: %s)", check.nextAction)
 			}
-			fmt.Fprintln(w)
+			fmt.Fprintln(w, line)
 		}
 	}
+}
+
+func doctorFamilySummary(family doctorFamilyReport) string {
+	if family.reason != "" {
+		return family.reason
+	}
+	return "ready"
+}
+
+func doctorStatusStyle(status doctorStatus) string {
+	switch status {
+	case doctorStatusOK:
+		return doctorANSIGreen
+	case doctorStatusPartial, doctorStatusNA:
+		return doctorANSIYellow
+	case doctorStatusBlocked:
+		return doctorANSIRed
+	case doctorStatusDegraded:
+		return doctorANSICyan
+	default:
+		return doctorANSIDim
+	}
+}
+
+func doctorStatusCell(color bool, status doctorStatus) string {
+	return doctorStyled(color, doctorStatusStyle(status), fmt.Sprintf("%-8s", status))
+}
+
+func doctorColorEnabled(w io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+}
+
+func doctorStyled(color bool, style, text string) string {
+	if !color {
+		return text
+	}
+	return style + text + doctorANSIReset
 }

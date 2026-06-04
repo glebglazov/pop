@@ -177,15 +177,15 @@ func TestDoctorHealthyCoreFamiliesRenderOK(t *testing.T) {
 	s := out.String()
 
 	for _, line := range []string{
-		"pop project: OK",
-		"pop monitor: OK",
-		"pop pane: OK",
+		"OK        pop project    ready",
+		"OK        pop monitor    ready",
+		"OK        pop pane       ready",
 	} {
 		if !strings.Contains(s, line) {
 			t.Fatalf("output missing %q:\n%s", line, s)
 		}
 	}
-	if strings.Contains(s, "[Blocked ] tmux available") {
+	if strings.Contains(s, "Blocked   tmux available") {
 		t.Fatalf("healthy tmux check should not be blocked:\n%s", s)
 	}
 }
@@ -198,11 +198,47 @@ func TestDoctorDaemonDownIsBlockedButExitsZero(t *testing.T) {
 		t.Fatalf("doctor must exit 0 on render success even when unhealthy: %v", err)
 	}
 	s := out.String()
-	if !strings.Contains(s, "pop monitor: Blocked (monitor daemon is not running)") {
+	if !strings.Contains(s, "Blocked   pop monitor    monitor daemon is not running") {
 		t.Fatalf("daemon-down should report blocked monitor family:\n%s", s)
 	}
 	if !strings.Contains(s, "(next: pop monitor)") {
 		t.Fatalf("daemon-down should carry a next action:\n%s", s)
+	}
+}
+
+func TestRenderDoctorReportPinsRepresentativeFamilyOutput(t *testing.T) {
+	report := &doctorReport{families: []doctorFamilyReport{
+		familyReport("pop project", []doctorCheck{
+			{label: "config loads", status: doctorStatusOK, detail: "/cfg/config.toml"},
+		}),
+		familyReport("pop pane", []doctorCheck{
+			{label: "tmux available", status: doctorStatusPartial, detail: "tmux executable was not found", nextAction: "brew install tmux"},
+		}),
+		familyReport("pop workload", []doctorCheck{
+			{label: "issue manifest readable", status: doctorStatusDegraded, detail: "manifest read returned inconsistent state"},
+		}),
+		familyReport("pop integrate", []doctorCheck{
+			{label: "claude pane-skill", status: doctorStatusBlocked, detail: "claude pane-skill conflicts at /home/me/.claude/skills/pane", nextAction: "rm /home/me/.claude/skills/pane && pop integrate claude --pane-skill"},
+		}),
+	}}
+
+	out := &bytes.Buffer{}
+	renderDoctorReport(out, report)
+
+	want := `Command-family readiness
+
+STATUS    COMMAND        SUMMARY
+OK        pop project    ready
+  OK        config loads - /cfg/config.toml
+Partial   pop pane       tmux executable was not found
+  Partial   tmux available - tmux executable was not found (next: brew install tmux)
+Degraded  pop workload   manifest read returned inconsistent state
+  Degraded  issue manifest readable - manifest read returned inconsistent state
+Blocked   pop integrate  claude pane-skill conflicts at /home/me/.claude/skills/pane
+  Blocked   claude pane-skill - claude pane-skill conflicts at /home/me/.claude/skills/pane (next: rm /home/me/.claude/skills/pane && pop integrate claude --pane-skill)
+`
+	if out.String() != want {
+		t.Fatalf("rendered doctor report mismatch:\nwant:\n%s\ngot:\n%s", want, out.String())
 	}
 }
 

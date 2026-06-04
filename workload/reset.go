@@ -38,7 +38,7 @@ func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	issueSetID, issueID, err := ResolveIssueTarget(d, refresh, opts.CWD, opts.IssuePath)
+	issueSetID, issueID, err := ResolveIssueFileTarget(d, refresh, opts.CWD, opts.IssuePath)
 	if err != nil {
 		return nil, err
 	}

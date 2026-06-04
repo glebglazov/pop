@@ -92,7 +92,7 @@ func TestRunIssueRejectsBareManifestID(t *testing.T) {
 	opts.IssuePathOverride = "01-a"
 
 	_, err := RunIssueWith(env.deps(), nil, nil, opts)
-	if err == nil || !strings.Contains(err.Error(), "valid: target") {
+	if err == nil || !strings.Contains(err.Error(), "valid: demo") {
 		t.Fatalf("err = %v", err)
 	}
 }
