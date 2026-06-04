@@ -356,15 +356,18 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Install the handler before the agent starts so a signal arriving while
+	// the agent is already running can never hit the default (fatal) action.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
 	proc, err := d.Runner.Start(ctx, runtimePath, agentOut, agentOut, invocation.Name, invocation.Args...)
 	if err != nil {
 		return "", nil, err
 	}
 
 	outcome := &attemptOutcome{}
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
 
 	done := make(chan waitResult, 1)
 	go func() {

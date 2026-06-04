@@ -201,10 +201,7 @@ func TestRunIssueSignalLeavesIssueOpen(t *testing.T) {
 
 	opts := env.runOpts(true, agent)
 	opts.Timeout = time.Minute
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
-	}()
+	signalOwnPidWhenAgentStarts(t, env.root)
 
 	_, err := RunIssueWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitInterrupted)
@@ -218,10 +215,7 @@ func TestRunIssueSignalReleasesRuntimeLock(t *testing.T) {
 
 	opts := env.runOpts(true, agent)
 	opts.Timeout = time.Minute
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
-	}()
+	signalOwnPidWhenAgentStarts(t, env.root)
 
 	_, err := RunIssueWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitInterrupted)
@@ -464,11 +458,35 @@ func writeSlowAgent(t *testing.T, root string, delay time.Duration) string {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := fmt.Sprintf("#!/bin/sh\nsleep %f\nprintf 'SUMMARY_START\\nslow\\nSUMMARY_END\\nTASK_COMPLETE\\n'\n", delay.Seconds())
+	sentinel := slowAgentSentinel(root)
+	script := fmt.Sprintf("#!/bin/sh\n: > %s\nsleep %f\nprintf 'SUMMARY_START\\nslow\\nSUMMARY_END\\nTASK_COMPLETE\\n'\n", sentinel, delay.Seconds())
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func slowAgentSentinel(root string) string {
+	return filepath.Join(root, ".agent", "started")
+}
+
+// signalOwnPidWhenAgentStarts waits for the slow agent's start sentinel, then
+// SIGTERMs the test process. The agent only starts after runAgentAttempt has
+// installed its signal handler, so the signal can never hit the default
+// (fatal) action — unlike a fixed sleep, which raced against setup.
+func signalOwnPidWhenAgentStarts(t *testing.T, root string) {
+	t.Helper()
+	sentinel := slowAgentSentinel(root)
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(sentinel); err == nil {
+				_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
 }
 
 func writeProcessGroupAgent(t *testing.T, root string, delay time.Duration) string {
