@@ -91,6 +91,26 @@ func TestRenderWorkloadSkillsBodyMatchesInjectedSource(t *testing.T) {
 	}
 }
 
+// TestRenderWorkloadSkillsContentUsesShowPath confirms the rendered planning
+// skills no longer assume an in-tree thoughts/ location and instead resolve
+// their write location via `pop workload show-path` (ADR 0012).
+func TestRenderWorkloadSkillsContentUsesShowPath(t *testing.T) {
+	tree, err := renderComponent(ComponentWorkloadSkills, "claude")
+	if err != nil {
+		t.Fatalf("renderComponent: %v", err)
+	}
+
+	for _, skill := range []string{"pop-to-prd", "pop-to-issues"} {
+		body := string(tree[skill+"/SKILL.md"])
+		if strings.Contains(body, "thoughts/") {
+			t.Errorf("%s SKILL.md still mentions thoughts/: %q", skill, body)
+		}
+		if !strings.Contains(body, "pop workload show-path") {
+			t.Errorf("%s SKILL.md does not route through `pop workload show-path`", skill)
+		}
+	}
+}
+
 // TestRenderWorkloadSkillsUnsupportedAgents confirms opencode and codex error
 // rather than producing a degraded (flat, companion-less) tree.
 func TestRenderWorkloadSkillsUnsupportedAgents(t *testing.T) {

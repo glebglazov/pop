@@ -49,7 +49,9 @@ Iterate until the user approves the breakdown.
 
 ### 5. Write the work items to the local filesystem
 
-For each approved slice, write a markdown file to the project's `thoughts/issues/<issue-set-name>/` directory (create it if it doesn't exist). `<issue-set-name>` is `<timestamp>-<slug>`, where `<slug>` is either the source PRD slug (without its timestamp prefix) or a hyphen-delimited string summarising what you intend to do (infer from context or ask the user). Use the following template. Write them in dependency order (blockers first) so you can reference real identifiers in the "Blocked by" field.
+Resolve the write location by running `pop workload show-path`. It prints this repository's Workload storage issues directory (an absolute path), creating it on demand. Write the Issue set as a new subdirectory `<issue-set-name>/` beneath that printed path. `<issue-set-name>` is `<timestamp>-<slug>`, where `<slug>` is either the source PRD slug (without its timestamp prefix) or a hyphen-delimited string summarising what you intend to do (infer from context or ask the user).
+
+For each approved slice, write a markdown file into that Issue set directory using the following template. Write them in dependency order (blockers first) so you can reference real identifiers in the "Blocked by" field.
 
 <naming-convention>
 `<timestamp>` is a human-readable local date/time prefix so issue sets sort chronologically:
@@ -89,13 +91,13 @@ Or "None - can start immediately" if no blockers.
 
 </issue-template>
 
-Use a consistent filename scheme: `<number>-<issue-name>.md`, e.g. `thoughts/issues/2026-05-31-user-auth/01-login-form.md`.
+Use a consistent filename scheme: `<number>-<issue-name>.md`, e.g. `01-login-form.md`. The set-relative Workload target reference for that issue is `<issue-set-name>/<number>-<issue-name>.md`, e.g. `2026-05-31-user-auth/01-login-form.md`.
 
 Do NOT close or modify any parent file.
 
 ### 6. Write the sidecar JSON manifest
 
-Alongside the markdown files, write `thoughts/issues/<issue-set-name>/index.json` — a machine-readable manifest that a ralph loop (or any automation) can rely on to track completion and unblock ordering. Each entry mirrors one markdown file.
+Alongside the markdown files, write `index.json` inside the same Issue set directory — a machine-readable manifest that a ralph loop (or any automation) can rely on to track completion and unblock ordering. Each entry mirrors one markdown file.
 
 <manifest-schema>
 ```json
