@@ -74,6 +74,12 @@ type AgentHeadlessRequest struct {
 	OutputMode  AgentOutputMode
 }
 
+// AgentAssistanceRequest describes one attended HITL assistance invocation.
+type AgentAssistanceRequest struct {
+	Prompt      string
+	RuntimePath string
+}
+
 // AgentAssistanceMode describes how an adapter can offer attended HITL help.
 type AgentAssistanceMode string
 
@@ -87,6 +93,16 @@ const (
 type AgentCommand struct {
 	Name string
 	Args []string
+}
+
+// AgentAssistanceInvocation is a resolved attended command and human-facing
+// command detail for a HITL assistance action.
+type AgentAssistanceInvocation struct {
+	AgentPreset string
+	Mode        AgentAssistanceMode
+	Command     AgentCommand
+	Display     string
+	Detail      string
 }
 
 // AgentAssistanceCapability reports whether attended assistance can be offered.
@@ -110,6 +126,7 @@ type AgentAdapter interface {
 	NormalizeOutput(raw string, format AgentOutputFormat) AgentResult
 	RenderOutput(w io.Writer, raw string, format AgentOutputFormat)
 	AssistanceCapability() AgentAssistanceCapability
+	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
 }
 
 // Agent adapters map preset names to per-agent behavior.
@@ -202,6 +219,31 @@ func (a *presetAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 	return cloneAssistanceCapability(a.assistance)
 }
 
+func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {
+	capability := a.AssistanceCapability()
+	if !capability.Available() || capability.Command == nil || capability.Command.Name == "" {
+		return nil, fmt.Errorf("agent preset %q does not support attended assistance", a.preset)
+	}
+	command := *capability.Command
+	command.Args = append([]string{}, capability.Command.Args...)
+	if req.Prompt != "" {
+		command.Args = append(command.Args, req.Prompt)
+	}
+	invocation := &AgentAssistanceInvocation{
+		AgentPreset: a.preset,
+		Mode:        capability.Mode,
+		Command:     command,
+		Display:     displayAgentCommand(command, req.Prompt),
+	}
+	switch capability.Mode {
+	case AgentAssistanceFallback:
+		invocation.Detail = fmt.Sprintf("using %s fallback for %s attended assistance", command.Name, a.preset)
+	case AgentAssistanceNative:
+		invocation.Detail = fmt.Sprintf("using %s native attended assistance", a.preset)
+	}
+	return invocation, nil
+}
+
 type customAgentAdapter struct{}
 
 func (customAgentAdapter) Preset() string { return "custom" }
@@ -220,6 +262,10 @@ func (a customAgentAdapter) RenderOutput(w io.Writer, raw string, format AgentOu
 
 func (a customAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 	return AgentAssistanceCapability{Mode: AgentAssistanceUnavailable}
+}
+
+func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {
+	return nil, fmt.Errorf("custom agent adapter does not support attended assistance")
 }
 
 func cloneAssistanceCapability(capability AgentAssistanceCapability) AgentAssistanceCapability {
@@ -307,16 +353,50 @@ func ResolveAgentAdapter(preset string) (AgentAdapter, error) {
 }
 
 // ResolveAgentAssistanceCapability returns attended-assistance support for the selected agent.
-// Custom headless commands are intentionally not treated as attended commands.
+// agentCmd is intentionally ignored because custom --agent-cmd only applies to
+// unattended issue attempts.
 func ResolveAgentAssistanceCapability(preset, agentCmd string) (AgentAssistanceCapability, error) {
-	if agentCmd != "" {
-		return AgentAssistanceCapability{Mode: AgentAssistanceUnavailable}, nil
-	}
 	adapter, err := ResolveAgentAdapter(preset)
 	if err != nil {
 		return AgentAssistanceCapability{}, err
 	}
 	return adapter.AssistanceCapability(), nil
+}
+
+// ResolveAgentAssistanceInvocation returns the attended command owned by the selected adapter.
+// agentCmd is accepted for call-site symmetry with headless invocation but is intentionally ignored:
+// custom --agent-cmd only applies to unattended issue attempts.
+func ResolveAgentAssistanceInvocation(preset, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
+	adapter, err := ResolveAgentAdapter(preset)
+	if err != nil {
+		return nil, err
+	}
+	return adapter.AssistanceInvocation(AgentAssistanceRequest{
+		Prompt:      prompt,
+		RuntimePath: runtimePath,
+	})
+}
+
+func displayAgentCommand(command AgentCommand, prompt string) string {
+	parts := []string{shellQuote(command.Name)}
+	for _, arg := range command.Args {
+		if prompt != "" && arg == prompt {
+			parts = append(parts, "<HITL assistance prompt>")
+			continue
+		}
+		parts = append(parts, shellQuote(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if strings.ContainsAny(s, " \t\n'\"\\$`!&|;()<>") {
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+	return s
 }
 
 func validateAgentOutputMode(mode AgentOutputMode) error {
