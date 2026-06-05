@@ -10,7 +10,7 @@ import (
 // matchIssueFileField resolves an issue file name to its manifest issue ID.
 func matchIssueFileField(m *Manifest, fileName string) (string, error) {
 	if m == nil {
-		return "", exitErr(ExitNoRunnable, "unknown issue %q", fileName)
+		return "", exitErr(ExitNoRunnable, "unknown task %q", fileName)
 	}
 	base := filepath.Base(fileName)
 	for _, issue := range m.Issues {
@@ -70,10 +70,10 @@ func invalidTargetMessage(refresh *RefreshResult, raw, reason string) string {
 func rejectPathForms(refresh *RefreshResult, raw string) error {
 	slash := filepath.ToSlash(raw)
 	if filepath.IsAbs(raw) || raw == "~" || strings.HasPrefix(slash, "~/") {
-		return exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "absolute paths are not Workload target references"))
+		return exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "absolute paths are not task target references"))
 	}
 	if raw == "." || raw == ".." || strings.HasPrefix(slash, "./") || strings.HasPrefix(slash, "../") {
-		return exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "relative paths are not Workload target references"))
+		return exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "relative paths are not task target references"))
 	}
 	return nil
 }
@@ -84,10 +84,10 @@ func resolveIssueSetRelativeIssue(refresh *RefreshResult, raw string) (issueSetI
 	slash := filepath.ToSlash(raw)
 	head, tail, found := strings.Cut(slash, "/")
 	if !found || head == "" || tail == "" || strings.Contains(tail, "/") {
-		return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected <issue-set>/<file>.md"))
+		return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected <task-set>/<file>.md"))
 	}
 	if !strings.HasSuffix(tail, ".md") {
-		return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "issue file must end with .md"))
+		return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "task file must end with .md"))
 	}
 
 	issueSetID, err = resolveIssueSetIdentifier(refresh, head)
@@ -114,10 +114,10 @@ func ResolveIssueSetTarget(refresh *RefreshResult, raw string) (string, error) {
 	}
 	slash := filepath.ToSlash(raw)
 	if strings.Contains(slash, "/") {
-		return "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected a bare Issue set identifier"))
+		return "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected a bare task set identifier"))
 	}
 	if strings.HasSuffix(slash, ".md") {
-		return "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected a bare Issue set identifier, not a file name"))
+		return "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected a bare task set identifier, not a file name"))
 	}
 	return resolveIssueSetIdentifier(refresh, raw)
 }
@@ -138,7 +138,7 @@ func ResolveIssueTarget(refresh *RefreshResult, raw string) (issueSetID, issueID
 		return resolveIssueSetRelativeIssue(refresh, slash)
 	}
 	if strings.HasSuffix(slash, ".md") {
-		return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "bare filenames are not Workload target references; use <issue-set>/<file>.md"))
+		return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "bare filenames are not task target references; use <task-set>/<file>.md"))
 	}
 	issueSetID, err = resolveIssueSetIdentifier(refresh, raw)
 	return issueSetID, "", err
@@ -150,14 +150,14 @@ func ResolveIssueTarget(refresh *RefreshResult, raw string) (issueSetID, issueID
 func ResolveIssueFileTarget(refresh *RefreshResult, raw string) (issueSetID, issueID string, err error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected <issue-set>/<file>.md"))
+		return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected <task-set>/<file>.md"))
 	}
 	if err := rejectPathForms(refresh, raw); err != nil {
 		return "", "", err
 	}
 	slash := filepath.ToSlash(raw)
 	if !strings.Contains(slash, "/") {
-		return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected <issue-set>/<file>.md"))
+		return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected <task-set>/<file>.md"))
 	}
 	return resolveIssueSetRelativeIssue(refresh, slash)
 }

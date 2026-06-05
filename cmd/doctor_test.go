@@ -121,9 +121,9 @@ func runDoctorGit(t *testing.T, dir string, args ...string) string {
 
 func workloadCheck(t *testing.T, report *doctorReport, label string) doctorCheck {
 	t.Helper()
-	family, ok := familyByCommand(report, "pop workload")
+	family, ok := familyByCommand(report, "pop tasks")
 	if !ok {
-		t.Fatalf("missing pop workload family")
+		t.Fatalf("missing pop tasks family")
 	}
 	check, ok := checkByLabel(family, label)
 	if !ok {
@@ -661,15 +661,15 @@ func TestDoctorWorkloadHealthyStorageIsOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop workload")
+	family, ok := familyByCommand(report, "pop tasks")
 	if !ok {
-		t.Fatalf("missing pop workload family")
+		t.Fatalf("missing pop tasks family")
 	}
 	if family.status != doctorStatusOK {
 		t.Fatalf("workload status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
 	}
 
-	writable := workloadCheck(t, report, "workload storage writable")
+	writable := workloadCheck(t, report, "task storage writable")
 	if writable.status != doctorStatusOK {
 		t.Fatalf("writable status = %s, want %s", writable.status, doctorStatusOK)
 	}
@@ -677,12 +677,12 @@ func TestDoctorWorkloadHealthyStorageIsOK(t *testing.T) {
 		t.Fatalf("writable detail should name the data dir: %q", writable.detail)
 	}
 
-	legacy := workloadCheck(t, report, "legacy in-tree Issue sets")
+	legacy := workloadCheck(t, report, "legacy in-tree task sets")
 	if legacy.status != doctorStatusOK {
 		t.Fatalf("legacy status = %s, want %s", legacy.status, doctorStatusOK)
 	}
 
-	orphan := workloadCheck(t, report, "orphaned workload storage")
+	orphan := workloadCheck(t, report, "orphaned task storage")
 	if orphan.status != doctorStatusOK {
 		t.Fatalf("orphan status = %s, want %s", orphan.status, doctorStatusOK)
 	}
@@ -698,14 +698,14 @@ func TestDoctorWorkloadStorageUnwritableBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop workload")
+	family, ok := familyByCommand(report, "pop tasks")
 	if !ok {
-		t.Fatalf("missing pop workload family")
+		t.Fatalf("missing pop tasks family")
 	}
 	if family.status != doctorStatusBlocked {
 		t.Fatalf("workload status = %s, want %s", family.status, doctorStatusBlocked)
 	}
-	check := workloadCheck(t, report, "workload storage writable")
+	check := workloadCheck(t, report, "task storage writable")
 	if check.status != doctorStatusBlocked {
 		t.Fatalf("writable status = %s, want %s", check.status, doctorStatusBlocked)
 	}
@@ -724,21 +724,21 @@ func TestDoctorWorkloadLegacyIssueSetsAdviseMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop workload")
+	family, ok := familyByCommand(report, "pop tasks")
 	if !ok {
-		t.Fatalf("missing pop workload family")
+		t.Fatalf("missing pop tasks family")
 	}
 	if family.status != doctorStatusPartial {
 		t.Fatalf("workload status = %s, want %s", family.status, doctorStatusPartial)
 	}
-	check := workloadCheck(t, report, "legacy in-tree Issue sets")
+	check := workloadCheck(t, report, "legacy in-tree task sets")
 	if check.status != doctorStatusPartial {
 		t.Fatalf("legacy status = %s, want %s", check.status, doctorStatusPartial)
 	}
 	if !strings.Contains(check.detail, "2026-01-01-old-set") || !strings.Contains(check.detail, "thoughts/issues") {
 		t.Fatalf("legacy detail should list sets and location: %q", check.detail)
 	}
-	if check.nextAction != "pop workload migrate" {
+	if check.nextAction != "pop tasks migrate" {
 		t.Fatalf("legacy nextAction = %q, want exact migrate command", check.nextAction)
 	}
 }
@@ -753,14 +753,14 @@ func TestDoctorWorkloadLegacyInspectionFailureIsNA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop workload")
+	family, ok := familyByCommand(report, "pop tasks")
 	if !ok {
-		t.Fatalf("missing pop workload family")
+		t.Fatalf("missing pop tasks family")
 	}
 	if family.status != doctorStatusOK {
 		t.Fatalf("workload status = %s, want %s (legacy inspection failure must not block)", family.status, doctorStatusOK)
 	}
-	check := workloadCheck(t, report, "legacy in-tree Issue sets")
+	check := workloadCheck(t, report, "legacy in-tree task sets")
 	if check.status != doctorStatusNA {
 		t.Fatalf("legacy status = %s, want %s", check.status, doctorStatusNA)
 	}
@@ -781,15 +781,15 @@ func TestDoctorWorkloadOrphanStorageIsReportOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop workload")
+	family, ok := familyByCommand(report, "pop tasks")
 	if !ok {
-		t.Fatalf("missing pop workload family")
+		t.Fatalf("missing pop tasks family")
 	}
 	// Orphans are informational: a healthy repository's family stays OK.
 	if family.status != doctorStatusOK {
 		t.Fatalf("workload status = %s, want %s (orphans must not affect healthy status)", family.status, doctorStatusOK)
 	}
-	check := workloadCheck(t, report, "orphaned workload storage")
+	check := workloadCheck(t, report, "orphaned task storage")
 	if check.status != doctorStatusNA {
 		t.Fatalf("orphan status = %s, want %s", check.status, doctorStatusNA)
 	}
@@ -1018,8 +1018,8 @@ func TestRenderDoctorReportPinsRepresentativeFamilyOutput(t *testing.T) {
 		familyReport("pop pane", []doctorCheck{
 			{label: "tmux available", status: doctorStatusPartial, detail: "tmux executable was not found", nextAction: "brew install tmux"},
 		}),
-		familyReport("pop workload", []doctorCheck{
-			{label: "issue manifest readable", status: doctorStatusDegraded, detail: "manifest read returned inconsistent state"},
+		familyReport("pop tasks", []doctorCheck{
+			{label: "task manifest readable", status: doctorStatusDegraded, detail: "manifest read returned inconsistent state"},
 		}),
 		familyReport("pop integrate", []doctorCheck{
 			{label: "intended agent setup repair path", status: doctorStatusOK, detail: "can inspect and repair intended agent setup through pop integrate for: claude (workload config)"},
@@ -1037,8 +1037,8 @@ OK        pop project    ready
   OK        config loads - /cfg/config.toml
 Partial   pop pane       tmux executable was not found
   Partial   tmux available - tmux executable was not found (next: brew install tmux)
-Degraded  pop workload   manifest read returned inconsistent state
-  Degraded  issue manifest readable - manifest read returned inconsistent state
+Degraded  pop tasks      manifest read returned inconsistent state
+  Degraded  task manifest readable - manifest read returned inconsistent state
 OK        pop integrate  ready
   OK        intended agent setup repair path - can inspect and repair intended agent setup through pop integrate for: claude (workload config)
   N/A       codex available agent suggestion - agent executable is available on PATH but no Pop intent was detected (next: pop integrate codex)

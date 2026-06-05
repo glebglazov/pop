@@ -449,7 +449,7 @@ func TestResetIssueCmdTargetsIssueSetRelativeFile(t *testing.T) {
 	if err := runWorkloadResetIssueWith(workload.DefaultDeps(), &stdout, "demo/01-a.md"); err != nil {
 		t.Fatalf("issue-set-relative file failed: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Reset issue demo/01-a to open") {
+	if !strings.Contains(stdout.String(), "Reset task demo/01-a to open") {
 		t.Fatalf("missing canonical success output:\n%s", stdout.String())
 	}
 	_ = root
@@ -461,7 +461,7 @@ func TestResetIssueCmdRejectsBareIdentifier(t *testing.T) {
 	t.Cleanup(resetWorkloadFlags)
 
 	err := runWorkloadResetIssueWith(workload.DefaultDeps(), &bytes.Buffer{}, "demo")
-	if err == nil || !strings.Contains(err.Error(), "<issue-set>/<file>.md") {
+	if err == nil || !strings.Contains(err.Error(), "<task-set>/<file>.md") {
 		t.Fatalf("bare identifier error = %v", err)
 	}
 	_ = root
@@ -484,7 +484,7 @@ func TestCompleteIssueCmdTargetsIssueSetRelativeFile(t *testing.T) {
 	if err := runWorkloadCompleteIssueWith(workload.DefaultDeps(), &stdout, "demo/01-a.md"); err != nil {
 		t.Fatalf("issue-set-relative file failed: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Completed issue demo/01-a") {
+	if !strings.Contains(stdout.String(), "Completed task demo/01-a") {
 		t.Fatalf("missing canonical success output:\n%s", stdout.String())
 	}
 	manifestPath := filepath.Join(runIssueCmdDemoDir(t, root), "index.json")
@@ -503,7 +503,7 @@ func TestRunIssuesCmdRejectsIssueSetRelativeFile(t *testing.T) {
 	t.Cleanup(resetWorkloadFlags)
 
 	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md")
-	if err == nil || !strings.Contains(err.Error(), "bare Issue set identifier") {
+	if err == nil || !strings.Contains(err.Error(), "bare task set identifier") {
 		t.Fatalf("file reference error = %v", err)
 	}
 	_ = root
@@ -545,30 +545,30 @@ func TestWorkloadCommandSurfaceUsesIssueSetVocabulary(t *testing.T) {
 		names[c.Name()] = c
 	}
 
-	if _, ok := names["run-issues"]; !ok {
-		t.Fatal("run-issues command is not registered")
+	if _, ok := names["drain"]; !ok {
+		t.Fatal("drain command is not registered")
 	}
 	if _, ok := names["run-prd"]; ok {
 		t.Fatal("removed run-prd alias is still registered")
 	}
 
-	if names["reset-issue"] == nil {
-		t.Fatal("reset-issue command is not registered")
+	if names["open"] == nil {
+		t.Fatal("open command is not registered")
 	}
-	if names["reset-issue"].Flags().Lookup("issue-set") != nil {
-		t.Fatal("reset-issue still exposes removed --issue-set flag")
+	if names["open"].Flags().Lookup("issue-set") != nil {
+		t.Fatal("open still exposes removed --issue-set flag")
 	}
-	if names["reset-issue"].Flags().Lookup("issue") != nil {
-		t.Fatal("reset-issue still exposes removed --issue flag")
+	if names["open"].Flags().Lookup("issue") != nil {
+		t.Fatal("open still exposes removed --issue flag")
 	}
-	if names["run-issue"].Flags().Lookup("issue-set") != nil {
-		t.Fatal("run-issue still exposes removed --issue-set flag")
+	if names["run"].Flags().Lookup("issue-set") != nil {
+		t.Fatal("run still exposes removed --issue-set flag")
 	}
-	if names["run-issue"].Flags().Lookup("issue") != nil {
-		t.Fatal("run-issue still exposes removed --issue flag")
+	if names["run"].Flags().Lookup("issue") != nil {
+		t.Fatal("run still exposes removed --issue flag")
 	}
-	if names["run-issues"].Flags().Lookup("issue-set") != nil {
-		t.Fatal("run-issues still exposes removed --issue-set flag")
+	if names["drain"].Flags().Lookup("issue-set") != nil {
+		t.Fatal("drain still exposes removed --issue-set flag")
 	}
 }
 

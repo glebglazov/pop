@@ -43,15 +43,15 @@ func CompleteIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		return nil, err
 	}
 	if issueSetID == "" || issueID == "" {
-		return nil, exitErr(ExitSetup, "complete-issue requires an issue path")
+		return nil, exitErr(ExitSetup, "complete requires a task path")
 	}
 
 	m := refresh.Manifests[issueSetID]
 	if m == nil {
-		return nil, exitErr(ExitNoRunnable, "Issue set %q has no issue manifest", issueSetID)
+		return nil, exitErr(ExitNoRunnable, "task set %q has no task manifest", issueSetID)
 	}
 	if !m.Valid {
-		return nil, exitErr(ExitNoRunnable, "Issue set %q is malformed", issueSetID)
+		return nil, exitErr(ExitNoRunnable, "task set %q is malformed", issueSetID)
 	}
 
 	idx := -1
@@ -67,12 +67,12 @@ func CompleteIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 
 	issue := m.Issues[idx]
 	if issue.Status == "done" {
-		return nil, exitErr(ExitNoRunnable, "issue %q is already done", issueID)
+		return nil, exitErr(ExitNoRunnable, "task %q is already done", issueID)
 	}
 
 	for _, blocker := range issue.BlockedBy {
 		if !blockerSatisfied(m, blocker) {
-			return nil, exitErr(ExitNoRunnable, "issue %q blocked by %s; complete it first", issueID, blocker)
+			return nil, exitErr(ExitNoRunnable, "task %q blocked by %s; complete it first", issueID, blocker)
 		}
 	}
 

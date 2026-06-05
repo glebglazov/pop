@@ -39,7 +39,7 @@ func TestRunIssueHappyPathWithCommit(t *testing.T) {
 	assertProgressContains(t, env, "DONE", "implemented feature")
 
 	out, _ := env.deps().Git.CommandInDir(env.root, "log", "-1", "--format=%s")
-	if !strings.Contains(out, "workload(demo): 01-a") {
+	if !strings.Contains(out, "task(demo): 01-a") {
 		t.Fatalf("commit subject = %q", out)
 	}
 }

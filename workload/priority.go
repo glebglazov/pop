@@ -102,8 +102,8 @@ func findRegisteredIssueSet(entry *WorkloadEntry, issueSetID string) (int, int, 
 
 func unknownIssueSetError(id string, candidates []string) error {
 	if len(candidates) == 0 {
-		return fmt.Errorf("unknown Issue set %q (no registered Issue sets)", id)
+		return fmt.Errorf("unknown task set %q (no registered task sets)", id)
 	}
 	sort.Strings(candidates)
-	return fmt.Errorf("unknown Issue set %q; valid: %s", id, strings.Join(candidates, ", "))
+	return fmt.Errorf("unknown task set %q; valid: %s", id, strings.Join(candidates, ", "))
 }

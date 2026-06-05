@@ -95,7 +95,7 @@ func findRow(refresh *RefreshResult, issueSetID string) *Row {
 // SelectIssue chooses the next issue to run from a refreshed workload.
 func SelectIssue(refresh *RefreshResult, issueSetOverride, issueOverride string) (*Selection, error) {
 	if issueOverride != "" && issueSetOverride == "" {
-		return nil, exitErr(ExitSetup, "explicit issue requires an Issue set")
+		return nil, exitErr(ExitSetup, "explicit task requires a task set")
 	}
 
 	manifests := refresh.Manifests
@@ -216,7 +216,7 @@ func firstEligibleIssue(issueSetID string, m *Manifest) (*Selection, error) {
 			IssueIndex: i,
 		}, nil
 	}
-	return nil, exitErr(ExitNoRunnable, "Issue set %q has no eligible AFK issue", issueSetID)
+	return nil, exitErr(ExitNoRunnable, "task set %q has no eligible AFK task", issueSetID)
 }
 
 func unknownIssueSetTargetMessage(refresh *RefreshResult, issueSetID string) string {
@@ -228,9 +228,9 @@ func unknownIssueSetTargetMessage(refresh *RefreshResult, issueSetID string) str
 	}
 	sort.Strings(ids)
 	if len(ids) == 0 {
-		return fmt.Sprintf("unknown Issue set %q", issueSetID)
+		return fmt.Sprintf("unknown task set %q", issueSetID)
 	}
-	return fmt.Sprintf("unknown Issue set %q; valid: %s", issueSetID, strings.Join(ids, ", "))
+	return fmt.Sprintf("unknown task set %q; valid: %s", issueSetID, strings.Join(ids, ", "))
 }
 
 func unknownIssueMessage(m *Manifest, issueID string) string {
@@ -239,7 +239,7 @@ func unknownIssueMessage(m *Manifest, issueID string) string {
 		ids = append(ids, issue.ID)
 	}
 	sort.Strings(ids)
-	return fmt.Sprintf("unknown issue %q; valid: %s", issueID, strings.Join(ids, ", "))
+	return fmt.Sprintf("unknown task %q; valid: %s", issueID, strings.Join(ids, ", "))
 }
 
 // MarkAutoPick marks the highest-priority runnable Issue-set row with AUTO.

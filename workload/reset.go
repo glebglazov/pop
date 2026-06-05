@@ -43,15 +43,15 @@ func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, err
 	}
 	if issueSetID == "" || issueID == "" {
-		return nil, exitErr(ExitSetup, "reset-issue requires an issue path")
+		return nil, exitErr(ExitSetup, "open requires a task path")
 	}
 
 	m := refresh.Manifests[issueSetID]
 	if m == nil {
-		return nil, exitErr(ExitNoRunnable, "Issue set %q has no issue manifest", issueSetID)
+		return nil, exitErr(ExitNoRunnable, "task set %q has no task manifest", issueSetID)
 	}
 	if !m.Valid {
-		return nil, exitErr(ExitNoRunnable, "Issue set %q is malformed", issueSetID)
+		return nil, exitErr(ExitNoRunnable, "task set %q is malformed", issueSetID)
 	}
 
 	idx := -1
@@ -67,7 +67,7 @@ func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 
 	issue := m.Issues[idx]
 	if issue.Status != "failed" && issue.Status != "skipped" {
-		return nil, exitErr(ExitNoRunnable, "issue %q is %s; reset requires a failed or skipped issue", issueID, issue.Status)
+		return nil, exitErr(ExitNoRunnable, "task %q is %s; open requires a failed or skipped task", issueID, issue.Status)
 	}
 
 	priorStatus := issue.Status

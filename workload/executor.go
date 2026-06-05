@@ -226,7 +226,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 
 func executeIssueAttempts(d *Deps, sel *Selection, runtimePath string, out io.Writer, invocation *AgentInvocation, maxTries int, timeout time.Duration) (*RunIssueResult, error) {
 	display := outputFor(out)
-	display.line(ansiBold+ansiCyan, "━━ Running issue %s/%s: %s", sel.IssueSetID, sel.IssueID, sel.Issue.Title)
+	display.line(ansiBold+ansiCyan, "━━ Running task %s/%s: %s", sel.IssueSetID, sel.IssueID, sel.Issue.Title)
 	for attempt := 1; attempt <= maxTries; attempt++ {
 		display.line(ansiDim, "   Attempt %d/%d", attempt, maxTries)
 		display.line(ansiDim, "── Agent output ────────────────────────────────────────")
@@ -268,7 +268,7 @@ func executeIssueAttempts(d *Deps, sel *Selection, runtimePath string, out io.Wr
 
 		issueData, err := d.FS.ReadFile(sel.IssuePath)
 		if err != nil {
-			return nil, issueExitErr(sel, ExitOperational, "read issue markdown: %v", err)
+			return nil, issueExitErr(sel, ExitOperational, "read task markdown: %v", err)
 		}
 
 		assessment, reason := assessAttempt(agentResult.Output, outcome.exitCode, issueData)
@@ -297,7 +297,7 @@ func executeIssueAttempts(d *Deps, sel *Selection, runtimePath string, out io.Wr
 }
 
 func issueExitErr(sel *Selection, code int, format string, args ...any) *ExitError {
-	return exitErr(code, "issue %s/%s: %s", sel.IssueSetID, sel.IssueID, fmt.Sprintf(format, args...))
+	return exitErr(code, "task %s/%s: %s", sel.IssueSetID, sel.IssueID, fmt.Sprintf(format, args...))
 }
 
 func assessAttempt(agentOut string, exitCode int, issueData []byte) (Assessment, string) {
@@ -444,7 +444,7 @@ func cloneRows(rows []Row) []Row {
 	return out
 }
 
-const issueConfirmPrompt = "Run issue? [y/N]: "
+const issueConfirmPrompt = "Run task? [y/N]: "
 
 // NonInteractiveReader marks explicit non-interactive confirmation input (for tests and automation).
 type NonInteractiveReader struct{}

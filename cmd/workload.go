@@ -29,69 +29,69 @@ var (
 )
 
 var workloadCmd = &cobra.Command{
-	Use:   "workload",
-	Short: "Discover and manage local Issue-set workloads",
+	Use:   "tasks",
+	Short: "Discover and manage local task sets",
 }
 
 var workloadStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show discovered Issue-set workloads and their statuses",
+	Short: "Show discovered task sets and their statuses",
 	Args:  cobra.NoArgs,
 	RunE:  runWorkloadStatus,
 }
 
 var workloadSetPriorityCmd = &cobra.Command{
-	Use:   "set-priority ISSUE_SET PRIORITY",
-	Short: "Set a registered Issue-set priority",
+	Use:   "set-priority TASK_SET PRIORITY",
+	Short: "Set a registered task-set priority",
 	Args:  cobra.ExactArgs(2),
 	RunE:  runWorkloadSetPriority,
 }
 
 var workloadRunIssueCmd = &cobra.Command{
-	Use:   "run-issue [ISSUE_SET | ISSUE_SET/FILE.md]",
-	Short: "Execute one eligible AFK issue through a coding agent",
+	Use:   "run [TASK_SET | TASK_SET/FILE.md]",
+	Short: "Execute one eligible AFK task through a coding agent",
 	Args:  cobra.MaximumNArgs(1),
 	Run:   runWorkloadRunIssue,
 }
 
 var workloadRunIssuesCmd = &cobra.Command{
-	Use:   "run-issues [ISSUE_SET]",
-	Short: "Sequentially drain eligible AFK issues from one Issue set",
+	Use:   "drain [TASK_SET]",
+	Short: "Sequentially drain eligible AFK tasks from one task set",
 	Args:  cobra.MaximumNArgs(1),
 	Run:   runWorkloadRunIssues,
 }
 
 var workloadResetIssueCmd = &cobra.Command{
-	Use:   "reset-issue ISSUE_SET/FILE.md",
-	Short: "Reset one failed or skipped issue back to open",
+	Use:   "open TASK_SET/FILE.md",
+	Short: "Reset one failed or skipped task back to open",
 	Args:  cobra.ExactArgs(1),
 	Run:   runWorkloadResetIssue,
 }
 
 var workloadCompleteIssueCmd = &cobra.Command{
-	Use:   "complete-issue ISSUE_SET/FILE.md",
-	Short: "Manually mark one issue done without running an agent",
+	Use:   "complete TASK_SET/FILE.md",
+	Short: "Manually mark one task done without running an agent",
 	Args:  cobra.ExactArgs(1),
 	Run:   runWorkloadCompleteIssue,
 }
 
 var workloadSkipIssueCmd = &cobra.Command{
-	Use:   "skip-issue ISSUE_SET/FILE.md",
-	Short: "Defer one open issue to skipped, unblocking its dependents",
+	Use:   "skip TASK_SET/FILE.md",
+	Short: "Defer one open task to skipped, unblocking its dependents",
 	Args:  cobra.ExactArgs(1),
 	Run:   runWorkloadSkipIssue,
 }
 
 var workloadShowPathCmd = &cobra.Command{
-	Use:   "show-path [ISSUE_SET]",
-	Short: "Print this repository's Workload storage issues directory, creating it on demand",
+	Use:   "show-path [TASK_SET]",
+	Short: "Print this repository's task storage directory, creating it on demand",
 	Args:  cobra.MaximumNArgs(1),
 	Run:   runWorkloadShowPath,
 }
 
 var workloadMigrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Move legacy thoughts/issues Issue sets in this worktree into Workload storage",
+	Short: "Move legacy thoughts/issues task sets in this worktree into task storage",
 	Args:  cobra.NoArgs,
 	Run:   runWorkloadMigrate,
 }
@@ -110,25 +110,25 @@ func init() {
 
 	workloadCmd.PersistentFlags().StringVar(&workloadProject, "project", "", "Select project by exact picker-visible name")
 	workloadCmd.PersistentFlags().StringVar(&workloadPath, "path", "", "Select project by path (normalized to git checkout root)")
-	workloadCmd.PersistentFlags().StringVar(&workloadDefPath, "workload-definition-path", "", "Exact workload definition directory (not normalized to git root)")
+	workloadCmd.PersistentFlags().StringVar(&workloadDefPath, "task-definition-path", "", "Exact task definition directory (not normalized to git root)")
 
-	workloadRunIssueCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
+	workloadRunIssueCmd.Flags().StringVar(&workloadRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	workloadRunIssueCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
 	workloadRunIssueCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
 	workloadRunIssueCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 	workloadRunIssueCmd.Flags().Var(&workloadAgentOutput, "agent-output", "Agent output mode: auto (default), text")
-	workloadRunIssueCmd.Flags().IntVar(&workloadMaxTries, "max-tries", workload.DefaultMaxTries, "Maximum started attempts per issue")
+	workloadRunIssueCmd.Flags().IntVar(&workloadMaxTries, "max-tries", workload.DefaultMaxTries, "Maximum started attempts per task")
 	workloadRunIssueCmd.Flags().StringVar(&workloadTimeout, "timeout", "30m", "Maximum duration per attempt")
 	workloadRunIssueCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
 
-	workloadRunIssuesCmd.Flags().StringVar(&workloadRuntimePath, "workload-runtime-path", "", "Git checkout root for issue execution (normalized to checkout root)")
+	workloadRunIssuesCmd.Flags().StringVar(&workloadRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	workloadRunIssuesCmd.Flags().Var(&workloadAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
 	workloadRunIssuesCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(workload.DirtyRuntimeContinue)
 	workloadRunIssuesCmd.Flags().StringVar(&workloadAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
 	workloadRunIssuesCmd.Flags().StringVar(&workloadAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 	workloadRunIssuesCmd.Flags().Var(&workloadAgentOutput, "agent-output", "Agent output mode: auto (default), text")
-	workloadRunIssuesCmd.Flags().IntVar(&workloadMaxTries, "max-tries", workload.DefaultMaxTries, "Maximum started attempts per issue")
+	workloadRunIssuesCmd.Flags().IntVar(&workloadMaxTries, "max-tries", workload.DefaultMaxTries, "Maximum started attempts per task")
 	workloadRunIssuesCmd.Flags().StringVar(&workloadTimeout, "timeout", "30m", "Maximum duration per attempt")
 	workloadRunIssuesCmd.Flags().BoolVarP(&workloadRunYes, "yes", "y", false, "Skip confirmation prompt")
 }
@@ -153,12 +153,12 @@ var workloadConfigLoad = func(path string) (*config.Config, error) {
 func runWorkloadStatusWith(d *workload.Deps, w io.Writer) error {
 	resolved, err := workload.ResolvePathsWith(d, workloadProjectDeps(), workloadConfigLoad, workloadResolveInput())
 	if err != nil {
-		return fmt.Errorf("workload status: %w", err)
+		return fmt.Errorf("tasks status: %w", err)
 	}
 
 	result, err := workload.RefreshWith(d, resolved.DefinitionPath, workload.DefaultStatePathWith(d))
 	if err != nil {
-		return fmt.Errorf("workload status: %w", err)
+		return fmt.Errorf("tasks status: %w", err)
 	}
 
 	if runtimePath, err := workload.ResolveRuntimePathWith(d, resolved.ProjectPath, ""); err == nil {
@@ -176,12 +176,12 @@ func runWorkloadSetPriority(cmd *cobra.Command, args []string) error {
 func runWorkloadSetPriorityWith(d *workload.Deps, w io.Writer, issueSetID, priorityArg string) error {
 	priority, err := strconv.Atoi(priorityArg)
 	if err != nil {
-		return fmt.Errorf("workload set-priority: invalid priority %q: %w", priorityArg, err)
+		return fmt.Errorf("tasks set-priority: invalid priority %q: %w", priorityArg, err)
 	}
 
 	result, err := workload.SetPriorityWith(d, workloadProjectDeps(), workloadConfigLoad, workloadResolveInput(), issueSetID, priority)
 	if err != nil {
-		return fmt.Errorf("workload set-priority: %w", err)
+		return fmt.Errorf("tasks set-priority: %w", err)
 	}
 
 	workload.RenderPriorityUpdate(w, result.IssueSetID, result.OldPriority, result.NewPriority)
@@ -202,7 +202,7 @@ func runWorkloadRunIssue(cmd *cobra.Command, args []string) {
 func runWorkloadRunIssueWith(d *workload.Deps, stdout, stderr io.Writer, stdin io.Reader, issuePath string) error {
 	timeout, err := time.ParseDuration(workloadTimeout)
 	if err != nil {
-		return fmt.Errorf("workload run-issue: invalid --timeout %q: %w", workloadTimeout, err)
+		return fmt.Errorf("tasks run: invalid --timeout %q: %w", workloadTimeout, err)
 	}
 	_, err = workload.RunIssueWith(d, workloadProjectDeps(), workloadConfigLoad, workload.RunIssueOptions{
 		ResolveInput:      workloadResolveInput(),
@@ -233,7 +233,7 @@ func runWorkloadRunIssues(cmd *cobra.Command, args []string) {
 func runWorkloadRunIssuesWith(d *workload.Deps, stdout, stderr io.Writer, stdin io.Reader, issueSetPath string) error {
 	timeout, err := time.ParseDuration(workloadTimeout)
 	if err != nil {
-		return fmt.Errorf("workload run-issues: invalid --timeout %q: %w", workloadTimeout, err)
+		return fmt.Errorf("tasks drain: invalid --timeout %q: %w", workloadTimeout, err)
 	}
 	_, err = workload.RunIssueSetWith(d, workloadProjectDeps(), workloadConfigLoad, workload.RunIssueSetOptions{
 		ResolveInput:     workloadResolveInput(),

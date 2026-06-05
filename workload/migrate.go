@@ -67,12 +67,12 @@ func Migrate(d *Deps, cwd string) (*MigrateResult, error) {
 			result.Skipped = append(result.Skipped, setID)
 			continue
 		} else if !os.IsNotExist(statErr) {
-			return nil, exitErr(ExitOperational, "inspect storage for Issue set %q: %v", setID, statErr)
+			return nil, exitErr(ExitOperational, "inspect storage for task set %q: %v", setID, statErr)
 		}
 
 		src := filepath.Join(legacyIssuesDir, setID)
 		if err := moveTree(d, src, dst); err != nil {
-			return nil, exitErr(ExitOperational, "move Issue set %q into storage: %v", setID, err)
+			return nil, exitErr(ExitOperational, "move task set %q into storage: %v", setID, err)
 		}
 		result.Migrated = append(result.Migrated, setID)
 	}

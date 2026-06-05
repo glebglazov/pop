@@ -226,7 +226,7 @@ func BuildBlockedReason(m *Manifest) string {
 			}
 		}
 	}
-	return "no eligible AFK issue"
+	return "no eligible AFK task"
 }
 
 // BlockingHITLIssue returns the open HITL issue whose blockers are all resolved
@@ -260,19 +260,19 @@ func issuePathHint(stem, file string) string {
 	return path.Join(stem, file)
 }
 
-// resetIssueHint returns the copy-paste reset-issue command for an issue file.
+// resetIssueHint returns the copy-paste open command for a task file.
 func resetIssueHint(stem, file string) string {
-	return fmt.Sprintf("pop workload reset-issue %s", issuePathHint(stem, file))
+	return fmt.Sprintf("pop tasks open %s", issuePathHint(stem, file))
 }
 
-// completeIssueHint returns the copy-paste complete-issue command for an issue file.
+// completeIssueHint returns the copy-paste complete command for a task file.
 func completeIssueHint(stem, file string) string {
-	return fmt.Sprintf("pop workload complete-issue %s", issuePathHint(stem, file))
+	return fmt.Sprintf("pop tasks complete %s", issuePathHint(stem, file))
 }
 
-// skipIssueHint returns the copy-paste skip-issue command for an issue file.
+// skipIssueHint returns the copy-paste skip command for a task file.
 func skipIssueHint(stem, file string) string {
-	return fmt.Sprintf("pop workload skip-issue %s", issuePathHint(stem, file))
+	return fmt.Sprintf("pop tasks skip %s", issuePathHint(stem, file))
 }
 
 // BuildFailedInfo returns failed issue IDs and reset command hints.

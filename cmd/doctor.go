@@ -201,7 +201,7 @@ var canonicalDoctorCommands = []string{
 	"pop worktree",
 	"pop monitor",
 	"pop pane",
-	"pop workload",
+	"pop tasks",
 	"pop integrate",
 }
 
@@ -220,7 +220,7 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 			familyReport("pop worktree", doctorWorktreeChecks(d)),
 			familyReport("pop monitor", doctorMonitorChecks(d, intent)),
 			familyReport("pop pane", doctorPaneChecks(d)),
-			familyReport("pop workload", doctorWorkloadChecks(d)),
+			familyReport("pop tasks", doctorWorkloadChecks(d)),
 		},
 	}
 
@@ -385,13 +385,13 @@ func doctorWorkloadStorageWritableCheck(d *doctorDeps) doctorCheck {
 	dir, err := d.workloadStorageWritable()
 	if err != nil {
 		return doctorCheck{
-			label:  "workload storage writable",
+			label:  "task storage writable",
 			status: doctorStatusBlocked,
-			detail: fmt.Sprintf("cannot create or write beneath workloads data dir: %v", err),
+			detail: fmt.Sprintf("cannot create or write beneath task storage data dir: %v", err),
 		}
 	}
 	return doctorCheck{
-		label:  "workload storage writable",
+		label:  "task storage writable",
 		status: doctorStatusOK,
 		detail: fmt.Sprintf("pop can create and write beneath %s", dir),
 	}
@@ -402,22 +402,22 @@ func doctorWorkloadLegacyCheck(d *doctorDeps) doctorCheck {
 	switch {
 	case err != nil:
 		return doctorCheck{
-			label:  "legacy in-tree Issue sets",
+			label:  "legacy in-tree task sets",
 			status: doctorStatusNA,
 			detail: fmt.Sprintf("not assessed: %v", err),
 		}
 	case len(legacy) > 0:
 		return doctorCheck{
-			label:      "legacy in-tree Issue sets",
+			label:      "legacy in-tree task sets",
 			status:     doctorStatusPartial,
-			detail:     fmt.Sprintf("%d legacy Issue set(s) under thoughts/issues/ in this worktree: %s", len(legacy), strings.Join(legacy, ", ")),
-			nextAction: "pop workload migrate",
+			detail:     fmt.Sprintf("%d legacy task set(s) under thoughts/issues/ in this worktree: %s", len(legacy), strings.Join(legacy, ", ")),
+			nextAction: "pop tasks migrate",
 		}
 	default:
 		return doctorCheck{
-			label:  "legacy in-tree Issue sets",
+			label:  "legacy in-tree task sets",
 			status: doctorStatusOK,
-			detail: "no legacy thoughts/issues Issue sets in this worktree",
+			detail: "no legacy thoughts/issues task sets in this worktree",
 		}
 	}
 }
@@ -427,7 +427,7 @@ func doctorWorkloadOrphanCheck(d *doctorDeps) doctorCheck {
 	switch {
 	case err != nil:
 		return doctorCheck{
-			label:  "orphaned workload storage",
+			label:  "orphaned task storage",
 			status: doctorStatusNA,
 			detail: fmt.Sprintf("not assessed: %v", err),
 		}
@@ -440,15 +440,15 @@ func doctorWorkloadOrphanCheck(d *doctorDeps) doctorCheck {
 		// repository's Workload family below OK. Doctor only reports orphans —
 		// it never deletes storage, and no GC exists.
 		return doctorCheck{
-			label:  "orphaned workload storage",
+			label:  "orphaned task storage",
 			status: doctorStatusNA,
 			detail: fmt.Sprintf("%d orphaned storage director(ies) (report-only, never deleted): %s", len(orphans), strings.Join(lines, "; ")),
 		}
 	default:
 		return doctorCheck{
-			label:  "orphaned workload storage",
+			label:  "orphaned task storage",
 			status: doctorStatusOK,
-			detail: "no orphaned workload storage detected",
+			detail: "no orphaned task storage detected",
 		}
 	}
 }

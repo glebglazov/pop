@@ -85,7 +85,7 @@ The per-agent wiring that makes a coding agent report pane status into the **Mon
 _Avoid_: Skill install, setup, framework
 
 **Integration component**:
-An individually consented unit `pop integrate` can install for one agent: the status wiring (core), the **Pane skill**, or the **Workload planning skills**. Running integrate implies consent to the status wiring only; every other component is an explicit per-component opt-in.
+An individually consented unit `pop integrate` can install for one agent: the status wiring (core), the **Pane skill**, or the **Task planning skills**. Running integrate implies consent to the status wiring only; every other component is an explicit per-component opt-in.
 _Avoid_: Bundle, default install
 
 **Integration wizard**:
@@ -97,7 +97,7 @@ The automatic re-render of already-installed **Integration components** when the
 _Avoid_: Auto-install, update prompt
 
 **Doctor**:
-The readiness report opened by `pop doctor`: a top-level command-family view of whether Pop's user-facing workflows can run on this machine. Its canonical first-pass families are `pop project`, `pop worktree`, `pop monitor`, `pop pane`, `pop workload`, and `pop integrate`; hidden or deprecated aliases are not top-level families. Doctor drills into subcommands or agent-specific integration state only where they explain a degraded or unavailable workflow. Read-only; it never installs or repairs.
+The readiness report opened by `pop doctor`: a top-level command-family view of whether Pop's user-facing workflows can run on this machine. Its canonical first-pass families are `pop project`, `pop worktree`, `pop monitor`, `pop pane`, `pop tasks`, and `pop integrate`; hidden or deprecated aliases are not top-level families. Doctor drills into subcommands or agent-specific integration state only where they explain a degraded or unavailable workflow. Read-only; it never installs or repairs.
 _Avoid_: Integrate status, health subcommand
 
 **Doctor status**:
@@ -109,7 +109,7 @@ The terminal presentation of **Doctor**. It should be visually scannable with AN
 _Avoid_: Emoji health report, decorative symbols
 
 **Doctor intent**:
-The set of variants Doctor has reason to evaluate for a command family. Doctor reports missing or broken agent-specific setup only for agents the user appears to use through Pop configuration, installed Pop artifacts, or an explicit command context; unsupported but unused agents are suggestions, not reasons for Partial or Degraded status. Agent intent is inferred first from workload configuration, then from Pop-owned integration artifacts or Pop hooks/extensions already present, and only then from explicit command context. Merely having an agent executable installed is a suggestion, not intent.
+The set of variants Doctor has reason to evaluate for a command family. Doctor reports missing or broken agent-specific setup only for agents the user appears to use through Pop configuration, installed Pop artifacts, or an explicit command context; unsupported but unused agents are suggestions, not reasons for Partial or Degraded status. Agent intent is inferred first from task execution configuration, then from Pop-owned integration artifacts or Pop hooks/extensions already present, and only then from explicit command context. Merely having an agent executable installed is a suggestion, not intent.
 _Avoid_: Supported agents matrix, all possible integrations
 
 **Integration conflict**:
@@ -120,8 +120,8 @@ _Avoid_: Stale integration, collision overwrite
 The embedded skill that teaches an agent to drive `pop pane`. An opt-in **Integration component**; pane monitoring works without it.
 _Avoid_: Agent integration, hooks
 
-**Workload planning skills**:
-The embedded, pop-independent skills (grill-with-docs, to-prd, to-issues) whose output feeds Issue sets. Versioned with the pop binary and installed only by explicit opt-in; pop's workload scheduling and execution do not depend on them being installed.
+**Task planning skills**:
+The embedded, pop-independent skills (grill-with-docs, to-prd, to-tasks) whose output feeds Task sets. Versioned with the pop binary and installed only by explicit opt-in; pop's task scheduling and execution do not depend on them being installed.
 _Avoid_: Workload framework, workload skills bundle, agent integration
 
 ### Pickers
@@ -162,130 +162,130 @@ _Avoid_: Pin, watch
 An agent setup that connects a coding tool (Claude, Pi, OpenCode) to the monitor, so its pane self-reports status. Installed via `pop integrate <agent>`.
 _Avoid_: Hook, plugin (when you mean the whole setup, not a single file)
 
-### Workloads
+### Tasks
 
 #### Lifecycle
 
-This overview relates the terms defined below; read it before changing workload behaviour. It is a domain model, not an implementation guide.
+This overview relates the terms defined below; read it before changing task behaviour. It is a domain model, not an implementation guide.
 
-An **issue** moves between four statuses. The executor drives the solid transitions; the human drives the dashed ones through manual override commands.
+A **task** moves between four statuses. The executor drives the solid transitions; the human drives the dashed ones through manual override commands.
 
 ```
-                  Run issue / Run issues (agent success)
+                      Run / Drain (agent success)
         open ──────────────────────────────────────────▶ done
          │ ▲                                              ▲ ▲
-         │ │ Issue reset                       Complete   │ │ Complete
-         │ └──────────── failed ◀── attempt ───┐ issue ───┘ │  issue
+         │ │ Open task                         Complete   │ │ Complete
+         │ └──────────── failed ◀── attempt ───┐ task ────┘ │  task
          │                  │   exhaustion/timeout           │
-         │ Skip issue       │ Issue reset                    │
+         │ Skip task        │ Open task                      │
          ▼                  ▼                                │
       skipped ─────────────┴────────────────────────────────┘
-              Issue reset (skipped → open) / Complete issue (skipped → done)
+              Open task (skipped → open) / Complete task (skipped → done)
 ```
 
-- An issue is **eligible** when it is `open`, type AFK, and every `blocked_by` prerequisite is satisfied. A prerequisite counts as satisfied when it is `done` **or** `skipped` — a Skipped issue unblocks its dependents even though it was deferred, not completed.
-- HITL issues are never eligible; the executor never runs them.
-- A HITL issue contains only human work — verification, decisions, manual checks. Agent-doable prep (building the artifact to verify) belongs in a separate AFK issue that the HITL issue is blocked by; a HITL issue describing software to build is mis-typed.
-- `complete-issue`, `skip-issue`, and `reset-issue` are the only manual overrides; each moves exactly one issue and bypasses the agent.
+- A task is **eligible** when it is `open`, type AFK, and every `blocked_by` prerequisite is satisfied. A prerequisite counts as satisfied when it is `done` **or** `skipped` — a Skipped task unblocks its dependents even though it was deferred, not completed.
+- HITL tasks are never eligible; the executor never runs them.
+- A HITL task contains only human work — verification, decisions, manual checks. Agent-doable prep (building the artifact to verify) belongs in a separate AFK task that the HITL task is blocked by; a HITL task describing software to build is mis-typed.
+- `complete`, `skip`, and `open` are the only manual overrides; each moves exactly one task and bypasses the agent.
 
-An **Issue set**'s status is derived from its issues, in this precedence:
+A **Task set**'s status is derived from its tasks, in this precedence:
 
 ```
-all issues done ............................. DONE
-any issue failed ............................ FAILED
-has an eligible AFK issue ................... READY      ← Run issues drains these
-every issue done or skipped, ≥1 skipped ..... DEFERRED   ← conclude or reopen later
+all tasks done .............................. DONE
+any task failed ............................. FAILED
+has an eligible AFK task .................... READY      ← Drain drains these
+every task done or skipped, ≥1 skipped ...... DEFERRED   ← conclude or reopen later
 otherwise (unfinished, none eligible) ....... BLOCKED    ← Human-blocked: HITL or undone dependency
 ```
 
-(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets. Run issues stops when its set reaches DONE, FAILED, BLOCKED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing issue status. At a BLOCKED HITL gate it advises the recovery paths (complete, edit-and-rerun, or skip).
+(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets. Drain stops when its set reaches DONE, FAILED, BLOCKED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate it advises the recovery paths (complete, edit-and-rerun, or skip).
 
-**Workload**:
-A machine-local schedule of Issue sets whose issues can be executed by an agent. A workload decides which Issue set to draw work from next; it does not replace the local Issue sets or their execution rules.
-_Avoid_: Issue set, project dashboard
+**Tasks readiness**:
+The **Doctor status** of the `pop tasks` command family. Because the tasks feature is aimed at Git projects and its central workflow is agent execution from a **Runtime path**, Doctor reports `pop tasks` as Blocked when no Git runtime checkout can be resolved, even if read-only status rendering could still inspect local artifacts.
+_Avoid_: Workload readiness, task status availability
 
-**Workload readiness**:
-The **Doctor status** of the `pop workload` command family. Because the workload feature is aimed at Git projects and its central workflow is agent execution from a **Workload runtime path**, Doctor reports `pop workload` as Blocked when no Git runtime checkout can be resolved, even if read-only workload status rendering could still inspect local artifacts.
-_Avoid_: Workload status availability
+**Task set**:
+The local `<id>/index.json` manifest and its sibling task markdown files beneath the **Task storage** `tasks/` directory. A Task set is the schedulable unit. Its directory name is its canonical identifier and display label; there is no separate Task-set title. It may be created from a PRD, a grilling session, or another planning workflow; PRD existence is irrelevant to task scheduling and execution.
+_Avoid_: Issue set, PRD, workload
 
-**Issue set**:
-The local `<id>/index.json` manifest and its sibling issue markdown files beneath the **Workload storage** `issues/` directory. An Issue set is the schedulable unit of a workload. Its directory name is its canonical identifier and display label; there is no separate Issue-set title. It may be created from a PRD, a grilling session, or another planning workflow; PRD existence is irrelevant to workload scheduling and execution.
-_Avoid_: PRD, workload
-
-**Issue set registration**:
-An Issue set entering a workload so pop may select issues from it. Pop automatically registers discovered Issue sets and reports newly registered Issue sets to the user. Registration metadata and Issue set artifacts remain machine-local.
+**Task set registration**:
+A Task set entering the repository's **Task state** so pop may select tasks from it. Pop automatically registers discovered Task sets and reports newly registered Task sets to the user. Registration metadata and Task set artifacts remain machine-local.
 _Avoid_: Import, tracking
 
 **Repository identity**:
-The key mapping a repository to its **Workload storage**: the hash of the canonical git common directory path. All worktrees of one repository share one identity and therefore one Workload storage. A fresh clone or a moved repository is a new identity.
+The key mapping a repository to its **Task storage**: the hash of the canonical git common directory path. All worktrees of one repository share one identity and therefore one Task storage. A fresh clone or a moved repository is a new identity.
 _Avoid_: Remote URL, project name, worktree path
 
-**Workload storage**:
-The per-repository directory in pop's data dir where a repository's Issue sets live, named `<repo-basename>-<short-hash>` from **Repository identity**. It contains a `repo.json` reverse-lookup marker and an `issues/` directory; discovery scans `issues/*/index.json` beneath it. It is derived, never configured, and created on demand by **Show path**. Nothing workload-related lives inside the repository tree.
-_Avoid_: Workload definition path, thoughts directory, project root, runtime path
+**Task storage**:
+The per-repository directory in pop's data dir where a repository's Task sets live — `repos/<repo-basename>-<short-hash>` from **Repository identity**. It contains a `repo.json` reverse-lookup marker, a `tasks/` directory, and the repository's **Task state**; discovery scans `tasks/*/index.json` beneath it. It is derived, never configured, and created on demand by **Show path**. Nothing task-related lives inside the repository tree.
+_Avoid_: Workload storage, workload definition path, thoughts directory, project root, runtime path
 
 **Show path**:
-Printing the absolute path to the current repository's Workload storage `issues/` directory, or to one Issue set's directory when given a target. It creates the Workload storage on demand, making it the single entry point for humans (`cd`, `$EDITOR`) and for planning skills that write Issue sets.
-_Avoid_: Path command, show command, workload status table
+Printing the absolute path to the current repository's Task storage `tasks/` directory, or to one Task set's directory when given a target. It creates the Task storage on demand, making it the single entry point for humans (`cd`, `$EDITOR`) and for planning skills that write Task sets.
+_Avoid_: Path command, show command, status table
 
-**Workload migration**:
-The one-shot move of legacy `thoughts/issues/` Issue sets from the current worktree into Workload storage, rekeying **Workload state** entries while preserving registration metadata and priority. An Issue set whose identifier already exists in storage is reported and skipped, never merged. Legacy global-ignore entries are left untouched.
+**Legacy migration**:
+The one-shot move of legacy `thoughts/issues/` Task sets from the current worktree into Task storage via `pop tasks migrate`, rekeying **Task state** entries while preserving registration metadata and priority. A Task set whose identifier already exists in storage is reported and skipped, never merged. Legacy global-ignore entries are left untouched.
 _Avoid_: Import, worktree sweep
 
-**Orphaned workload storage**:
-A Workload storage directory whose recorded repository path no longer exists. Doctor reports it; pop never deletes it automatically.
-_Avoid_: Missing Issue set, stale registration
+**Storage layout migration**:
+The automatic, idempotent move of a pre-rename storage layout (`workloads/<repo>/issues/`, issue-keyed manifests) to the current layout on first touch. It never merges colliding identifiers and reports what moved.
+_Avoid_: Legacy migration, manual rekeying
 
-**Workload runtime path**:
-The git checkout from which issue execution starts. It defaults to the selected project's path and may be overridden for a command. Pop resolves it to the checkout root and uses that root for the agent working directory, dirty-tree preflight, staging, commits, and the Runtime execution lock. Workload artifacts remain in the separate **Workload storage**. Durable workload path configuration is deferred until worktree-oriented execution needs it.
-_Avoid_: Workload storage, shared git root
+**Orphaned task storage**:
+A Task storage directory whose recorded repository path no longer exists. Doctor reports it; pop never deletes it automatically.
+_Avoid_: Missing Task set, stale registration
+
+**Runtime path**:
+The git checkout from which task execution starts. It defaults to the selected project's path and may be overridden for a command. Pop resolves it to the checkout root and uses that root for the agent working directory, dirty-tree preflight, staging, commits, and the Runtime execution lock. Task artifacts remain in the separate **Task storage**. Durable runtime path configuration is deferred until worktree-oriented execution needs it.
+_Avoid_: Workload runtime path, task storage, shared git root
 
 **Dirty runtime strategy**:
-Controls how workload execution starts from a dirty runtime checkout. `continue` starts execution without modifying the existing dirty state; it is the default both when the option is absent and when it is present without a value, and after successful issue completion the normal implementation commit intentionally includes both pre-existing and agent changes. `commit-and-continue` captures the existing dirty state in a separate implementation commit before invoking the agent. `stash-and-continue` stashes tracked and untracked changes but not ignored files, prints the stash reference when one is created, and leaves restoration to the user; an empty stash does not prevent execution. When the runtime is dirty the command always displays `git status` and the chosen strategy's effect, then requires interactive `y` confirmation; `--yes` auto-confirms, and a non-interactive run without `--yes` is rejected. Run issues applies the chosen strategy once before draining its selected Issue set.
+Controls how task execution starts from a dirty runtime checkout. `continue` starts execution without modifying the existing dirty state; it is the default both when the option is absent and when it is present without a value, and after successful task completion the normal implementation commit intentionally includes both pre-existing and agent changes. `commit-and-continue` captures the existing dirty state in a separate implementation commit before invoking the agent. `stash-and-continue` stashes tracked and untracked changes but not ignored files, prints the stash reference when one is created, and leaves restoration to the user; an empty stash does not prevent execution. When the runtime is dirty the command always displays `git status` and the chosen strategy's effect, then requires interactive `y` confirmation; `--yes` auto-confirms, and a non-interactive run without `--yes` is rejected. Drain applies the chosen strategy once before draining its selected Task set.
 _Avoid_: Clean runtime checkout requirement, automatic stash restoration
 
 **Implementation commit**:
-A commit created by the workload executor from runtime-checkout changes. After successful issue completion, the executor stages all runtime changes and commits them with an issue-derived subject and the agent summary as body. Workload artifacts remain local and unstaged.
-_Avoid_: Workload artifact update, progress record
+A commit created by the task executor from runtime-checkout changes. After successful task completion, the executor stages all runtime changes and commits them with a task-derived subject and the agent summary as body. Task artifacts remain local and unstaged.
+_Avoid_: Task artifact update, progress record
 
-**Issue manifest**:
-The `index.json` within an Issue set. It remains the source of truth for issue eligibility and completion.
-_Avoid_: Workload, dashboard
+**Task manifest**:
+The `index.json` within a Task set. It remains the source of truth for task eligibility and completion.
+_Avoid_: Issue manifest, workload, dashboard
 
-**Issue parent reference**:
-Optional planning context written inside an issue markdown file, such as a `## Parent` section pointing to a PRD or another artifact. An issue may be self-contained. Pop does not require, synthesize, validate, or interpret parent references.
-_Avoid_: Required PRD pairing, Issue set identity
+**Task parent reference**:
+Optional planning context written inside a task markdown file, such as a `## Parent` section pointing to a PRD or another artifact. A task may be self-contained. Pop does not require, synthesize, validate, or interpret parent references.
+_Avoid_: Required PRD pairing, Task set identity
 
-**Workload project resolution**:
-Choosing the project path for a workload command. A unique project display-name match may be selected explicitly; ambiguous names must be rejected with candidate paths. A direct path may be supplied as an escape hatch. When neither is supplied, the current directory is used.
-_Avoid_: Worktree discovery, workload storage
+**Task project resolution**:
+Choosing the project path for a tasks command. A unique project display-name match may be selected explicitly; ambiguous names must be rejected with candidate paths. A direct path may be supplied as an escape hatch. When neither is supplied, the current directory is used.
+_Avoid_: Worktree discovery, task storage
 
-**Issue set priority**:
-A numeric workload value used to choose between ready Issue sets. Newly registered Issue sets start at priority `0`. Higher priority wins; equal-priority Issue sets retain workload list order.
-_Avoid_: Issue dependency, issue-manifest order
+**Task set priority**:
+A numeric value used to choose between ready Task sets. Newly registered Task sets start at priority `0`. Higher priority wins; equal-priority Task sets retain registration order.
+_Avoid_: Task dependency, task-manifest order
 
-**Issue set workload status**:
-The status derived from a discovered Issue set whenever a workload command runs. A **Ready** Issue set has at least one eligible issue; a **Done** Issue set has only done issues; a **Failed** Issue set has at least one failed issue; a **Blocked** Issue set is unfinished but has no eligible issue. The workload does not persist a separate completion flag, so artifact changes naturally affect the next derived status.
-_Avoid_: Pane status, persisted Issue set completion
+**Task set status**:
+The status derived from a discovered Task set whenever a tasks command runs. A **Ready** Task set has at least one eligible task; a **Done** Task set has only done tasks; a **Failed** Task set has at least one failed task; a **Blocked** Task set is unfinished but has no eligible task. Pop does not persist a separate completion flag, so artifact changes naturally affect the next derived status.
+_Avoid_: Pane status, persisted Task set completion
 
-**Next issue**:
-Selecting and executing one issue from the highest-priority Ready Issue set. Non-runnable Issue sets are reported and skipped; among Ready Issue sets, equal priority retains workload list order.
-_Avoid_: First registered Issue set, highest-priority Issue set regardless of status
+**Next task**:
+Selecting and executing one task from the highest-priority Ready Task set. Non-runnable Task sets are reported and skipped; among Ready Task sets, equal priority retains registration order.
+_Avoid_: First registered Task set, highest-priority Task set regardless of status
 
-**Workload executor**:
-The mechanism that runs a selected issue through an agent, verifies completion, updates the issue manifest and progress record locally, and commits implementation changes.
-_Avoid_: Workload scheduler
+**Task executor**:
+The mechanism that runs a selected task through an agent, verifies completion, updates the task manifest and progress record locally, and commits implementation changes.
+_Avoid_: Workload executor, scheduler
 
-**Run issue**:
-Executing exactly one eligible issue from a Ready Issue set. By default pop chooses the Issue set using workload priority. When a positional argument names an Issue set as a bare Issue set identifier, pop runs the next eligible issue from that set. When the argument is an Issue-set-relative file reference such as `<issue-set>/<file>.md`, pop targets that issue. Paths, bare filenames, and bare issue identifiers are rejected. Targeting still requires Open status, AFK type, and satisfied dependencies.
-_Avoid_: Next issue
+**Run**:
+Executing exactly one eligible task from a Ready Task set via `pop tasks run`. By default pop chooses the Task set using priority. When a positional argument names a Task set as a bare Task set identifier, pop runs the next eligible task from that set. When the argument is a Task-set-relative file reference such as `<task-set>/<file>.md`, pop targets that task. Paths, bare filenames, and bare task identifiers are rejected. Targeting still requires Open status, AFK type, and satisfied dependencies.
+_Avoid_: Run issue, next task
 
-**Run issues**:
-Sequentially executing eligible issues from one Ready Issue set until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly. By default pop chooses the Issue set using workload priority. When a positional argument is supplied, it must be a bare Issue set identifier; paths are rejected. It does not continue into another Issue set.
-_Avoid_: Run all, next Issue set, Run PRD
+**Drain**:
+Sequentially executing eligible tasks from one Ready Task set via `pop tasks drain` until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly. By default pop chooses the Task set using priority. When a positional argument is supplied, it must be a bare Task set identifier; paths are rejected. It does not continue into another Task set.
+_Avoid_: Run issues, run all, next Task set, Run PRD
 
 **Agent preset**:
-A named headless agent command known to the workload executor. An explicit agent command may override a preset. The executor appends its generated prompt as the final positional argument and disconnects stdin.
+A named headless agent command known to the task executor. An explicit agent command may override a preset. The executor appends its generated prompt as the final positional argument and disconnects stdin.
 _Avoid_: Integration
 
 **Agent output adapter**:
@@ -301,115 +301,125 @@ Proactively displaying subscription quota remaining in a provider-specific rolli
 _Avoid_: Token usage, API cost
 
 **Agent quota detection**:
-Identifying from an Agent output adapter that an issue attempt stopped because the agent allowance is exhausted. Detection is preset-specific and relies on a stable headless signal. A detected quota pause stops Run issue or Run issues cleanly without retrying, leaves the issue Open, preserves partial runtime changes, and does not append a progress record. It is not a Failed, Skipped, or Interrupted issue. Proactively reporting remaining allowance is the separate **Agent quota reporting** concern.
-_Avoid_: Agent quota reporting, failed issue, skipped issue
+Identifying from an Agent output adapter that a task attempt stopped because the agent allowance is exhausted. Detection is preset-specific and relies on a stable headless signal. A detected quota pause stops Run or Drain cleanly without retrying, leaves the task Open, preserves partial runtime changes, and does not append a progress record. It is not a Failed, Skipped, or Interrupted task. Proactively reporting remaining allowance is the separate **Agent quota reporting** concern.
+_Avoid_: Agent quota reporting, failed task, skipped task
 
 **Agent quota pause**:
-The clean stop produced by Agent quota detection. It leaves the current issue Open and preserves its partial runtime changes, so a later Run issue or Run issues invocation may resume work after allowance returns.
-_Avoid_: Exhausted issue, Interrupted issue, Failed issue
+The clean stop produced by Agent quota detection. It leaves the current task Open and preserves its partial runtime changes, so a later Run or Drain invocation may resume work after allowance returns.
+_Avoid_: Exhausted task, Interrupted task, Failed task
 
-**Issue attempt**:
-One agent invocation for an issue. The workload executor retries an unsuccessful issue up to the configured maximum, defaulting to three attempts. Exhaustion marks the issue Failed, records the attempt count and reason locally, and stops Run issues.
-_Avoid_: Issue set retry, issue dependency
+**Task attempt**:
+One agent invocation for a task. The task executor retries an unsuccessful task up to the configured maximum, defaulting to three attempts. Exhaustion marks the task Failed, records the attempt count and reason locally, and stops Drain.
+_Avoid_: Task set retry, task dependency
 
-**Issue attempt timeout**:
-The maximum duration for one issue attempt, defaulting to 30 minutes and configurable per command. When exceeded, the workload executor terminates the agent process group, preserves partial changes, marks the issue Failed locally, appends a Failed progress record, and stops immediately without further retries. A deliberate retry requires an Issue reset.
-_Avoid_: Issue set timeout, interruption
+**Task attempt timeout**:
+The maximum duration for one task attempt, defaulting to 30 minutes and configurable per command. When exceeded, the task executor terminates the agent process group, preserves partial changes, marks the task Failed locally, appends a Failed progress record, and stops immediately without further retries. A deliberate retry requires an **Open task** override.
+_Avoid_: Task set timeout, interruption
 
-**Human-blocked Issue set**:
-An Issue set with unfinished issues but no eligible AFK issue because human-in-the-loop work must happen first. Run issue and Run issues report the condition and stop; the workload executor never automatically runs HITL issues. On stopping, pop prints the blocking issue body verbatim — the human sees what to do without opening the file — and advises the recovery paths for the blocking HITL issue: Complete issue once the human work is done, edit the issue file and re-run, or skip the issue to defer it and unblock its dependents (Skipped issue). The blocked row also shows a copy-paste complete hint, symmetric with the reset hint on Failed rows.
-_Avoid_: Failed Issue set
+**Human-blocked Task set**:
+A Task set with unfinished tasks but no eligible AFK task because human-in-the-loop work must happen first. Run and Drain report the condition and stop; the task executor never automatically runs HITL tasks. On stopping, pop prints the blocking task body verbatim — the human sees what to do without opening the file — and advises the recovery paths for the blocking HITL task: Complete task once the human work is done, edit the task file and re-run, or skip the task to defer it and unblock its dependents (Skipped task). The blocked row also shows a copy-paste complete hint, symmetric with the open hint on Failed rows.
+_Avoid_: Failed Task set
 
-**Workload artifact**:
-A machine-local planning document, issue markdown file, issue manifest, or progress record within **Workload storage**. Workload artifacts live outside the repository tree, so they can never enter implementation commits and require no ignore configuration.
-_Avoid_: Implementation change, workload state
+**Task artifact**:
+A machine-local planning document, task markdown file, task manifest, or progress record within **Task storage**. Task artifacts live outside the repository tree, so they can never enter implementation commits and require no ignore configuration.
+_Avoid_: Workload artifact, implementation change, task state
 
-**No-op issue completion**:
-A successful issue execution that produces no staged implementation change. The workload executor marks the issue Done locally, appends progress, reports that no implementation commit was created, and allows Run issues to continue.
-_Avoid_: Failed issue, empty commit
+**No-op task completion**:
+A successful task execution that produces no staged implementation change. The task executor marks the task Done locally, appends progress, reports that no implementation commit was created, and allows Drain to continue.
+_Avoid_: Failed task, empty commit
 
-**Exhausted issue**:
-An issue that remains unsuccessful after its maximum attempts. The workload executor marks it Failed locally, preserves any partial implementation changes for inspection, does not commit them, and stops Run issues.
-_Avoid_: No-op issue completion, reverted issue
+**Exhausted task**:
+A task that remains unsuccessful after its maximum attempts. The task executor marks it Failed locally, preserves any partial implementation changes for inspection, does not commit them, and stops Drain.
+_Avoid_: No-op task completion, reverted task
 
-**Interrupted issue**:
-An issue whose active agent process was terminated by user interruption or process termination. The workload executor forwards termination to the agent process group, preserves partial implementation changes, leaves workload artifacts unchanged, and exits without committing. An interrupted issue is not Failed.
-_Avoid_: Exhausted issue, failed issue
+**Interrupted task**:
+A task whose active agent process was terminated by user interruption or process termination. The task executor forwards termination to the agent process group, preserves partial implementation changes, leaves task artifacts unchanged, and exits without committing. An interrupted task is not Failed.
+_Avoid_: Exhausted task, failed task
 
-**Issue reset**:
-Explicitly returning one Failed or Skipped issue to Open so it may be attempted again. The reset command requires a positional Issue-set-relative file reference, `<issue-set>/<file>.md`; paths, bare filenames, and bare issue identifiers are rejected. Reset removes any recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit. The workload status table prints copy-paste reset hints in the same `<issue-set>/<file>.md` form.
-_Avoid_: Issue set reset, automatic retry
+**Open task**:
+Explicitly returning one Failed or Skipped task to Open via `pop tasks open` so it may be attempted again — the command is named for the target status. It requires a positional Task-set-relative file reference, `<task-set>/<file>.md`; paths, bare filenames, and bare task identifiers are rejected. It removes any recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit. The status table prints copy-paste open hints in the same `<task-set>/<file>.md` form.
+_Avoid_: Issue reset, reset, automatic retry
 
-**Complete issue**:
-Manually marking one Open, Failed, or Skipped issue Done without running an agent, regardless of issue type. Used primarily to clear a human-in-the-loop issue after the human performs the work, to conclude a Skipped issue once its deferred verification is satisfied, and also valid for finishing an AFK or Failed issue by hand. The command requires a positional Issue-set-relative file reference, `<issue-set>/<file>.md`; paths, bare filenames, and bare issue identifiers are rejected. All `blocked_by` dependencies must be Done. It bypasses the Completion sentinel — it does not verify acceptance criteria, does not prompt for confirmation, and does not stage or commit implementation changes; the human owns and commits that work. It appends a local COMPLETE progress record noting the prior state.
-_Avoid_: Completion sentinel, no-op issue completion, run issue
+**Complete task**:
+Manually marking one Open, Failed, or Skipped task Done via `pop tasks complete` without running an agent, regardless of task type. Used primarily to clear a human-in-the-loop task after the human performs the work, to conclude a Skipped task once its deferred verification is satisfied, and also valid for finishing an AFK or Failed task by hand. The command requires a positional Task-set-relative file reference, `<task-set>/<file>.md`; paths, bare filenames, and bare task identifiers are rejected. All `blocked_by` dependencies must be Done. It bypasses the Completion sentinel — it does not verify acceptance criteria, does not prompt for confirmation, and does not stage or commit implementation changes; the human owns and commits that work. It appends a local COMPLETE progress record noting the prior state.
+_Avoid_: Complete issue, completion sentinel, no-op task completion, run
 
-**Skipped issue**:
-An issue the human deliberately set aside via skip-issue, recorded with the `skipped` status. Skipping accepts only an Open issue of any type and is the deadlock breaker when a human-in-the-loop issue cannot be verified until its own follow-up issues complete. A Skipped issue is never selected for execution, yet — unlike an Open dependency — it satisfies `blocked_by` for its dependents, so downstream issues become eligible against a deliberately deferred, not completed, prerequisite. The command mirrors Issue reset targeting and appends a local SKIP progress record. A Skipped issue later resolves through Complete issue (to Done) or Issue reset (to Open).
-_Avoid_: Exhausted issue, interrupted issue, blocked issue
+**Skipped task**:
+A task the human deliberately set aside via `pop tasks skip`, recorded with the `skipped` status. Skipping accepts only an Open task of any type and is the deadlock breaker when a human-in-the-loop task cannot be verified until its own follow-up tasks complete. A Skipped task is never selected for execution, yet — unlike an Open dependency — it satisfies `blocked_by` for its dependents, so downstream tasks become eligible against a deliberately deferred, not completed, prerequisite. The command mirrors **Open task** targeting and appends a local SKIP progress record. A Skipped task later resolves through Complete task (to Done) or Open task (to Open).
+_Avoid_: Skipped issue, exhausted task, interrupted task, blocked task
 
-**Deferred Issue set**:
-An Issue set in which every issue is Done or Skipped and at least one is Skipped, so no runnable, failed, or open work remains but the set is not Done. Run issue and Run issues stop cleanly reporting the deferral rather than an error, and automatic selection passes over it like a Done set so it never blocks the queue. The workload status table keeps it visible with its skipped count so the human remembers to conclude or reopen the Skipped issues. A set with any still-Open issue, including an Open HITL issue, is Ready or Human-blocked rather than Deferred.
-_Avoid_: Done Issue set, Human-blocked Issue set
+**Deferred Task set**:
+A Task set in which every task is Done or Skipped and at least one is Skipped, so no runnable, failed, or open work remains but the set is not Done. Run and Drain stop cleanly reporting the deferral rather than an error, and automatic selection passes over it like a Done set so it never blocks selection. The status table keeps it visible with its skipped count so the human remembers to conclude or reopen the Skipped tasks. A set with any still-Open task, including an Open HITL task, is Ready or Human-blocked rather than Deferred.
+_Avoid_: Done Task set, Human-blocked Task set
 
 **Progress record**:
-The append-only local `progress.txt` history beside an issue manifest. It records terminal Done and Failed outcomes, explicit issue resets, and manual completions. Intermediate attempts are streamed during execution but are not appended.
-_Avoid_: Workload state, agent output log
+The append-only local `progress.txt` history beside a task manifest. It records terminal Done and Failed outcomes, explicit task reopenings, and manual completions. Intermediate attempts are streamed during execution but are not appended.
+_Avoid_: Task state, agent output log
 
 **Completion sentinel**:
-The machine-readable ending emitted by an agent after an issue attempt. Success requires a zero agent exit status, a summary block followed by `TASK_COMPLETE`, and every acceptance-criteria checkbox in the issue markdown checked. Failure may end with `TASK_FAILED: <reason>`.
+The machine-readable ending emitted by an agent after a task attempt. Success requires a zero agent exit status, a summary block followed by `TASK_COMPLETE`, and every acceptance-criteria checkbox in the task markdown checked. Failure may end with `TASK_FAILED: <reason>`.
 _Avoid_: Agent exit code, progress record
 
-**Malformed Issue set**:
-A discovered Issue set whose issue manifest or issue markdown files violate the workload contract. This includes an issue with persisted `in_progress` status: the synchronous workload executor does not use that status because it could become stale after a crash. Malformed Issue sets are reported in the workload status table and skipped during automatic selection; the workload executor never spawns an agent for them.
-_Avoid_: Blocked Issue set
+**Malformed Task set**:
+A discovered Task set whose task manifest or task markdown files violate the contract. This includes a task with persisted `in_progress` status: the synchronous task executor does not use that status because it could become stale after a crash. Malformed Task sets are reported in the status table and skipped during automatic selection; the task executor never spawns an agent for them.
+_Avoid_: Blocked Task set
 
-**Workload state**:
-The machine-local persisted record of workloads and their registered Issue sets. A workload is keyed by the canonical path of its **Workload storage**; its Issue sets are stored in registration order with priority. Workload state does not duplicate derived Issue set completion.
-_Avoid_: Workload artifact, issue manifest
+**Task state**:
+The machine-local persisted record of a repository's registered Task sets, stored within its **Task storage**, in registration order with priority. Task state does not duplicate derived Task set completion.
+_Avoid_: Workload state, task artifact, task manifest
 
 **Runtime execution lock**:
-A machine-local lock held while Run issue or Run issues executes for a canonical workload runtime path. It prevents concurrent workload execution in one checkout while allowing unrelated projects or isolated runtime worktrees to execute concurrently. Non-execution workload commands remain available. Lock metadata records the executor PID; a dead PID is reported and replaced as a stale lock.
-_Avoid_: Global workload lock, project-name lock
+A machine-local lock held while Run or Drain executes for a canonical runtime path. It prevents concurrent task execution in one checkout while allowing unrelated projects or isolated runtime worktrees to execute concurrently. Non-execution tasks commands remain available. Lock metadata records the executor PID; a dead PID is reported and replaced as a stale lock.
+_Avoid_: Global task lock, project-name lock
 
-**Workload status table**:
-The non-interactive summary printed by the workload status command after discovery refresh. Missing Issue sets appear first as stale registrations, followed by Done Issue sets. Remaining discovered Issue sets then appear in scheduler order: descending priority with stable registration order for ties, so the user can read the active queue top-to-bottom to understand which Ready work will be selected first. The automatically selected Ready Issue set is marked explicitly. Before execution, the actual Run target is also marked; when an explicit Issue set override differs from the automatic selection, the table shows both markers on their respective rows. An interactive workload dashboard is deferred until the table workflow is exercised.
-_Avoid_: Dashboard
+**Status table**:
+The non-interactive summary printed by `pop tasks status` after discovery refresh. Missing Task sets appear first as stale registrations, followed by Done Task sets. Remaining discovered Task sets then appear in scheduler order: descending priority with stable registration order for ties, so the user can read the active schedule top-to-bottom to understand which Ready work will be selected first. The automatically selected Ready Task set is marked explicitly. Before execution, the actual Run target is also marked; when an explicit Task set override differs from the automatic selection, the table shows both markers on their respective rows. An interactive tasks dashboard is deferred until the table workflow is exercised.
+_Avoid_: Workload status table, dashboard
 
 **Execution confirmation**:
-The human gate before Run issue or Run issues spawns an agent. Pop prints the refreshed workload status table with the selected Issue set marked and asks for `y/n` confirmation. Run issues asks once before draining its selected Issue set, not before each issue. An explicit `--yes` (`-y`) option bypasses the prompt for unattended use. Non-interactive execution without that option fails rather than waiting for input.
-_Avoid_: HITL issue, issue reset
+The human gate before Run or Drain spawns an agent. Pop prints the refreshed status table with the selected Task set marked and asks for `y/n` confirmation. Drain asks once before draining its selected Task set, not before each task. An explicit `--yes` (`-y`) option bypasses the prompt for unattended use. Non-interactive execution without that option fails rather than waiting for input.
+_Avoid_: HITL task, open task
 
-**Workload execution exit status**:
-The process result exposed by Run issue and Run issues: `0` for completed work or a declined confirmation, `1` for execution failure, timeout, malformed target, commit failure, or a live Runtime execution lock, `2` when no runnable issue exists, `3` for usage, configuration, or project-resolution errors, and `130` for interruption.
-_Avoid_: Issue set workload status, agent exit code
+**Execution exit status**:
+The process result exposed by Run and Drain: `0` for completed work or a declined confirmation, `1` for execution failure, timeout, malformed target, commit failure, or a live Runtime execution lock, `2` when no runnable task exists, `3` for usage, configuration, or project-resolution errors, and `130` for interruption.
+_Avoid_: Task set status, agent exit code
 
-**Workload status exit status**:
-The process result exposed by the workload status command. Rendering a resolved workload succeeds even when rows are Malformed, Failed, or Blocked; non-zero is reserved for failures that prevent workload resolution or rendering.
-_Avoid_: Workload execution exit status
+**Status exit status**:
+The process result exposed by `pop tasks status`. Rendering succeeds even when rows are Malformed, Failed, or Blocked; non-zero is reserved for failures that prevent resolution or rendering.
+_Avoid_: Execution exit status
 
-**Workload identifier**:
-The canonical name of an Issue set — its directory name under the **Workload storage** `issues/` directory — or an issue-manifest issue ID. These identifiers drive scheduling, state, and display.
+**Task identifier**:
+The canonical name of a Task set — its directory name under the **Task storage** `tasks/` directory — or a task-manifest task ID. These identifiers drive scheduling, state, and display.
 _Avoid_: Display title, filename, path
 
-**Workload target reference**:
-An argument that identifies an Issue set or issue markdown file on Run issue, Run issues, Issue reset, Complete issue, or Skip issue. Run issue and Run issues accept an optional positional argument; Issue reset, Complete issue, and Skip issue require one. Exactly two forms exist: a bare Issue set identifier targets an Issue set, and an Issue-set-relative file reference `<issue-set>/<file>.md` targets one issue. Resolution is scoped to the current repository's Workload storage via **Repository identity** from the CWD. Relative paths, absolute paths, bare filenames, bare issue identifiers, titles, prefixes, fuzzy matches, and unresolved references are rejected.
-_Avoid_: Shell completion candidate, path
+**Task target reference**:
+An argument that identifies a Task set or task markdown file on Run, Drain, Open task, Complete task, or Skip. Run and Drain accept an optional positional argument; Open task, Complete task, and Skip require one. Exactly two forms exist: a bare Task set identifier targets a Task set, and a Task-set-relative file reference `<task-set>/<file>.md` targets one task. Resolution is scoped to the current repository's Task storage via **Repository identity** from the CWD. Relative paths, absolute paths, bare filenames, bare task identifiers, titles, prefixes, fuzzy matches, and unresolved references are rejected.
+_Avoid_: Workload target reference, shell completion candidate, path
 
-**Workload shell completion**:
-Read-only shell tab completion for workload subcommands, project names, **Workload target references**, agent presets, and path flags. Positional completion on Run issue and Run issues offers bare Issue set identifiers; Run issue also completes Issue-set-relative issue files after an Issue set identifier and slash, such as `<issue-set>/<file>.md`. Issue reset, Complete issue, and Skip issue complete Issue-set-relative file references only. Set-priority completes bare Issue set identifiers for its ISSUE_SET positional. Completion never offers filesystem path segments. Completion may scan Workload storage but must not auto-register Issue sets, persist workload state, or print warnings.
+**Task shell completion**:
+Read-only shell tab completion for tasks subcommands, project names, **Task target references**, agent presets, and path flags. Positional completion on Run and Drain offers bare Task set identifiers; Run also completes Task-set-relative task files after a Task set identifier and slash, such as `<task-set>/<file>.md`. Open task, Complete task, and Skip complete Task-set-relative file references only. Set-priority completes bare Task set identifiers for its TASK_SET positional. Completion never offers filesystem path segments. Completion may scan Task storage but must not auto-register Task sets, persist task state, or print warnings.
 _Avoid_: Shell autosuggestion, discovery refresh
 
-**Missing Issue set**:
-A locally registered Issue set whose manifest is no longer present beneath its Workload storage. Its registration, priority, and list order are preserved in case the Issue set returns. It is skipped during execution and shown before all discovered Issue sets in the workload status table so active work remains grouped toward the end for a future terminal UI.
-_Avoid_: Malformed Issue set
+**Missing Task set**:
+A locally registered Task set whose manifest is no longer present beneath its Task storage. Its registration, priority, and list order are preserved in case the Task set returns. It is skipped during execution and shown before all discovered Task sets in the status table so active work remains grouped toward the end for a future terminal UI.
+_Avoid_: Malformed Task set
+
+#### Reserved terms
+
+**Queue** (reserved, not implemented):
+Reserved for a future machine-global scheduler that picks the next Task set across all projects by priority and runs it. Do not use "queue" for today's per-repository scheduling; it has no current definition.
 
 ## Deprecated aliases
 
 - `idle`, `read` → **Clear**
 - `needs_attention` → **Unread**
-- `workload definition path`, `thoughts/issues` → **Workload storage**
-- `workload artifact ignore coverage` → removed; Workload storage lives outside the repository tree (ADR 0012)
+- `issue` → **Task**; `Issue set` → **Task set**
+- `pop workload` (command family) → **`pop tasks`**; the umbrella term "workload" is retired — say "the repository's Task sets" or name the specific concept
+- `run-issue` → **Run** (`pop tasks run`); `run-issues` → **Drain** (`pop tasks drain`)
+- `reset-issue` → **Open task** (`pop tasks open`); `complete-issue` → **Complete task**; `skip-issue` → **Skip**
+- `to-issues` (skill) → **to-tasks**; `run-one` (skill) → **run-task**
+- `workload definition path`, `thoughts/issues` → **Task storage**
+- `workload artifact ignore coverage` → removed; Task storage lives outside the repository tree (ADR 0012)
 
 ## Flagged ambiguities
 
@@ -418,6 +428,8 @@ _Avoid_: Malformed Issue set
 **Visit vs status change** — A **Visit** records interaction with a pane without changing its status. Changing a pane to **Clear** records that no attention is required. Some navigation actions intentionally do both.
 
 **Active vs working** — An **Active pane** is currently visible to the user. A **Working** pane has an agent or process actively running. A pane may be either, both, or neither.
+
+**Open as status vs override** — `open` is both a task status and the override command that returns a task to that status. The command is deliberately named for its target status; context (noun vs verb) disambiguates.
 
 **Session name derivation trade-off** — `project.SessionName` is the single source of truth for exact session names (bare-repo worktrees, regular repos, non-git paths). It calls git commands and is correct for all entry points that create, attach to, or kill sessions. The **dashboard** deliberately uses `project.FastSessionName` for history matching because exact derivation is too slow for a frequently-opened popup. `FastSessionName` is a pure string approximation (directory base + tmux-safe sanitization); it is identical for regular repos and non-git paths, and only differs for bare-repo worktrees where the exact name is `repo/worktree`. See ADR 0005.
 
@@ -447,6 +459,6 @@ _Avoid_: Malformed Issue set
 >
 > **Expert:** **Following** on the dashboard. Toggle follow on the pane, then use following mode to filter to just followed panes.
 >
-> **Dev:** What if a workload agent changes its structured output and pop cannot interpret it?
+> **Dev:** What if a task agent changes its structured output and pop cannot interpret it?
 >
-> **Expert:** Its **Agent output adapter** falls back to the original text, which still has to satisfy the normal **Completion sentinel** contract. An **Agent quota pause** is different: when the adapter recognizes one, the issue stays Open and Run issues stops cleanly.
+> **Expert:** Its **Agent output adapter** falls back to the original text, which still has to satisfy the normal **Completion sentinel** contract. An **Agent quota pause** is different: when the adapter recognizes one, the task stays Open and **Drain** stops cleanly.

@@ -22,7 +22,7 @@ func printHITLGateAdvice(d *Deps, w io.Writer, stem, dir string, issue *Issue) {
 	fmt.Fprintln(out, "  finish by hand:")
 	fmt.Fprintf(out, "                  %s\n", completeIssueHint(stem, issue.File))
 	fmt.Fprintln(out, "  edit & re-run:")
-	fmt.Fprintf(out, "                  $EDITOR %s && pop workload run-issues\n", hint)
+	fmt.Fprintf(out, "                  $EDITOR %s && pop tasks drain\n", hint)
 	fmt.Fprintln(out, "  defer it:")
 	fmt.Fprintf(out, "                  %s\n", skipIssueHint(stem, issue.File))
 }

@@ -71,18 +71,18 @@ Interactively add project directories to your config.
 
 ### `pop doctor`
 
-Print a read-only command-family readiness report for `pop project`, `pop worktree`, `pop monitor`, `pop pane`, `pop workload`, and `pop integrate`. Doctor explains degraded or blocked workflows with nested checks and next actions; it uses agent integration state only as supporting evidence when a command family depends on it.
+Print a read-only command-family readiness report for `pop project`, `pop worktree`, `pop monitor`, `pop pane`, `pop tasks`, and `pop integrate`. Doctor explains degraded or blocked workflows with nested checks and next actions; it uses agent integration state only as supporting evidence when a command family depends on it.
 
 ## Live Agent Smoke
 
-To exercise workload execution against real agent CLIs, run the opt-in smoke script:
+To exercise task execution against real agent CLIs, run the opt-in smoke script:
 
 ```bash
 scripts/live-workload-agent-smoke.sh codex
 make live-agent-smoke AGENTS="codex claude"
 ```
 
-It creates disposable git repos with a temporary Issue set and runs `pop workload run-issues` using each selected agent preset. This can consume agent quota and depends on local CLI authentication, so it is not part of normal tests.
+It creates disposable git repos with a temporary task set and runs `pop tasks drain` using each selected agent preset. This can consume agent quota and depends on local CLI authentication, so it is not part of normal tests.
 
 ## Custom worktree commands
 

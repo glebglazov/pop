@@ -213,13 +213,13 @@ func TestFailedRowResetHints(t *testing.T) {
 	if len(result.Rows) != 1 || result.Rows[0].Status != StatusFailed {
 		t.Fatalf("rows = %#v", result.Rows)
 	}
-	if len(result.Rows[0].ResetHints) != 1 || result.Rows[0].ResetHints[0] != "pop workload reset-issue failed-prd/repair-broken.md" {
+	if len(result.Rows[0].ResetHints) != 1 || result.Rows[0].ResetHints[0] != "pop tasks open failed-prd/repair-broken.md" {
 		t.Fatalf("reset hints = %v", result.Rows[0].ResetHints)
 	}
 
 	var buf bytes.Buffer
 	Render(&buf, result)
-	if !strings.Contains(buf.String(), "reset: pop workload reset-issue") {
+	if !strings.Contains(buf.String(), "reset: pop tasks open") {
 		t.Fatalf("output missing reset hint: %s", buf.String())
 	}
 }
@@ -237,13 +237,13 @@ func TestBlockedReasonInTable(t *testing.T) {
 	if result.Rows[0].BlockedReason != "HITL: 01-hitl" {
 		t.Fatalf("blocked reason = %q", result.Rows[0].BlockedReason)
 	}
-	if result.Rows[0].CompleteHint != "pop workload complete-issue blocked/01-hitl.md" {
+	if result.Rows[0].CompleteHint != "pop tasks complete blocked/01-hitl.md" {
 		t.Fatalf("complete hint = %q", result.Rows[0].CompleteHint)
 	}
 
 	var buf bytes.Buffer
 	Render(&buf, result)
-	if !strings.Contains(buf.String(), "complete: pop workload complete-issue") {
+	if !strings.Contains(buf.String(), "complete: pop tasks complete") {
 		t.Fatalf("output missing inline complete hint:\n%s", buf.String())
 	}
 }

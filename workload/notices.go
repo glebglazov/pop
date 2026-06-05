@@ -15,7 +15,7 @@ func RenderMigrate(w io.Writer, result *MigrateResult) {
 	}
 
 	for _, setID := range result.Migrated {
-		out.line(ansiGreen, "✓ Migrated %s into Workload storage", setID)
+		out.line(ansiGreen, "✓ Migrated %s into task storage", setID)
 	}
 	if len(result.Skipped) > 0 {
 		out.line(ansiYellow, "Skipped %d set(s) already present in storage: %s",
@@ -35,17 +35,17 @@ func RenderPriorityUpdate(w io.Writer, issueSetID string, oldPriority, newPriori
 	outputFor(w).line(ansiCyan, "Updated priority for %s: %d -> %d", issueSetID, oldPriority, newPriority)
 }
 
-// RenderIssueReset writes the user-facing reset-issue result.
+// RenderIssueReset writes the user-facing open result.
 func RenderIssueReset(w io.Writer, issueSetID, issueID string) {
-	outputFor(w).line(ansiCyan, "Reset issue %s/%s to open", issueSetID, issueID)
+	outputFor(w).line(ansiCyan, "Reset task %s/%s to open", issueSetID, issueID)
 }
 
-// RenderIssueComplete writes the user-facing complete-issue result.
+// RenderIssueComplete writes the user-facing complete result.
 func RenderIssueComplete(w io.Writer, issueSetID, issueID string) {
-	outputFor(w).line(ansiGreen, "✓ Completed issue %s/%s", issueSetID, issueID)
+	outputFor(w).line(ansiGreen, "✓ Completed task %s/%s", issueSetID, issueID)
 }
 
-// RenderIssueSkip writes the user-facing skip-issue result.
+// RenderIssueSkip writes the user-facing skip result.
 func RenderIssueSkip(w io.Writer, issueSetID, issueID string) {
-	outputFor(w).line(ansiYellow, "Skipped issue %s/%s", issueSetID, issueID)
+	outputFor(w).line(ansiYellow, "Skipped task %s/%s", issueSetID, issueID)
 }

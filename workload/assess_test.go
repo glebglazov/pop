@@ -39,14 +39,14 @@ func TestAssessCompletionUncheckedBoxes(t *testing.T) {
 
 func TestCommitSubject(t *testing.T) {
 	got := CommitSubject("feature", "01-a")
-	if got != "workload(feature): 01-a" {
+	if got != "task(feature): 01-a" {
 		t.Fatalf("subject = %q", got)
 	}
 }
 
 func TestDirtyCheckpointSubject(t *testing.T) {
 	got := DirtyCheckpointSubject("feature", "01-a")
-	if got != "workload(feature): 01-a capturing dirty state" {
+	if got != "task(feature): 01-a capturing dirty state" {
 		t.Fatalf("subject = %q", got)
 	}
 }

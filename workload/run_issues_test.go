@@ -207,9 +207,9 @@ func TestRunIssueSetHITLGatePrintsRecoveryAdvice(t *testing.T) {
 		"--- demo/02-hitl.md ---",
 		"- [ ] ok",
 		"--- end ---",
-		"pop workload complete-issue demo/02-hitl.md",
-		"$EDITOR demo/02-hitl.md && pop workload run-issues",
-		"pop workload skip-issue demo/02-hitl.md",
+		"pop tasks complete demo/02-hitl.md",
+		"$EDITOR demo/02-hitl.md && pop tasks drain",
+		"pop tasks skip demo/02-hitl.md",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("advice missing %q:\n%s", want, out)
@@ -233,7 +233,7 @@ func TestHITLGateAdviceSurvivesUnreadableIssueFile(t *testing.T) {
 	if !strings.Contains(out, "could not read demo/02-hitl.md") {
 		t.Fatalf("missing read-failure notice:\n%s", out)
 	}
-	if !strings.Contains(out, "pop workload complete-issue demo/02-hitl.md") {
+	if !strings.Contains(out, "pop tasks complete demo/02-hitl.md") {
 		t.Fatalf("advice block missing after read failure:\n%s", out)
 	}
 }
@@ -251,10 +251,10 @@ func TestRunIssueSetFailedStopMentionsCompleteAndReset(t *testing.T) {
 	assertExitCode(t, err, ExitOperational)
 
 	out := buf.String()
-	if !strings.Contains(out, "pop workload reset-issue demo/01-a.md") {
+	if !strings.Contains(out, "pop tasks open demo/01-a.md") {
 		t.Fatalf("advice missing reset hint:\n%s", out)
 	}
-	if !strings.Contains(out, "pop workload complete-issue demo/01-a.md") {
+	if !strings.Contains(out, "pop tasks complete demo/01-a.md") {
 		t.Fatalf("advice missing complete hint:\n%s", out)
 	}
 }
@@ -309,7 +309,7 @@ func TestRunIssueSetClaudeQuotaPauseStopsCleanly(t *testing.T) {
 	if got := strings.TrimSpace(string(mustReadFile(t, counterPath))); got != "1" {
 		t.Fatalf("started attempts = %q, want 1", got)
 	}
-	if !strings.Contains(buf.String(), "Issue set demo paused") {
+	if !strings.Contains(buf.String(), "Task set demo paused") {
 		t.Fatalf("missing pause summary:\n%s", buf.String())
 	}
 }
@@ -354,8 +354,8 @@ func TestRunIssueSetOperationalStopOnCommitFailure(t *testing.T) {
 
 	_, err := RunIssueSetWith(d, nil, nil, env.runIssueSetOpts(true, agent, nil))
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "issue demo/01-a") {
-		t.Fatalf("error missing issue reference: %v", err)
+	if !strings.Contains(err.Error(), "task demo/01-a") {
+		t.Fatalf("error missing task reference: %v", err)
 	}
 	assertIssueOpen(t, env.execFixture(), "01-a")
 }
@@ -415,12 +415,12 @@ func TestRunIssueSetYesPrintsConciseSummary(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"━━ Running issue demo/01-a: A",
+		"━━ Running task demo/01-a: A",
 		"   Attempt 1/3",
 		"── Agent output",
 		"── Agent finished for demo/01-a",
 		"✓ Completed demo/01-a",
-		"✓ Completed Issue set demo",
+		"✓ Completed task set demo",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
@@ -429,7 +429,7 @@ func TestRunIssueSetYesPrintsConciseSummary(t *testing.T) {
 	if strings.Contains(out, "\033[") {
 		t.Fatalf("redirected output contains ANSI:\n%q", out)
 	}
-	if !strings.Contains(out, "Completed demo/01-a") || !strings.Contains(out, "Completed Issue set demo") {
+	if !strings.Contains(out, "Completed demo/01-a") || !strings.Contains(out, "Completed task set demo") {
 		t.Fatalf("missing concise summary:\n%s", out)
 	}
 	if strings.Count(out, "STATUS") != 1 {

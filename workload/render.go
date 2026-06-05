@@ -164,12 +164,12 @@ func Render(w io.Writer, result *RefreshResult) {
 
 func render(out *output, result *RefreshResult) {
 	if len(result.NewRegistrations) > 0 {
-		out.line(ansiCyan, "Registered new Issue set(s): %s", strings.Join(result.NewRegistrations, ", "))
+		out.line(ansiCyan, "Registered new task set(s): %s", strings.Join(result.NewRegistrations, ", "))
 		fmt.Fprintln(out)
 	}
 
 	if len(result.Rows) == 0 {
-		fmt.Fprintf(out, "No workloads at %s\n", result.DefinitionPath)
+		fmt.Fprintf(out, "No task sets at %s\n", result.DefinitionPath)
 		return
 	}
 
@@ -191,7 +191,7 @@ func formatTableWithOutput(out *output, rows []Row) string {
 	)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", idW, "ISSUE SET", stW, "STATUS", prW, "PRI", "DETAILS")
+	fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", idW, "TASK SET", stW, "STATUS", prW, "PRI", "DETAILS")
 	fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", idW, strings.Repeat("-", idW), stW, strings.Repeat("-", stW), prW, strings.Repeat("-", prW), strings.Repeat("-", detailW))
 
 	for _, row := range rows {
@@ -217,7 +217,7 @@ func formatTableWithOutput(out *output, rows []Row) string {
 func rowDetail(row Row) string {
 	switch row.Status {
 	case StatusMissing:
-		return "registered Issue set missing"
+		return "registered task set missing"
 	case StatusMalformed:
 		return row.MalformedSummary
 	case StatusFailed:
@@ -300,7 +300,7 @@ func renderIssueList(out *output, issueSetID string, m *Manifest) {
 	if m == nil || !m.Valid {
 		return
 	}
-	fmt.Fprintf(out, "\nIssues in %s:\n", issueSetID)
+	fmt.Fprintf(out, "\nTasks in %s:\n", issueSetID)
 	fmt.Fprintln(out, "  Legend: → runnable  ○ blocked  ◐ needs human  ✓ done  ⊘ failed/skipped")
 	for _, issue := range m.Issues {
 		sym := issueSymbol(m, issue)

@@ -154,7 +154,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	for {
 		currentRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if err != nil {
-			return nil, exitErr(ExitOperational, "refresh before issue selection: %v", err)
+			return nil, exitErr(ExitOperational, "refresh before task selection: %v", err)
 		}
 
 		sel, selErr := SelectIssueInSet(currentRefresh, issueSetID)
@@ -253,15 +253,15 @@ func finishRunIssueSet(out io.Writer, yes bool, result *RunIssueSetResult) {
 
 func deferralMessage(result *RunIssueSetResult) string {
 	if len(result.SkippedIssues) > 0 {
-		return fmt.Sprintf("Issue set %s deferred: skipped %s", result.IssueSetID, strings.Join(result.SkippedIssues, ", "))
+		return fmt.Sprintf("Task set %s deferred: skipped %s", result.IssueSetID, strings.Join(result.SkippedIssues, ", "))
 	}
-	return fmt.Sprintf("Issue set %s deferred", result.IssueSetID)
+	return fmt.Sprintf("Task set %s deferred", result.IssueSetID)
 }
 
 func printIssueSetSummary(w io.Writer, result *RunIssueSetResult) {
 	out := outputFor(w)
 	if result.IssueSetDone {
-		out.line(ansiGreen, "✓ Completed Issue set %s (%d issue(s))", result.IssueSetID, len(result.Completed))
+		out.line(ansiGreen, "✓ Completed task set %s (%d task(s))", result.IssueSetID, len(result.Completed))
 		return
 	}
 	if result.IssueSetDeferred {
@@ -269,12 +269,12 @@ func printIssueSetSummary(w io.Writer, result *RunIssueSetResult) {
 		return
 	}
 	if result.BlockedReason != "" {
-		out.line(ansiYellow, "Issue set %s blocked: %s", result.IssueSetID, result.BlockedReason)
+		out.line(ansiYellow, "Task set %s blocked: %s", result.IssueSetID, result.BlockedReason)
 		return
 	}
 	if result.QuotaPaused {
-		out.line(ansiYellow, "Issue set %s paused after %d completed issue(s): agent quota exhausted", result.IssueSetID, len(result.Completed))
+		out.line(ansiYellow, "Task set %s paused after %d completed task(s): agent quota exhausted", result.IssueSetID, len(result.Completed))
 		return
 	}
-	fmt.Fprintf(out, "Issue set %s stopped after %d issue(s)\n", result.IssueSetID, len(result.Completed))
+	fmt.Fprintf(out, "Task set %s stopped after %d task(s)\n", result.IssueSetID, len(result.Completed))
 }

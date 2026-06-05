@@ -157,11 +157,11 @@ for agent in "${agents[@]}"; do
   printf '\n==> Running live workload smoke for %s in %s\n' "$agent" "$runtime"
   if (
     cd "$runtime"
-    XDG_DATA_HOME="$xdg" "$pop_bin" workload \
+    XDG_DATA_HOME="$xdg" "$pop_bin" tasks \
       --path "$runtime" \
-      --workload-definition-path "$runtime" \
-      run-issues thoughts/issues/live-agent-smoke \
-      --workload-runtime-path "$runtime" \
+      --task-definition-path "$runtime" \
+      drain thoughts/issues/live-agent-smoke \
+      --task-runtime-path "$runtime" \
       --agent "$agent" \
       --agent-output auto \
       --max-tries "$max_tries" \

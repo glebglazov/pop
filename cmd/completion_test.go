@@ -69,56 +69,56 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	t.Run("project", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "status", "--project")
+		out := shellCompNoDesc(t, "tasks", "status", "--project")
 		assertShellCompContains(t, out, "svc")
 	})
 
 	t.Run("run issue positional defaults to Issue set IDs", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "run-issue")
+		out := shellCompNoDesc(t, "tasks", "run")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
 		assertShellCompOmitsExact(t, out, "01-a")
 	})
 
 	t.Run("run issue positional issue set relative path", func(t *testing.T) {
-		out := shellCompNoDescCompleting(t, "workload", "run-issue", "svc/")
+		out := shellCompNoDescCompleting(t, "tasks", "run", "svc/")
 		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
 	})
 
 	t.Run("run issues positional defaults to Issue set IDs", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "run-issues")
+		out := shellCompNoDesc(t, "tasks", "drain")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
 	})
 
 	t.Run("reset issue positional defaults to Issue set IDs", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "reset-issue")
+		out := shellCompNoDesc(t, "tasks", "open")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
 		assertShellCompOmitsExact(t, out, "01-a")
 	})
 
 	t.Run("reset issue positional issue set relative file", func(t *testing.T) {
-		out := shellCompNoDescCompleting(t, "workload", "reset-issue", "svc/")
+		out := shellCompNoDescCompleting(t, "tasks", "open", "svc/")
 		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
 	})
 
 	t.Run("set priority positional IDs", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "set-priority")
+		out := shellCompNoDesc(t, "tasks", "set-priority")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
 	})
 
 	t.Run("agent presets", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "run-issue", "--agent")
+		out := shellCompNoDesc(t, "tasks", "run", "--agent")
 		for _, preset := range []string{"claude", "codex", "cursor", "opencode", "pi"} {
 			assertShellCompContains(t, out, preset)
 		}
 	})
 
 	t.Run("subcommands", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload")
-		for _, sub := range []string{"status", "set-priority", "run-issue", "run-issues", "reset-issue"} {
+		out := shellCompNoDesc(t, "tasks")
+		for _, sub := range []string{"status", "set-priority", "run", "drain", "open"} {
 			assertShellCompContains(t, out, sub)
 		}
 	})
@@ -136,7 +136,7 @@ func TestWorkloadCompletionReadOnly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	_ = shellCompNoDesc(t, "workload", "run-issue")
+	_ = shellCompNoDesc(t, "tasks", "run")
 
 	statePath := filepath.Join(root, ".xdg", "pop", "workloads-state.json")
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
@@ -145,7 +145,7 @@ func TestWorkloadCompletionReadOnly(t *testing.T) {
 }
 
 func TestWorkloadPathFlagsRequestDirectoryCompletion(t *testing.T) {
-	out := shellCompNoDesc(t, "workload", "status", "--path")
+	out := shellCompNoDesc(t, "tasks", "status", "--path")
 	if !strings.Contains(out, ":16") {
 		t.Fatalf("expected directory completion directive, got:\n%s", out)
 	}
