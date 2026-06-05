@@ -1,5 +1,7 @@
 # Workload target references resolve from the current working directory
 
+> Superseded by [ADR 0012](./0012-issue-sets-live-in-pop-data-dir-keyed-per-repository.md): path-form targets removed; targets are bare identifiers resolved via repository identity from the CWD.
+
 Run issue, Run issues, and Issue reset accept positional **Workload target references** only. Run issue and Run issues each accept an optional positional path override; Issue reset requires a positional issue path. These commands do not expose `--issue-set` or `--issue` targeting flags. Pop normalizes every accepted reference to canonical Issue set and issue identifiers before selection. Resolved paths must match discovery under the command's workload definition path.
 
 Positional targeting is path-only. Run issues accepts a CWD-relative path to a discovered Issue set directory, such as `thoughts/issues/<id>` or `.` when the shell is already inside the directory. Run issue and Issue reset accept a CWD-relative path to an issue markdown file beneath a discovered Issue set, such as `thoughts/issues/<id>/<file>.md`. A bare filename is accepted when it resolves from the current directory to such a markdown file. Bare **Workload identifiers**, absolute paths, titles, prefixes, fuzzy matches, unresolved paths, and other non-relative forms are rejected.

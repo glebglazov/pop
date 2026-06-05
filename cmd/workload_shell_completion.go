@@ -36,6 +36,18 @@ func registerWorkloadShellCompletions() {
 	workloadResetIssueCmd.ValidArgsFunction = completeWorkloadIssuePathArgs
 	workloadCompleteIssueCmd.ValidArgsFunction = completeWorkloadIssuePathArgs
 	workloadSkipIssueCmd.ValidArgsFunction = completeWorkloadIssuePathArgs
+	workloadShowPathCmd.ValidArgsFunction = completeWorkloadShowPathArgs
+}
+
+func completeWorkloadShowPathArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	ids, err := workload.ListStoredIssueSetIDs(workloadCompletionDeps(), "")
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
 func registerWorkloadPathFlagCompletions() {

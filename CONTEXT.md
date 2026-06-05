@@ -209,20 +209,36 @@ The **Doctor status** of the `pop workload` command family. Because the workload
 _Avoid_: Workload status availability
 
 **Issue set**:
-The local `thoughts/issues/<id>/index.json` manifest and its sibling issue markdown files. An Issue set is the schedulable unit of a workload. Its directory name is its canonical identifier and display label; there is no separate Issue-set title. It may be created from a PRD, a grilling session, or another planning workflow; PRD existence is irrelevant to workload scheduling and execution.
+The local `<id>/index.json` manifest and its sibling issue markdown files beneath the **Workload storage** `issues/` directory. An Issue set is the schedulable unit of a workload. Its directory name is its canonical identifier and display label; there is no separate Issue-set title. It may be created from a PRD, a grilling session, or another planning workflow; PRD existence is irrelevant to workload scheduling and execution.
 _Avoid_: PRD, workload
 
 **Issue set registration**:
 An Issue set entering a workload so pop may select issues from it. Pop automatically registers discovered Issue sets and reports newly registered Issue sets to the user. Registration metadata and Issue set artifacts remain machine-local.
 _Avoid_: Import, tracking
 
-**Workload definition path**:
-The directory where pop discovers a workload's Issue sets. Discovery scans only `thoughts/issues/*/index.json` beneath this directory. It defaults to the selected project's path and may be overridden for a command. The definition path may be a designated worktree and must not be inferred from a repository's shared git directory.
-_Avoid_: Shared git root, runtime path, project root
+**Repository identity**:
+The key mapping a repository to its **Workload storage**: the hash of the canonical git common directory path. All worktrees of one repository share one identity and therefore one Workload storage. A fresh clone or a moved repository is a new identity.
+_Avoid_: Remote URL, project name, worktree path
+
+**Workload storage**:
+The per-repository directory in pop's data dir where a repository's Issue sets live, named `<repo-basename>-<short-hash>` from **Repository identity**. It contains a `repo.json` reverse-lookup marker and an `issues/` directory; discovery scans `issues/*/index.json` beneath it. It is derived, never configured, and created on demand by **Show path**. Nothing workload-related lives inside the repository tree.
+_Avoid_: Workload definition path, thoughts directory, project root, runtime path
+
+**Show path**:
+Printing the absolute path to the current repository's Workload storage `issues/` directory, or to one Issue set's directory when given a target. It creates the Workload storage on demand, making it the single entry point for humans (`cd`, `$EDITOR`) and for planning skills that write Issue sets.
+_Avoid_: Path command, show command, workload status table
+
+**Workload migration**:
+The one-shot move of legacy `thoughts/issues/` Issue sets from the current worktree into Workload storage, rekeying **Workload state** entries while preserving registration metadata and priority. An Issue set whose identifier already exists in storage is reported and skipped, never merged. Legacy global-ignore entries are left untouched.
+_Avoid_: Import, worktree sweep
+
+**Orphaned workload storage**:
+A Workload storage directory whose recorded repository path no longer exists. Doctor reports it; pop never deletes it automatically.
+_Avoid_: Missing Issue set, stale registration
 
 **Workload runtime path**:
-The git checkout from which issue execution starts. It defaults to the selected project's path and may be overridden for a command. Pop resolves it to the checkout root and uses that root for the agent working directory, dirty-tree preflight, staging, commits, and the Runtime execution lock. Workload artifacts remain under the separate Workload definition path. Durable workload path configuration is deferred until worktree-oriented execution needs it.
-_Avoid_: Definition path, shared git root
+The git checkout from which issue execution starts. It defaults to the selected project's path and may be overridden for a command. Pop resolves it to the checkout root and uses that root for the agent working directory, dirty-tree preflight, staging, commits, and the Runtime execution lock. Workload artifacts remain in the separate **Workload storage**. Durable workload path configuration is deferred until worktree-oriented execution needs it.
+_Avoid_: Workload storage, shared git root
 
 **Dirty runtime strategy**:
 Controls how workload execution starts from a dirty runtime checkout. `continue` starts execution without modifying the existing dirty state; it is the default both when the option is absent and when it is present without a value, and after successful issue completion the normal implementation commit intentionally includes both pre-existing and agent changes. `commit-and-continue` captures the existing dirty state in a separate implementation commit before invoking the agent. `stash-and-continue` stashes tracked and untracked changes but not ignored files, prints the stash reference when one is created, and leaves restoration to the user; an empty stash does not prevent execution. When the runtime is dirty the command always displays `git status` and the chosen strategy's effect, then requires interactive `y` confirmation; `--yes` auto-confirms, and a non-interactive run without `--yes` is rejected. Run issues applies the chosen strategy once before draining its selected Issue set.
@@ -242,7 +258,7 @@ _Avoid_: Required PRD pairing, Issue set identity
 
 **Workload project resolution**:
 Choosing the project path for a workload command. A unique project display-name match may be selected explicitly; ambiguous names must be rejected with candidate paths. A direct path may be supplied as an escape hatch. When neither is supplied, the current directory is used.
-_Avoid_: Worktree discovery, workload definition path
+_Avoid_: Worktree discovery, workload storage
 
 **Issue set priority**:
 A numeric workload value used to choose between ready Issue sets. Newly registered Issue sets start at priority `0`. Higher priority wins; equal-priority Issue sets retain workload list order.
@@ -261,11 +277,11 @@ The mechanism that runs a selected issue through an agent, verifies completion, 
 _Avoid_: Workload scheduler
 
 **Run issue**:
-Executing exactly one eligible issue from a Ready Issue set. By default pop chooses the Issue set using workload priority. When a positional argument names an Issue set, either as a bare Issue set identifier or a CWD-relative Issue set path, pop runs the next eligible issue from that set. When the argument names an issue markdown file, either as a CWD-relative path, an Issue-set-relative file reference such as `<issue-set>/<file>.md`, or a bare filename from inside the Issue set directory, pop targets that issue. Bare issue identifiers and absolute paths are rejected. Targeting still requires Open status, AFK type, and satisfied dependencies.
+Executing exactly one eligible issue from a Ready Issue set. By default pop chooses the Issue set using workload priority. When a positional argument names an Issue set as a bare Issue set identifier, pop runs the next eligible issue from that set. When the argument is an Issue-set-relative file reference such as `<issue-set>/<file>.md`, pop targets that issue. Paths, bare filenames, and bare issue identifiers are rejected. Targeting still requires Open status, AFK type, and satisfied dependencies.
 _Avoid_: Next issue
 
 **Run issues**:
-Sequentially executing eligible issues from one Ready Issue set until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly. By default pop chooses the Issue set using workload priority. When a positional argument is supplied, it may be a bare Issue set identifier or a CWD-relative path to the Issue set directory. Absolute paths are rejected. It does not continue into another Issue set.
+Sequentially executing eligible issues from one Ready Issue set until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly. By default pop chooses the Issue set using workload priority. When a positional argument is supplied, it must be a bare Issue set identifier; paths are rejected. It does not continue into another Issue set.
 _Avoid_: Run all, next Issue set, Run PRD
 
 **Agent preset**:
@@ -305,12 +321,8 @@ An Issue set with unfinished issues but no eligible AFK issue because human-in-t
 _Avoid_: Failed Issue set
 
 **Workload artifact**:
-A machine-local planning document, issue markdown file, issue manifest, or progress record beneath `thoughts/`. The workload executor updates workload artifacts locally but does not stage or commit them with implementation changes.
+A machine-local planning document, issue markdown file, issue manifest, or progress record within **Workload storage**. Workload artifacts live outside the repository tree, so they can never enter implementation commits and require no ignore configuration.
 _Avoid_: Implementation change, workload state
-
-**Workload artifact ignore coverage**:
-The effective Git behavior that keeps **Workload artifacts** out of implementation commits. Doctor treats this as covered when Git reports that `thoughts/` would be ignored in the relevant **Workload runtime path**, regardless of whether the ignore comes from a repository ignore file, `.git/info/exclude`, a configured excludes file, Git's default global ignore file, or Pop's own workload-gitignore install step. If no Git runtime checkout can be resolved, workload execution is Blocked and ignore coverage is not applicable. Doctor must disclose the probe it used to make this assessment.
-_Avoid_: Workload gitignore installed, global gitignore configured
 
 **No-op issue completion**:
 A successful issue execution that produces no staged implementation change. The workload executor marks the issue Done locally, appends progress, reports that no implementation commit was created, and allows Run issues to continue.
@@ -325,11 +337,11 @@ An issue whose active agent process was terminated by user interruption or proce
 _Avoid_: Exhausted issue, failed issue
 
 **Issue reset**:
-Explicitly returning one Failed or Skipped issue to Open so it may be attempted again. The reset command requires a CWD-relative path positional argument to the issue markdown file; bare issue identifiers and absolute paths are rejected. A bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. Reset removes any recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit. The workload status table prints copy-paste reset hints using the canonical path `thoughts/issues/<id>/<file>.md` from the workload definition root.
+Explicitly returning one Failed or Skipped issue to Open so it may be attempted again. The reset command requires a positional Issue-set-relative file reference, `<issue-set>/<file>.md`; paths, bare filenames, and bare issue identifiers are rejected. Reset removes any recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit. The workload status table prints copy-paste reset hints in the same `<issue-set>/<file>.md` form.
 _Avoid_: Issue set reset, automatic retry
 
 **Complete issue**:
-Manually marking one Open, Failed, or Skipped issue Done without running an agent, regardless of issue type. Used primarily to clear a human-in-the-loop issue after the human performs the work, to conclude a Skipped issue once its deferred verification is satisfied, and also valid for finishing an AFK or Failed issue by hand. The command requires a CWD-relative path positional argument to the issue markdown file; bare issue identifiers and absolute paths are rejected, and a bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. All `blocked_by` dependencies must be Done. It bypasses the Completion sentinel — it does not verify acceptance criteria, does not prompt for confirmation, and does not stage or commit implementation changes; the human owns and commits that work. It appends a local COMPLETE progress record noting the prior state.
+Manually marking one Open, Failed, or Skipped issue Done without running an agent, regardless of issue type. Used primarily to clear a human-in-the-loop issue after the human performs the work, to conclude a Skipped issue once its deferred verification is satisfied, and also valid for finishing an AFK or Failed issue by hand. The command requires a positional Issue-set-relative file reference, `<issue-set>/<file>.md`; paths, bare filenames, and bare issue identifiers are rejected. All `blocked_by` dependencies must be Done. It bypasses the Completion sentinel — it does not verify acceptance criteria, does not prompt for confirmation, and does not stage or commit implementation changes; the human owns and commits that work. It appends a local COMPLETE progress record noting the prior state.
 _Avoid_: Completion sentinel, no-op issue completion, run issue
 
 **Skipped issue**:
@@ -353,7 +365,7 @@ A discovered Issue set whose issue manifest or issue markdown files violate the 
 _Avoid_: Blocked Issue set
 
 **Workload state**:
-The machine-local persisted record of workloads and their registered Issue sets. A workload is keyed by its canonical definition path; its Issue sets are stored in registration order with priority. Workload state does not duplicate derived Issue set completion.
+The machine-local persisted record of workloads and their registered Issue sets. A workload is keyed by the canonical path of its **Workload storage**; its Issue sets are stored in registration order with priority. Workload state does not duplicate derived Issue set completion.
 _Avoid_: Workload artifact, issue manifest
 
 **Runtime execution lock**:
@@ -377,25 +389,27 @@ The process result exposed by the workload status command. Rendering a resolved 
 _Avoid_: Workload execution exit status
 
 **Workload identifier**:
-The canonical name of an Issue set — its directory name under `thoughts/issues/` — or an issue-manifest issue ID. These identifiers drive scheduling, state, and display.
+The canonical name of an Issue set — its directory name under the **Workload storage** `issues/` directory — or an issue-manifest issue ID. These identifiers drive scheduling, state, and display.
 _Avoid_: Display title, filename, path
 
 **Workload target reference**:
-An argument that identifies an Issue set directory or issue markdown file on Run issue, Run issues, Issue reset, Complete issue, or Skip issue. Run issue and Run issues accept an optional positional argument; Issue reset, Complete issue, and Skip issue require one. Run issue and Run issues accept bare Issue set identifiers as Issue set targets; Run issue also accepts an Issue-set-relative file reference such as `<issue-set>/<file>.md`. A bare filename is accepted when it resolves from the current directory to an issue markdown file under a discovered Issue set. CWD-relative paths may point at an Issue set directory, at `thoughts/issues/<id>`, or at an issue markdown file beneath a discovered Issue set, including `.` when the shell is already inside that Issue set directory. Pop normalizes every accepted reference to the canonical Issue set and issue identifiers before selection. Resolved paths must match an Issue set discovered under the command's workload definition path; paths outside that discovery are rejected. Absolute paths, bare issue identifiers, titles, prefixes, fuzzy matches, and unresolved paths are rejected.
-_Avoid_: Shell completion candidate
+An argument that identifies an Issue set or issue markdown file on Run issue, Run issues, Issue reset, Complete issue, or Skip issue. Run issue and Run issues accept an optional positional argument; Issue reset, Complete issue, and Skip issue require one. Exactly two forms exist: a bare Issue set identifier targets an Issue set, and an Issue-set-relative file reference `<issue-set>/<file>.md` targets one issue. Resolution is scoped to the current repository's Workload storage via **Repository identity** from the CWD. Relative paths, absolute paths, bare filenames, bare issue identifiers, titles, prefixes, fuzzy matches, and unresolved references are rejected.
+_Avoid_: Shell completion candidate, path
 
 **Workload shell completion**:
-Read-only shell tab completion for workload subcommands, project names, **Workload target references**, agent presets, and path flags. Positional completion on Run issue and Run issues offers bare Issue set identifiers by default; when the in-progress word is path-like, including a `thoughts/` prefix, it offers CWD-relative path segments. Run issue also completes Issue-set-relative issue files after an Issue set identifier and slash, such as `<issue-set>/<file>.md`. Issue reset, Complete issue, and Skip issue complete issue-file paths only. Set-priority completes bare Issue set identifiers for its ISSUE_SET positional. Completion may scan local workload artifacts but must not auto-register Issue sets, persist workload state, or print warnings.
+Read-only shell tab completion for workload subcommands, project names, **Workload target references**, agent presets, and path flags. Positional completion on Run issue and Run issues offers bare Issue set identifiers; Run issue also completes Issue-set-relative issue files after an Issue set identifier and slash, such as `<issue-set>/<file>.md`. Issue reset, Complete issue, and Skip issue complete Issue-set-relative file references only. Set-priority completes bare Issue set identifiers for its ISSUE_SET positional. Completion never offers filesystem path segments. Completion may scan Workload storage but must not auto-register Issue sets, persist workload state, or print warnings.
 _Avoid_: Shell autosuggestion, discovery refresh
 
 **Missing Issue set**:
-A locally registered Issue set whose manifest is no longer present beneath the workload definition path. Its registration, priority, and list order are preserved in case the Issue set returns. It is skipped during execution and shown before all discovered Issue sets in the workload status table so active work remains grouped toward the end for a future terminal UI.
+A locally registered Issue set whose manifest is no longer present beneath its Workload storage. Its registration, priority, and list order are preserved in case the Issue set returns. It is skipped during execution and shown before all discovered Issue sets in the workload status table so active work remains grouped toward the end for a future terminal UI.
 _Avoid_: Malformed Issue set
 
 ## Deprecated aliases
 
 - `idle`, `read` → **Clear**
 - `needs_attention` → **Unread**
+- `workload definition path`, `thoughts/issues` → **Workload storage**
+- `workload artifact ignore coverage` → removed; Workload storage lives outside the repository tree (ADR 0012)
 
 ## Flagged ambiguities
 

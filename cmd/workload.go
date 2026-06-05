@@ -82,6 +82,13 @@ var workloadSkipIssueCmd = &cobra.Command{
 	Run:   runWorkloadSkipIssue,
 }
 
+var workloadShowPathCmd = &cobra.Command{
+	Use:   "show-path [ISSUE_SET]",
+	Short: "Print this repository's Workload storage issues directory, creating it on demand",
+	Args:  cobra.MaximumNArgs(1),
+	Run:   runWorkloadShowPath,
+}
+
 func init() {
 	rootCmd.AddCommand(workloadCmd)
 	workloadCmd.AddCommand(workloadStatusCmd)
@@ -91,6 +98,7 @@ func init() {
 	workloadCmd.AddCommand(workloadResetIssueCmd)
 	workloadCmd.AddCommand(workloadCompleteIssueCmd)
 	workloadCmd.AddCommand(workloadSkipIssueCmd)
+	workloadCmd.AddCommand(workloadShowPathCmd)
 
 	workloadCmd.PersistentFlags().StringVar(&workloadProject, "project", "", "Select project by exact picker-visible name")
 	workloadCmd.PersistentFlags().StringVar(&workloadPath, "path", "", "Select project by path (normalized to git checkout root)")
@@ -290,6 +298,24 @@ func runWorkloadSkipIssueWith(d *workload.Deps, w io.Writer, issuePath string) e
 	workload.RenderIssueSkip(w, result.IssueSetID, result.IssueID)
 	fmt.Fprintln(w)
 	workload.Render(w, result.Refresh)
+	return nil
+}
+
+func runWorkloadShowPath(cmd *cobra.Command, args []string) {
+	var issueSetID string
+	if len(args) > 0 {
+		issueSetID = args[0]
+	}
+	err := runWorkloadShowPathWith(workload.DefaultDeps(), os.Stdout, issueSetID)
+	handleWorkloadExit(err)
+}
+
+func runWorkloadShowPathWith(d *workload.Deps, w io.Writer, issueSetID string) error {
+	result, err := workload.ShowPath(d, "", issueSetID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w, result.Path)
 	return nil
 }
 
