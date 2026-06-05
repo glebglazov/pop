@@ -18,7 +18,9 @@ import (
 
 func TestWorkloadStatusExitSuccessWithMalformedRows(t *testing.T) {
 	root := t.TempDir()
-	issueDir := filepath.Join(root, "thoughts/issues/bad")
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	issueDir := filepath.Join(cmdIssuesDir(t, root), "bad")
 	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +58,9 @@ func TestWorkloadStatusUnreadableDiscoveryFails(t *testing.T) {
 		t.Skip("chmod tests unreliable as root")
 	}
 	root := t.TempDir()
-	issueDir := filepath.Join(root, "thoughts/issues")
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	issueDir := cmdIssuesDir(t, root)
 	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +101,10 @@ func TestWorkloadSetPriorityRefreshesTable(t *testing.T) {
 		workloadDefPath = ""
 	})
 
-	issueDir := filepath.Join(root, "thoughts/issues/feature")
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	issuesDir := cmdIssuesDir(t, root)
+	issueDir := filepath.Join(issuesDir, "feature")
 	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -115,8 +122,7 @@ func TestWorkloadSetPriorityRefreshesTable(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	t.Setenv("XDG_DATA_HOME", root)
-	if _, err := workload.RefreshWith(workload.DefaultDeps(), root, workload.DefaultStatePath()); err != nil {
+	if _, err := workload.RefreshWith(workload.DefaultDeps(), issuesDir, workload.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -163,7 +169,9 @@ func TestWorkloadResolveByProjectName(t *testing.T) {
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeWorkloadThoughts(t, projectDir, "svc")
+	initGitRepoCmd(t, projectDir)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	writeWorkloadThoughts(t, cmdIssuesDir(t, projectDir), "svc")
 
 	cfgPath := filepath.Join(root, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("projects = [{ path = \""+projectDir+"\" }]\n"), 0o644); err != nil {
@@ -185,7 +193,6 @@ func TestWorkloadResolveByProjectName(t *testing.T) {
 		workloadDefPath = ""
 	})
 
-	t.Setenv("XDG_DATA_HOME", root)
 	var buf bytes.Buffer
 	if err := runWorkloadStatusWith(workload.DefaultDeps(), &buf); err != nil {
 		t.Fatal(err)
@@ -195,10 +202,21 @@ func TestWorkloadResolveByProjectName(t *testing.T) {
 	}
 }
 
-// writeWorkloadThoughts creates a minimal valid Issue set (no PRD pairing required).
-func writeWorkloadThoughts(t *testing.T, dir, stem string) {
+// cmdIssuesDir resolves the Workload storage issues directory for a repository checkout.
+// XDG_DATA_HOME must already be set so the location is deterministic.
+func cmdIssuesDir(t *testing.T, repoRoot string) string {
 	t.Helper()
-	issueDir := filepath.Join(dir, "thoughts/issues", stem)
+	id, err := workload.ResolveRepositoryIdentity(workload.DefaultDeps(), repoRoot)
+	if err != nil {
+		t.Fatalf("resolve storage: %v", err)
+	}
+	return id.IssuesDir
+}
+
+// writeWorkloadThoughts creates a minimal valid Issue set under issuesDir/<stem>.
+func writeWorkloadThoughts(t *testing.T, issuesDir, stem string) {
+	t.Helper()
+	issueDir := filepath.Join(issuesDir, stem)
 	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -214,9 +232,10 @@ func writeWorkloadThoughts(t *testing.T, dir, stem string) {
 func TestWorkloadStatusShowsRuntimeLock(t *testing.T) {
 	root := t.TempDir()
 	initGitRepoCmd(t, root)
-	writeWorkloadThoughts(t, root, "demo")
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	if _, err := workload.RefreshWith(workload.DefaultDeps(), root, workload.DefaultStatePath()); err != nil {
+	issuesDir := cmdIssuesDir(t, root)
+	writeWorkloadThoughts(t, issuesDir, "demo")
+	if _, err := workload.RefreshWith(workload.DefaultDeps(), issuesDir, workload.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -339,7 +358,7 @@ func TestRunIssuesCmdTargetsRelativeIssueSetPath(t *testing.T) {
 	t.Cleanup(resetWorkloadFlags)
 
 	var stdout bytes.Buffer
-	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "thoughts/issues/demo")
+	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), relTo(t, root, runIssueCmdDemoDir(t, root)))
 	if err != nil {
 		t.Fatalf("relative Issue set path failed: %v", err)
 	}
@@ -355,7 +374,7 @@ func TestRunIssueCmdTargetsRelativeIssuePath(t *testing.T) {
 	t.Cleanup(resetWorkloadFlags)
 
 	var stdout bytes.Buffer
-	err := runWorkloadRunIssueWith(workload.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "thoughts/issues/demo/01-a.md")
+	err := runWorkloadRunIssueWith(workload.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), relTo(t, root, filepath.Join(runIssueCmdDemoDir(t, root), "01-a.md")))
 	if err != nil {
 		t.Fatalf("relative issue path failed: %v", err)
 	}
@@ -365,19 +384,16 @@ func TestRunIssueCmdTargetsRelativeIssuePath(t *testing.T) {
 	_ = root
 }
 
-func TestRunIssueCmdTargetsBareFilenameFromIssueSetDirectory(t *testing.T) {
+func TestRunIssueCmdTargetsIssueSetRelativeFile(t *testing.T) {
 	root := setupRunIssueCmdFixture(t)
 	resetWorkloadFlags()
 	t.Cleanup(resetWorkloadFlags)
 
-	if err := os.Chdir(filepath.Join(root, "thoughts/issues/demo")); err != nil {
-		t.Fatal(err)
-	}
-
-	err := runWorkloadRunIssueWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "01-a.md")
+	err := runWorkloadRunIssueWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md")
 	if err != nil {
-		t.Fatalf("bare filename failed: %v", err)
+		t.Fatalf("issue-set-relative file failed: %v", err)
 	}
+	_ = root
 }
 
 func TestRunIssueCmdTargetsIssueSetIdentifier(t *testing.T) {
@@ -402,7 +418,7 @@ func TestRunIssueCmdRejectsInvalidIssueTargets(t *testing.T) {
 		t.Fatalf("bare issue ID error = %v", err)
 	}
 
-	err = runWorkloadRunIssueWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), filepath.Join(root, "thoughts/issues/demo/01-a.md"))
+	err = runWorkloadRunIssueWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), filepath.Join(runIssueCmdDemoDir(t, root), "01-a.md"))
 	if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
 		t.Fatalf("absolute path error = %v", err)
 	}
@@ -428,14 +444,14 @@ func TestResetIssueCmdTargetsRelativeIssuePath(t *testing.T) {
 	resetWorkloadFlags()
 	t.Cleanup(resetWorkloadFlags)
 
-	manifestPath := filepath.Join(root, "thoughts/issues/demo/index.json")
+	manifestPath := filepath.Join(runIssueCmdDemoDir(t, root), "index.json")
 	manifest := `{"issues":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"failed","failed_after":2}]}`
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	var stdout bytes.Buffer
-	if err := runWorkloadResetIssueWith(workload.DefaultDeps(), &stdout, "thoughts/issues/demo/01-a.md"); err != nil {
+	if err := runWorkloadResetIssueWith(workload.DefaultDeps(), &stdout, relTo(t, root, filepath.Join(runIssueCmdDemoDir(t, root), "01-a.md"))); err != nil {
 		t.Fatalf("relative issue path failed: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "Reset issue demo/01-a to open") {
@@ -457,13 +473,13 @@ func TestCompleteIssueCmdTargetsRelativeIssuePath(t *testing.T) {
 	t.Cleanup(resetWorkloadFlags)
 
 	var stdout bytes.Buffer
-	if err := runWorkloadCompleteIssueWith(workload.DefaultDeps(), &stdout, "thoughts/issues/demo/01-a.md"); err != nil {
+	if err := runWorkloadCompleteIssueWith(workload.DefaultDeps(), &stdout, relTo(t, root, filepath.Join(runIssueCmdDemoDir(t, root), "01-a.md"))); err != nil {
 		t.Fatalf("relative issue path failed: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "Completed issue demo/01-a") {
 		t.Fatalf("missing canonical success output:\n%s", stdout.String())
 	}
-	manifestPath := filepath.Join(root, "thoughts/issues/demo/index.json")
+	manifestPath := filepath.Join(runIssueCmdDemoDir(t, root), "index.json")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
@@ -473,18 +489,14 @@ func TestCompleteIssueCmdTargetsRelativeIssuePath(t *testing.T) {
 	}
 }
 
-func TestRunIssuesCmdTargetsDotFromIssueSetDirectory(t *testing.T) {
+func TestRunIssuesCmdTargetsRelativeIssueSetDir(t *testing.T) {
 	root := setupRunIssueCmdFixture(t)
 	resetWorkloadFlags()
 	t.Cleanup(resetWorkloadFlags)
 
-	if err := os.Chdir(filepath.Join(root, "thoughts/issues/demo")); err != nil {
-		t.Fatal(err)
-	}
-
-	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), ".")
+	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), relTo(t, root, runIssueCmdDemoDir(t, root)))
 	if err != nil {
-		t.Fatalf("dot Issue set path failed: %v", err)
+		t.Fatalf("relative Issue set dir failed: %v", err)
 	}
 }
 
@@ -505,7 +517,7 @@ func TestRunIssuesCmdRejectsAbsoluteIssueSetPath(t *testing.T) {
 	resetWorkloadFlags()
 	t.Cleanup(resetWorkloadFlags)
 
-	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), filepath.Join(root, "thoughts/issues/demo"))
+	err := runWorkloadRunIssuesWith(workload.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), runIssueCmdDemoDir(t, root))
 	if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
 		t.Fatalf("absolute path error = %v", err)
 	}
@@ -627,7 +639,7 @@ func setupRunIssueCmdFixture(t *testing.T) string {
 			t.Fatal(err, string(out))
 		}
 	}
-	writeFileCmd(t, filepath.Join(root, ".gitignore"), "thoughts/\n.agent/\n.xdg/\n")
+	writeFileCmd(t, filepath.Join(root, ".gitignore"), ".agent/\n.xdg/\n")
 	writeFileCmd(t, filepath.Join(root, "README.md"), "# test\n")
 	if out, err := exec.Command("git", "add", "-A").CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
@@ -636,24 +648,29 @@ func setupRunIssueCmdFixture(t *testing.T) string {
 		t.Fatal(err, string(out))
 	}
 
-	writeWorkloadThoughts(t, root, "demo")
-	issueDir := filepath.Join(root, "thoughts/issues/demo")
-	if err := os.MkdirAll(issueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(issueDir, "01-a.md"), []byte("## Acceptance criteria\n\n- [ ] ok\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	manifest := `{"issues":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}]}`
-	if err := os.WriteFile(filepath.Join(issueDir, "index.json"), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	if _, err := workload.RefreshWith(workload.DefaultDeps(), root, workload.DefaultStatePath()); err != nil {
+	issuesDir := cmdIssuesDir(t, root)
+	writeWorkloadThoughts(t, issuesDir, "demo")
+	if _, err := workload.RefreshWith(workload.DefaultDeps(), issuesDir, workload.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	return root
+}
+
+// runIssueCmdDemoDir returns the storage directory of the fixture's "demo" Issue set.
+func runIssueCmdDemoDir(t *testing.T, root string) string {
+	t.Helper()
+	return filepath.Join(cmdIssuesDir(t, root), "demo")
+}
+
+// relTo returns a relative path from base to target, failing the test on error.
+func relTo(t *testing.T, base, target string) string {
+	t.Helper()
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rel
 }
 
 func writeRunIssueFakeAgent(t *testing.T, root string) string {

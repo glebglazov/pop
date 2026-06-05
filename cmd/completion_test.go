@@ -47,7 +47,9 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeCompletionThoughts(t, projectDir, "svc", []string{"01-a", "02-b"})
+	initGitRepoCmd(t, projectDir)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	writeCompletionThoughts(t, cmdIssuesDir(t, projectDir), "svc", []string{"01-a", "02-b"})
 
 	cfgPath := filepath.Join(root, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("projects = [{ path = \""+projectDir+"\" }]\n"), 0o644); err != nil {
@@ -71,11 +73,6 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "svc")
 	})
 
-	t.Run("run issue positional path", func(t *testing.T) {
-		out := shellCompNoDescCompleting(t, "workload", "run-issue", "thoughts/issues/svc/")
-		assertShellCompContains(t, out, "thoughts/issues/svc/01-a.md", "thoughts/issues/svc/02-b.md")
-	})
-
 	t.Run("run issue positional defaults to Issue set IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "workload", "run-issue")
 		assertShellCompContains(t, out, "svc")
@@ -88,37 +85,10 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
 	})
 
-	t.Run("run issue positional dot path", func(t *testing.T) {
-		out := shellCompNoDescCompleting(t, "workload", "run-issue", "./")
-		assertShellCompContains(t, out, "./thoughts/issues/svc/01-a.md")
-	})
-
 	t.Run("run issues positional defaults to Issue set IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "workload", "run-issues")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
-	})
-
-	t.Run("run issues positional thoughts prefix expands path", func(t *testing.T) {
-		out := shellCompNoDescCompleting(t, "workload", "run-issues", "th")
-		assertShellCompContains(t, out, "thoughts/issues/svc")
-		assertShellCompOmitsExact(t, out, "svc")
-	})
-
-	t.Run("run issues positional dot path", func(t *testing.T) {
-		out := shellCompNoDescCompleting(t, "workload", "run-issues", "./")
-		assertShellCompContains(t, out, "./thoughts/issues/svc")
-	})
-
-	t.Run("reset issue positional path", func(t *testing.T) {
-		out := shellCompNoDescCompleting(t, "workload", "reset-issue", "thoughts/issues/svc/")
-		assertShellCompContains(t, out, "thoughts/issues/svc/01-a.md", "thoughts/issues/svc/02-b.md")
-	})
-
-	t.Run("reset issue positional omits IDs", func(t *testing.T) {
-		out := shellCompNoDesc(t, "workload", "reset-issue")
-		assertShellCompContains(t, out, "thoughts/issues/svc", "thoughts/issues/svc/01-a.md")
-		assertShellCompOmitsExact(t, out, "svc", "01-a")
 	})
 
 	t.Run("set priority positional IDs", func(t *testing.T) {
@@ -144,9 +114,9 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 
 func TestWorkloadCompletionReadOnly(t *testing.T) {
 	root := t.TempDir()
-	writeCompletionThoughts(t, root, "fresh", nil)
-
-	t.Setenv("XDG_DATA_HOME", root)
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	writeCompletionThoughts(t, cmdIssuesDir(t, root), "fresh", nil)
 
 	oldWd, _ := os.Getwd()
 	if err := os.Chdir(root); err != nil {
@@ -154,9 +124,9 @@ func TestWorkloadCompletionReadOnly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	_ = shellCompNoDescCompleting(t, "workload", "run-issue", "thoughts/")
+	_ = shellCompNoDesc(t, "workload", "run-issue")
 
-	statePath := filepath.Join(root, "pop", "workloads-state.json")
+	statePath := filepath.Join(root, ".xdg", "pop", "workloads-state.json")
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatal("completion should not create workload state")
 	}
@@ -237,13 +207,14 @@ func shellCompBody(output string) string {
 	return output
 }
 
-// writeCompletionThoughts creates a valid Issue set (no PRD pairing required).
-func writeCompletionThoughts(t *testing.T, dir, stem string, issueIDs []string) {
+// writeCompletionThoughts creates a valid Issue set (no PRD pairing required)
+// under the repository's Workload storage issues directory.
+func writeCompletionThoughts(t *testing.T, issuesDir, stem string, issueIDs []string) {
 	t.Helper()
 	if len(issueIDs) == 0 {
 		issueIDs = []string{"01-a"}
 	}
-	issueDir := filepath.Join(dir, "thoughts/issues", stem)
+	issueDir := filepath.Join(issuesDir, stem)
 	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

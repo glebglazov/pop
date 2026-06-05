@@ -108,11 +108,21 @@ func MatchPickerProject(name string, projects []project.ExpandedProject) (string
 	}
 }
 
+// resolveDefinitionPath resolves the workload definition directory: the repository's
+// Workload storage issues directory, derived per ADR 0012 from the project's git
+// common directory. An explicit override names that issues directory directly (testing).
 func resolveDefinitionPath(d *Deps, projectPath, override string) (string, error) {
 	if override != "" {
 		return CanonicalDefinitionPathWith(d, override)
 	}
-	return NormalizeProjectPathWith(d, projectPath)
+	id, err := ResolveRepositoryIdentity(d, projectPath)
+	if err != nil {
+		return "", err
+	}
+	// Canonicalize so the returned path matches the state key RefreshWith derives
+	// (it canonicalizes the definition path), keeping state lookups keyed by
+	// resolved.DefinitionPath consistent across invocations.
+	return CanonicalDefinitionPathWith(d, id.IssuesDir)
 }
 
 // NormalizeProjectPath canonicalizes path and normalizes git subdirectories to checkout roots.

@@ -175,7 +175,7 @@ func TestStatusDerivation(t *testing.T) {
 
 func TestRenderDiagnostics(t *testing.T) {
 	root := t.TempDir()
-	issueDir := filepath.Join(root, "thoughts/issues/bad")
+	issueDir := filepath.Join(root, "bad")
 	writeIssueMD(t, issueDir, "01-a.md", "## Acceptance criteria\n\n- [ ] a\n")
 	writeManifest(t, issueDir, []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "in_progress"},
@@ -253,22 +253,22 @@ func TestUnreadableDiscoveryDoesNotMutateState(t *testing.T) {
 		t.Skip("chmod tests unreliable as root")
 	}
 	root := t.TempDir()
-	setupManifest(t, root, "a", []Issue{
+	issuesDir := filepath.Join(root, "issues")
+	setupManifest(t, issuesDir, "a", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := filepath.Join(root, "state.json")
 
-	if _, err := RefreshWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RefreshWith(DefaultDeps(), issuesDir, statePath); err != nil {
 		t.Fatal(err)
 	}
 
-	issueDir := filepath.Join(root, "thoughts/issues")
-	if err := os.Chmod(issueDir, 0o000); err != nil {
+	if err := os.Chmod(issuesDir, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(issueDir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(issuesDir, 0o755) })
 
-	_, err := RefreshWith(DefaultDeps(), root, statePath)
+	_, err := RefreshWith(DefaultDeps(), issuesDir, statePath)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -277,15 +277,17 @@ func TestUnreadableDiscoveryDoesNotMutateState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	canon, _ := CanonicalDefinitionPath(root)
+	canon, _ := CanonicalDefinitionPath(issuesDir)
 	if len(state.Workloads[canon].IssueSets) != 1 {
 		t.Fatalf("state mutated: %#v", state.Workloads[canon])
 	}
 }
 
-func setupManifest(t *testing.T, root, stem string, issues []Issue) {
+// setupManifest writes an Issue set into issuesDir, which is the definition
+// (Workload storage issues) directory: the set lives at issuesDir/<stem>/.
+func setupManifest(t *testing.T, issuesDir, stem string, issues []Issue) {
 	t.Helper()
-	issueDir := filepath.Join(root, "thoughts/issues", stem)
+	issueDir := filepath.Join(issuesDir, stem)
 	for _, issue := range issues {
 		writeIssueMD(t, issueDir, issue.File, "## Acceptance criteria\n\n- [ ] ok\n")
 	}

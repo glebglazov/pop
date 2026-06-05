@@ -64,10 +64,10 @@ func TestRunIssueNoOpCompletion(t *testing.T) {
 
 func TestRunIssueTargetsEligibleIssuePath(t *testing.T) {
 	env := setupExecutorFixture(t, false)
-	setupManifest(t, env.root, "target", []Issue{
+	setupManifest(t, env.issuesDir, "target", []Issue{
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
-	if _, err := RefreshWith(DefaultDeps(), env.root, DefaultStatePath()); err != nil {
+	if _, err := RefreshWith(DefaultDeps(), env.issuesDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
@@ -76,7 +76,7 @@ func TestRunIssueTargetsEligibleIssuePath(t *testing.T) {
 	})
 
 	opts := env.runOpts(true, agent)
-	opts.IssuePathOverride = "thoughts/issues/target/02-b.md"
+	opts.IssuePathOverride = "target/02-b.md"
 	result, err := RunIssueWith(env.deps(), nil, nil, opts)
 	if err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestRunIssueInteractivePrintsRefreshedTable(t *testing.T) {
 
 func TestRunIssueNoRunnableWork(t *testing.T) {
 	env := setupExecutorFixture(t, false)
-	manifestPath := filepath.Join(env.root, "thoughts/issues/demo/index.json")
+	manifestPath := env.demoManifest()
 	data, _ := os.ReadFile(manifestPath)
 	var payload map[string]any
 	_ = json.Unmarshal(data, &payload)
@@ -471,11 +471,12 @@ func TestRunIssueSeparateRuntimePath(t *testing.T) {
 	initExecutorGitRepo(t, defRoot)
 	initExecutorGitRepo(t, runtimeRoot)
 
-	setupManifest(t, defRoot, "demo", []Issue{
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	issuesDir := storageIssuesDir(t, defRoot)
+	setupManifest(t, issuesDir, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	if _, err := RefreshWith(DefaultDeps(), defRoot, DefaultStatePath()); err != nil {
+	if _, err := RefreshWith(DefaultDeps(), issuesDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -486,7 +487,7 @@ func TestRunIssueSeparateRuntimePath(t *testing.T) {
 		summary:    "runtime work",
 	})
 
-	env := &execFixture{root: defRoot}
+	env := &execFixture{root: defRoot, issuesDir: issuesDir}
 	opts := RunIssueOptions{
 		ResolveInput: ResolveInput{
 			CWD:             defRoot,
@@ -549,7 +550,7 @@ func TestRunIssueBookkeepingOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	progress, err := os.ReadFile(filepath.Join(env.root, "thoughts/issues/demo/progress.txt"))
+	progress, err := os.ReadFile(filepath.Join(env.demoDir(), "progress.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +561,36 @@ func TestRunIssueBookkeepingOrder(t *testing.T) {
 }
 
 type execFixture struct {
-	root string
+	root      string
+	issuesDir string
+}
+
+// demoDir returns the storage directory of the fixture's "demo" Issue set.
+func (e *execFixture) demoDir() string { return filepath.Join(e.issuesDir, "demo") }
+
+// demoManifest returns the storage path to the fixture's "demo" Issue set manifest.
+func (e *execFixture) demoManifest() string { return filepath.Join(e.demoDir(), "index.json") }
+
+// demoIssueRel returns a CWD-relative (to the repo root) path to a file in the
+// fixture's storage-resident "demo" Issue set, for commands that take a path target.
+func (e *execFixture) demoIssueRel(t *testing.T, file string) string {
+	t.Helper()
+	rel, err := filepath.Rel(e.root, filepath.Join(e.demoDir(), file))
+	if err != nil {
+		t.Fatalf("relpath: %v", err)
+	}
+	return rel
+}
+
+// storageIssuesDir resolves the Workload storage issues directory for a repository checkout.
+// XDG_DATA_HOME must already be set so the storage location is deterministic.
+func storageIssuesDir(t *testing.T, repoRoot string) string {
+	t.Helper()
+	id, err := ResolveRepositoryIdentity(DefaultDeps(), repoRoot)
+	if err != nil {
+		t.Fatalf("resolve storage: %v", err)
+	}
+	return id.IssuesDir
 }
 
 type fakeAgentConfig struct {
@@ -577,15 +607,16 @@ func setupExecutorFixture(t *testing.T, interactive bool) *execFixture {
 	t.Helper()
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	setupManifest(t, root, "demo", []Issue{
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	issuesDir := storageIssuesDir(t, root)
+	setupManifest(t, issuesDir, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	if _, err := RefreshWith(DefaultDeps(), root, DefaultStatePath()); err != nil {
+	if _, err := RefreshWith(DefaultDeps(), issuesDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	_ = interactive
-	return &execFixture{root: root}
+	return &execFixture{root: root, issuesDir: issuesDir}
 }
 
 func (e *execFixture) deps() *Deps {
@@ -663,7 +694,7 @@ func realGitInDir(dir string, args ...string) (string, error) {
 
 func assertIssueDone(t *testing.T, env *execFixture, issueID string) {
 	t.Helper()
-	m := LoadManifest(DefaultDeps(), "demo", filepath.Join(env.root, "thoughts/issues/demo/index.json"))
+	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
 	for _, issue := range m.Issues {
 		if issue.ID == issueID && issue.Status != "done" {
 			t.Fatalf("issue %s status = %q", issueID, issue.Status)
@@ -673,7 +704,7 @@ func assertIssueDone(t *testing.T, env *execFixture, issueID string) {
 
 func assertIssueOpen(t *testing.T, env *execFixture, issueID string) {
 	t.Helper()
-	m := LoadManifest(DefaultDeps(), "demo", filepath.Join(env.root, "thoughts/issues/demo/index.json"))
+	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
 	for _, issue := range m.Issues {
 		if issue.ID == issueID && issue.Status != "open" {
 			t.Fatalf("issue %s status = %q, want open", issueID, issue.Status)
@@ -683,7 +714,7 @@ func assertIssueOpen(t *testing.T, env *execFixture, issueID string) {
 
 func assertIssueFailed(t *testing.T, env *execFixture, issueID string, failedAfter int) {
 	t.Helper()
-	m := LoadManifest(DefaultDeps(), "demo", filepath.Join(env.root, "thoughts/issues/demo/index.json"))
+	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
 	for _, issue := range m.Issues {
 		if issue.ID != issueID {
 			continue
@@ -701,7 +732,7 @@ func assertIssueFailed(t *testing.T, env *execFixture, issueID string, failedAft
 
 func assertProgressContains(t *testing.T, env *execFixture, parts ...string) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(env.root, "thoughts/issues/demo/progress.txt"))
+	data, err := os.ReadFile(filepath.Join(env.demoDir(), "progress.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}

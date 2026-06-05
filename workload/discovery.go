@@ -6,12 +6,10 @@ import (
 	"path/filepath"
 )
 
-const issuesSubdir = "thoughts/issues"
-
 // Discovery holds non-recursive scan results beneath a definition path.
 type Discovery struct {
 	Manifests   map[string]string // Issue-set id -> absolute path to index.json
-	IssueDirErr error             // non-nil when thoughts/issues exists but is unreadable
+	IssueDirErr error             // non-nil when the issues directory exists but is unreadable
 }
 
 // CanonicalDefinitionPath returns the canonical exact definition directory.
@@ -33,7 +31,8 @@ func CanonicalDefinitionPathWith(d *Deps, path string) (string, error) {
 	return resolved, nil
 }
 
-// Discover scans thoughts/issues/*/index.json non-recursively.
+// Discover scans <defPath>/*/index.json non-recursively, where defPath is the
+// repository's Workload storage issues directory.
 func Discover(defPath string) (*Discovery, error) {
 	return DiscoverWith(defaultDeps, defPath)
 }
@@ -44,8 +43,7 @@ func DiscoverWith(d *Deps, defPath string) (*Discovery, error) {
 		Manifests: make(map[string]string),
 	}
 
-	issueDir := filepath.Join(defPath, issuesSubdir)
-	if err := scanManifests(d, issueDir, result); err != nil {
+	if err := scanManifests(d, defPath, result); err != nil {
 		result.IssueDirErr = err
 	}
 
@@ -58,15 +56,15 @@ func scanManifests(d *Deps, issueDir string, result *Discovery) error {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("read %s: %w", issuesSubdir, err)
+		return fmt.Errorf("read issues directory: %w", err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("%s is not a directory", issuesSubdir)
+		return fmt.Errorf("issues path is not a directory")
 	}
 
 	entries, err := d.FS.ReadDir(issueDir)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", issuesSubdir, err)
+		return fmt.Errorf("read issues directory: %w", err)
 	}
 	for _, ent := range entries {
 		if !ent.IsDir() {

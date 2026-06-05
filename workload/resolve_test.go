@@ -50,6 +50,8 @@ func TestResolveByExactProjectName(t *testing.T) {
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	initGitRepo(t, projectDir)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 
 	cfg := &config.Config{
 		Projects: []config.ProjectEntry{{Path: projectDir}},
@@ -64,7 +66,8 @@ func TestResolveByExactProjectName(t *testing.T) {
 		t.Fatal(err)
 	}
 	pathEqual(t, projectDir, resolved.ProjectPath)
-	pathEqual(t, projectDir, resolved.DefinitionPath)
+	// The definition path is now the repository's Workload storage issues dir, not the project tree.
+	pathEqual(t, storageIssuesDir(t, projectDir), resolved.DefinitionPath)
 }
 
 func TestResolveRejectsAmbiguousProjectName(t *testing.T) {
@@ -116,35 +119,37 @@ func TestResolveConcreteWorktreeNotBareContainer(t *testing.T) {
 		t.Fatalf("projects = %#v", projects)
 	}
 
-	resolved, err := ResolvePathsWith(d, pd, func(string) (*config.Config, error) {
-		return cfg, nil
-	}, ResolveInput{ProjectName: "repo/main"})
+	// The picker resolves the concrete worktree, not the bare container. Definition-path
+	// resolution (storage keying) is exercised by other tests; this one uses a synthetic
+	// worktree layout that is not a real git repository, so it checks project matching only.
+	_ = d
+	projectPath, err := MatchPickerProject("repo/main", projects)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pathEqual(t, mainWT, resolved.ProjectPath)
+	pathEqual(t, mainWT, projectPath)
 
-	_, err = ResolvePathsWith(d, pd, func(string) (*config.Config, error) {
-		return cfg, nil
-	}, ResolveInput{ProjectName: "repo"})
-	if err == nil {
+	if _, err := MatchPickerProject("repo", projects); err == nil {
 		t.Fatal("expected unknown project for bare container name")
 	}
 }
 
-func TestResolveCWDFallbackOutsideGit(t *testing.T) {
+func TestResolveOutsideGitFailsDefinition(t *testing.T) {
+	// With Issue sets stored per-repository, resolving a definition path requires a
+	// git repository: a non-git CWD has no Workload storage to key against.
 	root := t.TempDir()
 	d := DefaultDeps()
 	pd := project.DefaultDeps()
 
-	resolved, err := ResolvePathsWith(d, pd, func(string) (*config.Config, error) {
+	_, err := ResolvePathsWith(d, pd, func(string) (*config.Config, error) {
 		return nil, os.ErrNotExist
 	}, ResolveInput{CWD: root})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected definition resolution to fail outside a git repository")
 	}
-	pathEqual(t, root, resolved.ProjectPath)
-	pathEqual(t, root, resolved.DefinitionPath)
+	if !strings.Contains(err.Error(), "git repository") {
+		t.Fatalf("err = %v", err)
+	}
 }
 
 func TestNormalizeProjectPathToGitRoot(t *testing.T) {
@@ -195,16 +200,18 @@ func TestDefinitionOverridePreservesExactDirectory(t *testing.T) {
 
 func TestSetPrioritySignedAndStableTies(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	setupManifest(t, root, "a", []Issue{
+	initGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	issuesDir := storageIssuesDir(t, root)
+	setupManifest(t, issuesDir, "a", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	setupManifest(t, root, "b", []Issue{
+	setupManifest(t, issuesDir, "b", []Issue{
 		{ID: "01-b", File: "01-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
 
 	statePath := DefaultStatePath()
-	canon, err := CanonicalDefinitionPath(root)
+	canon, err := CanonicalDefinitionPath(issuesDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,12 +253,14 @@ func TestSetPrioritySignedAndStableTies(t *testing.T) {
 
 func TestSetPriorityRejectsInvalidIssueSetIdentifier(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	setupManifest(t, root, "feature", []Issue{
+	initGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	issuesDir := storageIssuesDir(t, root)
+	setupManifest(t, issuesDir, "feature", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 
-	if _, err := RefreshWith(DefaultDeps(), root, DefaultStatePath()); err != nil {
+	if _, err := RefreshWith(DefaultDeps(), issuesDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 

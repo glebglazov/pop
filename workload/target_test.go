@@ -21,12 +21,12 @@ func TestResolveIssueSetTargetPathAndDot(t *testing.T) {
 
 	refresh := refreshFixture(t, root)
 
-	id, err := ResolveIssueSetTarget(DefaultDeps(), refresh, root, "thoughts/issues/demo")
+	id, err := ResolveIssueSetTarget(DefaultDeps(), refresh, root, "./demo")
 	if err != nil || id != "demo" {
 		t.Fatalf("tree path = %q err=%v", id, err)
 	}
 
-	issueDir := filepath.Join(root, "thoughts/issues/demo")
+	issueDir := filepath.Join(root, "./demo")
 	if err := os.Chdir(issueDir); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestResolveIssueSetTargetAcceptsIdentifier(t *testing.T) {
 		t.Fatalf("identifier = %q err=%v", id, err)
 	}
 
-	_, err = ResolveIssueSetTarget(DefaultDeps(), refresh, root, filepath.Join(root, "thoughts/issues/demo"))
+	_, err = ResolveIssueSetTarget(DefaultDeps(), refresh, root, filepath.Join(root, "./demo"))
 	if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
 		t.Fatalf("absolute path error = %v", err)
 	}
@@ -63,7 +63,7 @@ func TestResolveIssueSetTargetRejectsUnknownPath(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	_, err := ResolveIssueSetTarget(DefaultDeps(), refresh, root, "thoughts/issues/missing")
+	_, err := ResolveIssueSetTarget(DefaultDeps(), refresh, root, "./missing")
 	if err == nil {
 		t.Fatal("expected unknown Issue set error")
 	}
@@ -85,7 +85,7 @@ func TestResolveWorkloadTargetsSpanningIssuePath(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	setID, issueID, err := ResolveWorkloadTargets(DefaultDeps(), refresh, root, "", "thoughts/issues/demo/01-a.md")
+	setID, issueID, err := ResolveWorkloadTargets(DefaultDeps(), refresh, root, "", "./demo/01-a.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,12 +101,12 @@ func TestResolveIssueTargetPathAndBareFilename(t *testing.T) {
 	})
 	refresh := refreshFixture(t, root)
 
-	setID, issueID, err := ResolveIssueTarget(DefaultDeps(), refresh, root, "thoughts/issues/demo/01-a.md")
+	setID, issueID, err := ResolveIssueTarget(DefaultDeps(), refresh, root, "./demo/01-a.md")
 	if err != nil || setID != "demo" || issueID != "01-a" {
 		t.Fatalf("tree path = %s/%s err=%v", setID, issueID, err)
 	}
 
-	issueDir := filepath.Join(root, "thoughts/issues/demo")
+	issueDir := filepath.Join(root, "./demo")
 	setID, issueID, err = ResolveIssueTarget(DefaultDeps(), refresh, issueDir, "01-a.md")
 	if err != nil || setID != "demo" || issueID != "01-a" {
 		t.Fatalf("bare filename = %s/%s err=%v", setID, issueID, err)
@@ -135,7 +135,7 @@ func TestResolveIssueTargetAcceptsIssueSetIdentifierAndRelativeFile(t *testing.T
 		t.Fatalf("issue ID error = %v", err)
 	}
 
-	_, _, err = ResolveIssueTarget(DefaultDeps(), refresh, root, filepath.Join(root, "thoughts/issues/demo/01-add-auth.md"))
+	_, _, err = ResolveIssueTarget(DefaultDeps(), refresh, root, filepath.Join(root, "demo/01-add-auth.md"))
 	if err == nil || !strings.Contains(err.Error(), "CWD-relative path") {
 		t.Fatalf("absolute path error = %v", err)
 	}
@@ -148,7 +148,7 @@ func TestResolveIssueTargetRejectsUnknownRelativePathWithWorkloadIdentifiers(t *
 	})
 	refresh := refreshFixture(t, root)
 
-	_, _, err := ResolveIssueTarget(DefaultDeps(), refresh, root, "thoughts/issues/missing/01-a.md")
+	_, _, err := ResolveIssueTarget(DefaultDeps(), refresh, root, "./missing/01-a.md")
 	if err == nil || !strings.Contains(err.Error(), "valid: demo") {
 		t.Fatalf("error = %v", err)
 	}
@@ -199,7 +199,7 @@ func TestResolveWorkloadTargetsMismatchRejected(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	_, _, err := ResolveWorkloadTargets(DefaultDeps(), refresh, root, "alpha", "thoughts/issues/beta/01-b.md")
+	_, _, err := ResolveWorkloadTargets(DefaultDeps(), refresh, root, "alpha", "./beta/01-b.md")
 	if err == nil {
 		t.Fatal("expected mismatch error")
 	}

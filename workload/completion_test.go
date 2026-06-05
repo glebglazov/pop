@@ -13,8 +13,9 @@ import (
 
 func TestCompleteIssueSetIDsFromDiscovery(t *testing.T) {
 	root := t.TempDir()
-	writeCompletionIssueSet(t, root, "alpha")
-	writeCompletionIssueSet(t, root, "beta")
+	issuesDir := setupCompletionRepo(t, root)
+	writeCompletionIssueSet(t, issuesDir, "alpha")
+	writeCompletionIssueSet(t, issuesDir, "beta")
 
 	oldWd, _ := os.Getwd()
 	if err := os.Chdir(root); err != nil {
@@ -33,7 +34,8 @@ func TestCompleteIssueSetIDsFromDiscovery(t *testing.T) {
 
 func TestCompleteIssueIDsRequiresIssueSet(t *testing.T) {
 	root := t.TempDir()
-	writeCompletionFixture(t, root, "feature", []Issue{
+	issuesDir := setupCompletionRepo(t, root)
+	writeCompletionFixture(t, issuesDir, "feature", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "done"},
 	})
@@ -84,11 +86,14 @@ func TestCompleteProjectNamesUsesPickerVisibleNames(t *testing.T) {
 
 func TestCompletionDoesNotPersistWorkloadState(t *testing.T) {
 	root := t.TempDir()
-	writeCompletionIssueSet(t, root, "existing")
-	writeCompletionIssueSet(t, root, "new-prd")
+	initGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", root)
+	issuesDir := storageIssuesDir(t, root)
+	writeCompletionIssueSet(t, issuesDir, "existing")
+	writeCompletionIssueSet(t, issuesDir, "new-prd")
 
 	statePath := filepath.Join(root, "state.json")
-	canon, err := CanonicalDefinitionPath(root)
+	canon, err := CanonicalDefinitionPath(issuesDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +119,6 @@ func TestCompletionDoesNotPersistWorkloadState(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	t.Setenv("XDG_DATA_HOME", root)
 
 	var notices bytes.Buffer
 	d.NoticeOut = &notices
@@ -148,12 +151,12 @@ func TestCompletionUnreadableDiscoveryReturnsEmptyWithoutError(t *testing.T) {
 		t.Skip("chmod tests unreliable as root")
 	}
 	root := t.TempDir()
-	writeCompletionIssueSet(t, root, "a")
-	issueDir := filepath.Join(root, "thoughts/issues")
-	if err := os.Chmod(issueDir, 0o000); err != nil {
+	issuesDir := setupCompletionRepo(t, root)
+	writeCompletionIssueSet(t, issuesDir, "a")
+	if err := os.Chmod(issuesDir, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(issueDir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(issuesDir, 0o755) })
 
 	oldWd, _ := os.Getwd()
 	if err := os.Chdir(root); err != nil {
@@ -170,17 +173,26 @@ func TestCompletionUnreadableDiscoveryReturnsEmptyWithoutError(t *testing.T) {
 	}
 }
 
-// writeCompletionIssueSet creates a minimal valid Issue set (no PRD pairing required).
-func writeCompletionIssueSet(t *testing.T, dir, stem string) {
+// setupCompletionRepo initializes a git repo at root, points XDG at it, and
+// returns the repository's Workload storage issues directory.
+func setupCompletionRepo(t *testing.T, root string) string {
 	t.Helper()
-	writeCompletionFixture(t, dir, stem, []Issue{
+	initGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	return storageIssuesDir(t, root)
+}
+
+// writeCompletionIssueSet creates a minimal valid Issue set (no PRD pairing required).
+func writeCompletionIssueSet(t *testing.T, issuesDir, stem string) {
+	t.Helper()
+	writeCompletionFixture(t, issuesDir, stem, []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 }
 
-func writeCompletionFixture(t *testing.T, root, stem string, issues []Issue) {
+func writeCompletionFixture(t *testing.T, issuesDir, stem string, issues []Issue) {
 	t.Helper()
-	issueDir := filepath.Join(root, "thoughts/issues", stem)
+	issueDir := filepath.Join(issuesDir, stem)
 	for _, issue := range issues {
 		path := filepath.Join(issueDir, issue.File)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -212,10 +224,11 @@ func TestCompleteIssueSetIDsUsesDefinitionOverride(t *testing.T) {
 
 func TestCompleteIssueIDsScopedToSelectedIssueSet(t *testing.T) {
 	root := t.TempDir()
-	writeCompletionFixture(t, root, "one", []Issue{
+	issuesDir := setupCompletionRepo(t, root)
+	writeCompletionFixture(t, issuesDir, "one", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	writeCompletionFixture(t, root, "two", []Issue{
+	writeCompletionFixture(t, issuesDir, "two", []Issue{
 		{ID: "99-z", File: "99-z.md", Title: "Z", Type: "AFK", Status: "open"},
 	})
 
@@ -248,7 +261,8 @@ func TestCompleteProjectNamesMissingConfigIsEmpty(t *testing.T) {
 
 func TestCompletionNeverWritesProgress(t *testing.T) {
 	root := t.TempDir()
-	writeCompletionFixture(t, root, "demo", []Issue{
+	issuesDir := setupCompletionRepo(t, root)
+	writeCompletionFixture(t, issuesDir, "demo", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 
@@ -261,7 +275,7 @@ func TestCompletionNeverWritesProgress(t *testing.T) {
 	_, _ = CompleteIssueSetIDs(CompletionInput{}, "")
 	_, _ = CompleteIssueIDs(CompletionInput{IssueSet: "demo"}, "")
 
-	progressPath := filepath.Join(root, "thoughts/issues/demo/progress.txt")
+	progressPath := filepath.Join(issuesDir, "demo", "progress.txt")
 	if _, err := os.Stat(progressPath); !os.IsNotExist(err) {
 		t.Fatal("completion should not create progress.txt")
 	}
@@ -269,15 +283,14 @@ func TestCompletionNeverWritesProgress(t *testing.T) {
 
 func TestCompleteIssueSetIDsDoesNotRegisterInStateFile(t *testing.T) {
 	root := t.TempDir()
-	writeCompletionIssueSet(t, root, "fresh")
+	issuesDir := setupCompletionRepo(t, root)
+	writeCompletionIssueSet(t, issuesDir, "fresh")
 
 	oldWd, _ := os.Getwd()
 	if err := os.Chdir(root); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 
 	if _, err := CompleteIssueSetIDs(CompletionInput{}, ""); err != nil {
 		t.Fatal(err)
@@ -290,8 +303,9 @@ func TestCompleteIssueSetIDsDoesNotRegisterInStateFile(t *testing.T) {
 
 func TestCompleteIssueSetIDsSorted(t *testing.T) {
 	root := t.TempDir()
+	issuesDir := setupCompletionRepo(t, root)
 	for _, stem := range []string{"charlie", "alpha", "bravo"} {
-		writeCompletionIssueSet(t, root, stem)
+		writeCompletionIssueSet(t, issuesDir, stem)
 	}
 
 	oldWd, _ := os.Getwd()

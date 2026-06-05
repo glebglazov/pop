@@ -12,12 +12,13 @@ func setupCustomIssueFixture(t *testing.T, issues []Issue) *execFixture {
 	t.Helper()
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	setupManifest(t, root, "demo", issues)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	if _, err := RefreshWith(DefaultDeps(), root, DefaultStatePath()); err != nil {
+	issuesDir := storageIssuesDir(t, root)
+	setupManifest(t, issuesDir, "demo", issues)
+	if _, err := RefreshWith(DefaultDeps(), issuesDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
-	return &execFixture{root: root}
+	return &execFixture{root: root, issuesDir: issuesDir}
 }
 
 func TestCompleteIssueOpenToDone(t *testing.T) {
@@ -25,7 +26,7 @@ func TestCompleteIssueOpenToDone(t *testing.T) {
 
 	result, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +45,7 @@ func TestCompleteIssueHITLOpenToDone(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +59,7 @@ func TestCompleteIssueFailedToDone(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +75,7 @@ func TestCompleteIssueSkippedToDone(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +92,7 @@ func TestCompleteIssueSkippedBlockedByUndoneRejected(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/02-b.md",
+		IssuePath:    env.demoIssueRel(t, "02-b.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "blocked by 01-a") {
@@ -106,7 +107,7 @@ func TestCompleteIssueAlreadyDoneRejected(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "already done") {
@@ -122,7 +123,7 @@ func TestCompleteIssueBlockedByUndoneRejected(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/02-b.md",
+		IssuePath:    env.demoIssueRel(t, "02-b.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "blocked by 01-a") {
@@ -139,7 +140,7 @@ func TestCompleteIssueBlockedByDoneAllowed(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/02-b.md",
+		IssuePath:    env.demoIssueRel(t, "02-b.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +163,7 @@ func TestCompleteIssueRejectsAbsolutePath(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    filepath.Join(env.root, "thoughts/issues/demo/01-a.md"),
+		IssuePath:    filepath.Join(env.demoDir(), "01-a.md"),
 	})
 	assertExitCode(t, err, ExitSetup)
 }
@@ -171,7 +172,7 @@ func TestCompleteIssueAcceptsBareFilename(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
-		ResolveInput: ResolveInput{CWD: filepath.Join(env.root, "thoughts/issues/demo")},
+		ResolveInput: ResolveInput{CWD: env.demoDir()},
 		IssuePath:    "01-a.md",
 	})
 	if err != nil {
@@ -186,7 +187,7 @@ func TestCompleteIssueDoesNotStageChanges(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +214,7 @@ func TestCompleteIssueProgressBeforeManifest(t *testing.T) {
 
 	_, err := CompleteIssueWith(d, nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -234,7 +235,7 @@ func TestCompleteIssueManifestFailureManualRepair(t *testing.T) {
 
 	_, err := CompleteIssueWith(d, nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitOperational)
 	if !strings.Contains(err.Error(), "manual repair required") {

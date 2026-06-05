@@ -145,14 +145,15 @@ func TestRunIssueSetAppliesDirtyStrategyOnceBeforeDrain(t *testing.T) {
 func TestRunIssueSetTargetedIssueSet(t *testing.T) {
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	setupManifest(t, root, "high", []Issue{
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	issuesDir := storageIssuesDir(t, root)
+	setupManifest(t, issuesDir, "high", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	setupManifest(t, root, "low", []Issue{
+	setupManifest(t, issuesDir, "low", []Issue{
 		{ID: "01-x", File: "01-x.md", Title: "X", Type: "AFK", Status: "open"},
 	})
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	refresh, err := RefreshWith(DefaultDeps(), root, DefaultStatePath())
+	refresh, err := RefreshWith(DefaultDeps(), issuesDir, DefaultStatePath())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,9 +163,9 @@ func TestRunIssueSetTargetedIssueSet(t *testing.T) {
 	_ = refresh
 
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkIssue: true, summary: "targeted"})
-	env := &runIssueSetFixture{root: root}
+	env := &runIssueSetFixture{root: root, issuesDir: issuesDir}
 	opts := env.runIssueSetOpts(true, agent, nil)
-	opts.IssueSetOverride = "thoughts/issues/high"
+	opts.IssueSetOverride = "high"
 
 	result, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
@@ -362,14 +363,15 @@ func TestRunIssueSetOperationalStopOnCommitFailure(t *testing.T) {
 func TestRunIssueSetDoesNotContinueIntoAnotherIssueSet(t *testing.T) {
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	setupManifest(t, root, "one", []Issue{
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	issuesDir := storageIssuesDir(t, root)
+	setupManifest(t, issuesDir, "one", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	setupManifest(t, root, "two", []Issue{
+	setupManifest(t, issuesDir, "two", []Issue{
 		{ID: "01-x", File: "01-x.md", Title: "X", Type: "AFK", Status: "open"},
 	})
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	if _, err := RefreshWith(DefaultDeps(), root, DefaultStatePath()); err != nil {
+	if _, err := RefreshWith(DefaultDeps(), issuesDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := SetPriorityWith(DefaultDeps(), nil, nil, ResolveInput{CWD: root}, "two", 10); err != nil {
@@ -377,7 +379,7 @@ func TestRunIssueSetDoesNotContinueIntoAnotherIssueSet(t *testing.T) {
 	}
 
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkIssue: true, summary: "one only"})
-	env := &runIssueSetFixture{root: root}
+	env := &runIssueSetFixture{root: root, issuesDir: issuesDir}
 	result, err := RunIssueSetWith(env.deps(), nil, nil, env.runIssueSetOpts(true, agent, nil))
 	if err != nil {
 		t.Fatal(err)
@@ -385,7 +387,7 @@ func TestRunIssueSetDoesNotContinueIntoAnotherIssueSet(t *testing.T) {
 	if !result.IssueSetDone || result.IssueSetID != "two" || len(result.Completed) != 1 {
 		t.Fatalf("result = %#v", result)
 	}
-	assertIssueOpen(t, &execFixture{root: root}, "01-x")
+	assertIssueOpen(t, &execFixture{root: root, issuesDir: issuesDir}, "01-x")
 }
 
 func TestRunIssueSetFailedIssueSetRejected(t *testing.T) {
@@ -394,7 +396,7 @@ func TestRunIssueSetFailedIssueSetRejected(t *testing.T) {
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
 	opts := env.runIssueSetOpts(true, agent, nil)
-	opts.IssueSetOverride = "thoughts/issues/demo"
+	opts.IssueSetOverride = "demo"
 
 	_, err := RunIssueSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
@@ -547,19 +549,21 @@ func TestSelectIssueSetAutomaticAndExplicit(t *testing.T) {
 }
 
 type runIssueSetFixture struct {
-	root string
+	root      string
+	issuesDir string
 }
 
 func setupRunIssueSetFixture(t *testing.T, stem string, issues []Issue) *runIssueSetFixture {
 	t.Helper()
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	setupManifest(t, root, stem, issues)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	if _, err := RefreshWith(DefaultDeps(), root, DefaultStatePath()); err != nil {
+	issuesDir := storageIssuesDir(t, root)
+	setupManifest(t, issuesDir, stem, issues)
+	if _, err := RefreshWith(DefaultDeps(), issuesDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
-	return &runIssueSetFixture{root: root}
+	return &runIssueSetFixture{root: root, issuesDir: issuesDir}
 }
 
 func (e *runIssueSetFixture) deps() *Deps {
@@ -571,7 +575,7 @@ func (e *runIssueSetFixture) deps() *Deps {
 }
 
 func (e *runIssueSetFixture) execFixture() *execFixture {
-	return &execFixture{root: e.root}
+	return &execFixture{root: e.root, issuesDir: e.issuesDir}
 }
 
 func (e *runIssueSetFixture) runIssueSetOpts(yes bool, agentCmd string, out io.Writer) RunIssueSetOptions {

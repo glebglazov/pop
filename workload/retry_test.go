@@ -86,7 +86,7 @@ func TestRunIssueClaudeQuotaPauseLeavesIssueOpenWithoutRetry(t *testing.T) {
 	if got := strings.TrimSpace(string(mustReadFile(t, counterPath))); got != "1" {
 		t.Fatalf("started attempts = %q, want 1", got)
 	}
-	if _, err := os.Stat(filepath.Join(env.root, "thoughts/issues/demo/progress.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(env.demoDir(), "progress.txt")); !os.IsNotExist(err) {
 		t.Fatalf("quota pause wrote progress: %v", err)
 	}
 	if strings.Contains(buf.String(), "{\"type\"") {
@@ -274,7 +274,7 @@ func TestResetIssueReturnsFailedToOpen(t *testing.T) {
 
 	result, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -293,7 +293,7 @@ func TestResetIssueRequiresFailed(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	_, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "failed or skipped") {
@@ -308,7 +308,7 @@ func TestResetIssueSkippedToOpen(t *testing.T) {
 
 	result, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -332,7 +332,7 @@ func TestResetIssueProgressBeforeManifest(t *testing.T) {
 
 	_, err := ResetIssueWith(d, nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -353,7 +353,7 @@ func TestResetIssueFailureManualRepair(t *testing.T) {
 
 	_, err := ResetIssueWith(d, nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitOperational)
 	if !strings.Contains(err.Error(), "manual repair required") {
@@ -506,7 +506,7 @@ func writeProcessGroupAgent(t *testing.T, root string, delay time.Duration) stri
 func setupFailedIssueFixture(t *testing.T) *execFixture {
 	t.Helper()
 	env := setupExecutorFixture(t, false)
-	m := LoadManifest(DefaultDeps(), "demo", filepath.Join(env.root, "thoughts/issues/demo/index.json"))
+	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
 	failedAfter := 2
 	m.Issues[0].Status = "failed"
 	m.Issues[0].FailedAfter = &failedAfter

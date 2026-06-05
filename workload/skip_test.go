@@ -8,7 +8,7 @@ import (
 
 func issueStatus(t *testing.T, env *execFixture, issueID string) string {
 	t.Helper()
-	m := LoadManifest(DefaultDeps(), "demo", filepath.Join(env.root, "thoughts/issues/demo/index.json"))
+	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
 	for _, issue := range m.Issues {
 		if issue.ID == issueID {
 			return issue.Status
@@ -23,7 +23,7 @@ func TestSkipIssueOpenToSkipped(t *testing.T) {
 
 	result, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestSkipIssueHITLOpenToSkipped(t *testing.T) {
 
 	_, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestSkipIssueDoneRejected(t *testing.T) {
 
 	_, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "is done") {
@@ -74,7 +74,7 @@ func TestSkipIssueFailedRejected(t *testing.T) {
 
 	_, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "is failed") {
@@ -89,7 +89,7 @@ func TestSkipIssueAlreadySkippedRejected(t *testing.T) {
 
 	_, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "is skipped") {
@@ -105,7 +105,7 @@ func TestSkipIssueUnblocksDependent(t *testing.T) {
 
 	result, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    "thoughts/issues/demo/01-a.md",
+		IssuePath:    env.demoIssueRel(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestSkippedIssueNotSelectedExplicit(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "skipped"},
 	})
 
-	refresh, err := RefreshWith(env.deps(), env.root, DefaultStatePathWith(env.deps()))
+	refresh, err := RefreshWith(env.deps(), env.issuesDir, DefaultStatePathWith(env.deps()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestSkippedIssueNotSelectedAutomatic(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "skipped"},
 	})
 
-	refresh, err := RefreshWith(env.deps(), env.root, DefaultStatePathWith(env.deps()))
+	refresh, err := RefreshWith(env.deps(), env.issuesDir, DefaultStatePathWith(env.deps()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestSkipIssueRejectsAbsolutePath(t *testing.T) {
 
 	_, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    filepath.Join(env.root, "thoughts/issues/demo/01-a.md"),
+		IssuePath:    filepath.Join(env.demoDir(), "01-a.md"),
 	})
 	assertExitCode(t, err, ExitSetup)
 }
