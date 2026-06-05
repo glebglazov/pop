@@ -53,6 +53,7 @@ type AgentInvocation struct {
 	Name         string
 	Args         []string
 	OutputFormat AgentOutputFormat
+	adapter      AgentAdapter
 }
 
 // AgentResult is the provider-neutral result of normalizing one invocation.
@@ -66,19 +67,175 @@ type AgentQuotaPause struct {
 	Reason string
 }
 
-// Agent presets map names to command argument prefixes (prompt appended as final arg).
-var agentPresets = map[string][]string{
-	"claude":   {"claude", "--dangerously-skip-permissions", "-p"},
-	"opencode": {"opencode", "run"},
-	"cursor":   {"cursor-agent", "-p", "--force", "--trust"},
-	"codex":    {"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
-	"pi":       {"pi", "-p", "--no-extensions", "--no-skills"},
+// AgentHeadlessRequest describes one unattended issue-attempt invocation.
+type AgentHeadlessRequest struct {
+	Prompt      string
+	RuntimePath string
+	OutputMode  AgentOutputMode
+}
+
+// AgentAssistanceMode describes how an adapter can offer attended HITL help.
+type AgentAssistanceMode string
+
+const (
+	AgentAssistanceUnavailable AgentAssistanceMode = "unavailable"
+	AgentAssistanceNative      AgentAssistanceMode = "native"
+	AgentAssistanceFallback    AgentAssistanceMode = "fallback"
+)
+
+// AgentCommand is a resolved attended command owned by an Agent adapter.
+type AgentCommand struct {
+	Name string
+	Args []string
+}
+
+// AgentAssistanceCapability reports whether attended assistance can be offered.
+// Fallback allows an adapter to support HITL help even when the selected agent
+// does not have a native interactive command.
+type AgentAssistanceCapability struct {
+	Mode    AgentAssistanceMode
+	Command *AgentCommand
+}
+
+// Available reports whether this capability can be offered to a human.
+func (c AgentAssistanceCapability) Available() bool {
+	return c.Mode == AgentAssistanceNative || c.Mode == AgentAssistanceFallback
+}
+
+// AgentAdapter owns one agent preset's headless command, output handling, and
+// attended-assistance support decision.
+type AgentAdapter interface {
+	Preset() string
+	HeadlessInvocation(AgentHeadlessRequest) (*AgentInvocation, error)
+	NormalizeOutput(raw string, format AgentOutputFormat) AgentResult
+	RenderOutput(w io.Writer, raw string, format AgentOutputFormat)
+	AssistanceCapability() AgentAssistanceCapability
+}
+
+// Agent adapters map preset names to per-agent behavior.
+var agentAdapters = map[string]AgentAdapter{
+	"claude": newPresetAgentAdapter("claude",
+		[]string{"claude", "--dangerously-skip-permissions", "-p"},
+		AgentOutputClaudeStreamJSON,
+		[]string{"--output-format", "stream-json", "--verbose"},
+		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "claude"}},
+	),
+	"opencode": newPresetAgentAdapter("opencode",
+		[]string{"opencode", "run"},
+		AgentOutputOpenCodeJSON,
+		[]string{"--format", "json"},
+		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
+	),
+	"cursor": newPresetAgentAdapter("cursor",
+		[]string{"cursor-agent", "-p", "--force", "--trust"},
+		AgentOutputCursorStreamJSON,
+		[]string{"--output-format", "stream-json"},
+		AgentAssistanceCapability{Mode: AgentAssistanceFallback, Command: &AgentCommand{Name: "claude"}},
+	),
+	"codex": newPresetAgentAdapter("codex",
+		[]string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
+		AgentOutputCodexJSONL,
+		[]string{"--json"},
+		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "codex"}},
+	),
+	"pi": newPresetAgentAdapter("pi",
+		[]string{"pi", "-p", "--no-extensions", "--no-skills"},
+		AgentOutputPiJSONL,
+		[]string{"--mode", "json"},
+		AgentAssistanceCapability{Mode: AgentAssistanceFallback, Command: &AgentCommand{Name: "claude"}},
+	),
+}
+
+type presetAgentAdapter struct {
+	preset         string
+	headlessPrefix []string
+	autoFormat     AgentOutputFormat
+	autoArgs       []string
+	assistance     AgentAssistanceCapability
+}
+
+func newPresetAgentAdapter(preset string, headlessPrefix []string, autoFormat AgentOutputFormat, autoArgs []string, assistance AgentAssistanceCapability) AgentAdapter {
+	return &presetAgentAdapter{
+		preset:         preset,
+		headlessPrefix: append([]string{}, headlessPrefix...),
+		autoFormat:     autoFormat,
+		autoArgs:       append([]string{}, autoArgs...),
+		assistance:     assistance,
+	}
+}
+
+func (a *presetAgentAdapter) Preset() string { return a.preset }
+
+func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*AgentInvocation, error) {
+	if err := validateAgentOutputMode(req.OutputMode); err != nil {
+		return nil, err
+	}
+	mode := req.OutputMode
+	if mode == "" {
+		mode = AgentOutputAuto
+	}
+	args := append([]string{}, a.headlessPrefix...)
+	format := AgentOutputPlain
+	if mode == AgentOutputAuto {
+		args = append(args, a.autoArgs...)
+		format = a.autoFormat
+	}
+	if a.preset == "cursor" {
+		if mode == AgentOutputText {
+			args = append(args, "--output-format", "text")
+		}
+		args = append(args, "--workspace", req.RuntimePath)
+	}
+	args = append(args, req.Prompt)
+	return &AgentInvocation{Name: args[0], Args: args[1:], OutputFormat: format, adapter: a}, nil
+}
+
+func (a *presetAgentAdapter) NormalizeOutput(raw string, format AgentOutputFormat) AgentResult {
+	return normalizeAgentOutput(format, raw)
+}
+
+func (a *presetAgentAdapter) RenderOutput(w io.Writer, raw string, format AgentOutputFormat) {
+	renderAgentOutput(w, format, raw)
+}
+
+func (a *presetAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
+	return cloneAssistanceCapability(a.assistance)
+}
+
+type customAgentAdapter struct{}
+
+func (customAgentAdapter) Preset() string { return "custom" }
+
+func (a customAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*AgentInvocation, error) {
+	return nil, fmt.Errorf("custom agent adapter requires ResolveCustomAgentInvocation")
+}
+
+func (a customAgentAdapter) NormalizeOutput(raw string, format AgentOutputFormat) AgentResult {
+	return normalizeAgentOutput(format, raw)
+}
+
+func (a customAgentAdapter) RenderOutput(w io.Writer, raw string, format AgentOutputFormat) {
+	renderAgentOutput(w, format, raw)
+}
+
+func (a customAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
+	return AgentAssistanceCapability{Mode: AgentAssistanceUnavailable}
+}
+
+func cloneAssistanceCapability(capability AgentAssistanceCapability) AgentAssistanceCapability {
+	if capability.Command == nil {
+		return capability
+	}
+	clone := *capability.Command
+	clone.Args = append([]string{}, capability.Command.Args...)
+	capability.Command = &clone
+	return capability
 }
 
 // ValidAgentPresets returns sorted preset names.
 func ValidAgentPresets() []string {
-	names := make([]string, 0, len(agentPresets))
-	for name := range agentPresets {
+	names := make([]string, 0, len(agentAdapters))
+	for name := range agentAdapters {
 		names = append(names, name)
 	}
 	sortStrings(names)
@@ -118,48 +275,48 @@ func ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath string
 		mode = AgentOutputAuto
 	}
 	if agentCmd != "" {
+		adapter := customAgentAdapter{}
 		return &AgentInvocation{
 			Name:         "sh",
 			Args:         []string{"-c", agentCmd + ` "$@"`, "task-agent", prompt},
 			OutputFormat: AgentOutputPlain,
+			adapter:      adapter,
 		}, nil
 	}
+	adapter, err := ResolveAgentAdapter(preset)
+	if err != nil {
+		return nil, err
+	}
+	return adapter.HeadlessInvocation(AgentHeadlessRequest{
+		Prompt:      prompt,
+		RuntimePath: runtimePath,
+		OutputMode:  mode,
+	})
+}
+
+// ResolveAgentAdapter returns the adapter for a named preset.
+func ResolveAgentAdapter(preset string) (AgentAdapter, error) {
 	if preset == "" {
 		preset = "claude"
 	}
-	prefix, ok := agentPresets[preset]
+	adapter, ok := agentAdapters[preset]
 	if !ok {
 		return nil, fmt.Errorf("unknown agent preset %q; valid: %s", preset, strings.Join(ValidAgentPresets(), ", "))
 	}
-	args := append([]string{}, prefix...)
-	format := AgentOutputPlain
-	if mode == AgentOutputAuto {
-		switch preset {
-		case "claude":
-			args = append(args, "--output-format", "stream-json", "--verbose")
-			format = AgentOutputClaudeStreamJSON
-		case "cursor":
-			args = append(args, "--output-format", "stream-json")
-			format = AgentOutputCursorStreamJSON
-		case "codex":
-			args = append(args, "--json")
-			format = AgentOutputCodexJSONL
-		case "opencode":
-			args = append(args, "--format", "json")
-			format = AgentOutputOpenCodeJSON
-		case "pi":
-			args = append(args, "--mode", "json")
-			format = AgentOutputPiJSONL
-		}
+	return adapter, nil
+}
+
+// ResolveAgentAssistanceCapability returns attended-assistance support for the selected agent.
+// Custom headless commands are intentionally not treated as attended commands.
+func ResolveAgentAssistanceCapability(preset, agentCmd string) (AgentAssistanceCapability, error) {
+	if agentCmd != "" {
+		return AgentAssistanceCapability{Mode: AgentAssistanceUnavailable}, nil
 	}
-	if preset == "cursor" {
-		if mode == AgentOutputText {
-			args = append(args, "--output-format", "text")
-		}
-		args = append(args, "--workspace", runtimePath)
+	adapter, err := ResolveAgentAdapter(preset)
+	if err != nil {
+		return AgentAssistanceCapability{}, err
 	}
-	args = append(args, prompt)
-	return &AgentInvocation{Name: args[0], Args: args[1:], OutputFormat: format}, nil
+	return adapter.AssistanceCapability(), nil
 }
 
 func validateAgentOutputMode(mode AgentOutputMode) error {
@@ -200,6 +357,10 @@ func resolveAgentOutputMode(loadConfig func(string) (*config.Config, error), pre
 
 // NormalizeAgentOutput converts provider output into the completion-contract text.
 func NormalizeAgentOutput(format AgentOutputFormat, raw string) AgentResult {
+	return normalizeAgentOutput(format, raw)
+}
+
+func normalizeAgentOutput(format AgentOutputFormat, raw string) AgentResult {
 	var result AgentResult
 	switch format {
 	case AgentOutputClaudeStreamJSON:
@@ -221,18 +382,44 @@ func NormalizeAgentOutput(format AgentOutputFormat, raw string) AgentResult {
 	return result
 }
 
+// NormalizeOutput converts this invocation's raw output into completion-contract text.
+func (i *AgentInvocation) NormalizeOutput(raw string) AgentResult {
+	if i != nil && i.adapter != nil {
+		return i.adapter.NormalizeOutput(raw, i.OutputFormat)
+	}
+	if i == nil {
+		return AgentResult{}
+	}
+	return normalizeAgentOutput(i.OutputFormat, raw)
+}
+
 // RenderAgentOutput writes normalized agent text without dumping structured events.
 func RenderAgentOutput(w io.Writer, format AgentOutputFormat, raw string) {
+	renderAgentOutput(w, format, raw)
+}
+
+func renderAgentOutput(w io.Writer, format AgentOutputFormat, raw string) {
 	if format == AgentOutputPlain {
 		_, _ = io.Copy(w, bytes.NewBufferString(raw))
 		return
 	}
-	normalized := NormalizeAgentOutput(format, raw)
+	normalized := normalizeAgentOutput(format, raw)
 	if normalized.QuotaPause != nil {
 		fmt.Fprintln(w, normalized.QuotaPause.Reason)
 		return
 	}
 	if normalized.Output != "" {
 		fmt.Fprint(w, normalized.Output)
+	}
+}
+
+// RenderOutput writes this invocation's normalized agent text.
+func (i *AgentInvocation) RenderOutput(w io.Writer, raw string) {
+	if i != nil && i.adapter != nil {
+		i.adapter.RenderOutput(w, raw, i.OutputFormat)
+		return
+	}
+	if i != nil {
+		renderAgentOutput(w, i.OutputFormat, raw)
 	}
 }

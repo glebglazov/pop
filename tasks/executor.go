@@ -255,7 +255,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out io.Wri
 		if outcome.runErr != nil {
 			return nil, taskExitErr(sel, ExitOperational, "agent execution: %v", outcome.runErr)
 		}
-		agentResult := NormalizeAgentOutput(invocation.OutputFormat, agentOut)
+		agentResult := invocation.NormalizeOutput(agentOut)
 		if agentResult.QuotaPause != nil {
 			display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.TaskSetID, sel.TaskID)
 			display.line(ansiYellow, "  %s", agentResult.QuotaPause.Reason)
@@ -417,8 +417,8 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 	// Formats rendered live already streamed to liveOut; only the silently
 	// captured formats still need the post-hoc dump.
 	if invocation.OutputFormat != AgentOutputPlain && liveWriter == nil {
-		if normalized := NormalizeAgentOutput(invocation.OutputFormat, raw); normalized.QuotaPause == nil {
-			RenderAgentOutput(liveOut, invocation.OutputFormat, raw)
+		if normalized := invocation.NormalizeOutput(raw); normalized.QuotaPause == nil {
+			invocation.RenderOutput(liveOut, raw)
 		}
 	}
 	return raw, outcome, nil

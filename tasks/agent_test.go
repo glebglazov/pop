@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,6 +23,51 @@ func TestResolveAgentCommandPresets(t *testing.T) {
 		if last != "prompt text" {
 			t.Fatalf("%s: last arg = %q", preset, last)
 		}
+	}
+}
+
+func TestResolveAgentInvocationPreservesRepresentativePresetCommands(t *testing.T) {
+	tests := []struct {
+		preset string
+		name   string
+		args   []string
+		format AgentOutputFormat
+	}{
+		{
+			preset: "claude",
+			name:   "claude",
+			args:   []string{"--dangerously-skip-permissions", "-p", "--output-format", "stream-json", "--verbose", "prompt text"},
+			format: AgentOutputClaudeStreamJSON,
+		},
+		{
+			preset: "cursor",
+			name:   "cursor-agent",
+			args:   []string{"-p", "--force", "--trust", "--output-format", "stream-json", "--workspace", "/tmp/runtime", "prompt text"},
+			format: AgentOutputCursorStreamJSON,
+		},
+		{
+			preset: "codex",
+			name:   "codex",
+			args:   []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--json", "prompt text"},
+			format: AgentOutputCodexJSONL,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.preset, func(t *testing.T) {
+			invocation, err := ResolveAgentInvocation(tt.preset, "", "prompt text", "/tmp/runtime")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if invocation.Name != tt.name {
+				t.Fatalf("name = %q, want %q", invocation.Name, tt.name)
+			}
+			if !reflect.DeepEqual(invocation.Args, tt.args) {
+				t.Fatalf("args = %#v, want %#v", invocation.Args, tt.args)
+			}
+			if invocation.OutputFormat != tt.format {
+				t.Fatalf("format = %q, want %q", invocation.OutputFormat, tt.format)
+			}
+		})
 	}
 }
 
@@ -187,6 +233,70 @@ func TestResolveAgentInvocationTextFallbacks(t *testing.T) {
 	}
 }
 
+func TestResolveAgentInvocationTextModePreservesHeadlessCommands(t *testing.T) {
+	tests := []struct {
+		preset string
+		name   string
+		args   []string
+	}{
+		{
+			preset: "claude",
+			name:   "claude",
+			args:   []string{"--dangerously-skip-permissions", "-p", "prompt text"},
+		},
+		{
+			preset: "cursor",
+			name:   "cursor-agent",
+			args:   []string{"-p", "--force", "--trust", "--output-format", "text", "--workspace", "/tmp/runtime", "prompt text"},
+		},
+		{
+			preset: "pi",
+			name:   "pi",
+			args:   []string{"-p", "--no-extensions", "--no-skills", "prompt text"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.preset, func(t *testing.T) {
+			invocation, err := ResolveAgentInvocationWithMode(tt.preset, "", "prompt text", "/tmp/runtime", AgentOutputText)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if invocation.Name != tt.name {
+				t.Fatalf("name = %q, want %q", invocation.Name, tt.name)
+			}
+			if !reflect.DeepEqual(invocation.Args, tt.args) {
+				t.Fatalf("args = %#v, want %#v", invocation.Args, tt.args)
+			}
+			if invocation.OutputFormat != AgentOutputPlain {
+				t.Fatalf("format = %q, want plain", invocation.OutputFormat)
+			}
+		})
+	}
+}
+
+func TestAgentAssistanceCapabilitySupportsFallbacks(t *testing.T) {
+	capability, err := ResolveAgentAssistanceCapability("cursor", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !capability.Available() || capability.Mode != AgentAssistanceFallback {
+		t.Fatalf("capability = %#v, want available fallback", capability)
+	}
+	if capability.Command == nil || capability.Command.Name == "" {
+		t.Fatalf("fallback command = %#v", capability.Command)
+	}
+}
+
+func TestCustomAgentCmdHasNoAssistanceCapability(t *testing.T) {
+	capability, err := ResolveAgentAssistanceCapability("claude", "fake-agent --verbose")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capability.Available() || capability.Mode != AgentAssistanceUnavailable {
+		t.Fatalf("capability = %#v, want unavailable", capability)
+	}
+}
+
 func TestResolveAgentOutputModePrecedence(t *testing.T) {
 	loadText := func(string) (*config.Config, error) {
 		return &config.Config{Task: &config.TaskConfig{
@@ -245,6 +355,21 @@ func TestNormalizeClaudeStreamJSONDetectsQuotaPause(t *testing.T) {
 	RenderAgentOutput(&out, AgentOutputClaudeStreamJSON, raw)
 	if strings.Contains(out.String(), "{\"type\"") {
 		t.Fatalf("rendered raw JSONL: %q", out.String())
+	}
+}
+
+func TestInvocationNormalizesStructuredOutputThroughAdapter(t *testing.T) {
+	invocation, err := ResolveAgentInvocation("claude", "", "p", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"result\":\"You've hit your weekly limit · resets Mon 12:00am\"}\n"
+	result := invocation.NormalizeOutput(raw)
+	if result.QuotaPause == nil {
+		t.Fatal("missing quota pause")
+	}
+	if !strings.Contains(result.QuotaPause.Reason, "weekly limit") {
+		t.Fatalf("reason = %q", result.QuotaPause.Reason)
 	}
 }
 

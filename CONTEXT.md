@@ -198,7 +198,7 @@ every task done or skipped, ≥1 skipped ...... DEFERRED   ← conclude or reope
 otherwise (unfinished, none eligible) ....... BLOCKED    ← Human-blocked: HITL or undone dependency
 ```
 
-(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets. Drain stops when its set reaches DONE, FAILED, BLOCKED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate it advises the recovery paths (complete, edit-and-rerun, or skip).
+(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets. Drain stops when its set reaches DONE, FAILED, BLOCKED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate, interactive runs show a **HITL gate prompt** while non-interactive runs and `--yes` preserve stop-and-advice output.
 
 **Tasks readiness**:
 The **Doctor status** of the `pop tasks` command family. Because the tasks feature is aimed at Git projects and its central workflow is agent execution from a **Runtime path**, Doctor reports `pop tasks` as Blocked when no Git runtime checkout can be resolved, even if read-only status rendering could still inspect local artifacts.
@@ -288,12 +288,20 @@ _Avoid_: Run issues, run all, next Task set, Run PRD
 A named headless agent command known to the task executor. An explicit agent command may override a preset. The executor appends its generated prompt as the final positional argument and disconnects stdin.
 _Avoid_: Integration
 
-**Agent output adapter**:
-The preset-specific interpretation of an agent's headless output. An adapter may recover completion text or detect an **Agent quota pause** from a structured protocol; when it cannot interpret the output, the original text remains subject to the normal **Completion sentinel** contract. An adapter may also render the agent's activity live as it streams — assistant prose plus a compact tick per tool use — so a structured run shows progress instead of going silent until it ends. Live rendering is cosmetic: the captured raw output, not the rendered view, remains the source of truth for completion assessment and quota detection.
+**Interactive agent preset**:
+A named attended-assistance command known to an Agent adapter. It is separate from an Agent preset because assisting a human at a HITL gate is an attended conversation, not a headless task attempt; custom headless agent commands do not imply an interactive preset.
+_Avoid_: Agent preset, stripped headless command, agent-cmd
+
+**Agent adapter**:
+The preset-specific bridge between Pop and a supported agent. An adapter may provide headless invocation, headless output handling, and agent-assistance invocation; fallback for attended assistance belongs inside the selected adapter rather than in the HITL gate prompt.
 _Avoid_: Universal JSON protocol, agent integration
 
+**Agent output handling**:
+The Agent adapter capability that interprets an agent's headless output. It may recover completion text or detect an **Agent quota pause** from a structured protocol; when it cannot interpret the output, the original text remains subject to the normal **Completion sentinel** contract. It may also render the agent's activity live as it streams — assistant prose plus a compact tick per tool use — so a structured run shows progress instead of going silent until it ends. Live rendering is cosmetic: the captured raw output, not the rendered view, remains the source of truth for completion assessment and quota detection.
+_Avoid_: Interactive invocation, universal JSON protocol
+
 **Agent output mode**:
-Controls whether one Agent preset uses its Agent output adapter or a plain-text compatibility fallback. In adapter mode the agent's activity is rendered live as it streams; plain-text mode passes the agent's raw output through untouched and disables adapter capabilities such as Agent quota detection.
+Controls whether one Agent preset uses its Agent output handling or a plain-text compatibility fallback. In adapter mode the agent's activity is rendered live as it streams; plain-text mode passes the agent's raw output through untouched and disables adapter capabilities such as Agent quota detection.
 _Avoid_: Agent quota reporting, universal JSON protocol
 
 **Agent quota reporting**:
@@ -301,7 +309,7 @@ Proactively displaying subscription quota remaining in a provider-specific rolli
 _Avoid_: Token usage, API cost
 
 **Agent quota detection**:
-Identifying from an Agent output adapter that a task attempt stopped because the agent allowance is exhausted. Detection is preset-specific and relies on a stable headless signal. A detected quota pause stops Run or Drain cleanly without retrying, leaves the task Open, preserves partial runtime changes, and does not append a progress record. It is not a Failed, Skipped, or Interrupted task. Proactively reporting remaining allowance is the separate **Agent quota reporting** concern.
+Identifying from Agent output handling that a task attempt stopped because the agent allowance is exhausted. Detection is preset-specific and relies on a stable headless signal. A detected quota pause stops Run or Drain cleanly without retrying, leaves the task Open, preserves partial runtime changes, and does not append a progress record. It is not a Failed, Skipped, or Interrupted task. Proactively reporting remaining allowance is the separate **Agent quota reporting** concern.
 _Avoid_: Agent quota reporting, failed task, skipped task
 
 **Agent quota pause**:
@@ -319,6 +327,18 @@ _Avoid_: Task set timeout, interruption
 **Human-blocked Task set**:
 A Task set with unfinished tasks but no eligible AFK task because human-in-the-loop work must happen first. Run and Drain report the condition and stop; the task executor never automatically runs HITL tasks. On stopping, pop prints the blocking task body verbatim — the human sees what to do without opening the file — and advises the recovery paths for the blocking HITL task: Complete task once the human work is done, edit the task file and re-run, or skip the task to defer it and unblock its dependents (Skipped task). The blocked row also shows a copy-paste complete hint, symmetric with the open hint on Failed rows.
 _Avoid_: Failed Task set
+
+**HITL gate prompt**:
+An interactive choice shown when Drain reaches a Human-blocked Task set. It lets the human choose the next action at the gate, such as completing the task, getting agent assistance, deferring the task, or exiting without changing task state.
+_Avoid_: Automatic HITL execution, yes/no launch prompt
+
+**HITL assistance session**:
+An attended agent session started from a HITL gate prompt with the blocking HITL task and surrounding Task set context loaded. It helps the human inspect, verify, and decide; it does not make HITL tasks eligible for unattended execution.
+_Avoid_: Agent attempt, automatic HITL fallback
+
+**HITL assistance prompt**:
+The context loaded into a HITL assistance session. It identifies the Task set and blocking HITL task, includes the HITL task body, summarizes completed AFK work when available, and names the allowed manual outcomes without changing task state by itself.
+_Avoid_: Agent transcript, completion sentinel
 
 **Task artifact**:
 A machine-local planning document, task markdown file, task manifest, or progress record within **Task storage**. Task artifacts live outside the repository tree, so they can never enter implementation commits and require no ignore configuration.
@@ -343,6 +363,14 @@ _Avoid_: Issue reset, reset, automatic retry
 **Complete task**:
 Manually marking one Open, Failed, or Skipped task Done via `pop tasks complete` without running an agent, regardless of task type. Used primarily to clear a human-in-the-loop task after the human performs the work, to conclude a Skipped task once its deferred verification is satisfied, and also valid for finishing an AFK or Failed task by hand. The command requires a positional Task-set-relative file reference, `<task-set>/<file>.md`; paths, bare filenames, and bare task identifiers are rejected. All `blocked_by` dependencies must be Done. It bypasses the Completion sentinel — it does not verify acceptance criteria, does not prompt for confirmation, and does not stage or commit implementation changes; the human owns and commits that work. It appends a local COMPLETE progress record noting the prior state.
 _Avoid_: Complete issue, completion sentinel, no-op task completion, run
+
+**HITL gate completion**:
+Completing the blocking HITL task from a HITL gate prompt after explicit confirmation. It uses the same state transition as Complete task, then Drain continues draining the Task set instead of stopping at the cleared gate.
+_Avoid_: Completion sentinel, automatic HITL execution
+
+**HITL gate deferral**:
+Skipping the blocking HITL task from a HITL gate prompt after explicit confirmation. It uses the same state transition as Skipped task, then Drain continues draining the Task set because a Skipped task satisfies dependent `blocked_by` prerequisites.
+_Avoid_: Failed task, automatic HITL execution
 
 **Skipped task**:
 A task the human deliberately set aside via `pop tasks skip`, recorded with the `skipped` status. Skipping accepts only an Open task of any type and is the deadlock breaker when a human-in-the-loop task cannot be verified until its own follow-up tasks complete. A Skipped task is never selected for execution, yet — unlike an Open dependency — it satisfies `blocked_by` for its dependents, so downstream tasks become eligible against a deliberately deferred, not completed, prerequisite. The command mirrors **Open task** targeting and appends a local SKIP progress record. A Skipped task later resolves through Complete task (to Done) or Open task (to Open).
@@ -481,4 +509,4 @@ Removal of all deprecated aliases is gated on beta-tester sign-off, not a versio
 >
 > **Dev:** What if a task agent changes its structured output and pop cannot interpret it?
 >
-> **Expert:** Its **Agent output adapter** falls back to the original text, which still has to satisfy the normal **Completion sentinel** contract. An **Agent quota pause** is different: when the adapter recognizes one, the task stays Open and **Drain** stops cleanly.
+> **Expert:** Its **Agent output handling** falls back to the original text, which still has to satisfy the normal **Completion sentinel** contract. An **Agent quota pause** is different: when the adapter recognizes one, the task stays Open and **Drain** stops cleanly.
