@@ -38,7 +38,7 @@ func CompleteIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	issueSetID, issueID, err := ResolveIssueFileTarget(d, refresh, opts.CWD, opts.IssuePath)
+	issueSetID, issueID, err := ResolveIssueFileTarget(refresh, opts.IssuePath)
 	if err != nil {
 		return nil, err
 	}

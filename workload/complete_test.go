@@ -26,7 +26,7 @@ func TestCompleteIssueOpenToDone(t *testing.T) {
 
 	result, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestCompleteIssueHITLOpenToDone(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestCompleteIssueFailedToDone(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestCompleteIssueSkippedToDone(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestCompleteIssueSkippedBlockedByUndoneRejected(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "02-b.md"),
+		IssuePath:    env.demoIssueRef(t, "02-b.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "blocked by 01-a") {
@@ -107,7 +107,7 @@ func TestCompleteIssueAlreadyDoneRejected(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "already done") {
@@ -123,7 +123,7 @@ func TestCompleteIssueBlockedByUndoneRejected(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "02-b.md"),
+		IssuePath:    env.demoIssueRef(t, "02-b.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "blocked by 01-a") {
@@ -140,7 +140,7 @@ func TestCompleteIssueBlockedByDoneAllowed(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "02-b.md"),
+		IssuePath:    env.demoIssueRef(t, "02-b.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -168,12 +168,22 @@ func TestCompleteIssueRejectsAbsolutePath(t *testing.T) {
 	assertExitCode(t, err, ExitSetup)
 }
 
-func TestCompleteIssueAcceptsBareFilename(t *testing.T) {
+func TestCompleteIssueRejectsBareFilename(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
-		ResolveInput: ResolveInput{CWD: env.demoDir()},
+		ResolveInput: ResolveInput{CWD: env.root},
 		IssuePath:    "01-a.md",
+	})
+	assertExitCode(t, err, ExitSetup)
+}
+
+func TestCompleteIssueAcceptsIssueSetRelativeFile(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+
+	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +197,7 @@ func TestCompleteIssueDoesNotStageChanges(t *testing.T) {
 
 	_, err := CompleteIssueWith(env.deps(), nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +224,7 @@ func TestCompleteIssueProgressBeforeManifest(t *testing.T) {
 
 	_, err := CompleteIssueWith(d, nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +245,7 @@ func TestCompleteIssueManifestFailureManualRepair(t *testing.T) {
 
 	_, err := CompleteIssueWith(d, nil, nil, CompleteIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitOperational)
 	if !strings.Contains(err.Error(), "manual repair required") {

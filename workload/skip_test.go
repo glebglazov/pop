@@ -23,7 +23,7 @@ func TestSkipIssueOpenToSkipped(t *testing.T) {
 
 	result, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestSkipIssueHITLOpenToSkipped(t *testing.T) {
 
 	_, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestSkipIssueDoneRejected(t *testing.T) {
 
 	_, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "is done") {
@@ -74,7 +74,7 @@ func TestSkipIssueFailedRejected(t *testing.T) {
 
 	_, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "is failed") {
@@ -89,7 +89,7 @@ func TestSkipIssueAlreadySkippedRejected(t *testing.T) {
 
 	_, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "is skipped") {
@@ -105,7 +105,7 @@ func TestSkipIssueUnblocksDependent(t *testing.T) {
 
 	result, err := SkipIssueWith(env.deps(), nil, nil, SkipIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)

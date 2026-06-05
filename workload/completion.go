@@ -3,7 +3,6 @@ package workload
 import (
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -15,7 +14,6 @@ type CompletionInput struct {
 	Path               string
 	DefinitionOverride string
 	CWD                string
-	IssueSet           string
 }
 
 // CompleteProjectNames returns picker-visible project names for shell completion.
@@ -69,56 +67,9 @@ func CompleteIssueSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) 
 	return ids, nil
 }
 
-// CompleteIssueSetPaths returns CWD-relative discovered Issue-set paths for shell completion.
-func CompleteIssueSetPaths(input CompletionInput, toComplete string) ([]string, error) {
-	return CompleteIssueSetPathsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
-}
-
-// CompleteIssueSetPathsWith returns CWD-relative discovered Issue-set paths using injected dependencies.
-func CompleteIssueSetPathsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
-	_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
-	if err != nil || refresh == nil {
-		return nil, err
-	}
-	cwd, err := cwdOrDefault(d, input.CWD)
-	if err != nil {
-		return nil, err
-	}
-	return issueSetPathCompletionsFromCWD(refresh, cwd, toComplete), nil
-}
-
-// CompleteIssueSetTargets returns Issue set identifiers by default and CWD-relative Issue-set paths for path-like input.
-func CompleteIssueSetTargets(input CompletionInput, toComplete string) ([]string, error) {
-	return CompleteIssueSetTargetsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
-}
-
-// CompleteIssueSetTargetsWith returns Issue set target candidates using injected dependencies.
-func CompleteIssueSetTargetsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
-	if completionLooksPathLike(toComplete) {
-		return CompleteIssueSetPathsWith(d, pd, loadConfig, input, toComplete)
-	}
-	return CompleteIssueSetIDsWith(d, pd, loadConfig, input, toComplete)
-}
-
-// CompleteIssuePaths returns CWD-relative discovered issue markdown paths for shell completion.
-func CompleteIssuePaths(input CompletionInput, toComplete string) ([]string, error) {
-	return CompleteIssuePathsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
-}
-
-// CompleteIssuePathsWith returns CWD-relative discovered issue markdown paths using injected dependencies.
-func CompleteIssuePathsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
-	_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
-	if err != nil || refresh == nil {
-		return nil, err
-	}
-	cwd, err := cwdOrDefault(d, input.CWD)
-	if err != nil {
-		return nil, err
-	}
-	return issuePathCompletionsFromCWD(refresh, cwd, toComplete), nil
-}
-
-// CompleteIssueTargets returns Issue set identifiers by default and CWD-relative Issue paths for path-like input.
+// CompleteIssueTargets returns bare Issue set identifiers and, after an
+// identifier and slash, set-relative issue files. It never offers filesystem
+// path segments.
 func CompleteIssueTargets(input CompletionInput, toComplete string) ([]string, error) {
 	return CompleteIssueTargetsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
 }
@@ -129,41 +80,7 @@ func CompleteIssueTargetsWith(d *Deps, pd *project.Deps, loadConfig func(string)
 	if err != nil || refresh == nil {
 		return nil, err
 	}
-	if completionLooksPathLike(toComplete) {
-		cwd, err := cwdOrDefault(d, input.CWD)
-		if err != nil {
-			return nil, err
-		}
-		return issuePathCompletionsFromCWD(refresh, cwd, toComplete), nil
-	}
 	return issueTargetIdentifierCompletions(refresh, toComplete), nil
-}
-
-// CompleteIssueIDs returns manifest issue IDs for the selected Issue set.
-func CompleteIssueIDs(input CompletionInput, toComplete string) ([]string, error) {
-	return CompleteIssueIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
-}
-
-// CompleteIssueIDsWith returns manifest issue IDs using injected dependencies.
-func CompleteIssueIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
-	if completionLooksPathLike(toComplete) {
-		_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
-		if err != nil || refresh == nil {
-			return nil, err
-		}
-		return issuePathCompletions(refresh, input.IssueSet, input.CWD, toComplete), nil
-	}
-
-	if strings.TrimSpace(input.IssueSet) == "" {
-		return nil, nil
-	}
-
-	_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
-	if err != nil || refresh == nil {
-		return nil, err
-	}
-
-	return issuePathCompletions(refresh, input.IssueSet, input.CWD, toComplete), nil
 }
 
 func completionRefreshContext(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) (string, *RefreshResult, error) {

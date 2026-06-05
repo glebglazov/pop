@@ -32,7 +32,7 @@ func TestCompleteIssueSetIDsFromDiscovery(t *testing.T) {
 	}
 }
 
-func TestCompleteIssueIDsRequiresIssueSet(t *testing.T) {
+func TestCompleteIssueTargetsOffersIdentifiersAndSetRelativeFiles(t *testing.T) {
 	root := t.TempDir()
 	issuesDir := setupCompletionRepo(t, root)
 	writeCompletionFixture(t, issuesDir, "feature", []Issue{
@@ -46,17 +46,20 @@ func TestCompleteIssueIDsRequiresIssueSet(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	empty, err := CompleteIssueIDs(CompletionInput{}, "")
-	if err != nil || len(empty) != 0 {
-		t.Fatalf("without PRD: ids=%#v err=%v", empty, err)
-	}
-
-	ids, err := CompleteIssueIDs(CompletionInput{IssueSet: "feature"}, "")
+	ids, err := CompleteIssueTargets(CompletionInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ids) != 2 || ids[0] != "01-a" || ids[1] != "02-b" {
-		t.Fatalf("ids = %#v", ids)
+	if len(ids) != 1 || ids[0] != "feature" {
+		t.Fatalf("identifiers = %#v", ids)
+	}
+
+	files, err := CompleteIssueTargets(CompletionInput{}, "feature/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 || files[0] != "feature/01-a.md" || files[1] != "feature/02-b.md" {
+		t.Fatalf("set-relative files = %#v", files)
 	}
 }
 
@@ -222,7 +225,7 @@ func TestCompleteIssueSetIDsUsesDefinitionOverride(t *testing.T) {
 	}
 }
 
-func TestCompleteIssueIDsScopedToSelectedIssueSet(t *testing.T) {
+func TestCompleteIssueTargetsScopedToSelectedIssueSet(t *testing.T) {
 	root := t.TempDir()
 	issuesDir := setupCompletionRepo(t, root)
 	writeCompletionFixture(t, issuesDir, "one", []Issue{
@@ -238,12 +241,12 @@ func TestCompleteIssueIDsScopedToSelectedIssueSet(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	ids, err := CompleteIssueIDs(CompletionInput{IssueSet: "two"}, "")
+	files, err := CompleteIssueTargets(CompletionInput{}, "two/")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ids) != 1 || ids[0] != "99-z" {
-		t.Fatalf("ids = %#v", ids)
+	if len(files) != 1 || files[0] != "two/99-z.md" {
+		t.Fatalf("files = %#v", files)
 	}
 }
 
@@ -273,7 +276,7 @@ func TestCompletionNeverWritesProgress(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	_, _ = CompleteIssueSetIDs(CompletionInput{}, "")
-	_, _ = CompleteIssueIDs(CompletionInput{IssueSet: "demo"}, "")
+	_, _ = CompleteIssueTargets(CompletionInput{}, "demo/")
 
 	progressPath := filepath.Join(issuesDir, "demo", "progress.txt")
 	if _, err := os.Stat(progressPath); !os.IsNotExist(err) {

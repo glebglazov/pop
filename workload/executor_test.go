@@ -571,15 +571,10 @@ func (e *execFixture) demoDir() string { return filepath.Join(e.issuesDir, "demo
 // demoManifest returns the storage path to the fixture's "demo" Issue set manifest.
 func (e *execFixture) demoManifest() string { return filepath.Join(e.demoDir(), "index.json") }
 
-// demoIssueRel returns a CWD-relative (to the repo root) path to a file in the
-// fixture's storage-resident "demo" Issue set, for commands that take a path target.
-func (e *execFixture) demoIssueRel(t *testing.T, file string) string {
-	t.Helper()
-	rel, err := filepath.Rel(e.root, filepath.Join(e.demoDir(), file))
-	if err != nil {
-		t.Fatalf("relpath: %v", err)
-	}
-	return rel
+// demoIssueRef returns the <issue-set>/<file>.md Workload target reference for a
+// file in the fixture's "demo" Issue set (see ADR 0012).
+func (e *execFixture) demoIssueRef(_ *testing.T, file string) string {
+	return "demo/" + file
 }
 
 // storageIssuesDir resolves the Workload storage issues directory for a repository checkout.

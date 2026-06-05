@@ -254,10 +254,10 @@ func blockersResolved(m *Manifest, issue Issue) bool {
 	return true
 }
 
-// issuePathHint returns the canonical copy-paste path to an issue file,
-// relative to the workload definition root (see ADR 0004).
+// issuePathHint returns the canonical copy-paste Workload target reference for an
+// issue file: the <issue-set>/<file>.md form (see ADR 0012).
 func issuePathHint(stem, file string) string {
-	return path.Join("thoughts/issues", stem, file)
+	return path.Join(stem, file)
 }
 
 // resetIssueHint returns the copy-paste reset-issue command for an issue file.

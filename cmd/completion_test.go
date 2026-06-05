@@ -91,6 +91,18 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
 	})
 
+	t.Run("reset issue positional defaults to Issue set IDs", func(t *testing.T) {
+		out := shellCompNoDesc(t, "workload", "reset-issue")
+		assertShellCompContains(t, out, "svc")
+		assertShellCompOmits(t, out, "thoughts/issues/svc")
+		assertShellCompOmitsExact(t, out, "01-a")
+	})
+
+	t.Run("reset issue positional issue set relative file", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "workload", "reset-issue", "svc/")
+		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
+	})
+
 	t.Run("set priority positional IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "workload", "set-priority")
 		assertShellCompContains(t, out, "svc")

@@ -33,9 +33,9 @@ func registerWorkloadShellCompletions() {
 	workloadSetPriorityCmd.ValidArgsFunction = completeWorkloadSetPriorityArgs
 	workloadRunIssueCmd.ValidArgsFunction = completeWorkloadRunIssueArgs
 	workloadRunIssuesCmd.ValidArgsFunction = completeWorkloadRunIssuesArgs
-	workloadResetIssueCmd.ValidArgsFunction = completeWorkloadIssuePathArgs
-	workloadCompleteIssueCmd.ValidArgsFunction = completeWorkloadIssuePathArgs
-	workloadSkipIssueCmd.ValidArgsFunction = completeWorkloadIssuePathArgs
+	workloadResetIssueCmd.ValidArgsFunction = completeWorkloadIssueFileArgs
+	workloadCompleteIssueCmd.ValidArgsFunction = completeWorkloadIssueFileArgs
+	workloadSkipIssueCmd.ValidArgsFunction = completeWorkloadIssueFileArgs
 	workloadShowPathCmd.ValidArgsFunction = completeWorkloadShowPathArgs
 }
 
@@ -83,48 +83,6 @@ func completeWorkloadIssueSets(cmd *cobra.Command, args []string, toComplete str
 	return filterShellCompletions(stems, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
-func completeWorkloadIssueSetPaths(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	paths, err := workload.CompleteIssueSetPathsWith(
-		workloadCompletionDeps(),
-		workloadCompletionProjectDeps(),
-		workloadCompletionConfigLoad,
-		completionInputFromCmd(cmd),
-		toComplete,
-	)
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	return filterShellCompletions(paths, toComplete), cobra.ShellCompDirectiveNoFileComp
-}
-
-func completeWorkloadIssuePaths(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	paths, err := workload.CompleteIssuePathsWith(
-		workloadCompletionDeps(),
-		workloadCompletionProjectDeps(),
-		workloadCompletionConfigLoad,
-		completionInputFromCmd(cmd),
-		toComplete,
-	)
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	return filterShellCompletions(paths, toComplete), cobra.ShellCompDirectiveNoFileComp
-}
-
-func completeWorkloadIssueSetTargets(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	targets, err := workload.CompleteIssueSetTargetsWith(
-		workloadCompletionDeps(),
-		workloadCompletionProjectDeps(),
-		workloadCompletionConfigLoad,
-		completionInputFromCmd(cmd),
-		toComplete,
-	)
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	return filterShellCompletions(targets, toComplete), cobra.ShellCompDirectiveNoFileComp
-}
-
 func completeWorkloadIssueTargets(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	targets, err := workload.CompleteIssueTargetsWith(
 		workloadCompletionDeps(),
@@ -161,18 +119,18 @@ func completeWorkloadRunIssueArgs(cmd *cobra.Command, args []string, toComplete 
 	return completeWorkloadIssueTargets(cmd, args, toComplete)
 }
 
-func completeWorkloadIssuePathArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+func completeWorkloadIssueFileArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeWorkloadIssuePaths(cmd, args, toComplete)
+	return completeWorkloadIssueTargets(cmd, args, toComplete)
 }
 
 func completeWorkloadRunIssuesArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeWorkloadIssueSetTargets(cmd, args, toComplete)
+	return completeWorkloadIssueSets(cmd, args, toComplete)
 }
 
 func completionInputFromCmd(cmd *cobra.Command) workload.CompletionInput {

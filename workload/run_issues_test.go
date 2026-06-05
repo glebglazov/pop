@@ -204,12 +204,12 @@ func TestRunIssueSetHITLGatePrintsRecoveryAdvice(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"Human-blocked: demo/02-hitl",
-		"--- thoughts/issues/demo/02-hitl.md ---",
+		"--- demo/02-hitl.md ---",
 		"- [ ] ok",
 		"--- end ---",
-		"pop workload complete-issue thoughts/issues/demo/02-hitl.md",
-		"$EDITOR thoughts/issues/demo/02-hitl.md && pop workload run-issues",
-		"pop workload skip-issue thoughts/issues/demo/02-hitl.md",
+		"pop workload complete-issue demo/02-hitl.md",
+		"$EDITOR demo/02-hitl.md && pop workload run-issues",
+		"pop workload skip-issue demo/02-hitl.md",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("advice missing %q:\n%s", want, out)
@@ -230,10 +230,10 @@ func TestHITLGateAdviceSurvivesUnreadableIssueFile(t *testing.T) {
 	printHITLGateAdvice(d, &buf, "demo", "/tmp/demo", &Issue{ID: "02-hitl", File: "02-hitl.md"})
 
 	out := buf.String()
-	if !strings.Contains(out, "could not read thoughts/issues/demo/02-hitl.md") {
+	if !strings.Contains(out, "could not read demo/02-hitl.md") {
 		t.Fatalf("missing read-failure notice:\n%s", out)
 	}
-	if !strings.Contains(out, "pop workload complete-issue thoughts/issues/demo/02-hitl.md") {
+	if !strings.Contains(out, "pop workload complete-issue demo/02-hitl.md") {
 		t.Fatalf("advice block missing after read failure:\n%s", out)
 	}
 }
@@ -251,10 +251,10 @@ func TestRunIssueSetFailedStopMentionsCompleteAndReset(t *testing.T) {
 	assertExitCode(t, err, ExitOperational)
 
 	out := buf.String()
-	if !strings.Contains(out, "pop workload reset-issue thoughts/issues/demo/01-a.md") {
+	if !strings.Contains(out, "pop workload reset-issue demo/01-a.md") {
 		t.Fatalf("advice missing reset hint:\n%s", out)
 	}
-	if !strings.Contains(out, "pop workload complete-issue thoughts/issues/demo/01-a.md") {
+	if !strings.Contains(out, "pop workload complete-issue demo/01-a.md") {
 		t.Fatalf("advice missing complete hint:\n%s", out)
 	}
 }

@@ -82,7 +82,7 @@ func RunIssueSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	issueSetOverride, err := ResolveIssueSetTarget(d, refresh, opts.CWD, opts.IssueSetOverride)
+	issueSetOverride, err := ResolveIssueSetTarget(refresh, opts.IssueSetOverride)
 	if err != nil {
 		return nil, err
 	}

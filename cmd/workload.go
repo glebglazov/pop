@@ -48,35 +48,35 @@ var workloadSetPriorityCmd = &cobra.Command{
 }
 
 var workloadRunIssueCmd = &cobra.Command{
-	Use:   "run-issue [ISSUE_PATH]",
+	Use:   "run-issue [ISSUE_SET | ISSUE_SET/FILE.md]",
 	Short: "Execute one eligible AFK issue through a coding agent",
 	Args:  cobra.MaximumNArgs(1),
 	Run:   runWorkloadRunIssue,
 }
 
 var workloadRunIssuesCmd = &cobra.Command{
-	Use:   "run-issues [ISSUE_SET_PATH]",
+	Use:   "run-issues [ISSUE_SET]",
 	Short: "Sequentially drain eligible AFK issues from one Issue set",
 	Args:  cobra.MaximumNArgs(1),
 	Run:   runWorkloadRunIssues,
 }
 
 var workloadResetIssueCmd = &cobra.Command{
-	Use:   "reset-issue ISSUE_PATH",
+	Use:   "reset-issue ISSUE_SET/FILE.md",
 	Short: "Reset one failed or skipped issue back to open",
 	Args:  cobra.ExactArgs(1),
 	Run:   runWorkloadResetIssue,
 }
 
 var workloadCompleteIssueCmd = &cobra.Command{
-	Use:   "complete-issue ISSUE_PATH",
+	Use:   "complete-issue ISSUE_SET/FILE.md",
 	Short: "Manually mark one issue done without running an agent",
 	Args:  cobra.ExactArgs(1),
 	Run:   runWorkloadCompleteIssue,
 }
 
 var workloadSkipIssueCmd = &cobra.Command{
-	Use:   "skip-issue ISSUE_PATH",
+	Use:   "skip-issue ISSUE_SET/FILE.md",
 	Short: "Defer one open issue to skipped, unblocking its dependents",
 	Args:  cobra.ExactArgs(1),
 	Run:   runWorkloadSkipIssue,

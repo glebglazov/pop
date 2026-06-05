@@ -274,7 +274,7 @@ func TestResetIssueReturnsFailedToOpen(t *testing.T) {
 
 	result, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -293,7 +293,7 @@ func TestResetIssueRequiresFailed(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	_, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
 	if !strings.Contains(err.Error(), "failed or skipped") {
@@ -308,7 +308,7 @@ func TestResetIssueSkippedToOpen(t *testing.T) {
 
 	result, err := ResetIssueWith(env.deps(), nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -332,7 +332,7 @@ func TestResetIssueProgressBeforeManifest(t *testing.T) {
 
 	_, err := ResetIssueWith(d, nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -353,7 +353,7 @@ func TestResetIssueFailureManualRepair(t *testing.T) {
 
 	_, err := ResetIssueWith(d, nil, nil, ResetIssueOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		IssuePath:    env.demoIssueRel(t, "01-a.md"),
+		IssuePath:    env.demoIssueRef(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitOperational)
 	if !strings.Contains(err.Error(), "manual repair required") {

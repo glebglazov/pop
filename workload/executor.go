@@ -126,7 +126,7 @@ func RunIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	issueSetID, issueID, err := ResolveIssueTarget(d, refresh, opts.CWD, opts.IssuePathOverride)
+	issueSetID, issueID, err := ResolveIssueTarget(refresh, opts.IssuePathOverride)
 	if err != nil {
 		return nil, err
 	}

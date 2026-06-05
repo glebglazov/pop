@@ -213,7 +213,7 @@ func TestFailedRowResetHints(t *testing.T) {
 	if len(result.Rows) != 1 || result.Rows[0].Status != StatusFailed {
 		t.Fatalf("rows = %#v", result.Rows)
 	}
-	if len(result.Rows[0].ResetHints) != 1 || result.Rows[0].ResetHints[0] != "pop workload reset-issue thoughts/issues/failed-prd/repair-broken.md" {
+	if len(result.Rows[0].ResetHints) != 1 || result.Rows[0].ResetHints[0] != "pop workload reset-issue failed-prd/repair-broken.md" {
 		t.Fatalf("reset hints = %v", result.Rows[0].ResetHints)
 	}
 
@@ -237,7 +237,7 @@ func TestBlockedReasonInTable(t *testing.T) {
 	if result.Rows[0].BlockedReason != "HITL: 01-hitl" {
 		t.Fatalf("blocked reason = %q", result.Rows[0].BlockedReason)
 	}
-	if result.Rows[0].CompleteHint != "pop workload complete-issue thoughts/issues/blocked/01-hitl.md" {
+	if result.Rows[0].CompleteHint != "pop workload complete-issue blocked/01-hitl.md" {
 		t.Fatalf("complete hint = %q", result.Rows[0].CompleteHint)
 	}
 
