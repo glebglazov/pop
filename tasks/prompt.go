@@ -2,9 +2,13 @@ package tasks
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+var progressHeaderPattern = regexp.MustCompile(`^(\S+)\s+\[([^\]]+)\]\s+(\S+)\s*$`)
 
 // BuildAgentPrompt generates the instruction prompt for an task attempt.
 func BuildAgentPrompt(taskPath, runtimePath string) string {
@@ -31,4 +35,154 @@ func BuildAgentPrompt(taskPath, runtimePath string) string {
 	fmt.Fprintf(&b, "failure), instead print as the final line:\n\n")
 	fmt.Fprintf(&b, "TASK_FAILED: <one-line reason>\n")
 	return b.String()
+}
+
+// BuildHITLAssistancePrompt generates the attended-agent prompt shown when a
+// Task set reaches a human-in-the-loop gate.
+func BuildHITLAssistancePrompt(d *Deps, taskSetID string, m *Manifest, blocking Task, runtimePath string) string {
+	if d == nil {
+		d = defaultDeps
+	}
+	if d.FS == nil {
+		d.FS = DefaultDeps().FS
+	}
+
+	taskPath := filepath.Join(m.Dir, blocking.File)
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are assisting a human at a HITL gate for a Pop task set.\n\n")
+	fmt.Fprintf(&b, "Task set: %s\n", taskSetID)
+	fmt.Fprintf(&b, "Task set path: %s\n", m.Dir)
+	fmt.Fprintf(&b, "Blocking HITL task: %s", blocking.ID)
+	if blocking.Title != "" {
+		fmt.Fprintf(&b, " - %s", blocking.Title)
+	}
+	fmt.Fprintf(&b, "\n")
+	fmt.Fprintf(&b, "Human-facing task path: %s\n", taskPath)
+	if runtimePath != "" {
+		fmt.Fprintf(&b, "Runtime checkout: %s\n", runtimePath)
+	}
+	fmt.Fprintf(&b, "\n")
+
+	fmt.Fprintf(&b, "Allowed manual outcomes:\n")
+	fmt.Fprintf(&b, "- complete: the human marks the HITL task done after verifying the required work.\n")
+	fmt.Fprintf(&b, "- defer: the human skips the HITL task so downstream work can continue while the set remains Deferred.\n")
+	fmt.Fprintf(&b, "- edit and rerun: the human edits tasks or implementation state, then reruns the task set.\n")
+	fmt.Fprintf(&b, "- exit without changing task state: leave the HITL task open and make no manual override.\n\n")
+
+	fmt.Fprintf(&b, "Full HITL task body:\n")
+	if data, err := d.FS.ReadFile(taskPath); err == nil {
+		fmt.Fprintf(&b, "```markdown\n%s\n```\n\n", strings.TrimRight(string(data), "\n"))
+	} else {
+		fmt.Fprintf(&b, "Could not read %s: %v.\n", taskPath, err)
+		fmt.Fprintf(&b, "Proceed by inspecting the task path manually or asking the human for the missing task body.\n\n")
+	}
+
+	fmt.Fprintf(&b, "Task set context:\n")
+	for _, task := range m.Tasks {
+		fmt.Fprintf(&b, "- %s [%s %s]", task.ID, task.Type, task.Status)
+		if task.Title != "" {
+			fmt.Fprintf(&b, " %s", task.Title)
+		}
+		fmt.Fprintf(&b, " (%s)", filepath.Join(m.Dir, task.File))
+		if len(task.BlockedBy) > 0 {
+			fmt.Fprintf(&b, "; blocked_by: %s", strings.Join(task.BlockedBy, ", "))
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+	fmt.Fprintf(&b, "\n")
+
+	fmt.Fprintf(&b, "Completed AFK work from task artifacts:\n")
+	completed := completedAFKProgress(d, m)
+	if len(completed) == 0 {
+		fmt.Fprintf(&b, "- No completed AFK work summary is available in progress.txt.\n\n")
+	} else {
+		for _, item := range completed {
+			fmt.Fprintf(&b, "- %s (%s, %s at %s)\n", item.TaskID, item.File, item.Outcome, item.Timestamp)
+			for _, line := range strings.Split(item.Summary, "\n") {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
+				fmt.Fprintf(&b, "  %s\n", line)
+			}
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+
+	fmt.Fprintf(&b, "Use the repository and task context to help the human decide which allowed outcome is correct. Do not mark tasks complete or skipped unless the human explicitly chooses that outcome.\n")
+	return b.String()
+}
+
+type completedAFKProgressItem struct {
+	TaskID    string
+	File      string
+	Outcome   string
+	Timestamp string
+	Summary   string
+}
+
+func completedAFKProgress(d *Deps, m *Manifest) []completedAFKProgressItem {
+	progressPath := filepath.Join(m.Dir, "progress.txt")
+	data, err := d.FS.ReadFile(progressPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return nil
+	}
+
+	tasksByFile := make(map[string]Task, len(m.Tasks))
+	for _, task := range m.Tasks {
+		tasksByFile[task.File] = task
+	}
+
+	var completed []completedAFKProgressItem
+	for _, record := range parseProgressRecords(string(data)) {
+		task, ok := tasksByFile[record.File]
+		if !ok || task.Type != "AFK" || task.Status != "done" {
+			continue
+		}
+		if record.Outcome != "DONE" && record.Outcome != "COMPLETE" {
+			continue
+		}
+		completed = append(completed, completedAFKProgressItem{
+			TaskID:    task.ID,
+			File:      record.File,
+			Outcome:   record.Outcome,
+			Timestamp: record.Timestamp,
+			Summary:   record.Summary,
+		})
+	}
+	return completed
+}
+
+type progressRecord struct {
+	Timestamp string
+	File      string
+	Outcome   string
+	Summary   string
+}
+
+func parseProgressRecords(data string) []progressRecord {
+	var records []progressRecord
+	for _, block := range strings.Split(data, "\n---\n") {
+		block = strings.TrimSpace(block)
+		if block == "" {
+			continue
+		}
+		lines := strings.Split(block, "\n")
+		if len(lines) == 0 {
+			continue
+		}
+		matches := progressHeaderPattern.FindStringSubmatch(strings.TrimSpace(lines[0]))
+		if matches == nil {
+			continue
+		}
+		records = append(records, progressRecord{
+			Timestamp: matches[1],
+			File:      matches[2],
+			Outcome:   matches[3],
+			Summary:   strings.TrimSpace(strings.Join(lines[1:], "\n")),
+		})
+	}
+	return records
 }

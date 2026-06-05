@@ -2,11 +2,14 @@ package tasks
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/deps"
 )
 
 func TestResolveAgentCommandPresets(t *testing.T) {
@@ -481,5 +484,116 @@ func TestBuildAgentPromptAbsolutePaths(t *testing.T) {
 	}
 	if strings.Contains(prompt, "Parent PRD") {
 		t.Fatalf("prompt must not synthesize a PRD path:\n%s", prompt)
+	}
+}
+
+func TestBuildHITLAssistancePromptWithCompletedAFKWork(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "thoughts/issues/demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePromptTestFile(t, filepath.Join(dir, "01-afk.md"), "## AFK\n\n## Acceptance criteria\n\n- [x] done\n")
+	writePromptTestFile(t, filepath.Join(dir, "02-hitl.md"), "## Review\n\nCheck the AFK result.\n\n## Acceptance criteria\n\n- [ ] approved\n")
+	writePromptTestFile(t, filepath.Join(dir, "progress.txt"), "2026-06-05T10:00:00Z [01-afk.md] DONE\nimplemented storage\nverified tests\n---\n")
+
+	m := &Manifest{
+		Stem: "demo",
+		Dir:  dir,
+		Issues: []Issue{
+			{ID: "01-afk", File: "01-afk.md", Title: "Build storage", Type: "AFK", Status: "done"},
+			{ID: "02-hitl", File: "02-hitl.md", Title: "Review storage", Type: "HITL", Status: "open", BlockedBy: []string{"01-afk"}},
+		},
+	}
+
+	prompt := BuildHITLAssistancePrompt(DefaultDeps(), "demo", m, m.Issues[1], "/runtime")
+	for _, want := range []string{
+		"Issue set: demo",
+		"Blocking HITL issue: 02-hitl - Review storage",
+		"Human-facing issue path: " + filepath.Join(dir, "02-hitl.md"),
+		"Check the AFK result.",
+		"- 01-afk [AFK done] Build storage",
+		"blocked_by: 01-afk",
+		"- 01-afk (01-afk.md, DONE at 2026-06-05T10:00:00Z)",
+		"implemented storage",
+		"verified tests",
+		"complete: the human marks the HITL issue done",
+		"defer: the human skips the HITL issue",
+		"edit and rerun",
+		"exit without changing issue state",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "raw agent transcript") {
+		t.Fatalf("prompt should not request raw transcripts:\n%s", prompt)
+	}
+}
+
+func TestBuildHITLAssistancePromptWithNoCompletedAFKWork(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "thoughts/issues/demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePromptTestFile(t, filepath.Join(dir, "01-hitl.md"), "## Decide\n\nHuman choice.\n\n## Acceptance criteria\n\n- [ ] decided\n")
+
+	m := &Manifest{
+		Stem: "demo",
+		Dir:  dir,
+		Issues: []Issue{
+			{ID: "01-hitl", File: "01-hitl.md", Title: "Decide", Type: "HITL", Status: "open"},
+		},
+	}
+
+	prompt := BuildHITLAssistancePrompt(DefaultDeps(), "demo", m, m.Issues[0], "")
+	for _, want := range []string{
+		"Issue set: demo",
+		"Human choice.",
+		"No completed AFK work summary is available in progress.txt.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildHITLAssistancePromptWithUnreadableHITLIssueFile(t *testing.T) {
+	d := &Deps{FS: &deps.MockFileSystem{
+		ReadFileFunc: func(path string) ([]byte, error) {
+			return nil, os.ErrPermission
+		},
+	}}
+	m := &Manifest{
+		Stem: "demo",
+		Dir:  "/issues/demo",
+		Issues: []Issue{
+			{ID: "01-afk", File: "01-afk.md", Title: "Done", Type: "AFK", Status: "done"},
+			{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+		},
+	}
+
+	prompt := BuildHITLAssistancePrompt(d, "demo", m, m.Issues[1], "/runtime")
+	for _, want := range []string{
+		"Human-facing issue path: /issues/demo/02-hitl.md",
+		"Could not read /issues/demo/02-hitl.md",
+		"Proceed by inspecting the issue path manually",
+		"No completed AFK work summary is available in progress.txt.",
+		"complete",
+		"defer",
+		"edit and rerun",
+		"exit without changing issue state",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
+		}
+	}
+}
+
+func writePromptTestFile(t *testing.T, path, data string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
