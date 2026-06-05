@@ -642,9 +642,6 @@ func doctorDetectAgentIntent(d *integrateDeps, home string, loadConfig func(stri
 
 	for _, agent := range integrationAgents {
 		for _, comp := range integrationCatalog {
-			if comp.id == ComponentWorkloadGitignore {
-				continue
-			}
 			state, err := doctorComponentState(d, home, comp.id, agent)
 			if err != nil {
 				return nil, err
@@ -839,9 +836,8 @@ func doctorStatusReason(check doctorCheck) string {
 // the existing check seams — it owns no state logic. File-based components
 // (the pane skill, the workload planning skills) defer entirely to
 // wizardFileComponentState (catalog support + conflict + installed + stale).
-// The status wiring and the global-gitignore step have no render tree, so their
-// state is the binary installed/not-installed signal from their own seams
-// (statusWiringInstalled, gitignoreConfigured).
+// The status wiring has no render tree, so its state is the binary
+// installed/not-installed signal from its own seam (statusWiringInstalled).
 func doctorComponentState(d *integrateDeps, home string, id ComponentID, agent string) (componentStateInfo, error) {
 	comp, ok := lookupComponent(id)
 	if !ok {
@@ -857,12 +853,6 @@ func doctorComponentState(d *integrateDeps, home string, id ComponentID, agent s
 			return componentStateInfo{}, err
 		}
 		return installedState(installed), nil
-	case ComponentWorkloadGitignore:
-		configured, _, err := gitignoreConfigured(d)
-		if err != nil {
-			return componentStateInfo{}, err
-		}
-		return installedState(configured), nil
 	default:
 		return wizardFileComponentState(d, home, id, agent)
 	}
@@ -881,10 +871,9 @@ func installedState(installed bool) componentStateInfo {
 // it non-interactively. The status wiring has no flag — it is the core
 // component a bare `pop integrate <agent>` installs.
 var doctorComponentFlag = map[ComponentID]string{
-	ComponentStatusWiring:      "",
-	ComponentPaneSkill:         "--pane-skill",
-	ComponentWorkloadSkills:    "--workload-skills",
-	ComponentWorkloadGitignore: "--workload-gitignore",
+	ComponentStatusWiring:   "",
+	ComponentPaneSkill:      "--pane-skill",
+	ComponentWorkloadSkills: "--workload-skills",
 }
 
 // integrateInvocation builds the copy-paste integrate command that installs the

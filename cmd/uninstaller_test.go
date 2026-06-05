@@ -177,27 +177,6 @@ func TestRemoveStatusWiringNoHooksReportsNothing(t *testing.T) {
 	}
 }
 
-// TestRemoveGitignoreReportOnly: removing the workload-gitignore component
-// through the remove path reports the manual step and edits nothing.
-func TestRemoveGitignoreReportOnly(t *testing.T) {
-	fs := newFakeFS()
-	out := &bytes.Buffer{}
-	d := fakeDeps(installerHome, fs, out)
-	target := filepath.Join(installerHome, ".config", "git", "ignore")
-	fs.files[target] = []byte("thoughts/\n")
-
-	if err := removeComponent(d, installerHome, ComponentWorkloadGitignore, "claude"); err != nil {
-		t.Fatalf("removeComponent(gitignore): %v", err)
-	}
-
-	if string(fs.files[target]) != "thoughts/\n" {
-		t.Fatalf("gitignore file was edited: %q", fs.files[target])
-	}
-	if !strings.Contains(out.String(), target) || !strings.Contains(out.String(), gitignoreLine) {
-		t.Fatalf("manual step not reported: %q", out.String())
-	}
-}
-
 // TestRunIntegrateRemoveSingleComponent: removing one named component touches
 // only that component and leaves the others installed.
 func TestRunIntegrateRemoveSingleComponent(t *testing.T) {

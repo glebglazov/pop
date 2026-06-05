@@ -137,11 +137,6 @@ func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 		symlink:     fs.symlink,
 		readlink:    fs.readlink,
 		lstatMode:   fs.lstatMode,
-		// Gitignore-step defaults: no core.excludesfile and no XDG override, so
-		// the target resolves to <home>/.config/git/ignore. Gitignore tests
-		// override these to exercise the other resolutions.
-		gitConfig: func(string) (string, error) { return "", os.ErrNotExist },
-		getenv:    func(string) string { return "" },
 	}
 }
 
@@ -1492,18 +1487,6 @@ func TestRefreshComponent_SkipsNotSupportedSilently(t *testing.T) {
 		if updated || warning != "" {
 			t.Errorf("codex/%s: expected silent no-op, got updated=%v warning=%q", id, updated, warning)
 		}
-	}
-}
-
-func TestRefreshComponent_GitignoreNeverRefreshed(t *testing.T) {
-	// The gitignore step has no binary-versioned content, so refresh never
-	// touches it: configured-or-not, never stale, never added.
-	fs := newFakeFS()
-	dry, real := fakeFactories("/h", fs)
-
-	updated, warning := refreshComponent(dry, real, "claude", ComponentWorkloadGitignore)
-	if updated || warning != "" {
-		t.Errorf("gitignore: expected silent no-op, got updated=%v warning=%q", updated, warning)
 	}
 }
 

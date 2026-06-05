@@ -21,8 +21,8 @@ func wizardDeps(fs *fakeFS, input string, out *bytes.Buffer) *integrateDeps {
 func TestWizardCoreInstalledNoPrompt(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
-	// Decline pane skill, workload skills, and the gitignore sub-step.
-	d := wizardDeps(fs, "n\nn\nn\n", out)
+	// Decline pane skill and workload skills.
+	d := wizardDeps(fs, "n\nn\n", out)
 
 	if err := runIntegrateComponents(d, "claude", nil, true); err != nil {
 		t.Fatalf("wizard: %v", err)
@@ -49,7 +49,7 @@ func TestWizardCoreInstalledNoPrompt(t *testing.T) {
 func TestWizardAcceptPaneSkill(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
-	d := wizardDeps(fs, "y\nn\nn\n", out)
+	d := wizardDeps(fs, "y\nn\n", out)
 
 	if err := runIntegrateComponents(d, "claude", nil, true); err != nil {
 		t.Fatalf("wizard: %v", err)
@@ -61,12 +61,12 @@ func TestWizardAcceptPaneSkill(t *testing.T) {
 	}
 }
 
-// TestWizardAcceptAll: answering yes to every step installs the pane skill, the
-// workload skills, and appends the gitignore line.
+// TestWizardAcceptAll: answering yes to every step installs the pane skill and
+// the workload skills.
 func TestWizardAcceptAll(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
-	d := wizardDeps(fs, "y\ny\ny\n", out)
+	d := wizardDeps(fs, "y\ny\n", out)
 
 	if err := runIntegrateComponents(d, "claude", nil, true); err != nil {
 		t.Fatalf("wizard: %v", err)
@@ -80,11 +80,6 @@ func TestWizardAcceptAll(t *testing.T) {
 	if _, ok := fs.symlinks[grillDest]; !ok {
 		t.Fatalf("workload skill not symlinked: %s missing (symlinks=%v)", grillDest, fs.symlinks)
 	}
-	gitignore := filepath.Join(installerHome, ".config", "git", "ignore")
-	data, ok := fs.files[gitignore]
-	if !ok || !hasGitignoreLine(data) {
-		t.Fatalf("gitignore line not appended to %s: %q", gitignore, string(data))
-	}
 }
 
 // TestWizardDeclineContinues: declining a step does not abort the wizard — the
@@ -92,8 +87,8 @@ func TestWizardAcceptAll(t *testing.T) {
 func TestWizardDeclineContinues(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
-	// Decline pane skill, accept workload skills, decline gitignore.
-	d := wizardDeps(fs, "n\ny\nn\n", out)
+	// Decline pane skill, accept workload skills.
+	d := wizardDeps(fs, "n\ny\n", out)
 
 	if err := runIntegrateComponents(d, "claude", nil, true); err != nil {
 		t.Fatalf("wizard: %v", err)
@@ -123,7 +118,7 @@ func TestWizardStateDisplayInstalledCurrent(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	d := wizardDeps(fs, "n\nn\nn\n", out)
+	d := wizardDeps(fs, "n\nn\n", out)
 	if err := runIntegrateComponents(d, "claude", nil, true); err != nil {
 		t.Fatalf("wizard: %v", err)
 	}
@@ -137,7 +132,7 @@ func TestWizardStateDisplayInstalledCurrent(t *testing.T) {
 func TestWizardStateDisplayNotInstalled(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
-	d := wizardDeps(fs, "n\nn\nn\n", out)
+	d := wizardDeps(fs, "n\nn\n", out)
 	if err := runIntegrateComponents(d, "claude", nil, true); err != nil {
 		t.Fatalf("wizard: %v", err)
 	}
@@ -156,9 +151,9 @@ func TestWizardConflictReportNoPrompt(t *testing.T) {
 	fs.files[conflictPath] = []byte("my own skill")
 
 	out := &bytes.Buffer{}
-	// Only the workload-skills and gitignore steps should consume input; the
-	// pane-skill step is a conflict and must not read a prompt.
-	d := wizardDeps(fs, "n\nn\n", out)
+	// Only the workload-skills step should consume input; the pane-skill step
+	// is a conflict and must not read a prompt.
+	d := wizardDeps(fs, "n\n", out)
 	if err := runIntegrateComponents(d, "claude", nil, true); err != nil {
 		t.Fatalf("wizard: %v", err)
 	}
@@ -185,9 +180,9 @@ func TestWizardConflictReportNoPrompt(t *testing.T) {
 func TestWizardNotSupportedReport(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
-	// opencode supports the pane skill (1 prompt) and gitignore (1 prompt); the
-	// workload step is not-supported and issues no prompt.
-	d := wizardDeps(fs, "n\nn\n", out)
+	// opencode supports the pane skill (1 prompt); the workload step is
+	// not-supported and issues no prompt.
+	d := wizardDeps(fs, "n\n", out)
 	if err := runIntegrateComponents(d, "opencode", nil, true); err != nil {
 		t.Fatalf("wizard: %v", err)
 	}

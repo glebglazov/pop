@@ -28,18 +28,13 @@ const (
 	// ComponentWorkloadSkills is the opt-in workload planning skill set
 	// (grill-with-docs, to-prd, to-issues).
 	ComponentWorkloadSkills ComponentID = "workload-skills"
-
-	// ComponentWorkloadGitignore is the opt-in global-gitignore sub-step of
-	// the workload component (appends the thoughts/ ignore line).
-	ComponentWorkloadGitignore ComponentID = "workload-gitignore"
 )
 
 // integrationComponent is one entry in the component catalog: a stable
 // identifier, the set of agents that can host it, the embedded source paths it
 // renders from, and (once wired) the installer that applies it for an agent.
 //
-// A non-nil install applies the component directly (status wiring; the
-// gitignore step, whose effect is global and agent-independent). File-based
+// A non-nil install applies the component directly (status wiring). File-based
 // components leave install nil and go through the link installer, driven by
 // their sources. ComponentStatusWiring is the sole component the bare integrate
 // path installs; the rest are explicit opt-ins.
@@ -48,7 +43,7 @@ type integrationComponent struct {
 	supports map[string]bool
 	// sources lists embedded source paths (within skillFiles) this component
 	// renders from. Empty for components whose sources are not file-based
-	// (status wiring, gitignore) or not yet embedded (workload skills).
+	// (status wiring) or not yet embedded (workload skills).
 	sources []string
 	install func(d *integrateDeps, home, agent string) error
 }
@@ -98,11 +93,6 @@ var integrationCatalog = []integrationComponent{
 			"skills/pop/to-prd",
 			"skills/pop/to-issues",
 		},
-	},
-	{
-		id:       ComponentWorkloadGitignore,
-		supports: agentSet("claude", "codex", "pi", "opencode", "cursor"),
-		install:  installGitignore,
 	},
 }
 

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -67,13 +66,6 @@ type integrateDeps struct {
 	readlink  func(string) (string, error)
 	lstatMode func(string) (os.FileMode, error)
 
-	// Gitignore step (ADR 0010 global-config sub-consent). gitConfig reads a
-	// git config value (used read-only for core.excludesfile; git config is
-	// never mutated); getenv resolves environment variables (XDG_CONFIG_HOME)
-	// for git's default global ignore path.
-	gitConfig func(key string) (string, error)
-	getenv    func(string) string
-
 	// Dry-run mode: set DryRun=true to turn writeFile into a comparator.
 	// `installed` and `changed` are output fields filled in during the run.
 	DryRun    bool
@@ -100,14 +92,6 @@ func defaultIntegrateDeps() *integrateDeps {
 			}
 			return fi.Mode(), nil
 		},
-		gitConfig: func(key string) (string, error) {
-			out, err := exec.Command("git", "config", "--get", key).Output()
-			if err != nil {
-				return "", err
-			}
-			return strings.TrimSpace(string(out)), nil
-		},
-		getenv: os.Getenv,
 	}
 }
 
@@ -139,8 +123,6 @@ func withDryRun(base *integrateDeps) *integrateDeps {
 		userHomeDir: base.userHomeDir,
 		readFile:    base.readFile,
 		dataDir:     base.dataDir,
-		gitConfig:   base.gitConfig,
-		getenv:      base.getenv,
 		DryRun:      true,
 	}
 	// File-component refresh inspects the link installer's render tree and the
@@ -195,12 +177,6 @@ var integratePaneSkill bool
 // installed for the agent alongside the core status wiring.
 var integrateWorkloadSkills bool
 
-// integrateWorkloadGitignore is the --workload-gitignore component flag. When
-// set, the global-gitignore sub-step is applied (the thoughts/ ignore line is
-// appended to the resolved global excludes file). Its effect is global and
-// agent-independent; the agent argument only anchors the command form.
-var integrateWorkloadGitignore bool
-
 var integrateCmd = &cobra.Command{
 	Use:   "integrate [agent]",
 	Short: "Install pop status wiring for a coding agent",
@@ -228,9 +204,8 @@ skills) are separate opt-ins selected with component flags:
 Run in a terminal with no component flags to launch the interactive
 Integration wizard: it installs the core status wiring (no prompt), then
 walks one explained y/n step per supported opt-in component — the pane skill
-and the workload planning skills, with a global-gitignore sub-step inside the
-workload step. Declining any step skips it; re-run anytime to add or remove
-components.
+and the workload planning skills. Declining any step skips it; re-run anytime
+to add or remove components.
 
 Component flags select an exact set: the status wiring plus exactly the
 requested components, with no prompting. A non-interactive run with no
@@ -273,9 +248,8 @@ after copying a new binary into place.`,
 // integrateRemoveCmd is the removal form of integrate: `pop integrate remove
 // <agent> [component...]`. With no component identifiers it removes every pop
 // component currently installed for the agent; with identifiers it removes
-// exactly that set. Only pop-owned artifacts are deleted (ADR 0011): the
-// workload-gitignore step is report-only, and a same-named entry pop does not
-// own is left untouched and reported.
+// exactly that set. Only pop-owned artifacts are deleted (ADR 0011): a
+// same-named entry pop does not own is left untouched and reported.
 var integrateRemoveCmd = &cobra.Command{
 	Use:   "remove <agent> [component...]",
 	Short: "Remove pop integration components for an agent",
@@ -283,15 +257,13 @@ var integrateRemoveCmd = &cobra.Command{
 
 With no component identifiers, every pop component currently installed for the
 agent is removed. With identifiers, exactly that set is removed. Valid
-identifiers: status-wiring, pane-skill, workload-skills, workload-gitignore.
+identifiers: status-wiring, pane-skill, workload-skills.
 
 Removal only ever deletes artifacts pop owns: status wiring strips pop's hook
 entries while preserving unrelated hooks (claude, codex, cursor) or deletes the
 pop-owned status-sync extension (pi, opencode); file-based skills delete only
 pop-owned symlinks and their render-tree entries — a same-named entry pop does
-not own is left untouched and reported. The workload-gitignore step is
-report-only: pop never edits your global git excludes file, it prints the line
-to remove manually.`,
+not own is left untouched and reported.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
 			return fmt.Errorf("requires an agent name (claude, codex, pi, opencode, or cursor)")
@@ -315,8 +287,6 @@ func init() {
 		"Install the pane skill (lets the agent drive tmux panes) alongside the status wiring")
 	integrateCmd.Flags().BoolVar(&integrateWorkloadSkills, "workload-skills", false,
 		"Install the workload planning skills (grill-with-docs, to-prd, to-issues) alongside the status wiring")
-	integrateCmd.Flags().BoolVar(&integrateWorkloadGitignore, "workload-gitignore", false,
-		"Append the thoughts/ line to your global git excludes file (global effect; never mutates git config)")
 	integrateCmd.AddCommand(integrateRemoveCmd)
 	rootCmd.AddCommand(integrateCmd)
 }
@@ -331,9 +301,6 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 	}
 	if integrateWorkloadSkills {
 		optins = append(optins, ComponentWorkloadSkills)
-	}
-	if integrateWorkloadGitignore {
-		optins = append(optins, ComponentWorkloadGitignore)
 	}
 	return runIntegrateComponents(defaultIntegrateDeps(), args[0], optins, stdinIsInteractive())
 }
@@ -359,8 +326,7 @@ func stdinIsInteractive() bool {
 //     nothing lands by surprise default.
 //   - Without flags, interactively: run the Integration wizard — install the
 //     core status wiring, then walk one explained y/n step per supported opt-in
-//     component (gitignore as a sub-step of the workload step), closing with a
-//     note that re-running adds or removes components.
+//     component, closing with a note that re-running adds or removes components.
 func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID, interactive bool) error {
 	agent = strings.ToLower(agent)
 
@@ -408,8 +374,8 @@ func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID
 	}
 	for _, id := range optins {
 		comp, _ := lookupComponent(id)
-		// A component carrying its own install func (the gitignore step) is
-		// applied directly; file-based components go through the link installer.
+		// A component carrying its own install func is applied directly;
+		// file-based components go through the link installer.
 		if comp.install != nil {
 			if err := comp.install(d, home, agent); err != nil {
 				return err
@@ -923,8 +889,7 @@ func updateStaleIntegrations(newDry, newReal func() *integrateDeps) integrationU
 // surface. A component not supported by the agent is skipped silently (no
 // warning) — the same treatment a conflict or an absent component gets. The
 // status wiring and the file-based skills are refreshed through their own
-// staleness seams; the gitignore step has no binary-versioned content and so
-// is never refreshed (it is configured-or-not, never stale).
+// staleness seams.
 func refreshComponent(newDry, newReal func() *integrateDeps, agent string, id ComponentID) (updated bool, warning string) {
 	comp, ok := lookupComponent(id)
 	if !ok {
@@ -936,8 +901,6 @@ func refreshComponent(newDry, newReal func() *integrateDeps, agent string, id Co
 	switch id {
 	case ComponentStatusWiring:
 		return refreshStatusWiring(newDry, newReal, agent)
-	case ComponentWorkloadGitignore:
-		return false, "" // no versioned content: never stale, never added by refresh
 	default:
 		return refreshFileComponent(newDry, newReal, agent, id)
 	}

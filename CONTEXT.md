@@ -85,7 +85,7 @@ The per-agent wiring that makes a coding agent report pane status into the **Mon
 _Avoid_: Skill install, setup, framework
 
 **Integration component**:
-An individually consented unit `pop integrate` can install for one agent: the status wiring (core), the **Pane skill**, or the **Workload planning skills** with their gitignore step. Running integrate implies consent to the status wiring only; every other component is an explicit per-component opt-in.
+An individually consented unit `pop integrate` can install for one agent: the status wiring (core), the **Pane skill**, or the **Workload planning skills**. Running integrate implies consent to the status wiring only; every other component is an explicit per-component opt-in.
 _Avoid_: Bundle, default install
 
 **Integration wizard**:

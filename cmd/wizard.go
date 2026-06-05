@@ -14,9 +14,8 @@ import (
 // `pop integrate <agent>`: a re-entrant, step-by-step consent flow over the
 // component catalog. It installs the core status wiring with no prompt (consent
 // is implied by running the command), then walks one explained y/n step per
-// opt-in component in catalog order, with the global-gitignore sub-step nested
-// inside the workload step. Declining any step skips it and the wizard
-// continues. Each step first reports the component's current state; conflict
+// opt-in component in catalog order. Declining any step skips it and the
+// wizard continues. Each step first reports the component's current state; conflict
 // and not-supported states print their report instead of prompting. The wizard
 // closes with a note that re-running adds or removes components at any time.
 
@@ -63,11 +62,10 @@ func runIntegrateWizard(d *integrateDeps, home, agent string) error {
 		return err
 	}
 
-	// Opt-in steps in catalog order. The gitignore step is a sub-step of the
-	// workload step, so it is skipped at the top level and run from there.
+	// Opt-in steps in catalog order.
 	for _, comp := range integrationCatalog {
 		switch comp.id {
-		case ComponentStatusWiring, ComponentWorkloadGitignore:
+		case ComponentStatusWiring:
 			continue
 		case ComponentPaneSkill:
 			if err := wizardFileComponentStep(d, home, agent, in, comp.id, "Pane skill", paneSkillExplanation); err != nil {
@@ -75,10 +73,6 @@ func runIntegrateWizard(d *integrateDeps, home, agent string) error {
 			}
 		case ComponentWorkloadSkills:
 			if err := wizardFileComponentStep(d, home, agent, in, comp.id, "Workload planning skills", workloadSkillsExplanation); err != nil {
-				return err
-			}
-			// Global-gitignore sub-step, nested inside the workload step.
-			if err := wizardGitignoreStep(d, home, agent, in); err != nil {
 				return err
 			}
 		}
@@ -145,37 +139,6 @@ func wizardFileComponentStep(d *integrateDeps, home, agent string, in *bufio.Rea
 		return nil
 	}
 	return installFileComponent(d, home, id, agent)
-}
-
-// wizardGitignoreStep runs the global-gitignore sub-step inside the workload
-// step. It shows whether the line is already configured (idempotent skip),
-// otherwise previews the exact line and target file before asking y/n.
-func wizardGitignoreStep(d *integrateDeps, home, agent string, in *bufio.Reader) error {
-	out := d.stdout
-	configured, target, err := gitignoreConfigured(d)
-	if err != nil {
-		return err
-	}
-	if out != nil {
-		fmt.Fprintf(out, "\n  Workload artifacts gitignore (sub-step)\n")
-	}
-	if configured {
-		fmt.Fprintf(orDiscard(out), "  Currently: %q already configured in %s — skipping.\n", gitignoreLine, target)
-		return nil
-	}
-	if out != nil {
-		fmt.Fprintf(out, "  Currently: not configured.\n")
-		fmt.Fprintf(out, "  Appends the line:\n    %s\n  to your global git excludes file (git config is never modified):\n    %s\n", gitignoreLine, target)
-	}
-	yes, err := promptYesNo(in, out, "Append the workload gitignore line?")
-	if err != nil {
-		return err
-	}
-	if !yes {
-		fmt.Fprintf(orDiscard(out), "  Skipped.\n")
-		return nil
-	}
-	return installGitignore(d, home, agent)
 }
 
 // wizardFileComponentState computes the displayable state of a file-based

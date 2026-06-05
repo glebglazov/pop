@@ -15,8 +15,6 @@ import (
 //   - Status wiring strips pop's hook entries from the agent's settings while
 //     preserving unrelated hooks (claude/codex/cursor), or deletes the
 //     pop-owned status-sync extension file (pi/opencode).
-//   - The workload-gitignore step is report-only: pop never edits a shared
-//     global config file out from under the user.
 //   - File-based skill components delete only pop-owned symlinks and their
 //     render-tree entries; a same-named entry pop does not own is left
 //     untouched and reported.
@@ -24,8 +22,6 @@ func removeComponent(d *integrateDeps, home string, id ComponentID, agent string
 	switch id {
 	case ComponentStatusWiring:
 		return removeStatusWiring(d, home, agent)
-	case ComponentWorkloadGitignore:
-		return reportGitignoreRemoval(d)
 	default:
 		return removeFileComponent(d, home, id, agent)
 	}
@@ -217,9 +213,6 @@ func componentInstalled(d *integrateDeps, home string, id ComponentID, agent str
 	switch id {
 	case ComponentStatusWiring:
 		return statusWiringInstalled(d, home, agent)
-	case ComponentWorkloadGitignore:
-		configured, _, err := gitignoreConfigured(d)
-		return configured, err
 	default:
 		return fileComponentInstalled(d, home, id, agent)
 	}

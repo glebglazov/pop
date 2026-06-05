@@ -11,10 +11,9 @@ import (
 // not a refactor.
 func TestCatalog_StableIdentifiers(t *testing.T) {
 	want := map[ComponentID]bool{
-		"status-wiring":      true,
-		"pane-skill":         true,
-		"workload-skills":    true,
-		"workload-gitignore": true,
+		"status-wiring":   true,
+		"pane-skill":      true,
+		"workload-skills": true,
 	}
 
 	got := map[ComponentID]bool{}
@@ -46,9 +45,6 @@ func TestCatalog_StableIdentifiers(t *testing.T) {
 	if ComponentWorkloadSkills != "workload-skills" {
 		t.Errorf("ComponentWorkloadSkills = %q, want workload-skills", ComponentWorkloadSkills)
 	}
-	if ComponentWorkloadGitignore != "workload-gitignore" {
-		t.Errorf("ComponentWorkloadGitignore = %q, want workload-gitignore", ComponentWorkloadGitignore)
-	}
 }
 
 // TestCatalog_SupportMatrix asserts the per-agent support matrix: codex hosts
@@ -75,10 +71,6 @@ func TestCatalog_SupportMatrix(t *testing.T) {
 			id:        ComponentWorkloadSkills,
 			supported: []string{"claude", "pi", "cursor"},
 			denied:    []string{"opencode", "codex"},
-		},
-		{
-			id:        ComponentWorkloadGitignore,
-			supported: allAgents,
 		},
 	}
 
