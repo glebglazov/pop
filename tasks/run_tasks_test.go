@@ -287,6 +287,129 @@ func TestRunTaskSetInteractiveHITLGateDefaultGetsAgentAssistance(t *testing.T) {
 	assertTaskDone(t, env.execFixture(), "02-hitl")
 }
 
+func TestRunTaskSetInteractiveHITLGateAssistanceStartFailureReprompts(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open", BlockedBy: []string{"01-a"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+	runner := &configurableHITLAssistanceRunner{t: t, runErr: fmt.Errorf("exec: claude: not found")}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n\n4\n")
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+	out := buf.String()
+	if !strings.Contains(out, "Could not start HITL assistance: exec: claude: not found") {
+		t.Fatalf("missing start-failure message:\n%s", out)
+	}
+	if strings.Count(out, "Choose [2]:") < 2 {
+		t.Fatalf("start failure did not return to gate prompt:\n%s", out)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("assistance calls = %d, want 1", runner.calls)
+	}
+	assertTaskOpen(t, env.execFixture(), "02-hitl")
+}
+
+func TestRunTaskSetInteractiveHITLGateAssistanceClearedGateContinuesDraining(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open", BlockedBy: []string{"01-a"}},
+		{ID: "03-b", File: "03-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"02-hitl"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+	runner := &configurableHITLAssistanceRunner{t: t, tasksDir: env.tasksDir, onRun: func(t *testing.T, tasksDir string) {
+		setTaskStatus(t, tasksDir, "02-hitl", "skipped", nil)
+	}}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n\n")
+
+	result, err := RunTaskSetWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDeferred || len(result.Completed) != 2 {
+		t.Fatalf("result = %#v, want deferred with two AFK completions", result)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("assistance calls = %d, want 1", runner.calls)
+	}
+	if runner.attendedCalls != 1 || runner.runCalls != 0 {
+		t.Fatalf("runner calls: attended=%d run=%d, want attended only", runner.attendedCalls, runner.runCalls)
+	}
+	if runner.name != "claude" || len(runner.args) != 1 || !strings.Contains(runner.args[0], "You are assisting a human at a HITL gate") {
+		t.Fatalf("assistance command = %s %v", runner.name, runner.args)
+	}
+	if !strings.Contains(buf.String(), "━━ Running task demo/03-b") {
+		t.Fatalf("did not continue draining after cleared gate:\n%s", buf.String())
+	}
+	assertTaskSkipped(t, env.execFixture(), "02-hitl")
+	assertTaskDone(t, env.execFixture(), "03-b")
+}
+
+func TestRunTaskSetInteractiveHITLGateAssistanceStillBlockedReprompts(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open", BlockedBy: []string{"01-a"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+	runner := &configurableHITLAssistanceRunner{t: t, tasksDir: env.tasksDir}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n\n4\n")
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+	out := buf.String()
+	if strings.Count(out, "Choose [2]:") < 2 {
+		t.Fatalf("still-blocked assistance did not return to gate prompt:\n%s", out)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("assistance calls = %d, want 1", runner.calls)
+	}
+	assertTaskOpen(t, env.execFixture(), "02-hitl")
+}
+
+func TestRunTaskSetInteractiveHITLGateAssistanceChangedStatusUsesNormalHandling(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open", BlockedBy: []string{"01-a"}},
+		{ID: "03-b", File: "03-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"02-hitl"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+	failedAfter := 1
+	runner := &configurableHITLAssistanceRunner{t: t, tasksDir: env.tasksDir, onRun: func(t *testing.T, tasksDir string) {
+		setTaskStatus(t, tasksDir, "02-hitl", "failed", &failedAfter)
+	}}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n\n")
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	out := buf.String()
+	if !strings.Contains(out, "FAILED") || !strings.Contains(out, "pop tasks open demo/02-hitl.md") {
+		t.Fatalf("normal failed-status handling did not apply:\n%s", out)
+	}
+	assertTaskFailed(t, env.execFixture(), "02-hitl", failedAfter)
+	assertTaskOpen(t, env.execFixture(), "03-b")
+}
+
 func TestRunTaskSetInteractiveHITLGateConfirmedCompletionContinuesDraining(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -845,6 +968,62 @@ func (r *hitlAssistanceRunner) Run(ctx context.Context, dir string, stdout, stde
 
 func (r *hitlAssistanceRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
 	return RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+}
+
+type configurableHITLAssistanceRunner struct {
+	t             *testing.T
+	tasksDir      string
+	calls         int
+	runCalls      int
+	attendedCalls int
+	name          string
+	args          []string
+	exitCode      int
+	runErr        error
+	onRun         func(*testing.T, string)
+}
+
+func (r *configurableHITLAssistanceRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	r.runCalls++
+	return r.run(name, args...)
+}
+
+func (r *configurableHITLAssistanceRunner) RunAttended(ctx context.Context, dir string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	r.attendedCalls++
+	return r.run(name, args...)
+}
+
+func (r *configurableHITLAssistanceRunner) run(name string, args ...string) (int, error) {
+	r.calls++
+	r.name = name
+	r.args = append([]string{}, args...)
+	if r.runErr != nil {
+		return 1, r.runErr
+	}
+	if r.onRun != nil {
+		r.onRun(r.t, r.tasksDir)
+	}
+	return r.exitCode, nil
+}
+
+func (r *configurableHITLAssistanceRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	return RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+}
+
+func setTaskStatus(t *testing.T, tasksDir, taskID, status string, failedAfter *int) {
+	t.Helper()
+	m := LoadManifest(DefaultDeps(), "demo", filepath.Join(tasksDir, "demo", "index.json"))
+	for i := range m.Tasks {
+		if m.Tasks[i].ID == taskID {
+			m.Tasks[i].Status = status
+			m.Tasks[i].FailedAfter = failedAfter
+			if err := WriteManifestAtomic(DefaultDeps(), m); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	t.Fatalf("task %s not found", taskID)
 }
 
 func writeSequentialFakeAgent(t *testing.T, root string, steps []fakeAgentStep) string {

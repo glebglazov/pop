@@ -334,12 +334,13 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, yes bool, a
 			return true, nil
 		case hitlGateAssist:
 			fmt.Fprintf(outputFor(out), "Starting HITL assistance: %s\n", invocation.Display)
-			exitCode, err := d.Runner.Run(context.Background(), runtimePath, out, out, invocation.Command.Name, invocation.Command.Args...)
+			exitCode, err := runHITLAssistanceCommand(d, reader, runtimePath, out, invocation)
 			if err != nil {
-				return true, exitErr(ExitOperational, "HITL assistance: %v", err)
+				fmt.Fprintf(outputFor(out), "Could not start HITL assistance: %v\n", err)
+				continue
 			}
 			if exitCode != 0 {
-				return true, exitErr(ExitOperational, "HITL assistance exited with status %d", exitCode)
+				fmt.Fprintf(outputFor(out), "HITL assistance exited with status %d; refreshing Task set.\n", exitCode)
 			}
 			afterRefresh, err := RefreshWith(d, definitionPath, statePath)
 			if err != nil {
@@ -374,6 +375,13 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, yes bool, a
 			return false, nil
 		}
 	}
+}
+
+func runHITLAssistanceCommand(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, invocation *AgentAssistanceInvocation) (int, error) {
+	if attended, ok := d.Runner.(AttendedCommandRunner); ok {
+		return attended.RunAttended(context.Background(), runtimePath, stdin, out, out, invocation.Command.Name, invocation.Command.Args...)
+	}
+	return d.Runner.Run(context.Background(), runtimePath, out, out, invocation.Command.Name, invocation.Command.Args...)
 }
 
 func canPrompt(in io.Reader) bool {
