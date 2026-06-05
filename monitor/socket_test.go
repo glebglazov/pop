@@ -228,5 +228,7 @@ func (m *mockFS) ReadDir(string) ([]os.DirEntry, error)       { return nil, nil 
 func (m *mockFS) ReadFile(string) ([]byte, error)             { return nil, nil }
 func (m *mockFS) WriteFile(string, []byte, os.FileMode) error { return nil }
 func (m *mockFS) MkdirAll(string, os.FileMode) error          { return nil }
+func (m *mockFS) Rename(string, string) error                 { return nil }
+func (m *mockFS) RemoveAll(string) error                      { return nil }
 func (m *mockFS) DirFS(string) fs.FS                          { return nil }
 func (m *mockFS) EvalSymlinks(string) (string, error)         { return "", nil }

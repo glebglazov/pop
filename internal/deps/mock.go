@@ -35,6 +35,8 @@ type MockFileSystem struct {
 	ReadFileFunc     func(path string) ([]byte, error)
 	WriteFileFunc    func(path string, data []byte, perm os.FileMode) error
 	MkdirAllFunc     func(path string, perm os.FileMode) error
+	RenameFunc       func(oldpath, newpath string) error
+	RemoveAllFunc    func(path string) error
 	DirFSFunc        func(dir string) fs.FS
 	EvalSymlinksFunc func(path string) (string, error)
 }
@@ -91,6 +93,20 @@ func (m *MockFileSystem) WriteFile(path string, data []byte, perm os.FileMode) e
 func (m *MockFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	if m.MkdirAllFunc != nil {
 		return m.MkdirAllFunc(path, perm)
+	}
+	return nil
+}
+
+func (m *MockFileSystem) Rename(oldpath, newpath string) error {
+	if m.RenameFunc != nil {
+		return m.RenameFunc(oldpath, newpath)
+	}
+	return nil
+}
+
+func (m *MockFileSystem) RemoveAll(path string) error {
+	if m.RemoveAllFunc != nil {
+		return m.RemoveAllFunc(path)
 	}
 	return nil
 }

@@ -24,6 +24,10 @@ type FileSystem interface {
 	WriteFile(path string, data []byte, perm os.FileMode) error
 	// MkdirAll creates a directory and all parents
 	MkdirAll(path string, perm os.FileMode) error
+	// Rename moves oldpath to newpath
+	Rename(oldpath, newpath string) error
+	// RemoveAll removes path and any children it contains
+	RemoveAll(path string) error
 	// DirFS returns a filesystem rooted at the given directory
 	DirFS(dir string) fs.FS
 	// EvalSymlinks returns the path after evaluating any symbolic links
@@ -67,6 +71,14 @@ func (f *RealFileSystem) WriteFile(path string, data []byte, perm os.FileMode) e
 
 func (f *RealFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	return os.MkdirAll(path, perm)
+}
+
+func (f *RealFileSystem) Rename(oldpath, newpath string) error {
+	return os.Rename(oldpath, newpath)
+}
+
+func (f *RealFileSystem) RemoveAll(path string) error {
+	return os.RemoveAll(path)
 }
 
 func (f *RealFileSystem) DirFS(dir string) fs.FS {

@@ -89,6 +89,13 @@ var workloadShowPathCmd = &cobra.Command{
 	Run:   runWorkloadShowPath,
 }
 
+var workloadMigrateCmd = &cobra.Command{
+	Use:   "migrate",
+	Short: "Move legacy thoughts/issues Issue sets in this worktree into Workload storage",
+	Args:  cobra.NoArgs,
+	Run:   runWorkloadMigrate,
+}
+
 func init() {
 	rootCmd.AddCommand(workloadCmd)
 	workloadCmd.AddCommand(workloadStatusCmd)
@@ -99,6 +106,7 @@ func init() {
 	workloadCmd.AddCommand(workloadCompleteIssueCmd)
 	workloadCmd.AddCommand(workloadSkipIssueCmd)
 	workloadCmd.AddCommand(workloadShowPathCmd)
+	workloadCmd.AddCommand(workloadMigrateCmd)
 
 	workloadCmd.PersistentFlags().StringVar(&workloadProject, "project", "", "Select project by exact picker-visible name")
 	workloadCmd.PersistentFlags().StringVar(&workloadPath, "path", "", "Select project by path (normalized to git checkout root)")
@@ -316,6 +324,20 @@ func runWorkloadShowPathWith(d *workload.Deps, w io.Writer, issueSetID string) e
 		return err
 	}
 	fmt.Fprintln(w, result.Path)
+	return nil
+}
+
+func runWorkloadMigrate(cmd *cobra.Command, args []string) {
+	err := runWorkloadMigrateWith(workload.DefaultDeps(), os.Stdout)
+	handleWorkloadExit(err)
+}
+
+func runWorkloadMigrateWith(d *workload.Deps, w io.Writer) error {
+	result, err := workload.Migrate(d, "")
+	if err != nil {
+		return err
+	}
+	workload.RenderMigrate(w, result)
 	return nil
 }
 
