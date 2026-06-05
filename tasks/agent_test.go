@@ -546,7 +546,7 @@ func TestBuildAgentPromptAbsolutePaths(t *testing.T) {
 
 func TestBuildHITLAssistancePromptWithCompletedAFKWork(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "thoughts/issues/demo")
+	dir := filepath.Join(root, "tasks/demo")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -557,27 +557,27 @@ func TestBuildHITLAssistancePromptWithCompletedAFKWork(t *testing.T) {
 	m := &Manifest{
 		Stem: "demo",
 		Dir:  dir,
-		Issues: []Issue{
+		Tasks: []Task{
 			{ID: "01-afk", File: "01-afk.md", Title: "Build storage", Type: "AFK", Status: "done"},
 			{ID: "02-hitl", File: "02-hitl.md", Title: "Review storage", Type: "HITL", Status: "open", BlockedBy: []string{"01-afk"}},
 		},
 	}
 
-	prompt := BuildHITLAssistancePrompt(DefaultDeps(), "demo", m, m.Issues[1], "/runtime")
+	prompt := BuildHITLAssistancePrompt(DefaultDeps(), "demo", m, m.Tasks[1], "/runtime")
 	for _, want := range []string{
-		"Issue set: demo",
-		"Blocking HITL issue: 02-hitl - Review storage",
-		"Human-facing issue path: " + filepath.Join(dir, "02-hitl.md"),
+		"Task set: demo",
+		"Blocking HITL task: 02-hitl - Review storage",
+		"Human-facing task path: " + filepath.Join(dir, "02-hitl.md"),
 		"Check the AFK result.",
 		"- 01-afk [AFK done] Build storage",
 		"blocked_by: 01-afk",
 		"- 01-afk (01-afk.md, DONE at 2026-06-05T10:00:00Z)",
 		"implemented storage",
 		"verified tests",
-		"complete: the human marks the HITL issue done",
-		"defer: the human skips the HITL issue",
+		"complete: the human marks the HITL task done",
+		"defer: the human skips the HITL task",
 		"edit and rerun",
-		"exit without changing issue state",
+		"exit without changing task state",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
@@ -590,7 +590,7 @@ func TestBuildHITLAssistancePromptWithCompletedAFKWork(t *testing.T) {
 
 func TestBuildHITLAssistancePromptWithNoCompletedAFKWork(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "thoughts/issues/demo")
+	dir := filepath.Join(root, "tasks/demo")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -599,14 +599,14 @@ func TestBuildHITLAssistancePromptWithNoCompletedAFKWork(t *testing.T) {
 	m := &Manifest{
 		Stem: "demo",
 		Dir:  dir,
-		Issues: []Issue{
+		Tasks: []Task{
 			{ID: "01-hitl", File: "01-hitl.md", Title: "Decide", Type: "HITL", Status: "open"},
 		},
 	}
 
-	prompt := BuildHITLAssistancePrompt(DefaultDeps(), "demo", m, m.Issues[0], "")
+	prompt := BuildHITLAssistancePrompt(DefaultDeps(), "demo", m, m.Tasks[0], "")
 	for _, want := range []string{
-		"Issue set: demo",
+		"Task set: demo",
 		"Human choice.",
 		"No completed AFK work summary is available in progress.txt.",
 	} {
@@ -616,7 +616,7 @@ func TestBuildHITLAssistancePromptWithNoCompletedAFKWork(t *testing.T) {
 	}
 }
 
-func TestBuildHITLAssistancePromptWithUnreadableHITLIssueFile(t *testing.T) {
+func TestBuildHITLAssistancePromptWithUnreadableHITLTaskFile(t *testing.T) {
 	d := &Deps{FS: &deps.MockFileSystem{
 		ReadFileFunc: func(path string) ([]byte, error) {
 			return nil, os.ErrPermission
@@ -624,23 +624,23 @@ func TestBuildHITLAssistancePromptWithUnreadableHITLIssueFile(t *testing.T) {
 	}}
 	m := &Manifest{
 		Stem: "demo",
-		Dir:  "/issues/demo",
-		Issues: []Issue{
+		Dir:  "/tasks/demo",
+		Tasks: []Task{
 			{ID: "01-afk", File: "01-afk.md", Title: "Done", Type: "AFK", Status: "done"},
 			{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
 		},
 	}
 
-	prompt := BuildHITLAssistancePrompt(d, "demo", m, m.Issues[1], "/runtime")
+	prompt := BuildHITLAssistancePrompt(d, "demo", m, m.Tasks[1], "/runtime")
 	for _, want := range []string{
-		"Human-facing issue path: /issues/demo/02-hitl.md",
-		"Could not read /issues/demo/02-hitl.md",
-		"Proceed by inspecting the issue path manually",
+		"Human-facing task path: /tasks/demo/02-hitl.md",
+		"Could not read /tasks/demo/02-hitl.md",
+		"Proceed by inspecting the task path manually",
 		"No completed AFK work summary is available in progress.txt.",
 		"complete",
 		"defer",
 		"edit and rerun",
-		"exit without changing issue state",
+		"exit without changing task state",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q in prompt:\n%s", want, prompt)

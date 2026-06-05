@@ -1,6 +1,8 @@
 package tasks
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -183,6 +185,13 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					printTaskSetSummary(out, result)
 				}
 				if hitl := BlockingHITLTask(currentRefresh.Manifests[taskSetID]); hitl != nil {
+					handled, err := handleInteractiveHITLGate(d, out, opts.ConfirmIn, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, currentRefresh.Manifests[taskSetID], hitl)
+					if err != nil {
+						return nil, err
+					}
+					if handled {
+						continue
+					}
 					printHITLGateAdvice(d, out, taskSetID, currentRefresh.Manifests[taskSetID].Dir, hitl)
 				}
 				if result.BlockedReason != "" {
@@ -277,4 +286,156 @@ func printTaskSetSummary(w io.Writer, result *RunTaskSetResult) {
 		return
 	}
 	fmt.Fprintf(out, "Task set %s stopped after %d task(s)\n", result.TaskSetID, len(result.Completed))
+}
+
+type hitlGateAction int
+
+const (
+	hitlGateExit hitlGateAction = iota
+	hitlGateComplete
+	hitlGateAssist
+	hitlGateDefer
+)
+
+func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, yes bool, agentPreset, agentCmd, cwd, runtimePath, definitionPath, statePath, taskSetID string, m *Manifest, hitl *Task) (bool, error) {
+	if yes || !canPrompt(in) || m == nil || hitl == nil {
+		return false, nil
+	}
+	if in == nil {
+		in = os.Stdin
+	}
+
+	prompt := BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+	if err != nil {
+		return false, exitErr(ExitSetup, "%v", err)
+	}
+
+	reader := bufio.NewReader(in)
+	taskPath := taskPathHint(taskSetID, hitl.File)
+	for {
+		action, err := promptHITLGateAction(out, reader, taskSetID, hitl, invocation)
+		if err != nil {
+			return true, err
+		}
+		switch action {
+		case hitlGateComplete:
+			confirmed, err := confirmHITLGateAction(out, reader, "Complete task? [y/N]: ")
+			if err != nil {
+				return true, err
+			}
+			if !confirmed {
+				continue
+			}
+			if _, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPath}); err != nil {
+				return true, err
+			}
+			return true, nil
+		case hitlGateAssist:
+			fmt.Fprintf(outputFor(out), "Starting HITL assistance: %s\n", invocation.Display)
+			exitCode, err := d.Runner.Run(context.Background(), runtimePath, out, out, invocation.Command.Name, invocation.Command.Args...)
+			if err != nil {
+				return true, exitErr(ExitOperational, "HITL assistance: %v", err)
+			}
+			if exitCode != 0 {
+				return true, exitErr(ExitOperational, "HITL assistance exited with status %d", exitCode)
+			}
+			afterRefresh, err := RefreshWith(d, definitionPath, statePath)
+			if err != nil {
+				return true, exitErr(ExitOperational, "refresh after HITL assistance: %v", err)
+			}
+			afterManifest := afterRefresh.Manifests[taskSetID]
+			if BlockingHITLTask(afterManifest) == nil {
+				return true, nil
+			}
+			m = afterManifest
+			prompt = BuildHITLAssistancePrompt(d, taskSetID, m, *BlockingHITLTask(m), runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+			if err != nil {
+				return true, exitErr(ExitSetup, "%v", err)
+			}
+			hitl = BlockingHITLTask(m)
+		case hitlGateDefer:
+			confirmed, err := confirmHITLGateAction(out, reader, "Defer task? [y/N]: ")
+			if err != nil {
+				return true, err
+			}
+			if !confirmed {
+				continue
+			}
+			if _, err := SkipTaskWith(d, nil, nil, SkipTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPath}); err != nil {
+				return true, err
+			}
+			return true, nil
+		case hitlGateExit:
+			return false, nil
+		}
+	}
+}
+
+func canPrompt(in io.Reader) bool {
+	if _, ok := in.(NonInteractiveReader); ok {
+		return false
+	}
+	if in == nil {
+		return isInteractive(os.Stdin)
+	}
+	return in != os.Stdin || isInteractive(in)
+}
+
+func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string, hitl *Task, invocation *AgentAssistanceInvocation) (hitlGateAction, error) {
+	display := outputFor(out)
+	fmt.Fprintln(display)
+	display.line(ansiYellow, "Human-blocked: %s/%s needs human work before the set can continue.", taskSetID, hitl.ID)
+	fmt.Fprintln(display, "  1. Complete task")
+	fmt.Fprintln(display, "  2. Get agent assistance (default)")
+	if invocation != nil {
+		fmt.Fprintf(display, "     %s\n", invocation.Display)
+		if invocation.Detail != "" {
+			fmt.Fprintf(display, "     %s\n", invocation.Detail)
+		}
+	}
+	fmt.Fprintln(display, "  3. Defer task")
+	fmt.Fprintln(display, "  4. Exit")
+	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [2]: "))
+
+	answer, err := readPromptLine(reader)
+	if err != nil {
+		return hitlGateExit, err
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "", "2":
+		return hitlGateAssist, nil
+	case "1":
+		return hitlGateComplete, nil
+	case "3":
+		return hitlGateDefer, nil
+	case "4", "q", "quit", "exit":
+		return hitlGateExit, nil
+	default:
+		fmt.Fprintln(display, "Choose 1, 2, 3, or 4.")
+		return promptHITLGateAction(out, reader, taskSetID, hitl, invocation)
+	}
+}
+
+func confirmHITLGateAction(out io.Writer, reader *bufio.Reader, prompt string) (bool, error) {
+	display := outputFor(out)
+	fmt.Fprintf(display, "%s", display.styled(ansiCyan, prompt))
+	answer, err := readPromptLine(reader)
+	if err != nil {
+		return false, err
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == "y" || answer == "yes", nil
+}
+
+func readPromptLine(reader *bufio.Reader) (string, error) {
+	answer, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", exitErr(ExitOperational, "read HITL gate selection: %v", err)
+	}
+	if err == io.EOF && answer == "" {
+		return "4", nil
+	}
+	return strings.TrimRight(answer, "\r\n"), nil
 }

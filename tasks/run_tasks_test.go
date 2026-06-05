@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -217,6 +218,118 @@ func TestRunTaskSetHITLGatePrintsRecoveryAdvice(t *testing.T) {
 	}
 	if strings.Index(out, "--- end ---") > strings.Index(out, "finish by hand") {
 		t.Fatalf("task body should precede recovery options:\n%s", out)
+	}
+}
+
+func TestRunTaskSetInteractiveHITLGateShowsNumberedMenu(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n4\n")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	out := buf.String()
+	for _, want := range []string{
+		"1. Complete task",
+		"2. Get agent assistance (default)",
+		"3. Defer task",
+		"4. Exit",
+		"Choose [2]:",
+		"claude <HITL assistance prompt>",
+		"using claude native attended assistance",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("menu missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunTaskSetInteractiveHITLGateDefaultGetsAgentAssistance(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
+	runner := &hitlAssistanceRunner{t: t, tasksDir: env.tasksDir}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n\n")
+
+	result, err := RunTaskSetWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("assistance calls = %d, want 1", runner.calls)
+	}
+	if runner.name != "claude" || len(runner.args) != 1 {
+		t.Fatalf("assistance command = %s %v", runner.name, runner.args)
+	}
+	if !strings.Contains(runner.args[0], "You are assisting a human at a HITL gate") {
+		t.Fatalf("assistance prompt missing HITL context:\n%s", runner.args[0])
+	}
+	if !result.TaskSetDone {
+		t.Fatalf("result = %#v, want TaskSetDone", result)
+	}
+	if !strings.Contains(buf.String(), "Starting HITL assistance: claude <HITL assistance prompt>") {
+		t.Fatalf("missing assistance start detail:\n%s", buf.String())
+	}
+	assertTaskDone(t, env.execFixture(), "02-hitl")
+}
+
+func TestRunTaskSetHITLGateNonInteractiveKeepsAdvice(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
+	opts.ConfirmIn = NonInteractiveReader{}
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	out := buf.String()
+	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "Choose [2]:") {
+		t.Fatalf("non-interactive run prompted:\n%s", out)
+	}
+	if !strings.Contains(out, "Human-blocked: demo/02-hitl") || !strings.Contains(out, "pop tasks complete demo/02-hitl.md") {
+		t.Fatalf("missing HITL advice:\n%s", out)
+	}
+}
+
+func TestRunTaskSetHITLGateYesKeepsAdvice(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("2\n")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	out := buf.String()
+	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "Choose [2]:") {
+		t.Fatalf("--yes run prompted:\n%s", out)
+	}
+	if !strings.Contains(out, "Human-blocked: demo/02-hitl") || !strings.Contains(out, "pop tasks skip demo/02-hitl.md") {
+		t.Fatalf("missing HITL advice:\n%s", out)
 	}
 }
 
@@ -593,6 +706,35 @@ func (e *runTaskSetFixture) runTaskSetOpts(yes bool, agentCmd string, out io.Wri
 type fakeAgentStep struct {
 	summary  string
 	exitCode int
+}
+
+type hitlAssistanceRunner struct {
+	t        *testing.T
+	tasksDir string
+	calls    int
+	name     string
+	args     []string
+}
+
+func (r *hitlAssistanceRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	r.calls++
+	r.name = name
+	r.args = append([]string{}, args...)
+	m := LoadManifest(DefaultDeps(), "demo", filepath.Join(r.tasksDir, "demo", "index.json"))
+	for i := range m.Tasks {
+		if m.Tasks[i].ID == "02-hitl" {
+			m.Tasks[i].Status = "done"
+		}
+	}
+	if err := WriteManifestAtomic(DefaultDeps(), m); err != nil {
+		r.t.Fatal(err)
+	}
+	fmt.Fprintln(stdout, "assistance complete")
+	return 0, nil
+}
+
+func (r *hitlAssistanceRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	return RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
 }
 
 func writeSequentialFakeAgent(t *testing.T, root string, steps []fakeAgentStep) string {
