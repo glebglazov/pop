@@ -287,6 +287,116 @@ func TestRunTaskSetInteractiveHITLGateDefaultGetsAgentAssistance(t *testing.T) {
 	assertTaskDone(t, env.execFixture(), "02-hitl")
 }
 
+func TestRunTaskSetInteractiveHITLGateConfirmedCompletionContinuesDraining(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open", BlockedBy: []string{"01-a"}},
+		{ID: "03-b", File: "03-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"02-hitl"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n1\ny\n")
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 2 {
+		t.Fatalf("result = %#v, want done with two AFK completions", result)
+	}
+	out := buf.String()
+	for _, want := range []string{"Complete task? [y/N]:", "✓ Completed task demo/02-hitl", "━━ Running task demo/03-b"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
+	assertTaskDone(t, env.execFixture(), "02-hitl")
+	assertTaskDone(t, env.execFixture(), "03-b")
+	assertProgressContains(t, env.execFixture(), "COMPLETE", "manually completed demo/02-hitl (was open)")
+}
+
+func TestRunTaskSetInteractiveHITLGateConfirmedDeferralContinuesDraining(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open", BlockedBy: []string{"01-a"}},
+		{ID: "03-b", File: "03-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"02-hitl"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n3\ny\n")
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDeferred || len(result.Completed) != 2 {
+		t.Fatalf("result = %#v, want deferred after two AFK completions", result)
+	}
+	out := buf.String()
+	for _, want := range []string{"Defer task? [y/N]:", "Skipped task demo/02-hitl", "━━ Running task demo/03-b", "Task set demo deferred: skipped 02-hitl"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
+	assertTaskSkipped(t, env.execFixture(), "02-hitl")
+	assertTaskDone(t, env.execFixture(), "03-b")
+	assertProgressContains(t, env.execFixture(), "SKIP", "skipped demo/02-hitl")
+}
+
+func TestRunTaskSetInteractiveHITLGateDeclinedCompletionLeavesStateUnchanged(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open", BlockedBy: []string{"01-a"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n1\nn\n4\n")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+	out := buf.String()
+	if strings.Count(out, "Choose [2]:") < 2 {
+		t.Fatalf("decline did not return to gate prompt:\n%s", out)
+	}
+	if strings.Contains(out, "✓ Completed task demo/02-hitl") {
+		t.Fatalf("declined completion rendered completion:\n%s", out)
+	}
+	assertTaskOpen(t, env.execFixture(), "02-hitl")
+	assertProgressNotContains(t, env.execFixture(), "COMPLETE")
+}
+
+func TestRunTaskSetInteractiveHITLGateDeclinedDeferralLeavesStateUnchanged(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open", BlockedBy: []string{"01-a"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n3\nno\n4\n")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+	out := buf.String()
+	if strings.Count(out, "Choose [2]:") < 2 {
+		t.Fatalf("decline did not return to gate prompt:\n%s", out)
+	}
+	if strings.Contains(out, "Skipped task demo/02-hitl") {
+		t.Fatalf("declined deferral rendered skip:\n%s", out)
+	}
+	assertTaskOpen(t, env.execFixture(), "02-hitl")
+	assertProgressNotContains(t, env.execFixture(), "SKIP")
+}
+
 func TestRunTaskSetHITLGateNonInteractiveKeepsAdvice(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},

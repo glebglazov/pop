@@ -707,6 +707,16 @@ func assertTaskOpen(t *testing.T, env *execFixture, taskID string) {
 	}
 }
 
+func assertTaskSkipped(t *testing.T, env *execFixture, taskID string) {
+	t.Helper()
+	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
+	for _, task := range m.Tasks {
+		if task.ID == taskID && task.Status != "skipped" {
+			t.Fatalf("task %s status = %q, want skipped", taskID, task.Status)
+		}
+	}
+}
+
 func assertTaskFailed(t *testing.T, env *execFixture, taskID string, failedAfter int) {
 	t.Helper()
 	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
@@ -734,6 +744,19 @@ func assertProgressContains(t *testing.T, env *execFixture, parts ...string) {
 	for _, part := range parts {
 		if !strings.Contains(string(data), part) {
 			t.Fatalf("progress missing %q:\n%s", part, data)
+		}
+	}
+}
+
+func assertProgressNotContains(t *testing.T, env *execFixture, parts ...string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(env.demoDir(), "progress.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range parts {
+		if strings.Contains(string(data), part) {
+			t.Fatalf("progress unexpectedly contains %q:\n%s", part, data)
 		}
 	}
 }

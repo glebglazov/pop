@@ -312,7 +312,6 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, yes bool, a
 	}
 
 	reader := bufio.NewReader(in)
-	taskPath := taskPathHint(taskSetID, hitl.File)
 	for {
 		action, err := promptHITLGateAction(out, reader, taskSetID, hitl, invocation)
 		if err != nil {
@@ -327,9 +326,11 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, yes bool, a
 			if !confirmed {
 				continue
 			}
-			if _, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPath}); err != nil {
+			result, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, hitl.File)})
+			if err != nil {
 				return true, err
 			}
+			RenderTaskComplete(out, result.TaskSetID, result.TaskID)
 			return true, nil
 		case hitlGateAssist:
 			fmt.Fprintf(outputFor(out), "Starting HITL assistance: %s\n", invocation.Display)
@@ -363,9 +364,11 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, yes bool, a
 			if !confirmed {
 				continue
 			}
-			if _, err := SkipTaskWith(d, nil, nil, SkipTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPath}); err != nil {
+			result, err := SkipTaskWith(d, nil, nil, SkipTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, hitl.File)})
+			if err != nil {
 				return true, err
 			}
+			RenderTaskSkip(out, result.TaskSetID, result.TaskID)
 			return true, nil
 		case hitlGateExit:
 			return false, nil
