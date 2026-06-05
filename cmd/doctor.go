@@ -49,8 +49,9 @@ type doctorDeps struct {
 	agentIntent               func() (*doctorAgentIntentReport, error)
 	explicitAgentContext      func() []string
 	agentExecutableAvailable  func(string) bool
-	resolveWorkloadRuntime    func() (string, error)
-	workloadArtifactIgnored   func(runtimePath, probePath string) (bool, error)
+	workloadStorageWritable   func() (string, error)
+	legacyIssueSets           func() ([]string, error)
+	orphanedWorkloadStorage   func() ([]workload.OrphanedStorage, error)
 }
 
 func defaultDoctorDeps() *doctorDeps {
@@ -98,8 +99,9 @@ func defaultDoctorDeps() *doctorDeps {
 		},
 		explicitAgentContext:     func() []string { return nil },
 		agentExecutableAvailable: doctorAgentExecutableAvailable,
-		resolveWorkloadRuntime:   defaultDoctorResolveWorkloadRuntime,
-		workloadArtifactIgnored:  defaultDoctorWorkloadArtifactIgnored,
+		workloadStorageWritable:  func() (string, error) { return workload.ProbeStorageWritable(workload.DefaultDeps()) },
+		legacyIssueSets:          func() ([]string, error) { return workload.LegacyIssueSetIDs(workload.DefaultDeps(), "") },
+		orphanedWorkloadStorage:  func() ([]workload.OrphanedStorage, error) { return workload.FindOrphanedStorage(workload.DefaultDeps()) },
 	}
 }
 
@@ -367,79 +369,88 @@ func doctorPaneChecks(d *doctorDeps) []doctorCheck {
 	return checks
 }
 
-const doctorWorkloadIgnoreProbe = "thoughts/.pop-workload-doctor-probe"
-
+// doctorWorkloadChecks reports Workload readiness for storage that lives in pop's
+// data dir rather than the repository tree (ADR 0012): the workloads data dir is
+// writable, no legacy in-tree Issue sets remain in this worktree, and no Workload
+// storage has been orphaned by a vanished repository. Orphan reporting is
+// informational only — Doctor never deletes or modifies storage.
 func doctorWorkloadChecks(d *doctorDeps) []doctorCheck {
-	runtimePath, err := d.resolveWorkloadRuntime()
-	if err != nil {
-		return []doctorCheck{
-			{
-				label:  "git runtime checkout resolved",
-				status: doctorStatusBlocked,
-				detail: fmt.Sprintf("no git runtime checkout resolved from command context: %v", err),
-			},
-			{
-				label:  "workload artifact ignore coverage",
-				status: doctorStatusNA,
-				detail: "not assessed because no git runtime checkout was resolved",
-			},
-		}
-	}
-
-	checks := []doctorCheck{{
-		label:  "git runtime checkout resolved",
-		status: doctorStatusOK,
-		detail: runtimePath,
-	}}
-
-	ignored, err := d.workloadArtifactIgnored(runtimePath, doctorWorkloadIgnoreProbe)
-	method := fmt.Sprintf("git check-ignore --quiet -- %s", doctorWorkloadIgnoreProbe)
-	if err != nil {
-		checks = append(checks, doctorCheck{
-			label:  "workload artifact ignore coverage",
-			status: doctorStatusBlocked,
-			detail: fmt.Sprintf("%s failed in %s: %v", method, runtimePath, err),
-		})
-		return checks
-	}
-	if ignored {
-		checks = append(checks, doctorCheck{
-			label:  "workload artifact ignore coverage",
-			status: doctorStatusOK,
-			detail: fmt.Sprintf("effective Git ignore covers representative artifact %q via %s", doctorWorkloadIgnoreProbe, method),
-		})
-		return checks
-	}
-
-	checks = append(checks, doctorCheck{
-		label:      "workload artifact ignore coverage",
-		status:     doctorStatusPartial,
-		detail:     fmt.Sprintf("effective Git ignore does not cover representative artifact %q; add %s to an effective Git ignore source", doctorWorkloadIgnoreProbe, gitignoreLine),
-		nextAction: "add thoughts/ to .gitignore, .git/info/exclude, or run pop integrate claude --workload-gitignore",
-	})
+	checks := []doctorCheck{doctorWorkloadStorageWritableCheck(d)}
+	checks = append(checks, doctorWorkloadLegacyCheck(d))
+	checks = append(checks, doctorWorkloadOrphanCheck(d))
 	return checks
 }
 
-func defaultDoctorResolveWorkloadRuntime() (string, error) {
-	d := workload.DefaultDeps()
-	resolved, err := workload.ResolvePathsWith(d, workloadProjectDeps(), workloadConfigLoad, workloadResolveInput())
+func doctorWorkloadStorageWritableCheck(d *doctorDeps) doctorCheck {
+	dir, err := d.workloadStorageWritable()
 	if err != nil {
-		return "", err
+		return doctorCheck{
+			label:  "workload storage writable",
+			status: doctorStatusBlocked,
+			detail: fmt.Sprintf("cannot create or write beneath workloads data dir: %v", err),
+		}
 	}
-	return workload.ResolveRuntimePathWith(d, resolved.ProjectPath, workloadRuntimePath)
+	return doctorCheck{
+		label:  "workload storage writable",
+		status: doctorStatusOK,
+		detail: fmt.Sprintf("pop can create and write beneath %s", dir),
+	}
 }
 
-func defaultDoctorWorkloadArtifactIgnored(runtimePath, probePath string) (bool, error) {
-	cmd := exec.Command("git", "-C", runtimePath, "check-ignore", "--quiet", "--", probePath)
-	err := cmd.Run()
-	if err == nil {
-		return true, nil
+func doctorWorkloadLegacyCheck(d *doctorDeps) doctorCheck {
+	legacy, err := d.legacyIssueSets()
+	switch {
+	case err != nil:
+		return doctorCheck{
+			label:  "legacy in-tree Issue sets",
+			status: doctorStatusNA,
+			detail: fmt.Sprintf("not assessed: %v", err),
+		}
+	case len(legacy) > 0:
+		return doctorCheck{
+			label:      "legacy in-tree Issue sets",
+			status:     doctorStatusPartial,
+			detail:     fmt.Sprintf("%d legacy Issue set(s) under thoughts/issues/ in this worktree: %s", len(legacy), strings.Join(legacy, ", ")),
+			nextAction: "pop workload migrate",
+		}
+	default:
+		return doctorCheck{
+			label:  "legacy in-tree Issue sets",
+			status: doctorStatusOK,
+			detail: "no legacy thoughts/issues Issue sets in this worktree",
+		}
 	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-		return false, nil
+}
+
+func doctorWorkloadOrphanCheck(d *doctorDeps) doctorCheck {
+	orphans, err := d.orphanedWorkloadStorage()
+	switch {
+	case err != nil:
+		return doctorCheck{
+			label:  "orphaned workload storage",
+			status: doctorStatusNA,
+			detail: fmt.Sprintf("not assessed: %v", err),
+		}
+	case len(orphans) > 0:
+		var lines []string
+		for _, o := range orphans {
+			lines = append(lines, fmt.Sprintf("%s (repository %s no longer exists)", o.StorageDir, o.RepositoryPath))
+		}
+		// N/A keeps orphan reporting informational: it never drives a healthy
+		// repository's Workload family below OK. Doctor only reports orphans —
+		// it never deletes storage, and no GC exists.
+		return doctorCheck{
+			label:  "orphaned workload storage",
+			status: doctorStatusNA,
+			detail: fmt.Sprintf("%d orphaned storage director(ies) (report-only, never deleted): %s", len(orphans), strings.Join(lines, "; ")),
+		}
+	default:
+		return doctorCheck{
+			label:  "orphaned workload storage",
+			status: doctorStatusOK,
+			detail: "no orphaned workload storage detected",
+		}
 	}
-	return false, err
 }
 
 func defaultPaneSessionAddressable() (string, error) {

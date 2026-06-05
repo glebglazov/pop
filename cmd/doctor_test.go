@@ -12,6 +12,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/workload"
 )
 
 // readOnlyDoctorDeps wires a doctorDeps over a fakeFS with injectable core
@@ -60,18 +61,11 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 		},
 		explicitAgentContext:     func() []string { return nil },
 		agentExecutableAvailable: func(string) bool { return false },
-		resolveWorkloadRuntime: func() (string, error) {
-			return "/repo/app", nil
+		workloadStorageWritable: func() (string, error) {
+			return "/data/pop/workloads", nil
 		},
-		workloadArtifactIgnored: func(runtimePath, probePath string) (bool, error) {
-			if runtimePath != "/repo/app" {
-				t.Fatalf("workload ignore probe runtime = %q, want /repo/app", runtimePath)
-			}
-			if !strings.HasPrefix(probePath, "thoughts/") {
-				t.Fatalf("workload ignore probe path = %q, want path under thoughts/", probePath)
-			}
-			return true, nil
-		},
+		legacyIssueSets:         func() ([]string, error) { return nil, nil },
+		orphanedWorkloadStorage: func() ([]workload.OrphanedStorage, error) { return nil, nil },
 	}
 }
 
@@ -125,15 +119,15 @@ func runDoctorGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func workloadIgnoreCheck(t *testing.T, report *doctorReport) doctorCheck {
+func workloadCheck(t *testing.T, report *doctorReport, label string) doctorCheck {
 	t.Helper()
 	family, ok := familyByCommand(report, "pop workload")
 	if !ok {
 		t.Fatalf("missing pop workload family")
 	}
-	check, ok := checkByLabel(family, "workload artifact ignore coverage")
+	check, ok := checkByLabel(family, label)
 	if !ok {
-		t.Fatalf("missing workload artifact ignore coverage check")
+		t.Fatalf("missing %q check", label)
 	}
 	return check
 }
@@ -660,14 +654,44 @@ func TestDoctorWorktreeReadinessBlocksOutsideGit(t *testing.T) {
 	}
 }
 
-func TestDoctorWorkloadBlocksOutsideGitAndIgnoreCoverageIsNA(t *testing.T) {
+func TestDoctorWorkloadHealthyStorageIsOK(t *testing.T) {
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-	d.resolveWorkloadRuntime = func() (string, error) {
-		return "", errors.New("runtime path \"/tmp/outside\" is not a git checkout")
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	d.workloadArtifactIgnored = func(string, string) (bool, error) {
-		t.Fatal("ignore coverage should not be probed without a git runtime checkout")
-		return false, nil
+	family, ok := familyByCommand(report, "pop workload")
+	if !ok {
+		t.Fatalf("missing pop workload family")
+	}
+	if family.status != doctorStatusOK {
+		t.Fatalf("workload status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+	}
+
+	writable := workloadCheck(t, report, "workload storage writable")
+	if writable.status != doctorStatusOK {
+		t.Fatalf("writable status = %s, want %s", writable.status, doctorStatusOK)
+	}
+	if !strings.Contains(writable.detail, "/data/pop/workloads") {
+		t.Fatalf("writable detail should name the data dir: %q", writable.detail)
+	}
+
+	legacy := workloadCheck(t, report, "legacy in-tree Issue sets")
+	if legacy.status != doctorStatusOK {
+		t.Fatalf("legacy status = %s, want %s", legacy.status, doctorStatusOK)
+	}
+
+	orphan := workloadCheck(t, report, "orphaned workload storage")
+	if orphan.status != doctorStatusOK {
+		t.Fatalf("orphan status = %s, want %s", orphan.status, doctorStatusOK)
+	}
+}
+
+func TestDoctorWorkloadStorageUnwritableBlocks(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.workloadStorageWritable = func() (string, error) {
+		return "", errors.New("write beneath workloads data dir /data/pop/workloads: permission denied")
 	}
 
 	report, err := buildDoctorReport(d)
@@ -681,124 +705,20 @@ func TestDoctorWorkloadBlocksOutsideGitAndIgnoreCoverageIsNA(t *testing.T) {
 	if family.status != doctorStatusBlocked {
 		t.Fatalf("workload status = %s, want %s", family.status, doctorStatusBlocked)
 	}
-	if !strings.Contains(family.reason, "no git runtime checkout resolved") {
-		t.Fatalf("blocked reason should explain missing git runtime: %q", family.reason)
+	check := workloadCheck(t, report, "workload storage writable")
+	if check.status != doctorStatusBlocked {
+		t.Fatalf("writable status = %s, want %s", check.status, doctorStatusBlocked)
 	}
-	check := workloadIgnoreCheck(t, report)
-	if check.status != doctorStatusNA {
-		t.Fatalf("ignore coverage status = %s, want %s", check.status, doctorStatusNA)
-	}
-	if strings.Contains(check.detail, "missing") || strings.Contains(check.detail, "not cover") {
-		t.Fatalf("outside-git ignore coverage should not report a missing-rule false positive: %q", check.detail)
+	if !strings.Contains(check.detail, "cannot create or write") || !strings.Contains(check.detail, "permission denied") {
+		t.Fatalf("writable failure should explain the cause: %q", check.detail)
 	}
 }
 
-func TestDoctorWorkloadEffectiveIgnoreCoverageSources(t *testing.T) {
-	tests := []struct {
-		name  string
-		setup func(t *testing.T, repo string)
-	}{
-		{
-			name: "configured global excludes",
-			setup: func(t *testing.T, repo string) {
-				excludes := filepath.Join(t.TempDir(), "global-ignore")
-				if err := os.WriteFile(excludes, []byte("thoughts/\n"), 0o644); err != nil {
-					t.Fatalf("write global excludes: %v", err)
-				}
-				runDoctorGit(t, repo, "config", "core.excludesfile", excludes)
-			},
-		},
-		{
-			name: "git info exclude",
-			setup: func(t *testing.T, repo string) {
-				if err := os.WriteFile(filepath.Join(repo, ".git", "info", "exclude"), []byte("thoughts/\n"), 0o644); err != nil {
-					t.Fatalf("write info exclude: %v", err)
-				}
-			},
-		},
-		{
-			name: "repository gitignore",
-			setup: func(t *testing.T, repo string) {
-				if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("thoughts/\n"), 0o644); err != nil {
-					t.Fatalf("write .gitignore: %v", err)
-				}
-			},
-		},
-		{
-			name: "default global ignore",
-			setup: func(t *testing.T, repo string) {
-				xdg := filepath.Join(t.TempDir(), "xdg")
-				target := filepath.Join(xdg, "git", "ignore")
-				if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-					t.Fatalf("mkdir default global ignore: %v", err)
-				}
-				if err := os.WriteFile(target, []byte("thoughts/\n"), 0o644); err != nil {
-					t.Fatalf("write default global ignore: %v", err)
-				}
-				t.Setenv("XDG_CONFIG_HOME", xdg)
-			},
-		},
-		{
-			name: "pop workload gitignore step",
-			setup: func(t *testing.T, repo string) {
-				d := &integrateDeps{
-					userHomeDir: func() (string, error) { return os.Getenv("HOME"), nil },
-					readFile:    os.ReadFile,
-					writeFile:   os.WriteFile,
-					mkdirAll:    os.MkdirAll,
-					gitConfig:   func(string) (string, error) { return "", os.ErrNotExist },
-					getenv:      os.Getenv,
-				}
-				if err := installGitignore(d, "", "claude"); err != nil {
-					t.Fatalf("install workload gitignore: %v", err)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "empty-xdg"))
-			repo := initDoctorGitRepo(t)
-			tt.setup(t, repo)
-
-			d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-			d.resolveWorkloadRuntime = func() (string, error) { return repo, nil }
-			d.workloadArtifactIgnored = defaultDoctorWorkloadArtifactIgnored
-
-			report, err := buildDoctorReport(d)
-			if err != nil {
-				t.Fatalf("buildDoctorReport: %v", err)
-			}
-			family, ok := familyByCommand(report, "pop workload")
-			if !ok {
-				t.Fatalf("missing pop workload family")
-			}
-			if family.status != doctorStatusOK {
-				t.Fatalf("workload status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
-			}
-			check := workloadIgnoreCheck(t, report)
-			if check.status != doctorStatusOK {
-				t.Fatalf("ignore coverage status = %s, want %s (%s)", check.status, doctorStatusOK, check.detail)
-			}
-			if !strings.Contains(check.detail, "git check-ignore") || !strings.Contains(check.detail, doctorWorkloadIgnoreProbe) {
-				t.Fatalf("ignore coverage should disclose probe method and path: %q", check.detail)
-			}
-			if _, err := os.Stat(filepath.Join(repo, doctorWorkloadIgnoreProbe)); !os.IsNotExist(err) {
-				t.Fatalf("ignore probe should not create representative artifact, stat err = %v", err)
-			}
-		})
-	}
-}
-
-func TestDoctorWorkloadMissingEffectiveIgnoreCoverageIsActionable(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "empty-xdg"))
-	repo := initDoctorGitRepo(t)
+func TestDoctorWorkloadLegacyIssueSetsAdviseMigrate(t *testing.T) {
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-	d.resolveWorkloadRuntime = func() (string, error) { return repo, nil }
-	d.workloadArtifactIgnored = defaultDoctorWorkloadArtifactIgnored
+	d.legacyIssueSets = func() ([]string, error) {
+		return []string{"2026-01-01-old-set", "2026-02-02-other"}, nil
+	}
 
 	report, err := buildDoctorReport(d)
 	if err != nil {
@@ -808,18 +728,79 @@ func TestDoctorWorkloadMissingEffectiveIgnoreCoverageIsActionable(t *testing.T) 
 	if !ok {
 		t.Fatalf("missing pop workload family")
 	}
-	if family.status == doctorStatusOK {
-		t.Fatalf("workload status = %s, want non-OK when ignore coverage is missing", family.status)
+	if family.status != doctorStatusPartial {
+		t.Fatalf("workload status = %s, want %s", family.status, doctorStatusPartial)
 	}
-	check := workloadIgnoreCheck(t, report)
-	if check.status == doctorStatusOK || check.status == doctorStatusNA {
-		t.Fatalf("ignore coverage status = %s, want actionable non-OK", check.status)
+	check := workloadCheck(t, report, "legacy in-tree Issue sets")
+	if check.status != doctorStatusPartial {
+		t.Fatalf("legacy status = %s, want %s", check.status, doctorStatusPartial)
 	}
-	if !strings.Contains(check.detail, "does not cover") || !strings.Contains(check.detail, gitignoreLine) {
-		t.Fatalf("missing ignore coverage should explain the rule to add: %q", check.detail)
+	if !strings.Contains(check.detail, "2026-01-01-old-set") || !strings.Contains(check.detail, "thoughts/issues") {
+		t.Fatalf("legacy detail should list sets and location: %q", check.detail)
 	}
-	if !strings.Contains(check.nextAction, "pop integrate") && !strings.Contains(check.nextAction, ".gitignore") {
-		t.Fatalf("missing ignore coverage should include clear next action: %q", check.nextAction)
+	if check.nextAction != "pop workload migrate" {
+		t.Fatalf("legacy nextAction = %q, want exact migrate command", check.nextAction)
+	}
+}
+
+func TestDoctorWorkloadLegacyInspectionFailureIsNA(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.legacyIssueSets = func() ([]string, error) {
+		return nil, errors.New("resolve worktree root: not a git repository")
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop workload")
+	if !ok {
+		t.Fatalf("missing pop workload family")
+	}
+	if family.status != doctorStatusOK {
+		t.Fatalf("workload status = %s, want %s (legacy inspection failure must not block)", family.status, doctorStatusOK)
+	}
+	check := workloadCheck(t, report, "legacy in-tree Issue sets")
+	if check.status != doctorStatusNA {
+		t.Fatalf("legacy status = %s, want %s", check.status, doctorStatusNA)
+	}
+	if !strings.Contains(check.detail, "not assessed") {
+		t.Fatalf("legacy failure detail should mark it not assessed: %q", check.detail)
+	}
+}
+
+func TestDoctorWorkloadOrphanStorageIsReportOnly(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.orphanedWorkloadStorage = func() ([]workload.OrphanedStorage, error) {
+		return []workload.OrphanedStorage{
+			{StorageDir: "/data/pop/workloads/gone-abc123", RepositoryPath: "/vanished/repo/.git"},
+		}, nil
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop workload")
+	if !ok {
+		t.Fatalf("missing pop workload family")
+	}
+	// Orphans are informational: a healthy repository's family stays OK.
+	if family.status != doctorStatusOK {
+		t.Fatalf("workload status = %s, want %s (orphans must not affect healthy status)", family.status, doctorStatusOK)
+	}
+	check := workloadCheck(t, report, "orphaned workload storage")
+	if check.status != doctorStatusNA {
+		t.Fatalf("orphan status = %s, want %s", check.status, doctorStatusNA)
+	}
+	if !strings.Contains(check.detail, "/data/pop/workloads/gone-abc123") || !strings.Contains(check.detail, "/vanished/repo/.git") {
+		t.Fatalf("orphan detail should list storage dir and repository path: %q", check.detail)
+	}
+	if !strings.Contains(check.detail, "report-only") {
+		t.Fatalf("orphan detail should mark it report-only: %q", check.detail)
+	}
+	if check.nextAction != "" {
+		t.Fatalf("orphan check must carry no destructive next action, got %q", check.nextAction)
 	}
 }
 
