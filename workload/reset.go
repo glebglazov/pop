@@ -32,7 +32,7 @@ func ResetIssueWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	statePath := DefaultStatePathWith(d)
+	statePath := StatePathFor(resolved.DefinitionPath)
 	refresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)

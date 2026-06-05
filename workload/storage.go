@@ -31,10 +31,10 @@ type RepositoryIdentity struct {
 	Basename string
 	// ShortHash is the truncated hash of CommonDir used in the storage directory name.
 	ShortHash string
-	// StorageDir is the per-repository Workload storage directory.
+	// StorageDir is the per-repository Task storage directory.
 	StorageDir string
-	// IssuesDir is the Issue-set container inside StorageDir.
-	IssuesDir string
+	// TasksDir is the Task-set container inside StorageDir.
+	TasksDir string
 }
 
 // popDataDirWith returns pop's base data directory, respecting XDG_DATA_HOME with the
@@ -80,13 +80,13 @@ func ResolveRepositoryIdentity(d *Deps, cwd string) (*RepositoryIdentity, error)
 	shortHash := fmt.Sprintf("%x", sum)[:shortHashLen]
 	basename := repoBasename(canon)
 
-	storageDir := filepath.Join(popDataDirWith(d), "workloads", fmt.Sprintf("%s-%s", basename, shortHash))
+	storageDir := filepath.Join(popDataDirWith(d), "repos", fmt.Sprintf("%s-%s", basename, shortHash))
 	return &RepositoryIdentity{
 		CommonDir:  canon,
 		Basename:   basename,
 		ShortHash:  shortHash,
 		StorageDir: storageDir,
-		IssuesDir:  filepath.Join(storageDir, "issues"),
+		TasksDir:   filepath.Join(storageDir, "tasks"),
 	}, nil
 }
 
@@ -100,18 +100,23 @@ func repoBasename(commonDir string) string {
 	return strings.TrimSuffix(base, ".git")
 }
 
-// EnsureStorage creates the Workload storage directory tree and repo.json marker on demand.
+// EnsureStorage creates the Task storage directory tree and repo.json marker on demand.
 // It is idempotent: an existing marker is left untouched so created_at is preserved.
+// Before creating anything it migrates a pre-rename storage layout into place (see
+// MigrateStorageLayout) so first touch lands on the current layout.
 func EnsureStorage(d *Deps, id *RepositoryIdentity) error {
-	if err := d.FS.MkdirAll(id.IssuesDir, 0o755); err != nil {
-		return exitErr(ExitOperational, "create workload storage: %v", err)
+	if _, err := MigrateStorageLayout(d, id.TasksDir); err != nil {
+		return err
+	}
+	if err := d.FS.MkdirAll(id.TasksDir, 0o755); err != nil {
+		return exitErr(ExitOperational, "create task storage: %v", err)
 	}
 
 	markerPath := filepath.Join(id.StorageDir, repoMarkerFile)
 	if _, err := d.FS.Stat(markerPath); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
-		return exitErr(ExitOperational, "inspect workload storage marker: %v", err)
+		return exitErr(ExitOperational, "inspect task storage marker: %v", err)
 	}
 
 	marker := RepoMarker{
@@ -120,10 +125,10 @@ func EnsureStorage(d *Deps, id *RepositoryIdentity) error {
 	}
 	data, err := json.MarshalIndent(marker, "", "  ")
 	if err != nil {
-		return exitErr(ExitOperational, "encode workload storage marker: %v", err)
+		return exitErr(ExitOperational, "encode task storage marker: %v", err)
 	}
 	if err := WriteAtomicWith(d, markerPath, data, 0o644); err != nil {
-		return exitErr(ExitOperational, "write workload storage marker: %v", err)
+		return exitErr(ExitOperational, "write task storage marker: %v", err)
 	}
 	return nil
 }
@@ -135,7 +140,7 @@ func ListStoredIssueSetIDs(d *Deps, cwd string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return readIssueSetIDs(d, id.IssuesDir), nil
+	return readIssueSetIDs(d, id.TasksDir), nil
 }
 
 func readIssueSetIDs(d *Deps, issuesDir string) []string {
@@ -171,10 +176,10 @@ func ShowPath(d *Deps, cwd, issueSetID string) (*ShowPathResult, error) {
 	}
 
 	if issueSetID == "" {
-		return &ShowPathResult{Path: id.IssuesDir}, nil
+		return &ShowPathResult{Path: id.TasksDir}, nil
 	}
 
-	setDir := filepath.Join(id.IssuesDir, issueSetID)
+	setDir := filepath.Join(id.TasksDir, issueSetID)
 	info, err := d.FS.Stat(setDir)
 	if err == nil && info.IsDir() {
 		return &ShowPathResult{Path: setDir}, nil
@@ -183,7 +188,7 @@ func ShowPath(d *Deps, cwd, issueSetID string) (*ShowPathResult, error) {
 		return nil, exitErr(ExitOperational, "inspect Issue set %q: %v", issueSetID, err)
 	}
 
-	valid := readIssueSetIDs(d, id.IssuesDir)
+	valid := readIssueSetIDs(d, id.TasksDir)
 	if len(valid) == 0 {
 		return nil, exitErr(ExitSetup, "unknown Issue set %q (no Issue sets in storage)", issueSetID)
 	}

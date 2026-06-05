@@ -51,18 +51,18 @@ func Migrate(d *Deps, cwd string) (*MigrateResult, error) {
 	if err := EnsureStorage(d, id); err != nil {
 		return nil, err
 	}
-	// Canonicalize the storage issues directory so the rekeyed state key matches the
+	// Canonicalize the storage tasks directory so the rekeyed state key matches the
 	// key discovery and status derive (resolveDefinitionPath canonicalizes it too).
-	newDefPath, err := CanonicalDefinitionPathWith(d, id.IssuesDir)
+	newDefPath, err := CanonicalDefinitionPathWith(d, id.TasksDir)
 	if err != nil {
-		return nil, exitErr(ExitSetup, "canonicalize storage issues directory: %v", err)
+		return nil, exitErr(ExitSetup, "canonicalize storage tasks directory: %v", err)
 	}
 
-	result := &MigrateResult{StorageDir: id.IssuesDir}
+	result := &MigrateResult{StorageDir: id.TasksDir}
 
 	legacyIDs := readIssueSetIDs(d, legacyIssuesDir)
 	for _, setID := range legacyIDs {
-		dst := filepath.Join(id.IssuesDir, setID)
+		dst := filepath.Join(id.TasksDir, setID)
 		if _, statErr := d.FS.Stat(dst); statErr == nil {
 			result.Skipped = append(result.Skipped, setID)
 			continue
@@ -95,42 +95,63 @@ func Migrate(d *Deps, cwd string) (*MigrateResult, error) {
 	return result, nil
 }
 
-// rekeyState moves the registration entries for migrated Issue sets from the legacy
-// definition-path key to the storage key, preserving priority and relative order.
-// Entries already registered under the storage key are left untouched (never merged).
+// rekeyState moves the registration entries for migrated Task sets from the legacy
+// worktree-root key in the global workloads-state.json into the repository's
+// per-repository state.json keyed by the storage tasks path, preserving priority
+// and relative order. Entries already registered under the storage key are left
+// untouched (never merged); the global key is removed once emptied.
 func rekeyState(d *Deps, legacyDefPath, newDefPath string, migrated []string) error {
 	migratedSet := make(map[string]bool, len(migrated))
 	for _, setID := range migrated {
 		migratedSet[setID] = true
 	}
 
-	statePath := DefaultStatePathWith(d)
-	return UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-		oldEntry := state.Workloads[legacyDefPath]
-		if oldEntry == nil {
+	legacyPath := DefaultStatePathWith(d)
+	legacyState, err := LoadGlobalStateWith(d, legacyPath)
+	if err != nil {
+		return err
+	}
+	oldEntry := legacyState.Workloads[legacyDefPath]
+	if oldEntry == nil {
+		return nil
+	}
+
+	var moved, remaining []RegisteredIssueSet
+	for _, set := range oldEntry.IssueSets {
+		if migratedSet[set.ID] {
+			moved = append(moved, set)
+		} else {
+			remaining = append(remaining, set)
+		}
+	}
+
+	if len(moved) > 0 {
+		newStatePath := StatePathFor(newDefPath)
+		if err := UpdateGlobalStateWith(d, newStatePath, func(state *GlobalState) error {
+			newEntry := state.Entry(newDefPath)
+			registered := state.RegisteredIDs(newDefPath)
+			for _, set := range moved {
+				if _, exists := registered[set.ID]; exists {
+					continue
+				}
+				newEntry.IssueSets = append(newEntry.IssueSets, set)
+				registered[set.ID] = len(newEntry.IssueSets) - 1
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+
+	return UpdateGlobalStateWith(d, legacyPath, func(state *GlobalState) error {
+		entry := state.Workloads[legacyDefPath]
+		if entry == nil {
 			return nil
 		}
-
-		newEntry := state.Entry(newDefPath)
-		registered := state.RegisteredIDs(newDefPath)
-
-		var remaining []RegisteredIssueSet
-		for _, set := range oldEntry.IssueSets {
-			if !migratedSet[set.ID] {
-				remaining = append(remaining, set)
-				continue
-			}
-			if _, exists := registered[set.ID]; exists {
-				continue
-			}
-			newEntry.IssueSets = append(newEntry.IssueSets, set)
-			registered[set.ID] = len(newEntry.IssueSets) - 1
-		}
-
 		if len(remaining) == 0 {
 			delete(state.Workloads, legacyDefPath)
 		} else {
-			oldEntry.IssueSets = remaining
+			entry.IssueSets = remaining
 		}
 		return nil
 	})

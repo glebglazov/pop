@@ -10,8 +10,8 @@ func TestDiscoverNonRecursive(t *testing.T) {
 	root := t.TempDir()
 	// A stray non-manifest file beside the Issue sets is irrelevant to discovery.
 	writeFile(t, filepath.Join(root, "notes.md"), "# A\n")
-	writeFile(t, filepath.Join(root, "a/index.json"), `{"issues":[]}`)
-	writeFile(t, filepath.Join(root, "deep/nested/index.json"), `{"issues":[]}`)
+	writeFile(t, filepath.Join(root, "a/index.json"), `{"tasks":[]}`)
+	writeFile(t, filepath.Join(root, "deep/nested/index.json"), `{"tasks":[]}`)
 
 	disc, err := Discover(root)
 	if err != nil {
@@ -38,7 +38,7 @@ func TestDiscoverUnreadableDirectory(t *testing.T) {
 		t.Skip("chmod tests unreliable as root")
 	}
 	root := t.TempDir()
-	issueDir := filepath.Join(root, "issues")
+	issueDir := filepath.Join(root, "tasks")
 	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

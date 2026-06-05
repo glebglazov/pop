@@ -24,7 +24,7 @@ func TestManifestValidation(t *testing.T) {
 		{
 			name: "valid manifest",
 			manifest: `{
-				"issues": [{
+				"tasks": [{
 					"id": "01-one",
 					"file": "01-one.md",
 					"title": "One",
@@ -38,7 +38,7 @@ func TestManifestValidation(t *testing.T) {
 		},
 		{
 			name: "duplicate id",
-			manifest: `{"issues":[
+			manifest: `{"tasks":[
 				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]},
 				{"id":"01-one","file":"01-one.md","title":"Dup","type":"AFK","status":"open","blocked_by":[]}
 			]}`,
@@ -47,7 +47,7 @@ func TestManifestValidation(t *testing.T) {
 		},
 		{
 			name: "in_progress malformed",
-			manifest: `{"issues":[
+			manifest: `{"tasks":[
 				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"in_progress","blocked_by":[]}
 			]}`,
 			valid: false,
@@ -55,7 +55,7 @@ func TestManifestValidation(t *testing.T) {
 		},
 		{
 			name: "unresolved blocker",
-			manifest: `{"issues":[
+			manifest: `{"tasks":[
 				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":["missing"]}
 			]}`,
 			valid: false,
@@ -97,7 +97,7 @@ func TestManifestPreservesUnknownFields(t *testing.T) {
 
 	path := filepath.Join(issueDir, "index.json")
 	original := `{
-		"issues": [{
+		"tasks": [{
 			"id": "01-one",
 			"file": "01-one.md",
 			"title": "One",
@@ -154,7 +154,7 @@ func TestAcceptanceCriteriaValidation(t *testing.T) {
 
 	d := DefaultDeps()
 	for file, wantValid := range cases {
-		manifest := `{"issues":[{"id":"x","file":"` + file + `","title":"T","type":"AFK","status":"open","blocked_by":[]}]}`
+		manifest := `{"tasks":[{"id":"x","file":"` + file + `","title":"T","type":"AFK","status":"open","blocked_by":[]}]}`
 		path := filepath.Join(issueDir, "index-"+file+".json")
 		if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
 			t.Fatal(err)

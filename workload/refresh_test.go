@@ -253,7 +253,7 @@ func TestUnreadableDiscoveryDoesNotMutateState(t *testing.T) {
 		t.Skip("chmod tests unreliable as root")
 	}
 	root := t.TempDir()
-	issuesDir := filepath.Join(root, "issues")
+	issuesDir := filepath.Join(root, "tasks")
 	setupManifest(t, issuesDir, "a", []Issue{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -299,7 +299,7 @@ func writeManifest(t *testing.T, issueDir string, issues []Issue) {
 	if err := os.MkdirAll(issueDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	payload := map[string]any{"issues": issues}
+	payload := map[string]any{"tasks": issues}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		t.Fatal(err)

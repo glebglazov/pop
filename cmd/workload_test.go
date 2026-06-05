@@ -111,7 +111,7 @@ func TestWorkloadSetPriorityRefreshesTable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(issueDir, "01-a.md"), []byte("## Acceptance criteria\n\n- [ ] ok\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"issues":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}]}`
+	manifest := `{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}]}`
 	if err := os.WriteFile(filepath.Join(issueDir, "index.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func cmdIssuesDir(t *testing.T, repoRoot string) string {
 	if err != nil {
 		t.Fatalf("resolve storage: %v", err)
 	}
-	return id.IssuesDir
+	return id.TasksDir
 }
 
 // writeWorkloadThoughts creates a minimal valid Issue set under issuesDir/<stem>.
@@ -223,7 +223,7 @@ func writeWorkloadThoughts(t *testing.T, issuesDir, stem string) {
 	if err := os.WriteFile(filepath.Join(issueDir, "01-a.md"), []byte("## Acceptance criteria\n\n- [ ] ok\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"issues":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}]}`
+	manifest := `{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}]}`
 	if err := os.WriteFile(filepath.Join(issueDir, "index.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestResetIssueCmdTargetsIssueSetRelativeFile(t *testing.T) {
 	t.Cleanup(resetWorkloadFlags)
 
 	manifestPath := filepath.Join(runIssueCmdDemoDir(t, root), "index.json")
-	manifest := `{"issues":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"failed","failed_after":2}]}`
+	manifest := `{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"failed","failed_after":2}]}`
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}

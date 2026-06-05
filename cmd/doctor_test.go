@@ -62,10 +62,11 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 		explicitAgentContext:     func() []string { return nil },
 		agentExecutableAvailable: func(string) bool { return false },
 		workloadStorageWritable: func() (string, error) {
-			return "/data/pop/workloads", nil
+			return "/data/pop/repos", nil
 		},
 		legacyIssueSets:         func() ([]string, error) { return nil, nil },
 		orphanedWorkloadStorage: func() ([]workload.OrphanedStorage, error) { return nil, nil },
+		legacyLayoutStorage:     func() ([]string, error) { return nil, nil },
 	}
 }
 
@@ -673,7 +674,7 @@ func TestDoctorWorkloadHealthyStorageIsOK(t *testing.T) {
 	if writable.status != doctorStatusOK {
 		t.Fatalf("writable status = %s, want %s", writable.status, doctorStatusOK)
 	}
-	if !strings.Contains(writable.detail, "/data/pop/workloads") {
+	if !strings.Contains(writable.detail, "/data/pop/repos") {
 		t.Fatalf("writable detail should name the data dir: %q", writable.detail)
 	}
 
@@ -801,6 +802,33 @@ func TestDoctorWorkloadOrphanStorageIsReportOnly(t *testing.T) {
 	}
 	if check.nextAction != "" {
 		t.Fatalf("orphan check must carry no destructive next action, got %q", check.nextAction)
+	}
+}
+
+func TestDoctorWorkloadLegacyLayoutIsReportOnly(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.legacyLayoutStorage = func() ([]string, error) {
+		return []string{"/data/pop/workloads/repo-abc123"}, nil
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop tasks")
+	if !ok {
+		t.Fatalf("missing pop tasks family")
+	}
+	// An un-migrated layout is a finding, never a readiness failure.
+	if family.status != doctorStatusOK {
+		t.Fatalf("workload status = %s, want %s (legacy layout must not block)", family.status, doctorStatusOK)
+	}
+	check := workloadCheck(t, report, "legacy storage layout")
+	if check.status != doctorStatusNA {
+		t.Fatalf("legacy layout status = %s, want %s", check.status, doctorStatusNA)
+	}
+	if !strings.Contains(check.detail, "/data/pop/workloads/repo-abc123") || !strings.Contains(check.detail, "auto-migrated") {
+		t.Fatalf("legacy layout detail should list the dir and note auto-migration: %q", check.detail)
 	}
 }
 

@@ -156,7 +156,7 @@ func runWorkloadStatusWith(d *workload.Deps, w io.Writer) error {
 		return fmt.Errorf("tasks status: %w", err)
 	}
 
-	result, err := workload.RefreshWith(d, resolved.DefinitionPath, workload.DefaultStatePathWith(d))
+	result, err := workload.RefreshWith(d, resolved.DefinitionPath, workload.StatePathFor(resolved.DefinitionPath))
 	if err != nil {
 		return fmt.Errorf("tasks status: %w", err)
 	}

@@ -103,7 +103,7 @@ func (e *migrateEnv) storageKey(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := CanonicalDefinitionPathWith(e.deps, id.IssuesDir)
+	key, err := CanonicalDefinitionPathWith(e.deps, id.TasksDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,9 +129,20 @@ func (e *migrateEnv) seedState(t *testing.T, key string, sets []RegisteredIssueS
 	}
 }
 
-func (e *migrateEnv) loadState(t *testing.T) *GlobalState {
+// loadGlobalState reads the legacy global state file (the migration source).
+func (e *migrateEnv) loadGlobalState(t *testing.T) *GlobalState {
 	t.Helper()
 	state, err := LoadGlobalStateWith(e.deps, DefaultStatePathWith(e.deps))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+// loadRepoState reads the per-repository state.json the storage tasks key lives in.
+func (e *migrateEnv) loadRepoState(t *testing.T) *GlobalState {
+	t.Helper()
+	state, err := LoadGlobalStateWith(e.deps, StatePathFor(e.storageKey(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,11 +183,13 @@ func TestMigrateMovesSetsAndRekeysState(t *testing.T) {
 		t.Fatalf("legacy set-a still present: %v", err)
 	}
 
-	// State rekeyed to storage path, priorities and order preserved.
-	state := e.loadState(t)
-	if _, ok := state.Workloads[legacyKey]; ok {
+	// Legacy worktree-root key removed from the global state source.
+	global := e.loadGlobalState(t)
+	if _, ok := global.Workloads[legacyKey]; ok {
 		t.Fatal("legacy state key still present after full migration")
 	}
+	// State rekeyed into the per-repository state.json, priorities and order preserved.
+	state := e.loadRepoState(t)
 	entry := state.Workloads[e.storageKey(t)]
 	if entry == nil {
 		t.Fatal("storage state key missing")
@@ -205,7 +218,7 @@ func TestMigrateCollisionSkips(t *testing.T) {
 	if err := EnsureStorage(e.deps, id); err != nil {
 		t.Fatal(err)
 	}
-	existing := filepath.Join(id.IssuesDir, "set-collide")
+	existing := filepath.Join(id.TasksDir, "set-collide")
 	if err := os.MkdirAll(existing, 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -238,7 +238,7 @@ func TestRunIssueNoRunnableWork(t *testing.T) {
 	data, _ := os.ReadFile(manifestPath)
 	var payload map[string]any
 	_ = json.Unmarshal(data, &payload)
-	payload["issues"] = []map[string]any{
+	payload["tasks"] = []map[string]any{
 		{"id": "01-a", "file": "01-a.md", "title": "A", "type": "AFK", "status": "done"},
 	}
 	updated, _ := json.MarshalIndent(payload, "", "  ")
@@ -585,7 +585,7 @@ func storageIssuesDir(t *testing.T, repoRoot string) string {
 	if err != nil {
 		t.Fatalf("resolve storage: %v", err)
 	}
-	return id.IssuesDir
+	return id.TasksDir
 }
 
 type fakeAgentConfig struct {

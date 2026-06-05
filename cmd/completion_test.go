@@ -231,7 +231,7 @@ func writeCompletionThoughts(t *testing.T, issuesDir, stem string, issueIDs []st
 		t.Fatal(err)
 	}
 	var issues strings.Builder
-	issues.WriteString(`{"issues":[`)
+	issues.WriteString(`{"tasks":[`)
 	for i, id := range issueIDs {
 		if i > 0 {
 			issues.WriteByte(',')

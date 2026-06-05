@@ -9,6 +9,17 @@ import (
 
 const StateVersion = 1
 
+// stateFileName is the per-repository Task state file, stored inside Task storage
+// beside the tasks/ directory.
+const stateFileName = "state.json"
+
+// StatePathFor returns the per-repository Task state file path for a definition
+// (tasks) directory: <storage>/state.json beside the tasks/ directory. The state
+// lives in Task storage, not in a single global file.
+func StatePathFor(defPath string) string {
+	return filepath.Join(filepath.Dir(defPath), stateFileName)
+}
+
 // RegisteredIssueSet is persisted registration metadata for an Issue set.
 type RegisteredIssueSet struct {
 	ID       string `json:"id"`
@@ -27,12 +38,17 @@ type GlobalState struct {
 	path      string
 }
 
-// DefaultStatePath returns the default workload state file path.
+// DefaultStatePath returns the legacy global workload state file path.
+//
+// Deprecated: Task state now lives per-repository inside Task storage (see
+// StatePathFor). This path is retained only as the migration source read by
+// MigrateStorageLayout; no normal command reads or writes it.
 func DefaultStatePath() string {
 	return DefaultStatePathWith(defaultDeps)
 }
 
-// DefaultStatePathWith returns the default workload state file path using provided dependencies.
+// DefaultStatePathWith returns the legacy global workload state file path using
+// provided dependencies. See DefaultStatePath for why it survives.
 func DefaultStatePathWith(d *Deps) string {
 	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
 		return filepath.Join(xdgData, "pop", "workloads-state.json")

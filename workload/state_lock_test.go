@@ -24,7 +24,7 @@ func TestStateLockPathUsesXDGData(t *testing.T) {
 		},
 	}}
 	got := StateLockPathWith(d)
-	want := "/xdg/data/pop/workloads-state.lock"
+	want := "/xdg/data/pop/tasks-state.lock"
 	if got != want {
 		t.Fatalf("path = %q, want %q", got, want)
 	}
@@ -318,7 +318,6 @@ func TestConcurrentDistinctProjectUpdates(t *testing.T) {
 func TestRefreshConcurrentRegistrationAndPriority(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", root)
-	statePath := DefaultStatePath()
 
 	defA := filepath.Join(root, "project-a")
 	defB := filepath.Join(root, "project-b")
@@ -338,6 +337,9 @@ func TestRefreshConcurrentRegistrationAndPriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// defA and defB share the same parent, so both resolve to one per-repository
+	// state.json — the file the priority update and the registration both target.
+	statePath := StatePathFor(canonA)
 
 	seed := &GlobalState{
 		Version: StateVersion,

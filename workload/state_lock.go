@@ -16,7 +16,7 @@ var ErrStateLockBusy = errors.New("workload state update in progress")
 const (
 	stateLockRetries    = 100
 	stateLockRetryDelay = 5 * time.Millisecond
-	stateLockFileName   = "workloads-state.lock"
+	stateLockFileName   = "tasks-state.lock"
 )
 
 // StateLockMetadata is persisted in the global workload state lock file.

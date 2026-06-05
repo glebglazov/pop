@@ -9,31 +9,31 @@ import (
 )
 
 // doctorWriteProbeFile is the transient probe Doctor writes and removes to prove
-// pop can write beneath the workloads data dir. It lives at the workloads-dir
-// root, never inside an Issue-set storage directory.
+// pop can write beneath the Task storage data dir. It lives at the repos-dir
+// root, never inside a Task-set storage directory.
 const doctorWriteProbeFile = ".pop-doctor-write-probe"
 
-// WorkloadsDir returns pop's per-repository Workload storage parent directory:
-// <pop data dir>/workloads. It is derived only; nothing is written.
-func WorkloadsDir(d *Deps) string {
-	return filepath.Join(popDataDirWith(d), "workloads")
+// TaskStorageRoot returns pop's per-repository Task storage parent directory:
+// <pop data dir>/repos. It is derived only; nothing is written.
+func TaskStorageRoot(d *Deps) string {
+	return filepath.Join(popDataDirWith(d), "repos")
 }
 
-// ProbeStorageWritable verifies pop can create and write beneath its workloads
+// ProbeStorageWritable verifies pop can create and write beneath its Task storage
 // data dir. It creates the directory on demand (harmless and idempotent), writes
-// a probe file, then removes it, and returns the workloads directory path. It
-// never touches Issue-set storage directories.
+// a probe file, then removes it, and returns the repos directory path. It never
+// touches Task-set storage directories.
 func ProbeStorageWritable(d *Deps) (string, error) {
-	dir := WorkloadsDir(d)
+	dir := TaskStorageRoot(d)
 	if err := d.FS.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("create workloads data dir %s: %w", dir, err)
+		return "", fmt.Errorf("create task storage data dir %s: %w", dir, err)
 	}
 	probe := filepath.Join(dir, doctorWriteProbeFile)
 	if err := d.FS.WriteFile(probe, []byte("pop doctor write probe\n"), 0o644); err != nil {
-		return "", fmt.Errorf("write beneath workloads data dir %s: %w", dir, err)
+		return "", fmt.Errorf("write beneath task storage data dir %s: %w", dir, err)
 	}
 	if err := d.FS.RemoveAll(probe); err != nil {
-		return dir, fmt.Errorf("remove workloads data dir probe %s: %w", probe, err)
+		return dir, fmt.Errorf("remove task storage data dir probe %s: %w", probe, err)
 	}
 	return dir, nil
 }
@@ -47,19 +47,19 @@ type OrphanedStorage struct {
 	RepositoryPath string
 }
 
-// FindOrphanedStorage walks the workloads data dir and returns storage
+// FindOrphanedStorage walks the Task storage data dir and returns storage
 // directories whose repo.json repository_path no longer exists. It is strictly
-// read-only: it never creates, modifies, or deletes storage. A missing workloads
+// read-only: it never creates, modifies, or deletes storage. A missing repos
 // dir yields no orphans. Directories without a readable, parseable repo.json are
 // skipped rather than reported.
 func FindOrphanedStorage(d *Deps) ([]OrphanedStorage, error) {
-	dir := WorkloadsDir(d)
+	dir := TaskStorageRoot(d)
 	entries, err := d.FS.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read workloads data dir %s: %w", dir, err)
+		return nil, fmt.Errorf("read task storage data dir %s: %w", dir, err)
 	}
 
 	var orphans []OrphanedStorage

@@ -20,12 +20,23 @@ type RefreshResult struct {
 
 // Refresh discovers workloads, auto-registers Issue sets, and builds table rows.
 func Refresh(defPath string) (*RefreshResult, error) {
-	return RefreshWith(defaultDeps, defPath, DefaultStatePath())
+	return RefreshWith(defaultDeps, defPath, StatePathFor(defPath))
 }
 
 // RefreshWith performs refresh using injected dependencies and state path.
 func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
 	canon, err := CanonicalDefinitionPathWith(d, defPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := MigrateStorageLayout(d, canon); err != nil {
+		return nil, err
+	}
+	// Migration may have created the tasks directory for the first time, so
+	// re-canonicalize: a path that did not exist resolves symlinks once it does,
+	// and the state key must match what migration wrote and future calls resolve.
+	canon, err = CanonicalDefinitionPathWith(d, canon)
 	if err != nil {
 		return nil, err
 	}

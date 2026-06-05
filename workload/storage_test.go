@@ -53,12 +53,12 @@ func TestShowPathCreatesStorageAndMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantPrefix := filepath.Join(dataHome, "pop", "workloads")
+	wantPrefix := filepath.Join(dataHome, "pop", "repos")
 	if !strings.HasPrefix(res.Path, wantPrefix) {
 		t.Fatalf("path %q not under %q", res.Path, wantPrefix)
 	}
-	if filepath.Base(res.Path) != "issues" {
-		t.Fatalf("path %q does not end in issues", res.Path)
+	if filepath.Base(res.Path) != "tasks" {
+		t.Fatalf("path %q does not end in tasks", res.Path)
 	}
 	storageDir := filepath.Dir(res.Path)
 	if !strings.HasPrefix(filepath.Base(storageDir), "repo-") {
@@ -283,12 +283,12 @@ func TestListStoredIssueSetIDsReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"zeta", "alpha"} {
-		if err := os.MkdirAll(filepath.Join(id.IssuesDir, name), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(id.TasksDir, name), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// A stray file must be ignored.
-	if err := os.WriteFile(filepath.Join(id.IssuesDir, "note.txt"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(id.TasksDir, "note.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -321,7 +321,7 @@ func TestRespectsHomeFallbackWithoutXDG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantPrefix := filepath.Join(home, ".local", "share", "pop", "workloads")
+	wantPrefix := filepath.Join(home, ".local", "share", "pop", "repos")
 	if !strings.HasPrefix(id.StorageDir, wantPrefix) {
 		t.Fatalf("storage dir %q not under %q", id.StorageDir, wantPrefix)
 	}

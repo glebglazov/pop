@@ -72,17 +72,17 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 		return fmt.Errorf("parse JSON: %w", err)
 	}
 
-	issuesRaw, ok := raw["issues"]
+	tasksRaw, ok := raw["tasks"]
 	if !ok {
-		return fmt.Errorf("missing issues array")
+		return fmt.Errorf("missing tasks array")
 	}
-	if err := json.Unmarshal(issuesRaw, &m.Issues); err != nil {
-		return fmt.Errorf("parse issues: %w", err)
+	if err := json.Unmarshal(tasksRaw, &m.Issues); err != nil {
+		return fmt.Errorf("parse tasks: %w", err)
 	}
 
 	m.Unknown = make(map[string]json.RawMessage)
 	for k, v := range raw {
-		if k != "issues" {
+		if k != "tasks" {
 			m.Unknown[k] = v
 		}
 	}
@@ -91,7 +91,7 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 
 func validateManifest(d *Deps, m *Manifest) {
 	if len(m.Issues) == 0 {
-		m.Errors = append(m.Errors, "issues array is empty")
+		m.Errors = append(m.Errors, "tasks array is empty")
 	}
 
 	ids := make(map[string]int)
@@ -199,11 +199,11 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 	for k, v := range m.Unknown {
 		out[k] = v
 	}
-	issuesData, err := json.Marshal(m.Issues)
+	tasksData, err := json.Marshal(m.Issues)
 	if err != nil {
 		return err
 	}
-	out["issues"] = issuesData
+	out["tasks"] = tasksData
 
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {

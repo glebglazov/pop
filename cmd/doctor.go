@@ -52,6 +52,7 @@ type doctorDeps struct {
 	workloadStorageWritable   func() (string, error)
 	legacyIssueSets           func() ([]string, error)
 	orphanedWorkloadStorage   func() ([]workload.OrphanedStorage, error)
+	legacyLayoutStorage       func() ([]string, error)
 }
 
 func defaultDoctorDeps() *doctorDeps {
@@ -101,7 +102,10 @@ func defaultDoctorDeps() *doctorDeps {
 		agentExecutableAvailable: doctorAgentExecutableAvailable,
 		workloadStorageWritable:  func() (string, error) { return workload.ProbeStorageWritable(workload.DefaultDeps()) },
 		legacyIssueSets:          func() ([]string, error) { return workload.LegacyIssueSetIDs(workload.DefaultDeps(), "") },
-		orphanedWorkloadStorage:  func() ([]workload.OrphanedStorage, error) { return workload.FindOrphanedStorage(workload.DefaultDeps()) },
+		orphanedWorkloadStorage: func() ([]workload.OrphanedStorage, error) {
+			return workload.FindOrphanedStorage(workload.DefaultDeps())
+		},
+		legacyLayoutStorage: func() ([]string, error) { return workload.LegacyLayoutStorageDirs(workload.DefaultDeps()) },
 	}
 }
 
@@ -369,16 +373,54 @@ func doctorPaneChecks(d *doctorDeps) []doctorCheck {
 	return checks
 }
 
-// doctorWorkloadChecks reports Workload readiness for storage that lives in pop's
-// data dir rather than the repository tree (ADR 0012): the workloads data dir is
-// writable, no legacy in-tree Issue sets remain in this worktree, and no Workload
-// storage has been orphaned by a vanished repository. Orphan reporting is
-// informational only — Doctor never deletes or modifies storage.
+// doctorWorkloadChecks reports Tasks readiness for storage that lives in pop's
+// data dir rather than the repository tree (ADR 0012): the Task storage data dir
+// is writable, no legacy in-tree task sets remain in this worktree, no pre-rename
+// storage layout is left un-migrated, and no Task storage has been orphaned by a
+// vanished repository. Legacy-layout, orphan, and migration reporting are
+// informational only — Doctor never deletes, moves, or modifies storage.
 func doctorWorkloadChecks(d *doctorDeps) []doctorCheck {
 	checks := []doctorCheck{doctorWorkloadStorageWritableCheck(d)}
 	checks = append(checks, doctorWorkloadLegacyCheck(d))
+	checks = append(checks, doctorWorkloadLegacyLayoutCheck(d))
 	checks = append(checks, doctorWorkloadOrphanCheck(d))
 	return checks
+}
+
+// doctorWorkloadLegacyLayoutCheck surfaces a pre-rename storage layout still
+// present under the retired workloads/ data dir. It is informational (N/A): an
+// un-migrated layout is migrated automatically on the next tasks command, so it
+// never drives readiness below OK and Doctor never moves storage itself.
+func doctorWorkloadLegacyLayoutCheck(d *doctorDeps) doctorCheck {
+	if d.legacyLayoutStorage == nil {
+		return doctorCheck{
+			label:  "legacy storage layout",
+			status: doctorStatusOK,
+			detail: "no pre-rename task storage layout present",
+		}
+	}
+	dirs, err := d.legacyLayoutStorage()
+	switch {
+	case err != nil:
+		return doctorCheck{
+			label:  "legacy storage layout",
+			status: doctorStatusNA,
+			detail: fmt.Sprintf("not assessed: %v", err),
+		}
+	case len(dirs) > 0:
+		return doctorCheck{
+			label:      "legacy storage layout",
+			status:     doctorStatusNA,
+			detail:     fmt.Sprintf("%d pre-rename storage director(ies) under workloads/ (auto-migrated on next tasks command): %s", len(dirs), strings.Join(dirs, ", ")),
+			nextAction: "pop tasks status",
+		}
+	default:
+		return doctorCheck{
+			label:  "legacy storage layout",
+			status: doctorStatusOK,
+			detail: "no pre-rename task storage layout present",
+		}
+	}
 }
 
 func doctorWorkloadStorageWritableCheck(d *doctorDeps) doctorCheck {

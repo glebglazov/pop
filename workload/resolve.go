@@ -122,7 +122,7 @@ func resolveDefinitionPath(d *Deps, projectPath, override string) (string, error
 	// Canonicalize so the returned path matches the state key RefreshWith derives
 	// (it canonicalizes the definition path), keeping state lookups keyed by
 	// resolved.DefinitionPath consistent across invocations.
-	return CanonicalDefinitionPathWith(d, id.IssuesDir)
+	return CanonicalDefinitionPathWith(d, id.TasksDir)
 }
 
 // NormalizeProjectPath canonicalizes path and normalizes git subdirectories to checkout roots.
