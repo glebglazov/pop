@@ -245,7 +245,7 @@ Controls how task execution starts from a dirty runtime checkout. `continue` sta
 _Avoid_: Clean runtime checkout requirement, automatic stash restoration
 
 **Implementation commit**:
-A commit created by the task executor from runtime-checkout changes. After successful task completion, the executor stages all runtime changes and commits them with a task-derived subject and the agent summary as body. Task artifacts remain local and unstaged.
+A commit created by the task executor from runtime-checkout changes. After successful task completion, the executor stages all runtime changes and commits them with a task-derived subject and the agent summary as body. The subject's scope names the Task set by its identifier without the timestamp prefix. Task artifacts remain local and unstaged.
 _Avoid_: Task artifact update, progress record
 
 **Task manifest**:

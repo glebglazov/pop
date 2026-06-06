@@ -104,12 +104,25 @@ func allAcceptanceChecked(data []byte) bool {
 	return foundCheckbox
 }
 
+// timestampPrefixPattern matches the chronological prefix of a Task set
+// identifier (YYYY-MM-DD or YYYY-MM-DD-HHMM followed by a hyphen).
+var timestampPrefixPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(-\d{4})?-`)
+
+// taskSetSlug returns the Task set identifier without its timestamp prefix;
+// the commit carries its own date, so the prefix is noise in subjects.
+func taskSetSlug(taskSetID string) string {
+	if slug := timestampPrefixPattern.ReplaceAllString(taskSetID, ""); slug != "" {
+		return slug
+	}
+	return taskSetID
+}
+
 // CommitSubject returns the implementation commit subject for a task.
 func CommitSubject(taskSetID, taskID string) string {
-	return fmt.Sprintf("task(%s): %s", taskSetID, taskID)
+	return fmt.Sprintf("tasks(%s): %s", taskSetSlug(taskSetID), taskID)
 }
 
 // DirtyCheckpointSubject returns the checkpoint commit subject for dirty runtime state.
 func DirtyCheckpointSubject(taskSetID, taskID string) string {
-	return fmt.Sprintf("task(%s): %s capturing dirty state", taskSetID, taskID)
+	return fmt.Sprintf("tasks(%s): %s capturing dirty state", taskSetSlug(taskSetID), taskID)
 }

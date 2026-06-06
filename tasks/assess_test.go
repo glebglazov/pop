@@ -39,14 +39,23 @@ func TestAssessCompletionUncheckedBoxes(t *testing.T) {
 
 func TestCommitSubject(t *testing.T) {
 	got := CommitSubject("feature", "01-a")
-	if got != "task(feature): 01-a" {
+	if got != "tasks(feature): 01-a" {
+		t.Fatalf("subject = %q", got)
+	}
+}
+
+func TestCommitSubjectStripsTimestampPrefix(t *testing.T) {
+	if got := CommitSubject("2026-06-06-feature", "01-a"); got != "tasks(feature): 01-a" {
+		t.Fatalf("subject = %q", got)
+	}
+	if got := CommitSubject("2026-06-06-2036-feature", "01-a"); got != "tasks(feature): 01-a" {
 		t.Fatalf("subject = %q", got)
 	}
 }
 
 func TestDirtyCheckpointSubject(t *testing.T) {
 	got := DirtyCheckpointSubject("feature", "01-a")
-	if got != "task(feature): 01-a capturing dirty state" {
+	if got != "tasks(feature): 01-a capturing dirty state" {
 		t.Fatalf("subject = %q", got)
 	}
 }
