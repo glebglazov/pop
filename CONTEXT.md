@@ -9,7 +9,7 @@ A directory on disk that pop knows about — either listed explicitly in config 
 _Avoid_: Folder, workspace, session (when you mean the directory itself)
 
 **Project command**:
-The `pop project` entry point — opens the project picker. Project-specific config lives in `[project]`. `pop select` and `[select]` are deprecated aliases; remove at the next major release. The CLI alias is hidden (not shown in help) and emits no runtime warning; the config alias emits a load-time warning.
+The `pop project` entry point — opens the project picker. Project-specific config lives in `[project]`. `pop select` and `[select]` are deprecated aliases; removal is gated on beta-tester sign-off (tracked in CLEANUP.md). The CLI alias is hidden (not shown in help) and emits no runtime warning; the config alias emits a load-time warning.
 _Avoid_: Select command, normal mode
 
 **Project readiness**:
@@ -410,6 +410,8 @@ _Avoid_: Malformed Task set
 Reserved for a future machine-global scheduler that picks the next Task set across all projects by priority and runs it. Do not use "queue" for today's per-repository scheduling; it has no current definition.
 
 ## Deprecated aliases
+
+Removal of all deprecated aliases is gated on beta-tester sign-off, not a version number (inventory and checklist in CLEANUP.md).
 
 - `idle`, `read` → **Clear**
 - `needs_attention` → **Unread**
