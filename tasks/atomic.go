@@ -4,11 +4,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 )
 
 // AtomicFS extends FileSystem with rename support for atomic writes.
 type AtomicFS interface {
 	Rename(oldpath, newpath string) error
+}
+
+var atomicWriteSeq uint64
+
+func nextAtomicTempPath(dir string) string {
+	seq := atomic.AddUint64(&atomicWriteSeq, 1)
+	return filepath.Join(dir, fmt.Sprintf(".task-tmp-%d-%d", os.Getpid(), seq))
 }
 
 // WriteAtomic writes data to path via a same-directory temp file and atomic rename.
@@ -24,11 +32,15 @@ func WriteAtomicWith(d *Deps, path string, data []byte, perm os.FileMode) error 
 	}
 
 	if afs, ok := d.FS.(AtomicFS); ok {
-		tmpPath := filepath.Join(dir, fmt.Sprintf(".task-tmp-%d", os.Getpid()))
+		tmpPath := nextAtomicTempPath(dir)
 		if err := d.FS.WriteFile(tmpPath, data, perm); err != nil {
 			return err
 		}
-		return afs.Rename(tmpPath, path)
+		if err := afs.Rename(tmpPath, path); err != nil {
+			_ = d.FS.RemoveAll(tmpPath)
+			return err
+		}
+		return nil
 	}
 
 	f, err := os.CreateTemp(dir, ".task-tmp-*")

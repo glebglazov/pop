@@ -121,17 +121,8 @@ func acquireStateLock(d *Deps, noticeOut io.Writer, retried bool) (*StateLock, e
 		return nil, fmt.Errorf("encode task state lock: %w", err)
 	}
 
-	f, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err == nil {
-		if _, err := f.Write(payload); err != nil {
-			_ = f.Close()
-			_ = os.Remove(lockPath)
-			return nil, fmt.Errorf("write task state lock: %w", err)
-		}
-		if err := f.Close(); err != nil {
-			_ = os.Remove(lockPath)
-			return nil, fmt.Errorf("close task state lock: %w", err)
-		}
+	created, err := createStateLockFile(d, lockPath, payload)
+	if err == nil && created {
 		return &StateLock{path: lockPath}, nil
 	}
 	if !os.IsExist(err) {
@@ -174,6 +165,19 @@ func acquireStateLock(d *Deps, noticeOut io.Writer, retried bool) (*StateLock, e
 		return nil, fmt.Errorf("acquire task state lock after removing stale lock")
 	}
 	return acquireStateLock(d, noticeOut, true)
+}
+
+func createStateLockFile(d *Deps, lockPath string, payload []byte) (bool, error) {
+	tmpPath := nextAtomicTempPath(filepath.Dir(lockPath))
+	if err := d.FS.WriteFile(tmpPath, payload, 0o644); err != nil {
+		return false, fmt.Errorf("write task state lock temp file: %w", err)
+	}
+	if err := os.Link(tmpPath, lockPath); err != nil {
+		_ = d.FS.RemoveAll(tmpPath)
+		return false, err
+	}
+	_ = d.FS.RemoveAll(tmpPath)
+	return true, nil
 }
 
 func parseStateLockMetadata(data []byte) (*StateLockMetadata, error) {
