@@ -92,6 +92,15 @@ type ProjectConfig struct {
 	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled"`
 }
 
+// UpdatesConfig holds update-check / Update-notice configuration.
+type UpdatesConfig struct {
+	// NoticeEnabled gates both the picker Update notice and the daily
+	// background Update check. A nil pointer (absent section or key) defaults
+	// to enabled; an explicit false disables both so pop makes zero automatic
+	// network calls (CONTEXT.md "Update check", "Update notice").
+	NoticeEnabled *bool `toml:"notice_enabled"`
+}
+
 // TaskConfig holds task-execution configuration.
 type TaskConfig struct {
 	Agents map[string]TaskAgentConfig `toml:"agents"`
@@ -134,7 +143,8 @@ type Config struct {
 	Dashboard      *DashboardConfig      `toml:"dashboard"`
 	// The TOML key stays "workload" for backward compatibility with existing
 	// user config files; the rename is internal only.
-	Task *TaskConfig `toml:"workload"`
+	Task    *TaskConfig    `toml:"workload"`
+	Updates *UpdatesConfig `toml:"updates"`
 
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
 }
@@ -150,6 +160,17 @@ func (c *Config) TaskAgentOutput(agent string) string {
 		return "auto"
 	}
 	return agentConfig.Output
+}
+
+// UpdateNoticeEnabled reports whether the picker Update notice and the daily
+// background Update check are enabled. Defaults to true; only an explicit
+// [updates] notice_enabled = false disables them (CONTEXT.md "Update check").
+// Doctor's live check is user-initiated and not gated by this flag.
+func (c *Config) UpdateNoticeEnabled() bool {
+	if c == nil || c.Updates == nil || c.Updates.NoticeEnabled == nil {
+		return true
+	}
+	return *c.Updates.NoticeEnabled
 }
 
 // ExpandedPath represents a resolved project path with display metadata

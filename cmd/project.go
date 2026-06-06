@@ -285,8 +285,11 @@ func RunProject(d *ProjectDeps) error {
 	// Compute the Update notice once: it surfaces at most once per calendar day,
 	// so a single computation up front stamps shown-at and keeps the badge
 	// stable across picker-loop iterations.
+	// The kill switch ([updates] notice_enabled = false) suppresses the badge
+	// and, by skipping the call entirely, prevents the background Update fetch
+	// PickerNotice would otherwise schedule.
 	var updateNotice string
-	if d.UpdateNotice != nil {
+	if d.UpdateNotice != nil && cfg.UpdateNoticeEnabled() {
 		updateNotice = d.UpdateNotice()
 	}
 

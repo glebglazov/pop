@@ -57,6 +57,13 @@ projects = [
 # while still allowing explicit reads from the dashboard.
 # ignore_status_from = ["tmux-global"]
 
+# [updates]
+# Gate the picker Update notice and the daily background update check.
+# When false, pop makes zero automatic network calls — an explicit
+# `pop doctor` run becomes the only update check (doctor always checks live).
+# Defaults to true.
+# notice_enabled = true
+
 # [dashboard]
 # Initial cursor strategy. Available: "current_registered", "current_any",
 # "first_active". "current_any" adds the current pane as a virtual clear entry

@@ -1132,6 +1132,53 @@ func TestRunProject_ActionCancelExitsCleanly(t *testing.T) {
 	}
 }
 
+// TestRunProject_UpdateNoticeKillSwitch verifies the [updates] kill switch:
+// with notice_enabled = false the UpdateNotice seam is never invoked (so no
+// background update fetch is scheduled), and it is invoked when enabled.
+func TestRunProject_UpdateNoticeKillSwitch(t *testing.T) {
+	disabled := false
+	enabled := true
+
+	tests := []struct {
+		name       string
+		updates    *config.UpdatesConfig
+		wantCalled bool
+	}{
+		{name: "absent section defaults to enabled", updates: nil, wantCalled: true},
+		{name: "explicit true enabled", updates: &config.UpdatesConfig{NoticeEnabled: &enabled}, wantCalled: true},
+		{name: "explicit false disabled", updates: &config.UpdatesConfig{NoticeEnabled: &disabled}, wantCalled: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectDir := t.TempDir()
+			noticeCalled := false
+
+			d := testProjectDeps(t)
+			d.LoadConfig = func() (*config.Config, error) {
+				return &config.Config{
+					Projects: []config.ProjectEntry{{Path: projectDir}},
+					Updates:  tt.updates,
+				}, nil
+			}
+			d.UpdateNotice = func() string {
+				noticeCalled = true
+				return "1.2.3"
+			}
+			d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+				return ui.Result{Action: ui.ActionCancel}, nil
+			}
+
+			if err := RunProject(d); err != nil {
+				t.Fatalf("RunProject: unexpected error %v", err)
+			}
+			if noticeCalled != tt.wantCalled {
+				t.Errorf("UpdateNotice called = %v, want %v", noticeCalled, tt.wantCalled)
+			}
+		})
+	}
+}
+
 // TestRunProject_NoGitCallsDuringPickerOpen asserts that opening the project
 // picker does not invoke git commands. Regression guard for the session-module
 // change that called project.SessionName (which runs git) inside hot loops

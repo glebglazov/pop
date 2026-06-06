@@ -68,10 +68,12 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	var configWarnings []string
 	quickAccessModifier := "alt"
 	attentionEnabled := false
+	updateNoticeEnabled := true
 	if cfg, err := config.Load(config.DefaultConfigPath()); err == nil {
 		quickAccessModifier = cfg.GetQuickAccessModifier()
 		configWarnings = cfg.Warnings
 		attentionEnabled = cfg.UnreadNotificationsEnabled("worktree")
+		updateNoticeEnabled = cfg.UpdateNoticeEnabled()
 		for _, cc := range cfg.CommandsForMode("worktree") {
 			customCommands = append(customCommands, ui.UserDefinedCommand{
 				Key:     cc.Key,
@@ -85,7 +87,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 	restoreCursorIdx := -1
 	for {
-		result, err := showWorktreePicker(ctx, customCommands, quickAccessModifier, restoreCursorIdx, configWarnings, attentionEnabled)
+		result, err := showWorktreePicker(ctx, customCommands, quickAccessModifier, restoreCursorIdx, configWarnings, attentionEnabled, updateNoticeEnabled)
 		restoreCursorIdx = -1
 		if err != nil {
 			return err
@@ -156,7 +158,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefinedCommand, quickAccessModifier string, initialCursorIdx int, warnings []string, attentionEnabled bool) (ui.Result, error) {
+func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefinedCommand, quickAccessModifier string, initialCursorIdx int, warnings []string, attentionEnabled, updateNoticeEnabled bool) (ui.Result, error) {
 	worktrees, err := project.ListWorktrees(ctx)
 	if err != nil {
 		return ui.Result{Action: ui.ActionCancel}, fmt.Errorf("failed to list worktrees: %w", err)
@@ -226,8 +228,12 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	if len(warnings) > 0 {
 		opts = append(opts, ui.WithWarnings(warnings))
 	}
-	if notice := pickerUpdateNotice(); notice != "" {
-		opts = append(opts, ui.WithUpdateNotice(notice))
+	// Gating the call (not just the badge) also prevents the background Update
+	// fetch when [updates] notice_enabled = false.
+	if updateNoticeEnabled {
+		if notice := pickerUpdateNotice(); notice != "" {
+			opts = append(opts, ui.WithUpdateNotice(notice))
+		}
 	}
 
 	return ui.Run(items, opts...)

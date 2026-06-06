@@ -513,6 +513,57 @@ display_depth = 3
 	}
 }
 
+func TestUpdateNoticeEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		toml     string
+		expected bool
+	}{
+		{
+			name:     "defaults to true when section absent",
+			toml:     `projects = [{ path = "~/Dev" }]`,
+			expected: true,
+		},
+		{
+			name:     "defaults to true when section present but key absent",
+			toml:     "projects = [{ path = \"~/Dev\" }]\n[updates]",
+			expected: true,
+		},
+		{
+			name:     "explicit true",
+			toml:     "projects = [{ path = \"~/Dev\" }]\n[updates]\nnotice_enabled = true",
+			expected: true,
+		},
+		{
+			name:     "explicit false disables",
+			toml:     "projects = [{ path = \"~/Dev\" }]\n[updates]\nnotice_enabled = false",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
+				t.Fatalf("failed to write config: %v", err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if got := cfg.UpdateNoticeEnabled(); got != tt.expected {
+				t.Errorf("UpdateNoticeEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+
+	// A nil receiver / nil Updates must not panic and defaults to true.
+	if !(*Config)(nil).UpdateNoticeEnabled() {
+		t.Errorf("nil Config UpdateNoticeEnabled() = false, want true")
+	}
+}
+
 func TestGetDisambiguationStrategy(t *testing.T) {
 	tests := []struct {
 		name     string

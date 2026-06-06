@@ -85,8 +85,12 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	if len(systemWarnings) > 0 {
 		opts = append(opts, ui.WithDashboardWarnings(systemWarnings))
 	}
-	if notice := pickerUpdateNotice(); notice != "" {
-		opts = append(opts, ui.WithDashboardUpdateNotice(notice))
+	// Gating the call (not just the badge) also prevents the background Update
+	// fetch when [updates] notice_enabled = false.
+	if cfg.UpdateNoticeEnabled() {
+		if notice := pickerUpdateNotice(); notice != "" {
+			opts = append(opts, ui.WithDashboardUpdateNotice(notice))
+		}
 	}
 
 	panes, initialPaneID := buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosition, sortCriteria)
