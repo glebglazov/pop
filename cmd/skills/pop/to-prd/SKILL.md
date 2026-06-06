@@ -17,7 +17,7 @@ A deep module (as opposed to a shallow module) is one which encapsulates a lot o
 
 Check with the user that these modules match their expectations. Check with the user which modules they want tests written for.
 
-3. Write the PRD using the template below. Resolve the write location by running `pop workload show-path`, which prints this repository's Workload storage issues directory (an absolute path), creating it on demand. Save the PRD into a `prds/` directory alongside that issues directory — i.e. its sibling inside the same Workload storage (create it if it doesn't exist). Name the file `<timestamp>-<slug>.md`, where `<slug>` is a descriptive hyphen-delimited name (e.g. `2026-05-31-user-auth.md`); the slug carries over to the Issue set name when this PRD is later broken down with to-issues.
+3. Write the PRD using the template below. Resolve the write location by running `pop tasks show-path`, which prints this repository's task storage directory (an absolute path), creating it on demand. Save the PRD into a `prds/` directory alongside that task directory — i.e. its sibling inside the same task storage (create it if it doesn't exist). Name the file `<timestamp>-<slug>.md`, where `<slug>` is a descriptive hyphen-delimited name (e.g. `2026-05-31-user-auth.md`); the slug carries over to the task set name when this PRD is later broken down with to-tasks.
 
 <naming-convention>
 `<timestamp>` is a human-readable local date/time prefix so PRDs sort chronologically:

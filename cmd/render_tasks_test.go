@@ -11,7 +11,7 @@ import (
 var taskSkillDirs = map[string][]string{
 	"pop-grill-with-docs": {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-to-prd":          {},
-	"pop-to-issues":       {},
+	"pop-to-tasks":        {},
 }
 
 // TestRenderTaskSkillsDirAgents pins the task-skills rendered tree for
@@ -93,22 +93,24 @@ func TestRenderTaskSkillsBodyMatchesInjectedSource(t *testing.T) {
 
 // TestRenderTaskSkillsContentUsesShowPath confirms the rendered planning
 // skills no longer assume an in-tree thoughts/ location and instead resolve
-// their write location via `pop task show-path` (ADR 0012).
+// their write location via `pop tasks show-path` (ADR 0012, ADR 0013).
 func TestRenderTaskSkillsContentUsesShowPath(t *testing.T) {
 	tree, err := renderComponent(ComponentTaskSkills, "claude")
 	if err != nil {
 		t.Fatalf("renderComponent: %v", err)
 	}
 
-	for _, skill := range []string{"pop-to-prd", "pop-to-issues"} {
+	for _, skill := range []string{"pop-to-prd", "pop-to-tasks"} {
 		body := string(tree[skill+"/SKILL.md"])
 		if strings.Contains(body, "thoughts/") {
 			t.Errorf("%s SKILL.md still mentions thoughts/: %q", skill, body)
 		}
-		// The embedded skill markdown is renamed in a separate slice; it still
-		// emits the pre-rename `pop workload show-path` command, so match that.
-		if !strings.Contains(body, "pop workload show-path") {
-			t.Errorf("%s SKILL.md does not route through `pop workload show-path`", skill)
+		if !strings.Contains(body, "pop tasks show-path") {
+			t.Errorf("%s SKILL.md does not route through `pop tasks show-path`", skill)
+		}
+		// No leftover issue/workload vocabulary.
+		if strings.Contains(body, "workload") || strings.Contains(body, "to-issues") {
+			t.Errorf("%s SKILL.md still mentions issue/workload vocabulary: %q", skill, body)
 		}
 	}
 }

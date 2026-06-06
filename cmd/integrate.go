@@ -173,7 +173,7 @@ var integrateUpdateExisting bool
 var integratePaneSkill bool
 
 // integrateTaskSkills is the --task-skills component flag. When set,
-// the task planning skills (grill-with-docs, to-prd, to-issues) are
+// the task planning skills (grill-with-docs, to-prd, to-tasks) are
 // installed for the agent alongside the core status wiring.
 var integrateTaskSkills bool
 
@@ -194,7 +194,7 @@ skills) are separate opt-ins selected with component flags:
 
   --task-skills
                 Also install the task planning skills (grill-with-docs,
-                to-prd, to-issues), each as a multi-file skill directory
+                to-prd, to-tasks), each as a multi-file skill directory
                 symlinked into pop's data directory (e.g.
                 ~/.claude/skills/pop-grill-with-docs/). grill-with-docs ships
                 with its companion format documents so its references resolve.
@@ -286,7 +286,7 @@ func init() {
 	integrateCmd.Flags().BoolVar(&integratePaneSkill, "pane-skill", false,
 		"Install the pane skill (lets the agent drive tmux panes) alongside the status wiring")
 	integrateCmd.Flags().BoolVar(&integrateTaskSkills, "task-skills", false,
-		"Install the task planning skills (grill-with-docs, to-prd, to-issues) alongside the status wiring")
+		"Install the task planning skills (grill-with-docs, to-prd, to-tasks) alongside the status wiring")
 	integrateCmd.AddCommand(integrateRemoveCmd)
 	rootCmd.AddCommand(integrateCmd)
 }

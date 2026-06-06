@@ -462,7 +462,7 @@ func TestInstallFileComponentPartialSetInstall(t *testing.T) {
 	skillsDir := filepath.Join(installerHome, ".claude", "skills")
 	conflictDest := filepath.Join(skillsDir, "pop-to-prd")
 	// User's own skill at the bare name of one task skill.
-	bareConflict := filepath.Join(skillsDir, "to-issues")
+	bareConflict := filepath.Join(skillsDir, "to-tasks")
 	fs.dirs[bareConflict] = true
 	fs.files[filepath.Join(bareConflict, "SKILL.md")] = []byte("mine")
 
@@ -470,9 +470,9 @@ func TestInstallFileComponentPartialSetInstall(t *testing.T) {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
-	// The conflicting skill (to-issues, via its bare form) is skipped.
-	if _, linked := fs.symlinks[filepath.Join(skillsDir, "pop-to-issues")]; linked {
-		t.Fatalf("conflicting skill pop-to-issues was installed despite bare conflict")
+	// The conflicting skill (to-tasks, via its bare form) is skipped.
+	if _, linked := fs.symlinks[filepath.Join(skillsDir, "pop-to-tasks")]; linked {
+		t.Fatalf("conflicting skill pop-to-tasks was installed despite bare conflict")
 	}
 	// The other two skills install normally.
 	for _, name := range []string{"pop-grill-with-docs", "pop-to-prd"} {

@@ -39,7 +39,7 @@ func taskAgents() []taskAgent {
 
 // taskSkillNames is the set of skill directory names the task-skills
 // component installs.
-var taskSkillNames = []string{"pop-grill-with-docs", "pop-to-prd", "pop-to-issues"}
+var taskSkillNames = []string{"pop-grill-with-docs", "pop-to-prd", "pop-to-tasks"}
 
 // TestInstallTaskSkillsAllAgents covers the clean install for claude, pi,
 // and cursor: all three planning skills land as render trees under the data dir
@@ -137,6 +137,45 @@ func TestRunIntegrateTaskSkillsInstallsExactSet(t *testing.T) {
 				if fs.symlinks[dest] == "" {
 					t.Fatalf("missing symlink for %s at %s", skill, dest)
 				}
+			}
+		})
+	}
+}
+
+// TestInstallTaskSkillsLeftoverOldNameNotBlocking covers the rename seam: a
+// pre-existing skill under the old `to-issues` name (bare or `pop-` prefixed),
+// which pop does not own, neither blocks the `to-tasks` install nor is deleted.
+// The old-name vocabulary differs from the new skill name, so it is not even a
+// conflict candidate — all three current skills install and the leftover stays.
+func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
+	for _, leftover := range []string{"to-issues", "pop-to-issues"} {
+		t.Run(leftover, func(t *testing.T) {
+			fs := newFakeFS()
+			d := fakeDeps(installerHome, fs, nil)
+
+			skillsDir := filepath.Join(installerHome, ".claude", "skills")
+			oldDir := filepath.Join(skillsDir, leftover)
+			oldBody := filepath.Join(oldDir, "SKILL.md")
+			fs.dirs[oldDir] = true
+			fs.files[oldBody] = []byte("legacy user skill")
+
+			if err := installFileComponent(d, installerHome, ComponentTaskSkills, "claude"); err != nil {
+				t.Fatalf("installFileComponent: %v", err)
+			}
+
+			// All three current skills install — the leftover blocks nothing.
+			if len(fs.symlinks) != len(taskSkillNames) {
+				t.Fatalf("expected %d symlinks, got %d: %v", len(taskSkillNames), len(fs.symlinks), fs.symlinks)
+			}
+			for _, skill := range taskSkillNames {
+				if _, linked := fs.symlinks[filepath.Join(skillsDir, skill)]; !linked {
+					t.Fatalf("skill %s was not installed: %v", skill, fs.symlinks)
+				}
+			}
+
+			// The old-name skill pop does not own is left untouched.
+			if _, ok := fs.files[oldBody]; !ok {
+				t.Fatalf("leftover old-name skill %s was deleted", leftover)
 			}
 		})
 	}

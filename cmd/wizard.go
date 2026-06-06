@@ -92,7 +92,7 @@ const paneSkillExplanation = `  The pane skill lets the agent drive tmux panes d
 const taskSkillsExplanation = `  The task planning skills install pop's planning-to-execution flow:
   a grilling session that stress-tests your design (grill-with-docs), then
   a PRD (to-prd), then a breakdown into independently-runnable tasks
-  (to-issues) that ` + "`pop tasks drain`" + ` executes, one agent per task.`
+  (to-tasks) that ` + "`pop tasks drain`" + ` executes, one agent per task.`
 
 // wizardFileComponentStep runs one wizard step for a file-based opt-in
 // component (the pane skill, the task planning skills). It reports the
