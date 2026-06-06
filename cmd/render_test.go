@@ -112,10 +112,10 @@ func TestRenderUnsupportedAgent(t *testing.T) {
 	if _, err := renderComponent(ComponentPaneSkill, "codex"); err == nil {
 		t.Fatalf("expected error rendering pane skill for codex")
 	}
-	// Workload skills remain unsupported for opencode even though the pane
+	// Task skills remain unsupported for opencode even though the pane
 	// skill is now supported there.
-	if _, err := renderComponent(ComponentWorkloadSkills, "opencode"); err == nil {
-		t.Fatalf("expected error rendering workload skills for opencode")
+	if _, err := renderComponent(ComponentTaskSkills, "opencode"); err == nil {
+		t.Fatalf("expected error rendering task skills for opencode")
 	}
 }
 

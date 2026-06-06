@@ -12,7 +12,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/workload"
+	"github.com/glebglazov/pop/tasks"
 )
 
 // readOnlyDoctorDeps wires a doctorDeps over a fakeFS with injectable core
@@ -61,12 +61,12 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 		},
 		explicitAgentContext:     func() []string { return nil },
 		agentExecutableAvailable: func(string) bool { return false },
-		workloadStorageWritable: func() (string, error) {
+		taskStorageWritable: func() (string, error) {
 			return "/data/pop/repos", nil
 		},
-		legacyIssueSets:         func() ([]string, error) { return nil, nil },
-		orphanedWorkloadStorage: func() ([]workload.OrphanedStorage, error) { return nil, nil },
-		legacyLayoutStorage:     func() ([]string, error) { return nil, nil },
+		legacyTaskSets:      func() ([]string, error) { return nil, nil },
+		orphanedTaskStorage: func() ([]tasks.OrphanedStorage, error) { return nil, nil },
+		legacyLayoutStorage: func() ([]string, error) { return nil, nil },
 	}
 }
 
@@ -120,7 +120,7 @@ func runDoctorGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func workloadCheck(t *testing.T, report *doctorReport, label string) doctorCheck {
+func taskCheck(t *testing.T, report *doctorReport, label string) doctorCheck {
 	t.Helper()
 	family, ok := familyByCommand(report, "pop tasks")
 	if !ok {
@@ -256,12 +256,12 @@ func TestDoctorDoesNotRenderStalePaneSkillAsPrimaryIntegrateRow(t *testing.T) {
 	}
 }
 
-func TestDoctorDerivesIntendedAgentsFromWorkloadConfiguration(t *testing.T) {
+func TestDoctorDerivesIntendedAgentsFromTaskConfiguration(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
 	intent, err := doctorDetectAgentIntent(d, installerHome, func(string) (*config.Config, error) {
-		return &config.Config{Workload: &config.WorkloadConfig{Agents: map[string]config.WorkloadAgentConfig{
+		return &config.Config{Task: &config.TaskConfig{Agents: map[string]config.TaskAgentConfig{
 			"cursor": {Output: "text"},
 		}}}, nil
 	}, nil, func(string) bool { return false })
@@ -270,10 +270,10 @@ func TestDoctorDerivesIntendedAgentsFromWorkloadConfiguration(t *testing.T) {
 	}
 	got, ok := doctorIntentByAgent(intent, "cursor")
 	if !ok {
-		t.Fatalf("configured workload agent was not intended: %+v", intent)
+		t.Fatalf("configured task agent was not intended: %+v", intent)
 	}
-	if !stringSliceContains(got.sources, "workload config") {
-		t.Fatalf("intent sources = %v, want workload config", got.sources)
+	if !stringSliceContains(got.sources, "task config") {
+		t.Fatalf("intent sources = %v, want task config", got.sources)
 	}
 }
 
@@ -407,7 +407,7 @@ func TestDoctorUsesAgentComponentStateOnlyAsSupportingEvidence(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing pop integrate family")
 	}
-	for _, oldLabel := range []string{"claude status-wiring", "claude pane-skill", "codex workload-skills"} {
+	for _, oldLabel := range []string{"claude status-wiring", "claude pane-skill", "codex task-skills"} {
 		if _, ok := checkByLabel(integrate, oldLabel); ok {
 			t.Fatalf("old component-grid row %q should not be rendered in integrate family: %+v", oldLabel, integrate.checks)
 		}
@@ -655,7 +655,7 @@ func TestDoctorWorktreeReadinessBlocksOutsideGit(t *testing.T) {
 	}
 }
 
-func TestDoctorWorkloadHealthyStorageIsOK(t *testing.T) {
+func TestDoctorTaskHealthyStorageIsOK(t *testing.T) {
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 
 	report, err := buildDoctorReport(d)
@@ -667,10 +667,10 @@ func TestDoctorWorkloadHealthyStorageIsOK(t *testing.T) {
 		t.Fatalf("missing pop tasks family")
 	}
 	if family.status != doctorStatusOK {
-		t.Fatalf("workload status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+		t.Fatalf("task status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
 	}
 
-	writable := workloadCheck(t, report, "task storage writable")
+	writable := taskCheck(t, report, "task storage writable")
 	if writable.status != doctorStatusOK {
 		t.Fatalf("writable status = %s, want %s", writable.status, doctorStatusOK)
 	}
@@ -678,20 +678,20 @@ func TestDoctorWorkloadHealthyStorageIsOK(t *testing.T) {
 		t.Fatalf("writable detail should name the data dir: %q", writable.detail)
 	}
 
-	legacy := workloadCheck(t, report, "legacy in-tree task sets")
+	legacy := taskCheck(t, report, "legacy in-tree task sets")
 	if legacy.status != doctorStatusOK {
 		t.Fatalf("legacy status = %s, want %s", legacy.status, doctorStatusOK)
 	}
 
-	orphan := workloadCheck(t, report, "orphaned task storage")
+	orphan := taskCheck(t, report, "orphaned task storage")
 	if orphan.status != doctorStatusOK {
 		t.Fatalf("orphan status = %s, want %s", orphan.status, doctorStatusOK)
 	}
 }
 
-func TestDoctorWorkloadStorageUnwritableBlocks(t *testing.T) {
+func TestDoctorTaskStorageUnwritableBlocks(t *testing.T) {
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-	d.workloadStorageWritable = func() (string, error) {
+	d.taskStorageWritable = func() (string, error) {
 		return "", errors.New("write beneath workloads data dir /data/pop/workloads: permission denied")
 	}
 
@@ -704,9 +704,9 @@ func TestDoctorWorkloadStorageUnwritableBlocks(t *testing.T) {
 		t.Fatalf("missing pop tasks family")
 	}
 	if family.status != doctorStatusBlocked {
-		t.Fatalf("workload status = %s, want %s", family.status, doctorStatusBlocked)
+		t.Fatalf("task status = %s, want %s", family.status, doctorStatusBlocked)
 	}
-	check := workloadCheck(t, report, "task storage writable")
+	check := taskCheck(t, report, "task storage writable")
 	if check.status != doctorStatusBlocked {
 		t.Fatalf("writable status = %s, want %s", check.status, doctorStatusBlocked)
 	}
@@ -715,9 +715,9 @@ func TestDoctorWorkloadStorageUnwritableBlocks(t *testing.T) {
 	}
 }
 
-func TestDoctorWorkloadLegacyIssueSetsAdviseMigrate(t *testing.T) {
+func TestDoctorTaskLegacyTaskSetsAdviseMigrate(t *testing.T) {
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-	d.legacyIssueSets = func() ([]string, error) {
+	d.legacyTaskSets = func() ([]string, error) {
 		return []string{"2026-01-01-old-set", "2026-02-02-other"}, nil
 	}
 
@@ -730,9 +730,9 @@ func TestDoctorWorkloadLegacyIssueSetsAdviseMigrate(t *testing.T) {
 		t.Fatalf("missing pop tasks family")
 	}
 	if family.status != doctorStatusPartial {
-		t.Fatalf("workload status = %s, want %s", family.status, doctorStatusPartial)
+		t.Fatalf("task status = %s, want %s", family.status, doctorStatusPartial)
 	}
-	check := workloadCheck(t, report, "legacy in-tree task sets")
+	check := taskCheck(t, report, "legacy in-tree task sets")
 	if check.status != doctorStatusPartial {
 		t.Fatalf("legacy status = %s, want %s", check.status, doctorStatusPartial)
 	}
@@ -744,9 +744,9 @@ func TestDoctorWorkloadLegacyIssueSetsAdviseMigrate(t *testing.T) {
 	}
 }
 
-func TestDoctorWorkloadLegacyInspectionFailureIsNA(t *testing.T) {
+func TestDoctorTaskLegacyInspectionFailureIsNA(t *testing.T) {
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-	d.legacyIssueSets = func() ([]string, error) {
+	d.legacyTaskSets = func() ([]string, error) {
 		return nil, errors.New("resolve worktree root: not a git repository")
 	}
 
@@ -759,9 +759,9 @@ func TestDoctorWorkloadLegacyInspectionFailureIsNA(t *testing.T) {
 		t.Fatalf("missing pop tasks family")
 	}
 	if family.status != doctorStatusOK {
-		t.Fatalf("workload status = %s, want %s (legacy inspection failure must not block)", family.status, doctorStatusOK)
+		t.Fatalf("task status = %s, want %s (legacy inspection failure must not block)", family.status, doctorStatusOK)
 	}
-	check := workloadCheck(t, report, "legacy in-tree task sets")
+	check := taskCheck(t, report, "legacy in-tree task sets")
 	if check.status != doctorStatusNA {
 		t.Fatalf("legacy status = %s, want %s", check.status, doctorStatusNA)
 	}
@@ -770,10 +770,10 @@ func TestDoctorWorkloadLegacyInspectionFailureIsNA(t *testing.T) {
 	}
 }
 
-func TestDoctorWorkloadOrphanStorageIsReportOnly(t *testing.T) {
+func TestDoctorTaskOrphanStorageIsReportOnly(t *testing.T) {
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-	d.orphanedWorkloadStorage = func() ([]workload.OrphanedStorage, error) {
-		return []workload.OrphanedStorage{
+	d.orphanedTaskStorage = func() ([]tasks.OrphanedStorage, error) {
+		return []tasks.OrphanedStorage{
 			{StorageDir: "/data/pop/workloads/gone-abc123", RepositoryPath: "/vanished/repo/.git"},
 		}, nil
 	}
@@ -788,9 +788,9 @@ func TestDoctorWorkloadOrphanStorageIsReportOnly(t *testing.T) {
 	}
 	// Orphans are informational: a healthy repository's family stays OK.
 	if family.status != doctorStatusOK {
-		t.Fatalf("workload status = %s, want %s (orphans must not affect healthy status)", family.status, doctorStatusOK)
+		t.Fatalf("task status = %s, want %s (orphans must not affect healthy status)", family.status, doctorStatusOK)
 	}
-	check := workloadCheck(t, report, "orphaned task storage")
+	check := taskCheck(t, report, "orphaned task storage")
 	if check.status != doctorStatusNA {
 		t.Fatalf("orphan status = %s, want %s", check.status, doctorStatusNA)
 	}
@@ -805,7 +805,7 @@ func TestDoctorWorkloadOrphanStorageIsReportOnly(t *testing.T) {
 	}
 }
 
-func TestDoctorWorkloadLegacyLayoutIsReportOnly(t *testing.T) {
+func TestDoctorTaskLegacyLayoutIsReportOnly(t *testing.T) {
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.legacyLayoutStorage = func() ([]string, error) {
 		return []string{"/data/pop/workloads/repo-abc123"}, nil
@@ -821,9 +821,9 @@ func TestDoctorWorkloadLegacyLayoutIsReportOnly(t *testing.T) {
 	}
 	// An un-migrated layout is a finding, never a readiness failure.
 	if family.status != doctorStatusOK {
-		t.Fatalf("workload status = %s, want %s (legacy layout must not block)", family.status, doctorStatusOK)
+		t.Fatalf("task status = %s, want %s (legacy layout must not block)", family.status, doctorStatusOK)
 	}
-	check := workloadCheck(t, report, "legacy storage layout")
+	check := taskCheck(t, report, "legacy storage layout")
 	if check.status != doctorStatusNA {
 		t.Fatalf("legacy layout status = %s, want %s", check.status, doctorStatusNA)
 	}
@@ -1050,7 +1050,7 @@ func TestRenderDoctorReportPinsRepresentativeFamilyOutput(t *testing.T) {
 			{label: "task manifest readable", status: doctorStatusDegraded, detail: "manifest read returned inconsistent state"},
 		}),
 		familyReport("pop integrate", []doctorCheck{
-			{label: "intended agent setup repair path", status: doctorStatusOK, detail: "can inspect and repair intended agent setup through pop integrate for: claude (workload config)"},
+			{label: "intended agent setup repair path", status: doctorStatusOK, detail: "can inspect and repair intended agent setup through pop integrate for: claude (task config)"},
 			{label: "codex available agent suggestion", status: doctorStatusNA, detail: "agent executable is available on PATH but no Pop intent was detected", nextAction: "pop integrate codex"},
 		}),
 	}}
@@ -1068,7 +1068,7 @@ Partial   pop pane       tmux executable was not found
 Degraded  pop tasks      manifest read returned inconsistent state
   Degraded  task manifest readable - manifest read returned inconsistent state
 OK        pop integrate  ready
-  OK        intended agent setup repair path - can inspect and repair intended agent setup through pop integrate for: claude (workload config)
+  OK        intended agent setup repair path - can inspect and repair intended agent setup through pop integrate for: claude (task config)
   N/A       codex available agent suggestion - agent executable is available on PATH but no Pop intent was detected (next: pop integrate codex)
 `
 	if out.String() != want {

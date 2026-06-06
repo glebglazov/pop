@@ -12,7 +12,7 @@ import (
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/workload"
+	"github.com/glebglazov/pop/tasks"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ import (
 // paths use. It never installs or repairs — actionable checks simply carry the
 // copy-paste command that fixes them.
 //
-// Exit status mirrors `workload status`: it reflects rendering success, not the
+// Exit status mirrors `task status`: it reflects rendering success, not the
 // health findings. A machine with everything broken still exits 0; only a
 // failure to produce the report (e.g. no home directory) is a non-zero exit.
 
@@ -49,9 +49,9 @@ type doctorDeps struct {
 	agentIntent               func() (*doctorAgentIntentReport, error)
 	explicitAgentContext      func() []string
 	agentExecutableAvailable  func(string) bool
-	workloadStorageWritable   func() (string, error)
-	legacyIssueSets           func() ([]string, error)
-	orphanedWorkloadStorage   func() ([]workload.OrphanedStorage, error)
+	taskStorageWritable       func() (string, error)
+	legacyTaskSets            func() ([]string, error)
+	orphanedTaskStorage       func() ([]tasks.OrphanedStorage, error)
 	legacyLayoutStorage       func() ([]string, error)
 }
 
@@ -100,12 +100,12 @@ func defaultDoctorDeps() *doctorDeps {
 		},
 		explicitAgentContext:     func() []string { return nil },
 		agentExecutableAvailable: doctorAgentExecutableAvailable,
-		workloadStorageWritable:  func() (string, error) { return workload.ProbeStorageWritable(workload.DefaultDeps()) },
-		legacyIssueSets:          func() ([]string, error) { return workload.LegacyIssueSetIDs(workload.DefaultDeps(), "") },
-		orphanedWorkloadStorage: func() ([]workload.OrphanedStorage, error) {
-			return workload.FindOrphanedStorage(workload.DefaultDeps())
+		taskStorageWritable:      func() (string, error) { return tasks.ProbeStorageWritable(tasks.DefaultDeps()) },
+		legacyTaskSets:           func() ([]string, error) { return tasks.LegacyTaskSetIDs(tasks.DefaultDeps(), "") },
+		orphanedTaskStorage: func() ([]tasks.OrphanedStorage, error) {
+			return tasks.FindOrphanedStorage(tasks.DefaultDeps())
 		},
-		legacyLayoutStorage: func() ([]string, error) { return workload.LegacyLayoutStorageDirs(workload.DefaultDeps()) },
+		legacyLayoutStorage: func() ([]string, error) { return tasks.LegacyLayoutStorageDirs(tasks.DefaultDeps()) },
 	}
 }
 
@@ -169,7 +169,7 @@ var doctorCmd = &cobra.Command{
 	Long: `Report pop's readiness on this machine — strictly read-only.
 
 Doctor prints the canonical command families (project, worktree, monitor,
-pane, workload, integrate) and nested checks for each family. When a family
+pane, task, integrate) and nested checks for each family. When a family
 depends on agent setup, Doctor reads Pop's existing integration evidence to
 explain that family's readiness; it does not present a support matrix or
 per-agent component inventory as the report.
@@ -224,7 +224,7 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 			familyReport("pop worktree", doctorWorktreeChecks(d)),
 			familyReport("pop monitor", doctorMonitorChecks(d, intent)),
 			familyReport("pop pane", doctorPaneChecks(d)),
-			familyReport("pop tasks", doctorWorkloadChecks(d)),
+			familyReport("pop tasks", doctorTaskChecks(d)),
 		},
 	}
 
@@ -373,25 +373,25 @@ func doctorPaneChecks(d *doctorDeps) []doctorCheck {
 	return checks
 }
 
-// doctorWorkloadChecks reports Tasks readiness for storage that lives in pop's
+// doctorTaskChecks reports Tasks readiness for storage that lives in pop's
 // data dir rather than the repository tree (ADR 0012): the Task storage data dir
 // is writable, no legacy in-tree task sets remain in this worktree, no pre-rename
 // storage layout is left un-migrated, and no Task storage has been orphaned by a
 // vanished repository. Legacy-layout, orphan, and migration reporting are
 // informational only — Doctor never deletes, moves, or modifies storage.
-func doctorWorkloadChecks(d *doctorDeps) []doctorCheck {
-	checks := []doctorCheck{doctorWorkloadStorageWritableCheck(d)}
-	checks = append(checks, doctorWorkloadLegacyCheck(d))
-	checks = append(checks, doctorWorkloadLegacyLayoutCheck(d))
-	checks = append(checks, doctorWorkloadOrphanCheck(d))
+func doctorTaskChecks(d *doctorDeps) []doctorCheck {
+	checks := []doctorCheck{doctorTaskStorageWritableCheck(d)}
+	checks = append(checks, doctorTaskLegacyCheck(d))
+	checks = append(checks, doctorTaskLegacyLayoutCheck(d))
+	checks = append(checks, doctorTaskOrphanCheck(d))
 	return checks
 }
 
-// doctorWorkloadLegacyLayoutCheck surfaces a pre-rename storage layout still
+// doctorTaskLegacyLayoutCheck surfaces a pre-rename storage layout still
 // present under the retired workloads/ data dir. It is informational (N/A): an
 // un-migrated layout is migrated automatically on the next tasks command, so it
 // never drives readiness below OK and Doctor never moves storage itself.
-func doctorWorkloadLegacyLayoutCheck(d *doctorDeps) doctorCheck {
+func doctorTaskLegacyLayoutCheck(d *doctorDeps) doctorCheck {
 	if d.legacyLayoutStorage == nil {
 		return doctorCheck{
 			label:  "legacy storage layout",
@@ -423,8 +423,8 @@ func doctorWorkloadLegacyLayoutCheck(d *doctorDeps) doctorCheck {
 	}
 }
 
-func doctorWorkloadStorageWritableCheck(d *doctorDeps) doctorCheck {
-	dir, err := d.workloadStorageWritable()
+func doctorTaskStorageWritableCheck(d *doctorDeps) doctorCheck {
+	dir, err := d.taskStorageWritable()
 	if err != nil {
 		return doctorCheck{
 			label:  "task storage writable",
@@ -439,8 +439,8 @@ func doctorWorkloadStorageWritableCheck(d *doctorDeps) doctorCheck {
 	}
 }
 
-func doctorWorkloadLegacyCheck(d *doctorDeps) doctorCheck {
-	legacy, err := d.legacyIssueSets()
+func doctorTaskLegacyCheck(d *doctorDeps) doctorCheck {
+	legacy, err := d.legacyTaskSets()
 	switch {
 	case err != nil:
 		return doctorCheck{
@@ -464,8 +464,8 @@ func doctorWorkloadLegacyCheck(d *doctorDeps) doctorCheck {
 	}
 }
 
-func doctorWorkloadOrphanCheck(d *doctorDeps) doctorCheck {
-	orphans, err := d.orphanedWorkloadStorage()
+func doctorTaskOrphanCheck(d *doctorDeps) doctorCheck {
+	orphans, err := d.orphanedTaskStorage()
 	switch {
 	case err != nil:
 		return doctorCheck{
@@ -479,7 +479,7 @@ func doctorWorkloadOrphanCheck(d *doctorDeps) doctorCheck {
 			lines = append(lines, fmt.Sprintf("%s (repository %s no longer exists)", o.StorageDir, o.RepositoryPath))
 		}
 		// N/A keeps orphan reporting informational: it never drives a healthy
-		// repository's Workload family below OK. Doctor only reports orphans —
+		// repository's Task family below OK. Doctor only reports orphans —
 		// it never deletes storage, and no GC exists.
 		return doctorCheck{
 			label:  "orphaned task storage",
@@ -671,11 +671,11 @@ func doctorDetectAgentIntent(d *integrateDeps, home string, loadConfig func(stri
 		cfg, err := loadConfig(config.DefaultConfigPath())
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("load workload config for agent intent: %w", err)
+				return nil, fmt.Errorf("load task config for agent intent: %w", err)
 			}
-		} else if cfg != nil && cfg.Workload != nil {
-			for agent := range cfg.Workload.Agents {
-				addIntent(agent, "workload config")
+		} else if cfg != nil && cfg.Task != nil {
+			for agent := range cfg.Task.Agents {
+				addIntent(agent, "task config")
 			}
 		}
 	}
@@ -876,7 +876,7 @@ func doctorStatusReason(check doctorCheck) string {
 
 // doctorComponentState computes a component's state for an agent by composing
 // the existing check seams — it owns no state logic. File-based components
-// (the pane skill, the workload planning skills) defer entirely to
+// (the pane skill, the task planning skills) defer entirely to
 // wizardFileComponentState (catalog support + conflict + installed + stale).
 // The status wiring has no render tree, so its state is the binary
 // installed/not-installed signal from its own seam (statusWiringInstalled).
@@ -913,9 +913,9 @@ func installedState(installed bool) componentStateInfo {
 // it non-interactively. The status wiring has no flag — it is the core
 // component a bare `pop integrate <agent>` installs.
 var doctorComponentFlag = map[ComponentID]string{
-	ComponentStatusWiring:   "",
-	ComponentPaneSkill:      "--pane-skill",
-	ComponentWorkloadSkills: "--workload-skills",
+	ComponentStatusWiring: "",
+	ComponentPaneSkill:    "--pane-skill",
+	ComponentTaskSkills:   "--task-skills",
 }
 
 // integrateInvocation builds the copy-paste integrate command that installs the

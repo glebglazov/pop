@@ -189,13 +189,13 @@ func TestWorktreeHelpHasNoPhantomCreateBinding(t *testing.T) {
 	}
 }
 
-// TestBuildWorktreeItemsIssuesNoGitCalls guards against reintroducing the
+// TestBuildWorktreeItemsTasksNoGitCalls guards against reintroducing the
 // per-worktree git-call storm (commit 59d4af8, fixed in 417eaeb). Session
 // names must be derived from the already-known RepoContext, not by calling
 // project.SessionName(path) — which spawns 2-3 git subprocesses per worktree —
 // inside the build loop. Building items for many worktrees must cost zero git
 // calls regardless of count.
-func TestBuildWorktreeItemsIssuesNoGitCalls(t *testing.T) {
+func TestBuildWorktreeItemsTasksNoGitCalls(t *testing.T) {
 	for _, ctx := range []*project.RepoContext{
 		{IsBare: true, RepoName: "myrepo"},
 		{IsBare: false},
@@ -211,7 +211,7 @@ func TestBuildWorktreeItemsIssuesNoGitCalls(t *testing.T) {
 		restore()
 
 		if *gitCalls != 0 {
-			t.Errorf("IsBare=%v: buildWorktreeItems issued %d git calls for %d worktrees, want 0 (per-item git derivation regressed)", ctx.IsBare, *gitCalls, len(worktrees))
+			t.Errorf("IsBare=%v: buildWorktreeItems taskd %d git calls for %d worktrees, want 0 (per-item git derivation regressed)", ctx.IsBare, *gitCalls, len(worktrees))
 		}
 	}
 }

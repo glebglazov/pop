@@ -868,7 +868,7 @@ func TestIntegrateCursor_PreservesExistingHooks(t *testing.T) {
 	fs := newFakeFS()
 	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
 	existing := map[string]interface{}{
-		"version": 1,
+		"version":   1,
 		"customKey": "customValue",
 		"hooks": map[string]interface{}{
 			"beforeSubmitPrompt": []interface{}{
@@ -1482,7 +1482,7 @@ func TestRefreshComponent_SkipsNotSupportedSilently(t *testing.T) {
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)
 
-	for _, id := range []ComponentID{ComponentPaneSkill, ComponentWorkloadSkills} {
+	for _, id := range []ComponentID{ComponentPaneSkill, ComponentTaskSkills} {
 		updated, warning := refreshComponent(dry, real, "codex", id)
 		if updated || warning != "" {
 			t.Errorf("codex/%s: expected silent no-op, got updated=%v warning=%q", id, updated, warning)

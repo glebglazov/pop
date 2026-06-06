@@ -25,9 +25,9 @@ const (
 	// path; it returns behind an explicit opt-in in a later slice.
 	ComponentPaneSkill ComponentID = "pane-skill"
 
-	// ComponentWorkloadSkills is the opt-in workload planning skill set
+	// ComponentTaskSkills is the opt-in task planning skill set
 	// (grill-with-docs, to-prd, to-issues).
-	ComponentWorkloadSkills ComponentID = "workload-skills"
+	ComponentTaskSkills ComponentID = "task-skills"
 )
 
 // integrationComponent is one entry in the component catalog: a stable
@@ -43,7 +43,7 @@ type integrationComponent struct {
 	supports map[string]bool
 	// sources lists embedded source paths (within skillFiles) this component
 	// renders from. Empty for components whose sources are not file-based
-	// (status wiring) or not yet embedded (workload skills).
+	// (status wiring) or not yet embedded (task skills).
 	sources []string
 	install func(d *integrateDeps, home, agent string) error
 }
@@ -68,7 +68,7 @@ func agentSet(agents ...string) map[string]bool {
 // knowledge. Adding a future component means adding an entry here.
 //
 // Support matrix: codex cannot host either skill component; opencode hosts the
-// pane skill (in its flat single-file form) but not the workload planning
+// pane skill (in its flat single-file form) but not the task planning
 // skills. Unsupported pairs are reported as not-supported rather than receiving
 // a degraded install. See ADR 0010.
 var integrationCatalog = []integrationComponent{
@@ -83,7 +83,7 @@ var integrationCatalog = []integrationComponent{
 		sources:  []string{"skills/pop/pane.md"},
 	},
 	{
-		id:       ComponentWorkloadSkills,
+		id:       ComponentTaskSkills,
 		supports: agentSet("claude", "pi", "cursor"),
 		// Each source is a skill directory (SKILL.md plus any companion
 		// documents). grill-with-docs ships two companion format files that

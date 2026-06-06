@@ -996,8 +996,8 @@ func testProjectDeps(t *testing.T) *ProjectDeps {
 			return ui.Result{Action: ui.ActionCancel}, nil
 		},
 
-		SessionActivity:    func() map[string]int64 { return nil },
-		AttentionSessions:  func() map[string]bool { return nil },
+		SessionActivity:   func() map[string]int64 { return nil },
+		AttentionSessions: func() map[string]bool { return nil },
 
 		OpenSession:       func(tmux deps.Tmux, item *ui.Item) error { return nil },
 		OpenWindow:        func(tmux deps.Tmux, item *ui.Item) error { return nil },

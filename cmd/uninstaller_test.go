@@ -213,7 +213,7 @@ func TestRunIntegrateRemoveSeveralComponents(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	if err := runIntegrateComponents(d, "claude",
-		[]ComponentID{ComponentPaneSkill, ComponentWorkloadSkills}, false); err != nil {
+		[]ComponentID{ComponentPaneSkill, ComponentTaskSkills}, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -229,9 +229,9 @@ func TestRunIntegrateRemoveSeveralComponents(t *testing.T) {
 	if inst, _ := fileComponentInstalled(d, installerHome, ComponentPaneSkill, "claude"); inst {
 		t.Fatalf("pane skill should be removed")
 	}
-	// Workload skills remain (not requested).
-	if inst, _ := fileComponentInstalled(d, installerHome, ComponentWorkloadSkills, "claude"); !inst {
-		t.Fatalf("workload skills should remain")
+	// Task skills remain (not requested).
+	if inst, _ := fileComponentInstalled(d, installerHome, ComponentTaskSkills, "claude"); !inst {
+		t.Fatalf("task skills should remain")
 	}
 }
 
@@ -242,7 +242,7 @@ func TestRunIntegrateRemoveDefaultSet(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	if err := runIntegrateComponents(d, "claude",
-		[]ComponentID{ComponentPaneSkill, ComponentWorkloadSkills}, false); err != nil {
+		[]ComponentID{ComponentPaneSkill, ComponentTaskSkills}, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -250,7 +250,7 @@ func TestRunIntegrateRemoveDefaultSet(t *testing.T) {
 		t.Fatalf("remove default set: %v", err)
 	}
 
-	for _, id := range []ComponentID{ComponentPaneSkill, ComponentWorkloadSkills} {
+	for _, id := range []ComponentID{ComponentPaneSkill, ComponentTaskSkills} {
 		if inst, _ := fileComponentInstalled(d, installerHome, id, "claude"); inst {
 			t.Fatalf("component %s should be removed in default set", id)
 		}

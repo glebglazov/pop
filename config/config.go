@@ -92,13 +92,13 @@ type ProjectConfig struct {
 	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled"`
 }
 
-// WorkloadConfig holds workload-execution configuration.
-type WorkloadConfig struct {
-	Agents map[string]WorkloadAgentConfig `toml:"agents"`
+// TaskConfig holds task-execution configuration.
+type TaskConfig struct {
+	Agents map[string]TaskAgentConfig `toml:"agents"`
 }
 
-// WorkloadAgentConfig holds configuration for one workload agent preset.
-type WorkloadAgentConfig struct {
+// TaskAgentConfig holds configuration for one task agent preset.
+type TaskAgentConfig struct {
 	Output string `toml:"output"`
 }
 
@@ -132,18 +132,20 @@ type Config struct {
 	Select         *ProjectConfig        `toml:"select"`
 	PaneMonitoring *PaneMonitoringConfig `toml:"pane_monitoring"`
 	Dashboard      *DashboardConfig      `toml:"dashboard"`
-	Workload       *WorkloadConfig       `toml:"workload"`
+	// The TOML key stays "workload" for backward compatibility with existing
+	// user config files; the rename is internal only.
+	Task *TaskConfig `toml:"workload"`
 
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
 }
 
-// WorkloadAgentOutput returns the configured output mode for one agent preset.
-// Defaults to "auto"; validation is owned by the workload executor.
-func (c *Config) WorkloadAgentOutput(agent string) string {
-	if c == nil || c.Workload == nil {
+// TaskAgentOutput returns the configured output mode for one agent preset.
+// Defaults to "auto"; validation is owned by the task executor.
+func (c *Config) TaskAgentOutput(agent string) string {
+	if c == nil || c.Task == nil {
 		return "auto"
 	}
-	agentConfig, ok := c.Workload.Agents[agent]
+	agentConfig, ok := c.Task.Agents[agent]
 	if !ok || agentConfig.Output == "" {
 		return "auto"
 	}

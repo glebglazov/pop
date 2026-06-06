@@ -21,7 +21,7 @@ func wizardDeps(fs *fakeFS, input string, out *bytes.Buffer) *integrateDeps {
 func TestWizardCoreInstalledNoPrompt(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
-	// Decline pane skill and workload skills.
+	// Decline pane skill and task skills.
 	d := wizardDeps(fs, "n\nn\n", out)
 
 	if err := runIntegrateComponents(d, "claude", nil, true); err != nil {
@@ -62,7 +62,7 @@ func TestWizardAcceptPaneSkill(t *testing.T) {
 }
 
 // TestWizardAcceptAll: answering yes to every step installs the pane skill and
-// the workload skills.
+// the task skills.
 func TestWizardAcceptAll(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
@@ -78,7 +78,7 @@ func TestWizardAcceptAll(t *testing.T) {
 	}
 	grillDest := filepath.Join(installerHome, ".claude", "skills", "pop-grill-with-docs")
 	if _, ok := fs.symlinks[grillDest]; !ok {
-		t.Fatalf("workload skill not symlinked: %s missing (symlinks=%v)", grillDest, fs.symlinks)
+		t.Fatalf("task skill not symlinked: %s missing (symlinks=%v)", grillDest, fs.symlinks)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestWizardAcceptAll(t *testing.T) {
 func TestWizardDeclineContinues(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
-	// Decline pane skill, accept workload skills.
+	// Decline pane skill, accept task skills.
 	d := wizardDeps(fs, "n\ny\n", out)
 
 	if err := runIntegrateComponents(d, "claude", nil, true); err != nil {
@@ -100,7 +100,7 @@ func TestWizardDeclineContinues(t *testing.T) {
 	}
 	grillDest := filepath.Join(installerHome, ".claude", "skills", "pop-grill-with-docs")
 	if _, ok := fs.symlinks[grillDest]; !ok {
-		t.Fatalf("accepted workload skill should be installed after a prior decline")
+		t.Fatalf("accepted task skill should be installed after a prior decline")
 	}
 	if !strings.Contains(out.String(), "Re-run `pop integrate claude`") {
 		t.Fatalf("wizard did not complete with re-run note after a decline")
@@ -143,7 +143,7 @@ func TestWizardStateDisplayNotInstalled(t *testing.T) {
 
 // TestWizardConflictReportNoPrompt: a same-named entry pop does not own makes
 // the step print the conflict report (path plus remove-and-re-run guidance) and
-// install nothing — no prompt is issued.
+// install nothing — no prompt is taskd.
 func TestWizardConflictReportNoPrompt(t *testing.T) {
 	fs := newFakeFS()
 	// A hand-written skill under the bare name shadows pop's pane skill.
@@ -151,7 +151,7 @@ func TestWizardConflictReportNoPrompt(t *testing.T) {
 	fs.files[conflictPath] = []byte("my own skill")
 
 	out := &bytes.Buffer{}
-	// Only the workload-skills step should consume input; the pane-skill step
+	// Only the task-skills step should consume input; the pane-skill step
 	// is a conflict and must not read a prompt.
 	d := wizardDeps(fs, "n\n", out)
 	if err := runIntegrateComponents(d, "claude", nil, true); err != nil {
@@ -175,19 +175,19 @@ func TestWizardConflictReportNoPrompt(t *testing.T) {
 	}
 }
 
-// TestWizardNotSupportedReport: on opencode (which cannot host the workload
-// planning skills) the workload step reports not-supported instead of prompting.
+// TestWizardNotSupportedReport: on opencode (which cannot host the task
+// planning skills) the task step reports not-supported instead of prompting.
 func TestWizardNotSupportedReport(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
-	// opencode supports the pane skill (1 prompt); the workload step is
+	// opencode supports the pane skill (1 prompt); the task step is
 	// not-supported and issues no prompt.
 	d := wizardDeps(fs, "n\n", out)
 	if err := runIntegrateComponents(d, "opencode", nil, true); err != nil {
 		t.Fatalf("wizard: %v", err)
 	}
 	if !strings.Contains(out.String(), "Not supported for opencode") {
-		t.Fatalf("expected not-supported report for opencode workload skills, output:\n%s", out.String())
+		t.Fatalf("expected not-supported report for opencode task skills, output:\n%s", out.String())
 	}
 }
 

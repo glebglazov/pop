@@ -11,9 +11,9 @@ import (
 // not a refactor.
 func TestCatalog_StableIdentifiers(t *testing.T) {
 	want := map[ComponentID]bool{
-		"status-wiring":   true,
-		"pane-skill":      true,
-		"workload-skills": true,
+		"status-wiring": true,
+		"pane-skill":    true,
+		"task-skills":   true,
 	}
 
 	got := map[ComponentID]bool{}
@@ -42,14 +42,14 @@ func TestCatalog_StableIdentifiers(t *testing.T) {
 	if ComponentPaneSkill != "pane-skill" {
 		t.Errorf("ComponentPaneSkill = %q, want pane-skill", ComponentPaneSkill)
 	}
-	if ComponentWorkloadSkills != "workload-skills" {
-		t.Errorf("ComponentWorkloadSkills = %q, want workload-skills", ComponentWorkloadSkills)
+	if ComponentTaskSkills != "task-skills" {
+		t.Errorf("ComponentTaskSkills = %q, want task-skills", ComponentTaskSkills)
 	}
 }
 
 // TestCatalog_SupportMatrix asserts the per-agent support matrix: codex hosts
 // neither skill component, and opencode hosts the pane skill but not the
-// workload planning skills.
+// task planning skills.
 func TestCatalog_SupportMatrix(t *testing.T) {
 	allAgents := []string{"claude", "codex", "pi", "opencode", "cursor"}
 
@@ -68,7 +68,7 @@ func TestCatalog_SupportMatrix(t *testing.T) {
 			denied:    []string{"codex"},
 		},
 		{
-			id:        ComponentWorkloadSkills,
+			id:        ComponentTaskSkills,
 			supported: []string{"claude", "pi", "cursor"},
 			denied:    []string{"opencode", "codex"},
 		},

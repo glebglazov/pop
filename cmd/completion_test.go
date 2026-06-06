@@ -41,7 +41,7 @@ func TestCompletionSubcommandsGenerateScripts(t *testing.T) {
 	}
 }
 
-func TestWorkloadShellCompletionCandidates(t *testing.T) {
+func TestTaskShellCompletionCandidates(t *testing.T) {
 	root := t.TempDir()
 	projectDir := filepath.Join(root, "svc")
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
@@ -49,18 +49,18 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 	}
 	initGitRepoCmd(t, projectDir)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	writeCompletionThoughts(t, cmdIssuesDir(t, projectDir), "svc", []string{"01-a", "02-b"})
+	writeCompletionThoughts(t, cmdTasksDir(t, projectDir), "svc", []string{"01-a", "02-b"})
 
 	cfgPath := filepath.Join(root, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("projects = [{ path = \""+projectDir+"\" }]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	origLoad := workloadCompletionConfigLoad
-	workloadCompletionConfigLoad = func(path string) (*config.Config, error) {
+	origLoad := taskCompletionConfigLoad
+	taskCompletionConfigLoad = func(path string) (*config.Config, error) {
 		return config.Load(cfgPath)
 	}
-	t.Cleanup(func() { workloadCompletionConfigLoad = origLoad })
+	t.Cleanup(func() { taskCompletionConfigLoad = origLoad })
 
 	oldWd, _ := os.Getwd()
 	if err := os.Chdir(projectDir); err != nil {
@@ -73,32 +73,32 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "svc")
 	})
 
-	t.Run("run issue positional defaults to Issue set IDs", func(t *testing.T) {
+	t.Run("run task positional defaults to Task set IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "run")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
 		assertShellCompOmitsExact(t, out, "01-a")
 	})
 
-	t.Run("run issue positional issue set relative path", func(t *testing.T) {
+	t.Run("run task positional task set relative path", func(t *testing.T) {
 		out := shellCompNoDescCompleting(t, "tasks", "run", "svc/")
 		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
 	})
 
-	t.Run("run issues positional defaults to Issue set IDs", func(t *testing.T) {
+	t.Run("run tasks positional defaults to Task set IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "drain")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
 	})
 
-	t.Run("reset issue positional defaults to Issue set IDs", func(t *testing.T) {
+	t.Run("reset task positional defaults to Task set IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "open")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
 		assertShellCompOmitsExact(t, out, "01-a")
 	})
 
-	t.Run("reset issue positional issue set relative file", func(t *testing.T) {
+	t.Run("reset task positional task set relative file", func(t *testing.T) {
 		out := shellCompNoDescCompleting(t, "tasks", "open", "svc/")
 		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
 	})
@@ -124,11 +124,11 @@ func TestWorkloadShellCompletionCandidates(t *testing.T) {
 	})
 }
 
-func TestWorkloadCompletionReadOnly(t *testing.T) {
+func TestTaskCompletionReadOnly(t *testing.T) {
 	root := t.TempDir()
 	initGitRepoCmd(t, root)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	writeCompletionThoughts(t, cmdIssuesDir(t, root), "fresh", nil)
+	writeCompletionThoughts(t, cmdTasksDir(t, root), "fresh", nil)
 
 	oldWd, _ := os.Getwd()
 	if err := os.Chdir(root); err != nil {
@@ -140,11 +140,11 @@ func TestWorkloadCompletionReadOnly(t *testing.T) {
 
 	statePath := filepath.Join(root, ".xdg", "pop", "workloads-state.json")
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
-		t.Fatal("completion should not create workload state")
+		t.Fatal("completion should not create task state")
 	}
 }
 
-func TestWorkloadPathFlagsRequestDirectoryCompletion(t *testing.T) {
+func TestTaskPathFlagsRequestDirectoryCompletion(t *testing.T) {
 	out := shellCompNoDesc(t, "tasks", "status", "--path")
 	if !strings.Contains(out, ":16") {
 		t.Fatalf("expected directory completion directive, got:\n%s", out)
@@ -219,37 +219,37 @@ func shellCompBody(output string) string {
 	return output
 }
 
-// writeCompletionThoughts creates a valid Issue set (no PRD pairing required)
-// under the repository's Workload storage issues directory.
-func writeCompletionThoughts(t *testing.T, issuesDir, stem string, issueIDs []string) {
+// writeCompletionThoughts creates a valid Task set (no PRD pairing required)
+// under the repository's Task storage tasks directory.
+func writeCompletionThoughts(t *testing.T, tasksDir, stem string, taskIDs []string) {
 	t.Helper()
-	if len(issueIDs) == 0 {
-		issueIDs = []string{"01-a"}
+	if len(taskIDs) == 0 {
+		taskIDs = []string{"01-a"}
 	}
-	issueDir := filepath.Join(issuesDir, stem)
-	if err := os.MkdirAll(issueDir, 0o755); err != nil {
+	taskDir := filepath.Join(tasksDir, stem)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	var issues strings.Builder
-	issues.WriteString(`{"tasks":[`)
-	for i, id := range issueIDs {
+	var tasks strings.Builder
+	tasks.WriteString(`{"tasks":[`)
+	for i, id := range taskIDs {
 		if i > 0 {
-			issues.WriteByte(',')
+			tasks.WriteByte(',')
 		}
 		file := id + ".md"
-		issues.WriteString(`{"id":"`)
-		issues.WriteString(id)
-		issues.WriteString(`","file":"`)
-		issues.WriteString(file)
-		issues.WriteString(`","title":"`)
-		issues.WriteString(id)
-		issues.WriteString(`","type":"AFK","status":"open"}`)
-		if err := os.WriteFile(filepath.Join(issueDir, file), []byte("## Acceptance criteria\n\n- [ ] ok\n"), 0o644); err != nil {
+		tasks.WriteString(`{"id":"`)
+		tasks.WriteString(id)
+		tasks.WriteString(`","file":"`)
+		tasks.WriteString(file)
+		tasks.WriteString(`","title":"`)
+		tasks.WriteString(id)
+		tasks.WriteString(`","type":"AFK","status":"open"}`)
+		if err := os.WriteFile(filepath.Join(taskDir, file), []byte("## Acceptance criteria\n\n- [ ] ok\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	issues.WriteString(`]}`)
-	if err := os.WriteFile(filepath.Join(issueDir, "index.json"), []byte(issues.String()), 0o644); err != nil {
+	tasks.WriteString(`]}`)
+	if err := os.WriteFile(filepath.Join(taskDir, "index.json"), []byte(tasks.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -497,13 +497,13 @@ func TestSessionAccessTime(t *testing.T) {
 	})
 }
 
-// TestSessionAccessTimeIssuesNoGitCalls guards the monitor dashboard against
+// TestSessionAccessTimeTasksNoGitCalls guards the monitor dashboard against
 // reintroducing the per-history-entry git-call storm that commit 6d7bd3d
 // eliminated (≈1.8s → 0.02s). Matching session names against history must go
 // through project.FastSessionName (pure string; see ADR 0005), not
 // project.SessionName, which spawns git subprocesses per entry. Scanning the
 // whole history must cost zero git calls regardless of entry count.
-func TestSessionAccessTimeIssuesNoGitCalls(t *testing.T) {
+func TestSessionAccessTimeTasksNoGitCalls(t *testing.T) {
 	now := time.Now()
 	hist := &history.History{}
 	for i := 0; i < 20; i++ {
@@ -519,7 +519,7 @@ func TestSessionAccessTimeIssuesNoGitCalls(t *testing.T) {
 	restore()
 
 	if *gitCalls != 0 {
-		t.Errorf("sessionAccessTime issued %d git calls for %d history entries, want 0 (per-entry git derivation regressed)", *gitCalls, len(hist.Entries))
+		t.Errorf("sessionAccessTime taskd %d git calls for %d history entries, want 0 (per-entry git derivation regressed)", *gitCalls, len(hist.Entries))
 	}
 }
 

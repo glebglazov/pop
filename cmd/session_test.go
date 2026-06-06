@@ -416,5 +416,3 @@ func TestSwitchToTmuxTargetAndZoomWith_InTmux(t *testing.T) {
 		}
 	}
 }
-
-

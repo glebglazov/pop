@@ -172,10 +172,10 @@ var integrateUpdateExisting bool
 // skill is installed for the agent alongside the core status wiring.
 var integratePaneSkill bool
 
-// integrateWorkloadSkills is the --workload-skills component flag. When set,
-// the workload planning skills (grill-with-docs, to-prd, to-issues) are
+// integrateTaskSkills is the --task-skills component flag. When set,
+// the task planning skills (grill-with-docs, to-prd, to-issues) are
 // installed for the agent alongside the core status wiring.
-var integrateWorkloadSkills bool
+var integrateTaskSkills bool
 
 var integrateCmd = &cobra.Command{
 	Use:   "integrate [agent]",
@@ -183,7 +183,7 @@ var integrateCmd = &cobra.Command{
 	Long: `Install pop's status wiring for a coding agent.
 
 The status wiring makes the agent report pane status to pop's monitor; it
-changes no agent behavior. Skills (the pane skill and the workload planning
+changes no agent behavior. Skills (the pane skill and the task planning
 skills) are separate opt-ins selected with component flags:
 
   --pane-skill  Also install the pane skill, which lets the agent drive tmux
@@ -192,8 +192,8 @@ skills) are separate opt-ins selected with component flags:
                 ~/.claude/skills/pop-pane) and a flat file for opencode
                 (~/.config/opencode/agent/pop-pane.md). Not supported for codex.
 
-  --workload-skills
-                Also install the workload planning skills (grill-with-docs,
+  --task-skills
+                Also install the task planning skills (grill-with-docs,
                 to-prd, to-issues), each as a multi-file skill directory
                 symlinked into pop's data directory (e.g.
                 ~/.claude/skills/pop-grill-with-docs/). grill-with-docs ships
@@ -204,7 +204,7 @@ skills) are separate opt-ins selected with component flags:
 Run in a terminal with no component flags to launch the interactive
 Integration wizard: it installs the core status wiring (no prompt), then
 walks one explained y/n step per supported opt-in component — the pane skill
-and the workload planning skills. Declining any step skips it; re-run anytime
+and the task planning skills. Declining any step skips it; re-run anytime
 to add or remove components.
 
 Component flags select an exact set: the status wiring plus exactly the
@@ -257,7 +257,7 @@ var integrateRemoveCmd = &cobra.Command{
 
 With no component identifiers, every pop component currently installed for the
 agent is removed. With identifiers, exactly that set is removed. Valid
-identifiers: status-wiring, pane-skill, workload-skills.
+identifiers: status-wiring, pane-skill, task-skills.
 
 Removal only ever deletes artifacts pop owns: status wiring strips pop's hook
 entries while preserving unrelated hooks (claude, codex, cursor) or deletes the
@@ -285,8 +285,8 @@ func init() {
 		"Refresh already-installed agent integrations to match the current binary (no agent argument)")
 	integrateCmd.Flags().BoolVar(&integratePaneSkill, "pane-skill", false,
 		"Install the pane skill (lets the agent drive tmux panes) alongside the status wiring")
-	integrateCmd.Flags().BoolVar(&integrateWorkloadSkills, "workload-skills", false,
-		"Install the workload planning skills (grill-with-docs, to-prd, to-issues) alongside the status wiring")
+	integrateCmd.Flags().BoolVar(&integrateTaskSkills, "task-skills", false,
+		"Install the task planning skills (grill-with-docs, to-prd, to-issues) alongside the status wiring")
 	integrateCmd.AddCommand(integrateRemoveCmd)
 	rootCmd.AddCommand(integrateCmd)
 }
@@ -299,13 +299,13 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 	if integratePaneSkill {
 		optins = append(optins, ComponentPaneSkill)
 	}
-	if integrateWorkloadSkills {
-		optins = append(optins, ComponentWorkloadSkills)
+	if integrateTaskSkills {
+		optins = append(optins, ComponentTaskSkills)
 	}
 	return runIntegrateComponents(defaultIntegrateDeps(), args[0], optins, stdinIsInteractive())
 }
 
-// stdinIsInteractive reports whether stdin is a terminal. Mirrors the workload
+// stdinIsInteractive reports whether stdin is a terminal. Mirrors the task
 // execution-confirmation detection: a non-terminal stdin (pipe, redirect, CI)
 // is treated as non-interactive.
 func stdinIsInteractive() bool {
@@ -393,7 +393,7 @@ func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID
 //
 // Bare `pop integrate <agent>` installs only the status wiring — the core
 // component implied by the integrate verb (ADR 0010). The pane skill and the
-// workload planning skills are explicit opt-ins landed by later slices, so no
+// task planning skills are explicit opt-ins landed by later slices, so no
 // skill files are written on this path. Component knowledge comes from the
 // catalog; this function does not hardcode the agent fan-out.
 func runIntegrateWith(d *integrateDeps, agent string) error {

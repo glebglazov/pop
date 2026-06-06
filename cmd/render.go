@@ -28,7 +28,7 @@ func renderComponent(id ComponentID, agent string) (map[string][]byte, error) {
 	}
 
 	switch id {
-	case ComponentPaneSkill, ComponentWorkloadSkills:
+	case ComponentPaneSkill, ComponentTaskSkills:
 		return renderSkillComponent(comp, agent)
 	default:
 		return nil, fmt.Errorf("component %q has no file-based render", id)

@@ -452,7 +452,7 @@ func TestInstallFileComponentConflictPrefixInsensitive(t *testing.T) {
 
 // TestInstallFileComponentPartialSetInstall covers a conflict on one skill of a
 // multi-skill component skipping only that skill while the rest install. The
-// workload-skills component renders three skill directories for claude; a
+// task-skills component renders three skill directories for claude; a
 // non-pop entry at one of them must not block the other two.
 func TestInstallFileComponentPartialSetInstall(t *testing.T) {
 	fs := newFakeFS()
@@ -461,12 +461,12 @@ func TestInstallFileComponentPartialSetInstall(t *testing.T) {
 
 	skillsDir := filepath.Join(installerHome, ".claude", "skills")
 	conflictDest := filepath.Join(skillsDir, "pop-to-prd")
-	// User's own skill at the bare name of one workload skill.
+	// User's own skill at the bare name of one task skill.
 	bareConflict := filepath.Join(skillsDir, "to-issues")
 	fs.dirs[bareConflict] = true
 	fs.files[filepath.Join(bareConflict, "SKILL.md")] = []byte("mine")
 
-	if err := installFileComponent(d, installerHome, ComponentWorkloadSkills, "claude"); err != nil {
+	if err := installFileComponent(d, installerHome, ComponentTaskSkills, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 

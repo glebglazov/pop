@@ -1,0 +1,632 @@
+package tasks
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/glebglazov/pop/internal/deps"
+)
+
+func TestRunTaskSetDrainsMultipleAFKTasksInOrder(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		changeFile: "impl.txt",
+		changeData: "x\n",
+		checkTask:  true,
+		summary:    "done",
+	})
+
+	var buf bytes.Buffer
+	result, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, &buf))
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 2 {
+		t.Fatalf("result = %#v", result)
+	}
+	if result.Completed[0].Selection.TaskID != "01-a" || result.Completed[1].Selection.TaskID != "02-b" {
+		t.Fatalf("task order = %s, %s", result.Completed[0].Selection.TaskID, result.Completed[1].Selection.TaskID)
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
+	assertTaskDone(t, env.execFixture(), "02-b")
+}
+
+func TestRunTaskSetSequentialDependencyUnblocking(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "ok"})
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, nil))
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if len(result.Completed) != 2 {
+		t.Fatalf("completed = %d", len(result.Completed))
+	}
+	assertTaskDone(t, env.execFixture(), "02-b")
+}
+
+func TestRunTaskSetNoOpContinuation(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "verified"})
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Completed) != 2 || !result.Completed[0].NoOp {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRunTaskSetSingleConfirmation(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "ok"})
+
+	var confirmOut bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, nil)
+	opts.ConfirmIn = strings.NewReader("y\n")
+	opts.ConfirmOut = &confirmOut
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(confirmOut.String(), "Run Task set?") != 1 {
+		t.Fatalf("expected one confirmation prompt:\n%s", confirmOut.String())
+	}
+}
+
+func TestRunTaskSetDirtyNonInteractiveRejection(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	writeFile(t, filepath.Join(env.root, "partial.txt"), "pending\n")
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+
+	opts := env.runTaskSetOpts(false, agent, nil)
+	opts.ConfirmIn = NonInteractiveReader{}
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+}
+
+func TestRunTaskSetAppliesDirtyStrategyOnceBeforeDrain(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	writeFile(t, filepath.Join(env.root, "partial.txt"), "stash once\n")
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+
+	stashPushes := 0
+	git := &deps.MockGit{
+		CommandInDirFunc: func(dir string, args ...string) (string, error) {
+			if len(args) >= 2 && args[0] == "stash" && args[1] == "push" {
+				stashPushes++
+			}
+			return realGitInDir(dir, args...)
+		},
+	}
+	d := env.deps()
+	d.Git = git
+	opts := env.runTaskSetOpts(true, agent, nil)
+	opts.AllowDirty = DirtyRuntimeStashAndContinue
+
+	result, err := RunTaskSetWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if len(result.Completed) != 2 {
+		t.Fatalf("completed = %d", len(result.Completed))
+	}
+	if stashPushes != 1 {
+		t.Fatalf("stash pushes = %d, want 1", stashPushes)
+	}
+}
+
+func TestRunTaskSetTargetedTaskSet(t *testing.T) {
+	root := t.TempDir()
+	initExecutorGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := storageTasksDir(t, root)
+	setupManifest(t, tasksDir, "high", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	setupManifest(t, tasksDir, "low", []Task{
+		{ID: "01-x", File: "01-x.md", Title: "X", Type: "AFK", Status: "open"},
+	})
+	refresh, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetPriorityWith(DefaultDeps(), nil, nil, ResolveInput{CWD: root}, "low", 99); err != nil {
+		t.Fatal(err)
+	}
+	_ = refresh
+
+	agent := writeFakeAgent(t, root, fakeAgentConfig{checkTask: true, summary: "targeted"})
+	env := &runTaskSetFixture{root: root, tasksDir: tasksDir}
+	opts := env.runTaskSetOpts(true, agent, nil)
+	opts.TaskSetOverride = "high"
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TaskSetID != "high" || len(result.Completed) != 1 || result.Completed[0].Selection.TaskID != "01-a" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRunTaskSetBlockedStopsWithReason(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, nil))
+	assertExitCode(t, err, ExitNoRunnable)
+	if !strings.Contains(err.Error(), "HITL") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunTaskSetHITLGatePrintsRecoveryAdvice(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
+
+	var buf bytes.Buffer
+	_, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, &buf))
+	assertExitCode(t, err, ExitNoRunnable)
+
+	out := buf.String()
+	for _, want := range []string{
+		"Human-blocked: demo/02-hitl",
+		"--- demo/02-hitl.md ---",
+		"- [ ] ok",
+		"--- end ---",
+		"pop tasks complete demo/02-hitl.md",
+		"$EDITOR demo/02-hitl.md && pop tasks drain",
+		"pop tasks skip demo/02-hitl.md",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("advice missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "--- end ---") > strings.Index(out, "finish by hand") {
+		t.Fatalf("task body should precede recovery options:\n%s", out)
+	}
+}
+
+func TestHITLGateAdviceSurvivesUnreadableTaskFile(t *testing.T) {
+	d := &Deps{FS: &deps.MockFileSystem{
+		ReadFileFunc: func(string) ([]byte, error) {
+			return nil, fmt.Errorf("no such file")
+		},
+	}}
+	var buf bytes.Buffer
+	printHITLGateAdvice(d, &buf, "demo", "/tmp/demo", &Task{ID: "02-hitl", File: "02-hitl.md"})
+
+	out := buf.String()
+	if !strings.Contains(out, "could not read demo/02-hitl.md") {
+		t.Fatalf("missing read-failure notice:\n%s", out)
+	}
+	if !strings.Contains(out, "pop tasks complete demo/02-hitl.md") {
+		t.Fatalf("advice block missing after read failure:\n%s", out)
+	}
+}
+
+func TestRunTaskSetFailedStopMentionsCompleteAndReset(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeSequentialFakeAgent(t, env.root, []fakeAgentStep{{exitCode: 1}})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
+	opts.MaxTries = 1
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+
+	out := buf.String()
+	if !strings.Contains(out, "pop tasks open demo/01-a.md") {
+		t.Fatalf("advice missing reset hint:\n%s", out)
+	}
+	if !strings.Contains(out, "pop tasks complete demo/01-a.md") {
+		t.Fatalf("advice missing complete hint:\n%s", out)
+	}
+}
+
+func TestRunTaskSetHITLOnlyTaskSetRejectedAtSelection(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-hitl", File: "01-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, nil))
+	assertExitCode(t, err, ExitNoRunnable)
+}
+
+func TestRunTaskSetFailedTaskStopsDrain(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	agent := writeSequentialFakeAgent(t, env.root, []fakeAgentStep{
+		{summary: "ok"},
+		{exitCode: 1},
+	})
+
+	opts := env.runTaskSetOpts(true, agent, nil)
+	opts.MaxTries = 1
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	assertTaskDone(t, env.execFixture(), "01-a")
+	assertTaskFailed(t, env.execFixture(), "02-b", 1)
+}
+
+func TestRunTaskSetClaudeQuotaPauseStopsCleanly(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	counterPath := installClaudeQuotaAgent(t, env.root)
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPreset = "claude"
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.QuotaPaused || len(result.Completed) != 0 {
+		t.Fatalf("result = %#v", result)
+	}
+	assertTaskOpen(t, env.execFixture(), "01-a")
+	assertTaskOpen(t, env.execFixture(), "02-b")
+	if got := strings.TrimSpace(string(mustReadFile(t, counterPath))); got != "1" {
+		t.Fatalf("started attempts = %q, want 1", got)
+	}
+	if !strings.Contains(buf.String(), "Task set demo paused") {
+		t.Fatalf("missing pause summary:\n%s", buf.String())
+	}
+}
+
+func TestRunTaskSetTimeoutPropagation(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		summary:  "slow",
+		sleepFor: 200 * time.Millisecond,
+	})
+
+	opts := env.runTaskSetOpts(true, agent, nil)
+	opts.Timeout = 50 * time.Millisecond
+	opts.MaxTries = 1
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	assertTaskFailed(t, env.execFixture(), "01-a", 1)
+}
+
+func TestRunTaskSetOperationalStopOnCommitFailure(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		changeFile: "impl.txt",
+		changeData: "x\n",
+		checkTask:  true,
+		summary:    "done",
+	})
+	git := &deps.MockGit{
+		CommandInDirFunc: func(dir string, args ...string) (string, error) {
+			if len(args) >= 2 && args[0] == "commit" && !strings.Contains(args[2], "capturing dirty state") {
+				return "", fmt.Errorf("commit rejected")
+			}
+			return realGitInDir(dir, args...)
+		},
+	}
+	d := env.deps()
+	d.Git = git
+
+	_, err := RunTaskSetWith(d, nil, nil, env.runTaskSetOpts(true, agent, nil))
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "task demo/01-a") {
+		t.Fatalf("error missing task reference: %v", err)
+	}
+	assertTaskOpen(t, env.execFixture(), "01-a")
+}
+
+func TestRunTaskSetDoesNotContinueIntoAnotherTaskSet(t *testing.T) {
+	root := t.TempDir()
+	initExecutorGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := storageTasksDir(t, root)
+	setupManifest(t, tasksDir, "one", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	setupManifest(t, tasksDir, "two", []Task{
+		{ID: "01-x", File: "01-x.md", Title: "X", Type: "AFK", Status: "open"},
+	})
+	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetPriorityWith(DefaultDeps(), nil, nil, ResolveInput{CWD: root}, "two", 10); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := writeFakeAgent(t, root, fakeAgentConfig{checkTask: true, summary: "one only"})
+	env := &runTaskSetFixture{root: root, tasksDir: tasksDir}
+	result, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || result.TaskSetID != "two" || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	assertTaskOpen(t, &execFixture{root: root, tasksDir: tasksDir}, "01-x")
+}
+
+func TestRunTaskSetFailedTaskSetRejected(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+	opts := env.runTaskSetOpts(true, agent, nil)
+	opts.TaskSetOverride = "demo"
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+}
+
+func TestRunTaskSetYesPrintsConciseSummary(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "ok"})
+
+	var buf bytes.Buffer
+	_, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, &buf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"━━ Running task demo/01-a: A",
+		"   Attempt 1/3",
+		"── Agent output",
+		"── Agent finished for demo/01-a",
+		"✓ Completed demo/01-a",
+		"✓ Completed task set demo",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "\033[") {
+		t.Fatalf("redirected output contains ANSI:\n%q", out)
+	}
+	if !strings.Contains(out, "Completed demo/01-a") || !strings.Contains(out, "Completed task set demo") {
+		t.Fatalf("missing concise summary:\n%s", out)
+	}
+	if strings.Count(out, "STATUS") != 1 {
+		t.Fatalf("expected pre-run table only:\n%s", out)
+	}
+}
+
+func TestRunTaskSetInteractivePrintsRefreshedTable(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "ok"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(buf.String(), "STATUS") < 2 {
+		t.Fatalf("expected pre and post tables:\n%s", buf.String())
+	}
+}
+
+func TestRunTaskSetDeclinedConfirmation(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+	opts := env.runTaskSetOpts(false, agent, nil)
+	opts.ConfirmIn = strings.NewReader("n\n")
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Declined {
+		t.Fatal("expected declined")
+	}
+}
+
+func TestRunTaskSetInterruptionPropagation(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeSlowAgent(t, env.root, 10*time.Second)
+
+	opts := env.runTaskSetOpts(true, agent, nil)
+	opts.Timeout = time.Minute
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+	}()
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitInterrupted)
+	assertTaskOpen(t, env.execFixture(), "01-a")
+}
+
+func TestRunTaskSetStopsCleanlyOnDeferred(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-skip", File: "02-skip.md", Title: "Skip", Type: "HITL", Status: "skipped"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "ok"})
+
+	var buf bytes.Buffer
+	result, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, &buf))
+	if err != nil {
+		t.Fatalf("run failed (deferred should not error): %v", err)
+	}
+	if !result.TaskSetDeferred {
+		t.Fatalf("result = %#v, want TaskSetDeferred", result)
+	}
+	if result.TaskSetDone {
+		t.Fatal("deferred set must not be reported as done")
+	}
+	if len(result.Completed) != 1 {
+		t.Fatalf("completed = %d, want 1", len(result.Completed))
+	}
+	if len(result.SkippedTasks) != 1 || result.SkippedTasks[0] != "02-skip" {
+		t.Fatalf("skipped tasks = %v, want [02-skip]", result.SkippedTasks)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "deferred") || !strings.Contains(out, "02-skip") {
+		t.Fatalf("missing deferral message:\n%s", out)
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
+}
+
+func TestSelectTaskSetAutomaticAndExplicit(t *testing.T) {
+	refresh := &RefreshResult{
+		Rows: []Row{
+			{ID: "auto", Status: StatusReady, Priority: 10},
+			{ID: "target", Status: StatusReady, Priority: 0},
+		},
+		Manifests: map[string]*Manifest{
+			"auto": {Stem: "auto", Valid: true, Tasks: []Task{
+				{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "open"},
+			}},
+			"target": {Stem: "target", Valid: true, Tasks: []Task{
+				{ID: "01-x", File: "01-x.md", Type: "AFK", Status: "open"},
+			}},
+		},
+	}
+
+	id, err := SelectTaskSet(refresh, "")
+	if err != nil || id != "auto" {
+		t.Fatalf("auto = %q, err = %v", id, err)
+	}
+	id, err = SelectTaskSet(refresh, "target")
+	if err != nil || id != "target" {
+		t.Fatalf("target = %q, err = %v", id, err)
+	}
+}
+
+type runTaskSetFixture struct {
+	root     string
+	tasksDir string
+}
+
+func setupRunTaskSetFixture(t *testing.T, stem string, tasks []Task) *runTaskSetFixture {
+	t.Helper()
+	root := t.TempDir()
+	initExecutorGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := storageTasksDir(t, root)
+	setupManifest(t, tasksDir, stem, tasks)
+	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+	return &runTaskSetFixture{root: root, tasksDir: tasksDir}
+}
+
+func (e *runTaskSetFixture) deps() *Deps {
+	return &Deps{
+		FS:     deps.NewRealFileSystem(),
+		Git:    deps.NewRealGit(),
+		Runner: RealCommandRunner{},
+	}
+}
+
+func (e *runTaskSetFixture) execFixture() *execFixture {
+	return &execFixture{root: e.root, tasksDir: e.tasksDir}
+}
+
+func (e *runTaskSetFixture) runTaskSetOpts(yes bool, agentCmd string, out io.Writer) RunTaskSetOptions {
+	opts := RunTaskSetOptions{
+		ResolveInput: ResolveInput{CWD: e.root},
+		AgentCmd:     agentCmd,
+		Yes:          yes,
+	}
+	if out != nil {
+		opts.Output = out
+	}
+	return opts
+}
+
+type fakeAgentStep struct {
+	summary  string
+	exitCode int
+}
+
+func writeSequentialFakeAgent(t *testing.T, root string, steps []fakeAgentStep) string {
+	t.Helper()
+	path := filepath.Join(root, ".agent", "seq-agent.sh")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	counterPath := filepath.Join(root, ".agent", "step.count")
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	b.WriteString("COUNT=0\n")
+	b.WriteString("if [ -f " + counterPath + " ]; then COUNT=$(cat " + counterPath + "); fi\n")
+	b.WriteString("TASK=$(printf '%s' \"$1\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n")
+	b.WriteString("if [ -n \"$TASK\" ] && [ -f \"$TASK\" ]; then sed -i '' 's/- \\[ \\]/- [x]/g' \"$TASK\" 2>/dev/null || sed -i 's/- \\[ \\]/- [x]/g' \"$TASK\"; fi\n")
+	for i, step := range steps {
+		summary := step.summary
+		if summary == "" {
+			summary = "step"
+		}
+		exit := step.exitCode
+		fmt.Fprintf(&b, "if [ \"$COUNT\" -eq %d ]; then\n", i)
+		fmt.Fprintf(&b, "  echo %d > %q\n", i+1, counterPath)
+		fmt.Fprintf(&b, "  printf 'SUMMARY_START\\n%s\\nSUMMARY_END\\nTASK_COMPLETE\\n' \"%s\"\n", summary, summary)
+		if exit != 0 {
+			fmt.Fprintf(&b, "  exit %d\n", exit)
+		}
+		b.WriteString("fi\n")
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(counterPath, []byte("0"), 0o644)
+	return path
+}
+
+func intPtr(v int) *int { return &v }
