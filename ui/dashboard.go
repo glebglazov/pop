@@ -112,6 +112,9 @@ type Dashboard struct {
 
 	warnings []string
 
+	// updateNotice is the dimmed top-right Update notice text (empty = none).
+	updateNotice string
+
 	initialPaneID        string
 	protectedPaneID      string
 	protectedCursorIndex int
@@ -138,6 +141,15 @@ func WithInitialPaneID(paneID string) DashboardOption {
 func WithDashboardWarnings(warnings []string) DashboardOption {
 	return func(d *Dashboard) {
 		d.warnings = warnings
+	}
+}
+
+// WithDashboardUpdateNotice sets the dimmed top-right Update notice text. Empty
+// text shows nothing. The notice occupies a reserved top line so it never
+// shifts the pane list or preview.
+func WithDashboardUpdateNotice(text string) DashboardOption {
+	return func(d *Dashboard) {
+		d.updateNotice = text
 	}
 }
 
@@ -477,6 +489,9 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		d.width = msg.Width
 		d.height = msg.Height - 4 // Reserve space for hints (1 line) + input box (3 lines)
+		if d.updateNotice != "" {
+			d.height-- // reserve the top line for the dimmed Update notice
+		}
 		if d.height < 3 {
 			d.height = 3
 		}
@@ -748,6 +763,14 @@ func (d *Dashboard) viewHelp() string {
 func (d *Dashboard) viewDashboard() string {
 	var b strings.Builder
 
+	// Dimmed Update notice on a reserved top line, anchored top-right. The line
+	// is accounted for in d.height (see WindowSizeMsg), so it never shifts the
+	// pane list, preview, or hints.
+	if d.updateNotice != "" {
+		b.WriteString(renderUpdateNotice(d.width, d.updateNotice))
+		b.WriteString("\n")
+	}
+
 	sepStyle := lipgloss.NewStyle().Foreground(colorSeparator)
 
 	leftWidth := d.width * 3 / 10
@@ -765,6 +788,10 @@ func (d *Dashboard) viewDashboard() string {
 	if len(d.panes) == 0 {
 		msgStyle := lipgloss.NewStyle().Foreground(colorDim)
 		var eb strings.Builder
+		if d.updateNotice != "" {
+			eb.WriteString(renderUpdateNotice(d.width, d.updateNotice))
+			eb.WriteString("\n")
+		}
 		headerText := d.title
 		if d.following {
 			headerText += " · following"

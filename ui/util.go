@@ -66,6 +66,37 @@ func writeInputBox(b *strings.Builder, width int, content string) {
 	b.WriteString("┘\n")
 }
 
+// renderUpdateNotice renders the dimmed Update notice anchored to the top-right
+// of a width-wide line. It is unobtrusive: dimmed and right-aligned, with the
+// text truncated if it would not fit. The caller reserves the line so the
+// notice never shifts surrounding content.
+func renderUpdateNotice(width int, text string) string {
+	if text == "" {
+		return ""
+	}
+	if width <= 0 {
+		return dimStyle.Render(text)
+	}
+	text = truncateToWidth(text, width)
+	padding := width - len([]rune(text))
+	if padding < 0 {
+		padding = 0
+	}
+	return strings.Repeat(" ", padding) + dimStyle.Render(text)
+}
+
+// truncateToWidth trims s to at most width runes (plain text, no ANSI).
+func truncateToWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	return string(r[:width])
+}
+
 // adjustScroll ensures cursor is visible by adjusting scroll offset.
 // margin is the number of extra lines to keep above the cursor (0 for no margin).
 func adjustScroll(cursor, scroll, height, itemCount, margin int) (newScroll int) {

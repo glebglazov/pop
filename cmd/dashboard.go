@@ -85,6 +85,9 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	if len(systemWarnings) > 0 {
 		opts = append(opts, ui.WithDashboardWarnings(systemWarnings))
 	}
+	if notice := pickerUpdateNotice(); notice != "" {
+		opts = append(opts, ui.WithDashboardUpdateNotice(notice))
+	}
 
 	panes, initialPaneID := buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosition, sortCriteria)
 	if initialPaneID != "" {

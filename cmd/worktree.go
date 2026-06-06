@@ -226,6 +226,9 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	if len(warnings) > 0 {
 		opts = append(opts, ui.WithWarnings(warnings))
 	}
+	if notice := pickerUpdateNotice(); notice != "" {
+		opts = append(opts, ui.WithUpdateNotice(notice))
+	}
 
 	return ui.Run(items, opts...)
 }

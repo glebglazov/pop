@@ -97,6 +97,9 @@ type Picker struct {
 
 	// Warnings to display in the picker
 	warnings []string
+
+	// updateNotice is the dimmed top-right Update notice text (empty = none).
+	updateNotice string
 }
 
 // iconLegendEntry maps an icon to its description in the help view
@@ -225,6 +228,15 @@ func WithUserDefinedCommands(commands []UserDefinedCommand) PickerOption {
 func WithWarnings(warnings []string) PickerOption {
 	return func(p *Picker) {
 		p.warnings = warnings
+	}
+}
+
+// WithUpdateNotice sets the dimmed top-right Update notice text. Empty text
+// shows nothing. The notice occupies a reserved top line so it never shifts
+// the list, input box, or hints.
+func WithUpdateNotice(text string) PickerOption {
+	return func(p *Picker) {
+		p.updateNotice = text
 	}
 }
 
@@ -433,6 +445,9 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		p.width = msg.Width
 		p.height = msg.Height - 4 // Reserve space for hints (1 line) + input box (3 lines)
+		if p.updateNotice != "" {
+			p.height-- // reserve the top line for the dimmed Update notice
+		}
 		if p.height < 3 {
 			p.height = 3
 		}
@@ -774,6 +789,14 @@ func truncateString(s string, maxWidth int) string {
 
 func (p *Picker) viewProject() string {
 	var b strings.Builder
+
+	// Dimmed Update notice on a reserved top line, anchored top-right. The line
+	// is accounted for in p.height (see WindowSizeMsg), so it never shifts the
+	// list, input box, or hints.
+	if p.updateNotice != "" {
+		b.WriteString(renderUpdateNotice(p.width, p.updateNotice))
+		b.WriteString("\n")
+	}
 
 	// Items
 	visible := p.height

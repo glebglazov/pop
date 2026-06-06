@@ -102,6 +102,10 @@ type ProjectDeps struct {
 	EnsureSystemState func() []string
 	RunConfigure      func() error
 
+	// UpdateNotice returns the dimmed top-right Update notice text, or "" for
+	// none. It is a seam so tests never touch the real cache or network.
+	UpdateNotice func() string
+
 	// Environment
 	InTmux         func() bool
 	CurrentSession func(tmux deps.Tmux) string
@@ -148,6 +152,8 @@ func DefaultProjectDeps() *ProjectDeps {
 			cd.ShowWelcome = true
 			return runConfigureWith(cd)
 		},
+
+		UpdateNotice: pickerUpdateNotice,
 
 		InTmux:         func() bool { return os.Getenv("TMUX") != "" },
 		CurrentSession: currentTmuxSessionWith,
@@ -276,6 +282,14 @@ func RunProject(d *ProjectDeps) error {
 		})
 	}
 
+	// Compute the Update notice once: it surfaces at most once per calendar day,
+	// so a single computation up front stamps shown-at and keeps the badge
+	// stable across picker-loop iterations.
+	var updateNotice string
+	if d.UpdateNotice != nil {
+		updateNotice = d.UpdateNotice()
+	}
+
 	// Run picker loop
 	inTmux := d.InTmux()
 	restoreCursorIdx := -1
@@ -319,6 +333,9 @@ func RunProject(d *ProjectDeps) error {
 		if restoreCursorIdx >= 0 {
 			opts = append(opts, ui.WithInitialCursorIndex(restoreCursorIdx))
 			restoreCursorIdx = -1
+		}
+		if updateNotice != "" {
+			opts = append(opts, ui.WithUpdateNotice(updateNotice))
 		}
 		result, err := d.RunPicker(items, opts...)
 		if err != nil {
