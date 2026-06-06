@@ -1,0 +1,63 @@
+name: Release
+
+# Two entry points, one pipeline (ADR 0014):
+#   - workflow_dispatch: CI runs scripts/release.sh, which tags vYYYY.M.N for
+#     the current UTC month (zero-based counter, resets monthly) and pushes it.
+#     Tags pushed with GITHUB_TOKEN don't retrigger workflows, so the same job
+#     continues into goreleaser.
+#   - tag push: scripts/release.sh was run locally; the pushed tag triggers
+#     goreleaser here.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v20*"]
+
+# Only one release run at a time, so two clicks can't race on tag creation.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Cut release tag
+        if: github.event_name == 'workflow_dispatch'
+        id: cut
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          scripts/release.sh
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "value=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ steps.cut.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.tag.outputs.value != ''
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        if: steps.tag.outputs.value != ''
+        with:
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

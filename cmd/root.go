@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	runtimedebug "runtime/debug"
+	"strings"
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/ui"
@@ -11,6 +12,12 @@ import (
 )
 
 var cfgFile string
+
+// version is injected at build time via -ldflags (see Makefile and
+// .goreleaser.yml): `git describe --tags --always --dirty` for local builds,
+// the release tag for released binaries. CalVer tags are v-prefixed
+// (vYYYY.M.N, ADR 0014); the prefix is stripped for display.
+var version string
 
 var rootCmd = &cobra.Command{
 	Use:   "pop",
@@ -43,9 +50,14 @@ func buildRevision() string {
 	return "dev"
 }
 
-// buildVersion reads VCS stamps embedded by `go build` and returns a short
-// commit SHA, optionally suffixed with "-dirty" and the commit timestamp.
+// buildVersion returns the ldflags-injected version (tag-relative, without
+// the v prefix) when present, falling back to VCS stamps embedded by
+// `go build`: a short commit SHA, optionally suffixed with "-dirty" and the
+// commit timestamp.
 func buildVersion() string {
+	if version != "" {
+		return strings.TrimPrefix(version, "v")
+	}
 	info, ok := runtimedebug.ReadBuildInfo()
 	if !ok {
 		return "unknown"

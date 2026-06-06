@@ -12,6 +12,7 @@ import (
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/release"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/spf13/cobra"
 )
@@ -53,6 +54,7 @@ type doctorDeps struct {
 	legacyTaskSets            func() ([]string, error)
 	orphanedTaskStorage       func() ([]tasks.OrphanedStorage, error)
 	legacyLayoutStorage       func() ([]string, error)
+	updateCheck               func() release.Result
 }
 
 func defaultDoctorDeps() *doctorDeps {
@@ -106,6 +108,7 @@ func defaultDoctorDeps() *doctorDeps {
 			return tasks.FindOrphanedStorage(tasks.DefaultDeps())
 		},
 		legacyLayoutStorage: func() ([]string, error) { return tasks.LegacyLayoutStorageDirs(tasks.DefaultDeps()) },
+		updateCheck:         func() release.Result { return release.Check(buildVersion()) },
 	}
 }
 
@@ -140,6 +143,7 @@ type doctorFamilyReport struct {
 
 type doctorReport struct {
 	families []doctorFamilyReport
+	update   release.Result
 }
 
 type doctorAgentStatusWiring struct {
@@ -231,6 +235,13 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 	integrationChecks := doctorIntegrateIntentChecks(intent)
 	integrationChecks = append(integrationChecks, doctorIntegrateSuggestionChecks(intent)...)
 	report.families = append(report.families, familyReport("pop integrate", integrationChecks))
+
+	// The Update check is a header line only; it never affects any family's
+	// status (CONTEXT.md "Update notice"), so it is computed independently and
+	// not folded into any familyReport.
+	if d.updateCheck != nil {
+		report.update = d.updateCheck()
+	}
 	return report, nil
 }
 
@@ -939,6 +950,8 @@ const (
 
 func renderDoctorReport(w io.Writer, report *doctorReport) {
 	color := doctorColorEnabled(w)
+	fmt.Fprintln(w, doctorUpdateHeader(color, report.update))
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, doctorStyled(color, doctorANSIBold, "Command-family readiness"))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "STATUS    COMMAND        SUMMARY")
@@ -960,6 +973,27 @@ func renderDoctorReport(w io.Writer, report *doctorReport) {
 			}
 			fmt.Fprintln(w, line)
 		}
+	}
+}
+
+// doctorUpdateHeader renders the version-freshness header line above the
+// family rows. It reflects the Update check per CONTEXT.md "Releases": an
+// outdated binary notes the available update, a current one is marked
+// "(latest)", a Dev build shows its version with "(dev build)" and no
+// comparison, and a failed check appends a dim note — never a failure.
+func doctorUpdateHeader(color bool, res release.Result) string {
+	base := "pop " + res.Current
+	switch res.State {
+	case release.StateOutdated:
+		return fmt.Sprintf("%s (latest: %s — update available)", base, res.Latest)
+	case release.StateCurrent:
+		return base + " (latest)"
+	case release.StateDev:
+		return base + doctorStyled(color, doctorANSIDim, " (dev build)")
+	case release.StateFailed:
+		return base + doctorStyled(color, doctorANSIDim, " (update check failed)")
+	default:
+		return base
 	}
 }
 

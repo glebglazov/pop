@@ -126,6 +126,18 @@ func (m *MockFileSystem) EvalSymlinks(path string) (string, error) {
 	return path, nil
 }
 
+// MockReleaseFetcher is a test double for ReleaseFetcher
+type MockReleaseFetcher struct {
+	LatestReleaseTagFunc func() (string, error)
+}
+
+func (m *MockReleaseFetcher) LatestReleaseTag() (string, error) {
+	if m.LatestReleaseTagFunc != nil {
+		return m.LatestReleaseTagFunc()
+	}
+	return "", nil
+}
+
 // MockTmux is a test double for Tmux
 type MockTmux struct {
 	CommandFunc       func(args ...string) (string, error)

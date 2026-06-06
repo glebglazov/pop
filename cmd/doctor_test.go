@@ -12,6 +12,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/release"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -67,6 +68,7 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 		legacyTaskSets:      func() ([]string, error) { return nil, nil },
 		orphanedTaskStorage: func() ([]tasks.OrphanedStorage, error) { return nil, nil },
 		legacyLayoutStorage: func() ([]string, error) { return nil, nil },
+		updateCheck:         func() release.Result { return release.Result{Current: "dev", State: release.StateDev} },
 	}
 }
 
@@ -1039,7 +1041,7 @@ func TestDoctorMonitorPartialOnlyForMixedIntendedAgentStatusWiring(t *testing.T)
 }
 
 func TestRenderDoctorReportPinsRepresentativeFamilyOutput(t *testing.T) {
-	report := &doctorReport{families: []doctorFamilyReport{
+	report := &doctorReport{update: release.Result{Current: "2026.6.0", Latest: "2026.6.0", State: release.StateCurrent}, families: []doctorFamilyReport{
 		familyReport("pop project", []doctorCheck{
 			{label: "config loads", status: doctorStatusOK, detail: "/cfg/config.toml"},
 		}),
@@ -1058,7 +1060,9 @@ func TestRenderDoctorReportPinsRepresentativeFamilyOutput(t *testing.T) {
 	out := &bytes.Buffer{}
 	renderDoctorReport(out, report)
 
-	want := `Command-family readiness
+	want := `pop 2026.6.0 (latest)
+
+Command-family readiness
 
 STATUS    COMMAND        SUMMARY
 OK        pop project    ready
@@ -1073,6 +1077,66 @@ OK        pop integrate  ready
 `
 	if out.String() != want {
 		t.Fatalf("rendered doctor report mismatch:\nwant:\n%s\ngot:\n%s", want, out.String())
+	}
+}
+
+func TestDoctorUpdateHeaderStates(t *testing.T) {
+	cases := []struct {
+		name string
+		res  release.Result
+		want string
+	}{
+		{"outdated", release.Result{Current: "2026.6.0", Latest: "2026.6.1", State: release.StateOutdated}, "pop 2026.6.0 (latest: 2026.6.1 — update available)"},
+		{"current", release.Result{Current: "2026.6.0", Latest: "2026.6.0", State: release.StateCurrent}, "pop 2026.6.0 (latest)"},
+		{"dev", release.Result{Current: "2026.6.0-5-gabc123-dirty", State: release.StateDev}, "pop 2026.6.0-5-gabc123-dirty (dev build)"},
+		{"failed", release.Result{Current: "2026.6.0", State: release.StateFailed}, "pop 2026.6.0 (update check failed)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// color=false so dim notes render as plain text for assertion.
+			if got := doctorUpdateHeader(false, c.res); got != c.want {
+				t.Errorf("doctorUpdateHeader = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestDoctorUpdateCheckNeverAffectsFamilyStatus asserts the four Update-check
+// states leave every family's status untouched (CONTEXT.md "Update notice").
+func TestDoctorUpdateCheckNeverAffectsFamilyStatus(t *testing.T) {
+	states := []release.Result{
+		{Current: "2026.6.0", Latest: "2026.6.1", State: release.StateOutdated},
+		{Current: "2026.6.0", Latest: "2026.6.0", State: release.StateCurrent},
+		{Current: "2026.6.0-5-gabc123-dirty", State: release.StateDev},
+		{Current: "2026.6.0", State: release.StateFailed},
+	}
+
+	var baseline []doctorFamilyReport
+	for i, st := range states {
+		fs := newFakeFS()
+		d := readOnlyDoctorDeps(t, fs, true, true, true)
+		st := st
+		d.updateCheck = func() release.Result { return st }
+		report, err := buildDoctorReport(d)
+		if err != nil {
+			t.Fatalf("buildDoctorReport: %v", err)
+		}
+		if report.update.State != st.State {
+			t.Errorf("report.update.State = %v, want %v", report.update.State, st.State)
+		}
+		if i == 0 {
+			baseline = report.families
+			continue
+		}
+		if len(report.families) != len(baseline) {
+			t.Fatalf("family count changed across update states")
+		}
+		for j := range report.families {
+			if report.families[j].command != baseline[j].command || report.families[j].status != baseline[j].status {
+				t.Errorf("family %q status changed with update state %v: %v vs baseline %v",
+					report.families[j].command, st.State, report.families[j].status, baseline[j].status)
+			}
+		}
 	}
 }
 

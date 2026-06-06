@@ -1,0 +1,40 @@
+# Release pipeline (ADR 0014): runs from the Release workflow on a vYYYY.M.N
+# tag. Builds the binaries, publishes a GitHub release, and bumps the
+# homebrew tap formula to point at it.
+version: 2
+
+project_name: pop
+
+builds:
+  - main: .
+    binary: pop
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - arm64
+      - amd64
+    # Same injection point as the Makefile; buildVersion strips the v prefix.
+    ldflags:
+      - -s -w -X github.com/glebglazov/pop/cmd.version={{ .Tag }}
+
+archives:
+  - formats: [tar.gz]
+
+brews:
+  - name: pop
+    repository:
+      owner: glebglazov
+      name: homebrew-tap
+      # PAT with write access to the tap repo; the default workflow token
+      # cannot push to another repository.
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/glebglazov/pop
+    description: Project and worktree switcher for tmux
+    dependencies:
+      - name: tmux
+    test: |
+      system "#{bin}/pop", "--version"

@@ -1,6 +1,11 @@
 PREFIX ?= ~/.local
 
-LDFLAGS :=
+# CalVer version string (ADR 0014): the latest vYYYY.M.N tag, plus
+# commits-since and short SHA between releases, "-dirty" with uncommitted
+# changes. Falls back to the bare SHA before the first tag exists.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null)
+
+LDFLAGS := -X github.com/glebglazov/pop/cmd.version=$(VERSION)
 ifdef DEBUG
 	LDFLAGS += -X github.com/glebglazov/pop/debug.defaultLogPath=$(HOME)/.local/share/pop/debug.log
 endif

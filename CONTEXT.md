@@ -404,6 +404,24 @@ _Avoid_: Shell autosuggestion, discovery refresh
 A locally registered Task set whose manifest is no longer present beneath its Task storage. Its registration, priority, and list order are preserved in case the Task set returns. It is skipped during execution and shown before all discovered Task sets in the status table so active work remains grouped toward the end for a future terminal UI.
 _Avoid_: Malformed Task set
 
+### Releases
+
+**Release**:
+A published build of pop identified by a CalVer tag — `vYYYY.M.N`, where N is a release counter that resets each month; the version displays without the `v` prefix. The version records when the release happened, never compatibility: breaking changes are communicated through deprecation warnings and beta-tester sign-off, not version bumps. A Release ships prebuilt binaries; the homebrew tap points at the latest one.
+_Avoid_: Major/minor version, semver, compatibility promise
+
+**Dev build**:
+A pop binary whose version is not exactly a release tag. It identifies itself tag-relative — latest Release tag plus commits-since and short SHA, with a dirty marker (`v2026.6.0-5-gabc123-dirty`); before any tag exists, the bare SHA. A Dev build never shows the **Update notice**.
+_Avoid_: Snapshot, pre-release, bare commit SHA
+
+**Update check**:
+Determining whether a newer **Release** exists than the running binary. Pickers refresh this in the background at most once a day and render only from the cached result — never a network wait in the picker path. **Doctor** performs the check live on every run. Disabling the Update notice also disables the automatic background check, so an explicit Doctor run becomes the only check.
+_Avoid_: Phone home, telemetry, blocking version lookup
+
+**Update notice**:
+The dimmed top-right indication in a picker that a newer **Release** exists — surfaced at most once per calendar day across all pickers, suppressed for **Dev builds**, and disabled via config. In **Doctor**, version freshness is a header line only; an outdated binary never affects any family's **Doctor status**, and a failed check is a dim note, not a failure.
+_Avoid_: Upgrade nag, degraded status, update row
+
 #### Reserved terms
 
 **Queue** (reserved, not implemented):
