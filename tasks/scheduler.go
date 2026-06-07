@@ -19,15 +19,18 @@ type Selection struct {
 }
 
 // SelectTaskSet chooses the Task set to drain using the same readiness and failed-set
-// gates as SelectTask, without selecting an task.
-func SelectTaskSet(refresh *RefreshResult, taskSetOverride string) (string, error) {
+// gates as SelectTask, without selecting an task. The returned bool reports whether
+// the selection is a HITL fallback: no Ready Task set existed and the choice is the
+// sole attendable Human-blocked Task set, which Drain frames as "No runnable AFK work".
+func SelectTaskSet(refresh *RefreshResult, taskSetOverride string) (string, bool, error) {
 	if taskSetOverride != "" {
-		return selectExplicitTaskSet(refresh, taskSetOverride)
+		id, err := selectExplicitTaskSet(refresh, taskSetOverride)
+		return id, false, err
 	}
 	return selectAutomaticTaskSet(refresh)
 }
 
-func selectAutomaticTaskSet(refresh *RefreshResult) (string, error) {
+func selectAutomaticTaskSet(refresh *RefreshResult) (string, bool, error) {
 	manifests := refresh.Manifests
 	if manifests == nil {
 		manifests = make(map[string]*Manifest)
@@ -43,9 +46,31 @@ func selectAutomaticTaskSet(refresh *RefreshResult) (string, error) {
 		if _, err := firstEligibleTask(row.ID, m); err != nil {
 			continue
 		}
-		return row.ID, nil
+		return row.ID, false, nil
 	}
-	return "", exitErr(ExitNoRunnable, "no runnable work")
+	// No Ready Task set. Fall back to the HITL gate only when exactly one Task set
+	// is Human-blocked by an open HITL task; ambiguity stays no-runnable.
+	if id, ok := singleAttendableHITLTaskSet(refresh); ok {
+		return id, true, nil
+	}
+	return "", false, exitErr(ExitNoRunnable, "no runnable work")
+}
+
+// singleAttendableHITLTaskSet returns the only Task set held at a HITL gate by an
+// open HITL task, reporting false when zero or more than one such set exists.
+func singleAttendableHITLTaskSet(refresh *RefreshResult) (string, bool) {
+	found := ""
+	count := 0
+	for _, row := range refresh.Rows {
+		if BlockingHITLTask(refresh.Manifests[row.ID]) != nil {
+			found = row.ID
+			count++
+		}
+	}
+	if count == 1 {
+		return found, true
+	}
+	return "", false
 }
 
 func selectExplicitTaskSet(refresh *RefreshResult, taskSetID string) (string, error) {

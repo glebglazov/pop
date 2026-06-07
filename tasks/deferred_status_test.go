@@ -154,7 +154,7 @@ func TestSelectTaskSetSkipsDeferredLikeDone(t *testing.T) {
 		},
 	}
 
-	id, err := SelectTaskSet(refresh, "")
+	id, _, err := SelectTaskSet(refresh, "")
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}

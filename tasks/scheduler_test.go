@@ -142,9 +142,12 @@ func TestSelectTaskSetExplicitHumanBlockedAttendable(t *testing.T) {
 	}
 
 	// Explicit attendance works even when another Task set is Ready.
-	got, err := SelectTaskSet(refresh, "target")
+	got, fallback, err := SelectTaskSet(refresh, "target")
 	if err != nil {
 		t.Fatalf("explicit Human-blocked target: %v", err)
+	}
+	if fallback {
+		t.Fatalf("explicit target must not be a HITL fallback")
 	}
 	if got != "target" {
 		t.Fatalf("selected = %q, want target", got)
@@ -164,7 +167,7 @@ func TestSelectTaskSetExplicitAFKBlockedRejected(t *testing.T) {
 		},
 	}
 
-	_, err := SelectTaskSet(refresh, "target")
+	_, _, err := SelectTaskSet(refresh, "target")
 	if err == nil {
 		t.Fatal("expected error for AFK-dependency-blocked target")
 	}

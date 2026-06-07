@@ -198,6 +198,101 @@ func setupTwoSetHumanBlockedFixture(t *testing.T) (*runTaskSetFixture, string) {
 	return &runTaskSetFixture{root: root, tasksDir: tasksDir}, agent
 }
 
+func setupSoleHumanBlockedFixture(t *testing.T) (*runTaskSetFixture, string) {
+	t.Helper()
+	root := t.TempDir()
+	initExecutorGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := storageTasksDir(t, root)
+	// solo is the only set and is Human-blocked: an open HITL task gates it and no
+	// Ready Task set exists anywhere, so bare drain must fall back to its HITL gate.
+	setupManifest(t, tasksDir, "solo", []Task{
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+	agent := writeFakeAgent(t, root, fakeAgentConfig{checkTask: true, summary: "done"})
+	return &runTaskSetFixture{root: root, tasksDir: tasksDir}, agent
+}
+
+func TestRunTaskSetBareDrainFallsBackToSoleHITLGate(t *testing.T) {
+	env, agent := setupSoleHumanBlockedFixture(t)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n4\n")
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+	if result != nil && len(result.Completed) != 0 {
+		t.Fatalf("fallback gate should not drain AFK work: %#v", result)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"No runnable AFK work",
+		"Human-blocked: solo/02-hitl",
+		"1. Get agent assistance (default)",
+		"4. Exit",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("fallback gate output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "No runnable AFK work") > strings.Index(out, "Human-blocked: solo/02-hitl") {
+		t.Fatalf("No runnable AFK work must precede the HITL gate:\n%s", out)
+	}
+}
+
+func TestRunTaskSetBareDrainFallbackDefaultGetsAgentAssistance(t *testing.T) {
+	env, agent := setupSoleHumanBlockedFixture(t)
+	runner := &configurableHITLAssistanceRunner{t: t, tasksDir: env.tasksDir, onRun: func(t *testing.T, tasksDir string) {
+		m := LoadManifest(DefaultDeps(), "solo", filepath.Join(tasksDir, "solo", "index.json"))
+		for i := range m.Tasks {
+			if m.Tasks[i].ID == "02-hitl" {
+				m.Tasks[i].Status = "done"
+			}
+		}
+		if err := WriteManifestAtomic(DefaultDeps(), m); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("y\n\n")
+
+	if _, err := RunTaskSetWith(d, nil, nil, opts); err != nil {
+		t.Fatalf("fallback assistance should resolve the gate: %v", err)
+	}
+	if runner.attendedCalls != 1 {
+		t.Fatalf("fallback default must start attended assistance once: attended=%d", runner.attendedCalls)
+	}
+}
+
+func TestRunTaskSetBareDrainFallbackYesStopsWithoutAssistance(t *testing.T) {
+	env, agent := setupSoleHumanBlockedFixture(t)
+	runner := &configurableHITLAssistanceRunner{t: t, tasksDir: env.tasksDir}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+	if runner.calls != 0 {
+		t.Fatalf("--yes must not start attended assistance: calls=%d", runner.calls)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "pop tasks complete solo/02-hitl.md") {
+		t.Fatalf("stop-and-advice missing:\n%s", out)
+	}
+}
+
 func TestRunTaskSetExplicitHumanBlockedShowsGateDespiteReadyElsewhere(t *testing.T) {
 	env, agent := setupTwoSetHumanBlockedFixture(t)
 
@@ -954,11 +1049,14 @@ func TestSelectTaskSetAutomaticAndExplicit(t *testing.T) {
 		},
 	}
 
-	id, err := SelectTaskSet(refresh, "")
+	id, fallback, err := SelectTaskSet(refresh, "")
 	if err != nil || id != "auto" {
 		t.Fatalf("auto = %q, err = %v", id, err)
 	}
-	id, err = SelectTaskSet(refresh, "target")
+	if fallback {
+		t.Fatalf("Ready selection must not be a HITL fallback")
+	}
+	id, _, err = SelectTaskSet(refresh, "target")
 	if err != nil || id != "target" {
 		t.Fatalf("target = %q, err = %v", id, err)
 	}

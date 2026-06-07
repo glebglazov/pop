@@ -89,7 +89,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, err
 	}
 
-	taskSetID, err := SelectTaskSet(refresh, taskSetOverride)
+	taskSetID, hitlFallback, err := SelectTaskSet(refresh, taskSetOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +113,10 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	MarkRunTarget(displayRows, taskSetID)
 	displayRefresh := *refresh
 	displayRefresh.Rows = displayRows
+
+	if hitlFallback {
+		outputFor(out).line(ansiYellow, "No runnable AFK work")
+	}
 
 	fmt.Fprintln(out)
 	Render(out, &displayRefresh)
