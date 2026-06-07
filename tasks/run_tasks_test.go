@@ -237,11 +237,11 @@ func TestRunTaskSetInteractiveHITLGateShowsNumberedMenu(t *testing.T) {
 
 	out := buf.String()
 	for _, want := range []string{
-		"1. Complete task",
-		"2. Get agent assistance (default)",
+		"1. Get agent assistance (default)",
+		"2. Complete task",
 		"3. Defer task",
 		"4. Exit",
-		"Choose [2]:",
+		"Choose [1]:",
 		"claude <HITL assistance prompt>",
 		"using claude native attended assistance",
 	} {
@@ -307,7 +307,7 @@ func TestRunTaskSetInteractiveHITLGateAssistanceStartFailureReprompts(t *testing
 	if !strings.Contains(out, "Could not start HITL assistance: exec: claude: not found") {
 		t.Fatalf("missing start-failure message:\n%s", out)
 	}
-	if strings.Count(out, "Choose [2]:") < 2 {
+	if strings.Count(out, "Choose [1]:") < 2 {
 		t.Fatalf("start failure did not return to gate prompt:\n%s", out)
 	}
 	if runner.calls != 1 {
@@ -373,7 +373,7 @@ func TestRunTaskSetInteractiveHITLGateAssistanceStillBlockedReprompts(t *testing
 	_, err := RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
 	out := buf.String()
-	if strings.Count(out, "Choose [2]:") < 2 {
+	if strings.Count(out, "Choose [1]:") < 2 {
 		t.Fatalf("still-blocked assistance did not return to gate prompt:\n%s", out)
 	}
 	if runner.calls != 1 {
@@ -420,7 +420,7 @@ func TestRunTaskSetInteractiveHITLGateConfirmedCompletionContinuesDraining(t *te
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n1\ny\n")
+	opts.ConfirmIn = strings.NewReader("y\n2\ny\n")
 
 	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
@@ -481,12 +481,12 @@ func TestRunTaskSetInteractiveHITLGateDeclinedCompletionLeavesStateUnchanged(t *
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n1\nn\n4\n")
+	opts.ConfirmIn = strings.NewReader("y\n2\nn\n4\n")
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
 	out := buf.String()
-	if strings.Count(out, "Choose [2]:") < 2 {
+	if strings.Count(out, "Choose [1]:") < 2 {
 		t.Fatalf("decline did not return to gate prompt:\n%s", out)
 	}
 	if strings.Contains(out, "✓ Completed task demo/02-hitl") {
@@ -510,7 +510,7 @@ func TestRunTaskSetInteractiveHITLGateDeclinedDeferralLeavesStateUnchanged(t *te
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
 	out := buf.String()
-	if strings.Count(out, "Choose [2]:") < 2 {
+	if strings.Count(out, "Choose [1]:") < 2 {
 		t.Fatalf("decline did not return to gate prompt:\n%s", out)
 	}
 	if strings.Contains(out, "Skipped task demo/02-hitl") {
@@ -535,7 +535,7 @@ func TestRunTaskSetHITLGateNonInteractiveKeepsAdvice(t *testing.T) {
 	assertExitCode(t, err, ExitNoRunnable)
 
 	out := buf.String()
-	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "Choose [2]:") {
+	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "Choose [1]:") {
 		t.Fatalf("non-interactive run prompted:\n%s", out)
 	}
 	if !strings.Contains(out, "Human-blocked: demo/02-hitl") || !strings.Contains(out, "pop tasks complete demo/02-hitl.md") {
@@ -558,7 +558,7 @@ func TestRunTaskSetHITLGateYesKeepsAdvice(t *testing.T) {
 	assertExitCode(t, err, ExitNoRunnable)
 
 	out := buf.String()
-	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "Choose [2]:") {
+	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "Choose [1]:") {
 		t.Fatalf("--yes run prompted:\n%s", out)
 	}
 	if !strings.Contains(out, "Human-blocked: demo/02-hitl") || !strings.Contains(out, "pop tasks skip demo/02-hitl.md") {

@@ -198,7 +198,7 @@ every task done or skipped, ≥1 skipped ...... DEFERRED   ← conclude or reope
 otherwise (unfinished, none eligible) ....... BLOCKED    ← Human-blocked: HITL or undone dependency
 ```
 
-(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets. Drain stops when its set reaches DONE, FAILED, BLOCKED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate, interactive runs show a **HITL gate prompt** while non-interactive runs and `--yes` preserve stop-and-advice output.
+(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets; only when no READY set exists may Drain select a single unambiguous Human-blocked Task set for attended help, and only when the block is an open HITL task rather than an unresolved AFK dependency. Multiple Human-blocked Task sets are ambiguous and require an explicit target. Drain stops when its selected set reaches DONE, FAILED, BLOCKED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate, interactive runs show a **HITL gate prompt** while non-interactive runs and `--yes` preserve stop-and-advice output and never auto-start attended assistance.
 
 **Tasks readiness**:
 The **Doctor status** of the `pop tasks` command family. Because the tasks feature is aimed at Git projects and its central workflow is agent execution from a **Runtime path**, Doctor reports `pop tasks` as Blocked when no Git runtime checkout can be resolved, even if read-only status rendering could still inspect local artifacts.
@@ -281,7 +281,7 @@ Executing exactly one eligible task from a Ready Task set via `pop tasks run`. B
 _Avoid_: Run issue, next task
 
 **Drain**:
-Sequentially executing eligible tasks from one Ready Task set via `pop tasks drain` until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly. By default pop chooses the Task set using priority. When a positional argument is supplied, it must be a bare Task set identifier; paths are rejected. It does not continue into another Task set.
+Sequentially executing eligible tasks from one Ready Task set via `pop tasks drain` until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly; only when there is no Ready Task set may bare Drain instead attend one unambiguous Human-blocked Task set through a HITL gate prompt. By default pop chooses the Task set using priority. When a positional argument is supplied, it must be a bare Task set identifier; paths are rejected, and an explicitly targeted Human-blocked Task set may be attended even when Ready sets exist elsewhere. It does not continue into another Task set.
 _Avoid_: Run issues, run all, next Task set, Run PRD
 
 **Agent preset**:
@@ -329,7 +329,7 @@ A Task set with unfinished tasks but no eligible AFK task because human-in-the-l
 _Avoid_: Failed Task set
 
 **HITL gate prompt**:
-An interactive choice shown when Drain reaches a Human-blocked Task set. It lets the human choose the next action at the gate, such as completing the task, getting agent assistance, deferring the task, or exiting without changing task state.
+An interactive choice shown when Drain reaches or selects a Human-blocked Task set. It defaults to getting agent assistance while still letting the human complete the task, defer it, or exit without changing task state; when shown because bare Drain found no Ready Task set, it is framed as "No runnable AFK work" rather than as a dead end.
 _Avoid_: Automatic HITL execution, yes/no launch prompt
 
 **HITL assistance session**:
@@ -409,7 +409,7 @@ The human gate before Run or Drain spawns an agent. Pop prints the refreshed sta
 _Avoid_: HITL task, open task
 
 **Execution exit status**:
-The process result exposed by Run and Drain: `0` for completed work or a declined confirmation, `1` for execution failure, timeout, malformed target, commit failure, or a live Runtime execution lock, `2` when no runnable task exists, `3` for usage, configuration, or project-resolution errors, and `130` for interruption.
+The process result exposed by Run and Drain: `0` for completed work or a declined confirmation, `1` for execution failure, timeout, malformed target, commit failure, or a live Runtime execution lock, `2` when no runnable task exists or when a HITL gate exits without changing task state, `3` for usage, configuration, or project-resolution errors, and `130` for interruption.
 _Avoid_: Task set status, agent exit code
 
 **Status exit status**:

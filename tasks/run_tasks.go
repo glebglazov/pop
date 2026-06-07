@@ -398,26 +398,26 @@ func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string,
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiYellow, "Human-blocked: %s/%s needs human work before the set can continue.", taskSetID, hitl.ID)
-	fmt.Fprintln(display, "  1. Complete task")
-	fmt.Fprintln(display, "  2. Get agent assistance (default)")
+	fmt.Fprintln(display, "  1. Get agent assistance (default)")
 	if invocation != nil {
 		fmt.Fprintf(display, "     %s\n", invocation.Display)
 		if invocation.Detail != "" {
 			fmt.Fprintf(display, "     %s\n", invocation.Detail)
 		}
 	}
+	fmt.Fprintln(display, "  2. Complete task")
 	fmt.Fprintln(display, "  3. Defer task")
 	fmt.Fprintln(display, "  4. Exit")
-	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [2]: "))
+	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
 	answer, err := readPromptLine(reader)
 	if err != nil {
 		return hitlGateExit, err
 	}
 	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "", "2":
+	case "", "1":
 		return hitlGateAssist, nil
-	case "1":
+	case "2":
 		return hitlGateComplete, nil
 	case "3":
 		return hitlGateDefer, nil
