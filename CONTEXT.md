@@ -281,7 +281,7 @@ Executing exactly one eligible task from a Ready Task set via `pop tasks run`. B
 _Avoid_: Run issue, next task
 
 **Drain**:
-Sequentially executing eligible tasks from one Ready Task set via `pop tasks drain` until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly; only when there is no Ready Task set may bare Drain instead attend one unambiguous Human-blocked Task set through a HITL gate prompt. By default pop chooses the Task set using priority. When a positional argument is supplied, it must be a bare Task set identifier; paths are rejected, and an explicitly targeted Human-blocked Task set may be attended even when Ready sets exist elsewhere. It does not continue into another Task set.
+Sequentially executing eligible tasks from one Ready Task set via `pop tasks drain` until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly; only when there is no Ready Task set may bare Drain instead attend one unambiguous Human-blocked Task set through a HITL gate prompt. By default pop chooses the Task set using priority. When a positional argument is supplied, it must be a bare Task set identifier; paths are rejected, and an explicitly targeted Human-blocked Task set may be attended even when Ready sets exist elsewhere. It does not continue into another Task set. Drain requires explicit consent once per session before it may execute AFK tasks in the selected Task set, phrased as "Run AFK tasks in this Task set?"; when the selected Task set is already Human-blocked at a HITL gate, Drain may go directly to the HITL gate prompt only if it will ask for that AFK-execution consent before running any AFK task unblocked by the gate.
 _Avoid_: Run issues, run all, next Task set, Run PRD
 
 **Agent preset**:
@@ -329,7 +329,7 @@ A Task set with unfinished tasks but no eligible AFK task because human-in-the-l
 _Avoid_: Failed Task set
 
 **HITL gate prompt**:
-An interactive choice shown when Drain reaches or selects a Human-blocked Task set. It defaults to getting agent assistance while still letting the human complete the task, defer it, or exit without changing task state; when shown because bare Drain found no Ready Task set, it is framed as "No runnable AFK work" rather than as a dead end.
+An interactive choice shown when Drain reaches or selects a Human-blocked Task set. It defaults to getting agent assistance while still letting the human complete the task, defer it, or exit without changing task state; choosing complete or defer is the explicit manual decision and does not ask for a second yes/no confirmation. After complete or defer clears the blocking HITL task, Drain refreshes the same Task set and continues from any newly eligible AFK task. When shown because bare Drain found no Ready Task set, it is framed as "No runnable AFK work" rather than as a dead end.
 _Avoid_: Automatic HITL execution, yes/no launch prompt
 
 **HITL assistance session**:

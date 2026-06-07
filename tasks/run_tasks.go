@@ -13,7 +13,7 @@ import (
 	"github.com/glebglazov/pop/project"
 )
 
-const taskSetConfirmPrompt = "Run Task set? [y/N]: "
+const taskSetConfirmPrompt = "Run AFK tasks in this Task set? [y/N]: "
 
 // RunTaskSetOptions configures sequential Task-set draining.
 type RunTaskSetOptions struct {
@@ -131,12 +131,26 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		}
 	}
 
-	confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes, taskSetConfirmPrompt)
-	if err != nil {
-		return nil, err
+	initialHITLGate := selectedTaskSetStartsAtHITLGate(refresh, taskSetID)
+	var sharedPromptReader *bufio.Reader
+	if initialHITLGate && !opts.Yes && canPrompt(opts.ConfirmIn) {
+		promptIn := opts.ConfirmIn
+		if promptIn == nil {
+			promptIn = os.Stdin
+		}
+		sharedPromptReader = bufio.NewReader(promptIn)
 	}
-	if !confirmed {
-		return &RunTaskSetResult{TaskSetID: taskSetID, Refresh: refresh, Declined: true}, nil
+
+	afkConsentConfirmed := opts.Yes
+	if !initialHITLGate {
+		confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes, taskSetConfirmPrompt)
+		if err != nil {
+			return nil, err
+		}
+		if !confirmed {
+			return &RunTaskSetResult{TaskSetID: taskSetID, Refresh: refresh, Declined: true}, nil
+		}
+		afkConsentConfirmed = true
 	}
 
 	lock, err := AcquireRuntimeLock(d, runtimePath, confirmOut)
@@ -189,7 +203,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					printTaskSetSummary(out, result)
 				}
 				if hitl := BlockingHITLTask(currentRefresh.Manifests[taskSetID]); hitl != nil {
-					handled, err := handleInteractiveHITLGate(d, out, opts.ConfirmIn, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, currentRefresh.Manifests[taskSetID], hitl)
+					handled, err := handleInteractiveHITLGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, currentRefresh.Manifests[taskSetID], hitl)
 					if err != nil {
 						return nil, err
 					}
@@ -212,6 +226,23 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			default:
 				return nil, selErr
 			}
+		}
+
+		if !afkConsentConfirmed {
+			confirmIn := opts.ConfirmIn
+			if sharedPromptReader != nil {
+				confirmIn = sharedPromptReader
+			}
+			confirmed, err := confirmExecution(confirmIn, confirmOut, opts.Yes, taskSetConfirmPrompt)
+			if err != nil {
+				return nil, err
+			}
+			if !confirmed {
+				result.Refresh = currentRefresh
+				result.Declined = true
+				return result, nil
+			}
+			afkConsentConfirmed = true
 		}
 
 		if dirty && !dirtyStrategyApplied {
@@ -264,6 +295,11 @@ func finishRunTaskSet(out io.Writer, yes bool, result *RunTaskSetResult) {
 	}
 }
 
+func selectedTaskSetStartsAtHITLGate(refresh *RefreshResult, taskSetID string) bool {
+	row := findRow(refresh, taskSetID)
+	return row != nil && row.Status == StatusBlocked && BlockingHITLTask(refresh.Manifests[taskSetID]) != nil
+}
+
 func deferralMessage(result *RunTaskSetResult) string {
 	if len(result.SkippedTasks) > 0 {
 		return fmt.Sprintf("Task set %s deferred: skipped %s", result.TaskSetID, strings.Join(result.SkippedTasks, ", "))
@@ -301,12 +337,15 @@ const (
 	hitlGateDefer
 )
 
-func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, yes bool, agentPreset, agentCmd, cwd, runtimePath, definitionPath, statePath, taskSetID string, m *Manifest, hitl *Task) (bool, error) {
+func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *bufio.Reader, yes bool, agentPreset, agentCmd, cwd, runtimePath, definitionPath, statePath, taskSetID string, m *Manifest, hitl *Task) (bool, error) {
 	if yes || !canPrompt(in) || m == nil || hitl == nil {
 		return false, nil
 	}
-	if in == nil {
-		in = os.Stdin
+	if reader == nil {
+		if in == nil {
+			in = os.Stdin
+		}
+		reader = bufio.NewReader(in)
 	}
 
 	prompt := BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
@@ -315,7 +354,6 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, yes bool, a
 		return false, exitErr(ExitSetup, "%v", err)
 	}
 
-	reader := bufio.NewReader(in)
 	for {
 		action, err := promptHITLGateAction(out, reader, taskSetID, hitl, invocation)
 		if err != nil {
@@ -323,13 +361,6 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, yes bool, a
 		}
 		switch action {
 		case hitlGateComplete:
-			confirmed, err := confirmHITLGateAction(out, reader, "Complete task? [y/N]: ")
-			if err != nil {
-				return true, err
-			}
-			if !confirmed {
-				continue
-			}
 			result, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, hitl.File)})
 			if err != nil {
 				return true, err
@@ -362,13 +393,6 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, yes bool, a
 			}
 			hitl = BlockingHITLTask(m)
 		case hitlGateDefer:
-			confirmed, err := confirmHITLGateAction(out, reader, "Defer task? [y/N]: ")
-			if err != nil {
-				return true, err
-			}
-			if !confirmed {
-				continue
-			}
 			result, err := SkipTaskWith(d, nil, nil, SkipTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, hitl.File)})
 			if err != nil {
 				return true, err
@@ -431,17 +455,6 @@ func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string,
 		fmt.Fprintln(display, "Choose 1, 2, 3, or 4.")
 		return promptHITLGateAction(out, reader, taskSetID, hitl, invocation)
 	}
-}
-
-func confirmHITLGateAction(out io.Writer, reader *bufio.Reader, prompt string) (bool, error) {
-	display := outputFor(out)
-	fmt.Fprintf(display, "%s", display.styled(ansiCyan, prompt))
-	answer, err := readPromptLine(reader)
-	if err != nil {
-		return false, err
-	}
-	answer = strings.ToLower(strings.TrimSpace(answer))
-	return answer == "y" || answer == "yes", nil
 }
 
 func readPromptLine(reader *bufio.Reader) (string, error) {
