@@ -177,6 +177,76 @@ func TestRunTaskSetTargetedTaskSet(t *testing.T) {
 	}
 }
 
+func setupTwoSetHumanBlockedFixture(t *testing.T) (*runTaskSetFixture, string) {
+	t.Helper()
+	root := t.TempDir()
+	initExecutorGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := storageTasksDir(t, root)
+	// target is Human-blocked: only an open HITL task gates the set.
+	setupManifest(t, tasksDir, "target", []Task{
+		{ID: "01-hitl", File: "01-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	// ready would be auto-selected by a bare drain.
+	setupManifest(t, tasksDir, "ready", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+	agent := writeFakeAgent(t, root, fakeAgentConfig{checkTask: true, summary: "ready done"})
+	return &runTaskSetFixture{root: root, tasksDir: tasksDir}, agent
+}
+
+func TestRunTaskSetExplicitHumanBlockedShowsGateDespiteReadyElsewhere(t *testing.T) {
+	env, agent := setupTwoSetHumanBlockedFixture(t)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.TaskSetOverride = "target"
+	opts.ConfirmIn = strings.NewReader("y\n4\n")
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+	if result != nil && len(result.Completed) != 0 {
+		t.Fatalf("explicit target should not drain the Ready set: %#v", result)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"Human-blocked: target/01-hitl",
+		"1. Get agent assistance (default)",
+		"4. Exit",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("gate output missing %q:\n%s", want, out)
+		}
+	}
+	// The Ready set elsewhere must not have been touched.
+	assertTaskOpen(t, &execFixture{root: env.root, tasksDir: env.tasksDir}, "01-a")
+}
+
+func TestRunTaskSetExplicitHumanBlockedYesStopsWithoutAssistance(t *testing.T) {
+	env, agent := setupTwoSetHumanBlockedFixture(t)
+	runner := &configurableHITLAssistanceRunner{t: t, tasksDir: env.tasksDir}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
+	opts.TaskSetOverride = "target"
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+	if runner.calls != 0 {
+		t.Fatalf("--yes must not start attended assistance: calls=%d", runner.calls)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "pop tasks complete target/01-hitl.md") {
+		t.Fatalf("stop-and-advice missing:\n%s", out)
+	}
+}
+
 func TestRunTaskSetBlockedStopsWithReason(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},

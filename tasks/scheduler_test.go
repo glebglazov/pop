@@ -124,6 +124,56 @@ func TestSelectTaskFailedTaskSetRejected(t *testing.T) {
 	}
 }
 
+func TestSelectTaskSetExplicitHumanBlockedAttendable(t *testing.T) {
+	refresh := &RefreshResult{
+		Rows: []Row{
+			{ID: "ready", Status: StatusReady, Priority: 10},
+			{ID: "target", Status: StatusBlocked, Priority: 0, BlockedReason: "HITL: 02-gate"},
+		},
+		Manifests: map[string]*Manifest{
+			"ready": {Stem: "ready", Valid: true, Tasks: []Task{
+				{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "open"},
+			}},
+			"target": {Stem: "target", Valid: true, Tasks: []Task{
+				{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "done"},
+				{ID: "02-gate", File: "02-gate.md", Type: "HITL", Status: "open"},
+			}},
+		},
+	}
+
+	// Explicit attendance works even when another Task set is Ready.
+	got, err := SelectTaskSet(refresh, "target")
+	if err != nil {
+		t.Fatalf("explicit Human-blocked target: %v", err)
+	}
+	if got != "target" {
+		t.Fatalf("selected = %q, want target", got)
+	}
+}
+
+func TestSelectTaskSetExplicitAFKBlockedRejected(t *testing.T) {
+	refresh := &RefreshResult{
+		Rows: []Row{
+			{ID: "target", Status: StatusBlocked, Priority: 0, BlockedReason: "blocked by 01-dep"},
+		},
+		Manifests: map[string]*Manifest{
+			"target": {Stem: "target", Valid: true, Tasks: []Task{
+				{ID: "01-dep", File: "01-dep.md", Type: "AFK", Status: "open", BlockedBy: []string{"02-other"}},
+				{ID: "02-task", File: "02-task.md", Type: "AFK", Status: "open", BlockedBy: []string{"01-dep"}},
+			}},
+		},
+	}
+
+	_, err := SelectTaskSet(refresh, "target")
+	if err == nil {
+		t.Fatal("expected error for AFK-dependency-blocked target")
+	}
+	ee, ok := err.(*ExitError)
+	if !ok || ee.Code != ExitNoRunnable {
+		t.Fatalf("code = %v", err)
+	}
+}
+
 func TestMarkRunTargetCombinedAndSeparate(t *testing.T) {
 	rows := []Row{
 		{ID: "auto", Priority: 5, Status: StatusReady, AutoPick: true, PriorityShow: "5 AUTO"},

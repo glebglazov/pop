@@ -69,6 +69,12 @@ func selectExplicitTaskSet(refresh *RefreshResult, taskSetID string) (string, er
 	case StatusReady, StatusDeferred:
 		return taskSetID, nil
 	default:
+		// An explicitly targeted set that is Human-blocked by an open HITL task
+		// is allowed through so drain can enter the HITL gate. Sets blocked only
+		// by unresolved AFK dependencies still stop as no-runnable.
+		if BlockingHITLTask(m) != nil {
+			return taskSetID, nil
+		}
 		return "", exitErr(ExitNoRunnable, "Task set %q is %s: %s", taskSetID, strings.ToLower(string(row.Status)), row.BlockedReason)
 	}
 }
