@@ -49,28 +49,34 @@ func selectAutomaticTaskSet(refresh *RefreshResult) (string, bool, error) {
 		return row.ID, false, nil
 	}
 	// No Ready Task set. Fall back to the HITL gate only when exactly one Task set
-	// is Human-blocked by an open HITL task; ambiguity stays no-runnable.
-	if id, ok := singleAttendableHITLTaskSet(refresh); ok {
-		return id, true, nil
+	// is Human-blocked by an open HITL task. When several sets are attendable the
+	// choice is ambiguous: refuse to pick by priority and tell the human to target
+	// one explicitly. Zero attendable sets stays plain no-runnable.
+	attendable := attendableHITLTaskSets(refresh)
+	switch len(attendable) {
+	case 1:
+		return attendable[0], true, nil
+	case 0:
+		return "", false, exitErr(ExitNoRunnable, "no runnable work")
+	default:
+		return "", false, exitErr(ExitNoRunnable,
+			"no runnable AFK work and multiple Task sets are Human-blocked: %s; "+
+				"run `pop tasks drain <task-set>` for the set you want to attend",
+			strings.Join(attendable, ", "))
 	}
-	return "", false, exitErr(ExitNoRunnable, "no runnable work")
 }
 
-// singleAttendableHITLTaskSet returns the only Task set held at a HITL gate by an
-// open HITL task, reporting false when zero or more than one such set exists.
-func singleAttendableHITLTaskSet(refresh *RefreshResult) (string, bool) {
-	found := ""
-	count := 0
+// attendableHITLTaskSets returns the IDs of every Task set held at a HITL gate by
+// an open HITL task, sorted for stable output.
+func attendableHITLTaskSets(refresh *RefreshResult) []string {
+	var ids []string
 	for _, row := range refresh.Rows {
 		if BlockingHITLTask(refresh.Manifests[row.ID]) != nil {
-			found = row.ID
-			count++
+			ids = append(ids, row.ID)
 		}
 	}
-	if count == 1 {
-		return found, true
-	}
-	return "", false
+	sort.Strings(ids)
+	return ids
 }
 
 func selectExplicitTaskSet(refresh *RefreshResult, taskSetID string) (string, error) {

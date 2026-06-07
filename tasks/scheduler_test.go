@@ -177,6 +177,47 @@ func TestSelectTaskSetExplicitAFKBlockedRejected(t *testing.T) {
 	}
 }
 
+func TestSelectTaskSetAmbiguousHITLFallbackRejected(t *testing.T) {
+	// Two Task sets are Human-blocked and none is Ready: a bare drain must refuse
+	// to pick by priority and advise targeting one explicitly.
+	refresh := &RefreshResult{
+		Rows: []Row{
+			{ID: "beta", Status: StatusBlocked, Priority: 100, BlockedReason: "HITL: 01-gate"},
+			{ID: "alpha", Status: StatusBlocked, Priority: 0, BlockedReason: "HITL: 01-gate"},
+		},
+		Manifests: map[string]*Manifest{
+			"beta": {Stem: "beta", Valid: true, Tasks: []Task{
+				{ID: "01-gate", File: "01-gate.md", Type: "HITL", Status: "open"},
+			}},
+			"alpha": {Stem: "alpha", Valid: true, Tasks: []Task{
+				{ID: "01-gate", File: "01-gate.md", Type: "HITL", Status: "open"},
+			}},
+		},
+	}
+
+	got, fallback, err := SelectTaskSet(refresh, "")
+	if err == nil {
+		t.Fatal("expected error for ambiguous HITL fallback")
+	}
+	if got != "" || fallback {
+		t.Fatalf("ambiguous fallback must not select a set: got=%q fallback=%v", got, fallback)
+	}
+	ee, ok := err.(*ExitError)
+	if !ok || ee.Code != ExitNoRunnable {
+		t.Fatalf("code = %v, want ExitNoRunnable", err)
+	}
+	msg := ee.Error()
+	for _, want := range []string{"pop tasks drain <task-set>", "alpha", "beta"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("message %q missing %q", msg, want)
+		}
+	}
+	// Priority must not decide the gate: the higher-priority set is not auto-picked.
+	if strings.Contains(msg, "alpha, beta") == false {
+		t.Fatalf("attendable sets must be listed sorted, got %q", msg)
+	}
+}
+
 func TestMarkRunTargetCombinedAndSeparate(t *testing.T) {
 	rows := []Row{
 		{ID: "auto", Priority: 5, Status: StatusReady, AutoPick: true, PriorityShow: "5 AUTO"},
