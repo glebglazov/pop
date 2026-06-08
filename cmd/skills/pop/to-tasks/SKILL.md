@@ -127,6 +127,6 @@ Field rules:
 The JSON is the source of truth for automation. The rules above — the eligibility condition (`status == "open"` and every `blocked_by` id `done`, preferring `AFK` over `HITL` among eligible tasks), the done-condition (all `## Acceptance criteria` boxes checked), and the commit format `tasks(<task-set-slug>): <id>` (set name without its timestamp prefix) — are the **contract** that two independent runners implement:
 
 - **In-context:** the **run-task** skill, pure prose, where the live agent picks, implements, and commits one task itself.
-- **Headless:** the `pop tasks` runner (`pop tasks run` for one eligible task, `pop tasks drain` for the whole set), which spawns an agent per task with retry/timeout handling.
+- **Headless:** the `pop tasks` runner (`pop tasks implement` — drains the whole set, or runs one task when given a `<task-set>/<file>.md` target), which spawns an agent per task with retry/timeout handling.
 
 Keep `index.json` and the markdown files in sync — every markdown file has exactly one manifest entry and vice versa.

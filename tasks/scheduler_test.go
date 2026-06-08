@@ -207,7 +207,7 @@ func TestSelectTaskSetAmbiguousHITLFallbackRejected(t *testing.T) {
 		t.Fatalf("code = %v, want ExitNoRunnable", err)
 	}
 	msg := ee.Error()
-	for _, want := range []string{"pop tasks drain <task-set>", "alpha", "beta"} {
+	for _, want := range []string{"pop tasks implement <task-set>", "alpha", "beta"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("message %q missing %q", msg, want)
 		}

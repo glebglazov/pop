@@ -419,10 +419,30 @@ func TestRunTaskCmdRejectsInvalidTaskTargets(t *testing.T) {
 	}
 }
 
-func TestRunTaskCmdRejectsMoreThanOnePositional(t *testing.T) {
-	err := taskRunTaskCmd.Args(taskRunTaskCmd, []string{"one", "two"})
+func TestImplementCmdRejectsMoreThanOnePositional(t *testing.T) {
+	err := taskImplementCmd.Args(taskImplementCmd, []string{"one", "two"})
 	if err == nil {
 		t.Fatal("expected usage error")
+	}
+}
+
+func TestImplementDispatchByTargetShape(t *testing.T) {
+	// A ".md" target is a Task-set-relative file reference (single task); a bare
+	// identifier or empty target (no argument) drains an auto-selected set.
+	cases := []struct {
+		target   string
+		wantFile bool
+	}{
+		{"", false},
+		{"demo", false},
+		{"thoughts/issues/live-agent-smoke", false},
+		{"demo/01-a.md", true},
+		{"2026-06-08-feature/03-x.md", true},
+	}
+	for _, c := range cases {
+		if got := isTaskFileTarget(c.target); got != c.wantFile {
+			t.Errorf("isTaskFileTarget(%q) = %v, want %v", c.target, got, c.wantFile)
+		}
 	}
 }
 
@@ -532,21 +552,21 @@ func TestRunTasksCmdRejectsAbsoluteTaskSetPath(t *testing.T) {
 	}
 }
 
-func TestRunTasksCmdRejectsMoreThanOnePositional(t *testing.T) {
-	err := taskRunTasksCmd.Args(taskRunTasksCmd, []string{"one", "two"})
-	if err == nil {
-		t.Fatal("expected usage error")
-	}
-}
-
 func TestTaskCommandSurfaceUsesTaskSetVocabulary(t *testing.T) {
 	names := map[string]*cobra.Command{}
 	for _, c := range taskCmd.Commands() {
 		names[c.Name()] = c
 	}
 
-	if _, ok := names["drain"]; !ok {
-		t.Fatal("drain command is not registered")
+	if _, ok := names["implement"]; !ok {
+		t.Fatal("implement command is not registered")
+	}
+	// run and drain merged into the single implement verb (ADR 0015).
+	if _, ok := names["run"]; ok {
+		t.Fatal("removed run verb is still registered")
+	}
+	if _, ok := names["drain"]; ok {
+		t.Fatal("removed drain verb is still registered")
 	}
 	if _, ok := names["run-prd"]; ok {
 		t.Fatal("removed run-prd alias is still registered")
@@ -563,20 +583,17 @@ func TestTaskCommandSurfaceUsesTaskSetVocabulary(t *testing.T) {
 	if names["open"].Flags().Lookup("issue") != nil {
 		t.Fatal("open still exposes removed --issue flag")
 	}
-	if names["run"].Flags().Lookup("issue-set") != nil {
-		t.Fatal("run still exposes removed --issue-set flag")
+	if names["implement"].Flags().Lookup("issue-set") != nil {
+		t.Fatal("implement still exposes removed --issue-set flag")
 	}
-	if names["run"].Flags().Lookup("issue") != nil {
-		t.Fatal("run still exposes removed --issue flag")
-	}
-	if names["drain"].Flags().Lookup("issue-set") != nil {
-		t.Fatal("drain still exposes removed --issue-set flag")
+	if names["implement"].Flags().Lookup("issue") != nil {
+		t.Fatal("implement still exposes removed --issue flag")
 	}
 }
 
 func TestTaskAllowDirtyFlagAcceptsOptionalStrategies(t *testing.T) {
 	t.Cleanup(resetTaskFlags)
-	for _, command := range []*cobra.Command{taskRunTaskCmd, taskRunTasksCmd} {
+	for _, command := range []*cobra.Command{taskImplementCmd} {
 		flag := command.Flags().Lookup("allow-dirty")
 		if flag == nil {
 			t.Fatalf("%s missing --allow-dirty", command.Name())

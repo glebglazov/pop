@@ -61,7 +61,7 @@ func selectAutomaticTaskSet(refresh *RefreshResult) (string, bool, error) {
 	default:
 		return "", false, exitErr(ExitNoRunnable,
 			"no runnable AFK work and multiple Task sets are Human-blocked: %s; "+
-				"run `pop tasks drain <task-set>` for the set you want to attend",
+				"run `pop tasks implement <task-set>` for the set you want to attend",
 			strings.Join(attendable, ", "))
 	}
 }

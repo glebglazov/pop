@@ -2,7 +2,7 @@
 
 ## Live Workload Agent Smoke
 
-`live-workload-agent-smoke.sh` runs `pop tasks drain` against real agent CLIs in disposable git repositories:
+`live-workload-agent-smoke.sh` runs `pop tasks implement` against real agent CLIs in disposable git repositories:
 
 ```bash
 scripts/live-workload-agent-smoke.sh codex

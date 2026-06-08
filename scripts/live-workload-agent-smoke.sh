@@ -160,7 +160,7 @@ for agent in "${agents[@]}"; do
     XDG_DATA_HOME="$xdg" "$pop_bin" tasks \
       --path "$runtime" \
       --task-definition-path "$runtime" \
-      drain thoughts/issues/live-agent-smoke \
+      implement thoughts/issues/live-agent-smoke \
       --task-runtime-path "$runtime" \
       --agent "$agent" \
       --agent-output auto \

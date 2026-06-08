@@ -25,14 +25,11 @@ func registerTaskShellCompletions() {
 
 	_ = taskCmd.RegisterFlagCompletionFunc("project", completeTaskProjects)
 
-	for _, cmd := range []*cobra.Command{taskRunTaskCmd, taskRunTasksCmd} {
-		_ = cmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
-		_ = cmd.RegisterFlagCompletionFunc("agent-output", completeTaskAgentOutputs)
-	}
+	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent-output", completeTaskAgentOutputs)
 
 	taskSetPriorityCmd.ValidArgsFunction = completeTaskSetPriorityArgs
-	taskRunTaskCmd.ValidArgsFunction = completeTaskRunTaskArgs
-	taskRunTasksCmd.ValidArgsFunction = completeTaskRunTasksArgs
+	taskImplementCmd.ValidArgsFunction = completeTaskImplementArgs
 	taskResetTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskCompleteTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskSkipTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
@@ -53,8 +50,7 @@ func completeTaskShowPathArgs(cmd *cobra.Command, args []string, toComplete stri
 func registerTaskPathFlagCompletions() {
 	_ = taskCmd.MarkPersistentFlagDirname("path")
 	_ = taskCmd.MarkPersistentFlagDirname("task-definition-path")
-	_ = taskRunTaskCmd.MarkFlagDirname("task-runtime-path")
-	_ = taskRunTasksCmd.MarkFlagDirname("task-runtime-path")
+	_ = taskImplementCmd.MarkFlagDirname("task-runtime-path")
 }
 
 func completeTaskProjects(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -112,7 +108,7 @@ func completeTaskSetPriorityArgs(cmd *cobra.Command, args []string, toComplete s
 	return completeTaskTaskSets(cmd, args, toComplete)
 }
 
-func completeTaskRunTaskArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+func completeTaskImplementArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -124,13 +120,6 @@ func completeTaskTaskFileArgs(cmd *cobra.Command, args []string, toComplete stri
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	return completeTaskTaskTargets(cmd, args, toComplete)
-}
-
-func completeTaskRunTasksArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if len(args) > 0 {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	return completeTaskTaskSets(cmd, args, toComplete)
 }
 
 func completionInputFromCmd(cmd *cobra.Command) tasks.CompletionInput {

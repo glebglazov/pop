@@ -82,7 +82,7 @@ scripts/live-workload-agent-smoke.sh codex
 make live-agent-smoke AGENTS="codex claude"
 ```
 
-It creates disposable git repos with a temporary task set and runs `pop tasks drain` using each selected agent preset. This can consume agent quota and depends on local CLI authentication, so it is not part of normal tests.
+It creates disposable git repos with a temporary task set and runs `pop tasks implement` using each selected agent preset. This can consume agent quota and depends on local CLI authentication, so it is not part of normal tests.
 
 ## Custom worktree commands
 

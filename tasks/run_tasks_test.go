@@ -406,7 +406,7 @@ func TestRunTaskSetHITLGatePrintsRecoveryAdvice(t *testing.T) {
 		"- [ ] ok",
 		"--- end ---",
 		"pop tasks complete demo/02-hitl.md",
-		"$EDITOR demo/02-hitl.md && pop tasks drain",
+		"$EDITOR demo/02-hitl.md && pop tasks implement",
 		"pop tasks skip demo/02-hitl.md",
 	} {
 		if !strings.Contains(out, want) {

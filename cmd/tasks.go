@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/config"
@@ -47,18 +48,11 @@ var taskSetPriorityCmd = &cobra.Command{
 	RunE:  runTaskSetPriority,
 }
 
-var taskRunTaskCmd = &cobra.Command{
-	Use:   "run [TASK_SET | TASK_SET/FILE.md]",
-	Short: "Execute one eligible AFK task through a coding agent",
+var taskImplementCmd = &cobra.Command{
+	Use:   "implement [TASK_SET | TASK_SET/FILE.md]",
+	Short: "Implement tasks through a coding agent: drain a task set, or run one targeted task",
 	Args:  cobra.MaximumNArgs(1),
-	Run:   runTaskRunTask,
-}
-
-var taskRunTasksCmd = &cobra.Command{
-	Use:   "drain [TASK_SET]",
-	Short: "Sequentially drain eligible AFK tasks from one task set",
-	Args:  cobra.MaximumNArgs(1),
-	Run:   runTaskRunTasks,
+	Run:   runTaskImplement,
 }
 
 var taskResetTaskCmd = &cobra.Command{
@@ -100,8 +94,7 @@ func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
 	taskCmd.AddCommand(taskSetPriorityCmd)
-	taskCmd.AddCommand(taskRunTaskCmd)
-	taskCmd.AddCommand(taskRunTasksCmd)
+	taskCmd.AddCommand(taskImplementCmd)
 	taskCmd.AddCommand(taskResetTaskCmd)
 	taskCmd.AddCommand(taskCompleteTaskCmd)
 	taskCmd.AddCommand(taskSkipTaskCmd)
@@ -112,25 +105,15 @@ func init() {
 	taskCmd.PersistentFlags().StringVar(&taskPath, "path", "", "Select project by path (normalized to git checkout root)")
 	taskCmd.PersistentFlags().StringVar(&taskDefPath, "task-definition-path", "", "Exact task definition directory (not normalized to git root)")
 
-	taskRunTaskCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
-	taskRunTaskCmd.Flags().Var(&taskAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
-	taskRunTaskCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(tasks.DirtyRuntimeContinue)
-	taskRunTaskCmd.Flags().StringVar(&taskAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
-	taskRunTaskCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
-	taskRunTaskCmd.Flags().Var(&taskAgentOutput, "agent-output", "Agent output mode: auto (default), text")
-	taskRunTaskCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
-	taskRunTaskCmd.Flags().StringVar(&taskTimeout, "timeout", "30m", "Maximum duration per attempt")
-	taskRunTaskCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip confirmation prompt")
-
-	taskRunTasksCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
-	taskRunTasksCmd.Flags().Var(&taskAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
-	taskRunTasksCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(tasks.DirtyRuntimeContinue)
-	taskRunTasksCmd.Flags().StringVar(&taskAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
-	taskRunTasksCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
-	taskRunTasksCmd.Flags().Var(&taskAgentOutput, "agent-output", "Agent output mode: auto (default), text")
-	taskRunTasksCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
-	taskRunTasksCmd.Flags().StringVar(&taskTimeout, "timeout", "30m", "Maximum duration per attempt")
-	taskRunTasksCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip confirmation prompt")
+	taskImplementCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
+	taskImplementCmd.Flags().Var(&taskAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
+	taskImplementCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(tasks.DirtyRuntimeContinue)
+	taskImplementCmd.Flags().StringVar(&taskAgentPreset, "agent", "claude", "Agent preset: claude, opencode, cursor, codex, pi")
+	taskImplementCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
+	taskImplementCmd.Flags().Var(&taskAgentOutput, "agent-output", "Agent output mode: auto (default), text")
+	taskImplementCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
+	taskImplementCmd.Flags().StringVar(&taskTimeout, "timeout", "30m", "Maximum duration per attempt")
+	taskImplementCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip confirmation prompt")
 }
 
 func taskResolveInput() tasks.ResolveInput {
@@ -190,19 +173,34 @@ func runTaskSetPriorityWith(d *tasks.Deps, w io.Writer, taskSetID, priorityArg s
 	return nil
 }
 
-func runTaskRunTask(cmd *cobra.Command, args []string) {
-	var taskPath string
+func runTaskImplement(cmd *cobra.Command, args []string) {
+	var target string
 	if len(args) > 0 {
-		taskPath = args[0]
+		target = args[0]
 	}
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, taskPath)
+	var err error
+	if isTaskFileTarget(target) {
+		err = runTaskRunTaskWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target)
+	} else {
+		err = runTaskRunTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target)
+	}
 	handleTaskExit(err)
+}
+
+// isTaskFileTarget reports whether a Task target reference names a single task —
+// a Task-set-relative file reference such as "<task-set>/<file>.md" — rather than
+// a bare Task set identifier. The ".md" suffix is the discriminator: it is exactly
+// the file-reference form, so a single task runs only when a file names it; a bare
+// set identifier or an empty target (no argument) drains an auto-selected set.
+// Malformed forms still route in and are rejected by the executor's own validation.
+func isTaskFileTarget(target string) bool {
+	return strings.HasSuffix(target, ".md")
 }
 
 func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskPath string) error {
 	timeout, err := time.ParseDuration(taskTimeout)
 	if err != nil {
-		return fmt.Errorf("tasks run: invalid --timeout %q: %w", taskTimeout, err)
+		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
 	}
 	_, err = tasks.RunTaskWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskOptions{
 		ResolveInput:     taskResolveInput(),
@@ -221,19 +219,10 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 	return err
 }
 
-func runTaskRunTasks(cmd *cobra.Command, args []string) {
-	var taskSetPath string
-	if len(args) > 0 {
-		taskSetPath = args[0]
-	}
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, taskSetPath)
-	handleTaskExit(err)
-}
-
 func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskSetPath string) error {
 	timeout, err := time.ParseDuration(taskTimeout)
 	if err != nil {
-		return fmt.Errorf("tasks drain: invalid --timeout %q: %w", taskTimeout, err)
+		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
 	}
 	_, err = tasks.RunTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskSetOptions{
 		ResolveInput:    taskResolveInput(),

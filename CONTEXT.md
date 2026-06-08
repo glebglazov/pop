@@ -171,7 +171,7 @@ This overview relates the terms defined below; read it before changing task beha
 A **task** moves between four statuses. The executor drives the solid transitions; the human drives the dashed ones through manual override commands.
 
 ```
-                      Run / Drain (agent success)
+                       Implement (agent success)
         open ──────────────────────────────────────────▶ done
          │ ▲                                              ▲ ▲
          │ │ Open task                         Complete   │ │ Complete
@@ -193,12 +193,12 @@ A **Task set**'s status is derived from its tasks, in this precedence:
 ```
 all tasks done .............................. DONE
 any task failed ............................. FAILED
-has an eligible AFK task .................... READY      ← Drain drains these
+has an eligible AFK task .................... READY      ← Implement drains these
 every task done or skipped, ≥1 skipped ...... DEFERRED   ← conclude or reopen later
 otherwise (unfinished, none eligible) ....... BLOCKED    ← Human-blocked: HITL or undone dependency
 ```
 
-(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets; only when no READY set exists may Drain select a single unambiguous Human-blocked Task set for attended help, and only when the block is an open HITL task rather than an unresolved AFK dependency. Multiple Human-blocked Task sets are ambiguous and require an explicit target. Drain stops when its selected set reaches DONE, FAILED, BLOCKED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate, interactive runs show a **HITL gate prompt** while non-interactive runs and `--yes` preserve stop-and-advice output and never auto-start attended assistance.
+(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets; only when no READY set exists may a no-argument implement select a single unambiguous Human-blocked Task set for attended help, and only when the block is an open HITL task rather than an unresolved AFK dependency. Multiple Human-blocked Task sets are ambiguous and require an explicit target. Draining stops when its selected set reaches DONE, FAILED, BLOCKED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate, interactive runs show a **HITL gate prompt** while non-interactive runs and `--yes` preserve stop-and-advice output and never auto-start attended assistance.
 
 **Tasks readiness**:
 The **Doctor status** of the `pop tasks` command family. Because the tasks feature is aimed at Git projects and its central workflow is agent execution from a **Runtime path**, Doctor reports `pop tasks` as Blocked when no Git runtime checkout can be resolved, even if read-only status rendering could still inspect local artifacts.
@@ -241,7 +241,7 @@ The git checkout from which task execution starts. It defaults to the selected p
 _Avoid_: Workload runtime path, task storage, shared git root
 
 **Dirty runtime strategy**:
-Controls how task execution starts from a dirty runtime checkout. `continue` starts execution without modifying the existing dirty state; it is the default both when the option is absent and when it is present without a value, and after successful task completion the normal implementation commit intentionally includes both pre-existing and agent changes. `commit-and-continue` captures the existing dirty state in a separate implementation commit before invoking the agent. `stash-and-continue` stashes tracked and untracked changes but not ignored files, prints the stash reference when one is created, and leaves restoration to the user; an empty stash does not prevent execution. When the runtime is dirty the command always displays `git status` and the chosen strategy's effect, then requires interactive `y` confirmation; `--yes` auto-confirms, and a non-interactive run without `--yes` is rejected. Drain applies the chosen strategy once before draining its selected Task set.
+Controls how task execution starts from a dirty runtime checkout. `continue` starts execution without modifying the existing dirty state; it is the default both when the option is absent and when it is present without a value, and after successful task completion the normal implementation commit intentionally includes both pre-existing and agent changes. `commit-and-continue` captures the existing dirty state in a separate implementation commit before invoking the agent. `stash-and-continue` stashes tracked and untracked changes but not ignored files, prints the stash reference when one is created, and leaves restoration to the user; an empty stash does not prevent execution. When the runtime is dirty the command always displays `git status` and the chosen strategy's effect, then requires interactive `y` confirmation; `--yes` auto-confirms, and a non-interactive run without `--yes` is rejected. Implement applies the chosen strategy once before draining its selected Task set.
 _Avoid_: Clean runtime checkout requirement, automatic stash restoration
 
 **Implementation commit**:
@@ -276,13 +276,9 @@ _Avoid_: First registered Task set, highest-priority Task set regardless of stat
 The mechanism that runs a selected task through an agent, verifies completion, updates the task manifest and progress record locally, and commits implementation changes.
 _Avoid_: Workload executor, scheduler
 
-**Run**:
-Executing exactly one eligible task from a Ready Task set via `pop tasks run`. By default pop chooses the Task set using priority. When a positional argument names a Task set as a bare Task set identifier, pop runs the next eligible task from that set. When the argument is a Task-set-relative file reference such as `<task-set>/<file>.md`, pop targets that task. Paths, bare filenames, and bare task identifiers are rejected. Targeting still requires Open status, AFK type, and satisfied dependencies.
-_Avoid_: Run issue, next task
-
-**Drain**:
-Sequentially executing eligible tasks from one Ready Task set via `pop tasks drain` until it becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops draining cleanly; only when there is no Ready Task set may bare Drain instead attend one unambiguous Human-blocked Task set through a HITL gate prompt. By default pop chooses the Task set using priority. When a positional argument is supplied, it must be a bare Task set identifier; paths are rejected, and an explicitly targeted Human-blocked Task set may be attended even when Ready sets exist elsewhere. It does not continue into another Task set. Drain requires explicit consent once per session before it may execute AFK tasks in the selected Task set, phrased as "Run AFK tasks in this Task set?"; when the selected Task set is already Human-blocked at a HITL gate, Drain may go directly to the HITL gate prompt only if it will ask for that AFK-execution consent before running any AFK task unblocked by the gate.
-_Avoid_: Run issues, run all, next Task set, Run PRD
+**Implement**:
+The single task-execution command, `pop tasks implement`, that runs tasks through the **Task executor** and dispatches by **Task target reference** shape — there is no separate one-vs-many verb. Given a Task-set-relative file reference `<task-set>/<file>.md`, it executes exactly that one task, which must be Open, AFK, and have satisfied dependencies. Given a bare Task set identifier — or no argument, in which case pop chooses the highest-priority Ready Task set — it **drains** that set, executing eligible tasks sequentially until the set becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops cleanly; it does not continue into another Task set. There is no way to run a single auto-picked task: a no-argument implement always drains, and exactly one task runs only when a file reference names it. Only when no Ready Task set exists may a no-argument implement instead attend one unambiguous Human-blocked Task set through a **HITL gate prompt**; multiple Human-blocked sets are ambiguous and require an explicit target, and an explicitly targeted Human-blocked set may be attended even when Ready sets exist elsewhere. Draining requires explicit consent once per session before executing AFK tasks in the selected Task set, phrased "Run AFK tasks in this Task set?"; a single targeted task asks "Run task?". When the selected Task set is already Human-blocked at a HITL gate, implement may go directly to the HITL gate prompt only if it will still ask for AFK-execution consent before running any AFK task the gate unblocks. Paths, bare filenames, and bare task identifiers are rejected.
+_Avoid_: Run, Drain, separate one-vs-many verbs, run issue, run issues, run all, next Task set, Run PRD
 
 **Agent preset**:
 A named headless agent command known to the task executor. An explicit agent command may override a preset. The executor appends its generated prompt as the final positional argument and disconnects stdin.
@@ -309,15 +305,15 @@ Proactively displaying subscription quota remaining in a provider-specific rolli
 _Avoid_: Token usage, API cost
 
 **Agent quota detection**:
-Identifying from Agent output handling that a task attempt stopped because the agent allowance is exhausted. Detection is preset-specific and relies on a stable headless signal. A detected quota pause stops Run or Drain cleanly without retrying, leaves the task Open, preserves partial runtime changes, and does not append a progress record. It is not a Failed, Skipped, or Interrupted task. Proactively reporting remaining allowance is the separate **Agent quota reporting** concern.
+Identifying from Agent output handling that a task attempt stopped because the agent allowance is exhausted. Detection is preset-specific and relies on a stable headless signal. A detected quota pause stops implement cleanly without retrying, leaves the task Open, preserves partial runtime changes, and does not append a progress record. It is not a Failed, Skipped, or Interrupted task. Proactively reporting remaining allowance is the separate **Agent quota reporting** concern.
 _Avoid_: Agent quota reporting, failed task, skipped task
 
 **Agent quota pause**:
-The clean stop produced by Agent quota detection. It leaves the current task Open and preserves its partial runtime changes, so a later Run or Drain invocation may resume work after allowance returns.
+The clean stop produced by Agent quota detection. It leaves the current task Open and preserves its partial runtime changes, so a later implement invocation may resume work after allowance returns.
 _Avoid_: Exhausted task, Interrupted task, Failed task
 
 **Task attempt**:
-One agent invocation for a task. The task executor retries an unsuccessful task up to the configured maximum, defaulting to three attempts. Exhaustion marks the task Failed, records the attempt count and reason locally, and stops Drain.
+One agent invocation for a task. The task executor retries an unsuccessful task up to the configured maximum, defaulting to three attempts. Exhaustion marks the task Failed, records the attempt count and reason locally, and stops draining.
 _Avoid_: Task set retry, task dependency
 
 **Task attempt timeout**:
@@ -325,11 +321,11 @@ The maximum duration for one task attempt, defaulting to 30 minutes and configur
 _Avoid_: Task set timeout, interruption
 
 **Human-blocked Task set**:
-A Task set with unfinished tasks but no eligible AFK task because human-in-the-loop work must happen first. Run and Drain report the condition and stop; the task executor never automatically runs HITL tasks. On stopping, pop prints the blocking task body verbatim — the human sees what to do without opening the file — and advises the recovery paths for the blocking HITL task: Complete task once the human work is done, edit the task file and re-run, or skip the task to defer it and unblock its dependents (Skipped task). The blocked row also shows a copy-paste complete hint, symmetric with the open hint on Failed rows.
+A Task set with unfinished tasks but no eligible AFK task because human-in-the-loop work must happen first. Implement reports the condition and stops; the task executor never automatically runs HITL tasks. On stopping, pop prints the blocking task body verbatim — the human sees what to do without opening the file — and advises the recovery paths for the blocking HITL task: Complete task once the human work is done, edit the task file and re-run, or skip the task to defer it and unblock its dependents (Skipped task). The blocked row also shows a copy-paste complete hint, symmetric with the open hint on Failed rows.
 _Avoid_: Failed Task set
 
 **HITL gate prompt**:
-An interactive choice shown when Drain reaches or selects a Human-blocked Task set. It defaults to getting agent assistance while still letting the human complete the task, defer it, or exit without changing task state; choosing complete or defer is the explicit manual decision and does not ask for a second yes/no confirmation. After complete or defer clears the blocking HITL task, Drain refreshes the same Task set and continues from any newly eligible AFK task. When shown because bare Drain found no Ready Task set, it is framed as "No runnable AFK work" rather than as a dead end.
+An interactive choice shown when implement reaches or selects a Human-blocked Task set. It defaults to getting agent assistance while still letting the human complete the task, defer it, or exit without changing task state; choosing complete or defer is the explicit manual decision and does not ask for a second yes/no confirmation. After complete or defer clears the blocking HITL task, implement refreshes the same Task set and continues from any newly eligible AFK task. When shown because a no-argument implement found no Ready Task set, it is framed as "No runnable AFK work" rather than as a dead end.
 _Avoid_: Automatic HITL execution, yes/no launch prompt
 
 **HITL assistance session**:
@@ -345,11 +341,11 @@ A machine-local planning document, task markdown file, task manifest, or progres
 _Avoid_: Workload artifact, implementation change, task state
 
 **No-op task completion**:
-A successful task execution that produces no staged implementation change. The task executor marks the task Done locally, appends progress, reports that no implementation commit was created, and allows Drain to continue.
+A successful task execution that produces no staged implementation change. The task executor marks the task Done locally, appends progress, reports that no implementation commit was created, and allows draining to continue.
 _Avoid_: Failed task, empty commit
 
 **Exhausted task**:
-A task that remains unsuccessful after its maximum attempts. The task executor marks it Failed locally, preserves any partial implementation changes for inspection, does not commit them, and stops Drain.
+A task that remains unsuccessful after its maximum attempts. The task executor marks it Failed locally, preserves any partial implementation changes for inspection, does not commit them, and stops draining.
 _Avoid_: No-op task completion, reverted task
 
 **Interrupted task**:
@@ -365,11 +361,11 @@ Manually marking one Open, Failed, or Skipped task Done via `pop tasks complete`
 _Avoid_: Complete issue, completion sentinel, no-op task completion, run
 
 **HITL gate completion**:
-Completing the blocking HITL task from a HITL gate prompt after explicit confirmation. It uses the same state transition as Complete task, then Drain continues draining the Task set instead of stopping at the cleared gate.
+Completing the blocking HITL task from a HITL gate prompt after explicit confirmation. It uses the same state transition as Complete task, then implement continues draining the Task set instead of stopping at the cleared gate.
 _Avoid_: Completion sentinel, automatic HITL execution
 
 **HITL gate deferral**:
-Skipping the blocking HITL task from a HITL gate prompt after explicit confirmation. It uses the same state transition as Skipped task, then Drain continues draining the Task set because a Skipped task satisfies dependent `blocked_by` prerequisites.
+Skipping the blocking HITL task from a HITL gate prompt after explicit confirmation. It uses the same state transition as Skipped task, then implement continues draining the Task set because a Skipped task satisfies dependent `blocked_by` prerequisites.
 _Avoid_: Failed task, automatic HITL execution
 
 **Skipped task**:
@@ -377,7 +373,7 @@ A task the human deliberately set aside via `pop tasks skip`, recorded with the 
 _Avoid_: Skipped issue, exhausted task, interrupted task, blocked task
 
 **Deferred Task set**:
-A Task set in which every task is Done or Skipped and at least one is Skipped, so no runnable, failed, or open work remains but the set is not Done. Run and Drain stop cleanly reporting the deferral rather than an error, and automatic selection passes over it like a Done set so it never blocks selection. The status table keeps it visible with its skipped count so the human remembers to conclude or reopen the Skipped tasks. A set with any still-Open task, including an Open HITL task, is Ready or Human-blocked rather than Deferred.
+A Task set in which every task is Done or Skipped and at least one is Skipped, so no runnable, failed, or open work remains but the set is not Done. Implement stops cleanly reporting the deferral rather than an error, and automatic selection passes over it like a Done set so it never blocks selection. The status table keeps it visible with its skipped count so the human remembers to conclude or reopen the Skipped tasks. A set with any still-Open task, including an Open HITL task, is Ready or Human-blocked rather than Deferred.
 _Avoid_: Done Task set, Human-blocked Task set
 
 **Progress record**:
@@ -397,19 +393,19 @@ The machine-local persisted record of a repository's registered Task sets, store
 _Avoid_: Workload state, task artifact, task manifest
 
 **Runtime execution lock**:
-A machine-local lock held while Run or Drain executes for a canonical runtime path. It prevents concurrent task execution in one checkout while allowing unrelated projects or isolated runtime worktrees to execute concurrently. Non-execution tasks commands remain available. Lock metadata records the executor PID; a dead PID is reported and replaced as a stale lock.
+A machine-local lock held while implement executes for a canonical runtime path. It prevents concurrent task execution in one checkout while allowing unrelated projects or isolated runtime worktrees to execute concurrently. Non-execution tasks commands remain available. Lock metadata records the executor PID; a dead PID is reported and replaced as a stale lock.
 _Avoid_: Global task lock, project-name lock
 
 **Status table**:
-The non-interactive summary printed by `pop tasks status` after discovery refresh. Missing Task sets appear first as stale registrations, followed by Done Task sets. Remaining discovered Task sets then appear in scheduler order: descending priority with stable registration order for ties, so the user can read the active schedule top-to-bottom to understand which Ready work will be selected first. The automatically selected Ready Task set is marked explicitly. Before execution, the actual Run target is also marked; when an explicit Task set override differs from the automatic selection, the table shows both markers on their respective rows. An interactive tasks dashboard is deferred until the table workflow is exercised.
+The non-interactive summary printed by `pop tasks status` after discovery refresh. Missing Task sets appear first as stale registrations, followed by Done Task sets. Remaining discovered Task sets then appear in scheduler order: descending priority with stable registration order for ties, so the user can read the active schedule top-to-bottom to understand which Ready work will be selected first. The automatically selected Ready Task set is marked explicitly. Before execution, the actual implement target is also marked; when an explicit Task set override differs from the automatic selection, the table shows both markers on their respective rows. An interactive tasks dashboard is deferred until the table workflow is exercised.
 _Avoid_: Workload status table, dashboard
 
 **Execution confirmation**:
-The human gate before Run or Drain spawns an agent. Pop prints the refreshed status table with the selected Task set marked and asks for `y/n` confirmation. Drain asks once before draining its selected Task set, not before each task. An explicit `--yes` (`-y`) option bypasses the prompt for unattended use. Non-interactive execution without that option fails rather than waiting for input.
+The human gate before implement spawns an agent. Pop prints the refreshed status table with the selected Task set marked and asks for `y/n` confirmation. A drain asks once before draining its selected Task set, not before each task. An explicit `--yes` (`-y`) option bypasses the prompt for unattended use. Non-interactive execution without that option fails rather than waiting for input.
 _Avoid_: HITL task, open task
 
 **Execution exit status**:
-The process result exposed by Run and Drain: `0` for completed work or a declined confirmation, `1` for execution failure, timeout, malformed target, commit failure, or a live Runtime execution lock, `2` when no runnable task exists or when a HITL gate exits without changing task state, `3` for usage, configuration, or project-resolution errors, and `130` for interruption.
+The process result exposed by implement: `0` for completed work or a declined confirmation, `1` for execution failure, timeout, malformed target, commit failure, or a live Runtime execution lock, `2` when no runnable task exists or when a HITL gate exits without changing task state, `3` for usage, configuration, or project-resolution errors, and `130` for interruption.
 _Avoid_: Task set status, agent exit code
 
 **Status exit status**:
@@ -421,11 +417,11 @@ The canonical name of a Task set — its directory name under the **Task storage
 _Avoid_: Display title, filename, path
 
 **Task target reference**:
-An argument that identifies a Task set or task markdown file on Run, Drain, Open task, Complete task, or Skip. Run and Drain accept an optional positional argument; Open task, Complete task, and Skip require one. Exactly two forms exist: a bare Task set identifier targets a Task set, and a Task-set-relative file reference `<task-set>/<file>.md` targets one task. Resolution is scoped to the current repository's Task storage via **Repository identity** from the CWD. Relative paths, absolute paths, bare filenames, bare task identifiers, titles, prefixes, fuzzy matches, and unresolved references are rejected.
+An argument that identifies a Task set or task markdown file on Implement, Open task, Complete task, or Skip. Implement accepts an optional positional argument; Open task, Complete task, and Skip require one. Exactly two forms exist: a bare Task set identifier targets a Task set, and a Task-set-relative file reference `<task-set>/<file>.md` targets one task. Resolution is scoped to the current repository's Task storage via **Repository identity** from the CWD. Relative paths, absolute paths, bare filenames, bare task identifiers, titles, prefixes, fuzzy matches, and unresolved references are rejected.
 _Avoid_: Workload target reference, shell completion candidate, path
 
 **Task shell completion**:
-Read-only shell tab completion for tasks subcommands, project names, **Task target references**, agent presets, and path flags. Positional completion on Run and Drain offers bare Task set identifiers; Run also completes Task-set-relative task files after a Task set identifier and slash, such as `<task-set>/<file>.md`. Open task, Complete task, and Skip complete Task-set-relative file references only. Set-priority completes bare Task set identifiers for its TASK_SET positional. Completion never offers filesystem path segments. Completion may scan Task storage but must not auto-register Task sets, persist task state, or print warnings.
+Read-only shell tab completion for tasks subcommands, project names, **Task target references**, agent presets, and path flags. Positional completion on Implement offers bare Task set identifiers and also completes Task-set-relative task files after a Task set identifier and slash, such as `<task-set>/<file>.md`. Open task, Complete task, and Skip complete Task-set-relative file references only. Set-priority completes bare Task set identifiers for its TASK_SET positional. Completion never offers filesystem path segments. Completion may scan Task storage but must not auto-register Task sets, persist task state, or print warnings.
 _Avoid_: Shell autosuggestion, discovery refresh
 
 **Missing Task set**:
@@ -463,7 +459,7 @@ Removal of all deprecated aliases is gated on beta-tester sign-off, not a versio
 - `needs_attention` → **Unread**
 - `issue` → **Task**; `Issue set` → **Task set**
 - `pop workload` (command family) → **`pop tasks`**; the umbrella term "workload" is retired — say "the repository's Task sets" or name the specific concept
-- `run-issue` → **Run** (`pop tasks run`); `run-issues` → **Drain** (`pop tasks drain`)
+- `run-issue`, `run-issues` → **Implement** (`pop tasks implement`); the one-task and whole-set verbs merged into one command that dispatches by target shape
 - `reset-issue` → **Open task** (`pop tasks open`); `complete-issue` → **Complete task**; `skip-issue` → **Skip**
 - `to-issues` (skill) → **to-tasks**; `run-one` (skill) → **run-task**
 - `workload definition path`, `thoughts/issues` → **Task storage**
@@ -509,4 +505,4 @@ Removal of all deprecated aliases is gated on beta-tester sign-off, not a versio
 >
 > **Dev:** What if a task agent changes its structured output and pop cannot interpret it?
 >
-> **Expert:** Its **Agent output handling** falls back to the original text, which still has to satisfy the normal **Completion sentinel** contract. An **Agent quota pause** is different: when the adapter recognizes one, the task stays Open and **Drain** stops cleanly.
+> **Expert:** Its **Agent output handling** falls back to the original text, which still has to satisfy the normal **Completion sentinel** contract. An **Agent quota pause** is different: when the adapter recognizes one, the task stays Open and **implement** stops cleanly.

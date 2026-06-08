@@ -73,22 +73,16 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "svc")
 	})
 
-	t.Run("run task positional defaults to Task set IDs", func(t *testing.T) {
-		out := shellCompNoDesc(t, "tasks", "run")
+	t.Run("implement positional defaults to Task set IDs", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "implement")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
 		assertShellCompOmitsExact(t, out, "01-a")
 	})
 
-	t.Run("run task positional task set relative path", func(t *testing.T) {
-		out := shellCompNoDescCompleting(t, "tasks", "run", "svc/")
+	t.Run("implement positional task set relative path", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "tasks", "implement", "svc/")
 		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
-	})
-
-	t.Run("run tasks positional defaults to Task set IDs", func(t *testing.T) {
-		out := shellCompNoDesc(t, "tasks", "drain")
-		assertShellCompContains(t, out, "svc")
-		assertShellCompOmits(t, out, "thoughts/issues/svc")
 	})
 
 	t.Run("reset task positional defaults to Task set IDs", func(t *testing.T) {
@@ -110,7 +104,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 	})
 
 	t.Run("agent presets", func(t *testing.T) {
-		out := shellCompNoDesc(t, "tasks", "run", "--agent")
+		out := shellCompNoDesc(t, "tasks", "implement", "--agent")
 		for _, preset := range []string{"claude", "codex", "cursor", "opencode", "pi"} {
 			assertShellCompContains(t, out, preset)
 		}
@@ -118,7 +112,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 
 	t.Run("subcommands", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks")
-		for _, sub := range []string{"status", "set-priority", "run", "drain", "open"} {
+		for _, sub := range []string{"status", "set-priority", "implement", "open"} {
 			assertShellCompContains(t, out, sub)
 		}
 	})
@@ -136,7 +130,7 @@ func TestTaskCompletionReadOnly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	_ = shellCompNoDesc(t, "tasks", "run")
+	_ = shellCompNoDesc(t, "tasks", "implement")
 
 	statePath := filepath.Join(root, ".xdg", "pop", "workloads-state.json")
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
