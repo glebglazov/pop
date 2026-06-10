@@ -247,12 +247,12 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	// with `pop tasks timings`.
 	var streamPaths []string
 	persist := func(rec *streamRecorder, attempt int, outcome string) {
-		if p := persistAttemptStream(d, errOut, sel, rec, invocation.AgentPreset(), attempt, outcome); p != "" {
+		if p := persistAttemptStream(d, errOut, sel, rec, invocation.AgentPreset(), invocation.RequestedAgent, attempt, outcome); p != "" {
 			streamPaths = append(streamPaths, p)
 		}
 	}
 	for attempt := 1; attempt <= maxTries; attempt++ {
-		display.line(ansiDim, "   Attempt %d/%d", attempt, maxTries)
+		display.line(ansiDim, "   Attempt %d/%d · %s", attempt, maxTries, invocation.RequestedAgent)
 		display.line(ansiDim, "── Agent output ────────────────────────────────────────")
 
 		agentOut, outcome, err := runAgentAttempt(d, runtimePath, out, timeout, invocation)

@@ -63,7 +63,7 @@ func TestStreamRecorderRecordFormat(t *testing.T) {
 		t.Fatalf("capture distorted: %q", got)
 	}
 
-	jsonl, err := encodeAttemptStream(rec, "claude", 2, "completed")
+	jsonl, err := encodeAttemptStream(rec, "claude", "claude --model opus4.8", 2, "completed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestStreamRecorderRecordFormat(t *testing.T) {
 	}
 
 	header := records[0]
-	if header["type"] != "header" || header["agent"] != "claude" || header["attempt"] != float64(2) {
+	if header["type"] != "header" || header["agent"] != "claude" || header["requested_agent"] != "claude --model opus4.8" || header["attempt"] != float64(2) {
 		t.Fatalf("header = %v", header)
 	}
 	if _, err := time.Parse(time.RFC3339, header["start_time"].(string)); err != nil {

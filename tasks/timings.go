@@ -23,12 +23,13 @@ import (
 // attempt's Model time — the residual of the total not covered by any tool
 // window — and is meaningful only when Tools is non-empty.
 type AttemptTiming struct {
-	Agent    string
-	Start    time.Time
-	Outcome  string
-	Duration time.Duration
-	Tools    []ToolTiming
-	Model    time.Duration
+	Agent          string
+	RequestedAgent string
+	Start          time.Time
+	Outcome        string
+	Duration       time.Duration
+	Tools          []ToolTiming
+	Model          time.Duration
 }
 
 // ToolTiming aggregates one tool's paired invocations within an attempt:
@@ -259,6 +260,10 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 	if !hasFooter {
 		return AttemptTiming{}, fmt.Errorf("missing footer record")
 	}
+	requestedAgent := header.RequestedAgent
+	if requestedAgent == "" {
+		requestedAgent = header.Agent
+	}
 	var tools []ToolTiming
 	var model time.Duration
 	if parse := toolTimingParsers[header.Agent]; parse != nil {
@@ -269,12 +274,13 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 		}
 	}
 	return AttemptTiming{
-		Agent:    header.Agent,
-		Start:    header.StartTime,
-		Outcome:  footer.Outcome,
-		Duration: time.Duration(footer.DurationMS) * time.Millisecond,
-		Tools:    tools,
-		Model:    model,
+		Agent:          header.Agent,
+		RequestedAgent: requestedAgent,
+		Start:          header.StartTime,
+		Outcome:        footer.Outcome,
+		Duration:       time.Duration(footer.DurationMS) * time.Millisecond,
+		Tools:          tools,
+		Model:          model,
 	}, nil
 }
 
@@ -301,14 +307,21 @@ func RenderTimings(w io.Writer, result *TimingsResult) {
 func renderAttemptRows(out *output, attempts []AttemptTiming) {
 	agentW, outcomeW := 0, 0
 	for _, a := range attempts {
-		agentW = max(agentW, len(a.Agent))
+		agentW = max(agentW, len(displayAttemptAgent(a)))
 		outcomeW = max(outcomeW, len(a.Outcome))
 	}
 	for _, a := range attempts {
 		out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %s",
-			a.Start.Format(time.RFC3339), agentW, a.Agent, outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
+			a.Start.Format(time.RFC3339), agentW, displayAttemptAgent(a), outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
 		renderToolTimings(out, a.Tools, a.Model)
 	}
+}
+
+func displayAttemptAgent(a AttemptTiming) string {
+	if a.RequestedAgent != "" {
+		return a.RequestedAgent
+	}
+	return a.Agent
 }
 
 // printAttemptBreakdown prints the Attempt timing breakdown for the Captured

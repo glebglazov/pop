@@ -50,10 +50,11 @@ func ValidAgentOutputModes() []string {
 
 // AgentInvocation is one resolved headless-agent command.
 type AgentInvocation struct {
-	Name         string
-	Args         []string
-	OutputFormat AgentOutputFormat
-	adapter      AgentAdapter
+	Name           string
+	Args           []string
+	OutputFormat   AgentOutputFormat
+	RequestedAgent string
+	adapter        AgentAdapter
 }
 
 // AgentPreset returns the owning adapter's preset name.
@@ -343,10 +344,11 @@ func ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath string
 	if agentCmd != "" {
 		adapter := customAgentAdapter{}
 		return &AgentInvocation{
-			Name:         "sh",
-			Args:         []string{"-c", agentCmd + ` "$@"`, "task-agent", prompt},
-			OutputFormat: AgentOutputPlain,
-			adapter:      adapter,
+			Name:           "sh",
+			Args:           []string{"-c", agentCmd + ` "$@"`, "task-agent", prompt},
+			OutputFormat:   AgentOutputPlain,
+			RequestedAgent: requestedAgentSpec(preset, adapter.Preset()),
+			adapter:        adapter,
 		}, nil
 	}
 	_, extraArgs, err := parseAgentPresetSpec(preset)
@@ -357,12 +359,24 @@ func ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath string
 	if err != nil {
 		return nil, err
 	}
-	return adapter.HeadlessInvocation(AgentHeadlessRequest{
+	invocation, err := adapter.HeadlessInvocation(AgentHeadlessRequest{
 		Prompt:      prompt,
 		RuntimePath: runtimePath,
 		OutputMode:  mode,
 		ExtraArgs:   extraArgs,
 	})
+	if err != nil {
+		return nil, err
+	}
+	invocation.RequestedAgent = requestedAgentSpec(preset, invocation.AgentPreset())
+	return invocation, nil
+}
+
+func requestedAgentSpec(spec, fallback string) string {
+	if strings.TrimSpace(spec) != "" {
+		return spec
+	}
+	return fallback
 }
 
 // ResolveAgentAdapter returns the adapter for an --agent value. The value may

@@ -938,6 +938,25 @@ func TestRunTaskSetYesPrintsConciseSummary(t *testing.T) {
 	}
 }
 
+func TestRunTaskSetAttemptStartPrintsRequestedAgent(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "ok"})
+	opts := env.runTaskSetOpts(true, agent, nil)
+	opts.AgentPreset = "claude --model opus4.8"
+
+	var buf bytes.Buffer
+	opts.Output = &buf
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "   Attempt 1/3 · claude --model opus4.8") {
+		t.Fatalf("attempt start missing requested agent:\n%s", buf.String())
+	}
+}
+
 func TestRunTaskSetInteractivePrintsRefreshedTable(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},

@@ -32,10 +32,11 @@ const (
 
 // streamHeaderRecord opens a Captured attempt stream file.
 type streamHeaderRecord struct {
-	Type      string    `json:"type"`
-	Agent     string    `json:"agent"`
-	Attempt   int       `json:"attempt"`
-	StartTime time.Time `json:"start_time"`
+	Type           string    `json:"type"`
+	Agent          string    `json:"agent"`
+	RequestedAgent string    `json:"requested_agent,omitempty"`
+	Attempt        int       `json:"attempt"`
+	StartTime      time.Time `json:"start_time"`
 }
 
 // streamEventRecord is one raw stream event tagged with its arrival time
@@ -115,10 +116,10 @@ func (r *streamRecorder) finish() {
 
 // encodeAttemptStream renders one self-contained JSONL document: header,
 // timestamped raw events, footer.
-func encodeAttemptStream(r *streamRecorder, agent string, attempt int, outcome string) ([]byte, error) {
+func encodeAttemptStream(r *streamRecorder, agent, requestedAgent string, attempt int, outcome string) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
-	if err := enc.Encode(streamHeaderRecord{Type: "header", Agent: agent, Attempt: attempt, StartTime: r.start.UTC()}); err != nil {
+	if err := enc.Encode(streamHeaderRecord{Type: "header", Agent: agent, RequestedAgent: requestedAgent, Attempt: attempt, StartTime: r.start.UTC()}); err != nil {
 		return nil, err
 	}
 	for _, ev := range r.events {
@@ -210,12 +211,12 @@ func writeAttemptStream(d *Deps, dir string, jsonl []byte) (string, error) {
 // storage failure is reported on errOut but never fails the implement run.
 // A nil recorder (plain-output or custom-command attempt) records nothing.
 // Returns the written file's path, or "" when nothing was persisted.
-func persistAttemptStream(d *Deps, errOut io.Writer, sel *Selection, rec *streamRecorder, agent string, attempt int, outcome string) string {
+func persistAttemptStream(d *Deps, errOut io.Writer, sel *Selection, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome string) string {
 	if rec == nil {
 		return ""
 	}
 	var path string
-	jsonl, err := encodeAttemptStream(rec, agent, attempt, outcome)
+	jsonl, err := encodeAttemptStream(rec, agent, requestedAgent, attempt, outcome)
 	if err == nil {
 		path, err = writeAttemptStream(d, taskStreamDir(sel.Manifest.Dir, sel.TaskFile), jsonl)
 	}

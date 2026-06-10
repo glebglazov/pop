@@ -15,17 +15,17 @@ import (
 // given header and footer, mirroring what persistAttemptStream stores.
 func writeTimingStream(t *testing.T, dir, name, agent string, attempt int, start time.Time, outcome string, durationMS int64) {
 	t.Helper()
-	writeTimingStreamWithEvents(t, dir, name, agent, attempt, start, outcome, durationMS, []streamEventRecord{
+	writeTimingStreamWithEvents(t, dir, name, agent, "", attempt, start, outcome, durationMS, []streamEventRecord{
 		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
 	})
 }
 
 // writeTimingStreamWithEvents is writeTimingStream with explicit stream events.
-func writeTimingStreamWithEvents(t *testing.T, dir, name, agent string, attempt int, start time.Time, outcome string, durationMS int64, events []streamEventRecord) {
+func writeTimingStreamWithEvents(t *testing.T, dir, name, agent, requestedAgent string, attempt int, start time.Time, outcome string, durationMS int64, events []streamEventRecord) {
 	t.Helper()
 	var jsonl bytes.Buffer
 	enc := json.NewEncoder(&jsonl)
-	if err := enc.Encode(streamHeaderRecord{Type: "header", Agent: agent, Attempt: attempt, StartTime: start.UTC()}); err != nil {
+	if err := enc.Encode(streamHeaderRecord{Type: "header", Agent: agent, RequestedAgent: requestedAgent, Attempt: attempt, StartTime: start.UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	for _, ev := range events {
@@ -91,13 +91,13 @@ func TestTimingsWholeSetSpansAttemptsOrderedByStartTime(t *testing.T) {
 		t.Fatalf("attempts = %d, want all stored attempts", len(attempts))
 	}
 	wantOrder := []AttemptTiming{
-		{Agent: "claude", Start: base, Outcome: "timed_out", Duration: 83 * time.Second},
-		{Agent: "claude", Start: base.Add(10 * time.Minute), Outcome: "failed", Duration: 45 * time.Second},
-		{Agent: "codex", Start: base.Add(20 * time.Minute), Outcome: "completed", Duration: 500 * time.Millisecond},
+		{Agent: "claude", RequestedAgent: "claude", Start: base, Outcome: "timed_out", Duration: 83 * time.Second},
+		{Agent: "claude", RequestedAgent: "claude", Start: base.Add(10 * time.Minute), Outcome: "failed", Duration: 45 * time.Second},
+		{Agent: "codex", RequestedAgent: "codex", Start: base.Add(20 * time.Minute), Outcome: "completed", Duration: 500 * time.Millisecond},
 	}
 	for i, want := range wantOrder {
 		got := attempts[i]
-		if got.Agent != want.Agent || !got.Start.Equal(want.Start) || got.Outcome != want.Outcome || got.Duration != want.Duration {
+		if got.Agent != want.Agent || got.RequestedAgent != want.RequestedAgent || !got.Start.Equal(want.Start) || got.Outcome != want.Outcome || got.Duration != want.Duration {
 			t.Fatalf("attempt[%d] = %+v, want %+v", i, got, want)
 		}
 	}
@@ -194,6 +194,44 @@ func TestRenderTimingsShowsRowsWithoutOrdinals(t *testing.T) {
 	for _, forbidden := range []string{"attempt-", "Attempt 1", "#1"} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("output shows ordinal %q:\n%s", forbidden, out)
+		}
+	}
+}
+
+func TestTimingsShowsRequestedAgentAndFallsBackForOldStreams(t *testing.T) {
+	env := timingsFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "claude", "claude --model opus4.8", 1, base, "completed", 60_000, nil)
+	writeTimingStream(t, streamDir, "attempt-002.jsonl.gz", "codex", 2, base.Add(time.Minute), "failed", 30_000)
+
+	result, err := TimingsWith(env.deps(), nil, nil, TimingsOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := result.Tasks[0].Attempts
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %#v", attempts)
+	}
+	if attempts[0].Agent != "claude" || attempts[0].RequestedAgent != "claude --model opus4.8" {
+		t.Fatalf("new stream attempt = %+v", attempts[0])
+	}
+	if attempts[1].Agent != "codex" || attempts[1].RequestedAgent != "codex" {
+		t.Fatalf("old stream fallback = %+v", attempts[1])
+	}
+
+	var buf bytes.Buffer
+	RenderTimings(&buf, result)
+	out := buf.String()
+	for _, want := range []string{
+		"2026-06-10T12:00:00Z  claude --model opus4.8  completed  1m0s",
+		"2026-06-10T12:01:00Z  codex                   failed     30s",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
 		}
 	}
 }
@@ -349,10 +387,10 @@ func TestTimingsPerToolBreakdownForClaudeOnly(t *testing.T) {
 		{Type: "event", AtMS: 2000, Raw: claudeUse([2]string{"tu_2", "Read"})},
 		{Type: "event", AtMS: 2200, Raw: claudeResult("tu_2")},
 	}
-	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "claude", 1, base, "completed", 60_000, claudeEvents)
+	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "claude", "", 1, base, "completed", 60_000, claudeEvents)
 	// A non-claude structured agent stores the same substrate but has no
 	// pairing parser yet: outcome + total only, no per-tool rows, no error.
-	writeTimingStreamWithEvents(t, streamDir, "attempt-002.jsonl.gz", "codex", 2, base.Add(10*time.Minute), "completed", 30_000, claudeEvents)
+	writeTimingStreamWithEvents(t, streamDir, "attempt-002.jsonl.gz", "codex", "", 2, base.Add(10*time.Minute), "completed", 30_000, claudeEvents)
 
 	result, err := TimingsWith(env.deps(), nil, nil, TimingsOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
