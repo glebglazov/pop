@@ -301,8 +301,16 @@ A named attended-assistance command known to an Agent adapter. It is separate fr
 _Avoid_: Agent preset, stripped headless command, agent-cmd
 
 **Agent adapter**:
-The preset-specific bridge between Pop and a supported agent. An adapter may provide headless invocation, headless output handling, and agent-assistance invocation; attended assistance launches the preset's own interactive binary and is owned by the adapter rather than the HITL gate prompt. An adapter reports assistance Unavailable only when it has no usable interactive command at all (e.g. custom headless `--agent-cmd`).
+The preset-specific bridge between Pop and a supported agent. An adapter may provide headless invocation, headless output handling, agent-assistance invocation, and a **Model source**; attended assistance launches the preset's own interactive binary and is owned by the adapter rather than the HITL gate prompt. An adapter reports assistance Unavailable only when it has no usable interactive command at all (e.g. custom headless `--agent-cmd`).
 _Avoid_: Universal JSON protocol, agent integration
+
+**Agent catalog**:
+The readout of `pop tasks agents`: every recognized **Agent preset** with its binary, whether that binary is on PATH, which preset is the default, and notes such as attended-assistance availability. It reports what Pop owns — recognition and availability — by PATH lookup only; it never execs agents by default, and authentication or deeper health stays with **Doctor**. Its audience is a planner choosing a **Task agent** as much as a human. Model details come from each preset's **Model source**, surfaced only on request.
+_Avoid_: Supported agents matrix, doctor, model catalog
+
+**Model source**:
+An Agent adapter's answer to "which models can this preset's `--model` take", with three honesty levels and the provenance always shown: live enumeration by the agent's own listing command (e.g. `opencode models`), baked known-stable aliases when no listing exists (e.g. claude's `opus`, `sonnet`, `haiku`), or empty. Empty is honest — Pop never invents a model catalog for an agent, and a planner unsure of a model omits it, since a bare preset is always valid. Live listings run only when explicitly requested from the **Agent catalog**, never during its default render. A user-config layer of curated models is deferred until a real need appears.
+_Avoid_: Model catalog, model registry, supported models
 
 **Agent output handling**:
 The Agent adapter capability that interprets an agent's headless output. It may recover completion text or detect an **Agent quota pause** from a structured protocol; when it cannot interpret the output, the original text remains subject to the normal **Completion sentinel** contract. It may also render the agent's activity live as it streams — assistant prose plus a compact tick per tool use — so a structured run shows progress instead of going silent until it ends. Live rendering is cosmetic: the captured raw output, not the rendered view, remains the source of truth for completion assessment and quota detection.
@@ -335,6 +343,14 @@ _Avoid_: Task set timeout, interruption
 **Captured attempt stream**:
 The timestamped raw agent stream recorded for one Task attempt and kept among **Task artifacts**, accumulating across attempts over a task's lifetime. It is captured only for structured adapter-mode attempts; plain-output and custom-command attempts are not recorded. It is the durable substrate from which an Attempt timing breakdown is derived, and is distinct from the ephemeral in-memory capture used for completion assessment and Agent quota detection.
 _Avoid_: Agent output log, progress record, transcript
+
+**Requested agent**:
+The full resolved **Agent preset** string — preset name plus extra invocation arguments, e.g. `claude --model opus4.8` — that Pop invoked for a Task attempt. Pop always knows it at invocation time, so it is recorded verbatim in the Captured attempt stream's header and printed when the attempt starts. It states what was asked for, not what ran; the model an agent actually used is the separate **Actual model**.
+_Avoid_: Agent name, preset name, model
+
+**Actual model**:
+The model identifier an agent itself reported inside its Captured attempt stream (e.g. Claude's `init` event). It is a derived, per-adapter, best-effort reading at display time — never recorded as a separate event — and is absent when the agent does not report one. It may differ from the model requested in the **Requested agent** arguments through aliases or provider fallbacks. Surfaced in the Attempt timing breakdown and shown once by the live renderer when the agent reports it mid-attempt; `pop tasks status` shows at most the manifest's **Task agent** and never reads streams.
+_Avoid_: Model time, requested model, agent
 
 **Attempt timing breakdown**:
 The agent-specific accounting of where a Task attempt's wall-clock time went, derived from its Captured attempt stream: each attempt's outcome and total duration, and — for agents whose stream pairs a tool invocation with its result — a per-tool count and duration, followed by **Model time**. Tool figures are reported under the agent that ran the attempt because tool vocabularies differ by agent. Implement prints the breakdown for a task as the task finishes, showing the attempts made in that invocation; `pop tasks timings` reprints the full per-task history, ordered by attempt start time. There is no cross-Task-set rollup.
