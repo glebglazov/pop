@@ -324,7 +324,7 @@ func TestRunTaskCmdDeclinedIsSuccess(t *testing.T) {
 	t.Cleanup(resetTaskFlags)
 
 	var stdout bytes.Buffer
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "")
+	err := runTaskRunTaskWith(tasks.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "", false)
 	if err != nil {
 		t.Fatalf("declined should succeed: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestRunTasksCmdDeclinedIsSuccess(t *testing.T) {
 	t.Cleanup(resetTaskFlags)
 
 	var stdout bytes.Buffer
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "")
+	err := runTaskRunTasksWith(tasks.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "", false)
 	if err != nil {
 		t.Fatalf("declined should succeed: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestRunTasksCmdRejectsRelativeTaskSetPath(t *testing.T) {
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), relTo(t, root, runTaskCmdDemoDir(t, root)))
+	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), relTo(t, root, runTaskCmdDemoDir(t, root)), false)
 	if err == nil || !strings.Contains(err.Error(), "invalid target") || !strings.Contains(err.Error(), "valid: demo") {
 		t.Fatalf("relative Task set path error = %v", err)
 	}
@@ -369,7 +369,7 @@ func TestRunTaskCmdRejectsRelativeTaskPath(t *testing.T) {
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), relTo(t, root, filepath.Join(runTaskCmdDemoDir(t, root), "01-a.md")))
+	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), relTo(t, root, filepath.Join(runTaskCmdDemoDir(t, root), "01-a.md")), false)
 	if err == nil || !strings.Contains(err.Error(), "invalid target") || !strings.Contains(err.Error(), "valid: demo") {
 		t.Fatalf("relative task path error = %v", err)
 	}
@@ -380,7 +380,7 @@ func TestRunTaskCmdTargetsTaskSetRelativeFile(t *testing.T) {
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md")
+	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md", false)
 	if err != nil {
 		t.Fatalf("task-set-relative file failed: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestRunTaskCmdTargetsTaskSetIdentifier(t *testing.T) {
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo")
+	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false)
 	if err != nil {
 		t.Fatalf("Task set identifier failed: %v", err)
 	}
@@ -404,17 +404,17 @@ func TestRunTaskCmdRejectsInvalidTaskTargets(t *testing.T) {
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "01-a")
+	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "01-a", false)
 	if err == nil || !strings.Contains(err.Error(), "valid: demo") {
 		t.Fatalf("bare task ID error = %v", err)
 	}
 
-	err = runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "01-a.md")
+	err = runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "01-a.md", false)
 	if err == nil || !strings.Contains(err.Error(), "bare filenames") {
 		t.Fatalf("bare filename error = %v", err)
 	}
 
-	err = runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), filepath.Join(runTaskCmdDemoDir(t, root), "01-a.md"))
+	err = runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), filepath.Join(runTaskCmdDemoDir(t, root), "01-a.md"), false)
 	if err == nil || !strings.Contains(err.Error(), "absolute paths") {
 		t.Fatalf("absolute path error = %v", err)
 	}
@@ -537,7 +537,7 @@ func TestRunTasksCmdRejectsTaskSetRelativeFile(t *testing.T) {
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md")
+	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md", false)
 	if err == nil || !strings.Contains(err.Error(), "bare task set identifier") {
 		t.Fatalf("file reference error = %v", err)
 	}
@@ -549,7 +549,7 @@ func TestRunTasksCmdTargetsTaskSetIdentifier(t *testing.T) {
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo")
+	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false)
 	if err != nil {
 		t.Fatalf("Task set identifier failed: %v", err)
 	}
@@ -561,7 +561,7 @@ func TestRunTasksCmdRejectsAbsoluteTaskSetPath(t *testing.T) {
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), runTaskCmdDemoDir(t, root))
+	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), runTaskCmdDemoDir(t, root), false)
 	if err == nil || !strings.Contains(err.Error(), "absolute paths") {
 		t.Fatalf("absolute path error = %v", err)
 	}
@@ -642,7 +642,7 @@ func TestRunTaskCmdNonInteractiveFails(t *testing.T) {
 	taskAgentCmd = agent
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, tasks.NonInteractiveReader{}, "")
+	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, tasks.NonInteractiveReader{}, "", false)
 	var ee *tasks.ExitError
 	if !errors.As(err, &ee) || ee.Code != tasks.ExitOperational {
 		t.Fatalf("err = %v", err)
@@ -739,5 +739,28 @@ func writeFileCmd(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestImplementAgentFlagExplicitness pins the contract behind per-task agent
+// resolution (ADR-0018): a bare defaulted --agent does not report Changed, so
+// only an explicitly passed flag overrides a task's `agent` key.
+func TestImplementAgentFlagExplicitness(t *testing.T) {
+	f := taskImplementCmd.Flags().Lookup("agent")
+	if f == nil {
+		t.Fatal("agent flag not registered")
+	}
+	if f.Changed {
+		t.Fatal("defaulted agent flag must not report Changed")
+	}
+	if err := taskImplementCmd.Flags().Set("agent", "claude"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		f.Changed = false
+		_ = f.Value.Set(f.DefValue)
+	})
+	if !taskImplementCmd.Flags().Changed("agent") {
+		t.Fatal("explicitly passed agent flag must report Changed even at the default value")
 	}
 }

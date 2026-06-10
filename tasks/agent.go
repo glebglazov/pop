@@ -383,6 +383,37 @@ func ResolveAgentAdapter(preset string) (AgentAdapter, error) {
 	return adapter, nil
 }
 
+// resolveTaskAgentSpec applies ADR-0018 precedence for one task attempt:
+// explicit --agent-cmd > explicitly-passed --agent > the task's `agent` key >
+// the resolved CLI/default agent. agentExplicit must come from
+// Flags().Changed("agent"), not the resolved value, so a bare defaulted
+// --agent claude never stomps a planner's per-task choice.
+func resolveTaskAgentSpec(cliPreset string, agentExplicit bool, agentCmd, taskAgent string) string {
+	if agentCmd != "" || agentExplicit || taskAgent == "" {
+		return cliPreset
+	}
+	return taskAgent
+}
+
+// validateManifestAgentSpec checks a Manifest `agent` key names a recognized
+// Agent preset (ADR-0018). Opaque agent commands are not permitted: anything
+// whose first token is not a known preset is a contract fault, surfaced as a
+// Malformed Task set at discovery rather than mid-attempt. Extra args after
+// the preset stay opaque/unvalidated, exactly as on the CLI.
+func validateManifestAgentSpec(spec string) error {
+	name, _, err := parseAgentPresetSpec(spec)
+	if err != nil {
+		return err
+	}
+	if name == "" {
+		return fmt.Errorf("empty agent value")
+	}
+	if _, ok := agentAdapters[name]; !ok {
+		return fmt.Errorf("unknown agent preset %q in agent key (opaque agent commands are not permitted in a manifest); valid: %s", name, strings.Join(ValidAgentPresets(), ", "))
+	}
+	return nil
+}
+
 // parseAgentPresetSpec splits an --agent value into the preset name (first
 // token) and the extra invocation arguments that augment it.
 func parseAgentPresetSpec(spec string) (string, []string, error) {

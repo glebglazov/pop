@@ -2,8 +2,10 @@ package tasks
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -769,5 +771,186 @@ func assertExitCode(t *testing.T, err error, code int) {
 	ee, ok := err.(*ExitError)
 	if !ok || ee.Code != code {
 		t.Fatalf("err = %v, want code %d", err, code)
+	}
+}
+
+// captureAgentRunner records every Start invocation without executing anything,
+// completing each immediately with exit 0 and no output.
+type captureAgentRunner struct {
+	names    []string
+	argLists [][]string
+}
+
+func (r *captureAgentRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	proc, err := r.Start(ctx, dir, stdout, stderr, name, args...)
+	if err != nil {
+		return 1, err
+	}
+	return proc.Wait()
+}
+
+func (r *captureAgentRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	r.names = append(r.names, name)
+	r.argLists = append(r.argLists, append([]string{}, args...))
+	proc := &ManagedProcess{done: make(chan waitResult, 1)}
+	proc.done <- waitResult{exitCode: 0}
+	return proc, nil
+}
+
+func setupTaskAgentKeyFixture(t *testing.T, agent string) *execFixture {
+	t.Helper()
+	root := t.TempDir()
+	initExecutorGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := storageTasksDir(t, root)
+	setupManifest(t, tasksDir, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Agent: agent},
+	})
+	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+	return &execFixture{root: root, tasksDir: tasksDir}
+}
+
+func TestRunTaskAgentKeyRunsDeclaredAgent(t *testing.T) {
+	env := setupTaskAgentKeyFixture(t, "codex --model gpt-5-codex")
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, err := RunTaskWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if len(runner.names) != 1 || runner.names[0] != "codex" {
+		t.Fatalf("agent binary = %v, want codex", runner.names)
+	}
+	args := runner.argLists[0]
+	// Slice 01's augmented invocation shape: extra args first, then the
+	// adapter prefix and owned output flags, prompt last.
+	if args[0] != "--model" || args[1] != "gpt-5-codex" {
+		t.Fatalf("extra args not leading: %v", args)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "exec") || !strings.Contains(joined, "--json") {
+		t.Fatalf("missing codex adapter args: %v", args)
+	}
+	if !strings.Contains(args[len(args)-1], "You are implementing the task at:") {
+		t.Fatalf("prompt not last: %q", args[len(args)-1])
+	}
+}
+
+func TestRunTaskBareDefaultedAgentDoesNotOverrideTaskKey(t *testing.T) {
+	env := setupTaskAgentKeyFixture(t, "opencode")
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.AgentExplicit = false
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.names) != 1 || runner.names[0] != "opencode" {
+		t.Fatalf("agent binary = %v, want opencode", runner.names)
+	}
+}
+
+func TestRunTaskExplicitAgentOverridesTaskKey(t *testing.T) {
+	env := setupTaskAgentKeyFixture(t, "codex")
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.AgentExplicit = true
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.names) != 1 || runner.names[0] != "claude" {
+		t.Fatalf("agent binary = %v, want claude", runner.names)
+	}
+}
+
+func TestRunTaskAgentCmdOverridesTaskKey(t *testing.T) {
+	env := setupTaskAgentKeyFixture(t, "codex")
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "./my-agent.sh")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.names) != 1 || runner.names[0] != "sh" {
+		t.Fatalf("agent binary = %v, want sh (custom agent command)", runner.names)
+	}
+}
+
+func TestRunTaskNoAgentKeyFallsThroughToCLIAgent(t *testing.T) {
+	env := setupTaskAgentKeyFixture(t, "")
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.names) != 1 || runner.names[0] != "claude" {
+		t.Fatalf("agent binary = %v, want claude", runner.names)
+	}
+}
+
+func TestRunTaskUnknownAgentKeyIsMalformedBeforeAttempt(t *testing.T) {
+	env := setupTaskAgentKeyFixture(t, "gemini --model pro")
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, err := RunTaskWith(d, nil, nil, opts)
+	if err == nil {
+		t.Fatal("expected malformed task set error")
+	}
+	if len(runner.names) != 0 {
+		t.Fatalf("agent unexpectedly invoked: %v", runner.names)
+	}
+}
+
+func TestRunTaskSetUsesPerTaskAgentKey(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Agent: "codex --model gpt-5-codex"},
+	})
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runTaskSetOpts(true, "", io.Discard)
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if len(runner.names) != 1 || runner.names[0] != "codex" {
+		t.Fatalf("agent binary = %v, want codex", runner.names)
+	}
+	if runner.argLists[0][0] != "--model" || runner.argLists[0][1] != "gpt-5-codex" {
+		t.Fatalf("extra args not applied: %v", runner.argLists[0])
 	}
 }

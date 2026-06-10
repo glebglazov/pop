@@ -56,15 +56,18 @@ type RunTaskOptions struct {
 	ResolveInput
 	TaskPathOverride string
 	AgentPreset      string
-	AgentCmd         string
-	AgentOutput      AgentOutputMode
-	AllowDirty       DirtyRuntimeStrategy
-	MaxTries         int
-	Timeout          time.Duration
-	Yes              bool
-	ConfirmIn        io.Reader
-	ConfirmOut       io.Writer
-	Output           io.Writer
+	// AgentExplicit reports the --agent flag was explicitly passed
+	// (Flags().Changed), letting it override a task's `agent` key (ADR-0018).
+	AgentExplicit bool
+	AgentCmd      string
+	AgentOutput   AgentOutputMode
+	AllowDirty    DirtyRuntimeStrategy
+	MaxTries      int
+	Timeout       time.Duration
+	Yes           bool
+	ConfirmIn     io.Reader
+	ConfirmOut    io.Writer
+	Output        io.Writer
 }
 
 // RunTaskResult is the outcome of a successful or declined run-task.
@@ -186,8 +189,16 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		}
 	}
 
+	agentSpec := resolveTaskAgentSpec(opts.AgentPreset, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent)
+	if agentSpec != opts.AgentPreset {
+		agentOutput, err = resolveAgentOutputMode(loadConfig, agentSpec, opts.AgentOutput)
+		if err != nil {
+			return nil, taskExitErr(sel, ExitSetup, "%v", err)
+		}
+	}
+
 	prompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
-	invocation, err := ResolveAgentInvocationWithMode(opts.AgentPreset, opts.AgentCmd, prompt, runtimePath, agentOutput)
+	invocation, err := ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, agentOutput)
 	if err != nil {
 		return nil, taskExitErr(sel, ExitSetup, "%v", err)
 	}

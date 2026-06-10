@@ -61,6 +61,45 @@ func TestManifestValidation(t *testing.T) {
 			valid:    false,
 			contains: "unresolved blocker",
 		},
+		{
+			name: "valid agent key with extra args",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"claude --model opus4.8"}
+			]}`,
+			valid: true,
+		},
+		{
+			name: "unknown agent preset",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"gemini --model pro"}
+			]}`,
+			valid:    false,
+			contains: "unknown agent preset",
+		},
+		{
+			name: "opaque agent command rejected",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"./scripts/my-agent.sh --flag"}
+			]}`,
+			valid:    false,
+			contains: "opaque agent commands are not permitted",
+		},
+		{
+			name: "unterminated quote in agent value",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"claude --model 'opus"}
+			]}`,
+			valid:    false,
+			contains: "invalid agent value",
+		},
+		{
+			name: "whitespace-only agent value",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"   "}
+			]}`,
+			valid:    false,
+			contains: "empty agent value",
+		},
 	}
 
 	d := DefaultDeps()
@@ -87,6 +126,33 @@ func TestManifestValidation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestManifestParsesAgentKey(t *testing.T) {
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "thoughts/issues/demo")
+	writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
+	writeTaskMD(t, taskDir, "02-two.md", "## Acceptance criteria\n\n- [ ] two\n")
+
+	path := filepath.Join(taskDir, "index.json")
+	manifest := `{"tasks":[
+		{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"claude --model opus4.8"},
+		{"id":"02-two","file":"02-two.md","title":"Two","type":"AFK","status":"open","blocked_by":[]}
+	]}`
+	if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := LoadManifest(DefaultDeps(), "demo", path)
+	if !m.Valid {
+		t.Fatalf("unexpected invalid: %v", m.Errors)
+	}
+	if m.Tasks[0].Agent != "claude --model opus4.8" {
+		t.Fatalf("agent = %q", m.Tasks[0].Agent)
+	}
+	if m.Tasks[1].Agent != "" {
+		t.Fatalf("agent unexpectedly set: %q", m.Tasks[1].Agent)
 	}
 }
 

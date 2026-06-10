@@ -25,6 +25,9 @@ type Task struct {
 	Status      string   `json:"status"`
 	BlockedBy   []string `json:"blocked_by"`
 	FailedAfter *int     `json:"failed_after,omitempty"`
+	// Agent optionally pins this task to an Agent-preset-shaped value, e.g.
+	// "claude --model opus4.8" (ADR-0018). Only recognized presets are allowed.
+	Agent string `json:"agent,omitempty"`
 }
 
 // Manifest is a parsed and validated task manifest.
@@ -132,6 +135,12 @@ func validateManifest(d *Deps, m *Manifest) {
 
 		if !allowedTaskTypes[task.Type] {
 			m.Errors = append(m.Errors, fmt.Sprintf("task %q: invalid type %q", task.ID, task.Type))
+		}
+
+		if task.Agent != "" {
+			if err := validateManifestAgentSpec(task.Agent); err != nil {
+				m.Errors = append(m.Errors, fmt.Sprintf("task %q: %v", task.ID, err))
+			}
 		}
 
 		switch task.Status {

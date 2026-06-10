@@ -116,7 +116,7 @@ func init() {
 	taskImplementCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	taskImplementCmd.Flags().Var(&taskAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
 	taskImplementCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(tasks.DirtyRuntimeContinue)
-	taskImplementCmd.Flags().StringVar(&taskAgentPreset, "agent", "claude", "Agent preset (claude, opencode, cursor, codex, pi), optionally followed by extra agent args, e.g. \"claude --model opus4.8\"")
+	taskImplementCmd.Flags().StringVar(&taskAgentPreset, "agent", "claude", "Agent preset (claude, opencode, cursor, codex, pi), optionally followed by extra agent args, e.g. \"claude --model opus4.8\"; when passed explicitly, overrides a task's manifest agent key")
 	taskImplementCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 	taskImplementCmd.Flags().Var(&taskAgentOutput, "agent-output", "Agent output mode: auto (default), text")
 	taskImplementCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
@@ -186,11 +186,15 @@ func runTaskImplement(cmd *cobra.Command, args []string) {
 	if len(args) > 0 {
 		target = args[0]
 	}
+	// Explicitness, not the resolved value, decides whether --agent overrides
+	// a task's `agent` key (ADR-0018): a bare defaulted --agent claude must
+	// not stomp a planner's per-task choice.
+	agentExplicit := cmd.Flags().Changed("agent")
 	var err error
 	if isTaskFileTarget(target) {
-		err = runTaskRunTaskWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target)
+		err = runTaskRunTaskWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target, agentExplicit)
 	} else {
-		err = runTaskRunTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target)
+		err = runTaskRunTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target, agentExplicit)
 	}
 	handleTaskExit(err)
 }
@@ -205,7 +209,7 @@ func isTaskFileTarget(target string) bool {
 	return strings.HasSuffix(target, ".md")
 }
 
-func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskPath string) error {
+func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskPath string, agentExplicit bool) error {
 	timeout, err := time.ParseDuration(taskTimeout)
 	if err != nil {
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
@@ -214,6 +218,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		ResolveInput:     taskResolveInput(),
 		TaskPathOverride: taskPath,
 		AgentPreset:      taskAgentPreset,
+		AgentExplicit:    agentExplicit,
 		AgentCmd:         taskAgentCmd,
 		AgentOutput:      taskAgentOutput,
 		AllowDirty:       taskAllowDirty,
@@ -227,7 +232,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 	return err
 }
 
-func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskSetPath string) error {
+func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskSetPath string, agentExplicit bool) error {
 	timeout, err := time.ParseDuration(taskTimeout)
 	if err != nil {
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
@@ -236,6 +241,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		ResolveInput:    taskResolveInput(),
 		TaskSetOverride: taskSetPath,
 		AgentPreset:     taskAgentPreset,
+		AgentExplicit:   agentExplicit,
 		AgentCmd:        taskAgentCmd,
 		AgentOutput:     taskAgentOutput,
 		AllowDirty:      taskAllowDirty,
