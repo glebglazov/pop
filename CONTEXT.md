@@ -281,11 +281,19 @@ The single task-execution command, `pop tasks implement`, that runs tasks throug
 _Avoid_: Run, Drain, separate one-vs-many verbs, run issue, run issues, run all, next Task set, Run PRD
 
 **Agent preset**:
-A named headless agent command known to the task executor. An explicit agent command may override a preset. The executor appends its generated prompt as the final positional argument and disconnects stdin.
+A headless agent the task executor recognizes — `claude`, `opencode`, `cursor`, `codex`, or `pi` — selected by name and optionally augmented with extra invocation arguments (e.g. `claude --model opus4.8`). Pop runs the supplied command as given, exactly as it runs a **Custom agent command**; the sole difference is recognition. Because the first token names a known agent, the **Agent adapter** appends the flags Pop owns — the output protocol governed by **Agent output mode** — after the user's arguments, then the generated prompt as the final positional argument with stdin disconnected. Appending last makes those flags authoritative: a user value for an owned flag is overridden, not rejected. Recognition is what lets Pop parse the structured stream and keep every adapter capability; augmenting a recognized preset this way is distinct from replacing the invocation with a Custom agent command.
 _Avoid_: Integration
 
+**Custom agent command**:
+A trusted, opaque command supplied via `--agent-cmd` that Pop runs verbatim through a shell, with the generated prompt appended as the final positional argument. Pop neither recognizes nor inspects it, so it forgoes every adapter capability: plain output only, no **Agent quota detection**, no live rendering, and no entry in the **Captured attempt stream**. It governs only unattended task attempts, never attended HITL assistance. It replaces the invocation wholesale — the inverse of an augmented **Agent preset**.
+_Avoid_: Override command, escape-hatch agent, agent passthrough
+
+**Task agent**:
+An optional per-task `agent` key in the **Manifest**, carrying an **Agent preset**-shaped value (e.g. `claude --model opus4.8`) so a planner can pick the agent and model for an individual task. It must name a recognized preset — an unknown first token is a contract fault that makes the Task set **Malformed**, and the opaque **Custom agent command** form is not allowed in a Manifest, since a durable definition must stay recognizable and replayable. The agent for a task attempt resolves by precedence: an explicit `--agent-cmd` wins, then an explicitly passed `--agent`, then the task's own `agent` key, then the default. A bare defaulted `--agent` never overrides a task key.
+_Avoid_: Per-set agent, agent override
+
 **Interactive agent preset**:
-A named attended-assistance command known to an Agent adapter. It is separate from an Agent preset because assisting a human at a HITL gate is an attended conversation, not a headless task attempt; custom headless agent commands do not imply an interactive preset.
+A named attended-assistance command known to an Agent adapter. It is separate from an Agent preset because assisting a human at a HITL gate is an attended conversation, not a headless task attempt; custom headless agent commands do not imply an interactive preset. When an **Agent preset** carries extra arguments, those arguments ride into native attended assistance for the same agent but are dropped when assistance falls back to a different agent, since they were written for the original.
 _Avoid_: Agent preset, stripped headless command, agent-cmd
 
 **Agent adapter**:

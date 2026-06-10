@@ -155,6 +155,74 @@ func TestResolveAgentCommandUnknownPreset(t *testing.T) {
 	}
 }
 
+func TestResolveAgentInvocationAugmentedPreset(t *testing.T) {
+	invocation, err := ResolveAgentInvocation("claude --model opus4.8", "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invocation.Name != "claude" {
+		t.Fatalf("name = %q, want claude", invocation.Name)
+	}
+	want := []string{"--model", "opus4.8", "--dangerously-skip-permissions", "-p", "--output-format", "stream-json", "--verbose", "prompt text"}
+	if !reflect.DeepEqual(invocation.Args, want) {
+		t.Fatalf("args = %#v, want %#v", invocation.Args, want)
+	}
+	if invocation.OutputFormat != AgentOutputClaudeStreamJSON {
+		t.Fatalf("format = %q, want structured", invocation.OutputFormat)
+	}
+	if invocation.AgentPreset() != "claude" {
+		t.Fatalf("preset = %q, want claude", invocation.AgentPreset())
+	}
+}
+
+func TestResolveAgentInvocationAugmentedOwnedFlagsAppendedLast(t *testing.T) {
+	invocation, err := ResolveAgentInvocation("claude --output-format text", "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--output-format", "text", "--dangerously-skip-permissions", "-p", "--output-format", "stream-json", "--verbose", "prompt text"}
+	if !reflect.DeepEqual(invocation.Args, want) {
+		t.Fatalf("args = %#v, want %#v", invocation.Args, want)
+	}
+	if invocation.OutputFormat != AgentOutputClaudeStreamJSON {
+		t.Fatalf("format = %q, want structured despite user --output-format", invocation.OutputFormat)
+	}
+}
+
+func TestResolveAgentInvocationAugmentedQuotedArgs(t *testing.T) {
+	invocation, err := ResolveAgentInvocation(`claude --append-system-prompt "be nice"`, "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--append-system-prompt", "be nice", "--dangerously-skip-permissions", "-p", "--output-format", "stream-json", "--verbose", "prompt text"}
+	if !reflect.DeepEqual(invocation.Args, want) {
+		t.Fatalf("args = %#v, want %#v", invocation.Args, want)
+	}
+}
+
+func TestResolveAgentInvocationAugmentedUnknownPreset(t *testing.T) {
+	_, err := ResolveAgentInvocation("nope --model opus4.8", "", "p", "/tmp/runtime")
+	if err == nil || !strings.Contains(err.Error(), `unknown agent preset "nope"`) {
+		t.Fatalf("err = %v, want unknown agent preset", err)
+	}
+}
+
+func TestResolveAgentInvocationAgentCmdWinsOverAugmentedPreset(t *testing.T) {
+	invocation, err := ResolveAgentInvocation("claude --model opus4.8", "fake-agent --verbose", "prompt", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invocation.Name != "sh" {
+		t.Fatalf("name = %q, want sh", invocation.Name)
+	}
+	if invocation.OutputFormat != AgentOutputPlain {
+		t.Fatalf("format = %q, want plain", invocation.OutputFormat)
+	}
+	if strings.Contains(strings.Join(invocation.Args, " "), "opus4.8") {
+		t.Fatalf("augmented preset leaked into --agent-cmd invocation: %#v", invocation.Args)
+	}
+}
+
 func TestResolveAgentInvocationOutputFormats(t *testing.T) {
 	claude, err := ResolveAgentInvocation("claude", "", "p", "/tmp/runtime")
 	if err != nil {
@@ -336,6 +404,33 @@ func TestResolveAgentAssistanceInvocationAdapterOwnedFallback(t *testing.T) {
 	}
 }
 
+func TestResolveAgentAssistanceInvocationCarriesExtraArgsNative(t *testing.T) {
+	invocation, err := ResolveAgentAssistanceInvocation("claude --model opus4.8", "", "assist prompt", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invocation.Mode != AgentAssistanceNative || invocation.Command.Name != "claude" {
+		t.Fatalf("invocation = %#v, want claude native", invocation)
+	}
+	want := []string{"--model", "opus4.8", "assist prompt"}
+	if !reflect.DeepEqual(invocation.Command.Args, want) {
+		t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, want)
+	}
+}
+
+func TestResolveAgentAssistanceInvocationDropsExtraArgsOnFallback(t *testing.T) {
+	invocation, err := ResolveAgentAssistanceInvocation("cursor --model gpt-5", "", "assist prompt", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invocation.Mode != AgentAssistanceFallback || invocation.Command.Name != "claude" {
+		t.Fatalf("invocation = %#v, want claude fallback", invocation)
+	}
+	if !reflect.DeepEqual(invocation.Command.Args, []string{"assist prompt"}) {
+		t.Fatalf("fallback command args = %#v, want prompt only", invocation.Command.Args)
+	}
+}
+
 func TestAgentCmdIgnoredForAttendedAssistance(t *testing.T) {
 	capability, err := ResolveAgentAssistanceCapability("claude", "fake-agent --verbose")
 	if err != nil {
@@ -374,6 +469,10 @@ func TestResolveAgentOutputModePrecedence(t *testing.T) {
 	mode, err = resolveAgentOutputMode(loadText, "cursor", "")
 	if err != nil || mode != AgentOutputAuto {
 		t.Fatalf("other agent mode = %q, err = %v", mode, err)
+	}
+	mode, err = resolveAgentOutputMode(loadText, "claude --model opus4.8", "")
+	if err != nil || mode != AgentOutputText {
+		t.Fatalf("augmented preset mode = %q, err = %v", mode, err)
 	}
 }
 

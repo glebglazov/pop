@@ -80,12 +80,18 @@ type AgentHeadlessRequest struct {
 	Prompt      string
 	RuntimePath string
 	OutputMode  AgentOutputMode
+	// ExtraArgs are user-supplied arguments augmenting the preset (ADR-0017).
+	// They precede pop's owned flags so owned flags stay authoritative.
+	ExtraArgs []string
 }
 
 // AgentAssistanceRequest describes one attended HITL assistance invocation.
 type AgentAssistanceRequest struct {
 	Prompt      string
 	RuntimePath string
+	// ExtraArgs ride into native assistance for the same agent and are
+	// dropped on fallback to a different agent (ADR-0017).
+	ExtraArgs []string
 }
 
 // AgentAssistanceMode describes how an adapter can offer attended HITL help.
@@ -199,7 +205,9 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 	if mode == "" {
 		mode = AgentOutputAuto
 	}
-	args := append([]string{}, a.headlessPrefix...)
+	args := []string{a.headlessPrefix[0]}
+	args = append(args, req.ExtraArgs...)
+	args = append(args, a.headlessPrefix[1:]...)
 	format := AgentOutputPlain
 	if mode == AgentOutputAuto {
 		args = append(args, a.autoArgs...)
@@ -233,7 +241,11 @@ func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*
 		return nil, fmt.Errorf("agent preset %q does not support attended assistance", a.preset)
 	}
 	command := *capability.Command
-	command.Args = append([]string{}, capability.Command.Args...)
+	command.Args = []string{}
+	if capability.Mode == AgentAssistanceNative {
+		command.Args = append(command.Args, req.ExtraArgs...)
+	}
+	command.Args = append(command.Args, capability.Command.Args...)
 	if req.Prompt != "" {
 		command.Args = append(command.Args, req.Prompt)
 	}
@@ -337,6 +349,10 @@ func ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath string
 			adapter:      adapter,
 		}, nil
 	}
+	_, extraArgs, err := parseAgentPresetSpec(preset)
+	if err != nil {
+		return nil, err
+	}
 	adapter, err := ResolveAgentAdapter(preset)
 	if err != nil {
 		return nil, err
@@ -345,19 +361,73 @@ func ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath string
 		Prompt:      prompt,
 		RuntimePath: runtimePath,
 		OutputMode:  mode,
+		ExtraArgs:   extraArgs,
 	})
 }
 
-// ResolveAgentAdapter returns the adapter for a named preset.
+// ResolveAgentAdapter returns the adapter for an --agent value. The value may
+// carry extra invocation arguments after the preset name (ADR-0017); only the
+// first token selects the adapter.
 func ResolveAgentAdapter(preset string) (AgentAdapter, error) {
-	if preset == "" {
-		preset = "claude"
+	name, _, err := parseAgentPresetSpec(preset)
+	if err != nil {
+		return nil, err
 	}
-	adapter, ok := agentAdapters[preset]
+	if name == "" {
+		name = "claude"
+	}
+	adapter, ok := agentAdapters[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown agent preset %q; valid: %s", preset, strings.Join(ValidAgentPresets(), ", "))
+		return nil, fmt.Errorf("unknown agent preset %q; valid: %s", name, strings.Join(ValidAgentPresets(), ", "))
 	}
 	return adapter, nil
+}
+
+// parseAgentPresetSpec splits an --agent value into the preset name (first
+// token) and the extra invocation arguments that augment it.
+func parseAgentPresetSpec(spec string) (string, []string, error) {
+	tokens, err := splitCommandWords(spec)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid agent value %q: %v", spec, err)
+	}
+	if len(tokens) == 0 {
+		return "", nil, nil
+	}
+	return tokens[0], tokens[1:], nil
+}
+
+// splitCommandWords tokenizes on whitespace, honoring single and double
+// quotes so a quoted argument survives as one token.
+func splitCommandWords(s string) ([]string, error) {
+	var words []string
+	var current strings.Builder
+	inWord := false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '\'', '"':
+			inWord = true
+			i++
+			for ; i < len(s) && s[i] != c; i++ {
+				current.WriteByte(s[i])
+			}
+			if i == len(s) {
+				return nil, fmt.Errorf("unterminated %c quote", c)
+			}
+		case ' ', '\t', '\n':
+			if inWord {
+				words = append(words, current.String())
+				current.Reset()
+				inWord = false
+			}
+		default:
+			inWord = true
+			current.WriteByte(c)
+		}
+	}
+	if inWord {
+		words = append(words, current.String())
+	}
+	return words, nil
 }
 
 // ResolveAgentAssistanceCapability returns attended-assistance support for the selected agent.
@@ -375,6 +445,10 @@ func ResolveAgentAssistanceCapability(preset, agentCmd string) (AgentAssistanceC
 // agentCmd is accepted for call-site symmetry with headless invocation but is intentionally ignored:
 // custom --agent-cmd only applies to unattended issue attempts.
 func ResolveAgentAssistanceInvocation(preset, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
+	_, extraArgs, err := parseAgentPresetSpec(preset)
+	if err != nil {
+		return nil, err
+	}
 	adapter, err := ResolveAgentAdapter(preset)
 	if err != nil {
 		return nil, err
@@ -382,6 +456,7 @@ func ResolveAgentAssistanceInvocation(preset, agentCmd, prompt, runtimePath stri
 	return adapter.AssistanceInvocation(AgentAssistanceRequest{
 		Prompt:      prompt,
 		RuntimePath: runtimePath,
+		ExtraArgs:   extraArgs,
 	})
 }
 
@@ -433,12 +508,16 @@ func resolveAgentOutputMode(loadConfig func(string) (*config.Config, error), pre
 		}
 		return "", fmt.Errorf("load config: %w", err)
 	}
-	if preset == "" {
-		preset = "claude"
+	name, _, err := parseAgentPresetSpec(preset)
+	if err != nil {
+		return "", err
 	}
-	mode := AgentOutputMode(cfg.TaskAgentOutput(preset))
+	if name == "" {
+		name = "claude"
+	}
+	mode := AgentOutputMode(cfg.TaskAgentOutput(name))
 	if err := validateAgentOutputMode(mode); err != nil {
-		return "", fmt.Errorf("[workload.agents.%s] output: %w", preset, err)
+		return "", fmt.Errorf("[workload.agents.%s] output: %w", name, err)
 	}
 	return mode, nil
 }
