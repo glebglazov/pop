@@ -209,15 +209,19 @@ func writeAttemptStream(d *Deps, dir string, jsonl []byte) (string, error) {
 // persistAttemptStream writes one Captured attempt stream file best-effort: a
 // storage failure is reported on errOut but never fails the implement run.
 // A nil recorder (plain-output or custom-command attempt) records nothing.
-func persistAttemptStream(d *Deps, errOut io.Writer, sel *Selection, rec *streamRecorder, agent string, attempt int, outcome string) {
+// Returns the written file's path, or "" when nothing was persisted.
+func persistAttemptStream(d *Deps, errOut io.Writer, sel *Selection, rec *streamRecorder, agent string, attempt int, outcome string) string {
 	if rec == nil {
-		return
+		return ""
 	}
+	var path string
 	jsonl, err := encodeAttemptStream(rec, agent, attempt, outcome)
 	if err == nil {
-		_, err = writeAttemptStream(d, taskStreamDir(sel.Manifest.Dir, sel.TaskFile), jsonl)
+		path, err = writeAttemptStream(d, taskStreamDir(sel.Manifest.Dir, sel.TaskFile), jsonl)
 	}
 	if err != nil {
 		fmt.Fprintf(errOut, "warning: persist attempt stream for %s/%s: %v\n", sel.TaskSetID, sel.TaskID, err)
+		return ""
 	}
+	return path
 }

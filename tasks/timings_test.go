@@ -362,6 +362,119 @@ func TestRenderTimingsShowsToolRowsUnderTheirAttempt(t *testing.T) {
 	}
 }
 
+func TestRunTaskPrintsInlineBreakdownOnDone(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	installClaudeStreamAgent(t, env.root, true)
+	// A stream from a previous invocation: it must stay with `pop tasks
+	// timings`, not reappear inline.
+	writeTimingStream(t, taskStreamDir(env.demoDir(), "01-a.md"), "attempt-001.jsonl.gz",
+		"codex", 1, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), "timed_out", 9_000)
+
+	var buf bytes.Buffer
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.Output = &buf
+	if _, err := RunTaskWith(env.deps(), nil, nil, opts); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	summary, heading := strings.Index(out, "✓ Completed demo/01-a"), strings.Index(out, "Attempt timing")
+	if summary == -1 || heading == -1 || heading < summary {
+		t.Fatalf("breakdown not after completion summary:\n%s", out)
+	}
+	breakdown := out[heading:]
+	if !strings.Contains(breakdown, "claude") || !strings.Contains(breakdown, "completed") {
+		t.Fatalf("breakdown missing this invocation's attempt:\n%s", out)
+	}
+	for _, forbidden := range []string{"codex", "timed_out"} {
+		if strings.Contains(breakdown, forbidden) {
+			t.Fatalf("breakdown shows prior-invocation attempt (%q):\n%s", forbidden, out)
+		}
+	}
+
+	// Full history — both invocations — stays with the timings reader.
+	result, err := TimingsWith(env.deps(), nil, nil, TimingsOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tasks[0].Attempts) != 2 {
+		t.Fatalf("reader attempts = %#v, want prior + this invocation", result.Tasks[0].Attempts)
+	}
+}
+
+func TestRunTaskPrintsInlineBreakdownOnFailed(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	installClaudeStreamAgent(t, env.root, false)
+
+	var buf bytes.Buffer
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 2
+	opts.Output = &buf
+	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+
+	out := buf.String()
+	lastFail, heading := strings.Index(out, "✗ Attempt 2/2 failed"), strings.Index(out, "Attempt timing")
+	if lastFail == -1 || heading == -1 || heading < lastFail {
+		t.Fatalf("breakdown not after the terminal failure line:\n%s", out)
+	}
+	// Both of this invocation's attempts appear as failed rows.
+	if got := strings.Count(out[heading:], "failed"); got != 2 {
+		t.Fatalf("failed rows = %d, want 2:\n%s", got, out)
+	}
+}
+
+func TestRunTaskCustomCommandPrintsNoBreakdown(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "custom run"})
+
+	var buf bytes.Buffer
+	opts := env.runOpts(true, agent)
+	opts.Output = &buf
+	if _, err := RunTaskWith(env.deps(), nil, nil, opts); err != nil {
+		t.Fatal(err)
+	}
+	assertTaskDone(t, env, "01-a")
+	if strings.Contains(buf.String(), "Attempt timing") {
+		t.Fatalf("custom-command run printed a breakdown:\n%s", buf.String())
+	}
+}
+
+func TestRunTaskSetPrintsBreakdownPerTaskAsItTerminates(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	installClaudeStreamAgent(t, env.root, true)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPreset = "claude"
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Completed) != 2 {
+		t.Fatalf("completed = %d", len(result.Completed))
+	}
+
+	out := buf.String()
+	if got := strings.Count(out, "Attempt timing"); got != 2 {
+		t.Fatalf("breakdown headings = %d, want one per task:\n%s", got, out)
+	}
+	// The first task's breakdown prints before the second task starts —
+	// per task at termination, not batched at the end of the drain.
+	firstBreakdown, secondTask := strings.Index(out, "Attempt timing"), strings.Index(out, "Running task demo/02-b")
+	if secondTask == -1 || firstBreakdown > secondTask {
+		t.Fatalf("first task's breakdown not printed before second task ran:\n%s", out)
+	}
+}
+
 func TestReadAttemptTimingRejectsTruncatedStream(t *testing.T) {
 	env := timingsFixture(t)
 	dir := taskStreamDir(env.demoDir(), "01-a.md")

@@ -234,17 +234,49 @@ func RenderTimings(w io.Writer, result *TimingsResult) {
 			out.line(ansiDim, "  no recorded attempts")
 			continue
 		}
-		agentW, outcomeW := 0, 0
-		for _, a := range task.Attempts {
-			agentW = max(agentW, len(a.Agent))
-			outcomeW = max(outcomeW, len(a.Outcome))
-		}
-		for _, a := range task.Attempts {
-			out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %s",
-				a.Start.Format(time.RFC3339), agentW, a.Agent, outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
-			renderToolTimings(out, a.Tools)
-		}
+		renderAttemptRows(out, task.Attempts)
 	}
+}
+
+// renderAttemptRows writes one task's attempt rows: agent, outcome, and total
+// duration per attempt, with per-tool rows beneath. Shared by the timings
+// reader and the inline breakdown so the two views render identically.
+func renderAttemptRows(out *output, attempts []AttemptTiming) {
+	agentW, outcomeW := 0, 0
+	for _, a := range attempts {
+		agentW = max(agentW, len(a.Agent))
+		outcomeW = max(outcomeW, len(a.Outcome))
+	}
+	for _, a := range attempts {
+		out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %s",
+			a.Start.Format(time.RFC3339), agentW, a.Agent, outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
+		renderToolTimings(out, a.Tools)
+	}
+}
+
+// printAttemptBreakdown prints the Attempt timing breakdown for the Captured
+// attempt streams written by this invocation, as a task reaches a terminal
+// state during implement. It re-reads the stored files through the reader's
+// derivation (readAttemptTiming), so the inline view and `pop tasks timings`
+// can never disagree; full history stays with the reader. Best-effort like
+// the write path: an unreadable stream is skipped, never an error. No paths
+// (plain-output or custom-command attempts) prints nothing.
+func printAttemptBreakdown(d *Deps, w io.Writer, paths []string) {
+	var attempts []AttemptTiming
+	for _, p := range paths {
+		at, err := readAttemptTiming(d, p)
+		if err != nil {
+			continue
+		}
+		attempts = append(attempts, at)
+	}
+	if len(attempts) == 0 {
+		return
+	}
+	sort.SliceStable(attempts, func(i, j int) bool { return attempts[i].Start.Before(attempts[j].Start) })
+	out := outputFor(w)
+	out.line(ansiDim, "  Attempt timing")
+	renderAttemptRows(out, attempts)
 }
 
 // renderToolTimings writes one attempt's per-tool rows indented under the
