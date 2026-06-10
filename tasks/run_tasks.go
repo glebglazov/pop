@@ -353,10 +353,10 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *buf
 	if yes || !canPrompt(in) || m == nil || hitl == nil {
 		return false, nil
 	}
+	if in == nil {
+		in = os.Stdin
+	}
 	if reader == nil {
-		if in == nil {
-			in = os.Stdin
-		}
 		reader = bufio.NewReader(in)
 	}
 
@@ -381,7 +381,7 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *buf
 			return true, nil
 		case hitlGateAssist:
 			fmt.Fprintf(outputFor(out), "Starting HITL assistance: %s\n", invocation.Display)
-			exitCode, err := runHITLAssistanceCommand(d, reader, runtimePath, out, invocation)
+			exitCode, err := runHITLAssistanceCommand(d, in, runtimePath, out, invocation)
 			if err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start HITL assistance: %v\n", err)
 				continue
@@ -417,6 +417,12 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *buf
 	}
 }
 
+// runHITLAssistanceCommand runs the attended assistance agent. stdin must be
+// the raw input source (the *os.File terminal), NOT the bufio.Reader used for
+// gate prompts: os/exec only inherits a child's controlling terminal when
+// cmd.Stdin is an *os.File. Handing it any other io.Reader makes exec splice a
+// pipe instead, so a TTY-requiring agent (e.g. codex) fails immediately with
+// "stdin is not a terminal".
 func runHITLAssistanceCommand(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, invocation *AgentAssistanceInvocation) (int, error) {
 	if attended, ok := d.Runner.(AttendedCommandRunner); ok {
 		return attended.RunAttended(context.Background(), runtimePath, stdin, out, out, invocation.Command.Name, invocation.Command.Args...)
