@@ -1,5 +1,7 @@
 # Live agent rendering is a cosmetic side-channel
 
+> Refined by [ADR 0016](0016-captured-stream-is-a-durable-telemetry-substrate.md). The invariant below still holds — the live-render parse is never the source of truth — but "cosmetic" undersells what is now the primary user-facing flow. 0016 reframes it: the *captured stream* is the authoritative substrate (for completion assessment and for telemetry), and the live render is one derived view among several.
+
 When an **Agent output adapter** runs in adapter mode (`auto`), pop renders the agent's activity live as it streams — assistant prose plus a compact `→` tick per tool use — instead of capturing silently and showing nothing until the process exits. The rendering is a pure side-channel: the structured stream is teed to a capture buffer unchanged, and the captured raw output, not the rendered view, remains the single source of truth for completion-sentinel assessment and **Agent quota detection**. The stream is therefore parsed twice — once incrementally for the live view, once post-hoc over the full capture for assessment.
 
 ## Why

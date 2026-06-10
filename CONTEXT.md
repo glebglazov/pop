@@ -320,6 +320,18 @@ _Avoid_: Task set retry, task dependency
 The maximum duration for one task attempt, defaulting to one hour and configurable per command. When exceeded, the task executor terminates the agent process group, preserves partial changes, marks the task Failed locally, appends a Failed progress record, and stops immediately without further retries. A deliberate retry requires an **Open task** override.
 _Avoid_: Task set timeout, interruption
 
+**Captured attempt stream**:
+The timestamped raw agent stream recorded for one Task attempt and kept among **Task artifacts**, accumulating across attempts over a task's lifetime. It is captured only for structured adapter-mode attempts; plain-output and custom-command attempts are not recorded. It is the durable substrate from which an Attempt timing breakdown is derived, and is distinct from the ephemeral in-memory capture used for completion assessment and Agent quota detection.
+_Avoid_: Agent output log, progress record, transcript
+
+**Attempt timing breakdown**:
+The agent-specific accounting of where a Task attempt's wall-clock time went, derived from its Captured attempt stream: each attempt's outcome and total duration, and — for agents whose stream pairs a tool invocation with its result — a per-tool count and duration. Tool figures are reported under the agent that ran the attempt because tool vocabularies differ by agent. Implement prints the breakdown for a task as the task finishes, showing the attempts made in that invocation; `pop tasks timings` reprints the full per-task history, ordered by attempt start time. There is no cross-Task-set rollup.
+_Avoid_: Workload report, run summary, set rollup
+
+**Stream entry timing**:
+The elapsed time since the previous live line, shown as a `+Xs` prefix on each rendered stream entry while implement runs. It is part of the cosmetic live side-channel and never feeds completion assessment.
+_Avoid_: Tool duration, attempt timing breakdown
+
 **Human-blocked Task set**:
 A Task set with unfinished tasks but no eligible AFK task because human-in-the-loop work must happen first. Implement reports the condition and stops; the task executor never automatically runs HITL tasks. On stopping, pop prints the blocking task body verbatim — the human sees what to do without opening the file — and advises the recovery paths for the blocking HITL task: Complete task once the human work is done, edit the task file and re-run, or skip the task to defer it and unblock its dependents (Skipped task). The blocked row also shows a copy-paste complete hint, symmetric with the open hint on Failed rows.
 _Avoid_: Failed Task set
@@ -337,7 +349,7 @@ The context loaded into a HITL assistance session. It identifies the Task set an
 _Avoid_: Agent transcript, completion sentinel
 
 **Task artifact**:
-A machine-local planning document, task markdown file, task manifest, or progress record within **Task storage**. Task artifacts live outside the repository tree, so they can never enter implementation commits and require no ignore configuration.
+A machine-local planning document, task markdown file, task manifest, progress record, or captured attempt stream within **Task storage**. Task artifacts live outside the repository tree, so they can never enter implementation commits and require no ignore configuration.
 _Avoid_: Workload artifact, implementation change, task state
 
 **No-op task completion**:

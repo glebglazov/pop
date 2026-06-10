@@ -85,6 +85,7 @@ type attemptOutcome struct {
 	timedOut    bool
 	interrupted bool
 	runErr      error
+	stream      *streamRecorder
 }
 
 // RunTask executes one task task through an agent.
@@ -200,7 +201,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		timeout = DefaultAttemptTimeout
 	}
 
-	result, execErr := executeTaskAttempts(d, sel, runtimePath, out, invocation, maxTries, timeout)
+	result, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, invocation, maxTries, timeout)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil && !opts.Yes {
@@ -224,7 +225,10 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	return result, nil
 }
 
-func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out io.Writer, invocation *AgentInvocation, maxTries int, timeout time.Duration) (*RunTaskResult, error) {
+func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, invocation *AgentInvocation, maxTries int, timeout time.Duration) (*RunTaskResult, error) {
+	if errOut == nil {
+		errOut = os.Stderr
+	}
 	display := outputFor(out)
 	display.line(ansiBold+ansiCyan, "━━ Running task %s/%s: %s", sel.TaskSetID, sel.TaskID, sel.Task.Title)
 	for attempt := 1; attempt <= maxTries; attempt++ {
@@ -272,6 +276,11 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out io.Wri
 		}
 
 		assessment, reason := assessAttempt(agentResult.Output, outcome.exitCode, taskData)
+		streamOutcome := "failed"
+		if assessment.Complete {
+			streamOutcome = "completed"
+		}
+		persistAttemptStream(d, errOut, sel, outcome.stream, invocation.AgentPreset(), attempt, streamOutcome)
 		if assessment.Complete {
 			result, err := completeSuccessfulTask(d, sel, runtimePath, assessment.Summary)
 			if err != nil {
@@ -345,12 +354,19 @@ func completeSuccessfulTask(d *Deps, sel *Selection, runtimePath, summary string
 func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout time.Duration, invocation *AgentInvocation) (string, *attemptOutcome, error) {
 	var capture bytes.Buffer
 	var agentOut io.Writer = &capture
+	var recorder *streamRecorder
 	var liveWriter *liveRenderWriter
 	if invocation.OutputFormat == AgentOutputPlain {
+		// Plain-output and custom-command attempts have no structured events
+		// and are not recorded (ADR 0016).
 		agentOut = io.MultiWriter(liveOut, &capture)
-	} else if render := lineRendererFor(invocation.OutputFormat, outputFor(liveOut).color); render != nil {
-		liveWriter = newLiveRenderWriter(liveOut, &capture, render)
-		agentOut = liveWriter
+	} else {
+		recorder = newStreamRecorder(&capture, time.Now)
+		agentOut = recorder
+		if render := lineRendererFor(invocation.OutputFormat, outputFor(liveOut).color); render != nil {
+			liveWriter = newLiveRenderWriter(liveOut, recorder, render)
+			agentOut = liveWriter
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -411,6 +427,10 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 
 	if liveWriter != nil {
 		liveWriter.Flush()
+	}
+	if recorder != nil {
+		recorder.finish()
+		outcome.stream = recorder
 	}
 
 	raw := capture.String()

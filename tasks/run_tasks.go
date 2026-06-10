@@ -258,7 +258,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)
 		}
 
-		taskResult, execErr := executeTaskAttempts(d, sel, runtimePath, out, invocation, maxTries, timeout)
+		taskResult, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, invocation, maxTries, timeout)
 		if execErr != nil {
 			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 			if refreshErr == nil {

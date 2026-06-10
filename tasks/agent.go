@@ -56,6 +56,14 @@ type AgentInvocation struct {
 	adapter      AgentAdapter
 }
 
+// AgentPreset returns the owning adapter's preset name.
+func (i *AgentInvocation) AgentPreset() string {
+	if i == nil || i.adapter == nil {
+		return ""
+	}
+	return i.adapter.Preset()
+}
+
 // AgentResult is the provider-neutral result of normalizing one invocation.
 type AgentResult struct {
 	Output     string
