@@ -25,6 +25,7 @@ import (
 type AttemptTiming struct {
 	Agent          string
 	RequestedAgent string
+	ActualModel    string
 	Start          time.Time
 	Outcome        string
 	Duration       time.Duration
@@ -58,6 +59,10 @@ const openWindowEndMS = int64(-1)
 // time derivation.
 var toolTimingParsers = map[string]func([]streamEventRecord) ([]ToolTiming, []toolWindow){
 	"claude": claudeToolTimings,
+}
+
+var actualModelParsers = map[string]func([]streamEventRecord) string{
+	"claude": claudeActualModel,
 }
 
 // modelTime derives Model time: the attempt's total duration minus the union
@@ -264,6 +269,10 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 	if requestedAgent == "" {
 		requestedAgent = header.Agent
 	}
+	var actualModel string
+	if parse := actualModelParsers[header.Agent]; parse != nil {
+		actualModel = parse(events)
+	}
 	var tools []ToolTiming
 	var model time.Duration
 	if parse := toolTimingParsers[header.Agent]; parse != nil {
@@ -276,6 +285,7 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 	return AttemptTiming{
 		Agent:          header.Agent,
 		RequestedAgent: requestedAgent,
+		ActualModel:    actualModel,
 		Start:          header.StartTime,
 		Outcome:        footer.Outcome,
 		Duration:       time.Duration(footer.DurationMS) * time.Millisecond,
@@ -305,14 +315,20 @@ func RenderTimings(w io.Writer, result *TimingsResult) {
 // duration per attempt, with per-tool rows beneath. Shared by the timings
 // reader and the inline breakdown so the two views render identically.
 func renderAttemptRows(out *output, attempts []AttemptTiming) {
-	agentW, outcomeW := 0, 0
+	agentW, actualModelW, outcomeW := 0, 0, 0
 	for _, a := range attempts {
 		agentW = max(agentW, len(displayAttemptAgent(a)))
+		actualModelW = max(actualModelW, len(a.ActualModel))
 		outcomeW = max(outcomeW, len(a.Outcome))
 	}
 	for _, a := range attempts {
-		out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %s",
-			a.Start.Format(time.RFC3339), agentW, displayAttemptAgent(a), outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
+		if actualModelW > 0 {
+			out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %-*s  %s",
+				a.Start.Format(time.RFC3339), agentW, displayAttemptAgent(a), actualModelW, a.ActualModel, outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
+		} else {
+			out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %s",
+				a.Start.Format(time.RFC3339), agentW, displayAttemptAgent(a), outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
+		}
 		renderToolTimings(out, a.Tools, a.Model)
 	}
 }

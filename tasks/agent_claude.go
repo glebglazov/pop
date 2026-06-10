@@ -12,9 +12,10 @@ func normalizeClaudeStreamJSON(raw string) AgentResult {
 }
 
 // claudeLineRenderer renders claude stream-json events live: assistant prose
-// plain, and a dim "→ Tool hint" tick per tool use. Other event types render
-// nothing; non-JSON lines are reported as unhandled so the writer passes them
-// through raw.
+// plain, a dim "model <id>" line when the init event reports the actual model,
+// and a dim "→ Tool hint" tick per tool use. Other event types render nothing;
+// non-JSON lines are reported as unhandled so the writer passes them through
+// raw.
 func claudeLineRenderer(color bool) lineRenderer {
 	dim := func(s string) string {
 		if !color {
@@ -22,9 +23,12 @@ func claudeLineRenderer(color bool) lineRenderer {
 		}
 		return ansiDim + s + ansiReset
 	}
+	printedModel := false
 	return func(line []byte) (string, bool) {
 		var event struct {
 			Type    string `json:"type"`
+			Subtype string `json:"subtype"`
+			Model   string `json:"model"`
 			Message struct {
 				Content []struct {
 					Type  string          `json:"type"`
@@ -36,6 +40,14 @@ func claudeLineRenderer(color bool) lineRenderer {
 		}
 		if err := json.Unmarshal(line, &event); err != nil {
 			return "", false
+		}
+		if event.Type == "system" && event.Subtype == "init" {
+			model := strings.TrimSpace(event.Model)
+			if model == "" || printedModel {
+				return "", true
+			}
+			printedModel = true
+			return dim("model "+model) + "\n", true
 		}
 		if event.Type != "assistant" {
 			return "", true
@@ -55,6 +67,23 @@ func claudeLineRenderer(color bool) lineRenderer {
 		}
 		return b.String(), true
 	}
+}
+
+func claudeActualModel(events []streamEventRecord) string {
+	for _, ev := range events {
+		var event struct {
+			Type    string `json:"type"`
+			Subtype string `json:"subtype"`
+			Model   string `json:"model"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type == "system" && event.Subtype == "init" {
+			return strings.TrimSpace(event.Model)
+		}
+	}
+	return ""
 }
 
 // claudeToolTick formats a compact "→ Name hint" line, probing the tool input

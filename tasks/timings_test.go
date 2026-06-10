@@ -236,6 +236,52 @@ func TestTimingsShowsRequestedAgentAndFallsBackForOldStreams(t *testing.T) {
 	}
 }
 
+func TestTimingsExtractsActualModelFromClaudeInitOnly(t *testing.T) {
+	env := timingsFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	claudeEvents := []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init","model":"claude-sonnet-4-20250514"}`},
+	}
+	missingModelEvents := []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
+	}
+	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "claude", "claude --model sonnet", 1, base, "completed", 60_000, claudeEvents)
+	writeTimingStreamWithEvents(t, streamDir, "attempt-002.jsonl.gz", "claude", "claude --model opus", 2, base.Add(time.Minute), "failed", 30_000, missingModelEvents)
+	writeTimingStreamWithEvents(t, streamDir, "attempt-003.jsonl.gz", "codex", "codex --model gpt-5", 3, base.Add(2*time.Minute), "completed", 10_000, claudeEvents)
+
+	result, err := TimingsWith(env.deps(), nil, nil, TimingsOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := result.Tasks[0].Attempts
+	if len(attempts) != 3 {
+		t.Fatalf("attempts = %#v", attempts)
+	}
+	if attempts[0].ActualModel != "claude-sonnet-4-20250514" {
+		t.Fatalf("claude actual model = %q", attempts[0].ActualModel)
+	}
+	if attempts[1].ActualModel != "" {
+		t.Fatalf("missing claude model should stay blank, got %q", attempts[1].ActualModel)
+	}
+	if attempts[2].ActualModel != "" {
+		t.Fatalf("codex actual model should stay blank, got %q", attempts[2].ActualModel)
+	}
+
+	var buf bytes.Buffer
+	RenderTimings(&buf, result)
+	out := buf.String()
+	if !strings.Contains(out, "claude --model sonnet  claude-sonnet-4-20250514  completed") {
+		t.Fatalf("output missing requested agent beside actual model:\n%s", out)
+	}
+	if strings.Contains(out, "claude --model opus  opus") || strings.Contains(out, "codex --model gpt-5  gpt-5") {
+		t.Fatalf("output appears to copy requested model into actual model column:\n%s", out)
+	}
+}
+
 // claudeUse renders one assistant event whose content is the given tool_use
 // blocks, each pair of (id, name).
 func claudeUse(pairs ...[2]string) string {

@@ -98,6 +98,22 @@ func TestClaudeLineRendererSkipsNonAssistantEvents(t *testing.T) {
 	}
 }
 
+func TestClaudeLineRendererPrintsInitModelOnce(t *testing.T) {
+	render := claudeLineRenderer(false)
+	line := `{"type":"system","subtype":"init","model":"claude-sonnet-4-20250514"}`
+	got, handled := render([]byte(line))
+	if !handled {
+		t.Fatal("system init event should be handled")
+	}
+	if got != "model claude-sonnet-4-20250514\n" {
+		t.Fatalf("got %q, want model line", got)
+	}
+	got, handled = render([]byte(line))
+	if !handled || got != "" {
+		t.Fatalf("second init model should be handled silently, got %q handled=%v", got, handled)
+	}
+}
+
 func TestClaudeLineRendererNonJSONUnhandled(t *testing.T) {
 	render := claudeLineRenderer(false)
 	got, handled := render([]byte("warning: something broke"))
@@ -116,6 +132,32 @@ func TestClaudeLineRendererColorStylesToolTick(t *testing.T) {
 	want := ansiDim + "→ Read a.go" + ansiReset + "\n"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestClaudeLineRendererColorStylesInitModel(t *testing.T) {
+	render := claudeLineRenderer(true)
+	line := `{"type":"system","subtype":"init","model":"claude-opus-4-20250514"}`
+	got, _ := render([]byte(line))
+	want := ansiDim + "model claude-opus-4-20250514" + ansiReset + "\n"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestLiveRenderWriterPrintsInitModel(t *testing.T) {
+	var live, capture bytes.Buffer
+	w := newLiveRenderWriter(&live, &capture, claudeLineRenderer(false), staticClock())
+
+	raw := `{"type":"system","subtype":"init","model":"claude-sonnet-4-20250514"}` + "\n"
+	if _, err := w.Write([]byte(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if capture.String() != raw {
+		t.Fatalf("capture got %q, want exact raw %q", capture.String(), raw)
+	}
+	if live.String() != " +0.0s  model claude-sonnet-4-20250514\n" {
+		t.Fatalf("live got %q", live.String())
 	}
 }
 
