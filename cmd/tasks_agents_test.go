@@ -2,16 +2,15 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"errors"
-	"io"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/glebglazov/pop/tasks"
 )
 
-func TestTaskAgentsCatalogListsPresetsWithInjectedPathLookup(t *testing.T) {
+func TestTaskAgentsCatalogListsPresetsWithModelsColumn(t *testing.T) {
 	found := map[string]bool{
 		"claude":   true,
 		"opencode": true,
@@ -26,117 +25,32 @@ func TestTaskAgentsCatalogListsPresetsWithInjectedPathLookup(t *testing.T) {
 			}
 			return "", errors.New("not found")
 		},
-		Runner: failRunner{t: t},
 	}
 
 	var buf bytes.Buffer
-	if err := runTaskAgentsWith(d, &buf, ""); err != nil {
+	if err := runTaskAgentsWith(d, &buf); err != nil {
 		t.Fatal(err)
 	}
 
-	want := "" +
-		"agent     binary         found notes\n" +
-		"claude    claude         yes   default; accepts extra args, e.g. --model <alias>\n" +
-		"opencode  opencode       yes   accepts extra args\n" +
-		"cursor    cursor-agent   no    accepts extra args\n" +
-		"codex     codex          yes   accepts extra args\n" +
-		"pi        pi             no    accepts extra args\n"
-	if buf.String() != want {
-		t.Fatalf("catalog output mismatch\nwant:\n%sgot:\n%s", want, buf.String())
+	rows := [][4]string{
+		{"agent", "binary", "found", "models"},
+		{"claude", "claude", "yes", "opus, sonnet, haiku, fable"},
+		{"opencode", "opencode", "yes", "opencode/kimi-k2.6, opencode/gpt-5.5, opencode/claude-opus-4-8, opencode/claude-sonnet-4-6"},
+		{"cursor", "cursor-agent", "no", "auto, composer-2.5, gpt-5.3-codex"},
+		{"codex", "codex", "yes", "gpt-5.5, gpt-5.4-mini"},
+		{"pi", "pi", "no", "opencode-go/kimi-k2.6, opencode-go/qwen3.7-max, opencode-go/minimax-m3, opencode-go/deepseek-v4-flash"},
+	}
+	var want strings.Builder
+	for _, r := range rows {
+		fmt.Fprintf(&want, "%-9s %-14s %-5s %s\n", r[0], r[1], r[2], r[3])
+	}
+	if buf.String() != want.String() {
+		t.Fatalf("catalog output mismatch\nwant:\n%sgot:\n%s", want.String(), buf.String())
 	}
 
 	wantLookups := []string{"claude", "opencode", "cursor-agent", "codex", "pi"}
 	if strings.Join(looked, ",") != strings.Join(wantLookups, ",") {
 		t.Fatalf("lookups = %v, want %v", looked, wantLookups)
-	}
-}
-
-func TestTaskAgentsModelsOpenCodeUsesLiveListing(t *testing.T) {
-	runner := &captureModelsRunner{
-		stdout: "openai/gpt-5\nanthropic/claude-sonnet-4\n\n",
-	}
-	d := &tasks.Deps{Runner: runner}
-
-	var buf bytes.Buffer
-	if err := runTaskAgentsWith(d, &buf, "opencode"); err != nil {
-		t.Fatal(err)
-	}
-
-	if runner.name != "opencode" || strings.Join(runner.args, " ") != "models" {
-		t.Fatalf("command = %s %v, want opencode models", runner.name, runner.args)
-	}
-	want := "" +
-		"agent: opencode\n" +
-		"model source: live\n" +
-		"notes: live listing from opencode models\n" +
-		"models:\n" +
-		"  openai/gpt-5\n" +
-		"  anthropic/claude-sonnet-4\n"
-	if buf.String() != want {
-		t.Fatalf("models output mismatch\nwant:\n%sgot:\n%s", want, buf.String())
-	}
-}
-
-func TestTaskAgentsModelsClaudeUsesKnownAliasesWithoutExec(t *testing.T) {
-	d := &tasks.Deps{Runner: failRunner{t: t}}
-
-	var buf bytes.Buffer
-	if err := runTaskAgentsWith(d, &buf, "claude"); err != nil {
-		t.Fatal(err)
-	}
-
-	want := "" +
-		"agent: claude\n" +
-		"model source: known aliases\n" +
-		"notes: known stable aliases shipped with Pop\n" +
-		"models:\n" +
-		"  opus\n" +
-		"  sonnet\n" +
-		"  haiku\n" +
-		"  fable\n"
-	if buf.String() != want {
-		t.Fatalf("models output mismatch\nwant:\n%sgot:\n%s", want, buf.String())
-	}
-}
-
-func TestTaskAgentsModelsEmptyForPresetsWithoutCatalog(t *testing.T) {
-	for _, preset := range []string{"codex", "cursor", "pi"} {
-		t.Run(preset, func(t *testing.T) {
-			d := &tasks.Deps{Runner: failRunner{t: t}}
-
-			var buf bytes.Buffer
-			if err := runTaskAgentsWith(d, &buf, preset); err != nil {
-				t.Fatal(err)
-			}
-
-			want := "" +
-				"agent: " + preset + "\n" +
-				"model source: empty\n" +
-				"notes: Pop has no model catalog for this preset; pass --model only when you know a valid value.\n"
-			if buf.String() != want {
-				t.Fatalf("models output mismatch\nwant:\n%sgot:\n%s", want, buf.String())
-			}
-		})
-	}
-}
-
-func TestTaskAgentsModelsLiveFailureDegradesToMessage(t *testing.T) {
-	d := &tasks.Deps{Runner: &captureModelsRunner{
-		exitCode: 127,
-		stderr:   "opencode: not found\n",
-	}}
-
-	var buf bytes.Buffer
-	if err := runTaskAgentsWith(d, &buf, "opencode"); err != nil {
-		t.Fatal(err)
-	}
-
-	want := "" +
-		"agent: opencode\n" +
-		"model source: live\n" +
-		"notes: live model listing failed: opencode: not found\n"
-	if buf.String() != want {
-		t.Fatalf("models output mismatch\nwant:\n%sgot:\n%s", want, buf.String())
 	}
 }
 
@@ -162,39 +76,4 @@ func TestTaskAgentsCommandRegisteredAndHelpVisible(t *testing.T) {
 	if !strings.Contains(out.String(), "\n  agents ") {
 		t.Fatalf("tasks help missing agents command:\n%s", out.String())
 	}
-}
-
-type failRunner struct {
-	t *testing.T
-}
-
-func (r failRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
-	r.t.Fatalf("tasks agents must not run command %s %v", name, args)
-	return 1, nil
-}
-
-func (r failRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*tasks.ManagedProcess, error) {
-	r.t.Fatalf("tasks agents must not start command %s %v", name, args)
-	return nil, nil
-}
-
-type captureModelsRunner struct {
-	name     string
-	args     []string
-	stdout   string
-	stderr   string
-	exitCode int
-	err      error
-}
-
-func (r *captureModelsRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
-	r.name = name
-	r.args = append([]string{}, args...)
-	_, _ = io.WriteString(stdout, r.stdout)
-	_, _ = io.WriteString(stderr, r.stderr)
-	return r.exitCode, r.err
-}
-
-func (r *captureModelsRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*tasks.ManagedProcess, error) {
-	return nil, errors.New("unexpected start")
 }

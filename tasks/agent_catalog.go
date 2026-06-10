@@ -9,12 +9,12 @@ const DefaultAgentPreset = "claude"
 var agentCatalogOrder = []string{"claude", "opencode", "cursor", "codex", "pi"}
 
 // AgentCatalogRow describes Pop's recognition and PATH availability for one
-// built-in agent preset.
+// built-in agent preset, plus its curated, recommended-first model aliases.
 type AgentCatalogRow struct {
 	Agent  string
 	Binary string
 	Found  bool
-	Notes  string
+	Models []string
 }
 
 // AgentCatalog returns stable rows for every recognized built-in agent preset.
@@ -34,23 +34,10 @@ func AgentCatalog(d *Deps) []AgentCatalogRow {
 			Agent:  preset,
 			Binary: binary,
 			Found:  err == nil,
-			Notes:  agentCatalogNotes(preset),
+			Models: adapter.Models(),
 		})
 	}
 	return rows
-}
-
-// AgentModels returns model-source details for one recognized preset. Adapters
-// without an explicit model-source capability yield an honest empty source.
-func AgentModels(d *Deps, preset string) (AgentModelSource, error) {
-	adapter, err := ResolveAgentAdapter(preset)
-	if err != nil {
-		return AgentModelSource{}, err
-	}
-	if source, ok := adapter.(AgentModelSourceProvider); ok {
-		return source.ModelSource(d), nil
-	}
-	return emptyModelSource(adapter.Preset()), nil
 }
 
 func agentBinary(adapter AgentAdapter) string {
@@ -58,11 +45,4 @@ func agentBinary(adapter AgentAdapter) string {
 		return preset.headlessPrefix[0]
 	}
 	return adapter.Preset()
-}
-
-func agentCatalogNotes(preset string) string {
-	if preset == DefaultAgentPreset {
-		return "default; accepts extra args, e.g. --model <alias>"
-	}
-	return "accepts extra args"
 }

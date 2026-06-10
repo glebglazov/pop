@@ -27,7 +27,6 @@ var (
 	taskAllowDirty  tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
 	taskMaxTries    int
 	taskTimeout     string
-	taskModelsAgent string
 )
 
 var taskCmd = &cobra.Command{
@@ -131,7 +130,6 @@ func init() {
 	taskImplementCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
 	taskImplementCmd.Flags().StringVar(&taskTimeout, "timeout", "1h", "Maximum duration per attempt")
 	taskImplementCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip confirmation prompt")
-	taskAgentsCmd.Flags().StringVar(&taskModelsAgent, "models", "", "Show model-source details for one agent preset")
 }
 
 func taskResolveInput() tasks.ResolveInput {
@@ -372,45 +370,22 @@ func runTaskMigrateWith(d *tasks.Deps, w io.Writer) error {
 }
 
 func runTaskAgents(cmd *cobra.Command, args []string) error {
-	return runTaskAgentsWith(tasks.DefaultDeps(), os.Stdout, taskModelsAgent)
+	return runTaskAgentsWith(tasks.DefaultDeps(), os.Stdout)
 }
 
-func runTaskAgentsWith(d *tasks.Deps, w io.Writer, modelsAgent string) error {
-	if strings.TrimSpace(modelsAgent) != "" {
-		source, err := tasks.AgentModels(d, modelsAgent)
-		if err != nil {
-			return err
-		}
-		renderTaskAgentModels(w, source)
-		return nil
-	}
+func runTaskAgentsWith(d *tasks.Deps, w io.Writer) error {
 	renderTaskAgents(w, tasks.AgentCatalog(d))
 	return nil
 }
 
 func renderTaskAgents(w io.Writer, rows []tasks.AgentCatalogRow) {
-	fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", "agent", "binary", "found", "notes")
+	fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", "agent", "binary", "found", "models")
 	for _, row := range rows {
 		found := "no"
 		if row.Found {
 			found = "yes"
 		}
-		fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", row.Agent, row.Binary, found, row.Notes)
-	}
-}
-
-func renderTaskAgentModels(w io.Writer, source tasks.AgentModelSource) {
-	fmt.Fprintf(w, "agent: %s\n", source.Agent)
-	fmt.Fprintf(w, "model source: %s\n", source.Provenance)
-	if source.Message != "" {
-		fmt.Fprintf(w, "notes: %s\n", source.Message)
-	}
-	if len(source.Models) == 0 {
-		return
-	}
-	fmt.Fprintln(w, "models:")
-	for _, model := range source.Models {
-		fmt.Fprintf(w, "  %s\n", model)
+		fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", row.Agent, row.Binary, found, strings.Join(row.Models, ", "))
 	}
 }
 

@@ -659,7 +659,6 @@ func resetTaskFlags() {
 	taskAgentOutput = ""
 	taskRunYes = false
 	taskAllowDirty = tasks.DirtyRuntimeContinue
-	taskModelsAgent = ""
 }
 
 func setupRunTaskCmdFixture(t *testing.T) string {

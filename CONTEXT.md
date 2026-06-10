@@ -292,6 +292,10 @@ _Avoid_: Override command, escape-hatch agent, agent passthrough
 An optional per-task `agent` key in the **Manifest**, carrying an **Agent preset**-shaped value (e.g. `claude --model opus4.8`) so a planner can pick the agent and model for an individual task. It must name a recognized preset — an unknown first token is a contract fault that makes the Task set **Malformed**, and the opaque **Custom agent command** form is not allowed in a Manifest, since a durable definition must stay recognizable and replayable. The agent for a task attempt resolves by precedence: an explicit `--agent-cmd` wins, then an explicitly passed `--agent`, then the task's own `agent` key, then the default. A bare defaulted `--agent` never overrides a task key.
 _Avoid_: Per-set agent, agent override
 
+**Curated model aliases**:
+A short, hand-maintained list of model aliases Pop ships for each recognized **Agent preset**, surfaced as a column in the recognized-agent catalog (`pop tasks agents`), recommended value first. It is a _suggestion_ surface to help a planner fill a **Task agent**'s `--model` — never exhaustive, and never a validation gate: a `--model` value absent from the list still runs. Only `claude`'s entries are stable auto-resolving aliases; other presets list pinned version IDs that need maintenance as models change. Pop ships a curated subset rather than a live listing because an exhaustive provider dump defeats picking.
+_Avoid_: model source, live model listing, model provenance
+
 **Interactive agent preset**:
 A named attended-assistance command known to an Agent adapter. It is separate from an Agent preset because assisting a human at a HITL gate is an attended conversation, not a headless task attempt; custom headless agent commands do not imply an interactive preset. Every supported preset launches its own interactive binary, so when an **Agent preset** carries extra arguments, those arguments ride into that preset's own attended assistance.
 _Avoid_: Agent preset, stripped headless command, agent-cmd
