@@ -19,13 +19,16 @@ import (
 // agent, outcome, and total duration, keyed by start time. No ordinal is
 // carried, so the persisted sequence never contradicts the executor's
 // per-invocation "Attempt N/max" line (ADR 0016). Tools holds the per-tool
-// breakdown for agents with a pairing parser; empty otherwise.
+// breakdown for agents with a pairing parser; empty otherwise. Model is the
+// attempt's Model time — the residual of the total not covered by any tool
+// window — and is meaningful only when Tools is non-empty.
 type AttemptTiming struct {
 	Agent    string
 	Start    time.Time
 	Outcome  string
 	Duration time.Duration
 	Tools    []ToolTiming
+	Model    time.Duration
 }
 
 // ToolTiming aggregates one tool's paired invocations within an attempt:
@@ -36,12 +39,60 @@ type ToolTiming struct {
 	Total time.Duration
 }
 
+// toolWindow is one tool-active interval within an attempt, in stream-relative
+// milliseconds. EndMS of openWindowEndMS marks a window still open when the
+// attempt ended (a tool_use with no result); modelTime clamps it to the
+// attempt's total duration.
+type toolWindow struct {
+	StartMS int64
+	EndMS   int64
+}
+
+const openWindowEndMS = int64(-1)
+
 // toolTimingParsers maps agent preset → pairing parser over one attempt's
 // stored events. Pairing tool_use with tool_result is per-adapter work because
 // the stream shape differs across agents (ADR 0016); agents without a parser
-// show outcome + total only.
-var toolTimingParsers = map[string]func([]streamEventRecord) []ToolTiming{
+// show outcome + total only. The windows feed the agent-independent Model
+// time derivation.
+var toolTimingParsers = map[string]func([]streamEventRecord) ([]ToolTiming, []toolWindow){
 	"claude": claudeToolTimings,
+}
+
+// modelTime derives Model time: the attempt's total duration minus the union
+// of tool-active intervals. The union — not the sum — is subtracted so
+// parallel tool calls are not double-counted; open windows clamp to the
+// attempt's end, and the result clamps at zero against clock skew.
+func modelTime(windows []toolWindow, totalMS int64) time.Duration {
+	clamped := make([]toolWindow, 0, len(windows))
+	for _, w := range windows {
+		if w.EndMS == openWindowEndMS || w.EndMS > totalMS {
+			w.EndMS = totalMS
+		}
+		if w.StartMS < 0 {
+			w.StartMS = 0
+		}
+		if w.StartMS >= w.EndMS {
+			continue
+		}
+		clamped = append(clamped, w)
+	}
+	sort.Slice(clamped, func(i, j int) bool { return clamped[i].StartMS < clamped[j].StartMS })
+	var coveredMS, coveredUntil int64
+	for _, w := range clamped {
+		if w.StartMS > coveredUntil {
+			coveredUntil = w.StartMS
+		}
+		if w.EndMS > coveredUntil {
+			coveredMS += w.EndMS - coveredUntil
+			coveredUntil = w.EndMS
+		}
+	}
+	residual := totalMS - coveredMS
+	if residual < 0 {
+		residual = 0
+	}
+	return time.Duration(residual) * time.Millisecond
 }
 
 // TaskTimings groups one task's attempts ordered by start time.
@@ -209,8 +260,13 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 		return AttemptTiming{}, fmt.Errorf("missing footer record")
 	}
 	var tools []ToolTiming
+	var model time.Duration
 	if parse := toolTimingParsers[header.Agent]; parse != nil {
-		tools = parse(events)
+		var windows []toolWindow
+		tools, windows = parse(events)
+		if len(tools) > 0 {
+			model = modelTime(windows, footer.DurationMS)
+		}
 	}
 	return AttemptTiming{
 		Agent:    header.Agent,
@@ -218,6 +274,7 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 		Outcome:  footer.Outcome,
 		Duration: time.Duration(footer.DurationMS) * time.Millisecond,
 		Tools:    tools,
+		Model:    model,
 	}, nil
 }
 
@@ -250,7 +307,7 @@ func renderAttemptRows(out *output, attempts []AttemptTiming) {
 	for _, a := range attempts {
 		out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %s",
 			a.Start.Format(time.RFC3339), agentW, a.Agent, outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
-		renderToolTimings(out, a.Tools)
+		renderToolTimings(out, a.Tools, a.Model)
 	}
 }
 
@@ -280,9 +337,14 @@ func printAttemptBreakdown(d *Deps, w io.Writer, paths []string) {
 }
 
 // renderToolTimings writes one attempt's per-tool rows indented under the
-// attempt line, so tool figures sit under the agent that ran them.
-func renderToolTimings(out *output, tools []ToolTiming) {
-	nameW, countW := 0, 0
+// attempt line, so tool figures sit under the agent that ran them, closed by
+// the Model time row. The model row has no count column — it is the residual
+// of the attempt, not a tool — and renders only when tool rows do.
+func renderToolTimings(out *output, tools []ToolTiming, model time.Duration) {
+	if len(tools) == 0 {
+		return
+	}
+	nameW, countW := len("model"), 0
 	for _, t := range tools {
 		nameW = max(nameW, len(t.Name))
 		countW = max(countW, len(fmt.Sprintf("%d", t.Count)))
@@ -290,6 +352,7 @@ func renderToolTimings(out *output, tools []ToolTiming) {
 	for _, t := range tools {
 		out.line(ansiDim, "    %-*s  ×%-*d  %s", nameW, t.Name, countW, t.Count, formatAttemptDuration(t.Total))
 	}
+	out.line(ansiDim, "    %-*s  %-*s  %s", nameW, "model", countW+1, "", formatAttemptDuration(model))
 }
 
 func timingOutcomeStyle(outcome string) string {

@@ -213,7 +213,7 @@ func claudeResult(toolUseID string) string {
 }
 
 func TestClaudeToolTimingsPairsUseWithResultByID(t *testing.T) {
-	tools := claudeToolTimings([]streamEventRecord{
+	tools, _ := claudeToolTimings([]streamEventRecord{
 		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
 		{Type: "event", AtMS: 100, Raw: claudeUse([2]string{"tu_1", "Bash"})},
 		{Type: "event", AtMS: 1100, Raw: claudeResult("tu_1")},
@@ -240,7 +240,7 @@ func TestClaudeToolTimingsPairsUseWithResultByID(t *testing.T) {
 func TestClaudeToolTimingsPairsParallelCallsByID(t *testing.T) {
 	// One assistant turn issues two tool calls at once; results arrive in the
 	// opposite order. Ids — not arrival order — must do the pairing.
-	tools := claudeToolTimings([]streamEventRecord{
+	tools, _ := claudeToolTimings([]streamEventRecord{
 		{Type: "event", AtMS: 100, Raw: claudeUse([2]string{"tu_a", "Read"}, [2]string{"tu_b", "Grep"})},
 		{Type: "event", AtMS: 400, Raw: claudeResult("tu_b")},
 		{Type: "event", AtMS: 900, Raw: claudeResult("tu_a")},
@@ -261,7 +261,7 @@ func TestClaudeToolTimingsPairsParallelCallsByID(t *testing.T) {
 }
 
 func TestClaudeToolTimingsSkipsUnpairedAndMalformedEvents(t *testing.T) {
-	tools := claudeToolTimings([]streamEventRecord{
+	tools, windows := claudeToolTimings([]streamEventRecord{
 		{Type: "event", AtMS: 10, Raw: `not json`},
 		{Type: "event", AtMS: 100, Raw: claudeUse([2]string{"tu_killed", "Bash"})}, // no result: attempt died
 		{Type: "event", AtMS: 200, Raw: claudeResult("tu_unknown")},                // result without a use
@@ -271,6 +271,70 @@ func TestClaudeToolTimingsSkipsUnpairedAndMalformedEvents(t *testing.T) {
 
 	if len(tools) != 1 || tools[0] != (ToolTiming{Name: "Edit", Count: 1, Total: 250 * time.Millisecond}) {
 		t.Fatalf("tools = %#v, want only the paired Edit call", tools)
+	}
+	// The unpaired use is absent from the rows but present as an open window,
+	// so Model time will not absorb the wait on the tool the attempt died in.
+	want := map[toolWindow]bool{
+		{StartMS: 300, EndMS: 550}:             true,
+		{StartMS: 100, EndMS: openWindowEndMS}: true,
+	}
+	if len(windows) != len(want) {
+		t.Fatalf("windows = %#v, want paired + open", windows)
+	}
+	for _, w := range windows {
+		if !want[w] {
+			t.Fatalf("unexpected window %+v in %#v", w, windows)
+		}
+	}
+}
+
+func TestModelTimeSubtractsUnionOfToolWindows(t *testing.T) {
+	cases := []struct {
+		name    string
+		windows []toolWindow
+		totalMS int64
+		want    time.Duration
+	}{
+		{
+			name:    "disjoint windows",
+			windows: []toolWindow{{0, 2_000}, {10_000, 14_000}},
+			totalMS: 20_000,
+			want:    14 * time.Second,
+		},
+		{
+			name: "parallel calls overlap counted once",
+			// Two tools in flight 100..900 and 100..400: union is 800ms, not 1.1s.
+			windows: []toolWindow{{100, 900}, {100, 400}},
+			totalMS: 1_000,
+			want:    200 * time.Millisecond,
+		},
+		{
+			name: "open window clamps to attempt end",
+			// Killed at 60s while a tool launched at 20s was still running: the
+			// 40s wait is tool time, not Model time.
+			windows: []toolWindow{{0, 2_000}, {10_000, 14_000}, {20_000, openWindowEndMS}},
+			totalMS: 60_000,
+			want:    14 * time.Second,
+		},
+		{
+			name:    "no windows means all model",
+			windows: nil,
+			totalMS: 5_000,
+			want:    5 * time.Second,
+		},
+		{
+			name:    "skew past the footer clamps to zero",
+			windows: []toolWindow{{0, 99_000}},
+			totalMS: 10_000,
+			want:    0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := modelTime(tc.windows, tc.totalMS); got != tc.want {
+				t.Fatalf("modelTime = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -314,8 +378,15 @@ func TestTimingsPerToolBreakdownForClaudeOnly(t *testing.T) {
 			t.Fatalf("claude tools[%d] = %+v, want %+v", i, attempts[0].Tools[i], wantTools[i])
 		}
 	}
+	// Model time: 60s total minus 1.2s of tool windows.
+	if attempts[0].Model != 58_800*time.Millisecond {
+		t.Fatalf("claude model = %v, want 58.8s", attempts[0].Model)
+	}
 	if len(attempts[1].Tools) != 0 {
 		t.Fatalf("codex tools = %#v, want none", attempts[1].Tools)
+	}
+	if attempts[1].Model != 0 {
+		t.Fatalf("codex model = %v, want zero without a pairing parser", attempts[1].Model)
 	}
 }
 
@@ -335,6 +406,7 @@ func TestRenderTimingsShowsToolRowsUnderTheirAttempt(t *testing.T) {
 							{Name: "Bash", Count: 12, Total: 65 * time.Second},
 							{Name: "Read", Count: 3, Total: 2 * time.Second},
 						},
+						Model: 23 * time.Second,
 					},
 					{Agent: "codex", Start: base.Add(10 * time.Minute), Outcome: "completed", Duration: 30 * time.Second},
 				},
@@ -347,18 +419,39 @@ func TestRenderTimingsShowsToolRowsUnderTheirAttempt(t *testing.T) {
 	out := buf.String()
 
 	for _, want := range []string{
-		"    Bash  ×12  1m5s",
-		"    Read  ×3   2s",
+		"    Bash   ×12  1m5s",
+		"    Read   ×3   2s",
+		"    model       23s",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
 	}
 	// Tool rows belong to the attempt — and so the agent — that ran them: they
-	// sit between the claude row and the codex row.
-	claudeRow, bashRow, codexRow := strings.Index(out, "claude"), strings.Index(out, "Bash"), strings.Index(out, "codex")
-	if !(claudeRow < bashRow && bashRow < codexRow) {
+	// sit between the claude row and the codex row, with the model row last.
+	claudeRow, bashRow, modelRow, codexRow := strings.Index(out, "claude"), strings.Index(out, "Bash"), strings.Index(out, "model"), strings.Index(out, "codex")
+	if !(claudeRow < bashRow && bashRow < modelRow && modelRow < codexRow) {
 		t.Fatalf("tool rows not under their attempt:\n%s", out)
+	}
+}
+
+func TestRenderTimingsOmitsModelRowWithoutToolRows(t *testing.T) {
+	// An attempt with no tool rows (no pairing parser, or no paired calls)
+	// shows outcome + total only: a model row equal to the total is noise.
+	result := &TimingsResult{
+		TaskSetID: "demo",
+		Tasks: []TaskTimings{{
+			TaskID: "01-a", File: "01-a.md", Title: "A",
+			Attempts: []AttemptTiming{
+				{Agent: "claude", Start: time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC), Outcome: "completed", Duration: 9 * time.Second},
+			},
+		}},
+	}
+
+	var buf bytes.Buffer
+	RenderTimings(&buf, result)
+	if strings.Contains(buf.String(), "model") {
+		t.Fatalf("model row rendered without tool rows:\n%s", buf.String())
 	}
 }
 

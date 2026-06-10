@@ -333,8 +333,12 @@ The timestamped raw agent stream recorded for one Task attempt and kept among **
 _Avoid_: Agent output log, progress record, transcript
 
 **Attempt timing breakdown**:
-The agent-specific accounting of where a Task attempt's wall-clock time went, derived from its Captured attempt stream: each attempt's outcome and total duration, and — for agents whose stream pairs a tool invocation with its result — a per-tool count and duration. Tool figures are reported under the agent that ran the attempt because tool vocabularies differ by agent. Implement prints the breakdown for a task as the task finishes, showing the attempts made in that invocation; `pop tasks timings` reprints the full per-task history, ordered by attempt start time. There is no cross-Task-set rollup.
+The agent-specific accounting of where a Task attempt's wall-clock time went, derived from its Captured attempt stream: each attempt's outcome and total duration, and — for agents whose stream pairs a tool invocation with its result — a per-tool count and duration, followed by **Model time**. Tool figures are reported under the agent that ran the attempt because tool vocabularies differ by agent. Implement prints the breakdown for a task as the task finishes, showing the attempts made in that invocation; `pop tasks timings` reprints the full per-task history, ordered by attempt start time. There is no cross-Task-set rollup.
 _Avoid_: Workload report, run summary, set rollup
+
+**Model time**:
+The portion of a Task attempt's total duration during which no tool was in flight — the agent itself producing output: reasoning, narration, composing edits. It is the residual after removing every interval covered by a tool invocation awaiting its result, so overlapping (parallel) tool calls are not double-counted, and a tool still running when the attempt ends counts as tool time, not Model time. It appears in the Attempt timing breakdown only when per-tool figures do, labeled `model`. It is a derived reading of the Captured attempt stream, not a recorded event.
+_Avoid_: Thinking time, unattributed time, idle time, overhead
 
 **Stream entry timing**:
 The elapsed time since the previous live line, shown as a `+Xs` prefix on each rendered stream entry while implement runs. It is part of the cosmetic live side-channel and never feeds completion assessment.

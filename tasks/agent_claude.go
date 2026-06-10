@@ -105,15 +105,18 @@ func firstNonEmpty(values ...string) string {
 // tool_result block carrying the same tool-use id, and the gap between their
 // arrival times is that invocation's duration. Ids — not order — do the
 // pairing, so parallel tool calls within one assistant turn resolve correctly.
-// A tool_use with no result (e.g. a killed attempt) contributes nothing.
-// Results aggregate per tool name, longest total first.
-func claudeToolTimings(events []streamEventRecord) []ToolTiming {
+// A tool_use with no result (e.g. a killed attempt) contributes nothing to the
+// per-tool rows, but its still-open interval is reported as a tool window so
+// Model time never absorbs the wait on a tool that was running when the
+// attempt ended. Results aggregate per tool name, longest total first.
+func claudeToolTimings(events []streamEventRecord) ([]ToolTiming, []toolWindow) {
 	type pendingUse struct {
 		name string
 		atMS int64
 	}
 	pending := map[string]pendingUse{}
 	totals := map[string]*ToolTiming{}
+	var windows []toolWindow
 	for _, ev := range events {
 		var msg struct {
 			Type    string `json:"type"`
@@ -153,8 +156,12 @@ func claudeToolTimings(events []streamEventRecord) []ToolTiming {
 				}
 				agg.Count++
 				agg.Total += time.Duration(ev.AtMS-use.atMS) * time.Millisecond
+				windows = append(windows, toolWindow{StartMS: use.atMS, EndMS: ev.AtMS})
 			}
 		}
+	}
+	for _, use := range pending {
+		windows = append(windows, toolWindow{StartMS: use.atMS, EndMS: openWindowEndMS})
 	}
 	out := make([]ToolTiming, 0, len(totals))
 	for _, t := range totals {
@@ -166,7 +173,7 @@ func claudeToolTimings(events []streamEventRecord) []ToolTiming {
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out
+	return out, windows
 }
 
 func claudeQuotaPauseReason(result string) *AgentQuotaPause {
