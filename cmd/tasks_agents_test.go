@@ -38,9 +38,9 @@ func TestTaskAgentsCatalogListsPresetsWithInjectedPathLookup(t *testing.T) {
 		"agent     binary         found notes\n" +
 		"claude    claude         yes   default; accepts extra args, e.g. --model <alias>\n" +
 		"opencode  opencode       yes   accepts extra args\n" +
-		"cursor    cursor-agent   no    HITL assistance falls back to claude\n" +
+		"cursor    cursor-agent   no    accepts extra args\n" +
 		"codex     codex          yes   accepts extra args\n" +
-		"pi        pi             no    HITL assistance falls back to claude\n"
+		"pi        pi             no    accepts extra args\n"
 	if buf.String() != want {
 		t.Fatalf("catalog output mismatch\nwant:\n%sgot:\n%s", want, buf.String())
 	}

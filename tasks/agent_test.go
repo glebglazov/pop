@@ -348,16 +348,27 @@ func TestResolveAgentInvocationTextModePreservesHeadlessCommands(t *testing.T) {
 	}
 }
 
-func TestAgentAssistanceCapabilitySupportsFallbacks(t *testing.T) {
-	capability, err := ResolveAgentAssistanceCapability("cursor", "")
-	if err != nil {
-		t.Fatal(err)
+func TestAgentAssistanceCapabilityNativeForEveryPreset(t *testing.T) {
+	wantBinary := map[string]string{
+		"claude":   "claude",
+		"opencode": "opencode",
+		"cursor":   "cursor-agent",
+		"codex":    "codex",
+		"pi":       "pi",
 	}
-	if !capability.Available() || capability.Mode != AgentAssistanceFallback {
-		t.Fatalf("capability = %#v, want available fallback", capability)
-	}
-	if capability.Command == nil || capability.Command.Name == "" {
-		t.Fatalf("fallback command = %#v", capability.Command)
+	for preset, binary := range wantBinary {
+		t.Run(preset, func(t *testing.T) {
+			capability, err := ResolveAgentAssistanceCapability(preset, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !capability.Available() || capability.Mode != AgentAssistanceNative {
+				t.Fatalf("capability = %#v, want available native", capability)
+			}
+			if capability.Command == nil || capability.Command.Name != binary {
+				t.Fatalf("native command = %#v, want %q", capability.Command, binary)
+			}
+		})
 	}
 }
 
@@ -383,27 +394,25 @@ func TestResolveAgentAssistanceInvocationNative(t *testing.T) {
 	}
 }
 
-func TestResolveAgentAssistanceInvocationAdapterOwnedFallback(t *testing.T) {
+func TestResolveAgentAssistanceInvocationCursorLaunchesOwnBinary(t *testing.T) {
 	invocation, err := ResolveAgentAssistanceInvocation("cursor", "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if invocation.AgentPreset != "cursor" || invocation.Mode != AgentAssistanceFallback {
-		t.Fatalf("invocation = %#v, want cursor fallback", invocation)
+	if invocation.AgentPreset != "cursor" || invocation.Mode != AgentAssistanceNative {
+		t.Fatalf("invocation = %#v, want cursor native", invocation)
 	}
-	if invocation.Command.Name != "claude" {
-		t.Fatalf("fallback command name = %q, want claude", invocation.Command.Name)
+	if invocation.Command.Name != "cursor-agent" {
+		t.Fatalf("command name = %q, want cursor-agent", invocation.Command.Name)
 	}
 	if !reflect.DeepEqual(invocation.Command.Args, []string{"assist prompt"}) {
-		t.Fatalf("fallback command args = %#v", invocation.Command.Args)
+		t.Fatalf("command args = %#v", invocation.Command.Args)
 	}
-	if invocation.Display != "claude <HITL assistance prompt>" {
+	if invocation.Display != "cursor-agent <HITL assistance prompt>" {
 		t.Fatalf("display = %q", invocation.Display)
 	}
-	for _, want := range []string{"fallback", "cursor", "claude"} {
-		if !strings.Contains(invocation.Detail, want) {
-			t.Fatalf("detail = %q, missing %q", invocation.Detail, want)
-		}
+	if !strings.Contains(invocation.Detail, "native") || strings.Contains(invocation.Detail, "fallback") {
+		t.Fatalf("detail = %q, want native detail", invocation.Detail)
 	}
 }
 
@@ -421,16 +430,17 @@ func TestResolveAgentAssistanceInvocationCarriesExtraArgsNative(t *testing.T) {
 	}
 }
 
-func TestResolveAgentAssistanceInvocationDropsExtraArgsOnFallback(t *testing.T) {
+func TestResolveAgentAssistanceInvocationCarriesExtraArgsForNonClaudePreset(t *testing.T) {
 	invocation, err := ResolveAgentAssistanceInvocation("cursor --model gpt-5", "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if invocation.Mode != AgentAssistanceFallback || invocation.Command.Name != "claude" {
-		t.Fatalf("invocation = %#v, want claude fallback", invocation)
+	if invocation.Mode != AgentAssistanceNative || invocation.Command.Name != "cursor-agent" {
+		t.Fatalf("invocation = %#v, want cursor-agent native", invocation)
 	}
-	if !reflect.DeepEqual(invocation.Command.Args, []string{"assist prompt"}) {
-		t.Fatalf("fallback command args = %#v, want prompt only", invocation.Command.Args)
+	want := []string{"--model", "gpt-5", "assist prompt"}
+	if !reflect.DeepEqual(invocation.Command.Args, want) {
+		t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, want)
 	}
 }
 
@@ -447,8 +457,8 @@ func TestAgentCmdIgnoredForAttendedAssistance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if invocation.Command.Name != "claude" {
-		t.Fatalf("command name = %q, want adapter fallback claude", invocation.Command.Name)
+	if invocation.Command.Name != "cursor-agent" {
+		t.Fatalf("command name = %q, want adapter-owned cursor-agent", invocation.Command.Name)
 	}
 	if strings.Contains(invocation.Display, "fake-agent") || strings.Contains(strings.Join(invocation.Command.Args, " "), "fake-agent") {
 		t.Fatalf("--agent-cmd leaked into attended assistance: %#v", invocation)

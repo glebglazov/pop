@@ -91,8 +91,7 @@ type AgentHeadlessRequest struct {
 type AgentAssistanceRequest struct {
 	Prompt      string
 	RuntimePath string
-	// ExtraArgs ride into native assistance for the same agent and are
-	// dropped on fallback to a different agent (ADR-0017).
+	// ExtraArgs ride into attended assistance for the selected agent (ADR-0017).
 	ExtraArgs []string
 }
 
@@ -102,7 +101,6 @@ type AgentAssistanceMode string
 const (
 	AgentAssistanceUnavailable AgentAssistanceMode = "unavailable"
 	AgentAssistanceNative      AgentAssistanceMode = "native"
-	AgentAssistanceFallback    AgentAssistanceMode = "fallback"
 )
 
 // AgentCommand is a resolved attended command owned by an Agent adapter.
@@ -122,8 +120,8 @@ type AgentAssistanceInvocation struct {
 }
 
 // AgentAssistanceCapability reports whether attended assistance can be offered.
-// Fallback allows an adapter to support HITL help even when the selected agent
-// does not have a native interactive command.
+// Every supported preset launches its own interactive binary; an adapter reports
+// Unavailable only when it has no usable attended command at all.
 type AgentAssistanceCapability struct {
 	Mode    AgentAssistanceMode
 	Command *AgentCommand
@@ -131,7 +129,7 @@ type AgentAssistanceCapability struct {
 
 // Available reports whether this capability can be offered to a human.
 func (c AgentAssistanceCapability) Available() bool {
-	return c.Mode == AgentAssistanceNative || c.Mode == AgentAssistanceFallback
+	return c.Mode == AgentAssistanceNative
 }
 
 // AgentModelProvenance describes how much Pop knows about a preset's
@@ -189,7 +187,7 @@ var agentAdapters = map[string]AgentAdapter{
 		[]string{"cursor-agent", "-p", "--force", "--trust"},
 		AgentOutputCursorStreamJSON,
 		[]string{"--output-format", "stream-json"},
-		AgentAssistanceCapability{Mode: AgentAssistanceFallback, Command: &AgentCommand{Name: "claude"}},
+		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "cursor-agent"}},
 		nil,
 	),
 	"codex": newPresetAgentAdapter("codex",
@@ -203,7 +201,7 @@ var agentAdapters = map[string]AgentAdapter{
 		[]string{"pi", "-p", "--no-extensions", "--no-skills"},
 		AgentOutputPiJSONL,
 		[]string{"--mode", "json"},
-		AgentAssistanceCapability{Mode: AgentAssistanceFallback, Command: &AgentCommand{Name: "claude"}},
+		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "pi"}},
 		nil,
 	),
 }
@@ -284,9 +282,7 @@ func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*
 	}
 	command := *capability.Command
 	command.Args = []string{}
-	if capability.Mode == AgentAssistanceNative {
-		command.Args = append(command.Args, req.ExtraArgs...)
-	}
+	command.Args = append(command.Args, req.ExtraArgs...)
 	command.Args = append(command.Args, capability.Command.Args...)
 	if req.Prompt != "" {
 		command.Args = append(command.Args, req.Prompt)
@@ -296,12 +292,7 @@ func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*
 		Mode:        capability.Mode,
 		Command:     command,
 		Display:     displayAgentCommand(command, req.Prompt),
-	}
-	switch capability.Mode {
-	case AgentAssistanceFallback:
-		invocation.Detail = fmt.Sprintf("using %s fallback for %s attended assistance", command.Name, a.preset)
-	case AgentAssistanceNative:
-		invocation.Detail = fmt.Sprintf("using %s native attended assistance", a.preset)
+		Detail:      fmt.Sprintf("using %s native attended assistance", a.preset),
 	}
 	return invocation, nil
 }

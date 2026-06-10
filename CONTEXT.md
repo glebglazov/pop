@@ -293,11 +293,11 @@ An optional per-task `agent` key in the **Manifest**, carrying an **Agent preset
 _Avoid_: Per-set agent, agent override
 
 **Interactive agent preset**:
-A named attended-assistance command known to an Agent adapter. It is separate from an Agent preset because assisting a human at a HITL gate is an attended conversation, not a headless task attempt; custom headless agent commands do not imply an interactive preset. When an **Agent preset** carries extra arguments, those arguments ride into native attended assistance for the same agent but are dropped when assistance falls back to a different agent, since they were written for the original.
+A named attended-assistance command known to an Agent adapter. It is separate from an Agent preset because assisting a human at a HITL gate is an attended conversation, not a headless task attempt; custom headless agent commands do not imply an interactive preset. Every supported preset launches its own interactive binary, so when an **Agent preset** carries extra arguments, those arguments ride into that preset's own attended assistance.
 _Avoid_: Agent preset, stripped headless command, agent-cmd
 
 **Agent adapter**:
-The preset-specific bridge between Pop and a supported agent. An adapter may provide headless invocation, headless output handling, and agent-assistance invocation; fallback for attended assistance belongs inside the selected adapter rather than in the HITL gate prompt.
+The preset-specific bridge between Pop and a supported agent. An adapter may provide headless invocation, headless output handling, and agent-assistance invocation; attended assistance launches the preset's own interactive binary and is owned by the adapter rather than the HITL gate prompt. An adapter reports assistance Unavailable only when it has no usable interactive command at all (e.g. custom headless `--agent-cmd`).
 _Avoid_: Universal JSON protocol, agent integration
 
 **Agent output handling**:

@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"fmt"
 	"os/exec"
 )
 
@@ -35,7 +34,7 @@ func AgentCatalog(d *Deps) []AgentCatalogRow {
 			Agent:  preset,
 			Binary: binary,
 			Found:  err == nil,
-			Notes:  agentCatalogNotes(preset, adapter),
+			Notes:  agentCatalogNotes(preset),
 		})
 	}
 	return rows
@@ -61,11 +60,7 @@ func agentBinary(adapter AgentAdapter) string {
 	return adapter.Preset()
 }
 
-func agentCatalogNotes(preset string, adapter AgentAdapter) string {
-	capability := adapter.AssistanceCapability()
-	if capability.Mode == AgentAssistanceFallback && capability.Command != nil && capability.Command.Name != "" {
-		return fmt.Sprintf("HITL assistance falls back to %s", capability.Command.Name)
-	}
+func agentCatalogNotes(preset string) string {
 	if preset == DefaultAgentPreset {
 		return "default; accepts extra args, e.g. --model <alias>"
 	}
