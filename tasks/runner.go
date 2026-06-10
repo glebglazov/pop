@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-const (
-	signalGracePeriod = 5 * time.Second
-)
+// signalGracePeriod is how long a SIGTERMed agent gets to exit before the
+// process group is SIGKILLed. A variable so tests can shorten the escalation.
+var signalGracePeriod = 5 * time.Second
 
 // CommandRunner executes external commands.
 type CommandRunner interface {

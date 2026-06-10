@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -362,6 +363,142 @@ func TestRunTaskPlainOutputWritesNoStream(t *testing.T) {
 	assertTaskDone(t, env, "01-a")
 	if _, err := os.Stat(filepath.Join(env.demoDir(), "streams")); !os.IsNotExist(err) {
 		t.Fatalf("plain-output attempt wrote a stream: %v", err)
+	}
+}
+
+// installClaudeHangingAgent puts a fake `claude` on PATH that emits structured
+// events, touches the slow-agent start sentinel, then hangs until killed. With
+// trapTerm it ignores SIGTERM so only SIGKILL escalation ends it.
+func installClaudeHangingAgent(t *testing.T, root string, trapTerm bool) {
+	t.Helper()
+	dir := filepath.Join(root, ".agent-bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(slowAgentSentinel(root)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	if trapTerm {
+		b.WriteString("trap '' TERM\n")
+	}
+	b.WriteString(`printf '%s\n' '{"type":"system","subtype":"init"}'` + "\n")
+	b.WriteString(`printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}'` + "\n")
+	fmt.Fprintf(&b, ": > %q\n", slowAgentSentinel(root))
+	b.WriteString("while true; do sleep 0.05; done\n")
+	writeFile(t, filepath.Join(dir, "claude"), b.String())
+	if err := os.Chmod(filepath.Join(dir, "claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// assertKilledStreamFinalized decompresses the attempt's stream end-to-end
+// (gzip.NewReader + ReadAll validates the gzip trailer, so a truncated file
+// fails here) and checks the footer carries the kill outcome.
+func assertKilledStreamFinalized(t *testing.T, env *execFixture, outcome string) {
+	t.Helper()
+	records := readAttemptStream(t, filepath.Join(demoStreamDir(env), "attempt-001.jsonl.gz"))
+	header := records[0]
+	if header["type"] != "header" || header["agent"] != "claude" {
+		t.Fatalf("header = %v", header)
+	}
+	footer := records[len(records)-1]
+	if footer["type"] != "footer" || footer["outcome"] != outcome {
+		t.Fatalf("footer = %v, want outcome %q", footer, outcome)
+	}
+	if _, ok := footer["duration_ms"].(float64); !ok {
+		t.Fatalf("footer missing duration_ms: %v", footer)
+	}
+}
+
+func TestRunTaskTimeoutFinalizesStream(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	installClaudeHangingAgent(t, env.root, false)
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.Timeout = 500 * time.Millisecond
+	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v", err)
+	}
+
+	assertKilledStreamFinalized(t, env, streamOutcomeTimedOut)
+}
+
+func TestRunTaskInterruptFinalizesStream(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	installClaudeHangingAgent(t, env.root, false)
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.Timeout = time.Minute
+	signalOwnPidWhenAgentStarts(t, env.root)
+
+	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitInterrupted)
+
+	assertKilledStreamFinalized(t, env, streamOutcomeInterrupted)
+}
+
+func TestRunTaskInterruptSigkillEscalationFinalizesStream(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	// The agent ignores SIGTERM, so only the SIGKILL escalation after the
+	// grace period ends it.
+	installClaudeHangingAgent(t, env.root, true)
+	old := signalGracePeriod
+	signalGracePeriod = 200 * time.Millisecond
+	t.Cleanup(func() { signalGracePeriod = old })
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.Timeout = time.Minute
+	signalOwnPidWhenAgentStarts(t, env.root)
+
+	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitInterrupted)
+
+	assertKilledStreamFinalized(t, env, streamOutcomeInterrupted)
+}
+
+func TestRunTaskQuotaPauseFinalizesStream(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	installClaudeQuotaAgent(t, env.root)
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	result, err := RunTaskWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.QuotaPaused {
+		t.Fatalf("result = %#v", result)
+	}
+
+	assertKilledStreamFinalized(t, env, streamOutcomeQuotaPaused)
+}
+
+func TestRunTaskKillPathStreamFailureKeepsExitBehavior(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	installClaudeHangingAgent(t, env.root, false)
+	// A regular file where streams/ must go makes the kill-path finalization fail.
+	writeFile(t, filepath.Join(env.demoDir(), "streams"), "not a directory")
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.Timeout = 500 * time.Millisecond
+	var errBuf bytes.Buffer
+	opts.ConfirmOut = &errBuf
+	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("finalization failure changed the exit: %v", err)
+	}
+	if !strings.Contains(errBuf.String(), "persist attempt stream") {
+		t.Fatalf("storage failure not reported:\n%s", errBuf.String())
 	}
 }
 

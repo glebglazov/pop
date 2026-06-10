@@ -19,6 +19,17 @@ import (
 // first lens over these files, not the last.
 const streamsDirName = "streams"
 
+// Footer outcomes. The kill outcomes distinguish why an attempt stopped,
+// mirroring the Exhausted task / Interrupted task / Agent quota pause
+// vocabulary, so a killed attempt's file still carries its terminal outcome.
+const (
+	streamOutcomeCompleted   = "completed"
+	streamOutcomeFailed      = "failed"
+	streamOutcomeTimedOut    = "timed_out"
+	streamOutcomeInterrupted = "interrupted"
+	streamOutcomeQuotaPaused = "quota_paused"
+)
+
 // streamHeaderRecord opens a Captured attempt stream file.
 type streamHeaderRecord struct {
 	Type      string    `json:"type"`

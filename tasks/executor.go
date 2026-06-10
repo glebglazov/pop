@@ -246,9 +246,11 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			display.line(ansiDim, "── Agent finished for %s/%s ───────────────────────────", sel.TaskSetID, sel.TaskID)
 		}
 		if outcome.interrupted {
+			persistAttemptStream(d, errOut, sel, outcome.stream, invocation.AgentPreset(), attempt, streamOutcomeInterrupted)
 			return nil, taskExitErr(sel, ExitInterrupted, "interrupted")
 		}
 		if outcome.timedOut {
+			persistAttemptStream(d, errOut, sel, outcome.stream, invocation.AgentPreset(), attempt, streamOutcomeTimedOut)
 			summary := fmt.Sprintf("timed out after %s on attempt %d", timeout, attempt)
 			display.line(ansiRed, "✗ Attempt %d/%d timed out after %s", attempt, maxTries, timeout)
 			if err := finalizeTaskFailed(d, sel, attempt, summary); err != nil {
@@ -261,6 +263,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		}
 		agentResult := invocation.NormalizeOutput(agentOut)
 		if agentResult.QuotaPause != nil {
+			persistAttemptStream(d, errOut, sel, outcome.stream, invocation.AgentPreset(), attempt, streamOutcomeQuotaPaused)
 			display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.TaskSetID, sel.TaskID)
 			display.line(ansiYellow, "  %s", agentResult.QuotaPause.Reason)
 			return &RunTaskResult{
@@ -276,9 +279,9 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		}
 
 		assessment, reason := assessAttempt(agentResult.Output, outcome.exitCode, taskData)
-		streamOutcome := "failed"
+		streamOutcome := streamOutcomeFailed
 		if assessment.Complete {
-			streamOutcome = "completed"
+			streamOutcome = streamOutcomeCompleted
 		}
 		persistAttemptStream(d, errOut, sel, outcome.stream, invocation.AgentPreset(), attempt, streamOutcome)
 		if assessment.Complete {
