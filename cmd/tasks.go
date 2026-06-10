@@ -97,6 +97,13 @@ var taskMigrateCmd = &cobra.Command{
 	Run:   runTaskMigrate,
 }
 
+var taskAgentsCmd = &cobra.Command{
+	Use:   "agents",
+	Short: "List recognized agent presets and PATH availability",
+	Args:  cobra.NoArgs,
+	RunE:  runTaskAgents,
+}
+
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
@@ -108,6 +115,7 @@ func init() {
 	taskCmd.AddCommand(taskTimingsCmd)
 	taskCmd.AddCommand(taskShowPathCmd)
 	taskCmd.AddCommand(taskMigrateCmd)
+	taskCmd.AddCommand(taskAgentsCmd)
 
 	taskCmd.PersistentFlags().StringVar(&taskProject, "project", "", "Select project by exact picker-visible name")
 	taskCmd.PersistentFlags().StringVar(&taskPath, "path", "", "Select project by path (normalized to git checkout root)")
@@ -116,7 +124,7 @@ func init() {
 	taskImplementCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	taskImplementCmd.Flags().Var(&taskAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
 	taskImplementCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(tasks.DirtyRuntimeContinue)
-	taskImplementCmd.Flags().StringVar(&taskAgentPreset, "agent", "claude", "Agent preset (claude, opencode, cursor, codex, pi), optionally followed by extra agent args, e.g. \"claude --model opus4.8\"; when passed explicitly, overrides a task's manifest agent key")
+	taskImplementCmd.Flags().StringVar(&taskAgentPreset, "agent", tasks.DefaultAgentPreset, "Agent preset (claude, opencode, cursor, codex, pi), optionally followed by extra agent args, e.g. \"claude --model opus4.8\"; when passed explicitly, overrides a task's manifest agent key")
 	taskImplementCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 	taskImplementCmd.Flags().Var(&taskAgentOutput, "agent-output", "Agent output mode: auto (default), text")
 	taskImplementCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
@@ -359,6 +367,26 @@ func runTaskMigrateWith(d *tasks.Deps, w io.Writer) error {
 	}
 	tasks.RenderMigrate(w, result)
 	return nil
+}
+
+func runTaskAgents(cmd *cobra.Command, args []string) error {
+	return runTaskAgentsWith(tasks.DefaultDeps(), os.Stdout)
+}
+
+func runTaskAgentsWith(d *tasks.Deps, w io.Writer) error {
+	renderTaskAgents(w, tasks.AgentCatalog(d))
+	return nil
+}
+
+func renderTaskAgents(w io.Writer, rows []tasks.AgentCatalogRow) {
+	fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", "agent", "binary", "found", "notes")
+	for _, row := range rows {
+		found := "no"
+		if row.Found {
+			found = "yes"
+		}
+		fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", row.Agent, row.Binary, found, row.Notes)
+	}
 }
 
 func handleTaskExit(err error) {

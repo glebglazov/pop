@@ -124,7 +124,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 
 	t.Run("subcommands", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks")
-		for _, sub := range []string{"status", "set-priority", "implement", "open", "timings"} {
+		for _, sub := range []string{"status", "set-priority", "implement", "open", "timings", "agents"} {
 			assertShellCompContains(t, out, sub)
 		}
 	})

@@ -388,7 +388,7 @@ func ResolveAgentAdapter(preset string) (AgentAdapter, error) {
 		return nil, err
 	}
 	if name == "" {
-		name = "claude"
+		name = DefaultAgentPreset
 	}
 	adapter, ok := agentAdapters[name]
 	if !ok {
