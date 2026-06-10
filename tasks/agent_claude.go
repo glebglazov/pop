@@ -2,7 +2,9 @@ package tasks
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
+	"time"
 )
 
 func normalizeClaudeStreamJSON(raw string) AgentResult {
@@ -96,6 +98,75 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// claudeToolTimings derives per-tool durations from one stored Captured
+// attempt stream: each assistant tool_use block is paired with the user
+// tool_result block carrying the same tool-use id, and the gap between their
+// arrival times is that invocation's duration. Ids — not order — do the
+// pairing, so parallel tool calls within one assistant turn resolve correctly.
+// A tool_use with no result (e.g. a killed attempt) contributes nothing.
+// Results aggregate per tool name, longest total first.
+func claudeToolTimings(events []streamEventRecord) []ToolTiming {
+	type pendingUse struct {
+		name string
+		atMS int64
+	}
+	pending := map[string]pendingUse{}
+	totals := map[string]*ToolTiming{}
+	for _, ev := range events {
+		var msg struct {
+			Type    string `json:"type"`
+			Message struct {
+				Content []struct {
+					Type      string `json:"type"`
+					ID        string `json:"id"`
+					Name      string `json:"name"`
+					ToolUseID string `json:"tool_use_id"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &msg); err != nil {
+			continue
+		}
+		switch msg.Type {
+		case "assistant":
+			for _, c := range msg.Message.Content {
+				if c.Type == "tool_use" && c.ID != "" {
+					pending[c.ID] = pendingUse{name: c.Name, atMS: ev.AtMS}
+				}
+			}
+		case "user":
+			for _, c := range msg.Message.Content {
+				if c.Type != "tool_result" {
+					continue
+				}
+				use, ok := pending[c.ToolUseID]
+				if !ok {
+					continue
+				}
+				delete(pending, c.ToolUseID)
+				agg := totals[use.name]
+				if agg == nil {
+					agg = &ToolTiming{Name: use.name}
+					totals[use.name] = agg
+				}
+				agg.Count++
+				agg.Total += time.Duration(ev.AtMS-use.atMS) * time.Millisecond
+			}
+		}
+	}
+	out := make([]ToolTiming, 0, len(totals))
+	for _, t := range totals {
+		out = append(out, *t)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Total != out[j].Total {
+			return out[i].Total > out[j].Total
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
 }
 
 func claudeQuotaPauseReason(result string) *AgentQuotaPause {

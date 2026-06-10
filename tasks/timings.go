@@ -18,12 +18,30 @@ import (
 // AttemptTiming is one Captured attempt stream summarized for the timing lens:
 // agent, outcome, and total duration, keyed by start time. No ordinal is
 // carried, so the persisted sequence never contradicts the executor's
-// per-invocation "Attempt N/max" line (ADR 0016).
+// per-invocation "Attempt N/max" line (ADR 0016). Tools holds the per-tool
+// breakdown for agents with a pairing parser; empty otherwise.
 type AttemptTiming struct {
 	Agent    string
 	Start    time.Time
 	Outcome  string
 	Duration time.Duration
+	Tools    []ToolTiming
+}
+
+// ToolTiming aggregates one tool's paired invocations within an attempt:
+// how many times it ran and the total wall-clock spent across those runs.
+type ToolTiming struct {
+	Name  string
+	Count int
+	Total time.Duration
+}
+
+// toolTimingParsers maps agent preset → pairing parser over one attempt's
+// stored events. Pairing tool_use with tool_result is per-adapter work because
+// the stream shape differs across agents (ADR 0016); agents without a parser
+// show outcome + total only.
+var toolTimingParsers = map[string]func([]streamEventRecord) []ToolTiming{
+	"claude": claudeToolTimings,
 }
 
 // TaskTimings groups one task's attempts ordered by start time.
@@ -153,6 +171,7 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 		header               streamHeaderRecord
 		footer               streamFooterRecord
 		hasHeader, hasFooter bool
+		events               []streamEventRecord
 	)
 	for _, line := range bytes.Split(jsonl, []byte("\n")) {
 		if len(bytes.TrimSpace(line)) == 0 {
@@ -175,6 +194,12 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 				return AttemptTiming{}, fmt.Errorf("parse footer: %w", err)
 			}
 			hasFooter = true
+		case "event":
+			var ev streamEventRecord
+			if err := json.Unmarshal(line, &ev); err != nil {
+				return AttemptTiming{}, fmt.Errorf("parse event: %w", err)
+			}
+			events = append(events, ev)
 		}
 	}
 	if !hasHeader {
@@ -183,11 +208,16 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 	if !hasFooter {
 		return AttemptTiming{}, fmt.Errorf("missing footer record")
 	}
+	var tools []ToolTiming
+	if parse := toolTimingParsers[header.Agent]; parse != nil {
+		tools = parse(events)
+	}
 	return AttemptTiming{
 		Agent:    header.Agent,
 		Start:    header.StartTime,
 		Outcome:  footer.Outcome,
 		Duration: time.Duration(footer.DurationMS) * time.Millisecond,
+		Tools:    tools,
 	}, nil
 }
 
@@ -212,7 +242,21 @@ func RenderTimings(w io.Writer, result *TimingsResult) {
 		for _, a := range task.Attempts {
 			out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %s",
 				a.Start.Format(time.RFC3339), agentW, a.Agent, outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
+			renderToolTimings(out, a.Tools)
 		}
+	}
+}
+
+// renderToolTimings writes one attempt's per-tool rows indented under the
+// attempt line, so tool figures sit under the agent that ran them.
+func renderToolTimings(out *output, tools []ToolTiming) {
+	nameW, countW := 0, 0
+	for _, t := range tools {
+		nameW = max(nameW, len(t.Name))
+		countW = max(countW, len(fmt.Sprintf("%d", t.Count)))
+	}
+	for _, t := range tools {
+		out.line(ansiDim, "    %-*s  ×%-*d  %s", nameW, t.Name, countW, t.Count, formatAttemptDuration(t.Total))
 	}
 }
 

@@ -15,13 +15,23 @@ import (
 // given header and footer, mirroring what persistAttemptStream stores.
 func writeTimingStream(t *testing.T, dir, name, agent string, attempt int, start time.Time, outcome string, durationMS int64) {
 	t.Helper()
+	writeTimingStreamWithEvents(t, dir, name, agent, attempt, start, outcome, durationMS, []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
+	})
+}
+
+// writeTimingStreamWithEvents is writeTimingStream with explicit stream events.
+func writeTimingStreamWithEvents(t *testing.T, dir, name, agent string, attempt int, start time.Time, outcome string, durationMS int64, events []streamEventRecord) {
+	t.Helper()
 	var jsonl bytes.Buffer
 	enc := json.NewEncoder(&jsonl)
 	if err := enc.Encode(streamHeaderRecord{Type: "header", Agent: agent, Attempt: attempt, StartTime: start.UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := enc.Encode(streamEventRecord{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`}); err != nil {
-		t.Fatal(err)
+	for _, ev := range events {
+		if err := enc.Encode(ev); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := enc.Encode(streamFooterRecord{Type: "footer", Outcome: outcome, DurationMS: durationMS}); err != nil {
 		t.Fatal(err)
@@ -185,6 +195,170 @@ func TestRenderTimingsShowsRowsWithoutOrdinals(t *testing.T) {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("output shows ordinal %q:\n%s", forbidden, out)
 		}
+	}
+}
+
+// claudeUse renders one assistant event whose content is the given tool_use
+// blocks, each pair of (id, name).
+func claudeUse(pairs ...[2]string) string {
+	blocks := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		blocks = append(blocks, `{"type":"tool_use","id":"`+p[0]+`","name":"`+p[1]+`","input":{"command":"ls"}}`)
+	}
+	return `{"type":"assistant","message":{"content":[` + strings.Join(blocks, ",") + `]}}`
+}
+
+func claudeResult(toolUseID string) string {
+	return `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"` + toolUseID + `","content":"ok"}]}}`
+}
+
+func TestClaudeToolTimingsPairsUseWithResultByID(t *testing.T) {
+	tools := claudeToolTimings([]streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
+		{Type: "event", AtMS: 100, Raw: claudeUse([2]string{"tu_1", "Bash"})},
+		{Type: "event", AtMS: 1100, Raw: claudeResult("tu_1")},
+		{Type: "event", AtMS: 2000, Raw: claudeUse([2]string{"tu_2", "Read"})},
+		{Type: "event", AtMS: 2200, Raw: claudeResult("tu_2")},
+		{Type: "event", AtMS: 3000, Raw: claudeUse([2]string{"tu_3", "Bash"})},
+		{Type: "event", AtMS: 3500, Raw: claudeResult("tu_3")},
+	})
+
+	want := []ToolTiming{
+		{Name: "Bash", Count: 2, Total: 1500 * time.Millisecond},
+		{Name: "Read", Count: 1, Total: 200 * time.Millisecond},
+	}
+	if len(tools) != len(want) {
+		t.Fatalf("tools = %#v, want %#v", tools, want)
+	}
+	for i := range want {
+		if tools[i] != want[i] {
+			t.Fatalf("tools[%d] = %+v, want %+v", i, tools[i], want[i])
+		}
+	}
+}
+
+func TestClaudeToolTimingsPairsParallelCallsByID(t *testing.T) {
+	// One assistant turn issues two tool calls at once; results arrive in the
+	// opposite order. Ids — not arrival order — must do the pairing.
+	tools := claudeToolTimings([]streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: claudeUse([2]string{"tu_a", "Read"}, [2]string{"tu_b", "Grep"})},
+		{Type: "event", AtMS: 400, Raw: claudeResult("tu_b")},
+		{Type: "event", AtMS: 900, Raw: claudeResult("tu_a")},
+	})
+
+	want := []ToolTiming{
+		{Name: "Read", Count: 1, Total: 800 * time.Millisecond},
+		{Name: "Grep", Count: 1, Total: 300 * time.Millisecond},
+	}
+	if len(tools) != len(want) {
+		t.Fatalf("tools = %#v, want %#v", tools, want)
+	}
+	for i := range want {
+		if tools[i] != want[i] {
+			t.Fatalf("tools[%d] = %+v, want %+v", i, tools[i], want[i])
+		}
+	}
+}
+
+func TestClaudeToolTimingsSkipsUnpairedAndMalformedEvents(t *testing.T) {
+	tools := claudeToolTimings([]streamEventRecord{
+		{Type: "event", AtMS: 10, Raw: `not json`},
+		{Type: "event", AtMS: 100, Raw: claudeUse([2]string{"tu_killed", "Bash"})}, // no result: attempt died
+		{Type: "event", AtMS: 200, Raw: claudeResult("tu_unknown")},                // result without a use
+		{Type: "event", AtMS: 300, Raw: claudeUse([2]string{"tu_ok", "Edit"})},
+		{Type: "event", AtMS: 550, Raw: claudeResult("tu_ok")},
+	})
+
+	if len(tools) != 1 || tools[0] != (ToolTiming{Name: "Edit", Count: 1, Total: 250 * time.Millisecond}) {
+		t.Fatalf("tools = %#v, want only the paired Edit call", tools)
+	}
+}
+
+func TestTimingsPerToolBreakdownForClaudeOnly(t *testing.T) {
+	env := timingsFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+
+	claudeEvents := []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: claudeUse([2]string{"tu_1", "Bash"})},
+		{Type: "event", AtMS: 1100, Raw: claudeResult("tu_1")},
+		{Type: "event", AtMS: 2000, Raw: claudeUse([2]string{"tu_2", "Read"})},
+		{Type: "event", AtMS: 2200, Raw: claudeResult("tu_2")},
+	}
+	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "claude", 1, base, "completed", 60_000, claudeEvents)
+	// A non-claude structured agent stores the same substrate but has no
+	// pairing parser yet: outcome + total only, no per-tool rows, no error.
+	writeTimingStreamWithEvents(t, streamDir, "attempt-002.jsonl.gz", "codex", 2, base.Add(10*time.Minute), "completed", 30_000, claudeEvents)
+
+	result, err := TimingsWith(env.deps(), nil, nil, TimingsOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := result.Tasks[0].Attempts
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %#v", attempts)
+	}
+
+	wantTools := []ToolTiming{
+		{Name: "Bash", Count: 1, Total: time.Second},
+		{Name: "Read", Count: 1, Total: 200 * time.Millisecond},
+	}
+	if len(attempts[0].Tools) != len(wantTools) {
+		t.Fatalf("claude tools = %#v, want %#v", attempts[0].Tools, wantTools)
+	}
+	for i := range wantTools {
+		if attempts[0].Tools[i] != wantTools[i] {
+			t.Fatalf("claude tools[%d] = %+v, want %+v", i, attempts[0].Tools[i], wantTools[i])
+		}
+	}
+	if len(attempts[1].Tools) != 0 {
+		t.Fatalf("codex tools = %#v, want none", attempts[1].Tools)
+	}
+}
+
+func TestRenderTimingsShowsToolRowsUnderTheirAttempt(t *testing.T) {
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	result := &TimingsResult{
+		TaskSetID: "demo",
+		Tasks: []TaskTimings{
+			{
+				TaskID: "01-a",
+				File:   "01-a.md",
+				Title:  "A",
+				Attempts: []AttemptTiming{
+					{
+						Agent: "claude", Start: base, Outcome: "completed", Duration: 90 * time.Second,
+						Tools: []ToolTiming{
+							{Name: "Bash", Count: 12, Total: 65 * time.Second},
+							{Name: "Read", Count: 3, Total: 2 * time.Second},
+						},
+					},
+					{Agent: "codex", Start: base.Add(10 * time.Minute), Outcome: "completed", Duration: 30 * time.Second},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	RenderTimings(&buf, result)
+	out := buf.String()
+
+	for _, want := range []string{
+		"    Bash  ×12  1m5s",
+		"    Read  ×3   2s",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	// Tool rows belong to the attempt — and so the agent — that ran them: they
+	// sit between the claude row and the codex row.
+	claudeRow, bashRow, codexRow := strings.Index(out, "claude"), strings.Index(out, "Bash"), strings.Index(out, "codex")
+	if !(claudeRow < bashRow && bashRow < codexRow) {
+		t.Fatalf("tool rows not under their attempt:\n%s", out)
 	}
 }
 
