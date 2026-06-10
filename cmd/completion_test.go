@@ -97,6 +97,18 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
 	})
 
+	t.Run("timings positional defaults to Task set IDs", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "timings")
+		assertShellCompContains(t, out, "svc")
+		assertShellCompOmits(t, out, "thoughts/issues/svc")
+		assertShellCompOmitsExact(t, out, "01-a")
+	})
+
+	t.Run("timings positional task set relative path", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "tasks", "timings", "svc/")
+		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
+	})
+
 	t.Run("set priority positional IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "set-priority")
 		assertShellCompContains(t, out, "svc")
@@ -112,7 +124,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 
 	t.Run("subcommands", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks")
-		for _, sub := range []string{"status", "set-priority", "implement", "open"} {
+		for _, sub := range []string{"status", "set-priority", "implement", "open", "timings"} {
 			assertShellCompContains(t, out, sub)
 		}
 	})

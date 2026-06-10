@@ -76,6 +76,13 @@ var taskSkipTaskCmd = &cobra.Command{
 	Run:   runTaskSkipTask,
 }
 
+var taskTimingsCmd = &cobra.Command{
+	Use:   "timings TASK_SET[/FILE.md]",
+	Short: "Show per-task attempt timings derived from captured attempt streams",
+	Args:  cobra.ExactArgs(1),
+	Run:   runTaskTimings,
+}
+
 var taskShowPathCmd = &cobra.Command{
 	Use:   "show-path [TASK_SET]",
 	Short: "Print this repository's task storage directory, creating it on demand",
@@ -98,6 +105,7 @@ func init() {
 	taskCmd.AddCommand(taskResetTaskCmd)
 	taskCmd.AddCommand(taskCompleteTaskCmd)
 	taskCmd.AddCommand(taskSkipTaskCmd)
+	taskCmd.AddCommand(taskTimingsCmd)
 	taskCmd.AddCommand(taskShowPathCmd)
 	taskCmd.AddCommand(taskMigrateCmd)
 
@@ -295,6 +303,23 @@ func runTaskSkipTaskWith(d *tasks.Deps, w io.Writer, taskPath string) error {
 	tasks.RenderTaskSkip(w, result.TaskSetID, result.TaskID)
 	fmt.Fprintln(w)
 	tasks.Render(w, result.Refresh)
+	return nil
+}
+
+func runTaskTimings(cmd *cobra.Command, args []string) {
+	err := runTaskTimingsWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	handleTaskExit(err)
+}
+
+func runTaskTimingsWith(d *tasks.Deps, w io.Writer, target string) error {
+	result, err := tasks.TimingsWith(d, taskProjectDeps(), taskConfigLoad, tasks.TimingsOptions{
+		ResolveInput: taskResolveInput(),
+		Target:       target,
+	})
+	if err != nil {
+		return err
+	}
+	tasks.RenderTimings(w, result)
 	return nil
 }
 

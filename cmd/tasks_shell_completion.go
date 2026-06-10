@@ -33,6 +33,7 @@ func registerTaskShellCompletions() {
 	taskResetTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskCompleteTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskSkipTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
+	taskTimingsCmd.ValidArgsFunction = completeTaskTimingsArgs
 	taskShowPathCmd.ValidArgsFunction = completeTaskShowPathArgs
 }
 
@@ -109,6 +110,13 @@ func completeTaskSetPriorityArgs(cmd *cobra.Command, args []string, toComplete s
 }
 
 func completeTaskImplementArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeTaskTaskTargets(cmd, args, toComplete)
+}
+
+func completeTaskTimingsArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
