@@ -17,7 +17,7 @@ import (
 
 const (
 	DefaultMaxTries       = 3
-	DefaultAttemptTimeout = 30 * time.Minute
+	DefaultAttemptTimeout = 1 * time.Hour
 
 	DirtyRuntimeContinue          DirtyRuntimeStrategy = "continue"
 	DirtyRuntimeCommitAndContinue DirtyRuntimeStrategy = "commit-and-continue"

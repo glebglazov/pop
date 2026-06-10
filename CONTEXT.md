@@ -317,7 +317,7 @@ One agent invocation for a task. The task executor retries an unsuccessful task 
 _Avoid_: Task set retry, task dependency
 
 **Task attempt timeout**:
-The maximum duration for one task attempt, defaulting to 30 minutes and configurable per command. When exceeded, the task executor terminates the agent process group, preserves partial changes, marks the task Failed locally, appends a Failed progress record, and stops immediately without further retries. A deliberate retry requires an **Open task** override.
+The maximum duration for one task attempt, defaulting to one hour and configurable per command. When exceeded, the task executor terminates the agent process group, preserves partial changes, marks the task Failed locally, appends a Failed progress record, and stops immediately without further retries. A deliberate retry requires an **Open task** override.
 _Avoid_: Task set timeout, interruption
 
 **Human-blocked Task set**:

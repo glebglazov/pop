@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
@@ -423,6 +424,20 @@ func TestImplementCmdRejectsMoreThanOnePositional(t *testing.T) {
 	err := taskImplementCmd.Args(taskImplementCmd, []string{"one", "two"})
 	if err == nil {
 		t.Fatal("expected usage error")
+	}
+}
+
+func TestImplementTimeoutDefaultMatchesAttemptTimeout(t *testing.T) {
+	// The flag default is a clean literal ("1h") for pretty help text, while the
+	// executor's zero-value fallback is the DefaultAttemptTimeout constant. They
+	// are independent sources; this guards them against drift.
+	def := taskImplementCmd.Flags().Lookup("timeout").DefValue
+	got, err := time.ParseDuration(def)
+	if err != nil {
+		t.Fatalf("flag default %q does not parse: %v", def, err)
+	}
+	if got != tasks.DefaultAttemptTimeout {
+		t.Errorf("flag default %q = %v, want DefaultAttemptTimeout %v", def, got, tasks.DefaultAttemptTimeout)
 	}
 }
 
