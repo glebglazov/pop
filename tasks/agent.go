@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -133,6 +134,30 @@ func (c AgentAssistanceCapability) Available() bool {
 	return c.Mode == AgentAssistanceNative || c.Mode == AgentAssistanceFallback
 }
 
+// AgentModelProvenance describes how much Pop knows about a preset's
+// acceptable --model values.
+type AgentModelProvenance string
+
+const (
+	AgentModelProvenanceLive    AgentModelProvenance = "live"
+	AgentModelProvenanceAliases AgentModelProvenance = "known aliases"
+	AgentModelProvenanceEmpty   AgentModelProvenance = "empty"
+)
+
+// AgentModelSource is a preset's answer to which values --model can take.
+type AgentModelSource struct {
+	Agent      string
+	Provenance AgentModelProvenance
+	Models     []string
+	Message    string
+}
+
+// AgentModelSourceProvider is optional adapter behavior. Adapters without it
+// intentionally report an empty model source.
+type AgentModelSourceProvider interface {
+	ModelSource(*Deps) AgentModelSource
+}
+
 // AgentAdapter owns one agent preset's headless command, output handling, and
 // attended-assistance support decision.
 type AgentAdapter interface {
@@ -151,30 +176,35 @@ var agentAdapters = map[string]AgentAdapter{
 		AgentOutputClaudeStreamJSON,
 		[]string{"--output-format", "stream-json", "--verbose"},
 		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "claude"}},
+		knownAliasModelSource("opus", "sonnet", "haiku", "fable"),
 	),
 	"opencode": newPresetAgentAdapter("opencode",
 		[]string{"opencode", "run"},
 		AgentOutputOpenCodeJSON,
 		[]string{"--format", "json"},
 		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
+		liveCommandModelSource("opencode", "models"),
 	),
 	"cursor": newPresetAgentAdapter("cursor",
 		[]string{"cursor-agent", "-p", "--force", "--trust"},
 		AgentOutputCursorStreamJSON,
 		[]string{"--output-format", "stream-json"},
 		AgentAssistanceCapability{Mode: AgentAssistanceFallback, Command: &AgentCommand{Name: "claude"}},
+		nil,
 	),
 	"codex": newPresetAgentAdapter("codex",
 		[]string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
 		AgentOutputCodexJSONL,
 		[]string{"--json"},
 		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "codex"}},
+		nil,
 	),
 	"pi": newPresetAgentAdapter("pi",
 		[]string{"pi", "-p", "--no-extensions", "--no-skills"},
 		AgentOutputPiJSONL,
 		[]string{"--mode", "json"},
 		AgentAssistanceCapability{Mode: AgentAssistanceFallback, Command: &AgentCommand{Name: "claude"}},
+		nil,
 	),
 }
 
@@ -184,15 +214,19 @@ type presetAgentAdapter struct {
 	autoFormat     AgentOutputFormat
 	autoArgs       []string
 	assistance     AgentAssistanceCapability
+	modelSource    modelSourceFunc
 }
 
-func newPresetAgentAdapter(preset string, headlessPrefix []string, autoFormat AgentOutputFormat, autoArgs []string, assistance AgentAssistanceCapability) AgentAdapter {
+type modelSourceFunc func(*Deps, string) AgentModelSource
+
+func newPresetAgentAdapter(preset string, headlessPrefix []string, autoFormat AgentOutputFormat, autoArgs []string, assistance AgentAssistanceCapability, modelSource modelSourceFunc) AgentAdapter {
 	return &presetAgentAdapter{
 		preset:         preset,
 		headlessPrefix: append([]string{}, headlessPrefix...),
 		autoFormat:     autoFormat,
 		autoArgs:       append([]string{}, autoArgs...),
 		assistance:     assistance,
+		modelSource:    modelSource,
 	}
 }
 
@@ -234,6 +268,13 @@ func (a *presetAgentAdapter) RenderOutput(w io.Writer, raw string, format AgentO
 
 func (a *presetAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 	return cloneAssistanceCapability(a.assistance)
+}
+
+func (a *presetAgentAdapter) ModelSource(d *Deps) AgentModelSource {
+	if a.modelSource == nil {
+		return emptyModelSource(a.preset)
+	}
+	return a.modelSource(d, a.preset)
 }
 
 func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {
@@ -287,6 +328,70 @@ func (a customAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 
 func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {
 	return nil, fmt.Errorf("custom agent adapter does not support attended assistance")
+}
+
+func knownAliasModelSource(models ...string) modelSourceFunc {
+	return func(_ *Deps, preset string) AgentModelSource {
+		return AgentModelSource{
+			Agent:      preset,
+			Provenance: AgentModelProvenanceAliases,
+			Models:     append([]string{}, models...),
+			Message:    "known stable aliases shipped with Pop",
+		}
+	}
+}
+
+func liveCommandModelSource(name string, args ...string) modelSourceFunc {
+	return func(d *Deps, preset string) AgentModelSource {
+		var runner CommandRunner = RealCommandRunner{}
+		if d != nil && d.Runner != nil {
+			runner = d.Runner
+		}
+		var stdout, stderr bytes.Buffer
+		exitCode, err := runner.Run(context.Background(), "", &stdout, &stderr, name, args...)
+		result := AgentModelSource{
+			Agent:      preset,
+			Provenance: AgentModelProvenanceLive,
+			Message:    fmt.Sprintf("live listing from %s %s", name, strings.Join(args, " ")),
+		}
+		if err != nil {
+			result.Message = fmt.Sprintf("live model listing failed: %v", err)
+			return result
+		}
+		if exitCode != 0 {
+			detail := strings.TrimSpace(stderr.String())
+			if detail == "" {
+				detail = fmt.Sprintf("exit code %d", exitCode)
+			}
+			result.Message = "live model listing failed: " + detail
+			return result
+		}
+		result.Models = parseModelLines(stdout.String())
+		if len(result.Models) == 0 {
+			result.Message = fmt.Sprintf("live listing from %s %s returned no models", name, strings.Join(args, " "))
+		}
+		return result
+	}
+}
+
+func emptyModelSource(preset string) AgentModelSource {
+	return AgentModelSource{
+		Agent:      preset,
+		Provenance: AgentModelProvenanceEmpty,
+		Message:    "Pop has no model catalog for this preset; pass --model only when you know a valid value.",
+	}
+}
+
+func parseModelLines(raw string) []string {
+	var models []string
+	for _, line := range strings.Split(raw, "\n") {
+		model := strings.TrimSpace(line)
+		if model == "" {
+			continue
+		}
+		models = append(models, model)
+	}
+	return models
 }
 
 func cloneAssistanceCapability(capability AgentAssistanceCapability) AgentAssistanceCapability {

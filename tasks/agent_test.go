@@ -2,6 +2,9 @@ package tasks
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -834,4 +837,109 @@ func TestValidateManifestAgentSpec(t *testing.T) {
 	if err := validateManifestAgentSpec(" \t"); err == nil || !strings.Contains(err.Error(), "empty agent value") {
 		t.Fatalf("whitespace-only value not rejected: %v", err)
 	}
+}
+
+func TestAgentModelsProvenanceLevels(t *testing.T) {
+	opencodeRunner := &agentModelsRunner{stdout: "github-copilot/gpt-5\nanthropic/claude-opus-4\n"}
+	tests := []struct {
+		name       string
+		preset     string
+		deps       *Deps
+		provenance AgentModelProvenance
+		models     []string
+		ran        bool
+	}{
+		{
+			name:       "live opencode",
+			preset:     "opencode",
+			deps:       &Deps{Runner: opencodeRunner},
+			provenance: AgentModelProvenanceLive,
+			models:     []string{"github-copilot/gpt-5", "anthropic/claude-opus-4"},
+			ran:        true,
+		},
+		{
+			name:       "claude aliases",
+			preset:     "claude",
+			deps:       &Deps{Runner: failAgentModelsRunner{t: t}},
+			provenance: AgentModelProvenanceAliases,
+			models:     []string{"opus", "sonnet", "haiku", "fable"},
+		},
+		{
+			name:       "empty codex",
+			preset:     "codex",
+			deps:       &Deps{Runner: failAgentModelsRunner{t: t}},
+			provenance: AgentModelProvenanceEmpty,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, err := AgentModels(tt.deps, tt.preset)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if source.Provenance != tt.provenance {
+				t.Fatalf("provenance = %q, want %q", source.Provenance, tt.provenance)
+			}
+			if !reflect.DeepEqual(source.Models, tt.models) {
+				t.Fatalf("models = %#v, want %#v", source.Models, tt.models)
+			}
+			if tt.ran && (opencodeRunner.name != "opencode" || strings.Join(opencodeRunner.args, " ") != "models") {
+				t.Fatalf("command = %s %v, want opencode models", opencodeRunner.name, opencodeRunner.args)
+			}
+		})
+	}
+}
+
+func TestAgentModelsLiveFailureReturnsMessage(t *testing.T) {
+	source, err := AgentModels(&Deps{Runner: &agentModelsRunner{
+		exitCode: 2,
+		stderr:   "auth required\n",
+	}}, "opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.Provenance != AgentModelProvenanceLive {
+		t.Fatalf("provenance = %q, want live", source.Provenance)
+	}
+	if len(source.Models) != 0 {
+		t.Fatalf("models = %#v, want none", source.Models)
+	}
+	if !strings.Contains(source.Message, "auth required") {
+		t.Fatalf("message = %q, want failure detail", source.Message)
+	}
+}
+
+type agentModelsRunner struct {
+	name     string
+	args     []string
+	stdout   string
+	stderr   string
+	exitCode int
+	err      error
+}
+
+func (r *agentModelsRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	r.name = name
+	r.args = append([]string{}, args...)
+	_, _ = io.WriteString(stdout, r.stdout)
+	_, _ = io.WriteString(stderr, r.stderr)
+	return r.exitCode, r.err
+}
+
+func (r *agentModelsRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	return nil, errors.New("unexpected start")
+}
+
+type failAgentModelsRunner struct {
+	t *testing.T
+}
+
+func (r failAgentModelsRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	r.t.Fatalf("unexpected model command %s %v", name, args)
+	return 1, nil
+}
+
+func (r failAgentModelsRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	r.t.Fatalf("unexpected model start %s %v", name, args)
+	return nil, nil
 }

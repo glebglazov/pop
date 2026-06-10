@@ -41,6 +41,19 @@ func AgentCatalog(d *Deps) []AgentCatalogRow {
 	return rows
 }
 
+// AgentModels returns model-source details for one recognized preset. Adapters
+// without an explicit model-source capability yield an honest empty source.
+func AgentModels(d *Deps, preset string) (AgentModelSource, error) {
+	adapter, err := ResolveAgentAdapter(preset)
+	if err != nil {
+		return AgentModelSource{}, err
+	}
+	if source, ok := adapter.(AgentModelSourceProvider); ok {
+		return source.ModelSource(d), nil
+	}
+	return emptyModelSource(adapter.Preset()), nil
+}
+
 func agentBinary(adapter AgentAdapter) string {
 	if preset, ok := adapter.(*presetAgentAdapter); ok && len(preset.headlessPrefix) > 0 {
 		return preset.headlessPrefix[0]
