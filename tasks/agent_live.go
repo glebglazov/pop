@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
+	"time"
 )
 
 // lineRenderer turns one complete output line into the text shown live.
@@ -34,16 +36,20 @@ func lineRendererFor(format AgentOutputFormat, color bool) lineRenderer {
 // liveRenderWriter tees an agent's structured output: raw bytes go to capture
 // unchanged (the source of truth for assessment and quota detection), while
 // each complete line is rendered to live as a progress view. Rendering is
-// cosmetic and never feeds the completion contract.
+// cosmetic and never feeds the completion contract. Each rendered entry is
+// prefixed with the elapsed time since the previous live line — the first
+// since attempt start (construction time).
 type liveRenderWriter struct {
 	live    io.Writer
 	capture io.Writer
 	render  lineRenderer
+	now     func() time.Time
+	last    time.Time
 	buf     []byte
 }
 
-func newLiveRenderWriter(live, capture io.Writer, render lineRenderer) *liveRenderWriter {
-	return &liveRenderWriter{live: live, capture: capture, render: render}
+func newLiveRenderWriter(live, capture io.Writer, render lineRenderer, now func() time.Time) *liveRenderWriter {
+	return &liveRenderWriter{live: live, capture: capture, render: render, now: now, last: now()}
 }
 
 func (w *liveRenderWriter) Write(p []byte) (int, error) {
@@ -79,9 +85,49 @@ func (w *liveRenderWriter) emit(line []byte) {
 	rendered, handled := w.render(trimmed)
 	if !handled {
 		fmt.Fprintln(w.live, string(line))
+		w.last = w.now()
 		return
 	}
-	if rendered != "" {
-		fmt.Fprint(w.live, rendered)
+	if rendered == "" {
+		return
 	}
+	at := w.now()
+	fmt.Fprint(w.live, prefixStreamDelta(rendered, at.Sub(w.last)))
+	w.last = at
+}
+
+// streamDeltaWidth right-aligns markers up to "+59.9s" so entry columns line up.
+const streamDeltaWidth = 6
+
+// prefixStreamDelta prefixes a rendered entry with a "+Xs" gap marker
+// ("+2.3s  → Bash go test ./..."). Continuation lines of a multi-line entry
+// get matching blank padding so the entry column stays aligned.
+func prefixStreamDelta(rendered string, delta time.Duration) string {
+	marker := fmt.Sprintf("%*s", streamDeltaWidth, formatStreamDelta(delta))
+	pad := strings.Repeat(" ", len(marker))
+	var b strings.Builder
+	for i, line := range strings.Split(strings.TrimSuffix(rendered, "\n"), "\n") {
+		if i == 0 {
+			b.WriteString(marker)
+		} else {
+			b.WriteString(pad)
+		}
+		b.WriteString("  ")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// formatStreamDelta renders a gap as "+2.3s" under a minute and "+1m05s" above.
+func formatStreamDelta(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	tenths := (d + 50*time.Millisecond) / (100 * time.Millisecond)
+	if tenths < 600 {
+		return fmt.Sprintf("+%d.%ds", tenths/10, tenths%10)
+	}
+	secs := (d + 500*time.Millisecond) / time.Second
+	return fmt.Sprintf("+%dm%02ds", secs/60, secs%60)
 }

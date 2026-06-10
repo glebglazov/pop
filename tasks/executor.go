@@ -364,7 +364,7 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 		recorder = newStreamRecorder(&capture, time.Now)
 		agentOut = recorder
 		if render := lineRendererFor(invocation.OutputFormat, outputFor(liveOut).color); render != nil {
-			liveWriter = newLiveRenderWriter(liveOut, recorder, render)
+			liveWriter = newLiveRenderWriter(liveOut, recorder, render, time.Now)
 			agentOut = liveWriter
 		}
 	}

@@ -116,7 +116,7 @@ func TestStreamRecorderUnaffectedByRenderer(t *testing.T) {
 		rec := newStreamRecorder(&capture, fakeClock(start, 50*time.Millisecond))
 		var w io.Writer = rec
 		if render != nil {
-			w = newLiveRenderWriter(io.Discard, rec, render)
+			w = newLiveRenderWriter(io.Discard, rec, render, fakeClock(start, 50*time.Millisecond))
 		}
 		if _, err := w.Write([]byte(lines)); err != nil {
 			t.Fatal(err)
