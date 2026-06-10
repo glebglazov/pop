@@ -59,6 +59,7 @@ const openWindowEndMS = int64(-1)
 // time derivation.
 var toolTimingParsers = map[string]func([]streamEventRecord) ([]ToolTiming, []toolWindow){
 	"claude": claudeToolTimings,
+	"codex":  codexToolTimings,
 }
 
 var actualModelParsers = map[string]func([]streamEventRecord) string{

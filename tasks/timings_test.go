@@ -372,6 +372,120 @@ func TestClaudeToolTimingsSkipsUnpairedAndMalformedEvents(t *testing.T) {
 	}
 }
 
+// codexStarted renders one item.started for a tool item of the given id, type,
+// and optional server/tool (used only for mcp_tool_call).
+func codexStarted(id, itemType string, serverTool ...string) string {
+	return codexItemEvent("item.started", id, itemType, serverTool...)
+}
+
+// codexCompleted renders the matching item.completed for an item id.
+func codexCompleted(id, itemType string, serverTool ...string) string {
+	return codexItemEvent("item.completed", id, itemType, serverTool...)
+}
+
+func codexItemEvent(phase, id, itemType string, serverTool ...string) string {
+	fields := `"id":"` + id + `","type":"` + itemType + `"`
+	if len(serverTool) == 2 {
+		fields += `,"server":"` + serverTool[0] + `","tool":"` + serverTool[1] + `"`
+	}
+	return `{"type":"` + phase + `","item":{` + fields + `}}`
+}
+
+func TestCodexToolTimingsPairsStartedWithCompletedByID(t *testing.T) {
+	tools, _ := codexToolTimings([]streamEventRecord{
+		{Type: "event", AtMS: 9761, Raw: `{"type":"turn.started"}`},
+		{Type: "event", AtMS: 9878, Raw: codexStarted("item_1", "command_execution")},
+		{Type: "event", AtMS: 10878, Raw: codexCompleted("item_1", "command_execution")},
+		{Type: "event", AtMS: 11000, Raw: codexStarted("item_2", "file_change")},
+		{Type: "event", AtMS: 11200, Raw: codexCompleted("item_2", "file_change")},
+		{Type: "event", AtMS: 12000, Raw: codexStarted("item_3", "command_execution")},
+		{Type: "event", AtMS: 12500, Raw: codexCompleted("item_3", "command_execution")},
+	})
+
+	want := []ToolTiming{
+		{Name: "command_execution", Count: 2, Total: 1500 * time.Millisecond},
+		{Name: "file_change", Count: 1, Total: 200 * time.Millisecond},
+	}
+	if len(tools) != len(want) {
+		t.Fatalf("tools = %#v, want %#v", tools, want)
+	}
+	for i := range want {
+		if tools[i] != want[i] {
+			t.Fatalf("tools[%d] = %+v, want %+v", i, tools[i], want[i])
+		}
+	}
+}
+
+func TestCodexToolTimingsNamesMcpByServerAndTool(t *testing.T) {
+	tools, _ := codexToolTimings([]streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: codexStarted("a", "mcp_tool_call", "github", "search")},
+		{Type: "event", AtMS: 400, Raw: codexCompleted("a", "mcp_tool_call", "github", "search")},
+		// tool present, server missing -> mcp:<tool>
+		{Type: "event", AtMS: 500, Raw: codexStarted("b", "mcp_tool_call", "", "read_file")},
+		{Type: "event", AtMS: 700, Raw: codexCompleted("b", "mcp_tool_call", "", "read_file")},
+		// neither present -> bare mcp_tool_call
+		{Type: "event", AtMS: 800, Raw: codexStarted("c", "mcp_tool_call")},
+		{Type: "event", AtMS: 850, Raw: codexCompleted("c", "mcp_tool_call")},
+	})
+
+	want := []ToolTiming{
+		{Name: "mcp:github/search", Count: 1, Total: 300 * time.Millisecond},
+		{Name: "mcp:read_file", Count: 1, Total: 200 * time.Millisecond},
+		{Name: "mcp_tool_call", Count: 1, Total: 50 * time.Millisecond},
+	}
+	if len(tools) != len(want) {
+		t.Fatalf("tools = %#v, want %#v", tools, want)
+	}
+	for i := range want {
+		if tools[i] != want[i] {
+			t.Fatalf("tools[%d] = %+v, want %+v", i, tools[i], want[i])
+		}
+	}
+}
+
+func TestCodexToolTimingsTakesMcpNameFromCompletedWhenStartedLacksIt(t *testing.T) {
+	// The mcp server/tool fields may only be present on the completed event.
+	tools, _ := codexToolTimings([]streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: codexStarted("a", "mcp_tool_call")},
+		{Type: "event", AtMS: 400, Raw: codexCompleted("a", "mcp_tool_call", "github", "search")},
+	})
+	if len(tools) != 1 || tools[0] != (ToolTiming{Name: "mcp:github/search", Count: 1, Total: 300 * time.Millisecond}) {
+		t.Fatalf("tools = %#v, want mcp:github/search named from completed", tools)
+	}
+}
+
+func TestCodexToolTimingsIgnoresNonToolItemsAndMalformed(t *testing.T) {
+	tools, windows := codexToolTimings([]streamEventRecord{
+		{Type: "event", AtMS: 10, Raw: `not json`},
+		// agent_message and reasoning are not tools even if they bracket like one.
+		{Type: "event", AtMS: 50, Raw: codexStarted("msg", "agent_message")},
+		{Type: "event", AtMS: 60, Raw: codexCompleted("msg", "agent_message")},
+		{Type: "event", AtMS: 70, Raw: codexStarted("rsn", "reasoning")},
+		{Type: "event", AtMS: 90, Raw: codexCompleted("rsn", "reasoning")},
+		// a tool that started but never completed: a killed attempt.
+		{Type: "event", AtMS: 100, Raw: codexStarted("killed", "command_execution")},
+		// a real paired tool.
+		{Type: "event", AtMS: 300, Raw: codexStarted("ok", "file_change")},
+		{Type: "event", AtMS: 550, Raw: codexCompleted("ok", "file_change")},
+	})
+
+	if len(tools) != 1 || tools[0] != (ToolTiming{Name: "file_change", Count: 1, Total: 250 * time.Millisecond}) {
+		t.Fatalf("tools = %#v, want only the paired file_change", tools)
+	}
+	want := map[toolWindow]bool{
+		{StartMS: 300, EndMS: 550}:             true,
+		{StartMS: 100, EndMS: openWindowEndMS}: true,
+	}
+	if len(windows) != len(want) {
+		t.Fatalf("windows = %#v, want paired + open", windows)
+	}
+	for _, w := range windows {
+		if !want[w] {
+			t.Fatalf("unexpected window %+v in %#v", w, windows)
+		}
+	}
+}
+
 func TestModelTimeSubtractsUnionOfToolWindows(t *testing.T) {
 	cases := []struct {
 		name    string
