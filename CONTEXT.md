@@ -134,6 +134,22 @@ _Avoid_: Session picker, select view, normal mode
 The fuzzy-search picker in `pop worktree` for choosing or deleting git worktrees in the current repository. Worktree creation is not built in; it belongs to user-defined commands, which hand the new path back via **Switch**. Deleting a worktree also removes its **History** entry; its tmux session is left alone (killing it stays an explicit, separate action).
 _Avoid_: Repo picker
 
+**Dashboard picker**:
+A selection-only Dashboard mode for choosing a tracked **Pane** and returning it to a caller without switching tmux focus or applying visit-like side effects. Its broad candidate set is the same tracked pane set shown by the **Dashboard**; message-sending callers narrow it to **Session-local panes** by default rather than inferring agentic panes. In picker mode, one candidate is selected without opening the TUI, while zero candidates exits unsuccessfully without output.
+_Avoid_: Agent picker, monitor picker
+
+**Session-local pane**:
+A tracked **Pane** whose tmux session matches the session of the current tmux pane. Session-locality is a Dashboard filtering concern for targeted write actions; picker candidates exclude the current pane itself and do not imply the pane is agentic.
+_Avoid_: Relevant pane, current pane's agent
+
+**Pane ID target**:
+A raw tmux pane identifier used as an explicit command target, such as `%63`. A Pane ID target is global within tmux and bypasses Pop's name-based agent-window lookup.
+_Avoid_: Pane name, dashboard label
+
+**Quick selection**:
+A numeric shortcut for selecting a visible picker row relative to the cursor. Project and worktree pickers already expose quick selection; the **Dashboard picker** uses the same idea for fast target choice.
+_Avoid_: Quick filter, fuzzy search
+
 **Worktree readiness**:
 The **Doctor status** of the `pop worktree` command family. It depends on being able to identify the current Git repository and list its worktrees. A repository with no linked worktrees is still OK; the absence of worktrees is content, not a readiness failure.
 _Avoid_: Worktree count health

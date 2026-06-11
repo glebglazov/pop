@@ -44,6 +44,33 @@ func TestFindPaneWith(t *testing.T) {
 	})
 }
 
+func TestRunPaneSendToPaneIDWith(t *testing.T) {
+	var calls [][]string
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			return "", nil
+		},
+	}
+
+	if err := runPaneSendToPaneIDWith(tmux, "%63", []string{"hello", "Enter"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	want := []string{"send-keys", "-t", "%63", "hello", "Enter"}
+	if got := strings.Join(calls[0], "\x00"); got != strings.Join(want, "\x00") {
+		t.Errorf("tmux args = %v, want %v", calls[0], want)
+	}
+
+	t.Run("requires keys", func(t *testing.T) {
+		if err := runPaneSendToPaneIDWith(tmux, "%63", nil); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
 func TestHasAgentWindowWith(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -129,6 +129,22 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 	}
 }
 
+func TestSessionLocalDashboardPanes(t *testing.T) {
+	panes := []ui.AttentionPane{
+		{PaneID: "%1", Session: "pop"},
+		{PaneID: "%2", Session: "pop"},
+		{PaneID: "%3", Session: "other"},
+	}
+
+	got := sessionLocalDashboardPanes(panes, "pop", "%1")
+	if len(got) != 1 {
+		t.Fatalf("got %d panes, want 1: %+v", len(got), got)
+	}
+	if got[0].PaneID != "%2" {
+		t.Errorf("got pane %s, want %%2", got[0].PaneID)
+	}
+}
+
 func TestPositionCurrentPane(t *testing.T) {
 	t.Run("untracked pane is injected at end", func(t *testing.T) {
 		// Scenario: monitored panes are pop (working) and vcdr (unread),

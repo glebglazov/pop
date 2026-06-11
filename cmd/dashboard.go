@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -22,8 +23,12 @@ var monitorCmd = &cobra.Command{
 var monitorDashboardCmd = &cobra.Command{
 	Use:   "dashboard",
 	Short: "Show all monitored agent panes",
-	Args:  cobra.NoArgs,
-	RunE:  runDashboard,
+	Long: `Show all monitored agent panes.
+
+Use --pick to choose a session-local pane for scripts. Picker mode prints
+the selected tmux pane ID and does not switch focus or mutate monitor state.`,
+	Args: cobra.NoArgs,
+	RunE: runDashboard,
 }
 
 // Deprecated: use `pop monitor dashboard` instead. Hidden compatibility alias
@@ -36,14 +41,21 @@ var dashboardCmd = &cobra.Command{
 	RunE:   runDashboard,
 }
 
+var dashboardPick bool
+
 func init() {
 	rootCmd.AddCommand(monitorCmd)
 	monitorCmd.AddCommand(monitorDashboardCmd)
 	rootCmd.AddCommand(dashboardCmd)
+	monitorDashboardCmd.Flags().BoolVar(&dashboardPick, "pick", false, "Pick a session-local pane and print its tmux pane ID")
+	dashboardCmd.Flags().BoolVar(&dashboardPick, "pick", false, "Pick a session-local pane and print its tmux pane ID")
 }
 
 func runDashboard(cmd *cobra.Command, args []string) error {
-	systemWarnings := ensureSystemState()
+	var systemWarnings []string
+	if !dashboardPick {
+		systemWarnings = ensureSystemState()
+	}
 
 	cfg, err := config.Load(config.DefaultConfigPath())
 	if err != nil {
@@ -55,17 +67,26 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 
 	cursorPosition := cfg.DashboardCursorPosition()
 	var currentPaneID, currentPaneSession string
-	if cursorPosition == config.DashboardCursorCurrentRegistered || cursorPosition == config.DashboardCursorCurrentAny {
+	if dashboardPick || cursorPosition == config.DashboardCursorCurrentRegistered || cursorPosition == config.DashboardCursorCurrentAny {
 		var err error
 		currentPaneID, err = defaultTmux.Command("display-message", "-p", "#{pane_id}")
 		if err != nil {
+			if dashboardPick {
+				return fmt.Errorf("cannot determine current tmux session")
+			}
 			debug.Error("dashboard: get current pane ID: %v", err)
 		}
 		if currentPaneID != "" {
 			currentPaneSession, err = tmuxPaneSessionWith(defaultTmux, currentPaneID)
 			if err != nil {
+				if dashboardPick {
+					return fmt.Errorf("cannot determine current tmux session")
+				}
 				debug.Error("dashboard: get pane session for %s: %v", currentPaneID, err)
 			}
+		}
+		if dashboardPick && currentPaneSession == "" {
+			return fmt.Errorf("cannot determine current tmux session")
 		}
 	}
 
@@ -73,6 +94,9 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 
 	buildPanes := func() []ui.AttentionPane {
 		panes, _ := buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosition, sortCriteria)
+		if dashboardPick {
+			panes = sessionLocalDashboardPanes(panes, currentPaneSession, currentPaneID)
+		}
 		return panes
 	}
 
@@ -94,12 +118,32 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	panes, initialPaneID := buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosition, sortCriteria)
+	if dashboardPick {
+		panes = sessionLocalDashboardPanes(panes, currentPaneSession, currentPaneID)
+		switch len(panes) {
+		case 0:
+			return fmt.Errorf("no session-local panes")
+		case 1:
+			fmt.Println(panes[0].PaneID)
+			return nil
+		}
+		initialPaneID = ""
+		opts = append(opts, ui.WithDashboardPickerMode(cfg.GetQuickAccessModifier()))
+	}
 	if initialPaneID != "" {
 		opts = append(opts, ui.WithInitialPaneID(initialPaneID))
 	}
 	result, err := ui.RunDashboard("dashboard", panes, attentionCallbacks(), buildPanes, opts...)
 	if err != nil {
 		return err
+	}
+
+	if dashboardPick {
+		if result.Action == ui.DashboardActionConfirm && result.Selected != nil {
+			fmt.Println(result.Selected.PaneID)
+			return nil
+		}
+		os.Exit(1)
 	}
 
 	// Persist following mode for next dashboard open
@@ -119,6 +163,17 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func sessionLocalDashboardPanes(panes []ui.AttentionPane, session, currentPaneID string) []ui.AttentionPane {
+	filtered := make([]ui.AttentionPane, 0, len(panes))
+	for _, pane := range panes {
+		if pane.Session != session || pane.PaneID == currentPaneID {
+			continue
+		}
+		filtered = append(filtered, pane)
+	}
+	return filtered
 }
 
 // handleDashboardSwitch performs the post-picker bookkeeping for a dashboard

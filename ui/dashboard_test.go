@@ -175,6 +175,63 @@ func TestDashboardEnter(t *testing.T) {
 	})
 }
 
+func TestDashboardPickerMode(t *testing.T) {
+	panes := []AttentionPane{
+		{PaneID: "%1", Session: "s1", Status: AttentionUnread},
+		{PaneID: "%2", Session: "s1", Status: AttentionClear},
+		{PaneID: "%3", Session: "s1", Status: AttentionWorking},
+	}
+
+	t.Run("quick access confirms relative pane", func(t *testing.T) {
+		d := newDashboard(panes, AttentionCallbacks{}, WithDashboardPickerMode("alt"))
+		d.cursor = 2
+		m, cmd := d.Update(tea.KeyPressMsg{Code: '2', Text: "2", Mod: tea.ModAlt})
+		d = m.(*Dashboard)
+		if d.result.Action != DashboardActionConfirm {
+			t.Errorf("action = %d, want DashboardActionConfirm", d.result.Action)
+		}
+		if d.result.Selected == nil || d.result.Selected.PaneID != "%1" {
+			t.Errorf("selected = %v, want pane %%1", d.result.Selected)
+		}
+		if cmd == nil {
+			t.Error("expected quit cmd")
+		}
+	})
+
+	t.Run("mutation keys are disabled", func(t *testing.T) {
+		called := false
+		cb := AttentionCallbacks{
+			MarkClear:    func(string) { called = true },
+			MarkUnread:   func(string) { called = true },
+			ToggleFollow: func(string) { called = true },
+			Unmonitor:    func(string) { called = true },
+			SetNote:      func(string, string) { called = true },
+		}
+		d := newDashboard(panes, cb, WithDashboardPickerMode("alt"))
+		d.cursor = 0
+		for _, msg := range []tea.KeyPressMsg{
+			{Code: 'r', Text: "r"},
+			{Code: 'a', Text: "a", Mod: tea.ModCtrl},
+			{Code: 'f', Text: "f"},
+			{Code: 'x', Text: "x"},
+			{Code: 'N', Text: "N"},
+			{Code: 'p', Text: "p"},
+		} {
+			m, _ := d.Update(msg)
+			d = m.(*Dashboard)
+		}
+		if called {
+			t.Error("picker mode should not call mutation callbacks")
+		}
+		if d.dirty {
+			t.Error("picker mode mutation keys should not mark dashboard dirty")
+		}
+		if d.result.Action != DashboardActionCancel {
+			t.Errorf("action = %d, want no action", d.result.Action)
+		}
+	})
+}
+
 func TestDashboardPeek(t *testing.T) {
 	t.Run("peek opens without clearing", func(t *testing.T) {
 		panes := []AttentionPane{

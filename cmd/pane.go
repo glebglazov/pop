@@ -339,16 +339,19 @@ func runPaneListWith(tmux deps.Tmux) error {
 
 // --- send ---
 
+var paneSendPaneID string
+
 var paneSendCmd = &cobra.Command{
-	Use:   "send <name> <keys...>",
-	Short: "Send literal keys to a named pane",
-	Long: `Send literal keys to a named pane via tmux send-keys.
+	Use:   "send [--pane-id <pane_id>] <name> <keys...>",
+	Short: "Send literal keys to a pane",
+	Long: `Send literal keys to a named pane or explicit tmux pane ID via tmux send-keys.
 
 Each argument after <name> is passed as a separate key to tmux. Keys
 are NOT auto-terminated with Enter — include it explicitly if needed.
 
 Examples:
   pop pane send server "npm run dev" Enter   # type command and press Enter
+  pop pane send --pane-id %63 "hello" Enter  # send to an explicit tmux pane ID
   pop pane send server C-c                   # send Ctrl+C (interrupt)
   pop pane send server C-d                   # send Ctrl+D (EOF)
   pop pane send server C-l                   # send Ctrl+L (clear screen)
@@ -358,12 +361,22 @@ Examples:
 Tmux special key names: Enter, Escape, Space, Tab, Up, Down, Left,
 Right, BSpace, DC (delete), End, Home, IC (insert), NPage (page down),
 PPage (page up), F1-F12, C-<key> (ctrl), M-<key> (alt).`,
-	Args: cobra.MinimumNArgs(2),
+	Args: cobra.MinimumNArgs(1),
 	RunE: runPaneSend,
 }
 
 func runPaneSend(cmd *cobra.Command, args []string) error {
+	if paneSendPaneID != "" {
+		return runPaneSendToPaneIDWith(defaultTmux, paneSendPaneID, args)
+	}
+	if len(args) < 2 {
+		return fmt.Errorf("requires a pane name and at least one key")
+	}
 	return runPaneSendWith(defaultTmux, args[0], args[1:])
+}
+
+func init() {
+	paneSendCmd.Flags().StringVar(&paneSendPaneID, "pane-id", "", "Target an explicit tmux pane ID instead of a named pane")
 }
 
 func runPaneSendWith(tmux deps.Tmux, name string, keys []string) error {
@@ -380,6 +393,20 @@ func runPaneSendWith(tmux deps.Tmux, name string, keys []string) error {
 	tmuxArgs := append([]string{"send-keys", "-t", paneID}, keys...)
 	if _, err := tmux.Command(tmuxArgs...); err != nil {
 		return fmt.Errorf("failed to send keys to pane %q: %w", name, err)
+	}
+	return nil
+}
+
+func runPaneSendToPaneIDWith(tmux deps.Tmux, paneID string, keys []string) error {
+	if paneID == "" {
+		return fmt.Errorf("--pane-id requires a pane ID")
+	}
+	if len(keys) == 0 {
+		return fmt.Errorf("--pane-id requires at least one key")
+	}
+	tmuxArgs := append([]string{"send-keys", "-t", paneID}, keys...)
+	if _, err := tmux.Command(tmuxArgs...); err != nil {
+		return fmt.Errorf("failed to send keys to pane ID %q: %w", paneID, err)
 	}
 	return nil
 }

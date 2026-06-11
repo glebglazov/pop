@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -118,6 +119,9 @@ type Dashboard struct {
 	initialPaneID        string
 	protectedPaneID      string
 	protectedCursorIndex int
+
+	pickerMode          bool
+	quickAccessModifier string
 }
 
 // DashboardOption configures the dashboard
@@ -157,6 +161,14 @@ func WithDashboardUpdateNotice(text string) DashboardOption {
 func WithEmptyNote(note string) DashboardOption {
 	return func(d *Dashboard) {
 		d.emptyNote = note
+	}
+}
+
+// WithDashboardPickerMode makes the dashboard a pure selection UI.
+func WithDashboardPickerMode(quickAccessModifier string) DashboardOption {
+	return func(d *Dashboard) {
+		d.pickerMode = true
+		d.quickAccessModifier = quickAccessModifier
 	}
 }
 
@@ -323,6 +335,9 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return d, tea.Quit
 
 		case key.Matches(msg, dashboardKeys.PeekPane):
+			if d.pickerMode {
+				return d, nil
+			}
 			// "Peek" — open the pane without mutating its monitor state.
 			if len(d.panes) == 0 {
 				return d, nil
@@ -361,6 +376,9 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return d, nil
 
 		case key.Matches(msg, dashboardKeys.ToggleClearUnread):
+			if d.pickerMode {
+				return d, nil
+			}
 			if len(d.panes) > 0 && d.markClearFunc != nil && d.markUnreadFunc != nil {
 				pane := &d.panes[d.cursor]
 				if pane.Status == AttentionVirtual {
@@ -387,6 +405,9 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return d, nil
 
 		case key.Matches(msg, dashboardKeys.MarkUnread):
+			if d.pickerMode {
+				return d, nil
+			}
 			if len(d.panes) > 0 && d.markUnreadFunc != nil {
 				pane := &d.panes[d.cursor]
 				if pane.Status == AttentionVirtual {
@@ -407,6 +428,9 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return d, nil
 
 		case key.Matches(msg, dashboardKeys.FollowPane):
+			if d.pickerMode {
+				return d, nil
+			}
 			if len(d.panes) > 0 && d.toggleFollowFunc != nil {
 				pane := &d.panes[d.cursor]
 				if pane.Status == AttentionVirtual {
@@ -444,6 +468,9 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return d, nil
 
 		case key.Matches(msg, dashboardKeys.EditNote):
+			if d.pickerMode {
+				return d, nil
+			}
 			if len(d.panes) > 0 && d.setNoteFunc != nil {
 				pane := d.panes[d.cursor]
 				if pane.Status == AttentionVirtual {
@@ -458,6 +485,9 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return d, nil
 
 		case key.Matches(msg, dashboardKeys.Unmonitor):
+			if d.pickerMode {
+				return d, nil
+			}
 			if len(d.panes) > 0 && d.unmonitorFunc != nil {
 				pane := d.panes[d.cursor]
 				if pane.Status == AttentionVirtual {
@@ -484,6 +514,18 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				d.fetchPreview()
 			}
 			return d, nil
+
+		case d.isQuickAccessKey(msg):
+			targetIdx := d.cursor - d.quickAccessDigit(msg)
+			if targetIdx >= 0 && targetIdx < len(d.panes) {
+				pane := d.panes[targetIdx]
+				d.result = DashboardResult{
+					Selected: &pane,
+					Action:   DashboardActionConfirm,
+				}
+				return d, tea.Quit
+			}
+			return d, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -499,6 +541,43 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return d, nil
+}
+
+func (d *Dashboard) quickAccessEnabled() bool {
+	return d.pickerMode && d.quickAccessModifier != "" && d.quickAccessModifier != "disabled"
+}
+
+func (d *Dashboard) isQuickAccessKey(msg tea.KeyPressMsg) bool {
+	return d.quickAccessDigit(msg) >= 1
+}
+
+func (d *Dashboard) quickAccessDigit(msg tea.KeyPressMsg) int {
+	if !d.quickAccessEnabled() || msg.Code < '1' || msg.Code > '9' {
+		return 0
+	}
+	digit := int(msg.Code - '0')
+	switch d.quickAccessModifier {
+	case "alt":
+		if msg.Mod.Contains(tea.ModAlt) {
+			return digit
+		}
+	case "ctrl":
+		if msg.Mod.Contains(tea.ModCtrl) {
+			return digit
+		}
+	}
+	return 0
+}
+
+func (d *Dashboard) quickAccessLabel(n int) string {
+	switch d.quickAccessModifier {
+	case "ctrl":
+		return fmt.Sprintf("^%d", n)
+	case "alt":
+		return fmt.Sprintf("⌥%d", n)
+	default:
+		return "  "
+	}
 }
 
 // reloadPanes refreshes the pane list from the reload function,
@@ -926,21 +1005,39 @@ func (d *Dashboard) viewDashboard() string {
 		}
 		icon += " "
 
-		nameWidth := leftWidth - iconWidth - 3
+		quickPrefixWidth := 0
+		if d.quickAccessEnabled() {
+			quickPrefixWidth = 2
+		}
+		nameWidth := leftWidth - quickPrefixWidth - iconWidth - 3
 		name := truncateString(pane.Name, nameWidth)
 
 		if listIdx == d.cursor {
-			padding := leftWidth - len([]rune(name)) - iconWidth - 3
+			prefix := indicatorStyle.Render("█")
+			prefixWidth := 1
+			if d.quickAccessEnabled() {
+				prefix = " " + prefix
+				prefixWidth = 2
+			}
+			padding := leftWidth - len([]rune(name)) - iconWidth - prefixWidth - 1
 			if padding < 0 {
 				padding = 0
 			}
-			left = indicatorStyle.Render("█") + " " + icon + name + strings.Repeat(" ", padding)
+			left = prefix + " " + icon + name + strings.Repeat(" ", padding)
 		} else {
-			padding := leftWidth - len([]rune(name)) - iconWidth - 2
+			prefix := "  "
+			prefixWidth := 2
+			if d.quickAccessEnabled() {
+				distFromCursor := d.cursor - listIdx
+				if distFromCursor >= 1 && distFromCursor <= 9 {
+					prefix = dimStyle.Render(d.quickAccessLabel(distFromCursor))
+				}
+			}
+			padding := leftWidth - len([]rune(name)) - iconWidth - prefixWidth
 			if padding < 0 {
 				padding = 0
 			}
-			left = "  " + icon + name + strings.Repeat(" ", padding)
+			left = prefix + icon + name + strings.Repeat(" ", padding)
 		}
 
 		rightContent := ""
@@ -969,6 +1066,15 @@ func (d *Dashboard) viewDashboard() string {
 		b.WriteString("  " + d.noteInput.View())
 	} else {
 		hints := "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel"
+		if d.pickerMode {
+			hints = "  Enter select · F follow view · Esc cancel"
+			switch d.quickAccessModifier {
+			case "alt":
+				hints += " · A-1..9 quick select"
+			case "ctrl":
+				hints += " · C-1..9 quick select"
+			}
+		}
 		b.WriteString(hintStyle.Render(hints))
 	}
 
