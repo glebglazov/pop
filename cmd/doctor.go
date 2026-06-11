@@ -79,6 +79,11 @@ func defaultDoctorDeps() *doctorDeps {
 		detectRepoContext:      project.DetectRepoContext,
 		listWorktrees:          project.ListWorktrees,
 		daemonRunning: func() bool {
+			cfg := loadConfigQuietly()
+			if cfg.PaneMonitoringTCPServer() {
+				_, err := monitor.Handshake(monitorAddr(cfg))
+				return err == nil
+			}
 			return monitor.IsDaemonRunning(monitor.DefaultPIDPath())
 		},
 		monitorDaemonStartable: func() bool {

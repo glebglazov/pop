@@ -222,6 +222,22 @@ func TestBuildMonitorHandler_DispatchesByCmd(t *testing.T) {
 			t.Errorf("expected OK=true for empty pane_id (set-status no-op), got error %q", resp.Error)
 		}
 	})
+
+	t.Run("identify reports daemon identity", func(t *testing.T) {
+		resp := handler(monitor.Request{Cmd: "identify"})
+		if !resp.OK {
+			t.Fatalf("identify returned error: %q", resp.Error)
+		}
+		if resp.PID != os.Getpid() {
+			t.Errorf("PID = %d, want %d", resp.PID, os.Getpid())
+		}
+		if resp.ExeMod == 0 {
+			t.Error("ExeMod = 0, want the running binary's mtime")
+		}
+	})
+	// "shutdown" is intentionally not exercised here: it SIGTERMs the current
+	// process, which would kill the test runner. Its routing is covered by the
+	// dispatch switch; the signal path is verified manually.
 }
 
 func TestHandleSetFollowing(t *testing.T) {

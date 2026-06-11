@@ -2,6 +2,8 @@ package monitor
 
 import (
 	"encoding/json"
+	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -88,6 +90,20 @@ func DefaultDeps() *Deps {
 
 var defaultDeps = DefaultDeps()
 
+// dataDirWith returns the XDG-resolved pop data directory (the scope of the
+// monitor state). The daemon address is derived from this path so that
+// distinct data dirs never collide on a port (ADR 0021).
+func dataDirWith(d *Deps) string {
+	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
+		return filepath.Join(xdgData, "pop")
+	}
+	home, err := d.FS.UserHomeDir()
+	if err != nil {
+		debug.Error("dataDir: UserHomeDir: %v", err)
+	}
+	return filepath.Join(home, ".local", "share", "pop")
+}
+
 // DefaultStatePath returns the default monitor state file path
 func DefaultStatePath() string {
 	return DefaultStatePathWith(defaultDeps)
@@ -95,14 +111,7 @@ func DefaultStatePath() string {
 
 // DefaultStatePathWith returns the default monitor state file path using provided dependencies
 func DefaultStatePathWith(d *Deps) string {
-	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
-		return filepath.Join(xdgData, "pop", "monitor.json")
-	}
-	home, err := d.FS.UserHomeDir()
-	if err != nil {
-		debug.Error("DefaultStatePath: UserHomeDir: %v", err)
-	}
-	return filepath.Join(home, ".local", "share", "pop", "monitor.json")
+	return filepath.Join(dataDirWith(d), "monitor.json")
 }
 
 // DefaultPIDPath returns the default daemon PID file path
@@ -112,34 +121,45 @@ func DefaultPIDPath() string {
 
 // DefaultPIDPathWith returns the default daemon PID file path using provided dependencies
 func DefaultPIDPathWith(d *Deps) string {
-	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
-		return filepath.Join(xdgData, "pop", "monitor.pid")
-	}
-	home, err := d.FS.UserHomeDir()
-	if err != nil {
-		debug.Error("DefaultPIDPath: UserHomeDir: %v", err)
-	}
-	return filepath.Join(home, ".local", "share", "pop", "monitor.pid")
+	return filepath.Join(dataDirWith(d), "monitor.pid")
 }
 
-// defaultMonitorAddr is the TCP address the daemon binds by default.
-// Loopback-only so the port is not exposed beyond the host. Port 57341
-// picked from the IANA dynamic range (49152-65535) to minimize collisions.
-const defaultMonitorAddr = "127.0.0.1:57341"
+// derivedPortRange spans the IANA dynamic/private range (49152–65535).
+const (
+	derivedPortBase = 49152
+	derivedPortSpan = 65536 - derivedPortBase
+)
 
-// DefaultAddr returns the TCP address the monitor daemon listens on.
-// Override with the POP_MONITOR_ADDR env var (e.g. "0.0.0.0:57341" to
-// allow container-to-host connections via host.docker.internal).
+// DerivedAddr returns the loopback address whose port is derived from the data
+// dir. Pure function of the data dir — no env, no config (ADR 0021). Distinct
+// data dirs map to distinct ports, so a daemon for one data dir never collides
+// with a daemon for another (e.g. a test instance vs. the real one).
+func DerivedAddr() string {
+	return DerivedAddrWith(defaultDeps)
+}
+
+// DerivedAddrWith returns the derived address using provided dependencies.
+func DerivedAddrWith(d *Deps) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(dataDirWith(d)))
+	port := derivedPortBase + int(h.Sum32()%derivedPortSpan)
+	return fmt.Sprintf("127.0.0.1:%d", port)
+}
+
+// DefaultAddr returns the TCP address the monitor daemon listens on: the
+// POP_MONITOR_ADDR env override if set, else the data-dir-derived address.
+// Config-file overrides sit between these two and are applied in the command
+// layer (the monitor package must not import config — ADR 0001).
 func DefaultAddr() string {
 	return DefaultAddrWith(defaultDeps)
 }
 
-// DefaultAddrWith returns the TCP address using provided dependencies.
+// DefaultAddrWith returns the env-or-derived address using provided dependencies.
 func DefaultAddrWith(d *Deps) string {
 	if v := d.FS.Getenv("POP_MONITOR_ADDR"); v != "" {
 		return v
 	}
-	return defaultMonitorAddr
+	return DerivedAddrWith(d)
 }
 
 // Load reads monitor state from disk

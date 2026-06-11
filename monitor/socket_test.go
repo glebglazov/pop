@@ -1,48 +1,71 @@
 package monitor
 
 import (
+	"errors"
 	"io/fs"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestDefaultAddrWith(t *testing.T) {
-	tests := []struct {
-		name     string
-		envVal   string
-		expected string
-	}{
-		{
-			name:     "uses POP_MONITOR_ADDR when set",
-			envVal:   "0.0.0.0:12345",
-			expected: "0.0.0.0:12345",
-		},
-		{
-			name:     "falls back to default when env empty",
-			envVal:   "",
-			expected: defaultMonitorAddr,
-		},
+	// POP_MONITOR_ADDR wins when set.
+	t.Run("uses POP_MONITOR_ADDR when set", func(t *testing.T) {
+		d := &Deps{FS: &mockFS{getenv: func(key string) string {
+			if key == "POP_MONITOR_ADDR" {
+				return "0.0.0.0:12345"
+			}
+			return ""
+		}}}
+		if got := DefaultAddrWith(d); got != "0.0.0.0:12345" {
+			t.Errorf("got %q, want %q", got, "0.0.0.0:12345")
+		}
+	})
+
+	// With no env override, falls back to the data-dir-derived address.
+	t.Run("falls back to derived address when env empty", func(t *testing.T) {
+		d := &Deps{FS: &mockFS{getenv: func(string) string { return "" }}}
+		got := DefaultAddrWith(d)
+		if got != DerivedAddrWith(d) {
+			t.Errorf("got %q, want derived %q", got, DerivedAddrWith(d))
+		}
+	})
+}
+
+func TestDerivedAddrWith(t *testing.T) {
+	// Deterministic for a given data dir, and distinct data dirs map to
+	// distinct ports (ADR 0021 — this is what prevents cross-instance
+	// collisions). Loopback host, port in the dynamic range.
+	mk := func(xdg string) *Deps {
+		return &Deps{FS: &mockFS{getenv: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return xdg
+			}
+			return ""
+		}}}
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := &Deps{
-				FS: &mockFS{
-					getenv: func(key string) string {
-						if key == "POP_MONITOR_ADDR" {
-							return tt.envVal
-						}
-						return ""
-					},
-				},
-			}
-			result := DefaultAddrWith(d)
-			if result != tt.expected {
-				t.Errorf("got %q, want %q", result, tt.expected)
-			}
-		})
+	a1 := DerivedAddrWith(mk("/tmp/dirA"))
+	a1again := DerivedAddrWith(mk("/tmp/dirA"))
+	a2 := DerivedAddrWith(mk("/tmp/dirB"))
+
+	if a1 != a1again {
+		t.Errorf("not deterministic: %q vs %q", a1, a1again)
+	}
+	if a1 == a2 {
+		t.Errorf("distinct data dirs collided on %q", a1)
+	}
+	host, portStr, err := net.SplitHostPort(a1)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q): %v", a1, err)
+	}
+	if host != "127.0.0.1" {
+		t.Errorf("host = %q, want loopback", host)
+	}
+	if p, _ := net.LookupPort("tcp", portStr); p < derivedPortBase {
+		t.Errorf("port %s below dynamic-range base %d", portStr, derivedPortBase)
 	}
 }
 
@@ -56,6 +79,92 @@ func startTestServer(t *testing.T, handler RequestHandler) string {
 	}
 	t.Cleanup(func() { ln.Close() })
 	return ln.Addr().String()
+}
+
+func TestHandshake(t *testing.T) {
+	t.Run("current daemon returns identity", func(t *testing.T) {
+		addr := startTestServer(t, func(req Request) Response {
+			if req.Cmd != "identify" {
+				return Response{OK: false, Error: "unexpected"}
+			}
+			return Response{OK: true, PID: 4242, ExePath: "/bin/pop", ExeMod: 99, Version: "test"}
+		})
+		id, err := Handshake(addr)
+		if err != nil {
+			t.Fatalf("Handshake: %v", err)
+		}
+		if id.Legacy {
+			t.Error("Legacy = true, want false for a current daemon")
+		}
+		if id.PID != 4242 || id.ExeMod != 99 {
+			t.Errorf("identity = %+v, want PID 4242 ExeMod 99", id)
+		}
+	})
+
+	t.Run("pre-protocol daemon flagged Legacy", func(t *testing.T) {
+		// An old daemon does not know "identify" → replies OK=false.
+		addr := startTestServer(t, func(req Request) Response {
+			return Response{OK: false, Error: "unknown command: " + req.Cmd}
+		})
+		id, err := Handshake(addr)
+		if err != nil {
+			t.Fatalf("Handshake: %v", err)
+		}
+		if !id.Legacy {
+			t.Error("Legacy = false, want true for a pre-protocol daemon")
+		}
+	})
+
+	t.Run("nobody listening returns error", func(t *testing.T) {
+		// Reserve a port, close it, then handshake the now-free address.
+		ln, _ := net.Listen("tcp", "127.0.0.1:0")
+		addr := ln.Addr().String()
+		ln.Close()
+		if _, err := Handshake(addr); err == nil {
+			t.Error("expected error handshaking a free port")
+		}
+	})
+}
+
+func TestSendShutdown(t *testing.T) {
+	t.Run("ok", func(t *testing.T) {
+		addr := startTestServer(t, func(Request) Response { return Response{OK: true} })
+		if err := SendShutdown(addr); err != nil {
+			t.Errorf("SendShutdown: %v", err)
+		}
+	})
+	t.Run("refused", func(t *testing.T) {
+		addr := startTestServer(t, func(Request) Response { return Response{OK: false, Error: "busy"} })
+		if err := SendShutdown(addr); err == nil {
+			t.Error("expected error when daemon refuses shutdown")
+		}
+	})
+}
+
+// TestRunDaemonWith_AddrInUse verifies the bind-ordering fix: a daemon that
+// loses the bind race returns ErrAddrInUse and does NOT touch the PID file
+// (the loser must not delete the winner's liveness marker).
+func TestRunDaemonWith_AddrInUse(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("occupy port: %v", err)
+	}
+	defer ln.Close()
+	addr := ln.Addr().String()
+
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "monitor.pid")
+	statePath := filepath.Join(dir, "monitor.json")
+
+	err = RunDaemonWith(DefaultDeps(), statePath, pidPath, addr,
+		func(Request) Response { return Response{OK: true} })
+
+	if !errors.Is(err, ErrAddrInUse) {
+		t.Fatalf("err = %v, want ErrAddrInUse", err)
+	}
+	if _, statErr := os.Stat(pidPath); statErr == nil {
+		t.Error("PID file was written/left by a daemon that failed to bind")
+	}
 }
 
 func TestSocketRoundTrip(t *testing.T) {

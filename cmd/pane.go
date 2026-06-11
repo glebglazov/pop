@@ -524,7 +524,7 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noR
 		NoRegister: noRegister,
 	}
 
-	addr := monitor.DefaultAddr()
+	addr := monitorAddr(cfg)
 	resp, err := monitor.SendRequest(addr, req)
 	if err != nil {
 		debug.Error("pane set-status: socket send failed, falling back to direct write: %v", err)
@@ -571,18 +571,42 @@ var paneStatusCmd = &cobra.Command{
 	RunE:  runPaneStatus,
 }
 
+// ensurePaneStatusDaemon makes `pane status` self-healing: unlike Doctor
+// (read-only by contract), status starts the daemon if it is not answering and
+// waits briefly so the same invocation reports an accurate, live result.
+func ensurePaneStatusDaemon(cfg *config.Config) {
+	if !cfg.PaneMonitoringTCPServer() {
+		if !monitor.IsDaemonRunning(monitor.DefaultPIDPath()) {
+			fmt.Fprintln(os.Stderr, "monitor daemon not running — starting…")
+			ensureMonitorDaemon()
+		}
+		return
+	}
+	addr := monitorAddr(cfg)
+	if _, err := monitor.Handshake(addr); err == nil {
+		return // already answering
+	}
+	fmt.Fprintln(os.Stderr, "monitor daemon not running — starting…")
+	ensureMonitorDaemon()
+	if waitForDaemon(addr, 2*time.Second) == nil {
+		fmt.Fprintf(os.Stderr,
+			"monitor daemon did not come up at %s (port may be held by another process)\n", addr)
+	}
+}
+
 func runPaneStatus(cmd *cobra.Command, args []string) error {
-	state := loadMonitorState()
-	if state == nil {
-		fmt.Fprintln(os.Stderr, "monitor daemon is not running")
+	cfg := loadConfigQuietly()
+	ensurePaneStatusDaemon(cfg)
+
+	// Read state from disk regardless of daemon status — ensurePaneStatusDaemon
+	// has already started one if it could.
+	state := loadMonitorStateAlways()
+	if state == nil || len(state.PanesAll()) == 0 {
+		fmt.Println("no tracked panes")
 		return nil
 	}
 
 	entries := state.PanesAll()
-	if len(entries) == 0 {
-		fmt.Println("no tracked panes")
-		return nil
-	}
 
 	// Also load pop history for session_last_visit_at
 	hist, err := history.Load(history.DefaultHistoryPath())
@@ -675,7 +699,7 @@ func runPaneSetFollowWith(tmux deps.Tmux, cfg *config.Config, arg string, follow
 	// write on connect failure (cold start), the same pattern set-status
 	// uses.
 	if cfg.PaneMonitoringTCPServer() {
-		resp, err := monitor.SendRequest(monitor.DefaultAddr(), monitor.Request{
+		resp, err := monitor.SendRequest(monitorAddr(cfg), monitor.Request{
 			Cmd:       "set-following",
 			PaneID:    paneID,
 			Following: &follow,
@@ -743,7 +767,7 @@ func runPaneVisitWith(tmux deps.Tmux, cfg *config.Config, args []string) error {
 		return runPaneVisitDirect(paneID)
 	}
 
-	resp, err := monitor.SendRequest(monitor.DefaultAddr(), monitor.Request{
+	resp, err := monitor.SendRequest(monitorAddr(cfg), monitor.Request{
 		Cmd:    "visit",
 		PaneID: paneID,
 	})

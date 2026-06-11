@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -18,6 +19,12 @@ import (
 
 const pollInterval = 5 * time.Second
 
+// ErrAddrInUse is returned by RunDaemonWith when the daemon address is already
+// bound. The caller distinguishes this from other startup failures so it can
+// react to a squatter (reap a stale pop daemon, or surface a foreign process)
+// rather than dying silently.
+var ErrAddrInUse = errors.New("monitor address already in use")
+
 // RunDaemon runs the monitoring loop in the foreground.
 // Writes PID file on start, removes on exit.
 // The daemon only handles cleanup (dead panes) and active-pane
@@ -32,11 +39,6 @@ func RunDaemon(statePath, pidPath, addr string, handler RequestHandler) error {
 // dead-pane poll loop. A mutex serializes all state mutations
 // (socket handler + poll cleanup).
 func RunDaemonWith(d *Deps, statePath, pidPath, addr string, handler RequestHandler) error {
-	if err := writePIDFile(d, pidPath); err != nil {
-		return fmt.Errorf("failed to write PID file: %w", err)
-	}
-	defer removePIDFile(d, pidPath)
-
 	var mu sync.Mutex
 
 	// Wrap handler so socket requests and poll are serialized.
@@ -46,16 +48,28 @@ func RunDaemonWith(d *Deps, statePath, pidPath, addr string, handler RequestHand
 		return handler(req)
 	}
 
+	// Bind the listener BEFORE writing the PID file. A failed bind must not
+	// touch the PID file — otherwise a daemon that loses the bind race deletes
+	// the winner's liveness marker on its way out (the loser-deletes-winner
+	// bug). The PID file is owned only by whoever actually holds the port.
 	var ln net.Listener
 	if addr != "" {
 		var err error
 		ln, err = ListenAndServe(addr, guardedHandler)
 		if err != nil {
+			if errors.Is(err, syscall.EADDRINUSE) {
+				return ErrAddrInUse
+			}
 			return fmt.Errorf("failed to start TCP server: %w", err)
 		}
 		defer ln.Close()
 		fmt.Printf("Monitor listening on %s\n", ln.Addr())
 	}
+
+	if err := writePIDFile(d, pidPath); err != nil {
+		return fmt.Errorf("failed to write PID file: %w", err)
+	}
+	defer removePIDFile(d, pidPath)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

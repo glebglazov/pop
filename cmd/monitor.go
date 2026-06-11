@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -51,27 +52,34 @@ var paneMonitorStartCmd = &cobra.Command{
 }
 
 func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
+	cfg := loadConfigQuietly()
 	pidPath := monitor.DefaultPIDPath()
-	if monitor.IsDaemonRunning(pidPath) {
+	statePath := monitor.DefaultStatePath()
+
+	addr := ""
+	if cfg.PaneMonitoringTCPServer() {
+		addr = monitorAddr(cfg)
+		// Liveness is the port, not the PID file: don't start a second daemon
+		// if a current one already answers there.
+		if id, err := monitor.Handshake(addr); err == nil && !id.Legacy {
+			return fmt.Errorf("daemon already running (pid %d) at %s", id.PID, addr)
+		}
+	} else if monitor.IsDaemonRunning(pidPath) {
 		return fmt.Errorf("daemon is already running (PID file: %s)", pidPath)
 	}
 
 	installTmuxAutoClearHooks()
 
-	statePath := monitor.DefaultStatePath()
-	cfg, err := config.Load(config.DefaultConfigPath())
-	if err != nil {
-		debug.Error("monitor-start: load config: %v", err)
-	}
-	if cfg == nil {
-		cfg = &config.Config{}
-	}
-	addr := ""
-	if cfg.PaneMonitoringTCPServer() {
-		addr = monitor.DefaultAddr()
-	}
 	handler := buildMonitorHandler(defaultTmux, statePath)
-	return monitor.RunDaemon(statePath, pidPath, addr, handler)
+	err := monitor.RunDaemon(statePath, pidPath, addr, handler)
+	if errors.Is(err, monitor.ErrAddrInUse) {
+		// Handshake above found no pop daemon, yet the bind failed: a non-pop
+		// process holds the port. Surface it instead of dying silently.
+		debug.Error("monitor-start: %s is held by a non-pop process", addr)
+		return fmt.Errorf("monitor address %s is held by another process; "+
+			"set [pane_monitoring] addr or POP_MONITOR_ADDR to relocate", addr)
+	}
+	return err
 }
 
 // buildMonitorHandler returns a RequestHandler that dispatches by req.Cmd.
@@ -90,10 +98,42 @@ func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandle
 			return handleSetFollowing(tmux, statePath, req)
 		case "visit":
 			return handleVisit(statePath, req)
+		case "identify":
+			return handleIdentify()
+		case "shutdown":
+			return handleShutdown()
 		default:
 			return monitor.Response{OK: false, Error: "unknown command: " + req.Cmd}
 		}
 	}
+}
+
+// handleIdentify reports the running daemon's identity so a challenger can
+// decide whether it is current. ExeMod (the running binary's mtime) is the
+// comparison key; PID/ExePath/Version are diagnostic.
+func handleIdentify() monitor.Response {
+	resp := monitor.Response{OK: true, PID: os.Getpid(), Version: buildVersion()}
+	if exe, err := os.Executable(); err == nil {
+		resp.ExePath = exe
+		if info, statErr := os.Stat(exe); statErr == nil {
+			resp.ExeMod = info.ModTime().Unix()
+		}
+	}
+	return resp
+}
+
+// handleShutdown signals the daemon to exit gracefully by sending SIGTERM to
+// itself — the daemon's run loop catches it and shuts down cleanly, releasing
+// the port and removing its PID file. Reusing the signal path keeps a single
+// shutdown route.
+func handleShutdown() monitor.Response {
+	debug.Log("[monitor] shutdown requested via socket")
+	if p, err := os.FindProcess(os.Getpid()); err == nil {
+		if err := p.Signal(syscall.SIGTERM); err != nil {
+			return monitor.Response{OK: false, Error: err.Error()}
+		}
+	}
+	return monitor.Response{OK: true}
 }
 
 // handleSetStatus applies the set-status business logic. Extracted from
@@ -224,12 +264,39 @@ func ensureSystemState() []string {
 	return warnings
 }
 
-// ensureMonitorDaemon ensures a monitor daemon is running with the current binary.
-// Restarts if the binary is newer than the running daemon.
-// Called automatically by `pop project dashboard`.
+// monitorAddr resolves the daemon's TCP address with precedence
+// POP_MONITOR_ADDR env > [pane_monitoring] addr config > data-dir-derived
+// default (ADR 0021). Daemon and all clients route through this so they agree.
+func monitorAddr(cfg *config.Config) string {
+	if v := os.Getenv("POP_MONITOR_ADDR"); v != "" {
+		return v
+	}
+	if a := cfg.PaneMonitoringAddr(); a != "" {
+		return a
+	}
+	return monitor.DerivedAddr()
+}
+
+// loadConfigQuietly loads config, logging (not surfacing) errors and never
+// returning nil — callers in non-interactive paths just need defaults.
+func loadConfigQuietly() *config.Config {
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Error("load config: %v", err)
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	return cfg
+}
+
+// ensureMonitorDaemon ensures a current monitor daemon is running, reaping a
+// stale one if the running binary is newer (ADR 0021 version-restart).
+// Called automatically by the interactive pickers and the socket-failure
+// self-heal path.
 //
-// Always invoked in a background goroutine, so panics here must not crash the
-// parent process — a failed daemon startup is non-fatal for the picker flow.
+// Always invoked where a panic must not crash the parent — a failed daemon
+// startup is non-fatal for the picker flow.
 func ensureMonitorDaemon() {
 	defer func() {
 		if r := recover(); r != nil {
@@ -237,31 +304,64 @@ func ensureMonitorDaemon() {
 		}
 	}()
 
-	pidPath := monitor.DefaultPIDPath()
 	exe, err := os.Executable()
 	if err != nil {
 		debug.Error("ensureMonitorDaemon: os.Executable: %v", err)
 		return
 	}
+	cfg := loadConfigQuietly()
 
+	// TCP disabled: no port to handshake. Fall back to PID-file liveness +
+	// binary-mtime version comparison (no bind, so no port-conflict hazard).
+	if !cfg.PaneMonitoringTCPServer() {
+		ensureMonitorDaemonViaPID(exe)
+		return
+	}
+
+	addr := monitorAddr(cfg)
+	id, err := monitor.Handshake(addr)
+	if err == nil {
+		// A pop daemon holds the port. Keep it if it is current; otherwise reap.
+		if !id.Legacy && id.ExeMod >= exeModTime(exe) {
+			return // up to date
+		}
+		debug.Log("ensureMonitorDaemon: reaping stale daemon (pid=%d exeMod=%d mine=%d legacy=%v)",
+			id.PID, id.ExeMod, exeModTime(exe), id.Legacy)
+		if err := monitor.SendShutdown(addr); err != nil {
+			debug.Error("ensureMonitorDaemon: shutdown stale daemon: %v", err)
+		}
+		waitForPortFree(addr, 2*time.Second)
+	}
+	// err != nil ⇒ port free, or held by a non-pop process. Either way attempt
+	// to start; the daemon surfaces ErrAddrInUse loudly if a foreign process
+	// holds it (see runPaneMonitorStart).
+	startMonitorDaemon(exe)
+}
+
+// ensureMonitorDaemonViaPID is the legacy PID-file path used only when the TCP
+// server is disabled. With no listener there is no bind conflict, so the
+// historical scheme is safe here.
+func ensureMonitorDaemonViaPID(exe string) {
+	pidPath := monitor.DefaultPIDPath()
 	if monitor.IsDaemonRunning(pidPath) {
 		if !binaryNewerThanPID(exe, pidPath) {
-			return // daemon is up to date
+			return
 		}
-		// Signal old daemon to stop; it will clean up its PID file on exit
 		if err := monitor.StopDaemon(pidPath); err != nil {
 			debug.Error("ensureMonitorDaemon: stop old daemon: %v", err)
 		}
 	}
-
-	// Wait for old PID file to be released (up to 500ms)
 	for range 10 {
 		if !monitor.IsDaemonRunning(pidPath) {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	startMonitorDaemon(exe)
+}
 
+// startMonitorDaemon spawns a detached `pop pane monitor-start`.
+func startMonitorDaemon(exe string) {
 	cmd := exec.Command(exe, "pane", "monitor-start")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout = nil
@@ -274,6 +374,41 @@ func ensureMonitorDaemon() {
 		if err := cmd.Process.Release(); err != nil {
 			debug.Error("ensureMonitorDaemon: release process: %v", err)
 		}
+	}
+}
+
+// exeModTime returns the unix mtime of exe, or 0 if it cannot be stat'd.
+func exeModTime(exe string) int64 {
+	info, err := os.Stat(exe)
+	if err != nil {
+		return 0
+	}
+	return info.ModTime().Unix()
+}
+
+// waitForPortFree polls until no pop daemon answers at addr, or the deadline.
+func waitForPortFree(addr string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := monitor.Handshake(addr); err != nil {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// waitForDaemon polls until a pop daemon answers at addr (returning its
+// identity), or the deadline (returning nil).
+func waitForDaemon(addr string, timeout time.Duration) *monitor.Identity {
+	deadline := time.Now().Add(timeout)
+	for {
+		if id, err := monitor.Handshake(addr); err == nil {
+			return id
+		}
+		if !time.Now().Before(deadline) {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

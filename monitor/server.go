@@ -25,6 +25,16 @@ type Request struct {
 type Response struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+
+	// Identity fields, populated by the "identify" command so a challenger
+	// can decide whether the running daemon is current. ExeMod (the running
+	// binary's mtime) is the comparison key — it mirrors the historical
+	// binary-mtime heuristic but is sourced from the daemon's actual binary
+	// rather than the PID-file proxy. PID/ExePath/Version are diagnostic.
+	PID     int    `json:"pid,omitempty"`
+	ExePath string `json:"exe_path,omitempty"`
+	ExeMod  int64  `json:"exe_mod,omitempty"`
+	Version string `json:"version,omitempty"`
 }
 
 // RequestHandler processes a single request and returns a response.

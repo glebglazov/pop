@@ -43,6 +43,11 @@ type PaneMonitoringConfig struct {
 	DismissAttentionInActivePane bool     `toml:"dismiss_attention_in_active_pane"`
 	IgnoreStatusFrom             []string `toml:"ignore_status_from"`
 	TCPServer                    bool     `toml:"tcp_server"`
+	// Addr pins the monitor daemon's TCP address (host:port). Empty means the
+	// address is derived from the data dir (ADR 0021). A pinned addr is shared
+	// across any data dirs using this config, so only pin it for single-instance
+	// setups (e.g. exposing a fixed port to containers).
+	Addr string `toml:"addr"`
 }
 
 // DashboardConfig holds dashboard-specific configuration
@@ -266,6 +271,15 @@ func (c *Config) PaneMonitoringTCPServer() bool {
 		return false
 	}
 	return c.PaneMonitoring.TCPServer
+}
+
+// PaneMonitoringAddr returns the pinned monitor daemon address, or "" when
+// none is configured (in which case the address is derived from the data dir).
+func (c *Config) PaneMonitoringAddr() string {
+	if c.PaneMonitoring == nil {
+		return ""
+	}
+	return c.PaneMonitoring.Addr
 }
 
 // DashboardSortCriteria returns the configured sort criteria for the dashboard.
