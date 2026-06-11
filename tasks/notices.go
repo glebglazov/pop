@@ -49,3 +49,12 @@ func RenderTaskComplete(w io.Writer, taskSetID, taskID string) {
 func RenderTaskSkip(w io.Writer, taskSetID, taskID string) {
 	outputFor(w).line(ansiYellow, "Skipped task %s/%s", taskSetID, taskID)
 }
+
+// RenderTaskCompleteBatch writes one line per batch transition in the form
+// <set>/<file>: <prior>→done.
+func RenderTaskCompleteBatch(w io.Writer, taskSetID string, transitions []CompleteTransition) {
+	out := outputFor(w)
+	for _, t := range transitions {
+		out.line(ansiGreen, "✓ %s/%s: %s→done", taskSetID, t.File, t.Prior)
+	}
+}

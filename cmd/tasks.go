@@ -12,6 +12,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -63,8 +64,8 @@ var taskResetTaskCmd = &cobra.Command{
 }
 
 var taskCompleteTaskCmd = &cobra.Command{
-	Use:   "complete TASK_SET/FILE.md",
-	Short: "Manually mark one task done without running an agent",
+	Use:   "complete [TASK_SET | TASK_SET/FILE.md]",
+	Short: "Manually mark tasks done without running an agent: one targeted task, or pick a set's tasks interactively",
 	Args:  cobra.ExactArgs(1),
 	Run:   runTaskCompleteTask,
 }
@@ -283,7 +284,15 @@ func runTaskResetTaskWith(d *tasks.Deps, w io.Writer, taskPath string) error {
 }
 
 func runTaskCompleteTask(cmd *cobra.Command, args []string) {
-	err := runTaskCompleteTaskWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	target := args[0]
+	var err error
+	if isTaskFileTarget(target) {
+		// A <task-set>/<file>.md reference moves exactly one task, no prompt.
+		err = runTaskCompleteTaskWith(tasks.DefaultDeps(), os.Stdout, target)
+	} else {
+		// A whole-set target opens the interactive Multi-task selection.
+		err = runTaskCompleteTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stdin, target)
+	}
 	handleTaskExit(err)
 }
 
@@ -296,6 +305,89 @@ func runTaskCompleteTaskWith(d *tasks.Deps, w io.Writer, taskPath string) error 
 		return err
 	}
 	tasks.RenderTaskComplete(w, result.TaskSetID, result.TaskID)
+	fmt.Fprintln(w)
+	tasks.Render(w, result.Refresh)
+	return nil
+}
+
+// completeTaskSelect runs the interactive Multi-task selection. It is a package
+// variable so tests can drive selection without a real terminal.
+var completeTaskSelect = func(title string, items []ui.MultiSelectItem) (ui.MultiSelectResult, error) {
+	return ui.RunMultiSelect(title, items)
+}
+
+// completeTaskInteractive reports whether stdin is an interactive terminal. It
+// is a package variable so tests can simulate either case.
+var completeTaskInteractive = func(stdin io.Reader) bool {
+	f, ok := stdin.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func completeRowLabel(r tasks.CompleteSelectionRow) string {
+	label := fmt.Sprintf("%-9s %s", "["+r.Status+"]", r.File)
+	if r.Title != "" {
+		label += "  " + r.Title
+	}
+	return label
+}
+
+func runTaskCompleteTasksWith(d *tasks.Deps, w io.Writer, stdin io.Reader, target string) error {
+	ctx, err := tasks.LoadCompleteSelectionWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput(), target)
+	if err != nil {
+		return err
+	}
+
+	// A whole-set target with no interactive TTY is rejected with a pointer to
+	// the file-reference form, never a silent mass mutation (ADR 0020).
+	if !completeTaskInteractive(stdin) {
+		return &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf(
+			"completing a whole task set needs an interactive terminal; target one task with %s/<file>.md instead", ctx.TaskSetID)}
+	}
+
+	items := make([]ui.MultiSelectItem, len(ctx.Rows))
+	for i, r := range ctx.Rows {
+		items[i] = ui.MultiSelectItem{
+			Label:      completeRowLabel(r),
+			Locked:     r.Locked,
+			LockedMark: "✓",
+		}
+	}
+
+	selection, err := completeTaskSelect(fmt.Sprintf("Complete tasks in %s", ctx.TaskSetID), items)
+	if err != nil {
+		return err
+	}
+	if !selection.Confirmed {
+		return nil // Esc cancels: zero writes.
+	}
+
+	var selectedIDs []string
+	for _, idx := range selection.Checked {
+		if idx >= 0 && idx < len(ctx.Rows) {
+			selectedIDs = append(selectedIDs, ctx.Rows[idx].TaskID)
+		}
+	}
+	if len(selectedIDs) == 0 {
+		return nil // Empty selection: clean no-op exit.
+	}
+
+	result, err := tasks.CompleteTasksWith(d, taskProjectDeps(), taskConfigLoad, tasks.CompleteTasksOptions{
+		ResolveInput:    taskResolveInput(),
+		TaskSetTarget:   target,
+		SelectedTaskIDs: selectedIDs,
+	})
+	if err != nil {
+		return err
+	}
+
+	tasks.RenderTaskCompleteBatch(w, result.TaskSetID, result.Transitions)
 	fmt.Fprintln(w)
 	tasks.Render(w, result.Refresh)
 	return nil
