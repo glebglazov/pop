@@ -891,16 +891,190 @@ func TestRunTaskSetDoesNotContinueIntoAnotherTaskSet(t *testing.T) {
 	assertTaskOpen(t, &execFixture{root: root, tasksDir: tasksDir}, "01-x")
 }
 
-func TestRunTaskSetFailedTaskSetRejected(t *testing.T) {
+// Under --yes the Failed gate cannot prompt, so re-entry into an already-Failed
+// set preserves the static printFailedStopAdvice output and exits with
+// operational failure so wrapping automation still sees the failure.
+func TestRunTaskSetFailedReentryYesFallsBackToStaticAdvice(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
-	opts := env.runTaskSetOpts(true, agent, nil)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
 	opts.TaskSetOverride = "demo"
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
-	assertExitCode(t, err, ExitNoRunnable)
+	assertExitCode(t, err, ExitOperational)
+
+	out := buf.String()
+	if !strings.Contains(out, "pop tasks open demo/01-a.md") {
+		t.Fatalf("static advice missing reset hint:\n%s", out)
+	}
+	if strings.Contains(out, "Re-run (default)") {
+		t.Fatalf("--yes must not show the interactive Failed gate menu:\n%s", out)
+	}
+	assertTaskFailed(t, env.execFixture(), "01-a", 3)
+}
+
+// A non-interactive input (NonInteractiveReader, not --yes) also cannot prompt,
+// so the Failed gate falls back to the same static advice and operational exit.
+func TestRunTaskSetFailedReentryNonInteractiveFallsBack(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	opts.ConfirmIn = NonInteractiveReader{}
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(buf.String(), "pop tasks open demo/01-a.md") {
+		t.Fatalf("static advice missing reset hint:\n%s", buf.String())
+	}
+}
+
+// Re-run (empty input selects the default) resets the failed task and retries
+// it in the same invocation, with no second AFK consent prompt.
+func TestRunTaskSetFailedGateRerunRetriesInProcess(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "fixed"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	opts.ConfirmIn = strings.NewReader("\n")
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v, want done with one completion", result)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"Failed: demo/01-a failed before the set could continue.",
+		"1. Re-run (default)",
+		"Reset task demo/01-a to open",
+		"━━ Running task demo/01-a",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, taskSetConfirmPrompt) {
+		t.Fatalf("Re-run must not ask for a second AFK consent:\n%s", out)
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
+}
+
+// Finish by hand marks the failed task done and lets the set continue draining
+// from a task that the completion newly unblocks.
+func TestRunTaskSetFailedGateFinishByHandContinues(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "second"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	opts.ConfirmIn = strings.NewReader("2\n")
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v, want done with one completion", result)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"✓ Completed task demo/01-a",
+		"━━ Running task demo/02-b",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
+	assertTaskDone(t, env.execFixture(), "02-b")
+}
+
+// Exit leaves the failure in place, prints the static advice, and exits with
+// operational failure.
+func TestRunTaskSetFailedGateExitStops(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	opts.ConfirmIn = strings.NewReader("3\n")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(buf.String(), "pop tasks open demo/01-a.md") {
+		t.Fatalf("exit must print static advice:\n%s", buf.String())
+	}
+	assertTaskFailed(t, env.execFixture(), "01-a", 3)
+}
+
+// Invalid input re-prompts before accepting a valid selection.
+func TestRunTaskSetFailedGateInvalidReprompts(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	opts.ConfirmIn = strings.NewReader("9\n3\n")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(buf.String(), "Choose 1, 2, or 3.") {
+		t.Fatalf("invalid input must re-prompt:\n%s", buf.String())
+	}
+}
+
+// The Failed gate also appears right after a live attempt exhausts its retries;
+// Re-run retries the task in the same invocation.
+func TestRunTaskSetFailedGateLiveFailureRerunRetries(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeSequentialFakeAgent(t, env.root, []fakeAgentStep{
+		{exitCode: 1},
+		{summary: "recovered"},
+	})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.MaxTries = 1
+	opts.ConfirmIn = strings.NewReader("y\n1\n")
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone {
+		t.Fatalf("result = %#v, want done after re-run", result)
+	}
+	if !strings.Contains(buf.String(), "Failed: demo/01-a failed before the set could continue.") {
+		t.Fatalf("live failure must show the Failed gate:\n%s", buf.String())
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
 }
 
 func TestRunTaskSetYesPrintsConciseSummary(t *testing.T) {

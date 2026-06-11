@@ -245,6 +245,21 @@ func BlockingHITLTask(m *Manifest) *Task {
 	return nil
 }
 
+// FailedTask returns the first failed task in a manifest, or nil when none has
+// failed. A set goes Failed on its first failure and selection halts before
+// another task can fail, so this is the single task the Failed gate targets.
+func FailedTask(m *Manifest) *Task {
+	if m == nil {
+		return nil
+	}
+	for i := range m.Tasks {
+		if m.Tasks[i].Status == "failed" {
+			return &m.Tasks[i]
+		}
+	}
+	return nil
+}
+
 func blockersResolved(m *Manifest, task Task) bool {
 	for _, blocker := range task.BlockedBy {
 		if !blockerSatisfied(m, blocker) {

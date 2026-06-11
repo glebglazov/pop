@@ -92,7 +92,11 @@ func selectExplicitTaskSet(refresh *RefreshResult, taskSetID string) (string, er
 
 	switch row.Status {
 	case StatusFailed:
-		return "", exitErr(ExitNoRunnable, "Task set %q has failed tasks; reset required before execution", taskSetID)
+		// An explicitly targeted Failed set is allowed through so drain can
+		// re-enter the Failed gate, mirroring the Human-blocked pass-through
+		// below. The loop's StatusFailed branch runs the interactive recovery
+		// prompt (re-run / finish by hand / exit) or the static advice fallback.
+		return taskSetID, nil
 	case StatusMalformed:
 		return "", exitErr(ExitNoRunnable, "Task set %q is malformed", taskSetID)
 	case StatusMissing:

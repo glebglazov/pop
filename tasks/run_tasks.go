@@ -135,17 +135,15 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	}
 
 	initialHITLGate := selectedTaskSetStartsAtHITLGate(refresh, taskSetID)
+	initialFailedGate := selectedTaskSetStartsAtFailedGate(refresh, taskSetID)
+	initialGate := initialHITLGate || initialFailedGate
 	var sharedPromptReader *bufio.Reader
-	if initialHITLGate && !opts.Yes && canPrompt(opts.ConfirmIn) {
-		promptIn := opts.ConfirmIn
-		if promptIn == nil {
-			promptIn = os.Stdin
-		}
-		sharedPromptReader = bufio.NewReader(promptIn)
+	if initialGate {
+		sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
 	}
 
 	afkConsentConfirmed := opts.Yes
-	if !initialHITLGate {
+	if !initialGate {
 		confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes, taskSetConfirmPrompt)
 		if err != nil {
 			return nil, err
@@ -224,7 +222,21 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					fmt.Fprintln(out)
 					Render(out, currentRefresh)
 				}
-				printFailedStopAdvice(out, taskSetID, currentRefresh.Manifests[taskSetID])
+				m := currentRefresh.Manifests[taskSetID]
+				sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
+				handled, err := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.CWD, taskSetID, m, FailedTask(m))
+				if err != nil {
+					return nil, err
+				}
+				if handled {
+					// Re-run reset the task to open and Finish-by-hand marked it
+					// done; either way the user actively chose to continue, so the
+					// newly eligible task runs in this invocation without a second
+					// AFK consent prompt.
+					afkConsentConfirmed = true
+					continue
+				}
+				printFailedStopAdvice(out, taskSetID, m)
 				return nil, exitErr(ExitOperational, "Task set %q has failed tasks", taskSetID)
 			default:
 				return nil, selErr
@@ -279,7 +291,16 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					fmt.Fprintln(out)
 					Render(out, afterRefresh)
 				}
-				printFailedStopAdvice(out, taskSetID, afterRefresh.Manifests[taskSetID])
+				m := afterRefresh.Manifests[taskSetID]
+				sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
+				handled, gateErr := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.CWD, taskSetID, m, FailedTask(m))
+				if gateErr != nil {
+					return result, gateErr
+				}
+				if handled {
+					continue
+				}
+				printFailedStopAdvice(out, taskSetID, m)
 			}
 			return result, execErr
 		}
@@ -310,6 +331,32 @@ func finishRunTaskSet(out io.Writer, yes bool, result *RunTaskSetResult) {
 func selectedTaskSetStartsAtHITLGate(refresh *RefreshResult, taskSetID string) bool {
 	row := findRow(refresh, taskSetID)
 	return row != nil && row.Status == StatusBlocked && BlockingHITLTask(refresh.Manifests[taskSetID]) != nil
+}
+
+// selectedTaskSetStartsAtFailedGate reports whether draining re-enters an
+// already-Failed set, so the run goes straight to the Failed gate instead of
+// asking for AFK consent first (the set has no immediately runnable task).
+func selectedTaskSetStartsAtFailedGate(refresh *RefreshResult, taskSetID string) bool {
+	row := findRow(refresh, taskSetID)
+	return row != nil && row.Status == StatusFailed
+}
+
+// ensurePromptReader returns a single bufio.Reader reused across every gate
+// prompt in one run. Reusing one reader matters: a fresh bufio.Reader buffers
+// ahead on its first read, so making a new one per gate would swallow the input
+// queued for later gates. Returns nil — and the caller falls back to static
+// advice — when prompting is impossible (--yes or a non-interactive input).
+func ensurePromptReader(existing *bufio.Reader, in io.Reader, yes bool) *bufio.Reader {
+	if existing != nil {
+		return existing
+	}
+	if yes || !canPrompt(in) {
+		return nil
+	}
+	if in == nil {
+		in = os.Stdin
+	}
+	return bufio.NewReader(in)
 }
 
 func deferralMessage(result *RunTaskSetResult) string {
@@ -456,7 +503,7 @@ func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string,
 	fmt.Fprintln(display, "  4. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
-	answer, err := readPromptLine(reader)
+	answer, err := readPromptLine(reader, "4")
 	if err != nil {
 		return hitlGateExit, err
 	}
@@ -475,13 +522,95 @@ func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string,
 	}
 }
 
-func readPromptLine(reader *bufio.Reader) (string, error) {
+// readPromptLine reads one menu selection. eofDefault is returned when the
+// input source closes with nothing pending, so a closed pipe resolves to a
+// definite choice (each gate passes the number of its Exit option) instead of
+// looping forever on empty reads.
+func readPromptLine(reader *bufio.Reader, eofDefault string) (string, error) {
 	answer, err := reader.ReadString('\n')
 	if err != nil && err != io.EOF {
-		return "", exitErr(ExitOperational, "read HITL gate selection: %v", err)
+		return "", exitErr(ExitOperational, "read gate selection: %v", err)
 	}
 	if err == io.EOF && answer == "" {
-		return "4", nil
+		return eofDefault, nil
 	}
 	return strings.TrimRight(answer, "\r\n"), nil
+}
+
+type failedGateAction int
+
+const (
+	failedGateExit failedGateAction = iota
+	failedGateRerun
+	failedGateComplete
+)
+
+// handleInteractiveFailedGate is the interactive counterpart to
+// printFailedStopAdvice: it offers the same recovery paths as a numbered menu
+// at both points where draining stops on a failed task. Returns (true, nil)
+// when the caller should keep draining in-process — Re-run reset the task to
+// open, Finish-by-hand marked it done — and (false, nil) when it should fall
+// back to the static advice and exit with operational failure (Exit chosen, or
+// the prompt cannot run under --yes / a non-interactive input).
+func handleInteractiveFailedGate(d *Deps, out io.Writer, in io.Reader, reader *bufio.Reader, yes bool, cwd, taskSetID string, m *Manifest, failed *Task) (bool, error) {
+	if yes || !canPrompt(in) || m == nil || failed == nil {
+		return false, nil
+	}
+	if in == nil {
+		in = os.Stdin
+	}
+	if reader == nil {
+		reader = bufio.NewReader(in)
+	}
+
+	for {
+		action, err := promptFailedGateAction(out, reader, taskSetID, failed)
+		if err != nil {
+			return true, err
+		}
+		switch action {
+		case failedGateRerun:
+			result, err := ResetTaskWith(d, nil, nil, ResetTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, failed.File)})
+			if err != nil {
+				return true, err
+			}
+			RenderTaskReset(out, result.TaskSetID, result.TaskID)
+			return true, nil
+		case failedGateComplete:
+			result, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, failed.File)})
+			if err != nil {
+				return true, err
+			}
+			RenderTaskComplete(out, result.TaskSetID, result.TaskID)
+			return true, nil
+		case failedGateExit:
+			return false, nil
+		}
+	}
+}
+
+func promptFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID string, failed *Task) (failedGateAction, error) {
+	display := outputFor(out)
+	fmt.Fprintln(display)
+	display.line(ansiRed, "Failed: %s/%s failed before the set could continue.", taskSetID, failed.ID)
+	fmt.Fprintln(display, "  1. Re-run (default)")
+	fmt.Fprintln(display, "  2. Finish by hand")
+	fmt.Fprintln(display, "  3. Exit")
+	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
+
+	answer, err := readPromptLine(reader, "3")
+	if err != nil {
+		return failedGateExit, err
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "", "1":
+		return failedGateRerun, nil
+	case "2":
+		return failedGateComplete, nil
+	case "3", "q", "quit", "exit":
+		return failedGateExit, nil
+	default:
+		fmt.Fprintln(display, "Choose 1, 2, or 3.")
+		return promptFailedGateAction(out, reader, taskSetID, failed)
+	}
 }
