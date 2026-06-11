@@ -63,7 +63,7 @@ func TestStreamRecorderRecordFormat(t *testing.T) {
 		t.Fatalf("capture distorted: %q", got)
 	}
 
-	jsonl, err := encodeAttemptStream(rec, "claude", "claude --model opus4.8", 2, "completed")
+	jsonl, err := encodeAttemptStream(rec, "claude", "claude --model opus4.8", 2, "completed", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +105,45 @@ func TestStreamRecorderRecordFormat(t *testing.T) {
 	}
 	if footer["duration_ms"].(float64) < events[2]["at_ms"].(float64) {
 		t.Fatalf("footer duration %v shorter than last event %v", footer["duration_ms"], events[2]["at_ms"])
+	}
+}
+
+func TestEncodeAttemptStreamFooterCarriesReasonAndExitCode(t *testing.T) {
+	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	encodeFooter := func(outcome, reason string, exitCode int) map[string]any {
+		var capture bytes.Buffer
+		rec := newStreamRecorder(&capture, fakeClock(start, 100*time.Millisecond))
+		rec.finish()
+		jsonl, err := encodeAttemptStream(rec, "claude", "claude", 1, outcome, reason, exitCode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		records := decodeStreamRecords(t, jsonl)
+		return records[len(records)-1]
+	}
+
+	// A failure footer carries the structured reason and exit code beside outcome.
+	failed := encodeFooter(streamOutcomeFailed, "missing TASK_COMPLETE sentinel", 0)
+	if failed["type"] != "footer" || failed["outcome"] != streamOutcomeFailed {
+		t.Fatalf("footer = %v", failed)
+	}
+	if failed["reason"] != "missing TASK_COMPLETE sentinel" {
+		t.Fatalf("footer reason = %v", failed["reason"])
+	}
+
+	exited := encodeFooter(streamOutcomeFailed, "agent exited with status 3", 3)
+	if exited["reason"] != "agent exited with status 3" || exited["exit_code"].(float64) != 3 {
+		t.Fatalf("footer = %v, want reason + exit_code 3", exited)
+	}
+
+	// A non-failure footer omits both fields, so the prior shape is unchanged.
+	completed := encodeFooter(streamOutcomeCompleted, "", 0)
+	if _, ok := completed["reason"]; ok {
+		t.Fatalf("completed footer should omit reason: %v", completed)
+	}
+	if _, ok := completed["exit_code"]; ok {
+		t.Fatalf("completed footer should omit exit_code: %v", completed)
 	}
 }
 

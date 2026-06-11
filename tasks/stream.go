@@ -47,11 +47,20 @@ type streamEventRecord struct {
 	Raw  string `json:"raw"`
 }
 
-// streamFooterRecord closes a Captured attempt stream file.
+// streamFooterRecord closes a Captured attempt stream file. Reason is the
+// structured failure verdict assessment produced (the agent's own TASK_FAILED
+// text, a missing sentinel/summary, unchecked acceptance criteria, or a
+// non-zero exit) and ExitCode the agent's exit status; both ride beside the
+// outcome so a later run re-entering a Failed Task set can recover why the last
+// attempt failed without scraping the human-facing progress record (ADR 0020).
+// Reason is a finer-grained verdict than Outcome and is populated only on
+// failure paths; on other terminal paths it is empty and omitted.
 type streamFooterRecord struct {
 	Type       string `json:"type"`
 	Outcome    string `json:"outcome"`
 	DurationMS int64  `json:"duration_ms"`
+	Reason     string `json:"reason,omitempty"`
+	ExitCode   int    `json:"exit_code,omitempty"`
 }
 
 // streamRecorder sits on the capture tee: it forwards raw bytes to the capture
@@ -116,7 +125,7 @@ func (r *streamRecorder) finish() {
 
 // encodeAttemptStream renders one self-contained JSONL document: header,
 // timestamped raw events, footer.
-func encodeAttemptStream(r *streamRecorder, agent, requestedAgent string, attempt int, outcome string) ([]byte, error) {
+func encodeAttemptStream(r *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	if err := enc.Encode(streamHeaderRecord{Type: "header", Agent: agent, RequestedAgent: requestedAgent, Attempt: attempt, StartTime: r.start.UTC()}); err != nil {
@@ -131,7 +140,7 @@ func encodeAttemptStream(r *streamRecorder, agent, requestedAgent string, attemp
 	if end.IsZero() {
 		end = r.now()
 	}
-	if err := enc.Encode(streamFooterRecord{Type: "footer", Outcome: outcome, DurationMS: end.Sub(r.start).Milliseconds()}); err != nil {
+	if err := enc.Encode(streamFooterRecord{Type: "footer", Outcome: outcome, DurationMS: end.Sub(r.start).Milliseconds(), Reason: reason, ExitCode: exitCode}); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -211,12 +220,12 @@ func writeAttemptStream(d *Deps, dir string, jsonl []byte) (string, error) {
 // storage failure is reported on errOut but never fails the implement run.
 // A nil recorder (plain-output or custom-command attempt) records nothing.
 // Returns the written file's path, or "" when nothing was persisted.
-func persistAttemptStream(d *Deps, errOut io.Writer, sel *Selection, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome string) string {
+func persistAttemptStream(d *Deps, errOut io.Writer, sel *Selection, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int) string {
 	if rec == nil {
 		return ""
 	}
 	var path string
-	jsonl, err := encodeAttemptStream(rec, agent, requestedAgent, attempt, outcome)
+	jsonl, err := encodeAttemptStream(rec, agent, requestedAgent, attempt, outcome, reason, exitCode)
 	if err == nil {
 		path, err = writeAttemptStream(d, taskStreamDir(sel.Manifest.Dir, sel.TaskFile), jsonl)
 	}

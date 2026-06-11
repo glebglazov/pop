@@ -31,6 +31,12 @@ type AttemptTiming struct {
 	Duration       time.Duration
 	Tools          []ToolTiming
 	Model          time.Duration
+	// Reason is the structured failure verdict from the footer and ExitCode the
+	// agent's exit status; both are meaningful only when Outcome is a failure
+	// and empty otherwise (ADR 0020). The timing lens does not render them — they
+	// feed the Failed Task re-entry path via LatestFailureReason.
+	Reason   string
+	ExitCode int
 }
 
 // ToolTiming aggregates one tool's paired invocations within an attempt:
@@ -292,7 +298,28 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 		Duration:       time.Duration(footer.DurationMS) * time.Millisecond,
 		Tools:          tools,
 		Model:          model,
+		Reason:         footer.Reason,
+		ExitCode:       footer.ExitCode,
 	}, nil
+}
+
+// LatestFailureReason returns the structured failure reason recorded on the
+// latest persisted attempt footer for one task — the durable source the Failed
+// Task re-entry path reads to recover why the last attempt failed without
+// scraping the human-facing progress record (ADR 0020). Attempts are ordered by
+// start time, so the last is the most recent regardless of attempt numbering.
+// Returns "" when the task has no recorded attempts or the latest attempt did
+// not record a reason (a non-failure outcome). The reason comes from the stream
+// footer, never the task markdown.
+func LatestFailureReason(d *Deps, taskSetDir, taskFile string) (string, error) {
+	attempts, err := readTaskAttemptTimings(d, taskSetDir, taskFile)
+	if err != nil {
+		return "", err
+	}
+	if len(attempts) == 0 {
+		return "", nil
+	}
+	return attempts[len(attempts)-1].Reason, nil
 }
 
 // RenderTimings writes the Attempt timing breakdown: per task, attempts

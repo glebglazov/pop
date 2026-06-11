@@ -23,9 +23,20 @@ func writeTimingStream(t *testing.T, dir, name, agent string, attempt int, start
 // writeTimingStreamWithEvents is writeTimingStream with explicit stream events.
 func writeTimingStreamWithEvents(t *testing.T, dir, name, agent, requestedAgent string, attempt int, start time.Time, outcome string, durationMS int64, events []streamEventRecord) {
 	t.Helper()
+	writeTimingStreamRecords(t, dir, name,
+		streamHeaderRecord{Type: "header", Agent: agent, RequestedAgent: requestedAgent, Attempt: attempt, StartTime: start.UTC()},
+		events,
+		streamFooterRecord{Type: "footer", Outcome: outcome, DurationMS: durationMS})
+}
+
+// writeTimingStreamRecords writes one gzipped stream from explicit header,
+// events, and footer records, so tests can populate footer fields the higher
+// helpers omit (e.g. the failure reason and exit code).
+func writeTimingStreamRecords(t *testing.T, dir, name string, header streamHeaderRecord, events []streamEventRecord, footer streamFooterRecord) {
+	t.Helper()
 	var jsonl bytes.Buffer
 	enc := json.NewEncoder(&jsonl)
-	if err := enc.Encode(streamHeaderRecord{Type: "header", Agent: agent, RequestedAgent: requestedAgent, Attempt: attempt, StartTime: start.UTC()}); err != nil {
+	if err := enc.Encode(header); err != nil {
 		t.Fatal(err)
 	}
 	for _, ev := range events {
@@ -33,7 +44,7 @@ func writeTimingStreamWithEvents(t *testing.T, dir, name, agent, requestedAgent 
 			t.Fatal(err)
 		}
 	}
-	if err := enc.Encode(streamFooterRecord{Type: "footer", Outcome: outcome, DurationMS: durationMS}); err != nil {
+	if err := enc.Encode(footer); err != nil {
 		t.Fatal(err)
 	}
 
@@ -763,6 +774,47 @@ func TestRunTaskSetPrintsBreakdownPerTaskAsItTerminates(t *testing.T) {
 	firstBreakdown, secondTask := strings.Index(out, "Attempt timing"), strings.Index(out, "Running task demo/02-b")
 	if secondTask == -1 || firstBreakdown > secondTask {
 		t.Fatalf("first task's breakdown not printed before second task ran:\n%s", out)
+	}
+}
+
+func TestLatestFailureReasonReadsLatestFooter(t *testing.T) {
+	d := realFSDeps()
+	taskSetDir := t.TempDir()
+	taskFile := "01-a.md"
+	dir := taskStreamDir(taskSetDir, taskFile)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	event := []streamEventRecord{{Type: "event", AtMS: 5, Raw: `{"type":"system"}`}}
+
+	// Three attempts written out of start-time order: the latest by start time —
+	// not by attempt number or on-disk order — supplies the reason.
+	writeTimingStreamRecords(t, dir, "attempt-001.jsonl.gz",
+		streamHeaderRecord{Type: "header", Agent: "claude", Attempt: 1, StartTime: base.Add(20 * time.Minute).UTC()},
+		event,
+		streamFooterRecord{Type: "footer", Outcome: streamOutcomeFailed, DurationMS: 1_000, Reason: "unchecked acceptance criteria", ExitCode: 0})
+	writeTimingStreamRecords(t, dir, "attempt-002.jsonl.gz",
+		streamHeaderRecord{Type: "header", Agent: "claude", Attempt: 2, StartTime: base.UTC()},
+		event,
+		streamFooterRecord{Type: "footer", Outcome: streamOutcomeFailed, DurationMS: 1_000, Reason: "missing TASK_COMPLETE sentinel", ExitCode: 0})
+	writeTimingStreamRecords(t, dir, "attempt-003.jsonl.gz",
+		streamHeaderRecord{Type: "header", Agent: "claude", Attempt: 3, StartTime: base.Add(10 * time.Minute).UTC()},
+		event,
+		streamFooterRecord{Type: "footer", Outcome: streamOutcomeFailed, DurationMS: 1_000, Reason: "agent exited with status 2", ExitCode: 2})
+
+	reason, err := LatestFailureReason(d, taskSetDir, taskFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reason != "unchecked acceptance criteria" {
+		t.Fatalf("reason = %q, want the latest attempt's reason", reason)
+	}
+
+	// No recorded attempts: the reader is empty, not an error.
+	empty, err := LatestFailureReason(d, taskSetDir, "02-b.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty != "" {
+		t.Fatalf("reason = %q, want empty for a task with no streams", empty)
 	}
 }
 

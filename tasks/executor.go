@@ -246,8 +246,8 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	// breakdown when the task reaches a terminal state. Full history stays
 	// with `pop tasks timings`.
 	var streamPaths []string
-	persist := func(rec *streamRecorder, attempt int, outcome string) {
-		if p := persistAttemptStream(d, errOut, sel, rec, invocation.AgentPreset(), invocation.RequestedAgent, attempt, outcome); p != "" {
+	persist := func(rec *streamRecorder, attempt int, outcome, reason string, exitCode int) {
+		if p := persistAttemptStream(d, errOut, sel, rec, invocation.AgentPreset(), invocation.RequestedAgent, attempt, outcome, reason, exitCode); p != "" {
 			streamPaths = append(streamPaths, p)
 		}
 	}
@@ -266,11 +266,12 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			display.line(ansiDim, "── Agent finished for %s/%s ───────────────────────────", sel.TaskSetID, sel.TaskID)
 		}
 		if outcome.interrupted {
-			persist(outcome.stream, attempt, streamOutcomeInterrupted)
+			persist(outcome.stream, attempt, streamOutcomeInterrupted, "", outcome.exitCode)
 			return nil, taskExitErr(sel, ExitInterrupted, "interrupted")
 		}
 		if outcome.timedOut {
-			persist(outcome.stream, attempt, streamOutcomeTimedOut)
+			timeoutReason := fmt.Sprintf("timed out after %s", timeout)
+			persist(outcome.stream, attempt, streamOutcomeTimedOut, timeoutReason, outcome.exitCode)
 			summary := fmt.Sprintf("timed out after %s on attempt %d", timeout, attempt)
 			display.line(ansiRed, "✗ Attempt %d/%d timed out after %s", attempt, maxTries, timeout)
 			printAttemptBreakdown(d, out, streamPaths)
@@ -284,7 +285,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		}
 		agentResult := invocation.NormalizeOutput(agentOut)
 		if agentResult.QuotaPause != nil {
-			persist(outcome.stream, attempt, streamOutcomeQuotaPaused)
+			persist(outcome.stream, attempt, streamOutcomeQuotaPaused, "", outcome.exitCode)
 			display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.TaskSetID, sel.TaskID)
 			display.line(ansiYellow, "  %s", agentResult.QuotaPause.Reason)
 			return &RunTaskResult{
@@ -304,7 +305,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		if assessment.Complete {
 			streamOutcome = streamOutcomeCompleted
 		}
-		persist(outcome.stream, attempt, streamOutcome)
+		persist(outcome.stream, attempt, streamOutcome, reason, outcome.exitCode)
 		if assessment.Complete {
 			result, err := completeSuccessfulTask(d, sel, runtimePath, assessment.Summary)
 			if err != nil {
