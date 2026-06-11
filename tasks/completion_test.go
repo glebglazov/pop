@@ -63,6 +63,49 @@ func TestCompleteTaskTargetsOffersIdentifiersAndSetRelativeFiles(t *testing.T) {
 	}
 }
 
+func TestCompleteActionableTaskTargetsOmitsDoneSetsAndTasks(t *testing.T) {
+	root := t.TempDir()
+	tasksDir := setupCompletionRepo(t, root)
+	writeCompletionFixture(t, tasksDir, "archived", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeCompletionFixture(t, tasksDir, "feature", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "done"},
+	})
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	ids, err := CompleteActionableTaskTargets(CompletionInput{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != "feature/" {
+		t.Fatalf("identifiers = %#v", ids)
+	}
+
+	files, err := CompleteActionableTaskTargets(CompletionInput{}, "feature/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0] != "feature/01-a.md" {
+		t.Fatalf("set-relative files = %#v", files)
+	}
+
+	// The unfiltered variant (timings) still offers the Done set and done task.
+	all, err := CompleteTaskTargets(CompletionInput{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(all, ",") != "archived/,feature/" {
+		t.Fatalf("unfiltered identifiers = %#v", all)
+	}
+}
+
 func TestCompleteProjectNamesUsesPickerVisibleNames(t *testing.T) {
 	root := t.TempDir()
 	projectDir := filepath.Join(root, "svc")

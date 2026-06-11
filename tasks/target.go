@@ -181,6 +181,19 @@ func ResolveTaskFileTarget(refresh *RefreshResult, raw string) (taskSetID, taskI
 // set-relative task files for that set. It never offers filesystem path
 // segments.
 func taskTargetIdentifierCompletions(refresh *RefreshResult, toComplete string) []string {
+	return taskTargetCompletions(refresh, toComplete, false)
+}
+
+// actionableTaskTargetCompletions is the filtered variant for implement and
+// the override verbs: it never offers a done thing — Done Task sets are
+// omitted at the set stage and done tasks at the file stage, since neither is
+// actionable by any of those verbs. Explicitly typed done targets still
+// resolve; the filter narrows completion, not resolution.
+func actionableTaskTargetCompletions(refresh *RefreshResult, toComplete string) []string {
+	return taskTargetCompletions(refresh, toComplete, true)
+}
+
+func taskTargetCompletions(refresh *RefreshResult, toComplete string, omitDone bool) []string {
 	if refresh == nil || refresh.Manifests == nil {
 		return nil
 	}
@@ -193,6 +206,9 @@ func taskTargetIdentifierCompletions(refresh *RefreshResult, toComplete string) 
 		prefix := head + "/"
 		var out []string
 		for _, task := range m.Tasks {
+			if omitDone && task.Status == "done" {
+				continue
+			}
 			candidate := prefix + task.File
 			if strings.HasPrefix(candidate, slash) {
 				out = append(out, candidate)
@@ -206,7 +222,10 @@ func taskTargetIdentifierCompletions(refresh *RefreshResult, toComplete string) 
 	// stage's no-space drill leaves the cursor right after the slash. The
 	// <task-set>/ form is itself a valid whole-set target.
 	var ids []string
-	for id := range refresh.Manifests {
+	for id, m := range refresh.Manifests {
+		if omitDone && DeriveStatus(m) == StatusDone {
+			continue
+		}
 		candidate := id + "/"
 		if strings.HasPrefix(candidate, slash) {
 			ids = append(ids, candidate)

@@ -81,7 +81,17 @@ func completeTaskTaskSets(cmd *cobra.Command, args []string, toComplete string) 
 }
 
 func completeTaskTaskTargets(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	targets, err := tasks.CompleteTaskTargetsWith(
+	return completeTaskTargetCandidates(cmd, toComplete, tasks.CompleteTaskTargetsWith)
+}
+
+// completeActionableTaskTargets omits Done sets and done tasks; implement and
+// the override verbs use it, while timings keeps the unfiltered list.
+func completeActionableTaskTargets(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return completeTaskTargetCandidates(cmd, toComplete, tasks.CompleteActionableTaskTargetsWith)
+}
+
+func completeTaskTargetCandidates(cmd *cobra.Command, toComplete string, list func(*tasks.Deps, *project.Deps, func(string) (*config.Config, error), tasks.CompletionInput, string) ([]string, error)) ([]string, cobra.ShellCompDirective) {
+	targets, err := list(
 		taskCompletionDeps(),
 		taskCompletionProjectDeps(),
 		taskCompletionConfigLoad,
@@ -122,7 +132,7 @@ func completeTaskImplementArgs(cmd *cobra.Command, args []string, toComplete str
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeTaskTaskTargets(cmd, args, toComplete)
+	return completeActionableTaskTargets(cmd, args, toComplete)
 }
 
 func completeTaskTimingsArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -136,7 +146,7 @@ func completeTaskTaskFileArgs(cmd *cobra.Command, args []string, toComplete stri
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeTaskTaskTargets(cmd, args, toComplete)
+	return completeActionableTaskTargets(cmd, args, toComplete)
 }
 
 func completionInputFromCmd(cmd *cobra.Command) tasks.CompletionInput {

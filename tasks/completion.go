@@ -83,6 +83,22 @@ func CompleteTaskTargetsWith(d *Deps, pd *project.Deps, loadConfig func(string) 
 	return taskTargetIdentifierCompletions(refresh, toComplete), nil
 }
 
+// CompleteActionableTaskTargets is the filtered variant for implement and the
+// override verbs: Done Task sets and done tasks are omitted because neither is
+// actionable by those verbs. Timings completes the unfiltered list instead.
+func CompleteActionableTaskTargets(input CompletionInput, toComplete string) ([]string, error) {
+	return CompleteActionableTaskTargetsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
+}
+
+// CompleteActionableTaskTargetsWith returns actionable task target candidates using injected dependencies.
+func CompleteActionableTaskTargetsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
+	_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
+	if err != nil || refresh == nil {
+		return nil, err
+	}
+	return actionableTaskTargetCompletions(refresh, toComplete), nil
+}
+
 func completionRefreshContext(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) (string, *RefreshResult, error) {
 	defPath, err := resolveCompletionDefinitionPath(d, pd, loadConfig, input)
 	if err != nil || defPath == "" {

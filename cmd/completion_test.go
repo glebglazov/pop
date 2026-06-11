@@ -50,7 +50,10 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 	}
 	initGitRepoCmd(t, projectDir)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	writeCompletionThoughts(t, cmdTasksDir(t, projectDir), "svc", []string{"01-a", "02-b"})
+	tasksDir := cmdTasksDir(t, projectDir)
+	writeCompletionThoughts(t, tasksDir, "svc", []string{"01-a", "02-b"})
+	writeCompletionThoughtsStatuses(t, tasksDir, "archived", [][2]string{{"01-a", "done"}})
+	writeCompletionThoughtsStatuses(t, tasksDir, "mix", [][2]string{{"01-open", "open"}, {"02-done", "done"}})
 
 	cfgPath := filepath.Join(root, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("projects = [{ path = \""+projectDir+"\" }]\n"), 0o644); err != nil {
@@ -139,6 +142,29 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "set-priority")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmits(t, out, "thoughts/issues/svc")
+	})
+
+	t.Run("override verbs omit Done sets at set stage", func(t *testing.T) {
+		for _, verb := range []string{"implement", "open", "complete", "skip"} {
+			out := shellCompNoDesc(t, "tasks", verb)
+			assertShellCompContains(t, out, "mix/")
+			assertShellCompOmitsExact(t, out, "archived/")
+		}
+	})
+
+	t.Run("override verbs omit done tasks at file stage", func(t *testing.T) {
+		for _, verb := range []string{"implement", "open", "complete", "skip"} {
+			out := shellCompNoDescCompleting(t, "tasks", verb, "mix/")
+			assertShellCompContains(t, out, "mix/01-open.md")
+			assertShellCompOmitsExact(t, out, "mix/02-done.md")
+		}
+	})
+
+	t.Run("timings keeps Done sets and done tasks", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "timings")
+		assertShellCompContains(t, out, "archived/")
+		out = shellCompNoDescCompleting(t, "tasks", "timings", "mix/")
+		assertShellCompContains(t, out, "mix/01-open.md", "mix/02-done.md")
 	})
 
 	t.Run("agent presets", func(t *testing.T) {
@@ -274,13 +300,25 @@ func writeCompletionThoughts(t *testing.T, tasksDir, stem string, taskIDs []stri
 	if len(taskIDs) == 0 {
 		taskIDs = []string{"01-a"}
 	}
+	tasks := make([][2]string, len(taskIDs))
+	for i, id := range taskIDs {
+		tasks[i] = [2]string{id, "open"}
+	}
+	writeCompletionThoughtsStatuses(t, tasksDir, stem, tasks)
+}
+
+// writeCompletionThoughtsStatuses creates a valid Task set with explicit
+// per-task statuses, each entry an {id, status} pair.
+func writeCompletionThoughtsStatuses(t *testing.T, tasksDir, stem string, taskEntries [][2]string) {
+	t.Helper()
 	taskDir := filepath.Join(tasksDir, stem)
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	var tasks strings.Builder
 	tasks.WriteString(`{"tasks":[`)
-	for i, id := range taskIDs {
+	for i, entry := range taskEntries {
+		id, status := entry[0], entry[1]
 		if i > 0 {
 			tasks.WriteByte(',')
 		}
@@ -291,7 +329,9 @@ func writeCompletionThoughts(t *testing.T, tasksDir, stem string, taskIDs []stri
 		tasks.WriteString(file)
 		tasks.WriteString(`","title":"`)
 		tasks.WriteString(id)
-		tasks.WriteString(`","type":"AFK","status":"open"}`)
+		tasks.WriteString(`","type":"AFK","status":"`)
+		tasks.WriteString(status)
+		tasks.WriteString(`"}`)
 		if err := os.WriteFile(filepath.Join(taskDir, file), []byte("## Acceptance criteria\n\n- [ ] ok\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}

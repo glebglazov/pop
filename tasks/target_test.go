@@ -212,6 +212,43 @@ func TestTaskTargetIdentifierCompletions(t *testing.T) {
 	}
 }
 
+func TestActionableTaskTargetCompletionsNeverOfferDoneThings(t *testing.T) {
+	refresh := &RefreshResult{Manifests: map[string]*Manifest{
+		"finished": {Valid: true, Tasks: []Task{
+			{ID: "01-a", File: "01-a.md", Status: "done"},
+		}},
+		"deferred": {Valid: true, Tasks: []Task{
+			{ID: "01-a", File: "01-a.md", Status: "done"},
+			{ID: "02-b", File: "02-b.md", Status: "skipped"},
+		}},
+		"mixed": {Valid: true, Tasks: []Task{
+			{ID: "01-a", File: "01-a.md", Status: "done"},
+			{ID: "02-b", File: "02-b.md", Status: "open"},
+		}},
+		"broken": {Valid: false},
+	}}
+
+	ids := actionableTaskTargetCompletions(refresh, "")
+	if strings.Join(ids, ",") != "broken/,deferred/,mixed/" {
+		t.Fatalf("actionable identifiers = %#v", ids)
+	}
+
+	files := actionableTaskTargetCompletions(refresh, "mixed/")
+	if len(files) != 1 || files[0] != "mixed/02-b.md" {
+		t.Fatalf("actionable files = %#v", files)
+	}
+
+	// The unfiltered variant still offers Done sets and done tasks (timings).
+	all := taskTargetIdentifierCompletions(refresh, "")
+	if strings.Join(all, ",") != "broken/,deferred/,finished/,mixed/" {
+		t.Fatalf("unfiltered identifiers = %#v", all)
+	}
+	allFiles := taskTargetIdentifierCompletions(refresh, "mixed/")
+	if len(allFiles) != 2 {
+		t.Fatalf("unfiltered files = %#v", allFiles)
+	}
+}
+
 func refreshFixture(t *testing.T, root string) *RefreshResult {
 	t.Helper()
 	result, err := Refresh(root)
