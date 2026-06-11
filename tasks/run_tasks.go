@@ -224,7 +224,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				}
 				m := currentRefresh.Manifests[taskSetID]
 				sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
-				handled, err := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.CWD, taskSetID, m, FailedTask(m))
+				handled, err := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, m, FailedTask(m))
 				if err != nil {
 					return nil, err
 				}
@@ -293,7 +293,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				}
 				m := afterRefresh.Manifests[taskSetID]
 				sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
-				handled, gateErr := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.CWD, taskSetID, m, FailedTask(m))
+				handled, gateErr := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, m, FailedTask(m))
 				if gateErr != nil {
 					return result, gateErr
 				}
@@ -428,7 +428,7 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *buf
 			return true, nil
 		case hitlGateAssist:
 			fmt.Fprintf(outputFor(out), "Starting HITL assistance: %s\n", invocation.Display)
-			exitCode, err := runHITLAssistanceCommand(d, in, runtimePath, out, invocation)
+			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
 			if err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start HITL assistance: %v\n", err)
 				continue
@@ -464,13 +464,13 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *buf
 	}
 }
 
-// runHITLAssistanceCommand runs the attended assistance agent. stdin must be
+// runAttendedAssistanceCommand runs the attended assistance agent. stdin must be
 // the raw input source (the *os.File terminal), NOT the bufio.Reader used for
 // gate prompts: os/exec only inherits a child's controlling terminal when
 // cmd.Stdin is an *os.File. Handing it any other io.Reader makes exec splice a
 // pipe instead, so a TTY-requiring agent (e.g. codex) fails immediately with
 // "stdin is not a terminal".
-func runHITLAssistanceCommand(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, invocation *AgentAssistanceInvocation) (int, error) {
+func runAttendedAssistanceCommand(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, invocation *AgentAssistanceInvocation) (int, error) {
 	if attended, ok := d.Runner.(AttendedCommandRunner); ok {
 		return attended.RunAttended(context.Background(), runtimePath, stdin, out, out, invocation.Command.Name, invocation.Command.Args...)
 	}
@@ -542,6 +542,7 @@ type failedGateAction int
 const (
 	failedGateExit failedGateAction = iota
 	failedGateRerun
+	failedGateAssist
 	failedGateComplete
 )
 
@@ -552,7 +553,7 @@ const (
 // open, Finish-by-hand marked it done — and (false, nil) when it should fall
 // back to the static advice and exit with operational failure (Exit chosen, or
 // the prompt cannot run under --yes / a non-interactive input).
-func handleInteractiveFailedGate(d *Deps, out io.Writer, in io.Reader, reader *bufio.Reader, yes bool, cwd, taskSetID string, m *Manifest, failed *Task) (bool, error) {
+func handleInteractiveFailedGate(d *Deps, out io.Writer, in io.Reader, reader *bufio.Reader, yes bool, agentPreset, agentCmd, cwd, runtimePath, definitionPath, statePath, taskSetID string, m *Manifest, failed *Task) (bool, error) {
 	if yes || !canPrompt(in) || m == nil || failed == nil {
 		return false, nil
 	}
@@ -563,8 +564,14 @@ func handleInteractiveFailedGate(d *Deps, out io.Writer, in io.Reader, reader *b
 		reader = bufio.NewReader(in)
 	}
 
+	prompt := BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+	if err != nil {
+		return false, exitErr(ExitSetup, "%v", err)
+	}
+
 	for {
-		action, err := promptFailedGateAction(out, reader, taskSetID, failed)
+		action, err := promptFailedGateAction(out, reader, taskSetID, failed, invocation)
 		if err != nil {
 			return true, err
 		}
@@ -576,6 +583,35 @@ func handleInteractiveFailedGate(d *Deps, out io.Writer, in io.Reader, reader *b
 			}
 			RenderTaskReset(out, result.TaskSetID, result.TaskID)
 			return true, nil
+		case failedGateAssist:
+			fmt.Fprintf(outputFor(out), "Starting Failed assistance: %s\n", invocation.Display)
+			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
+			if err != nil {
+				fmt.Fprintf(outputFor(out), "Could not start Failed assistance: %v\n", err)
+				continue
+			}
+			if exitCode != 0 {
+				fmt.Fprintf(outputFor(out), "Failed assistance exited with status %d; refreshing Task set.\n", exitCode)
+			}
+			afterRefresh, err := RefreshWith(d, definitionPath, statePath)
+			if err != nil {
+				return true, exitErr(ExitOperational, "refresh after Failed assistance: %v", err)
+			}
+			afterManifest := afterRefresh.Manifests[taskSetID]
+			// The assist agent does not change task state on its own, so the task
+			// is still failed: refresh, then re-show the Failed gate. If the human
+			// did override state during the session, fall through to normal
+			// draining.
+			if FailedTask(afterManifest) == nil {
+				return true, nil
+			}
+			m = afterManifest
+			failed = FailedTask(m)
+			prompt = BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+			if err != nil {
+				return true, exitErr(ExitSetup, "%v", err)
+			}
 		case failedGateComplete:
 			result, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, failed.File)})
 			if err != nil {
@@ -589,16 +625,23 @@ func handleInteractiveFailedGate(d *Deps, out io.Writer, in io.Reader, reader *b
 	}
 }
 
-func promptFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID string, failed *Task) (failedGateAction, error) {
+func promptFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID string, failed *Task, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiRed, "Failed: %s/%s failed before the set could continue.", taskSetID, failed.ID)
 	fmt.Fprintln(display, "  1. Re-run (default)")
-	fmt.Fprintln(display, "  2. Finish by hand")
-	fmt.Fprintln(display, "  3. Exit")
+	fmt.Fprintln(display, "  2. Agent assistance")
+	if invocation != nil {
+		fmt.Fprintf(display, "     %s\n", invocation.Display)
+		if invocation.Detail != "" {
+			fmt.Fprintf(display, "     %s\n", invocation.Detail)
+		}
+	}
+	fmt.Fprintln(display, "  3. Finish by hand")
+	fmt.Fprintln(display, "  4. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
-	answer, err := readPromptLine(reader, "3")
+	answer, err := readPromptLine(reader, "4")
 	if err != nil {
 		return failedGateExit, err
 	}
@@ -606,11 +649,13 @@ func promptFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID strin
 	case "", "1":
 		return failedGateRerun, nil
 	case "2":
+		return failedGateAssist, nil
+	case "3":
 		return failedGateComplete, nil
-	case "3", "q", "quit", "exit":
+	case "4", "q", "quit", "exit":
 		return failedGateExit, nil
 	default:
-		fmt.Fprintln(display, "Choose 1, 2, or 3.")
-		return promptFailedGateAction(out, reader, taskSetID, failed)
+		fmt.Fprintln(display, "Choose 1, 2, 3, or 4.")
+		return promptFailedGateAction(out, reader, taskSetID, failed, invocation)
 	}
 }

@@ -112,6 +112,75 @@ func BuildHITLAssistancePrompt(d *Deps, taskSetID string, m *Manifest, blocking 
 	return b.String()
 }
 
+// BuildFailedAssistancePrompt generates the attended-agent prompt shown when a
+// Task set stops at the Failed gate. It reopens the failed task for another
+// attempt: the agent sees the task body — framed as the work to do again — and
+// the structured failure reason from the last attempt, scoped to the two
+// outcomes the Failed gate allows (re-run or complete by hand). It deliberately
+// omits defer (not an option at the Failed gate) and never points the agent at
+// the raw captured stream; the structured reason is the durable signal (ADR
+// 0020).
+func BuildFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, failed Task, runtimePath string) string {
+	if d == nil {
+		d = defaultDeps
+	}
+	if d.FS == nil {
+		d.FS = DefaultDeps().FS
+	}
+
+	taskPath := filepath.Join(m.Dir, failed.File)
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are assisting a human with a failed task in a Pop task set.\n\n")
+	fmt.Fprintf(&b, "Task set: %s\n", taskSetID)
+	fmt.Fprintf(&b, "Task set path: %s\n", m.Dir)
+	fmt.Fprintf(&b, "Failed task: %s", failed.ID)
+	if failed.Title != "" {
+		fmt.Fprintf(&b, " - %s", failed.Title)
+	}
+	fmt.Fprintf(&b, "\n")
+	fmt.Fprintf(&b, "Task path: %s\n", taskPath)
+	if runtimePath != "" {
+		fmt.Fprintf(&b, "Runtime checkout: %s\n", runtimePath)
+	}
+	fmt.Fprintf(&b, "\n")
+
+	if reason, err := LatestFailureReason(d, m.Dir, failed.File); err == nil && reason != "" {
+		fmt.Fprintf(&b, "Why the last attempt failed:\n%s\n\n", strings.TrimRight(reason, "\n"))
+	} else {
+		fmt.Fprintf(&b, "Why the last attempt failed: no structured failure reason was recorded for the last attempt.\n\n")
+	}
+
+	fmt.Fprintf(&b, "Allowed outcomes:\n")
+	fmt.Fprintf(&b, "- re-run: fix the underlying problem in the runtime checkout so a fresh attempt can pass; the human then reruns the task set to retry the task AFK.\n")
+	fmt.Fprintf(&b, "- complete by hand: the human finishes the task's work directly and marks the task done.\n")
+	fmt.Fprintf(&b, "These are the only outcomes at the Failed gate. Do not change task state yourself; the human chooses the outcome.\n\n")
+
+	fmt.Fprintf(&b, "Treat the following as the task to work again. Read it in full and satisfy every acceptance criterion:\n")
+	if data, err := d.FS.ReadFile(taskPath); err == nil {
+		fmt.Fprintf(&b, "```markdown\n%s\n```\n\n", strings.TrimRight(string(data), "\n"))
+	} else {
+		fmt.Fprintf(&b, "Could not read %s: %v.\n", taskPath, err)
+		fmt.Fprintf(&b, "Proceed by inspecting the task path manually or asking the human for the missing task body.\n\n")
+	}
+
+	fmt.Fprintf(&b, "Task set context:\n")
+	for _, task := range m.Tasks {
+		fmt.Fprintf(&b, "- %s [%s %s]", task.ID, task.Type, task.Status)
+		if task.Title != "" {
+			fmt.Fprintf(&b, " %s", task.Title)
+		}
+		fmt.Fprintf(&b, " (%s)", filepath.Join(m.Dir, task.File))
+		if len(task.BlockedBy) > 0 {
+			fmt.Fprintf(&b, "; blocked_by: %s", strings.Join(task.BlockedBy, ", "))
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+	fmt.Fprintf(&b, "\n")
+
+	fmt.Fprintf(&b, "Help the human get this task to a passing state. Do not mark the task done or reset it yourself unless the human explicitly chooses that outcome.\n")
+	return b.String()
+}
+
 type completedAFKProgressItem struct {
 	TaskID    string
 	File      string

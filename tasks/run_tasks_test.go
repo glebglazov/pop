@@ -986,7 +986,7 @@ func TestRunTaskSetFailedGateFinishByHandContinues(t *testing.T) {
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
 	opts.TaskSetOverride = "demo"
-	opts.ConfirmIn = strings.NewReader("2\n")
+	opts.ConfirmIn = strings.NewReader("3\n")
 
 	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
@@ -1019,7 +1019,7 @@ func TestRunTaskSetFailedGateExitStops(t *testing.T) {
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
 	opts.TaskSetOverride = "demo"
-	opts.ConfirmIn = strings.NewReader("3\n")
+	opts.ConfirmIn = strings.NewReader("4\n")
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
@@ -1039,11 +1039,11 @@ func TestRunTaskSetFailedGateInvalidReprompts(t *testing.T) {
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
 	opts.TaskSetOverride = "demo"
-	opts.ConfirmIn = strings.NewReader("9\n3\n")
+	opts.ConfirmIn = strings.NewReader("9\n4\n")
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(buf.String(), "Choose 1, 2, or 3.") {
+	if !strings.Contains(buf.String(), "Choose 1, 2, 3, or 4.") {
 		t.Fatalf("invalid input must re-prompt:\n%s", buf.String())
 	}
 }
@@ -1075,6 +1075,58 @@ func TestRunTaskSetFailedGateLiveFailureRerunRetries(t *testing.T) {
 		t.Fatalf("live failure must show the Failed gate:\n%s", buf.String())
 	}
 	assertTaskDone(t, env.execFixture(), "01-a")
+}
+
+// The Failed gate offers Agent assistance as option 2; choosing it launches the
+// attended agent for the configured preset, then refreshes the set and re-shows
+// the Failed gate while the task is still failed (the assist agent does not
+// change task state on its own).
+func TestRunTaskSetFailedGateAgentAssistanceRefreshesAndReprompts(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+	runner := &configurableHITLAssistanceRunner{t: t, tasksDir: env.tasksDir}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	// Choose Agent assistance, then Exit at the re-shown gate.
+	opts.ConfirmIn = strings.NewReader("2\n4\n")
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	out := buf.String()
+
+	for _, want := range []string{
+		"1. Re-run (default)",
+		"2. Agent assistance",
+		"3. Finish by hand",
+		"4. Exit",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Failed gate missing menu option %q:\n%s", want, out)
+		}
+	}
+	if runner.calls != 1 {
+		t.Fatalf("assistance calls = %d, want 1", runner.calls)
+	}
+	if runner.attendedCalls != 1 || runner.runCalls != 0 {
+		t.Fatalf("runner calls: attended=%d run=%d, want attended only", runner.attendedCalls, runner.runCalls)
+	}
+	if runner.name != "claude" || len(runner.args) != 1 || !strings.Contains(runner.args[0], "You are assisting a human with a failed task") {
+		t.Fatalf("assistance command = %s %v", runner.name, runner.args)
+	}
+	if !strings.Contains(out, "Starting Failed assistance: claude") {
+		t.Fatalf("missing assistance start detail:\n%s", out)
+	}
+	if strings.Count(out, "Choose [1]:") < 2 {
+		t.Fatalf("assistance did not refresh and re-show the Failed gate:\n%s", out)
+	}
+	// The assist agent did not change task state; the task is still failed.
+	assertTaskFailed(t, env.execFixture(), "01-a", 3)
 }
 
 func TestRunTaskSetYesPrintsConciseSummary(t *testing.T) {

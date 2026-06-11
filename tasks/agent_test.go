@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
@@ -754,6 +755,84 @@ func TestBuildHITLAssistancePromptWithUnreadableHITLTaskFile(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestBuildFailedAssistancePromptIncludesBodyAndFailureReason(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "tasks", "demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePromptTestFile(t, filepath.Join(dir, "01-a.md"),
+		"## Build storage\n\nWire up the cache layer.\n\n## Acceptance criteria\n\n- [ ] cache writes\n")
+
+	// A persisted attempt footer is the durable source of the failure reason.
+	streamDir := taskStreamDir(dir, "01-a.md")
+	writeTimingStreamRecords(t, streamDir, "attempt-001.jsonl.gz",
+		streamHeaderRecord{Type: "header", Agent: "claude", Attempt: 1, StartTime: time.Date(2026, 6, 11, 9, 0, 0, 0, time.UTC)},
+		[]streamEventRecord{{Type: "event", AtMS: 5, Raw: `{"type":"system"}`}},
+		streamFooterRecord{Type: "footer", Outcome: streamOutcomeFailed, DurationMS: 1_000, Reason: "unchecked acceptance criteria", ExitCode: 0})
+
+	m := &Manifest{
+		Stem: "demo",
+		Dir:  dir,
+		Tasks: []Task{
+			{ID: "01-a", File: "01-a.md", Title: "Build storage", Type: "AFK", Status: "failed"},
+			{ID: "02-b", File: "02-b.md", Title: "Use storage", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
+		},
+	}
+
+	prompt := BuildFailedAssistancePrompt(realFSDeps(), "demo", m, m.Tasks[0], "/runtime")
+	for _, want := range []string{
+		"Task set: demo",
+		"Failed task: 01-a - Build storage",
+		"Task path: " + filepath.Join(dir, "01-a.md"),
+		"Runtime checkout: /runtime",
+		"Why the last attempt failed:",
+		"unchecked acceptance criteria",
+		"Wire up the cache layer.",
+		"re-run:",
+		"complete by hand:",
+		"- 02-b [AFK open] Use storage",
+		"blocked_by: 01-a",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
+		}
+	}
+	// The Failed gate offers only re-run and complete; defer is not framed, and
+	// the prompt never points the agent at the raw captured stream.
+	for _, unwanted := range []string{"defer", "raw", "stream", "transcript"} {
+		if strings.Contains(strings.ToLower(prompt), unwanted) {
+			t.Fatalf("prompt should not mention %q:\n%s", unwanted, prompt)
+		}
+	}
+}
+
+func TestBuildFailedAssistancePromptWithoutRecordedReason(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "tasks", "demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePromptTestFile(t, filepath.Join(dir, "01-a.md"),
+		"## Build storage\n\nDo the work.\n\n## Acceptance criteria\n\n- [ ] done\n")
+
+	m := &Manifest{
+		Stem: "demo",
+		Dir:  dir,
+		Tasks: []Task{
+			{ID: "01-a", File: "01-a.md", Title: "Build storage", Type: "AFK", Status: "failed"},
+		},
+	}
+
+	prompt := BuildFailedAssistancePrompt(realFSDeps(), "demo", m, m.Tasks[0], "")
+	if !strings.Contains(prompt, "no structured failure reason was recorded") {
+		t.Fatalf("missing fallback reason line:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Do the work.") {
+		t.Fatalf("missing task body:\n%s", prompt)
 	}
 }
 
