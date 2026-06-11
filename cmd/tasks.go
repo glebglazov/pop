@@ -71,8 +71,8 @@ var taskCompleteTaskCmd = &cobra.Command{
 }
 
 var taskSkipTaskCmd = &cobra.Command{
-	Use:   "skip TASK_SET/FILE.md",
-	Short: "Defer one open task to skipped, unblocking its dependents",
+	Use:   "skip [TASK_SET | TASK_SET/FILE.md]",
+	Short: "Defer open tasks to skipped, unblocking dependents: one targeted task, or pick a set's tasks interactively",
 	Args:  cobra.ExactArgs(1),
 	Run:   runTaskSkipTask,
 }
@@ -460,7 +460,15 @@ func runTaskCompleteTasksWith(d *tasks.Deps, w io.Writer, stdin io.Reader, targe
 }
 
 func runTaskSkipTask(cmd *cobra.Command, args []string) {
-	err := runTaskSkipTaskWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	target := args[0]
+	var err error
+	if isTaskFileTarget(target) {
+		// A <task-set>/<file>.md reference defers exactly one task, no prompt.
+		err = runTaskSkipTaskWith(tasks.DefaultDeps(), os.Stdout, target)
+	} else {
+		// A whole-set target opens the interactive Multi-task selection.
+		err = runTaskSkipTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stdin, target)
+	}
 	handleTaskExit(err)
 }
 
@@ -473,6 +481,61 @@ func runTaskSkipTaskWith(d *tasks.Deps, w io.Writer, taskPath string) error {
 		return err
 	}
 	tasks.RenderTaskSkip(w, result.TaskSetID, result.TaskID)
+	fmt.Fprintln(w)
+	tasks.Render(w, result.Refresh)
+	return nil
+}
+
+func runTaskSkipTasksWith(d *tasks.Deps, w io.Writer, stdin io.Reader, target string) error {
+	ctx, err := tasks.LoadSkipSelectionWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput(), target)
+	if err != nil {
+		return err
+	}
+
+	// A whole-set target with no interactive TTY is rejected with a pointer to
+	// the file-reference form, never a silent mass mutation (ADR 0020).
+	if !taskStdinInteractive(stdin) {
+		return &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf(
+			"skipping a whole task set needs an interactive terminal; target one task with %s/<file>.md instead", ctx.TaskSetID)}
+	}
+
+	items := make([]ui.MultiSelectItem, len(ctx.Rows))
+	for i, r := range ctx.Rows {
+		items[i] = ui.MultiSelectItem{
+			Label:      selectionRowLabel(r),
+			Locked:     r.Locked,
+			LockedMark: r.LockedMark,
+		}
+	}
+
+	selection, err := runTaskMultiSelect(fmt.Sprintf("Skip tasks in %s", ctx.TaskSetID), items)
+	if err != nil {
+		return err
+	}
+	if !selection.Confirmed {
+		return nil // Esc cancels: zero writes.
+	}
+
+	var selectedIDs []string
+	for _, idx := range selection.Checked {
+		if idx >= 0 && idx < len(ctx.Rows) {
+			selectedIDs = append(selectedIDs, ctx.Rows[idx].TaskID)
+		}
+	}
+	if len(selectedIDs) == 0 {
+		return nil // Empty selection: clean no-op exit.
+	}
+
+	result, err := tasks.SkipTasksWith(d, taskProjectDeps(), taskConfigLoad, tasks.SkipTasksOptions{
+		ResolveInput:    taskResolveInput(),
+		TaskSetTarget:   target,
+		SelectedTaskIDs: selectedIDs,
+	})
+	if err != nil {
+		return err
+	}
+
+	tasks.RenderTaskSkipBatch(w, result.TaskSetID, result.Transitions)
 	fmt.Fprintln(w)
 	tasks.Render(w, result.Refresh)
 	return nil

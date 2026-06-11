@@ -67,3 +67,12 @@ func RenderTaskOpenBatch(w io.Writer, taskSetID string, transitions []OpenTransi
 		out.line(ansiCyan, "%s/%s: %s→open", taskSetID, t.File, t.Prior)
 	}
 }
+
+// RenderTaskSkipBatch writes one line per batch transition in the form
+// <set>/<file>: <prior>→skipped.
+func RenderTaskSkipBatch(w io.Writer, taskSetID string, transitions []SkipTransition) {
+	out := outputFor(w)
+	for _, t := range transitions {
+		out.line(ansiYellow, "%s/%s: %s→skipped", taskSetID, t.File, t.Prior)
+	}
+}
