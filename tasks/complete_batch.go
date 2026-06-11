@@ -8,33 +8,14 @@ import (
 )
 
 // CompleteSelectionRow is one task offered in the whole-set Multi-task
-// selection. Done tasks are Locked (a status indicator, not a removable
-// selection); every other task is checkable.
-type CompleteSelectionRow struct {
-	TaskID string
-	File   string
-	Title  string
-	Status string
-	Locked bool
-}
+// selection. It is the shared SelectionRow shaped by the `complete` eligibility
+// predicate: Done tasks are Locked, every other task is checkable.
+type CompleteSelectionRow = SelectionRow
 
 // BuildCompleteSelection lists every task in manifest order, marking already
 // Done tasks Locked. Returns nil for a nil/invalid manifest.
 func BuildCompleteSelection(m *Manifest) []CompleteSelectionRow {
-	if m == nil {
-		return nil
-	}
-	rows := make([]CompleteSelectionRow, 0, len(m.Tasks))
-	for _, task := range m.Tasks {
-		rows = append(rows, CompleteSelectionRow{
-			TaskID: task.ID,
-			File:   task.File,
-			Title:  task.Title,
-			Status: task.Status,
-			Locked: task.Status == "done",
-		})
-	}
-	return rows
+	return BuildSelection(m, completeEligibility)
 }
 
 // CompleteTasksOptions configures the atomic whole-set batch completion.
@@ -68,9 +49,10 @@ type CompleteSelectionContext struct {
 	Rows      []CompleteSelectionRow
 }
 
-// resolveTaskSetForComplete resolves a whole-set target to its canonical ID and
-// validated manifest, shared by the selection loader and the batch applier.
-func resolveTaskSetForComplete(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), in ResolveInput, target string) (*ResolvedPaths, *RefreshResult, string, *Manifest, error) {
+// resolveTaskSetForBatch resolves a whole-set target to its canonical ID and
+// validated manifest, shared by every verb's selection loader and batch
+// applier. verb names the operation for error messages (e.g. "complete").
+func resolveTaskSetForBatch(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), in ResolveInput, target, verb string) (*ResolvedPaths, *RefreshResult, string, *Manifest, error) {
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, in)
 	if err != nil {
 		return nil, nil, "", nil, exitErr(ExitSetup, "%v", err)
@@ -87,7 +69,7 @@ func resolveTaskSetForComplete(d *Deps, pd *project.Deps, loadConfig func(string
 		return nil, nil, "", nil, err
 	}
 	if taskSetID == "" {
-		return nil, nil, "", nil, exitErr(ExitSetup, "complete requires a task set target")
+		return nil, nil, "", nil, exitErr(ExitSetup, "%s requires a task set target", verb)
 	}
 
 	m := refresh.Manifests[taskSetID]
@@ -103,7 +85,7 @@ func resolveTaskSetForComplete(d *Deps, pd *project.Deps, loadConfig func(string
 // LoadCompleteSelectionWith resolves a whole-set target and builds the rows for
 // the Multi-task selection without writing anything.
 func LoadCompleteSelectionWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), in ResolveInput, target string) (*CompleteSelectionContext, error) {
-	_, _, taskSetID, m, err := resolveTaskSetForComplete(d, pd, loadConfig, in, target)
+	_, _, taskSetID, m, err := resolveTaskSetForBatch(d, pd, loadConfig, in, target, "complete")
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +102,7 @@ func CompleteTasks(opts CompleteTasksOptions) (*CompleteTasksResult, error) {
 // blocked_by topological order, and persisted as one manifest write plus one
 // COMPLETE progress record per task. An empty selection is a clean no-op.
 func CompleteTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts CompleteTasksOptions) (*CompleteTasksResult, error) {
-	resolved, refresh, taskSetID, m, err := resolveTaskSetForComplete(d, pd, loadConfig, opts.ResolveInput, opts.TaskSetTarget)
+	resolved, refresh, taskSetID, m, err := resolveTaskSetForBatch(d, pd, loadConfig, opts.ResolveInput, opts.TaskSetTarget, "complete")
 	if err != nil {
 		return nil, err
 	}

@@ -15,22 +15,22 @@ import (
 // stubCompleteInteractive forces the interactive-terminal check for the test.
 func stubCompleteInteractive(t *testing.T, interactive bool) {
 	t.Helper()
-	prev := completeTaskInteractive
-	completeTaskInteractive = func(io.Reader) bool { return interactive }
-	t.Cleanup(func() { completeTaskInteractive = prev })
+	prev := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return interactive }
+	t.Cleanup(func() { taskStdinInteractive = prev })
 }
 
 // stubCompleteSelect installs a fake Multi-task selection result.
 func stubCompleteSelect(t *testing.T, res ui.MultiSelectResult, capture *[]ui.MultiSelectItem) {
 	t.Helper()
-	prev := completeTaskSelect
-	completeTaskSelect = func(_ string, items []ui.MultiSelectItem) (ui.MultiSelectResult, error) {
+	prev := runTaskMultiSelect
+	runTaskMultiSelect = func(_ string, items []ui.MultiSelectItem) (ui.MultiSelectResult, error) {
 		if capture != nil {
 			*capture = items
 		}
 		return res, nil
 	}
-	t.Cleanup(func() { completeTaskSelect = prev })
+	t.Cleanup(func() { runTaskMultiSelect = prev })
 }
 
 func TestCompleteDispatchByTargetShape(t *testing.T) {

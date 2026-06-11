@@ -57,8 +57,8 @@ var taskImplementCmd = &cobra.Command{
 }
 
 var taskResetTaskCmd = &cobra.Command{
-	Use:   "open TASK_SET/FILE.md",
-	Short: "Reset one failed or skipped task back to open",
+	Use:   "open [TASK_SET | TASK_SET/FILE.md]",
+	Short: "Reset failed or skipped tasks back to open: one targeted task, or pick a set's tasks interactively",
 	Args:  cobra.ExactArgs(1),
 	Run:   runTaskResetTask,
 }
@@ -265,7 +265,15 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 }
 
 func runTaskResetTask(cmd *cobra.Command, args []string) {
-	err := runTaskResetTaskWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	target := args[0]
+	var err error
+	if isTaskFileTarget(target) {
+		// A <task-set>/<file>.md reference reopens exactly one task, no prompt.
+		err = runTaskResetTaskWith(tasks.DefaultDeps(), os.Stdout, target)
+	} else {
+		// A whole-set target opens the interactive Multi-task selection.
+		err = runTaskOpenTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stdin, target)
+	}
 	handleTaskExit(err)
 }
 
@@ -278,6 +286,61 @@ func runTaskResetTaskWith(d *tasks.Deps, w io.Writer, taskPath string) error {
 		return err
 	}
 	tasks.RenderTaskReset(w, result.TaskSetID, result.TaskID)
+	fmt.Fprintln(w)
+	tasks.Render(w, result.Refresh)
+	return nil
+}
+
+func runTaskOpenTasksWith(d *tasks.Deps, w io.Writer, stdin io.Reader, target string) error {
+	ctx, err := tasks.LoadOpenSelectionWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput(), target)
+	if err != nil {
+		return err
+	}
+
+	// A whole-set target with no interactive TTY is rejected with a pointer to
+	// the file-reference form, never a silent mass mutation (ADR 0020).
+	if !taskStdinInteractive(stdin) {
+		return &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf(
+			"reopening a whole task set needs an interactive terminal; target one task with %s/<file>.md instead", ctx.TaskSetID)}
+	}
+
+	items := make([]ui.MultiSelectItem, len(ctx.Rows))
+	for i, r := range ctx.Rows {
+		items[i] = ui.MultiSelectItem{
+			Label:      selectionRowLabel(r),
+			Locked:     r.Locked,
+			LockedMark: r.LockedMark,
+		}
+	}
+
+	selection, err := runTaskMultiSelect(fmt.Sprintf("Reopen tasks in %s", ctx.TaskSetID), items)
+	if err != nil {
+		return err
+	}
+	if !selection.Confirmed {
+		return nil // Esc cancels: zero writes.
+	}
+
+	var selectedIDs []string
+	for _, idx := range selection.Checked {
+		if idx >= 0 && idx < len(ctx.Rows) {
+			selectedIDs = append(selectedIDs, ctx.Rows[idx].TaskID)
+		}
+	}
+	if len(selectedIDs) == 0 {
+		return nil // Empty selection: clean no-op exit.
+	}
+
+	result, err := tasks.OpenTasksWith(d, taskProjectDeps(), taskConfigLoad, tasks.OpenTasksOptions{
+		ResolveInput:    taskResolveInput(),
+		TaskSetTarget:   target,
+		SelectedTaskIDs: selectedIDs,
+	})
+	if err != nil {
+		return err
+	}
+
+	tasks.RenderTaskOpenBatch(w, result.TaskSetID, result.Transitions)
 	fmt.Fprintln(w)
 	tasks.Render(w, result.Refresh)
 	return nil
@@ -310,15 +373,16 @@ func runTaskCompleteTaskWith(d *tasks.Deps, w io.Writer, taskPath string) error 
 	return nil
 }
 
-// completeTaskSelect runs the interactive Multi-task selection. It is a package
-// variable so tests can drive selection without a real terminal.
-var completeTaskSelect = func(title string, items []ui.MultiSelectItem) (ui.MultiSelectResult, error) {
+// runTaskMultiSelect runs the interactive Multi-task selection shared by every
+// whole-set verb. It is a package variable so tests can drive selection without
+// a real terminal.
+var runTaskMultiSelect = func(title string, items []ui.MultiSelectItem) (ui.MultiSelectResult, error) {
 	return ui.RunMultiSelect(title, items)
 }
 
-// completeTaskInteractive reports whether stdin is an interactive terminal. It
-// is a package variable so tests can simulate either case.
-var completeTaskInteractive = func(stdin io.Reader) bool {
+// taskStdinInteractive reports whether stdin is an interactive terminal. It is a
+// package variable so tests can simulate either case.
+var taskStdinInteractive = func(stdin io.Reader) bool {
 	f, ok := stdin.(*os.File)
 	if !ok {
 		return false
@@ -330,7 +394,9 @@ var completeTaskInteractive = func(stdin io.Reader) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-func completeRowLabel(r tasks.CompleteSelectionRow) string {
+// selectionRowLabel renders one Multi-task selection row's display label,
+// shared across verbs.
+func selectionRowLabel(r tasks.SelectionRow) string {
 	label := fmt.Sprintf("%-9s %s", "["+r.Status+"]", r.File)
 	if r.Title != "" {
 		label += "  " + r.Title
@@ -346,7 +412,7 @@ func runTaskCompleteTasksWith(d *tasks.Deps, w io.Writer, stdin io.Reader, targe
 
 	// A whole-set target with no interactive TTY is rejected with a pointer to
 	// the file-reference form, never a silent mass mutation (ADR 0020).
-	if !completeTaskInteractive(stdin) {
+	if !taskStdinInteractive(stdin) {
 		return &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf(
 			"completing a whole task set needs an interactive terminal; target one task with %s/<file>.md instead", ctx.TaskSetID)}
 	}
@@ -354,13 +420,13 @@ func runTaskCompleteTasksWith(d *tasks.Deps, w io.Writer, stdin io.Reader, targe
 	items := make([]ui.MultiSelectItem, len(ctx.Rows))
 	for i, r := range ctx.Rows {
 		items[i] = ui.MultiSelectItem{
-			Label:      completeRowLabel(r),
+			Label:      selectionRowLabel(r),
 			Locked:     r.Locked,
-			LockedMark: "✓",
+			LockedMark: r.LockedMark,
 		}
 	}
 
-	selection, err := completeTaskSelect(fmt.Sprintf("Complete tasks in %s", ctx.TaskSetID), items)
+	selection, err := runTaskMultiSelect(fmt.Sprintf("Complete tasks in %s", ctx.TaskSetID), items)
 	if err != nil {
 		return err
 	}

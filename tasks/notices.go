@@ -58,3 +58,12 @@ func RenderTaskCompleteBatch(w io.Writer, taskSetID string, transitions []Comple
 		out.line(ansiGreen, "✓ %s/%s: %s→done", taskSetID, t.File, t.Prior)
 	}
 }
+
+// RenderTaskOpenBatch writes one line per batch transition in the form
+// <set>/<file>: <prior>→open.
+func RenderTaskOpenBatch(w io.Writer, taskSetID string, transitions []OpenTransition) {
+	out := outputFor(w)
+	for _, t := range transitions {
+		out.line(ansiCyan, "%s/%s: %s→open", taskSetID, t.File, t.Prior)
+	}
+}
