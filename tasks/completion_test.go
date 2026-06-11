@@ -50,7 +50,7 @@ func TestCompleteTaskTargetsOffersIdentifiersAndSetRelativeFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ids) != 1 || ids[0] != "feature" {
+	if len(ids) != 1 || ids[0] != "feature/" {
 		t.Fatalf("identifiers = %#v", ids)
 	}
 

@@ -112,14 +112,17 @@ func ResolveTaskSetTarget(refresh *RefreshResult, raw string) (string, error) {
 	if err := rejectPathForms(refresh, raw); err != nil {
 		return "", err
 	}
-	slash := filepath.ToSlash(raw)
+	// The trailing-slash <task-set>/ spelling is a whole-set synonym for a
+	// bare <task-set>; trim one trailing slash and resolve the remainder. A
+	// form that still contains an inner slash (e.g. a/b/) stays rejected.
+	slash := strings.TrimSuffix(filepath.ToSlash(raw), "/")
 	if strings.Contains(slash, "/") {
 		return "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected a bare task set identifier"))
 	}
 	if strings.HasSuffix(slash, ".md") {
 		return "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected a bare task set identifier, not a file name"))
 	}
-	return resolveTaskSetIdentifier(refresh, raw)
+	return resolveTaskSetIdentifier(refresh, slash)
 }
 
 // ResolveTaskTarget resolves a bare Task set identifier or an
@@ -134,6 +137,17 @@ func ResolveTaskTarget(refresh *RefreshResult, raw string) (taskSetID, taskID st
 		return "", "", err
 	}
 	slash := filepath.ToSlash(raw)
+	// A trailing slash marks the whole-set <task-set>/ spelling: trim it and
+	// resolve a bare set (no task). A remainder with an inner slash (e.g.
+	// a/b/) is neither a set nor a file reference and stays rejected.
+	if strings.HasSuffix(slash, "/") {
+		trimmed := strings.TrimSuffix(slash, "/")
+		if trimmed == "" || strings.Contains(trimmed, "/") {
+			return "", "", exitErr(ExitSetup, "%s", invalidTargetMessage(refresh, raw, "expected <task-set> or <task-set>/<file>.md"))
+		}
+		taskSetID, err = resolveTaskSetIdentifier(refresh, trimmed)
+		return taskSetID, "", err
+	}
 	if strings.Contains(slash, "/") {
 		return resolveTaskSetRelativeTask(refresh, slash)
 	}
@@ -162,9 +176,10 @@ func ResolveTaskFileTarget(refresh *RefreshResult, raw string) (taskSetID, taskI
 	return resolveTaskSetRelativeTask(refresh, slash)
 }
 
-// taskTargetIdentifierCompletions offers bare Task set identifiers and, once an
-// identifier and slash are typed, the set-relative task files for that set. It
-// never offers filesystem path segments.
+// taskTargetIdentifierCompletions offers <task-set>/ candidates at the
+// set-identifier stage and, once an identifier and slash are typed, the
+// set-relative task files for that set. It never offers filesystem path
+// segments.
 func taskTargetIdentifierCompletions(refresh *RefreshResult, toComplete string) []string {
 	if refresh == nil || refresh.Manifests == nil {
 		return nil
@@ -187,10 +202,14 @@ func taskTargetIdentifierCompletions(refresh *RefreshResult, toComplete string) 
 		return out
 	}
 
+	// At the set-identifier stage, offer each set as <task-set>/ so the file
+	// stage's no-space drill leaves the cursor right after the slash. The
+	// <task-set>/ form is itself a valid whole-set target.
 	var ids []string
 	for id := range refresh.Manifests {
-		if strings.HasPrefix(id, slash) {
-			ids = append(ids, id)
+		candidate := id + "/"
+		if strings.HasPrefix(candidate, slash) {
+			ids = append(ids, candidate)
 		}
 	}
 	sort.Strings(ids)

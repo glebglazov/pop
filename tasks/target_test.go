@@ -73,6 +73,46 @@ func TestResolveTaskTargetAcceptsIdentifierAndRelativeFile(t *testing.T) {
 	}
 }
 
+func TestResolveTaskSetTargetAcceptsTrailingSlash(t *testing.T) {
+	root := t.TempDir()
+	setupManifest(t, root, "demo", nil)
+	refresh := refreshFixture(t, root)
+
+	id, err := ResolveTaskSetTarget(refresh, "demo/")
+	if err != nil || id != "demo" {
+		t.Fatalf("trailing slash = %q err=%v", id, err)
+	}
+
+	// A remainder with an inner slash after trimming stays rejected.
+	if _, err := ResolveTaskSetTarget(refresh, "a/b/"); err == nil {
+		t.Fatalf("expected rejection for inner-slash form")
+	}
+}
+
+func TestResolveTaskTargetAcceptsTrailingSlashAsWholeSet(t *testing.T) {
+	root := t.TempDir()
+	setupManifest(t, root, "demo", []Task{
+		{ID: "add-auth", File: "01-add-auth.md", Title: "Auth", Type: "AFK", Status: "open"},
+	})
+	refresh := refreshFixture(t, root)
+
+	setID, taskID, err := ResolveTaskTarget(refresh, "demo/")
+	if err != nil || setID != "demo" || taskID != "" {
+		t.Fatalf("trailing slash = %s/%s err=%v", setID, taskID, err)
+	}
+
+	// The trailing-slash form resolves identically to the bare set.
+	bareID, bareTask, bareErr := ResolveTaskTarget(refresh, "demo")
+	if bareID != setID || bareTask != taskID || (bareErr == nil) != (err == nil) {
+		t.Fatalf("trailing slash diverged from bare: %s/%s vs %s/%s", setID, taskID, bareID, bareTask)
+	}
+
+	// An inner-slash form after trimming stays rejected.
+	if _, _, err := ResolveTaskTarget(refresh, "a/b/"); err == nil {
+		t.Fatalf("expected rejection for inner-slash form")
+	}
+}
+
 func TestResolveTaskTargetRejectsInvalidForms(t *testing.T) {
 	root := t.TempDir()
 	setupManifest(t, root, "demo", []Task{
@@ -154,7 +194,7 @@ func TestTaskTargetIdentifierCompletions(t *testing.T) {
 	refresh := refreshFixture(t, root)
 
 	ids := taskTargetIdentifierCompletions(refresh, "")
-	if len(ids) != 2 || ids[0] != "alpha" || ids[1] != "beta" {
+	if len(ids) != 2 || ids[0] != "alpha/" || ids[1] != "beta/" {
 		t.Fatalf("identifiers = %#v", ids)
 	}
 

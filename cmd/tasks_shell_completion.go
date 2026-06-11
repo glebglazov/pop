@@ -91,7 +91,16 @@ func completeTaskTaskTargets(cmd *cobra.Command, args []string, toComplete strin
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return filterShellCompletions(targets, toComplete), cobra.ShellCompDirectiveNoFileComp
+	filtered := filterShellCompletions(targets, toComplete)
+	if strings.Contains(toComplete, "/") {
+		// File stage: a slash is already present, so candidates are
+		// <task-set>/<file>.md. Complete them with a normal trailing space.
+		return filtered, cobra.ShellCompDirectiveNoFileComp
+	}
+	// Set stage: candidates are <task-set>/. Keep the cursor on the slash
+	// (no trailing space) so the operator can drill straight into a file,
+	// while <task-set>/ itself remains a valid whole-set target.
+	return filtered, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp
 }
 
 func completeTaskAgents(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

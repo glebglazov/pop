@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -83,6 +84,31 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 	t.Run("implement positional task set relative path", func(t *testing.T) {
 		out := shellCompNoDescCompleting(t, "tasks", "implement", "svc/")
 		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
+	})
+
+	t.Run("set stage drills with no-space directive", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "implement")
+		assertShellCompContains(t, out, "svc/")
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoSpace|cobra.ShellCompDirectiveNoFileComp)
+	})
+
+	t.Run("file stage uses trailing space", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "tasks", "implement", "svc/")
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+	})
+
+	t.Run("set-priority stays set-only without slash drill", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "set-priority")
+		assertShellCompContains(t, out, "svc")
+		assertShellCompOmitsExact(t, out, "svc/")
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+	})
+
+	t.Run("show-path stays set-only without slash drill", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "show-path")
+		assertShellCompContains(t, out, "svc")
+		assertShellCompOmitsExact(t, out, "svc/")
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
 	})
 
 	t.Run("reset task positional defaults to Task set IDs", func(t *testing.T) {
@@ -210,6 +236,22 @@ func assertShellCompOmitsExact(t *testing.T, output string, items ...string) {
 				t.Fatalf("unexpected %q in completion output:\n%s", item, output)
 			}
 		}
+	}
+}
+
+func assertShellCompDirective(t *testing.T, output string, want cobra.ShellCompDirective) {
+	t.Helper()
+	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(last, ":") {
+		t.Fatalf("no directive line in completion output:\n%s", output)
+	}
+	got, err := strconv.Atoi(strings.TrimPrefix(last, ":"))
+	if err != nil {
+		t.Fatalf("directive parse %q: %v", last, err)
+	}
+	if cobra.ShellCompDirective(got) != want {
+		t.Fatalf("directive = %d, want %d\n%s", got, want, output)
 	}
 }
 
