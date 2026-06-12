@@ -1062,13 +1062,18 @@ func ensureIntegrationsForRevisionWith(rev string, newDry, newReal func() *integ
 //   - Always exits 0. Non-fatal by design: a broken integration must not
 //     block `make install` or `brew install` from completing.
 func runIntegrateUpdateExisting() error {
-	return runIntegrateUpdateExistingWith(
+	err := runIntegrateUpdateExistingWith(
 		buildRevision(),
 		dryRunIntegrateDeps,
 		defaultIntegrateDeps,
 		os.Stdout,
 		os.Stderr,
 	)
+	// Run by `make install` with the freshly installed binary: reap any stale
+	// daemon now so new daemon commands (e.g. set-topic) work on the next hook,
+	// not only after the next interactive picker (ADR 0021).
+	refreshMonitorDaemonIfRunning()
+	return err
 }
 
 // runIntegrateUpdateExistingWith is the fully testable variant. Tests inject

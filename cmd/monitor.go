@@ -51,7 +51,20 @@ var paneMonitorStartCmd = &cobra.Command{
 	RunE:   runPaneMonitorStart,
 }
 
+// daemonExeMod freezes the daemon binary's mtime at process start. handleIdentify
+// reports this instead of a live stat: `make install` overwrites the binary in
+// place (cp -f, same path), so a live stat would make a still-running old daemon
+// report the *new* mtime and look current — defeating the version-restart
+// (ADR 0021). A value captured at start stays older than a freshly installed
+// binary, so the challenger correctly reaps the stale daemon. Zero means
+// unset (e.g. handler unit tests that never start a daemon), where
+// handleIdentify falls back to a live stat.
+var daemonExeMod int64
+
 func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
+	if exe, err := os.Executable(); err == nil {
+		daemonExeMod = exeModTime(exe)
+	}
 	cfg := loadConfigQuietly()
 	pidPath := monitor.DefaultPIDPath()
 	statePath := monitor.DefaultStatePath()
@@ -117,7 +130,11 @@ func handleIdentify() monitor.Response {
 	resp := monitor.Response{OK: true, PID: os.Getpid(), Version: buildVersion()}
 	if exe, err := os.Executable(); err == nil {
 		resp.ExePath = exe
-		if info, statErr := os.Stat(exe); statErr == nil {
+		// Report the mtime frozen at daemon start, not a live stat — see
+		// daemonExeMod. Fall back to a live stat when unset (handler unit tests).
+		if daemonExeMod != 0 {
+			resp.ExeMod = daemonExeMod
+		} else if info, statErr := os.Stat(exe); statErr == nil {
 			resp.ExeMod = info.ModTime().Unix()
 		}
 	}
@@ -377,6 +394,69 @@ func ensureMonitorDaemonViaPID(exe string) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	startMonitorDaemon(exe)
+}
+
+// refreshMonitorDaemonIfRunning reaps and restarts a stale monitor daemon, but
+// only when one is already running. It is the post-install hook (run by
+// `pop integrate --update-existing` with the freshly installed binary) that
+// makes the version-restart fire immediately, instead of waiting for the next
+// interactive picker. Without it, a daemon predating a new command — like
+// set-topic — keeps answering set-status while silently rejecting the new
+// command until something else prods ensureMonitorDaemon (ADR 0021).
+//
+// Unlike ensureMonitorDaemon it never starts a daemon that was not already
+// running: installing pop must not spawn a monitor on a machine that never
+// uses panes.
+func refreshMonitorDaemonIfRunning() {
+	defer func() {
+		if r := recover(); r != nil {
+			debug.Error("refreshMonitorDaemonIfRunning: panic: %v\n%s", r, runtimedebug.Stack())
+		}
+	}()
+
+	exe, err := os.Executable()
+	if err != nil {
+		debug.Error("refreshMonitorDaemonIfRunning: os.Executable: %v", err)
+		return
+	}
+	cfg := loadConfigQuietly()
+
+	if !cfg.PaneMonitoringTCPServer() {
+		pidPath := monitor.DefaultPIDPath()
+		if !monitor.IsDaemonRunning(pidPath) {
+			return // nothing running — do not spawn one
+		}
+		if !binaryNewerThanPID(exe, pidPath) {
+			return // already current
+		}
+		if err := monitor.StopDaemon(pidPath); err != nil {
+			debug.Error("refreshMonitorDaemonIfRunning: stop old daemon: %v", err)
+		}
+		for range 10 {
+			if !monitor.IsDaemonRunning(pidPath) {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		startMonitorDaemon(exe)
+		return
+	}
+
+	addr := monitorAddr(cfg)
+	id, err := monitor.Handshake(addr)
+	if err != nil {
+		return // no daemon answering — do not spawn one
+	}
+	if !id.Legacy && id.ExeMod >= exeModTime(exe) {
+		return // already current
+	}
+	debug.Log("refreshMonitorDaemonIfRunning: reaping stale daemon (pid=%d exeMod=%d mine=%d legacy=%v)",
+		id.PID, id.ExeMod, exeModTime(exe), id.Legacy)
+	if err := monitor.SendShutdown(addr); err != nil {
+		debug.Error("refreshMonitorDaemonIfRunning: shutdown stale daemon: %v", err)
+	}
+	waitForPortFree(addr, 2*time.Second)
 	startMonitorDaemon(exe)
 }
 
