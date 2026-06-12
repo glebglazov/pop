@@ -518,6 +518,168 @@ func TestIntegrateClaude_WriteError(t *testing.T) {
 	}
 }
 
+// claudeUserPromptHooks returns the UserPromptSubmit hook entries from the
+// freshly written claude settings.json, with each entry's inner command.
+func claudeUserPromptCommands(t *testing.T, fs *fakeFS) []string {
+	t.Helper()
+	settingsPath := filepath.Join("/h", ".claude", "settings.json")
+	var settings map[string]interface{}
+	if err := json.Unmarshal(fs.files[settingsPath], &settings); err != nil {
+		t.Fatalf("failed to parse settings: %v", err)
+	}
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing hooks key in settings")
+	}
+	entries, _ := hooks["UserPromptSubmit"].([]interface{})
+	var cmds []string
+	for _, e := range entries {
+		em, ok := e.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		inner, _ := em["hooks"].([]interface{})
+		for _, h := range inner {
+			hm, ok := h.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if c, _ := hm["command"].(string); c != "" {
+				cmds = append(cmds, c)
+			}
+		}
+	}
+	return cmds
+}
+
+func countContains(cmds []string, needle string) int {
+	n := 0
+	for _, c := range cmds {
+		if strings.Contains(c, needle) {
+			n++
+		}
+	}
+	return n
+}
+
+// The topic hook installs as a separate UserPromptSubmit entry alongside the
+// set-status working hook, with no extra opt-in (ADR 0023).
+func TestIntegrateClaude_InstallsTopicHook(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmds := claudeUserPromptCommands(t, fs)
+	if got := countContains(cmds, "pop pane set-topic --derive"); got != 1 {
+		t.Errorf("expected exactly 1 set-topic --derive UserPromptSubmit hook, got %d (cmds=%v)", got, cmds)
+	}
+	// The set-status working hook must remain a distinct, untouched entry.
+	if got := countContains(cmds, "pop pane set-status working"); got != 1 {
+		t.Errorf("expected exactly 1 set-status working UserPromptSubmit hook, got %d (cmds=%v)", got, cmds)
+	}
+	if len(cmds) != 2 {
+		t.Errorf("expected 2 separate UserPromptSubmit entries, got %d (cmds=%v)", len(cmds), cmds)
+	}
+}
+
+// Re-running integrate is idempotent: the topic hook is not duplicated.
+func TestIntegrateClaude_TopicHookIdempotent(t *testing.T) {
+	fs := newFakeFS()
+	for i := 0; i < 3; i++ {
+		if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+			t.Fatalf("run %d: unexpected error: %v", i, err)
+		}
+	}
+	cmds := claudeUserPromptCommands(t, fs)
+	if got := countContains(cmds, "pop pane set-topic --derive"); got != 1 {
+		t.Errorf("expected exactly 1 set-topic hook after repeated installs, got %d", got)
+	}
+	if got := countContains(cmds, "pop pane set-status working"); got != 1 {
+		t.Errorf("expected exactly 1 set-status working hook after repeated installs, got %d", got)
+	}
+}
+
+// statusWiringInstalled and refresh detection see the topic hook as pop wiring,
+// and removal strips it cleanly alongside the rest of the status wiring.
+func TestIntegrateClaude_RemovesTopicHook(t *testing.T) {
+	fs := newFakeFS()
+	d := fakeDeps("/h", fs, io.Discard)
+	if err := runIntegrateWith(d, "claude"); err != nil {
+		t.Fatalf("install: unexpected error: %v", err)
+	}
+
+	installed, err := statusWiringInstalled(d, "/h", "claude")
+	if err != nil {
+		t.Fatalf("statusWiringInstalled: %v", err)
+	}
+	if !installed {
+		t.Fatal("expected status wiring (incl. topic hook) to report installed")
+	}
+
+	if err := removeStatusWiring(d, "/h", "claude"); err != nil {
+		t.Fatalf("remove: unexpected error: %v", err)
+	}
+
+	settingsPath := filepath.Join("/h", ".claude", "settings.json")
+	var settings map[string]interface{}
+	json.Unmarshal(fs.files[settingsPath], &settings)
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	for event, val := range hooks {
+		entries, _ := val.([]interface{})
+		for _, e := range entries {
+			if isPopHook(e) {
+				t.Errorf("event %q still has a pop hook after removal: %v", event, e)
+			}
+		}
+	}
+}
+
+// A binary change re-renders the topic hook through the refresh path: an
+// install missing the topic hook is detected as changed and re-installed.
+func TestIntegrateClaude_RefreshRendersTopicHook(t *testing.T) {
+	fs := newFakeFS()
+	settingsPath := filepath.Join("/h", ".claude", "settings.json")
+	// Simulate an older install that wired set-status but not the topic hook.
+	existing := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"UserPromptSubmit": []interface{}{
+				map[string]interface{}{
+					"hooks": []interface{}{
+						map[string]interface{}{
+							"type":    "command",
+							"command": "pop pane set-status working 2>/dev/null || true",
+						},
+					},
+				},
+			},
+		},
+	}
+	raw, _ := json.Marshal(existing)
+	fs.files[settingsPath] = raw
+
+	newReal := func() *integrateDeps { return fakeDeps("/h", fs, io.Discard) }
+	newDry := func() *integrateDeps { return withDryRun(fakeDeps("/h", fs, io.Discard)) }
+
+	updated, warning := refreshStatusWiring(newDry, newReal, "claude")
+	if warning != "" {
+		t.Fatalf("unexpected warning: %s", warning)
+	}
+	if !updated {
+		t.Fatal("expected refresh to update claude status wiring (topic hook added)")
+	}
+	cmds := claudeUserPromptCommands(t, fs)
+	if got := countContains(cmds, "pop pane set-topic --derive"); got != 1 {
+		t.Errorf("expected topic hook present after refresh, got %d (cmds=%v)", got, cmds)
+	}
+}
+
+func TestIsPopHookCommand_Topic(t *testing.T) {
+	if !isPopHookCommand("pop pane set-topic --derive 2>/dev/null || true") {
+		t.Error("expected set-topic command to be recognised as a pop hook")
+	}
+}
+
 // ----- integrateCodex: hooks.json -------------------------------------------
 
 func TestIntegrateCodex_WritesHooksJSON(t *testing.T) {

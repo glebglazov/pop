@@ -426,9 +426,16 @@ type hookSpec struct {
 // popHooks defines the hook commands installed into Claude's settings.json.
 // Each entry is a (event, command) pair; the matcher is left empty so the
 // hook fires for every tool / event.
+//
+// The topic hook is a *separate* UserPromptSubmit entry alongside the
+// set-status one (ADR 0023): it pipes the same payload to `set-topic --derive`
+// to derive a pane topic from the prompt. It installs whenever the core status
+// wiring installs — no extra opt-in — and rides the same idempotent
+// install/remove/refresh paths (both commands match isPopHookCommand).
 var popHooks = []hookSpec{
 	{"SessionStart", "pop pane set-status clear 2>/dev/null || true"},
 	{"UserPromptSubmit", "pop pane set-status working 2>/dev/null || true"},
+	{"UserPromptSubmit", "pop pane set-topic --derive 2>/dev/null || true"},
 	{"PreToolUse", "pop pane set-status working 2>/dev/null || true"},
 	{"Stop", "pop pane set-status unread 2>/dev/null || true"},
 	{"Notification", "pop pane set-status unread 2>/dev/null || true"},
@@ -752,6 +759,7 @@ func isCursorPopHook(entry interface{}) bool {
 func isPopHookCommand(cmd string) bool {
 	return strings.Contains(cmd, "pop monitor") ||
 		strings.Contains(cmd, "pop pane set-status") ||
+		strings.Contains(cmd, "pop pane set-topic") ||
 		strings.Contains(cmd, "pop-status")
 }
 
