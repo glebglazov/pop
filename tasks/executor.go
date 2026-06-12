@@ -197,10 +197,9 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		}
 	}
 
-	prompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
-	invocation, err := ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, agentOutput)
-	if err != nil {
-		return nil, taskExitErr(sel, ExitSetup, "%v", err)
+	basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
+	buildInvocation := func(prompt string) (*AgentInvocation, error) {
+		return ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, agentOutput)
 	}
 
 	maxTries := opts.MaxTries
@@ -212,7 +211,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		timeout = DefaultAttemptTimeout
 	}
 
-	result, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, invocation, maxTries, timeout)
+	result, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, basePrompt, buildInvocation, maxTries, timeout)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil && !opts.Yes {
@@ -236,7 +235,11 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	return result, nil
 }
 
-func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, invocation *AgentInvocation, maxTries int, timeout time.Duration) (*RunTaskResult, error) {
+// executeTaskAttempts runs the retry loop for one task. The prompt is rebuilt
+// per attempt (via buildInvocation over basePrompt) so a retry can carry this
+// task's own prior-attempt digest forward; attempt 1 runs the base prompt
+// unchanged (ADR 0023).
+func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, buildInvocation func(prompt string) (*AgentInvocation, error), maxTries int, timeout time.Duration) (*RunTaskResult, error) {
 	if errOut == nil {
 		errOut = os.Stderr
 	}
@@ -246,12 +249,25 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	// breakdown when the task reaches a terminal state. Full history stays
 	// with `pop tasks timings`.
 	var streamPaths []string
-	persist := func(rec *streamRecorder, attempt int, outcome, reason string, exitCode int) {
-		if p := persistAttemptStream(d, errOut, sel, rec, invocation.AgentPreset(), invocation.RequestedAgent, attempt, outcome, reason, exitCode); p != "" {
-			streamPaths = append(streamPaths, p)
-		}
-	}
 	for attempt := 1; attempt <= maxTries; attempt++ {
+		prompt := basePrompt
+		if attempt > 1 {
+			// A retry carries this task's own prior-attempt story forward so it
+			// converges instead of repeating; the digest is harness-built from the
+			// stream files, never a pointer to one (ADR 0020, ADR 0023).
+			if digest := buildPriorAttemptDigest(d, sel.Manifest.Dir, sel.TaskFile); digest != "" {
+				prompt = basePrompt + "\n" + digest
+			}
+		}
+		invocation, err := buildInvocation(prompt)
+		if err != nil {
+			return nil, taskExitErr(sel, ExitSetup, "%v", err)
+		}
+		persist := func(rec *streamRecorder, attempt int, outcome, reason string, exitCode int) {
+			if p := persistAttemptStream(d, errOut, sel, rec, invocation.AgentPreset(), invocation.RequestedAgent, attempt, outcome, reason, exitCode); p != "" {
+				streamPaths = append(streamPaths, p)
+			}
+		}
 		display.line(ansiDim, "   Attempt %d/%d · %s", attempt, maxTries, invocation.RequestedAgent)
 		display.line(ansiDim, "── Agent output ────────────────────────────────────────")
 

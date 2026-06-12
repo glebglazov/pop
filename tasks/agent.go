@@ -335,6 +335,17 @@ func ResolveAgentCommand(preset, agentCmd, prompt, runtimePath string) (name str
 	return invocation.Name, invocation.Args, nil
 }
 
+// presetAutoFormat returns the auto-mode output format for a preset, used to
+// pick the line renderer that turns a stored stream's events back into the
+// narrative they rendered live. An unknown preset (custom or absent) has no
+// structured format, so its raw lines are the narrative as-is.
+func presetAutoFormat(preset string) AgentOutputFormat {
+	if a, ok := agentAdapters[preset].(*presetAgentAdapter); ok {
+		return a.autoFormat
+	}
+	return AgentOutputPlain
+}
+
 // ResolveAgentInvocation returns an agent command together with its output protocol.
 func ResolveAgentInvocation(preset, agentCmd, prompt, runtimePath string) (*AgentInvocation, error) {
 	return ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath, AgentOutputAuto)

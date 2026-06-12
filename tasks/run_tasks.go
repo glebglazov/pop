@@ -277,13 +277,12 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			}
 		}
 
-		prompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
-		invocation, err := ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, attemptOutput)
-		if err != nil {
-			return nil, taskExitErr(sel, ExitSetup, "%v", err)
+		basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
+		buildInvocation := func(prompt string) (*AgentInvocation, error) {
+			return ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, attemptOutput)
 		}
 
-		taskResult, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, invocation, maxTries, timeout)
+		taskResult, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, basePrompt, buildInvocation, maxTries, timeout)
 		if execErr != nil {
 			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 			if refreshErr == nil {
