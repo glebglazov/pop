@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -613,9 +616,11 @@ Like set-status, the pane is auto-registered on the first call. Pass
 the topic.
 
 Pass --derive to read an agent hook payload on stdin (Claude Code's
-UserPromptSubmit) and set a truncated form of the user's prompt as the
-topic. A missing or unparseable payload is a no-op and never clobbers an
-existing topic.
+UserPromptSubmit) and set a derived topic. By default the user's prompt is
+truncated; when [pane_monitoring] topic_command is configured, the prompt is
+piped to that command as a normalized JSON payload and its stdout becomes the
+topic. A missing/unparseable payload, or a command failure, is a no-op and
+never clobbers an existing topic.
 
 The topic shows in the dashboard's descriptive parenthetical, dimmed to
 mark it machine-derived. A user-authored note always overrides it. The
@@ -639,10 +644,10 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 	derive, _ := cmd.Flags().GetBool("derive")
 
 	if derive {
-		paneID, topic, ok := deriveTopicFromStdin(cmd.InOrStdin(), args)
+		paneID, topic, ok := deriveTopic(cmd.InOrStdin(), args, cfg)
 		if !ok {
-			// Missing/unparseable payload or empty prompt: no-op so we never
-			// clobber an existing Topic.
+			// Missing/unparseable payload, empty prompt, or a command failure
+			// with an existing Topic to keep: no-op so we never clobber it.
 			return nil
 		}
 		return runPaneSetTopicWith(defaultTmux, cfg, paneID, topic, noRegister)
@@ -655,12 +660,43 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 	return runPaneSetTopicWith(defaultTmux, cfg, paneID, topic, noRegister)
 }
 
-// deriveTopicFromStdin reads an agent hook payload from r, extracts the user's
-// prompt, and truncates it into a Topic. The optional leading pane_id (a '%'
-// prefixed arg) overrides $TMUX_PANE. It returns ok=false when the payload is
-// missing/unparseable or yields no prompt, signalling the caller to no-op
-// rather than clobber an existing Topic.
-func deriveTopicFromStdin(r io.Reader, args []string) (paneID, topic string, ok bool) {
+// deriveTopic reads an agent hook payload from r and resolves a Topic. The
+// optional leading pane_id (a '%' prefixed arg) overrides $TMUX_PANE. It uses
+// the production prev-Topic lookup and command runner; see deriveTopicWith for
+// the injectable core.
+func deriveTopic(r io.Reader, args []string, cfg *config.Config) (paneID, topic string, ok bool) {
+	return deriveTopicWith(r, args, cfg, defaultPrevTopicLookup, runTopicCommand)
+}
+
+// prevTopicLookup returns the current Topic and session for a pane, used to
+// populate the command payload and to decide whether a failed derive can fall
+// back to truncation (no previous Topic) or must keep the existing one.
+type prevTopicLookup func(paneID string) (prevTopic, session string)
+
+// topicCommandRunner runs the user's topic command with the JSON payload on
+// stdin and returns its stdout. A non-nil error covers non-zero exit and
+// timeout (via the context).
+type topicCommandRunner func(ctx context.Context, command string, stdin []byte) (string, error)
+
+// topicCommandPayload is the normalized JSON contract pop pipes to a configured
+// topic_command. prompt/pane_id/session/prev_topic are always present;
+// transcript_path is passed through only when the agent's hook exposed one.
+// See ADR 0024 — pop owns this shape and stays a pipe (no model SDK, no keys).
+type topicCommandPayload struct {
+	PrevTopic      string `json:"prev_topic"`
+	Prompt         string `json:"prompt"`
+	TranscriptPath string `json:"transcript_path,omitempty"`
+	PaneID         string `json:"pane_id"`
+	Session        string `json:"session"`
+}
+
+// deriveTopicWith is the injectable core of the derive path. With no
+// topic_command configured it falls back to slice-02 prompt truncation. With a
+// command set it pipes the normalized JSON payload and uses the command's
+// stdout (trimmed, first line, capped). On command failure/timeout/empty output
+// it keeps the previous Topic (ok=false), or — when there is no previous Topic —
+// falls back to truncating the prompt. It never blocks the agent.
+func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, lookup prevTopicLookup, run topicCommandRunner) (paneID, topic string, ok bool) {
 	paneID = os.Getenv("TMUX_PANE")
 	if len(args) > 0 && strings.HasPrefix(args[0], "%") {
 		paneID = args[0]
@@ -671,9 +707,50 @@ func deriveTopicFromStdin(r io.Reader, args []string) (paneID, topic string, ok 
 		debug.Error("pane set-topic --derive: read stdin: %v", err)
 		return "", "", false
 	}
-	prompt, err := extractPromptFromPayload(data)
+	prompt, transcriptPath, err := parseTopicPayload(data)
 	if err != nil {
 		debug.Error("pane set-topic --derive: %v", err)
+		return "", "", false
+	}
+
+	command := cfg.PaneMonitoringTopicCommand()
+	if command == "" {
+		// No command configured: slice-02 truncation path, unchanged.
+		topic = truncateTopic(prompt)
+		if topic == "" {
+			return "", "", false
+		}
+		return paneID, topic, true
+	}
+
+	prevTopic, session := lookup(paneID)
+	payload, err := json.Marshal(topicCommandPayload{
+		PrevTopic:      prevTopic,
+		Prompt:         prompt,
+		TranscriptPath: transcriptPath,
+		PaneID:         paneID,
+		Session:        session,
+	})
+	if err != nil {
+		debug.Error("pane set-topic --derive: marshal payload: %v", err)
+		return "", "", false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), topicCommandTimeout)
+	defer cancel()
+	out, err := run(ctx, command, payload)
+	if err == nil {
+		if derived := capTopic(out); derived != "" {
+			return paneID, derived, true
+		}
+		debug.Log("pane set-topic --derive: topic_command produced empty output")
+	} else {
+		debug.Error("pane set-topic --derive: topic_command failed: %v", err)
+	}
+
+	// Command failed, timed out, or produced nothing usable. Keep the previous
+	// Topic when there is one; otherwise fall back to truncation.
+	if prevTopic != "" {
 		return "", "", false
 	}
 	topic = truncateTopic(prompt)
@@ -683,21 +760,68 @@ func deriveTopicFromStdin(r io.Reader, args []string) (paneID, topic string, ok 
 	return paneID, topic, true
 }
 
-// extractPromptFromPayload parses a Claude Code UserPromptSubmit hook payload
-// and returns its prompt field. Other agents come in a later slice.
-func extractPromptFromPayload(data []byte) (string, error) {
+// parseTopicPayload parses a Claude Code UserPromptSubmit hook payload and
+// returns its prompt and (optional) transcript_path fields. Other agents come
+// in a later slice. transcript_path is passed through verbatim — pop never
+// parses the transcript itself (ADR 0024).
+func parseTopicPayload(data []byte) (prompt, transcriptPath string, err error) {
 	var payload struct {
-		Prompt string `json:"prompt"`
+		Prompt         string `json:"prompt"`
+		TranscriptPath string `json:"transcript_path"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return "", fmt.Errorf("parse payload: %w", err)
+		return "", "", fmt.Errorf("parse payload: %w", err)
 	}
-	return payload.Prompt, nil
+	return payload.Prompt, payload.TranscriptPath, nil
+}
+
+// defaultPrevTopicLookup reads the current Topic and session for a pane from
+// the monitor state on disk. A missing pane or read error yields empties.
+func defaultPrevTopicLookup(paneID string) (prevTopic, session string) {
+	state, err := monitor.Load(monitor.DefaultStatePath())
+	if err != nil {
+		debug.Error("pane set-topic --derive: load state for prev topic: %v", err)
+		return "", ""
+	}
+	entry := state.Panes[paneID]
+	if entry == nil {
+		return "", ""
+	}
+	return entry.Topic, entry.Session
+}
+
+// runTopicCommand runs the user's topic_command via `sh -c`, feeding it the
+// JSON payload on stdin and returning its stdout. The context bounds runtime.
+func runTopicCommand(ctx context.Context, command string, stdin []byte) (string, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Stdin = bytes.NewReader(stdin)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	return out.String(), nil
+}
+
+// capTopic trims the command's stdout, keeps the first line only, and caps it
+// at topicMaxChars runes (matching truncation), appending an ellipsis when cut.
+func capTopic(out string) string {
+	line := out
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	line = strings.TrimSpace(line)
+	if utf8.RuneCountInString(line) > topicMaxChars {
+		runes := []rune(line)
+		line = strings.TrimRight(string(runes[:topicMaxChars]), " ") + "…"
+	}
+	return line
 }
 
 const (
-	topicMaxWords = 8
-	topicMaxChars = 60
+	topicMaxWords       = 8
+	topicMaxChars       = 60
+	topicCommandTimeout = 5 * time.Second
 )
 
 // truncateTopic collapses whitespace and trims the prompt to the first

@@ -48,6 +48,10 @@ type PaneMonitoringConfig struct {
 	// across any data dirs using this config, so only pin it for single-instance
 	// setups (e.g. exposing a fixed port to containers).
 	Addr string `toml:"addr"`
+	// TopicCommand, when set, is the shell command `set-topic --derive` pipes a
+	// normalized JSON payload to on stdin; its stdout becomes the pane's Topic.
+	// Empty means topics fall back to built-in prompt truncation (ADR 0024).
+	TopicCommand string `toml:"topic_command"`
 }
 
 // DashboardConfig holds dashboard-specific configuration
@@ -280,6 +284,15 @@ func (c *Config) PaneMonitoringAddr() string {
 		return ""
 	}
 	return c.PaneMonitoring.Addr
+}
+
+// PaneMonitoringTopicCommand returns the configured topic-derivation command,
+// or "" when none is set (in which case topics fall back to prompt truncation).
+func (c *Config) PaneMonitoringTopicCommand() string {
+	if c.PaneMonitoring == nil {
+		return ""
+	}
+	return c.PaneMonitoring.TopicCommand
 }
 
 // DashboardSortCriteria returns the configured sort criteria for the dashboard.
