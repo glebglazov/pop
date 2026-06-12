@@ -39,14 +39,20 @@ const (
 
 // PaneEntry represents a single monitored pane
 type PaneEntry struct {
-	PaneID       string     `json:"pane_id"`
-	Session      string     `json:"session"`
-	Status       PaneStatus `json:"status"`
-	Label        string     `json:"label,omitempty"`
-	Following    bool       `json:"following,omitempty"`
-	Note         string     `json:"note,omitempty"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	LastActiveAt time.Time  `json:"last_active_at,omitempty"`
+	PaneID    string     `json:"pane_id"`
+	Session   string     `json:"session"`
+	Status    PaneStatus `json:"status"`
+	Label     string     `json:"label,omitempty"`
+	Following bool       `json:"following,omitempty"`
+	Note      string     `json:"note,omitempty"`
+	// Topic is a short, machine-set phrase describing what the pane's
+	// conversation is about. Unlike a user-authored Note it carries no
+	// staleness/timestamp; it lives for the pane's whole monitored lifetime
+	// and is cleared only when the pane is retired (the whole entry is
+	// removed). unfollow does not touch it (it clears only Note).
+	Topic        string    `json:"topic,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	LastActiveAt time.Time `json:"last_active_at,omitempty"`
 }
 
 // UnmarshalJSON implements backward-compatible deserialization: older state

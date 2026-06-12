@@ -50,6 +50,14 @@ _Avoid_: Needs attention
 No attention is required — either you've acknowledged the pane or nothing new is pending.
 _Avoid_: Idle, read
 
+**Topic**:
+A short, agent-derived phrase describing the subject currently under discussion in an **Agentic pane** (e.g. "debugging auth middleware"). Distinct from a **Note**, which the user authors by hand: a Topic is machine-guessed and overwritten as the conversation moves. It is displayed, dimmed, in the parenthetical slot only when no Note is set, and lives for the pane's whole monitored lifetime — cleared only on retirement, never by `unfollow`.
+_Avoid_: Note (user-authored), Label (process identity), summary, title
+
+**Note**:
+A short annotation the **user** types for a pane in the dashboard. Human intent; outranks a **Topic** in display and is cleared by `unfollow`.
+_Avoid_: Topic (agent-derived), label
+
 **Active pane**:
 A pane currently visible to the user in tmux. A pane may be **Active** regardless of whether its status is **Working**, **Unread**, or **Clear**.
 _Avoid_: Working pane, focused pane

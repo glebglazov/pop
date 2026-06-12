@@ -48,6 +48,9 @@ func init() {
 	paneSetStatusCmd.Flags().String("source", "", "source identifier for filtering (e.g. tmux-global)")
 	paneSetStatusCmd.Flags().Bool("no-register", false, "only update already-tracked panes, never auto-register new ones")
 	paneSetStatusCmd.Flags().String("label", "", "display label for dashboard (e.g. cursor, claude); overrides tmux pane_current_command")
+	paneCmd.AddCommand(paneSetTopicCmd)
+	paneSetTopicCmd.Flags().Bool("no-register", false, "only update already-tracked panes, never auto-register new ones")
+	paneSetTopicCmd.Flags().Bool("clear", false, "clear the pane's topic")
 	paneCmd.AddCommand(paneStatusCmd)
 	paneCmd.AddCommand(paneFollowCmd)
 	paneCmd.AddCommand(paneUnfollowCmd)
@@ -587,6 +590,111 @@ func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatu
 		debug.Error("pane set-status: %v", err)
 	}
 	return err
+}
+
+// --- set-topic ---
+
+var paneSetTopicCmd = &cobra.Command{
+	Use:   "set-topic [pane_id] <text>",
+	Short: "Set a pane's topic",
+	Long: `Set the topic of a tmux pane — a short, machine-set phrase
+describing what the pane's conversation is about.
+
+If pane_id is omitted, uses $TMUX_PANE from the environment. A leading
+pane_id is recognised by its '%' prefix; everything after it is the topic
+text (joined with spaces if passed as multiple words).
+
+Like set-status, the pane is auto-registered on the first call. Pass
+--no-register to update only already-tracked panes. Pass --clear to wipe
+the topic.
+
+The topic shows in the dashboard's descriptive parenthetical, dimmed to
+mark it machine-derived. A user-authored note always overrides it. The
+topic lives for the pane's whole monitored lifetime and is cleared only
+when the pane is retired; unfollow does not touch it.`,
+	Args:   cobra.ArbitraryArgs,
+	Hidden: true,
+	RunE:   runPaneSetTopic,
+}
+
+func runPaneSetTopic(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Error("pane set-topic: load config: %v", err)
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	clear, _ := cmd.Flags().GetBool("clear")
+	noRegister, _ := cmd.Flags().GetBool("no-register")
+
+	paneID, topic, err := parseSetTopicArgs(clear, args)
+	if err != nil {
+		return err
+	}
+	return runPaneSetTopicWith(defaultTmux, cfg, paneID, topic, noRegister)
+}
+
+// parseSetTopicArgs resolves the optional leading pane_id (recognised by its
+// '%' prefix) and the topic text. Without --clear a topic is required; with
+// --clear any trailing text is ignored.
+func parseSetTopicArgs(clear bool, args []string) (paneID, topic string, err error) {
+	rest := args
+	if len(rest) > 0 && strings.HasPrefix(rest[0], "%") {
+		paneID = rest[0]
+		rest = rest[1:]
+	} else {
+		paneID = os.Getenv("TMUX_PANE")
+	}
+	if clear {
+		return paneID, "", nil
+	}
+	if len(rest) == 0 {
+		return "", "", fmt.Errorf("set-topic requires topic text (or --clear)")
+	}
+	return paneID, strings.Join(rest, " "), nil
+}
+
+func runPaneSetTopicWith(tmux deps.Tmux, cfg *config.Config, paneID, topic string, noRegister bool) error {
+	debug.Init()
+	defer debug.Close()
+
+	if paneID == "" {
+		return nil
+	}
+
+	// Daemon path when TCP server is enabled — keeps writes serialized with
+	// set-status under the daemon's mutex. Fall through to a direct write on
+	// connect failure (cold start), the same pattern set-status uses.
+	if cfg.PaneMonitoringTCPServer() {
+		resp, err := monitor.SendRequest(monitorAddr(cfg), monitor.Request{
+			Cmd:        "set-topic",
+			PaneID:     paneID,
+			Topic:      topic,
+			NoRegister: noRegister,
+		})
+		if err == nil {
+			if !resp.OK {
+				return fmt.Errorf("%s", resp.Error)
+			}
+			return nil
+		}
+		debug.Error("pane set-topic: socket send failed, falling back to direct write: %v", err)
+		paneOnSocketSendFailed()
+	}
+
+	return runPaneSetTopicDirect(tmux, paneID, topic, noRegister)
+}
+
+// runPaneSetTopicDirect is the fallback path used when the daemon socket is
+// unavailable (cold start).
+func runPaneSetTopicDirect(tmux deps.Tmux, paneID, topic string, noRegister bool) error {
+	store := monitor.NewStore(monitor.DefaultStatePath(), nil)
+	return store.ReportTopic(tmux, monitor.ReportTopicInput{
+		PaneID:     paneID,
+		Topic:      topic,
+		NoRegister: noRegister,
+	})
 }
 
 // --- status ---

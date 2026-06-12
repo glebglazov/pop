@@ -264,12 +264,13 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 		}
 
 		panes = append(panes, ui.AttentionPane{
-			PaneID:    entry.PaneID,
-			Session:   entry.Session,
-			Name:      name,
-			Note:      entry.Note,
-			Status:    status,
-			Following: entry.Following,
+			PaneID:       entry.PaneID,
+			Session:      entry.Session,
+			Name:         name,
+			Note:         entry.Note,
+			Status:       status,
+			Following:    entry.Following,
+			TopicDerived: paneTopicDerived(entry),
 		})
 	}
 
@@ -496,12 +497,26 @@ func paneProcessLabel(entry *monitor.PaneEntry, paneCommands map[string]string) 
 	return paneCommands[entry.PaneID]
 }
 
+// paneAttentionName builds the dashboard display name. The descriptive
+// parenthetical follows the precedence Note → Topic → Label → pane_current_command:
+// a user-authored Note wins; a machine-derived Topic shows only when no Note is
+// set (and is rendered dimmed by the UI — see paneTopicDerived).
 func paneAttentionName(entry *monitor.PaneEntry, paneCommands map[string]string) string {
 	if entry.Note != "" {
 		return entry.Session + " (" + entry.Note + ")"
+	}
+	if entry.Topic != "" {
+		return entry.Session + " (" + entry.Topic + ")"
 	}
 	if cmd := paneProcessLabel(entry, paneCommands); cmd != "" {
 		return entry.Session + " (" + entry.PaneID + ", " + cmd + ")"
 	}
 	return entry.Session + " (" + entry.PaneID + ")"
+}
+
+// paneTopicDerived reports whether the descriptive parenthetical is the
+// machine-derived Topic (shown only when no Note overrides it). The UI dims
+// the name in this case to mark it as machine-derived.
+func paneTopicDerived(entry *monitor.PaneEntry) bool {
+	return entry.Note == "" && entry.Topic != ""
 }

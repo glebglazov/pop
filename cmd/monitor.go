@@ -96,6 +96,8 @@ func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandle
 			return handleSetStatus(tmux, statePath, req)
 		case "set-following":
 			return handleSetFollowing(tmux, statePath, req)
+		case "set-topic":
+			return handleSetTopic(tmux, statePath, req)
 		case "visit":
 			return handleVisit(statePath, req)
 		case "identify":
@@ -186,6 +188,24 @@ func handleSetFollowing(tmux deps.Tmux, statePath string, req monitor.Request) m
 	store := monitor.NewStore(statePath, nil)
 	if err := store.SetFollowing(tmux, req.PaneID, *req.Following); err != nil {
 		debug.Error("handler set-following: %v", err)
+		return monitor.Response{OK: false, Error: err.Error()}
+	}
+	return monitor.Response{OK: true}
+}
+
+// handleSetTopic sets (or clears) a pane's Topic via the monitor Store.
+func handleSetTopic(tmux deps.Tmux, statePath string, req monitor.Request) monitor.Response {
+	if req.PaneID == "" {
+		return monitor.Response{OK: true}
+	}
+
+	store := monitor.NewStore(statePath, nil)
+	if err := store.ReportTopic(tmux, monitor.ReportTopicInput{
+		PaneID:     req.PaneID,
+		Topic:      req.Topic,
+		NoRegister: req.NoRegister,
+	}); err != nil {
+		debug.Error("handler set-topic: %v", err)
 		return monitor.Response{OK: false, Error: err.Error()}
 	}
 	return monitor.Response{OK: true}

@@ -51,6 +51,10 @@ type AttentionPane struct {
 	Status    AttentionStatus
 	Following bool
 	Note      string
+	// TopicDerived marks Name's parenthetical as a machine-derived Topic
+	// (shown only when no Note overrides it). When set, the name is rendered
+	// dimmed to signal it was set by an agent rather than the user.
+	TopicDerived bool
 }
 
 // AttentionCallbacks holds callback functions for the attention sub-view.
@@ -933,14 +937,22 @@ func (d *Dashboard) viewDashboard() string {
 		maxNameWidth = 0
 	}
 	paneName = truncateString(paneName, maxNameWidth)
-	rightHeader := paneName + pinSuffix
 	rightHeaderVisualLen := len([]rune(paneName)) + pinVisualWidth
 	rightPadding := rightWidth - rightHeaderVisualLen
 	if rightPadding < 0 {
 		rightPadding = 0
 	}
+	// A machine-derived Topic name is dimmed; otherwise it uses the header
+	// style. The pin always keeps the header style.
+	nameStyle := headerStyle
+	if pane.TopicDerived {
+		nameStyle = dimStyle
+	}
 	b.WriteString(strings.Repeat(" ", rightPadding))
-	b.WriteString(headerStyle.Render(rightHeader))
+	b.WriteString(nameStyle.Render(paneName))
+	if pinSuffix != "" {
+		b.WriteString(headerStyle.Render(pinSuffix))
+	}
 	b.WriteString("\n")
 
 	// Build preview lines
@@ -1011,6 +1023,12 @@ func (d *Dashboard) viewDashboard() string {
 		}
 		nameWidth := leftWidth - quickPrefixWidth - iconWidth - 3
 		name := truncateString(pane.Name, nameWidth)
+		// A machine-derived Topic name renders dimmed. Width math stays on the
+		// plain (un-styled) name so padding is unaffected.
+		displayName := name
+		if pane.TopicDerived {
+			displayName = dimStyle.Render(name)
+		}
 
 		if listIdx == d.cursor {
 			prefix := indicatorStyle.Render("█")
@@ -1023,7 +1041,7 @@ func (d *Dashboard) viewDashboard() string {
 			if padding < 0 {
 				padding = 0
 			}
-			left = prefix + " " + icon + name + strings.Repeat(" ", padding)
+			left = prefix + " " + icon + displayName + strings.Repeat(" ", padding)
 		} else {
 			prefix := "  "
 			prefixWidth := 2
@@ -1037,7 +1055,7 @@ func (d *Dashboard) viewDashboard() string {
 			if padding < 0 {
 				padding = 0
 			}
-			left = prefix + icon + name + strings.Repeat(" ", padding)
+			left = prefix + icon + displayName + strings.Repeat(" ", padding)
 		}
 
 		rightContent := ""

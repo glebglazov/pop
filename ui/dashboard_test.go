@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -809,6 +810,31 @@ func TestDashboardView(t *testing.T) {
 		}
 		if !containsSubstring(view, "No active panes") {
 			t.Error("view missing empty message")
+		}
+	})
+
+	t.Run("topic-derived name renders dimmed", func(t *testing.T) {
+		const dimSeq = "38;5;241" // colorDim foreground
+
+		plain := []AttentionPane{
+			{PaneID: "%1", Session: "s1", Name: "s1 (node)", Status: AttentionClear},
+		}
+		topic := []AttentionPane{
+			{PaneID: "%1", Session: "s1", Name: "s1 (refactor auth)", Status: AttentionClear, TopicDerived: true},
+		}
+
+		plainView := newDashboard(plain, AttentionCallbacks{}).View().Content
+		topicView := newDashboard(topic, AttentionCallbacks{}).View().Content
+
+		// Both share the dimmed hint line, so compare counts: the topic name is
+		// dimmed in both the list row and the right header, adding occurrences.
+		if strings.Count(topicView, dimSeq) <= strings.Count(plainView, dimSeq) {
+			t.Errorf("expected more dim sequences for topic-derived name: topic=%d plain=%d",
+				strings.Count(topicView, dimSeq), strings.Count(plainView, dimSeq))
+		}
+		// The name text itself is preserved (only styled, not altered).
+		if !containsSubstring(StripANSI(topicView), "refactor auth") {
+			t.Error("topic name text missing from view")
 		}
 	})
 

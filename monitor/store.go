@@ -207,6 +207,51 @@ func (s *Store) ReportStatus(tmux deps.Tmux, in ReportStatusInput) error {
 	)
 }
 
+// ReportTopicInput carries a topic report. An empty Topic clears the topic.
+type ReportTopicInput struct {
+	PaneID     string
+	Topic      string
+	NoRegister bool
+}
+
+// ReportTopic sets a pane's Topic, mirroring ReportStatus's auto-register
+// semantics: an untracked pane is registered (as clear) unless NoRegister is
+// set. Registration is skipped when the topic is empty (a clear has nothing to
+// register). No-op when the topic already matches.
+func (s *Store) ReportTopic(tmux deps.Tmux, in ReportTopicInput) error {
+	return s.upsert(in.PaneID,
+		func() (*PaneEntry, bool) {
+			if in.NoRegister || in.Topic == "" {
+				return nil, false
+			}
+			session, _, err := TmuxPaneInfo(tmux, in.PaneID)
+			if err != nil {
+				debug.Error("[set-topic] %s: failed to look up pane info, skipping: %v", in.PaneID, err)
+				return nil, false
+			}
+			debug.Log("[set-topic] %s: auto-registering in session=%s with topic=%q", in.PaneID, session, in.Topic)
+			now := time.Now()
+			return &PaneEntry{
+				PaneID:       in.PaneID,
+				Session:      session,
+				Status:       StatusClear,
+				Topic:        in.Topic,
+				UpdatedAt:    now,
+				LastActiveAt: now,
+			}, true
+		},
+		func(entry *PaneEntry) bool {
+			if entry.Topic == in.Topic {
+				return false
+			}
+			debug.Log("[set-topic] %s (session=%s): %q → %q", in.PaneID, entry.Session, entry.Topic, in.Topic)
+			entry.Topic = in.Topic
+			entry.UpdatedAt = time.Now()
+			return true
+		},
+	)
+}
+
 func applyLabel(entry *PaneEntry, label string) {
 	if label != "" {
 		entry.Label = label
