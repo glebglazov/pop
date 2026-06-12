@@ -644,7 +644,14 @@ func TestNormalizeStructuredOutputRawFallbackUsesCompletionContract(t *testing.T
 
 func TestBuildAgentPromptAbsolutePaths(t *testing.T) {
 	prompt := BuildAgentPrompt("/abs/tasks/01-a.md", "/abs/runtime")
-	for _, want := range []string{"/abs/tasks/01-a.md", "/abs/runtime", "index.json", "Do NOT make git commits", "optional context references"} {
+	for _, want := range []string{
+		"/abs/tasks/01-a.md", "/abs/runtime", "index.json", "Do NOT make git commits", "optional context references",
+		"single non-interactive session",
+		"later turn",
+		"completion sentinel (TASK_COMPLETE or TASK_FAILED) is recorded as a",
+		"keep polling it across successive",
+		"tool timeout",
+	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
 		}
