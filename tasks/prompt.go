@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var progressHeaderPattern = regexp.MustCompile(`^(\S+)\s+\[([^\]]+)\]\s+(\S+)\s*$`)
@@ -190,6 +191,36 @@ func BuildFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, failed 
 	return b.String()
 }
 
+// formatSiblingCompletedBriefs renders the inter-task feed appended to the
+// worker prompt on a retry: briefs of sibling tasks already completed in the
+// same Task set, for cross-task orientation — what already landed, so the
+// worker knows where to look (ADR 0023). It draws from the same completed-AFK
+// join the HITL assistance prompt uses (done manifest status + DONE/COMPLETE
+// outcome, deduped to the latest record per task), so sibling failure/reset
+// churn never reaches the worker. Returns "" when no sibling has a brief.
+func formatSiblingCompletedBriefs(d *Deps, m *Manifest) string {
+	completed := completedAFKProgress(d, m)
+	if len(completed) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString("Sibling tasks already completed in this task set (for orientation — what\n")
+	b.WriteString("already landed, so you know where to look). These are done siblings, not\n")
+	b.WriteString("this task:\n\n")
+	for _, item := range completed {
+		fmt.Fprintf(&b, "%s — %s\n", item.TaskID, item.Outcome)
+		for _, line := range strings.Split(item.Summary, "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "  %s\n", line)
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
 type completedAFKProgressItem struct {
 	TaskID    string
 	File      string
@@ -213,7 +244,12 @@ func completedAFKProgress(d *Deps, m *Manifest) []completedAFKProgressItem {
 		tasksByFile[task.File] = task
 	}
 
-	var completed []completedAFKProgressItem
+	// Dedupe to the latest record per task: a done→reset→done task yields two
+	// DONE records, and only the current one is a live brief — the earlier one
+	// describes the abandoned line of attack (ADR 0023). The State gate already
+	// drops a done→reset→failed task (its manifest status is not "done").
+	var order []string
+	latest := make(map[string]completedAFKProgressItem)
 	for _, record := range parseProgressRecords(string(data)) {
 		task, ok := tasksByFile[record.File]
 		if !ok || task.Type != "AFK" || task.Status != "done" {
@@ -222,15 +258,39 @@ func completedAFKProgress(d *Deps, m *Manifest) []completedAFKProgressItem {
 		if record.Outcome != "DONE" && record.Outcome != "COMPLETE" {
 			continue
 		}
-		completed = append(completed, completedAFKProgressItem{
+		item := completedAFKProgressItem{
 			TaskID:    task.ID,
 			File:      record.File,
 			Outcome:   record.Outcome,
 			Timestamp: record.Timestamp,
 			Summary:   record.Summary,
-		})
+		}
+		prev, seen := latest[record.File]
+		if !seen {
+			order = append(order, record.File)
+		} else if !recordAfter(record.Timestamp, prev.Timestamp) {
+			continue
+		}
+		latest[record.File] = item
+	}
+
+	completed := make([]completedAFKProgressItem, 0, len(order))
+	for _, file := range order {
+		completed = append(completed, latest[file])
 	}
 	return completed
+}
+
+// recordAfter reports whether progress record timestamp a is at or after b.
+// Both are RFC3339; on a parse failure it falls back to true so the later
+// (append-only) record wins, matching progress.txt's chronological order.
+func recordAfter(a, b string) bool {
+	ta, errA := time.Parse(time.RFC3339, a)
+	tb, errB := time.Parse(time.RFC3339, b)
+	if errA != nil || errB != nil {
+		return true
+	}
+	return !ta.Before(tb)
 }
 
 type progressRecord struct {

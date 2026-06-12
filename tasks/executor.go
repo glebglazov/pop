@@ -252,12 +252,19 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	for attempt := 1; attempt <= maxTries; attempt++ {
 		prompt := basePrompt
 		if attempt > 1 {
-			// A retry carries this task's own prior-attempt story forward so it
-			// converges instead of repeating; the digest is harness-built from the
-			// stream files, never a pointer to one (ADR 0020, ADR 0023).
-			if digest := buildPriorAttemptDigest(d, sel.Manifest.Dir, sel.TaskFile); digest != "" {
-				prompt = basePrompt + "\n" + digest
+			// A retry carries two feeds forward so it converges instead of
+			// repeating (ADR 0023): briefs of sibling tasks already completed in
+			// the set (cross-task orientation), then this task's own prior-attempt
+			// story. Both are harness-built, never a pointer to a raw stream (ADR
+			// 0020).
+			var carry strings.Builder
+			if briefs := formatSiblingCompletedBriefs(d, sel.Manifest); briefs != "" {
+				carry.WriteString("\n" + briefs)
 			}
+			if digest := buildPriorAttemptDigest(d, sel.Manifest.Dir, sel.TaskFile); digest != "" {
+				carry.WriteString("\n" + digest)
+			}
+			prompt = basePrompt + carry.String()
 		}
 		invocation, err := buildInvocation(prompt)
 		if err != nil {
