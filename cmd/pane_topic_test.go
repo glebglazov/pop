@@ -415,14 +415,32 @@ func TestDeriveTopic_Command(t *testing.T) {
 			}
 			return "topic", nil
 		}
-		lookup := func(string) (string, string) { return "old topic", "sess" }
+		// The command only runs on a fresh pane (ADR 0025), so prev_topic is
+		// always empty; session still rides through the lookup.
+		lookup := func(string) (string, string) { return "", "sess" }
 		_, _, ok := deriveTopicWith(strings.NewReader(payload), []string{"%5"}, withTopicCommand("x"), "claude", lookup, run)
 		if !ok {
 			t.Fatal("expected ok")
 		}
-		if got.PrevTopic != "old topic" || got.Prompt != "refactor the auth layer" ||
+		if got.PrevTopic != "" || got.Prompt != "refactor the auth layer" ||
 			got.TranscriptPath != "/tmp/abc.jsonl" || got.PaneID != "%5" || got.Session != "sess" {
 			t.Errorf("payload = %+v", got)
+		}
+	})
+
+	t.Run("derives once: skips the command when a Topic already exists", func(t *testing.T) {
+		ran := false
+		run := func(context.Context, string, []byte) (string, error) {
+			ran = true
+			return "new topic", nil
+		}
+		lookup := func(string) (string, string) { return "existing topic", "sess" }
+		_, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", lookup, run)
+		if ok {
+			t.Error("expected ok=false (keep existing Topic)")
+		}
+		if ran {
+			t.Error("command must not run when a Topic already exists")
 		}
 	})
 

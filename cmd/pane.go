@@ -729,6 +729,12 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 	}
 
 	prevTopic, session := lookup(paneID)
+	if prevTopic != "" {
+		// Derive once per pane (ADR 0025): a pane that already has a Topic never
+		// re-runs the command. Keep the existing Topic; a user note overrides it.
+		return "", "", false
+	}
+
 	payload, err := json.Marshal(topicCommandPayload{
 		PrevTopic:      prevTopic,
 		Prompt:         prompt,
@@ -753,11 +759,9 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 		debug.Error("pane set-topic --derive: topic_command failed: %v", err)
 	}
 
-	// Command failed, timed out, or produced nothing usable. Keep the previous
-	// Topic when there is one; otherwise fall back to truncation.
-	if prevTopic != "" {
-		return "", "", false
-	}
+	// Command failed, timed out, or produced nothing usable. prevTopic is empty
+	// here (the once-guard above returns early otherwise), so fall back to
+	// truncation; that truncated Topic then freezes the pane.
 	topic = truncateTopic(prompt)
 	if topic == "" {
 		return "", "", false
