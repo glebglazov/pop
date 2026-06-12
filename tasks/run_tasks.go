@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -408,13 +409,14 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *buf
 	}
 
 	prompt := BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
+	body := gateTaskBody(d, m, hitl)
 	invocation, err := ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
 
 	for {
-		action, err := promptHITLGateAction(out, reader, taskSetID, hitl, invocation)
+		action, err := promptHITLGateAction(out, reader, taskSetID, hitl, body, invocation)
 		if err != nil {
 			return true, err
 		}
@@ -451,6 +453,7 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *buf
 				return true, exitErr(ExitSetup, "%v", err)
 			}
 			hitl = BlockingHITLTask(m)
+			body = gateTaskBody(d, m, hitl)
 		case hitlGateDefer:
 			result, err := SkipTaskWith(d, nil, nil, SkipTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, hitl.File)})
 			if err != nil {
@@ -487,10 +490,42 @@ func canPrompt(in io.Reader) bool {
 	return in != os.Stdin || isInteractive(in)
 }
 
-func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string, hitl *Task, invocation *AgentAssistanceInvocation) (hitlGateAction, error) {
+// gateTaskBody returns the raw task file body for inline display at a gate, or
+// "" when it cannot be read. The agent prompt carries the body regardless; this
+// is the copy the human reads before electing to act on the task by hand.
+func gateTaskBody(d *Deps, m *Manifest, task *Task) string {
+	if d == nil || m == nil || task == nil {
+		return ""
+	}
+	fs := d.FS
+	if fs == nil {
+		fs = DefaultDeps().FS
+	}
+	data, err := fs.ReadFile(filepath.Join(m.Dir, task.File))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(data), "\n")
+}
+
+// renderGateTaskBody prints the blocking task's full body above a gate menu so a
+// human electing to finish by hand can see every action point in place.
+func renderGateTaskBody(display *output, taskFile, body string) {
+	if body == "" {
+		return
+	}
+	heading := fmt.Sprintf("--- %s ---", taskFile)
+	fmt.Fprintln(display)
+	fmt.Fprintln(display, heading)
+	fmt.Fprintln(display, body)
+	fmt.Fprintln(display, strings.Repeat("-", len(heading)))
+}
+
+func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string, hitl *Task, body string, invocation *AgentAssistanceInvocation) (hitlGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiYellow, "Human-blocked: %s/%s needs human work before the set can continue.", taskSetID, hitl.ID)
+	renderGateTaskBody(display, hitl.File, body)
 	fmt.Fprintln(display, "  1. Get agent assistance (default)")
 	if invocation != nil {
 		fmt.Fprintf(display, "     %s\n", invocation.Display)
@@ -518,7 +553,7 @@ func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string,
 		return hitlGateExit, nil
 	default:
 		fmt.Fprintln(display, "Choose 1, 2, 3, or 4.")
-		return promptHITLGateAction(out, reader, taskSetID, hitl, invocation)
+		return promptHITLGateAction(out, reader, taskSetID, hitl, body, invocation)
 	}
 }
 
@@ -565,13 +600,14 @@ func handleInteractiveFailedGate(d *Deps, out io.Writer, in io.Reader, reader *b
 	}
 
 	prompt := BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
+	body := gateTaskBody(d, m, failed)
 	invocation, err := ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
 
 	for {
-		action, err := promptFailedGateAction(out, reader, taskSetID, failed, invocation)
+		action, err := promptFailedGateAction(out, reader, taskSetID, failed, body, invocation)
 		if err != nil {
 			return true, err
 		}
@@ -608,6 +644,7 @@ func handleInteractiveFailedGate(d *Deps, out io.Writer, in io.Reader, reader *b
 			m = afterManifest
 			failed = FailedTask(m)
 			prompt = BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
+			body = gateTaskBody(d, m, failed)
 			invocation, err = ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
 			if err != nil {
 				return true, exitErr(ExitSetup, "%v", err)
@@ -625,10 +662,11 @@ func handleInteractiveFailedGate(d *Deps, out io.Writer, in io.Reader, reader *b
 	}
 }
 
-func promptFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID string, failed *Task, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
+func promptFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiRed, "Failed: %s/%s failed before the set could continue.", taskSetID, failed.ID)
+	renderGateTaskBody(display, failed.File, body)
 	fmt.Fprintln(display, "  1. Re-run (default)")
 	fmt.Fprintln(display, "  2. Agent assistance")
 	if invocation != nil {
@@ -656,6 +694,6 @@ func promptFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID strin
 		return failedGateExit, nil
 	default:
 		fmt.Fprintln(display, "Choose 1, 2, 3, or 4.")
-		return promptFailedGateAction(out, reader, taskSetID, failed, invocation)
+		return promptFailedGateAction(out, reader, taskSetID, failed, body, invocation)
 	}
 }
