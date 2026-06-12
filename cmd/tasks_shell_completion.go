@@ -28,6 +28,7 @@ func registerTaskShellCompletions() {
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent-output", completeTaskAgentOutputs)
 
+	taskStatusCmd.ValidArgsFunction = completeTaskStatusArgs
 	taskSetPriorityCmd.ValidArgsFunction = completeTaskSetPriorityArgs
 	taskImplementCmd.ValidArgsFunction = completeTaskImplementArgs
 	taskResetTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
@@ -119,6 +120,17 @@ func completeTaskAgents(cmd *cobra.Command, args []string, toComplete string) ([
 
 func completeTaskAgentOutputs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	return filterShellCompletions(tasks.ValidAgentOutputModes(), toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeTaskStatusArgs completes the optional set argument to `tasks status`.
+// status is set-only and read-only, so it offers bare set identifiers with a
+// normal trailing space (no <task-set>/ slash drill) and keeps Done sets — the
+// finished set you most often confirm.
+func completeTaskStatusArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeTaskTaskSets(cmd, args, toComplete)
 }
 
 func completeTaskSetPriorityArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

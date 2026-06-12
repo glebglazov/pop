@@ -124,6 +124,11 @@ func SelectTaskInSet(refresh *RefreshResult, taskSetID string) (*Selection, erro
 	return firstEligibleTask(taskSetID, m)
 }
 
+// FindRow returns the status row for a task set by ID, or nil when none matches.
+func FindRow(refresh *RefreshResult, taskSetID string) *Row {
+	return findRow(refresh, taskSetID)
+}
+
 func findRow(refresh *RefreshResult, taskSetID string) *Row {
 	for i := range refresh.Rows {
 		if refresh.Rows[i].ID == taskSetID {

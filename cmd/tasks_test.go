@@ -46,7 +46,7 @@ func TestTaskStatusExitSuccessWithMalformedRows(t *testing.T) {
 
 	d := tasks.DefaultDeps()
 	var buf bytes.Buffer
-	if err := runTaskStatusWith(d, &buf); err != nil {
+	if err := runTaskStatusWith(d, &buf, ""); err != nil {
 		t.Fatalf("status should succeed: %v", err)
 	}
 	if buf.Len() == 0 {
@@ -85,7 +85,7 @@ func TestTaskStatusUnreadableDiscoveryFails(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	err := runTaskStatusWith(tasks.DefaultDeps(), &bytes.Buffer{})
+	err := runTaskStatusWith(tasks.DefaultDeps(), &bytes.Buffer{}, "")
 	if err == nil {
 		t.Fatal("expected setup failure")
 	}
@@ -156,7 +156,7 @@ func TestTaskStatusUsesDefinitionOverride(t *testing.T) {
 
 	t.Setenv("XDG_DATA_HOME", root)
 	var buf bytes.Buffer
-	if err := runTaskStatusWith(tasks.DefaultDeps(), &buf); err != nil {
+	if err := runTaskStatusWith(tasks.DefaultDeps(), &buf, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "a") {
@@ -195,7 +195,7 @@ func TestTaskResolveByProjectName(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := runTaskStatusWith(tasks.DefaultDeps(), &buf); err != nil {
+	if err := runTaskStatusWith(tasks.DefaultDeps(), &buf, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "svc") {
@@ -263,12 +263,85 @@ func TestTaskStatusShowsRuntimeLock(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	var buf bytes.Buffer
-	if err := runTaskStatusWith(d, &buf); err != nil {
+	if err := runTaskStatusWith(d, &buf, ""); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "Runtime execution lock") || !strings.Contains(out, "PID") {
 		t.Fatalf("missing lock rendering:\n%s", out)
+	}
+}
+
+func TestTaskStatusSetArgDrillsIn(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "alpha")
+	writeTaskThoughts(t, tasksDir, "beta")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+
+	taskProject = ""
+	taskPath = ""
+	taskDefPath = ""
+	t.Cleanup(resetTaskFlags)
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	var buf bytes.Buffer
+	if err := runTaskStatusWith(tasks.DefaultDeps(), &buf, "alpha"); err != nil {
+		t.Fatalf("drill-in should succeed: %v", err)
+	}
+	out := buf.String()
+	// Per-task table, not the all-sets overview.
+	if strings.Contains(out, "TASK SET") {
+		t.Fatalf("expected per-task breakdown, got overview:\n%s", out)
+	}
+	for _, want := range []string{"alpha", "STATUS", "TYPE", "ID", "TITLE", "BLOCKED-BY", "01-a"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in breakdown:\n%s", want, out)
+		}
+	}
+	// Scoped to the named set only.
+	if strings.Contains(out, "beta") {
+		t.Fatalf("breakdown leaked another set:\n%s", out)
+	}
+}
+
+func TestTaskStatusUnknownSetArgErrors(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "alpha")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+
+	taskProject = ""
+	taskPath = ""
+	taskDefPath = ""
+	t.Cleanup(resetTaskFlags)
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	err := runTaskStatusWith(tasks.DefaultDeps(), &bytes.Buffer{}, "nope")
+	if err == nil {
+		t.Fatal("expected error for unknown set")
+	}
+	// The error lists the valid identifiers so a typo becomes the answer.
+	if !strings.Contains(err.Error(), "alpha") {
+		t.Fatalf("error should list valid ids: %v", err)
 	}
 }
 

@@ -320,6 +320,82 @@ func renderTaskList(out *output, taskSetID string, m *Manifest) {
 	fmt.Fprintln(out)
 }
 
+// RenderTaskSetDetail writes a per-task breakdown of one task set — the arg
+// form of `pop tasks status`. Where the no-arg overview shows one row per set,
+// this drills into a single set and shows every task's status, type, identifier,
+// title, and blockers in manifest (dependency) order, so a set's aggregate
+// state can be read down to the task that holds it.
+func RenderTaskSetDetail(w io.Writer, taskSetID string, row *Row, m *Manifest) {
+	renderTaskSetDetail(outputFor(w), taskSetID, row, m)
+}
+
+func renderTaskSetDetail(out *output, taskSetID string, row *Row, m *Manifest) {
+	status := DeriveStatus(m)
+	progress := ""
+	if row != nil {
+		status = row.Status
+		progress = row.Progress
+	}
+
+	header := fmt.Sprintf("%s  [%s]", taskSetID, status)
+	if progress != "" {
+		header += "  " + progress
+	}
+	out.line(statusStyle(status), "%s", header)
+
+	if status == StatusMissing {
+		out.line(ansiYellow, "registered task set missing")
+		return
+	}
+	if m == nil || !m.Valid {
+		out.line(ansiRed, "malformed manifest")
+		if m != nil {
+			for _, e := range m.Errors {
+				fmt.Fprintf(out, "  - %s\n", e)
+			}
+		}
+		return
+	}
+
+	const (
+		stW    = 10
+		tyW    = 4
+		titleW = 40
+	)
+	idW := len("ID")
+	for _, task := range m.Tasks {
+		if len(task.ID) > idW {
+			idW = len(task.ID)
+		}
+	}
+	fmt.Fprintf(out, "%-*s  %-*s  %-*s  %-*s  %s\n", stW, "STATUS", tyW, "TYPE", idW, "ID", titleW, "TITLE", "BLOCKED-BY")
+	fmt.Fprintf(out, "%-*s  %-*s  %-*s  %-*s  %s\n",
+		stW, strings.Repeat("-", stW), tyW, strings.Repeat("-", tyW), idW, strings.Repeat("-", idW), titleW, strings.Repeat("-", titleW), strings.Repeat("-", 12))
+
+	for _, task := range m.Tasks {
+		title := task.Title
+		if len(title) > titleW {
+			title = title[:titleW-3] + "..."
+		}
+		blockedBy := "-"
+		if len(task.BlockedBy) > 0 {
+			blockedBy = strings.Join(task.BlockedBy, ", ")
+		}
+		line := fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s", stW, taskStatusCell(task), tyW, task.Type, idW, task.ID, titleW, title, blockedBy)
+		fmt.Fprintln(out, out.styled(taskStyle(m, task), line))
+	}
+}
+
+// taskStatusCell renders one task's status for the detail table, folding the
+// retry count into a failed task's cell (failed(N)) so the table needs no
+// separate column for it.
+func taskStatusCell(task Task) string {
+	if task.Status == "failed" && task.FailedAfter != nil {
+		return fmt.Sprintf("failed(%d)", *task.FailedAfter)
+	}
+	return task.Status
+}
+
 func taskStyle(m *Manifest, task Task) string {
 	switch task.Status {
 	case "done":

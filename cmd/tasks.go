@@ -36,9 +36,9 @@ var taskCmd = &cobra.Command{
 }
 
 var taskStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show discovered task sets and their statuses",
-	Args:  cobra.NoArgs,
+	Use:   "status [TASK_SET]",
+	Short: "Show discovered task sets and their statuses, or one set's per-task breakdown",
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runTaskStatus,
 }
 
@@ -143,14 +143,18 @@ func taskResolveInput() tasks.ResolveInput {
 }
 
 func runTaskStatus(cmd *cobra.Command, args []string) error {
-	return runTaskStatusWith(tasks.DefaultDeps(), os.Stdout)
+	var taskSetID string
+	if len(args) > 0 {
+		taskSetID = args[0]
+	}
+	return runTaskStatusWith(tasks.DefaultDeps(), os.Stdout, taskSetID)
 }
 
 var taskConfigLoad = func(path string) (*config.Config, error) {
 	return config.Load(path)
 }
 
-func runTaskStatusWith(d *tasks.Deps, w io.Writer) error {
+func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	resolved, err := tasks.ResolvePathsWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput())
 	if err != nil {
 		return fmt.Errorf("tasks status: %w", err)
@@ -159,6 +163,18 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer) error {
 	result, err := tasks.RefreshWith(d, resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
 	if err != nil {
 		return fmt.Errorf("tasks status: %w", err)
+	}
+
+	// A set argument drills into that one set's per-task breakdown; absent, the
+	// no-arg overview lists every set. ResolveTaskSetTarget rejects file and
+	// path forms and errors with the valid identifiers on an unknown set.
+	if strings.TrimSpace(taskSetID) != "" {
+		id, err := tasks.ResolveTaskSetTarget(result, taskSetID)
+		if err != nil {
+			return fmt.Errorf("tasks status: %w", err)
+		}
+		tasks.RenderTaskSetDetail(w, id, tasks.FindRow(result, id), result.Manifests[id])
+		return nil
 	}
 
 	if runtimePath, err := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, ""); err == nil {
