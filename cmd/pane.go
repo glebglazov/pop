@@ -57,7 +57,8 @@ func init() {
 	paneCmd.AddCommand(paneSetTopicCmd)
 	paneSetTopicCmd.Flags().Bool("no-register", false, "only update already-tracked panes, never auto-register new ones")
 	paneSetTopicCmd.Flags().Bool("clear", false, "clear the pane's topic")
-	paneSetTopicCmd.Flags().Bool("derive", false, "derive the topic from an agent hook payload read on stdin (Claude Code UserPromptSubmit)")
+	paneSetTopicCmd.Flags().Bool("derive", false, "derive the topic from an agent hook payload read on stdin (e.g. Claude Code UserPromptSubmit)")
+	paneSetTopicCmd.Flags().String("label", "", "agent whose hook payload is on stdin (claude, codex, cursor, pi, opencode); selects the payload adapter for --derive")
 	paneCmd.AddCommand(paneStatusCmd)
 	paneCmd.AddCommand(paneFollowCmd)
 	paneCmd.AddCommand(paneUnfollowCmd)
@@ -615,12 +616,14 @@ Like set-status, the pane is auto-registered on the first call. Pass
 --no-register to update only already-tracked panes. Pass --clear to wipe
 the topic.
 
-Pass --derive to read an agent hook payload on stdin (Claude Code's
-UserPromptSubmit) and set a derived topic. By default the user's prompt is
-truncated; when [pane_monitoring] topic_command is configured, the prompt is
+Pass --derive to read an agent hook payload on stdin and set a derived topic.
+Use --label to name the agent whose payload is on stdin (claude, codex, cursor,
+pi, opencode); each agent's prompt-submit hook delivers the prompt differently,
+so the label selects the matching payload adapter. By default the user's prompt
+is truncated; when [pane_monitoring] topic_command is configured, the prompt is
 piped to that command as a normalized JSON payload and its stdout becomes the
-topic. A missing/unparseable payload, or a command failure, is a no-op and
-never clobbers an existing topic.
+topic. A missing/unparseable payload, an agent whose hook exposes no prompt
+text, or a command failure is a no-op and never clobbers an existing topic.
 
 The topic shows in the dashboard's descriptive parenthetical, dimmed to
 mark it machine-derived. A user-authored note always overrides it. The
@@ -642,9 +645,10 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 	clear, _ := cmd.Flags().GetBool("clear")
 	noRegister, _ := cmd.Flags().GetBool("no-register")
 	derive, _ := cmd.Flags().GetBool("derive")
+	label, _ := cmd.Flags().GetString("label")
 
 	if derive {
-		paneID, topic, ok := deriveTopic(cmd.InOrStdin(), args, cfg)
+		paneID, topic, ok := deriveTopic(cmd.InOrStdin(), args, cfg, label)
 		if !ok {
 			// Missing/unparseable payload, empty prompt, or a command failure
 			// with an existing Topic to keep: no-op so we never clobber it.
@@ -661,11 +665,12 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 }
 
 // deriveTopic reads an agent hook payload from r and resolves a Topic. The
-// optional leading pane_id (a '%' prefixed arg) overrides $TMUX_PANE. It uses
-// the production prev-Topic lookup and command runner; see deriveTopicWith for
-// the injectable core.
-func deriveTopic(r io.Reader, args []string, cfg *config.Config) (paneID, topic string, ok bool) {
-	return deriveTopicWith(r, args, cfg, defaultPrevTopicLookup, runTopicCommand)
+// optional leading pane_id (a '%' prefixed arg) overrides $TMUX_PANE. label
+// names the agent so the right payload adapter is chosen. It uses the
+// production prev-Topic lookup and command runner; see deriveTopicWith for the
+// injectable core.
+func deriveTopic(r io.Reader, args []string, cfg *config.Config, label string) (paneID, topic string, ok bool) {
+	return deriveTopicWith(r, args, cfg, label, defaultPrevTopicLookup, runTopicCommand)
 }
 
 // prevTopicLookup returns the current Topic and session for a pane, used to
@@ -696,7 +701,7 @@ type topicCommandPayload struct {
 // stdout (trimmed, first line, capped). On command failure/timeout/empty output
 // it keeps the previous Topic (ok=false), or — when there is no previous Topic —
 // falls back to truncating the prompt. It never blocks the agent.
-func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, lookup prevTopicLookup, run topicCommandRunner) (paneID, topic string, ok bool) {
+func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label string, lookup prevTopicLookup, run topicCommandRunner) (paneID, topic string, ok bool) {
 	paneID = os.Getenv("TMUX_PANE")
 	if len(args) > 0 && strings.HasPrefix(args[0], "%") {
 		paneID = args[0]
@@ -707,7 +712,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, lookup prev
 		debug.Error("pane set-topic --derive: read stdin: %v", err)
 		return "", "", false
 	}
-	prompt, transcriptPath, err := parseTopicPayload(data)
+	prompt, transcriptPath, err := parseTopicPayload(data, label)
 	if err != nil {
 		debug.Error("pane set-topic --derive: %v", err)
 		return "", "", false
@@ -760,19 +765,71 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, lookup prev
 	return paneID, topic, true
 }
 
-// parseTopicPayload parses a Claude Code UserPromptSubmit hook payload and
-// returns its prompt and (optional) transcript_path fields. Other agents come
-// in a later slice. transcript_path is passed through verbatim — pop never
-// parses the transcript itself (ADR 0024).
-func parseTopicPayload(data []byte) (prompt, transcriptPath string, err error) {
+// topicPayloadAdapter maps one agent's "user submitted prompt" hook payload
+// (JSON on stdin) into the prompt text and an optional transcript_path that
+// `set-topic --derive` consumes. Each integrated agent delivers the prompt
+// under a different shape, so derivation picks an adapter by the --label passed
+// on the hook command — the same per-agent variance set-status carries via
+// --label. A non-nil error is reserved for malformed JSON; a well-formed
+// payload that exposes no prompt text returns an empty prompt (the caller then
+// degrades to no Topic, never an error). transcript_path is forwarded only by
+// agents that expose one — pop never parses the transcript itself (ADR 0024).
+type topicPayloadAdapter func(data []byte) (prompt, transcriptPath string, err error)
+
+// topicPayloadAdapters maps an agent label to its payload adapter. The empty
+// label is treated as Claude (the unlabeled default, preserving slice-04
+// behavior). Agents whose prompt-submit hook exposes no prompt text are absent
+// here and resolve to a degrade adapter.
+var topicPayloadAdapters = map[string]topicPayloadAdapter{
+	"":         claudeTopicPayload,
+	"claude":   claudeTopicPayload,
+	"codex":    promptOnlyTopicPayload,
+	"cursor":   promptOnlyTopicPayload,
+	"pi":       promptOnlyTopicPayload,
+	"opencode": promptOnlyTopicPayload,
+}
+
+// parseTopicPayload selects the adapter for label and extracts the prompt and
+// optional transcript_path from the agent's hook payload.
+func parseTopicPayload(data []byte, label string) (prompt, transcriptPath string, err error) {
+	adapter, ok := topicPayloadAdapters[strings.ToLower(label)]
+	if !ok {
+		// Unknown label: an agent we don't have an adapter for. Degrade to no
+		// Topic rather than erroring, so a future agent's hook never breaks.
+		debug.Log("pane set-topic --derive: no payload adapter for label %q — degrading to no Topic", label)
+		return "", "", nil
+	}
+	return adapter(data)
+}
+
+// claudeTopicPayload parses Claude Code's UserPromptSubmit payload, the only
+// integrated agent that exposes a transcript_path.
+func claudeTopicPayload(data []byte) (prompt, transcriptPath string, err error) {
 	var payload struct {
 		Prompt         string `json:"prompt"`
 		TranscriptPath string `json:"transcript_path"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return "", "", fmt.Errorf("parse payload: %w", err)
+		return "", "", fmt.Errorf("parse claude payload: %w", err)
 	}
 	return payload.Prompt, payload.TranscriptPath, nil
+}
+
+// promptOnlyTopicPayload parses the {"prompt": "..."} shape shared by agents
+// whose prompt-submit hook exposes the text but no transcript: codex's and
+// cursor's hook JSON, and the pi/opencode extensions, which serialize the
+// submitted message into this shape themselves. transcript_path is
+// deliberately not read — these agents don't provide one, so it stays out of
+// the topic_command contract. A payload with no prompt field yields an empty
+// prompt and the caller degrades silently.
+func promptOnlyTopicPayload(data []byte) (prompt, transcriptPath string, err error) {
+	var payload struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", "", fmt.Errorf("parse payload: %w", err)
+	}
+	return payload.Prompt, "", nil
 }
 
 // defaultPrevTopicLookup reads the current Topic and session for a pane from

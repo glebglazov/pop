@@ -528,6 +528,10 @@ func installJSONHooks(d *integrateDeps, settingsPath string, hooksToInstall []ho
 var codexPopHooks = []hookSpec{
 	{"SessionStart", "pop pane set-status clear 2>/dev/null || true"},
 	{"UserPromptSubmit", "pop pane set-status working 2>/dev/null || true"},
+	// Topic hook: a separate UserPromptSubmit entry alongside set-status,
+	// riding core status wiring (ADR 0023). --label codex selects codex's
+	// payload adapter; codex exposes no transcript_path.
+	{"UserPromptSubmit", "pop pane set-topic --derive --label codex 2>/dev/null || true"},
 	{"PreToolUse", "pop pane set-status working 2>/dev/null || true"},
 	{"PermissionRequest", "pop pane set-status unread 2>/dev/null || true"},
 	{"Stop", "pop pane set-status unread 2>/dev/null || true"},
@@ -621,6 +625,10 @@ type cursorHookSpec struct {
 var cursorPopHooks = []cursorHookSpec{
 	{"sessionStart", "pop pane set-status clear --label cursor 2>/dev/null || true"},
 	{"beforeSubmitPrompt", "pop pane set-status working --label cursor 2>/dev/null || true"},
+	// Topic hook: a separate beforeSubmitPrompt entry alongside set-status,
+	// riding core status wiring (ADR 0023). --label cursor selects cursor's
+	// payload adapter; cursor exposes no transcript_path.
+	{"beforeSubmitPrompt", "pop pane set-topic --derive --label cursor 2>/dev/null || true"},
 	{"preToolUse", "pop pane set-status working --label cursor 2>/dev/null || true"},
 	{"afterAgentResponse", "pop pane set-status unread --label cursor 2>/dev/null || true"},
 	{"stop", "pop pane set-status unread --label cursor 2>/dev/null || true"},

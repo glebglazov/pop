@@ -138,7 +138,7 @@ func TestParseSetTopicArgs(t *testing.T) {
 func TestParseTopicPayload(t *testing.T) {
 	t.Run("extracts prompt and transcript path", func(t *testing.T) {
 		payload := `{"hook_event_name":"UserPromptSubmit","session_id":"abc","prompt":"refactor the auth layer","transcript_path":"/tmp/abc.jsonl"}`
-		prompt, transcript, err := parseTopicPayload([]byte(payload))
+		prompt, transcript, err := parseTopicPayload([]byte(payload), "claude")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func TestParseTopicPayload(t *testing.T) {
 	})
 
 	t.Run("absent fields yield empty", func(t *testing.T) {
-		prompt, transcript, err := parseTopicPayload([]byte(`{"hook_event_name":"UserPromptSubmit"}`))
+		prompt, transcript, err := parseTopicPayload([]byte(`{"hook_event_name":"UserPromptSubmit"}`), "claude")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,8 +161,141 @@ func TestParseTopicPayload(t *testing.T) {
 	})
 
 	t.Run("unparseable payload errors", func(t *testing.T) {
-		if _, _, err := parseTopicPayload([]byte("not json")); err == nil {
+		if _, _, err := parseTopicPayload([]byte("not json"), "claude"); err == nil {
 			t.Error("expected error for unparseable payload")
+		}
+	})
+}
+
+// TestParseTopicPayload_PerAgent locks the per-agent adapter mapping: each
+// label maps its hook payload to the prompt text, transcript_path rides only
+// for agents that expose one (Claude), and agents/labels with no prompt text
+// degrade to an empty prompt without error.
+func TestParseTopicPayload_PerAgent(t *testing.T) {
+	cases := []struct {
+		name           string
+		label          string
+		payload        string
+		wantPrompt     string
+		wantTranscript string
+		wantErr        bool
+	}{
+		{
+			name:           "claude forwards transcript_path",
+			label:          "claude",
+			payload:        `{"prompt":"refactor auth","transcript_path":"/tmp/c.jsonl"}`,
+			wantPrompt:     "refactor auth",
+			wantTranscript: "/tmp/c.jsonl",
+		},
+		{
+			name:       "empty label defaults to claude",
+			label:      "",
+			payload:    `{"prompt":"hello","transcript_path":"/tmp/c.jsonl"}`,
+			wantPrompt: "hello", wantTranscript: "/tmp/c.jsonl",
+		},
+		{
+			name:    "label is case-insensitive",
+			label:   "Claude",
+			payload: `{"prompt":"hi","transcript_path":"/t.jsonl"}`,
+			// Mixed case still resolves to the claude adapter.
+			wantPrompt: "hi", wantTranscript: "/t.jsonl",
+		},
+		{
+			name:    "codex maps prompt and drops transcript",
+			label:   "codex",
+			payload: `{"prompt":"fix the build","transcript_path":"/should/be/ignored.jsonl"}`,
+			// codex exposes no transcript_path: even if present it is not forwarded.
+			wantPrompt: "fix the build", wantTranscript: "",
+		},
+		{
+			name:       "cursor maps prompt and drops transcript",
+			label:      "cursor",
+			payload:    `{"hook_event_name":"beforeSubmitPrompt","prompt":"add tests","conversation_id":"x"}`,
+			wantPrompt: "add tests", wantTranscript: "",
+		},
+		{
+			name:       "pi maps prompt and drops transcript",
+			label:      "pi",
+			payload:    `{"prompt":"write docs"}`,
+			wantPrompt: "write docs", wantTranscript: "",
+		},
+		{
+			name:       "opencode maps prompt and drops transcript",
+			label:      "opencode",
+			payload:    `{"prompt":"profile startup"}`,
+			wantPrompt: "profile startup", wantTranscript: "",
+		},
+		{
+			name:    "agent without prompt-text exposure degrades to empty",
+			label:   "opencode",
+			payload: `{"sessionID":"abc"}`,
+			// No prompt field: empty prompt, no error — caller degrades to no Topic.
+			wantPrompt: "", wantTranscript: "",
+		},
+		{
+			name:    "unknown label degrades to empty without error",
+			label:   "future-agent",
+			payload: `{"prompt":"anything"}`,
+			// No adapter registered: degrade rather than error.
+			wantPrompt: "", wantTranscript: "",
+		},
+		{
+			name:    "malformed json errors for claude",
+			label:   "claude",
+			payload: "not json",
+			wantErr: true,
+		},
+		{
+			name:    "malformed json errors for prompt-only agents",
+			label:   "codex",
+			payload: "{not json",
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt, transcript, err := parseTopicPayload([]byte(tc.payload), tc.label)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got prompt=%q transcript=%q", prompt, transcript)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if prompt != tc.wantPrompt {
+				t.Errorf("prompt = %q, want %q", prompt, tc.wantPrompt)
+			}
+			if transcript != tc.wantTranscript {
+				t.Errorf("transcript = %q, want %q", transcript, tc.wantTranscript)
+			}
+		})
+	}
+}
+
+// TestDeriveTopic_DegradesWhenNoPromptText confirms the full derive path is a
+// silent no-op when the agent's payload exposes no prompt text — no Topic, no
+// error — for both an unknown label and a known agent with an empty payload.
+func TestDeriveTopic_DegradesWhenNoPromptText(t *testing.T) {
+	t.Setenv("TMUX_PANE", "%env")
+	cfg := &config.Config{}
+	failRun := func(context.Context, string, []byte) (string, error) {
+		t.Fatal("command runner must not be called when degrading")
+		return "", nil
+	}
+
+	t.Run("opencode payload without prompt", func(t *testing.T) {
+		_, _, ok := deriveTopicWith(strings.NewReader(`{"sessionID":"abc"}`), nil, cfg, "opencode", noPrevTopic, failRun)
+		if ok {
+			t.Error("expected no Topic for prompt-less payload")
+		}
+	})
+
+	t.Run("unknown label", func(t *testing.T) {
+		_, _, ok := deriveTopicWith(strings.NewReader(`{"prompt":"hi"}`), nil, cfg, "future-agent", noPrevTopic, failRun)
+		if ok {
+			t.Error("expected no Topic for unknown label")
 		}
 	})
 }
@@ -225,7 +358,7 @@ func TestDeriveTopic_Truncation(t *testing.T) {
 
 	t.Run("derives truncated topic with env pane", func(t *testing.T) {
 		payload := `{"prompt":"one two three four five six seven eight nine"}`
-		pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, noPrevTopic, failRun)
+		pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noPrevTopic, failRun)
 		if !ok {
 			t.Fatal("expected ok")
 		}
@@ -238,20 +371,20 @@ func TestDeriveTopic_Truncation(t *testing.T) {
 	})
 
 	t.Run("explicit pane id overrides env", func(t *testing.T) {
-		pane, topic, ok := deriveTopicWith(strings.NewReader(`{"prompt":"hi"}`), []string{"%7"}, cfg, noPrevTopic, failRun)
+		pane, topic, ok := deriveTopicWith(strings.NewReader(`{"prompt":"hi"}`), []string{"%7"}, cfg, "claude", noPrevTopic, failRun)
 		if !ok || pane != "%7" || topic != "hi" {
 			t.Errorf("got pane=%q topic=%q ok=%v", pane, topic, ok)
 		}
 	})
 
 	t.Run("unparseable payload is no-op", func(t *testing.T) {
-		if _, _, ok := deriveTopicWith(strings.NewReader("garbage"), nil, cfg, noPrevTopic, failRun); ok {
+		if _, _, ok := deriveTopicWith(strings.NewReader("garbage"), nil, cfg, "claude", noPrevTopic, failRun); ok {
 			t.Error("expected ok=false for unparseable payload")
 		}
 	})
 
 	t.Run("empty prompt is no-op", func(t *testing.T) {
-		if _, _, ok := deriveTopicWith(strings.NewReader(`{"prompt":"   "}`), nil, cfg, noPrevTopic, failRun); ok {
+		if _, _, ok := deriveTopicWith(strings.NewReader(`{"prompt":"   "}`), nil, cfg, "claude", noPrevTopic, failRun); ok {
 			t.Error("expected ok=false for empty prompt")
 		}
 	})
@@ -268,7 +401,7 @@ func TestDeriveTopic_Command(t *testing.T) {
 		run := func(_ context.Context, _ string, _ []byte) (string, error) {
 			return "auth refactor\n", nil
 		}
-		pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), noPrevTopic, run)
+		pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", noPrevTopic, run)
 		if !ok || pane != "%env" || topic != "auth refactor" {
 			t.Errorf("got pane=%q topic=%q ok=%v", pane, topic, ok)
 		}
@@ -283,7 +416,7 @@ func TestDeriveTopic_Command(t *testing.T) {
 			return "topic", nil
 		}
 		lookup := func(string) (string, string) { return "old topic", "sess" }
-		_, _, ok := deriveTopicWith(strings.NewReader(payload), []string{"%5"}, withTopicCommand("x"), lookup, run)
+		_, _, ok := deriveTopicWith(strings.NewReader(payload), []string{"%5"}, withTopicCommand("x"), "claude", lookup, run)
 		if !ok {
 			t.Fatal("expected ok")
 		}
@@ -299,7 +432,7 @@ func TestDeriveTopic_Command(t *testing.T) {
 			stdin = in
 			return "topic", nil
 		}
-		_, _, _ = deriveTopicWith(strings.NewReader(`{"prompt":"hi"}`), nil, withTopicCommand("x"), noPrevTopic, run)
+		_, _, _ = deriveTopicWith(strings.NewReader(`{"prompt":"hi"}`), nil, withTopicCommand("x"), "claude", noPrevTopic, run)
 		if strings.Contains(string(stdin), "transcript_path") {
 			t.Errorf("transcript_path should be omitted: %s", stdin)
 		}
@@ -308,7 +441,7 @@ func TestDeriveTopic_Command(t *testing.T) {
 	t.Run("caps long command output", func(t *testing.T) {
 		long := strings.Repeat("a", topicMaxChars+10)
 		run := func(_ context.Context, _ string, _ []byte) (string, error) { return long, nil }
-		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), noPrevTopic, run)
+		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", noPrevTopic, run)
 		if !ok {
 			t.Fatal("expected ok")
 		}
@@ -329,14 +462,14 @@ func TestDeriveTopic_Command(t *testing.T) {
 	for _, fc := range failureCases {
 		t.Run("keeps previous topic on "+fc.name, func(t *testing.T) {
 			lookup := func(string) (string, string) { return "kept topic", "sess" }
-			_, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), lookup, fc.run)
+			_, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", lookup, fc.run)
 			if ok {
 				t.Errorf("expected ok=false (keep previous) on %s", fc.name)
 			}
 		})
 
 		t.Run("falls back to truncation with no previous topic on "+fc.name, func(t *testing.T) {
-			pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), noPrevTopic, fc.run)
+			pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", noPrevTopic, fc.run)
 			if !ok || pane != "%env" || topic != "refactor the auth layer" {
 				t.Errorf("got pane=%q topic=%q ok=%v on %s", pane, topic, ok, fc.name)
 			}

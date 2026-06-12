@@ -9,6 +9,9 @@
  * `clear` is sent on `session_start` to clear any stale "working" status
  * left over from a crashed previous run.
  *
+ * It also derives a pane *topic* from each submitted prompt (`set-topic
+ * --derive --label pi`), riding the same status wiring (ADR 0023).
+ *
  * Installed by `pop integrate pi` to ~/.pi/agent/extensions/pop-status-sync.ts.
  */
 
@@ -24,10 +27,31 @@ export default function (pi: ExtensionAPI) {
 		pi.exec("pop", ["pane", "set-status", paneID, status]).catch(() => {});
 	};
 
-	// UserPromptSubmit → working
+	// Derive a pane topic from the submitted prompt. pi.exec runs a binary
+	// directly with no stdin option, so we route through `sh -c` and feed the
+	// normalized {prompt} JSON on stdin. The payload rides as a positional
+	// argument ($1) — never interpolated into the script — so prompt text can
+	// never break out into the shell. `--label pi` selects pop's pi payload
+	// adapter (prompt-only, no transcript_path). Fire-and-forget.
+	const setTopic = (text: string) => {
+		if (!text) return;
+		const payload = JSON.stringify({ prompt: text });
+		pi.exec(
+			"sh",
+			[
+				"-c",
+				`printf '%s' "$1" | pop pane set-topic --derive --label pi ${paneID}`,
+				"sh",
+				payload,
+			],
+		).catch(() => {});
+	};
+
+	// UserPromptSubmit → working (status) + derive topic from the prompt text.
 	pi.on("input", async (event) => {
 		if (event.source !== "extension") {
 			setStatus("working");
+			setTopic(event.text);
 		}
 		return { action: "continue" };
 	});

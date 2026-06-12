@@ -829,6 +829,125 @@ func TestIntegrateCodex_WriteError(t *testing.T) {
 	}
 }
 
+// nestedEventCommands returns the inner command strings for a nested-format
+// (claude/codex) hook event from the JSON settings file at path.
+func nestedEventCommands(t *testing.T, fs *fakeFS, path, event string) []string {
+	t.Helper()
+	var settings map[string]interface{}
+	if err := json.Unmarshal(fs.files[path], &settings); err != nil {
+		t.Fatalf("failed to parse %s: %v", path, err)
+	}
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	entries, _ := hooks[event].([]interface{})
+	var cmds []string
+	for _, e := range entries {
+		em, _ := e.(map[string]interface{})
+		inner, _ := em["hooks"].([]interface{})
+		for _, h := range inner {
+			hm, _ := h.(map[string]interface{})
+			if c, _ := hm["command"].(string); c != "" {
+				cmds = append(cmds, c)
+			}
+		}
+	}
+	return cmds
+}
+
+// flatEventCommands returns the command strings for a flat-format (cursor) hook
+// event from the JSON settings file at path.
+func flatEventCommands(t *testing.T, fs *fakeFS, path, event string) []string {
+	t.Helper()
+	var settings map[string]interface{}
+	if err := json.Unmarshal(fs.files[path], &settings); err != nil {
+		t.Fatalf("failed to parse %s: %v", path, err)
+	}
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	entries, _ := hooks[event].([]interface{})
+	var cmds []string
+	for _, e := range entries {
+		em, _ := e.(map[string]interface{})
+		if c, _ := em["command"].(string); c != "" {
+			cmds = append(cmds, c)
+		}
+	}
+	return cmds
+}
+
+// The codex topic hook installs as a separate UserPromptSubmit entry alongside
+// set-status, labeled for codex's payload adapter (ADR 0023).
+func TestIntegrateCodex_InstallsTopicHook(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
+	cmds := nestedEventCommands(t, fs, hooksPath, "UserPromptSubmit")
+	if got := countContains(cmds, "pop pane set-topic --derive --label codex"); got != 1 {
+		t.Errorf("expected 1 codex topic hook, got %d (cmds=%v)", got, cmds)
+	}
+	if got := countContains(cmds, "pop pane set-status working"); got != 1 {
+		t.Errorf("expected set-status working hook untouched, got %d (cmds=%v)", got, cmds)
+	}
+}
+
+// Re-running integrate is idempotent: the codex topic hook is not duplicated.
+func TestIntegrateCodex_TopicHookIdempotent(t *testing.T) {
+	fs := newFakeFS()
+	for i := 0; i < 3; i++ {
+		if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+			t.Fatalf("run %d: unexpected error: %v", i, err)
+		}
+	}
+	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
+	cmds := nestedEventCommands(t, fs, hooksPath, "UserPromptSubmit")
+	if got := countContains(cmds, "pop pane set-topic --derive --label codex"); got != 1 {
+		t.Errorf("expected 1 codex topic hook after repeated installs, got %d", got)
+	}
+}
+
+// An older codex install missing the topic hook is detected as changed and the
+// topic hook is rendered through the refresh path; removal then strips it.
+func TestIntegrateCodex_RefreshRendersAndRemovesTopicHook(t *testing.T) {
+	fs := newFakeFS()
+	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
+	existing := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"UserPromptSubmit": []interface{}{
+				map[string]interface{}{
+					"hooks": []interface{}{
+						map[string]interface{}{"type": "command", "command": "pop pane set-status working 2>/dev/null || true"},
+					},
+				},
+			},
+		},
+	}
+	raw, _ := json.Marshal(existing)
+	fs.files[hooksPath] = raw
+
+	newReal := func() *integrateDeps { return fakeDeps("/h", fs, io.Discard) }
+	newDry := func() *integrateDeps { return withDryRun(fakeDeps("/h", fs, io.Discard)) }
+
+	updated, warning := refreshStatusWiring(newDry, newReal, "codex")
+	if warning != "" {
+		t.Fatalf("unexpected warning: %s", warning)
+	}
+	if !updated {
+		t.Fatal("expected refresh to add the codex topic hook")
+	}
+	cmds := nestedEventCommands(t, fs, hooksPath, "UserPromptSubmit")
+	if got := countContains(cmds, "pop pane set-topic --derive --label codex"); got != 1 {
+		t.Errorf("expected codex topic hook after refresh, got %d (cmds=%v)", got, cmds)
+	}
+
+	if err := removeStatusWiring(fakeDeps("/h", fs, io.Discard), "/h", "codex"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	cmds = nestedEventCommands(t, fs, hooksPath, "UserPromptSubmit")
+	if got := countContains(cmds, "pop pane set-topic"); got != 0 {
+		t.Errorf("expected topic hook removed, got %d (cmds=%v)", got, cmds)
+	}
+}
+
 // ----- integratePi: directory structure --------------------------------------
 
 func TestIntegratePi_WritesExtensionAtCorrectPath(t *testing.T) {
@@ -1145,6 +1264,114 @@ func TestIntegrateCursor_AgentNameIsCaseInsensitive(t *testing.T) {
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "CuRsOr"); err != nil {
 		t.Errorf("expected case-insensitive agent matching, got error: %v", err)
+	}
+}
+
+// The cursor topic hook installs as a separate beforeSubmitPrompt entry
+// alongside set-status, labeled for cursor's payload adapter (ADR 0023).
+func TestIntegrateCursor_InstallsTopicHook(t *testing.T) {
+	fs := newFakeFS()
+	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
+	cmds := flatEventCommands(t, fs, hooksPath, "beforeSubmitPrompt")
+	if got := countContains(cmds, "pop pane set-topic --derive --label cursor"); got != 1 {
+		t.Errorf("expected 1 cursor topic hook, got %d (cmds=%v)", got, cmds)
+	}
+	if got := countContains(cmds, "pop pane set-status working --label cursor"); got != 1 {
+		t.Errorf("expected set-status working hook untouched, got %d (cmds=%v)", got, cmds)
+	}
+}
+
+// Re-running integrate is idempotent: the cursor topic hook is not duplicated.
+func TestIntegrateCursor_TopicHookIdempotent(t *testing.T) {
+	fs := newFakeFS()
+	for i := 0; i < 3; i++ {
+		if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+			t.Fatalf("run %d: unexpected error: %v", i, err)
+		}
+	}
+	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
+	cmds := flatEventCommands(t, fs, hooksPath, "beforeSubmitPrompt")
+	if got := countContains(cmds, "pop pane set-topic --derive --label cursor"); got != 1 {
+		t.Errorf("expected 1 cursor topic hook after repeated installs, got %d", got)
+	}
+}
+
+// An older cursor install missing the topic hook is detected as changed and the
+// topic hook is rendered through the refresh path; removal then strips it.
+func TestIntegrateCursor_RefreshRendersAndRemovesTopicHook(t *testing.T) {
+	fs := newFakeFS()
+	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
+	existing := map[string]interface{}{
+		"version": 1,
+		"hooks": map[string]interface{}{
+			"beforeSubmitPrompt": []interface{}{
+				map[string]interface{}{"command": "pop pane set-status working --label cursor 2>/dev/null || true"},
+			},
+		},
+	}
+	raw, _ := json.Marshal(existing)
+	fs.files[hooksPath] = raw
+
+	newReal := func() *integrateDeps { return fakeDeps("/h", fs, io.Discard) }
+	newDry := func() *integrateDeps { return withDryRun(fakeDeps("/h", fs, io.Discard)) }
+
+	updated, warning := refreshStatusWiring(newDry, newReal, "cursor")
+	if warning != "" {
+		t.Fatalf("unexpected warning: %s", warning)
+	}
+	if !updated {
+		t.Fatal("expected refresh to add the cursor topic hook")
+	}
+	cmds := flatEventCommands(t, fs, hooksPath, "beforeSubmitPrompt")
+	if got := countContains(cmds, "pop pane set-topic --derive --label cursor"); got != 1 {
+		t.Errorf("expected cursor topic hook after refresh, got %d (cmds=%v)", got, cmds)
+	}
+
+	if err := removeStatusWiring(fakeDeps("/h", fs, io.Discard), "/h", "cursor"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	cmds = flatEventCommands(t, fs, hooksPath, "beforeSubmitPrompt")
+	if got := countContains(cmds, "pop pane set-topic"); got != 0 {
+		t.Errorf("expected topic hook removed, got %d (cmds=%v)", got, cmds)
+	}
+}
+
+// The pi and opencode extensions carry the topic-derivation call as part of the
+// status-sync wiring they install (ADR 0023). Removing the extension file (the
+// status-wiring removal path for these agents) takes the topic call with it.
+func TestExtensions_DeriveTopic(t *testing.T) {
+	if !bytes.Contains(piExtensionFile, []byte("set-topic --derive --label pi")) {
+		t.Error("pi extension missing topic derivation call")
+	}
+	if !bytes.Contains(opencodeExtensionFile, []byte("set-topic --derive --label opencode")) {
+		t.Error("opencode extension missing topic derivation call")
+	}
+
+	// Removal of the extension file (status-wiring removal for pi/opencode)
+	// removes the topic call along with it.
+	for _, tc := range []struct {
+		agent string
+		path  string
+	}{
+		{"pi", filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")},
+		{"opencode", filepath.Join("/h", ".config", "opencode", "plugins", "pop-status-sync.ts")},
+	} {
+		fs := newFakeFS()
+		if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), tc.agent); err != nil {
+			t.Fatalf("%s install: %v", tc.agent, err)
+		}
+		if !bytes.Contains(fs.files[tc.path], []byte("set-topic --derive")) {
+			t.Errorf("%s: installed extension missing topic call", tc.agent)
+		}
+		if err := removeStatusWiring(fakeDeps("/h", fs, io.Discard), "/h", tc.agent); err != nil {
+			t.Fatalf("%s remove: %v", tc.agent, err)
+		}
+		if _, ok := fs.files[tc.path]; ok {
+			t.Errorf("%s: extension (incl. topic call) not removed", tc.agent)
+		}
 	}
 }
 

@@ -9,6 +9,9 @@
  * `clear` is sent on plugin load and on session.created/deleted to clear any
  * stale "working" status left over from a crashed previous run.
  *
+ * It also derives a pane *topic* from each submitted message (`set-topic
+ * --derive --label opencode`), riding the same status wiring (ADR 0023).
+ *
  * Installed by `pop integrate opencode` to ~/.config/opencode/plugins/pop-status-sync.ts.
  */
 
@@ -20,6 +23,19 @@ export const PopStatusSync = async ({ $ }) => {
 		// Fire-and-forget; swallow errors so a missing `pop` binary never
 		// breaks the agent.
 		$`pop pane set-status ${paneID} ${status}`.catch(() => {});
+	};
+
+	// Derive a pane topic from a submitted user message. opencode's plugin
+	// events carry no transcript path, so we serialize the message text into
+	// the {prompt} shape pop's opencode adapter reads and pipe it on stdin
+	// (Bun `$` redirects a Response body into the command). `--label opencode`
+	// selects that adapter. Fire-and-forget; never blocks the agent.
+	const setTopic = (text: string) => {
+		if (!text) return;
+		const payload = JSON.stringify({ prompt: text });
+		$`pop pane set-topic --derive --label opencode ${paneID} < ${new Response(payload)}`.catch(
+			() => {},
+		);
 	};
 
 	// Clear any stale "working" status left over from a previous run.
@@ -67,6 +83,15 @@ export const PopStatusSync = async ({ $ }) => {
 		},
 		"tool.execute.before": () => {
 			markWorking();
+		},
+		// User submitted a message → derive a topic from its text parts.
+		"chat.message": async (_input, output) => {
+			const text = (output.parts ?? [])
+				.filter((p: any) => p.type === "text")
+				.map((p: any) => p.text ?? "")
+				.join(" ")
+				.trim();
+			setTopic(text);
 		},
 	};
 };
