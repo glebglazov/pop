@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/glebglazov/pop/monitor"
@@ -116,6 +117,122 @@ func TestParseSetTopicArgs(t *testing.T) {
 	t.Run("missing topic without clear errors", func(t *testing.T) {
 		if _, _, err := parseSetTopicArgs(false, nil); err == nil {
 			t.Error("expected error for missing topic")
+		}
+	})
+}
+
+// TestExtractPromptFromPayload covers parsing the Claude UserPromptSubmit JSON
+// and the unparseable/missing cases.
+func TestExtractPromptFromPayload(t *testing.T) {
+	t.Run("extracts prompt field", func(t *testing.T) {
+		payload := `{"hook_event_name":"UserPromptSubmit","session_id":"abc","prompt":"refactor the auth layer"}`
+		got, err := extractPromptFromPayload([]byte(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "refactor the auth layer" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("absent prompt field yields empty", func(t *testing.T) {
+		got, err := extractPromptFromPayload([]byte(`{"hook_event_name":"UserPromptSubmit"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+
+	t.Run("unparseable payload errors", func(t *testing.T) {
+		if _, err := extractPromptFromPayload([]byte("not json")); err == nil {
+			t.Error("expected error for unparseable payload")
+		}
+	})
+}
+
+// TestTruncateTopic locks the truncation boundaries: word cap, char cap,
+// whitespace collapse, ellipsis only when cut, and the empty case.
+func TestTruncateTopic(t *testing.T) {
+	cases := []struct {
+		name   string
+		prompt string
+		want   string
+	}{
+		{"short prompt passes through whole", "fix the bug", "fix the bug"},
+		{"whitespace collapsed", "fix   the\n\tbug", "fix the bug"},
+		{"empty prompt", "", ""},
+		{"whitespace only", "   \n\t ", ""},
+		{
+			name:   "over word cap truncates with ellipsis",
+			prompt: "one two three four five six seven eight nine ten",
+			want:   "one two three four five six seven eight…",
+		},
+		{
+			name:   "exactly word cap passes whole",
+			prompt: "one two three four five six seven eight",
+			want:   "one two three four five six seven eight",
+		},
+		{
+			name:   "over char cap truncates with ellipsis",
+			prompt: "supercalifragilisticexpialidocioussupercalifragilisticexpialidocious",
+			want:   "supercalifragilisticexpialidocioussupercalifragilisticexpial…",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateTopic(tc.prompt)
+			if got != tc.want {
+				t.Errorf("truncateTopic(%q) = %q, want %q", tc.prompt, got, tc.want)
+			}
+			if tc.want != "" && tc.want != strings.TrimSuffix(tc.want, "…") {
+				// ellipsis cases: ensure the visible body (minus ellipsis) is within caps
+				body := strings.TrimSuffix(got, "…")
+				if len([]rune(body)) > topicMaxChars {
+					t.Errorf("body %q exceeds char cap", body)
+				}
+			}
+		})
+	}
+}
+
+// TestDeriveTopicFromStdin covers the end-to-end derive helper: pane id
+// resolution, truncation, and no-op on bad/empty input.
+func TestDeriveTopicFromStdin(t *testing.T) {
+	t.Setenv("TMUX_PANE", "%env")
+
+	t.Run("derives truncated topic with env pane", func(t *testing.T) {
+		payload := `{"prompt":"one two three four five six seven eight nine"}`
+		pane, topic, ok := deriveTopicFromStdin(strings.NewReader(payload), nil)
+		if !ok {
+			t.Fatal("expected ok")
+		}
+		if pane != "%env" {
+			t.Errorf("pane = %q", pane)
+		}
+		if topic != "one two three four five six seven eight…" {
+			t.Errorf("topic = %q", topic)
+		}
+	})
+
+	t.Run("explicit pane id overrides env", func(t *testing.T) {
+		_, _, _ = deriveTopicFromStdin(strings.NewReader(`{"prompt":"hi"}`), []string{"%7"})
+		pane, topic, ok := deriveTopicFromStdin(strings.NewReader(`{"prompt":"hi"}`), []string{"%7"})
+		if !ok || pane != "%7" || topic != "hi" {
+			t.Errorf("got pane=%q topic=%q ok=%v", pane, topic, ok)
+		}
+	})
+
+	t.Run("unparseable payload is no-op", func(t *testing.T) {
+		if _, _, ok := deriveTopicFromStdin(strings.NewReader("garbage"), nil); ok {
+			t.Error("expected ok=false for unparseable payload")
+		}
+	})
+
+	t.Run("empty prompt is no-op", func(t *testing.T) {
+		if _, _, ok := deriveTopicFromStdin(strings.NewReader(`{"prompt":"   "}`), nil); ok {
+			t.Error("expected ok=false for empty prompt")
 		}
 	})
 }

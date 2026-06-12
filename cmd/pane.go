@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
@@ -51,6 +54,7 @@ func init() {
 	paneCmd.AddCommand(paneSetTopicCmd)
 	paneSetTopicCmd.Flags().Bool("no-register", false, "only update already-tracked panes, never auto-register new ones")
 	paneSetTopicCmd.Flags().Bool("clear", false, "clear the pane's topic")
+	paneSetTopicCmd.Flags().Bool("derive", false, "derive the topic from an agent hook payload read on stdin (Claude Code UserPromptSubmit)")
 	paneCmd.AddCommand(paneStatusCmd)
 	paneCmd.AddCommand(paneFollowCmd)
 	paneCmd.AddCommand(paneUnfollowCmd)
@@ -608,6 +612,11 @@ Like set-status, the pane is auto-registered on the first call. Pass
 --no-register to update only already-tracked panes. Pass --clear to wipe
 the topic.
 
+Pass --derive to read an agent hook payload on stdin (Claude Code's
+UserPromptSubmit) and set a truncated form of the user's prompt as the
+topic. A missing or unparseable payload is a no-op and never clobbers an
+existing topic.
+
 The topic shows in the dashboard's descriptive parenthetical, dimmed to
 mark it machine-derived. A user-authored note always overrides it. The
 topic lives for the pane's whole monitored lifetime and is cleared only
@@ -627,12 +636,96 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 	}
 	clear, _ := cmd.Flags().GetBool("clear")
 	noRegister, _ := cmd.Flags().GetBool("no-register")
+	derive, _ := cmd.Flags().GetBool("derive")
+
+	if derive {
+		paneID, topic, ok := deriveTopicFromStdin(cmd.InOrStdin(), args)
+		if !ok {
+			// Missing/unparseable payload or empty prompt: no-op so we never
+			// clobber an existing Topic.
+			return nil
+		}
+		return runPaneSetTopicWith(defaultTmux, cfg, paneID, topic, noRegister)
+	}
 
 	paneID, topic, err := parseSetTopicArgs(clear, args)
 	if err != nil {
 		return err
 	}
 	return runPaneSetTopicWith(defaultTmux, cfg, paneID, topic, noRegister)
+}
+
+// deriveTopicFromStdin reads an agent hook payload from r, extracts the user's
+// prompt, and truncates it into a Topic. The optional leading pane_id (a '%'
+// prefixed arg) overrides $TMUX_PANE. It returns ok=false when the payload is
+// missing/unparseable or yields no prompt, signalling the caller to no-op
+// rather than clobber an existing Topic.
+func deriveTopicFromStdin(r io.Reader, args []string) (paneID, topic string, ok bool) {
+	paneID = os.Getenv("TMUX_PANE")
+	if len(args) > 0 && strings.HasPrefix(args[0], "%") {
+		paneID = args[0]
+	}
+
+	data, err := io.ReadAll(r)
+	if err != nil {
+		debug.Error("pane set-topic --derive: read stdin: %v", err)
+		return "", "", false
+	}
+	prompt, err := extractPromptFromPayload(data)
+	if err != nil {
+		debug.Error("pane set-topic --derive: %v", err)
+		return "", "", false
+	}
+	topic = truncateTopic(prompt)
+	if topic == "" {
+		return "", "", false
+	}
+	return paneID, topic, true
+}
+
+// extractPromptFromPayload parses a Claude Code UserPromptSubmit hook payload
+// and returns its prompt field. Other agents come in a later slice.
+func extractPromptFromPayload(data []byte) (string, error) {
+	var payload struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", fmt.Errorf("parse payload: %w", err)
+	}
+	return payload.Prompt, nil
+}
+
+const (
+	topicMaxWords = 8
+	topicMaxChars = 60
+)
+
+// truncateTopic collapses whitespace and trims the prompt to the first
+// ~topicMaxWords words / ~topicMaxChars runes, appending an ellipsis when it
+// cuts. An empty or whitespace-only prompt yields "".
+func truncateTopic(prompt string) string {
+	fields := strings.Fields(prompt)
+	if len(fields) == 0 {
+		return ""
+	}
+
+	cut := false
+	if len(fields) > topicMaxWords {
+		fields = fields[:topicMaxWords]
+		cut = true
+	}
+	collapsed := strings.Join(fields, " ")
+
+	if utf8.RuneCountInString(collapsed) > topicMaxChars {
+		runes := []rune(collapsed)
+		collapsed = strings.TrimRight(string(runes[:topicMaxChars]), " ")
+		cut = true
+	}
+
+	if cut {
+		return collapsed + "…"
+	}
+	return collapsed
 }
 
 // parseSetTopicArgs resolves the optional leading pane_id (recognised by its
