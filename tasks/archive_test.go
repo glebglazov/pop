@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/glebglazov/pop/internal/deps"
 )
 
 func TestRegisteredTaskSetArchivedDefaultsFalseOnExistingState(t *testing.T) {
@@ -182,4 +184,135 @@ func TestArchivedSetIsNotAutoSelected(t *testing.T) {
 	if selected != "active-low" {
 		t.Fatalf("selected = %q", selected)
 	}
+}
+
+func TestBuildArchiveSetSelectionPrechecksDoneOnly(t *testing.T) {
+	root := t.TempDir()
+	setupManifest(t, root, "done", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	setupManifest(t, root, "ready", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	setupManifest(t, root, "deferred", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "skipped"},
+	})
+	setupManifest(t, root, "failed", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
+	})
+	setupManifest(t, root, "blocked", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "HITL", Status: "open"},
+	})
+	badDir := filepath.Join(root, "malformed")
+	if err := os.MkdirAll(badDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, "index.json"), []byte(`not json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	statePath := StatePathFor(root)
+	if _, err := RefreshWith(DefaultDeps(), root, statePath); err != nil {
+		t.Fatal(err)
+	}
+	canon, err := CanonicalDefinitionPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = UpdateGlobalStateWith(DefaultDeps(), statePath, func(state *GlobalState) error {
+		state.Entry(canon).TaskSets = append(state.Entry(canon).TaskSets, RegisteredTaskSet{ID: "missing"})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refresh, err := RefreshWith(DefaultDeps(), root, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := BuildArchiveSetSelection(refresh)
+	if len(rows) != 7 {
+		t.Fatalf("rows = %d, want all non-archived registered sets: %#v", len(rows), rows)
+	}
+	statuses := map[string]TaskSetStatus{}
+	var checked []string
+	for _, row := range rows {
+		statuses[row.TaskSetID] = row.Status
+		if row.Checked {
+			checked = append(checked, row.TaskSetID)
+		}
+	}
+	for id, status := range map[string]TaskSetStatus{
+		"done":      StatusDone,
+		"ready":     StatusReady,
+		"deferred":  StatusDeferred,
+		"failed":    StatusFailed,
+		"blocked":   StatusBlocked,
+		"malformed": StatusMalformed,
+		"missing":   StatusMissing,
+	} {
+		if statuses[id] != status {
+			t.Fatalf("%s status = %s, want %s (all statuses: %#v)", id, statuses[id], status, statuses)
+		}
+	}
+	if strings.Join(checked, ",") != "done" {
+		t.Fatalf("checked = %v, want done only", checked)
+	}
+}
+
+func TestArchiveTaskSetsOneAtomicStateWrite(t *testing.T) {
+	root := t.TempDir()
+	setupManifest(t, root, "done", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	setupManifest(t, root, "ready", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	if _, err := RefreshWith(DefaultDeps(), root, StatePathFor(root)); err != nil {
+		t.Fatal(err)
+	}
+
+	tracker := &stateWriteTracker{}
+	d := DefaultDeps()
+	d.FS = &stateWriteTrackingFS{FileSystem: deps.NewRealFileSystem(), tracker: tracker}
+	result, err := ArchiveTaskSetsWith(d, nil, nil, ArchiveTaskSetsOptions{
+		ResolveInput: ResolveInput{DefinitionOverride: root, CWD: root},
+		TaskSetIDs:   []string{"done", "ready"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(result.TaskSetIDs, ","); got != "done,ready" {
+		t.Fatalf("archived ids = %s", got)
+	}
+	if tracker.stateWrites != 1 {
+		t.Fatalf("state writes = %d, want one atomic write", tracker.stateWrites)
+	}
+	state, err := LoadGlobalState(StatePathFor(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	canon, _ := CanonicalDefinitionPath(root)
+	for _, id := range []string{"done", "ready"} {
+		if !taskSetArchived(state, canon, id) {
+			t.Fatalf("%s not archived: %#v", id, state.Tasks[canon].TaskSets)
+		}
+	}
+}
+
+type stateWriteTracker struct {
+	stateWrites int
+}
+
+type stateWriteTrackingFS struct {
+	deps.FileSystem
+	tracker *stateWriteTracker
+}
+
+func (f *stateWriteTrackingFS) Rename(oldpath, newpath string) error {
+	if filepath.Base(newpath) == stateFileName {
+		f.tracker.stateWrites++
+	}
+	return f.FileSystem.Rename(oldpath, newpath)
 }

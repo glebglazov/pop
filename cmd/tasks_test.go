@@ -14,6 +14,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -197,6 +198,203 @@ func TestTaskArchiveCommandsAndArchivedStatus(t *testing.T) {
 	}
 	if !strings.Contains(unarchiveOut.String(), "Unarchived task set alpha") {
 		t.Fatalf("missing unarchive report:\n%s", unarchiveOut.String())
+	}
+}
+
+func TestTaskArchiveSelectionPrechecksDoneOnlyAndCancelWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughtsWithStatus(t, tasksDir, "done", "done")
+	writeTaskThoughtsWithStatus(t, tasksDir, "ready", "open")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	stubCompleteInteractive(t, true)
+
+	var items []ui.MultiSelectItem
+	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: false}, &items)
+	before, err := os.ReadFile(tasks.StatePathFor(tasksDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	if err := runTaskArchiveSelectionWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), false); err != nil {
+		t.Fatalf("archive picker cancel failed: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("cancel should render nothing:\n%s", stdout.String())
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want done and ready: %+v", len(items), items)
+	}
+	if !items[0].Checked || items[1].Checked {
+		t.Fatalf("prechecked policy wrong: %+v", items)
+	}
+	if !strings.Contains(items[0].Label, "[DONE]") || !strings.Contains(items[0].Label, "done") {
+		t.Fatalf("done row label missing id/status: %+v", items[0])
+	}
+	if !strings.Contains(items[1].Label, "[READY]") || !strings.Contains(items[1].Label, "ready") {
+		t.Fatalf("ready row label missing id/status: %+v", items[1])
+	}
+	after, err := os.ReadFile(tasks.StatePathFor(tasksDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("cancel must not write:\nbefore:%s\nafter:%s", before, after)
+	}
+}
+
+func TestTaskArchiveSelectionConfirmArchivesBatch(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughtsWithStatus(t, tasksDir, "done", "done")
+	writeTaskThoughtsWithStatus(t, tasksDir, "ready", "open")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	stubCompleteInteractive(t, true)
+	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: true, Checked: []int{0, 1}}, nil)
+
+	var stdout bytes.Buffer
+	if err := runTaskArchiveSelectionWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), false); err != nil {
+		t.Fatalf("archive picker confirm failed: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Archived task sets done, ready") {
+		t.Fatalf("missing batch archive report:\n%s", out)
+	}
+	active, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active.Rows) != 0 {
+		t.Fatalf("active rows = %#v, want none", active.Rows)
+	}
+}
+
+func TestTaskArchiveYesArchivesDoneOnly(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughtsWithStatus(t, tasksDir, "done", "done")
+	writeTaskThoughtsWithStatus(t, tasksDir, "ready", "open")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	var stdout bytes.Buffer
+	if err := runTaskArchiveSelectionWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), true); err != nil {
+		t.Fatalf("--yes archive failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Archived task set done") {
+		t.Fatalf("missing done archive report:\n%s", stdout.String())
+	}
+	active, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active.Rows) != 1 || active.Rows[0].ID != "ready" {
+		t.Fatalf("--yes should leave only ready active: %#v", active.Rows)
+	}
+}
+
+func TestTaskArchiveYesNoDoneNoop(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughtsWithStatus(t, tasksDir, "ready", "open")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	before, _ := os.ReadFile(tasks.StatePathFor(tasksDir))
+	var stdout bytes.Buffer
+	if err := runTaskArchiveSelectionWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), true); err != nil {
+		t.Fatalf("--yes zero done should be clean: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "No done task sets to archive.") {
+		t.Fatalf("missing no-op message:\n%s", stdout.String())
+	}
+	after, _ := os.ReadFile(tasks.StatePathFor(tasksDir))
+	if string(before) != string(after) {
+		t.Fatalf("zero-done --yes must not write:\nbefore:%s\nafter:%s", before, after)
+	}
+}
+
+func TestTaskArchiveNoArgNonInteractiveRejected(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughtsWithStatus(t, tasksDir, "done", "done")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	stubCompleteInteractive(t, false)
+
+	err := runTaskArchiveSelectionWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), false)
+	if err == nil {
+		t.Fatal("no-arg non-interactive archive should error")
+	}
+	ee, ok := err.(*tasks.ExitError)
+	if !ok || ee.Code != tasks.ExitOperational {
+		t.Fatalf("err = %v, want ExitOperational", err)
+	}
+	if !strings.Contains(err.Error(), "--yes") || !strings.Contains(err.Error(), "bare identifier") {
+		t.Fatalf("err should point to --yes or a bare identifier: %v", err)
 	}
 }
 
@@ -394,6 +592,21 @@ func writeTaskThoughts(t *testing.T, tasksDir, stem string) {
 		t.Fatal(err)
 	}
 	manifest := `{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}]}`
+	if err := os.WriteFile(filepath.Join(taskDir, "index.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeTaskThoughtsWithStatus(t *testing.T, tasksDir, stem, status string) {
+	t.Helper()
+	taskDir := filepath.Join(tasksDir, stem)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "01-a.md"), []byte("## Acceptance criteria\n\n- [ ] ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := fmt.Sprintf(`{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":%q}]}`, status)
 	if err := os.WriteFile(filepath.Join(taskDir, "index.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}

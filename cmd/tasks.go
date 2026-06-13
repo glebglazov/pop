@@ -44,9 +44,9 @@ var taskStatusCmd = &cobra.Command{
 }
 
 var taskArchiveCmd = &cobra.Command{
-	Use:   "archive TASK_SET",
+	Use:   "archive [TASK_SET]",
 	Short: "Hide a registered task set from default task status and selection",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runTaskArchive,
 }
 
@@ -161,6 +161,7 @@ func init() {
 	taskCmd.PersistentFlags().StringVar(&taskDefPath, "task-definition-path", "", "Exact task definition directory (not normalized to git root)")
 
 	taskStatusCmd.Flags().BoolVar(&taskStatusArchived, "archived", false, "Show archived task sets only")
+	taskArchiveCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Archive Done task sets without opening the picker")
 
 	taskImplementCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	taskImplementCmd.Flags().Var(&taskAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
@@ -234,7 +235,10 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 }
 
 func runTaskArchive(cmd *cobra.Command, args []string) error {
-	return runTaskArchiveWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	if len(args) > 0 {
+		return runTaskArchiveWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	}
+	return runTaskArchiveSelectionWith(tasks.DefaultDeps(), os.Stdout, os.Stdin, taskRunYes)
 }
 
 func runTaskArchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
@@ -245,6 +249,68 @@ func runTaskArchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	fmt.Fprintf(w, "Archived task set %s\n\n", result.TaskSetID)
 	tasks.Render(w, result.Refresh)
 	return nil
+}
+
+func runTaskArchiveSelectionWith(d *tasks.Deps, w io.Writer, stdin io.Reader, yes bool) error {
+	ctx, err := tasks.LoadArchiveSetSelectionWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput())
+	if err != nil {
+		return fmt.Errorf("tasks archive: %w", err)
+	}
+
+	var selectedIDs []string
+	if yes {
+		selectedIDs = tasks.DoneArchiveSetIDs(ctx.Rows)
+		if len(selectedIDs) == 0 {
+			fmt.Fprintln(w, "No done task sets to archive.")
+			return nil
+		}
+	} else {
+		if !taskStdinInteractive(stdin) {
+			return &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf(
+				"archiving task sets needs an interactive terminal; pass --yes to archive Done sets or target one task set by bare identifier")}
+		}
+		items := make([]ui.MultiSelectItem, len(ctx.Rows))
+		for i, row := range ctx.Rows {
+			items[i] = ui.MultiSelectItem{
+				Label:   archiveSetRowLabel(row),
+				Checked: row.Checked,
+			}
+		}
+		selection, err := runTaskMultiSelect("Archive task sets", items)
+		if err != nil {
+			return err
+		}
+		if !selection.Confirmed {
+			return nil
+		}
+		for _, idx := range selection.Checked {
+			if idx >= 0 && idx < len(ctx.Rows) {
+				selectedIDs = append(selectedIDs, ctx.Rows[idx].TaskSetID)
+			}
+		}
+		if len(selectedIDs) == 0 {
+			return nil
+		}
+	}
+
+	result, err := tasks.ArchiveTaskSetsWith(d, taskProjectDeps(), taskConfigLoad, tasks.ArchiveTaskSetsOptions{
+		ResolveInput: taskResolveInput(),
+		TaskSetIDs:   selectedIDs,
+	})
+	if err != nil {
+		return fmt.Errorf("tasks archive: %w", err)
+	}
+	fmt.Fprintf(w, "Archived task set")
+	if len(result.TaskSetIDs) != 1 {
+		fmt.Fprint(w, "s")
+	}
+	fmt.Fprintf(w, " %s\n\n", strings.Join(result.TaskSetIDs, ", "))
+	tasks.Render(w, result.Refresh)
+	return nil
+}
+
+func archiveSetRowLabel(r tasks.ArchiveSetSelectionRow) string {
+	return fmt.Sprintf("%-10s %s", "["+string(r.Status)+"]", r.TaskSetID)
 }
 
 func runTaskUnarchive(cmd *cobra.Command, args []string) error {

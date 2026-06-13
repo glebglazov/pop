@@ -16,6 +16,33 @@ type ArchiveResult struct {
 	Archived  bool
 }
 
+// ArchiveSetSelectionRow is one Task set offered in the cross-set archive
+// selection. Done sets are initially checked; every non-archived registered set
+// remains toggleable so the operator can widen or narrow the batch.
+type ArchiveSetSelectionRow struct {
+	TaskSetID string
+	Status    TaskSetStatus
+	Checked   bool
+}
+
+// ArchiveSetSelectionContext carries the resolved cross-set archive selection.
+type ArchiveSetSelectionContext struct {
+	Rows []ArchiveSetSelectionRow
+}
+
+// ArchiveTaskSetsOptions configures an atomic archive update across multiple
+// registered Task sets.
+type ArchiveTaskSetsOptions struct {
+	ResolveInput
+	TaskSetIDs []string
+}
+
+// ArchiveTaskSetsResult is the outcome of archiving zero or more Task sets.
+type ArchiveTaskSetsResult struct {
+	TaskSetIDs []string
+	Refresh    *RefreshResult
+}
+
 // ArchivedTaskSetError reports that a deliberately archived Task set was
 // explicitly targeted by a verb that schedules or mutates tasks.
 type ArchivedTaskSetError struct {
@@ -67,6 +94,110 @@ func ArchiveTaskSet(input ResolveInput, taskSetID string) (*ArchiveResult, error
 // ArchiveTaskSetWith marks one registered Task set as archived using injected dependencies.
 func ArchiveTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input ResolveInput, taskSetID string) (*ArchiveResult, error) {
 	return setTaskSetArchivedWith(d, pd, loadConfig, input, taskSetID, true)
+}
+
+// LoadArchiveSetSelectionWith lists every non-archived registered Task set and
+// marks only Done sets as initially checked.
+func LoadArchiveSetSelectionWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input ResolveInput) (*ArchiveSetSelectionContext, error) {
+	resolved, err := ResolvePathsWith(d, pd, loadConfig, input)
+	if err != nil {
+		return nil, err
+	}
+	refresh, err := RefreshWith(d, resolved.DefinitionPath, StatePathFor(resolved.DefinitionPath))
+	if err != nil {
+		return nil, err
+	}
+	return &ArchiveSetSelectionContext{Rows: BuildArchiveSetSelection(refresh)}, nil
+}
+
+// BuildArchiveSetSelection shapes status rows into a cross-set checkbox list.
+func BuildArchiveSetSelection(refresh *RefreshResult) []ArchiveSetSelectionRow {
+	if refresh == nil {
+		return nil
+	}
+	rows := make([]ArchiveSetSelectionRow, 0, len(refresh.Rows))
+	for _, row := range refresh.Rows {
+		rows = append(rows, ArchiveSetSelectionRow{
+			TaskSetID: row.ID,
+			Status:    row.Status,
+			Checked:   row.Status == StatusDone,
+		})
+	}
+	return rows
+}
+
+// DoneArchiveSetIDs returns the ids that the no-argument archive picker should
+// pre-check: exactly the non-archived Done Task sets in displayed row order.
+func DoneArchiveSetIDs(rows []ArchiveSetSelectionRow) []string {
+	var ids []string
+	for _, row := range rows {
+		if row.Checked {
+			ids = append(ids, row.TaskSetID)
+		}
+	}
+	return ids
+}
+
+// ArchiveTaskSetsWith marks several registered Task sets archived in one state
+// update. An empty selection is a clean no-op and writes nothing.
+func ArchiveTaskSetsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts ArchiveTaskSetsOptions) (*ArchiveTaskSetsResult, error) {
+	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
+	if err != nil {
+		return nil, err
+	}
+	statePath := StatePathFor(resolved.DefinitionPath)
+	refresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
+	if err != nil {
+		return nil, err
+	}
+	if len(opts.TaskSetIDs) == 0 {
+		return &ArchiveTaskSetsResult{Refresh: refresh}, nil
+	}
+	state, err := LoadGlobalStateWith(d, statePath)
+	if err != nil {
+		return nil, err
+	}
+
+	allowed := make(map[string]bool, len(refresh.Rows))
+	for _, row := range refresh.Rows {
+		allowed[row.ID] = true
+	}
+	seen := make(map[string]bool, len(opts.TaskSetIDs))
+	selected := make([]string, 0, len(opts.TaskSetIDs))
+	for _, raw := range opts.TaskSetIDs {
+		id, err := resolveRegisteredTaskSetTarget(state, resolved.DefinitionPath, raw)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed[id] {
+			return nil, fmt.Errorf("task set %q is already archived", id)
+		}
+		if !seen[id] {
+			seen[id] = true
+			selected = append(selected, id)
+		}
+	}
+
+	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
+		entry := state.Tasks[resolved.DefinitionPath]
+		for _, id := range selected {
+			idx, _, err := findRegisteredTaskSet(entry, id)
+			if err != nil {
+				return err
+			}
+			entry.TaskSets[idx].Archived = true
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
+	if err != nil {
+		return nil, err
+	}
+	return &ArchiveTaskSetsResult{TaskSetIDs: selected, Refresh: afterRefresh}, nil
 }
 
 // UnarchiveTaskSet clears one registered Task set's archived flag.
