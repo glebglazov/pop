@@ -435,7 +435,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 	if err != nil {
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
 	}
-	_, err = tasks.RunTaskWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskOptions{
+	result, err := tasks.RunTaskWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskOptions{
 		ResolveInput:     taskResolveInput(),
 		TaskPathOverride: taskPath,
 		AgentPreset:      taskAgentPreset,
@@ -450,7 +450,13 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		ConfirmOut:       stderr,
 		Output:           stdout,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if result != nil && result.QuotaPaused {
+		return &tasks.ExitError{Code: tasks.ExitQuotaPaused}
+	}
+	return nil
 }
 
 func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskSetPath string, agentExplicit bool) error {
@@ -458,7 +464,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 	if err != nil {
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
 	}
-	_, err = tasks.RunTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskSetOptions{
+	result, err := tasks.RunTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskSetOptions{
 		ResolveInput:    taskResolveInput(),
 		TaskSetOverride: taskSetPath,
 		AgentPreset:     taskAgentPreset,
@@ -473,7 +479,13 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		ConfirmOut:      stderr,
 		Output:          stdout,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if result != nil && result.QuotaPaused {
+		return &tasks.ExitError{Code: tasks.ExitQuotaPaused}
+	}
+	return nil
 }
 
 func runTaskResetTask(cmd *cobra.Command, args []string) {

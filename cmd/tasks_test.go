@@ -1339,6 +1339,43 @@ func writeFileCmd(t *testing.T, path, content string) {
 	}
 }
 
+// TestRunTasksCmdQuotaPauseExitsQuotaPaused pins the machine-readable signal a
+// supervisor reads: a drain that stops on an agent quota pause exits with the
+// dedicated ExitQuotaPaused code rather than a clean ExitSuccess.
+func TestRunTasksCmdQuotaPauseExitsQuotaPaused(t *testing.T) {
+	root := setupRunTaskCmdFixture(t)
+	installClaudeQuotaAgentCmd(t, root)
+
+	resetTaskFlags()
+	taskAgentPreset = "claude"
+	taskRunYes = true
+	t.Cleanup(resetTaskFlags)
+
+	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, tasks.NonInteractiveReader{}, "demo", false)
+	var ee *tasks.ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("err = %v, want *tasks.ExitError", err)
+	}
+	if ee.Code != tasks.ExitQuotaPaused {
+		t.Fatalf("exit code = %d, want ExitQuotaPaused (%d)", ee.Code, tasks.ExitQuotaPaused)
+	}
+}
+
+func installClaudeQuotaAgentCmd(t *testing.T, root string) {
+	t.Helper()
+	dir := filepath.Join(root, ".agent-bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"result\":\"You'\"'\"'ve hit your weekly limit · resets Mon 12:00am\"}'\n"
+	bin := filepath.Join(dir, "claude")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // TestImplementAgentFlagExplicitness pins the contract behind per-task agent
 // resolution (ADR-0018): a bare defaulted --agent does not report Changed, so
 // only an explicitly passed flag overrides a task's `agent` key.

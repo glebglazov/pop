@@ -47,6 +47,8 @@ type RunTaskSetResult struct {
 	BlockedReason   string
 	QuotaPaused     bool
 	PauseReason     string
+	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
+	PausePreset string
 }
 
 // RunTaskSet drains one Task set sequentially through eligible AFK tasks.
@@ -55,7 +57,7 @@ func RunTaskSet(opts RunTaskSetOptions) (*RunTaskSetResult, error) {
 }
 
 // RunTaskSetWith drains one Task set using injected dependencies.
-func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts RunTaskSetOptions) (*RunTaskSetResult, error) {
+func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts RunTaskSetOptions) (result *RunTaskSetResult, err error) {
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
 	}
@@ -160,11 +162,21 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		afkConsentConfirmed = true
 	}
 
-	lock, err := AcquireRuntimeLock(d, runtimePath, confirmOut)
+	lock, err := AcquireRuntimeLockForSet(d, runtimePath, taskSetID, confirmOut)
 	if err != nil {
 		return nil, err
 	}
 	defer lock.Release()
+
+	// The lock is held, so this process owns the drain: record how it ends on
+	// every exit path below (including a panic-free crash bubbling up as err) so
+	// the supervisor can read the outcome without parsing human output. A
+	// declined run never reaches here, so it writes no record.
+	defer func() {
+		if rec, ok := drainOutcomeFor(taskSetID, runtimePath, result, err); ok {
+			_ = WriteDrainOutcome(d, rec)
+		}
+	}()
 
 	maxTries := opts.MaxTries
 	if maxTries <= 0 {
@@ -175,7 +187,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		timeout = DefaultAttemptTimeout
 	}
 
-	result := &RunTaskSetResult{TaskSetID: taskSetID}
+	result = &RunTaskSetResult{TaskSetID: taskSetID}
 	dirtyStrategyApplied := false
 
 	for {
@@ -312,6 +324,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		if taskResult.QuotaPaused {
 			result.QuotaPaused = true
 			result.PauseReason = taskResult.PauseReason
+			result.PausePreset = taskResult.PausePreset
 			result.Refresh = currentRefresh
 			printTaskSetSummary(out, result)
 			return result, nil

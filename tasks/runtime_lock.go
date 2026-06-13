@@ -16,6 +16,11 @@ type RuntimeLockMetadata struct {
 	PID         int       `json:"pid"`
 	RuntimePath string    `json:"runtime_path"`
 	StartedAt   time.Time `json:"started_at"`
+	// SetID identifies the task set this checkout is draining. It is optional:
+	// older lock files (and locks written by older binaries) omit it, and the
+	// parser must not reject a lock for its absence. A reader uses it to tell
+	// which set a busy checkout is draining, not merely that it is busy.
+	SetID string `json:"set_id,omitempty"`
 }
 
 // RuntimeLockStatus is best-effort lock information for status rendering.
@@ -85,10 +90,16 @@ func ReadRuntimeLockStatus(d *Deps, runtimeRoot string) *RuntimeLockStatus {
 
 // AcquireRuntimeLock acquires an exclusive runtime execution lock.
 func AcquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer) (*RuntimeLock, error) {
-	return acquireRuntimeLock(d, runtimeRoot, noticeOut, false)
+	return acquireRuntimeLock(d, runtimeRoot, "", noticeOut, false)
 }
 
-func acquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer, retried bool) (*RuntimeLock, error) {
+// AcquireRuntimeLockForSet acquires an exclusive runtime execution lock and
+// records which task set is draining the checkout in the lock metadata.
+func AcquireRuntimeLockForSet(d *Deps, runtimeRoot, setID string, noticeOut io.Writer) (*RuntimeLock, error) {
+	return acquireRuntimeLock(d, runtimeRoot, setID, noticeOut, false)
+}
+
+func acquireRuntimeLock(d *Deps, runtimeRoot, setID string, noticeOut io.Writer, retried bool) (*RuntimeLock, error) {
 	if noticeOut == nil {
 		noticeOut = io.Discard
 	}
@@ -103,6 +114,7 @@ func acquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer, retrie
 		PID:         os.Getpid(),
 		RuntimePath: runtimeRoot,
 		StartedAt:   time.Now().UTC(),
+		SetID:       setID,
 	}
 	payload, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
@@ -133,7 +145,7 @@ func acquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer, retrie
 		if retried {
 			return nil, exitErr(ExitOperational, "acquire runtime lock after recovery: %v", readErr)
 		}
-		return acquireRuntimeLock(d, runtimeRoot, noticeOut, true)
+		return acquireRuntimeLock(d, runtimeRoot, setID, noticeOut, true)
 	}
 
 	existingMeta, parseErr := parseRuntimeLockMetadata(existing)
@@ -143,7 +155,7 @@ func acquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer, retrie
 		if retried {
 			return nil, exitErr(ExitOperational, "acquire runtime lock after recovery: %v", parseErr)
 		}
-		return acquireRuntimeLock(d, runtimeRoot, noticeOut, true)
+		return acquireRuntimeLock(d, runtimeRoot, setID, noticeOut, true)
 	}
 
 	if processAlive(d, existingMeta.PID) {
@@ -162,7 +174,7 @@ func acquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer, retrie
 	if retried {
 		return nil, exitErr(ExitOperational, "acquire runtime lock after removing stale lock")
 	}
-	return acquireRuntimeLock(d, runtimeRoot, noticeOut, true)
+	return acquireRuntimeLock(d, runtimeRoot, setID, noticeOut, true)
 }
 
 func parseRuntimeLockMetadata(data []byte) (*RuntimeLockMetadata, error) {

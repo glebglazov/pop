@@ -72,12 +72,14 @@ type RunTaskOptions struct {
 
 // RunTaskResult is the outcome of a successful or declined run-task.
 type RunTaskResult struct {
-	Selection    *Selection
-	Refresh      *RefreshResult
-	Declined     bool
-	NoOp         bool
-	QuotaPaused  bool
-	PauseReason  string
+	Selection   *Selection
+	Refresh     *RefreshResult
+	Declined    bool
+	NoOp        bool
+	QuotaPaused bool
+	PauseReason string
+	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
+	PausePreset  string
 	CommitSHA    string
 	AgentSummary string
 }
@@ -180,7 +182,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		return &RunTaskResult{Selection: sel, Refresh: refresh, Declined: true}, nil
 	}
 
-	lock, err := AcquireRuntimeLock(d, runtimePath, confirmOut)
+	lock, err := AcquireRuntimeLockForSet(d, runtimePath, sel.TaskSetID, confirmOut)
 	if err != nil {
 		return nil, err
 	}
@@ -318,6 +320,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 				Selection:   sel,
 				QuotaPaused: true,
 				PauseReason: agentResult.QuotaPause.Reason,
+				PausePreset: invocation.AgentPreset(),
 			}, nil
 		}
 
