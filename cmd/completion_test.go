@@ -114,6 +114,13 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
 	})
 
+	t.Run("export stays set-only without slash drill", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "export")
+		assertShellCompContains(t, out, "svc")
+		assertShellCompOmitsExact(t, out, "svc/")
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+	})
+
 	t.Run("reset task positional defaults to Task set IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "open")
 		assertShellCompContains(t, out, "svc")

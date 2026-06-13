@@ -91,6 +91,25 @@ var taskShowPathCmd = &cobra.Command{
 	Run:   runTaskShowPath,
 }
 
+var taskExportCmd = &cobra.Command{
+	Use:   "export TASK_SET",
+	Short: "Export a task set as a tar.gz archive",
+	Args:  cobra.ExactArgs(1),
+	Run:   runTaskExport,
+}
+
+var taskImportCmd = &cobra.Command{
+	Use:   "import ARCHIVE",
+	Short: "Import a task set export into this repository's task storage",
+	Args:  cobra.ExactArgs(1),
+	Run:   runTaskImport,
+}
+
+var (
+	taskExportOutput string
+	taskImportAs     string
+)
+
 var taskMigrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Move legacy thoughts/issues task sets in this worktree into task storage",
@@ -115,6 +134,8 @@ func init() {
 	taskCmd.AddCommand(taskSkipTaskCmd)
 	taskCmd.AddCommand(taskTimingsCmd)
 	taskCmd.AddCommand(taskShowPathCmd)
+	taskCmd.AddCommand(taskExportCmd)
+	taskCmd.AddCommand(taskImportCmd)
 	taskCmd.AddCommand(taskMigrateCmd)
 	taskCmd.AddCommand(taskAgentsCmd)
 
@@ -131,6 +152,9 @@ func init() {
 	taskImplementCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
 	taskImplementCmd.Flags().StringVar(&taskTimeout, "timeout", "1h", "Maximum duration per attempt")
 	taskImplementCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip confirmation prompt")
+
+	taskExportCmd.Flags().StringVarP(&taskExportOutput, "output", "o", "", "Output archive path (default: <task-set-id>.tar.gz in the current directory)")
+	taskImportCmd.Flags().StringVar(&taskImportAs, "as", "", "Install under a different task set identifier")
 }
 
 func taskResolveInput() tasks.ResolveInput {
@@ -585,6 +609,42 @@ func runTaskShowPath(cmd *cobra.Command, args []string) {
 
 func runTaskShowPathWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	result, err := tasks.ShowPath(d, "", taskSetID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w, result.Path)
+	return nil
+}
+
+func runTaskExport(cmd *cobra.Command, args []string) {
+	err := runTaskExportWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	handleTaskExit(err)
+}
+
+func runTaskExportWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
+	result, err := tasks.ExportWith(d, taskProjectDeps(), taskConfigLoad, tasks.ExportOptions{
+		ResolveInput: taskResolveInput(),
+		TaskSetID:    taskSetID,
+		OutputPath:   taskExportOutput,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w, result.Path)
+	return nil
+}
+
+func runTaskImport(cmd *cobra.Command, args []string) {
+	err := runTaskImportWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	handleTaskExit(err)
+}
+
+func runTaskImportWith(d *tasks.Deps, w io.Writer, archivePath string) error {
+	result, err := tasks.ImportWith(d, taskProjectDeps(), taskConfigLoad, tasks.ImportOptions{
+		ResolveInput: taskResolveInput(),
+		ArchivePath:  archivePath,
+		AsID:         taskImportAs,
+	})
 	if err != nil {
 		return err
 	}

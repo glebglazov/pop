@@ -732,6 +732,8 @@ func resetTaskFlags() {
 	taskAgentOutput = ""
 	taskRunYes = false
 	taskAllowDirty = tasks.DirtyRuntimeContinue
+	taskExportOutput = ""
+	taskImportAs = ""
 }
 
 func setupRunTaskCmdFixture(t *testing.T) string {
@@ -835,5 +837,58 @@ func TestImplementAgentFlagExplicitness(t *testing.T) {
 	})
 	if !taskImplementCmd.Flags().Changed("agent") {
 		t.Fatal("explicitly passed agent flag must report Changed even at the default value")
+	}
+}
+
+func TestTaskExportImportRoundtripCmd(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	const setID = "2026-06-01-user-auth"
+	writeTaskThoughts(t, tasksDir, setID)
+
+	taskProject = ""
+	taskPath = ""
+	taskDefPath = ""
+	taskExportOutput = ""
+	taskImportAs = ""
+	t.Cleanup(resetTaskFlags)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	d := tasks.DefaultDeps()
+	var exportBuf bytes.Buffer
+	if err := runTaskExportWith(d, &exportBuf, setID); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	archivePath := strings.TrimSpace(exportBuf.String())
+	if _, err := os.Stat(archivePath); err != nil {
+		t.Fatalf("archive missing: %v", err)
+	}
+
+	dstRoot := t.TempDir()
+	initGitRepoCmd(t, dstRoot)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dstRoot, ".xdg"))
+	oldWd2, _ := os.Getwd()
+	if err := os.Chdir(dstRoot); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd2) })
+
+	var importBuf bytes.Buffer
+	if err := runTaskImportWith(d, &importBuf, archivePath); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	importedPath := strings.TrimSpace(importBuf.String())
+	if _, err := os.Stat(filepath.Join(importedPath, "index.json")); err != nil {
+		t.Fatalf("imported set missing manifest: %v", err)
 	}
 }
