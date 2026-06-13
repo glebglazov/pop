@@ -296,6 +296,109 @@ func TestTaskArchiveSelectionConfirmArchivesBatch(t *testing.T) {
 	}
 }
 
+func TestTaskUnarchiveSelectionListsArchivedOnlyUncheckedAndCancelWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughtsWithStatus(t, tasksDir, "archived", "open")
+	writeTaskThoughtsWithStatus(t, tasksDir, "active", "open")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{DefinitionOverride: tasksDir, CWD: root}, "archived"); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	stubCompleteInteractive(t, true)
+
+	var items []ui.MultiSelectItem
+	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: false}, &items)
+	before, err := os.ReadFile(tasks.StatePathFor(tasksDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	if err := runTaskUnarchiveSelectionWith(tasks.DefaultDeps(), &stdout, strings.NewReader("")); err != nil {
+		t.Fatalf("unarchive picker cancel failed: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("cancel should render nothing:\n%s", stdout.String())
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want archived only: %+v", len(items), items)
+	}
+	if items[0].Checked {
+		t.Fatalf("unarchive picker should start unchecked: %+v", items)
+	}
+	if !strings.Contains(items[0].Label, "[READY]") || !strings.Contains(items[0].Label, "archived") {
+		t.Fatalf("archived row label missing id/status: %+v", items[0])
+	}
+	if strings.Contains(items[0].Label, "active") {
+		t.Fatalf("active row leaked into unarchive picker: %+v", items)
+	}
+	after, err := os.ReadFile(tasks.StatePathFor(tasksDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("cancel must not write:\nbefore:%s\nafter:%s", before, after)
+	}
+}
+
+func TestTaskUnarchiveSelectionConfirmRestoresBatch(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughtsWithStatus(t, tasksDir, "one", "open")
+	writeTaskThoughtsWithStatus(t, tasksDir, "two", "open")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"one", "two"} {
+		if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{DefinitionOverride: tasksDir, CWD: root}, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	stubCompleteInteractive(t, true)
+	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: true, Checked: []int{0, 1}}, nil)
+
+	var stdout bytes.Buffer
+	if err := runTaskUnarchiveSelectionWith(tasks.DefaultDeps(), &stdout, strings.NewReader("")); err != nil {
+		t.Fatalf("unarchive picker confirm failed: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Unarchived task sets one, two") {
+		t.Fatalf("missing batch unarchive report:\n%s", out)
+	}
+	active, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active.Rows) != 2 {
+		t.Fatalf("active rows = %#v, want both restored", active.Rows)
+	}
+}
+
 func TestTaskArchiveYesArchivesDoneOnly(t *testing.T) {
 	root := t.TempDir()
 	resetTaskFlags()
@@ -395,6 +498,42 @@ func TestTaskArchiveNoArgNonInteractiveRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--yes") || !strings.Contains(err.Error(), "bare identifier") {
 		t.Fatalf("err should point to --yes or a bare identifier: %v", err)
+	}
+}
+
+func TestTaskUnarchiveNoArgNonInteractiveRejected(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughtsWithStatus(t, tasksDir, "demo", "open")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{DefinitionOverride: tasksDir, CWD: root}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	stubCompleteInteractive(t, false)
+
+	err := runTaskUnarchiveSelectionWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""))
+	if err == nil {
+		t.Fatal("no-arg non-interactive unarchive should error")
+	}
+	ee, ok := err.(*tasks.ExitError)
+	if !ok || ee.Code != tasks.ExitOperational {
+		t.Fatalf("err = %v, want ExitOperational", err)
+	}
+	if !strings.Contains(err.Error(), "bare identifier") || !strings.Contains(err.Error(), "pop tasks unarchive <task-set>") {
+		t.Fatalf("err should point to the bare identifier form: %v", err)
 	}
 }
 

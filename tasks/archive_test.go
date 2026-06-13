@@ -261,6 +261,61 @@ func TestBuildArchiveSetSelectionPrechecksDoneOnly(t *testing.T) {
 	}
 }
 
+func TestLoadUnarchiveSetSelectionListsArchivedOnlyUncheckedFromRegistration(t *testing.T) {
+	root := t.TempDir()
+	setupManifest(t, root, "archived-present", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	setupManifest(t, root, "active", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	statePath := StatePathFor(root)
+	if _, err := RefreshWith(DefaultDeps(), root, statePath); err != nil {
+		t.Fatal(err)
+	}
+	canon, err := CanonicalDefinitionPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = UpdateGlobalStateWith(DefaultDeps(), statePath, func(state *GlobalState) error {
+		entry := state.Entry(canon)
+		for i := range entry.TaskSets {
+			if entry.TaskSets[i].ID == "archived-present" {
+				entry.TaskSets[i].Archived = true
+			}
+		}
+		entry.TaskSets = append(entry.TaskSets, RegisteredTaskSet{ID: "archived-missing", Archived: true})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, err := LoadUnarchiveSetSelectionWith(DefaultDeps(), nil, nil, ResolveInput{DefinitionOverride: root, CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ctx.Rows) != 2 {
+		t.Fatalf("rows = %#v, want two archived registered sets", ctx.Rows)
+	}
+	statuses := map[string]TaskSetStatus{}
+	for _, row := range ctx.Rows {
+		statuses[row.TaskSetID] = row.Status
+		if row.Checked {
+			t.Fatalf("unarchive row should not be prechecked: %#v", row)
+		}
+	}
+	if statuses["archived-present"] != StatusReady {
+		t.Fatalf("archived-present status = %s, want READY (all statuses: %#v)", statuses["archived-present"], statuses)
+	}
+	if statuses["archived-missing"] != StatusMissing {
+		t.Fatalf("archived-missing status = %s, want MISSING (all statuses: %#v)", statuses["archived-missing"], statuses)
+	}
+	if _, ok := statuses["active"]; ok {
+		t.Fatalf("active set leaked into unarchive picker: %#v", ctx.Rows)
+	}
+}
+
 func TestArchiveTaskSetsOneAtomicStateWrite(t *testing.T) {
 	root := t.TempDir()
 	setupManifest(t, root, "done", []Task{
@@ -297,6 +352,71 @@ func TestArchiveTaskSetsOneAtomicStateWrite(t *testing.T) {
 	for _, id := range []string{"done", "ready"} {
 		if !taskSetArchived(state, canon, id) {
 			t.Fatalf("%s not archived: %#v", id, state.Tasks[canon].TaskSets)
+		}
+	}
+}
+
+func TestUnarchiveTaskSetsOneAtomicStateWriteAndRestoresSelection(t *testing.T) {
+	root := t.TempDir()
+	setupManifest(t, root, "one", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	setupManifest(t, root, "two", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	if _, err := RefreshWith(DefaultDeps(), root, StatePathFor(root)); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"one", "two"} {
+		if _, err := ArchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tracker := &stateWriteTracker{}
+	d := DefaultDeps()
+	d.FS = &stateWriteTrackingFS{FileSystem: deps.NewRealFileSystem(), tracker: tracker}
+	result, err := UnarchiveTaskSetsWith(d, nil, nil, UnarchiveTaskSetsOptions{
+		ResolveInput: ResolveInput{DefinitionOverride: root, CWD: root},
+		TaskSetIDs:   []string{"one", "two"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(result.TaskSetIDs, ","); got != "one,two" {
+		t.Fatalf("unarchived ids = %s", got)
+	}
+	if tracker.stateWrites != 1 {
+		t.Fatalf("state writes = %d, want one atomic write", tracker.stateWrites)
+	}
+	if len(result.Refresh.Rows) != 2 {
+		t.Fatalf("rows after unarchive = %#v, want both restored", result.Refresh.Rows)
+	}
+	if result.Refresh.ArchivedCount != 0 {
+		t.Fatalf("archived count = %d, want 0", result.Refresh.ArchivedCount)
+	}
+	selected, _, err := SelectTaskSet(result.Refresh, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected == "" {
+		t.Fatalf("auto-selection did not see restored rows: %#v", result.Refresh.Rows)
+	}
+	completions, err := CompleteTaskSetIDsWith(DefaultDeps(), nil, nil, CompletionInput{DefinitionOverride: root}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(completions, ",") != "one,two" {
+		t.Fatalf("completion ids = %v, want restored sets", completions)
+	}
+	state, err := LoadGlobalState(StatePathFor(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	canon, _ := CanonicalDefinitionPath(root)
+	for _, id := range []string{"one", "two"} {
+		if taskSetArchived(state, canon, id) {
+			t.Fatalf("%s still archived: %#v", id, state.Tasks[canon].TaskSets)
 		}
 	}
 }

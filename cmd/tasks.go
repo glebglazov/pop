@@ -51,9 +51,9 @@ var taskArchiveCmd = &cobra.Command{
 }
 
 var taskUnarchiveCmd = &cobra.Command{
-	Use:   "unarchive TASK_SET",
+	Use:   "unarchive [TASK_SET]",
 	Short: "Restore an archived task set to default task status and selection",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runTaskUnarchive,
 }
 
@@ -314,7 +314,10 @@ func archiveSetRowLabel(r tasks.ArchiveSetSelectionRow) string {
 }
 
 func runTaskUnarchive(cmd *cobra.Command, args []string) error {
-	return runTaskUnarchiveWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	if len(args) > 0 {
+		return runTaskUnarchiveWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	}
+	return runTaskUnarchiveSelectionWith(tasks.DefaultDeps(), os.Stdout, os.Stdin)
 }
 
 func runTaskUnarchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
@@ -323,6 +326,57 @@ func runTaskUnarchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return fmt.Errorf("tasks unarchive: %w", err)
 	}
 	fmt.Fprintf(w, "Unarchived task set %s\n\n", result.TaskSetID)
+	tasks.Render(w, result.Refresh)
+	return nil
+}
+
+func runTaskUnarchiveSelectionWith(d *tasks.Deps, w io.Writer, stdin io.Reader) error {
+	ctx, err := tasks.LoadUnarchiveSetSelectionWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput())
+	if err != nil {
+		return fmt.Errorf("tasks unarchive: %w", err)
+	}
+
+	if !taskStdinInteractive(stdin) {
+		return &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf(
+			"unarchiving task sets needs an interactive terminal; target one task set by bare identifier, e.g. `pop tasks unarchive <task-set>`")}
+	}
+
+	items := make([]ui.MultiSelectItem, len(ctx.Rows))
+	for i, row := range ctx.Rows {
+		items[i] = ui.MultiSelectItem{
+			Label:   archiveSetRowLabel(row),
+			Checked: row.Checked,
+		}
+	}
+	selection, err := runTaskMultiSelect("Unarchive task sets", items)
+	if err != nil {
+		return err
+	}
+	if !selection.Confirmed {
+		return nil
+	}
+	var selectedIDs []string
+	for _, idx := range selection.Checked {
+		if idx >= 0 && idx < len(ctx.Rows) {
+			selectedIDs = append(selectedIDs, ctx.Rows[idx].TaskSetID)
+		}
+	}
+	if len(selectedIDs) == 0 {
+		return nil
+	}
+
+	result, err := tasks.UnarchiveTaskSetsWith(d, taskProjectDeps(), taskConfigLoad, tasks.UnarchiveTaskSetsOptions{
+		ResolveInput: taskResolveInput(),
+		TaskSetIDs:   selectedIDs,
+	})
+	if err != nil {
+		return fmt.Errorf("tasks unarchive: %w", err)
+	}
+	fmt.Fprintf(w, "Unarchived task set")
+	if len(result.TaskSetIDs) != 1 {
+		fmt.Fprint(w, "s")
+	}
+	fmt.Fprintf(w, " %s\n\n", strings.Join(result.TaskSetIDs, ", "))
 	tasks.Render(w, result.Refresh)
 	return nil
 }
