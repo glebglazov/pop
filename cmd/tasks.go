@@ -17,17 +17,18 @@ import (
 )
 
 var (
-	taskProject     string
-	taskPath        string
-	taskDefPath     string
-	taskRuntimePath string
-	taskAgentPreset string
-	taskAgentCmd    string
-	taskAgentOutput tasks.AgentOutputMode
-	taskRunYes      bool
-	taskAllowDirty  tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
-	taskMaxTries    int
-	taskTimeout     string
+	taskProject        string
+	taskPath           string
+	taskDefPath        string
+	taskRuntimePath    string
+	taskAgentPreset    string
+	taskAgentCmd       string
+	taskAgentOutput    tasks.AgentOutputMode
+	taskRunYes         bool
+	taskAllowDirty     tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
+	taskMaxTries       int
+	taskTimeout        string
+	taskStatusArchived bool
 )
 
 var taskCmd = &cobra.Command{
@@ -40,6 +41,20 @@ var taskStatusCmd = &cobra.Command{
 	Short: "Show discovered task sets and their statuses, or one set's per-task breakdown",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runTaskStatus,
+}
+
+var taskArchiveCmd = &cobra.Command{
+	Use:   "archive TASK_SET",
+	Short: "Hide a registered task set from default task status and selection",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskArchive,
+}
+
+var taskUnarchiveCmd = &cobra.Command{
+	Use:   "unarchive TASK_SET",
+	Short: "Restore an archived task set to default task status and selection",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskUnarchive,
 }
 
 var taskSetPriorityCmd = &cobra.Command{
@@ -127,6 +142,8 @@ var taskAgentsCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
+	taskCmd.AddCommand(taskArchiveCmd)
+	taskCmd.AddCommand(taskUnarchiveCmd)
 	taskCmd.AddCommand(taskSetPriorityCmd)
 	taskCmd.AddCommand(taskImplementCmd)
 	taskCmd.AddCommand(taskResetTaskCmd)
@@ -142,6 +159,8 @@ func init() {
 	taskCmd.PersistentFlags().StringVar(&taskProject, "project", "", "Select project by exact picker-visible name")
 	taskCmd.PersistentFlags().StringVar(&taskPath, "path", "", "Select project by path (normalized to git checkout root)")
 	taskCmd.PersistentFlags().StringVar(&taskDefPath, "task-definition-path", "", "Exact task definition directory (not normalized to git root)")
+
+	taskStatusCmd.Flags().BoolVar(&taskStatusArchived, "archived", false, "Show archived task sets only")
 
 	taskImplementCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	taskImplementCmd.Flags().Var(&taskAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
@@ -184,7 +203,12 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return fmt.Errorf("tasks status: %w", err)
 	}
 
-	result, err := tasks.RefreshWith(d, resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
+	var result *tasks.RefreshResult
+	if taskStatusArchived {
+		result, err = tasks.RefreshArchivedWith(d, resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
+	} else {
+		result, err = tasks.RefreshWith(d, resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
+	}
 	if err != nil {
 		return fmt.Errorf("tasks status: %w", err)
 	}
@@ -206,6 +230,34 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	}
 
 	tasks.Render(w, result)
+	return nil
+}
+
+func runTaskArchive(cmd *cobra.Command, args []string) error {
+	return runTaskArchiveWith(tasks.DefaultDeps(), os.Stdout, args[0])
+}
+
+func runTaskArchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
+	result, err := tasks.ArchiveTaskSetWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput(), taskSetID)
+	if err != nil {
+		return fmt.Errorf("tasks archive: %w", err)
+	}
+	fmt.Fprintf(w, "Archived task set %s\n\n", result.TaskSetID)
+	tasks.Render(w, result.Refresh)
+	return nil
+}
+
+func runTaskUnarchive(cmd *cobra.Command, args []string) error {
+	return runTaskUnarchiveWith(tasks.DefaultDeps(), os.Stdout, args[0])
+}
+
+func runTaskUnarchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
+	result, err := tasks.UnarchiveTaskSetWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput(), taskSetID)
+	if err != nil {
+		return fmt.Errorf("tasks unarchive: %w", err)
+	}
+	fmt.Fprintf(w, "Unarchived task set %s\n\n", result.TaskSetID)
+	tasks.Render(w, result.Refresh)
 	return nil
 }
 

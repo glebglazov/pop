@@ -140,6 +140,66 @@ func TestTaskSetPriorityRefreshesTable(t *testing.T) {
 	}
 }
 
+func TestTaskArchiveCommandsAndArchivedStatus(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "alpha")
+	writeTaskThoughts(t, tasksDir, "beta")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	var archiveOut bytes.Buffer
+	if err := runTaskArchiveWith(tasks.DefaultDeps(), &archiveOut, "alpha"); err != nil {
+		t.Fatalf("archive failed: %v", err)
+	}
+	if !strings.Contains(archiveOut.String(), "Archived task set alpha") {
+		t.Fatalf("missing archive report:\n%s", archiveOut.String())
+	}
+
+	var defaultOut bytes.Buffer
+	taskStatusArchived = false
+	if err := runTaskStatusWith(tasks.DefaultDeps(), &defaultOut, ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(defaultOut.String(), "alpha") || !strings.Contains(defaultOut.String(), "beta") {
+		t.Fatalf("default status wrong:\n%s", defaultOut.String())
+	}
+	if !strings.Contains(defaultOut.String(), "pop tasks status --archived") {
+		t.Fatalf("default status missing archive hint:\n%s", defaultOut.String())
+	}
+
+	var archivedOut bytes.Buffer
+	taskStatusArchived = true
+	if err := runTaskStatusWith(tasks.DefaultDeps(), &archivedOut, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(archivedOut.String(), "alpha") || strings.Contains(archivedOut.String(), "beta") {
+		t.Fatalf("archived status wrong:\n%s", archivedOut.String())
+	}
+
+	taskStatusArchived = false
+	var unarchiveOut bytes.Buffer
+	if err := runTaskUnarchiveWith(tasks.DefaultDeps(), &unarchiveOut, "alpha"); err != nil {
+		t.Fatalf("unarchive failed: %v", err)
+	}
+	if !strings.Contains(unarchiveOut.String(), "Unarchived task set alpha") {
+		t.Fatalf("missing unarchive report:\n%s", unarchiveOut.String())
+	}
+}
+
 func TestTaskStatusUsesDefinitionOverride(t *testing.T) {
 	root := t.TempDir()
 	defDir := filepath.Join(root, "planning")
@@ -727,6 +787,7 @@ func resetTaskFlags() {
 	taskProject = ""
 	taskPath = ""
 	taskDefPath = ""
+	taskStatusArchived = false
 	taskAgentPreset = ""
 	taskAgentCmd = ""
 	taskAgentOutput = ""

@@ -16,6 +16,8 @@ type RefreshResult struct {
 	Manifests        map[string]*Manifest
 	NeedsSave        bool
 	RuntimeLock      *RuntimeLockStatus
+	ArchivedCount    int
+	ShowArchived     bool
 }
 
 // Refresh discovers Task sets, auto-registers them, and builds table rows.
@@ -25,6 +27,15 @@ func Refresh(defPath string) (*RefreshResult, error) {
 
 // RefreshWith performs refresh using injected dependencies and state path.
 func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
+	return refreshWith(d, defPath, statePath, false)
+}
+
+// RefreshArchivedWith performs refresh and returns only Archived Task sets.
+func RefreshArchivedWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
+	return refreshWith(d, defPath, statePath, true)
+}
+
+func refreshWith(d *Deps, defPath, statePath string, showArchived bool) (*RefreshResult, error) {
 	canon, err := CanonicalDefinitionPathWith(d, defPath)
 	if err != nil {
 		return nil, err
@@ -89,19 +100,38 @@ func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
 		NewRegistrations: newRegs,
 		Manifests:        manifests,
 		NeedsSave:        needsSave,
+		ArchivedCount:    archivedCount(state, canon),
+		ShowArchived:     showArchived,
 	}
-	result.Rows = buildRows(state, canon, disc, manifests)
+	result.Rows = buildRows(state, canon, disc, manifests, showArchived)
 	MarkAutoPick(result.Rows)
 	return result, nil
 }
 
-func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests map[string]*Manifest) []Row {
+func archivedCount(state *GlobalState, defPath string) int {
+	entry := state.Tasks[defPath]
+	if entry == nil {
+		return 0
+	}
+	count := 0
+	for _, reg := range entry.TaskSets {
+		if reg.Archived {
+			count++
+		}
+	}
+	return count
+}
+
+func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests map[string]*Manifest, showArchived bool) []Row {
 	var missing, done, active []Row
 
 	entry := state.Tasks[defPath]
 
 	if entry != nil {
 		for i, reg := range entry.TaskSets {
+			if reg.Archived != showArchived {
+				continue
+			}
 			if _, ok := disc.Manifests[reg.ID]; !ok {
 				missing = append(missing, Row{
 					ID:           reg.ID,
@@ -181,12 +211,26 @@ func render(out *output, result *RefreshResult) {
 
 	if len(result.Rows) == 0 {
 		fmt.Fprintf(out, "No task sets at %s\n", result.DefinitionPath)
+		renderArchivedFooter(out, result)
 		return
 	}
 
 	fmt.Fprintln(out, formatTableWithOutput(out, result.Rows))
 	renderRuntimeLock(out, result.RuntimeLock)
 	renderDiagnostics(out, result.Rows)
+	renderArchivedFooter(out, result)
+}
+
+func renderArchivedFooter(out *output, result *RefreshResult) {
+	if result == nil || result.ShowArchived || result.ArchivedCount == 0 {
+		return
+	}
+	fmt.Fprintln(out)
+	label := "Archived Task set"
+	if result.ArchivedCount != 1 {
+		label = "Archived Task sets"
+	}
+	out.line(ansiDim, "%d %s hidden. Run `pop tasks status --archived` to view.", result.ArchivedCount, label)
 }
 
 func formatTable(rows []Row) string {

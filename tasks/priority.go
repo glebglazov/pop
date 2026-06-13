@@ -93,17 +93,32 @@ func findRegisteredTaskSet(entry *TaskEntry, taskSetID string) (int, int, error)
 		}
 	}
 
+	ids := registeredIDsFromEntry(entry)
+	return -1, 0, unknownTaskSetError(taskSetID, ids)
+}
+
+func registeredIdentifierList(state *GlobalState, defPath string) []string {
+	if state == nil {
+		return nil
+	}
+	return registeredIDsFromEntry(state.Tasks[defPath])
+}
+
+func registeredIDsFromEntry(entry *TaskEntry) []string {
+	if entry == nil {
+		return nil
+	}
 	ids := make([]string, len(entry.TaskSets))
 	for i, set := range entry.TaskSets {
 		ids[i] = set.ID
 	}
-	return -1, 0, unknownTaskSetError(taskSetID, ids)
+	sort.Strings(ids)
+	return ids
 }
 
 func unknownTaskSetError(id string, candidates []string) error {
 	if len(candidates) == 0 {
 		return fmt.Errorf("unknown task set %q (no registered task sets)", id)
 	}
-	sort.Strings(candidates)
 	return fmt.Errorf("unknown task set %q; valid: %s", id, strings.Join(candidates, ", "))
 }

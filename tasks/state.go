@@ -24,6 +24,7 @@ func StatePathFor(defPath string) string {
 type RegisteredTaskSet struct {
 	ID       string `json:"id"`
 	Priority int    `json:"priority"`
+	Archived bool   `json:"archived"`
 }
 
 // TaskEntry holds registered Task sets for one definition path.
