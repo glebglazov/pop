@@ -43,6 +43,9 @@ func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	if err != nil {
 		return nil, err
 	}
+	if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, resolvedTaskSetID); err != nil {
+		return nil, err
+	}
 
 	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {

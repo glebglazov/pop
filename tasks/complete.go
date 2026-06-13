@@ -42,6 +42,9 @@ func CompleteTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*confi
 	if err != nil {
 		return nil, err
 	}
+	if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, taskSetID); err != nil {
+		return nil, err
+	}
 	if taskSetID == "" || taskID == "" {
 		return nil, exitErr(ExitSetup, "complete requires a task path")
 	}

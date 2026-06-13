@@ -106,6 +106,62 @@ func TestCompleteActionableTaskTargetsOmitsDoneSetsAndTasks(t *testing.T) {
 	}
 }
 
+func TestCompletionsFilterArchivedTaskSets(t *testing.T) {
+	root := t.TempDir()
+	tasksDir := setupCompletionRepo(t, root)
+	writeCompletionFixture(t, tasksDir, "active", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	writeCompletionFixture(t, tasksDir, "archived", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	if _, err := RefreshWith(DefaultDeps(), tasksDir, StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ArchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{}, "archived"); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := CompleteTaskSetIDs(CompletionInput{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ids, ",") != "active" {
+		t.Fatalf("active ids = %#v", ids)
+	}
+
+	targets, err := CompleteTaskTargets(CompletionInput{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(targets, ",") != "active/" {
+		t.Fatalf("snapshot targets = %#v", targets)
+	}
+
+	actionable, err := CompleteActionableTaskTargets(CompletionInput{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(actionable, ",") != "active/" {
+		t.Fatalf("actionable targets = %#v", actionable)
+	}
+
+	archived, err := CompleteArchivedTaskSetIDs(CompletionInput{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(archived, ",") != "archived" {
+		t.Fatalf("archived ids = %#v", archived)
+	}
+}
+
 func TestCompleteProjectNamesUsesPickerVisibleNames(t *testing.T) {
 	root := t.TempDir()
 	projectDir := filepath.Join(root, "svc")

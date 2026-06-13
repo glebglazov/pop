@@ -134,6 +134,9 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	if err != nil {
 		return nil, err
 	}
+	if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, taskSetID); err != nil {
+		return nil, err
+	}
 
 	sel, err := SelectTask(refresh, taskSetID, taskID)
 	if err != nil {

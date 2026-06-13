@@ -29,6 +29,8 @@ func registerTaskShellCompletions() {
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent-output", completeTaskAgentOutputs)
 
 	taskStatusCmd.ValidArgsFunction = completeTaskStatusArgs
+	taskArchiveCmd.ValidArgsFunction = completeTaskArchiveArgs
+	taskUnarchiveCmd.ValidArgsFunction = completeTaskUnarchiveArgs
 	taskSetPriorityCmd.ValidArgsFunction = completeTaskSetPriorityArgs
 	taskImplementCmd.ValidArgsFunction = completeTaskImplementArgs
 	taskResetTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
@@ -43,7 +45,13 @@ func completeTaskShowPathArgs(cmd *cobra.Command, args []string, toComplete stri
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	ids, err := tasks.ListStoredTaskSetIDs(taskCompletionDeps(), "")
+	ids, err := tasks.CompleteTaskSetIDsWith(
+		taskCompletionDeps(),
+		taskCompletionProjectDeps(),
+		taskCompletionConfigLoad,
+		completionInputFromCmd(cmd),
+		toComplete,
+	)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -54,7 +62,13 @@ func completeTaskExportArgs(cmd *cobra.Command, args []string, toComplete string
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	ids, err := tasks.ListStoredTaskSetIDs(taskCompletionDeps(), "")
+	ids, err := tasks.CompleteTaskSetIDsWith(
+		taskCompletionDeps(),
+		taskCompletionProjectDeps(),
+		taskCompletionConfigLoad,
+		completionInputFromCmd(cmd),
+		toComplete,
+	)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -143,6 +157,30 @@ func completeTaskStatusArgs(cmd *cobra.Command, args []string, toComplete string
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	return completeTaskTaskSets(cmd, args, toComplete)
+}
+
+func completeTaskArchiveArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeTaskTaskSets(cmd, args, toComplete)
+}
+
+func completeTaskUnarchiveArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	ids, err := tasks.CompleteArchivedTaskSetIDsWith(
+		taskCompletionDeps(),
+		taskCompletionProjectDeps(),
+		taskCompletionConfigLoad,
+		completionInputFromCmd(cmd),
+		toComplete,
+	)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
 func completeTaskSetPriorityArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

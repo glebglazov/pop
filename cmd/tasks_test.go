@@ -200,6 +200,115 @@ func TestTaskArchiveCommandsAndArchivedStatus(t *testing.T) {
 	}
 }
 
+func TestTaskActionVerbsRejectArchivedTargets(t *testing.T) {
+	root := setupRunTaskCmdFixture(t)
+	agent := writeRunTaskFakeAgent(t, root)
+
+	resetTaskFlags()
+	taskAgentCmd = agent
+	t.Cleanup(resetTaskFlags)
+
+	tasksDir := cmdTasksDir(t, root)
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		run  func() error
+	}{
+		{"implement set", func() error {
+			return runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false)
+		}},
+		{"implement task", func() error {
+			return runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md", false)
+		}},
+		{"open task", func() error {
+			return runTaskResetTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, "demo/01-a.md")
+		}},
+		{"open set", func() error {
+			return runTaskOpenTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), "demo")
+		}},
+		{"complete task", func() error {
+			return runTaskCompleteTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, "demo/01-a.md")
+		}},
+		{"complete set", func() error {
+			return runTaskCompleteTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), "demo")
+		}},
+		{"skip task", func() error {
+			return runTaskSkipTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, "demo/01-a.md")
+		}},
+		{"skip set", func() error {
+			return runTaskSkipTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), "demo")
+		}},
+		{"set-priority", func() error {
+			return runTaskSetPriorityWith(tasks.DefaultDeps(), &bytes.Buffer{}, "demo", "4")
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			var ee *tasks.ExitError
+			if !errors.As(err, &ee) || ee.Code == 0 {
+				t.Fatalf("err = %v", err)
+			}
+			if !strings.Contains(err.Error(), "pop tasks unarchive demo") || !strings.Contains(err.Error(), "first") {
+				t.Fatalf("missing unarchive-first guidance: %v", err)
+			}
+		})
+	}
+}
+
+func TestTaskSnapshotVerbsAcceptArchivedTargets(t *testing.T) {
+	root := setupRunTaskCmdFixture(t)
+
+	resetTaskFlags()
+	taskExportOutput = filepath.Join(root, "archived-demo.tar.gz")
+	t.Cleanup(resetTaskFlags)
+
+	tasksDir := cmdTasksDir(t, root)
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("timings", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := runTaskTimingsWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {
+			t.Fatalf("timings: %v", err)
+		}
+		if !strings.Contains(buf.String(), "demo") {
+			t.Fatalf("timings output missing task set:\n%s", buf.String())
+		}
+	})
+
+	t.Run("show-path", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := runTaskShowPathWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {
+			t.Fatalf("show-path: %v", err)
+		}
+		if !strings.Contains(buf.String(), filepath.Join("tasks", "demo")) {
+			t.Fatalf("show-path output = %q", buf.String())
+		}
+	})
+
+	t.Run("export", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := runTaskExportWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {
+			t.Fatalf("export: %v", err)
+		}
+		if _, err := os.Stat(strings.TrimSpace(buf.String())); err != nil {
+			t.Fatalf("exported archive missing: %v", err)
+		}
+	})
+}
+
 func TestTaskStatusUsesDefinitionOverride(t *testing.T) {
 	root := t.TempDir()
 	defDir := filepath.Join(root, "planning")

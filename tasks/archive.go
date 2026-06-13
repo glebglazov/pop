@@ -16,6 +16,49 @@ type ArchiveResult struct {
 	Archived  bool
 }
 
+// ArchivedTaskSetError reports that a deliberately archived Task set was
+// explicitly targeted by a verb that schedules or mutates tasks.
+type ArchivedTaskSetError struct {
+	TaskSetID string
+}
+
+func (e ArchivedTaskSetError) Error() string {
+	return fmt.Sprintf("task set %q is archived; run `pop tasks unarchive %s` first", e.TaskSetID, e.TaskSetID)
+}
+
+// RejectArchivedTaskSet returns a setup error when taskSetID is archived in
+// the repository-local Task state. Unknown/unregistered sets are left to the
+// caller's normal target validation.
+func RejectArchivedTaskSet(d *Deps, statePath, defPath, taskSetID string) error {
+	if taskSetID == "" {
+		return nil
+	}
+	state, err := LoadGlobalStateWith(d, statePath)
+	if err != nil {
+		return exitErr(ExitSetup, "%v", err)
+	}
+	if taskSetArchived(state, defPath, taskSetID) {
+		return exitErr(ExitSetup, "%v", ArchivedTaskSetError{TaskSetID: taskSetID})
+	}
+	return nil
+}
+
+func taskSetArchived(state *GlobalState, defPath, taskSetID string) bool {
+	if state == nil {
+		return false
+	}
+	entry := state.Tasks[defPath]
+	if entry == nil {
+		return false
+	}
+	for _, set := range entry.TaskSets {
+		if set.ID == taskSetID {
+			return set.Archived
+		}
+	}
+	return false
+}
+
 // ArchiveTaskSet marks one registered Task set as archived.
 func ArchiveTaskSet(input ResolveInput, taskSetID string) (*ArchiveResult, error) {
 	return ArchiveTaskSetWith(defaultDeps, projectDefaultDeps(), config.Load, input, taskSetID)

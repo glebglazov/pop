@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/tasks"
 	"github.com/spf13/cobra"
 )
 
@@ -52,7 +53,8 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	tasksDir := cmdTasksDir(t, projectDir)
 	writeCompletionThoughts(t, tasksDir, "svc", []string{"01-a", "02-b"})
-	writeCompletionThoughtsStatuses(t, tasksDir, "archived", [][2]string{{"01-a", "done"}})
+	writeCompletionThoughtsStatuses(t, tasksDir, "done", [][2]string{{"01-a", "done"}})
+	writeCompletionThoughtsStatuses(t, tasksDir, "archived", [][2]string{{"01-a", "open"}})
 	writeCompletionThoughtsStatuses(t, tasksDir, "mix", [][2]string{{"01-open", "open"}, {"02-done", "done"}})
 
 	cfgPath := filepath.Join(root, "config.toml")
@@ -71,6 +73,13 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{}, "archived"); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Run("project", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "status", "--project")
@@ -110,6 +119,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 	t.Run("show-path stays set-only without slash drill", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "show-path")
 		assertShellCompContains(t, out, "svc")
+		assertShellCompOmitsExact(t, out, "archived")
 		assertShellCompOmitsExact(t, out, "svc/")
 		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
 	})
@@ -117,6 +127,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 	t.Run("export stays set-only without slash drill", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "export")
 		assertShellCompContains(t, out, "svc")
+		assertShellCompOmitsExact(t, out, "archived")
 		assertShellCompOmitsExact(t, out, "svc/")
 		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
 	})
@@ -155,7 +166,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		for _, verb := range []string{"implement", "open", "complete", "skip"} {
 			out := shellCompNoDesc(t, "tasks", verb)
 			assertShellCompContains(t, out, "mix/")
-			assertShellCompOmitsExact(t, out, "archived/")
+			assertShellCompOmitsExact(t, out, "done/")
 		}
 	})
 
@@ -169,9 +180,27 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 
 	t.Run("timings keeps Done sets and done tasks", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "timings")
-		assertShellCompContains(t, out, "archived/")
+		assertShellCompContains(t, out, "done/")
 		out = shellCompNoDescCompleting(t, "tasks", "timings", "mix/")
 		assertShellCompContains(t, out, "mix/01-open.md", "mix/02-done.md")
+	})
+
+	t.Run("all task target completions omit archived sets", func(t *testing.T) {
+		for _, verb := range []string{"implement", "open", "complete", "skip", "timings"} {
+			out := shellCompNoDesc(t, "tasks", verb)
+			assertShellCompOmitsExact(t, out, "archived/")
+		}
+		for _, verb := range []string{"status", "archive", "set-priority", "show-path", "export"} {
+			out := shellCompNoDesc(t, "tasks", verb)
+			assertShellCompOmitsExact(t, out, "archived")
+		}
+	})
+
+	t.Run("unarchive offers only archived IDs", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "unarchive")
+		assertShellCompContains(t, out, "archived")
+		assertShellCompOmitsExact(t, out, "svc")
+		assertShellCompOmitsExact(t, out, "done")
 	})
 
 	t.Run("agent presets", func(t *testing.T) {

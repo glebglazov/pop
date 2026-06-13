@@ -68,6 +68,9 @@ func resolveTaskSetForBatch(d *Deps, pd *project.Deps, loadConfig func(string) (
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
+	if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, taskSetID); err != nil {
+		return nil, nil, "", nil, err
+	}
 	if taskSetID == "" {
 		return nil, nil, "", nil, exitErr(ExitSetup, "%s requires a task set target", verb)
 	}

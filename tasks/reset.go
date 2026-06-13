@@ -42,6 +42,9 @@ func ResetTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 	if err != nil {
 		return nil, err
 	}
+	if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, taskSetID); err != nil {
+		return nil, err
+	}
 	if taskSetID == "" || taskID == "" {
 		return nil, exitErr(ExitSetup, "open requires a task path")
 	}

@@ -92,6 +92,11 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	if err != nil {
 		return nil, err
 	}
+	if taskSetOverride != "" {
+		if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, taskSetOverride); err != nil {
+			return nil, err
+		}
+	}
 
 	taskSetID, hitlFallback, err := SelectTaskSet(refresh, taskSetOverride)
 	if err != nil {

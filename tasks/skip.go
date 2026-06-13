@@ -42,6 +42,9 @@ func SkipTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	if err != nil {
 		return nil, err
 	}
+	if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, taskSetID); err != nil {
+		return nil, err
+	}
 	if taskSetID == "" || taskID == "" {
 		return nil, exitErr(ExitSetup, "skip requires a task path")
 	}

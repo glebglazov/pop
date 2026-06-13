@@ -8,6 +8,13 @@ import (
 	"github.com/glebglazov/pop/project"
 )
 
+type completionArchiveMode int
+
+const (
+	completionActiveOnly completionArchiveMode = iota
+	completionArchivedOnly
+)
+
 // CompletionInput selects context for read-only shell completion candidates.
 type CompletionInput struct {
 	ProjectName        string
@@ -51,6 +58,20 @@ func CompleteTaskSetIDs(input CompletionInput, toComplete string) ([]string, err
 
 // CompleteTaskSetIDsWith returns discovered Task-set identifiers using injected dependencies.
 func CompleteTaskSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
+	return completeTaskSetIDsWithArchiveMode(d, pd, loadConfig, input, toComplete, completionActiveOnly)
+}
+
+// CompleteArchivedTaskSetIDs returns archived Task-set identifiers for shell completion.
+func CompleteArchivedTaskSetIDs(input CompletionInput, toComplete string) ([]string, error) {
+	return CompleteArchivedTaskSetIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)
+}
+
+// CompleteArchivedTaskSetIDsWith returns archived Task-set identifiers using injected dependencies.
+func CompleteArchivedTaskSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
+	return completeTaskSetIDsWithArchiveMode(d, pd, loadConfig, input, toComplete, completionArchivedOnly)
+}
+
+func completeTaskSetIDsWithArchiveMode(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string, mode completionArchiveMode) ([]string, error) {
 	defPath, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
 	if err != nil || defPath == "" {
 		return nil, err
@@ -59,8 +80,20 @@ func CompleteTaskSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (
 		return nil, nil
 	}
 
+	archived, err := completionArchivedIDs(d, defPath)
+	if err != nil {
+		return nil, err
+	}
+
 	ids := make([]string, 0, len(refresh.Manifests))
 	for id := range refresh.Manifests {
+		isArchived := archived[id]
+		if mode == completionActiveOnly && isArchived {
+			continue
+		}
+		if mode == completionArchivedOnly && !isArchived {
+			continue
+		}
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -80,6 +113,9 @@ func CompleteTaskTargetsWith(d *Deps, pd *project.Deps, loadConfig func(string) 
 	if err != nil || refresh == nil {
 		return nil, err
 	}
+	if err := omitArchivedCompletionTargets(d, refresh); err != nil {
+		return nil, err
+	}
 	return taskTargetIdentifierCompletions(refresh, toComplete), nil
 }
 
@@ -94,6 +130,9 @@ func CompleteActionableTaskTargets(input CompletionInput, toComplete string) ([]
 func CompleteActionableTaskTargetsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, toComplete string) ([]string, error) {
 	_, refresh, err := completionRefreshContext(d, pd, loadConfig, input)
 	if err != nil || refresh == nil {
+		return nil, err
+	}
+	if err := omitArchivedCompletionTargets(d, refresh); err != nil {
 		return nil, err
 	}
 	return actionableTaskTargetCompletions(refresh, toComplete), nil
@@ -113,11 +152,40 @@ func completionRefreshContext(d *Deps, pd *project.Deps, loadConfig func(string)
 		return defPath, nil, nil
 	}
 
-	refresh := &RefreshResult{Manifests: make(map[string]*Manifest, len(disc.Manifests))}
+	refresh := &RefreshResult{DefinitionPath: defPath, Manifests: make(map[string]*Manifest, len(disc.Manifests))}
 	for stem, manifestPath := range disc.Manifests {
 		refresh.Manifests[stem] = LoadManifest(d, stem, manifestPath)
 	}
 	return defPath, refresh, nil
+}
+
+func completionArchivedIDs(d *Deps, defPath string) (map[string]bool, error) {
+	state, err := LoadGlobalStateWith(d, StatePathFor(defPath))
+	if err != nil {
+		return nil, err
+	}
+	archived := make(map[string]bool)
+	entry := state.Tasks[defPath]
+	if entry == nil {
+		return archived, nil
+	}
+	for _, set := range entry.TaskSets {
+		if set.Archived {
+			archived[set.ID] = true
+		}
+	}
+	return archived, nil
+}
+
+func omitArchivedCompletionTargets(d *Deps, refresh *RefreshResult) error {
+	archived, err := completionArchivedIDs(d, refresh.DefinitionPath)
+	if err != nil {
+		return err
+	}
+	for id := range archived {
+		delete(refresh.Manifests, id)
+	}
+	return nil
 }
 
 func resolveCompletionDefinitionPath(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput) (string, error) {
