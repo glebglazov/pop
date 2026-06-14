@@ -184,6 +184,12 @@ var agentAdapters = map[string]AgentAdapter{
 	),
 }
 
+var claudeEffortModels = map[string][]string{
+	"heavy":    {"opus"},
+	"standard": {"sonnet"},
+	"light":    {"haiku"},
+}
+
 type presetAgentAdapter struct {
 	preset         string
 	headlessPrefix []string
@@ -460,6 +466,73 @@ func resolveTaskAgentSpec(cliPreset, defaultPreset string, agentExplicit bool, a
 	return taskAgent
 }
 
+func resolveTaskAgentSpecForEffort(agentSpec, effort string, effortExplicit bool) string {
+	return resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort, effortExplicit, nil)
+}
+
+func resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort string, effortExplicit bool, cfg *config.Config) string {
+	if !effortExplicit {
+		return agentSpec
+	}
+	if effort == "" {
+		effort = DefaultTaskEffort
+	}
+	name, extraArgs, err := parseAgentPresetSpec(agentSpec)
+	if err != nil {
+		return agentSpec
+	}
+	if name == "" {
+		name = DefaultAgentPreset
+	}
+	if agentArgsContainModel(extraArgs) {
+		return agentSpec
+	}
+	models := effortModelsForAgent(cfg, name, effort)
+	if len(models) == 0 {
+		return agentSpec
+	}
+	args := append([]string{name}, extraArgs...)
+	args = append(args, "--model", models[0])
+	for i, arg := range args {
+		args[i] = shellQuote(arg)
+	}
+	return strings.Join(args, " ")
+}
+
+func effortModelsForAgent(cfg *config.Config, agent, effort string) []string {
+	if cfg != nil && cfg.Effort != nil {
+		if ladder, ok := cfg.Effort[agent]; ok {
+			return effortModelsForTier(ladder, effort)
+		}
+	}
+	if agent == "claude" {
+		return claudeEffortModels[effort]
+	}
+	return nil
+}
+
+func effortModelsForTier(ladder config.EffortConfig, effort string) []string {
+	switch effort {
+	case "heavy":
+		return ladder.Heavy
+	case "standard":
+		return ladder.Standard
+	case "light":
+		return ladder.Light
+	default:
+		return nil
+	}
+}
+
+func agentArgsContainModel(args []string) bool {
+	for _, arg := range args {
+		if arg == "--model" || strings.HasPrefix(arg, "--model=") {
+			return true
+		}
+	}
+	return false
+}
+
 // validateManifestAgentSpec checks a Manifest `agent` key names a recognized
 // Agent preset (ADR-0018). Opaque agent commands are not permitted: anything
 // whose first token is not a known preset is a contract fault, surfaced as a
@@ -587,6 +660,20 @@ func validateAgentOutputMode(mode AgentOutputMode) error {
 	}
 }
 
+func loadConfigIfPresent(loadConfig func(string) (*config.Config, error)) (*config.Config, error) {
+	if loadConfig == nil {
+		return nil, nil
+	}
+	cfg, err := loadConfig(config.DefaultConfigPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	return cfg, nil
+}
+
 func resolveAgentOutputMode(loadConfig func(string) (*config.Config, error), preset string, override AgentOutputMode) (AgentOutputMode, error) {
 	if override != "" {
 		if err := validateAgentOutputMode(override); err != nil {
@@ -597,12 +684,12 @@ func resolveAgentOutputMode(loadConfig func(string) (*config.Config, error), pre
 	if loadConfig == nil {
 		return AgentOutputAuto, nil
 	}
-	cfg, err := loadConfig(config.DefaultConfigPath())
+	cfg, err := loadConfigIfPresent(loadConfig)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return AgentOutputAuto, nil
-		}
-		return "", fmt.Errorf("load config: %w", err)
+		return "", err
+	}
+	if cfg == nil {
+		return AgentOutputAuto, nil
 	}
 	name, _, err := parseAgentPresetSpec(preset)
 	if err != nil {

@@ -1221,6 +1221,29 @@ func TestRunTaskSetAttemptStartPrintsRequestedAgent(t *testing.T) {
 	}
 }
 
+func TestRunTaskSetAttemptStartPrintsEffortResolvedRequestedAgent(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Effort: "heavy", EffortExplicit: true},
+	})
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(buf.String(), "   Attempt 1/1 · claude --model opus") {
+		t.Fatalf("attempt start missing effort-resolved requested agent:\n%s", buf.String())
+	}
+	if len(runner.argLists) != 1 || runner.argLists[0][0] != "--model" || runner.argLists[0][1] != "opus" {
+		t.Fatalf("agent args = %v, want leading --model opus", runner.argLists)
+	}
+}
+
 func TestRunTaskSetInteractivePrintsRefreshedTable(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},

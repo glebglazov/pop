@@ -200,6 +200,29 @@ func TestRenderDiagnostics(t *testing.T) {
 	}
 }
 
+func TestUnknownEffortMarksTaskSetMalformed(t *testing.T) {
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "bad-effort")
+	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] a\n")
+	writeManifest(t, taskDir, []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Effort: "extreme"},
+	})
+
+	result, err := RefreshWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) != 1 || result.Rows[0].Status != StatusMalformed {
+		t.Fatalf("rows = %#v", result.Rows)
+	}
+	var buf bytes.Buffer
+	Render(&buf, result)
+	out := buf.String()
+	if !strings.Contains(out, `invalid effort "extreme"`) {
+		t.Fatalf("diagnostic missing offending effort:\n%s", out)
+	}
+}
+
 func TestFailedRowResetHints(t *testing.T) {
 	root := t.TempDir()
 	setupManifest(t, root, "failed-prd", []Task{

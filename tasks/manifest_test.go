@@ -69,6 +69,21 @@ func TestManifestValidation(t *testing.T) {
 			valid: true,
 		},
 		{
+			name: "valid effort key",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"effort":"heavy"}
+			]}`,
+			valid: true,
+		},
+		{
+			name: "unknown effort value",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"effort":"extreme"}
+			]}`,
+			valid:    false,
+			contains: `invalid effort "extreme"`,
+		},
+		{
 			name: "unknown agent preset",
 			manifest: `{"tasks":[
 				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"gemini --model pro"}
@@ -153,6 +168,33 @@ func TestManifestParsesAgentKey(t *testing.T) {
 	}
 	if m.Tasks[1].Agent != "" {
 		t.Fatalf("agent unexpectedly set: %q", m.Tasks[1].Agent)
+	}
+}
+
+func TestManifestParsesEffortDefaultAndExplicit(t *testing.T) {
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "thoughts/issues/demo")
+	writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
+	writeTaskMD(t, taskDir, "02-two.md", "## Acceptance criteria\n\n- [ ] two\n")
+
+	path := filepath.Join(taskDir, "index.json")
+	manifest := `{"tasks":[
+		{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"effort":"light"},
+		{"id":"02-two","file":"02-two.md","title":"Two","type":"AFK","status":"open","blocked_by":[]}
+	]}`
+	if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := LoadManifest(DefaultDeps(), "demo", path)
+	if !m.Valid {
+		t.Fatalf("unexpected invalid: %v", m.Errors)
+	}
+	if m.Tasks[0].Effort != "light" || !m.Tasks[0].EffortExplicit {
+		t.Fatalf("first effort = %q explicit=%v", m.Tasks[0].Effort, m.Tasks[0].EffortExplicit)
+	}
+	if m.Tasks[1].Effort != DefaultTaskEffort || m.Tasks[1].EffortExplicit {
+		t.Fatalf("second effort = %q explicit=%v", m.Tasks[1].Effort, m.Tasks[1].EffortExplicit)
 	}
 }
 

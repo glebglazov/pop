@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 )
 
@@ -874,6 +875,36 @@ func TestRunTaskAgentKeyRunsDeclaredAgent(t *testing.T) {
 	}
 }
 
+func TestRunTaskConfiguredEffortResolvesOpencodeModel(t *testing.T) {
+	setEnv := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Agent: "opencode", Effort: "heavy", EffortExplicit: true},
+	})
+	env := setEnv.execFixture()
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+	loadConfig := func(string) (*config.Config, error) {
+		return &config.Config{Effort: map[string]config.EffortConfig{
+			"opencode": {Heavy: []string{"opencode/claude-opus-4-8", "opencode/kimi-k2.6"}},
+		}}, nil
+	}
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, err := RunTaskWith(d, nil, loadConfig, opts)
+	assertExitCode(t, err, ExitOperational)
+	if len(runner.names) != 1 || runner.names[0] != "opencode" {
+		t.Fatalf("agent binary = %v, want opencode", runner.names)
+	}
+	args := runner.argLists[0]
+	if len(args) < 2 || args[0] != "--model" || args[1] != "opencode/claude-opus-4-8" {
+		t.Fatalf("agent args = %v, want leading configured model", args)
+	}
+}
+
 func TestRunTaskBareDefaultedAgentDoesNotOverrideTaskKey(t *testing.T) {
 	env := setupTaskAgentKeyFixture(t, "opencode")
 	runner := &captureAgentRunner{}
@@ -927,6 +958,29 @@ func TestRunTaskAgentCmdOverridesTaskKey(t *testing.T) {
 	}
 }
 
+func TestRunTaskAgentCmdIgnoresEffortModelResolution(t *testing.T) {
+	setEnv := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Effort: "heavy", EffortExplicit: true},
+	})
+	env := setEnv.execFixture()
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "./my-agent.sh")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.names) != 1 || runner.names[0] != "sh" {
+		t.Fatalf("agent binary = %v, want sh", runner.names)
+	}
+	if strings.Contains(strings.Join(runner.argLists[0], " "), "--model") {
+		t.Fatalf("custom agent invocation unexpectedly contains model: %v", runner.argLists[0])
+	}
+}
+
 func TestRunTaskNoAgentKeyFallsThroughToCLIAgent(t *testing.T) {
 	env := setupTaskAgentKeyFixture(t, "")
 	runner := &captureAgentRunner{}
@@ -941,6 +995,26 @@ func TestRunTaskNoAgentKeyFallsThroughToCLIAgent(t *testing.T) {
 	_, _ = RunTaskWith(d, nil, nil, opts)
 	if len(runner.names) != 1 || runner.names[0] != "claude" {
 		t.Fatalf("agent binary = %v, want claude", runner.names)
+	}
+}
+
+func TestRunTaskNoEffortKeyKeepsLegacyClaudeInvocation(t *testing.T) {
+	env := setupTaskAgentKeyFixture(t, "")
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.argLists) != 1 {
+		t.Fatalf("agent invocations = %d", len(runner.argLists))
+	}
+	if strings.Contains(strings.Join(runner.argLists[0], " "), "--model") {
+		t.Fatalf("legacy invocation unexpectedly contains model: %v", runner.argLists[0])
 	}
 }
 

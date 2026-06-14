@@ -137,6 +137,14 @@ type TaskGitConfig struct {
 	CommitConfigOverrides []string `toml:"commit_config_overrides"`
 }
 
+// EffortConfig holds the model ladder for one agent preset. Each tier is an
+// ordered, user-owned fallback list; current resolution uses the head entry.
+type EffortConfig struct {
+	Heavy    []string `toml:"heavy"`
+	Standard []string `toml:"standard"`
+	Light    []string `toml:"light"`
+}
+
 // ResolveCommitConfigOverrides validates the [workload.git]
 // commit_config_overrides entries and returns them as `key=value` strings ready
 // to be prepended as `-c key=value` pairs to Pop's commit invocations. Each
@@ -292,9 +300,10 @@ type Config struct {
 	Dashboard      *DashboardConfig      `toml:"dashboard"`
 	// The TOML key stays "workload" for backward compatibility with existing
 	// user config files; the rename is internal only.
-	Task    *TaskConfig    `toml:"workload"`
-	Queue   *QueueConfig   `toml:"queue"`
-	Updates *UpdatesConfig `toml:"updates"`
+	Task    *TaskConfig             `toml:"workload"`
+	Effort  map[string]EffortConfig `toml:"effort"`
+	Queue   *QueueConfig            `toml:"queue"`
+	Updates *UpdatesConfig          `toml:"updates"`
 
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
 }
@@ -571,7 +580,11 @@ func Load(path string) (*Config, error) {
 // LoadWith reads the config file using provided dependencies for ~ expansion
 func LoadWith(d *Deps, path string) (*Config, error) {
 	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	md, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateEffortConfigMetadata(path, md); err != nil {
 		return nil, err
 	}
 
@@ -609,11 +622,15 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		}
 
 		var included Config
-		if _, err := toml.DecodeFile(expanded, &included); err != nil {
+		includedMD, err := toml.DecodeFile(expanded, &included)
+		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("include file %q not found, skipping", include))
 				continue
 			}
+			return nil, fmt.Errorf("loading include %q: %w", include, err)
+		}
+		if err := validateEffortConfigMetadata(expanded, includedMD); err != nil {
 			return nil, fmt.Errorf("loading include %q: %w", include, err)
 		}
 
@@ -621,6 +638,15 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func validateEffortConfigMetadata(path string, md toml.MetaData) error {
+	for _, key := range md.Undecoded() {
+		if len(key) >= 3 && key[0] == "effort" {
+			return fmt.Errorf("%s: [effort.%s] unknown tier %q; valid tiers: heavy, standard, light", path, key[1], key[2])
+		}
+	}
+	return nil
 }
 
 // ExpandProjects resolves all project paths from the config

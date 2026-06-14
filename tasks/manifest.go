@@ -12,9 +12,12 @@ import (
 var (
 	allowedTaskTypes    = map[string]bool{"AFK": true, "HITL": true}
 	allowedTaskStatuses = map[string]bool{"open": true, "done": true, "failed": true, "skipped": true}
+	allowedTaskEfforts  = map[string]bool{"light": true, "standard": true, "heavy": true}
 	acHeaderPattern     = regexp.MustCompile(`(?i)^##\s+Acceptance criteria\s*$`)
 	checkboxPattern     = regexp.MustCompile(`^-\s+\[[ xX]\]`)
 )
+
+const DefaultTaskEffort = "standard"
 
 // Task represents one entry in an task manifest.
 type Task struct {
@@ -25,9 +28,70 @@ type Task struct {
 	Status      string   `json:"status"`
 	BlockedBy   []string `json:"blocked_by"`
 	FailedAfter *int     `json:"failed_after,omitempty"`
+	// Effort selects the model-strength tier for this task. Missing manifests
+	// resolve to DefaultTaskEffort; EffortExplicit records whether the key was
+	// present so legacy manifests keep their previous invocation shape.
+	Effort         string `json:"-"`
+	EffortExplicit bool   `json:"-"`
 	// Agent optionally pins this task to an Agent-preset-shaped value, e.g.
 	// "claude --model opus4.8" (ADR-0018). Only recognized presets are allowed.
 	Agent string `json:"agent,omitempty"`
+}
+
+type taskJSON struct {
+	ID          string   `json:"id"`
+	File        string   `json:"file"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type"`
+	Status      string   `json:"status"`
+	BlockedBy   []string `json:"blocked_by"`
+	FailedAfter *int     `json:"failed_after,omitempty"`
+	Effort      *string  `json:"effort,omitempty"`
+	Agent       string   `json:"agent,omitempty"`
+}
+
+// UnmarshalJSON preserves the difference between an absent effort key and an
+// explicit effort: "standard" while presenting both as standard to callers.
+func (t *Task) UnmarshalJSON(data []byte) error {
+	var raw taskJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	t.ID = raw.ID
+	t.File = raw.File
+	t.Title = raw.Title
+	t.Type = raw.Type
+	t.Status = raw.Status
+	t.BlockedBy = raw.BlockedBy
+	t.FailedAfter = raw.FailedAfter
+	t.Agent = raw.Agent
+	t.Effort = DefaultTaskEffort
+	t.EffortExplicit = false
+	if raw.Effort != nil {
+		t.Effort = *raw.Effort
+		t.EffortExplicit = true
+	}
+	return nil
+}
+
+// MarshalJSON omits effort unless it was explicitly present or set by code,
+// avoiding churn when older manifests are rewritten for unrelated state.
+func (t Task) MarshalJSON() ([]byte, error) {
+	raw := taskJSON{
+		ID:          t.ID,
+		File:        t.File,
+		Title:       t.Title,
+		Type:        t.Type,
+		Status:      t.Status,
+		BlockedBy:   t.BlockedBy,
+		FailedAfter: t.FailedAfter,
+		Agent:       t.Agent,
+	}
+	if t.EffortExplicit || (t.Effort != "" && t.Effort != DefaultTaskEffort) {
+		effort := t.Effort
+		raw.Effort = &effort
+	}
+	return json.Marshal(raw)
 }
 
 // Manifest is a parsed and validated task manifest.
@@ -135,6 +199,14 @@ func validateManifest(d *Deps, m *Manifest) {
 
 		if !allowedTaskTypes[task.Type] {
 			m.Errors = append(m.Errors, fmt.Sprintf("task %q: invalid type %q", task.ID, task.Type))
+		}
+
+		if task.Effort == "" {
+			m.Tasks[i].Effort = DefaultTaskEffort
+			task.Effort = DefaultTaskEffort
+		}
+		if !allowedTaskEfforts[task.Effort] {
+			m.Errors = append(m.Errors, fmt.Sprintf("task %q: invalid effort %q", task.ID, task.Effort))
 		}
 
 		if task.Agent != "" {

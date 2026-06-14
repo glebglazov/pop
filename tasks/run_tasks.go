@@ -260,6 +260,13 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		}
 
 		agentSpec := resolveTaskAgentSpec(opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent)
+		if opts.AgentCmd == "" {
+			effortConfig, err := loadConfigIfPresent(loadConfig)
+			if err != nil {
+				return nil, taskExitErr(sel, ExitSetup, "%v", err)
+			}
+			agentSpec = resolveTaskAgentSpecForEffortWithConfig(agentSpec, sel.Task.Effort, sel.Task.EffortExplicit, effortConfig)
+		}
 		attemptOutput := agentOutput
 		if agentSpec != baseAgentPreset {
 			attemptOutput, err = resolveAgentOutputMode(loadConfig, agentSpec, opts.AgentOutput)
