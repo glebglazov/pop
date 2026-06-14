@@ -21,6 +21,7 @@ const (
 	JournalEventAgentUnavailable = "agent_unavailable"
 	JournalEventSetParked        = "set_parked"
 	JournalEventMergeability     = "mergeability"
+	JournalEventIntegrated       = "integrated"
 )
 
 // JournalEntry is one append-only queue journal record.

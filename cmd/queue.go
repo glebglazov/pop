@@ -51,16 +51,25 @@ var queueLogCmd = &cobra.Command{
 	RunE:  runQueueLog,
 }
 
+var queueIntegrateCmd = &cobra.Command{
+	Use:   "integrate <set>",
+	Short: "Merge a clean completed queue set into its working branch",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runQueueIntegrate,
+}
+
 func init() {
 	rootCmd.AddCommand(queueCmd)
 	queueCmd.AddCommand(queueRunCmd)
 	queueCmd.AddCommand(queueStatusCmd)
 	queueCmd.AddCommand(queueLogCmd)
+	queueCmd.AddCommand(queueIntegrateCmd)
 }
 
 var (
 	queueConfigLoad = config.Load
 	queueRun        = queue.Run
+	queueIntegrate  = queue.Integrate
 )
 
 const queueLogLimit = 50
@@ -159,4 +168,19 @@ func runQueueLog(cmd *cobra.Command, args []string) error {
 	}
 	queue.RenderLog(os.Stdout, entries, queueLogLimit)
 	return nil
+}
+
+func runQueueIntegrate(cmd *cobra.Command, args []string) error {
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	cfg, err := queueConfigLoad(cfgPath)
+	if err != nil {
+		return err
+	}
+	d := queue.DefaultDeps()
+	d.LoadConfig = queueConfigLoad
+	_, err = queueIntegrate(d, cfg, args[0], os.Stdout)
+	return err
 }

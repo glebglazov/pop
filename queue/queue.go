@@ -44,8 +44,15 @@ type Deps struct {
 	// ComputeMergeability dry-runs merging a completed runtime branch into the
 	// working checkout. Defaults to git merge-tree.
 	ComputeMergeability func(workingPath, runtimePath string) (MergeabilityRecord, error)
+	// AcquireRuntimeLock serializes human-triggered integration with normal
+	// runtime execution. Defaults to tasks.AcquireRuntimeLock.
+	AcquireRuntimeLock func(runtimePath string) (runtimeLock, error)
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
+}
+
+type runtimeLock interface {
+	Release() error
 }
 
 // DefaultDeps returns supervisor dependencies backed by real implementations.
@@ -88,6 +95,13 @@ func (d *Deps) computeMergeability(workingPath, runtimePath string) (Mergeabilit
 		return d.ComputeMergeability(workingPath, runtimePath)
 	}
 	return computeMergeability(d, workingPath, runtimePath)
+}
+
+func (d *Deps) acquireRuntimeLock(runtimePath string) (runtimeLock, error) {
+	if d.AcquireRuntimeLock != nil {
+		return d.AcquireRuntimeLock(runtimePath)
+	}
+	return tasks.AcquireRuntimeLock(d.Tasks, runtimePath, nil)
 }
 
 // projectScan holds one registered project's resolved coordinates for a scan.

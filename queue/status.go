@@ -265,6 +265,8 @@ func RenderLog(out io.Writer, entries []JournalEntry, limit int) {
 			fmt.Fprintf(out, "%s %s %s parked reason=%s\n", ts, entry.Project, entry.SetID, entry.Reason)
 		case JournalEventMergeability:
 			fmt.Fprintf(out, "%s %s %s mergeability=%s\n", ts, entry.Project, entry.SetID, entry.MergeStatus)
+		case JournalEventIntegrated:
+			fmt.Fprintf(out, "%s %s %s integrated\n", ts, entry.Project, entry.SetID)
 		default:
 			fmt.Fprintf(out, "%s %s %s %s\n", ts, entry.Project, entry.SetID, entry.Event)
 		}

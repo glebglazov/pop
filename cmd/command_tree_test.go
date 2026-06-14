@@ -18,6 +18,7 @@ func TestDashboardCommandTree(t *testing.T) {
 		{path: []string{"monitor", "dashboard"}, wantCmd: monitorDashboardCmd, wantRun: runDashboard},
 		{path: []string{"project", "dashboard"}, wantCmd: projectDashboardCmd, wantRun: runProject},
 		{path: []string{"worktree", "dashboard"}, wantCmd: worktreeDashboardCmd, wantRun: runWorktree},
+		{path: []string{"queue", "integrate"}, wantCmd: queueIntegrateCmd, wantRun: runQueueIntegrate},
 	}
 
 	for _, tt := range tests {
