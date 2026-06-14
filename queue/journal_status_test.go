@@ -94,13 +94,15 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 			},
 		},
 		{
-			Project:   "waiting",
-			TaskSetID: "set-ready",
-			Reason:    "ready",
+			Project:       "waiting",
+			TaskSetID:     "set-ready",
+			Reason:        "ready",
+			WorktreeReady: true,
 		},
 		{
-			Project: "idle",
-			Reason:  "no ready set",
+			Project:            "idle",
+			Reason:             "no ready set",
+			ProjectConfigError: "/repo/idle/.pop.toml: expected value",
 		},
 	}, &DaemonState{Version: 1})
 
@@ -110,8 +112,8 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 	for _, want := range []string{
 		"Picked-up sets:",
 		"busy: set-busy pid=1234 since 2026-06-14T13:00:00Z",
-		"waiting: waiting ready set set-ready",
-		"idle: idle (no ready set)",
+		"waiting [worktree-ready]: waiting ready set set-ready",
+		"idle [.pop.toml error: /repo/idle/.pop.toml: expected value]: idle (no ready set)",
 		`"version": 1`,
 	} {
 		if !strings.Contains(text, want) {

@@ -88,16 +88,18 @@ type projectScan struct {
 
 // Decision is the supervisor's per-project outcome for one scan iteration.
 type Decision struct {
-	Project      string
-	Busy         bool   // a live runtime lock ⇒ already executing, skip
-	TaskSetID    string // the drain to spawn; empty when nothing is actionable
-	Reason       string // why no drain was spawned (busy, no-ready-set, error)
-	DefaultAgent string
-	WaitUntil    time.Time
-	AgentNotes   []AgentNote
-	Err          error
-	scan         projectScan
-	lockStatus   *tasks.RuntimeLockStatus
+	Project            string
+	Busy               bool   // a live runtime lock ⇒ already executing, skip
+	TaskSetID          string // the drain to spawn; empty when nothing is actionable
+	Reason             string // why no drain was spawned (busy, no-ready-set, error)
+	DefaultAgent       string
+	WaitUntil          time.Time
+	AgentNotes         []AgentNote
+	WorktreeReady      bool
+	ProjectConfigError string
+	Err                error
+	scan               projectScan
+	lockStatus         *tasks.RuntimeLockStatus
 }
 
 type AgentNote struct {
@@ -178,6 +180,7 @@ func resolveScan(d *Deps, p project.ExpandedProject) (projectScan, error) {
 // non-Archived set is selected to drain.
 func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonState, now time.Time) Decision {
 	dec := Decision{Project: scan.Name, scan: scan}
+	dec.WorktreeReady, dec.ProjectConfigError = readRepoConfig(d, scan.ProjectPath)
 
 	lock := d.readLock(scan.RuntimePath)
 	dec.lockStatus = lock
@@ -220,6 +223,18 @@ func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonStat
 	dec.TaskSetID = id
 	dec.DefaultAgent = defaultAgent
 	return dec
+}
+
+func readRepoConfig(d *Deps, repoRoot string) (bool, string) {
+	pd := d.Project
+	if pd == nil || pd.FS == nil {
+		pd = project.DefaultDeps()
+	}
+	cfg, err := config.LoadRepoConfigWith(&config.Deps{FS: pd.FS}, repoRoot)
+	if err != nil {
+		return false, err.Error()
+	}
+	return cfg.WorktreeReady, ""
 }
 
 // selectReadySet returns the highest-priority Ready set among refresh rows.

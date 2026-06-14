@@ -11,6 +11,10 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 )
 
+func strPtr(s string) *string {
+	return &s
+}
+
 func TestDefaultConfigPathWith(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -255,6 +259,95 @@ crash_retry_delays = ["10s", "1m", "5m"]
 	}
 	if want := []time.Duration{10 * time.Second, time.Minute, 5 * time.Minute}; !reflect.DeepEqual(resolved.CrashRetryDelays, want) {
 		t.Fatalf("crash retry delays = %#v, want %#v", resolved.CrashRetryDelays, want)
+	}
+}
+
+func TestLoadRepoConfigWorktreeReady(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    *string
+		want    bool
+		wantErr string
+	}{
+		{name: "absent", want: false},
+		{name: "present true", body: strPtr("worktree_ready = true\n"), want: true},
+		{name: "present false", body: strPtr("worktree_ready = false\n"), want: false},
+		{name: "malformed", body: strPtr("worktree_ready =\n"), want: false, wantErr: ".pop.toml"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tt.body != nil {
+				if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte(*tt.body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := LoadRepoConfig(root)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+				}
+				if got.WorktreeReady {
+					t.Fatalf("malformed config must degrade to not worktree-ready, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.WorktreeReady != tt.want {
+				t.Fatalf("WorktreeReady = %v, want %v", got.WorktreeReady, tt.want)
+			}
+		})
+	}
+}
+
+func TestPopTOMLPresenceDoesNotRegisterProject(t *testing.T) {
+	root := t.TempDir()
+	registered := filepath.Join(root, "registered")
+	unregistered := filepath.Join(root, "unregistered")
+	if err := os.MkdirAll(registered, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(unregistered, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unregistered, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	real := deps.NewRealFileSystem()
+	d := &Deps{FS: &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return filepath.Join(root, "data")
+			}
+			return ""
+		},
+		UserHomeDirFunc:  real.UserHomeDir,
+		StatFunc:         real.Stat,
+		ReadDirFunc:      real.ReadDir,
+		ReadFileFunc:     real.ReadFile,
+		WriteFileFunc:    real.WriteFile,
+		MkdirAllFunc:     real.MkdirAll,
+		RenameFunc:       real.Rename,
+		RemoveAllFunc:    real.RemoveAll,
+		DirFSFunc:        real.DirFS,
+		EvalSymlinksFunc: real.EvalSymlinks,
+	}}
+	cfg := &Config{Projects: []ProjectEntry{{Path: registered}}}
+	wantPath, err := real.EvalSymlinks(registered)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	projects, err := cfg.ExpandProjectsWith(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || projects[0].Path != wantPath {
+		t.Fatalf("projects = %+v, want only %s", projects, wantPath)
 	}
 }
 

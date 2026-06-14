@@ -13,19 +13,23 @@ import (
 
 // PickedUpSet is a live in-flight drain derived from a runtime lock.
 type PickedUpSet struct {
-	Project     string
-	SetID       string
-	RuntimePath string
-	PID         int
-	StartedAt   time.Time
+	Project            string
+	SetID              string
+	RuntimePath        string
+	PID                int
+	StartedAt          time.Time
+	WorktreeReady      bool
+	ProjectConfigError string
 }
 
 // IdleProject is a configured project with no live runtime lock.
 type IdleProject struct {
-	Project  string
-	Waiting  string
-	ReadySet string
-	Reason   string
+	Project            string
+	Waiting            string
+	ReadySet           string
+	Reason             string
+	WorktreeReady      bool
+	ProjectConfigError string
 }
 
 // StatusSnapshot is the pure data model for `pop queue status`.
@@ -54,7 +58,7 @@ func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapsho
 	for _, dec := range decisions {
 		if dec.Busy {
 			lock := dec.lockStatus
-			picked := PickedUpSet{Project: dec.Project}
+			picked := PickedUpSet{Project: dec.Project, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError}
 			if lock != nil {
 				picked.RuntimePath = lock.RuntimePath
 				if lock.Metadata != nil {
@@ -68,10 +72,10 @@ func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapsho
 			continue
 		}
 		if dec.Err != nil {
-			snap.Idle = append(snap.Idle, IdleProject{Project: dec.Project, Waiting: "error", Reason: dec.Err.Error()})
+			snap.Idle = append(snap.Idle, IdleProject{Project: dec.Project, Waiting: "error", Reason: dec.Err.Error(), WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError})
 			continue
 		}
-		idle := IdleProject{Project: dec.Project, Reason: dec.Reason}
+		idle := IdleProject{Project: dec.Project, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError}
 		if dec.TaskSetID != "" {
 			idle.Waiting = "ready"
 			idle.ReadySet = dec.TaskSetID
@@ -92,6 +96,7 @@ func RenderStatus(out io.Writer, snap StatusSnapshot) {
 		fmt.Fprintln(out, "  none")
 	} else {
 		for _, p := range snap.PickedUp {
+			projectLabel := statusProjectLabel(p.Project, p.WorktreeReady, p.ProjectConfigError)
 			setID := p.SetID
 			if setID == "" {
 				setID = "(unknown set)"
@@ -104,7 +109,7 @@ func RenderStatus(out io.Writer, snap StatusSnapshot) {
 			if p.PID > 0 {
 				pid = fmt.Sprintf(" pid=%d", p.PID)
 			}
-			fmt.Fprintf(out, "  %s: %s%s%s\n", p.Project, setID, pid, started)
+			fmt.Fprintf(out, "  %s: %s%s%s\n", projectLabel, setID, pid, started)
 		}
 	}
 
@@ -113,13 +118,14 @@ func RenderStatus(out io.Writer, snap StatusSnapshot) {
 		fmt.Fprintln(out, "  none")
 	} else {
 		for _, idle := range snap.Idle {
+			projectLabel := statusProjectLabel(idle.Project, idle.WorktreeReady, idle.ProjectConfigError)
 			switch {
 			case idle.ReadySet != "":
-				fmt.Fprintf(out, "  %s: waiting ready set %s\n", idle.Project, idle.ReadySet)
+				fmt.Fprintf(out, "  %s: waiting ready set %s\n", projectLabel, idle.ReadySet)
 			case idle.Waiting == "error":
-				fmt.Fprintf(out, "  %s: error: %s\n", idle.Project, idle.Reason)
+				fmt.Fprintf(out, "  %s: error: %s\n", projectLabel, idle.Reason)
 			default:
-				fmt.Fprintf(out, "  %s: idle (%s)\n", idle.Project, idle.Reason)
+				fmt.Fprintf(out, "  %s: idle (%s)\n", projectLabel, idle.Reason)
 			}
 		}
 	}
@@ -135,6 +141,17 @@ func RenderStatus(out io.Writer, snap StatusSnapshot) {
 		return
 	}
 	fmt.Fprintln(out, string(payload))
+}
+
+func statusProjectLabel(project string, worktreeReady bool, configError string) string {
+	label := project
+	if worktreeReady {
+		label += " [worktree-ready]"
+	}
+	if configError != "" {
+		label += " [.pop.toml error: " + configError + "]"
+	}
+	return label
 }
 
 // RenderLog prints recent queue journal history.

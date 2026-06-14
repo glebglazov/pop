@@ -299,6 +299,37 @@ type Config struct {
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
 }
 
+// RepoConfig is the repo-root .pop.toml surface. It is deliberately separate
+// from Config: global config.toml registers projects, while .pop.toml only
+// describes behavior for an already-registered project.
+type RepoConfig struct {
+	WorktreeReady bool `toml:"worktree_ready"`
+}
+
+// LoadRepoConfig reads repo-root .pop.toml. A missing file is not an error and
+// resolves to the zero config. Malformed TOML is returned to the caller so it
+// can be reported while degrading behavior to defaults.
+func LoadRepoConfig(repoRoot string) (RepoConfig, error) {
+	return LoadRepoConfigWith(defaultDeps, repoRoot)
+}
+
+// LoadRepoConfigWith reads repo-root .pop.toml using injected dependencies.
+func LoadRepoConfigWith(d *Deps, repoRoot string) (RepoConfig, error) {
+	path := filepath.Join(repoRoot, ".pop.toml")
+	data, err := d.FS.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return RepoConfig{}, nil
+		}
+		return RepoConfig{}, err
+	}
+	var cfg RepoConfig
+	if _, err := toml.Decode(string(data), &cfg); err != nil {
+		return RepoConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return cfg, nil
+}
+
 // TaskAgentOutput returns the configured output mode for one agent preset.
 // Defaults to "auto"; validation is owned by the task executor.
 func (c *Config) TaskAgentOutput(agent string) string {

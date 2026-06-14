@@ -2,11 +2,14 @@ package queue
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -163,6 +166,58 @@ func TestDecideProjectNoReadySet(t *testing.T) {
 	}
 	if dec.Reason != "no ready set" {
 		t.Fatalf("expected reason 'no ready set', got %q", dec.Reason)
+	}
+}
+
+func TestDecideProjectReadsRepoWorktreeReady(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &Deps{
+		Tasks:   queueTestTasksDeps(true),
+		Project: &project.Deps{FS: deps.NewRealFileSystem()},
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
+			return idleLock(runtimePath)
+		},
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{}, nil
+		},
+	}
+
+	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+
+	if !dec.WorktreeReady {
+		t.Fatalf("WorktreeReady = false, want true: %+v", dec)
+	}
+	if dec.ProjectConfigError != "" {
+		t.Fatalf("ProjectConfigError = %q, want empty", dec.ProjectConfigError)
+	}
+}
+
+func TestDecideProjectMalformedRepoConfigReportsAndDegrades(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready =\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &Deps{
+		Tasks:   queueTestTasksDeps(true),
+		Project: &project.Deps{FS: deps.NewRealFileSystem()},
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
+			return idleLock(runtimePath)
+		},
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{}, nil
+		},
+	}
+
+	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+
+	if dec.WorktreeReady {
+		t.Fatalf("malformed .pop.toml must degrade to not worktree-ready: %+v", dec)
+	}
+	if !strings.Contains(dec.ProjectConfigError, ".pop.toml") {
+		t.Fatalf("ProjectConfigError = %q, want .pop.toml parse error", dec.ProjectConfigError)
 	}
 }
 
