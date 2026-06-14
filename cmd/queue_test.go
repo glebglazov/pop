@@ -130,10 +130,13 @@ func TestRunQueueIntegrateInvokesQueueIntegration(t *testing.T) {
 
 	cfgFile = path
 	var gotSet string
-	queueIntegrate = func(d *queue.Deps, cfg *config.Config, setID string, out io.Writer) (queue.IntegrationResult, error) {
+	queueIntegrate = func(d *queue.Deps, cfg *config.Config, setID string, out io.Writer, opts queue.IntegrationOptions) (queue.IntegrationResult, error) {
 		gotSet = setID
 		if cfg == nil {
 			t.Fatal("config was nil")
+		}
+		if opts.In == nil {
+			t.Fatal("integration input was nil")
 		}
 		return queue.IntegrationResult{SetID: setID}, nil
 	}

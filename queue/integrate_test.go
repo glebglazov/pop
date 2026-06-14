@@ -2,7 +2,9 @@ package queue
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,16 +99,12 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 }
 
 func TestIntegrateConflictSetRefuses(t *testing.T) {
+	repo, wt, rec := setupConflictingIntegration(t)
 	td := queueDataDeps(t)
 	state := &DaemonState{
 		Version: 1,
 		Mergeability: map[string]MergeabilityRecord{
-			setBackoffKey("/worktree", "set-1"): {
-				Project:     "pop",
-				RuntimePath: "/worktree",
-				SetID:       "set-1",
-				Status:      MergeabilityConflicts,
-			},
+			setBackoffKey(wt, "set-1"): rec,
 		},
 	}
 	if err := WriteDaemonState(td, state); err != nil {
@@ -120,12 +118,16 @@ func TestIntegrateConflictSetRefuses(t *testing.T) {
 		},
 	}
 
-	_, err := Integrate(d, &config.Config{}, "set-1", nil)
-	if err == nil {
-		t.Fatal("expected conflict refusal")
+	var out bytes.Buffer
+	got, err := Integrate(d, &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, "set-1", &out)
+	if err != nil {
+		t.Fatalf("integrate: %v", err)
 	}
-	if !strings.Contains(err.Error(), "has conflicts") || !strings.Contains(err.Error(), "deferred to conflict handling") {
-		t.Fatalf("error = %q", err)
+	if !got.Kept || got.Outcome != "declined" {
+		t.Fatalf("result = %+v, want declined kept conflict", got)
+	}
+	if !strings.Contains(out.String(), "has merge conflicts") || !strings.Contains(out.String(), "Get agent assistance") {
+		t.Fatalf("output = %q, want surfaced conflict with assistance offer", out.String())
 	}
 	after, err := ReadDaemonState(td)
 	if err != nil {
@@ -133,6 +135,129 @@ func TestIntegrateConflictSetRefuses(t *testing.T) {
 	}
 	if len(after.Mergeability) != 1 {
 		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
+	}
+}
+
+func TestIntegrateConflictDeclinedKeepsWorktreeBranchAndState(t *testing.T) {
+	repo, wt, rec := setupConflictingIntegration(t)
+	td := queueDataDeps(t)
+	if err := WriteDaemonState(td, &DaemonState{
+		Version:      1,
+		Mergeability: map[string]MergeabilityRecord{setBackoffKey(wt, "set-1"): rec},
+	}); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	d := &Deps{
+		Tasks: td,
+		AcquireRuntimeLock: func(runtimePath string) (runtimeLock, error) {
+			t.Fatalf("declined conflict must not acquire runtime lock")
+			return nil, nil
+		},
+	}
+
+	var out bytes.Buffer
+	got, err := IntegrateWithOptions(d, &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, "set-1", &out, IntegrationOptions{In: strings.NewReader("2\n")})
+	if err != nil {
+		t.Fatalf("integrate: %v", err)
+	}
+	if !got.Kept || got.Outcome != "declined" {
+		t.Fatalf("result = %+v, want declined kept", got)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("worktree should be kept: %v", err)
+	}
+	if branch := strings.TrimSpace(runGitOutput(t, repo, "branch", "--list", "set-conflict")); branch == "" {
+		t.Fatal("set branch should be kept")
+	}
+	after, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if len(after.Mergeability) != 1 {
+		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
+	}
+	entries, err := ReadJournal(td)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	if !journalContains(entries, JournalEventIntegrationConflict, "") || !journalContains(entries, JournalEventIntegrationOutcome, "declined") {
+		t.Fatalf("journal entries = %+v, want conflict and declined outcome", entries)
+	}
+}
+
+func TestIntegrateConflictAttendedResolutionMergesAndTearsDown(t *testing.T) {
+	repo, wt, rec := setupConflictingIntegration(t)
+	td := queueDataDeps(t)
+	runner := &conflictResolutionRunner{t: t, resolvedText: "resolved by agent\n"}
+	td.Runner = runner
+	if err := WriteDaemonState(td, &DaemonState{
+		Version:      1,
+		Mergeability: map[string]MergeabilityRecord{setBackoffKey(wt, "set-1"): rec},
+	}); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	var lockedRuntime string
+	d := &Deps{
+		Tasks: td,
+		AcquireRuntimeLock: func(runtimePath string) (runtimeLock, error) {
+			lockedRuntime = runtimePath
+			return tasks.AcquireRuntimeLock(td, runtimePath, nil)
+		},
+	}
+
+	var out bytes.Buffer
+	got, err := IntegrateWithOptions(d, &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, "set-1", &out, IntegrationOptions{In: strings.NewReader("\n"), AgentPreset: "claude"})
+	if err != nil {
+		t.Fatalf("integrate: %v", err)
+	}
+	if got.Kept || got.Outcome != "resolved" || got.Branch != "set-conflict" {
+		t.Fatalf("result = %+v, want resolved integration", got)
+	}
+	canonicalRepo, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatalf("canonical repo: %v", err)
+	}
+	if lockedRuntime != canonicalRepo {
+		t.Fatalf("locked runtime = %q, want %q", lockedRuntime, canonicalRepo)
+	}
+	if runner.calls != 1 || runner.dir != canonicalRepo || runner.name != "claude" {
+		t.Fatalf("runner = calls %d dir %q name %q", runner.calls, runner.dir, runner.name)
+	}
+	if len(runner.args) == 0 || !strings.Contains(runner.args[len(runner.args)-1], "Pop queue integration conflict") {
+		t.Fatalf("agent prompt args = %#v", runner.args)
+	}
+	if got := string(mustReadFile(t, filepath.Join(repo, "shared.txt"))); got != "resolved by agent\n" {
+		t.Fatalf("merged file = %q", got)
+	}
+	if _, err := os.Stat(wt); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("worktree stat err = %v, want not exist", err)
+	}
+	if branch := strings.TrimSpace(runGitOutput(t, repo, "branch", "--list", "set-conflict")); branch != "" {
+		t.Fatalf("branch still exists: %q", branch)
+	}
+	after, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if len(after.Mergeability) != 0 {
+		t.Fatalf("mergeability state = %+v, want cleared", after.Mergeability)
+	}
+	entries, err := ReadJournal(td)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	for _, want := range []struct {
+		event  string
+		reason string
+	}{
+		{JournalEventIntegrationConflict, ""},
+		{JournalEventIntegrationAttended, ""},
+		{JournalEventIntegrated, ""},
+		{JournalEventIntegrationOutcome, "resolved"},
+	} {
+		if !journalContains(entries, want.event, want.reason) {
+			t.Fatalf("journal entries = %+v, missing %s/%s", entries, want.event, want.reason)
+		}
 	}
 }
 
@@ -177,4 +302,69 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
 	}
 	return string(out)
+}
+
+func setupConflictingIntegration(t *testing.T) (string, string, MergeabilityRecord) {
+	t.Helper()
+	repo := initMergeabilityRepo(t)
+	wt := filepath.Join(t.TempDir(), "set-conflict")
+	runGit(t, repo, "worktree", "add", "-b", "set-conflict", wt, "HEAD")
+	writeFile(t, filepath.Join(wt, "shared.txt"), "set branch\n")
+	runGit(t, wt, "add", "shared.txt")
+	runGit(t, wt, "commit", "-m", "set edits shared")
+	writeFile(t, filepath.Join(repo, "shared.txt"), "working branch\n")
+	runGit(t, repo, "add", "shared.txt")
+	runGit(t, repo, "commit", "-m", "working edits shared")
+	rec, err := computeMergeability(&Deps{Tasks: tasks.DefaultDeps()}, repo, wt)
+	if err != nil {
+		t.Fatalf("compute mergeability: %v", err)
+	}
+	rec.Project = filepath.Base(repo)
+	rec.RuntimePath = wt
+	rec.SetID = "set-1"
+	return repo, wt, rec
+}
+
+func journalContains(entries []JournalEntry, event, reason string) bool {
+	for _, entry := range entries {
+		if entry.Event == event && (reason == "" || entry.Reason == reason) {
+			return true
+		}
+	}
+	return false
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return data
+}
+
+type conflictResolutionRunner struct {
+	t            *testing.T
+	resolvedText string
+	calls        int
+	dir          string
+	name         string
+	args         []string
+}
+
+func (r *conflictResolutionRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	return r.RunAttended(ctx, dir, nil, stdout, stderr, name, args...)
+}
+
+func (r *conflictResolutionRunner) RunAttended(ctx context.Context, dir string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	r.calls++
+	r.dir = dir
+	r.name = name
+	r.args = append([]string(nil), args...)
+	writeFile(r.t, filepath.Join(dir, "shared.txt"), r.resolvedText)
+	return 0, nil
+}
+
+func (r *conflictResolutionRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*tasks.ManagedProcess, error) {
+	return nil, errors.New("unexpected Start call")
 }

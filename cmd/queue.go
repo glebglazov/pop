@@ -69,7 +69,7 @@ func init() {
 var (
 	queueConfigLoad = config.Load
 	queueRun        = queue.Run
-	queueIntegrate  = queue.Integrate
+	queueIntegrate  = queue.IntegrateWithOptions
 )
 
 const queueLogLimit = 50
@@ -181,6 +181,6 @@ func runQueueIntegrate(cmd *cobra.Command, args []string) error {
 	}
 	d := queue.DefaultDeps()
 	d.LoadConfig = queueConfigLoad
-	_, err = queueIntegrate(d, cfg, args[0], os.Stdout)
+	_, err = queueIntegrate(d, cfg, args[0], os.Stdout, queue.IntegrationOptions{In: os.Stdin})
 	return err
 }

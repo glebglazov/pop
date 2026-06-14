@@ -14,14 +14,17 @@ import (
 )
 
 const (
-	JournalEventSpawn            = "spawn"
-	JournalEventOutcome          = "outcome"
-	JournalEventAgentSwitch      = "agent_switch"
-	JournalEventAgentCooldown    = "agent_cooldown"
-	JournalEventAgentUnavailable = "agent_unavailable"
-	JournalEventSetParked        = "set_parked"
-	JournalEventMergeability     = "mergeability"
-	JournalEventIntegrated       = "integrated"
+	JournalEventSpawn               = "spawn"
+	JournalEventOutcome             = "outcome"
+	JournalEventAgentSwitch         = "agent_switch"
+	JournalEventAgentCooldown       = "agent_cooldown"
+	JournalEventAgentUnavailable    = "agent_unavailable"
+	JournalEventSetParked           = "set_parked"
+	JournalEventMergeability        = "mergeability"
+	JournalEventIntegrated          = "integrated"
+	JournalEventIntegrationConflict = "integration_conflict"
+	JournalEventIntegrationAttended = "integration_attended"
+	JournalEventIntegrationOutcome  = "integration_outcome"
 )
 
 // JournalEntry is one append-only queue journal record.
