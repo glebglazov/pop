@@ -25,16 +25,20 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 	runGit(t, wt, "commit", "-m", "set change")
 
 	td := queueDataDeps(t)
+	key := testScopedKey(t, repo, "set-1")
 	state := &DaemonState{
 		Version: 1,
 		Mergeability: map[string]MergeabilityRecord{
-			testScopedKey(t, repo, "set-1"): {
+			key: {
 				Project:     filepath.Base(repo),
 				RuntimePath: wt,
 				SetID:       "set-1",
 				Status:      MergeabilityClean,
 				CheckedAt:   time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
 			},
+		},
+		WorktreeBindings: map[string]WorktreeBinding{
+			key: integrationWorktreeBinding(t, repo, wt, "set-clean"),
 		},
 	}
 	if err := WriteDaemonState(td, state); err != nil {
@@ -82,6 +86,9 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 	if len(after.Mergeability) != 0 {
 		t.Fatalf("mergeability state = %+v, want cleared", after.Mergeability)
 	}
+	if len(after.WorktreeBindings) != 0 {
+		t.Fatalf("worktree bindings = %+v, want cleared", after.WorktreeBindings)
+	}
 	snap := statusFromDecisions(nil, after)
 	if len(snap.AwaitingIntegration) != 0 {
 		t.Fatalf("awaiting integration = %+v, want empty", snap.AwaitingIntegration)
@@ -99,12 +106,16 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 }
 
 func TestIntegrateConflictSetRefuses(t *testing.T) {
-	repo, _, rec := setupConflictingIntegration(t)
+	repo, wt, rec := setupConflictingIntegration(t)
 	td := queueDataDeps(t)
+	key := testScopedKey(t, repo, "set-1")
 	state := &DaemonState{
 		Version: 1,
 		Mergeability: map[string]MergeabilityRecord{
-			testScopedKey(t, repo, "set-1"): rec,
+			key: rec,
+		},
+		WorktreeBindings: map[string]WorktreeBinding{
+			key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
 		},
 	}
 	if err := WriteDaemonState(td, state); err != nil {
@@ -136,14 +147,21 @@ func TestIntegrateConflictSetRefuses(t *testing.T) {
 	if len(after.Mergeability) != 1 {
 		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
 	}
+	if len(after.WorktreeBindings) != 1 {
+		t.Fatalf("worktree bindings = %+v, want retained", after.WorktreeBindings)
+	}
 }
 
 func TestIntegrateConflictDeclinedKeepsWorktreeBranchAndState(t *testing.T) {
 	repo, wt, rec := setupConflictingIntegration(t)
 	td := queueDataDeps(t)
+	key := testScopedKey(t, repo, "set-1")
 	if err := WriteDaemonState(td, &DaemonState{
 		Version:      1,
-		Mergeability: map[string]MergeabilityRecord{testScopedKey(t, repo, "set-1"): rec},
+		Mergeability: map[string]MergeabilityRecord{key: rec},
+		WorktreeBindings: map[string]WorktreeBinding{
+			key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
+		},
 	}); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
@@ -176,6 +194,9 @@ func TestIntegrateConflictDeclinedKeepsWorktreeBranchAndState(t *testing.T) {
 	if len(after.Mergeability) != 1 {
 		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
 	}
+	if len(after.WorktreeBindings) != 1 {
+		t.Fatalf("worktree bindings = %+v, want retained", after.WorktreeBindings)
+	}
 	entries, err := ReadJournal(td)
 	if err != nil {
 		t.Fatalf("read journal: %v", err)
@@ -185,14 +206,62 @@ func TestIntegrateConflictDeclinedKeepsWorktreeBranchAndState(t *testing.T) {
 	}
 }
 
+func TestIntegrateConflictUnresolvedKeepsWorktreeBinding(t *testing.T) {
+	repo, wt, rec := setupConflictingIntegration(t)
+	td := queueDataDeps(t)
+	td.Runner = &noopConflictRunner{}
+	key := testScopedKey(t, repo, "set-1")
+	if err := WriteDaemonState(td, &DaemonState{
+		Version:      1,
+		Mergeability: map[string]MergeabilityRecord{key: rec},
+		WorktreeBindings: map[string]WorktreeBinding{
+			key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
+		},
+	}); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	d := &Deps{
+		Tasks: td,
+		AcquireRuntimeLock: func(runtimePath string) (runtimeLock, error) {
+			return tasks.AcquireRuntimeLock(td, runtimePath, nil)
+		},
+	}
+
+	var out bytes.Buffer
+	got, err := IntegrateWithOptions(d, &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, "set-1", &out, IntegrationOptions{In: strings.NewReader("\n"), AgentPreset: "claude"})
+	if err != nil {
+		t.Fatalf("integrate: %v", err)
+	}
+	if !got.Kept || got.Outcome != "unresolved" {
+		t.Fatalf("result = %+v, want unresolved kept conflict", got)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("worktree should be kept: %v", err)
+	}
+	after, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if len(after.Mergeability) != 1 {
+		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
+	}
+	if len(after.WorktreeBindings) != 1 {
+		t.Fatalf("worktree bindings = %+v, want retained", after.WorktreeBindings)
+	}
+}
+
 func TestIntegrateConflictAttendedResolutionMergesAndTearsDown(t *testing.T) {
 	repo, wt, rec := setupConflictingIntegration(t)
 	td := queueDataDeps(t)
 	runner := &conflictResolutionRunner{t: t, resolvedText: "resolved by agent\n"}
 	td.Runner = runner
+	key := testScopedKey(t, repo, "set-1")
 	if err := WriteDaemonState(td, &DaemonState{
 		Version:      1,
-		Mergeability: map[string]MergeabilityRecord{testScopedKey(t, repo, "set-1"): rec},
+		Mergeability: map[string]MergeabilityRecord{key: rec},
+		WorktreeBindings: map[string]WorktreeBinding{
+			key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
+		},
 	}); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
@@ -241,6 +310,9 @@ func TestIntegrateConflictAttendedResolutionMergesAndTearsDown(t *testing.T) {
 	}
 	if len(after.Mergeability) != 0 {
 		t.Fatalf("mergeability state = %+v, want cleared", after.Mergeability)
+	}
+	if len(after.WorktreeBindings) != 0 {
+		t.Fatalf("worktree bindings = %+v, want cleared", after.WorktreeBindings)
 	}
 	entries, err := ReadJournal(td)
 	if err != nil {
@@ -304,6 +376,15 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
+func integrationWorktreeBinding(t *testing.T, repo, wt, branch string) WorktreeBinding {
+	t.Helper()
+	return WorktreeBinding{
+		RuntimePath: wt,
+		Branch:      branch,
+		Project:     filepath.Base(repo),
+	}
+}
+
 func setupConflictingIntegration(t *testing.T) (string, string, MergeabilityRecord) {
 	t.Helper()
 	repo := initMergeabilityRepo(t)
@@ -341,6 +422,20 @@ func mustReadFile(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return data
+}
+
+type noopConflictRunner struct{}
+
+func (noopConflictRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	return 0, nil
+}
+
+func (noopConflictRunner) RunAttended(ctx context.Context, dir string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	return 0, nil
+}
+
+func (noopConflictRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*tasks.ManagedProcess, error) {
+	return nil, errors.New("unexpected Start call")
 }
 
 type conflictResolutionRunner struct {
