@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/spf13/cobra"
 )
@@ -216,6 +218,94 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 			assertShellCompContains(t, out, sub)
 		}
 	})
+}
+
+func TestQueueIntegrateShellCompletionCandidates(t *testing.T) {
+	dir := t.TempDir()
+	td := queueShellCompletionDeps(t, dir)
+	state := &queue.DaemonState{
+		Version: 1,
+		Mergeability: map[string]queue.MergeabilityRecord{
+			"pop|set-ready": {
+				Project: "pop",
+				SetID:   "set-ready",
+				Status:  queue.MergeabilityClean,
+			},
+			"pop|set-conflict": {
+				Project: "pop",
+				SetID:   "set-conflict",
+				Status:  queue.MergeabilityConflicts,
+			},
+		},
+	}
+	if err := queue.WriteDaemonState(td, state); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := queueCompletionDeps
+	queueCompletionDeps = func() *queue.Deps { return &queue.Deps{Tasks: td} }
+	t.Cleanup(func() { queueCompletionDeps = prev })
+
+	out := shellCompNoDesc(t, "queue", "integrate")
+	assertShellCompContains(t, out, "set-ready", "set-conflict")
+	assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+
+	out = shellCompNoDescCompleting(t, "queue", "integrate", "set-r")
+	assertShellCompContains(t, out, "set-ready")
+	assertShellCompOmitsExact(t, out, "set-conflict")
+}
+
+func TestQueueAbandonShellCompletionCandidates(t *testing.T) {
+	dir := t.TempDir()
+	td := queueShellCompletionDeps(t, dir)
+	state := &queue.DaemonState{
+		Version: 1,
+		WorktreeBindings: map[string]queue.WorktreeBinding{
+			"pop-deadbeef\x00set-bound": {
+				RuntimePath: "/wt/bound",
+				Project:     "pop",
+			},
+			"pop-deadbeef\x00set-other": {
+				RuntimePath: "/wt/other",
+				Project:     "pop",
+			},
+		},
+	}
+	if err := queue.WriteDaemonState(td, state); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := queueCompletionDeps
+	queueCompletionDeps = func() *queue.Deps { return &queue.Deps{Tasks: td} }
+	t.Cleanup(func() { queueCompletionDeps = prev })
+
+	out := shellCompNoDesc(t, "queue", "abandon")
+	assertShellCompContains(t, out, "set-bound", "set-other")
+	assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+
+	out = shellCompNoDescCompleting(t, "queue", "abandon", "set-b")
+	assertShellCompContains(t, out, "set-bound")
+	assertShellCompOmitsExact(t, out, "set-other")
+}
+
+func queueShellCompletionDeps(t *testing.T, dataHome string) *tasks.Deps {
+	t.Helper()
+	real := deps.NewRealFileSystem()
+	d := tasks.DefaultDeps()
+	d.FS = &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataHome
+			}
+			return ""
+		},
+		ReadFileFunc:  real.ReadFile,
+		WriteFileFunc: real.WriteFile,
+		MkdirAllFunc:  real.MkdirAll,
+		RenameFunc:    real.Rename,
+		RemoveAllFunc: real.RemoveAll,
+	}
+	return d
 }
 
 func TestTaskCompletionReadOnly(t *testing.T) {

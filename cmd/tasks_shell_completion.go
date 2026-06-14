@@ -17,6 +17,7 @@ var (
 
 func init() {
 	registerTaskShellCompletions()
+	registerQueueShellCompletions()
 	rootCmd.InitDefaultCompletionCmd()
 }
 
