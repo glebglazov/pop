@@ -81,9 +81,7 @@ func cursorToolCall(raw json.RawMessage) (string, json.RawMessage) {
 		return legacy.Tool.Case, legacy.Tool.Value.Args
 	}
 
-	var keyed map[string]struct {
-		Args json.RawMessage `json:"args"`
-	}
+	var keyed map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &keyed); err != nil {
 		return "", nil
 	}
@@ -93,9 +91,24 @@ func cursorToolCall(raw json.RawMessage) (string, json.RawMessage) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if name != "" {
-			return name, keyed[name].Args
+		if name == "" {
+			continue
 		}
+		// A live keyed tool_call carries the single <name>ToolCall entry — an
+		// object — alongside sibling metadata: toolCallId (a string) and
+		// hookAdditionalContexts (an array). Only the tool entry is a JSON
+		// object, so decode each value on its own and skip any that is not an
+		// object. This both ignores the metadata keys (which sort before
+		// readToolCall and would otherwise be returned as the tool name) and
+		// survives them — decoding the whole map into a struct-valued map fails
+		// outright the moment one sibling value is an array.
+		var entry struct {
+			Args json.RawMessage `json:"args"`
+		}
+		if err := json.Unmarshal(keyed[name], &entry); err != nil {
+			continue
+		}
+		return name, entry.Args
 	}
 	return "", nil
 }

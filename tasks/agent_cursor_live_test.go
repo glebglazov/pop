@@ -74,6 +74,24 @@ func TestCursorLineRendererToolTickStartedKeyedLiveShape(t *testing.T) {
 	}
 }
 
+// TestCursorLineRendererToolTickKeyedWithSiblingMetadata guards the real wire
+// shape captured from a live cursor-agent run (streams/*.jsonl.gz): the keyed
+// tool_call object carries sibling metadata — hookAdditionalContexts (array)
+// and toolCallId (string) — beside the single <name>ToolCall entry. The
+// earlier struct-valued map decode failed outright on the array sibling and
+// dropped every tool tick; this asserts the real name and hint survive.
+func TestCursorLineRendererToolTickKeyedWithSiblingMetadata(t *testing.T) {
+	render := cursorLineRenderer(false)
+	line := `{"type":"tool_call","subtype":"started","call_id":"tool_7106","tool_call":{"readToolCall":{"args":{"path":"/p/a.md"}},"hookAdditionalContexts":[],"toolCallId":"tool_7106"},"session_id":"s"}`
+	got, handled := render([]byte(line))
+	if !handled {
+		t.Fatal("tool_call started event should be handled")
+	}
+	if got != "→ readToolCall /p/a.md\n" {
+		t.Fatalf("got %q, want %q", got, "→ readToolCall /p/a.md\n")
+	}
+}
+
 func TestCursorLineRendererToolTickShellCommandHint(t *testing.T) {
 	render := cursorLineRenderer(false)
 	line := `{"type":"tool_call","subtype":"started","tool_call":{"tool":{"case":"shellToolCall","value":{"args":{"command":"ls -la"}}}}}`
