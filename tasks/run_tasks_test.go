@@ -75,7 +75,7 @@ func TestRunTaskSetNoOpContinuation(t *testing.T) {
 	}
 }
 
-func TestRunTaskSetSingleConfirmation(t *testing.T) {
+func TestRunTaskSetStartsWithoutAFKConsentPrompt(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
@@ -84,29 +84,37 @@ func TestRunTaskSetSingleConfirmation(t *testing.T) {
 
 	var confirmOut bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, nil)
-	opts.ConfirmIn = strings.NewReader("y\n")
+	opts.ConfirmIn = strings.NewReader("n\n")
 	opts.ConfirmOut = &confirmOut
 
-	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(confirmOut.String(), "Run AFK tasks in this Task set?") != 1 {
-		t.Fatalf("expected one confirmation prompt:\n%s", confirmOut.String())
+	if !result.TaskSetDone || len(result.Completed) != 2 {
+		t.Fatalf("result = %#v, want done with two completions", result)
+	}
+	if strings.Contains(confirmOut.String(), "Run AFK tasks in this Task set?") {
+		t.Fatalf("set drain must not ask for AFK consent:\n%s", confirmOut.String())
 	}
 }
 
-func TestRunTaskSetDirtyNonInteractiveRejection(t *testing.T) {
+func TestRunTaskSetDirtyNonInteractiveProceeds(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	writeFile(t, filepath.Join(env.root, "partial.txt"), "pending\n")
-	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
 
 	opts := env.runTaskSetOpts(false, agent, nil)
 	opts.ConfirmIn = NonInteractiveReader{}
-	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
-	assertExitCode(t, err, ExitOperational)
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatalf("non-interactive set drain should proceed without AFK consent: %v", err)
+	}
+	if len(result.Completed) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
 }
 
 func TestRunTaskSetAppliesDirtyStrategyOnceBeforeDrain(t *testing.T) {
@@ -273,7 +281,7 @@ func TestRunTaskSetBareDrainFallbackDefaultGetsAgentAssistance(t *testing.T) {
 	}
 }
 
-func TestRunTaskSetInitialHITLGatePromptsForAFKConsentAfterGateClears(t *testing.T) {
+func TestRunTaskSetInitialHITLGateContinuesDrainingWithoutAFKConsent(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-hitl", File: "01-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
 		{ID: "02-a", File: "02-a.md", Title: "A", Type: "AFK", Status: "open", BlockedBy: []string{"01-hitl"}},
@@ -282,7 +290,7 @@ func TestRunTaskSetInitialHITLGatePromptsForAFKConsentAfterGateClears(t *testing
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("2\ny\n")
+	opts.ConfirmIn = strings.NewReader("2\n")
 	opts.ConfirmOut = &buf
 
 	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
@@ -293,13 +301,13 @@ func TestRunTaskSetInitialHITLGatePromptsForAFKConsentAfterGateClears(t *testing
 		t.Fatalf("result = %#v, want done with one AFK completion", result)
 	}
 	out := buf.String()
-	for _, want := range []string{"Human-blocked: demo/01-hitl", "✓ Completed task demo/01-hitl", "Run AFK tasks in this Task set?", "━━ Running task demo/02-a"} {
+	for _, want := range []string{"Human-blocked: demo/01-hitl", "✓ Completed task demo/01-hitl", "━━ Running task demo/02-a"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Index(out, "Run AFK tasks in this Task set?") < strings.Index(out, "✓ Completed task demo/01-hitl") {
-		t.Fatalf("AFK consent should be requested after the initial HITL gate clears:\n%s", out)
+	if strings.Contains(out, "Run AFK tasks in this Task set?") {
+		t.Fatalf("AFK consent must not be requested after the initial HITL gate clears:\n%s", out)
 	}
 	assertTaskDone(t, env.execFixture(), "01-hitl")
 	assertTaskDone(t, env.execFixture(), "02-a")
@@ -427,7 +435,7 @@ func TestRunTaskSetInteractiveHITLGateShowsNumberedMenu(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n4\n")
+	opts.ConfirmIn = strings.NewReader("4\n")
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
@@ -460,7 +468,7 @@ func TestRunTaskSetInteractiveHITLGateDefaultGetsAgentAssistance(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n\n")
+	opts.ConfirmIn = strings.NewReader("\n")
 
 	result, err := RunTaskSetWith(d, nil, nil, opts)
 	if err != nil {
@@ -496,7 +504,7 @@ func TestRunTaskSetInteractiveHITLGateAssistanceStartFailureReprompts(t *testing
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n\n4\n")
+	opts.ConfirmIn = strings.NewReader("\n4\n")
 
 	_, err := RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
@@ -528,7 +536,7 @@ func TestRunTaskSetInteractiveHITLGateAssistanceClearedGateContinuesDraining(t *
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n\n")
+	opts.ConfirmIn = strings.NewReader("\n")
 
 	result, err := RunTaskSetWith(d, nil, nil, opts)
 	if err != nil {
@@ -565,7 +573,7 @@ func TestRunTaskSetInteractiveHITLGateAssistanceStillBlockedReprompts(t *testing
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n\n4\n")
+	opts.ConfirmIn = strings.NewReader("\n4\n")
 
 	_, err := RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
@@ -595,7 +603,7 @@ func TestRunTaskSetInteractiveHITLGateAssistanceChangedStatusUsesNormalHandling(
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n\n")
+	opts.ConfirmIn = strings.NewReader("\n")
 
 	_, err := RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
@@ -617,7 +625,7 @@ func TestRunTaskSetInteractiveHITLGateCompletionContinuesDraining(t *testing.T) 
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n2\n")
+	opts.ConfirmIn = strings.NewReader("2\n")
 
 	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
@@ -651,7 +659,7 @@ func TestRunTaskSetInteractiveHITLGateDeferralContinuesDraining(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n3\n")
+	opts.ConfirmIn = strings.NewReader("3\n")
 
 	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
@@ -968,8 +976,8 @@ func TestRunTaskSetFailedGateRerunRetriesInProcess(t *testing.T) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, taskSetConfirmPrompt) {
-		t.Fatalf("Re-run must not ask for a second AFK consent:\n%s", out)
+	if strings.Contains(out, "Run AFK tasks in this Task set?") {
+		t.Fatalf("Re-run must not ask for AFK consent:\n%s", out)
 	}
 	assertTaskDone(t, env.execFixture(), "01-a")
 }
@@ -1062,7 +1070,7 @@ func TestRunTaskSetFailedGateLiveFailureRerunRetries(t *testing.T) {
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
 	opts.MaxTries = 1
-	opts.ConfirmIn = strings.NewReader("y\n1\n")
+	opts.ConfirmIn = strings.NewReader("1\n")
 
 	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
@@ -1191,7 +1199,6 @@ func TestRunTaskSetInteractivePrintsRefreshedTable(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("y\n")
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
@@ -1202,20 +1209,20 @@ func TestRunTaskSetInteractivePrintsRefreshedTable(t *testing.T) {
 	}
 }
 
-func TestRunTaskSetDeclinedConfirmation(t *testing.T) {
+func TestRunTaskSetNonInteractiveProceedsWithoutAFKConsent(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
 	opts := env.runTaskSetOpts(false, agent, nil)
-	opts.ConfirmIn = strings.NewReader("n\n")
+	opts.ConfirmIn = NonInteractiveReader{}
 
 	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Declined {
-		t.Fatal("expected declined")
+	if len(result.Completed) != 1 {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

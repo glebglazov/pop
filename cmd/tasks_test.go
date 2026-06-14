@@ -928,7 +928,7 @@ func TestRunTaskCmdDeclinedIsSuccess(t *testing.T) {
 	_ = root
 }
 
-func TestRunTasksCmdDeclinedIsSuccess(t *testing.T) {
+func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
 	root := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
 
@@ -939,10 +939,16 @@ func TestRunTasksCmdDeclinedIsSuccess(t *testing.T) {
 	var stdout bytes.Buffer
 	err := runTaskRunTasksWith(tasks.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "", false)
 	if err != nil {
-		t.Fatalf("declined should succeed: %v", err)
+		t.Fatalf("set drain should proceed without AFK consent: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "AUTO RUN") {
 		t.Fatalf("missing pre-run table:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Run AFK tasks in this Task set?") {
+		t.Fatalf("set drain must not ask for AFK consent:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "✓ Completed demo/01-a") {
+		t.Fatalf("expected set to drain:\n%s", stdout.String())
 	}
 	_ = root
 }
@@ -1140,7 +1146,9 @@ func TestRunTasksCmdRejectsTaskSetRelativeFile(t *testing.T) {
 
 func TestRunTasksCmdTargetsTaskSetIdentifier(t *testing.T) {
 	root := setupRunTaskCmdFixture(t)
+	agent := writeRunTaskFakeAgent(t, root)
 	resetTaskFlags()
+	taskAgentCmd = agent
 	t.Cleanup(resetTaskFlags)
 
 	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false)

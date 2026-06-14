@@ -14,8 +14,6 @@ import (
 	"github.com/glebglazov/pop/project"
 )
 
-const taskSetConfirmPrompt = "Run AFK tasks in this Task set? [y/N]: "
-
 // RunTaskSetOptions configures sequential Task-set draining.
 type RunTaskSetOptions struct {
 	ResolveInput
@@ -153,24 +151,11 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		}
 	}
 
-	initialHITLGate := selectedTaskSetStartsAtHITLGate(refresh, taskSetID)
-	initialFailedGate := selectedTaskSetStartsAtFailedGate(refresh, taskSetID)
-	initialGate := initialHITLGate || initialFailedGate
+	initialGate := selectedTaskSetStartsAtHITLGate(refresh, taskSetID) ||
+		selectedTaskSetStartsAtFailedGate(refresh, taskSetID)
 	var sharedPromptReader *bufio.Reader
 	if initialGate {
 		sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
-	}
-
-	afkConsentConfirmed := opts.Yes
-	if !initialGate {
-		confirmed, err := confirmExecution(opts.ConfirmIn, confirmOut, opts.Yes, taskSetConfirmPrompt)
-		if err != nil {
-			return nil, err
-		}
-		if !confirmed {
-			return &RunTaskSetResult{TaskSetID: taskSetID, Refresh: refresh, Declined: true}, nil
-		}
-		afkConsentConfirmed = true
 	}
 
 	lock, err := AcquireRuntimeLockForSet(d, runtimePath, taskSetID, confirmOut)
@@ -258,11 +243,6 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					return nil, err
 				}
 				if handled {
-					// Re-run reset the task to open and Finish-by-hand marked it
-					// done; either way the user actively chose to continue, so the
-					// newly eligible task runs in this invocation without a second
-					// AFK consent prompt.
-					afkConsentConfirmed = true
 					continue
 				}
 				printFailedStopAdvice(out, taskSetID, m)
@@ -270,23 +250,6 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			default:
 				return nil, selErr
 			}
-		}
-
-		if !afkConsentConfirmed {
-			confirmIn := opts.ConfirmIn
-			if sharedPromptReader != nil {
-				confirmIn = sharedPromptReader
-			}
-			confirmed, err := confirmExecution(confirmIn, confirmOut, opts.Yes, taskSetConfirmPrompt)
-			if err != nil {
-				return nil, err
-			}
-			if !confirmed {
-				result.Refresh = currentRefresh
-				result.Declined = true
-				return result, nil
-			}
-			afkConsentConfirmed = true
 		}
 
 		if dirty && !dirtyStrategyApplied {
