@@ -524,6 +524,34 @@ _Avoid_: Restore from export, Task set import, Open task
 The interactive checkbox UI that **Archive** and **Unarchive** open across whole Task sets — the cross-set sibling of the within-set **Multi-task selection**. Each row is one registered Task set showing its **Task identifier** and derived **Task set status**; Archive pre-checks Done rows and lists every other status as unchecked-but-checkable, while Unarchive lists only Archived Task sets with none pre-checked. Confirming (Enter) applies the checked sets as one atomic **Task state** write; cancelling (Esc) writes nothing. Like Multi-task selection it is terminal-only — a no-argument invocation with no interactive TTY is rejected rather than mutating silently.
 _Avoid_: Multi-task selection (within-set, task-level), Project picker, `--all`
 
+**Queue**:
+A daemon that supervises per-project Task-set draining, fanning `pop tasks implement <set>` runs out concurrently across registered projects into tmux. It targets one specific not-currently-running Ready set per idle project, never no-argument implement, which would re-pick a running set. Each project drains serially by local Task set priority, enforced by the **Runtime execution lock**; projects run in parallel. Global cross-project priority ordering is a non-goal.
+_Avoid_: Machine-global scheduler, per-repository scheduler
+
+**Picked-up Task set**:
+A Task set currently being drained, identified by a live **Runtime execution lock** that records its **Task identifier**. Picked-up state is derived from lock liveness, never persisted as a task status; tmux panes are display only, not the source of truth.
+_Avoid_: In-progress task, pane state
+
+**Queue daemon**:
+The supervisor process behind `pop queue run`. It is foreground and explicit, never auto-started from a picker, because it runs coding agents unattended across projects; the operator parks it in a pane and Ctrl-C (`SIGINT`) is graceful shutdown. It is single-instance via a PID/lock file. Unlike the **Monitor** daemon, it needs no control socket: it persists agent cooldowns, parked sets, backoff timers, and the **Queue journal** to disk, so `pop queue status` and `pop queue log` are pure file readers. On `run`, it reconciles in-flight drains from live **Runtime execution lock**s, so a restart never disturbs them. Its command surface is `run`, `status`, and `log`; Ctrl-C is stop.
+_Avoid_: Monitor daemon, background service
+
+**Queue scope**:
+The set of work the **Queue daemon** supervises: all registered projects' Ready Task sets. Running the daemon with `pop queue run` is the standing unattended-AFK consent; there is no per-project opt-in flag. The blast radius is self-limiting because the daemon only acts on Ready sets, and a Task set is a deliberately authored artifact; a project with no sets is skipped. The per-set opt-out is **Archive**. When a project has no tmux session, the daemon creates one detached, ensures a `pop-queue` window, and spawns the drain pane there; finished panes are kept as a visible log.
+_Avoid_: Per-project queue opt-in, global priority queue
+
+**Queue journal**:
+The durable append-only record in pop's data dir of every Queue drain event: started, done, failed, HITL-blocked, quota-paused-and-agent-switched, crashed, backing-off, or parked. It is emitted by **Implement** as a structured drain-outcome record carrying set id, outcome, and the exhausted preset when relevant; the **Queue daemon** consumes it to drive Queue agent fallback and backoff, and persists it for observability. `pop queue status` reads live state, such as picked-up sets, cooling agents, parked sets, and idle projects; `pop queue log` reads the journal history.
+_Avoid_: Progress record, Captured attempt stream, Task state
+
+**Queue backoff**:
+The daemon's response to an abnormal drain exit, such as crash, kill, or interrupt. Unlike a clean failure or quota pause, an abnormal exit leaves the set Ready with nothing cooled and would otherwise re-spawn immediately. The daemon applies an escalating per-set delay and, after N consecutive abnormal exits, parks the set until a human clears it. A clean exit resets the counter. Distinguishing abnormal from clean exits requires the **Queue journal**'s outcome record; storage status alone cannot tell a crash from a quota pause.
+_Avoid_: Failed task, Agent quota pause
+
+**Queue agent fallback**:
+The Queue's policy for choosing an **Agent preset** when draining, owned by the daemon rather than the executor. It rotates a configured ordered list of agents as a non-overriding default: **Task agent** pins always win, while unpinned tasks ride the rotating default. An agent whose binary is not on `PATH` is skipped with a **Queue journal** note, not a startup error. A global per-agent cooldown marks an agent exhausted-until after an **Agent quota pause**, because quota is per subscription, not per project. Recovery is probed by re-attempting after that fixed interval; there is no quota-remaining API to query. When a pinned task's agent is exhausted, the Queue backs that whole set off until that agent's cooldown expires rather than violating the pin.
+_Avoid_: Executor agent policy, per-project quota, overriding task agent
+
 ### Releases
 
 **Release**:
@@ -541,11 +569,6 @@ _Avoid_: Phone home, telemetry, blocking version lookup
 **Update notice**:
 The dimmed top-right indication in a picker that a newer **Release** exists — surfaced at most once per calendar day across all pickers, suppressed for **Dev builds**, and disabled via config. In **Doctor**, version freshness is a header line only; an outdated binary never affects any family's **Doctor status**, and a failed check is a dim note, not a failure.
 _Avoid_: Upgrade nag, degraded status, update row
-
-#### Reserved terms
-
-**Queue** (reserved, not implemented):
-Reserved for a future machine-global scheduler that picks the next Task set across all projects by priority and runs it. Do not use "queue" for today's per-repository scheduling; it has no current definition.
 
 ## Deprecated aliases
 
