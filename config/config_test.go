@@ -3,8 +3,10 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
 )
@@ -107,6 +109,111 @@ output = "auto"
 	}
 	if got := cfg.TaskAgentOutput("cursor"); got != "auto" {
 		t.Fatalf("cursor output = %q, want auto", got)
+	}
+}
+
+func TestLoadQueueConfig(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[queue]
+agents = ["claude --model opus4.8", "codex", "opencode"]
+poll_interval = "30s"
+agent_quota_retry_after = "2h"
+crash_retry_delays = ["10s", "1m", "5m"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Queue == nil {
+		t.Fatal("expected [queue] section to parse")
+	}
+	if got, want := cfg.Queue.Agents, []string{"claude --model opus4.8", "codex", "opencode"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("queue agents = %#v, want %#v", got, want)
+	}
+	resolved, err := cfg.ResolveQueue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.PollInterval != 30*time.Second {
+		t.Fatalf("poll interval = %s, want 30s", resolved.PollInterval)
+	}
+	if resolved.AgentQuotaRetryAfter != 2*time.Hour {
+		t.Fatalf("quota retry = %s, want 2h", resolved.AgentQuotaRetryAfter)
+	}
+	if want := []time.Duration{10 * time.Second, time.Minute, 5 * time.Minute}; !reflect.DeepEqual(resolved.CrashRetryDelays, want) {
+		t.Fatalf("crash retry delays = %#v, want %#v", resolved.CrashRetryDelays, want)
+	}
+}
+
+func TestResolveQueueDefaults(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+	}{
+		{name: "nil config", cfg: nil},
+		{name: "missing section", cfg: &Config{}},
+		{name: "empty section", cfg: &Config{Queue: &QueueConfig{}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.cfg.ResolveQueue()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.PollInterval != DefaultQueuePollInterval {
+				t.Fatalf("poll interval = %s, want %s", got.PollInterval, DefaultQueuePollInterval)
+			}
+			if got.AgentQuotaRetryAfter != DefaultQueueQuotaRetryAfter {
+				t.Fatalf("quota retry = %s, want %s", got.AgentQuotaRetryAfter, DefaultQueueQuotaRetryAfter)
+			}
+			if !reflect.DeepEqual(got.CrashRetryDelays, DefaultQueueCrashRetryDelays) {
+				t.Fatalf("crash retry delays = %#v, want %#v", got.CrashRetryDelays, DefaultQueueCrashRetryDelays)
+			}
+			if len(got.Agents) != 0 {
+				t.Fatalf("config layer should leave default agent selection to command layer, got %#v", got.Agents)
+			}
+		})
+	}
+}
+
+func TestResolveQueueDurationErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want string
+	}{
+		{
+			name: "poll interval",
+			cfg:  &Config{Queue: &QueueConfig{PollInterval: "soon"}},
+			want: "[queue] poll_interval",
+		},
+		{
+			name: "quota retry",
+			cfg:  &Config{Queue: &QueueConfig{AgentQuotaRetryAfter: "later"}},
+			want: "[queue] agent_quota_retry_after",
+		},
+		{
+			name: "crash retry list",
+			cfg:  &Config{Queue: &QueueConfig{CrashRetryDelays: []string{"1s", "bad"}}},
+			want: "[queue] crash_retry_delays[1]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.cfg.ResolveQueue()
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want it to contain %q", err, tt.want)
+			}
+		})
 	}
 }
 

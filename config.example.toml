@@ -64,6 +64,15 @@ projects = [
 # Defaults to true.
 # notice_enabled = true
 
+# [queue]
+# Ordered fallback pool for `pop queue run`. Entries use the same preset-shaped
+# grammar as `pop tasks implement --agent`; only the preset name is validated at
+# startup. Missing binaries are skipped later by the queue runtime.
+# agents = ["claude --model opus4.8", "codex", "opencode"]
+# poll_interval = "60s"
+# agent_quota_retry_after = "1h"
+# crash_retry_delays = ["1m", "5m", "15m"]
+
 # [dashboard]
 # Initial cursor strategy. Available: "current_registered", "current_any",
 # "first_active". "current_any" adds the current pane as a virtual clear entry

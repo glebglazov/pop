@@ -10,10 +10,6 @@ import (
 	"github.com/glebglazov/pop/config"
 )
 
-// PollInterval is the supervisor's scan cadence. Hardcoded for this slice;
-// configuration comes later.
-const PollInterval = 60 * time.Second
-
 // Run starts the foreground supervisor loop: it acquires the single-instance
 // lock, then every poll interval scans every registered project and spawns a
 // drain into tmux for each idle project with a Ready set. It returns when a

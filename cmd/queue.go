@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/spf13/cobra"
@@ -40,12 +42,66 @@ func init() {
 	queueCmd.AddCommand(queueRunCmd)
 }
 
+var (
+	queueConfigLoad = config.Load
+	queueRun        = queue.Run
+)
+
+type queueRunConfig struct {
+	Agents               []string
+	PollInterval         time.Duration
+	AgentQuotaRetryAfter time.Duration
+	CrashRetryDelays     []time.Duration
+}
+
+func resolveQueueRunConfig(loadConfig func(string) (*config.Config, error), path string) (queueRunConfig, error) {
+	cfg, err := loadConfig(path)
+	if err != nil {
+		return queueRunConfig{}, err
+	}
+	resolved, err := cfg.ResolveQueue()
+	if err != nil {
+		return queueRunConfig{}, err
+	}
+	if err := validateQueueAgents(resolved.Agents); err != nil {
+		return queueRunConfig{}, err
+	}
+	agents := append([]string(nil), resolved.Agents...)
+	if len(agents) == 0 {
+		agents = []string{tasks.DefaultAgentPreset}
+	}
+	return queueRunConfig{
+		Agents:               agents,
+		PollInterval:         resolved.PollInterval,
+		AgentQuotaRetryAfter: resolved.AgentQuotaRetryAfter,
+		CrashRetryDelays:     append([]time.Duration(nil), resolved.CrashRetryDelays...),
+	}, nil
+}
+
+func validateQueueAgents(agents []string) error {
+	for i, agent := range agents {
+		if _, err := tasks.ResolveAgentAdapter(agent); err != nil {
+			return fmt.Errorf("[queue] agents[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
 func runQueueRun(cmd *cobra.Command, args []string) error {
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	qcfg, err := resolveQueueRunConfig(queueConfigLoad, cfgPath)
+	if err != nil {
+		return err
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	err := queue.Run(queue.DefaultDeps(), queue.PollInterval, os.Stdout, sigCh)
+	err = queueRun(queue.DefaultDeps(), qcfg.PollInterval, os.Stdout, sigCh)
 	if err != nil {
 		var exitErr *tasks.ExitError
 		if errors.As(err, &exitErr) {

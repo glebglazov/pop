@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/bmatcuk/doublestar/v4"
@@ -120,6 +121,98 @@ type TaskAgentConfig struct {
 	Output string `toml:"output"`
 }
 
+// QueueConfig holds `pop queue` supervisor configuration. Durations are stored
+// as standard duration strings (e.g. "60s", "1h") and parsed by ResolveQueue.
+type QueueConfig struct {
+	// Agents is an ordered fallback pool of Agent-preset-shaped strings (same
+	// grammar as --agent). Validation against recognized presets is owned by
+	// the command layer (the config package stays free of the tasks package).
+	// Empty/unset ⇒ a single agent = implement's default, with no fallback.
+	Agents []string `toml:"agents"`
+	// PollInterval is the supervisor's scan cadence. Empty ⇒ DefaultQueuePollInterval.
+	PollInterval string `toml:"poll_interval"`
+	// AgentQuotaRetryAfter is the global cooldown applied after an agent reports
+	// a quota exit, before it re-enters rotation. Empty ⇒ DefaultQueueQuotaRetryAfter.
+	AgentQuotaRetryAfter string `toml:"agent_quota_retry_after"`
+	// CrashRetryDelays is the ordered backoff schedule for crash retries; its
+	// length is the park threshold. Empty ⇒ DefaultQueueCrashRetryDelays.
+	CrashRetryDelays []string `toml:"crash_retry_delays"`
+}
+
+// Queue default values applied when the [queue] section or individual fields
+// are omitted.
+const (
+	DefaultQueuePollInterval    = 60 * time.Second
+	DefaultQueueQuotaRetryAfter = time.Hour
+)
+
+// DefaultQueueCrashRetryDelays is the default crash-retry backoff schedule.
+var DefaultQueueCrashRetryDelays = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
+
+// ResolvedQueueConfig holds the parsed queue configuration with defaults
+// applied and durations parsed. Agents stay as raw preset-shaped strings;
+// preset validation is performed in the command layer.
+type ResolvedQueueConfig struct {
+	Agents               []string
+	PollInterval         time.Duration
+	AgentQuotaRetryAfter time.Duration
+	CrashRetryDelays     []time.Duration
+}
+
+// ResolveQueue parses the [queue] section, applying defaults for omitted
+// fields and validating that every duration string is well-formed. A bad
+// duration is a config error. The receiver may be nil (no [queue] section), in
+// which case all defaults apply.
+func (c *Config) ResolveQueue() (ResolvedQueueConfig, error) {
+	resolved := ResolvedQueueConfig{
+		PollInterval:         DefaultQueuePollInterval,
+		AgentQuotaRetryAfter: DefaultQueueQuotaRetryAfter,
+		CrashRetryDelays:     append([]time.Duration(nil), DefaultQueueCrashRetryDelays...),
+	}
+
+	var q *QueueConfig
+	if c != nil {
+		q = c.Queue
+	}
+	if q == nil {
+		return resolved, nil
+	}
+
+	if len(q.Agents) > 0 {
+		resolved.Agents = append([]string(nil), q.Agents...)
+	}
+
+	if strings.TrimSpace(q.PollInterval) != "" {
+		d, err := time.ParseDuration(q.PollInterval)
+		if err != nil {
+			return ResolvedQueueConfig{}, fmt.Errorf("[queue] poll_interval: %w", err)
+		}
+		resolved.PollInterval = d
+	}
+
+	if strings.TrimSpace(q.AgentQuotaRetryAfter) != "" {
+		d, err := time.ParseDuration(q.AgentQuotaRetryAfter)
+		if err != nil {
+			return ResolvedQueueConfig{}, fmt.Errorf("[queue] agent_quota_retry_after: %w", err)
+		}
+		resolved.AgentQuotaRetryAfter = d
+	}
+
+	if q.CrashRetryDelays != nil {
+		delays := make([]time.Duration, 0, len(q.CrashRetryDelays))
+		for i, raw := range q.CrashRetryDelays {
+			d, err := time.ParseDuration(raw)
+			if err != nil {
+				return ResolvedQueueConfig{}, fmt.Errorf("[queue] crash_retry_delays[%d]: %w", i, err)
+			}
+			delays = append(delays, d)
+		}
+		resolved.CrashRetryDelays = delays
+	}
+
+	return resolved, nil
+}
+
 // ProjectEntry represents a project configuration entry.
 type ProjectEntry struct {
 	Path         string `toml:"path"`
@@ -153,6 +246,7 @@ type Config struct {
 	// The TOML key stays "workload" for backward compatibility with existing
 	// user config files; the rename is internal only.
 	Task    *TaskConfig    `toml:"workload"`
+	Queue   *QueueConfig   `toml:"queue"`
 	Updates *UpdatesConfig `toml:"updates"`
 
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
