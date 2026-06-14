@@ -303,7 +303,8 @@ type Config struct {
 // from Config: global config.toml registers projects, while .pop.toml only
 // describes behavior for an already-registered project.
 type RepoConfig struct {
-	WorktreeReady bool `toml:"worktree_ready"`
+	WorktreeReady  bool `toml:"worktree_ready"`
+	AutoMergeClean bool `toml:"auto_merge_clean"`
 }
 
 // LoadRepoConfig reads repo-root .pop.toml. A missing file is not an error and

@@ -264,15 +264,19 @@ crash_retry_delays = ["10s", "1m", "5m"]
 
 func TestLoadRepoConfigWorktreeReady(t *testing.T) {
 	tests := []struct {
-		name    string
-		body    *string
-		want    bool
-		wantErr string
+		name          string
+		body          *string
+		wantWorktree  bool
+		wantAutoMerge bool
+		wantErr       string
 	}{
-		{name: "absent", want: false},
-		{name: "present true", body: strPtr("worktree_ready = true\n"), want: true},
-		{name: "present false", body: strPtr("worktree_ready = false\n"), want: false},
-		{name: "malformed", body: strPtr("worktree_ready =\n"), want: false, wantErr: ".pop.toml"},
+		{name: "absent"},
+		{name: "worktree present true", body: strPtr("worktree_ready = true\n"), wantWorktree: true},
+		{name: "worktree present false", body: strPtr("worktree_ready = false\n")},
+		{name: "auto merge present true", body: strPtr("auto_merge_clean = true\n"), wantAutoMerge: true},
+		{name: "auto merge present false", body: strPtr("auto_merge_clean = false\n")},
+		{name: "both flags", body: strPtr("worktree_ready = true\nauto_merge_clean = true\n"), wantWorktree: true, wantAutoMerge: true},
+		{name: "malformed", body: strPtr("worktree_ready =\n"), wantErr: ".pop.toml"},
 	}
 
 	for _, tt := range tests {
@@ -288,16 +292,19 @@ func TestLoadRepoConfigWorktreeReady(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
 				}
-				if got.WorktreeReady {
-					t.Fatalf("malformed config must degrade to not worktree-ready, got %+v", got)
+				if got.WorktreeReady || got.AutoMergeClean {
+					t.Fatalf("malformed config must degrade to zero repo config, got %+v", got)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got.WorktreeReady != tt.want {
-				t.Fatalf("WorktreeReady = %v, want %v", got.WorktreeReady, tt.want)
+			if got.WorktreeReady != tt.wantWorktree {
+				t.Fatalf("WorktreeReady = %v, want %v", got.WorktreeReady, tt.wantWorktree)
+			}
+			if got.AutoMergeClean != tt.wantAutoMerge {
+				t.Fatalf("AutoMergeClean = %v, want %v", got.AutoMergeClean, tt.wantAutoMerge)
 			}
 		})
 	}

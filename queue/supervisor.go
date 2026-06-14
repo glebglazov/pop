@@ -239,6 +239,11 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 							return err
 						}
 						entries = append(entries, mergeEvent)
+						if merge.Status == MergeabilityClean && autoMergeCleanEnabled(d, runtime.WorkingPath) {
+							if _, err := integrateCleanSet(d, cfg, setBackoffKey(rec.RuntimePath, rec.SetID), merge, io.Discard, "auto"); err != nil {
+								return err
+							}
+						}
 					}
 					if rec.Outcome == tasks.DrainOutcomeQuotaPaused && rec.ExhaustedPreset != "" {
 						until := time.Now().UTC().Add(qcfg.AgentQuotaRetryAfter)
@@ -341,6 +346,11 @@ func recordMergeability(d *Deps, state *DaemonState, rec MergeabilityRecord) err
 	}
 	state.Mergeability[setBackoffKey(rec.RuntimePath, rec.SetID)] = rec
 	return WriteDaemonState(d.Tasks, state)
+}
+
+func autoMergeCleanEnabled(d *Deps, repoRoot string) bool {
+	cfg, err := loadRepoConfig(d, repoRoot)
+	return err == nil && cfg.AutoMergeClean
 }
 
 func applyTerminalOutcomeState(d *Deps, state *DaemonState, qcfg config.ResolvedQueueConfig, project, runtimePath, setID string, outcome tasks.DrainOutcome) error {

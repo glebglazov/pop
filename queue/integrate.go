@@ -78,7 +78,22 @@ func IntegrateWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writ
 		}
 		return IntegrationResult{}, fmt.Errorf("queue: %s mergeability is %s; refusing integration", setID, mergeabilityLabel(rec.Status))
 	}
+	return integrateCleanSet(d, cfg, key, rec, out, "human")
+}
 
+func integrateCleanSet(d *Deps, cfg *config.Config, key string, rec MergeabilityRecord, out io.Writer, source string) (IntegrationResult, error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	if source == "" {
+		source = "human"
+	}
 	scan, err := resolveIntegrationScan(d, cfg, rec)
 	if err != nil {
 		return IntegrationResult{}, err
@@ -99,6 +114,10 @@ func IntegrateWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writ
 	if err := teardownIntegratedBranch(d, scan.RuntimePath, rec.RuntimePath, branch); err != nil {
 		return IntegrationResult{}, err
 	}
+	state, err := EnsureDaemonState(d.Tasks)
+	if err != nil {
+		return IntegrationResult{}, err
+	}
 	delete(state.Mergeability, key)
 	if err := WriteDaemonState(d.Tasks, state); err != nil {
 		return IntegrationResult{}, err
@@ -108,7 +127,7 @@ func IntegrateWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writ
 		Project:     rec.Project,
 		SetID:       rec.SetID,
 		RuntimePath: rec.RuntimePath,
-		Source:      "human",
+		Source:      source,
 		SourceRef:   branch,
 	}); err != nil {
 		return IntegrationResult{}, err

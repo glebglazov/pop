@@ -371,15 +371,19 @@ func liveOpenSpawns(d *Deps, projectName string) ([]liveOpenSpawn, error) {
 }
 
 func readRepoConfig(d *Deps, repoRoot string) (bool, string) {
-	pd := d.Project
-	if pd == nil || pd.FS == nil {
-		pd = project.DefaultDeps()
-	}
-	cfg, err := config.LoadRepoConfigWith(&config.Deps{FS: pd.FS}, repoRoot)
+	cfg, err := loadRepoConfig(d, repoRoot)
 	if err != nil {
 		return false, err.Error()
 	}
 	return cfg.WorktreeReady, ""
+}
+
+func loadRepoConfig(d *Deps, repoRoot string) (config.RepoConfig, error) {
+	pd := d.Project
+	if pd == nil || pd.FS == nil {
+		pd = project.DefaultDeps()
+	}
+	return config.LoadRepoConfigWith(&config.Deps{FS: pd.FS}, repoRoot)
 }
 
 // selectReadySet returns the highest-priority Ready set among refresh rows.
