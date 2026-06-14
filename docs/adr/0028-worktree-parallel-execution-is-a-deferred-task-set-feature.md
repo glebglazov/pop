@@ -1,6 +1,6 @@
 # Worktree-parallel execution is a deferred Task-set feature, not a Queue feature
 
-Status: accepted — deferred, not yet implemented
+Status: accepted — original design; implementation decisions recorded in ADR-0029 and ADR-0030
 
 The parked note `queue-worktree-parallelism.dormant.md` framed "drain several of a project's Task
 sets concurrently, each in its own worktree" as a future **Queue** capability. A design pass
@@ -40,11 +40,12 @@ question: **no** — per-set dispatch (ADR-0027) is unchanged.
   project (global config's glob registry still does that) and it contains **no command**, so it
   has no execution attack surface. Because nothing in `.pop.toml` runs, **pop itself owns
   `git worktree add`** — which **overrides the standing "worktree creation is not built in"**
-  stance (CONTEXT.md, Worktree picker). The first cut therefore serves **zero-setup projects
-  only**: a bare `git worktree add` must yield an immediately runnable checkout (no `npm install`,
-  no `.env` copy). An *executable* provisioning command for projects that need setup is
-  deliberately left for later — and that is where a trust model (the command is repo-sourced
-  shell run by an unattended daemon) would have to re-enter.
+  stance (CONTEXT.md, Worktree picker), now recorded as the implementation decision in ADR-0029.
+  The first cut therefore serves **zero-setup projects only**: a bare `git worktree add` must
+  yield an immediately runnable checkout (no `npm install`, no `.env` copy). An *executable*
+  provisioning command for projects that need setup is deliberately left for later — and that is
+  where a trust model (the command is repo-sourced shell run by an unattended daemon) would have
+  to re-enter.
 
 - **Branch model.** Each Worktree set forks off the working branch's HEAD at spawn and drains on
   its own branch; the reconcile target is that same **working branch** (continuing v1's "implement
@@ -59,7 +60,8 @@ question: **no** — per-set dispatch (ADR-0027) is unchanged.
   *conflicts* via `pop queue status`. The **human triggers** integration: a one-shot `pop` command
   for clean sets, an attended agent (ADR-0012) for conflicted ones. Conflict resolution is
   **necessarily an agent** — pop makes zero model calls (ADR-0024), so it cannot resolve
-  semantically itself. An opt-in `auto_merge_clean` per-project knob exists for operators who
+  semantically itself. This no-unattended-integration boundary is recorded as the implementation
+  decision in ADR-0030. An opt-in `auto_merge_clean` per-project knob exists for operators who
   accept the semantic risk; it is **off by default**.
 
 - **Lifecycle.** A worktree is torn down on clean reconcile + set DONE; **kept** when a set is
@@ -99,12 +101,12 @@ projects are not on day one.
 
 ## Consequences
 
-- When revived, pop owns `git worktree add`, **overriding** the "creation is not built in" stance
-  in CONTEXT.md — that line needs updating then, likely with its own ADR.
+- Pop now owns `git worktree add` for Worktree sets, **overriding** the "creation is not built in"
+  stance in CONTEXT.md for that execution path; ADR-0029 records the override and the glossary
+  now names the exception.
 - Introduces a repo-root `.pop.toml` (project-local, declarative; first use is `worktree_ready`)
   as a new config surface distinct from global `config.toml`.
-- New glossary terms land at revival, not now: **Worktree set**, **Worktree-ready project**,
-  **Mergeability**. CONTEXT.md is live ubiquitous language, so it stays untouched until code
-  exists.
+- The revival glossary terms are now live via a CONTEXT fragment: **Worktree set**,
+  **Worktree-ready project**, **Mergeability**.
 - The Queue is unchanged: per-set dispatch stays, and more checkouts simply use the parallelism
   the lock-per-checkout source of truth already permits.

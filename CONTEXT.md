@@ -139,7 +139,7 @@ The fuzzy-search picker opened by the project command — for choosing a project
 _Avoid_: Session picker, select view, normal mode
 
 **Worktree picker**:
-The fuzzy-search picker in `pop worktree` for choosing or deleting git worktrees in the current repository. Worktree creation is not built in; it belongs to user-defined commands, which hand the new path back via **Switch**. Deleting a worktree also removes its **History** entry; its tmux session is left alone (killing it stays an explicit, separate action).
+The fuzzy-search picker in `pop worktree` for choosing or deleting git worktrees in the current repository. Interactive picker creation remains out of scope for ordinary worktree navigation, but queue worktree parallelism is the explicit exception where pop owns `git worktree add` for a **Worktree-ready project**. User-defined creation commands may still hand a new path back via **Switch**. Deleting a worktree also removes its **History** entry; its tmux session is left alone (killing it stays an explicit, separate action).
 _Avoid_: Repo picker
 
 **Dashboard picker**:
