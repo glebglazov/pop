@@ -636,7 +636,7 @@ func TestProvisionWorktreeAddsFreshBranchFromHead(t *testing.T) {
 	}
 }
 
-func TestPrepareWorktreeDrainOverridesRuntimePath(t *testing.T) {
+func TestPrepareWorktreeDrainKeepsProjectSessionAndOverridesRuntimePath(t *testing.T) {
 	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
 	d := worktreeProvisionDeps(t, now, nil)
 	dec := actionableDecision()
@@ -652,8 +652,8 @@ func TestPrepareWorktreeDrainOverridesRuntimePath(t *testing.T) {
 	if got.scan.ProjectPath != got.scan.RuntimePath {
 		t.Fatalf("ProjectPath = %q, RuntimePath = %q; want worktree checkout for both", got.scan.ProjectPath, got.scan.RuntimePath)
 	}
-	if got.scan.SessionName == dec.scan.SessionName {
-		t.Fatalf("SessionName was not recalculated for worktree: %q", got.scan.SessionName)
+	if got.scan.SessionName != dec.scan.SessionName {
+		t.Fatalf("SessionName = %q, want originating project session %q", got.scan.SessionName, dec.scan.SessionName)
 	}
 }
 
@@ -756,6 +756,9 @@ func TestPrepareWorktreeDrainReusesBindingWithoutWorktreeAdd(t *testing.T) {
 	if got.scan.RuntimePath != boundPath || got.scan.ProjectPath != boundPath {
 		t.Fatalf("expected bound checkout %+v, got %+v", boundPath, got.scan)
 	}
+	if got.scan.SessionName != dec.scan.SessionName {
+		t.Fatalf("SessionName = %q, want originating project session %q", got.scan.SessionName, dec.scan.SessionName)
+	}
 }
 
 func TestPrepareWorktreeDrainRefusesInvalidBinding(t *testing.T) {
@@ -844,12 +847,20 @@ func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T)
 		t.Fatalf("Spawn: %v", err)
 	}
 
+	newSession, ok := rt.findCommand("new-session")
+	if !ok {
+		t.Fatal("expected originating project session to be created when absent")
+	}
+	if !reflect.DeepEqual(newSession, []string{"new-session", "proj-session", "/pop/worktrees/repo/set"}) {
+		t.Fatalf("new-session = %v, want project session created with worktree cwd", newSession)
+	}
+	assertSplitIntoWindow(t, rt, "proj-session:0", "/pop/worktrees/repo/set")
 	splitWindow, ok := rt.findCommand("split-window")
 	if !ok {
 		t.Fatal("expected a drain pane in the main window")
 	}
-	if !argsContain(splitWindow, "-c", "/pop/worktrees/repo/set") {
-		t.Fatalf("split-window must start in the worktree checkout: %v", splitWindow)
+	if argsContain(splitWindow, "-t", "set:0") || argsContain(splitWindow, "-t", "repo/set:0") {
+		t.Fatalf("split-window must not target a worktree-derived session: %v", splitWindow)
 	}
 	sendKeys, ok := rt.findCommand("send-keys")
 	if !ok {

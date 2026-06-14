@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -181,11 +180,6 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 		}
 		dec.scan.ProjectPath = binding.RuntimePath
 		dec.scan.RuntimePath = binding.RuntimePath
-		pd := d.Project
-		if pd == nil {
-			pd = project.DefaultDeps()
-		}
-		dec.scan.SessionName = project.SessionNameWith(pd, binding.RuntimePath)
 		return dec
 	}
 	wt, err := provisionWorktree(d, dec.scan.ProjectPath, dec.TaskSetID)
@@ -209,11 +203,6 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 	}
 	dec.scan.ProjectPath = wt.Path
 	dec.scan.RuntimePath = wt.Path
-	pd := d.Project
-	if pd == nil {
-		pd = project.DefaultDeps()
-	}
-	dec.scan.SessionName = project.SessionNameWith(pd, wt.Path)
 	return dec
 }
 
