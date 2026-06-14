@@ -20,6 +20,12 @@ import (
 // tmux-owned panes and keep running. A second `pop queue run` while one holds
 // the lock is refused before the loop starts.
 func Run(d *Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal) error {
+	out, supervisorLog, err := supervisorOutput(d.Tasks, out)
+	if err != nil {
+		return err
+	}
+	defer supervisorLog.Close()
+
 	lock, err := AcquireSupervisorLock(d.Tasks)
 	if err != nil {
 		return err
