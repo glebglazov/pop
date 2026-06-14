@@ -155,11 +155,6 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		return nil, err
 	}
 
-	dirty, err := runtimeIsDirty(d, runtimePath)
-	if err != nil {
-		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
-	}
-
 	confirmOut := opts.ConfirmOut
 	if confirmOut == nil {
 		confirmOut = os.Stderr
@@ -167,6 +162,17 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	out := opts.Output
 	if out == nil {
 		out = os.Stdout
+	}
+
+	lock, err := AcquireRuntimeLockForSet(d, runtimePath, sel.TaskSetID, confirmOut)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
+
+	dirty, err := runtimeIsDirty(d, runtimePath)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
 	}
 
 	displayRows := cloneRows(refresh.Rows)
@@ -191,12 +197,6 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	if !confirmed {
 		return &RunTaskResult{Selection: sel, Refresh: refresh, Declined: true}, nil
 	}
-
-	lock, err := AcquireRuntimeLockForSet(d, runtimePath, sel.TaskSetID, confirmOut)
-	if err != nil {
-		return nil, err
-	}
-	defer lock.Release()
 
 	if dirty {
 		if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.TaskSetID, sel.TaskID, strategy, commitOverrides, confirmOut); err != nil {

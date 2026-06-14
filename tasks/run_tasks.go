@@ -114,11 +114,6 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, err
 	}
 
-	dirty, err := runtimeIsDirty(d, runtimePath)
-	if err != nil {
-		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
-	}
-
 	confirmOut := opts.ConfirmOut
 	if confirmOut == nil {
 		confirmOut = os.Stderr
@@ -126,6 +121,27 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	out := opts.Output
 	if out == nil {
 		out = os.Stdout
+	}
+
+	lock, err := AcquireRuntimeLockForSet(d, runtimePath, taskSetID, confirmOut)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
+
+	// The lock is held, so this process owns the drain: record how it ends on
+	// every exit path below (including a panic-free crash bubbling up as err) so
+	// the supervisor can read the outcome without parsing human output. A
+	// declined run writes no record.
+	defer func() {
+		if rec, ok := drainOutcomeFor(taskSetID, runtimePath, result, err); ok {
+			_ = WriteDrainOutcome(d, rec)
+		}
+	}()
+
+	dirty, err := runtimeIsDirty(d, runtimePath)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
 	}
 
 	displayRows := cloneRows(refresh.Rows)
@@ -157,22 +173,6 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	if initialGate {
 		sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
 	}
-
-	lock, err := AcquireRuntimeLockForSet(d, runtimePath, taskSetID, confirmOut)
-	if err != nil {
-		return nil, err
-	}
-	defer lock.Release()
-
-	// The lock is held, so this process owns the drain: record how it ends on
-	// every exit path below (including a panic-free crash bubbling up as err) so
-	// the supervisor can read the outcome without parsing human output. A
-	// declined run never reaches here, so it writes no record.
-	defer func() {
-		if rec, ok := drainOutcomeFor(taskSetID, runtimePath, result, err); ok {
-			_ = WriteDrainOutcome(d, rec)
-		}
-	}()
 
 	maxTries := opts.MaxTries
 	if maxTries <= 0 {

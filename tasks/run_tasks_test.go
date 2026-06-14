@@ -253,6 +253,36 @@ func TestRunTaskSetBareDrainFallsBackToSoleHITLGate(t *testing.T) {
 	}
 }
 
+func TestRunTaskSetHoldsRuntimeLockAtInitialHITLGatePrompt(t *testing.T) {
+	env, agent := setupSoleHumanBlockedFixture(t)
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+	runtimePath, err := ResolveRuntimePathWith(d, env.root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(t *testing.T) {
+		t.Helper()
+		status := ReadRuntimeLockStatus(d, runtimePath)
+		if !status.Locked || status.Metadata == nil || status.Metadata.SetID != "solo" {
+			t.Fatalf("runtime lock at HITL prompt = %#v, want live solo lock", status)
+		}
+	}
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = &checkingPromptReader{t: t, check: check, response: "4\n"}
+
+	_, err = RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	status := ReadRuntimeLockStatus(d, runtimePath)
+	if status.Locked {
+		t.Fatalf("runtime lock leaked after HITL gate exit: %#v", status)
+	}
+}
+
 func TestRunTaskSetBareDrainFallbackDefaultGetsAgentAssistance(t *testing.T) {
 	env, agent := setupSoleHumanBlockedFixture(t)
 	runner := &configurableHITLAssistanceRunner{t: t, tasksDir: env.tasksDir, onRun: func(t *testing.T, tasksDir string) {
@@ -1349,6 +1379,22 @@ func (e *runTaskSetFixture) runTaskSetOpts(yes bool, agentCmd string, out io.Wri
 type fakeAgentStep struct {
 	summary  string
 	exitCode int
+}
+
+type checkingPromptReader struct {
+	t        *testing.T
+	check    func(*testing.T)
+	response string
+	done     bool
+}
+
+func (r *checkingPromptReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, io.EOF
+	}
+	r.check(r.t)
+	r.done = true
+	return copy(p, r.response), nil
 }
 
 type hitlAssistanceRunner struct {

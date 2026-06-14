@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
@@ -261,6 +262,44 @@ func TestDecideProjectWorktreeReadyTreatsLiveSpawnAsBusy(t *testing.T) {
 	}
 	if dec.lockStatus == nil || dec.lockStatus.RuntimePath != "/pop/worktrees/repo/set" {
 		t.Fatalf("lockStatus = %+v, want worktree lock", dec.lockStatus)
+	}
+}
+
+func TestScanTreatsDrainAtHITLGateRuntimeLockAsBusy(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	root := t.TempDir()
+	runGit(t, root, "init")
+
+	td := tasks.DefaultDeps()
+	td.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+	runtimePath, err := tasks.ResolveRuntimePathWith(td, root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := tasks.AcquireRuntimeLockForSet(td, runtimePath, "hitl-set", &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+
+	d := DefaultDeps()
+	d.Tasks = td
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: root}}}
+
+	decisions, err := Scan(d, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 {
+		t.Fatalf("decisions = %+v, want one busy decision", decisions)
+	}
+	dec := decisions[0]
+	if !dec.Busy || dec.Actionable() {
+		t.Fatalf("HITL-gated live drain must be busy and non-actionable, got %+v", dec)
+	}
+	if dec.TaskSetID != "hitl-set" {
+		t.Fatalf("busy TaskSetID = %q, want hitl-set", dec.TaskSetID)
 	}
 }
 

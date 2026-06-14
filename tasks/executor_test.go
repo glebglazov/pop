@@ -117,6 +117,37 @@ func TestRunTaskDeclinedConfirmation(t *testing.T) {
 	assertTaskOpen(t, env, "01-a")
 }
 
+func TestRunTaskDeclinedConfirmationReleasesEarlyRuntimeLockAndWritesNoDrainOutcome(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+	runtimePath, err := ResolveRuntimePathWith(d, env.root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := env.runOpts(false, agent)
+	opts.ConfirmIn = strings.NewReader("n\n")
+
+	result, err := RunTaskWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Declined {
+		t.Fatal("expected declined")
+	}
+
+	status := ReadRuntimeLockStatus(d, runtimePath)
+	if status.Locked {
+		t.Fatalf("runtime lock leaked after declined run: %#v", status)
+	}
+	if _, err := os.Stat(DrainOutcomePathFor(d, runtimePath)); !os.IsNotExist(err) {
+		t.Fatalf("declined single-task run wrote drain outcome or stat failed: %v", err)
+	}
+	assertTaskOpen(t, env, "01-a")
+}
+
 func TestRunTaskNonInteractiveRefusal(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
