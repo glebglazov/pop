@@ -175,7 +175,7 @@ func TestRecordTerminalOutcomesReadsDrainOutcome(t *testing.T) {
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
 
@@ -217,7 +217,7 @@ func TestRecordTerminalOutcomesInfersCrashForOpenSpawnWithoutOutcome(t *testing.
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
 
@@ -258,7 +258,7 @@ func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
 	if err := recordTerminalOutcomes(d, cfg, []Decision{{
 		Project: "pop",
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo, DefinitionPath: "/def"},
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
 	after := time.Now().UTC()
@@ -304,7 +304,7 @@ func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
 
@@ -370,7 +370,7 @@ func TestRecordTerminalOutcomesCrashBackoffEscalatesThenParks(t *testing.T) {
 		if err := recordTerminalOutcomes(d, cfg, []Decision{{
 			Project: "pop",
 			scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-		}}); err != nil {
+		}}, nil); err != nil {
 			t.Fatalf("record outcomes: %v", err)
 		}
 		state, err := ReadDaemonState(td)
@@ -457,7 +457,7 @@ func TestRecordTerminalOutcomesCleanOutcomeResetsCrashState(t *testing.T) {
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
 
@@ -515,7 +515,7 @@ func TestRecordTerminalOutcomesDoneRecordsMergeability(t *testing.T) {
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
 

@@ -58,7 +58,7 @@ func TestRecordTerminalOutcomesAutoMergeCleanEnabledIntegratesAndTearsDown(t *te
 	if err := recordTerminalOutcomes(d, cfg, []Decision{{
 		Project: projectName,
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestRecordTerminalOutcomesAutoMergeCleanDefaultOffWaits(t *testing.T) {
 	if err := recordTerminalOutcomes(d, cfg, []Decision{{
 		Project: projectName,
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
 
@@ -178,7 +178,7 @@ func TestRecordTerminalOutcomesAutoMergeCleanDoesNotIntegrateConflicts(t *testin
 	if err := recordTerminalOutcomes(d, cfg, []Decision{{
 		Project: projectName,
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
 

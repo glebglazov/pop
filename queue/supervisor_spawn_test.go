@@ -35,7 +35,7 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 	}
 
 	var supervisorOut bytes.Buffer
-	tick(d, &supervisorOut)
+	tick(d, &supervisorOut, newRunOutputState())
 
 	spawnCmd, ok := extractSpawnCommand(rt)
 	if !ok {

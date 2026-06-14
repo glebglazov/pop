@@ -39,8 +39,9 @@ func Run(d *Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal)
 
 	fmt.Fprintf(out, "pop queue supervisor started (PID %d); poll every %s. Ctrl-C to stop.\n", os.Getpid(), interval)
 
+	output := newRunOutputState()
 	for {
-		tick(d, out)
+		tick(d, out, output)
 
 		select {
 		case <-sigCh:
@@ -54,26 +55,35 @@ func Run(d *Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal)
 // tick performs one scan-and-spawn pass across all registered projects. Errors
 // resolving or spawning a single project are reported and skipped; one bad
 // project never halts the supervisor.
-func tick(d *Deps, out io.Writer) {
+func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 	cfg, err := d.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
-		fmt.Fprintf(out, "queue: load config: %v\n", err)
+		runOut.emitScanError(out, fmt.Sprintf("queue: load config: %v", err))
 		return
 	}
 
 	decisions, err := Scan(d, cfg)
 	if err != nil {
-		fmt.Fprintf(out, "queue: scan: %v\n", err)
+		runOut.emitScanError(out, fmt.Sprintf("queue: scan: %v", err))
 		return
 	}
-	if err := recordTerminalOutcomes(d, cfg, decisions); err != nil {
+	runOut.lastScan = ""
+	var eventLines []string
+	if err := recordTerminalOutcomes(d, cfg, decisions, &eventLines); err != nil {
 		fmt.Fprintf(out, "queue: journal outcomes: %v\n", err)
 	} else {
 		decisions, err = Scan(d, cfg)
 		if err != nil {
-			fmt.Fprintf(out, "queue: scan: %v\n", err)
+			runOut.emitScanError(out, fmt.Sprintf("queue: scan: %v", err))
 			return
 		}
+	}
+
+	if snap, err := BuildStatus(d, cfg); err == nil {
+		preSpawn := BuildRunView(snap, time.Now())
+		runOut.emitViewTransition(out, preSpawn, eventLines)
+	} else {
+		fmt.Fprintf(out, "queue: status: %v\n", err)
 	}
 
 	inPlaceFallbackSpawned := map[string]bool{}
@@ -83,7 +93,6 @@ func tick(d *Deps, out io.Writer) {
 		}
 		switch {
 		case dec.Err != nil:
-			fmt.Fprintf(out, "queue: %s: %v\n", dec.Project, dec.Err)
 		case dec.Actionable():
 			originalRuntimePath := dec.scan.RuntimePath
 			dec = prepareWorktreeDrain(d, out, dec)
@@ -121,6 +130,10 @@ func tick(d *Deps, out io.Writer) {
 			}
 			fmt.Fprintf(out, "queue: %s: spawned drain for %s\n", dec.Project, dec.TaskSetID)
 		}
+	}
+
+	if snap, err := BuildStatus(d, cfg); err == nil {
+		runOut.emitPostSpawnView(out, BuildRunView(snap, time.Now()))
 	}
 }
 
@@ -275,7 +288,7 @@ func ReconcileInFlight(d *Deps, cfg *config.Config) error {
 	return nil
 }
 
-func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) error {
+func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, eventLines *[]string) error {
 	entries, err := ReadJournal(d.Tasks)
 	if err != nil {
 		return err
@@ -311,7 +324,8 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 						return err
 					}
 					entries = append(entries, entry)
-					if err := applyTerminalOutcomeState(d, state, qcfg, dec.Project, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID, rec.Outcome); err != nil {
+					appendRunEvent(eventLines, formatOutcomeDelta(dec.Project, rec.SetID, rec.Outcome))
+					if err := applyTerminalOutcomeState(d, state, qcfg, dec.Project, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID, rec.Outcome, eventLines); err != nil {
 						return err
 					}
 					if rec.Outcome == tasks.DrainOutcomeDone {
@@ -382,6 +396,8 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 							return err
 						}
 						entries = append(entries, cooldown)
+						appendRunEvent(eventLines, fmt.Sprintf("queue: %s: %s cooldown agent=%s until=%s reason=%s",
+							dec.Project, rec.SetID, rec.ExhaustedPreset, until.UTC().Format(time.RFC3339), "quota pause"))
 					}
 				}
 			}
@@ -402,7 +418,8 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 					return err
 				}
 				entries = append(entries, outcome)
-				if err := applyTerminalOutcomeState(d, state, qcfg, entry.Project, dec.scan.ProjectPath, entry.RuntimePath, entry.SetID, DrainOutcomeCrashed); err != nil {
+				appendRunEvent(eventLines, formatOutcomeDelta(entry.Project, entry.SetID, DrainOutcomeCrashed))
+				if err := applyTerminalOutcomeState(d, state, qcfg, entry.Project, dec.scan.ProjectPath, entry.RuntimePath, entry.SetID, DrainOutcomeCrashed, eventLines); err != nil {
 					return err
 				}
 			}
@@ -465,7 +482,7 @@ func autoMergeCleanEnabled(d *Deps, repoRoot string) bool {
 	return err == nil && cfg.AutoMergeClean
 }
 
-func applyTerminalOutcomeState(d *Deps, state *DaemonState, qcfg config.ResolvedQueueConfig, project, projectPath, runtimePath, setID string, outcome tasks.DrainOutcome) error {
+func applyTerminalOutcomeState(d *Deps, state *DaemonState, qcfg config.ResolvedQueueConfig, project, projectPath, runtimePath, setID string, outcome tasks.DrainOutcome, eventLines *[]string) error {
 	if state == nil || runtimePath == "" || setID == "" {
 		return nil
 	}
@@ -498,6 +515,7 @@ func applyTerminalOutcomeState(d *Deps, state *DaemonState, qcfg config.Resolved
 			if err := WriteDaemonState(d.Tasks, state); err != nil {
 				return err
 			}
+			appendRunEvent(eventLines, fmt.Sprintf("queue: %s: %s parked reason=%s", project, setID, "repeated abnormal drain exits"))
 			return AppendJournalEntry(d.Tasks, JournalEntry{
 				Event:       JournalEventSetParked,
 				Project:     project,
@@ -532,6 +550,13 @@ func resetCrashState(state *DaemonState, key string) {
 	if state.ParkedSets != nil {
 		delete(state.ParkedSets, key)
 	}
+}
+
+func appendRunEvent(lines *[]string, line string) {
+	if lines == nil || line == "" {
+		return
+	}
+	*lines = append(*lines, line)
 }
 
 func drainOutcomeAbnormal(outcome tasks.DrainOutcome) bool {
