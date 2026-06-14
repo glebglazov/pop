@@ -54,8 +54,9 @@ func ValidDirtyRuntimeStrategies() []string {
 // RunTaskOptions configures a single-task execution.
 type RunTaskOptions struct {
 	ResolveInput
-	TaskPathOverride string
-	AgentPreset      string
+	TaskPathOverride   string
+	AgentPreset        string
+	DefaultAgentPreset string
 	// AgentExplicit reports the --agent flag was explicitly passed
 	// (Flags().Changed), letting it override a task's `agent` key (ADR-0018).
 	AgentExplicit bool
@@ -103,10 +104,11 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
 	}
+	baseAgentPreset := resolveDefaultAgentPreset(opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit)
 	agentOutput := AgentOutputAuto
 	if opts.AgentCmd == "" {
 		var err error
-		agentOutput, err = resolveAgentOutputMode(loadConfig, opts.AgentPreset, opts.AgentOutput)
+		agentOutput, err = resolveAgentOutputMode(loadConfig, baseAgentPreset, opts.AgentOutput)
 		if err != nil {
 			return nil, exitErr(ExitSetup, "%v", err)
 		}
@@ -194,8 +196,8 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		}
 	}
 
-	agentSpec := resolveTaskAgentSpec(opts.AgentPreset, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent)
-	if agentSpec != opts.AgentPreset {
+	agentSpec := resolveTaskAgentSpec(opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent)
+	if agentSpec != baseAgentPreset {
 		agentOutput, err = resolveAgentOutputMode(loadConfig, agentSpec, opts.AgentOutput)
 		if err != nil {
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)

@@ -26,6 +26,7 @@ func registerTaskShellCompletions() {
 	_ = taskCmd.RegisterFlagCompletionFunc("project", completeTaskProjects)
 
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+	_ = taskImplementCmd.RegisterFlagCompletionFunc("default-agent", completeTaskAgents)
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent-output", completeTaskAgentOutputs)
 
 	taskStatusCmd.ValidArgsFunction = completeTaskStatusArgs

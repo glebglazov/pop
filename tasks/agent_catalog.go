@@ -28,7 +28,7 @@ func AgentCatalog(d *Deps) []AgentCatalogRow {
 	rows := make([]AgentCatalogRow, 0, len(agentCatalogOrder))
 	for _, preset := range agentCatalogOrder {
 		adapter := agentAdapters[preset]
-		binary := agentBinary(adapter)
+		binary := AgentBinary(adapter)
 		_, err := lookPath(binary)
 		rows = append(rows, AgentCatalogRow{
 			Agent:  preset,
@@ -40,7 +40,7 @@ func AgentCatalog(d *Deps) []AgentCatalogRow {
 	return rows
 }
 
-func agentBinary(adapter AgentAdapter) string {
+func AgentBinary(adapter AgentAdapter) string {
 	if preset, ok := adapter.(*presetAgentAdapter); ok && len(preset.headlessPrefix) > 0 {
 		return preset.headlessPrefix[0]
 	}

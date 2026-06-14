@@ -14,8 +14,10 @@ import (
 // DaemonState is persisted supervisor-owned state. Later queue slices add
 // cooldowns, parked sets, and retry timers here.
 type DaemonState struct {
-	Version   int       `json:"version"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	Version        int                  `json:"version"`
+	UpdatedAt      time.Time            `json:"updated_at,omitempty"`
+	AgentCooldowns map[string]time.Time `json:"agent_cooldowns,omitempty"`
+	SetBackoffs    map[string]time.Time `json:"set_backoffs,omitempty"`
 }
 
 // DaemonStatePath returns the queue daemon state path.
@@ -60,6 +62,7 @@ func WriteDaemonState(d *tasks.Deps, state *DaemonState) error {
 	if state.Version == 0 {
 		state.Version = 1
 	}
+	state.UpdatedAt = time.Now().UTC()
 	payload, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err

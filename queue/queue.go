@@ -9,6 +9,8 @@ package queue
 import (
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
@@ -86,13 +88,23 @@ type projectScan struct {
 
 // Decision is the supervisor's per-project outcome for one scan iteration.
 type Decision struct {
-	Project    string
-	Busy       bool   // a live runtime lock ⇒ already executing, skip
-	TaskSetID  string // the drain to spawn; empty when nothing is actionable
-	Reason     string // why no drain was spawned (busy, no-ready-set, error)
-	Err        error
-	scan       projectScan
-	lockStatus *tasks.RuntimeLockStatus
+	Project      string
+	Busy         bool   // a live runtime lock ⇒ already executing, skip
+	TaskSetID    string // the drain to spawn; empty when nothing is actionable
+	Reason       string // why no drain was spawned (busy, no-ready-set, error)
+	DefaultAgent string
+	WaitUntil    time.Time
+	AgentNotes   []AgentNote
+	Err          error
+	scan         projectScan
+	lockStatus   *tasks.RuntimeLockStatus
+}
+
+type AgentNote struct {
+	Event  string
+	Agent  string
+	Reason string
+	Until  time.Time
 }
 
 // Actionable reports whether the decision selected a Task set to drain.
@@ -107,6 +119,15 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	if err != nil {
 		return nil, err
 	}
+	qcfg, err := resolvedQueueConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	state, err := EnsureDaemonState(d.Tasks)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
 
 	decisions := make([]Decision, 0, len(projects))
 	for _, p := range projects {
@@ -115,9 +136,20 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 			decisions = append(decisions, Decision{Project: p.Name, Err: err, Reason: "resolve"})
 			continue
 		}
-		decisions = append(decisions, decideProject(d, scan))
+		decisions = append(decisions, decideProject(d, scan, qcfg.Agents, state, now))
 	}
 	return decisions, nil
+}
+
+func resolvedQueueConfig(cfg *config.Config) (config.ResolvedQueueConfig, error) {
+	qcfg, err := cfg.ResolveQueue()
+	if err != nil {
+		return config.ResolvedQueueConfig{}, err
+	}
+	if len(qcfg.Agents) == 0 {
+		qcfg.Agents = []string{tasks.DefaultAgentPreset}
+	}
+	return qcfg, nil
 }
 
 // resolveScan derives a project's definition path, runtime checkout, and tmux
@@ -144,7 +176,7 @@ func resolveScan(d *Deps, p project.ExpandedProject) (projectScan, error) {
 // lock means the checkout is already executing, so the project is skipped
 // (per-project serialization, ADR 0027); otherwise the highest-priority Ready
 // non-Archived set is selected to drain.
-func decideProject(d *Deps, scan projectScan) Decision {
+func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonState, now time.Time) Decision {
 	dec := Decision{Project: scan.Name, scan: scan}
 
 	lock := d.readLock(scan.RuntimePath)
@@ -162,12 +194,29 @@ func decideProject(d *Deps, scan projectScan) Decision {
 		return dec
 	}
 
-	id, ok := selectReadySet(refresh.Rows)
+	id, waitUntil, ok := selectReadySet(refresh, scan.RuntimePath, state, now)
 	if !ok {
-		dec.Reason = "no ready set"
+		if !waitUntil.IsZero() {
+			dec.Reason = "set backed off for pinned agent cooldown"
+			dec.WaitUntil = waitUntil
+		} else {
+			dec.Reason = "no ready set"
+		}
+		return dec
+	}
+	defaultAgent, waitUntil, notes, ok := selectDefaultAgent(d, agents, state, now)
+	dec.AgentNotes = notes
+	if !ok {
+		if waitUntil.IsZero() {
+			dec.Reason = "no available agent"
+		} else {
+			dec.Reason = "all agents cooling"
+		}
+		dec.WaitUntil = waitUntil
 		return dec
 	}
 	dec.TaskSetID = id
+	dec.DefaultAgent = defaultAgent
 	return dec
 }
 
@@ -175,7 +224,7 @@ func decideProject(d *Deps, scan projectScan) Decision {
 // RefreshWith returns only non-Archived sets, so Archived sets are already
 // dropped here. Higher priority integers rank first; ties break by
 // registration order, matching the status table's active-set ordering.
-func selectReadySet(rows []tasks.Row) (string, bool) {
+func selectReadySetID(rows []tasks.Row) (string, bool) {
 	var ready []tasks.Row
 	for _, row := range rows {
 		if row.Status == tasks.StatusReady {
@@ -194,6 +243,103 @@ func selectReadySet(rows []tasks.Row) (string, bool) {
 	return ready[0].ID, true
 }
 
+func selectReadySet(refresh *tasks.RefreshResult, runtimePath string, state *DaemonState, now time.Time) (string, time.Time, bool) {
+	if refresh == nil {
+		return "", time.Time{}, false
+	}
+	var ready []tasks.Row
+	for _, row := range refresh.Rows {
+		if row.Status == tasks.StatusReady {
+			ready = append(ready, row)
+		}
+	}
+	if len(ready) == 0 {
+		return "", time.Time{}, false
+	}
+	sort.SliceStable(ready, func(i, j int) bool {
+		if ready[i].Priority != ready[j].Priority {
+			return ready[i].Priority > ready[j].Priority
+		}
+		return ready[i].RegIndex < ready[j].RegIndex
+	})
+	var earliest time.Time
+	for _, row := range ready {
+		until := setBackoffUntil(state, runtimePath, row.ID, now)
+		if until.IsZero() {
+			return row.ID, time.Time{}, true
+		}
+		if earliest.IsZero() || until.Before(earliest) {
+			earliest = until
+		}
+	}
+	return "", earliest, false
+}
+
+func setBackoffUntil(state *DaemonState, runtimePath, setID string, now time.Time) time.Time {
+	if state == nil || state.SetBackoffs == nil {
+		return time.Time{}
+	}
+	until := state.SetBackoffs[setBackoffKey(runtimePath, setID)]
+	if until.IsZero() || !until.After(now) {
+		return time.Time{}
+	}
+	return until
+}
+
+func setBackoffKey(runtimePath, setID string) string {
+	return runtimePath + "\x00" + setID
+}
+
+func selectDefaultAgent(d *Deps, agents []string, state *DaemonState, now time.Time) (string, time.Time, []AgentNote, bool) {
+	var notes []AgentNote
+	var earliest time.Time
+	for _, agent := range agents {
+		preset, err := tasks.AgentPresetName(agent)
+		if err != nil {
+			notes = append(notes, AgentNote{Event: "agent_unavailable", Agent: agent, Reason: err.Error()})
+			continue
+		}
+		until := agentCooldownUntil(state, preset, now)
+		if !until.IsZero() {
+			notes = append(notes, AgentNote{Event: "agent_cooling", Agent: preset, Reason: "quota cooldown", Until: until})
+			if earliest.IsZero() || until.Before(earliest) {
+				earliest = until
+			}
+			continue
+		}
+		if !agentBinaryAvailable(d, preset) {
+			notes = append(notes, AgentNote{Event: "agent_unavailable", Agent: preset, Reason: "binary not found on PATH"})
+			continue
+		}
+		return agent, time.Time{}, notes, true
+	}
+	return "", earliest, notes, false
+}
+
+func agentCooldownUntil(state *DaemonState, preset string, now time.Time) time.Time {
+	if state == nil || state.AgentCooldowns == nil {
+		return time.Time{}
+	}
+	until := state.AgentCooldowns[preset]
+	if until.IsZero() || !until.After(now) {
+		return time.Time{}
+	}
+	return until
+}
+
+func agentBinaryAvailable(d *Deps, preset string) bool {
+	adapter, err := tasks.ResolveAgentAdapter(preset)
+	if err != nil {
+		return false
+	}
+	lookPath := tasks.DefaultDeps().LookPath
+	if d != nil && d.Tasks != nil && d.Tasks.LookPath != nil {
+		lookPath = d.Tasks.LookPath
+	}
+	_, err = lookPath(tasks.AgentBinary(adapter))
+	return err == nil
+}
+
 // Spawn launches the selected drain into a pane of the project's `pop-queue`
 // window, creating the tmux session detached when absent and the window when
 // absent. It is a no-op for non-actionable decisions.
@@ -201,7 +347,10 @@ func Spawn(d *Deps, dec Decision) error {
 	if !dec.Actionable() {
 		return nil
 	}
-	command := fmt.Sprintf("pop tasks implement %s --yes", dec.TaskSetID)
+	command := fmt.Sprintf("pop tasks implement %s --yes", shellQuote(dec.TaskSetID))
+	if dec.DefaultAgent != "" {
+		command += " --default-agent " + shellQuote(dec.DefaultAgent)
+	}
 	return spawnDrain(d.Tmux, dec.scan.SessionName, dec.scan.ProjectPath, command)
 }
 
@@ -252,4 +401,17 @@ func hasQueueWindow(tmux deps.Tmux, session string) bool {
 		}
 	}
 	return false
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '\n', '\'', '"', '\\', '$', '`', '!', '&', '|', ';', '(', ')', '<', '>':
+			return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+		}
+	}
+	return s
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/tasks"
 )
 
 // Run starts the foreground supervisor loop: it acquires the single-instance
@@ -63,11 +64,14 @@ func tick(d *Deps, out io.Writer) {
 		fmt.Fprintf(out, "queue: scan: %v\n", err)
 		return
 	}
-	if err := recordTerminalOutcomes(d, decisions); err != nil {
+	if err := recordTerminalOutcomes(d, cfg, decisions); err != nil {
 		fmt.Fprintf(out, "queue: journal outcomes: %v\n", err)
 	}
 
 	for _, dec := range decisions {
+		if err := journalAgentNotes(d, dec); err != nil {
+			fmt.Fprintf(out, "queue: %s: journal agent notes: %v\n", dec.Project, err)
+		}
 		switch {
 		case dec.Err != nil:
 			fmt.Fprintf(out, "queue: %s: %v\n", dec.Project, dec.Err)
@@ -75,6 +79,18 @@ func tick(d *Deps, out io.Writer) {
 			if err := Spawn(d, dec); err != nil {
 				fmt.Fprintf(out, "queue: %s: spawn %s: %v\n", dec.Project, dec.TaskSetID, err)
 				continue
+			}
+			if dec.DefaultAgent != "" {
+				if err := AppendJournalEntry(d.Tasks, JournalEntry{
+					Event:       JournalEventAgentSwitch,
+					Project:     dec.Project,
+					SetID:       dec.TaskSetID,
+					RuntimePath: dec.scan.RuntimePath,
+					Agent:       dec.DefaultAgent,
+					Source:      "supervisor",
+				}); err != nil {
+					fmt.Fprintf(out, "queue: %s: journal agent switch %s: %v\n", dec.Project, dec.TaskSetID, err)
+				}
 			}
 			if err := AppendJournalEntry(d.Tasks, JournalEntry{
 				Event:       JournalEventSpawn,
@@ -123,8 +139,16 @@ func ReconcileInFlight(d *Deps, cfg *config.Config) error {
 	return nil
 }
 
-func recordTerminalOutcomes(d *Deps, decisions []Decision) error {
+func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) error {
 	entries, err := ReadJournal(d.Tasks)
+	if err != nil {
+		return err
+	}
+	qcfg, err := resolvedQueueConfig(cfg)
+	if err != nil {
+		return err
+	}
+	state, err := EnsureDaemonState(d.Tasks)
 	if err != nil {
 		return err
 	}
@@ -149,6 +173,36 @@ func recordTerminalOutcomes(d *Deps, decisions []Decision) error {
 					return err
 				}
 				entries = append(entries, entry)
+				if rec.Outcome == tasks.DrainOutcomeQuotaPaused && rec.ExhaustedPreset != "" {
+					until := time.Now().UTC().Add(qcfg.AgentQuotaRetryAfter)
+					if state.AgentCooldowns == nil {
+						state.AgentCooldowns = map[string]time.Time{}
+					}
+					state.AgentCooldowns[rec.ExhaustedPreset] = until
+					if rec.ExhaustedPinned {
+						if state.SetBackoffs == nil {
+							state.SetBackoffs = map[string]time.Time{}
+						}
+						state.SetBackoffs[setBackoffKey(rec.RuntimePath, rec.SetID)] = until
+					}
+					if err := WriteDaemonState(d.Tasks, state); err != nil {
+						return err
+					}
+					cooldown := JournalEntry{
+						Event:       JournalEventAgentCooldown,
+						Project:     dec.Project,
+						SetID:       rec.SetID,
+						RuntimePath: rec.RuntimePath,
+						Agent:       rec.ExhaustedPreset,
+						Reason:      "quota pause",
+						Until:       until,
+						Source:      "supervisor",
+					}
+					if err := AppendJournalEntry(d.Tasks, cooldown); err != nil {
+						return err
+					}
+					entries = append(entries, cooldown)
+				}
 			}
 		}
 		for _, entry := range entries {
@@ -168,6 +222,28 @@ func recordTerminalOutcomes(d *Deps, decisions []Decision) error {
 				}
 				entries = append(entries, outcome)
 			}
+		}
+	}
+	return nil
+}
+
+func journalAgentNotes(d *Deps, dec Decision) error {
+	for _, note := range dec.AgentNotes {
+		event := JournalEventAgentUnavailable
+		if note.Event == "agent_cooling" {
+			event = JournalEventAgentCooldown
+		}
+		if err := AppendJournalEntry(d.Tasks, JournalEntry{
+			Event:       event,
+			Project:     dec.Project,
+			SetID:       dec.TaskSetID,
+			RuntimePath: dec.scan.RuntimePath,
+			Agent:       note.Agent,
+			Reason:      note.Reason,
+			Until:       note.Until,
+			Source:      "supervisor",
+		}); err != nil {
+			return err
 		}
 	}
 	return nil

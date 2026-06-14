@@ -115,14 +115,16 @@ func TestClassifyDrainOutcome(t *testing.T) {
 		err         error
 		wantOutcome DrainOutcome
 		wantPreset  string
+		wantPinned  bool
 		wantWrite   bool
 		wantAbnorm  bool
 	}{
 		{
 			name:        "quota pause carries preset",
-			result:      &RunTaskSetResult{QuotaPaused: true, PausePreset: "claude"},
+			result:      &RunTaskSetResult{QuotaPaused: true, PausePreset: "claude", PausePinnedAgent: true},
 			wantOutcome: DrainOutcomeQuotaPaused,
 			wantPreset:  "claude",
+			wantPinned:  true,
 			wantWrite:   true,
 		},
 		{
@@ -171,7 +173,7 @@ func TestClassifyDrainOutcome(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			outcome, preset, ok := classifyDrainOutcome(tc.result, tc.err)
+			outcome, preset, pinned, ok := classifyDrainOutcome(tc.result, tc.err)
 			if ok != tc.wantWrite {
 				t.Fatalf("write = %v, want %v", ok, tc.wantWrite)
 			}
@@ -183,6 +185,9 @@ func TestClassifyDrainOutcome(t *testing.T) {
 			}
 			if preset != tc.wantPreset {
 				t.Fatalf("preset = %q, want %q", preset, tc.wantPreset)
+			}
+			if pinned != tc.wantPinned {
+				t.Fatalf("pinned = %v, want %v", pinned, tc.wantPinned)
 			}
 			if outcome.Abnormal() != tc.wantAbnorm {
 				t.Fatalf("abnormal = %v, want %v", outcome.Abnormal(), tc.wantAbnorm)
@@ -200,6 +205,7 @@ func TestWriteReadDrainOutcomeRoundTrip(t *testing.T) {
 		SetID:           "demo",
 		Outcome:         DrainOutcomeQuotaPaused,
 		ExhaustedPreset: "claude",
+		ExhaustedPinned: true,
 		RuntimePath:     "/some/checkout",
 	}
 	if err := WriteDrainOutcome(d, want); err != nil {
@@ -209,7 +215,7 @@ func TestWriteReadDrainOutcomeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if got.SetID != want.SetID || got.Outcome != want.Outcome || got.ExhaustedPreset != want.ExhaustedPreset || got.RuntimePath != want.RuntimePath {
+	if got.SetID != want.SetID || got.Outcome != want.Outcome || got.ExhaustedPreset != want.ExhaustedPreset || got.ExhaustedPinned != want.ExhaustedPinned || got.RuntimePath != want.RuntimePath {
 		t.Fatalf("round-trip mismatch: got %#v want %#v", got, want)
 	}
 	if got.WrittenAt.IsZero() {

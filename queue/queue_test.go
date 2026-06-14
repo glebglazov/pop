@@ -1,8 +1,10 @@
 package queue
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
@@ -61,7 +63,7 @@ func TestSelectReadySet(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := selectReadySet(tt.rows)
+			got, ok := selectReadySetID(tt.rows)
 			if ok != tt.ok || got != tt.want {
 				t.Fatalf("selectReadySet = (%q, %v), want (%q, %v)", got, ok, tt.want, tt.ok)
 			}
@@ -85,6 +87,7 @@ func idleLock(path string) *tasks.RuntimeLockStatus {
 func TestDecideProjectIdleSkip(t *testing.T) {
 	refreshCalled := false
 	d := &Deps{
+		Tasks: queueTestTasksDeps(true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
 			return liveLock(runtimePath)
 		},
@@ -94,7 +97,7 @@ func TestDecideProjectIdleSkip(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"})
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
 
 	if !dec.Busy {
 		t.Fatalf("expected Busy decision for a live lock, got %+v", dec)
@@ -112,6 +115,7 @@ func TestDecideProjectIdleSkip(t *testing.T) {
 
 func TestDecideProjectSelectsHighestPriority(t *testing.T) {
 	d := &Deps{
+		Tasks: queueTestTasksDeps(true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
 			return idleLock(runtimePath)
 		},
@@ -124,13 +128,16 @@ func TestDecideProjectSelectsHighestPriority(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"})
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
 
 	if dec.Busy || dec.Err != nil {
 		t.Fatalf("idle project with ready work should be actionable, got %+v", dec)
 	}
 	if dec.TaskSetID != "top" {
 		t.Fatalf("expected highest-priority ready set 'top', got %q", dec.TaskSetID)
+	}
+	if dec.DefaultAgent != "claude" {
+		t.Fatalf("default agent = %q, want claude", dec.DefaultAgent)
 	}
 	if !dec.Actionable() {
 		t.Fatalf("expected actionable decision, got %+v", dec)
@@ -139,6 +146,7 @@ func TestDecideProjectSelectsHighestPriority(t *testing.T) {
 
 func TestDecideProjectNoReadySet(t *testing.T) {
 	d := &Deps{
+		Tasks:    queueTestTasksDeps(true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
@@ -148,7 +156,7 @@ func TestDecideProjectNoReadySet(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"})
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
 
 	if dec.Actionable() {
 		t.Fatalf("a project with no ready set must not be actionable: %+v", dec)
@@ -156,6 +164,71 @@ func TestDecideProjectNoReadySet(t *testing.T) {
 	if dec.Reason != "no ready set" {
 		t.Fatalf("expected reason 'no ready set', got %q", dec.Reason)
 	}
+}
+
+func TestSelectDefaultAgentSkipsMissingAndCooled(t *testing.T) {
+	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	d := &Deps{Tasks: queueTestTasksDeps(false)}
+	d.Tasks.LookPath = func(file string) (string, error) {
+		if file == "codex" {
+			return "/bin/codex", nil
+		}
+		return "", fmt.Errorf("missing %s", file)
+	}
+	state := &DaemonState{Version: 1, AgentCooldowns: map[string]time.Time{
+		"opencode": now.Add(time.Hour),
+	}}
+
+	agent, _, notes, ok := selectDefaultAgent(d, []string{"claude", "opencode", "codex"}, state, now)
+	if !ok || agent != "codex" {
+		t.Fatalf("selectDefaultAgent = (%q, %v), want codex,true; notes=%+v", agent, ok, notes)
+	}
+	if len(notes) != 2 {
+		t.Fatalf("notes = %+v, want missing claude and cooling opencode", notes)
+	}
+}
+
+func TestSelectDefaultAgentAllCooledWaits(t *testing.T) {
+	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	first := now.Add(10 * time.Minute)
+	second := now.Add(time.Hour)
+	d := &Deps{Tasks: queueTestTasksDeps(true)}
+	state := &DaemonState{Version: 1, AgentCooldowns: map[string]time.Time{
+		"claude": first,
+		"codex":  second,
+	}}
+
+	agent, waitUntil, _, ok := selectDefaultAgent(d, []string{"claude", "codex"}, state, now)
+	if ok || agent != "" || !waitUntil.Equal(first) {
+		t.Fatalf("selectDefaultAgent = (%q,%s,%v), want wait until %s", agent, waitUntil, ok, first)
+	}
+}
+
+func TestSelectReadySetSkipsBackedOffPinnedSet(t *testing.T) {
+	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
+		{ID: "pinned", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
+		{ID: "fallback", Status: tasks.StatusReady, Priority: 1, RegIndex: 1},
+	}}
+	state := &DaemonState{Version: 1, SetBackoffs: map[string]time.Time{
+		setBackoffKey("/runtime", "pinned"): now.Add(time.Hour),
+	}}
+
+	id, _, ok := selectReadySet(refresh, "/runtime", state, now)
+	if !ok || id != "fallback" {
+		t.Fatalf("selectReadySet = (%q,%v), want fallback,true", id, ok)
+	}
+}
+
+func queueTestTasksDeps(allFound bool) *tasks.Deps {
+	d := tasks.DefaultDeps()
+	d.LookPath = func(file string) (string, error) {
+		if allFound {
+			return "/bin/" + file, nil
+		}
+		return "", fmt.Errorf("missing %s", file)
+	}
+	return d
 }
 
 // recordingTmux captures tmux invocations so spawn behavior can be asserted.
@@ -195,8 +268,9 @@ func (rt *recordingTmux) findCommand(verb string) ([]string, bool) {
 
 func actionableDecision() Decision {
 	return Decision{
-		Project:   "proj",
-		TaskSetID: "2026-06-14-queue",
+		Project:      "proj",
+		TaskSetID:    "2026-06-14-queue",
+		DefaultAgent: "codex",
 		scan: projectScan{
 			ProjectPath: "/checkout",
 			SessionName: "proj-session",
@@ -264,8 +338,8 @@ func assertSendKeys(t *testing.T, rt *recordingTmux) {
 		t.Fatal("expected the drain command to be sent into the pane")
 	}
 	joined := strings.Join(sendKeys, " ")
-	if !strings.Contains(joined, "pop tasks implement 2026-06-14-queue --yes") {
-		t.Fatalf("send-keys must run `pop tasks implement <set> --yes`: %v", sendKeys)
+	if !strings.Contains(joined, "pop tasks implement 2026-06-14-queue --yes --default-agent codex") {
+		t.Fatalf("send-keys must run `pop tasks implement <set> --yes --default-agent <agent>`: %v", sendKeys)
 	}
 }
 

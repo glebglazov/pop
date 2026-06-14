@@ -14,8 +14,11 @@ import (
 )
 
 const (
-	JournalEventSpawn   = "spawn"
-	JournalEventOutcome = "outcome"
+	JournalEventSpawn            = "spawn"
+	JournalEventOutcome          = "outcome"
+	JournalEventAgentSwitch      = "agent_switch"
+	JournalEventAgentCooldown    = "agent_cooldown"
+	JournalEventAgentUnavailable = "agent_unavailable"
 )
 
 // JournalEntry is one append-only queue journal record.
@@ -28,6 +31,9 @@ type JournalEntry struct {
 	Outcome     tasks.DrainOutcome `json:"outcome,omitempty"`
 	PID         int                `json:"pid,omitempty"`
 	Source      string             `json:"source,omitempty"`
+	Agent       string             `json:"agent,omitempty"`
+	Reason      string             `json:"reason,omitempty"`
+	Until       time.Time          `json:"until,omitempty"`
 }
 
 // QueueDataDir returns the data directory for queue-owned durable files.

@@ -415,13 +415,46 @@ func ResolveAgentAdapter(preset string) (AgentAdapter, error) {
 	return adapter, nil
 }
 
+// AgentPresetName returns the normalized preset token from an Agent-preset-shaped
+// value. It is exported for queue supervision, which stores cooldowns by
+// subscription-level preset rather than by augmented CLI spec.
+func AgentPresetName(spec string) (string, error) {
+	name, _, err := parseAgentPresetSpec(spec)
+	if err != nil {
+		return "", err
+	}
+	if name == "" {
+		name = DefaultAgentPreset
+	}
+	return name, nil
+}
+
+func resolveDefaultAgentPreset(cliPreset, defaultPreset string, agentExplicit bool) string {
+	if !agentExplicit && strings.TrimSpace(defaultPreset) != "" {
+		return defaultPreset
+	}
+	return cliPreset
+}
+
+func taskPinMatchesPreset(taskAgent, preset string) bool {
+	if strings.TrimSpace(taskAgent) == "" || strings.TrimSpace(preset) == "" {
+		return false
+	}
+	name, err := AgentPresetName(taskAgent)
+	return err == nil && name == preset
+}
+
 // resolveTaskAgentSpec applies ADR-0018 precedence for one task attempt:
 // explicit --agent-cmd > explicitly-passed --agent > the task's `agent` key >
-// the resolved CLI/default agent. agentExplicit must come from
+// a non-overriding default agent > the built-in default agent. agentExplicit
+// must come from
 // Flags().Changed("agent"), not the resolved value, so a bare defaulted
 // --agent claude never stomps a planner's per-task choice.
-func resolveTaskAgentSpec(cliPreset string, agentExplicit bool, agentCmd, taskAgent string) string {
+func resolveTaskAgentSpec(cliPreset, defaultPreset string, agentExplicit bool, agentCmd, taskAgent string) string {
 	if agentCmd != "" || agentExplicit || taskAgent == "" {
+		if agentCmd == "" && !agentExplicit && strings.TrimSpace(defaultPreset) != "" {
+			return defaultPreset
+		}
 		return cliPreset
 	}
 	return taskAgent

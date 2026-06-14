@@ -19,8 +19,9 @@ const taskSetConfirmPrompt = "Run AFK tasks in this Task set? [y/N]: "
 // RunTaskSetOptions configures sequential Task-set draining.
 type RunTaskSetOptions struct {
 	ResolveInput
-	TaskSetOverride string
-	AgentPreset     string
+	TaskSetOverride    string
+	AgentPreset        string
+	DefaultAgentPreset string
 	// AgentExplicit reports the --agent flag was explicitly passed
 	// (Flags().Changed), letting it override a task's `agent` key (ADR-0018).
 	AgentExplicit bool
@@ -48,7 +49,8 @@ type RunTaskSetResult struct {
 	QuotaPaused     bool
 	PauseReason     string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
-	PausePreset string
+	PausePreset      string
+	PausePinnedAgent bool
 }
 
 // RunTaskSet drains one Task set sequentially through eligible AFK tasks.
@@ -61,10 +63,11 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
 	}
+	baseAgentPreset := resolveDefaultAgentPreset(opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit)
 	agentOutput := AgentOutputAuto
 	if opts.AgentCmd == "" {
 		var err error
-		agentOutput, err = resolveAgentOutputMode(loadConfig, opts.AgentPreset, opts.AgentOutput)
+		agentOutput, err = resolveAgentOutputMode(loadConfig, baseAgentPreset, opts.AgentOutput)
 		if err != nil {
 			return nil, exitErr(ExitSetup, "%v", err)
 		}
@@ -285,9 +288,9 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			dirtyStrategyApplied = true
 		}
 
-		agentSpec := resolveTaskAgentSpec(opts.AgentPreset, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent)
+		agentSpec := resolveTaskAgentSpec(opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent)
 		attemptOutput := agentOutput
-		if agentSpec != opts.AgentPreset {
+		if agentSpec != baseAgentPreset {
 			attemptOutput, err = resolveAgentOutputMode(loadConfig, agentSpec, opts.AgentOutput)
 			if err != nil {
 				return nil, taskExitErr(sel, ExitSetup, "%v", err)
@@ -325,6 +328,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			result.QuotaPaused = true
 			result.PauseReason = taskResult.PauseReason
 			result.PausePreset = taskResult.PausePreset
+			result.PausePinnedAgent = taskPinMatchesPreset(sel.Task.Agent, taskResult.PausePreset)
 			result.Refresh = currentRefresh
 			printTaskSetSummary(out, result)
 			return result, nil

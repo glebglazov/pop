@@ -854,6 +854,7 @@ func TestResolveTaskAgentSpecPrecedence(t *testing.T) {
 	tests := []struct {
 		name          string
 		cliPreset     string
+		defaultPreset string
 		agentExplicit bool
 		agentCmd      string
 		taskAgent     string
@@ -864,6 +865,30 @@ func TestResolveTaskAgentSpecPrecedence(t *testing.T) {
 			cliPreset: "claude", agentExplicit: false,
 			taskAgent: "codex --model gpt-5-codex",
 			want:      "codex --model gpt-5-codex",
+		},
+		{
+			name:          "task key wins over supplied default agent",
+			cliPreset:     "claude",
+			defaultPreset: "opencode",
+			agentExplicit: false,
+			taskAgent:     "codex --model gpt-5-codex",
+			want:          "codex --model gpt-5-codex",
+		},
+		{
+			name:          "supplied default agent wins for unpinned task",
+			cliPreset:     "claude",
+			defaultPreset: "opencode",
+			agentExplicit: false,
+			taskAgent:     "",
+			want:          "opencode",
+		},
+		{
+			name:          "explicit agent wins over supplied default agent",
+			cliPreset:     "codex",
+			defaultPreset: "opencode",
+			agentExplicit: true,
+			taskAgent:     "",
+			want:          "codex",
 		},
 		{
 			name:      "explicit agent wins over task key",
@@ -906,7 +931,7 @@ func TestResolveTaskAgentSpecPrecedence(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveTaskAgentSpec(tt.cliPreset, tt.agentExplicit, tt.agentCmd, tt.taskAgent)
+			got := resolveTaskAgentSpec(tt.cliPreset, tt.defaultPreset, tt.agentExplicit, tt.agentCmd, tt.taskAgent)
 			if got != tt.want {
 				t.Fatalf("resolveTaskAgentSpec = %q, want %q", got, tt.want)
 			}

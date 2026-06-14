@@ -51,6 +51,10 @@ type DrainOutcomeRecord struct {
 	// when Outcome is DrainOutcomeQuotaPaused, and powers agent fallback's
 	// decision of which preset to cool down.
 	ExhaustedPreset string `json:"exhausted_preset,omitempty"`
+	// ExhaustedPinned reports that the quota-paused attempt was running because
+	// the task itself pinned ExhaustedPreset, not because the queue selected it
+	// as the rotating default.
+	ExhaustedPinned bool `json:"exhausted_pinned,omitempty"`
 	// RuntimePath is the runtime checkout the drain ran against; the record is
 	// keyed by it on disk.
 	RuntimePath string `json:"runtime_path"`
@@ -112,7 +116,7 @@ func ReadDrainOutcome(d *Deps, runtimeRoot string) (*DrainOutcomeRecord, error) 
 // record. The second return is false when no record should be written — a
 // declined run never drained, so there is nothing to report.
 func drainOutcomeFor(setID, runtimePath string, result *RunTaskSetResult, err error) (DrainOutcomeRecord, bool) {
-	outcome, preset, ok := classifyDrainOutcome(result, err)
+	outcome, preset, pinned, ok := classifyDrainOutcome(result, err)
 	if !ok {
 		return DrainOutcomeRecord{}, false
 	}
@@ -120,24 +124,25 @@ func drainOutcomeFor(setID, runtimePath string, result *RunTaskSetResult, err er
 		SetID:           setID,
 		Outcome:         outcome,
 		ExhaustedPreset: preset,
+		ExhaustedPinned: pinned,
 		RuntimePath:     runtimePath,
 		PID:             os.Getpid(),
 	}, true
 }
 
-func classifyDrainOutcome(result *RunTaskSetResult, err error) (DrainOutcome, string, bool) {
+func classifyDrainOutcome(result *RunTaskSetResult, err error) (DrainOutcome, string, bool, bool) {
 	if result != nil {
 		switch {
 		case result.Declined:
-			return "", "", false
+			return "", "", false, false
 		case result.QuotaPaused:
-			return DrainOutcomeQuotaPaused, result.PausePreset, true
+			return DrainOutcomeQuotaPaused, result.PausePreset, result.PausePinnedAgent, true
 		case result.TaskSetDone:
-			return DrainOutcomeDone, "", true
+			return DrainOutcomeDone, "", false, true
 		case result.TaskSetDeferred:
-			return DrainOutcomeDeferred, "", true
+			return DrainOutcomeDeferred, "", false, true
 		case result.BlockedReason != "":
-			return DrainOutcomeBlocked, "", true
+			return DrainOutcomeBlocked, "", false, true
 		}
 	}
 	if err != nil {
@@ -145,14 +150,14 @@ func classifyDrainOutcome(result *RunTaskSetResult, err error) (DrainOutcome, st
 		if errors.As(err, &ee) {
 			switch ee.Code {
 			case ExitInterrupted:
-				return DrainOutcomeInterrupted, "", true
+				return DrainOutcomeInterrupted, "", false, true
 			case ExitNoRunnable:
 				// No eligible AFK task: a blocked / HITL-gated set.
-				return DrainOutcomeBlocked, "", true
+				return DrainOutcomeBlocked, "", false, true
 			}
 		}
-		return DrainOutcomeFailed, "", true
+		return DrainOutcomeFailed, "", false, true
 	}
 	// Reached a clean end with no specific disposition flagged: treat as done.
-	return DrainOutcomeDone, "", true
+	return DrainOutcomeDone, "", false, true
 }

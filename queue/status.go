@@ -161,6 +161,12 @@ func RenderLog(out io.Writer, entries []JournalEntry, limit int) {
 				source = " source=" + entry.Source
 			}
 			fmt.Fprintf(out, "%s %s %s spawned%s\n", ts, entry.Project, entry.SetID, source)
+		case JournalEventAgentSwitch:
+			fmt.Fprintf(out, "%s %s %s default-agent=%s\n", ts, entry.Project, entry.SetID, entry.Agent)
+		case JournalEventAgentCooldown:
+			fmt.Fprintf(out, "%s %s %s cooldown agent=%s until=%s reason=%s\n", ts, entry.Project, entry.SetID, entry.Agent, entry.Until.UTC().Format(time.RFC3339), entry.Reason)
+		case JournalEventAgentUnavailable:
+			fmt.Fprintf(out, "%s %s %s unavailable agent=%s reason=%s\n", ts, entry.Project, entry.SetID, entry.Agent, entry.Reason)
 		default:
 			fmt.Fprintf(out, "%s %s %s %s\n", ts, entry.Project, entry.SetID, entry.Event)
 		}

@@ -17,18 +17,19 @@ import (
 )
 
 var (
-	taskProject        string
-	taskPath           string
-	taskDefPath        string
-	taskRuntimePath    string
-	taskAgentPreset    string
-	taskAgentCmd       string
-	taskAgentOutput    tasks.AgentOutputMode
-	taskRunYes         bool
-	taskAllowDirty     tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
-	taskMaxTries       int
-	taskTimeout        string
-	taskStatusArchived bool
+	taskProject            string
+	taskPath               string
+	taskDefPath            string
+	taskRuntimePath        string
+	taskAgentPreset        string
+	taskDefaultAgentPreset string
+	taskAgentCmd           string
+	taskAgentOutput        tasks.AgentOutputMode
+	taskRunYes             bool
+	taskAllowDirty         tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
+	taskMaxTries           int
+	taskTimeout            string
+	taskStatusArchived     bool
 )
 
 var taskCmd = &cobra.Command{
@@ -167,6 +168,7 @@ func init() {
 	taskImplementCmd.Flags().Var(&taskAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
 	taskImplementCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(tasks.DirtyRuntimeContinue)
 	taskImplementCmd.Flags().StringVar(&taskAgentPreset, "agent", tasks.DefaultAgentPreset, "Agent preset (claude, opencode, cursor, codex, pi), optionally followed by extra agent args, e.g. \"claude --model opus4.8\"; when passed explicitly, overrides a task's manifest agent key")
+	taskImplementCmd.Flags().StringVar(&taskDefaultAgentPreset, "default-agent", "", "Default agent preset for unpinned tasks; ranks below a task's manifest agent key")
 	taskImplementCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 	taskImplementCmd.Flags().Var(&taskAgentOutput, "agent-output", "Agent output mode: auto (default), text")
 	taskImplementCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
@@ -436,19 +438,20 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
 	}
 	result, err := tasks.RunTaskWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskOptions{
-		ResolveInput:     taskResolveInput(),
-		TaskPathOverride: taskPath,
-		AgentPreset:      taskAgentPreset,
-		AgentExplicit:    agentExplicit,
-		AgentCmd:         taskAgentCmd,
-		AgentOutput:      taskAgentOutput,
-		AllowDirty:       taskAllowDirty,
-		MaxTries:         taskMaxTries,
-		Timeout:          timeout,
-		Yes:              taskRunYes,
-		ConfirmIn:        stdin,
-		ConfirmOut:       stderr,
-		Output:           stdout,
+		ResolveInput:       taskResolveInput(),
+		TaskPathOverride:   taskPath,
+		AgentPreset:        taskAgentPreset,
+		DefaultAgentPreset: taskDefaultAgentPreset,
+		AgentExplicit:      agentExplicit,
+		AgentCmd:           taskAgentCmd,
+		AgentOutput:        taskAgentOutput,
+		AllowDirty:         taskAllowDirty,
+		MaxTries:           taskMaxTries,
+		Timeout:            timeout,
+		Yes:                taskRunYes,
+		ConfirmIn:          stdin,
+		ConfirmOut:         stderr,
+		Output:             stdout,
 	})
 	if err != nil {
 		return err
@@ -465,19 +468,20 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
 	}
 	result, err := tasks.RunTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskSetOptions{
-		ResolveInput:    taskResolveInput(),
-		TaskSetOverride: taskSetPath,
-		AgentPreset:     taskAgentPreset,
-		AgentExplicit:   agentExplicit,
-		AgentCmd:        taskAgentCmd,
-		AgentOutput:     taskAgentOutput,
-		AllowDirty:      taskAllowDirty,
-		MaxTries:        taskMaxTries,
-		Timeout:         timeout,
-		Yes:             taskRunYes,
-		ConfirmIn:       stdin,
-		ConfirmOut:      stderr,
-		Output:          stdout,
+		ResolveInput:       taskResolveInput(),
+		TaskSetOverride:    taskSetPath,
+		AgentPreset:        taskAgentPreset,
+		DefaultAgentPreset: taskDefaultAgentPreset,
+		AgentExplicit:      agentExplicit,
+		AgentCmd:           taskAgentCmd,
+		AgentOutput:        taskAgentOutput,
+		AllowDirty:         taskAllowDirty,
+		MaxTries:           taskMaxTries,
+		Timeout:            timeout,
+		Yes:                taskRunYes,
+		ConfirmIn:          stdin,
+		ConfirmOut:         stderr,
+		Output:             stdout,
 	})
 	if err != nil {
 		return err

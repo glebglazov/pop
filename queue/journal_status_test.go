@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
 )
@@ -23,8 +24,11 @@ func queueDataDeps(t *testing.T) *tasks.Deps {
 			}
 			return ""
 		},
-		ReadFileFunc: real.ReadFile,
-		MkdirAllFunc: real.MkdirAll,
+		ReadFileFunc:  real.ReadFile,
+		WriteFileFunc: real.WriteFile,
+		MkdirAllFunc:  real.MkdirAll,
+		RenameFunc:    real.Rename,
+		RemoveAllFunc: real.RemoveAll,
 	}
 	return d
 }
@@ -164,7 +168,7 @@ func TestRecordTerminalOutcomesReadsDrainOutcome(t *testing.T) {
 		},
 	}
 
-	if err := recordTerminalOutcomes(d, []Decision{{
+	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
 		scan:    projectScan{RuntimePath: "/runtime"},
 	}}); err != nil {
@@ -205,7 +209,7 @@ func TestRecordTerminalOutcomesInfersCrashForOpenSpawnWithoutOutcome(t *testing.
 		},
 	}
 
-	if err := recordTerminalOutcomes(d, []Decision{{
+	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
 		scan:    projectScan{RuntimePath: "/runtime"},
 	}}); err != nil {
@@ -222,5 +226,87 @@ func TestRecordTerminalOutcomesInfersCrashForOpenSpawnWithoutOutcome(t *testing.
 	got := entries[1]
 	if got.Event != JournalEventOutcome || got.Outcome != DrainOutcomeCrashed || got.SetID != "set-crash" {
 		t.Fatalf("crash entry = %+v", got)
+	}
+}
+
+func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
+	td := queueDataDeps(t)
+	writtenAt := time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC)
+	d := &Deps{
+		Tasks: td,
+		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
+			return &tasks.DrainOutcomeRecord{
+				SetID:           "set-1",
+				Outcome:         tasks.DrainOutcomeQuotaPaused,
+				ExhaustedPreset: "codex",
+				ExhaustedPinned: true,
+				RuntimePath:     "/runtime",
+				WrittenAt:       writtenAt,
+			}, nil
+		},
+	}
+	cfg := &config.Config{Queue: &config.QueueConfig{AgentQuotaRetryAfter: "30m"}}
+
+	before := time.Now().UTC()
+	if err := recordTerminalOutcomes(d, cfg, []Decision{{
+		Project: "pop",
+		scan:    projectScan{RuntimePath: "/runtime", DefinitionPath: "/def"},
+	}}); err != nil {
+		t.Fatalf("record outcomes: %v", err)
+	}
+	after := time.Now().UTC()
+
+	state, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	until := state.AgentCooldowns["codex"]
+	if until.Before(before.Add(30*time.Minute)) || until.After(after.Add(30*time.Minute+time.Second)) {
+		t.Fatalf("cooldown until = %s, want about now+30m", until)
+	}
+	if got := state.SetBackoffs[setBackoffKey("/runtime", "set-1")]; !got.Equal(until) {
+		t.Fatalf("set backoff = %s, want cooldown %s", got, until)
+	}
+
+	entries, err := ReadJournal(td)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	if len(entries) != 2 || entries[1].Event != JournalEventAgentCooldown || entries[1].Agent != "codex" {
+		t.Fatalf("journal entries = %+v, want outcome then codex cooldown", entries)
+	}
+}
+
+func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
+	td := queueDataDeps(t)
+	d := &Deps{
+		Tasks: td,
+		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
+			return &tasks.DrainOutcomeRecord{
+				SetID:           "set-1",
+				Outcome:         tasks.DrainOutcomeQuotaPaused,
+				ExhaustedPreset: "codex",
+				RuntimePath:     "/runtime",
+				WrittenAt:       time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
+			}, nil
+		},
+	}
+
+	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
+		Project: "pop",
+		scan:    projectScan{RuntimePath: "/runtime"},
+	}}); err != nil {
+		t.Fatalf("record outcomes: %v", err)
+	}
+
+	state, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state.AgentCooldowns["codex"].IsZero() {
+		t.Fatalf("codex cooldown was not recorded: %+v", state.AgentCooldowns)
+	}
+	if got := state.SetBackoffs[setBackoffKey("/runtime", "set-1")]; !got.IsZero() {
+		t.Fatalf("set backoff = %s, want none for rotating default quota pause", got)
 	}
 }
