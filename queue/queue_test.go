@@ -588,7 +588,7 @@ func TestPrepareWorktreeDrainProvisionFailureFallsBackInPlace(t *testing.T) {
 	}
 }
 
-func TestSpawnCreatesSessionAndWindow(t *testing.T) {
+func TestSpawnCreatesSessionAndSplitsMainWindow(t *testing.T) {
 	rt := newRecordingTmux(false, "")
 	d := &Deps{Tmux: rt}
 
@@ -599,13 +599,10 @@ func TestSpawnCreatesSessionAndWindow(t *testing.T) {
 	if _, ok := rt.findCommand("new-session"); !ok {
 		t.Fatal("expected a detached session to be created when absent")
 	}
-	newWindow, ok := rt.findCommand("new-window")
-	if !ok {
-		t.Fatal("expected the pop-queue window to be created when absent")
+	if _, ok := rt.findCommand("new-window"); ok {
+		t.Fatal("must not create a separate queue window")
 	}
-	if !argsContain(newWindow, "-n", queueWindow) {
-		t.Fatalf("new-window must target the %q window: %v", queueWindow, newWindow)
-	}
+	assertSplitIntoMainWindow(t, rt, "proj-session", "/checkout")
 	assertSendKeys(t, rt)
 }
 
@@ -621,12 +618,12 @@ func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T)
 		t.Fatalf("Spawn: %v", err)
 	}
 
-	newWindow, ok := rt.findCommand("new-window")
+	splitWindow, ok := rt.findCommand("split-window")
 	if !ok {
-		t.Fatal("expected the pop-queue window to be created")
+		t.Fatal("expected a drain pane in the main window")
 	}
-	if !argsContain(newWindow, "-c", "/pop/worktrees/repo/set") {
-		t.Fatalf("new-window must start in the worktree checkout: %v", newWindow)
+	if !argsContain(splitWindow, "-c", "/pop/worktrees/repo/set") {
+		t.Fatalf("split-window must start in the worktree checkout: %v", splitWindow)
 	}
 	sendKeys, ok := rt.findCommand("send-keys")
 	if !ok {
@@ -638,8 +635,8 @@ func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T)
 	}
 }
 
-func TestSpawnSplitsWhenWindowExists(t *testing.T) {
-	rt := newRecordingTmux(true, "main\npop-queue")
+func TestSpawnSplitsWhenSessionExists(t *testing.T) {
+	rt := newRecordingTmux(true, "main\nother")
 	d := &Deps{Tmux: rt}
 
 	if err := Spawn(d, actionableDecision()); err != nil {
@@ -650,11 +647,9 @@ func TestSpawnSplitsWhenWindowExists(t *testing.T) {
 		t.Fatal("must not create a session that already exists")
 	}
 	if _, ok := rt.findCommand("new-window"); ok {
-		t.Fatal("must not recreate an existing pop-queue window")
+		t.Fatal("must not create a new window when the session already exists")
 	}
-	if _, ok := rt.findCommand("split-window"); !ok {
-		t.Fatal("expected a new pane to be split into the existing pop-queue window")
-	}
+	assertSplitIntoMainWindow(t, rt, "proj-session", "/checkout")
 	assertSendKeys(t, rt)
 }
 
@@ -667,6 +662,27 @@ func TestSpawnNonActionableNoOp(t *testing.T) {
 	}
 	if len(rt.commands) != 0 {
 		t.Fatalf("non-actionable decision must touch tmux 0 times, got %v", rt.commands)
+	}
+}
+
+func assertSplitIntoMainWindow(t *testing.T, rt *recordingTmux, session, dir string) {
+	t.Helper()
+	splitWindow, ok := rt.findCommand("split-window")
+	if !ok {
+		t.Fatal("expected a new pane to be split into the main window")
+	}
+	if !argsContain(splitWindow, "-t", session+":0") {
+		t.Fatalf("split-window must target the main window: %v", splitWindow)
+	}
+	if !argsContain(splitWindow, "-c", dir) {
+		t.Fatalf("split-window must start in %q: %v", dir, splitWindow)
+	}
+	layout, ok := rt.findCommand("select-layout")
+	if !ok {
+		t.Fatal("expected the main window to be retiled after split")
+	}
+	if !argsContain(layout, "-t", session+":0") {
+		t.Fatalf("select-layout must target the main window: %v", layout)
 	}
 }
 

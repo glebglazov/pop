@@ -19,10 +19,6 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-// queueWindow is the tmux window name into which drains are spawned in each
-// project's session. Finished panes are left in place (not auto-closed).
-const queueWindow = "pop-queue"
-
 // Deps holds the supervisor's external dependencies. Refresh and ReadLock are
 // seams over the tasks package so the scan/selection logic can be unit-tested
 // with mocked Task-set rows and lock state without driving the filesystem.
@@ -608,9 +604,9 @@ func safeWorktreeComponent(s string) string {
 	return out
 }
 
-// Spawn launches the selected drain into a pane of the project's `pop-queue`
-// window, creating the tmux session detached when absent and the window when
-// absent. It is a no-op for non-actionable decisions.
+// Spawn launches the selected drain into a new pane of the project's main tmux
+// window (index 0), creating the session detached when absent. It is a no-op
+// for non-actionable decisions.
 func Spawn(d *Deps, dec Decision) error {
 	if !dec.Actionable() {
 		return nil
@@ -625,9 +621,8 @@ func Spawn(d *Deps, dec Decision) error {
 	return spawnDrain(d.Tmux, dec.scan.SessionName, dec.scan.ProjectPath, command)
 }
 
-// spawnDrain creates (if needed) the detached session and `pop-queue` window,
-// then sends the drain command into a fresh pane. Existing finished panes are
-// left in place; a new drain always lands in its own pane.
+// spawnDrain creates (if needed) the detached session, splits a fresh pane
+// into its main window (index 0), and sends the drain command there.
 func spawnDrain(tmux deps.Tmux, session, dir, command string) error {
 	if !tmux.HasSession(session) {
 		if err := tmux.NewSession(session, dir); err != nil {
@@ -635,43 +630,19 @@ func spawnDrain(tmux deps.Tmux, session, dir, command string) error {
 		}
 	}
 
-	var paneID string
-	if !hasQueueWindow(tmux, session) {
-		out, err := tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", queueWindow, "-c", dir)
-		if err != nil {
-			return fmt.Errorf("create %s window: %w", queueWindow, err)
-		}
-		paneID = out
-	} else {
-		out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":"+queueWindow, "-c", dir)
-		if err != nil {
-			return fmt.Errorf("create drain pane: %w", err)
-		}
-		paneID = out
-		if _, err := tmux.Command("select-layout", "-t", session+":"+queueWindow, "tiled"); err != nil {
-			return fmt.Errorf("retile %s window: %w", queueWindow, err)
-		}
+	mainWindow := session + ":0"
+	out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", mainWindow, "-c", dir)
+	if err != nil {
+		return fmt.Errorf("create drain pane: %w", err)
+	}
+	if _, err := tmux.Command("select-layout", "-t", mainWindow, "tiled"); err != nil {
+		return fmt.Errorf("retile main window: %w", err)
 	}
 
-	if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
+	if _, err := tmux.Command("send-keys", "-t", out, command, "Enter"); err != nil {
 		return fmt.Errorf("send drain command: %w", err)
 	}
 	return nil
-}
-
-// hasQueueWindow reports whether the project's session already holds the
-// `pop-queue` window.
-func hasQueueWindow(tmux deps.Tmux, session string) bool {
-	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
-	if err != nil {
-		return false
-	}
-	for _, name := range splitLines(out) {
-		if name == queueWindow {
-			return true
-		}
-	}
-	return false
 }
 
 func shellQuote(s string) string {

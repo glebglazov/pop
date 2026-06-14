@@ -24,7 +24,7 @@ var queueCmd = &cobra.Command{
 
 pop queue run starts a foreground supervisor that, every poll interval, scans
 every registered project and spawns a drain (pop tasks implement <set> --yes)
-into a pop-queue window in that project's tmux session for each idle project
+into a pane of that project's main tmux window for each idle project
 with a Ready task set. Execution is concurrent across projects and serial
 within each (enforced by the runtime execution lock). Ctrl-C stops the
 supervisor; in-flight drains keep running in their panes.`,
