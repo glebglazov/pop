@@ -116,6 +116,41 @@ output = "auto"
 	}
 }
 
+func TestLoadEffortConfig(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[effort.opencode]
+heavy = ["opencode/claude-opus-4-8", "opencode/kimi-k2.6"]
+standard = ["opencode/claude-sonnet-4-6"]
+light = ["opencode/kimi-k2.6"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Effort["opencode"].Heavy
+	want := []string{"opencode/claude-opus-4-8", "opencode/kimi-k2.6"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("opencode heavy effort = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadEffortConfigRejectsUnknownTier(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[effort.opencode]
+extreme = ["opencode/claude-opus-4-8"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(configPath)
+	if err == nil || !strings.Contains(err.Error(), `[effort.opencode] unknown tier "extreme"`) {
+		t.Fatalf("err = %v, want unknown effort tier diagnostic", err)
+	}
+}
+
 func TestResolveCommitConfigOverrides(t *testing.T) {
 	tests := []struct {
 		name    string

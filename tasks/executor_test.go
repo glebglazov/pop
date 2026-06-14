@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 )
 
@@ -871,6 +872,36 @@ func TestRunTaskAgentKeyRunsDeclaredAgent(t *testing.T) {
 	}
 	if !strings.Contains(args[len(args)-1], "You are implementing the task at:") {
 		t.Fatalf("prompt not last: %q", args[len(args)-1])
+	}
+}
+
+func TestRunTaskConfiguredEffortResolvesOpencodeModel(t *testing.T) {
+	setEnv := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Agent: "opencode", Effort: "heavy", EffortExplicit: true},
+	})
+	env := setEnv.execFixture()
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+	loadConfig := func(string) (*config.Config, error) {
+		return &config.Config{Effort: map[string]config.EffortConfig{
+			"opencode": {Heavy: []string{"opencode/claude-opus-4-8", "opencode/kimi-k2.6"}},
+		}}, nil
+	}
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, err := RunTaskWith(d, nil, loadConfig, opts)
+	assertExitCode(t, err, ExitOperational)
+	if len(runner.names) != 1 || runner.names[0] != "opencode" {
+		t.Fatalf("agent binary = %v, want opencode", runner.names)
+	}
+	args := runner.argLists[0]
+	if len(args) < 2 || args[0] != "--model" || args[1] != "opencode/claude-opus-4-8" {
+		t.Fatalf("agent args = %v, want leading configured model", args)
 	}
 }
 

@@ -202,6 +202,39 @@ func TestResolveTaskAgentSpecForEffortClaudeModels(t *testing.T) {
 	}
 }
 
+func TestResolveTaskAgentSpecForConfiguredEffortModels(t *testing.T) {
+	cfg := &config.Config{Effort: map[string]config.EffortConfig{
+		"opencode": {
+			Heavy:    []string{"opencode/claude-opus-4-8", "opencode/kimi-k2.6"},
+			Standard: []string{"opencode/claude-sonnet-4-6"},
+			Light:    []string{"opencode/kimi-k2.6"},
+		},
+		"claude": {
+			Heavy: []string{"custom-opus"},
+		},
+	}}
+	tests := []struct {
+		name      string
+		agentSpec string
+		effort    string
+		want      string
+	}{
+		{name: "configured opencode", agentSpec: "opencode", effort: "heavy", want: "opencode --model opencode/claude-opus-4-8"},
+		{name: "configured claude replaces built in", agentSpec: "claude", effort: "standard", want: "claude"},
+		{name: "configured claude uses configured tier", agentSpec: "claude", effort: "heavy", want: "claude --model custom-opus"},
+		{name: "unconfigured non claude is no op", agentSpec: "codex", effort: "heavy", want: "codex"},
+		{name: "explicit model still wins", agentSpec: "opencode --model already", effort: "heavy", want: "opencode --model already"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveTaskAgentSpecForEffortWithConfig(tt.agentSpec, tt.effort, true, cfg)
+			if got != tt.want {
+				t.Fatalf("spec = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveTaskAgentSpecEffortModelPrecedence(t *testing.T) {
 	tests := []struct {
 		name           string
