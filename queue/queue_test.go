@@ -850,8 +850,11 @@ func assertSendKeys(t *testing.T, rt *recordingTmux) {
 		t.Fatal("expected the drain command to be sent into the pane")
 	}
 	joined := strings.Join(sendKeys, " ")
-	if !strings.Contains(joined, "pop tasks implement 2026-06-14-queue --yes --default-agent codex") {
-		t.Fatalf("send-keys must run `pop tasks implement <set> --yes --default-agent <agent>`: %v", sendKeys)
+	if strings.Contains(joined, "--yes") {
+		t.Fatalf("send-keys must not pass --yes for queue spawns: %v", sendKeys)
+	}
+	if !strings.Contains(joined, "pop tasks implement 2026-06-14-queue --default-agent codex") {
+		t.Fatalf("send-keys must run plain `pop tasks implement <set> --default-agent <agent>`: %v", sendKeys)
 	}
 }
 

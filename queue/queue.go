@@ -638,7 +638,7 @@ func Spawn(d *Deps, dec Decision) error {
 	if !dec.Actionable() {
 		return nil
 	}
-	command := fmt.Sprintf("pop tasks implement %s --yes", shellQuote(dec.TaskSetID))
+	command := fmt.Sprintf("pop tasks implement %s", shellQuote(dec.TaskSetID))
 	if dec.WorktreeReady && dec.scan.RuntimePath != "" {
 		command += " --task-runtime-path " + shellQuote(dec.scan.RuntimePath)
 	}
