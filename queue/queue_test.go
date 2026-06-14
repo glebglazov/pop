@@ -240,8 +240,9 @@ func TestDecideProjectWorktreeReadyTreatsLiveSpawnAsBusy(t *testing.T) {
 			return idleLock(runtimePath)
 		},
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
-			t.Fatal("live worktree spawn must short-circuit before refresh")
-			return nil, nil
+			return &tasks.RefreshResult{Rows: []tasks.Row{
+				{ID: "ready", Status: tasks.StatusReady, Priority: 10, RegIndex: 0},
+			}}, nil
 		},
 	}
 	if err := AppendJournalEntry(d.Tasks, JournalEntry{
@@ -260,6 +261,86 @@ func TestDecideProjectWorktreeReadyTreatsLiveSpawnAsBusy(t *testing.T) {
 	}
 	if dec.lockStatus == nil || dec.lockStatus.RuntimePath != "/pop/worktrees/repo/set" {
 		t.Fatalf("lockStatus = %+v, want worktree lock", dec.lockStatus)
+	}
+}
+
+func TestDecideProjectDispatchesWorktreeReadyReadySetsConcurrently(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	td := queueDataDeps(t)
+	td.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
+	d := &Deps{
+		Tasks:   td,
+		Project: &project.Deps{FS: deps.NewRealFileSystem()},
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
+			if runtimePath == "/pop/worktrees/repo/set-a" {
+				lock := liveLock(runtimePath)
+				lock.Metadata.SetID = "set-a"
+				return lock
+			}
+			return idleLock(runtimePath)
+		},
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{Rows: []tasks.Row{
+				{ID: "set-a", Status: tasks.StatusReady, Priority: 30, RegIndex: 0},
+				{ID: "set-b", Status: tasks.StatusReady, Priority: 20, RegIndex: 1},
+				{ID: "set-c", Status: tasks.StatusReady, Priority: 10, RegIndex: 2},
+				{ID: "blocked", Status: tasks.StatusBlocked, Priority: 100, RegIndex: 3},
+			}}, nil
+		},
+	}
+	if err := AppendJournalEntry(td, JournalEntry{
+		Event:       JournalEventSpawn,
+		Project:     "proj",
+		SetID:       "set-a",
+		RuntimePath: "/pop/worktrees/repo/set-a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+
+	var busy []string
+	var actionable []string
+	for _, dec := range decisions {
+		if dec.Busy {
+			busy = append(busy, dec.TaskSetID)
+		}
+		if dec.Actionable() {
+			actionable = append(actionable, dec.TaskSetID)
+			if !dec.WorktreeReady {
+				t.Fatalf("actionable worktree decision lost WorktreeReady: %+v", dec)
+			}
+		}
+	}
+	if !reflect.DeepEqual(busy, []string{"set-a"}) {
+		t.Fatalf("busy sets = %#v, want set-a", busy)
+	}
+	if !reflect.DeepEqual(actionable, []string{"set-b", "set-c"}) {
+		t.Fatalf("actionable sets = %#v, want set-b,set-c", actionable)
+	}
+}
+
+func TestDecideProjectDispatchesNonWorktreeReadyKeepsSingleInPlaceDrain(t *testing.T) {
+	d := &Deps{
+		Tasks:    queueTestTasksDeps(true),
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{Rows: []tasks.Row{
+				{ID: "top", Status: tasks.StatusReady, Priority: 30, RegIndex: 0},
+				{ID: "next", Status: tasks.StatusReady, Priority: 20, RegIndex: 1},
+			}}, nil
+		},
+	}
+
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+
+	if len(decisions) != 1 || !decisions[0].Actionable() || decisions[0].TaskSetID != "top" {
+		t.Fatalf("non-worktree-ready dispatches = %+v, want one in-place top drain", decisions)
 	}
 }
 

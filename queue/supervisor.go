@@ -75,6 +75,7 @@ func tick(d *Deps, out io.Writer) {
 		}
 	}
 
+	inPlaceFallbackSpawned := map[string]bool{}
 	for _, dec := range decisions {
 		if err := journalAgentNotes(d, dec); err != nil {
 			fmt.Fprintf(out, "queue: %s: journal agent notes: %v\n", dec.Project, err)
@@ -83,7 +84,15 @@ func tick(d *Deps, out io.Writer) {
 		case dec.Err != nil:
 			fmt.Fprintf(out, "queue: %s: %v\n", dec.Project, dec.Err)
 		case dec.Actionable():
+			originalRuntimePath := dec.scan.RuntimePath
 			dec = prepareWorktreeDrain(d, out, dec)
+			if dec.WorktreeReady && dec.scan.RuntimePath == originalRuntimePath {
+				if inPlaceFallbackSpawned[dec.Project] {
+					fmt.Fprintf(out, "queue: %s: skip in-place fallback for %s; another set already fell back this tick\n", dec.Project, dec.TaskSetID)
+					continue
+				}
+				inPlaceFallbackSpawned[dec.Project] = true
+			}
 			if err := Spawn(d, dec); err != nil {
 				fmt.Fprintf(out, "queue: %s: spawn %s: %v\n", dec.Project, dec.TaskSetID, err)
 				continue

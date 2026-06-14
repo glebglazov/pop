@@ -129,8 +129,11 @@ func (d *Deps) now() time.Time {
 	return time.Now()
 }
 
-// Scan resolves every registered project, derives its actionable drain (if
-// any), and returns one Decision per project. It performs no tmux side effects.
+// Scan resolves every registered project, derives its actionable drain(s), and
+// returns the Decisions for this scan. Non-worktree-ready projects still return
+// at most one Decision; worktree-ready projects may return one busy Decision per
+// live worktree drain plus one actionable Decision per Ready set not already
+// running. It performs no tmux side effects.
 func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
 	if err != nil {
@@ -153,7 +156,7 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 			decisions = append(decisions, Decision{Project: p.Name, Err: err, Reason: "resolve"})
 			continue
 		}
-		decisions = append(decisions, decideProject(d, scan, qcfg.Agents, state, now))
+		decisions = append(decisions, decideProjectDispatches(d, scan, qcfg.Agents, state, now)...)
 	}
 	return decisions, nil
 }
@@ -189,27 +192,48 @@ func resolveScan(d *Deps, p project.ExpandedProject) (projectScan, error) {
 	}, nil
 }
 
-// decideProject reads the runtime lock and Ready sets for one project. A live
-// lock means the checkout is already executing, so the project is skipped
-// (per-project serialization, ADR 0027); otherwise the highest-priority Ready
-// non-Archived set is selected to drain.
+// decideProject reads the runtime lock and Ready sets for one project and
+// returns the first Decision. It is retained for tests and callers that need the
+// v1 single-decision view; Scan uses decideProjectDispatches to expose
+// worktree-ready multi-set fan-out.
 func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonState, now time.Time) Decision {
+	decisions := decideProjectDispatches(d, scan, agents, state, now)
+	if len(decisions) == 0 {
+		return Decision{Project: scan.Name, scan: scan, Reason: "no ready set"}
+	}
+	return decisions[0]
+}
+
+// decideProjectDispatches reads runtime locks and Ready sets for one project.
+// Non-worktree-ready projects remain v1: one live checkout lock makes the
+// project busy, otherwise the highest-priority Ready set is selected. A
+// worktree-ready project keeps live worktree drains as per-checkout busy
+// Decisions but may still dispatch other Ready sets into fresh worktrees.
+func decideProjectDispatches(d *Deps, scan projectScan, agents []string, state *DaemonState, now time.Time) []Decision {
 	dec := Decision{Project: scan.Name, scan: scan}
 	dec.WorktreeReady, dec.ProjectConfigError = readRepoConfig(d, scan.ProjectPath)
 
+	var decisions []Decision
+	runningSets := map[string]bool{}
 	if dec.WorktreeReady {
-		openSpawn, openLock, err := liveOpenSpawn(d, dec.Project)
+		openSpawns, err := liveOpenSpawns(d, dec.Project)
 		if err != nil {
 			dec.Err = err
 			dec.Reason = "journal"
-			return dec
+			return []Decision{dec}
 		}
-		if openLock != nil && openLock.Locked {
-			dec.Busy = true
-			dec.Reason = "busy"
-			dec.TaskSetID = openSpawn.SetID
-			dec.lockStatus = openLock
-			return dec
+		for _, open := range openSpawns {
+			if open.Lock == nil || !open.Lock.Locked {
+				continue
+			}
+			busy := dec
+			busy.Busy = true
+			busy.Reason = "busy"
+			busy.TaskSetID = open.Entry.SetID
+			busy.lockStatus = open.Lock
+			busy.scan.RuntimePath = open.Entry.RuntimePath
+			decisions = append(decisions, busy)
+			runningSets[open.Entry.SetID] = true
 		}
 	}
 
@@ -218,17 +242,22 @@ func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonStat
 	if lock != nil && lock.Locked {
 		dec.Busy = true
 		dec.Reason = "busy"
-		return dec
+		if lock.Metadata != nil && lock.Metadata.SetID != "" {
+			dec.TaskSetID = lock.Metadata.SetID
+			runningSets[lock.Metadata.SetID] = true
+		}
+		decisions = append(decisions, dec)
+		return decisions
 	}
 
 	refresh, err := d.refresh(scan.DefinitionPath)
 	if err != nil {
 		dec.Err = err
 		dec.Reason = "refresh"
-		return dec
+		return appendOrOnly(decisions, dec)
 	}
 
-	id, waitUntil, waitReason, ok := selectReadySet(refresh, scan.RuntimePath, state, now)
+	ids, waitUntil, waitReason, ok := selectReadySets(refresh, scan.RuntimePath, state, now)
 	if !ok {
 		if !waitUntil.IsZero() {
 			dec.Reason = waitReason
@@ -238,7 +267,7 @@ func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonStat
 		} else {
 			dec.Reason = "no ready set"
 		}
-		return dec
+		return appendOrOnly(decisions, dec)
 	}
 	defaultAgent, waitUntil, notes, ok := selectDefaultAgent(d, agents, state, now)
 	dec.AgentNotes = notes
@@ -249,21 +278,50 @@ func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonStat
 			dec.Reason = "all agents cooling"
 		}
 		dec.WaitUntil = waitUntil
-		return dec
+		return appendOrOnly(decisions, dec)
 	}
-	dec.TaskSetID = id
-	dec.DefaultAgent = defaultAgent
-	return dec
+
+	if !dec.WorktreeReady && len(ids) > 1 {
+		ids = ids[:1]
+	}
+	for _, id := range ids {
+		if runningSets[id] {
+			continue
+		}
+		action := dec
+		action.TaskSetID = id
+		action.DefaultAgent = defaultAgent
+		decisions = append(decisions, action)
+	}
+	if len(decisions) == 0 {
+		dec.Reason = "ready set already running"
+		return []Decision{dec}
+	}
+	return decisions
 }
 
-func liveOpenSpawn(d *Deps, projectName string) (JournalEntry, *tasks.RuntimeLockStatus, error) {
+func appendOrOnly(decisions []Decision, dec Decision) []Decision {
+	if len(decisions) > 0 {
+		return decisions
+	}
+	return []Decision{dec}
+}
+
+type liveOpenSpawn struct {
+	Entry JournalEntry
+	Lock  *tasks.RuntimeLockStatus
+}
+
+func liveOpenSpawns(d *Deps, projectName string) ([]liveOpenSpawn, error) {
 	if d == nil || d.Tasks == nil {
-		return JournalEntry{}, nil, nil
+		return nil, nil
 	}
 	entries, err := ReadJournal(d.Tasks)
 	if err != nil {
-		return JournalEntry{}, nil, err
+		return nil, err
 	}
+	seen := map[string]bool{}
+	var out []liveOpenSpawn
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
 		if entry.Project != projectName || entry.Event != JournalEventSpawn || entry.RuntimePath == "" || entry.SetID == "" {
@@ -272,12 +330,20 @@ func liveOpenSpawn(d *Deps, projectName string) (JournalEntry, *tasks.RuntimeLoc
 		if !journalHasOpenSpawn(entries, entry.Project, entry.RuntimePath, entry.SetID) {
 			continue
 		}
+		key := entry.RuntimePath + "\x00" + entry.SetID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		lock := d.readLock(entry.RuntimePath)
 		if lock != nil && lock.Locked {
-			return entry, lock, nil
+			out = append(out, liveOpenSpawn{Entry: entry, Lock: lock})
 		}
 	}
-	return JournalEntry{}, nil, nil
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
 }
 
 func readRepoConfig(d *Deps, repoRoot string) (bool, string) {
@@ -316,8 +382,16 @@ func selectReadySetID(rows []tasks.Row) (string, bool) {
 }
 
 func selectReadySet(refresh *tasks.RefreshResult, runtimePath string, state *DaemonState, now time.Time) (string, time.Time, string, bool) {
+	ids, waitUntil, reason, ok := selectReadySets(refresh, runtimePath, state, now)
+	if !ok || len(ids) == 0 {
+		return "", waitUntil, reason, false
+	}
+	return ids[0], time.Time{}, "", true
+}
+
+func selectReadySets(refresh *tasks.RefreshResult, runtimePath string, state *DaemonState, now time.Time) ([]string, time.Time, string, bool) {
 	if refresh == nil {
-		return "", time.Time{}, "", false
+		return nil, time.Time{}, "", false
 	}
 	var ready []tasks.Row
 	for _, row := range refresh.Rows {
@@ -326,7 +400,7 @@ func selectReadySet(refresh *tasks.RefreshResult, runtimePath string, state *Dae
 		}
 	}
 	if len(ready) == 0 {
-		return "", time.Time{}, "", false
+		return nil, time.Time{}, "", false
 	}
 	sort.SliceStable(ready, func(i, j int) bool {
 		if ready[i].Priority != ready[j].Priority {
@@ -338,6 +412,7 @@ func selectReadySet(refresh *tasks.RefreshResult, runtimePath string, state *Dae
 	var skippedParked bool
 	var skippedBackoff bool
 	var skippedQuota bool
+	var ids []string
 	for _, row := range ready {
 		if setParked(state, runtimePath, row.ID) {
 			skippedParked = true
@@ -357,17 +432,20 @@ func selectReadySet(refresh *tasks.RefreshResult, runtimePath string, state *Dae
 			}
 			continue
 		}
-		return row.ID, time.Time{}, "", true
+		ids = append(ids, row.ID)
+	}
+	if len(ids) > 0 {
+		return ids, time.Time{}, "", true
 	}
 	switch {
 	case !earliest.IsZero() && skippedBackoff:
-		return "", earliest, "set backed off after abnormal drain exit", false
+		return nil, earliest, "set backed off after abnormal drain exit", false
 	case !earliest.IsZero() && skippedQuota:
-		return "", earliest, "set backed off for pinned agent cooldown", false
+		return nil, earliest, "set backed off for pinned agent cooldown", false
 	case skippedParked:
-		return "", time.Time{}, "set parked after repeated abnormal drain exits", false
+		return nil, time.Time{}, "set parked after repeated abnormal drain exits", false
 	default:
-		return "", time.Time{}, "no ready set", false
+		return nil, time.Time{}, "no ready set", false
 	}
 }
 

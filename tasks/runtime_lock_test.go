@@ -158,6 +158,36 @@ func TestDistinctRuntimeRootsLockConcurrently(t *testing.T) {
 	})
 }
 
+func TestDistinctRuntimeRootsLockConcurrentlyForSeparateSets(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", root)
+	d := &Deps{FS: deps.NewRealFileSystem(), ProcessAlive: func(pid int) bool { return pid == os.Getpid() }}
+
+	aRoot := filepath.Join(root, "worktree-a")
+	bRoot := filepath.Join(root, "worktree-b")
+	lockA, err := AcquireRuntimeLockForSet(d, aRoot, "set-a", &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockB, err := AcquireRuntimeLockForSet(d, bRoot, "set-b", &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = lockA.Release()
+		_ = lockB.Release()
+	})
+
+	statusA := ReadRuntimeLockStatus(d, aRoot)
+	statusB := ReadRuntimeLockStatus(d, bRoot)
+	if !statusA.Locked || statusA.Metadata == nil || statusA.Metadata.SetID != "set-a" {
+		t.Fatalf("statusA = %#v, want live set-a lock", statusA)
+	}
+	if !statusB.Locked || statusB.Metadata == nil || statusB.Metadata.SetID != "set-b" {
+		t.Fatalf("statusB = %#v, want live set-b lock", statusB)
+	}
+}
+
 func TestReadRuntimeLockStatusLiveAndIdle(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", root)
