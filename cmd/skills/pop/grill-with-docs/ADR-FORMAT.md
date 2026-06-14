@@ -1,8 +1,10 @@
 # ADR Format
 
-ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
+ADRs live in `docs/adr/` and use **datetime ids**: `YYYYMMDD-HHMM-slug.md` (e.g. `20260613-1432-settlement-escrow.md`).
 
 Create the `docs/adr/` directory lazily — only when the first ADR is needed.
+
+Get the timestamp from `date +%Y%m%d-%H%M`. Datetime ids need no central counter, so parallel agents and teammates never collide on a number — drop your ADR and move on, no merge step. Lexicographic sort = chronological order.
 
 ## Template
 
@@ -22,9 +24,9 @@ Only include these when they add genuine value. Most ADRs won't need them.
 - **Considered Options** — only when the rejected alternatives are worth remembering
 - **Consequences** — only when non-obvious downstream effects need to be called out
 
-## Numbering
+## Ids
 
-Scan `docs/adr/` for the highest existing number and increment by one.
+Name the file `$(date +%Y%m%d-%H%M)-slug.md`. No scanning, no incrementing — the timestamp is unique by construction. If you ever expect two ADRs in the same minute (you shouldn't — offer them sparingly), add seconds: `%Y%m%d-%H%M%S`.
 
 ## When to offer an ADR
 

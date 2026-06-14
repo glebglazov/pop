@@ -129,7 +129,7 @@ The embedded skill that teaches an agent to drive `pop pane`. An opt-in **Integr
 _Avoid_: Agent integration, hooks
 
 **Task planning skills**:
-The embedded, pop-independent skills (grill-with-docs, to-prd, to-tasks) whose output feeds Task sets. Versioned with the pop binary and installed only by explicit opt-in; pop's task scheduling and execution do not depend on them being installed.
+The embedded, pop-independent skills (grill-with-docs, to-prd, to-tasks) whose output feeds Task sets. Versioned with the pop binary and installed only by explicit opt-in; pop's task scheduling and execution do not depend on them being installed. grill-consolidate also ships embedded, but is a glossary-maintenance pass that folds CONTEXT fragments into the base — not a Task-set producer.
 _Avoid_: Workload framework, workload skills bundle, agent integration
 
 ### Pickers

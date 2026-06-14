@@ -7,7 +7,7 @@ import (
 
 // taskAgent describes where the task-skills install lands for one
 // directory-hosting agent: the render-tree root under pop's data dir and the
-// agent's skill directory where the three skill symlinks are created.
+// agent's skill directory where the skill symlinks are created.
 type taskAgent struct {
 	name      string
 	renderDir string
@@ -39,10 +39,10 @@ func taskAgents() []taskAgent {
 
 // taskSkillNames is the set of skill directory names the task-skills
 // component installs.
-var taskSkillNames = []string{"pop-grill-with-docs", "pop-to-prd", "pop-to-tasks"}
+var taskSkillNames = []string{"pop-grill-with-docs", "pop-grill-consolidate", "pop-to-prd", "pop-to-tasks"}
 
 // TestInstallTaskSkillsAllAgents covers the clean install for claude, pi,
-// and cursor: all three planning skills land as render trees under the data dir
+// and cursor: all four planning skills land as render trees under the data dir
 // and the agent location receives a symlink per skill. grill-with-docs keeps its
 // companion documents so its internal references resolve.
 func TestInstallTaskSkillsAllAgents(t *testing.T) {
@@ -84,7 +84,7 @@ func TestInstallTaskSkillsAllAgents(t *testing.T) {
 	}
 }
 
-// TestInstallTaskSkillsIdempotent covers re-running: the same three symlinks
+// TestInstallTaskSkillsIdempotent covers re-running: the same four symlinks
 // to the same targets, nothing duplicated.
 func TestInstallTaskSkillsIdempotent(t *testing.T) {
 	for _, a := range taskAgents() {
@@ -113,7 +113,7 @@ func TestInstallTaskSkillsIdempotent(t *testing.T) {
 
 // TestRunIntegrateTaskSkillsInstallsExactSet covers the command-level path:
 // `pop integrate <agent> --task-skills` installs the core status wiring plus
-// the three symlinked planning skills, with no prompting.
+// the four symlinked planning skills, with no prompting.
 func TestRunIntegrateTaskSkillsInstallsExactSet(t *testing.T) {
 	for _, a := range taskAgents() {
 		t.Run(a.name, func(t *testing.T) {
@@ -128,7 +128,7 @@ func TestRunIntegrateTaskSkillsInstallsExactSet(t *testing.T) {
 			if len(fs.files) == 0 {
 				t.Fatalf("status wiring not installed for %s", a.name)
 			}
-			// Three skill symlinks.
+			// All skill symlinks.
 			if len(fs.symlinks) != len(taskSkillNames) {
 				t.Fatalf("expected %d skill symlinks, got %d: %v", len(taskSkillNames), len(fs.symlinks), fs.symlinks)
 			}
@@ -146,7 +146,7 @@ func TestRunIntegrateTaskSkillsInstallsExactSet(t *testing.T) {
 // pre-existing skill under the old `to-issues` name (bare or `pop-` prefixed),
 // which pop does not own, neither blocks the `to-tasks` install nor is deleted.
 // The old-name vocabulary differs from the new skill name, so it is not even a
-// conflict candidate — all three current skills install and the leftover stays.
+// conflict candidate — all four current skills install and the leftover stays.
 func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
 	for _, leftover := range []string{"to-issues", "pop-to-issues"} {
 		t.Run(leftover, func(t *testing.T) {
@@ -163,7 +163,7 @@ func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
 				t.Fatalf("installFileComponent: %v", err)
 			}
 
-			// All three current skills install — the leftover blocks nothing.
+			// All four current skills install — the leftover blocks nothing.
 			if len(fs.symlinks) != len(taskSkillNames) {
 				t.Fatalf("expected %d symlinks, got %d: %v", len(taskSkillNames), len(fs.symlinks), fs.symlinks)
 			}

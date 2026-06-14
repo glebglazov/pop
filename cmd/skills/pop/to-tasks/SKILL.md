@@ -21,7 +21,9 @@ If you have not already explored the codebase, do so to understand the current s
 
 Break the plan into **tracer bullet** slices. Each slice is a thin vertical slice that cuts through ALL integration layers end-to-end, NOT a horizontal slice of one layer.
 
-Slices may be 'HITL' or 'AFK'. HITL slices require human interaction, such as an architectural decision or a design review. AFK slices can be implemented and merged without human interaction. Prefer AFK over HITL where possible.
+Slices may be 'HITL' or 'AFK'. HITL slices contain ONLY human work — verification, decisions, manual testing; the executor never runs them. AFK slices can be implemented and merged without human interaction. Prefer AFK over HITL where possible.
+
+If a HITL slice needs an artifact built first (a report command, test data, a harness), split it: the agent work goes in an AFK slice, and the HITL slice depends on it via "Blocked by" and contains only the human steps. A HITL slice whose "What to build" describes software is mis-typed. Write the HITL body as instructions to the human — the exact steps to verify.
 
 Assign an `effort` to every slice using this named-signal heuristic:
 
@@ -53,14 +55,32 @@ Ask the user:
 - Are the dependency relationships correct?
 - Should any slices be merged or split further?
 - Are the correct slices marked as HITL and AFK?
+- Does any HITL slice contain agent-doable work that should be split into an AFK blocker?
 
 Iterate until the user approves the breakdown.
 
-### 5. Write the work items to the local filesystem
+### 5. Commit this session's artifacts
 
-Resolve the write location by running `pop tasks show-path`. It prints this repository's task storage directory (an absolute path), creating it on demand. Write the task set as a new subdirectory `<task-set-name>/` beneath that printed path. `<task-set-name>` is `<timestamp>-<slug>`, where `<slug>` is either the source PRD slug (without its timestamp prefix) or a hyphen-delimited string summarising what you intend to do (infer from context or ask the user).
+Before creating the task set, commit the repository artifacts **this agent session** produced. The motivation is the worktree strategy: tasks are often worked in a fresh git worktree forked from the current branch's HEAD, so any CONTEXT/ADR/code this session generated must be on HEAD for the worktree to carry it.
 
-For each approved slice, write a markdown file into that task set directory using the following template. Write them in dependency order (blockers first) so you can reference real identifiers in the "Blocked by" field.
+First, decide the **task-set name** `<task-set-name>` = `<timestamp>-<slug>` now (naming rules are in step 6 — `<slug>` is either the source PRD slug without its timestamp prefix, or a hyphen-delimited summary of the work). The commit reuses `<slug>` as its scope, and the same `<task-set-name>` is used when writing the work items in step 6.
+
+Then:
+
+1. **Skip if nothing to do.** If the working directory is not a git repository, or this session created/modified no committable repository files, skip this step silently and proceed to step 6.
+2. **Identify session paths.** From this conversation's history, list *exactly* the repository files this agent session created or modified — CONTEXT base/fragments (`CONTEXT*.md`), ADRs (`docs/adr/**`), `CONTEXT-MAP.md`, and any code or prototype the session touched. Commit CONTEXT fragments **as-is** — do not consolidate them. Do **not** include files this session never touched, even if dirty; prior-session artifacts are intentionally out of scope.
+3. **Confirm.** Show the user the exact file list to be staged and the proposed commit subject. Separately, report any dirty files this session did *not* touch as "left alone — not staged" so nothing is silently swept or split. Wait for approval.
+4. **Stage exactly those paths** (never `git add -A`) and create a **single commit**. The subject reuses `<slug>` as scope; the type follows content:
+   - docs-only → `docs(<slug>): <summary> (ADR-NNNN + glossary)` (drop whichever parenthetical part doesn't apply)
+   - mixed code + docs → a fitting conventional type (`feat`, `chore`, …), still scoped `(<slug>)`
+
+   Write a short human `<summary>` of what the artifacts cover (e.g. `effort-model-resolution glossary + ADR-0032`), matching the repo's existing commit style.
+
+### 6. Write the work items to the local filesystem
+
+Resolve the tasks base directory, `<tasks-dir>`, by running `pop tasks show-path` — it prints the absolute path to this repository's task storage (in pop's data dir, outside the repo tree) and creates it on demand.
+
+For each approved slice, write a markdown file to the `<tasks-dir>/<task-set-name>/` directory (create the subdirectory if it doesn't exist), using the `<task-set-name>` decided in step 5. Use the following template. Write them in dependency order (blockers first) so you can reference real identifiers in the "Blocked by" field.
 
 <naming-convention>
 `<timestamp>` is a human-readable local date/time prefix so task sets sort chronologically:
@@ -104,9 +124,9 @@ Use a consistent filename scheme: `<number>-<task-name>.md`, e.g. `01-login-form
 
 Do NOT close or modify any parent file.
 
-### 6. Write the sidecar JSON manifest
+### 7. Write the sidecar JSON manifest
 
-Alongside the markdown files, write `index.json` inside the same task set directory — a machine-readable manifest that a ralph loop (or any automation) can rely on to track completion and unblock ordering. Each entry mirrors one markdown file.
+Alongside the markdown files, write `<tasks-dir>/<task-set-name>/index.json` — a machine-readable manifest that a ralph loop (or any automation) can rely on to track completion and unblock ordering. Each entry mirrors one markdown file.
 
 <manifest-schema>
 ```json
@@ -139,3 +159,16 @@ Field rules:
 The JSON is the source of truth for automation. The rules above — the eligibility condition (`status == "open"` and every `blocked_by` id is satisfied by a task whose status is `done` or `skipped`, preferring `AFK` over `HITL` among eligible tasks), the done-condition (all `## Acceptance criteria` boxes checked), and the commit format `tasks(<task-set-slug>): <id>` (set name without its timestamp prefix) — are the **contract** implemented by `pop tasks implement`, which drains the whole set or runs one task when given a `<task-set>/<file>.md` target.
 
 Keep `index.json` and the markdown files in sync — every markdown file has exactly one manifest entry and vice versa.
+
+### 8. Verify registration
+
+Run `pop tasks status <task-set-name>` to trigger pop's lazy discovery and confirm the set registered correctly. Pop prints `Registered new task set(s): <task-set-name>` on first sighting.
+
+Check the output:
+
+- The task set appears in the table with status `READY` (or `DEFERRED` if every open task is HITL).
+- It is **not** `MALFORMED` or `MISSING`.
+
+If `MALFORMED`, read the diagnostics, fix the markdown/manifest issues they name, and re-run `pop tasks status <task-set-name>` until the set is `READY` or `DEFERRED`.
+
+Tell the user the task-set name, its status, and how many tasks are open.
