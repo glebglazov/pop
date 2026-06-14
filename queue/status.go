@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -125,18 +124,6 @@ func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapsho
 func RenderStatus(out io.Writer, snap StatusSnapshot) {
 	view := BuildRunView(snap, time.Now())
 	RenderRunBaseline(out, view)
-
-	fmt.Fprintln(out, "Daemon state:")
-	if snap.DaemonState == nil {
-		fmt.Fprintln(out, "  null")
-		return
-	}
-	payload, err := json.MarshalIndent(snap.DaemonState, "  ", "  ")
-	if err != nil {
-		fmt.Fprintf(out, "  error: %v\n", err)
-		return
-	}
-	fmt.Fprintln(out, string(payload))
 }
 
 func statusProjectLabel(project string, worktreeReady bool, configError string) string {

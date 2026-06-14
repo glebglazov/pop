@@ -81,6 +81,7 @@ func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
 	for _, want := range []string{
 		"Summary:",
 		"Picked-up sets:",
+		"Active worktrees:",
 		"running: set-a pid=99",
 		"Queued ready sets:",
 		"queued: waiting ready set set-ready",

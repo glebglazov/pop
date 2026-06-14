@@ -16,8 +16,20 @@ type RunView struct {
 	Queued              []IdleProject
 	Blocked             []BlockedItem
 	AwaitingIntegration []AwaitingIntegrationSet
+	WorktreeBindings    []WorktreeBindingView
 	IdleCount           int
 	ScanErrors          map[string]string
+}
+
+// WorktreeBindingView is one provisioned checkout tracked in queue daemon state.
+type WorktreeBindingView struct {
+	Project      string
+	SetID        string
+	Branch       string
+	RuntimePath  string
+	Phase        string
+	MergeStatus  string
+	PID          int
 }
 
 // BlockedItem is one blocked scheduling bucket: parked set, backoff, or agent cooldown.
@@ -74,6 +86,7 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 
 	if snap.DaemonState != nil {
 		view.Blocked = append(view.Blocked, blockedItemsFromDaemonState(snap.DaemonState, now, blockedProjects)...)
+		view.WorktreeBindings = buildWorktreeBindingViews(snap.DaemonState, view)
 	}
 
 	sort.SliceStable(view.Queued, func(i, j int) bool { return view.Queued[i].Project < view.Queued[j].Project })
@@ -348,6 +361,15 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 		}
 	}
 
+	fmt.Fprintln(out, "Active worktrees:")
+	if len(view.WorktreeBindings) == 0 {
+		fmt.Fprintln(out, "  none")
+	} else {
+		for _, binding := range view.WorktreeBindings {
+			fmt.Fprintf(out, "  %s\n", formatWorktreeBindingLine(binding))
+		}
+	}
+
 	fmt.Fprintln(out, "Queued ready sets:")
 	if len(view.Queued) == 0 {
 		fmt.Fprintln(out, "  none")
@@ -383,6 +405,11 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 			checked := ""
 			if !set.CheckedAt.IsZero() {
 				checked = " checked " + set.CheckedAt.UTC().Format(time.RFC3339)
+			}
+			hint := integrationHint(set.Status, setID)
+			if hint != "" {
+				fmt.Fprintf(out, "  %s: %s (%s%s)  %s\n", project, setID, mergeabilityLabel(set.Status), checked, hint)
+				continue
 			}
 			fmt.Fprintf(out, "  %s: %s (%s%s)\n", project, setID, mergeabilityLabel(set.Status), checked)
 		}
@@ -424,6 +451,97 @@ func formatRunningLine(p PickedUpSet) string {
 		pid = fmt.Sprintf(" pid=%d", p.PID)
 	}
 	return fmt.Sprintf("%s: %s%s%s", projectLabel, setID, pid, started)
+}
+
+func buildWorktreeBindingViews(state *DaemonState, view RunView) []WorktreeBindingView {
+	if state == nil || len(state.WorktreeBindings) == 0 {
+		return nil
+	}
+	runningBySet := make(map[string]PickedUpSet, len(view.Running))
+	for _, p := range view.Running {
+		if p.SetID != "" {
+			runningBySet[p.SetID] = p
+		}
+	}
+	awaitingBySet := make(map[string]AwaitingIntegrationSet, len(view.AwaitingIntegration))
+	for _, set := range view.AwaitingIntegration {
+		if set.SetID != "" {
+			awaitingBySet[set.SetID] = set
+		}
+	}
+
+	keys := make([]string, 0, len(state.WorktreeBindings))
+	for key := range state.WorktreeBindings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	items := make([]WorktreeBindingView, 0, len(keys))
+	for _, key := range keys {
+		binding := state.WorktreeBindings[key]
+		setID := setIDFromScopedKey(key)
+		project := binding.Project
+		if project == "" {
+			project = projectForScopedKey(state, key)
+		}
+		item := WorktreeBindingView{
+			Project:     project,
+			SetID:       setID,
+			Branch:      binding.Branch,
+			RuntimePath: binding.RuntimePath,
+		}
+		if picked, ok := runningBySet[setID]; ok {
+			item.Phase = "draining"
+			item.PID = picked.PID
+		} else if awaiting, ok := awaitingBySet[setID]; ok {
+			item.MergeStatus = awaiting.Status
+			item.Phase = mergeabilityLabel(awaiting.Status)
+		} else {
+			item.Phase = "bound"
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func formatWorktreeBindingLine(binding WorktreeBindingView) string {
+	project := binding.Project
+	if project == "" {
+		project = "(unknown project)"
+	}
+	setID := binding.SetID
+	if setID == "" {
+		setID = "(unknown set)"
+	}
+	var parts []string
+	parts = append(parts, fmt.Sprintf("%s: %s", project, setID))
+	if binding.Branch != "" {
+		parts = append(parts, "branch="+binding.Branch)
+	}
+	if binding.RuntimePath != "" {
+		parts = append(parts, "at "+binding.RuntimePath)
+	}
+	line := strings.Join(parts, " ")
+	line += " — " + binding.Phase
+	if binding.PID > 0 {
+		line += fmt.Sprintf(" pid=%d", binding.PID)
+	}
+	if hint := integrationHint(binding.MergeStatus, setID); hint != "" {
+		line += "  " + hint
+	}
+	return line
+}
+
+func integrationHint(mergeStatus, setID string) string {
+	if setID == "" || setID == "(unknown set)" {
+		return ""
+	}
+	switch mergeStatus {
+	case MergeabilityClean, MergeabilityConflicts:
+		return "integrate: pop queue integrate " + setID
+	default:
+		return ""
+	}
 }
 
 func formatBlockedLine(b BlockedItem) string {

@@ -113,6 +113,7 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 	for _, want := range []string{
 		"Summary:",
 		"Picked-up sets:",
+		"Active worktrees:",
 		"busy: set-busy pid=1234 since 2026-06-14T13:00:00Z",
 		"Queued ready sets:",
 		"waiting [worktree-ready]: waiting ready set set-ready",
@@ -120,10 +121,14 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 		"Integration: none awaiting",
 		"Scan errors:",
 		"idle: /repo/idle/.pop.toml: expected value",
-		`"version": 1`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status output missing %q:\n%s", want, text)
+		}
+	}
+	for _, omit := range []string{"Daemon state:", `"version"`} {
+		if strings.Contains(text, omit) {
+			t.Fatalf("status output should not contain %q:\n%s", omit, text)
 		}
 	}
 	if strings.Contains(text, "other project: no ready work") {
@@ -564,14 +569,34 @@ func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 				CheckedAt:   now,
 			},
 		},
+		WorktreeBindings: map[string]WorktreeBinding{
+			key: {
+				Project:     "pop",
+				RuntimePath: "/runtime",
+				Branch:      "set-1",
+			},
+		},
 	})
 
 	var statusOut bytes.Buffer
 	RenderStatus(&statusOut, snap)
 	statusText := statusOut.String()
-	for _, want := range []string{"set_crash_backoffs", "parked_sets", "set-1", "Blocked:", "Awaiting integration:"} {
+	for _, want := range []string{
+		"set-1",
+		"Blocked:",
+		"Awaiting integration:",
+		"Active worktrees:",
+		"pop: set-1 branch=set-1 at /runtime — conflicts",
+		"pop: set-1 parked",
+		"integrate: pop queue integrate set-1",
+	} {
 		if !strings.Contains(statusText, want) {
 			t.Fatalf("status output missing %q:\n%s", want, statusText)
+		}
+	}
+	for _, omit := range []string{"Daemon state:", `"version"`, "set_crash_backoffs", "parked_sets"} {
+		if strings.Contains(statusText, omit) {
+			t.Fatalf("status output should not contain %q:\n%s", omit, statusText)
 		}
 	}
 
