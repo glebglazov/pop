@@ -269,8 +269,28 @@ A Task storage directory whose recorded repository path no longer exists. Doctor
 _Avoid_: Missing Task set, stale registration
 
 **Runtime path**:
-The git checkout from which task execution starts. It defaults to the selected project's path and may be overridden for a command. Pop resolves it to the checkout root and uses that root for the agent working directory, dirty-tree preflight, staging, commits, and the Runtime execution lock. Task artifacts remain in the separate **Task storage**. Durable runtime path configuration is deferred until worktree-oriented execution needs it.
+The git checkout from which task execution starts. It defaults to the selected project's path and may be overridden for a command. For a **Worktree set**, pop resolves it from the set's **Worktree binding** when one exists; otherwise the project's trunk checkout. Pop resolves it to the checkout root and uses that root for the agent working directory, dirty-tree preflight, staging, commits, and the Runtime execution lock. Task artifacts remain in the separate **Task storage**.
 _Avoid_: Workload runtime path, task storage, shared git root
+
+**Worktree set**:
+A **Task set** drained in its own pop-provisioned git worktree under a **Worktree binding**. Worktree sets run in parallel across sets because each set gets an isolated **Runtime path**, while tasks inside one set remain serial because the Task set is still the ordered unit of work.
+_Avoid_: Worktree task, per-task worktree, queue shard
+
+**Worktree-ready project**:
+A Project whose repo-root `.pop.toml` declares `worktree_ready = true`, meaning a bare `git worktree add` yields a runnable checkout without a project-specific setup command. The flag is declarative capability, not project registration and not executable provisioning.
+_Avoid_: Provisioning command, queue-enabled project, registered project
+
+**Worktree binding**:
+A durable association between one **Task set** and one pop-provisioned git checkout for that set's active execution lifetime. Recorded in the **Queue daemon state** as a map from repository identity plus **Task set identifier** to the bound checkout path and branch. The bound checkout lives at a stable path derived from the set identifier — not a timestamped directory per spawn. Created on first **Worktree set** spawn; persists across drain exits, failures, and supervisor restarts so re-spawns resume the same branch and partial implementation state rather than forking afresh from trunk. If a binding exists but its checkout is missing or no longer registered with git, pop refuses to spawn and directs the human to repair git state or **Abandon worktree** — it never silently re-provisions from trunk. Pre-binding orphan checkouts are not auto-adopted; a one-time manual seed or cleanup is the operator's problem. Released — and the checkout torn down — only after integration completes or the human **Abandons worktree**. **Archive** does not release a binding; a filed-away set may still own a checkout awaiting integration or inspection.
+_Avoid_: Runtime path override, per-spawn worktree, timestamped checkout
+
+**Abandon worktree**:
+The human act of releasing a **Worktree binding** without integrating — dropping the set's provisioned checkout and branch while leaving **Task set** task statuses untouched. Invoked via `pop queue abandon` with a **Task set identifier**; interactive runs confirm for both **Failed** sets and **Done** sets awaiting integration, and `--yes` skips confirmation. Refused while the set actively holds the **Runtime execution lock**; noop once integration already released the binding. After abandon, the stable checkout slot is free; a later drain may provision a fresh binding from current trunk **HEAD**. Distinct from **Archive** (registration metadata only) and from integration (merging into trunk).
+_Avoid_: Archive, Failed task, worktree delete via picker
+
+**Mergeability**:
+The clean-or-conflicts verdict from pop's no-side-effect `git merge-tree` dry run of a completed **Worktree set** branch against the working branch it forked from. Mergeability is algorithmic evidence for integration routing; it is not semantic validation and does not mean pop has integrated the branch.
+_Avoid_: Merge result, integration status, semantic safety
 
 **Dirty runtime strategy**:
 Controls how task execution starts from a dirty runtime checkout. `continue` starts execution without modifying the existing dirty state; it is the default both when the option is absent and when it is present without a value, and after successful task completion the normal implementation commit intentionally includes both pre-existing and agent changes. `commit-and-continue` captures the existing dirty state in a separate implementation commit before invoking the agent. `stash-and-continue` stashes tracked and untracked changes but not ignored files, prints the stash reference when one is created, and leaves restoration to the user; an empty stash does not prevent execution. When the runtime is dirty the command always displays `git status` and the chosen strategy's effect, then requires interactive `y` confirmation; `--yes` auto-confirms, and a non-interactive run without `--yes` is rejected. Implement applies the chosen strategy once before draining its selected Task set.
@@ -309,7 +329,7 @@ The mechanism that runs a selected task through an agent, verifies completion, u
 _Avoid_: Workload executor, scheduler
 
 **Implement**:
-The single task-execution command, `pop tasks implement`, that runs tasks through the **Task executor** and dispatches by **Task target reference** shape — there is no separate one-vs-many verb. Given a Task-set-relative file reference `<task-set>/<file>.md`, it executes exactly that one task, which must be Open, AFK, and have satisfied dependencies. Given a bare Task set identifier — or no argument, in which case pop chooses the highest-priority Ready Task set — it **drains** that set, executing eligible tasks sequentially until the set becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops cleanly; it does not continue into another Task set. There is no way to run a single auto-picked task: a no-argument implement always drains, and exactly one task runs only when a file reference names it. Only when no Ready Task set exists may a no-argument implement instead attend one unambiguous Human-blocked Task set through a **HITL gate prompt**; multiple Human-blocked sets are ambiguous and require an explicit target, and an explicitly targeted Human-blocked set may be attended even when Ready sets exist elsewhere. Draining requires explicit consent once per session before executing AFK tasks in the selected Task set, phrased "Run AFK tasks in this Task set?"; a single targeted task asks "Run task?". When the selected Task set is already Human-blocked at a HITL gate, implement may go directly to the HITL gate prompt only if it will still ask for AFK-execution consent before running any AFK task the gate unblocks. Paths, bare filenames, and bare task identifiers are rejected.
+The single task-execution command, `pop tasks implement`, that runs tasks through the **Task executor** and dispatches by **Task target reference** shape — there is no separate one-vs-many verb. Given a Task-set-relative file reference `<task-set>/<file>.md`, it executes exactly that one task, which must be Open, AFK, and have satisfied dependencies — and asks **Execution confirmation** once before that task. Given a bare Task set identifier — or no argument, in which case pop chooses the highest-priority Ready Task set — it **drains** that set without an AFK start prompt, executing eligible tasks sequentially until the set becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops cleanly; it does not continue into another Task set. Mid-drain, **HITL gate prompt** and **Failed gate prompt** menus stay interactive when the pane has a TTY. There is no way to run a single auto-picked task: a no-argument implement always drains, and exactly one task runs only when a file reference names it. Only when no Ready Task set exists may a no-argument implement instead attend one unambiguous Human-blocked Task set through a **HITL gate prompt**; multiple Human-blocked sets are ambiguous and require an explicit target, and an explicitly targeted Human-blocked set may be attended even when Ready sets exist elsewhere. Paths, bare filenames, and bare task identifiers are rejected.
 _Avoid_: Run, Drain, separate one-vs-many verbs, run issue, run issues, run all, next Task set, Run PRD
 
 **Agent preset**:
@@ -401,8 +421,12 @@ A Task set with unfinished tasks but no eligible AFK task because human-in-the-l
 _Avoid_: Failed Task set
 
 **HITL gate prompt**:
-An interactive choice shown when implement reaches or selects a Human-blocked Task set. It defaults to getting agent assistance while still letting the human complete the task, defer it, or exit without changing task state; choosing complete or defer is the explicit manual decision and does not ask for a second yes/no confirmation. After complete or defer clears the blocking HITL task, implement refreshes the same Task set and continues from any newly eligible AFK task. When shown because a no-argument implement found no Ready Task set, it is framed as "No runnable AFK work" rather than as a dead end.
+An interactive choice shown when implement reaches or selects a Human-blocked Task set. It defaults to getting agent assistance while still letting the human complete the task, defer it, or exit without changing task state; choosing complete or defer is the explicit manual decision and does not ask for a second yes/no confirmation. After complete or defer clears the blocking HITL task, implement refreshes the same Task set and continues from any newly eligible AFK task. When shown because a no-argument implement found no Ready Task set, it is framed as "No runnable AFK work" rather than as a dead end. It stays interactive in a drain pane with a TTY; `--yes` skips it for fully unattended runs.
 _Avoid_: Automatic HITL execution, yes/no launch prompt
+
+**Failed gate prompt**:
+An interactive choice shown when a drain reaches a Failed task. It defaults to re-running the task while still offering agent assistance, finishing by hand, or exit without changing task state — the Failed-task counterpart of **HITL gate prompt**. It stays interactive in a drain pane with a TTY; `--yes` skips it for fully unattended runs.
+_Avoid_: Automatic retry, Open task
 
 **HITL assistance session**:
 An attended agent session started from a HITL gate prompt with the blocking HITL task and surrounding Task set context loaded. It helps the human inspect, verify, and decide; it does not make HITL tasks eligible for unattended execution.
@@ -473,7 +497,7 @@ The machine-local persisted record of a repository's registered Task sets, store
 _Avoid_: Workload state, task artifact, task manifest
 
 **Runtime execution lock**:
-A machine-local lock held while implement executes for a canonical runtime path. It prevents concurrent task execution in one checkout while allowing unrelated projects or isolated runtime worktrees to execute concurrently. Non-execution tasks commands remain available. Lock metadata records the executor PID; a dead PID is reported and replaced as a stale lock.
+A machine-local lock held while implement executes for a canonical runtime path. Implement acquires it at the start of a drain or single-task run — before any mid-run menu — so the **Queue daemon** treats a pane waiting at **HITL gate prompt** or **Failed gate prompt** as busy and never double-spawns. It prevents concurrent task execution in one checkout while allowing unrelated projects or isolated runtime worktrees to execute concurrently. Non-execution tasks commands remain available. Lock metadata records the executor PID and running set identifier; a dead PID is reported and replaced as a stale lock.
 _Avoid_: Global task lock, project-name lock
 
 **Status table**:
@@ -481,8 +505,8 @@ The non-interactive summary printed by `pop tasks status` after discovery refres
 _Avoid_: Workload status table, dashboard
 
 **Execution confirmation**:
-The human gate before implement spawns an agent. Pop prints the refreshed status table with the selected Task set marked and asks for `y/n` confirmation. A drain asks once before draining its selected Task set, not before each task. An explicit `--yes` (`-y`) option bypasses the prompt for unattended use. Non-interactive execution without that option fails rather than waiting for input.
-_Avoid_: HITL task, open task
+The human gate before implement spawns an agent for exactly one targeted task — `Run task? [y/N]` on a `<task-set>/<file>.md` reference. Set drains do not ask "Run AFK tasks in this Task set?"; **Queue scope** standing consent and manual drains alike start AFK work after printing the status table. An explicit `--yes` (`-y`) bypasses the single-task prompt and all interactive mid-drain menus for fully unattended use. Non-interactive single-task runs without `--yes` fail rather than waiting for input.
+_Avoid_: HITL task, open task, drain start prompt
 
 **Execution exit status**:
 The process result exposed by implement: `0` for completed work or a declined confirmation, `1` for execution failure, timeout, malformed target, commit failure, or a live Runtime execution lock, `2` when no runnable task exists or when a HITL gate exits without changing task state, `3` for usage, configuration, or project-resolution errors, and `130` for interruption.
@@ -537,12 +561,24 @@ The supervisor process behind `pop queue run`. It is foreground and explicit, ne
 _Avoid_: Monitor daemon, background service
 
 **Queue scope**:
-The set of work the **Queue daemon** supervises: all registered projects' Ready Task sets. Running the daemon with `pop queue run` is the standing unattended-AFK consent; there is no per-project opt-in flag. The blast radius is self-limiting because the daemon only acts on Ready sets, and a Task set is a deliberately authored artifact; a project with no sets is skipped. The per-set opt-out is **Archive**. When a project has no tmux session, the daemon creates one detached, ensures a `pop-queue` window, and spawns the drain pane there; finished panes are kept as a visible log.
-_Avoid_: Per-project queue opt-in, global priority queue
+The set of work the **Queue daemon** supervises: all registered projects' Ready Task sets. Running the daemon with `pop queue run` is the standing unattended-AFK consent; there is no per-project opt-in flag and no per-drain AFK start prompt. Queue spawns plain `pop tasks implement <set>` — no `--yes` — so **HITL gate prompt** and **Failed gate prompt** stay interactive when the drain pane has a TTY. The blast radius is self-limiting because the daemon only acts on Ready sets, and a Task set is a deliberately authored artifact; a project with no sets is skipped. The per-set opt-out is **Archive**. When a project has no tmux session, the daemon creates one detached and splits a drain pane into that session's main window (index 0); subsequent drains split additional panes there.
+_Avoid_: Per-project queue opt-in, global priority queue, per-drain --yes
 
 **Queue journal**:
 The durable append-only record in pop's data dir of every Queue drain event: started, done, failed, HITL-blocked, quota-paused-and-agent-switched, crashed, backing-off, or parked. It is emitted by **Implement** as a structured drain-outcome record carrying set id, outcome, and the exhausted preset when relevant; the **Queue daemon** consumes it to drive Queue agent fallback and backoff, and persists it for observability. `pop queue status` reads live state, such as picked-up sets, cooling agents, parked sets, and idle projects; `pop queue log` reads the journal history.
 _Avoid_: Progress record, Captured attempt stream, Task state
+
+**Queue run output**:
+The live stdout of `pop queue run` — an operator-facing event stream, not a repeating inventory. It prints one **Queue run baseline** on startup (the full scheduling-relevant picture of what the supervisor is watching), then only **Queue run deltas** when something changes: spawns, terminal drain outcomes, agent cooldowns, parks, integration events, and errors. A quiet tick with no change prints nothing. Drain panes keep their own implement output; `pop queue status` remains the on-demand full snapshot.
+_Avoid_: Per-tick status dump, queue log replay
+
+**Queue run baseline**:
+The one-time inventory printed when `pop queue run` starts. It lists every scheduling-relevant bucket the supervisor is watching — running drains, queued ready sets, blocked state (parked sets, crash backoffs, agent cooldowns), and sets awaiting integration — in the same human-readable shape as `pop queue status`, without the raw daemon-state JSON dump. Configured projects with no ready work and no active drain are not listed individually; they collapse into a single count line (e.g. "12 other projects: no ready work").
+_Avoid_: Per-project idle listing, repeating status table
+
+**Queue run delta**:
+A single stdout line emitted by `pop queue run` when supervisor-relevant state changes after the baseline. Deltas cover spawns, terminal drain outcomes (done, failed, HITL-blocked, quota-paused, crashed), set parked, agent cooldown started, cooldown or backoff cleared (work may resume), integration landed, and per-project scan errors. Unchanged state — still running, still cooling, still waiting — prints nothing.
+_Avoid_: Heartbeat line, per-tick inventory repeat
 
 **Queue backoff**:
 The daemon's response to an abnormal drain exit, such as crash, kill, or interrupt. Unlike a clean failure or quota pause, an abnormal exit leaves the set Ready with nothing cooled and would otherwise re-spawn immediately. The daemon applies an escalating per-set delay and, after N consecutive abnormal exits, parks the set until a human clears it. A clean exit resets the counter. Distinguishing abnormal from clean exits requires the **Queue journal**'s outcome record; storage status alone cannot tell a crash from a quota pause.

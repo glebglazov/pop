@@ -28,7 +28,7 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 	state := &DaemonState{
 		Version: 1,
 		Mergeability: map[string]MergeabilityRecord{
-			setBackoffKey(wt, "set-1"): {
+			testScopedKey(t, repo, "set-1"): {
 				Project:     filepath.Base(repo),
 				RuntimePath: wt,
 				SetID:       "set-1",
@@ -99,12 +99,12 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 }
 
 func TestIntegrateConflictSetRefuses(t *testing.T) {
-	repo, wt, rec := setupConflictingIntegration(t)
+	repo, _, rec := setupConflictingIntegration(t)
 	td := queueDataDeps(t)
 	state := &DaemonState{
 		Version: 1,
 		Mergeability: map[string]MergeabilityRecord{
-			setBackoffKey(wt, "set-1"): rec,
+			testScopedKey(t, repo, "set-1"): rec,
 		},
 	}
 	if err := WriteDaemonState(td, state); err != nil {
@@ -143,7 +143,7 @@ func TestIntegrateConflictDeclinedKeepsWorktreeBranchAndState(t *testing.T) {
 	td := queueDataDeps(t)
 	if err := WriteDaemonState(td, &DaemonState{
 		Version:      1,
-		Mergeability: map[string]MergeabilityRecord{setBackoffKey(wt, "set-1"): rec},
+		Mergeability: map[string]MergeabilityRecord{testScopedKey(t, repo, "set-1"): rec},
 	}); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestIntegrateConflictAttendedResolutionMergesAndTearsDown(t *testing.T) {
 	td.Runner = runner
 	if err := WriteDaemonState(td, &DaemonState{
 		Version:      1,
-		Mergeability: map[string]MergeabilityRecord{setBackoffKey(wt, "set-1"): rec},
+		Mergeability: map[string]MergeabilityRecord{testScopedKey(t, repo, "set-1"): rec},
 	}); err != nil {
 		t.Fatalf("write state: %v", err)
 	}

@@ -267,7 +267,7 @@ func TestDecideProjectWorktreeReadyTreatsLiveSpawnAsBusy(t *testing.T) {
 func TestDecideProjectDispatchesWorktreeReadyReadySetsConcurrently(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", xdg)
-	root := t.TempDir()
+	root := initMergeabilityRepo(t)
 	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -388,11 +388,12 @@ func TestSelectReadySetSkipsBackedOffPinnedSet(t *testing.T) {
 		{ID: "pinned", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
 		{ID: "fallback", Status: tasks.StatusReady, Priority: 1, RegIndex: 1},
 	}}
+	repoKey := "test-repo"
 	state := &DaemonState{Version: 1, SetBackoffs: map[string]time.Time{
-		setBackoffKey("/runtime", "pinned"): now.Add(time.Hour),
+		setScopedKey(repoKey, "pinned"): now.Add(time.Hour),
 	}}
 
-	id, _, _, ok := selectReadySet(refresh, "/runtime", state, now)
+	id, _, _, ok := selectReadySet(refresh, repoKey, state, now)
 	if !ok || id != "fallback" {
 		t.Fatalf("selectReadySet = (%q,%v), want fallback,true", id, ok)
 	}
@@ -403,16 +404,17 @@ func TestSelectReadySetSkipsCrashBackoffUntilElapsed(t *testing.T) {
 	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
 		{ID: "crashy", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
 	}}
+	repoKey := "test-repo"
 	state := &DaemonState{Version: 1, SetCrashBackoffs: map[string]time.Time{
-		setBackoffKey("/runtime", "crashy"): now.Add(time.Minute),
+		setScopedKey(repoKey, "crashy"): now.Add(time.Minute),
 	}}
 
-	id, until, reason, ok := selectReadySet(refresh, "/runtime", state, now)
+	id, until, reason, ok := selectReadySet(refresh, repoKey, state, now)
 	if ok || id != "" || !until.Equal(now.Add(time.Minute)) || reason != "set backed off after abnormal drain exit" {
 		t.Fatalf("selectReadySet during backoff = (%q,%s,%q,%v)", id, until, reason, ok)
 	}
 
-	id, _, _, ok = selectReadySet(refresh, "/runtime", state, now.Add(2*time.Minute))
+	id, _, _, ok = selectReadySet(refresh, repoKey, state, now.Add(2*time.Minute))
 	if !ok || id != "crashy" {
 		t.Fatalf("selectReadySet after backoff = (%q,%v), want crashy,true", id, ok)
 	}
@@ -423,11 +425,12 @@ func TestSelectReadySetSkipsParkedSet(t *testing.T) {
 	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
 		{ID: "parked", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
 	}}
+	repoKey := "test-repo"
 	state := &DaemonState{Version: 1, ParkedSets: map[string]ParkedSet{
-		setBackoffKey("/runtime", "parked"): {RuntimePath: "/runtime", SetID: "parked", ParkedAt: now},
+		setScopedKey(repoKey, "parked"): {RuntimePath: "/runtime", SetID: "parked", ParkedAt: now},
 	}}
 
-	id, until, reason, ok := selectReadySet(refresh, "/runtime", state, now)
+	id, until, reason, ok := selectReadySet(refresh, repoKey, state, now)
 	if ok || id != "" || !until.IsZero() || reason != "set parked after repeated abnormal drain exits" {
 		t.Fatalf("selectReadySet parked = (%q,%s,%q,%v)", id, until, reason, ok)
 	}
@@ -525,7 +528,7 @@ func TestProvisionWorktreeAddsFreshBranchFromHead(t *testing.T) {
 	}
 
 	wantBranch := "pop/set-with-spaces/20260614T090807Z"
-	wantPath := filepath.Join("/xdg", "pop", "queue", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "set-with-spaces-20260614T090807Z")
+	wantPath := filepath.Join("/xdg", "pop", "queue", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "set-with-spaces")
 	if wt.Branch != wantBranch || wt.Path != wantPath {
 		t.Fatalf("provisioned = %+v, want branch %q path %q", wt, wantBranch, wantPath)
 	}
@@ -588,6 +591,131 @@ func TestPrepareWorktreeDrainProvisionFailureFallsBackInPlace(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "falling back to in-place drain") {
 		t.Fatalf("fallback was not reported: %q", out.String())
+	}
+}
+
+func TestPrepareWorktreeDrainReusesBindingWithoutWorktreeAdd(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
+	repoHash := repoHashForTest(t, filepath.Join("/repo", ".git"))
+	boundPath := filepath.Join(xdg, "pop", "queue", "worktrees", "repo-"+repoHash, "2026-06-14-queue")
+	worktreeAddCalls := 0
+	real := deps.NewRealFileSystem()
+	d := worktreeProvisionDeps(t, now, nil)
+	d.Tasks.FS = &deps.MockFileSystem{
+		GetenvFunc:       func(key string) string { return xdg },
+		EvalSymlinksFunc: real.EvalSymlinks,
+		MkdirAllFunc:     real.MkdirAll,
+		WriteFileFunc:    real.WriteFile,
+		ReadFileFunc:     real.ReadFile,
+		RenameFunc:       real.Rename,
+		StatFunc:         real.Stat,
+	}
+	d.Tasks.Git = &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+		if reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}) {
+			return filepath.Join("/repo", ".git"), nil
+		}
+		if reflect.DeepEqual(args, []string{"worktree", "list", "--porcelain"}) {
+			return "worktree " + boundPath + "\n", nil
+		}
+		if reflect.DeepEqual(args, []string{"rev-parse", "--show-toplevel"}) && dir == boundPath {
+			return boundPath, nil
+		}
+		if len(args) >= 2 && args[0] == "worktree" && args[1] == "add" {
+			worktreeAddCalls++
+		}
+		return "", nil
+	}}
+	repoKey, err := resolveRepoKey(d, "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := real.MkdirAll(boundPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state := &DaemonState{
+		Version: 1,
+		WorktreeBindings: map[string]WorktreeBinding{
+			setScopedKey(repoKey, "2026-06-14-queue"): {
+				RuntimePath: boundPath,
+				Branch:      "pop/2026-06-14-queue/20260614T090807Z",
+				Project:     "proj",
+			},
+		},
+	}
+	if err := WriteDaemonState(d.Tasks, state); err != nil {
+		t.Fatal(err)
+	}
+
+	dec := actionableDecision()
+	dec.WorktreeReady = true
+	dec.scan.RuntimePath = "/repo"
+	dec.scan.ProjectPath = "/repo"
+
+	got := prepareWorktreeDrain(d, &bytes.Buffer{}, dec)
+
+	if worktreeAddCalls != 0 {
+		t.Fatalf("git worktree add calls = %d, want 0 when binding is valid", worktreeAddCalls)
+	}
+	if got.scan.RuntimePath != boundPath || got.scan.ProjectPath != boundPath {
+		t.Fatalf("expected bound checkout %+v, got %+v", boundPath, got.scan)
+	}
+}
+
+func TestPrepareWorktreeDrainRefusesInvalidBinding(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
+	repoHash := repoHashForTest(t, filepath.Join("/repo", ".git"))
+	missingPath := filepath.Join(xdg, "pop", "queue", "worktrees", "repo-"+repoHash, "2026-06-14-queue")
+	real := deps.NewRealFileSystem()
+	d := worktreeProvisionDeps(t, now, nil)
+	d.Tasks.FS = &deps.MockFileSystem{
+		GetenvFunc:       func(key string) string { return xdg },
+		EvalSymlinksFunc: real.EvalSymlinks,
+		MkdirAllFunc:     real.MkdirAll,
+		WriteFileFunc:    real.WriteFile,
+		ReadFileFunc:     real.ReadFile,
+		RenameFunc:       real.Rename,
+		StatFunc: func(path string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		},
+	}
+	repoKey, err := resolveRepoKey(d, "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &DaemonState{
+		Version: 1,
+		WorktreeBindings: map[string]WorktreeBinding{
+			setScopedKey(repoKey, "2026-06-14-queue"): {
+				RuntimePath: missingPath,
+				Branch:      "pop/2026-06-14-queue/20260614T090807Z",
+				Project:     "proj",
+			},
+		},
+	}
+	if err := WriteDaemonState(d.Tasks, state); err != nil {
+		t.Fatal(err)
+	}
+
+	dec := actionableDecision()
+	dec.WorktreeReady = true
+	dec.scan.RuntimePath = "/repo"
+	dec.scan.ProjectPath = "/repo"
+	var out bytes.Buffer
+
+	got := prepareWorktreeDrain(d, &out, dec)
+
+	if got.Actionable() {
+		t.Fatalf("invalid binding must refuse spawn, got actionable %+v", got)
+	}
+	if !strings.Contains(out.String(), "pop queue abandon") {
+		t.Fatalf("output must mention abandon: %q", out.String())
+	}
+	if got.scan.RuntimePath != "/repo" {
+		t.Fatalf("must not fall back in-place, got runtime %q", got.scan.RuntimePath)
 	}
 }
 
@@ -745,7 +873,7 @@ func argsContain(args []string, want ...string) bool {
 
 func worktreeProvisionDeps(t *testing.T, now time.Time, addErr error) *Deps {
 	t.Helper()
-	wtPath := filepath.Join("/xdg", "pop", "queue", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "2026-06-14-queue-20260614T090807Z")
+	wtPath := filepath.Join("/xdg", "pop", "queue", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "2026-06-14-queue")
 	return &Deps{
 		Tasks: &tasks.Deps{
 			FS: &deps.MockFileSystem{
@@ -798,4 +926,17 @@ func repoHashForTest(t *testing.T, commonDir string) string {
 		t.Fatal(err)
 	}
 	return id.ShortHash
+}
+
+func testScopedKey(t *testing.T, repoPath, setID string) string {
+	return testScopedKeyFor(t, queueDataDeps(t), repoPath, repoPath, setID)
+}
+
+func testScopedKeyFor(t *testing.T, td *tasks.Deps, projectPath, runtimePath, setID string) string {
+	t.Helper()
+	key, err := scopedKeyForPaths(&Deps{Tasks: td}, projectPath, runtimePath, setID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
 }

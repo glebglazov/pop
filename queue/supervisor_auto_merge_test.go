@@ -136,7 +136,8 @@ func TestRecordTerminalOutcomesAutoMergeCleanDefaultOffWaits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	if got := state.Mergeability[setBackoffKey(wt, "set-1")]; got.Status != MergeabilityClean {
+	key := testScopedKeyFor(t, td, repo, wt, "set-1")
+	if got := state.Mergeability[key]; got.Status != MergeabilityClean {
 		t.Fatalf("mergeability state = %+v, want clean awaiting integration", state.Mergeability)
 	}
 	entries, err := ReadJournal(td)
@@ -191,7 +192,8 @@ func TestRecordTerminalOutcomesAutoMergeCleanDoesNotIntegrateConflicts(t *testin
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	if got := state.Mergeability[setBackoffKey(wt, "set-1")]; got.Status != MergeabilityConflicts {
+	key := testScopedKeyFor(t, td, repo, wt, "set-1")
+	if got := state.Mergeability[key]; got.Status != MergeabilityConflicts {
 		t.Fatalf("mergeability state = %+v, want conflicts awaiting attended path", state.Mergeability)
 	}
 	entries, err := ReadJournal(td)

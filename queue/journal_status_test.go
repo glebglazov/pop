@@ -3,6 +3,7 @@ package queue
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -153,17 +154,18 @@ func TestRenderLogFromSampleJournal(t *testing.T) {
 
 func TestRecordTerminalOutcomesReadsDrainOutcome(t *testing.T) {
 	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
 	writtenAt := time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC)
 	d := &Deps{
 		Tasks: td,
 		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			if runtimePath != "/runtime" {
-				t.Fatalf("runtimePath = %q, want /runtime", runtimePath)
+			if runtimePath != repo {
+				t.Fatalf("runtimePath = %q, want %q", runtimePath, repo)
 			}
 			return &tasks.DrainOutcomeRecord{
 				SetID:       "set-1",
 				Outcome:     tasks.DrainOutcomeBlocked,
-				RuntimePath: "/runtime",
+				RuntimePath: repo,
 				PID:         222,
 				WrittenAt:   writtenAt,
 			}, nil
@@ -172,7 +174,7 @@ func TestRecordTerminalOutcomesReadsDrainOutcome(t *testing.T) {
 
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
-		scan:    projectScan{RuntimePath: "/runtime"},
+		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
 	}}); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
@@ -195,11 +197,12 @@ func TestRecordTerminalOutcomesReadsDrainOutcome(t *testing.T) {
 
 func TestRecordTerminalOutcomesInfersCrashForOpenSpawnWithoutOutcome(t *testing.T) {
 	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
 	if err := AppendJournalEntry(td, JournalEntry{
 		Event:       JournalEventSpawn,
 		Project:     "pop",
 		SetID:       "set-crash",
-		RuntimePath: "/runtime",
+		RuntimePath: repo,
 		Source:      "supervisor",
 	}); err != nil {
 		t.Fatalf("append spawn: %v", err)
@@ -213,7 +216,7 @@ func TestRecordTerminalOutcomesInfersCrashForOpenSpawnWithoutOutcome(t *testing.
 
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
-		scan:    projectScan{RuntimePath: "/runtime"},
+		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
 	}}); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
@@ -233,6 +236,8 @@ func TestRecordTerminalOutcomesInfersCrashForOpenSpawnWithoutOutcome(t *testing.
 
 func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
 	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
+	key := testScopedKeyFor(t, td, repo, repo, "set-1")
 	writtenAt := time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC)
 	d := &Deps{
 		Tasks: td,
@@ -242,7 +247,7 @@ func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
 				Outcome:         tasks.DrainOutcomeQuotaPaused,
 				ExhaustedPreset: "codex",
 				ExhaustedPinned: true,
-				RuntimePath:     "/runtime",
+				RuntimePath:     repo,
 				WrittenAt:       writtenAt,
 			}, nil
 		},
@@ -252,7 +257,7 @@ func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
 	before := time.Now().UTC()
 	if err := recordTerminalOutcomes(d, cfg, []Decision{{
 		Project: "pop",
-		scan:    projectScan{RuntimePath: "/runtime", DefinitionPath: "/def"},
+		scan:    projectScan{ProjectPath: repo, RuntimePath: repo, DefinitionPath: "/def"},
 	}}); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
@@ -266,7 +271,7 @@ func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
 	if until.Before(before.Add(30*time.Minute)) || until.After(after.Add(30*time.Minute+time.Second)) {
 		t.Fatalf("cooldown until = %s, want about now+30m", until)
 	}
-	if got := state.SetBackoffs[setBackoffKey("/runtime", "set-1")]; !got.Equal(until) {
+	if got := state.SetBackoffs[key]; !got.Equal(until) {
 		t.Fatalf("set backoff = %s, want cooldown %s", got, until)
 	}
 
@@ -281,6 +286,8 @@ func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
 
 func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
+	key := testScopedKeyFor(t, td, repo, repo, "set-1")
 	d := &Deps{
 		Tasks: td,
 		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
@@ -288,7 +295,7 @@ func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 				SetID:           "set-1",
 				Outcome:         tasks.DrainOutcomeQuotaPaused,
 				ExhaustedPreset: "codex",
-				RuntimePath:     "/runtime",
+				RuntimePath:     repo,
 				WrittenAt:       time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
 			}, nil
 		},
@@ -296,7 +303,7 @@ func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
-		scan:    projectScan{RuntimePath: "/runtime"},
+		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
 	}}); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
@@ -308,7 +315,7 @@ func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 	if state.AgentCooldowns["codex"].IsZero() {
 		t.Fatalf("codex cooldown was not recorded: %+v", state.AgentCooldowns)
 	}
-	if got := state.SetBackoffs[setBackoffKey("/runtime", "set-1")]; !got.IsZero() {
+	if got := state.SetBackoffs[key]; !got.IsZero() {
 		t.Fatalf("set backoff = %s, want none for rotating default quota pause", got)
 	}
 }
@@ -335,6 +342,8 @@ func TestDrainOutcomeAbnormalClassification(t *testing.T) {
 
 func TestRecordTerminalOutcomesCrashBackoffEscalatesThenParks(t *testing.T) {
 	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
+	key := testScopedKeyFor(t, td, repo, repo, "set-crash")
 	d := &Deps{
 		Tasks: td,
 		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
@@ -350,7 +359,7 @@ func TestRecordTerminalOutcomesCrashBackoffEscalatesThenParks(t *testing.T) {
 			Event:       JournalEventSpawn,
 			Project:     "pop",
 			SetID:       "set-crash",
-			RuntimePath: "/runtime",
+			RuntimePath: repo,
 			Source:      "supervisor",
 		}); err != nil {
 			t.Fatalf("append spawn: %v", err)
@@ -360,7 +369,7 @@ func TestRecordTerminalOutcomesCrashBackoffEscalatesThenParks(t *testing.T) {
 		t.Helper()
 		if err := recordTerminalOutcomes(d, cfg, []Decision{{
 			Project: "pop",
-			scan:    projectScan{RuntimePath: "/runtime"},
+			scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
 		}}); err != nil {
 			t.Fatalf("record outcomes: %v", err)
 		}
@@ -373,7 +382,6 @@ func TestRecordTerminalOutcomesCrashBackoffEscalatesThenParks(t *testing.T) {
 
 	appendSpawn()
 	state := record()
-	key := setBackoffKey("/runtime", "set-crash")
 	if got := state.SetCrashCounts[key]; got != 1 {
 		t.Fatalf("crash count after first crash = %d, want 1", got)
 	}
@@ -419,12 +427,13 @@ func TestRecordTerminalOutcomesCrashBackoffEscalatesThenParks(t *testing.T) {
 
 func TestRecordTerminalOutcomesCleanOutcomeResetsCrashState(t *testing.T) {
 	td := queueDataDeps(t)
-	key := setBackoffKey("/runtime", "set-1")
+	repo := initMergeabilityRepo(t)
+	key := testScopedKeyFor(t, td, repo, repo, "set-1")
 	state := &DaemonState{
 		Version:          1,
 		SetCrashCounts:   map[string]int{key: 2},
 		SetCrashBackoffs: map[string]time.Time{key: time.Now().UTC().Add(time.Hour)},
-		ParkedSets:       map[string]ParkedSet{key: {RuntimePath: "/runtime", SetID: "set-1", ParkedAt: time.Now().UTC()}},
+		ParkedSets:       map[string]ParkedSet{key: {RuntimePath: repo, SetID: "set-1", ParkedAt: time.Now().UTC()}},
 	}
 	if err := WriteDaemonState(td, state); err != nil {
 		t.Fatalf("write state: %v", err)
@@ -436,7 +445,7 @@ func TestRecordTerminalOutcomesCleanOutcomeResetsCrashState(t *testing.T) {
 			return &tasks.DrainOutcomeRecord{
 				SetID:       "set-1",
 				Outcome:     tasks.DrainOutcomeDone,
-				RuntimePath: "/runtime",
+				RuntimePath: repo,
 				WrittenAt:   writtenAt,
 			}, nil
 		},
@@ -447,7 +456,7 @@ func TestRecordTerminalOutcomesCleanOutcomeResetsCrashState(t *testing.T) {
 
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
-		scan:    projectScan{RuntimePath: "/runtime"},
+		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
 	}}); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
@@ -469,11 +478,15 @@ func TestRecordTerminalOutcomesCleanOutcomeResetsCrashState(t *testing.T) {
 
 func TestRecordTerminalOutcomesDoneRecordsMergeability(t *testing.T) {
 	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
+	wt := filepath.Join(t.TempDir(), "set-1")
+	runGit(t, repo, "worktree", "add", "-b", "set-1", wt, "HEAD")
+	key := testScopedKeyFor(t, td, repo, wt, "set-1")
 	if err := AppendJournalEntry(td, JournalEntry{
 		Event:       JournalEventSpawn,
 		Project:     "pop",
 		SetID:       "set-1",
-		RuntimePath: "/worktree/set-1",
+		RuntimePath: wt,
 		Source:      "supervisor",
 	}); err != nil {
 		t.Fatalf("append spawn: %v", err)
@@ -481,19 +494,19 @@ func TestRecordTerminalOutcomesDoneRecordsMergeability(t *testing.T) {
 	d := &Deps{
 		Tasks: td,
 		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			if runtimePath != "/worktree/set-1" {
+			if runtimePath != wt {
 				return nil, os.ErrNotExist
 			}
 			return &tasks.DrainOutcomeRecord{
 				SetID:       "set-1",
 				Outcome:     tasks.DrainOutcomeDone,
-				RuntimePath: "/worktree/set-1",
+				RuntimePath: wt,
 				WrittenAt:   time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
 			}, nil
 		},
 		ComputeMergeability: func(workingPath, runtimePath string) (MergeabilityRecord, error) {
-			if workingPath != "/repo" || runtimePath != "/worktree/set-1" {
-				t.Fatalf("mergeability paths = %q %q, want /repo /worktree/set-1", workingPath, runtimePath)
+			if workingPath != repo || runtimePath != wt {
+				t.Fatalf("mergeability paths = %q %q, want %q %q", workingPath, runtimePath, repo, wt)
 			}
 			return MergeabilityRecord{Status: MergeabilityClean, Target: "main", Source: "set"}, nil
 		},
@@ -501,7 +514,7 @@ func TestRecordTerminalOutcomesDoneRecordsMergeability(t *testing.T) {
 
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
 		Project: "pop",
-		scan:    projectScan{ProjectPath: "/repo", RuntimePath: "/repo"},
+		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
 	}}); err != nil {
 		t.Fatalf("record outcomes: %v", err)
 	}
@@ -510,7 +523,7 @@ func TestRecordTerminalOutcomesDoneRecordsMergeability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	got := state.Mergeability[setBackoffKey("/worktree/set-1", "set-1")]
+	got := state.Mergeability[key]
 	if got.Status != MergeabilityClean || got.Project != "pop" || got.SetID != "set-1" {
 		t.Fatalf("mergeability state = %+v", got)
 	}
@@ -525,7 +538,8 @@ func TestRecordTerminalOutcomesDoneRecordsMergeability(t *testing.T) {
 
 func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
-	key := setBackoffKey("/runtime", "set-1")
+	repoKey := "test-repo"
+	key := setScopedKey(repoKey, "set-1")
 	snap := statusFromDecisions([]Decision{{
 		Project: "pop",
 		Reason:  "set parked after repeated abnormal drain exits",
@@ -534,7 +548,7 @@ func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 		SetCrashBackoffs: map[string]time.Time{key: now.Add(time.Minute)},
 		ParkedSets:       map[string]ParkedSet{key: {RuntimePath: "/runtime", SetID: "set-1", ParkedAt: now}},
 		Mergeability: map[string]MergeabilityRecord{
-			setBackoffKey("/runtime", "set-1"): {
+			key: {
 				Project:     "pop",
 				RuntimePath: "/runtime",
 				SetID:       "set-1",

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/tasks"
@@ -14,14 +15,22 @@ import (
 // DaemonState is persisted supervisor-owned state. Later queue slices add
 // cooldowns, parked sets, and retry timers here.
 type DaemonState struct {
-	Version          int                           `json:"version"`
-	UpdatedAt        time.Time                     `json:"updated_at,omitempty"`
-	AgentCooldowns   map[string]time.Time          `json:"agent_cooldowns,omitempty"`
-	SetBackoffs      map[string]time.Time          `json:"set_backoffs,omitempty"`
-	SetCrashBackoffs map[string]time.Time          `json:"set_crash_backoffs,omitempty"`
-	SetCrashCounts   map[string]int                `json:"set_crash_counts,omitempty"`
-	ParkedSets       map[string]ParkedSet          `json:"parked_sets,omitempty"`
-	Mergeability     map[string]MergeabilityRecord `json:"mergeability,omitempty"`
+	Version           int                           `json:"version"`
+	UpdatedAt         time.Time                     `json:"updated_at,omitempty"`
+	AgentCooldowns    map[string]time.Time          `json:"agent_cooldowns,omitempty"`
+	SetBackoffs       map[string]time.Time          `json:"set_backoffs,omitempty"`
+	SetCrashBackoffs  map[string]time.Time          `json:"set_crash_backoffs,omitempty"`
+	SetCrashCounts    map[string]int                `json:"set_crash_counts,omitempty"`
+	ParkedSets        map[string]ParkedSet          `json:"parked_sets,omitempty"`
+	Mergeability      map[string]MergeabilityRecord `json:"mergeability,omitempty"`
+	WorktreeBindings  map[string]WorktreeBinding    `json:"worktree_bindings,omitempty"`
+}
+
+// WorktreeBinding records the durable checkout associated with one Task set.
+type WorktreeBinding struct {
+	RuntimePath string `json:"runtime_path"`
+	Branch      string `json:"branch"`
+	Project     string `json:"project"`
 }
 
 // ParkedSet records a task set whose consecutive abnormal exits exhausted the
@@ -83,6 +92,7 @@ func ReadDaemonState(d *tasks.Deps) (*DaemonState, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, fmt.Errorf("parse queue daemon state: %w", err)
 	}
+	migrateDaemonState(&state)
 	return &state, nil
 }
 
@@ -100,4 +110,166 @@ func WriteDaemonState(d *tasks.Deps, state *DaemonState) error {
 		return err
 	}
 	return tasks.WriteAtomicWith(d, DaemonStatePath(d), append(payload, '\n'), 0o644)
+}
+
+// repoIdentityKey returns the repository identity prefix used in set-scoped keys.
+func repoIdentityKey(id *tasks.RepositoryIdentity) string {
+	return id.Basename + "-" + id.ShortHash
+}
+
+// setScopedKey keys set-scoped daemon state by repository identity plus set id.
+func setScopedKey(repoKey, setID string) string {
+	return repoKey + "\x00" + setID
+}
+
+// repoIdentityFromWorktreePath extracts basename-shortHash from a queue worktree path.
+func repoIdentityFromWorktreePath(path string) string {
+	clean := filepath.Clean(path)
+	parts := strings.Split(clean, string(os.PathSeparator))
+	for i := 0; i < len(parts)-1; i++ {
+		if parts[i] == "worktrees" {
+			return parts[i+1]
+		}
+	}
+	return ""
+}
+
+func migrateDaemonState(state *DaemonState) {
+	if state == nil {
+		return
+	}
+	migrateStringTimeMap(state.SetBackoffs)
+	migrateStringTimeMap(state.SetCrashBackoffs)
+	migrateIntMap(state.SetCrashCounts)
+	migrateParkedSets(state)
+	migrateMergeability(state)
+}
+
+func migrateStringTimeMap(m map[string]time.Time) {
+	if len(m) == 0 {
+		return
+	}
+	targets := map[string][]string{}
+	for oldKey := range m {
+		runtimePath := runtimePathFromScopedKey(oldKey)
+		newKey, ok := migratedScopedKey(oldKey, runtimePath)
+		if !ok || newKey == oldKey {
+			continue
+		}
+		targets[newKey] = append(targets[newKey], oldKey)
+	}
+	for newKey, oldKeys := range targets {
+		if len(oldKeys) != 1 {
+			continue
+		}
+		if _, exists := m[newKey]; exists {
+			continue
+		}
+		m[newKey] = m[oldKeys[0]]
+		delete(m, oldKeys[0])
+	}
+}
+
+func migrateIntMap(m map[string]int) {
+	if len(m) == 0 {
+		return
+	}
+	targets := map[string][]string{}
+	for oldKey := range m {
+		runtimePath := runtimePathFromScopedKey(oldKey)
+		newKey, ok := migratedScopedKey(oldKey, runtimePath)
+		if !ok || newKey == oldKey {
+			continue
+		}
+		targets[newKey] = append(targets[newKey], oldKey)
+	}
+	for newKey, oldKeys := range targets {
+		if len(oldKeys) != 1 {
+			continue
+		}
+		if _, exists := m[newKey]; exists {
+			continue
+		}
+		m[newKey] = m[oldKeys[0]]
+		delete(m, oldKeys[0])
+	}
+}
+
+func migrateParkedSets(state *DaemonState) {
+	if len(state.ParkedSets) == 0 {
+		return
+	}
+	targets := map[string][]string{}
+	for oldKey, rec := range state.ParkedSets {
+		newKey, ok := migratedScopedKey(oldKey, rec.RuntimePath)
+		if !ok || newKey == oldKey {
+			continue
+		}
+		targets[newKey] = append(targets[newKey], oldKey)
+	}
+	for newKey, oldKeys := range targets {
+		if len(oldKeys) != 1 {
+			continue
+		}
+		if _, exists := state.ParkedSets[newKey]; exists {
+			continue
+		}
+		state.ParkedSets[newKey] = state.ParkedSets[oldKeys[0]]
+		delete(state.ParkedSets, oldKeys[0])
+	}
+}
+
+func migrateMergeability(state *DaemonState) {
+	if len(state.Mergeability) == 0 {
+		return
+	}
+	targets := map[string][]string{}
+	for oldKey, rec := range state.Mergeability {
+		newKey, ok := migratedScopedKey(oldKey, rec.RuntimePath)
+		if !ok || newKey == oldKey {
+			continue
+		}
+		targets[newKey] = append(targets[newKey], oldKey)
+	}
+	for newKey, oldKeys := range targets {
+		if len(oldKeys) != 1 {
+			continue
+		}
+		if _, exists := state.Mergeability[newKey]; exists {
+			continue
+		}
+		state.Mergeability[newKey] = state.Mergeability[oldKeys[0]]
+		delete(state.Mergeability, oldKeys[0])
+	}
+}
+
+func migratedScopedKey(oldKey, runtimePath string) (string, bool) {
+	parts := strings.Split(oldKey, "\x00")
+	if len(parts) != 2 {
+		return oldKey, false
+	}
+	setID := parts[1]
+	if !isLegacyScopedKey(parts[0]) {
+		return oldKey, false
+	}
+	repoKey := repoIdentityFromWorktreePath(parts[0])
+	if repoKey == "" {
+		repoKey = repoIdentityFromWorktreePath(runtimePath)
+	}
+	if repoKey == "" {
+		return oldKey, false
+	}
+	return setScopedKey(repoKey, setID), true
+}
+
+func isLegacyScopedKey(prefix string) bool {
+	return strings.HasPrefix(prefix, "/") || strings.Contains(prefix, "\\")
+}
+
+func runtimePathFromScopedKey(key string) string {
+	parts := strings.Split(key, "\x00")
+	if len(parts) != 2 {
+		return ""
+	}
+	return parts[0]
 }

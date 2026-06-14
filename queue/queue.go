@@ -278,7 +278,14 @@ func decideProjectDispatches(d *Deps, scan projectScan, agents []string, state *
 		return appendOrOnly(decisions, dec)
 	}
 
-	ids, waitUntil, waitReason, ok := selectReadySets(refresh, scan.RuntimePath, state, now)
+	repoKey, err := resolveRepoKey(d, scan.ProjectPath)
+	if err != nil {
+		dec.Err = err
+		dec.Reason = "repo"
+		return appendOrOnly(decisions, dec)
+	}
+
+	ids, waitUntil, waitReason, ok := selectReadySets(refresh, repoKey, state, now)
 	if !ok {
 		if !waitUntil.IsZero() {
 			dec.Reason = waitReason
@@ -406,15 +413,15 @@ func selectReadySetID(rows []tasks.Row) (string, bool) {
 	return ready[0].ID, true
 }
 
-func selectReadySet(refresh *tasks.RefreshResult, runtimePath string, state *DaemonState, now time.Time) (string, time.Time, string, bool) {
-	ids, waitUntil, reason, ok := selectReadySets(refresh, runtimePath, state, now)
+func selectReadySet(refresh *tasks.RefreshResult, repoKey string, state *DaemonState, now time.Time) (string, time.Time, string, bool) {
+	ids, waitUntil, reason, ok := selectReadySets(refresh, repoKey, state, now)
 	if !ok || len(ids) == 0 {
 		return "", waitUntil, reason, false
 	}
 	return ids[0], time.Time{}, "", true
 }
 
-func selectReadySets(refresh *tasks.RefreshResult, runtimePath string, state *DaemonState, now time.Time) ([]string, time.Time, string, bool) {
+func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *DaemonState, now time.Time) ([]string, time.Time, string, bool) {
 	if refresh == nil {
 		return nil, time.Time{}, "", false
 	}
@@ -439,18 +446,18 @@ func selectReadySets(refresh *tasks.RefreshResult, runtimePath string, state *Da
 	var skippedQuota bool
 	var ids []string
 	for _, row := range ready {
-		if setParked(state, runtimePath, row.ID) {
+		if setParked(state, repoKey, row.ID) {
 			skippedParked = true
 			continue
 		}
-		if until := setCrashBackoffUntil(state, runtimePath, row.ID, now); !until.IsZero() {
+		if until := setCrashBackoffUntil(state, repoKey, row.ID, now); !until.IsZero() {
 			skippedBackoff = true
 			if earliest.IsZero() || until.Before(earliest) {
 				earliest = until
 			}
 			continue
 		}
-		if until := setBackoffUntil(state, runtimePath, row.ID, now); !until.IsZero() {
+		if until := setBackoffUntil(state, repoKey, row.ID, now); !until.IsZero() {
 			skippedQuota = true
 			if earliest.IsZero() || until.Before(earliest) {
 				earliest = until
@@ -474,38 +481,57 @@ func selectReadySets(refresh *tasks.RefreshResult, runtimePath string, state *Da
 	}
 }
 
-func setBackoffUntil(state *DaemonState, runtimePath, setID string, now time.Time) time.Time {
+func setBackoffUntil(state *DaemonState, repoKey, setID string, now time.Time) time.Time {
 	if state == nil || state.SetBackoffs == nil {
 		return time.Time{}
 	}
-	until := state.SetBackoffs[setBackoffKey(runtimePath, setID)]
+	until := state.SetBackoffs[setScopedKey(repoKey, setID)]
 	if until.IsZero() || !until.After(now) {
 		return time.Time{}
 	}
 	return until
 }
 
-func setCrashBackoffUntil(state *DaemonState, runtimePath, setID string, now time.Time) time.Time {
+func setCrashBackoffUntil(state *DaemonState, repoKey, setID string, now time.Time) time.Time {
 	if state == nil || state.SetCrashBackoffs == nil {
 		return time.Time{}
 	}
-	until := state.SetCrashBackoffs[setBackoffKey(runtimePath, setID)]
+	until := state.SetCrashBackoffs[setScopedKey(repoKey, setID)]
 	if until.IsZero() || !until.After(now) {
 		return time.Time{}
 	}
 	return until
 }
 
-func setParked(state *DaemonState, runtimePath, setID string) bool {
+func setParked(state *DaemonState, repoKey, setID string) bool {
 	if state == nil || state.ParkedSets == nil {
 		return false
 	}
-	_, ok := state.ParkedSets[setBackoffKey(runtimePath, setID)]
+	_, ok := state.ParkedSets[setScopedKey(repoKey, setID)]
 	return ok
 }
 
-func setBackoffKey(runtimePath, setID string) string {
-	return runtimePath + "\x00" + setID
+func resolveRepoKey(d *Deps, projectPath string) (string, error) {
+	if d == nil || d.Tasks == nil {
+		return "", fmt.Errorf("missing task dependencies")
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, projectPath)
+	if err != nil {
+		return "", err
+	}
+	return repoIdentityKey(id), nil
+}
+
+func scopedKeyForPaths(d *Deps, projectPath, runtimePath, setID string) (string, error) {
+	repoKey := repoIdentityFromWorktreePath(runtimePath)
+	if repoKey == "" {
+		rk, err := resolveRepoKey(d, projectPath)
+		if err != nil {
+			return "", err
+		}
+		return setScopedKey(rk, setID), nil
+	}
+	return setScopedKey(repoKey, setID), nil
 }
 
 func selectDefaultAgent(d *Deps, agents []string, state *DaemonState, now time.Time) (string, time.Time, []AgentNote, bool) {
@@ -569,7 +595,7 @@ func provisionWorktree(d *Deps, projectPath, setID string) (provisionedWorktree,
 	safeSet := safeWorktreeComponent(setID)
 	stamp := d.now().UTC().Format("20060102T150405Z")
 	branch := fmt.Sprintf("pop/%s/%s", safeSet, stamp)
-	path := filepath.Join(QueueDataDir(d.Tasks), "worktrees", id.Basename+"-"+id.ShortHash, safeSet+"-"+stamp)
+	path := filepath.Join(QueueDataDir(d.Tasks), "worktrees", id.Basename+"-"+id.ShortHash, safeSet)
 	if err := d.Tasks.FS.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return provisionedWorktree{}, fmt.Errorf("create worktree parent: %w", err)
 	}

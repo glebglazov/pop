@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -127,9 +128,54 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 	if !dec.Actionable() || !dec.WorktreeReady {
 		return dec
 	}
+	state, err := EnsureDaemonState(d.Tasks)
+	if err != nil {
+		fmt.Fprintf(out, "queue: %s: load daemon state for %s: %v\n", dec.Project, dec.TaskSetID, err)
+		dec.TaskSetID = ""
+		dec.Reason = "daemon state"
+		return dec
+	}
+	repoKey, err := resolveRepoKey(d, dec.scan.ProjectPath)
+	if err != nil {
+		fmt.Fprintf(out, "queue: %s: resolve repository for %s: %v\n", dec.Project, dec.TaskSetID, err)
+		dec.TaskSetID = ""
+		dec.Reason = "repo"
+		return dec
+	}
+	key := setScopedKey(repoKey, dec.TaskSetID)
+	if binding, ok := state.WorktreeBindings[key]; ok {
+		if err := validateBoundWorktree(d, dec.scan.ProjectPath, binding); err != nil {
+			fmt.Fprintf(out, "queue: %s: bound worktree for %s is invalid (%v); repair git state or run `pop queue abandon`\n", dec.Project, dec.TaskSetID, err)
+			dec.TaskSetID = ""
+			dec.Reason = "bound worktree invalid"
+			return dec
+		}
+		dec.scan.ProjectPath = binding.RuntimePath
+		dec.scan.RuntimePath = binding.RuntimePath
+		pd := d.Project
+		if pd == nil {
+			pd = project.DefaultDeps()
+		}
+		dec.scan.SessionName = project.SessionNameWith(pd, binding.RuntimePath)
+		return dec
+	}
 	wt, err := provisionWorktree(d, dec.scan.ProjectPath, dec.TaskSetID)
 	if err != nil {
 		fmt.Fprintf(out, "queue: %s: provision worktree for %s: %v; falling back to in-place drain\n", dec.Project, dec.TaskSetID, err)
+		return dec
+	}
+	if state.WorktreeBindings == nil {
+		state.WorktreeBindings = map[string]WorktreeBinding{}
+	}
+	state.WorktreeBindings[key] = WorktreeBinding{
+		RuntimePath: wt.Path,
+		Branch:      wt.Branch,
+		Project:     dec.Project,
+	}
+	if err := WriteDaemonState(d.Tasks, state); err != nil {
+		fmt.Fprintf(out, "queue: %s: record worktree binding for %s: %v\n", dec.Project, dec.TaskSetID, err)
+		dec.TaskSetID = ""
+		dec.Reason = "daemon state"
 		return dec
 	}
 	dec.scan.ProjectPath = wt.Path
@@ -140,6 +186,60 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 	}
 	dec.scan.SessionName = project.SessionNameWith(pd, wt.Path)
 	return dec
+}
+
+func validateBoundWorktree(d *Deps, projectPath string, binding WorktreeBinding) error {
+	if d == nil || d.Tasks == nil {
+		return fmt.Errorf("missing task dependencies")
+	}
+	path := strings.TrimSpace(binding.RuntimePath)
+	if path == "" {
+		return fmt.Errorf("binding has no runtime path")
+	}
+	if _, err := d.Tasks.FS.Stat(path); err != nil {
+		return fmt.Errorf("checkout missing: %w", err)
+	}
+	registered, err := worktreeRegistered(d, projectPath, path)
+	if err != nil {
+		return err
+	}
+	if !registered {
+		return fmt.Errorf("checkout %s is not registered with git", path)
+	}
+	return nil
+}
+
+func worktreeRegistered(d *Deps, projectPath, checkoutPath string) (bool, error) {
+	out, err := d.Tasks.Git.CommandInDir(projectPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return false, fmt.Errorf("list worktrees: %w", err)
+	}
+	canonCheckout, err := canonicalCheckoutPath(d.Tasks, checkoutPath)
+	if err != nil {
+		return false, fmt.Errorf("canonicalize checkout: %w", err)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "worktree ") {
+			continue
+		}
+		wtPath := strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+		canonWT, err := canonicalCheckoutPath(d.Tasks, wtPath)
+		if err != nil {
+			continue
+		}
+		if canonWT == canonCheckout {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func canonicalCheckoutPath(d *tasks.Deps, path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return d.FS.EvalSymlinks(abs)
 }
 
 // ReconcileInFlight records open spawn entries for live runtime locks observed
@@ -211,7 +311,7 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 						return err
 					}
 					entries = append(entries, entry)
-					if err := applyTerminalOutcomeState(d, state, qcfg, dec.Project, rec.RuntimePath, rec.SetID, rec.Outcome); err != nil {
+					if err := applyTerminalOutcomeState(d, state, qcfg, dec.Project, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID, rec.Outcome); err != nil {
 						return err
 					}
 					if rec.Outcome == tasks.DrainOutcomeDone {
@@ -222,7 +322,7 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 						merge.Project = dec.Project
 						merge.RuntimePath = rec.RuntimePath
 						merge.SetID = rec.SetID
-						if err := recordMergeability(d, state, merge); err != nil {
+						if err := recordMergeability(d, state, dec.scan.ProjectPath, merge); err != nil {
 							return err
 						}
 						mergeEvent := JournalEntry{
@@ -240,7 +340,11 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 						}
 						entries = append(entries, mergeEvent)
 						if merge.Status == MergeabilityClean && autoMergeCleanEnabled(d, runtime.WorkingPath) {
-							if _, err := integrateCleanSet(d, cfg, setBackoffKey(rec.RuntimePath, rec.SetID), merge, io.Discard, "auto"); err != nil {
+							scopedKey, err := scopedKeyForPaths(d, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID)
+							if err != nil {
+								return err
+							}
+							if _, err := integrateCleanSet(d, cfg, scopedKey, merge, io.Discard, "auto"); err != nil {
 								return err
 							}
 						}
@@ -252,10 +356,14 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 						}
 						state.AgentCooldowns[rec.ExhaustedPreset] = until
 						if rec.ExhaustedPinned {
+							scopedKey, err := scopedKeyForPaths(d, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID)
+							if err != nil {
+								return err
+							}
 							if state.SetBackoffs == nil {
 								state.SetBackoffs = map[string]time.Time{}
 							}
-							state.SetBackoffs[setBackoffKey(rec.RuntimePath, rec.SetID)] = until
+							state.SetBackoffs[scopedKey] = until
 						}
 						if err := WriteDaemonState(d.Tasks, state); err != nil {
 							return err
@@ -294,7 +402,7 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 					return err
 				}
 				entries = append(entries, outcome)
-				if err := applyTerminalOutcomeState(d, state, qcfg, entry.Project, entry.RuntimePath, entry.SetID, DrainOutcomeCrashed); err != nil {
+				if err := applyTerminalOutcomeState(d, state, qcfg, entry.Project, dec.scan.ProjectPath, entry.RuntimePath, entry.SetID, DrainOutcomeCrashed); err != nil {
 					return err
 				}
 			}
@@ -334,17 +442,21 @@ func terminalOutcomeRuntimes(entries []JournalEntry, dec Decision) []terminalRun
 	return out
 }
 
-func recordMergeability(d *Deps, state *DaemonState, rec MergeabilityRecord) error {
+func recordMergeability(d *Deps, state *DaemonState, projectPath string, rec MergeabilityRecord) error {
 	if state == nil || rec.RuntimePath == "" || rec.SetID == "" {
 		return nil
 	}
 	if rec.CheckedAt.IsZero() {
 		rec.CheckedAt = time.Now().UTC()
 	}
+	scopedKey, err := scopedKeyForPaths(d, projectPath, rec.RuntimePath, rec.SetID)
+	if err != nil {
+		return err
+	}
 	if state.Mergeability == nil {
 		state.Mergeability = map[string]MergeabilityRecord{}
 	}
-	state.Mergeability[setBackoffKey(rec.RuntimePath, rec.SetID)] = rec
+	state.Mergeability[scopedKey] = rec
 	return WriteDaemonState(d.Tasks, state)
 }
 
@@ -353,11 +465,15 @@ func autoMergeCleanEnabled(d *Deps, repoRoot string) bool {
 	return err == nil && cfg.AutoMergeClean
 }
 
-func applyTerminalOutcomeState(d *Deps, state *DaemonState, qcfg config.ResolvedQueueConfig, project, runtimePath, setID string, outcome tasks.DrainOutcome) error {
+func applyTerminalOutcomeState(d *Deps, state *DaemonState, qcfg config.ResolvedQueueConfig, project, projectPath, runtimePath, setID string, outcome tasks.DrainOutcome) error {
 	if state == nil || runtimePath == "" || setID == "" {
 		return nil
 	}
-	key := setBackoffKey(runtimePath, setID)
+	scopedKey, err := scopedKeyForPaths(d, projectPath, runtimePath, setID)
+	if err != nil {
+		return err
+	}
+	key := scopedKey
 	if drainOutcomeAbnormal(outcome) {
 		if state.SetCrashCounts == nil {
 			state.SetCrashCounts = map[string]int{}

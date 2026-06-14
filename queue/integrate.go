@@ -119,6 +119,9 @@ func integrateCleanSet(d *Deps, cfg *config.Config, key string, rec Mergeability
 		return IntegrationResult{}, err
 	}
 	delete(state.Mergeability, key)
+	if state.WorktreeBindings != nil {
+		delete(state.WorktreeBindings, key)
+	}
 	if err := WriteDaemonState(d.Tasks, state); err != nil {
 		return IntegrationResult{}, err
 	}
@@ -288,6 +291,9 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Mergea
 		return IntegrationResult{}, err
 	}
 	delete(state.Mergeability, key)
+	if state.WorktreeBindings != nil {
+		delete(state.WorktreeBindings, key)
+	}
 	if err := WriteDaemonState(d.Tasks, state); err != nil {
 		return IntegrationResult{}, err
 	}
