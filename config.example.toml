@@ -73,6 +73,15 @@ projects = [
 # agent_quota_retry_after = "1h"
 # crash_retry_delays = ["1m", "5m", "15m"]
 
+# [workload.git]
+# Commit-time git config applied ONLY to pop's own commits during a task drain
+# (the implementation commit and the commit-and-continue dirty checkpoint). Each
+# entry is a git `-c`-style `key=value` string, prepended as a `-c key=value`
+# pair. Absent/empty ⇒ commits behave exactly as today. Use this to disable GPG
+# signing so an unattended queue drain never hangs on a 1Password presence
+# prompt. Your own `~/.gitconfig` and pop's other git calls are unaffected.
+# commit_config_overrides = ["commit.gpgsign=false"]
+
 # [dashboard]
 # Initial cursor strategy. Available: "current_registered", "current_any",
 # "first_active". "current_any" adds the current pane as a virtual clear entry

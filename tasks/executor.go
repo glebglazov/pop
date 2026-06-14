@@ -118,6 +118,14 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	}
 	strategy := resolveDirtyRuntimeStrategy(opts.AllowDirty)
 
+	// Resolve commit-config overrides up front (the lazy validation point) so a
+	// malformed [workload.git] entry fails the drain hard before any commit —
+	// including the dirty-runtime checkpoint, which commits earliest.
+	commitOverrides, err := resolveCommitConfigOverrides(loadConfig)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
+
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -191,7 +199,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	defer lock.Release()
 
 	if dirty {
-		if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.TaskSetID, sel.TaskID, strategy, confirmOut); err != nil {
+		if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.TaskSetID, sel.TaskID, strategy, commitOverrides, confirmOut); err != nil {
 			return nil, taskExitErr(sel, ExitOperational, "dirty-runtime strategy: %v", err)
 		}
 	}
@@ -218,7 +226,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		timeout = DefaultAttemptTimeout
 	}
 
-	result, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, basePrompt, buildInvocation, maxTries, timeout)
+	result, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, basePrompt, buildInvocation, maxTries, timeout, commitOverrides)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil && !opts.Yes {
@@ -246,7 +254,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 // per attempt (via buildInvocation over basePrompt) so a retry can carry this
 // task's own prior-attempt digest forward; attempt 1 runs the base prompt
 // unchanged (ADR 0023).
-func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, buildInvocation func(prompt string) (*AgentInvocation, error), maxTries int, timeout time.Duration) (*RunTaskResult, error) {
+func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, buildInvocation func(prompt string) (*AgentInvocation, error), maxTries int, timeout time.Duration, commitOverrides []string) (*RunTaskResult, error) {
 	if errOut == nil {
 		errOut = os.Stderr
 	}
@@ -338,7 +346,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		}
 		persist(outcome.stream, attempt, streamOutcome, reason, outcome.exitCode)
 		if assessment.Complete {
-			result, err := completeSuccessfulTask(d, sel, runtimePath, assessment.Summary)
+			result, err := completeSuccessfulTask(d, sel, runtimePath, assessment.Summary, commitOverrides)
 			if err != nil {
 				return nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
@@ -363,6 +371,24 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	return nil, taskExitErr(sel, ExitOperational, "unexpected attempt loop exit")
 }
 
+// resolveCommitConfigOverrides loads config and validates the commit-config
+// overrides for the drain path. A nil loadConfig (or a load that fails to find
+// a config file) yields no overrides — commits behave exactly as today. A
+// malformed entry is returned as a hard error so the caller fails the drain.
+func resolveCommitConfigOverrides(loadConfig func(string) (*config.Config, error)) ([]string, error) {
+	if loadConfig == nil {
+		return nil, nil
+	}
+	cfg, err := loadConfig(config.DefaultConfigPath())
+	if err != nil {
+		// A missing/unreadable config is not a drain-stopping error here; the
+		// rest of the run already tolerates it. Only a present-but-malformed
+		// override entry must fail hard, which ResolveCommitConfigOverrides does.
+		return nil, nil
+	}
+	return cfg.ResolveCommitConfigOverrides()
+}
+
 func taskExitErr(sel *Selection, code int, format string, args ...any) *ExitError {
 	return exitErr(code, "task %s/%s: %s", sel.TaskSetID, sel.TaskID, fmt.Sprintf(format, args...))
 }
@@ -382,7 +408,7 @@ func assessAttempt(agentOut string, exitCode int, taskData []byte) (Assessment, 
 	return assessment, reason
 }
 
-func completeSuccessfulTask(d *Deps, sel *Selection, runtimePath, summary string) (*RunTaskResult, error) {
+func completeSuccessfulTask(d *Deps, sel *Selection, runtimePath, summary string, commitOverrides []string) (*RunTaskResult, error) {
 	hasChanges, err := runtimeHasChanges(d, runtimePath)
 	if err != nil {
 		return nil, exitErr(ExitOperational, "check runtime changes: %v", err)
@@ -394,7 +420,7 @@ func completeSuccessfulTask(d *Deps, sel *Selection, runtimePath, summary string
 	}
 
 	if hasChanges {
-		sha, err := createImplementationCommit(d, runtimePath, sel.TaskSetID, sel.TaskID, summary)
+		sha, err := createImplementationCommit(d, runtimePath, sel.TaskSetID, sel.TaskID, summary, commitOverrides)
 		if err != nil {
 			return nil, exitErr(ExitOperational, "implementation commit: %v", err)
 		}
@@ -625,12 +651,12 @@ func reportDirtyRuntime(d *Deps, w io.Writer, runtimePath string, strategy Dirty
 	return nil
 }
 
-func applyDirtyRuntimeStrategy(d *Deps, runtimePath, taskSetID, taskID string, strategy DirtyRuntimeStrategy, out io.Writer) error {
+func applyDirtyRuntimeStrategy(d *Deps, runtimePath, taskSetID, taskID string, strategy DirtyRuntimeStrategy, commitOverrides []string, out io.Writer) error {
 	switch strategy {
 	case DirtyRuntimeContinue:
 		return nil
 	case DirtyRuntimeCommitAndContinue:
-		return checkpointDirtyRuntime(d, runtimePath, taskSetID, taskID)
+		return checkpointDirtyRuntime(d, runtimePath, taskSetID, taskID, commitOverrides)
 	case DirtyRuntimeStashAndContinue:
 		return stashDirtyRuntime(d, runtimePath, out)
 	default:
@@ -638,7 +664,21 @@ func applyDirtyRuntimeStrategy(d *Deps, runtimePath, taskSetID, taskID string, s
 	}
 }
 
-func checkpointDirtyRuntime(d *Deps, runtimePath, taskSetID, taskID string) error {
+// commitGitArgs prepends `-c key=value` pairs (one per configured commit-config
+// override) before a git subcommand's arguments. With no overrides it returns
+// args unchanged, so unconfigured commits are byte-for-byte identical to today.
+func commitGitArgs(overrides []string, args ...string) []string {
+	if len(overrides) == 0 {
+		return args
+	}
+	out := make([]string, 0, len(overrides)*2+len(args))
+	for _, kv := range overrides {
+		out = append(out, "-c", kv)
+	}
+	return append(out, args...)
+}
+
+func checkpointDirtyRuntime(d *Deps, runtimePath, taskSetID, taskID string, commitOverrides []string) error {
 	if _, err := d.Git.CommandInDir(runtimePath, "add", "-A"); err != nil {
 		return err
 	}
@@ -651,7 +691,7 @@ func checkpointDirtyRuntime(d *Deps, runtimePath, taskSetID, taskID string) erro
 		return nil
 	}
 	subject := DirtyCheckpointSubject(taskSetID, taskID)
-	if _, err := d.Git.CommandInDir(runtimePath, "commit", "-m", subject); err != nil {
+	if _, err := d.Git.CommandInDir(runtimePath, commitGitArgs(commitOverrides, "commit", "-m", subject)...); err != nil {
 		_, _ = d.Git.CommandInDir(runtimePath, "reset")
 		return err
 	}
@@ -679,7 +719,7 @@ func runtimeHasChanges(d *Deps, runtimePath string) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
-func createImplementationCommit(d *Deps, runtimePath, taskSetID, taskID, summary string) (string, error) {
+func createImplementationCommit(d *Deps, runtimePath, taskSetID, taskID, summary string, commitOverrides []string) (string, error) {
 	if _, err := d.Git.CommandInDir(runtimePath, "add", "-A"); err != nil {
 		return "", err
 	}
@@ -691,7 +731,7 @@ func createImplementationCommit(d *Deps, runtimePath, taskSetID, taskID, summary
 		return "", nil
 	}
 	subject := CommitSubject(taskSetID, taskID)
-	if _, err := d.Git.CommandInDir(runtimePath, "commit", "-m", subject, "-m", summary); err != nil {
+	if _, err := d.Git.CommandInDir(runtimePath, commitGitArgs(commitOverrides, "commit", "-m", subject, "-m", summary)...); err != nil {
 		return "", err
 	}
 	sha, err := d.Git.CommandInDir(runtimePath, "rev-parse", "HEAD")

@@ -112,6 +112,115 @@ output = "auto"
 	}
 }
 
+func TestResolveCommitConfigOverrides(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     *Config
+		want    []string
+		wantErr string
+	}{
+		{
+			name: "nil config",
+			cfg:  nil,
+			want: nil,
+		},
+		{
+			name: "no task section",
+			cfg:  &Config{},
+			want: nil,
+		},
+		{
+			name: "no git sub-table",
+			cfg:  &Config{Task: &TaskConfig{}},
+			want: nil,
+		},
+		{
+			name: "empty overrides",
+			cfg:  &Config{Task: &TaskConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{}}}},
+			want: nil,
+		},
+		{
+			name: "valid entries including empty value",
+			cfg:  &Config{Task: &TaskConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"commit.gpgsign=false", "user.signingkey="}}}},
+			want: []string{"commit.gpgsign=false", "user.signingkey="},
+		},
+		{
+			name:    "missing equals",
+			cfg:     &Config{Task: &TaskConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"commit.gpgsign"}}}},
+			wantErr: "[tasks.git] commit_config_overrides[0]:",
+		},
+		{
+			name:    "empty key",
+			cfg:     &Config{Task: &TaskConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"=value"}}}},
+			wantErr: "[tasks.git] commit_config_overrides[0]:",
+		},
+		{
+			name:    "bad entry reports its index",
+			cfg:     &Config{Task: &TaskConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"commit.gpgsign=false", "oops"}}}},
+			wantErr: "[tasks.git] commit_config_overrides[1]:",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.cfg.ResolveCommitConfigOverrides()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestLoadCommitConfigOverridesDoesNotBreakGlobalLoad asserts that a malformed
+// override entry is tolerated by global config Load (lazy validation): the
+// dashboard/picker still opens; only the drain path surfaces the error.
+func TestLoadCommitConfigOverridesDoesNotBreakGlobalLoad(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[workload.git]
+commit_config_overrides = ["this-is-not-valid"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("global Load must tolerate a malformed override entry, got: %v", err)
+	}
+	// The malformed entry only surfaces when the drain lazily resolves it.
+	if _, err := cfg.ResolveCommitConfigOverrides(); err == nil {
+		t.Fatal("expected ResolveCommitConfigOverrides to reject the malformed entry")
+	}
+}
+
+func TestLoadCommitConfigOverrides(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[workload.git]
+commit_config_overrides = ["commit.gpgsign=false"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := cfg.ResolveCommitConfigOverrides()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []string{"commit.gpgsign=false"}) {
+		t.Fatalf("got %v, want [commit.gpgsign=false]", got)
+	}
+}
+
 func TestLoadQueueConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`

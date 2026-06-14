@@ -77,6 +77,14 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	}
 	strategy := resolveDirtyRuntimeStrategy(opts.AllowDirty)
 
+	// Resolve commit-config overrides up front (the lazy validation point) so a
+	// malformed [workload.git] entry fails the drain hard before any commit —
+	// including the per-task dirty-runtime checkpoint, which commits earliest.
+	commitOverrides, err := resolveCommitConfigOverrides(loadConfig)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
+
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -282,7 +290,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		}
 
 		if dirty && !dirtyStrategyApplied {
-			if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.TaskSetID, sel.TaskID, strategy, confirmOut); err != nil {
+			if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.TaskSetID, sel.TaskID, strategy, commitOverrides, confirmOut); err != nil {
 				return nil, taskExitErr(sel, ExitOperational, "dirty-runtime strategy: %v", err)
 			}
 			dirtyStrategyApplied = true
@@ -302,7 +310,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			return ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, attemptOutput)
 		}
 
-		taskResult, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, basePrompt, buildInvocation, maxTries, timeout)
+		taskResult, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, basePrompt, buildInvocation, maxTries, timeout, commitOverrides)
 		if execErr != nil {
 			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 			if refreshErr == nil {

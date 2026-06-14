@@ -27,6 +27,12 @@ projects = [
 [workload.agents.claude]
 # Use "text" as a compatibility fallback if an agent's structured output fails.
 output = "auto"
+
+[workload.git]
+# Commit-time git config applied only to pop's own commits during a task drain.
+# Each entry is a git `-c`-style `key=value` pair. Disable GPG signing so an
+# unattended `pop queue` drain never blocks on a 1Password presence prompt:
+commit_config_overrides = ["commit.gpgsign=false"]
 ```
 
 Add a tmux binding for quick access:

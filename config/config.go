@@ -114,11 +114,58 @@ type UpdatesConfig struct {
 // TaskConfig holds task-execution configuration.
 type TaskConfig struct {
 	Agents map[string]TaskAgentConfig `toml:"agents"`
+	// Git holds commit-time git overrides for Pop's own commits. The TOML
+	// sub-table is `[workload.git]` because the parent key stays "workload"
+	// for backward compatibility (see Config.Task). A nil pointer means the
+	// section is absent ⇒ no overrides; Pop's commits behave exactly as today.
+	Git *TaskGitConfig `toml:"git"`
 }
 
 // TaskAgentConfig holds configuration for one task agent preset.
 type TaskAgentConfig struct {
 	Output string `toml:"output"`
+}
+
+// TaskGitConfig holds commit-time git configuration applied to Pop's own
+// commits during a task drain (e.g. disabling GPG signing so an unattended
+// queue drain never hangs on a 1Password presence prompt).
+type TaskGitConfig struct {
+	// CommitConfigOverrides is a list of git `-c`-style `key=value` strings
+	// (e.g. "commit.gpgsign=false") prepended as `-c key=value` pairs to Pop's
+	// commit invocations. Absent/empty ⇒ no overrides. Validation is lazy: see
+	// Config.ResolveCommitConfigOverrides.
+	CommitConfigOverrides []string `toml:"commit_config_overrides"`
+}
+
+// ResolveCommitConfigOverrides validates the [workload.git]
+// commit_config_overrides entries and returns them as `key=value` strings ready
+// to be prepended as `-c key=value` pairs to Pop's commit invocations. Each
+// entry must split into a non-empty key on the first `=` (an empty value is
+// legal git, e.g. "user.signingkey=").
+//
+// Validation is deliberately lazy — this is called only from the task drain
+// path, never at global config load — so a typo never breaks the picker or
+// dashboard. A malformed entry is a hard error: callers must fail the drain
+// rather than silently proceed (proceeding could re-trigger the very signing
+// hang this feature exists to prevent). The receiver may be nil (no [workload]
+// or [workload.git] section), in which case no overrides apply.
+func (c *Config) ResolveCommitConfigOverrides() ([]string, error) {
+	if c == nil || c.Task == nil || c.Task.Git == nil {
+		return nil, nil
+	}
+	raw := c.Task.Git.CommitConfigOverrides
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	overrides := make([]string, 0, len(raw))
+	for i, entry := range raw {
+		key, _, found := strings.Cut(entry, "=")
+		if !found || strings.TrimSpace(key) == "" {
+			return nil, fmt.Errorf("[tasks.git] commit_config_overrides[%d]: %q must be in key=value form with a non-empty key", i, entry)
+		}
+		overrides = append(overrides, entry)
+	}
+	return overrides, nil
 }
 
 // QueueConfig holds `pop queue` supervisor configuration. Durations are stored

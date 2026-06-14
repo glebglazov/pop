@@ -71,6 +71,6 @@ Queue journal to disk, and `pop queue status` / `pop queue log` are pure file re
   exhausted preset). Today a quota pause exits `0`, indistinguishable from success; the
   supervisor's agent-fallback and crash-backoff both depend on telling these apart, so this
   signal is required new plumbing in the executor.
-- Worktree-level parallelism *within* a project is deliberately out of scope and parked in
-  `docs/queue-worktree-parallelism.dormant.md`; the lock-per-checkout source of truth already
-  accommodates it when revived.
+- Worktree-level parallelism *within* a project is deliberately out of scope; the lock-per-checkout
+  source of truth already accommodates it when revived. A design pass reframed it as a deferred
+  Task-set/Runtime-path feature (not a Queue feature) in ADR-0028.
