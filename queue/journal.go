@@ -19,6 +19,7 @@ const (
 	JournalEventAgentSwitch      = "agent_switch"
 	JournalEventAgentCooldown    = "agent_cooldown"
 	JournalEventAgentUnavailable = "agent_unavailable"
+	JournalEventSetParked        = "set_parked"
 )
 
 // JournalEntry is one append-only queue journal record.

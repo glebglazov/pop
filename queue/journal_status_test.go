@@ -310,3 +310,188 @@ func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 		t.Fatalf("set backoff = %s, want none for rotating default quota pause", got)
 	}
 }
+
+func TestDrainOutcomeAbnormalClassification(t *testing.T) {
+	if !drainOutcomeAbnormal(DrainOutcomeCrashed) {
+		t.Fatal("crashed outcome must be abnormal")
+	}
+	if !drainOutcomeAbnormal(tasks.DrainOutcomeInterrupted) {
+		t.Fatal("interrupted outcome must be abnormal")
+	}
+	for _, outcome := range []tasks.DrainOutcome{
+		tasks.DrainOutcomeDone,
+		tasks.DrainOutcomeFailed,
+		tasks.DrainOutcomeBlocked,
+		tasks.DrainOutcomeDeferred,
+		tasks.DrainOutcomeQuotaPaused,
+	} {
+		if drainOutcomeAbnormal(outcome) {
+			t.Fatalf("%s must be classified as clean", outcome)
+		}
+	}
+}
+
+func TestRecordTerminalOutcomesCrashBackoffEscalatesThenParks(t *testing.T) {
+	td := queueDataDeps(t)
+	d := &Deps{
+		Tasks: td,
+		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
+			return nil, os.ErrNotExist
+		},
+	}
+	cfg := &config.Config{Queue: &config.QueueConfig{CrashRetryDelays: []string{"1m", "5m"}}}
+	before := time.Now().UTC()
+
+	appendSpawn := func() {
+		t.Helper()
+		if err := AppendJournalEntry(td, JournalEntry{
+			Event:       JournalEventSpawn,
+			Project:     "pop",
+			SetID:       "set-crash",
+			RuntimePath: "/runtime",
+			Source:      "supervisor",
+		}); err != nil {
+			t.Fatalf("append spawn: %v", err)
+		}
+	}
+	record := func() *DaemonState {
+		t.Helper()
+		if err := recordTerminalOutcomes(d, cfg, []Decision{{
+			Project: "pop",
+			scan:    projectScan{RuntimePath: "/runtime"},
+		}}); err != nil {
+			t.Fatalf("record outcomes: %v", err)
+		}
+		state, err := ReadDaemonState(td)
+		if err != nil {
+			t.Fatalf("read state: %v", err)
+		}
+		return state
+	}
+
+	appendSpawn()
+	state := record()
+	key := setBackoffKey("/runtime", "set-crash")
+	if got := state.SetCrashCounts[key]; got != 1 {
+		t.Fatalf("crash count after first crash = %d, want 1", got)
+	}
+	if until := state.SetCrashBackoffs[key]; until.Before(before.Add(time.Minute)) || until.After(time.Now().UTC().Add(time.Minute+time.Second)) {
+		t.Fatalf("first crash backoff = %s, want about now+1m", until)
+	}
+
+	appendSpawn()
+	state = record()
+	if got := state.SetCrashCounts[key]; got != 2 {
+		t.Fatalf("crash count after second crash = %d, want 2", got)
+	}
+	if until := state.SetCrashBackoffs[key]; until.Before(before.Add(5*time.Minute)) || until.After(time.Now().UTC().Add(5*time.Minute+time.Second)) {
+		t.Fatalf("second crash backoff = %s, want about now+5m", until)
+	}
+
+	appendSpawn()
+	state = record()
+	if got := state.SetCrashCounts[key]; got != 3 {
+		t.Fatalf("crash count after third crash = %d, want 3", got)
+	}
+	if _, ok := state.ParkedSets[key]; !ok {
+		t.Fatalf("parked sets = %+v, want set-crash parked", state.ParkedSets)
+	}
+	if got := state.SetCrashBackoffs[key]; !got.IsZero() {
+		t.Fatalf("parked set must not keep active crash backoff, got %s", got)
+	}
+
+	entries, err := ReadJournal(td)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	var parked int
+	for _, entry := range entries {
+		if entry.Event == JournalEventSetParked && entry.SetID == "set-crash" {
+			parked++
+		}
+	}
+	if parked != 1 {
+		t.Fatalf("park journal events = %d, want 1; entries=%+v", parked, entries)
+	}
+}
+
+func TestRecordTerminalOutcomesCleanOutcomeResetsCrashState(t *testing.T) {
+	td := queueDataDeps(t)
+	key := setBackoffKey("/runtime", "set-1")
+	state := &DaemonState{
+		Version:          1,
+		SetCrashCounts:   map[string]int{key: 2},
+		SetCrashBackoffs: map[string]time.Time{key: time.Now().UTC().Add(time.Hour)},
+		ParkedSets:       map[string]ParkedSet{key: {RuntimePath: "/runtime", SetID: "set-1", ParkedAt: time.Now().UTC()}},
+	}
+	if err := WriteDaemonState(td, state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	writtenAt := time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC)
+	d := &Deps{
+		Tasks: td,
+		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
+			return &tasks.DrainOutcomeRecord{
+				SetID:       "set-1",
+				Outcome:     tasks.DrainOutcomeDone,
+				RuntimePath: "/runtime",
+				WrittenAt:   writtenAt,
+			}, nil
+		},
+	}
+
+	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
+		Project: "pop",
+		scan:    projectScan{RuntimePath: "/runtime"},
+	}}); err != nil {
+		t.Fatalf("record outcomes: %v", err)
+	}
+
+	restartedState, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read state after simulated restart: %v", err)
+	}
+	if got := restartedState.SetCrashCounts[key]; got != 0 {
+		t.Fatalf("crash count after clean outcome = %d, want 0", got)
+	}
+	if got := restartedState.SetCrashBackoffs[key]; !got.IsZero() {
+		t.Fatalf("crash backoff after clean outcome = %s, want cleared", got)
+	}
+	if _, ok := restartedState.ParkedSets[key]; ok {
+		t.Fatalf("parked set after clean outcome was not cleared: %+v", restartedState.ParkedSets)
+	}
+}
+
+func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
+	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	key := setBackoffKey("/runtime", "set-1")
+	snap := statusFromDecisions([]Decision{{
+		Project: "pop",
+		Reason:  "set parked after repeated abnormal drain exits",
+	}}, &DaemonState{
+		Version:          1,
+		SetCrashBackoffs: map[string]time.Time{key: now.Add(time.Minute)},
+		ParkedSets:       map[string]ParkedSet{key: {RuntimePath: "/runtime", SetID: "set-1", ParkedAt: now}},
+	})
+
+	var statusOut bytes.Buffer
+	RenderStatus(&statusOut, snap)
+	statusText := statusOut.String()
+	for _, want := range []string{"set_crash_backoffs", "parked_sets", "set-1"} {
+		if !strings.Contains(statusText, want) {
+			t.Fatalf("status output missing %q:\n%s", want, statusText)
+		}
+	}
+
+	var logOut bytes.Buffer
+	RenderLog(&logOut, []JournalEntry{{
+		Timestamp: now,
+		Event:     JournalEventSetParked,
+		Project:   "pop",
+		SetID:     "set-1",
+		Reason:    "repeated abnormal drain exits",
+	}}, 50)
+	if !strings.Contains(logOut.String(), "pop set-1 parked reason=repeated abnormal drain exits") {
+		t.Fatalf("log output missing park event:\n%s", logOut.String())
+	}
+}

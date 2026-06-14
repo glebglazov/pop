@@ -66,6 +66,12 @@ func tick(d *Deps, out io.Writer) {
 	}
 	if err := recordTerminalOutcomes(d, cfg, decisions); err != nil {
 		fmt.Fprintf(out, "queue: journal outcomes: %v\n", err)
+	} else {
+		decisions, err = Scan(d, cfg)
+		if err != nil {
+			fmt.Fprintf(out, "queue: scan: %v\n", err)
+			return
+		}
 	}
 
 	for _, dec := range decisions {
@@ -173,6 +179,9 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 					return err
 				}
 				entries = append(entries, entry)
+				if err := applyTerminalOutcomeState(d, state, qcfg, dec.Project, rec.RuntimePath, rec.SetID, rec.Outcome); err != nil {
+					return err
+				}
 				if rec.Outcome == tasks.DrainOutcomeQuotaPaused && rec.ExhaustedPreset != "" {
 					until := time.Now().UTC().Add(qcfg.AgentQuotaRetryAfter)
 					if state.AgentCooldowns == nil {
@@ -209,7 +218,7 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 			if entry.Project != dec.Project || entry.RuntimePath != dec.scan.RuntimePath || entry.Event != JournalEventSpawn {
 				continue
 			}
-			if journalHasOpenSpawn(entries, entry.Project, entry.RuntimePath, entry.SetID) && !journalHasOutcome(entries, entry.Project, entry.RuntimePath, entry.SetID, DrainOutcomeCrashed, time.Time{}) {
+			if journalHasOpenSpawn(entries, entry.Project, entry.RuntimePath, entry.SetID) {
 				outcome := JournalEntry{
 					Event:       JournalEventOutcome,
 					Project:     entry.Project,
@@ -221,10 +230,82 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 					return err
 				}
 				entries = append(entries, outcome)
+				if err := applyTerminalOutcomeState(d, state, qcfg, entry.Project, entry.RuntimePath, entry.SetID, DrainOutcomeCrashed); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func applyTerminalOutcomeState(d *Deps, state *DaemonState, qcfg config.ResolvedQueueConfig, project, runtimePath, setID string, outcome tasks.DrainOutcome) error {
+	if state == nil || runtimePath == "" || setID == "" {
+		return nil
+	}
+	key := setBackoffKey(runtimePath, setID)
+	if drainOutcomeAbnormal(outcome) {
+		if state.SetCrashCounts == nil {
+			state.SetCrashCounts = map[string]int{}
+		}
+		count := state.SetCrashCounts[key] + 1
+		state.SetCrashCounts[key] = count
+
+		if len(qcfg.CrashRetryDelays) == 0 || count > len(qcfg.CrashRetryDelays) {
+			if state.SetCrashBackoffs != nil {
+				delete(state.SetCrashBackoffs, key)
+			}
+			if state.ParkedSets == nil {
+				state.ParkedSets = map[string]ParkedSet{}
+			}
+			state.ParkedSets[key] = ParkedSet{
+				RuntimePath:              runtimePath,
+				SetID:                    setID,
+				ParkedAt:                 time.Now().UTC(),
+				Reason:                   fmt.Sprintf("exhausted %d crash retry delay(s)", len(qcfg.CrashRetryDelays)),
+				ConsecutiveAbnormalExits: count,
+			}
+			if err := WriteDaemonState(d.Tasks, state); err != nil {
+				return err
+			}
+			return AppendJournalEntry(d.Tasks, JournalEntry{
+				Event:       JournalEventSetParked,
+				Project:     project,
+				SetID:       setID,
+				RuntimePath: runtimePath,
+				Reason:      "repeated abnormal drain exits",
+				Source:      "supervisor",
+			})
+		}
+
+		if state.SetCrashBackoffs == nil {
+			state.SetCrashBackoffs = map[string]time.Time{}
+		}
+		state.SetCrashBackoffs[key] = time.Now().UTC().Add(qcfg.CrashRetryDelays[count-1])
+		if state.ParkedSets != nil {
+			delete(state.ParkedSets, key)
+		}
+		return WriteDaemonState(d.Tasks, state)
+	}
+
+	resetCrashState(state, key)
+	return WriteDaemonState(d.Tasks, state)
+}
+
+func resetCrashState(state *DaemonState, key string) {
+	if state.SetCrashCounts != nil {
+		delete(state.SetCrashCounts, key)
+	}
+	if state.SetCrashBackoffs != nil {
+		delete(state.SetCrashBackoffs, key)
+	}
+	if state.ParkedSets != nil {
+		delete(state.ParkedSets, key)
+	}
+}
+
+func drainOutcomeAbnormal(outcome tasks.DrainOutcome) bool {
+	return outcome == DrainOutcomeCrashed || outcome.Abnormal()
 }
 
 func journalAgentNotes(d *Deps, dec Decision) error {

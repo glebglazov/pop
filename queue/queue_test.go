@@ -214,9 +214,44 @@ func TestSelectReadySetSkipsBackedOffPinnedSet(t *testing.T) {
 		setBackoffKey("/runtime", "pinned"): now.Add(time.Hour),
 	}}
 
-	id, _, ok := selectReadySet(refresh, "/runtime", state, now)
+	id, _, _, ok := selectReadySet(refresh, "/runtime", state, now)
 	if !ok || id != "fallback" {
 		t.Fatalf("selectReadySet = (%q,%v), want fallback,true", id, ok)
+	}
+}
+
+func TestSelectReadySetSkipsCrashBackoffUntilElapsed(t *testing.T) {
+	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
+		{ID: "crashy", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
+	}}
+	state := &DaemonState{Version: 1, SetCrashBackoffs: map[string]time.Time{
+		setBackoffKey("/runtime", "crashy"): now.Add(time.Minute),
+	}}
+
+	id, until, reason, ok := selectReadySet(refresh, "/runtime", state, now)
+	if ok || id != "" || !until.Equal(now.Add(time.Minute)) || reason != "set backed off after abnormal drain exit" {
+		t.Fatalf("selectReadySet during backoff = (%q,%s,%q,%v)", id, until, reason, ok)
+	}
+
+	id, _, _, ok = selectReadySet(refresh, "/runtime", state, now.Add(2*time.Minute))
+	if !ok || id != "crashy" {
+		t.Fatalf("selectReadySet after backoff = (%q,%v), want crashy,true", id, ok)
+	}
+}
+
+func TestSelectReadySetSkipsParkedSet(t *testing.T) {
+	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
+		{ID: "parked", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
+	}}
+	state := &DaemonState{Version: 1, ParkedSets: map[string]ParkedSet{
+		setBackoffKey("/runtime", "parked"): {RuntimePath: "/runtime", SetID: "parked", ParkedAt: now},
+	}}
+
+	id, until, reason, ok := selectReadySet(refresh, "/runtime", state, now)
+	if ok || id != "" || !until.IsZero() || reason != "set parked after repeated abnormal drain exits" {
+		t.Fatalf("selectReadySet parked = (%q,%s,%q,%v)", id, until, reason, ok)
 	}
 }
 

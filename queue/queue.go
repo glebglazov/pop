@@ -194,11 +194,13 @@ func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonStat
 		return dec
 	}
 
-	id, waitUntil, ok := selectReadySet(refresh, scan.RuntimePath, state, now)
+	id, waitUntil, waitReason, ok := selectReadySet(refresh, scan.RuntimePath, state, now)
 	if !ok {
 		if !waitUntil.IsZero() {
-			dec.Reason = "set backed off for pinned agent cooldown"
+			dec.Reason = waitReason
 			dec.WaitUntil = waitUntil
+		} else if waitReason != "" {
+			dec.Reason = waitReason
 		} else {
 			dec.Reason = "no ready set"
 		}
@@ -243,9 +245,9 @@ func selectReadySetID(rows []tasks.Row) (string, bool) {
 	return ready[0].ID, true
 }
 
-func selectReadySet(refresh *tasks.RefreshResult, runtimePath string, state *DaemonState, now time.Time) (string, time.Time, bool) {
+func selectReadySet(refresh *tasks.RefreshResult, runtimePath string, state *DaemonState, now time.Time) (string, time.Time, string, bool) {
 	if refresh == nil {
-		return "", time.Time{}, false
+		return "", time.Time{}, "", false
 	}
 	var ready []tasks.Row
 	for _, row := range refresh.Rows {
@@ -254,7 +256,7 @@ func selectReadySet(refresh *tasks.RefreshResult, runtimePath string, state *Dae
 		}
 	}
 	if len(ready) == 0 {
-		return "", time.Time{}, false
+		return "", time.Time{}, "", false
 	}
 	sort.SliceStable(ready, func(i, j int) bool {
 		if ready[i].Priority != ready[j].Priority {
@@ -263,16 +265,40 @@ func selectReadySet(refresh *tasks.RefreshResult, runtimePath string, state *Dae
 		return ready[i].RegIndex < ready[j].RegIndex
 	})
 	var earliest time.Time
+	var skippedParked bool
+	var skippedBackoff bool
+	var skippedQuota bool
 	for _, row := range ready {
-		until := setBackoffUntil(state, runtimePath, row.ID, now)
-		if until.IsZero() {
-			return row.ID, time.Time{}, true
+		if setParked(state, runtimePath, row.ID) {
+			skippedParked = true
+			continue
 		}
-		if earliest.IsZero() || until.Before(earliest) {
-			earliest = until
+		if until := setCrashBackoffUntil(state, runtimePath, row.ID, now); !until.IsZero() {
+			skippedBackoff = true
+			if earliest.IsZero() || until.Before(earliest) {
+				earliest = until
+			}
+			continue
 		}
+		if until := setBackoffUntil(state, runtimePath, row.ID, now); !until.IsZero() {
+			skippedQuota = true
+			if earliest.IsZero() || until.Before(earliest) {
+				earliest = until
+			}
+			continue
+		}
+		return row.ID, time.Time{}, "", true
 	}
-	return "", earliest, false
+	switch {
+	case !earliest.IsZero() && skippedBackoff:
+		return "", earliest, "set backed off after abnormal drain exit", false
+	case !earliest.IsZero() && skippedQuota:
+		return "", earliest, "set backed off for pinned agent cooldown", false
+	case skippedParked:
+		return "", time.Time{}, "set parked after repeated abnormal drain exits", false
+	default:
+		return "", time.Time{}, "no ready set", false
+	}
 }
 
 func setBackoffUntil(state *DaemonState, runtimePath, setID string, now time.Time) time.Time {
@@ -284,6 +310,25 @@ func setBackoffUntil(state *DaemonState, runtimePath, setID string, now time.Tim
 		return time.Time{}
 	}
 	return until
+}
+
+func setCrashBackoffUntil(state *DaemonState, runtimePath, setID string, now time.Time) time.Time {
+	if state == nil || state.SetCrashBackoffs == nil {
+		return time.Time{}
+	}
+	until := state.SetCrashBackoffs[setBackoffKey(runtimePath, setID)]
+	if until.IsZero() || !until.After(now) {
+		return time.Time{}
+	}
+	return until
+}
+
+func setParked(state *DaemonState, runtimePath, setID string) bool {
+	if state == nil || state.ParkedSets == nil {
+		return false
+	}
+	_, ok := state.ParkedSets[setBackoffKey(runtimePath, setID)]
+	return ok
 }
 
 func setBackoffKey(runtimePath, setID string) string {
