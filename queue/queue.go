@@ -8,6 +8,7 @@ package queue
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -40,6 +41,8 @@ type Deps struct {
 	// ReadOutcome returns the latest terminal drain outcome for a runtime
 	// checkout. Defaults to tasks.ReadDrainOutcome.
 	ReadOutcome func(runtimePath string) (*tasks.DrainOutcomeRecord, error)
+	// Now returns the current time. Defaults to time.Now.
+	Now func() time.Time
 }
 
 // DefaultDeps returns supervisor dependencies backed by real implementations.
@@ -86,6 +89,11 @@ type projectScan struct {
 	SessionName    string
 }
 
+type provisionedWorktree struct {
+	Path   string
+	Branch string
+}
+
 // Decision is the supervisor's per-project outcome for one scan iteration.
 type Decision struct {
 	Project            string
@@ -114,6 +122,13 @@ func (dec Decision) Actionable() bool {
 	return dec.Err == nil && !dec.Busy && dec.TaskSetID != ""
 }
 
+func (d *Deps) now() time.Time {
+	if d != nil && d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
+}
+
 // Scan resolves every registered project, derives its actionable drain (if
 // any), and returns one Decision per project. It performs no tmux side effects.
 func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
@@ -129,7 +144,7 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
+	now := d.now().UTC()
 
 	decisions := make([]Decision, 0, len(projects))
 	for _, p := range projects {
@@ -182,6 +197,22 @@ func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonStat
 	dec := Decision{Project: scan.Name, scan: scan}
 	dec.WorktreeReady, dec.ProjectConfigError = readRepoConfig(d, scan.ProjectPath)
 
+	if dec.WorktreeReady {
+		openSpawn, openLock, err := liveOpenSpawn(d, dec.Project)
+		if err != nil {
+			dec.Err = err
+			dec.Reason = "journal"
+			return dec
+		}
+		if openLock != nil && openLock.Locked {
+			dec.Busy = true
+			dec.Reason = "busy"
+			dec.TaskSetID = openSpawn.SetID
+			dec.lockStatus = openLock
+			return dec
+		}
+	}
+
 	lock := d.readLock(scan.RuntimePath)
 	dec.lockStatus = lock
 	if lock != nil && lock.Locked {
@@ -223,6 +254,30 @@ func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonStat
 	dec.TaskSetID = id
 	dec.DefaultAgent = defaultAgent
 	return dec
+}
+
+func liveOpenSpawn(d *Deps, projectName string) (JournalEntry, *tasks.RuntimeLockStatus, error) {
+	if d == nil || d.Tasks == nil {
+		return JournalEntry{}, nil, nil
+	}
+	entries, err := ReadJournal(d.Tasks)
+	if err != nil {
+		return JournalEntry{}, nil, err
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		if entry.Project != projectName || entry.Event != JournalEventSpawn || entry.RuntimePath == "" || entry.SetID == "" {
+			continue
+		}
+		if !journalHasOpenSpawn(entries, entry.Project, entry.RuntimePath, entry.SetID) {
+			continue
+		}
+		lock := d.readLock(entry.RuntimePath)
+		if lock != nil && lock.Locked {
+			return entry, lock, nil
+		}
+	}
+	return JournalEntry{}, nil, nil
 }
 
 func readRepoConfig(d *Deps, repoRoot string) (bool, string) {
@@ -400,6 +455,53 @@ func agentBinaryAvailable(d *Deps, preset string) bool {
 	return err == nil
 }
 
+func provisionWorktree(d *Deps, projectPath, setID string) (provisionedWorktree, error) {
+	if d == nil || d.Tasks == nil {
+		return provisionedWorktree{}, fmt.Errorf("missing task dependencies")
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, projectPath)
+	if err != nil {
+		return provisionedWorktree{}, err
+	}
+	safeSet := safeWorktreeComponent(setID)
+	stamp := d.now().UTC().Format("20060102T150405Z")
+	branch := fmt.Sprintf("pop/%s/%s", safeSet, stamp)
+	path := filepath.Join(QueueDataDir(d.Tasks), "worktrees", id.Basename+"-"+id.ShortHash, safeSet+"-"+stamp)
+	if err := d.Tasks.FS.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return provisionedWorktree{}, fmt.Errorf("create worktree parent: %w", err)
+	}
+	if _, err := d.Tasks.Git.CommandInDir(projectPath, "worktree", "add", "-b", branch, path, "HEAD"); err != nil {
+		return provisionedWorktree{}, fmt.Errorf("git worktree add: %w", err)
+	}
+	return provisionedWorktree{Path: path, Branch: branch}, nil
+}
+
+func safeWorktreeComponent(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "set"
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(s) {
+		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "set"
+	}
+	return out
+}
+
 // Spawn launches the selected drain into a pane of the project's `pop-queue`
 // window, creating the tmux session detached when absent and the window when
 // absent. It is a no-op for non-actionable decisions.
@@ -408,6 +510,9 @@ func Spawn(d *Deps, dec Decision) error {
 		return nil
 	}
 	command := fmt.Sprintf("pop tasks implement %s --yes", shellQuote(dec.TaskSetID))
+	if dec.WorktreeReady && dec.scan.RuntimePath != "" {
+		command += " --task-runtime-path " + shellQuote(dec.scan.RuntimePath)
+	}
 	if dec.DefaultAgent != "" {
 		command += " --default-agent " + shellQuote(dec.DefaultAgent)
 	}

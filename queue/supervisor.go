@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -82,6 +83,7 @@ func tick(d *Deps, out io.Writer) {
 		case dec.Err != nil:
 			fmt.Fprintf(out, "queue: %s: %v\n", dec.Project, dec.Err)
 		case dec.Actionable():
+			dec = prepareWorktreeDrain(d, out, dec)
 			if err := Spawn(d, dec); err != nil {
 				fmt.Fprintf(out, "queue: %s: spawn %s: %v\n", dec.Project, dec.TaskSetID, err)
 				continue
@@ -110,6 +112,25 @@ func tick(d *Deps, out io.Writer) {
 			fmt.Fprintf(out, "queue: %s: spawned drain for %s\n", dec.Project, dec.TaskSetID)
 		}
 	}
+}
+
+func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
+	if !dec.Actionable() || !dec.WorktreeReady {
+		return dec
+	}
+	wt, err := provisionWorktree(d, dec.scan.ProjectPath, dec.TaskSetID)
+	if err != nil {
+		fmt.Fprintf(out, "queue: %s: provision worktree for %s: %v; falling back to in-place drain\n", dec.Project, dec.TaskSetID, err)
+		return dec
+	}
+	dec.scan.ProjectPath = wt.Path
+	dec.scan.RuntimePath = wt.Path
+	pd := d.Project
+	if pd == nil {
+		pd = project.DefaultDeps()
+	}
+	dec.scan.SessionName = project.SessionNameWith(pd, wt.Path)
+	return dec
 }
 
 // ReconcileInFlight records open spawn entries for live runtime locks observed

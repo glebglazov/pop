@@ -1,9 +1,11 @@
 package queue
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -221,6 +223,46 @@ func TestDecideProjectMalformedRepoConfigReportsAndDegrades(t *testing.T) {
 	}
 }
 
+func TestDecideProjectWorktreeReadyTreatsLiveSpawnAsBusy(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &Deps{
+		Tasks:   queueTestTasksDeps(true),
+		Project: &project.Deps{FS: deps.NewRealFileSystem()},
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
+			if runtimePath == "/pop/worktrees/repo/set" {
+				return liveLock(runtimePath)
+			}
+			return idleLock(runtimePath)
+		},
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			t.Fatal("live worktree spawn must short-circuit before refresh")
+			return nil, nil
+		},
+	}
+	if err := AppendJournalEntry(d.Tasks, JournalEntry{
+		Event:       JournalEventSpawn,
+		Project:     "proj",
+		SetID:       "ready",
+		RuntimePath: "/pop/worktrees/repo/set",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+
+	if !dec.Busy || dec.TaskSetID != "ready" {
+		t.Fatalf("expected live worktree spawn to make project busy, got %+v", dec)
+	}
+	if dec.lockStatus == nil || dec.lockStatus.RuntimePath != "/pop/worktrees/repo/set" {
+		t.Fatalf("lockStatus = %+v, want worktree lock", dec.lockStatus)
+	}
+}
+
 func TestSelectDefaultAgentSkipsMissingAndCooled(t *testing.T) {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	d := &Deps{Tasks: queueTestTasksDeps(false)}
@@ -368,6 +410,103 @@ func actionableDecision() Decision {
 	}
 }
 
+func TestProvisionWorktreeAddsFreshBranchFromHead(t *testing.T) {
+	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
+	var gotDir string
+	var gotArgs []string
+	d := &Deps{
+		Tasks: &tasks.Deps{
+			FS: &deps.MockFileSystem{
+				GetenvFunc:       func(key string) string { return "/xdg" },
+				EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
+				MkdirAllFunc: func(path string, perm os.FileMode) error {
+					return nil
+				},
+			},
+			Git: &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+				if reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}) {
+					return filepath.Join("/repo", ".git"), nil
+				}
+				gotDir = dir
+				gotArgs = append([]string(nil), args...)
+				return "", nil
+			}},
+		},
+		Now: func() time.Time { return now },
+	}
+
+	wt, err := provisionWorktree(d, "/repo", "Set With Spaces")
+	if err != nil {
+		t.Fatalf("provisionWorktree: %v", err)
+	}
+
+	wantBranch := "pop/set-with-spaces/20260614T090807Z"
+	wantPath := filepath.Join("/xdg", "pop", "queue", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "set-with-spaces-20260614T090807Z")
+	if wt.Branch != wantBranch || wt.Path != wantPath {
+		t.Fatalf("provisioned = %+v, want branch %q path %q", wt, wantBranch, wantPath)
+	}
+	if gotDir != "/repo" {
+		t.Fatalf("git worktree add dir = %q, want /repo", gotDir)
+	}
+	wantArgs := []string{"worktree", "add", "-b", wantBranch, wantPath, "HEAD"}
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Fatalf("git args = %#v, want %#v", gotArgs, wantArgs)
+	}
+}
+
+func TestPrepareWorktreeDrainOverridesRuntimePath(t *testing.T) {
+	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
+	d := worktreeProvisionDeps(t, now, nil)
+	dec := actionableDecision()
+	dec.WorktreeReady = true
+	dec.scan.RuntimePath = "/repo"
+	dec.scan.ProjectPath = "/repo"
+
+	got := prepareWorktreeDrain(d, &bytes.Buffer{}, dec)
+
+	if got.scan.RuntimePath == "/repo" || got.scan.RuntimePath == "" {
+		t.Fatalf("RuntimePath was not overridden: %+v", got.scan)
+	}
+	if got.scan.ProjectPath != got.scan.RuntimePath {
+		t.Fatalf("ProjectPath = %q, RuntimePath = %q; want worktree checkout for both", got.scan.ProjectPath, got.scan.RuntimePath)
+	}
+	if got.scan.SessionName == dec.scan.SessionName {
+		t.Fatalf("SessionName was not recalculated for worktree: %q", got.scan.SessionName)
+	}
+}
+
+func TestPrepareWorktreeDrainNonReadyStaysInPlace(t *testing.T) {
+	d := worktreeProvisionDeps(t, time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC), fmt.Errorf("must not provision"))
+	dec := actionableDecision()
+	dec.WorktreeReady = false
+	dec.scan.RuntimePath = "/repo"
+	dec.scan.ProjectPath = "/repo"
+
+	got := prepareWorktreeDrain(d, &bytes.Buffer{}, dec)
+
+	if got.scan.RuntimePath != "/repo" || got.scan.ProjectPath != "/repo" {
+		t.Fatalf("non-worktree-ready project must stay in-place, got %+v", got.scan)
+	}
+}
+
+func TestPrepareWorktreeDrainProvisionFailureFallsBackInPlace(t *testing.T) {
+	d := worktreeProvisionDeps(t, time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC), fmt.Errorf("boom"))
+	dec := actionableDecision()
+	dec.WorktreeReady = true
+	dec.scan.RuntimePath = "/repo"
+	dec.scan.ProjectPath = "/repo"
+	var out bytes.Buffer
+
+	got := prepareWorktreeDrain(d, &out, dec)
+
+	if got.scan.RuntimePath != "/repo" || got.scan.ProjectPath != "/repo" {
+		t.Fatalf("failed provisioning must fall back in-place, got %+v", got.scan)
+	}
+	if !strings.Contains(out.String(), "falling back to in-place drain") {
+		t.Fatalf("fallback was not reported: %q", out.String())
+	}
+}
+
 func TestSpawnCreatesSessionAndWindow(t *testing.T) {
 	rt := newRecordingTmux(false, "")
 	d := &Deps{Tmux: rt}
@@ -387,6 +526,35 @@ func TestSpawnCreatesSessionAndWindow(t *testing.T) {
 		t.Fatalf("new-window must target the %q window: %v", queueWindow, newWindow)
 	}
 	assertSendKeys(t, rt)
+}
+
+func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T) {
+	rt := newRecordingTmux(false, "")
+	dec := actionableDecision()
+	dec.WorktreeReady = true
+	dec.scan.ProjectPath = "/pop/worktrees/repo/set"
+	dec.scan.RuntimePath = "/pop/worktrees/repo/set"
+	d := &Deps{Tmux: rt}
+
+	if err := Spawn(d, dec); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	newWindow, ok := rt.findCommand("new-window")
+	if !ok {
+		t.Fatal("expected the pop-queue window to be created")
+	}
+	if !argsContain(newWindow, "-c", "/pop/worktrees/repo/set") {
+		t.Fatalf("new-window must start in the worktree checkout: %v", newWindow)
+	}
+	sendKeys, ok := rt.findCommand("send-keys")
+	if !ok {
+		t.Fatal("expected drain command")
+	}
+	joined := strings.Join(sendKeys, " ")
+	if !strings.Contains(joined, "--task-runtime-path /pop/worktrees/repo/set") {
+		t.Fatalf("send-keys must pass runtime override: %v", sendKeys)
+	}
 }
 
 func TestSpawnSplitsWhenWindowExists(t *testing.T) {
@@ -447,4 +615,61 @@ func argsContain(args []string, want ...string) bool {
 		}
 	}
 	return false
+}
+
+func worktreeProvisionDeps(t *testing.T, now time.Time, addErr error) *Deps {
+	t.Helper()
+	wtPath := filepath.Join("/xdg", "pop", "queue", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "2026-06-14-queue-20260614T090807Z")
+	return &Deps{
+		Tasks: &tasks.Deps{
+			FS: &deps.MockFileSystem{
+				GetenvFunc:       func(key string) string { return "/xdg" },
+				EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
+				MkdirAllFunc:     func(path string, perm os.FileMode) error { return nil },
+			},
+			Git: &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+				if reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}) {
+					return filepath.Join("/repo", ".git"), nil
+				}
+				if reflect.DeepEqual(args, []string{"rev-parse", "--show-toplevel"}) && dir == wtPath {
+					return wtPath, nil
+				}
+				return "", addErr
+			}},
+		},
+		Project: &project.Deps{
+			FS: &deps.MockFileSystem{
+				StatFunc: func(path string) (os.FileInfo, error) {
+					return nil, os.ErrNotExist
+				},
+			},
+			Git: &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+				if reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}) {
+					return ".git", nil
+				}
+				if reflect.DeepEqual(args, []string{"rev-parse", "--show-toplevel"}) {
+					return dir, nil
+				}
+				return "", nil
+			}},
+		},
+		Now: func() time.Time { return now },
+	}
+}
+
+func repoHashForTest(t *testing.T, commonDir string) string {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(&tasks.Deps{
+		FS: &deps.MockFileSystem{
+			GetenvFunc:       func(key string) string { return "/xdg" },
+			EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
+		},
+		Git: &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+			return commonDir, nil
+		}},
+	}, "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id.ShortHash
 }
