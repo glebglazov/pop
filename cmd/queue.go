@@ -37,15 +37,33 @@ var queueRunCmd = &cobra.Command{
 	RunE:  runQueueRun,
 }
 
+var queueStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show queue status from on-disk state",
+	Args:  cobra.NoArgs,
+	RunE:  runQueueStatus,
+}
+
+var queueLogCmd = &cobra.Command{
+	Use:   "log",
+	Short: "Show recent queue journal history",
+	Args:  cobra.NoArgs,
+	RunE:  runQueueLog,
+}
+
 func init() {
 	rootCmd.AddCommand(queueCmd)
 	queueCmd.AddCommand(queueRunCmd)
+	queueCmd.AddCommand(queueStatusCmd)
+	queueCmd.AddCommand(queueLogCmd)
 }
 
 var (
 	queueConfigLoad = config.Load
 	queueRun        = queue.Run
 )
+
+const queueLogLimit = 50
 
 type queueRunConfig struct {
 	Agents               []string
@@ -112,5 +130,33 @@ func runQueueRun(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
+	return nil
+}
+
+func runQueueStatus(cmd *cobra.Command, args []string) error {
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	cfg, err := queueConfigLoad(cfgPath)
+	if err != nil {
+		return err
+	}
+	d := queue.DefaultDeps()
+	d.LoadConfig = queueConfigLoad
+	snap, err := queue.BuildStatus(d, cfg)
+	if err != nil {
+		return err
+	}
+	queue.RenderStatus(os.Stdout, snap)
+	return nil
+}
+
+func runQueueLog(cmd *cobra.Command, args []string) error {
+	entries, err := queue.ReadJournal(tasks.DefaultDeps())
+	if err != nil {
+		return err
+	}
+	queue.RenderLog(os.Stdout, entries, queueLogLimit)
 	return nil
 }

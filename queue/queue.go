@@ -35,6 +35,9 @@ type Deps struct {
 	// ReadLock returns the runtime execution lock status for a runtime
 	// checkout. Defaults to tasks.ReadRuntimeLockStatus.
 	ReadLock func(runtimePath string) *tasks.RuntimeLockStatus
+	// ReadOutcome returns the latest terminal drain outcome for a runtime
+	// checkout. Defaults to tasks.ReadDrainOutcome.
+	ReadOutcome func(runtimePath string) (*tasks.DrainOutcomeRecord, error)
 }
 
 // DefaultDeps returns supervisor dependencies backed by real implementations.
@@ -64,6 +67,14 @@ func (d *Deps) readLock(runtimePath string) *tasks.RuntimeLockStatus {
 	return tasks.ReadRuntimeLockStatus(d.Tasks, runtimePath)
 }
 
+// readOutcome resolves the ReadOutcome seam, defaulting to tasks.ReadDrainOutcome.
+func (d *Deps) readOutcome(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
+	if d.ReadOutcome != nil {
+		return d.ReadOutcome(runtimePath)
+	}
+	return tasks.ReadDrainOutcome(d.Tasks, runtimePath)
+}
+
 // projectScan holds one registered project's resolved coordinates for a scan.
 type projectScan struct {
 	Name           string
@@ -75,12 +86,13 @@ type projectScan struct {
 
 // Decision is the supervisor's per-project outcome for one scan iteration.
 type Decision struct {
-	Project   string
-	Busy      bool   // a live runtime lock ⇒ already executing, skip
-	TaskSetID string // the drain to spawn; empty when nothing is actionable
-	Reason    string // why no drain was spawned (busy, no-ready-set, error)
-	Err       error
-	scan      projectScan
+	Project    string
+	Busy       bool   // a live runtime lock ⇒ already executing, skip
+	TaskSetID  string // the drain to spawn; empty when nothing is actionable
+	Reason     string // why no drain was spawned (busy, no-ready-set, error)
+	Err        error
+	scan       projectScan
+	lockStatus *tasks.RuntimeLockStatus
 }
 
 // Actionable reports whether the decision selected a Task set to drain.
@@ -136,6 +148,7 @@ func decideProject(d *Deps, scan projectScan) Decision {
 	dec := Decision{Project: scan.Name, scan: scan}
 
 	lock := d.readLock(scan.RuntimePath)
+	dec.lockStatus = lock
 	if lock != nil && lock.Locked {
 		dec.Busy = true
 		dec.Reason = "busy"
