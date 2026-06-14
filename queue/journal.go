@@ -25,6 +25,7 @@ const (
 	JournalEventIntegrationConflict = "integration_conflict"
 	JournalEventIntegrationAttended = "integration_attended"
 	JournalEventIntegrationOutcome  = "integration_outcome"
+	JournalEventAbandoned           = "abandoned"
 )
 
 // JournalEntry is one append-only queue journal record.
