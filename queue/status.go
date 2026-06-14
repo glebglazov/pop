@@ -32,11 +32,24 @@ type IdleProject struct {
 	ProjectConfigError string
 }
 
+// AwaitingIntegrationSet is a DONE set whose branch has not been integrated by
+// queue. Mergeability is advisory and recomputed when the DONE outcome is seen.
+type AwaitingIntegrationSet struct {
+	Project     string
+	SetID       string
+	RuntimePath string
+	Status      string
+	Target      string
+	Source      string
+	CheckedAt   time.Time
+}
+
 // StatusSnapshot is the pure data model for `pop queue status`.
 type StatusSnapshot struct {
-	PickedUp    []PickedUpSet
-	Idle        []IdleProject
-	DaemonState *DaemonState
+	PickedUp            []PickedUpSet
+	Idle                []IdleProject
+	AwaitingIntegration []AwaitingIntegrationSet
+	DaemonState         *DaemonState
 }
 
 // BuildStatus derives queue status from on-disk lock/state truth.
@@ -86,6 +99,25 @@ func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapsho
 	}
 	sort.SliceStable(snap.PickedUp, func(i, j int) bool { return snap.PickedUp[i].Project < snap.PickedUp[j].Project })
 	sort.SliceStable(snap.Idle, func(i, j int) bool { return snap.Idle[i].Project < snap.Idle[j].Project })
+	if state != nil {
+		for _, rec := range state.Mergeability {
+			snap.AwaitingIntegration = append(snap.AwaitingIntegration, AwaitingIntegrationSet{
+				Project:     rec.Project,
+				SetID:       rec.SetID,
+				RuntimePath: rec.RuntimePath,
+				Status:      rec.Status,
+				Target:      rec.Target,
+				Source:      rec.Source,
+				CheckedAt:   rec.CheckedAt,
+			})
+		}
+		sort.SliceStable(snap.AwaitingIntegration, func(i, j int) bool {
+			if snap.AwaitingIntegration[i].Project != snap.AwaitingIntegration[j].Project {
+				return snap.AwaitingIntegration[i].Project < snap.AwaitingIntegration[j].Project
+			}
+			return snap.AwaitingIntegration[i].SetID < snap.AwaitingIntegration[j].SetID
+		})
+	}
 	return snap
 }
 
@@ -130,6 +162,40 @@ func RenderStatus(out io.Writer, snap StatusSnapshot) {
 		}
 	}
 
+	fmt.Fprintln(out, "Done sets:")
+	if len(snap.AwaitingIntegration) == 0 {
+		fmt.Fprintln(out, "  none")
+	} else {
+		for _, set := range snap.AwaitingIntegration {
+			project := set.Project
+			if project == "" {
+				project = "(unknown project)"
+			}
+			setID := set.SetID
+			if setID == "" {
+				setID = "(unknown set)"
+			}
+			fmt.Fprintf(out, "  %s: %s done · %s\n", project, setID, mergeabilityLabel(set.Status))
+		}
+	}
+
+	fmt.Fprintln(out, "Awaiting integration:")
+	if len(snap.AwaitingIntegration) == 0 {
+		fmt.Fprintln(out, "  none")
+	} else {
+		for _, set := range snap.AwaitingIntegration {
+			project := set.Project
+			if project == "" {
+				project = "(unknown project)"
+			}
+			checked := ""
+			if !set.CheckedAt.IsZero() {
+				checked = " checked " + set.CheckedAt.UTC().Format(time.RFC3339)
+			}
+			fmt.Fprintf(out, "  %s: %s (%s%s)\n", project, set.SetID, mergeabilityLabel(set.Status), checked)
+		}
+	}
+
 	fmt.Fprintln(out, "Daemon state:")
 	if snap.DaemonState == nil {
 		fmt.Fprintln(out, "  null")
@@ -152,6 +218,17 @@ func statusProjectLabel(project string, worktreeReady bool, configError string) 
 		label += " [.pop.toml error: " + configError + "]"
 	}
 	return label
+}
+
+func mergeabilityLabel(status string) string {
+	switch status {
+	case MergeabilityClean:
+		return "merges clean"
+	case MergeabilityConflicts:
+		return "conflicts"
+	default:
+		return "mergeability unknown"
+	}
 }
 
 // RenderLog prints recent queue journal history.
@@ -186,6 +263,8 @@ func RenderLog(out io.Writer, entries []JournalEntry, limit int) {
 			fmt.Fprintf(out, "%s %s %s unavailable agent=%s reason=%s\n", ts, entry.Project, entry.SetID, entry.Agent, entry.Reason)
 		case JournalEventSetParked:
 			fmt.Fprintf(out, "%s %s %s parked reason=%s\n", ts, entry.Project, entry.SetID, entry.Reason)
+		case JournalEventMergeability:
+			fmt.Fprintf(out, "%s %s %s mergeability=%s\n", ts, entry.Project, entry.SetID, entry.MergeStatus)
 		default:
 			fmt.Fprintf(out, "%s %s %s %s\n", ts, entry.Project, entry.SetID, entry.Event)
 		}

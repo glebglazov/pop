@@ -192,55 +192,84 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 		if dec.Busy || dec.scan.RuntimePath == "" {
 			continue
 		}
-		rec, err := d.readOutcome(dec.scan.RuntimePath)
-		if err == nil && rec != nil && rec.SetID != "" {
-			if !journalHasOutcome(entries, dec.Project, rec.RuntimePath, rec.SetID, rec.Outcome, rec.WrittenAt) {
-				ts := rec.WrittenAt
-				entry := JournalEntry{
-					Timestamp:   ts,
-					Event:       JournalEventOutcome,
-					Project:     dec.Project,
-					SetID:       rec.SetID,
-					RuntimePath: rec.RuntimePath,
-					Outcome:     rec.Outcome,
-					PID:         rec.PID,
-				}
-				if err := AppendJournalEntry(d.Tasks, entry); err != nil {
-					return err
-				}
-				entries = append(entries, entry)
-				if err := applyTerminalOutcomeState(d, state, qcfg, dec.Project, rec.RuntimePath, rec.SetID, rec.Outcome); err != nil {
-					return err
-				}
-				if rec.Outcome == tasks.DrainOutcomeQuotaPaused && rec.ExhaustedPreset != "" {
-					until := time.Now().UTC().Add(qcfg.AgentQuotaRetryAfter)
-					if state.AgentCooldowns == nil {
-						state.AgentCooldowns = map[string]time.Time{}
-					}
-					state.AgentCooldowns[rec.ExhaustedPreset] = until
-					if rec.ExhaustedPinned {
-						if state.SetBackoffs == nil {
-							state.SetBackoffs = map[string]time.Time{}
-						}
-						state.SetBackoffs[setBackoffKey(rec.RuntimePath, rec.SetID)] = until
-					}
-					if err := WriteDaemonState(d.Tasks, state); err != nil {
-						return err
-					}
-					cooldown := JournalEntry{
-						Event:       JournalEventAgentCooldown,
+		runtimes := terminalOutcomeRuntimes(entries, dec)
+		for _, runtime := range runtimes {
+			rec, err := d.readOutcome(runtime.RuntimePath)
+			if err == nil && rec != nil && rec.SetID != "" {
+				if !journalHasOutcome(entries, dec.Project, rec.RuntimePath, rec.SetID, rec.Outcome, rec.WrittenAt) {
+					ts := rec.WrittenAt
+					entry := JournalEntry{
+						Timestamp:   ts,
+						Event:       JournalEventOutcome,
 						Project:     dec.Project,
 						SetID:       rec.SetID,
 						RuntimePath: rec.RuntimePath,
-						Agent:       rec.ExhaustedPreset,
-						Reason:      "quota pause",
-						Until:       until,
-						Source:      "supervisor",
+						Outcome:     rec.Outcome,
+						PID:         rec.PID,
 					}
-					if err := AppendJournalEntry(d.Tasks, cooldown); err != nil {
+					if err := AppendJournalEntry(d.Tasks, entry); err != nil {
 						return err
 					}
-					entries = append(entries, cooldown)
+					entries = append(entries, entry)
+					if err := applyTerminalOutcomeState(d, state, qcfg, dec.Project, rec.RuntimePath, rec.SetID, rec.Outcome); err != nil {
+						return err
+					}
+					if rec.Outcome == tasks.DrainOutcomeDone {
+						merge, err := d.computeMergeability(runtime.WorkingPath, rec.RuntimePath)
+						if err != nil {
+							return err
+						}
+						merge.Project = dec.Project
+						merge.RuntimePath = rec.RuntimePath
+						merge.SetID = rec.SetID
+						if err := recordMergeability(d, state, merge); err != nil {
+							return err
+						}
+						mergeEvent := JournalEntry{
+							Event:       JournalEventMergeability,
+							Project:     dec.Project,
+							SetID:       rec.SetID,
+							RuntimePath: rec.RuntimePath,
+							MergeStatus: merge.Status,
+							Target:      merge.Target,
+							SourceRef:   merge.Source,
+							Source:      "supervisor",
+						}
+						if err := AppendJournalEntry(d.Tasks, mergeEvent); err != nil {
+							return err
+						}
+						entries = append(entries, mergeEvent)
+					}
+					if rec.Outcome == tasks.DrainOutcomeQuotaPaused && rec.ExhaustedPreset != "" {
+						until := time.Now().UTC().Add(qcfg.AgentQuotaRetryAfter)
+						if state.AgentCooldowns == nil {
+							state.AgentCooldowns = map[string]time.Time{}
+						}
+						state.AgentCooldowns[rec.ExhaustedPreset] = until
+						if rec.ExhaustedPinned {
+							if state.SetBackoffs == nil {
+								state.SetBackoffs = map[string]time.Time{}
+							}
+							state.SetBackoffs[setBackoffKey(rec.RuntimePath, rec.SetID)] = until
+						}
+						if err := WriteDaemonState(d.Tasks, state); err != nil {
+							return err
+						}
+						cooldown := JournalEntry{
+							Event:       JournalEventAgentCooldown,
+							Project:     dec.Project,
+							SetID:       rec.SetID,
+							RuntimePath: rec.RuntimePath,
+							Agent:       rec.ExhaustedPreset,
+							Reason:      "quota pause",
+							Until:       until,
+							Source:      "supervisor",
+						}
+						if err := AppendJournalEntry(d.Tasks, cooldown); err != nil {
+							return err
+						}
+						entries = append(entries, cooldown)
+					}
 				}
 			}
 		}
@@ -267,6 +296,51 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision) e
 		}
 	}
 	return nil
+}
+
+type terminalRuntime struct {
+	RuntimePath string
+	WorkingPath string
+}
+
+func terminalOutcomeRuntimes(entries []JournalEntry, dec Decision) []terminalRuntime {
+	seen := map[string]bool{}
+	add := func(out *[]terminalRuntime, runtimePath string) {
+		if runtimePath == "" || seen[runtimePath] {
+			return
+		}
+		seen[runtimePath] = true
+		workingPath := dec.scan.ProjectPath
+		if workingPath == "" {
+			workingPath = dec.scan.RuntimePath
+		}
+		*out = append(*out, terminalRuntime{RuntimePath: runtimePath, WorkingPath: workingPath})
+	}
+	var out []terminalRuntime
+	add(&out, dec.scan.RuntimePath)
+	for _, entry := range entries {
+		if entry.Project != dec.Project || entry.Event != JournalEventSpawn || entry.RuntimePath == "" {
+			continue
+		}
+		if journalHasOpenSpawn(entries, entry.Project, entry.RuntimePath, entry.SetID) {
+			add(&out, entry.RuntimePath)
+		}
+	}
+	return out
+}
+
+func recordMergeability(d *Deps, state *DaemonState, rec MergeabilityRecord) error {
+	if state == nil || rec.RuntimePath == "" || rec.SetID == "" {
+		return nil
+	}
+	if rec.CheckedAt.IsZero() {
+		rec.CheckedAt = time.Now().UTC()
+	}
+	if state.Mergeability == nil {
+		state.Mergeability = map[string]MergeabilityRecord{}
+	}
+	state.Mergeability[setBackoffKey(rec.RuntimePath, rec.SetID)] = rec
+	return WriteDaemonState(d.Tasks, state)
 }
 
 func applyTerminalOutcomeState(d *Deps, state *DaemonState, qcfg config.ResolvedQueueConfig, project, runtimePath, setID string, outcome tasks.DrainOutcome) error {

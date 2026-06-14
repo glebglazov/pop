@@ -440,6 +440,9 @@ func TestRecordTerminalOutcomesCleanOutcomeResetsCrashState(t *testing.T) {
 				WrittenAt:   writtenAt,
 			}, nil
 		},
+		ComputeMergeability: func(workingPath, runtimePath string) (MergeabilityRecord, error) {
+			return MergeabilityRecord{Status: MergeabilityClean, Target: "target", Source: "source"}, nil
+		},
 	}
 
 	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
@@ -464,6 +467,62 @@ func TestRecordTerminalOutcomesCleanOutcomeResetsCrashState(t *testing.T) {
 	}
 }
 
+func TestRecordTerminalOutcomesDoneRecordsMergeability(t *testing.T) {
+	td := queueDataDeps(t)
+	if err := AppendJournalEntry(td, JournalEntry{
+		Event:       JournalEventSpawn,
+		Project:     "pop",
+		SetID:       "set-1",
+		RuntimePath: "/worktree/set-1",
+		Source:      "supervisor",
+	}); err != nil {
+		t.Fatalf("append spawn: %v", err)
+	}
+	d := &Deps{
+		Tasks: td,
+		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
+			if runtimePath != "/worktree/set-1" {
+				return nil, os.ErrNotExist
+			}
+			return &tasks.DrainOutcomeRecord{
+				SetID:       "set-1",
+				Outcome:     tasks.DrainOutcomeDone,
+				RuntimePath: "/worktree/set-1",
+				WrittenAt:   time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
+			}, nil
+		},
+		ComputeMergeability: func(workingPath, runtimePath string) (MergeabilityRecord, error) {
+			if workingPath != "/repo" || runtimePath != "/worktree/set-1" {
+				t.Fatalf("mergeability paths = %q %q, want /repo /worktree/set-1", workingPath, runtimePath)
+			}
+			return MergeabilityRecord{Status: MergeabilityClean, Target: "main", Source: "set"}, nil
+		},
+	}
+
+	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
+		Project: "pop",
+		scan:    projectScan{ProjectPath: "/repo", RuntimePath: "/repo"},
+	}}); err != nil {
+		t.Fatalf("record outcomes: %v", err)
+	}
+
+	state, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	got := state.Mergeability[setBackoffKey("/worktree/set-1", "set-1")]
+	if got.Status != MergeabilityClean || got.Project != "pop" || got.SetID != "set-1" {
+		t.Fatalf("mergeability state = %+v", got)
+	}
+	entries, err := ReadJournal(td)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	if len(entries) != 3 || entries[2].Event != JournalEventMergeability || entries[2].MergeStatus != MergeabilityClean {
+		t.Fatalf("journal entries = %+v, want spawn/outcome/mergeability", entries)
+	}
+}
+
 func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	key := setBackoffKey("/runtime", "set-1")
@@ -474,12 +533,21 @@ func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 		Version:          1,
 		SetCrashBackoffs: map[string]time.Time{key: now.Add(time.Minute)},
 		ParkedSets:       map[string]ParkedSet{key: {RuntimePath: "/runtime", SetID: "set-1", ParkedAt: now}},
+		Mergeability: map[string]MergeabilityRecord{
+			setBackoffKey("/runtime", "set-1"): {
+				Project:     "pop",
+				RuntimePath: "/runtime",
+				SetID:       "set-1",
+				Status:      MergeabilityConflicts,
+				CheckedAt:   now,
+			},
+		},
 	})
 
 	var statusOut bytes.Buffer
 	RenderStatus(&statusOut, snap)
 	statusText := statusOut.String()
-	for _, want := range []string{"set_crash_backoffs", "parked_sets", "set-1"} {
+	for _, want := range []string{"set_crash_backoffs", "parked_sets", "set-1", "pop: set-1 done · conflicts", "Awaiting integration:"} {
 		if !strings.Contains(statusText, want) {
 			t.Fatalf("status output missing %q:\n%s", want, statusText)
 		}

@@ -14,13 +14,14 @@ import (
 // DaemonState is persisted supervisor-owned state. Later queue slices add
 // cooldowns, parked sets, and retry timers here.
 type DaemonState struct {
-	Version          int                  `json:"version"`
-	UpdatedAt        time.Time            `json:"updated_at,omitempty"`
-	AgentCooldowns   map[string]time.Time `json:"agent_cooldowns,omitempty"`
-	SetBackoffs      map[string]time.Time `json:"set_backoffs,omitempty"`
-	SetCrashBackoffs map[string]time.Time `json:"set_crash_backoffs,omitempty"`
-	SetCrashCounts   map[string]int       `json:"set_crash_counts,omitempty"`
-	ParkedSets       map[string]ParkedSet `json:"parked_sets,omitempty"`
+	Version          int                           `json:"version"`
+	UpdatedAt        time.Time                     `json:"updated_at,omitempty"`
+	AgentCooldowns   map[string]time.Time          `json:"agent_cooldowns,omitempty"`
+	SetBackoffs      map[string]time.Time          `json:"set_backoffs,omitempty"`
+	SetCrashBackoffs map[string]time.Time          `json:"set_crash_backoffs,omitempty"`
+	SetCrashCounts   map[string]int                `json:"set_crash_counts,omitempty"`
+	ParkedSets       map[string]ParkedSet          `json:"parked_sets,omitempty"`
+	Mergeability     map[string]MergeabilityRecord `json:"mergeability,omitempty"`
 }
 
 // ParkedSet records a task set whose consecutive abnormal exits exhausted the
@@ -32,6 +33,23 @@ type ParkedSet struct {
 	ParkedAt                 time.Time `json:"parked_at"`
 	Reason                   string    `json:"reason,omitempty"`
 	ConsecutiveAbnormalExits int       `json:"consecutive_abnormal_exits"`
+}
+
+const (
+	MergeabilityClean     = "clean"
+	MergeabilityConflicts = "conflicts"
+)
+
+// MergeabilityRecord records whether a DONE set branch can be textually merged
+// into the working branch. It is advisory; queue never integrates automatically.
+type MergeabilityRecord struct {
+	Project     string    `json:"project,omitempty"`
+	RuntimePath string    `json:"runtime_path"`
+	SetID       string    `json:"set_id"`
+	Status      string    `json:"status"`
+	CheckedAt   time.Time `json:"checked_at"`
+	Target      string    `json:"target,omitempty"`
+	Source      string    `json:"source,omitempty"`
 }
 
 // DaemonStatePath returns the queue daemon state path.

@@ -20,6 +20,7 @@ const (
 	JournalEventAgentCooldown    = "agent_cooldown"
 	JournalEventAgentUnavailable = "agent_unavailable"
 	JournalEventSetParked        = "set_parked"
+	JournalEventMergeability     = "mergeability"
 )
 
 // JournalEntry is one append-only queue journal record.
@@ -35,6 +36,9 @@ type JournalEntry struct {
 	Agent       string             `json:"agent,omitempty"`
 	Reason      string             `json:"reason,omitempty"`
 	Until       time.Time          `json:"until,omitempty"`
+	MergeStatus string             `json:"merge_status,omitempty"`
+	Target      string             `json:"target,omitempty"`
+	SourceRef   string             `json:"source_ref,omitempty"`
 }
 
 // QueueDataDir returns the data directory for queue-owned durable files.

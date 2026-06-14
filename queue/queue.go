@@ -41,6 +41,9 @@ type Deps struct {
 	// ReadOutcome returns the latest terminal drain outcome for a runtime
 	// checkout. Defaults to tasks.ReadDrainOutcome.
 	ReadOutcome func(runtimePath string) (*tasks.DrainOutcomeRecord, error)
+	// ComputeMergeability dry-runs merging a completed runtime branch into the
+	// working checkout. Defaults to git merge-tree.
+	ComputeMergeability func(workingPath, runtimePath string) (MergeabilityRecord, error)
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
 }
@@ -78,6 +81,13 @@ func (d *Deps) readOutcome(runtimePath string) (*tasks.DrainOutcomeRecord, error
 		return d.ReadOutcome(runtimePath)
 	}
 	return tasks.ReadDrainOutcome(d.Tasks, runtimePath)
+}
+
+func (d *Deps) computeMergeability(workingPath, runtimePath string) (MergeabilityRecord, error) {
+	if d.ComputeMergeability != nil {
+		return d.ComputeMergeability(workingPath, runtimePath)
+	}
+	return computeMergeability(d, workingPath, runtimePath)
 }
 
 // projectScan holds one registered project's resolved coordinates for a scan.
