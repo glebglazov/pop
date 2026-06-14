@@ -108,6 +108,57 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 	}
 }
 
+func TestSupervisorWorktreeDrainTargetsProjectSessionWithCheckoutCWD(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "worktree-drain", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	if err := os.WriteFile(filepath.Join(repo, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	rt := newRecordingTmux(false, "0")
+	td := queueTestTasksDeps(true)
+	d := &Deps{
+		Tasks:      td,
+		Project:    project.DefaultDeps(),
+		Tmux:       rt,
+		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
+	}
+
+	var supervisorOut bytes.Buffer
+	tick(d, &supervisorOut, newRunOutputState())
+
+	wantSession := project.SessionNameWith(project.DefaultDeps(), repo)
+	newSession, ok := rt.findCommand("new-session")
+	if !ok {
+		t.Fatal("expected originating project session to be created when absent")
+	}
+	if len(newSession) != 3 || newSession[1] != wantSession {
+		t.Fatalf("new-session = %v, want session %q", newSession, wantSession)
+	}
+	checkout := newSession[2]
+	if checkout == repo || !strings.Contains(checkout, filepath.Join("pop", "queue", "worktrees")) {
+		t.Fatalf("new-session cwd = %q, want provisioned worktree checkout", checkout)
+	}
+
+	assertSplitIntoWindow(t, rt, wantSession+":"+drainWindowName, checkout)
+	spawnCmd, ok := extractSpawnCommand(rt)
+	if !ok {
+		t.Fatal("supervisor tick must spawn a drain command")
+	}
+	if !strings.Contains(spawnCmd, "pop tasks implement "+setID) || !strings.Contains(spawnCmd, "--task-runtime-path "+checkout) {
+		t.Fatalf("spawn command = %q, want set and checkout runtime override %q", spawnCmd, checkout)
+	}
+	worktreeSession := project.SessionNameWith(project.DefaultDeps(), checkout)
+	if worktreeSession != wantSession && newSession[1] == worktreeSession {
+		t.Fatalf("new-session must not target worktree-derived session %q: %v", worktreeSession, newSession)
+	}
+	if !strings.Contains(supervisorOut.String(), "spawned drain for "+setID) {
+		t.Fatalf("supervisor output missing spawn line:\n%s", supervisorOut.String())
+	}
+}
+
 func TestSupervisorTickJournalsSpawnFailure(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "spawn-fails", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
