@@ -202,6 +202,104 @@ func TestResolveTaskAgentSpecForEffortClaudeModels(t *testing.T) {
 	}
 }
 
+func TestResolveTaskAgentSpecEffortModelPrecedence(t *testing.T) {
+	tests := []struct {
+		name           string
+		cliPreset      string
+		defaultPreset  string
+		agentExplicit  bool
+		agentCmd       string
+		taskAgent      string
+		effort         string
+		effortExplicit bool
+		wantSpec       string
+		wantPreset     string
+	}{
+		{
+			name:           "task agent model pin wins over effort",
+			cliPreset:      "claude",
+			taskAgent:      "claude --model sonnet",
+			effort:         "heavy",
+			effortExplicit: true,
+			wantSpec:       "claude --model sonnet",
+			wantPreset:     "claude",
+		},
+		{
+			name:           "explicit agent flag model wins over effort",
+			cliPreset:      "claude --model sonnet",
+			agentExplicit:  true,
+			taskAgent:      "claude",
+			effort:         "heavy",
+			effortExplicit: true,
+			wantSpec:       "claude --model sonnet",
+			wantPreset:     "claude",
+		},
+		{
+			name:           "bare task agent pin composes with effort",
+			cliPreset:      "codex",
+			taskAgent:      "claude",
+			effort:         "heavy",
+			effortExplicit: true,
+			wantSpec:       "claude --model opus",
+			wantPreset:     "claude",
+		},
+		{
+			name:           "explicit non claude agent is not changed by effort",
+			cliPreset:      "codex",
+			agentExplicit:  true,
+			taskAgent:      "claude",
+			effort:         "heavy",
+			effortExplicit: true,
+			wantSpec:       "codex",
+			wantPreset:     "codex",
+		},
+		{
+			name:           "task non claude pin is not changed by effort",
+			cliPreset:      "claude",
+			taskAgent:      "opencode",
+			effort:         "heavy",
+			effortExplicit: true,
+			wantSpec:       "opencode",
+			wantPreset:     "opencode",
+		},
+		{
+			name:           "default non claude agent is not changed by effort",
+			cliPreset:      "claude",
+			defaultPreset:  "opencode",
+			effort:         "heavy",
+			effortExplicit: true,
+			wantSpec:       "opencode",
+			wantPreset:     "opencode",
+		},
+		{
+			name:       "absent explicit effort leaves bare claude alone",
+			cliPreset:  "claude",
+			taskAgent:  "claude",
+			effort:     "standard",
+			wantSpec:   "claude",
+			wantPreset: "claude",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agentSpec := resolveTaskAgentSpec(tt.cliPreset, tt.defaultPreset, tt.agentExplicit, tt.agentCmd, tt.taskAgent)
+			if tt.agentCmd == "" {
+				agentSpec = resolveTaskAgentSpecForEffort(agentSpec, tt.effort, tt.effortExplicit)
+			}
+			if agentSpec != tt.wantSpec {
+				t.Fatalf("resolved spec = %q, want %q", agentSpec, tt.wantSpec)
+			}
+			preset, err := AgentPresetName(agentSpec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if preset != tt.wantPreset {
+				t.Fatalf("resolved preset = %q, want %q", preset, tt.wantPreset)
+			}
+		})
+	}
+}
+
 func TestResolveAgentInvocationAugmentedOwnedFlagsAppendedLast(t *testing.T) {
 	invocation, err := ResolveAgentInvocation("claude --output-format text", "", "prompt text", "/tmp/runtime")
 	if err != nil {
