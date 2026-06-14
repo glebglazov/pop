@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
 )
 
-func TestTaskAgentsCatalogListsPresetsWithModelsColumn(t *testing.T) {
+func TestTaskAgentsCatalogListsPresetsWithEffortLadders(t *testing.T) {
 	found := map[string]bool{
 		"claude":   true,
 		"opencode": true,
@@ -26,6 +27,17 @@ func TestTaskAgentsCatalogListsPresetsWithModelsColumn(t *testing.T) {
 			return "", errors.New("not found")
 		},
 	}
+	oldLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Effort: map[string]config.EffortConfig{
+			"opencode": {
+				Heavy:    []string{"opencode/claude-opus-4-8", "opencode/kimi-k2.6"},
+				Standard: []string{"opencode/claude-sonnet-4-6"},
+				Light:    []string{"opencode/kimi-k2.6"},
+			},
+		}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = oldLoad })
 
 	var buf bytes.Buffer
 	if err := runTaskAgentsWith(d, &buf); err != nil {
@@ -33,12 +45,12 @@ func TestTaskAgentsCatalogListsPresetsWithModelsColumn(t *testing.T) {
 	}
 
 	rows := [][4]string{
-		{"agent", "binary", "found", "models"},
-		{"claude", "claude", "yes", "opus, sonnet, haiku, fable"},
-		{"opencode", "opencode", "yes", "opencode/kimi-k2.6, opencode/gpt-5.5, opencode/claude-opus-4-8, opencode/claude-sonnet-4-6"},
-		{"cursor", "cursor-agent", "no", "auto, composer-2.5, gpt-5.3-codex"},
-		{"codex", "codex", "yes", "gpt-5.5, gpt-5.4-mini"},
-		{"pi", "pi", "no", "opencode-go/kimi-k2.6, opencode-go/qwen3.7-max, opencode-go/minimax-m3, opencode-go/deepseek-v4-flash"},
+		{"agent", "binary", "found", "effort ladder"},
+		{"claude", "claude", "yes", "heavy: opus (built-in); standard: sonnet (built-in); light: haiku (built-in)"},
+		{"opencode", "opencode", "yes", "heavy: opencode/claude-opus-4-8, opencode/kimi-k2.6 (configured); standard: opencode/claude-sonnet-4-6 (configured); light: opencode/kimi-k2.6 (configured)"},
+		{"cursor", "cursor-agent", "no", "none"},
+		{"codex", "codex", "yes", "none"},
+		{"pi", "pi", "no", "none"},
 	}
 	var want strings.Builder
 	for _, r := range rows {
@@ -51,6 +63,36 @@ func TestTaskAgentsCatalogListsPresetsWithModelsColumn(t *testing.T) {
 	wantLookups := []string{"claude", "opencode", "cursor-agent", "codex", "pi"}
 	if strings.Join(looked, ",") != strings.Join(wantLookups, ",") {
 		t.Fatalf("lookups = %v, want %v", looked, wantLookups)
+	}
+}
+
+func TestTaskAgentsCatalogListsConfigOnlyEffortAgents(t *testing.T) {
+	d := &tasks.Deps{
+		LookPath: func(file string) (string, error) {
+			if file == "custom-agent" {
+				return "/mock/bin/" + file, nil
+			}
+			return "", errors.New("not found")
+		},
+	}
+	oldLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Effort: map[string]config.EffortConfig{
+			"custom-agent": {
+				Heavy: []string{"custom-large"},
+			},
+		}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = oldLoad })
+
+	var buf bytes.Buffer
+	if err := runTaskAgentsWith(d, &buf); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	want := "custom-agent custom-agent   yes   heavy: custom-large (configured); standard: none (configured); light: none (configured)\n"
+	if !strings.Contains(got, want) {
+		t.Fatalf("config-only agent row missing\nwant contains:\n%sgot:\n%s", want, got)
 	}
 }
 

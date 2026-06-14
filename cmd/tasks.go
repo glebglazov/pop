@@ -135,7 +135,7 @@ var taskMigrateCmd = &cobra.Command{
 
 var taskAgentsCmd = &cobra.Command{
 	Use:   "agents",
-	Short: "List recognized agent presets and PATH availability",
+	Short: "List agent PATH availability and resolved effort ladders",
 	Args:  cobra.NoArgs,
 	RunE:  runTaskAgents,
 }
@@ -859,19 +859,41 @@ func runTaskAgents(cmd *cobra.Command, args []string) error {
 }
 
 func runTaskAgentsWith(d *tasks.Deps, w io.Writer) error {
-	renderTaskAgents(w, tasks.AgentCatalog(d))
+	cfg, err := taskConfigLoad(config.DefaultConfigPath())
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("tasks agents: load config: %w", err)
+	}
+	if os.IsNotExist(err) {
+		cfg = nil
+	}
+	renderTaskAgents(w, tasks.AgentCatalogWithConfig(d, cfg))
 	return nil
 }
 
 func renderTaskAgents(w io.Writer, rows []tasks.AgentCatalogRow) {
-	fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", "agent", "binary", "found", "models")
+	fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", "agent", "binary", "found", "effort ladder")
 	for _, row := range rows {
 		found := "no"
 		if row.Found {
 			found = "yes"
 		}
-		fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", row.Agent, row.Binary, found, strings.Join(row.Models, ", "))
+		fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", row.Agent, row.Binary, found, renderEffortLadder(row.EffortLadder))
 	}
+}
+
+func renderEffortLadder(ladder []tasks.AgentCatalogEffortTier) string {
+	if len(ladder) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(ladder))
+	for _, tier := range ladder {
+		models := "none"
+		if len(tier.Models) > 0 {
+			models = strings.Join(tier.Models, ", ")
+		}
+		parts = append(parts, fmt.Sprintf("%s: %s (%s)", tier.Tier, models, tier.Source))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func handleTaskExit(err error) {
