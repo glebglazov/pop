@@ -685,6 +685,47 @@ func TestNormalizeClaudeStreamJSONDetectsQuotaPause(t *testing.T) {
 	}
 }
 
+// TestNormalizeCodexJSONLDetectsQuotaPause uses the stream captured verbatim
+// from a live codex exec --json limit-hit: the turn aborts (exit 1) and emits an
+// `error` event plus a `turn.failed` event, both carrying the usage-limit
+// message. Detection must fire and preserve the reset time in the reason.
+func TestNormalizeCodexJSONLDetectsQuotaPause(t *testing.T) {
+	raw := `{"type":"thread.started","thread_id":"t"}
+{"type":"turn.started"}
+{"type":"error","message":"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:28 AM."}
+{"type":"turn.failed","error":{"message":"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:28 AM."}}
+`
+	result := NormalizeAgentOutput(AgentOutputCodexJSONL, raw)
+	if result.QuotaPause == nil {
+		t.Fatal("missing quota pause")
+	}
+	if !strings.Contains(result.QuotaPause.Reason, "usage limit") {
+		t.Fatalf("reason = %q", result.QuotaPause.Reason)
+	}
+	if !strings.Contains(result.QuotaPause.Reason, "2:28 AM") {
+		t.Fatalf("reset time not preserved in reason = %q", result.QuotaPause.Reason)
+	}
+	var out bytes.Buffer
+	RenderAgentOutput(&out, AgentOutputCodexJSONL, raw)
+	if strings.Contains(out.String(), "{\"type\"") {
+		t.Fatalf("rendered raw JSONL: %q", out.String())
+	}
+}
+
+// TestNormalizeCodexJSONLNonLimitErrorIsNotQuotaPause guards against false
+// positives: an ordinary codex error or a completed run must not be read as a
+// quota pause.
+func TestNormalizeCodexJSONLNonLimitErrorIsNotQuotaPause(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"turn.failed","error":{"message":"sandbox denied write to /etc/hosts"}}` + "\n",
+		`{"type":"item.completed","item":{"type":"agent_message","text":"done"}}` + "\n",
+	} {
+		if pause := NormalizeAgentOutput(AgentOutputCodexJSONL, raw).QuotaPause; pause != nil {
+			t.Fatalf("unexpected quota pause for %q: %q", raw, pause.Reason)
+		}
+	}
+}
+
 func TestInvocationNormalizesStructuredOutputThroughAdapter(t *testing.T) {
 	invocation, err := ResolveAgentInvocation("claude", "", "p", "/tmp/runtime")
 	if err != nil {

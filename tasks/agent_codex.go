@@ -22,6 +22,7 @@ var codexToolItemTypes = map[string]bool{
 func normalizeCodexJSONL(raw string) AgentResult {
 	var transcript string
 	var diagnostics []string
+	var pause *AgentQuotaPause
 	scanAgentJSONLines(raw, nil, func(line []byte) bool {
 		var event struct {
 			Type    string          `json:"type"`
@@ -41,15 +42,36 @@ func normalizeCodexJSONL(raw string) AgentResult {
 				transcript = event.Item.Text
 			}
 		case "error", "turn.failed":
-			if detail := agentJSONDiagnostic(event.Error); detail != "" {
-				appendAgentDiagnostic(&diagnostics, detail)
-			} else {
-				appendAgentDiagnostic(&diagnostics, event.Message)
+			detail := agentJSONDiagnostic(event.Error)
+			if detail == "" {
+				detail = event.Message
 			}
+			if pause == nil {
+				pause = codexQuotaPauseReason(detail)
+			}
+			appendAgentDiagnostic(&diagnostics, detail)
 		}
 		return true
 	})
+	if pause != nil {
+		return AgentResult{QuotaPause: pause}
+	}
 	return normalizedTranscript(transcript, diagnostics)
+}
+
+// codexQuotaPauseReason detects codex's usage-limit message in an error or
+// turn.failed diagnostic, the codex analog of claudeQuotaPauseReason. Confirmed
+// against a live limit-hit: codex exec --json aborts the turn (exit 1) and emits
+// both {"type":"error","message":...} and {"type":"turn.failed","error":
+// {"message":...}}, each carrying "You've hit your usage limit. ... try again at
+// <time>." The reset time and upsell URLs vary, so the stable anchor is the
+// leading sentence; the full message is kept as the pause reason so the reset
+// time reaches the user.
+func codexQuotaPauseReason(message string) *AgentQuotaPause {
+	if strings.Contains(message, "You've hit your usage limit") {
+		return &AgentQuotaPause{Reason: message}
+	}
+	return nil
 }
 
 // codexLineRenderer renders codex-jsonl Thread Events live: assistant prose is
