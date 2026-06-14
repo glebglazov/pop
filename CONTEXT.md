@@ -273,7 +273,7 @@ The git checkout from which task execution starts. It defaults to the selected p
 _Avoid_: Workload runtime path, task storage, shared git root
 
 **Worktree set**:
-A **Task set** drained in its own pop-provisioned git worktree under a **Worktree binding**. Worktree sets run in parallel across sets because each set gets an isolated **Runtime path**, while tasks inside one set remain serial because the Task set is still the ordered unit of work.
+A **Task set** drained in its own pop-provisioned git worktree under a **Worktree binding**. The checkout is an ephemeral execution context, not a navigable project peer: pop does not auto-create a session for it. It is still a registered git worktree, so it remains reachable on demand via the Worktree picker, which creates a session only when the human selects it.
 _Avoid_: Worktree task, per-task worktree, queue shard
 
 **Worktree-ready project**:
@@ -345,8 +345,16 @@ An optional per-task `agent` key in the **Manifest**, carrying an **Agent preset
 _Avoid_: Per-set agent, agent override
 
 **Curated model aliases**:
-A short, hand-maintained list of model aliases Pop ships for each recognized **Agent preset**, surfaced as a column in the recognized-agent catalog (`pop tasks agents`), recommended value first. It is a _suggestion_ surface to help a planner fill a **Task agent**'s `--model` — never exhaustive, and never a validation gate: a `--model` value absent from the list still runs. Only `claude`'s entries are stable auto-resolving aliases; other presets list pinned version IDs that need maintenance as models change. Pop ships a curated subset rather than a live listing because an exhaustive provider dump defeats picking.
+A short, hand-maintained list of model aliases Pop ships for each recognized **Agent preset**, surfaced as a column in `pop tasks agents`, recommended value first. It is a suggestion surface to help a planner fill a **Task agent**'s `--model` — never exhaustive, never a validation gate. Distinct from the **Effort ladder**, which is the resolution surface: `claude`'s curated aliases are structured into tiers to feed its built-in Effort ladder, while the curated list itself stays advisory. Only `claude`'s entries are stable auto-resolving aliases; other presets list pinned version ids that need maintenance.
 _Avoid_: model source, live model listing, model provenance
+
+**Effort**:
+An optional per-task `effort` key in the **Manifest** — `light`, `standard`, or `heavy` — naming how strong a model the task wants, independent of which agent runs it. It is the model axis, orthogonal to the agent axis owned by **Task agent** pins and **Queue agent fallback**. An absent key means `standard`; an unknown token is a contract fault that makes the Task set **Malformed**, mirroring the Task agent rule. For the model axis it resolves after an explicit `--model` (flag or Task agent pin) but before the agent's plain default; it never selects an agent.
+_Avoid_: Priority, weight, tier, task size, difficulty
+
+**Effort ladder**:
+A per-agent, per-tier ordered list of models that resolves an **Effort** to a concrete `--model` for whichever agent was chosen. Pop ships a built-in ladder for `claude` only (its aliases auto-resolve and are account-independent); every other agent has none built-in and is configured by the user in `config.toml` under `[effort.<agent>]`, which fully replaces the built-in for an agent it names. Resolution uses the head of the chosen tier; the ordered tail is reserved for a deferred runtime fallback. A chosen agent with no ladder makes Effort a graceful no-op — the agent runs its own default model. Surfaced per agent in `pop tasks agents` with built-in-versus-configured provenance.
+_Avoid_: Model catalog, effort table, model tier map, model priority list
 
 **Interactive agent preset**:
 A named attended-assistance command known to an Agent adapter. It is separate from an Agent preset because assisting a human at a HITL gate is an attended conversation, not a headless task attempt; custom headless agent commands do not imply an interactive preset. Every supported preset launches its own interactive binary, so when an **Agent preset** carries extra arguments, those arguments ride into that preset's own attended assistance.
@@ -587,6 +595,10 @@ _Avoid_: Heartbeat line, per-tick inventory repeat
 **Queue backoff**:
 The daemon's response to an abnormal drain exit, such as crash, kill, or interrupt. Unlike a clean failure or quota pause, an abnormal exit leaves the set Ready with nothing cooled and would otherwise re-spawn immediately. The daemon applies an escalating per-set delay and, after N consecutive abnormal exits, parks the set until a human clears it. A clean exit resets the counter. Distinguishing abnormal from clean exits requires the **Queue journal**'s outcome record; storage status alone cannot tell a crash from a quota pause.
 _Avoid_: Failed task, Agent quota pause
+
+**Queue window**:
+The single tmux window, named `pop-queue`, that the Queue daemon spawns its drains into within a Project's session. All queue-spawned drains for that project — both in-place and **Worktree set** — land here as panes under a balanced (`tiled`) layout, instead of in the user's working windows or in per-worktree sessions. One Queue window per project session; created on first spawn, reused thereafter.
+_Avoid_: Drain session, worktree session, queue tab
 
 **Queue agent fallback**:
 The Queue's policy for choosing an **Agent preset** when draining, owned by the daemon rather than the executor. It rotates a configured ordered list of agents as a non-overriding default: **Task agent** pins always win, while unpinned tasks ride the rotating default. An agent whose binary is not on `PATH` is skipped with a **Queue journal** note, not a startup error. A global per-agent cooldown marks an agent exhausted-until after an **Agent quota pause**, because quota is per subscription, not per project. Recovery is probed by re-attempting after that fixed interval; there is no quota-remaining API to query. When a pinned task's agent is exhausted, the Queue backs that whole set off until that agent's cooldown expires rather than violating the pin.
