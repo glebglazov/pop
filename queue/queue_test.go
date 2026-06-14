@@ -548,7 +548,7 @@ type recordingTmux struct {
 	commands [][]string
 }
 
-func newRecordingTmux(hasSession bool, windowIndices string) *recordingTmux {
+func newRecordingTmux(hasSession bool, windowNames string) *recordingTmux {
 	rt := &recordingTmux{}
 	rt.HasSessionFunc = func(name string) bool { return hasSession }
 	rt.NewSessionFunc = func(name, dir string) error {
@@ -558,10 +558,10 @@ func newRecordingTmux(hasSession bool, windowIndices string) *recordingTmux {
 	rt.CommandFunc = func(args ...string) (string, error) {
 		rt.commands = append(rt.commands, args)
 		if len(args) > 0 && args[0] == "list-windows" {
-			return windowIndices, nil
+			return windowNames, nil
 		}
 		if len(args) > 0 && args[0] == "new-window" {
-			return "0", nil
+			return "", nil
 		}
 		if len(args) > 0 && args[0] == "split-window" {
 			return "%7", nil
@@ -817,7 +817,7 @@ func TestPrepareWorktreeDrainRefusesInvalidBinding(t *testing.T) {
 	}
 }
 
-func TestSpawnCreatesSessionAndSplitsMainWindow(t *testing.T) {
+func TestSpawnCreatesQueueWindowWhenAbsent(t *testing.T) {
 	rt := newRecordingTmux(false, "0")
 	d := &Deps{Tmux: rt}
 
@@ -828,15 +828,19 @@ func TestSpawnCreatesSessionAndSplitsMainWindow(t *testing.T) {
 	if _, ok := rt.findCommand("new-session"); !ok {
 		t.Fatal("expected a detached session to be created when absent")
 	}
-	if _, ok := rt.findCommand("new-window"); ok {
-		t.Fatal("must not create a separate queue window")
+	newWindow, ok := rt.findCommand("new-window")
+	if !ok {
+		t.Fatal("expected pop-queue window to be created when absent")
 	}
-	assertSplitIntoWindow(t, rt, "proj-session:0", "/checkout")
+	if !argsContain(newWindow, "-t", "proj-session") || !argsContain(newWindow, "-n", drainWindowName) {
+		t.Fatalf("new-window must create %q in project session: %v", drainWindowName, newWindow)
+	}
+	assertSplitIntoWindow(t, rt, "proj-session:"+drainWindowName, "/checkout")
 	assertSendKeys(t, rt)
 }
 
 func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T) {
-	rt := newRecordingTmux(false, "0")
+	rt := newRecordingTmux(false, "main")
 	dec := actionableDecision()
 	dec.WorktreeReady = true
 	dec.scan.ProjectPath = "/pop/worktrees/repo/set"
@@ -854,12 +858,12 @@ func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T)
 	if !reflect.DeepEqual(newSession, []string{"new-session", "proj-session", "/pop/worktrees/repo/set"}) {
 		t.Fatalf("new-session = %v, want project session created with worktree cwd", newSession)
 	}
-	assertSplitIntoWindow(t, rt, "proj-session:0", "/pop/worktrees/repo/set")
+	assertSplitIntoWindow(t, rt, "proj-session:"+drainWindowName, "/pop/worktrees/repo/set")
 	splitWindow, ok := rt.findCommand("split-window")
 	if !ok {
-		t.Fatal("expected a drain pane in the main window")
+		t.Fatal("expected a drain pane in the queue window")
 	}
-	if argsContain(splitWindow, "-t", "set:0") || argsContain(splitWindow, "-t", "repo/set:0") {
+	if argsContain(splitWindow, "-t", "set:"+drainWindowName) || argsContain(splitWindow, "-t", "repo/set:"+drainWindowName) {
 		t.Fatalf("split-window must not target a worktree-derived session: %v", splitWindow)
 	}
 	sendKeys, ok := rt.findCommand("send-keys")
@@ -872,8 +876,8 @@ func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T)
 	}
 }
 
-func TestSpawnSplitsWhenSessionExists(t *testing.T) {
-	rt := newRecordingTmux(true, "0\n1")
+func TestSpawnReusesQueueWindowWhenSessionExists(t *testing.T) {
+	rt := newRecordingTmux(true, "main\n"+drainWindowName)
 	d := &Deps{Tmux: rt}
 
 	if err := Spawn(d, actionableDecision()); err != nil {
@@ -884,35 +888,56 @@ func TestSpawnSplitsWhenSessionExists(t *testing.T) {
 		t.Fatal("must not create a session that already exists")
 	}
 	if _, ok := rt.findCommand("new-window"); ok {
-		t.Fatal("must not create a new window when the session already exists")
+		t.Fatal("must not create a new window when pop-queue already exists")
 	}
-	assertSplitIntoWindow(t, rt, "proj-session:0", "/checkout")
+	assertSplitIntoWindow(t, rt, "proj-session:"+drainWindowName, "/checkout")
 	assertSendKeys(t, rt)
 }
 
-func TestSpawnSplitsWhenWindowZeroMissing(t *testing.T) {
-	rt := newRecordingTmux(true, "1")
+func TestSpawnDoesNotTargetLowestIndexWindow(t *testing.T) {
+	rt := newRecordingTmux(true, "0\n1")
 	d := &Deps{Tmux: rt}
 
 	if err := Spawn(d, actionableDecision()); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
 
-	assertSplitIntoWindow(t, rt, "proj-session:1", "/checkout")
+	if _, ok := rt.findCommand("new-window"); !ok {
+		t.Fatal("expected pop-queue window to be created instead of targeting an existing numeric window")
+	}
+	assertSplitIntoWindow(t, rt, "proj-session:"+drainWindowName, "/checkout")
 	assertSendKeys(t, rt)
 }
 
-func TestResolveDrainWindowTargetCreatesWindowWhenSessionEmpty(t *testing.T) {
-	rt := newRecordingTmux(true, "")
+func TestResolveDrainWindowTargetCreatesQueueWindowWhenAbsent(t *testing.T) {
+	rt := newRecordingTmux(true, "main")
 	target, err := resolveDrainWindowTarget(rt, "pop")
 	if err != nil {
 		t.Fatalf("resolveDrainWindowTarget: %v", err)
 	}
-	if target != "pop:0" {
-		t.Fatalf("target = %q, want pop:0", target)
+	if target != "pop:"+drainWindowName {
+		t.Fatalf("target = %q, want pop:%s", target, drainWindowName)
 	}
-	if _, ok := rt.findCommand("new-window"); !ok {
-		t.Fatal("expected new-window when session has no windows")
+	newWindow, ok := rt.findCommand("new-window")
+	if !ok {
+		t.Fatal("expected new-window when queue window is absent")
+	}
+	if !argsContain(newWindow, "-t", "pop") || !argsContain(newWindow, "-n", drainWindowName) {
+		t.Fatalf("new-window must create %q in session pop: %v", drainWindowName, newWindow)
+	}
+}
+
+func TestResolveDrainWindowTargetReusesQueueWindowWhenPresent(t *testing.T) {
+	rt := newRecordingTmux(true, "0\n"+drainWindowName)
+	target, err := resolveDrainWindowTarget(rt, "pop")
+	if err != nil {
+		t.Fatalf("resolveDrainWindowTarget: %v", err)
+	}
+	if target != "pop:"+drainWindowName {
+		t.Fatalf("target = %q, want pop:%s", target, drainWindowName)
+	}
+	if _, ok := rt.findCommand("new-window"); ok {
+		t.Fatal("must not create a window when pop-queue is present")
 	}
 }
 

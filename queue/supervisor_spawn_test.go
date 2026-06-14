@@ -142,7 +142,7 @@ func TestSupervisorWorktreeDrainTargetsProjectSessionWithCheckoutCWD(t *testing.
 		t.Fatalf("new-session cwd = %q, want provisioned worktree checkout", checkout)
 	}
 
-	assertSplitIntoWindow(t, rt, wantSession+":0", checkout)
+	assertSplitIntoWindow(t, rt, wantSession+":"+drainWindowName, checkout)
 	spawnCmd, ok := extractSpawnCommand(rt)
 	if !ok {
 		t.Fatal("supervisor tick must spawn a drain command")
