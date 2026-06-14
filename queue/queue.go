@@ -662,12 +662,13 @@ func Spawn(d *Deps, dec Decision) error {
 	if dec.DefaultAgent != "" {
 		command += " --default-agent " + shellQuote(dec.DefaultAgent)
 	}
-	return spawnDrain(d.Tmux, dec.scan.SessionName, dec.scan.ProjectPath, command)
+	return spawnDrain(d.Tmux, dec.scan.SessionName, dec.scan.ProjectPath, dec.TaskSetID, command)
 }
 
-// spawnDrain creates (if needed) the detached session, splits a fresh pane
-// into the shared queue window, and sends the drain command there.
-func spawnDrain(tmux deps.Tmux, session, dir, command string) error {
+// spawnDrain creates (if needed) the detached session and shared queue window,
+// then sends the drain command to this set's existing pane or a freshly split
+// tagged pane.
+func spawnDrain(tmux deps.Tmux, session, dir, setID, command string) error {
 	if !tmux.HasSession(session) {
 		if err := tmux.NewSession(session, dir); err != nil {
 			return fmt.Errorf("create session %q: %w", session, err)
@@ -679,18 +680,61 @@ func spawnDrain(tmux deps.Tmux, session, dir, command string) error {
 		return err
 	}
 
+	paneID, err := findDrainPaneForSet(tmux, windowTarget, setID)
+	if err != nil {
+		return err
+	}
+	if paneID != "" {
+		if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
+			return fmt.Errorf("send drain command: %w", err)
+		}
+		return nil
+	}
+
 	out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", windowTarget, "-c", dir)
 	if err != nil {
 		return fmt.Errorf("create drain pane: %w", err)
+	}
+	paneID = strings.TrimSpace(out)
+	if paneID == "" {
+		return fmt.Errorf("create drain pane: tmux returned no pane id")
+	}
+	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_set", setID); err != nil {
+		return fmt.Errorf("tag drain pane: %w", err)
 	}
 	if _, err := tmux.Command("select-layout", "-t", windowTarget, "tiled"); err != nil {
 		return fmt.Errorf("retile drain window: %w", err)
 	}
 
-	if _, err := tmux.Command("send-keys", "-t", out, command, "Enter"); err != nil {
+	if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
 		return fmt.Errorf("send drain command: %w", err)
 	}
 	return nil
+}
+
+func findDrainPaneForSet(tmux deps.Tmux, windowTarget, setID string) (string, error) {
+	out, err := tmux.Command("list-panes", "-t", windowTarget, "-F", "#{@pop_set} #{pane_id}")
+	if err != nil {
+		return "", fmt.Errorf("list drain panes in %q: %w", windowTarget, err)
+	}
+	for _, line := range splitLines(out) {
+		tag, paneID, ok := parseDrainPaneTagLine(line)
+		if ok && tag == setID {
+			return paneID, nil
+		}
+	}
+	return "", nil
+}
+
+func parseDrainPaneTagLine(line string) (tag, paneID string, ok bool) {
+	line = strings.TrimSpace(line)
+	idx := strings.LastIndex(line, " %")
+	if idx < 0 {
+		return "", "", false
+	}
+	tag = strings.TrimSpace(line[:idx])
+	paneID = strings.TrimSpace(line[idx+1:])
+	return tag, paneID, tag != "" && paneID != ""
 }
 
 func resolveDrainWindowTarget(tmux deps.Tmux, session string) (string, error) {
