@@ -184,6 +184,12 @@ var agentAdapters = map[string]AgentAdapter{
 	),
 }
 
+var claudeEffortModels = map[string][]string{
+	"heavy":    {"opus"},
+	"standard": {"sonnet"},
+	"light":    {"haiku"},
+}
+
 type presetAgentAdapter struct {
 	preset         string
 	headlessPrefix []string
@@ -458,6 +464,44 @@ func resolveTaskAgentSpec(cliPreset, defaultPreset string, agentExplicit bool, a
 		return cliPreset
 	}
 	return taskAgent
+}
+
+func resolveTaskAgentSpecForEffort(agentSpec, effort string, effortExplicit bool) string {
+	if !effortExplicit {
+		return agentSpec
+	}
+	if effort == "" {
+		effort = DefaultTaskEffort
+	}
+	models := claudeEffortModels[effort]
+	if len(models) == 0 {
+		return agentSpec
+	}
+	name, extraArgs, err := parseAgentPresetSpec(agentSpec)
+	if err != nil {
+		return agentSpec
+	}
+	if name == "" {
+		name = DefaultAgentPreset
+	}
+	if name != "claude" || agentArgsContainModel(extraArgs) {
+		return agentSpec
+	}
+	args := append([]string{name}, extraArgs...)
+	args = append(args, "--model", models[0])
+	for i, arg := range args {
+		args[i] = shellQuote(arg)
+	}
+	return strings.Join(args, " ")
+}
+
+func agentArgsContainModel(args []string) bool {
+	for _, arg := range args {
+		if arg == "--model" || strings.HasPrefix(arg, "--model=") {
+			return true
+		}
+	}
+	return false
 }
 
 // validateManifestAgentSpec checks a Manifest `agent` key names a recognized
