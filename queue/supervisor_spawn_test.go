@@ -50,20 +50,36 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 	if !strings.Contains(supervisorOut.String(), "spawned drain for "+setID) {
 		t.Fatalf("supervisor output missing spawn line:\n%s", supervisorOut.String())
 	}
+	entries, err := ReadJournal(td)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	spawns := 0
+	for _, entry := range entries {
+		switch entry.Event {
+		case JournalEventSpawn:
+			spawns++
+		case JournalEventSpawnFailed:
+			t.Fatalf("successful spawn must not write spawn_failed: %+v", entry)
+		}
+	}
+	if spawns != 1 {
+		t.Fatalf("successful spawn entries = %d, want 1; journal=%+v", spawns, entries)
+	}
 
 	var confirmOut bytes.Buffer
 	var drainOut bytes.Buffer
 	opts := tasks.RunTaskSetOptions{
-		ResolveInput:    tasks.ResolveInput{CWD: repo},
-		TaskSetOverride: setID,
+		ResolveInput:       tasks.ResolveInput{CWD: repo},
+		TaskSetOverride:    setID,
 		DefaultAgentPreset: "claude",
-		AgentCmd:        agent,
-		Yes:             false,
-		ConfirmIn:       strings.NewReader("4\n"),
-		ConfirmOut:      &confirmOut,
-		Output:          &drainOut,
+		AgentCmd:           agent,
+		Yes:                false,
+		ConfirmIn:          strings.NewReader("4\n"),
+		ConfirmOut:         &confirmOut,
+		Output:             &drainOut,
 	}
-	_, err := tasks.RunTaskSetWith(td, project.DefaultDeps(), d.LoadConfig, opts)
+	_, err = tasks.RunTaskSetWith(td, project.DefaultDeps(), d.LoadConfig, opts)
 	if err == nil {
 		t.Fatal("expected exit after choosing Exit at the HITL gate")
 	}
@@ -89,6 +105,57 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("HITL gate menu missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestSupervisorTickJournalsSpawnFailure(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "spawn-fails", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	td := queueTestTasksDeps(true)
+	rt := newRecordingTmux(false, "0")
+	rt.CommandFunc = func(args ...string) (string, error) {
+		rt.commands = append(rt.commands, args)
+		if len(args) > 0 && args[0] == "list-windows" {
+			return "0", nil
+		}
+		if len(args) > 0 && args[0] == "split-window" {
+			return "", errors.New("tmux refused pane")
+		}
+		return "", nil
+	}
+	d := &Deps{
+		Tasks:      td,
+		Project:    project.DefaultDeps(),
+		Tmux:       rt,
+		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
+	}
+
+	var out bytes.Buffer
+	tick(d, &out, newRunOutputState())
+
+	if !strings.Contains(out.String(), "spawn "+setID+": create drain pane: tmux refused pane") {
+		t.Fatalf("supervisor output missing spawn failure:\n%s", out.String())
+	}
+	entries, err := ReadJournal(td)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("journal entries = %+v, want one spawn_failed entry", entries)
+	}
+	wantRuntimePath, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatalf("canonicalize repo: %v", err)
+	}
+	got := entries[0]
+	if got.Event != JournalEventSpawnFailed || got.Project == "" || got.SetID != setID || got.RuntimePath != wantRuntimePath || got.Source != "supervisor" {
+		t.Fatalf("spawn_failed entry = %+v", got)
+	}
+	if got.Reason != "create drain pane: tmux refused pane" {
+		t.Fatalf("spawn_failed reason = %q", got.Reason)
 	}
 }
 

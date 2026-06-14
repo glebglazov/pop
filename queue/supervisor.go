@@ -105,6 +105,16 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 			}
 			if err := Spawn(d, dec); err != nil {
 				fmt.Fprintf(out, "queue: %s: spawn %s: %v\n", dec.Project, dec.TaskSetID, err)
+				if journalErr := AppendJournalEntry(d.Tasks, JournalEntry{
+					Event:       JournalEventSpawnFailed,
+					Project:     dec.Project,
+					SetID:       dec.TaskSetID,
+					RuntimePath: dec.scan.RuntimePath,
+					Source:      "supervisor",
+					Reason:      err.Error(),
+				}); journalErr != nil {
+					fmt.Fprintf(out, "queue: %s: journal spawn failure %s: %v\n", dec.Project, dec.TaskSetID, journalErr)
+				}
 				continue
 			}
 			if dec.DefaultAgent != "" {

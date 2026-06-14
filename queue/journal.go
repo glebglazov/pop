@@ -15,6 +15,7 @@ import (
 
 const (
 	JournalEventSpawn               = "spawn"
+	JournalEventSpawnFailed         = "spawn_failed"
 	JournalEventOutcome             = "outcome"
 	JournalEventAgentSwitch         = "agent_switch"
 	JournalEventAgentCooldown       = "agent_cooldown"
