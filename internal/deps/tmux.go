@@ -1,8 +1,8 @@
 package deps
 
 import (
-	"errors"
-	"fmt"
+	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -39,22 +39,9 @@ func (t *RealTmux) Command(args ...string) (string, error) {
 	cmd := exec.Command("tmux", args...)
 	out, err := cmd.Output()
 	if err != nil {
-		return "", tmuxError(err)
+		return "", outputError(err)
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-// tmuxError enriches an exec error with tmux's stderr, which Cmd.Output()
-// captures into ExitError.Stderr but the bare error string omits — leaving
-// only an opaque "exit status 1". Surfacing stderr makes failures diagnosable.
-func tmuxError(err error) error {
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		if msg := strings.TrimSpace(string(exit.Stderr)); msg != "" {
-			return fmt.Errorf("%w: %s", err, msg)
-		}
-	}
-	return err
 }
 
 func (t *RealTmux) HasSession(name string) bool {
@@ -64,38 +51,51 @@ func (t *RealTmux) HasSession(name string) bool {
 
 func (t *RealTmux) NewSession(name, dir string) error {
 	cmd := exec.Command("tmux", "new-session", "-ds", name, "-c", dir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		if msg := strings.TrimSpace(string(out)); msg != "" {
-			return fmt.Errorf("%w: %s", err, msg)
-		}
-		return err
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return commandError(err, stderr.Bytes())
 	}
 	return nil
 }
 
 func (t *RealTmux) SwitchClient(name string) error {
 	cmd := exec.Command("tmux", "switch-client", "-t", name)
-	return cmd.Run()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return commandError(err, stderr.Bytes())
+	}
+	return nil
 }
 
 func (t *RealTmux) AttachSession(name string) error {
 	cmd := exec.Command("tmux", "attach-session", "-t", name)
+	var stderr bytes.Buffer
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	if err := cmd.Run(); err != nil {
+		return commandError(err, stderr.Bytes())
+	}
+	return nil
 }
 
 func (t *RealTmux) KillSession(name string) error {
 	cmd := exec.Command("tmux", "kill-session", "-t", name)
-	return cmd.Run()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return commandError(err, stderr.Bytes())
+	}
+	return nil
 }
 
 func (t *RealTmux) ListSessions() (string, error) {
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}\t#{session_activity}")
 	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return "", outputError(err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

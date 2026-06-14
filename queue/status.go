@@ -172,6 +172,8 @@ func RenderLog(out io.Writer, entries []JournalEntry, limit int) {
 				source = " source=" + entry.Source
 			}
 			fmt.Fprintf(out, "%s %s %s spawned%s\n", ts, entry.Project, entry.SetID, source)
+		case JournalEventSpawnFailed:
+			fmt.Fprintf(out, "%s %s %s spawn_failed reason=%s\n", ts, entry.Project, entry.SetID, entry.Reason)
 		case JournalEventAgentSwitch:
 			fmt.Fprintf(out, "%s %s %s default-agent=%s\n", ts, entry.Project, entry.SetID, entry.Agent)
 		case JournalEventAgentCooldown:

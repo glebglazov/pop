@@ -152,6 +152,13 @@ func TestRenderLogFromSampleJournal(t *testing.T) {
 			SetID:     "set-1",
 			Outcome:   tasks.DrainOutcomeQuotaPaused,
 		},
+		{
+			Timestamp: time.Date(2026, 6, 14, 12, 6, 0, 0, time.UTC),
+			Event:     JournalEventSpawnFailed,
+			Project:   "pop",
+			SetID:     "set-2",
+			Reason:    "create drain pane: tmux refused pane",
+		},
 	}
 
 	var out bytes.Buffer
@@ -162,6 +169,9 @@ func TestRenderLogFromSampleJournal(t *testing.T) {
 	}
 	if !strings.Contains(text, "2026-06-14T12:05:00Z pop set-1 outcome=quota_paused") {
 		t.Fatalf("log output missing outcome:\n%s", text)
+	}
+	if !strings.Contains(text, "2026-06-14T12:06:00Z pop set-2 spawn_failed reason=create drain pane: tmux refused pane") {
+		t.Fatalf("log output missing spawn failure:\n%s", text)
 	}
 }
 

@@ -24,7 +24,7 @@ func (g *RealGit) Command(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return "", outputError(err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -33,7 +33,7 @@ func (g *RealGit) CommandInDir(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return "", outputError(err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
