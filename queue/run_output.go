@@ -52,7 +52,9 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 	for _, idle := range snap.Idle {
 		switch {
 		case idle.Waiting == "error":
-			view.ScanErrors[idle.Project] = idle.Reason
+			appendScanError(view.ScanErrors, idle.Project, idle.Reason)
+		case idle.ProjectConfigError != "":
+			appendScanError(view.ScanErrors, idle.Project, idle.ProjectConfigError)
 		case idle.ReadySet != "":
 			view.Queued = append(view.Queued, idle)
 		case isBlockedIdleReason(idle.Reason):
@@ -61,6 +63,12 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 			blockedProjects[idle.Project] = true
 		default:
 			view.IdleCount++
+		}
+	}
+
+	for _, picked := range view.Running {
+		if picked.ProjectConfigError != "" {
+			appendScanError(view.ScanErrors, picked.Project, picked.ProjectConfigError)
 		}
 	}
 
@@ -79,6 +87,17 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 		return view.Blocked[i].Kind < view.Blocked[j].Kind
 	})
 	return view
+}
+
+func appendScanError(scanErrors map[string]string, project, msg string) {
+	if msg == "" {
+		return
+	}
+	if existing, ok := scanErrors[project]; ok {
+		scanErrors[project] = existing + "; " + msg
+		return
+	}
+	scanErrors[project] = msg
 }
 
 func isBlockedIdleReason(reason string) bool {
@@ -264,8 +283,62 @@ func setIDFromScopedKey(key string) string {
 	return parts[1]
 }
 
+func formatQueueWorkSummary(view RunView) string {
+	var parts []string
+	if n := len(view.Running); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d running", n))
+	}
+	if n := len(view.Queued); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d queued", n))
+	}
+	if n := len(view.Blocked); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d blocked", n))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatIntegrationSummary(view RunView) string {
+	if len(view.AwaitingIntegration) == 0 {
+		return "none awaiting"
+	}
+	clean, conflicts, unknown := 0, 0, 0
+	for _, set := range view.AwaitingIntegration {
+		switch set.Status {
+		case MergeabilityClean:
+			clean++
+		case MergeabilityConflicts:
+			conflicts++
+		default:
+			unknown++
+		}
+	}
+	parts := []string{fmt.Sprintf("%d awaiting integration", len(view.AwaitingIntegration))}
+	if clean > 0 {
+		parts = append(parts, fmt.Sprintf("%d ready to merge", clean))
+	}
+	if conflicts > 0 {
+		parts = append(parts, fmt.Sprintf("%d conflicts", conflicts))
+	}
+	if unknown > 0 {
+		parts = append(parts, fmt.Sprintf("%d mergeability unknown", unknown))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// RenderRunSummary prints the aggregate queue and integration headline.
+func RenderRunSummary(out io.Writer, view RunView) {
+	fmt.Fprintln(out, "Summary:")
+	fmt.Fprintf(out, "  Queue: %s\n", formatQueueWorkSummary(view))
+	fmt.Fprintf(out, "  Integration: %s\n", formatIntegrationSummary(view))
+}
+
 // RenderRunBaseline prints the one-time queue run inventory.
 func RenderRunBaseline(out io.Writer, view RunView) {
+	RenderRunSummary(out, view)
+
 	fmt.Fprintln(out, "Picked-up sets:")
 	if len(view.Running) == 0 {
 		fmt.Fprintln(out, "  none")

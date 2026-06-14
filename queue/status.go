@@ -123,78 +123,8 @@ func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapsho
 
 // RenderStatus prints a human-readable queue status snapshot.
 func RenderStatus(out io.Writer, snap StatusSnapshot) {
-	fmt.Fprintln(out, "Picked-up sets:")
-	if len(snap.PickedUp) == 0 {
-		fmt.Fprintln(out, "  none")
-	} else {
-		for _, p := range snap.PickedUp {
-			projectLabel := statusProjectLabel(p.Project, p.WorktreeReady, p.ProjectConfigError)
-			setID := p.SetID
-			if setID == "" {
-				setID = "(unknown set)"
-			}
-			started := ""
-			if !p.StartedAt.IsZero() {
-				started = " since " + p.StartedAt.UTC().Format(time.RFC3339)
-			}
-			pid := ""
-			if p.PID > 0 {
-				pid = fmt.Sprintf(" pid=%d", p.PID)
-			}
-			fmt.Fprintf(out, "  %s: %s%s%s\n", projectLabel, setID, pid, started)
-		}
-	}
-
-	fmt.Fprintln(out, "Idle/waiting projects:")
-	if len(snap.Idle) == 0 {
-		fmt.Fprintln(out, "  none")
-	} else {
-		for _, idle := range snap.Idle {
-			projectLabel := statusProjectLabel(idle.Project, idle.WorktreeReady, idle.ProjectConfigError)
-			switch {
-			case idle.ReadySet != "":
-				fmt.Fprintf(out, "  %s: waiting ready set %s\n", projectLabel, idle.ReadySet)
-			case idle.Waiting == "error":
-				fmt.Fprintf(out, "  %s: error: %s\n", projectLabel, idle.Reason)
-			default:
-				fmt.Fprintf(out, "  %s: idle (%s)\n", projectLabel, idle.Reason)
-			}
-		}
-	}
-
-	fmt.Fprintln(out, "Done sets:")
-	if len(snap.AwaitingIntegration) == 0 {
-		fmt.Fprintln(out, "  none")
-	} else {
-		for _, set := range snap.AwaitingIntegration {
-			project := set.Project
-			if project == "" {
-				project = "(unknown project)"
-			}
-			setID := set.SetID
-			if setID == "" {
-				setID = "(unknown set)"
-			}
-			fmt.Fprintf(out, "  %s: %s done · %s\n", project, setID, mergeabilityLabel(set.Status))
-		}
-	}
-
-	fmt.Fprintln(out, "Awaiting integration:")
-	if len(snap.AwaitingIntegration) == 0 {
-		fmt.Fprintln(out, "  none")
-	} else {
-		for _, set := range snap.AwaitingIntegration {
-			project := set.Project
-			if project == "" {
-				project = "(unknown project)"
-			}
-			checked := ""
-			if !set.CheckedAt.IsZero() {
-				checked = " checked " + set.CheckedAt.UTC().Format(time.RFC3339)
-			}
-			fmt.Fprintf(out, "  %s: %s (%s%s)\n", project, set.SetID, mergeabilityLabel(set.Status), checked)
-		}
-	}
+	view := BuildRunView(snap, time.Now())
+	RenderRunBaseline(out, view)
 
 	fmt.Fprintln(out, "Daemon state:")
 	if snap.DaemonState == nil {

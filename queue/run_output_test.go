@@ -12,6 +12,52 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
+func TestBuildRunViewConfigErrorIsScanError(t *testing.T) {
+	snap := statusFromDecisions([]Decision{
+		{
+			Project:            "broken",
+			Reason:             "no ready set",
+			ProjectConfigError: "/repo/broken/.pop.toml: expected value",
+		},
+	}, &DaemonState{Version: 1})
+
+	view := BuildRunView(snap, time.Now())
+	if view.IdleCount != 0 {
+		t.Fatalf("IdleCount = %d, want 0 for config error project", view.IdleCount)
+	}
+	if got := view.ScanErrors["broken"]; !strings.Contains(got, ".pop.toml") {
+		t.Fatalf("ScanErrors[broken] = %q, want .pop.toml parse error", got)
+	}
+}
+
+func TestFormatRunSummary(t *testing.T) {
+	view := RunView{
+		Running: []PickedUpSet{{Project: "a", SetID: "set-a"}},
+		Queued: []IdleProject{
+			{Project: "b", ReadySet: "set-b"},
+			{Project: "c", ReadySet: "set-c"},
+		},
+		Blocked: []BlockedItem{{Project: "d", SetID: "set-d", Kind: "parked"}},
+		AwaitingIntegration: []AwaitingIntegrationSet{
+			{Project: "e", SetID: "set-e", Status: MergeabilityClean},
+			{Project: "f", SetID: "set-f", Status: MergeabilityConflicts},
+		},
+	}
+
+	var out bytes.Buffer
+	RenderRunSummary(&out, view)
+	text := out.String()
+	for _, want := range []string{
+		"Summary:",
+		"Queue: 1 running, 2 queued, 1 blocked",
+		"Integration: 2 awaiting integration, 1 ready to merge, 1 conflicts",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("summary missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
 	snap := statusFromDecisions([]Decision{
 		{Project: "running", Busy: true, lockStatus: &tasks.RuntimeLockStatus{
@@ -33,6 +79,7 @@ func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
 	RenderRunBaseline(&out, view)
 	text := out.String()
 	for _, want := range []string{
+		"Summary:",
 		"Picked-up sets:",
 		"running: set-a pid=99",
 		"Queued ready sets:",

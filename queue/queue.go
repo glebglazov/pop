@@ -174,12 +174,28 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	for _, p := range projects {
 		scan, err := resolveScan(d, p)
 		if err != nil {
+			if outsideQueueScopeResolveError(err) {
+				decisions = append(decisions, Decision{Project: p.Name, Reason: "no ready set"})
+				continue
+			}
 			decisions = append(decisions, Decision{Project: p.Name, Err: err, Reason: "resolve"})
 			continue
 		}
 		decisions = append(decisions, decideProjectDispatches(d, scan, qcfg.Agents, state, now)...)
 	}
 	return decisions, nil
+}
+
+// outsideQueueScopeResolveError reports whether resolveScan failed because the
+// project has no git checkout. Such projects are picker Projects but outside
+// Queue scope — they have no Repository identity and therefore no Task storage.
+func outsideQueueScopeResolveError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not inside a git repository") ||
+		strings.Contains(msg, "is not a git checkout")
 }
 
 func resolvedQueueConfig(cfg *config.Config) (config.ResolvedQueueConfig, error) {

@@ -111,15 +111,23 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 	RenderStatus(&out, snap)
 	text := out.String()
 	for _, want := range []string{
+		"Summary:",
 		"Picked-up sets:",
 		"busy: set-busy pid=1234 since 2026-06-14T13:00:00Z",
+		"Queued ready sets:",
 		"waiting [worktree-ready]: waiting ready set set-ready",
-		"idle [.pop.toml error: /repo/idle/.pop.toml: expected value]: idle (no ready set)",
+		"Queue: 1 running, 1 queued",
+		"Integration: none awaiting",
+		"Scan errors:",
+		"idle: /repo/idle/.pop.toml: expected value",
 		`"version": 1`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status output missing %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "other project: no ready work") {
+		t.Fatalf("config error project should be a scan error, not collapsed idle:\n%s", text)
 	}
 }
 
@@ -561,7 +569,7 @@ func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 	var statusOut bytes.Buffer
 	RenderStatus(&statusOut, snap)
 	statusText := statusOut.String()
-	for _, want := range []string{"set_crash_backoffs", "parked_sets", "set-1", "pop: set-1 done · conflicts", "Awaiting integration:"} {
+	for _, want := range []string{"set_crash_backoffs", "parked_sets", "set-1", "Blocked:", "Awaiting integration:"} {
 		if !strings.Contains(statusText, want) {
 			t.Fatalf("status output missing %q:\n%s", want, statusText)
 		}

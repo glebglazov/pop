@@ -90,6 +90,62 @@ func idleLock(path string) *tasks.RuntimeLockStatus {
 	return &tasks.RuntimeLockStatus{RuntimePath: path}
 }
 
+func TestScanSkipsNonGitProjectsOutsideQueueScope(t *testing.T) {
+	gitRepo := t.TempDir()
+	spawnInitGitRepo(t, gitRepo)
+	nonGit := t.TempDir()
+
+	cfg := &config.Config{
+		Projects: []config.ProjectEntry{
+			{Path: gitRepo},
+			{Path: nonGit},
+		},
+	}
+	td := queueTestTasksDeps(true)
+	d := &Deps{
+		Tasks:      td,
+		Project:    project.DefaultDeps(),
+		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
+		ReadLock:   func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
+		Refresh:    func(defPath string) (*tasks.RefreshResult, error) { return &tasks.RefreshResult{}, nil },
+	}
+
+	decisions, err := Scan(d, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gitDec, nonGitDec *Decision
+	for i := range decisions {
+		switch decisions[i].Project {
+		case filepath.Base(gitRepo):
+			gitDec = &decisions[i]
+		case filepath.Base(nonGit):
+			nonGitDec = &decisions[i]
+		}
+	}
+	if gitDec == nil {
+		t.Fatal("expected decision for git project")
+	}
+	if nonGitDec == nil {
+		t.Fatal("expected decision for non-git project")
+	}
+	if nonGitDec.Err != nil {
+		t.Fatalf("non-git project must not be a scan error: %v", nonGitDec.Err)
+	}
+	if nonGitDec.Reason != "no ready set" {
+		t.Fatalf("non-git project Reason = %q, want no ready set", nonGitDec.Reason)
+	}
+
+	view := BuildRunView(statusFromDecisions(decisions, &DaemonState{Version: 1}), time.Now())
+	if len(view.ScanErrors) != 0 {
+		t.Fatalf("ScanErrors = %v, want none", view.ScanErrors)
+	}
+	if view.IdleCount != 2 {
+		t.Fatalf("IdleCount = %d, want 2 (both projects have no ready sets)", view.IdleCount)
+	}
+}
+
 func TestDecideProjectIdleSkip(t *testing.T) {
 	refreshCalled := false
 	d := &Deps{
