@@ -23,6 +23,14 @@ Break the plan into **tracer bullet** slices. Each slice is a thin vertical slic
 
 Slices may be 'HITL' or 'AFK'. HITL slices require human interaction, such as an architectural decision or a design review. AFK slices can be implemented and merged without human interaction. Prefer AFK over HITL where possible.
 
+Assign an `effort` to every slice using this named-signal heuristic:
+
+- `heavy` — architectural or cross-cutting refactors, or genuinely tricky algorithms.
+- `light` — large but mechanical work such as renames, codemods, config, or boilerplate.
+- `standard` — everything else.
+
+Write an explicit effort value for each task. Default to `standard` when no named signal clearly applies. Do not consult `pop tasks agents` in the default flow: effort is model-strength intent, not an agent choice.
+
 <vertical-slice-rules>
 - Each slice delivers a narrow but COMPLETE path through every layer (schema, API, UI, tests)
 - A completed slice is demoable or verifiable on its own
@@ -35,6 +43,7 @@ Present the proposed breakdown as a numbered list. For each slice, show:
 
 - **Title**: short descriptive name
 - **Type**: HITL / AFK
+- **Effort**: light / standard / heavy
 - **Blocked by**: which other slices (if any) must complete first
 - **User stories covered**: which user stories this addresses (if the source material has them)
 
@@ -108,6 +117,7 @@ Alongside the markdown files, write `index.json` inside the same task set direct
       "file": "01-login-form.md",
       "title": "Login form",
       "type": "AFK",
+      "effort": "standard",
       "status": "open",
       "blocked_by": []
     }
@@ -122,6 +132,8 @@ Field rules:
 - `status` — one of `open` | `done` | `failed` | `skipped`. Always initialize to `open`. Do not write `in_progress`; persisted `in_progress` is malformed.
 - `blocked_by` — array of `id`s of blocking tasks. Empty array if none.
 - `type` — `HITL` or `AFK`, matching the markdown.
+- `effort` — one of `light` | `standard` | `heavy`. Write it explicitly for new tasks using the named-signal heuristic above. If absent in an existing manifest, it means `standard`.
+- `agent` — optional escape hatch from ADR-0018. Fill it only when the user explicitly asks for a specific agent or model for a task; it is not part of the default planning flow.
 - `failed_after` — optional integer; the number of attempts after which a runner gave up. Written only when `status` becomes `failed`.
 
 The JSON is the source of truth for automation. The rules above — the eligibility condition (`status == "open"` and every `blocked_by` id is satisfied by a task whose status is `done` or `skipped`, preferring `AFK` over `HITL` among eligible tasks), the done-condition (all `## Acceptance criteria` boxes checked), and the commit format `tasks(<task-set-slug>): <id>` (set name without its timestamp prefix) — are the **contract** implemented by `pop tasks implement`, which drains the whole set or runs one task when given a `<task-set>/<file>.md` target.
