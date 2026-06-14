@@ -450,7 +450,7 @@ type recordingTmux struct {
 	commands [][]string
 }
 
-func newRecordingTmux(hasSession bool, windows string) *recordingTmux {
+func newRecordingTmux(hasSession bool, windowIndices string) *recordingTmux {
 	rt := &recordingTmux{}
 	rt.HasSessionFunc = func(name string) bool { return hasSession }
 	rt.NewSessionFunc = func(name, dir string) error {
@@ -460,9 +460,12 @@ func newRecordingTmux(hasSession bool, windows string) *recordingTmux {
 	rt.CommandFunc = func(args ...string) (string, error) {
 		rt.commands = append(rt.commands, args)
 		if len(args) > 0 && args[0] == "list-windows" {
-			return windows, nil
+			return windowIndices, nil
 		}
-		if len(args) > 0 && (args[0] == "new-window" || args[0] == "split-window") {
+		if len(args) > 0 && args[0] == "new-window" {
+			return "0", nil
+		}
+		if len(args) > 0 && args[0] == "split-window" {
 			return "%7", nil
 		}
 		return "", nil
@@ -589,7 +592,7 @@ func TestPrepareWorktreeDrainProvisionFailureFallsBackInPlace(t *testing.T) {
 }
 
 func TestSpawnCreatesSessionAndSplitsMainWindow(t *testing.T) {
-	rt := newRecordingTmux(false, "")
+	rt := newRecordingTmux(false, "0")
 	d := &Deps{Tmux: rt}
 
 	if err := Spawn(d, actionableDecision()); err != nil {
@@ -602,12 +605,12 @@ func TestSpawnCreatesSessionAndSplitsMainWindow(t *testing.T) {
 	if _, ok := rt.findCommand("new-window"); ok {
 		t.Fatal("must not create a separate queue window")
 	}
-	assertSplitIntoMainWindow(t, rt, "proj-session", "/checkout")
+	assertSplitIntoWindow(t, rt, "proj-session:0", "/checkout")
 	assertSendKeys(t, rt)
 }
 
 func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T) {
-	rt := newRecordingTmux(false, "")
+	rt := newRecordingTmux(false, "0")
 	dec := actionableDecision()
 	dec.WorktreeReady = true
 	dec.scan.ProjectPath = "/pop/worktrees/repo/set"
@@ -636,7 +639,7 @@ func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T)
 }
 
 func TestSpawnSplitsWhenSessionExists(t *testing.T) {
-	rt := newRecordingTmux(true, "main\nother")
+	rt := newRecordingTmux(true, "0\n1")
 	d := &Deps{Tmux: rt}
 
 	if err := Spawn(d, actionableDecision()); err != nil {
@@ -649,8 +652,34 @@ func TestSpawnSplitsWhenSessionExists(t *testing.T) {
 	if _, ok := rt.findCommand("new-window"); ok {
 		t.Fatal("must not create a new window when the session already exists")
 	}
-	assertSplitIntoMainWindow(t, rt, "proj-session", "/checkout")
+	assertSplitIntoWindow(t, rt, "proj-session:0", "/checkout")
 	assertSendKeys(t, rt)
+}
+
+func TestSpawnSplitsWhenWindowZeroMissing(t *testing.T) {
+	rt := newRecordingTmux(true, "1")
+	d := &Deps{Tmux: rt}
+
+	if err := Spawn(d, actionableDecision()); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	assertSplitIntoWindow(t, rt, "proj-session:1", "/checkout")
+	assertSendKeys(t, rt)
+}
+
+func TestResolveDrainWindowTargetCreatesWindowWhenSessionEmpty(t *testing.T) {
+	rt := newRecordingTmux(true, "")
+	target, err := resolveDrainWindowTarget(rt, "pop")
+	if err != nil {
+		t.Fatalf("resolveDrainWindowTarget: %v", err)
+	}
+	if target != "pop:0" {
+		t.Fatalf("target = %q, want pop:0", target)
+	}
+	if _, ok := rt.findCommand("new-window"); !ok {
+		t.Fatal("expected new-window when session has no windows")
+	}
 }
 
 func TestSpawnNonActionableNoOp(t *testing.T) {
@@ -665,24 +694,24 @@ func TestSpawnNonActionableNoOp(t *testing.T) {
 	}
 }
 
-func assertSplitIntoMainWindow(t *testing.T, rt *recordingTmux, session, dir string) {
+func assertSplitIntoWindow(t *testing.T, rt *recordingTmux, windowTarget, dir string) {
 	t.Helper()
 	splitWindow, ok := rt.findCommand("split-window")
 	if !ok {
-		t.Fatal("expected a new pane to be split into the main window")
+		t.Fatal("expected a new pane to be split into the drain window")
 	}
-	if !argsContain(splitWindow, "-t", session+":0") {
-		t.Fatalf("split-window must target the main window: %v", splitWindow)
+	if !argsContain(splitWindow, "-t", windowTarget) {
+		t.Fatalf("split-window must target %q: %v", windowTarget, splitWindow)
 	}
 	if !argsContain(splitWindow, "-c", dir) {
 		t.Fatalf("split-window must start in %q: %v", dir, splitWindow)
 	}
 	layout, ok := rt.findCommand("select-layout")
 	if !ok {
-		t.Fatal("expected the main window to be retiled after split")
+		t.Fatal("expected the drain window to be retiled after split")
 	}
-	if !argsContain(layout, "-t", session+":0") {
-		t.Fatalf("select-layout must target the main window: %v", layout)
+	if !argsContain(layout, "-t", windowTarget) {
+		t.Fatalf("select-layout must target %q: %v", windowTarget, layout)
 	}
 }
 

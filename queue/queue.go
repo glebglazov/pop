@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -604,9 +605,9 @@ func safeWorktreeComponent(s string) string {
 	return out
 }
 
-// Spawn launches the selected drain into a new pane of the project's main tmux
-// window (index 0), creating the session detached when absent. It is a no-op
-// for non-actionable decisions.
+// Spawn launches the selected drain into a new pane of the project's tmux
+// session, creating the session detached when absent. It is a no-op for
+// non-actionable decisions.
 func Spawn(d *Deps, dec Decision) error {
 	if !dec.Actionable() {
 		return nil
@@ -622,7 +623,9 @@ func Spawn(d *Deps, dec Decision) error {
 }
 
 // spawnDrain creates (if needed) the detached session, splits a fresh pane
-// into its main window (index 0), and sends the drain command there.
+// into the session's lowest-index window, and sends the drain command there.
+// Existing sessions may not have window 0 (for example when that window was
+// closed); listing windows avoids "can't find window: 0".
 func spawnDrain(tmux deps.Tmux, session, dir, command string) error {
 	if !tmux.HasSession(session) {
 		if err := tmux.NewSession(session, dir); err != nil {
@@ -630,19 +633,51 @@ func spawnDrain(tmux deps.Tmux, session, dir, command string) error {
 		}
 	}
 
-	mainWindow := session + ":0"
-	out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", mainWindow, "-c", dir)
+	windowTarget, err := resolveDrainWindowTarget(tmux, session)
+	if err != nil {
+		return err
+	}
+
+	out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", windowTarget, "-c", dir)
 	if err != nil {
 		return fmt.Errorf("create drain pane: %w", err)
 	}
-	if _, err := tmux.Command("select-layout", "-t", mainWindow, "tiled"); err != nil {
-		return fmt.Errorf("retile main window: %w", err)
+	if _, err := tmux.Command("select-layout", "-t", windowTarget, "tiled"); err != nil {
+		return fmt.Errorf("retile drain window: %w", err)
 	}
 
 	if _, err := tmux.Command("send-keys", "-t", out, command, "Enter"); err != nil {
 		return fmt.Errorf("send drain command: %w", err)
 	}
 	return nil
+}
+
+func resolveDrainWindowTarget(tmux deps.Tmux, session string) (string, error) {
+	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_index}")
+	if err != nil {
+		return "", fmt.Errorf("list windows in %q: %w", session, err)
+	}
+	var indices []int
+	for _, line := range splitLines(out) {
+		idx, err := strconv.Atoi(line)
+		if err != nil {
+			return "", fmt.Errorf("parse window index %q in %q: %w", line, session, err)
+		}
+		indices = append(indices, idx)
+	}
+	if len(indices) == 0 {
+		idx, err := tmux.Command("new-window", "-d", "-P", "-F", "#{window_index}", "-t", session)
+		if err != nil {
+			return "", fmt.Errorf("create window in %q: %w", session, err)
+		}
+		parsed, err := strconv.Atoi(strings.TrimSpace(idx))
+		if err != nil {
+			return "", fmt.Errorf("parse new window index in %q: %w", session, err)
+		}
+		return fmt.Sprintf("%s:%d", session, parsed), nil
+	}
+	sort.Ints(indices)
+	return fmt.Sprintf("%s:%d", session, indices[0]), nil
 }
 
 func shellQuote(s string) string {
