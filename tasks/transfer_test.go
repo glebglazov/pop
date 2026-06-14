@@ -82,6 +82,7 @@ func TestExportImportRoundtrip(t *testing.T) {
 	exported, err := ExportWith(src.deps, projectDefaultDeps(), config.Load, ExportOptions{
 		ResolveInput: src.resolveInput(),
 		TaskSetID:    setID,
+		OutputPath:   filepath.Join(src.root, setID+".tar.gz"),
 	})
 	if err != nil {
 		t.Fatalf("export: %v", err)
