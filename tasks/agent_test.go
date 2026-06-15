@@ -685,6 +685,47 @@ func TestNormalizeClaudeStreamJSONDetectsQuotaPause(t *testing.T) {
 	}
 }
 
+func TestClaudeQuotaResetAtParsesCapturedWeeklyLimitString(t *testing.T) {
+	prevLocal := time.Local
+	time.Local = time.FixedZone("local", -5*60*60)
+	t.Cleanup(func() { time.Local = prevLocal })
+
+	reason := "You've hit your weekly limit · resets Mon 12:00am"
+	now := time.Date(2026, 6, 11, 15, 0, 0, 0, time.Local) // Thu
+	want := time.Date(2026, 6, 15, 0, 0, 0, 0, time.Local) // next Mon
+	got := claudeQuotaResetAt(reason, now)
+	if !got.Equal(want) {
+		t.Fatalf("reset = %s, want %s", got, want)
+	}
+	if got.Sub(now) <= 24*time.Hour {
+		t.Fatalf("weekly reset should remain multi-day, got %s after now", got.Sub(now))
+	}
+	if viaPreset := agentQuotaResetAt("claude", reason, now); !viaPreset.Equal(want) {
+		t.Fatalf("preset reset = %s, want %s", viaPreset, want)
+	}
+}
+
+func TestClaudeQuotaResetAtParsesBareTimeAndFailures(t *testing.T) {
+	prevLocal := time.Local
+	time.Local = time.FixedZone("local", 2*60*60)
+	t.Cleanup(func() { time.Local = prevLocal })
+
+	now := time.Date(2026, 6, 15, 23, 0, 0, 0, time.Local)
+	want := time.Date(2026, 6, 16, 0, 0, 0, 0, time.Local)
+	if got := claudeQuotaResetAt("You've hit your session limit · resets 12:00am", now); !got.Equal(want) {
+		t.Fatalf("bare reset = %s, want %s", got, want)
+	}
+	for _, reason := range []string{
+		"You've hit your weekly limit · reset Mon 12:00am",
+		"You've hit your Opus limit · resets 13:00pm",
+		"You've hit your session limit · resets noon",
+	} {
+		if got := claudeQuotaResetAt(reason, now); !got.IsZero() {
+			t.Fatalf("reset for %q = %s, want zero", reason, got)
+		}
+	}
+}
+
 // TestNormalizeCodexJSONLDetectsQuotaPause uses the stream captured verbatim
 // from a live codex exec --json limit-hit: the turn aborts (exit 1) and emits an
 // `error` event plus a `turn.failed` event, both carrying the usage-limit
@@ -709,6 +750,40 @@ func TestNormalizeCodexJSONLDetectsQuotaPause(t *testing.T) {
 	RenderAgentOutput(&out, AgentOutputCodexJSONL, raw)
 	if strings.Contains(out.String(), "{\"type\"") {
 		t.Fatalf("rendered raw JSONL: %q", out.String())
+	}
+}
+
+func TestCodexQuotaResetAtParsesCapturedLimitString(t *testing.T) {
+	prevLocal := time.Local
+	time.Local = time.FixedZone("local", -5*60*60)
+	t.Cleanup(func() { time.Local = prevLocal })
+
+	reason := "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:28 AM."
+	now := time.Date(2026, 6, 15, 1, 30, 0, 0, time.Local)
+	want := time.Date(2026, 6, 15, 2, 28, 0, 0, time.Local)
+	if got := codexQuotaResetAt(reason, now); !got.Equal(want) {
+		t.Fatalf("reset = %s, want %s", got, want)
+	}
+}
+
+func TestCodexQuotaResetAtNextOccurrenceAndFailures(t *testing.T) {
+	prevLocal := time.Local
+	time.Local = time.FixedZone("local", 2*60*60)
+	t.Cleanup(func() { time.Local = prevLocal })
+
+	now := time.Date(2026, 6, 15, 3, 0, 0, 0, time.Local)
+	want := time.Date(2026, 6, 16, 2, 28, 0, 0, time.Local)
+	if got := codexQuotaResetAt("try again at 2:28 AM.", now); !got.Equal(want) {
+		t.Fatalf("next reset = %s, want %s", got, want)
+	}
+	for _, reason := range []string{
+		"try again later",
+		"try again at 13:28 AM.",
+		"try again at 2:99 AM.",
+	} {
+		if got := codexQuotaResetAt(reason, now); !got.IsZero() {
+			t.Fatalf("reset for %q = %s, want zero", reason, got)
+		}
 	}
 }
 

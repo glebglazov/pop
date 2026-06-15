@@ -2,9 +2,16 @@ package tasks
 
 import (
 	"encoding/json"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+)
+
+var (
+	claudeWeekdayResetAtPattern = regexp.MustCompile(`(?i)\bresets\s+(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+([0-9]{1,2}):([0-9]{2})\s*([AP]M)\b`)
+	claudeBareResetAtPattern    = regexp.MustCompile(`(?i)\bresets\s+([0-9]{1,2}):([0-9]{2})\s*([AP]M)\b`)
 )
 
 func normalizeClaudeStreamJSON(raw string) AgentResult {
@@ -216,4 +223,94 @@ func claudeQuotaPauseReason(result string) *AgentQuotaPause {
 		}
 	}
 	return nil
+}
+
+func claudeQuotaResetAt(reason string, now time.Time) time.Time {
+	if m := claudeWeekdayResetAtPattern.FindStringSubmatch(reason); m != nil {
+		hour, minute, ok := parseQuotaClock(m[2], m[3], m[4])
+		if !ok {
+			return time.Time{}
+		}
+		weekday, ok := parseQuotaWeekday(m[1])
+		if !ok {
+			return time.Time{}
+		}
+		return nextQuotaWeekdayTime(now, weekday, hour, minute)
+	}
+	if m := claudeBareResetAtPattern.FindStringSubmatch(reason); m != nil {
+		hour, minute, ok := parseQuotaClock(m[1], m[2], m[3])
+		if !ok {
+			return time.Time{}
+		}
+		return nextQuotaLocalTime(now, hour, minute)
+	}
+	return time.Time{}
+}
+
+func parseQuotaClock(hourText, minuteText, meridiem string) (int, int, bool) {
+	hour, err := strconv.Atoi(hourText)
+	if err != nil || hour < 1 || hour > 12 {
+		return 0, 0, false
+	}
+	minute, err := strconv.Atoi(minuteText)
+	if err != nil || minute < 0 || minute > 59 {
+		return 0, 0, false
+	}
+	switch strings.ToUpper(meridiem) {
+	case "AM":
+		if hour == 12 {
+			hour = 0
+		}
+	case "PM":
+		if hour != 12 {
+			hour += 12
+		}
+	default:
+		return 0, 0, false
+	}
+	return hour, minute, true
+}
+
+func parseQuotaWeekday(text string) (time.Weekday, bool) {
+	switch strings.ToLower(text) {
+	case "sun":
+		return time.Sunday, true
+	case "mon":
+		return time.Monday, true
+	case "tue":
+		return time.Tuesday, true
+	case "wed":
+		return time.Wednesday, true
+	case "thu":
+		return time.Thursday, true
+	case "fri":
+		return time.Friday, true
+	case "sat":
+		return time.Saturday, true
+	default:
+		return time.Sunday, false
+	}
+}
+
+func nextQuotaLocalTime(now time.Time, hour, minute int) time.Time {
+	localNow := now.In(time.Local)
+	reset := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, time.Local)
+	if !reset.After(localNow) {
+		reset = reset.Add(24 * time.Hour)
+	}
+	if reset.Sub(localNow) > 24*time.Hour {
+		return time.Time{}
+	}
+	return reset
+}
+
+func nextQuotaWeekdayTime(now time.Time, weekday time.Weekday, hour, minute int) time.Time {
+	localNow := now.In(time.Local)
+	reset := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, time.Local)
+	days := (int(weekday) - int(localNow.Weekday()) + 7) % 7
+	reset = reset.AddDate(0, 0, days)
+	if !reset.After(localNow) {
+		reset = reset.AddDate(0, 0, 7)
+	}
+	return reset
 }

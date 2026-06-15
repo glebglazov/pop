@@ -55,6 +55,10 @@ type DrainOutcomeRecord struct {
 	// the task itself pinned ExhaustedPreset, not because the queue selected it
 	// as the rotating default.
 	ExhaustedPinned bool `json:"exhausted_pinned,omitempty"`
+	// ExhaustedResetAt is the agent-reported absolute reset instant. A zero
+	// value means unknown / unparseable and is omitted so fixed-interval
+	// cooldown remains byte-identical for fallback records.
+	ExhaustedResetAt time.Time `json:"exhausted_reset_at,omitempty,omitzero"`
 	// RuntimePath is the runtime checkout the drain ran against; the record is
 	// keyed by it on disk.
 	RuntimePath string `json:"runtime_path"`
@@ -120,13 +124,18 @@ func drainOutcomeFor(setID, runtimePath string, result *RunTaskSetResult, err er
 	if !ok {
 		return DrainOutcomeRecord{}, false
 	}
+	var resetAt time.Time
+	if result != nil && result.QuotaPaused {
+		resetAt = result.PauseResetAt
+	}
 	return DrainOutcomeRecord{
-		SetID:           setID,
-		Outcome:         outcome,
-		ExhaustedPreset: preset,
-		ExhaustedPinned: pinned,
-		RuntimePath:     runtimePath,
-		PID:             os.Getpid(),
+		SetID:            setID,
+		Outcome:          outcome,
+		ExhaustedPreset:  preset,
+		ExhaustedPinned:  pinned,
+		ExhaustedResetAt: resetAt,
+		RuntimePath:      runtimePath,
+		PID:              os.Getpid(),
 	}, true
 }
 

@@ -77,6 +77,51 @@ func TestRunTaskSetQuotaPauseWritesDrainOutcome(t *testing.T) {
 	}
 }
 
+func TestRunTaskSetCodexQuotaPauseWritesResetAt(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	installCodexQuotaAgent(t, env.root)
+	opts := env.runTaskSetOpts(true, "", nil)
+	opts.AgentPreset = "codex"
+
+	d := env.deps()
+	result, err := RunTaskSetWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.QuotaPaused || result.PauseResetAt.IsZero() {
+		t.Fatalf("result = %#v", result)
+	}
+
+	rec := readOnlyDrainOutcome(t, d)
+	if rec.Outcome != DrainOutcomeQuotaPaused || rec.ExhaustedPreset != "codex" || rec.ExhaustedResetAt.IsZero() {
+		t.Fatalf("record missing codex reset: %#v", rec)
+	}
+	if !rec.ExhaustedResetAt.Equal(result.PauseResetAt) {
+		t.Fatalf("record reset = %s, result reset = %s", rec.ExhaustedResetAt, result.PauseResetAt)
+	}
+}
+
+func installCodexQuotaAgent(t *testing.T, root string) {
+	t.Helper()
+	dir := filepath.Join(root, ".agent-bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"t\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"turn.started\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"error\",\"message\":\"You'\"'\"'ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:28 AM.\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"turn.failed\",\"error\":{\"message\":\"You'\"'\"'ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:28 AM.\"}}'\n" +
+		"exit 1\n"
+	writeFile(t, filepath.Join(dir, "codex"), script)
+	if err := os.Chmod(filepath.Join(dir, "codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 func TestRunTaskSetDoneWritesDrainOutcome(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -200,13 +245,15 @@ func TestWriteReadDrainOutcomeRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	d := &Deps{FS: deps.NewRealFileSystem()}
+	resetAt := time.Date(2026, 6, 15, 2, 28, 0, 0, time.UTC)
 
 	want := DrainOutcomeRecord{
-		SetID:           "demo",
-		Outcome:         DrainOutcomeQuotaPaused,
-		ExhaustedPreset: "claude",
-		ExhaustedPinned: true,
-		RuntimePath:     "/some/checkout",
+		SetID:            "demo",
+		Outcome:          DrainOutcomeQuotaPaused,
+		ExhaustedPreset:  "codex",
+		ExhaustedPinned:  true,
+		ExhaustedResetAt: resetAt,
+		RuntimePath:      "/some/checkout",
 	}
 	if err := WriteDrainOutcome(d, want); err != nil {
 		t.Fatalf("write: %v", err)
@@ -215,11 +262,34 @@ func TestWriteReadDrainOutcomeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if got.SetID != want.SetID || got.Outcome != want.Outcome || got.ExhaustedPreset != want.ExhaustedPreset || got.ExhaustedPinned != want.ExhaustedPinned || got.RuntimePath != want.RuntimePath {
+	if got.SetID != want.SetID || got.Outcome != want.Outcome || got.ExhaustedPreset != want.ExhaustedPreset || got.ExhaustedPinned != want.ExhaustedPinned || !got.ExhaustedResetAt.Equal(want.ExhaustedResetAt) || got.RuntimePath != want.RuntimePath {
 		t.Fatalf("round-trip mismatch: got %#v want %#v", got, want)
 	}
 	if got.WrittenAt.IsZero() {
 		t.Fatalf("WriteDrainOutcome should stamp WrittenAt")
+	}
+}
+
+func TestWriteDrainOutcomeOmitsZeroExhaustedResetAt(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	d := &Deps{FS: deps.NewRealFileSystem()}
+
+	rec := DrainOutcomeRecord{
+		SetID:           "demo",
+		Outcome:         DrainOutcomeQuotaPaused,
+		ExhaustedPreset: "claude",
+		RuntimePath:     "/some/checkout",
+	}
+	if err := WriteDrainOutcome(d, rec); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	data, err := os.ReadFile(DrainOutcomePathFor(d, rec.RuntimePath))
+	if err != nil {
+		t.Fatalf("read raw record: %v", err)
+	}
+	if strings.Contains(string(data), "exhausted_reset_at") {
+		t.Fatalf("zero reset should be omitted from JSON: %s", data)
 	}
 }
 

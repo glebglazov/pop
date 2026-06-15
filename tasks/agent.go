@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 )
@@ -74,6 +75,9 @@ type AgentResult struct {
 // AgentQuotaPause reports that execution stopped because the agent allowance ran out.
 type AgentQuotaPause struct {
 	Reason string
+	// ResetAt is the agent-reported absolute reset instant. A zero value means
+	// unknown / unparseable; queue supervision must use its fixed fallback.
+	ResetAt time.Time
 }
 
 // AgentHeadlessRequest describes one unattended issue-attempt invocation.

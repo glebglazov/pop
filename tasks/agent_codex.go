@@ -2,10 +2,13 @@ package tasks
 
 import (
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
+
+var codexResetAtPattern = regexp.MustCompile(`(?i)\btry again at\s+([0-9]{1,2}):([0-9]{2})\s*([AP]M)\b`)
 
 // codexToolItemTypes is the set of Thread Event item types that count as a tool
 // invocation — the same set codexLineRenderer ticks live. Sharing one set keeps
@@ -72,6 +75,29 @@ func codexQuotaPauseReason(message string) *AgentQuotaPause {
 		return &AgentQuotaPause{Reason: message}
 	}
 	return nil
+}
+
+func codexQuotaResetAt(reason string, now time.Time) time.Time {
+	m := codexResetAtPattern.FindStringSubmatch(reason)
+	if m == nil {
+		return time.Time{}
+	}
+	hour, minute, ok := parseQuotaClock(m[1], m[2], m[3])
+	if !ok {
+		return time.Time{}
+	}
+	return nextQuotaLocalTime(now, hour, minute)
+}
+
+func agentQuotaResetAt(preset, reason string, now time.Time) time.Time {
+	switch preset {
+	case "codex":
+		return codexQuotaResetAt(reason, now)
+	case "claude":
+		return claudeQuotaResetAt(reason, now)
+	default:
+		return time.Time{}
+	}
 }
 
 // codexLineRenderer renders codex-jsonl Thread Events live: assistant prose is
