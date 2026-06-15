@@ -194,7 +194,7 @@ func AdoptCurrentCheckout(td *tasks.Deps, pd *project.Deps, cfg *config.Config, 
 		return false, nil
 	}
 
-	linked, err := isLinkedWorktree(td, checkoutPath)
+	linked, err := IsLinkedWorktree(td, checkoutPath)
 	if err != nil {
 		return false, err
 	}
@@ -203,7 +203,7 @@ func AdoptCurrentCheckout(td *tasks.Deps, pd *project.Deps, cfg *config.Config, 
 		return false, nil
 	}
 
-	branch := currentBranch(td, checkoutPath)
+	branch := CurrentBranch(td, checkoutPath)
 	store.Put(key, Adopt(checkoutPath, branch, DetectProject(pd, td, cfg, id)))
 	if err := Save(td, store); err != nil {
 		return false, err
@@ -239,12 +239,16 @@ func DetectProject(pd *project.Deps, td *tasks.Deps, cfg *config.Config, id *tas
 	return ""
 }
 
-// isLinkedWorktree reports whether checkoutPath is a linked git worktree (a
+// IsLinkedWorktree reports whether checkoutPath is a linked git worktree (a
 // non-trunk checkout) rather than the repository's main working tree. A linked
 // worktree's git dir lives under the common dir's worktrees/; the main working
 // tree's git dir IS the common dir. A bare repo has no main working tree, so
 // every checkout reads as linked — correct, since a bare repo has no trunk.
-func isLinkedWorktree(td *tasks.Deps, checkoutPath string) (bool, error) {
+//
+// It is the single predicate that decides where a `pop tasks implement` run
+// lands: a linked worktree is adopted (integrateable), trunk drains inline. So
+// `pop tasks status` reuses it to report that destination before a drain starts.
+func IsLinkedWorktree(td *tasks.Deps, checkoutPath string) (bool, error) {
 	gitDir, err := gitRevParsePath(td, checkoutPath, "--git-dir")
 	if err != nil {
 		return false, err
@@ -273,10 +277,10 @@ func gitRevParsePath(td *tasks.Deps, checkoutPath, which string) (string, error)
 	return filepath.Clean(p), nil
 }
 
-// currentBranch returns the checked-out branch of checkoutPath, or "" when the
+// CurrentBranch returns the checked-out branch of checkoutPath, or "" when the
 // checkout is detached. A detached worktree still adopts; integration resolves
 // its ref later.
-func currentBranch(td *tasks.Deps, checkoutPath string) string {
+func CurrentBranch(td *tasks.Deps, checkoutPath string) string {
 	out, err := td.Git.CommandInDir(checkoutPath, "branch", "--show-current")
 	if err != nil {
 		return ""

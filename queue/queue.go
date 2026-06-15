@@ -836,7 +836,7 @@ func resolveDrainWindowTarget(tmux deps.Tmux, session string) (string, error) {
 			return target, nil
 		}
 	}
-	if _, err := tmux.Command("new-window", "-d", "-t", session, "-n", drainWindowName); err != nil {
+	if _, err := tmux.Command("new-window", "-d", "-a", "-t", session, "-n", drainWindowName); err != nil {
 		return "", fmt.Errorf("create queue window in %q: %w", session, err)
 	}
 	return target, nil
