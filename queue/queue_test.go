@@ -292,7 +292,9 @@ func TestDecideProjectWorktreeReadyTreatsLiveSpawnAsBusy(t *testing.T) {
 		Project: &project.Deps{FS: deps.NewRealFileSystem()},
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
 			if runtimePath == "/pop/worktrees/repo/set" {
-				return liveLock(runtimePath)
+				lock := liveLock(runtimePath)
+				lock.Metadata.SetID = "ready"
+				return lock
 			}
 			return idleLock(runtimePath)
 		},
@@ -318,6 +320,124 @@ func TestDecideProjectWorktreeReadyTreatsLiveSpawnAsBusy(t *testing.T) {
 	}
 	if dec.lockStatus == nil || dec.lockStatus.RuntimePath != "/pop/worktrees/repo/set" {
 		t.Fatalf("lockStatus = %+v, want worktree lock", dec.lockStatus)
+	}
+}
+
+func TestDecideProjectWorktreeReadyAdoptedCheckoutNotDoubleCounted(t *testing.T) {
+	// ADR-0036: the current checkout can be adopted into the worktree binding
+	// model, so an open spawn's RuntimePath equals the project's own runtime
+	// path. The openSpawns loop and the direct lock read then see the same live
+	// lock; it must yield exactly one busy decision, not two.
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	root := initMergeabilityRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	td := queueDataDeps(t)
+	td.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
+	d := &Deps{
+		Tasks:   td,
+		Project: &project.Deps{FS: deps.NewRealFileSystem()},
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
+			if runtimePath == root {
+				lock := liveLock(runtimePath)
+				lock.Metadata.SetID = "adopted"
+				return lock
+			}
+			return idleLock(runtimePath)
+		},
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{Rows: []tasks.Row{
+				{ID: "adopted", Status: tasks.StatusReady, Priority: 20, RegIndex: 0},
+				{ID: "other", Status: tasks.StatusReady, Priority: 10, RegIndex: 1},
+			}}, nil
+		},
+	}
+	if err := AppendJournalEntry(d.Tasks, JournalEntry{
+		Event:       JournalEventSpawn,
+		Project:     "proj",
+		SetID:       "adopted",
+		RuntimePath: root,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+
+	var busy, actionable []string
+	for _, dec := range decisions {
+		if dec.Busy {
+			busy = append(busy, dec.TaskSetID)
+		}
+		if dec.Actionable() {
+			actionable = append(actionable, dec.TaskSetID)
+		}
+	}
+	// The adopted spawn appears once as busy (not double-counted), and the repo's
+	// other Ready set still dispatches into a fresh worktree.
+	if !reflect.DeepEqual(busy, []string{"adopted"}) {
+		t.Fatalf("busy sets = %#v, want single adopted (no double-count)", busy)
+	}
+	if !reflect.DeepEqual(actionable, []string{"other"}) {
+		t.Fatalf("actionable sets = %#v, want other dispatched into fresh worktree", actionable)
+	}
+}
+
+func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
+	// Under the adopt-current-checkout model several sets share one runtime path.
+	// A drain killed without journaling an outcome leaves a stale open-spawn; its
+	// SetID no longer matches the live lock's metadata, so it must not be reported
+	// as running (which would borrow the live set's lock and surface as a
+	// duplicate picked-up line).
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	root := initMergeabilityRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	td := queueDataDeps(t)
+	td.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
+	d := &Deps{
+		Tasks:   td,
+		Project: &project.Deps{FS: deps.NewRealFileSystem()},
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
+			if runtimePath == root {
+				lock := liveLock(runtimePath)
+				lock.Metadata.SetID = "live"
+				return lock
+			}
+			return idleLock(runtimePath)
+		},
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{Rows: []tasks.Row{
+				{ID: "live", Status: tasks.StatusReady, Priority: 20, RegIndex: 0},
+			}}, nil
+		},
+	}
+	// Both sets have an open spawn at the same checkout, but only "live" holds the
+	// lock now; "stale" was killed without an outcome entry.
+	for _, set := range []string{"stale", "live"} {
+		if err := AppendJournalEntry(d.Tasks, JournalEntry{
+			Event:       JournalEventSpawn,
+			Project:     "proj",
+			SetID:       set,
+			RuntimePath: root,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+
+	var busy []string
+	for _, dec := range decisions {
+		if dec.Busy {
+			busy = append(busy, dec.TaskSetID)
+		}
+	}
+	if !reflect.DeepEqual(busy, []string{"live"}) {
+		t.Fatalf("busy sets = %#v, want only the live lock holder (stale spawn excluded)", busy)
 	}
 }
 

@@ -292,7 +292,14 @@ func decideProjectDispatches(d *Deps, scan projectScan, agents []string, state *
 
 	lock := d.readLock(scan.RuntimePath)
 	dec.lockStatus = lock
-	if lock != nil && lock.Locked {
+	// When the current checkout has been adopted into the worktree binding model
+	// (ADR-0036), its runtime path equals an open spawn's runtime path that the
+	// openSpawns loop above already reported as busy. Treating that lock as a v1
+	// in-place lock here would both double-count the live drain and short-circuit
+	// dispatch of the repo's other Ready sets into fresh worktrees, so fall
+	// through to the dispatch logic instead.
+	adoptedSpawn := dec.WorktreeReady && lock != nil && lock.Metadata != nil && runningSets[lock.Metadata.SetID]
+	if lock != nil && lock.Locked && !adoptedSpawn {
 		dec.Busy = true
 		dec.Reason = "busy"
 		if lock.Metadata != nil && lock.Metadata.SetID != "" {
@@ -301,6 +308,10 @@ func decideProjectDispatches(d *Deps, scan projectScan, agents []string, state *
 		}
 		decisions = append(decisions, dec)
 		return decisions
+	}
+	if adoptedSpawn {
+		// The dispatch baseline must not carry the adopted spawn's live lock.
+		dec.lockStatus = nil
 	}
 
 	refresh, err := d.refresh(scan.DefinitionPath)
@@ -396,7 +407,13 @@ func liveOpenSpawns(d *Deps, projectName string) ([]liveOpenSpawn, error) {
 		}
 		seen[key] = true
 		lock := d.readLock(entry.RuntimePath)
-		if lock != nil && lock.Locked {
+		// Under the adopt-current-checkout model several sets share one runtime
+		// path, so a held lock alone does not prove THIS set is the live drain —
+		// only the set named in the lock metadata is. Requiring the match drops
+		// stale open-spawns left by drains that died without journaling an
+		// outcome, which would otherwise borrow the live lock of another set and
+		// surface as a duplicate picked-up line.
+		if lock != nil && lock.Locked && lock.Metadata != nil && lock.Metadata.SetID == entry.SetID {
 			out = append(out, liveOpenSpawn{Entry: entry, Lock: lock})
 		}
 	}
