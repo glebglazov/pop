@@ -142,7 +142,14 @@ func TestSupervisorWorktreeDrainTargetsProjectSessionWithCheckoutCWD(t *testing.
 		t.Fatalf("new-session cwd = %q, want provisioned worktree checkout", checkout)
 	}
 
-	assertSplitIntoWindow(t, rt, wantSession+":"+drainWindowName, checkout)
+	assertReusesFreshPane(t, rt, "%3")
+	newWindow, ok := rt.findCommand("new-window")
+	if !ok {
+		t.Fatal("expected a queue window to host the drain pane")
+	}
+	if !argsContain(newWindow, "-c", checkout) {
+		t.Fatalf("new-window must start in worktree checkout %q: %v", checkout, newWindow)
+	}
 	spawnCmd, ok := extractSpawnCommand(rt)
 	if !ok {
 		t.Fatal("supervisor tick must spawn a drain command")
@@ -170,7 +177,7 @@ func TestSupervisorTickJournalsSpawnFailure(t *testing.T) {
 	rt.CommandFunc = func(args ...string) (string, error) {
 		rt.commands = append(rt.commands, args)
 		if len(args) > 0 && args[0] == "list-windows" {
-			return "0", nil
+			return drainWindowName, nil
 		}
 		if len(args) > 0 && args[0] == "split-window" {
 			return "", errors.New("tmux refused pane")

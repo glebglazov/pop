@@ -681,7 +681,7 @@ func newRecordingTmux(hasSession bool, windowNames string) *recordingTmux {
 			return windowNames, nil
 		}
 		if len(args) > 0 && args[0] == "new-window" {
-			return "", nil
+			return "%3", nil
 		}
 		if len(args) > 0 && args[0] == "split-window" {
 			return "%7", nil
@@ -965,8 +965,11 @@ func TestSpawnCreatesQueueWindowWhenAbsent(t *testing.T) {
 	if !argsContain(newWindow, "-t", "proj-session") || !argsContain(newWindow, "-n", drainWindowName) {
 		t.Fatalf("new-window must create %q in project session: %v", drainWindowName, newWindow)
 	}
-	assertSplitIntoWindow(t, rt, "proj-session:"+drainWindowName, "/checkout")
-	assertPaneTagged(t, rt, "%7", "2026-06-14-queue")
+	if !argsContain(newWindow, "-c", "/checkout") {
+		t.Fatalf("new-window must start in %q: %v", "/checkout", newWindow)
+	}
+	assertReusesFreshPane(t, rt, "%3")
+	assertPaneTagged(t, rt, "%3", "2026-06-14-queue")
 	assertSendKeys(t, rt)
 }
 
@@ -989,14 +992,17 @@ func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T)
 	if !reflect.DeepEqual(newSession, []string{"new-session", "proj-session", "/pop/worktrees/repo/set"}) {
 		t.Fatalf("new-session = %v, want project session created with worktree cwd", newSession)
 	}
-	assertSplitIntoWindow(t, rt, "proj-session:"+drainWindowName, "/pop/worktrees/repo/set")
-	assertPaneTagged(t, rt, "%7", "2026-06-14-queue")
-	splitWindow, ok := rt.findCommand("split-window")
+	assertReusesFreshPane(t, rt, "%3")
+	assertPaneTagged(t, rt, "%3", "2026-06-14-queue")
+	newWindow, ok := rt.findCommand("new-window")
 	if !ok {
-		t.Fatal("expected a drain pane in the queue window")
+		t.Fatal("expected a queue window to host the drain pane")
 	}
-	if argsContain(splitWindow, "-t", "set:"+drainWindowName) || argsContain(splitWindow, "-t", "repo/set:"+drainWindowName) {
-		t.Fatalf("split-window must not target a worktree-derived session: %v", splitWindow)
+	if argsContain(newWindow, "-t", "set:"+drainWindowName) || argsContain(newWindow, "-t", "repo/set:"+drainWindowName) {
+		t.Fatalf("new-window must not target a worktree-derived session: %v", newWindow)
+	}
+	if !argsContain(newWindow, "-c", "/pop/worktrees/repo/set") {
+		t.Fatalf("new-window must start in worktree dir: %v", newWindow)
 	}
 	sendKeys, ok := rt.findCommand("send-keys")
 	if !ok {
@@ -1038,8 +1044,8 @@ func TestSpawnDoesNotTargetLowestIndexWindow(t *testing.T) {
 	if _, ok := rt.findCommand("new-window"); !ok {
 		t.Fatal("expected pop-queue window to be created instead of targeting an existing numeric window")
 	}
-	assertSplitIntoWindow(t, rt, "proj-session:"+drainWindowName, "/checkout")
-	assertPaneTagged(t, rt, "%7", "2026-06-14-queue")
+	assertReusesFreshPane(t, rt, "%3")
+	assertPaneTagged(t, rt, "%3", "2026-06-14-queue")
 	assertSendKeys(t, rt)
 }
 
@@ -1094,12 +1100,15 @@ func TestSpawnReusesExistingPaneForSameSet(t *testing.T) {
 
 func TestResolveDrainWindowTargetCreatesQueueWindowWhenAbsent(t *testing.T) {
 	rt := newRecordingTmux(true, "main")
-	target, err := resolveDrainWindowTarget(rt, "pop")
+	target, freshPaneID, err := resolveDrainWindowTarget(rt, "pop", "/checkout")
 	if err != nil {
 		t.Fatalf("resolveDrainWindowTarget: %v", err)
 	}
 	if target != "pop:"+drainWindowName {
 		t.Fatalf("target = %q, want pop:%s", target, drainWindowName)
+	}
+	if freshPaneID != "%3" {
+		t.Fatalf("freshPaneID = %q, want %%3 (initial pane of created window)", freshPaneID)
 	}
 	newWindow, ok := rt.findCommand("new-window")
 	if !ok {
@@ -1108,16 +1117,22 @@ func TestResolveDrainWindowTargetCreatesQueueWindowWhenAbsent(t *testing.T) {
 	if !argsContain(newWindow, "-t", "pop") || !argsContain(newWindow, "-n", drainWindowName) {
 		t.Fatalf("new-window must create %q in session pop: %v", drainWindowName, newWindow)
 	}
+	if !argsContain(newWindow, "-c", "/checkout") {
+		t.Fatalf("new-window must start in %q: %v", "/checkout", newWindow)
+	}
 }
 
 func TestResolveDrainWindowTargetReusesQueueWindowWhenPresent(t *testing.T) {
 	rt := newRecordingTmux(true, "0\n"+drainWindowName)
-	target, err := resolveDrainWindowTarget(rt, "pop")
+	target, freshPaneID, err := resolveDrainWindowTarget(rt, "pop", "/checkout")
 	if err != nil {
 		t.Fatalf("resolveDrainWindowTarget: %v", err)
 	}
 	if target != "pop:"+drainWindowName {
 		t.Fatalf("target = %q, want pop:%s", target, drainWindowName)
+	}
+	if freshPaneID != "" {
+		t.Fatalf("freshPaneID = %q, want empty when window already present", freshPaneID)
 	}
 	if _, ok := rt.findCommand("new-window"); ok {
 		t.Fatal("must not create a window when pop-queue is present")
@@ -1154,6 +1169,23 @@ func assertSplitIntoWindow(t *testing.T, rt *recordingTmux, windowTarget, dir st
 	}
 	if !argsContain(layout, "-t", windowTarget) {
 		t.Fatalf("select-layout must target %q: %v", windowTarget, layout)
+	}
+}
+
+func assertReusesFreshPane(t *testing.T, rt *recordingTmux, paneID string) {
+	t.Helper()
+	if _, ok := rt.findCommand("split-window"); ok {
+		t.Fatal("must reuse the freshly created window's pane, not split a second pane")
+	}
+	if _, ok := rt.findCommand("select-layout"); ok {
+		t.Fatal("must not retile a single-pane drain window")
+	}
+	sendKeys, ok := rt.findCommand("send-keys")
+	if !ok {
+		t.Fatal("expected the drain command to be sent into the pane")
+	}
+	if !argsContain(sendKeys, "-t", paneID) {
+		t.Fatalf("send-keys must target reused pane %s: %v", paneID, sendKeys)
 	}
 }
 

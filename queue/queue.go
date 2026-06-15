@@ -763,7 +763,7 @@ func spawnDrain(tmux deps.Tmux, session, dir, setID, command string) error {
 		}
 	}
 
-	windowTarget, err := resolveDrainWindowTarget(tmux, session)
+	windowTarget, freshPaneID, err := resolveDrainWindowTarget(tmux, session, dir)
 	if err != nil {
 		return err
 	}
@@ -779,21 +779,27 @@ func spawnDrain(tmux deps.Tmux, session, dir, setID, command string) error {
 		return nil
 	}
 
-	out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", windowTarget, "-c", dir)
-	if err != nil {
-		return fmt.Errorf("create drain pane: %w", err)
+	if freshPaneID != "" {
+		// The queue window was just created; reuse its initial pane instead of
+		// splitting, so a fresh window holds a single drain pane.
+		paneID = freshPaneID
+	} else {
+		out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", windowTarget, "-c", dir)
+		if err != nil {
+			return fmt.Errorf("create drain pane: %w", err)
+		}
+		paneID = strings.TrimSpace(out)
+		if paneID == "" {
+			return fmt.Errorf("create drain pane: tmux returned no pane id")
+		}
+		if _, err := tmux.Command("select-layout", "-t", windowTarget, "tiled"); err != nil {
+			return fmt.Errorf("retile drain window: %w", err)
+		}
 	}
-	paneID = strings.TrimSpace(out)
-	if paneID == "" {
-		return fmt.Errorf("create drain pane: tmux returned no pane id")
-	}
+
 	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_set", setID); err != nil {
 		return fmt.Errorf("tag drain pane: %w", err)
 	}
-	if _, err := tmux.Command("select-layout", "-t", windowTarget, "tiled"); err != nil {
-		return fmt.Errorf("retile drain window: %w", err)
-	}
-
 	if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
 		return fmt.Errorf("send drain command: %w", err)
 	}
@@ -825,21 +831,30 @@ func parseDrainPaneTagLine(line string) (tag, paneID string, ok bool) {
 	return tag, paneID, tag != "" && paneID != ""
 }
 
-func resolveDrainWindowTarget(tmux deps.Tmux, session string) (string, error) {
-	target := session + ":" + drainWindowName
+// resolveDrainWindowTarget returns the queue window target, creating it when
+// absent. When it creates the window, it also returns the id of the window's
+// initial pane (started in dir) so the caller can reuse it instead of splitting
+// a second pane; the pane id is empty when the window already existed.
+func resolveDrainWindowTarget(tmux deps.Tmux, session, dir string) (target, freshPaneID string, err error) {
+	target = session + ":" + drainWindowName
 	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
 	if err != nil {
-		return "", fmt.Errorf("list windows in %q: %w", session, err)
+		return "", "", fmt.Errorf("list windows in %q: %w", session, err)
 	}
 	for _, line := range splitLines(out) {
 		if line == drainWindowName {
-			return target, nil
+			return target, "", nil
 		}
 	}
-	if _, err := tmux.Command("new-window", "-d", "-a", "-t", session, "-n", drainWindowName); err != nil {
-		return "", fmt.Errorf("create queue window in %q: %w", session, err)
+	out, err = tmux.Command("new-window", "-d", "-a", "-P", "-F", "#{pane_id}", "-t", session, "-n", drainWindowName, "-c", dir)
+	if err != nil {
+		return "", "", fmt.Errorf("create queue window in %q: %w", session, err)
 	}
-	return target, nil
+	freshPaneID = strings.TrimSpace(out)
+	if freshPaneID == "" {
+		return "", "", fmt.Errorf("create queue window in %q: tmux returned no pane id", session)
+	}
+	return target, freshPaneID, nil
 }
 
 func shellQuote(s string) string {
