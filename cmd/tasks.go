@@ -540,11 +540,19 @@ func taskRecordMergeabilityOnDone(d *tasks.Deps, result *tasks.RunTaskSetResult,
 // asks "integrate into <working branch> now?". A trunk drain has no
 // Mergeability record and is silently skipped (ADR-0036). Conflicts route to
 // the attended agent path (same as `pop queue integrate`).
+//
+// With --yes: never prompts. Integrates automatically only when
+// auto_merge_clean=true (ADR-0035/0036) and the set is clean; conflicts always
+// park in the Integration backlog regardless of the flag.
 func offerImplementIntegration(d *tasks.Deps, result *tasks.RunTaskSetResult, stdin io.Reader, out io.Writer) {
 	if result == nil || !result.TaskSetDone || result.RuntimePath == "" {
 		return
 	}
-	if taskRunYes || !taskStdinInteractive(stdin) {
+	if taskRunYes {
+		tryAutoIntegrateYes(d, result, out)
+		return
+	}
+	if !taskStdinInteractive(stdin) {
 		return
 	}
 
@@ -589,6 +597,40 @@ func offerImplementIntegration(d *tasks.Deps, result *tasks.RunTaskSetResult, st
 		In:          stdin,
 		AgentPreset: taskAgentPreset,
 		AgentCmd:    taskAgentCmd,
+	}); intErr != nil {
+		fmt.Fprintf(out, "integrate: %v\n", intErr)
+	}
+}
+
+// tryAutoIntegrateYes is the --yes integration path (AFK). It integrates a
+// clean worktree drain only when the repository opted in with
+// auto_merge_clean=true (ADR-0035/0036). Conflicts always park in the
+// Integration backlog; no prompt is ever shown.
+func tryAutoIntegrateYes(d *tasks.Deps, result *tasks.RunTaskSetResult, out io.Writer) {
+	if result == nil || result.RuntimePath == "" {
+		return
+	}
+
+	qd := queue.DefaultDeps()
+	qd.Tasks = d
+
+	rec, ok, err := queue.LookupMergeability(qd, result.TaskSetID)
+	if err != nil || !ok {
+		return // trunk drain or state error: park in backlog
+	}
+	if rec.Status != queue.MergeabilityClean {
+		return // conflicts always park in backlog
+	}
+
+	cfg, _ := taskConfigLoad(config.DefaultConfigPath())
+	pd := project.DefaultDeps()
+	repoConfig, _ := cfg.ResolveRepoConfig(&config.Deps{FS: pd.FS}, result.ProjectPath)
+	if !repoConfig.AutoMergeClean {
+		return // opt-in not set: park in backlog
+	}
+
+	if _, intErr := queue.IntegrateWithOptions(qd, cfg, result.TaskSetID, out, queue.IntegrationOptions{
+		In: tasks.NonInteractiveReader{},
 	}); intErr != nil {
 		fmt.Fprintf(out, "integrate: %v\n", intErr)
 	}

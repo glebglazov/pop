@@ -1575,9 +1575,10 @@ func TestOfferImplementIntegrationNonInteractiveSkips(t *testing.T) {
 	}
 }
 
-// TestOfferImplementIntegrationYesFlagSkips verifies the offer is suppressed
-// when --yes is set (ADR-0036: --yes never auto-integrates).
-func TestOfferImplementIntegrationYesFlagSkips(t *testing.T) {
+// TestOfferImplementIntegrationYesFlagTrunkDrainSkips verifies that --yes
+// with no mergeability record (trunk drain) produces no output and no
+// integration (ADR-0036).
+func TestOfferImplementIntegrationYesFlagTrunkDrainSkips(t *testing.T) {
 	resetTaskFlags()
 	taskRunYes = true
 	t.Cleanup(resetTaskFlags)
@@ -1590,7 +1591,180 @@ func TestOfferImplementIntegrationYesFlagSkips(t *testing.T) {
 	var out bytes.Buffer
 	offerImplementIntegration(tasks.DefaultDeps(), result, strings.NewReader("y\n"), &out)
 	if out.Len() != 0 {
-		t.Fatalf("expected no output when --yes is set, got: %q", out.String())
+		t.Fatalf("expected no output when --yes is set on trunk drain, got: %q", out.String())
+	}
+}
+
+// TestOfferImplementIntegrationYesNoAutoMergeCleanCleanParks verifies that
+// --yes with a clean mergeability but no auto_merge_clean opt-in parks the
+// set in the Integration backlog without integrating (ADR-0036).
+func TestOfferImplementIntegrationYesNoAutoMergeCleanCleanParks(t *testing.T) {
+	td := offerIntegrationTestDataDeps(t)
+	repo, wt, setID := setupOfferIntegrationWorktree(t, td, queue.MergeabilityClean)
+	resetTaskFlags()
+	taskRunYes = true
+	t.Cleanup(resetTaskFlags)
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	result := &tasks.RunTaskSetResult{
+		TaskSetID:   setID,
+		TaskSetDone: true,
+		RuntimePath: wt,
+		ProjectPath: repo,
+	}
+	var out bytes.Buffer
+	offerImplementIntegration(td, result, strings.NewReader(""), &out)
+
+	if out.Len() != 0 {
+		t.Fatalf("expected no output (parked), got: %q", out.String())
+	}
+	// Mergeability record must remain in state (not integrated).
+	qd := queue.DefaultDeps()
+	qd.Tasks = td
+	_, ok, err := queue.LookupMergeability(qd, setID)
+	if err != nil {
+		t.Fatalf("lookup mergeability: %v", err)
+	}
+	if !ok {
+		t.Fatal("mergeability record cleared: set must remain in backlog when auto_merge_clean is not set")
+	}
+}
+
+// TestOfferImplementIntegrationYesNoAutoMergeCleanConflictsParks verifies
+// that --yes with conflicts and no auto_merge_clean parks in the backlog.
+func TestOfferImplementIntegrationYesNoAutoMergeCleanConflictsParks(t *testing.T) {
+	td := offerIntegrationTestDataDeps(t)
+	repo, wt, setID := setupOfferIntegrationWorktree(t, td, queue.MergeabilityConflicts)
+	resetTaskFlags()
+	taskRunYes = true
+	t.Cleanup(resetTaskFlags)
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	result := &tasks.RunTaskSetResult{
+		TaskSetID:   setID,
+		TaskSetDone: true,
+		RuntimePath: wt,
+		ProjectPath: repo,
+	}
+	var out bytes.Buffer
+	offerImplementIntegration(td, result, strings.NewReader(""), &out)
+
+	if out.Len() != 0 {
+		t.Fatalf("expected no output (parked), got: %q", out.String())
+	}
+	qd := queue.DefaultDeps()
+	qd.Tasks = td
+	_, ok, err := queue.LookupMergeability(qd, setID)
+	if err != nil {
+		t.Fatalf("lookup mergeability: %v", err)
+	}
+	if !ok {
+		t.Fatal("mergeability record cleared: conflicting set must remain in backlog")
+	}
+}
+
+// TestOfferImplementIntegrationYesAutoMergeCleanCleanIntegrates verifies that
+// --yes with a clean set and auto_merge_clean=true integrates automatically
+// without prompting (ADR-0036).
+func TestOfferImplementIntegrationYesAutoMergeCleanCleanIntegrates(t *testing.T) {
+	td := offerIntegrationTestDataDeps(t)
+	repo, wt, setID := setupOfferIntegrationWorktree(t, td, queue.MergeabilityClean)
+	resetTaskFlags()
+	taskRunYes = true
+	t.Cleanup(resetTaskFlags)
+
+	if err := os.WriteFile(filepath.Join(repo, ".pop.toml"), []byte("auto_merge_clean = true\n"), 0o644); err != nil {
+		t.Fatalf("write .pop.toml: %v", err)
+	}
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(_ string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	result := &tasks.RunTaskSetResult{
+		TaskSetID:   setID,
+		TaskSetDone: true,
+		RuntimePath: wt,
+		ProjectPath: repo,
+	}
+	var out bytes.Buffer
+	offerImplementIntegration(td, result, strings.NewReader(""), &out)
+
+	// Integration: feature.txt must appear in the main repo.
+	if _, err := os.Stat(filepath.Join(repo, "feature.txt")); err != nil {
+		t.Fatalf("feature.txt missing from main repo after auto-integration: %v", err)
+	}
+	// Mergeability record must be cleared from state.
+	qd := queue.DefaultDeps()
+	qd.Tasks = td
+	_, ok, err := queue.LookupMergeability(qd, setID)
+	if err != nil {
+		t.Fatalf("lookup mergeability: %v", err)
+	}
+	if ok {
+		t.Fatal("mergeability record not cleared: set must be removed from backlog after auto-integration")
+	}
+}
+
+// TestOfferImplementIntegrationYesAutoMergeCleanConflictsParks verifies that
+// --yes with auto_merge_clean=true still parks conflicting sets in the backlog
+// (ADR-0036: conflicts never auto-integrate regardless of flag).
+func TestOfferImplementIntegrationYesAutoMergeCleanConflictsParks(t *testing.T) {
+	td := offerIntegrationTestDataDeps(t)
+	repo, wt, setID := setupOfferIntegrationWorktree(t, td, queue.MergeabilityConflicts)
+	resetTaskFlags()
+	taskRunYes = true
+	t.Cleanup(resetTaskFlags)
+
+	if err := os.WriteFile(filepath.Join(repo, ".pop.toml"), []byte("auto_merge_clean = true\n"), 0o644); err != nil {
+		t.Fatalf("write .pop.toml: %v", err)
+	}
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(_ string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	result := &tasks.RunTaskSetResult{
+		TaskSetID:   setID,
+		TaskSetDone: true,
+		RuntimePath: wt,
+		ProjectPath: repo,
+	}
+	var out bytes.Buffer
+	offerImplementIntegration(td, result, strings.NewReader(""), &out)
+
+	if out.Len() != 0 {
+		t.Fatalf("expected no output for conflicting set, got: %q", out.String())
+	}
+	qd := queue.DefaultDeps()
+	qd.Tasks = td
+	rec, ok, err := queue.LookupMergeability(qd, setID)
+	if err != nil {
+		t.Fatalf("lookup mergeability: %v", err)
+	}
+	if !ok {
+		t.Fatal("mergeability record cleared: conflicting set must remain in backlog even with auto_merge_clean")
+	}
+	if rec.Status != queue.MergeabilityConflicts {
+		t.Fatalf("mergeability status = %q, want conflicts", rec.Status)
 	}
 }
 
