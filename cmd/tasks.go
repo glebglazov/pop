@@ -107,6 +107,11 @@ var taskShowPathCmd = &cobra.Command{
 	Run:   runTaskShowPath,
 }
 
+var taskTransferCmd = &cobra.Command{
+	Use:   "transfer",
+	Short: "Move task sets between machines or repositories via portable archives",
+}
+
 var taskExportCmd = &cobra.Command{
 	Use:   "export TASK_SET",
 	Short: "Export a task set as a tar.gz archive",
@@ -152,8 +157,9 @@ func init() {
 	taskCmd.AddCommand(taskSkipTaskCmd)
 	taskCmd.AddCommand(taskTimingsCmd)
 	taskCmd.AddCommand(taskShowPathCmd)
-	taskCmd.AddCommand(taskExportCmd)
-	taskCmd.AddCommand(taskImportCmd)
+	taskCmd.AddCommand(taskTransferCmd)
+	taskTransferCmd.AddCommand(taskExportCmd)
+	taskTransferCmd.AddCommand(taskImportCmd)
 	taskCmd.AddCommand(taskMigrateCmd)
 	taskCmd.AddCommand(taskAgentsCmd)
 

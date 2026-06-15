@@ -127,7 +127,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 	})
 
 	t.Run("export stays set-only without slash drill", func(t *testing.T) {
-		out := shellCompNoDesc(t, "tasks", "export")
+		out := shellCompNoDesc(t, "tasks", "transfer", "export")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmitsExact(t, out, "archived")
 		assertShellCompOmitsExact(t, out, "svc/")
@@ -192,10 +192,11 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 			out := shellCompNoDesc(t, "tasks", verb)
 			assertShellCompOmitsExact(t, out, "archived/")
 		}
-		for _, verb := range []string{"status", "archive", "set-priority", "show-path", "export"} {
+		for _, verb := range []string{"status", "archive", "set-priority", "show-path"} {
 			out := shellCompNoDesc(t, "tasks", verb)
 			assertShellCompOmitsExact(t, out, "archived")
 		}
+		assertShellCompOmitsExact(t, shellCompNoDesc(t, "tasks", "transfer", "export"), "archived")
 	})
 
 	t.Run("unarchive offers only archived IDs", func(t *testing.T) {
