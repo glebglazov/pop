@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1322,7 +1323,7 @@ projects = [{ path = "/main" }]
 		}
 	})
 
-	t.Run("included file scalar fields are ignored", func(t *testing.T) {
+	t.Run("include with non-whitelisted keys warns and ignores them", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		writeFile := func(name, content string) string {
 			p := filepath.Join(tmpDir, name)
@@ -1367,6 +1368,55 @@ projects = [{ path = "/main" }]
 		if len(cfg.Projects) != 2 {
 			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
 		}
+		// Check for warnings about non-whitelisted keys
+		warnCount := 0
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "extra.toml") && strings.Contains(w, "ignored") {
+				warnCount++
+			}
+		}
+		if warnCount == 0 {
+			t.Errorf("expected warnings about non-whitelisted keys, got: %v", cfg.Warnings)
+		}
+	})
+
+	t.Run("include with nested includes warns and ignores them", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			os.WriteFile(p, []byte(content), 0644)
+			return p
+		}
+
+		writeFile("nested.toml", `projects = [{ path = "/nested" }]`)
+		writeFile("extra.toml", `
+includes = ["nested.toml"]
+projects = [{ path = "/extra" }]
+`)
+		configPath := writeFile("config.toml", `
+includes = ["extra.toml"]
+projects = [{ path = "/main" }]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		// Nested includes should not be processed
+		if len(cfg.Projects) != 2 {
+			t.Fatalf("got %d projects, want 2 (nested include should be ignored)", len(cfg.Projects))
+		}
+		// Check for warning about nested includes
+		found := false
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "extra.toml") && strings.Contains(w, "nested") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected warning about nested includes, got: %v", cfg.Warnings)
+		}
 	})
 
 	t.Run("empty includes array works fine", func(t *testing.T) {
@@ -1397,6 +1447,283 @@ projects = [{ path = "/main" }]
 		}
 		if len(cfg.Projects) != 1 {
 			t.Fatalf("got %d projects, want 1", len(cfg.Projects))
+		}
+	})
+
+	t.Run("malformed include file is fatal error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			os.WriteFile(p, []byte(content), 0644)
+			return p
+		}
+
+		writeFile("malformed.toml", `
+projects = [{ path = /unquoted/path }]
+`)
+		configPath := writeFile("config.toml", `
+includes = ["malformed.toml"]
+projects = [{ path = "/main" }]
+`)
+
+		_, err := Load(configPath)
+		if err == nil {
+			t.Fatalf("expected error for malformed include, got nil")
+		}
+		if !strings.Contains(err.Error(), "malformed.toml") {
+			t.Errorf("error should name the include file, got: %v", err)
+		}
+	})
+
+	t.Run("missing include file warns and continues", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		os.WriteFile(configPath, []byte(`
+includes = ["nonexistent.toml"]
+projects = [{ path = "/main" }]
+`), 0644)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("expected no error for missing include, got: %v", err)
+		}
+		if len(cfg.Projects) != 1 || cfg.Projects[0].Path != "/main" {
+			t.Fatalf("expected 1 project from main config, got: %v", cfg.Projects)
+		}
+		if len(cfg.Warnings) == 0 {
+			t.Fatalf("expected warning for missing include, got none")
+		}
+		// Verify the warning mentions the missing file
+		found := false
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "nonexistent.toml") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("warning should name the missing include file, got: %v", cfg.Warnings)
+		}
+	})
+
+	t.Run("include paths are literal (no glob expansion)", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			os.WriteFile(p, []byte(content), 0644)
+			return p
+		}
+
+		// Create actual files that would match a glob
+		writeFile("extra1.toml", `projects = [{ path = "/extra1" }]`)
+		writeFile("extra2.toml", `projects = [{ path = "/extra2" }]`)
+
+		configPath := writeFile("config.toml", fmt.Sprintf(`
+includes = ["%s"]
+projects = [{ path = "/main" }]
+`, filepath.Join(tmpDir, "extra*.toml")))
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			// Glob path doesn't expand, so it's treated as literal and won't exist
+			// This should result in a warning about missing include, not an error
+			if !strings.Contains(err.Error(), "loading include") {
+				t.Fatalf("expected error about missing literal include file, got: %v", err)
+			}
+			return
+		}
+
+		// If we get here, the glob was NOT expanded (correct behavior)
+		// The include should have failed or warned since the literal glob path doesn't exist
+		if len(cfg.Projects) != 1 {
+			t.Errorf("glob pattern should not be expanded in include paths, got %d projects", len(cfg.Projects))
+		}
+	})
+
+	t.Run("include-only repo block is merged", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("private.toml", `
+[repo."/home/user/secret"]
+worktree_ready = true
+auto_merge_clean = true
+`)
+		configPath := writeFile("config.toml", `
+includes = ["private.toml"]
+projects = [{ path = "/main" }]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		block, ok := cfg.Repo["/home/user/secret"]
+		if !ok {
+			t.Fatal("expected [repo.\"/home/user/secret\"] to be merged from include")
+		}
+		if block.WorktreeReady == nil || !*block.WorktreeReady {
+			t.Error("worktree_ready should be true")
+		}
+		if block.AutoMergeClean == nil || !*block.AutoMergeClean {
+			t.Error("auto_merge_clean should be true")
+		}
+		if len(cfg.Warnings) != 0 {
+			t.Errorf("expected no warnings, got: %v", cfg.Warnings)
+		}
+	})
+
+	t.Run("parent repo block wins over include collision", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("extra.toml", `
+[repo."/shared/repo"]
+worktree_ready = false
+`)
+		configPath := writeFile("config.toml", `
+includes = ["extra.toml"]
+
+[repo."/shared/repo"]
+worktree_ready = true
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		block, ok := cfg.Repo["/shared/repo"]
+		if !ok {
+			t.Fatal("expected [repo.\"/shared/repo\"] in effective config")
+		}
+		if block.WorktreeReady == nil || !*block.WorktreeReady {
+			t.Error("parent's worktree_ready=true should win")
+		}
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("expected 1 collision warning, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+		}
+		if !strings.Contains(cfg.Warnings[0], "/shared/repo") {
+			t.Errorf("warning should name the repo key, got: %q", cfg.Warnings[0])
+		}
+	})
+
+	t.Run("earlier include repo block wins over later include collision", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("first.toml", `
+[repo."/shared/repo"]
+worktree_ready = true
+`)
+		writeFile("second.toml", `
+[repo."/shared/repo"]
+worktree_ready = false
+`)
+		configPath := writeFile("config.toml", `
+includes = ["first.toml", "second.toml"]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		block, ok := cfg.Repo["/shared/repo"]
+		if !ok {
+			t.Fatal("expected [repo.\"/shared/repo\"] in effective config")
+		}
+		if block.WorktreeReady == nil || !*block.WorktreeReady {
+			t.Error("first include's worktree_ready=true should win over second include's false")
+		}
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("expected 1 collision warning, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+		}
+		if !strings.Contains(cfg.Warnings[0], "/shared/repo") {
+			t.Errorf("warning should name the repo key, got: %q", cfg.Warnings[0])
+		}
+	})
+
+	t.Run("unknown key in included repo block produces warning", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("private.toml", `
+[repo."/some/repo"]
+worktree_ready = true
+unknown_field = "oops"
+`)
+		configPath := writeFile("config.toml", `
+includes = ["private.toml"]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("expected 1 warning for unknown key, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+		}
+		if !strings.Contains(cfg.Warnings[0], "unknown_field") {
+			t.Errorf("warning should name the unknown key, got: %q", cfg.Warnings[0])
+		}
+	})
+
+	t.Run("projects merge unaffected by repo merge", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("extra.toml", `
+projects = [{ path = "/extra" }]
+
+[repo."/extra/repo"]
+worktree_ready = true
+`)
+		configPath := writeFile("config.toml", `
+includes = ["extra.toml"]
+projects = [{ path = "/main" }]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if len(cfg.Projects) != 2 {
+			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
+		}
+		if cfg.Projects[0].Path != "/main" || cfg.Projects[1].Path != "/extra" {
+			t.Errorf("unexpected project order: %v", cfg.Projects)
+		}
+		if _, ok := cfg.Repo["/extra/repo"]; !ok {
+			t.Error("repo block from include should be present")
 		}
 	})
 }
