@@ -43,10 +43,19 @@ type AwaitingIntegrationSet struct {
 	CheckedAt   time.Time
 }
 
+// SkippedRepo is a repository the Queue refused to schedule because it could
+// resolve no representative checkout (a bare repo with no queue_base and no
+// per-set Worktree binding). It is reported, never scheduled (ADR-0035).
+type SkippedRepo struct {
+	Project string
+	Reason  string
+}
+
 // StatusSnapshot is the pure data model for `pop queue status`.
 type StatusSnapshot struct {
 	PickedUp            []PickedUpSet
 	Idle                []IdleProject
+	Skipped             []SkippedRepo
 	AwaitingIntegration []AwaitingIntegrationSet
 	DaemonState         *DaemonState
 }
@@ -87,6 +96,10 @@ func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapsho
 			snap.Idle = append(snap.Idle, IdleProject{Project: dec.Project, Waiting: "error", Reason: dec.Err.Error(), WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError})
 			continue
 		}
+		if dec.TaskSetID == "" && dec.Reason == repoScanReason {
+			snap.Skipped = append(snap.Skipped, SkippedRepo{Project: dec.Project, Reason: dec.Reason})
+			continue
+		}
 		idle := IdleProject{Project: dec.Project, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError}
 		if dec.TaskSetID != "" {
 			idle.Waiting = "ready"
@@ -98,6 +111,7 @@ func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapsho
 	}
 	sort.SliceStable(snap.PickedUp, func(i, j int) bool { return snap.PickedUp[i].Project < snap.PickedUp[j].Project })
 	sort.SliceStable(snap.Idle, func(i, j int) bool { return snap.Idle[i].Project < snap.Idle[j].Project })
+	sort.SliceStable(snap.Skipped, func(i, j int) bool { return snap.Skipped[i].Project < snap.Skipped[j].Project })
 	if state != nil {
 		for _, rec := range state.Mergeability {
 			snap.AwaitingIntegration = append(snap.AwaitingIntegration, AwaitingIntegrationSet{

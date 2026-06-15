@@ -17,19 +17,20 @@ type RunView struct {
 	Blocked             []BlockedItem
 	AwaitingIntegration []AwaitingIntegrationSet
 	WorktreeBindings    []WorktreeBindingView
+	Skipped             []SkippedRepo
 	IdleCount           int
 	ScanErrors          map[string]string
 }
 
 // WorktreeBindingView is one provisioned checkout tracked in queue daemon state.
 type WorktreeBindingView struct {
-	Project      string
-	SetID        string
-	Branch       string
-	RuntimePath  string
-	Phase        string
-	MergeStatus  string
-	PID          int
+	Project     string
+	SetID       string
+	Branch      string
+	RuntimePath string
+	Phase       string
+	MergeStatus string
+	PID         int
 }
 
 // BlockedItem is one blocked scheduling bucket: parked set, backoff, or agent cooldown.
@@ -57,6 +58,7 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 	view := RunView{
 		Running:             append([]PickedUpSet(nil), snap.PickedUp...),
 		AwaitingIntegration: append([]AwaitingIntegrationSet(nil), snap.AwaitingIntegration...),
+		Skipped:             append([]SkippedRepo(nil), snap.Skipped...),
 		ScanErrors:          map[string]string{},
 	}
 	blockedProjects := map[string]bool{}
@@ -389,6 +391,17 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 		}
 	}
 
+	if len(view.Skipped) > 0 {
+		fmt.Fprintln(out, "Skipped repositories:")
+		for _, s := range view.Skipped {
+			project := s.Project
+			if project == "" {
+				project = "(unknown project)"
+			}
+			fmt.Fprintf(out, "  %s: %s\n", project, s.Reason)
+		}
+	}
+
 	fmt.Fprintln(out, "Awaiting integration:")
 	if len(view.AwaitingIntegration) == 0 {
 		fmt.Fprintln(out, "  none")
@@ -638,6 +651,15 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 		lines = append(lines, fmt.Sprintf("queue: %s: %s integrated", a.Project, a.SetID))
 	}
 
+	prevSkipped := skippedIndex(prev.Skipped)
+	currSkipped := skippedIndex(curr.Skipped)
+	for project, s := range currSkipped {
+		if _, ok := prevSkipped[project]; ok {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("queue: %s: %s", project, s.Reason))
+	}
+
 	for project, msg := range curr.ScanErrors {
 		if prev.ScanErrors[project] == msg {
 			continue
@@ -714,6 +736,14 @@ func blockedKey(item BlockedItem) string {
 		return "agent\x00" + item.Agent
 	}
 	return item.Project + "\x00" + item.SetID + "\x00" + item.Kind
+}
+
+func skippedIndex(items []SkippedRepo) map[string]SkippedRepo {
+	out := make(map[string]SkippedRepo, len(items))
+	for _, item := range items {
+		out[item.Project] = item
+	}
+	return out
 }
 
 func awaitingIndex(items []AwaitingIntegrationSet) map[string]AwaitingIntegrationSet {

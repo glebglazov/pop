@@ -151,11 +151,14 @@ func (d *Deps) now() time.Time {
 	return time.Now()
 }
 
-// Scan resolves every registered project, derives its actionable drain(s), and
-// returns the Decisions for this scan. Non-worktree-ready projects still return
-// at most one Decision; worktree-ready projects may return one busy Decision per
-// live worktree drain plus one actionable Decision per Ready set not already
-// running. It performs no tmux side effects.
+// Scan resolves every registered project, collapses the checkouts that share a
+// Repository identity into one scheduling unit (ADR-0035), derives each repo's
+// actionable drain(s), and returns the Decisions for this scan. A repository is
+// scheduled at most once per Ready set regardless of how many worktrees it
+// expands into. Non-worktree-ready repos still return at most one actionable
+// Decision; worktree-ready repos may return one busy Decision per live worktree
+// drain plus one actionable Decision per Ready set not already running. It
+// performs no tmux side effects.
 func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
 	if err != nil {
@@ -171,6 +174,11 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	}
 	now := d.now().UTC()
 
+	// Group picker Projects by Repository identity. All checkouts of one repo
+	// share a Task storage definition path, so it keys the group: a bare repo's
+	// many worktrees collapse to a single scheduling unit.
+	var order []string
+	groups := map[string][]projectScan{}
 	decisions := make([]Decision, 0, len(projects))
 	for _, p := range projects {
 		scan, err := resolveScan(d, p)
@@ -182,7 +190,13 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 			decisions = append(decisions, Decision{Project: p.Name, Err: err, Reason: "resolve"})
 			continue
 		}
-		decisions = append(decisions, decideProjectDispatches(d, scan, qcfg.Agents, state, now)...)
+		if _, ok := groups[scan.DefinitionPath]; !ok {
+			order = append(order, scan.DefinitionPath)
+		}
+		groups[scan.DefinitionPath] = append(groups[scan.DefinitionPath], scan)
+	}
+	for _, key := range order {
+		decisions = append(decisions, decideRepoDispatches(d, cfg, groups[key], qcfg.Agents, state, now)...)
 	}
 	return decisions, nil
 }
