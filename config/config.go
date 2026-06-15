@@ -736,8 +736,23 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		if err := validateEffortConfigMetadata(expanded, includedMD); err != nil {
 			return nil, fmt.Errorf("loading include %q: %w", include, err)
 		}
+		cfg.Warnings = append(cfg.Warnings, repoBlockWarnings(expanded, includedMD)...)
 
 		cfg.Projects = append(cfg.Projects, included.Projects...)
+
+		for key, block := range included.Repo {
+			if _, exists := cfg.Repo[key]; exists {
+				cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+					"%s: [repo.%q] skipped, key already defined (first definition wins)",
+					expanded, key,
+				))
+				continue
+			}
+			if cfg.Repo == nil {
+				cfg.Repo = make(map[string]RepoOverrideConfig)
+			}
+			cfg.Repo[key] = block
+		}
 	}
 
 	return &cfg, nil
