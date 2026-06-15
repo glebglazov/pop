@@ -1,9 +1,0 @@
----
-fragment: d0625b10
-generation: 0001
-branch: master
----
-
-~ Queue agent fallback
-  The Queue's policy for choosing an **Agent preset** when draining, owned by the daemon rather than the executor. It rotates a configured ordered list of agents as a non-overriding default: **Task agent** pins always win, while unpinned tasks ride the rotating default. An agent whose binary is not on `PATH` is skipped with a **Queue journal** note, not a startup error. A global per-agent cooldown marks an agent exhausted-until after an **Agent quota pause**, because quota is per subscription, not per project. The cooldown is **reset-aware**: when the quota pause carries the agent's own reported reset time, recovery is set to that instant rather than a blind interval; a missing or unparseable reset time falls back to the fixed retry interval. There is still no quota-remaining API to query — the reset time is read from the same headless pause signal, never queried ahead of exhaustion. When a pinned task's agent is exhausted, the Queue backs that whole set off until that agent's cooldown expires rather than violating the pin.
-  was: The Queue's policy for choosing an **Agent preset** when draining, owned by the daemon rather than the executor. It rotates a configured ordered list of agents as a non-overriding default: **Task agent** pins always win, while unpinned tasks ride the rotating default. An agent whose binary is not on `PATH` is skipped with a **Queue journal** note, not a startup error. A global per-agent cooldown marks an agent exhausted-until after an **Agent quota pause**, because quota is per subscription, not per project. Recovery is probed by re-attempting after that fixed interval; there is no quota-remaining API to query. When a pinned task's agent is exhausted, the Queue backs that whole set off until that agent's cooldown expires rather than violating the pin.
