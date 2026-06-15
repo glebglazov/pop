@@ -382,6 +382,7 @@ func integrationWorktreeBinding(t *testing.T, repo, wt, branch string) WorktreeB
 		RuntimePath: wt,
 		Branch:      branch,
 		Project:     filepath.Base(repo),
+		Provisioned: true,
 	}
 }
 

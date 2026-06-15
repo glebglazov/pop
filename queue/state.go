@@ -31,6 +31,36 @@ type WorktreeBinding struct {
 	RuntimePath string `json:"runtime_path"`
 	Branch      string `json:"branch"`
 	Project     string `json:"project"`
+	// Provisioned is true when pop ran `git worktree add` to create this
+	// checkout. False (or absent) means the binding is adopted — a human
+	// pointed an existing checkout at the set; pop must never delete it.
+	Provisioned bool `json:"provisioned,omitempty"`
+}
+
+// bindingProvisioned reports whether the binding stored under key was
+// provisioned by pop (safe to teardown) or adopted (must not delete).
+func bindingProvisioned(state *DaemonState, key string) bool {
+	if state == nil || state.WorktreeBindings == nil {
+		return false
+	}
+	b, ok := state.WorktreeBindings[key]
+	return ok && b.Provisioned
+}
+
+// bindingShouldTeardown reports whether the worktree at key should be torn
+// down. It returns true when there is no binding (legacy/unknown — pop probably
+// created it) or when the binding is explicitly provisioned. It returns false
+// only for explicitly adopted bindings (Provisioned=false), which must never
+// have their directories deleted.
+func bindingShouldTeardown(state *DaemonState, key string) bool {
+	if state == nil || state.WorktreeBindings == nil {
+		return true // no state at all: legacy path, tear down
+	}
+	b, ok := state.WorktreeBindings[key]
+	if !ok {
+		return true // no binding recorded: legacy path, tear down
+	}
+	return b.Provisioned // adopted=false → retain; provisioned=true → tear down
 }
 
 // ParkedSet records a task set whose consecutive abnormal exits exhausted the

@@ -111,12 +111,19 @@ func integrateCleanSet(d *Deps, cfg *config.Config, key string, rec Mergeability
 	if err := mergeBranch(d, scan.RuntimePath, branch); err != nil {
 		return IntegrationResult{}, err
 	}
-	if err := teardownIntegratedBranch(d, scan.RuntimePath, rec.RuntimePath, branch); err != nil {
-		return IntegrationResult{}, err
-	}
 	state, err := EnsureDaemonState(d.Tasks)
 	if err != nil {
 		return IntegrationResult{}, err
+	}
+	provisioned := bindingShouldTeardown(state, key)
+	if provisioned {
+		if err := teardownIntegratedBranch(d, scan.RuntimePath, rec.RuntimePath, branch); err != nil {
+			return IntegrationResult{}, err
+		}
+		state, err = EnsureDaemonState(d.Tasks)
+		if err != nil {
+			return IntegrationResult{}, err
+		}
 	}
 	delete(state.Mergeability, key)
 	if state.WorktreeBindings != nil {
@@ -135,7 +142,11 @@ func integrateCleanSet(d *Deps, cfg *config.Config, key string, rec Mergeability
 	}); err != nil {
 		return IntegrationResult{}, err
 	}
-	fmt.Fprintf(out, "queue: integrated %s into %s and removed worktree %s\n", rec.SetID, scan.RuntimePath, rec.RuntimePath)
+	if provisioned {
+		fmt.Fprintf(out, "queue: integrated %s into %s and removed worktree %s\n", rec.SetID, scan.RuntimePath, rec.RuntimePath)
+	} else {
+		fmt.Fprintf(out, "queue: integrated %s into %s (adopted checkout retained)\n", rec.SetID, scan.RuntimePath)
+	}
 	return IntegrationResult{SetID: rec.SetID, Project: rec.Project, RuntimePath: rec.RuntimePath, Branch: branch, Outcome: "integrated"}, nil
 }
 
@@ -283,12 +294,19 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Mergea
 		return result, nil
 	}
 
-	if err := teardownIntegratedBranch(d, scan.RuntimePath, rec.RuntimePath, branch); err != nil {
-		return IntegrationResult{}, err
-	}
 	state, err := EnsureDaemonState(d.Tasks)
 	if err != nil {
 		return IntegrationResult{}, err
+	}
+	provisioned := bindingShouldTeardown(state, key)
+	if provisioned {
+		if err := teardownIntegratedBranch(d, scan.RuntimePath, rec.RuntimePath, branch); err != nil {
+			return IntegrationResult{}, err
+		}
+		state, err = EnsureDaemonState(d.Tasks)
+		if err != nil {
+			return IntegrationResult{}, err
+		}
 	}
 	delete(state.Mergeability, key)
 	if state.WorktreeBindings != nil {
@@ -310,7 +328,11 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Mergea
 	if err := appendIntegrationOutcome(d, rec, branch, "resolved"); err != nil {
 		return IntegrationResult{}, err
 	}
-	fmt.Fprintf(out, "queue: resolved and integrated %s into %s; removed worktree %s\n", rec.SetID, scan.RuntimePath, rec.RuntimePath)
+	if provisioned {
+		fmt.Fprintf(out, "queue: resolved and integrated %s into %s; removed worktree %s\n", rec.SetID, scan.RuntimePath, rec.RuntimePath)
+	} else {
+		fmt.Fprintf(out, "queue: resolved and integrated %s into %s (adopted checkout retained)\n", rec.SetID, scan.RuntimePath)
+	}
 	return IntegrationResult{SetID: rec.SetID, Project: rec.Project, RuntimePath: rec.RuntimePath, Branch: branch, Outcome: "resolved"}, nil
 }
 

@@ -79,6 +79,7 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 				RuntimePath: wt,
 				Branch:      "set-done",
 				Project:     filepath.Base(repo),
+				Provisioned: true,
 			},
 		},
 		Mergeability: map[string]MergeabilityRecord{
@@ -188,6 +189,7 @@ func TestAbandonDoneSetRequiresConfirmationUnlessYes(t *testing.T) {
 				RuntimePath: wt,
 				Branch:      "set-done",
 				Project:     filepath.Base(repo),
+				Provisioned: true,
 			},
 		},
 		Mergeability: map[string]MergeabilityRecord{

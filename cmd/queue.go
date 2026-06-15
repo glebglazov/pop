@@ -65,6 +65,19 @@ var queueAbandonCmd = &cobra.Command{
 	RunE:  runQueueAbandon,
 }
 
+var queueBindWorktreeCmd = &cobra.Command{
+	Use:   "bind-worktree <set>",
+	Short: "Adopt the current checkout as the drain worktree for a set",
+	Long: `Adopt the current checkout as the drain worktree for a set.
+
+Run from inside the target checkout. Pop will drain the named set into this
+checkout without deleting the directory on abandon or integration — only the
+binding is forgotten. Use --force to re-point a set that is already bound
+elsewhere.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runQueueBindWorktree,
+}
+
 func init() {
 	rootCmd.AddCommand(queueCmd)
 	queueCmd.AddCommand(queueRunCmd)
@@ -73,14 +86,18 @@ func init() {
 	queueCmd.AddCommand(queueIntegrateCmd)
 	queueAbandonCmd.Flags().BoolVar(&queueAbandonYes, "yes", false, "Skip confirmation prompt")
 	queueCmd.AddCommand(queueAbandonCmd)
+	queueBindWorktreeCmd.Flags().BoolVar(&queueBindWorktreeForce, "force", false, "Re-point a set already bound elsewhere")
+	queueCmd.AddCommand(queueBindWorktreeCmd)
 }
 
 var (
-	queueConfigLoad = config.Load
-	queueRun        = queue.Run
-	queueIntegrate  = queue.IntegrateWithOptions
-	queueAbandon    = queue.AbandonWithOptions
-	queueAbandonYes bool
+	queueConfigLoad        = config.Load
+	queueRun               = queue.Run
+	queueIntegrate         = queue.IntegrateWithOptions
+	queueAbandon           = queue.AbandonWithOptions
+	queueBindWorktree      = queue.BindWorktree
+	queueAbandonYes        bool
+	queueBindWorktreeForce bool
 )
 
 const queueLogLimit = 50
@@ -208,5 +225,24 @@ func runQueueAbandon(cmd *cobra.Command, args []string) error {
 	d := queue.DefaultDeps()
 	d.LoadConfig = queueConfigLoad
 	_, err = queueAbandon(d, cfg, args[0], os.Stdout, queue.AbandonOptions{Yes: queueAbandonYes, In: os.Stdin})
+	return err
+}
+
+func runQueueBindWorktree(cmd *cobra.Command, args []string) error {
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	cfg, err := queueConfigLoad(cfgPath)
+	if err != nil {
+		return err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("determine working directory: %w", err)
+	}
+	d := queue.DefaultDeps()
+	d.LoadConfig = queueConfigLoad
+	_, err = queueBindWorktree(d, cfg, args[0], cwd, queue.BindWorktreeOptions{Force: queueBindWorktreeForce}, os.Stdout)
 	return err
 }

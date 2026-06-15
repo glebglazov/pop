@@ -14,6 +14,7 @@ import (
 )
 
 const abandonConfirmPrompt = "Abandon worktree for %s? This removes the bound checkout and branch without integrating. Task statuses are unchanged. [y/N]: "
+const abandonConfirmPromptAdopted = "Abandon binding for %s? This forgets the association; the checkout and branch are kept. Task statuses are unchanged. [y/N]: "
 
 // AbandonResult describes the outcome of releasing a worktree binding.
 type AbandonResult struct {
@@ -80,7 +81,11 @@ func AbandonWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer
 		return AbandonResult{}, err
 	}
 	if needsConfirm {
-		confirmed, err := confirmAbandon(opts.In, out, opts.Yes, fmt.Sprintf(abandonConfirmPrompt, setID))
+		prompt := fmt.Sprintf(abandonConfirmPrompt, setID)
+		if !binding.Provisioned {
+			prompt = fmt.Sprintf(abandonConfirmPromptAdopted, setID)
+		}
+		confirmed, err := confirmAbandon(opts.In, out, opts.Yes, prompt)
 		if err != nil {
 			return AbandonResult{}, err
 		}
@@ -90,19 +95,24 @@ func AbandonWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer
 		}
 	}
 
-	scan, err := resolveBindingScan(d, cfg, binding)
-	if err != nil {
-		return AbandonResult{}, err
-	}
-	branch := strings.TrimSpace(binding.Branch)
-	if branch == "" {
-		branch, err = resolveSetBranch(d, binding.RuntimePath)
+	var branch string
+	if binding.Provisioned {
+		scan, err := resolveBindingScan(d, cfg, binding)
 		if err != nil {
 			return AbandonResult{}, err
 		}
-	}
-	if err := teardownBoundWorktree(d, scan.RuntimePath, binding.RuntimePath, branch); err != nil {
-		return AbandonResult{}, err
+		branch = strings.TrimSpace(binding.Branch)
+		if branch == "" {
+			branch, err = resolveSetBranch(d, binding.RuntimePath)
+			if err != nil {
+				return AbandonResult{}, err
+			}
+		}
+		if err := teardownBoundWorktree(d, scan.RuntimePath, binding.RuntimePath, branch); err != nil {
+			return AbandonResult{}, err
+		}
+	} else {
+		branch = strings.TrimSpace(binding.Branch)
 	}
 
 	state, err = EnsureDaemonState(d.Tasks)
@@ -126,7 +136,11 @@ func AbandonWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer
 	}); err != nil {
 		return AbandonResult{}, err
 	}
-	fmt.Fprintf(out, "queue: abandoned %s and removed worktree %s\n", setID, binding.RuntimePath)
+	if binding.Provisioned {
+		fmt.Fprintf(out, "queue: abandoned %s and removed worktree %s\n", setID, binding.RuntimePath)
+	} else {
+		fmt.Fprintf(out, "queue: abandoned %s (adopted checkout retained at %s)\n", setID, binding.RuntimePath)
+	}
 	return AbandonResult{SetID: setID}, nil
 }
 
@@ -165,6 +179,9 @@ func abandonNeedsConfirm(d *Deps, cfg *config.Config, state *DaemonState, setID 
 		return false, err
 	} else if ok {
 		return true, nil
+	}
+	if binding.Project == "" {
+		return false, nil
 	}
 	failed, err := setHasStatus(d, cfg, binding, setID, tasks.StatusFailed)
 	if err != nil {

@@ -194,6 +194,7 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 		RuntimePath: wt.Path,
 		Branch:      wt.Branch,
 		Project:     dec.Project,
+		Provisioned: true,
 	}
 	if err := WriteDaemonState(d.Tasks, state); err != nil {
 		fmt.Fprintf(out, "queue: %s: record worktree binding for %s: %v\n", dec.Project, dec.TaskSetID, err)
