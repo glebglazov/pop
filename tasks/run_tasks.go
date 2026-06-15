@@ -57,6 +57,11 @@ type RunTaskSetResult struct {
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
 	PausePreset      string
 	PausePinnedAgent bool
+	// RuntimePath and ProjectPath are set once the drain has committed to its
+	// runtime checkout, making them available to the caller even on Done so
+	// post-drain work (e.g. mergeability recording) does not need to re-resolve.
+	RuntimePath string
+	ProjectPath string
 }
 
 // RunTaskSet drains one Task set sequentially through eligible AFK tasks.
@@ -209,7 +214,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		timeout = DefaultAttemptTimeout
 	}
 
-	result = &RunTaskSetResult{TaskSetID: taskSetID}
+	result = &RunTaskSetResult{TaskSetID: taskSetID, RuntimePath: runtimePath, ProjectPath: resolved.ProjectPath}
 	dirtyStrategyApplied := false
 
 	for {

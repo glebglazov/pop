@@ -12,6 +12,7 @@ import (
 	"github.com/glebglazov/pop/binding"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
@@ -508,10 +509,27 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 	if err != nil {
 		return err
 	}
+	if result != nil && result.TaskSetDone {
+		taskRecordMergeabilityOnDone(d, result, stderr)
+	}
 	if result != nil && result.QuotaPaused {
 		return &tasks.ExitError{Code: tasks.ExitQuotaPaused}
 	}
 	return nil
+}
+
+// taskRecordMergeabilityOnDone computes and records Mergeability when an
+// implement worktree drain reaches Done (ADR-0036). Errors are best-effort:
+// mergeability is advisory and the set is already successfully drained.
+func taskRecordMergeabilityOnDone(d *tasks.Deps, result *tasks.RunTaskSetResult, stderr io.Writer) {
+	if result == nil || result.RuntimePath == "" {
+		return
+	}
+	qd := queue.DefaultDeps()
+	qd.Tasks = d
+	if err := queue.RecordImplementMergeability(qd, result.ProjectPath, result.RuntimePath, result.TaskSetID, ""); err != nil {
+		fmt.Fprintf(stderr, "warning: mergeability check: %v\n", err)
+	}
 }
 
 func runTaskResetTask(cmd *cobra.Command, args []string) {
