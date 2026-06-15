@@ -737,6 +737,7 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 			return nil, fmt.Errorf("loading include %q: %w", include, err)
 		}
 		cfg.Warnings = append(cfg.Warnings, repoBlockWarnings(expanded, includedMD)...)
+		cfg.Warnings = append(cfg.Warnings, includeFileWarnings(expanded, &included, d)...)
 
 		cfg.Projects = append(cfg.Projects, included.Projects...)
 
@@ -788,6 +789,54 @@ func repoBlockWarnings(path string, md toml.MetaData) []string {
 			path, key[1], key[2],
 		))
 	}
+	return warnings
+}
+
+// includeFileWarnings returns load-time warnings for non-whitelisted top-level
+// keys and nested includes in an included file. Includes carry a fixed whitelist:
+// `projects` and `[repo."<path>"]` only.
+func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
+	var warnings []string
+
+	// Check for nested includes (not allowed)
+	if len(cfg.Includes) > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"%s: includes field ignored (nested includes not supported, one level only)",
+			path,
+		))
+	}
+
+	// Detect all top-level keys actually present in the include file by parsing
+	// into a generic map. This catches both struct fields and undecoded keys.
+	data, err := d.FS.ReadFile(path)
+	if err != nil {
+		return warnings
+	}
+
+	var rawInclude map[string]interface{}
+	if _, err := toml.Decode(string(data), &rawInclude); err != nil {
+		return warnings
+	}
+
+	// Whitelisted top-level keys
+	whitelisted := map[string]bool{
+		"projects": true,
+		"repo":     true,
+		"includes": true, // mentioned in includes, so we track it for warning above
+	}
+
+	// Check for non-whitelisted keys
+	seen := make(map[string]bool)
+	for key := range rawInclude {
+		if !whitelisted[key] && !seen[key] {
+			seen[key] = true
+			warnings = append(warnings, fmt.Sprintf(
+				"%s: %q ignored (includes only support projects and repo blocks)",
+				path, key,
+			))
+		}
+	}
+
 	return warnings
 }
 
