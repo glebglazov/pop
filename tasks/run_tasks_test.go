@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -1287,10 +1286,7 @@ func TestRunTaskSetInterruptionPropagation(t *testing.T) {
 
 	opts := env.runTaskSetOpts(true, agent, nil)
 	opts.Timeout = time.Minute
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
-	}()
+	signalOwnPidWhenAgentStarts(t, env.root)
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitInterrupted)
