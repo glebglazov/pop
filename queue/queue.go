@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/binding"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
@@ -615,51 +616,19 @@ func agentBinaryAvailable(d *Deps, preset string) bool {
 	return err == nil
 }
 
+// provisionWorktree is the Queue's adapter over the binding module's
+// provisioner. The worktree directory tree lives under the queue data dir; the
+// binding module owns the `git worktree add` and path-layout details.
 func provisionWorktree(d *Deps, projectPath, setID string) (provisionedWorktree, error) {
 	if d == nil || d.Tasks == nil {
 		return provisionedWorktree{}, fmt.Errorf("missing task dependencies")
 	}
-	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, projectPath)
+	worktreesRoot := filepath.Join(QueueDataDir(d.Tasks), "worktrees")
+	b, err := binding.ProvisionWorktree(d.Tasks, worktreesRoot, projectPath, setID, d.now())
 	if err != nil {
 		return provisionedWorktree{}, err
 	}
-	safeSet := safeWorktreeComponent(setID)
-	stamp := d.now().UTC().Format("20060102T150405Z")
-	branch := fmt.Sprintf("pop/%s/%s", safeSet, stamp)
-	path := filepath.Join(QueueDataDir(d.Tasks), "worktrees", id.Basename+"-"+id.ShortHash, safeSet)
-	if err := d.Tasks.FS.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return provisionedWorktree{}, fmt.Errorf("create worktree parent: %w", err)
-	}
-	if _, err := d.Tasks.Git.CommandInDir(projectPath, "worktree", "add", "-b", branch, path, "HEAD"); err != nil {
-		return provisionedWorktree{}, fmt.Errorf("git worktree add: %w", err)
-	}
-	return provisionedWorktree{Path: path, Branch: branch}, nil
-}
-
-func safeWorktreeComponent(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "set"
-	}
-	var b strings.Builder
-	lastDash := false
-	for _, r := range strings.ToLower(s) {
-		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
-		if ok {
-			b.WriteRune(r)
-			lastDash = false
-			continue
-		}
-		if !lastDash {
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
-	out := strings.Trim(b.String(), "-")
-	if out == "" {
-		return "set"
-	}
-	return out
+	return provisionedWorktree{Path: b.RuntimePath, Branch: b.Branch}, nil
 }
 
 // Spawn launches the selected drain into a new pane of the project's tmux

@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/glebglazov/pop/binding"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
@@ -91,12 +92,7 @@ func BindWorktree(d *Deps, cfg *config.Config, setID, checkoutPath string, opts 
 	if state.WorktreeBindings == nil {
 		state.WorktreeBindings = map[string]WorktreeBinding{}
 	}
-	state.WorktreeBindings[key] = WorktreeBinding{
-		RuntimePath: checkoutPath,
-		Branch:      branch,
-		Project:     proj,
-		Provisioned: false,
-	}
+	state.WorktreeBindings[key] = binding.Adopt(checkoutPath, branch, proj)
 	if err := WriteDaemonState(d.Tasks, state); err != nil {
 		return BindWorktreeResult{}, err
 	}

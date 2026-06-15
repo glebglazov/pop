@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/glebglazov/pop/binding"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
@@ -504,13 +505,7 @@ func branchMerged(d *Deps, workingPath, branch string) bool {
 }
 
 func teardownIntegratedBranch(d *Deps, workingPath, runtimePath, branch string) error {
-	if _, err := d.Tasks.Git.CommandInDir(workingPath, "worktree", "remove", runtimePath); err != nil {
-		return fmt.Errorf("remove worktree %s: %w", runtimePath, err)
-	}
-	if _, err := d.Tasks.Git.CommandInDir(workingPath, "branch", "-d", branch); err != nil {
-		return fmt.Errorf("delete branch %s: %w", branch, err)
-	}
-	return nil
+	return binding.TeardownWorktree(d.Tasks, workingPath, runtimePath, branch, false)
 }
 
 func shortRef(ref string) string {
