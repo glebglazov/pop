@@ -7,6 +7,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/tasks"
 )
 
 // repoScanReason is the reason emitted when a repository cannot be scheduled
@@ -82,6 +83,28 @@ func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*p
 		return nil, false, fmt.Errorf("no git main worktree")
 	}
 	return scanForCheckout(d, scans, mainPath), false, nil
+}
+
+// MainWorktreeBranch returns the branch currently checked out in the
+// repository's main working tree — the merge target for an implement worktree
+// drain (ADR-0036). Returns ("", nil) when the repo is bare or the main
+// worktree is in detached HEAD state.
+func MainWorktreeBranch(d *Deps, runtimePath string) (string, error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	mainPath, bare, err := gitMainWorktree(d, runtimePath)
+	if err != nil || bare || mainPath == "" {
+		return "", err
+	}
+	out, err := d.Tasks.Git.CommandInDir(mainPath, "branch", "--show-current")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // gitMainWorktree returns the repository's primary working tree by parsing

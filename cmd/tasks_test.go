@@ -12,7 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/binding"
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
@@ -1457,5 +1460,277 @@ func TestTaskExportImportRoundtripCmd(t *testing.T) {
 	importedPath := strings.TrimSpace(importBuf.String())
 	if _, err := os.Stat(filepath.Join(importedPath, "index.json")); err != nil {
 		t.Fatalf("imported set missing manifest: %v", err)
+	}
+}
+
+// offerIntegrationTestDataDeps returns task Deps whose data dir is redirected
+// to a fresh temp dir so daemon state reads and writes stay within the test
+// sandbox. The XDG_DATA_HOME is set on the test's environment so that
+// offerImplementIntegration (which calls queue.DefaultDeps()) picks up the
+// same directory through the env var.
+func offerIntegrationTestDataDeps(t *testing.T) *tasks.Deps {
+	t.Helper()
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	real := deps.NewRealFileSystem()
+	d := tasks.DefaultDeps()
+	d.FS = &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return xdg
+			}
+			return ""
+		},
+		ReadFileFunc:  real.ReadFile,
+		WriteFileFunc: real.WriteFile,
+		MkdirAllFunc:  real.MkdirAll,
+		RenameFunc:    real.Rename,
+		RemoveAllFunc: real.RemoveAll,
+	}
+	return d
+}
+
+// offerIntegrationRunGit runs a git command in dir, failing the test on error.
+func offerIntegrationRunGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
+	}
+}
+
+// setupOfferIntegrationWorktree creates a bare-enough git repo with one linked
+// worktree and writes a mergeability record into the daemon state. Returns the
+// repo path (main working tree), worktree path, and the set ID so callers can
+// drive offerImplementIntegration.
+func setupOfferIntegrationWorktree(t *testing.T, td *tasks.Deps, status string) (repo, wt, setID string) {
+	t.Helper()
+	repo = t.TempDir()
+	offerIntegrationRunGit(t, repo, "init")
+	offerIntegrationRunGit(t, repo, "config", "user.email", "pop@example.test")
+	offerIntegrationRunGit(t, repo, "config", "user.name", "Pop Test")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write base: %v", err)
+	}
+	offerIntegrationRunGit(t, repo, "add", "base.txt")
+	offerIntegrationRunGit(t, repo, "commit", "-m", "base")
+
+	setID = "test-set-1"
+	wt = filepath.Join(t.TempDir(), "wt-feature")
+	offerIntegrationRunGit(t, repo, "worktree", "add", "-b", "feature", wt, "HEAD")
+
+	if err := os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatalf("write feature: %v", err)
+	}
+	offerIntegrationRunGit(t, wt, "add", "feature.txt")
+	offerIntegrationRunGit(t, wt, "commit", "-m", "feature work")
+
+	// Write the binding so IntegrateWithOptions can find the working path.
+	bstore, _ := binding.Load(td)
+	id, err := tasks.ResolveRepositoryIdentity(td, repo)
+	if err != nil {
+		t.Fatalf("repo identity: %v", err)
+	}
+	key := binding.Key(id, setID)
+	bstore.Put(key, binding.Adopt(wt, "feature", ""))
+	if err := binding.Save(td, bstore); err != nil {
+		t.Fatalf("save binding: %v", err)
+	}
+
+	// Write a mergeability record via the daemon state.
+	state := &queue.DaemonState{
+		Version: 1,
+		Mergeability: map[string]queue.MergeabilityRecord{
+			key: {
+				RuntimePath: wt,
+				SetID:       setID,
+				Status:      status,
+			},
+		},
+		WorktreeBindings: map[string]queue.WorktreeBinding{
+			key: {RuntimePath: wt, Branch: "feature", Provisioned: false},
+		},
+	}
+	if err := queue.WriteDaemonState(td, state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	return repo, wt, setID
+}
+
+// TestOfferImplementIntegrationNonInteractiveSkips verifies the offer is
+// suppressed when stdin is not a TTY.
+func TestOfferImplementIntegrationNonInteractiveSkips(t *testing.T) {
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return false }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	result := &tasks.RunTaskSetResult{TaskSetID: "demo", TaskSetDone: true, RuntimePath: "/some/wt"}
+	var out bytes.Buffer
+	offerImplementIntegration(tasks.DefaultDeps(), result, strings.NewReader("y\n"), &out)
+	if out.Len() != 0 {
+		t.Fatalf("expected no output for non-interactive stdin, got: %q", out.String())
+	}
+}
+
+// TestOfferImplementIntegrationYesFlagSkips verifies the offer is suppressed
+// when --yes is set (ADR-0036: --yes never auto-integrates).
+func TestOfferImplementIntegrationYesFlagSkips(t *testing.T) {
+	resetTaskFlags()
+	taskRunYes = true
+	t.Cleanup(resetTaskFlags)
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	result := &tasks.RunTaskSetResult{TaskSetID: "demo", TaskSetDone: true, RuntimePath: "/some/wt"}
+	var out bytes.Buffer
+	offerImplementIntegration(tasks.DefaultDeps(), result, strings.NewReader("y\n"), &out)
+	if out.Len() != 0 {
+		t.Fatalf("expected no output when --yes is set, got: %q", out.String())
+	}
+}
+
+// TestOfferImplementIntegrationTrunkDrainNoOffer verifies trunk drains (no
+// mergeability record) produce no integration prompt.
+func TestOfferImplementIntegrationTrunkDrainNoOffer(t *testing.T) {
+	td := offerIntegrationTestDataDeps(t)
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	repo := t.TempDir()
+	offerIntegrationRunGit(t, repo, "init")
+	offerIntegrationRunGit(t, repo, "config", "user.email", "pop@example.test")
+	offerIntegrationRunGit(t, repo, "config", "user.name", "Pop Test")
+	offerIntegrationRunGit(t, repo, "commit", "--allow-empty", "-m", "base")
+
+	// No mergeability record written: trunk drain.
+	result := &tasks.RunTaskSetResult{
+		TaskSetID:   "demo",
+		TaskSetDone: true,
+		RuntimePath: repo,
+	}
+	var out bytes.Buffer
+	offerImplementIntegration(td, result, strings.NewReader("y\n"), &out)
+	if out.Len() != 0 {
+		t.Fatalf("trunk drain must produce no integration offer, got: %q", out.String())
+	}
+}
+
+// TestOfferImplementIntegrationCleanPromptDeclined verifies a clean merge
+// offer that the user declines does not trigger integration.
+func TestOfferImplementIntegrationCleanPromptDeclined(t *testing.T) {
+	td := offerIntegrationTestDataDeps(t)
+	repo, wt, setID := setupOfferIntegrationWorktree(t, td, queue.MergeabilityClean)
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	result := &tasks.RunTaskSetResult{
+		TaskSetID:   setID,
+		TaskSetDone: true,
+		RuntimePath: wt,
+		ProjectPath: repo,
+	}
+	var out bytes.Buffer
+	offerImplementIntegration(td, result, strings.NewReader("n\n"), &out)
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "Integrate") {
+		t.Fatalf("expected Integrate prompt, got: %q", outStr)
+	}
+	if !strings.Contains(outStr, "merges clean") {
+		t.Fatalf("expected 'merges clean' in prompt, got: %q", outStr)
+	}
+	// Declined: worktree should still exist.
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("worktree should not be removed on decline: %v", err)
+	}
+}
+
+// TestOfferImplementIntegrationCleanPromptShowsBranch verifies the working
+// branch name appears in the integration offer.
+func TestOfferImplementIntegrationCleanPromptShowsBranch(t *testing.T) {
+	td := offerIntegrationTestDataDeps(t)
+	repo, wt, setID := setupOfferIntegrationWorktree(t, td, queue.MergeabilityClean)
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	result := &tasks.RunTaskSetResult{
+		TaskSetID:   setID,
+		TaskSetDone: true,
+		RuntimePath: wt,
+		ProjectPath: repo,
+	}
+	var out bytes.Buffer
+	offerImplementIntegration(td, result, strings.NewReader("n\n"), &out)
+
+	outStr := out.String()
+	// The main worktree's branch (master or main depending on git config) should appear.
+	if !strings.Contains(outStr, "Integrate "+setID+" into ") {
+		t.Fatalf("expected branch name in integrate offer, got: %q", outStr)
+	}
+}
+
+// TestOfferImplementIntegrationConflictsInPrompt verifies a conflicting merge
+// shows "has conflicts" in the integration offer.
+func TestOfferImplementIntegrationConflictsInPrompt(t *testing.T) {
+	td := offerIntegrationTestDataDeps(t)
+	repo, wt, setID := setupOfferIntegrationWorktree(t, td, queue.MergeabilityConflicts)
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	result := &tasks.RunTaskSetResult{
+		TaskSetID:   setID,
+		TaskSetDone: true,
+		RuntimePath: wt,
+		ProjectPath: repo,
+	}
+	var out bytes.Buffer
+	offerImplementIntegration(td, result, strings.NewReader("n\n"), &out)
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "has conflicts") {
+		t.Fatalf("expected 'has conflicts' in prompt for conflicting merge, got: %q", outStr)
+	}
+}
+
+// TestOfferImplementIntegrationNotDoneSkips verifies the offer is not shown
+// when the set did not reach Done (e.g. stopped mid-drain).
+func TestOfferImplementIntegrationNotDoneSkips(t *testing.T) {
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	orig := taskStdinInteractive
+	taskStdinInteractive = func(io.Reader) bool { return true }
+	t.Cleanup(func() { taskStdinInteractive = orig })
+
+	result := &tasks.RunTaskSetResult{
+		TaskSetID:   "demo",
+		TaskSetDone: false,
+		RuntimePath: "/some/wt",
+	}
+	var out bytes.Buffer
+	offerImplementIntegration(tasks.DefaultDeps(), result, strings.NewReader("y\n"), &out)
+	if out.Len() != 0 {
+		t.Fatalf("expected no output when set not Done, got: %q", out.String())
 	}
 }

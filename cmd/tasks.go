@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -511,6 +512,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 	}
 	if result != nil && result.TaskSetDone {
 		taskRecordMergeabilityOnDone(d, result, stderr)
+		offerImplementIntegration(d, result, stdin, stdout)
 	}
 	if result != nil && result.QuotaPaused {
 		return &tasks.ExitError{Code: tasks.ExitQuotaPaused}
@@ -529,6 +531,66 @@ func taskRecordMergeabilityOnDone(d *tasks.Deps, result *tasks.RunTaskSetResult,
 	qd.Tasks = d
 	if err := queue.RecordImplementMergeability(qd, result.ProjectPath, result.RuntimePath, result.TaskSetID, ""); err != nil {
 		fmt.Fprintf(stderr, "warning: mergeability check: %v\n", err)
+	}
+}
+
+// offerImplementIntegration presents the integration offer after a set drains
+// to Done in a worktree, when stdin is a TTY and --yes is not set. It reads
+// the Mergeability record just recorded by taskRecordMergeabilityOnDone and
+// asks "integrate into <working branch> now?". A trunk drain has no
+// Mergeability record and is silently skipped (ADR-0036). Conflicts route to
+// the attended agent path (same as `pop queue integrate`).
+func offerImplementIntegration(d *tasks.Deps, result *tasks.RunTaskSetResult, stdin io.Reader, out io.Writer) {
+	if result == nil || !result.TaskSetDone || result.RuntimePath == "" {
+		return
+	}
+	if taskRunYes || !taskStdinInteractive(stdin) {
+		return
+	}
+
+	qd := queue.DefaultDeps()
+	qd.Tasks = d
+
+	rec, ok, err := queue.LookupMergeability(qd, result.TaskSetID)
+	if err != nil || !ok {
+		return // trunk drain or state error: no offer
+	}
+
+	workingBranch, err := queue.MainWorktreeBranch(qd, result.RuntimePath)
+	if err != nil || workingBranch == "" {
+		return // bare repo or detached HEAD: no offer
+	}
+
+	cfg, _ := taskConfigLoad(config.DefaultConfigPath())
+
+	var mergeDesc string
+	switch rec.Status {
+	case queue.MergeabilityClean:
+		mergeDesc = "merges clean"
+	case queue.MergeabilityConflicts:
+		mergeDesc = "has conflicts"
+	default:
+		return
+	}
+
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "Integrate %s into %s? (%s) [y/n]: ", result.TaskSetID, workingBranch, mergeDesc)
+
+	reader := bufio.NewReader(stdin)
+	answer, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return
+	}
+	if strings.ToLower(strings.TrimSpace(answer)) != "y" {
+		return
+	}
+
+	if _, intErr := queue.IntegrateWithOptions(qd, cfg, result.TaskSetID, out, queue.IntegrationOptions{
+		In:          stdin,
+		AgentPreset: taskAgentPreset,
+		AgentCmd:    taskAgentCmd,
+	}); intErr != nil {
+		fmt.Fprintf(out, "integrate: %v\n", intErr)
 	}
 }
 

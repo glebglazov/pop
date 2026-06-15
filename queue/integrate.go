@@ -151,6 +151,27 @@ func integrateCleanSet(d *Deps, cfg *config.Config, key string, rec Mergeability
 	return IntegrationResult{SetID: rec.SetID, Project: rec.Project, RuntimePath: rec.RuntimePath, Branch: branch, Outcome: "integrated"}, nil
 }
 
+// LookupMergeability returns the mergeability record for setID from the
+// current daemon state. It returns (rec, true, nil) when a record exists,
+// (zero, false, nil) when absent (trunk drain or not yet recorded), and
+// (zero, false, err) when the state cannot be read. Used by the attended
+// completion prompt in `pop tasks implement` to decide whether to offer
+// integration and what kind (ADR-0036).
+func LookupMergeability(d *Deps, setID string) (MergeabilityRecord, bool, error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	state, err := EnsureDaemonState(d.Tasks)
+	if err != nil {
+		return MergeabilityRecord{}, false, err
+	}
+	_, rec, ok, err := findIntegrationRecord(state, setID)
+	return rec, ok, err
+}
+
 func findIntegrationRecord(state *DaemonState, setID string) (string, MergeabilityRecord, bool, error) {
 	if state == nil || len(state.Mergeability) == 0 {
 		return "", MergeabilityRecord{}, false, nil
