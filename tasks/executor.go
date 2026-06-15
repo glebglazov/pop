@@ -155,6 +155,13 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		return nil, err
 	}
 
+	// Cross-checkout backstop: reject if this same (repo, set) is already live
+	// in any other worktree of the repository. The per-checkout local lock
+	// handles same-checkout conflicts; this closes the gap across checkouts.
+	if err := CheckCrossCheckoutConflict(d, resolved.ProjectPath, runtimePath, sel.TaskSetID); err != nil {
+		return nil, err
+	}
+
 	confirmOut := opts.ConfirmOut
 	if confirmOut == nil {
 		confirmOut = os.Stderr

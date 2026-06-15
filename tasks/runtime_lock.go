@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -200,4 +201,79 @@ func processAlive(d *Deps, pid int) bool {
 		return false
 	}
 	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// CheckCrossCheckoutConflict checks whether the same (repo, setID) pair is
+// already live in any other checkout of the same repository. It enumerates all
+// runtime lock files, and for each live, PID-alive lock that matches setID in a
+// different checkout, verifies membership in the same repository by comparing
+// git common directories. Stale (dead-PID) locks are silently ignored,
+// consistent with the per-checkout lock's self-healing behavior.
+// currentRuntimePath is excluded from the scan so the existing per-checkout lock
+// handles same-checkout conflicts without this backstop interfering.
+//
+// Repository identity comparison is lazy: it only runs git commands when a
+// live candidate conflict is found, keeping the common (no-conflict) path free
+// of subprocess overhead.
+func CheckCrossCheckoutConflict(d *Deps, projectPath, currentRuntimePath, setID string) error {
+	if setID == "" {
+		return nil
+	}
+	lockDir := RuntimeLockDirWith(d)
+	entries, err := d.FS.ReadDir(lockDir)
+	if err != nil {
+		return nil // no lock directory = no conflicts
+	}
+	var ourCommonDir string
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".lock") {
+			continue
+		}
+		data, err := d.FS.ReadFile(filepath.Join(lockDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		meta, err := parseRuntimeLockMetadata(data)
+		if err != nil {
+			continue
+		}
+		if !processAlive(d, meta.PID) || meta.SetID != setID || meta.RuntimePath == currentRuntimePath {
+			continue
+		}
+		// Candidate conflict: resolve our commonDir lazily on the first one found.
+		if ourCommonDir == "" {
+			id, err := ResolveRepositoryIdentity(d, projectPath)
+			if err != nil {
+				return nil // can't determine our repo — skip the backstop
+			}
+			ourCommonDir = id.CommonDir
+		}
+		theirCommonDir, err := resolveCheckoutCommonDir(d, meta.RuntimePath)
+		if err != nil {
+			continue
+		}
+		if theirCommonDir == ourCommonDir {
+			return exitErr(ExitOperational,
+				"runtime execution already in progress (PID %d since %s at %s)",
+				meta.PID,
+				meta.StartedAt.Format(time.RFC3339),
+				meta.RuntimePath,
+			)
+		}
+	}
+	return nil
+}
+
+// resolveCheckoutCommonDir returns the canonical git common directory for the
+// repository containing checkoutPath.
+func resolveCheckoutCommonDir(d *Deps, checkoutPath string) (string, error) {
+	out, err := d.Git.CommandInDir(checkoutPath, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	out = strings.TrimSpace(out)
+	if !filepath.IsAbs(out) {
+		out = filepath.Join(checkoutPath, out)
+	}
+	return canonicalAbsPath(d, out)
 }
