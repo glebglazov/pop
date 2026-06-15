@@ -81,6 +81,7 @@ type RunTaskResult struct {
 	PauseReason string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
 	PausePreset  string
+	PauseResetAt time.Time
 	CommitSHA    string
 	AgentSummary string
 }
@@ -330,14 +331,17 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		}
 		agentResult := invocation.NormalizeOutput(agentOut)
 		if agentResult.QuotaPause != nil {
+			pause := *agentResult.QuotaPause
+			pause.ResetAt = agentQuotaResetAt(invocation.AgentPreset(), pause.Reason, time.Now())
 			persist(outcome.stream, attempt, streamOutcomeQuotaPaused, "", outcome.exitCode)
 			display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.TaskSetID, sel.TaskID)
-			display.line(ansiYellow, "  %s", agentResult.QuotaPause.Reason)
+			display.line(ansiYellow, "  %s", pause.Reason)
 			return &RunTaskResult{
-				Selection:   sel,
-				QuotaPaused: true,
-				PauseReason: agentResult.QuotaPause.Reason,
-				PausePreset: invocation.AgentPreset(),
+				Selection:    sel,
+				QuotaPaused:  true,
+				PauseReason:  pause.Reason,
+				PausePreset:  invocation.AgentPreset(),
+				PauseResetAt: pause.ResetAt,
 			}, nil
 		}
 

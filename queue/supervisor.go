@@ -12,6 +12,9 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
+const agentQuotaResetSkew = 2 * time.Minute
+const maxAgentQuotaResetHorizon = 8 * 24 * time.Hour
+
 // Run starts the foreground supervisor loop: it acquires the single-instance
 // lock, then every poll interval scans every registered project and spawns a
 // drain into tmux for each idle project with a Ready set. It returns when a
@@ -369,7 +372,7 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, e
 						}
 					}
 					if rec.Outcome == tasks.DrainOutcomeQuotaPaused && rec.ExhaustedPreset != "" {
-						until := time.Now().UTC().Add(qcfg.AgentQuotaRetryAfter)
+						until := agentQuotaCooldownUntil(rec.ExhaustedResetAt, time.Now().UTC(), qcfg.AgentQuotaRetryAfter)
 						if state.AgentCooldowns == nil {
 							state.AgentCooldowns = map[string]time.Time{}
 						}
@@ -562,6 +565,18 @@ func appendRunEvent(lines *[]string, line string) {
 		return
 	}
 	*lines = append(*lines, line)
+}
+
+func agentQuotaCooldownUntil(resetAt, now time.Time, fallback time.Duration) time.Time {
+	now = now.UTC()
+	if resetAt.IsZero() {
+		return now.Add(fallback)
+	}
+	resetAt = resetAt.UTC()
+	if !resetAt.After(now) || resetAt.Sub(now) > maxAgentQuotaResetHorizon {
+		return now.Add(fallback)
+	}
+	return resetAt.Add(agentQuotaResetSkew)
 }
 
 func drainOutcomeAbnormal(outcome tasks.DrainOutcome) bool {

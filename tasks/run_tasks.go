@@ -48,6 +48,7 @@ type RunTaskSetResult struct {
 	PauseReason     string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
 	PausePreset      string
+	PauseResetAt     time.Time
 	PausePinnedAgent bool
 }
 
@@ -306,6 +307,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			result.QuotaPaused = true
 			result.PauseReason = taskResult.PauseReason
 			result.PausePreset = taskResult.PausePreset
+			result.PauseResetAt = taskResult.PauseResetAt
 			result.PausePinnedAgent = taskPinMatchesPreset(sel.Task.Agent, taskResult.PausePreset)
 			result.Refresh = currentRefresh
 			printTaskSetSummary(out, result)

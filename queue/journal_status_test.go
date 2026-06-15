@@ -307,6 +307,66 @@ func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
 	}
 }
 
+func TestRecordTerminalOutcomesSetsQuotaCooldownFromResetAt(t *testing.T) {
+	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
+	resetAt := time.Now().UTC().Add(45 * time.Minute).Truncate(time.Second)
+	d := &Deps{
+		Tasks: td,
+		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
+			return &tasks.DrainOutcomeRecord{
+				SetID:            "set-1",
+				Outcome:          tasks.DrainOutcomeQuotaPaused,
+				ExhaustedPreset:  "codex",
+				ExhaustedResetAt: resetAt,
+				RuntimePath:      repo,
+				WrittenAt:        time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
+			}, nil
+		},
+	}
+	cfg := &config.Config{Queue: &config.QueueConfig{AgentQuotaRetryAfter: "30m"}}
+
+	if err := recordTerminalOutcomes(d, cfg, []Decision{{
+		Project: "pop",
+		scan:    projectScan{ProjectPath: repo, RuntimePath: repo, DefinitionPath: "/def"},
+	}}, nil); err != nil {
+		t.Fatalf("record outcomes: %v", err)
+	}
+
+	state, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	want := resetAt.Add(2 * time.Minute)
+	if got := state.AgentCooldowns["codex"]; !got.Equal(want) {
+		t.Fatalf("cooldown until = %s, want reset+2m %s", got, want)
+	}
+}
+
+func TestAgentQuotaCooldownUntilPolicy(t *testing.T) {
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	fallback := 30 * time.Minute
+
+	tests := []struct {
+		name    string
+		resetAt time.Time
+		want    time.Time
+	}{
+		{name: "zero fallback", resetAt: time.Time{}, want: now.Add(fallback)},
+		{name: "past fallback", resetAt: now.Add(-time.Second), want: now.Add(fallback)},
+		{name: "too far fallback", resetAt: now.Add(8*24*time.Hour + time.Second), want: now.Add(fallback)},
+		{name: "sane reset with skew", resetAt: now.Add(time.Hour), want: now.Add(time.Hour + 2*time.Minute)},
+		{name: "eight days exactly with skew", resetAt: now.Add(8 * 24 * time.Hour), want: now.Add(8*24*time.Hour + 2*time.Minute)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := agentQuotaCooldownUntil(tc.resetAt, now, fallback); !got.Equal(tc.want) {
+				t.Fatalf("cooldown = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initMergeabilityRepo(t)

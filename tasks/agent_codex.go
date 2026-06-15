@@ -2,10 +2,14 @@ package tasks
 
 import (
 	"encoding/json"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
+
+var codexResetAtPattern = regexp.MustCompile(`(?i)\btry again at\s+([0-9]{1,2}):([0-9]{2})\s*([AP]M)\b`)
 
 // codexToolItemTypes is the set of Thread Event item types that count as a tool
 // invocation — the same set codexLineRenderer ticks live. Sharing one set keeps
@@ -72,6 +76,51 @@ func codexQuotaPauseReason(message string) *AgentQuotaPause {
 		return &AgentQuotaPause{Reason: message}
 	}
 	return nil
+}
+
+func codexQuotaResetAt(reason string, now time.Time) time.Time {
+	m := codexResetAtPattern.FindStringSubmatch(reason)
+	if m == nil {
+		return time.Time{}
+	}
+	hour, err := strconv.Atoi(m[1])
+	if err != nil || hour < 1 || hour > 12 {
+		return time.Time{}
+	}
+	minute, err := strconv.Atoi(m[2])
+	if err != nil || minute < 0 || minute > 59 {
+		return time.Time{}
+	}
+	switch strings.ToUpper(m[3]) {
+	case "AM":
+		if hour == 12 {
+			hour = 0
+		}
+	case "PM":
+		if hour != 12 {
+			hour += 12
+		}
+	default:
+		return time.Time{}
+	}
+	localNow := now.In(time.Local)
+	reset := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, time.Local)
+	if !reset.After(localNow) {
+		reset = reset.Add(24 * time.Hour)
+	}
+	if reset.Sub(localNow) > 24*time.Hour {
+		return time.Time{}
+	}
+	return reset
+}
+
+func agentQuotaResetAt(preset, reason string, now time.Time) time.Time {
+	switch preset {
+	case "codex":
+		return codexQuotaResetAt(reason, now)
+	default:
+		return time.Time{}
+	}
 }
 
 // codexLineRenderer renders codex-jsonl Thread Events live: assistant prose is
