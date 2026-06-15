@@ -16,8 +16,22 @@ type RefreshResult struct {
 	Manifests        map[string]*Manifest
 	NeedsSave        bool
 	RuntimeLock      *RuntimeLockStatus
+	Checkout         *CheckoutStatus
 	ArchivedCount    int
 	ShowArchived     bool
+}
+
+// CheckoutStatus describes the checkout a drain started here would run in — the
+// answer to "if I implement here, worktree or inline?". It is resolved by the
+// command layer the same way `pop tasks implement` resolves its runtime
+// checkout, so status never disagrees with what a drain would actually do.
+// Worktree is true for a linked git worktree (implement adopts it; the set is
+// integrateable) and false for trunk (implement drains inline). Branch is the
+// worktree's checked-out branch, empty when detached or on trunk.
+type CheckoutStatus struct {
+	Path     string
+	Worktree bool
+	Branch   string
 }
 
 // Refresh discovers Task sets, auto-registers them, and builds table rows.
@@ -216,9 +230,34 @@ func render(out *output, result *RefreshResult) {
 	}
 
 	fmt.Fprintln(out, formatTableWithOutput(out, result.Rows))
+	renderCheckout(out, result.Checkout)
 	renderRuntimeLock(out, result.RuntimeLock)
 	renderDiagnostics(out, result.Rows)
 	renderArchivedFooter(out, result)
+}
+
+// renderCheckout reports where a `pop tasks implement` started here would drain:
+// an adopted worktree (integrateable) or trunk (inline). It deliberately omits
+// the queue's worktree_ready capability and existing bindings — those describe
+// the AFK provisioner and project actuality, not where this attended drain
+// lands (see ADR-0036's trigger-vs-checkout split). Surfaced via `pop queue
+// status` instead.
+func renderCheckout(out *output, cs *CheckoutStatus) {
+	if cs == nil {
+		return
+	}
+	fmt.Fprintln(out)
+	if cs.Worktree {
+		where := "worktree"
+		if cs.Branch != "" {
+			where = fmt.Sprintf("worktree (%s)", cs.Branch)
+		} else {
+			where = "worktree (detached)"
+		}
+		out.line(ansiCyan, "Checkout: %s — implement adopts it (integrateable)", where)
+		return
+	}
+	out.line(ansiDim, "Checkout: trunk — implement drains inline")
 }
 
 func renderArchivedFooter(out *output, result *RefreshResult) {

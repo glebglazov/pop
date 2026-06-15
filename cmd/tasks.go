@@ -237,8 +237,15 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return nil
 	}
 
-	if runtimePath, err := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, ""); err == nil {
+	if runtimePath, err := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath); err == nil {
 		result.RuntimeLock = tasks.ReadRuntimeLockStatus(d, runtimePath)
+		if linked, err := binding.IsLinkedWorktree(d, runtimePath); err == nil {
+			cs := &tasks.CheckoutStatus{Path: runtimePath, Worktree: linked}
+			if linked {
+				cs.Branch = binding.CurrentBranch(d, runtimePath)
+			}
+			result.Checkout = cs
+		}
 	}
 
 	tasks.Render(w, result)
