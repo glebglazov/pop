@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -83,41 +82,19 @@ func codexQuotaResetAt(reason string, now time.Time) time.Time {
 	if m == nil {
 		return time.Time{}
 	}
-	hour, err := strconv.Atoi(m[1])
-	if err != nil || hour < 1 || hour > 12 {
+	hour, minute, ok := parseQuotaClock(m[1], m[2], m[3])
+	if !ok {
 		return time.Time{}
 	}
-	minute, err := strconv.Atoi(m[2])
-	if err != nil || minute < 0 || minute > 59 {
-		return time.Time{}
-	}
-	switch strings.ToUpper(m[3]) {
-	case "AM":
-		if hour == 12 {
-			hour = 0
-		}
-	case "PM":
-		if hour != 12 {
-			hour += 12
-		}
-	default:
-		return time.Time{}
-	}
-	localNow := now.In(time.Local)
-	reset := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, time.Local)
-	if !reset.After(localNow) {
-		reset = reset.Add(24 * time.Hour)
-	}
-	if reset.Sub(localNow) > 24*time.Hour {
-		return time.Time{}
-	}
-	return reset
+	return nextQuotaLocalTime(now, hour, minute)
 }
 
 func agentQuotaResetAt(preset, reason string, now time.Time) time.Time {
 	switch preset {
 	case "codex":
 		return codexQuotaResetAt(reason, now)
+	case "claude":
+		return claudeQuotaResetAt(reason, now)
 	default:
 		return time.Time{}
 	}
