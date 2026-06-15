@@ -1818,3 +1818,245 @@ func TestDashboardCursorPosition(t *testing.T) {
 		})
 	}
 }
+
+// boolPtr returns a pointer to b for use in RepoOverrideConfig fields.
+func boolPtr(b bool) *bool { return &b }
+
+// makeFSWithBare returns a MockFileSystem whose Stat recognises
+// bareDir+"/.bare" as a directory and everything else as not existing.
+func makeFSWithBare(bareDir string) *deps.MockFileSystem {
+	return &deps.MockFileSystem{
+		StatFunc: func(path string) (os.FileInfo, error) {
+			if path == filepath.Join(bareDir, ".bare") {
+				return &deps.MockFileInfo{IsDirVal: true}, nil
+			}
+			return nil, os.ErrNotExist
+		},
+		ReadFileFunc: func(path string) ([]byte, error) {
+			return nil, os.ErrNotExist
+		},
+		EvalSymlinksFunc: func(path string) (string, error) {
+			return path, nil
+		},
+		UserHomeDirFunc: func() (string, error) {
+			return "/home/user", nil
+		},
+	}
+}
+
+func TestResolveRepoConfigPrecedence(t *testing.T) {
+	root := t.TempDir()
+	// Write .pop.toml at root with worktree_ready = false (explicit)
+	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = false\nauto_merge_clean = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	real := deps.NewRealFileSystem()
+	d := &Deps{FS: &deps.MockFileSystem{
+		StatFunc:         real.Stat,
+		ReadFileFunc:     real.ReadFile,
+		EvalSymlinksFunc: real.EvalSymlinks,
+		UserHomeDirFunc:  real.UserHomeDir,
+	}}
+
+	t.Run("global override wins over pop.toml", func(t *testing.T) {
+		// Override flips worktree_ready to true; auto_merge_clean not in override → .pop.toml wins
+		cfg := &Config{
+			Repo: map[string]RepoOverrideConfig{
+				root: {WorktreeReady: boolPtr(true)},
+			},
+		}
+		got, err := cfg.ResolveRepoConfig(d, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.WorktreeReady {
+			t.Errorf("WorktreeReady = false, want true (override wins)")
+		}
+		if !got.AutoMergeClean {
+			t.Errorf("AutoMergeClean = false, want true (.pop.toml wins when override absent)")
+		}
+	})
+
+	t.Run("no override uses pop.toml", func(t *testing.T) {
+		cfg := &Config{}
+		got, err := cfg.ResolveRepoConfig(d, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.WorktreeReady {
+			t.Errorf("WorktreeReady = true, want false (.pop.toml explicit false)")
+		}
+		if !got.AutoMergeClean {
+			t.Errorf("AutoMergeClean = false, want true (.pop.toml)")
+		}
+	})
+
+	t.Run("no override and no pop.toml yields defaults", func(t *testing.T) {
+		cfg := &Config{}
+		fakeDir := filepath.Join(t.TempDir(), "nopoptom")
+		if err := os.MkdirAll(fakeDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		got, err := cfg.ResolveRepoConfig(d, fakeDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.WorktreeReady || got.AutoMergeClean || got.QueueBase {
+			t.Errorf("expected zero defaults, got %+v", got)
+		}
+	})
+}
+
+func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
+	// Global override flips worktree_ready and queue_base for a repo with no .pop.toml
+	dir := t.TempDir()
+	real := deps.NewRealFileSystem()
+	d := &Deps{FS: &deps.MockFileSystem{
+		StatFunc:         real.Stat,
+		ReadFileFunc:     real.ReadFile,
+		EvalSymlinksFunc: real.EvalSymlinks,
+		UserHomeDirFunc:  real.UserHomeDir,
+	}}
+	cfg := &Config{
+		Repo: map[string]RepoOverrideConfig{
+			dir: {WorktreeReady: boolPtr(true), QueueBase: boolPtr(true)},
+		},
+	}
+	got, err := cfg.ResolveRepoConfig(d, dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.WorktreeReady {
+		t.Errorf("WorktreeReady = false, want true")
+	}
+	if !got.QueueBase {
+		t.Errorf("QueueBase = false, want true")
+	}
+}
+
+func TestResolveRepoConfigCanonicalizationBareRepo(t *testing.T) {
+	// A bare repo at /bare with worktrees at /bare/main and /bare/feature.
+	// A block keyed by /bare/main should apply worktree_ready to /bare/feature too.
+	bareDir := "/bare"
+	d := &Deps{FS: makeFSWithBare(bareDir)}
+
+	cfg := &Config{
+		Repo: map[string]RepoOverrideConfig{
+			bareDir + "/main": {WorktreeReady: boolPtr(true)},
+		},
+	}
+
+	// Both worktrees should see worktree_ready = true
+	for _, checkout := range []string{bareDir + "/main", bareDir + "/feature"} {
+		got, err := cfg.ResolveRepoConfig(d, checkout)
+		if err != nil {
+			t.Fatalf("checkout=%q: unexpected error: %v", checkout, err)
+		}
+		if !got.WorktreeReady {
+			t.Errorf("checkout=%q: WorktreeReady = false, want true", checkout)
+		}
+	}
+
+	// Bare dir itself also resolves to same identity
+	got, err := cfg.ResolveRepoConfig(d, bareDir)
+	if err != nil {
+		t.Fatalf("bare dir: unexpected error: %v", err)
+	}
+	if !got.WorktreeReady {
+		t.Errorf("bare dir: WorktreeReady = false, want true")
+	}
+}
+
+func TestResolveRepoConfigQueueBasePerCheckout(t *testing.T) {
+	// queue_base=true block keyed by /bare/main must NOT propagate to /bare/feature.
+	bareDir := "/bare"
+	d := &Deps{FS: makeFSWithBare(bareDir)}
+
+	cfg := &Config{
+		Repo: map[string]RepoOverrideConfig{
+			bareDir + "/main": {QueueBase: boolPtr(true), WorktreeReady: boolPtr(true)},
+		},
+	}
+
+	mainGot, err := cfg.ResolveRepoConfig(d, bareDir+"/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mainGot.QueueBase {
+		t.Errorf("main: QueueBase = false, want true (keyed checkout)")
+	}
+	if !mainGot.WorktreeReady {
+		t.Errorf("main: WorktreeReady = false, want true")
+	}
+
+	featureGot, err := cfg.ResolveRepoConfig(d, bareDir+"/feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if featureGot.QueueBase {
+		t.Errorf("feature: QueueBase = true, want false (not the keyed checkout)")
+	}
+	if !featureGot.WorktreeReady {
+		t.Errorf("feature: WorktreeReady = false, want true (override still applies)")
+	}
+}
+
+func TestRepoBlockUnknownKeyWarning(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	content := `
+[repo."/path/to/repo"]
+worktree_ready = true
+projects = ["should-warn"]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The override block is still accepted (degrades to known fields only)
+	block, ok := cfg.Repo["/path/to/repo"]
+	if !ok {
+		t.Fatalf("repo block not parsed")
+	}
+	if block.WorktreeReady == nil || !*block.WorktreeReady {
+		t.Errorf("worktree_ready not parsed correctly from repo block")
+	}
+	// A warning must be emitted for the unknown key
+	found := false
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w, "projects") && strings.Contains(w, "ignored") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about unknown key 'projects', got: %v", cfg.Warnings)
+	}
+}
+
+func TestRepoBlockGlobalOnlyKeysIgnored(t *testing.T) {
+	// Global-only keys inside a repo block must degrade (warn) not hard-fail.
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	content := `
+[repo."/path/to/repo"]
+worktree_ready = true
+exclude_current_session = true
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load must not hard-fail on unknown repo block key: %v", err)
+	}
+	if len(cfg.Warnings) == 0 {
+		t.Errorf("expected at least one warning for unknown repo block key")
+	}
+	// The top-level ExcludeCurrentSession must NOT be set from a repo block
+	if cfg.ExcludeCurrentSession {
+		t.Errorf("global ExcludeCurrentSession must not be set from repo block")
+	}
+}

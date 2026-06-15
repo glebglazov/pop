@@ -304,6 +304,11 @@ type Config struct {
 	Effort  map[string]EffortConfig `toml:"effort"`
 	Queue   *QueueConfig            `toml:"queue"`
 	Updates *UpdatesConfig          `toml:"updates"`
+	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
+	// The key is canonicalized (~ expanded, symlinks resolved) at resolution
+	// time; any worktree path or bare dir of the same repo resolves to the
+	// same repository identity.
+	Repo map[string]RepoOverrideConfig `toml:"repo"`
 
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
 }
@@ -314,6 +319,22 @@ type Config struct {
 type RepoConfig struct {
 	WorktreeReady  bool `toml:"worktree_ready"`
 	AutoMergeClean bool `toml:"auto_merge_clean"`
+	// QueueBase marks a specific checkout as the base for queue scheduling.
+	// In .pop.toml it applies repo-wide; in a [repo."<path>"] global override
+	// block it applies only to the keyed checkout.
+	QueueBase bool `toml:"queue_base"`
+}
+
+// RepoOverrideConfig is the shape of a [repo."<path>"] block in global
+// config.toml. Only the RepoConfig subset of fields is accepted here;
+// global-only settings (project registry, daemon knobs, etc.) are not.
+// Pointer fields allow field-level merge semantics (nil = not set).
+type RepoOverrideConfig struct {
+	WorktreeReady  *bool `toml:"worktree_ready"`
+	AutoMergeClean *bool `toml:"auto_merge_clean"`
+	// QueueBase is meaningful only for the specific checkout path that keys
+	// this block; it is not propagated to other worktrees of the same repo.
+	QueueBase *bool `toml:"queue_base"`
 }
 
 // LoadRepoConfig reads repo-root .pop.toml. A missing file is not an error and
@@ -338,6 +359,87 @@ func LoadRepoConfigWith(d *Deps, repoRoot string) (RepoConfig, error) {
 		return RepoConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+// canonicalPath expands ~ and resolves symlinks, returning a clean absolute path.
+func canonicalPath(d *Deps, path string) string {
+	p := expandHomeWith(d, path)
+	if r, err := d.FS.EvalSymlinks(p); err == nil {
+		p = r
+	}
+	return filepath.Clean(p)
+}
+
+// repoIdentity resolves path to its repository identity using filesystem checks
+// only (no git commands). For pop-style bare repos (directories containing a
+// .bare/ subdir), the identity is the bare repo root. For all other paths the
+// identity is the canonicalized path itself. Two worktrees of the same bare
+// repo therefore share the same identity.
+func repoIdentity(d *Deps, path string) string {
+	canon := canonicalPath(d, path)
+	current := canon
+	for {
+		if info, err := d.FS.Stat(filepath.Join(current, ".bare")); err == nil && info.IsDir() {
+			return current
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	return canon
+}
+
+// ResolveRepoConfig returns the effective RepoConfig for checkoutPath by merging:
+//
+//	global [repo."<path>"] override → .pop.toml → built-in default (false for all bools)
+//
+// Fields are merged individually; a nil pointer in the override means "not set"
+// and the next layer wins.  queue_base from a global override block is applied
+// only when the override's key path exactly matches checkoutPath (per-checkout
+// semantics); queue_base from .pop.toml is always applied.
+//
+// A missing .pop.toml is not an error. A malformed .pop.toml degrades to the
+// zero config (the error is returned so callers may surface a warning).
+func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, error) {
+	canon := canonicalPath(d, checkoutPath)
+	identity := repoIdentity(d, checkoutPath)
+
+	// Find the matching global override block, if any.
+	var override *RepoOverrideConfig
+	var queueBaseApplies bool
+	if c != nil {
+		for rawKey, block := range c.Repo {
+			keyCanon := canonicalPath(d, rawKey)
+			keyIdentity := repoIdentity(d, rawKey)
+			if keyIdentity != identity {
+				continue
+			}
+			b := block
+			override = &b
+			queueBaseApplies = (keyCanon == canon)
+		}
+	}
+
+	// Load .pop.toml from the repo identity root (may be zero config).
+	popTOML, popErr := LoadRepoConfigWith(d, identity)
+
+	// Merge: start with .pop.toml, then layer global override on top.
+	result := popTOML
+	if override != nil {
+		if override.WorktreeReady != nil {
+			result.WorktreeReady = *override.WorktreeReady
+		}
+		if override.AutoMergeClean != nil {
+			result.AutoMergeClean = *override.AutoMergeClean
+		}
+		if override.QueueBase != nil && queueBaseApplies {
+			result.QueueBase = *override.QueueBase
+		}
+	}
+
+	return result, popErr
 }
 
 // TaskAgentOutput returns the configured output mode for one agent preset.
@@ -587,6 +689,7 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	if err := validateEffortConfigMetadata(path, md); err != nil {
 		return nil, err
 	}
+	cfg.Warnings = append(cfg.Warnings, repoBlockWarnings(path, md)...)
 
 	selectSectionUsed := cfg.Select != nil
 	if selectSectionUsed {
@@ -647,6 +750,30 @@ func validateEffortConfigMetadata(path string, md toml.MetaData) error {
 		}
 	}
 	return nil
+}
+
+// repoBlockWarnings returns load-time warnings for unknown keys inside
+// [repo."<path>"] blocks. Only the RepoConfig subset is valid there; any
+// other key is silently degraded but surfaced as a warning.
+func repoBlockWarnings(path string, md toml.MetaData) []string {
+	var warnings []string
+	seen := make(map[string]bool)
+	for _, key := range md.Undecoded() {
+		if len(key) < 3 || key[0] != "repo" {
+			continue
+		}
+		// key[1] = block path, key[2] = unknown field name
+		uniq := key[1] + "\x00" + key[2]
+		if seen[uniq] {
+			continue
+		}
+		seen[uniq] = true
+		warnings = append(warnings, fmt.Sprintf(
+			"%s: [repo.%q] unknown key %q ignored (only worktree_ready, auto_merge_clean, queue_base are accepted)",
+			path, key[1], key[2],
+		))
+	}
+	return warnings
 }
 
 // ExpandProjects resolves all project paths from the config
