@@ -115,27 +115,12 @@ func BindWorktree(d *Deps, cfg *config.Config, setID, checkoutPath string, opts 
 }
 
 // detectBindingProject finds the configured project name whose repo identity
-// matches id. Returns empty string when zero or multiple projects match.
+// matches id. Returns empty string when zero or multiple projects match. It
+// delegates to the binding module so `bind-worktree` and `implement` stamp
+// adopted bindings with the same Project value.
 func detectBindingProject(d *Deps, cfg *config.Config, id *tasks.RepositoryIdentity) string {
-	if cfg == nil || d == nil || d.Project == nil {
+	if d == nil {
 		return ""
 	}
-	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
-	if err != nil {
-		return ""
-	}
-	var matches []string
-	for _, p := range projects {
-		pid, err := tasks.ResolveRepositoryIdentity(d.Tasks, p.Path)
-		if err != nil {
-			continue
-		}
-		if pid.ShortHash == id.ShortHash && pid.Basename == id.Basename {
-			matches = append(matches, p.Name)
-		}
-	}
-	if len(matches) == 1 {
-		return matches[0]
-	}
-	return ""
+	return binding.DetectProject(d.Project, d.Tasks, cfg, id)
 }

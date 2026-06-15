@@ -1357,6 +1357,70 @@ func TestSelectTaskSetAutomaticAndExplicit(t *testing.T) {
 	}
 }
 
+// TestRunTaskSetRefusesWhenSetLiveElsewhere proves the ADR-0035 cross-checkout
+// backstop still fires through the implement drain — and that checkout adoption
+// (ADR-0036) is correctly sequenced after it: a refused run never reaches the
+// BindCheckout hook, so a live set is never re-bound from a losing checkout.
+func TestRunTaskSetRefusesWhenSetLiveElsewhere(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+
+	// A sibling linked worktree of the same repo holds a live lock for "demo".
+	other := filepath.Join(t.TempDir(), "sibling")
+	runGit(t, env.root, "worktree", "add", "-b", "sibling-branch", other, "HEAD")
+	lock, err := AcquireRuntimeLockForSet(d, other, "demo", io.Discard)
+	if err != nil {
+		t.Fatalf("acquire sibling lock: %v", err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+
+	bindCalls := 0
+	opts := env.runTaskSetOpts(true, "", io.Discard)
+	opts.BindCheckout = func(setID, projectPath, runtimePath string) error {
+		bindCalls++
+		return nil
+	}
+
+	_, err = RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "already in progress") {
+		t.Fatalf("err = %v, want cross-checkout refusal", err)
+	}
+	if bindCalls != 0 {
+		t.Fatalf("BindCheckout must not run when the drain is refused; got %d calls", bindCalls)
+	}
+}
+
+// TestRunTaskSetInvokesBindCheckoutAfterBackstop confirms the drain reaches the
+// BindCheckout hook with the resolved set and runtime checkout once the
+// cross-checkout backstop passes.
+func TestRunTaskSetInvokesBindCheckoutAfterBackstop(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "ok"})
+
+	var gotSet, gotRuntime string
+	opts := env.runTaskSetOpts(true, agent, io.Discard)
+	opts.BindCheckout = func(setID, projectPath, runtimePath string) error {
+		gotSet, gotRuntime = setID, runtimePath
+		return nil
+	}
+
+	if _, err := RunTaskSetWith(env.deps(), nil, nil, opts); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if gotSet != "demo" {
+		t.Fatalf("BindCheckout setID = %q, want demo", gotSet)
+	}
+	if gotRuntime == "" {
+		t.Fatalf("BindCheckout runtimePath must be the resolved checkout")
+	}
+}
+
 type runTaskSetFixture struct {
 	root     string
 	tasksDir string

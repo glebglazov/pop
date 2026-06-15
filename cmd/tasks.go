@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/binding"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
@@ -438,6 +439,19 @@ func isTaskFileTarget(target string) bool {
 	return strings.HasSuffix(target, ".md")
 }
 
+// taskBindCheckout returns the binding hook `pop tasks implement` passes to the
+// executor. It adopts the run's current checkout into the binding model
+// (ADR-0036): a worktree-locus run records a never-delete adopted binding via
+// the shared module, while a trunk-locus run records nothing. `implement` never
+// provisions a worktree — auto-provisioning stays the Queue's path.
+func taskBindCheckout(d *tasks.Deps) func(setID, projectPath, runtimePath string) error {
+	return func(setID, projectPath, runtimePath string) error {
+		cfg, _ := taskConfigLoad(config.DefaultConfigPath())
+		_, err := binding.AdoptCurrentCheckout(d, taskProjectDeps(), cfg, projectPath, runtimePath, setID)
+		return err
+	}
+}
+
 func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskPath string, agentExplicit bool) error {
 	timeout, err := time.ParseDuration(taskTimeout)
 	if err != nil {
@@ -458,6 +472,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		ConfirmIn:          stdin,
 		ConfirmOut:         stderr,
 		Output:             stdout,
+		BindCheckout:       taskBindCheckout(d),
 	})
 	if err != nil {
 		return err
@@ -488,6 +503,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		ConfirmIn:          stdin,
 		ConfirmOut:         stderr,
 		Output:             stdout,
+		BindCheckout:       taskBindCheckout(d),
 	})
 	if err != nil {
 		return err

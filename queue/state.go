@@ -178,13 +178,15 @@ func WriteDaemonState(d *tasks.Deps, state *DaemonState) error {
 }
 
 // repoIdentityKey returns the repository identity prefix used in set-scoped keys.
+// It delegates to the binding module so daemon-state keys and shared-store
+// binding keys stay byte-identical for the same (repo, set).
 func repoIdentityKey(id *tasks.RepositoryIdentity) string {
-	return id.Basename + "-" + id.ShortHash
+	return binding.RepoKey(id)
 }
 
 // setScopedKey keys set-scoped daemon state by repository identity plus set id.
 func setScopedKey(repoKey, setID string) string {
-	return repoKey + "\x00" + setID
+	return binding.ScopedKey(repoKey, setID)
 }
 
 // repoIdentityFromWorktreePath extracts basename-shortHash from a queue worktree path.

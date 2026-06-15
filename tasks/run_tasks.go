@@ -32,6 +32,14 @@ type RunTaskSetOptions struct {
 	ConfirmIn     io.Reader
 	ConfirmOut    io.Writer
 	Output        io.Writer
+	// BindCheckout, when set, is invoked once the drain has committed to its
+	// Task set and runtime checkout (after the cross-checkout backstop and lock
+	// acquisition, before any task runs). It lets the caller record the
+	// set↔checkout association in the shared binding store — `pop tasks
+	// implement` adopts its current checkout this way (ADR-0036). It receives the
+	// resolved set id, project path, and runtime checkout path; a non-nil error
+	// aborts the drain.
+	BindCheckout func(setID, projectPath, runtimePath string) error
 }
 
 // RunTaskSetResult is the outcome of a run-tasks invocation.
@@ -135,6 +143,17 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, err
 	}
 	defer lock.Release()
+
+	// Adopt this checkout into the binding model before draining (ADR-0036): a
+	// worktree-locus run records a never-delete adopted binding so the set is
+	// integrateable even if the drain later fails; a trunk-locus run records
+	// nothing. Done before the first task runs so a failed run is not
+	// re-provisioned and orphaned by a later `queue run`.
+	if opts.BindCheckout != nil {
+		if err := opts.BindCheckout(taskSetID, resolved.ProjectPath, runtimePath); err != nil {
+			return nil, exitErr(ExitOperational, "bind checkout: %v", err)
+		}
+	}
 
 	// The lock is held, so this process owns the drain: record how it ends on
 	// every exit path below (including a panic-free crash bubbling up as err) so

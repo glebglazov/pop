@@ -69,6 +69,10 @@ type RunTaskOptions struct {
 	ConfirmIn     io.Reader
 	ConfirmOut    io.Writer
 	Output        io.Writer
+	// BindCheckout mirrors RunTaskSetOptions.BindCheckout for the single-task
+	// path: it adopts the current checkout into the binding model (ADR-0036)
+	// once the run has committed to its set and runtime checkout.
+	BindCheckout func(setID, projectPath, runtimePath string) error
 }
 
 // RunTaskResult is the outcome of a successful or declined run-task.
@@ -176,6 +180,14 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		return nil, err
 	}
 	defer lock.Release()
+
+	// Adopt this checkout into the binding model (ADR-0036): worktree-locus runs
+	// record a never-delete adopted binding; trunk-locus runs record nothing.
+	if opts.BindCheckout != nil {
+		if err := opts.BindCheckout(sel.TaskSetID, resolved.ProjectPath, runtimePath); err != nil {
+			return nil, exitErr(ExitOperational, "bind checkout: %v", err)
+		}
+	}
 
 	dirty, err := runtimeIsDirty(d, runtimePath)
 	if err != nil {
