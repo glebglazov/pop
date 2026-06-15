@@ -9,8 +9,10 @@ package queue
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/glebglazov/pop/binding"
@@ -110,6 +112,10 @@ type projectScan struct {
 	DefinitionPath string
 	RuntimePath    string
 	SessionName    string
+	// RepoKey is the repository identity prefix (basename-shortHash) resolved
+	// once during scan path resolution. Carrying it lets the decision phase reuse
+	// it instead of re-forking `git rev-parse --git-common-dir` per group.
+	RepoKey string
 }
 
 type provisionedWorktree struct {
@@ -175,31 +181,103 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	}
 	now := d.now().UTC()
 
+	// Memoize idempotent git reads for this scan. resolveScan and
+	// decideRepoDispatches resolve the same repository coordinates repeatedly
+	// (path normalization per project, identity per project and again per group),
+	// re-forking git for the same directories. Wrap a shallow copy of the deps so
+	// the caller's git is untouched, then serve those repeated reads from cache.
+	if d.Tasks != nil && d.Tasks.Git != nil {
+		scanDeps := *d
+		tasksDeps := *d.Tasks
+		tasksDeps.Git = newScanGitCache(d.Tasks.Git)
+		scanDeps.Tasks = &tasksDeps
+		d = &scanDeps
+	}
+
+	// Each project's scan resolution and each repo group's decision run several
+	// read-only git subprocesses; with many registered checkouts the serial cost
+	// dominates wall-clock. Both phases are concurrency-safe — resolveScan and
+	// decideRepoDispatches only read the shared DaemonState and Deps — so fan
+	// them out across a bounded worker pool while preserving deterministic order.
+	sem := make(chan struct{}, scanConcurrency())
+
+	// Phase 1: resolve every project's scan concurrently. A terminal decision
+	// (resolve error or out-of-scope) is recorded in place of a scan.
+	type scanResult struct {
+		scan projectScan
+		dec  *Decision
+	}
+	results := make([]scanResult, len(projects))
+	var wg sync.WaitGroup
+	for i, p := range projects {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, p project.ExpandedProject) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			scan, err := resolveScan(d, p)
+			if err != nil {
+				if outsideQueueScopeResolveError(err) {
+					results[idx] = scanResult{dec: &Decision{Project: p.Name, Reason: "no ready set"}}
+					return
+				}
+				results[idx] = scanResult{dec: &Decision{Project: p.Name, Err: err, Reason: "resolve"}}
+				return
+			}
+			results[idx] = scanResult{scan: scan}
+		}(i, p)
+	}
+	wg.Wait()
+
 	// Group picker Projects by Repository identity. All checkouts of one repo
 	// share a Task storage definition path, so it keys the group: a bare repo's
 	// many worktrees collapse to a single scheduling unit.
 	var order []string
 	groups := map[string][]projectScan{}
 	decisions := make([]Decision, 0, len(projects))
-	for _, p := range projects {
-		scan, err := resolveScan(d, p)
-		if err != nil {
-			if outsideQueueScopeResolveError(err) {
-				decisions = append(decisions, Decision{Project: p.Name, Reason: "no ready set"})
-				continue
-			}
-			decisions = append(decisions, Decision{Project: p.Name, Err: err, Reason: "resolve"})
+	for _, r := range results {
+		if r.dec != nil {
+			decisions = append(decisions, *r.dec)
 			continue
 		}
-		if _, ok := groups[scan.DefinitionPath]; !ok {
-			order = append(order, scan.DefinitionPath)
+		if _, ok := groups[r.scan.DefinitionPath]; !ok {
+			order = append(order, r.scan.DefinitionPath)
 		}
-		groups[scan.DefinitionPath] = append(groups[scan.DefinitionPath], scan)
+		groups[r.scan.DefinitionPath] = append(groups[r.scan.DefinitionPath], r.scan)
 	}
-	for _, key := range order {
-		decisions = append(decisions, decideRepoDispatches(d, cfg, groups[key], qcfg.Agents, state, now)...)
+
+	// Phase 2: decide each repo group concurrently, preserving group order.
+	groupDecisions := make([][]Decision, len(order))
+	var wg2 sync.WaitGroup
+	for i, key := range order {
+		wg2.Add(1)
+		sem <- struct{}{}
+		go func(idx int, key string) {
+			defer wg2.Done()
+			defer func() { <-sem }()
+			groupDecisions[idx] = decideRepoDispatches(d, cfg, groups[key], qcfg.Agents, state, now)
+		}(i, key)
+	}
+	wg2.Wait()
+	for _, gd := range groupDecisions {
+		decisions = append(decisions, gd...)
 	}
 	return decisions, nil
+}
+
+// scanConcurrency bounds the worker pool used to resolve project scans and decide
+// repo groups in parallel. The work is git-subprocess (I/O) bound, so it oversubscribes
+// the CPU count; the cap keeps a large project list from spawning hundreds of
+// simultaneous git processes.
+func scanConcurrency() int {
+	n := runtime.NumCPU() * 4
+	if n < 4 {
+		n = 4
+	}
+	if n > 32 {
+		n = 32
+	}
+	return n
 }
 
 // outsideQueueScopeResolveError reports whether resolveScan failed because the
@@ -228,11 +306,10 @@ func resolvedQueueConfig(cfg *config.Config) (config.ResolvedQueueConfig, error)
 // resolveScan derives a project's definition path, runtime checkout, and tmux
 // session name from its picker-visible entry.
 func resolveScan(d *Deps, p project.ExpandedProject) (projectScan, error) {
-	resolved, err := tasks.ResolvePathsWith(d.Tasks, d.Project, d.LoadConfig, tasks.ResolveInput{Path: p.Path})
-	if err != nil {
-		return projectScan{}, err
-	}
-	runtimePath, err := tasks.ResolveRuntimePathWith(d.Tasks, resolved.ProjectPath, "")
+	// ResolveScanPaths derives the project root and definition path in a single
+	// git invocation. The runtime checkout equals the project root here (the
+	// queue never overrides it), so no separate runtime-path resolution is needed.
+	resolved, id, err := tasks.ResolveScanPaths(d.Tasks, p.Path)
 	if err != nil {
 		return projectScan{}, err
 	}
@@ -240,9 +317,20 @@ func resolveScan(d *Deps, p project.ExpandedProject) (projectScan, error) {
 		Name:           p.Name,
 		ProjectPath:    resolved.ProjectPath,
 		DefinitionPath: resolved.DefinitionPath,
-		RuntimePath:    runtimePath,
+		RuntimePath:    resolved.ProjectPath,
 		SessionName:    project.SessionNameWith(d.Project, resolved.ProjectPath),
+		RepoKey:        repoIdentityKey(id),
 	}, nil
+}
+
+// scanRepoKey returns the repository key resolved during scan path resolution,
+// falling back to a git lookup for callers (tests, the spawn path) that build a
+// projectScan without it.
+func scanRepoKey(d *Deps, scan projectScan) (string, error) {
+	if scan.RepoKey != "" {
+		return scan.RepoKey, nil
+	}
+	return resolveRepoKey(d, scan.ProjectPath)
 }
 
 // decideProject reads the runtime lock and Ready sets for one project and
@@ -321,7 +409,7 @@ func decideProjectDispatches(d *Deps, scan projectScan, agents []string, state *
 		return appendOrOnly(decisions, dec)
 	}
 
-	repoKey, err := resolveRepoKey(d, scan.ProjectPath)
+	repoKey, err := scanRepoKey(d, scan)
 	if err != nil {
 		dec.Err = err
 		dec.Reason = "repo"

@@ -230,7 +230,7 @@ func applyBindingRouting(d *Deps, scans []projectScan, state *DaemonState, decis
 	if state == nil || len(state.WorktreeBindings) == 0 {
 		return
 	}
-	repoKey, err := resolveRepoKey(d, scans[0].ProjectPath)
+	repoKey, err := scanRepoKey(d, scans[0])
 	if err != nil {
 		return
 	}
@@ -274,7 +274,7 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 		skel.Reason = "refresh"
 		return []Decision{skel}
 	}
-	repoKey, err := resolveRepoKey(d, base.ProjectPath)
+	repoKey, err := scanRepoKey(d, base)
 	if err != nil {
 		skel.Err = err
 		skel.Reason = "repo"

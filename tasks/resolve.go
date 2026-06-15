@@ -67,6 +67,48 @@ func ResolvePathsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*confi
 	}, nil
 }
 
+// ResolveScanPaths resolves a checkout's canonical project root and task
+// definition directory using a single git invocation. It is a fast path for
+// bulk scanners (the queue) that resolve hundreds of checkouts: the general
+// ResolvePathsWith + ResolveRuntimePathWith pair issues three git subprocesses
+// per project (`--show-toplevel` for the project path, another for the runtime
+// path, and `--git-common-dir` for the identity), whereas a single
+// `rev-parse --show-toplevel --git-common-dir` yields both facts at once. The
+// runtime checkout equals ProjectPath for the no-override case the queue uses.
+//
+// A non-git path returns the same "not inside a git repository" error as
+// ResolveRepositoryIdentity, so out-of-scope detection is unchanged.
+func ResolveScanPaths(d *Deps, path string) (*ResolvedPaths, *RepositoryIdentity, error) {
+	canon, err := canonicalAbsPath(d, path)
+	if err != nil {
+		return nil, nil, err
+	}
+	out, err := d.Git.CommandInDir(canon, "rev-parse", "--show-toplevel", "--git-common-dir")
+	if err != nil {
+		return nil, nil, exitErr(ExitSetup, "not inside a git repository (run from a worktree of the target repo)")
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 2 || strings.TrimSpace(lines[0]) == "" {
+		return nil, nil, exitErr(ExitSetup, "not inside a git repository (run from a worktree of the target repo)")
+	}
+	toplevel := strings.TrimSpace(lines[0])
+	commonDir := strings.TrimSpace(lines[len(lines)-1])
+
+	projectPath, err := canonicalAbsPath(d, toplevel)
+	if err != nil {
+		return nil, nil, err
+	}
+	id, err := identityFromCommonDir(d, canon, commonDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	defPath, err := CanonicalDefinitionPathWith(d, id.TasksDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &ResolvedPaths{ProjectPath: projectPath, DefinitionPath: defPath}, id, nil
+}
+
 func resolveByProjectName(pd *project.Deps, loadConfig func(string) (*config.Config, error), name string) (string, error) {
 	cfg, err := loadConfig(config.DefaultConfigPath())
 	if err != nil {

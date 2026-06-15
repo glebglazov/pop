@@ -63,13 +63,25 @@ func ResolveRepositoryIdentity(d *Deps, cwd string) (*RepositoryIdentity, error)
 	}
 
 	commonDir, err := d.Git.CommandInDir(cwd, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return nil, exitErr(ExitSetup, "not inside a git repository (run from a worktree of the target repo)")
+	}
+	return identityFromCommonDir(d, cwd, commonDir)
+}
+
+// identityFromCommonDir derives the repository identity from a git common
+// directory already obtained by the caller (relative to gitCwd, as git reports
+// it). It performs no git invocation, letting bulk resolvers fetch the common
+// directory once and reuse it. An empty commonDir means the path is not inside a
+// git repository.
+func identityFromCommonDir(d *Deps, gitCwd, commonDir string) (*RepositoryIdentity, error) {
 	commonDir = strings.TrimSpace(commonDir)
-	if err != nil || commonDir == "" {
+	if commonDir == "" {
 		return nil, exitErr(ExitSetup, "not inside a git repository (run from a worktree of the target repo)")
 	}
 
 	if !filepath.IsAbs(commonDir) {
-		commonDir = filepath.Join(cwd, commonDir)
+		commonDir = filepath.Join(gitCwd, commonDir)
 	}
 	canon, err := canonicalAbsPath(d, commonDir)
 	if err != nil {
