@@ -150,6 +150,12 @@ func TestDashboardColumnDerivation(t *testing.T) {
 	if byID["bound"].Worktree != "/repo/bound (bound-branch)" {
 		t.Fatalf("bound row = %+v", byID["bound"])
 	}
+	if !DashboardRowCanIntegrate(byID["done"]) {
+		t.Fatalf("done row should be integration-enabled: %+v", byID["done"])
+	}
+	if DashboardRowCanIntegrate(byID["ready"]) || DashboardRowCanIntegrate(byID["bound"]) {
+		t.Fatalf("non-integration rows should not be integration-enabled: ready=%+v bound=%+v", byID["ready"], byID["bound"])
+	}
 }
 
 func TestDashboardNoBaseWorktree(t *testing.T) {
@@ -245,6 +251,53 @@ func TestDashboardBKeyOpensBindModal(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatalf("b key did not return a worktree-loading command")
+	}
+}
+
+func TestDashboardIKeyOnlyEnabledForIntegrationBacklog(t *testing.T) {
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "ready", Status: "READY"},
+		{Project: "pop", SetID: "done", Status: "DONE · clean", integrationBacklog: true},
+	}})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
+	if cmd != nil {
+		t.Fatalf("I key on non-integration row returned command")
+	}
+	got := updated.(dashboardModel)
+	got.cursor = 1
+	_, cmd = got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
+	if cmd == nil {
+		t.Fatalf("I key on integration backlog row returned nil command")
+	}
+}
+
+func TestDashboardLaunchIntegrateDispatchesExistingWizardAndSwitchesPane(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "dashboard-integrate", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+	row.integrationBacklog = true
+
+	result, err := LaunchDashboardIntegrate(d, cfg, row)
+	if err != nil {
+		t.Fatalf("LaunchDashboardIntegrate: %v", err)
+	}
+	if result.PaneID != "%3" {
+		t.Fatalf("pane = %q, want fresh queue pane %%3", result.PaneID)
+	}
+	sendKeys, ok := rt.findCommand("send-keys")
+	if !ok {
+		t.Fatal("expected integrate command to be sent")
+	}
+	if got := strings.Join(sendKeys, " "); !strings.Contains(got, "pop tasks integrate "+setID) {
+		t.Fatalf("send-keys = %v, want existing integrate entry point", sendKeys)
+	}
+	if _, ok := rt.findCommand("select-pane"); !ok {
+		t.Fatal("expected integrate pane to be selected")
+	}
+	switchClient, ok := rt.findCommand("switch-client")
+	if !ok || !argsContain(switchClient, "-t", "%3") {
+		t.Fatalf("switch-client = %v, want pane %%3", switchClient)
 	}
 }
 

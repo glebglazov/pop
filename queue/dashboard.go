@@ -28,12 +28,13 @@ type DashboardRow struct {
 	Drain     string
 	AutoDrain bool
 
-	defPath     string
-	statePath   string
-	cursorKey   string
-	repoKey     string
-	runtimePath string
-	paneID      string
+	defPath            string
+	statePath          string
+	cursorKey          string
+	repoKey            string
+	runtimePath        string
+	paneID             string
+	integrationBacklog bool
 }
 
 // DashboardSnapshot is the data model for `pop queue dashboard`.
@@ -133,18 +134,19 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 		drain := dashboardDrain(d, state, repoKey, taskRow.ID, wt.runtimePath)
 		status := dashboardStatus(taskRow.Status, merge, awaitingIntegration)
 		rows = append(rows, DashboardRow{
-			Project:     projectName,
-			SetID:       taskRow.ID,
-			Status:      status,
-			Worktree:    wt.label,
-			Drain:       drain,
-			AutoDrain:   taskRow.AutoDrain,
-			defPath:     scans[0].DefinitionPath,
-			statePath:   tasks.StatePathFor(scans[0].DefinitionPath),
-			cursorKey:   projectName + "\x00" + taskRow.ID,
-			repoKey:     repoKey,
-			runtimePath: wt.runtimePath,
-			paneID:      dashboardPaneID(state, repoKey, taskRow.ID),
+			Project:            projectName,
+			SetID:              taskRow.ID,
+			Status:             status,
+			Worktree:           wt.label,
+			Drain:              drain,
+			AutoDrain:          taskRow.AutoDrain,
+			defPath:            scans[0].DefinitionPath,
+			statePath:          tasks.StatePathFor(scans[0].DefinitionPath),
+			cursorKey:          projectName + "\x00" + taskRow.ID,
+			repoKey:            repoKey,
+			runtimePath:        wt.runtimePath,
+			paneID:             dashboardPaneID(state, repoKey, taskRow.ID),
+			integrationBacklog: taskRow.Status == tasks.StatusDone && awaitingIntegration,
 		})
 	}
 	return rows, nil
@@ -347,6 +349,12 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.err = nil
 			return m, m.launchDrain(m.snap.Rows[m.cursor])
+		case "I":
+			if !m.selectedRowCanIntegrate() {
+				return m, nil
+			}
+			m.err = nil
+			return m, m.launchIntegrate(m.snap.Rows[m.cursor])
 		case "p":
 			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
 				return m, nil
@@ -427,6 +435,10 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.reload()
 	}
 	return m, nil
+}
+
+func (m dashboardModel) selectedRowCanIntegrate() bool {
+	return len(m.snap.Rows) > 0 && m.cursor >= 0 && m.cursor < len(m.snap.Rows) && DashboardRowCanIntegrate(m.snap.Rows[m.cursor])
 }
 
 func (m dashboardModel) updateBindModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -536,6 +548,13 @@ func (m dashboardModel) launchDrain(row DashboardRow) tea.Cmd {
 	}
 }
 
+func (m dashboardModel) launchIntegrate(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		_, err := LaunchDashboardIntegrate(m.d, m.cfg, row)
+		return dashboardDrainMsg{err: err}
+	}
+}
+
 func (m dashboardModel) previewDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		err := PreviewDashboardDrain(m.d, row)
@@ -572,6 +591,11 @@ func (m dashboardModel) createBindWorktree(row DashboardRow, baseRef, name strin
 }
 
 type DashboardDrainResult struct {
+	PaneID      string
+	RuntimePath string
+}
+
+type DashboardIntegrateResult struct {
 	PaneID      string
 	RuntimePath string
 }
@@ -690,6 +714,101 @@ func LaunchDashboardDrain(d *Deps, cfg *config.Config, row DashboardRow) (Dashbo
 		return DashboardDrainResult{}, err
 	}
 	return DashboardDrainResult{PaneID: spawn.PaneID, RuntimePath: dec.scan.RuntimePath}, nil
+}
+
+// DashboardRowCanIntegrate reports whether the dashboard's `I` action is
+// enabled. Only DONE sets that have a mergeability record are in the
+// Integration backlog; all other rows intentionally no-op.
+func DashboardRowCanIntegrate(row DashboardRow) bool {
+	return row.integrationBacklog
+}
+
+// LaunchDashboardIntegrate opens the existing `pop tasks integrate <set>`
+// wizard in the shared pop-queue window and switches the current tmux client to
+// that pane so the attended conflict path has a TTY.
+func LaunchDashboardIntegrate(d *Deps, cfg *config.Config, row DashboardRow) (DashboardIntegrateResult, error) {
+	if !DashboardRowCanIntegrate(row) {
+		return DashboardIntegrateResult{}, nil
+	}
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	if d.Tmux == nil {
+		d.Tmux = deps.NewRealTmux()
+	}
+	session, dir, err := dashboardIntegrateTarget(d, cfg, row)
+	if err != nil {
+		return DashboardIntegrateResult{}, err
+	}
+	paneID, err := spawnIntegrateWizard(d.Tmux, session, dir, "pop tasks integrate "+shellQuote(row.SetID))
+	if err != nil {
+		return DashboardIntegrateResult{}, err
+	}
+	return DashboardIntegrateResult{PaneID: paneID, RuntimePath: dir}, nil
+}
+
+func dashboardIntegrateTarget(d *Deps, cfg *config.Config, row DashboardRow) (session, dir string, err error) {
+	scans, err := dashboardScansForDefinition(d, cfg, row.defPath)
+	if err != nil {
+		return "", "", err
+	}
+	if len(scans) == 0 {
+		return "", "", fmt.Errorf("task set %s is no longer in a registered queue project", row.SetID)
+	}
+	rep, _, err := resolveRepresentative(d, cfg, scans)
+	if err != nil {
+		return "", "", err
+	}
+	if rep != nil {
+		return rep.SessionName, rep.ProjectPath, nil
+	}
+	if strings.TrimSpace(row.runtimePath) != "" {
+		dir := row.runtimePath
+		return project.SessionNameWith(d.Project, dir), dir, nil
+	}
+	return "", "", fmt.Errorf("no checkout available for integrating %s", row.SetID)
+}
+
+func spawnIntegrateWizard(tmux deps.Tmux, session, dir, command string) (string, error) {
+	if !tmux.HasSession(session) {
+		if err := tmux.NewSession(session, dir); err != nil {
+			return "", fmt.Errorf("create session %q: %w", session, err)
+		}
+	}
+	windowTarget, freshPaneID, err := resolveDrainWindowTarget(tmux, session, dir)
+	if err != nil {
+		return "", err
+	}
+	paneID := freshPaneID
+	if paneID == "" {
+		out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", windowTarget, "-c", dir)
+		if err != nil {
+			return "", fmt.Errorf("create integrate pane: %w", err)
+		}
+		paneID = strings.TrimSpace(out)
+		if paneID == "" {
+			return "", fmt.Errorf("create integrate pane: tmux returned no pane id")
+		}
+		if _, err := tmux.Command("select-layout", "-t", windowTarget, "tiled"); err != nil {
+			return "", fmt.Errorf("retile queue window: %w", err)
+		}
+	}
+	if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
+		return "", fmt.Errorf("send integrate command: %w", err)
+	}
+	if _, err := tmux.Command("select-pane", "-t", paneID); err != nil {
+		return "", err
+	}
+	if _, err := tmux.Command("switch-client", "-t", paneID); err != nil {
+		return "", err
+	}
+	return paneID, nil
 }
 
 func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([]projectScan, error) {
