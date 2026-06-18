@@ -61,7 +61,7 @@ func TestFormatRunSummary(t *testing.T) {
 func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
 	snap := statusFromDecisions([]Decision{
 		{Project: "running", Busy: true, lockStatus: &tasks.RuntimeLockStatus{
-			Locked: true,
+			Locked:   true,
 			Metadata: &tasks.RuntimeLockMetadata{SetID: "set-a", PID: 99},
 		}},
 		{Project: "queued", TaskSetID: "set-ready", Reason: "ready"},

@@ -45,6 +45,9 @@ type Deps struct {
 	// ComputeMergeability dry-runs merging a completed runtime branch into the
 	// working checkout. Defaults to git merge-tree.
 	ComputeMergeability func(workingPath, runtimePath string) (MergeabilityRecord, error)
+	// ToggleAutoDrain flips a registered Task-set auto-drain bit in Task state.
+	// Defaults to tasks.ToggleAutoDrainWith.
+	ToggleAutoDrain func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error)
 	// AcquireRuntimeLock serializes human-triggered integration with normal
 	// runtime execution. Defaults to tasks.AcquireRuntimeLock.
 	AcquireRuntimeLock func(runtimePath string) (runtimeLock, error)
@@ -96,6 +99,13 @@ func (d *Deps) computeMergeability(workingPath, runtimePath string) (Mergeabilit
 		return d.ComputeMergeability(workingPath, runtimePath)
 	}
 	return computeMergeability(d, workingPath, runtimePath)
+}
+
+func (d *Deps) toggleAutoDrain(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {
+	if d.ToggleAutoDrain != nil {
+		return d.ToggleAutoDrain(defPath, statePath, setID)
+	}
+	return tasks.ToggleAutoDrainWith(d.Tasks, defPath, statePath, setID)
 }
 
 func (d *Deps) acquireRuntimeLock(runtimePath string) (runtimeLock, error) {
@@ -527,14 +537,14 @@ func loadRepoConfig(d *Deps, repoRoot string) (config.RepoConfig, error) {
 	return config.LoadRepoConfigWith(&config.Deps{FS: pd.FS}, repoRoot)
 }
 
-// selectReadySet returns the highest-priority Ready set among refresh rows.
-// RefreshWith returns only non-Archived sets, so Archived sets are already
-// dropped here. Higher priority integers rank first; ties break by
+// selectReadySetID returns the highest-priority Auto-drain Ready set among
+// refresh rows. RefreshWith returns only non-Archived sets, so Archived sets are
+// already dropped here. Higher priority integers rank first; ties break by
 // registration order, matching the status table's active-set ordering.
 func selectReadySetID(rows []tasks.Row) (string, bool) {
 	var ready []tasks.Row
 	for _, row := range rows {
-		if row.Status == tasks.StatusReady {
+		if row.Status == tasks.StatusReady && row.AutoDrain {
 			ready = append(ready, row)
 		}
 	}
@@ -564,7 +574,7 @@ func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *Daemon
 	}
 	var ready []tasks.Row
 	for _, row := range refresh.Rows {
-		if row.Status == tasks.StatusReady {
+		if row.Status == tasks.StatusReady && row.AutoDrain {
 			ready = append(ready, row)
 		}
 	}

@@ -40,7 +40,7 @@ func TestSelectReadySet(t *testing.T) {
 		{
 			name: "single ready row",
 			rows: []tasks.Row{
-				{ID: "only", Status: tasks.StatusReady, Priority: 0},
+				{ID: "only", Status: tasks.StatusReady, AutoDrain: true, Priority: 0},
 			},
 			want: "only",
 			ok:   true,
@@ -48,10 +48,10 @@ func TestSelectReadySet(t *testing.T) {
 		{
 			name: "highest priority wins, non-ready ignored",
 			rows: []tasks.Row{
-				{ID: "low", Status: tasks.StatusReady, Priority: 1, RegIndex: 0},
+				{ID: "low", Status: tasks.StatusReady, AutoDrain: true, Priority: 1, RegIndex: 0},
 				{ID: "blocked-high", Status: tasks.StatusBlocked, Priority: 100, RegIndex: 1},
-				{ID: "high", Status: tasks.StatusReady, Priority: 50, RegIndex: 2},
-				{ID: "mid", Status: tasks.StatusReady, Priority: 10, RegIndex: 3},
+				{ID: "high", Status: tasks.StatusReady, AutoDrain: true, Priority: 50, RegIndex: 2},
+				{ID: "mid", Status: tasks.StatusReady, AutoDrain: true, Priority: 10, RegIndex: 3},
 			},
 			want: "high",
 			ok:   true,
@@ -59,8 +59,8 @@ func TestSelectReadySet(t *testing.T) {
 		{
 			name: "priority tie breaks by registration order",
 			rows: []tasks.Row{
-				{ID: "second", Status: tasks.StatusReady, Priority: 5, RegIndex: 4},
-				{ID: "first", Status: tasks.StatusReady, Priority: 5, RegIndex: 1},
+				{ID: "second", Status: tasks.StatusReady, AutoDrain: true, Priority: 5, RegIndex: 4},
+				{ID: "first", Status: tasks.StatusReady, AutoDrain: true, Priority: 5, RegIndex: 1},
 			},
 			want: "first",
 			ok:   true,
@@ -183,8 +183,8 @@ func TestDecideProjectSelectsHighestPriority(t *testing.T) {
 		},
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
-				{ID: "low", Status: tasks.StatusReady, Priority: 1, RegIndex: 0},
-				{ID: "top", Status: tasks.StatusReady, Priority: 99, RegIndex: 1},
+				{ID: "low", Status: tasks.StatusReady, AutoDrain: true, Priority: 1, RegIndex: 0},
+				{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 99, RegIndex: 1},
 				{ID: "blocked", Status: tasks.StatusBlocked, Priority: 100, RegIndex: 2},
 			}}, nil
 		},
@@ -203,6 +203,35 @@ func TestDecideProjectSelectsHighestPriority(t *testing.T) {
 	}
 	if !dec.Actionable() {
 		t.Fatalf("expected actionable decision, got %+v", dec)
+	}
+}
+
+func TestDecideProjectSelectsOnlyAutoDrainReadySets(t *testing.T) {
+	d := &Deps{
+		Tasks:    queueTestTasksDeps(true),
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{Rows: []tasks.Row{
+				{ID: "unmarked", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
+				{ID: "marked", Status: tasks.StatusReady, AutoDrain: true, Priority: 1, RegIndex: 1},
+			}}, nil
+		},
+	}
+
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+
+	if dec.TaskSetID != "marked" {
+		t.Fatalf("TaskSetID = %q, want marked; decision=%+v", dec.TaskSetID, dec)
+	}
+
+	d.Refresh = func(defPath string) (*tasks.RefreshResult, error) {
+		return &tasks.RefreshResult{Rows: []tasks.Row{
+			{ID: "unmarked", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
+		}}, nil
+	}
+	dec = decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	if dec.Actionable() || dec.Reason != "no ready set" {
+		t.Fatalf("unmarked ready set should be skipped, got %+v", dec)
 	}
 }
 
@@ -300,7 +329,7 @@ func TestDecideProjectWorktreeReadyTreatsLiveSpawnAsBusy(t *testing.T) {
 		},
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
-				{ID: "ready", Status: tasks.StatusReady, Priority: 10, RegIndex: 0},
+				{ID: "ready", Status: tasks.StatusReady, AutoDrain: true, Priority: 10, RegIndex: 0},
 			}}, nil
 		},
 	}
@@ -349,8 +378,8 @@ func TestDecideProjectWorktreeReadyAdoptedCheckoutNotDoubleCounted(t *testing.T)
 		},
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
-				{ID: "adopted", Status: tasks.StatusReady, Priority: 20, RegIndex: 0},
-				{ID: "other", Status: tasks.StatusReady, Priority: 10, RegIndex: 1},
+				{ID: "adopted", Status: tasks.StatusReady, AutoDrain: true, Priority: 20, RegIndex: 0},
+				{ID: "other", Status: tasks.StatusReady, AutoDrain: true, Priority: 10, RegIndex: 1},
 			}}, nil
 		},
 	}
@@ -411,7 +440,7 @@ func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 		},
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
-				{ID: "live", Status: tasks.StatusReady, Priority: 20, RegIndex: 0},
+				{ID: "live", Status: tasks.StatusReady, AutoDrain: true, Priority: 20, RegIndex: 0},
 			}}, nil
 		},
 	}
@@ -501,9 +530,9 @@ func TestDecideProjectDispatchesWorktreeReadyReadySetsConcurrently(t *testing.T)
 		},
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
-				{ID: "set-a", Status: tasks.StatusReady, Priority: 30, RegIndex: 0},
-				{ID: "set-b", Status: tasks.StatusReady, Priority: 20, RegIndex: 1},
-				{ID: "set-c", Status: tasks.StatusReady, Priority: 10, RegIndex: 2},
+				{ID: "set-a", Status: tasks.StatusReady, AutoDrain: true, Priority: 30, RegIndex: 0},
+				{ID: "set-b", Status: tasks.StatusReady, AutoDrain: true, Priority: 20, RegIndex: 1},
+				{ID: "set-c", Status: tasks.StatusReady, AutoDrain: true, Priority: 10, RegIndex: 2},
 				{ID: "blocked", Status: tasks.StatusBlocked, Priority: 100, RegIndex: 3},
 			}}, nil
 		},
@@ -546,8 +575,8 @@ func TestDecideProjectDispatchesNonWorktreeReadyKeepsSingleInPlaceDrain(t *testi
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
-				{ID: "top", Status: tasks.StatusReady, Priority: 30, RegIndex: 0},
-				{ID: "next", Status: tasks.StatusReady, Priority: 20, RegIndex: 1},
+				{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 30, RegIndex: 0},
+				{ID: "next", Status: tasks.StatusReady, AutoDrain: true, Priority: 20, RegIndex: 1},
 			}}, nil
 		},
 	}
@@ -600,8 +629,8 @@ func TestSelectDefaultAgentAllCooledWaits(t *testing.T) {
 func TestSelectReadySetSkipsBackedOffPinnedSet(t *testing.T) {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
-		{ID: "pinned", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
-		{ID: "fallback", Status: tasks.StatusReady, Priority: 1, RegIndex: 1},
+		{ID: "pinned", Status: tasks.StatusReady, AutoDrain: true, Priority: 100, RegIndex: 0},
+		{ID: "fallback", Status: tasks.StatusReady, AutoDrain: true, Priority: 1, RegIndex: 1},
 	}}
 	repoKey := "test-repo"
 	state := &DaemonState{Version: 1, SetBackoffs: map[string]time.Time{
@@ -617,7 +646,7 @@ func TestSelectReadySetSkipsBackedOffPinnedSet(t *testing.T) {
 func TestSelectReadySetSkipsCrashBackoffUntilElapsed(t *testing.T) {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
-		{ID: "crashy", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
+		{ID: "crashy", Status: tasks.StatusReady, AutoDrain: true, Priority: 100, RegIndex: 0},
 	}}
 	repoKey := "test-repo"
 	state := &DaemonState{Version: 1, SetCrashBackoffs: map[string]time.Time{
@@ -638,7 +667,7 @@ func TestSelectReadySetSkipsCrashBackoffUntilElapsed(t *testing.T) {
 func TestSelectReadySetSkipsParkedSet(t *testing.T) {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
-		{ID: "parked", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
+		{ID: "parked", Status: tasks.StatusReady, AutoDrain: true, Priority: 100, RegIndex: 0},
 	}}
 	repoKey := "test-repo"
 	state := &DaemonState{Version: 1, ParkedSets: map[string]ParkedSet{

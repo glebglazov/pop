@@ -242,7 +242,11 @@ func setupSupervisorSpawnRepo(t *testing.T, stem string, taskRows []spawnTestTas
 		writeSpawnTaskMD(t, setDir, task.File)
 	}
 	writeSpawnManifest(t, setDir, taskRows)
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	statePath := tasks.StatePathFor(tasksDir)
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, statePath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.ToggleAutoDrainWith(tasks.DefaultDeps(), tasksDir, statePath, stem); err != nil {
 		t.Fatal(err)
 	}
 

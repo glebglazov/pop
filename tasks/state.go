@@ -22,9 +22,10 @@ func StatePathFor(defPath string) string {
 
 // RegisteredTaskSet is persisted registration metadata for an Task set.
 type RegisteredTaskSet struct {
-	ID       string `json:"id"`
-	Priority int    `json:"priority"`
-	Archived bool   `json:"archived"`
+	ID        string `json:"id"`
+	Priority  int    `json:"priority"`
+	Archived  bool   `json:"archived"`
+	AutoDrain bool   `json:"auto_drain"`
 }
 
 // TaskEntry holds registered Task sets for one definition path.

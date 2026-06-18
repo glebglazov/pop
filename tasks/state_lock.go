@@ -199,9 +199,10 @@ func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *Glob
 			continue
 		}
 		entry.TaskSets = append(entry.TaskSets, RegisteredTaskSet{
-			ID:       id,
-			Priority: 0,
-			Archived: false,
+			ID:        id,
+			Priority:  0,
+			Archived:  false,
+			AutoDrain: false,
 		})
 		registered[id] = len(entry.TaskSets) - 1
 		if added != nil {

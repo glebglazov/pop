@@ -19,12 +19,15 @@ const dashboardPollInterval = 2 * time.Second
 
 // DashboardRow is one read-only Queue dashboard table row.
 type DashboardRow struct {
-	Project  string
-	SetID    string
-	Status   string
-	Worktree string
-	Drain    string
+	Project   string
+	SetID     string
+	Status    string
+	Worktree  string
+	Drain     string
+	AutoDrain bool
 
+	defPath   string
+	statePath string
 	cursorKey string
 }
 
@@ -130,6 +133,9 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 			Status:    status,
 			Worktree:  wt.label,
 			Drain:     drain,
+			AutoDrain: taskRow.AutoDrain,
+			defPath:   scans[0].DefinitionPath,
+			statePath: tasks.StatePathFor(scans[0].DefinitionPath),
 			cursorKey: projectName + "\x00" + taskRow.ID,
 		})
 	}
@@ -220,6 +226,11 @@ type dashboardRowsMsg struct {
 	snap DashboardSnapshot
 	err  error
 }
+type dashboardToggleMsg struct {
+	key       string
+	autoDrain bool
+	err       error
+}
 
 type dashboardModel struct {
 	d      *Deps
@@ -232,6 +243,9 @@ type dashboardModel struct {
 }
 
 func newDashboardModel(d *Deps, cfg *config.Config, snap DashboardSnapshot) dashboardModel {
+	if d == nil {
+		d = DefaultDeps()
+	}
 	return dashboardModel{d: d, cfg: cfg, snap: snap}
 }
 
@@ -253,6 +267,14 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.snap.Rows) > 0 && m.cursor > 0 {
 				m.cursor--
 			}
+		case "a":
+			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+				return m, nil
+			}
+			row := m.snap.Rows[m.cursor]
+			m.snap.Rows[m.cursor].AutoDrain = !m.snap.Rows[m.cursor].AutoDrain
+			m.err = nil
+			return m, m.toggleAutoDrain(row)
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -269,6 +291,17 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.snap = msg.snap
 			m.cursor = dashboardCursorAfterReload(m.snap.Rows, oldKey, m.cursor)
 		}
+	case dashboardToggleMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, m.reload()
+		}
+		for i := range m.snap.Rows {
+			if m.snap.Rows[i].cursorKey == msg.key {
+				m.snap.Rows[i].AutoDrain = msg.autoDrain
+				break
+			}
+		}
 	}
 	return m, nil
 }
@@ -277,6 +310,16 @@ func (m dashboardModel) reload() tea.Cmd {
 	return func() tea.Msg {
 		snap, err := BuildDashboard(m.d, m.cfg)
 		return dashboardRowsMsg{snap: snap, err: err}
+	}
+}
+
+func (m dashboardModel) toggleAutoDrain(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		result, err := m.d.toggleAutoDrain(row.defPath, row.statePath, row.SetID)
+		if err != nil {
+			return dashboardToggleMsg{key: row.cursorKey, err: err}
+		}
+		return dashboardToggleMsg{key: row.cursorKey, autoDrain: result.AutoDrain}
 	}
 }
 
@@ -319,15 +362,16 @@ func (m dashboardModel) View() tea.View {
 	}
 	renderDashboardTable(&b, m.snap.Rows, m.cursor)
 	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "j/k move · q quit")
+	fmt.Fprintln(&b, "j/k move · a auto-drain · q quit")
 	return tea.NewView(b.String())
 }
 
 func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor int) {
-	headers := []string{"project", "task set", "status", "worktree", "drain"}
+	headers := []string{"project", "task set", "status", "worktree", "drain", ""}
 	widths := []int{len(headers[0]), len(headers[1]), len(headers[2]), len(headers[3]), len(headers[4])}
+	widths = append(widths, len(headers[5]))
 	for _, row := range rows {
-		values := []string{row.Project, row.SetID, row.Status, row.Worktree, row.Drain}
+		values := dashboardRowValues(row)
 		for i, v := range values {
 			if n := lipgloss.Width(v); n > widths[i] {
 				widths[i] = n
@@ -340,9 +384,17 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor int) {
 		if i == cursor {
 			prefix = "> "
 		}
-		values := []string{row.Project, row.SetID, row.Status, row.Worktree, row.Drain}
+		values := dashboardRowValues(row)
 		fmt.Fprintf(w, "%s%s\n", prefix, dashboardTableLine(values, widths))
 	}
+}
+
+func dashboardRowValues(row DashboardRow) []string {
+	badge := ""
+	if row.AutoDrain {
+		badge = "Auto-drain"
+	}
+	return []string{row.Project, row.SetID, row.Status, row.Worktree, row.Drain, badge}
 }
 
 func dashboardTableLine(values []string, widths []int) string {

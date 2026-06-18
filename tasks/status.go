@@ -25,6 +25,7 @@ type Row struct {
 	Status           TaskSetStatus
 	Priority         int
 	PriorityShow     string
+	AutoDrain        bool
 	Progress         string
 	BlockedReason    string
 	FailedTasks      []string

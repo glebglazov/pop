@@ -93,7 +93,7 @@ func TestParseGitMainWorktree(t *testing.T) {
 
 func TestDecideRepoDispatchesBareMultiWorktreeCollapsesToOneDrain(t *testing.T) {
 	_, wts := initBareRepoWithWorktrees(t, 3)
-	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, Priority: 1}}, nil)
+	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
 
 	// queue_base override pins the repo's base to the first worktree.
 	cfg := &config.Config{Repo: map[string]config.RepoOverrideConfig{
@@ -125,7 +125,7 @@ func TestDecideRepoDispatchesBareMultiWorktreeCollapsesToOneDrain(t *testing.T) 
 
 func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 	_, wts := initBareRepoWithWorktrees(t, 2)
-	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, Priority: 1}}, nil)
+	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
 	scans := scansForCheckouts(wts, "/def")
 
 	decisions := decideRepoDispatches(d, &config.Config{}, scans, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
@@ -155,7 +155,7 @@ func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 
 func TestDecideRepoDispatchesBindingRoutesRegardlessOfWorktreeReady(t *testing.T) {
 	_, wts := initBareRepoWithWorktrees(t, 2)
-	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, Priority: 1}}, nil)
+	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
 
 	// A per-set binding exists even though the bare repo is not worktree-ready
 	// and has no queue_base: the binding is the universal drain router.
@@ -189,7 +189,7 @@ func TestDecideRepoDispatchesBindingRoutesRegardlessOfWorktreeReady(t *testing.T
 
 func TestDecideRepoDispatchesNonBareRoutesToGitMainWorktree(t *testing.T) {
 	main, linked := initNonBareRepoWithLinkedWorktrees(t, 2)
-	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, Priority: 1}}, nil)
+	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
 
 	// Picker order lists a linked worktree first; with no config the drain must
 	// still route to the repo's git main worktree.
@@ -228,7 +228,7 @@ func TestScanCrossRepositoryFanOutPreserved(t *testing.T) {
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
 		ReadLock:   func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
 		Refresh: func(string) (*tasks.RefreshResult, error) {
-			return &tasks.RefreshResult{Rows: []tasks.Row{{ID: "top", Status: tasks.StatusReady, Priority: 1}}}, nil
+			return &tasks.RefreshResult{Rows: []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}}, nil
 		},
 	}
 

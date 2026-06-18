@@ -152,6 +152,7 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 					Status:       StatusMissing,
 					Priority:     reg.Priority,
 					PriorityShow: fmt.Sprintf("%d", reg.Priority),
+					AutoDrain:    reg.AutoDrain,
 					RegIndex:     i,
 				})
 				continue
@@ -190,6 +191,7 @@ func buildTaskSetRow(reg RegisteredTaskSet, m *Manifest, regIndex int) Row {
 		Status:       status,
 		Priority:     reg.Priority,
 		PriorityShow: fmt.Sprintf("%d", reg.Priority),
+		AutoDrain:    reg.AutoDrain,
 		RegIndex:     regIndex,
 	}
 

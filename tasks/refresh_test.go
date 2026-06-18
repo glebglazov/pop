@@ -33,8 +33,11 @@ func TestRefreshAutoRegistration(t *testing.T) {
 	if entry == nil || len(entry.TaskSets) != 1 || entry.TaskSets[0].Priority != 0 {
 		t.Fatalf("state = %#v", entry)
 	}
+	if entry.TaskSets[0].AutoDrain {
+		t.Fatalf("auto_drain default = true, want false")
+	}
 
-	// Persisted registration uses the issue_sets key and stores only id + priority.
+	// Persisted registration uses the issue_sets key and stores registration metadata only.
 	raw, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +47,9 @@ func TestRefreshAutoRegistration(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "\"prds\"") || strings.Contains(string(raw), "\"title\"") {
 		t.Fatalf("state file has stale PRD fields:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "\"auto_drain\": false") {
+		t.Fatalf("state file missing default auto_drain bit:\n%s", raw)
 	}
 }
 

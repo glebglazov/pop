@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
@@ -69,7 +70,7 @@ func dashboardTestDeps(t *testing.T, rows []tasks.Row, locks map[string]*tasks.R
 
 func TestDashboardShowRuleFiltering(t *testing.T) {
 	rows := []tasks.Row{
-		{ID: "ready", Status: tasks.StatusReady},
+		{ID: "ready", Status: tasks.StatusReady, AutoDrain: true},
 		{ID: "failed", Status: tasks.StatusFailed},
 		{ID: "blocked", Status: tasks.StatusBlocked},
 		{ID: "deferred", Status: tasks.StatusDeferred},
@@ -115,7 +116,7 @@ func TestDashboardSortOrder(t *testing.T) {
 func TestDashboardColumnDerivation(t *testing.T) {
 	rows := []tasks.Row{
 		{ID: "done", Status: tasks.StatusDone},
-		{ID: "ready", Status: tasks.StatusReady},
+		{ID: "ready", Status: tasks.StatusReady, AutoDrain: true},
 		{ID: "bound", Status: tasks.StatusBlocked},
 	}
 	d := dashboardTestDeps(t, rows, nil)
@@ -172,8 +173,8 @@ func TestDashboardPickedUpIndicator(t *testing.T) {
 		},
 	}
 	d := dashboardTestDeps(t, []tasks.Row{
-		{ID: "ready", Status: tasks.StatusReady},
-		{ID: "other", Status: tasks.StatusReady},
+		{ID: "ready", Status: tasks.StatusReady, AutoDrain: true},
+		{ID: "other", Status: tasks.StatusReady, AutoDrain: true},
 	}, locks)
 	scans := []projectScan{{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}}
 
@@ -190,5 +191,43 @@ func TestDashboardPickedUpIndicator(t *testing.T) {
 	}
 	if byID["other"].Drain != "" {
 		t.Fatalf("other drain = %q, want empty", byID["other"].Drain)
+	}
+}
+
+func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
+	rows := []DashboardRow{
+		{Project: "pop", SetID: "marked", Status: "READY", Worktree: "/repo/main (main)", AutoDrain: true},
+		{Project: "pop", SetID: "plain", Status: "READY", Worktree: "/repo/main (main)"},
+	}
+	var rendered strings.Builder
+	renderDashboardTable(&rendered, rows, 0)
+	if !strings.Contains(rendered.String(), "Auto-drain") {
+		t.Fatalf("missing auto-drain badge:\n%s", rendered.String())
+	}
+
+	var toggledDef, toggledState, toggledSet string
+	d := &Deps{
+		ToggleAutoDrain: func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {
+			toggledDef, toggledState, toggledSet = defPath, statePath, setID
+			return &tasks.AutoDrainResult{TaskSetID: setID, AutoDrain: true}, nil
+		},
+	}
+	m := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+		Project: "pop", SetID: "plain", Status: "READY", Worktree: "/repo/main (main)",
+		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00plain",
+	}}})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(dashboardModel)
+	if !got.snap.Rows[0].AutoDrain {
+		t.Fatalf("toggle did not update badge immediately: %+v", got.snap.Rows[0])
+	}
+	msg := cmd().(dashboardToggleMsg)
+	updated, _ = got.Update(msg)
+	got = updated.(dashboardModel)
+	if toggledDef != "/repo/tasks" || toggledState != "/repo/state.json" || toggledSet != "plain" {
+		t.Fatalf("toggle target = (%q, %q, %q)", toggledDef, toggledState, toggledSet)
+	}
+	if !got.snap.Rows[0].AutoDrain || got.err != nil {
+		t.Fatalf("toggle result = row %+v err %v", got.snap.Rows[0], got.err)
 	}
 }
