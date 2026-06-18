@@ -256,7 +256,7 @@ func TestTaskIntegrateShellCompletionCandidates(t *testing.T) {
 	assertShellCompOmitsExact(t, out, "set-conflict")
 }
 
-func TestQueueAbandonShellCompletionCandidates(t *testing.T) {
+func TestTasksUnbindWorktreeShellCompletionCandidates(t *testing.T) {
 	dir := t.TempDir()
 	td := queueShellCompletionDeps(t, dir)
 	state := &queue.DaemonState{
@@ -276,15 +276,15 @@ func TestQueueAbandonShellCompletionCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prev := queueCompletionDeps
-	queueCompletionDeps = func() *queue.Deps { return &queue.Deps{Tasks: td} }
-	t.Cleanup(func() { queueCompletionDeps = prev })
+	prev := taskIntegrationCompletionDeps
+	taskIntegrationCompletionDeps = func() *queue.Deps { return &queue.Deps{Tasks: td} }
+	t.Cleanup(func() { taskIntegrationCompletionDeps = prev })
 
-	out := shellCompNoDesc(t, "queue", "abandon")
+	out := shellCompNoDesc(t, "tasks", "unbind-worktree")
 	assertShellCompContains(t, out, "set-bound", "set-other")
 	assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
 
-	out = shellCompNoDescCompleting(t, "queue", "abandon", "set-b")
+	out = shellCompNoDescCompleting(t, "tasks", "unbind-worktree", "set-b")
 	assertShellCompContains(t, out, "set-bound")
 	assertShellCompOmitsExact(t, out, "set-other")
 }

@@ -939,8 +939,8 @@ func TestPrepareWorktreeDrainRefusesInvalidBinding(t *testing.T) {
 	if got.Actionable() {
 		t.Fatalf("invalid binding must refuse spawn, got actionable %+v", got)
 	}
-	if !strings.Contains(out.String(), "pop queue abandon") {
-		t.Fatalf("output must mention abandon: %q", out.String())
+	if !strings.Contains(out.String(), "pop tasks unbind-worktree") {
+		t.Fatalf("output must mention unbind: %q", out.String())
 	}
 	if got.scan.RuntimePath != "/repo" {
 		t.Fatalf("must not fall back in-place, got runtime %q", got.scan.RuntimePath)

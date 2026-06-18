@@ -176,7 +176,7 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 	key := setScopedKey(repoKey, dec.TaskSetID)
 	if binding, ok := state.WorktreeBindings[key]; ok {
 		if err := validateBoundWorktree(d, dec.scan.ProjectPath, binding); err != nil {
-			fmt.Fprintf(out, "queue: %s: bound worktree for %s is invalid (%v); repair git state or run `pop queue abandon`\n", dec.Project, dec.TaskSetID, err)
+			fmt.Fprintf(out, "queue: %s: bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`\n", dec.Project, dec.TaskSetID, err)
 			dec.TaskSetID = ""
 			dec.Reason = "bound worktree invalid"
 			return dec

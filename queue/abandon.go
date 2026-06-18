@@ -65,16 +65,16 @@ func AbandonWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer
 		return AbandonResult{}, err
 	}
 	if !ok {
-		fmt.Fprintf(out, "queue: %s has no worktree binding to abandon\n", setID)
+		fmt.Fprintf(out, "%s has no worktree binding to unbind\n", setID)
 		return AbandonResult{SetID: setID, Noop: true}, nil
 	}
 
 	lock := d.readLock(binding.RuntimePath)
 	if lock != nil && lock.Locked {
 		if lock.Metadata != nil && lock.Metadata.SetID != "" && lock.Metadata.SetID != setID {
-			return AbandonResult{}, fmt.Errorf("queue: %s runtime checkout is locked for another set (%s); refusing abandon", setID, lock.Metadata.SetID)
+			return AbandonResult{}, fmt.Errorf("%s runtime checkout is locked for another set (%s); refusing unbind", setID, lock.Metadata.SetID)
 		}
-		return AbandonResult{}, fmt.Errorf("queue: %s is currently executing; refusing abandon", setID)
+		return AbandonResult{}, fmt.Errorf("%s is currently executing; refusing unbind", setID)
 	}
 
 	needsConfirm, err := abandonNeedsConfirm(d, cfg, state, setID, binding)
@@ -91,7 +91,7 @@ func AbandonWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer
 			return AbandonResult{}, err
 		}
 		if !confirmed {
-			fmt.Fprintf(out, "queue: abandon cancelled for %s\n", setID)
+			fmt.Fprintf(out, "Unbind cancelled for %s\n", setID)
 			return AbandonResult{SetID: setID, Noop: true}, nil
 		}
 	}
@@ -138,9 +138,9 @@ func AbandonWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer
 		return AbandonResult{}, err
 	}
 	if binding.Provisioned {
-		fmt.Fprintf(out, "queue: abandoned %s and removed worktree %s\n", setID, binding.RuntimePath)
+		fmt.Fprintf(out, "Unbound %s and removed worktree %s\n", setID, binding.RuntimePath)
 	} else {
-		fmt.Fprintf(out, "queue: abandoned %s (adopted checkout retained at %s)\n", setID, binding.RuntimePath)
+		fmt.Fprintf(out, "Unbound %s (adopted checkout retained at %s)\n", setID, binding.RuntimePath)
 	}
 	return AbandonResult{SetID: setID}, nil
 }

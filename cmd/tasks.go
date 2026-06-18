@@ -20,20 +20,21 @@ import (
 )
 
 var (
-	taskProject            string
-	taskPath               string
-	taskDefPath            string
-	taskRuntimePath        string
-	taskAgentPreset        string
-	taskDefaultAgentPreset string
-	taskAgentCmd           string
-	taskAgentOutput        tasks.AgentOutputMode
-	taskRunYes             bool
-	taskAllowDirty         tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
-	taskMaxTries           int
-	taskTimeout            string
-	taskStatusArchived     bool
-	taskBindWorktreeForce  bool
+	taskProject              string
+	taskPath                 string
+	taskDefPath              string
+	taskRuntimePath          string
+	taskAgentPreset          string
+	taskDefaultAgentPreset   string
+	taskAgentCmd             string
+	taskAgentOutput          tasks.AgentOutputMode
+	taskRunYes               bool
+	taskAllowDirty           tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
+	taskMaxTries             int
+	taskTimeout              string
+	taskStatusArchived       bool
+	taskBindWorktreeForce    bool
+	taskUnbindWorktreeYes    bool
 )
 
 var taskCmd = &cobra.Command{
@@ -169,6 +170,13 @@ elsewhere.`,
 	RunE: runTaskBindWorktree,
 }
 
+var taskUnbindWorktreeCmd = &cobra.Command{
+	Use:   "unbind-worktree <set>",
+	Short: "Release a worktree binding without integrating",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskUnbindWorktree,
+}
+
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
@@ -189,6 +197,8 @@ func init() {
 	taskCmd.AddCommand(taskIntegrateCmd)
 	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeForce, "force", false, "Re-point a set already bound elsewhere")
 	taskCmd.AddCommand(taskBindWorktreeCmd)
+	taskUnbindWorktreeCmd.Flags().BoolVar(&taskUnbindWorktreeYes, "yes", false, "Skip confirmation prompt")
+	taskCmd.AddCommand(taskUnbindWorktreeCmd)
 
 	taskCmd.PersistentFlags().StringVar(&taskProject, "project", "", "Select project by exact picker-visible name")
 	taskCmd.PersistentFlags().StringVar(&taskPath, "path", "", "Select project by path (normalized to git checkout root)")
@@ -1117,6 +1127,21 @@ func runTaskBindWorktree(cmd *cobra.Command, args []string) error {
 	d := queue.DefaultDeps()
 	d.LoadConfig = taskConfigLoad
 	_, err = queue.BindWorktree(d, cfg, args[0], cwd, queue.BindWorktreeOptions{Force: taskBindWorktreeForce}, os.Stdout)
+	return err
+}
+
+func runTaskUnbindWorktree(cmd *cobra.Command, args []string) error {
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	cfg, err := taskConfigLoad(cfgPath)
+	if err != nil {
+		return err
+	}
+	d := queue.DefaultDeps()
+	d.LoadConfig = taskConfigLoad
+	_, err = queue.AbandonWithOptions(d, cfg, args[0], os.Stdout, queue.AbandonOptions{Yes: taskUnbindWorktreeYes, In: os.Stdin})
 	return err
 }
 

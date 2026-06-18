@@ -44,7 +44,7 @@ func TestAbandonRefusesWhileBusy(t *testing.T) {
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 
 	_, err := AbandonWithOptions(d, cfg, "set-1", io.Discard, AbandonOptions{Yes: true, In: tasks.NonInteractiveReader{}})
-	if err == nil || !strings.Contains(err.Error(), "refusing abandon") {
+	if err == nil || !strings.Contains(err.Error(), "refusing unbind") {
 		t.Fatalf("err = %v, want refuse while busy", err)
 	}
 
@@ -137,8 +137,8 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 	if len(entries) != 1 || entries[0].Event != JournalEventAbandoned || entries[0].SetID != "set-1" {
 		t.Fatalf("journal entries = %+v, want abandoned event", entries)
 	}
-	if !strings.Contains(out.String(), "abandoned set-1") {
-		t.Fatalf("output = %q, want clear abandon message", out.String())
+	if !strings.Contains(out.String(), "Unbound set-1") {
+		t.Fatalf("output = %q, want clear unbind message", out.String())
 	}
 }
 

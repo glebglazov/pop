@@ -118,45 +118,6 @@ poll_interval = "2s"
 	}
 }
 
-func TestRunQueueAbandonInvokesQueueAbandon(t *testing.T) {
-	path := writeQueueConfig(t, ``)
-
-	oldCfgFile := cfgFile
-	oldAbandon := queueAbandon
-	oldYes := queueAbandonYes
-	defer func() {
-		cfgFile = oldCfgFile
-		queueAbandon = oldAbandon
-		queueAbandonYes = oldYes
-	}()
-
-	cfgFile = path
-	queueAbandonYes = true
-	var gotSet string
-	var gotYes bool
-	queueAbandon = func(d *queue.Deps, cfg *config.Config, setID string, out io.Writer, opts queue.AbandonOptions) (queue.AbandonResult, error) {
-		gotSet = setID
-		gotYes = opts.Yes
-		if cfg == nil {
-			t.Fatal("config was nil")
-		}
-		if opts.In == nil {
-			t.Fatal("abandon input was nil")
-		}
-		return queue.AbandonResult{SetID: setID}, nil
-	}
-
-	if err := runQueueAbandon(nil, []string{"set-1"}); err != nil {
-		t.Fatal(err)
-	}
-	if gotSet != "set-1" {
-		t.Fatalf("setID = %q, want set-1", gotSet)
-	}
-	if !gotYes {
-		t.Fatal("expected --yes to be forwarded")
-	}
-}
-
 func equalQueueStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

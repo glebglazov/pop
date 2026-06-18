@@ -20,7 +20,7 @@ func TestDashboardCommandTree(t *testing.T) {
 		{path: []string{"worktree", "dashboard"}, wantCmd: worktreeDashboardCmd, wantRun: runWorktree},
 		{path: []string{"tasks", "integrate"}, wantCmd: taskIntegrateCmd, wantRun: runTaskIntegrate},
 		{path: []string{"tasks", "bind-worktree"}, wantCmd: taskBindWorktreeCmd, wantRun: runTaskBindWorktree},
-		{path: []string{"queue", "abandon"}, wantCmd: queueAbandonCmd, wantRun: runQueueAbandon},
+		{path: []string{"tasks", "unbind-worktree"}, wantCmd: taskUnbindWorktreeCmd, wantRun: runTaskUnbindWorktree},
 	}
 
 	for _, tt := range tests {
@@ -50,6 +50,20 @@ func TestQueueBindWorktreeRemovedMovedToTasks(t *testing.T) {
 	}
 	if got != taskBindWorktreeCmd {
 		t.Fatalf("Find([tasks bind-worktree]) = %q, want %q", got.CommandPath(), taskBindWorktreeCmd.CommandPath())
+	}
+}
+
+func TestQueueAbandonRemovedMovedToTasks(t *testing.T) {
+	cmd, args, err := rootCmd.Find([]string{"queue", "abandon"})
+	if len(args) == 0 && cmd.CommandPath() == "pop queue abandon" {
+		t.Fatalf("pop queue abandon should not exist; it moved to pop tasks unbind-worktree")
+	}
+	got, _, err := rootCmd.Find([]string{"tasks", "unbind-worktree"})
+	if err != nil {
+		t.Fatalf("Find([tasks unbind-worktree]): %v", err)
+	}
+	if got != taskUnbindWorktreeCmd {
+		t.Fatalf("Find([tasks unbind-worktree]) = %q, want %q", got.CommandPath(), taskUnbindWorktreeCmd.CommandPath())
 	}
 }
 

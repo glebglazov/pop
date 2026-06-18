@@ -51,27 +51,16 @@ var queueLogCmd = &cobra.Command{
 	RunE:  runQueueLog,
 }
 
-var queueAbandonCmd = &cobra.Command{
-	Use:   "abandon <set>",
-	Short: "Release a worktree binding without integrating",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runQueueAbandon,
-}
-
 func init() {
 	rootCmd.AddCommand(queueCmd)
 	queueCmd.AddCommand(queueRunCmd)
 	queueCmd.AddCommand(queueStatusCmd)
 	queueCmd.AddCommand(queueLogCmd)
-	queueAbandonCmd.Flags().BoolVar(&queueAbandonYes, "yes", false, "Skip confirmation prompt")
-	queueCmd.AddCommand(queueAbandonCmd)
 }
 
 var (
 	queueConfigLoad = config.Load
 	queueRun        = queue.Run
-	queueAbandon    = queue.AbandonWithOptions
-	queueAbandonYes bool
 )
 
 const queueLogLimit = 50
@@ -170,19 +159,4 @@ func runQueueLog(cmd *cobra.Command, args []string) error {
 	}
 	queue.RenderLog(os.Stdout, entries, queueLogLimit)
 	return nil
-}
-
-func runQueueAbandon(cmd *cobra.Command, args []string) error {
-	cfgPath := cfgFile
-	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
-	}
-	cfg, err := queueConfigLoad(cfgPath)
-	if err != nil {
-		return err
-	}
-	d := queue.DefaultDeps()
-	d.LoadConfig = queueConfigLoad
-	_, err = queueAbandon(d, cfg, args[0], os.Stdout, queue.AbandonOptions{Yes: queueAbandonYes, In: os.Stdin})
-	return err
 }
