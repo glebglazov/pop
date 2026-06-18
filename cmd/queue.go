@@ -44,6 +44,13 @@ var queueStatusCmd = &cobra.Command{
 	RunE:  runQueueStatus,
 }
 
+var queueDashboardCmd = &cobra.Command{
+	Use:   "dashboard",
+	Short: "Open the read-only queue dashboard",
+	Args:  cobra.NoArgs,
+	RunE:  runQueueDashboard,
+}
+
 var queueLogCmd = &cobra.Command{
 	Use:   "log",
 	Short: "Show recent queue journal history",
@@ -55,6 +62,7 @@ func init() {
 	rootCmd.AddCommand(queueCmd)
 	queueCmd.AddCommand(queueRunCmd)
 	queueCmd.AddCommand(queueStatusCmd)
+	queueCmd.AddCommand(queueDashboardCmd)
 	queueCmd.AddCommand(queueLogCmd)
 }
 
@@ -150,6 +158,20 @@ func runQueueStatus(cmd *cobra.Command, args []string) error {
 	}
 	queue.RenderStatus(os.Stdout, snap)
 	return nil
+}
+
+func runQueueDashboard(cmd *cobra.Command, args []string) error {
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	cfg, err := queueConfigLoad(cfgPath)
+	if err != nil {
+		return err
+	}
+	d := queue.DefaultDeps()
+	d.LoadConfig = queueConfigLoad
+	return queue.RunDashboard(d, cfg)
 }
 
 func runQueueLog(cmd *cobra.Command, args []string) error {
