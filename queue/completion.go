@@ -35,6 +35,31 @@ func CompleteAbandonSetIDs(d *Deps) ([]string, error) {
 	return dedupeSortSetIDs(ids), nil
 }
 
+// CompleteBindWorktreeSetIDs returns all task-set identifiers (bound or not)
+// for shell completion of `pop tasks bind-worktree`.
+func CompleteBindWorktreeSetIDs(d *Deps) ([]string, error) {
+	state, err := readDaemonStateForCompletion(d)
+	if err != nil || state == nil {
+		return nil, err
+	}
+	// Return all set IDs from bindings and mergeability records
+	// (all sets that have ever been associated with queue state)
+	seen := make(map[string]struct{})
+	for key := range state.WorktreeBindings {
+		id := setIDFromScopedKey(key)
+		seen[id] = struct{}{}
+	}
+	for key := range state.Mergeability {
+		id := setIDFromScopedKey(key)
+		seen[id] = struct{}{}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	return dedupeSortSetIDs(ids), nil
+}
+
 func readDaemonStateForCompletion(d *Deps) (*DaemonState, error) {
 	if d == nil {
 		d = DefaultDeps()

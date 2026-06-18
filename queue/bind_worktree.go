@@ -73,15 +73,15 @@ func BindWorktree(d *Deps, cfg *config.Config, setID, checkoutPath string, opts 
 		lock := d.readLock(existing.RuntimePath)
 		if lock != nil && lock.Locked {
 			if lock.Metadata != nil && lock.Metadata.SetID != "" && lock.Metadata.SetID != setID {
-				return BindWorktreeResult{}, fmt.Errorf("queue: %s runtime checkout is locked for another set (%s); refusing bind-worktree", setID, lock.Metadata.SetID)
+				return BindWorktreeResult{}, fmt.Errorf("refusing bind-worktree: %s runtime checkout is locked for another set (%s)", setID, lock.Metadata.SetID)
 			}
-			return BindWorktreeResult{}, fmt.Errorf("queue: %s is currently executing; refusing bind-worktree", setID)
+			return BindWorktreeResult{}, fmt.Errorf("refusing bind-worktree: %s is currently executing", setID)
 		}
 		existingCanon, _ := canonicalCheckoutPath(d.Tasks, existing.RuntimePath)
 		newCanon, _ := canonicalCheckoutPath(d.Tasks, checkoutPath)
 		if existingCanon != newCanon {
 			if !opts.Force {
-				return BindWorktreeResult{}, fmt.Errorf("queue: %s is already bound to %s; use --force to re-point", setID, existing.RuntimePath)
+				return BindWorktreeResult{}, fmt.Errorf("%s is already bound to %s; use --force to re-point", setID, existing.RuntimePath)
 			}
 			replaced = true
 		}
@@ -107,9 +107,9 @@ func BindWorktree(d *Deps, cfg *config.Config, setID, checkoutPath string, opts 
 		return BindWorktreeResult{}, err
 	}
 	if replaced {
-		fmt.Fprintf(out, "queue: re-bound %s → %s (branch %s)\n", setID, checkoutPath, branch)
+		fmt.Fprintf(out, "Bound %s to %s (branch %s)\n", setID, checkoutPath, branch)
 	} else {
-		fmt.Fprintf(out, "queue: bound %s → %s (branch %s)\n", setID, checkoutPath, branch)
+		fmt.Fprintf(out, "Bound %s to %s (branch %s)\n", setID, checkoutPath, branch)
 	}
 	return BindWorktreeResult{SetID: setID, RuntimePath: checkoutPath, Branch: branch, Replaced: replaced}, nil
 }

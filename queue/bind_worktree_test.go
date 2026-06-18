@@ -186,7 +186,7 @@ func TestBindWorktreeCreatesAdoptedBinding(t *testing.T) {
 		t.Fatalf("journal = %+v, want bound event for set-x", entries)
 	}
 
-	if !strings.Contains(out.String(), "bound set-x") {
+	if !strings.Contains(out.String(), "Bound") {
 		t.Fatalf("output = %q, want bind confirmation", out.String())
 	}
 }
@@ -239,8 +239,8 @@ func TestBindWorktreeRefusesAlreadyBoundWithoutForce(t *testing.T) {
 	if !got.Replaced {
 		t.Fatalf("got.Replaced = false, want true")
 	}
-	if !strings.Contains(out.String(), "re-bound") {
-		t.Fatalf("output = %q, want re-bound message", out.String())
+	if !strings.Contains(out.String(), "Bound") {
+		t.Fatalf("output = %q, want bind message", out.String())
 	}
 	after, err = ReadDaemonState(td)
 	if err != nil {

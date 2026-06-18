@@ -19,6 +19,7 @@ func TestDashboardCommandTree(t *testing.T) {
 		{path: []string{"project", "dashboard"}, wantCmd: projectDashboardCmd, wantRun: runProject},
 		{path: []string{"worktree", "dashboard"}, wantCmd: worktreeDashboardCmd, wantRun: runWorktree},
 		{path: []string{"tasks", "integrate"}, wantCmd: taskIntegrateCmd, wantRun: runTaskIntegrate},
+		{path: []string{"tasks", "bind-worktree"}, wantCmd: taskBindWorktreeCmd, wantRun: runTaskBindWorktree},
 		{path: []string{"queue", "abandon"}, wantCmd: queueAbandonCmd, wantRun: runQueueAbandon},
 	}
 
@@ -35,6 +36,20 @@ func TestDashboardCommandTree(t *testing.T) {
 				t.Fatalf("%q does not use the expected picker handler", got.CommandPath())
 			}
 		})
+	}
+}
+
+func TestQueueBindWorktreeRemovedMovedToTasks(t *testing.T) {
+	cmd, args, err := rootCmd.Find([]string{"queue", "bind-worktree"})
+	if len(args) == 0 && cmd.CommandPath() == "pop queue bind-worktree" {
+		t.Fatalf("pop queue bind-worktree should not exist; it moved to pop tasks bind-worktree")
+	}
+	got, _, err := rootCmd.Find([]string{"tasks", "bind-worktree"})
+	if err != nil {
+		t.Fatalf("Find([tasks bind-worktree]): %v", err)
+	}
+	if got != taskBindWorktreeCmd {
+		t.Fatalf("Find([tasks bind-worktree]) = %q, want %q", got.CommandPath(), taskBindWorktreeCmd.CommandPath())
 	}
 }
 

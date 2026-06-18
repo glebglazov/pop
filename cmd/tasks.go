@@ -33,6 +33,7 @@ var (
 	taskMaxTries           int
 	taskTimeout            string
 	taskStatusArchived     bool
+	taskBindWorktreeForce  bool
 )
 
 var taskCmd = &cobra.Command{
@@ -155,6 +156,19 @@ var taskIntegrateCmd = &cobra.Command{
 	RunE:  runTaskIntegrate,
 }
 
+var taskBindWorktreeCmd = &cobra.Command{
+	Use:   "bind-worktree <set>",
+	Short: "Adopt the current checkout as the drain worktree for a set",
+	Long: `Adopt the current checkout as the drain worktree for a set.
+
+Run from inside the target checkout. Pop will drain the named set into this
+checkout without deleting the directory on abandon or integration — only the
+binding is forgotten. Use --force to re-point a set that is already bound
+elsewhere.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runTaskBindWorktree,
+}
+
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
@@ -173,6 +187,8 @@ func init() {
 	taskCmd.AddCommand(taskMigrateCmd)
 	taskCmd.AddCommand(taskAgentsCmd)
 	taskCmd.AddCommand(taskIntegrateCmd)
+	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeForce, "force", false, "Re-point a set already bound elsewhere")
+	taskCmd.AddCommand(taskBindWorktreeCmd)
 
 	taskCmd.PersistentFlags().StringVar(&taskProject, "project", "", "Select project by exact picker-visible name")
 	taskCmd.PersistentFlags().StringVar(&taskPath, "path", "", "Select project by path (normalized to git checkout root)")
@@ -1082,6 +1098,25 @@ func runTaskIntegrate(cmd *cobra.Command, args []string) error {
 	d := queue.DefaultDeps()
 	d.LoadConfig = taskConfigLoad
 	_, err = queue.IntegrateWithOptions(d, cfg, args[0], os.Stdout, queue.IntegrationOptions{In: os.Stdin})
+	return err
+}
+
+func runTaskBindWorktree(cmd *cobra.Command, args []string) error {
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	cfg, err := taskConfigLoad(cfgPath)
+	if err != nil {
+		return err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("determine working directory: %w", err)
+	}
+	d := queue.DefaultDeps()
+	d.LoadConfig = taskConfigLoad
+	_, err = queue.BindWorktree(d, cfg, args[0], cwd, queue.BindWorktreeOptions{Force: taskBindWorktreeForce}, os.Stdout)
 	return err
 }
 
