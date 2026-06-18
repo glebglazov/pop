@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -257,6 +258,11 @@ type dashboardDrainMsg struct {
 type dashboardPreviewMsg struct {
 	err error
 }
+type dashboardStatusMsg struct {
+	row   DashboardRow
+	lines []string
+	err   error
+}
 type dashboardBindListMsg struct {
 	row     DashboardRow
 	entries []dashboardBindEntry
@@ -304,6 +310,14 @@ type dashboardAbandonModal struct {
 	loading bool
 }
 
+type dashboardStatusModal struct {
+	row     DashboardRow
+	lines   []string
+	scroll  int
+	loading bool
+	err     error
+}
+
 type dashboardModel struct {
 	d       *Deps
 	cfg     *config.Config
@@ -314,6 +328,7 @@ type dashboardModel struct {
 	height  int
 	bind    *dashboardBindModal
 	abandon *dashboardAbandonModal
+	status  *dashboardStatusModal
 }
 
 func newDashboardModel(d *Deps, cfg *config.Config, snap DashboardSnapshot) dashboardModel {
@@ -335,6 +350,9 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.abandon != nil {
 			return m.updateAbandonModal(msg)
+		}
+		if m.status != nil {
+			return m.updateStatusModal(msg)
 		}
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
@@ -373,6 +391,14 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.err = nil
 			return m, m.previewDrain(m.snap.Rows[m.cursor])
+		case "s":
+			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+				return m, nil
+			}
+			m.err = nil
+			row := m.snap.Rows[m.cursor]
+			m.status = &dashboardStatusModal{row: row, loading: true}
+			return m, m.loadStatusDetail(row)
 		case "b":
 			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
 				return m, nil
@@ -424,6 +450,11 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		}
+	case dashboardStatusMsg:
+		if m.status == nil {
+			return m, nil
+		}
+		m.status = &dashboardStatusModal{row: msg.row, lines: msg.lines, err: msg.err}
 	case dashboardBindListMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -510,6 +541,30 @@ func (m dashboardModel) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
+func (m dashboardModel) updateStatusModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.status = nil
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	case "j", "down":
+		m.moveStatusScroll(1)
+	case "k", "up":
+		m.moveStatusScroll(-1)
+	case "pgdown":
+		m.moveStatusScroll(m.statusVisibleLines())
+	case "pgup":
+		m.moveStatusScroll(-m.statusVisibleLines())
+	case "home":
+		m.status.scroll = 0
+	case "end":
+		max := m.statusMaxScroll()
+		m.status.scroll = max
+	}
+	return m, nil
+}
+
 func (m *dashboardModel) moveBindCursor(delta int) {
 	if m.bind == nil {
 		return
@@ -528,6 +583,40 @@ func (m *dashboardModel) moveBindCursor(delta int) {
 	if m.bind.cursor >= limit {
 		m.bind.cursor = 0
 	}
+}
+
+func (m *dashboardModel) moveStatusScroll(delta int) {
+	if m.status == nil {
+		return
+	}
+	m.status.scroll += delta
+	if m.status.scroll < 0 {
+		m.status.scroll = 0
+	}
+	if max := m.statusMaxScroll(); m.status.scroll > max {
+		m.status.scroll = max
+	}
+}
+
+func (m dashboardModel) statusVisibleLines() int {
+	if m.height <= 0 {
+		return 16
+	}
+	n := m.height - 10
+	if n < 4 {
+		return 4
+	}
+	return n
+}
+
+func (m dashboardModel) statusMaxScroll() int {
+	if m.status == nil {
+		return 0
+	}
+	if max := len(m.status.lines) - m.statusVisibleLines(); max > 0 {
+		return max
+	}
+	return 0
 }
 
 func (m dashboardModel) confirmBindModal() (tea.Model, tea.Cmd) {
@@ -604,11 +693,41 @@ func (m dashboardModel) previewDrain(row DashboardRow) tea.Cmd {
 	}
 }
 
+func (m dashboardModel) loadStatusDetail(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		lines, err := DashboardStatusDetailLines(m.d, row)
+		return dashboardStatusMsg{row: row, lines: lines, err: err}
+	}
+}
+
 func (m dashboardModel) loadBindWorktrees(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		entries, err := DashboardBindWorktreeEntries(m.d, m.cfg, row)
 		return dashboardBindListMsg{row: row, entries: entries, err: err}
 	}
+}
+
+// DashboardStatusDetailLines renders the same per-set task status detail as
+// `pop tasks status <set>` for a dashboard row.
+func DashboardStatusDetailLines(d *Deps, row DashboardRow) ([]string, error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	refresh, err := d.refresh(row.defPath)
+	if err != nil {
+		return nil, err
+	}
+	detailRow := tasks.FindRow(refresh, row.SetID)
+	var buf bytes.Buffer
+	tasks.RenderTaskSetDetail(&buf, row.SetID, detailRow, refresh.Manifests[row.SetID])
+	text := strings.TrimRight(buf.String(), "\n")
+	if text == "" {
+		text = fmt.Sprintf("%s: no status detail available", row.SetID)
+	}
+	return strings.Split(text, "\n"), nil
 }
 
 func (m dashboardModel) loadBindRefs(row DashboardRow) tea.Cmd {
@@ -1194,10 +1313,51 @@ func (m dashboardModel) View() tea.View {
 		renderDashboardBindModal(&b, m.bind)
 	} else if m.abandon != nil {
 		renderDashboardAbandonModal(&b, m.abandon)
+	} else if m.status != nil {
+		renderDashboardStatusModal(&b, m.status, m.statusVisibleLines())
 	} else {
-		fmt.Fprintln(&b, "j/k move · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · q quit")
+		fmt.Fprintln(&b, "j/k move · s status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · q quit")
 	}
 	return tea.NewView(b.String())
+}
+
+func renderDashboardStatusModal(w io.Writer, modal *dashboardStatusModal, visibleLines int) {
+	if modal == nil {
+		return
+	}
+	fmt.Fprintf(w, "Task status: %s\n", modal.row.SetID)
+	if modal.loading {
+		fmt.Fprintln(w, "  loading...")
+		fmt.Fprintln(w, "esc/q close")
+		return
+	}
+	if modal.err != nil {
+		fmt.Fprintf(w, "  error: %v\n", modal.err)
+		fmt.Fprintln(w, "esc/q close")
+		return
+	}
+	if visibleLines <= 0 {
+		visibleLines = len(modal.lines)
+	}
+	start := modal.scroll
+	if start < 0 {
+		start = 0
+	}
+	if start > len(modal.lines) {
+		start = len(modal.lines)
+	}
+	end := start + visibleLines
+	if end > len(modal.lines) {
+		end = len(modal.lines)
+	}
+	for _, line := range modal.lines[start:end] {
+		fmt.Fprintf(w, "  %s\n", line)
+	}
+	if len(modal.lines) > visibleLines {
+		fmt.Fprintf(w, "showing %d-%d of %d · j/k scroll · esc/q close\n", start+1, end, len(modal.lines))
+		return
+	}
+	fmt.Fprintln(w, "esc/q close")
 }
 
 func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {

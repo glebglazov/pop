@@ -254,6 +254,117 @@ func TestDashboardBKeyOpensBindModal(t *testing.T) {
 	}
 }
 
+func TestDashboardSKeyOpensStatusModalAndClosePreservesCursor(t *testing.T) {
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "first", Status: "READY", cursorKey: "pop\x00first"},
+		{Project: "pop", SetID: "second", Status: "READY", cursorKey: "pop\x00second"},
+	}})
+	m.cursor = 1
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	got := updated.(dashboardModel)
+	if got.status == nil || !got.status.loading || got.status.row.SetID != "second" {
+		t.Fatalf("status modal = %+v, want loading modal for second", got.status)
+	}
+	if cmd == nil {
+		t.Fatalf("s key did not return a status-loading command")
+	}
+
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	got = updated.(dashboardModel)
+	if cmd != nil {
+		t.Fatalf("q in status modal should close modal without quitting")
+	}
+	if got.status != nil || got.cursor != 1 {
+		t.Fatalf("after close: status=%+v cursor=%d, want nil and 1", got.status, got.cursor)
+	}
+}
+
+func TestDashboardStatusModalRendersNormalTaskDetail(t *testing.T) {
+	d := &Deps{Refresh: func(string) (*tasks.RefreshResult, error) {
+		return &tasks.RefreshResult{
+			Rows: []tasks.Row{{ID: "set-normal", Status: tasks.StatusReady, Progress: "1/2 done, 1 open"}},
+			Manifests: map[string]*tasks.Manifest{"set-normal": {
+				Valid: true,
+				Tasks: []tasks.Task{
+					{ID: "01-a", File: "01-a.md", Title: "First", Type: "AFK", Status: "done"},
+					{ID: "02-b", File: "02-b.md", Title: "Second", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
+				},
+			}},
+		}, nil
+	}}
+	lines, err := DashboardStatusDetailLines(d, DashboardRow{SetID: "set-normal"})
+	if err != nil {
+		t.Fatalf("DashboardStatusDetailLines: %v", err)
+	}
+	modal := &dashboardStatusModal{row: DashboardRow{SetID: "set-normal"}, lines: lines}
+	var rendered strings.Builder
+	renderDashboardStatusModal(&rendered, modal, 20)
+	out := rendered.String()
+
+	for _, want := range []string{"Task status: set-normal", "set-normal  [READY]  1/2 done, 1 open", "STATUS", "01-a", "02-b", "01-a"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered modal missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "01-a") > strings.Index(out, "02-b") {
+		t.Fatalf("tasks out of manifest order:\n%s", out)
+	}
+}
+
+func TestDashboardStatusModalRendersMalformedDiagnostics(t *testing.T) {
+	d := &Deps{Refresh: func(string) (*tasks.RefreshResult, error) {
+		return &tasks.RefreshResult{
+			Rows: []tasks.Row{{
+				ID:               "set-broken",
+				Status:           tasks.StatusMalformed,
+				MalformedSummary: "bad manifest",
+				DetailErrors:     []string{"task \"01-a\": invalid status \"wat\""},
+			}},
+			Manifests: map[string]*tasks.Manifest{"set-broken": {
+				Valid:  false,
+				Errors: []string{"task \"01-a\": invalid status \"wat\""},
+			}},
+		}, nil
+	}}
+	lines, err := DashboardStatusDetailLines(d, DashboardRow{SetID: "set-broken"})
+	if err != nil {
+		t.Fatalf("DashboardStatusDetailLines: %v", err)
+	}
+	modal := &dashboardStatusModal{row: DashboardRow{SetID: "set-broken"}, lines: lines}
+	var rendered strings.Builder
+	renderDashboardStatusModal(&rendered, modal, 20)
+	out := rendered.String()
+
+	if !strings.Contains(out, "set-broken  [MALFORMED]") || !strings.Contains(out, "malformed manifest") || !strings.Contains(out, "invalid status") {
+		t.Fatalf("expected malformed diagnostics:\n%s", out)
+	}
+	if strings.Contains(out, "STATUS") {
+		t.Fatalf("malformed modal should not print a task table:\n%s", out)
+	}
+}
+
+func TestDashboardStatusModalRendersMissingDiagnostic(t *testing.T) {
+	d := &Deps{Refresh: func(string) (*tasks.RefreshResult, error) {
+		return &tasks.RefreshResult{
+			Rows:      []tasks.Row{{ID: "set-missing", Status: tasks.StatusMissing}},
+			Manifests: map[string]*tasks.Manifest{},
+		}, nil
+	}}
+	lines, err := DashboardStatusDetailLines(d, DashboardRow{SetID: "set-missing"})
+	if err != nil {
+		t.Fatalf("DashboardStatusDetailLines: %v", err)
+	}
+	modal := &dashboardStatusModal{row: DashboardRow{SetID: "set-missing"}, lines: lines}
+	var rendered strings.Builder
+	renderDashboardStatusModal(&rendered, modal, 20)
+	out := rendered.String()
+
+	if !strings.Contains(out, "set-missing  [MISSING]") || !strings.Contains(out, "registered task set missing") {
+		t.Fatalf("expected missing diagnostic:\n%s", out)
+	}
+}
+
 func TestDashboardIKeyOnlyEnabledForIntegrationBacklog(t *testing.T) {
 	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "ready", Status: "READY"},
