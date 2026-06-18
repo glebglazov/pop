@@ -750,8 +750,17 @@ func provisionWorktree(d *Deps, projectPath, setID string) (provisionedWorktree,
 // session, creating the session detached when absent. It is a no-op for
 // non-actionable decisions.
 func Spawn(d *Deps, dec Decision) error {
+	_, err := SpawnWithResult(d, dec)
+	return err
+}
+
+type SpawnResult struct {
+	PaneID string
+}
+
+func SpawnWithResult(d *Deps, dec Decision) (SpawnResult, error) {
 	if !dec.Actionable() {
-		return nil
+		return SpawnResult{}, nil
 	}
 	command := fmt.Sprintf("pop tasks implement %s", shellQuote(dec.TaskSetID))
 	if dec.WorktreeReady && dec.scan.RuntimePath != "" {
@@ -760,33 +769,60 @@ func Spawn(d *Deps, dec Decision) error {
 	if dec.DefaultAgent != "" {
 		command += " --default-agent " + shellQuote(dec.DefaultAgent)
 	}
-	return spawnDrain(d.Tmux, dec.scan.SessionName, dec.scan.ProjectPath, dec.TaskSetID, command)
+	paneID, err := spawnDrain(d.Tmux, dec.scan.SessionName, dec.scan.ProjectPath, dec.TaskSetID, command)
+	return SpawnResult{PaneID: paneID}, err
+}
+
+func recordDrainPane(d *Deps, dec Decision, paneID, source string) error {
+	if d == nil || d.Tasks == nil || paneID == "" || dec.TaskSetID == "" {
+		return nil
+	}
+	key, err := scopedKeyForPaths(d, dec.scan.ProjectPath, dec.scan.RuntimePath, dec.TaskSetID)
+	if err != nil {
+		return err
+	}
+	state, err := EnsureDaemonState(d.Tasks)
+	if err != nil {
+		return err
+	}
+	if state.DrainPanes == nil {
+		state.DrainPanes = map[string]DrainPane{}
+	}
+	state.DrainPanes[key] = DrainPane{
+		Project:     dec.Project,
+		RuntimePath: dec.scan.RuntimePath,
+		SetID:       dec.TaskSetID,
+		PaneID:      paneID,
+		RecordedAt:  d.now().UTC(),
+		Source:      source,
+	}
+	return WriteDaemonState(d.Tasks, state)
 }
 
 // spawnDrain creates (if needed) the detached session and shared queue window,
 // then sends the drain command to this set's existing pane or a freshly split
 // tagged pane.
-func spawnDrain(tmux deps.Tmux, session, dir, setID, command string) error {
+func spawnDrain(tmux deps.Tmux, session, dir, setID, command string) (string, error) {
 	if !tmux.HasSession(session) {
 		if err := tmux.NewSession(session, dir); err != nil {
-			return fmt.Errorf("create session %q: %w", session, err)
+			return "", fmt.Errorf("create session %q: %w", session, err)
 		}
 	}
 
 	windowTarget, freshPaneID, err := resolveDrainWindowTarget(tmux, session, dir)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	paneID, err := findDrainPaneForSet(tmux, windowTarget, setID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if paneID != "" {
 		if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
-			return fmt.Errorf("send drain command: %w", err)
+			return "", fmt.Errorf("send drain command: %w", err)
 		}
-		return nil
+		return paneID, nil
 	}
 
 	if freshPaneID != "" {
@@ -796,24 +832,24 @@ func spawnDrain(tmux deps.Tmux, session, dir, setID, command string) error {
 	} else {
 		out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", windowTarget, "-c", dir)
 		if err != nil {
-			return fmt.Errorf("create drain pane: %w", err)
+			return "", fmt.Errorf("create drain pane: %w", err)
 		}
 		paneID = strings.TrimSpace(out)
 		if paneID == "" {
-			return fmt.Errorf("create drain pane: tmux returned no pane id")
+			return "", fmt.Errorf("create drain pane: tmux returned no pane id")
 		}
 		if _, err := tmux.Command("select-layout", "-t", windowTarget, "tiled"); err != nil {
-			return fmt.Errorf("retile drain window: %w", err)
+			return "", fmt.Errorf("retile drain window: %w", err)
 		}
 	}
 
 	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_set", setID); err != nil {
-		return fmt.Errorf("tag drain pane: %w", err)
+		return "", fmt.Errorf("tag drain pane: %w", err)
 	}
 	if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
-		return fmt.Errorf("send drain command: %w", err)
+		return "", fmt.Errorf("send drain command: %w", err)
 	}
-	return nil
+	return paneID, nil
 }
 
 func findDrainPaneForSet(tmux deps.Tmux, windowTarget, setID string) (string, error) {

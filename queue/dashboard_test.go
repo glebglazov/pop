@@ -3,6 +3,7 @@ package queue
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -229,5 +230,183 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 	}
 	if !got.snap.Rows[0].AutoDrain || got.err != nil {
 		t.Fatalf("toggle result = row %+v err %v", got.snap.Rows[0], got.err)
+	}
+}
+
+func TestDashboardLaunchDrainRoutesPlainQueueBaseAndRecordsPane(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "plain-drain", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+
+	result, err := LaunchDashboardDrain(d, cfg, row)
+	if err != nil {
+		t.Fatalf("LaunchDashboardDrain: %v", err)
+	}
+	if canon(t, d, result.RuntimePath) != canon(t, d, repo) {
+		t.Fatalf("runtime = %q, want queue base %q", result.RuntimePath, repo)
+	}
+	cmd, ok := extractSpawnCommand(rt)
+	if !ok {
+		t.Fatal("expected drain spawn command")
+	}
+	if !strings.Contains(cmd, "pop tasks implement "+setID) || strings.Contains(cmd, "--task-runtime-path") {
+		t.Fatalf("spawn command = %q, want in-place queue-base drain", cmd)
+	}
+	assertDashboardPaneMapping(t, d, repo, setID, "%3", "dashboard")
+}
+
+func TestDashboardLaunchDrainRoutesBoundCheckout(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "bound-drain", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	bound := filepath.Join(t.TempDir(), "bound")
+	runGit(t, repo, "worktree", "add", "--detach", bound, "HEAD")
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "bound", Project: "pop", Provisioned: false},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LaunchDashboardDrain(d, cfg, row)
+	if err != nil {
+		t.Fatalf("LaunchDashboardDrain: %v", err)
+	}
+	if result.RuntimePath != bound {
+		t.Fatalf("runtime = %q, want bound checkout %q", result.RuntimePath, bound)
+	}
+	newWindow, ok := rt.findCommand("new-window")
+	if !ok || !argsContain(newWindow, "-c", bound) {
+		t.Fatalf("new-window = %v, want cwd %q", newWindow, bound)
+	}
+	assertDashboardPaneMapping(t, d, repo, setID, "%3", "dashboard")
+}
+
+func TestDashboardLaunchDrainProvisionsManagedWorktreeWhenReady(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "managed-drain", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	if err := os.WriteFile(filepath.Join(repo, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+
+	result, err := LaunchDashboardDrain(d, cfg, row)
+	if err != nil {
+		t.Fatalf("LaunchDashboardDrain: %v", err)
+	}
+	if result.RuntimePath == repo || !strings.Contains(result.RuntimePath, filepath.Join("pop", "queue", "worktrees")) {
+		t.Fatalf("runtime = %q, want managed queue worktree", result.RuntimePath)
+	}
+	cmd, ok := extractSpawnCommand(rt)
+	if !ok || !strings.Contains(cmd, "--task-runtime-path "+result.RuntimePath) {
+		t.Fatalf("spawn command = %q, want runtime override %q", cmd, result.RuntimePath)
+	}
+	state, err := ReadDaemonState(d.Tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := state.WorktreeBindings[setScopedKey(repoKey, setID)]
+	if binding.RuntimePath != result.RuntimePath || !binding.Provisioned {
+		t.Fatalf("binding = %+v, want managed worktree %q", binding, result.RuntimePath)
+	}
+	assertDashboardPaneMapping(t, d, repo, setID, "%3", "dashboard")
+}
+
+func TestDashboardLaunchDrainRefusesBareWithoutQueueBase(t *testing.T) {
+	_, wts := initBareRepoWithWorktrees(t, 1)
+	checkout := wts[0]
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdg"))
+	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setID := "bare-drain"
+	setDir := filepath.Join(id.TasksDir, setID)
+	writeSpawnTaskMD(t, setDir, "01-a.md")
+	writeSpawnManifest(t, setDir, []spawnTestTask{{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"}})
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), id.TasksDir, tasks.StatePathFor(id.TasksDir)); err != nil {
+		t.Fatal(err)
+	}
+	d, cfg, row, rt := dashboardLaunchFixture(t, checkout, setID)
+
+	_, err = LaunchDashboardDrain(d, cfg, row)
+	if err == nil || !strings.Contains(err.Error(), repoScanReason) {
+		t.Fatalf("LaunchDashboardDrain err = %v, want %q", err, repoScanReason)
+	}
+	if len(rt.commands) != 0 {
+		t.Fatalf("bare no-base refusal must not touch tmux, got %v", rt.commands)
+	}
+}
+
+func TestDashboardPreviewDrainPaneAndNoOp(t *testing.T) {
+	rt := newRecordingTmux(true, drainWindowName)
+	d := &Deps{Tmux: rt}
+	if err := PreviewDashboardDrain(d, DashboardRow{paneID: "%9"}); err != nil {
+		t.Fatalf("PreviewDashboardDrain: %v", err)
+	}
+	if _, ok := rt.findCommand("select-pane"); !ok {
+		t.Fatal("expected select-pane")
+	}
+	switchClient, ok := rt.findCommand("switch-client")
+	if !ok || !argsContain(switchClient, "-t", "%9") {
+		t.Fatalf("switch-client = %v, want pane %%9", switchClient)
+	}
+	rt.commands = nil
+	if err := PreviewDashboardDrain(d, DashboardRow{}); err != nil {
+		t.Fatalf("PreviewDashboardDrain no-op: %v", err)
+	}
+	if len(rt.commands) != 0 {
+		t.Fatalf("preview without pane must no-op, got %v", rt.commands)
+	}
+}
+
+func dashboardLaunchFixture(t *testing.T, repo, setID string) (*Deps, *config.Config, DashboardRow, *recordingTmux) {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	rt := newRecordingTmux(false, "0")
+	td := queueTestTasksDeps(true)
+	d := &Deps{Tasks: td, Project: project.DefaultDeps(), Tmux: rt}
+	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) == 0 {
+		t.Fatalf("no picker projects for %s", repo)
+	}
+	scan, err := resolveScan(d, projects[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := DashboardRow{Project: "pop", SetID: setID, defPath: scan.DefinitionPath, statePath: tasks.StatePathFor(id.TasksDir)}
+	return d, cfg, row, rt
+}
+
+func assertDashboardPaneMapping(t *testing.T, d *Deps, repo, setID, paneID, source string) {
+	t.Helper()
+	state, err := ReadDaemonState(d.Tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pane := state.DrainPanes[setScopedKey(repoKey, setID)]
+	if pane.PaneID != paneID || pane.SetID != setID || pane.Source != source {
+		t.Fatalf("pane mapping = %+v, want pane=%s set=%s source=%s", pane, paneID, setID, source)
 	}
 }

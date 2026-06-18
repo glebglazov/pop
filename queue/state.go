@@ -30,6 +30,7 @@ type DaemonState struct {
 	SetCrashCounts   map[string]int                `json:"set_crash_counts,omitempty"`
 	ParkedSets       map[string]ParkedSet          `json:"parked_sets,omitempty"`
 	Mergeability     map[string]MergeabilityRecord `json:"mergeability,omitempty"`
+	DrainPanes       map[string]DrainPane          `json:"drain_panes,omitempty"`
 	WorktreeBindings map[string]WorktreeBinding    `json:"worktree_bindings,omitempty"`
 }
 
@@ -37,6 +38,16 @@ type DaemonState struct {
 // keeps queue call sites and tests referring to it unchanged while the type is
 // owned by the binding module.
 type WorktreeBinding = binding.Binding
+
+// DrainPane records the tmux pane currently associated with a Task set drain.
+type DrainPane struct {
+	Project     string    `json:"project,omitempty"`
+	RuntimePath string    `json:"runtime_path,omitempty"`
+	SetID       string    `json:"set_id"`
+	PaneID      string    `json:"pane_id"`
+	RecordedAt  time.Time `json:"recorded_at"`
+	Source      string    `json:"source,omitempty"`
+}
 
 // bindingProvisioned reports whether the binding stored under key was
 // provisioned by pop (safe to teardown) or adopted (must not delete).

@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/binding"
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
@@ -29,6 +30,8 @@ type DashboardRow struct {
 	defPath   string
 	statePath string
 	cursorKey string
+	repoKey   string
+	paneID    string
 }
 
 // DashboardSnapshot is the data model for `pop queue dashboard`.
@@ -137,6 +140,8 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 			defPath:   scans[0].DefinitionPath,
 			statePath: tasks.StatePathFor(scans[0].DefinitionPath),
 			cursorKey: projectName + "\x00" + taskRow.ID,
+			repoKey:   repoKey,
+			paneID:    dashboardPaneID(state, repoKey, taskRow.ID),
 		})
 	}
 	return rows, nil
@@ -221,6 +226,16 @@ func dashboardDrain(d *Deps, state *DaemonState, repoKey, setID, runtimePath str
 	return ""
 }
 
+func dashboardPaneID(state *DaemonState, repoKey, setID string) string {
+	if state == nil || state.DrainPanes == nil {
+		return ""
+	}
+	if pane, ok := state.DrainPanes[setScopedKey(repoKey, setID)]; ok {
+		return pane.PaneID
+	}
+	return ""
+}
+
 type dashboardTickMsg struct{}
 type dashboardRowsMsg struct {
 	snap DashboardSnapshot
@@ -230,6 +245,12 @@ type dashboardToggleMsg struct {
 	key       string
 	autoDrain bool
 	err       error
+}
+type dashboardDrainMsg struct {
+	err error
+}
+type dashboardPreviewMsg struct {
+	err error
 }
 
 type dashboardModel struct {
@@ -275,6 +296,18 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.snap.Rows[m.cursor].AutoDrain = !m.snap.Rows[m.cursor].AutoDrain
 			m.err = nil
 			return m, m.toggleAutoDrain(row)
+		case "i":
+			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+				return m, nil
+			}
+			m.err = nil
+			return m, m.launchDrain(m.snap.Rows[m.cursor])
+		case "p":
+			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+				return m, nil
+			}
+			m.err = nil
+			return m, m.previewDrain(m.snap.Rows[m.cursor])
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -302,6 +335,15 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+	case dashboardDrainMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		}
+		return m, m.reload()
+	case dashboardPreviewMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		}
 	}
 	return m, nil
 }
@@ -321,6 +363,181 @@ func (m dashboardModel) toggleAutoDrain(row DashboardRow) tea.Cmd {
 		}
 		return dashboardToggleMsg{key: row.cursorKey, autoDrain: result.AutoDrain}
 	}
+}
+
+func (m dashboardModel) launchDrain(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		_, err := LaunchDashboardDrain(m.d, m.cfg, row)
+		return dashboardDrainMsg{err: err}
+	}
+}
+
+func (m dashboardModel) previewDrain(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		err := PreviewDashboardDrain(m.d, row)
+		return dashboardPreviewMsg{err: err}
+	}
+}
+
+type DashboardDrainResult struct {
+	PaneID      string
+	RuntimePath string
+}
+
+// LaunchDashboardDrain manually launches the highlighted dashboard row through
+// the same Queue provisioning and tmux spawn path used by the supervisor.
+func LaunchDashboardDrain(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainResult, error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	state, err := EnsureDaemonState(d.Tasks)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	scans, err := dashboardScansForDefinition(d, cfg, row.defPath)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	if len(scans) == 0 {
+		return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", row.SetID)
+	}
+	repoKey, err := scanRepoKey(d, scans[0])
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	rep, bare, err := resolveRepresentative(d, cfg, scans)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	qcfg, err := resolvedQueueConfig(cfg)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	defaultAgent, _, notes, ok := selectDefaultAgent(d, qcfg.Agents, state, d.now().UTC())
+	if !ok {
+		for _, note := range notes {
+			if note.Reason != "" {
+				return DashboardDrainResult{}, fmt.Errorf("no available agent: %s: %s", note.Agent, note.Reason)
+			}
+		}
+		return DashboardDrainResult{}, fmt.Errorf("no available agent")
+	}
+
+	dec := Decision{
+		Project:      repoName(scans, rep),
+		TaskSetID:    row.SetID,
+		DefaultAgent: defaultAgent,
+	}
+	key := setScopedKey(repoKey, row.SetID)
+	if binding, ok := state.WorktreeBindings[key]; ok && strings.TrimSpace(binding.RuntimePath) != "" {
+		if err := validateBoundWorktree(d, scans[0].ProjectPath, binding); err != nil {
+			return DashboardDrainResult{}, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", row.SetID, err)
+		}
+		worktreeReady, configErr := readRepoConfig(d, scans[0].ProjectPath)
+		if configErr != "" {
+			worktreeReady = false
+		}
+		sessionName := project.SessionNameWith(d.Project, binding.RuntimePath)
+		if worktreeReady && rep != nil {
+			sessionName = rep.SessionName
+		}
+		dec.WorktreeReady = worktreeReady
+		dec.scan = projectScan{
+			Name:           dec.Project,
+			ProjectPath:    binding.RuntimePath,
+			DefinitionPath: scans[0].DefinitionPath,
+			RuntimePath:    binding.RuntimePath,
+			SessionName:    sessionName,
+			RepoKey:        repoKey,
+		}
+	} else {
+		if rep == nil {
+			if bare {
+				return DashboardDrainResult{}, fmt.Errorf("%s", repoScanReason)
+			}
+			return DashboardDrainResult{}, fmt.Errorf("no queue base checkout")
+		}
+		dec.scan = *rep
+		dec.WorktreeReady, _ = readRepoConfig(d, rep.ProjectPath)
+		if dec.WorktreeReady {
+			dec = prepareWorktreeDrain(d, io.Discard, dec)
+			if !dec.Actionable() {
+				return DashboardDrainResult{}, fmt.Errorf("%s", dec.Reason)
+			}
+		}
+	}
+
+	spawn, err := SpawnWithResult(d, dec)
+	if err != nil {
+		_ = AppendJournalEntry(d.Tasks, JournalEntry{
+			Event:       JournalEventSpawnFailed,
+			Project:     dec.Project,
+			SetID:       dec.TaskSetID,
+			RuntimePath: dec.scan.RuntimePath,
+			Source:      "dashboard",
+			Reason:      err.Error(),
+		})
+		return DashboardDrainResult{}, err
+	}
+	if err := recordDrainPane(d, dec, spawn.PaneID, "dashboard"); err != nil {
+		return DashboardDrainResult{}, err
+	}
+	if err := AppendJournalEntry(d.Tasks, JournalEntry{
+		Event:       JournalEventSpawn,
+		Project:     dec.Project,
+		SetID:       dec.TaskSetID,
+		RuntimePath: dec.scan.RuntimePath,
+		Source:      "dashboard",
+	}); err != nil {
+		return DashboardDrainResult{}, err
+	}
+	return DashboardDrainResult{PaneID: spawn.PaneID, RuntimePath: dec.scan.RuntimePath}, nil
+}
+
+func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([]projectScan, error) {
+	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
+	if err != nil {
+		return nil, err
+	}
+	var scans []projectScan
+	for _, p := range projects {
+		scan, err := resolveScan(d, p)
+		if err != nil {
+			if outsideQueueScopeResolveError(err) {
+				continue
+			}
+			return nil, err
+		}
+		if scan.DefinitionPath == defPath {
+			scans = append(scans, scan)
+		}
+	}
+	return scans, nil
+}
+
+// PreviewDashboardDrain switches the active tmux client to the pane associated
+// with the highlighted row. Rows without a recorded pane intentionally no-op.
+func PreviewDashboardDrain(d *Deps, row DashboardRow) error {
+	if strings.TrimSpace(row.paneID) == "" {
+		return nil
+	}
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tmux == nil {
+		d.Tmux = deps.NewRealTmux()
+	}
+	if _, err := d.Tmux.Command("select-pane", "-t", row.paneID); err != nil {
+		return err
+	}
+	_, err := d.Tmux.Command("switch-client", "-t", row.paneID)
+	return err
 }
 
 func dashboardTick() tea.Cmd {
@@ -362,7 +579,7 @@ func (m dashboardModel) View() tea.View {
 	}
 	renderDashboardTable(&b, m.snap.Rows, m.cursor)
 	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "j/k move · a auto-drain · q quit")
+	fmt.Fprintln(&b, "j/k move · i drain · p preview · a auto-drain · q quit")
 	return tea.NewView(b.String())
 }
 

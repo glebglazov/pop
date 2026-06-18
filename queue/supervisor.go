@@ -111,7 +111,8 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 				}
 				inPlaceFallbackSpawned[dec.Project] = true
 			}
-			if err := Spawn(d, dec); err != nil {
+			spawn, err := SpawnWithResult(d, dec)
+			if err != nil {
 				fmt.Fprintf(out, "queue: %s: spawn %s: %v\n", dec.Project, dec.TaskSetID, err)
 				if journalErr := AppendJournalEntry(d.Tasks, JournalEntry{
 					Event:       JournalEventSpawnFailed,
@@ -124,6 +125,9 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 					fmt.Fprintf(out, "queue: %s: journal spawn failure %s: %v\n", dec.Project, dec.TaskSetID, journalErr)
 				}
 				continue
+			}
+			if err := recordDrainPane(d, dec, spawn.PaneID, "supervisor"); err != nil {
+				fmt.Fprintf(out, "queue: %s: record drain pane %s: %v\n", dec.Project, dec.TaskSetID, err)
 			}
 			if dec.DefaultAgent != "" {
 				if err := AppendJournalEntry(d.Tasks, JournalEntry{
