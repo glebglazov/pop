@@ -118,37 +118,6 @@ poll_interval = "2s"
 	}
 }
 
-func TestRunQueueIntegrateInvokesQueueIntegration(t *testing.T) {
-	path := writeQueueConfig(t, ``)
-
-	oldCfgFile := cfgFile
-	oldIntegrate := queueIntegrate
-	defer func() {
-		cfgFile = oldCfgFile
-		queueIntegrate = oldIntegrate
-	}()
-
-	cfgFile = path
-	var gotSet string
-	queueIntegrate = func(d *queue.Deps, cfg *config.Config, setID string, out io.Writer, opts queue.IntegrationOptions) (queue.IntegrationResult, error) {
-		gotSet = setID
-		if cfg == nil {
-			t.Fatal("config was nil")
-		}
-		if opts.In == nil {
-			t.Fatal("integration input was nil")
-		}
-		return queue.IntegrationResult{SetID: setID}, nil
-	}
-
-	if err := runQueueIntegrate(nil, []string{"set-1"}); err != nil {
-		t.Fatal(err)
-	}
-	if gotSet != "set-1" {
-		t.Fatalf("setID = %q, want set-1", gotSet)
-	}
-}
-
 func TestRunQueueAbandonInvokesQueueAbandon(t *testing.T) {
 	path := writeQueueConfig(t, ``)
 

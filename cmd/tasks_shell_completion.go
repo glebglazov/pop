@@ -5,6 +5,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/spf13/cobra"
 )
@@ -13,6 +14,7 @@ var (
 	taskCompletionDeps        = func() *tasks.Deps { return tasks.DefaultDeps() }
 	taskCompletionProjectDeps = func() *project.Deps { return project.DefaultDeps() }
 	taskCompletionConfigLoad  = func(path string) (*config.Config, error) { return config.Load(path) }
+	taskIntegrationCompletionDeps = func() *queue.Deps { return queue.DefaultDeps() }
 )
 
 func init() {
@@ -41,6 +43,7 @@ func registerTaskShellCompletions() {
 	taskTimingsCmd.ValidArgsFunction = completeTaskTimingsArgs
 	taskShowPathCmd.ValidArgsFunction = completeTaskShowPathArgs
 	taskExportCmd.ValidArgsFunction = completeTaskExportArgs
+	taskIntegrateCmd.ValidArgsFunction = completeTaskIntegrateArgs
 }
 
 func completeTaskShowPathArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -71,6 +74,17 @@ func completeTaskExportArgs(cmd *cobra.Command, args []string, toComplete string
 		completionInputFromCmd(cmd),
 		toComplete,
 	)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeTaskIntegrateArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	ids, err := queue.CompleteIntegrationSetIDs(taskIntegrationCompletionDeps())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

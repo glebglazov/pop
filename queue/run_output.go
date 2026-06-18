@@ -551,7 +551,7 @@ func integrationHint(mergeStatus, setID string) string {
 	}
 	switch mergeStatus {
 	case MergeabilityClean, MergeabilityConflicts:
-		return "integrate: pop queue integrate " + setID
+		return "integrate: pop tasks integrate " + setID
 	default:
 		return ""
 	}

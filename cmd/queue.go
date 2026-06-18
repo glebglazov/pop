@@ -51,13 +51,6 @@ var queueLogCmd = &cobra.Command{
 	RunE:  runQueueLog,
 }
 
-var queueIntegrateCmd = &cobra.Command{
-	Use:   "integrate <set>",
-	Short: "Merge a clean completed queue set into its working branch",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runQueueIntegrate,
-}
-
 var queueAbandonCmd = &cobra.Command{
 	Use:   "abandon <set>",
 	Short: "Release a worktree binding without integrating",
@@ -83,7 +76,6 @@ func init() {
 	queueCmd.AddCommand(queueRunCmd)
 	queueCmd.AddCommand(queueStatusCmd)
 	queueCmd.AddCommand(queueLogCmd)
-	queueCmd.AddCommand(queueIntegrateCmd)
 	queueAbandonCmd.Flags().BoolVar(&queueAbandonYes, "yes", false, "Skip confirmation prompt")
 	queueCmd.AddCommand(queueAbandonCmd)
 	queueBindWorktreeCmd.Flags().BoolVar(&queueBindWorktreeForce, "force", false, "Re-point a set already bound elsewhere")
@@ -93,7 +85,6 @@ func init() {
 var (
 	queueConfigLoad        = config.Load
 	queueRun               = queue.Run
-	queueIntegrate         = queue.IntegrateWithOptions
 	queueAbandon           = queue.AbandonWithOptions
 	queueBindWorktree      = queue.BindWorktree
 	queueAbandonYes        bool
@@ -196,21 +187,6 @@ func runQueueLog(cmd *cobra.Command, args []string) error {
 	}
 	queue.RenderLog(os.Stdout, entries, queueLogLimit)
 	return nil
-}
-
-func runQueueIntegrate(cmd *cobra.Command, args []string) error {
-	cfgPath := cfgFile
-	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
-	}
-	cfg, err := queueConfigLoad(cfgPath)
-	if err != nil {
-		return err
-	}
-	d := queue.DefaultDeps()
-	d.LoadConfig = queueConfigLoad
-	_, err = queueIntegrate(d, cfg, args[0], os.Stdout, queue.IntegrationOptions{In: os.Stdin})
-	return err
 }
 
 func runQueueAbandon(cmd *cobra.Command, args []string) error {

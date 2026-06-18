@@ -148,6 +148,13 @@ var taskAgentsCmd = &cobra.Command{
 	RunE:  runTaskAgents,
 }
 
+var taskIntegrateCmd = &cobra.Command{
+	Use:   "integrate <set>",
+	Short: "Merge a clean completed set into its working branch",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskIntegrate,
+}
+
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
@@ -165,6 +172,7 @@ func init() {
 	taskTransferCmd.AddCommand(taskImportCmd)
 	taskCmd.AddCommand(taskMigrateCmd)
 	taskCmd.AddCommand(taskAgentsCmd)
+	taskCmd.AddCommand(taskIntegrateCmd)
 
 	taskCmd.PersistentFlags().StringVar(&taskProject, "project", "", "Select project by exact picker-visible name")
 	taskCmd.PersistentFlags().StringVar(&taskPath, "path", "", "Select project by path (normalized to git checkout root)")
@@ -1060,6 +1068,21 @@ func handleTaskExit(err error) {
 	}
 	fmt.Fprintln(os.Stderr, err)
 	os.Exit(tasks.ExitSetup)
+}
+
+func runTaskIntegrate(cmd *cobra.Command, args []string) error {
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	cfg, err := taskConfigLoad(cfgPath)
+	if err != nil {
+		return err
+	}
+	d := queue.DefaultDeps()
+	d.LoadConfig = taskConfigLoad
+	_, err = queue.IntegrateWithOptions(d, cfg, args[0], os.Stdout, queue.IntegrationOptions{In: os.Stdin})
+	return err
 }
 
 func taskProjectDeps() *project.Deps {

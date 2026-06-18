@@ -658,7 +658,7 @@ func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 		"Active worktrees:",
 		"pop: set-1 branch=set-1 at /runtime — conflicts",
 		"pop: set-1 parked",
-		"integrate: pop queue integrate set-1",
+		"integrate: pop tasks integrate set-1",
 	} {
 		if !strings.Contains(statusText, want) {
 			t.Fatalf("status output missing %q:\n%s", want, statusText)

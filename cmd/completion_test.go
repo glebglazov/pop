@@ -221,7 +221,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 	})
 }
 
-func TestQueueIntegrateShellCompletionCandidates(t *testing.T) {
+func TestTaskIntegrateShellCompletionCandidates(t *testing.T) {
 	dir := t.TempDir()
 	td := queueShellCompletionDeps(t, dir)
 	state := &queue.DaemonState{
@@ -243,15 +243,15 @@ func TestQueueIntegrateShellCompletionCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prev := queueCompletionDeps
-	queueCompletionDeps = func() *queue.Deps { return &queue.Deps{Tasks: td} }
-	t.Cleanup(func() { queueCompletionDeps = prev })
+	prev := taskIntegrationCompletionDeps
+	taskIntegrationCompletionDeps = func() *queue.Deps { return &queue.Deps{Tasks: td} }
+	t.Cleanup(func() { taskIntegrationCompletionDeps = prev })
 
-	out := shellCompNoDesc(t, "queue", "integrate")
+	out := shellCompNoDesc(t, "tasks", "integrate")
 	assertShellCompContains(t, out, "set-ready", "set-conflict")
 	assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
 
-	out = shellCompNoDescCompleting(t, "queue", "integrate", "set-r")
+	out = shellCompNoDescCompleting(t, "tasks", "integrate", "set-r")
 	assertShellCompContains(t, out, "set-ready")
 	assertShellCompOmitsExact(t, out, "set-conflict")
 }
