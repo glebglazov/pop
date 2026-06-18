@@ -3,6 +3,7 @@ package queue
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -27,11 +28,12 @@ type DashboardRow struct {
 	Drain     string
 	AutoDrain bool
 
-	defPath   string
-	statePath string
-	cursorKey string
-	repoKey   string
-	paneID    string
+	defPath     string
+	statePath   string
+	cursorKey   string
+	repoKey     string
+	runtimePath string
+	paneID      string
 }
 
 // DashboardSnapshot is the data model for `pop queue dashboard`.
@@ -131,17 +133,18 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 		drain := dashboardDrain(d, state, repoKey, taskRow.ID, wt.runtimePath)
 		status := dashboardStatus(taskRow.Status, merge, awaitingIntegration)
 		rows = append(rows, DashboardRow{
-			Project:   projectName,
-			SetID:     taskRow.ID,
-			Status:    status,
-			Worktree:  wt.label,
-			Drain:     drain,
-			AutoDrain: taskRow.AutoDrain,
-			defPath:   scans[0].DefinitionPath,
-			statePath: tasks.StatePathFor(scans[0].DefinitionPath),
-			cursorKey: projectName + "\x00" + taskRow.ID,
-			repoKey:   repoKey,
-			paneID:    dashboardPaneID(state, repoKey, taskRow.ID),
+			Project:     projectName,
+			SetID:       taskRow.ID,
+			Status:      status,
+			Worktree:    wt.label,
+			Drain:       drain,
+			AutoDrain:   taskRow.AutoDrain,
+			defPath:     scans[0].DefinitionPath,
+			statePath:   tasks.StatePathFor(scans[0].DefinitionPath),
+			cursorKey:   projectName + "\x00" + taskRow.ID,
+			repoKey:     repoKey,
+			runtimePath: wt.runtimePath,
+			paneID:      dashboardPaneID(state, repoKey, taskRow.ID),
 		})
 	}
 	return rows, nil
@@ -252,6 +255,44 @@ type dashboardDrainMsg struct {
 type dashboardPreviewMsg struct {
 	err error
 }
+type dashboardBindListMsg struct {
+	row     DashboardRow
+	entries []dashboardBindEntry
+	err     error
+}
+type dashboardBindRefsMsg struct {
+	refs []string
+	err  error
+}
+type dashboardBindMsg struct {
+	err error
+}
+
+type dashboardBindStage int
+
+const (
+	dashboardBindStageWorktree dashboardBindStage = iota
+	dashboardBindStageBaseRef
+	dashboardBindStageName
+)
+
+type dashboardBindEntry struct {
+	Label  string
+	Path   string
+	Branch string
+	Create bool
+}
+
+type dashboardBindModal struct {
+	row     DashboardRow
+	stage   dashboardBindStage
+	entries []dashboardBindEntry
+	refs    []string
+	cursor  int
+	baseRef string
+	name    string
+	loading bool
+}
 
 type dashboardModel struct {
 	d      *Deps
@@ -261,6 +302,7 @@ type dashboardModel struct {
 	err    error
 	width  int
 	height int
+	bind   *dashboardBindModal
 }
 
 func newDashboardModel(d *Deps, cfg *config.Config, snap DashboardSnapshot) dashboardModel {
@@ -277,6 +319,9 @@ func (m dashboardModel) Init() tea.Cmd {
 func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.bind != nil {
+			return m.updateBindModal(msg)
+		}
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
@@ -308,6 +353,14 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.err = nil
 			return m, m.previewDrain(m.snap.Rows[m.cursor])
+		case "b":
+			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+				return m, nil
+			}
+			m.err = nil
+			row := m.snap.Rows[m.cursor]
+			m.bind = &dashboardBindModal{row: row, loading: true}
+			return m, m.loadBindWorktrees(row)
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -344,6 +397,117 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		}
+	case dashboardBindListMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.bind = nil
+			return m, nil
+		}
+		m.bind = &dashboardBindModal{row: msg.row, entries: msg.entries}
+	case dashboardBindRefsMsg:
+		if m.bind == nil {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.err = msg.err
+			m.bind = nil
+			return m, nil
+		}
+		m.bind.stage = dashboardBindStageBaseRef
+		m.bind.refs = msg.refs
+		m.bind.cursor = 0
+		m.bind.loading = false
+	case dashboardBindMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.bind = nil
+			return m, m.reload()
+		}
+		m.bind = nil
+		return m, m.reload()
+	}
+	return m, nil
+}
+
+func (m dashboardModel) updateBindModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.bind = nil
+		return m, nil
+	case "j", "down":
+		m.moveBindCursor(1)
+		return m, nil
+	case "k", "up":
+		m.moveBindCursor(-1)
+		return m, nil
+	case "backspace":
+		if m.bind.stage == dashboardBindStageName && len(m.bind.name) > 0 {
+			m.bind.name = m.bind.name[:len(m.bind.name)-1]
+		}
+		return m, nil
+	case "enter":
+		return m.confirmBindModal()
+	}
+	if m.bind.stage == dashboardBindStageName {
+		if s := msg.String(); len([]rune(s)) == 1 {
+			m.bind.name += s
+		}
+	}
+	return m, nil
+}
+
+func (m *dashboardModel) moveBindCursor(delta int) {
+	if m.bind == nil {
+		return
+	}
+	limit := len(m.bind.entries)
+	if m.bind.stage == dashboardBindStageBaseRef {
+		limit = len(m.bind.refs)
+	}
+	if limit == 0 {
+		return
+	}
+	m.bind.cursor += delta
+	if m.bind.cursor < 0 {
+		m.bind.cursor = limit - 1
+	}
+	if m.bind.cursor >= limit {
+		m.bind.cursor = 0
+	}
+}
+
+func (m dashboardModel) confirmBindModal() (tea.Model, tea.Cmd) {
+	if m.bind == nil || m.bind.loading {
+		return m, nil
+	}
+	switch m.bind.stage {
+	case dashboardBindStageWorktree:
+		if len(m.bind.entries) == 0 || m.bind.cursor < 0 || m.bind.cursor >= len(m.bind.entries) {
+			return m, nil
+		}
+		entry := m.bind.entries[m.bind.cursor]
+		if entry.Create {
+			m.bind.loading = true
+			return m, m.loadBindRefs(m.bind.row)
+		}
+		m.bind.loading = true
+		return m, m.adoptBindWorktree(m.bind.row, entry.Path)
+	case dashboardBindStageBaseRef:
+		if len(m.bind.refs) == 0 || m.bind.cursor < 0 || m.bind.cursor >= len(m.bind.refs) {
+			return m, nil
+		}
+		m.bind.baseRef = m.bind.refs[m.bind.cursor]
+		m.bind.stage = dashboardBindStageName
+		m.bind.cursor = 0
+		return m, nil
+	case dashboardBindStageName:
+		name := strings.TrimSpace(m.bind.name)
+		if name == "" {
+			m.err = fmt.Errorf("worktree name is required")
+			return m, nil
+		}
+		m.bind.loading = true
+		return m, m.createBindWorktree(m.bind.row, m.bind.baseRef, name)
 	}
 	return m, nil
 }
@@ -376,6 +540,34 @@ func (m dashboardModel) previewDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		err := PreviewDashboardDrain(m.d, row)
 		return dashboardPreviewMsg{err: err}
+	}
+}
+
+func (m dashboardModel) loadBindWorktrees(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		entries, err := DashboardBindWorktreeEntries(m.d, m.cfg, row)
+		return dashboardBindListMsg{row: row, entries: entries, err: err}
+	}
+}
+
+func (m dashboardModel) loadBindRefs(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		refs, err := DashboardBindBaseRefs(m.d, m.cfg, row)
+		return dashboardBindRefsMsg{refs: refs, err: err}
+	}
+}
+
+func (m dashboardModel) adoptBindWorktree(row DashboardRow, checkoutPath string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := DashboardAdoptWorktree(m.d, m.cfg, row, checkoutPath)
+		return dashboardBindMsg{err: err}
+	}
+}
+
+func (m dashboardModel) createBindWorktree(row DashboardRow, baseRef, name string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := DashboardCreateWorktree(m.d, m.cfg, row, baseRef, name)
+		return dashboardBindMsg{err: err}
 	}
 }
 
@@ -540,6 +732,245 @@ func PreviewDashboardDrain(d *Deps, row DashboardRow) error {
 	return err
 }
 
+// DashboardBindWorktreeEntries returns the inline bind picker entries for the
+// highlighted dashboard row: every existing worktree in the row's repository,
+// followed by the pop-native creation entry.
+func DashboardBindWorktreeEntries(d *Deps, cfg *config.Config, row DashboardRow) ([]dashboardBindEntry, error) {
+	scans, _, err := dashboardBindContext(d, cfg, row)
+	if err != nil {
+		return nil, err
+	}
+	out, err := d.Tasks.Git.CommandInDir(scans[0].ProjectPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("list worktrees: %w", err)
+	}
+	worktrees := parseDashboardWorktrees(out)
+	entries := make([]dashboardBindEntry, 0, len(worktrees)+1)
+	for _, wt := range worktrees {
+		label := wt.Name
+		if wt.Branch != "" {
+			label = fmt.Sprintf("%s (%s)", wt.Name, wt.Branch)
+		}
+		entries = append(entries, dashboardBindEntry{Label: label, Path: wt.Path, Branch: wt.Branch})
+	}
+	entries = append(entries, dashboardBindEntry{Label: "＋ Create new worktree", Create: true})
+	return entries, nil
+}
+
+// DashboardBindBaseRefs lists local and remote branch refs for the create-new
+// flow, with main/master variants first.
+func DashboardBindBaseRefs(d *Deps, cfg *config.Config, row DashboardRow) ([]string, error) {
+	scans, _, err := dashboardBindContext(d, cfg, row)
+	if err != nil {
+		return nil, err
+	}
+	out, err := d.Tasks.Git.CommandInDir(scans[0].ProjectPath, "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes")
+	if err != nil {
+		return nil, fmt.Errorf("list base refs: %w", err)
+	}
+	refs := parseDashboardBaseRefs(out)
+	if len(refs) == 0 {
+		return nil, fmt.Errorf("no local or remote branches found")
+	}
+	return refs, nil
+}
+
+// DashboardAdoptWorktree binds row.SetID to an existing checkout. The dashboard
+// action is deliberate, so idle re-pointing uses Force without a second prompt.
+func DashboardAdoptWorktree(d *Deps, cfg *config.Config, row DashboardRow, checkoutPath string) (BindWorktreeResult, error) {
+	if err := refuseDashboardBindWhileLocked(d, row); err != nil {
+		return BindWorktreeResult{}, err
+	}
+	return BindWorktree(d, cfg, row.SetID, checkoutPath, BindWorktreeOptions{Force: true}, io.Discard)
+}
+
+type DashboardCreateWorktreeResult struct {
+	SetID       string
+	RuntimePath string
+	Branch      string
+	BaseRef     string
+}
+
+// DashboardCreateWorktree creates a pop-managed worktree on a fresh branch and
+// records a provisioned binding. It never opens or attaches a tmux session.
+func DashboardCreateWorktree(d *Deps, cfg *config.Config, row DashboardRow, baseRef, name string) (DashboardCreateWorktreeResult, error) {
+	baseRef = strings.TrimSpace(baseRef)
+	name = strings.TrimSpace(name)
+	if baseRef == "" {
+		return DashboardCreateWorktreeResult{}, fmt.Errorf("base ref is required")
+	}
+	if name == "" {
+		return DashboardCreateWorktreeResult{}, fmt.Errorf("worktree name is required")
+	}
+	scans, repoKey, err := dashboardBindContext(d, cfg, row)
+	if err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	if err := refuseDashboardBindWhileLocked(d, row); err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	branch := name
+	path := filepath.Join(QueueDataDir(d.Tasks), "worktrees", repoKey, binding.SafeComponent(name))
+	if err := d.Tasks.FS.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return DashboardCreateWorktreeResult{}, fmt.Errorf("create worktree parent: %w", err)
+	}
+	if _, err := d.Tasks.Git.CommandInDir(scans[0].ProjectPath, "worktree", "add", "-b", branch, path, baseRef); err != nil {
+		return DashboardCreateWorktreeResult{}, fmt.Errorf("git worktree add: %w", err)
+	}
+	proj := repoName(scans, nil)
+	if rep, _, err := resolveRepresentative(d, cfg, scans); err == nil {
+		proj = repoName(scans, rep)
+	}
+	state, err := EnsureDaemonState(d.Tasks)
+	if err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	if state.WorktreeBindings == nil {
+		state.WorktreeBindings = map[string]WorktreeBinding{}
+	}
+	key := setScopedKey(repoKey, row.SetID)
+	state.WorktreeBindings[key] = binding.Binding{RuntimePath: path, Branch: branch, Project: proj, Provisioned: true}
+	if err := WriteDaemonState(d.Tasks, state); err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	if err := AppendJournalEntry(d.Tasks, JournalEntry{
+		Event:       JournalEventBound,
+		Project:     proj,
+		SetID:       row.SetID,
+		RuntimePath: path,
+		SourceRef:   branch,
+		Source:      "dashboard",
+	}); err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	return DashboardCreateWorktreeResult{SetID: row.SetID, RuntimePath: path, Branch: branch, BaseRef: baseRef}, nil
+}
+
+func dashboardBindContext(d *Deps, cfg *config.Config, row DashboardRow) ([]projectScan, string, error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	scans, err := dashboardScansForDefinition(d, cfg, row.defPath)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(scans) == 0 {
+		return nil, "", fmt.Errorf("task set %s is no longer in a registered queue project", row.SetID)
+	}
+	repoKey := row.repoKey
+	if repoKey == "" {
+		repoKey, err = scanRepoKey(d, scans[0])
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	return scans, repoKey, nil
+}
+
+func refuseDashboardBindWhileLocked(d *Deps, row DashboardRow) error {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	state, err := EnsureDaemonState(d.Tasks)
+	if err != nil {
+		return err
+	}
+	paths := map[string]bool{}
+	if strings.TrimSpace(row.runtimePath) != "" {
+		paths[row.runtimePath] = true
+	}
+	if row.repoKey != "" {
+		if b, ok := state.WorktreeBindings[setScopedKey(row.repoKey, row.SetID)]; ok && b.RuntimePath != "" {
+			paths[b.RuntimePath] = true
+		}
+	}
+	for path := range paths {
+		lock := d.readLock(path)
+		if lock == nil || !lock.Locked {
+			continue
+		}
+		if lock.Metadata == nil || lock.Metadata.SetID == "" || lock.Metadata.SetID == row.SetID {
+			return fmt.Errorf("refusing bind-worktree: %s is currently executing", row.SetID)
+		}
+	}
+	return nil
+}
+
+func parseDashboardWorktrees(output string) []project.Worktree {
+	var worktrees []project.Worktree
+	var current project.Worktree
+	isBare := false
+	for _, line := range strings.Split(output, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			current.Path = strings.TrimPrefix(line, "worktree ")
+			current.Name = filepath.Base(current.Path)
+		case strings.HasPrefix(line, "branch "):
+			current.Branch = strings.TrimPrefix(strings.TrimPrefix(line, "branch "), "refs/heads/")
+		case line == "detached":
+			current.Branch = "detached"
+		case line == "bare":
+			isBare = true
+		case line == "":
+			if current.Path != "" && !isBare {
+				worktrees = append(worktrees, current)
+			}
+			current = project.Worktree{}
+			isBare = false
+		}
+	}
+	if current.Path != "" && !isBare {
+		worktrees = append(worktrees, current)
+	}
+	return worktrees
+}
+
+func parseDashboardBaseRefs(output string) []string {
+	seen := map[string]bool{}
+	var refs []string
+	for _, line := range strings.Split(output, "\n") {
+		ref := strings.TrimSpace(line)
+		if ref == "" || strings.HasSuffix(ref, "/HEAD") || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		refs = append(refs, ref)
+	}
+	sort.SliceStable(refs, func(i, j int) bool {
+		ri, rj := dashboardBaseRefRank(refs[i]), dashboardBaseRefRank(refs[j])
+		if ri != rj {
+			return ri < rj
+		}
+		return refs[i] < refs[j]
+	})
+	return refs
+}
+
+func dashboardBaseRefRank(ref string) int {
+	switch ref {
+	case "main":
+		return 0
+	case "master":
+		return 1
+	}
+	if strings.HasSuffix(ref, "/main") {
+		return 2
+	}
+	if strings.HasSuffix(ref, "/master") {
+		return 3
+	}
+	return 4
+}
+
 func dashboardTick() tea.Cmd {
 	return tea.Tick(dashboardPollInterval, func(time.Time) tea.Msg { return dashboardTickMsg{} })
 }
@@ -579,8 +1010,52 @@ func (m dashboardModel) View() tea.View {
 	}
 	renderDashboardTable(&b, m.snap.Rows, m.cursor)
 	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "j/k move · i drain · p preview · a auto-drain · q quit")
+	if m.bind != nil {
+		renderDashboardBindModal(&b, m.bind)
+	} else {
+		fmt.Fprintln(&b, "j/k move · i drain · p preview · b bind worktree · a auto-drain · q quit")
+	}
 	return tea.NewView(b.String())
+}
+
+func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
+	if modal == nil {
+		return
+	}
+	fmt.Fprintln(w, "Bind worktree")
+	if modal.loading {
+		fmt.Fprintln(w, "  loading...")
+		return
+	}
+	switch modal.stage {
+	case dashboardBindStageWorktree:
+		for i, entry := range modal.entries {
+			prefix := "  "
+			if i == modal.cursor {
+				prefix = "> "
+			}
+			label := entry.Label
+			if label == "" {
+				label = entry.Path
+			}
+			fmt.Fprintf(w, "%s%s\n", prefix, label)
+		}
+		fmt.Fprintln(w, "enter select · esc cancel")
+	case dashboardBindStageBaseRef:
+		fmt.Fprintln(w, "Base ref")
+		for i, ref := range modal.refs {
+			prefix := "  "
+			if i == modal.cursor {
+				prefix = "> "
+			}
+			fmt.Fprintf(w, "%s%s\n", prefix, ref)
+		}
+		fmt.Fprintln(w, "enter select · esc cancel")
+	case dashboardBindStageName:
+		fmt.Fprintf(w, "Base: %s\n", modal.baseRef)
+		fmt.Fprintf(w, "Name: %s\n", modal.name)
+		fmt.Fprintln(w, "enter create · esc cancel")
+	}
 }
 
 func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor int) {

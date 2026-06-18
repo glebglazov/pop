@@ -233,6 +233,29 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 	}
 }
 
+func TestDashboardBKeyOpensBindModal(t *testing.T) {
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+		Project: "pop", SetID: "set-bind", Status: "READY", Worktree: "/repo/main (main)",
+		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set-bind",
+	}}})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	got := updated.(dashboardModel)
+	if got.bind == nil || !got.bind.loading || got.bind.row.SetID != "set-bind" {
+		t.Fatalf("bind modal = %+v, want loading modal for set-bind", got.bind)
+	}
+	if cmd == nil {
+		t.Fatalf("b key did not return a worktree-loading command")
+	}
+}
+
+func TestDashboardBaseRefsMainMasterFirst(t *testing.T) {
+	got := parseDashboardBaseRefs("feature\norigin/master\norigin/HEAD\nmaster\norigin/main\nmain\n")
+	want := []string{"main", "master", "origin/main", "origin/master", "feature"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("refs = %v, want %v", got, want)
+	}
+}
+
 func TestDashboardLaunchDrainRoutesPlainQueueBaseAndRecordsPane(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "plain-drain", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -320,6 +343,152 @@ func TestDashboardLaunchDrainProvisionsManagedWorktreeWhenReady(t *testing.T) {
 		t.Fatalf("binding = %+v, want managed worktree %q", binding, result.RuntimePath)
 	}
 	assertDashboardPaneMapping(t, d, repo, setID, "%3", "dashboard")
+}
+
+func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "bind-existing", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	wt1 := filepath.Join(t.TempDir(), "existing-one")
+	wt2 := filepath.Join(t.TempDir(), "existing-two")
+	runGit(t, repo, "worktree", "add", "-b", "existing-one", wt1, "HEAD")
+	runGit(t, repo, "worktree", "add", "-b", "existing-two", wt2, "HEAD")
+	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+
+	entries, err := DashboardBindWorktreeEntries(d, cfg, row)
+	if err != nil {
+		t.Fatalf("DashboardBindWorktreeEntries: %v", err)
+	}
+	if len(entries) < 3 || !entries[len(entries)-1].Create {
+		t.Fatalf("entries = %+v, want existing worktrees plus create entry", entries)
+	}
+	var sawWT1 bool
+	for _, entry := range entries {
+		if entry.Path != "" && canon(t, d, entry.Path) == canon(t, d, wt1) && entry.Branch == "existing-one" {
+			sawWT1 = true
+		}
+	}
+	if !sawWT1 {
+		t.Fatalf("entries = %+v, want %s on branch existing-one", entries, wt1)
+	}
+
+	got, err := DashboardAdoptWorktree(d, cfg, row, wt1)
+	if err != nil {
+		t.Fatalf("DashboardAdoptWorktree: %v", err)
+	}
+	if got.RuntimePath != wt1 || got.Branch != "existing-one" {
+		t.Fatalf("adopt result = %+v, want %s existing-one", got, wt1)
+	}
+
+	repointed, err := DashboardAdoptWorktree(d, cfg, row, wt2)
+	if err != nil {
+		t.Fatalf("idle re-point should not require force prompt: %v", err)
+	}
+	if !repointed.Replaced || repointed.RuntimePath != wt2 {
+		t.Fatalf("repoint result = %+v, want replaced binding to %s", repointed, wt2)
+	}
+	state, err := ReadDaemonState(d.Tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := state.WorktreeBindings[setScopedKey(repoKey, setID)]
+	if binding.RuntimePath != wt2 || binding.Provisioned {
+		t.Fatalf("binding = %+v, want adopted %s", binding, wt2)
+	}
+	snap, err := BuildDashboard(d, cfg)
+	if err != nil {
+		t.Fatalf("BuildDashboard: %v", err)
+	}
+	if len(snap.Rows) == 0 || snap.Rows[0].Worktree != wt2+" (existing-two)" {
+		t.Fatalf("dashboard rows = %+v, want worktree column updated", snap.Rows)
+	}
+}
+
+func TestDashboardCreateWorktreeManagedFreshBranchNoSession(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "bind-create", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+
+	refs, err := DashboardBindBaseRefs(d, cfg, row)
+	if err != nil {
+		t.Fatalf("DashboardBindBaseRefs: %v", err)
+	}
+	if len(refs) == 0 || refs[0] != "main" {
+		t.Fatalf("refs = %v, want main first", refs)
+	}
+
+	got, err := DashboardCreateWorktree(d, cfg, row, "main", "fresh-dashboard-branch")
+	if err != nil {
+		t.Fatalf("DashboardCreateWorktree: %v", err)
+	}
+	if got.Branch != "fresh-dashboard-branch" || got.BaseRef != "main" {
+		t.Fatalf("create result = %+v", got)
+	}
+	if len(rt.commands) != 0 {
+		t.Fatalf("create-new must not spawn or switch tmux sessions, got %v", rt.commands)
+	}
+	if branch := runGitOutput(t, repo, "branch", "--list", "fresh-dashboard-branch"); strings.TrimSpace(branch) == "" {
+		t.Fatalf("fresh branch was not created")
+	}
+	state, err := ReadDaemonState(d.Tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := state.WorktreeBindings[setScopedKey(repoKey, setID)]
+	if binding.RuntimePath != got.RuntimePath || binding.Branch != "fresh-dashboard-branch" || !binding.Provisioned {
+		t.Fatalf("binding = %+v, want managed fresh branch at %s", binding, got.RuntimePath)
+	}
+}
+
+func TestDashboardBindRefusesLiveLock(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "bind-locked", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	locked := filepath.Join(t.TempDir(), "locked")
+	target := filepath.Join(t.TempDir(), "target")
+	runGit(t, repo, "worktree", "add", "-b", "locked-branch", locked, "HEAD")
+	runGit(t, repo, "worktree", "add", "-b", "target-branch", target, "HEAD")
+	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.repoKey = repoKey
+	row.runtimePath = locked
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: locked, Branch: "locked-branch", Project: "pop", Provisioned: false},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	d.ReadLock = func(runtimePath string) *tasks.RuntimeLockStatus {
+		if runtimePath == locked {
+			lock := liveLock(runtimePath)
+			lock.Metadata.SetID = setID
+			return lock
+		}
+		return idleLock(runtimePath)
+	}
+
+	_, err = DashboardAdoptWorktree(d, cfg, row, target)
+	if err == nil || !strings.Contains(err.Error(), "currently executing") {
+		t.Fatalf("DashboardAdoptWorktree err = %v, want live-lock refusal", err)
+	}
+	after, err := ReadDaemonState(d.Tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after.WorktreeBindings[setScopedKey(repoKey, setID)].RuntimePath; got != locked {
+		t.Fatalf("binding runtime = %q, want unchanged %q", got, locked)
+	}
 }
 
 func TestDashboardLaunchDrainRefusesBareWithoutQueueBase(t *testing.T) {
