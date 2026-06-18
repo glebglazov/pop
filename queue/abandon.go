@@ -69,6 +69,50 @@ func AbandonWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer
 		return AbandonResult{SetID: setID, Noop: true}, nil
 	}
 
+	return abandonResolvedBinding(d, cfg, state, key, binding, setID, out, opts)
+}
+
+// AbandonBindingWithOptions releases the binding stored at bindingKey using
+// the same implementation as AbandonWithOptions. It is for callers, such as the
+// dashboard, that already resolved a highlighted row to a repository-scoped key.
+func AbandonBindingWithOptions(d *Deps, cfg *config.Config, bindingKey, setID string, out io.Writer, opts AbandonOptions) (AbandonResult, error) {
+	setID = strings.TrimSpace(setID)
+	if setID == "" {
+		return AbandonResult{}, fmt.Errorf("set id is required")
+	}
+	bindingKey = strings.TrimSpace(bindingKey)
+	if bindingKey == "" {
+		return AbandonWithOptions(d, cfg, setID, out, opts)
+	}
+	if out == nil {
+		out = io.Discard
+	}
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	if opts.In == nil {
+		opts.In = os.Stdin
+	}
+
+	state, err := EnsureDaemonState(d.Tasks)
+	if err != nil {
+		return AbandonResult{}, err
+	}
+	binding, ok := state.WorktreeBindings[bindingKey]
+	if !ok {
+		fmt.Fprintf(out, "%s has no worktree binding to unbind\n", setID)
+		return AbandonResult{SetID: setID, Noop: true}, nil
+	}
+	return abandonResolvedBinding(d, cfg, state, bindingKey, binding, setID, out, opts)
+}
+
+func abandonResolvedBinding(d *Deps, cfg *config.Config, state *DaemonState, key string, binding WorktreeBinding, setID string, out io.Writer, opts AbandonOptions) (AbandonResult, error) {
 	lock := d.readLock(binding.RuntimePath)
 	if lock != nil && lock.Locked {
 		if lock.Metadata != nil && lock.Metadata.SetID != "" && lock.Metadata.SetID != setID {

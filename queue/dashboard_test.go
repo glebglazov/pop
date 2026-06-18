@@ -544,6 +544,204 @@ func TestDashboardBindRefusesLiveLock(t *testing.T) {
 	}
 }
 
+func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+		Project: "pop", SetID: "set-unbind", Status: "FAILED", Worktree: "/repo/bound (branch)",
+		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set-unbind",
+	}}})
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	got := updated.(dashboardModel)
+	if cmd != nil {
+		t.Fatalf("U key returned command before confirmation")
+	}
+	if got.abandon == nil || got.abandon.row.SetID != "set-unbind" {
+		t.Fatalf("abandon modal = %+v, want set-unbind", got.abandon)
+	}
+	if !strings.Contains(got.View().Content, "Unbind worktree for set-unbind") {
+		t.Fatalf("view missing unbind modal:\n%s", got.View().Content)
+	}
+
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got = updated.(dashboardModel)
+	if cmd == nil {
+		t.Fatalf("confirm did not return unbind command")
+	}
+	if got.abandon == nil || !got.abandon.loading {
+		t.Fatalf("abandon modal after confirm = %+v, want loading", got.abandon)
+	}
+
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	got = updated.(dashboardModel)
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	got = updated.(dashboardModel)
+	if cmd != nil || got.abandon != nil {
+		t.Fatalf("cancel should close modal without command: modal=%+v cmd=%v", got.abandon, cmd)
+	}
+}
+
+func TestDashboardUnbindManagedTearsDownAndRefreshShowsQueueBase(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "dashboard-unbind-managed", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
+	})
+	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeManifest := mustReadFile(t, filepath.Join(id.TasksDir, setID, "index.json"))
+	wt := filepath.Join(t.TempDir(), "managed")
+	runGit(t, repo, "worktree", "add", "-b", "managed-unbind", wt, "HEAD")
+	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.repoKey = repoKey
+	row.runtimePath = wt
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "managed-unbind", Project: filepath.Base(repo), Provisioned: true},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := DashboardUnbindWorktree(d, cfg, row)
+	if err != nil {
+		t.Fatalf("DashboardUnbindWorktree: %v", err)
+	}
+	if got.Noop {
+		t.Fatalf("unbind result = %+v, want success", got)
+	}
+	if _, err := os.Stat(wt); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("managed checkout stat err = %v, want not exist", err)
+	}
+	if branch := runGitOutput(t, repo, "branch", "--list", "managed-unbind"); strings.TrimSpace(branch) != "" {
+		t.Fatalf("managed branch still exists: %q", branch)
+	}
+	after, err := ReadDaemonState(d.Tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.WorktreeBindings) != 0 {
+		t.Fatalf("bindings = %+v, want cleared", after.WorktreeBindings)
+	}
+	afterManifest := mustReadFile(t, filepath.Join(id.TasksDir, setID, "index.json"))
+	if string(beforeManifest) != string(afterManifest) {
+		t.Fatalf("manifest changed:\nbefore:%s\nafter:%s", beforeManifest, afterManifest)
+	}
+	snap, err := BuildDashboard(d, cfg)
+	if err != nil {
+		t.Fatalf("BuildDashboard: %v", err)
+	}
+	if len(snap.Rows) == 0 || canon(t, d, snap.Rows[0].runtimePath) != canon(t, d, repo) || !strings.Contains(snap.Rows[0].Worktree, " (main)") {
+		t.Fatalf("dashboard rows = %+v, want queue base worktree", snap.Rows)
+	}
+}
+
+func TestDashboardUnbindAdoptedOnlyForgetsBindingAndKeepsStatus(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "dashboard-unbind-adopted", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeManifest := mustReadFile(t, filepath.Join(id.TasksDir, setID, "index.json"))
+	wt := filepath.Join(t.TempDir(), "adopted")
+	runGit(t, repo, "worktree", "add", "-b", "adopted-unbind", wt, "HEAD")
+	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.repoKey = repoKey
+	row.runtimePath = wt
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "adopted-unbind", Project: filepath.Base(repo), Provisioned: false},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := DashboardUnbindWorktree(d, cfg, row)
+	if err != nil {
+		t.Fatalf("DashboardUnbindWorktree: %v", err)
+	}
+	if got.Noop {
+		t.Fatalf("unbind result = %+v, want success", got)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("adopted checkout should remain: %v", err)
+	}
+	if branch := runGitOutput(t, repo, "branch", "--list", "adopted-unbind"); strings.TrimSpace(branch) == "" {
+		t.Fatalf("adopted branch was removed")
+	}
+	after, err := ReadDaemonState(d.Tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.WorktreeBindings) != 0 {
+		t.Fatalf("bindings = %+v, want cleared", after.WorktreeBindings)
+	}
+	afterManifest := mustReadFile(t, filepath.Join(id.TasksDir, setID, "index.json"))
+	if string(beforeManifest) != string(afterManifest) {
+		t.Fatalf("manifest changed:\nbefore:%s\nafter:%s", beforeManifest, afterManifest)
+	}
+}
+
+func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "dashboard-unbind-locked", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
+	})
+	wt := filepath.Join(t.TempDir(), "locked")
+	runGit(t, repo, "worktree", "add", "-b", "locked-unbind", wt, "HEAD")
+	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.repoKey = repoKey
+	row.runtimePath = wt
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "locked-unbind", Project: filepath.Base(repo), Provisioned: false},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	d.ReadLock = func(runtimePath string) *tasks.RuntimeLockStatus {
+		if runtimePath == wt {
+			lock := liveLock(runtimePath)
+			lock.Metadata.SetID = setID
+			return lock
+		}
+		return idleLock(runtimePath)
+	}
+
+	_, err = DashboardUnbindWorktree(d, cfg, row)
+	if err == nil || !strings.Contains(err.Error(), "refusing unbind") {
+		t.Fatalf("DashboardUnbindWorktree err = %v, want live-lock refusal", err)
+	}
+	after, err := ReadDaemonState(d.Tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after.WorktreeBindings[setScopedKey(repoKey, setID)].RuntimePath; got != wt {
+		t.Fatalf("binding runtime = %q, want unchanged %q", got, wt)
+	}
+
+	d.ReadLock = func(runtimePath string) *tasks.RuntimeLockStatus {
+		t.Fatalf("no-binding unbind must not read runtime lock")
+		return nil
+	}
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := DashboardUnbindWorktree(d, cfg, row)
+	if err != nil {
+		t.Fatalf("no-binding DashboardUnbindWorktree: %v", err)
+	}
+	if !got.Noop {
+		t.Fatalf("no-binding result = %+v, want noop", got)
+	}
+}
+
 func TestDashboardLaunchDrainRefusesBareWithoutQueueBase(t *testing.T) {
 	_, wts := initBareRepoWithWorktrees(t, 1)
 	checkout := wts[0]

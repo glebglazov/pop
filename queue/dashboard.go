@@ -269,6 +269,9 @@ type dashboardBindRefsMsg struct {
 type dashboardBindMsg struct {
 	err error
 }
+type dashboardAbandonMsg struct {
+	err error
+}
 
 type dashboardBindStage int
 
@@ -296,15 +299,21 @@ type dashboardBindModal struct {
 	loading bool
 }
 
+type dashboardAbandonModal struct {
+	row     DashboardRow
+	loading bool
+}
+
 type dashboardModel struct {
-	d      *Deps
-	cfg    *config.Config
-	snap   DashboardSnapshot
-	cursor int
-	err    error
-	width  int
-	height int
-	bind   *dashboardBindModal
+	d       *Deps
+	cfg     *config.Config
+	snap    DashboardSnapshot
+	cursor  int
+	err     error
+	width   int
+	height  int
+	bind    *dashboardBindModal
+	abandon *dashboardAbandonModal
 }
 
 func newDashboardModel(d *Deps, cfg *config.Config, snap DashboardSnapshot) dashboardModel {
@@ -323,6 +332,9 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.bind != nil {
 			return m.updateBindModal(msg)
+		}
+		if m.abandon != nil {
+			return m.updateAbandonModal(msg)
 		}
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
@@ -369,6 +381,13 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			row := m.snap.Rows[m.cursor]
 			m.bind = &dashboardBindModal{row: row, loading: true}
 			return m, m.loadBindWorktrees(row)
+		case "U":
+			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+				return m, nil
+			}
+			m.err = nil
+			m.abandon = &dashboardAbandonModal{row: m.snap.Rows[m.cursor]}
+			return m, nil
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -433,6 +452,14 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.bind = nil
 		return m, m.reload()
+	case dashboardAbandonMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.abandon = nil
+			return m, m.reload()
+		}
+		m.abandon = nil
+		return m, m.reload()
 	}
 	return m, nil
 }
@@ -464,6 +491,21 @@ func (m dashboardModel) updateBindModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if s := msg.String(); len([]rune(s)) == 1 {
 			m.bind.name += s
 		}
+	}
+	return m, nil
+}
+
+func (m dashboardModel) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c", "n":
+		m.abandon = nil
+		return m, nil
+	case "enter", "y":
+		if m.abandon == nil || m.abandon.loading {
+			return m, nil
+		}
+		m.abandon.loading = true
+		return m, m.abandonWorktree(m.abandon.row)
 	}
 	return m, nil
 }
@@ -587,6 +629,13 @@ func (m dashboardModel) createBindWorktree(row DashboardRow, baseRef, name strin
 	return func() tea.Msg {
 		_, err := DashboardCreateWorktree(m.d, m.cfg, row, baseRef, name)
 		return dashboardBindMsg{err: err}
+	}
+}
+
+func (m dashboardModel) abandonWorktree(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		_, err := DashboardUnbindWorktree(m.d, m.cfg, row)
+		return dashboardAbandonMsg{err: err}
 	}
 }
 
@@ -849,6 +898,18 @@ func PreviewDashboardDrain(d *Deps, row DashboardRow) error {
 	}
 	_, err := d.Tmux.Command("switch-client", "-t", row.paneID)
 	return err
+}
+
+// DashboardUnbindWorktree releases the highlighted set's worktree binding
+// through the same unbind implementation used by `pop tasks unbind-worktree`.
+// The dashboard supplies its own inline confirmation, so the command-level
+// prompt is skipped here.
+func DashboardUnbindWorktree(d *Deps, cfg *config.Config, row DashboardRow) (AbandonResult, error) {
+	key := ""
+	if strings.TrimSpace(row.repoKey) != "" {
+		key = setScopedKey(row.repoKey, row.SetID)
+	}
+	return AbandonBindingWithOptions(d, cfg, key, row.SetID, io.Discard, AbandonOptions{Yes: true, In: tasks.NonInteractiveReader{}})
 }
 
 // DashboardBindWorktreeEntries returns the inline bind picker entries for the
@@ -1131,8 +1192,10 @@ func (m dashboardModel) View() tea.View {
 	fmt.Fprintln(&b)
 	if m.bind != nil {
 		renderDashboardBindModal(&b, m.bind)
+	} else if m.abandon != nil {
+		renderDashboardAbandonModal(&b, m.abandon)
 	} else {
-		fmt.Fprintln(&b, "j/k move · i drain · p preview · b bind worktree · a auto-drain · q quit")
+		fmt.Fprintln(&b, "j/k move · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · q quit")
 	}
 	return tea.NewView(b.String())
 }
@@ -1175,6 +1238,19 @@ func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
 		fmt.Fprintf(w, "Name: %s\n", modal.name)
 		fmt.Fprintln(w, "enter create · esc cancel")
 	}
+}
+
+func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal) {
+	if modal == nil {
+		return
+	}
+	fmt.Fprintf(w, "Unbind worktree for %s\n", modal.row.SetID)
+	if modal.loading {
+		fmt.Fprintln(w, "  unbinding...")
+		return
+	}
+	fmt.Fprintln(w, "This releases the binding without integrating. Task statuses are unchanged.")
+	fmt.Fprintln(w, "enter/y confirm · n/esc cancel")
 }
 
 func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor int) {
