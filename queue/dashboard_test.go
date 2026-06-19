@@ -254,114 +254,167 @@ func TestDashboardBKeyOpensBindModal(t *testing.T) {
 	}
 }
 
-func TestDashboardSKeyOpensStatusModalAndClosePreservesCursor(t *testing.T) {
+func TestDashboardSKeyOpensDetailViewAndClosePreservesCursor(t *testing.T) {
 	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "first", Status: "READY", cursorKey: "pop\x00first"},
 		{Project: "pop", SetID: "second", Status: "READY", cursorKey: "pop\x00second"},
 	}})
 	m.cursor = 1
 
+	// Enter: s opens detail view for the focused row.
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(dashboardModel)
-	if got.status == nil || !got.status.loading || got.status.row.SetID != "second" {
-		t.Fatalf("status modal = %+v, want loading modal for second", got.status)
+	if got.detail == nil || !got.detail.loading || got.detail.row.SetID != "second" {
+		t.Fatalf("detail view = %+v, want loading for second", got.detail)
 	}
 	if cmd == nil {
-		t.Fatalf("s key did not return a status-loading command")
+		t.Fatalf("s key did not return a loading command")
+	}
+	// View must be the detail view (no table).
+	view := got.View().Content
+	if strings.Contains(view, "project") && strings.Contains(view, "task set") {
+		t.Fatalf("view should not show the table when detail is open:\n%s", view)
 	}
 
+	// Exit: q closes detail, returns to queue table, cursor unchanged.
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	got = updated.(dashboardModel)
 	if cmd != nil {
-		t.Fatalf("q in status modal should close modal without quitting")
+		t.Fatalf("q in detail view should close without quitting")
 	}
-	if got.status != nil || got.cursor != 1 {
-		t.Fatalf("after close: status=%+v cursor=%d, want nil and 1", got.status, got.cursor)
+	if got.detail != nil || got.cursor != 1 {
+		t.Fatalf("after close: detail=%+v cursor=%d, want nil and 1", got.detail, got.cursor)
+	}
+
+	// Exit via esc also works.
+	m2 := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "alpha", Status: "READY", cursorKey: "pop\x00alpha"},
+	}})
+	updated, _ = m2.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	updated, cmd = updated.(dashboardModel).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if cmd != nil || updated.(dashboardModel).detail != nil {
+		t.Fatalf("esc should close detail view without quitting")
 	}
 }
 
-func TestDashboardStatusModalRendersNormalTaskDetail(t *testing.T) {
-	d := &Deps{Refresh: func(string) (*tasks.RefreshResult, error) {
-		return &tasks.RefreshResult{
-			Rows: []tasks.Row{{ID: "set-normal", Status: tasks.StatusReady, Progress: "1/2 done, 1 open"}},
-			Manifests: map[string]*tasks.Manifest{"set-normal": {
-				Valid: true,
-				Tasks: []tasks.Task{
-					{ID: "01-a", File: "01-a.md", Title: "First", Type: "AFK", Status: "done"},
-					{ID: "02-b", File: "02-b.md", Title: "Second", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
-				},
-			}},
-		}, nil
-	}}
-	lines, err := DashboardStatusDetailLines(d, DashboardRow{SetID: "set-normal"})
-	if err != nil {
-		t.Fatalf("DashboardStatusDetailLines: %v", err)
+func TestDashboardDetailViewRendersTaskList(t *testing.T) {
+	manifest := &tasks.Manifest{
+		Valid: true,
+		Tasks: []tasks.Task{
+			{ID: "01-a", File: "01-a.md", Title: "First", Type: "AFK", Status: "done"},
+			{ID: "02-b", File: "02-b.md", Title: "Second", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
+		},
 	}
-	modal := &dashboardStatusModal{row: DashboardRow{SetID: "set-normal"}, lines: lines}
+	taskRow := &tasks.Row{ID: "set-normal", Status: tasks.StatusReady, Progress: "1/2 done, 1 open"}
+	d := &detailView{
+		row:      DashboardRow{SetID: "set-normal"},
+		manifest: manifest,
+		taskRow:  taskRow,
+		cursorID: "01-a",
+	}
 	var rendered strings.Builder
-	renderDashboardStatusModal(&rendered, modal, 20)
+	renderDetailContent(&rendered, d)
 	out := rendered.String()
 
-	for _, want := range []string{"Task status: set-normal", "set-normal  [READY]  1/2 done, 1 open", "STATUS", "01-a", "02-b", "01-a"} {
+	for _, want := range []string{"set-normal  [READY]  1/2 done, 1 open", "STATUS", "01-a", "02-b", "01-a"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("rendered modal missing %q:\n%s", want, out)
+			t.Fatalf("rendered detail missing %q:\n%s", want, out)
 		}
 	}
 	if strings.Index(out, "01-a") > strings.Index(out, "02-b") {
 		t.Fatalf("tasks out of manifest order:\n%s", out)
 	}
-}
-
-func TestDashboardStatusModalRendersMalformedDiagnostics(t *testing.T) {
-	d := &Deps{Refresh: func(string) (*tasks.RefreshResult, error) {
-		return &tasks.RefreshResult{
-			Rows: []tasks.Row{{
-				ID:               "set-broken",
-				Status:           tasks.StatusMalformed,
-				MalformedSummary: "bad manifest",
-				DetailErrors:     []string{"task \"01-a\": invalid status \"wat\""},
-			}},
-			Manifests: map[string]*tasks.Manifest{"set-broken": {
-				Valid:  false,
-				Errors: []string{"task \"01-a\": invalid status \"wat\""},
-			}},
-		}, nil
-	}}
-	lines, err := DashboardStatusDetailLines(d, DashboardRow{SetID: "set-broken"})
-	if err != nil {
-		t.Fatalf("DashboardStatusDetailLines: %v", err)
-	}
-	modal := &dashboardStatusModal{row: DashboardRow{SetID: "set-broken"}, lines: lines}
-	var rendered strings.Builder
-	renderDashboardStatusModal(&rendered, modal, 20)
-	out := rendered.String()
-
-	if !strings.Contains(out, "set-broken  [MALFORMED]") || !strings.Contains(out, "malformed manifest") || !strings.Contains(out, "invalid status") {
-		t.Fatalf("expected malformed diagnostics:\n%s", out)
-	}
-	if strings.Contains(out, "STATUS") {
-		t.Fatalf("malformed modal should not print a task table:\n%s", out)
+	// Cursor indicator on first task.
+	if !strings.Contains(out, "█") {
+		t.Fatalf("expected cursor indicator:\n%s", out)
 	}
 }
 
-func TestDashboardStatusModalRendersMissingDiagnostic(t *testing.T) {
-	d := &Deps{Refresh: func(string) (*tasks.RefreshResult, error) {
-		return &tasks.RefreshResult{
-			Rows:      []tasks.Row{{ID: "set-missing", Status: tasks.StatusMissing}},
-			Manifests: map[string]*tasks.Manifest{},
-		}, nil
-	}}
-	lines, err := DashboardStatusDetailLines(d, DashboardRow{SetID: "set-missing"})
-	if err != nil {
-		t.Fatalf("DashboardStatusDetailLines: %v", err)
+func TestDashboardDetailViewCursorByIDPinsAcrossRefresh(t *testing.T) {
+	manifest1 := &tasks.Manifest{
+		Valid: true,
+		Tasks: []tasks.Task{
+			{ID: "01-a", Type: "AFK", Status: "done"},
+			{ID: "02-b", Type: "AFK", Status: "open"},
+		},
 	}
-	modal := &dashboardStatusModal{row: DashboardRow{SetID: "set-missing"}, lines: lines}
-	var rendered strings.Builder
-	renderDashboardStatusModal(&rendered, modal, 20)
-	out := rendered.String()
+	// Same tasks, different order (simulates a refresh that reorders).
+	manifest2 := &tasks.Manifest{
+		Valid: true,
+		Tasks: []tasks.Task{
+			{ID: "02-b", Type: "AFK", Status: "done"}, // promoted
+			{ID: "01-a", Type: "AFK", Status: "done"},
+		},
+	}
 
-	if !strings.Contains(out, "set-missing  [MISSING]") || !strings.Contains(out, "registered task set missing") {
-		t.Fatalf("expected missing diagnostic:\n%s", out)
+	d := &detailView{
+		row:      DashboardRow{SetID: "set-x"},
+		manifest: manifest1,
+		cursorID: "02-b",
+	}
+
+	// Cursor is at index 1 before refresh.
+	if got := d.cursorIndex(); got != 1 {
+		t.Fatalf("cursorIndex = %d, want 1", got)
+	}
+
+	// After refresh the manifest has the same task ID at index 0.
+	d.syncManifest(manifest2, nil)
+
+	// Cursor ID is preserved; index changed because order changed.
+	if d.cursorID != "02-b" {
+		t.Fatalf("cursorID = %q, want 02-b", d.cursorID)
+	}
+	if got := d.cursorIndex(); got != 0 {
+		t.Fatalf("cursorIndex after refresh = %d, want 0", got)
+	}
+
+	// When cursor ID disappears, falls back to first task.
+	manifest3 := &tasks.Manifest{
+		Valid: true,
+		Tasks: []tasks.Task{
+			{ID: "03-c", Type: "AFK", Status: "open"},
+		},
+	}
+	d.syncManifest(manifest3, nil)
+	if d.cursorID != "03-c" {
+		t.Fatalf("cursorID after disappear = %q, want 03-c", d.cursorID)
+	}
+}
+
+func TestDashboardDetailViewJKNavigation(t *testing.T) {
+	manifest := &tasks.Manifest{
+		Valid: true,
+		Tasks: []tasks.Task{
+			{ID: "01-a", Type: "AFK", Status: "done"},
+			{ID: "02-b", Type: "AFK", Status: "open"},
+			{ID: "03-c", Type: "AFK", Status: "open"},
+		},
+	}
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "set-nav", Status: "READY", cursorKey: "pop\x00set-nav"},
+	}})
+	m.detail = &detailView{row: m.snap.Rows[0], manifest: manifest, cursorID: "01-a"}
+
+	// j moves cursor down.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	got := updated.(dashboardModel)
+	if got.detail.cursorID != "02-b" {
+		t.Fatalf("after j: cursorID = %q, want 02-b", got.detail.cursorID)
+	}
+
+	// k moves cursor up.
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	got = updated.(dashboardModel)
+	if got.detail.cursorID != "01-a" {
+		t.Fatalf("after k: cursorID = %q, want 01-a", got.detail.cursorID)
+	}
+
+	// j/k clamp at boundaries.
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	got = updated.(dashboardModel)
+	if got.detail.cursorID != "01-a" {
+		t.Fatalf("k at top should clamp: cursorID = %q, want 01-a", got.detail.cursorID)
 	}
 }
 
@@ -1107,7 +1160,7 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 	if called {
 		t.Fatal("bare-letter actions must be inert in filter mode")
 	}
-	if m.bind != nil || m.abandon != nil || m.status != nil {
+	if m.bind != nil || m.abandon != nil || m.detail != nil {
 		t.Fatal("modals must not open while in filter mode")
 	}
 }

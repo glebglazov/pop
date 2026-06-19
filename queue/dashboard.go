@@ -419,10 +419,11 @@ type dashboardDrainMsg struct {
 type dashboardPreviewMsg struct {
 	err error
 }
-type dashboardStatusMsg struct {
-	row   DashboardRow
-	lines []string
-	err   error
+type dashboardDetailMsg struct {
+	dashRow  DashboardRow
+	manifest *tasks.Manifest
+	taskRow  *tasks.Row
+	err      error
 }
 type dashboardBindListMsg struct {
 	row     DashboardRow
@@ -471,12 +472,61 @@ type dashboardAbandonModal struct {
 	loading bool
 }
 
-type dashboardStatusModal struct {
-	row     DashboardRow
-	lines   []string
-	scroll  int
-	loading bool
-	err     error
+// detailView is the full-screen task-set detail that replaces the table when
+// the user presses `s`. The cursor is pinned by task ID so it survives
+// manifest refreshes.
+type detailView struct {
+	row      DashboardRow
+	manifest *tasks.Manifest
+	taskRow  *tasks.Row
+	cursorID string
+	loading  bool
+	err      error
+}
+
+// cursorIndex returns the index of the cursor task in the manifest, or 0.
+func (d *detailView) cursorIndex() int {
+	if d.manifest == nil {
+		return 0
+	}
+	for i, t := range d.manifest.Tasks {
+		if t.ID == d.cursorID {
+			return i
+		}
+	}
+	return 0
+}
+
+// moveCursor moves the cursor by delta, clamped to valid task indices.
+func (d *detailView) moveCursor(delta int) {
+	if d.manifest == nil || len(d.manifest.Tasks) == 0 {
+		return
+	}
+	idx := d.cursorIndex() + delta
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(d.manifest.Tasks) {
+		idx = len(d.manifest.Tasks) - 1
+	}
+	d.cursorID = d.manifest.Tasks[idx].ID
+}
+
+// syncManifest updates the manifest on a tick refresh, keeping cursor on the
+// same task ID when possible.
+func (d *detailView) syncManifest(m *tasks.Manifest, row *tasks.Row) {
+	d.manifest = m
+	d.taskRow = row
+	if m == nil || len(m.Tasks) == 0 {
+		d.cursorID = ""
+		return
+	}
+	for _, t := range m.Tasks {
+		if t.ID == d.cursorID {
+			return
+		}
+	}
+	d.cursorID = m.Tasks[0].ID
 }
 
 type dashboardModel struct {
@@ -490,7 +540,7 @@ type dashboardModel struct {
 	height  int
 	bind    *dashboardBindModal
 	abandon *dashboardAbandonModal
-	status  *dashboardStatusModal
+	detail  *detailView
 
 	filterMode  bool
 	filterInput textinput.Model
@@ -516,8 +566,8 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.abandon != nil {
 			return m.updateAbandonModal(msg)
 		}
-		if m.status != nil {
-			return m.updateStatusModal(msg)
+		if m.detail != nil {
+			return m.updateDetailView(msg)
 		}
 		if m.filterMode {
 			return m.updateFilterMode(msg)
@@ -572,8 +622,8 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.err = nil
 			row := m.snap.Rows[m.cursor]
-			m.status = &dashboardStatusModal{row: row, loading: true}
-			return m, m.loadStatusDetail(row)
+			m.detail = &detailView{row: row, loading: true}
+			return m, m.loadDetail(row)
 		case "b":
 			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
 				return m, nil
@@ -594,7 +644,11 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case dashboardTickMsg:
-		return m, tea.Batch(dashboardTick(), m.reload())
+		cmds := []tea.Cmd{dashboardTick(), m.reload()}
+		if m.detail != nil {
+			cmds = append(cmds, m.loadDetail(m.detail.row))
+		}
+		return m, tea.Batch(cmds...)
 	case dashboardRowsMsg:
 		oldKey := ""
 		if m.cursor >= 0 && m.cursor < len(m.snap.Rows) {
@@ -608,7 +662,28 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.snap.Rows = filterDashboardRows(m.allRows, m.filterInput.Value())
 			}
 			m.cursor = dashboardCursorAfterReload(m.snap.Rows, oldKey, m.cursor)
+			if m.detail != nil {
+				for _, row := range m.snap.Rows {
+					if row.cursorKey == m.detail.row.cursorKey {
+						m.detail.row = row
+						break
+					}
+				}
+			}
 		}
+	case dashboardDetailMsg:
+		if m.detail == nil {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.detail.loading = false
+			m.detail.err = msg.err
+			return m, nil
+		}
+		m.detail.syncManifest(msg.manifest, msg.taskRow)
+		m.detail.loading = false
+		m.detail.err = nil
+		return m, nil
 	case dashboardToggleMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -629,11 +704,6 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		}
-	case dashboardStatusMsg:
-		if m.status == nil {
-			return m, nil
-		}
-		m.status = &dashboardStatusModal{row: msg.row, lines: msg.lines, err: msg.err}
 	case dashboardBindListMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -720,26 +790,21 @@ func (m dashboardModel) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-func (m dashboardModel) updateStatusModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m dashboardModel) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
-		m.status = nil
+		m.detail = nil
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
 	case "j", "down":
-		m.moveStatusScroll(1)
+		if m.detail != nil {
+			m.detail.moveCursor(1)
+		}
 	case "k", "up":
-		m.moveStatusScroll(-1)
-	case "pgdown":
-		m.moveStatusScroll(m.statusVisibleLines())
-	case "pgup":
-		m.moveStatusScroll(-m.statusVisibleLines())
-	case "home":
-		m.status.scroll = 0
-	case "end":
-		max := m.statusMaxScroll()
-		m.status.scroll = max
+		if m.detail != nil {
+			m.detail.moveCursor(-1)
+		}
 	}
 	return m, nil
 }
@@ -812,40 +877,6 @@ func (m *dashboardModel) moveBindCursor(delta int) {
 	if m.bind.cursor >= limit {
 		m.bind.cursor = 0
 	}
-}
-
-func (m *dashboardModel) moveStatusScroll(delta int) {
-	if m.status == nil {
-		return
-	}
-	m.status.scroll += delta
-	if m.status.scroll < 0 {
-		m.status.scroll = 0
-	}
-	if max := m.statusMaxScroll(); m.status.scroll > max {
-		m.status.scroll = max
-	}
-}
-
-func (m dashboardModel) statusVisibleLines() int {
-	if m.height <= 0 {
-		return 16
-	}
-	n := m.height - 10
-	if n < 4 {
-		return 4
-	}
-	return n
-}
-
-func (m dashboardModel) statusMaxScroll() int {
-	if m.status == nil {
-		return 0
-	}
-	if max := len(m.status.lines) - m.statusVisibleLines(); max > 0 {
-		return max
-	}
-	return 0
 }
 
 func (m dashboardModel) confirmBindModal() (tea.Model, tea.Cmd) {
@@ -922,10 +953,22 @@ func (m dashboardModel) previewDrain(row DashboardRow) tea.Cmd {
 	}
 }
 
-func (m dashboardModel) loadStatusDetail(row DashboardRow) tea.Cmd {
+func (m dashboardModel) loadDetail(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		lines, err := DashboardStatusDetailLines(m.d, row)
-		return dashboardStatusMsg{row: row, lines: lines, err: err}
+		d := m.d
+		if d == nil {
+			d = DefaultDeps()
+		}
+		if d.Tasks == nil {
+			d.Tasks = tasks.DefaultDeps()
+		}
+		refresh, err := d.refresh(row.defPath)
+		if err != nil {
+			return dashboardDetailMsg{dashRow: row, err: err}
+		}
+		taskRow := tasks.FindRow(refresh, row.SetID)
+		manifest := refresh.Manifests[row.SetID]
+		return dashboardDetailMsg{dashRow: row, manifest: manifest, taskRow: taskRow}
 	}
 }
 
@@ -1528,6 +1571,12 @@ func dashboardCursorAfterReload(rows []DashboardRow, key string, previous int) i
 }
 
 func (m dashboardModel) View() tea.View {
+	if m.detail != nil {
+		content := m.viewDetail()
+		v := tea.NewView(dashboardBottomAnchor(m.height, content))
+		v.AltScreen = true
+		return v
+	}
 	var body strings.Builder
 	title := lipgloss.NewStyle().Bold(true).Render("Queue dashboard")
 	fmt.Fprintln(&body, title)
@@ -1558,8 +1607,6 @@ func (m dashboardModel) View() tea.View {
 		renderDashboardBindModal(&body, m.bind)
 	} else if m.abandon != nil {
 		renderDashboardAbandonModal(&body, m.abandon)
-	} else if m.status != nil {
-		renderDashboardStatusModal(&body, m.status, m.statusVisibleLines())
 	} else if m.filterMode {
 		ui.WriteInputBox(&body, m.width, m.filterInput.View())
 		fmt.Fprint(&body, ui.HintStyle.Render("esc clear filter · j/k navigate"))
@@ -1586,43 +1633,109 @@ func dashboardBottomAnchor(height int, content string) string {
 	return content
 }
 
-func renderDashboardStatusModal(w io.Writer, modal *dashboardStatusModal, visibleLines int) {
-	if modal == nil {
+// viewDetail renders the full-screen task-set detail view.
+func (m dashboardModel) viewDetail() string {
+	var b strings.Builder
+	title := lipgloss.NewStyle().Bold(true).Render("Queue dashboard")
+	fmt.Fprintln(&b, title)
+	d := m.detail
+	if d.loading {
+		fmt.Fprintf(&b, "Loading %s...\n", d.row.SetID)
+		fmt.Fprint(&b, ui.HintStyle.Render("  esc/q back"))
+		return b.String()
+	}
+	if d.err != nil {
+		fmt.Fprintf(&b, "error loading %s: %v\n", d.row.SetID, d.err)
+		fmt.Fprint(&b, ui.HintStyle.Render("  esc/q back"))
+		return b.String()
+	}
+	renderDetailContent(&b, d)
+	return b.String()
+}
+
+// renderDetailContent renders the task list with cursor indicators for the
+// detail view. The cursor is on the task identified by detailView.cursorID.
+func renderDetailContent(b *strings.Builder, d *detailView) {
+	manifest := d.manifest
+	taskRow := d.taskRow
+
+	status := tasks.DeriveStatus(manifest)
+	progress := ""
+	if taskRow != nil {
+		status = taskRow.Status
+		progress = taskRow.Progress
+	}
+
+	header := fmt.Sprintf("%s  [%s]", d.row.SetID, status)
+	if progress != "" {
+		header += "  " + progress
+	}
+	fmt.Fprintln(b, header)
+
+	if status == tasks.StatusMissing {
+		fmt.Fprintln(b, "  registered task set missing")
+		fmt.Fprint(b, ui.HintStyle.Render("  esc/q back"))
 		return
 	}
-	fmt.Fprintf(w, "Task status: %s\n", modal.row.SetID)
-	if modal.loading {
-		fmt.Fprintln(w, "  loading...")
-		fmt.Fprint(w, ui.HintStyle.Render("esc/q close"))
+	if manifest == nil || !manifest.Valid {
+		fmt.Fprintln(b, "  malformed manifest")
+		if manifest != nil {
+			for _, e := range manifest.Errors {
+				fmt.Fprintf(b, "  - %s\n", e)
+			}
+		}
+		fmt.Fprint(b, ui.HintStyle.Render("  esc/q back"))
 		return
 	}
-	if modal.err != nil {
-		fmt.Fprintf(w, "  error: %v\n", modal.err)
-		fmt.Fprint(w, ui.HintStyle.Render("esc/q close"))
-		return
+
+	fmt.Fprintln(b)
+
+	const (
+		stW    = 10
+		tyW    = 4
+		titleW = 40
+	)
+	idW := len("ID")
+	for _, t := range manifest.Tasks {
+		if len(t.ID) > idW {
+			idW = len(t.ID)
+		}
 	}
-	if visibleLines <= 0 {
-		visibleLines = len(modal.lines)
+
+	fmt.Fprintf(b, "  %-*s  %-*s  %-*s  %-*s  %s\n",
+		stW, "STATUS", tyW, "TYPE", idW, "ID", titleW, "TITLE", "BLOCKED-BY")
+	fmt.Fprintf(b, "  %-*s  %-*s  %-*s  %-*s  %s\n",
+		stW, strings.Repeat("-", stW),
+		tyW, strings.Repeat("-", tyW),
+		idW, strings.Repeat("-", idW),
+		titleW, strings.Repeat("-", titleW),
+		strings.Repeat("-", 12))
+
+	cursorIdx := d.cursorIndex()
+	for i, t := range manifest.Tasks {
+		prefix := "  "
+		if i == cursorIdx {
+			prefix = ui.IndicatorStyle.Render("█") + " "
+		}
+		title := t.Title
+		if len(title) > titleW {
+			title = title[:titleW-3] + "..."
+		}
+		blockedBy := "-"
+		if len(t.BlockedBy) > 0 {
+			blockedBy = strings.Join(t.BlockedBy, ", ")
+		}
+		statusCell := t.Status
+		if t.Status == "failed" && t.FailedAfter != nil {
+			statusCell = fmt.Sprintf("failed(%d)", *t.FailedAfter)
+		}
+		line := fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s",
+			stW, statusCell, tyW, t.Type, idW, t.ID, titleW, title, blockedBy)
+		fmt.Fprintf(b, "%s%s\n", prefix, line)
 	}
-	start := modal.scroll
-	if start < 0 {
-		start = 0
-	}
-	if start > len(modal.lines) {
-		start = len(modal.lines)
-	}
-	end := start + visibleLines
-	if end > len(modal.lines) {
-		end = len(modal.lines)
-	}
-	for _, line := range modal.lines[start:end] {
-		fmt.Fprintf(w, "  %s\n", line)
-	}
-	if len(modal.lines) > visibleLines {
-		fmt.Fprint(w, ui.HintStyle.Render(fmt.Sprintf("showing %d-%d of %d · j/k scroll · esc/q close", start+1, end, len(modal.lines))))
-		return
-	}
-	fmt.Fprint(w, ui.HintStyle.Render("esc/q close"))
+
+	fmt.Fprintln(b)
+	fmt.Fprint(b, ui.HintStyle.Render("  j/k navigate · esc/q back"))
 }
 
 func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
