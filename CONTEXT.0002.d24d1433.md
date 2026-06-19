@@ -1,0 +1,14 @@
+---
+fragment: d24d1433
+generation: 0002
+branch: master
+---
+
++ Task set detail view
+  The full-screen interactive drill-down entered with `s` from the **Queue dashboard**, replacing the table until dismissed (`esc`/`q` return to the table). It lists the focused **Task set**'s tasks and applies a per-task override to the task at the cursor — **Complete task** (`C`), **Open task** (`O`), **Skip** (`K`) — mirroring the CLI transitions exactly: each key acts only on its valid source states and a disallowed press is an inert status-line hint, never a mutation, so a Done task stays a one-way door. It acts on the single cursored task immediately (no checkbox **Multi-task selection**, no yes/no prompt — the keypress is the decision) and live-refreshes the manifest on the dashboard tick, pinning the cursor by task ID so a concurrent **drain**'s progress appears in place. It promotes the former read-only `s` inspect modal into a task-state editing surface.
+  avoid: status view, status modal, inspect modal, task editor
+  under: Task sets
+
+~ Queue dashboard
+  The interactive `pop queue dashboard` TUI — the primary hands-on surface for starting and managing **Queue** work, sibling to the **Project picker** and **Worktree picker**. It is machine-global like `pop queue status`, scanning every registered repository's **Task storage** and rendering one row per non-archived **Task set** that still has outstanding queue-actionable state (grouped by project, sets newest-first by identifier), excluding only a concluded **Done Task set**. Each row shows the derived **Task set status** (folding **Mergeability** for **Integration backlog** rows), the set's branch — prefixed with a `↳` glyph when it runs in a non-trunk **Worktree binding**, unmarked when it runs in the **Representative checkout** — a live **Picked-up** drain indicator, and an **Auto-drain** badge. A `/` keystroke enters a filter mode that narrows rows by typed text (`esc` exits back to normal mode); outside filter mode the bare-letter actions stay live, unlike the always-on filter of the **Project picker** and **Worktree picker**. Keys drain (`i`), integrate (`I`), bind or create a worktree (`b`), abandon (`U`), toggle **Auto-drain** (`a`), preview the working pane (`p`), and open the **Task set detail view** (`s`) to edit per-task state. The full on-disk checkout path is not shown inline (it lives in the detail view); an overflowing cell is ellipsis-truncated. It is a manual launcher running parallel to the **Queue daemon**'s **Auto-drain**-gated autopilot, not a replacement for it.
+  was: ... keys drain (`i`), integrate (`I`), bind or create a worktree (`b`), abandon (`U`), inspect (`s`), toggle **Auto-drain** (`a`), and preview the working pane (`p`). The full on-disk checkout path is not shown inline (it lives in the `s` inspect modal) ... [read-only `s` inspect modal; no filter mode]
