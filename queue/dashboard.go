@@ -49,10 +49,47 @@ type DashboardSnapshot struct {
 	Rows []DashboardRow
 }
 
+// dashboardRepoStatic holds one repo group's tick-stable resolution: the git
+// coordinates and representative checkout that do not change while the dashboard
+// is open. The dashboard recomputes only the volatile overlay (task statuses,
+// locks, daemon state) per poll, reusing these across ticks.
+type dashboardRepoStatic struct {
+	defPath     string
+	statePath   string
+	repoKey     string
+	projectName string
+	rep         *projectScan
+	repBranch   string
+	bare        bool
+}
+
+// dashboardCache memoizes the git-static repo resolution across dashboard polls.
+// Resolving it forks git per candidate checkout (~hundreds of ms on a large
+// project list); none of it changes tick to tick, so it is keyed by the
+// candidate set's fingerprint and re-resolved only when that set changes (a repo
+// gains/loses task storage, or the config is edited). The mutex guards reuse
+// against an overlapping reload, though polls rarely overlap once builds are
+// cheap.
+type dashboardCache struct {
+	mu          sync.Mutex
+	fingerprint string
+	statics     []dashboardRepoStatic
+	resolved    bool
+}
+
 // BuildDashboard derives the Queue dashboard rows from registered projects and
 // on-disk task/queue state. It is read-only except for the same refresh
 // auto-registration behavior used by `pop queue status`.
 func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
+	return BuildDashboardWith(d, cfg, nil)
+}
+
+// BuildDashboardWith is BuildDashboard with an optional cross-tick cache of the
+// git-static repo resolution. A nil cache resolves everything fresh (the path
+// tests and one-shot callers use); the running dashboard passes a persistent
+// cache so each poll re-forks git only when the candidate set changed, doing
+// just the cheap volatile overlay otherwise.
+func BuildDashboardWith(d *Deps, cfg *config.Config, cache *dashboardCache) (DashboardSnapshot, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -87,11 +124,61 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 		return DashboardSnapshot{}, nil
 	}
 
-	// Memoize idempotent git reads for this build, mirroring Scan: resolveScan
-	// and resolveRepresentative re-fork rev-parse/worktree-list against the same
-	// directories (once per project, then again per repo group). Wrap a shallow
-	// copy so the caller's git is untouched. The dashboard rebuilds on a poll,
-	// so the cache is per-build (a point-in-time snapshot), not cross-tick.
+	statics, err := resolveDashboardStatics(d, cfg, cache, dashboardFingerprint(d, projects), projects)
+	if err != nil {
+		return DashboardSnapshot{}, err
+	}
+
+	// Volatile overlay: task statuses, locks, and daemon-state-derived columns
+	// are re-read every poll so the view stays live, but these are cheap file
+	// reads — the git resolution above is what the cache spares.
+	var rows []DashboardRow
+	for _, st := range statics {
+		groupRows, err := dashboardRowsFromStatic(d, state, st)
+		if err != nil {
+			return DashboardSnapshot{}, err
+		}
+		rows = append(rows, groupRows...)
+	}
+	sortDashboardRows(rows)
+	return DashboardSnapshot{Rows: rows}, nil
+}
+
+// dashboardFingerprint is the order-independent identity of the candidate set:
+// when it is unchanged, the git-static resolution is still valid. It canonicalizes
+// each project path (cheap symlink eval, never a git fork).
+func dashboardFingerprint(d *Deps, projects []project.ExpandedProject) string {
+	paths := make([]string, 0, len(projects))
+	for _, p := range projects {
+		canon, err := canonicalCheckoutPath(d.Tasks, p.Path)
+		if err != nil {
+			canon = p.Path
+		}
+		paths = append(paths, canon)
+	}
+	sort.Strings(paths)
+	return strings.Join(paths, "\x00")
+}
+
+// resolveDashboardStatics returns the git-static resolution for each repo group,
+// serving a valid cache without forking git. On a miss it resolves every
+// candidate's scan concurrently (resolveScan only reads, so the bounded fan-out
+// is safe — Scan's phase 1 pattern), groups by repository, and resolves each
+// group's representative once, memoizing idempotent git reads for the resolution.
+func resolveDashboardStatics(d *Deps, cfg *config.Config, cache *dashboardCache, fingerprint string, projects []project.ExpandedProject) ([]dashboardRepoStatic, error) {
+	if cache != nil {
+		cache.mu.Lock()
+		if cache.resolved && cache.fingerprint == fingerprint {
+			statics := cache.statics
+			cache.mu.Unlock()
+			return statics, nil
+		}
+		cache.mu.Unlock()
+	}
+
+	// Memoize idempotent git reads for this resolution: resolveScan and
+	// resolveRepresentative re-fork rev-parse/worktree-list against the same
+	// directories. Wrap a shallow copy so the caller's git is untouched.
 	if d.Tasks != nil && d.Tasks.Git != nil {
 		buildDeps := *d
 		tasksDeps := *d.Tasks
@@ -100,9 +187,6 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 		d = &buildDeps
 	}
 
-	// Resolve every project's scan concurrently; with many registered checkouts
-	// the serial git cost dominates wall-clock. resolveScan only reads, so the
-	// bounded fan-out is safe (same pattern as Scan's phase 1).
 	scanResults := make([]*projectScan, len(projects))
 	scanErrs := make([]error, len(projects))
 	sem := make(chan struct{}, scanConcurrency())
@@ -128,7 +212,7 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 	var scans []projectScan
 	for i := range projects {
 		if scanErrs[i] != nil {
-			return DashboardSnapshot{}, scanErrs[i]
+			return nil, scanErrs[i]
 		}
 		if scanResults[i] != nil {
 			scans = append(scans, *scanResults[i])
@@ -144,17 +228,23 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 		groups[scan.DefinitionPath] = append(groups[scan.DefinitionPath], scan)
 	}
 
-	var rows []DashboardRow
+	statics := make([]dashboardRepoStatic, 0, len(order))
 	for _, key := range order {
-		group := groups[key]
-		groupRows, err := dashboardRowsForRepo(d, cfg, state, group)
+		st, err := resolveRepoStatic(d, cfg, groups[key])
 		if err != nil {
-			return DashboardSnapshot{}, err
+			return nil, err
 		}
-		rows = append(rows, groupRows...)
+		statics = append(statics, st)
 	}
-	sortDashboardRows(rows)
-	return DashboardSnapshot{Rows: rows}, nil
+
+	if cache != nil {
+		cache.mu.Lock()
+		cache.fingerprint = fingerprint
+		cache.statics = statics
+		cache.resolved = true
+		cache.mu.Unlock()
+	}
+	return statics, nil
 }
 
 // dashboardCandidateProjects keeps only the registered picker projects that
@@ -253,17 +343,24 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 	if len(scans) == 0 {
 		return nil, nil
 	}
-	refresh, err := d.refresh(scans[0].DefinitionPath)
+	st, err := resolveRepoStatic(d, cfg, scans)
 	if err != nil {
 		return nil, err
 	}
+	return dashboardRowsFromStatic(d, state, st)
+}
+
+// resolveRepoStatic resolves one repo group's tick-stable coordinates: repo key,
+// representative checkout, representative branch, and display name. This is the
+// git-forking half of a repo's rows; the dashboard caches it across polls.
+func resolveRepoStatic(d *Deps, cfg *config.Config, scans []projectScan) (dashboardRepoStatic, error) {
 	repoKey, err := scanRepoKey(d, scans[0])
 	if err != nil {
-		return nil, err
+		return dashboardRepoStatic{}, err
 	}
 	rep, bare, err := resolveRepresentative(d, cfg, scans)
 	if err != nil {
-		return nil, err
+		return dashboardRepoStatic{}, err
 	}
 	// The representative is shared by every row that lacks a per-set binding;
 	// read its branch from the worktree-list porcelain — already fetched (and
@@ -279,36 +376,55 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 			repBranch = binding.CurrentBranch(d.Tasks, rep.RuntimePath)
 		}
 	}
-	projectName := repoName(scans, rep)
+	return dashboardRepoStatic{
+		defPath:     scans[0].DefinitionPath,
+		statePath:   tasks.StatePathFor(scans[0].DefinitionPath),
+		repoKey:     repoKey,
+		projectName: repoName(scans, rep),
+		rep:         rep,
+		repBranch:   repBranch,
+		bare:        bare,
+	}, nil
+}
+
+// dashboardRowsFromStatic builds a repo group's rows from its cached static
+// resolution plus the current volatile state: task statuses (refresh), runtime
+// locks, and daemon-state columns. It forks no git, so it is the cheap per-poll
+// half the cross-tick cache exists to isolate.
+func dashboardRowsFromStatic(d *Deps, state *DaemonState, st dashboardRepoStatic) ([]DashboardRow, error) {
+	refresh, err := d.refresh(st.defPath)
+	if err != nil {
+		return nil, err
+	}
 	var rows []DashboardRow
 	for _, taskRow := range refresh.Rows {
-		merge, _ := mergeabilityForSet(d, repoKey, taskRow.ID)
+		merge, _ := mergeabilityForSet(d, st.repoKey, taskRow.ID)
 		// Integration-backlog membership is binding-driven, not gated on a
 		// recorded Mergeability (ADR-0051). bindings.json only ever holds
 		// non-trunk bindings — a trunk drain records none — so a Done set's
 		// having a binding is the backlog test; Mergeability is left-joined and
 		// renders as "unknown" when no record exists.
-		_, hasBinding := bindingForSet(d.Tasks, repoKey, taskRow.ID)
+		_, hasBinding := bindingForSet(d.Tasks, st.repoKey, taskRow.ID)
 		awaitingIntegration := taskRow.Status == tasks.StatusDone && hasBinding
 		if !dashboardShowRow(taskRow, awaitingIntegration) {
 			continue
 		}
-		wt := dashboardWorktree(d, state, repoKey, taskRow.ID, rep, repBranch, bare)
-		drain := dashboardDrain(d, state, repoKey, taskRow.ID, wt.runtimePath)
+		wt := dashboardWorktree(d, state, st.repoKey, taskRow.ID, st.rep, st.repBranch, st.bare)
+		drain := dashboardDrain(d, state, st.repoKey, taskRow.ID, wt.runtimePath)
 		status := dashboardStatus(taskRow.Status, merge, awaitingIntegration)
 		rows = append(rows, DashboardRow{
-			Project:            projectName,
+			Project:            st.projectName,
 			SetID:              taskRow.ID,
 			Status:             status,
 			Worktree:           wt.label,
 			Drain:              drain,
 			AutoDrain:          taskRow.AutoDrain,
-			defPath:            scans[0].DefinitionPath,
-			statePath:          tasks.StatePathFor(scans[0].DefinitionPath),
-			cursorKey:          projectName + "\x00" + taskRow.ID,
-			repoKey:            repoKey,
+			defPath:            st.defPath,
+			statePath:          st.statePath,
+			cursorKey:          st.projectName + "\x00" + taskRow.ID,
+			repoKey:            st.repoKey,
 			runtimePath:        wt.runtimePath,
-			paneID:             dashboardPaneID(state, repoKey, taskRow.ID),
+			paneID:             dashboardPaneID(state, st.repoKey, taskRow.ID),
 			integrationBacklog: awaitingIntegration,
 		})
 	}
@@ -576,6 +692,7 @@ type dashboardModel struct {
 	bind    *dashboardBindModal
 	abandon *dashboardAbandonModal
 	detail  *detailView
+	cache   *dashboardCache
 
 	filterMode  bool
 	filterInput textinput.Model
@@ -587,7 +704,7 @@ func newDashboardModel(d *Deps, cfg *config.Config, snap DashboardSnapshot) dash
 	if d == nil {
 		d = DefaultDeps()
 	}
-	return dashboardModel{d: d, cfg: cfg, snap: snap, allRows: snap.Rows}
+	return dashboardModel{d: d, cfg: cfg, snap: snap, allRows: snap.Rows, cache: &dashboardCache{}}
 }
 
 func (m dashboardModel) Init() tea.Cmd {
@@ -1156,7 +1273,7 @@ func (m dashboardModel) confirmBindModal() (tea.Model, tea.Cmd) {
 
 func (m dashboardModel) reload() tea.Cmd {
 	return func() tea.Msg {
-		snap, err := BuildDashboard(m.d, m.cfg)
+		snap, err := BuildDashboardWith(m.d, m.cfg, m.cache)
 		return dashboardRowsMsg{snap: snap, err: err}
 	}
 }
@@ -2238,11 +2355,13 @@ func padDashboardCell(s string, width int) string {
 
 // RunDashboard opens the read-only Queue dashboard TUI.
 func RunDashboard(d *Deps, cfg *config.Config) error {
-	snap, err := BuildDashboard(d, cfg)
+	m := newDashboardModel(d, cfg, DashboardSnapshot{})
+	snap, err := BuildDashboardWith(d, cfg, m.cache)
 	if err != nil {
 		return err
 	}
-	program := tea.NewProgram(newDashboardModel(d, cfg, snap))
+	m.snap = snap
+	program := tea.NewProgram(m)
 	_, err = program.Run()
 	return err
 }

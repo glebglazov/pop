@@ -963,6 +963,57 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 	}
 }
 
+// countingGit wraps a real git and tallies invocations so a test can assert
+// that a cached dashboard build forks no further git.
+type countingGit struct {
+	inner deps.Git
+	calls int
+}
+
+func (g *countingGit) Command(args ...string) (string, error) {
+	g.calls++
+	return g.inner.Command(args...)
+}
+
+func (g *countingGit) CommandInDir(dir string, args ...string) (string, error) {
+	g.calls++
+	return g.inner.CommandInDir(dir, args...)
+}
+
+func TestDashboardCacheSkipsGitOnUnchangedCandidateSet(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "cache-skip", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	d, cfg, _, _ := dashboardLaunchFixture(t, repo, setID)
+	gc := &countingGit{inner: d.Tasks.Git}
+	d.Tasks.Git = gc
+	d.Project.Git = gc
+
+	cache := &dashboardCache{}
+	first, err := BuildDashboardWith(d, cfg, cache)
+	if err != nil {
+		t.Fatalf("first build: %v", err)
+	}
+	if len(first.Rows) == 0 {
+		t.Fatalf("first build produced no rows")
+	}
+	afterFirst := gc.calls
+	if afterFirst == 0 {
+		t.Fatalf("first build forked no git; fixture did not exercise resolution")
+	}
+
+	second, err := BuildDashboardWith(d, cfg, cache)
+	if err != nil {
+		t.Fatalf("second build: %v", err)
+	}
+	if !reflect.DeepEqual(first.Rows, second.Rows) {
+		t.Fatalf("cached build rows differ:\nfirst:  %+v\nsecond: %+v", first.Rows, second.Rows)
+	}
+	if delta := gc.calls - afterFirst; delta != 0 {
+		t.Fatalf("cached build forked %d git commands, want 0", delta)
+	}
+}
+
 func TestDashboardCreateWorktreeManagedFreshBranchNoSession(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "bind-create", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
