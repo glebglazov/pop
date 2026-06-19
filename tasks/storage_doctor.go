@@ -87,6 +87,57 @@ func FindOrphanedStorage(d *Deps) ([]OrphanedStorage, error) {
 	return orphans, nil
 }
 
+// TaskStorageRepo names one repository that has Task storage on disk: the git
+// common directory recorded in its repo.json marker, alongside the storage
+// directory that holds its Task sets.
+type TaskStorageRepo struct {
+	// StorageDir is the per-repository Task storage directory.
+	StorageDir string
+	// RepositoryPath is the canonical git common directory recorded in repo.json.
+	RepositoryPath string
+}
+
+// ListTaskStorageRepos returns every repository that has a Task storage
+// directory containing at least one Task set, reading each repo.json marker for
+// the recorded git common directory. It lets a bulk reader (the Queue dashboard)
+// discover the small set of repositories that can actually contribute rows
+// without resolving git coordinates for every registered project. It is strictly
+// read-only: a missing repos dir yields nothing, and directories without a
+// readable, parseable marker or with no Task sets are skipped.
+func ListTaskStorageRepos(d *Deps) ([]TaskStorageRepo, error) {
+	dir := TaskStorageRoot(d)
+	entries, err := d.FS.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read task storage data dir %s: %w", dir, err)
+	}
+
+	var repos []TaskStorageRepo
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		storageDir := filepath.Join(dir, e.Name())
+		sets, err := d.FS.ReadDir(filepath.Join(storageDir, "tasks"))
+		if err != nil || len(sets) == 0 {
+			continue
+		}
+		data, err := d.FS.ReadFile(filepath.Join(storageDir, repoMarkerFile))
+		if err != nil {
+			continue
+		}
+		var marker RepoMarker
+		if err := json.Unmarshal(data, &marker); err != nil || marker.RepositoryPath == "" {
+			continue
+		}
+		repos = append(repos, TaskStorageRepo{StorageDir: storageDir, RepositoryPath: marker.RepositoryPath})
+	}
+	sort.Slice(repos, func(i, j int) bool { return repos[i].StorageDir < repos[j].StorageDir })
+	return repos, nil
+}
+
 // LegacyTaskSetIDs returns the legacy in-tree Task-set identifiers
 // (thoughts/issues/<id>/index.json) present in the worktree containing cwd,
 // sorted. When cwd is empty the current working directory is used. It is

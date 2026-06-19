@@ -907,6 +907,13 @@ func dashboardLaunchFixture(t *testing.T, repo, setID string) (*Deps, *config.Co
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A real repo with task sets always carries a repo.json storage marker
+	// (EnsureStorage writes it on first task touch); the spawn fixture writes
+	// task files directly and skips it, so write it here so BuildDashboard's
+	// storage-scoped discovery sees this repo.
+	if err := tasks.EnsureStorage(tasks.DefaultDeps(), id); err != nil {
+		t.Fatal(err)
+	}
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 	rt := newRecordingTmux(false, "0")
 	td := queueTestTasksDeps(true)

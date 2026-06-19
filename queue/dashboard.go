@@ -66,6 +66,22 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 		return DashboardSnapshot{}, err
 	}
 
+	// Narrow to the registered projects whose repository has Task storage on
+	// disk. The dashboard can only ever render task sets, which live in per-repo
+	// Task storage, so resolving git coordinates for projects without any is pure
+	// waste — those rows are filtered out downstream regardless. On a large
+	// project list this is the difference between forking git for every checkout
+	// each poll and forking only for the handful that hold task sets. Matching is
+	// by canonical filesystem path, never a git fork (see docs/adr: queue
+	// dashboard scoped to repositories with task storage).
+	projects, err = dashboardCandidateProjects(d, projects)
+	if err != nil {
+		return DashboardSnapshot{}, err
+	}
+	if len(projects) == 0 {
+		return DashboardSnapshot{}, nil
+	}
+
 	// Memoize idempotent git reads for this build, mirroring Scan: resolveScan
 	// and resolveRepresentative re-fork rev-parse/worktree-list against the same
 	// directories (once per project, then again per repo group). Wrap a shallow
@@ -136,6 +152,89 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 	return DashboardSnapshot{Rows: rows}, nil
 }
 
+// dashboardCandidateProjects keeps only the registered picker projects that
+// belong to a repository with Task storage on disk. It resolves no git: each
+// storage repo's working-tree root is derived from its marker's common dir and
+// compared to canonical project paths by path nesting. A project matches when
+// its checkout is the repo root, nests under it (a worktree), or contains it.
+func dashboardCandidateProjects(d *Deps, projects []project.ExpandedProject) ([]project.ExpandedProject, error) {
+	repos, err := tasks.ListTaskStorageRepos(d.Tasks)
+	if err != nil {
+		return nil, err
+	}
+	if len(repos) == 0 {
+		return nil, nil
+	}
+	roots := make([]string, 0, len(repos))
+	for _, r := range repos {
+		roots = append(roots, storageRepoRoot(d.Tasks, r.RepositoryPath))
+	}
+	var kept []project.ExpandedProject
+	for _, p := range projects {
+		canon, err := canonicalCheckoutPath(d.Tasks, p.Path)
+		if err != nil {
+			canon = p.Path
+		}
+		for _, root := range roots {
+			if pathWithinOrEqual(canon, root) || pathWithinOrEqual(root, canon) {
+				kept = append(kept, p)
+				break
+			}
+		}
+	}
+	return kept, nil
+}
+
+// storageRepoRoot derives a repository's working-tree root from the canonical
+// git common directory recorded in its marker: a normal repo's common dir is
+// `<root>/.git` and a bare-with-worktrees layout's is `<root>/.bare`, so the
+// root is the parent; a top-level bare repo's common dir is the repo dir itself.
+func storageRepoRoot(d *tasks.Deps, commonDir string) string {
+	root := commonDir
+	switch filepath.Base(commonDir) {
+	case ".git", ".bare":
+		root = filepath.Dir(commonDir)
+	}
+	if canon, err := canonicalCheckoutPath(d, root); err == nil {
+		return canon
+	}
+	return root
+}
+
+// pathWithinOrEqual reports whether p is base or a descendant of base.
+func pathWithinOrEqual(p, base string) bool {
+	return p == base || strings.HasPrefix(p, base+string(filepath.Separator))
+}
+
+// worktreeBranchByPath parses `git worktree list --porcelain` into a map from
+// each worktree's canonical path to its branch (empty when detached). One
+// porcelain read — already cached for the build by scanGitCache — yields every
+// checkout's branch, replacing a `git branch --show-current` fork per repo.
+func worktreeBranchByPath(d *Deps, fromCheckout string) map[string]string {
+	out, err := d.Tasks.Git.CommandInDir(fromCheckout, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil
+	}
+	branches := map[string]string{}
+	path := ""
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			path = strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+			if canon, err := canonicalCheckoutPath(d.Tasks, path); err == nil {
+				path = canon
+			}
+		case strings.HasPrefix(line, "branch ") && path != "":
+			branches[path] = strings.TrimPrefix(strings.TrimPrefix(line, "branch "), "refs/heads/")
+		case line == "detached" && path != "":
+			branches[path] = ""
+		case line == "":
+			path = ""
+		}
+	}
+	return branches
+}
+
 func sortDashboardRows(rows []DashboardRow) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Project != rows[j].Project {
@@ -162,11 +261,18 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 		return nil, err
 	}
 	// The representative is shared by every row that lacks a per-set binding;
-	// resolve its branch once instead of re-forking `git branch --show-current`
-	// per row (scanGitCache does not memoize `branch`).
+	// read its branch from the worktree-list porcelain — already fetched (and
+	// cached) while resolving the representative — instead of forking `git branch
+	// --show-current` per repo, which scanGitCache cannot memoize. The lookup
+	// falls back to that fork only when the representative is not among the
+	// repo's listed worktrees (e.g. a queue_base checkout outside it).
 	repBranch := ""
 	if rep != nil {
-		repBranch = binding.CurrentBranch(d.Tasks, rep.RuntimePath)
+		if b, ok := worktreeBranchByPath(d, scans[0].ProjectPath)[rep.RuntimePath]; ok {
+			repBranch = b
+		} else {
+			repBranch = binding.CurrentBranch(d.Tasks, rep.RuntimePath)
+		}
 	}
 	projectName := repoName(scans, rep)
 	var rows []DashboardRow
