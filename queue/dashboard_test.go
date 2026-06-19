@@ -141,13 +141,13 @@ func TestDashboardColumnDerivation(t *testing.T) {
 	for _, row := range got {
 		byID[row.SetID] = row
 	}
-	if byID["done"].Status != "DONE · conflicts" || byID["done"].Worktree != "/repo/done (done-branch)" {
+	if byID["done"].Status != "DONE · conflicts" || byID["done"].Worktree != "↳ done-branch" {
 		t.Fatalf("done row = %+v", byID["done"])
 	}
-	if byID["ready"].Status != "READY" || byID["ready"].Worktree != "/repo/main (main)" {
+	if byID["ready"].Status != "READY" || byID["ready"].Worktree != "main" {
 		t.Fatalf("ready row = %+v", byID["ready"])
 	}
-	if byID["bound"].Worktree != "/repo/bound (bound-branch)" {
+	if byID["bound"].Worktree != "↳ bound-branch" {
 		t.Fatalf("bound row = %+v", byID["bound"])
 	}
 	if !DashboardRowCanIntegrate(byID["done"]) {
@@ -207,7 +207,7 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 		{Project: "pop", SetID: "plain", Status: "READY", Worktree: "/repo/main (main)"},
 	}
 	var rendered strings.Builder
-	renderDashboardTable(&rendered, rows, 0)
+	renderDashboardTable(&rendered, rows, 0, 0)
 	if !strings.Contains(rendered.String(), "Auto-drain") {
 		t.Fatalf("missing auto-drain badge:\n%s", rendered.String())
 	}
@@ -567,7 +567,7 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildDashboard: %v", err)
 	}
-	if len(snap.Rows) == 0 || snap.Rows[0].Worktree != wt2+" (existing-two)" {
+	if len(snap.Rows) == 0 || snap.Rows[0].Worktree != "↳ existing-two" {
 		t.Fatalf("dashboard rows = %+v, want worktree column updated", snap.Rows)
 	}
 }
@@ -743,7 +743,7 @@ func TestDashboardUnbindManagedTearsDownAndRefreshShowsQueueBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildDashboard: %v", err)
 	}
-	if len(snap.Rows) == 0 || canon(t, d, snap.Rows[0].runtimePath) != canon(t, d, repo) || !strings.Contains(snap.Rows[0].Worktree, " (main)") {
+	if len(snap.Rows) == 0 || canon(t, d, snap.Rows[0].runtimePath) != canon(t, d, repo) || snap.Rows[0].Worktree != "main" {
 		t.Fatalf("dashboard rows = %+v, want queue base worktree", snap.Rows)
 	}
 }

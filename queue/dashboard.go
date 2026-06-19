@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -65,16 +66,52 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 		return DashboardSnapshot{}, err
 	}
 
-	var scans []projectScan
-	for _, p := range projects {
-		scan, err := resolveScan(d, p)
-		if err != nil {
-			if outsideQueueScopeResolveError(err) {
-				continue
+	// Memoize idempotent git reads for this build, mirroring Scan: resolveScan
+	// and resolveRepresentative re-fork rev-parse/worktree-list against the same
+	// directories (once per project, then again per repo group). Wrap a shallow
+	// copy so the caller's git is untouched. The dashboard rebuilds on a poll,
+	// so the cache is per-build (a point-in-time snapshot), not cross-tick.
+	if d.Tasks != nil && d.Tasks.Git != nil {
+		buildDeps := *d
+		tasksDeps := *d.Tasks
+		tasksDeps.Git = newScanGitCache(d.Tasks.Git)
+		buildDeps.Tasks = &tasksDeps
+		d = &buildDeps
+	}
+
+	// Resolve every project's scan concurrently; with many registered checkouts
+	// the serial git cost dominates wall-clock. resolveScan only reads, so the
+	// bounded fan-out is safe (same pattern as Scan's phase 1).
+	scanResults := make([]*projectScan, len(projects))
+	scanErrs := make([]error, len(projects))
+	sem := make(chan struct{}, scanConcurrency())
+	var wg sync.WaitGroup
+	for i, p := range projects {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, p project.ExpandedProject) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			scan, err := resolveScan(d, p)
+			if err != nil {
+				if !outsideQueueScopeResolveError(err) {
+					scanErrs[idx] = err
+				}
+				return
 			}
-			return DashboardSnapshot{}, err
+			scanResults[idx] = &scan
+		}(i, p)
+	}
+	wg.Wait()
+
+	var scans []projectScan
+	for i := range projects {
+		if scanErrs[i] != nil {
+			return DashboardSnapshot{}, scanErrs[i]
 		}
-		scans = append(scans, scan)
+		if scanResults[i] != nil {
+			scans = append(scans, *scanResults[i])
+		}
 	}
 
 	groups := map[string][]projectScan{}
@@ -124,6 +161,13 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 	if err != nil {
 		return nil, err
 	}
+	// The representative is shared by every row that lacks a per-set binding;
+	// resolve its branch once instead of re-forking `git branch --show-current`
+	// per row (scanGitCache does not memoize `branch`).
+	repBranch := ""
+	if rep != nil {
+		repBranch = binding.CurrentBranch(d.Tasks, rep.RuntimePath)
+	}
 	projectName := repoName(scans, rep)
 	var rows []DashboardRow
 	for _, taskRow := range refresh.Rows {
@@ -131,7 +175,7 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 		if !dashboardShowRow(taskRow, awaitingIntegration) {
 			continue
 		}
-		wt := dashboardWorktree(d, state, repoKey, taskRow.ID, rep, bare)
+		wt := dashboardWorktree(d, state, repoKey, taskRow.ID, rep, repBranch, bare)
 		drain := dashboardDrain(d, state, repoKey, taskRow.ID, wt.runtimePath)
 		status := dashboardStatus(taskRow.Status, merge, awaitingIntegration)
 		rows = append(rows, DashboardRow{
@@ -182,19 +226,22 @@ type dashboardWorktreeView struct {
 	runtimePath string
 }
 
-func dashboardWorktree(d *Deps, state *DaemonState, repoKey, setID string, rep *projectScan, bare bool) dashboardWorktreeView {
+// dashboardWorktreeMarker prefixes a branch running in a dedicated (non-trunk)
+// Worktree binding. The representative checkout (trunk) is left unmarked.
+const dashboardWorktreeMarker = "↳ "
+
+func dashboardWorktree(d *Deps, state *DaemonState, repoKey, setID string, rep *projectScan, repBranch string, bare bool) dashboardWorktreeView {
 	if state != nil {
 		if b, ok := state.WorktreeBindings[setScopedKey(repoKey, setID)]; ok && strings.TrimSpace(b.RuntimePath) != "" {
 			branch := b.Branch
 			if branch == "" {
 				branch = binding.CurrentBranch(d.Tasks, b.RuntimePath)
 			}
-			return dashboardWorktreeView{label: formatDashboardWorktree(b.RuntimePath, branch), runtimePath: b.RuntimePath}
+			return dashboardWorktreeView{label: formatDashboardWorktree(branch, true), runtimePath: b.RuntimePath}
 		}
 	}
 	if rep != nil {
-		branch := binding.CurrentBranch(d.Tasks, rep.RuntimePath)
-		return dashboardWorktreeView{label: formatDashboardWorktree(rep.RuntimePath, branch), runtimePath: rep.RuntimePath}
+		return dashboardWorktreeView{label: formatDashboardWorktree(repBranch, false), runtimePath: rep.RuntimePath}
 	}
 	if bare {
 		return dashboardWorktreeView{label: "(no base)"}
@@ -202,12 +249,18 @@ func dashboardWorktree(d *Deps, state *DaemonState, repoKey, setID string, rep *
 	return dashboardWorktreeView{label: "(no base)"}
 }
 
-func formatDashboardWorktree(path, branch string) string {
+// formatDashboardWorktree renders a row's checkout as its branch, marking a
+// dedicated (non-trunk) worktree with a leading glyph. The on-disk path is not
+// shown inline — it lives in the `s` inspect modal.
+func formatDashboardWorktree(branch string, worktree bool) string {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		branch = "detached"
 	}
-	return fmt.Sprintf("%s (%s)", path, branch)
+	if worktree {
+		return dashboardWorktreeMarker + branch
+	}
+	return branch
 }
 
 func dashboardDrain(d *Deps, state *DaemonState, repoKey, setID, runtimePath string) string {
@@ -727,7 +780,11 @@ func DashboardStatusDetailLines(d *Deps, row DashboardRow) ([]string, error) {
 	if text == "" {
 		text = fmt.Sprintf("%s: no status detail available", row.SetID)
 	}
-	return strings.Split(text, "\n"), nil
+	lines := strings.Split(text, "\n")
+	if strings.TrimSpace(row.runtimePath) != "" {
+		lines = append([]string{"checkout: " + row.runtimePath, ""}, lines...)
+	}
+	return lines, nil
 }
 
 func (m dashboardModel) loadBindRefs(row DashboardRow) tea.Cmd {
@@ -1307,7 +1364,7 @@ func (m dashboardModel) View() tea.View {
 		fmt.Fprintln(&b, "q quit")
 		return tea.NewView(b.String())
 	}
-	renderDashboardTable(&b, m.snap.Rows, m.cursor)
+	renderDashboardTable(&b, m.snap.Rows, m.cursor, m.width)
 	fmt.Fprintln(&b)
 	if m.bind != nil {
 		renderDashboardBindModal(&b, m.bind)
@@ -1413,7 +1470,7 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal) {
 	fmt.Fprintln(w, "enter/y confirm · n/esc cancel")
 }
 
-func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor int) {
+func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
 	headers := []string{"project", "task set", "status", "worktree", "drain", ""}
 	widths := []int{len(headers[0]), len(headers[1]), len(headers[2]), len(headers[3]), len(headers[4])}
 	widths = append(widths, len(headers[5]))
@@ -1425,15 +1482,32 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor int) {
 			}
 		}
 	}
-	fmt.Fprintf(w, "  %s\n", dashboardTableLine(headers, widths))
+	fmt.Fprintf(w, "%s\n", truncateToWidth("  "+dashboardTableLine(headers, widths), width))
 	for i, row := range rows {
 		prefix := "  "
 		if i == cursor {
 			prefix = "> "
 		}
-		values := dashboardRowValues(row)
-		fmt.Fprintf(w, "%s%s\n", prefix, dashboardTableLine(values, widths))
+		line := truncateToWidth(prefix+dashboardTableLine(dashboardRowValues(row), widths), width)
+		fmt.Fprintf(w, "%s\n", line)
 	}
+}
+
+// truncateToWidth clips a rendered line that overflows the viewport, replacing
+// the tail with an ellipsis. A non-positive width (no WindowSizeMsg yet) leaves
+// the line untouched.
+func truncateToWidth(s string, width int) string {
+	if width <= 0 || lipgloss.Width(s) <= width {
+		return s
+	}
+	if width <= 1 {
+		return "…"
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
 }
 
 func dashboardRowValues(row DashboardRow) []string {
