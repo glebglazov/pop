@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/binding"
 	"github.com/glebglazov/pop/config"
@@ -482,6 +483,7 @@ type dashboardModel struct {
 	d       *Deps
 	cfg     *config.Config
 	snap    DashboardSnapshot
+	allRows []DashboardRow // source of truth; snap.Rows is the filtered view
 	cursor  int
 	err     error
 	width   int
@@ -489,13 +491,16 @@ type dashboardModel struct {
 	bind    *dashboardBindModal
 	abandon *dashboardAbandonModal
 	status  *dashboardStatusModal
+
+	filterMode  bool
+	filterInput textinput.Model
 }
 
 func newDashboardModel(d *Deps, cfg *config.Config, snap DashboardSnapshot) dashboardModel {
 	if d == nil {
 		d = DefaultDeps()
 	}
-	return dashboardModel{d: d, cfg: cfg, snap: snap}
+	return dashboardModel{d: d, cfg: cfg, snap: snap, allRows: snap.Rows}
 }
 
 func (m dashboardModel) Init() tea.Cmd {
@@ -514,9 +519,19 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.status != nil {
 			return m.updateStatusModal(msg)
 		}
+		if m.filterMode {
+			return m.updateFilterMode(msg)
+		}
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
+		case "/":
+			m.filterMode = true
+			ti := textinput.New()
+			ti.Prompt = "> "
+			ti.Focus()
+			m.filterInput = ti
+			return m, nil
 		case "j", "down":
 			if len(m.snap.Rows) > 0 && m.cursor < len(m.snap.Rows)-1 {
 				m.cursor++
@@ -587,7 +602,11 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = msg.err
 		if msg.err == nil {
+			m.allRows = msg.snap.Rows
 			m.snap = msg.snap
+			if m.filterMode {
+				m.snap.Rows = filterDashboardRows(m.allRows, m.filterInput.Value())
+			}
 			m.cursor = dashboardCursorAfterReload(m.snap.Rows, oldKey, m.cursor)
 		}
 	case dashboardToggleMsg:
@@ -723,6 +742,56 @@ func (m dashboardModel) updateStatusModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status.scroll = max
 	}
 	return m, nil
+}
+
+func (m dashboardModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.filterMode = false
+		m.filterInput = textinput.Model{}
+		m.snap.Rows = m.allRows
+		m.cursor = dashboardCursorAfterReload(m.snap.Rows, "", m.cursor)
+		return m, nil
+	case "j", "down":
+		if len(m.snap.Rows) > 0 && m.cursor < len(m.snap.Rows)-1 {
+			m.cursor++
+		}
+		return m, nil
+	case "k", "up":
+		if len(m.snap.Rows) > 0 && m.cursor > 0 {
+			m.cursor--
+		}
+		return m, nil
+	default:
+		oldKey := ""
+		if m.cursor >= 0 && m.cursor < len(m.snap.Rows) {
+			oldKey = m.snap.Rows[m.cursor].cursorKey
+		}
+		var cmd tea.Cmd
+		m.filterInput, cmd = m.filterInput.Update(msg)
+		m.snap.Rows = filterDashboardRows(m.allRows, m.filterInput.Value())
+		m.cursor = dashboardCursorAfterReload(m.snap.Rows, oldKey, m.cursor)
+		return m, cmd
+	}
+}
+
+// filterDashboardRows returns rows whose Project or SetID contain query
+// (case-insensitive). Returns allRows unchanged when query is empty.
+func filterDashboardRows(rows []DashboardRow, query string) []DashboardRow {
+	if query == "" {
+		return rows
+	}
+	q := strings.ToLower(query)
+	var filtered []DashboardRow
+	for _, row := range rows {
+		if strings.Contains(strings.ToLower(row.Project), q) ||
+			strings.Contains(strings.ToLower(row.SetID), q) {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
 }
 
 func (m *dashboardModel) moveBindCursor(delta int) {
@@ -1466,9 +1535,18 @@ func (m dashboardModel) View() tea.View {
 		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
 	}
 	if len(m.snap.Rows) == 0 {
-		fmt.Fprintln(&body, "No queue-actionable task sets.")
+		if m.filterMode {
+			fmt.Fprintln(&body, "No matching task sets.")
+		} else {
+			fmt.Fprintln(&body, "No queue-actionable task sets.")
+		}
 		fmt.Fprintln(&body)
-		fmt.Fprint(&body, ui.HintStyle.Render("q quit"))
+		if m.filterMode {
+			ui.WriteInputBox(&body, m.width, m.filterInput.View())
+			fmt.Fprint(&body, ui.HintStyle.Render("esc clear filter"))
+		} else {
+			fmt.Fprint(&body, ui.HintStyle.Render("q quit"))
+		}
 		content := body.String()
 		v := tea.NewView(dashboardBottomAnchor(m.height, content))
 		v.AltScreen = true
@@ -1482,8 +1560,11 @@ func (m dashboardModel) View() tea.View {
 		renderDashboardAbandonModal(&body, m.abandon)
 	} else if m.status != nil {
 		renderDashboardStatusModal(&body, m.status, m.statusVisibleLines())
+	} else if m.filterMode {
+		ui.WriteInputBox(&body, m.width, m.filterInput.View())
+		fmt.Fprint(&body, ui.HintStyle.Render("esc clear filter · j/k navigate"))
 	} else {
-		fmt.Fprint(&body, ui.HintStyle.Render("j/k move · s status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · q quit"))
+		fmt.Fprint(&body, ui.HintStyle.Render("j/k move · s status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · q quit"))
 	}
 	content := body.String()
 	v := tea.NewView(dashboardBottomAnchor(m.height, content))

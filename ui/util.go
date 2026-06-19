@@ -44,6 +44,12 @@ func newTextInput() textinput.Model {
 	return ti
 }
 
+// WriteInputBox writes a bordered input box to b; exported for cross-package use.
+// content is rendered inside; use textinput.View() or a static string like " Help".
+func WriteInputBox(b *strings.Builder, width int, content string) {
+	writeInputBox(b, width, content)
+}
+
 // writeInputBox writes a bordered input box to b. content is rendered inside;
 // use inputView from textinput.View() or a static string like " Help".
 func writeInputBox(b *strings.Builder, width int, content string) {

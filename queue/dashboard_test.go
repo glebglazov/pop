@@ -948,3 +948,261 @@ func assertDashboardPaneMapping(t *testing.T, d *Deps, repo, setID, paneID, sour
 		t.Fatalf("pane mapping = %+v, want pane=%s set=%s source=%s", pane, paneID, setID, source)
 	}
 }
+
+func filterTestModel() dashboardModel {
+	rows := []DashboardRow{
+		{Project: "alpha", SetID: "set-one", Status: "READY", cursorKey: "alpha\x00set-one"},
+		{Project: "beta", SetID: "set-two", Status: "READY", cursorKey: "beta\x00set-two"},
+		{Project: "gamma", SetID: "feature", Status: "FAILED", cursorKey: "gamma\x00feature"},
+	}
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	m.cursor = 2
+	return m
+}
+
+func TestDashboardFilterMode_SlashEntersFilterMode(t *testing.T) {
+	m := filterTestModel()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	got := updated.(dashboardModel)
+	if !got.filterMode {
+		t.Fatal("expected filterMode = true after /")
+	}
+	if len(got.snap.Rows) != 3 {
+		t.Fatalf("rows = %d, want 3 (no filter applied yet)", len(got.snap.Rows))
+	}
+}
+
+func TestDashboardFilterMode_EscExitsAndClearsFilter(t *testing.T) {
+	m := filterTestModel()
+	// Enter filter mode
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(dashboardModel)
+	// Type a filter
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	m = updated.(dashboardModel)
+	if len(m.snap.Rows) != 1 {
+		t.Fatalf("after 'b' filter: rows = %d, want 1", len(m.snap.Rows))
+	}
+	// Esc exits filter mode and restores all rows
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got := updated.(dashboardModel)
+	if got.filterMode {
+		t.Fatal("expected filterMode = false after esc")
+	}
+	if len(got.snap.Rows) != 3 {
+		t.Fatalf("after esc: rows = %d, want 3 (filter cleared)", len(got.snap.Rows))
+	}
+	if got.filterInput.Value() != "" {
+		t.Fatalf("filterInput value = %q, want empty after esc", got.filterInput.Value())
+	}
+}
+
+func TestDashboardFilterMode_TypingNarrowsRows(t *testing.T) {
+	m := filterTestModel()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(dashboardModel)
+
+	// Type "alpha" — matches Project "alpha"
+	for _, ch := range "alpha" {
+		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+		m = updated.(dashboardModel)
+	}
+	if len(m.snap.Rows) != 1 {
+		t.Fatalf("after 'alpha': rows = %d, want 1", len(m.snap.Rows))
+	}
+	if m.snap.Rows[0].Project != "alpha" {
+		t.Fatalf("filtered row project = %q, want alpha", m.snap.Rows[0].Project)
+	}
+}
+
+func TestDashboardFilterMode_MatchesSetID(t *testing.T) {
+	m := filterTestModel()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(dashboardModel)
+
+	// "feature" matches SetID "feature" in project "gamma"
+	for _, ch := range "feature" {
+		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+		m = updated.(dashboardModel)
+	}
+	if len(m.snap.Rows) != 1 {
+		t.Fatalf("after 'feature': rows = %d, want 1", len(m.snap.Rows))
+	}
+	if m.snap.Rows[0].SetID != "feature" {
+		t.Fatalf("filtered row setID = %q, want feature", m.snap.Rows[0].SetID)
+	}
+}
+
+func TestDashboardFilterMode_CursorClampedToFilteredRows(t *testing.T) {
+	m := filterTestModel()
+	m.cursor = 2 // on gamma/feature
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(dashboardModel)
+
+	// Type "alpha" — only alpha/set-one matches; cursor must move within bounds
+	for _, ch := range "alpha" {
+		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+		m = updated.(dashboardModel)
+	}
+	if m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+		t.Fatalf("cursor = %d, out of bounds for %d filtered rows", m.cursor, len(m.snap.Rows))
+	}
+}
+
+func TestDashboardFilterMode_NavigationWorksInsideFilter(t *testing.T) {
+	m := filterTestModel()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(dashboardModel)
+	// Type "set" to match two rows
+	for _, ch := range "set" {
+		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+		m = updated.(dashboardModel)
+	}
+	if len(m.snap.Rows) != 2 {
+		t.Fatalf("after 'set': rows = %d, want 2", len(m.snap.Rows))
+	}
+	m.cursor = 0
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	got := updated.(dashboardModel)
+	if got.cursor != 1 {
+		t.Fatalf("j in filter mode: cursor = %d, want 1", got.cursor)
+	}
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	got = updated.(dashboardModel)
+	if got.cursor != 0 {
+		t.Fatalf("k in filter mode: cursor = %d, want 0", got.cursor)
+	}
+}
+
+func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
+	called := false
+	d := &Deps{
+		ToggleAutoDrain: func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {
+			called = true
+			return &tasks.AutoDrainResult{}, nil
+		},
+	}
+	rows := []DashboardRow{
+		{Project: "alpha", SetID: "set-one", Status: "READY", cursorKey: "alpha\x00set-one",
+			defPath: "/def", statePath: "/state"},
+	}
+	m := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: rows})
+	m.cursor = 0
+	// Enter filter mode
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(dashboardModel)
+	// Action keys should NOT trigger actions — they go to the filter input
+	for _, key := range []tea.KeyPressMsg{
+		{Code: 'i', Text: "i"},
+		{Code: 'I', Text: "I"},
+		{Code: 'b', Text: "b"},
+		{Code: 'U', Text: "U"},
+		{Code: 'a', Text: "a"},
+		{Code: 'p', Text: "p"},
+		{Code: 's', Text: "s"},
+	} {
+		updated, _ = m.Update(key)
+		m = updated.(dashboardModel)
+	}
+	if called {
+		t.Fatal("bare-letter actions must be inert in filter mode")
+	}
+	if m.bind != nil || m.abandon != nil || m.status != nil {
+		t.Fatal("modals must not open while in filter mode")
+	}
+}
+
+func TestDashboardFilterMode_QKeyGoesToInputNotQuit(t *testing.T) {
+	m := filterTestModel()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(dashboardModel)
+	// 'q' in filter mode goes to the input box, not quit
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	got := updated.(dashboardModel)
+	if !got.filterMode {
+		t.Fatal("q in filter mode must not exit filter mode")
+	}
+	if got.filterInput.Value() != "q" {
+		t.Fatalf("filter input = %q after q, want 'q'", got.filterInput.Value())
+	}
+}
+
+func TestDashboardFilterMode_ReloadPreservesFilter(t *testing.T) {
+	m := filterTestModel()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(dashboardModel)
+	for _, ch := range "alpha" {
+		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+		m = updated.(dashboardModel)
+	}
+	if len(m.snap.Rows) != 1 {
+		t.Fatalf("before reload: rows = %d, want 1", len(m.snap.Rows))
+	}
+
+	// Simulate a reload with new rows that still include alpha
+	newRows := []DashboardRow{
+		{Project: "alpha", SetID: "set-one", Status: "BLOCKED", cursorKey: "alpha\x00set-one"},
+		{Project: "beta", SetID: "set-two", Status: "READY", cursorKey: "beta\x00set-two"},
+		{Project: "delta", SetID: "alpha-task", Status: "READY", cursorKey: "delta\x00alpha-task"},
+	}
+	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: newRows}})
+	got := updated.(dashboardModel)
+
+	if !got.filterMode {
+		t.Fatal("filter mode must persist across reload")
+	}
+	// Filter "alpha" should match "alpha" project and "alpha-task" set
+	if len(got.snap.Rows) != 2 {
+		t.Fatalf("after reload with filter 'alpha': rows = %d, want 2", len(got.snap.Rows))
+	}
+}
+
+func TestFilterDashboardRows(t *testing.T) {
+	rows := []DashboardRow{
+		{Project: "alpha", SetID: "set-one"},
+		{Project: "beta", SetID: "set-two"},
+		{Project: "gamma", SetID: "feature"},
+	}
+
+	t.Run("empty query returns all rows", func(t *testing.T) {
+		got := filterDashboardRows(rows, "")
+		if len(got) != 3 {
+			t.Fatalf("empty filter: got %d rows, want 3", len(got))
+		}
+	})
+
+	t.Run("matches project name", func(t *testing.T) {
+		got := filterDashboardRows(rows, "beta")
+		if len(got) != 1 || got[0].Project != "beta" {
+			t.Fatalf("got %+v, want beta row", got)
+		}
+	})
+
+	t.Run("matches set ID", func(t *testing.T) {
+		got := filterDashboardRows(rows, "feature")
+		if len(got) != 1 || got[0].SetID != "feature" {
+			t.Fatalf("got %+v, want feature row", got)
+		}
+	})
+
+	t.Run("case insensitive", func(t *testing.T) {
+		got := filterDashboardRows(rows, "ALPHA")
+		if len(got) != 1 || got[0].Project != "alpha" {
+			t.Fatalf("got %+v, want alpha row", got)
+		}
+	})
+
+	t.Run("partial match works", func(t *testing.T) {
+		got := filterDashboardRows(rows, "set")
+		if len(got) != 2 {
+			t.Fatalf("got %d rows for 'set', want 2", len(got))
+		}
+	})
+
+	t.Run("no match returns nil", func(t *testing.T) {
+		got := filterDashboardRows(rows, "zzz")
+		if len(got) != 0 {
+			t.Fatalf("got %d rows for 'zzz', want 0", len(got))
+		}
+	})
+}
