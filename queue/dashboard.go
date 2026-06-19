@@ -17,6 +17,7 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/ui"
 )
 
 const dashboardPollInterval = 2 * time.Second
@@ -1458,30 +1459,50 @@ func dashboardCursorAfterReload(rows []DashboardRow, key string, previous int) i
 }
 
 func (m dashboardModel) View() tea.View {
-	var b strings.Builder
+	var body strings.Builder
 	title := lipgloss.NewStyle().Bold(true).Render("Queue dashboard")
-	fmt.Fprintln(&b, title)
+	fmt.Fprintln(&body, title)
 	if m.err != nil {
-		fmt.Fprintf(&b, "refresh error: %v\n", m.err)
+		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
 	}
 	if len(m.snap.Rows) == 0 {
-		fmt.Fprintln(&b, "No queue-actionable task sets.")
-		fmt.Fprintln(&b)
-		fmt.Fprintln(&b, "q quit")
-		return tea.NewView(b.String())
+		fmt.Fprintln(&body, "No queue-actionable task sets.")
+		fmt.Fprintln(&body)
+		fmt.Fprint(&body, ui.HintStyle.Render("q quit"))
+		content := body.String()
+		v := tea.NewView(dashboardBottomAnchor(m.height, content))
+		v.AltScreen = true
+		return v
 	}
-	renderDashboardTable(&b, m.snap.Rows, m.cursor, m.width)
-	fmt.Fprintln(&b)
+	renderDashboardTable(&body, m.snap.Rows, m.cursor, m.width)
+	fmt.Fprintln(&body)
 	if m.bind != nil {
-		renderDashboardBindModal(&b, m.bind)
+		renderDashboardBindModal(&body, m.bind)
 	} else if m.abandon != nil {
-		renderDashboardAbandonModal(&b, m.abandon)
+		renderDashboardAbandonModal(&body, m.abandon)
 	} else if m.status != nil {
-		renderDashboardStatusModal(&b, m.status, m.statusVisibleLines())
+		renderDashboardStatusModal(&body, m.status, m.statusVisibleLines())
 	} else {
-		fmt.Fprintln(&b, "j/k move · s status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · q quit")
+		fmt.Fprint(&body, ui.HintStyle.Render("j/k move · s status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · q quit"))
 	}
-	return tea.NewView(b.String())
+	content := body.String()
+	v := tea.NewView(dashboardBottomAnchor(m.height, content))
+	v.AltScreen = true
+	return v
+}
+
+// dashboardBottomAnchor prepends empty lines so that content is pushed to the
+// bottom of the terminal — the same anchoring used by the project/worktree picker.
+// When height is not yet known (0) the content is returned unchanged.
+func dashboardBottomAnchor(height int, content string) string {
+	if height <= 0 {
+		return content
+	}
+	lines := strings.Count(content, "\n")
+	if emptyLines := height - lines; emptyLines > 0 {
+		return strings.Repeat("\n", emptyLines) + content
+	}
+	return content
 }
 
 func renderDashboardStatusModal(w io.Writer, modal *dashboardStatusModal, visibleLines int) {
@@ -1491,12 +1512,12 @@ func renderDashboardStatusModal(w io.Writer, modal *dashboardStatusModal, visibl
 	fmt.Fprintf(w, "Task status: %s\n", modal.row.SetID)
 	if modal.loading {
 		fmt.Fprintln(w, "  loading...")
-		fmt.Fprintln(w, "esc/q close")
+		fmt.Fprint(w, ui.HintStyle.Render("esc/q close"))
 		return
 	}
 	if modal.err != nil {
 		fmt.Fprintf(w, "  error: %v\n", modal.err)
-		fmt.Fprintln(w, "esc/q close")
+		fmt.Fprint(w, ui.HintStyle.Render("esc/q close"))
 		return
 	}
 	if visibleLines <= 0 {
@@ -1517,10 +1538,10 @@ func renderDashboardStatusModal(w io.Writer, modal *dashboardStatusModal, visibl
 		fmt.Fprintf(w, "  %s\n", line)
 	}
 	if len(modal.lines) > visibleLines {
-		fmt.Fprintf(w, "showing %d-%d of %d · j/k scroll · esc/q close\n", start+1, end, len(modal.lines))
+		fmt.Fprint(w, ui.HintStyle.Render(fmt.Sprintf("showing %d-%d of %d · j/k scroll · esc/q close", start+1, end, len(modal.lines))))
 		return
 	}
-	fmt.Fprintln(w, "esc/q close")
+	fmt.Fprint(w, ui.HintStyle.Render("esc/q close"))
 }
 
 func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
@@ -1537,7 +1558,7 @@ func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
 		for i, entry := range modal.entries {
 			prefix := "  "
 			if i == modal.cursor {
-				prefix = "> "
+				prefix = ui.IndicatorStyle.Render("█") + " "
 			}
 			label := entry.Label
 			if label == "" {
@@ -1545,21 +1566,21 @@ func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
 			}
 			fmt.Fprintf(w, "%s%s\n", prefix, label)
 		}
-		fmt.Fprintln(w, "enter select · esc cancel")
+		fmt.Fprint(w, ui.HintStyle.Render("enter select · esc cancel"))
 	case dashboardBindStageBaseRef:
 		fmt.Fprintln(w, "Base ref")
 		for i, ref := range modal.refs {
 			prefix := "  "
 			if i == modal.cursor {
-				prefix = "> "
+				prefix = ui.IndicatorStyle.Render("█") + " "
 			}
 			fmt.Fprintf(w, "%s%s\n", prefix, ref)
 		}
-		fmt.Fprintln(w, "enter select · esc cancel")
+		fmt.Fprint(w, ui.HintStyle.Render("enter select · esc cancel"))
 	case dashboardBindStageName:
 		fmt.Fprintf(w, "Base: %s\n", modal.baseRef)
 		fmt.Fprintf(w, "Name: %s\n", modal.name)
-		fmt.Fprintln(w, "enter create · esc cancel")
+		fmt.Fprint(w, ui.HintStyle.Render("enter create · esc cancel"))
 	}
 }
 
@@ -1573,7 +1594,7 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal) {
 		return
 	}
 	fmt.Fprintln(w, "This releases the binding without integrating. Task statuses are unchanged.")
-	fmt.Fprintln(w, "enter/y confirm · n/esc cancel")
+	fmt.Fprint(w, ui.HintStyle.Render("enter/y confirm · n/esc cancel"))
 }
 
 func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
@@ -1590,9 +1611,11 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
 	}
 	fmt.Fprintf(w, "%s\n", truncateToWidth("  "+dashboardTableLine(headers, widths), width))
 	for i, row := range rows {
-		prefix := "  "
+		var prefix string
 		if i == cursor {
-			prefix = "> "
+			prefix = ui.IndicatorStyle.Render("█") + " "
+		} else {
+			prefix = "  "
 		}
 		line := truncateToWidth(prefix+dashboardTableLine(dashboardRowValues(row), widths), width)
 		fmt.Fprintf(w, "%s\n", line)

@@ -26,6 +26,11 @@ var (
 	hintStyle      = lipgloss.NewStyle().Foreground(colorDim)
 	dimStyle       = lipgloss.NewStyle().Foreground(colorDim)
 	headerStyle    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+
+	// IndicatorStyle is the shared cursor-row block indicator; exported for cross-package use.
+	IndicatorStyle = indicatorStyle
+	// HintStyle is the shared dimmed footer hint style; exported for cross-package use.
+	HintStyle = hintStyle
 )
 
 // newTextInput creates a consistently configured text input for all pickers.
