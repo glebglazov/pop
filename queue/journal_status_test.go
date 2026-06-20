@@ -257,7 +257,7 @@ func TestRecordTerminalOutcomesInfersCrashForOpenSpawnWithoutOutcome(t *testing.
 	}
 }
 
-func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
+func TestRecordTerminalOutcomesBacksOffPinnedQuotaSet(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initMergeabilityRepo(t)
 	key := testScopedKeyFor(t, td, repo, repo, "set-1")
@@ -290,12 +290,9 @@ func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	until := state.AgentCooldowns["codex"]
+	until := state.SetBackoffs[key]
 	if until.Before(before.Add(30*time.Minute)) || until.After(after.Add(30*time.Minute+time.Second)) {
-		t.Fatalf("cooldown until = %s, want about now+30m", until)
-	}
-	if got := state.SetBackoffs[key]; !got.Equal(until) {
-		t.Fatalf("set backoff = %s, want cooldown %s", got, until)
+		t.Fatalf("set backoff = %s, want about now+30m", until)
 	}
 
 	entries, err := ReadJournal(td)
@@ -305,11 +302,19 @@ func TestRecordTerminalOutcomesSetsQuotaCooldown(t *testing.T) {
 	if len(entries) != 2 || entries[1].Event != JournalEventAgentCooldown || entries[1].Agent != "codex" {
 		t.Fatalf("journal entries = %+v, want outcome then codex cooldown", entries)
 	}
+	cooldowns, err := tasks.ActiveAgentCooldownsWith(td, after)
+	if err != nil {
+		t.Fatalf("read cooldown store: %v", err)
+	}
+	if len(cooldowns) != 0 {
+		t.Fatalf("queue must not write task cooldown store, got %+v", cooldowns)
+	}
 }
 
-func TestRecordTerminalOutcomesSetsQuotaCooldownFromResetAt(t *testing.T) {
+func TestRecordTerminalOutcomesBacksOffPinnedQuotaSetFromResetAt(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initMergeabilityRepo(t)
+	key := testScopedKeyFor(t, td, repo, repo, "set-1")
 	resetAt := time.Now().UTC().Add(45 * time.Minute).Truncate(time.Second)
 	d := &Deps{
 		Tasks: td,
@@ -318,6 +323,7 @@ func TestRecordTerminalOutcomesSetsQuotaCooldownFromResetAt(t *testing.T) {
 				SetID:            "set-1",
 				Outcome:          tasks.DrainOutcomeQuotaPaused,
 				ExhaustedPreset:  "codex",
+				ExhaustedPinned:  true,
 				ExhaustedResetAt: resetAt,
 				RuntimePath:      repo,
 				WrittenAt:        time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
@@ -338,8 +344,8 @@ func TestRecordTerminalOutcomesSetsQuotaCooldownFromResetAt(t *testing.T) {
 		t.Fatalf("read state: %v", err)
 	}
 	want := resetAt.Add(2 * time.Minute)
-	if got := state.AgentCooldowns["codex"]; !got.Equal(want) {
-		t.Fatalf("cooldown until = %s, want reset+2m %s", got, want)
+	if got := state.SetBackoffs[key]; !got.Equal(want) {
+		t.Fatalf("set backoff = %s, want reset+2m %s", got, want)
 	}
 }
 
@@ -395,11 +401,15 @@ func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	if state.AgentCooldowns["codex"].IsZero() {
-		t.Fatalf("codex cooldown was not recorded: %+v", state.AgentCooldowns)
-	}
 	if got := state.SetBackoffs[key]; !got.IsZero() {
 		t.Fatalf("set backoff = %s, want none for rotating default quota pause", got)
+	}
+	cooldowns, err := tasks.ActiveAgentCooldownsWith(td, time.Now())
+	if err != nil {
+		t.Fatalf("read cooldown store: %v", err)
+	}
+	if len(cooldowns) != 0 {
+		t.Fatalf("queue must not write task cooldown store, got %+v", cooldowns)
 	}
 }
 

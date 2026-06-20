@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/binding"
 	"github.com/glebglazov/pop/config"
@@ -1152,24 +1152,9 @@ func LaunchDashboardDrain(d *Deps, cfg *config.Config, row DashboardRow) (Dashbo
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	qcfg, err := resolvedQueueConfig(cfg)
-	if err != nil {
-		return DashboardDrainResult{}, err
-	}
-	defaultAgent, _, notes, ok := selectDefaultAgent(d, qcfg.Agents, state, d.now().UTC())
-	if !ok {
-		for _, note := range notes {
-			if note.Reason != "" {
-				return DashboardDrainResult{}, fmt.Errorf("no available agent: %s: %s", note.Agent, note.Reason)
-			}
-		}
-		return DashboardDrainResult{}, fmt.Errorf("no available agent")
-	}
-
 	dec := Decision{
-		Project:      repoName(scans, rep),
-		TaskSetID:    row.SetID,
-		DefaultAgent: defaultAgent,
+		Project:   repoName(scans, rep),
+		TaskSetID: row.SetID,
 	}
 	key := setScopedKey(repoKey, row.SetID)
 	if binding, ok := state.WorktreeBindings[key]; ok && strings.TrimSpace(binding.RuntimePath) != "" {

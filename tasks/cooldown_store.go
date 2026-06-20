@@ -49,6 +49,17 @@ func readAgentCooldowns(d *Deps) (agentCooldownStore, error) {
 	return store, nil
 }
 
+// ActiveAgentCooldownsWith returns active machine-global agent cooldowns keyed
+// by preset. It is read-only and lock-protected so status/reporting callers do
+// not need to know the cooldown store format.
+func ActiveAgentCooldownsWith(d *Deps, now time.Time) (map[string]time.Time, error) {
+	store, err := readAgentCooldowns(d)
+	if err != nil {
+		return nil, err
+	}
+	return activeAgentCooldowns(store, now), nil
+}
+
 func updateAgentCooldown(d *Deps, preset string, until time.Time) error {
 	preset = strings.TrimSpace(preset)
 	if preset == "" || until.IsZero() {

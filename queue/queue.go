@@ -209,21 +209,12 @@ type Decision struct {
 	Busy               bool   // a live runtime lock ⇒ already executing, skip
 	TaskSetID          string // the drain to spawn; empty when nothing is actionable
 	Reason             string // why no drain was spawned (busy, no-ready-set, error)
-	DefaultAgent       string
 	WaitUntil          time.Time
-	AgentNotes         []AgentNote
 	WorktreeReady      bool
 	ProjectConfigError string
 	Err                error
 	scan               projectScan
 	lockStatus         *tasks.RuntimeLockStatus
-}
-
-type AgentNote struct {
-	Event  string
-	Agent  string
-	Reason string
-	Until  time.Time
 }
 
 // Actionable reports whether the decision selected a Task set to drain.
@@ -251,8 +242,7 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	if err != nil {
 		return nil, err
 	}
-	qcfg, err := resolvedQueueConfig(cfg)
-	if err != nil {
+	if _, err := resolvedQueueConfig(cfg); err != nil {
 		return nil, err
 	}
 	state, err := EnsureDaemonState(d.Tasks)
@@ -335,7 +325,7 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 		go func(idx int, key string) {
 			defer wg2.Done()
 			defer func() { <-sem }()
-			groupDecisions[idx] = decideRepoDispatches(d, cfg, groups[key], qcfg.Agents, state, now)
+			groupDecisions[idx] = decideRepoDispatches(d, cfg, groups[key], state, now)
 		}(i, key)
 	}
 	wg2.Wait()
@@ -377,9 +367,6 @@ func resolvedQueueConfig(cfg *config.Config) (config.ResolvedQueueConfig, error)
 	if err != nil {
 		return config.ResolvedQueueConfig{}, err
 	}
-	if len(qcfg.Agents) == 0 {
-		qcfg.Agents = []string{tasks.DefaultAgentPreset}
-	}
 	return qcfg, nil
 }
 
@@ -417,8 +404,8 @@ func scanRepoKey(d *Deps, scan projectScan) (string, error) {
 // returns the first Decision. It is retained for tests and callers that need the
 // v1 single-decision view; Scan uses decideProjectDispatches to expose
 // worktree-ready multi-set fan-out.
-func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonState, now time.Time) Decision {
-	decisions := decideProjectDispatches(d, scan, agents, state, now)
+func decideProject(d *Deps, scan projectScan, state *DaemonState, now time.Time) Decision {
+	decisions := decideProjectDispatches(d, scan, state, now)
 	if len(decisions) == 0 {
 		return Decision{Project: scan.Name, scan: scan, Reason: "no ready set"}
 	}
@@ -430,7 +417,7 @@ func decideProject(d *Deps, scan projectScan, agents []string, state *DaemonStat
 // project busy, otherwise the highest-priority Ready set is selected. A
 // worktree-ready project keeps live worktree drains as per-checkout busy
 // Decisions but may still dispatch other Ready sets into fresh worktrees.
-func decideProjectDispatches(d *Deps, scan projectScan, agents []string, state *DaemonState, now time.Time) []Decision {
+func decideProjectDispatches(d *Deps, scan projectScan, state *DaemonState, now time.Time) []Decision {
 	dec := Decision{Project: scan.Name, scan: scan}
 	dec.WorktreeReady, dec.ProjectConfigError = readRepoConfig(d, scan.ProjectPath)
 
@@ -508,18 +495,6 @@ func decideProjectDispatches(d *Deps, scan projectScan, agents []string, state *
 		}
 		return appendOrOnly(decisions, dec)
 	}
-	defaultAgent, waitUntil, notes, ok := selectDefaultAgent(d, agents, state, now)
-	dec.AgentNotes = notes
-	if !ok {
-		if waitUntil.IsZero() {
-			dec.Reason = "no available agent"
-		} else {
-			dec.Reason = "all agents cooling"
-		}
-		dec.WaitUntil = waitUntil
-		return appendOrOnly(decisions, dec)
-	}
-
 	if !dec.WorktreeReady && len(ids) > 1 {
 		ids = ids[:1]
 	}
@@ -529,7 +504,6 @@ func decideProjectDispatches(d *Deps, scan projectScan, agents []string, state *
 		}
 		action := dec
 		action.TaskSetID = id
-		action.DefaultAgent = defaultAgent
 		decisions = append(decisions, action)
 	}
 	if len(decisions) == 0 {
@@ -751,56 +725,6 @@ func scopedKeyForPaths(d *Deps, projectPath, runtimePath, setID string) (string,
 	return setScopedKey(repoKey, setID), nil
 }
 
-func selectDefaultAgent(d *Deps, agents []string, state *DaemonState, now time.Time) (string, time.Time, []AgentNote, bool) {
-	var notes []AgentNote
-	var earliest time.Time
-	for _, agent := range agents {
-		preset, err := tasks.AgentPresetName(agent)
-		if err != nil {
-			notes = append(notes, AgentNote{Event: "agent_unavailable", Agent: agent, Reason: err.Error()})
-			continue
-		}
-		until := agentCooldownUntil(state, preset, now)
-		if !until.IsZero() {
-			notes = append(notes, AgentNote{Event: "agent_cooling", Agent: preset, Reason: "quota cooldown", Until: until})
-			if earliest.IsZero() || until.Before(earliest) {
-				earliest = until
-			}
-			continue
-		}
-		if !agentBinaryAvailable(d, preset) {
-			notes = append(notes, AgentNote{Event: "agent_unavailable", Agent: preset, Reason: "binary not found on PATH"})
-			continue
-		}
-		return agent, time.Time{}, notes, true
-	}
-	return "", earliest, notes, false
-}
-
-func agentCooldownUntil(state *DaemonState, preset string, now time.Time) time.Time {
-	if state == nil || state.AgentCooldowns == nil {
-		return time.Time{}
-	}
-	until := state.AgentCooldowns[preset]
-	if until.IsZero() || !until.After(now) {
-		return time.Time{}
-	}
-	return until
-}
-
-func agentBinaryAvailable(d *Deps, preset string) bool {
-	adapter, err := tasks.ResolveAgentAdapter(preset)
-	if err != nil {
-		return false
-	}
-	lookPath := tasks.DefaultDeps().LookPath
-	if d != nil && d.Tasks != nil && d.Tasks.LookPath != nil {
-		lookPath = d.Tasks.LookPath
-	}
-	_, err = lookPath(tasks.AgentBinary(adapter))
-	return err == nil
-}
-
 // provisionWorktree is the Queue's adapter over the binding module's
 // provisioner. The worktree directory tree lives under the queue data dir; the
 // binding module owns the `git worktree add` and path-layout details.
@@ -835,9 +759,6 @@ func SpawnWithResult(d *Deps, dec Decision) (SpawnResult, error) {
 	command := fmt.Sprintf("pop tasks implement %s", shellQuote(dec.TaskSetID))
 	if dec.WorktreeReady && dec.scan.RuntimePath != "" {
 		command += " --task-runtime-path " + shellQuote(dec.scan.RuntimePath)
-	}
-	if dec.DefaultAgent != "" {
-		command += " --default-agent " + shellQuote(dec.DefaultAgent)
 	}
 	paneID, err := spawnDrain(d.Tmux, dec.scan.SessionName, dec.scan.ProjectPath, dec.TaskSetID, command)
 	return SpawnResult{PaneID: paneID}, err

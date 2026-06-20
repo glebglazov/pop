@@ -96,9 +96,6 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 
 	inPlaceFallbackSpawned := map[string]bool{}
 	for _, dec := range decisions {
-		if err := journalAgentNotes(d, dec); err != nil {
-			fmt.Fprintf(out, "queue: %s: journal agent notes: %v\n", dec.Project, err)
-		}
 		switch {
 		case dec.Err != nil:
 		case dec.Actionable():
@@ -128,18 +125,6 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 			}
 			if err := recordDrainPane(d, dec, spawn.PaneID, "supervisor"); err != nil {
 				fmt.Fprintf(out, "queue: %s: record drain pane %s: %v\n", dec.Project, dec.TaskSetID, err)
-			}
-			if dec.DefaultAgent != "" {
-				if err := AppendJournalEntry(d.Tasks, JournalEntry{
-					Event:       JournalEventAgentSwitch,
-					Project:     dec.Project,
-					SetID:       dec.TaskSetID,
-					RuntimePath: dec.scan.RuntimePath,
-					Agent:       dec.DefaultAgent,
-					Source:      "supervisor",
-				}); err != nil {
-					fmt.Fprintf(out, "queue: %s: journal agent switch %s: %v\n", dec.Project, dec.TaskSetID, err)
-				}
 			}
 			if err := AppendJournalEntry(d.Tasks, JournalEntry{
 				Event:       JournalEventSpawn,
@@ -378,10 +363,6 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, e
 					}
 					if rec.Outcome == tasks.DrainOutcomeQuotaPaused && rec.ExhaustedPreset != "" {
 						until := agentQuotaCooldownUntil(rec.ExhaustedResetAt, time.Now().UTC(), qcfg.AgentQuotaRetryAfter)
-						if state.AgentCooldowns == nil {
-							state.AgentCooldowns = map[string]time.Time{}
-						}
-						state.AgentCooldowns[rec.ExhaustedPreset] = until
 						if rec.ExhaustedPinned {
 							scopedKey, err := scopedKeyForPaths(d, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID)
 							if err != nil {
@@ -409,8 +390,6 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, e
 							return err
 						}
 						entries = append(entries, cooldown)
-						appendRunEvent(eventLines, fmt.Sprintf("queue: %s: %s cooldown agent=%s until=%s reason=%s",
-							dec.Project, rec.SetID, rec.ExhaustedPreset, until.UTC().Format(time.RFC3339), "quota pause"))
 					}
 				}
 			}
@@ -586,28 +565,6 @@ func agentQuotaCooldownUntil(resetAt, now time.Time, fallback time.Duration) tim
 
 func drainOutcomeAbnormal(outcome tasks.DrainOutcome) bool {
 	return outcome == DrainOutcomeCrashed || outcome.Abnormal()
-}
-
-func journalAgentNotes(d *Deps, dec Decision) error {
-	for _, note := range dec.AgentNotes {
-		event := JournalEventAgentUnavailable
-		if note.Event == "agent_cooling" {
-			event = JournalEventAgentCooldown
-		}
-		if err := AppendJournalEntry(d.Tasks, JournalEntry{
-			Event:       event,
-			Project:     dec.Project,
-			SetID:       dec.TaskSetID,
-			RuntimePath: dec.scan.RuntimePath,
-			Agent:       note.Agent,
-			Reason:      note.Reason,
-			Until:       note.Until,
-			Source:      "supervisor",
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // splitLines splits tmux output into non-empty lines.

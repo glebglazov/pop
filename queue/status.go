@@ -53,11 +53,12 @@ type SkippedRepo struct {
 
 // StatusSnapshot is the pure data model for `pop queue status`.
 type StatusSnapshot struct {
-	PickedUp            []PickedUpSet
-	Idle                []IdleProject
-	Skipped             []SkippedRepo
-	AwaitingIntegration []AwaitingIntegrationSet
-	DaemonState         *DaemonState
+	PickedUp             []PickedUpSet
+	Idle                 []IdleProject
+	Skipped              []SkippedRepo
+	AwaitingIntegration  []AwaitingIntegrationSet
+	DaemonState          *DaemonState
+	ActiveAgentCooldowns map[string]time.Time
 }
 
 // BuildStatus derives queue status from on-disk lock/state truth.
@@ -70,7 +71,13 @@ func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
-	return statusFromDecisions(decisions, state), nil
+	snap := statusFromDecisions(decisions, state)
+	cooldowns, err := tasks.ActiveAgentCooldownsWith(d.Tasks, d.now().UTC())
+	if err != nil {
+		return StatusSnapshot{}, err
+	}
+	snap.ActiveAgentCooldowns = cooldowns
+	return snap, nil
 }
 
 func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapshot {

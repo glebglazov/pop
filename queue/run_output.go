@@ -90,6 +90,7 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 		view.Blocked = append(view.Blocked, blockedItemsFromDaemonState(snap.DaemonState, now, blockedProjects)...)
 		view.WorktreeBindings = buildWorktreeBindingViews(snap.DaemonState, view)
 	}
+	view.Blocked = append(view.Blocked, blockedItemsFromAgentCooldowns(snap.ActiveAgentCooldowns, now)...)
 
 	sort.SliceStable(view.Queued, func(i, j int) bool { return view.Queued[i].Project < view.Queued[j].Project })
 	sort.SliceStable(view.Blocked, func(i, j int) bool {
@@ -165,17 +166,6 @@ func blockedItemsFromDaemonState(state *DaemonState, now time.Time, seenProjects
 		return nil
 	}
 	var out []BlockedItem
-	for agent, until := range state.AgentCooldowns {
-		if until.IsZero() || !until.After(now) {
-			continue
-		}
-		out = append(out, BlockedItem{
-			Kind:   "agent_cooldown",
-			Agent:  agent,
-			Until:  until,
-			Reason: "agent quota cooldown",
-		})
-	}
 	for key, parked := range state.ParkedSets {
 		project := projectForScopedKey(state, key)
 		if seenProjects[project] {
@@ -219,6 +209,22 @@ func blockedItemsFromDaemonState(state *DaemonState, now time.Time, seenProjects
 			Kind:    "quota_backoff",
 			Until:   until,
 			Reason:  "set backed off for pinned agent cooldown",
+		})
+	}
+	return out
+}
+
+func blockedItemsFromAgentCooldowns(cooldowns map[string]time.Time, now time.Time) []BlockedItem {
+	var out []BlockedItem
+	for agent, until := range cooldowns {
+		if until.IsZero() || !until.After(now) {
+			continue
+		}
+		out = append(out, BlockedItem{
+			Kind:   "agent_cooldown",
+			Agent:  agent,
+			Until:  until,
+			Reason: "agent quota cooldown",
 		})
 	}
 	return out

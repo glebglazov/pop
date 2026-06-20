@@ -101,7 +101,7 @@ func TestDecideRepoDispatchesBareMultiWorktreeCollapsesToOneDrain(t *testing.T) 
 	}}
 	scans := scansForCheckouts(wts, "/def")
 
-	decisions := decideRepoDispatches(d, cfg, scans, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	decisions := decideRepoDispatches(d, cfg, scans, &DaemonState{Version: 1}, time.Now())
 
 	var actionable []Decision
 	for _, dec := range decisions {
@@ -128,7 +128,7 @@ func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
 	scans := scansForCheckouts(wts, "/def")
 
-	decisions := decideRepoDispatches(d, &config.Config{}, scans, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	decisions := decideRepoDispatches(d, &config.Config{}, scans, &DaemonState{Version: 1}, time.Now())
 
 	if len(decisions) != 1 {
 		t.Fatalf("bare repo without base: %d decisions, want 1 skip\n%+v", len(decisions), decisions)
@@ -168,7 +168,7 @@ func TestDecideRepoDispatchesBindingRoutesRegardlessOfWorktreeReady(t *testing.T
 	}}
 	scans := scansForCheckouts(wts, "/def")
 
-	decisions := decideRepoDispatches(d, &config.Config{}, scans, []string{"claude"}, state, time.Now())
+	decisions := decideRepoDispatches(d, &config.Config{}, scans, state, time.Now())
 
 	var actionable []Decision
 	for _, dec := range decisions {
@@ -196,7 +196,7 @@ func TestDecideRepoDispatchesNonBareRoutesToGitMainWorktree(t *testing.T) {
 	checkouts := []string{linked[0], linked[1], main}
 	scans := scansForCheckouts(checkouts, "/def")
 
-	decisions := decideRepoDispatches(d, &config.Config{}, scans, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	decisions := decideRepoDispatches(d, &config.Config{}, scans, &DaemonState{Version: 1}, time.Now())
 
 	var actionable []Decision
 	for _, dec := range decisions {

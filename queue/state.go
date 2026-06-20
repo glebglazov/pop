@@ -13,8 +13,8 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-// DaemonState is persisted supervisor-owned state. Later queue slices add
-// cooldowns, parked sets, and retry timers here.
+// DaemonState is persisted supervisor-owned state. It tracks parked sets,
+// retry timers, mergeability, panes, and worktree bindings.
 //
 // WorktreeBindings is no longer persisted here: ADR-0036 moved Worktree
 // bindings into the shared per-repository store owned by the binding module.
@@ -24,7 +24,6 @@ import (
 type DaemonState struct {
 	Version          int                           `json:"version"`
 	UpdatedAt        time.Time                     `json:"updated_at,omitempty"`
-	AgentCooldowns   map[string]time.Time          `json:"agent_cooldowns,omitempty"`
 	SetBackoffs      map[string]time.Time          `json:"set_backoffs,omitempty"`
 	SetCrashBackoffs map[string]time.Time          `json:"set_crash_backoffs,omitempty"`
 	SetCrashCounts   map[string]int                `json:"set_crash_counts,omitempty"`

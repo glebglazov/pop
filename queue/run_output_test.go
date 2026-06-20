@@ -2,6 +2,8 @@ package queue
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -95,6 +97,35 @@ func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
 		if strings.Contains(text, omit) {
 			t.Fatalf("baseline should not contain %q:\n%s", omit, text)
 		}
+	}
+}
+
+func TestBuildStatusReportsTaskOwnedAgentCooldowns(t *testing.T) {
+	td := queueDataDeps(t)
+	until := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	data, err := json.Marshal(map[string]tasks.AgentCooldownEntry{
+		"codex": {ExhaustedUntil: until},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := tasks.AgentCooldownPathWith(td)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &Deps{Tasks: td, Project: project.DefaultDeps()}
+
+	snap, err := BuildStatus(d, &config.Config{})
+	if err != nil {
+		t.Fatalf("build status: %v", err)
+	}
+	view := BuildRunView(snap, time.Now())
+
+	if len(view.Blocked) != 1 || view.Blocked[0].Kind != "agent_cooldown" || view.Blocked[0].Agent != "codex" || !view.Blocked[0].Until.Equal(until) {
+		t.Fatalf("blocked = %+v, want codex cooldown from task store until %s", view.Blocked, until)
 	}
 }
 

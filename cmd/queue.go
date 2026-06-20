@@ -74,7 +74,6 @@ var (
 const queueLogLimit = 50
 
 type queueRunConfig struct {
-	Agents               []string
 	PollInterval         time.Duration
 	AgentQuotaRetryAfter time.Duration
 	CrashRetryDelays     []time.Duration
@@ -89,28 +88,11 @@ func resolveQueueRunConfig(loadConfig func(string) (*config.Config, error), path
 	if err != nil {
 		return queueRunConfig{}, err
 	}
-	if err := validateQueueAgents(resolved.Agents); err != nil {
-		return queueRunConfig{}, err
-	}
-	agents := append([]string(nil), resolved.Agents...)
-	if len(agents) == 0 {
-		agents = []string{tasks.DefaultAgentPreset}
-	}
 	return queueRunConfig{
-		Agents:               agents,
 		PollInterval:         resolved.PollInterval,
 		AgentQuotaRetryAfter: resolved.AgentQuotaRetryAfter,
 		CrashRetryDelays:     append([]time.Duration(nil), resolved.CrashRetryDelays...),
 	}, nil
-}
-
-func validateQueueAgents(agents []string) error {
-	for i, agent := range agents {
-		if _, err := tasks.ResolveAgentAdapter(agent); err != nil {
-			return fmt.Errorf("[queue] agents[%d]: %w", i, err)
-		}
-	}
-	return nil
 }
 
 func runQueueRun(cmd *cobra.Command, args []string) error {

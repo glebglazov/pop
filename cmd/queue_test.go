@@ -4,7 +4,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +20,7 @@ func writeQueueConfig(t *testing.T, body string) string {
 	return path
 }
 
-func TestResolveQueueRunConfigDefaultsAgent(t *testing.T) {
+func TestResolveQueueRunConfigDefaults(t *testing.T) {
 	path := writeQueueConfig(t, ``)
 
 	got, err := resolveQueueRunConfig(config.Load, path)
@@ -31,15 +30,12 @@ func TestResolveQueueRunConfigDefaultsAgent(t *testing.T) {
 	if got.PollInterval != config.DefaultQueuePollInterval {
 		t.Fatalf("poll interval = %s, want %s", got.PollInterval, config.DefaultQueuePollInterval)
 	}
-	if want := []string{"claude"}; !equalQueueStrings(got.Agents, want) {
-		t.Fatalf("agents = %#v, want %#v", got.Agents, want)
-	}
 }
 
-func TestResolveQueueRunConfigValidatesAgentPresets(t *testing.T) {
+func TestResolveQueueRunConfigIgnoresQueueAgents(t *testing.T) {
 	path := writeQueueConfig(t, `
 [queue]
-agents = ["claude --model opus4.8", "codex", "opencode"]
+agents = ["missing-agent --flag"]
 poll_interval = "5s"
 agent_quota_retry_after = "30m"
 crash_retry_delays = ["1s", "2s"]
@@ -49,9 +45,6 @@ crash_retry_delays = ["1s", "2s"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"claude --model opus4.8", "codex", "opencode"}; !equalQueueStrings(got.Agents, want) {
-		t.Fatalf("agents = %#v, want %#v", got.Agents, want)
-	}
 	if got.PollInterval != 5*time.Second {
 		t.Fatalf("poll interval = %s, want 5s", got.PollInterval)
 	}
@@ -60,33 +53,6 @@ crash_retry_delays = ["1s", "2s"]
 	}
 	if want := []time.Duration{time.Second, 2 * time.Second}; !equalQueueDurations(got.CrashRetryDelays, want) {
 		t.Fatalf("crash retry delays = %#v, want %#v", got.CrashRetryDelays, want)
-	}
-}
-
-func TestResolveQueueRunConfigRejectsUnknownAgentPreset(t *testing.T) {
-	path := writeQueueConfig(t, `
-[queue]
-agents = ["missing-agent --flag"]
-`)
-
-	_, err := resolveQueueRunConfig(config.Load, path)
-	if err == nil {
-		t.Fatal("expected unknown agent error")
-	}
-	if !strings.Contains(err.Error(), `[queue] agents[0]`) || !strings.Contains(err.Error(), `unknown agent preset "missing-agent"`) {
-		t.Fatalf("error = %q", err)
-	}
-}
-
-func TestResolveQueueRunConfigDoesNotCheckAgentPath(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	path := writeQueueConfig(t, `
-[queue]
-agents = ["codex"]
-`)
-
-	if _, err := resolveQueueRunConfig(config.Load, path); err != nil {
-		t.Fatalf("recognized preset must not fail just because its binary may be absent from PATH: %v", err)
 	}
 }
 
@@ -116,18 +82,6 @@ poll_interval = "2s"
 	if got != 2*time.Second {
 		t.Fatalf("queue.Run interval = %s, want 2s", got)
 	}
-}
-
-func equalQueueStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func equalQueueDurations(a, b []time.Duration) bool {

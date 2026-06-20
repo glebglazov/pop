@@ -24,7 +24,7 @@ const repoScanReason = "needs queue_base; skipped"
 // The drain routes to a single representative checkout resolved in order:
 // per-set Worktree binding → explicit queue_base checkout → the repo's git main
 // worktree (non-bare) → refuse and report.
-func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, agents []string, state *DaemonState, now time.Time) []Decision {
+func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, state *DaemonState, now time.Time) []Decision {
 	if len(scans) == 0 {
 		return nil
 	}
@@ -44,10 +44,10 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, agen
 		// Bare repo with no queue_base. A per-set Worktree binding is still a
 		// valid drain router (decoupled from worktree_ready); without one the
 		// repository is refused and reported.
-		return append(extraBusy, decideBareWithoutBase(d, cfg, scans, name, agents, state, now, runningElsewhere)...)
+		return append(extraBusy, decideBareWithoutBase(d, cfg, scans, name, state, now, runningElsewhere)...)
 	}
 
-	decisions := decideProjectDispatches(d, *rep, agents, state, now)
+	decisions := decideProjectDispatches(d, *rep, state, now)
 	decisions = filterRunningElsewhere(decisions, runningElsewhere)
 	applyBindingRouting(d, scans, state, decisions)
 	return append(extraBusy, decisions...)
@@ -258,7 +258,7 @@ func applyBindingRouting(d *Deps, scans []projectScan, state *DaemonState, decis
 // set with a per-set binding routes to that bound checkout; any Ready set
 // without one leaves the repository refused and reported (a single skip
 // decision), never scheduled.
-func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, name string, agents []string, state *DaemonState, now time.Time, runningElsewhere map[string]bool) []Decision {
+func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, name string, state *DaemonState, now time.Time, runningElsewhere map[string]bool) []Decision {
 	base := scans[0]
 	worktreeReady, configErr := readRepoConfig(d, base.ProjectPath)
 	skel := Decision{
@@ -296,8 +296,6 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 
 	var decisions []Decision
 	var unbound bool
-	var defaultAgent string
-	var agentResolved bool
 	for _, id := range ids {
 		if runningElsewhere[id] {
 			continue
@@ -307,24 +305,8 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 			unbound = true
 			continue
 		}
-		if !agentResolved {
-			agent, until, notes, agentOK := selectDefaultAgent(d, agents, state, now)
-			skel.AgentNotes = notes
-			if !agentOK {
-				if until.IsZero() {
-					skel.Reason = "no available agent"
-				} else {
-					skel.Reason = "all agents cooling"
-				}
-				skel.WaitUntil = until
-				return []Decision{skel}
-			}
-			defaultAgent = agent
-			agentResolved = true
-		}
 		action := skel
 		action.TaskSetID = id
-		action.DefaultAgent = defaultAgent
 		action.scan.ProjectPath = binding.RuntimePath
 		action.scan.RuntimePath = binding.RuntimePath
 		action.scan.SessionName = project.SessionNameWith(d.Project, binding.RuntimePath)

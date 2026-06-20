@@ -159,7 +159,7 @@ func TestDecideProjectIdleSkip(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
 
 	if !dec.Busy {
 		t.Fatalf("expected Busy decision for a live lock, got %+v", dec)
@@ -190,16 +190,13 @@ func TestDecideProjectSelectsHighestPriority(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
 
 	if dec.Busy || dec.Err != nil {
 		t.Fatalf("idle project with ready work should be actionable, got %+v", dec)
 	}
 	if dec.TaskSetID != "top" {
 		t.Fatalf("expected highest-priority ready set 'top', got %q", dec.TaskSetID)
-	}
-	if dec.DefaultAgent != "claude" {
-		t.Fatalf("default agent = %q, want claude", dec.DefaultAgent)
 	}
 	if !dec.Actionable() {
 		t.Fatalf("expected actionable decision, got %+v", dec)
@@ -218,7 +215,7 @@ func TestDecideProjectSelectsOnlyAutoDrainReadySets(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
 
 	if dec.TaskSetID != "marked" {
 		t.Fatalf("TaskSetID = %q, want marked; decision=%+v", dec.TaskSetID, dec)
@@ -229,7 +226,7 @@ func TestDecideProjectSelectsOnlyAutoDrainReadySets(t *testing.T) {
 			{ID: "unmarked", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
 		}}, nil
 	}
-	dec = decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	dec = decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
 	if dec.Actionable() || dec.Reason != "no ready set" {
 		t.Fatalf("unmarked ready set should be skipped, got %+v", dec)
 	}
@@ -247,7 +244,7 @@ func TestDecideProjectNoReadySet(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
 
 	if dec.Actionable() {
 		t.Fatalf("a project with no ready set must not be actionable: %+v", dec)
@@ -273,7 +270,7 @@ func TestDecideProjectReadsRepoWorktreeReady(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
 
 	if !dec.WorktreeReady {
 		t.Fatalf("WorktreeReady = false, want true: %+v", dec)
@@ -299,7 +296,7 @@ func TestDecideProjectMalformedRepoConfigReportsAndDegrades(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
 
 	if dec.WorktreeReady {
 		t.Fatalf("malformed .pop.toml must degrade to not worktree-ready: %+v", dec)
@@ -342,7 +339,7 @@ func TestDecideProjectWorktreeReadyTreatsLiveSpawnAsBusy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
 
 	if !dec.Busy || dec.TaskSetID != "ready" {
 		t.Fatalf("expected live worktree spawn to make project busy, got %+v", dec)
@@ -392,7 +389,7 @@ func TestDecideProjectWorktreeReadyAdoptedCheckoutNotDoubleCounted(t *testing.T)
 		t.Fatal(err)
 	}
 
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
 
 	var busy, actionable []string
 	for _, dec := range decisions {
@@ -457,7 +454,7 @@ func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 		}
 	}
 
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
 
 	var busy []string
 	for _, dec := range decisions {
@@ -546,7 +543,7 @@ func TestDecideProjectDispatchesWorktreeReadyReadySetsConcurrently(t *testing.T)
 		t.Fatal(err)
 	}
 
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
 
 	var busy []string
 	var actionable []string
@@ -581,48 +578,10 @@ func TestDecideProjectDispatchesNonWorktreeReadyKeepsSingleInPlaceDrain(t *testi
 		},
 	}
 
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, []string{"claude"}, &DaemonState{Version: 1}, time.Now())
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
 
 	if len(decisions) != 1 || !decisions[0].Actionable() || decisions[0].TaskSetID != "top" {
 		t.Fatalf("non-worktree-ready dispatches = %+v, want one in-place top drain", decisions)
-	}
-}
-
-func TestSelectDefaultAgentSkipsMissingAndCooled(t *testing.T) {
-	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
-	d := &Deps{Tasks: queueTestTasksDeps(false)}
-	d.Tasks.LookPath = func(file string) (string, error) {
-		if file == "codex" {
-			return "/bin/codex", nil
-		}
-		return "", fmt.Errorf("missing %s", file)
-	}
-	state := &DaemonState{Version: 1, AgentCooldowns: map[string]time.Time{
-		"opencode": now.Add(time.Hour),
-	}}
-
-	agent, _, notes, ok := selectDefaultAgent(d, []string{"claude", "opencode", "codex"}, state, now)
-	if !ok || agent != "codex" {
-		t.Fatalf("selectDefaultAgent = (%q, %v), want codex,true; notes=%+v", agent, ok, notes)
-	}
-	if len(notes) != 2 {
-		t.Fatalf("notes = %+v, want missing claude and cooling opencode", notes)
-	}
-}
-
-func TestSelectDefaultAgentAllCooledWaits(t *testing.T) {
-	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
-	first := now.Add(10 * time.Minute)
-	second := now.Add(time.Hour)
-	d := &Deps{Tasks: queueTestTasksDeps(true)}
-	state := &DaemonState{Version: 1, AgentCooldowns: map[string]time.Time{
-		"claude": first,
-		"codex":  second,
-	}}
-
-	agent, waitUntil, _, ok := selectDefaultAgent(d, []string{"claude", "codex"}, state, now)
-	if ok || agent != "" || !waitUntil.Equal(first) {
-		t.Fatalf("selectDefaultAgent = (%q,%s,%v), want wait until %s", agent, waitUntil, ok, first)
 	}
 }
 
@@ -741,9 +700,8 @@ func (rt *recordingTmux) countCommand(verb string) int {
 
 func actionableDecision() Decision {
 	return Decision{
-		Project:      "proj",
-		TaskSetID:    "2026-06-14-queue",
-		DefaultAgent: "codex",
+		Project:   "proj",
+		TaskSetID: "2026-06-14-queue",
 		scan: projectScan{
 			ProjectPath: "/checkout",
 			SessionName: "proj-session",
@@ -1239,8 +1197,11 @@ func assertSendKeys(t *testing.T, rt *recordingTmux) {
 	if strings.Contains(joined, "--yes") {
 		t.Fatalf("send-keys must not pass --yes for queue spawns: %v", sendKeys)
 	}
-	if !strings.Contains(joined, "pop tasks implement 2026-06-14-queue --default-agent codex") {
-		t.Fatalf("send-keys must run plain `pop tasks implement <set> --default-agent <agent>`: %v", sendKeys)
+	if strings.Contains(joined, "--default-agent") || strings.Contains(joined, "--agent") {
+		t.Fatalf("send-keys must not inject agent flags: %v", sendKeys)
+	}
+	if !strings.Contains(joined, "pop tasks implement 2026-06-14-queue") {
+		t.Fatalf("send-keys must run plain `pop tasks implement <set>`: %v", sendKeys)
 	}
 }
 

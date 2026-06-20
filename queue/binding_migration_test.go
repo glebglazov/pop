@@ -66,3 +66,37 @@ func TestReadDaemonStateMigratesLegacyBindings(t *testing.T) {
 		t.Fatalf("store missing migrated binding: %+v", store.Bindings)
 	}
 }
+
+func TestReadDaemonStateIgnoresLegacyAgentCooldowns(t *testing.T) {
+	td := queueDataDeps(t)
+	legacy, err := json.Marshal(map[string]any{
+		"version": 1,
+		"agent_cooldowns": map[string]string{
+			"codex": "2026-06-20T12:00:00Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy: %v", err)
+	}
+	if err := td.FS.MkdirAll(QueueDataDir(td), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := td.FS.WriteFile(DaemonStatePath(td), legacy, 0o644); err != nil {
+		t.Fatalf("write legacy state: %v", err)
+	}
+
+	state, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read legacy cooldown state: %v", err)
+	}
+	if err := WriteDaemonState(td, state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	raw, err := td.FS.ReadFile(DaemonStatePath(td))
+	if err != nil {
+		t.Fatalf("reread state: %v", err)
+	}
+	if strings.Contains(string(raw), "agent_cooldowns") {
+		t.Fatalf("daemon state still carries legacy agent cooldowns: %s", raw)
+	}
+}
