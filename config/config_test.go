@@ -94,6 +94,28 @@ func TestTaskAgentOutput(t *testing.T) {
 	}
 }
 
+func TestLoadWorkloadDefaultAgents(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[workload]
+default_agents = ["claude --model opus4.8", "codex"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Task == nil {
+		t.Fatal("expected [workload] section to parse")
+	}
+	want := []string{"claude --model opus4.8", "codex"}
+	if !reflect.DeepEqual(cfg.Task.DefaultAgents, want) {
+		t.Fatalf("default_agents = %#v, want %#v", cfg.Task.DefaultAgents, want)
+	}
+}
+
 func TestLoadTaskAgentOutput(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`

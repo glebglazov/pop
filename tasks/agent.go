@@ -446,6 +446,50 @@ func resolveDefaultAgentPreset(cliPreset, defaultPreset string, agentExplicit bo
 	return cliPreset
 }
 
+func resolveDefaultAgentPresets(cliPresets []string, cliPreset, defaultPreset string, agentExplicit bool, cfg *config.Config) []string {
+	if agentExplicit {
+		return nonEmptyAgentSpecs(cliPresets, cliPreset)
+	}
+	if strings.TrimSpace(defaultPreset) != "" {
+		return []string{defaultPreset}
+	}
+	if cfg != nil && cfg.Task != nil && len(cfg.Task.DefaultAgents) > 0 {
+		return nonEmptyAgentSpecs(cfg.Task.DefaultAgents, DefaultAgentPreset)
+	}
+	return nonEmptyAgentSpecs(nil, cliPreset)
+}
+
+func nonEmptyAgentSpecs(specs []string, fallback string) []string {
+	var out []string
+	for _, spec := range specs {
+		if strings.TrimSpace(spec) != "" {
+			out = append(out, spec)
+		}
+	}
+	if len(out) == 0 {
+		if strings.TrimSpace(fallback) != "" {
+			return []string{fallback}
+		}
+		return []string{DefaultAgentPreset}
+	}
+	return out
+}
+
+func resolveTaskAgentSpecs(defaultSpecs []string, agentExplicit bool, agentCmd, taskAgent, effort string, effortExplicit bool, cfg *config.Config) []string {
+	if agentCmd != "" || agentExplicit || strings.TrimSpace(taskAgent) == "" {
+		specs := nonEmptyAgentSpecs(defaultSpecs, DefaultAgentPreset)
+		if agentCmd != "" {
+			return specs
+		}
+		resolved := make([]string, 0, len(specs))
+		for _, spec := range specs {
+			resolved = append(resolved, resolveTaskAgentSpecForEffortWithConfig(spec, effort, effortExplicit, cfg))
+		}
+		return resolved
+	}
+	return []string{resolveTaskAgentSpecForEffortWithConfig(taskAgent, effort, effortExplicit, cfg)}
+}
+
 func taskPinMatchesPreset(taskAgent, preset string) bool {
 	if strings.TrimSpace(taskAgent) == "" || strings.TrimSpace(preset) == "" {
 		return false

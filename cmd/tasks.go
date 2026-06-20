@@ -20,21 +20,22 @@ import (
 )
 
 var (
-	taskProject              string
-	taskPath                 string
-	taskDefPath              string
-	taskRuntimePath          string
-	taskAgentPreset          string
-	taskDefaultAgentPreset   string
-	taskAgentCmd             string
-	taskAgentOutput          tasks.AgentOutputMode
-	taskRunYes               bool
-	taskAllowDirty           tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
-	taskMaxTries             int
-	taskTimeout              string
-	taskStatusArchived       bool
-	taskBindWorktreeForce    bool
-	taskUnbindWorktreeYes    bool
+	taskProject            string
+	taskPath               string
+	taskDefPath            string
+	taskRuntimePath        string
+	taskAgentPreset        string
+	taskAgentPresets       []string
+	taskDefaultAgentPreset string
+	taskAgentCmd           string
+	taskAgentOutput        tasks.AgentOutputMode
+	taskRunYes             bool
+	taskAllowDirty         tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
+	taskMaxTries           int
+	taskTimeout            string
+	taskStatusArchived     bool
+	taskBindWorktreeForce  bool
+	taskUnbindWorktreeYes  bool
 )
 
 var taskCmd = &cobra.Command{
@@ -210,7 +211,7 @@ func init() {
 	taskImplementCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	taskImplementCmd.Flags().Var(&taskAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
 	taskImplementCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(tasks.DirtyRuntimeContinue)
-	taskImplementCmd.Flags().StringVar(&taskAgentPreset, "agent", tasks.DefaultAgentPreset, "Agent preset (claude, opencode, cursor, codex, pi), optionally followed by extra agent args, e.g. \"claude --model opus4.8\"; when passed explicitly, overrides a task's manifest agent key")
+	taskImplementCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset (claude, opencode, cursor, codex, pi), optionally followed by extra agent args, e.g. \"claude --model opus4.8\"; repeat to define an ordered quota fallback list; when passed explicitly, overrides a task's manifest agent key")
 	taskImplementCmd.Flags().StringVar(&taskDefaultAgentPreset, "default-agent", "", "Default agent preset for unpinned tasks; ranks below a task's manifest agent key")
 	taskImplementCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 	taskImplementCmd.Flags().Var(&taskAgentOutput, "agent-output", "Agent output mode: auto (default), text")
@@ -503,7 +504,8 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 	result, err := tasks.RunTaskWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskOptions{
 		ResolveInput:       taskResolveInput(),
 		TaskPathOverride:   taskPath,
-		AgentPreset:        taskAgentPreset,
+		AgentPreset:        selectedTaskAgentPreset(),
+		AgentPresets:       selectedTaskAgentPresets(),
 		DefaultAgentPreset: taskDefaultAgentPreset,
 		AgentExplicit:      agentExplicit,
 		AgentCmd:           taskAgentCmd,
@@ -534,7 +536,8 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 	result, err := tasks.RunTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskSetOptions{
 		ResolveInput:       taskResolveInput(),
 		TaskSetOverride:    taskSetPath,
-		AgentPreset:        taskAgentPreset,
+		AgentPreset:        selectedTaskAgentPreset(),
+		AgentPresets:       selectedTaskAgentPresets(),
 		DefaultAgentPreset: taskDefaultAgentPreset,
 		AgentExplicit:      agentExplicit,
 		AgentCmd:           taskAgentCmd,
@@ -559,6 +562,23 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		return &tasks.ExitError{Code: tasks.ExitQuotaPaused}
 	}
 	return nil
+}
+
+func selectedTaskAgentPresets() []string {
+	if len(taskAgentPresets) > 0 {
+		return append([]string(nil), taskAgentPresets...)
+	}
+	if strings.TrimSpace(taskAgentPreset) != "" {
+		return []string{taskAgentPreset}
+	}
+	return nil
+}
+
+func selectedTaskAgentPreset() string {
+	if specs := selectedTaskAgentPresets(); len(specs) > 0 {
+		return specs[0]
+	}
+	return tasks.DefaultAgentPreset
 }
 
 // taskRecordMergeabilityOnDone computes and records Mergeability when an
@@ -636,7 +656,7 @@ func offerImplementIntegration(d *tasks.Deps, result *tasks.RunTaskSetResult, st
 
 	if _, intErr := queue.IntegrateWithOptions(qd, cfg, result.TaskSetID, out, queue.IntegrationOptions{
 		In:          stdin,
-		AgentPreset: taskAgentPreset,
+		AgentPreset: selectedTaskAgentPreset(),
 		AgentCmd:    taskAgentCmd,
 	}); intErr != nil {
 		fmt.Fprintf(out, "integrate: %v\n", intErr)

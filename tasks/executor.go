@@ -56,6 +56,7 @@ type RunTaskOptions struct {
 	ResolveInput
 	TaskPathOverride   string
 	AgentPreset        string
+	AgentPresets       []string
 	DefaultAgentPreset string
 	// AgentExplicit reports the --agent flag was explicitly passed
 	// (Flags().Changed), letting it override a task's `agent` key (ADR-0018).
@@ -109,7 +110,12 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
 	}
-	baseAgentPreset := resolveDefaultAgentPreset(opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit)
+	cfg, err := loadConfigIfPresent(loadConfig)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
+	baseAgentPresets := resolveDefaultAgentPresets(opts.AgentPresets, opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit, cfg)
+	baseAgentPreset := baseAgentPresets[0]
 	agentOutput := AgentOutputAuto
 	if opts.AgentCmd == "" {
 		var err error
@@ -224,24 +230,19 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		}
 	}
 
-	agentSpec := resolveTaskAgentSpec(opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent)
-	if opts.AgentCmd == "" {
-		effortConfig, err := loadConfigIfPresent(loadConfig)
-		if err != nil {
-			return nil, taskExitErr(sel, ExitSetup, "%v", err)
-		}
-		agentSpec = resolveTaskAgentSpecForEffortWithConfig(agentSpec, sel.Task.Effort, sel.Task.EffortExplicit, effortConfig)
-	}
-	if agentSpec != baseAgentPreset {
-		agentOutput, err = resolveAgentOutputMode(loadConfig, agentSpec, opts.AgentOutput)
-		if err != nil {
-			return nil, taskExitErr(sel, ExitSetup, "%v", err)
-		}
-	}
-
 	basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
-	buildInvocation := func(prompt string) (*AgentInvocation, error) {
-		return ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, agentOutput)
+	buildForAgent := func(agentSpec string) (func(string) (*AgentInvocation, error), error) {
+		attemptOutput := agentOutput
+		if agentSpec != baseAgentPreset {
+			var err error
+			attemptOutput, err = resolveAgentOutputMode(loadConfig, agentSpec, opts.AgentOutput)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return func(prompt string) (*AgentInvocation, error) {
+			return ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, attemptOutput)
+		}, nil
 	}
 
 	maxTries := opts.MaxTries
@@ -253,7 +254,8 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		timeout = DefaultAttemptTimeout
 	}
 
-	result, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, basePrompt, buildInvocation, maxTries, timeout, commitOverrides)
+	agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
+	result, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil && !opts.Yes {
@@ -399,6 +401,45 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		return nil, taskExitErr(sel, ExitOperational, "%s", summary)
 	}
 	return nil, taskExitErr(sel, ExitOperational, "unexpected attempt loop exit")
+}
+
+func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, agentSpecs []string, buildForAgent func(agentSpec string) (func(prompt string) (*AgentInvocation, error), error), maxTries int, timeout time.Duration, commitOverrides []string) (*RunTaskResult, error) {
+	var quotaResults []*RunTaskResult
+	for _, agentSpec := range nonEmptyAgentSpecs(agentSpecs, DefaultAgentPreset) {
+		buildInvocation, err := buildForAgent(agentSpec)
+		if err != nil {
+			return nil, taskExitErr(sel, ExitSetup, "%v", err)
+		}
+		result, execErr := executeTaskAttempts(d, sel, runtimePath, out, errOut, basePrompt, buildInvocation, maxTries, timeout, commitOverrides)
+		if execErr != nil || result == nil || !result.QuotaPaused {
+			return result, execErr
+		}
+		quotaResults = append(quotaResults, result)
+	}
+	if len(quotaResults) == 0 {
+		return nil, taskExitErr(sel, ExitOperational, "no agent attempts were run")
+	}
+	return earliestQuotaPauseResult(quotaResults), nil
+}
+
+func earliestQuotaPauseResult(results []*RunTaskResult) *RunTaskResult {
+	var best *RunTaskResult
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		if best == nil {
+			best = result
+			continue
+		}
+		if result.PauseResetAt.IsZero() {
+			continue
+		}
+		if best.PauseResetAt.IsZero() || result.PauseResetAt.Before(best.PauseResetAt) {
+			best = result
+		}
+	}
+	return best
 }
 
 // resolveCommitConfigOverrides loads config and validates the commit-config

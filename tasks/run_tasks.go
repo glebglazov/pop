@@ -19,6 +19,7 @@ type RunTaskSetOptions struct {
 	ResolveInput
 	TaskSetOverride    string
 	AgentPreset        string
+	AgentPresets       []string
 	DefaultAgentPreset string
 	// AgentExplicit reports the --agent flag was explicitly passed
 	// (Flags().Changed), letting it override a task's `agent` key (ADR-0018).
@@ -75,7 +76,12 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
 	}
-	baseAgentPreset := resolveDefaultAgentPreset(opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit)
+	cfg, err := loadConfigIfPresent(loadConfig)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
+	baseAgentPresets := resolveDefaultAgentPresets(opts.AgentPresets, opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit, cfg)
+	baseAgentPreset := baseAgentPresets[0]
 	agentOutput := AgentOutputAuto
 	if opts.AgentCmd == "" {
 		var err error
@@ -291,28 +297,23 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			dirtyStrategyApplied = true
 		}
 
-		agentSpec := resolveTaskAgentSpec(opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent)
-		if opts.AgentCmd == "" {
-			effortConfig, err := loadConfigIfPresent(loadConfig)
-			if err != nil {
-				return nil, taskExitErr(sel, ExitSetup, "%v", err)
-			}
-			agentSpec = resolveTaskAgentSpecForEffortWithConfig(agentSpec, sel.Task.Effort, sel.Task.EffortExplicit, effortConfig)
-		}
-		attemptOutput := agentOutput
-		if agentSpec != baseAgentPreset {
-			attemptOutput, err = resolveAgentOutputMode(loadConfig, agentSpec, opts.AgentOutput)
-			if err != nil {
-				return nil, taskExitErr(sel, ExitSetup, "%v", err)
-			}
-		}
-
 		basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
-		buildInvocation := func(prompt string) (*AgentInvocation, error) {
-			return ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, attemptOutput)
+		buildForAgent := func(agentSpec string) (func(string) (*AgentInvocation, error), error) {
+			attemptOutput := agentOutput
+			if agentSpec != baseAgentPreset {
+				var err error
+				attemptOutput, err = resolveAgentOutputMode(loadConfig, agentSpec, opts.AgentOutput)
+				if err != nil {
+					return nil, err
+				}
+			}
+			return func(prompt string) (*AgentInvocation, error) {
+				return ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, attemptOutput)
+			}, nil
 		}
 
-		taskResult, execErr := executeTaskAttempts(d, sel, runtimePath, out, confirmOut, basePrompt, buildInvocation, maxTries, timeout, commitOverrides)
+		agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
+		taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides)
 		if execErr != nil {
 			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 			if refreshErr == nil {

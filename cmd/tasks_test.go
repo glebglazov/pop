@@ -1261,6 +1261,7 @@ func resetTaskFlags() {
 	taskDefPath = ""
 	taskStatusArchived = false
 	taskAgentPreset = ""
+	taskAgentPresets = nil
 	taskAgentCmd = ""
 	taskAgentOutput = ""
 	taskRunYes = false

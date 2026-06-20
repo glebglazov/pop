@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 )
 
@@ -1241,6 +1242,177 @@ func TestRunTaskSetAttemptStartPrintsEffortResolvedRequestedAgent(t *testing.T) 
 	if len(runner.argLists) != 1 || runner.argLists[0][0] != "--model" || runner.argLists[0][1] != "opus" {
 		t.Fatalf("agent args = %v, want leading --model opus", runner.argLists)
 	}
+}
+
+func TestRunTaskSetAgentFallbackAdvancesOnQuota(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	installAgentShim(t, env.root, "claude", `#!/bin/sh
+printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You'\''ve hit your weekly limit · resets Mon 12:00am"}'
+`)
+	installAgentShim(t, env.root, "codex", `#!/bin/sh
+TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
+printf 'SUMMARY_START\ncodex done\nSUMMARY_END\nTASK_COMPLETE\n'
+`)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPresets = []string{"claude", "codex"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 1
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Attempt 1/1 · claude") || !strings.Contains(out, "Attempt 1/1 · codex") {
+		t.Fatalf("fallback attempts not rendered:\n%s", out)
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
+}
+
+func TestRunTaskSetAgentFallbackDoesNotAdvanceOnPlainFailure(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	claudeCount := filepath.Join(env.root, ".agent-bin", "claude.count")
+	codexCount := filepath.Join(env.root, ".agent-bin", "codex.count")
+	installAgentShim(t, env.root, "claude", fmt.Sprintf(`#!/bin/sh
+n=0
+test -f %[1]q && n=$(cat %[1]q)
+n=$((n + 1))
+printf '%%s\n' "$n" > %[1]q
+printf 'TASK_FAILED: plain failure\n'
+exit 2
+`, claudeCount))
+	installAgentShim(t, env.root, "codex", fmt.Sprintf(`#!/bin/sh
+printf 'called\n' >> %[1]q
+TASK=$(printf '%%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
+printf 'SUMMARY_START\ncodex done\nSUMMARY_END\nTASK_COMPLETE\n'
+`, codexCount))
+
+	opts := env.runTaskSetOpts(true, "", io.Discard)
+	opts.AgentPresets = []string{"claude", "codex"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 2
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if got := strings.TrimSpace(readFileString(t, claudeCount)); got != "2" {
+		t.Fatalf("claude attempts = %q, want 2", got)
+	}
+	if _, err := os.Stat(codexCount); !os.IsNotExist(err) {
+		t.Fatalf("codex should not be called on plain failure: %v", err)
+	}
+}
+
+func TestRunTaskSetAgentFallbackReportsEarliestReset(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	installAgentShim(t, env.root, "claude", `#!/bin/sh
+printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You'\''ve hit your weekly limit · resets Mon 12:00am"}'
+`)
+	installAgentShim(t, env.root, "codex", `#!/bin/sh
+printf '%s\n' '{"type":"error","message":"You'\''ve hit your usage limit. try again at 11:59 PM."}'
+`)
+
+	opts := env.runTaskSetOpts(true, "", io.Discard)
+	opts.AgentPresets = []string{"claude", "codex"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 1
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.QuotaPaused || result.PausePreset != "codex" {
+		t.Fatalf("result = %#v, want codex quota pause", result)
+	}
+	if result.PauseResetAt.IsZero() {
+		t.Fatal("expected reset time to be reported")
+	}
+	assertTaskOpen(t, env.execFixture(), "01-a")
+}
+
+func TestRunTaskSetDefaultAgentsConfigAndFlagOverride(t *testing.T) {
+	loadConfig := func(string) (*config.Config, error) {
+		return &config.Config{Task: &config.TaskConfig{DefaultAgents: []string{"codex"}}}, nil
+	}
+	t.Run("config default", func(t *testing.T) {
+		env := setupRunTaskSetFixture(t, "demo", []Task{
+			{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		})
+		installAgentShim(t, env.root, "codex", `#!/bin/sh
+TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
+printf 'SUMMARY_START\ncodex done\nSUMMARY_END\nTASK_COMPLETE\n'
+`)
+		var buf bytes.Buffer
+		opts := env.runTaskSetOpts(true, "", &buf)
+		opts.MaxTries = 1
+
+		result, err := RunTaskSetWith(env.deps(), nil, loadConfig, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.TaskSetDone || !strings.Contains(buf.String(), "Attempt 1/1 · codex") {
+			t.Fatalf("result = %#v output:\n%s", result, buf.String())
+		}
+	})
+	t.Run("flag override", func(t *testing.T) {
+		env := setupRunTaskSetFixture(t, "demo", []Task{
+			{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		})
+		installAgentShim(t, env.root, "claude", `#!/bin/sh
+TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
+printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
+`)
+		var buf bytes.Buffer
+		opts := env.runTaskSetOpts(true, "", &buf)
+		opts.AgentPresets = []string{"claude"}
+		opts.AgentExplicit = true
+		opts.MaxTries = 1
+
+		result, err := RunTaskSetWith(env.deps(), nil, loadConfig, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.TaskSetDone || !strings.Contains(buf.String(), "Attempt 1/1 · claude") || strings.Contains(buf.String(), "codex") {
+			t.Fatalf("flag did not override config: result=%#v output:\n%s", result, buf.String())
+		}
+	})
+}
+
+func installAgentShim(t *testing.T, root, name, script string) string {
+	t.Helper()
+	dir := filepath.Join(root, ".agent-bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return path
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func TestRunTaskSetInteractivePrintsRefreshedTable(t *testing.T) {

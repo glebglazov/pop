@@ -114,6 +114,9 @@ type UpdatesConfig struct {
 // TaskConfig holds task-execution configuration.
 type TaskConfig struct {
 	Agents map[string]TaskAgentConfig `toml:"agents"`
+	// DefaultAgents is the ordered in-process fallback list used by
+	// `pop tasks implement` for unpinned tasks when --agent is absent.
+	DefaultAgents []string `toml:"default_agents"`
 	// Git holds commit-time git overrides for Pop's own commits. The TOML
 	// sub-table is `[workload.git]` because the parent key stays "workload"
 	// for backward compatibility (see Config.Task). A nil pointer means the
