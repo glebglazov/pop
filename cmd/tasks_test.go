@@ -1388,9 +1388,8 @@ func installClaudeQuotaAgentCmd(t *testing.T, root string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// TestImplementAgentFlagExplicitness pins the contract behind per-task agent
-// resolution (ADR-0018): a bare defaulted --agent does not report Changed, so
-// only an explicitly passed flag overrides a task's `agent` key.
+// TestImplementAgentFlagExplicitness pins the distinction between the built-in
+// fallback and an explicitly supplied --agent fallback list.
 func TestImplementAgentFlagExplicitness(t *testing.T) {
 	f := taskImplementCmd.Flags().Lookup("agent")
 	if f == nil {

@@ -54,12 +54,11 @@ func ValidDirtyRuntimeStrategies() []string {
 // RunTaskOptions configures a single-task execution.
 type RunTaskOptions struct {
 	ResolveInput
-	TaskPathOverride   string
-	AgentPreset        string
-	AgentPresets       []string
-	DefaultAgentPreset string
+	TaskPathOverride string
+	AgentPreset      string
+	AgentPresets     []string
 	// AgentExplicit reports the --agent flag was explicitly passed
-	// (Flags().Changed), letting it override a task's `agent` key (ADR-0018).
+	// (Flags().Changed).
 	AgentExplicit bool
 	AgentCmd      string
 	AgentOutput   AgentOutputMode
@@ -114,7 +113,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
-	baseAgentPresets := resolveDefaultAgentPresets(opts.AgentPresets, opts.AgentPreset, opts.DefaultAgentPreset, opts.AgentExplicit, cfg)
+	baseAgentPresets := resolveDefaultAgentPresets(opts.AgentPresets, opts.AgentPreset, opts.AgentExplicit, cfg)
 	baseAgentPreset := baseAgentPresets[0]
 	agentOutput := AgentOutputAuto
 	if opts.AgentCmd == "" {
@@ -258,7 +257,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		timeout = DefaultAttemptTimeout
 	}
 
-	agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
+	agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
 	result, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)

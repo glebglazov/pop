@@ -238,96 +238,60 @@ func TestResolveTaskAgentSpecForConfiguredEffortModels(t *testing.T) {
 func TestResolveTaskAgentSpecEffortModelPrecedence(t *testing.T) {
 	tests := []struct {
 		name           string
-		cliPreset      string
-		defaultPreset  string
-		agentExplicit  bool
 		agentCmd       string
-		taskAgent      string
+		defaultSpecs   []string
 		effort         string
 		effortExplicit bool
-		wantSpec       string
-		wantPreset     string
+		wantSpecs      []string
 	}{
 		{
-			name:           "task agent model pin wins over effort",
-			cliPreset:      "claude",
-			taskAgent:      "claude --model sonnet",
+			name:           "agent model pin wins over effort",
+			defaultSpecs:   []string{"claude --model sonnet"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpec:       "claude --model sonnet",
-			wantPreset:     "claude",
+			wantSpecs:      []string{"claude --model sonnet"},
 		},
 		{
-			name:           "explicit agent flag model wins over effort",
-			cliPreset:      "claude --model sonnet",
-			agentExplicit:  true,
-			taskAgent:      "claude",
+			name:           "bare claude composes with effort",
+			defaultSpecs:   []string{"claude"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpec:       "claude --model sonnet",
-			wantPreset:     "claude",
+			wantSpecs:      []string{"claude --model opus"},
 		},
 		{
-			name:           "bare task agent pin composes with effort",
-			cliPreset:      "codex",
-			taskAgent:      "claude",
+			name:           "non claude agent is not changed by effort",
+			defaultSpecs:   []string{"codex"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpec:       "claude --model opus",
-			wantPreset:     "claude",
+			wantSpecs:      []string{"codex"},
 		},
 		{
-			name:           "explicit non claude agent is not changed by effort",
-			cliPreset:      "codex",
-			agentExplicit:  true,
-			taskAgent:      "claude",
+			name:           "fallback list entries each resolve effort",
+			defaultSpecs:   []string{"claude", "codex"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpec:       "codex",
-			wantPreset:     "codex",
+			wantSpecs:      []string{"claude --model opus", "codex"},
 		},
 		{
-			name:           "task non claude pin is not changed by effort",
-			cliPreset:      "claude",
-			taskAgent:      "opencode",
+			name:           "agent-cmd leaves fallback list untouched",
+			agentCmd:       "./my-agent.sh",
+			defaultSpecs:   []string{"claude", "codex"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpec:       "opencode",
-			wantPreset:     "opencode",
+			wantSpecs:      []string{"claude", "codex"},
 		},
 		{
-			name:           "default non claude agent is not changed by effort",
-			cliPreset:      "claude",
-			defaultPreset:  "opencode",
-			effort:         "heavy",
-			effortExplicit: true,
-			wantSpec:       "opencode",
-			wantPreset:     "opencode",
-		},
-		{
-			name:       "absent explicit effort leaves bare claude alone",
-			cliPreset:  "claude",
-			taskAgent:  "claude",
-			effort:     "standard",
-			wantSpec:   "claude",
-			wantPreset: "claude",
+			name:         "absent explicit effort leaves bare claude alone",
+			defaultSpecs: []string{"claude"},
+			effort:       "standard",
+			wantSpecs:    []string{"claude"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			agentSpec := resolveTaskAgentSpec(tt.cliPreset, tt.defaultPreset, tt.agentExplicit, tt.agentCmd, tt.taskAgent)
-			if tt.agentCmd == "" {
-				agentSpec = resolveTaskAgentSpecForEffort(agentSpec, tt.effort, tt.effortExplicit)
-			}
-			if agentSpec != tt.wantSpec {
-				t.Fatalf("resolved spec = %q, want %q", agentSpec, tt.wantSpec)
-			}
-			preset, err := AgentPresetName(agentSpec)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if preset != tt.wantPreset {
-				t.Fatalf("resolved preset = %q, want %q", preset, tt.wantPreset)
+			got := resolveTaskAgentSpecs(tt.defaultSpecs, tt.agentCmd, tt.effort, tt.effortExplicit, nil)
+			if !reflect.DeepEqual(got, tt.wantSpecs) {
+				t.Fatalf("resolved specs = %#v, want %#v", got, tt.wantSpecs)
 			}
 		})
 	}
@@ -1120,113 +1084,6 @@ func writePromptTestFile(t *testing.T, path, data string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestResolveTaskAgentSpecPrecedence(t *testing.T) {
-	tests := []struct {
-		name          string
-		cliPreset     string
-		defaultPreset string
-		agentExplicit bool
-		agentCmd      string
-		taskAgent     string
-		want          string
-	}{
-		{
-			name:      "task key wins over bare defaulted agent",
-			cliPreset: "claude", agentExplicit: false,
-			taskAgent: "codex --model gpt-5-codex",
-			want:      "codex --model gpt-5-codex",
-		},
-		{
-			name:          "task key wins over supplied default agent",
-			cliPreset:     "claude",
-			defaultPreset: "opencode",
-			agentExplicit: false,
-			taskAgent:     "codex --model gpt-5-codex",
-			want:          "codex --model gpt-5-codex",
-		},
-		{
-			name:          "supplied default agent wins for unpinned task",
-			cliPreset:     "claude",
-			defaultPreset: "opencode",
-			agentExplicit: false,
-			taskAgent:     "",
-			want:          "opencode",
-		},
-		{
-			name:          "explicit agent wins over supplied default agent",
-			cliPreset:     "codex",
-			defaultPreset: "opencode",
-			agentExplicit: true,
-			taskAgent:     "",
-			want:          "codex",
-		},
-		{
-			name:      "explicit agent wins over task key",
-			cliPreset: "claude", agentExplicit: true,
-			taskAgent: "codex --model gpt-5-codex",
-			want:      "claude",
-		},
-		{
-			name:      "explicit bare claude still wins over task key",
-			cliPreset: "claude", agentExplicit: true,
-			taskAgent: "opencode",
-			want:      "claude",
-		},
-		{
-			name:      "agent-cmd wins over task key without explicit agent",
-			cliPreset: "claude", agentExplicit: false,
-			agentCmd:  "./my-agent.sh",
-			taskAgent: "codex",
-			want:      "claude",
-		},
-		{
-			name:      "agent-cmd wins over explicit agent and task key",
-			cliPreset: "opencode", agentExplicit: true,
-			agentCmd:  "./my-agent.sh",
-			taskAgent: "codex",
-			want:      "opencode",
-		},
-		{
-			name:      "no task key falls through to resolved CLI agent",
-			cliPreset: "claude", agentExplicit: false,
-			taskAgent: "",
-			want:      "claude",
-		},
-		{
-			name:      "no task key with explicit augmented agent",
-			cliPreset: "claude --model opus4.8", agentExplicit: true,
-			taskAgent: "",
-			want:      "claude --model opus4.8",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := resolveTaskAgentSpec(tt.cliPreset, tt.defaultPreset, tt.agentExplicit, tt.agentCmd, tt.taskAgent)
-			if got != tt.want {
-				t.Fatalf("resolveTaskAgentSpec = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestValidateManifestAgentSpec(t *testing.T) {
-	if err := validateManifestAgentSpec("claude --model opus4.8"); err != nil {
-		t.Fatalf("recognized preset rejected: %v", err)
-	}
-	if err := validateManifestAgentSpec("codex"); err != nil {
-		t.Fatalf("bare preset rejected: %v", err)
-	}
-	if err := validateManifestAgentSpec("./run-agent.sh --opaque"); err == nil || !strings.Contains(err.Error(), "unknown agent preset") {
-		t.Fatalf("opaque command not rejected: %v", err)
-	}
-	if err := validateManifestAgentSpec("claude 'unterminated"); err == nil || !strings.Contains(err.Error(), "invalid agent value") {
-		t.Fatalf("unterminated quote not rejected: %v", err)
-	}
-	if err := validateManifestAgentSpec(" \t"); err == nil || !strings.Contains(err.Error(), "empty agent value") {
-		t.Fatalf("whitespace-only value not rejected: %v", err)
 	}
 }
 

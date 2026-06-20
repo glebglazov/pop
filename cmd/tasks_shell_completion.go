@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	taskCompletionDeps        = func() *tasks.Deps { return tasks.DefaultDeps() }
-	taskCompletionProjectDeps = func() *project.Deps { return project.DefaultDeps() }
-	taskCompletionConfigLoad  = func(path string) (*config.Config, error) { return config.Load(path) }
+	taskCompletionDeps            = func() *tasks.Deps { return tasks.DefaultDeps() }
+	taskCompletionProjectDeps     = func() *project.Deps { return project.DefaultDeps() }
+	taskCompletionConfigLoad      = func(path string) (*config.Config, error) { return config.Load(path) }
 	taskIntegrationCompletionDeps = func() *queue.Deps { return queue.DefaultDeps() }
 )
 
@@ -29,7 +29,6 @@ func registerTaskShellCompletions() {
 	_ = taskCmd.RegisterFlagCompletionFunc("project", completeTaskProjects)
 
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
-	_ = taskImplementCmd.RegisterFlagCompletionFunc("default-agent", completeTaskAgents)
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent-output", completeTaskAgentOutputs)
 
 	taskStatusCmd.ValidArgsFunction = completeTaskStatusArgs

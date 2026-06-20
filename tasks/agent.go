@@ -439,19 +439,9 @@ func AgentPresetName(spec string) (string, error) {
 	return name, nil
 }
 
-func resolveDefaultAgentPreset(cliPreset, defaultPreset string, agentExplicit bool) string {
-	if !agentExplicit && strings.TrimSpace(defaultPreset) != "" {
-		return defaultPreset
-	}
-	return cliPreset
-}
-
-func resolveDefaultAgentPresets(cliPresets []string, cliPreset, defaultPreset string, agentExplicit bool, cfg *config.Config) []string {
+func resolveDefaultAgentPresets(cliPresets []string, cliPreset string, agentExplicit bool, cfg *config.Config) []string {
 	if agentExplicit {
 		return nonEmptyAgentSpecs(cliPresets, cliPreset)
-	}
-	if strings.TrimSpace(defaultPreset) != "" {
-		return []string{defaultPreset}
 	}
 	if cfg != nil && cfg.Task != nil && len(cfg.Task.DefaultAgents) > 0 {
 		return nonEmptyAgentSpecs(cfg.Task.DefaultAgents, DefaultAgentPreset)
@@ -475,43 +465,16 @@ func nonEmptyAgentSpecs(specs []string, fallback string) []string {
 	return out
 }
 
-func resolveTaskAgentSpecs(defaultSpecs []string, agentExplicit bool, agentCmd, taskAgent, effort string, effortExplicit bool, cfg *config.Config) []string {
-	if agentCmd != "" || agentExplicit || strings.TrimSpace(taskAgent) == "" {
-		specs := nonEmptyAgentSpecs(defaultSpecs, DefaultAgentPreset)
-		if agentCmd != "" {
-			return specs
-		}
-		resolved := make([]string, 0, len(specs))
-		for _, spec := range specs {
-			resolved = append(resolved, resolveTaskAgentSpecForEffortWithConfig(spec, effort, effortExplicit, cfg))
-		}
-		return resolved
+func resolveTaskAgentSpecs(defaultSpecs []string, agentCmd, effort string, effortExplicit bool, cfg *config.Config) []string {
+	specs := nonEmptyAgentSpecs(defaultSpecs, DefaultAgentPreset)
+	if agentCmd != "" {
+		return specs
 	}
-	return []string{resolveTaskAgentSpecForEffortWithConfig(taskAgent, effort, effortExplicit, cfg)}
-}
-
-func taskPinMatchesPreset(taskAgent, preset string) bool {
-	if strings.TrimSpace(taskAgent) == "" || strings.TrimSpace(preset) == "" {
-		return false
+	resolved := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		resolved = append(resolved, resolveTaskAgentSpecForEffortWithConfig(spec, effort, effortExplicit, cfg))
 	}
-	name, err := AgentPresetName(taskAgent)
-	return err == nil && name == preset
-}
-
-// resolveTaskAgentSpec applies ADR-0018 precedence for one task attempt:
-// explicit --agent-cmd > explicitly-passed --agent > the task's `agent` key >
-// a non-overriding default agent > the built-in default agent. agentExplicit
-// must come from
-// Flags().Changed("agent"), not the resolved value, so a bare defaulted
-// --agent claude never stomps a planner's per-task choice.
-func resolveTaskAgentSpec(cliPreset, defaultPreset string, agentExplicit bool, agentCmd, taskAgent string) string {
-	if agentCmd != "" || agentExplicit || taskAgent == "" {
-		if agentCmd == "" && !agentExplicit && strings.TrimSpace(defaultPreset) != "" {
-			return defaultPreset
-		}
-		return cliPreset
-	}
-	return taskAgent
+	return resolved
 }
 
 func resolveTaskAgentSpecForEffort(agentSpec, effort string, effortExplicit bool) string {
@@ -579,25 +542,6 @@ func agentArgsContainModel(args []string) bool {
 		}
 	}
 	return false
-}
-
-// validateManifestAgentSpec checks a Manifest `agent` key names a recognized
-// Agent preset (ADR-0018). Opaque agent commands are not permitted: anything
-// whose first token is not a known preset is a contract fault, surfaced as a
-// Malformed Task set at discovery rather than mid-attempt. Extra args after
-// the preset stay opaque/unvalidated, exactly as on the CLI.
-func validateManifestAgentSpec(spec string) error {
-	name, _, err := parseAgentPresetSpec(spec)
-	if err != nil {
-		return err
-	}
-	if name == "" {
-		return fmt.Errorf("empty agent value")
-	}
-	if _, ok := agentAdapters[name]; !ok {
-		return fmt.Errorf("unknown agent preset %q in agent key (opaque agent commands are not permitted in a manifest); valid: %s", name, strings.Join(ValidAgentPresets(), ", "))
-	}
-	return nil
 }
 
 // parseAgentPresetSpec splits an --agent value into the preset name (first

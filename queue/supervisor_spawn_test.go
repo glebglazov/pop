@@ -70,14 +70,13 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 	var confirmOut bytes.Buffer
 	var drainOut bytes.Buffer
 	opts := tasks.RunTaskSetOptions{
-		ResolveInput:       tasks.ResolveInput{CWD: repo},
-		TaskSetOverride:    setID,
-		DefaultAgentPreset: "claude",
-		AgentCmd:           agent,
-		Yes:                false,
-		ConfirmIn:          strings.NewReader("4\n"),
-		ConfirmOut:         &confirmOut,
-		Output:             &drainOut,
+		ResolveInput:    tasks.ResolveInput{CWD: repo},
+		TaskSetOverride: setID,
+		AgentCmd:        agent,
+		Yes:             false,
+		ConfirmIn:       strings.NewReader("4\n"),
+		ConfirmOut:      &confirmOut,
+		Output:          &drainOut,
 	}
 	_, err = tasks.RunTaskSetWith(td, project.DefaultDeps(), d.LoadConfig, opts)
 	if err == nil {

@@ -33,9 +33,6 @@ type Task struct {
 	// present so legacy manifests keep their previous invocation shape.
 	Effort         string `json:"-"`
 	EffortExplicit bool   `json:"-"`
-	// Agent optionally pins this task to an Agent-preset-shaped value, e.g.
-	// "claude --model opus4.8" (ADR-0018). Only recognized presets are allowed.
-	Agent string `json:"agent,omitempty"`
 }
 
 type taskJSON struct {
@@ -47,7 +44,6 @@ type taskJSON struct {
 	BlockedBy   []string `json:"blocked_by"`
 	FailedAfter *int     `json:"failed_after,omitempty"`
 	Effort      *string  `json:"effort,omitempty"`
-	Agent       string   `json:"agent,omitempty"`
 }
 
 // UnmarshalJSON preserves the difference between an absent effort key and an
@@ -64,7 +60,6 @@ func (t *Task) UnmarshalJSON(data []byte) error {
 	t.Status = raw.Status
 	t.BlockedBy = raw.BlockedBy
 	t.FailedAfter = raw.FailedAfter
-	t.Agent = raw.Agent
 	t.Effort = DefaultTaskEffort
 	t.EffortExplicit = false
 	if raw.Effort != nil {
@@ -85,7 +80,6 @@ func (t Task) MarshalJSON() ([]byte, error) {
 		Status:      t.Status,
 		BlockedBy:   t.BlockedBy,
 		FailedAfter: t.FailedAfter,
-		Agent:       t.Agent,
 	}
 	if t.EffortExplicit || (t.Effort != "" && t.Effort != DefaultTaskEffort) {
 		effort := t.Effort
@@ -207,12 +201,6 @@ func validateManifest(d *Deps, m *Manifest) {
 		}
 		if !allowedTaskEfforts[task.Effort] {
 			m.Errors = append(m.Errors, fmt.Sprintf("task %q: invalid effort %q", task.ID, task.Effort))
-		}
-
-		if task.Agent != "" {
-			if err := validateManifestAgentSpec(task.Agent); err != nil {
-				m.Errors = append(m.Errors, fmt.Sprintf("task %q: %v", task.ID, err))
-			}
 		}
 
 		switch task.Status {

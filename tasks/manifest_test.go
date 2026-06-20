@@ -62,7 +62,7 @@ func TestManifestValidation(t *testing.T) {
 			contains: "unresolved blocker",
 		},
 		{
-			name: "valid agent key with extra args",
+			name: "agent key ignored",
 			manifest: `{"tasks":[
 				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"claude --model opus4.8"}
 			]}`,
@@ -82,38 +82,6 @@ func TestManifestValidation(t *testing.T) {
 			]}`,
 			valid:    false,
 			contains: `invalid effort "extreme"`,
-		},
-		{
-			name: "unknown agent preset",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"gemini --model pro"}
-			]}`,
-			valid:    false,
-			contains: "unknown agent preset",
-		},
-		{
-			name: "opaque agent command rejected",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"./scripts/my-agent.sh --flag"}
-			]}`,
-			valid:    false,
-			contains: "opaque agent commands are not permitted",
-		},
-		{
-			name: "unterminated quote in agent value",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"claude --model 'opus"}
-			]}`,
-			valid:    false,
-			contains: "invalid agent value",
-		},
-		{
-			name: "whitespace-only agent value",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"agent":"   "}
-			]}`,
-			valid:    false,
-			contains: "empty agent value",
 		},
 	}
 
@@ -144,7 +112,7 @@ func TestManifestValidation(t *testing.T) {
 	}
 }
 
-func TestManifestParsesAgentKey(t *testing.T) {
+func TestManifestIgnoresAgentKey(t *testing.T) {
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "thoughts/issues/demo")
 	writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
@@ -163,11 +131,12 @@ func TestManifestParsesAgentKey(t *testing.T) {
 	if !m.Valid {
 		t.Fatalf("unexpected invalid: %v", m.Errors)
 	}
-	if m.Tasks[0].Agent != "claude --model opus4.8" {
-		t.Fatalf("agent = %q", m.Tasks[0].Agent)
+	data, err := json.Marshal(m.Tasks[0])
+	if err != nil {
+		t.Fatal(err)
 	}
-	if m.Tasks[1].Agent != "" {
-		t.Fatalf("agent unexpectedly set: %q", m.Tasks[1].Agent)
+	if strings.Contains(string(data), "agent") {
+		t.Fatalf("agent key should not round-trip: %s", data)
 	}
 }
 
