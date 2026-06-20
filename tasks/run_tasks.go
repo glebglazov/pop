@@ -102,6 +102,10 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
+	agentQuotaRetryAfter, err := resolveAgentQuotaRetryAfter(cfg)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
 
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
@@ -313,7 +317,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		}
 
 		agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
-		taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides)
+		taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter)
 		if execErr != nil {
 			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 			if refreshErr == nil {

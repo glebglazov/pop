@@ -136,6 +136,10 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
+	agentQuotaRetryAfter, err := resolveAgentQuotaRetryAfter(cfg)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
 
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
@@ -255,7 +259,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	}
 
 	agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentExplicit, opts.AgentCmd, sel.Task.Agent, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
-	result, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides)
+	result, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil && !opts.Yes {
@@ -403,9 +407,28 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	return nil, taskExitErr(sel, ExitOperational, "unexpected attempt loop exit")
 }
 
-func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, agentSpecs []string, buildForAgent func(agentSpec string) (func(prompt string) (*AgentInvocation, error), error), maxTries int, timeout time.Duration, commitOverrides []string) (*RunTaskResult, error) {
+func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, agentSpecs []string, buildForAgent func(agentSpec string) (func(prompt string) (*AgentInvocation, error), error), maxTries int, timeout time.Duration, commitOverrides []string, agentQuotaRetryAfter time.Duration) (*RunTaskResult, error) {
+	cooldowns, err := readAgentCooldowns(d)
+	if err != nil {
+		return nil, taskExitErr(sel, ExitOperational, "%v", err)
+	}
+	activeCooldowns := activeAgentCooldowns(cooldowns, time.Now())
 	var quotaResults []*RunTaskResult
 	for _, agentSpec := range nonEmptyAgentSpecs(agentSpecs, DefaultAgentPreset) {
+		preset, err := AgentPresetName(agentSpec)
+		if err != nil {
+			return nil, taskExitErr(sel, ExitSetup, "%v", err)
+		}
+		if until, cooling := activeCooldowns[preset]; cooling {
+			quotaResults = append(quotaResults, &RunTaskResult{
+				Selection:    sel,
+				QuotaPaused:  true,
+				PauseReason:  fmt.Sprintf("agent quota cooldown until %s", until.UTC().Format(time.RFC3339)),
+				PausePreset:  preset,
+				PauseResetAt: until,
+			})
+			continue
+		}
 		buildInvocation, err := buildForAgent(agentSpec)
 		if err != nil {
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)
@@ -414,12 +437,25 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 		if execErr != nil || result == nil || !result.QuotaPaused {
 			return result, execErr
 		}
+		until := agentQuotaCooldownUntil(result.PauseResetAt, time.Now(), agentQuotaRetryAfter)
+		if err := updateAgentCooldown(d, result.PausePreset, until); err != nil {
+			return nil, taskExitErr(sel, ExitOperational, "%v", err)
+		}
+		activeCooldowns[result.PausePreset] = until
 		quotaResults = append(quotaResults, result)
 	}
 	if len(quotaResults) == 0 {
 		return nil, taskExitErr(sel, ExitOperational, "no agent attempts were run")
 	}
 	return earliestQuotaPauseResult(quotaResults), nil
+}
+
+func resolveAgentQuotaRetryAfter(cfg *config.Config) (time.Duration, error) {
+	resolved, err := cfg.ResolveQueue()
+	if err != nil {
+		return 0, err
+	}
+	return resolved.AgentQuotaRetryAfter, nil
 }
 
 func earliestQuotaPauseResult(results []*RunTaskResult) *RunTaskResult {

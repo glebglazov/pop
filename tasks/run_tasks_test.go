@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1338,6 +1339,154 @@ printf '%s\n' '{"type":"error","message":"You'\''ve hit your usage limit. try ag
 	}
 	if result.PauseResetAt.IsZero() {
 		t.Fatal("expected reset time to be reported")
+	}
+	assertTaskOpen(t, env.execFixture(), "01-a")
+}
+
+func TestRunTaskSetAgentFallbackSkipsCoolingAgentBeforeSpawn(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	codexCount := filepath.Join(env.root, ".agent-bin", "codex.count")
+	installAgentShim(t, env.root, "codex", fmt.Sprintf(`#!/bin/sh
+printf 'called\n' >> %[1]q
+`, codexCount))
+	installAgentShim(t, env.root, "claude", `#!/bin/sh
+TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
+printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
+`)
+	if err := updateAgentCooldown(env.deps(), "codex", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := env.runTaskSetOpts(true, "", io.Discard)
+	opts.AgentPresets = []string{"codex", "claude"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 1
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	if _, err := os.Stat(codexCount); !os.IsNotExist(err) {
+		t.Fatalf("cooling codex should not be spawned: %v", err)
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
+}
+
+func TestRunTaskSetAgentFallbackWritesResetAwareCooldown(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	reason := "You've hit your usage limit. try again at 11:59 PM."
+	installAgentShim(t, env.root, "codex", fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %q\n", fmt.Sprintf(`{"type":"error","message":%s}`, strconv.Quote(reason))))
+
+	opts := env.runTaskSetOpts(true, "", io.Discard)
+	opts.AgentPresets = []string{"codex"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 1
+	before := time.Now()
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.QuotaPaused || result.PausePreset != "codex" {
+		t.Fatalf("result = %#v", result)
+	}
+
+	store, err := readAgentCooldowns(env.deps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := codexQuotaResetAt(reason, before).Add(agentQuotaResetSkew)
+	got := store["codex"].ExhaustedUntil
+	if got.Before(want.Add(-5*time.Second)) || got.After(want.Add(5*time.Second)) {
+		t.Fatalf("cooldown until = %s, want around reset+skew %s", got, want)
+	}
+	if result.PauseResetAt.IsZero() || !got.After(result.PauseResetAt) {
+		t.Fatalf("result reset = %s, store cooldown = %s", result.PauseResetAt, got)
+	}
+	assertTaskOpen(t, env.execFixture(), "01-a")
+}
+
+func TestRunTaskSetAgentFallbackWritesFixedIntervalCooldownWhenResetMissing(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	installAgentShim(t, env.root, "claude", `#!/bin/sh
+printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You'\''ve hit your weekly limit"}'
+`)
+	loadConfig := func(string) (*config.Config, error) {
+		return &config.Config{Queue: &config.QueueConfig{AgentQuotaRetryAfter: "17m"}}, nil
+	}
+
+	opts := env.runTaskSetOpts(true, "", io.Discard)
+	opts.AgentPresets = []string{"claude"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 1
+	before := time.Now().UTC()
+	result, err := RunTaskSetWith(env.deps(), nil, loadConfig, opts)
+	after := time.Now().UTC()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.QuotaPaused || result.PausePreset != "claude" {
+		t.Fatalf("result = %#v", result)
+	}
+
+	store, err := readAgentCooldowns(env.deps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := store["claude"].ExhaustedUntil
+	if got.Before(before.Add(17*time.Minute)) || got.After(after.Add(17*time.Minute+2*time.Second)) {
+		t.Fatalf("cooldown until = %s, want about now+17m", got)
+	}
+	assertTaskOpen(t, env.execFixture(), "01-a")
+}
+
+func TestRunTaskSetAgentFallbackAllCoolingReturnsEarliestWithoutSpawn(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	claudeCount := filepath.Join(env.root, ".agent-bin", "claude.count")
+	codexCount := filepath.Join(env.root, ".agent-bin", "codex.count")
+	installAgentShim(t, env.root, "claude", fmt.Sprintf(`#!/bin/sh
+printf 'called\n' >> %[1]q
+`, claudeCount))
+	installAgentShim(t, env.root, "codex", fmt.Sprintf(`#!/bin/sh
+printf 'called\n' >> %[1]q
+`, codexCount))
+	earliest := time.Now().UTC().Add(10 * time.Minute).Truncate(time.Second)
+	later := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Second)
+	if err := updateAgentCooldown(env.deps(), "claude", later); err != nil {
+		t.Fatal(err)
+	}
+	if err := updateAgentCooldown(env.deps(), "codex", earliest); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := env.runTaskSetOpts(true, "", io.Discard)
+	opts.AgentPresets = []string{"claude", "codex"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 1
+
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.QuotaPaused || result.PausePreset != "codex" || !result.PauseResetAt.Equal(earliest) {
+		t.Fatalf("result = %#v, want codex earliest reset %s", result, earliest)
+	}
+	if _, err := os.Stat(claudeCount); !os.IsNotExist(err) {
+		t.Fatalf("cooling claude should not be spawned: %v", err)
+	}
+	if _, err := os.Stat(codexCount); !os.IsNotExist(err) {
+		t.Fatalf("cooling codex should not be spawned: %v", err)
 	}
 	assertTaskOpen(t, env.execFixture(), "01-a")
 }

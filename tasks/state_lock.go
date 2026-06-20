@@ -131,6 +131,9 @@ func acquireStateLock(d *Deps, noticeOut io.Writer, retried bool) (*StateLock, e
 
 	existing, readErr := d.FS.ReadFile(lockPath)
 	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return acquireStateLock(d, noticeOut, false)
+		}
 		out.line(ansiYellow, "Removing unreadable task state lock at %s", lockPath)
 		_ = os.Remove(lockPath)
 		if retried {
