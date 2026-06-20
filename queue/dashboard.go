@@ -1650,7 +1650,7 @@ func dashboardCursorAfterReload(rows []DashboardRow, key string, previous int) i
 func (m dashboardModel) View() tea.View {
 	if m.detail != nil {
 		content := m.viewDetail()
-		v := tea.NewView(dashboardBottomAnchor(m.height, content))
+		v := tea.NewView(content)
 		v.AltScreen = true
 		return v
 	}
@@ -1674,7 +1674,7 @@ func (m dashboardModel) View() tea.View {
 			fmt.Fprint(&body, ui.HintStyle.Render("q quit"))
 		}
 		content := body.String()
-		v := tea.NewView(dashboardBottomAnchor(m.height, content))
+		v := tea.NewView(content)
 		v.AltScreen = true
 		return v
 	}
@@ -1691,23 +1691,9 @@ func (m dashboardModel) View() tea.View {
 		fmt.Fprint(&body, ui.HintStyle.Render("j/k move · s status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · q quit"))
 	}
 	content := body.String()
-	v := tea.NewView(dashboardBottomAnchor(m.height, content))
+	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
-}
-
-// dashboardBottomAnchor prepends empty lines so that content is pushed to the
-// bottom of the terminal — the same anchoring used by the project/worktree picker.
-// When height is not yet known (0) the content is returned unchanged.
-func dashboardBottomAnchor(height int, content string) string {
-	if height <= 0 {
-		return content
-	}
-	lines := strings.Count(content, "\n")
-	if emptyLines := height - lines; emptyLines > 0 {
-		return strings.Repeat("\n", emptyLines) + content
-	}
-	return content
 }
 
 // viewDetail renders the full-screen task-set detail view.
