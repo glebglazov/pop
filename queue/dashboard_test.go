@@ -1259,3 +1259,226 @@ func TestFilterDashboardRows(t *testing.T) {
 		}
 	})
 }
+
+// detailOverrideModel builds a dashboardModel with a loaded detailView and
+// injectable override seams. The seams record calls and return the provided error.
+func detailOverrideModel(row DashboardRow, task tasks.Task, completeErr, resetErr, skipErr error) (dashboardModel, *int, *int, *int) {
+	completeCalls, resetCalls, skipCalls := 0, 0, 0
+	d := &Deps{
+		CompleteDetailTask: func(defPath, taskPath string) error {
+			completeCalls++
+			return completeErr
+		},
+		ResetDetailTask: func(defPath, taskPath string) error {
+			resetCalls++
+			return resetErr
+		},
+		SkipDetailTask: func(defPath, taskPath string) error {
+			skipCalls++
+			return skipErr
+		},
+	}
+	manifest := &tasks.Manifest{
+		Valid:  true,
+		Tasks:  []tasks.Task{task},
+	}
+	m := newDashboardModel(d, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m.detail = &detailView{
+		row:      row,
+		manifest: manifest,
+		cursorID: task.ID,
+	}
+	return m, &completeCalls, &resetCalls, &skipCalls
+}
+
+func TestDetailViewOverrideKeyC_ValidAndInvalid(t *testing.T) {
+	row := DashboardRow{SetID: "set-x", defPath: "/def"}
+
+	// C on open task: valid — dispatches command, no statusMsg
+	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
+	m, completeCalls, _, _ := detailOverrideModel(row, openTask, nil, nil, nil)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'C', Text: "C"})
+	got := updated.(dashboardModel)
+	if got.detail.statusMsg != "" {
+		t.Fatalf("C on open: statusMsg = %q, want empty", got.detail.statusMsg)
+	}
+	if cmd == nil {
+		t.Fatal("C on open task: expected a command to be dispatched")
+	}
+	msg := cmd()
+	if *completeCalls != 1 {
+		t.Fatalf("completeCalls = %d, want 1", *completeCalls)
+	}
+	// Apply the success message
+	updated, _ = got.Update(msg)
+	got = updated.(dashboardModel)
+	if got.detail.statusMsg == "" {
+		t.Fatal("C success: expected confirmation statusMsg")
+	}
+	if !strings.Contains(got.detail.statusMsg, "complete") {
+		t.Fatalf("C confirmation = %q, want 'complete'", got.detail.statusMsg)
+	}
+
+	// C on done task: invalid — statusMsg set, no dispatch
+	doneTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "done"}
+	m2, completeCalls2, _, _ := detailOverrideModel(row, doneTask, nil, nil, nil)
+	updated2, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'C', Text: "C"})
+	got2 := updated2.(dashboardModel)
+	if cmd2 != nil {
+		t.Fatal("C on done: expected no command")
+	}
+	if *completeCalls2 != 0 {
+		t.Fatalf("C on done: completeCalls = %d, want 0", *completeCalls2)
+	}
+	if got2.detail.statusMsg == "" {
+		t.Fatal("C on done: expected statusMsg hint")
+	}
+}
+
+func TestDetailViewOverrideKeyO_ValidAndInvalid(t *testing.T) {
+	row := DashboardRow{SetID: "set-y", defPath: "/def"}
+
+	// O on failed task: valid
+	failedTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
+	m, _, resetCalls, _ := detailOverrideModel(row, failedTask, nil, nil, nil)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	got := updated.(dashboardModel)
+	if got.detail.statusMsg != "" {
+		t.Fatalf("O on failed: statusMsg = %q, want empty", got.detail.statusMsg)
+	}
+	if cmd == nil {
+		t.Fatal("O on failed: expected a command")
+	}
+	msg := cmd()
+	if *resetCalls != 1 {
+		t.Fatalf("resetCalls = %d, want 1", *resetCalls)
+	}
+	updated, _ = got.Update(msg)
+	got = updated.(dashboardModel)
+	if !strings.Contains(got.detail.statusMsg, "open") {
+		t.Fatalf("O confirmation = %q, want 'open'", got.detail.statusMsg)
+	}
+
+	// O on skipped task: also valid
+	skippedTask := tasks.Task{ID: "03-c", File: "03-c.md", Status: "skipped"}
+	m2, _, resetCalls2, _ := detailOverrideModel(row, skippedTask, nil, nil, nil)
+	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	if cmd2 == nil {
+		t.Fatal("O on skipped: expected a command")
+	}
+	cmd2()
+	if *resetCalls2 != 1 {
+		t.Fatalf("O on skipped: resetCalls = %d, want 1", *resetCalls2)
+	}
+
+	// O on done task: invalid — one-line hint, no mutation
+	doneTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "done"}
+	m3, _, resetCalls3, _ := detailOverrideModel(row, doneTask, nil, nil, nil)
+	updated3, cmd3 := m3.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	got3 := updated3.(dashboardModel)
+	if cmd3 != nil {
+		t.Fatal("O on done: expected no command")
+	}
+	if *resetCalls3 != 0 {
+		t.Fatalf("O on done: resetCalls = %d, want 0", *resetCalls3)
+	}
+	if got3.detail.statusMsg == "" {
+		t.Fatal("O on done: expected statusMsg hint")
+	}
+	if strings.Contains(got3.detail.statusMsg, "open requires") && !strings.Contains(got3.detail.statusMsg, "failed or skipped") {
+		t.Fatalf("O on done hint = %q, want mention of failed or skipped", got3.detail.statusMsg)
+	}
+}
+
+func TestDetailViewOverrideKeyK_ValidAndInvalid(t *testing.T) {
+	row := DashboardRow{SetID: "set-z", defPath: "/def"}
+
+	// K on open task: valid
+	openTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "open"}
+	m, _, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
+	got := updated.(dashboardModel)
+	if got.detail.statusMsg != "" {
+		t.Fatalf("K on open: statusMsg = %q, want empty", got.detail.statusMsg)
+	}
+	if cmd == nil {
+		t.Fatal("K on open: expected a command")
+	}
+	msg := cmd()
+	if *skipCalls != 1 {
+		t.Fatalf("skipCalls = %d, want 1", *skipCalls)
+	}
+	updated, _ = got.Update(msg)
+	got = updated.(dashboardModel)
+	if !strings.Contains(got.detail.statusMsg, "skip") {
+		t.Fatalf("K confirmation = %q, want 'skip'", got.detail.statusMsg)
+	}
+
+	// K on done task: invalid — hint, no dispatch
+	doneTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "done"}
+	m2, _, _, skipCalls2 := detailOverrideModel(row, doneTask, nil, nil, nil)
+	updated2, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
+	got2 := updated2.(dashboardModel)
+	if cmd2 != nil {
+		t.Fatal("K on done: expected no command")
+	}
+	if *skipCalls2 != 0 {
+		t.Fatalf("K on done: skipCalls = %d, want 0", *skipCalls2)
+	}
+	if got2.detail.statusMsg == "" {
+		t.Fatal("K on done: expected statusMsg hint")
+	}
+
+	// K on failed task: also invalid (requires open)
+	failedTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "failed"}
+	m3, _, _, skipCalls3 := detailOverrideModel(row, failedTask, nil, nil, nil)
+	updated3, cmd3 := m3.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
+	got3 := updated3.(dashboardModel)
+	if cmd3 != nil {
+		t.Fatal("K on failed: expected no command")
+	}
+	if *skipCalls3 != 0 {
+		t.Fatalf("K on failed: skipCalls = %d, want 0", *skipCalls3)
+	}
+	if got3.detail.statusMsg == "" {
+		t.Fatal("K on failed: expected statusMsg hint")
+	}
+}
+
+func TestDetailViewOverrideErrorSurfaced(t *testing.T) {
+	row := DashboardRow{SetID: "set-err", defPath: "/def"}
+	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
+	someErr := errors.New("blocked by unsatisfied")
+	m, _, _, _ := detailOverrideModel(row, openTask, someErr, nil, nil)
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'C', Text: "C"})
+	got := updated.(dashboardModel)
+	msg := cmd()
+	updated, _ = got.Update(msg)
+	got = updated.(dashboardModel)
+	if !strings.Contains(got.detail.statusMsg, "error") {
+		t.Fatalf("error not surfaced in statusMsg: %q", got.detail.statusMsg)
+	}
+}
+
+func TestDetailViewOverrideStatusRendered(t *testing.T) {
+	manifest := &tasks.Manifest{
+		Valid:  true,
+		Tasks:  []tasks.Task{{ID: "01-a", File: "01-a.md", Status: "open", Type: "AFK", Title: "A"}},
+	}
+	d := &detailView{
+		row:       DashboardRow{SetID: "set-render"},
+		manifest:  manifest,
+		cursorID:  "01-a",
+		statusMsg: "completed 01-a",
+	}
+	var b strings.Builder
+	renderDetailContent(&b, d)
+	out := b.String()
+	if !strings.Contains(out, "completed 01-a") {
+		t.Fatalf("statusMsg not rendered:\n%s", out)
+	}
+	if !strings.Contains(out, "C complete") {
+		t.Fatalf("hint line missing override keys:\n%s", out)
+	}
+}

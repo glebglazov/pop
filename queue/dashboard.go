@@ -440,6 +440,11 @@ type dashboardBindMsg struct {
 type dashboardAbandonMsg struct {
 	err error
 }
+type dashboardDetailOverrideMsg struct {
+	taskID string
+	verb   string // "complete", "open", or "skip" (for confirmation text)
+	err    error
+}
 
 type dashboardBindStage int
 
@@ -482,6 +487,9 @@ type detailView struct {
 	cursorID string
 	loading  bool
 	err      error
+	// statusMsg is a transient one-line message shown above the hint bar.
+	// Set to a hint on invalid transition; set to confirmation on success.
+	statusMsg string
 }
 
 // cursorIndex returns the index of the cursor task in the manifest, or 0.
@@ -740,6 +748,16 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.abandon = nil
 		return m, m.reload()
+	case dashboardDetailOverrideMsg:
+		if m.detail == nil {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.detail.statusMsg = fmt.Sprintf("error: %v", msg.err)
+		} else {
+			m.detail.statusMsg = fmt.Sprintf("%s applied to %s", msg.verb, msg.taskID)
+		}
+		return m, m.loadDetail(m.detail.row)
 	}
 	return m, nil
 }
@@ -805,8 +823,67 @@ func (m dashboardModel) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			m.detail.moveCursor(-1)
 		}
+	case "C", "O", "K":
+		return m.handleDetailOverrideKey(msg.String())
 	}
 	return m, nil
+}
+
+// handleDetailOverrideKey applies C/O/K override verbs to the cursored task.
+// Invalid transitions set a status-line hint and perform no mutation.
+func (m dashboardModel) handleDetailOverrideKey(key string) (tea.Model, tea.Cmd) {
+	if m.detail == nil || m.detail.manifest == nil || m.detail.loading {
+		return m, nil
+	}
+	idx := m.detail.cursorIndex()
+	if idx < 0 || idx >= len(m.detail.manifest.Tasks) {
+		return m, nil
+	}
+	task := m.detail.manifest.Tasks[idx]
+
+	switch key {
+	case "C":
+		if task.Status == "done" {
+			m.detail.statusMsg = fmt.Sprintf("task %q is already done", task.ID)
+			return m, nil
+		}
+	case "O":
+		if task.Status != "failed" && task.Status != "skipped" {
+			m.detail.statusMsg = fmt.Sprintf("task %q is %s; open requires failed or skipped", task.ID, task.Status)
+			return m, nil
+		}
+	case "K":
+		if task.Status != "open" {
+			m.detail.statusMsg = fmt.Sprintf("task %q is %s; skip requires an open task", task.ID, task.Status)
+			return m, nil
+		}
+	}
+
+	m.detail.statusMsg = ""
+	return m, m.applyDetailOverride(m.detail.row, task, key)
+}
+
+// applyDetailOverride dispatches the C/O/K override verb to the appropriate
+// tasks.*With function via the Deps seam.
+func (m dashboardModel) applyDetailOverride(row DashboardRow, task tasks.Task, verb string) tea.Cmd {
+	d := m.d
+	if d == nil {
+		d = DefaultDeps()
+	}
+	taskPath := row.SetID + "/" + task.File
+	return func() tea.Msg {
+		var err error
+		switch verb {
+		case "C":
+			err = d.completeDetailTask(row.defPath, taskPath)
+		case "O":
+			err = d.resetDetailTask(row.defPath, taskPath)
+		case "K":
+			err = d.skipDetailTask(row.defPath, taskPath)
+		}
+		verbName := map[string]string{"C": "complete", "O": "open", "K": "skip"}[verb]
+		return dashboardDetailOverrideMsg{taskID: task.ID, verb: verbName, err: err}
+	}
 }
 
 func (m dashboardModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1735,7 +1812,10 @@ func renderDetailContent(b *strings.Builder, d *detailView) {
 	}
 
 	fmt.Fprintln(b)
-	fmt.Fprint(b, ui.HintStyle.Render("  j/k navigate · esc/q back"))
+	if d.statusMsg != "" {
+		fmt.Fprintf(b, "  %s\n", d.statusMsg)
+	}
+	fmt.Fprint(b, ui.HintStyle.Render("  j/k · C complete · O open · K skip · esc/q back"))
 }
 
 func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {

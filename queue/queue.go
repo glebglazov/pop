@@ -53,6 +53,13 @@ type Deps struct {
 	AcquireRuntimeLock func(runtimePath string) (runtimeLock, error)
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
+
+	// CompleteDetailTask, ResetDetailTask, SkipDetailTask are seams for the
+	// detail-view override keys (C/O/K). Each defaults to the corresponding
+	// tasks.*With function resolved with the Deps' Tasks, Project, and LoadConfig.
+	CompleteDetailTask func(defPath, taskPath string) error
+	ResetDetailTask    func(defPath, taskPath string) error
+	SkipDetailTask     func(defPath, taskPath string) error
 }
 
 type runtimeLock interface {
@@ -113,6 +120,69 @@ func (d *Deps) acquireRuntimeLock(runtimePath string) (runtimeLock, error) {
 		return d.AcquireRuntimeLock(runtimePath)
 	}
 	return tasks.AcquireRuntimeLock(d.Tasks, runtimePath, nil)
+}
+
+func (d *Deps) resolveInput(defPath string) tasks.ResolveInput {
+	return tasks.ResolveInput{DefinitionOverride: defPath, CWD: defPath}
+}
+
+func (d *Deps) loadConfig() func(string) (*config.Config, error) {
+	if d.LoadConfig != nil {
+		return d.LoadConfig
+	}
+	return config.Load
+}
+
+func (d *Deps) projectDeps() *project.Deps {
+	if d.Project != nil {
+		return d.Project
+	}
+	return project.DefaultDeps()
+}
+
+func (d *Deps) completeDetailTask(defPath, taskPath string) error {
+	if d.CompleteDetailTask != nil {
+		return d.CompleteDetailTask(defPath, taskPath)
+	}
+	td := d.Tasks
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
+	_, err := tasks.CompleteTaskWith(td, d.projectDeps(), d.loadConfig(), tasks.CompleteTaskOptions{
+		ResolveInput: d.resolveInput(defPath),
+		TaskPath:     taskPath,
+	})
+	return err
+}
+
+func (d *Deps) resetDetailTask(defPath, taskPath string) error {
+	if d.ResetDetailTask != nil {
+		return d.ResetDetailTask(defPath, taskPath)
+	}
+	td := d.Tasks
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
+	_, err := tasks.ResetTaskWith(td, d.projectDeps(), d.loadConfig(), tasks.ResetTaskOptions{
+		ResolveInput: d.resolveInput(defPath),
+		TaskPath:     taskPath,
+	})
+	return err
+}
+
+func (d *Deps) skipDetailTask(defPath, taskPath string) error {
+	if d.SkipDetailTask != nil {
+		return d.SkipDetailTask(defPath, taskPath)
+	}
+	td := d.Tasks
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
+	_, err := tasks.SkipTaskWith(td, d.projectDeps(), d.loadConfig(), tasks.SkipTaskOptions{
+		ResolveInput: d.resolveInput(defPath),
+		TaskPath:     taskPath,
+	})
+	return err
 }
 
 // projectScan holds one registered project's resolved coordinates for a scan.
