@@ -1,12 +1,10 @@
 package cmd
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +14,7 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/implement"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -539,13 +538,15 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 	if err != nil {
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
 	}
-	resolveInput, err := resolveTaskSetRuntimeForImplement(d, taskSetPath)
-	if err != nil {
-		return err
-	}
-	result, err := tasks.RunTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskSetOptions{
-		ResolveInput:    resolveInput,
+	impl := implement.DefaultDeps()
+	impl.Tasks = d
+	impl.Project = taskProjectDeps()
+	impl.LoadConfig = taskConfigLoad
+	impl.StdinInteractive = taskStdinInteractive
+	_, err = implement.RunWholeSetWith(impl, implement.WholeSetOptions{
+		ResolveInput:    taskResolveInput(),
 		TaskSetOverride: taskSetPath,
+		Inline:          taskInline,
 		AgentPreset:     selectedTaskAgentPreset(),
 		AgentPresets:    selectedTaskAgentPresets(),
 		AgentExplicit:   agentExplicit,
@@ -558,19 +559,8 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		ConfirmIn:       stdin,
 		ConfirmOut:      stderr,
 		Output:          stdout,
-		BindCheckout:    taskBindCheckout(d),
 	})
-	if err != nil {
-		return err
-	}
-	if result != nil && result.TaskSetDone {
-		taskRecordMergeabilityOnDone(d, result, stderr)
-		offerImplementIntegration(d, result, stdin, stdout)
-	}
-	if result != nil && result.QuotaPaused {
-		return &tasks.ExitError{Code: tasks.ExitQuotaPaused}
-	}
-	return nil
+	return err
 }
 
 func validateInlineRuntimeOverride(d *tasks.Deps, in tasks.ResolveInput) error {
@@ -595,67 +585,6 @@ func validateInlineRuntimeOverride(d *tasks.Deps, in tasks.ResolveInput) error {
 	return nil
 }
 
-func resolveTaskSetRuntimeForImplement(d *tasks.Deps, taskSetPath string) (tasks.ResolveInput, error) {
-	in := taskResolveInput()
-	cfg, err := taskConfigLoad(config.DefaultConfigPath())
-	if err != nil {
-		return in, err
-	}
-	resolved, err := tasks.ResolvePathsWith(d, taskProjectDeps(), taskConfigLoad, in)
-	if err != nil {
-		return in, err
-	}
-	refresh, err := tasks.RefreshWith(d, resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
-	if err != nil {
-		return in, err
-	}
-	taskSetOverride, err := tasks.ResolveTaskSetTarget(refresh, taskSetPath)
-	if err != nil {
-		return in, err
-	}
-	if taskSetOverride != "" {
-		if err := tasks.RejectArchivedTaskSet(d, tasks.StatePathFor(resolved.DefinitionPath), resolved.DefinitionPath, taskSetOverride); err != nil {
-			return in, err
-		}
-	}
-	taskSetID, _, err := tasks.SelectTaskSet(refresh, taskSetOverride)
-	if err != nil {
-		return in, err
-	}
-
-	repoConfig, err := cfg.ResolveRepoConfig(&config.Deps{FS: taskProjectDeps().FS}, resolved.ProjectPath)
-	if err != nil {
-		return in, err
-	}
-
-	route, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
-		TD:                 d,
-		PD:                 taskProjectDeps(),
-		Cfg:                cfg,
-		CurrentCheckout:    resolved.ProjectPath,
-		SetID:              taskSetID,
-		Trigger:            binding.TriggerImplementForeground,
-		Inline:             taskInline,
-		RuntimeOverride:    in.RuntimeOverride,
-		WorktreeReady:      repoConfig.WorktreeReady,
-		OnProvisionFailure: binding.ProvisionFail,
-		WorktreesRoot:      filepath.Join(queue.QueueDataDir(d), "worktrees"),
-	})
-	if err != nil {
-		return in, err
-	}
-	if route.UsedExistingBinding || route.ProvisionedNew {
-		if route.ExecutionBase != "" {
-			in.ProjectName = ""
-			in.Path = route.ExecutionBase
-		}
-		in.RuntimeOverride = route.RuntimePath
-	} else if strings.TrimSpace(in.RuntimeOverride) != "" {
-		in.RuntimeOverride = route.RuntimePath
-	}
-	return in, nil
-}
-
 func selectedTaskAgentPresets() []string {
 	if len(taskAgentPresets) > 0 {
 		return append([]string(nil), taskAgentPresets...)
@@ -671,122 +600,6 @@ func selectedTaskAgentPreset() string {
 		return specs[0]
 	}
 	return tasks.DefaultAgentPreset
-}
-
-// taskRecordMergeabilityOnDone computes and records Mergeability when an
-// implement worktree drain reaches Done (ADR-0036). Errors are best-effort:
-// mergeability is advisory and the set is already successfully drained.
-func taskRecordMergeabilityOnDone(d *tasks.Deps, result *tasks.RunTaskSetResult, stderr io.Writer) {
-	if result == nil || result.RuntimePath == "" {
-		return
-	}
-	qd := queue.DefaultDeps()
-	qd.Tasks = d
-	if err := queue.RecordImplementMergeability(qd, result.ProjectPath, result.RuntimePath, result.TaskSetID, ""); err != nil {
-		fmt.Fprintf(stderr, "warning: mergeability check: %v\n", err)
-	}
-}
-
-// offerImplementIntegration presents the integration offer after a set drains
-// to Done in a worktree, when stdin is a TTY and --yes is not set. It reads
-// the Mergeability record just recorded by taskRecordMergeabilityOnDone and
-// asks "integrate into <working branch> now?". A trunk drain has no
-// Mergeability record and is silently skipped (ADR-0036). Conflicts route to
-// the attended agent path (same as `pop queue integrate`).
-//
-// With --yes: never prompts. Integrates automatically only when
-// auto_merge_clean=true (ADR-0035/0036) and the set is clean; conflicts always
-// park in the Integration backlog regardless of the flag.
-func offerImplementIntegration(d *tasks.Deps, result *tasks.RunTaskSetResult, stdin io.Reader, out io.Writer) {
-	if result == nil || !result.TaskSetDone || result.RuntimePath == "" {
-		return
-	}
-	if taskRunYes {
-		tryAutoIntegrateYes(d, result, out)
-		return
-	}
-	if !taskStdinInteractive(stdin) {
-		return
-	}
-
-	qd := queue.DefaultDeps()
-	qd.Tasks = d
-
-	rec, ok, err := queue.LookupMergeability(qd, result.TaskSetID)
-	if err != nil || !ok {
-		return // trunk drain or state error: no offer
-	}
-
-	workingBranch, err := queue.MainWorktreeBranch(qd, result.RuntimePath)
-	if err != nil || workingBranch == "" {
-		return // bare repo or detached HEAD: no offer
-	}
-
-	cfg, _ := taskConfigLoad(config.DefaultConfigPath())
-
-	var mergeDesc string
-	switch rec.Status {
-	case queue.MergeabilityClean:
-		mergeDesc = "merges clean"
-	case queue.MergeabilityConflicts:
-		mergeDesc = "has conflicts"
-	default:
-		return
-	}
-
-	fmt.Fprintln(out)
-	fmt.Fprintf(out, "Integrate %s into %s? (%s) [y/n]: ", result.TaskSetID, workingBranch, mergeDesc)
-
-	reader := bufio.NewReader(stdin)
-	answer, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return
-	}
-	if strings.ToLower(strings.TrimSpace(answer)) != "y" {
-		return
-	}
-
-	if _, intErr := queue.IntegrateWithOptions(qd, cfg, result.TaskSetID, out, queue.IntegrationOptions{
-		In:          stdin,
-		AgentPreset: selectedTaskAgentPreset(),
-		AgentCmd:    taskAgentCmd,
-	}); intErr != nil {
-		fmt.Fprintf(out, "integrate: %v\n", intErr)
-	}
-}
-
-// tryAutoIntegrateYes is the --yes integration path (AFK). It integrates a
-// clean worktree drain only when the repository opted in with
-// auto_merge_clean=true (ADR-0035/0036). Conflicts always park in the
-// Integration backlog; no prompt is ever shown.
-func tryAutoIntegrateYes(d *tasks.Deps, result *tasks.RunTaskSetResult, out io.Writer) {
-	if result == nil || result.RuntimePath == "" {
-		return
-	}
-
-	qd := queue.DefaultDeps()
-	qd.Tasks = d
-
-	rec, ok, err := queue.LookupMergeability(qd, result.TaskSetID)
-	if err != nil || !ok {
-		return // trunk drain or state error: park in backlog
-	}
-	if rec.Status != queue.MergeabilityClean {
-		return // conflicts always park in backlog
-	}
-
-	cfg, _ := taskConfigLoad(config.DefaultConfigPath())
-	pd := project.DefaultDeps()
-	repoConfig, _ := cfg.ResolveRepoConfig(&config.Deps{FS: pd.FS}, result.ProjectPath)
-	if !repoConfig.AutoMergeClean {
-		return // opt-in not set: park in backlog
-	}
-
-	if _, intErr := queue.IntegrateWithOptions(qd, cfg, result.TaskSetID, out, queue.IntegrationOptions{
-		In: tasks.NonInteractiveReader{},
-	}); intErr != nil {
-		fmt.Fprintf(out, "integrate: %v\n", intErr)
-	}
 }
 
 func runTaskResetTask(cmd *cobra.Command, args []string) {
