@@ -249,6 +249,31 @@ func TestResolveTaskAgentSpecForEffortCursorModels(t *testing.T) {
 	}
 }
 
+func TestResolveTaskAgentSpecForEffortPiModels(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentSpec string
+		effort    string
+		want      string
+	}{
+		{name: "heavy", agentSpec: "pi", effort: "heavy", want: "pi --model opencode-go/qwen3.7-max --thinking high"},
+		{name: "standard", agentSpec: "pi", effort: "standard", want: "pi --model opencode-go/kimi-k2.6 --thinking medium"},
+		{name: "light", agentSpec: "pi", effort: "light", want: "pi --model opencode-go/deepseek-v4-flash --thinking low"},
+		{name: "preserves explicit model and skips thinking", agentSpec: "pi --model custom", effort: "heavy", want: "pi --model custom"},
+		{name: "preserves explicit thinking", agentSpec: "pi --thinking low", effort: "heavy", want: "pi --thinking low --model opencode-go/qwen3.7-max"},
+		{name: "preserves explicit thinking via equals form", agentSpec: "pi --thinking=low", effort: "heavy", want: "pi --thinking=low --model opencode-go/qwen3.7-max"},
+		{name: "preserves model thinking shorthand", agentSpec: "pi --model opencode-go/kimi-k2.6:low", effort: "heavy", want: "pi --model opencode-go/kimi-k2.6:low"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveTaskAgentSpecForEffort(tt.agentSpec, tt.effort, true)
+			if got != tt.want {
+				t.Fatalf("spec = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveTaskAgentSpecForEffortCursorConfiguredModelOnly(t *testing.T) {
 	cfg := &config.Config{Effort: map[string]config.EffortConfig{
 		"cursor": {
@@ -272,6 +297,33 @@ func TestCursorAdapterDetectsBracketedReasoning(t *testing.T) {
 	}
 	if adapter.ArgsContainReasoning([]string{"--model", "composer-2.5"}) {
 		t.Fatal("cursor adapter detected reasoning in a plain model token")
+	}
+}
+
+func TestPiAdapterDetectsThinkingReasoning(t *testing.T) {
+	adapter, err := ResolveAgentAdapter("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "flag form", args: []string{"--thinking", "high"}, want: true},
+		{name: "equals flag form", args: []string{"--thinking=medium"}, want: true},
+		{name: "model shorthand separate arg", args: []string{"--model", "opencode-go/kimi-k2.6:low"}, want: true},
+		{name: "model shorthand equals arg", args: []string{"--model=opencode-go/kimi-k2.6:low"}, want: true},
+		{name: "plain model", args: []string{"--model", "opencode-go/kimi-k2.6"}, want: false},
+		{name: "bare thinking token", args: []string{"--thinking"}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := adapter.ArgsContainReasoning(tt.args)
+			if got != tt.want {
+				t.Fatalf("ArgsContainReasoning(%#v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
 	}
 }
 

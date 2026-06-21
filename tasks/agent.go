@@ -208,10 +208,17 @@ var cursorEffortModels = map[string][]config.EffortModel{
 	"light":    {{Model: "composer-2.5", Reasoning: "low"}},
 }
 
+var piEffortModels = map[string][]config.EffortModel{
+	"heavy":    {{Model: "opencode-go/qwen3.7-max", Reasoning: "high"}},
+	"standard": {{Model: "opencode-go/kimi-k2.6", Reasoning: "medium"}},
+	"light":    {{Model: "opencode-go/deepseek-v4-flash", Reasoning: "low"}},
+}
+
 var builtInEffortModels = map[string]map[string][]config.EffortModel{
 	"claude": claudeEffortModels,
 	"codex":  codexEffortModels,
 	"cursor": cursorEffortModels,
+	"pi":     piEffortModels,
 }
 
 type presetAgentAdapter struct {
@@ -246,6 +253,8 @@ func (a *presetAgentAdapter) ReasoningArgs(reasoning string) []string {
 		return []string{"--effort", reasoning}
 	case "codex":
 		return []string{"-c", fmt.Sprintf(`model_reasoning_effort="%s"`, reasoning)}
+	case "pi":
+		return []string{"--thinking", reasoning}
 	default:
 		return nil
 	}
@@ -277,6 +286,24 @@ func (a *presetAgentAdapter) ArgsContainReasoning(args []string) bool {
 				return true
 			}
 		}
+	case "pi":
+		for i, arg := range args {
+			if arg == "--thinking" {
+				return true
+			}
+			if strings.HasPrefix(arg, "--thinking=") {
+				return true
+			}
+			if arg == "--model" {
+				if i+1 < len(args) && piModelTokenContainsThinking(args[i+1]) {
+					return true
+				}
+				continue
+			}
+			if strings.HasPrefix(arg, "--model=") && piModelTokenContainsThinking(strings.TrimPrefix(arg, "--model=")) {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -284,6 +311,11 @@ func (a *presetAgentAdapter) ArgsContainReasoning(args []string) bool {
 func isCodexReasoningConfig(arg string) bool {
 	key, _, found := strings.Cut(strings.TrimSpace(arg), "=")
 	return found && strings.TrimSpace(key) == "model_reasoning_effort"
+}
+
+func piModelTokenContainsThinking(arg string) bool {
+	model, thinking, found := strings.Cut(strings.TrimSpace(arg), ":")
+	return found && strings.TrimSpace(model) != "" && strings.TrimSpace(thinking) != ""
 }
 
 func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*AgentInvocation, error) {
