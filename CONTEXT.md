@@ -219,10 +219,11 @@ all tasks done .............................. DONE
 any task failed ............................. FAILED
 has an eligible AFK task .................... READY      ← Implement drains these
 every task done or skipped, ≥1 skipped ...... DEFERRED   ← conclude or reopen later
+no open AFK work, open HITL remains ......... UNVERIFIED ← Human verification remains
 otherwise (unfinished, none eligible) ....... BLOCKED    ← Human-blocked: HITL or undone dependency
 ```
 
-(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE and DEFERRED sets; only when no READY set exists may a no-argument implement select a single unambiguous Human-blocked Task set for attended help, and only when the block is an open HITL task rather than an unresolved AFK dependency. Multiple Human-blocked Task sets are ambiguous and require an explicit target. Draining stops when its selected set reaches DONE, FAILED, BLOCKED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate, interactive runs show a **HITL gate prompt** while non-interactive runs and `--yes` preserve stop-and-advice output and never auto-start attended assistance.
+(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE, DEFERRED, and UNVERIFIED sets; only when no READY set exists may a no-argument implement select a single unambiguous Human-blocked Task set for attended help, and only when the block is an open HITL task rather than an unresolved AFK dependency. Multiple Human-blocked Task sets are ambiguous and require an explicit target. Draining stops when its selected set reaches DONE, FAILED, BLOCKED, UNVERIFIED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate, interactive runs show a **HITL gate prompt** while non-interactive runs and `--yes` preserve stop-and-advice output and never auto-start attended assistance.
 
 **Tasks readiness**:
 The **Doctor status** of the `pop tasks` command family. Because the tasks feature is aimed at Git projects and its central workflow is agent execution from a **Runtime path**, Doctor reports `pop tasks` as Blocked when no Git runtime checkout can be resolved, even if read-only status rendering could still inspect local artifacts.
@@ -325,7 +326,7 @@ A numeric value used to choose between ready Task sets. Newly registered Task se
 _Avoid_: Task dependency, task-manifest order
 
 **Task set status**:
-The status derived from a discovered Task set whenever a tasks command runs. A **Ready** Task set has at least one eligible task; a **Done** Task set has only done tasks; a **Failed** Task set has at least one failed task; a **Blocked** Task set is unfinished but has no eligible task. Pop does not persist a separate completion flag, so artifact changes naturally affect the next derived status.
+The status derived from a discovered Task set whenever a tasks command runs. A **Ready** Task set has at least one eligible task; a **Done** Task set has only done tasks; a **Failed** Task set has at least one failed task. When no AFK task is eligible and the set is neither Done, Failed, nor Deferred, the disposition splits by whether agent work remains: an **Unverified** Task set has no open AFK task left — only human verification (HITL) stands before Done; a **Blocked** Task set still has an open AFK task gated behind a human-in-the-loop task. Pop does not persist a separate completion flag, so artifact changes naturally affect the next derived status.
 _Avoid_: Pane status, persisted Task set completion
 
 **Next task**:
@@ -344,20 +345,20 @@ _Avoid_: Run, Drain, separate one-vs-many verbs, run issue, run issues, run all,
 A headless agent the task executor recognizes — `claude`, `opencode`, `cursor`, `codex`, or `pi` — selected by name and optionally augmented with extra invocation arguments (e.g. `claude --model opus4.8`). Pop runs the supplied command as given, exactly as it runs a **Custom agent command**; the sole difference is recognition. Because the first token names a known agent, the **Agent adapter** appends the flags Pop owns — the output protocol governed by **Agent output mode** — after the user's arguments, then the generated prompt as the final positional argument with stdin disconnected. Appending last makes those flags authoritative: a user value for an owned flag is overridden, not rejected. Recognition is what lets Pop parse the structured stream and keep every adapter capability; augmenting a recognized preset this way is distinct from replacing the invocation with a Custom agent command.
 _Avoid_: Integration
 
+**Agent fallback**:
+The task executor's policy for choosing an **Agent preset**, owned by `pop tasks implement` rather than the **Queue**. Implement takes an ordered list of agents — one or more repeated `--agent` flags, else the `[workload] default_agents` config list, else the built-in `claude` — and runs each task on the first live agent, falling through to the next only on an **Agent quota pause**; a machine-global cooldown store records quota pauses per preset, and the Queue spawns plain `pop tasks implement` so manual and queue-triggered implements share the same fallback memory.
+_Avoid_: Queue agent fallback, executor agent policy, default-agent, agent pin, agent rotation
+
 **Custom agent command**:
 A trusted, opaque command supplied via `--agent-cmd` that Pop runs verbatim through a shell, with the generated prompt appended as the final positional argument. Pop neither recognizes nor inspects it, so it forgoes every adapter capability: plain output only, no **Agent quota detection**, no live rendering, and no entry in the **Captured attempt stream**. It governs only unattended task attempts, never attended HITL assistance. It replaces the invocation wholesale — the inverse of an augmented **Agent preset**.
 _Avoid_: Override command, escape-hatch agent, agent passthrough
 
-**Task agent**:
-An optional per-task `agent` key in the **Manifest**, carrying an **Agent preset**-shaped value (e.g. `claude --model opus4.8`) so a planner can pick the agent and model for an individual task. It must name a recognized preset — an unknown first token is a contract fault that makes the Task set **Malformed**, and the opaque **Custom agent command** form is not allowed in a Manifest, since a durable definition must stay recognizable and replayable. The agent for a task attempt resolves by precedence: an explicit `--agent-cmd` wins, then an explicitly passed `--agent`, then the task's own `agent` key, then the default. A bare defaulted `--agent` never overrides a task key.
-_Avoid_: Per-set agent, agent override
-
 **Curated model aliases**:
-A short, hand-maintained list of model aliases Pop ships for each recognized **Agent preset**, surfaced as a column in `pop tasks agents`, recommended value first. It is a suggestion surface to help a planner fill a **Task agent**'s `--model` — never exhaustive, never a validation gate. Distinct from the **Effort ladder**, which is the resolution surface: `claude`'s curated aliases are structured into tiers to feed its built-in Effort ladder, while the curated list itself stays advisory. Only `claude`'s entries are stable auto-resolving aliases; other presets list pinned version ids that need maintenance.
+A short, hand-maintained list of model aliases Pop ships for each recognized **Agent preset**, surfaced as a column in `pop tasks agents`, recommended value first. It is a suggestion surface to help a planner fill an **Agent preset**'s `--model` via `--agent` augmentation, or to read an **Effort** tier — never exhaustive, never a validation gate. Distinct from the **Effort ladder**, which is the resolution surface: `claude`'s curated aliases are structured into tiers to feed its built-in Effort ladder, while the curated list itself stays advisory. Only `claude`'s entries are stable auto-resolving aliases; other presets list pinned version ids that need maintenance.
 _Avoid_: model source, live model listing, model provenance
 
 **Effort**:
-An optional per-task `effort` key in the **Manifest** — `light`, `standard`, or `heavy` — naming how strong a model the task wants, independent of which agent runs it. It is the model axis, orthogonal to the agent axis owned by **Task agent** pins and **Queue agent fallback**. An absent key means `standard`; an unknown token is a contract fault that makes the Task set **Malformed**, mirroring the Task agent rule. For the model axis it resolves after an explicit `--model` (flag or Task agent pin) but before the agent's plain default; it never selects an agent.
+An optional per-task `effort` key in the **Manifest** — `light`, `standard`, or `heavy` — naming how strong a model the task wants, independent of which agent runs it. It is the model axis, orthogonal to the agent axis owned by **Agent fallback** and explicit `--agent` augmentation. An absent key means `standard`; an unknown token is a contract fault that makes the Task set **Malformed**. For the model axis it resolves after an explicit `--model` but before the agent's plain default; it never selects an agent.
 _Avoid_: Priority, weight, tier, task size, difficulty
 
 **Effort ladder**:
@@ -373,7 +374,7 @@ The preset-specific bridge between Pop and a supported agent. An adapter may pro
 _Avoid_: Universal JSON protocol, agent integration
 
 **Agent catalog**:
-The readout of `pop tasks agents`: every recognized **Agent preset** with its binary, whether that binary is on PATH, which preset is the default, and notes such as attended-assistance availability. It reports what Pop owns — recognition and availability — by PATH lookup only; it never execs agents by default, and authentication or deeper health stays with **Doctor**. Its audience is a planner choosing a **Task agent** as much as a human. Model details come from each preset's **Model source**, surfaced only on request.
+The readout of `pop tasks agents`: every recognized **Agent preset** with its binary, whether that binary is on PATH, which preset is the default, and notes such as attended-assistance availability. It reports what Pop owns — recognition and availability — by PATH lookup only; it never execs agents by default, and authentication or deeper health stays with **Doctor**. Its audience is a planner choosing an **Agent preset** as much as a human. Model details come from each preset's **Model source**, surfaced only on request.
 _Avoid_: Supported agents matrix, doctor, model catalog
 
 **Model source**:
@@ -417,7 +418,7 @@ The full resolved **Agent preset** string — preset name plus extra invocation 
 _Avoid_: Agent name, preset name, model
 
 **Actual model**:
-The model identifier an agent itself reported inside its Captured attempt stream (e.g. Claude's `init` event). It is a derived, per-adapter, best-effort reading at display time — never recorded as a separate event — and is absent when the agent does not report one. It may differ from the model requested in the **Requested agent** arguments through aliases or provider fallbacks. Surfaced in the Attempt timing breakdown and shown once by the live renderer when the agent reports it mid-attempt; `pop tasks status` shows at most the manifest's **Task agent** and never reads streams.
+The model identifier an agent itself reported inside its Captured attempt stream (e.g. Claude's `init` event). It is a derived, per-adapter, best-effort reading at display time — never recorded as a separate event — and is absent when the agent does not report one. It may differ from the model requested in the **Requested agent** arguments through aliases or provider fallbacks. Surfaced in the Attempt timing breakdown and shown once by the live renderer when the agent reports it mid-attempt; `pop tasks status` shows at most requested-agent metadata from the manifest and never reads streams.
 _Avoid_: Model time, requested model, agent
 
 **Attempt timing breakdown**:
@@ -433,8 +434,12 @@ The elapsed time since the previous live line, shown as a `+Xs` prefix on each r
 _Avoid_: Tool duration, attempt timing breakdown
 
 **Human-blocked Task set**:
-A Task set with unfinished tasks but no eligible AFK task because human-in-the-loop work must happen first. Implement reports the condition and stops; the task executor never automatically runs HITL tasks. On stopping, pop prints the blocking task body verbatim — the human sees what to do without opening the file — and advises the recovery paths for the blocking HITL task: Complete task once the human work is done, edit the task file and re-run, or skip the task to defer it and unblock its dependents (Skipped task). The blocked row also shows a copy-paste complete hint, symmetric with the open hint on Failed rows.
-_Avoid_: Failed Task set
+A Task set with at least one still-open AFK task that cannot run because human-in-the-loop work must happen first — the pre-agent or mid-flow end of the HITL lifecycle. It derives status BLOCKED and a `blocked` **Drain outcome**: real agent work remains, gated on a human. Contrast an **Unverified Task set**, where no open AFK work remains and only human verification is left. Implement reports the condition and stops; the task executor never automatically runs HITL tasks.
+_Avoid_: Failed Task set, Unverified Task set
+
+**Unverified Task set**:
+A Task set whose only remaining open work is human-in-the-loop verification: every AFK task is done or skipped, and one or more open HITL tasks stand between the set and Done. It is the post-agent end of the HITL lifecycle — the agents are finished and the only thing left is a human's eyes on the result. It derives status UNVERIFIED and a matching `unverified` **Drain outcome**.
+_Avoid_: Blocked Task set, Human-blocked Task set, pending verification, review state
 
 **HITL gate prompt**:
 An interactive choice shown when implement reaches or selects a Human-blocked Task set. It defaults to getting agent assistance while still letting the human complete the task, defer it, or exit without changing task state; choosing complete or defer is the explicit manual decision and does not ask for a second yes/no confirmation. After complete or defer clears the blocking HITL task, implement refreshes the same Task set and continues from any newly eligible AFK task. When shown because a no-argument implement found no Ready Task set, it is framed as "No runnable AFK work" rather than as a dead end. It stays interactive in a drain pane with a TTY; `--yes` skips it for fully unattended runs.
@@ -581,8 +586,12 @@ The set of work the **Queue daemon** supervises: **Auto-drain**-marked Ready Tas
 _Avoid_: Per-project queue opt-in, global priority queue, per-drain --yes
 
 **Queue journal**:
-The durable append-only record in pop's data dir of every Queue drain event: started, done, failed, HITL-blocked, quota-paused-and-agent-switched, crashed, backing-off, or parked. It is emitted by **Implement** as a structured drain-outcome record carrying set id, outcome, and the exhausted preset when relevant; the **Queue daemon** consumes it to drive Queue agent fallback and backoff, and persists it for observability. `pop queue status` reads live state, such as picked-up sets, cooling agents, parked sets, and idle projects; `pop queue log` reads the journal history.
+The durable append-only record in pop's data dir of every Queue drain event: started, done, failed, HITL-blocked, quota-paused-and-agent-switched, crashed, backing-off, or parked. It is emitted by **Implement** as a structured drain-outcome record carrying set id, outcome, and the exhausted preset when relevant; the **Queue daemon** consumes it to drive **Agent fallback** and backoff, and persists it for observability. `pop queue status` reads live state, such as picked-up sets, cooling agents, parked sets, and idle projects; `pop queue log` reads the journal history.
 _Avoid_: Progress record, Captured attempt stream, Task state
+
+**Drain outcome**:
+The terminal disposition of a task-set drain, written to a machine-readable record on exit so the queue supervisor can react without parsing human output: done, failed, blocked, unverified, deferred, quota-paused, or interrupted. The HITL gate splits into two: `unverified` when only human verification remains, and `blocked` when open AFK work still sits behind a human gate.
+_Avoid_: drain disposition, drain result
 
 **Queue run output**:
 The live stdout of `pop queue run` — an operator-facing event stream, not a repeating inventory. It prints one **Queue run baseline** on startup (the full scheduling-relevant picture of what the supervisor is watching), then only **Queue run deltas** when something changes: spawns, terminal drain outcomes, agent cooldowns, parks, integration events, and errors. A quiet tick with no change prints nothing. Drain panes keep their own implement output; `pop queue status` remains the on-demand full snapshot.
@@ -608,17 +617,21 @@ _Avoid_: Failed task, Agent quota pause
 The single tmux window, named `pop-queue`, that the Queue daemon spawns its drains into within a Project's session. All queue-spawned drains for that project — both in-place and **Worktree set** — land here as panes under a balanced (`tiled`) layout, instead of in the user's working windows or in per-worktree sessions. One Queue window per project session; created on first spawn, reused thereafter.
 _Avoid_: Drain session, worktree session, queue tab
 
-**Queue agent fallback**:
-The Queue's policy for choosing an **Agent preset** when draining, owned by the daemon rather than the executor. It rotates a configured ordered list of agents as a non-overriding default: **Task agent** pins always win, while unpinned tasks ride the rotating default. An agent whose binary is not on `PATH` is skipped with a **Queue journal** note, not a startup error. A global per-agent cooldown marks an agent exhausted-until after an **Agent quota pause**, because quota is per subscription, not per project. The cooldown is **reset-aware**: when the quota pause carries the agent's own reported reset time, recovery is set to that instant rather than a blind interval; a missing or unparseable reset time falls back to the fixed retry interval. There is still no quota-remaining API to query — the reset time is read from the same headless pause signal, never queried ahead of exhaustion. When a pinned task's agent is exhausted, the Queue backs that whole set off until that agent's cooldown expires rather than violating the pin.
-_Avoid_: Executor agent policy, per-project quota, overriding task agent
-
 **Auto-drain**:
 A per-set persisted consent bit in **Task state**, alongside priority and the archived flag, marking that the **Queue daemon** may automatically drain this **Task set**. It defaults off for a freshly-discovered set, inverting the old standing-consent model: `pop queue run` drains nothing until a set is marked auto-drainable from the **Queue dashboard**, or a human launches it by hand. It is orthogonal to **Archive** (which hides a set entirely) and distinct from a **Picked-up Task set**, which is a runtime fact (a live lock), not a consent fact.
 _Avoid_: Pickable, pick-up status, auto-pickup, queue-enrolled
 
 **Queue dashboard**:
-The interactive `pop queue dashboard` TUI — the primary hands-on surface for starting and managing **Queue** work, sibling to the **Project picker** and **Worktree picker**. It is machine-global like `pop queue status`, scanning every registered repository's **Task storage** and rendering one row per non-archived **Task set** that still has outstanding queue-actionable state (grouped by project, sets newest-first by identifier), excluding only a concluded **Done Task set**. Each row shows the derived **Task set status** (folding **Mergeability** for **Integration backlog** rows), the associated checkout as `<dir> (<branch>)` (bound worktree, else the resolved **Queue base**), a live **Picked-up** drain indicator, and an **Auto-drain** badge; keys drain (`i`), integrate (`I`), bind or create a worktree (`b`), abandon (`U`), inspect (`s`), toggle **Auto-drain** (`a`), and preview the working pane (`p`). It is a manual launcher running parallel to the **Queue daemon**'s **Auto-drain**-gated autopilot, not a replacement for it.
+The interactive `pop queue dashboard` TUI — the primary hands-on surface for starting and managing **Queue** work, sibling to the **Project picker** and **Worktree picker**. It is machine-global like `pop queue status`, scanning every registered repository's **Task storage** and rendering one row per non-archived **Task set** that still has outstanding queue-actionable state, excluding only a concluded **Done Task set**. Each row shows the derived **Task set status**, the set's branch, a live **Picked-up** drain indicator, and an **Auto-drain** badge; keys drain (`i`), integrate (`I`), bind or create a worktree (`b`), abandon (`U`), toggle **Auto-drain** (`a`), preview the working pane (`p`), move to the top or bottom (`gg`/`G`), go back or exit (`h`/left/`esc`), and open the **Task set detail view** (`l`/Enter). `q` and the former `s` shortcut are intentionally unbound.
 _Avoid_: Queue picker, queue status table, drain dashboard
+
+**Task set detail view**:
+The full-screen interactive drill-down entered with `l` or Enter from the **Queue dashboard**, replacing the table until dismissed with `h`/left/`esc`. It lists the focused **Task set**'s tasks, supports Vim-style list movement including top and bottom (`gg`/`G`), opens a read-only **Task text peek** for the cursored task with `l` or Enter, and applies **Complete task** (`C`), **Open task** (`O`), or **Skip** (`K`) to the single cursored task without a separate confirmation.
+_Avoid_: status view, status modal, inspect modal, task editor
+
+**Task text peek**:
+A read-only nested view inside the **Task set detail view** that shows the full markdown text of the cursored task file from **Task storage**. It is opened with `l` or Enter from the task list, supports Vim-style scrolling (`j`/`k`, `ctrl-d`/`ctrl-u`, `gg`/`G`), and is dismissed with `h`/left/`esc`, returning to the same **Task set detail view** without changing task status.
+_Avoid_: task editor, task modal, preview pane
 
 ### Releases
 
