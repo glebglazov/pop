@@ -28,9 +28,11 @@ type IntegrationResult struct {
 
 // IntegrationOptions controls the attended conflict-resolution path.
 type IntegrationOptions struct {
-	In          io.Reader
-	AgentPreset string
-	AgentCmd    string
+	In            io.Reader
+	AgentPreset   string
+	AgentPresets  []string
+	AgentExplicit bool
+	AgentCmd      string
 }
 
 // JournalEntry is the integration module's journal event shape. Queue callers
@@ -216,7 +218,7 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Record
 		}
 	}
 
-	agentPreset, err := integrationAgentPreset(cfg, opts.AgentPreset)
+	agentPreset, err := integrationAgentPreset(cfg, opts)
 	if err != nil {
 		return IntegrationResult{}, err
 	}
@@ -405,21 +407,12 @@ func BuildConflictResolutionPrompt(rec Record, workingPath, branch string) strin
 	return b.String()
 }
 
-func integrationAgentPreset(cfg *config.Config, explicit string) (string, error) {
-	if strings.TrimSpace(explicit) != "" {
-		return explicit, nil
-	}
-	if cfg == nil {
+func integrationAgentPreset(cfg *config.Config, opts IntegrationOptions) (string, error) {
+	presets := tasks.ResolveDefaultAgentPresets(opts.AgentPresets, opts.AgentPreset, opts.AgentExplicit, cfg)
+	if len(presets) == 0 {
 		return tasks.DefaultAgentPreset, nil
 	}
-	qcfg, err := cfg.ResolveQueue()
-	if err != nil {
-		return "", err
-	}
-	if len(qcfg.Agents) == 0 {
-		return tasks.DefaultAgentPreset, nil
-	}
-	return qcfg.Agents[0], nil
+	return presets[0], nil
 }
 
 func runAttendedAssistance(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, invocation *tasks.AgentAssistanceInvocation) (int, error) {

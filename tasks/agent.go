@@ -545,7 +545,10 @@ func AgentPresetName(spec string) (string, error) {
 	return name, nil
 }
 
-func resolveDefaultAgentPresets(cliPresets []string, cliPreset string, agentExplicit bool, cfg *config.Config) []string {
+// ResolveDefaultAgentPresets returns the ordered agent preset list for a run.
+// Explicit CLI --agent flags win; otherwise [workload] default_agents applies;
+// the final fallback is claude.
+func ResolveDefaultAgentPresets(cliPresets []string, cliPreset string, agentExplicit bool, cfg *config.Config) []string {
 	if agentExplicit {
 		return nonEmptyAgentSpecs(cliPresets, cliPreset)
 	}

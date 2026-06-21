@@ -190,11 +190,6 @@ func (c *Config) ResolveCommitConfigOverrides() ([]string, error) {
 // QueueConfig holds `pop queue` supervisor configuration. Durations are stored
 // as standard duration strings (e.g. "60s", "1h") and parsed by ResolveQueue.
 type QueueConfig struct {
-	// Agents is an ordered fallback pool of Agent-preset-shaped strings (same
-	// grammar as --agent). Validation against recognized presets is owned by
-	// the command layer (the config package stays free of the tasks package).
-	// Empty/unset ⇒ a single agent = implement's default, with no fallback.
-	Agents []string `toml:"agents"`
 	// PollInterval is the supervisor's scan cadence. Empty ⇒ DefaultQueuePollInterval.
 	PollInterval string `toml:"poll_interval"`
 	// AgentQuotaRetryAfter is the global cooldown applied after an agent reports
@@ -216,10 +211,8 @@ const (
 var DefaultQueueCrashRetryDelays = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
 
 // ResolvedQueueConfig holds the parsed queue configuration with defaults
-// applied and durations parsed. Agents stay as raw preset-shaped strings;
-// preset validation is performed in the command layer.
+// applied and durations parsed.
 type ResolvedQueueConfig struct {
-	Agents               []string
 	PollInterval         time.Duration
 	AgentQuotaRetryAfter time.Duration
 	CrashRetryDelays     []time.Duration
@@ -242,10 +235,6 @@ func (c *Config) ResolveQueue() (ResolvedQueueConfig, error) {
 	}
 	if q == nil {
 		return resolved, nil
-	}
-
-	if len(q.Agents) > 0 {
-		resolved.Agents = append([]string(nil), q.Agents...)
 	}
 
 	if strings.TrimSpace(q.PollInterval) != "" {
@@ -708,6 +697,7 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Warnings = append(cfg.Warnings, repoBlockWarnings(path, md)...)
+	cfg.Warnings = append(cfg.Warnings, queueAgentsWarnings(path, md)...)
 
 	selectSectionUsed := cfg.Select != nil
 	if selectSectionUsed {
@@ -806,6 +796,21 @@ func validateRepoConfigMetadata(path string, md toml.MetaData) error {
 		}
 		if len(key) >= 3 && key[0] == "repo" && key[2] == "queue_base" {
 			return fmt.Errorf("%s: [repo.%q] queue_base was renamed to execution_base", path, key[1])
+		}
+	}
+	return nil
+}
+
+// queueAgentsWarnings returns a load-time warning when a config file still
+// sets the deleted [queue].agents key. Agent selection is owned by
+// [workload] default_agents; the old key is ignored (fail-soft).
+func queueAgentsWarnings(path string, md toml.MetaData) []string {
+	for _, key := range md.Undecoded() {
+		if len(key) == 2 && key[0] == "queue" && key[1] == "agents" {
+			return []string{fmt.Sprintf(
+				"%s: [queue] agents is ignored; configure agent fallback under [workload] default_agents",
+				path,
+			)}
 		}
 	}
 	return nil

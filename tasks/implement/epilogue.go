@@ -92,9 +92,11 @@ func OfferIntegration(d *Deps, result *tasks.RunTaskSetResult, opts WholeSetOpti
 	}
 
 	if _, intErr := integration.IntegrateWithOptions(id, cfg, result.TaskSetID, out, integration.IntegrationOptions{
-		In:          opts.ConfirmIn,
-		AgentPreset: opts.AgentPreset,
-		AgentCmd:    opts.AgentCmd,
+		In:            opts.ConfirmIn,
+		AgentPreset:   opts.AgentPreset,
+		AgentPresets:  opts.AgentPresets,
+		AgentExplicit: opts.AgentExplicit,
+		AgentCmd:      opts.AgentCmd,
 	}, integration.IntegrateHooks{}); intErr != nil {
 		fmt.Fprintf(out, "integrate: %v\n", intErr)
 	}

@@ -215,6 +215,70 @@ func TestIntegrateConflictUnresolvedKeepsWorktreeBinding(t *testing.T) {
 	}
 }
 
+func TestIntegrateConflictUsesConfigDefaultAgent(t *testing.T) {
+	repo, wt, rec := setupConflictingIntegration(t)
+	td := queueDataDeps(t)
+	runner := &conflictResolutionRunner{t: t, resolvedText: "resolved by agent\n"}
+	td.Runner = runner
+	key := testScopedKey(t, repo, "set-1")
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{key: rec})
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
+	})
+	d := &Deps{
+		Tasks: td,
+		AcquireRuntimeLock: func(runtimePath string) (runtimeLock, error) {
+			return tasks.AcquireRuntimeLock(td, runtimePath, nil)
+		},
+	}
+	cfg := &config.Config{
+		Projects: []config.ProjectEntry{{Path: repo}},
+		Task:     &config.TaskConfig{DefaultAgents: []string{"codex", "claude"}},
+	}
+
+	var out bytes.Buffer
+	got, err := IntegrateWithOptions(d, cfg, "set-1", &out, IntegrationOptions{In: strings.NewReader("\n")})
+	if err != nil {
+		t.Fatalf("integrate: %v", err)
+	}
+	if got.Outcome != "resolved" {
+		t.Fatalf("result = %+v, want resolved integration", got)
+	}
+	if runner.name != "codex" {
+		t.Fatalf("agent = %q, want codex from default_agents[0]", runner.name)
+	}
+}
+
+func TestIntegrateConflictClaudeFallbackWhenNoConfigAgents(t *testing.T) {
+	repo, wt, rec := setupConflictingIntegration(t)
+	td := queueDataDeps(t)
+	runner := &conflictResolutionRunner{t: t, resolvedText: "resolved by agent\n"}
+	td.Runner = runner
+	key := testScopedKey(t, repo, "set-1")
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{key: rec})
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
+	})
+	d := &Deps{
+		Tasks: td,
+		AcquireRuntimeLock: func(runtimePath string) (runtimeLock, error) {
+			return tasks.AcquireRuntimeLock(td, runtimePath, nil)
+		},
+	}
+
+	var out bytes.Buffer
+	got, err := IntegrateWithOptions(d, &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, "set-1", &out, IntegrationOptions{In: strings.NewReader("\n")})
+	if err != nil {
+		t.Fatalf("integrate: %v", err)
+	}
+	if got.Outcome != "resolved" {
+		t.Fatalf("result = %+v, want resolved integration", got)
+	}
+	if runner.name != "claude" {
+		t.Fatalf("agent = %q, want claude fallback", runner.name)
+	}
+}
+
 func TestIntegrateConflictAttendedResolutionMergesAndTearsDown(t *testing.T) {
 	repo, wt, rec := setupConflictingIntegration(t)
 	td := queueDataDeps(t)
