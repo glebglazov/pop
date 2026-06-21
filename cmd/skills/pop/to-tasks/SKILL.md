@@ -131,10 +131,30 @@ Alongside the markdown files, write `<tasks-dir>/<task-set-name>/index.json` —
   ]
 }
 ```
+
+When the human explicitly requests auto-drain in the planning session, add a top-level `"auto_drain": true` key (omit it by default):
+
+```json
+{
+  "auto_drain": true,
+  "tasks": [
+    {
+      "id": "01-login-form",
+      "file": "01-login-form.md",
+      "title": "Login form",
+      "type": "AFK",
+      "effort": "standard",
+      "status": "open",
+      "blocked_by": []
+    }
+  ]
+}
+```
 </manifest-schema>
 
 Field rules:
 
+- `auto_drain` — optional top-level boolean. **Omit by default.** Write `"auto_drain": true` only when the human explicitly requests auto-drain in that session (e.g. "with auto-drain", "queue should pick this up"). Never infer it from task content; do not write `"auto_drain": false` unless the human explicitly asks to disable. Pop seeds the Auto-drain bit in Task state once at first registration; the Queue dashboard toggle remains authoritative afterward.
 - `id` — the filename stem (`<number>-<task-name>`), stable identifier referenced by `blocked_by`.
 - `status` — one of `open` | `done` | `failed` | `skipped`. Always initialize to `open`. Do not write `in_progress`; persisted `in_progress` is malformed.
 - `blocked_by` — array of `id`s of blocking tasks. Empty array if none.
