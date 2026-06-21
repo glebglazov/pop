@@ -606,7 +606,7 @@ func (e *execFixture) demoDir() string { return filepath.Join(e.tasksDir, "demo"
 func (e *execFixture) demoManifest() string { return filepath.Join(e.demoDir(), "index.json") }
 
 // demoTaskRef returns the <task-set>/<file>.md Task target reference for a
-// file in the fixture's "demo" Task set (see ADR 0012).
+// file in the fixture's "demo" Task set (see ADR 0039).
 func (e *execFixture) demoTaskRef(_ *testing.T, file string) string {
 	return "demo/" + file
 }

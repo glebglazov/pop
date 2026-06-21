@@ -287,7 +287,7 @@ func blockersResolved(m *Manifest, task Task) bool {
 }
 
 // taskPathHint returns the canonical copy-paste Task target reference for an
-// task file: the <task-set>/<file>.md form (see ADR 0012).
+// task file: the <task-set>/<file>.md form (see ADR 0039).
 func taskPathHint(stem, file string) string {
 	return path.Join(stem, file)
 }

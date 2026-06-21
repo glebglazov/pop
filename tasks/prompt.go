@@ -194,7 +194,7 @@ func BuildFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, failed 
 // formatSiblingCompletedBriefs renders the inter-task feed appended to the
 // worker prompt on a retry: briefs of sibling tasks already completed in the
 // same Task set, for cross-task orientation — what already landed, so the
-// worker knows where to look (ADR 0023). It draws from the same completed-AFK
+// worker knows where to look (ADR 0040). It draws from the same completed-AFK
 // join the HITL assistance prompt uses (done manifest status + DONE/COMPLETE
 // outcome, deduped to the latest record per task), so sibling failure/reset
 // churn never reaches the worker. Returns "" when no sibling has a brief.
@@ -246,7 +246,7 @@ func completedAFKProgress(d *Deps, m *Manifest) []completedAFKProgressItem {
 
 	// Dedupe to the latest record per task: a done→reset→done task yields two
 	// DONE records, and only the current one is a live brief — the earlier one
-	// describes the abandoned line of attack (ADR 0023). The State gate already
+	// describes the abandoned line of attack (ADR 0040). The State gate already
 	// drops a done→reset→failed task (its manifest status is not "done").
 	var order []string
 	latest := make(map[string]completedAFKProgressItem)

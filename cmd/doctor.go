@@ -390,7 +390,7 @@ func doctorPaneChecks(d *doctorDeps) []doctorCheck {
 }
 
 // doctorTaskChecks reports Tasks readiness for storage that lives in pop's
-// data dir rather than the repository tree (ADR 0012): the Task storage data dir
+// data dir rather than the repository tree (ADR 0039): the Task storage data dir
 // is writable, no legacy in-tree task sets remain in this worktree, no pre-rename
 // storage layout is left un-migrated, and no Task storage has been orphaned by a
 // vanished repository. Legacy-layout, orphan, and migration reporting are

@@ -15,7 +15,7 @@ import (
 // Prior-attempt lessons. The contract lesson keeps a sound approach on track —
 // the dominant real failure is a correct line of attack cut off before the
 // completion sentinel (a backgrounded suite, a timeout), where "try a different
-// angle" is exactly the wrong instruction (ADR 0023). The reassess lesson is
+// angle" is exactly the wrong instruction (ADR 0040). The reassess lesson is
 // for a crash or an empty session, where there is no approach to stand on.
 const (
 	lessonContinue = "continue — your approach stood, finish and close out the sentinel"
@@ -33,7 +33,7 @@ type priorAttempt struct {
 }
 
 // attemptLesson maps a footer's (outcome, reason, exitCode) to the failure-type
-// lesson the next attempt should carry (ADR 0023). A timeout is a contract
+// lesson the next attempt should carry (ADR 0040). A timeout is a contract
 // failure on a (presumed) sound approach, so it continues; a non-zero exit is a
 // crash, so it reassesses; the harness-generated contract verdicts continue;
 // anything else with a clean exit is the agent's own TASK_FAILED text, which
@@ -70,7 +70,7 @@ func isContractReason(reason string) bool {
 }
 
 // buildPriorAttemptDigest derives the prompt section that carries this task's
-// own prior-attempt story into a retry (ADR 0023). It reads the task's Captured
+// own prior-attempt story into a retry (ADR 0040). It reads the task's Captured
 // attempt stream files, scopes them to attempts since the latest Open-task
 // reset (a human reopens precisely because the prior line of attack was
 // abandoned), and renders a failure-type lesson plus a short approach narrative
@@ -124,7 +124,7 @@ func buildPriorAttemptDigest(d *Deps, taskSetDir, taskFile string) string {
 // latestResetTime returns the timestamp of the most recent Open-task reset for
 // one task from the Progress record, or the zero time when the task has no
 // recorded reset. It is the cut for the prior-attempt digest's since-last-reset
-// scoping (ADR 0023).
+// scoping (ADR 0040).
 func latestResetTime(d *Deps, taskSetDir, taskFile string) time.Time {
 	data, err := d.FS.ReadFile(filepath.Join(taskSetDir, "progress.txt"))
 	if err != nil {

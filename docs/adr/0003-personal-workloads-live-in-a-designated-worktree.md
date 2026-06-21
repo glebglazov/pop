@@ -1,6 +1,6 @@
 # Personal workloads live in a designated worktree
 
-> Superseded by [ADR 0012](./0012-issue-sets-live-in-pop-data-dir-keyed-per-repository.md): Issue sets moved out of the repository tree into pop's data dir.
+> Superseded by [ADR 0039](./0039-issue-sets-live-in-pop-data-dir-keyed-per-repository.md): Issue sets moved out of the repository tree into pop's data dir.
 
 Personal workload artifacts live beneath `thoughts/` in a designated ordinary worktree, typically the main worktree used to start an investigation. The `thoughts/` directory is ignored globally by git. Pop discovers Issue sets from that worktree's workload definition path rather than inferring a location from git's shared directory.
 

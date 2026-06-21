@@ -94,7 +94,7 @@ func TestRenderTaskSkillsBodyMatchesInjectedSource(t *testing.T) {
 
 // TestRenderTaskSkillsContentUsesShowPath confirms the rendered planning
 // skills no longer assume an in-tree thoughts/ location and instead resolve
-// their write location via `pop tasks show-path` (ADR 0012, ADR 0013).
+// their write location via `pop tasks show-path` (ADR 0039, ADR 0013).
 func TestRenderTaskSkillsContentUsesShowPath(t *testing.T) {
 	tree, err := renderComponent(ComponentTaskSkills, "claude")
 	if err != nil {

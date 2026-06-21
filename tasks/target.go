@@ -66,7 +66,7 @@ func invalidTargetMessage(refresh *RefreshResult, raw, reason string) string {
 }
 
 // rejectPathForms rejects absolute and relative filesystem paths, which are no
-// longer valid Task target references (see ADR 0012).
+// longer valid Task target references (see ADR 0039).
 func rejectPathForms(refresh *RefreshResult, raw string) error {
 	slash := filepath.ToSlash(raw)
 	if filepath.IsAbs(raw) || raw == "~" || strings.HasPrefix(slash, "~/") {

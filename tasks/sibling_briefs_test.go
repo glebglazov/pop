@@ -48,7 +48,7 @@ func TestCompletedAFKProgressDedupesToLatestRecord(t *testing.T) {
 }
 
 // The worker carries only done-sibling briefs: failed and reset siblings teach
-// it nothing about unrelated files, so they are excluded (ADR 0023).
+// it nothing about unrelated files, so they are excluded (ADR 0040).
 func TestFormatSiblingCompletedBriefsOnlyDoneSiblings(t *testing.T) {
 	dir := t.TempDir()
 	progress := strings.Join([]string{

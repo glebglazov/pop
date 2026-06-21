@@ -151,7 +151,7 @@ func MatchPickerProject(name string, projects []project.ExpandedProject) (string
 }
 
 // resolveDefinitionPath resolves the task definition directory: the repository's
-// Task storage tasks directory, derived per ADR 0012 from the project's git
+// Task storage tasks directory, derived per ADR 0039 from the project's git
 // common directory. An explicit override names that tasks directory directly (testing).
 func resolveDefinitionPath(d *Deps, projectPath, override string) (string, error) {
 	if override != "" {

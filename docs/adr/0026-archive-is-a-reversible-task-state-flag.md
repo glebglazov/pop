@@ -1,6 +1,6 @@
 # Archive is a reversible Task-state flag
 
-Status: accepted (extends ADR 0012's per-repository Task state and ADR 0020's whole-set Multi-task selection)
+Status: accepted (extends ADR 0039's per-repository Task state and ADR 0020's whole-set Multi-task selection)
 
 Done Task sets never leave the **Status table** — they pile up at the top of `pop tasks status` and stay in `pop tasks timings` completion forever, even after the work is long finished. There was no way to say "I'm done with this set, get it out of my way" short of deleting its directory. Users wanted a declutter affordance: review the finished sets, file them away, and have them stop surfacing in status and completion — most of the time, every Done set at once.
 
@@ -26,5 +26,5 @@ Add `pop tasks archive` / `pop tasks unarchive`, operating on whole **Task sets*
 - **Task state** gains an `archived` field per registered set; the state file format stays at its current version with the field defaulting to `false`, so existing state reads forward without migration.
 - A new cross-set **Multi-set selection** bubbletea component is needed; the **Multi-task selection** from ADR 0020 returns task rows within one set and does not cover whole-set rows.
 - Every completion surface and the scheduler grow an archived filter; `unarchive` adds an inverse completion that offers only archived identifiers.
-- Resolution and completion diverge for archived ids on snapshot verbs: completion narrows (never offers archived), resolution still succeeds — the same split ADR 0012-era completion already applies to done targets.
+- Resolution and completion diverge for archived ids on snapshot verbs: completion narrows (never offers archived), resolution still succeeds — the same split ADR 0039-era completion already applies to done targets.
 - The **Status table** grows an `--archived` mode and a conditional archived-count footer.

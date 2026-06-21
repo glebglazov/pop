@@ -285,7 +285,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 // executeTaskAttempts runs the retry loop for one task. The prompt is rebuilt
 // per attempt (via buildInvocation over basePrompt) so a retry can carry this
 // task's own prior-attempt digest forward; attempt 1 runs the base prompt
-// unchanged (ADR 0023).
+// unchanged (ADR 0040).
 func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, buildInvocation func(prompt string) (*AgentInvocation, error), maxTries int, timeout time.Duration, commitOverrides []string) (*RunTaskResult, error) {
 	if errOut == nil {
 		errOut = os.Stderr
@@ -300,7 +300,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		prompt := basePrompt
 		if attempt > 1 {
 			// A retry carries two feeds forward so it converges instead of
-			// repeating (ADR 0023): briefs of sibling tasks already completed in
+			// repeating (ADR 0040): briefs of sibling tasks already completed in
 			// the set (cross-task orientation), then this task's own prior-attempt
 			// story. Both are harness-built, never a pointer to a raw stream (ADR
 			// 0020).
