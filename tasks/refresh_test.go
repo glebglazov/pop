@@ -357,11 +357,18 @@ func setupManifest(t *testing.T, tasksDir, stem string, tasks []Task) {
 }
 
 func writeManifest(t *testing.T, taskDir string, tasks []Task) {
+	writeManifestWithSetKeys(t, taskDir, tasks, nil)
+}
+
+func writeManifestWithSetKeys(t *testing.T, taskDir string, tasks []Task, setKeys map[string]any) {
 	t.Helper()
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	payload := map[string]any{"tasks": tasks}
+	for k, v := range setKeys {
+		payload[k] = v
+	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		t.Fatal(err)

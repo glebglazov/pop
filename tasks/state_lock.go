@@ -197,19 +197,37 @@ func parseStateLockMetadata(data []byte) (*StateLockMetadata, error) {
 func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *GlobalState, added *[]string) {
 	entry := state.Entry(defPath)
 	registered := state.RegisteredIDs(defPath)
-	for id := range disc.Manifests {
+	for id, manifestPath := range disc.Manifests {
 		if _, ok := registered[id]; ok {
 			continue
 		}
-		entry.TaskSets = append(entry.TaskSets, RegisteredTaskSet{
-			ID:        id,
-			Priority:  0,
-			Archived:  false,
-			AutoDrain: false,
-		})
+		reg := registeredTaskSetFromManifest(d, id, manifestPath)
+		entry.TaskSets = append(entry.TaskSets, reg)
 		registered[id] = len(entry.TaskSets) - 1
 		if added != nil {
-			*added = append(*added, id)
+			*added = append(*added, registrationDisplayID(id, reg.AutoDrain))
 		}
 	}
+}
+
+// registeredTaskSetFromManifest builds a new registration entry, seeding
+// Auto-drain from the manifest once at first registration.
+func registeredTaskSetFromManifest(d *Deps, id, manifestPath string) RegisteredTaskSet {
+	reg := RegisteredTaskSet{
+		ID:       id,
+		Priority: 0,
+		Archived: false,
+	}
+	if manifestPath != "" {
+		m := LoadManifest(d, id, manifestPath)
+		reg.AutoDrain = m.AutoDrain
+	}
+	return reg
+}
+
+func registrationDisplayID(id string, autoDrain bool) string {
+	if autoDrain {
+		return id + " (auto-drain)"
+	}
+	return id
 }
