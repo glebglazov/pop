@@ -10,11 +10,19 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
+// UnverifiedItem is a Task-set whose AFK work is finished but a terminal HITL
+// verification gate remains before it can be marked Done.
+type UnverifiedItem struct {
+	Project string
+	SetID   string
+}
+
 // RunView is the scheduling-relevant snapshot used for queue run baseline and deltas.
 type RunView struct {
 	Running             []PickedUpSet
 	Queued              []IdleProject
 	Blocked             []BlockedItem
+	Unverified          []UnverifiedItem
 	AwaitingIntegration []AwaitingIntegrationSet
 	WorktreeBindings    []WorktreeBindingView
 	Skipped             []SkippedRepo
@@ -75,6 +83,11 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 			item := blockedItemFromIdle(idle, snap.DaemonState)
 			view.Blocked = append(view.Blocked, item)
 			blockedProjects[idle.Project] = true
+		case idle.UnverifiedSetID != "":
+			view.Unverified = append(view.Unverified, UnverifiedItem{
+				Project: idle.Project,
+				SetID:   idle.UnverifiedSetID,
+			})
 		default:
 			view.IdleCount++
 		}
@@ -101,6 +114,12 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 			return view.Blocked[i].SetID < view.Blocked[j].SetID
 		}
 		return view.Blocked[i].Kind < view.Blocked[j].Kind
+	})
+	sort.SliceStable(view.Unverified, func(i, j int) bool {
+		if view.Unverified[i].Project != view.Unverified[j].Project {
+			return view.Unverified[i].Project < view.Unverified[j].Project
+		}
+		return view.Unverified[i].SetID < view.Unverified[j].SetID
 	})
 	return view
 }
@@ -315,6 +334,9 @@ func formatQueueWorkSummary(view RunView) string {
 	if n := len(view.Blocked); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d blocked", n))
 	}
+	if n := len(view.Unverified); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d awaiting verification", n))
+	}
 	if len(parts) == 0 {
 		return "none"
 	}
@@ -394,6 +416,23 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 	} else {
 		for _, b := range view.Blocked {
 			fmt.Fprintf(out, "  %s\n", formatBlockedLine(b))
+		}
+	}
+
+	fmt.Fprintln(out, "Awaiting verification:")
+	if len(view.Unverified) == 0 {
+		fmt.Fprintln(out, "  none")
+	} else {
+		for _, u := range view.Unverified {
+			project := u.Project
+			if project == "" {
+				project = "(unknown project)"
+			}
+			setID := u.SetID
+			if setID == "" {
+				setID = "(unknown set)"
+			}
+			fmt.Fprintf(out, "  %s: %s — awaiting your check\n", project, setID)
 		}
 	}
 

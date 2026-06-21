@@ -26,6 +26,9 @@ type IdleProject struct {
 	Project            string
 	Waiting            string
 	ReadySet           string
+	// UnverifiedSetID is the first Task-set in UNVERIFIED state (awaiting human
+	// sign-off). Non-empty only when Reason is "awaiting verification".
+	UnverifiedSetID    string
 	Reason             string
 	WorktreeReady      bool
 	ProjectConfigError string
@@ -107,7 +110,7 @@ func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapsho
 			snap.Skipped = append(snap.Skipped, SkippedRepo{Project: dec.Project, Reason: dec.Reason})
 			continue
 		}
-		idle := IdleProject{Project: dec.Project, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError}
+		idle := IdleProject{Project: dec.Project, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError, UnverifiedSetID: dec.UnverifiedSetID}
 		if dec.TaskSetID != "" {
 			idle.Waiting = "ready"
 			idle.ReadySet = dec.TaskSetID

@@ -212,9 +212,12 @@ type Decision struct {
 	WaitUntil          time.Time
 	WorktreeReady      bool
 	ProjectConfigError string
-	Err                error
-	scan               projectScan
-	lockStatus         *tasks.RuntimeLockStatus
+	// UnverifiedSetID is the first Task-set in UNVERIFIED state (AFK done, terminal
+	// HITL gate awaits human sign-off). Empty when the project has no unverified set.
+	UnverifiedSetID string
+	Err             error
+	scan            projectScan
+	lockStatus      *tasks.RuntimeLockStatus
 }
 
 // Actionable reports whether the decision selected a Task set to drain.
@@ -490,6 +493,9 @@ func decideProjectDispatches(d *Deps, scan projectScan, state *DaemonState, now 
 			dec.WaitUntil = waitUntil
 		} else if waitReason != "" {
 			dec.Reason = waitReason
+		} else if id := firstUnverifiedSetID(refresh.Rows); id != "" {
+			dec.Reason = "awaiting verification"
+			dec.UnverifiedSetID = id
 		} else {
 			dec.Reason = "no ready set"
 		}
@@ -602,6 +608,17 @@ func selectReadySetID(rows []tasks.Row) (string, bool) {
 		return ready[i].RegIndex < ready[j].RegIndex
 	})
 	return ready[0].ID, true
+}
+
+// firstUnverifiedSetID returns the ID of the first Task-set in UNVERIFIED state
+// (all AFK work done/skipped, only a terminal HITL gate remains). Empty when none.
+func firstUnverifiedSetID(rows []tasks.Row) string {
+	for _, row := range rows {
+		if row.Status == tasks.StatusUnverified {
+			return row.ID
+		}
+	}
+	return ""
 }
 
 func selectReadySet(refresh *tasks.RefreshResult, repoKey string, state *DaemonState, now time.Time) (string, time.Time, string, bool) {

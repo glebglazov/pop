@@ -236,3 +236,140 @@ func TestRecordTerminalOutcomesEmitsOutcomeDelta(t *testing.T) {
 		t.Fatalf("events = %v, want outcome delta", events)
 	}
 }
+
+// TestRecordTerminalOutcomesEmitsUnverifiedDelta checks that an unverified drain
+// outcome produces a distinct delta line separate from a blocked outcome.
+func TestRecordTerminalOutcomesEmitsUnverifiedDelta(t *testing.T) {
+	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
+	writtenAt := time.Date(2026, 6, 21, 9, 0, 0, 0, time.UTC)
+	d := &Deps{
+		Tasks: td,
+		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
+			return &tasks.DrainOutcomeRecord{
+				SetID:       "set-hitl",
+				RuntimePath: repo,
+				Outcome:     tasks.DrainOutcomeUnverified,
+				WrittenAt:   writtenAt,
+			}, nil
+		},
+	}
+
+	var events []string
+	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
+		Project: "pop",
+		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
+	}}, &events); err != nil {
+		t.Fatalf("record outcomes: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %v, want exactly one delta line", events)
+	}
+	line := events[0]
+	if !strings.Contains(line, "outcome=unverified") {
+		t.Fatalf("delta line = %q, want outcome=unverified", line)
+	}
+	if strings.Contains(line, "outcome=blocked") {
+		t.Fatalf("delta line = %q, must not say outcome=blocked for unverified outcome", line)
+	}
+}
+
+// TestBuildRunViewUnverifiedBucket checks that a project with an UNVERIFIED set is
+// placed in view.Unverified rather than view.Blocked or view.IdleCount.
+func TestBuildRunViewUnverifiedBucket(t *testing.T) {
+	snap := statusFromDecisions([]Decision{
+		{
+			Project:         "pop",
+			Reason:          "awaiting verification",
+			UnverifiedSetID: "set-hitl",
+		},
+	}, &DaemonState{Version: 1})
+
+	view := BuildRunView(snap, time.Now())
+
+	if view.IdleCount != 0 {
+		t.Fatalf("IdleCount = %d, want 0 for unverified project", view.IdleCount)
+	}
+	if len(view.Blocked) != 0 {
+		t.Fatalf("Blocked = %v, want empty — unverified must not be in blocked bucket", view.Blocked)
+	}
+	if len(view.Unverified) != 1 {
+		t.Fatalf("Unverified = %v, want one item", view.Unverified)
+	}
+	if view.Unverified[0].Project != "pop" || view.Unverified[0].SetID != "set-hitl" {
+		t.Fatalf("Unverified[0] = %+v, want pop/set-hitl", view.Unverified[0])
+	}
+}
+
+// TestFormatRunSummaryUnverified checks the queue summary counts unverified in its own bucket.
+func TestFormatRunSummaryUnverified(t *testing.T) {
+	view := RunView{
+		Running:    []PickedUpSet{{Project: "a", SetID: "set-a"}},
+		Blocked:    []BlockedItem{{Project: "b", SetID: "set-b", Kind: "parked"}},
+		Unverified: []UnverifiedItem{{Project: "c", SetID: "set-c"}},
+	}
+
+	var out bytes.Buffer
+	RenderRunSummary(&out, view)
+	text := out.String()
+
+	for _, want := range []string{
+		"1 running",
+		"1 blocked",
+		"1 awaiting verification",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("summary missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// TestRenderRunBaselineUnverifiedSection checks the baseline renders a distinct
+// "Awaiting verification:" section for UNVERIFIED sets.
+func TestRenderRunBaselineUnverifiedSection(t *testing.T) {
+	view := RunView{
+		Unverified: []UnverifiedItem{{Project: "pop", SetID: "hitl-set"}},
+		ScanErrors: map[string]string{},
+	}
+
+	var out bytes.Buffer
+	RenderRunBaseline(&out, view)
+	text := out.String()
+
+	for _, want := range []string{
+		"Awaiting verification:",
+		"pop: hitl-set — awaiting your check",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("baseline missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Blocked:\n  pop") {
+		t.Fatalf("unverified set must not appear under Blocked:\n%s", text)
+	}
+}
+
+// TestRenderLogUnverifiedOutcome checks the journal log renders unverified outcomes by name.
+func TestRenderLogUnverifiedOutcome(t *testing.T) {
+	ts := time.Date(2026, 6, 21, 9, 0, 0, 0, time.UTC)
+	entries := []JournalEntry{
+		{
+			Timestamp: ts,
+			Event:     JournalEventOutcome,
+			Project:   "pop",
+			SetID:     "set-hitl",
+			Outcome:   tasks.DrainOutcomeUnverified,
+		},
+	}
+
+	var out bytes.Buffer
+	RenderLog(&out, entries, 10)
+	text := out.String()
+
+	if !strings.Contains(text, "outcome=unverified") {
+		t.Fatalf("log missing outcome=unverified:\n%s", text)
+	}
+	if strings.Contains(text, "outcome=blocked") {
+		t.Fatalf("log must not say outcome=blocked for unverified:\n%s", text)
+	}
+}
