@@ -229,6 +229,39 @@ func TestUnknownEffortMarksTaskSetMalformed(t *testing.T) {
 	}
 }
 
+func TestInvalidAutoDrainMarksTaskSetMalformed(t *testing.T) {
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "bad-auto-drain")
+	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] a\n")
+	if err := os.WriteFile(filepath.Join(taskDir, "index.json"), []byte(`{
+		"tasks": [{
+			"id": "01-a",
+			"file": "01-a.md",
+			"title": "A",
+			"type": "AFK",
+			"status": "open",
+			"blocked_by": []
+		}],
+		"auto_drain": "yes"
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RefreshWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) != 1 || result.Rows[0].Status != StatusMalformed {
+		t.Fatalf("rows = %#v", result.Rows)
+	}
+	var buf bytes.Buffer
+	Render(&buf, result)
+	out := buf.String()
+	if !strings.Contains(out, `invalid auto_drain "yes"`) {
+		t.Fatalf("diagnostic missing offending auto_drain:\n%s", out)
+	}
+}
+
 func TestFailedRowResetHints(t *testing.T) {
 	root := t.TempDir()
 	setupManifest(t, root, "failed-prd", []Task{

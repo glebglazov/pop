@@ -98,6 +98,12 @@ type Manifest struct {
 	Errors  []string
 	Valid   bool
 	Unknown map[string]json.RawMessage
+	// AutoDrain is the set-level auto-drain seed read once at registration.
+	// Absent keys resolve to false; AutoDrainExplicit records presence for rewrite.
+	AutoDrain         bool
+	AutoDrainExplicit bool
+	autoDrainRaw      json.RawMessage
+	autoDrainInvalid  bool
 }
 
 // LoadManifest reads and validates an task manifest.
@@ -143,7 +149,16 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 
 	m.Unknown = make(map[string]json.RawMessage)
 	for k, v := range raw {
-		if k != "tasks" {
+		switch k {
+		case "tasks":
+			continue
+		case "auto_drain":
+			m.autoDrainRaw = v
+			m.AutoDrainExplicit = true
+			if err := json.Unmarshal(v, &m.AutoDrain); err != nil {
+				m.autoDrainInvalid = true
+			}
+		default:
 			m.Unknown[k] = v
 		}
 	}
@@ -151,6 +166,10 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 }
 
 func validateManifest(d *Deps, m *Manifest) {
+	if m.autoDrainInvalid {
+		m.Errors = append(m.Errors, invalidAutoDrainError(m.autoDrainRaw))
+	}
+
 	if len(m.Tasks) == 0 {
 		m.Errors = append(m.Errors, "tasks array is empty")
 	}
@@ -262,11 +281,26 @@ func validateAcceptanceCriteria(d *Deps, mdPath string) error {
 	return nil
 }
 
+func invalidAutoDrainError(raw json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return fmt.Sprintf("invalid auto_drain %q", s)
+	}
+	return fmt.Sprintf("invalid auto_drain (expected boolean, got %s)", strings.TrimSpace(string(raw)))
+}
+
 // WriteManifestAtomic writes a manifest JSON file atomically, preserving unknown fields.
 func WriteManifestAtomic(d *Deps, m *Manifest) error {
 	out := make(map[string]json.RawMessage)
 	for k, v := range m.Unknown {
 		out[k] = v
+	}
+	if m.AutoDrainExplicit {
+		autoDrainData, err := json.Marshal(m.AutoDrain)
+		if err != nil {
+			return err
+		}
+		out["auto_drain"] = autoDrainData
 	}
 	tasksData, err := json.Marshal(m.Tasks)
 	if err != nil {

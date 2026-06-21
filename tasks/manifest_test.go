@@ -83,6 +83,35 @@ func TestManifestValidation(t *testing.T) {
 			valid:    false,
 			contains: `invalid effort "extreme"`,
 		},
+		{
+			name: "auto_drain true",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"auto_drain":true}`,
+			valid: true,
+		},
+		{
+			name: "auto_drain absent",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			]}`,
+			valid: true,
+		},
+		{
+			name: "auto_drain explicit false",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"auto_drain":false}`,
+			valid: true,
+		},
+		{
+			name: "invalid auto_drain type",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"auto_drain":"yes"}`,
+			valid:    false,
+			contains: `invalid auto_drain "yes"`,
+		},
 	}
 
 	d := DefaultDeps()
@@ -106,6 +135,20 @@ func TestManifestValidation(t *testing.T) {
 				}
 				if !found {
 					t.Fatalf("errors %v missing %q", m.Errors, tt.contains)
+				}
+			}
+			switch tt.name {
+			case "auto_drain true":
+				if !m.AutoDrain || !m.AutoDrainExplicit {
+					t.Fatalf("AutoDrain = %v explicit = %v, want true/true", m.AutoDrain, m.AutoDrainExplicit)
+				}
+			case "auto_drain absent":
+				if m.AutoDrain || m.AutoDrainExplicit {
+					t.Fatalf("AutoDrain = %v explicit = %v, want false/false", m.AutoDrain, m.AutoDrainExplicit)
+				}
+			case "auto_drain explicit false":
+				if m.AutoDrain || !m.AutoDrainExplicit {
+					t.Fatalf("AutoDrain = %v explicit = %v, want false/true", m.AutoDrain, m.AutoDrainExplicit)
 				}
 			}
 		})
@@ -164,6 +207,54 @@ func TestManifestParsesEffortDefaultAndExplicit(t *testing.T) {
 	}
 	if m.Tasks[1].Effort != DefaultTaskEffort || m.Tasks[1].EffortExplicit {
 		t.Fatalf("second effort = %q explicit=%v", m.Tasks[1].Effort, m.Tasks[1].EffortExplicit)
+	}
+}
+
+func TestManifestPreservesAutoDrain(t *testing.T) {
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "thoughts/issues/demo")
+	writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
+
+	path := filepath.Join(taskDir, "index.json")
+	original := `{
+		"tasks": [{
+			"id": "01-one",
+			"file": "01-one.md",
+			"title": "One",
+			"type": "AFK",
+			"status": "open",
+			"blocked_by": []
+		}],
+		"auto_drain": true
+	}`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := DefaultDeps()
+	m := LoadManifest(d, "demo", path)
+	if !m.Valid {
+		t.Fatalf("unexpected invalid: %v", m.Errors)
+	}
+	if !m.AutoDrain {
+		t.Fatal("expected AutoDrain true")
+	}
+
+	m.Tasks[0].Status = "done"
+	if err := WriteManifestAtomic(d, m); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	if string(out["auto_drain"]) != "true" {
+		t.Fatalf("auto_drain field lost or changed: %s", out["auto_drain"])
 	}
 }
 
