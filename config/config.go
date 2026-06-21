@@ -781,9 +781,16 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 }
 
 func validateEffortConfigMetadata(path string, md toml.MetaData) error {
+	validTiers := map[string]bool{"heavy": true, "standard": true, "light": true}
+	validEntryKeys := map[string]bool{"model": true, "reasoning": true}
 	for _, key := range md.Undecoded() {
-		if len(key) >= 3 && key[0] == "effort" {
+		if len(key) >= 3 && key[0] == "effort" && !validTiers[key[2]] {
 			return fmt.Errorf("%s: [effort.%s] unknown tier %q; valid tiers: heavy, standard, light", path, key[1], key[2])
+		}
+	}
+	for _, key := range md.Undecoded() {
+		if len(key) >= 4 && key[0] == "effort" && validTiers[key[2]] && !validEntryKeys[key[3]] {
+			return fmt.Errorf("%s: [effort.%s] tier %q entry has unknown key %q; valid entry keys: model, reasoning", path, key[1], key[2], key[3])
 		}
 	}
 	return nil

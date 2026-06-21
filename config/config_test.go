@@ -143,7 +143,7 @@ func TestLoadEffortConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
 [effort.opencode]
-heavy = [{ model = "opencode/claude-opus-4-8", reasoning = "high" }, { model = "opencode/kimi-k2.6" }]
+heavy = [{ model = "opencode/claude-opus-4-8", reasoning = "turbo" }, { model = "opencode/kimi-k2.6" }]
 standard = [{ model = "opencode/claude-sonnet-4-6", reasoning = "medium" }]
 light = [{ model = "opencode/kimi-k2.6" }]
 `), 0o644); err != nil {
@@ -155,7 +155,7 @@ light = [{ model = "opencode/kimi-k2.6" }]
 	}
 	got := cfg.Effort["opencode"].Heavy
 	want := []EffortModel{
-		{Model: "opencode/claude-opus-4-8", Reasoning: "high"},
+		{Model: "opencode/claude-opus-4-8", Reasoning: "turbo"},
 		{Model: "opencode/kimi-k2.6"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -174,6 +174,26 @@ extreme = [{ model = "opencode/claude-opus-4-8" }]
 	_, err := Load(configPath)
 	if err == nil || !strings.Contains(err.Error(), `[effort.opencode] unknown tier "extreme"`) {
 		t.Fatalf("err = %v, want unknown effort tier diagnostic", err)
+	}
+	if !strings.Contains(err.Error(), `valid tiers: heavy, standard, light`) {
+		t.Fatalf("err = %v, want valid tier list", err)
+	}
+}
+
+func TestLoadEffortConfigRejectsUnknownTierEntryKey(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[effort.opencode]
+heavy = [{ model = "opencode/claude-opus-4-8", reasoning = "high", temperature = "low" }]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(configPath)
+	if err == nil || !strings.Contains(err.Error(), `[effort.opencode] tier "heavy" entry has unknown key "temperature"`) {
+		t.Fatalf("err = %v, want unknown effort tier entry key diagnostic", err)
+	}
+	if !strings.Contains(err.Error(), `valid entry keys: model, reasoning`) {
+		t.Fatalf("err = %v, want valid entry key list", err)
 	}
 }
 
