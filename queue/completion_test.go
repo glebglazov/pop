@@ -18,30 +18,24 @@ func TestCompleteIntegrationSetIDsEmpty(t *testing.T) {
 
 func TestCompleteIntegrationSetIDsDedupesAndSorts(t *testing.T) {
 	td := queueDataDeps(t)
-	state := &DaemonState{
-		Version: 1,
-		Mergeability: map[string]MergeabilityRecord{
-			"b|set-b": {
-				Project: "beta",
-				SetID:   "set-b",
-				Status:  MergeabilityConflicts,
-			},
-			"a|set-a": {
-				Project: "alpha",
-				SetID:   "set-a",
-				Status:  MergeabilityClean,
-			},
-			"a|set-a-dup": {
-				Project: "alpha2",
-				SetID:   "set-a",
-				Status:  MergeabilityClean,
-				CheckedAt: time.Now(),
-			},
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
+		"b|set-b": {
+			Project: "beta",
+			SetID:   "set-b",
+			Status:  MergeabilityConflicts,
 		},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
-		t.Fatal(err)
-	}
+		"a|set-a": {
+			Project: "alpha",
+			SetID:   "set-a",
+			Status:  MergeabilityClean,
+		},
+		"a|set-a-dup": {
+			Project:   "alpha2",
+			SetID:     "set-a",
+			Status:    MergeabilityClean,
+			CheckedAt: time.Now(),
+		},
+	})
 
 	ids, err := CompleteIntegrationSetIDs(&Deps{Tasks: td})
 	if err != nil {

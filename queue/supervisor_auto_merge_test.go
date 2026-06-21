@@ -78,12 +78,8 @@ func TestRecordTerminalOutcomesAutoMergeCleanEnabledIntegratesAndTearsDown(t *te
 	if branch := strings.TrimSpace(runGitOutput(t, repo, "branch", "--list", "set-clean")); branch != "" {
 		t.Fatalf("branch still exists: %q", branch)
 	}
-	state, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	if len(state.Mergeability) != 0 {
-		t.Fatalf("mergeability state = %+v, want cleared", state.Mergeability)
+	if len(loadMergeabilityStore(t, td)) != 0 {
+		t.Fatalf("mergeability state = %+v, want cleared", loadMergeabilityStore(t, td))
 	}
 	entries, err := ReadJournal(td)
 	if err != nil {
@@ -132,13 +128,9 @@ func TestRecordTerminalOutcomesAutoMergeCleanDefaultOffWaits(t *testing.T) {
 	if _, err := os.Stat(wt); err != nil {
 		t.Fatalf("worktree should remain awaiting integration: %v", err)
 	}
-	state, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
 	key := testScopedKeyFor(t, td, repo, wt, "set-1")
-	if got := state.Mergeability[key]; got.Status != MergeabilityClean {
-		t.Fatalf("mergeability state = %+v, want clean awaiting integration", state.Mergeability)
+	if got := loadMergeabilityStore(t, td)[key]; got.Status != MergeabilityClean {
+		t.Fatalf("mergeability state = %+v, want clean awaiting integration", loadMergeabilityStore(t, td))
 	}
 	entries, err := ReadJournal(td)
 	if err != nil {
@@ -188,13 +180,9 @@ func TestRecordTerminalOutcomesAutoMergeCleanDoesNotIntegrateConflicts(t *testin
 	if branch := strings.TrimSpace(runGitOutput(t, repo, "branch", "--list", "set-conflict")); branch == "" {
 		t.Fatal("conflicted set branch should remain")
 	}
-	state, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
 	key := testScopedKeyFor(t, td, repo, wt, "set-1")
-	if got := state.Mergeability[key]; got.Status != MergeabilityConflicts {
-		t.Fatalf("mergeability state = %+v, want conflicts awaiting attended path", state.Mergeability)
+	if got := loadMergeabilityStore(t, td)[key]; got.Status != MergeabilityConflicts {
+		t.Fatalf("mergeability state = %+v, want conflicts awaiting attended path", loadMergeabilityStore(t, td))
 	}
 	entries, err := ReadJournal(td)
 	if err != nil {

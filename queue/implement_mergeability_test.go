@@ -89,36 +89,31 @@ func TestIntegrationBacklogWorktreeDrainAppearsRegardlessOfTrigger(t *testing.T)
 
 	qd := &Deps{Tasks: td}
 
-	// Seed a queue-sourced mergeability record directly into daemon state.
-	state, err := EnsureDaemonState(td)
-	if err != nil {
-		t.Fatalf("ensure state: %v", err)
-	}
-	if state.Mergeability == nil {
-		state.Mergeability = map[string]MergeabilityRecord{}
-	}
-	state.Mergeability["queue-repo\x00set-b"] = MergeabilityRecord{
-		Project:     "queue-project",
-		SetID:       "set-b",
-		RuntimePath: "/some/queue/worktree",
-		Status:      MergeabilityClean,
-		CheckedAt:   time.Now().UTC(),
-	}
-	if err := WriteDaemonState(td, state); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
+	// Seed a queue-sourced mergeability record in the shared store.
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
+		"queue-repo\x00set-b": {
+			Project:     "queue-project",
+			SetID:       "set-b",
+			RuntimePath: "/some/queue/worktree",
+			Status:      MergeabilityClean,
+			CheckedAt:   time.Now().UTC(),
+		},
+	})
 
 	// Record implement-sourced mergeability.
 	if err := RecordImplementMergeability(qd, repo, wt, "set-a", "implement-project"); err != nil {
 		t.Fatalf("RecordImplementMergeability: %v", err)
 	}
 
-	// Load the final state and build the Integration backlog.
-	finalState, err := ReadDaemonState(td)
+	// Load the final backlog view.
+	finalState, err := EnsureDaemonState(td)
 	if err != nil {
-		t.Fatalf("read final state: %v", err)
+		t.Fatalf("ensure state: %v", err)
 	}
-	snap := statusFromDecisions(nil, finalState)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, nil, finalState)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
 
 	if len(snap.AwaitingIntegration) != 2 {
 		t.Fatalf("AwaitingIntegration = %d entries, want 2 (one queue, one implement)", len(snap.AwaitingIntegration))
@@ -156,7 +151,10 @@ func TestIntegrationBacklogTrunkDrainNeverAppears(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure state: %v", err)
 	}
-	snap := statusFromDecisions(nil, state)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, nil, state)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
 
 	if len(snap.AwaitingIntegration) != 0 {
 		t.Fatalf("trunk drain must not appear in backlog, got %d entries: %+v", len(snap.AwaitingIntegration), snap.AwaitingIntegration)

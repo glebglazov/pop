@@ -11,6 +11,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -303,7 +304,7 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, e
 						merge.Project = dec.Project
 						merge.RuntimePath = rec.RuntimePath
 						merge.SetID = rec.SetID
-						if err := recordMergeability(d, state, dec.scan.ProjectPath, merge); err != nil {
+						if err := recordMergeability(d, dec.scan.ProjectPath, merge); err != nil {
 							return err
 						}
 						mergeEvent := JournalEntry{
@@ -420,22 +421,14 @@ func terminalOutcomeRuntimes(entries []JournalEntry, dec Decision) []terminalRun
 	return out
 }
 
-func recordMergeability(d *Deps, state *DaemonState, projectPath string, rec MergeabilityRecord) error {
-	if state == nil || rec.RuntimePath == "" || rec.SetID == "" {
+func recordMergeability(d *Deps, projectPath string, rec MergeabilityRecord) error {
+	if rec.RuntimePath == "" || rec.SetID == "" {
 		return nil
 	}
 	if rec.CheckedAt.IsZero() {
 		rec.CheckedAt = time.Now().UTC()
 	}
-	scopedKey, err := scopedKeyForPaths(d, projectPath, rec.RuntimePath, rec.SetID)
-	if err != nil {
-		return err
-	}
-	if state.Mergeability == nil {
-		state.Mergeability = map[string]MergeabilityRecord{}
-	}
-	state.Mergeability[scopedKey] = rec
-	return WriteDaemonState(d.Tasks, state)
+	return integration.RecordMergeability(queueIntegrationDeps(d), projectPath, mergeabilityRecordToIntegration(rec))
 }
 
 func autoMergeCleanEnabled(d *Deps, repoRoot string) bool {

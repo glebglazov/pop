@@ -142,7 +142,11 @@ func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 	}
 
 	// The refusal is reported in status and run output, never silently dropped.
-	snap := statusFromDecisions(decisions, &DaemonState{Version: 1})
+	td := queueDataDeps(t)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, decisions, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
 	snap.Tasks = queueDataDeps(t)
 	if len(snap.Skipped) != 1 || snap.Skipped[0].Reason != repoScanReason {
 		t.Fatalf("status Skipped = %+v, want one %q", snap.Skipped, repoScanReason)

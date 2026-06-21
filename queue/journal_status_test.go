@@ -79,7 +79,8 @@ func TestJournalAppendRead(t *testing.T) {
 
 func TestRenderStatusFromLocksAndState(t *testing.T) {
 	started := time.Date(2026, 6, 14, 13, 0, 0, 0, time.UTC)
-	snap := statusFromDecisions([]Decision{
+	td := queueDataDeps(t)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{
 		{
 			Project: "busy",
 			Busy:    true,
@@ -106,7 +107,10 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 			ProjectConfigError: "/repo/idle/.pop.toml: expected value",
 		},
 	}, &DaemonState{Version: 1})
-	snap.Tasks = queueDataDeps(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Tasks = td
 
 	var out bytes.Buffer
 	RenderStatus(&out, snap)
@@ -613,11 +617,7 @@ func TestRecordTerminalOutcomesDoneRecordsMergeability(t *testing.T) {
 		t.Fatalf("record outcomes: %v", err)
 	}
 
-	state, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	got := state.Mergeability[key]
+	got := loadMergeabilityStore(t, td)[key]
 	if got.Status != MergeabilityClean || got.Project != "pop" || got.SetID != "set-1" {
 		t.Fatalf("mergeability state = %+v", got)
 	}
@@ -642,23 +642,26 @@ func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 			Branch:      "set-1",
 		},
 	})
-	snap := statusFromDecisions([]Decision{{
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
+		key: {
+			Project:     "pop",
+			RuntimePath: "/runtime",
+			SetID:       "set-1",
+			Status:      MergeabilityConflicts,
+			CheckedAt:   now,
+		},
+	})
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{{
 		Project: "pop",
 		Reason:  "set parked after repeated abnormal drain exits",
 	}}, &DaemonState{
 		Version:          1,
 		SetCrashBackoffs: map[string]time.Time{key: now.Add(time.Minute)},
 		ParkedSets:       map[string]ParkedSet{key: {RuntimePath: "/runtime", SetID: "set-1", ParkedAt: now}},
-		Mergeability: map[string]MergeabilityRecord{
-			key: {
-				Project:     "pop",
-				RuntimePath: "/runtime",
-				SetID:       "set-1",
-				Status:      MergeabilityConflicts,
-				CheckedAt:   now,
-			},
-		},
 	})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
 	snap.Tasks = td
 
 	var statusOut bytes.Buffer

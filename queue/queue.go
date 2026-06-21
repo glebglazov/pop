@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
@@ -105,7 +106,8 @@ func (d *Deps) computeMergeability(workingPath, runtimePath string) (Mergeabilit
 	if d.ComputeMergeability != nil {
 		return d.ComputeMergeability(workingPath, runtimePath)
 	}
-	return computeMergeability(d, workingPath, runtimePath)
+	rec, err := integration.Compute(d.Tasks, workingPath, runtimePath)
+	return mergeabilityRecordFromIntegration(rec), err
 }
 
 func (d *Deps) toggleAutoDrain(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {

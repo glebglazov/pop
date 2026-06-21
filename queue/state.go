@@ -10,21 +10,21 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
 // DaemonState is persisted supervisor-owned state. It tracks parked sets,
-// retry timers, mergeability, and drain panes. Worktree bindings live in the
-// shared per-repository store owned by tasks/binding (ADR-0036).
+// retry timers, and drain panes. Worktree bindings and mergeability live in
+// the shared per-repository stores owned by tasks/binding and tasks/integration.
 type DaemonState struct {
-	Version          int                           `json:"version"`
-	UpdatedAt        time.Time                     `json:"updated_at,omitempty"`
-	SetBackoffs      map[string]time.Time          `json:"set_backoffs,omitempty"`
-	SetCrashBackoffs map[string]time.Time          `json:"set_crash_backoffs,omitempty"`
-	SetCrashCounts   map[string]int                `json:"set_crash_counts,omitempty"`
-	ParkedSets       map[string]ParkedSet          `json:"parked_sets,omitempty"`
-	Mergeability     map[string]MergeabilityRecord `json:"mergeability,omitempty"`
-	DrainPanes       map[string]DrainPane          `json:"drain_panes,omitempty"`
+	Version          int                  `json:"version"`
+	UpdatedAt        time.Time            `json:"updated_at,omitempty"`
+	SetBackoffs      map[string]time.Time `json:"set_backoffs,omitempty"`
+	SetCrashBackoffs map[string]time.Time `json:"set_crash_backoffs,omitempty"`
+	SetCrashCounts   map[string]int       `json:"set_crash_counts,omitempty"`
+	ParkedSets       map[string]ParkedSet `json:"parked_sets,omitempty"`
+	DrainPanes       map[string]DrainPane `json:"drain_panes,omitempty"`
 }
 
 // WorktreeBinding is the binding module's durable checkout record. The alias
@@ -69,21 +69,13 @@ type ParkedSet struct {
 }
 
 const (
-	MergeabilityClean     = "clean"
-	MergeabilityConflicts = "conflicts"
+	MergeabilityClean     = integration.StatusClean
+	MergeabilityConflicts = integration.StatusConflicts
 )
 
 // MergeabilityRecord records whether a DONE set branch can be textually merged
-// into the working branch. It is advisory; queue never integrates automatically.
-type MergeabilityRecord struct {
-	Project     string    `json:"project,omitempty"`
-	RuntimePath string    `json:"runtime_path"`
-	SetID       string    `json:"set_id"`
-	Status      string    `json:"status"`
-	CheckedAt   time.Time `json:"checked_at"`
-	Target      string    `json:"target,omitempty"`
-	Source      string    `json:"source,omitempty"`
-}
+// into the working branch.
+type MergeabilityRecord = integration.Record
 
 // bindingForSet returns the shared-store binding for (repoKey, setID).
 func bindingForSet(d *tasks.Deps, repoKey, setID string) (WorktreeBinding, bool) {
@@ -129,7 +121,8 @@ func ReadDaemonState(d *tasks.Deps) (*DaemonState, error) {
 	}
 	var envelope struct {
 		DaemonState
-		LegacyBindings map[string]WorktreeBinding `json:"worktree_bindings,omitempty"`
+		LegacyBindings     map[string]WorktreeBinding    `json:"worktree_bindings,omitempty"`
+		LegacyMergeability map[string]MergeabilityRecord `json:"mergeability,omitempty"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, fmt.Errorf("parse queue daemon state: %w", err)
@@ -138,6 +131,15 @@ func ReadDaemonState(d *tasks.Deps) (*DaemonState, error) {
 	migrateDaemonState(&state)
 	if len(envelope.LegacyBindings) > 0 {
 		if err := migrateLegacyBindings(d, envelope.LegacyBindings); err != nil {
+			return nil, err
+		}
+	}
+	if len(envelope.LegacyMergeability) > 0 {
+		legacy := make(map[string]integration.Record, len(envelope.LegacyMergeability))
+		for k, v := range envelope.LegacyMergeability {
+			legacy[k] = integration.Record(v)
+		}
+		if err := integration.MigrateLegacyFromDaemonState(d, legacy); err != nil {
 			return nil, err
 		}
 	}
@@ -209,7 +211,6 @@ func migrateDaemonState(state *DaemonState) {
 	migrateStringTimeMap(state.SetCrashBackoffs)
 	migrateIntMap(state.SetCrashCounts)
 	migrateParkedSets(state)
-	migrateMergeability(state)
 }
 
 func migrateStringTimeMap(m map[string]time.Time) {
@@ -283,30 +284,6 @@ func migrateParkedSets(state *DaemonState) {
 		}
 		state.ParkedSets[newKey] = state.ParkedSets[oldKeys[0]]
 		delete(state.ParkedSets, oldKeys[0])
-	}
-}
-
-func migrateMergeability(state *DaemonState) {
-	if len(state.Mergeability) == 0 {
-		return
-	}
-	targets := map[string][]string{}
-	for oldKey, rec := range state.Mergeability {
-		newKey, ok := migratedScopedKey(oldKey, rec.RuntimePath)
-		if !ok || newKey == oldKey {
-			continue
-		}
-		targets[newKey] = append(targets[newKey], oldKey)
-	}
-	for newKey, oldKeys := range targets {
-		if len(oldKeys) != 1 {
-			continue
-		}
-		if _, exists := state.Mergeability[newKey]; exists {
-			continue
-		}
-		state.Mergeability[newKey] = state.Mergeability[oldKeys[0]]
-		delete(state.Mergeability, oldKeys[0])
 	}
 }
 

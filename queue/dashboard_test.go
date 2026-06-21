@@ -81,9 +81,27 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 		{ID: "done-concluded", Status: tasks.StatusDone},
 	}
 	d := dashboardTestDeps(t, rows, nil)
-	state := &DaemonState{Version: 1, Mergeability: map[string]MergeabilityRecord{
+	dataHome := t.TempDir()
+	real := deps.NewRealFileSystem()
+	origFS := d.Tasks.FS.(*deps.MockFileSystem)
+	d.Tasks.FS = &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataHome
+			}
+			return origFS.GetenvFunc(key)
+		},
+		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
+		ReadFileFunc:     real.ReadFile,
+		WriteFileFunc:    real.WriteFile,
+		MkdirAllFunc:     real.MkdirAll,
+		RenameFunc:       real.Rename,
+		StatFunc:         origFS.StatFunc,
+	}
+	seedMergeabilityStore(t, d.Tasks, map[string]MergeabilityRecord{
 		setScopedKey("repo-key", "done-integrating"): {RuntimePath: "/repo/done", SetID: "done-integrating", Status: MergeabilityClean},
-	}}
+	})
+	state := &DaemonState{Version: 1}
 	scans := []projectScan{{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}}
 
 	got, err := dashboardRowsForRepo(d, &config.Config{}, state, scans)
@@ -145,12 +163,10 @@ func TestDashboardColumnDerivation(t *testing.T) {
 		RenameFunc:    real.Rename,
 		StatFunc:      origFS.StatFunc,
 	}
-	state := &DaemonState{
-		Version: 1,
-		Mergeability: map[string]MergeabilityRecord{
-			setScopedKey("repo-key", "done"): {RuntimePath: "/repo/done", SetID: "done", Status: MergeabilityConflicts},
-		},
-	}
+	state := &DaemonState{Version: 1}
+	seedMergeabilityStore(t, d.Tasks, map[string]MergeabilityRecord{
+		setScopedKey("repo-key", "done"): {RuntimePath: "/repo/done", SetID: "done", Status: MergeabilityConflicts},
+	})
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey("repo-key", "done"):  {RuntimePath: "/repo/done", Branch: "done-branch"},
 		setScopedKey("repo-key", "bound"): {RuntimePath: "/repo/bound", Branch: "bound-branch"},

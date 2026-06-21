@@ -1,4 +1,4 @@
-package queue
+package integration
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-func TestComputeMergeabilityClean(t *testing.T) {
+func TestComputeClean(t *testing.T) {
 	repo := initMergeabilityRepo(t)
 	wt := filepath.Join(t.TempDir(), "set-clean")
 	runGit(t, repo, "worktree", "add", "-b", "set-clean", wt, "HEAD")
@@ -17,16 +17,16 @@ func TestComputeMergeabilityClean(t *testing.T) {
 	runGit(t, wt, "add", "set.txt")
 	runGit(t, wt, "commit", "-m", "set change")
 
-	got, err := (&Deps{Tasks: tasks.DefaultDeps()}).computeMergeability(repo, wt)
+	got, err := Compute(tasks.DefaultDeps(), repo, wt)
 	if err != nil {
-		t.Fatalf("computeMergeability: %v", err)
+		t.Fatalf("Compute: %v", err)
 	}
-	if got.Status != MergeabilityClean {
+	if got.Status != StatusClean {
 		t.Fatalf("status = %q, want clean", got.Status)
 	}
 }
 
-func TestComputeMergeabilityConflictAfterWorkingBranchAdvanced(t *testing.T) {
+func TestComputeConflictAfterWorkingBranchAdvanced(t *testing.T) {
 	repo := initMergeabilityRepo(t)
 	wt := filepath.Join(t.TempDir(), "set-conflict")
 	runGit(t, repo, "worktree", "add", "-b", "set-conflict", wt, "HEAD")
@@ -39,11 +39,11 @@ func TestComputeMergeabilityConflictAfterWorkingBranchAdvanced(t *testing.T) {
 	runGit(t, repo, "add", "shared.txt")
 	runGit(t, repo, "commit", "-m", "working edits shared")
 
-	got, err := (&Deps{Tasks: tasks.DefaultDeps()}).computeMergeability(repo, wt)
+	got, err := Compute(tasks.DefaultDeps(), repo, wt)
 	if err != nil {
-		t.Fatalf("computeMergeability: %v", err)
+		t.Fatalf("Compute: %v", err)
 	}
-	if got.Status != MergeabilityConflicts {
+	if got.Status != StatusConflicts {
 		t.Fatalf("status = %q, want conflicts", got.Status)
 	}
 }

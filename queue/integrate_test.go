@@ -26,9 +26,7 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-1")
-	state := &DaemonState{
-		Version: 1,
-		Mergeability: map[string]MergeabilityRecord{
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
 			key: {
 				Project:     filepath.Base(repo),
 				RuntimePath: wt,
@@ -36,11 +34,7 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 				Status:      MergeabilityClean,
 				CheckedAt:   time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
 			},
-		},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
+		})
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: integrationWorktreeBinding(t, repo, wt, "set-clean"),
 	})
@@ -79,17 +73,16 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 		t.Fatalf("branch still exists: %q", branch)
 	}
 
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	if len(after.Mergeability) != 0 {
-		t.Fatalf("mergeability state = %+v, want cleared", after.Mergeability)
+	if len(loadMergeabilityStore(t, td)) != 0 {
+		t.Fatalf("mergeability state = %+v, want cleared", loadMergeabilityStore(t, td))
 	}
 	if len(loadBindingStore(t, td)) != 0 {
 		t.Fatalf("worktree bindings = %+v, want cleared", loadBindingStore(t, td))
 	}
-	snap := statusFromDecisions(nil, after)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, nil, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
 	if len(snap.AwaitingIntegration) != 0 {
 		t.Fatalf("awaiting integration = %+v, want empty", snap.AwaitingIntegration)
 	}
@@ -109,15 +102,9 @@ func TestIntegrateConflictSetRefuses(t *testing.T) {
 	repo, wt, rec := setupConflictingIntegration(t)
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-1")
-	state := &DaemonState{
-		Version: 1,
-		Mergeability: map[string]MergeabilityRecord{
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
 			key: rec,
-		},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
+		})
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
 	})
@@ -140,12 +127,8 @@ func TestIntegrateConflictSetRefuses(t *testing.T) {
 	if !strings.Contains(out.String(), "has merge conflicts") || !strings.Contains(out.String(), "Get agent assistance") {
 		t.Fatalf("output = %q, want surfaced conflict with assistance offer", out.String())
 	}
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	if len(after.Mergeability) != 1 {
-		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
+	if len(loadMergeabilityStore(t, td)) != 1 {
+		t.Fatalf("mergeability state = %+v, want retained", loadMergeabilityStore(t, td))
 	}
 	if len(loadBindingStore(t, td)) != 1 {
 		t.Fatalf("worktree bindings = %+v, want retained", loadBindingStore(t, td))
@@ -156,12 +139,7 @@ func TestIntegrateConflictDeclinedKeepsWorktreeBranchAndState(t *testing.T) {
 	repo, wt, rec := setupConflictingIntegration(t)
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-1")
-	if err := WriteDaemonState(td, &DaemonState{
-		Version:      1,
-		Mergeability: map[string]MergeabilityRecord{key: rec},
-	}); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{key: rec})
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
 	})
@@ -187,12 +165,8 @@ func TestIntegrateConflictDeclinedKeepsWorktreeBranchAndState(t *testing.T) {
 	if branch := strings.TrimSpace(runGitOutput(t, repo, "branch", "--list", "set-conflict")); branch == "" {
 		t.Fatal("set branch should be kept")
 	}
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	if len(after.Mergeability) != 1 {
-		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
+	if len(loadMergeabilityStore(t, td)) != 1 {
+		t.Fatalf("mergeability state = %+v, want retained", loadMergeabilityStore(t, td))
 	}
 	if len(loadBindingStore(t, td)) != 1 {
 		t.Fatalf("worktree bindings = %+v, want retained", loadBindingStore(t, td))
@@ -211,12 +185,7 @@ func TestIntegrateConflictUnresolvedKeepsWorktreeBinding(t *testing.T) {
 	td := queueDataDeps(t)
 	td.Runner = &noopConflictRunner{}
 	key := testScopedKey(t, repo, "set-1")
-	if err := WriteDaemonState(td, &DaemonState{
-		Version:      1,
-		Mergeability: map[string]MergeabilityRecord{key: rec},
-	}); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{key: rec})
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
 	})
@@ -238,12 +207,8 @@ func TestIntegrateConflictUnresolvedKeepsWorktreeBinding(t *testing.T) {
 	if _, err := os.Stat(wt); err != nil {
 		t.Fatalf("worktree should be kept: %v", err)
 	}
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	if len(after.Mergeability) != 1 {
-		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
+	if len(loadMergeabilityStore(t, td)) != 1 {
+		t.Fatalf("mergeability state = %+v, want retained", loadMergeabilityStore(t, td))
 	}
 	if len(loadBindingStore(t, td)) != 1 {
 		t.Fatalf("worktree bindings = %+v, want retained", loadBindingStore(t, td))
@@ -256,12 +221,7 @@ func TestIntegrateConflictAttendedResolutionMergesAndTearsDown(t *testing.T) {
 	runner := &conflictResolutionRunner{t: t, resolvedText: "resolved by agent\n"}
 	td.Runner = runner
 	key := testScopedKey(t, repo, "set-1")
-	if err := WriteDaemonState(td, &DaemonState{
-		Version:      1,
-		Mergeability: map[string]MergeabilityRecord{key: rec},
-	}); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{key: rec})
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
 	})
@@ -304,12 +264,8 @@ func TestIntegrateConflictAttendedResolutionMergesAndTearsDown(t *testing.T) {
 	if branch := strings.TrimSpace(runGitOutput(t, repo, "branch", "--list", "set-conflict")); branch != "" {
 		t.Fatalf("branch still exists: %q", branch)
 	}
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	if len(after.Mergeability) != 0 {
-		t.Fatalf("mergeability state = %+v, want cleared", after.Mergeability)
+	if len(loadMergeabilityStore(t, td)) != 0 {
+		t.Fatalf("mergeability state = %+v, want cleared", loadMergeabilityStore(t, td))
 	}
 	if len(loadBindingStore(t, td)) != 0 {
 		t.Fatalf("worktree bindings = %+v, want cleared", loadBindingStore(t, td))
@@ -397,7 +353,7 @@ func setupConflictingIntegration(t *testing.T) (string, string, MergeabilityReco
 	writeFile(t, filepath.Join(repo, "shared.txt"), "working branch\n")
 	runGit(t, repo, "add", "shared.txt")
 	runGit(t, repo, "commit", "-m", "working edits shared")
-	rec, err := computeMergeability(&Deps{Tasks: tasks.DefaultDeps()}, repo, wt)
+	rec, err := (&Deps{Tasks: tasks.DefaultDeps()}).computeMergeability(repo, wt)
 	if err != nil {
 		t.Fatalf("compute mergeability: %v", err)
 	}

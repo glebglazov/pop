@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
@@ -279,7 +280,7 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 	projectName := repoName(scans, rep)
 	var rows []DashboardRow
 	for _, taskRow := range refresh.Rows {
-		merge, awaitingIntegration := mergeabilityForSet(state, repoKey, taskRow.ID)
+		merge, awaitingIntegration := mergeabilityForSet(d, repoKey, taskRow.ID)
 		if !dashboardShowRow(taskRow, awaitingIntegration) {
 			continue
 		}
@@ -321,12 +322,15 @@ func dashboardStatus(status tasks.TaskSetStatus, rec MergeabilityRecord, awaitin
 	}
 }
 
-func mergeabilityForSet(state *DaemonState, repoKey, setID string) (MergeabilityRecord, bool) {
-	if state == nil || len(state.Mergeability) == 0 {
+func mergeabilityForSet(d *Deps, repoKey, setID string) (MergeabilityRecord, bool) {
+	if d == nil || d.Tasks == nil {
 		return MergeabilityRecord{}, false
 	}
-	rec, ok := state.Mergeability[setScopedKey(repoKey, setID)]
-	return rec, ok
+	rec, ok, err := integration.GetForSet(d.Tasks, repoKey, setID)
+	if err != nil || !ok {
+		return MergeabilityRecord{}, false
+	}
+	return mergeabilityRecordFromIntegration(rec), true
 }
 
 type dashboardWorktreeView struct {

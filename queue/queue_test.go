@@ -14,6 +14,7 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -138,7 +139,10 @@ func TestScanSkipsNonGitProjectsOutsideQueueScope(t *testing.T) {
 		t.Fatalf("non-git project Reason = %q, want no ready set", nonGitDec.Reason)
 	}
 
-	snap := statusFromDecisions(decisions, &DaemonState{Version: 1})
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, decisions, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
 	snap.Tasks = queueDataDeps(t)
 	view := BuildRunView(snap, time.Now())
 	if len(view.ScanErrors) != 0 {
@@ -1338,6 +1342,33 @@ func loadBindingStore(t *testing.T, td *tasks.Deps) map[string]WorktreeBinding {
 	out := make(map[string]WorktreeBinding, len(store.Bindings))
 	for k, v := range store.Bindings {
 		out[k] = v
+	}
+	return out
+}
+
+func seedMergeabilityStore(t *testing.T, td *tasks.Deps, records map[string]MergeabilityRecord) {
+	t.Helper()
+	store := &integration.Store{}
+	for key, rec := range records {
+		store.Put(key, integration.Record(rec))
+	}
+	if err := integration.Save(td, store); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func loadMergeabilityStore(t *testing.T, td *tasks.Deps) map[string]MergeabilityRecord {
+	t.Helper()
+	store, err := integration.Load(td)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store == nil || len(store.Records) == 0 {
+		return nil
+	}
+	out := make(map[string]MergeabilityRecord, len(store.Records))
+	for k, v := range store.Records {
+		out[k] = MergeabilityRecord(v)
 	}
 	return out
 }

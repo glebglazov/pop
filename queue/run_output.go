@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -272,44 +273,39 @@ func projectMatchesScopedKey(td *tasks.Deps, state *DaemonState, project, key st
 
 func projectSetFromScopedKey(td *tasks.Deps, state *DaemonState, key string) (project, setID string) {
 	setID = setIDFromScopedKey(key)
-	if state != nil {
-		if p := projectForScopedKey(td, state, key); p != "" {
-			return p, setID
-		}
-		for _, rec := range state.Mergeability {
-			if rec.SetID == setID {
-				return rec.Project, setID
-			}
-		}
+	if p := projectForScopedKey(td, state, key); p != "" {
+		return p, setID
+	}
+	if p := integration.ProjectForScopedKey(td, key); p != "" {
+		return p, setID
 	}
 	return "", setID
 }
 
 func projectForScopedKey(td *tasks.Deps, state *DaemonState, key string) string {
-	if state == nil {
-		return ""
-	}
 	setID := setIDFromScopedKey(key)
 	bindings, _ := binding.AllBindings(td)
-	for _, b := range bindings {
-		if b.Project != "" {
-			for _, parked := range state.ParkedSets {
-				if parked.SetID == setID && parked.RuntimePath == b.RuntimePath {
-					return b.Project
+	if state != nil {
+		for _, b := range bindings {
+			if b.Project != "" {
+				for _, parked := range state.ParkedSets {
+					if parked.SetID == setID && parked.RuntimePath == b.RuntimePath {
+						return b.Project
+					}
 				}
 			}
 		}
 	}
-	for _, rec := range state.Mergeability {
-		if rec.SetID == setID {
-			return rec.Project
-		}
+	if p := integration.ProjectForScopedKey(td, key); p != "" {
+		return p
 	}
-	for _, parked := range state.ParkedSets {
-		if parked.SetID == setID {
-			for _, b := range bindings {
-				if b.RuntimePath == parked.RuntimePath {
-					return b.Project
+	if state != nil {
+		for _, parked := range state.ParkedSets {
+			if parked.SetID == setID {
+				for _, b := range bindings {
+					if b.RuntimePath == parked.RuntimePath {
+						return b.Project
+					}
 				}
 			}
 		}

@@ -5,19 +5,23 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
 // CompleteIntegrationSetIDs returns task-set identifiers awaiting queue
 // integration, deduplicated and sorted for shell completion.
 func CompleteIntegrationSetIDs(d *Deps) ([]string, error) {
-	state, err := readDaemonStateForCompletion(d)
-	if err != nil || state == nil || len(state.Mergeability) == 0 {
-		return nil, err
+	if d == nil {
+		d = DefaultDeps()
 	}
-	ids := make([]string, 0, len(state.Mergeability))
-	for _, rec := range state.Mergeability {
-		ids = append(ids, rec.SetID)
+	td := d.Tasks
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
+	ids, err := integration.SetIDsFromStore(td)
+	if err != nil || len(ids) == 0 {
+		return nil, err
 	}
 	return dedupeSortSetIDs(ids), nil
 }
@@ -39,10 +43,6 @@ func CompleteAbandonSetIDs(d *Deps) ([]string, error) {
 // CompleteBindWorktreeSetIDs returns all task-set identifiers (bound or not)
 // for shell completion of `pop tasks bind-worktree`.
 func CompleteBindWorktreeSetIDs(d *Deps) ([]string, error) {
-	state, err := readDaemonStateForCompletion(d)
-	if err != nil {
-		return nil, err
-	}
 	bindings, err := binding.AllBindings(d.Tasks)
 	if err != nil {
 		return nil, err
@@ -52,11 +52,12 @@ func CompleteBindWorktreeSetIDs(d *Deps) ([]string, error) {
 		id := setIDFromScopedKey(key)
 		seen[id] = struct{}{}
 	}
-	if state != nil {
-		for key := range state.Mergeability {
-			id := setIDFromScopedKey(key)
-			seen[id] = struct{}{}
-		}
+	mergeIDs, err := integration.SetIDsFromStore(d.Tasks)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range mergeIDs {
+		seen[id] = struct{}{}
 	}
 	ids := make([]string, 0, len(seen))
 	for id := range seen {

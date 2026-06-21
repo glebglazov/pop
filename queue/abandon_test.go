@@ -71,21 +71,15 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 			Provisioned: true,
 		},
 	})
-	state := &DaemonState{
-		Version: 1,
-		Mergeability: map[string]MergeabilityRecord{
-			key: {
-				Project:     filepath.Base(repo),
-				RuntimePath: wt,
-				SetID:       "set-1",
-				Status:      MergeabilityClean,
-				CheckedAt:   time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
-			},
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
+		key: {
+			Project:     filepath.Base(repo),
+			RuntimePath: wt,
+			SetID:       "set-1",
+			Status:      MergeabilityClean,
+			CheckedAt:   time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
 		},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
+	})
 
 	d := &Deps{Tasks: td}
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
@@ -105,16 +99,12 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 		t.Fatalf("branch still exists: %q", branch)
 	}
 
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
 	afterBindings := loadBindingStore(t, td)
 	if len(afterBindings) != 0 {
 		t.Fatalf("bindings = %+v, want cleared", afterBindings)
 	}
-	if len(after.Mergeability) != 0 {
-		t.Fatalf("mergeability = %+v, want cleared", after.Mergeability)
+	if len(loadMergeabilityStore(t, td)) != 0 {
+		t.Fatalf("mergeability = %+v, want cleared", loadMergeabilityStore(t, td))
 	}
 
 	afterManifest := mustReadFile(t, filepath.Join(tasksDir, "set-1", "index.json"))
@@ -182,21 +172,15 @@ func TestAbandonDoneSetRequiresConfirmationUnlessYes(t *testing.T) {
 			Provisioned: true,
 		},
 	})
-	state := &DaemonState{
-		Version: 1,
-		Mergeability: map[string]MergeabilityRecord{
-			key: {
-				Project:     filepath.Base(repo),
-				RuntimePath: wt,
-				SetID:       "set-1",
-				Status:      MergeabilityClean,
-				CheckedAt:   time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
-			},
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
+		key: {
+			Project:     filepath.Base(repo),
+			RuntimePath: wt,
+			SetID:       "set-1",
+			Status:      MergeabilityClean,
+			CheckedAt:   time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
 		},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
+	})
 	d := &Deps{Tasks: td}
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 
@@ -225,12 +209,8 @@ func TestAbandonDoneSetRequiresConfirmationUnlessYes(t *testing.T) {
 	if got.Noop {
 		t.Fatalf("confirmed result = %+v, want success", got)
 	}
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	if len(after.Mergeability) != 0 || len(loadBindingStore(t, td)) != 0 {
-		t.Fatalf("state = %+v, want binding and mergeability cleared", after)
+	if len(loadMergeabilityStore(t, td)) != 0 || len(loadBindingStore(t, td)) != 0 {
+		t.Fatalf("mergeability = %+v bindings = %+v, want cleared", loadMergeabilityStore(t, td), loadBindingStore(t, td))
 	}
 }
 

@@ -15,14 +15,18 @@ import (
 )
 
 func TestBuildRunViewConfigErrorIsScanError(t *testing.T) {
-	snap := statusFromDecisions([]Decision{
+	td := queueDataDeps(t)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{
 		{
 			Project:            "broken",
 			Reason:             "no ready set",
 			ProjectConfigError: "/repo/broken/.pop.toml: expected value",
 		},
 	}, &DaemonState{Version: 1})
-	snap.Tasks = queueDataDeps(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Tasks = td
 
 	view := BuildRunView(snap, time.Now())
 	if view.IdleCount != 0 {
@@ -62,7 +66,8 @@ func TestFormatRunSummary(t *testing.T) {
 }
 
 func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
-	snap := statusFromDecisions([]Decision{
+	td := queueDataDeps(t)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{
 		{Project: "running", Busy: true, lockStatus: &tasks.RuntimeLockStatus{
 			Locked:   true,
 			Metadata: &tasks.RuntimeLockMetadata{SetID: "set-a", PID: 99},
@@ -72,6 +77,9 @@ func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
 		{Project: "idle-b", Reason: "no ready set"},
 		{Project: "idle-c", Reason: "no ready set"},
 	}, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
 	snap.Tasks = queueDataDeps(t)
 
 	view := BuildRunView(snap, time.Now())
@@ -279,14 +287,18 @@ func TestRecordTerminalOutcomesEmitsUnverifiedDelta(t *testing.T) {
 // TestBuildRunViewUnverifiedBucket checks that a project with an UNVERIFIED set is
 // placed in view.Unverified rather than view.Blocked or view.IdleCount.
 func TestBuildRunViewUnverifiedBucket(t *testing.T) {
-	snap := statusFromDecisions([]Decision{
+	td := queueDataDeps(t)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{
 		{
 			Project:         "pop",
 			Reason:          "awaiting verification",
 			UnverifiedSetID: "set-hitl",
 		},
 	}, &DaemonState{Version: 1})
-	snap.Tasks = queueDataDeps(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Tasks = td
 
 	view := BuildRunView(snap, time.Now())
 

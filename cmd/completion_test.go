@@ -14,6 +14,7 @@ import (
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/spf13/cobra"
 )
 
@@ -225,22 +226,19 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 func TestTaskIntegrateShellCompletionCandidates(t *testing.T) {
 	dir := t.TempDir()
 	td := queueShellCompletionDeps(t, dir)
-	state := &queue.DaemonState{
-		Version: 1,
-		Mergeability: map[string]queue.MergeabilityRecord{
-			"pop|set-ready": {
-				Project: "pop",
-				SetID:   "set-ready",
-				Status:  queue.MergeabilityClean,
-			},
-			"pop|set-conflict": {
-				Project: "pop",
-				SetID:   "set-conflict",
-				Status:  queue.MergeabilityConflicts,
-			},
+	store := &integration.Store{Records: map[string]integration.Record{
+		"pop|set-ready": {
+			Project: "pop",
+			SetID:   "set-ready",
+			Status:  queue.MergeabilityClean,
 		},
-	}
-	if err := queue.WriteDaemonState(td, state); err != nil {
+		"pop|set-conflict": {
+			Project: "pop",
+			SetID:   "set-conflict",
+			Status:  queue.MergeabilityConflicts,
+		},
+	}}
+	if err := integration.Save(td, store); err != nil {
 		t.Fatal(err)
 	}
 

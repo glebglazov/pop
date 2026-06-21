@@ -5,6 +5,7 @@ import (
 
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -51,14 +52,7 @@ func queueUnbindHooks(d *Deps, cfg *config.Config) binding.LifecycleHooks {
 			return scan.RuntimePath, nil
 		},
 		AfterUnbind: func(key, setID string, b binding.Binding, branch string) error {
-			state, err := EnsureDaemonState(d.Tasks)
-			if err != nil {
-				return err
-			}
-			if state.Mergeability != nil {
-				delete(state.Mergeability, key)
-			}
-			if err := WriteDaemonState(d.Tasks, state); err != nil {
+			if err := integration.DeleteRecord(d.Tasks, key); err != nil {
 				return err
 			}
 			return AppendJournalEntry(d.Tasks, JournalEntry{
@@ -74,7 +68,7 @@ func queueUnbindHooks(d *Deps, cfg *config.Config) binding.LifecycleHooks {
 }
 
 func abandonNeedsConfirm(d *Deps, cfg *config.Config, state *DaemonState, setID string, wt WorktreeBinding) (bool, error) {
-	if _, _, ok, err := findIntegrationRecord(state, setID); err != nil {
+	if _, _, ok, err := findIntegrationRecord(d, setID); err != nil {
 		return false, err
 	} else if ok {
 		return true, nil

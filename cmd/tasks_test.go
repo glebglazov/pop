@@ -17,6 +17,7 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -1599,19 +1600,16 @@ func setupOfferIntegrationWorktree(t *testing.T, td *tasks.Deps, status string) 
 		t.Fatalf("save binding: %v", err)
 	}
 
-	// Write a mergeability record via the daemon state.
-	state := &queue.DaemonState{
-		Version: 1,
-		Mergeability: map[string]queue.MergeabilityRecord{
-			key: {
-				RuntimePath: wt,
-				SetID:       setID,
-				Status:      status,
-			},
+	// Write a mergeability record in the shared store.
+	store := &integration.Store{Records: map[string]integration.Record{
+		key: {
+			RuntimePath: wt,
+			SetID:       setID,
+			Status:      status,
 		},
-	}
-	if err := queue.WriteDaemonState(td, state); err != nil {
-		t.Fatalf("write state: %v", err)
+	}}
+	if err := integration.Save(td, store); err != nil {
+		t.Fatalf("save mergeability: %v", err)
 	}
 	return repo, wt, setID
 }

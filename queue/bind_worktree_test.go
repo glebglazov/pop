@@ -293,19 +293,14 @@ func TestIntegrateAdoptedBindingRetainsCheckout(t *testing.T) {
 
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-adopted")
-	if err := WriteDaemonState(td, &DaemonState{
-		Version: 1,
-		Mergeability: map[string]MergeabilityRecord{
-			key: {
-				Project:     filepath.Base(repo),
-				RuntimePath: wt,
-				SetID:       "set-adopted",
-				Status:      MergeabilityClean,
-			},
+	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
+		key: {
+			Project:     filepath.Base(repo),
+			RuntimePath: wt,
+			SetID:       "set-adopted",
+			Status:      MergeabilityClean,
 		},
-	}); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
+	})
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: {
 			RuntimePath: wt,
@@ -347,15 +342,11 @@ func TestIntegrateAdoptedBindingRetainsCheckout(t *testing.T) {
 	}
 
 	// Binding and mergeability must be cleared from state
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
 	if len(loadBindingStore(t, td)) != 0 {
 		t.Fatalf("worktree bindings = %+v, want cleared", loadBindingStore(t, td))
 	}
-	if len(after.Mergeability) != 0 {
-		t.Fatalf("mergeability = %+v, want cleared", after.Mergeability)
+	if len(loadMergeabilityStore(t, td)) != 0 {
+		t.Fatalf("mergeability = %+v, want cleared", loadMergeabilityStore(t, td))
 	}
 
 	// Output should mention "retained"

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -75,7 +76,10 @@ func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
-	snap := statusFromDecisions(decisions, state)
+	snap, err := statusFromDecisions(d, decisions, state)
+	if err != nil {
+		return StatusSnapshot{}, err
+	}
 	cooldowns, err := tasks.ActiveAgentCooldownsWith(d.Tasks, d.now().UTC())
 	if err != nil {
 		return StatusSnapshot{}, err
@@ -85,7 +89,7 @@ func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
 	return snap, nil
 }
 
-func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapshot {
+func statusFromDecisions(d *Deps, decisions []Decision, state *DaemonState) (StatusSnapshot, error) {
 	var snap StatusSnapshot
 	snap.DaemonState = state
 	for _, dec := range decisions {
@@ -124,26 +128,22 @@ func statusFromDecisions(decisions []Decision, state *DaemonState) StatusSnapsho
 	sort.SliceStable(snap.PickedUp, func(i, j int) bool { return snap.PickedUp[i].Project < snap.PickedUp[j].Project })
 	sort.SliceStable(snap.Idle, func(i, j int) bool { return snap.Idle[i].Project < snap.Idle[j].Project })
 	sort.SliceStable(snap.Skipped, func(i, j int) bool { return snap.Skipped[i].Project < snap.Skipped[j].Project })
-	if state != nil {
-		for _, rec := range state.Mergeability {
-			snap.AwaitingIntegration = append(snap.AwaitingIntegration, AwaitingIntegrationSet{
-				Project:     rec.Project,
-				SetID:       rec.SetID,
-				RuntimePath: rec.RuntimePath,
-				Status:      rec.Status,
-				Target:      rec.Target,
-				Source:      rec.Source,
-				CheckedAt:   rec.CheckedAt,
-			})
-		}
-		sort.SliceStable(snap.AwaitingIntegration, func(i, j int) bool {
-			if snap.AwaitingIntegration[i].Project != snap.AwaitingIntegration[j].Project {
-				return snap.AwaitingIntegration[i].Project < snap.AwaitingIntegration[j].Project
-			}
-			return snap.AwaitingIntegration[i].SetID < snap.AwaitingIntegration[j].SetID
+	records, err := integration.AwaitingIntegration(d.Tasks)
+	if err != nil {
+		return StatusSnapshot{}, err
+	}
+	for _, rec := range records {
+		snap.AwaitingIntegration = append(snap.AwaitingIntegration, AwaitingIntegrationSet{
+			Project:     rec.Project,
+			SetID:       rec.SetID,
+			RuntimePath: rec.RuntimePath,
+			Status:      rec.Status,
+			Target:      rec.Target,
+			Source:      rec.Source,
+			CheckedAt:   rec.CheckedAt,
 		})
 	}
-	return snap
+	return snap, nil
 }
 
 // RenderStatus prints a human-readable queue status snapshot.
