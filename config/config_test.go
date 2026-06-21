@@ -325,8 +325,11 @@ crash_retry_delays = ["10s", "1m", "5m"]
 	if cfg.Queue == nil {
 		t.Fatal("expected [queue] section to parse")
 	}
-	if got, want := cfg.Queue.Agents, []string{"claude --model opus4.8", "codex", "opencode"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("queue agents = %#v, want %#v", got, want)
+	if len(cfg.Warnings) != 1 {
+		t.Fatalf("expected 1 warning for deprecated [queue].agents, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+	}
+	if !strings.Contains(cfg.Warnings[0], "[queue] agents") || !strings.Contains(cfg.Warnings[0], "[workload] default_agents") {
+		t.Fatalf("warning = %q, want [queue] agents ignored with pointer to [workload] default_agents", cfg.Warnings[0])
 	}
 	resolved, err := cfg.ResolveQueue()
 	if err != nil {
@@ -464,10 +467,27 @@ func TestResolveQueueDefaults(t *testing.T) {
 			if !reflect.DeepEqual(got.CrashRetryDelays, DefaultQueueCrashRetryDelays) {
 				t.Fatalf("crash retry delays = %#v, want %#v", got.CrashRetryDelays, DefaultQueueCrashRetryDelays)
 			}
-			if len(got.Agents) != 0 {
-				t.Fatalf("config layer should leave default agent selection to command layer, got %#v", got.Agents)
-			}
 		})
+	}
+}
+
+func TestLoadQueueConfigNoAgentsWarning(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[queue]
+poll_interval = "30s"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w, "agents") {
+			t.Fatalf("expected no agents-related warning, got: %v", cfg.Warnings)
+		}
 	}
 }
 

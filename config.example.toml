@@ -65,10 +65,8 @@ projects = [
 # notice_enabled = true
 
 # [queue]
-# Ordered fallback pool for `pop queue run`. Entries use the same preset-shaped
-# grammar as `pop tasks implement --agent`; only the preset name is validated at
-# startup. Missing binaries are skipped later by the queue runtime.
-# agents = ["claude --model opus4.8", "codex", "opencode"]
+# Supervisor timing for `pop queue run`. Agent selection is configured under
+# [workload] default_agents (see above), not in this section.
 # poll_interval = "60s"
 # agent_quota_retry_after = "1h"
 # crash_retry_delays = ["1m", "5m", "15m"]
