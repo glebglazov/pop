@@ -25,6 +25,8 @@ Slices may be 'HITL' or 'AFK'. HITL slices contain ONLY human work — verificat
 
 If a HITL slice needs an artifact built first (a report command, test data, a harness), split it: the agent work goes in an AFK slice, and the HITL slice depends on it via "Blocked by" and contains only the human steps. A HITL slice whose "What to build" describes software is mis-typed. Write the HITL body as instructions to the human — the exact steps to verify.
 
+HITL slices have two healthy roles, at opposite ends of a set. **Setup at the bottom** — the human prepares a harness (secrets, accounts, a device) before agents can run; AFK slices depend on it, so the set sits `BLOCKED` until you act. **Verification at the end** — the agents are done and the human signs off; nothing depends on it, so the set reaches `UNVERIFIED`. Prefer placing HITL at these boundaries. A HITL in the middle is still valid (a genuine mid-flow human decision), but the set will park at `BLOCKED` mid-drain — which is the correct signal that real agent work waits behind a human.
+
 Assign an `effort` to every slice using this named-signal heuristic:
 
 - `heavy` — architectural or cross-cutting refactors, or genuinely tricky algorithms.
