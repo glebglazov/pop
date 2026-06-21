@@ -1794,8 +1794,6 @@ func (m dashboardModel) View() tea.View {
 		return v
 	}
 	var body strings.Builder
-	title := lipgloss.NewStyle().Bold(true).Render("Queue dashboard")
-	fmt.Fprintln(&body, title)
 	if m.err != nil {
 		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
 	}
@@ -1805,29 +1803,34 @@ func (m dashboardModel) View() tea.View {
 		} else {
 			fmt.Fprintln(&body, "No queue-actionable task sets.")
 		}
-		fmt.Fprintln(&body)
+		hint := "h/esc quit"
 		if m.filterMode {
 			ui.WriteInputBox(&body, m.width, m.filterInput.View())
-			fmt.Fprint(&body, ui.HintStyle.Render("esc clear filter"))
-		} else {
-			fmt.Fprint(&body, ui.HintStyle.Render("h/esc quit"))
+			hint = "esc clear filter"
 		}
+		writeDashboardFooter(&body, m.height, ui.HintStyle.Render(hint))
 		content := body.String()
 		v := tea.NewView(content)
 		v.AltScreen = true
 		return v
 	}
-	renderDashboardTable(&body, m.snap.Rows, m.cursor, m.width)
+	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
+	renderDashboardTable(&body, m.snap.Rows, m.cursor, m.width)
+	hint := "j/k move · gg/G top/bottom · l/enter status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · h/esc quit"
+	footer := true
 	if m.bind != nil {
 		renderDashboardBindModal(&body, m.bind)
+		footer = false
 	} else if m.abandon != nil {
 		renderDashboardAbandonModal(&body, m.abandon)
+		footer = false
 	} else if m.filterMode {
 		ui.WriteInputBox(&body, m.width, m.filterInput.View())
-		fmt.Fprint(&body, ui.HintStyle.Render("esc clear filter · j/k navigate"))
-	} else {
-		fmt.Fprint(&body, ui.HintStyle.Render("j/k move · gg/G top/bottom · l/enter status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · h/esc quit"))
+		hint = "esc clear filter · j/k navigate"
+	}
+	if footer {
+		writeDashboardFooter(&body, m.height, ui.HintStyle.Render(hint))
 	}
 	content := body.String()
 	v := tea.NewView(content)
@@ -1835,11 +1838,52 @@ func (m dashboardModel) View() tea.View {
 	return v
 }
 
+func dashboardSummary(rows []DashboardRow) string {
+	total := len(rows)
+	ready := 0
+	running := 0
+	autoDrain := 0
+	integration := 0
+	for _, row := range rows {
+		if row.Status == string(tasks.StatusReady) {
+			ready++
+		}
+		if strings.TrimSpace(row.Drain) != "" {
+			running++
+		}
+		if row.AutoDrain {
+			autoDrain++
+		}
+		if row.integrationBacklog {
+			integration++
+		}
+	}
+	parts := []string{countPhrase(total, "task set", "task sets")}
+	if ready > 0 {
+		parts = append(parts, countPhrase(ready, "ready", "ready"))
+	}
+	if running > 0 {
+		parts = append(parts, countPhrase(running, "running", "running"))
+	}
+	if autoDrain > 0 {
+		parts = append(parts, countPhrase(autoDrain, "auto-drain", "auto-drain"))
+	}
+	if integration > 0 {
+		parts = append(parts, countPhrase(integration, "awaiting integration", "awaiting integration"))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func countPhrase(n int, singular, plural string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", singular)
+	}
+	return fmt.Sprintf("%d %s", n, plural)
+}
+
 // viewDetail renders the full-screen task-set detail view.
 func (m dashboardModel) viewDetail() string {
 	var b strings.Builder
-	title := lipgloss.NewStyle().Bold(true).Render("Queue dashboard")
-	fmt.Fprintln(&b, title)
 	d := m.detail
 	if d.peek != nil {
 		renderTaskTextPeek(&b, d, m.height, m.width)
@@ -1847,21 +1891,21 @@ func (m dashboardModel) viewDetail() string {
 	}
 	if d.loading {
 		fmt.Fprintf(&b, "Loading %s...\n", d.row.SetID)
-		fmt.Fprint(&b, ui.HintStyle.Render("  h/esc back"))
+		writeDashboardFooter(&b, m.height, ui.HintStyle.Render("  h/esc back"))
 		return b.String()
 	}
 	if d.err != nil {
 		fmt.Fprintf(&b, "error loading %s: %v\n", d.row.SetID, d.err)
-		fmt.Fprint(&b, ui.HintStyle.Render("  h/esc back"))
+		writeDashboardFooter(&b, m.height, ui.HintStyle.Render("  h/esc back"))
 		return b.String()
 	}
-	renderDetailContent(&b, d)
+	renderDetailContent(&b, d, m.height)
 	return b.String()
 }
 
 // renderDetailContent renders the task list with cursor indicators for the
 // detail view. The cursor is on the task identified by detailView.cursorID.
-func renderDetailContent(b *strings.Builder, d *detailView) {
+func renderDetailContent(b *strings.Builder, d *detailView, height int) {
 	manifest := d.manifest
 	taskRow := d.taskRow
 
@@ -1872,7 +1916,7 @@ func renderDetailContent(b *strings.Builder, d *detailView) {
 		progress = taskRow.Progress
 	}
 
-	header := fmt.Sprintf("%s  [%s]", d.row.SetID, status)
+	header := fmt.Sprintf("Task · %s  [%s]", d.row.SetID, status)
 	if progress != "" {
 		header += "  " + progress
 	}
@@ -1880,7 +1924,7 @@ func renderDetailContent(b *strings.Builder, d *detailView) {
 
 	if status == tasks.StatusMissing {
 		fmt.Fprintln(b, "  registered task set missing")
-		fmt.Fprint(b, ui.HintStyle.Render("  h/esc back"))
+		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
 		return
 	}
 	if manifest == nil || !manifest.Valid {
@@ -1890,7 +1934,7 @@ func renderDetailContent(b *strings.Builder, d *detailView) {
 				fmt.Fprintf(b, "  - %s\n", e)
 			}
 		}
-		fmt.Fprint(b, ui.HintStyle.Render("  h/esc back"))
+		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
 		return
 	}
 
@@ -1944,7 +1988,7 @@ func renderDetailContent(b *strings.Builder, d *detailView) {
 	if d.statusMsg != "" {
 		fmt.Fprintf(b, "  %s\n", d.statusMsg)
 	}
-	fmt.Fprint(b, ui.HintStyle.Render("  j/k · gg/G top/bottom · l/enter peek · C complete · O open · K skip · h/esc back"))
+	writeDashboardFooter(b, height, ui.HintStyle.Render("  j/k · gg/G top/bottom · l/enter peek · C complete · O open · K skip · h/esc back"))
 }
 
 func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int) {
@@ -1956,7 +2000,7 @@ func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int) {
 	fmt.Fprintln(b, header)
 	if p.loading {
 		fmt.Fprintln(b, "  loading task text...")
-		fmt.Fprint(b, ui.HintStyle.Render("  h/esc back"))
+		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
 		return
 	}
 	if p.err != nil {
@@ -1964,7 +2008,7 @@ func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int) {
 		if p.path != "" {
 			fmt.Fprintf(b, "  %s\n", p.path)
 		}
-		fmt.Fprint(b, ui.HintStyle.Render("  h/esc back"))
+		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
 		return
 	}
 	if p.path != "" {
@@ -1998,7 +2042,7 @@ func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int) {
 	if maxScroll > 0 {
 		position = fmt.Sprintf(" · %d/%d", p.scroll+1, len(lines))
 	}
-	fmt.Fprint(b, ui.HintStyle.Render("  j/k · C-d/C-u · gg/G · h/esc back"+position))
+	writeDashboardFooter(b, height, ui.HintStyle.Render("  j/k · C-d/C-u · gg/G · h/esc back"+position))
 }
 
 func taskTextPeekLines(text string) []string {
@@ -2088,7 +2132,7 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal) {
 }
 
 func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
-	headers := []string{"project", "task set", "status", "worktree", "drain", ""}
+	headers := []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", "DRAIN", ""}
 	widths := []int{len(headers[0]), len(headers[1]), len(headers[2]), len(headers[3]), len(headers[4])}
 	widths = append(widths, len(headers[5]))
 	for _, row := range rows {
@@ -2100,6 +2144,7 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
 		}
 	}
 	fmt.Fprintf(w, "%s\n", truncateToWidth("  "+dashboardTableLine(headers, widths), width))
+	fmt.Fprintf(w, "%s\n", truncateToWidth("  "+dashboardTableSeparator(widths), width))
 	for i, row := range rows {
 		var prefix string
 		if i == cursor {
@@ -2110,6 +2155,22 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
 		line := truncateToWidth(prefix+dashboardTableLine(dashboardRowValues(row), widths), width)
 		fmt.Fprintf(w, "%s\n", line)
 	}
+}
+
+func writeDashboardFooter(b *strings.Builder, height int, hint string) {
+	if height > 0 {
+		lines := strings.Count(b.String(), "\n")
+		for lines < height-1 {
+			b.WriteByte('\n')
+			lines++
+		}
+		if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+			b.WriteByte('\n')
+		}
+	} else if b.Len() > 0 {
+		b.WriteByte('\n')
+	}
+	fmt.Fprint(b, hint)
 }
 
 // truncateToWidth clips a rendered line that overflows the viewport, replacing
@@ -2141,6 +2202,14 @@ func dashboardTableLine(values []string, widths []int) string {
 	parts := make([]string, len(values))
 	for i, v := range values {
 		parts[i] = padDashboardCell(v, widths[i])
+	}
+	return strings.Join(parts, "  ")
+}
+
+func dashboardTableSeparator(widths []int) string {
+	parts := make([]string, len(widths))
+	for i, width := range widths {
+		parts[i] = strings.Repeat("-", width)
 	}
 	return strings.Join(parts, "  ")
 }

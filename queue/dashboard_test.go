@@ -317,6 +317,82 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 	}
 }
 
+func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "set", Status: "READY", Worktree: "main", Drain: "picked up", AutoDrain: true, cursorKey: "pop\x00set"},
+		{Project: "pop", SetID: "done", Status: "DONE · clean", Worktree: "main", integrationBacklog: true, cursorKey: "pop\x00done"},
+	}})
+	m.width = 120
+	m.height = 8
+
+	view := m.View().Content
+	if strings.Contains(view, "Queue dashboard") {
+		t.Fatalf("task-set list should use summary instead of dashboard title:\n%s", view)
+	}
+	if !strings.Contains(view, "Queue · 2 task sets · 1 ready · 1 running · 1 auto-drain · 1 awaiting integration") {
+		t.Fatalf("task-set list should render useful summary:\n%s", view)
+	}
+	for _, want := range []string{"PROJECT  TASK SET  STATUS", "-------  --------  ------"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view missing %q:\n%s", want, view)
+		}
+	}
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("line count = %d, want %d:\n%s", got, want, view)
+	}
+	if !strings.Contains(lines[len(lines)-1], "j/k move") {
+		t.Fatalf("shortcut legend should be on bottom line:\n%s", view)
+	}
+	if got, want := dashboardTestLineIndex(lines, "PROJECT"), 2; got != want {
+		t.Fatalf("task-set table header line = %d, want %d:\n%s", got, want, view)
+	}
+}
+
+func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) {
+	manifest := &tasks.Manifest{
+		Valid: true,
+		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Title: "First", Type: "AFK", Status: "open"}},
+	}
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "set-normal", Status: "READY", cursorKey: "pop\x00set-normal"},
+	}})
+	m.width = 120
+	m.height = 8
+	m.detail = &detailView{
+		row:      m.snap.Rows[0],
+		manifest: manifest,
+		cursorID: "01-a",
+	}
+
+	view := m.View().Content
+	if strings.Contains(view, "Queue dashboard") {
+		t.Fatalf("detail view should not render dashboard title:\n%s", view)
+	}
+	if !strings.Contains(view, "Task · set-normal") {
+		t.Fatalf("detail view should render task prefix:\n%s", view)
+	}
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("line count = %d, want %d:\n%s", got, want, view)
+	}
+	if !strings.Contains(lines[len(lines)-1], "C complete") {
+		t.Fatalf("detail shortcut legend should be on bottom line:\n%s", view)
+	}
+	if got, want := dashboardTestLineIndex(lines, "STATUS"), 2; got != want {
+		t.Fatalf("detail table header line = %d, want %d:\n%s", got, want, view)
+	}
+}
+
+func dashboardTestLineIndex(lines []string, needle string) int {
+	for i, line := range lines {
+		if strings.Contains(line, needle) {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestDashboardQAndSAreUnbound(t *testing.T) {
 	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set", Status: "READY", cursorKey: "pop\x00set"},
@@ -513,7 +589,7 @@ func TestDashboardDetailViewRendersTaskList(t *testing.T) {
 		cursorID: "01-a",
 	}
 	var rendered strings.Builder
-	renderDetailContent(&rendered, d)
+	renderDetailContent(&rendered, d, 0)
 	out := rendered.String()
 
 	for _, want := range []string{"set-normal  [READY]  1/2 done, 1 open", "STATUS", "01-a", "02-b", "01-a"} {
@@ -1692,7 +1768,7 @@ func TestDetailViewOverrideStatusRendered(t *testing.T) {
 		statusMsg: "completed 01-a",
 	}
 	var b strings.Builder
-	renderDetailContent(&b, d)
+	renderDetailContent(&b, d, 0)
 	out := b.String()
 	if !strings.Contains(out, "completed 01-a") {
 		t.Fatalf("statusMsg not rendered:\n%s", out)
