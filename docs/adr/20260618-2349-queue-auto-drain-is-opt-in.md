@@ -32,7 +32,7 @@ Invert the consent model and add a hands-on control surface:
   of its Auto-drain bit — Auto-drain gates only the daemon's autopilot, never
   the human.
 - The dashboard's `i` reuses the Queue's per-set drain-spawn (provision a
-  managed worktree for a worktree-ready project, else drain the Queue base in
+  managed worktree for a worktree-ready project, else drain the Execution base in
   place), so manual and automatic drains share one provisioning module and
   identical binding semantics; the only difference is human-trigger vs the
   Auto-drain gate.

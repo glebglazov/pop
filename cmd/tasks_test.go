@@ -956,6 +956,66 @@ func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
 	_ = root
 }
 
+func TestRunTasksCmdWorktreeReadyDefaultsManagedWorktree(t *testing.T) {
+	root := setupRunTaskCmdFixture(t)
+	agent := writeRunTaskFakeAgent(t, root)
+	writeFileCmd(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
+
+	resetTaskFlags()
+	taskAgentCmd = agent
+	t.Cleanup(resetTaskFlags)
+
+	if err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false); err != nil {
+		t.Fatalf("run task set: %v", err)
+	}
+
+	store, err := binding.Load(tasks.DefaultDeps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, ok := store.Get(binding.Key(id, "demo"))
+	if !ok {
+		t.Fatalf("missing binding for demo: %+v", store.Bindings)
+	}
+	if !b.Provisioned {
+		t.Fatalf("binding Provisioned = false, want managed worktree: %+v", b)
+	}
+	if b.RuntimePath == "" || b.RuntimePath == root {
+		t.Fatalf("runtime path = %q, want managed worktree distinct from %q", b.RuntimePath, root)
+	}
+}
+
+func TestRunTasksCmdInlineBypassesWorktreeReadyDefault(t *testing.T) {
+	root := setupRunTaskCmdFixture(t)
+	agent := writeRunTaskFakeAgent(t, root)
+	writeFileCmd(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
+
+	resetTaskFlags()
+	taskAgentCmd = agent
+	taskInline = true
+	t.Cleanup(resetTaskFlags)
+
+	if err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false); err != nil {
+		t.Fatalf("run task set: %v", err)
+	}
+
+	store, err := binding.Load(tasks.DefaultDeps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := store.Get(binding.Key(id, "demo")); ok {
+		t.Fatalf("unexpected worktree binding for inline run: %+v", b)
+	}
+}
+
 func TestRunTasksCmdRejectsRelativeTaskSetPath(t *testing.T) {
 	root := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
@@ -1259,12 +1319,14 @@ func resetTaskFlags() {
 	taskProject = ""
 	taskPath = ""
 	taskDefPath = ""
+	taskRuntimePath = ""
 	taskStatusArchived = false
 	taskAgentPreset = ""
 	taskAgentPresets = nil
 	taskAgentCmd = ""
 	taskAgentOutput = ""
 	taskRunYes = false
+	taskInline = false
 	taskAllowDirty = tasks.DirtyRuntimeContinue
 	taskExportOutput = ""
 	taskImportAs = ""

@@ -267,7 +267,7 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 	// cached) while resolving the representative — instead of forking `git branch
 	// --show-current` per repo, which scanGitCache cannot memoize. The lookup
 	// falls back to that fork only when the representative is not among the
-	// repo's listed worktrees (e.g. a queue_base checkout outside it).
+	// repo's listed worktrees (e.g. an execution_base checkout outside it).
 	repBranch := ""
 	if rep != nil {
 		if b, ok := worktreeBranchByPath(d, scans[0].ProjectPath)[rep.RuntimePath]; ok {
@@ -1337,7 +1337,7 @@ func LaunchDashboardDrain(d *Deps, cfg *config.Config, row DashboardRow) (Dashbo
 			if bare {
 				return DashboardDrainResult{}, fmt.Errorf("%s", repoScanReason)
 			}
-			return DashboardDrainResult{}, fmt.Errorf("no queue base checkout")
+			return DashboardDrainResult{}, fmt.Errorf("no execution base checkout")
 		}
 		dec.scan = *rep
 		dec.WorktreeReady, _ = readRepoConfig(d, rep.ProjectPath)

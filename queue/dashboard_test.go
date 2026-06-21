@@ -766,7 +766,7 @@ func TestDashboardBaseRefsMainMasterFirst(t *testing.T) {
 	}
 }
 
-func TestDashboardLaunchDrainRoutesPlainQueueBaseAndRecordsPane(t *testing.T) {
+func TestDashboardLaunchDrainRoutesPlainExecutionBaseAndRecordsPane(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "plain-drain", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -777,7 +777,7 @@ func TestDashboardLaunchDrainRoutesPlainQueueBaseAndRecordsPane(t *testing.T) {
 		t.Fatalf("LaunchDashboardDrain: %v", err)
 	}
 	if canon(t, d, result.RuntimePath) != canon(t, d, repo) {
-		t.Fatalf("runtime = %q, want queue base %q", result.RuntimePath, repo)
+		t.Fatalf("runtime = %q, want execution base %q", result.RuntimePath, repo)
 	}
 	cmd, ok := extractSpawnCommand(rt)
 	if !ok {
@@ -1037,7 +1037,7 @@ func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 	}
 }
 
-func TestDashboardUnbindManagedTearsDownAndRefreshShowsQueueBase(t *testing.T) {
+func TestDashboardUnbindManagedTearsDownAndRefreshShowsExecutionBase(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "dashboard-unbind-managed", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
 	})
@@ -1090,7 +1090,7 @@ func TestDashboardUnbindManagedTearsDownAndRefreshShowsQueueBase(t *testing.T) {
 		t.Fatalf("BuildDashboard: %v", err)
 	}
 	if len(snap.Rows) == 0 || canon(t, d, snap.Rows[0].runtimePath) != canon(t, d, repo) || snap.Rows[0].Worktree != "main" {
-		t.Fatalf("dashboard rows = %+v, want queue base worktree", snap.Rows)
+		t.Fatalf("dashboard rows = %+v, want execution base worktree", snap.Rows)
 	}
 }
 
@@ -1199,7 +1199,7 @@ func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
 	}
 }
 
-func TestDashboardLaunchDrainRefusesBareWithoutQueueBase(t *testing.T) {
+func TestDashboardLaunchDrainRefusesBareWithoutExecutionBase(t *testing.T) {
 	_, wts := initBareRepoWithWorktrees(t, 1)
 	checkout := wts[0]
 	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdg"))

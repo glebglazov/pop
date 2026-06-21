@@ -2251,14 +2251,14 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.WorktreeReady || got.AutoMergeClean || got.QueueBase {
+		if got.WorktreeReady || got.AutoMergeClean || got.ExecutionBase {
 			t.Errorf("expected zero defaults, got %+v", got)
 		}
 	})
 }
 
 func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
-	// Global override flips worktree_ready and queue_base for a repo with no .pop.toml
+	// Global override flips worktree_ready and execution_base for a repo with no .pop.toml
 	dir := t.TempDir()
 	real := deps.NewRealFileSystem()
 	d := &Deps{FS: &deps.MockFileSystem{
@@ -2269,7 +2269,7 @@ func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
 	}}
 	cfg := &Config{
 		Repo: map[string]RepoOverrideConfig{
-			dir: {WorktreeReady: boolPtr(true), QueueBase: boolPtr(true)},
+			dir: {WorktreeReady: boolPtr(true), ExecutionBase: boolPtr(true)},
 		},
 	}
 	got, err := cfg.ResolveRepoConfig(d, dir)
@@ -2279,8 +2279,8 @@ func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
 	if !got.WorktreeReady {
 		t.Errorf("WorktreeReady = false, want true")
 	}
-	if !got.QueueBase {
-		t.Errorf("QueueBase = false, want true")
+	if !got.ExecutionBase {
+		t.Errorf("ExecutionBase = false, want true")
 	}
 }
 
@@ -2317,14 +2317,14 @@ func TestResolveRepoConfigCanonicalizationBareRepo(t *testing.T) {
 	}
 }
 
-func TestResolveRepoConfigQueueBasePerCheckout(t *testing.T) {
-	// queue_base=true block keyed by /bare/main must NOT propagate to /bare/feature.
+func TestResolveRepoConfigExecutionBasePerCheckout(t *testing.T) {
+	// execution_base=true block keyed by /bare/main must NOT propagate to /bare/feature.
 	bareDir := "/bare"
 	d := &Deps{FS: makeFSWithBare(bareDir)}
 
 	cfg := &Config{
 		Repo: map[string]RepoOverrideConfig{
-			bareDir + "/main": {QueueBase: boolPtr(true), WorktreeReady: boolPtr(true)},
+			bareDir + "/main": {ExecutionBase: boolPtr(true), WorktreeReady: boolPtr(true)},
 		},
 	}
 
@@ -2332,8 +2332,8 @@ func TestResolveRepoConfigQueueBasePerCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !mainGot.QueueBase {
-		t.Errorf("main: QueueBase = false, want true (keyed checkout)")
+	if !mainGot.ExecutionBase {
+		t.Errorf("main: ExecutionBase = false, want true (keyed checkout)")
 	}
 	if !mainGot.WorktreeReady {
 		t.Errorf("main: WorktreeReady = false, want true")
@@ -2343,8 +2343,8 @@ func TestResolveRepoConfigQueueBasePerCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if featureGot.QueueBase {
-		t.Errorf("feature: QueueBase = true, want false (not the keyed checkout)")
+	if featureGot.ExecutionBase {
+		t.Errorf("feature: ExecutionBase = true, want false (not the keyed checkout)")
 	}
 	if !featureGot.WorktreeReady {
 		t.Errorf("feature: WorktreeReady = false, want true (override still applies)")
@@ -2383,6 +2383,32 @@ projects = ["should-warn"]
 	}
 	if !found {
 		t.Errorf("expected warning about unknown key 'projects', got: %v", cfg.Warnings)
+	}
+}
+
+func TestRepoBlockQueueBaseHardError(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	content := `
+[repo."/path/to/repo"]
+queue_base = true
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(configPath)
+	if err == nil || !strings.Contains(err.Error(), "queue_base was renamed to execution_base") {
+		t.Fatalf("Load err = %v, want queue_base rename error", err)
+	}
+}
+
+func TestRepoLocalExecutionBaseHardError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("execution_base = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadRepoConfigWith(&Deps{FS: deps.NewRealFileSystem()}, root)
+	if err == nil || !strings.Contains(err.Error(), "execution_base is only valid in global") {
+		t.Fatalf("LoadRepoConfig err = %v, want global-only execution_base error", err)
 	}
 }
 

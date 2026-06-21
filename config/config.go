@@ -322,10 +322,10 @@ type Config struct {
 type RepoConfig struct {
 	WorktreeReady  bool `toml:"worktree_ready"`
 	AutoMergeClean bool `toml:"auto_merge_clean"`
-	// QueueBase marks a specific checkout as the base for queue scheduling.
-	// In .pop.toml it applies repo-wide; in a [repo."<path>"] global override
-	// block it applies only to the keyed checkout.
-	QueueBase bool `toml:"queue_base"`
+	// ExecutionBase marks a specific checkout as the base for task execution.
+	// It is meaningful only in a [repo."<path>"] global override block keyed to
+	// that checkout. Repo-local .pop.toml cannot name a machine-specific base.
+	ExecutionBase bool `toml:"-"`
 }
 
 // RepoOverrideConfig is the shape of a [repo."<path>"] block in global
@@ -335,9 +335,9 @@ type RepoConfig struct {
 type RepoOverrideConfig struct {
 	WorktreeReady  *bool `toml:"worktree_ready"`
 	AutoMergeClean *bool `toml:"auto_merge_clean"`
-	// QueueBase is meaningful only for the specific checkout path that keys
+	// ExecutionBase is meaningful only for the specific checkout path that keys
 	// this block; it is not propagated to other worktrees of the same repo.
-	QueueBase *bool `toml:"queue_base"`
+	ExecutionBase *bool `toml:"execution_base"`
 }
 
 // LoadRepoConfig reads repo-root .pop.toml. A missing file is not an error and
@@ -358,8 +358,12 @@ func LoadRepoConfigWith(d *Deps, repoRoot string) (RepoConfig, error) {
 		return RepoConfig{}, err
 	}
 	var cfg RepoConfig
-	if _, err := toml.Decode(string(data), &cfg); err != nil {
+	md, err := toml.Decode(string(data), &cfg)
+	if err != nil {
 		return RepoConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := validateRepoConfigMetadata(path, md); err != nil {
+		return RepoConfig{}, err
 	}
 	return cfg, nil
 }
@@ -399,9 +403,9 @@ func repoIdentity(d *Deps, path string) string {
 //	global [repo."<path>"] override → .pop.toml → built-in default (false for all bools)
 //
 // Fields are merged individually; a nil pointer in the override means "not set"
-// and the next layer wins.  queue_base from a global override block is applied
-// only when the override's key path exactly matches checkoutPath (per-checkout
-// semantics); queue_base from .pop.toml is always applied.
+// and the next layer wins. execution_base exists only in global override blocks
+// and is applied only when the override's key path exactly matches checkoutPath
+// (per-checkout semantics).
 //
 // A missing .pop.toml is not an error. A malformed .pop.toml degrades to the
 // zero config (the error is returned so callers may surface a warning).
@@ -411,7 +415,7 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 
 	// Find the matching global override block, if any.
 	var override *RepoOverrideConfig
-	var queueBaseApplies bool
+	var executionBaseApplies bool
 	if c != nil {
 		for rawKey, block := range c.Repo {
 			keyCanon := canonicalPath(d, rawKey)
@@ -421,7 +425,7 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 			}
 			b := block
 			override = &b
-			queueBaseApplies = (keyCanon == canon)
+			executionBaseApplies = (keyCanon == canon)
 		}
 	}
 
@@ -437,8 +441,8 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 		if override.AutoMergeClean != nil {
 			result.AutoMergeClean = *override.AutoMergeClean
 		}
-		if override.QueueBase != nil && queueBaseApplies {
-			result.QueueBase = *override.QueueBase
+		if override.ExecutionBase != nil && executionBaseApplies {
+			result.ExecutionBase = *override.ExecutionBase
 		}
 	}
 
@@ -692,6 +696,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	if err := validateEffortConfigMetadata(path, md); err != nil {
 		return nil, err
 	}
+	if err := validateRepoConfigMetadata(path, md); err != nil {
+		return nil, err
+	}
 	cfg.Warnings = append(cfg.Warnings, repoBlockWarnings(path, md)...)
 
 	selectSectionUsed := cfg.Select != nil
@@ -739,6 +746,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		if err := validateEffortConfigMetadata(expanded, includedMD); err != nil {
 			return nil, fmt.Errorf("loading include %q: %w", include, err)
 		}
+		if err := validateRepoConfigMetadata(expanded, includedMD); err != nil {
+			return nil, fmt.Errorf("loading include %q: %w", include, err)
+		}
 		cfg.Warnings = append(cfg.Warnings, repoBlockWarnings(expanded, includedMD)...)
 		cfg.Warnings = append(cfg.Warnings, includeFileWarnings(expanded, &included, d)...)
 
@@ -771,6 +781,21 @@ func validateEffortConfigMetadata(path string, md toml.MetaData) error {
 	return nil
 }
 
+func validateRepoConfigMetadata(path string, md toml.MetaData) error {
+	for _, key := range md.Undecoded() {
+		if len(key) == 1 && key[0] == "queue_base" {
+			return fmt.Errorf("%s: queue_base was renamed to execution_base", path)
+		}
+		if len(key) == 1 && key[0] == "execution_base" {
+			return fmt.Errorf("%s: execution_base is only valid in global [repo.%q] override blocks", path, "<path>")
+		}
+		if len(key) >= 3 && key[0] == "repo" && key[2] == "queue_base" {
+			return fmt.Errorf("%s: [repo.%q] queue_base was renamed to execution_base", path, key[1])
+		}
+	}
+	return nil
+}
+
 // repoBlockWarnings returns load-time warnings for unknown keys inside
 // [repo."<path>"] blocks. Only the RepoConfig subset is valid there; any
 // other key is silently degraded but surfaced as a warning.
@@ -788,7 +813,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []string {
 		}
 		seen[uniq] = true
 		warnings = append(warnings, fmt.Sprintf(
-			"%s: [repo.%q] unknown key %q ignored (only worktree_ready, auto_merge_clean, queue_base are accepted)",
+			"%s: [repo.%q] unknown key %q ignored (only worktree_ready, auto_merge_clean, execution_base are accepted)",
 			path, key[1], key[2],
 		))
 	}

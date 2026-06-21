@@ -95,9 +95,9 @@ func TestDecideRepoDispatchesBareMultiWorktreeCollapsesToOneDrain(t *testing.T) 
 	_, wts := initBareRepoWithWorktrees(t, 3)
 	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
 
-	// queue_base override pins the repo's base to the first worktree.
+	// execution_base override pins the repo's base to the first worktree.
 	cfg := &config.Config{Repo: map[string]config.RepoOverrideConfig{
-		wts[0]: {QueueBase: ptrBool(true)},
+		wts[0]: {ExecutionBase: ptrBool(true)},
 	}}
 	scans := scansForCheckouts(wts, "/def")
 
@@ -109,7 +109,7 @@ func TestDecideRepoDispatchesBareMultiWorktreeCollapsesToOneDrain(t *testing.T) 
 			actionable = append(actionable, dec)
 		}
 		if dec.Reason == repoScanReason {
-			t.Fatalf("a repo with a queue_base must not be skipped: %+v", dec)
+			t.Fatalf("a repo with an execution_base must not be skipped: %+v", dec)
 		}
 	}
 	if len(actionable) != 1 {
@@ -119,7 +119,7 @@ func TestDecideRepoDispatchesBareMultiWorktreeCollapsesToOneDrain(t *testing.T) 
 		t.Fatalf("drain set = %q, want top", actionable[0].TaskSetID)
 	}
 	if got := canon(t, d, actionable[0].scan.RuntimePath); got != canon(t, d, wts[0]) {
-		t.Fatalf("drain routed to %q, want queue_base checkout %q", got, canon(t, d, wts[0]))
+		t.Fatalf("drain routed to %q, want execution_base checkout %q", got, canon(t, d, wts[0]))
 	}
 }
 
@@ -158,7 +158,7 @@ func TestDecideRepoDispatchesBindingRoutesRegardlessOfWorktreeReady(t *testing.T
 	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
 
 	// A per-set binding exists even though the bare repo is not worktree-ready
-	// and has no queue_base: the binding is the universal drain router.
+	// and has no execution_base: the binding is the universal drain router.
 	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, wts[0])
 	if err != nil {
 		t.Fatal(err)

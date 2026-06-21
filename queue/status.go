@@ -47,7 +47,7 @@ type AwaitingIntegrationSet struct {
 }
 
 // SkippedRepo is a repository the Queue refused to schedule because it could
-// resolve no representative checkout (a bare repo with no queue_base and no
+// resolve no representative checkout (a bare repo with no execution_base and no
 // per-set Worktree binding). It is reported, never scheduled (ADR-0035).
 type SkippedRepo struct {
 	Project string

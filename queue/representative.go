@@ -12,9 +12,9 @@ import (
 
 // repoScanReason is the reason emitted when a repository cannot be scheduled
 // because no representative checkout could be resolved (ADR-0035): a bare repo
-// with no `queue_base` override and no per-set Worktree binding. The Queue
+// with no `execution_base` override and no per-set Worktree binding. The Queue
 // never guesses a checkout, so it refuses and reports.
-const repoScanReason = "needs queue_base; skipped"
+const repoScanReason = "needs execution_base; skipped"
 
 // decideRepoDispatches collapses one repository's in-scope checkouts (its
 // worktrees, grouped by Repository identity) into a single scheduling unit and
@@ -22,7 +22,7 @@ const repoScanReason = "needs queue_base; skipped"
 // repository per Ready set — never once per worktree (ADR-0035).
 //
 // The drain routes to a single representative checkout resolved in order:
-// per-set Worktree binding → explicit queue_base checkout → the repo's git main
+// per-set Worktree binding → explicit execution_base checkout → the repo's git main
 // worktree (non-bare) → refuse and report.
 func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, state *DaemonState, now time.Time) []Decision {
 	if len(scans) == 0 {
@@ -41,7 +41,7 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, stat
 	extraBusy, runningElsewhere := repoBusyAcrossCheckouts(d, scans, rep, name)
 
 	if rep == nil {
-		// Bare repo with no queue_base. A per-set Worktree binding is still a
+		// Bare repo with no execution_base. A per-set Worktree binding is still a
 		// valid drain router (decoupled from worktree_ready); without one the
 		// repository is refused and reported.
 		return append(extraBusy, decideBareWithoutBase(d, cfg, scans, name, state, now, runningElsewhere)...)
@@ -56,16 +56,16 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, stat
 // resolveRepresentative resolves the repository's representative base checkout
 // (the one the drain routes to when no per-set binding applies):
 //
-//	explicit queue_base checkout → git main worktree (non-bare) → none (refuse).
+//	explicit execution_base checkout → git main worktree (non-bare) → none (refuse).
 //
-// A nil scan with bare=true means the repository is bare and has no queue_base
+// A nil scan with bare=true means the repository is bare and has no execution_base
 // override: it has no git main worktree, so it is refused unless a per-set
 // binding routes the drain elsewhere.
 func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*projectScan, bool, error) {
-	// 1. explicit queue_base checkout (task 01's resolved config).
+	// 1. explicit execution_base checkout (task 01's resolved config).
 	for i := range scans {
 		rc, err := resolveRepoConfigFor(d, cfg, scans[i].ProjectPath)
-		if err == nil && rc.QueueBase {
+		if err == nil && rc.ExecutionBase {
 			return &scans[i], false, nil
 		}
 	}
@@ -83,6 +83,47 @@ func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*p
 		return nil, false, fmt.Errorf("no git main worktree")
 	}
 	return scanForCheckout(d, scans, mainPath), false, nil
+}
+
+// ResolveExecutionBasePath resolves the repository checkout used as the base
+// when no per-set Worktree binding applies: explicit execution_base override,
+// then the git main worktree for non-bare repositories. It is the foreground
+// counterpart to resolveRepresentative for callers that have one checkout
+// rather than a queue scan group.
+func ResolveExecutionBasePath(d *Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	repoKey, err := resolveRepoKey(d, checkoutPath)
+	if err != nil {
+		return "", false, err
+	}
+	if cfg != nil {
+		for rawKey, block := range cfg.Repo {
+			if block.ExecutionBase == nil || !*block.ExecutionBase {
+				continue
+			}
+			candidate, err := tasks.NormalizeProjectPathWith(d.Tasks, rawKey)
+			if err != nil {
+				continue
+			}
+			candidateKey, err := resolveRepoKey(d, candidate)
+			if err != nil {
+				continue
+			}
+			if candidateKey == repoKey {
+				return candidate, false, nil
+			}
+		}
+	}
+	mainPath, bare, err := gitMainWorktree(d, checkoutPath)
+	if err != nil || bare || mainPath == "" {
+		return mainPath, bare, err
+	}
+	return mainPath, false, nil
 }
 
 // MainWorktreeBranch returns the branch currently checked out in the
@@ -254,7 +295,7 @@ func applyBindingRouting(d *Deps, scans []projectScan, state *DaemonState, decis
 	}
 }
 
-// decideBareWithoutBase handles a bare repository with no queue_base: each Ready
+// decideBareWithoutBase handles a bare repository with no execution_base: each Ready
 // set with a per-set binding routes to that bound checkout; any Ready set
 // without one leaves the repository refused and reported (a single skip
 // decision), never scheduled.
@@ -349,7 +390,7 @@ func repoName(scans []projectScan, rep *projectScan) string {
 }
 
 // resolveRepoConfigFor resolves the effective RepoConfig for a checkout, merging
-// global [repo."<path>"] overrides (task 01) over repo-root .pop.toml. queue_base
+// global [repo."<path>"] overrides (task 01) over repo-root .pop.toml. execution_base
 // is honored only for the keyed checkout path.
 func resolveRepoConfigFor(d *Deps, cfg *config.Config, checkoutPath string) (config.RepoConfig, error) {
 	pd := d.Project

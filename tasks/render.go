@@ -21,17 +21,15 @@ type RefreshResult struct {
 	ShowArchived     bool
 }
 
-// CheckoutStatus describes the checkout a drain started here would run in — the
-// answer to "if I implement here, worktree or inline?". It is resolved by the
-// command layer the same way `pop tasks implement` resolves its runtime
-// checkout, so status never disagrees with what a drain would actually do.
+// CheckoutStatus describes where a whole-set implement started here would run.
 // Worktree is true for a linked git worktree (implement adopts it; the set is
-// integrateable) and false for trunk (implement drains inline). Branch is the
-// worktree's checked-out branch, empty when detached or on trunk.
+// integrateable). WorktreeReady means an unbound whole-set drain from the base
+// checkout provisions a managed worktree by default.
 type CheckoutStatus struct {
-	Path     string
-	Worktree bool
-	Branch   string
+	Path          string
+	Worktree      bool
+	Branch        string
+	WorktreeReady bool
 }
 
 // Refresh discovers Task sets, auto-registers them, and builds table rows.
@@ -238,12 +236,9 @@ func render(out *output, result *RefreshResult) {
 	renderArchivedFooter(out, result)
 }
 
-// renderCheckout reports where a `pop tasks implement` started here would drain:
-// an adopted worktree (integrateable) or trunk (inline). It deliberately omits
-// the queue's worktree_ready capability and existing bindings — those describe
-// the AFK provisioner and project actuality, not where this attended drain
-// lands (see ADR-0036's trigger-vs-checkout split). Surfaced via `pop queue
-// status` instead.
+// renderCheckout reports where a whole-set `pop tasks implement` started here
+// would drain by default. Single task-file runs remain current-checkout
+// operations.
 func renderCheckout(out *output, cs *CheckoutStatus) {
 	if cs == nil {
 		return
@@ -259,7 +254,11 @@ func renderCheckout(out *output, cs *CheckoutStatus) {
 		out.line(ansiCyan, "Checkout: %s — implement adopts it (integrateable)", where)
 		return
 	}
-	out.line(ansiDim, "Checkout: trunk — implement drains inline")
+	if cs.WorktreeReady {
+		out.line(ansiCyan, "Checkout: execution base — whole-set implement provisions a worktree")
+		return
+	}
+	out.line(ansiDim, "Checkout: execution base — whole-set implement drains inline")
 }
 
 func renderArchivedFooter(out *output, result *RefreshResult) {
