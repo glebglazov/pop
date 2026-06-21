@@ -58,7 +58,7 @@ func TestDeriveStatusAllDoneIsDoneNotDeferred(t *testing.T) {
 	}
 }
 
-// TestDeriveStatusPrecedence locks DONE → FAILED → READY → DEFERRED → BLOCKED.
+// TestDeriveStatusPrecedence locks DONE → FAILED → READY → DEFERRED → BLOCKED/UNVERIFIED.
 func TestDeriveStatusPrecedence(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -90,10 +90,70 @@ func TestDeriveStatusPrecedence(t *testing.T) {
 			want: StatusDeferred,
 		},
 		{
-			name: "blocked when open but not eligible and not all done-or-skipped",
+			name: "blocked when open AFK gated behind HITL",
 			tasks: []Task{
 				{ID: "01-a", Type: "AFK", Status: "open", BlockedBy: []string{"02-b"}},
 				{ID: "02-b", Type: "HITL", Status: "open"},
+			},
+			want: StatusBlocked,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Manifest{Valid: true, Tasks: tc.tasks}
+			if got := DeriveStatus(m); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeriveStatusUnverifiedVsBlocked covers the terminal-HITL discriminator:
+// UNVERIFIED when no open AFK remains, BLOCKED when an open AFK is still gated.
+func TestDeriveStatusUnverifiedVsBlocked(t *testing.T) {
+	cases := []struct {
+		name  string
+		tasks []Task
+		want  TaskSetStatus
+	}{
+		{
+			name: "terminal HITL only → UNVERIFIED",
+			tasks: []Task{
+				{ID: "01-gate", Type: "HITL", Status: "open"},
+			},
+			want: StatusUnverified,
+		},
+		{
+			name: "all AFK done, HITL open → UNVERIFIED",
+			tasks: []Task{
+				{ID: "01-a", Type: "AFK", Status: "done"},
+				{ID: "02-gate", Type: "HITL", Status: "open"},
+			},
+			want: StatusUnverified,
+		},
+		{
+			name: "AFK done and skipped, HITL open → UNVERIFIED",
+			tasks: []Task{
+				{ID: "01-a", Type: "AFK", Status: "done"},
+				{ID: "02-b", Type: "AFK", Status: "skipped"},
+				{ID: "03-gate", Type: "HITL", Status: "open"},
+			},
+			want: StatusUnverified,
+		},
+		{
+			name: "open AFK gated by HITL → BLOCKED",
+			tasks: []Task{
+				{ID: "01-gate", Type: "HITL", Status: "open"},
+				{ID: "02-a", Type: "AFK", Status: "open", BlockedBy: []string{"01-gate"}},
+			},
+			want: StatusBlocked,
+		},
+		{
+			name: "done AFK + open AFK gated by HITL → BLOCKED",
+			tasks: []Task{
+				{ID: "01-a", Type: "AFK", Status: "done"},
+				{ID: "02-gate", Type: "HITL", Status: "open"},
+				{ID: "03-b", Type: "AFK", Status: "open", BlockedBy: []string{"02-gate"}},
 			},
 			want: StatusBlocked,
 		},

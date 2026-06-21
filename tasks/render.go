@@ -196,7 +196,7 @@ func buildTaskSetRow(reg RegisteredTaskSet, m *Manifest, regIndex int) Row {
 	}
 
 	row.Progress = BuildProgress(m, status)
-	if status == StatusBlocked {
+	if status == StatusBlocked || status == StatusUnverified {
 		row.BlockedReason = BuildBlockedReason(m)
 		if hitl := BlockingHITLTask(m); hitl != nil {
 			row.CompleteHint = completeTaskHint(reg.ID, hitl.File)
@@ -325,7 +325,7 @@ func rowDetail(row Row) string {
 			parts = append(parts, "reset: "+row.ResetHints[0])
 		}
 		return strings.Join(parts, " — ")
-	case StatusBlocked:
+	case StatusBlocked, StatusUnverified:
 		parts := []string{row.Progress}
 		if row.BlockedReason != "" {
 			parts = append(parts, row.BlockedReason)

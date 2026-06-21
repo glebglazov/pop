@@ -248,7 +248,7 @@ func TestBuildArchiveSetSelectionPrechecksDoneOnly(t *testing.T) {
 		"ready":     StatusReady,
 		"deferred":  StatusDeferred,
 		"failed":    StatusFailed,
-		"blocked":   StatusBlocked,
+		"blocked":   StatusUnverified,
 		"malformed": StatusMalformed,
 		"missing":   StatusMissing,
 	} {

@@ -10,13 +10,14 @@ import (
 type TaskSetStatus string
 
 const (
-	StatusMissing   TaskSetStatus = "MISSING"
-	StatusDone      TaskSetStatus = "DONE"
-	StatusMalformed TaskSetStatus = "MALFORMED"
-	StatusFailed    TaskSetStatus = "FAILED"
-	StatusReady     TaskSetStatus = "READY"
-	StatusDeferred  TaskSetStatus = "DEFERRED"
-	StatusBlocked   TaskSetStatus = "BLOCKED"
+	StatusMissing    TaskSetStatus = "MISSING"
+	StatusDone       TaskSetStatus = "DONE"
+	StatusMalformed  TaskSetStatus = "MALFORMED"
+	StatusFailed     TaskSetStatus = "FAILED"
+	StatusReady      TaskSetStatus = "READY"
+	StatusDeferred   TaskSetStatus = "DEFERRED"
+	StatusBlocked    TaskSetStatus = "BLOCKED"
+	StatusUnverified TaskSetStatus = "UNVERIFIED"
 )
 
 // Row is one line in the task status table.
@@ -58,7 +59,12 @@ func DeriveStatus(m *Manifest) TaskSetStatus {
 	if isDeferred(m) {
 		return StatusDeferred
 	}
-	return StatusBlocked
+	// Terminal HITL: all AFK work is done/skipped, only the human-gate remains.
+	// Gating HITL: at least one open AFK task is still waiting behind the gate.
+	if hasOpenAFKTask(m) {
+		return StatusBlocked
+	}
+	return StatusUnverified
 }
 
 // isDeferred reports whether every task is Done or Skipped with at least one
@@ -156,6 +162,16 @@ func isEligible(m *Manifest, task Task) bool {
 		}
 	}
 	return true
+}
+
+// hasOpenAFKTask reports whether any AFK task is still open (eligible or not).
+func hasOpenAFKTask(m *Manifest) bool {
+	for _, task := range m.Tasks {
+		if task.Status == "open" && task.Type == "AFK" {
+			return true
+		}
+	}
+	return false
 }
 
 // BuildProgress returns compact progress text for a row.

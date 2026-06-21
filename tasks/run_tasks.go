@@ -250,7 +250,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				result.SkippedTasks = SkippedTaskIDs(currentRefresh.Manifests[taskSetID])
 				finishRunTaskSet(out, opts.Yes, result)
 				return result, nil
-			case StatusBlocked:
+			case StatusBlocked, StatusUnverified:
 				result.BlockedReason = row.BlockedReason
 				if !opts.Yes {
 					fmt.Fprintln(out)
@@ -366,7 +366,7 @@ func finishRunTaskSet(out io.Writer, yes bool, result *RunTaskSetResult) {
 
 func selectedTaskSetStartsAtHITLGate(refresh *RefreshResult, taskSetID string) bool {
 	row := findRow(refresh, taskSetID)
-	return row != nil && row.Status == StatusBlocked && BlockingHITLTask(refresh.Manifests[taskSetID]) != nil
+	return row != nil && (row.Status == StatusBlocked || row.Status == StatusUnverified) && BlockingHITLTask(refresh.Manifests[taskSetID]) != nil
 }
 
 // selectedTaskSetStartsAtFailedGate reports whether draining re-enters an

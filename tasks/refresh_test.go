@@ -171,8 +171,8 @@ func TestStatusDerivation(t *testing.T) {
 	if statusByID["ready"] != StatusReady {
 		t.Fatalf("ready = %q", statusByID["ready"])
 	}
-	if statusByID["blocked-hitl"] != StatusBlocked {
-		t.Fatalf("blocked = %q", statusByID["blocked-hitl"])
+	if statusByID["blocked-hitl"] != StatusUnverified {
+		t.Fatalf("blocked-hitl = %q, want UNVERIFIED", statusByID["blocked-hitl"])
 	}
 	if statusByID["failed"] != StatusFailed {
 		t.Fatalf("failed = %q", statusByID["failed"])
