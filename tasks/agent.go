@@ -144,6 +144,8 @@ type AgentAdapter interface {
 	RenderOutput(w io.Writer, raw string, format AgentOutputFormat)
 	AssistanceCapability() AgentAssistanceCapability
 	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
+	ReasoningArgs(reasoning string) []string
+	ArgsContainReasoning(args []string) bool
 	// Models returns the preset's curated, recommended-first model aliases that
 	// Pop ships for display. Advisory only; never a validation gate (ADR-0019).
 	Models() []string
@@ -188,10 +190,35 @@ var agentAdapters = map[string]AgentAdapter{
 	),
 }
 
-var claudeEffortModels = map[string][]string{
-	"heavy":    {"opus"},
-	"standard": {"sonnet"},
-	"light":    {"haiku"},
+var claudeEffortModels = map[string][]config.EffortModel{
+	"heavy":    {{Model: "opus", Reasoning: "high"}},
+	"standard": {{Model: "sonnet", Reasoning: "high"}},
+	"light":    {{Model: "haiku", Reasoning: "high"}},
+}
+
+var codexEffortModels = map[string][]config.EffortModel{
+	"heavy":    {{Model: "gpt-5.5", Reasoning: "high"}},
+	"standard": {{Model: "gpt-5.5", Reasoning: "medium"}},
+	"light":    {{Model: "gpt-5.4-mini", Reasoning: "low"}},
+}
+
+var cursorEffortModels = map[string][]config.EffortModel{
+	"heavy":    {{Model: "composer-2.5", Reasoning: "high"}},
+	"standard": {{Model: "composer-2.5", Reasoning: "medium"}},
+	"light":    {{Model: "composer-2.5", Reasoning: "low"}},
+}
+
+var piEffortModels = map[string][]config.EffortModel{
+	"heavy":    {{Model: "opencode-go/qwen3.7-max", Reasoning: "high"}},
+	"standard": {{Model: "opencode-go/kimi-k2.6", Reasoning: "medium"}},
+	"light":    {{Model: "opencode-go/deepseek-v4-flash", Reasoning: "low"}},
+}
+
+var builtInEffortModels = map[string]map[string][]config.EffortModel{
+	"claude": claudeEffortModels,
+	"codex":  codexEffortModels,
+	"cursor": cursorEffortModels,
+	"pi":     piEffortModels,
 }
 
 type presetAgentAdapter struct {
@@ -215,6 +242,81 @@ func newPresetAgentAdapter(preset string, headlessPrefix []string, autoFormat Ag
 }
 
 func (a *presetAgentAdapter) Preset() string { return a.preset }
+
+func (a *presetAgentAdapter) ReasoningArgs(reasoning string) []string {
+	reasoning = strings.TrimSpace(reasoning)
+	if reasoning == "" {
+		return nil
+	}
+	switch a.preset {
+	case "claude":
+		return []string{"--effort", reasoning}
+	case "codex":
+		return []string{"-c", fmt.Sprintf(`model_reasoning_effort="%s"`, reasoning)}
+	case "pi":
+		return []string{"--thinking", reasoning}
+	default:
+		return nil
+	}
+}
+
+func (a *presetAgentAdapter) ArgsContainReasoning(args []string) bool {
+	switch a.preset {
+	case "claude":
+		for _, arg := range args {
+			if arg == "--effort" || strings.HasPrefix(arg, "--effort=") {
+				return true
+			}
+		}
+	case "codex":
+		for i, arg := range args {
+			if arg == "-c" {
+				if i+1 < len(args) && isCodexReasoningConfig(args[i+1]) {
+					return true
+				}
+				continue
+			}
+			if strings.HasPrefix(arg, "-c=") && isCodexReasoningConfig(strings.TrimPrefix(arg, "-c=")) {
+				return true
+			}
+		}
+	case "cursor":
+		for _, arg := range args {
+			if strings.Contains(arg, "[") && strings.Contains(arg, "]") && strings.Contains(arg, "effort=") {
+				return true
+			}
+		}
+	case "pi":
+		for i, arg := range args {
+			if arg == "--thinking" {
+				return true
+			}
+			if strings.HasPrefix(arg, "--thinking=") {
+				return true
+			}
+			if arg == "--model" {
+				if i+1 < len(args) && piModelTokenContainsThinking(args[i+1]) {
+					return true
+				}
+				continue
+			}
+			if strings.HasPrefix(arg, "--model=") && piModelTokenContainsThinking(strings.TrimPrefix(arg, "--model=")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isCodexReasoningConfig(arg string) bool {
+	key, _, found := strings.Cut(strings.TrimSpace(arg), "=")
+	return found && strings.TrimSpace(key) == "model_reasoning_effort"
+}
+
+func piModelTokenContainsThinking(arg string) bool {
+	model, thinking, found := strings.Cut(strings.TrimSpace(arg), ":")
+	return found && strings.TrimSpace(model) != "" && strings.TrimSpace(thinking) != ""
+}
 
 func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*AgentInvocation, error) {
 	if err := validateAgentOutputMode(req.OutputMode); err != nil {
@@ -303,6 +405,10 @@ func (a customAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {
 	return nil, fmt.Errorf("custom agent adapter does not support attended assistance")
 }
+
+func (a customAgentAdapter) ReasoningArgs(reasoning string) []string { return nil }
+
+func (a customAgentAdapter) ArgsContainReasoning(args []string) bool { return false }
 
 func (a customAgentAdapter) Models() []string { return nil }
 
@@ -498,31 +604,44 @@ func resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort string, effortExp
 	if agentArgsContainModel(extraArgs) {
 		return agentSpec
 	}
-	models := effortModelsForAgent(cfg, name, effort)
-	if len(models) == 0 {
+	bundles := effortModelsForAgent(cfg, name, effort)
+	if len(bundles) == 0 || strings.TrimSpace(bundles[0].Model) == "" {
 		return agentSpec
 	}
 	args := append([]string{name}, extraArgs...)
-	args = append(args, "--model", models[0])
+	adapter := agentAdapters[name]
+	args = append(args, "--model", effortModelTokenForAgent(name, bundles[0], adapter, extraArgs))
+	if adapter != nil && !adapter.ArgsContainReasoning(extraArgs) {
+		args = append(args, adapter.ReasoningArgs(bundles[0].Reasoning)...)
+	}
 	for i, arg := range args {
 		args[i] = shellQuote(arg)
 	}
 	return strings.Join(args, " ")
 }
 
-func effortModelsForAgent(cfg *config.Config, agent, effort string) []string {
+func effortModelTokenForAgent(agent string, bundle config.EffortModel, adapter AgentAdapter, extraArgs []string) string {
+	model := strings.TrimSpace(bundle.Model)
+	reasoning := strings.TrimSpace(bundle.Reasoning)
+	if agent == "cursor" && reasoning != "" && (adapter == nil || !adapter.ArgsContainReasoning(extraArgs)) {
+		return model + "[effort=" + reasoning + "]"
+	}
+	return model
+}
+
+func effortModelsForAgent(cfg *config.Config, agent, effort string) []config.EffortModel {
 	if cfg != nil && cfg.Effort != nil {
 		if ladder, ok := cfg.Effort[agent]; ok {
 			return effortModelsForTier(ladder, effort)
 		}
 	}
-	if agent == "claude" {
-		return claudeEffortModels[effort]
+	if ladder, ok := builtInEffortModels[agent]; ok {
+		return ladder[effort]
 	}
 	return nil
 }
 
-func effortModelsForTier(ladder config.EffortConfig, effort string) []string {
+func effortModelsForTier(ladder config.EffortConfig, effort string) []config.EffortModel {
 	switch effort {
 	case "heavy":
 		return ladder.Heavy
@@ -637,7 +756,7 @@ func shellQuote(s string) string {
 	if s == "" {
 		return "''"
 	}
-	if strings.ContainsAny(s, " \t\n'\"\\$`!&|;()<>") {
+	if strings.ContainsAny(s, " \t\n'\"\\$`!&|;()<>[]") {
 		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 	}
 	return s

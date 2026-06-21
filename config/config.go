@@ -140,12 +140,20 @@ type TaskGitConfig struct {
 	CommitConfigOverrides []string `toml:"commit_config_overrides"`
 }
 
-// EffortConfig holds the model ladder for one agent preset. Each tier is an
-// ordered, user-owned fallback list; current resolution uses the head entry.
+// EffortModel is one entry in an effort ladder. Reasoning is optional because
+// not every agent has a reasoning-effort mechanism.
+type EffortModel struct {
+	Model     string `toml:"model"`
+	Reasoning string `toml:"reasoning"`
+}
+
+// EffortConfig holds the model/reasoning ladder for one agent preset. Each
+// tier is an ordered, user-owned fallback list; current resolution uses the
+// head entry.
 type EffortConfig struct {
-	Heavy    []string `toml:"heavy"`
-	Standard []string `toml:"standard"`
-	Light    []string `toml:"light"`
+	Heavy    []EffortModel `toml:"heavy"`
+	Standard []EffortModel `toml:"standard"`
+	Light    []EffortModel `toml:"light"`
 }
 
 // ResolveCommitConfigOverrides validates the [workload.git]
@@ -773,9 +781,16 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 }
 
 func validateEffortConfigMetadata(path string, md toml.MetaData) error {
+	validTiers := map[string]bool{"heavy": true, "standard": true, "light": true}
+	validEntryKeys := map[string]bool{"model": true, "reasoning": true}
 	for _, key := range md.Undecoded() {
-		if len(key) >= 3 && key[0] == "effort" {
+		if len(key) >= 3 && key[0] == "effort" && !validTiers[key[2]] {
 			return fmt.Errorf("%s: [effort.%s] unknown tier %q; valid tiers: heavy, standard, light", path, key[1], key[2])
+		}
+	}
+	for _, key := range md.Undecoded() {
+		if len(key) >= 4 && key[0] == "effort" && validTiers[key[2]] && !validEntryKeys[key[3]] {
+			return fmt.Errorf("%s: [effort.%s] tier %q entry has unknown key %q; valid entry keys: model, reasoning", path, key[1], key[2], key[3])
 		}
 	}
 	return nil

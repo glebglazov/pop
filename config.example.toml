@@ -73,6 +73,15 @@ projects = [
 # agent_quota_retry_after = "1h"
 # crash_retry_delays = ["1m", "5m", "15m"]
 
+# Per-agent effort ladders map task effort to ordered { model, reasoning }
+# entries. reasoning is optional; a model-only entry resolves just --model.
+# Built-in ladders exist for claude/codex/cursor/pi; configuring an agent here
+# fully replaces that agent's built-in ladder.
+# [effort.opencode]
+# heavy = [{ model = "opencode/claude-opus-4-8", reasoning = "high" }]
+# standard = [{ model = "opencode/claude-sonnet-4-6", reasoning = "medium" }]
+# light = [{ model = "opencode/kimi-k2.6" }]
+
 # [workload.git]
 # Commit-time git config applied ONLY to pop's own commits during a task drain
 # (the implementation commit and the commit-and-continue dirty checkpoint). Each

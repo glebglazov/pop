@@ -183,12 +183,12 @@ func TestResolveTaskAgentSpecForEffortClaudeModels(t *testing.T) {
 		effort    string
 		want      string
 	}{
-		{name: "heavy", agentSpec: "claude", effort: "heavy", want: "claude --model opus"},
-		{name: "standard", agentSpec: "claude", effort: "standard", want: "claude --model sonnet"},
-		{name: "light", agentSpec: "claude", effort: "light", want: "claude --model haiku"},
+		{name: "heavy", agentSpec: "claude", effort: "heavy", want: "claude --model opus --effort high"},
+		{name: "standard", agentSpec: "claude", effort: "standard", want: "claude --model sonnet --effort high"},
+		{name: "light", agentSpec: "claude", effort: "light", want: "claude --model haiku --effort high"},
 		{name: "preserves explicit model", agentSpec: "claude --model custom", effort: "heavy", want: "claude --model custom"},
-		{name: "preserves quoted extra arg", agentSpec: `claude --append-system-prompt "be nice"`, effort: "heavy", want: "claude --append-system-prompt 'be nice' --model opus"},
-		{name: "ignores non claude", agentSpec: "codex", effort: "heavy", want: "codex"},
+		{name: "preserves quoted extra arg", agentSpec: `claude --append-system-prompt "be nice"`, effort: "heavy", want: "claude --append-system-prompt 'be nice' --model opus --effort high"},
+		{name: "preserves explicit reasoning", agentSpec: "claude --effort low", effort: "heavy", want: "claude --effort low --model opus"},
 		{name: "absent effort unchanged", agentSpec: "claude", effort: "standard", want: "claude"},
 	}
 	for _, tt := range tests {
@@ -202,15 +202,140 @@ func TestResolveTaskAgentSpecForEffortClaudeModels(t *testing.T) {
 	}
 }
 
+func TestResolveTaskAgentSpecForEffortCodexModels(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentSpec string
+		effort    string
+		want      string
+	}{
+		{name: "heavy", agentSpec: "codex", effort: "heavy", want: `codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
+		{name: "standard", agentSpec: "codex", effort: "standard", want: `codex --model gpt-5.5 -c 'model_reasoning_effort="medium"'`},
+		{name: "light", agentSpec: "codex", effort: "light", want: `codex --model gpt-5.4-mini -c 'model_reasoning_effort="low"'`},
+		{name: "preserves explicit model and skips reasoning", agentSpec: "codex --model custom", effort: "heavy", want: "codex --model custom"},
+		{name: "preserves explicit reasoning", agentSpec: "codex -c model_reasoning_effort=low", effort: "heavy", want: "codex -c model_reasoning_effort=low --model gpt-5.5"},
+		{name: "preserves explicit reasoning via equals form", agentSpec: "codex -c=model_reasoning_effort=low", effort: "heavy", want: "codex -c=model_reasoning_effort=low --model gpt-5.5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveTaskAgentSpecForEffort(tt.agentSpec, tt.effort, true)
+			if got != tt.want {
+				t.Fatalf("spec = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveTaskAgentSpecForEffortCursorModels(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentSpec string
+		effort    string
+		want      string
+	}{
+		{name: "heavy", agentSpec: "cursor", effort: "heavy", want: `cursor --model 'composer-2.5[effort=high]'`},
+		{name: "standard", agentSpec: "cursor", effort: "standard", want: `cursor --model 'composer-2.5[effort=medium]'`},
+		{name: "light", agentSpec: "cursor", effort: "light", want: `cursor --model 'composer-2.5[effort=low]'`},
+		{name: "preserves explicit model", agentSpec: "cursor --model custom", effort: "heavy", want: "cursor --model custom"},
+		{name: "preserves explicit bracketed model", agentSpec: `cursor --model "composer-2.5[effort=low]"`, effort: "heavy", want: `cursor --model "composer-2.5[effort=low]"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveTaskAgentSpecForEffort(tt.agentSpec, tt.effort, true)
+			if got != tt.want {
+				t.Fatalf("spec = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveTaskAgentSpecForEffortPiModels(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentSpec string
+		effort    string
+		want      string
+	}{
+		{name: "heavy", agentSpec: "pi", effort: "heavy", want: "pi --model opencode-go/qwen3.7-max --thinking high"},
+		{name: "standard", agentSpec: "pi", effort: "standard", want: "pi --model opencode-go/kimi-k2.6 --thinking medium"},
+		{name: "light", agentSpec: "pi", effort: "light", want: "pi --model opencode-go/deepseek-v4-flash --thinking low"},
+		{name: "preserves explicit model and skips thinking", agentSpec: "pi --model custom", effort: "heavy", want: "pi --model custom"},
+		{name: "preserves explicit thinking", agentSpec: "pi --thinking low", effort: "heavy", want: "pi --thinking low --model opencode-go/qwen3.7-max"},
+		{name: "preserves explicit thinking via equals form", agentSpec: "pi --thinking=low", effort: "heavy", want: "pi --thinking=low --model opencode-go/qwen3.7-max"},
+		{name: "preserves model thinking shorthand", agentSpec: "pi --model opencode-go/kimi-k2.6:low", effort: "heavy", want: "pi --model opencode-go/kimi-k2.6:low"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveTaskAgentSpecForEffort(tt.agentSpec, tt.effort, true)
+			if got != tt.want {
+				t.Fatalf("spec = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveTaskAgentSpecForEffortCursorConfiguredModelOnly(t *testing.T) {
+	cfg := &config.Config{Effort: map[string]config.EffortConfig{
+		"cursor": {
+			Heavy: []config.EffortModel{{Model: "composer-2.5"}},
+		},
+	}}
+	got := resolveTaskAgentSpecForEffortWithConfig("cursor", "heavy", true, cfg)
+	want := "cursor --model composer-2.5"
+	if got != want {
+		t.Fatalf("spec = %q, want %q", got, want)
+	}
+}
+
+func TestCursorAdapterDetectsBracketedReasoning(t *testing.T) {
+	adapter, err := ResolveAgentAdapter("cursor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !adapter.ArgsContainReasoning([]string{"--model", "composer-2.5[effort=high]"}) {
+		t.Fatal("cursor adapter did not detect bracketed effort")
+	}
+	if adapter.ArgsContainReasoning([]string{"--model", "composer-2.5"}) {
+		t.Fatal("cursor adapter detected reasoning in a plain model token")
+	}
+}
+
+func TestPiAdapterDetectsThinkingReasoning(t *testing.T) {
+	adapter, err := ResolveAgentAdapter("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "flag form", args: []string{"--thinking", "high"}, want: true},
+		{name: "equals flag form", args: []string{"--thinking=medium"}, want: true},
+		{name: "model shorthand separate arg", args: []string{"--model", "opencode-go/kimi-k2.6:low"}, want: true},
+		{name: "model shorthand equals arg", args: []string{"--model=opencode-go/kimi-k2.6:low"}, want: true},
+		{name: "plain model", args: []string{"--model", "opencode-go/kimi-k2.6"}, want: false},
+		{name: "bare thinking token", args: []string{"--thinking"}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := adapter.ArgsContainReasoning(tt.args)
+			if got != tt.want {
+				t.Fatalf("ArgsContainReasoning(%#v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveTaskAgentSpecForConfiguredEffortModels(t *testing.T) {
 	cfg := &config.Config{Effort: map[string]config.EffortConfig{
 		"opencode": {
-			Heavy:    []string{"opencode/claude-opus-4-8", "opencode/kimi-k2.6"},
-			Standard: []string{"opencode/claude-sonnet-4-6"},
-			Light:    []string{"opencode/kimi-k2.6"},
+			Heavy:    []config.EffortModel{{Model: "opencode/claude-opus-4-8", Reasoning: "high"}, {Model: "opencode/kimi-k2.6"}},
+			Standard: []config.EffortModel{{Model: "opencode/claude-sonnet-4-6"}},
+			Light:    []config.EffortModel{{Model: "opencode/kimi-k2.6"}},
 		},
 		"claude": {
-			Heavy: []string{"custom-opus"},
+			Heavy: []config.EffortModel{{Model: "custom-opus", Reasoning: "max"}},
 		},
 	}}
 	tests := []struct {
@@ -221,8 +346,8 @@ func TestResolveTaskAgentSpecForConfiguredEffortModels(t *testing.T) {
 	}{
 		{name: "configured opencode", agentSpec: "opencode", effort: "heavy", want: "opencode --model opencode/claude-opus-4-8"},
 		{name: "configured claude replaces built in", agentSpec: "claude", effort: "standard", want: "claude"},
-		{name: "configured claude uses configured tier", agentSpec: "claude", effort: "heavy", want: "claude --model custom-opus"},
-		{name: "unconfigured non claude is no op", agentSpec: "codex", effort: "heavy", want: "codex"},
+		{name: "configured claude uses configured tier", agentSpec: "claude", effort: "heavy", want: "claude --model custom-opus --effort max"},
+		{name: "codex uses built in when unconfigured", agentSpec: "codex", effort: "heavy", want: `codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
 		{name: "explicit model still wins", agentSpec: "opencode --model already", effort: "heavy", want: "opencode --model already"},
 	}
 	for _, tt := range tests {
@@ -256,21 +381,28 @@ func TestResolveTaskAgentSpecEffortModelPrecedence(t *testing.T) {
 			defaultSpecs:   []string{"claude"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpecs:      []string{"claude --model opus"},
+			wantSpecs:      []string{"claude --model opus --effort high"},
 		},
 		{
-			name:           "non claude agent is not changed by effort",
+			name:           "codex composes with effort",
 			defaultSpecs:   []string{"codex"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpecs:      []string{"codex"},
+			wantSpecs:      []string{`codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
+		},
+		{
+			name:           "cursor composes with bracketed effort",
+			defaultSpecs:   []string{"cursor"},
+			effort:         "heavy",
+			effortExplicit: true,
+			wantSpecs:      []string{`cursor --model 'composer-2.5[effort=high]'`},
 		},
 		{
 			name:           "fallback list entries each resolve effort",
-			defaultSpecs:   []string{"claude", "codex"},
+			defaultSpecs:   []string{"claude", "cursor", "codex"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpecs:      []string{"claude --model opus", "codex"},
+			wantSpecs:      []string{"claude --model opus --effort high", `cursor --model 'composer-2.5[effort=high]'`, `codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
 		},
 		{
 			name:           "agent-cmd leaves fallback list untouched",
