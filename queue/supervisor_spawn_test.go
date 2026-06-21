@@ -74,7 +74,7 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 		TaskSetOverride: setID,
 		AgentCmd:        agent,
 		Yes:             false,
-		ConfirmIn:       strings.NewReader("4\n"),
+		ConfirmIn:       strings.NewReader("0\n"),
 		ConfirmOut:      &confirmOut,
 		Output:          &drainOut,
 	}
@@ -98,7 +98,7 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 		"1. Get agent assistance (default)",
 		"2. Complete task",
 		"3. Defer task",
-		"4. Exit",
+		"0. Exit",
 		"Choose [1]:",
 	} {
 		if !strings.Contains(out, want) {

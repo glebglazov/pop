@@ -445,6 +445,7 @@ const (
 	hitlGateComplete
 	hitlGateAssist
 	hitlGateDefer
+	hitlGateShell
 )
 
 func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *bufio.Reader, yes bool, agentPreset, agentCmd, cwd, runtimePath, definitionPath, statePath, taskSetID string, m *Manifest, hitl *Task) (bool, error) {
@@ -511,6 +512,11 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *buf
 			}
 			RenderTaskSkip(out, result.TaskSetID, result.TaskID)
 			return true, nil
+		case hitlGateShell:
+			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
+				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
+			}
+			// No state change, no refresh — loop back to the gate menu unchanged.
 		case hitlGateExit:
 			return false, nil
 		}
@@ -528,6 +534,22 @@ func runAttendedAssistanceCommand(d *Deps, stdin io.Reader, runtimePath string, 
 		return attended.RunAttended(context.Background(), runtimePath, stdin, out, out, invocation.Command.Name, invocation.Command.Args...)
 	}
 	return d.Runner.Run(context.Background(), runtimePath, out, out, invocation.Command.Name, invocation.Command.Args...)
+}
+
+// spawnRuntimeShell spawns $SHELL (falling back to /bin/sh) in the runtime
+// checkout as an attended subshell. It is a pure side-trip: no task state is
+// changed and no refresh occurs; callers re-show their gate menu after it exits.
+func spawnRuntimeShell(d *Deps, stdin io.Reader, runtimePath string, out io.Writer) error {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	if attended, ok := d.Runner.(AttendedCommandRunner); ok {
+		_, err := attended.RunAttended(context.Background(), runtimePath, stdin, out, out, shell)
+		return err
+	}
+	_, err := d.Runner.Run(context.Background(), runtimePath, out, out, shell)
+	return err
 }
 
 func canPrompt(in io.Reader) bool {
@@ -585,10 +607,11 @@ func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string,
 	}
 	fmt.Fprintln(display, "  2. Complete task")
 	fmt.Fprintln(display, "  3. Defer task")
-	fmt.Fprintln(display, "  4. Exit")
+	fmt.Fprintln(display, "  4. Open a shell in the checkout")
+	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
-	answer, err := readPromptLine(reader, "4")
+	answer, err := readPromptLine(reader, "0")
 	if err != nil {
 		return hitlGateExit, err
 	}
@@ -599,10 +622,12 @@ func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string,
 		return hitlGateComplete, nil
 	case "3":
 		return hitlGateDefer, nil
-	case "4", "q", "quit", "exit":
+	case "4":
+		return hitlGateShell, nil
+	case "0", "q", "quit", "exit":
 		return hitlGateExit, nil
 	default:
-		fmt.Fprintln(display, "Choose 1, 2, 3, or 4.")
+		fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
 		return promptHITLGateAction(out, reader, taskSetID, hitl, body, invocation)
 	}
 }
