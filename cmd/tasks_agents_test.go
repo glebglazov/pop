@@ -31,9 +31,9 @@ func TestTaskAgentsCatalogListsPresetsWithEffortLadders(t *testing.T) {
 	taskConfigLoad = func(string) (*config.Config, error) {
 		return &config.Config{Effort: map[string]config.EffortConfig{
 			"opencode": {
-				Heavy:    []string{"opencode/claude-opus-4-8", "opencode/kimi-k2.6"},
-				Standard: []string{"opencode/claude-sonnet-4-6"},
-				Light:    []string{"opencode/kimi-k2.6"},
+				Heavy:    []config.EffortModel{{Model: "opencode/claude-opus-4-8", Reasoning: "high"}, {Model: "opencode/kimi-k2.6"}},
+				Standard: []config.EffortModel{{Model: "opencode/claude-sonnet-4-6", Reasoning: "medium"}},
+				Light:    []config.EffortModel{{Model: "opencode/kimi-k2.6"}},
 			},
 		}}, nil
 	}
@@ -46,8 +46,8 @@ func TestTaskAgentsCatalogListsPresetsWithEffortLadders(t *testing.T) {
 
 	rows := [][4]string{
 		{"agent", "binary", "found", "effort ladder"},
-		{"claude", "claude", "yes", "heavy: opus (built-in); standard: sonnet (built-in); light: haiku (built-in)"},
-		{"opencode", "opencode", "yes", "heavy: opencode/claude-opus-4-8, opencode/kimi-k2.6 (configured); standard: opencode/claude-sonnet-4-6 (configured); light: opencode/kimi-k2.6 (configured)"},
+		{"claude", "claude", "yes", "heavy: opus[reasoning=high] (built-in); standard: sonnet[reasoning=high] (built-in); light: haiku[reasoning=high] (built-in)"},
+		{"opencode", "opencode", "yes", "heavy: opencode/claude-opus-4-8[reasoning=high], opencode/kimi-k2.6 (configured); standard: opencode/claude-sonnet-4-6[reasoning=medium] (configured); light: opencode/kimi-k2.6 (configured)"},
 		{"cursor", "cursor-agent", "no", "none"},
 		{"codex", "codex", "yes", "none"},
 		{"pi", "pi", "no", "none"},
@@ -79,7 +79,7 @@ func TestTaskAgentsCatalogListsConfigOnlyEffortAgents(t *testing.T) {
 	taskConfigLoad = func(string) (*config.Config, error) {
 		return &config.Config{Effort: map[string]config.EffortConfig{
 			"custom-agent": {
-				Heavy: []string{"custom-large"},
+				Heavy: []config.EffortModel{{Model: "custom-large", Reasoning: "high"}},
 			},
 		}}, nil
 	}
@@ -90,7 +90,7 @@ func TestTaskAgentsCatalogListsConfigOnlyEffortAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	want := "custom-agent custom-agent   yes   heavy: custom-large (configured); standard: none (configured); light: none (configured)\n"
+	want := "custom-agent custom-agent   yes   heavy: custom-large[reasoning=high] (configured); standard: none (configured); light: none (configured)\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("config-only agent row missing\nwant contains:\n%sgot:\n%s", want, got)
 	}

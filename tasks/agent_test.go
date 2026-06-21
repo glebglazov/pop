@@ -183,11 +183,12 @@ func TestResolveTaskAgentSpecForEffortClaudeModels(t *testing.T) {
 		effort    string
 		want      string
 	}{
-		{name: "heavy", agentSpec: "claude", effort: "heavy", want: "claude --model opus"},
-		{name: "standard", agentSpec: "claude", effort: "standard", want: "claude --model sonnet"},
-		{name: "light", agentSpec: "claude", effort: "light", want: "claude --model haiku"},
+		{name: "heavy", agentSpec: "claude", effort: "heavy", want: "claude --model opus --effort high"},
+		{name: "standard", agentSpec: "claude", effort: "standard", want: "claude --model sonnet --effort high"},
+		{name: "light", agentSpec: "claude", effort: "light", want: "claude --model haiku --effort high"},
 		{name: "preserves explicit model", agentSpec: "claude --model custom", effort: "heavy", want: "claude --model custom"},
-		{name: "preserves quoted extra arg", agentSpec: `claude --append-system-prompt "be nice"`, effort: "heavy", want: "claude --append-system-prompt 'be nice' --model opus"},
+		{name: "preserves quoted extra arg", agentSpec: `claude --append-system-prompt "be nice"`, effort: "heavy", want: "claude --append-system-prompt 'be nice' --model opus --effort high"},
+		{name: "preserves explicit reasoning", agentSpec: "claude --effort low", effort: "heavy", want: "claude --effort low --model opus"},
 		{name: "ignores non claude", agentSpec: "codex", effort: "heavy", want: "codex"},
 		{name: "absent effort unchanged", agentSpec: "claude", effort: "standard", want: "claude"},
 	}
@@ -205,12 +206,12 @@ func TestResolveTaskAgentSpecForEffortClaudeModels(t *testing.T) {
 func TestResolveTaskAgentSpecForConfiguredEffortModels(t *testing.T) {
 	cfg := &config.Config{Effort: map[string]config.EffortConfig{
 		"opencode": {
-			Heavy:    []string{"opencode/claude-opus-4-8", "opencode/kimi-k2.6"},
-			Standard: []string{"opencode/claude-sonnet-4-6"},
-			Light:    []string{"opencode/kimi-k2.6"},
+			Heavy:    []config.EffortModel{{Model: "opencode/claude-opus-4-8", Reasoning: "high"}, {Model: "opencode/kimi-k2.6"}},
+			Standard: []config.EffortModel{{Model: "opencode/claude-sonnet-4-6"}},
+			Light:    []config.EffortModel{{Model: "opencode/kimi-k2.6"}},
 		},
 		"claude": {
-			Heavy: []string{"custom-opus"},
+			Heavy: []config.EffortModel{{Model: "custom-opus", Reasoning: "max"}},
 		},
 	}}
 	tests := []struct {
@@ -221,7 +222,7 @@ func TestResolveTaskAgentSpecForConfiguredEffortModels(t *testing.T) {
 	}{
 		{name: "configured opencode", agentSpec: "opencode", effort: "heavy", want: "opencode --model opencode/claude-opus-4-8"},
 		{name: "configured claude replaces built in", agentSpec: "claude", effort: "standard", want: "claude"},
-		{name: "configured claude uses configured tier", agentSpec: "claude", effort: "heavy", want: "claude --model custom-opus"},
+		{name: "configured claude uses configured tier", agentSpec: "claude", effort: "heavy", want: "claude --model custom-opus --effort max"},
 		{name: "unconfigured non claude is no op", agentSpec: "codex", effort: "heavy", want: "codex"},
 		{name: "explicit model still wins", agentSpec: "opencode --model already", effort: "heavy", want: "opencode --model already"},
 	}
@@ -256,7 +257,7 @@ func TestResolveTaskAgentSpecEffortModelPrecedence(t *testing.T) {
 			defaultSpecs:   []string{"claude"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpecs:      []string{"claude --model opus"},
+			wantSpecs:      []string{"claude --model opus --effort high"},
 		},
 		{
 			name:           "non claude agent is not changed by effort",
@@ -270,7 +271,7 @@ func TestResolveTaskAgentSpecEffortModelPrecedence(t *testing.T) {
 			defaultSpecs:   []string{"claude", "codex"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpecs:      []string{"claude --model opus", "codex"},
+			wantSpecs:      []string{"claude --model opus --effort high", "codex"},
 		},
 		{
 			name:           "agent-cmd leaves fallback list untouched",

@@ -839,7 +839,7 @@ func TestRunTaskConfiguredEffortResolvesOpencodeModel(t *testing.T) {
 	d.Runner = runner
 	loadConfig := func(string) (*config.Config, error) {
 		return &config.Config{Effort: map[string]config.EffortConfig{
-			"opencode": {Heavy: []string{"opencode/claude-opus-4-8", "opencode/kimi-k2.6"}},
+			"opencode": {Heavy: []config.EffortModel{{Model: "opencode/claude-opus-4-8"}, {Model: "opencode/kimi-k2.6"}}},
 		}}, nil
 	}
 
@@ -902,5 +902,8 @@ func TestRunTaskNoEffortKeyKeepsLegacyClaudeInvocation(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(runner.argLists[0], " "), "--model") {
 		t.Fatalf("legacy invocation unexpectedly contains model: %v", runner.argLists[0])
+	}
+	if strings.Contains(strings.Join(runner.argLists[0], " "), "--effort") {
+		t.Fatalf("legacy invocation unexpectedly contains effort: %v", runner.argLists[0])
 	}
 }

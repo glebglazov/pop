@@ -144,6 +144,8 @@ type AgentAdapter interface {
 	RenderOutput(w io.Writer, raw string, format AgentOutputFormat)
 	AssistanceCapability() AgentAssistanceCapability
 	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
+	ReasoningArgs(reasoning string) []string
+	ArgsContainReasoning(args []string) bool
 	// Models returns the preset's curated, recommended-first model aliases that
 	// Pop ships for display. Advisory only; never a validation gate (ADR-0019).
 	Models() []string
@@ -188,10 +190,10 @@ var agentAdapters = map[string]AgentAdapter{
 	),
 }
 
-var claudeEffortModels = map[string][]string{
-	"heavy":    {"opus"},
-	"standard": {"sonnet"},
-	"light":    {"haiku"},
+var claudeEffortModels = map[string][]config.EffortModel{
+	"heavy":    {{Model: "opus", Reasoning: "high"}},
+	"standard": {{Model: "sonnet", Reasoning: "high"}},
+	"light":    {{Model: "haiku", Reasoning: "high"}},
 }
 
 type presetAgentAdapter struct {
@@ -215,6 +217,31 @@ func newPresetAgentAdapter(preset string, headlessPrefix []string, autoFormat Ag
 }
 
 func (a *presetAgentAdapter) Preset() string { return a.preset }
+
+func (a *presetAgentAdapter) ReasoningArgs(reasoning string) []string {
+	reasoning = strings.TrimSpace(reasoning)
+	if reasoning == "" {
+		return nil
+	}
+	switch a.preset {
+	case "claude":
+		return []string{"--effort", reasoning}
+	default:
+		return nil
+	}
+}
+
+func (a *presetAgentAdapter) ArgsContainReasoning(args []string) bool {
+	switch a.preset {
+	case "claude":
+		for _, arg := range args {
+			if arg == "--effort" || strings.HasPrefix(arg, "--effort=") {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*AgentInvocation, error) {
 	if err := validateAgentOutputMode(req.OutputMode); err != nil {
@@ -303,6 +330,10 @@ func (a customAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {
 	return nil, fmt.Errorf("custom agent adapter does not support attended assistance")
 }
+
+func (a customAgentAdapter) ReasoningArgs(reasoning string) []string { return nil }
+
+func (a customAgentAdapter) ArgsContainReasoning(args []string) bool { return false }
 
 func (a customAgentAdapter) Models() []string { return nil }
 
@@ -498,19 +529,22 @@ func resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort string, effortExp
 	if agentArgsContainModel(extraArgs) {
 		return agentSpec
 	}
-	models := effortModelsForAgent(cfg, name, effort)
-	if len(models) == 0 {
+	bundles := effortModelsForAgent(cfg, name, effort)
+	if len(bundles) == 0 || strings.TrimSpace(bundles[0].Model) == "" {
 		return agentSpec
 	}
 	args := append([]string{name}, extraArgs...)
-	args = append(args, "--model", models[0])
+	args = append(args, "--model", bundles[0].Model)
+	if adapter := agentAdapters[name]; adapter != nil && !adapter.ArgsContainReasoning(extraArgs) {
+		args = append(args, adapter.ReasoningArgs(bundles[0].Reasoning)...)
+	}
 	for i, arg := range args {
 		args[i] = shellQuote(arg)
 	}
 	return strings.Join(args, " ")
 }
 
-func effortModelsForAgent(cfg *config.Config, agent, effort string) []string {
+func effortModelsForAgent(cfg *config.Config, agent, effort string) []config.EffortModel {
 	if cfg != nil && cfg.Effort != nil {
 		if ladder, ok := cfg.Effort[agent]; ok {
 			return effortModelsForTier(ladder, effort)
@@ -522,7 +556,7 @@ func effortModelsForAgent(cfg *config.Config, agent, effort string) []string {
 	return nil
 }
 
-func effortModelsForTier(ladder config.EffortConfig, effort string) []string {
+func effortModelsForTier(ladder config.EffortConfig, effort string) []config.EffortModel {
 	switch effort {
 	case "heavy":
 		return ladder.Heavy

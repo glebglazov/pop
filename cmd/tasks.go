@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks/implement"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
@@ -997,11 +997,19 @@ func renderEffortLadder(ladder []tasks.AgentCatalogEffortTier) string {
 	}
 	parts := make([]string, 0, len(ladder))
 	for _, tier := range ladder {
-		models := "none"
-		if len(tier.Models) > 0 {
-			models = strings.Join(tier.Models, ", ")
+		entries := "none"
+		if len(tier.Entries) > 0 {
+			rendered := make([]string, 0, len(tier.Entries))
+			for _, entry := range tier.Entries {
+				model := entry.Model
+				if entry.Reasoning != "" {
+					model += "[reasoning=" + entry.Reasoning + "]"
+				}
+				rendered = append(rendered, model)
+			}
+			entries = strings.Join(rendered, ", ")
 		}
-		parts = append(parts, fmt.Sprintf("%s: %s (%s)", tier.Tier, models, tier.Source))
+		parts = append(parts, fmt.Sprintf("%s: %s (%s)", tier.Tier, entries, tier.Source))
 	}
 	return strings.Join(parts, "; ")
 }

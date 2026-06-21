@@ -22,11 +22,11 @@ type AgentCatalogRow struct {
 
 // AgentCatalogEffortTier describes one resolved effort tier for display.
 // Source is "built-in" for Pop's default opinion and "configured" for user
-// config. An empty Models slice means the tier has no configured models.
+// config. An empty Entries slice means the tier has no configured models.
 type AgentCatalogEffortTier struct {
-	Tier   string
-	Models []string
-	Source string
+	Tier    string
+	Entries []config.EffortModel
+	Source  string
 }
 
 // AgentCatalog returns stable rows for every recognized built-in agent preset.
@@ -99,9 +99,9 @@ func effortLadderForCatalog(cfg *config.Config, agent string) []AgentCatalogEffo
 	}
 	if agent == "claude" {
 		return []AgentCatalogEffortTier{
-			{Tier: "heavy", Models: append([]string(nil), claudeEffortModels["heavy"]...), Source: "built-in"},
-			{Tier: "standard", Models: append([]string(nil), claudeEffortModels["standard"]...), Source: "built-in"},
-			{Tier: "light", Models: append([]string(nil), claudeEffortModels["light"]...), Source: "built-in"},
+			{Tier: "heavy", Entries: append([]config.EffortModel(nil), claudeEffortModels["heavy"]...), Source: "built-in"},
+			{Tier: "standard", Entries: append([]config.EffortModel(nil), claudeEffortModels["standard"]...), Source: "built-in"},
+			{Tier: "light", Entries: append([]config.EffortModel(nil), claudeEffortModels["light"]...), Source: "built-in"},
 		}
 	}
 	return nil
@@ -109,8 +109,8 @@ func effortLadderForCatalog(cfg *config.Config, agent string) []AgentCatalogEffo
 
 func effortLadderTiers(ladder config.EffortConfig, source string) []AgentCatalogEffortTier {
 	return []AgentCatalogEffortTier{
-		{Tier: "heavy", Models: append([]string(nil), ladder.Heavy...), Source: source},
-		{Tier: "standard", Models: append([]string(nil), ladder.Standard...), Source: source},
-		{Tier: "light", Models: append([]string(nil), ladder.Light...), Source: source},
+		{Tier: "heavy", Entries: append([]config.EffortModel(nil), ladder.Heavy...), Source: source},
+		{Tier: "standard", Entries: append([]config.EffortModel(nil), ladder.Standard...), Source: source},
+		{Tier: "light", Entries: append([]config.EffortModel(nil), ladder.Light...), Source: source},
 	}
 }
