@@ -65,17 +65,11 @@ func TestCompleteAbandonSetIDsEmpty(t *testing.T) {
 
 func TestCompleteAbandonSetIDsDedupesAndSorts(t *testing.T) {
 	td := queueDataDeps(t)
-	state := &DaemonState{
-		Version: 1,
-		WorktreeBindings: map[string]WorktreeBinding{
-			"beta\x00set-b":  {RuntimePath: "/wt/b", Project: "beta"},
-			"alpha\x00set-a": {RuntimePath: "/wt/a", Project: "alpha"},
-			"alpha2\x00set-a": {RuntimePath: "/wt/a2", Project: "alpha2"},
-		},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
-		t.Fatal(err)
-	}
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		"beta\x00set-b":   {RuntimePath: "/wt/b", Project: "beta"},
+		"alpha\x00set-a":  {RuntimePath: "/wt/a", Project: "alpha"},
+		"alpha2\x00set-a": {RuntimePath: "/wt/a2", Project: "alpha2"},
+	})
 
 	ids, err := CompleteAbandonSetIDs(&Deps{Tasks: td})
 	if err != nil {

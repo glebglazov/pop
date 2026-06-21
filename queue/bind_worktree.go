@@ -63,13 +63,13 @@ func BindWorktree(d *Deps, cfg *config.Config, setID, checkoutPath string, opts 
 	repoKey := repoIdentityKey(id)
 	key := setScopedKey(repoKey, setID)
 
-	state, err := EnsureDaemonState(d.Tasks)
+	store, err := binding.Load(d.Tasks)
 	if err != nil {
 		return BindWorktreeResult{}, err
 	}
 
 	var replaced bool
-	if existing, ok := state.WorktreeBindings[key]; ok {
+	if existing, ok := store.Get(key); ok {
 		lock := d.readLock(existing.RuntimePath)
 		if lock != nil && lock.Locked {
 			if lock.Metadata != nil && lock.Metadata.SetID != "" && lock.Metadata.SetID != setID {
@@ -89,11 +89,7 @@ func BindWorktree(d *Deps, cfg *config.Config, setID, checkoutPath string, opts 
 
 	proj := detectBindingProject(d, cfg, id)
 
-	if state.WorktreeBindings == nil {
-		state.WorktreeBindings = map[string]WorktreeBinding{}
-	}
-	state.WorktreeBindings[key] = binding.Adopt(checkoutPath, branch, proj)
-	if err := WriteDaemonState(d.Tasks, state); err != nil {
+	if err := binding.Put(d.Tasks, key, binding.Adopt(checkoutPath, branch, proj)); err != nil {
 		return BindWorktreeResult{}, err
 	}
 	if err := AppendJournalEntry(d.Tasks, JournalEntry{

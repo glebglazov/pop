@@ -106,6 +106,7 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 			ProjectConfigError: "/repo/idle/.pop.toml: expected value",
 		},
 	}, &DaemonState{Version: 1})
+	snap.Tasks = queueDataDeps(t)
 
 	var out bytes.Buffer
 	RenderStatus(&out, snap)
@@ -633,6 +634,14 @@ func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	repoKey := "test-repo"
 	key := setScopedKey(repoKey, "set-1")
+	td := queueDataDeps(t)
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: {
+			Project:     "pop",
+			RuntimePath: "/runtime",
+			Branch:      "set-1",
+		},
+	})
 	snap := statusFromDecisions([]Decision{{
 		Project: "pop",
 		Reason:  "set parked after repeated abnormal drain exits",
@@ -649,14 +658,8 @@ func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 				CheckedAt:   now,
 			},
 		},
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: {
-				Project:     "pop",
-				RuntimePath: "/runtime",
-				Branch:      "set-1",
-			},
-		},
 	})
+	snap.Tasks = td
 
 	var statusOut bytes.Buffer
 	RenderStatus(&statusOut, snap)

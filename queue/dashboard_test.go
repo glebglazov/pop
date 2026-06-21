@@ -121,16 +121,40 @@ func TestDashboardColumnDerivation(t *testing.T) {
 		{ID: "bound", Status: tasks.StatusBlocked},
 	}
 	d := dashboardTestDeps(t, rows, nil)
+	dataHome := t.TempDir()
+	real := deps.NewRealFileSystem()
+	origFS := d.Tasks.FS.(*deps.MockFileSystem)
+	d.Tasks.FS = &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataHome
+			}
+			return ""
+		},
+		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
+		ReadFileFunc: func(path string) ([]byte, error) {
+			if origFS.ReadFileFunc != nil {
+				if data, err := origFS.ReadFileFunc(path); err == nil || !errors.Is(err, os.ErrNotExist) {
+					return data, err
+				}
+			}
+			return real.ReadFile(path)
+		},
+		WriteFileFunc: real.WriteFile,
+		MkdirAllFunc:  real.MkdirAll,
+		RenameFunc:    real.Rename,
+		StatFunc:      origFS.StatFunc,
+	}
 	state := &DaemonState{
 		Version: 1,
 		Mergeability: map[string]MergeabilityRecord{
 			setScopedKey("repo-key", "done"): {RuntimePath: "/repo/done", SetID: "done", Status: MergeabilityConflicts},
 		},
-		WorktreeBindings: map[string]WorktreeBinding{
-			setScopedKey("repo-key", "done"):  {RuntimePath: "/repo/done", Branch: "done-branch"},
-			setScopedKey("repo-key", "bound"): {RuntimePath: "/repo/bound", Branch: "bound-branch"},
-		},
 	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey("repo-key", "done"):  {RuntimePath: "/repo/done", Branch: "done-branch"},
+		setScopedKey("repo-key", "bound"): {RuntimePath: "/repo/bound", Branch: "bound-branch"},
+	})
 	scans := []projectScan{{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}}
 
 	got, err := dashboardRowsForRepo(d, &config.Config{}, state, scans)
@@ -800,11 +824,12 @@ func TestDashboardLaunchDrainRoutesBoundCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
-		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "bound", Project: "pop", Provisioned: false},
-	}}); err != nil {
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1}); err != nil {
 		t.Fatal(err)
 	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "bound", Project: "pop", Provisioned: false},
+	})
 
 	result, err := LaunchDashboardDrain(d, cfg, row)
 	if err != nil {
@@ -840,15 +865,12 @@ func TestDashboardLaunchDrainProvisionsManagedWorktreeWhenReady(t *testing.T) {
 	if !ok || !strings.Contains(cmd, "--task-runtime-path "+result.RuntimePath) {
 		t.Fatalf("spawn command = %q, want runtime override %q", cmd, result.RuntimePath)
 	}
-	state, err := ReadDaemonState(d.Tasks)
-	if err != nil {
-		t.Fatal(err)
-	}
 	repoKey, err := resolveRepoKey(d, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding := state.WorktreeBindings[setScopedKey(repoKey, setID)]
+	bindings := loadBindingStore(t, d.Tasks)
+	binding := bindings[setScopedKey(repoKey, setID)]
 	if binding.RuntimePath != result.RuntimePath || !binding.Provisioned {
 		t.Fatalf("binding = %+v, want managed worktree %q", binding, result.RuntimePath)
 	}
@@ -897,15 +919,12 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 	if !repointed.Replaced || repointed.RuntimePath != wt2 {
 		t.Fatalf("repoint result = %+v, want replaced binding to %s", repointed, wt2)
 	}
-	state, err := ReadDaemonState(d.Tasks)
-	if err != nil {
-		t.Fatal(err)
-	}
 	repoKey, err := resolveRepoKey(d, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding := state.WorktreeBindings[setScopedKey(repoKey, setID)]
+	bindings := loadBindingStore(t, d.Tasks)
+	binding := bindings[setScopedKey(repoKey, setID)]
 	if binding.RuntimePath != wt2 || binding.Provisioned {
 		t.Fatalf("binding = %+v, want adopted %s", binding, wt2)
 	}
@@ -945,15 +964,12 @@ func TestDashboardCreateWorktreeManagedFreshBranchNoSession(t *testing.T) {
 	if branch := runGitOutput(t, repo, "branch", "--list", "fresh-dashboard-branch"); strings.TrimSpace(branch) == "" {
 		t.Fatalf("fresh branch was not created")
 	}
-	state, err := ReadDaemonState(d.Tasks)
-	if err != nil {
-		t.Fatal(err)
-	}
 	repoKey, err := resolveRepoKey(d, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding := state.WorktreeBindings[setScopedKey(repoKey, setID)]
+	bindings := loadBindingStore(t, d.Tasks)
+	binding := bindings[setScopedKey(repoKey, setID)]
 	if binding.RuntimePath != got.RuntimePath || binding.Branch != "fresh-dashboard-branch" || !binding.Provisioned {
 		t.Fatalf("binding = %+v, want managed fresh branch at %s", binding, got.RuntimePath)
 	}
@@ -974,11 +990,12 @@ func TestDashboardBindRefusesLiveLock(t *testing.T) {
 	}
 	row.repoKey = repoKey
 	row.runtimePath = locked
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
-		setScopedKey(repoKey, setID): {RuntimePath: locked, Branch: "locked-branch", Project: "pop", Provisioned: false},
-	}}); err != nil {
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1}); err != nil {
 		t.Fatal(err)
 	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: locked, Branch: "locked-branch", Project: "pop", Provisioned: false},
+	})
 	d.ReadLock = func(runtimePath string) *tasks.RuntimeLockStatus {
 		if runtimePath == locked {
 			lock := liveLock(runtimePath)
@@ -992,11 +1009,8 @@ func TestDashboardBindRefusesLiveLock(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "currently executing") {
 		t.Fatalf("DashboardAdoptWorktree err = %v, want live-lock refusal", err)
 	}
-	after, err := ReadDaemonState(d.Tasks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := after.WorktreeBindings[setScopedKey(repoKey, setID)].RuntimePath; got != locked {
+	afterBindings := loadBindingStore(t, d.Tasks)
+	if got := afterBindings[setScopedKey(repoKey, setID)].RuntimePath; got != locked {
 		t.Fatalf("binding runtime = %q, want unchanged %q", got, locked)
 	}
 }
@@ -1055,11 +1069,12 @@ func TestDashboardUnbindManagedTearsDownAndRefreshShowsExecutionBase(t *testing.
 	}
 	row.repoKey = repoKey
 	row.runtimePath = wt
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
-		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "managed-unbind", Project: filepath.Base(repo), Provisioned: true},
-	}}); err != nil {
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1}); err != nil {
 		t.Fatal(err)
 	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "managed-unbind", Project: filepath.Base(repo), Provisioned: true},
+	})
 
 	got, err := DashboardUnbindWorktree(d, cfg, row)
 	if err != nil {
@@ -1074,12 +1089,8 @@ func TestDashboardUnbindManagedTearsDownAndRefreshShowsExecutionBase(t *testing.
 	if branch := runGitOutput(t, repo, "branch", "--list", "managed-unbind"); strings.TrimSpace(branch) != "" {
 		t.Fatalf("managed branch still exists: %q", branch)
 	}
-	after, err := ReadDaemonState(d.Tasks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(after.WorktreeBindings) != 0 {
-		t.Fatalf("bindings = %+v, want cleared", after.WorktreeBindings)
+	if len(loadBindingStore(t, d.Tasks)) != 0 {
+		t.Fatalf("bindings = %+v, want cleared", loadBindingStore(t, d.Tasks))
 	}
 	afterManifest := mustReadFile(t, filepath.Join(id.TasksDir, setID, "index.json"))
 	if string(beforeManifest) != string(afterManifest) {
@@ -1112,11 +1123,12 @@ func TestDashboardUnbindAdoptedOnlyForgetsBindingAndKeepsStatus(t *testing.T) {
 	}
 	row.repoKey = repoKey
 	row.runtimePath = wt
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
-		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "adopted-unbind", Project: filepath.Base(repo), Provisioned: false},
-	}}); err != nil {
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1}); err != nil {
 		t.Fatal(err)
 	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "adopted-unbind", Project: filepath.Base(repo), Provisioned: false},
+	})
 
 	got, err := DashboardUnbindWorktree(d, cfg, row)
 	if err != nil {
@@ -1131,12 +1143,8 @@ func TestDashboardUnbindAdoptedOnlyForgetsBindingAndKeepsStatus(t *testing.T) {
 	if branch := runGitOutput(t, repo, "branch", "--list", "adopted-unbind"); strings.TrimSpace(branch) == "" {
 		t.Fatalf("adopted branch was removed")
 	}
-	after, err := ReadDaemonState(d.Tasks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(after.WorktreeBindings) != 0 {
-		t.Fatalf("bindings = %+v, want cleared", after.WorktreeBindings)
+	if len(loadBindingStore(t, d.Tasks)) != 0 {
+		t.Fatalf("bindings = %+v, want cleared", loadBindingStore(t, d.Tasks))
 	}
 	afterManifest := mustReadFile(t, filepath.Join(id.TasksDir, setID, "index.json"))
 	if string(beforeManifest) != string(afterManifest) {
@@ -1157,11 +1165,12 @@ func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
 	}
 	row.repoKey = repoKey
 	row.runtimePath = wt
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
-		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "locked-unbind", Project: filepath.Base(repo), Provisioned: false},
-	}}); err != nil {
+	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1}); err != nil {
 		t.Fatal(err)
 	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "locked-unbind", Project: filepath.Base(repo), Provisioned: false},
+	})
 	d.ReadLock = func(runtimePath string) *tasks.RuntimeLockStatus {
 		if runtimePath == wt {
 			lock := liveLock(runtimePath)
@@ -1175,11 +1184,8 @@ func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "refusing unbind") {
 		t.Fatalf("DashboardUnbindWorktree err = %v, want live-lock refusal", err)
 	}
-	after, err := ReadDaemonState(d.Tasks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := after.WorktreeBindings[setScopedKey(repoKey, setID)].RuntimePath; got != wt {
+	afterBindings := loadBindingStore(t, d.Tasks)
+	if got := afterBindings[setScopedKey(repoKey, setID)].RuntimePath; got != wt {
 		t.Fatalf("binding runtime = %q, want unchanged %q", got, wt)
 	}
 
@@ -1187,9 +1193,7 @@ func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
 		t.Fatalf("no-binding unbind must not read runtime lock")
 		return nil
 	}
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{}}); err != nil {
-		t.Fatal(err)
-	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{})
 	got, err := DashboardUnbindWorktree(d, cfg, row)
 	if err != nil {
 		t.Fatalf("no-binding DashboardUnbindWorktree: %v", err)

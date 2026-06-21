@@ -22,6 +22,7 @@ func TestBuildRunViewConfigErrorIsScanError(t *testing.T) {
 			ProjectConfigError: "/repo/broken/.pop.toml: expected value",
 		},
 	}, &DaemonState{Version: 1})
+	snap.Tasks = queueDataDeps(t)
 
 	view := BuildRunView(snap, time.Now())
 	if view.IdleCount != 0 {
@@ -71,6 +72,7 @@ func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
 		{Project: "idle-b", Reason: "no ready set"},
 		{Project: "idle-c", Reason: "no ready set"},
 	}, &DaemonState{Version: 1})
+	snap.Tasks = queueDataDeps(t)
 
 	view := BuildRunView(snap, time.Now())
 	if view.IdleCount != 3 {
@@ -284,6 +286,7 @@ func TestBuildRunViewUnverifiedBucket(t *testing.T) {
 			UnverifiedSetID: "set-hitl",
 		},
 	}, &DaemonState{Version: 1})
+	snap.Tasks = queueDataDeps(t)
 
 	view := BuildRunView(snap, time.Now())
 

@@ -17,24 +17,22 @@ import (
 // Provisioned (e.g. from an older or hand-written state.json) is treated as
 // adopted — teardown must never delete it.
 func TestBindingProvisionedDefault(t *testing.T) {
-	state := &DaemonState{
-		WorktreeBindings: map[string]WorktreeBinding{
-			"repo\x00set-1": {RuntimePath: "/some/path", Branch: "b"},
-		},
-	}
-	if bindingProvisioned(state, "repo\x00set-1") {
+	td := queueDataDeps(t)
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		"repo\x00set-1": {RuntimePath: "/some/path", Branch: "b"},
+	})
+	if bindingProvisioned(td, "repo\x00set-1") {
 		t.Fatalf("absent Provisioned should be false (adopted/safe-by-default)")
 	}
 }
 
 // TestBindingProvisionedTrue verifies pop-provisioned bindings are marked true.
 func TestBindingProvisionedTrue(t *testing.T) {
-	state := &DaemonState{
-		WorktreeBindings: map[string]WorktreeBinding{
-			"repo\x00set-1": {RuntimePath: "/p", Provisioned: true},
-		},
-	}
-	if !bindingProvisioned(state, "repo\x00set-1") {
+	td := queueDataDeps(t)
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		"repo\x00set-1": {RuntimePath: "/p", Provisioned: true},
+	})
+	if !bindingProvisioned(td, "repo\x00set-1") {
 		t.Fatalf("Provisioned:true should return true")
 	}
 }
@@ -48,20 +46,17 @@ func TestAbandonAdoptedRetainsCheckout(t *testing.T) {
 
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-a")
-	state := &DaemonState{
-		Version: 1,
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: {
-				RuntimePath: wt,
-				Branch:      "adopted-branch",
-				Project:     filepath.Base(repo),
-				Provisioned: false, // adopted
-			},
-		},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
+	if err := WriteDaemonState(td, &DaemonState{Version: 1}); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: {
+			RuntimePath: wt,
+			Branch:      "adopted-branch",
+			Project:     filepath.Base(repo),
+			Provisioned: false, // adopted
+		},
+	})
 
 	d := &Deps{Tasks: td}
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
@@ -84,13 +79,9 @@ func TestAbandonAdoptedRetainsCheckout(t *testing.T) {
 		t.Fatalf("adopted branch should still exist after abandon")
 	}
 
-	// Binding must be cleared from state
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	if len(after.WorktreeBindings) != 0 {
-		t.Fatalf("binding = %+v, want cleared", after.WorktreeBindings)
+	// Binding must be cleared from store
+	if len(loadBindingStore(t, td)) != 0 {
+		t.Fatalf("binding = %+v, want cleared", loadBindingStore(t, td))
 	}
 
 	// Output should mention "retained"
@@ -108,20 +99,17 @@ func TestAbandonProvisionedTearsDown(t *testing.T) {
 
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-p")
-	state := &DaemonState{
-		Version: 1,
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: {
-				RuntimePath: wt,
-				Branch:      "provisioned-branch",
-				Project:     filepath.Base(repo),
-				Provisioned: true,
-			},
-		},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
+	if err := WriteDaemonState(td, &DaemonState{Version: 1}); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: {
+			RuntimePath: wt,
+			Branch:      "provisioned-branch",
+			Project:     filepath.Base(repo),
+			Provisioned: true,
+		},
+	})
 
 	d := &Deps{Tasks: td}
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
@@ -157,15 +145,12 @@ func TestBindWorktreeCreatesAdoptedBinding(t *testing.T) {
 		t.Fatalf("result = %+v, want set-x@%s branch my-branch", got, wt)
 	}
 
-	state, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	if len(state.WorktreeBindings) == 0 {
+	bindings := loadBindingStore(t, td)
+	if len(bindings) == 0 {
 		t.Fatalf("no bindings written")
 	}
 	var binding WorktreeBinding
-	for _, b := range state.WorktreeBindings {
+	for _, b := range bindings {
 		binding = b
 	}
 	if binding.RuntimePath != wt {
@@ -216,18 +201,15 @@ func TestBindWorktreeRefusesAlreadyBoundWithoutForce(t *testing.T) {
 	}
 
 	// Binding must be unchanged (still wt1)
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
+	afterBindings := loadBindingStore(t, td)
 	var found bool
-	for _, b := range after.WorktreeBindings {
+	for _, b := range afterBindings {
 		if b.RuntimePath == wt1 {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("bindings = %+v, want wt1 still bound", after.WorktreeBindings)
+		t.Fatalf("bindings = %+v, want wt1 still bound", afterBindings)
 	}
 
 	// With --force: succeeds and updates
@@ -242,18 +224,15 @@ func TestBindWorktreeRefusesAlreadyBoundWithoutForce(t *testing.T) {
 	if !strings.Contains(out.String(), "Bound") {
 		t.Fatalf("output = %q, want bind message", out.String())
 	}
-	after, err = ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state after force: %v", err)
-	}
+	afterBindings = loadBindingStore(t, td)
 	var foundWt2 bool
-	for _, b := range after.WorktreeBindings {
+	for _, b := range afterBindings {
 		if b.RuntimePath == wt2 {
 			foundWt2 = true
 		}
 	}
 	if !foundWt2 {
-		t.Fatalf("bindings after force = %+v, want wt2", after.WorktreeBindings)
+		t.Fatalf("bindings after force = %+v, want wt2", afterBindings)
 	}
 }
 
@@ -289,18 +268,15 @@ func TestBindWorktreeRefusesWhileLocked(t *testing.T) {
 	}
 
 	// Binding must remain pointing to wt1
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
+	afterBindings := loadBindingStore(t, td)
 	var foundWt1 bool
-	for _, b := range after.WorktreeBindings {
+	for _, b := range afterBindings {
 		if b.RuntimePath == wt1 {
 			foundWt1 = true
 		}
 	}
 	if !foundWt1 {
-		t.Fatalf("binding = %+v, want wt1 unchanged", after.WorktreeBindings)
+		t.Fatalf("binding = %+v, want wt1 unchanged", afterBindings)
 	}
 }
 
@@ -317,7 +293,7 @@ func TestIntegrateAdoptedBindingRetainsCheckout(t *testing.T) {
 
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-adopted")
-	state := &DaemonState{
+	if err := WriteDaemonState(td, &DaemonState{
 		Version: 1,
 		Mergeability: map[string]MergeabilityRecord{
 			key: {
@@ -327,18 +303,17 @@ func TestIntegrateAdoptedBindingRetainsCheckout(t *testing.T) {
 				Status:      MergeabilityClean,
 			},
 		},
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: {
-				RuntimePath: wt,
-				Branch:      "adopted-int-branch",
-				Project:     filepath.Base(repo),
-				Provisioned: false, // adopted
-			},
-		},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
+	}); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: {
+			RuntimePath: wt,
+			Branch:      "adopted-int-branch",
+			Project:     filepath.Base(repo),
+			Provisioned: false, // adopted
+		},
+	})
 
 	d := &Deps{
 		Tasks: td,
@@ -376,8 +351,8 @@ func TestIntegrateAdoptedBindingRetainsCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	if len(after.WorktreeBindings) != 0 {
-		t.Fatalf("worktree bindings = %+v, want cleared", after.WorktreeBindings)
+	if len(loadBindingStore(t, td)) != 0 {
+		t.Fatalf("worktree bindings = %+v, want cleared", loadBindingStore(t, td))
 	}
 	if len(after.Mergeability) != 0 {
 		t.Fatalf("mergeability = %+v, want cleared", after.Mergeability)

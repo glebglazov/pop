@@ -38,15 +38,19 @@ func TestReadDaemonStateMigratesLegacyBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	b, ok := state.WorktreeBindings[key]
+	store, err := binding.Load(td)
+	if err != nil {
+		t.Fatalf("load store: %v", err)
+	}
+	b, ok := store.Get(key)
 	if !ok {
-		t.Fatalf("legacy binding not surfaced: %+v", state.WorktreeBindings)
+		t.Fatalf("legacy binding not migrated to store: %+v", store.Bindings)
 	}
 	if b.RuntimePath != "/some/checkout" || !b.Provisioned {
 		t.Fatalf("legacy binding = %+v, want /some/checkout provisioned", b)
 	}
 
-	// Persist: the store now owns the binding; state.json must shed it.
+	// Persist: legacy bindings stay in the shared store only.
 	if err := WriteDaemonState(td, state); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -58,7 +62,7 @@ func TestReadDaemonStateMigratesLegacyBindings(t *testing.T) {
 		t.Fatalf("daemon state still carries bindings: %s", raw)
 	}
 
-	store, err := binding.Load(td)
+	store, err = binding.Load(td)
 	if err != nil {
 		t.Fatalf("load store: %v", err)
 	}

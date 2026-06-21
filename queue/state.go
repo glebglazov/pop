@@ -14,13 +14,8 @@ import (
 )
 
 // DaemonState is persisted supervisor-owned state. It tracks parked sets,
-// retry timers, mergeability, panes, and worktree bindings.
-//
-// WorktreeBindings is no longer persisted here: ADR-0036 moved Worktree
-// bindings into the shared per-repository store owned by the binding module.
-// The field is retained as an in-memory view that ReadDaemonState populates
-// from the binding store and WriteDaemonState writes back to it, so the daemon
-// state file itself never carries binding state.
+// retry timers, mergeability, and drain panes. Worktree bindings live in the
+// shared per-repository store owned by tasks/binding (ADR-0036).
 type DaemonState struct {
 	Version          int                           `json:"version"`
 	UpdatedAt        time.Time                     `json:"updated_at,omitempty"`
@@ -30,7 +25,6 @@ type DaemonState struct {
 	ParkedSets       map[string]ParkedSet          `json:"parked_sets,omitempty"`
 	Mergeability     map[string]MergeabilityRecord `json:"mergeability,omitempty"`
 	DrainPanes       map[string]DrainPane          `json:"drain_panes,omitempty"`
-	WorktreeBindings map[string]WorktreeBinding    `json:"worktree_bindings,omitempty"`
 }
 
 // WorktreeBinding is the binding module's durable checkout record. The alias
@@ -50,11 +44,8 @@ type DrainPane struct {
 
 // bindingProvisioned reports whether the binding stored under key was
 // provisioned by pop (safe to teardown) or adopted (must not delete).
-func bindingProvisioned(state *DaemonState, key string) bool {
-	if state == nil {
-		return false
-	}
-	return (&binding.Store{Bindings: state.WorktreeBindings}).Provisioned(key)
+func bindingProvisioned(d *tasks.Deps, key string) bool {
+	return binding.Provisioned(d, key)
 }
 
 // bindingShouldTeardown reports whether the worktree at key should be torn
@@ -62,11 +53,8 @@ func bindingProvisioned(state *DaemonState, key string) bool {
 // created it) or when the binding is explicitly provisioned. It returns false
 // only for explicitly adopted bindings (Provisioned=false), which must never
 // have their directories deleted.
-func bindingShouldTeardown(state *DaemonState, key string) bool {
-	if state == nil {
-		return true // no state at all: legacy path, tear down
-	}
-	return (&binding.Store{Bindings: state.WorktreeBindings}).ShouldTeardown(key)
+func bindingShouldTeardown(d *tasks.Deps, key string) bool {
+	return binding.ShouldTeardown(d, key)
 }
 
 // ParkedSet records a task set whose consecutive abnormal exits exhausted the
@@ -97,6 +85,19 @@ type MergeabilityRecord struct {
 	Source      string    `json:"source,omitempty"`
 }
 
+// bindingForSet returns the shared-store binding for (repoKey, setID).
+func bindingForSet(d *tasks.Deps, repoKey, setID string) (WorktreeBinding, bool) {
+	if d == nil {
+		return WorktreeBinding{}, false
+	}
+	store, err := binding.Load(d)
+	if err != nil {
+		return WorktreeBinding{}, false
+	}
+	b, ok := store.Get(setScopedKey(repoKey, setID))
+	return b, ok
+}
+
 // DaemonStatePath returns the queue daemon state path.
 func DaemonStatePath(d *tasks.Deps) string {
 	return filepath.Join(QueueDataDir(d), "state.json")
@@ -118,52 +119,51 @@ func EnsureDaemonState(d *tasks.Deps) (*DaemonState, error) {
 	return state, nil
 }
 
-// ReadDaemonState reads the persisted queue daemon state file and hydrates the
-// in-memory WorktreeBindings view from the shared binding store. Any binding
-// state still embedded in a pre-ADR-0036 daemon state file is folded into the
-// view (store entries win) and migrated out on the next write.
+// ReadDaemonState reads the persisted queue daemon state file. Legacy
+// worktree_bindings embedded in pre-ADR-0036 state files are migrated into the
+// shared binding store on read.
 func ReadDaemonState(d *tasks.Deps) (*DaemonState, error) {
 	data, err := d.FS.ReadFile(DaemonStatePath(d))
 	if err != nil {
 		return nil, err
 	}
-	var state DaemonState
-	if err := json.Unmarshal(data, &state); err != nil {
+	var envelope struct {
+		DaemonState
+		LegacyBindings map[string]WorktreeBinding `json:"worktree_bindings,omitempty"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, fmt.Errorf("parse queue daemon state: %w", err)
 	}
+	state := envelope.DaemonState
 	migrateDaemonState(&state)
-	if err := loadBindings(d, &state); err != nil {
-		return nil, err
+	if len(envelope.LegacyBindings) > 0 {
+		if err := migrateLegacyBindings(d, envelope.LegacyBindings); err != nil {
+			return nil, err
+		}
 	}
 	return &state, nil
 }
 
-// loadBindings replaces state.WorktreeBindings with the shared binding store's
-// contents, folding in any legacy bindings the daemon state file still carries.
-func loadBindings(d *tasks.Deps, state *DaemonState) error {
+func migrateLegacyBindings(d *tasks.Deps, legacy map[string]WorktreeBinding) error {
 	store, err := binding.Load(d)
 	if err != nil {
 		return err
 	}
-	merged := store.Bindings
-	for key, legacy := range state.WorktreeBindings {
-		if _, ok := merged[key]; ok {
+	changed := false
+	for key, b := range legacy {
+		if _, ok := store.Get(key); ok {
 			continue
 		}
-		if merged == nil {
-			merged = map[string]WorktreeBinding{}
-		}
-		merged[key] = legacy
+		store.Put(key, b)
+		changed = true
 	}
-	state.WorktreeBindings = merged
+	if changed {
+		return binding.Save(d, store)
+	}
 	return nil
 }
 
-// WriteDaemonState writes the queue daemon state file atomically. Worktree
-// bindings are persisted to the shared binding store (not the daemon state
-// file) so they remain readable and writable without a daemon process. The
-// store is only rewritten when the caller manages bindings (non-nil view), so a
-// plain state update never clobbers the store.
+// WriteDaemonState writes the queue daemon state file atomically.
 func WriteDaemonState(d *tasks.Deps, state *DaemonState) error {
 	if state == nil {
 		state = &DaemonState{Version: 1}
@@ -172,15 +172,7 @@ func WriteDaemonState(d *tasks.Deps, state *DaemonState) error {
 		state.Version = 1
 	}
 	state.UpdatedAt = time.Now().UTC()
-	if state.WorktreeBindings != nil {
-		if err := binding.Save(d, &binding.Store{Bindings: state.WorktreeBindings}); err != nil {
-			return err
-		}
-	}
-	bindings := state.WorktreeBindings
-	state.WorktreeBindings = nil
 	payload, err := json.MarshalIndent(state, "", "  ")
-	state.WorktreeBindings = bindings
 	if err != nil {
 		return err
 	}
@@ -188,8 +180,6 @@ func WriteDaemonState(d *tasks.Deps, state *DaemonState) error {
 }
 
 // repoIdentityKey returns the repository identity prefix used in set-scoped keys.
-// It delegates to the binding module so daemon-state keys and shared-store
-// binding keys stay byte-identical for the same (repo, set).
 func repoIdentityKey(id *tasks.RepositoryIdentity) string {
 	return binding.RepoKey(id)
 }

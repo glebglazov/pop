@@ -7,6 +7,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -72,7 +73,7 @@ func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*p
 
 	// 2. the repo's git main worktree — derived for any non-bare repo even when
 	// it has linked worktrees.
-	mainPath, bare, err := gitMainWorktree(d, scans[0].ProjectPath)
+	mainPath, bare, err := binding.GitMainWorktree(d.Tasks, scans[0].ProjectPath)
 	if err != nil {
 		return nil, false, err
 	}
@@ -85,11 +86,8 @@ func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*p
 	return scanForCheckout(d, scans, mainPath), false, nil
 }
 
-// ResolveExecutionBasePath resolves the repository checkout used as the base
-// when no per-set Worktree binding applies: explicit execution_base override,
-// then the git main worktree for non-bare repositories. It is the foreground
-// counterpart to resolveRepresentative for callers that have one checkout
-// rather than a queue scan group.
+// ResolveExecutionBasePath resolves the repository checkout used as Execution
+// base. It delegates to tasks/binding.
 func ResolveExecutionBasePath(d *Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
 	if d == nil {
 		d = DefaultDeps()
@@ -97,33 +95,7 @@ func ResolveExecutionBasePath(d *Deps, cfg *config.Config, checkoutPath string) 
 	if d.Tasks == nil {
 		d.Tasks = tasks.DefaultDeps()
 	}
-	repoKey, err := resolveRepoKey(d, checkoutPath)
-	if err != nil {
-		return "", false, err
-	}
-	if cfg != nil {
-		for rawKey, block := range cfg.Repo {
-			if block.ExecutionBase == nil || !*block.ExecutionBase {
-				continue
-			}
-			candidate, err := tasks.NormalizeProjectPathWith(d.Tasks, rawKey)
-			if err != nil {
-				continue
-			}
-			candidateKey, err := resolveRepoKey(d, candidate)
-			if err != nil {
-				continue
-			}
-			if candidateKey == repoKey {
-				return candidate, false, nil
-			}
-		}
-	}
-	mainPath, bare, err := gitMainWorktree(d, checkoutPath)
-	if err != nil || bare || mainPath == "" {
-		return mainPath, bare, err
-	}
-	return mainPath, false, nil
+	return binding.ResolveExecutionBasePath(d.Tasks, cfg, checkoutPath)
 }
 
 // MainWorktreeBranch returns the branch currently checked out in the
@@ -137,7 +109,7 @@ func MainWorktreeBranch(d *Deps, runtimePath string) (string, error) {
 	if d.Tasks == nil {
 		d.Tasks = tasks.DefaultDeps()
 	}
-	mainPath, bare, err := gitMainWorktree(d, runtimePath)
+	mainPath, bare, err := binding.GitMainWorktree(d.Tasks, runtimePath)
 	if err != nil || bare || mainPath == "" {
 		return "", err
 	}
@@ -268,7 +240,9 @@ func filterRunningElsewhere(decisions []Decision, runningElsewhere map[string]bo
 // Worktree-ready decisions are left for prepareWorktreeDrain, which provisions
 // or reuses the binding while preserving the project session.
 func applyBindingRouting(d *Deps, scans []projectScan, state *DaemonState, decisions []Decision) {
-	if state == nil || len(state.WorktreeBindings) == 0 {
+	_ = state
+	bindings, err := binding.AllBindings(d.Tasks)
+	if err != nil || len(bindings) == 0 {
 		return
 	}
 	repoKey, err := scanRepoKey(d, scans[0])
@@ -280,14 +254,14 @@ func applyBindingRouting(d *Deps, scans []projectScan, state *DaemonState, decis
 		if !dec.Actionable() || dec.WorktreeReady {
 			continue
 		}
-		binding, ok := state.WorktreeBindings[setScopedKey(repoKey, dec.TaskSetID)]
-		if !ok || strings.TrimSpace(binding.RuntimePath) == "" {
+		b, ok := bindings[setScopedKey(repoKey, dec.TaskSetID)]
+		if !ok || strings.TrimSpace(b.RuntimePath) == "" {
 			continue
 		}
-		dec.scan.ProjectPath = binding.RuntimePath
-		dec.scan.RuntimePath = binding.RuntimePath
-		dec.scan.SessionName = project.SessionNameWith(d.Project, binding.RuntimePath)
-		if lock := d.readLock(binding.RuntimePath); lock != nil && lock.Locked {
+		dec.scan.ProjectPath = b.RuntimePath
+		dec.scan.RuntimePath = b.RuntimePath
+		dec.scan.SessionName = project.SessionNameWith(d.Project, b.RuntimePath)
+		if lock := d.readLock(b.RuntimePath); lock != nil && lock.Locked {
 			dec.Busy = true
 			dec.Reason = "busy"
 			dec.lockStatus = lock
@@ -335,30 +309,35 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 		return []Decision{skel}
 	}
 
+	bindings, bindErr := binding.AllBindings(d.Tasks)
+	if bindErr != nil {
+		bindings = nil
+	}
+
 	var decisions []Decision
 	var unbound bool
 	for _, id := range ids {
 		if runningElsewhere[id] {
 			continue
 		}
-		binding, has := state.WorktreeBindings[setScopedKey(repoKey, id)]
-		if !has || strings.TrimSpace(binding.RuntimePath) == "" {
+		b, has := bindings[setScopedKey(repoKey, id)]
+		if !has || strings.TrimSpace(b.RuntimePath) == "" {
 			unbound = true
 			continue
 		}
 		action := skel
 		action.TaskSetID = id
-		action.scan.ProjectPath = binding.RuntimePath
-		action.scan.RuntimePath = binding.RuntimePath
-		action.scan.SessionName = project.SessionNameWith(d.Project, binding.RuntimePath)
-		if lock := d.readLock(binding.RuntimePath); lock != nil && lock.Locked {
+		action.scan.ProjectPath = b.RuntimePath
+		action.scan.RuntimePath = b.RuntimePath
+		action.scan.SessionName = project.SessionNameWith(d.Project, b.RuntimePath)
+		if lock := d.readLock(b.RuntimePath); lock != nil && lock.Locked {
 			busyDec := skel
 			busyDec.Busy = true
 			busyDec.Reason = "busy"
 			busyDec.TaskSetID = id
 			busyDec.lockStatus = lock
-			busyDec.scan.RuntimePath = binding.RuntimePath
-			busyDec.scan.ProjectPath = binding.RuntimePath
+			busyDec.scan.RuntimePath = b.RuntimePath
+			busyDec.scan.ProjectPath = b.RuntimePath
 			decisions = append(decisions, busyDec)
 			continue
 		}

@@ -62,6 +62,7 @@ type StatusSnapshot struct {
 	AwaitingIntegration  []AwaitingIntegrationSet
 	DaemonState          *DaemonState
 	ActiveAgentCooldowns map[string]time.Time
+	Tasks                *tasks.Deps
 }
 
 // BuildStatus derives queue status from on-disk lock/state truth.
@@ -80,6 +81,7 @@ func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
 		return StatusSnapshot{}, err
 	}
 	snap.ActiveAgentCooldowns = cooldowns
+	snap.Tasks = d.Tasks
 	return snap, nil
 }
 

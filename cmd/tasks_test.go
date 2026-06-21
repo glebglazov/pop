@@ -1609,9 +1609,6 @@ func setupOfferIntegrationWorktree(t *testing.T, td *tasks.Deps, status string) 
 				Status:      status,
 			},
 		},
-		WorktreeBindings: map[string]queue.WorktreeBinding{
-			key: {RuntimePath: wt, Branch: "feature", Provisioned: false},
-		},
 	}
 	if err := queue.WriteDaemonState(td, state); err != nil {
 		t.Fatalf("write state: %v", err)

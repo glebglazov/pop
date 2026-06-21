@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/glebglazov/pop/tasks/binding"
@@ -60,7 +59,7 @@ func AbandonWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer
 	if err != nil {
 		return AbandonResult{}, err
 	}
-	key, binding, ok, err := findWorktreeBinding(state, setID)
+	key, binding, ok, err := binding.FindBySetID(d.Tasks, setID)
 	if err != nil {
 		return AbandonResult{}, err
 	}
@@ -104,16 +103,20 @@ func AbandonBindingWithOptions(d *Deps, cfg *config.Config, bindingKey, setID st
 	if err != nil {
 		return AbandonResult{}, err
 	}
-	binding, ok := state.WorktreeBindings[bindingKey]
+	store, err := binding.Load(d.Tasks)
+	if err != nil {
+		return AbandonResult{}, err
+	}
+	b, ok := store.Get(bindingKey)
 	if !ok {
 		fmt.Fprintf(out, "%s has no worktree binding to unbind\n", setID)
 		return AbandonResult{SetID: setID, Noop: true}, nil
 	}
-	return abandonResolvedBinding(d, cfg, state, bindingKey, binding, setID, out, opts)
+	return abandonResolvedBinding(d, cfg, state, bindingKey, b, setID, out, opts)
 }
 
-func abandonResolvedBinding(d *Deps, cfg *config.Config, state *DaemonState, key string, binding WorktreeBinding, setID string, out io.Writer, opts AbandonOptions) (AbandonResult, error) {
-	lock := d.readLock(binding.RuntimePath)
+func abandonResolvedBinding(d *Deps, cfg *config.Config, state *DaemonState, key string, wt WorktreeBinding, setID string, out io.Writer, opts AbandonOptions) (AbandonResult, error) {
+	lock := d.readLock(wt.RuntimePath)
 	if lock != nil && lock.Locked {
 		if lock.Metadata != nil && lock.Metadata.SetID != "" && lock.Metadata.SetID != setID {
 			return AbandonResult{}, fmt.Errorf("%s runtime checkout is locked for another set (%s); refusing unbind", setID, lock.Metadata.SetID)
@@ -121,13 +124,13 @@ func abandonResolvedBinding(d *Deps, cfg *config.Config, state *DaemonState, key
 		return AbandonResult{}, fmt.Errorf("%s is currently executing; refusing unbind", setID)
 	}
 
-	needsConfirm, err := abandonNeedsConfirm(d, cfg, state, setID, binding)
+	needsConfirm, err := abandonNeedsConfirm(d, cfg, state, setID, wt)
 	if err != nil {
 		return AbandonResult{}, err
 	}
 	if needsConfirm {
 		prompt := fmt.Sprintf(abandonConfirmPrompt, setID)
-		if !binding.Provisioned {
+		if !wt.Provisioned {
 			prompt = fmt.Sprintf(abandonConfirmPromptAdopted, setID)
 		}
 		confirmed, err := confirmAbandon(opts.In, out, opts.Yes, prompt)
@@ -141,82 +144,54 @@ func abandonResolvedBinding(d *Deps, cfg *config.Config, state *DaemonState, key
 	}
 
 	var branch string
-	if binding.Provisioned {
-		scan, err := resolveBindingScan(d, cfg, binding)
+	if wt.Provisioned {
+		scan, err := resolveBindingScan(d, cfg, wt)
 		if err != nil {
 			return AbandonResult{}, err
 		}
-		branch = strings.TrimSpace(binding.Branch)
+		branch = strings.TrimSpace(wt.Branch)
 		if branch == "" {
-			branch, err = resolveSetBranch(d, binding.RuntimePath)
+			branch, err = resolveSetBranch(d, wt.RuntimePath)
 			if err != nil {
 				return AbandonResult{}, err
 			}
 		}
-		if err := teardownBoundWorktree(d, scan.RuntimePath, binding.RuntimePath, branch); err != nil {
+		if err := teardownBoundWorktree(d, scan.RuntimePath, wt.RuntimePath, branch); err != nil {
 			return AbandonResult{}, err
 		}
 	} else {
-		branch = strings.TrimSpace(binding.Branch)
+		branch = strings.TrimSpace(wt.Branch)
 	}
 
 	state, err = EnsureDaemonState(d.Tasks)
 	if err != nil {
 		return AbandonResult{}, err
 	}
-	delete(state.WorktreeBindings, key)
 	if state.Mergeability != nil {
 		delete(state.Mergeability, key)
+	}
+	if err := binding.Delete(d.Tasks, key); err != nil {
+		return AbandonResult{}, err
 	}
 	if err := WriteDaemonState(d.Tasks, state); err != nil {
 		return AbandonResult{}, err
 	}
 	if err := AppendJournalEntry(d.Tasks, JournalEntry{
 		Event:       JournalEventAbandoned,
-		Project:     binding.Project,
+		Project:     wt.Project,
 		SetID:       setID,
-		RuntimePath: binding.RuntimePath,
+		RuntimePath: wt.RuntimePath,
 		SourceRef:   branch,
 		Source:      "human",
 	}); err != nil {
 		return AbandonResult{}, err
 	}
-	if binding.Provisioned {
-		fmt.Fprintf(out, "Unbound %s and removed worktree %s\n", setID, binding.RuntimePath)
+	if wt.Provisioned {
+		fmt.Fprintf(out, "Unbound %s and removed worktree %s\n", setID, wt.RuntimePath)
 	} else {
-		fmt.Fprintf(out, "Unbound %s (adopted checkout retained at %s)\n", setID, binding.RuntimePath)
+		fmt.Fprintf(out, "Unbound %s (adopted checkout retained at %s)\n", setID, wt.RuntimePath)
 	}
 	return AbandonResult{SetID: setID}, nil
-}
-
-func findWorktreeBinding(state *DaemonState, setID string) (string, WorktreeBinding, bool, error) {
-	if state == nil || len(state.WorktreeBindings) == 0 {
-		return "", WorktreeBinding{}, false, nil
-	}
-	var keys []string
-	for key, binding := range state.WorktreeBindings {
-		parts := strings.Split(key, "\x00")
-		if len(parts) != 2 || parts[1] != setID {
-			continue
-		}
-		keys = append(keys, key)
-		_ = binding
-	}
-	switch len(keys) {
-	case 0:
-		return "", WorktreeBinding{}, false, nil
-	case 1:
-		return keys[0], state.WorktreeBindings[keys[0]], true, nil
-	default:
-		sort.Strings(keys)
-		var b strings.Builder
-		fmt.Fprintf(&b, "queue: set %q is ambiguous; bound in:", setID)
-		for _, key := range keys {
-			binding := state.WorktreeBindings[key]
-			fmt.Fprintf(&b, "\n  %s (%s)", binding.Project, binding.RuntimePath)
-		}
-		return "", WorktreeBinding{}, false, fmt.Errorf("%s", b.String())
-	}
 }
 
 func abandonNeedsConfirm(d *Deps, cfg *config.Config, state *DaemonState, setID string, binding WorktreeBinding) (bool, error) {

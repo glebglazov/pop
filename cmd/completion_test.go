@@ -13,6 +13,7 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/spf13/cobra"
 )
 
@@ -259,20 +260,16 @@ func TestTaskIntegrateShellCompletionCandidates(t *testing.T) {
 func TestTasksUnbindWorktreeShellCompletionCandidates(t *testing.T) {
 	dir := t.TempDir()
 	td := queueShellCompletionDeps(t, dir)
-	state := &queue.DaemonState{
-		Version: 1,
-		WorktreeBindings: map[string]queue.WorktreeBinding{
-			"pop-deadbeef\x00set-bound": {
-				RuntimePath: "/wt/bound",
-				Project:     "pop",
-			},
-			"pop-deadbeef\x00set-other": {
-				RuntimePath: "/wt/other",
-				Project:     "pop",
-			},
+	if err := binding.Save(td, &binding.Store{Bindings: map[string]binding.Binding{
+		"pop-deadbeef\x00set-bound": {
+			RuntimePath: "/wt/bound",
+			Project:     "pop",
 		},
-	}
-	if err := queue.WriteDaemonState(td, state); err != nil {
+		"pop-deadbeef\x00set-other": {
+			RuntimePath: "/wt/other",
+			Project:     "pop",
+		},
+	}}); err != nil {
 		t.Fatal(err)
 	}
 

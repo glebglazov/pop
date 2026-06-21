@@ -21,19 +21,13 @@ func TestAbandonRefusesWhileBusy(t *testing.T) {
 
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-1")
-	state := &DaemonState{
-		Version: 1,
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: {
-				RuntimePath: wt,
-				Branch:      "set-busy",
-				Project:     filepath.Base(repo),
-			},
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: {
+			RuntimePath: wt,
+			Branch:      "set-busy",
+			Project:     filepath.Base(repo),
 		},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
+	})
 
 	d := &Deps{
 		Tasks: td,
@@ -48,12 +42,9 @@ func TestAbandonRefusesWhileBusy(t *testing.T) {
 		t.Fatalf("err = %v, want refuse while busy", err)
 	}
 
-	after, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	if len(after.WorktreeBindings) != 1 {
-		t.Fatalf("binding state = %+v, want retained while busy", after.WorktreeBindings)
+	afterBindings := loadBindingStore(t, td)
+	if len(afterBindings) != 1 {
+		t.Fatalf("binding state = %+v, want retained while busy", afterBindings)
 	}
 	if _, err := os.Stat(wt); err != nil {
 		t.Fatalf("worktree should still exist: %v", err)
@@ -72,16 +63,16 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-1")
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: {
+			RuntimePath: wt,
+			Branch:      "set-done",
+			Project:     filepath.Base(repo),
+			Provisioned: true,
+		},
+	})
 	state := &DaemonState{
 		Version: 1,
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: {
-				RuntimePath: wt,
-				Branch:      "set-done",
-				Project:     filepath.Base(repo),
-				Provisioned: true,
-			},
-		},
 		Mergeability: map[string]MergeabilityRecord{
 			key: {
 				Project:     filepath.Base(repo),
@@ -118,8 +109,9 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	if len(after.WorktreeBindings) != 0 {
-		t.Fatalf("bindings = %+v, want cleared", after.WorktreeBindings)
+	afterBindings := loadBindingStore(t, td)
+	if len(afterBindings) != 0 {
+		t.Fatalf("bindings = %+v, want cleared", afterBindings)
 	}
 	if len(after.Mergeability) != 0 {
 		t.Fatalf("mergeability = %+v, want cleared", after.Mergeability)
@@ -182,16 +174,16 @@ func TestAbandonDoneSetRequiresConfirmationUnlessYes(t *testing.T) {
 
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-1")
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: {
+			RuntimePath: wt,
+			Branch:      "set-done",
+			Project:     filepath.Base(repo),
+			Provisioned: true,
+		},
+	})
 	state := &DaemonState{
 		Version: 1,
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: {
-				RuntimePath: wt,
-				Branch:      "set-done",
-				Project:     filepath.Base(repo),
-				Provisioned: true,
-			},
-		},
 		Mergeability: map[string]MergeabilityRecord{
 			key: {
 				Project:     filepath.Base(repo),
@@ -237,7 +229,7 @@ func TestAbandonDoneSetRequiresConfirmationUnlessYes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	if len(after.Mergeability) != 0 || len(after.WorktreeBindings) != 0 {
+	if len(after.Mergeability) != 0 || len(loadBindingStore(t, td)) != 0 {
 		t.Fatalf("state = %+v, want binding and mergeability cleared", after)
 	}
 }

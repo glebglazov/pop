@@ -143,6 +143,7 @@ func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 
 	// The refusal is reported in status and run output, never silently dropped.
 	snap := statusFromDecisions(decisions, &DaemonState{Version: 1})
+	snap.Tasks = queueDataDeps(t)
 	if len(snap.Skipped) != 1 || snap.Skipped[0].Reason != repoScanReason {
 		t.Fatalf("status Skipped = %+v, want one %q", snap.Skipped, repoScanReason)
 	}
@@ -163,9 +164,11 @@ func TestDecideRepoDispatchesBindingRoutesRegardlessOfWorktreeReady(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := &DaemonState{Version: 1, WorktreeBindings: map[string]WorktreeBinding{
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey(repoIdentityKey(id), "top"): {RuntimePath: wts[1], Branch: "pop/top", Project: "repo"},
-	}}
+	})
+	state := &DaemonState{Version: 1}
 	scans := scansForCheckouts(wts, "/def")
 
 	decisions := decideRepoDispatches(d, &config.Config{}, scans, state, time.Now())

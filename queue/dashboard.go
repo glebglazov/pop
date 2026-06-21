@@ -339,14 +339,13 @@ type dashboardWorktreeView struct {
 const dashboardWorktreeMarker = "↳ "
 
 func dashboardWorktree(d *Deps, state *DaemonState, repoKey, setID string, rep *projectScan, repBranch string, bare bool) dashboardWorktreeView {
-	if state != nil {
-		if b, ok := state.WorktreeBindings[setScopedKey(repoKey, setID)]; ok && strings.TrimSpace(b.RuntimePath) != "" {
+	if b, ok := bindingForSet(d.Tasks, repoKey, setID); ok && strings.TrimSpace(b.RuntimePath) != "" {
+		_ = state
 			branch := b.Branch
 			if branch == "" {
 				branch = binding.CurrentBranch(d.Tasks, b.RuntimePath)
 			}
-			return dashboardWorktreeView{label: formatDashboardWorktree(branch, true), runtimePath: b.RuntimePath}
-		}
+		return dashboardWorktreeView{label: formatDashboardWorktree(branch, true), runtimePath: b.RuntimePath}
 	}
 	if rep != nil {
 		return dashboardWorktreeView{label: formatDashboardWorktree(repBranch, false), runtimePath: rep.RuntimePath}
@@ -376,11 +375,10 @@ func dashboardDrain(d *Deps, state *DaemonState, repoKey, setID, runtimePath str
 	if runtimePath != "" {
 		paths[runtimePath] = true
 	}
-	if state != nil {
-		if b, ok := state.WorktreeBindings[setScopedKey(repoKey, setID)]; ok && b.RuntimePath != "" {
-			paths[b.RuntimePath] = true
-		}
+	if b, ok := bindingForSet(d.Tasks, repoKey, setID); ok && b.RuntimePath != "" {
+		paths[b.RuntimePath] = true
 	}
+	_ = state
 	for path := range paths {
 		lock := d.readLock(path)
 		if lock == nil || !lock.Locked || lock.Metadata == nil {
@@ -1287,10 +1285,6 @@ func LaunchDashboardDrain(d *Deps, cfg *config.Config, row DashboardRow) (Dashbo
 	if d.Project == nil {
 		d.Project = project.DefaultDeps()
 	}
-	state, err := EnsureDaemonState(d.Tasks)
-	if err != nil {
-		return DashboardDrainResult{}, err
-	}
 	scans, err := dashboardScansForDefinition(d, cfg, row.defPath)
 	if err != nil {
 		return DashboardDrainResult{}, err
@@ -1310,25 +1304,24 @@ func LaunchDashboardDrain(d *Deps, cfg *config.Config, row DashboardRow) (Dashbo
 		Project:   repoName(scans, rep),
 		TaskSetID: row.SetID,
 	}
-	key := setScopedKey(repoKey, row.SetID)
-	if binding, ok := state.WorktreeBindings[key]; ok && strings.TrimSpace(binding.RuntimePath) != "" {
-		if err := validateBoundWorktree(d, scans[0].ProjectPath, binding); err != nil {
+	if b, ok := bindingForSet(d.Tasks, repoKey, row.SetID); ok && strings.TrimSpace(b.RuntimePath) != "" {
+		if err := validateBoundWorktree(d, scans[0].ProjectPath, b); err != nil {
 			return DashboardDrainResult{}, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", row.SetID, err)
 		}
 		worktreeReady, configErr := readRepoConfig(d, scans[0].ProjectPath)
 		if configErr != "" {
 			worktreeReady = false
 		}
-		sessionName := project.SessionNameWith(d.Project, binding.RuntimePath)
+		sessionName := project.SessionNameWith(d.Project, b.RuntimePath)
 		if worktreeReady && rep != nil {
 			sessionName = rep.SessionName
 		}
 		dec.WorktreeReady = worktreeReady
 		dec.scan = projectScan{
 			Name:           dec.Project,
-			ProjectPath:    binding.RuntimePath,
+			ProjectPath:    b.RuntimePath,
 			DefinitionPath: scans[0].DefinitionPath,
-			RuntimePath:    binding.RuntimePath,
+			RuntimePath:    b.RuntimePath,
 			SessionName:    sessionName,
 			RepoKey:        repoKey,
 		}
@@ -1612,16 +1605,8 @@ func DashboardCreateWorktree(d *Deps, cfg *config.Config, row DashboardRow, base
 	if rep, _, err := resolveRepresentative(d, cfg, scans); err == nil {
 		proj = repoName(scans, rep)
 	}
-	state, err := EnsureDaemonState(d.Tasks)
-	if err != nil {
-		return DashboardCreateWorktreeResult{}, err
-	}
-	if state.WorktreeBindings == nil {
-		state.WorktreeBindings = map[string]WorktreeBinding{}
-	}
 	key := setScopedKey(repoKey, row.SetID)
-	state.WorktreeBindings[key] = binding.Binding{RuntimePath: path, Branch: branch, Project: proj, Provisioned: true}
-	if err := WriteDaemonState(d.Tasks, state); err != nil {
+	if err := binding.Put(d.Tasks, key, binding.Binding{RuntimePath: path, Branch: branch, Project: proj, Provisioned: true}); err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
 	if err := AppendJournalEntry(d.Tasks, JournalEntry{
@@ -1671,16 +1656,12 @@ func refuseDashboardBindWhileLocked(d *Deps, row DashboardRow) error {
 	if d.Tasks == nil {
 		d.Tasks = tasks.DefaultDeps()
 	}
-	state, err := EnsureDaemonState(d.Tasks)
-	if err != nil {
-		return err
-	}
 	paths := map[string]bool{}
 	if strings.TrimSpace(row.runtimePath) != "" {
 		paths[row.runtimePath] = true
 	}
 	if row.repoKey != "" {
-		if b, ok := state.WorktreeBindings[setScopedKey(row.repoKey, row.SetID)]; ok && b.RuntimePath != "" {
+		if b, ok := bindingForSet(d.Tasks, row.repoKey, row.SetID); ok && b.RuntimePath != "" {
 			paths[b.RuntimePath] = true
 		}
 	}

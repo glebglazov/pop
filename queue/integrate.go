@@ -116,19 +116,15 @@ func integrateCleanSet(d *Deps, cfg *config.Config, key string, rec Mergeability
 	if err != nil {
 		return IntegrationResult{}, err
 	}
-	provisioned := bindingShouldTeardown(state, key)
+	provisioned := bindingShouldTeardown(d.Tasks, key)
 	if provisioned {
 		if err := teardownIntegratedBranch(d, scan.RuntimePath, rec.RuntimePath, branch); err != nil {
 			return IntegrationResult{}, err
 		}
-		state, err = EnsureDaemonState(d.Tasks)
-		if err != nil {
-			return IntegrationResult{}, err
-		}
 	}
 	delete(state.Mergeability, key)
-	if state.WorktreeBindings != nil {
-		delete(state.WorktreeBindings, key)
+	if err := binding.Delete(d.Tasks, key); err != nil {
+		return IntegrationResult{}, err
 	}
 	if err := WriteDaemonState(d.Tasks, state); err != nil {
 		return IntegrationResult{}, err
@@ -320,19 +316,15 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Mergea
 	if err != nil {
 		return IntegrationResult{}, err
 	}
-	provisioned := bindingShouldTeardown(state, key)
+	provisioned := bindingShouldTeardown(d.Tasks, key)
 	if provisioned {
 		if err := teardownIntegratedBranch(d, scan.RuntimePath, rec.RuntimePath, branch); err != nil {
 			return IntegrationResult{}, err
 		}
-		state, err = EnsureDaemonState(d.Tasks)
-		if err != nil {
-			return IntegrationResult{}, err
-		}
 	}
 	delete(state.Mergeability, key)
-	if state.WorktreeBindings != nil {
-		delete(state.WorktreeBindings, key)
+	if err := binding.Delete(d.Tasks, key); err != nil {
+		return IntegrationResult{}, err
 	}
 	if err := WriteDaemonState(d.Tasks, state); err != nil {
 		return IntegrationResult{}, err

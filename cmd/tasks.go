@@ -623,106 +623,37 @@ func resolveTaskSetRuntimeForImplement(d *tasks.Deps, taskSetPath string) (tasks
 		return in, err
 	}
 
-	store, err := binding.Load(d)
-	if err != nil {
-		return in, err
-	}
-	repoID, err := tasks.ResolveRepositoryIdentity(d, resolved.ProjectPath)
-	if err != nil {
-		return in, err
-	}
-	key := binding.Key(repoID, taskSetID)
-	if existing, ok := store.Get(key); ok && strings.TrimSpace(existing.RuntimePath) != "" {
-		if taskInline {
-			return in, fmt.Errorf("tasks implement: task set %s has a worktree binding; run `pop tasks unbind-worktree %s` before --inline", taskSetID, taskSetID)
-		}
-		if strings.TrimSpace(in.RuntimeOverride) != "" {
-			overridePath, err := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, in.RuntimeOverride)
-			if err != nil {
-				return in, err
-			}
-			if overridePath != existing.RuntimePath {
-				return in, fmt.Errorf("tasks implement: --task-runtime-path %s conflicts with bound worktree %s for %s", overridePath, existing.RuntimePath, taskSetID)
-			}
-		}
-		in.RuntimeOverride = existing.RuntimePath
-		return in, nil
-	}
-
-	if strings.TrimSpace(in.RuntimeOverride) != "" {
-		if err := validateInlineRuntimeOverride(d, in); err != nil {
-			return in, err
-		}
-		return in, nil
-	}
-	if taskInline {
-		return in, nil
-	}
-
-	currentRuntime, err := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, "")
-	if err != nil {
-		return in, err
-	}
-	linked, err := binding.IsLinkedWorktree(d, currentRuntime)
-	if err != nil {
-		return in, err
-	}
-	if linked {
-		return in, nil
-	}
-
 	repoConfig, err := cfg.ResolveRepoConfig(&config.Deps{FS: taskProjectDeps().FS}, resolved.ProjectPath)
 	if err != nil {
 		return in, err
 	}
-	if !repoConfig.WorktreeReady {
-		return in, nil
-	}
 
-	qd := queue.DefaultDeps()
-	qd.Tasks = d
-	qd.Project = taskProjectDeps()
-	basePath, bare, err := queue.ResolveExecutionBasePath(qd, cfg, resolved.ProjectPath)
+	route, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
+		TD:                 d,
+		PD:                 taskProjectDeps(),
+		Cfg:                cfg,
+		CurrentCheckout:    resolved.ProjectPath,
+		SetID:              taskSetID,
+		Trigger:            binding.TriggerImplementForeground,
+		Inline:             taskInline,
+		RuntimeOverride:    in.RuntimeOverride,
+		WorktreeReady:      repoConfig.WorktreeReady,
+		OnProvisionFailure: binding.ProvisionFail,
+		WorktreesRoot:      filepath.Join(queue.QueueDataDir(d), "worktrees"),
+	})
 	if err != nil {
 		return in, err
 	}
-	if bare || strings.TrimSpace(basePath) == "" {
-		return in, fmt.Errorf("tasks implement: needs execution_base; skipped")
+	if route.UsedExistingBinding || route.ProvisionedNew {
+		if route.ExecutionBase != "" {
+			in.ProjectName = ""
+			in.Path = route.ExecutionBase
+		}
+		in.RuntimeOverride = route.RuntimePath
+	} else if strings.TrimSpace(in.RuntimeOverride) != "" {
+		in.RuntimeOverride = route.RuntimePath
 	}
-	managed, err := provisionImplementWorktree(d, cfg, basePath, taskSetID)
-	if err != nil {
-		return in, err
-	}
-	in.ProjectName = ""
-	in.Path = basePath
-	in.RuntimeOverride = managed.RuntimePath
 	return in, nil
-}
-
-func provisionImplementWorktree(d *tasks.Deps, cfg *config.Config, basePath, taskSetID string) (binding.Binding, error) {
-	repoID, err := tasks.ResolveRepositoryIdentity(d, basePath)
-	if err != nil {
-		return binding.Binding{}, err
-	}
-	key := binding.Key(repoID, taskSetID)
-	store, err := binding.Load(d)
-	if err != nil {
-		return binding.Binding{}, err
-	}
-	if existing, ok := store.Get(key); ok && strings.TrimSpace(existing.RuntimePath) != "" {
-		return existing, nil
-	}
-	worktreesRoot := filepath.Join(queue.QueueDataDir(d), "worktrees")
-	managed, err := binding.ProvisionWorktree(d, worktreesRoot, basePath, taskSetID, time.Now())
-	if err != nil {
-		return binding.Binding{}, err
-	}
-	managed.Project = binding.DetectProject(taskProjectDeps(), d, cfg, repoID)
-	store.Put(key, managed)
-	if err := binding.Save(d, store); err != nil {
-		return binding.Binding{}, err
-	}
-	return managed, nil
 }
 
 func selectedTaskAgentPresets() []string {

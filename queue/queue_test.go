@@ -13,6 +13,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -137,7 +138,9 @@ func TestScanSkipsNonGitProjectsOutsideQueueScope(t *testing.T) {
 		t.Fatalf("non-git project Reason = %q, want no ready set", nonGitDec.Reason)
 	}
 
-	view := BuildRunView(statusFromDecisions(decisions, &DaemonState{Version: 1}), time.Now())
+	snap := statusFromDecisions(decisions, &DaemonState{Version: 1})
+	snap.Tasks = queueDataDeps(t)
+	view := BuildRunView(snap, time.Now())
 	if len(view.ScanErrors) != 0 {
 		t.Fatalf("ScanErrors = %v, want none", view.ScanErrors)
 	}
@@ -828,11 +831,13 @@ func TestPrepareWorktreeDrainReusesBindingWithoutWorktreeAdd(t *testing.T) {
 		if reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}) {
 			return filepath.Join("/repo", ".git"), nil
 		}
+		if reflect.DeepEqual(args, []string{"rev-parse", "--show-toplevel"}) {
+			if dir == "/repo" || dir == boundPath {
+				return dir, nil
+			}
+		}
 		if reflect.DeepEqual(args, []string{"worktree", "list", "--porcelain"}) {
 			return "worktree " + boundPath + "\n", nil
-		}
-		if reflect.DeepEqual(args, []string{"rev-parse", "--show-toplevel"}) && dir == boundPath {
-			return boundPath, nil
 		}
 		if len(args) >= 2 && args[0] == "worktree" && args[1] == "add" {
 			worktreeAddCalls++
@@ -846,19 +851,13 @@ func TestPrepareWorktreeDrainReusesBindingWithoutWorktreeAdd(t *testing.T) {
 	if err := real.MkdirAll(boundPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	state := &DaemonState{
-		Version: 1,
-		WorktreeBindings: map[string]WorktreeBinding{
-			setScopedKey(repoKey, "2026-06-14-queue"): {
-				RuntimePath: boundPath,
-				Branch:      "pop/2026-06-14-queue/20260614T090807Z",
-				Project:     "proj",
-			},
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, "2026-06-14-queue"): {
+			RuntimePath: boundPath,
+			Branch:      "pop/2026-06-14-queue/20260614T090807Z",
+			Project:     "proj",
 		},
-	}
-	if err := WriteDaemonState(d.Tasks, state); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	dec := actionableDecision()
 	dec.WorktreeReady = true
@@ -901,19 +900,13 @@ func TestPrepareWorktreeDrainRefusesInvalidBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := &DaemonState{
-		Version: 1,
-		WorktreeBindings: map[string]WorktreeBinding{
-			setScopedKey(repoKey, "2026-06-14-queue"): {
-				RuntimePath: missingPath,
-				Branch:      "pop/2026-06-14-queue/20260614T090807Z",
-				Project:     "proj",
-			},
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, "2026-06-14-queue"): {
+			RuntimePath: missingPath,
+			Branch:      "pop/2026-06-14-queue/20260614T090807Z",
+			Project:     "proj",
 		},
-	}
-	if err := WriteDaemonState(d.Tasks, state); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	dec := actionableDecision()
 	dec.WorktreeReady = true
@@ -1233,23 +1226,52 @@ func argsContain(args []string, want ...string) bool {
 
 func worktreeProvisionDeps(t *testing.T, now time.Time, addErr error) *Deps {
 	t.Helper()
-	wtPath := filepath.Join("/xdg", "pop", "queue", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "2026-06-14-queue")
+	dataHome := t.TempDir()
+	wtPath := filepath.Join(dataHome, "pop", "queue", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "2026-06-14-queue")
+	real := deps.NewRealFileSystem()
+	gitMock := func(dir string, args ...string) (string, error) {
+		switch {
+		case reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}):
+			return filepath.Join("/repo", ".git"), nil
+		case reflect.DeepEqual(args, []string{"rev-parse", "--git-dir"}):
+			if dir == "/repo" {
+				return filepath.Join("/repo", ".git"), nil
+			}
+			if dir == wtPath {
+				return filepath.Join("/repo", ".git", "worktrees", "linked"), nil
+			}
+		case reflect.DeepEqual(args, []string{"rev-parse", "--show-toplevel"}):
+			if dir == "/repo" || dir == wtPath {
+				return dir, nil
+			}
+		case reflect.DeepEqual(args, []string{"worktree", "list", "--porcelain"}):
+			return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\n", nil
+		case reflect.DeepEqual(args, []string{"branch", "--show-current"}):
+			return "main", nil
+		case len(args) >= 2 && args[0] == "worktree" && args[1] == "add":
+			return "", addErr
+		}
+		if addErr != nil {
+			return "", addErr
+		}
+		return "", nil
+	}
 	return &Deps{
 		Tasks: &tasks.Deps{
 			FS: &deps.MockFileSystem{
-				GetenvFunc:       func(key string) string { return "/xdg" },
+				GetenvFunc: func(key string) string {
+					if key == "XDG_DATA_HOME" {
+						return dataHome
+					}
+					return ""
+				},
 				EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
-				MkdirAllFunc:     func(path string, perm os.FileMode) error { return nil },
+				MkdirAllFunc:     real.MkdirAll,
+				WriteFileFunc:    real.WriteFile,
+				ReadFileFunc:     real.ReadFile,
+				RenameFunc:       real.Rename,
 			},
-			Git: &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
-				if reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}) {
-					return filepath.Join("/repo", ".git"), nil
-				}
-				if reflect.DeepEqual(args, []string{"rev-parse", "--show-toplevel"}) && dir == wtPath {
-					return wtPath, nil
-				}
-				return "", addErr
-			}},
+			Git: &deps.MockGit{CommandInDirFunc: gitMock},
 		},
 		Project: &project.Deps{
 			FS: &deps.MockFileSystem{
@@ -1257,15 +1279,7 @@ func worktreeProvisionDeps(t *testing.T, now time.Time, addErr error) *Deps {
 					return nil, os.ErrNotExist
 				},
 			},
-			Git: &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
-				if reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}) {
-					return ".git", nil
-				}
-				if reflect.DeepEqual(args, []string{"rev-parse", "--show-toplevel"}) {
-					return dir, nil
-				}
-				return "", nil
-			}},
+			Git: &deps.MockGit{CommandInDirFunc: gitMock},
 		},
 		Now: func() time.Time { return now },
 	}
@@ -1299,4 +1313,31 @@ func testScopedKeyFor(t *testing.T, td *tasks.Deps, projectPath, runtimePath, se
 		t.Fatal(err)
 	}
 	return key
+}
+
+func seedBindingStore(t *testing.T, td *tasks.Deps, bindings map[string]WorktreeBinding) {
+	t.Helper()
+	store := &binding.Store{}
+	for key, b := range bindings {
+		store.Put(key, b)
+	}
+	if err := binding.Save(td, store); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func loadBindingStore(t *testing.T, td *tasks.Deps) map[string]WorktreeBinding {
+	t.Helper()
+	store, err := binding.Load(td)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store == nil || len(store.Bindings) == 0 {
+		return nil
+	}
+	out := make(map[string]WorktreeBinding, len(store.Bindings))
+	for k, v := range store.Bindings {
+		out[k] = v
+	}
+	return out
 }

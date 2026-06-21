@@ -37,13 +37,13 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 				CheckedAt:   time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
 			},
 		},
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: integrationWorktreeBinding(t, repo, wt, "set-clean"),
-		},
 	}
 	if err := WriteDaemonState(td, state); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: integrationWorktreeBinding(t, repo, wt, "set-clean"),
+	})
 	var lockedRuntime string
 	d := &Deps{
 		Tasks: td,
@@ -86,8 +86,8 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 	if len(after.Mergeability) != 0 {
 		t.Fatalf("mergeability state = %+v, want cleared", after.Mergeability)
 	}
-	if len(after.WorktreeBindings) != 0 {
-		t.Fatalf("worktree bindings = %+v, want cleared", after.WorktreeBindings)
+	if len(loadBindingStore(t, td)) != 0 {
+		t.Fatalf("worktree bindings = %+v, want cleared", loadBindingStore(t, td))
 	}
 	snap := statusFromDecisions(nil, after)
 	if len(snap.AwaitingIntegration) != 0 {
@@ -114,13 +114,13 @@ func TestIntegrateConflictSetRefuses(t *testing.T) {
 		Mergeability: map[string]MergeabilityRecord{
 			key: rec,
 		},
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
-		},
 	}
 	if err := WriteDaemonState(td, state); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
+	})
 	d := &Deps{
 		Tasks: td,
 		AcquireRuntimeLock: func(runtimePath string) (runtimeLock, error) {
@@ -147,8 +147,8 @@ func TestIntegrateConflictSetRefuses(t *testing.T) {
 	if len(after.Mergeability) != 1 {
 		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
 	}
-	if len(after.WorktreeBindings) != 1 {
-		t.Fatalf("worktree bindings = %+v, want retained", after.WorktreeBindings)
+	if len(loadBindingStore(t, td)) != 1 {
+		t.Fatalf("worktree bindings = %+v, want retained", loadBindingStore(t, td))
 	}
 }
 
@@ -159,12 +159,12 @@ func TestIntegrateConflictDeclinedKeepsWorktreeBranchAndState(t *testing.T) {
 	if err := WriteDaemonState(td, &DaemonState{
 		Version:      1,
 		Mergeability: map[string]MergeabilityRecord{key: rec},
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
-		},
 	}); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
+	})
 	d := &Deps{
 		Tasks: td,
 		AcquireRuntimeLock: func(runtimePath string) (runtimeLock, error) {
@@ -194,8 +194,8 @@ func TestIntegrateConflictDeclinedKeepsWorktreeBranchAndState(t *testing.T) {
 	if len(after.Mergeability) != 1 {
 		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
 	}
-	if len(after.WorktreeBindings) != 1 {
-		t.Fatalf("worktree bindings = %+v, want retained", after.WorktreeBindings)
+	if len(loadBindingStore(t, td)) != 1 {
+		t.Fatalf("worktree bindings = %+v, want retained", loadBindingStore(t, td))
 	}
 	entries, err := ReadJournal(td)
 	if err != nil {
@@ -214,12 +214,12 @@ func TestIntegrateConflictUnresolvedKeepsWorktreeBinding(t *testing.T) {
 	if err := WriteDaemonState(td, &DaemonState{
 		Version:      1,
 		Mergeability: map[string]MergeabilityRecord{key: rec},
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
-		},
 	}); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
+	})
 	d := &Deps{
 		Tasks: td,
 		AcquireRuntimeLock: func(runtimePath string) (runtimeLock, error) {
@@ -245,8 +245,8 @@ func TestIntegrateConflictUnresolvedKeepsWorktreeBinding(t *testing.T) {
 	if len(after.Mergeability) != 1 {
 		t.Fatalf("mergeability state = %+v, want retained", after.Mergeability)
 	}
-	if len(after.WorktreeBindings) != 1 {
-		t.Fatalf("worktree bindings = %+v, want retained", after.WorktreeBindings)
+	if len(loadBindingStore(t, td)) != 1 {
+		t.Fatalf("worktree bindings = %+v, want retained", loadBindingStore(t, td))
 	}
 }
 
@@ -259,12 +259,12 @@ func TestIntegrateConflictAttendedResolutionMergesAndTearsDown(t *testing.T) {
 	if err := WriteDaemonState(td, &DaemonState{
 		Version:      1,
 		Mergeability: map[string]MergeabilityRecord{key: rec},
-		WorktreeBindings: map[string]WorktreeBinding{
-			key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
-		},
 	}); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		key: integrationWorktreeBinding(t, repo, wt, "set-conflict"),
+	})
 	var lockedRuntime string
 	d := &Deps{
 		Tasks: td,
@@ -311,8 +311,8 @@ func TestIntegrateConflictAttendedResolutionMergesAndTearsDown(t *testing.T) {
 	if len(after.Mergeability) != 0 {
 		t.Fatalf("mergeability state = %+v, want cleared", after.Mergeability)
 	}
-	if len(after.WorktreeBindings) != 0 {
-		t.Fatalf("worktree bindings = %+v, want cleared", after.WorktreeBindings)
+	if len(loadBindingStore(t, td)) != 0 {
+		t.Fatalf("worktree bindings = %+v, want cleared", loadBindingStore(t, td))
 	}
 	entries, err := ReadJournal(td)
 	if err != nil {

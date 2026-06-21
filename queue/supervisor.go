@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -148,76 +150,43 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 	if !dec.Actionable() || !dec.WorktreeReady {
 		return dec
 	}
-	state, err := EnsureDaemonState(d.Tasks)
+	route, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
+		TD:                 d.Tasks,
+		PD:                 d.Project,
+		Cfg:                nil,
+		CurrentCheckout:    dec.scan.ProjectPath,
+		SetID:              dec.TaskSetID,
+		Trigger:            binding.TriggerQueueSpawn,
+		WorktreeReady:      true,
+		OnProvisionFailure: binding.ProvisionFallbackInline,
+		ProjectName:        dec.Project,
+		WorktreesRoot:      filepath.Join(QueueDataDir(d.Tasks), "worktrees"),
+		Now:                d.now(),
+	})
 	if err != nil {
-		fmt.Fprintf(out, "queue: %s: load daemon state for %s: %v\n", dec.Project, dec.TaskSetID, err)
-		dec.TaskSetID = ""
-		dec.Reason = "daemon state"
-		return dec
-	}
-	repoKey, err := resolveRepoKey(d, dec.scan.ProjectPath)
-	if err != nil {
-		fmt.Fprintf(out, "queue: %s: resolve repository for %s: %v\n", dec.Project, dec.TaskSetID, err)
-		dec.TaskSetID = ""
-		dec.Reason = "repo"
-		return dec
-	}
-	key := setScopedKey(repoKey, dec.TaskSetID)
-	if binding, ok := state.WorktreeBindings[key]; ok {
-		if err := validateBoundWorktree(d, dec.scan.ProjectPath, binding); err != nil {
+		if errors.Is(err, binding.ErrBoundWorktreeInvalid) {
 			fmt.Fprintf(out, "queue: %s: bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`\n", dec.Project, dec.TaskSetID, err)
 			dec.TaskSetID = ""
 			dec.Reason = "bound worktree invalid"
 			return dec
 		}
-		dec.scan.ProjectPath = binding.RuntimePath
-		dec.scan.RuntimePath = binding.RuntimePath
-		return dec
-	}
-	wt, err := provisionWorktree(d, dec.scan.ProjectPath, dec.TaskSetID)
-	if err != nil {
-		fmt.Fprintf(out, "queue: %s: provision worktree for %s: %v; falling back to in-place drain\n", dec.Project, dec.TaskSetID, err)
-		return dec
-	}
-	if state.WorktreeBindings == nil {
-		state.WorktreeBindings = map[string]WorktreeBinding{}
-	}
-	state.WorktreeBindings[key] = WorktreeBinding{
-		RuntimePath: wt.Path,
-		Branch:      wt.Branch,
-		Project:     dec.Project,
-		Provisioned: true,
-	}
-	if err := WriteDaemonState(d.Tasks, state); err != nil {
-		fmt.Fprintf(out, "queue: %s: record worktree binding for %s: %v\n", dec.Project, dec.TaskSetID, err)
+		fmt.Fprintf(out, "queue: %s: route drain for %s: %v\n", dec.Project, dec.TaskSetID, err)
 		dec.TaskSetID = ""
-		dec.Reason = "daemon state"
+		dec.Reason = "route"
 		return dec
 	}
-	dec.scan.ProjectPath = wt.Path
-	dec.scan.RuntimePath = wt.Path
+	if !dec.WorktreeReady && !route.UsedExistingBinding && !route.ProvisionedNew {
+		// unchanged
+	} else if dec.WorktreeReady && !route.UsedExistingBinding && !route.ProvisionedNew {
+		fmt.Fprintf(out, "queue: %s: provision worktree for %s: falling back to in-place drain\n", dec.Project, dec.TaskSetID)
+	}
+	dec.scan.ProjectPath = route.RuntimePath
+	dec.scan.RuntimePath = route.RuntimePath
 	return dec
 }
 
-func validateBoundWorktree(d *Deps, projectPath string, binding WorktreeBinding) error {
-	if d == nil || d.Tasks == nil {
-		return fmt.Errorf("missing task dependencies")
-	}
-	path := strings.TrimSpace(binding.RuntimePath)
-	if path == "" {
-		return fmt.Errorf("binding has no runtime path")
-	}
-	if _, err := d.Tasks.FS.Stat(path); err != nil {
-		return fmt.Errorf("checkout missing: %w", err)
-	}
-	registered, err := worktreeRegistered(d, projectPath, path)
-	if err != nil {
-		return err
-	}
-	if !registered {
-		return fmt.Errorf("checkout %s is not registered with git", path)
-	}
-	return nil
+func validateBoundWorktree(d *Deps, projectPath string, b WorktreeBinding) error {
+	return binding.ValidateBoundWorktree(d.Tasks, projectPath, b)
 }
 
 func worktreeRegistered(d *Deps, projectPath, checkoutPath string) (bool, error) {
