@@ -654,6 +654,7 @@ const (
 	failedGateRerun
 	failedGateAssist
 	failedGateComplete
+	failedGateShell
 )
 
 // handleInteractiveFailedGate is the interactive counterpart to
@@ -731,6 +732,10 @@ func handleInteractiveFailedGate(d *Deps, out io.Writer, in io.Reader, reader *b
 			}
 			RenderTaskComplete(out, result.TaskSetID, result.TaskID)
 			return true, nil
+		case failedGateShell:
+			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
+				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
+			}
 		case failedGateExit:
 			return false, nil
 		}
@@ -751,10 +756,11 @@ func promptFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID strin
 		}
 	}
 	fmt.Fprintln(display, "  3. Finish by hand")
-	fmt.Fprintln(display, "  4. Exit")
+	fmt.Fprintln(display, "  4. Open a shell in the checkout")
+	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
-	answer, err := readPromptLine(reader, "4")
+	answer, err := readPromptLine(reader, "0")
 	if err != nil {
 		return failedGateExit, err
 	}
@@ -765,10 +771,12 @@ func promptFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID strin
 		return failedGateAssist, nil
 	case "3":
 		return failedGateComplete, nil
-	case "4", "q", "quit", "exit":
+	case "4":
+		return failedGateShell, nil
+	case "0", "q", "quit", "exit":
 		return failedGateExit, nil
 	default:
-		fmt.Fprintln(display, "Choose 1, 2, 3, or 4.")
+		fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
 		return promptFailedGateAction(out, reader, taskSetID, failed, body, invocation)
 	}
 }

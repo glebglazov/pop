@@ -1171,11 +1171,11 @@ func TestRunTaskSetFailedGateInvalidReprompts(t *testing.T) {
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
 	opts.TaskSetOverride = "demo"
-	opts.ConfirmIn = strings.NewReader("9\n4\n")
+	opts.ConfirmIn = strings.NewReader("9\n0\n")
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(buf.String(), "Choose 1, 2, 3, or 4.") {
+	if !strings.Contains(buf.String(), "Choose 1, 2, 3, 4, or 0.") {
 		t.Fatalf("invalid input must re-prompt:\n%s", buf.String())
 	}
 }
@@ -1226,7 +1226,7 @@ func TestRunTaskSetFailedGateAgentAssistanceRefreshesAndReprompts(t *testing.T) 
 	opts := env.runTaskSetOpts(false, agent, &buf)
 	opts.TaskSetOverride = "demo"
 	// Choose Agent assistance, then Exit at the re-shown gate.
-	opts.ConfirmIn = strings.NewReader("2\n4\n")
+	opts.ConfirmIn = strings.NewReader("2\n0\n")
 
 	_, err := RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
@@ -1236,7 +1236,8 @@ func TestRunTaskSetFailedGateAgentAssistanceRefreshesAndReprompts(t *testing.T) 
 		"1. Re-run (default)",
 		"2. Agent assistance",
 		"3. Finish by hand",
-		"4. Exit",
+		"4. Open a shell in the checkout",
+		"0. Exit",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("Failed gate missing menu option %q:\n%s", want, out)
@@ -1258,6 +1259,74 @@ func TestRunTaskSetFailedGateAgentAssistanceRefreshesAndReprompts(t *testing.T) 
 		t.Fatalf("assistance did not refresh and re-show the Failed gate:\n%s", out)
 	}
 	// The assist agent did not change task state; the task is still failed.
+	assertTaskFailed(t, env.execFixture(), "01-a", 3)
+}
+
+func TestRunTaskSetFailedGateShellOptionDispatch(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	runner := &shellSpawnRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, "", &buf)
+	opts.TaskSetOverride = "demo"
+	// Open shell (4), then exit (0).
+	opts.ConfirmIn = strings.NewReader("4\n0\n")
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+
+	out := buf.String()
+	if !strings.Contains(out, "4. Open a shell in the checkout") {
+		t.Fatalf("menu missing shell option:\n%s", out)
+	}
+	// Shell spawned once.
+	if runner.shellCalls != 1 {
+		t.Fatalf("shell calls = %d, want 1", runner.shellCalls)
+	}
+	// Gate re-displayed after shell returned (two Choose [1]: prompts).
+	if strings.Count(out, "Choose [1]:") < 2 {
+		t.Fatalf("gate must re-display after shell exits:\n%s", out)
+	}
+	// No task state changed.
+	assertTaskFailed(t, env.execFixture(), "01-a", 3)
+}
+
+func TestRunTaskSetFailedGateExitKeyIs0(t *testing.T) {
+	for _, input := range []string{"0\n", "q\n", "quit\n", "exit\n"} {
+		t.Run("input="+strings.TrimSpace(input), func(t *testing.T) {
+			env := setupRunTaskSetFixture(t, "demo", []Task{
+				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+			})
+			var buf bytes.Buffer
+			opts := env.runTaskSetOpts(false, "", &buf)
+			opts.TaskSetOverride = "demo"
+			opts.ConfirmIn = strings.NewReader(input)
+
+			_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+			assertExitCode(t, err, ExitOperational)
+			// No task state changed.
+			assertTaskFailed(t, env.execFixture(), "01-a", 3)
+		})
+	}
+}
+
+func TestRunTaskSetFailedGateEOFDefaultExits(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, "", &buf)
+	opts.TaskSetOverride = "demo"
+	// EOF with no pending input — should default to exit (0).
+	opts.ConfirmIn = strings.NewReader("")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	// No task state changed.
 	assertTaskFailed(t, env.execFixture(), "01-a", 3)
 }
 
