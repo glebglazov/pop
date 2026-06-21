@@ -113,7 +113,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
-	baseAgentPresets := resolveDefaultAgentPresets(opts.AgentPresets, opts.AgentPreset, opts.AgentExplicit, cfg)
+	baseAgentPresets := ResolveDefaultAgentPresets(opts.AgentPresets, opts.AgentPreset, opts.AgentExplicit, cfg)
 	baseAgentPreset := baseAgentPresets[0]
 	agentOutput := AgentOutputAuto
 	if opts.AgentCmd == "" {
