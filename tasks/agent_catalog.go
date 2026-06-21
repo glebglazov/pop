@@ -97,11 +97,11 @@ func effortLadderForCatalog(cfg *config.Config, agent string) []AgentCatalogEffo
 			return effortLadderTiers(ladder, "configured")
 		}
 	}
-	if agent == "claude" {
+	if ladder, ok := builtInEffortModels[agent]; ok {
 		return []AgentCatalogEffortTier{
-			{Tier: "heavy", Entries: append([]config.EffortModel(nil), claudeEffortModels["heavy"]...), Source: "built-in"},
-			{Tier: "standard", Entries: append([]config.EffortModel(nil), claudeEffortModels["standard"]...), Source: "built-in"},
-			{Tier: "light", Entries: append([]config.EffortModel(nil), claudeEffortModels["light"]...), Source: "built-in"},
+			{Tier: "heavy", Entries: append([]config.EffortModel(nil), ladder["heavy"]...), Source: "built-in"},
+			{Tier: "standard", Entries: append([]config.EffortModel(nil), ladder["standard"]...), Source: "built-in"},
+			{Tier: "light", Entries: append([]config.EffortModel(nil), ladder["light"]...), Source: "built-in"},
 		}
 	}
 	return nil

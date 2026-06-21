@@ -49,7 +49,7 @@ func TestTaskAgentsCatalogListsPresetsWithEffortLadders(t *testing.T) {
 		{"claude", "claude", "yes", "heavy: opus[reasoning=high] (built-in); standard: sonnet[reasoning=high] (built-in); light: haiku[reasoning=high] (built-in)"},
 		{"opencode", "opencode", "yes", "heavy: opencode/claude-opus-4-8[reasoning=high], opencode/kimi-k2.6 (configured); standard: opencode/claude-sonnet-4-6[reasoning=medium] (configured); light: opencode/kimi-k2.6 (configured)"},
 		{"cursor", "cursor-agent", "no", "none"},
-		{"codex", "codex", "yes", "none"},
+		{"codex", "codex", "yes", "heavy: gpt-5.5[reasoning=high] (built-in); standard: gpt-5.5[reasoning=medium] (built-in); light: gpt-5.4-mini[reasoning=low] (built-in)"},
 		{"pi", "pi", "no", "none"},
 	}
 	var want strings.Builder

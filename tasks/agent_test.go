@@ -189,13 +189,36 @@ func TestResolveTaskAgentSpecForEffortClaudeModels(t *testing.T) {
 		{name: "preserves explicit model", agentSpec: "claude --model custom", effort: "heavy", want: "claude --model custom"},
 		{name: "preserves quoted extra arg", agentSpec: `claude --append-system-prompt "be nice"`, effort: "heavy", want: "claude --append-system-prompt 'be nice' --model opus --effort high"},
 		{name: "preserves explicit reasoning", agentSpec: "claude --effort low", effort: "heavy", want: "claude --effort low --model opus"},
-		{name: "ignores non claude", agentSpec: "codex", effort: "heavy", want: "codex"},
 		{name: "absent effort unchanged", agentSpec: "claude", effort: "standard", want: "claude"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			explicit := tt.name != "absent effort unchanged"
 			got := resolveTaskAgentSpecForEffort(tt.agentSpec, tt.effort, explicit)
+			if got != tt.want {
+				t.Fatalf("spec = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveTaskAgentSpecForEffortCodexModels(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentSpec string
+		effort    string
+		want      string
+	}{
+		{name: "heavy", agentSpec: "codex", effort: "heavy", want: `codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
+		{name: "standard", agentSpec: "codex", effort: "standard", want: `codex --model gpt-5.5 -c 'model_reasoning_effort="medium"'`},
+		{name: "light", agentSpec: "codex", effort: "light", want: `codex --model gpt-5.4-mini -c 'model_reasoning_effort="low"'`},
+		{name: "preserves explicit model and skips reasoning", agentSpec: "codex --model custom", effort: "heavy", want: "codex --model custom"},
+		{name: "preserves explicit reasoning", agentSpec: "codex -c model_reasoning_effort=low", effort: "heavy", want: "codex -c model_reasoning_effort=low --model gpt-5.5"},
+		{name: "preserves explicit reasoning via equals form", agentSpec: "codex -c=model_reasoning_effort=low", effort: "heavy", want: "codex -c=model_reasoning_effort=low --model gpt-5.5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveTaskAgentSpecForEffort(tt.agentSpec, tt.effort, true)
 			if got != tt.want {
 				t.Fatalf("spec = %q, want %q", got, tt.want)
 			}
@@ -223,7 +246,7 @@ func TestResolveTaskAgentSpecForConfiguredEffortModels(t *testing.T) {
 		{name: "configured opencode", agentSpec: "opencode", effort: "heavy", want: "opencode --model opencode/claude-opus-4-8"},
 		{name: "configured claude replaces built in", agentSpec: "claude", effort: "standard", want: "claude"},
 		{name: "configured claude uses configured tier", agentSpec: "claude", effort: "heavy", want: "claude --model custom-opus --effort max"},
-		{name: "unconfigured non claude is no op", agentSpec: "codex", effort: "heavy", want: "codex"},
+		{name: "codex uses built in when unconfigured", agentSpec: "codex", effort: "heavy", want: `codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
 		{name: "explicit model still wins", agentSpec: "opencode --model already", effort: "heavy", want: "opencode --model already"},
 	}
 	for _, tt := range tests {
@@ -260,18 +283,18 @@ func TestResolveTaskAgentSpecEffortModelPrecedence(t *testing.T) {
 			wantSpecs:      []string{"claude --model opus --effort high"},
 		},
 		{
-			name:           "non claude agent is not changed by effort",
+			name:           "codex composes with effort",
 			defaultSpecs:   []string{"codex"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpecs:      []string{"codex"},
+			wantSpecs:      []string{`codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
 		},
 		{
 			name:           "fallback list entries each resolve effort",
 			defaultSpecs:   []string{"claude", "codex"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpecs:      []string{"claude --model opus --effort high", "codex"},
+			wantSpecs:      []string{"claude --model opus --effort high", `codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
 		},
 		{
 			name:           "agent-cmd leaves fallback list untouched",

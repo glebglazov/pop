@@ -196,6 +196,17 @@ var claudeEffortModels = map[string][]config.EffortModel{
 	"light":    {{Model: "haiku", Reasoning: "high"}},
 }
 
+var codexEffortModels = map[string][]config.EffortModel{
+	"heavy":    {{Model: "gpt-5.5", Reasoning: "high"}},
+	"standard": {{Model: "gpt-5.5", Reasoning: "medium"}},
+	"light":    {{Model: "gpt-5.4-mini", Reasoning: "low"}},
+}
+
+var builtInEffortModels = map[string]map[string][]config.EffortModel{
+	"claude": claudeEffortModels,
+	"codex":  codexEffortModels,
+}
+
 type presetAgentAdapter struct {
 	preset         string
 	headlessPrefix []string
@@ -226,6 +237,8 @@ func (a *presetAgentAdapter) ReasoningArgs(reasoning string) []string {
 	switch a.preset {
 	case "claude":
 		return []string{"--effort", reasoning}
+	case "codex":
+		return []string{"-c", fmt.Sprintf(`model_reasoning_effort="%s"`, reasoning)}
 	default:
 		return nil
 	}
@@ -239,8 +252,25 @@ func (a *presetAgentAdapter) ArgsContainReasoning(args []string) bool {
 				return true
 			}
 		}
+	case "codex":
+		for i, arg := range args {
+			if arg == "-c" {
+				if i+1 < len(args) && isCodexReasoningConfig(args[i+1]) {
+					return true
+				}
+				continue
+			}
+			if strings.HasPrefix(arg, "-c=") && isCodexReasoningConfig(strings.TrimPrefix(arg, "-c=")) {
+				return true
+			}
+		}
 	}
 	return false
+}
+
+func isCodexReasoningConfig(arg string) bool {
+	key, _, found := strings.Cut(strings.TrimSpace(arg), "=")
+	return found && strings.TrimSpace(key) == "model_reasoning_effort"
 }
 
 func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*AgentInvocation, error) {
@@ -550,8 +580,8 @@ func effortModelsForAgent(cfg *config.Config, agent, effort string) []config.Eff
 			return effortModelsForTier(ladder, effort)
 		}
 	}
-	if agent == "claude" {
-		return claudeEffortModels[effort]
+	if ladder, ok := builtInEffortModels[agent]; ok {
+		return ladder[effort]
 	}
 	return nil
 }
