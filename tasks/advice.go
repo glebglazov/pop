@@ -27,6 +27,24 @@ func printHITLGateAdvice(d *Deps, w io.Writer, stem, dir string, task *Task) {
 	fmt.Fprintf(out, "                  %s\n", skipTaskHint(stem, task.File))
 }
 
+// printTerminalHITLAdvice prints the recovery options when run-tasks stops at a
+// terminal HITL gate — all AFK work is done, only the final verification task
+// remains. Framing differs from printHITLGateAdvice: agents are finished, the
+// human's sign-off is all that stands between the set and Done.
+func printTerminalHITLAdvice(d *Deps, w io.Writer, stem, dir string, task *Task) {
+	out := outputFor(w)
+	hint := taskPathHint(stem, task.File)
+	fmt.Fprintln(out)
+	out.line(ansiCyan, "Agents done — verify: %s/%s is the final task. Options:", stem, task.ID)
+	printHITLTaskBody(d, out, hint, filepath.Join(dir, task.File))
+	fmt.Fprintln(out, "  finish by hand:")
+	fmt.Fprintf(out, "                  %s\n", completeTaskHint(stem, task.File))
+	fmt.Fprintln(out, "  edit & re-run:")
+	fmt.Fprintf(out, "                  $EDITOR %s && pop tasks implement\n", hint)
+	fmt.Fprintln(out, "  defer it:")
+	fmt.Fprintf(out, "                  %s\n", skipTaskHint(stem, task.File))
+}
+
 // printHITLTaskBody prints the blocking task file verbatim between dim
 // delimiters. Display is best-effort: a read failure prints a dim notice and
 // leaves the surrounding advice intact.

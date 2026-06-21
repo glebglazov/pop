@@ -197,6 +197,13 @@ func TestClassifyDrainOutcome(t *testing.T) {
 			wantWrite:   true,
 		},
 		{
+			name:        "unverified — terminal HITL, no open AFK work",
+			result:      &RunTaskSetResult{TaskSetUnverified: true, BlockedReason: "HITL: 03-verify"},
+			err:         exitErr(ExitNoRunnable, "agents done — verify"),
+			wantOutcome: DrainOutcomeUnverified,
+			wantWrite:   true,
+		},
+		{
 			name:        "failed via operational error",
 			err:         exitErr(ExitOperational, "task failed"),
 			wantOutcome: DrainOutcomeFailed,
@@ -238,6 +245,37 @@ func TestClassifyDrainOutcome(t *testing.T) {
 				t.Fatalf("abnormal = %v, want %v", outcome.Abnormal(), tc.wantAbnorm)
 			}
 		})
+	}
+}
+
+func TestDrainOutcomeUnverifiedIsClean(t *testing.T) {
+	if DrainOutcomeUnverified.Abnormal() {
+		t.Fatal("DrainOutcomeUnverified must be a clean (non-abnormal) terminal stop")
+	}
+}
+
+func TestWriteReadDrainOutcomeUnverifiedRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	d := &Deps{FS: deps.NewRealFileSystem()}
+
+	want := DrainOutcomeRecord{
+		SetID:       "demo",
+		Outcome:     DrainOutcomeUnverified,
+		RuntimePath: "/some/checkout",
+	}
+	if err := WriteDrainOutcome(d, want); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := ReadDrainOutcome(d, "/some/checkout")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got.Outcome != DrainOutcomeUnverified {
+		t.Fatalf("outcome = %q, want unverified", got.Outcome)
+	}
+	if got.Outcome.Abnormal() {
+		t.Fatal("round-tripped unverified must still be clean")
 	}
 }
 
@@ -321,6 +359,34 @@ func TestRuntimeLockMetadataSetIDOptional(t *testing.T) {
 	}
 	if legacyMeta.SetID != "" {
 		t.Fatalf("legacy set id = %q, want empty", legacyMeta.SetID)
+	}
+}
+
+func TestPrintHITLGateAdviceFraming(t *testing.T) {
+	task := &Task{ID: "02-gate", File: "02-gate.md", Type: "HITL", Status: "open"}
+	d := &Deps{FS: deps.NewRealFileSystem()}
+	var buf strings.Builder
+	printHITLGateAdvice(d, &buf, "demo", t.TempDir(), task)
+	got := buf.String()
+	if !strings.Contains(got, "Human-blocked") {
+		t.Errorf("gating HITL advice missing 'Human-blocked': %s", got)
+	}
+	if strings.Contains(got, "Agents done") {
+		t.Errorf("gating HITL advice must not say 'Agents done': %s", got)
+	}
+}
+
+func TestPrintTerminalHITLAdviceFraming(t *testing.T) {
+	task := &Task{ID: "03-verify", File: "03-verify.md", Type: "HITL", Status: "open"}
+	d := &Deps{FS: deps.NewRealFileSystem()}
+	var buf strings.Builder
+	printTerminalHITLAdvice(d, &buf, "demo", t.TempDir(), task)
+	got := buf.String()
+	if !strings.Contains(got, "Agents done") {
+		t.Errorf("terminal HITL advice missing 'Agents done': %s", got)
+	}
+	if strings.Contains(got, "Human-blocked") {
+		t.Errorf("terminal HITL advice must not say 'Human-blocked': %s", got)
 	}
 }
 

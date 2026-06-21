@@ -47,11 +47,12 @@ type RunTaskSetResult struct {
 	TaskSetID       string
 	Completed       []*RunTaskResult
 	Refresh         *RefreshResult
-	Declined        bool
-	TaskSetDone     bool
-	TaskSetDeferred bool
-	SkippedTasks    []string
-	BlockedReason   string
+	Declined         bool
+	TaskSetDone      bool
+	TaskSetDeferred  bool
+	TaskSetUnverified bool
+	SkippedTasks     []string
+	BlockedReason    string
 	QuotaPaused     bool
 	PauseReason     string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
@@ -252,6 +253,9 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				return result, nil
 			case StatusBlocked, StatusUnverified:
 				result.BlockedReason = row.BlockedReason
+				if row.Status == StatusUnverified {
+					result.TaskSetUnverified = true
+				}
 				if !opts.Yes {
 					fmt.Fprintln(out)
 					Render(out, currentRefresh)
@@ -266,9 +270,16 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					if handled {
 						continue
 					}
-					printHITLGateAdvice(d, out, taskSetID, currentRefresh.Manifests[taskSetID].Dir, hitl)
+					if result.TaskSetUnverified {
+						printTerminalHITLAdvice(d, out, taskSetID, currentRefresh.Manifests[taskSetID].Dir, hitl)
+					} else {
+						printHITLGateAdvice(d, out, taskSetID, currentRefresh.Manifests[taskSetID].Dir, hitl)
+					}
 				}
 				if result.BlockedReason != "" {
+					if result.TaskSetUnverified {
+						return result, exitErr(ExitNoRunnable, "Task set %q agents done — verify: %s", taskSetID, result.BlockedReason)
+					}
 					return nil, exitErr(ExitNoRunnable, "Task set %q blocked: %s", taskSetID, result.BlockedReason)
 				}
 				return nil, exitErr(ExitNoRunnable, "Task set %q has no eligible AFK task", taskSetID)
@@ -410,6 +421,10 @@ func printTaskSetSummary(w io.Writer, result *RunTaskSetResult) {
 	}
 	if result.TaskSetDeferred {
 		out.line(ansiYellow, "%s", deferralMessage(result))
+		return
+	}
+	if result.TaskSetUnverified {
+		out.line(ansiCyan, "Agents done — verify: task set %s is ready for sign-off: %s", result.TaskSetID, result.BlockedReason)
 		return
 	}
 	if result.BlockedReason != "" {

@@ -21,9 +21,14 @@ const (
 	DrainOutcomeDone DrainOutcome = "done"
 	// DrainOutcomeFailed — a task failed and draining stopped.
 	DrainOutcomeFailed DrainOutcome = "failed"
-	// DrainOutcomeBlocked — the set has no eligible AFK task (HITL gate or
-	// unmet dependency) so draining could not proceed.
+	// DrainOutcomeBlocked — the set has no eligible AFK task and open AFK work
+	// remains gated behind a human (setup or mid-flow HITL), so draining could
+	// not proceed.
 	DrainOutcomeBlocked DrainOutcome = "blocked"
+	// DrainOutcomeUnverified — all AFK work is done/skipped; only a terminal
+	// HITL verification gate stands before Done. Agents are finished; human
+	// sign-off is all that remains.
+	DrainOutcomeUnverified DrainOutcome = "unverified"
 	// DrainOutcomeDeferred — the set finished with skipped tasks deferred.
 	DrainOutcomeDeferred DrainOutcome = "deferred"
 	// DrainOutcomeQuotaPaused — draining stopped because an agent's quota ran
@@ -35,9 +40,9 @@ const (
 
 // Abnormal reports whether the drain ended abnormally — interrupted, or (by the
 // absence of any record at all) crashed — rather than reaching a clean terminal
-// stop (done / failed / blocked / deferred / quota-paused). A clean stop is a
-// disposition the executor chose; an abnormal one is the process being torn down
-// out from under it.
+// stop (done / failed / blocked / unverified / deferred / quota-paused). A
+// clean stop is a disposition the executor chose; an abnormal one is the
+// process being torn down out from under it.
 func (o DrainOutcome) Abnormal() bool {
 	return o == DrainOutcomeInterrupted
 }
@@ -150,6 +155,8 @@ func classifyDrainOutcome(result *RunTaskSetResult, err error) (DrainOutcome, st
 			return DrainOutcomeDone, "", false, true
 		case result.TaskSetDeferred:
 			return DrainOutcomeDeferred, "", false, true
+		case result.TaskSetUnverified:
+			return DrainOutcomeUnverified, "", false, true
 		case result.BlockedReason != "":
 			return DrainOutcomeBlocked, "", false, true
 		}

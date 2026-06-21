@@ -439,8 +439,10 @@ func TestRunTaskSetHITLGatePrintsRecoveryAdvice(t *testing.T) {
 	assertExitCode(t, err, ExitNoRunnable)
 
 	out := buf.String()
+	// After the AFK task completes, only the HITL remains → StatusUnverified:
+	// all agent work is done, terminal verification framing applies.
 	for _, want := range []string{
-		"Human-blocked: demo/02-hitl",
+		"Agents done — verify: demo/02-hitl",
 		"--- demo/02-hitl.md ---",
 		"- [ ] ok",
 		"--- end ---",
@@ -732,7 +734,8 @@ func TestRunTaskSetHITLGateNonInteractiveKeepsAdvice(t *testing.T) {
 	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "Choose [1]:") {
 		t.Fatalf("non-interactive run prompted:\n%s", out)
 	}
-	if !strings.Contains(out, "Human-blocked: demo/02-hitl") || !strings.Contains(out, "pop tasks complete demo/02-hitl.md") {
+	// After AFK completes, set is UNVERIFIED → terminal framing.
+	if !strings.Contains(out, "Agents done — verify: demo/02-hitl") || !strings.Contains(out, "pop tasks complete demo/02-hitl.md") {
 		t.Fatalf("missing HITL advice:\n%s", out)
 	}
 }
@@ -755,7 +758,8 @@ func TestRunTaskSetHITLGateYesKeepsAdvice(t *testing.T) {
 	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "Choose [1]:") {
 		t.Fatalf("--yes run prompted:\n%s", out)
 	}
-	if !strings.Contains(out, "Human-blocked: demo/02-hitl") || !strings.Contains(out, "pop tasks skip demo/02-hitl.md") {
+	// After AFK completes, set is UNVERIFIED → terminal framing.
+	if !strings.Contains(out, "Agents done — verify: demo/02-hitl") || !strings.Contains(out, "pop tasks skip demo/02-hitl.md") {
 		t.Fatalf("missing HITL advice:\n%s", out)
 	}
 }
