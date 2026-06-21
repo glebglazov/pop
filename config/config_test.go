@@ -1725,6 +1725,155 @@ includes = ["first.toml", "second.toml"]
 		}
 	})
 
+	t.Run("include-only workload default_agents is merged", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("private.toml", `
+[workload]
+default_agents = ["codex", "claude"]
+`)
+		configPath := writeFile("config.toml", `
+includes = ["private.toml"]
+projects = [{ path = "/main" }]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.Task == nil {
+			t.Fatal("expected [workload] to be merged from include")
+		}
+		if got, want := cfg.Task.DefaultAgents, []string{"codex", "claude"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("default_agents = %#v, want %#v", got, want)
+		}
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "workload") && strings.Contains(w, "ignored") {
+				t.Fatalf("unexpected workload warning: %q", w)
+			}
+		}
+	})
+
+	t.Run("parent workload default_agents wins over include collision", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("private.toml", `
+[workload]
+default_agents = ["codex"]
+`)
+		configPath := writeFile("config.toml", `
+includes = ["private.toml"]
+
+[workload]
+default_agents = ["claude"]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if got, want := cfg.Task.DefaultAgents, []string{"claude"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("default_agents = %#v, want %#v", got, want)
+		}
+		found := false
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "default_agents skipped") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected default_agents collision warning, got: %v", cfg.Warnings)
+		}
+	})
+
+	t.Run("include-only effort ladder is merged", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("private.toml", `
+[effort.claude]
+heavy = [{ model = "opus", reasoning = "xhigh" }]
+standard = [{ model = "opus", reasoning = "high" }]
+light = [{ model = "sonnet", reasoning = "high" }]
+`)
+		configPath := writeFile("config.toml", `
+includes = ["private.toml"]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		got := cfg.Effort["claude"].Heavy
+		want := []EffortModel{{Model: "opus", Reasoning: "xhigh"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("effort.claude heavy = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("parent effort ladder wins over include collision", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("private.toml", `
+[effort.claude]
+heavy = [{ model = "sonnet", reasoning = "low" }]
+`)
+		configPath := writeFile("config.toml", `
+includes = ["private.toml"]
+
+[effort.claude]
+heavy = [{ model = "opus", reasoning = "high" }]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		got := cfg.Effort["claude"].Heavy
+		want := []EffortModel{{Model: "opus", Reasoning: "high"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("effort.claude heavy = %#v, want %#v", got, want)
+		}
+		found := false
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "[effort.claude] skipped") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected effort collision warning, got: %v", cfg.Warnings)
+		}
+	})
+
 	t.Run("unknown key in included repo block produces warning", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		writeFile := func(name, content string) string {

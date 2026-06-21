@@ -16,18 +16,20 @@ does not solve the problem it looks like it solves.
 
 An **Include** carries a fixed whitelist and resolves by a single precedence rule.
 
-- **Whitelist, not deep-merge.** An include contributes only `projects` and `[repo."<path>"]`
-  blocks. Every other section in an include file is ignored — and now **warned about** rather
-  than silently dropped, since silent-drop is the confusion this feature exists to remove.
+- **Whitelist, not deep-merge.** An include contributes only `projects`, `[workload]`,
+  `[effort.<agent>]`, and `[repo."<path>"]` blocks. Every other section in an include
+  file is ignored — and now **warned about** rather than silently dropped, since
+  silent-drop is the confusion this feature exists to remove.
 
 - **One precedence rule: parent first, then includes in listed order, first definition wins.**
-  `projects` is a list, so includes append and existing expansion dedups. `Repo` is a map keyed
-  by checkout path, so the same key can appear in multiple sources; the **first** source to
-  define a repo key wins (parent beats any include; earlier include beats later), whole-block,
-  and a collision emits a warning. This is deliberately the **opposite** of TOML's native
-  duplicate-table last-wins and is whole-block rather than the field-level merge that
-  `ResolveRepoConfig` uses for global-override → `.pop.toml` → default — the asymmetry is the
-  surprising part worth recording.
+  `projects` is a list, so includes append and existing expansion dedups. `Repo` and
+  `[effort.<agent>]` are maps, so the **first** source to define a key wins (parent beats
+  any include; earlier include beats later), whole-block, and a collision emits a warning.
+  `[workload]` merges field-by-field with the same first-wins rule for `default_agents`,
+  per-agent `agents` entries, and the `git` sub-table. This is deliberately the **opposite**
+  of TOML's native duplicate-table last-wins and is whole-block rather than the field-level
+  merge that `ResolveRepoConfig` uses for global-override → `.pop.toml` → default — the
+  asymmetry is the surprising part worth recording.
 
 - **Flat, one level.** An `includes` key inside an included file is ignored and warned about;
   no recursion, so no cycle detection or precedence tree.

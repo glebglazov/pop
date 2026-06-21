@@ -751,6 +751,8 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		cfg.Warnings = append(cfg.Warnings, includeFileWarnings(expanded, &included, d)...)
 
 		cfg.Projects = append(cfg.Projects, included.Projects...)
+		mergeIncludedTask(&cfg, included.Task, expanded)
+		mergeIncludedEffort(&cfg, included.Effort, expanded)
 
 		for key, block := range included.Repo {
 			if _, exists := cfg.Repo[key]; exists {
@@ -842,7 +844,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []string {
 
 // includeFileWarnings returns load-time warnings for non-whitelisted top-level
 // keys and nested includes in an included file. Includes carry a fixed whitelist:
-// `projects` and `[repo."<path>"]` only.
+// `projects`, `[workload]`, `[effort.<agent>]`, and `[repo."<path>"]`.
 func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	var warnings []string
 
@@ -870,6 +872,8 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	whitelisted := map[string]bool{
 		"projects": true,
 		"repo":     true,
+		"workload": true,
+		"effort":   true,
 		"includes": true, // mentioned in includes, so we track it for warning above
 	}
 
@@ -886,6 +890,111 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	}
 
 	return warnings
+}
+
+func mergeIncludedTask(cfg *Config, included *TaskConfig, path string) {
+	if included == nil {
+		return
+	}
+	if cfg.Task == nil {
+		cfg.Task = cloneTaskConfig(included)
+		return
+	}
+	if len(included.DefaultAgents) > 0 {
+		if len(cfg.Task.DefaultAgents) > 0 {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+				"%s: [workload] default_agents skipped, already defined (first definition wins)",
+				path,
+			))
+		} else {
+			cfg.Task.DefaultAgents = append([]string(nil), included.DefaultAgents...)
+		}
+	}
+	for agent, block := range included.Agents {
+		if cfg.Task.Agents == nil {
+			cfg.Task.Agents = make(map[string]TaskAgentConfig)
+		}
+		if _, exists := cfg.Task.Agents[agent]; exists {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+				"%s: [workload.agents.%s] skipped, already defined (first definition wins)",
+				path, agent,
+			))
+			continue
+		}
+		cfg.Task.Agents[agent] = block
+	}
+	if included.Git != nil {
+		if cfg.Task.Git != nil {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+				"%s: [workload.git] skipped, already defined (first definition wins)",
+				path,
+			))
+		} else {
+			cfg.Task.Git = cloneTaskGitConfig(included.Git)
+		}
+	}
+}
+
+func mergeIncludedEffort(cfg *Config, included map[string]EffortConfig, path string) {
+	if len(included) == 0 {
+		return
+	}
+	if cfg.Effort == nil {
+		cfg.Effort = make(map[string]EffortConfig, len(included))
+	}
+	for agent, ladder := range included {
+		if _, exists := cfg.Effort[agent]; exists {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+				"%s: [effort.%s] skipped, already defined (first definition wins)",
+				path, agent,
+			))
+			continue
+		}
+		cfg.Effort[agent] = cloneEffortConfig(ladder)
+	}
+}
+
+func cloneTaskConfig(src *TaskConfig) *TaskConfig {
+	if src == nil {
+		return nil
+	}
+	dst := &TaskConfig{
+		DefaultAgents: append([]string(nil), src.DefaultAgents...),
+	}
+	if len(src.Agents) > 0 {
+		dst.Agents = make(map[string]TaskAgentConfig, len(src.Agents))
+		for agent, block := range src.Agents {
+			dst.Agents[agent] = block
+		}
+	}
+	if src.Git != nil {
+		dst.Git = cloneTaskGitConfig(src.Git)
+	}
+	return dst
+}
+
+func cloneTaskGitConfig(src *TaskGitConfig) *TaskGitConfig {
+	if src == nil {
+		return nil
+	}
+	return &TaskGitConfig{
+		CommitConfigOverrides: append([]string(nil), src.CommitConfigOverrides...),
+	}
+}
+
+func cloneEffortConfig(src EffortConfig) EffortConfig {
+	return EffortConfig{
+		Heavy:    cloneEffortModels(src.Heavy),
+		Standard: cloneEffortModels(src.Standard),
+		Light:    cloneEffortModels(src.Light),
+	}
+}
+
+func cloneEffortModels(src []EffortModel) []EffortModel {
+	if len(src) == 0 {
+		return nil
+	}
+	return append([]EffortModel(nil), src...)
 }
 
 // ExpandProjects resolves all project paths from the config
