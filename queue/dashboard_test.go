@@ -254,21 +254,20 @@ func TestDashboardBKeyOpensBindModal(t *testing.T) {
 	}
 }
 
-func TestDashboardSKeyOpensDetailViewAndClosePreservesCursor(t *testing.T) {
+func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) {
 	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "first", Status: "READY", cursorKey: "pop\x00first"},
 		{Project: "pop", SetID: "second", Status: "READY", cursorKey: "pop\x00second"},
 	}})
 	m.cursor = 1
 
-	// Enter: s opens detail view for the focused row.
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	got := updated.(dashboardModel)
 	if got.detail == nil || !got.detail.loading || got.detail.row.SetID != "second" {
 		t.Fatalf("detail view = %+v, want loading for second", got.detail)
 	}
 	if cmd == nil {
-		t.Fatalf("s key did not return a loading command")
+		t.Fatalf("l key did not return a loading command")
 	}
 	// View must be the detail view (no table).
 	view := got.View().Content
@@ -276,11 +275,11 @@ func TestDashboardSKeyOpensDetailViewAndClosePreservesCursor(t *testing.T) {
 		t.Fatalf("view should not show the table when detail is open:\n%s", view)
 	}
 
-	// Exit: q closes detail, returns to queue table, cursor unchanged.
-	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	// Exit: h closes detail, returns to queue table, cursor unchanged.
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	got = updated.(dashboardModel)
 	if cmd != nil {
-		t.Fatalf("q in detail view should close without quitting")
+		t.Fatalf("h in detail view should close without quitting")
 	}
 	if got.detail != nil || got.cursor != 1 {
 		t.Fatalf("after close: detail=%+v cursor=%d, want nil and 1", got.detail, got.cursor)
@@ -290,10 +289,211 @@ func TestDashboardSKeyOpensDetailViewAndClosePreservesCursor(t *testing.T) {
 	m2 := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "alpha", Status: "READY", cursorKey: "pop\x00alpha"},
 	}})
-	updated, _ = m2.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	updated, _ = m2.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	updated, cmd = updated.(dashboardModel).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmd != nil || updated.(dashboardModel).detail != nil {
 		t.Fatalf("esc should close detail view without quitting")
+	}
+
+	for _, tc := range []struct {
+		name string
+		msg  tea.KeyPressMsg
+	}{
+		{name: "enter", msg: tea.KeyPressMsg{Code: tea.KeyEnter}},
+	} {
+		t.Run(tc.name+" opens detail", func(t *testing.T) {
+			m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+				{Project: "pop", SetID: "target", Status: "READY", cursorKey: "pop\x00target"},
+			}})
+			updated, cmd := m.Update(tc.msg)
+			got := updated.(dashboardModel)
+			if got.detail == nil || !got.detail.loading || got.detail.row.SetID != "target" {
+				t.Fatalf("detail view = %+v, want loading for target", got.detail)
+			}
+			if cmd == nil {
+				t.Fatalf("%s key did not return a loading command", tc.name)
+			}
+		})
+	}
+}
+
+func TestDashboardQAndSAreUnbound(t *testing.T) {
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "set", Status: "READY", cursorKey: "pop\x00set"},
+	}})
+	got := m
+	for _, key := range []string{"q", "s"} {
+		updated, cmd := got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
+		got = updated.(dashboardModel)
+		if cmd != nil {
+			t.Fatalf("%s at top level returned command, want no-op", key)
+		}
+		if got.cursor != 0 || got.detail != nil {
+			t.Fatalf("%s changed model: cursor=%d detail=%+v", key, got.cursor, got.detail)
+		}
+	}
+
+	got.detail = &detailView{row: got.snap.Rows[0], loading: true}
+	for _, key := range []string{"q", "s"} {
+		updated, cmd := got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
+		got = updated.(dashboardModel)
+		if cmd != nil {
+			t.Fatalf("%s in detail returned command, want no-op", key)
+		}
+		if got.detail == nil {
+			t.Fatalf("%s in detail closed detail view", key)
+		}
+	}
+}
+
+func TestDashboardDetailViewPeekTaskText(t *testing.T) {
+	taskPath := filepath.Join("/tasks", "set-peek", "01-a.md")
+	d := &Deps{Tasks: &tasks.Deps{FS: &deps.MockFileSystem{
+		ReadFileFunc: func(path string) ([]byte, error) {
+			if path != taskPath {
+				t.Fatalf("read path = %q, want %q", path, taskPath)
+			}
+			return []byte("# Task A\n\nFull task body.\n"), nil
+		},
+	}}}
+	manifest := &tasks.Manifest{
+		Dir:   filepath.Join("/tasks", "set-peek"),
+		Valid: true,
+		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "open"}},
+	}
+	m := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "set-peek", Status: "READY", cursorKey: "pop\x00set-peek"},
+	}})
+	m.detail = &detailView{row: m.snap.Rows[0], manifest: manifest, cursorID: "01-a"}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	got := updated.(dashboardModel)
+	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.taskID != "01-a" {
+		t.Fatalf("peek = %+v, want loading peek for 01-a", got.detail.peek)
+	}
+	if cmd == nil {
+		t.Fatalf("l in detail did not return task-text loading command")
+	}
+	msg := cmd()
+	updated, _ = got.Update(msg)
+	got = updated.(dashboardModel)
+	if got.detail.peek == nil || got.detail.peek.loading || got.detail.peek.err != nil {
+		t.Fatalf("loaded peek = %+v, want loaded text", got.detail.peek)
+	}
+	view := got.View().Content
+	for _, want := range []string{"set-peek / 01-a", taskPath, "# Task A", "Full task body."} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("peek view missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	got = updated.(dashboardModel)
+	if cmd != nil {
+		t.Fatalf("h from task-text peek returned command")
+	}
+	if got.detail == nil || got.detail.peek != nil {
+		t.Fatalf("h should close peek but keep detail: detail=%+v", got.detail)
+	}
+
+	m2 := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "set-peek", Status: "READY", cursorKey: "pop\x00set-peek"},
+	}})
+	m2.detail = &detailView{row: m2.snap.Rows[0], manifest: manifest, cursorID: "01-a"}
+	updated, cmd = m2.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got = updated.(dashboardModel)
+	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.taskID != "01-a" {
+		t.Fatalf("enter peek = %+v, want loading peek for 01-a", got.detail.peek)
+	}
+	if cmd == nil {
+		t.Fatalf("enter in detail did not return task-text loading command")
+	}
+}
+
+func TestDashboardTaskTextPeekScrolls(t *testing.T) {
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "set-scroll", Status: "READY", cursorKey: "pop\x00set-scroll"},
+	}})
+	m.height = 8
+	m.width = 80
+	m.detail = &detailView{
+		row: m.snap.Rows[0],
+		peek: &taskTextPeek{
+			taskID: "01-a",
+			path:   filepath.Join("/tasks", "set-scroll", "01-a.md"),
+			text:   "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\n",
+		},
+	}
+
+	view := m.View().Content
+	for _, want := range []string{"line 1", "line 2", "line 3"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("initial peek missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "line 4") {
+		t.Fatalf("initial peek should clip line 4:\n%s", view)
+	}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	got := updated.(dashboardModel)
+	if got.detail.peek.scroll != 1 {
+		t.Fatalf("after j scroll = %d, want 1", got.detail.peek.scroll)
+	}
+	view = got.View().Content
+	if strings.Contains(view, "line 1") || !strings.Contains(view, "line 4") {
+		t.Fatalf("after j view should show lines 2-4:\n%s", view)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	got = updated.(dashboardModel)
+	if got.detail.peek.scroll != 3 {
+		t.Fatalf("after G scroll = %d, want 3", got.detail.peek.scroll)
+	}
+	view = got.View().Content
+	if !strings.Contains(view, "line 6") || strings.Contains(view, "line 1") {
+		t.Fatalf("after G view should show bottom lines:\n%s", view)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	got = updated.(dashboardModel)
+	if got.detail.peek.scroll != 3 {
+		t.Fatalf("first g scroll = %d, want 3", got.detail.peek.scroll)
+	}
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	got = updated.(dashboardModel)
+	if got.detail.peek.scroll != 0 {
+		t.Fatalf("after gg scroll = %d, want 0", got.detail.peek.scroll)
+	}
+}
+
+func TestDashboardTopLevelVimNavigation(t *testing.T) {
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "first", Status: "READY", cursorKey: "pop\x00first"},
+		{Project: "pop", SetID: "second", Status: "READY", cursorKey: "pop\x00second"},
+		{Project: "pop", SetID: "third", Status: "READY", cursorKey: "pop\x00third"},
+	}})
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	got := updated.(dashboardModel)
+	if got.cursor != 2 {
+		t.Fatalf("G cursor = %d, want 2", got.cursor)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	got = updated.(dashboardModel)
+	if got.cursor != 2 {
+		t.Fatalf("first g cursor = %d, want 2", got.cursor)
+	}
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	got = updated.(dashboardModel)
+	if got.cursor != 0 {
+		t.Fatalf("gg cursor = %d, want 0", got.cursor)
+	}
+
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	if cmd == nil {
+		t.Fatalf("h should quit from top level")
 	}
 }
 
@@ -382,7 +582,7 @@ func TestDashboardDetailViewCursorByIDPinsAcrossRefresh(t *testing.T) {
 	}
 }
 
-func TestDashboardDetailViewJKNavigation(t *testing.T) {
+func TestDashboardDetailViewVimNavigation(t *testing.T) {
 	manifest := &tasks.Manifest{
 		Valid: true,
 		Tasks: []tasks.Task{
@@ -415,6 +615,23 @@ func TestDashboardDetailViewJKNavigation(t *testing.T) {
 	got = updated.(dashboardModel)
 	if got.detail.cursorID != "01-a" {
 		t.Fatalf("k at top should clamp: cursorID = %q, want 01-a", got.detail.cursorID)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	got = updated.(dashboardModel)
+	if got.detail.cursorID != "03-c" {
+		t.Fatalf("G should move to bottom: cursorID = %q, want 03-c", got.detail.cursorID)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	got = updated.(dashboardModel)
+	if got.detail.cursorID != "03-c" {
+		t.Fatalf("first g should not move cursor: cursorID = %q, want 03-c", got.detail.cursorID)
+	}
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	got = updated.(dashboardModel)
+	if got.detail.cursorID != "01-a" {
+		t.Fatalf("gg should move to top: cursorID = %q, want 01-a", got.detail.cursorID)
 	}
 }
 
@@ -1153,6 +1370,8 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 		{Code: 'a', Text: "a"},
 		{Code: 'p', Text: "p"},
 		{Code: 's', Text: "s"},
+		{Code: 'l', Text: "l"},
+		{Code: tea.KeyEnter},
 	} {
 		updated, _ = m.Update(key)
 		m = updated.(dashboardModel)
@@ -1279,8 +1498,8 @@ func detailOverrideModel(row DashboardRow, task tasks.Task, completeErr, resetEr
 		},
 	}
 	manifest := &tasks.Manifest{
-		Valid:  true,
-		Tasks:  []tasks.Task{task},
+		Valid: true,
+		Tasks: []tasks.Task{task},
 	}
 	m := newDashboardModel(d, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
 	m.detail = &detailView{
@@ -1463,8 +1682,8 @@ func TestDetailViewOverrideErrorSurfaced(t *testing.T) {
 
 func TestDetailViewOverrideStatusRendered(t *testing.T) {
 	manifest := &tasks.Manifest{
-		Valid:  true,
-		Tasks:  []tasks.Task{{ID: "01-a", File: "01-a.md", Status: "open", Type: "AFK", Title: "A"}},
+		Valid: true,
+		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Status: "open", Type: "AFK", Title: "A"}},
 	}
 	d := &detailView{
 		row:       DashboardRow{SetID: "set-render"},

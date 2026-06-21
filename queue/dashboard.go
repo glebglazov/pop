@@ -359,7 +359,7 @@ func dashboardWorktree(d *Deps, state *DaemonState, repoKey, setID string, rep *
 
 // formatDashboardWorktree renders a row's checkout as its branch, marking a
 // dedicated (non-trunk) worktree with a leading glyph. The on-disk path is not
-// shown inline — it lives in the `s` inspect modal.
+// shown inline; the detail view carries the broader task-set context.
 func formatDashboardWorktree(branch string, worktree bool) string {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
@@ -425,6 +425,13 @@ type dashboardDetailMsg struct {
 	taskRow  *tasks.Row
 	err      error
 }
+
+type dashboardTaskTextMsg struct {
+	taskID string
+	path   string
+	text   string
+	err    error
+}
 type dashboardBindListMsg struct {
 	row     DashboardRow
 	entries []dashboardBindEntry
@@ -477,9 +484,8 @@ type dashboardAbandonModal struct {
 	loading bool
 }
 
-// detailView is the full-screen task-set detail that replaces the table when
-// the user presses `s`. The cursor is pinned by task ID so it survives
-// manifest refreshes.
+// detailView is the full-screen task-set detail that replaces the table. The
+// cursor is pinned by task ID so it survives manifest refreshes.
 type detailView struct {
 	row      DashboardRow
 	manifest *tasks.Manifest
@@ -487,9 +493,19 @@ type detailView struct {
 	cursorID string
 	loading  bool
 	err      error
+	peek     *taskTextPeek
 	// statusMsg is a transient one-line message shown above the hint bar.
 	// Set to a hint on invalid transition; set to confirmation on success.
 	statusMsg string
+}
+
+type taskTextPeek struct {
+	taskID  string
+	path    string
+	text    string
+	loading bool
+	err     error
+	scroll  int
 }
 
 // cursorIndex returns the index of the cursor task in the manifest, or 0.
@@ -552,6 +568,7 @@ type dashboardModel struct {
 
 	filterMode  bool
 	filterInput textinput.Model
+	pendingG    bool
 }
 
 func newDashboardModel(d *Deps, cfg *config.Config, snap DashboardSnapshot) dashboardModel {
@@ -569,19 +586,34 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.bind != nil {
+			m.pendingG = false
 			return m.updateBindModal(msg)
 		}
 		if m.abandon != nil {
+			m.pendingG = false
 			return m.updateAbandonModal(msg)
 		}
 		if m.detail != nil {
 			return m.updateDetailView(msg)
 		}
 		if m.filterMode {
+			m.pendingG = false
 			return m.updateFilterMode(msg)
 		}
+		if msg.String() == "g" {
+			if m.pendingG {
+				m.pendingG = false
+				if len(m.snap.Rows) > 0 {
+					m.cursor = 0
+				}
+			} else {
+				m.pendingG = true
+			}
+			return m, nil
+		}
+		m.pendingG = false
 		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		case "ctrl+c", "esc", "h", "left":
 			return m, tea.Quit
 		case "/":
 			m.filterMode = true
@@ -597,6 +629,10 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			if len(m.snap.Rows) > 0 && m.cursor > 0 {
 				m.cursor--
+			}
+		case "G":
+			if len(m.snap.Rows) > 0 {
+				m.cursor = len(m.snap.Rows) - 1
 			}
 		case "a":
 			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
@@ -624,7 +660,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.err = nil
 			return m, m.previewDrain(m.snap.Rows[m.cursor])
-		case "s":
+		case "l", "enter":
 			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
 				return m, nil
 			}
@@ -758,6 +794,15 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.statusMsg = fmt.Sprintf("%s applied to %s", msg.verb, msg.taskID)
 		}
 		return m, m.loadDetail(m.detail.row)
+	case dashboardTaskTextMsg:
+		if m.detail == nil || m.detail.peek == nil {
+			return m, nil
+		}
+		m.detail.peek.loading = false
+		m.detail.peek.taskID = msg.taskID
+		m.detail.peek.path = msg.path
+		m.detail.peek.text = msg.text
+		m.detail.peek.err = msg.err
 	}
 	return m, nil
 }
@@ -809,8 +854,49 @@ func (m dashboardModel) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 }
 
 func (m dashboardModel) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.detail != nil && m.detail.peek != nil {
+		if msg.String() == "g" {
+			if m.pendingG {
+				m.pendingG = false
+				m.detail.peek.scroll = 0
+			} else {
+				m.pendingG = true
+			}
+			return m, nil
+		}
+		m.pendingG = false
+		switch msg.String() {
+		case "esc", "h", "left":
+			m.detail.peek = nil
+		case "ctrl+c":
+			return m, tea.Quit
+		case "j", "down":
+			m.moveTaskTextPeek(1)
+		case "k", "up":
+			m.moveTaskTextPeek(-1)
+		case "ctrl+d":
+			m.moveTaskTextPeek(halfPageDelta(m.taskTextPeekPageSize()))
+		case "ctrl+u":
+			m.moveTaskTextPeek(-halfPageDelta(m.taskTextPeekPageSize()))
+		case "G":
+			m.detail.peek.scroll = m.maxTaskTextPeekScroll()
+		}
+		return m, nil
+	}
+	if msg.String() == "g" {
+		if m.pendingG {
+			m.pendingG = false
+			if m.detail != nil && m.detail.manifest != nil && len(m.detail.manifest.Tasks) > 0 {
+				m.detail.cursorID = m.detail.manifest.Tasks[0].ID
+			}
+		} else {
+			m.pendingG = true
+		}
+		return m, nil
+	}
+	m.pendingG = false
 	switch msg.String() {
-	case "esc", "q":
+	case "esc", "h", "left":
 		m.detail = nil
 		return m, nil
 	case "ctrl+c":
@@ -823,6 +909,21 @@ func (m dashboardModel) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			m.detail.moveCursor(-1)
 		}
+	case "G":
+		if m.detail != nil && m.detail.manifest != nil && len(m.detail.manifest.Tasks) > 0 {
+			m.detail.cursorID = m.detail.manifest.Tasks[len(m.detail.manifest.Tasks)-1].ID
+		}
+	case "l", "enter":
+		if m.detail == nil || m.detail.loading || m.detail.manifest == nil {
+			return m, nil
+		}
+		idx := m.detail.cursorIndex()
+		if idx < 0 || idx >= len(m.detail.manifest.Tasks) {
+			return m, nil
+		}
+		task := m.detail.manifest.Tasks[idx]
+		m.detail.peek = &taskTextPeek{taskID: task.ID, loading: true}
+		return m, m.loadTaskText(m.detail.manifest, task)
 	case "C", "O", "K":
 		return m.handleDetailOverrideKey(msg.String())
 	}
@@ -917,6 +1018,38 @@ func (m dashboardModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = dashboardCursorAfterReload(m.snap.Rows, oldKey, m.cursor)
 		return m, cmd
 	}
+}
+
+func (m dashboardModel) moveTaskTextPeek(delta int) {
+	if m.detail == nil || m.detail.peek == nil || delta == 0 {
+		return
+	}
+	m.detail.peek.scroll += delta
+	if m.detail.peek.scroll < 0 {
+		m.detail.peek.scroll = 0
+	}
+	if maxScroll := m.maxTaskTextPeekScroll(); m.detail.peek.scroll > maxScroll {
+		m.detail.peek.scroll = maxScroll
+	}
+}
+
+func (m dashboardModel) maxTaskTextPeekScroll() int {
+	if m.detail == nil || m.detail.peek == nil {
+		return 0
+	}
+	lines := taskTextPeekLines(m.detail.peek.text)
+	maxScroll := len(lines) - m.taskTextPeekPageSize()
+	if maxScroll < 0 {
+		return 0
+	}
+	return maxScroll
+}
+
+func (m dashboardModel) taskTextPeekPageSize() int {
+	if m.detail == nil || m.detail.peek == nil {
+		return 1
+	}
+	return taskTextPeekPageSize(m.height, m.detail.peek.path)
 }
 
 // filterDashboardRows returns rows whose Project or SetID contain query
@@ -1046,6 +1179,27 @@ func (m dashboardModel) loadDetail(row DashboardRow) tea.Cmd {
 		taskRow := tasks.FindRow(refresh, row.SetID)
 		manifest := refresh.Manifests[row.SetID]
 		return dashboardDetailMsg{dashRow: row, manifest: manifest, taskRow: taskRow}
+	}
+}
+
+func (m dashboardModel) loadTaskText(manifest *tasks.Manifest, task tasks.Task) tea.Cmd {
+	return func() tea.Msg {
+		if manifest == nil {
+			return dashboardTaskTextMsg{taskID: task.ID, err: fmt.Errorf("manifest not loaded")}
+		}
+		d := m.d
+		if d == nil {
+			d = DefaultDeps()
+		}
+		if d.Tasks == nil {
+			d.Tasks = tasks.DefaultDeps()
+		}
+		path := filepath.Join(manifest.Dir, task.File)
+		data, err := d.Tasks.FS.ReadFile(path)
+		if err != nil {
+			return dashboardTaskTextMsg{taskID: task.ID, path: path, err: err}
+		}
+		return dashboardTaskTextMsg{taskID: task.ID, path: path, text: string(data)}
 	}
 }
 
@@ -1656,7 +1810,7 @@ func (m dashboardModel) View() tea.View {
 			ui.WriteInputBox(&body, m.width, m.filterInput.View())
 			fmt.Fprint(&body, ui.HintStyle.Render("esc clear filter"))
 		} else {
-			fmt.Fprint(&body, ui.HintStyle.Render("q quit"))
+			fmt.Fprint(&body, ui.HintStyle.Render("h/esc quit"))
 		}
 		content := body.String()
 		v := tea.NewView(content)
@@ -1673,7 +1827,7 @@ func (m dashboardModel) View() tea.View {
 		ui.WriteInputBox(&body, m.width, m.filterInput.View())
 		fmt.Fprint(&body, ui.HintStyle.Render("esc clear filter · j/k navigate"))
 	} else {
-		fmt.Fprint(&body, ui.HintStyle.Render("j/k move · s status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · q quit"))
+		fmt.Fprint(&body, ui.HintStyle.Render("j/k move · gg/G top/bottom · l/enter status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · h/esc quit"))
 	}
 	content := body.String()
 	v := tea.NewView(content)
@@ -1687,14 +1841,18 @@ func (m dashboardModel) viewDetail() string {
 	title := lipgloss.NewStyle().Bold(true).Render("Queue dashboard")
 	fmt.Fprintln(&b, title)
 	d := m.detail
+	if d.peek != nil {
+		renderTaskTextPeek(&b, d, m.height, m.width)
+		return b.String()
+	}
 	if d.loading {
 		fmt.Fprintf(&b, "Loading %s...\n", d.row.SetID)
-		fmt.Fprint(&b, ui.HintStyle.Render("  esc/q back"))
+		fmt.Fprint(&b, ui.HintStyle.Render("  h/esc back"))
 		return b.String()
 	}
 	if d.err != nil {
 		fmt.Fprintf(&b, "error loading %s: %v\n", d.row.SetID, d.err)
-		fmt.Fprint(&b, ui.HintStyle.Render("  esc/q back"))
+		fmt.Fprint(&b, ui.HintStyle.Render("  h/esc back"))
 		return b.String()
 	}
 	renderDetailContent(&b, d)
@@ -1722,7 +1880,7 @@ func renderDetailContent(b *strings.Builder, d *detailView) {
 
 	if status == tasks.StatusMissing {
 		fmt.Fprintln(b, "  registered task set missing")
-		fmt.Fprint(b, ui.HintStyle.Render("  esc/q back"))
+		fmt.Fprint(b, ui.HintStyle.Render("  h/esc back"))
 		return
 	}
 	if manifest == nil || !manifest.Valid {
@@ -1732,7 +1890,7 @@ func renderDetailContent(b *strings.Builder, d *detailView) {
 				fmt.Fprintf(b, "  - %s\n", e)
 			}
 		}
-		fmt.Fprint(b, ui.HintStyle.Render("  esc/q back"))
+		fmt.Fprint(b, ui.HintStyle.Render("  h/esc back"))
 		return
 	}
 
@@ -1786,7 +1944,94 @@ func renderDetailContent(b *strings.Builder, d *detailView) {
 	if d.statusMsg != "" {
 		fmt.Fprintf(b, "  %s\n", d.statusMsg)
 	}
-	fmt.Fprint(b, ui.HintStyle.Render("  j/k · C complete · O open · K skip · esc/q back"))
+	fmt.Fprint(b, ui.HintStyle.Render("  j/k · gg/G top/bottom · l/enter peek · C complete · O open · K skip · h/esc back"))
+}
+
+func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int) {
+	p := d.peek
+	header := d.row.SetID
+	if p.taskID != "" {
+		header += " / " + p.taskID
+	}
+	fmt.Fprintln(b, header)
+	if p.loading {
+		fmt.Fprintln(b, "  loading task text...")
+		fmt.Fprint(b, ui.HintStyle.Render("  h/esc back"))
+		return
+	}
+	if p.err != nil {
+		fmt.Fprintf(b, "  error loading task text: %v\n", p.err)
+		if p.path != "" {
+			fmt.Fprintf(b, "  %s\n", p.path)
+		}
+		fmt.Fprint(b, ui.HintStyle.Render("  h/esc back"))
+		return
+	}
+	if p.path != "" {
+		fmt.Fprintf(b, "  %s\n\n", p.path)
+	}
+	lines := taskTextPeekLines(p.text)
+	pageSize := taskTextPeekPageSize(height, p.path)
+	maxScroll := len(lines) - pageSize
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if p.scroll > maxScroll {
+		p.scroll = maxScroll
+	}
+	if p.scroll < 0 {
+		p.scroll = 0
+	}
+	if len(lines) == 0 {
+		fmt.Fprintln(b, "  (empty task file)")
+	} else {
+		end := p.scroll + pageSize
+		if end > len(lines) {
+			end = len(lines)
+		}
+		for _, line := range lines[p.scroll:end] {
+			fmt.Fprintln(b, truncateToWidth(line, width))
+		}
+	}
+	fmt.Fprintln(b)
+	position := ""
+	if maxScroll > 0 {
+		position = fmt.Sprintf(" · %d/%d", p.scroll+1, len(lines))
+	}
+	fmt.Fprint(b, ui.HintStyle.Render("  j/k · C-d/C-u · gg/G · h/esc back"+position))
+}
+
+func taskTextPeekLines(text string) []string {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func taskTextPeekPageSize(height int, path string) int {
+	if height <= 0 {
+		height = 20
+	}
+	pathLines := 0
+	if path != "" {
+		pathLines = 2
+	}
+	pageSize := height - 1 /* title */ - 1 /* header */ - pathLines - 1 /* hint */
+	if pageSize < 1 {
+		return 1
+	}
+	return pageSize
+}
+
+func halfPageDelta(pageSize int) int {
+	if pageSize <= 1 {
+		return 1
+	}
+	return pageSize / 2
 }
 
 func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
