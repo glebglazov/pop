@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebglazov/pop/binding"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
 )

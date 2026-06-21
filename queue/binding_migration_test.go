@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glebglazov/pop/binding"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
 // TestReadDaemonStateMigratesLegacyBindings verifies that bindings still

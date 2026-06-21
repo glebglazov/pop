@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glebglazov/pop/binding"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
 )
 

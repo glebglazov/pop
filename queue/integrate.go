@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/glebglazov/pop/binding"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
