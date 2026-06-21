@@ -202,9 +202,16 @@ var codexEffortModels = map[string][]config.EffortModel{
 	"light":    {{Model: "gpt-5.4-mini", Reasoning: "low"}},
 }
 
+var cursorEffortModels = map[string][]config.EffortModel{
+	"heavy":    {{Model: "composer-2.5", Reasoning: "high"}},
+	"standard": {{Model: "composer-2.5", Reasoning: "medium"}},
+	"light":    {{Model: "composer-2.5", Reasoning: "low"}},
+}
+
 var builtInEffortModels = map[string]map[string][]config.EffortModel{
 	"claude": claudeEffortModels,
 	"codex":  codexEffortModels,
+	"cursor": cursorEffortModels,
 }
 
 type presetAgentAdapter struct {
@@ -261,6 +268,12 @@ func (a *presetAgentAdapter) ArgsContainReasoning(args []string) bool {
 				continue
 			}
 			if strings.HasPrefix(arg, "-c=") && isCodexReasoningConfig(strings.TrimPrefix(arg, "-c=")) {
+				return true
+			}
+		}
+	case "cursor":
+		for _, arg := range args {
+			if strings.Contains(arg, "[") && strings.Contains(arg, "]") && strings.Contains(arg, "effort=") {
 				return true
 			}
 		}
@@ -564,14 +577,24 @@ func resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort string, effortExp
 		return agentSpec
 	}
 	args := append([]string{name}, extraArgs...)
-	args = append(args, "--model", bundles[0].Model)
-	if adapter := agentAdapters[name]; adapter != nil && !adapter.ArgsContainReasoning(extraArgs) {
+	adapter := agentAdapters[name]
+	args = append(args, "--model", effortModelTokenForAgent(name, bundles[0], adapter, extraArgs))
+	if adapter != nil && !adapter.ArgsContainReasoning(extraArgs) {
 		args = append(args, adapter.ReasoningArgs(bundles[0].Reasoning)...)
 	}
 	for i, arg := range args {
 		args[i] = shellQuote(arg)
 	}
 	return strings.Join(args, " ")
+}
+
+func effortModelTokenForAgent(agent string, bundle config.EffortModel, adapter AgentAdapter, extraArgs []string) string {
+	model := strings.TrimSpace(bundle.Model)
+	reasoning := strings.TrimSpace(bundle.Reasoning)
+	if agent == "cursor" && reasoning != "" && (adapter == nil || !adapter.ArgsContainReasoning(extraArgs)) {
+		return model + "[effort=" + reasoning + "]"
+	}
+	return model
 }
 
 func effortModelsForAgent(cfg *config.Config, agent, effort string) []config.EffortModel {
@@ -701,7 +724,7 @@ func shellQuote(s string) string {
 	if s == "" {
 		return "''"
 	}
-	if strings.ContainsAny(s, " \t\n'\"\\$`!&|;()<>") {
+	if strings.ContainsAny(s, " \t\n'\"\\$`!&|;()<>[]") {
 		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 	}
 	return s

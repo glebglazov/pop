@@ -226,6 +226,55 @@ func TestResolveTaskAgentSpecForEffortCodexModels(t *testing.T) {
 	}
 }
 
+func TestResolveTaskAgentSpecForEffortCursorModels(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentSpec string
+		effort    string
+		want      string
+	}{
+		{name: "heavy", agentSpec: "cursor", effort: "heavy", want: `cursor --model 'composer-2.5[effort=high]'`},
+		{name: "standard", agentSpec: "cursor", effort: "standard", want: `cursor --model 'composer-2.5[effort=medium]'`},
+		{name: "light", agentSpec: "cursor", effort: "light", want: `cursor --model 'composer-2.5[effort=low]'`},
+		{name: "preserves explicit model", agentSpec: "cursor --model custom", effort: "heavy", want: "cursor --model custom"},
+		{name: "preserves explicit bracketed model", agentSpec: `cursor --model "composer-2.5[effort=low]"`, effort: "heavy", want: `cursor --model "composer-2.5[effort=low]"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveTaskAgentSpecForEffort(tt.agentSpec, tt.effort, true)
+			if got != tt.want {
+				t.Fatalf("spec = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveTaskAgentSpecForEffortCursorConfiguredModelOnly(t *testing.T) {
+	cfg := &config.Config{Effort: map[string]config.EffortConfig{
+		"cursor": {
+			Heavy: []config.EffortModel{{Model: "composer-2.5"}},
+		},
+	}}
+	got := resolveTaskAgentSpecForEffortWithConfig("cursor", "heavy", true, cfg)
+	want := "cursor --model composer-2.5"
+	if got != want {
+		t.Fatalf("spec = %q, want %q", got, want)
+	}
+}
+
+func TestCursorAdapterDetectsBracketedReasoning(t *testing.T) {
+	adapter, err := ResolveAgentAdapter("cursor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !adapter.ArgsContainReasoning([]string{"--model", "composer-2.5[effort=high]"}) {
+		t.Fatal("cursor adapter did not detect bracketed effort")
+	}
+	if adapter.ArgsContainReasoning([]string{"--model", "composer-2.5"}) {
+		t.Fatal("cursor adapter detected reasoning in a plain model token")
+	}
+}
+
 func TestResolveTaskAgentSpecForConfiguredEffortModels(t *testing.T) {
 	cfg := &config.Config{Effort: map[string]config.EffortConfig{
 		"opencode": {
@@ -290,11 +339,18 @@ func TestResolveTaskAgentSpecEffortModelPrecedence(t *testing.T) {
 			wantSpecs:      []string{`codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
 		},
 		{
-			name:           "fallback list entries each resolve effort",
-			defaultSpecs:   []string{"claude", "codex"},
+			name:           "cursor composes with bracketed effort",
+			defaultSpecs:   []string{"cursor"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpecs:      []string{"claude --model opus --effort high", `codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
+			wantSpecs:      []string{`cursor --model 'composer-2.5[effort=high]'`},
+		},
+		{
+			name:           "fallback list entries each resolve effort",
+			defaultSpecs:   []string{"claude", "cursor", "codex"},
+			effort:         "heavy",
+			effortExplicit: true,
+			wantSpecs:      []string{"claude --model opus --effort high", `cursor --model 'composer-2.5[effort=high]'`, `codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
 		},
 		{
 			name:           "agent-cmd leaves fallback list untouched",
