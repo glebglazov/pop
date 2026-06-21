@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
 // RecordMergeability persists a mergeability record for a completed set.
@@ -25,6 +25,10 @@ func RecordMergeability(d *Deps, projectPath string, rec Record) error {
 	store, err := Load(d.tasksDeps())
 	if err != nil {
 		return err
+	}
+	if !AwaitsIntegration(rec) {
+		store.Delete(scopedKey)
+		return Save(d.tasksDeps(), store)
 	}
 	store.Put(scopedKey, rec)
 	return Save(d.tasksDeps(), store)
@@ -65,6 +69,9 @@ func GetForSet(td *tasks.Deps, repoKey, setID string) (Record, bool, error) {
 		return Record{}, false, err
 	}
 	rec, ok := store.Get(binding.ScopedKey(repoKey, setID))
+	if ok && !AwaitsIntegration(rec) {
+		return Record{}, false, nil
+	}
 	return rec, ok, nil
 }
 
@@ -75,7 +82,7 @@ func findRecord(store *Store, setID string) (key string, rec Record, ok bool, er
 	setID = strings.TrimSpace(setID)
 	var keys []string
 	for k, r := range store.Records {
-		if r.SetID == setID {
+		if r.SetID == setID && AwaitsIntegration(r) {
 			keys = append(keys, k)
 		}
 	}
@@ -153,7 +160,9 @@ func AwaitingIntegration(td *tasks.Deps) ([]Record, error) {
 	}
 	out := make([]Record, 0, len(store.Records))
 	for _, rec := range store.Records {
-		out = append(out, rec)
+		if AwaitsIntegration(rec) {
+			out = append(out, rec)
+		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Project != out[j].Project {
@@ -162,6 +171,14 @@ func AwaitingIntegration(td *tasks.Deps) ([]Record, error) {
 		return out[i].SetID < out[j].SetID
 	})
 	return out, nil
+}
+
+// AwaitsIntegration reports whether a mergeability record represents a real
+// integration backlog item. Records with identical target and source commits
+// are no-ops left by older queue supervisor builds that computed mergeability
+// for an in-place trunk drain.
+func AwaitsIntegration(rec Record) bool {
+	return rec.Target == "" || rec.Source == "" || rec.Target != rec.Source
 }
 
 // ProjectForScopedKey returns the project label for a scoped store key by

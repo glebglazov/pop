@@ -630,6 +630,47 @@ func TestRecordTerminalOutcomesDoneRecordsMergeability(t *testing.T) {
 	}
 }
 
+func TestRecordTerminalOutcomesDoneSkipsMergeabilityForTrunkDrain(t *testing.T) {
+	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
+	d := &Deps{
+		Tasks: td,
+		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
+			if runtimePath != repo {
+				return nil, os.ErrNotExist
+			}
+			return &tasks.DrainOutcomeRecord{
+				SetID:       "set-trunk",
+				Outcome:     tasks.DrainOutcomeDone,
+				RuntimePath: repo,
+				WrittenAt:   time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
+			}, nil
+		},
+		ComputeMergeability: func(workingPath, runtimePath string) (MergeabilityRecord, error) {
+			t.Fatalf("mergeability should not be computed for trunk drain: %q %q", workingPath, runtimePath)
+			return MergeabilityRecord{}, nil
+		},
+	}
+
+	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
+		Project: "pop",
+		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
+	}}, nil); err != nil {
+		t.Fatalf("record outcomes: %v", err)
+	}
+
+	if got := loadMergeabilityStore(t, td); len(got) != 0 {
+		t.Fatalf("mergeability state = %+v, want empty", got)
+	}
+	entries, err := ReadJournal(td)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Event != JournalEventOutcome {
+		t.Fatalf("journal entries = %+v, want outcome only", entries)
+	}
+}
+
 func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	repoKey := "test-repo"

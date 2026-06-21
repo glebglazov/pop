@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks/integration"
-	"github.com/glebglazov/pop/tasks"
 )
 
 const agentQuotaResetSkew = 2 * time.Minute
@@ -296,7 +296,7 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, e
 					if err := applyTerminalOutcomeState(d, state, qcfg, dec.Project, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID, rec.Outcome, eventLines); err != nil {
 						return err
 					}
-					if rec.Outcome == tasks.DrainOutcomeDone {
+					if rec.Outcome == tasks.DrainOutcomeDone && shouldRecordMergeability(d, runtime.WorkingPath, rec.RuntimePath) {
 						merge, err := d.computeMergeability(runtime.WorkingPath, rec.RuntimePath)
 						if err != nil {
 							return err
@@ -388,6 +388,21 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, e
 		}
 	}
 	return nil
+}
+
+func shouldRecordMergeability(d *Deps, workingPath, runtimePath string) bool {
+	if strings.TrimSpace(workingPath) == "" || strings.TrimSpace(runtimePath) == "" {
+		return false
+	}
+	workingCanon, err := canonicalCheckoutPath(d.Tasks, workingPath)
+	if err != nil {
+		workingCanon = filepath.Clean(workingPath)
+	}
+	runtimeCanon, err := canonicalCheckoutPath(d.Tasks, runtimePath)
+	if err != nil {
+		runtimeCanon = filepath.Clean(runtimePath)
+	}
+	return workingCanon != runtimeCanon
 }
 
 type terminalRuntime struct {
