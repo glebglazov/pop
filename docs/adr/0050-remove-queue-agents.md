@@ -1,7 +1,7 @@
 ---
 status: accepted
 supersedes:
-  - docs/adr/20260620-1602-agent-fallback-owned-by-implement.md (in part — `[queue].agents` is deleted, not merely unused)
+  - docs/adr/0043-agent-fallback-owned-by-implement.md (in part — `[queue].agents` is deleted, not merely unused)
 ---
 
 # Remove `[queue].agents`; integration reads `[workload] default_agents`

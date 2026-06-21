@@ -1,7 +1,7 @@
 // Package integration owns Mergeability persistence, the Integrate verb, and
 // Integration backlog helpers. It is trigger-agnostic: both `pop queue run` and
 // `pop tasks implement` read and write the same mergeability store beside the
-// binding store, not in queue daemon state (ADR-0036, ADR-20260621).
+// binding store, not in queue daemon state (ADR-0036, ADR-0046).
 package integration
 
 import (

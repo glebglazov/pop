@@ -2,7 +2,7 @@
 
 Status: accepted — deferred/unbuilt
 
-Worktree binding, drain routing, integration, and Implement orchestration were scattered across root `binding/`, `cmd/tasks.go`, and `queue/` (including a `DaemonState.WorktreeBindings` mirror of `bindings.json`). ADR-0036 and ADR-20260621 established shared routing semantics; ADR-0038 moved binding lifecycle CLI verbs to `pop tasks` but left implementations under `queue/`.
+Worktree binding, drain routing, integration, and Implement orchestration were scattered across root `binding/`, `cmd/tasks.go`, and `queue/` (including a `DaemonState.WorktreeBindings` mirror of `bindings.json`). ADR-0036 and ADR-0046 established shared routing semantics; ADR-0038 moved binding lifecycle CLI verbs to `pop tasks` but left implementations under `queue/`.
 
 Three task-scoped modules replace that layout:
 

@@ -6,7 +6,7 @@ accepted
 
 ## Context
 
-**Auto-drain** is a per-set consent bit in **Task state** (ADR-20260618): it defaults off and the **Queue dashboard** toggle is the runtime control surface. Planning workflows authoring a Task set had no way to express "enqueue this for unattended draining when it first appears" without a separate dashboard step after registration.
+**Auto-drain** is a per-set consent bit in **Task state** (ADR-0041): it defaults off and the **Queue dashboard** toggle is the runtime control surface. Planning workflows authoring a Task set had no way to express "enqueue this for unattended draining when it first appears" without a separate dashboard step after registration.
 
 ## Decision
 
