@@ -98,8 +98,13 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 		RenameFunc:       real.Rename,
 		StatFunc:         origFS.StatFunc,
 	}
-	seedMergeabilityStore(t, d.Tasks, map[string]MergeabilityRecord{
-		setScopedKey("repo-key", "done-integrating"): {RuntimePath: "/repo/done", SetID: "done-integrating", Status: MergeabilityClean},
+	// Binding-driven membership (ADR-0051): a Done set is in the integration
+	// backlog because it has a non-trunk Worktree binding, not because a
+	// mergeability record exists. done-integrating has a binding but no record
+	// (the self-heal case) and still shows as DONE · unknown; done-concluded has
+	// neither and stays hidden.
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey("repo-key", "done-integrating"): {RuntimePath: "/repo/done", Branch: "done-branch"},
 	})
 	state := &DaemonState{Version: 1}
 	scans := []projectScan{{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}}
@@ -109,12 +114,17 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ids []string
+	byID := map[string]DashboardRow{}
 	for _, row := range got {
 		ids = append(ids, row.SetID)
+		byID[row.SetID] = row
 	}
 	want := []string{"ready", "failed", "blocked", "deferred", "missing", "malformed", "done-integrating"}
 	if !reflect.DeepEqual(ids, want) {
 		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	if got := byID["done-integrating"]; got.Status != "DONE · unknown" || !got.integrationBacklog {
+		t.Fatalf("done-integrating row = %+v, want DONE · unknown in backlog", got)
 	}
 }
 

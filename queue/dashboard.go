@@ -280,7 +280,14 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 	projectName := repoName(scans, rep)
 	var rows []DashboardRow
 	for _, taskRow := range refresh.Rows {
-		merge, awaitingIntegration := mergeabilityForSet(d, repoKey, taskRow.ID)
+		merge, _ := mergeabilityForSet(d, repoKey, taskRow.ID)
+		// Integration-backlog membership is binding-driven, not gated on a
+		// recorded Mergeability (ADR-0051). bindings.json only ever holds
+		// non-trunk bindings — a trunk drain records none — so a Done set's
+		// having a binding is the backlog test; Mergeability is left-joined and
+		// renders as "unknown" when no record exists.
+		_, hasBinding := bindingForSet(d.Tasks, repoKey, taskRow.ID)
+		awaitingIntegration := taskRow.Status == tasks.StatusDone && hasBinding
 		if !dashboardShowRow(taskRow, awaitingIntegration) {
 			continue
 		}
@@ -300,7 +307,7 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 			repoKey:            repoKey,
 			runtimePath:        wt.runtimePath,
 			paneID:             dashboardPaneID(state, repoKey, taskRow.ID),
-			integrationBacklog: taskRow.Status == tasks.StatusDone && awaitingIntegration,
+			integrationBacklog: awaitingIntegration,
 		})
 	}
 	return rows, nil
