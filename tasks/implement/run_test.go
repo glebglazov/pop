@@ -90,11 +90,9 @@ func writeImplementFile(t *testing.T, path, content string) {
 
 // TestResolveTaskSetRuntimeUnboundUsesCurrentCheckout asserts an unbound
 // whole-set drain with no flags stays in the current checkout and provisions no
-// managed worktree, even when the repo declared the (now ignored) worktree_ready
-// bit — routing never provisions (ADR-0052).
+// managed worktree — routing never provisions (ADR-0052).
 func TestResolveTaskSetRuntimeUnboundUsesCurrentCheckout(t *testing.T) {
 	root, d := setupImplementFixture(t)
-	writeImplementFile(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
 
 	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
 	if err != nil {
@@ -123,9 +121,8 @@ func TestResolveTaskSetRuntimeUnboundUsesCurrentCheckout(t *testing.T) {
 	}
 }
 
-func TestResolveTaskSetRuntimeInlineBypassesWorktreeReady(t *testing.T) {
+func TestResolveTaskSetRuntimeInlineBypassesTrunkDefault(t *testing.T) {
 	root, d := setupImplementFixture(t)
-	writeImplementFile(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
 
 	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
 	if err != nil {

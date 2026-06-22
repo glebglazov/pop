@@ -317,12 +317,13 @@ type Config struct {
 // from Config: global config.toml registers projects, while .pop.toml only
 // describes behavior for an already-registered project.
 type RepoConfig struct {
-	WorktreeReady  bool `toml:"worktree_ready"`
 	AutoMergeClean bool `toml:"auto_merge_clean"`
-	// ExecutionBase marks a specific checkout as the base for task execution.
-	// It is meaningful only in a [repo."<path>"] global override block keyed to
-	// that checkout. Repo-local .pop.toml cannot name a machine-specific base.
-	ExecutionBase bool `toml:"-"`
+	// Trunk marks a specific checkout as the Trunk worktree — the repository's
+	// integration anchor and fork base for managed worktrees. Meaningful only in
+	// a [repo."<path>"] global override block keyed to that checkout; a bare repo
+	// must declare trunk = true to enable managed-worktree provisioning and
+	// integration. Repo-local .pop.toml cannot name a machine-specific trunk.
+	Trunk bool `toml:"-"`
 }
 
 // RepoOverrideConfig is the shape of a [repo."<path>"] block in global
@@ -330,11 +331,10 @@ type RepoConfig struct {
 // global-only settings (project registry, daemon knobs, etc.) are not.
 // Pointer fields allow field-level merge semantics (nil = not set).
 type RepoOverrideConfig struct {
-	WorktreeReady  *bool `toml:"worktree_ready"`
 	AutoMergeClean *bool `toml:"auto_merge_clean"`
-	// ExecutionBase is meaningful only for the specific checkout path that keys
-	// this block; it is not propagated to other worktrees of the same repo.
-	ExecutionBase *bool `toml:"execution_base"`
+	// Trunk is meaningful only for the specific checkout path that keys this
+	// block; it is not propagated to other worktrees of the same repo.
+	Trunk *bool `toml:"trunk"`
 }
 
 // LoadRepoConfig reads repo-root .pop.toml. A missing file is not an error and
@@ -400,8 +400,8 @@ func repoIdentity(d *Deps, path string) string {
 //	global [repo."<path>"] override → .pop.toml → built-in default (false for all bools)
 //
 // Fields are merged individually; a nil pointer in the override means "not set"
-// and the next layer wins. execution_base exists only in global override blocks
-// and is applied only when the override's key path exactly matches checkoutPath
+// and the next layer wins. trunk exists only in global override blocks and is
+// applied only when the override's key path exactly matches checkoutPath
 // (per-checkout semantics).
 //
 // A missing .pop.toml is not an error. A malformed .pop.toml degrades to the
@@ -432,14 +432,11 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 	// Merge: start with .pop.toml, then layer global override on top.
 	result := popTOML
 	if override != nil {
-		if override.WorktreeReady != nil {
-			result.WorktreeReady = *override.WorktreeReady
-		}
 		if override.AutoMergeClean != nil {
 			result.AutoMergeClean = *override.AutoMergeClean
 		}
-		if override.ExecutionBase != nil && executionBaseApplies {
-			result.ExecutionBase = *override.ExecutionBase
+		if override.Trunk != nil && executionBaseApplies {
+			result.Trunk = *override.Trunk
 		}
 	}
 
@@ -790,14 +787,29 @@ func validateEffortConfigMetadata(path string, md toml.MetaData) error {
 
 func validateRepoConfigMetadata(path string, md toml.MetaData) error {
 	for _, key := range md.Undecoded() {
-		if len(key) == 1 && key[0] == "queue_base" {
-			return fmt.Errorf("%s: queue_base was renamed to execution_base", path)
+		// .pop.toml-level (len==1) errors
+		if len(key) == 1 {
+			switch key[0] {
+			case "worktree_ready":
+				return fmt.Errorf("%s: worktree_ready was removed; use trunk = true in a global [repo.%q] block to name the Trunk worktree", path, "<path>")
+			case "execution_base":
+				return fmt.Errorf("%s: execution_base was renamed to trunk; use trunk = true in a global [repo.%q] block", path, "<path>")
+			case "queue_base":
+				return fmt.Errorf("%s: queue_base was renamed to trunk; use trunk = true in a global [repo.%q] block", path, "<path>")
+			case "trunk":
+				return fmt.Errorf("%s: trunk is only valid in a global [repo.%q] override block", path, "<path>")
+			}
 		}
-		if len(key) == 1 && key[0] == "execution_base" {
-			return fmt.Errorf("%s: execution_base is only valid in global [repo.%q] override blocks", path, "<path>")
-		}
-		if len(key) >= 3 && key[0] == "repo" && key[2] == "queue_base" {
-			return fmt.Errorf("%s: [repo.%q] queue_base was renamed to execution_base", path, key[1])
+		// [repo."<path>"] block errors (len>=3)
+		if len(key) >= 3 && key[0] == "repo" {
+			switch key[2] {
+			case "worktree_ready":
+				return fmt.Errorf("%s: [repo.%q] worktree_ready was removed; there is no replacement", path, key[1])
+			case "execution_base":
+				return fmt.Errorf("%s: [repo.%q] execution_base was renamed to trunk", path, key[1])
+			case "queue_base":
+				return fmt.Errorf("%s: [repo.%q] queue_base was renamed to trunk", path, key[1])
+			}
 		}
 	}
 	return nil
@@ -835,7 +847,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []string {
 		}
 		seen[uniq] = true
 		warnings = append(warnings, fmt.Sprintf(
-			"%s: [repo.%q] unknown key %q ignored (only worktree_ready, auto_merge_clean, execution_base are accepted)",
+			"%s: [repo.%q] unknown key %q ignored (only trunk, auto_merge_clean are accepted)",
 			path, key[1], key[2],
 		))
 	}

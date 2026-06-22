@@ -955,13 +955,11 @@ func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
 }
 
 // TestRunTasksCmdUnboundDrainsInCurrentCheckout asserts a default (non-inline)
-// whole-set run no longer auto-provisions a managed worktree even when the repo
-// declared the now-ignored worktree_ready bit: it drains in the current checkout
-// and records no Worktree binding (ADR-0052).
+// whole-set run does not auto-provision a managed worktree: it drains inline in
+// the current checkout and records no Worktree binding (ADR-0052).
 func TestRunTasksCmdUnboundDrainsInCurrentCheckout(t *testing.T) {
 	root := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
-	writeFileCmd(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
 
 	resetTaskFlags()
 	taskAgentCmd = agent
@@ -984,10 +982,9 @@ func TestRunTasksCmdUnboundDrainsInCurrentCheckout(t *testing.T) {
 	}
 }
 
-func TestRunTasksCmdInlineBypassesWorktreeReadyDefault(t *testing.T) {
+func TestRunTasksCmdInlineBypassesTrunkDefault(t *testing.T) {
 	root := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
-	writeFileCmd(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
 
 	resetTaskFlags()
 	taskAgentCmd = agent

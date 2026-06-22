@@ -128,10 +128,11 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 	return RouteDrainCheckoutResult{RuntimePath: currentRuntime}, nil
 }
 
-// ResolveExecutionBasePath resolves the repository checkout used as Execution
-// base: explicit execution_base override, then the git main worktree for
-// non-bare repositories.
-func ResolveExecutionBasePath(td *tasks.Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
+// ResolveTrunkPath resolves the repository checkout used as the Trunk worktree:
+// explicit trunk = true override, then the git main worktree for non-bare
+// repositories. Returns (path, false, nil) on success; (_, true, nil) when the
+// repo is bare with no trunk override (caller must refuse and name a trunk).
+func ResolveTrunkPath(td *tasks.Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
 	if td == nil {
 		return "", false, fmt.Errorf("missing task dependencies")
 	}
@@ -141,7 +142,7 @@ func ResolveExecutionBasePath(td *tasks.Deps, cfg *config.Config, checkoutPath s
 	}
 	if cfg != nil {
 		for rawKey, block := range cfg.Repo {
-			if block.ExecutionBase == nil || !*block.ExecutionBase {
+			if block.Trunk == nil || !*block.Trunk {
 				continue
 			}
 			candidate, err := tasks.NormalizeProjectPathWith(td, rawKey)

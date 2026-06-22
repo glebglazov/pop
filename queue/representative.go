@@ -13,9 +13,9 @@ import (
 
 // repoScanReason is the reason emitted when a repository cannot be scheduled
 // because no representative checkout could be resolved (ADR-0035): a bare repo
-// with no `execution_base` override and no per-set Worktree binding. The Queue
+// with no Trunk worktree configured and no per-set Worktree binding. The Queue
 // never guesses a checkout, so it refuses and reports.
-const repoScanReason = "needs execution_base; skipped"
+const repoScanReason = "needs trunk; skipped (set trunk = true in a global [repo.\"<path>\"] block)"
 
 // decideRepoDispatches collapses one repository's in-scope checkouts (its
 // worktrees, grouped by Repository identity) into a single scheduling unit and
@@ -23,8 +23,8 @@ const repoScanReason = "needs execution_base; skipped"
 // repository per Ready set — never once per worktree (ADR-0035).
 //
 // The drain routes to a single representative checkout resolved in order:
-// per-set Worktree binding → explicit execution_base checkout → the repo's git main
-// worktree (non-bare) → refuse and report.
+// per-set Worktree binding → Trunk worktree (explicit trunk override or git main
+// worktree for non-bare) → refuse and report.
 func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, state *DaemonState, now time.Time) []Decision {
 	if len(scans) == 0 {
 		return nil
@@ -42,9 +42,9 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, stat
 	extraBusy, runningElsewhere := repoBusyAcrossCheckouts(d, scans, rep, name)
 
 	if rep == nil {
-		// Bare repo with no execution_base. A per-set Worktree binding is still a
-		// valid drain router (decoupled from worktree_ready); without one the
-		// repository is refused and reported.
+		// Bare repo with no Trunk worktree configured. A per-set Worktree binding
+		// is still a valid drain router; without one the repository is refused and
+		// reported.
 		return append(extraBusy, decideBareWithoutBase(d, cfg, scans, name, state, now, runningElsewhere)...)
 	}
 
@@ -57,16 +57,15 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, stat
 // resolveRepresentative resolves the repository's representative base checkout
 // (the one the drain routes to when no per-set binding applies):
 //
-//	explicit execution_base checkout → git main worktree (non-bare) → none (refuse).
+//	Trunk worktree (explicit trunk override or git main worktree) → none (refuse).
 //
-// A nil scan with bare=true means the repository is bare and has no execution_base
-// override: it has no git main worktree, so it is refused unless a per-set
-// binding routes the drain elsewhere.
+// A nil scan with bare=true means the repository is bare with no Trunk worktree
+// configured: it is refused unless a per-set binding routes the drain elsewhere.
 func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*projectScan, bool, error) {
-	// 1. explicit execution_base checkout (task 01's resolved config).
+	// 1. explicit trunk = true checkout.
 	for i := range scans {
 		rc, err := resolveRepoConfigFor(d, cfg, scans[i].ProjectPath)
-		if err == nil && rc.ExecutionBase {
+		if err == nil && rc.Trunk {
 			return &scans[i], false, nil
 		}
 	}
@@ -86,22 +85,22 @@ func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*p
 	return scanForCheckout(d, scans, mainPath), false, nil
 }
 
-// ResolveExecutionBasePath resolves the repository checkout used as Execution
-// base. It delegates to tasks/binding.
-func ResolveExecutionBasePath(d *Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
+// ResolveTrunkPath resolves the repository's Trunk worktree checkout. It
+// delegates to tasks/binding.
+func ResolveTrunkPath(d *Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
 	if d.Tasks == nil {
 		d.Tasks = tasks.DefaultDeps()
 	}
-	return binding.ResolveExecutionBasePath(d.Tasks, cfg, checkoutPath)
+	return binding.ResolveTrunkPath(d.Tasks, cfg, checkoutPath)
 }
 
-// MainWorktreeBranch returns the branch currently checked out in the
-// repository's main working tree — the merge target for an implement worktree
-// drain (ADR-0036). Returns ("", nil) when the repo is bare or the main
-// worktree is in detached HEAD state.
+// MainWorktreeBranch returns the branch currently checked out in the Trunk
+// worktree — the merge target for an implement worktree drain (ADR-0036).
+// Returns ("", nil) when the repo is bare with no Trunk configured or the
+// Trunk worktree is in detached HEAD state.
 func MainWorktreeBranch(d *Deps, runtimePath string) (string, error) {
 	if d == nil {
 		d = DefaultDeps()
@@ -109,11 +108,11 @@ func MainWorktreeBranch(d *Deps, runtimePath string) (string, error) {
 	if d.Tasks == nil {
 		d.Tasks = tasks.DefaultDeps()
 	}
-	mainPath, bare, err := binding.GitMainWorktree(d.Tasks, runtimePath)
-	if err != nil || bare || mainPath == "" {
+	trunkPath, bare, err := binding.ResolveTrunkPath(d.Tasks, nil, runtimePath)
+	if err != nil || bare || trunkPath == "" {
 		return "", err
 	}
-	out, err := d.Tasks.Git.CommandInDir(mainPath, "branch", "--show-current")
+	out, err := d.Tasks.Git.CommandInDir(trunkPath, "branch", "--show-current")
 	if err != nil {
 		return "", err
 	}
@@ -234,11 +233,11 @@ func filterRunningElsewhere(decisions []Decision, runningElsewhere map[string]bo
 	return out
 }
 
-// applyBindingRouting routes a non-worktree-ready actionable drain to its per-set
-// Worktree binding when one exists, making the binding the universal drain
-// router (ADR-0035) — consulted for any repo, not only worktree-ready ones.
-// Worktree-ready decisions are left for prepareWorktreeDrain, which provisions
-// or reuses the binding while preserving the project session.
+// applyBindingRouting routes an actionable drain to its per-set Worktree
+// binding when one exists, making the binding the universal drain router
+// (ADR-0035) — consulted for any repo. WorktreeReady decisions are left for
+// prepareWorktreeDrain, which reuses the binding while preserving the project
+// session.
 func applyBindingRouting(d *Deps, scans []projectScan, state *DaemonState, decisions []Decision) {
 	_ = state
 	bindings, err := binding.AllBindings(d.Tasks)
@@ -269,10 +268,10 @@ func applyBindingRouting(d *Deps, scans []projectScan, state *DaemonState, decis
 	}
 }
 
-// decideBareWithoutBase handles a bare repository with no execution_base: each Ready
-// set with a per-set binding routes to that bound checkout; any Ready set
-// without one leaves the repository refused and reported (a single skip
-// decision), never scheduled.
+// decideBareWithoutBase handles a bare repository with no Trunk worktree
+// configured: each Ready set with a per-set binding routes to that bound
+// checkout; any Ready set without one leaves the repository refused and
+// reported (a single skip decision), never scheduled.
 func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, name string, state *DaemonState, now time.Time, runningElsewhere map[string]bool) []Decision {
 	base := scans[0]
 	worktreeReady, configErr := readRepoConfig(d, base.ProjectPath)
@@ -369,8 +368,8 @@ func repoName(scans []projectScan, rep *projectScan) string {
 }
 
 // resolveRepoConfigFor resolves the effective RepoConfig for a checkout, merging
-// global [repo."<path>"] overrides (task 01) over repo-root .pop.toml. execution_base
-// is honored only for the keyed checkout path.
+// global [repo."<path>"] overrides over repo-root .pop.toml. trunk is honored
+// only for the keyed checkout path.
 func resolveRepoConfigFor(d *Deps, cfg *config.Config, checkoutPath string) (config.RepoConfig, error) {
 	pd := d.Project
 	if pd == nil || pd.FS == nil {

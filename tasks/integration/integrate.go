@@ -158,7 +158,7 @@ func recomputeMergeabilityFromBinding(d *Deps, setID string) (bool, error) {
 	// binding was provisioned under, so it would silently find nothing. Reusing
 	// matchKey also keeps the record and binding co-keyed, so integration's
 	// teardown removes both.
-	mainPath, bare, err := binding.GitMainWorktree(td, match.RuntimePath)
+	mainPath, bare, err := binding.ResolveTrunkPath(td, nil, match.RuntimePath)
 	if err != nil {
 		return false, err
 	}
@@ -414,14 +414,14 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Record
 	return IntegrationResult{SetID: rec.SetID, Project: rec.Project, RuntimePath: rec.RuntimePath, Branch: branch, Outcome: "resolved"}, nil
 }
 
-// MainWorktreeBranch returns the branch checked out in the repository's main
-// working tree — the merge target for an implement worktree drain.
+// MainWorktreeBranch returns the branch checked out in the Trunk worktree —
+// the merge target for an implement worktree drain (ADR-0036).
 func MainWorktreeBranch(d *Deps, runtimePath string) (string, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
 	td := d.tasksDeps()
-	mainPath, bare, err := binding.GitMainWorktree(td, runtimePath)
+	mainPath, bare, err := binding.ResolveTrunkPath(td, nil, runtimePath)
 	if err != nil || bare || mainPath == "" {
 		return "", err
 	}

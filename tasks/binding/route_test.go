@@ -106,16 +106,16 @@ func TestRouteDrainCheckoutUnboundUsesCurrentCheckout(t *testing.T) {
 	}
 }
 
-func TestResolveExecutionBasePathUsesConfigOverride(t *testing.T) {
+func TestResolveTrunkPathUsesConfigOverride(t *testing.T) {
 	td := routeTestDeps(t)
 	main := initAdoptRepo(t)
 	base := addLinkedWorktree(t, main, "exec-base")
 	cfg := &config.Config{
 		Repo: map[string]config.RepoOverrideConfig{
-			base: {ExecutionBase: boolPtr(true)},
+			base: {Trunk: boolPtr(true)},
 		},
 	}
-	path, bare, err := ResolveExecutionBasePath(td, cfg, main)
+	path, bare, err := ResolveTrunkPath(td, cfg, main)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}

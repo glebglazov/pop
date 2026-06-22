@@ -18,17 +18,10 @@ func renderWithCheckout(cs *CheckoutStatus) string {
 	return buf.String()
 }
 
-func TestRenderCheckoutExecutionBaseInline(t *testing.T) {
+func TestRenderCheckoutTrunkWorktreeInline(t *testing.T) {
 	out := renderWithCheckout(&CheckoutStatus{Path: "/repo", Worktree: false})
-	if !strings.Contains(out, "Checkout: execution base — whole-set implement drains inline") {
-		t.Fatalf("execution base checkout line missing: %q", out)
-	}
-}
-
-func TestRenderCheckoutWorktreeReadyBase(t *testing.T) {
-	out := renderWithCheckout(&CheckoutStatus{Path: "/repo", WorktreeReady: true})
-	if !strings.Contains(out, "Checkout: execution base — whole-set implement provisions a worktree") {
-		t.Fatalf("worktree-ready checkout line missing: %q", out)
+	if !strings.Contains(out, "Checkout: Trunk worktree — whole-set implement drains inline") {
+		t.Fatalf("trunk worktree checkout line missing: %q", out)
 	}
 }
 

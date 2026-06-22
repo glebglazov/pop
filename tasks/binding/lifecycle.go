@@ -50,7 +50,7 @@ type LifecycleHooks struct {
 	// AfterUnbind runs after the binding is deleted from the shared store.
 	AfterUnbind func(key, setID string, b Binding, branch string) error
 	// ResolveTeardownBase returns the git working tree used to remove a managed
-	// checkout. When nil, ResolveExecutionBasePath is used.
+	// checkout. When nil, ResolveTrunkPath is used.
 	ResolveTeardownBase func(b Binding) (string, error)
 }
 
@@ -278,7 +278,7 @@ func resolveTeardownWorkingPath(td *tasks.Deps, pd *project.Deps, cfg *config.Co
 	if hooks.ResolveTeardownBase != nil {
 		return hooks.ResolveTeardownBase(b)
 	}
-	path, bare, err := ResolveExecutionBasePath(td, cfg, b.RuntimePath)
+	path, bare, err := ResolveTrunkPath(td, cfg, b.RuntimePath)
 	if err != nil {
 		return "", err
 	}

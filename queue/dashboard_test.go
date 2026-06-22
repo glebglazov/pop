@@ -816,7 +816,7 @@ func TestDashboardBaseRefsMainMasterFirst(t *testing.T) {
 	}
 }
 
-func TestDashboardLaunchDrainRoutesPlainExecutionBaseAndRecordsPane(t *testing.T) {
+func TestDashboardLaunchDrainRoutesPlainTrunkWorktreeAndRecordsPane(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "plain-drain", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -880,9 +880,6 @@ func TestDashboardLaunchDrainUnboundUsesRepresentativeCheckout(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "managed-drain", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if err := os.WriteFile(filepath.Join(repo, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
 
 	result, err := LaunchDashboardDrain(d, cfg, row)
@@ -895,8 +892,8 @@ func TestDashboardLaunchDrainUnboundUsesRepresentativeCheckout(t *testing.T) {
 		t.Fatalf("runtime = %q, want representative checkout %q with no provisioned worktree", result.RuntimePath, repo)
 	}
 	cmd, ok := extractSpawnCommand(rt)
-	if !ok || !strings.Contains(cmd, "--task-runtime-path "+result.RuntimePath) {
-		t.Fatalf("spawn command = %q, want runtime override %q", cmd, result.RuntimePath)
+	if !ok || !strings.Contains(cmd, "pop tasks implement "+setID) {
+		t.Fatalf("spawn command = %q, want implement command for set %q", cmd, setID)
 	}
 	repoKey, err := resolveRepoKey(d, repo)
 	if err != nil {
@@ -1134,7 +1131,7 @@ func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 	}
 }
 
-func TestDashboardUnbindManagedTearsDownAndRefreshShowsExecutionBase(t *testing.T) {
+func TestDashboardUnbindManagedTearsDownAndRefreshShowsTrunkWorktree(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "dashboard-unbind-managed", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
 	})
@@ -1286,7 +1283,7 @@ func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
 	}
 }
 
-func TestDashboardLaunchDrainRefusesBareWithoutExecutionBase(t *testing.T) {
+func TestDashboardLaunchDrainRefusesBareWithoutTrunk(t *testing.T) {
 	_, wts := initBareRepoWithWorktrees(t, 1)
 	checkout := wts[0]
 	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdg"))

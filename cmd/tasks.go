@@ -279,10 +279,6 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 			cs := &tasks.CheckoutStatus{Path: runtimePath, Worktree: linked}
 			if linked {
 				cs.Branch = binding.CurrentBranch(d, runtimePath)
-			} else if cfg, err := taskConfigLoad(config.DefaultConfigPath()); err == nil {
-				if repoConfig, err := cfg.ResolveRepoConfig(&config.Deps{FS: taskProjectDeps().FS}, resolved.ProjectPath); err == nil {
-					cs.WorktreeReady = repoConfig.WorktreeReady
-				}
 			}
 			result.Checkout = cs
 		}
