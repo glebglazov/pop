@@ -101,19 +101,13 @@ func TestOpenTasksCmdEligibilityAndLockRendering(t *testing.T) {
 	if len(items) != 4 {
 		t.Fatalf("items = %d, want 4", len(items))
 	}
-	// Failed/Skipped checkable.
-	if items[0].Locked || items[1].Locked {
-		t.Fatalf("failed/skipped rows should be checkable: %+v %+v", items[0], items[1])
+	// Failed/Skipped/Done all checkable (ADR-0053).
+	if items[0].Locked || items[1].Locked || items[3].Locked {
+		t.Fatalf("failed/skipped/done rows should be checkable: %+v %+v %+v", items[0], items[1], items[3])
 	}
-	// Open locked at-target, Done inert locked, with distinct marks.
+	// Open is the only locked-at-target row, with a mark.
 	if !items[2].Locked || items[2].LockedMark == "" {
 		t.Fatalf("open row should be locked-at-target with a mark: %+v", items[2])
-	}
-	if !items[3].Locked {
-		t.Fatalf("done row should be inert-locked: %+v", items[3])
-	}
-	if items[2].LockedMark == items[3].LockedMark {
-		t.Fatalf("at-target and inert marks should differ: open=%q done=%q", items[2].LockedMark, items[3].LockedMark)
 	}
 }
 

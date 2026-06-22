@@ -81,7 +81,7 @@ var taskImplementCmd = &cobra.Command{
 
 var taskResetTaskCmd = &cobra.Command{
 	Use:   "open [TASK_SET | TASK_SET/FILE.md]",
-	Short: "Reset failed or skipped tasks back to open: one targeted task, or pick a set's tasks interactively",
+	Short: "Reset failed, skipped, or done tasks back to open: one targeted task, or pick a set's tasks interactively",
 	Args:  cobra.ExactArgs(1),
 	Run:   runTaskResetTask,
 }

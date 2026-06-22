@@ -31,20 +31,13 @@ func TestBuildOpenSelectionThreeWaySplit(t *testing.T) {
 	if len(rows) != 4 {
 		t.Fatalf("rows = %d, want 4", len(rows))
 	}
-	// Failed and Skipped are checkable.
-	if rows[0].Locked || rows[1].Locked {
-		t.Fatalf("failed/skipped should be checkable: %+v %+v", rows[0], rows[1])
+	// Failed, Skipped, and Done are all checkable (ADR-0053).
+	if rows[0].Locked || rows[1].Locked || rows[3].Locked {
+		t.Fatalf("failed/skipped/done should be checkable: %+v %+v %+v", rows[0], rows[1], rows[3])
 	}
-	// Open is locked at-target with a distinct mark from Done.
+	// Open is the only locked-at-target row, with a mark.
 	if !rows[2].Locked || rows[2].LockedMark == "" {
 		t.Fatalf("open should be locked at-target with a mark: %+v", rows[2])
-	}
-	// Done is inert locked.
-	if !rows[3].Locked {
-		t.Fatalf("done should be inert-locked: %+v", rows[3])
-	}
-	if rows[2].LockedMark == rows[3].LockedMark {
-		t.Fatalf("at-target and inert marks should differ: open=%q done=%q", rows[2].LockedMark, rows[3].LockedMark)
 	}
 }
 
@@ -147,27 +140,30 @@ func TestOpenTasksAlreadyOpenRejected(t *testing.T) {
 	}
 }
 
-func TestOpenTasksDoneRejectedBeforeAnyWrite(t *testing.T) {
+func TestOpenTasksDoneReopensInBatch(t *testing.T) {
+	// A Done task reopens like Failed/Skipped — it is the inverse of complete
+	// (ADR-0053). Mixing Failed and Done in one batch reopens both.
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
-		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "done"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "HITL", Status: "done"},
 	})
 
-	_, err := OpenTasksWith(env.deps(), nil, nil, OpenTasksOptions{
+	result, err := OpenTasksWith(env.deps(), nil, nil, OpenTasksOptions{
 		ResolveInput:    ResolveInput{CWD: env.root},
 		TaskSetTarget:   "demo",
 		SelectedTaskIDs: []string{"01-a", "02-b"},
 	})
-	assertExitCode(t, err, ExitNoRunnable)
-	if !strings.Contains(err.Error(), "02-b") || !strings.Contains(err.Error(), "done") {
-		t.Fatalf("err = %v, want it to name the Done offender 02-b", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// Whole batch rejected before any write — the eligible task stays failed.
-	assertOpenTaskStatus(t, env, "01-a", "failed")
-	if _, err := os.Stat(filepath.Join(env.demoDir(), "progress.txt")); !os.IsNotExist(err) {
-		t.Fatalf("progress.txt should not exist after rejected batch (err=%v)", err)
+	if len(result.Transitions) != 2 {
+		t.Fatalf("transitions = %d, want 2", len(result.Transitions))
 	}
+	if result.Transitions[0].Prior != "failed" || result.Transitions[1].Prior != "done" {
+		t.Fatalf("priors wrong: %+v", result.Transitions)
+	}
+	assertTaskOpen(t, env, "01-a")
+	assertTaskOpen(t, env, "02-b")
 }
 
 func TestOpenTasksEmptySelectionNoop(t *testing.T) {

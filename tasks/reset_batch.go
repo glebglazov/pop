@@ -55,8 +55,8 @@ func LoadOpenSelectionWith(d *Deps, pd *project.Deps, loadConfig func(string) (*
 	return &OpenSelectionContext{TaskSetID: taskSetID, Rows: BuildOpenSelection(m)}, nil
 }
 
-// OpenTasks manually resets several failed or skipped tasks back to open in one
-// atomic batch.
+// OpenTasks manually reopens several non-open tasks (failed, skipped, or done)
+// back to open in one atomic batch.
 func OpenTasks(opts OpenTasksOptions) (*OpenTasksResult, error) {
 	return OpenTasksWith(defaultDeps, project.DefaultDeps(), config.Load, opts)
 }
@@ -83,21 +83,17 @@ func OpenTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 		indexByID[task.ID] = i
 	}
 
-	// Validate the whole batch before any write: only Failed/Skipped tasks can
-	// be reopened. Reject the entire batch (no writes) if any selection is not
-	// eligible, naming the offender.
+	// Validate the whole batch before any write: any non-Open task reopens —
+	// Failed/Skipped (retry) and Done (undo a completion, ADR-0053). Reject the
+	// entire batch (no writes) if any selection is already Open, naming it.
 	selected := make(map[string]bool, len(opts.SelectedTaskIDs))
 	for _, id := range opts.SelectedTaskIDs {
 		idx, ok := indexByID[id]
 		if !ok {
 			return nil, exitErr(ExitNoRunnable, "%s", unknownTaskMessage(m, id))
 		}
-		status := m.Tasks[idx].Status
-		if status != "failed" && status != "skipped" {
-			if status == "open" {
-				return nil, exitErr(ExitNoRunnable, "task %q is already open", id)
-			}
-			return nil, exitErr(ExitNoRunnable, "task %q is %s; open requires a failed or skipped task", id, status)
+		if m.Tasks[idx].Status == "open" {
+			return nil, exitErr(ExitNoRunnable, "task %q is already open", id)
 		}
 		selected[id] = true
 	}

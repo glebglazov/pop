@@ -7,7 +7,7 @@ import (
 	"github.com/glebglazov/pop/project"
 )
 
-// ResetTaskOptions configures resetting one failed or skipped task.
+// ResetTaskOptions configures reopening one failed, skipped, or done task.
 type ResetTaskOptions struct {
 	ResolveInput
 	TaskPath string
@@ -20,7 +20,7 @@ type ResetTaskResult struct {
 	Refresh   *RefreshResult
 }
 
-// ResetTask returns one failed or skipped task to open status.
+// ResetTask returns one failed, skipped, or done task to open status.
 func ResetTask(opts ResetTaskOptions) (*ResetTaskResult, error) {
 	return ResetTaskWith(defaultDeps, project.DefaultDeps(), config.Load, opts)
 }
@@ -69,8 +69,10 @@ func ResetTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 	}
 
 	task := m.Tasks[idx]
-	if task.Status != "failed" && task.Status != "skipped" {
-		return nil, exitErr(ExitNoRunnable, "task %q is %s; open requires a failed or skipped task", taskID, task.Status)
+	// Any non-Open status reopens: Failed/Skipped (retry) and Done (undo a
+	// completion, ADR-0053). Only an already-Open task is rejected.
+	if task.Status == "open" {
+		return nil, exitErr(ExitNoRunnable, "task %q is already open", taskID)
 	}
 
 	priorStatus := task.Status

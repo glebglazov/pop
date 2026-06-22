@@ -64,17 +64,13 @@ func skipEligibility(status string) (bool, string) {
 	}
 }
 
-// openEligibility is the per-verb predicate for `open`: Failed and Skipped
-// tasks are checkable, an already-Open task is locked at-target (✓ — already in
-// the target state), and a Done task is inert locked context that cannot be
-// reopened (·).
+// openEligibility is the per-verb predicate for `open`: Failed, Skipped, and
+// Done tasks are all checkable — reopening a Done task is the inverse of
+// Complete (ADR-0053) — and an already-Open task is locked at-target (✓ —
+// already in the target state). No row is pre-checked; the human selects each.
 func openEligibility(status string) (bool, string) {
-	switch status {
-	case "failed", "skipped":
-		return false, ""
-	case "open":
+	if status == "open" {
 		return true, "✓"
-	default:
-		return true, "·"
 	}
+	return false, ""
 }

@@ -289,14 +289,16 @@ func TestResetTaskReturnsFailedToOpen(t *testing.T) {
 	}
 }
 
-func TestResetTaskRequiresFailed(t *testing.T) {
+func TestResetTaskRejectsAlreadyOpen(t *testing.T) {
+	// Open is the only status open cannot reopen; every non-Open status
+	// (failed, skipped, done) is reopenable (ADR-0053).
 	env := setupExecutorFixture(t, false)
 	_, err := ResetTaskWith(env.deps(), nil, nil, ResetTaskOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
 		TaskPath:     env.demoTaskRef(t, "01-a.md"),
 	})
 	assertExitCode(t, err, ExitNoRunnable)
-	if !strings.Contains(err.Error(), "failed or skipped") {
+	if !strings.Contains(err.Error(), "already open") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -318,6 +320,27 @@ func TestResetTaskSkippedToOpen(t *testing.T) {
 	}
 	assertTaskOpen(t, env, "01-a")
 	assertProgressContains(t, env, "RESET", "was skipped")
+}
+
+func TestResetTaskDoneToOpen(t *testing.T) {
+	// Reopening a Done task undoes a completion — the motivating case is a HITL
+	// task marked Done prematurely (ADR-0053).
+	env := setupCustomTaskFixture(t, []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "HITL", Status: "done"},
+	})
+
+	result, err := ResetTaskWith(env.deps(), nil, nil, ResetTaskOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		TaskPath:     env.demoTaskRef(t, "01-a.md"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TaskSetID != "demo" || result.TaskID != "01-a" {
+		t.Fatalf("reset target = %s/%s", result.TaskSetID, result.TaskID)
+	}
+	assertTaskOpen(t, env, "01-a")
+	assertProgressContains(t, env, "RESET", "was done")
 }
 
 func TestResetTaskProgressBeforeManifest(t *testing.T) {
