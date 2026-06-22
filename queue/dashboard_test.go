@@ -1807,3 +1807,62 @@ func TestDetailViewOverrideStatusRendered(t *testing.T) {
 		t.Fatalf("hint line missing override keys:\n%s", out)
 	}
 }
+
+func TestMainListRuntimeShell(t *testing.T) {
+	t.Run("O with empty runtimePath is no-op with statusMsg hint", func(t *testing.T) {
+		row := DashboardRow{SetID: "set-x", defPath: "/def", runtimePath: ""}
+		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+		got := updated.(dashboardModel)
+		if cmd != nil {
+			t.Fatal("O with empty runtimePath: expected no cmd")
+		}
+		if got.statusMsg == "" {
+			t.Fatal("O with empty runtimePath: expected statusMsg hint")
+		}
+	})
+
+	t.Run("O with whitespace-only runtimePath is no-op with statusMsg hint", func(t *testing.T) {
+		row := DashboardRow{SetID: "set-y", defPath: "/def", runtimePath: "   "}
+		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+		got := updated.(dashboardModel)
+		if cmd != nil {
+			t.Fatal("O with whitespace runtimePath: expected no cmd")
+		}
+		if got.statusMsg == "" {
+			t.Fatal("O with whitespace runtimePath: expected statusMsg hint")
+		}
+	})
+
+	t.Run("O with no rows is no-op", func(t *testing.T) {
+		m := newDashboardModel(nil, nil, DashboardSnapshot{})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+		got := updated.(dashboardModel)
+		if cmd != nil {
+			t.Fatal("O with no rows: expected no cmd")
+		}
+		if got.statusMsg != "" {
+			t.Fatalf("O with no rows: expected no statusMsg, got %q", got.statusMsg)
+		}
+	})
+
+	t.Run("statusMsg hint rendered in view", func(t *testing.T) {
+		row := DashboardRow{SetID: "set-z", defPath: "/def", runtimePath: ""}
+		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+		m.statusMsg = "no checkout bound to this task set"
+		v := m.View()
+		if !strings.Contains(v.Content, "no checkout bound to this task set") {
+			t.Fatalf("statusMsg not rendered in view:\n%s", v.Content)
+		}
+	})
+
+	t.Run("footer hint includes O shell", func(t *testing.T) {
+		row := DashboardRow{SetID: "set-hint", defPath: "/def"}
+		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+		v := m.View()
+		if !strings.Contains(v.Content, "O shell") {
+			t.Fatalf("footer missing 'O shell':\n%s", v.Content)
+		}
+	})
+}

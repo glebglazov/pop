@@ -230,7 +230,7 @@ func TestRunTaskSetBareDrainFallsBackToSoleHITLGate(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("4\n")
+	opts.ConfirmIn = strings.NewReader("0\n")
 
 	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
@@ -243,7 +243,7 @@ func TestRunTaskSetBareDrainFallsBackToSoleHITLGate(t *testing.T) {
 		"No runnable AFK work",
 		"Human-blocked: solo/02-hitl",
 		"1. Get agent assistance (default)",
-		"4. Exit",
+		"0. Exit",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("fallback gate output missing %q:\n%s", want, out)
@@ -273,7 +273,7 @@ func TestRunTaskSetHoldsRuntimeLockAtInitialHITLGatePrompt(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = &checkingPromptReader{t: t, check: check, response: "4\n"}
+	opts.ConfirmIn = &checkingPromptReader{t: t, check: check, response: "0\n"}
 
 	_, err = RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
@@ -370,7 +370,7 @@ func TestRunTaskSetExplicitHumanBlockedShowsGateDespiteReadyElsewhere(t *testing
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
 	opts.TaskSetOverride = "target"
-	opts.ConfirmIn = strings.NewReader("4\n")
+	opts.ConfirmIn = strings.NewReader("0\n")
 
 	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
@@ -382,7 +382,7 @@ func TestRunTaskSetExplicitHumanBlockedShowsGateDespiteReadyElsewhere(t *testing
 	for _, want := range []string{
 		"Human-blocked: target/01-hitl",
 		"1. Get agent assistance (default)",
-		"4. Exit",
+		"0. Exit",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("gate output missing %q:\n%s", want, out)
@@ -468,7 +468,7 @@ func TestRunTaskSetInteractiveHITLGateShowsNumberedMenu(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("4\n")
+	opts.ConfirmIn = strings.NewReader("0\n")
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
@@ -478,7 +478,8 @@ func TestRunTaskSetInteractiveHITLGateShowsNumberedMenu(t *testing.T) {
 		"1. Get agent assistance (default)",
 		"2. Complete task",
 		"3. Defer task",
-		"4. Exit",
+		"4. Open a shell in the checkout",
+		"0. Exit",
 		"Choose [1]:",
 		"claude <HITL assistance prompt>",
 		"using claude native attended assistance",
@@ -487,6 +488,94 @@ func TestRunTaskSetInteractiveHITLGateShowsNumberedMenu(t *testing.T) {
 			t.Fatalf("menu missing %q:\n%s", want, out)
 		}
 	}
+}
+
+func TestRunTaskSetHITLGateShellOptionDispatch(t *testing.T) {
+	env, _ := setupSoleHumanBlockedFixture(t)
+	runner := &shellSpawnRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, "", &buf)
+	// Open shell (4), then exit (0).
+	opts.ConfirmIn = strings.NewReader("4\n0\n")
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	out := buf.String()
+	if !strings.Contains(out, "4. Open a shell in the checkout") {
+		t.Fatalf("menu missing shell option:\n%s", out)
+	}
+	// Shell spawned once.
+	if runner.shellCalls != 1 {
+		t.Fatalf("shell calls = %d, want 1", runner.shellCalls)
+	}
+	// Gate re-displayed after shell returned (two Choose [1]: prompts).
+	if strings.Count(out, "Choose [1]:") < 2 {
+		t.Fatalf("gate must re-display after shell exits:\n%s", out)
+	}
+	// No task state changed.
+	assertTaskOpen(t, &execFixture{root: env.root, tasksDir: env.tasksDir}, "02-hitl")
+}
+
+func TestRunTaskSetHITLGateShellUsesShellEnv(t *testing.T) {
+	env, _ := setupSoleHumanBlockedFixture(t)
+	runner := &shellSpawnRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, "", &buf)
+	opts.ConfirmIn = strings.NewReader("4\n0\n")
+
+	wantShell := os.Getenv("SHELL")
+	if wantShell == "" {
+		wantShell = "/bin/sh"
+	}
+	wantDir, _ := filepath.EvalSymlinks(env.root)
+	if wantDir == "" {
+		wantDir = env.root
+	}
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	if runner.shellName != wantShell {
+		t.Fatalf("shell binary = %q, want %q", runner.shellName, wantShell)
+	}
+	if runner.shellDir != wantDir {
+		t.Fatalf("shell cwd = %q, want %q", runner.shellDir, wantDir)
+	}
+}
+
+func TestRunTaskSetHITLGateExitKeyIs0(t *testing.T) {
+	for _, input := range []string{"0\n", "q\n", "quit\n", "exit\n"} {
+		t.Run("input="+strings.TrimSpace(input), func(t *testing.T) {
+			env, _ := setupSoleHumanBlockedFixture(t)
+			var buf bytes.Buffer
+			opts := env.runTaskSetOpts(false, "", &buf)
+			opts.ConfirmIn = strings.NewReader(input)
+
+			_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+			assertExitCode(t, err, ExitNoRunnable)
+			// No task state changed.
+			assertTaskOpen(t, &execFixture{root: env.root, tasksDir: env.tasksDir}, "02-hitl")
+		})
+	}
+}
+
+func TestRunTaskSetHITLGateEOFDefaultExits(t *testing.T) {
+	env, _ := setupSoleHumanBlockedFixture(t)
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, "", &buf)
+	// EOF with no input resolves to exit (default "0").
+	opts.ConfirmIn = strings.NewReader("")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+	assertTaskOpen(t, &execFixture{root: env.root, tasksDir: env.tasksDir}, "02-hitl")
 }
 
 func TestRunTaskSetInteractiveHITLGateDefaultGetsAgentAssistance(t *testing.T) {
@@ -537,7 +626,7 @@ func TestRunTaskSetInteractiveHITLGateAssistanceStartFailureReprompts(t *testing
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("\n4\n")
+	opts.ConfirmIn = strings.NewReader("\n0\n")
 
 	_, err := RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
@@ -606,7 +695,7 @@ func TestRunTaskSetInteractiveHITLGateAssistanceStillBlockedReprompts(t *testing
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
-	opts.ConfirmIn = strings.NewReader("\n4\n")
+	opts.ConfirmIn = strings.NewReader("\n0\n")
 
 	_, err := RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
@@ -1082,11 +1171,11 @@ func TestRunTaskSetFailedGateInvalidReprompts(t *testing.T) {
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(false, agent, &buf)
 	opts.TaskSetOverride = "demo"
-	opts.ConfirmIn = strings.NewReader("9\n4\n")
+	opts.ConfirmIn = strings.NewReader("9\n0\n")
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(buf.String(), "Choose 1, 2, 3, or 4.") {
+	if !strings.Contains(buf.String(), "Choose 1, 2, 3, 4, or 0.") {
 		t.Fatalf("invalid input must re-prompt:\n%s", buf.String())
 	}
 }
@@ -1137,7 +1226,7 @@ func TestRunTaskSetFailedGateAgentAssistanceRefreshesAndReprompts(t *testing.T) 
 	opts := env.runTaskSetOpts(false, agent, &buf)
 	opts.TaskSetOverride = "demo"
 	// Choose Agent assistance, then Exit at the re-shown gate.
-	opts.ConfirmIn = strings.NewReader("2\n4\n")
+	opts.ConfirmIn = strings.NewReader("2\n0\n")
 
 	_, err := RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
@@ -1147,7 +1236,8 @@ func TestRunTaskSetFailedGateAgentAssistanceRefreshesAndReprompts(t *testing.T) 
 		"1. Re-run (default)",
 		"2. Agent assistance",
 		"3. Finish by hand",
-		"4. Exit",
+		"4. Open a shell in the checkout",
+		"0. Exit",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("Failed gate missing menu option %q:\n%s", want, out)
@@ -1169,6 +1259,74 @@ func TestRunTaskSetFailedGateAgentAssistanceRefreshesAndReprompts(t *testing.T) 
 		t.Fatalf("assistance did not refresh and re-show the Failed gate:\n%s", out)
 	}
 	// The assist agent did not change task state; the task is still failed.
+	assertTaskFailed(t, env.execFixture(), "01-a", 3)
+}
+
+func TestRunTaskSetFailedGateShellOptionDispatch(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	runner := &shellSpawnRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, "", &buf)
+	opts.TaskSetOverride = "demo"
+	// Open shell (4), then exit (0).
+	opts.ConfirmIn = strings.NewReader("4\n0\n")
+
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+
+	out := buf.String()
+	if !strings.Contains(out, "4. Open a shell in the checkout") {
+		t.Fatalf("menu missing shell option:\n%s", out)
+	}
+	// Shell spawned once.
+	if runner.shellCalls != 1 {
+		t.Fatalf("shell calls = %d, want 1", runner.shellCalls)
+	}
+	// Gate re-displayed after shell returned (two Choose [1]: prompts).
+	if strings.Count(out, "Choose [1]:") < 2 {
+		t.Fatalf("gate must re-display after shell exits:\n%s", out)
+	}
+	// No task state changed.
+	assertTaskFailed(t, env.execFixture(), "01-a", 3)
+}
+
+func TestRunTaskSetFailedGateExitKeyIs0(t *testing.T) {
+	for _, input := range []string{"0\n", "q\n", "quit\n", "exit\n"} {
+		t.Run("input="+strings.TrimSpace(input), func(t *testing.T) {
+			env := setupRunTaskSetFixture(t, "demo", []Task{
+				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+			})
+			var buf bytes.Buffer
+			opts := env.runTaskSetOpts(false, "", &buf)
+			opts.TaskSetOverride = "demo"
+			opts.ConfirmIn = strings.NewReader(input)
+
+			_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+			assertExitCode(t, err, ExitOperational)
+			// No task state changed.
+			assertTaskFailed(t, env.execFixture(), "01-a", 3)
+		})
+	}
+}
+
+func TestRunTaskSetFailedGateEOFDefaultExits(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, "", &buf)
+	opts.TaskSetOverride = "demo"
+	// EOF with no pending input — should default to exit (0).
+	opts.ConfirmIn = strings.NewReader("")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	// No task state changed.
 	assertTaskFailed(t, env.execFixture(), "01-a", 3)
 }
 
@@ -1925,3 +2083,26 @@ func writeSequentialFakeAgent(t *testing.T, root string, steps []fakeAgentStep) 
 }
 
 func intPtr(v int) *int { return &v }
+
+// shellSpawnRunner tracks RunAttended calls (for shell spawns) and delegates
+// Run/Start to the real runner so AFK agent tasks execute normally.
+type shellSpawnRunner struct {
+	shellCalls int
+	shellName  string
+	shellDir   string
+}
+
+func (r *shellSpawnRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	return RealCommandRunner{}.Run(ctx, dir, stdout, stderr, name, args...)
+}
+
+func (r *shellSpawnRunner) RunAttended(ctx context.Context, dir string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	r.shellCalls++
+	r.shellName = name
+	r.shellDir = dir
+	return 0, nil
+}
+
+func (r *shellSpawnRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	return RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+}

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -578,6 +580,7 @@ type dashboardModel struct {
 	filterMode  bool
 	filterInput textinput.Model
 	pendingG    bool
+	statusMsg   string
 }
 
 func newDashboardModel(d *Deps, cfg *config.Config, snap DashboardSnapshot) dashboardModel {
@@ -692,6 +695,23 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.abandon = &dashboardAbandonModal{row: m.snap.Rows[m.cursor]}
 			return m, nil
+		case "O":
+			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+				return m, nil
+			}
+			row := m.snap.Rows[m.cursor]
+			if strings.TrimSpace(row.runtimePath) == "" {
+				m.statusMsg = "no checkout bound to this task set"
+				return m, nil
+			}
+			m.statusMsg = ""
+			shell := os.Getenv("SHELL")
+			if shell == "" {
+				shell = "/bin/sh"
+			}
+			cmd := exec.Command(shell)
+			cmd.Dir = row.runtimePath
+			return m, tea.ExecProcess(cmd, nil)
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1809,7 +1829,7 @@ func (m dashboardModel) View() tea.View {
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
 	renderDashboardTable(&body, m.snap.Rows, m.cursor, m.width)
-	hint := "j/k move · gg/G top/bottom · l/enter status · i drain · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · h/esc quit"
+	hint := "j/k move · gg/G top/bottom · l/enter status · i drain · O shell · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · h/esc quit"
 	footer := true
 	if m.bind != nil {
 		renderDashboardBindModal(&body, m.bind)
@@ -1822,6 +1842,9 @@ func (m dashboardModel) View() tea.View {
 		hint = "esc clear filter · j/k navigate"
 	}
 	if footer {
+		if m.statusMsg != "" {
+			fmt.Fprintf(&body, "  %s\n", m.statusMsg)
+		}
 		writeDashboardFooter(&body, m.height, ui.HintStyle.Render(hint))
 	}
 	content := body.String()
