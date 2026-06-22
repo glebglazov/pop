@@ -1423,7 +1423,7 @@ func TestRunTasksCmdQuotaPauseExitsQuotaPaused(t *testing.T) {
 	taskRunYes = true
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, tasks.NonInteractiveReader{}, "demo", false)
+	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, tasks.NonInteractiveReader{}, "demo", true)
 	var ee *tasks.ExitError
 	if !errors.As(err, &ee) {
 		t.Fatalf("err = %v, want *tasks.ExitError", err)
