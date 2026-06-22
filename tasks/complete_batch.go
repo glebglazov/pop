@@ -38,6 +38,10 @@ type CompleteTransition struct {
 type CompleteTasksResult struct {
 	TaskSetID   string
 	Transitions []CompleteTransition
+	// ProjectPath is the resolved checkout the batch ran against, carried so
+	// callers can record Mergeability when the batch flips a worktree-bound set
+	// to Done (ADR-0051).
+	ProjectPath string
 	Refresh     *RefreshResult
 }
 
@@ -113,7 +117,7 @@ func CompleteTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 
 	// Empty selection: a clean no-op exit, no writes.
 	if len(opts.SelectedTaskIDs) == 0 {
-		return &CompleteTasksResult{TaskSetID: taskSetID, Refresh: refresh}, nil
+		return &CompleteTasksResult{TaskSetID: taskSetID, ProjectPath: resolved.ProjectPath, Refresh: refresh}, nil
 	}
 
 	indexByID := make(map[string]int, len(m.Tasks))
@@ -180,7 +184,7 @@ func CompleteTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		return nil, exitErr(ExitOperational, "refresh after complete: %v", err)
 	}
 
-	return &CompleteTasksResult{TaskSetID: taskSetID, Transitions: transitions, Refresh: afterRefresh}, nil
+	return &CompleteTasksResult{TaskSetID: taskSetID, Transitions: transitions, ProjectPath: resolved.ProjectPath, Refresh: afterRefresh}, nil
 }
 
 // topoOrderSelected orders the selected task IDs so each task follows its

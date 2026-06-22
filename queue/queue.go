@@ -150,11 +150,22 @@ func (d *Deps) completeDetailTask(defPath, taskPath string) error {
 	if td == nil {
 		td = tasks.DefaultDeps()
 	}
-	_, err := tasks.CompleteTaskWith(td, d.projectDeps(), d.loadConfig(), tasks.CompleteTaskOptions{
+	result, err := tasks.CompleteTaskWith(td, d.projectDeps(), d.loadConfig(), tasks.CompleteTaskOptions{
 		ResolveInput: d.resolveInput(defPath),
 		TaskPath:     taskPath,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	// Record Mergeability when this completion concluded a worktree-bound set,
+	// so the dashboard backlog shows a merge verdict rather than "unknown"
+	// (ADR-0051). Best-effort and silent: the completion already succeeded,
+	// Mergeability is recomputed at integrate time, and the dashboard runs an
+	// alt-screen TUI where a stderr warning would corrupt the display.
+	id := integration.DefaultDeps()
+	id.Tasks = td
+	_ = integration.RecordCompletionMergeability(id, result.ProjectPath, result.TaskSetID, result.Refresh)
+	return nil
 }
 
 func (d *Deps) resetDetailTask(defPath, taskPath string) error {

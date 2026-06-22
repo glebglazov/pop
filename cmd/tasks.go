@@ -15,6 +15,7 @@ import (
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks/implement"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -708,7 +709,20 @@ func runTaskCompleteTaskWith(d *tasks.Deps, w io.Writer, taskPath string) error 
 	tasks.RenderTaskComplete(w, result.TaskSetID, result.TaskID)
 	fmt.Fprintln(w)
 	tasks.Render(w, result.Refresh)
+	recordCompletionMergeability(d, result.ProjectPath, result.TaskSetID, result.Refresh)
 	return nil
+}
+
+// recordCompletionMergeability records Mergeability when a manual completion
+// flipped a worktree-bound set to Done, so the Integration backlog shows a merge
+// verdict rather than "unknown" (ADR-0051). Best-effort: the completion already
+// succeeded and Mergeability is recomputed at integrate time.
+func recordCompletionMergeability(d *tasks.Deps, projectPath, setID string, refresh *tasks.RefreshResult) {
+	id := integration.DefaultDeps()
+	id.Tasks = d
+	if err := integration.RecordCompletionMergeability(id, projectPath, setID, refresh); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: mergeability check: %v\n", err)
+	}
 }
 
 // runTaskMultiSelect runs the interactive Multi-task selection shared by every
@@ -794,6 +808,7 @@ func runTaskCompleteTasksWith(d *tasks.Deps, w io.Writer, stdin io.Reader, targe
 	tasks.RenderTaskCompleteBatch(w, result.TaskSetID, result.Transitions)
 	fmt.Fprintln(w)
 	tasks.Render(w, result.Refresh)
+	recordCompletionMergeability(d, result.ProjectPath, result.TaskSetID, result.Refresh)
 	return nil
 }
 

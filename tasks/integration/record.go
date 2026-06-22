@@ -149,6 +149,45 @@ func RecordImplementMergeability(d *Deps, projectPath, runtimePath, setID, proje
 	return RecordMergeability(d, projectPath, merge)
 }
 
+// RecordCompletionMergeability records Mergeability when a manual task
+// completion (CLI `pop tasks complete`, its batch form, or the dashboard `C`
+// action) flips a worktree-bound set to Done. It is the manual-completion
+// analogue of RecordImplementMergeability: the implement epilogue covers sets a
+// drain finished, this covers sets a human concluded by hand, so the
+// Integration backlog sees a merge verdict the moment the set becomes
+// integrable regardless of how Done was reached (ADR-0051).
+//
+// It is a no-op unless the set is Done in refresh and has a non-trunk Worktree
+// binding (a trunk drain records nothing). Best-effort: callers treat errors as
+// advisory, since the completion itself already succeeded and Mergeability is
+// recomputed at integrate time.
+func RecordCompletionMergeability(d *Deps, projectPath, setID string, refresh *tasks.RefreshResult) error {
+	if refresh == nil || setID == "" {
+		return nil
+	}
+	m := refresh.Manifests[setID]
+	if m == nil || tasks.DeriveStatus(m) != tasks.StatusDone {
+		return nil
+	}
+	if d == nil {
+		d = DefaultDeps()
+	}
+	td := d.tasksDeps()
+	store, err := binding.Load(td)
+	if err != nil {
+		return err
+	}
+	id, err := tasks.ResolveRepositoryIdentity(td, projectPath)
+	if err != nil {
+		return err
+	}
+	b, ok := store.Get(binding.Key(id, setID))
+	if !ok {
+		return nil // trunk drain: nothing enters the backlog
+	}
+	return RecordImplementMergeability(d, projectPath, b.RuntimePath, setID, b.Project)
+}
+
 // AwaitingIntegration lists every set in the Integration backlog.
 func AwaitingIntegration(td *tasks.Deps) ([]Record, error) {
 	store, err := Load(td)

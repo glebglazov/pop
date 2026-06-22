@@ -17,7 +17,11 @@ type CompleteTaskOptions struct {
 type CompleteTaskResult struct {
 	TaskSetID string
 	TaskID    string
-	Refresh   *RefreshResult
+	// ProjectPath is the resolved checkout the completion ran against, carried
+	// so callers can record Mergeability when this completion flips a
+	// worktree-bound set to Done (ADR-0051).
+	ProjectPath string
+	Refresh     *RefreshResult
 }
 
 // CompleteTask manually marks one task Done without running an agent.
@@ -96,5 +100,5 @@ func CompleteTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*confi
 		return nil, exitErr(ExitOperational, "refresh after complete: %v", err)
 	}
 
-	return &CompleteTaskResult{TaskSetID: taskSetID, TaskID: taskID, Refresh: afterRefresh}, nil
+	return &CompleteTaskResult{TaskSetID: taskSetID, TaskID: taskID, ProjectPath: resolved.ProjectPath, Refresh: afterRefresh}, nil
 }
