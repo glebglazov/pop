@@ -137,8 +137,10 @@ func TestSupervisorWorktreeDrainTargetsProjectSessionWithCheckoutCWD(t *testing.
 		t.Fatalf("new-session = %v, want session %q", newSession, wantSession)
 	}
 	checkout := newSession[2]
-	if checkout == repo || !strings.Contains(checkout, filepath.Join("pop", "queue", "worktrees")) {
-		t.Fatalf("new-session cwd = %q, want provisioned worktree checkout", checkout)
+	wantCheckout, _ := filepath.EvalSymlinks(repo)
+	gotCheckout, _ := filepath.EvalSymlinks(checkout)
+	if gotCheckout != wantCheckout || strings.Contains(checkout, filepath.Join("pop", "queue", "worktrees")) {
+		t.Fatalf("new-session cwd = %q, want current checkout %q with no provisioned worktree (ADR-0052)", checkout, repo)
 	}
 
 	assertReusesFreshPane(t, rt, "%3")

@@ -871,7 +871,12 @@ func TestDashboardLaunchDrainRoutesBoundCheckout(t *testing.T) {
 	assertDashboardPaneMapping(t, d, repo, setID, "%3", "dashboard")
 }
 
-func TestDashboardLaunchDrainProvisionsManagedWorktreeWhenReady(t *testing.T) {
+// TestDashboardLaunchDrainUnboundUsesRepresentativeCheckout asserts the
+// dashboard launch-drain action no longer auto-provisions a managed worktree for
+// an unbound worktree-ready set: routing collapsed, so the drain lands on the
+// representative checkout (the repo) and records no binding (ADR-0052). Explicit
+// provisioning returns later via the Drain target picker.
+func TestDashboardLaunchDrainUnboundUsesRepresentativeCheckout(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "managed-drain", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -884,8 +889,10 @@ func TestDashboardLaunchDrainProvisionsManagedWorktreeWhenReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LaunchDashboardDrain: %v", err)
 	}
-	if result.RuntimePath == repo || !strings.Contains(result.RuntimePath, filepath.Join("pop", "queue", "worktrees")) {
-		t.Fatalf("runtime = %q, want managed queue worktree", result.RuntimePath)
+	wantRepo, _ := filepath.EvalSymlinks(repo)
+	gotRuntime, _ := filepath.EvalSymlinks(result.RuntimePath)
+	if gotRuntime != wantRepo || strings.Contains(result.RuntimePath, filepath.Join("pop", "queue", "worktrees")) {
+		t.Fatalf("runtime = %q, want representative checkout %q with no provisioned worktree", result.RuntimePath, repo)
 	}
 	cmd, ok := extractSpawnCommand(rt)
 	if !ok || !strings.Contains(cmd, "--task-runtime-path "+result.RuntimePath) {
@@ -896,9 +903,8 @@ func TestDashboardLaunchDrainProvisionsManagedWorktreeWhenReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	bindings := loadBindingStore(t, d.Tasks)
-	binding := bindings[setScopedKey(repoKey, setID)]
-	if binding.RuntimePath != result.RuntimePath || !binding.Provisioned {
-		t.Fatalf("binding = %+v, want managed worktree %q", binding, result.RuntimePath)
+	if b, ok := bindings[setScopedKey(repoKey, setID)]; ok {
+		t.Fatalf("unexpected binding for unbound dashboard drain: %+v", b)
 	}
 	assertDashboardPaneMapping(t, d, repo, setID, "%3", "dashboard")
 }

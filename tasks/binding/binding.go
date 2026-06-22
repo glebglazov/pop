@@ -156,8 +156,8 @@ func Adopt(checkoutPath, branch, proj string) Binding {
 // checkout). It is the entry point `pop tasks implement` uses to adopt the
 // checkout it runs in (ADR-0036): the binding is identical in shape to a
 // `bind-worktree` adoption (Provisioned=false, never deleted), routed through
-// this module's shared store. It never runs `git worktree add` — provisioning
-// stays the Queue's path, gated by worktree_ready.
+// this module's shared store. It never runs `git worktree add` — routing never
+// provisions (ADR-0052); provisioning is an explicit act handled elsewhere.
 //
 // It is a no-op returning (false, nil) in two cases. First, when checkoutPath is
 // the repository's main working tree (trunk): a trunk drain is never

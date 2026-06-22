@@ -954,7 +954,11 @@ func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
 	_ = root
 }
 
-func TestRunTasksCmdWorktreeReadyDefaultsManagedWorktree(t *testing.T) {
+// TestRunTasksCmdUnboundDrainsInCurrentCheckout asserts a default (non-inline)
+// whole-set run no longer auto-provisions a managed worktree even when the repo
+// declared the now-ignored worktree_ready bit: it drains in the current checkout
+// and records no Worktree binding (ADR-0052).
+func TestRunTasksCmdUnboundDrainsInCurrentCheckout(t *testing.T) {
 	root := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
 	writeFileCmd(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
@@ -975,15 +979,8 @@ func TestRunTasksCmdWorktreeReadyDefaultsManagedWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, ok := store.Get(binding.Key(id, "demo"))
-	if !ok {
-		t.Fatalf("missing binding for demo: %+v", store.Bindings)
-	}
-	if !b.Provisioned {
-		t.Fatalf("binding Provisioned = false, want managed worktree: %+v", b)
-	}
-	if b.RuntimePath == "" || b.RuntimePath == root {
-		t.Fatalf("runtime path = %q, want managed worktree distinct from %q", b.RuntimePath, root)
+	if b, ok := store.Get(binding.Key(id, "demo")); ok {
+		t.Fatalf("unexpected worktree binding for unbound run: %+v", b)
 	}
 }
 

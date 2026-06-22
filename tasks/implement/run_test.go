@@ -88,7 +88,11 @@ func writeImplementFile(t *testing.T, path, content string) {
 	}
 }
 
-func TestResolveTaskSetRuntimeWorktreeReadyProvisionsManagedWorktree(t *testing.T) {
+// TestResolveTaskSetRuntimeUnboundUsesCurrentCheckout asserts an unbound
+// whole-set drain with no flags stays in the current checkout and provisions no
+// managed worktree, even when the repo declared the (now ignored) worktree_ready
+// bit — routing never provisions (ADR-0052).
+func TestResolveTaskSetRuntimeUnboundUsesCurrentCheckout(t *testing.T) {
 	root, d := setupImplementFixture(t)
 	writeImplementFile(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
 
@@ -96,8 +100,14 @@ func TestResolveTaskSetRuntimeWorktreeReadyProvisionsManagedWorktree(t *testing.
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
-	if strings.TrimSpace(resolved.RuntimeOverride) == "" || resolved.RuntimeOverride == root {
-		t.Fatalf("RuntimeOverride = %q, want managed worktree distinct from %q", resolved.RuntimeOverride, root)
+	runtimePath, err := tasks.ResolveRuntimePathWith(d.tasksDeps(), root, resolved.RuntimeOverride)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	gotRuntime, _ := filepath.EvalSymlinks(runtimePath)
+	if gotRuntime != wantRoot {
+		t.Fatalf("runtime = %q, want current checkout %q", gotRuntime, wantRoot)
 	}
 
 	store, err := binding.Load(d.tasksDeps())
@@ -108,15 +118,8 @@ func TestResolveTaskSetRuntimeWorktreeReadyProvisionsManagedWorktree(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, ok := store.Get(binding.Key(id, "demo"))
-	if !ok {
-		t.Fatalf("missing binding for demo: %+v", store.Bindings)
-	}
-	if !b.Provisioned {
-		t.Fatalf("binding Provisioned = false, want managed worktree: %+v", b)
-	}
-	if b.RuntimePath != resolved.RuntimeOverride {
-		t.Fatalf("binding runtime = %q, resolved = %q", b.RuntimePath, resolved.RuntimeOverride)
+	if b, ok := store.Get(binding.Key(id, "demo")); ok {
+		t.Fatalf("unexpected worktree binding for unbound drain: %+v", b)
 	}
 }
 

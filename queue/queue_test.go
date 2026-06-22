@@ -760,9 +760,14 @@ func TestProvisionWorktreeAddsFreshBranchFromHead(t *testing.T) {
 	}
 }
 
-func TestPrepareWorktreeDrainKeepsProjectSessionAndOverridesRuntimePath(t *testing.T) {
+// TestPrepareWorktreeDrainUnboundStaysOnRepresentativeCheckout asserts an
+// unbound worktree-ready drain keeps the originating project session and stays
+// on the representative checkout: routing no longer provisions, so the runtime
+// path is not redirected to a managed worktree (ADR-0052). The "must not
+// provision" sentinel ensures a `git worktree add` would surface as an error.
+func TestPrepareWorktreeDrainUnboundStaysOnRepresentativeCheckout(t *testing.T) {
 	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
-	d := worktreeProvisionDeps(t, now, nil)
+	d := worktreeProvisionDeps(t, now, fmt.Errorf("must not provision"))
 	dec := actionableDecision()
 	dec.WorktreeReady = true
 	dec.scan.RuntimePath = "/repo"
@@ -770,11 +775,8 @@ func TestPrepareWorktreeDrainKeepsProjectSessionAndOverridesRuntimePath(t *testi
 
 	got := prepareWorktreeDrain(d, &bytes.Buffer{}, dec)
 
-	if got.scan.RuntimePath == "/repo" || got.scan.RuntimePath == "" {
-		t.Fatalf("RuntimePath was not overridden: %+v", got.scan)
-	}
-	if got.scan.ProjectPath != got.scan.RuntimePath {
-		t.Fatalf("ProjectPath = %q, RuntimePath = %q; want worktree checkout for both", got.scan.ProjectPath, got.scan.RuntimePath)
+	if got.scan.RuntimePath != "/repo" || got.scan.ProjectPath != "/repo" {
+		t.Fatalf("unbound drain must stay on representative checkout, got %+v", got.scan)
 	}
 	if got.scan.SessionName != dec.scan.SessionName {
 		t.Fatalf("SessionName = %q, want originating project session %q", got.scan.SessionName, dec.scan.SessionName)
@@ -795,21 +797,59 @@ func TestPrepareWorktreeDrainNonReadyStaysInPlace(t *testing.T) {
 	}
 }
 
-func TestPrepareWorktreeDrainProvisionFailureFallsBackInPlace(t *testing.T) {
-	d := worktreeProvisionDeps(t, time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC), fmt.Errorf("boom"))
-	dec := actionableDecision()
-	dec.WorktreeReady = true
-	dec.scan.RuntimePath = "/repo"
-	dec.scan.ProjectPath = "/repo"
-	var out bytes.Buffer
-
-	got := prepareWorktreeDrain(d, &out, dec)
-
-	if got.scan.RuntimePath != "/repo" || got.scan.ProjectPath != "/repo" {
-		t.Fatalf("failed provisioning must fall back in-place, got %+v", got.scan)
+// TestPrepareWorktreeDrainUnboundSetsSerializeOnRepresentative asserts that two
+// unbound auto-drain sets in one repo both route to the single representative
+// checkout — no `git worktree add` runs — so they queue on that checkout's
+// Runtime execution lock instead of fanning into separate worktrees (ADR-0052).
+func TestPrepareWorktreeDrainUnboundSetsSerializeOnRepresentative(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
+	worktreeAddCalls := 0
+	real := deps.NewRealFileSystem()
+	gitMock := func(dir string, args ...string) (string, error) {
+		if reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}) {
+			return filepath.Join("/repo", ".git"), nil
+		}
+		if len(args) >= 2 && args[0] == "worktree" && args[1] == "add" {
+			worktreeAddCalls++
+		}
+		return "", nil
 	}
-	if !strings.Contains(out.String(), "falling back to in-place drain") {
-		t.Fatalf("fallback was not reported: %q", out.String())
+	d := &Deps{
+		Tasks: &tasks.Deps{
+			FS: &deps.MockFileSystem{
+				GetenvFunc:       func(key string) string { return xdg },
+				EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
+				MkdirAllFunc:     real.MkdirAll,
+				WriteFileFunc:    real.WriteFile,
+				ReadFileFunc:     real.ReadFile,
+				RenameFunc:       real.Rename,
+				StatFunc:         real.Stat,
+			},
+			Git: &deps.MockGit{CommandInDirFunc: gitMock},
+		},
+		Now: func() time.Time { return now },
+	}
+
+	var routed []Decision
+	for _, setID := range []string{"2026-06-14-alpha", "2026-06-14-beta"} {
+		dec := actionableDecision()
+		dec.TaskSetID = setID
+		dec.WorktreeReady = true
+		dec.scan.RuntimePath = "/repo"
+		dec.scan.ProjectPath = "/repo"
+		routed = append(routed, prepareWorktreeDrain(d, &bytes.Buffer{}, dec))
+	}
+
+	if worktreeAddCalls != 0 {
+		t.Fatalf("git worktree add calls = %d, want 0 — unbound sets must not provision separate worktrees", worktreeAddCalls)
+	}
+	if routed[0].scan.RuntimePath != "/repo" || routed[1].scan.RuntimePath != "/repo" {
+		t.Fatalf("both unbound sets must land on the representative checkout /repo, got %q and %q", routed[0].scan.RuntimePath, routed[1].scan.RuntimePath)
+	}
+	if routed[0].scan.RuntimePath != routed[1].scan.RuntimePath {
+		t.Fatalf("unbound sets routed to different checkouts (%q != %q); expected one shared checkout to serialize on", routed[0].scan.RuntimePath, routed[1].scan.RuntimePath)
 	}
 }
 

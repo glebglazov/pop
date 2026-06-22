@@ -147,22 +147,20 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 	}
 }
 
+// prepareWorktreeDrain routes a worktree-ready actionable drain to its checkout.
+// A bound set resumes at its bound worktree; an unbound set stays on the
+// representative checkout — routing never provisions, so the repo's unbound
+// Ready sets all land on one checkout and serialize on its runtime execution
+// lock instead of fanning into separate worktrees (ADR-0052).
 func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 	if !dec.Actionable() || !dec.WorktreeReady {
 		return dec
 	}
 	route, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
-		TD:                 d.Tasks,
-		PD:                 d.Project,
-		Cfg:                nil,
-		CurrentCheckout:    dec.scan.ProjectPath,
-		SetID:              dec.TaskSetID,
-		Trigger:            binding.TriggerQueueSpawn,
-		WorktreeReady:      true,
-		OnProvisionFailure: binding.ProvisionFallbackInline,
-		ProjectName:        dec.Project,
-		WorktreesRoot:      filepath.Join(QueueDataDir(d.Tasks), "worktrees"),
-		Now:                d.now(),
+		TD:              d.Tasks,
+		CurrentCheckout: dec.scan.ProjectPath,
+		SetID:           dec.TaskSetID,
+		Trigger:         binding.TriggerQueueSpawn,
 	})
 	if err != nil {
 		if errors.Is(err, binding.ErrBoundWorktreeInvalid) {
@@ -175,11 +173,6 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 		dec.TaskSetID = ""
 		dec.Reason = "route"
 		return dec
-	}
-	if !dec.WorktreeReady && !route.UsedExistingBinding && !route.ProvisionedNew {
-		// unchanged
-	} else if dec.WorktreeReady && !route.UsedExistingBinding && !route.ProvisionedNew {
-		fmt.Fprintf(out, "queue: %s: provision worktree for %s: falling back to in-place drain\n", dec.Project, dec.TaskSetID)
 	}
 	dec.scan.ProjectPath = route.RuntimePath
 	dec.scan.RuntimePath = route.RuntimePath

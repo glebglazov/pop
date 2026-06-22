@@ -2,7 +2,6 @@ package implement
 
 import (
 	"io"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -82,10 +81,6 @@ func ResolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 }
 
 func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inline bool) (tasks.ResolveInput, error) {
-	cfg, err := d.loadConfig(config.DefaultConfigPath())
-	if err != nil {
-		return in, err
-	}
 	resolved, err := tasks.ResolvePathsWith(d.tasksDeps(), d.projectDeps(), d.loadConfig, in)
 	if err != nil {
 		return in, err
@@ -108,34 +103,21 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 		return in, err
 	}
 
-	repoConfig, err := cfg.ResolveRepoConfig(&config.Deps{FS: d.projectDeps().FS}, resolved.ProjectPath)
-	if err != nil {
-		return in, err
-	}
-
 	route, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
-		TD:                 d.tasksDeps(),
-		PD:                 d.projectDeps(),
-		Cfg:                cfg,
-		CurrentCheckout:    resolved.ProjectPath,
-		SetID:              taskSetID,
-		Trigger:            binding.TriggerImplementForeground,
-		Inline:             inline,
-		RuntimeOverride:    in.RuntimeOverride,
-		WorktreeReady:      repoConfig.WorktreeReady,
-		OnProvisionFailure: binding.ProvisionFail,
-		WorktreesRoot:      filepath.Join(tasks.TaskStorageRoot(d.tasksDeps()), "worktrees"),
+		TD:              d.tasksDeps(),
+		CurrentCheckout: resolved.ProjectPath,
+		SetID:           taskSetID,
+		Trigger:         binding.TriggerImplementForeground,
+		Inline:          inline,
+		RuntimeOverride: in.RuntimeOverride,
 	})
 	if err != nil {
 		return in, err
 	}
-	if route.UsedExistingBinding || route.ProvisionedNew {
-		if route.ExecutionBase != "" {
-			in.ProjectName = ""
-			in.Path = route.ExecutionBase
-		}
-		in.RuntimeOverride = route.RuntimePath
-	} else if strings.TrimSpace(in.RuntimeOverride) != "" {
+	// An existing binding resumes at its bound checkout; an explicit override
+	// resolves to that checkout. Otherwise the drain stays in the current
+	// checkout, which the executor already resolves, so leave the override empty.
+	if route.UsedExistingBinding || strings.TrimSpace(in.RuntimeOverride) != "" {
 		in.RuntimeOverride = route.RuntimePath
 	}
 	return in, nil
