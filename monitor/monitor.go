@@ -189,8 +189,13 @@ func LoadWith(d *Deps, path string) (*State, error) {
 	}
 
 	if err := json.Unmarshal(data, s); err != nil {
+		// Do NOT fall back to empty state here. A caller that loads, mutates,
+		// and saves would persist that empty state over the real file, wiping
+		// the whole pane registry. Atomic writes (SaveWith) mean a torn read
+		// can no longer produce this; a genuine parse error now means real
+		// corruption, which must fail loudly rather than silently reset.
 		debug.Error("monitor.Load %s: unmarshal: %v", path, err)
-		return s, nil
+		return nil, fmt.Errorf("monitor.Load %s: %w", path, err)
 	}
 	if s.Panes == nil {
 		s.Panes = make(map[string]*PaneEntry)
@@ -214,7 +219,18 @@ func (s *State) Save() error {
 	return s.SaveWith(defaultDeps)
 }
 
-// SaveWith writes monitor state using provided dependencies
+// SaveWith writes monitor state using provided dependencies.
+//
+// The write is atomic: data is written to a temp file in the same directory
+// and then renamed over the target. rename(2) is atomic on a single
+// filesystem, so a concurrent reader always sees either the complete old file
+// or the complete new one — never a truncated or partially-written file.
+//
+// This matters because the state file is a full-rewrite store mutated by many
+// unsynchronized processes (every `pop pane set-status` hook plus the daemon
+// poll). A plain truncate-in-place write left a window where a reader could
+// observe an empty/partial file; combined with LoadWith treating an unparseable
+// file as empty state, that wiped the whole pane registry from time to time.
 func (s *State) SaveWith(d *Deps) error {
 	dir := filepath.Dir(s.path)
 	if err := d.FS.MkdirAll(dir, 0755); err != nil {
@@ -226,7 +242,18 @@ func (s *State) SaveWith(d *Deps) error {
 		return err
 	}
 
-	return d.FS.WriteFile(s.path, data, 0644)
+	// PID keeps temp names distinct across the concurrent writer processes
+	// that share this file. Within a single process writes are serialized by
+	// the daemon mutex, so a constant PID suffix is enough.
+	tmp := fmt.Sprintf("%s.tmp-%d", s.path, os.Getpid())
+	if err := d.FS.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	if err := d.FS.Rename(tmp, s.path); err != nil {
+		d.FS.RemoveAll(tmp)
+		return err
+	}
+	return nil
 }
 
 // SessionsWithUnread returns session names that have at least one pane

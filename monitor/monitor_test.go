@@ -89,9 +89,9 @@ func TestLoadWith(t *testing.T) {
 			wantPanes: 0,
 		},
 		{
-			name:      "returns empty state on parse error",
-			content:   "invalid json",
-			wantPanes: 0,
+			name:    "returns error on parse error (never silently resets)",
+			content: "invalid json",
+			wantErr: true,
 		},
 		{
 			name:    "returns error on read error",
@@ -330,7 +330,7 @@ func TestFollowingFieldBackwardCompat(t *testing.T) {
 
 func TestSaveWith(t *testing.T) {
 	var savedData []byte
-	var savedPath string
+	var writePath, renameFrom, renameTo string
 
 	d := &Deps{
 		FS: &deps.MockFileSystem{
@@ -338,8 +338,13 @@ func TestSaveWith(t *testing.T) {
 				return nil
 			},
 			WriteFileFunc: func(path string, data []byte, perm os.FileMode) error {
-				savedPath = path
+				writePath = path
 				savedData = data
+				return nil
+			},
+			RenameFunc: func(oldpath, newpath string) error {
+				renameFrom = oldpath
+				renameTo = newpath
 				return nil
 			},
 		},
@@ -356,8 +361,17 @@ func TestSaveWith(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if savedPath != "/test/dir/monitor.json" {
-		t.Errorf("saved to wrong path: %s", savedPath)
+	// The write must land in a temp file alongside the target, then be renamed
+	// over it — the atomicity guarantee that prevents torn reads (ADR: pane
+	// registry wipe). A reader never sees the temp file at the real path.
+	if !strings.HasPrefix(writePath, "/test/dir/monitor.json.tmp-") {
+		t.Errorf("expected write to a temp file beside the target, got %q", writePath)
+	}
+	if renameFrom != writePath {
+		t.Errorf("renamed from %q, want the temp file %q", renameFrom, writePath)
+	}
+	if renameTo != "/test/dir/monitor.json" {
+		t.Errorf("renamed to %q, want the target path", renameTo)
 	}
 
 	if !strings.Contains(string(savedData), `"pane_id": "%5"`) {
@@ -642,6 +656,11 @@ func TestPollOnce_NilLivePanesPreservesPanes(t *testing.T) {
 				stored[path] = data
 				return nil
 			},
+			RenameFunc: func(oldpath, newpath string) error {
+				stored[newpath] = stored[oldpath]
+				delete(stored, oldpath)
+				return nil
+			},
 			MkdirAllFunc: func(string, os.FileMode) error { return nil },
 		},
 	}
@@ -693,6 +712,11 @@ func TestPollOnce_DeadPanesRemoved(t *testing.T) {
 			},
 			WriteFileFunc: func(path string, data []byte, _ os.FileMode) error {
 				stored[path] = data
+				return nil
+			},
+			RenameFunc: func(oldpath, newpath string) error {
+				stored[newpath] = stored[oldpath]
+				delete(stored, oldpath)
 				return nil
 			},
 			MkdirAllFunc: func(string, os.FileMode) error { return nil },
