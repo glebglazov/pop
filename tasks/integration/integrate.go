@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks/binding"
@@ -85,8 +86,30 @@ func IntegrateWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writ
 		return IntegrationResult{}, err
 	}
 	if !ok {
-		fmt.Fprintf(out, "queue: %s is already integrated or is not awaiting integration\n", setID)
-		return IntegrationResult{SetID: setID, Noop: true}, nil
+		// No Mergeability record, but a set can be in the Integration backlog by
+		// virtue of its non-trunk Worktree binding alone (ADR-0051): a set whose
+		// final task was completed by hand pre-fix never had Mergeability
+		// computed. Recompute it from the binding so integrate acts on the
+		// binding, not a stale record gate. Falls through to the no-op message
+		// only when the set genuinely has no integrable worktree binding.
+		computed, cerr := recomputeMergeabilityFromBinding(d, setID)
+		if cerr != nil {
+			return IntegrationResult{}, cerr
+		}
+		if computed {
+			store, err = Load(d.tasksDeps())
+			if err != nil {
+				return IntegrationResult{}, err
+			}
+			key, rec, ok, err = findRecord(store, setID)
+			if err != nil {
+				return IntegrationResult{}, err
+			}
+		}
+		if !ok {
+			fmt.Fprintf(out, "queue: %s is already integrated or is not awaiting integration\n", setID)
+			return IntegrationResult{SetID: setID, Noop: true}, nil
+		}
 	}
 	if rec.Status != StatusClean {
 		if rec.Status == StatusConflicts {
@@ -95,6 +118,75 @@ func IntegrateWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writ
 		return IntegrationResult{}, fmt.Errorf("queue: %s mergeability is %s; refusing integration", setID, mergeabilityLabel(rec.Status))
 	}
 	return integrateCleanRecord(d, cfg, key, rec, out, "human", hooks)
+}
+
+// recomputeMergeabilityFromBinding computes and records Mergeability for a set
+// that sits in the Integration backlog by virtue of a non-trunk Worktree
+// binding but has no Mergeability record yet (ADR-0051), and reports whether a
+// record now exists. No-op (false, nil) when the set has no binding, when more
+// than one binding matches the set id (ambiguous across repos — left to the
+// operator), or when the worktree resolves to no integrable main worktree.
+func recomputeMergeabilityFromBinding(d *Deps, setID string) (bool, error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	td := d.tasksDeps()
+	bindings, err := binding.AllBindings(td)
+	if err != nil {
+		return false, err
+	}
+	var match *binding.Binding
+	var matchKey string
+	for k, b := range bindings {
+		if setIDFromScopedKey(k) != setID {
+			continue
+		}
+		if match != nil {
+			return false, nil // same set bound in multiple repos: ambiguous
+		}
+		bcopy := b
+		match = &bcopy
+		matchKey = k
+	}
+	if match == nil || strings.TrimSpace(match.RuntimePath) == "" {
+		return false, nil
+	}
+	// Compute directly against the binding's checkout and store under the
+	// binding's own scoped key. We deliberately do not route through
+	// RecordImplementMergeability: it re-derives the store key from the
+	// worktree path's repository identity, which need not match the key the
+	// binding was provisioned under, so it would silently find nothing. Reusing
+	// matchKey also keeps the record and binding co-keyed, so integration's
+	// teardown removes both.
+	mainPath, bare, err := binding.GitMainWorktree(td, match.RuntimePath)
+	if err != nil {
+		return false, err
+	}
+	if bare || mainPath == "" {
+		return false, nil
+	}
+	merge, err := d.computeMergeability(mainPath, match.RuntimePath)
+	if err != nil {
+		return false, err
+	}
+	merge.Project = match.Project
+	merge.RuntimePath = match.RuntimePath
+	merge.SetID = setID
+	if merge.CheckedAt.IsZero() {
+		merge.CheckedAt = time.Now().UTC()
+	}
+	if !AwaitsIntegration(merge) {
+		return false, nil // trunk-equivalent: nothing to integrate
+	}
+	store, err := Load(td)
+	if err != nil {
+		return false, err
+	}
+	store.Put(matchKey, merge)
+	if err := Save(td, store); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // IntegrateKnownRecord merges a record already keyed in the store. Used by the
