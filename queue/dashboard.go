@@ -467,6 +467,11 @@ type dashboardWorktreeView struct {
 // Worktree binding. The representative checkout (trunk) is left unmarked.
 const dashboardWorktreeMarker = "↳ "
 
+// dashboardWorktree resolves the destination column — where an auto-drain of the
+// set lands under the collapsed routing model (ADR-0052): the bound checkout when
+// a Worktree binding exists (marked), else the trunk worktree (unmarked), else
+// "(no base)" for an unconfigured bare repo. Routing never auto-provisions, so a
+// set with no binding always lands on the trunk and the column says so honestly.
 func dashboardWorktree(d *Deps, state *DaemonState, repoKey, setID string, rep *projectScan, repBranch string, bare bool) dashboardWorktreeView {
 	if b, ok := bindingForSet(d.Tasks, repoKey, setID); ok && strings.TrimSpace(b.RuntimePath) != "" {
 		_ = state
@@ -571,6 +576,11 @@ type dashboardBindRefsMsg struct {
 type dashboardBindMsg struct {
 	err error
 }
+type dashboardDrainListMsg struct {
+	row     DashboardRow
+	entries []dashboardDrainEntry
+	err     error
+}
 type dashboardAbandonMsg struct {
 	err error
 }
@@ -603,6 +613,37 @@ type dashboardBindModal struct {
 	cursor  int
 	baseRef string
 	name    string
+	loading bool
+}
+
+// dashboardDrainTargetKind identifies one Drain target picker option (ADR-0052).
+type dashboardDrainTargetKind int
+
+const (
+	// drainTargetWorktree adopts an existing non-managed, unbound worktree.
+	drainTargetWorktree dashboardDrainTargetKind = iota
+	// drainTargetNewManaged provisions a managed worktree forked from the trunk.
+	drainTargetNewManaged
+	// drainTargetTrunk drains inline in the trunk worktree with no binding.
+	drainTargetTrunk
+)
+
+type dashboardDrainEntry struct {
+	Label  string
+	Kind   dashboardDrainTargetKind
+	Path   string // adopt target checkout (drainTargetWorktree only)
+	Branch string
+}
+
+// dashboardDrainModal is the Drain target picker shown when `i` is pressed on an
+// unbound set: pick an existing worktree to adopt, a new managed worktree to
+// provision off the trunk (the default cursor), or the trunk itself — then bind
+// (or stay unbound for trunk) and drain in one action. A bound set skips the
+// picker and resumes in its binding (ADR-0052).
+type dashboardDrainModal struct {
+	row     DashboardRow
+	entries []dashboardDrainEntry
+	cursor  int
 	loading bool
 }
 
@@ -681,18 +722,19 @@ func (d *detailView) syncManifest(m *tasks.Manifest, row *tasks.Row) {
 }
 
 type dashboardModel struct {
-	d       *Deps
-	cfg     *config.Config
-	snap    DashboardSnapshot
-	allRows []DashboardRow // source of truth; snap.Rows is the filtered view
-	cursor  int
-	err     error
-	width   int
-	height  int
-	bind    *dashboardBindModal
-	abandon *dashboardAbandonModal
-	detail  *detailView
-	cache   *dashboardCache
+	d         *Deps
+	cfg       *config.Config
+	snap      DashboardSnapshot
+	allRows   []DashboardRow // source of truth; snap.Rows is the filtered view
+	cursor    int
+	err       error
+	width     int
+	height    int
+	bind      *dashboardBindModal
+	drainPick *dashboardDrainModal
+	abandon   *dashboardAbandonModal
+	detail    *detailView
+	cache     *dashboardCache
 
 	filterMode  bool
 	filterInput textinput.Model
@@ -717,6 +759,10 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.bind != nil {
 			m.pendingG = false
 			return m.updateBindModal(msg)
+		}
+		if m.drainPick != nil {
+			m.pendingG = false
+			return m.updateDrainModal(msg)
 		}
 		if m.abandon != nil {
 			m.pendingG = false
@@ -886,10 +932,22 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case dashboardDrainMsg:
+		m.drainPick = nil
 		if msg.err != nil {
 			m.err = msg.err
 		}
 		return m, m.reload()
+	case dashboardDrainListMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		if len(msg.entries) == 0 {
+			m.err = fmt.Errorf("no drain target available for %s", msg.row.SetID)
+			return m, nil
+		}
+		m.drainPick = &dashboardDrainModal{row: msg.row, entries: msg.entries, cursor: defaultDrainCursor(msg.entries)}
+		return m, nil
 	case dashboardPreviewMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -1288,11 +1346,90 @@ func (m dashboardModel) toggleAutoDrain(row DashboardRow) tea.Cmd {
 	}
 }
 
+// launchDrain handles the `i` key. A set that already holds a Worktree binding
+// resumes in it immediately (no picker). An unbound set opens the Drain target
+// picker so the operator chooses where the drain lands (ADR-0052).
 func (m dashboardModel) launchDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		_, err := LaunchDashboardDrain(m.d, m.cfg, row)
+		bound, err := dashboardSetBound(m.d, m.cfg, row)
+		if err != nil {
+			return dashboardDrainListMsg{row: row, err: err}
+		}
+		if bound {
+			_, err := LaunchDashboardDrain(m.d, m.cfg, row)
+			return dashboardDrainMsg{err: err}
+		}
+		entries, err := DashboardDrainTargetEntries(m.d, m.cfg, row)
+		return dashboardDrainListMsg{row: row, entries: entries, err: err}
+	}
+}
+
+func (m dashboardModel) updateDrainModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.drainPick = nil
+		return m, nil
+	case "j", "down":
+		m.moveDrainCursor(1)
+		return m, nil
+	case "k", "up":
+		m.moveDrainCursor(-1)
+		return m, nil
+	case "enter":
+		return m.confirmDrainModal()
+	}
+	return m, nil
+}
+
+func (m *dashboardModel) moveDrainCursor(delta int) {
+	if m.drainPick == nil {
+		return
+	}
+	n := len(m.drainPick.entries)
+	if n == 0 {
+		return
+	}
+	m.drainPick.cursor += delta
+	if m.drainPick.cursor < 0 {
+		m.drainPick.cursor = n - 1
+	}
+	if m.drainPick.cursor >= n {
+		m.drainPick.cursor = 0
+	}
+}
+
+func (m dashboardModel) confirmDrainModal() (tea.Model, tea.Cmd) {
+	if m.drainPick == nil || m.drainPick.loading {
+		return m, nil
+	}
+	if m.drainPick.cursor < 0 || m.drainPick.cursor >= len(m.drainPick.entries) {
+		return m, nil
+	}
+	entry := m.drainPick.entries[m.drainPick.cursor]
+	row := m.drainPick.row
+	m.drainPick.loading = true
+	return m, m.launchDrainTarget(row, entry)
+}
+
+// launchDrainTarget binds the chosen target (adopt, provision, or leave unbound
+// for trunk) and drains in one action.
+func (m dashboardModel) launchDrainTarget(row DashboardRow, target dashboardDrainEntry) tea.Cmd {
+	return func() tea.Msg {
+		_, err := LaunchDashboardDrainTarget(m.d, m.cfg, row, target)
 		return dashboardDrainMsg{err: err}
 	}
+}
+
+// defaultDrainCursor positions the picker on "new managed worktree" — the
+// frictionless default that provisions an isolated checkout. It falls back to the
+// first entry when no trunk is resolvable (the option is absent).
+func defaultDrainCursor(entries []dashboardDrainEntry) int {
+	for i, e := range entries {
+		if e.Kind == drainTargetNewManaged {
+			return i
+		}
+	}
+	return 0
 }
 
 func (m dashboardModel) launchIntegrate(row DashboardRow) tea.Cmd {
@@ -1770,6 +1907,195 @@ func DashboardCreateWorktree(d *Deps, cfg *config.Config, row DashboardRow, base
 	return DashboardCreateWorktreeResult{SetID: row.SetID, RuntimePath: path, Branch: branch, BaseRef: baseRef}, nil
 }
 
+// dashboardSetBound reports whether the row's set already holds a Worktree
+// binding. The Drain target picker only opens for unbound sets; a bound set
+// resumes in its binding (ADR-0052).
+func dashboardSetBound(d *Deps, cfg *config.Config, row DashboardRow) (bool, error) {
+	d = ensureQueueDeps(d)
+	repoKey := row.repoKey
+	if repoKey == "" {
+		_, rk, err := dashboardBindContext(d, cfg, row)
+		if err != nil {
+			return false, err
+		}
+		repoKey = rk
+	}
+	b, ok := bindingForSet(d.Tasks, repoKey, row.SetID)
+	return ok && strings.TrimSpace(b.RuntimePath) != "", nil
+}
+
+// DashboardDrainTargetEntries builds the Drain target picker options for an
+// unbound set (ADR-0052), in order: the repo's existing non-managed, unbound
+// worktrees (adopt), "new managed worktree" (provision off the trunk), then the
+// trunk itself (drain inline). The trunk-dependent options are omitted when no
+// trunk resolves (an unconfigured bare repo). Managed worktrees, the trunk, and
+// any worktree already bound to another set are excluded from the adopt list to
+// preserve the 1:1 checkout↔set mapping.
+func DashboardDrainTargetEntries(d *Deps, cfg *config.Config, row DashboardRow) ([]dashboardDrainEntry, error) {
+	scans, _, err := dashboardBindContext(d, cfg, row)
+	if err != nil {
+		return nil, err
+	}
+	projectPath := scans[0].ProjectPath
+
+	trunkPath, bare, trunkErr := binding.ResolveTrunkPath(d.Tasks, cfg, projectPath)
+	hasTrunk := trunkErr == nil && !bare && strings.TrimSpace(trunkPath) != ""
+	canonTrunk := ""
+	if hasTrunk {
+		canonTrunk = bestEffortCanon(d, trunkPath)
+	}
+
+	out, err := d.Tasks.Git.CommandInDir(projectPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("list worktrees: %w", err)
+	}
+	worktrees := parseDashboardWorktrees(out)
+	bound, err := boundCheckoutPaths(d)
+	if err != nil {
+		return nil, err
+	}
+	managedRoot := bestEffortCanon(d, binding.ManagedWorktreesRoot(d.Tasks))
+
+	var entries []dashboardDrainEntry
+	for _, wt := range worktrees {
+		canon := bestEffortCanon(d, wt.Path)
+		if hasTrunk && canon == canonTrunk {
+			continue // the trunk is offered as its own option
+		}
+		if pathUnder(canon, managedRoot) {
+			continue // a pop-managed worktree
+		}
+		if bound[canon] {
+			continue // already bound to another set (1:1 checkout↔set)
+		}
+		label := wt.Name
+		if wt.Branch != "" {
+			label = fmt.Sprintf("%s (%s)", wt.Name, wt.Branch)
+		}
+		entries = append(entries, dashboardDrainEntry{Label: label, Kind: drainTargetWorktree, Path: wt.Path, Branch: wt.Branch})
+	}
+	if hasTrunk {
+		entries = append(entries, dashboardDrainEntry{Label: "＋ New managed worktree (fork from trunk)", Kind: drainTargetNewManaged})
+		entries = append(entries, dashboardDrainEntry{Label: "Trunk worktree (drain inline)", Kind: drainTargetTrunk, Path: trunkPath})
+	}
+	return entries, nil
+}
+
+// LaunchDashboardDrainTarget binds the chosen Drain target picker option and
+// drains in one action (ADR-0052): an existing worktree is adopted, "new managed
+// worktree" provisions a managed checkout forked from the trunk, and trunk leaves
+// the set unbound so LaunchDashboardDrain routes it to the trunk. Once bound (or
+// for trunk, immediately), it reuses LaunchDashboardDrain to spawn the drain.
+func LaunchDashboardDrainTarget(d *Deps, cfg *config.Config, row DashboardRow, target dashboardDrainEntry) (DashboardDrainResult, error) {
+	switch target.Kind {
+	case drainTargetWorktree:
+		if _, err := DashboardAdoptWorktree(d, cfg, row, target.Path); err != nil {
+			return DashboardDrainResult{}, err
+		}
+	case drainTargetNewManaged:
+		if _, err := DashboardProvisionManagedWorktree(d, cfg, row); err != nil {
+			return DashboardDrainResult{}, err
+		}
+	case drainTargetTrunk:
+		// Leave the set unbound: LaunchDashboardDrain routes to the representative
+		// checkout (the trunk) and records no binding — a trunk drain is inline.
+	default:
+		return DashboardDrainResult{}, fmt.Errorf("unknown drain target")
+	}
+	return LaunchDashboardDrain(d, cfg, row)
+}
+
+// DashboardProvisionManagedWorktree provisions a pop-managed worktree forked
+// from the Trunk worktree's HEAD and records a provisioned binding, reusing the
+// shared provisioning path (ADR-0052). It refuses a repo with no resolvable
+// trunk and never opens or attaches a tmux session.
+func DashboardProvisionManagedWorktree(d *Deps, cfg *config.Config, row DashboardRow) (DashboardCreateWorktreeResult, error) {
+	scans, repoKey, err := dashboardBindContext(d, cfg, row)
+	if err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	if err := refuseDashboardBindWhileLocked(d, row); err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	if b, ok := bindingForSet(d.Tasks, repoKey, row.SetID); ok && strings.TrimSpace(b.RuntimePath) != "" {
+		return DashboardCreateWorktreeResult{}, fmt.Errorf("task set %s is already bound; unbind first to retarget", row.SetID)
+	}
+	trunkPath, bare, err := binding.ResolveTrunkPath(d.Tasks, cfg, scans[0].ProjectPath)
+	if err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	if bare || strings.TrimSpace(trunkPath) == "" {
+		return DashboardCreateWorktreeResult{}, fmt.Errorf("no Trunk worktree configured; set trunk = true in a global [repo.\"<path>\"] block")
+	}
+	b, err := binding.ProvisionWorktree(d.Tasks, binding.ManagedWorktreesRoot(d.Tasks), trunkPath, row.SetID, d.now())
+	if err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	proj := repoName(scans, nil)
+	if rep, _, repErr := resolveRepresentative(d, cfg, scans); repErr == nil {
+		proj = repoName(scans, rep)
+	}
+	b.Project = proj
+	key := setScopedKey(repoKey, row.SetID)
+	if err := binding.Put(d.Tasks, key, b); err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	if err := AppendJournalEntry(d.Tasks, JournalEntry{
+		Event:       JournalEventBound,
+		Project:     proj,
+		SetID:       row.SetID,
+		RuntimePath: b.RuntimePath,
+		SourceRef:   b.Branch,
+		Source:      "dashboard",
+	}); err != nil {
+		return DashboardCreateWorktreeResult{}, err
+	}
+	return DashboardCreateWorktreeResult{SetID: row.SetID, RuntimePath: b.RuntimePath, Branch: b.Branch}, nil
+}
+
+// boundCheckoutPaths returns the canonicalized set of every checkout currently
+// bound to a set, across all repos. The Drain target picker excludes these from
+// its adopt list so a checkout never binds to two sets at once.
+func boundCheckoutPaths(d *Deps) (map[string]bool, error) {
+	bindings, err := binding.AllBindings(d.Tasks)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, b := range bindings {
+		path := strings.TrimSpace(b.RuntimePath)
+		if path == "" {
+			continue
+		}
+		out[bestEffortCanon(d, path)] = true
+	}
+	return out, nil
+}
+
+// bestEffortCanon canonicalizes path for reliable comparison, falling back to a
+// cleaned absolute path when the target does not exist (so EvalSymlinks fails).
+func bestEffortCanon(d *Deps, path string) string {
+	if c, err := canonicalCheckoutPath(d.Tasks, path); err == nil {
+		return c
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(path)
+}
+
+// pathUnder reports whether path is root or lives beneath it. Both arguments are
+// expected to be canonicalized.
+func pathUnder(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	if path == root {
+		return true
+	}
+	return strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
 func dashboardBindContext(d *Deps, cfg *config.Config, row DashboardRow) ([]projectScan, string, error) {
 	if d == nil {
 		d = DefaultDeps()
@@ -1950,6 +2276,9 @@ func (m dashboardModel) View() tea.View {
 	footer := true
 	if m.bind != nil {
 		renderDashboardBindModal(&body, m.bind)
+		footer = false
+	} else if m.drainPick != nil {
+		renderDashboardDrainModal(&body, m.drainPick)
 		footer = false
 	} else if m.abandon != nil {
 		renderDashboardAbandonModal(&body, m.abandon)
@@ -2248,6 +2577,29 @@ func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
 		fmt.Fprintf(w, "Name: %s\n", modal.name)
 		fmt.Fprint(w, ui.HintStyle.Render("enter create · esc cancel"))
 	}
+}
+
+func renderDashboardDrainModal(w io.Writer, modal *dashboardDrainModal) {
+	if modal == nil {
+		return
+	}
+	fmt.Fprintf(w, "Drain target for %s\n", modal.row.SetID)
+	if modal.loading {
+		fmt.Fprintln(w, "  draining...")
+		return
+	}
+	for i, entry := range modal.entries {
+		prefix := "  "
+		if i == modal.cursor {
+			prefix = ui.IndicatorStyle.Render("█") + " "
+		}
+		label := entry.Label
+		if label == "" {
+			label = entry.Path
+		}
+		fmt.Fprintf(w, "%s%s\n", prefix, label)
+	}
+	fmt.Fprint(w, ui.HintStyle.Render("enter drain · esc cancel"))
 }
 
 func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal) {
