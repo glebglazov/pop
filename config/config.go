@@ -60,6 +60,7 @@ type DashboardConfig struct {
 	CurrentPaneAlwaysUnderCursor bool     `toml:"current_pane_always_under_cursor"`
 	CursorPosition               string   `toml:"cursor_position"`
 	SortCriteria                 []string `toml:"sort_criteria"`
+	ZoomOnSwitch                 *bool    `toml:"zoom_on_switch"`
 }
 
 // Valid dashboard cursor position strategies.
@@ -578,6 +579,17 @@ func (c *Config) PaneMonitoringTopicCommand() string {
 		return ""
 	}
 	return c.PaneMonitoring.TopicCommand
+}
+
+// DashboardZoomOnSwitch reports whether selecting a pane from the dashboard
+// maximizes (zooms) it within its window. Defaults to true; set
+// [dashboard] zoom_on_switch = false to focus the pane in place, preserving
+// the window's split layout (e.g. nvim above, agent below).
+func (c *Config) DashboardZoomOnSwitch() bool {
+	if c == nil || c.Dashboard == nil || c.Dashboard.ZoomOnSwitch == nil {
+		return true
+	}
+	return *c.Dashboard.ZoomOnSwitch
 }
 
 // DashboardSortCriteria returns the configured sort criteria for the dashboard.
