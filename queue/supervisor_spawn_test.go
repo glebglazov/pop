@@ -111,9 +111,6 @@ func TestSupervisorWorktreeDrainTargetsProjectSessionWithCheckoutCWD(t *testing.
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "worktree-drain", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if err := os.WriteFile(filepath.Join(repo, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 	rt := newRecordingTmux(false, "0")
@@ -137,8 +134,10 @@ func TestSupervisorWorktreeDrainTargetsProjectSessionWithCheckoutCWD(t *testing.
 		t.Fatalf("new-session = %v, want session %q", newSession, wantSession)
 	}
 	checkout := newSession[2]
-	if checkout == repo || !strings.Contains(checkout, filepath.Join("pop", "queue", "worktrees")) {
-		t.Fatalf("new-session cwd = %q, want provisioned worktree checkout", checkout)
+	wantCheckout, _ := filepath.EvalSymlinks(repo)
+	gotCheckout, _ := filepath.EvalSymlinks(checkout)
+	if gotCheckout != wantCheckout || strings.Contains(checkout, filepath.Join("pop", "queue", "worktrees")) {
+		t.Fatalf("new-session cwd = %q, want current checkout %q with no provisioned worktree (ADR-0052)", checkout, repo)
 	}
 
 	assertReusesFreshPane(t, rt, "%3")
@@ -153,8 +152,8 @@ func TestSupervisorWorktreeDrainTargetsProjectSessionWithCheckoutCWD(t *testing.
 	if !ok {
 		t.Fatal("supervisor tick must spawn a drain command")
 	}
-	if !strings.Contains(spawnCmd, "pop tasks implement "+setID) || !strings.Contains(spawnCmd, "--task-runtime-path "+checkout) {
-		t.Fatalf("spawn command = %q, want set and checkout runtime override %q", spawnCmd, checkout)
+	if !strings.Contains(spawnCmd, "pop tasks implement "+setID) {
+		t.Fatalf("spawn command = %q, want implement command for set %q", spawnCmd, setID)
 	}
 	worktreeSession := project.SessionNameWith(project.DefaultDeps(), checkout)
 	if worktreeSession != wantSession && newSession[1] == worktreeSession {

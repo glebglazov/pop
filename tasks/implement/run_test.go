@@ -88,16 +88,48 @@ func writeImplementFile(t *testing.T, path, content string) {
 	}
 }
 
-func TestResolveTaskSetRuntimeWorktreeReadyProvisionsManagedWorktree(t *testing.T) {
+// TestResolveTaskSetRuntimeUnboundUsesCurrentCheckout asserts an unbound
+// whole-set drain with no flags stays in the current checkout and provisions no
+// managed worktree — routing never provisions (ADR-0052).
+func TestResolveTaskSetRuntimeUnboundUsesCurrentCheckout(t *testing.T) {
 	root, d := setupImplementFixture(t)
-	writeImplementFile(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
 
 	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
-	if strings.TrimSpace(resolved.RuntimeOverride) == "" || resolved.RuntimeOverride == root {
-		t.Fatalf("RuntimeOverride = %q, want managed worktree distinct from %q", resolved.RuntimeOverride, root)
+	runtimePath, err := tasks.ResolveRuntimePathWith(d.tasksDeps(), root, resolved.RuntimeOverride)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	gotRuntime, _ := filepath.EvalSymlinks(runtimePath)
+	if gotRuntime != wantRoot {
+		t.Fatalf("runtime = %q, want current checkout %q", gotRuntime, wantRoot)
+	}
+
+	store, err := binding.Load(d.tasksDeps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := store.Get(binding.Key(id, "demo")); ok {
+		t.Fatalf("unexpected worktree binding for unbound drain: %+v", b)
+	}
+}
+
+// TestResolveTaskSetRuntimeInWorktreeProvisionsAndBinds asserts --in-worktree
+// forks a managed worktree off the trunk, records a provisioned binding, and
+// points the drain at the new checkout (ADR-0052).
+func TestResolveTaskSetRuntimeInWorktreeProvisionsAndBinds(t *testing.T) {
+	root, d := setupImplementFixture(t)
+
+	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
+	if err != nil {
+		t.Fatalf("resolve runtime: %v", err)
 	}
 
 	store, err := binding.Load(d.tasksDeps())
@@ -110,45 +142,114 @@ func TestResolveTaskSetRuntimeWorktreeReadyProvisionsManagedWorktree(t *testing.
 	}
 	b, ok := store.Get(binding.Key(id, "demo"))
 	if !ok {
-		t.Fatalf("missing binding for demo: %+v", store.Bindings)
+		t.Fatalf("expected provisioned binding for --in-worktree drain")
 	}
 	if !b.Provisioned {
-		t.Fatalf("binding Provisioned = false, want managed worktree: %+v", b)
+		t.Fatalf("binding = %+v, want Provisioned=true", b)
 	}
 	if b.RuntimePath != resolved.RuntimeOverride {
-		t.Fatalf("binding runtime = %q, resolved = %q", b.RuntimePath, resolved.RuntimeOverride)
+		t.Fatalf("RuntimeOverride = %q, want provisioned worktree %q", resolved.RuntimeOverride, b.RuntimePath)
+	}
+
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	gotRuntime, _ := filepath.EvalSymlinks(b.RuntimePath)
+	if gotRuntime == wantRoot {
+		t.Fatalf("provisioned worktree = current checkout %q, want a distinct managed worktree", wantRoot)
+	}
+	if _, err := os.Stat(b.RuntimePath); err != nil {
+		t.Fatalf("provisioned worktree missing on disk: %v", err)
+	}
+	if !strings.HasPrefix(b.RuntimePath, binding.ManagedWorktreesRoot(d.tasksDeps())) {
+		t.Fatalf("provisioned worktree %q not under managed root %q", b.RuntimePath, binding.ManagedWorktreesRoot(d.tasksDeps()))
 	}
 }
 
-func TestResolveTaskSetRuntimeInlineBypassesWorktreeReady(t *testing.T) {
+// TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet asserts --in-worktree on an
+// already-bound set is rejected with guidance to unbind first — a binding wins.
+func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {
 	root, d := setupImplementFixture(t)
-	writeImplementFile(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
-
-	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
-	if err != nil {
-		t.Fatalf("resolve runtime: %v", err)
-	}
-	runtimePath, err := tasks.ResolveRuntimePathWith(d.tasksDeps(), root, resolved.RuntimeOverride)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantRoot, _ := filepath.EvalSymlinks(root)
-	gotRuntime, _ := filepath.EvalSymlinks(runtimePath)
-	if gotRuntime != wantRoot {
-		t.Fatalf("inline runtime = %q, want trunk %q", gotRuntime, wantRoot)
-	}
-
-	store, err := binding.Load(d.tasksDeps())
-	if err != nil {
-		t.Fatal(err)
+	wt := filepath.Join(t.TempDir(), "existing-wt")
+	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "feature", wt, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
 	}
 	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, ok := store.Get(binding.Key(id, "demo")); ok {
-		t.Fatalf("unexpected worktree binding for inline run: %+v", b)
+	store := &binding.Store{}
+	store.Put(binding.Key(id, "demo"), binding.Adopt(wt, "feature", ""))
+	if err := binding.Save(d.tasksDeps(), store); err != nil {
+		t.Fatal(err)
 	}
+
+	_, err = ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
+	if err == nil || !strings.Contains(err.Error(), "already bound") || !strings.Contains(err.Error(), "unbind-worktree") {
+		t.Fatalf("err = %v, want already-bound rejection with unbind guidance", err)
+	}
+}
+
+// TestResolveTaskSetRuntimeInWorktreeRefusesWithoutTrunk asserts --in-worktree in
+// a bare repo with no configured trunk refuses with the "set `trunk`" message —
+// there is no canonical fork base to provision from (ADR-0052).
+func TestResolveTaskSetRuntimeInWorktreeRefusesWithoutTrunk(t *testing.T) {
+	oldWd, _ := os.Getwd()
+	parent := t.TempDir()
+
+	src := filepath.Join(parent, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@test"},
+		{"config", "user.name", "test"},
+	} {
+		if out, err := runImplementGit(src, args...); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	writeImplementFile(t, filepath.Join(src, "README.md"), "# test\n")
+	if out, err := runImplementGit(src, "add", "-A"); err != nil {
+		t.Fatal(err, out)
+	}
+	if out, err := runImplementGit(src, "commit", "-m", "init"); err != nil {
+		t.Fatal(err, out)
+	}
+	if out, err := runImplementGit(parent, "clone", "--bare", src, "repo.git"); err != nil {
+		t.Fatalf("clone --bare: %v\n%s", err, out)
+	}
+	bareDir := filepath.Join(parent, "repo.git")
+	wt := filepath.Join(parent, "wt")
+	if out, err := runImplementGit(bareDir, "worktree", "add", "--detach", wt, "HEAD"); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+
+	if err := os.Chdir(wt); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	t.Setenv("XDG_DATA_HOME", filepath.Join(parent, ".xdg"))
+
+	tasksDir := implementTasksDir(t, wt)
+	writeImplementThoughts(t, tasksDir, "demo")
+	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+
+	d := DefaultDeps()
+	d.StdinInteractive = func(io.Reader) bool { return false }
+
+	_, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
+	if err == nil || !strings.Contains(err.Error(), "Trunk worktree configured") || !strings.Contains(err.Error(), "trunk = true") {
+		t.Fatalf("err = %v, want \"set trunk\" refusal", err)
+	}
+}
+
+func runImplementGit(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 func TestResolveTaskSetRuntimeRejectsRelativeTaskSetPath(t *testing.T) {

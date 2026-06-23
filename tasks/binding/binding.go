@@ -115,6 +115,15 @@ func StorePath(d *tasks.Deps) string {
 	return filepath.Join(filepath.Dir(tasks.TaskStorageRoot(d)), "bindings.json")
 }
 
+// ManagedWorktreesRoot returns the directory under which pop-provisioned
+// (managed) worktrees live: <pop data dir>/queue/worktrees. It is the single
+// fork-base layout shared by every explicit provisioner — the Queue, the Drain
+// target picker, and `pop tasks implement --in-worktree` — so a worktree any of
+// them creates lands in the same tree and integration/teardown find it.
+func ManagedWorktreesRoot(d *tasks.Deps) string {
+	return filepath.Join(filepath.Dir(tasks.TaskStorageRoot(d)), "queue", "worktrees")
+}
+
 // Load reads the shared binding store. A missing file yields an empty store
 // rather than an error so callers need no daemon and no pre-seeding.
 func Load(d *tasks.Deps) (*Store, error) {
@@ -156,8 +165,8 @@ func Adopt(checkoutPath, branch, proj string) Binding {
 // checkout). It is the entry point `pop tasks implement` uses to adopt the
 // checkout it runs in (ADR-0036): the binding is identical in shape to a
 // `bind-worktree` adoption (Provisioned=false, never deleted), routed through
-// this module's shared store. It never runs `git worktree add` — provisioning
-// stays the Queue's path, gated by worktree_ready.
+// this module's shared store. It never runs `git worktree add` — routing never
+// provisions (ADR-0052); provisioning is an explicit act handled elsewhere.
 //
 // It is a no-op returning (false, nil) in two cases. First, when checkoutPath is
 // the repository's main working tree (trunk): a trunk drain is never

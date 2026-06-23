@@ -126,7 +126,7 @@ func RecordImplementMergeability(d *Deps, projectPath, runtimePath, setID, proje
 		return nil
 	}
 
-	mainPath, bare, err := binding.GitMainWorktree(td, runtimePath)
+	mainPath, bare, err := binding.ResolveTrunkPath(td, nil, runtimePath)
 	if err != nil {
 		return err
 	}

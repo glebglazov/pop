@@ -346,21 +346,21 @@ crash_retry_delays = ["10s", "1m", "5m"]
 	}
 }
 
-func TestLoadRepoConfigWorktreeReady(t *testing.T) {
+func TestLoadRepoConfigAutoMergeClean(t *testing.T) {
 	tests := []struct {
 		name          string
 		body          *string
-		wantWorktree  bool
 		wantAutoMerge bool
 		wantErr       string
 	}{
 		{name: "absent"},
-		{name: "worktree present true", body: strPtr("worktree_ready = true\n"), wantWorktree: true},
-		{name: "worktree present false", body: strPtr("worktree_ready = false\n")},
 		{name: "auto merge present true", body: strPtr("auto_merge_clean = true\n"), wantAutoMerge: true},
 		{name: "auto merge present false", body: strPtr("auto_merge_clean = false\n")},
-		{name: "both flags", body: strPtr("worktree_ready = true\nauto_merge_clean = true\n"), wantWorktree: true, wantAutoMerge: true},
-		{name: "malformed", body: strPtr("worktree_ready =\n"), wantErr: ".pop.toml"},
+		{name: "worktree_ready causes error", body: strPtr("worktree_ready = true\n"), wantErr: "worktree_ready was removed"},
+		{name: "execution_base causes error", body: strPtr("execution_base = true\n"), wantErr: "execution_base was renamed to trunk"},
+		{name: "queue_base causes error", body: strPtr("queue_base = true\n"), wantErr: "queue_base was renamed to trunk"},
+		{name: "trunk in pop.toml causes error", body: strPtr("trunk = true\n"), wantErr: "trunk is only valid in a global"},
+		{name: "malformed", body: strPtr("auto_merge_clean =\n"), wantErr: ".pop.toml"},
 	}
 
 	for _, tt := range tests {
@@ -376,16 +376,13 @@ func TestLoadRepoConfigWorktreeReady(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
 				}
-				if got.WorktreeReady || got.AutoMergeClean {
+				if got.AutoMergeClean {
 					t.Fatalf("malformed config must degrade to zero repo config, got %+v", got)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
-			}
-			if got.WorktreeReady != tt.wantWorktree {
-				t.Fatalf("WorktreeReady = %v, want %v", got.WorktreeReady, tt.wantWorktree)
 			}
 			if got.AutoMergeClean != tt.wantAutoMerge {
 				t.Fatalf("AutoMergeClean = %v, want %v", got.AutoMergeClean, tt.wantAutoMerge)
@@ -404,7 +401,7 @@ func TestPopTOMLPresenceDoesNotRegisterProject(t *testing.T) {
 	if err := os.MkdirAll(unregistered, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(unregistered, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(unregistered, ".pop.toml"), []byte("auto_merge_clean = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1617,7 +1614,7 @@ projects = [{ path = "/main" }]
 
 		writeFile("private.toml", `
 [repo."/home/user/secret"]
-worktree_ready = true
+trunk = true
 auto_merge_clean = true
 `)
 		configPath := writeFile("config.toml", `
@@ -1633,8 +1630,8 @@ projects = [{ path = "/main" }]
 		if !ok {
 			t.Fatal("expected [repo.\"/home/user/secret\"] to be merged from include")
 		}
-		if block.WorktreeReady == nil || !*block.WorktreeReady {
-			t.Error("worktree_ready should be true")
+		if block.Trunk == nil || !*block.Trunk {
+			t.Error("trunk should be true")
 		}
 		if block.AutoMergeClean == nil || !*block.AutoMergeClean {
 			t.Error("auto_merge_clean should be true")
@@ -1656,13 +1653,13 @@ projects = [{ path = "/main" }]
 
 		writeFile("extra.toml", `
 [repo."/shared/repo"]
-worktree_ready = false
+trunk = false
 `)
 		configPath := writeFile("config.toml", `
 includes = ["extra.toml"]
 
 [repo."/shared/repo"]
-worktree_ready = true
+trunk = true
 `)
 
 		cfg, err := Load(configPath)
@@ -1673,8 +1670,8 @@ worktree_ready = true
 		if !ok {
 			t.Fatal("expected [repo.\"/shared/repo\"] in effective config")
 		}
-		if block.WorktreeReady == nil || !*block.WorktreeReady {
-			t.Error("parent's worktree_ready=true should win")
+		if block.Trunk == nil || !*block.Trunk {
+			t.Error("parent's trunk=true should win")
 		}
 		if len(cfg.Warnings) != 1 {
 			t.Fatalf("expected 1 collision warning, got %d: %v", len(cfg.Warnings), cfg.Warnings)
@@ -1696,11 +1693,11 @@ worktree_ready = true
 
 		writeFile("first.toml", `
 [repo."/shared/repo"]
-worktree_ready = true
+trunk = true
 `)
 		writeFile("second.toml", `
 [repo."/shared/repo"]
-worktree_ready = false
+trunk = false
 `)
 		configPath := writeFile("config.toml", `
 includes = ["first.toml", "second.toml"]
@@ -1714,8 +1711,8 @@ includes = ["first.toml", "second.toml"]
 		if !ok {
 			t.Fatal("expected [repo.\"/shared/repo\"] in effective config")
 		}
-		if block.WorktreeReady == nil || !*block.WorktreeReady {
-			t.Error("first include's worktree_ready=true should win over second include's false")
+		if block.Trunk == nil || !*block.Trunk {
+			t.Error("first include's trunk=true should win over second include's false")
 		}
 		if len(cfg.Warnings) != 1 {
 			t.Fatalf("expected 1 collision warning, got %d: %v", len(cfg.Warnings), cfg.Warnings)
@@ -1886,7 +1883,7 @@ heavy = [{ model = "opus", reasoning = "high" }]
 
 		writeFile("private.toml", `
 [repo."/some/repo"]
-worktree_ready = true
+trunk = true
 unknown_field = "oops"
 `)
 		configPath := writeFile("config.toml", `
@@ -1919,7 +1916,7 @@ includes = ["private.toml"]
 projects = [{ path = "/extra" }]
 
 [repo."/extra/repo"]
-worktree_ready = true
+trunk = true
 `)
 		configPath := writeFile("config.toml", `
 includes = ["extra.toml"]
@@ -2387,8 +2384,8 @@ func makeFSWithBare(bareDir string) *deps.MockFileSystem {
 
 func TestResolveRepoConfigPrecedence(t *testing.T) {
 	root := t.TempDir()
-	// Write .pop.toml at root with worktree_ready = false (explicit)
-	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = false\nauto_merge_clean = true\n"), 0o644); err != nil {
+	// Write .pop.toml at root with auto_merge_clean = true (trunk cannot be set in .pop.toml)
+	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("auto_merge_clean = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2401,18 +2398,18 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 	}}
 
 	t.Run("global override wins over pop.toml", func(t *testing.T) {
-		// Override flips worktree_ready to true; auto_merge_clean not in override → .pop.toml wins
+		// Override sets trunk = true; auto_merge_clean not in override → .pop.toml wins
 		cfg := &Config{
 			Repo: map[string]RepoOverrideConfig{
-				root: {WorktreeReady: boolPtr(true)},
+				root: {Trunk: boolPtr(true)},
 			},
 		}
 		got, err := cfg.ResolveRepoConfig(d, root)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !got.WorktreeReady {
-			t.Errorf("WorktreeReady = false, want true (override wins)")
+		if !got.Trunk {
+			t.Errorf("Trunk = false, want true (override wins)")
 		}
 		if !got.AutoMergeClean {
 			t.Errorf("AutoMergeClean = false, want true (.pop.toml wins when override absent)")
@@ -2425,8 +2422,8 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.WorktreeReady {
-			t.Errorf("WorktreeReady = true, want false (.pop.toml explicit false)")
+		if got.Trunk {
+			t.Errorf("Trunk = true, want false (no override)")
 		}
 		if !got.AutoMergeClean {
 			t.Errorf("AutoMergeClean = false, want true (.pop.toml)")
@@ -2443,14 +2440,14 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.WorktreeReady || got.AutoMergeClean || got.ExecutionBase {
+		if got.Trunk || got.AutoMergeClean {
 			t.Errorf("expected zero defaults, got %+v", got)
 		}
 	})
 }
 
 func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
-	// Global override flips worktree_ready and execution_base for a repo with no .pop.toml
+	// Global override sets trunk for a repo with no .pop.toml
 	dir := t.TempDir()
 	real := deps.NewRealFileSystem()
 	d := &Deps{FS: &deps.MockFileSystem{
@@ -2461,41 +2458,39 @@ func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
 	}}
 	cfg := &Config{
 		Repo: map[string]RepoOverrideConfig{
-			dir: {WorktreeReady: boolPtr(true), ExecutionBase: boolPtr(true)},
+			dir: {Trunk: boolPtr(true)},
 		},
 	}
 	got, err := cfg.ResolveRepoConfig(d, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !got.WorktreeReady {
-		t.Errorf("WorktreeReady = false, want true")
-	}
-	if !got.ExecutionBase {
-		t.Errorf("ExecutionBase = false, want true")
+	if !got.Trunk {
+		t.Errorf("Trunk = false, want true")
 	}
 }
 
 func TestResolveRepoConfigCanonicalizationBareRepo(t *testing.T) {
 	// A bare repo at /bare with worktrees at /bare/main and /bare/feature.
-	// A block keyed by /bare/main should apply worktree_ready to /bare/feature too.
+	// A block keyed by /bare/main should propagate auto_merge_clean to /bare/feature too
+	// (auto_merge_clean is repo-wide; trunk is per-checkout and does not propagate).
 	bareDir := "/bare"
 	d := &Deps{FS: makeFSWithBare(bareDir)}
 
 	cfg := &Config{
 		Repo: map[string]RepoOverrideConfig{
-			bareDir + "/main": {WorktreeReady: boolPtr(true)},
+			bareDir + "/main": {AutoMergeClean: boolPtr(true)},
 		},
 	}
 
-	// Both worktrees should see worktree_ready = true
+	// Both worktrees should see auto_merge_clean = true (repo-wide propagation)
 	for _, checkout := range []string{bareDir + "/main", bareDir + "/feature"} {
 		got, err := cfg.ResolveRepoConfig(d, checkout)
 		if err != nil {
 			t.Fatalf("checkout=%q: unexpected error: %v", checkout, err)
 		}
-		if !got.WorktreeReady {
-			t.Errorf("checkout=%q: WorktreeReady = false, want true", checkout)
+		if !got.AutoMergeClean {
+			t.Errorf("checkout=%q: AutoMergeClean = false, want true", checkout)
 		}
 	}
 
@@ -2504,19 +2499,19 @@ func TestResolveRepoConfigCanonicalizationBareRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bare dir: unexpected error: %v", err)
 	}
-	if !got.WorktreeReady {
-		t.Errorf("bare dir: WorktreeReady = false, want true")
+	if !got.AutoMergeClean {
+		t.Errorf("bare dir: AutoMergeClean = false, want true")
 	}
 }
 
-func TestResolveRepoConfigExecutionBasePerCheckout(t *testing.T) {
-	// execution_base=true block keyed by /bare/main must NOT propagate to /bare/feature.
+func TestResolveRepoConfigTrunkPerCheckout(t *testing.T) {
+	// trunk=true block keyed by /bare/main must NOT propagate to /bare/feature.
 	bareDir := "/bare"
 	d := &Deps{FS: makeFSWithBare(bareDir)}
 
 	cfg := &Config{
 		Repo: map[string]RepoOverrideConfig{
-			bareDir + "/main": {ExecutionBase: boolPtr(true), WorktreeReady: boolPtr(true)},
+			bareDir + "/main": {Trunk: boolPtr(true), AutoMergeClean: boolPtr(true)},
 		},
 	}
 
@@ -2524,22 +2519,22 @@ func TestResolveRepoConfigExecutionBasePerCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !mainGot.ExecutionBase {
-		t.Errorf("main: ExecutionBase = false, want true (keyed checkout)")
+	if !mainGot.Trunk {
+		t.Errorf("main: Trunk = false, want true (keyed checkout)")
 	}
-	if !mainGot.WorktreeReady {
-		t.Errorf("main: WorktreeReady = false, want true")
+	if !mainGot.AutoMergeClean {
+		t.Errorf("main: AutoMergeClean = false, want true")
 	}
 
 	featureGot, err := cfg.ResolveRepoConfig(d, bareDir+"/feature")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if featureGot.ExecutionBase {
-		t.Errorf("feature: ExecutionBase = true, want false (not the keyed checkout)")
+	if featureGot.Trunk {
+		t.Errorf("feature: Trunk = true, want false (not the keyed checkout)")
 	}
-	if !featureGot.WorktreeReady {
-		t.Errorf("feature: WorktreeReady = false, want true (override still applies)")
+	if !featureGot.AutoMergeClean {
+		t.Errorf("feature: AutoMergeClean = false, want true (repo-wide override still applies)")
 	}
 }
 
@@ -2547,7 +2542,7 @@ func TestRepoBlockUnknownKeyWarning(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	content := `
 [repo."/path/to/repo"]
-worktree_ready = true
+trunk = true
 projects = ["should-warn"]
 `
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
@@ -2562,8 +2557,8 @@ projects = ["should-warn"]
 	if !ok {
 		t.Fatalf("repo block not parsed")
 	}
-	if block.WorktreeReady == nil || !*block.WorktreeReady {
-		t.Errorf("worktree_ready not parsed correctly from repo block")
+	if block.Trunk == nil || !*block.Trunk {
+		t.Errorf("trunk not parsed correctly from repo block")
 	}
 	// A warning must be emitted for the unknown key
 	found := false
@@ -2588,7 +2583,7 @@ queue_base = true
 		t.Fatal(err)
 	}
 	_, err := Load(configPath)
-	if err == nil || !strings.Contains(err.Error(), "queue_base was renamed to execution_base") {
+	if err == nil || !strings.Contains(err.Error(), "queue_base was renamed to trunk") {
 		t.Fatalf("Load err = %v, want queue_base rename error", err)
 	}
 }
@@ -2599,8 +2594,8 @@ func TestRepoLocalExecutionBaseHardError(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := LoadRepoConfigWith(&Deps{FS: deps.NewRealFileSystem()}, root)
-	if err == nil || !strings.Contains(err.Error(), "execution_base is only valid in global") {
-		t.Fatalf("LoadRepoConfig err = %v, want global-only execution_base error", err)
+	if err == nil || !strings.Contains(err.Error(), "execution_base was renamed to trunk") {
+		t.Fatalf("LoadRepoConfig err = %v, want execution_base rename error", err)
 	}
 }
 
@@ -2609,7 +2604,6 @@ func TestRepoBlockGlobalOnlyKeysIgnored(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	content := `
 [repo."/path/to/repo"]
-worktree_ready = true
 exclude_current_session = true
 `
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {

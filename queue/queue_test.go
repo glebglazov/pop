@@ -261,7 +261,7 @@ func TestDecideProjectNoReadySet(t *testing.T) {
 	}
 }
 
-func TestDecideProjectReadsRepoWorktreeReady(t *testing.T) {
+func TestDecideProjectWorktreeReadyCausesConfigError(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -279,11 +279,14 @@ func TestDecideProjectReadsRepoWorktreeReady(t *testing.T) {
 
 	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
 
-	if !dec.WorktreeReady {
-		t.Fatalf("WorktreeReady = false, want true: %+v", dec)
+	if dec.WorktreeReady {
+		t.Fatalf("WorktreeReady must always be false from config, got %+v", dec)
 	}
-	if dec.ProjectConfigError != "" {
-		t.Fatalf("ProjectConfigError = %q, want empty", dec.ProjectConfigError)
+	if dec.ProjectConfigError == "" {
+		t.Fatalf("worktree_ready in .pop.toml must cause ProjectConfigError, got empty: %+v", dec)
+	}
+	if !strings.Contains(dec.ProjectConfigError, "worktree_ready was removed") {
+		t.Fatalf("ProjectConfigError = %q, want 'worktree_ready was removed'", dec.ProjectConfigError)
 	}
 }
 
@@ -313,109 +316,6 @@ func TestDecideProjectMalformedRepoConfigReportsAndDegrades(t *testing.T) {
 	}
 }
 
-func TestDecideProjectWorktreeReadyTreatsLiveSpawnAsBusy(t *testing.T) {
-	xdg := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", xdg)
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	d := &Deps{
-		Tasks:   queueTestTasksDeps(true),
-		Project: &project.Deps{FS: deps.NewRealFileSystem()},
-		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
-			if runtimePath == "/pop/worktrees/repo/set" {
-				lock := liveLock(runtimePath)
-				lock.Metadata.SetID = "ready"
-				return lock
-			}
-			return idleLock(runtimePath)
-		},
-		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
-			return &tasks.RefreshResult{Rows: []tasks.Row{
-				{ID: "ready", Status: tasks.StatusReady, AutoDrain: true, Priority: 10, RegIndex: 0},
-			}}, nil
-		},
-	}
-	if err := AppendJournalEntry(d.Tasks, JournalEntry{
-		Event:       JournalEventSpawn,
-		Project:     "proj",
-		SetID:       "ready",
-		RuntimePath: "/pop/worktrees/repo/set",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
-
-	if !dec.Busy || dec.TaskSetID != "ready" {
-		t.Fatalf("expected live worktree spawn to make project busy, got %+v", dec)
-	}
-	if dec.lockStatus == nil || dec.lockStatus.RuntimePath != "/pop/worktrees/repo/set" {
-		t.Fatalf("lockStatus = %+v, want worktree lock", dec.lockStatus)
-	}
-}
-
-func TestDecideProjectWorktreeReadyAdoptedCheckoutNotDoubleCounted(t *testing.T) {
-	// ADR-0036: the current checkout can be adopted into the worktree binding
-	// model, so an open spawn's RuntimePath equals the project's own runtime
-	// path. The openSpawns loop and the direct lock read then see the same live
-	// lock; it must yield exactly one busy decision, not two.
-	xdg := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", xdg)
-	root := initMergeabilityRepo(t)
-	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	td := queueDataDeps(t)
-	td.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
-	d := &Deps{
-		Tasks:   td,
-		Project: &project.Deps{FS: deps.NewRealFileSystem()},
-		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
-			if runtimePath == root {
-				lock := liveLock(runtimePath)
-				lock.Metadata.SetID = "adopted"
-				return lock
-			}
-			return idleLock(runtimePath)
-		},
-		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
-			return &tasks.RefreshResult{Rows: []tasks.Row{
-				{ID: "adopted", Status: tasks.StatusReady, AutoDrain: true, Priority: 20, RegIndex: 0},
-				{ID: "other", Status: tasks.StatusReady, AutoDrain: true, Priority: 10, RegIndex: 1},
-			}}, nil
-		},
-	}
-	if err := AppendJournalEntry(d.Tasks, JournalEntry{
-		Event:       JournalEventSpawn,
-		Project:     "proj",
-		SetID:       "adopted",
-		RuntimePath: root,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
-
-	var busy, actionable []string
-	for _, dec := range decisions {
-		if dec.Busy {
-			busy = append(busy, dec.TaskSetID)
-		}
-		if dec.Actionable() {
-			actionable = append(actionable, dec.TaskSetID)
-		}
-	}
-	// The adopted spawn appears once as busy (not double-counted), and the repo's
-	// other Ready set still dispatches into a fresh worktree.
-	if !reflect.DeepEqual(busy, []string{"adopted"}) {
-		t.Fatalf("busy sets = %#v, want single adopted (no double-count)", busy)
-	}
-	if !reflect.DeepEqual(actionable, []string{"other"}) {
-		t.Fatalf("actionable sets = %#v, want other dispatched into fresh worktree", actionable)
-	}
-}
 
 func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 	// Under the adopt-current-checkout model several sets share one runtime path.
@@ -426,9 +326,6 @@ func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", xdg)
 	root := initMergeabilityRepo(t)
-	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	td := queueDataDeps(t)
 	td.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
 	d := &Deps{
@@ -512,68 +409,8 @@ func TestScanTreatsDrainAtHITLGateRuntimeLockAsBusy(t *testing.T) {
 	}
 }
 
-func TestDecideProjectDispatchesWorktreeReadyReadySetsConcurrently(t *testing.T) {
-	xdg := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", xdg)
-	root := initMergeabilityRepo(t)
-	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	td := queueDataDeps(t)
-	td.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
-	d := &Deps{
-		Tasks:   td,
-		Project: &project.Deps{FS: deps.NewRealFileSystem()},
-		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
-			if runtimePath == "/pop/worktrees/repo/set-a" {
-				lock := liveLock(runtimePath)
-				lock.Metadata.SetID = "set-a"
-				return lock
-			}
-			return idleLock(runtimePath)
-		},
-		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
-			return &tasks.RefreshResult{Rows: []tasks.Row{
-				{ID: "set-a", Status: tasks.StatusReady, AutoDrain: true, Priority: 30, RegIndex: 0},
-				{ID: "set-b", Status: tasks.StatusReady, AutoDrain: true, Priority: 20, RegIndex: 1},
-				{ID: "set-c", Status: tasks.StatusReady, AutoDrain: true, Priority: 10, RegIndex: 2},
-				{ID: "blocked", Status: tasks.StatusBlocked, Priority: 100, RegIndex: 3},
-			}}, nil
-		},
-	}
-	if err := AppendJournalEntry(td, JournalEntry{
-		Event:       JournalEventSpawn,
-		Project:     "proj",
-		SetID:       "set-a",
-		RuntimePath: "/pop/worktrees/repo/set-a",
-	}); err != nil {
-		t.Fatal(err)
-	}
 
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
-
-	var busy []string
-	var actionable []string
-	for _, dec := range decisions {
-		if dec.Busy {
-			busy = append(busy, dec.TaskSetID)
-		}
-		if dec.Actionable() {
-			actionable = append(actionable, dec.TaskSetID)
-			if !dec.WorktreeReady {
-				t.Fatalf("actionable worktree decision lost WorktreeReady: %+v", dec)
-			}
-		}
-	}
-	if !reflect.DeepEqual(busy, []string{"set-a"}) {
-		t.Fatalf("busy sets = %#v, want set-a", busy)
-	}
-	if !reflect.DeepEqual(actionable, []string{"set-b", "set-c"}) {
-		t.Fatalf("actionable sets = %#v, want set-b,set-c", actionable)
-	}
-}
-
-func TestDecideProjectDispatchesNonWorktreeReadyKeepsSingleInPlaceDrain(t *testing.T) {
+func TestDecideProjectDispatchesKeepsSingleInPlaceDrain(t *testing.T) {
 	d := &Deps{
 		Tasks:    queueTestTasksDeps(true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
@@ -760,9 +597,14 @@ func TestProvisionWorktreeAddsFreshBranchFromHead(t *testing.T) {
 	}
 }
 
-func TestPrepareWorktreeDrainKeepsProjectSessionAndOverridesRuntimePath(t *testing.T) {
+// TestPrepareWorktreeDrainUnboundStaysOnRepresentativeCheckout asserts an
+// unbound worktree-ready drain keeps the originating project session and stays
+// on the representative checkout: routing no longer provisions, so the runtime
+// path is not redirected to a managed worktree (ADR-0052). The "must not
+// provision" sentinel ensures a `git worktree add` would surface as an error.
+func TestPrepareWorktreeDrainUnboundStaysOnRepresentativeCheckout(t *testing.T) {
 	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
-	d := worktreeProvisionDeps(t, now, nil)
+	d := worktreeProvisionDeps(t, now, fmt.Errorf("must not provision"))
 	dec := actionableDecision()
 	dec.WorktreeReady = true
 	dec.scan.RuntimePath = "/repo"
@@ -770,11 +612,8 @@ func TestPrepareWorktreeDrainKeepsProjectSessionAndOverridesRuntimePath(t *testi
 
 	got := prepareWorktreeDrain(d, &bytes.Buffer{}, dec)
 
-	if got.scan.RuntimePath == "/repo" || got.scan.RuntimePath == "" {
-		t.Fatalf("RuntimePath was not overridden: %+v", got.scan)
-	}
-	if got.scan.ProjectPath != got.scan.RuntimePath {
-		t.Fatalf("ProjectPath = %q, RuntimePath = %q; want worktree checkout for both", got.scan.ProjectPath, got.scan.RuntimePath)
+	if got.scan.RuntimePath != "/repo" || got.scan.ProjectPath != "/repo" {
+		t.Fatalf("unbound drain must stay on representative checkout, got %+v", got.scan)
 	}
 	if got.scan.SessionName != dec.scan.SessionName {
 		t.Fatalf("SessionName = %q, want originating project session %q", got.scan.SessionName, dec.scan.SessionName)
@@ -795,21 +634,59 @@ func TestPrepareWorktreeDrainNonReadyStaysInPlace(t *testing.T) {
 	}
 }
 
-func TestPrepareWorktreeDrainProvisionFailureFallsBackInPlace(t *testing.T) {
-	d := worktreeProvisionDeps(t, time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC), fmt.Errorf("boom"))
-	dec := actionableDecision()
-	dec.WorktreeReady = true
-	dec.scan.RuntimePath = "/repo"
-	dec.scan.ProjectPath = "/repo"
-	var out bytes.Buffer
-
-	got := prepareWorktreeDrain(d, &out, dec)
-
-	if got.scan.RuntimePath != "/repo" || got.scan.ProjectPath != "/repo" {
-		t.Fatalf("failed provisioning must fall back in-place, got %+v", got.scan)
+// TestPrepareWorktreeDrainUnboundSetsSerializeOnRepresentative asserts that two
+// unbound auto-drain sets in one repo both route to the single representative
+// checkout — no `git worktree add` runs — so they queue on that checkout's
+// Runtime execution lock instead of fanning into separate worktrees (ADR-0052).
+func TestPrepareWorktreeDrainUnboundSetsSerializeOnRepresentative(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
+	worktreeAddCalls := 0
+	real := deps.NewRealFileSystem()
+	gitMock := func(dir string, args ...string) (string, error) {
+		if reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}) {
+			return filepath.Join("/repo", ".git"), nil
+		}
+		if len(args) >= 2 && args[0] == "worktree" && args[1] == "add" {
+			worktreeAddCalls++
+		}
+		return "", nil
 	}
-	if !strings.Contains(out.String(), "falling back to in-place drain") {
-		t.Fatalf("fallback was not reported: %q", out.String())
+	d := &Deps{
+		Tasks: &tasks.Deps{
+			FS: &deps.MockFileSystem{
+				GetenvFunc:       func(key string) string { return xdg },
+				EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
+				MkdirAllFunc:     real.MkdirAll,
+				WriteFileFunc:    real.WriteFile,
+				ReadFileFunc:     real.ReadFile,
+				RenameFunc:       real.Rename,
+				StatFunc:         real.Stat,
+			},
+			Git: &deps.MockGit{CommandInDirFunc: gitMock},
+		},
+		Now: func() time.Time { return now },
+	}
+
+	var routed []Decision
+	for _, setID := range []string{"2026-06-14-alpha", "2026-06-14-beta"} {
+		dec := actionableDecision()
+		dec.TaskSetID = setID
+		dec.WorktreeReady = true
+		dec.scan.RuntimePath = "/repo"
+		dec.scan.ProjectPath = "/repo"
+		routed = append(routed, prepareWorktreeDrain(d, &bytes.Buffer{}, dec))
+	}
+
+	if worktreeAddCalls != 0 {
+		t.Fatalf("git worktree add calls = %d, want 0 — unbound sets must not provision separate worktrees", worktreeAddCalls)
+	}
+	if routed[0].scan.RuntimePath != "/repo" || routed[1].scan.RuntimePath != "/repo" {
+		t.Fatalf("both unbound sets must land on the representative checkout /repo, got %q and %q", routed[0].scan.RuntimePath, routed[1].scan.RuntimePath)
+	}
+	if routed[0].scan.RuntimePath != routed[1].scan.RuntimePath {
+		t.Fatalf("unbound sets routed to different checkouts (%q != %q); expected one shared checkout to serialize on", routed[0].scan.RuntimePath, routed[1].scan.RuntimePath)
 	}
 }
 

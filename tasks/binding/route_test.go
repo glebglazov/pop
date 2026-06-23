@@ -1,12 +1,8 @@
 package binding
 
 import (
-	"errors"
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
@@ -43,8 +39,6 @@ func TestRouteDrainCheckoutExistingBindingWins(t *testing.T) {
 		CurrentCheckout: repo,
 		SetID:           "set-a",
 		Trigger:         TriggerImplementForeground,
-		WorktreeReady:   true,
-		WorktreesRoot:   filepath.Join(tasks.TaskStorageRoot(td), "worktrees"),
 	})
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -54,109 +48,29 @@ func TestRouteDrainCheckoutExistingBindingWins(t *testing.T) {
 	}
 }
 
-func TestRouteDrainCheckoutInlineRejectedWhenBound(t *testing.T) {
-	td := routeTestDeps(t)
-	repo := initAdoptRepo(t)
-	wt := addLinkedWorktree(t, repo, "feature")
-	seedBinding(t, td, wt, "set-a", Adopt(wt, "feature", "proj"))
-
-	_, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
-		TD:              td,
-		CurrentCheckout: repo,
-		SetID:           "set-a",
-		Trigger:         TriggerImplementForeground,
-		Inline:          true,
-	})
-	if !errors.Is(err, ErrInlineWhenBound) {
-		t.Fatalf("err = %v, want ErrInlineWhenBound", err)
-	}
-}
-
-func TestRouteDrainCheckoutWorktreeReadyProvisionsFromExecutionBase(t *testing.T) {
+// TestRouteDrainCheckoutUnboundUsesCurrentCheckout asserts an unbound whole-set
+// drain with no flags resolves to the current checkout and never provisions a
+// managed worktree — routing has no `git worktree add` path (ADR-0052).
+func TestRouteDrainCheckoutUnboundUsesCurrentCheckout(t *testing.T) {
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	worktreeAddCalls := 0
-	gotDir := ""
-	gotArgs := []string(nil)
 	innerGit := deps.NewRealGit()
-	rec := &interceptGit{
+	td.Git = &interceptGit{
 		inner: innerGit,
 		onCommandInDir: func(dir string, args ...string) (string, error) {
 			if len(args) >= 2 && args[0] == "worktree" && args[1] == "add" {
 				worktreeAddCalls++
-				gotDir = dir
-				gotArgs = append([]string(nil), args...)
-				return "", nil
 			}
 			return innerGit.CommandInDir(dir, args...)
 		},
 	}
-	td.Git = rec
 
-	worktreesRoot := filepath.Join(tasks.TaskStorageRoot(td), "worktrees")
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
 		CurrentCheckout: repo,
 		SetID:           "set-with-spaces",
 		Trigger:         TriggerImplementForeground,
-		WorktreeReady:   true,
-		WorktreesRoot:   worktreesRoot,
-		Now:             time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC),
-	})
-	if err != nil {
-		t.Fatalf("route: %v", err)
-	}
-	if !got.ProvisionedNew {
-		t.Fatalf("result = %+v, want provisioned new worktree", got)
-	}
-	wantBase, _ := filepath.EvalSymlinks(repo)
-	gotBase, _ := filepath.EvalSymlinks(got.ExecutionBase)
-	if gotBase != wantBase {
-		t.Fatalf("ExecutionBase = %q, want %q", gotBase, wantBase)
-	}
-	if worktreeAddCalls != 1 {
-		t.Fatalf("worktree add calls = %d, want 1", worktreeAddCalls)
-	}
-	if gotDir != repo {
-		gotDirCanon, _ := filepath.EvalSymlinks(gotDir)
-		wantDir, _ := filepath.EvalSymlinks(repo)
-		if gotDirCanon != wantDir {
-			t.Fatalf("git worktree add dir = %q, want %q", gotDir, repo)
-		}
-	}
-	if len(gotArgs) < 4 || gotArgs[len(gotArgs)-1] != "HEAD" {
-		t.Fatalf("git args = %#v, want ... HEAD", gotArgs)
-	}
-}
-
-func TestRouteDrainCheckoutQueueProvisionFallbackInline(t *testing.T) {
-	td := routeTestDeps(t)
-	repo := initAdoptRepo(t)
-	realFS := deps.NewRealFileSystem()
-	td.FS = &deps.MockFileSystem{
-		GetenvFunc:       os.Getenv,
-		EvalSymlinksFunc: realFS.EvalSymlinks,
-		MkdirAllFunc: func(path string, perm os.FileMode) error {
-			if strings.Contains(path, string(filepath.Separator)+"worktrees"+string(filepath.Separator)) {
-				return errors.New("boom")
-			}
-			return realFS.MkdirAll(path, perm)
-		},
-		WriteFileFunc: realFS.WriteFile,
-		ReadFileFunc:  realFS.ReadFile,
-		RenameFunc:    realFS.Rename,
-		StatFunc:      realFS.Stat,
-	}
-
-	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
-		TD:                 td,
-		CurrentCheckout:    repo,
-		SetID:              "set-a",
-		Trigger:            TriggerQueueSpawn,
-		WorktreeReady:      true,
-		OnProvisionFailure: ProvisionFallbackInline,
-		WorktreesRoot:      filepath.Join(tasks.TaskStorageRoot(td), "worktrees"),
-		Now:                time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -165,21 +79,24 @@ func TestRouteDrainCheckoutQueueProvisionFallbackInline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime: %v", err)
 	}
-	if got.RuntimePath != currentRuntime || got.ProvisionedNew {
-		t.Fatalf("result = %+v, want in-place fallback at %q", got, currentRuntime)
+	if got.RuntimePath != currentRuntime || got.UsedExistingBinding {
+		t.Fatalf("result = %+v, want current checkout %q with no binding", got, currentRuntime)
+	}
+	if worktreeAddCalls != 0 {
+		t.Fatalf("worktree add calls = %d, want 0 — routing must not provision", worktreeAddCalls)
 	}
 }
 
-func TestResolveExecutionBasePathUsesConfigOverride(t *testing.T) {
+func TestResolveTrunkPathUsesConfigOverride(t *testing.T) {
 	td := routeTestDeps(t)
 	main := initAdoptRepo(t)
 	base := addLinkedWorktree(t, main, "exec-base")
 	cfg := &config.Config{
 		Repo: map[string]config.RepoOverrideConfig{
-			base: {ExecutionBase: boolPtr(true)},
+			base: {Trunk: boolPtr(true)},
 		},
 	}
-	path, bare, err := ResolveExecutionBasePath(td, cfg, main)
+	path, bare, err := ResolveTrunkPath(td, cfg, main)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}

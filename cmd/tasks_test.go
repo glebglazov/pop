@@ -954,13 +954,44 @@ func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
 	_ = root
 }
 
-func TestRunTasksCmdWorktreeReadyDefaultsManagedWorktree(t *testing.T) {
+// TestRunTasksCmdUnboundDrainsInCurrentCheckout asserts a default (non-inline)
+// whole-set run does not auto-provision a managed worktree: it drains inline in
+// the current checkout and records no Worktree binding (ADR-0052).
+func TestRunTasksCmdUnboundDrainsInCurrentCheckout(t *testing.T) {
 	root := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
-	writeFileCmd(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
 
 	resetTaskFlags()
 	taskAgentCmd = agent
+	t.Cleanup(resetTaskFlags)
+
+	if err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false); err != nil {
+		t.Fatalf("run task set: %v", err)
+	}
+
+	store, err := binding.Load(tasks.DefaultDeps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := store.Get(binding.Key(id, "demo")); ok {
+		t.Fatalf("unexpected worktree binding for unbound run: %+v", b)
+	}
+}
+
+// TestRunTasksCmdInWorktreeProvisionsAndBinds asserts `--in-worktree` forks a
+// managed worktree off the trunk and records a provisioned Worktree binding so
+// the set enters the Integration backlog (ADR-0052).
+func TestRunTasksCmdInWorktreeProvisionsAndBinds(t *testing.T) {
+	root := setupRunTaskCmdFixture(t)
+	agent := writeRunTaskFakeAgent(t, root)
+
+	resetTaskFlags()
+	taskAgentCmd = agent
+	taskInWorktree = true
 	t.Cleanup(resetTaskFlags)
 
 	if err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false); err != nil {
@@ -977,40 +1008,46 @@ func TestRunTasksCmdWorktreeReadyDefaultsManagedWorktree(t *testing.T) {
 	}
 	b, ok := store.Get(binding.Key(id, "demo"))
 	if !ok {
-		t.Fatalf("missing binding for demo: %+v", store.Bindings)
+		t.Fatalf("expected provisioned worktree binding for --in-worktree run")
 	}
 	if !b.Provisioned {
-		t.Fatalf("binding Provisioned = false, want managed worktree: %+v", b)
+		t.Fatalf("binding = %+v, want Provisioned=true", b)
 	}
-	if b.RuntimePath == "" || b.RuntimePath == root {
-		t.Fatalf("runtime path = %q, want managed worktree distinct from %q", b.RuntimePath, root)
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	gotRuntime, _ := filepath.EvalSymlinks(b.RuntimePath)
+	if gotRuntime == wantRoot {
+		t.Fatalf("provisioned worktree = current checkout %q, want a distinct managed worktree", wantRoot)
 	}
 }
 
-func TestRunTasksCmdInlineBypassesWorktreeReadyDefault(t *testing.T) {
+// TestRunTasksCmdInWorktreeRejectsBoundSet asserts `--in-worktree` on an
+// already-bound set is rejected with guidance to unbind first.
+func TestRunTasksCmdInWorktreeRejectsBoundSet(t *testing.T) {
 	root := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
-	writeFileCmd(t, filepath.Join(root, ".pop.toml"), "worktree_ready = true\n")
 
-	resetTaskFlags()
-	taskAgentCmd = agent
-	taskInline = true
-	t.Cleanup(resetTaskFlags)
-
-	if err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false); err != nil {
-		t.Fatalf("run task set: %v", err)
-	}
-
-	store, err := binding.Load(tasks.DefaultDeps())
-	if err != nil {
-		t.Fatal(err)
+	wt := filepath.Join(t.TempDir(), "existing-wt")
+	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "feature", wt, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
 	}
 	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, ok := store.Get(binding.Key(id, "demo")); ok {
-		t.Fatalf("unexpected worktree binding for inline run: %+v", b)
+	store := &binding.Store{}
+	store.Put(binding.Key(id, "demo"), binding.Adopt(wt, "feature", ""))
+	if err := binding.Save(tasks.DefaultDeps(), store); err != nil {
+		t.Fatal(err)
+	}
+
+	resetTaskFlags()
+	taskAgentCmd = agent
+	taskInWorktree = true
+	t.Cleanup(resetTaskFlags)
+
+	err = runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false)
+	if err == nil || !strings.Contains(err.Error(), "already bound") || !strings.Contains(err.Error(), "unbind-worktree") {
+		t.Fatalf("err = %v, want already-bound rejection with unbind guidance", err)
 	}
 }
 
@@ -1324,7 +1361,7 @@ func resetTaskFlags() {
 	taskAgentCmd = ""
 	taskAgentOutput = ""
 	taskRunYes = false
-	taskInline = false
+	taskInWorktree = false
 	taskAllowDirty = tasks.DirtyRuntimeContinue
 	taskExportOutput = ""
 	taskImportAs = ""

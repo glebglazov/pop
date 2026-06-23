@@ -6,10 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -21,50 +19,36 @@ const (
 	TriggerQueueSpawn
 )
 
-// ProvisionFailureMode selects behavior when managed worktree provisioning fails.
-type ProvisionFailureMode int
-
-const (
-	ProvisionFail ProvisionFailureMode = iota
-	ProvisionFallbackInline
-)
-
 // RouteDrainCheckoutRequest carries inputs for drain checkout resolution.
-// Precedence: existing Worktree binding → runtime-path override → managed
-// worktree from Execution base (worktree-ready, not inline) → current checkout.
+// Precedence: existing Worktree binding → runtime-path override → current
+// checkout. Routing never provisions a worktree (ADR-0052).
 type RouteDrainCheckoutRequest struct {
-	TD                 *tasks.Deps
-	PD                 *project.Deps
-	Cfg                *config.Config
-	CurrentCheckout    string
-	SetID              string
-	Trigger            DrainTrigger
-	Inline             bool
-	RuntimeOverride    string
-	WorktreeReady      bool
-	OnProvisionFailure ProvisionFailureMode
-	ProjectName        string
-	WorktreesRoot      string
-	Now                time.Time
+	TD              *tasks.Deps
+	CurrentCheckout string
+	SetID           string
+	Trigger         DrainTrigger
+	RuntimeOverride string
 }
 
 // RouteDrainCheckoutResult describes the resolved drain checkout.
 type RouteDrainCheckoutResult struct {
 	RuntimePath         string
-	ExecutionBase       string
 	UsedExistingBinding bool
-	ProvisionedNew      bool
 	Binding             Binding
 }
 
 var (
-	ErrInlineWhenBound       = errors.New("inline conflicts with worktree binding")
 	ErrRuntimeOverrideConflict = errors.New("runtime override conflicts with bound worktree")
-	ErrNeedsExecutionBase    = errors.New("needs execution_base")
-	ErrBoundWorktreeInvalid  = errors.New("bound worktree invalid")
+	ErrBoundWorktreeInvalid    = errors.New("bound worktree invalid")
 )
 
-// RouteDrainCheckout resolves which checkout a set drain runs in.
+// RouteDrainCheckout resolves which checkout a set drain runs in. It never
+// provisions a worktree (ADR-0052): an existing Worktree binding resumes there,
+// an explicit runtime-path override resolves to that checkout, and otherwise the
+// drain runs in the current checkout. "Drain where you are" follows for free —
+// a linked current checkout is adopted (a never-delete adopted binding recorded
+// by the executor), the trunk drains inline with no binding. Provisioning is an
+// explicit act handled outside routing.
 func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult, error) {
 	if req.TD == nil {
 		return RouteDrainCheckoutResult{}, fmt.Errorf("missing task dependencies")
@@ -76,9 +60,6 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 	checkout := strings.TrimSpace(req.CurrentCheckout)
 	if checkout == "" {
 		return RouteDrainCheckoutResult{}, fmt.Errorf("checkout path is required")
-	}
-	if req.Now.IsZero() {
-		req.Now = time.Now().UTC()
 	}
 
 	repoID, err := tasks.ResolveRepositoryIdentity(req.TD, checkout)
@@ -97,10 +78,8 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 		return RouteDrainCheckoutResult{}, err
 	}
 
+	// 1. An existing Worktree binding resumes there.
 	if existing, ok := store.Get(key); ok && strings.TrimSpace(existing.RuntimePath) != "" {
-		if req.Inline {
-			return RouteDrainCheckoutResult{}, fmt.Errorf("%w: task set %s; run `pop tasks unbind-worktree %s` before --inline", ErrInlineWhenBound, setID, setID)
-		}
 		if override := strings.TrimSpace(req.RuntimeOverride); override != "" {
 			overridePath, err := tasks.ResolveRuntimePathWith(req.TD, checkout, override)
 			if err != nil {
@@ -122,95 +101,24 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 		}, nil
 	}
 
+	// 2. An explicit runtime-path override resolves to that checkout.
 	if override := strings.TrimSpace(req.RuntimeOverride); override != "" {
 		runtimePath, err := tasks.ResolveRuntimePathWith(req.TD, checkout, override)
 		if err != nil {
 			return RouteDrainCheckoutResult{}, err
 		}
-		if req.Inline {
-			linked, err := IsLinkedWorktree(req.TD, runtimePath)
-			if err != nil {
-				return RouteDrainCheckoutResult{}, err
-			}
-			if linked {
-				return RouteDrainCheckoutResult{}, fmt.Errorf("tasks implement: --inline conflicts with linked --task-runtime-path %s", runtimePath)
-			}
-		}
 		return RouteDrainCheckoutResult{RuntimePath: runtimePath}, nil
 	}
 
-	if req.Inline {
-		return RouteDrainCheckoutResult{RuntimePath: currentRuntime}, nil
-	}
-
-	linked, err := IsLinkedWorktree(req.TD, currentRuntime)
-	if err != nil {
-		return RouteDrainCheckoutResult{}, err
-	}
-	if linked {
-		return RouteDrainCheckoutResult{RuntimePath: currentRuntime}, nil
-	}
-
-	if !req.WorktreeReady {
-		return RouteDrainCheckoutResult{RuntimePath: currentRuntime}, nil
-	}
-
-	basePath, bare, err := ResolveExecutionBasePath(req.TD, req.Cfg, checkout)
-	if err != nil {
-		return RouteDrainCheckoutResult{}, err
-	}
-	if bare || strings.TrimSpace(basePath) == "" {
-		if req.Trigger == TriggerImplementForeground {
-			return RouteDrainCheckoutResult{}, fmt.Errorf("tasks implement: %w; skipped", ErrNeedsExecutionBase)
-		}
-		if req.OnProvisionFailure == ProvisionFallbackInline {
-			return RouteDrainCheckoutResult{RuntimePath: currentRuntime}, nil
-		}
-		return RouteDrainCheckoutResult{}, ErrNeedsExecutionBase
-	}
-
-	managed, err := provisionManagedBinding(req, store, key, basePath, repoID)
-	if err != nil {
-		if req.OnProvisionFailure == ProvisionFallbackInline {
-			return RouteDrainCheckoutResult{RuntimePath: currentRuntime}, nil
-		}
-		return RouteDrainCheckoutResult{}, err
-	}
-	return RouteDrainCheckoutResult{
-		RuntimePath:    managed.RuntimePath,
-		ExecutionBase:  basePath,
-		ProvisionedNew: true,
-		Binding:        managed,
-	}, nil
+	// 3. Otherwise the drain runs in the current checkout — no provisioning.
+	return RouteDrainCheckoutResult{RuntimePath: currentRuntime}, nil
 }
 
-func provisionManagedBinding(req RouteDrainCheckoutRequest, store *Store, key, basePath string, repoID *tasks.RepositoryIdentity) (Binding, error) {
-	if existing, ok := store.Get(key); ok && strings.TrimSpace(existing.RuntimePath) != "" {
-		return existing, nil
-	}
-	if strings.TrimSpace(req.WorktreesRoot) == "" {
-		return Binding{}, fmt.Errorf("worktrees root is required to provision")
-	}
-	managed, err := ProvisionWorktree(req.TD, req.WorktreesRoot, basePath, req.SetID, req.Now)
-	if err != nil {
-		return Binding{}, err
-	}
-	if req.ProjectName != "" {
-		managed.Project = req.ProjectName
-	} else {
-		managed.Project = DetectProject(req.PD, req.TD, req.Cfg, repoID)
-	}
-	store.Put(key, managed)
-	if err := Save(req.TD, store); err != nil {
-		return Binding{}, err
-	}
-	return managed, nil
-}
-
-// ResolveExecutionBasePath resolves the repository checkout used as Execution
-// base: explicit execution_base override, then the git main worktree for
-// non-bare repositories.
-func ResolveExecutionBasePath(td *tasks.Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
+// ResolveTrunkPath resolves the repository checkout used as the Trunk worktree:
+// explicit trunk = true override, then the git main worktree for non-bare
+// repositories. Returns (path, false, nil) on success; (_, true, nil) when the
+// repo is bare with no trunk override (caller must refuse and name a trunk).
+func ResolveTrunkPath(td *tasks.Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
 	if td == nil {
 		return "", false, fmt.Errorf("missing task dependencies")
 	}
@@ -220,7 +128,7 @@ func ResolveExecutionBasePath(td *tasks.Deps, cfg *config.Config, checkoutPath s
 	}
 	if cfg != nil {
 		for rawKey, block := range cfg.Repo {
-			if block.ExecutionBase == nil || !*block.ExecutionBase {
+			if block.Trunk == nil || !*block.Trunk {
 				continue
 			}
 			candidate, err := tasks.NormalizeProjectPathWith(td, rawKey)

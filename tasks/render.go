@@ -23,13 +23,12 @@ type RefreshResult struct {
 
 // CheckoutStatus describes where a whole-set implement started here would run.
 // Worktree is true for a linked git worktree (implement adopts it; the set is
-// integrateable). WorktreeReady means an unbound whole-set drain from the base
-// checkout provisions a managed worktree by default.
+// integrateable). A non-worktree checkout is the Trunk worktree and drains
+// inline by default.
 type CheckoutStatus struct {
-	Path          string
-	Worktree      bool
-	Branch        string
-	WorktreeReady bool
+	Path     string
+	Worktree bool
+	Branch   string
 }
 
 // Refresh discovers Task sets, auto-registers them, and builds table rows.
@@ -254,11 +253,7 @@ func renderCheckout(out *output, cs *CheckoutStatus) {
 		out.line(ansiCyan, "Checkout: %s — implement adopts it (integrateable)", where)
 		return
 	}
-	if cs.WorktreeReady {
-		out.line(ansiCyan, "Checkout: execution base — whole-set implement provisions a worktree")
-		return
-	}
-	out.line(ansiDim, "Checkout: execution base — whole-set implement drains inline")
+	out.line(ansiDim, "Checkout: Trunk worktree — whole-set implement drains inline")
 }
 
 func renderArchivedFooter(out *output, result *RefreshResult) {

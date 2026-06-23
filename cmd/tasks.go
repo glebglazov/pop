@@ -30,7 +30,7 @@ var (
 	taskAgentCmd          string
 	taskAgentOutput       tasks.AgentOutputMode
 	taskRunYes            bool
-	taskInline            bool
+	taskInWorktree        bool
 	taskAllowDirty        tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
 	taskMaxTries          int
 	taskTimeout           string
@@ -218,7 +218,7 @@ func init() {
 	taskImplementCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
 	taskImplementCmd.Flags().StringVar(&taskTimeout, "timeout", "1h", "Maximum duration per attempt")
 	taskImplementCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip confirmation prompt")
-	taskImplementCmd.Flags().BoolVar(&taskInline, "inline", false, "Drain in the current checkout instead of provisioning a worktree")
+	taskImplementCmd.Flags().BoolVar(&taskInWorktree, "in-worktree", false, "Provision a managed worktree forked from the trunk and drain there")
 
 	taskExportCmd.Flags().StringVarP(&taskExportOutput, "output", "o", "", "Output archive path (default: <task-set-id>.tar.gz in the current directory)")
 	taskImportCmd.Flags().StringVar(&taskImportAs, "as", "", "Install under a different task set identifier")
@@ -279,10 +279,6 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 			cs := &tasks.CheckoutStatus{Path: runtimePath, Worktree: linked}
 			if linked {
 				cs.Branch = binding.CurrentBranch(d, runtimePath)
-			} else if cfg, err := taskConfigLoad(config.DefaultConfigPath()); err == nil {
-				if repoConfig, err := cfg.ResolveRepoConfig(&config.Deps{FS: taskProjectDeps().FS}, resolved.ProjectPath); err == nil {
-					cs.WorktreeReady = repoConfig.WorktreeReady
-				}
 			}
 			result.Checkout = cs
 		}
@@ -505,9 +501,6 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 	if err != nil {
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
 	}
-	if err := validateInlineRuntimeOverride(d, taskResolveInput()); err != nil {
-		return err
-	}
 	result, err := tasks.RunTaskWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskOptions{
 		ResolveInput:     taskResolveInput(),
 		TaskPathOverride: taskPath,
@@ -547,7 +540,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 	_, err = implement.RunWholeSetWith(impl, implement.WholeSetOptions{
 		ResolveInput:    taskResolveInput(),
 		TaskSetOverride: taskSetPath,
-		Inline:          taskInline,
+		InWorktree:      taskInWorktree,
 		AgentPreset:     selectedTaskAgentPreset(),
 		AgentPresets:    selectedTaskAgentPresets(),
 		AgentExplicit:   agentExplicit,
@@ -562,28 +555,6 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		Output:          stdout,
 	})
 	return err
-}
-
-func validateInlineRuntimeOverride(d *tasks.Deps, in tasks.ResolveInput) error {
-	if !taskInline || strings.TrimSpace(in.RuntimeOverride) == "" {
-		return nil
-	}
-	resolved, err := tasks.ResolvePathsWith(d, taskProjectDeps(), taskConfigLoad, in)
-	if err != nil {
-		return err
-	}
-	runtimePath, err := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, in.RuntimeOverride)
-	if err != nil {
-		return err
-	}
-	linked, err := binding.IsLinkedWorktree(d, runtimePath)
-	if err != nil {
-		return err
-	}
-	if linked {
-		return fmt.Errorf("tasks implement: --inline conflicts with linked --task-runtime-path %s", runtimePath)
-	}
-	return nil
 }
 
 func selectedTaskAgentPresets() []string {

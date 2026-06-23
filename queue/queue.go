@@ -429,9 +429,9 @@ func decideProject(d *Deps, scan projectScan, state *DaemonState, now time.Time)
 }
 
 // decideProjectDispatches reads runtime locks and Ready sets for one project.
-// Non-worktree-ready projects remain v1: one live checkout lock makes the
-// project busy, otherwise the highest-priority Ready set is selected. A
-// worktree-ready project keeps live worktree drains as per-checkout busy
+// One live checkout lock makes the project busy; otherwise the
+// highest-priority Ready set is selected. A project with an explicit
+// WorktreeReady Decision keeps live worktree drains as per-checkout busy
 // Decisions but may still dispatch other Ready sets into fresh worktrees.
 func decideProjectDispatches(d *Deps, scan projectScan, state *DaemonState, now time.Time) []Decision {
 	dec := Decision{Project: scan.Name, scan: scan}
@@ -585,11 +585,11 @@ func liveOpenSpawns(d *Deps, projectName string) ([]liveOpenSpawn, error) {
 }
 
 func readRepoConfig(d *Deps, repoRoot string) (bool, string) {
-	cfg, err := loadRepoConfig(d, repoRoot)
+	_, err := loadRepoConfig(d, repoRoot)
 	if err != nil {
 		return false, err.Error()
 	}
-	return cfg.WorktreeReady, ""
+	return false, ""
 }
 
 func loadRepoConfig(d *Deps, repoRoot string) (config.RepoConfig, error) {
