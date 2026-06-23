@@ -123,6 +123,36 @@ func TestDecideRepoDispatchesBareMultiWorktreeCollapsesToOneDrain(t *testing.T) 
 	}
 }
 
+// TestDecideRepoDispatchesExecutionRenameIsFatal proves the migration tripwire
+// stays loud for a consuming command (ADR 0054): a queue_base→trunk rename,
+// carried as a blocking "repo" finding, makes the queue's representative
+// resolver fail fatally with the migration message rather than silently routing
+// the drain elsewhere. The same finding is invisible to the project dashboard
+// (covered in cmd/project_test.go).
+func TestDecideRepoDispatchesExecutionRenameIsFatal(t *testing.T) {
+	_, wts := initBareRepoWithWorktrees(t, 2)
+	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
+	scans := scansForCheckouts(wts, "/def")
+
+	cfg := &config.Config{Findings: []config.Finding{{
+		Path:    "repo",
+		Message: "config.toml: [repo.\"/some/repo\"] queue_base was renamed to trunk",
+	}}}
+
+	decisions := decideRepoDispatches(d, cfg, scans, &DaemonState{Version: 1}, time.Now())
+
+	if len(decisions) != 1 {
+		t.Fatalf("execution rename: %d decisions, want 1 fatal\n%+v", len(decisions), decisions)
+	}
+	dec := decisions[0]
+	if dec.Err == nil || !strings.Contains(dec.Err.Error(), "queue_base was renamed to trunk") {
+		t.Fatalf("decision Err = %v, want queue_base rename migration message", dec.Err)
+	}
+	if dec.Actionable() {
+		t.Fatalf("a repo poisoned by the execution rename must not be actionable: %+v", dec)
+	}
+}
+
 func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 	_, wts := initBareRepoWithWorktrees(t, 2)
 	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)

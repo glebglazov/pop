@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -62,6 +63,22 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, stat
 // A nil scan with bare=true means the repository is bare with no Trunk worktree
 // configured: it is refused unless a per-set binding routes the drain elsewhere.
 func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*projectScan, bool, error) {
+	// A renamed execution key (queue_base/execution_base → trunk) is a
+	// config-global blocking finding (ADR 0054). The queue consumes execution
+	// config, so surface it as fatal up front: ResolveRepoConfig returns the
+	// finding (a config.Finding) before touching .pop.toml, while a per-checkout
+	// .pop.toml problem comes back as a plain error and is still degraded past in
+	// the scan loop below. This keeps the migration tripwire loud for pop queue /
+	// pop tasks drain and the queue dashboard.
+	if cfg != nil && len(scans) > 0 {
+		if _, err := resolveRepoConfigFor(d, cfg, scans[0].ProjectPath); err != nil {
+			var f config.Finding
+			if errors.As(err, &f) {
+				return nil, false, err
+			}
+		}
+	}
+
 	// 1. explicit trunk = true checkout.
 	for i := range scans {
 		rc, err := resolveRepoConfigFor(d, cfg, scans[i].ProjectPath)

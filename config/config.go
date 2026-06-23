@@ -538,6 +538,16 @@ func repoIdentity(d *Deps, path string) string {
 // A missing .pop.toml is not an error. A malformed .pop.toml degrades to the
 // zero config (the error is returned so callers may surface a warning).
 func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, error) {
+	// A renamed execution key (queue_base/execution_base → trunk) is recorded at
+	// load as a blocking "repo" finding rather than aborting Load(). This getter
+	// is the execution-config consumption point, so it surfaces that finding as
+	// its error (ADR 0054): consuming commands treat it as fatal, the migration
+	// tripwire stays loud, while a command that never resolves repo config (the
+	// project dashboard) is unaffected. Checked before touching .pop.toml so the
+	// fatal config-global finding always wins over a per-checkout problem.
+	if err := c.blockingFindingFor("repo"); err != nil {
+		return RepoConfig{}, err
+	}
 	canon := canonicalPath(d, checkoutPath)
 	identity := repoIdentity(d, checkoutPath)
 
@@ -835,8 +845,8 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	for _, f := range projectEntryFindings(path, cfg.Projects) {
 		cfg.recordFinding(f)
 	}
-	if err := validateRepoConfigMetadata(path, md); err != nil {
-		return nil, err
+	for _, f := range repoRenameFindings(path, md) {
+		cfg.recordFinding(f)
 	}
 	cfg.Warnings = append(cfg.Warnings, repoBlockWarnings(path, md)...)
 	cfg.Warnings = append(cfg.Warnings, queueAgentsWarnings(path, md)...)
@@ -889,8 +899,8 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		for _, f := range projectEntryFindings(expanded, included.Projects) {
 			cfg.recordFinding(f)
 		}
-		if err := validateRepoConfigMetadata(expanded, includedMD); err != nil {
-			return nil, fmt.Errorf("loading include %q: %w", include, err)
+		for _, f := range repoRenameFindings(expanded, includedMD) {
+			cfg.recordFinding(f)
 		}
 		cfg.Warnings = append(cfg.Warnings, repoBlockWarnings(expanded, includedMD)...)
 		cfg.Warnings = append(cfg.Warnings, includeFileWarnings(expanded, &included, d)...)
@@ -978,32 +988,58 @@ func effortConfigFindings(path string, md toml.MetaData) []Finding {
 	return findings
 }
 
-func validateRepoConfigMetadata(path string, md toml.MetaData) error {
+// repoRenameFindings inspects decoded metadata for the deliberate migration
+// tripwires in repo/execution config — keys that were renamed or removed
+// (worktree_ready, execution_base→trunk, queue_base→trunk, misplaced trunk).
+// Per ADR 0054 these are returned as findings keyed to the "repo" section, not
+// thrown: a stale execution key must not abort a command (e.g. the project
+// dashboard) that never reads execution config. A command that consumes it
+// surfaces the finding as the error from Config.ResolveRepoConfig, so the
+// tripwire stays loud but confined to the execution/queue commands.
+func repoRenameFindings(path string, md toml.MetaData) []Finding {
+	var findings []Finding
+	add := func(msg string) {
+		findings = append(findings, Finding{Path: "repo", Message: msg})
+	}
 	for _, key := range md.Undecoded() {
-		// .pop.toml-level (len==1) errors
+		// .pop.toml-level / top-level (len==1) renames
 		if len(key) == 1 {
 			switch key[0] {
 			case "worktree_ready":
-				return fmt.Errorf("%s: worktree_ready was removed; use trunk = true in a global [repo.%q] block to name the Trunk worktree", path, "<path>")
+				add(fmt.Sprintf("%s: worktree_ready was removed; use trunk = true in a global [repo.%q] block to name the Trunk worktree", path, "<path>"))
 			case "execution_base":
-				return fmt.Errorf("%s: execution_base was renamed to trunk; use trunk = true in a global [repo.%q] block", path, "<path>")
+				add(fmt.Sprintf("%s: execution_base was renamed to trunk; use trunk = true in a global [repo.%q] block", path, "<path>"))
 			case "queue_base":
-				return fmt.Errorf("%s: queue_base was renamed to trunk; use trunk = true in a global [repo.%q] block", path, "<path>")
+				add(fmt.Sprintf("%s: queue_base was renamed to trunk; use trunk = true in a global [repo.%q] block", path, "<path>"))
 			case "trunk":
-				return fmt.Errorf("%s: trunk is only valid in a global [repo.%q] override block", path, "<path>")
+				add(fmt.Sprintf("%s: trunk is only valid in a global [repo.%q] override block", path, "<path>"))
 			}
 		}
-		// [repo."<path>"] block errors (len>=3)
+		// [repo."<path>"] block renames (len>=3)
 		if len(key) >= 3 && key[0] == "repo" {
 			switch key[2] {
 			case "worktree_ready":
-				return fmt.Errorf("%s: [repo.%q] worktree_ready was removed; there is no replacement", path, key[1])
+				add(fmt.Sprintf("%s: [repo.%q] worktree_ready was removed; there is no replacement", path, key[1]))
 			case "execution_base":
-				return fmt.Errorf("%s: [repo.%q] execution_base was renamed to trunk", path, key[1])
+				add(fmt.Sprintf("%s: [repo.%q] execution_base was renamed to trunk", path, key[1]))
 			case "queue_base":
-				return fmt.Errorf("%s: [repo.%q] queue_base was renamed to trunk", path, key[1])
+				add(fmt.Sprintf("%s: [repo.%q] queue_base was renamed to trunk", path, key[1]))
 			}
 		}
+	}
+	return findings
+}
+
+// validateRepoConfigMetadata keeps the repo-local .pop.toml path hard-failing on
+// the same migration tripwires (LoadRepoConfig has no Config to carry findings
+// on, and a stale key there still surfaces fatally via ResolveRepoConfig's
+// returned error). It returns a plain error — deliberately NOT a Finding — so a
+// caller iterating checkouts (the queue's representative resolver) can tell a
+// fatal config-global migration finding apart from a per-checkout .pop.toml
+// problem it should degrade past.
+func validateRepoConfigMetadata(path string, md toml.MetaData) error {
+	if findings := repoRenameFindings(path, md); len(findings) > 0 {
+		return errors.New(findings[0].Message)
 	}
 	return nil
 }

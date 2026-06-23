@@ -1251,6 +1251,48 @@ extreme = [{ model = "opencode/claude-opus-4-8" }]
 	}
 }
 
+// TestRunProject_ExecutionRenameRendersWithBanner asserts that the deliberate
+// queue_base→trunk migration tripwire — fatal to the queue/drain commands that
+// resolve execution config — is invisible to the project dashboard's capability
+// (it never resolves repo config), so the list still renders. The finding still
+// surfaces in the non-blocking warning banner (ADR 0054).
+func TestRunProject_ExecutionRenameRendersWithBanner(t *testing.T) {
+	projectDir := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	body := fmt.Sprintf(`
+projects = [{ path = %q }]
+
+[repo."/some/repo"]
+queue_base = true
+`, projectDir)
+	if err := os.WriteFile(configPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := testProjectDeps(t)
+	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+
+	var capturedItems []ui.Item
+	var capturedOpts []ui.PickerOption
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		capturedItems = items
+		capturedOpts = opts
+		return ui.Result{Action: ui.ActionCancel}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject aborted on an execution-config rename it never consumes: %v", err)
+	}
+	if len(capturedItems) == 0 {
+		t.Fatal("expected the project list to render at least one item")
+	}
+
+	view := ui.NewPicker(capturedItems, capturedOpts...).View().Content
+	if !strings.Contains(view, "queue_base was renamed to trunk") {
+		t.Errorf("expected the execution-rename finding in the picker warning banner, got view:\n%s", view)
+	}
+}
+
 // TestRunProject_InvalidDisplayDepthRendersWithBanner asserts that a wrong-typed
 // display_depth (a non-essential value in a consumed section) degrades to the
 // default depth plus a warning: the picker still renders and the finding lands

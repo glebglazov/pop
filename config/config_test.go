@@ -2818,7 +2818,12 @@ projects = ["should-warn"]
 	}
 }
 
-func TestRepoBlockQueueBaseHardError(t *testing.T) {
+// TestRepoBlockQueueBaseRenameIsFinding proves the migration tripwire is
+// confined (ADR 0054): the queue_base→trunk rename no longer aborts Load(); it
+// becomes a blocking "repo" finding that ResolveRepoConfig (the execution-config
+// getter consuming commands hit) returns as its error, while getters for other
+// sections (EffortFor) stay clean.
+func TestRepoBlockQueueBaseRenameIsFinding(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	content := `
 [repo."/path/to/repo"]
@@ -2827,9 +2832,32 @@ queue_base = true
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Load(configPath)
-	if err == nil || !strings.Contains(err.Error(), "queue_base was renamed to trunk") {
-		t.Fatalf("Load err = %v, want queue_base rename error", err)
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load err = %v, want the rename to be a finding, not a Load() error", err)
+	}
+	if cfg.blockingFindingFor("repo") == nil {
+		t.Fatalf("expected a blocking 'repo' finding, findings = %+v", cfg.Findings)
+	}
+	// The execution-config getter surfaces it as the migration message.
+	d := &Deps{FS: deps.NewRealFileSystem()}
+	if _, err := cfg.ResolveRepoConfig(d, "/path/to/repo"); err == nil || !strings.Contains(err.Error(), "queue_base was renamed to trunk") {
+		t.Fatalf("ResolveRepoConfig err = %v, want queue_base rename error", err)
+	}
+	// A getter for an unrelated section is unaffected.
+	if _, err := cfg.EffortFor("standard"); err != nil {
+		t.Fatalf("EffortFor err = %v, want nil (rename must not poison unrelated getters)", err)
+	}
+	// The finding is still mirrored into the non-blocking warning banner.
+	mirrored := false
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w, "queue_base was renamed to trunk") {
+			mirrored = true
+			break
+		}
+	}
+	if !mirrored {
+		t.Fatalf("rename finding must mirror into Warnings, got %v", cfg.Warnings)
 	}
 }
 
