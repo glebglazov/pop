@@ -1095,8 +1095,9 @@ func (m dashboardModel) handleDetailOverrideKey(key string) (tea.Model, tea.Cmd)
 			return m, nil
 		}
 	case "O":
-		if task.Status != "failed" && task.Status != "skipped" {
-			m.detail.statusMsg = fmt.Sprintf("task %q is %s; open requires failed or skipped", task.ID, task.Status)
+		// Shares tasks.CanReopen with the main `open` command (ADR-0053).
+		if !tasks.CanReopen(task.Status) {
+			m.detail.statusMsg = fmt.Sprintf("task %q is already open", task.ID)
 			return m, nil
 		}
 	case "K":

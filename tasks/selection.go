@@ -64,12 +64,20 @@ func skipEligibility(status string) (bool, string) {
 	}
 }
 
-// openEligibility is the per-verb predicate for `open`: Failed, Skipped, and
-// Done tasks are all checkable — reopening a Done task is the inverse of
-// Complete (ADR-0053) — and an already-Open task is locked at-target (✓ —
-// already in the target state). No row is pre-checked; the human selects each.
+// CanReopen reports whether `open` can return a task in this status to open.
+// Every non-open status — failed, skipped, done — reopens: failed/skipped are
+// retries, done is undoing a completion (ADR-0053). Only an already-open task
+// cannot. This is the single source of truth shared by the single-task, batch,
+// picker, and queue-dashboard open paths.
+func CanReopen(status string) bool {
+	return status != "open"
+}
+
+// openEligibility is the per-verb predicate for `open`: every CanReopen status
+// is checkable (no row pre-checked; the human selects each), and an already-Open
+// task is locked at-target (✓ — already in the target state).
 func openEligibility(status string) (bool, string) {
-	if status == "open" {
+	if !CanReopen(status) {
 		return true, "✓"
 	}
 	return false, ""

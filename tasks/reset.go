@@ -69,9 +69,7 @@ func ResetTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 	}
 
 	task := m.Tasks[idx]
-	// Any non-Open status reopens: Failed/Skipped (retry) and Done (undo a
-	// completion, ADR-0053). Only an already-Open task is rejected.
-	if task.Status == "open" {
+	if !CanReopen(task.Status) {
 		return nil, exitErr(ExitNoRunnable, "task %q is already open", taskID)
 	}
 

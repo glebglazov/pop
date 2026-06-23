@@ -1747,22 +1747,35 @@ func TestDetailViewOverrideKeyO_ValidAndInvalid(t *testing.T) {
 		t.Fatalf("O on skipped: resetCalls = %d, want 1", *resetCalls2)
 	}
 
-	// O on done task: invalid — one-line hint, no mutation
+	// O on done task: valid — reopening a done task undoes a completion (ADR-0053)
 	doneTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "done"}
 	m3, _, resetCalls3, _ := detailOverrideModel(row, doneTask, nil, nil, nil)
 	updated3, cmd3 := m3.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
 	got3 := updated3.(dashboardModel)
-	if cmd3 != nil {
-		t.Fatal("O on done: expected no command")
+	if got3.detail.statusMsg != "" {
+		t.Fatalf("O on done: statusMsg = %q, want empty", got3.detail.statusMsg)
 	}
-	if *resetCalls3 != 0 {
-		t.Fatalf("O on done: resetCalls = %d, want 0", *resetCalls3)
+	if cmd3 == nil {
+		t.Fatal("O on done: expected a command")
 	}
-	if got3.detail.statusMsg == "" {
-		t.Fatal("O on done: expected statusMsg hint")
+	cmd3()
+	if *resetCalls3 != 1 {
+		t.Fatalf("O on done: resetCalls = %d, want 1", *resetCalls3)
 	}
-	if strings.Contains(got3.detail.statusMsg, "open requires") && !strings.Contains(got3.detail.statusMsg, "failed or skipped") {
-		t.Fatalf("O on done hint = %q, want mention of failed or skipped", got3.detail.statusMsg)
+
+	// O on already-open task: invalid — one-line hint, no mutation
+	openTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "open"}
+	m4, _, resetCalls4, _ := detailOverrideModel(row, openTask, nil, nil, nil)
+	updated4, cmd4 := m4.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	got4 := updated4.(dashboardModel)
+	if cmd4 != nil {
+		t.Fatal("O on open: expected no command")
+	}
+	if *resetCalls4 != 0 {
+		t.Fatalf("O on open: resetCalls = %d, want 0", *resetCalls4)
+	}
+	if !strings.Contains(got4.detail.statusMsg, "already open") {
+		t.Fatalf("O on open hint = %q, want 'already open'", got4.detail.statusMsg)
 	}
 }
 

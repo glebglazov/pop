@@ -83,16 +83,15 @@ func OpenTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 		indexByID[task.ID] = i
 	}
 
-	// Validate the whole batch before any write: any non-Open task reopens —
-	// Failed/Skipped (retry) and Done (undo a completion, ADR-0053). Reject the
-	// entire batch (no writes) if any selection is already Open, naming it.
+	// Validate the whole batch before any write: reject (no writes) if any
+	// selection cannot reopen, naming it. CanReopen is the shared policy.
 	selected := make(map[string]bool, len(opts.SelectedTaskIDs))
 	for _, id := range opts.SelectedTaskIDs {
 		idx, ok := indexByID[id]
 		if !ok {
 			return nil, exitErr(ExitNoRunnable, "%s", unknownTaskMessage(m, id))
 		}
-		if m.Tasks[idx].Status == "open" {
+		if !CanReopen(m.Tasks[idx].Status) {
 			return nil, exitErr(ExitNoRunnable, "task %q is already open", id)
 		}
 		selected[id] = true
