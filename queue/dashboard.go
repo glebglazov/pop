@@ -39,6 +39,7 @@ type DashboardRow struct {
 	statePath          string
 	cursorKey          string
 	repoKey            string
+	projectPath        string
 	runtimePath        string
 	paneID             string
 	integrationBacklog bool
@@ -423,6 +424,7 @@ func dashboardRowsFromStatic(d *Deps, state *DaemonState, st dashboardRepoStatic
 			statePath:          st.statePath,
 			cursorKey:          st.projectName + "\x00" + taskRow.ID,
 			repoKey:            st.repoKey,
+			projectPath:        staticProjectPath(st),
 			runtimePath:        wt.runtimePath,
 			paneID:             dashboardPaneID(state, st.repoKey, taskRow.ID),
 			integrationBacklog: awaitingIntegration,
@@ -433,6 +435,17 @@ func dashboardRowsFromStatic(d *Deps, state *DaemonState, st dashboardRepoStatic
 
 func dashboardShowRow(row tasks.Row, awaitingIntegration bool) bool {
 	return row.Status != tasks.StatusDone || awaitingIntegration
+}
+
+// staticProjectPath returns the repo group's representative checkout, the path
+// every bind/drain sub-action runs git against. It is empty only for a bare
+// repo with no resolvable representative, in which case bind falls back to a
+// full project scan.
+func staticProjectPath(st dashboardRepoStatic) string {
+	if st.rep == nil {
+		return ""
+	}
+	return st.rep.ProjectPath
 }
 
 func dashboardStatus(status tasks.TaskSetStatus, rec MergeabilityRecord, awaitingIntegration bool) string {
@@ -2106,6 +2119,24 @@ func dashboardBindContext(d *Deps, cfg *config.Config, row DashboardRow) ([]proj
 	}
 	if d.Project == nil {
 		d.Project = project.DefaultDeps()
+	}
+	// Fast path: a row built by the live dashboard already carries its repo
+	// group's resolved coordinates (the representative checkout and repo key),
+	// derived once at build time and memoized across polls in dashboardCache.
+	// Every bind/drain sub-action consumes only scans[0].ProjectPath and the
+	// repo key, so reuse them directly instead of re-forking `git rev-parse`
+	// across every registered project — the sequential rescan that left the
+	// inline bind picker stuck on "loading...".
+	if row.projectPath != "" && row.repoKey != "" {
+		scan := projectScan{
+			Name:           row.Project,
+			ProjectPath:    row.projectPath,
+			DefinitionPath: row.defPath,
+			RuntimePath:    row.projectPath,
+			SessionName:    project.SessionNameWith(d.Project, row.projectPath),
+			RepoKey:        row.repoKey,
+		}
+		return []projectScan{scan}, row.repoKey, nil
 	}
 	scans, err := dashboardScansForDefinition(d, cfg, row.defPath)
 	if err != nil {
