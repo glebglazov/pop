@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -1203,5 +1204,49 @@ func TestRunProject_NoGitCallsDuringPickerOpen(t *testing.T) {
 
 	if gitCalls > 0 {
 		t.Errorf("picker open triggered %d git call(s); expected 0 — SessionName should be pre-computed during expansion", gitCalls)
+	}
+}
+
+// TestRunProject_StaleEffortKeyRendersWithBanner proves the ADR 0054 spine
+// end-to-end: a config whose only problem is a stale [effort] key — which the
+// project dashboard never consumes — must still render the project list (Load
+// no longer aborts), and the resulting finding must reach the picker's warning
+// banner through the cfg.Warnings path.
+func TestRunProject_StaleEffortKeyRendersWithBanner(t *testing.T) {
+	projectDir := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	body := fmt.Sprintf(`
+projects = [{ path = %q }]
+
+[effort.opencode]
+extreme = [{ model = "opencode/claude-opus-4-8" }]
+`, projectDir)
+	if err := os.WriteFile(configPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := testProjectDeps(t)
+	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+
+	var capturedItems []ui.Item
+	var capturedOpts []ui.PickerOption
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		capturedItems = items
+		capturedOpts = opts
+		return ui.Result{Action: ui.ActionCancel}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject aborted on a stale [effort] key the dashboard never consumes: %v", err)
+	}
+	if len(capturedItems) == 0 {
+		t.Fatal("expected the project list to render at least one item")
+	}
+
+	// Reconstruct the picker the loop built and assert the finding lands in the
+	// rendered warning banner.
+	view := ui.NewPicker(capturedItems, capturedOpts...).View().Content
+	if !strings.Contains(view, "unknown tier") {
+		t.Errorf("expected the effort finding in the picker warning banner, got view:\n%s", view)
 	}
 }

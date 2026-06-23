@@ -284,6 +284,24 @@ func (p ProjectEntry) GetDisplayDepth() int {
 	return p.DisplayDepth
 }
 
+// Finding is a single config validation problem, keyed to the config path of
+// the offending key (e.g. "effort.opencode.extreme") and carrying a
+// human-readable, file-qualified message. Per ADR 0054 findings are collected
+// on the loaded Config rather than thrown: a command that never consumes the
+// offending key still renders and surfaces the finding only as a non-blocking
+// warning, while a command that does consume it can treat the matching getter's
+// error as fatal. Finding implements error so a value getter can return it
+// directly.
+type Finding struct {
+	// Path is the dotted config path of the offending key.
+	Path string
+	// Message is a human-readable, file-qualified description of the problem.
+	Message string
+}
+
+// Error makes Finding usable as the error returned by a value getter.
+func (f Finding) Error() string { return f.Message }
+
 type Config struct {
 	Includes              []string             `toml:"includes"`
 	Projects              []ProjectEntry       `toml:"projects"`
@@ -311,7 +329,55 @@ type Config struct {
 	// same repository identity.
 	Repo map[string]RepoOverrideConfig `toml:"repo"`
 
+	// Findings holds semantic config problems collected at load time (ADR 0054).
+	// Each is keyed to its config path; callers consult them through value
+	// getters (e.g. EffortFor) and decide severity per their capability. They
+	// are also mirrored into Warnings so a command that never consumes the
+	// offending key still surfaces the problem in the picker's warning banner.
+	Findings []Finding `toml:"-"`
+
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
+}
+
+// recordFinding appends a finding and mirrors its message into Warnings, so a
+// command that never consumes the offending key still surfaces it in the
+// non-blocking picker banner (ADR 0054).
+func (c *Config) recordFinding(f Finding) {
+	c.Findings = append(c.Findings, f)
+	c.Warnings = append(c.Warnings, f.Message)
+}
+
+// blockingFindingFor returns the first finding whose config path lies under the
+// given top-level section (an exact match or a "<section>." prefix), or nil. A
+// value getter for that section returns this as its error so the caller decides
+// whether the problem is fatal to its capability (ADR 0054).
+func (c *Config) blockingFindingFor(section string) error {
+	if c == nil {
+		return nil
+	}
+	for i := range c.Findings {
+		p := c.Findings[i].Path
+		if p == section || strings.HasPrefix(p, section+".") {
+			return c.Findings[i]
+		}
+	}
+	return nil
+}
+
+// EffortFor returns the configured effort ladder for an agent preset. The error
+// is non-nil iff a blocking effort finding exists (an invalid [effort] tier or
+// entry key); per ADR 0054 the caller decides severity — fatal if it consumes
+// effort, otherwise fall back to defaults. When no effort finding exists the
+// error is nil and the returned EffortConfig is the agent's ladder (the zero
+// value if the agent is unconfigured).
+func (c *Config) EffortFor(agent string) (EffortConfig, error) {
+	if err := c.blockingFindingFor("effort"); err != nil {
+		return EffortConfig{}, err
+	}
+	if c == nil || c.Effort == nil {
+		return EffortConfig{}, nil
+	}
+	return c.Effort[agent], nil
 }
 
 // RepoConfig is the repo-root .pop.toml surface. It is deliberately separate
@@ -699,8 +765,8 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateEffortConfigMetadata(path, md); err != nil {
-		return nil, err
+	for _, f := range effortConfigFindings(path, md) {
+		cfg.recordFinding(f)
 	}
 	if err := validateRepoConfigMetadata(path, md); err != nil {
 		return nil, err
@@ -750,8 +816,8 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 			}
 			return nil, fmt.Errorf("loading include %q: %w", include, err)
 		}
-		if err := validateEffortConfigMetadata(expanded, includedMD); err != nil {
-			return nil, fmt.Errorf("loading include %q: %w", include, err)
+		for _, f := range effortConfigFindings(expanded, includedMD) {
+			cfg.recordFinding(f)
 		}
 		if err := validateRepoConfigMetadata(expanded, includedMD); err != nil {
 			return nil, fmt.Errorf("loading include %q: %w", include, err)
@@ -781,20 +847,44 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func validateEffortConfigMetadata(path string, md toml.MetaData) error {
+// effortConfigFindings inspects decoded metadata for semantic problems in the
+// [effort] section — an unknown tier, or an unknown key inside a valid tier —
+// and returns them as findings keyed to the offending config path. Per ADR 0054
+// these are collected, not thrown: a stale [effort] key must not abort a command
+// (e.g. the project dashboard) that never reads effort. A command that consumes
+// effort surfaces the finding as the error from Config.EffortFor.
+func effortConfigFindings(path string, md toml.MetaData) []Finding {
 	validTiers := map[string]bool{"heavy": true, "standard": true, "light": true}
 	validEntryKeys := map[string]bool{"model": true, "reasoning": true}
+	var findings []Finding
+	// An array-of-tables value (e.g. heavy = [{ ... }]) surfaces as several
+	// nested undecoded keys sharing a prefix, so dedupe by the finding path to
+	// report each offending tier / entry key exactly once.
+	seen := make(map[string]bool)
+	add := func(f Finding) {
+		if seen[f.Path] {
+			return
+		}
+		seen[f.Path] = true
+		findings = append(findings, f)
+	}
 	for _, key := range md.Undecoded() {
 		if len(key) >= 3 && key[0] == "effort" && !validTiers[key[2]] {
-			return fmt.Errorf("%s: [effort.%s] unknown tier %q; valid tiers: heavy, standard, light", path, key[1], key[2])
+			add(Finding{
+				Path:    fmt.Sprintf("effort.%s.%s", key[1], key[2]),
+				Message: fmt.Sprintf("%s: [effort.%s] unknown tier %q; valid tiers: heavy, standard, light", path, key[1], key[2]),
+			})
 		}
 	}
 	for _, key := range md.Undecoded() {
 		if len(key) >= 4 && key[0] == "effort" && validTiers[key[2]] && !validEntryKeys[key[3]] {
-			return fmt.Errorf("%s: [effort.%s] tier %q entry has unknown key %q; valid entry keys: model, reasoning", path, key[1], key[2], key[3])
+			add(Finding{
+				Path:    fmt.Sprintf("effort.%s.%s.%s", key[1], key[2], key[3]),
+				Message: fmt.Sprintf("%s: [effort.%s] tier %q entry has unknown key %q; valid entry keys: model, reasoning", path, key[1], key[2], key[3]),
+			})
 		}
 	}
-	return nil
+	return findings
 }
 
 func validateRepoConfigMetadata(path string, md toml.MetaData) error {

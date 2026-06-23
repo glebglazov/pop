@@ -163,7 +163,11 @@ light = [{ model = "opencode/kimi-k2.6" }]
 	}
 }
 
-func TestLoadEffortConfigRejectsUnknownTier(t *testing.T) {
+// TestLoadEffortConfigUnknownTierYieldsFinding asserts that an unknown [effort]
+// tier no longer aborts Load (ADR 0054): the load succeeds, the problem is
+// recorded as a finding keyed to its config path, mirrored into the warning
+// banner, and surfaced as the error of the effort getter for a consuming caller.
+func TestLoadEffortConfigUnknownTierYieldsFinding(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
 [effort.opencode]
@@ -171,16 +175,35 @@ extreme = [{ model = "opencode/claude-opus-4-8" }]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Load(configPath)
-	if err == nil || !strings.Contains(err.Error(), `[effort.opencode] unknown tier "extreme"`) {
-		t.Fatalf("err = %v, want unknown effort tier diagnostic", err)
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load returned a fatal error for a stale effort tier: %v", err)
 	}
-	if !strings.Contains(err.Error(), `valid tiers: heavy, standard, light`) {
-		t.Fatalf("err = %v, want valid tier list", err)
+	if len(cfg.Findings) != 1 {
+		t.Fatalf("expected exactly 1 finding, got %d: %+v", len(cfg.Findings), cfg.Findings)
+	}
+	f := cfg.Findings[0]
+	if f.Path != "effort.opencode.extreme" {
+		t.Errorf("finding path = %q, want effort.opencode.extreme", f.Path)
+	}
+	if !strings.Contains(f.Message, `[effort.opencode] unknown tier "extreme"`) ||
+		!strings.Contains(f.Message, "valid tiers: heavy, standard, light") {
+		t.Errorf("finding message = %q, want unknown-tier diagnostic", f.Message)
+	}
+	if !containsSubstring(cfg.Warnings, "unknown tier") {
+		t.Errorf("expected the effort finding mirrored into Warnings, got: %v", cfg.Warnings)
+	}
+	// A caller that consumes effort sees the finding as the getter's error.
+	if _, err := cfg.EffortFor("opencode"); err == nil {
+		t.Error("EffortFor returned nil error despite a blocking effort finding")
+	} else if !strings.Contains(err.Error(), `unknown tier "extreme"`) {
+		t.Errorf("EffortFor error = %v, want the unknown-tier finding", err)
 	}
 }
 
-func TestLoadEffortConfigRejectsUnknownTierEntryKey(t *testing.T) {
+// TestLoadEffortConfigUnknownTierEntryKeyYieldsFinding mirrors the tier case for
+// an unknown key inside an otherwise-valid tier.
+func TestLoadEffortConfigUnknownTierEntryKeyYieldsFinding(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
 [effort.opencode]
@@ -188,13 +211,73 @@ heavy = [{ model = "opencode/claude-opus-4-8", reasoning = "high", temperature =
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Load(configPath)
-	if err == nil || !strings.Contains(err.Error(), `[effort.opencode] tier "heavy" entry has unknown key "temperature"`) {
-		t.Fatalf("err = %v, want unknown effort tier entry key diagnostic", err)
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load returned a fatal error for a stale effort entry key: %v", err)
 	}
-	if !strings.Contains(err.Error(), `valid entry keys: model, reasoning`) {
-		t.Fatalf("err = %v, want valid entry key list", err)
+	if len(cfg.Findings) != 1 {
+		t.Fatalf("expected exactly 1 finding, got %d: %+v", len(cfg.Findings), cfg.Findings)
 	}
+	f := cfg.Findings[0]
+	if f.Path != "effort.opencode.heavy.temperature" {
+		t.Errorf("finding path = %q, want effort.opencode.heavy.temperature", f.Path)
+	}
+	if !strings.Contains(f.Message, `[effort.opencode] tier "heavy" entry has unknown key "temperature"`) ||
+		!strings.Contains(f.Message, "valid entry keys: model, reasoning") {
+		t.Errorf("finding message = %q, want unknown-entry-key diagnostic", f.Message)
+	}
+	if _, err := cfg.EffortFor("opencode"); err == nil {
+		t.Error("EffortFor returned nil error despite a blocking effort finding")
+	}
+}
+
+// TestEffortForReturnsLadderWhenClean asserts the getter returns the configured
+// ladder and a nil error when there is no blocking effort finding.
+func TestEffortForReturnsLadderWhenClean(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[effort.opencode]
+heavy = [{ model = "opencode/claude-opus-4-8" }]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ladder, err := cfg.EffortFor("opencode")
+	if err != nil {
+		t.Fatalf("EffortFor returned error for a clean config: %v", err)
+	}
+	if len(ladder.Heavy) != 1 || ladder.Heavy[0].Model != "opencode/claude-opus-4-8" {
+		t.Errorf("EffortFor ladder = %#v, want the configured heavy tier", ladder)
+	}
+	// An unconfigured agent is the zero ladder with a nil error, not a finding.
+	if _, err := cfg.EffortFor("missing"); err != nil {
+		t.Errorf("EffortFor(missing) = %v, want nil error", err)
+	}
+}
+
+// TestLoadSyntaxErrorIsFatal asserts that unparseable TOML (class A) still hard
+// fails Load — only semantic problems degrade to findings (ADR 0054).
+func TestLoadSyntaxErrorIsFatal(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte("this is = not valid = toml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(configPath); err == nil {
+		t.Fatal("Load accepted unparseable TOML; want a fatal error")
+	}
+}
+
+// containsSubstring reports whether any element of ss contains sub.
+func containsSubstring(ss []string, sub string) bool {
+	for _, s := range ss {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestResolveCommitConfigOverrides(t *testing.T) {
