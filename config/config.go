@@ -848,33 +848,49 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	for _, f := range repoRenameFindings(path, md) {
 		cfg.recordFinding(f)
 	}
-	cfg.Warnings = append(cfg.Warnings, repoBlockWarnings(path, md)...)
-	cfg.Warnings = append(cfg.Warnings, queueAgentsWarnings(path, md)...)
+	for _, f := range repoBlockWarnings(path, md) {
+		cfg.recordFinding(f)
+	}
+	for _, f := range queueAgentsWarnings(path, md) {
+		cfg.recordFinding(f)
+	}
 
 	selectSectionUsed := cfg.Select != nil
 	if selectSectionUsed {
-		cfg.Warnings = append(cfg.Warnings, "[select] is deprecated; rename to [project]")
+		cfg.recordFinding(Finding{Path: "deprecated.select", Message: "[select] is deprecated; rename to [project]"})
 		if cfg.Project == nil {
 			cfg.Project = cfg.Select
 		}
 	}
 
-	// Deprecation warnings for the needs_attention → unread rename.
+	// Deprecation findings for the needs_attention → unread rename.
 	if cfg.PaneMonitoring != nil && cfg.PaneMonitoring.DismissAttentionInActivePane {
-		cfg.Warnings = append(cfg.Warnings, "[pane_monitoring] dismiss_attention_in_active_pane is deprecated; rename to dismiss_unread_in_active_pane")
+		cfg.recordFinding(Finding{
+			Path:    "deprecated.pane_monitoring.dismiss_attention_in_active_pane",
+			Message: "[pane_monitoring] dismiss_attention_in_active_pane is deprecated; rename to dismiss_unread_in_active_pane",
+		})
 	}
 	if pc := cfg.projectConfig(); pc != nil && pc.AttentionNotificationsEnabled {
 		section := "[project]"
 		if selectSectionUsed && cfg.Select == pc {
 			section = "[select]"
 		}
-		cfg.Warnings = append(cfg.Warnings, section+" attention_notifications_enabled is deprecated; rename to unread_notifications_enabled")
+		cfg.recordFinding(Finding{
+			Path:    "deprecated.attention_notifications_enabled",
+			Message: section + " attention_notifications_enabled is deprecated; rename to unread_notifications_enabled",
+		})
 	}
 	if cfg.Select != nil && cfg.Select != cfg.Project && cfg.Select.AttentionNotificationsEnabled {
-		cfg.Warnings = append(cfg.Warnings, "[select] attention_notifications_enabled is deprecated; rename to unread_notifications_enabled")
+		cfg.recordFinding(Finding{
+			Path:    "deprecated.attention_notifications_enabled",
+			Message: "[select] attention_notifications_enabled is deprecated; rename to unread_notifications_enabled",
+		})
 	}
 	if cfg.Worktree != nil && cfg.Worktree.AttentionNotificationsEnabled {
-		cfg.Warnings = append(cfg.Warnings, "[worktree] attention_notifications_enabled is deprecated; rename to unread_notifications_enabled")
+		cfg.recordFinding(Finding{
+			Path:    "deprecated.worktree.attention_notifications_enabled",
+			Message: "[worktree] attention_notifications_enabled is deprecated; rename to unread_notifications_enabled",
+		})
 	}
 
 	configDir := filepath.Dir(path)
@@ -902,7 +918,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		for _, f := range repoRenameFindings(expanded, includedMD) {
 			cfg.recordFinding(f)
 		}
-		cfg.Warnings = append(cfg.Warnings, repoBlockWarnings(expanded, includedMD)...)
+		for _, f := range repoBlockWarnings(expanded, includedMD) {
+			cfg.recordFinding(f)
+		}
 		cfg.Warnings = append(cfg.Warnings, includeFileWarnings(expanded, &included, d)...)
 
 		cfg.Projects = append(cfg.Projects, included.Projects...)
@@ -1044,26 +1062,29 @@ func validateRepoConfigMetadata(path string, md toml.MetaData) error {
 	return nil
 }
 
-// queueAgentsWarnings returns a load-time warning when a config file still
+// queueAgentsWarnings returns a load-time finding when a config file still
 // sets the deleted [queue].agents key. Agent selection is owned by
 // [workload] default_agents; the old key is ignored (fail-soft).
-func queueAgentsWarnings(path string, md toml.MetaData) []string {
+func queueAgentsWarnings(path string, md toml.MetaData) []Finding {
 	for _, key := range md.Undecoded() {
 		if len(key) == 2 && key[0] == "queue" && key[1] == "agents" {
-			return []string{fmt.Sprintf(
-				"%s: [queue] agents is ignored; configure agent fallback under [workload] default_agents",
-				path,
-			)}
+			return []Finding{{
+				Path: "deprecated.queue.agents",
+				Message: fmt.Sprintf(
+					"%s: [queue] agents is ignored; configure agent fallback under [workload] default_agents",
+					path,
+				),
+			}}
 		}
 	}
 	return nil
 }
 
-// repoBlockWarnings returns load-time warnings for unknown keys inside
+// repoBlockWarnings returns load-time findings for unknown keys inside
 // [repo."<path>"] blocks. Only the RepoConfig subset is valid there; any
-// other key is silently degraded but surfaced as a warning.
-func repoBlockWarnings(path string, md toml.MetaData) []string {
-	var warnings []string
+// other key is silently degraded but surfaced as a finding.
+func repoBlockWarnings(path string, md toml.MetaData) []Finding {
+	var findings []Finding
 	seen := make(map[string]bool)
 	for _, key := range md.Undecoded() {
 		if len(key) < 3 || key[0] != "repo" {
@@ -1075,12 +1096,15 @@ func repoBlockWarnings(path string, md toml.MetaData) []string {
 			continue
 		}
 		seen[uniq] = true
-		warnings = append(warnings, fmt.Sprintf(
-			"%s: [repo.%q] unknown key %q ignored (only trunk, auto_merge_clean are accepted)",
-			path, key[1], key[2],
-		))
+		findings = append(findings, Finding{
+			Path: "config.unknown_repo_key",
+			Message: fmt.Sprintf(
+				"%s: [repo.%q] unknown key %q ignored (only trunk, auto_merge_clean are accepted)",
+				path, key[1], key[2],
+			),
+		})
 	}
-	return warnings
+	return findings
 }
 
 // includeFileWarnings returns load-time warnings for non-whitelisted top-level

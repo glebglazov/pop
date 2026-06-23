@@ -106,6 +106,9 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
+	if _, err := cfg.EffortFor(baseAgentPreset); err != nil {
+		return nil, exitErr(ExitSetup, "config: %v", err)
+	}
 
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {

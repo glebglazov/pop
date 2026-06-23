@@ -2894,3 +2894,147 @@ exclude_current_session = true
 		t.Errorf("global ExcludeCurrentSession must not be set from repo block")
 	}
 }
+
+// TestBrokenConfigMatrix asserts the caller-scoped contract (ADR 0054) across
+// the five canonical broken-config scenarios: each row feeds a deliberately
+// broken config and verifies render-vs-abort per capability boundary.
+func TestBrokenConfigMatrix(t *testing.T) {
+	type row struct {
+		name string
+		toml string
+		// Load-level expectations
+		loadFails bool
+		// ProjectEntries getter (project dashboard capability)
+		projectsEmpty bool // Load succeeds, getter returns empty list, nil error
+		projectsFails bool // getter returns non-nil error
+		// EffortFor getter (tasks drain capability)
+		effortFails bool
+		// ResolveRepoConfig getter (queue/tasks-drain repo capability)
+		repoFails bool
+		// Findings/Warnings assertions (when Load succeeds)
+		wantFindingPath string
+		wantWarning     string
+	}
+
+	tests := []row{
+		{
+			name: "unrelated effort rename — dashboard renders, tasks drain hard-fails",
+			toml: `
+[[projects]]
+path = "~/Dev"
+
+[effort.opencode]
+extreme = [{ model = "opencode/claude-opus-4-8" }]
+`,
+			effortFails:     true,
+			wantFindingPath: "effort.opencode.extreme",
+			wantWarning:     `unknown tier "extreme"`,
+		},
+		{
+			name: "queue_base rename — dashboard renders, repo getter hard-fails",
+			toml: `
+[[projects]]
+path = "~/Dev"
+
+[repo."/path/to/repo"]
+queue_base = true
+`,
+			repoFails:       true,
+			wantFindingPath: "repo",
+			wantWarning:     "queue_base was renamed to trunk",
+		},
+		{
+			name: "bad display_depth type — picker renders at default depth, warns",
+			toml: `
+[[projects]]
+path = "~/Dev"
+display_depth = "two"
+`,
+			wantFindingPath: "projects[].display_depth",
+			wantWarning:     "non-integer display_depth",
+		},
+		{
+			name:          "empty projects list — Load succeeds, getter returns empty",
+			toml:          `projects = []`,
+			projectsEmpty: true,
+		},
+		{
+			name:      "TOML syntax error — Load returns fatal parse error",
+			toml:      "this is = not valid = toml\n",
+			loadFails: true,
+		},
+	}
+
+	fd := &Deps{FS: deps.NewRealFileSystem()}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg, loadErr := Load(configPath)
+			if tt.loadFails {
+				if loadErr == nil {
+					t.Fatal("Load() succeeded, want fatal parse error")
+				}
+				return
+			}
+			if loadErr != nil {
+				t.Fatalf("Load() = %v, want nil (class-B problems must not abort Load)", loadErr)
+			}
+
+			// Finding path check
+			if tt.wantFindingPath != "" {
+				found := false
+				for _, f := range cfg.Findings {
+					if f.Path == tt.wantFindingPath {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("no finding with path %q; findings = %+v", tt.wantFindingPath, cfg.Findings)
+				}
+			}
+
+			// Warning mirror check
+			if tt.wantWarning != "" && !containsSubstring(cfg.Warnings, tt.wantWarning) {
+				t.Errorf("Warnings %v missing %q", cfg.Warnings, tt.wantWarning)
+			}
+
+			// ProjectEntries: project dashboard capability
+			entries, err := cfg.ProjectEntries()
+			if tt.projectsFails {
+				if err == nil {
+					t.Error("ProjectEntries() = nil error, want error (project dashboard should abort)")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("ProjectEntries() error = %v, want nil (project dashboard should render)", err)
+				}
+			}
+			if tt.projectsEmpty && len(entries) != 0 {
+				t.Errorf("ProjectEntries() returned %d entries, want 0", len(entries))
+			}
+
+			// EffortFor: tasks drain capability
+			if _, err := cfg.EffortFor("opencode"); tt.effortFails {
+				if err == nil {
+					t.Error("EffortFor() = nil error, want error (tasks drain should hard-fail)")
+				}
+			} else if err != nil {
+				t.Errorf("EffortFor() error = %v, want nil (must not poison unrelated callers)", err)
+			}
+
+			// ResolveRepoConfig: queue/tasks repo capability
+			if _, err := cfg.ResolveRepoConfig(fd, "/path/to/repo"); tt.repoFails {
+				if err == nil {
+					t.Error("ResolveRepoConfig() = nil error, want error (queue/tasks should hard-fail)")
+				}
+			} else if err != nil {
+				t.Errorf("ResolveRepoConfig() error = %v, want nil (must not poison unrelated callers)", err)
+			}
+		})
+	}
+}

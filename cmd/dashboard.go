@@ -106,8 +106,11 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	if state != nil && state.DashboardFollowing {
 		opts = append(opts, ui.WithFollowing(true))
 	}
-	if len(systemWarnings) > 0 {
-		opts = append(opts, ui.WithDashboardWarnings(systemWarnings))
+	var allWarnings []string
+	allWarnings = append(allWarnings, cfg.Warnings...)
+	allWarnings = append(allWarnings, systemWarnings...)
+	if len(allWarnings) > 0 {
+		opts = append(opts, ui.WithDashboardWarnings(allWarnings))
 	}
 	// Gating the call (not just the badge) also prevents the background Update
 	// fetch when [updates] notice_enabled = false.
