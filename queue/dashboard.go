@@ -2304,7 +2304,7 @@ func (m dashboardModel) View() tea.View {
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
 	renderDashboardTable(&body, m.snap.Rows, m.cursor, m.width)
-	hint := "j/k move · gg/G top/bottom · l/enter status · i drain · O shell · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · h/esc quit"
+	hint := "j/k move · gg/G top/bottom · l/enter status · i drain · I integrate · O shell · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · h/esc quit"
 	footer := true
 	if m.bind != nil {
 		renderDashboardBindModal(&body, m.bind)
