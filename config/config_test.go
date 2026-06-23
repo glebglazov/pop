@@ -270,6 +270,117 @@ func TestLoadSyntaxErrorIsFatal(t *testing.T) {
 	}
 }
 
+// TestLoadInvalidDisplayDepthYieldsFinding asserts that a wrong-typed
+// display_depth no longer aborts Load (ADR 0054): the load succeeds, every
+// other entry survives, the bad entry falls back to the default depth, and the
+// problem is recorded as a finding mirrored into the warning banner.
+func TestLoadInvalidDisplayDepthYieldsFinding(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+projects = [
+  { path = "~/bad", display_depth = "two" },
+  { path = "~/good", display_depth = 2 },
+]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load returned a fatal error for a wrong-typed display_depth: %v", err)
+	}
+	if len(cfg.Projects) != 2 {
+		t.Fatalf("expected both entries to survive decode, got %d: %+v", len(cfg.Projects), cfg.Projects)
+	}
+	if len(cfg.Findings) != 1 {
+		t.Fatalf("expected exactly 1 finding, got %d: %+v", len(cfg.Findings), cfg.Findings)
+	}
+	f := cfg.Findings[0]
+	if f.Path != "projects[].display_depth" {
+		t.Errorf("finding path = %q, want projects[].display_depth", f.Path)
+	}
+	if !strings.Contains(f.Message, "non-integer display_depth") || !strings.Contains(f.Message, configPath) {
+		t.Errorf("finding message = %q, want a file-qualified non-integer diagnostic", f.Message)
+	}
+	if !containsSubstring(cfg.Warnings, "non-integer display_depth") {
+		t.Errorf("expected the display_depth finding mirrored into Warnings, got: %v", cfg.Warnings)
+	}
+
+	// The bad entry falls back to the default depth and surfaces the finding as
+	// the getter's error; the good entry is clean.
+	if d, err := cfg.Projects[0].GetDisplayDepth(); d != 1 || err == nil {
+		t.Errorf("bad entry GetDisplayDepth() = %d, %v; want 1 with a finding error", d, err)
+	}
+	if d, err := cfg.Projects[1].GetDisplayDepth(); d != 2 || err != nil {
+		t.Errorf("good entry GetDisplayDepth() = %d, %v; want 2, nil", d, err)
+	}
+}
+
+// TestProjectEntriesSeverityBoundary asserts the projects-list getter's
+// severity boundary (ADR 0054): a non-essential per-entry finding (display_depth)
+// does not make the list fatal, while a blocking finding on the projects
+// section's essentials does surface as the getter's error.
+func TestProjectEntriesSeverityBoundary(t *testing.T) {
+	// A display_depth finding is non-essential: ProjectEntries stays clean.
+	cfg := &Config{
+		Projects: []ProjectEntry{{Path: "/x"}},
+		Findings: []Finding{{Path: "projects[].display_depth", Message: "bad depth"}},
+	}
+	if entries, err := cfg.ProjectEntries(); err != nil {
+		t.Errorf("ProjectEntries() = %v; want nil error for a non-essential display_depth finding", err)
+	} else if len(entries) != 1 {
+		t.Errorf("ProjectEntries() returned %d entries, want 1", len(entries))
+	}
+
+	// A blocking finding scoped to the projects section is fatal at the getter.
+	cfg2 := &Config{
+		Projects: []ProjectEntry{{Path: "/x"}},
+		Findings: []Finding{{Path: "projects", Message: "projects must be an array of tables"}},
+	}
+	if _, err := cfg2.ProjectEntries(); err == nil {
+		t.Error("ProjectEntries() = nil error; want the blocking projects finding")
+	} else if !strings.Contains(err.Error(), "array of tables") {
+		t.Errorf("ProjectEntries() error = %v, want the projects finding", err)
+	}
+}
+
+// TestExpandProjectsMalformedGlobWarnsAndPartiallyResolves asserts that a
+// malformed glob degrades to a warning instead of aborting expansion: the good
+// entry still resolves and the bad pattern is named in the warnings (ADR 0054).
+func TestExpandProjectsMalformedGlobWarnsAndPartiallyResolves(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	base := t.TempDir()
+	child := filepath.Join(base, "repo")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{
+		Projects: []ProjectEntry{
+			{Path: filepath.Join(base, "[a-") + "/*"}, // malformed glob
+			{Path: filepath.Join(base, "*")},          // good glob → resolves child
+		},
+	}
+	paths, err := cfg.ExpandProjects()
+	if err != nil {
+		t.Fatalf("ExpandProjects returned a fatal error despite a partially-resolving config: %v", err)
+	}
+	// The base tmpdir may be a symlink (macOS /var → /private/var), so the
+	// resolved match path differs from `child`; compare by basename.
+	var found bool
+	for _, p := range paths {
+		if filepath.Base(p.Path) == "repo" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected the good entry to resolve a %q dir; got %+v", child, paths)
+	}
+	if !containsSubstring(cfg.Warnings, "not a valid glob pattern") {
+		t.Errorf("expected a warning naming the malformed glob, got: %v", cfg.Warnings)
+	}
+}
+
 // containsSubstring reports whether any element of ss contains sub.
 func containsSubstring(ss []string, sub string) bool {
 	for _, s := range ss {
@@ -936,8 +1047,8 @@ func TestProjectEntry(t *testing.T) {
 				if entries[0].Path != "~/Dev/*/*" {
 					t.Errorf("Path = %q, want %q", entries[0].Path, "~/Dev/*/*")
 				}
-				if entries[0].GetDisplayDepth() != 2 {
-					t.Errorf("GetDisplayDepth() = %d, want 2", entries[0].GetDisplayDepth())
+				if d, err := entries[0].GetDisplayDepth(); err != nil || d != 2 {
+					t.Errorf("GetDisplayDepth() = %d, %v, want 2, nil", d, err)
 				}
 			},
 		},
@@ -949,8 +1060,8 @@ func TestProjectEntry(t *testing.T) {
 				if entries[0].Path != "~/Dev/*" {
 					t.Errorf("Path = %q, want %q", entries[0].Path, "~/Dev/*")
 				}
-				if entries[0].GetDisplayDepth() != 1 {
-					t.Errorf("GetDisplayDepth() = %d, want 1", entries[0].GetDisplayDepth())
+				if d, err := entries[0].GetDisplayDepth(); err != nil || d != 1 {
+					t.Errorf("GetDisplayDepth() = %d, %v, want 1, nil", d, err)
 				}
 			},
 		},
@@ -962,14 +1073,14 @@ func TestProjectEntry(t *testing.T) {
 				if entries[0].Path != "~/simple/*" {
 					t.Errorf("entries[0].Path = %q, want %q", entries[0].Path, "~/simple/*")
 				}
-				if entries[0].GetDisplayDepth() != 1 {
-					t.Errorf("entries[0].GetDisplayDepth() = %d, want 1", entries[0].GetDisplayDepth())
+				if d, err := entries[0].GetDisplayDepth(); err != nil || d != 1 {
+					t.Errorf("entries[0].GetDisplayDepth() = %d, %v, want 1, nil", d, err)
 				}
 				if entries[1].Path != "~/deep/*/*" {
 					t.Errorf("entries[1].Path = %q, want %q", entries[1].Path, "~/deep/*/*")
 				}
-				if entries[1].GetDisplayDepth() != 2 {
-					t.Errorf("entries[1].GetDisplayDepth() = %d, want 2", entries[1].GetDisplayDepth())
+				if d, err := entries[1].GetDisplayDepth(); err != nil || d != 2 {
+					t.Errorf("entries[1].GetDisplayDepth() = %d, %v, want 2, nil", d, err)
 				}
 			},
 		},
@@ -982,8 +1093,8 @@ display_depth = 3
 `,
 			expectedCount: 1,
 			checkEntries: func(t *testing.T, entries []ProjectEntry) {
-				if entries[0].GetDisplayDepth() != 3 {
-					t.Errorf("GetDisplayDepth() = %d, want 3", entries[0].GetDisplayDepth())
+				if d, err := entries[0].GetDisplayDepth(); err != nil || d != 3 {
+					t.Errorf("GetDisplayDepth() = %d, %v, want 3, nil", d, err)
 				}
 			},
 		},

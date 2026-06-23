@@ -196,6 +196,14 @@ func RunProject(d *ProjectDeps) error {
 
 	systemWarnings := d.EnsureSystemState()
 
+	// The projects list is essential to this command (ADR 0054): a blocking
+	// finding on it leaves nothing to switch to, so the call site treats the
+	// getter's error as fatal. Non-essential findings (display_depth, a bad
+	// glob) are not surfaced here — they degrade to the warning banner below.
+	if _, err := cfg.ProjectEntries(); err != nil {
+		return fmt.Errorf("invalid projects configuration: %w", err)
+	}
+
 	// Expand project paths
 	paths, err := cfg.ExpandProjects()
 	if err != nil {

@@ -273,15 +273,62 @@ func (c *Config) ResolveQueue() (ResolvedQueueConfig, error) {
 type ProjectEntry struct {
 	Path         string `toml:"path"`
 	DisplayDepth int    `toml:"display_depth"` // number of path segments to show in display name; 0 means use default (1)
+
+	// displayDepthInvalid records that the configured display_depth had the
+	// wrong type (e.g. a string) so the value could not be decoded. Per ADR 0054
+	// a non-essential bad value must not abort the load: UnmarshalTOML keeps the
+	// rest of the entry, sets this flag, and GetDisplayDepth surfaces it as a
+	// finding while falling back to the default depth.
+	displayDepthInvalid bool
 }
 
-// GetDisplayDepth returns the effective display depth.
-// Returns 1 if not explicitly set (DisplayDepth == 0).
-func (p ProjectEntry) GetDisplayDepth() int {
-	if p.DisplayDepth <= 0 {
-		return 1
+// UnmarshalTOML tolerantly decodes a single project entry. A wrong-typed
+// display_depth (the only non-essential field) is recorded as invalid rather
+// than aborting the whole config decode — BurntSushi stops at the first type
+// error otherwise, dropping every later entry too (ADR 0054). A non-table entry
+// or a non-string path is still an error: the projects list is essential, so a
+// malformed entry is fatal to the command that consumes it.
+func (p *ProjectEntry) UnmarshalTOML(v interface{}) error {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("project entry must be a table, got %T", v)
 	}
-	return p.DisplayDepth
+	if raw, present := m["path"]; present {
+		s, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("project entry path must be a string, got %T", raw)
+		}
+		p.Path = s
+	}
+	if raw, present := m["display_depth"]; present {
+		switch n := raw.(type) {
+		case int64:
+			p.DisplayDepth = int(n)
+		case int:
+			p.DisplayDepth = n
+		default:
+			p.displayDepthInvalid = true
+		}
+	}
+	return nil
+}
+
+// GetDisplayDepth returns the effective display depth and an error iff the
+// configured display_depth was the wrong type. Per ADR 0054 the caller decides
+// severity: this value is non-essential, so the project dashboard ignores the
+// error and uses the returned default (1). The error carries a Finding so the
+// problem still surfaces in the warning banner.
+func (p ProjectEntry) GetDisplayDepth() (int, error) {
+	if p.displayDepthInvalid {
+		return 1, Finding{
+			Path:    "projects[].display_depth",
+			Message: fmt.Sprintf("projects entry %q has a non-integer display_depth; using default depth 1", p.Path),
+		}
+	}
+	if p.DisplayDepth <= 0 {
+		return 1, nil
+	}
+	return p.DisplayDepth, nil
 }
 
 // Finding is a single config validation problem, keyed to the config path of
@@ -378,6 +425,23 @@ func (c *Config) EffortFor(agent string) (EffortConfig, error) {
 		return EffortConfig{}, nil
 	}
 	return c.Effort[agent], nil
+}
+
+// ProjectEntries returns the configured project list and an error iff a
+// blocking finding lands on the projects section's essentials. Per ADR 0054 the
+// projects list is essential to the project dashboard, so the call site treats
+// this error as fatal — there is nothing to switch to without it. A
+// non-essential per-entry finding (e.g. a bad display_depth, keyed under
+// "projects[]...") is deliberately not matched here, so it never makes the list
+// fatal.
+func (c *Config) ProjectEntries() ([]ProjectEntry, error) {
+	if c == nil {
+		return nil, nil
+	}
+	if err := c.blockingFindingFor("projects"); err != nil {
+		return c.Projects, err
+	}
+	return c.Projects, nil
 }
 
 // RepoConfig is the repo-root .pop.toml surface. It is deliberately separate
@@ -768,6 +832,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	for _, f := range effortConfigFindings(path, md) {
 		cfg.recordFinding(f)
 	}
+	for _, f := range projectEntryFindings(path, cfg.Projects) {
+		cfg.recordFinding(f)
+	}
 	if err := validateRepoConfigMetadata(path, md); err != nil {
 		return nil, err
 	}
@@ -819,6 +886,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		for _, f := range effortConfigFindings(expanded, includedMD) {
 			cfg.recordFinding(f)
 		}
+		for _, f := range projectEntryFindings(expanded, included.Projects) {
+			cfg.recordFinding(f)
+		}
 		if err := validateRepoConfigMetadata(expanded, includedMD); err != nil {
 			return nil, fmt.Errorf("loading include %q: %w", include, err)
 		}
@@ -845,6 +915,27 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// projectEntryFindings collects a finding for every project entry whose
+// display_depth had the wrong type. Per ADR 0054 these are non-essential: they
+// are keyed under "projects[].display_depth" (deliberately not the "projects"
+// section, so the essential ProjectEntries getter stays non-fatal) and only
+// surface as a warning banner while the entry still resolves at the default
+// depth. The file path is prepended so the banner names the offending file.
+func projectEntryFindings(path string, entries []ProjectEntry) []Finding {
+	var findings []Finding
+	for i := range entries {
+		if _, err := entries[i].GetDisplayDepth(); err != nil {
+			f, ok := err.(Finding)
+			if !ok {
+				continue
+			}
+			f.Message = fmt.Sprintf("%s: %s", path, f.Message)
+			findings = append(findings, f)
+		}
+	}
+	return findings
 }
 
 // effortConfigFindings inspects decoded metadata for semantic problems in the
@@ -1135,7 +1226,10 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 
 	for _, entry := range c.Projects {
 		expanded := expandHomeWith(d, entry.Path)
-		displayDepth := entry.GetDisplayDepth()
+		// display_depth is non-essential (ADR 0054): a wrong-typed value falls
+		// back to the default here while the entry still resolves. The finding
+		// was already recorded at load time, so it surfaces in the banner.
+		displayDepth, _ := entry.GetDisplayDepth()
 
 		// Check if it's a glob pattern (only single * allowed, not **)
 		if strings.Contains(expanded, "**") {
@@ -1147,6 +1241,13 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 				cacheModified = true
 			}
 			if err != nil {
+				// A malformed glob degrades to a warning rather than aborting:
+				// other entries still resolve, and the picker renders what it
+				// can while naming the bad pattern in the banner (ADR 0054).
+				c.recordFinding(Finding{
+					Path:    "projects[].path",
+					Message: fmt.Sprintf("project path %q is not a valid glob pattern (%v); skipping", entry.Path, err),
+				})
 				continue // Skip invalid patterns
 			}
 			for _, match := range matches {

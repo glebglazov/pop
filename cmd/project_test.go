@@ -1250,3 +1250,130 @@ extreme = [{ model = "opencode/claude-opus-4-8" }]
 		t.Errorf("expected the effort finding in the picker warning banner, got view:\n%s", view)
 	}
 }
+
+// TestRunProject_InvalidDisplayDepthRendersWithBanner asserts that a wrong-typed
+// display_depth (a non-essential value in a consumed section) degrades to the
+// default depth plus a warning: the picker still renders and the finding lands
+// in the banner (ADR 0054).
+func TestRunProject_InvalidDisplayDepthRendersWithBanner(t *testing.T) {
+	projectDir := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	body := fmt.Sprintf("projects = [{ path = %q, display_depth = \"two\" }]\n", projectDir)
+	if err := os.WriteFile(configPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := testProjectDeps(t)
+	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+
+	var capturedItems []ui.Item
+	var capturedOpts []ui.PickerOption
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		capturedItems = items
+		capturedOpts = opts
+		return ui.Result{Action: ui.ActionCancel}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject aborted on a non-essential bad display_depth: %v", err)
+	}
+	if len(capturedItems) == 0 {
+		t.Fatal("expected the project list to render at least one item")
+	}
+
+	view := ui.NewPicker(capturedItems, capturedOpts...).View().Content
+	if !strings.Contains(view, "non-integer display_depth") {
+		t.Errorf("expected the display_depth finding in the picker warning banner, got view:\n%s", view)
+	}
+}
+
+// TestRunProject_MalformedGlobRendersResolvedAndWarns asserts that one malformed
+// glob alongside one good entry renders the directories that resolved and warns
+// about the malformed pattern instead of aborting (ADR 0054).
+func TestRunProject_MalformedGlobRendersResolvedAndWarns(t *testing.T) {
+	base := t.TempDir()
+	if err := os.Mkdir(filepath.Join(base, "repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	body := fmt.Sprintf("projects = [{ path = %q }, { path = %q }]\n",
+		filepath.Join(base, "[a-")+"/*", filepath.Join(base, "*"))
+	if err := os.WriteFile(configPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := testProjectDeps(t)
+	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+
+	var capturedItems []ui.Item
+	var capturedOpts []ui.PickerOption
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		capturedItems = items
+		capturedOpts = opts
+		return ui.Result{Action: ui.ActionCancel}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject aborted despite a partially-resolving config: %v", err)
+	}
+	var rendered bool
+	for _, it := range capturedItems {
+		if filepath.Base(it.Path) == "repo" {
+			rendered = true
+		}
+	}
+	if !rendered {
+		t.Fatalf("expected the good entry to render a repo item, got %+v", capturedItems)
+	}
+
+	view := ui.NewPicker(capturedItems, capturedOpts...).View().Content
+	if !strings.Contains(view, "not a valid glob pattern") {
+		t.Errorf("expected the malformed-glob warning in the picker banner, got view:\n%s", view)
+	}
+}
+
+// TestRunProject_ZeroUsableDirectoriesAborts asserts that a projects table that
+// yields no usable directories keeps the existing clean hard-fail — there is
+// nothing to switch to (ADR 0054).
+func TestRunProject_ZeroUsableDirectoriesAborts(t *testing.T) {
+	base := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	// A single malformed glob resolves to nothing.
+	body := fmt.Sprintf("projects = [{ path = %q }]\n", filepath.Join(base, "[a-")+"/*")
+	if err := os.WriteFile(configPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := testProjectDeps(t)
+	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+	d.RunConfigure = func() error { t.Fatal("RunConfigure should not run for an existing config"); return nil }
+
+	err := RunProject(d)
+	if err == nil {
+		t.Fatal("expected RunProject to hard-fail when no directories resolve")
+	}
+	if !strings.Contains(err.Error(), "no projects found") {
+		t.Errorf("error = %v, want a clear no-projects-found message", err)
+	}
+}
+
+// TestRunProject_UnparseableTOMLAborts asserts that unparseable TOML (class A)
+// still hard-fails the dashboard with a clear message (ADR 0054).
+func TestRunProject_UnparseableTOMLAborts(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte("this is = not valid = toml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := testProjectDeps(t)
+	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+	d.RunConfigure = func() error { t.Fatal("RunConfigure should not run for unparseable TOML"); return nil }
+
+	err := RunProject(d)
+	if err == nil {
+		t.Fatal("expected RunProject to hard-fail on unparseable TOML")
+	}
+	if !strings.Contains(err.Error(), "failed to load config") {
+		t.Errorf("error = %v, want a clear config-load failure message", err)
+	}
+}
