@@ -3,6 +3,7 @@ package implement
 import (
 	"io"
 	"os"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -18,6 +19,10 @@ type Deps struct {
 	// StdinInteractive reports whether stdin is an interactive terminal. When nil,
 	// the default checks os.Stdin when ConfirmIn is an *os.File.
 	StdinInteractive func(io.Reader) bool
+
+	// Now stamps provisioned worktree branch names (`--in-worktree`). When nil it
+	// defaults to time.Now so tests can pin a deterministic branch.
+	Now func() time.Time
 }
 
 // DefaultDeps returns production implement dependencies.
@@ -48,6 +53,13 @@ func (d *Deps) loadConfig(path string) (*config.Config, error) {
 		return d.LoadConfig(path)
 	}
 	return config.Load(path)
+}
+
+func (d *Deps) now() time.Time {
+	if d != nil && d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
 }
 
 func (d *Deps) stdinInteractive(in io.Reader) bool {

@@ -115,6 +115,15 @@ func StorePath(d *tasks.Deps) string {
 	return filepath.Join(filepath.Dir(tasks.TaskStorageRoot(d)), "bindings.json")
 }
 
+// ManagedWorktreesRoot returns the directory under which pop-provisioned
+// (managed) worktrees live: <pop data dir>/queue/worktrees. It is the single
+// fork-base layout shared by every explicit provisioner — the Queue, the Drain
+// target picker, and `pop tasks implement --in-worktree` — so a worktree any of
+// them creates lands in the same tree and integration/teardown find it.
+func ManagedWorktreesRoot(d *tasks.Deps) string {
+	return filepath.Join(filepath.Dir(tasks.TaskStorageRoot(d)), "queue", "worktrees")
+}
+
 // Load reads the shared binding store. A missing file yields an empty store
 // rather than an error so callers need no daemon and no pre-seeding.
 func Load(d *tasks.Deps) (*Store, error) {

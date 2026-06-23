@@ -1,7 +1,6 @@
 package binding
 
 import (
-	"errors"
 	"path/filepath"
 	"testing"
 
@@ -46,24 +45,6 @@ func TestRouteDrainCheckoutExistingBindingWins(t *testing.T) {
 	}
 	if !got.UsedExistingBinding || got.RuntimePath != wt {
 		t.Fatalf("result = %+v, want existing binding at %q", got, wt)
-	}
-}
-
-func TestRouteDrainCheckoutInlineRejectedWhenBound(t *testing.T) {
-	td := routeTestDeps(t)
-	repo := initAdoptRepo(t)
-	wt := addLinkedWorktree(t, repo, "feature")
-	seedBinding(t, td, wt, "set-a", Adopt(wt, "feature", "proj"))
-
-	_, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
-		TD:              td,
-		CurrentCheckout: repo,
-		SetID:           "set-a",
-		Trigger:         TriggerImplementForeground,
-		Inline:          true,
-	})
-	if !errors.Is(err, ErrInlineWhenBound) {
-		t.Fatalf("err = %v, want ErrInlineWhenBound", err)
 	}
 }
 

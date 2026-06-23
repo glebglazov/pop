@@ -27,7 +27,6 @@ type RouteDrainCheckoutRequest struct {
 	CurrentCheckout string
 	SetID           string
 	Trigger         DrainTrigger
-	Inline          bool
 	RuntimeOverride string
 }
 
@@ -39,7 +38,6 @@ type RouteDrainCheckoutResult struct {
 }
 
 var (
-	ErrInlineWhenBound         = errors.New("inline conflicts with worktree binding")
 	ErrRuntimeOverrideConflict = errors.New("runtime override conflicts with bound worktree")
 	ErrBoundWorktreeInvalid    = errors.New("bound worktree invalid")
 )
@@ -82,9 +80,6 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 
 	// 1. An existing Worktree binding resumes there.
 	if existing, ok := store.Get(key); ok && strings.TrimSpace(existing.RuntimePath) != "" {
-		if req.Inline {
-			return RouteDrainCheckoutResult{}, fmt.Errorf("%w: task set %s; run `pop tasks unbind-worktree %s` before --inline", ErrInlineWhenBound, setID, setID)
-		}
 		if override := strings.TrimSpace(req.RuntimeOverride); override != "" {
 			overridePath, err := tasks.ResolveRuntimePathWith(req.TD, checkout, override)
 			if err != nil {
@@ -111,15 +106,6 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 		runtimePath, err := tasks.ResolveRuntimePathWith(req.TD, checkout, override)
 		if err != nil {
 			return RouteDrainCheckoutResult{}, err
-		}
-		if req.Inline {
-			linked, err := IsLinkedWorktree(req.TD, runtimePath)
-			if err != nil {
-				return RouteDrainCheckoutResult{}, err
-			}
-			if linked {
-				return RouteDrainCheckoutResult{}, fmt.Errorf("tasks implement: --inline conflicts with linked --task-runtime-path %s", runtimePath)
-			}
 		}
 		return RouteDrainCheckoutResult{RuntimePath: runtimePath}, nil
 	}
