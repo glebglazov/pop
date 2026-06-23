@@ -47,27 +47,7 @@ func SetPriorityWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		return nil, err
 	}
 
-	state, err := LoadGlobalStateWith(d, statePath)
-	if err != nil {
-		return nil, err
-	}
-
-	entry := state.Tasks[resolved.DefinitionPath]
-	if _, _, err := findRegisteredTaskSet(entry, resolvedTaskSetID); err != nil {
-		return nil, err
-	}
-
-	var oldPriority int
-	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-		entry := state.Tasks[resolved.DefinitionPath]
-		idx, old, err := findRegisteredTaskSet(entry, resolvedTaskSetID)
-		if err != nil {
-			return err
-		}
-		oldPriority = old
-		entry.TaskSets[idx].Priority = priority
-		return nil
-	})
+	oldPriority, err := SetTaskSetPriority(d, resolved.DefinitionPath, resolvedTaskSetID, priority)
 	if err != nil {
 		return nil, err
 	}

@@ -222,18 +222,7 @@ func ArchiveTaskSetsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*co
 		}
 	}
 
-	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-		entry := state.Tasks[resolved.DefinitionPath]
-		for _, id := range selected {
-			idx, _, err := findRegisteredTaskSet(entry, id)
-			if err != nil {
-				return err
-			}
-			entry.TaskSets[idx].Archived = true
-		}
-		return nil
-	})
-	if err != nil {
+	if err := SetTaskSetArchived(d, resolved.DefinitionPath, selected, true); err != nil {
 		return nil, err
 	}
 
@@ -294,18 +283,7 @@ func UnarchiveTaskSetsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*
 		}
 	}
 
-	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-		entry := state.Tasks[resolved.DefinitionPath]
-		for _, id := range selected {
-			idx, _, err := findRegisteredTaskSet(entry, id)
-			if err != nil {
-				return err
-			}
-			entry.TaskSets[idx].Archived = false
-		}
-		return nil
-	})
-	if err != nil {
+	if err := SetTaskSetArchived(d, resolved.DefinitionPath, selected, false); err != nil {
 		return nil, err
 	}
 
@@ -336,16 +314,7 @@ func setTaskSetArchivedWith(d *Deps, pd *project.Deps, loadConfig func(string) (
 		return nil, err
 	}
 
-	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-		entry := state.Tasks[resolved.DefinitionPath]
-		idx, _, err := findRegisteredTaskSet(entry, resolvedTaskSetID)
-		if err != nil {
-			return err
-		}
-		entry.TaskSets[idx].Archived = archived
-		return nil
-	})
-	if err != nil {
+	if err := SetTaskSetArchived(d, resolved.DefinitionPath, []string{resolvedTaskSetID}, archived); err != nil {
 		return nil, err
 	}
 

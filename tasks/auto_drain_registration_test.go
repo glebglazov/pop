@@ -87,13 +87,13 @@ func TestDiscoverySeedsAutoDrainOffWhenFalse(t *testing.T) {
 }
 
 func TestAutoDrainNoResyncAfterDashboardToggle(t *testing.T) {
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "tasks")
 	taskDir := filepath.Join(root, "toggle-set")
 	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] ok\n")
 	writeManifestWithSetKeys(t, taskDir, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	}, map[string]any{"auto_drain": true})
-	statePath := filepath.Join(root, "state.json")
+	statePath := StatePathFor(root)
 
 	if _, err := RefreshWith(DefaultDeps(), root, statePath); err != nil {
 		t.Fatal(err)
