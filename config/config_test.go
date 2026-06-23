@@ -978,6 +978,57 @@ func TestUpdateNoticeEnabled(t *testing.T) {
 	}
 }
 
+func TestDashboardZoomOnSwitch(t *testing.T) {
+	tests := []struct {
+		name     string
+		toml     string
+		expected bool
+	}{
+		{
+			name:     "defaults to true when section absent",
+			toml:     `projects = [{ path = "~/Dev" }]`,
+			expected: true,
+		},
+		{
+			name:     "defaults to true when section present but key absent",
+			toml:     "projects = [{ path = \"~/Dev\" }]\n[dashboard]",
+			expected: true,
+		},
+		{
+			name:     "explicit true",
+			toml:     "projects = [{ path = \"~/Dev\" }]\n[dashboard]\nzoom_on_switch = true",
+			expected: true,
+		},
+		{
+			name:     "explicit false focuses pane in place",
+			toml:     "projects = [{ path = \"~/Dev\" }]\n[dashboard]\nzoom_on_switch = false",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
+				t.Fatalf("failed to write config: %v", err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if got := cfg.DashboardZoomOnSwitch(); got != tt.expected {
+				t.Errorf("DashboardZoomOnSwitch() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+
+	// A nil receiver / nil Dashboard must not panic and defaults to true.
+	if !(*Config)(nil).DashboardZoomOnSwitch() {
+		t.Errorf("nil Config DashboardZoomOnSwitch() = false, want true")
+	}
+}
+
 func TestGetDisambiguationStrategy(t *testing.T) {
 	tests := []struct {
 		name     string

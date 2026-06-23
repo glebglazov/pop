@@ -99,3 +99,8 @@ projects = [
 # distinguishes two panes wins. Available: "status", "pane_last_active_at",
 # "session_last_visit_at", "alphabetical"
 # sort_criteria = ["status", "pane_last_active_at", "alphabetical"]
+#
+# When you select a pane from the dashboard, pop maximizes (zooms) it within
+# its window. Set this to false to focus the pane in place instead, keeping the
+# window's split layout visible (e.g. an editor above, an agent below).
+# zoom_on_switch = true

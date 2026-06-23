@@ -152,17 +152,28 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	switch result.Action {
 	case ui.DashboardActionConfirm:
 		if target := handleDashboardSwitch(result, true); target != "" {
-			return switchToTmuxTargetAndZoom(target)
+			return switchToDashboardTarget(cfg, target)
 		}
 	case ui.DashboardActionPeek:
 		if target := handleDashboardSwitch(result, false); target != "" {
-			return switchToTmuxTargetAndZoom(target)
+			return switchToDashboardTarget(cfg, target)
 		}
 	case ui.DashboardActionCancel:
 		os.Exit(1)
 	}
 
 	return nil
+}
+
+// switchToDashboardTarget jumps the client to the selected pane. When
+// [dashboard] zoom_on_switch is enabled (the default) the pane is maximized
+// within its window; otherwise it is focused in place, preserving the window's
+// split layout.
+func switchToDashboardTarget(cfg *config.Config, target string) error {
+	if cfg.DashboardZoomOnSwitch() {
+		return switchToTmuxTargetAndZoom(target)
+	}
+	return switchToTmuxTarget(target)
 }
 
 func sessionLocalDashboardPanes(panes []ui.AttentionPane, session, currentPaneID string) []ui.AttentionPane {
