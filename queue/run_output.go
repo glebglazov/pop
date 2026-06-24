@@ -82,8 +82,7 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 		case idle.ReadySet != "":
 			view.Queued = append(view.Queued, idle)
 		case isBlockedIdleReason(idle.Reason):
-			item := blockedItemFromIdle(idle, snap.Tasks, snap.DaemonState)
-			view.Blocked = append(view.Blocked, item)
+			view.Blocked = append(view.Blocked, blockedItemFromIdle(idle))
 			blockedProjects[idle.Project] = true
 		case idle.UnverifiedSetID != "":
 			view.Unverified = append(view.Unverified, UnverifiedItem{
@@ -101,8 +100,8 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 		}
 	}
 
+	view.Blocked = append(view.Blocked, blockedItemsFromState(snap.Tasks, snap.DaemonState, snap.CrashRetryDelays, now, blockedProjects)...)
 	if snap.DaemonState != nil {
-		view.Blocked = append(view.Blocked, blockedItemsFromDaemonState(snap.Tasks, snap.DaemonState, now, blockedProjects)...)
 		view.WorktreeBindings = buildWorktreeBindingViews(snap.Tasks, snap.DaemonState, view)
 	}
 	view.Blocked = append(view.Blocked, blockedItemsFromAgentCooldowns(snap.ActiveAgentCooldowns, now)...)
@@ -149,88 +148,88 @@ func isBlockedIdleReason(reason string) bool {
 	}
 }
 
-func blockedItemFromIdle(idle IdleProject, td *tasks.Deps, state *DaemonState) BlockedItem {
-	item := BlockedItem{
+func blockedItemFromIdle(idle IdleProject) BlockedItem {
+	return BlockedItem{
 		Project: idle.Project,
+		SetID:   idle.BlockedSetID,
 		Reason:  idle.Reason,
 		Kind:    blockedKindFromReason(idle.Reason),
+		Until:   idle.WaitUntil,
 	}
-	if state != nil {
-		for key, parked := range state.ParkedSets {
-			if idle.Project != "" && projectForScopedKey(td, state, key) != idle.Project {
-				continue
-			}
-			item.SetID = parked.SetID
-			item.Until = parked.ParkedAt
-			return item
-		}
-		for key, until := range state.SetCrashBackoffs {
-			if projectMatchesScopedKey(td, state, idle.Project, key) {
-				item.SetID = binding.SetIDFromKey(key)
-				item.Until = until
-				return item
-			}
-		}
-		for key, until := range state.SetBackoffs {
-			if projectMatchesScopedKey(td, state, idle.Project, key) {
-				item.SetID = binding.SetIDFromKey(key)
-				item.Until = until
-				return item
-			}
-		}
-	}
-	return item
 }
 
-func blockedItemsFromDaemonState(td *tasks.Deps, state *DaemonState, now time.Time, seenProjects map[string]bool) []BlockedItem {
-	if state == nil {
+// blockedItemsFromState surfaces parked / backed-off sets whose project is not
+// already shown as idle (e.g. a repo busy running another set). Abnormal-driven
+// parking and backoff are derived from each bound set's Drain history (ADR-0055);
+// only the pinned-agent quota cooldown still reads a persisted timer.
+func blockedItemsFromState(td *tasks.Deps, state *DaemonState, delays []time.Duration, now time.Time, seenProjects map[string]bool) []BlockedItem {
+	out := blockedItemsFromDrainHistory(td, delays, now, seenProjects)
+	if state != nil {
+		for key, until := range state.SetBackoffs {
+			if until.IsZero() || !until.After(now) {
+				continue
+			}
+			project, setID := projectSetFromScopedKey(td, key)
+			if seenProjects[project] {
+				continue
+			}
+			out = append(out, BlockedItem{
+				Project: project,
+				SetID:   setID,
+				Kind:    "quota_backoff",
+				Until:   until,
+				Reason:  "set backed off for pinned agent cooldown",
+			})
+		}
+	}
+	return out
+}
+
+// blockedItemsFromDrainHistory derives parked and crash-backed-off sets from the
+// Drain store, one per provisioned Worktree binding (a parked set ran in a
+// checkout, so it has a binding). A nil tasks dep or store-read error yields
+// nothing rather than blocking the view.
+func blockedItemsFromDrainHistory(td *tasks.Deps, delays []time.Duration, now time.Time, seenProjects map[string]bool) []BlockedItem {
+	if td == nil {
+		return nil
+	}
+	bindings, err := binding.AllBindings(td)
+	if err != nil {
 		return nil
 	}
 	var out []BlockedItem
-	for key, parked := range state.ParkedSets {
-		project := projectForScopedKey(td, state, key)
-		if seenProjects[project] {
+	for key, b := range bindings {
+		if seenProjects[b.Project] || strings.TrimSpace(b.RuntimePath) == "" {
 			continue
 		}
-		out = append(out, BlockedItem{
-			Project: project,
-			SetID:   parked.SetID,
-			Kind:    "parked",
-			Until:   parked.ParkedAt,
-			Reason:  parked.Reason,
-		})
-	}
-	for key, until := range state.SetCrashBackoffs {
-		if until.IsZero() || !until.After(now) {
+		setID := binding.SetIDFromKey(key)
+		id, err := tasks.ResolveRepositoryIdentity(td, b.RuntimePath)
+		if err != nil {
 			continue
 		}
-		project, setID := projectSetFromScopedKey(td, state, key)
-		if seenProjects[project] {
+		info, err := tasks.ReadSetBackoff(td, id.CommonDir, setID)
+		if err != nil {
 			continue
 		}
-		out = append(out, BlockedItem{
-			Project: project,
-			SetID:   setID,
-			Kind:    "crash_backoff",
-			Until:   until,
-			Reason:  "set backed off after abnormal drain exit",
-		})
-	}
-	for key, until := range state.SetBackoffs {
-		if until.IsZero() || !until.After(now) {
-			continue
+		parked, until := setBackoffStatus(info, delays, now)
+		switch {
+		case parked:
+			out = append(out, BlockedItem{
+				Project: b.Project,
+				SetID:   setID,
+				Kind:    "parked",
+				Until:   info.LastAbnormalAt,
+				Reason:  "repeated abnormal drain exits",
+			})
+		case !until.IsZero():
+			out = append(out, BlockedItem{
+				Project: b.Project,
+				SetID:   setID,
+				Kind:    "crash_backoff",
+				Until:   until,
+				Reason:  "set backed off after abnormal drain exit",
+			})
 		}
-		project, setID := projectSetFromScopedKey(td, state, key)
-		if seenProjects[project] {
-			continue
-		}
-		out = append(out, BlockedItem{
-			Project: project,
-			SetID:   setID,
-			Kind:    "quota_backoff",
-			Until:   until,
-			Reason:  "set backed off for pinned agent cooldown",
-		})
 	}
 	return out
 }
@@ -266,51 +265,18 @@ func blockedKindFromReason(reason string) string {
 	}
 }
 
-func projectMatchesScopedKey(td *tasks.Deps, state *DaemonState, project, key string) bool {
-	p, _ := projectSetFromScopedKey(td, state, key)
-	return p == project
-}
-
-func projectSetFromScopedKey(td *tasks.Deps, state *DaemonState, key string) (project, setID string) {
+func projectSetFromScopedKey(td *tasks.Deps, key string) (project, setID string) {
 	setID = binding.SetIDFromKey(key)
-	if p := projectForScopedKey(td, state, key); p != "" {
-		return p, setID
+	if bindings, err := binding.AllBindings(td); err == nil {
+		if b, ok := bindings[key]; ok && b.Project != "" {
+			return b.Project, setID
+		}
 	}
-	if p := integration.ProjectForScopedKey(td, key); p != "" {
-		return p, setID
-	}
-	return "", setID
+	return projectForScopedKey(td, key), setID
 }
 
-func projectForScopedKey(td *tasks.Deps, state *DaemonState, key string) string {
-	setID := binding.SetIDFromKey(key)
-	bindings, _ := binding.AllBindings(td)
-	if state != nil {
-		for _, b := range bindings {
-			if b.Project != "" {
-				for _, parked := range state.ParkedSets {
-					if parked.SetID == setID && parked.RuntimePath == b.RuntimePath {
-						return b.Project
-					}
-				}
-			}
-		}
-	}
-	if p := integration.ProjectForScopedKey(td, key); p != "" {
-		return p
-	}
-	if state != nil {
-		for _, parked := range state.ParkedSets {
-			if parked.SetID == setID {
-				for _, b := range bindings {
-					if b.RuntimePath == parked.RuntimePath {
-						return b.Project
-					}
-				}
-			}
-		}
-	}
-	return ""
+func projectForScopedKey(td *tasks.Deps, key string) string {
+	return integration.ProjectForScopedKey(td, key)
 }
 
 func formatQueueWorkSummary(view RunView) string {
@@ -531,7 +497,7 @@ func buildWorktreeBindingViews(d *tasks.Deps, state *DaemonState, view RunView) 
 		setID := binding.SetIDFromKey(key)
 		project := b.Project
 		if project == "" {
-			project = projectForScopedKey(d, state, key)
+			project = projectForScopedKey(d, key)
 		}
 		item := WorktreeBindingView{
 			Project:     project,

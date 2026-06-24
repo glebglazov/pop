@@ -358,7 +358,7 @@ func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 		}
 	}
 
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, nil, &DaemonState{Version: 1}, time.Now())
 
 	var busy []string
 	for _, dec := range decisions {
@@ -422,7 +422,7 @@ func TestDecideProjectDispatchesKeepsSingleInPlaceDrain(t *testing.T) {
 		},
 	}
 
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, &DaemonState{Version: 1}, time.Now())
 
 	if len(decisions) != 1 || !decisions[0].Actionable() || decisions[0].TaskSetID != "top" {
 		t.Fatalf("non-worktree-ready dispatches = %+v, want one in-place top drain", decisions)
@@ -440,9 +440,18 @@ func TestSelectReadySetSkipsBackedOffPinnedSet(t *testing.T) {
 		setScopedKey(repoKey, "pinned"): now.Add(time.Hour),
 	}}
 
-	id, _, _, ok := selectReadySet(refresh, repoKey, state, now)
+	id, _, _, ok := selectReadySet(refresh, repoKey, state, nil, now)
 	if !ok || id != "fallback" {
 		t.Fatalf("selectReadySet = (%q,%v), want fallback,true", id, ok)
+	}
+}
+
+// backoffFor returns a setBackoffFunc deriving each named set's status from
+// synthetic Drain history, exercising the same setBackoffStatus the production
+// store-backed lookup feeds (ADR-0055).
+func backoffFor(history map[string]tasks.SetBackoffInfo, delays []time.Duration, now time.Time) setBackoffFunc {
+	return func(setID string) (bool, time.Time) {
+		return setBackoffStatus(history[setID], delays, now)
 	}
 }
 
@@ -451,17 +460,18 @@ func TestSelectReadySetSkipsCrashBackoffUntilElapsed(t *testing.T) {
 	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
 		{ID: "crashy", Status: tasks.StatusReady, AutoDrain: true, Priority: 100, RegIndex: 0},
 	}}
-	repoKey := "test-repo"
-	state := &DaemonState{Version: 1, SetCrashBackoffs: map[string]time.Time{
-		setScopedKey(repoKey, "crashy"): now.Add(time.Minute),
-	}}
+	delays := []time.Duration{time.Minute}
+	history := map[string]tasks.SetBackoffInfo{
+		"crashy": {ConsecutiveAbnormal: 1, LastAbnormalAt: now},
+	}
 
-	id, until, reason, ok := selectReadySet(refresh, repoKey, state, now)
+	id, until, reason, ok := selectReadySet(refresh, "test-repo", nil, backoffFor(history, delays, now), now)
 	if ok || id != "" || !until.Equal(now.Add(time.Minute)) || reason != "set backed off after abnormal drain exit" {
 		t.Fatalf("selectReadySet during backoff = (%q,%s,%q,%v)", id, until, reason, ok)
 	}
 
-	id, _, _, ok = selectReadySet(refresh, repoKey, state, now.Add(2*time.Minute))
+	later := now.Add(2 * time.Minute)
+	id, _, _, ok = selectReadySet(refresh, "test-repo", nil, backoffFor(history, delays, later), later)
 	if !ok || id != "crashy" {
 		t.Fatalf("selectReadySet after backoff = (%q,%v), want crashy,true", id, ok)
 	}
@@ -472,14 +482,23 @@ func TestSelectReadySetSkipsParkedSet(t *testing.T) {
 	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
 		{ID: "parked", Status: tasks.StatusReady, AutoDrain: true, Priority: 100, RegIndex: 0},
 	}}
-	repoKey := "test-repo"
-	state := &DaemonState{Version: 1, ParkedSets: map[string]ParkedSet{
-		setScopedKey(repoKey, "parked"): {RuntimePath: "/runtime", SetID: "parked", ParkedAt: now},
-	}}
+	// n=2 consecutive abnormal terminals exceeds the single-entry retry schedule
+	// (park threshold = len+1), so the set is parked.
+	delays := []time.Duration{time.Minute}
+	history := map[string]tasks.SetBackoffInfo{
+		"parked": {ConsecutiveAbnormal: 2, LastAbnormalAt: now},
+	}
 
-	id, until, reason, ok := selectReadySet(refresh, repoKey, state, now)
+	id, until, reason, ok := selectReadySet(refresh, "test-repo", nil, backoffFor(history, delays, now), now)
 	if ok || id != "" || !until.IsZero() || reason != "set parked after repeated abnormal drain exits" {
 		t.Fatalf("selectReadySet parked = (%q,%s,%q,%v)", id, until, reason, ok)
+	}
+
+	// A park-clear newer than the latest abnormal terminal lifts the park.
+	history["parked"] = tasks.SetBackoffInfo{ConsecutiveAbnormal: 2, LastAbnormalAt: now, ParkClearedAt: now.Add(time.Second)}
+	id, _, _, ok = selectReadySet(refresh, "test-repo", nil, backoffFor(history, delays, now), now)
+	if !ok || id != "parked" {
+		t.Fatalf("selectReadySet after park-clear = (%q,%v), want parked,true", id, ok)
 	}
 }
 

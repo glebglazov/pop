@@ -39,10 +39,14 @@ type DashboardRow struct {
 	statePath          string
 	cursorKey          string
 	repoKey            string
+	repoCommonDir      string
 	projectPath        string
 	runtimePath        string
 	paneID             string
 	integrationBacklog bool
+	// parked is true when the set's repeated abnormal terminals have parked it
+	// (derived from Drain history); unpark writes a park-clear event (ADR-0055).
+	parked bool
 }
 
 // DashboardSnapshot is the data model for `pop queue dashboard`.
@@ -57,11 +61,12 @@ type DashboardSnapshot struct {
 type dashboardRepoStatic struct {
 	defPath     string
 	statePath   string
-	repoKey     string
-	projectName string
-	rep         *projectScan
-	repBranch   string
-	bare        bool
+	repoKey       string
+	repoCommonDir string
+	projectName   string
+	rep           *projectScan
+	repBranch     string
+	bare          bool
 }
 
 // dashboardCache memoizes the git-static repo resolution across dashboard polls.
@@ -137,9 +142,14 @@ func BuildDashboardWith(d *Deps, cfg *config.Config, cache *dashboardCache) (Das
 	// Volatile overlay: task statuses, locks, and daemon-state-derived columns
 	// are re-read every poll so the view stays live, but these are cheap file
 	// reads — the git resolution above is what the cache spares.
+	var delays []time.Duration
+	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
+		delays = qcfg.CrashRetryDelays
+	}
+	now := d.now().UTC()
 	var rows []DashboardRow
 	for _, st := range statics {
-		groupRows, err := dashboardRowsFromStatic(d, state, st)
+		groupRows, err := dashboardRowsFromStatic(d, state, delays, now, st)
 		if err != nil {
 			return DashboardSnapshot{}, err
 		}
@@ -352,7 +362,11 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 	if err != nil {
 		return nil, err
 	}
-	return dashboardRowsFromStatic(d, state, st)
+	var delays []time.Duration
+	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
+		delays = qcfg.CrashRetryDelays
+	}
+	return dashboardRowsFromStatic(d, state, delays, d.now().UTC(), st)
 }
 
 // resolveRepoStatic resolves one repo group's tick-stable coordinates: repo key,
@@ -382,13 +396,14 @@ func resolveRepoStatic(d *Deps, cfg *config.Config, scans []projectScan) (dashbo
 		}
 	}
 	return dashboardRepoStatic{
-		defPath:     scans[0].DefinitionPath,
-		statePath:   tasks.StatePathFor(scans[0].DefinitionPath),
-		repoKey:     repoKey,
-		projectName: repoName(scans, rep),
-		rep:         rep,
-		repBranch:   repBranch,
-		bare:        bare,
+		defPath:       scans[0].DefinitionPath,
+		statePath:     tasks.StatePathFor(scans[0].DefinitionPath),
+		repoKey:       repoKey,
+		repoCommonDir: scanRepoCommonDir(d, scans[0]),
+		projectName:   repoName(scans, rep),
+		rep:           rep,
+		repBranch:     repBranch,
+		bare:          bare,
 	}, nil
 }
 
@@ -396,11 +411,12 @@ func resolveRepoStatic(d *Deps, cfg *config.Config, scans []projectScan) (dashbo
 // resolution plus the current volatile state: task statuses (refresh), runtime
 // locks, and daemon-state columns. It forks no git, so it is the cheap per-poll
 // half the cross-tick cache exists to isolate.
-func dashboardRowsFromStatic(d *Deps, state *DaemonState, st dashboardRepoStatic) ([]DashboardRow, error) {
+func dashboardRowsFromStatic(d *Deps, state *DaemonState, delays []time.Duration, now time.Time, st dashboardRepoStatic) ([]DashboardRow, error) {
 	refresh, err := d.refresh(st.defPath)
 	if err != nil {
 		return nil, err
 	}
+	backoff := d.setBackoffLookup(st.repoCommonDir, delays, now)
 	var rows []DashboardRow
 	for _, taskRow := range refresh.Rows {
 		merge, _ := mergeabilityForSet(d, st.repoKey, taskRow.ID)
@@ -415,7 +431,14 @@ func dashboardRowsFromStatic(d *Deps, state *DaemonState, st dashboardRepoStatic
 			continue
 		}
 		wt := dashboardWorktree(d, state, st.repoKey, taskRow.ID, st.rep, st.repBranch, st.bare)
+		parked := false
+		if backoff != nil {
+			parked, _ = backoff(taskRow.ID)
+		}
 		drain := dashboardDrain(d, state, st.repoKey, taskRow.ID, wt.runtimePath)
+		if parked {
+			drain = "parked"
+		}
 		status := dashboardStatus(taskRow.Status, merge, awaitingIntegration)
 		rows = append(rows, DashboardRow{
 			Project:            st.projectName,
@@ -428,10 +451,12 @@ func dashboardRowsFromStatic(d *Deps, state *DaemonState, st dashboardRepoStatic
 			statePath:          st.statePath,
 			cursorKey:          st.projectName + "\x00" + taskRow.ID,
 			repoKey:            st.repoKey,
+			repoCommonDir:      st.repoCommonDir,
 			projectPath:        staticProjectPath(st),
 			runtimePath:        wt.runtimePath,
 			paneID:             dashboardPaneID(state, st.repoKey, taskRow.ID),
 			integrationBacklog: awaitingIntegration,
+			parked:             parked,
 		})
 	}
 	return rows, nil
@@ -564,6 +589,10 @@ type dashboardToggleMsg struct {
 }
 type dashboardDrainMsg struct {
 	err error
+}
+type dashboardUnparkMsg struct {
+	setID string
+	err   error
 }
 type dashboardPreviewMsg struct {
 	err error
@@ -875,6 +904,18 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.abandon = &dashboardAbandonModal{row: m.snap.Rows[m.cursor]}
 			return m, nil
+		case "P":
+			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+				return m, nil
+			}
+			row := m.snap.Rows[m.cursor]
+			if !row.parked {
+				m.statusMsg = "task set is not parked"
+				return m, nil
+			}
+			m.err = nil
+			m.statusMsg = ""
+			return m, m.unparkSet(row)
 		case "O":
 			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
 				return m, nil
@@ -952,6 +993,13 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.drainPick = nil
 		if msg.err != nil {
 			m.err = msg.err
+		}
+		return m, m.reload()
+	case dashboardUnparkMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		} else {
+			m.statusMsg = fmt.Sprintf("%s unparked", msg.setID)
 		}
 		return m, m.reload()
 	case dashboardDrainListMsg:
@@ -1352,6 +1400,33 @@ func (m dashboardModel) reload() tea.Cmd {
 		snap, err := BuildDashboardWith(m.d, m.cfg, m.cache)
 		return dashboardRowsMsg{snap: snap, err: err}
 	}
+}
+
+// unparkSet handles the `P` key: it writes a durable park-clear event for the
+// selected parked set so the daemon may auto-spawn it again (ADR-0055).
+func (m dashboardModel) unparkSet(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		err := UnparkDashboardRow(m.d, row)
+		return dashboardUnparkMsg{setID: row.SetID, err: err}
+	}
+}
+
+// UnparkDashboardRow clears the park on a dashboard row's Task set by appending a
+// park-clear event keyed by the repository's common dir and set id. The row must
+// carry a resolved common dir (parked rows always do).
+func UnparkDashboardRow(d *Deps, row DashboardRow) error {
+	if d == nil || d.Tasks == nil {
+		return fmt.Errorf("missing task dependencies")
+	}
+	commonDir := row.repoCommonDir
+	if strings.TrimSpace(commonDir) == "" {
+		id, err := tasks.ResolveRepositoryIdentity(d.Tasks, row.runtimePath)
+		if err != nil {
+			return err
+		}
+		commonDir = id.CommonDir
+	}
+	return tasks.RecordParkClear(d.Tasks, commonDir, row.SetID)
 }
 
 func (m dashboardModel) toggleAutoDrain(row DashboardRow) tea.Cmd {
@@ -2308,7 +2383,7 @@ func (m dashboardModel) View() tea.View {
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
 	renderDashboardTable(&body, m.snap.Rows, m.cursor, m.width)
-	hint := "j/k move · gg/G top/bottom · l/enter status · i drain · I integrate · O shell · p preview · b bind worktree · U unbind worktree · a auto-drain · / filter · h/esc quit"
+	hint := "j/k move · gg/G top/bottom · l/enter status · i drain · I integrate · O shell · p preview · b bind worktree · U unbind worktree · P unpark · a auto-drain · / filter · h/esc quit"
 	footer := true
 	if m.bind != nil {
 		renderDashboardBindModal(&body, m.bind)

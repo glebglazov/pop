@@ -226,6 +226,10 @@ type projectScan struct {
 	// once during scan path resolution. Carrying it lets the decision phase reuse
 	// it instead of re-forking `git rev-parse --git-common-dir` per group.
 	RepoKey string
+	// RepoCommonDir is the repository's canonical git common directory — the
+	// Drain row's repo key. The decision phase queries per-set abnormal-terminal
+	// history (Queue backoff/parking) by it (ADR-0055).
+	RepoCommonDir string
 }
 
 type provisionedWorktree struct {
@@ -245,9 +249,13 @@ type Decision struct {
 	// UnverifiedSetID is the first Task-set in UNVERIFIED state (AFK done, terminal
 	// HITL gate awaits human sign-off). Empty when the project has no unverified set.
 	UnverifiedSetID string
-	Err             error
-	scan            projectScan
-	lockStatus      *tasks.RuntimeLockStatus
+	// BlockedSetID names the set whose abnormal-backoff or parking produced
+	// Reason. It lets the dashboard attribute a backoff/park to a specific set
+	// without reading any persisted flag (ADR-0055).
+	BlockedSetID string
+	Err          error
+	scan         projectScan
+	lockStatus   *tasks.RuntimeLockStatus
 }
 
 // Actionable reports whether the decision selected a Task set to drain.
@@ -424,6 +432,7 @@ func resolveScan(d *Deps, p project.ExpandedProject) (projectScan, error) {
 		RuntimePath:    resolved.ProjectPath,
 		SessionName:    project.SessionNameWith(d.Project, resolved.ProjectPath),
 		RepoKey:        repoIdentityKey(id),
+		RepoCommonDir:  id.CommonDir,
 	}, nil
 }
 
@@ -437,12 +446,30 @@ func scanRepoKey(d *Deps, scan projectScan) (string, error) {
 	return resolveRepoKey(d, scan.ProjectPath)
 }
 
+// scanRepoCommonDir returns the repository's canonical git common directory (the
+// Drain row's repo key for backoff/parking history), reusing the value resolved
+// during scan path resolution and falling back to a git lookup for callers
+// (tests, the spawn path) that build a projectScan without it.
+func scanRepoCommonDir(d *Deps, scan projectScan) string {
+	if scan.RepoCommonDir != "" {
+		return scan.RepoCommonDir
+	}
+	if d == nil || d.Tasks == nil || strings.TrimSpace(scan.ProjectPath) == "" {
+		return ""
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, scan.ProjectPath)
+	if err != nil {
+		return ""
+	}
+	return id.CommonDir
+}
+
 // decideProject reads the runtime lock and Ready sets for one project and
 // returns the first Decision. It is retained for tests and callers that need the
 // v1 single-decision view; Scan uses decideProjectDispatches to expose
 // worktree-ready multi-set fan-out.
 func decideProject(d *Deps, scan projectScan, state *DaemonState, now time.Time) Decision {
-	decisions := decideProjectDispatches(d, scan, state, now)
+	decisions := decideProjectDispatches(d, scan, nil, state, now)
 	if len(decisions) == 0 {
 		return Decision{Project: scan.Name, scan: scan, Reason: "no ready set"}
 	}
@@ -454,7 +481,7 @@ func decideProject(d *Deps, scan projectScan, state *DaemonState, now time.Time)
 // highest-priority Ready set is selected. A project with an explicit
 // WorktreeReady Decision keeps live worktree drains as per-checkout busy
 // Decisions but may still dispatch other Ready sets into fresh worktrees.
-func decideProjectDispatches(d *Deps, scan projectScan, state *DaemonState, now time.Time) []Decision {
+func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, state *DaemonState, now time.Time) []Decision {
 	dec := Decision{Project: scan.Name, scan: scan}
 	dec.WorktreeReady, dec.ProjectConfigError = readRepoConfig(d, scan.ProjectPath)
 
@@ -520,13 +547,16 @@ func decideProjectDispatches(d *Deps, scan projectScan, state *DaemonState, now 
 		return appendOrOnly(decisions, dec)
 	}
 
-	ids, waitUntil, waitReason, ok := selectReadySets(refresh, repoKey, state, now)
+	backoff := d.setBackoffLookup(scanRepoCommonDir(d, scan), delays, now)
+	ids, waitUntil, waitReason, blockedID, ok := selectReadySets(refresh, repoKey, state, backoff, now)
 	if !ok {
 		if !waitUntil.IsZero() {
 			dec.Reason = waitReason
 			dec.WaitUntil = waitUntil
+			dec.BlockedSetID = blockedID
 		} else if waitReason != "" {
 			dec.Reason = waitReason
+			dec.BlockedSetID = blockedID
 		} else if id := firstUnverifiedSetID(refresh.Rows); id != "" {
 			dec.Reason = "awaiting verification"
 			dec.UnverifiedSetID = id
@@ -655,17 +685,24 @@ func firstUnverifiedSetID(rows []tasks.Row) string {
 	return ""
 }
 
-func selectReadySet(refresh *tasks.RefreshResult, repoKey string, state *DaemonState, now time.Time) (string, time.Time, string, bool) {
-	ids, waitUntil, reason, ok := selectReadySets(refresh, repoKey, state, now)
+func selectReadySet(refresh *tasks.RefreshResult, repoKey string, state *DaemonState, backoff setBackoffFunc, now time.Time) (string, time.Time, string, bool) {
+	ids, waitUntil, reason, _, ok := selectReadySets(refresh, repoKey, state, backoff, now)
 	if !ok || len(ids) == 0 {
 		return "", waitUntil, reason, false
 	}
 	return ids[0], time.Time{}, "", true
 }
 
-func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *DaemonState, now time.Time) ([]string, time.Time, string, bool) {
+// setBackoffFunc reports a set's abnormal-derived Queue eligibility: parked
+// reports whether repeated abnormal terminals have parked it (skip indefinitely
+// until a human unparks); a non-zero until is the instant it next becomes
+// spawnable after an escalating backoff. Both are derived from Drain history, so
+// a nil func (tests, callers without a store) means "always spawnable".
+type setBackoffFunc func(setID string) (parked bool, until time.Time)
+
+func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *DaemonState, backoff setBackoffFunc, now time.Time) ([]string, time.Time, string, string, bool) {
 	if refresh == nil {
-		return nil, time.Time{}, "", false
+		return nil, time.Time{}, "", "", false
 	}
 	var ready []tasks.Row
 	for _, row := range refresh.Rows {
@@ -674,7 +711,7 @@ func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *Daemon
 		}
 	}
 	if len(ready) == 0 {
-		return nil, time.Time{}, "", false
+		return nil, time.Time{}, "", "", false
 	}
 	sort.SliceStable(ready, func(i, j int) bool {
 		if ready[i].Priority != ready[j].Priority {
@@ -683,24 +720,29 @@ func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *Daemon
 		return ready[i].RegIndex < ready[j].RegIndex
 	})
 	var earliest time.Time
-	var skippedParked bool
-	var skippedBackoff bool
-	var skippedQuota bool
+	var parkedID, backoffID, quotaID string
 	var ids []string
 	for _, row := range ready {
-		if setParked(state, repoKey, row.ID) {
-			skippedParked = true
-			continue
-		}
-		if until := setCrashBackoffUntil(state, repoKey, row.ID, now); !until.IsZero() {
-			skippedBackoff = true
-			if earliest.IsZero() || until.Before(earliest) {
-				earliest = until
+		if backoff != nil {
+			if parked, until := backoff(row.ID); parked {
+				if parkedID == "" {
+					parkedID = row.ID
+				}
+				continue
+			} else if !until.IsZero() {
+				if backoffID == "" {
+					backoffID = row.ID
+				}
+				if earliest.IsZero() || until.Before(earliest) {
+					earliest = until
+				}
+				continue
 			}
-			continue
 		}
 		if until := setBackoffUntil(state, repoKey, row.ID, now); !until.IsZero() {
-			skippedQuota = true
+			if quotaID == "" {
+				quotaID = row.ID
+			}
 			if earliest.IsZero() || until.Before(earliest) {
 				earliest = until
 			}
@@ -709,17 +751,17 @@ func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *Daemon
 		ids = append(ids, row.ID)
 	}
 	if len(ids) > 0 {
-		return ids, time.Time{}, "", true
+		return ids, time.Time{}, "", "", true
 	}
 	switch {
-	case !earliest.IsZero() && skippedBackoff:
-		return nil, earliest, "set backed off after abnormal drain exit", false
-	case !earliest.IsZero() && skippedQuota:
-		return nil, earliest, "set backed off for pinned agent cooldown", false
-	case skippedParked:
-		return nil, time.Time{}, "set parked after repeated abnormal drain exits", false
+	case !earliest.IsZero() && backoffID != "":
+		return nil, earliest, "set backed off after abnormal drain exit", backoffID, false
+	case !earliest.IsZero() && quotaID != "":
+		return nil, earliest, "set backed off for pinned agent cooldown", quotaID, false
+	case parkedID != "":
+		return nil, time.Time{}, "set parked after repeated abnormal drain exits", parkedID, false
 	default:
-		return nil, time.Time{}, "no ready set", false
+		return nil, time.Time{}, "no ready set", "", false
 	}
 }
 
@@ -734,23 +776,46 @@ func setBackoffUntil(state *DaemonState, repoKey, setID string, now time.Time) t
 	return until
 }
 
-func setCrashBackoffUntil(state *DaemonState, repoKey, setID string, now time.Time) time.Time {
-	if state == nil || state.SetCrashBackoffs == nil {
-		return time.Time{}
+// setBackoffStatus derives a set's abnormal-driven Queue eligibility from its
+// Drain history (ADR-0055): with n consecutive abnormal terminals it is parked
+// once n exceeds the retry schedule's length, otherwise it backs off until the
+// most recent abnormal terminal plus the nth escalating delay. A park-clear
+// event newer than that terminal lifts both backoff and park. No timer or flag
+// is persisted — the history is the source of truth.
+func setBackoffStatus(info tasks.SetBackoffInfo, delays []time.Duration, now time.Time) (parked bool, until time.Time) {
+	n := info.ConsecutiveAbnormal
+	if n == 0 {
+		return false, time.Time{}
 	}
-	until := state.SetCrashBackoffs[setScopedKey(repoKey, setID)]
-	if until.IsZero() || !until.After(now) {
-		return time.Time{}
+	if !info.ParkClearedAt.IsZero() && info.ParkClearedAt.After(info.LastAbnormalAt) {
+		return false, time.Time{}
 	}
-	return until
+	if len(delays) == 0 || n > len(delays) {
+		return true, time.Time{}
+	}
+	candidate := info.LastAbnormalAt.Add(delays[n-1])
+	if candidate.After(now) {
+		return false, candidate
+	}
+	return false, time.Time{}
 }
 
-func setParked(state *DaemonState, repoKey, setID string) bool {
-	if state == nil || state.ParkedSets == nil {
-		return false
+// setBackoffLookup builds the per-set abnormal-backoff probe used during
+// dispatch. It reads each set's Drain history under the repository's common dir
+// and applies the configured escalation schedule. Read errors and a missing
+// store degrade to "spawnable", never blocking dispatch on a transient store
+// problem.
+func (d *Deps) setBackoffLookup(repoCommonDir string, delays []time.Duration, now time.Time) setBackoffFunc {
+	if d == nil || d.Tasks == nil || strings.TrimSpace(repoCommonDir) == "" {
+		return nil
 	}
-	_, ok := state.ParkedSets[setScopedKey(repoKey, setID)]
-	return ok
+	return func(setID string) (bool, time.Time) {
+		info, err := tasks.ReadSetBackoff(d.Tasks, repoCommonDir, setID)
+		if err != nil {
+			return false, time.Time{}
+		}
+		return setBackoffStatus(info, delays, now)
+	}
 }
 
 func resolveRepoKey(d *Deps, projectPath string) (string, error) {

@@ -248,6 +248,99 @@ func (s *Store) LatestTerminalByRuntimePath(runtimePath string) (*Drain, error) 
 	return scanDrain(row)
 }
 
+// SetBackoff summarises a (repo, set)'s recent Drain history for deriving Queue
+// backoff and parking (ADR-0055): the count of consecutive abnormal terminals
+// (crashed/interrupted) since the last clean one (finished/quota_paused), the
+// instant of the most recent abnormal terminal, and the latest park-clear
+// (unpark) event. Backoff delay and the parked decision are computed from these
+// — no timer or flag is persisted.
+type SetBackoff struct {
+	ConsecutiveAbnormal int
+	LastAbnormalAt      time.Time
+	ParkClearedAt       time.Time
+}
+
+// ReadSetBackoff walks the (repo, set)'s terminal Drains newest-first, counting
+// the unbroken run of abnormal terminals until the first clean one — a clean
+// terminal resets the count for free, so no counter is stored — and reads the
+// latest park-clear event.
+func (s *Store) ReadSetBackoff(repo, setID string) (SetBackoff, error) {
+	rows, err := s.db.Query(
+		`SELECT state, finished_at FROM drains
+		 WHERE repo = ? AND set_id = ? AND state <> ?
+		 ORDER BY finished_at DESC, id DESC`,
+		repo, setID, StateRunning)
+	if err != nil {
+		return SetBackoff{}, err
+	}
+	var info SetBackoff
+	for rows.Next() {
+		var state string
+		var finished sql.NullString
+		if err := rows.Scan(&state, &finished); err != nil {
+			_ = rows.Close()
+			return SetBackoff{}, err
+		}
+		if !drainStateAbnormal(state) {
+			break
+		}
+		if info.ConsecutiveAbnormal == 0 {
+			info.LastAbnormalAt = parseTime(finished.String)
+		}
+		info.ConsecutiveAbnormal++
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return SetBackoff{}, err
+	}
+	// Release the single connection before the next query: a loop that broke on a
+	// clean terminal leaves rows open, and with SetMaxOpenConns(1) latestParkClear
+	// would otherwise wait forever for a connection.
+	if err := rows.Close(); err != nil {
+		return SetBackoff{}, err
+	}
+	cleared, err := s.latestParkClear(repo, setID)
+	if err != nil {
+		return SetBackoff{}, err
+	}
+	info.ParkClearedAt = cleared
+	return info, nil
+}
+
+func (s *Store) latestParkClear(repo, setID string) (time.Time, error) {
+	row := s.db.QueryRow(
+		`SELECT cleared_at FROM park_clears
+		 WHERE repo = ? AND set_id = ?
+		 ORDER BY cleared_at DESC, id DESC LIMIT 1`,
+		repo, setID)
+	var cleared sql.NullString
+	switch err := row.Scan(&cleared); err {
+	case nil:
+		return parseTime(cleared.String), nil
+	case sql.ErrNoRows:
+		return time.Time{}, nil
+	default:
+		return time.Time{}, err
+	}
+}
+
+// RecordParkClear appends a park-clear (unpark) event for (repo, set). It is the
+// only durable addition to the otherwise-derived backoff/parking model: a clear
+// newer than the set's latest abnormal Drain lifts the park (ADR-0055).
+func (s *Store) RecordParkClear(repo, setID string, at time.Time) error {
+	_, err := s.db.Exec(
+		`INSERT INTO park_clears (repo, set_id, cleared_at) VALUES (?, ?, ?)`,
+		repo, setID, at.UTC().Format(timeLayout))
+	return err
+}
+
+// drainStateAbnormal reports whether a terminal state is an abnormal exit — a
+// process torn down out from under the executor — versus a clean stop. This is
+// the axis that feeds backoff and parking.
+func drainStateAbnormal(state string) bool {
+	return state == StateCrashed || state == StateInterrupted
+}
+
 func scanDrain(row *sql.Row) (*Drain, error) {
 	var d Drain
 	var started, state string

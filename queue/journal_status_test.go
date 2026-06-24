@@ -438,10 +438,70 @@ func TestDrainOutcomeAbnormalClassification(t *testing.T) {
 	}
 }
 
-func TestRecordTerminalOutcomesCrashBackoffEscalatesThenParks(t *testing.T) {
+// testRepoCommonDir resolves the Drain row's repo key (the canonical git common
+// dir) for a checkout, matching what BeginDrain records.
+func testRepoCommonDir(t *testing.T, td *tasks.Deps, path string) string {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(td, path)
+	if err != nil {
+		t.Fatalf("resolve repository identity: %v", err)
+	}
+	return id.CommonDir
+}
+
+// seedAbnormalDrain records one abnormal (interrupted) terminal Drain for a set,
+// the unit the derived backoff/parking counts (ADR-0055).
+func seedAbnormalDrain(t *testing.T, td *tasks.Deps, runtimePath, setID string) {
+	t.Helper()
+	h, err := tasks.BeginDrain(td, runtimePath, setID, nil)
+	if err != nil {
+		t.Fatalf("BeginDrain: %v", err)
+	}
+	if err := h.Finish(tasks.DrainOutcomeInterrupted, "", false, time.Time{}); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+}
+
+func TestCrashBackoffEscalatesThenParksFromDrainHistory(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initMergeabilityRepo(t)
-	key := testScopedKeyFor(t, td, repo, repo, "set-crash")
+	commonDir := testRepoCommonDir(t, td, repo)
+	delays := []time.Duration{time.Minute, 5 * time.Minute}
+
+	// First abnormal terminal → backoff one delay from the terminal instant.
+	seedAbnormalDrain(t, td, repo, "set-crash")
+	info, err := tasks.ReadSetBackoff(td, commonDir, "set-crash")
+	if err != nil {
+		t.Fatalf("ReadSetBackoff: %v", err)
+	}
+	if info.ConsecutiveAbnormal != 1 {
+		t.Fatalf("consecutive abnormal = %d, want 1", info.ConsecutiveAbnormal)
+	}
+	if parked, until := setBackoffStatus(info, delays, info.LastAbnormalAt); parked || !until.Equal(info.LastAbnormalAt.Add(time.Minute)) {
+		t.Fatalf("first backoff = (parked %v, until %s), want until+1m", parked, until)
+	}
+
+	// Second abnormal terminal → escalates to the second delay.
+	seedAbnormalDrain(t, td, repo, "set-crash")
+	info, _ = tasks.ReadSetBackoff(td, commonDir, "set-crash")
+	if info.ConsecutiveAbnormal != 2 {
+		t.Fatalf("consecutive abnormal = %d, want 2", info.ConsecutiveAbnormal)
+	}
+	if parked, until := setBackoffStatus(info, delays, info.LastAbnormalAt); parked || !until.Equal(info.LastAbnormalAt.Add(5*time.Minute)) {
+		t.Fatalf("second backoff = (parked %v, until %s), want until+5m", parked, until)
+	}
+
+	// Third abnormal terminal exhausts the schedule (park threshold = len+1).
+	seedAbnormalDrain(t, td, repo, "set-crash")
+	info, _ = tasks.ReadSetBackoff(td, commonDir, "set-crash")
+	if info.ConsecutiveAbnormal != 3 {
+		t.Fatalf("consecutive abnormal = %d, want 3", info.ConsecutiveAbnormal)
+	}
+	if parked, _ := setBackoffStatus(info, delays, info.LastAbnormalAt); !parked {
+		t.Fatalf("third abnormal terminal must park the set")
+	}
+
+	// The supervisor journals the park exactly once on the crossing terminal.
 	d := &Deps{
 		Tasks: td,
 		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
@@ -449,63 +509,20 @@ func TestRecordTerminalOutcomesCrashBackoffEscalatesThenParks(t *testing.T) {
 		},
 	}
 	cfg := &config.Config{Queue: &config.QueueConfig{CrashRetryDelays: []string{"1m", "5m"}}}
-	before := time.Now().UTC()
-
-	appendSpawn := func() {
-		t.Helper()
-		if err := AppendJournalEntry(td, JournalEntry{
-			Event:       JournalEventSpawn,
-			Project:     "pop",
-			SetID:       "set-crash",
-			RuntimePath: repo,
-			Source:      "supervisor",
-		}); err != nil {
-			t.Fatalf("append spawn: %v", err)
-		}
+	if err := AppendJournalEntry(td, JournalEntry{
+		Event:       JournalEventSpawn,
+		Project:     "pop",
+		SetID:       "set-crash",
+		RuntimePath: repo,
+		Source:      "supervisor",
+	}); err != nil {
+		t.Fatalf("append spawn: %v", err)
 	}
-	record := func() *DaemonState {
-		t.Helper()
-		if err := recordTerminalOutcomes(d, cfg, []Decision{{
-			Project: "pop",
-			scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-		}}, nil); err != nil {
-			t.Fatalf("record outcomes: %v", err)
-		}
-		state, err := ReadDaemonState(td)
-		if err != nil {
-			t.Fatalf("read state: %v", err)
-		}
-		return state
-	}
-
-	appendSpawn()
-	state := record()
-	if got := state.SetCrashCounts[key]; got != 1 {
-		t.Fatalf("crash count after first crash = %d, want 1", got)
-	}
-	if until := state.SetCrashBackoffs[key]; until.Before(before.Add(time.Minute)) || until.After(time.Now().UTC().Add(time.Minute+time.Second)) {
-		t.Fatalf("first crash backoff = %s, want about now+1m", until)
-	}
-
-	appendSpawn()
-	state = record()
-	if got := state.SetCrashCounts[key]; got != 2 {
-		t.Fatalf("crash count after second crash = %d, want 2", got)
-	}
-	if until := state.SetCrashBackoffs[key]; until.Before(before.Add(5*time.Minute)) || until.After(time.Now().UTC().Add(5*time.Minute+time.Second)) {
-		t.Fatalf("second crash backoff = %s, want about now+5m", until)
-	}
-
-	appendSpawn()
-	state = record()
-	if got := state.SetCrashCounts[key]; got != 3 {
-		t.Fatalf("crash count after third crash = %d, want 3", got)
-	}
-	if _, ok := state.ParkedSets[key]; !ok {
-		t.Fatalf("parked sets = %+v, want set-crash parked", state.ParkedSets)
-	}
-	if got := state.SetCrashBackoffs[key]; !got.IsZero() {
-		t.Fatalf("parked set must not keep active crash backoff, got %s", got)
+	if err := recordTerminalOutcomes(d, cfg, []Decision{{
+		Project: "pop",
+		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
+	}}, nil); err != nil {
+		t.Fatalf("record outcomes: %v", err)
 	}
 
 	entries, err := ReadJournal(td)
@@ -521,56 +538,51 @@ func TestRecordTerminalOutcomesCrashBackoffEscalatesThenParks(t *testing.T) {
 	if parked != 1 {
 		t.Fatalf("park journal events = %d, want 1; entries=%+v", parked, entries)
 	}
+
+	// No abnormal-backoff or park flags are persisted in daemon state (ADR-0055).
+	state, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	data, _ := td.FS.ReadFile(DaemonStatePath(td))
+	for _, omit := range []string{"set_crash_backoffs", "set_crash_counts", "parked_sets"} {
+		if strings.Contains(string(data), omit) {
+			t.Fatalf("daemon state must not persist %q: %s", omit, data)
+		}
+	}
+	_ = state
 }
 
-func TestRecordTerminalOutcomesCleanOutcomeResetsCrashState(t *testing.T) {
+func TestCleanTerminalResetsBackoffCountFromDrainHistory(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initMergeabilityRepo(t)
-	key := testScopedKeyFor(t, td, repo, repo, "set-1")
-	state := &DaemonState{
-		Version:          1,
-		SetCrashCounts:   map[string]int{key: 2},
-		SetCrashBackoffs: map[string]time.Time{key: time.Now().UTC().Add(time.Hour)},
-		ParkedSets:       map[string]ParkedSet{key: {RuntimePath: repo, SetID: "set-1", ParkedAt: time.Now().UTC()}},
-	}
-	if err := WriteDaemonState(td, state); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
-	writtenAt := time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC)
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			return &tasks.DrainOutcomeRecord{
-				SetID:       "set-1",
-				Outcome:     tasks.DrainOutcomeDone,
-				RuntimePath: repo,
-				WrittenAt:   writtenAt,
-			}, nil
-		},
-		ComputeMergeability: func(workingPath, runtimePath string) (MergeabilityRecord, error) {
-			return MergeabilityRecord{Status: MergeabilityClean, Target: "target", Source: "source"}, nil
-		},
-	}
+	commonDir := testRepoCommonDir(t, td, repo)
 
-	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}, nil); err != nil {
-		t.Fatalf("record outcomes: %v", err)
-	}
-
-	restartedState, err := ReadDaemonState(td)
+	seedAbnormalDrain(t, td, repo, "set-1")
+	seedAbnormalDrain(t, td, repo, "set-1")
+	info, err := tasks.ReadSetBackoff(td, commonDir, "set-1")
 	if err != nil {
-		t.Fatalf("read state after simulated restart: %v", err)
+		t.Fatalf("ReadSetBackoff: %v", err)
 	}
-	if got := restartedState.SetCrashCounts[key]; got != 0 {
-		t.Fatalf("crash count after clean outcome = %d, want 0", got)
+	if info.ConsecutiveAbnormal != 2 {
+		t.Fatalf("consecutive abnormal = %d, want 2 before clean terminal", info.ConsecutiveAbnormal)
 	}
-	if got := restartedState.SetCrashBackoffs[key]; !got.IsZero() {
-		t.Fatalf("crash backoff after clean outcome = %s, want cleared", got)
+
+	// A clean (finished) terminal breaks the abnormal run, resetting the count
+	// for free — no stored counter to clear.
+	h, err := tasks.BeginDrain(td, repo, "set-1", nil)
+	if err != nil {
+		t.Fatalf("BeginDrain: %v", err)
 	}
-	if _, ok := restartedState.ParkedSets[key]; ok {
-		t.Fatalf("parked set after clean outcome was not cleared: %+v", restartedState.ParkedSets)
+	if err := h.Finish(tasks.DrainOutcomeFinished, "", false, time.Time{}); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	info, _ = tasks.ReadSetBackoff(td, commonDir, "set-1")
+	if info.ConsecutiveAbnormal != 0 {
+		t.Fatalf("consecutive abnormal after clean terminal = %d, want 0", info.ConsecutiveAbnormal)
+	}
+	if parked, until := setBackoffStatus(info, []time.Duration{time.Minute}, time.Now().UTC()); parked || !until.IsZero() {
+		t.Fatalf("clean terminal must leave the set spawnable, got (parked %v, until %s)", parked, until)
 	}
 }
 
@@ -671,6 +683,38 @@ func TestRecordTerminalOutcomesDoneSkipsMergeabilityForTrunkDrain(t *testing.T) 
 	}
 }
 
+func TestUnparkDashboardRowClearsPark(t *testing.T) {
+	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
+	commonDir := testRepoCommonDir(t, td, repo)
+	delays := []time.Duration{time.Minute}
+
+	// Two abnormal terminals exceed the single-entry schedule and park the set.
+	seedAbnormalDrain(t, td, repo, "set-1")
+	seedAbnormalDrain(t, td, repo, "set-1")
+	info, err := tasks.ReadSetBackoff(td, commonDir, "set-1")
+	if err != nil {
+		t.Fatalf("ReadSetBackoff: %v", err)
+	}
+	if parked, _ := setBackoffStatus(info, delays, time.Now().UTC()); !parked {
+		t.Fatal("set should be parked before unpark")
+	}
+
+	d := &Deps{Tasks: td}
+	row := DashboardRow{SetID: "set-1", repoCommonDir: commonDir, runtimePath: repo}
+	if err := UnparkDashboardRow(d, row); err != nil {
+		t.Fatalf("UnparkDashboardRow: %v", err)
+	}
+
+	info, _ = tasks.ReadSetBackoff(td, commonDir, "set-1")
+	if info.ParkClearedAt.IsZero() {
+		t.Fatal("park-clear event was not recorded")
+	}
+	if parked, until := setBackoffStatus(info, delays, time.Now().UTC()); parked || !until.IsZero() {
+		t.Fatalf("set should be spawnable after unpark, got (parked %v, until %s)", parked, until)
+	}
+}
+
 func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	repoKey := "test-repo"
@@ -693,13 +737,10 @@ func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 		},
 	})
 	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{{
-		Project: "pop",
-		Reason:  "set parked after repeated abnormal drain exits",
-	}}, &DaemonState{
-		Version:          1,
-		SetCrashBackoffs: map[string]time.Time{key: now.Add(time.Minute)},
-		ParkedSets:       map[string]ParkedSet{key: {RuntimePath: "/runtime", SetID: "set-1", ParkedAt: now}},
-	})
+		Project:      "pop",
+		Reason:       "set parked after repeated abnormal drain exits",
+		BlockedSetID: "set-1",
+	}}, &DaemonState{Version: 1})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}

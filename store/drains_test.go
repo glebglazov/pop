@@ -176,6 +176,77 @@ func TestFinishedTerminalOmitsQuotaFields(t *testing.T) {
 	}
 }
 
+// finishAt records a terminal Drain for (repo, set) stamped at a fixed instant,
+// used to seed abnormal-history scenarios.
+func finishAt(t *testing.T, s *Store, repo, setID, state string, at time.Time) {
+	t.Helper()
+	d, err := s.StartDrain(Drain{Repo: repo, SetID: setID, RuntimePath: "/rt/" + setID, PID: 1, StartedAt: at}, allAlive(false))
+	if err != nil {
+		t.Fatalf("StartDrain: %v", err)
+	}
+	if err := s.FinishDrain(d.ID, state, "", false, time.Time{}, at); err != nil {
+		t.Fatalf("FinishDrain: %v", err)
+	}
+}
+
+func TestReadSetBackoffCountsConsecutiveAbnormal(t *testing.T) {
+	s := openTestStore(t)
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	finishAt(t, s, "repo", "set", StateInterrupted, base)
+	finishAt(t, s, "repo", "set", StateCrashed, base.Add(time.Minute))
+
+	info, err := s.ReadSetBackoff("repo", "set")
+	if err != nil {
+		t.Fatalf("ReadSetBackoff: %v", err)
+	}
+	if info.ConsecutiveAbnormal != 2 {
+		t.Fatalf("consecutive abnormal = %d, want 2", info.ConsecutiveAbnormal)
+	}
+	if !info.LastAbnormalAt.Equal(base.Add(time.Minute)) {
+		t.Fatalf("last abnormal = %s, want %s", info.LastAbnormalAt, base.Add(time.Minute))
+	}
+}
+
+func TestReadSetBackoffCleanTerminalResetsCount(t *testing.T) {
+	s := openTestStore(t)
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	finishAt(t, s, "repo", "set", StateInterrupted, base)
+	finishAt(t, s, "repo", "set", StateCrashed, base.Add(time.Minute))
+	// A later clean terminal (quota_paused) breaks the abnormal run.
+	finishAt(t, s, "repo", "set", StateQuotaPaused, base.Add(2*time.Minute))
+
+	info, err := s.ReadSetBackoff("repo", "set")
+	if err != nil {
+		t.Fatalf("ReadSetBackoff: %v", err)
+	}
+	if info.ConsecutiveAbnormal != 0 {
+		t.Fatalf("consecutive abnormal after clean terminal = %d, want 0", info.ConsecutiveAbnormal)
+	}
+}
+
+func TestRecordParkClearTracksLatest(t *testing.T) {
+	s := openTestStore(t)
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	finishAt(t, s, "repo", "set", StateCrashed, base)
+
+	if info, _ := s.ReadSetBackoff("repo", "set"); !info.ParkClearedAt.IsZero() {
+		t.Fatalf("park-clear before any event = %s, want zero", info.ParkClearedAt)
+	}
+	if err := s.RecordParkClear("repo", "set", base.Add(time.Minute)); err != nil {
+		t.Fatalf("RecordParkClear: %v", err)
+	}
+	if err := s.RecordParkClear("repo", "set", base.Add(3*time.Minute)); err != nil {
+		t.Fatalf("RecordParkClear: %v", err)
+	}
+	info, err := s.ReadSetBackoff("repo", "set")
+	if err != nil {
+		t.Fatalf("ReadSetBackoff: %v", err)
+	}
+	if !info.ParkClearedAt.Equal(base.Add(3 * time.Minute)) {
+		t.Fatalf("park-clear = %s, want latest %s", info.ParkClearedAt, base.Add(3*time.Minute))
+	}
+}
+
 // TestStartDrainConcurrentSeparateConnectionsAdmitsOne models competing
 // processes: each opens its own connection to the same database and races to
 // claim the same (repo, set). The BEGIN IMMEDIATE transaction must admit exactly

@@ -14,17 +14,16 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-// DaemonState is persisted supervisor-owned state. It tracks parked sets,
-// retry timers, and drain panes. Worktree bindings and mergeability live in
-// the shared per-repository stores owned by tasks/binding and tasks/integration.
+// DaemonState is persisted supervisor-owned state. It tracks pinned-agent quota
+// cooldown timers and drain panes. Abnormal-driven backoff and parking are no
+// longer persisted here — they are derived from Drain history plus a durable
+// park-clear event (ADR-0055). Worktree bindings and mergeability live in the
+// shared per-repository stores owned by tasks/binding and tasks/integration.
 type DaemonState struct {
-	Version          int                  `json:"version"`
-	UpdatedAt        time.Time            `json:"updated_at,omitempty"`
-	SetBackoffs      map[string]time.Time `json:"set_backoffs,omitempty"`
-	SetCrashBackoffs map[string]time.Time `json:"set_crash_backoffs,omitempty"`
-	SetCrashCounts   map[string]int       `json:"set_crash_counts,omitempty"`
-	ParkedSets       map[string]ParkedSet `json:"parked_sets,omitempty"`
-	DrainPanes       map[string]DrainPane `json:"drain_panes,omitempty"`
+	Version     int                  `json:"version"`
+	UpdatedAt   time.Time            `json:"updated_at,omitempty"`
+	SetBackoffs map[string]time.Time `json:"set_backoffs,omitempty"`
+	DrainPanes  map[string]DrainPane `json:"drain_panes,omitempty"`
 }
 
 // WorktreeBinding is the binding module's durable checkout record. The alias
@@ -55,17 +54,6 @@ func bindingProvisioned(d *tasks.Deps, key string) bool {
 // have their directories deleted.
 func bindingShouldTeardown(d *tasks.Deps, key string) bool {
 	return binding.ShouldTeardown(d, key)
-}
-
-// ParkedSet records a task set whose consecutive abnormal exits exhausted the
-// crash retry schedule. It is durable so a supervisor restart does not re-arm
-// the loop.
-type ParkedSet struct {
-	RuntimePath              string    `json:"runtime_path"`
-	SetID                    string    `json:"set_id"`
-	ParkedAt                 time.Time `json:"parked_at"`
-	Reason                   string    `json:"reason,omitempty"`
-	ConsecutiveAbnormalExits int       `json:"consecutive_abnormal_exits"`
 }
 
 const (
@@ -208,9 +196,6 @@ func migrateDaemonState(state *DaemonState) {
 		return
 	}
 	migrateStringTimeMap(state.SetBackoffs)
-	migrateStringTimeMap(state.SetCrashBackoffs)
-	migrateIntMap(state.SetCrashCounts)
-	migrateParkedSets(state)
 }
 
 func migrateStringTimeMap(m map[string]time.Time) {
@@ -235,55 +220,6 @@ func migrateStringTimeMap(m map[string]time.Time) {
 		}
 		m[newKey] = m[oldKeys[0]]
 		delete(m, oldKeys[0])
-	}
-}
-
-func migrateIntMap(m map[string]int) {
-	if len(m) == 0 {
-		return
-	}
-	targets := map[string][]string{}
-	for oldKey := range m {
-		runtimePath := runtimePathFromScopedKey(oldKey)
-		newKey, ok := migratedScopedKey(oldKey, runtimePath)
-		if !ok || newKey == oldKey {
-			continue
-		}
-		targets[newKey] = append(targets[newKey], oldKey)
-	}
-	for newKey, oldKeys := range targets {
-		if len(oldKeys) != 1 {
-			continue
-		}
-		if _, exists := m[newKey]; exists {
-			continue
-		}
-		m[newKey] = m[oldKeys[0]]
-		delete(m, oldKeys[0])
-	}
-}
-
-func migrateParkedSets(state *DaemonState) {
-	if len(state.ParkedSets) == 0 {
-		return
-	}
-	targets := map[string][]string{}
-	for oldKey, rec := range state.ParkedSets {
-		newKey, ok := migratedScopedKey(oldKey, rec.RuntimePath)
-		if !ok || newKey == oldKey {
-			continue
-		}
-		targets[newKey] = append(targets[newKey], oldKey)
-	}
-	for newKey, oldKeys := range targets {
-		if len(oldKeys) != 1 {
-			continue
-		}
-		if _, exists := state.ParkedSets[newKey]; exists {
-			continue
-		}
-		state.ParkedSets[newKey] = state.ParkedSets[oldKeys[0]]
-		delete(state.ParkedSets, oldKeys[0])
 	}
 }
 

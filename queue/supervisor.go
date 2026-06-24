@@ -286,7 +286,7 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, e
 					}
 					entries = append(entries, entry)
 					appendRunEvent(eventLines, formatOutcomeDelta(dec.Project, rec.SetID, rec.Outcome))
-					if err := applyTerminalOutcomeState(d, state, qcfg, dec.Project, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID, rec.Outcome, eventLines); err != nil {
+					if err := applyTerminalOutcomeState(d, qcfg, dec.Project, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID, rec.Outcome, eventLines); err != nil {
 						return err
 					}
 					if rec.Outcome == tasks.DrainOutcomeDone && shouldRecordMergeability(d, runtime.WorkingPath, rec.RuntimePath) {
@@ -374,7 +374,7 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, e
 				}
 				entries = append(entries, outcome)
 				appendRunEvent(eventLines, formatOutcomeDelta(entry.Project, entry.SetID, DrainOutcomeCrashed))
-				if err := applyTerminalOutcomeState(d, state, qcfg, entry.Project, dec.scan.ProjectPath, entry.RuntimePath, entry.SetID, DrainOutcomeCrashed, eventLines); err != nil {
+				if err := applyTerminalOutcomeState(d, qcfg, entry.Project, dec.scan.ProjectPath, entry.RuntimePath, entry.SetID, DrainOutcomeCrashed, eventLines); err != nil {
 					return err
 				}
 			}
@@ -444,74 +444,41 @@ func autoMergeCleanEnabled(d *Deps, repoRoot string) bool {
 	return err == nil && cfg.AutoMergeClean
 }
 
-func applyTerminalOutcomeState(d *Deps, state *DaemonState, qcfg config.ResolvedQueueConfig, project, projectPath, runtimePath, setID string, outcome tasks.DrainOutcome, eventLines *[]string) error {
-	if state == nil || runtimePath == "" || setID == "" {
+// applyTerminalOutcomeState reacts to a Drain reaching a terminal. Backoff and
+// parking are no longer persisted — they are derived from the Drain history the
+// terminal just extended (ADR-0055), so a clean terminal needs no action (it
+// resets the consecutive-abnormal count for free) and an abnormal one needs no
+// counter bump. The supervisor's only durable side effect here is the run log:
+// it emits the park journal event and run-event line once, when this abnormal
+// terminal is the one that crosses the set into the parked state.
+func applyTerminalOutcomeState(d *Deps, qcfg config.ResolvedQueueConfig, project, projectPath, runtimePath, setID string, outcome tasks.DrainOutcome, eventLines *[]string) error {
+	if runtimePath == "" || setID == "" || !drainOutcomeAbnormal(outcome) {
 		return nil
 	}
-	scopedKey, err := scopedKeyForPaths(d, projectPath, runtimePath, setID)
+	repoCommonDir := scanRepoCommonDir(d, projectScan{ProjectPath: runtimePath})
+	if repoCommonDir == "" {
+		return nil
+	}
+	info, err := tasks.ReadSetBackoff(d.Tasks, repoCommonDir, setID)
 	if err != nil {
 		return err
 	}
-	key := scopedKey
-	if drainOutcomeAbnormal(outcome) {
-		if state.SetCrashCounts == nil {
-			state.SetCrashCounts = map[string]int{}
-		}
-		count := state.SetCrashCounts[key] + 1
-		state.SetCrashCounts[key] = count
-
-		if len(qcfg.CrashRetryDelays) == 0 || count > len(qcfg.CrashRetryDelays) {
-			if state.SetCrashBackoffs != nil {
-				delete(state.SetCrashBackoffs, key)
-			}
-			if state.ParkedSets == nil {
-				state.ParkedSets = map[string]ParkedSet{}
-			}
-			state.ParkedSets[key] = ParkedSet{
-				RuntimePath:              runtimePath,
-				SetID:                    setID,
-				ParkedAt:                 time.Now().UTC(),
-				Reason:                   fmt.Sprintf("exhausted %d crash retry delay(s)", len(qcfg.CrashRetryDelays)),
-				ConsecutiveAbnormalExits: count,
-			}
-			if err := WriteDaemonState(d.Tasks, state); err != nil {
-				return err
-			}
-			appendRunEvent(eventLines, fmt.Sprintf("queue: %s: %s parked reason=%s", project, setID, "repeated abnormal drain exits"))
-			return AppendJournalEntry(d.Tasks, JournalEntry{
-				Event:       JournalEventSetParked,
-				Project:     project,
-				SetID:       setID,
-				RuntimePath: runtimePath,
-				Reason:      "repeated abnormal drain exits",
-				Source:      "supervisor",
-			})
-		}
-
-		if state.SetCrashBackoffs == nil {
-			state.SetCrashBackoffs = map[string]time.Time{}
-		}
-		state.SetCrashBackoffs[key] = time.Now().UTC().Add(qcfg.CrashRetryDelays[count-1])
-		if state.ParkedSets != nil {
-			delete(state.ParkedSets, key)
-		}
-		return WriteDaemonState(d.Tasks, state)
+	parked, _ := setBackoffStatus(info, qcfg.CrashRetryDelays, time.Now().UTC())
+	// Park threshold = one past the schedule's length (every abnormal exhausts a
+	// delay; parking follows the last). Journal only on the crossing terminal so
+	// the run log records a single park event per parking episode.
+	if !parked || info.ConsecutiveAbnormal != len(qcfg.CrashRetryDelays)+1 {
+		return nil
 	}
-
-	resetCrashState(state, key)
-	return WriteDaemonState(d.Tasks, state)
-}
-
-func resetCrashState(state *DaemonState, key string) {
-	if state.SetCrashCounts != nil {
-		delete(state.SetCrashCounts, key)
-	}
-	if state.SetCrashBackoffs != nil {
-		delete(state.SetCrashBackoffs, key)
-	}
-	if state.ParkedSets != nil {
-		delete(state.ParkedSets, key)
-	}
+	appendRunEvent(eventLines, fmt.Sprintf("queue: %s: %s parked reason=%s", project, setID, "repeated abnormal drain exits"))
+	return AppendJournalEntry(d.Tasks, JournalEntry{
+		Event:       JournalEventSetParked,
+		Project:     project,
+		SetID:       setID,
+		RuntimePath: runtimePath,
+		Reason:      "repeated abnormal drain exits",
+		Source:      "supervisor",
+	})
 }
 
 func appendRunEvent(lines *[]string, line string) {

@@ -37,6 +37,15 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, stat
 		return []Decision{{Project: name, Err: err, Reason: "repo"}}
 	}
 
+	// Crash-retry schedule (its length is the park threshold) drives the per-set
+	// abnormal backoff/parking derived from Drain history (ADR-0055). Resolve it
+	// once for the group; a config error degrades to no schedule (every abnormal
+	// parks immediately), matching the daemon's fail-safe stance.
+	var delays []time.Duration
+	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
+		delays = qcfg.CrashRetryDelays
+	}
+
 	// Live drains in any of the repo's checkouts collapse to the repository:
 	// a set already running in one worktree must not be dispatched again into
 	// the representative.
@@ -46,10 +55,10 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, stat
 		// Bare repo with no Trunk worktree configured. A per-set Worktree binding
 		// is still a valid drain router; without one the repository is refused and
 		// reported.
-		return append(extraBusy, decideBareWithoutBase(d, cfg, scans, name, state, now, runningElsewhere)...)
+		return append(extraBusy, decideBareWithoutBase(d, cfg, scans, name, delays, state, now, runningElsewhere)...)
 	}
 
-	decisions := decideProjectDispatches(d, *rep, state, now)
+	decisions := decideProjectDispatches(d, *rep, delays, state, now)
 	decisions = filterRunningElsewhere(decisions, runningElsewhere)
 	applyBindingRouting(d, scans, state, decisions)
 	return append(extraBusy, decisions...)
@@ -289,7 +298,7 @@ func applyBindingRouting(d *Deps, scans []projectScan, state *DaemonState, decis
 // configured: each Ready set with a per-set binding routes to that bound
 // checkout; any Ready set without one leaves the repository refused and
 // reported (a single skip decision), never scheduled.
-func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, name string, state *DaemonState, now time.Time, runningElsewhere map[string]bool) []Decision {
+func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, name string, delays []time.Duration, state *DaemonState, now time.Time, runningElsewhere map[string]bool) []Decision {
 	base := scans[0]
 	worktreeReady, configErr := readRepoConfig(d, base.ProjectPath)
 	skel := Decision{
@@ -312,13 +321,16 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 		return []Decision{skel}
 	}
 
-	ids, waitUntil, waitReason, ok := selectReadySets(refresh, repoKey, state, now)
+	backoff := d.setBackoffLookup(scanRepoCommonDir(d, base), delays, now)
+	ids, waitUntil, waitReason, blockedID, ok := selectReadySets(refresh, repoKey, state, backoff, now)
 	if !ok {
 		if !waitUntil.IsZero() {
 			skel.Reason = waitReason
 			skel.WaitUntil = waitUntil
+			skel.BlockedSetID = blockedID
 		} else if waitReason != "" {
 			skel.Reason = waitReason
+			skel.BlockedSetID = blockedID
 		} else {
 			skel.Reason = "no ready set"
 		}

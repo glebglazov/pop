@@ -31,6 +31,11 @@ type IdleProject struct {
 	// sign-off). Non-empty only when Reason is "awaiting verification".
 	UnverifiedSetID    string
 	Reason             string
+	// BlockedSetID names the set whose abnormal backoff or parking produced
+	// Reason; WaitUntil is when a backed-off set next becomes spawnable (zero for
+	// a parked set). Both are derived from Drain history (ADR-0055).
+	BlockedSetID       string
+	WaitUntil          time.Time
 	WorktreeReady      bool
 	ProjectConfigError string
 }
@@ -64,6 +69,10 @@ type StatusSnapshot struct {
 	DaemonState          *DaemonState
 	ActiveAgentCooldowns map[string]time.Time
 	Tasks                *tasks.Deps
+	// CrashRetryDelays is the resolved abnormal-backoff escalation schedule (its
+	// length is the park threshold). The run view derives each set's parked /
+	// backed-off status from Drain history against it (ADR-0055).
+	CrashRetryDelays []time.Duration
 }
 
 // BuildStatus derives queue status from on-disk lock/state truth.
@@ -86,6 +95,9 @@ func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
 	}
 	snap.ActiveAgentCooldowns = cooldowns
 	snap.Tasks = d.Tasks
+	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
+		snap.CrashRetryDelays = qcfg.CrashRetryDelays
+	}
 	return snap, nil
 }
 
@@ -116,7 +128,7 @@ func statusFromDecisions(d *Deps, decisions []Decision, state *DaemonState) (Sta
 			snap.Skipped = append(snap.Skipped, SkippedRepo{Project: dec.Project, Reason: dec.Reason})
 			continue
 		}
-		idle := IdleProject{Project: dec.Project, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError, UnverifiedSetID: dec.UnverifiedSetID}
+		idle := IdleProject{Project: dec.Project, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError, UnverifiedSetID: dec.UnverifiedSetID, BlockedSetID: dec.BlockedSetID, WaitUntil: dec.WaitUntil}
 		if dec.TaskSetID != "" {
 			idle.Waiting = "ready"
 			idle.ReadySet = dec.TaskSetID

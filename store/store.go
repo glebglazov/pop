@@ -107,6 +107,18 @@ var migrations = []string{
 		branch_sha   TEXT NOT NULL DEFAULT '',
 		computed_at  TEXT NOT NULL DEFAULT ''
 	);`,
+	// 4: park_clears — the durable park-clear (unpark) event. Queue backoff and
+	// parking are otherwise derived from Drain history (the run of abnormal
+	// terminals); the only persisted addition is this event, appended when a
+	// human clears a parked set. A clear newer than the set's latest abnormal
+	// Drain lifts the derived park (ADR-0055). Append-only: the latest row wins.
+	`CREATE TABLE park_clears (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		repo       TEXT NOT NULL,
+		set_id     TEXT NOT NULL,
+		cleared_at TEXT NOT NULL
+	);
+	CREATE INDEX idx_park_clears_repo_set ON park_clears(repo, set_id);`,
 }
 
 func (s *Store) migrate() error {
