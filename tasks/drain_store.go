@@ -67,9 +67,16 @@ func ReconcileDrains(d *Deps) (int, error) {
 		return 0, err
 	}
 	defer func() { _ = s.Close() }()
-	return s.ReconcileCrashed(func(dr store.Drain) bool {
+	now := time.Now().UTC()
+	n, err := s.ReconcileCrashed(func(dr store.Drain) bool {
 		return drainProcessAlive(d, dr.PID, dr.ProcStart)
-	}, time.Now().UTC())
+	}, now)
+	// SHA-gated mergeability refresh shares the reconcile pass (ADR-0055): it
+	// recomputes only sets whose HEADs moved, so a transient `unknown` is filled
+	// and a once-clean verdict flips to conflicts after trunk advances. Advisory:
+	// a refresh error never fails the crash reconcile a reader depends on.
+	_ = reconcileMergeability(d, s, now)
+	return n, err
 }
 
 // DrainHandle tracks an in-progress Drain so the caller can record its terminal

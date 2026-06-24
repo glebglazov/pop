@@ -5,15 +5,11 @@
 package integration
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -25,9 +21,14 @@ const (
 // Record records whether a DONE set branch can be textually merged into the
 // working branch. It is advisory; pop never integrates automatically except
 // when the repository opts in via auto_merge_clean.
+//
+// Status is the verdict, Target/Source the working and runtime HEADs it was
+// computed from, and WorkingPath the working checkout — carried so the reconcile
+// SHA gate can read both HEADs without resolving the trunk afresh (ADR-0055).
 type Record struct {
 	Project     string    `json:"project,omitempty"`
 	RuntimePath string    `json:"runtime_path"`
+	WorkingPath string    `json:"working_path,omitempty"`
 	SetID       string    `json:"set_id"`
 	Status      string    `json:"status"`
 	CheckedAt   time.Time `json:"checked_at"`
@@ -63,40 +64,58 @@ func (s *Store) Delete(key string) {
 	delete(s.Records, key)
 }
 
-// StorePath returns the shared mergeability store file path beside bindings.json.
-func StorePath(d *tasks.Deps) string {
-	return filepath.Join(filepath.Dir(binding.StorePath(d)), "mergeability.json")
-}
-
-// Load reads the shared mergeability store. A missing file yields an empty
-// store. Legacy entries embedded in queue daemon state are migrated on first
-// read via MigrateLegacyFromDaemonState.
+// Load reads the mergeability store from the global execution-state database
+// (ADR-0055). A store that does not yet exist yields an empty Store; nothing is
+// ever read from a standalone mergeability file.
 func Load(d *tasks.Deps) (*Store, error) {
-	data, err := d.FS.ReadFile(StorePath(d))
-	if errors.Is(err, os.ErrNotExist) {
-		return &Store{}, nil
-	}
+	entries, err := tasks.LoadMergeabilityEntries(d)
 	if err != nil {
 		return nil, err
 	}
-	var store Store
-	if err := json.Unmarshal(data, &store); err != nil {
-		return nil, fmt.Errorf("parse mergeability store: %w", err)
+	s := &Store{}
+	for key, e := range entries {
+		s.Put(key, recordFromEntry(e))
 	}
-	migrateStoreKeys(&store)
-	return &store, nil
+	return s, nil
 }
 
-// Save writes the shared mergeability store atomically.
+// Save writes the mergeability store to the global execution-state database,
+// replacing every row in one transaction (ADR-0055).
 func Save(d *tasks.Deps, store *Store) error {
 	if store == nil {
 		store = &Store{}
 	}
-	payload, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
+	entries := make(map[string]tasks.MergeabilityEntry, len(store.Records))
+	for key, rec := range store.Records {
+		entries[key] = entryFromRecord(rec)
 	}
-	return tasks.WriteAtomicWith(d, StorePath(d), append(payload, '\n'), 0o644)
+	return tasks.SaveMergeabilityEntries(d, entries)
+}
+
+func recordFromEntry(e tasks.MergeabilityEntry) Record {
+	return Record{
+		Project:     e.Project,
+		RuntimePath: e.RuntimePath,
+		WorkingPath: e.WorkingPath,
+		SetID:       e.SetID,
+		Status:      e.Verdict,
+		CheckedAt:   e.ComputedAt,
+		Target:      e.BaseSHA,
+		Source:      e.BranchSHA,
+	}
+}
+
+func entryFromRecord(rec Record) tasks.MergeabilityEntry {
+	return tasks.MergeabilityEntry{
+		Project:     rec.Project,
+		RuntimePath: rec.RuntimePath,
+		WorkingPath: rec.WorkingPath,
+		SetID:       rec.SetID,
+		Verdict:     rec.Status,
+		BaseSHA:     rec.Target,
+		BranchSHA:   rec.Source,
+		ComputedAt:  rec.CheckedAt,
+	}
 }
 
 // AllRecords returns every mergeability record in the shared store.
@@ -138,53 +157,6 @@ func MigrateLegacyFromDaemonState(d *tasks.Deps, legacy map[string]Record) error
 		return Save(d, store)
 	}
 	return nil
-}
-
-func migrateStoreKeys(store *Store) {
-	if store == nil || len(store.Records) == 0 {
-		return
-	}
-	targets := map[string][]string{}
-	for oldKey, rec := range store.Records {
-		newKey, ok := migratedScopedKey(oldKey, rec.RuntimePath)
-		if !ok || newKey == oldKey {
-			continue
-		}
-		targets[newKey] = append(targets[newKey], oldKey)
-	}
-	for newKey, oldKeys := range targets {
-		if len(oldKeys) != 1 {
-			continue
-		}
-		if _, exists := store.Records[newKey]; exists {
-			continue
-		}
-		store.Records[newKey] = store.Records[oldKeys[0]]
-		delete(store.Records, oldKeys[0])
-	}
-}
-
-func migratedScopedKey(oldKey, runtimePath string) (string, bool) {
-	parts := strings.Split(oldKey, "\x00")
-	if len(parts) != 2 {
-		return oldKey, false
-	}
-	setID := parts[1]
-	if !isLegacyScopedKey(parts[0]) {
-		return oldKey, false
-	}
-	repoKey := repoIdentityFromWorktreePath(parts[0])
-	if repoKey == "" {
-		repoKey = repoIdentityFromWorktreePath(runtimePath)
-	}
-	if repoKey == "" {
-		return oldKey, false
-	}
-	return binding.ScopedKey(repoKey, setID), true
-}
-
-func isLegacyScopedKey(prefix string) bool {
-	return strings.HasPrefix(prefix, "/") || strings.Contains(prefix, "\\")
 }
 
 func repoIdentityFromWorktreePath(path string) string {

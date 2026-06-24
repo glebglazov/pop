@@ -90,6 +90,23 @@ var migrations = []string{
 	// existed, or by a platform that cannot read process start-time, carries no
 	// token and falls back to bare PID liveness.
 	`ALTER TABLE drains ADD COLUMN proc_start TEXT;`,
+	// 3: mergeability — the kept-fresh merge verdict for a Done set's branch
+	// against its working checkout, keyed per (repository identity, set id) via
+	// the caller-built scoped key. It carries the two HEADs the verdict was
+	// computed from so a reader can cheaply gate recomputation on a SHA change
+	// (ADR-0051/0055): `unknown` is never stored as steady state, only the
+	// transient gap between a set going Done and the next reconcile.
+	`CREATE TABLE mergeability (
+		scoped_key   TEXT PRIMARY KEY,
+		project      TEXT NOT NULL DEFAULT '',
+		runtime_path TEXT NOT NULL DEFAULT '',
+		working_path TEXT NOT NULL DEFAULT '',
+		set_id       TEXT NOT NULL,
+		verdict      TEXT NOT NULL,
+		base_sha     TEXT NOT NULL DEFAULT '',
+		branch_sha   TEXT NOT NULL DEFAULT '',
+		computed_at  TEXT NOT NULL DEFAULT ''
+	);`,
 }
 
 func (s *Store) migrate() error {
