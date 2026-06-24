@@ -193,6 +193,28 @@ func (s *GlobalState) Entry(defPath string) *TaskEntry {
 	return s.Tasks[defPath]
 }
 
+// RegisteredWorktreeIntent returns the seeded worktree directive for the set
+// (defPath, setID), or nil when the set is unregistered or carries no directive.
+// It reads the persisted registration intent (ADR-0059) — the one-time seed —
+// and never re-reads the manifest. Drain routing consults it to decide whether
+// an unbound drain provisions/adopts a worktree.
+func RegisteredWorktreeIntent(d *Deps, defPath, setID string) (*WorktreeDirective, error) {
+	state, err := LoadGlobalStateWith(d, StatePathFor(defPath))
+	if err != nil {
+		return nil, err
+	}
+	entry := state.Tasks[defPath]
+	if entry == nil {
+		return nil, nil
+	}
+	for _, set := range entry.TaskSets {
+		if set.ID == setID {
+			return set.WorktreeIntent, nil
+		}
+	}
+	return nil, nil
+}
+
 // RegisteredIDs returns a set of registered Task-set IDs for a definition path.
 func (s *GlobalState) RegisteredIDs(defPath string) map[string]int {
 	entry := s.Tasks[defPath]

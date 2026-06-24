@@ -131,8 +131,15 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 	if !dec.Actionable() || !dec.WorktreeReady {
 		return dec
 	}
+	var cfg *config.Config
+	if d.LoadConfig != nil {
+		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+	}
 	route, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
 		TD:              d.Tasks,
+		PD:              d.Project,
+		Config:          cfg,
+		Now:             d.now(),
 		CurrentCheckout: dec.scan.ProjectPath,
 		SetID:           dec.TaskSetID,
 		Trigger:         binding.TriggerQueueSpawn,

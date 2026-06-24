@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -20,10 +22,18 @@ const (
 )
 
 // RouteDrainCheckoutRequest carries inputs for drain checkout resolution.
-// Precedence: existing Worktree binding → runtime-path override → current
-// checkout. Routing never provisions a worktree (ADR-0052).
+// Precedence: existing Worktree binding → runtime-path override → registration
+// worktree-intent → current checkout (ADR-0059). The directive step is the only
+// place routing provisions a worktree, and only on the first unbound drain of a
+// set whose registration carries one; every other path resolves an existing
+// checkout. Config, PD, and Now are consulted only by that directive step (to
+// resolve the Trunk worktree, label the binding, and stamp the provisioned
+// branch); a request that never hits it may leave them zero.
 type RouteDrainCheckoutRequest struct {
 	TD              *tasks.Deps
+	PD              *project.Deps
+	Config          *config.Config
+	Now             time.Time
 	CurrentCheckout string
 	SetID           string
 	Trigger         DrainTrigger
@@ -34,21 +44,36 @@ type RouteDrainCheckoutRequest struct {
 type RouteDrainCheckoutResult struct {
 	RuntimePath         string
 	UsedExistingBinding bool
-	Binding             Binding
+	// ProvisionedManaged is true when this route just forked and bound a managed
+	// worktree from the registration directive (ADR-0059). Like UsedExistingBinding,
+	// it tells the caller RuntimePath is a resolved checkout the executor must be
+	// pointed at rather than the current checkout it resolves on its own.
+	ProvisionedManaged bool
+	Binding            Binding
 }
 
 var (
 	ErrRuntimeOverrideConflict = errors.New("runtime override conflicts with bound worktree")
 	ErrBoundWorktreeInvalid    = errors.New("bound worktree invalid")
+	// ErrNoResolvableTrunk is returned when a `managed` worktree directive cannot
+	// be satisfied because the repository has no resolvable Trunk worktree to fork
+	// from. Routing refuses rather than silently falling back in place (ADR-0059);
+	// surfacing it as a visible config-class error on the set is a later slice.
+	ErrNoResolvableTrunk = errors.New("managed worktree directive: no resolvable Trunk worktree")
 )
 
-// RouteDrainCheckout resolves which checkout a set drain runs in. It never
-// provisions a worktree (ADR-0052): an existing Worktree binding resumes there,
-// an explicit runtime-path override resolves to that checkout, and otherwise the
-// drain runs in the current checkout. "Drain where you are" follows for free —
-// a linked current checkout is adopted (a never-delete adopted binding recorded
-// by the executor), the trunk drains inline with no binding. Provisioning is an
-// explicit act handled outside routing.
+// RouteDrainCheckout resolves which checkout a set drain runs in, honoring the
+// precedence binding → runtime-path override → registration worktree-intent →
+// current checkout (ADR-0059). An existing Worktree binding resumes there; an
+// explicit runtime-path override resolves to that checkout; an unbound set whose
+// registration carries a `managed` worktree directive forks a managed worktree
+// from the Trunk worktree, records a managed binding, and drains there; otherwise
+// the drain runs in the current checkout. "Drain where you are" still follows for
+// the no-directive case — a linked current checkout is adopted (a never-delete
+// adopted binding recorded by the executor), the trunk drains inline with no
+// binding. The directive is consulted only when unbound and unoverridden, so an
+// operator's bind/override always wins and provisioning stays lazy and one-time:
+// later drains resume via the binding recorded here.
 func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult, error) {
 	if req.TD == nil {
 		return RouteDrainCheckoutResult{}, fmt.Errorf("missing task dependencies")
@@ -110,8 +135,66 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 		return RouteDrainCheckoutResult{RuntimePath: runtimePath}, nil
 	}
 
-	// 3. Otherwise the drain runs in the current checkout — no provisioning.
+	// 3. An unbound set whose registration carries a `managed` worktree directive
+	// forks a managed worktree from the Trunk worktree and binds it (ADR-0059).
+	// This is the only path routing provisions, and only here, lazily, once: the
+	// binding above resumes later drains. The named-worktree arm is a later slice.
+	defPath, err := tasks.CanonicalDefinitionPathWith(req.TD, repoID.TasksDir)
+	if err != nil {
+		return RouteDrainCheckoutResult{}, err
+	}
+	intent, err := tasks.RegisteredWorktreeIntent(req.TD, defPath, setID)
+	if err != nil {
+		return RouteDrainCheckoutResult{}, err
+	}
+	if intent != nil && intent.Managed {
+		b, err := provisionManagedWorktree(req, checkout, setID, key, store)
+		if err != nil {
+			return RouteDrainCheckoutResult{}, err
+		}
+		return RouteDrainCheckoutResult{
+			RuntimePath:        b.RuntimePath,
+			ProvisionedManaged: true,
+			Binding:            b,
+		}, nil
+	}
+
+	// 4. Otherwise the drain runs in the current checkout — no provisioning.
 	return RouteDrainCheckoutResult{RuntimePath: currentRuntime}, nil
+}
+
+// provisionManagedWorktree forks a managed worktree from the repository's Trunk
+// worktree for setID, records a provisioned (pop-owned, torn-down-on-integrate)
+// Worktree binding under key, and returns it. It is the lazy provisioner the
+// `managed` registration directive triggers on the first unbound drain — the
+// same fork-from-trunk act as `pop tasks implement --in-worktree`, routed so both
+// foreground implement and the Queue reach it through RouteDrainCheckout. A repo
+// with no resolvable trunk yields ErrNoResolvableTrunk; routing never falls back
+// in place.
+func provisionManagedWorktree(req RouteDrainCheckoutRequest, checkout, setID, key string, store *Store) (Binding, error) {
+	trunkPath, bare, err := ResolveTrunkPath(req.TD, req.Config, checkout)
+	if err != nil {
+		return Binding{}, err
+	}
+	if bare || strings.TrimSpace(trunkPath) == "" {
+		return Binding{}, fmt.Errorf("%w for %s", ErrNoResolvableTrunk, setID)
+	}
+	now := req.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	b, err := ProvisionWorktree(req.TD, ManagedWorktreesRoot(req.TD), trunkPath, setID, now)
+	if err != nil {
+		return Binding{}, err
+	}
+	if id, err := tasks.ResolveRepositoryIdentity(req.TD, trunkPath); err == nil {
+		b.Project = DetectProject(req.PD, req.TD, req.Config, id)
+	}
+	store.Put(key, b)
+	if err := Save(req.TD, store); err != nil {
+		return Binding{}, err
+	}
+	return b, nil
 }
 
 // ResolveTrunkPath resolves the repository checkout used as the Trunk worktree:

@@ -164,6 +164,123 @@ func TestResolveTaskSetRuntimeInWorktreeProvisionsAndBinds(t *testing.T) {
 	}
 }
 
+// seedManagedIntentImplement stamps a `managed` worktree directive onto the
+// already-registered set, preserving the rest of its registration — the one-time
+// seed routing reads (ADR-0059).
+func seedManagedIntentImplement(t *testing.T, d *Deps, repoRoot, setID string) {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(d.tasksDeps(), id.TasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tasks.UpdateGlobalStateWith(d.tasksDeps(), tasks.StatePathFor(defPath), func(s *tasks.GlobalState) error {
+		entry := s.Entry(defPath)
+		for i := range entry.TaskSets {
+			if entry.TaskSets[i].ID == setID {
+				entry.TaskSets[i].WorktreeIntent = &tasks.WorktreeDirective{Managed: true}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestResolveTaskSetRuntimeManagedDirectiveProvisionsAndResumes asserts a plain
+// `pop tasks implement` drain (no --in-worktree) of a set carrying a `managed`
+// directive lands in a fresh worktree forked from trunk and binds it, and that a
+// second drain resumes that binding rather than provisioning again (ADR-0059).
+// This is the foreground half of "implement and the Queue route identically":
+// the Queue spawns `pop tasks implement`, so it reaches the same routing.
+func TestResolveTaskSetRuntimeManagedDirectiveProvisionsAndResumes(t *testing.T) {
+	root, d := setupImplementFixture(t)
+	seedManagedIntentImplement(t, d, root, "demo")
+
+	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
+	if err != nil {
+		t.Fatalf("resolve runtime: %v", err)
+	}
+
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := binding.Load(d.tasksDeps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, ok := store.Get(binding.Key(id, "demo"))
+	if !ok || !b.Provisioned {
+		t.Fatalf("binding = %+v ok=%v, want a provisioned managed binding", b, ok)
+	}
+	if b.RuntimePath != resolved.RuntimeOverride {
+		t.Fatalf("RuntimeOverride = %q, want provisioned worktree %q", resolved.RuntimeOverride, b.RuntimePath)
+	}
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	gotRuntime, _ := filepath.EvalSymlinks(b.RuntimePath)
+	if gotRuntime == wantRoot {
+		t.Fatalf("managed worktree = current checkout %q, want a distinct worktree", wantRoot)
+	}
+	if !strings.HasPrefix(b.RuntimePath, binding.ManagedWorktreesRoot(d.tasksDeps())) {
+		t.Fatalf("managed worktree %q not under managed root", b.RuntimePath)
+	}
+	if _, err := os.Stat(b.RuntimePath); err != nil {
+		t.Fatalf("managed worktree missing on disk: %v", err)
+	}
+
+	// A second drain resumes the same binding — no second worktree.
+	resumed, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
+	if err != nil {
+		t.Fatalf("second resolve runtime: %v", err)
+	}
+	if resumed.RuntimeOverride != resolved.RuntimeOverride {
+		t.Fatalf("second drain runtime = %q, want resumed %q", resumed.RuntimeOverride, resolved.RuntimeOverride)
+	}
+}
+
+// TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding asserts a
+// pre-existing binding shadows the `managed` directive: the drain resumes the
+// bound checkout and no managed worktree is provisioned (ADR-0059 precedence).
+func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing.T) {
+	root, d := setupImplementFixture(t)
+	seedManagedIntentImplement(t, d, root, "demo")
+
+	wt := filepath.Join(t.TempDir(), "bound-wt")
+	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "bound", wt, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &binding.Store{}
+	store.Put(binding.Key(id, "demo"), binding.Adopt(wt, "bound", ""))
+	if err := binding.Save(d.tasksDeps(), store); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
+	if err != nil {
+		t.Fatalf("resolve runtime: %v", err)
+	}
+	if resolved.RuntimeOverride != wt {
+		t.Fatalf("RuntimeOverride = %q, want bound checkout %q (directive must not provision)", resolved.RuntimeOverride, wt)
+	}
+	// The bound (adopted) binding is untouched — the directive provisioned nothing.
+	after, err := binding.Load(d.tasksDeps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := after.Get(binding.Key(id, "demo")); b.Provisioned || b.RuntimePath != wt {
+		t.Fatalf("binding = %+v, want the adopted binding at %q unchanged", b, wt)
+	}
+}
+
 // TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet asserts --in-worktree on an
 // already-bound set is rejected with guidance to unbind first — a binding wins.
 func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {

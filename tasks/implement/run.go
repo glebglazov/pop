@@ -111,8 +111,12 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 		return provisionInWorktree(d, in, resolved.ProjectPath, taskSetID)
 	}
 
+	cfg, _ := d.loadConfig(config.DefaultConfigPath())
 	route, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
 		TD:              d.tasksDeps(),
+		PD:              d.projectDeps(),
+		Config:          cfg,
+		Now:             d.now(),
 		CurrentCheckout: resolved.ProjectPath,
 		SetID:           taskSetID,
 		Trigger:         binding.TriggerImplementForeground,
@@ -121,10 +125,12 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 	if err != nil {
 		return in, err
 	}
-	// An existing binding resumes at its bound checkout; an explicit override
-	// resolves to that checkout. Otherwise the drain stays in the current
-	// checkout, which the executor already resolves, so leave the override empty.
-	if route.UsedExistingBinding || strings.TrimSpace(in.RuntimeOverride) != "" {
+	// An existing binding resumes at its bound checkout, an explicit override
+	// resolves to that checkout, and a `managed` directive provisions a fresh
+	// managed worktree to drain in — all three are resolved checkouts the executor
+	// must be pointed at. Otherwise the drain stays in the current checkout, which
+	// the executor already resolves, so leave the override empty.
+	if route.UsedExistingBinding || route.ProvisionedManaged || strings.TrimSpace(in.RuntimeOverride) != "" {
 		in.RuntimeOverride = route.RuntimePath
 	}
 	return in, nil
