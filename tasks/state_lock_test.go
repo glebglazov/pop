@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -168,6 +169,7 @@ func TestUpdateGlobalStateRemovesLockAfterWrite(t *testing.T) {
 
 func TestUpdateGlobalStateMergePreservesOtherProjects(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", root)
 	statePath := filepath.Join(root, "state.json")
 	d := DefaultDeps()
 
@@ -204,19 +206,21 @@ func TestUpdateGlobalStateMergePreservesOtherProjects(t *testing.T) {
 	}
 }
 
-func TestUpdateGlobalStateRefusesCorruptState(t *testing.T) {
+func TestMigrateLegacyStateRefusesCorruptState(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", root)
-	statePath := filepath.Join(root, "state.json")
-	if err := os.WriteFile(statePath, []byte(`{"version":99}`), 0o644); err != nil {
+	d := DefaultDeps()
+	// A surviving per-repo state.json with an unsupported version is surfaced by
+	// the fold run on first load, not silently dropped.
+	legacyPath := StatePathFor(filepath.Join(t.TempDir(), "tasks"))
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(`{"version":99}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	d := DefaultDeps()
-	err := UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-		state.Entry("/project/a")
-		return nil
-	})
+	_, err := LoadGlobalStateWith(d, legacyPath)
 	if err == nil {
 		t.Fatal("expected corrupt state error")
 	}
@@ -224,26 +228,28 @@ func TestUpdateGlobalStateRefusesCorruptState(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 
-	data, err := os.ReadFile(statePath)
+	data, err := os.ReadFile(legacyPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(data) != `{"version":99}` {
-		t.Fatalf("state overwritten: %q", data)
+		t.Fatalf("legacy state overwritten or removed: %q", data)
 	}
 }
 
-func TestUpdateGlobalStateRefusesMalformedState(t *testing.T) {
+func TestMigrateLegacyStateRefusesMalformedState(t *testing.T) {
 	root := t.TempDir()
-	statePath := filepath.Join(root, "state.json")
-	if err := os.WriteFile(statePath, []byte("{"), 0o644); err != nil {
+	t.Setenv("XDG_DATA_HOME", root)
+	d := DefaultDeps()
+	legacyPath := StatePathFor(filepath.Join(t.TempDir(), "tasks"))
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	d := DefaultDeps()
-	err := UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-		return nil
-	})
+	_, err := LoadGlobalStateWith(d, legacyPath)
 	if err == nil {
 		t.Fatal("expected parse error")
 	}
@@ -408,6 +414,7 @@ func TestRefreshEmptyInspectionDoesNotCreateStateOrLock(t *testing.T) {
 
 func TestRefreshReadOnlyDoesNotRewriteExistingState(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", root)
 	setupManifest(t, root, "existing", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -428,10 +435,7 @@ func TestRefreshReadOnlyDoesNotRewriteExistingState(t *testing.T) {
 	if err := seed.SaveWith(d); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	before := registeredTaskSetsFor(t, d, canon)
 
 	result, err := RefreshWith(d, root, statePath)
 	if err != nil {
@@ -441,11 +445,8 @@ func TestRefreshReadOnlyDoesNotRewriteExistingState(t *testing.T) {
 		t.Fatalf("unexpected mutation: %#v", result)
 	}
 
-	after, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(before) {
-		t.Fatalf("state rewritten:\nbefore=%q\nafter=%q", before, after)
+	after := registeredTaskSetsFor(t, d, canon)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("state rewritten:\nbefore=%#v\nafter=%#v", before, after)
 	}
 }

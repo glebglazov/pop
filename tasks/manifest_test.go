@@ -372,12 +372,14 @@ func TestDefaultStatePathHomeFallback(t *testing.T) {
 }
 
 func TestCorruptStateRefused(t *testing.T) {
-	root := t.TempDir()
-	statePath := filepath.Join(root, "state.json")
+	d := &Deps{FS: deps.NewRealFileSystem()}
+	statePath := filepath.Join(t.TempDir(), "state.json")
 	if err := os.WriteFile(statePath, []byte(`{"version":99}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := LoadGlobalState(statePath)
+	// A retired registration file with an unsupported version is refused by the
+	// migration parser rather than silently dropped.
+	_, err := loadLegacyGlobalState(d, statePath)
 	if err == nil {
 		t.Fatal("expected corrupt state error")
 	}

@@ -61,9 +61,30 @@ func noticeWriter(d *Deps) io.Writer {
 	return io.Discard
 }
 
-// UpdateGlobalStateWith acquires the global state lock, re-reads state, merges
-// changes, atomically persists, and releases the lock.
+// UpdateGlobalStateWith acquires the global state lock, re-reads registration
+// from the store, merges changes, persists, and releases the lock. The store
+// rewrite is atomic; the lock serialises load-merge-save across processes so a
+// concurrent update to another repository is never lost. statePath is the
+// retired state.json path, kept for call-site compatibility and ignored by the
+// store-backed loaders.
 func UpdateGlobalStateWith(d *Deps, statePath string, merge func(*GlobalState) error) error {
+	return withStateLock(d, func() error {
+		state, err := LoadGlobalStateWith(d, statePath)
+		if err != nil {
+			return err
+		}
+		if err := merge(state); err != nil {
+			return err
+		}
+		return state.SaveWith(d)
+	})
+}
+
+// withStateLock runs fn while holding the global task state lock, retrying while
+// another live process holds it. It serialises every registration mutation —
+// store-backed (UpdateGlobalStateWith) and the retired-file pruning
+// (updateLegacyGlobalState) alike — across processes.
+func withStateLock(d *Deps, fn func() error) error {
 	noticeOut := noticeWriter(d)
 	var lastErr error
 	for attempt := 0; attempt < stateLockRetries; attempt++ {
@@ -79,15 +100,7 @@ func UpdateGlobalStateWith(d *Deps, statePath string, merge func(*GlobalState) e
 
 		err = func() error {
 			defer lock.Release()
-
-			state, err := LoadGlobalStateWith(d, statePath)
-			if err != nil {
-				return err
-			}
-			if err := merge(state); err != nil {
-				return err
-			}
-			return state.SaveWith(d)
+			return fn()
 		}()
 		if err != nil {
 			return err

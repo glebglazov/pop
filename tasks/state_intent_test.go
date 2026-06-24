@@ -1,7 +1,7 @@
 package tasks
 
 import (
-	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -113,28 +113,22 @@ func TestSetTaskSetArchivedUnknownIDFailsWholeBatch(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", root)
 	d := DefaultDeps()
 	defPath := root + "/tasks"
-	_, statePath := seedIntentState(t, d, defPath, []RegisteredTaskSet{
+	canon, _ := seedIntentState(t, d, defPath, []RegisteredTaskSet{
 		{ID: "one"},
 		{ID: "two"},
 	})
-	before, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	before := registeredTaskSetsFor(t, d, canon)
 
-	err = SetTaskSetArchived(d, defPath, []string{"one", "ghost"}, true)
+	err := SetTaskSetArchived(d, defPath, []string{"one", "ghost"}, true)
 	if err == nil {
 		t.Fatal("expected unknown-id error")
 	}
 	if !strings.Contains(err.Error(), `unknown task set "ghost"`) {
 		t.Fatalf("err = %v", err)
 	}
-	after, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(before) {
-		t.Fatalf("batch wrote despite failure:\nbefore=%s\nafter=%s", before, after)
+	after := registeredTaskSetsFor(t, d, canon)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("batch wrote despite failure:\nbefore=%#v\nafter=%#v", before, after)
 	}
 }
 
@@ -143,21 +137,15 @@ func TestSetTaskSetArchivedEmptyWritesNothing(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", root)
 	d := DefaultDeps()
 	defPath := root + "/tasks"
-	_, statePath := seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "one"}})
-	before, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	canon, _ := seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "one"}})
+	before := registeredTaskSetsFor(t, d, canon)
 
 	if err := SetTaskSetArchived(d, defPath, nil, true); err != nil {
 		t.Fatal(err)
 	}
-	after, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(before) {
-		t.Fatalf("empty batch wrote:\nbefore=%s\nafter=%s", before, after)
+	after := registeredTaskSetsFor(t, d, canon)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("empty batch wrote:\nbefore=%#v\nafter=%#v", before, after)
 	}
 }
 

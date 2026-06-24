@@ -4,12 +4,28 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 )
+
+// registeredTaskSetsFor returns the registrations stored for a definition path,
+// read back through the store-backed loader.
+func registeredTaskSetsFor(t *testing.T, d *Deps, defPath string) []RegisteredTaskSet {
+	t.Helper()
+	state, err := LoadGlobalStateWith(d, StatePathFor(defPath))
+	if err != nil {
+		t.Fatalf("load registration: %v", err)
+	}
+	entry := state.Tasks[defPath]
+	if entry == nil {
+		return nil
+	}
+	return entry.TaskSets
+}
 
 func TestCompleteTaskSetIDsFromDiscovery(t *testing.T) {
 	root := t.TempDir()
@@ -211,10 +227,7 @@ func TestCompletionDoesNotPersistTaskState(t *testing.T) {
 	if err := seed.SaveWith(d); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	before := registeredTaskSetsFor(t, d, canon)
 
 	oldWd, _ := os.Getwd()
 	if err := os.Chdir(root); err != nil {
@@ -233,15 +246,15 @@ func TestCompletionDoesNotPersistTaskState(t *testing.T) {
 		t.Fatalf("stems = %#v", stems)
 	}
 
-	after, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(before) {
-		t.Fatalf("state mutated:\nbefore=%q\nafter=%q", before, after)
+	after := registeredTaskSetsFor(t, d, canon)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("state mutated:\nbefore=%#v\nafter=%#v", before, after)
 	}
 	if _, err := os.Stat(filepath.Join(root, "pop", "workloads-state.json")); !os.IsNotExist(err) {
 		t.Fatal("expected no default state file write")
+	}
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatalf("retired state.json was written: stat err = %v", err)
 	}
 	if notices.Len() != 0 {
 		t.Fatalf("unexpected notices: %q", notices.String())

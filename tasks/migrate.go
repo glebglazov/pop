@@ -107,8 +107,8 @@ func rekeyState(d *Deps, legacyDefPath, newDefPath string, migrated []string) er
 	}
 
 	legacyPath := DefaultStatePathWith(d)
-	legacyState, err := LoadGlobalStateWith(d, legacyPath)
-	if err != nil {
+	legacyState, err := loadLegacyGlobalState(d, legacyPath)
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	oldEntry := legacyState.Tasks[legacyDefPath]
@@ -143,7 +143,7 @@ func rekeyState(d *Deps, legacyDefPath, newDefPath string, migrated []string) er
 		}
 	}
 
-	return UpdateGlobalStateWith(d, legacyPath, func(state *GlobalState) error {
+	return updateLegacyGlobalState(d, legacyPath, func(state *GlobalState) error {
 		entry := state.Tasks[legacyDefPath]
 		if entry == nil {
 			return nil

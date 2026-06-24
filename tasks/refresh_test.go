@@ -37,19 +37,9 @@ func TestRefreshAutoRegistration(t *testing.T) {
 		t.Fatalf("auto_drain default = true, want false")
 	}
 
-	// Persisted registration uses the issue_sets key and stores registration metadata only.
-	raw, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "\"issue_sets\"") {
-		t.Fatalf("state file missing issue_sets key:\n%s", raw)
-	}
-	if strings.Contains(string(raw), "\"prds\"") || strings.Contains(string(raw), "\"title\"") {
-		t.Fatalf("state file has stale PRD fields:\n%s", raw)
-	}
-	if !strings.Contains(string(raw), "\"auto_drain\": false") {
-		t.Fatalf("state file missing default auto_drain bit:\n%s", raw)
+	// Registration is persisted in the store, not a per-repo state.json file.
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatalf("retired state.json was written: stat err = %v", err)
 	}
 }
 

@@ -11,14 +11,16 @@ import (
 )
 
 func TestRegisteredTaskSetArchivedDefaultsFalseOnExistingState(t *testing.T) {
-	root := t.TempDir()
-	statePath := StatePathFor(root)
+	d := &Deps{FS: deps.NewRealFileSystem()}
+	statePath := filepath.Join(t.TempDir(), "state.json")
 	raw := `{"version":1,"workloads":{"/tmp/tasks":{"issue_sets":[{"id":"demo","priority":3}]}}}`
 	if err := os.WriteFile(statePath, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	state, err := LoadGlobalState(statePath)
+	// A retired registration file with no archived bit folds in (and parses) as
+	// not-archived; the bit defaults false.
+	state, err := loadLegacyGlobalState(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,8 +318,9 @@ func TestLoadUnarchiveSetSelectionListsArchivedOnlyUncheckedFromRegistration(t *
 	}
 }
 
-func TestArchiveTaskSetsOneAtomicStateWrite(t *testing.T) {
+func TestArchiveTaskSetsBatchArchivesAll(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	setupManifest(t, root, "done", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
@@ -328,9 +331,7 @@ func TestArchiveTaskSetsOneAtomicStateWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tracker := &stateWriteTracker{}
 	d := DefaultDeps()
-	d.FS = &stateWriteTrackingFS{FileSystem: deps.NewRealFileSystem(), tracker: tracker}
 	result, err := ArchiveTaskSetsWith(d, nil, nil, ArchiveTaskSetsOptions{
 		ResolveInput: ResolveInput{DefinitionOverride: root, CWD: root},
 		TaskSetIDs:   []string{"done", "ready"},
@@ -340,9 +341,6 @@ func TestArchiveTaskSetsOneAtomicStateWrite(t *testing.T) {
 	}
 	if got := strings.Join(result.TaskSetIDs, ","); got != "done,ready" {
 		t.Fatalf("archived ids = %s", got)
-	}
-	if tracker.stateWrites != 1 {
-		t.Fatalf("state writes = %d, want one atomic write", tracker.stateWrites)
 	}
 	state, err := LoadGlobalState(StatePathFor(root))
 	if err != nil {
@@ -356,8 +354,9 @@ func TestArchiveTaskSetsOneAtomicStateWrite(t *testing.T) {
 	}
 }
 
-func TestUnarchiveTaskSetsOneAtomicStateWriteAndRestoresSelection(t *testing.T) {
+func TestUnarchiveTaskSetsRestoresSelection(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	setupManifest(t, root, "one", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -373,9 +372,7 @@ func TestUnarchiveTaskSetsOneAtomicStateWriteAndRestoresSelection(t *testing.T) 
 		}
 	}
 
-	tracker := &stateWriteTracker{}
 	d := DefaultDeps()
-	d.FS = &stateWriteTrackingFS{FileSystem: deps.NewRealFileSystem(), tracker: tracker}
 	result, err := UnarchiveTaskSetsWith(d, nil, nil, UnarchiveTaskSetsOptions{
 		ResolveInput: ResolveInput{DefinitionOverride: root, CWD: root},
 		TaskSetIDs:   []string{"one", "two"},
@@ -385,9 +382,6 @@ func TestUnarchiveTaskSetsOneAtomicStateWriteAndRestoresSelection(t *testing.T) 
 	}
 	if got := strings.Join(result.TaskSetIDs, ","); got != "one,two" {
 		t.Fatalf("unarchived ids = %s", got)
-	}
-	if tracker.stateWrites != 1 {
-		t.Fatalf("state writes = %d, want one atomic write", tracker.stateWrites)
 	}
 	if len(result.Refresh.Rows) != 2 {
 		t.Fatalf("rows after unarchive = %#v, want both restored", result.Refresh.Rows)
@@ -421,18 +415,3 @@ func TestUnarchiveTaskSetsOneAtomicStateWriteAndRestoresSelection(t *testing.T) 
 	}
 }
 
-type stateWriteTracker struct {
-	stateWrites int
-}
-
-type stateWriteTrackingFS struct {
-	deps.FileSystem
-	tracker *stateWriteTracker
-}
-
-func (f *stateWriteTrackingFS) Rename(oldpath, newpath string) error {
-	if filepath.Base(newpath) == stateFileName {
-		f.tracker.stateWrites++
-	}
-	return f.FileSystem.Rename(oldpath, newpath)
-}

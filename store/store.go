@@ -159,6 +159,24 @@ var migrations = []string{
 		preset          TEXT PRIMARY KEY,
 		exhausted_until TEXT NOT NULL
 	);`,
+	// 8: sets — per-repository Task set registration metadata (priority, archived,
+	// auto-drain), keyed (def_path, set_id) where def_path identifies the
+	// repository's Task storage. ADR-0055 completes the layer-2 consolidation by
+	// moving registration off the per-repo state.json files into the global store;
+	// the files are folded in at the tasks boundary on first read, then retired.
+	// The autoincrement seq preserves registration order, which the status table
+	// renders by. Layer-1 Task set status stays manifest-derived (ADR-0006/0056);
+	// only this machine-local registration moves.
+	`CREATE TABLE sets (
+		seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+		def_path   TEXT    NOT NULL,
+		set_id     TEXT    NOT NULL,
+		priority   INTEGER NOT NULL DEFAULT 0,
+		archived   INTEGER NOT NULL DEFAULT 0,
+		auto_drain INTEGER NOT NULL DEFAULT 0,
+		UNIQUE(def_path, set_id)
+	);
+	CREATE INDEX idx_sets_def ON sets(def_path);`,
 }
 
 func (s *Store) migrate() error {

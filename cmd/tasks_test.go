@@ -19,6 +19,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// registrationSnapshot returns a stable string of the registration metadata
+// stored for a definition path, read back through the store, so a test can
+// assert that a cancelled operation wrote nothing.
+func registrationSnapshot(t *testing.T, defPath string) string {
+	t.Helper()
+	canon, err := tasks.CanonicalDefinitionPath(defPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := tasks.LoadGlobalState(tasks.StatePathFor(canon))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := state.Tasks[canon]
+	if entry == nil {
+		return ""
+	}
+	return fmt.Sprintf("%+v", entry.TaskSets)
+}
+
 func TestTaskStatusExitSuccessWithMalformedRows(t *testing.T) {
 	root := t.TempDir()
 	initGitRepoCmd(t, root)
@@ -225,10 +245,7 @@ func TestTaskArchiveSelectionPrechecksDoneOnlyAndCancelWritesNothing(t *testing.
 
 	var items []ui.MultiSelectItem
 	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: false}, &items)
-	before, err := os.ReadFile(tasks.StatePathFor(tasksDir))
-	if err != nil {
-		t.Fatal(err)
-	}
+	before := registrationSnapshot(t, tasksDir)
 
 	var stdout bytes.Buffer
 	if err := runTaskArchiveSelectionWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), false); err != nil {
@@ -249,11 +266,8 @@ func TestTaskArchiveSelectionPrechecksDoneOnlyAndCancelWritesNothing(t *testing.
 	if !strings.Contains(items[1].Label, "[READY]") || !strings.Contains(items[1].Label, "ready") {
 		t.Fatalf("ready row label missing id/status: %+v", items[1])
 	}
-	after, err := os.ReadFile(tasks.StatePathFor(tasksDir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
+	after := registrationSnapshot(t, tasksDir)
+	if before != after {
 		t.Fatalf("cancel must not write:\nbefore:%s\nafter:%s", before, after)
 	}
 }
@@ -323,10 +337,7 @@ func TestTaskUnarchiveSelectionListsArchivedOnlyUncheckedAndCancelWritesNothing(
 
 	var items []ui.MultiSelectItem
 	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: false}, &items)
-	before, err := os.ReadFile(tasks.StatePathFor(tasksDir))
-	if err != nil {
-		t.Fatal(err)
-	}
+	before := registrationSnapshot(t, tasksDir)
 
 	var stdout bytes.Buffer
 	if err := runTaskUnarchiveSelectionWith(tasks.DefaultDeps(), &stdout, strings.NewReader("")); err != nil {
@@ -347,11 +358,8 @@ func TestTaskUnarchiveSelectionListsArchivedOnlyUncheckedAndCancelWritesNothing(
 	if strings.Contains(items[0].Label, "active") {
 		t.Fatalf("active row leaked into unarchive picker: %+v", items)
 	}
-	after, err := os.ReadFile(tasks.StatePathFor(tasksDir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
+	after := registrationSnapshot(t, tasksDir)
+	if before != after {
 		t.Fatalf("cancel must not write:\nbefore:%s\nafter:%s", before, after)
 	}
 }

@@ -142,8 +142,8 @@ func rewriteManifestTaskKey(d *Deps, manifestPath string) error {
 // is a no-op.
 func migrateStateEntry(d *Deps, oldKey, newKey, newStatePath string) error {
 	legacyPath := DefaultStatePathWith(d)
-	state, err := LoadGlobalStateWith(d, legacyPath)
-	if err != nil {
+	state, err := loadLegacyGlobalState(d, legacyPath)
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	entry := state.Tasks[oldKey]
@@ -161,7 +161,7 @@ func migrateStateEntry(d *Deps, oldKey, newKey, newStatePath string) error {
 		return err
 	}
 
-	return UpdateGlobalStateWith(d, legacyPath, func(s *GlobalState) error {
+	return updateLegacyGlobalState(d, legacyPath, func(s *GlobalState) error {
 		delete(s.Tasks, oldKey)
 		return nil
 	})
