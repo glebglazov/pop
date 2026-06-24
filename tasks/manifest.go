@@ -117,8 +117,8 @@ type Manifest struct {
 // set: Managed requests a pop-provisioned managed worktree, Name adopts the
 // existing worktree of that name on this machine.
 type WorktreeDirective struct {
-	Managed bool
-	Name    string
+	Managed bool   `json:"managed,omitempty"`
+	Name    string `json:"name,omitempty"`
 }
 
 // LoadManifest reads and validates an task manifest.

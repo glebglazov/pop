@@ -35,6 +35,36 @@ type RegisteredTaskSet struct {
 	Priority  int    `json:"priority"`
 	Archived  bool   `json:"archived"`
 	AutoDrain bool   `json:"auto_drain"`
+	// WorktreeIntent is the set-level worktree directive seeded once at first
+	// registration (ADR-0059), exactly like AutoDrain. Nil means no directive:
+	// the set drains in the current checkout. It records intent only — no
+	// provisioning happens here — and is never re-read from the manifest on later
+	// refreshes.
+	WorktreeIntent *WorktreeDirective `json:"worktree_intent,omitempty"`
+}
+
+// worktreeIntentToStore flattens a seeded worktree directive into the store's
+// two columns (ADR-0059): nil → no directive, Managed → managed bit, else the
+// adopted worktree name.
+func worktreeIntentToStore(w *WorktreeDirective) (managed bool, name string) {
+	if w == nil {
+		return false, ""
+	}
+	return w.Managed, w.Name
+}
+
+// worktreeIntentFromStore reconstructs a seeded worktree directive from the
+// store's two columns. The managed bit wins; else a non-empty name adopts; else
+// there is no directive (nil).
+func worktreeIntentFromStore(managed bool, name string) *WorktreeDirective {
+	switch {
+	case managed:
+		return &WorktreeDirective{Managed: true}
+	case name != "":
+		return &WorktreeDirective{Name: name}
+	default:
+		return nil
+	}
 }
 
 // TaskEntry holds registered Task sets for one definition path.
@@ -107,10 +137,11 @@ func LoadGlobalStateWith(d *Deps, path string) (*GlobalState, error) {
 		entry := &TaskEntry{}
 		for _, r := range regs {
 			entry.TaskSets = append(entry.TaskSets, RegisteredTaskSet{
-				ID:        r.SetID,
-				Priority:  r.Priority,
-				Archived:  r.Archived,
-				AutoDrain: r.AutoDrain,
+				ID:             r.SetID,
+				Priority:       r.Priority,
+				Archived:       r.Archived,
+				AutoDrain:      r.AutoDrain,
+				WorktreeIntent: worktreeIntentFromStore(r.WorktreeManaged, r.WorktreeName),
 			})
 		}
 		gs.Tasks[def] = entry
@@ -139,12 +170,15 @@ func (s *GlobalState) SaveWith(d *Deps) error {
 			continue
 		}
 		for _, r := range entry.TaskSets {
+			managed, name := worktreeIntentToStore(r.WorktreeIntent)
 			rows[def] = append(rows[def], store.SetReg{
-				DefPath:   def,
-				SetID:     r.ID,
-				Priority:  r.Priority,
-				Archived:  r.Archived,
-				AutoDrain: r.AutoDrain,
+				DefPath:         def,
+				SetID:           r.ID,
+				Priority:        r.Priority,
+				Archived:        r.Archived,
+				AutoDrain:       r.AutoDrain,
+				WorktreeManaged: managed,
+				WorktreeName:    name,
 			})
 		}
 	}
@@ -216,12 +250,15 @@ func foldLegacyStateFile(d *Deps, statePath string) error {
 				if seen[reg.ID] {
 					continue
 				}
+				managed, name := worktreeIntentToStore(reg.WorktreeIntent)
 				if err := s.PutSet(store.SetReg{
-					DefPath:   def,
-					SetID:     reg.ID,
-					Priority:  reg.Priority,
-					Archived:  reg.Archived,
-					AutoDrain: reg.AutoDrain,
+					DefPath:         def,
+					SetID:           reg.ID,
+					Priority:        reg.Priority,
+					Archived:        reg.Archived,
+					AutoDrain:       reg.AutoDrain,
+					WorktreeManaged: managed,
+					WorktreeName:    name,
 				}); err != nil {
 					_ = s.Close()
 					return err

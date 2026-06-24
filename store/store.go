@@ -177,6 +177,15 @@ var migrations = []string{
 		UNIQUE(def_path, set_id)
 	);
 	CREATE INDEX idx_sets_def ON sets(def_path);`,
+	// 9: worktree-intent seed (ADR-0059) — the optional set-level worktree
+	// directive read once at first registration alongside auto_drain. Two columns
+	// carry the three states without a sentinel collision: worktree_managed=1
+	// requests a pop-provisioned managed worktree; else a non-empty worktree_name
+	// adopts the existing worktree of that name on this machine; else (the default
+	// 0/'') there is no directive and the set drains in the current checkout.
+	// Intent only — no provisioning happens at registration (lazy, per ADR-0059).
+	`ALTER TABLE sets ADD COLUMN worktree_managed INTEGER NOT NULL DEFAULT 0;
+	 ALTER TABLE sets ADD COLUMN worktree_name TEXT NOT NULL DEFAULT '';`,
 }
 
 func (s *Store) migrate() error {

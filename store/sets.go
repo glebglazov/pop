@@ -14,13 +14,20 @@ type SetReg struct {
 	Priority  int
 	Archived  bool
 	AutoDrain bool
+	// WorktreeManaged and WorktreeName carry the seeded worktree directive
+	// (ADR-0059), read once at first registration. WorktreeManaged requests a
+	// pop-provisioned managed worktree; else a non-empty WorktreeName adopts the
+	// existing worktree of that name; else there is no directive. Provisioning is
+	// lazy — these record intent only.
+	WorktreeManaged bool
+	WorktreeName    string
 }
 
 // AllSets returns every registration grouped by def_path, each slice ordered by
 // registration order (the seq autoincrement).
 func (s *Store) AllSets() (map[string][]SetReg, error) {
 	rows, err := s.db.Query(
-		`SELECT def_path, set_id, priority, archived, auto_drain
+		`SELECT def_path, set_id, priority, archived, auto_drain, worktree_managed, worktree_name
 		 FROM sets ORDER BY seq`)
 	if err != nil {
 		return nil, err
@@ -29,12 +36,13 @@ func (s *Store) AllSets() (map[string][]SetReg, error) {
 	out := map[string][]SetReg{}
 	for rows.Next() {
 		var r SetReg
-		var archived, autoDrain int
-		if err := rows.Scan(&r.DefPath, &r.SetID, &r.Priority, &archived, &autoDrain); err != nil {
+		var archived, autoDrain, worktreeManaged int
+		if err := rows.Scan(&r.DefPath, &r.SetID, &r.Priority, &archived, &autoDrain, &worktreeManaged, &r.WorktreeName); err != nil {
 			return nil, err
 		}
 		r.Archived = archived != 0
 		r.AutoDrain = autoDrain != 0
+		r.WorktreeManaged = worktreeManaged != 0
 		out[r.DefPath] = append(out[r.DefPath], r)
 	}
 	return out, rows.Err()
@@ -45,12 +53,15 @@ func (s *Store) AllSets() (map[string][]SetReg, error) {
 // set in the status table.
 func (s *Store) PutSet(r SetReg) error {
 	_, err := s.db.Exec(
-		`INSERT INTO sets (def_path, set_id, priority, archived, auto_drain)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO sets (def_path, set_id, priority, archived, auto_drain, worktree_managed, worktree_name)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(def_path, set_id) DO UPDATE SET
 		   priority=excluded.priority, archived=excluded.archived,
-		   auto_drain=excluded.auto_drain`,
-		r.DefPath, r.SetID, r.Priority, boolToInt(r.Archived), boolToInt(r.AutoDrain))
+		   auto_drain=excluded.auto_drain,
+		   worktree_managed=excluded.worktree_managed,
+		   worktree_name=excluded.worktree_name`,
+		r.DefPath, r.SetID, r.Priority, boolToInt(r.Archived), boolToInt(r.AutoDrain),
+		boolToInt(r.WorktreeManaged), r.WorktreeName)
 	return err
 }
 
@@ -76,9 +87,10 @@ func (s *Store) ReplaceAllSets(all map[string][]SetReg) error {
 	for _, def := range defs {
 		for _, r := range all[def] {
 			if _, err := tx.Exec(
-				`INSERT INTO sets (def_path, set_id, priority, archived, auto_drain)
-				 VALUES (?, ?, ?, ?, ?)`,
-				def, r.SetID, r.Priority, boolToInt(r.Archived), boolToInt(r.AutoDrain)); err != nil {
+				`INSERT INTO sets (def_path, set_id, priority, archived, auto_drain, worktree_managed, worktree_name)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				def, r.SetID, r.Priority, boolToInt(r.Archived), boolToInt(r.AutoDrain),
+				boolToInt(r.WorktreeManaged), r.WorktreeName); err != nil {
 				return err
 			}
 		}

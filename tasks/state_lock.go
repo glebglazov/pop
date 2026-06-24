@@ -224,7 +224,10 @@ func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *Glob
 }
 
 // registeredTaskSetFromManifest builds a new registration entry, seeding
-// Auto-drain from the manifest once at first registration.
+// Auto-drain and the worktree directive from the manifest once at first
+// registration (ADR-0059). The worktree seed records intent only — no
+// git/worktree side effect happens here; provisioning is lazy and belongs to
+// drain routing.
 func registeredTaskSetFromManifest(d *Deps, id, manifestPath string) RegisteredTaskSet {
 	reg := RegisteredTaskSet{
 		ID:       id,
@@ -234,6 +237,7 @@ func registeredTaskSetFromManifest(d *Deps, id, manifestPath string) RegisteredT
 	if manifestPath != "" {
 		m := LoadManifest(d, id, manifestPath)
 		reg.AutoDrain = m.AutoDrain
+		reg.WorktreeIntent = m.Worktree
 	}
 	return reg
 }
