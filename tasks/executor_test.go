@@ -143,8 +143,8 @@ func TestRunTaskDeclinedConfirmationReleasesEarlyRuntimeLockAndWritesNoDrainOutc
 	if status.Locked {
 		t.Fatalf("runtime lock leaked after declined run: %#v", status)
 	}
-	if _, err := os.Stat(DrainOutcomePathFor(d, runtimePath)); !os.IsNotExist(err) {
-		t.Fatalf("declined single-task run wrote drain outcome or stat failed: %v", err)
+	if _, err := ReadDrainOutcome(d, runtimePath); !os.IsNotExist(err) {
+		t.Fatalf("declined single-task run recorded a drain terminal: %v", err)
 	}
 	assertTaskOpen(t, env, "01-a")
 }
@@ -560,15 +560,17 @@ func TestRunTaskReleasesRuntimeLockAfterExecution(t *testing.T) {
 	})
 
 	d := env.deps()
-	opts := env.runOpts(true, agent)
-	_, err := RunTaskWith(d, nil, nil, opts)
+	runtimePath, err := ResolveRuntimePathWith(d, env.root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	opts := env.runOpts(true, agent)
+	if _, err := RunTaskWith(d, nil, nil, opts); err != nil {
+		t.Fatal(err)
+	}
 
-	lockPath := RuntimeLockPathFor(d, env.root)
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Fatalf("lock not released after execution: %v", err)
+	if status := ReadRuntimeLockStatus(d, runtimePath); status.Locked {
+		t.Fatalf("drain still live after execution: %#v", status)
 	}
 }
 

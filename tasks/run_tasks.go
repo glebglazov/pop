@@ -33,8 +33,8 @@ type RunTaskSetOptions struct {
 	ConfirmOut    io.Writer
 	Output        io.Writer
 	// BindCheckout, when set, is invoked once the drain has committed to its
-	// Task set and runtime checkout (after the cross-checkout backstop and lock
-	// acquisition, before any task runs). It lets the caller record the
+	// Task set and runtime checkout (after the running Drain is started, before
+	// any task runs). It lets the caller record the
 	// set↔checkout association in the shared binding store — `pop tasks
 	// implement` adopts its current checkout this way (ADR-0036). It receives the
 	// resolved set id, project path, and runtime checkout path; a non-nil error
@@ -44,17 +44,17 @@ type RunTaskSetOptions struct {
 
 // RunTaskSetResult is the outcome of a run-tasks invocation.
 type RunTaskSetResult struct {
-	TaskSetID       string
-	Completed       []*RunTaskResult
-	Refresh         *RefreshResult
-	Declined         bool
-	TaskSetDone      bool
-	TaskSetDeferred  bool
+	TaskSetID         string
+	Completed         []*RunTaskResult
+	Refresh           *RefreshResult
+	Declined          bool
+	TaskSetDone       bool
+	TaskSetDeferred   bool
 	TaskSetUnverified bool
-	SkippedTasks     []string
-	BlockedReason    string
-	QuotaPaused     bool
-	PauseReason     string
+	SkippedTasks      []string
+	BlockedReason     string
+	QuotaPaused       bool
+	PauseReason       string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
 	PausePreset      string
 	PauseResetAt     time.Time
@@ -141,13 +141,6 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		return nil, err
 	}
 
-	// Cross-checkout backstop: reject if this same (repo, set) is already live
-	// in any other worktree of the repository. The per-checkout local lock
-	// handles same-checkout conflicts; this closes the gap across checkouts.
-	if err := CheckCrossCheckoutConflict(d, resolved.ProjectPath, runtimePath, taskSetID); err != nil {
-		return nil, err
-	}
-
 	confirmOut := opts.ConfirmOut
 	if confirmOut == nil {
 		confirmOut = os.Stderr
@@ -157,11 +150,36 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		out = os.Stdout
 	}
 
-	lock, err := AcquireRuntimeLockForSet(d, runtimePath, taskSetID, confirmOut)
+	// Start the Drain: insert a running row keyed by (repository, set) and
+	// enforce mutual exclusion transactionally (ADR-0055), replacing the runtime
+	// execution lock file and the cross-checkout backstop.
+	drain, err := BeginDrain(d, runtimePath, taskSetID, confirmOut)
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Release()
+
+	// This process owns the running Drain: record its exit-reason terminal on
+	// every exit path below (including an error bubbling up), so a reader can see
+	// how it ended without parsing human output. A declined run never executed,
+	// so its Drain row is cancelled rather than terminated (ADR-0056). Registered
+	// before BindCheckout so a bind failure still finalizes the row.
+	defer func() {
+		var (
+			declined    bool
+			quotaPaused bool
+			preset      string
+			pinned      bool
+			resetAt     time.Time
+		)
+		if result != nil {
+			declined = result.Declined
+			quotaPaused = result.QuotaPaused
+			preset = result.PausePreset
+			pinned = result.PausePinnedAgent
+			resetAt = result.PauseResetAt
+		}
+		finalizeDrain(drain, declined, quotaPaused, preset, pinned, resetAt, err)
+	}()
 
 	// Adopt this checkout into the binding model before draining (ADR-0036): a
 	// worktree-locus run records a never-delete adopted binding so the set is
@@ -173,16 +191,6 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			return nil, exitErr(ExitOperational, "bind checkout: %v", err)
 		}
 	}
-
-	// The lock is held, so this process owns the drain: record how it ends on
-	// every exit path below (including a panic-free crash bubbling up as err) so
-	// the supervisor can read the outcome without parsing human output. A
-	// declined run writes no record.
-	defer func() {
-		if rec, ok := drainOutcomeFor(taskSetID, runtimePath, result, err); ok {
-			_ = WriteDrainOutcome(d, rec)
-		}
-	}()
 
 	dirty, err := runtimeIsDirty(d, runtimePath)
 	if err != nil {

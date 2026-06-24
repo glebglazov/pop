@@ -217,12 +217,15 @@ func TestRunTaskSignalReleasesRuntimeLock(t *testing.T) {
 	opts.Timeout = time.Minute
 	signalOwnPidWhenAgentStarts(t, env.root)
 
-	_, err := RunTaskWith(d, nil, nil, opts)
+	runtimePath, err := ResolveRuntimePathWith(d, env.root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = RunTaskWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitInterrupted)
 
-	lockPath := RuntimeLockPathFor(d, env.root)
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Fatalf("lock not released after interruption: %v", err)
+	if status := ReadRuntimeLockStatus(d, runtimePath); status.Locked {
+		t.Fatalf("drain still live after interruption: %#v", status)
 	}
 }
 
@@ -236,7 +239,7 @@ func TestRunTaskPreAgentLockFailureImmutable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lock, err := AcquireRuntimeLock(d, runtimePath, io.Discard)
+	lock, err := AcquireRuntimeLockForSet(d, runtimePath, "busy-set", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

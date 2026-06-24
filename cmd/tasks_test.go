@@ -767,7 +767,7 @@ func TestTaskStatusShowsRuntimeLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lock, err := tasks.AcquireRuntimeLock(d, runtimePath, io.Discard)
+	lock, err := tasks.AcquireRuntimeLockForSet(d, runtimePath, "demo", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

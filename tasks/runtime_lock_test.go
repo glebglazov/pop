@@ -2,7 +2,6 @@ package tasks
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,222 +11,180 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 )
 
-func TestRuntimeLockPathDeterministic(t *testing.T) {
-	d := &Deps{FS: deps.NewRealFileSystem()}
-	root := "/tmp/runtime-a"
-	path1 := RuntimeLockPathFor(d, root)
-	path2 := RuntimeLockPathFor(d, root)
-	if path1 != path2 {
-		t.Fatalf("lock paths differ: %q vs %q", path1, path2)
+// drainTestRepo stands up a real git repo and a private data dir, returning deps
+// whose store-backed Drain lifecycle resolves repository identity from it. The
+// store is real-disk-only, so these tests use the real filesystem and git.
+func drainTestRepo(t *testing.T) (*Deps, string) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	repo := filepath.Join(root, "checkout")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.HasSuffix(path1, ".lock") {
-		t.Fatalf("unexpected lock path %q", path1)
+	initExecutorGitRepo(t, repo)
+	d := &Deps{
+		FS:           deps.NewRealFileSystem(),
+		Git:          deps.NewRealGit(),
+		ProcessAlive: func(pid int) bool { return pid == os.Getpid() },
+	}
+	return d, repo
+}
+
+func TestReadRuntimeLockStatusIdleWhenNoDrain(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	status := ReadRuntimeLockStatus(d, repo)
+	if status.Locked || status.Malformed || status.Metadata != nil {
+		t.Fatalf("idle status = %#v", status)
 	}
 }
 
-func TestAcquireReleaseRuntimeLock(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{FS: deps.NewRealFileSystem()}
+func TestAcquireRuntimeLockForSetShowsLiveDrain(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	lock, err := AcquireRuntimeLockForSet(d, repo, "demo", &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
 
-	runtimeRoot := filepath.Join(root, "checkout")
-	lock, err := AcquireRuntimeLock(d, runtimeRoot, &bytes.Buffer{})
+	status := ReadRuntimeLockStatus(d, repo)
+	if !status.Locked || status.Metadata == nil {
+		t.Fatalf("status = %#v, want live drain", status)
+	}
+	if status.Metadata.SetID != "demo" || status.Metadata.PID != os.Getpid() || status.Metadata.StartedAt.IsZero() {
+		t.Fatalf("metadata = %#v", status.Metadata)
+	}
+}
+
+func TestAcquireRuntimeLockForSetReleaseClearsLive(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	lock, err := AcquireRuntimeLockForSet(d, repo, "demo", &bytes.Buffer{})
 	if err != nil {
-		t.Fatal(err)
-	}
-	lockPath := RuntimeLockPathFor(d, runtimeRoot)
-	if _, err := os.Stat(lockPath); err != nil {
-		t.Fatalf("lock file missing: %v", err)
-	}
-	data, err := os.ReadFile(lockPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var meta RuntimeLockMetadata
-	if err := json.Unmarshal(data, &meta); err != nil {
-		t.Fatal(err)
-	}
-	if meta.PID != os.Getpid() || meta.RuntimePath != runtimeRoot || meta.StartedAt.IsZero() {
-		t.Fatalf("metadata = %#v", meta)
+		t.Fatalf("acquire: %v", err)
 	}
 	if err := lock.Release(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("release: %v", err)
 	}
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Fatalf("lock file still present: %v", err)
+	if status := ReadRuntimeLockStatus(d, repo); status.Locked {
+		t.Fatalf("drain still live after release: %#v", status)
+	}
+	// Release records a finished terminal, not a running row.
+	rec, err := ReadDrainOutcome(d, repo)
+	if err != nil {
+		t.Fatalf("read terminal: %v", err)
+	}
+	if rec.Outcome != DrainOutcomeFinished {
+		t.Fatalf("terminal = %q, want finished", rec.Outcome)
 	}
 }
 
-func TestRuntimeLockRefusesLiveConcurrentExecution(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{FS: deps.NewRealFileSystem(), ProcessAlive: func(pid int) bool { return pid == os.Getpid() }}
-
-	runtimeRoot := filepath.Join(root, "checkout")
-	first, err := AcquireRuntimeLock(d, runtimeRoot, &bytes.Buffer{})
+func TestBeginDrainRefusesConcurrentSameSet(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	first, err := AcquireRuntimeLockForSet(d, repo, "demo", &bytes.Buffer{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("first acquire: %v", err)
 	}
 	t.Cleanup(func() { _ = first.Release() })
 
-	var notice bytes.Buffer
-	_, err = AcquireRuntimeLock(d, runtimeRoot, &notice)
+	_, err = BeginDrain(d, repo, "demo", &bytes.Buffer{})
 	assertExitCode(t, err, ExitOperational)
 	if !strings.Contains(err.Error(), "already in progress") {
-		t.Fatalf("err = %v", err)
+		t.Fatalf("err = %v, want mutual-exclusion refusal", err)
 	}
 }
 
-func TestRuntimeLockRecoversStaleLock(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{
-		FS:           deps.NewRealFileSystem(),
-		ProcessAlive: func(int) bool { return false },
-	}
-
-	runtimeRoot := filepath.Join(root, "checkout")
-	lockPath := RuntimeLockPathFor(d, runtimeRoot)
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	stale := RuntimeLockMetadata{
-		PID:         999999,
-		RuntimePath: runtimeRoot,
-		StartedAt:   time.Now().UTC().Add(-time.Hour),
-	}
-	payload, _ := json.MarshalIndent(stale, "", "  ")
-	if err := os.WriteFile(lockPath, payload, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var notice bytes.Buffer
-	lock, err := AcquireRuntimeLock(d, runtimeRoot, &notice)
+func TestBeginDrainRefusesConcurrentSameCheckoutDifferentSet(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	first, err := AcquireRuntimeLockForSet(d, repo, "set-a", &bytes.Buffer{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("first acquire: %v", err)
 	}
-	t.Cleanup(func() { _ = lock.Release() })
-	if !strings.Contains(notice.String(), "stale runtime execution lock") {
-		t.Fatalf("notice = %q", notice.String())
+	t.Cleanup(func() { _ = first.Release() })
+
+	// A different set draining the same checkout would clobber its working tree.
+	_, err = BeginDrain(d, repo, "set-b", &bytes.Buffer{})
+	assertExitCode(t, err, ExitOperational)
+}
+
+func TestBeginDrainStaleRunningDoesNotBlock(t *testing.T) {
+	_, repo := drainTestRepo(t)
+	// First drain owned by a dead PID; its running row is stale.
+	dead := &Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit(), ProcessAlive: func(int) bool { return false }}
+	stale, err := AcquireRuntimeLockForSet(dead, repo, "demo", &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("seed stale drain: %v", err)
+	}
+	t.Cleanup(func() { _ = stale.Release() })
+
+	// A fresh start over the dead-PID row succeeds.
+	live := &Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit(), ProcessAlive: func(int) bool { return false }}
+	h, err := BeginDrain(live, repo, "demo", &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("start over stale row: %v", err)
+	}
+	_ = h.Cancel()
+}
+
+func TestAcquireRuntimeLockPathScopedNoopWhenIdle(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	lock, err := AcquireRuntimeLock(d, repo, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	// A path-scoped lock records no Drain, so the checkout still reads idle.
+	if status := ReadRuntimeLockStatus(d, repo); status.Locked {
+		t.Fatalf("path-scoped lock must not register a drain: %#v", status)
+	}
+	if err := lock.Release(); err != nil {
+		t.Fatalf("release: %v", err)
 	}
 }
 
-func TestRuntimeLockRecoversMalformedLock(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{FS: deps.NewRealFileSystem()}
-
-	runtimeRoot := filepath.Join(root, "checkout")
-	lockPath := RuntimeLockPathFor(d, runtimeRoot)
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(lockPath, []byte("not-json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var notice bytes.Buffer
-	lock, err := AcquireRuntimeLock(d, runtimeRoot, &notice)
+func TestAcquireRuntimeLockPathScopedRefusesWhileDrainLive(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	drain, err := AcquireRuntimeLockForSet(d, repo, "demo", &bytes.Buffer{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("start drain: %v", err)
 	}
-	t.Cleanup(func() { _ = lock.Release() })
-	if !strings.Contains(notice.String(), "malformed runtime execution lock") {
-		t.Fatalf("notice = %q", notice.String())
+	t.Cleanup(func() { _ = drain.Release() })
+
+	_, err = AcquireRuntimeLock(d, repo, &bytes.Buffer{})
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "already in progress") {
+		t.Fatalf("err = %v, want refusal while drain live", err)
 	}
 }
 
-func TestDistinctRuntimeRootsLockConcurrently(t *testing.T) {
+func TestDistinctReposDrainConcurrently(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{FS: deps.NewRealFileSystem()}
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	d := &Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit(), ProcessAlive: func(pid int) bool { return pid == os.Getpid() }}
 
-	aRoot := filepath.Join(root, "a")
-	bRoot := filepath.Join(root, "b")
-	lockA, err := AcquireRuntimeLock(d, aRoot, &bytes.Buffer{})
+	repoA := filepath.Join(root, "a")
+	repoB := filepath.Join(root, "b")
+	for _, r := range []string{repoA, repoB} {
+		if err := os.MkdirAll(r, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		initExecutorGitRepo(t, r)
+	}
+
+	lockA, err := AcquireRuntimeLockForSet(d, repoA, "set-a", &bytes.Buffer{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("acquire A: %v", err)
 	}
-	lockB, err := AcquireRuntimeLock(d, bRoot, &bytes.Buffer{})
+	t.Cleanup(func() { _ = lockA.Release() })
+	lockB, err := AcquireRuntimeLockForSet(d, repoB, "set-b", &bytes.Buffer{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("acquire B: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = lockA.Release()
-		_ = lockB.Release()
-	})
-}
+	t.Cleanup(func() { _ = lockB.Release() })
 
-func TestDistinctRuntimeRootsLockConcurrentlyForSeparateSets(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{FS: deps.NewRealFileSystem(), ProcessAlive: func(pid int) bool { return pid == os.Getpid() }}
-
-	aRoot := filepath.Join(root, "worktree-a")
-	bRoot := filepath.Join(root, "worktree-b")
-	lockA, err := AcquireRuntimeLockForSet(d, aRoot, "set-a", &bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
+	if s := ReadRuntimeLockStatus(d, repoA); !s.Locked || s.Metadata == nil || s.Metadata.SetID != "set-a" {
+		t.Fatalf("repoA status = %#v", s)
 	}
-	lockB, err := AcquireRuntimeLockForSet(d, bRoot, "set-b", &bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = lockA.Release()
-		_ = lockB.Release()
-	})
-
-	statusA := ReadRuntimeLockStatus(d, aRoot)
-	statusB := ReadRuntimeLockStatus(d, bRoot)
-	if !statusA.Locked || statusA.Metadata == nil || statusA.Metadata.SetID != "set-a" {
-		t.Fatalf("statusA = %#v, want live set-a lock", statusA)
-	}
-	if !statusB.Locked || statusB.Metadata == nil || statusB.Metadata.SetID != "set-b" {
-		t.Fatalf("statusB = %#v, want live set-b lock", statusB)
-	}
-}
-
-func TestReadRuntimeLockStatusLiveAndIdle(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{FS: deps.NewRealFileSystem(), ProcessAlive: func(pid int) bool { return pid == os.Getpid() }}
-
-	runtimeRoot := filepath.Join(root, "checkout")
-	idle := ReadRuntimeLockStatus(d, runtimeRoot)
-	if idle.Locked || idle.Malformed {
-		t.Fatalf("idle status = %#v", idle)
-	}
-
-	lock, err := AcquireRuntimeLock(d, runtimeRoot, &bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = lock.Release() })
-
-	live := ReadRuntimeLockStatus(d, runtimeRoot)
-	if !live.Locked || live.Metadata == nil || live.Metadata.PID != os.Getpid() {
-		t.Fatalf("live status = %#v", live)
-	}
-}
-
-func TestReadRuntimeLockStatusMalformed(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{FS: deps.NewRealFileSystem()}
-
-	runtimeRoot := filepath.Join(root, "checkout")
-	lockPath := RuntimeLockPathFor(d, runtimeRoot)
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(lockPath, []byte("{"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	status := ReadRuntimeLockStatus(d, runtimeRoot)
-	if !status.Malformed {
-		t.Fatalf("status = %#v", status)
+	if s := ReadRuntimeLockStatus(d, repoB); !s.Locked || s.Metadata == nil || s.Metadata.SetID != "set-b" {
+		t.Fatalf("repoB status = %#v", s)
 	}
 }
 

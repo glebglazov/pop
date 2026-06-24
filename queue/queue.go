@@ -1,9 +1,9 @@
 // Package queue implements `pop queue`, a parallel per-project supervisor that
 // fans Task-set drains out across registered projects (ADR 0027). It is
 // concurrent across projects and serial within each — per-project
-// serialization falls out of the runtime execution lock for free, so the
-// supervisor never coordinates within a project, it only ensures at most one
-// drain per idle project.
+// serialization falls out of the Drain's transactional mutual exclusion in the
+// global store for free (ADR-0055), so the supervisor never coordinates within a
+// project, it only ensures at most one drain per idle project.
 package queue
 
 import (

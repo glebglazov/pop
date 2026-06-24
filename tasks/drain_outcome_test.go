@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,38 +10,7 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 )
 
-// readOnlyDrainOutcome reads the single drain-outcome record written under the
-// fixture's data dir, keyed lookup sidestepped so a canonicalized runtime path
-// (/var vs /private/var on macOS) cannot cause a spurious miss.
-func readOnlyDrainOutcome(t *testing.T, d *Deps) *DrainOutcomeRecord {
-	t.Helper()
-	dir := DrainOutcomeDirWith(d)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read drain-outcome dir: %v", err)
-	}
-	var records []*DrainOutcomeRecord
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var rec DrainOutcomeRecord
-		if err := json.Unmarshal(data, &rec); err != nil {
-			t.Fatal(err)
-		}
-		records = append(records, &rec)
-	}
-	if len(records) != 1 {
-		t.Fatalf("drain-outcome records = %d, want 1", len(records))
-	}
-	return records[0]
-}
-
-func TestRunTaskSetQuotaPauseWritesDrainOutcome(t *testing.T) {
+func TestRunTaskSetQuotaPauseRecordsTerminal(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -59,7 +27,10 @@ func TestRunTaskSetQuotaPauseWritesDrainOutcome(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 
-	rec := readOnlyDrainOutcome(t, d)
+	rec, err := ReadDrainOutcome(d, result.RuntimePath)
+	if err != nil {
+		t.Fatalf("read terminal: %v", err)
+	}
 	if rec.Outcome != DrainOutcomeQuotaPaused {
 		t.Fatalf("outcome = %q, want quota_paused", rec.Outcome)
 	}
@@ -70,14 +41,14 @@ func TestRunTaskSetQuotaPauseWritesDrainOutcome(t *testing.T) {
 		t.Fatalf("set id = %q, want demo", rec.SetID)
 	}
 	if rec.RuntimePath == "" || rec.PID == 0 || rec.WrittenAt.IsZero() {
-		t.Fatalf("record missing fields: %#v", rec)
+		t.Fatalf("terminal missing fields: %#v", rec)
 	}
 	if rec.Outcome.Abnormal() {
 		t.Fatalf("quota pause must be a clean stop, got abnormal")
 	}
 }
 
-func TestRunTaskSetCodexQuotaPauseWritesResetAt(t *testing.T) {
+func TestRunTaskSetCodexQuotaPauseRecordsResetAt(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -94,12 +65,15 @@ func TestRunTaskSetCodexQuotaPauseWritesResetAt(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 
-	rec := readOnlyDrainOutcome(t, d)
+	rec, err := ReadDrainOutcome(d, result.RuntimePath)
+	if err != nil {
+		t.Fatalf("read terminal: %v", err)
+	}
 	if rec.Outcome != DrainOutcomeQuotaPaused || rec.ExhaustedPreset != "codex" || rec.ExhaustedResetAt.IsZero() {
-		t.Fatalf("record missing codex reset: %#v", rec)
+		t.Fatalf("terminal missing codex reset: %#v", rec)
 	}
 	if !rec.ExhaustedResetAt.Equal(result.PauseResetAt) {
-		t.Fatalf("record reset = %s, result reset = %s", rec.ExhaustedResetAt, result.PauseResetAt)
+		t.Fatalf("terminal reset = %s, result reset = %s", rec.ExhaustedResetAt, result.PauseResetAt)
 	}
 }
 
@@ -122,7 +96,10 @@ func installCodexQuotaAgent(t *testing.T, root string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func TestRunTaskSetDoneWritesDrainOutcome(t *testing.T) {
+// TestRunTaskSetDoneRecordsFinished proves the Drain records the process exit
+// reason (finished), never the set's work disposition (ADR-0056): a set that
+// drained to Done leaves a finished Drain, with done-ness read from the manifest.
+func TestRunTaskSetDoneRecordsFinished(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -138,102 +115,92 @@ func TestRunTaskSetDoneWritesDrainOutcome(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 
-	rec := readOnlyDrainOutcome(t, d)
-	if rec.Outcome != DrainOutcomeDone {
-		t.Fatalf("outcome = %q, want done", rec.Outcome)
+	rec, err := ReadDrainOutcome(d, result.RuntimePath)
+	if err != nil {
+		t.Fatalf("read terminal: %v", err)
+	}
+	if rec.Outcome != DrainOutcomeFinished {
+		t.Fatalf("outcome = %q, want finished", rec.Outcome)
 	}
 	if rec.ExhaustedPreset != "" {
-		t.Fatalf("done record should carry no exhausted preset, got %q", rec.ExhaustedPreset)
+		t.Fatalf("finished terminal should carry no exhausted preset, got %q", rec.ExhaustedPreset)
 	}
 	if rec.SetID != "demo" {
 		t.Fatalf("set id = %q, want demo", rec.SetID)
 	}
 	if rec.Outcome.Abnormal() {
-		t.Fatalf("done must be a clean stop, got abnormal")
+		t.Fatalf("finished must be a clean stop, got abnormal")
 	}
 }
 
-func TestClassifyDrainOutcome(t *testing.T) {
+func TestDrainTerminal(t *testing.T) {
+	resetAt := time.Date(2026, 6, 15, 2, 28, 0, 0, time.UTC)
 	cases := []struct {
-		name        string
-		result      *RunTaskSetResult
-		err         error
-		wantOutcome DrainOutcome
-		wantPreset  string
-		wantPinned  bool
-		wantWrite   bool
-		wantAbnorm  bool
+		name         string
+		declined     bool
+		quotaPaused  bool
+		preset       string
+		pinned       bool
+		resetAt      time.Time
+		err          error
+		wantTerminal DrainOutcome
+		wantPreset   string
+		wantPinned   bool
+		wantExecuted bool
+		wantAbnorm   bool
 	}{
 		{
-			name:        "quota pause carries preset",
-			result:      &RunTaskSetResult{QuotaPaused: true, PausePreset: "claude", PausePinnedAgent: true},
-			wantOutcome: DrainOutcomeQuotaPaused,
-			wantPreset:  "claude",
-			wantPinned:  true,
-			wantWrite:   true,
+			name:         "quota pause carries preset and reset",
+			quotaPaused:  true,
+			preset:       "claude",
+			pinned:       true,
+			resetAt:      resetAt,
+			wantTerminal: DrainOutcomeQuotaPaused,
+			wantPreset:   "claude",
+			wantPinned:   true,
+			wantExecuted: true,
 		},
 		{
-			name:        "done",
-			result:      &RunTaskSetResult{TaskSetDone: true},
-			wantOutcome: DrainOutcomeDone,
-			wantWrite:   true,
+			name:         "done is a finished process",
+			wantTerminal: DrainOutcomeFinished,
+			wantExecuted: true,
 		},
 		{
-			name:        "deferred",
-			result:      &RunTaskSetResult{TaskSetDeferred: true},
-			wantOutcome: DrainOutcomeDeferred,
-			wantWrite:   true,
+			name:         "failure is a finished process",
+			err:          exitErr(ExitOperational, "task failed"),
+			wantTerminal: DrainOutcomeFinished,
+			wantExecuted: true,
 		},
 		{
-			name:        "blocked via reason",
-			result:      &RunTaskSetResult{BlockedReason: "needs human"},
-			wantOutcome: DrainOutcomeBlocked,
-			wantWrite:   true,
+			name:         "no-runnable block is a finished process",
+			err:          exitErr(ExitNoRunnable, "no eligible AFK task"),
+			wantTerminal: DrainOutcomeFinished,
+			wantExecuted: true,
 		},
 		{
-			name:        "blocked via no-runnable error",
-			err:         exitErr(ExitNoRunnable, "no eligible AFK task"),
-			wantOutcome: DrainOutcomeBlocked,
-			wantWrite:   true,
+			name:         "interrupted is abnormal",
+			err:          exitErr(ExitInterrupted, "interrupted"),
+			wantTerminal: DrainOutcomeInterrupted,
+			wantExecuted: true,
+			wantAbnorm:   true,
 		},
 		{
-			name:        "unverified — terminal HITL, no open AFK work",
-			result:      &RunTaskSetResult{TaskSetUnverified: true, BlockedReason: "HITL: 03-verify"},
-			err:         exitErr(ExitNoRunnable, "agents done — verify"),
-			wantOutcome: DrainOutcomeUnverified,
-			wantWrite:   true,
-		},
-		{
-			name:        "failed via operational error",
-			err:         exitErr(ExitOperational, "task failed"),
-			wantOutcome: DrainOutcomeFailed,
-			wantWrite:   true,
-		},
-		{
-			name:        "interrupted is abnormal",
-			result:      &RunTaskSetResult{},
-			err:         exitErr(ExitInterrupted, "interrupted"),
-			wantOutcome: DrainOutcomeInterrupted,
-			wantWrite:   true,
-			wantAbnorm:  true,
-		},
-		{
-			name:      "declined writes nothing",
-			result:    &RunTaskSetResult{Declined: true},
-			wantWrite: false,
+			name:         "declined never executed",
+			declined:     true,
+			wantExecuted: false,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			outcome, preset, pinned, ok := classifyDrainOutcome(tc.result, tc.err)
-			if ok != tc.wantWrite {
-				t.Fatalf("write = %v, want %v", ok, tc.wantWrite)
+			terminal, preset, pinned, gotReset, executed := drainTerminal(tc.declined, tc.quotaPaused, tc.preset, tc.pinned, tc.resetAt, tc.err)
+			if executed != tc.wantExecuted {
+				t.Fatalf("executed = %v, want %v", executed, tc.wantExecuted)
 			}
-			if !ok {
+			if !executed {
 				return
 			}
-			if outcome != tc.wantOutcome {
-				t.Fatalf("outcome = %q, want %q", outcome, tc.wantOutcome)
+			if terminal != tc.wantTerminal {
+				t.Fatalf("terminal = %q, want %q", terminal, tc.wantTerminal)
 			}
 			if preset != tc.wantPreset {
 				t.Fatalf("preset = %q, want %q", preset, tc.wantPreset)
@@ -241,8 +208,11 @@ func TestClassifyDrainOutcome(t *testing.T) {
 			if pinned != tc.wantPinned {
 				t.Fatalf("pinned = %v, want %v", pinned, tc.wantPinned)
 			}
-			if outcome.Abnormal() != tc.wantAbnorm {
-				t.Fatalf("abnormal = %v, want %v", outcome.Abnormal(), tc.wantAbnorm)
+			if tc.quotaPaused && !gotReset.Equal(tc.resetAt) {
+				t.Fatalf("reset = %v, want %v", gotReset, tc.resetAt)
+			}
+			if terminal.Abnormal() != tc.wantAbnorm {
+				t.Fatalf("abnormal = %v, want %v", terminal.Abnormal(), tc.wantAbnorm)
 			}
 		})
 	}
@@ -254,111 +224,36 @@ func TestDrainOutcomeUnverifiedIsClean(t *testing.T) {
 	}
 }
 
-func TestWriteReadDrainOutcomeUnverifiedRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	d := &Deps{FS: deps.NewRealFileSystem()}
-
-	want := DrainOutcomeRecord{
-		SetID:       "demo",
-		Outcome:     DrainOutcomeUnverified,
-		RuntimePath: "/some/checkout",
-	}
-	if err := WriteDrainOutcome(d, want); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	got, err := ReadDrainOutcome(d, "/some/checkout")
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if got.Outcome != DrainOutcomeUnverified {
-		t.Fatalf("outcome = %q, want unverified", got.Outcome)
-	}
-	if got.Outcome.Abnormal() {
-		t.Fatal("round-tripped unverified must still be clean")
-	}
-}
-
-func TestWriteReadDrainOutcomeRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	d := &Deps{FS: deps.NewRealFileSystem()}
+// TestReadDrainOutcomeProjectsLatestTerminal round-trips a quota-paused terminal
+// through the store: BeginDrain → Finish → ReadDrainOutcome.
+func TestReadDrainOutcomeProjectsLatestTerminal(t *testing.T) {
+	d, repo := drainTestRepo(t)
 	resetAt := time.Date(2026, 6, 15, 2, 28, 0, 0, time.UTC)
 
-	want := DrainOutcomeRecord{
-		SetID:            "demo",
-		Outcome:          DrainOutcomeQuotaPaused,
-		ExhaustedPreset:  "codex",
-		ExhaustedPinned:  true,
-		ExhaustedResetAt: resetAt,
-		RuntimePath:      "/some/checkout",
+	h, err := BeginDrain(d, repo, "demo", nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
 	}
-	if err := WriteDrainOutcome(d, want); err != nil {
-		t.Fatalf("write: %v", err)
+	if err := h.Finish(DrainOutcomeQuotaPaused, "codex", true, resetAt); err != nil {
+		t.Fatalf("finish: %v", err)
 	}
-	got, err := ReadDrainOutcome(d, "/some/checkout")
+
+	got, err := ReadDrainOutcome(d, repo)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if got.SetID != want.SetID || got.Outcome != want.Outcome || got.ExhaustedPreset != want.ExhaustedPreset || got.ExhaustedPinned != want.ExhaustedPinned || !got.ExhaustedResetAt.Equal(want.ExhaustedResetAt) || got.RuntimePath != want.RuntimePath {
-		t.Fatalf("round-trip mismatch: got %#v want %#v", got, want)
+	if got.SetID != "demo" || got.Outcome != DrainOutcomeQuotaPaused || got.ExhaustedPreset != "codex" || !got.ExhaustedPinned || !got.ExhaustedResetAt.Equal(resetAt) {
+		t.Fatalf("terminal mismatch: %#v", got)
 	}
 	if got.WrittenAt.IsZero() {
-		t.Fatalf("WriteDrainOutcome should stamp WrittenAt")
+		t.Fatalf("Finish should stamp the terminal time")
 	}
 }
 
-func TestWriteDrainOutcomeOmitsZeroExhaustedResetAt(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	d := &Deps{FS: deps.NewRealFileSystem()}
-
-	rec := DrainOutcomeRecord{
-		SetID:           "demo",
-		Outcome:         DrainOutcomeQuotaPaused,
-		ExhaustedPreset: "claude",
-		RuntimePath:     "/some/checkout",
-	}
-	if err := WriteDrainOutcome(d, rec); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	data, err := os.ReadFile(DrainOutcomePathFor(d, rec.RuntimePath))
-	if err != nil {
-		t.Fatalf("read raw record: %v", err)
-	}
-	if strings.Contains(string(data), "exhausted_reset_at") {
-		t.Fatalf("zero reset should be omitted from JSON: %s", data)
-	}
-}
-
-func TestRuntimeLockMetadataSetIDOptional(t *testing.T) {
-	// Round-trip: a lock written with a set id reads it back.
-	withSet := RuntimeLockMetadata{
-		PID:         1234,
-		RuntimePath: "/checkout",
-		StartedAt:   time.Now().UTC().Truncate(time.Second),
-		SetID:       "demo",
-	}
-	data, err := json.Marshal(withSet)
-	if err != nil {
-		t.Fatal(err)
-	}
-	meta, err := parseRuntimeLockMetadata(data)
-	if err != nil {
-		t.Fatalf("parse with set id: %v", err)
-	}
-	if meta.SetID != "demo" {
-		t.Fatalf("set id = %q, want demo", meta.SetID)
-	}
-
-	// An older lock file without set_id must still parse (optional field).
-	legacy := []byte(`{"pid":1234,"runtime_path":"/checkout","started_at":"2026-06-14T00:00:00Z"}`)
-	legacyMeta, err := parseRuntimeLockMetadata(legacy)
-	if err != nil {
-		t.Fatalf("parse legacy lock: %v", err)
-	}
-	if legacyMeta.SetID != "" {
-		t.Fatalf("legacy set id = %q, want empty", legacyMeta.SetID)
+func TestReadDrainOutcomeMissingIsNotExist(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	if _, err := ReadDrainOutcome(d, repo); !os.IsNotExist(err) {
+		t.Fatalf("err = %v, want os.ErrNotExist for a checkout with no terminal", err)
 	}
 }
 
@@ -387,26 +282,5 @@ func TestPrintTerminalHITLAdviceFraming(t *testing.T) {
 	}
 	if strings.Contains(got, "Human-blocked") {
 		t.Errorf("terminal HITL advice must not say 'Human-blocked': %s", got)
-	}
-}
-
-func TestAcquireRuntimeLockForSetRecordsSetID(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	d := &Deps{FS: deps.NewRealFileSystem()}
-	runtimeRoot := filepath.Join(root, "checkout")
-
-	lock, err := AcquireRuntimeLockForSet(d, runtimeRoot, "demo", nil)
-	if err != nil {
-		t.Fatalf("acquire: %v", err)
-	}
-	defer lock.Release()
-
-	status := ReadRuntimeLockStatus(d, runtimeRoot)
-	if status.Metadata == nil {
-		t.Fatalf("missing metadata: %#v", status)
-	}
-	if status.Metadata.SetID != "demo" {
-		t.Fatalf("set id = %q, want demo", status.Metadata.SetID)
 	}
 }
