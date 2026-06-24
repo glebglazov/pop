@@ -84,6 +84,12 @@ var migrations = []string{
 	);
 	CREATE INDEX idx_drains_repo_set ON drains(repo, set_id);
 	CREATE INDEX idx_drains_runtime  ON drains(runtime_path);`,
+	// 2: proc_start — an opaque token capturing the owning process's start
+	// instant, recorded alongside pid so liveness can tell a still-running drain
+	// from a reused PID (ADR-0055). Nullable: a row written before this column
+	// existed, or by a platform that cannot read process start-time, carries no
+	// token and falls back to bare PID liveness.
+	`ALTER TABLE drains ADD COLUMN proc_start TEXT;`,
 }
 
 func (s *Store) migrate() error {

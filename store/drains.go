@@ -20,11 +20,16 @@ const (
 // (repository identity, set id) and carrying the owning process so liveness can
 // be checked.
 type Drain struct {
-	ID               int64
-	Repo             string
-	SetID            string
-	RuntimePath      string
-	PID              int
+	ID          int64
+	Repo        string
+	SetID       string
+	RuntimePath string
+	PID         int
+	// ProcStart is an opaque token identifying the owning process's start
+	// instant. Paired with PID it survives PID reuse: a recorded PID that is
+	// live but whose process now reports a different start token is a different
+	// process, not this drain. Empty when start-time could not be captured.
+	ProcStart        string
 	StartedAt        time.Time
 	State            string
 	FinishedAt       time.Time
@@ -40,11 +45,12 @@ const timeLayout = time.RFC3339Nano
 // already exists for the same (repo, set) or the same runtime checkout. A
 // running row whose PID is no longer alive is stale (a crash the reconciliation
 // slice will heal) and does not block. On refusal the returned Drain describes
-// the conflicting live drain. isAlive reports whether a recorded PID is still
-// running; a nil isAlive treats every recorded PID as alive.
-func (s *Store) StartDrain(d Drain, isAlive func(pid int) bool) (Drain, error) {
+// the conflicting live drain. isAlive reports whether a recorded drain's process
+// is still running (checked against its PID and ProcStart so a reused PID does
+// not read as live); a nil isAlive treats every recorded drain as alive.
+func (s *Store) StartDrain(d Drain, isAlive func(Drain) bool) (Drain, error) {
 	if isAlive == nil {
-		isAlive = func(int) bool { return true }
+		isAlive = func(Drain) bool { return true }
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -53,7 +59,7 @@ func (s *Store) StartDrain(d Drain, isAlive func(pid int) bool) (Drain, error) {
 	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.Query(
-		`SELECT id, set_id, runtime_path, pid, started_at FROM drains
+		`SELECT id, set_id, runtime_path, pid, proc_start, started_at FROM drains
 		 WHERE state = ? AND ((repo = ? AND set_id = ?) OR runtime_path = ?)`,
 		StateRunning, d.Repo, d.SetID, d.RuntimePath)
 	if err != nil {
@@ -63,10 +69,12 @@ func (s *Store) StartDrain(d Drain, isAlive func(pid int) bool) (Drain, error) {
 	for rows.Next() {
 		var c Drain
 		var started string
-		if err := rows.Scan(&c.ID, &c.SetID, &c.RuntimePath, &c.PID, &started); err != nil {
+		var procStart sql.NullString
+		if err := rows.Scan(&c.ID, &c.SetID, &c.RuntimePath, &c.PID, &procStart, &started); err != nil {
 			_ = rows.Close()
 			return Drain{}, err
 		}
+		c.ProcStart = procStart.String
 		c.StartedAt = parseTime(started)
 		c.State = StateRunning
 		live = append(live, c)
@@ -78,15 +86,15 @@ func (s *Store) StartDrain(d Drain, isAlive func(pid int) bool) (Drain, error) {
 	_ = rows.Close()
 
 	for _, c := range live {
-		if isAlive(c.PID) {
+		if isAlive(c) {
 			return c, ErrDrainInProgress
 		}
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO drains (repo, set_id, runtime_path, pid, started_at, state)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		d.Repo, d.SetID, d.RuntimePath, d.PID, d.StartedAt.UTC().Format(timeLayout), StateRunning)
+		`INSERT INTO drains (repo, set_id, runtime_path, pid, proc_start, started_at, state)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		d.Repo, d.SetID, d.RuntimePath, d.PID, nullString(d.ProcStart), d.StartedAt.UTC().Format(timeLayout), StateRunning)
 	if err != nil {
 		return Drain{}, err
 	}
@@ -128,14 +136,15 @@ func (s *Store) CancelDrain(id int64) error {
 }
 
 // LiveDrainByRuntimePath returns the live running Drain executing against
-// runtimePath, or nil when none is running there. A running row whose PID is no
-// longer alive is treated as not live.
-func (s *Store) LiveDrainByRuntimePath(runtimePath string, isAlive func(pid int) bool) (*Drain, error) {
+// runtimePath, or nil when none is running there. A running row whose process is
+// no longer alive (dead PID, or a reused PID with a different start token) is
+// treated as not live.
+func (s *Store) LiveDrainByRuntimePath(runtimePath string, isAlive func(Drain) bool) (*Drain, error) {
 	if isAlive == nil {
-		isAlive = func(int) bool { return true }
+		isAlive = func(Drain) bool { return true }
 	}
 	rows, err := s.db.Query(
-		`SELECT id, repo, set_id, runtime_path, pid, started_at FROM drains
+		`SELECT id, repo, set_id, runtime_path, pid, proc_start, started_at FROM drains
 		 WHERE state = ? AND runtime_path = ? ORDER BY id DESC`,
 		StateRunning, runtimePath)
 	if err != nil {
@@ -145,23 +154,91 @@ func (s *Store) LiveDrainByRuntimePath(runtimePath string, isAlive func(pid int)
 	for rows.Next() {
 		var d Drain
 		var started string
-		if err := rows.Scan(&d.ID, &d.Repo, &d.SetID, &d.RuntimePath, &d.PID, &started); err != nil {
+		var procStart sql.NullString
+		if err := rows.Scan(&d.ID, &d.Repo, &d.SetID, &d.RuntimePath, &d.PID, &procStart, &started); err != nil {
 			return nil, err
 		}
+		d.ProcStart = procStart.String
 		d.StartedAt = parseTime(started)
 		d.State = StateRunning
-		if isAlive(d.PID) {
+		if isAlive(d) {
 			return &d, nil
 		}
 	}
 	return nil, rows.Err()
 }
 
+// ReconcileCrashed is the opportunistic reconcile pass every layer-2 reader runs
+// before reading (ADR-0055): in one bounded transaction it finds running Drains
+// whose owning process is no longer alive and transitions them to crashed,
+// stamping finishedAt. isAlive is checked against each row's PID and ProcStart so
+// a reused PID is not mistaken for a live drain; a still-live drain is left
+// untouched. It forks nothing — it reads only the drains table — and returns the
+// number of rows transitioned. A nil isAlive treats every row as alive (a no-op).
+func (s *Store) ReconcileCrashed(isAlive func(Drain) bool, finishedAt time.Time) (int, error) {
+	if isAlive == nil {
+		return 0, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.Query(
+		`SELECT id, repo, set_id, runtime_path, pid, proc_start, started_at FROM drains
+		 WHERE state = ?`,
+		StateRunning)
+	if err != nil {
+		return 0, err
+	}
+	var running []Drain
+	for rows.Next() {
+		var d Drain
+		var started string
+		var procStart sql.NullString
+		if err := rows.Scan(&d.ID, &d.Repo, &d.SetID, &d.RuntimePath, &d.PID, &procStart, &started); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		d.ProcStart = procStart.String
+		d.StartedAt = parseTime(started)
+		d.State = StateRunning
+		running = append(running, d)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	_ = rows.Close()
+
+	stamp := finishedAt.UTC().Format(timeLayout)
+	var crashed int
+	for _, d := range running {
+		if isAlive(d) {
+			continue
+		}
+		if _, err := tx.Exec(
+			`UPDATE drains SET state = ?, finished_at = ? WHERE id = ? AND state = ?`,
+			StateCrashed, stamp, d.ID, StateRunning); err != nil {
+			return 0, err
+		}
+		crashed++
+	}
+	if crashed == 0 {
+		return 0, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return crashed, nil
+}
+
 // LatestTerminalByRuntimePath returns the most recently finished Drain that ran
 // against runtimePath, or nil when none has reached a terminal there.
 func (s *Store) LatestTerminalByRuntimePath(runtimePath string) (*Drain, error) {
 	row := s.db.QueryRow(
-		`SELECT id, repo, set_id, runtime_path, pid, started_at, state,
+		`SELECT id, repo, set_id, runtime_path, pid, proc_start, started_at, state,
 		        finished_at, exhausted_preset, exhausted_pinned, exhausted_reset_at
 		 FROM drains
 		 WHERE runtime_path = ? AND state <> ?
@@ -174,9 +251,9 @@ func (s *Store) LatestTerminalByRuntimePath(runtimePath string) (*Drain, error) 
 func scanDrain(row *sql.Row) (*Drain, error) {
 	var d Drain
 	var started, state string
-	var finished, preset, resetAt sql.NullString
+	var procStart, finished, preset, resetAt sql.NullString
 	var pinned int
-	err := row.Scan(&d.ID, &d.Repo, &d.SetID, &d.RuntimePath, &d.PID, &started, &state,
+	err := row.Scan(&d.ID, &d.Repo, &d.SetID, &d.RuntimePath, &d.PID, &procStart, &started, &state,
 		&finished, &preset, &pinned, &resetAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -184,6 +261,7 @@ func scanDrain(row *sql.Row) (*Drain, error) {
 	if err != nil {
 		return nil, err
 	}
+	d.ProcStart = procStart.String
 	d.StartedAt = parseTime(started)
 	d.State = state
 	d.FinishedAt = parseTime(finished.String)

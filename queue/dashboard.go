@@ -100,6 +100,10 @@ func BuildDashboardWith(d *Deps, cfg *config.Config, cache *dashboardCache) (Das
 	if d.Project == nil {
 		d.Project = project.DefaultDeps()
 	}
+	// Reconcile-then-read: heal dead-PID running Drains into crashed before the
+	// volatile overlay below reads locks from them (ADR-0055). A foreground drain
+	// that crashed is healed by whoever next opens the dashboard.
+	d.reconcile()
 	state, err := EnsureDaemonState(d.Tasks)
 	if err != nil {
 		return DashboardSnapshot{}, err

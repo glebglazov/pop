@@ -5,6 +5,8 @@ import (
 	"os"
 	"syscall"
 	"time"
+
+	"github.com/glebglazov/pop/store"
 )
 
 // RuntimeLockMetadata describes the live Drain holding a runtime checkout. It is
@@ -58,7 +60,9 @@ func ReadRuntimeLockStatus(d *Deps, runtimeRoot string) *RuntimeLockStatus {
 		return status
 	}
 	defer func() { _ = s.Close() }()
-	drain, err := s.LiveDrainByRuntimePath(runtimeRoot, func(pid int) bool { return processAlive(d, pid) })
+	drain, err := s.LiveDrainByRuntimePath(runtimeRoot, func(dr store.Drain) bool {
+		return drainProcessAlive(d, dr.PID, dr.ProcStart)
+	})
 	if err != nil || drain == nil {
 		return status
 	}
@@ -114,4 +118,34 @@ func processAlive(d *Deps, pid int) bool {
 		return false
 	}
 	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// procStartToken resolves the process-start seam, defaulting to the platform
+// implementation. The bool reports whether a token could be determined.
+func procStartToken(d *Deps, pid int) (string, bool) {
+	if d != nil && d.ProcessStartToken != nil {
+		return d.ProcessStartToken(pid)
+	}
+	return defaultProcStartToken(pid)
+}
+
+// drainProcessAlive reports whether the process that owns a Drain is still
+// running, using PID liveness plus the recorded start token to defeat PID reuse.
+// It is conservative on the side of "alive": when no start token can be compared
+// (the row predates the column, or this platform cannot read process start-time)
+// it falls back to bare PID liveness so a genuinely-live drain is never
+// misjudged dead. A reused PID is caught only when both tokens are available and
+// differ.
+func drainProcessAlive(d *Deps, pid int, storedToken string) bool {
+	if !processAlive(d, pid) {
+		return false
+	}
+	if storedToken == "" {
+		return true
+	}
+	current, ok := procStartToken(d, pid)
+	if !ok {
+		return true
+	}
+	return current == storedToken
 }

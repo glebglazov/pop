@@ -39,14 +39,18 @@ const (
 	DrainOutcomeQuotaPaused DrainOutcome = "quota_paused"
 	// DrainOutcomeInterrupted — the drain was interrupted (SIGINT) mid-attempt.
 	DrainOutcomeInterrupted DrainOutcome = "interrupted"
+	// DrainOutcomeCrashed — the drain process died without recording a terminal;
+	// detected by opportunistic reconciliation (a dead-PID running Drain), not
+	// inferred from a missing record (ADR-0055).
+	DrainOutcomeCrashed DrainOutcome = "crashed"
 )
 
-// Abnormal reports whether the drain ended abnormally — interrupted, or (by the
-// absence of any record at all) crashed — rather than reaching a clean terminal
-// stop. A clean stop is a disposition the executor chose; an abnormal one is the
-// process being torn down out from under it.
+// Abnormal reports whether the drain ended abnormally — interrupted or crashed —
+// rather than reaching a clean terminal stop. A clean stop (finished,
+// quota_paused) is how the executor exited; an abnormal one is the process being
+// torn down out from under it. This axis feeds backoff in a later slice.
 func (o DrainOutcome) Abnormal() bool {
-	return o == DrainOutcomeInterrupted
+	return o == DrainOutcomeInterrupted || o == DrainOutcomeCrashed
 }
 
 // DrainOutcomeRecord is the structured terminal a reader projects from the

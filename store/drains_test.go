@@ -68,7 +68,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	}
 }
 
-func allAlive(v bool) func(int) bool { return func(int) bool { return v } }
+func allAlive(v bool) func(Drain) bool { return func(Drain) bool { return v } }
 
 func TestStartDrainInsertsRunning(t *testing.T) {
 	s := openTestStore(t)

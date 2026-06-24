@@ -43,6 +43,10 @@ type Deps struct {
 	// ReadOutcome returns the latest terminal drain outcome for a runtime
 	// checkout. Defaults to tasks.ReadDrainOutcome.
 	ReadOutcome func(runtimePath string) (*tasks.DrainOutcomeRecord, error)
+	// Reconcile runs the opportunistic crash-detection pass before a read,
+	// transitioning dead-PID running Drains to crashed. Defaults to
+	// tasks.ReconcileDrains.
+	Reconcile func() (int, error)
 	// ComputeMergeability dry-runs merging a completed runtime branch into the
 	// working checkout. Defaults to git merge-tree.
 	ComputeMergeability func(workingPath, runtimePath string) (MergeabilityRecord, error)
@@ -100,6 +104,19 @@ func (d *Deps) readOutcome(runtimePath string) (*tasks.DrainOutcomeRecord, error
 		return d.ReadOutcome(runtimePath)
 	}
 	return tasks.ReadDrainOutcome(d.Tasks, runtimePath)
+}
+
+// reconcile runs the opportunistic crash-detection pass before a read pass,
+// healing dead-PID running Drains into crashed (ADR-0055). It defaults to
+// tasks.ReconcileDrains. The result count is advisory; reconciliation never
+// blocks a read, so a reconcile error is swallowed (the read still reflects the
+// pre-reconcile truth, which is no worse than before this pass existed).
+func (d *Deps) reconcile() {
+	if d.Reconcile != nil {
+		_, _ = d.Reconcile()
+		return
+	}
+	_, _ = tasks.ReconcileDrains(d.Tasks)
 }
 
 func (d *Deps) computeMergeability(workingPath, runtimePath string) (MergeabilityRecord, error) {
@@ -254,6 +271,10 @@ func (d *Deps) now() time.Time {
 // drain plus one actionable Decision per Ready set not already running. It
 // performs no tmux side effects.
 func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
+	// Reconcile-then-read: heal dead-PID running Drains into crashed before the
+	// lock/outcome reads below project from them (ADR-0055). This covers
+	// `pop queue status` (BuildStatus → Scan) and each daemon tick (tick → Scan).
+	d.reconcile()
 	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
 	if err != nil {
 		return nil, err

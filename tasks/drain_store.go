@@ -54,6 +54,24 @@ func openDrainStoreIfExists(d *Deps) (*store.Store, bool, error) {
 	return s, true, nil
 }
 
+// ReconcileDrains is the opportunistic reconcile pass every layer-2 reader runs
+// before reading (ADR-0055): it transitions running Drains whose owning process
+// is no longer alive to crashed, so a foreground drain that died is healed by
+// whoever next reads — no always-on daemon. It opens the store only when it
+// already exists (a pure reader never materialises an empty database), forks
+// nothing (it reads only the drains table), and does a single bounded
+// transaction. It returns the number of Drains transitioned to crashed.
+func ReconcileDrains(d *Deps) (int, error) {
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil || !ok {
+		return 0, err
+	}
+	defer func() { _ = s.Close() }()
+	return s.ReconcileCrashed(func(dr store.Drain) bool {
+		return drainProcessAlive(d, dr.PID, dr.ProcStart)
+	}, time.Now().UTC())
+}
+
 // DrainHandle tracks an in-progress Drain so the caller can record its terminal
 // exit reason — or cancel it — when the drain ends. It holds the store open for
 // the drain's lifetime; Finish and Cancel close it.
@@ -76,13 +94,18 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 	if err != nil {
 		return nil, err
 	}
+	pid := os.Getpid()
+	procStart, _ := procStartToken(d, pid)
 	drain, err := s.StartDrain(store.Drain{
 		Repo:        id.CommonDir,
 		SetID:       setID,
 		RuntimePath: runtimePath,
-		PID:         os.Getpid(),
+		PID:         pid,
+		ProcStart:   procStart,
 		StartedAt:   time.Now().UTC(),
-	}, func(pid int) bool { return processAlive(d, pid) })
+	}, func(dr store.Drain) bool {
+		return drainProcessAlive(d, dr.PID, dr.ProcStart)
+	})
 	if err != nil {
 		_ = s.Close()
 		if errors.Is(err, store.ErrDrainInProgress) {
