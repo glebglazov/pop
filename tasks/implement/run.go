@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
 // WholeSetOptions configures whole-set Implement orchestration: drain routing,
@@ -126,11 +126,11 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 		return in, err
 	}
 	// An existing binding resumes at its bound checkout, an explicit override
-	// resolves to that checkout, and a `managed` directive provisions a fresh
-	// managed worktree to drain in — all three are resolved checkouts the executor
-	// must be pointed at. Otherwise the drain stays in the current checkout, which
-	// the executor already resolves, so leave the override empty.
-	if route.UsedExistingBinding || route.ProvisionedManaged || strings.TrimSpace(in.RuntimeOverride) != "" {
+	// resolves to that checkout, a `managed` directive provisions a fresh managed
+	// worktree, and a `name` directive adopts the named worktree — all are resolved
+	// checkouts the executor must be pointed at. Otherwise the drain stays in the
+	// current checkout, which the executor already resolves, so leave it empty.
+	if route.UsedExistingBinding || route.ProvisionedManaged || route.AdoptedNamed || strings.TrimSpace(in.RuntimeOverride) != "" {
 		in.RuntimeOverride = route.RuntimePath
 	}
 	return in, nil

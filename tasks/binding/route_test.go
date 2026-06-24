@@ -113,6 +113,39 @@ func seedManagedIntent(t *testing.T, td *tasks.Deps, checkout, setID string) {
 	}
 }
 
+// seedNamedIntent registers setID under checkout's repository with a `name`
+// worktree directive (ADR-0059), the registration seed routing consults to adopt
+// the named worktree.
+func seedNamedIntent(t *testing.T, td *tasks.Deps, checkout, setID, name string) {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(td, checkout)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
+	if err != nil {
+		t.Fatalf("def path: %v", err)
+	}
+	err = tasks.UpdateGlobalStateWith(td, tasks.StatePathFor(defPath), func(s *tasks.GlobalState) error {
+		s.Entry(defPath).TaskSets = []tasks.RegisteredTaskSet{
+			{ID: setID, WorktreeIntent: &tasks.WorktreeDirective{Name: name}},
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed intent: %v", err)
+	}
+}
+
+// addNamedWorktree adds a linked worktree whose checkout basename — its
+// operator-facing name — is exactly name, on a fresh branch, and returns its path.
+func addNamedWorktree(t *testing.T, repo, name, branch string) string {
+	t.Helper()
+	wt := filepath.Join(t.TempDir(), name)
+	adoptRunGit(t, repo, "worktree", "add", "-b", branch, wt, "HEAD")
+	return wt
+}
+
 // countingGit wraps real git, tallying `git worktree add` invocations so a test
 // can assert routing provisioned (or did not) without mocking git semantics.
 func countingGit(t *testing.T, td *tasks.Deps) *int {
@@ -297,6 +330,218 @@ func TestRouteDrainCheckoutOverrideWinsOverManagedDirective(t *testing.T) {
 	}
 	if *addCalls != 0 {
 		t.Fatalf("worktree add calls = %d, want 0 — an override must shadow the directive", *addCalls)
+	}
+}
+
+// TestRouteDrainCheckoutNamedDirectiveAdopts asserts an unbound set carrying a
+// `name` directive resolves the worktree of that name on this machine, records an
+// adopted (never-delete) binding to it, and drains there — identically whether the
+// trigger is foreground implement or a Queue spawn, and without routing ever
+// running `git worktree add` (ADR-0059).
+func TestRouteDrainCheckoutNamedDirectiveAdopts(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		trigger DrainTrigger
+	}{
+		{"implement", TriggerImplementForeground},
+		{"queue", TriggerQueueSpawn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			td := routeTestDeps(t)
+			repo := initAdoptRepo(t)
+			named := addNamedWorktree(t, repo, "feature-x", "feature-x")
+			seedNamedIntent(t, td, repo, "named-set", "feature-x")
+			addCalls := countingGit(t, td)
+
+			got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+				TD:              td,
+				CurrentCheckout: repo,
+				SetID:           "named-set",
+				Trigger:         tc.trigger,
+			})
+			if err != nil {
+				t.Fatalf("route: %v", err)
+			}
+			if !got.AdoptedNamed || got.UsedExistingBinding || got.ProvisionedManaged {
+				t.Fatalf("result = %+v, want a freshly adopted named worktree", got)
+			}
+			if *addCalls != 0 {
+				t.Fatalf("worktree add calls = %d, want 0 — adopting an existing worktree never provisions", *addCalls)
+			}
+			if filepath.Base(got.RuntimePath) != "feature-x" {
+				t.Fatalf("runtime %q, want a worktree named feature-x", got.RuntimePath)
+			}
+			canonNamed, _ := filepath.EvalSymlinks(named)
+			canonGot, _ := filepath.EvalSymlinks(got.RuntimePath)
+			if canonGot != canonNamed {
+				t.Fatalf("runtime %q != named worktree %q", canonGot, canonNamed)
+			}
+			if _, err := os.Stat(got.RuntimePath); err != nil {
+				t.Fatalf("named worktree missing on disk: %v", err)
+			}
+
+			// The binding is recorded as adopted (never-delete) and resolvable.
+			key, b, ok, err := GetForSet(td, repo, "named-set")
+			if err != nil {
+				t.Fatalf("get for set: %v", err)
+			}
+			if !ok || b.Provisioned || b.RuntimePath != got.RuntimePath {
+				t.Fatalf("binding = %+v ok=%v, want adopted at %q", b, ok, got.RuntimePath)
+			}
+			if b.Branch != "feature-x" {
+				t.Fatalf("binding branch = %q, want feature-x", b.Branch)
+			}
+			// Adopted: unbinding leaves the checkout and branch on disk.
+			if ShouldTeardown(td, key) {
+				t.Fatalf("ShouldTeardown = true for an adopted binding; the checkout must never be torn down")
+			}
+		})
+	}
+}
+
+// TestRouteDrainCheckoutNamedDirectiveUnbindLeavesCheckout asserts the adopted
+// binding's never-delete semantics end to end: forgetting the binding (unbind)
+// removes only the association — the worktree checkout and its branch stay on disk
+// (ADR-0059, matching bind-worktree).
+func TestRouteDrainCheckoutNamedDirectiveUnbindLeavesCheckout(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	named := addNamedWorktree(t, repo, "feature-x", "feature-x")
+	seedNamedIntent(t, td, repo, "named-set", "feature-x")
+
+	if _, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo,
+		SetID:           "named-set",
+		Trigger:         TriggerImplementForeground,
+	}); err != nil {
+		t.Fatalf("route: %v", err)
+	}
+
+	key, _, ok, err := GetForSet(td, repo, "named-set")
+	if err != nil || !ok {
+		t.Fatalf("get for set: ok=%v err=%v", ok, err)
+	}
+	if err := Delete(td, key); err != nil { // unbind: forget the association only
+		t.Fatalf("unbind: %v", err)
+	}
+
+	if _, err := os.Stat(named); err != nil {
+		t.Fatalf("checkout removed by unbind: %v — adopted worktrees must survive", err)
+	}
+	out, err := deps.NewRealGit().CommandInDir(repo, "branch", "--list", "feature-x")
+	if err != nil {
+		t.Fatalf("branch list: %v", err)
+	}
+	if !strings.Contains(out, "feature-x") {
+		t.Fatalf("branch feature-x gone after unbind: %q", out)
+	}
+}
+
+// TestRouteDrainCheckoutNamedDirectiveSecondDrainResumes asserts a later drain of
+// the same set resumes the adopted binding the first drain recorded; the directive
+// is consulted only when unbound (ADR-0059).
+func TestRouteDrainCheckoutNamedDirectiveSecondDrainResumes(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	addNamedWorktree(t, repo, "feature-x", "feature-x")
+	seedNamedIntent(t, td, repo, "named-set", "feature-x")
+
+	req := RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo,
+		SetID:           "named-set",
+		Trigger:         TriggerImplementForeground,
+	}
+	first, err := RouteDrainCheckout(req)
+	if err != nil {
+		t.Fatalf("first route: %v", err)
+	}
+	second, err := RouteDrainCheckout(req)
+	if err != nil {
+		t.Fatalf("second route: %v", err)
+	}
+	if !second.UsedExistingBinding || second.AdoptedNamed {
+		t.Fatalf("second route = %+v, want resumed existing binding", second)
+	}
+	if second.RuntimePath != first.RuntimePath {
+		t.Fatalf("second runtime %q != first %q; resume must reuse the adopted worktree", second.RuntimePath, first.RuntimePath)
+	}
+}
+
+// TestRouteDrainCheckoutBindingWinsOverNamedDirective asserts a pre-existing
+// binding shadows the `name` directive: routing resumes the bound checkout and
+// never consults the directive.
+func TestRouteDrainCheckoutBindingWinsOverNamedDirective(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	addNamedWorktree(t, repo, "feature-x", "feature-x")
+	bound := addLinkedWorktree(t, repo, "bound")
+	seedNamedIntent(t, td, repo, "named-set", "feature-x")
+	seedBinding(t, td, repo, "named-set", Adopt(bound, "bound", "proj"))
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo,
+		SetID:           "named-set",
+		Trigger:         TriggerImplementForeground,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if !got.UsedExistingBinding || got.AdoptedNamed || got.RuntimePath != bound {
+		t.Fatalf("result = %+v, want resumed binding at %q with no adoption", got, bound)
+	}
+}
+
+// TestRouteDrainCheckoutOverrideWinsOverNamedDirective asserts an explicit
+// runtime-path override is honored before the `name` directive is read.
+func TestRouteDrainCheckoutOverrideWinsOverNamedDirective(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	addNamedWorktree(t, repo, "feature-x", "feature-x")
+	override := addLinkedWorktree(t, repo, "override-target")
+	seedNamedIntent(t, td, repo, "named-set", "feature-x")
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo,
+		SetID:           "named-set",
+		Trigger:         TriggerImplementForeground,
+		RuntimeOverride: override,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	canonOverride, _ := filepath.EvalSymlinks(override)
+	if got.AdoptedNamed || got.UsedExistingBinding || got.RuntimePath != canonOverride {
+		t.Fatalf("result = %+v, want override checkout %q with no adoption", got, canonOverride)
+	}
+}
+
+// TestRouteDrainCheckoutNamedDirectiveMatchesNameNotPath asserts resolution keys
+// on the operator-facing worktree name, never a path: with two worktrees present
+// the set lands in the one whose name matches the directive (ADR-0059).
+func TestRouteDrainCheckoutNamedDirectiveMatchesNameNotPath(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	other := addNamedWorktree(t, repo, "other-wt", "other")
+	target := addNamedWorktree(t, repo, "feature-x", "feature-x")
+	seedNamedIntent(t, td, repo, "named-set", "feature-x")
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo,
+		SetID:           "named-set",
+		Trigger:         TriggerImplementForeground,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	canonTarget, _ := filepath.EvalSymlinks(target)
+	canonGot, _ := filepath.EvalSymlinks(got.RuntimePath)
+	if canonGot != canonTarget {
+		t.Fatalf("runtime %q, want the worktree named feature-x at %q (not %q)", canonGot, canonTarget, other)
 	}
 }
 

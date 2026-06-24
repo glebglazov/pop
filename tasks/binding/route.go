@@ -49,7 +49,13 @@ type RouteDrainCheckoutResult struct {
 	// it tells the caller RuntimePath is a resolved checkout the executor must be
 	// pointed at rather than the current checkout it resolves on its own.
 	ProvisionedManaged bool
-	Binding            Binding
+	// AdoptedNamed is true when this route resolved a `name` worktree directive on
+	// the first unbound drain: it matched the named worktree on this machine and
+	// recorded an adopted (never-deleted) binding to it (ADR-0059). Like
+	// ProvisionedManaged it marks RuntimePath as a resolved checkout the executor
+	// must be pointed at; unlike it, pop never tears the checkout down.
+	AdoptedNamed bool
+	Binding      Binding
 }
 
 var (
@@ -60,6 +66,12 @@ var (
 	// from. Routing refuses rather than silently falling back in place (ADR-0059);
 	// surfacing it as a visible config-class error on the set is a later slice.
 	ErrNoResolvableTrunk = errors.New("managed worktree directive: no resolvable Trunk worktree")
+	// ErrNamedWorktreeNotFound is returned when a `name` worktree directive cannot
+	// be satisfied because no worktree of that name exists on this machine. The
+	// name is the portable identifier resolved per machine (ADR-0059); routing
+	// refuses rather than silently draining in place. Surfacing it as a visible
+	// config-class error on the set is a later slice.
+	ErrNamedWorktreeNotFound = errors.New("named worktree directive: no worktree of that name on this machine")
 )
 
 // RouteDrainCheckout resolves which checkout a set drain runs in, honoring the
@@ -135,10 +147,12 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 		return RouteDrainCheckoutResult{RuntimePath: runtimePath}, nil
 	}
 
-	// 3. An unbound set whose registration carries a `managed` worktree directive
-	// forks a managed worktree from the Trunk worktree and binds it (ADR-0059).
-	// This is the only path routing provisions, and only here, lazily, once: the
-	// binding above resumes later drains. The named-worktree arm is a later slice.
+	// 3. An unbound set whose registration carries a worktree directive resolves it
+	// once, lazily, and binds the result (ADR-0059); the binding above resumes later
+	// drains. The `managed` arm forks a managed worktree from the Trunk worktree —
+	// the only path routing provisions. The `name` arm adopts the existing worktree
+	// of that name on this machine, matched by its operator-facing name (never a
+	// path), recording a never-delete adopted binding.
 	defPath, err := tasks.CanonicalDefinitionPathWith(req.TD, repoID.TasksDir)
 	if err != nil {
 		return RouteDrainCheckoutResult{}, err
@@ -156,6 +170,17 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 			RuntimePath:        b.RuntimePath,
 			ProvisionedManaged: true,
 			Binding:            b,
+		}, nil
+	}
+	if intent != nil && intent.Name != "" {
+		b, err := adoptNamedWorktree(req, checkout, intent.Name, setID, key, store)
+		if err != nil {
+			return RouteDrainCheckoutResult{}, err
+		}
+		return RouteDrainCheckoutResult{
+			RuntimePath:  b.RuntimePath,
+			AdoptedNamed: true,
+			Binding:      b,
 		}, nil
 	}
 
@@ -195,6 +220,54 @@ func provisionManagedWorktree(req RouteDrainCheckoutRequest, checkout, setID, ke
 		return Binding{}, err
 	}
 	return b, nil
+}
+
+// adoptNamedWorktree resolves the worktree named by a `name` registration
+// directive on this machine, records an adopted (never-deleted) Worktree binding
+// pointing at it under key, and returns it. Adopted semantics match
+// `bind-worktree`: pop drains into the checkout but never tears it down
+// (Provisioned=false). The worktree is matched by its operator-facing name — its
+// checkout's basename, the label `pop worktree` shows — never by a path, since
+// the manifest carries the portable name resolved per machine (ADR-0059). A name
+// with no such worktree yields ErrNamedWorktreeNotFound; routing never falls back
+// in place.
+func adoptNamedWorktree(req RouteDrainCheckoutRequest, checkout, name, setID, key string, store *Store) (Binding, error) {
+	wt, err := resolveNamedWorktree(req.TD, checkout, name)
+	if err != nil {
+		return Binding{}, err
+	}
+	b := Adopt(wt.Path, CurrentBranch(req.TD, wt.Path), "")
+	if id, err := tasks.ResolveRepositoryIdentity(req.TD, wt.Path); err == nil {
+		b.Project = DetectProject(req.PD, req.TD, req.Config, id)
+	}
+	store.Put(key, b)
+	if err := Save(req.TD, store); err != nil {
+		return Binding{}, err
+	}
+	return b, nil
+}
+
+// resolveNamedWorktree returns the worktree of checkout's repository whose
+// operator-facing name (its checkout basename) matches name. It lists the repo's
+// worktrees with `git worktree list --porcelain` and matches on the name/label,
+// never the branch or an absolute path. Absent on this machine yields
+// ErrNamedWorktreeNotFound.
+func resolveNamedWorktree(td *tasks.Deps, checkout, name string) (project.Worktree, error) {
+	pd := &project.Deps{Git: td.Git, FS: td.FS}
+	ctx, err := project.DetectRepoContextFromPathWith(pd, checkout)
+	if err != nil {
+		return project.Worktree{}, err
+	}
+	worktrees, err := project.ListWorktreesWith(pd, ctx)
+	if err != nil {
+		return project.Worktree{}, err
+	}
+	for _, wt := range worktrees {
+		if wt.Name == name {
+			return wt, nil
+		}
+	}
+	return project.Worktree{}, fmt.Errorf("%w: %q", ErrNamedWorktreeNotFound, name)
 }
 
 // ResolveTrunkPath resolves the repository checkout used as the Trunk worktree:
