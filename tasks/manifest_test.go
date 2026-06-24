@@ -112,6 +112,76 @@ func TestManifestValidation(t *testing.T) {
 			valid:    false,
 			contains: `invalid auto_drain "yes"`,
 		},
+		{
+			name: "worktree managed true",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"worktree":{"managed":true}}`,
+			valid: true,
+		},
+		{
+			name: "worktree name",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"worktree":{"name":"feature-x"}}`,
+			valid: true,
+		},
+		{
+			name: "worktree both arms",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"worktree":{"managed":true,"name":"feature-x"}}`,
+			valid:    false,
+			contains: "invalid worktree",
+		},
+		{
+			name: "worktree neither arm",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"worktree":{}}`,
+			valid:    false,
+			contains: "invalid worktree",
+		},
+		{
+			name: "worktree unknown sub-key",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"worktree":{"managed":true,"extra":1}}`,
+			valid:    false,
+			contains: `unknown key "extra"`,
+		},
+		{
+			name: "worktree managed not boolean",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"worktree":{"managed":"yes"}}`,
+			valid:    false,
+			contains: "invalid worktree",
+		},
+		{
+			name: "worktree managed false",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"worktree":{"managed":false}}`,
+			valid:    false,
+			contains: "invalid worktree",
+		},
+		{
+			name: "worktree empty name",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"worktree":{"name":""}}`,
+			valid:    false,
+			contains: "invalid worktree",
+		},
+		{
+			name: "worktree name not string",
+			manifest: `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"worktree":{"name":42}}`,
+			valid:    false,
+			contains: "invalid worktree",
+		},
 	}
 
 	d := DefaultDeps()
@@ -255,6 +325,123 @@ func TestManifestPreservesAutoDrain(t *testing.T) {
 	}
 	if string(out["auto_drain"]) != "true" {
 		t.Fatalf("auto_drain field lost or changed: %s", out["auto_drain"])
+	}
+}
+
+func TestManifestParsesWorktreeDirective(t *testing.T) {
+	cases := []struct {
+		name        string
+		raw         string
+		wantManaged bool
+		wantName    string
+	}{
+		{name: "managed", raw: `{"managed":true}`, wantManaged: true},
+		{name: "name", raw: `{"name":"feature-x"}`, wantName: "feature-x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			taskDir := filepath.Join(root, "thoughts/issues/demo")
+			writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
+			path := filepath.Join(taskDir, "index.json")
+			manifest := `{"tasks":[
+				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+			],"worktree":` + tc.raw + `}`
+			if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			m := LoadManifest(DefaultDeps(), "demo", path)
+			if len(m.Errors) != 0 {
+				t.Fatalf("unexpected errors: %v", m.Errors)
+			}
+			if !m.WorktreeExplicit {
+				t.Fatal("expected WorktreeExplicit true")
+			}
+			if m.Worktree == nil {
+				t.Fatal("expected Worktree directive parsed")
+			}
+			if m.Worktree.Managed != tc.wantManaged {
+				t.Fatalf("Managed = %v, want %v", m.Worktree.Managed, tc.wantManaged)
+			}
+			if m.Worktree.Name != tc.wantName {
+				t.Fatalf("Name = %q, want %q", m.Worktree.Name, tc.wantName)
+			}
+		})
+	}
+}
+
+func TestManifestAbsentWorktree(t *testing.T) {
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "thoughts/issues/demo")
+	writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
+	path := filepath.Join(taskDir, "index.json")
+	manifest := `{"tasks":[
+		{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
+	]}`
+	if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := LoadManifest(DefaultDeps(), "demo", path)
+	if len(m.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", m.Errors)
+	}
+	if m.WorktreeExplicit {
+		t.Fatal("expected WorktreeExplicit false when key absent")
+	}
+	if m.Worktree != nil {
+		t.Fatal("expected nil Worktree when key absent")
+	}
+}
+
+func TestManifestPreservesWorktree(t *testing.T) {
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "thoughts/issues/demo")
+	writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
+
+	path := filepath.Join(taskDir, "index.json")
+	original := `{
+		"tasks": [{
+			"id": "01-one",
+			"file": "01-one.md",
+			"title": "One",
+			"type": "AFK",
+			"status": "open",
+			"blocked_by": []
+		}],
+		"worktree": {"name": "feature-x"}
+	}`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := DefaultDeps()
+	m := LoadManifest(d, "demo", path)
+	if !m.Valid {
+		t.Fatalf("unexpected invalid: %v", m.Errors)
+	}
+	if m.Worktree == nil || m.Worktree.Name != "feature-x" {
+		t.Fatalf("expected Worktree name feature-x, got %+v", m.Worktree)
+	}
+
+	m.Tasks[0].Status = "done"
+	if err := WriteManifestAtomic(d, m); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(out["worktree"], &got); err != nil {
+		t.Fatalf("worktree field lost or malformed: %s", out["worktree"])
+	}
+	if got["name"] != "feature-x" {
+		t.Fatalf("worktree field changed: %s", out["worktree"])
 	}
 }
 

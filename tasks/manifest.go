@@ -104,6 +104,21 @@ type Manifest struct {
 	AutoDrainExplicit bool
 	autoDrainRaw      json.RawMessage
 	autoDrainInvalid  bool
+	// Worktree is the set-level worktree directive seed read once at
+	// registration. Nil when absent; WorktreeExplicit records presence so the
+	// raw key is preserved verbatim on rewrite.
+	Worktree         *WorktreeDirective
+	WorktreeExplicit bool
+	worktreeRaw      json.RawMessage
+	worktreeErr      string
+}
+
+// WorktreeDirective is a parsed set-level worktree intent. Exactly one arm is
+// set: Managed requests a pop-provisioned managed worktree, Name adopts the
+// existing worktree of that name on this machine.
+type WorktreeDirective struct {
+	Managed bool
+	Name    string
 }
 
 // LoadManifest reads and validates an task manifest.
@@ -158,6 +173,15 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 			if err := json.Unmarshal(v, &m.AutoDrain); err != nil {
 				m.autoDrainInvalid = true
 			}
+		case "worktree":
+			m.worktreeRaw = v
+			m.WorktreeExplicit = true
+			wd, errMsg := parseWorktreeDirective(v)
+			if errMsg != "" {
+				m.worktreeErr = errMsg
+			} else {
+				m.Worktree = wd
+			}
 		default:
 			m.Unknown[k] = v
 		}
@@ -168,6 +192,10 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 func validateManifest(d *Deps, m *Manifest) {
 	if m.autoDrainInvalid {
 		m.Errors = append(m.Errors, invalidAutoDrainError(m.autoDrainRaw))
+	}
+
+	if m.worktreeErr != "" {
+		m.Errors = append(m.Errors, m.worktreeErr)
 	}
 
 	if len(m.Tasks) == 0 {
@@ -289,6 +317,51 @@ func invalidAutoDrainError(raw json.RawMessage) string {
 	return fmt.Sprintf("invalid auto_drain (expected boolean, got %s)", strings.TrimSpace(string(raw)))
 }
 
+// parseWorktreeDirective parses the set-level worktree key. It returns the
+// parsed directive, or a non-empty diagnostic naming the offending key when the
+// value is malformed (both arms set, neither set, unknown sub-key, wrong types,
+// or managed:false with no other arm).
+func parseWorktreeDirective(raw json.RawMessage) (*WorktreeDirective, string) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, fmt.Sprintf("invalid worktree (expected object, got %s)", strings.TrimSpace(string(raw)))
+	}
+
+	for k := range obj {
+		if k != "managed" && k != "name" {
+			return nil, fmt.Sprintf("invalid worktree (unknown key %q)", k)
+		}
+	}
+
+	managedRaw, hasManaged := obj["managed"]
+	nameRaw, hasName := obj["name"]
+
+	switch {
+	case hasManaged && hasName:
+		return nil, "invalid worktree (set exactly one of managed or name, both set)"
+	case hasManaged:
+		var managed bool
+		if err := json.Unmarshal(managedRaw, &managed); err != nil {
+			return nil, fmt.Sprintf("invalid worktree (managed must be a boolean, got %s)", strings.TrimSpace(string(managedRaw)))
+		}
+		if !managed {
+			return nil, "invalid worktree (managed: false; set managed: true or use name)"
+		}
+		return &WorktreeDirective{Managed: true}, ""
+	case hasName:
+		var name string
+		if err := json.Unmarshal(nameRaw, &name); err != nil {
+			return nil, fmt.Sprintf("invalid worktree (name must be a non-empty string, got %s)", strings.TrimSpace(string(nameRaw)))
+		}
+		if name == "" {
+			return nil, "invalid worktree (name must be a non-empty string)"
+		}
+		return &WorktreeDirective{Name: name}, ""
+	default:
+		return nil, "invalid worktree (set exactly one of managed or name, neither set)"
+	}
+}
+
 // WriteManifestAtomic writes a manifest JSON file atomically, preserving unknown fields.
 func WriteManifestAtomic(d *Deps, m *Manifest) error {
 	out := make(map[string]json.RawMessage)
@@ -301,6 +374,9 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 			return err
 		}
 		out["auto_drain"] = autoDrainData
+	}
+	if m.WorktreeExplicit {
+		out["worktree"] = m.worktreeRaw
 	}
 	tasksData, err := json.Marshal(m.Tasks)
 	if err != nil {
