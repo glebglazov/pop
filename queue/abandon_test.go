@@ -112,13 +112,6 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 		t.Fatalf("manifest changed:\nbefore:%s\nafter:%s", beforeManifest, afterManifest)
 	}
 
-	entries, err := ReadJournal(td)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	if len(entries) != 1 || entries[0].Event != JournalEventAbandoned || entries[0].SetID != "set-1" {
-		t.Fatalf("journal entries = %+v, want abandoned event", entries)
-	}
 	if !strings.Contains(out.String(), "Unbound set-1") {
 		t.Fatalf("output = %q, want clear unbind message", out.String())
 	}
@@ -147,13 +140,6 @@ func TestAbandonNoopWhenUnbound(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "no worktree binding") {
 		t.Fatalf("output = %q, want clear no-op message", out.String())
-	}
-	entries, err := ReadJournal(td)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("journal entries = %+v, want none for no-op", entries)
 	}
 }
 

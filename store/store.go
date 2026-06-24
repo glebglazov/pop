@@ -15,6 +15,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -148,22 +150,69 @@ var migrations = []string{
 	);
 	CREATE INDEX idx_integrations_set    ON integrations(set_id);
 	CREATE INDEX idx_integrations_scoped ON integrations(scoped_key);`,
+	// 7: agent_cooldowns — the machine-global, per-agent-preset quota cooldown a
+	// quota_paused Drain produces: the instant a subscription-level agent preset
+	// may be tried again. ADR-0055 moves this off the standalone
+	// agent-cooldowns.json file into the store; the queue's agent fallback reads it
+	// to skip a preset still cooling down. Keyed by preset; the latest write wins.
+	`CREATE TABLE agent_cooldowns (
+		preset          TEXT PRIMARY KEY,
+		exhausted_until TEXT NOT NULL
+	);`,
 }
 
 func (s *Store) migrate() error {
+	// Concurrent first-creates (several processes opening a fresh database at
+	// once) contend on WAL initialisation and the write lock; busy_timeout does
+	// not always absorb the lock taken to switch journal modes on an empty file.
+	// Retry the bounded migration transaction a few times on a lock error so the
+	// losers wait out the winner rather than failing the open.
+	var err error
+	for attempt := 0; attempt < 50; attempt++ {
+		if err = s.migrateOnce(); err == nil {
+			return nil
+		}
+		if !isLockedErr(err) {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return err
+}
+
+func isLockedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "database table is locked")
+}
+
+func (s *Store) migrateOnce() error {
+	// Run the check-and-apply inside one transaction so concurrent first-creates
+	// (two processes opening a fresh database at once) cannot both read
+	// user_version 0 and race the same CREATE TABLE. _txlock=immediate takes the
+	// write lock up front, serialising migrators; the loser re-reads the version
+	// after the winner commits and finds nothing left to apply.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin schema migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var version int
-	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	for version < len(migrations) {
-		if _, err := s.db.Exec(migrations[version]); err != nil {
+		if _, err := tx.Exec(migrations[version]); err != nil {
 			return fmt.Errorf("apply migration %d: %w", version+1, err)
 		}
 		version++
 		// user_version cannot be parameterised; the value is a trusted int.
-		if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
 			return fmt.Errorf("record schema version %d: %w", version, err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }

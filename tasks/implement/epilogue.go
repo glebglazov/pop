@@ -97,7 +97,7 @@ func OfferIntegration(d *Deps, result *tasks.RunTaskSetResult, opts WholeSetOpti
 		AgentPresets:  opts.AgentPresets,
 		AgentExplicit: opts.AgentExplicit,
 		AgentCmd:      opts.AgentCmd,
-	}, integration.IntegrateHooks{}); intErr != nil {
+	}); intErr != nil {
 		fmt.Fprintf(out, "integrate: %v\n", intErr)
 	}
 }
@@ -130,7 +130,7 @@ func tryAutoIntegrateYes(d *Deps, result *tasks.RunTaskSetResult, opts WholeSetO
 
 	if _, intErr := integration.IntegrateWithOptions(id, cfg, result.TaskSetID, out, integration.IntegrationOptions{
 		In: tasks.NonInteractiveReader{},
-	}, integration.IntegrateHooks{}); intErr != nil {
+	}); intErr != nil {
 		fmt.Fprintf(out, "integrate: %v\n", intErr)
 	}
 }

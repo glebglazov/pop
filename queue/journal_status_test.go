@@ -2,8 +2,6 @@ package queue
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,49 +30,6 @@ func queueDataDeps(t *testing.T) *tasks.Deps {
 		RemoveAllFunc: real.RemoveAll,
 	}
 	return d
-}
-
-func TestJournalAppendRead(t *testing.T) {
-	d := queueDataDeps(t)
-	ts := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
-
-	if err := AppendJournalEntry(d, JournalEntry{
-		Timestamp:   ts,
-		Event:       JournalEventSpawn,
-		Project:     "pop",
-		SetID:       "set-1",
-		RuntimePath: "/runtime",
-		Source:      "supervisor",
-	}); err != nil {
-		t.Fatalf("append spawn: %v", err)
-	}
-	if err := AppendJournalEntry(d, JournalEntry{
-		Timestamp:   ts.Add(time.Minute),
-		Event:       JournalEventOutcome,
-		Project:     "pop",
-		SetID:       "set-1",
-		RuntimePath: "/runtime",
-		Outcome:     tasks.DrainOutcomeDone,
-	}); err != nil {
-		t.Fatalf("append outcome: %v", err)
-	}
-
-	got, err := ReadJournal(d)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("journal entries = %d, want 2", len(got))
-	}
-	if got[0].Event != JournalEventSpawn || got[0].SetID != "set-1" {
-		t.Fatalf("first entry = %+v", got[0])
-	}
-	if got[1].Event != JournalEventOutcome || got[1].Outcome != tasks.DrainOutcomeDone {
-		t.Fatalf("second entry = %+v", got[1])
-	}
-	if _, err := os.Stat(JournalPath(d)); err != nil {
-		t.Fatalf("journal should exist on disk: %v", err)
-	}
 }
 
 func TestRenderStatusFromLocksAndState(t *testing.T) {
@@ -141,132 +96,57 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 	}
 }
 
-func TestRenderLogFromSampleJournal(t *testing.T) {
-	entries := []JournalEntry{
-		{
-			Timestamp: time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
-			Event:     JournalEventSpawn,
-			Project:   "pop",
-			SetID:     "set-1",
-			Source:    "supervisor",
-		},
-		{
-			Timestamp: time.Date(2026, 6, 14, 12, 5, 0, 0, time.UTC),
-			Event:     JournalEventOutcome,
-			Project:   "pop",
-			SetID:     "set-1",
-			Outcome:   tasks.DrainOutcomeQuotaPaused,
-		},
-		{
-			Timestamp: time.Date(2026, 6, 14, 12, 6, 0, 0, time.UTC),
-			Event:     JournalEventSpawnFailed,
-			Project:   "pop",
-			SetID:     "set-2",
-			Reason:    "create drain pane: tmux refused pane",
-		},
-	}
-
-	var out bytes.Buffer
-	RenderLog(&out, entries, 50)
-	text := out.String()
-	if !strings.Contains(text, "2026-06-14T12:00:00Z pop set-1 spawned source=supervisor") {
-		t.Fatalf("log output missing spawn:\n%s", text)
-	}
-	if !strings.Contains(text, "2026-06-14T12:05:00Z pop set-1 outcome=quota_paused") {
-		t.Fatalf("log output missing outcome:\n%s", text)
-	}
-	if !strings.Contains(text, "2026-06-14T12:06:00Z pop set-2 spawn_failed reason=create drain pane: tmux refused pane") {
-		t.Fatalf("log output missing spawn failure:\n%s", text)
-	}
-}
-
-func TestRecordTerminalOutcomesReadsDrainOutcome(t *testing.T) {
+// TestBuildLogFromStore checks the Queue journal view is derived from Drain
+// transitions, integration events, and park-clears in the store — there is no
+// standalone journal file (ADR-0055).
+func TestBuildLogFromStore(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initMergeabilityRepo(t)
-	writtenAt := time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC)
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			if runtimePath != repo {
-				t.Fatalf("runtimePath = %q, want %q", runtimePath, repo)
-			}
-			return &tasks.DrainOutcomeRecord{
-				SetID:       "set-1",
-				Outcome:     tasks.DrainOutcomeBlocked,
-				RuntimePath: repo,
-				PID:         222,
-				WrittenAt:   writtenAt,
-			}, nil
-		},
-	}
+	commonDir := testRepoCommonDir(t, td, repo)
 
-	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}, nil); err != nil {
-		t.Fatalf("record outcomes: %v", err)
-	}
-
-	entries, err := ReadJournal(td)
+	// A drain that quota-paused: contributes a spawn and a quota_paused outcome.
+	h, err := tasks.BeginDrain(td, repo, "set-1", nil)
 	if err != nil {
-		t.Fatalf("read journal: %v", err)
+		t.Fatalf("BeginDrain: %v", err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("entries = %d, want 1", len(entries))
+	if err := h.Finish(tasks.DrainOutcomeQuotaPaused, "codex", false, time.Time{}); err != nil {
+		t.Fatalf("Finish: %v", err)
 	}
-	got := entries[0]
-	if got.Event != JournalEventOutcome || got.Outcome != tasks.DrainOutcomeBlocked || got.SetID != "set-1" {
-		t.Fatalf("outcome entry = %+v", got)
+	// A park-clear (unpark) event.
+	if err := tasks.RecordParkClear(td, commonDir, "set-1"); err != nil {
+		t.Fatalf("RecordParkClear: %v", err)
 	}
-	if !got.Timestamp.Equal(writtenAt) {
-		t.Fatalf("timestamp = %s, want %s", got.Timestamp, writtenAt)
-	}
-}
-
-func TestRecordTerminalOutcomesInfersCrashForOpenSpawnWithoutOutcome(t *testing.T) {
-	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
-	if err := AppendJournalEntry(td, JournalEntry{
-		Event:       JournalEventSpawn,
-		Project:     "pop",
-		SetID:       "set-crash",
-		RuntimePath: repo,
-		Source:      "supervisor",
+	// An integration event.
+	if err := tasks.RecordIntegrationEvent(td, tasks.IntegrationEvent{
+		ScopedKey: "k", SetID: "set-2", Project: "pop", BaseRef: "main", BranchSHA: "abc",
 	}); err != nil {
-		t.Fatalf("append spawn: %v", err)
-	}
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			return nil, os.ErrNotExist
-		},
+		t.Fatalf("RecordIntegrationEvent: %v", err)
 	}
 
-	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}, nil); err != nil {
-		t.Fatalf("record outcomes: %v", err)
-	}
-
-	entries, err := ReadJournal(td)
+	events, err := BuildLog(td)
 	if err != nil {
-		t.Fatalf("read journal: %v", err)
+		t.Fatalf("BuildLog: %v", err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("entries = %d, want 2", len(entries))
-	}
-	got := entries[1]
-	if got.Event != JournalEventOutcome || got.Outcome != DrainOutcomeCrashed || got.SetID != "set-crash" {
-		t.Fatalf("crash entry = %+v", got)
+	var out bytes.Buffer
+	RenderLog(&out, events, 50)
+	text := out.String()
+	for _, want := range []string{
+		"set-1 spawned",
+		"set-1 quota_paused agent=codex",
+		"set-1 unparked",
+		"set-2 integrated base=main",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("log output missing %q:\n%s", want, text)
+		}
 	}
 }
 
-func TestRecordTerminalOutcomesBacksOffPinnedQuotaSet(t *testing.T) {
+func TestRecordPinnedQuotaCooldownsBacksOffPinnedQuotaSet(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initMergeabilityRepo(t)
 	key := testScopedKeyFor(t, td, repo, repo, "set-1")
-	writtenAt := time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC)
+	writtenAt := time.Now().UTC()
 	d := &Deps{
 		Tasks: td,
 		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
@@ -282,41 +162,34 @@ func TestRecordTerminalOutcomesBacksOffPinnedQuotaSet(t *testing.T) {
 	}
 	cfg := &config.Config{Queue: &config.QueueConfig{AgentQuotaRetryAfter: "30m"}}
 
-	before := time.Now().UTC()
-	if err := recordTerminalOutcomes(d, cfg, []Decision{{
+	if err := recordPinnedQuotaCooldowns(d, cfg, []Decision{{
 		Project: "pop",
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo, DefinitionPath: "/def"},
-	}}, nil); err != nil {
-		t.Fatalf("record outcomes: %v", err)
+	}}); err != nil {
+		t.Fatalf("record cooldowns: %v", err)
 	}
-	after := time.Now().UTC()
 
 	state, err := ReadDaemonState(td)
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	until := state.SetBackoffs[key]
-	if until.Before(before.Add(30*time.Minute)) || until.After(after.Add(30*time.Minute+time.Second)) {
-		t.Fatalf("set backoff = %s, want about now+30m", until)
+	want := writtenAt.Add(30 * time.Minute)
+	if got := state.SetBackoffs[key]; !got.Equal(want) {
+		t.Fatalf("set backoff = %s, want finishedAt+30m %s", got, want)
 	}
 
-	entries, err := ReadJournal(td)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	if len(entries) != 2 || entries[1].Event != JournalEventAgentCooldown || entries[1].Agent != "codex" {
-		t.Fatalf("journal entries = %+v, want outcome then codex cooldown", entries)
-	}
-	cooldowns, err := tasks.ActiveAgentCooldownsWith(td, after)
+	// The queue must not write the agent-global cooldown store — the executor
+	// fallback owns that axis (ADR-0055/0056).
+	cooldowns, err := tasks.ActiveAgentCooldownsWith(td, time.Now())
 	if err != nil {
 		t.Fatalf("read cooldown store: %v", err)
 	}
 	if len(cooldowns) != 0 {
-		t.Fatalf("queue must not write task cooldown store, got %+v", cooldowns)
+		t.Fatalf("queue must not write agent cooldown store, got %+v", cooldowns)
 	}
 }
 
-func TestRecordTerminalOutcomesBacksOffPinnedQuotaSetFromResetAt(t *testing.T) {
+func TestRecordPinnedQuotaCooldownsFromResetAt(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initMergeabilityRepo(t)
 	key := testScopedKeyFor(t, td, repo, repo, "set-1")
@@ -331,17 +204,17 @@ func TestRecordTerminalOutcomesBacksOffPinnedQuotaSetFromResetAt(t *testing.T) {
 				ExhaustedPinned:  true,
 				ExhaustedResetAt: resetAt,
 				RuntimePath:      repo,
-				WrittenAt:        time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
+				WrittenAt:        time.Now().UTC(),
 			}, nil
 		},
 	}
 	cfg := &config.Config{Queue: &config.QueueConfig{AgentQuotaRetryAfter: "30m"}}
 
-	if err := recordTerminalOutcomes(d, cfg, []Decision{{
+	if err := recordPinnedQuotaCooldowns(d, cfg, []Decision{{
 		Project: "pop",
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo, DefinitionPath: "/def"},
-	}}, nil); err != nil {
-		t.Fatalf("record outcomes: %v", err)
+	}}); err != nil {
+		t.Fatalf("record cooldowns: %v", err)
 	}
 
 	state, err := ReadDaemonState(td)
@@ -352,6 +225,53 @@ func TestRecordTerminalOutcomesBacksOffPinnedQuotaSetFromResetAt(t *testing.T) {
 	if got := state.SetBackoffs[key]; !got.Equal(want) {
 		t.Fatalf("set backoff = %s, want reset+2m %s", got, want)
 	}
+}
+
+// TestRecordPinnedQuotaCooldownsIdempotent checks re-observing the same
+// quota_paused terminal across ticks does not drift the cooldown — the instant
+// is derived from the Drain's finish time, so a second pass writes the same value
+// and, once elapsed, never re-blocks the set.
+func TestRecordPinnedQuotaCooldownsIdempotent(t *testing.T) {
+	td := queueDataDeps(t)
+	repo := initMergeabilityRepo(t)
+	key := testScopedKeyFor(t, td, repo, repo, "set-1")
+	writtenAt := time.Now().UTC()
+	d := &Deps{
+		Tasks: td,
+		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
+			return &tasks.DrainOutcomeRecord{
+				SetID:           "set-1",
+				Outcome:         tasks.DrainOutcomeQuotaPaused,
+				ExhaustedPreset: "codex",
+				ExhaustedPinned: true,
+				RuntimePath:     repo,
+				WrittenAt:       writtenAt,
+			}, nil
+		},
+	}
+	cfg := &config.Config{Queue: &config.QueueConfig{AgentQuotaRetryAfter: "30m"}}
+	dec := []Decision{{Project: "pop", scan: projectScan{ProjectPath: repo, RuntimePath: repo}}}
+
+	if err := recordPinnedQuotaCooldowns(d, cfg, dec); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	first := mustReadState(t, td).SetBackoffs[key]
+	if err := recordPinnedQuotaCooldowns(d, cfg, dec); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	second := mustReadState(t, td).SetBackoffs[key]
+	if !first.Equal(second) {
+		t.Fatalf("cooldown drifted across ticks: %s then %s", first, second)
+	}
+}
+
+func mustReadState(t *testing.T, td *tasks.Deps) *DaemonState {
+	t.Helper()
+	state, err := ReadDaemonState(td)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	return state
 }
 
 func TestAgentQuotaCooldownUntilPolicy(t *testing.T) {
@@ -378,7 +298,7 @@ func TestAgentQuotaCooldownUntilPolicy(t *testing.T) {
 	}
 }
 
-func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
+func TestRecordPinnedQuotaCooldownsDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initMergeabilityRepo(t)
 	key := testScopedKeyFor(t, td, repo, repo, "set-1")
@@ -390,16 +310,16 @@ func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 				Outcome:         tasks.DrainOutcomeQuotaPaused,
 				ExhaustedPreset: "codex",
 				RuntimePath:     repo,
-				WrittenAt:       time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
+				WrittenAt:       time.Now().UTC(),
 			}, nil
 		},
 	}
 
-	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
+	if err := recordPinnedQuotaCooldowns(d, &config.Config{}, []Decision{{
 		Project: "pop",
 		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}, nil); err != nil {
-		t.Fatalf("record outcomes: %v", err)
+	}}); err != nil {
+		t.Fatalf("record cooldowns: %v", err)
 	}
 
 	state, err := ReadDaemonState(td)
@@ -408,13 +328,6 @@ func TestRecordTerminalOutcomesDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 	}
 	if got := state.SetBackoffs[key]; !got.IsZero() {
 		t.Fatalf("set backoff = %s, want none for rotating default quota pause", got)
-	}
-	cooldowns, err := tasks.ActiveAgentCooldownsWith(td, time.Now())
-	if err != nil {
-		t.Fatalf("read cooldown store: %v", err)
-	}
-	if len(cooldowns) != 0 {
-		t.Fatalf("queue must not write task cooldown store, got %+v", cooldowns)
 	}
 }
 
@@ -501,56 +414,13 @@ func TestCrashBackoffEscalatesThenParksFromDrainHistory(t *testing.T) {
 		t.Fatalf("third abnormal terminal must park the set")
 	}
 
-	// The supervisor journals the park exactly once on the crossing terminal.
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			return nil, os.ErrNotExist
-		},
-	}
-	cfg := &config.Config{Queue: &config.QueueConfig{CrashRetryDelays: []string{"1m", "5m"}}}
-	if err := AppendJournalEntry(td, JournalEntry{
-		Event:       JournalEventSpawn,
-		Project:     "pop",
-		SetID:       "set-crash",
-		RuntimePath: repo,
-		Source:      "supervisor",
-	}); err != nil {
-		t.Fatalf("append spawn: %v", err)
-	}
-	if err := recordTerminalOutcomes(d, cfg, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}, nil); err != nil {
-		t.Fatalf("record outcomes: %v", err)
-	}
-
-	entries, err := ReadJournal(td)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	var parked int
-	for _, entry := range entries {
-		if entry.Event == JournalEventSetParked && entry.SetID == "set-crash" {
-			parked++
-		}
-	}
-	if parked != 1 {
-		t.Fatalf("park journal events = %d, want 1; entries=%+v", parked, entries)
-	}
-
 	// No abnormal-backoff or park flags are persisted in daemon state (ADR-0055).
-	state, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
 	data, _ := td.FS.ReadFile(DaemonStatePath(td))
 	for _, omit := range []string{"set_crash_backoffs", "set_crash_counts", "parked_sets"} {
 		if strings.Contains(string(data), omit) {
 			t.Fatalf("daemon state must not persist %q: %s", omit, data)
 		}
 	}
-	_ = state
 }
 
 func TestCleanTerminalResetsBackoffCountFromDrainHistory(t *testing.T) {
@@ -586,103 +456,6 @@ func TestCleanTerminalResetsBackoffCountFromDrainHistory(t *testing.T) {
 	}
 }
 
-func TestRecordTerminalOutcomesDoneRecordsMergeability(t *testing.T) {
-	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
-	wt := filepath.Join(t.TempDir(), "set-1")
-	runGit(t, repo, "worktree", "add", "-b", "set-1", wt, "HEAD")
-	key := testScopedKeyFor(t, td, repo, wt, "set-1")
-	if err := AppendJournalEntry(td, JournalEntry{
-		Event:       JournalEventSpawn,
-		Project:     "pop",
-		SetID:       "set-1",
-		RuntimePath: wt,
-		Source:      "supervisor",
-	}); err != nil {
-		t.Fatalf("append spawn: %v", err)
-	}
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			if runtimePath != wt {
-				return nil, os.ErrNotExist
-			}
-			return &tasks.DrainOutcomeRecord{
-				SetID:       "set-1",
-				Outcome:     tasks.DrainOutcomeDone,
-				RuntimePath: wt,
-				WrittenAt:   time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
-			}, nil
-		},
-		ComputeMergeability: func(workingPath, runtimePath string) (MergeabilityRecord, error) {
-			if workingPath != repo || runtimePath != wt {
-				t.Fatalf("mergeability paths = %q %q, want %q %q", workingPath, runtimePath, repo, wt)
-			}
-			return MergeabilityRecord{Status: MergeabilityClean, Target: "main", Source: "set"}, nil
-		},
-	}
-
-	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}, nil); err != nil {
-		t.Fatalf("record outcomes: %v", err)
-	}
-
-	got := loadMergeabilityStore(t, td)[key]
-	if got.Status != MergeabilityClean || got.Project != "pop" || got.SetID != "set-1" {
-		t.Fatalf("mergeability state = %+v", got)
-	}
-	entries, err := ReadJournal(td)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	if len(entries) != 3 || entries[2].Event != JournalEventMergeability || entries[2].MergeStatus != MergeabilityClean {
-		t.Fatalf("journal entries = %+v, want spawn/outcome/mergeability", entries)
-	}
-}
-
-func TestRecordTerminalOutcomesDoneSkipsMergeabilityForTrunkDrain(t *testing.T) {
-	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			if runtimePath != repo {
-				return nil, os.ErrNotExist
-			}
-			return &tasks.DrainOutcomeRecord{
-				SetID:       "set-trunk",
-				Outcome:     tasks.DrainOutcomeDone,
-				RuntimePath: repo,
-				WrittenAt:   time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
-			}, nil
-		},
-		ComputeMergeability: func(workingPath, runtimePath string) (MergeabilityRecord, error) {
-			t.Fatalf("mergeability should not be computed for trunk drain: %q %q", workingPath, runtimePath)
-			return MergeabilityRecord{}, nil
-		},
-	}
-
-	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}, nil); err != nil {
-		t.Fatalf("record outcomes: %v", err)
-	}
-
-	if got := loadMergeabilityStore(t, td); len(got) != 0 {
-		t.Fatalf("mergeability state = %+v, want empty", got)
-	}
-	entries, err := ReadJournal(td)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	if len(entries) != 1 || entries[0].Event != JournalEventOutcome {
-		t.Fatalf("journal entries = %+v, want outcome only", entries)
-	}
-}
-
 func TestUnparkDashboardRowClearsPark(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initMergeabilityRepo(t)
@@ -715,7 +488,7 @@ func TestUnparkDashboardRowClearsPark(t *testing.T) {
 	}
 }
 
-func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
+func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	repoKey := "test-repo"
 	key := setScopedKey(repoKey, "set-1")
@@ -766,17 +539,5 @@ func TestRenderStatusAndLogShowCrashBackoffAndPark(t *testing.T) {
 		if strings.Contains(statusText, omit) {
 			t.Fatalf("status output should not contain %q:\n%s", omit, statusText)
 		}
-	}
-
-	var logOut bytes.Buffer
-	RenderLog(&logOut, []JournalEntry{{
-		Timestamp: now,
-		Event:     JournalEventSetParked,
-		Project:   "pop",
-		SetID:     "set-1",
-		Reason:    "repeated abnormal drain exits",
-	}}, 50)
-	if !strings.Contains(logOut.String(), "pop set-1 parked reason=repeated abnormal drain exits") {
-		t.Fatalf("log output missing park event:\n%s", logOut.String())
 	}
 }

@@ -36,36 +36,18 @@ type IntegrationOptions struct {
 	AgentCmd      string
 }
 
-// JournalEntry is the integration module's journal event shape. Queue callers
-// map it into queue.JournalEntry in IntegrateHooks.
-type JournalEntry struct {
-	Event       string
-	Project     string
-	SetID       string
-	RuntimePath string
-	MergeStatus string
-	Target      string
-	SourceRef   string
-	Source      string
-	Agent       string
-	Reason      string
-}
-
-// IntegrateHooks injects queue-owned journal side effects.
-type IntegrateHooks struct {
-	AppendJournal func(JournalEntry) error
-}
-
 // Integrate merges a DONE set that was previously reported as clean into its
 // working branch, then tears down the set worktree and branch.
-func Integrate(d *Deps, cfg *config.Config, setID string, out io.Writer, hooks IntegrateHooks) (IntegrationResult, error) {
-	return IntegrateWithOptions(d, cfg, setID, out, IntegrationOptions{In: tasks.NonInteractiveReader{}}, hooks)
+func Integrate(d *Deps, cfg *config.Config, setID string, out io.Writer) (IntegrationResult, error) {
+	return IntegrateWithOptions(d, cfg, setID, out, IntegrationOptions{In: tasks.NonInteractiveReader{}})
 }
 
 // IntegrateWithOptions merges a completed set into its working branch. Clean
 // sets are integrated directly; conflicting sets offer attended agent
 // assistance and keep the worktree/branch unless the agent resolves the merge.
-func IntegrateWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer, opts IntegrationOptions, hooks IntegrateHooks) (IntegrationResult, error) {
+// The durable record that a set integrated is the appended integration event in
+// the store (ADR-0055); there is no separate journal side channel.
+func IntegrateWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer, opts IntegrationOptions) (IntegrationResult, error) {
 	setID = strings.TrimSpace(setID)
 	if setID == "" {
 		return IntegrationResult{}, fmt.Errorf("set id is required")
@@ -113,11 +95,11 @@ func IntegrateWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writ
 	}
 	if rec.Status != StatusClean {
 		if rec.Status == StatusConflicts {
-			return integrateConflictingSet(d, cfg, key, rec, out, opts, hooks)
+			return integrateConflictingSet(d, cfg, key, rec, out, opts)
 		}
 		return IntegrationResult{}, fmt.Errorf("queue: %s mergeability is %s; refusing integration", setID, mergeabilityLabel(rec.Status))
 	}
-	return integrateCleanRecord(d, cfg, key, rec, out, "human", hooks)
+	return integrateCleanRecord(d, cfg, key, rec, out, "human")
 }
 
 // recomputeMergeabilityFromBinding computes and records Mergeability for a set
@@ -191,14 +173,14 @@ func recomputeMergeabilityFromBinding(d *Deps, setID string) (bool, error) {
 
 // IntegrateKnownRecord merges a record already keyed in the store. Used by the
 // queue supervisor auto-merge path.
-func IntegrateKnownRecord(d *Deps, cfg *config.Config, key string, rec Record, out io.Writer, source string, hooks IntegrateHooks) (IntegrationResult, error) {
+func IntegrateKnownRecord(d *Deps, cfg *config.Config, key string, rec Record, out io.Writer, source string) (IntegrationResult, error) {
 	if source == "" {
 		source = "human"
 	}
-	return integrateCleanRecord(d, cfg, key, rec, out, source, hooks)
+	return integrateCleanRecord(d, cfg, key, rec, out, source)
 }
 
-func integrateCleanRecord(d *Deps, cfg *config.Config, key string, rec Record, out io.Writer, source string, hooks IntegrateHooks) (IntegrationResult, error) {
+func integrateCleanRecord(d *Deps, cfg *config.Config, key string, rec Record, out io.Writer, source string) (IntegrationResult, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -236,18 +218,6 @@ func integrateCleanRecord(d *Deps, cfg *config.Config, key string, rec Record, o
 	}
 	if err := binding.Delete(d.tasksDeps(), key); err != nil {
 		return IntegrationResult{}, err
-	}
-	if hooks.AppendJournal != nil {
-		if err := hooks.AppendJournal(JournalEntry{
-			Event:       "integrated",
-			Project:     rec.Project,
-			SetID:       rec.SetID,
-			RuntimePath: rec.RuntimePath,
-			Source:      source,
-			SourceRef:   branch,
-		}); err != nil {
-			return IntegrationResult{}, err
-		}
 	}
 	if provisioned {
 		fmt.Fprintf(out, "queue: integrated %s into %s and removed worktree %s\n", rec.SetID, scan.RuntimePath, rec.RuntimePath)
@@ -287,7 +257,7 @@ func resolveIntegrationScan(d *Deps, cfg *config.Config, rec Record) (integratio
 	}
 }
 
-func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Record, out io.Writer, opts IntegrationOptions, hooks IntegrateHooks) (IntegrationResult, error) {
+func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Record, out io.Writer, opts IntegrationOptions) (IntegrationResult, error) {
 	scan, err := resolveIntegrationScan(d, cfg, rec)
 	if err != nil {
 		return IntegrationResult{}, err
@@ -298,20 +268,6 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Record
 	}
 	result := IntegrationResult{SetID: rec.SetID, Project: rec.Project, RuntimePath: rec.RuntimePath, Branch: branch, Kept: true, Outcome: "kept"}
 	fmt.Fprintf(out, "queue: %s has merge conflicts between %s and %s\n", rec.SetID, shortRef(rec.Target), shortRef(rec.Source))
-	if hooks.AppendJournal != nil {
-		if err := hooks.AppendJournal(JournalEntry{
-			Event:       "integration_conflict",
-			Project:     rec.Project,
-			SetID:       rec.SetID,
-			RuntimePath: rec.RuntimePath,
-			MergeStatus: rec.Status,
-			Target:      rec.Target,
-			SourceRef:   rec.Source,
-			Source:      "human",
-		}); err != nil {
-			return IntegrationResult{}, err
-		}
-	}
 
 	agentPreset, err := integrationAgentPreset(cfg, opts)
 	if err != nil {
@@ -328,9 +284,6 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Record
 	}
 	if action != conflictActionAssist {
 		fmt.Fprintf(out, "queue: kept conflicted worktree %s on branch %s; %s remains awaiting integration\n", rec.RuntimePath, branch, rec.SetID)
-		if err := appendIntegrationOutcome(hooks, rec, branch, "declined"); err != nil {
-			return IntegrationResult{}, err
-		}
 		result.Outcome = "declined"
 		return result, nil
 	}
@@ -341,28 +294,12 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Record
 	}
 	defer func() { _ = lock.Release() }()
 
-	if hooks.AppendJournal != nil {
-		if err := hooks.AppendJournal(JournalEntry{
-			Event:       "integration_attended",
-			Project:     rec.Project,
-			SetID:       rec.SetID,
-			RuntimePath: rec.RuntimePath,
-			Agent:       invocation.AgentPreset,
-			Source:      "human",
-			SourceRef:   branch,
-		}); err != nil {
-			return IntegrationResult{}, err
-		}
-	}
 	if err := startConflictedMerge(d, scan.RuntimePath, branch); err != nil {
 		return IntegrationResult{}, err
 	}
 	fmt.Fprintf(out, "Starting conflict assistance: %s\n", invocation.Display)
 	exitCode, err := runAttendedAssistance(d, opts.In, scan.RuntimePath, out, invocation)
 	if err != nil {
-		if outcomeErr := appendIntegrationOutcome(hooks, rec, branch, "start_failed"); outcomeErr != nil {
-			return IntegrationResult{}, outcomeErr
-		}
 		fmt.Fprintf(out, "queue: could not start conflict assistance: %v\n", err)
 		return result, nil
 	}
@@ -374,9 +311,6 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Record
 		return IntegrationResult{}, err
 	}
 	if !resolved {
-		if err := appendIntegrationOutcome(hooks, rec, branch, "unresolved"); err != nil {
-			return IntegrationResult{}, err
-		}
 		fmt.Fprintf(out, "queue: conflict unresolved; kept worktree %s and branch %s for inspection\n", rec.RuntimePath, branch)
 		result.Outcome = "unresolved"
 		return result, nil
@@ -395,21 +329,6 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Record
 		return IntegrationResult{}, err
 	}
 	if err := binding.Delete(d.tasksDeps(), key); err != nil {
-		return IntegrationResult{}, err
-	}
-	if hooks.AppendJournal != nil {
-		if err := hooks.AppendJournal(JournalEntry{
-			Event:       "integrated",
-			Project:     rec.Project,
-			SetID:       rec.SetID,
-			RuntimePath: rec.RuntimePath,
-			Source:      "human",
-			SourceRef:   branch,
-		}); err != nil {
-			return IntegrationResult{}, err
-		}
-	}
-	if err := appendIntegrationOutcome(hooks, rec, branch, "resolved"); err != nil {
 		return IntegrationResult{}, err
 	}
 	if provisioned {
@@ -522,21 +441,6 @@ func runAttendedAssistance(d *Deps, stdin io.Reader, runtimePath string, out io.
 		return attended.RunAttended(context.Background(), runtimePath, stdin, out, out, invocation.Command.Name, invocation.Command.Args...)
 	}
 	return td.Runner.Run(context.Background(), runtimePath, out, out, invocation.Command.Name, invocation.Command.Args...)
-}
-
-func appendIntegrationOutcome(hooks IntegrateHooks, rec Record, branch, outcome string) error {
-	if hooks.AppendJournal == nil {
-		return nil
-	}
-	return hooks.AppendJournal(JournalEntry{
-		Event:       "integration_outcome",
-		Project:     rec.Project,
-		SetID:       rec.SetID,
-		RuntimePath: rec.RuntimePath,
-		Reason:      outcome,
-		Source:      "human",
-		SourceRef:   branch,
-	})
 }
 
 func resolveSetBranch(d *Deps, runtimePath string) (string, error) {

@@ -248,6 +248,56 @@ func (s *Store) LatestTerminalByRuntimePath(runtimePath string) (*Drain, error) 
 	return scanDrain(row)
 }
 
+// AllDrains returns every Drain row (running and terminal) ordered oldest-first
+// by id. It is the source for the Queue journal view (ADR-0055): each row
+// contributes a "spawned" event at started_at and, once terminal, an outcome
+// event at finished_at.
+func (s *Store) AllDrains() ([]Drain, error) {
+	return s.queryDrains(
+		`SELECT id, repo, set_id, runtime_path, pid, proc_start, started_at, state,
+		        finished_at, exhausted_preset, exhausted_pinned, exhausted_reset_at
+		 FROM drains ORDER BY id ASC`)
+}
+
+// RunningDrains returns every Drain still in the running state, ordered
+// oldest-first by id. Liveness is the caller's concern (it pairs each row's PID
+// and ProcStart against the OS); a reader that wants only live drains filters
+// with its own isAlive predicate.
+func (s *Store) RunningDrains() ([]Drain, error) {
+	return s.queryDrains(
+		`SELECT id, repo, set_id, runtime_path, pid, proc_start, started_at, state,
+		        finished_at, exhausted_preset, exhausted_pinned, exhausted_reset_at
+		 FROM drains WHERE state = ? ORDER BY id ASC`, StateRunning)
+}
+
+func (s *Store) queryDrains(query string, args ...any) ([]Drain, error) {
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Drain
+	for rows.Next() {
+		var d Drain
+		var started, state string
+		var procStart, finished, preset, resetAt sql.NullString
+		var pinned int
+		if err := rows.Scan(&d.ID, &d.Repo, &d.SetID, &d.RuntimePath, &d.PID, &procStart, &started, &state,
+			&finished, &preset, &pinned, &resetAt); err != nil {
+			return nil, err
+		}
+		d.ProcStart = procStart.String
+		d.StartedAt = parseTime(started)
+		d.State = state
+		d.FinishedAt = parseTime(finished.String)
+		d.ExhaustedPreset = preset.String
+		d.ExhaustedPinned = pinned != 0
+		d.ExhaustedResetAt = parseTime(resetAt.String)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // SetBackoff summarises a (repo, set)'s recent Drain history for deriving Queue
 // backoff and parking (ADR-0055): the count of consecutive abnormal terminals
 // (crashed/interrupted) since the last clean one (finished/quota_paused), the
@@ -322,6 +372,36 @@ func (s *Store) latestParkClear(repo, setID string) (time.Time, error) {
 	default:
 		return time.Time{}, err
 	}
+}
+
+// ParkClear is one durable park-clear (unpark) event: a human lifted the derived
+// park on (repo, set) at ClearedAt.
+type ParkClear struct {
+	Repo      string
+	SetID     string
+	ClearedAt time.Time
+}
+
+// AllParkClears returns every park-clear event ordered oldest-first by id, for
+// the Queue journal view (ADR-0055).
+func (s *Store) AllParkClears() ([]ParkClear, error) {
+	rows, err := s.db.Query(
+		`SELECT repo, set_id, cleared_at FROM park_clears ORDER BY id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ParkClear
+	for rows.Next() {
+		var pc ParkClear
+		var cleared string
+		if err := rows.Scan(&pc.Repo, &pc.SetID, &cleared); err != nil {
+			return nil, err
+		}
+		pc.ClearedAt = parseTime(cleared)
+		out = append(out, pc)
+	}
+	return out, rows.Err()
 }
 
 // RecordParkClear appends a park-clear (unpark) event for (repo, set). It is the

@@ -52,17 +52,7 @@ func queueUnbindHooks(d *Deps, cfg *config.Config) binding.LifecycleHooks {
 			return scan.RuntimePath, nil
 		},
 		AfterUnbind: func(key, setID string, b binding.Binding, branch string) error {
-			if err := integration.DeleteRecord(d.Tasks, key); err != nil {
-				return err
-			}
-			return AppendJournalEntry(d.Tasks, JournalEntry{
-				Event:       JournalEventAbandoned,
-				Project:     b.Project,
-				SetID:       setID,
-				RuntimePath: b.RuntimePath,
-				SourceRef:   branch,
-				Source:      "human",
-			})
+			return integration.DeleteRecord(d.Tasks, key)
 		},
 	}
 }

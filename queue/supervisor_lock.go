@@ -34,6 +34,14 @@ func (l *SupervisorLock) Release() error {
 	return err
 }
 
+// QueueDataDir returns the data directory for queue-owned durable files (the
+// supervisor lock, state, log, and provisioned worktrees). The append-only
+// journal that once lived here is retired — the journal is now a view over the
+// store (ADR-0055).
+func QueueDataDir(d *tasks.Deps) string {
+	return SupervisorLockDir(d)
+}
+
 // SupervisorLockDir returns the directory holding the supervisor lock file.
 // It mirrors the runtime-lock data location so all pop state lives together.
 func SupervisorLockDir(d *tasks.Deps) string {

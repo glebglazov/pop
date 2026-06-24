@@ -488,10 +488,10 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 	var decisions []Decision
 	runningSets := map[string]bool{}
 	if dec.WorktreeReady {
-		openSpawns, err := liveOpenSpawns(d, dec.Project)
+		openSpawns, err := liveOpenSpawns(d, scan)
 		if err != nil {
 			dec.Err = err
-			dec.Reason = "journal"
+			dec.Reason = "drain store"
 			return []Decision{dec}
 		}
 		for _, open := range openSpawns {
@@ -501,11 +501,11 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 			busy := dec
 			busy.Busy = true
 			busy.Reason = "busy"
-			busy.TaskSetID = open.Entry.SetID
+			busy.TaskSetID = open.SetID
 			busy.lockStatus = open.Lock
-			busy.scan.RuntimePath = open.Entry.RuntimePath
+			busy.scan.RuntimePath = open.RuntimePath
 			decisions = append(decisions, busy)
-			runningSets[open.Entry.SetID] = true
+			runningSets[open.SetID] = true
 		}
 	}
 
@@ -591,46 +591,54 @@ func appendOrOnly(decisions []Decision, dec Decision) []Decision {
 }
 
 type liveOpenSpawn struct {
-	Entry JournalEntry
-	Lock  *tasks.RuntimeLockStatus
+	SetID       string
+	RuntimePath string
+	Lock        *tasks.RuntimeLockStatus
 }
 
-func liveOpenSpawns(d *Deps, projectName string) ([]liveOpenSpawn, error) {
+// liveOpenSpawns returns the live Drains running against any checkout of the
+// scan's repository, one per (runtime path, set). ADR-0055 retires the journal's
+// open-spawn tracking: a running Drain row whose process is alive IS the live
+// execution claim, so the store's running drains are the source of truth. Each
+// is surfaced with a synthesized RuntimeLockStatus so callers read it exactly as
+// they read a single-checkout lock.
+func liveOpenSpawns(d *Deps, scan projectScan) ([]liveOpenSpawn, error) {
 	if d == nil || d.Tasks == nil {
 		return nil, nil
 	}
-	entries, err := ReadJournal(d.Tasks)
+	commonDir := scanRepoCommonDir(d, scan)
+	if commonDir == "" {
+		return nil, nil
+	}
+	running, err := tasks.LiveRunningDrains(d.Tasks)
 	if err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}
 	var out []liveOpenSpawn
-	for i := len(entries) - 1; i >= 0; i-- {
-		entry := entries[i]
-		if entry.Project != projectName || entry.Event != JournalEventSpawn || entry.RuntimePath == "" || entry.SetID == "" {
+	for _, dr := range running {
+		if dr.Repo != commonDir || dr.RuntimePath == "" || dr.SetID == "" {
 			continue
 		}
-		if !journalHasOpenSpawn(entries, entry.Project, entry.RuntimePath, entry.SetID) {
-			continue
-		}
-		key := entry.RuntimePath + "\x00" + entry.SetID
+		key := dr.RuntimePath + "\x00" + dr.SetID
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		lock := d.readLock(entry.RuntimePath)
-		// Under the adopt-current-checkout model several sets share one runtime
-		// path, so a held lock alone does not prove THIS set is the live drain —
-		// only the set named in the lock metadata is. Requiring the match drops
-		// stale open-spawns left by drains that died without journaling an
-		// outcome, which would otherwise borrow the live lock of another set and
-		// surface as a duplicate picked-up line.
-		if lock != nil && lock.Locked && lock.Metadata != nil && lock.Metadata.SetID == entry.SetID {
-			out = append(out, liveOpenSpawn{Entry: entry, Lock: lock})
-		}
-	}
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
+		out = append(out, liveOpenSpawn{
+			SetID:       dr.SetID,
+			RuntimePath: dr.RuntimePath,
+			Lock: &tasks.RuntimeLockStatus{
+				RuntimePath: dr.RuntimePath,
+				Locked:      true,
+				Metadata: &tasks.RuntimeLockMetadata{
+					PID:         dr.PID,
+					RuntimePath: dr.RuntimePath,
+					StartedAt:   dr.StartedAt,
+					SetID:       dr.SetID,
+				},
+			},
+		})
 	}
 	return out, nil
 }

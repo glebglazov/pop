@@ -1722,26 +1722,9 @@ func LaunchDashboardDrain(d *Deps, cfg *config.Config, row DashboardRow) (Dashbo
 
 	spawn, err := SpawnWithResult(d, dec)
 	if err != nil {
-		_ = AppendJournalEntry(d.Tasks, JournalEntry{
-			Event:       JournalEventSpawnFailed,
-			Project:     dec.Project,
-			SetID:       dec.TaskSetID,
-			RuntimePath: dec.scan.RuntimePath,
-			Source:      "dashboard",
-			Reason:      err.Error(),
-		})
 		return DashboardDrainResult{}, err
 	}
 	if err := recordDrainPane(d, dec, spawn.PaneID, "dashboard"); err != nil {
-		return DashboardDrainResult{}, err
-	}
-	if err := AppendJournalEntry(d.Tasks, JournalEntry{
-		Event:       JournalEventSpawn,
-		Project:     dec.Project,
-		SetID:       dec.TaskSetID,
-		RuntimePath: dec.scan.RuntimePath,
-		Source:      "dashboard",
-	}); err != nil {
 		return DashboardDrainResult{}, err
 	}
 	return DashboardDrainResult{PaneID: spawn.PaneID, RuntimePath: dec.scan.RuntimePath}, nil
@@ -1987,16 +1970,6 @@ func DashboardCreateWorktree(d *Deps, cfg *config.Config, row DashboardRow, base
 	if err := binding.Put(d.Tasks, key, binding.Binding{RuntimePath: path, Branch: branch, Project: proj, Provisioned: true}); err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
-	if err := AppendJournalEntry(d.Tasks, JournalEntry{
-		Event:       JournalEventBound,
-		Project:     proj,
-		SetID:       row.SetID,
-		RuntimePath: path,
-		SourceRef:   branch,
-		Source:      "dashboard",
-	}); err != nil {
-		return DashboardCreateWorktreeResult{}, err
-	}
 	return DashboardCreateWorktreeResult{SetID: row.SetID, RuntimePath: path, Branch: branch, BaseRef: baseRef}, nil
 }
 
@@ -2131,16 +2104,6 @@ func DashboardProvisionManagedWorktree(d *Deps, cfg *config.Config, row Dashboar
 	b.Project = proj
 	key := setScopedKey(repoKey, row.SetID)
 	if err := binding.Put(d.Tasks, key, b); err != nil {
-		return DashboardCreateWorktreeResult{}, err
-	}
-	if err := AppendJournalEntry(d.Tasks, JournalEntry{
-		Event:       JournalEventBound,
-		Project:     proj,
-		SetID:       row.SetID,
-		RuntimePath: b.RuntimePath,
-		SourceRef:   b.Branch,
-		Source:      "dashboard",
-	}); err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
 	return DashboardCreateWorktreeResult{SetID: row.SetID, RuntimePath: b.RuntimePath, Branch: b.Branch}, nil

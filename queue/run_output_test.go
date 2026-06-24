@@ -219,71 +219,6 @@ func TestDiffRunViewOutcomeTransition(t *testing.T) {
 	}
 }
 
-func TestRecordTerminalOutcomesEmitsOutcomeDelta(t *testing.T) {
-	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
-	writtenAt := time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC)
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			return &tasks.DrainOutcomeRecord{
-				SetID:       "set-1",
-				RuntimePath: repo,
-				Outcome:     tasks.DrainOutcomeDone,
-				WrittenAt:   writtenAt,
-			}, nil
-		},
-	}
-
-	var events []string
-	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}, &events); err != nil {
-		t.Fatalf("record outcomes: %v", err)
-	}
-	if len(events) != 1 || !strings.Contains(events[0], "outcome=done") {
-		t.Fatalf("events = %v, want outcome delta", events)
-	}
-}
-
-// TestRecordTerminalOutcomesEmitsUnverifiedDelta checks that an unverified drain
-// outcome produces a distinct delta line separate from a blocked outcome.
-func TestRecordTerminalOutcomesEmitsUnverifiedDelta(t *testing.T) {
-	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
-	writtenAt := time.Date(2026, 6, 21, 9, 0, 0, 0, time.UTC)
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			return &tasks.DrainOutcomeRecord{
-				SetID:       "set-hitl",
-				RuntimePath: repo,
-				Outcome:     tasks.DrainOutcomeUnverified,
-				WrittenAt:   writtenAt,
-			}, nil
-		},
-	}
-
-	var events []string
-	if err := recordTerminalOutcomes(d, &config.Config{}, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}, &events); err != nil {
-		t.Fatalf("record outcomes: %v", err)
-	}
-	if len(events) != 1 {
-		t.Fatalf("events = %v, want exactly one delta line", events)
-	}
-	line := events[0]
-	if !strings.Contains(line, "outcome=unverified") {
-		t.Fatalf("delta line = %q, want outcome=unverified", line)
-	}
-	if strings.Contains(line, "outcome=blocked") {
-		t.Fatalf("delta line = %q, must not say outcome=blocked for unverified outcome", line)
-	}
-}
-
 // TestBuildRunViewUnverifiedBucket checks that a project with an UNVERIFIED set is
 // placed in view.Unverified rather than view.Blocked or view.IdleCount.
 func TestBuildRunViewUnverifiedBucket(t *testing.T) {
@@ -364,27 +299,3 @@ func TestRenderRunBaselineUnverifiedSection(t *testing.T) {
 	}
 }
 
-// TestRenderLogUnverifiedOutcome checks the journal log renders unverified outcomes by name.
-func TestRenderLogUnverifiedOutcome(t *testing.T) {
-	ts := time.Date(2026, 6, 21, 9, 0, 0, 0, time.UTC)
-	entries := []JournalEntry{
-		{
-			Timestamp: ts,
-			Event:     JournalEventOutcome,
-			Project:   "pop",
-			SetID:     "set-hitl",
-			Outcome:   tasks.DrainOutcomeUnverified,
-		},
-	}
-
-	var out bytes.Buffer
-	RenderLog(&out, entries, 10)
-	text := out.String()
-
-	if !strings.Contains(text, "outcome=unverified") {
-		t.Fatalf("log missing outcome=unverified:\n%s", text)
-	}
-	if strings.Contains(text, "outcome=blocked") {
-		t.Fatalf("log must not say outcome=blocked for unverified:\n%s", text)
-	}
-}

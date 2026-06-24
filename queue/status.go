@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"fmt"
 	"io"
 	"sort"
 	"time"
@@ -183,52 +182,6 @@ func mergeabilityLabel(status string) string {
 		return "conflicts"
 	default:
 		return "mergeability unknown"
-	}
-}
-
-// RenderLog prints recent queue journal history.
-func RenderLog(out io.Writer, entries []JournalEntry, limit int) {
-	if limit <= 0 || limit > len(entries) {
-		limit = len(entries)
-	}
-	start := len(entries) - limit
-	if start < 0 {
-		start = 0
-	}
-	if len(entries[start:]) == 0 {
-		fmt.Fprintln(out, "No queue journal entries.")
-		return
-	}
-	for _, entry := range entries[start:] {
-		ts := entry.Timestamp.UTC().Format(time.RFC3339)
-		switch entry.Event {
-		case JournalEventOutcome:
-			fmt.Fprintf(out, "%s %s %s outcome=%s\n", ts, entry.Project, entry.SetID, entry.Outcome)
-		case JournalEventSpawn:
-			source := ""
-			if entry.Source != "" {
-				source = " source=" + entry.Source
-			}
-			fmt.Fprintf(out, "%s %s %s spawned%s\n", ts, entry.Project, entry.SetID, source)
-		case JournalEventSpawnFailed:
-			fmt.Fprintf(out, "%s %s %s spawn_failed reason=%s\n", ts, entry.Project, entry.SetID, entry.Reason)
-		case JournalEventAgentSwitch:
-			fmt.Fprintf(out, "%s %s %s default-agent=%s\n", ts, entry.Project, entry.SetID, entry.Agent)
-		case JournalEventAgentCooldown:
-			fmt.Fprintf(out, "%s %s %s cooldown agent=%s until=%s reason=%s\n", ts, entry.Project, entry.SetID, entry.Agent, entry.Until.UTC().Format(time.RFC3339), entry.Reason)
-		case JournalEventAgentUnavailable:
-			fmt.Fprintf(out, "%s %s %s unavailable agent=%s reason=%s\n", ts, entry.Project, entry.SetID, entry.Agent, entry.Reason)
-		case JournalEventSetParked:
-			fmt.Fprintf(out, "%s %s %s parked reason=%s\n", ts, entry.Project, entry.SetID, entry.Reason)
-		case JournalEventMergeability:
-			fmt.Fprintf(out, "%s %s %s mergeability=%s\n", ts, entry.Project, entry.SetID, entry.MergeStatus)
-		case JournalEventIntegrated:
-			fmt.Fprintf(out, "%s %s %s integrated\n", ts, entry.Project, entry.SetID)
-		case JournalEventAbandoned:
-			fmt.Fprintf(out, "%s %s %s abandoned branch=%s\n", ts, entry.Project, entry.SetID, entry.SourceRef)
-		default:
-			fmt.Fprintf(out, "%s %s %s %s\n", ts, entry.Project, entry.SetID, entry.Event)
-		}
 	}
 }
 

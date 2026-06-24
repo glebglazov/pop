@@ -50,22 +50,6 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 	if !strings.Contains(supervisorOut.String(), "spawned drain for "+setID) {
 		t.Fatalf("supervisor output missing spawn line:\n%s", supervisorOut.String())
 	}
-	entries, err := ReadJournal(td)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	spawns := 0
-	for _, entry := range entries {
-		switch entry.Event {
-		case JournalEventSpawn:
-			spawns++
-		case JournalEventSpawnFailed:
-			t.Fatalf("successful spawn must not write spawn_failed: %+v", entry)
-		}
-	}
-	if spawns != 1 {
-		t.Fatalf("successful spawn entries = %d, want 1; journal=%+v", spawns, entries)
-	}
 
 	var confirmOut bytes.Buffer
 	var drainOut bytes.Buffer
@@ -78,7 +62,7 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 		ConfirmOut:      &confirmOut,
 		Output:          &drainOut,
 	}
-	_, err = tasks.RunTaskSetWith(td, project.DefaultDeps(), d.LoadConfig, opts)
+	_, err := tasks.RunTaskSetWith(td, project.DefaultDeps(), d.LoadConfig, opts)
 	if err == nil {
 		t.Fatal("expected exit after choosing Exit at the HITL gate")
 	}
@@ -164,7 +148,7 @@ func TestSupervisorWorktreeDrainTargetsProjectSessionWithCheckoutCWD(t *testing.
 	}
 }
 
-func TestSupervisorTickJournalsSpawnFailure(t *testing.T) {
+func TestSupervisorTickReportsSpawnFailure(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "spawn-fails", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -194,24 +178,6 @@ func TestSupervisorTickJournalsSpawnFailure(t *testing.T) {
 
 	if !strings.Contains(out.String(), "spawn "+setID+": create drain pane: tmux refused pane") {
 		t.Fatalf("supervisor output missing spawn failure:\n%s", out.String())
-	}
-	entries, err := ReadJournal(td)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("journal entries = %+v, want one spawn_failed entry", entries)
-	}
-	wantRuntimePath, err := filepath.EvalSymlinks(repo)
-	if err != nil {
-		t.Fatalf("canonicalize repo: %v", err)
-	}
-	got := entries[0]
-	if got.Event != JournalEventSpawnFailed || got.Project == "" || got.SetID != setID || got.RuntimePath != wantRuntimePath || got.Source != "supervisor" {
-		t.Fatalf("spawn_failed entry = %+v", got)
-	}
-	if got.Reason != "create drain pane: tmux refused pane" {
-		t.Fatalf("spawn_failed reason = %q", got.Reason)
 	}
 }
 

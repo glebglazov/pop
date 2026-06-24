@@ -163,14 +163,6 @@ func TestBindWorktreeCreatesAdoptedBinding(t *testing.T) {
 		t.Fatalf("adopted binding must have Provisioned=false")
 	}
 
-	entries, err := ReadJournal(td)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	if len(entries) != 1 || entries[0].Event != JournalEventBound || entries[0].SetID != "set-x" {
-		t.Fatalf("journal = %+v, want bound event for set-x", entries)
-	}
-
 	if !strings.Contains(out.String(), "Bound") {
 		t.Fatalf("output = %q, want bind confirmation", out.String())
 	}

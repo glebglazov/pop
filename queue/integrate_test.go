@@ -86,12 +86,12 @@ func TestIntegrateCleanSetMergesAndTearsDown(t *testing.T) {
 	if len(snap.AwaitingIntegration) != 0 {
 		t.Fatalf("awaiting integration = %+v, want empty", snap.AwaitingIntegration)
 	}
-	entries, err := ReadJournal(td)
+	events, err := tasks.IntegrationEventsForSet(td, "set-1")
 	if err != nil {
-		t.Fatalf("read journal: %v", err)
+		t.Fatalf("read integration events: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Event != JournalEventIntegrated || entries[0].SetID != "set-1" {
-		t.Fatalf("journal entries = %+v, want integrated event", entries)
+	if len(events) != 1 || events[0].SetID != "set-1" {
+		t.Fatalf("integration events = %+v, want one for set-1", events)
 	}
 	if !strings.Contains(out.String(), "integrated set-1") {
 		t.Fatalf("output = %q, want clear integration message", out.String())
@@ -171,12 +171,13 @@ func TestIntegrateConflictDeclinedKeepsWorktreeBranchAndState(t *testing.T) {
 	if len(loadBindingStore(t, td)) != 1 {
 		t.Fatalf("worktree bindings = %+v, want retained", loadBindingStore(t, td))
 	}
-	entries, err := ReadJournal(td)
+	// A declined conflict never integrates, so no durable integration event lands.
+	events, err := tasks.IntegrationEventsForSet(td, "set-1")
 	if err != nil {
-		t.Fatalf("read journal: %v", err)
+		t.Fatalf("read integration events: %v", err)
 	}
-	if !journalContains(entries, JournalEventIntegrationConflict, "") || !journalContains(entries, JournalEventIntegrationOutcome, "declined") {
-		t.Fatalf("journal entries = %+v, want conflict and declined outcome", entries)
+	if len(events) != 0 {
+		t.Fatalf("integration events = %+v, want none for declined conflict", events)
 	}
 }
 
@@ -334,22 +335,13 @@ func TestIntegrateConflictAttendedResolutionMergesAndTearsDown(t *testing.T) {
 	if len(loadBindingStore(t, td)) != 0 {
 		t.Fatalf("worktree bindings = %+v, want cleared", loadBindingStore(t, td))
 	}
-	entries, err := ReadJournal(td)
+	// Resolving the conflict and merging records a durable integration event.
+	events, err := tasks.IntegrationEventsForSet(td, "set-1")
 	if err != nil {
-		t.Fatalf("read journal: %v", err)
+		t.Fatalf("read integration events: %v", err)
 	}
-	for _, want := range []struct {
-		event  string
-		reason string
-	}{
-		{JournalEventIntegrationConflict, ""},
-		{JournalEventIntegrationAttended, ""},
-		{JournalEventIntegrated, ""},
-		{JournalEventIntegrationOutcome, "resolved"},
-	} {
-		if !journalContains(entries, want.event, want.reason) {
-			t.Fatalf("journal entries = %+v, missing %s/%s", entries, want.event, want.reason)
-		}
+	if len(events) != 1 || events[0].SetID != "set-1" {
+		t.Fatalf("integration events = %+v, want one for set-1", events)
 	}
 }
 
@@ -377,12 +369,12 @@ func TestIntegrateAlreadyIntegratedNoop(t *testing.T) {
 	if !strings.Contains(out.String(), "already integrated") {
 		t.Fatalf("output = %q, want clear no-op message", out.String())
 	}
-	entries, err := ReadJournal(td)
+	events, err := tasks.IntegrationEventsForSet(td, "set-1")
 	if err != nil {
-		t.Fatalf("read journal: %v", err)
+		t.Fatalf("read integration events: %v", err)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("journal entries = %+v, want none for no-op", entries)
+	if len(events) != 0 {
+		t.Fatalf("integration events = %+v, want none for no-op", events)
 	}
 }
 
@@ -425,15 +417,6 @@ func setupConflictingIntegration(t *testing.T) (string, string, MergeabilityReco
 	rec.RuntimePath = wt
 	rec.SetID = "set-1"
 	return repo, wt, rec
-}
-
-func journalContains(entries []JournalEntry, event, reason string) bool {
-	for _, entry := range entries {
-		if entry.Event == event && (reason == "" || entry.Reason == reason) {
-			return true
-		}
-	}
-	return false
 }
 
 func mustReadFile(t *testing.T, path string) []byte {

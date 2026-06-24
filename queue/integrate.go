@@ -25,7 +25,7 @@ func Integrate(d *Deps, cfg *config.Config, setID string, out io.Writer) (Integr
 
 // IntegrateWithOptions merges a completed set into its working branch.
 func IntegrateWithOptions(d *Deps, cfg *config.Config, setID string, out io.Writer, opts IntegrationOptions) (IntegrationResult, error) {
-	return integration.IntegrateWithOptions(queueIntegrationDeps(d), cfg, setID, out, opts, queueIntegrateHooks(d))
+	return integration.IntegrateWithOptions(queueIntegrationDeps(d), cfg, setID, out, opts)
 }
 
 // LookupMergeability returns the mergeability record for setID.
@@ -77,10 +77,6 @@ func findIntegrationRecord(d *Deps, setID string) (string, MergeabilityRecord, b
 		}
 		return "", MergeabilityRecord{}, false, fmt.Errorf("%s", b.String())
 	}
-}
-
-func integrateCleanSet(d *Deps, cfg *config.Config, key string, rec MergeabilityRecord, out io.Writer, source string) (IntegrationResult, error) {
-	return integration.IntegrateKnownRecord(queueIntegrationDeps(d), cfg, key, mergeabilityRecordToIntegration(rec), out, source, queueIntegrateHooks(d))
 }
 
 func resolveIntegrationScan(d *Deps, cfg *config.Config, rec MergeabilityRecord) (projectScan, error) {

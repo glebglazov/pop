@@ -345,19 +345,8 @@ func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 			}}, nil
 		},
 	}
-	// Both sets have an open spawn at the same checkout, but only "live" holds the
-	// lock now; "stale" was killed without an outcome entry.
-	for _, set := range []string{"stale", "live"} {
-		if err := AppendJournalEntry(d.Tasks, JournalEntry{
-			Event:       JournalEventSpawn,
-			Project:     "proj",
-			SetID:       set,
-			RuntimePath: root,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
+	// Only "live" holds the runtime lock (a live running Drain); the busy
+	// detection must report that set alone and never a set with no live drain.
 	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, nil, &DaemonState{Version: 1}, time.Now())
 
 	var busy []string

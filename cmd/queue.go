@@ -157,10 +157,10 @@ func runQueueDashboard(cmd *cobra.Command, args []string) error {
 }
 
 func runQueueLog(cmd *cobra.Command, args []string) error {
-	entries, err := queue.ReadJournal(tasks.DefaultDeps())
+	events, err := queue.BuildLog(tasks.DefaultDeps())
 	if err != nil {
 		return err
 	}
-	queue.RenderLog(os.Stdout, entries, queueLogLimit)
+	queue.RenderLog(os.Stdout, events, queueLogLimit)
 	return nil
 }

@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -53,10 +52,9 @@ func TestAgentCooldownConcurrentUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := mustReadFile(t, AgentCooldownPathWith(d))
-	var store agentCooldownStore
-	if err := json.Unmarshal(data, &store); err != nil {
-		t.Fatalf("cooldown store was corrupted: %v\n%s", err, data)
+	store, err := readAgentCooldowns(d)
+	if err != nil {
+		t.Fatalf("readAgentCooldowns: %v", err)
 	}
 	if len(store) != writers {
 		t.Fatalf("store entries = %d, want %d: %#v", len(store), writers, store)

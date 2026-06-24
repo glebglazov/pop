@@ -12,7 +12,6 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
-	"github.com/glebglazov/pop/tasks/integration"
 )
 
 const agentQuotaResetSkew = 2 * time.Minute
@@ -40,12 +39,8 @@ func Run(d *Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal)
 	if _, err := EnsureDaemonState(d.Tasks); err != nil {
 		return err
 	}
-	cfg, err := d.LoadConfig(config.DefaultConfigPath())
-	if err != nil {
+	if _, err := d.LoadConfig(config.DefaultConfigPath()); err != nil {
 		return err
-	}
-	if err := ReconcileInFlight(d, cfg); err != nil {
-		fmt.Fprintf(out, "queue: reconcile in-flight drains: %v\n", err)
 	}
 
 	fmt.Fprintf(out, "pop queue supervisor started (PID %d); poll every %s. Ctrl-C to stop.\n", os.Getpid(), interval)
@@ -79,9 +74,8 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 		return
 	}
 	runOut.lastScan = ""
-	var eventLines []string
-	if err := recordTerminalOutcomes(d, cfg, decisions, &eventLines); err != nil {
-		fmt.Fprintf(out, "queue: journal outcomes: %v\n", err)
+	if err := recordPinnedQuotaCooldowns(d, cfg, decisions); err != nil {
+		fmt.Fprintf(out, "queue: record pinned quota cooldowns: %v\n", err)
 	} else {
 		decisions, err = Scan(d, cfg)
 		if err != nil {
@@ -92,7 +86,7 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 
 	if snap, err := BuildStatus(d, cfg); err == nil {
 		preSpawn := BuildRunView(snap, time.Now())
-		runOut.emitViewTransition(out, preSpawn, eventLines)
+		runOut.emitViewTransition(out, preSpawn, nil)
 	} else {
 		fmt.Fprintf(out, "queue: status: %v\n", err)
 	}
@@ -114,29 +108,10 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 			spawn, err := SpawnWithResult(d, dec)
 			if err != nil {
 				fmt.Fprintf(out, "queue: %s: spawn %s: %v\n", dec.Project, dec.TaskSetID, err)
-				if journalErr := AppendJournalEntry(d.Tasks, JournalEntry{
-					Event:       JournalEventSpawnFailed,
-					Project:     dec.Project,
-					SetID:       dec.TaskSetID,
-					RuntimePath: dec.scan.RuntimePath,
-					Source:      "supervisor",
-					Reason:      err.Error(),
-				}); journalErr != nil {
-					fmt.Fprintf(out, "queue: %s: journal spawn failure %s: %v\n", dec.Project, dec.TaskSetID, journalErr)
-				}
 				continue
 			}
 			if err := recordDrainPane(d, dec, spawn.PaneID, "supervisor"); err != nil {
 				fmt.Fprintf(out, "queue: %s: record drain pane %s: %v\n", dec.Project, dec.TaskSetID, err)
-			}
-			if err := AppendJournalEntry(d.Tasks, JournalEntry{
-				Event:       JournalEventSpawn,
-				Project:     dec.Project,
-				SetID:       dec.TaskSetID,
-				RuntimePath: dec.scan.RuntimePath,
-				Source:      "supervisor",
-			}); err != nil {
-				fmt.Fprintf(out, "queue: %s: journal spawn %s: %v\n", dec.Project, dec.TaskSetID, err)
 			}
 			fmt.Fprintf(out, "queue: %s: spawned drain for %s\n", dec.Project, dec.TaskSetID)
 		}
@@ -216,44 +191,16 @@ func canonicalCheckoutPath(d *tasks.Deps, path string) (string, error) {
 	return d.FS.EvalSymlinks(abs)
 }
 
-// ReconcileInFlight records open spawn entries for live runtime locks observed
-// when a supervisor starts after a restart.
-func ReconcileInFlight(d *Deps, cfg *config.Config) error {
-	decisions, err := Scan(d, cfg)
-	if err != nil {
-		return err
-	}
-	entries, err := ReadJournal(d.Tasks)
-	if err != nil {
-		return err
-	}
-	for _, dec := range decisions {
-		if !dec.Busy || dec.lockStatus == nil || dec.lockStatus.Metadata == nil || dec.lockStatus.Metadata.SetID == "" {
-			continue
-		}
-		meta := dec.lockStatus.Metadata
-		if journalHasOpenSpawn(entries, dec.Project, meta.RuntimePath, meta.SetID) {
-			continue
-		}
-		if err := AppendJournalEntry(d.Tasks, JournalEntry{
-			Event:       JournalEventSpawn,
-			Project:     dec.Project,
-			SetID:       meta.SetID,
-			RuntimePath: meta.RuntimePath,
-			PID:         meta.PID,
-			Source:      "reconcile",
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, eventLines *[]string) error {
-	entries, err := ReadJournal(d.Tasks)
-	if err != nil {
-		return err
-	}
+// recordPinnedQuotaCooldowns records the per-set pinned-agent quota cooldown for
+// any idle set whose latest terminal Drain quota-paused on a pinned agent. A
+// pinned set cannot fall back to another agent, so it must wait out the pinned
+// preset's reset; that wait is a daemon-state SetBackoff keyed by scoped key
+// (the agent-global cooldown in the store covers the fallback chain — a
+// different axis, ADR-0055/0056). The cooldown instant is derived from the
+// Drain's terminal (its reset instant, or its finish time plus the configured
+// retry-after) so re-observing the same terminal across ticks is idempotent: an
+// elapsed cooldown is never re-written, so it stops blocking the set.
+func recordPinnedQuotaCooldowns(d *Deps, cfg *config.Config, decisions []Decision) error {
 	qcfg, err := resolvedQueueConfig(cfg)
 	if err != nil {
 		return err
@@ -262,230 +209,40 @@ func recordTerminalOutcomes(d *Deps, cfg *config.Config, decisions []Decision, e
 	if err != nil {
 		return err
 	}
+	now := time.Now().UTC()
+	changed := false
 	for _, dec := range decisions {
 		if dec.Busy || dec.scan.RuntimePath == "" {
 			continue
 		}
-		runtimes := terminalOutcomeRuntimes(entries, dec)
-		for _, runtime := range runtimes {
-			rec, err := d.readOutcome(runtime.RuntimePath)
-			if err == nil && rec != nil && rec.SetID != "" {
-				if !journalHasOutcome(entries, dec.Project, rec.RuntimePath, rec.SetID, rec.Outcome, rec.WrittenAt) {
-					ts := rec.WrittenAt
-					entry := JournalEntry{
-						Timestamp:   ts,
-						Event:       JournalEventOutcome,
-						Project:     dec.Project,
-						SetID:       rec.SetID,
-						RuntimePath: rec.RuntimePath,
-						Outcome:     rec.Outcome,
-						PID:         rec.PID,
-					}
-					if err := AppendJournalEntry(d.Tasks, entry); err != nil {
-						return err
-					}
-					entries = append(entries, entry)
-					appendRunEvent(eventLines, formatOutcomeDelta(dec.Project, rec.SetID, rec.Outcome))
-					if err := applyTerminalOutcomeState(d, qcfg, dec.Project, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID, rec.Outcome, eventLines); err != nil {
-						return err
-					}
-					if rec.Outcome == tasks.DrainOutcomeDone && shouldRecordMergeability(d, runtime.WorkingPath, rec.RuntimePath) {
-						merge, err := d.computeMergeability(runtime.WorkingPath, rec.RuntimePath)
-						if err != nil {
-							return err
-						}
-						merge.Project = dec.Project
-						merge.RuntimePath = rec.RuntimePath
-						merge.SetID = rec.SetID
-						if err := recordMergeability(d, dec.scan.ProjectPath, merge); err != nil {
-							return err
-						}
-						mergeEvent := JournalEntry{
-							Event:       JournalEventMergeability,
-							Project:     dec.Project,
-							SetID:       rec.SetID,
-							RuntimePath: rec.RuntimePath,
-							MergeStatus: merge.Status,
-							Target:      merge.Target,
-							SourceRef:   merge.Source,
-							Source:      "supervisor",
-						}
-						if err := AppendJournalEntry(d.Tasks, mergeEvent); err != nil {
-							return err
-						}
-						entries = append(entries, mergeEvent)
-						if merge.Status == MergeabilityClean && autoMergeCleanEnabled(d, runtime.WorkingPath) {
-							scopedKey, err := scopedKeyForPaths(d, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID)
-							if err != nil {
-								return err
-							}
-							if _, err := integrateCleanSet(d, cfg, scopedKey, merge, io.Discard, "auto"); err != nil {
-								return err
-							}
-						}
-					}
-					if rec.Outcome == tasks.DrainOutcomeQuotaPaused && rec.ExhaustedPreset != "" {
-						until := agentQuotaCooldownUntil(rec.ExhaustedResetAt, time.Now().UTC(), qcfg.AgentQuotaRetryAfter)
-						if rec.ExhaustedPinned {
-							scopedKey, err := scopedKeyForPaths(d, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID)
-							if err != nil {
-								return err
-							}
-							if state.SetBackoffs == nil {
-								state.SetBackoffs = map[string]time.Time{}
-							}
-							state.SetBackoffs[scopedKey] = until
-						}
-						if err := WriteDaemonState(d.Tasks, state); err != nil {
-							return err
-						}
-						cooldown := JournalEntry{
-							Event:       JournalEventAgentCooldown,
-							Project:     dec.Project,
-							SetID:       rec.SetID,
-							RuntimePath: rec.RuntimePath,
-							Agent:       rec.ExhaustedPreset,
-							Reason:      "quota pause",
-							Until:       until,
-							Source:      "supervisor",
-						}
-						if err := AppendJournalEntry(d.Tasks, cooldown); err != nil {
-							return err
-						}
-						entries = append(entries, cooldown)
-					}
-				}
-			}
-		}
-		for _, entry := range entries {
-			if entry.Project != dec.Project || entry.RuntimePath != dec.scan.RuntimePath || entry.Event != JournalEventSpawn {
-				continue
-			}
-			if journalHasOpenSpawn(entries, entry.Project, entry.RuntimePath, entry.SetID) {
-				outcome := JournalEntry{
-					Event:       JournalEventOutcome,
-					Project:     entry.Project,
-					SetID:       entry.SetID,
-					RuntimePath: entry.RuntimePath,
-					Outcome:     DrainOutcomeCrashed,
-				}
-				if err := AppendJournalEntry(d.Tasks, outcome); err != nil {
-					return err
-				}
-				entries = append(entries, outcome)
-				appendRunEvent(eventLines, formatOutcomeDelta(entry.Project, entry.SetID, DrainOutcomeCrashed))
-				if err := applyTerminalOutcomeState(d, qcfg, entry.Project, dec.scan.ProjectPath, entry.RuntimePath, entry.SetID, DrainOutcomeCrashed, eventLines); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func shouldRecordMergeability(d *Deps, workingPath, runtimePath string) bool {
-	if strings.TrimSpace(workingPath) == "" || strings.TrimSpace(runtimePath) == "" {
-		return false
-	}
-	workingCanon, err := canonicalCheckoutPath(d.Tasks, workingPath)
-	if err != nil {
-		workingCanon = filepath.Clean(workingPath)
-	}
-	runtimeCanon, err := canonicalCheckoutPath(d.Tasks, runtimePath)
-	if err != nil {
-		runtimeCanon = filepath.Clean(runtimePath)
-	}
-	return workingCanon != runtimeCanon
-}
-
-type terminalRuntime struct {
-	RuntimePath string
-	WorkingPath string
-}
-
-func terminalOutcomeRuntimes(entries []JournalEntry, dec Decision) []terminalRuntime {
-	seen := map[string]bool{}
-	add := func(out *[]terminalRuntime, runtimePath string) {
-		if runtimePath == "" || seen[runtimePath] {
-			return
-		}
-		seen[runtimePath] = true
-		workingPath := dec.scan.ProjectPath
-		if workingPath == "" {
-			workingPath = dec.scan.RuntimePath
-		}
-		*out = append(*out, terminalRuntime{RuntimePath: runtimePath, WorkingPath: workingPath})
-	}
-	var out []terminalRuntime
-	add(&out, dec.scan.RuntimePath)
-	for _, entry := range entries {
-		if entry.Project != dec.Project || entry.Event != JournalEventSpawn || entry.RuntimePath == "" {
+		rec, err := d.readOutcome(dec.scan.RuntimePath)
+		if err != nil || rec == nil || rec.SetID == "" {
 			continue
 		}
-		if journalHasOpenSpawn(entries, entry.Project, entry.RuntimePath, entry.SetID) {
-			add(&out, entry.RuntimePath)
+		if rec.Outcome != tasks.DrainOutcomeQuotaPaused || !rec.ExhaustedPinned || rec.ExhaustedPreset == "" {
+			continue
 		}
+		until := agentQuotaCooldownUntil(rec.ExhaustedResetAt, rec.WrittenAt, qcfg.AgentQuotaRetryAfter)
+		if !until.After(now) {
+			continue
+		}
+		scopedKey, err := scopedKeyForPaths(d, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID)
+		if err != nil {
+			return err
+		}
+		if state.SetBackoffs == nil {
+			state.SetBackoffs = map[string]time.Time{}
+		}
+		if existing, ok := state.SetBackoffs[scopedKey]; ok && existing.Equal(until) {
+			continue
+		}
+		state.SetBackoffs[scopedKey] = until
+		changed = true
 	}
-	return out
-}
-
-func recordMergeability(d *Deps, projectPath string, rec MergeabilityRecord) error {
-	if rec.RuntimePath == "" || rec.SetID == "" {
-		return nil
+	if changed {
+		return WriteDaemonState(d.Tasks, state)
 	}
-	if rec.CheckedAt.IsZero() {
-		rec.CheckedAt = time.Now().UTC()
-	}
-	return integration.RecordMergeability(queueIntegrationDeps(d), projectPath, mergeabilityRecordToIntegration(rec))
-}
-
-func autoMergeCleanEnabled(d *Deps, repoRoot string) bool {
-	cfg, err := loadRepoConfig(d, repoRoot)
-	return err == nil && cfg.AutoMergeClean
-}
-
-// applyTerminalOutcomeState reacts to a Drain reaching a terminal. Backoff and
-// parking are no longer persisted — they are derived from the Drain history the
-// terminal just extended (ADR-0055), so a clean terminal needs no action (it
-// resets the consecutive-abnormal count for free) and an abnormal one needs no
-// counter bump. The supervisor's only durable side effect here is the run log:
-// it emits the park journal event and run-event line once, when this abnormal
-// terminal is the one that crosses the set into the parked state.
-func applyTerminalOutcomeState(d *Deps, qcfg config.ResolvedQueueConfig, project, projectPath, runtimePath, setID string, outcome tasks.DrainOutcome, eventLines *[]string) error {
-	if runtimePath == "" || setID == "" || !drainOutcomeAbnormal(outcome) {
-		return nil
-	}
-	repoCommonDir := scanRepoCommonDir(d, projectScan{ProjectPath: runtimePath})
-	if repoCommonDir == "" {
-		return nil
-	}
-	info, err := tasks.ReadSetBackoff(d.Tasks, repoCommonDir, setID)
-	if err != nil {
-		return err
-	}
-	parked, _ := setBackoffStatus(info, qcfg.CrashRetryDelays, time.Now().UTC())
-	// Park threshold = one past the schedule's length (every abnormal exhausts a
-	// delay; parking follows the last). Journal only on the crossing terminal so
-	// the run log records a single park event per parking episode.
-	if !parked || info.ConsecutiveAbnormal != len(qcfg.CrashRetryDelays)+1 {
-		return nil
-	}
-	appendRunEvent(eventLines, fmt.Sprintf("queue: %s: %s parked reason=%s", project, setID, "repeated abnormal drain exits"))
-	return AppendJournalEntry(d.Tasks, JournalEntry{
-		Event:       JournalEventSetParked,
-		Project:     project,
-		SetID:       setID,
-		RuntimePath: runtimePath,
-		Reason:      "repeated abnormal drain exits",
-		Source:      "supervisor",
-	})
-}
-
-func appendRunEvent(lines *[]string, line string) {
-	if lines == nil || line == "" {
-		return
-	}
-	*lines = append(*lines, line)
+	return nil
 }
 
 func agentQuotaCooldownUntil(resetAt, now time.Time, fallback time.Duration) time.Time {
