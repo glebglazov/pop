@@ -421,7 +421,7 @@ func dashboardRowsFromStatic(d *Deps, state *DaemonState, delays []time.Duration
 	for _, taskRow := range refresh.Rows {
 		merge, _ := mergeabilityForSet(d, st.repoKey, taskRow.ID)
 		// Integration-backlog membership is binding-driven, not gated on a
-		// recorded Mergeability (ADR-0051). bindings.json only ever holds
+		// recorded Mergeability (ADR-0051). The bindings table only ever holds
 		// non-trunk bindings — a trunk drain records none — so a Done set's
 		// having a binding is the backlog test; Mergeability is left-joined and
 		// renders as "unknown" when no record exists.

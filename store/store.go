@@ -119,6 +119,35 @@ var migrations = []string{
 		cleared_at TEXT NOT NULL
 	);
 	CREATE INDEX idx_park_clears_repo_set ON park_clears(repo, set_id);`,
+	// 5: bindings — the non-trunk Worktree bindings that are the Integration
+	// backlog's source (ADR-0051), keyed per (repository identity, set id) via the
+	// caller-built scoped key. The provisioned bit distinguishes a pop-provisioned
+	// (managed) checkout — torn down on integration/abandon — from an adopted one a
+	// human pointed at the set, which pop must never delete. This moves the binding
+	// store off the standalone bindings.json file into the global store (ADR-0055);
+	// the file's contents are migrated in at the tasks boundary on first read.
+	`CREATE TABLE bindings (
+		scoped_key   TEXT PRIMARY KEY,
+		runtime_path TEXT NOT NULL DEFAULT '',
+		branch       TEXT NOT NULL DEFAULT '',
+		project      TEXT NOT NULL DEFAULT '',
+		provisioned  INTEGER NOT NULL DEFAULT 0
+	);`,
+	// 6: integrations — the durable integration event {at, base_ref, branch_sha}.
+	// ADR-0055 kills "integrated = binding released": integration is now an
+	// explicit appended event, not inferred from a vanished binding. Append-only;
+	// the latest row for a set is its integration of record.
+	`CREATE TABLE integrations (
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		scoped_key    TEXT NOT NULL,
+		set_id        TEXT NOT NULL,
+		project       TEXT NOT NULL DEFAULT '',
+		integrated_at TEXT NOT NULL,
+		base_ref      TEXT NOT NULL DEFAULT '',
+		branch_sha    TEXT NOT NULL DEFAULT ''
+	);
+	CREATE INDEX idx_integrations_set    ON integrations(set_id);
+	CREATE INDEX idx_integrations_scoped ON integrations(scoped_key);`,
 }
 
 func (s *Store) migrate() error {

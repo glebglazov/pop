@@ -222,6 +222,9 @@ func integrateCleanRecord(d *Deps, cfg *config.Config, key string, rec Record, o
 	if err := mergeBranch(d, scan.RuntimePath, branch); err != nil {
 		return IntegrationResult{}, err
 	}
+	if err := recordIntegrationEvent(d, key, rec); err != nil {
+		return IntegrationResult{}, err
+	}
 	provisioned := bindingShouldTeardown(d.tasksDeps(), key)
 	if provisioned {
 		if err := teardownIntegratedBranch(d, scan.RuntimePath, rec.RuntimePath, branch); err != nil {
@@ -379,6 +382,9 @@ func integrateConflictingSet(d *Deps, cfg *config.Config, key string, rec Record
 		return result, nil
 	}
 
+	if err := recordIntegrationEvent(d, key, rec); err != nil {
+		return IntegrationResult{}, err
+	}
 	provisioned := bindingShouldTeardown(d.tasksDeps(), key)
 	if provisioned {
 		if err := teardownIntegratedBranch(d, scan.RuntimePath, rec.RuntimePath, branch); err != nil {
@@ -607,6 +613,22 @@ func teardownIntegratedBranch(d *Deps, workingPath, runtimePath, branch string) 
 
 func bindingShouldTeardown(td *tasks.Deps, key string) bool {
 	return binding.ShouldTeardown(td, key)
+}
+
+// recordIntegrationEvent appends the durable integration event for a set whose
+// branch just merged cleanly (ADR-0055). It is what makes "integrated" an
+// explicit, queryable fact rather than something inferred from the binding that
+// teardown is about to delete. BaseRef is the base the branch merged into and
+// BranchSHA the integrated branch's HEAD, as the Mergeability record observed
+// them, so the event carries the provenance of the merge.
+func recordIntegrationEvent(d *Deps, key string, rec Record) error {
+	return tasks.RecordIntegrationEvent(d.tasksDeps(), tasks.IntegrationEvent{
+		ScopedKey: key,
+		SetID:     rec.SetID,
+		Project:   rec.Project,
+		BaseRef:   rec.Target,
+		BranchSHA: rec.Source,
+	})
 }
 
 func shortRef(ref string) string {

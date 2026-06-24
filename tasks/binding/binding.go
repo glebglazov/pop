@@ -1,10 +1,13 @@
 // Package binding owns the Worktree binding model: the durable 1:1 association
 // between a Task set (within a Repository identity) and the checkout it drains
 // in. Bindings used to live in Queue daemon-private state (ADR-0031); ADR-0036
-// moves them into a shared per-repository drain store owned by this module so
+// moved them into a shared per-repository binding store, and ADR-0055 folds that
+// store into pop's global execution-state database (the `bindings` table) so
 // that both `pop queue run` (the AFK provisioner) and `pop tasks implement`
 // (the attended adopter) can read and write the same association without a
-// daemon process running.
+// daemon process running. This module wraps the store-backed accessors in its
+// own Store/Binding façade, so its callers are unchanged by the move off the
+// retired bindings.json file.
 //
 // The store keys bindings by Repository identity plus Task set identifier and
 // records, per binding, whether pop provisioned the checkout (`git worktree
@@ -14,10 +17,7 @@
 package binding
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -72,10 +72,12 @@ type Binding struct {
 	Provisioned bool `json:"provisioned,omitempty"`
 }
 
-// Store is the shared per-repository binding store. It is keyed by Repository
-// identity plus Task set identifier (the caller builds the key) and persists to
-// a single JSON file outside daemon-private state, readable and writable with
-// no daemon process running.
+// Store is the in-memory façade over the shared binding store. It is keyed by
+// Repository identity plus Task set identifier (the caller builds the key);
+// Load/Save back it onto the `bindings` table in pop's global execution-state
+// database (ADR-0055), readable and writable with no daemon process running. The
+// json tags are retained only so a legacy bindings.json can still be unmarshalled
+// during the one-time migration into the store.
 type Store struct {
 	Bindings map[string]Binding `json:"bindings,omitempty"`
 }
@@ -121,12 +123,6 @@ func (s *Store) ShouldTeardown(key string) bool {
 	return b.Provisioned // adopted=false → retain; provisioned=true → tear down
 }
 
-// StorePath returns the shared binding store file path. It lives beside the
-// per-repository Task storage root (pop's data dir), not inside daemon state.
-func StorePath(d *tasks.Deps) string {
-	return filepath.Join(filepath.Dir(tasks.TaskStorageRoot(d)), "bindings.json")
-}
-
 // ManagedWorktreesRoot returns the directory under which pop-provisioned
 // (managed) worktrees live: <pop data dir>/queue/worktrees. It is the single
 // fork-base layout shared by every explicit provisioner — the Queue, the Drain
@@ -136,33 +132,51 @@ func ManagedWorktreesRoot(d *tasks.Deps) string {
 	return filepath.Join(filepath.Dir(tasks.TaskStorageRoot(d)), "queue", "worktrees")
 }
 
-// Load reads the shared binding store. A missing file yields an empty store
-// rather than an error so callers need no daemon and no pre-seeding.
+// Load reads the shared binding store from the global execution-state database
+// (ADR-0055). A store that does not yet exist yields an empty Store; the retired
+// bindings.json is migrated into the store on first read and is never read here
+// directly. Callers need no daemon and no pre-seeding.
 func Load(d *tasks.Deps) (*Store, error) {
-	data, err := d.FS.ReadFile(StorePath(d))
-	if errors.Is(err, os.ErrNotExist) {
-		return &Store{}, nil
-	}
+	entries, err := tasks.LoadBindingEntries(d)
 	if err != nil {
 		return nil, err
 	}
-	var store Store
-	if err := json.Unmarshal(data, &store); err != nil {
-		return nil, fmt.Errorf("parse binding store: %w", err)
+	s := &Store{}
+	for key, e := range entries {
+		s.Put(key, bindingFromEntry(e))
 	}
-	return &store, nil
+	return s, nil
 }
 
-// Save writes the shared binding store atomically.
+// Save writes the shared binding store to the global execution-state database,
+// replacing every row in one transaction (ADR-0055).
 func Save(d *tasks.Deps, store *Store) error {
 	if store == nil {
 		store = &Store{}
 	}
-	payload, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
+	entries := make(map[string]tasks.BindingEntry, len(store.Bindings))
+	for key, b := range store.Bindings {
+		entries[key] = entryFromBinding(b)
 	}
-	return tasks.WriteAtomicWith(d, StorePath(d), append(payload, '\n'), 0o644)
+	return tasks.SaveBindingEntries(d, entries)
+}
+
+func bindingFromEntry(e tasks.BindingEntry) Binding {
+	return Binding{
+		RuntimePath: e.RuntimePath,
+		Branch:      e.Branch,
+		Project:     e.Project,
+		Provisioned: e.Provisioned,
+	}
+}
+
+func entryFromBinding(b Binding) tasks.BindingEntry {
+	return tasks.BindingEntry{
+		RuntimePath: b.RuntimePath,
+		Branch:      b.Branch,
+		Project:     b.Project,
+		Provisioned: b.Provisioned,
+	}
 }
 
 // Adopt builds an adopted binding record (Provisioned=false) for an existing
