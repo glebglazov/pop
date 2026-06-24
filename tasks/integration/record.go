@@ -223,7 +223,7 @@ func AwaitsIntegration(rec Record) bool {
 // ProjectForScopedKey returns the project label for a scoped store key by
 // consulting mergeability records and bindings.
 func ProjectForScopedKey(td *tasks.Deps, key string) string {
-	setID := setIDFromScopedKey(key)
+	setID := binding.SetIDFromKey(key)
 	store, err := Load(td)
 	if err == nil {
 		for _, rec := range store.Records {
@@ -236,7 +236,7 @@ func ProjectForScopedKey(td *tasks.Deps, key string) string {
 	for _, b := range bindings {
 		if b.Project != "" {
 			for k := range bindings {
-				if setIDFromScopedKey(k) == setID {
+				if binding.SetIDFromKey(k) == setID {
 					return b.Project
 				}
 			}

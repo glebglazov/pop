@@ -49,6 +49,18 @@ func Key(id *tasks.RepositoryIdentity, setID string) string {
 	return ScopedKey(RepoKey(id), setID)
 }
 
+// SetIDFromKey extracts the Task set identifier from a scoped store key built
+// by ScopedKey. It is the inverse of ScopedKey and returns "" for any key not
+// in scoped (repoKey + setID) form. This module owns the key shape, so it owns
+// the split too — callers must not re-derive it.
+func SetIDFromKey(key string) string {
+	parts := strings.Split(key, keySeparator)
+	if len(parts) != 2 {
+		return ""
+	}
+	return parts[1]
+}
+
 // Binding records the durable checkout associated with one Task set.
 type Binding struct {
 	RuntimePath string `json:"runtime_path"`

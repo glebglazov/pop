@@ -138,7 +138,7 @@ func recomputeMergeabilityFromBinding(d *Deps, setID string) (bool, error) {
 	var match *binding.Binding
 	var matchKey string
 	for k, b := range bindings {
-		if setIDFromScopedKey(k) != setID {
+		if binding.SetIDFromKey(k) != setID {
 			continue
 		}
 		if match != nil {

@@ -38,7 +38,11 @@ func queueIntegrateHooks(d *Deps) integration.IntegrateHooks {
 }
 
 func integrationJournalToQueue(e integration.JournalEntry) JournalEntry {
-	entry := JournalEntry{
+	// integration emits the same event-name strings the queue journal records
+	// (JournalEventIntegrated == "integrated", etc.), so the event copies across
+	// verbatim — no per-event mapping is needed.
+	return JournalEntry{
+		Event:       e.Event,
 		Project:     e.Project,
 		SetID:       e.SetID,
 		RuntimePath: e.RuntimePath,
@@ -49,21 +53,6 @@ func integrationJournalToQueue(e integration.JournalEntry) JournalEntry {
 		Agent:       e.Agent,
 		Reason:      e.Reason,
 	}
-	switch e.Event {
-	case "integrated":
-		entry.Event = JournalEventIntegrated
-	case "integration_conflict":
-		entry.Event = JournalEventIntegrationConflict
-	case "integration_attended":
-		entry.Event = JournalEventIntegrationAttended
-	case "integration_outcome":
-		entry.Event = JournalEventIntegrationOutcome
-	case "mergeability":
-		entry.Event = JournalEventMergeability
-	default:
-		entry.Event = e.Event
-	}
-	return entry
 }
 
 func mergeabilityRecordToIntegration(rec MergeabilityRecord) integration.Record {

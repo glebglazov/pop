@@ -197,11 +197,3 @@ func repoIdentityFromWorktreePath(path string) string {
 	}
 	return ""
 }
-
-func setIDFromScopedKey(key string) string {
-	parts := strings.Split(key, "\x00")
-	if len(parts) != 2 {
-		return ""
-	}
-	return parts[1]
-}

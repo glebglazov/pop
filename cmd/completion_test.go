@@ -242,9 +242,9 @@ func TestTaskIntegrateShellCompletionCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prev := taskIntegrationCompletionDeps
-	taskIntegrationCompletionDeps = func() *queue.Deps { return &queue.Deps{Tasks: td} }
-	t.Cleanup(func() { taskIntegrationCompletionDeps = prev })
+	prev := taskCompletionDeps
+	taskCompletionDeps = func() *tasks.Deps { return td }
+	t.Cleanup(func() { taskCompletionDeps = prev })
 
 	out := shellCompNoDesc(t, "tasks", "integrate")
 	assertShellCompContains(t, out, "set-ready", "set-conflict")
@@ -271,9 +271,9 @@ func TestTasksUnbindWorktreeShellCompletionCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prev := taskIntegrationCompletionDeps
-	taskIntegrationCompletionDeps = func() *queue.Deps { return &queue.Deps{Tasks: td} }
-	t.Cleanup(func() { taskIntegrationCompletionDeps = prev })
+	prev := taskCompletionDeps
+	taskCompletionDeps = func() *tasks.Deps { return td }
+	t.Cleanup(func() { taskCompletionDeps = prev })
 
 	out := shellCompNoDesc(t, "tasks", "unbind-worktree")
 	assertShellCompContains(t, out, "set-bound", "set-other")

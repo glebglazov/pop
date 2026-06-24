@@ -166,14 +166,14 @@ func blockedItemFromIdle(idle IdleProject, td *tasks.Deps, state *DaemonState) B
 		}
 		for key, until := range state.SetCrashBackoffs {
 			if projectMatchesScopedKey(td, state, idle.Project, key) {
-				item.SetID = setIDFromScopedKey(key)
+				item.SetID = binding.SetIDFromKey(key)
 				item.Until = until
 				return item
 			}
 		}
 		for key, until := range state.SetBackoffs {
 			if projectMatchesScopedKey(td, state, idle.Project, key) {
-				item.SetID = setIDFromScopedKey(key)
+				item.SetID = binding.SetIDFromKey(key)
 				item.Until = until
 				return item
 			}
@@ -272,7 +272,7 @@ func projectMatchesScopedKey(td *tasks.Deps, state *DaemonState, project, key st
 }
 
 func projectSetFromScopedKey(td *tasks.Deps, state *DaemonState, key string) (project, setID string) {
-	setID = setIDFromScopedKey(key)
+	setID = binding.SetIDFromKey(key)
 	if p := projectForScopedKey(td, state, key); p != "" {
 		return p, setID
 	}
@@ -283,7 +283,7 @@ func projectSetFromScopedKey(td *tasks.Deps, state *DaemonState, key string) (pr
 }
 
 func projectForScopedKey(td *tasks.Deps, state *DaemonState, key string) string {
-	setID := setIDFromScopedKey(key)
+	setID := binding.SetIDFromKey(key)
 	bindings, _ := binding.AllBindings(td)
 	if state != nil {
 		for _, b := range bindings {
@@ -311,14 +311,6 @@ func projectForScopedKey(td *tasks.Deps, state *DaemonState, key string) string 
 		}
 	}
 	return ""
-}
-
-func setIDFromScopedKey(key string) string {
-	parts := strings.Split(key, "\x00")
-	if len(parts) != 2 {
-		return ""
-	}
-	return parts[1]
 }
 
 func formatQueueWorkSummary(view RunView) string {
@@ -536,7 +528,7 @@ func buildWorktreeBindingViews(d *tasks.Deps, state *DaemonState, view RunView) 
 	items := make([]WorktreeBindingView, 0, len(keys))
 	for _, key := range keys {
 		b := bindings[key]
-		setID := setIDFromScopedKey(key)
+		setID := binding.SetIDFromKey(key)
 		project := b.Project
 		if project == "" {
 			project = projectForScopedKey(d, state, key)

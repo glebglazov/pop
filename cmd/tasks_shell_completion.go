@@ -5,16 +5,15 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/completion"
 	"github.com/spf13/cobra"
 )
 
 var (
-	taskCompletionDeps            = func() *tasks.Deps { return tasks.DefaultDeps() }
-	taskCompletionProjectDeps     = func() *project.Deps { return project.DefaultDeps() }
-	taskCompletionConfigLoad      = func(path string) (*config.Config, error) { return config.Load(path) }
-	taskIntegrationCompletionDeps = func() *queue.Deps { return queue.DefaultDeps() }
+	taskCompletionDeps        = func() *tasks.Deps { return tasks.DefaultDeps() }
+	taskCompletionProjectDeps = func() *project.Deps { return project.DefaultDeps() }
+	taskCompletionConfigLoad  = func(path string) (*config.Config, error) { return config.Load(path) }
 )
 
 func init() {
@@ -85,7 +84,7 @@ func completeTaskIntegrateArgs(cmd *cobra.Command, args []string, toComplete str
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	ids, err := queue.CompleteIntegrationSetIDs(taskIntegrationCompletionDeps())
+	ids, err := completion.IntegrationSetIDs(taskCompletionDeps())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -96,7 +95,7 @@ func completeTaskBindWorktreeArgs(cmd *cobra.Command, args []string, toComplete 
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	ids, err := queue.CompleteBindWorktreeSetIDs(taskIntegrationCompletionDeps())
+	ids, err := completion.BindWorktreeSetIDs(taskCompletionDeps())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -107,7 +106,7 @@ func completeTaskUnbindWorktreeArgs(cmd *cobra.Command, args []string, toComplet
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	ids, err := queue.CompleteAbandonSetIDs(taskIntegrationCompletionDeps())
+	ids, err := completion.AbandonSetIDs(taskCompletionDeps())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
