@@ -53,7 +53,15 @@ type PaneMonitoringConfig struct {
 	// normalized JSON payload to on stdin; its stdout becomes the pane's Topic.
 	// Empty means topics fall back to built-in prompt truncation (ADR 0024).
 	TopicCommand string `toml:"topic_command"`
+	// TopicWords bounds the word count of a derived Topic after it is normalized
+	// into a kebab slug (ADR 0057). Zero/unset means the default
+	// (DefaultTopicWords); see PaneMonitoringTopicWords.
+	TopicWords int `toml:"topic_words"`
 }
+
+// DefaultTopicWords is the word cap applied to a derived Topic slug when
+// [pane_monitoring] topic_words is unset.
+const DefaultTopicWords = 5
 
 // DashboardConfig holds dashboard-specific configuration
 type DashboardConfig struct {
@@ -719,6 +727,15 @@ func (c *Config) PaneMonitoringTopicCommand() string {
 		return ""
 	}
 	return c.PaneMonitoring.TopicCommand
+}
+
+// PaneMonitoringTopicWords returns the word cap applied to a derived Topic slug,
+// defaulting to DefaultTopicWords when unset or non-positive.
+func (c *Config) PaneMonitoringTopicWords() int {
+	if c.PaneMonitoring == nil || c.PaneMonitoring.TopicWords < 1 {
+		return DefaultTopicWords
+	}
+	return c.PaneMonitoring.TopicWords
 }
 
 // DashboardZoomOnSwitch reports whether selecting a pane from the dashboard

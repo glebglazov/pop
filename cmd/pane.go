@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/glebglazov/pop/config"
@@ -622,7 +623,9 @@ pi, opencode); each agent's prompt-submit hook delivers the prompt differently,
 so the label selects the matching payload adapter. By default the user's prompt
 is truncated; when [pane_monitoring] topic_command is configured, the prompt is
 piped to that command as a normalized JSON payload and its stdout becomes the
-topic. A missing/unparseable payload, an agent whose hook exposes no prompt
+topic. Either way the result is normalized into a lowercase kebab slug of at
+most [pane_monitoring] topic_words words (default 5; ADR 0057) before it is
+written. A missing/unparseable payload, an agent whose hook exposes no prompt
 text, or a command failure is a no-op and never clobbers an existing topic.
 
 Derive runs once per pane (ADR 0025): a pane whose @pop_topic is already
@@ -730,10 +733,14 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 		return "", "", false
 	}
 
+	// The Topic format is a pop-owned contract (ADR 0057): whatever the derive
+	// path produces is normalized into a kebab slug before it reaches @pop_topic.
+	maxWords := cfg.PaneMonitoringTopicWords()
+
 	command := cfg.PaneMonitoringTopicCommand()
 	if command == "" {
 		// No command configured: slice-02 truncation path.
-		topic = truncateTopic(prompt)
+		topic = slugifyTopic(truncateTopic(prompt), maxWords)
 		if topic == "" {
 			return "", "", false
 		}
@@ -756,7 +763,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 	defer cancel()
 	out, err := run(ctx, command, payload)
 	if err == nil {
-		if derived := capTopic(out); derived != "" {
+		if derived := slugifyTopic(capTopic(out), maxWords); derived != "" {
 			return paneID, derived, true
 		}
 		debug.Log("pane set-topic --derive: topic_command produced empty output")
@@ -767,7 +774,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 	// Command failed, timed out, or produced nothing usable. prevTopic is empty
 	// here (the once-guard above returns early otherwise), so fall back to
 	// truncation; that truncated Topic then freezes the pane.
-	topic = truncateTopic(prompt)
+	topic = slugifyTopic(truncateTopic(prompt), maxWords)
 	if topic == "" {
 		return "", "", false
 	}
@@ -903,6 +910,26 @@ const (
 	topicMaxChars       = 60
 	topicCommandTimeout = 5 * time.Second
 )
+
+// slugifyTopic normalizes derived Topic text into pop's canonical format (ADR
+// 0057): a lowercase kebab slug of at most maxWords words. It lowercases, treats
+// every non-alphanumeric rune (punctuation and whitespace alike) as a separator
+// so extra spacing collapses, keeps the first maxWords words, and joins them
+// with "-". Empty, whitespace-only, or punctuation-only input yields "". This is
+// the single normalizer reused by the derive path here and by later slices
+// (recipe output, drain pre-seed), so it is a standalone function.
+func slugifyTopic(text string, maxWords int) string {
+	if maxWords < 1 {
+		maxWords = 1
+	}
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	if len(words) > maxWords {
+		words = words[:maxWords]
+	}
+	return strings.Join(words, "-")
+}
 
 // truncateTopic collapses whitespace and trims the prompt to the first
 // ~topicMaxWords words / ~topicMaxChars runes, appending an ellipsis when it

@@ -458,6 +458,63 @@ func TestTruncateTopic(t *testing.T) {
 	}
 }
 
+// TestSlugifyTopic exercises the normalizer in isolation (ADR 0057): lowercase,
+// punctuation stripping, whitespace collapse, the word cap, and empty inputs.
+func TestSlugifyTopic(t *testing.T) {
+	cases := []struct {
+		name     string
+		text     string
+		maxWords int
+		want     string
+	}{
+		{"lowercases and joins with dashes", "Debugging Auth Middleware", 5, "debugging-auth-middleware"},
+		{"strips punctuation", "Fix: the (auth) bug!", 5, "fix-the-auth-bug"},
+		{"collapses extra whitespace", "fix   the\t\nbug", 5, "fix-the-bug"},
+		{"caps at max words", "one two three four five six seven", 5, "one-two-three-four-five"},
+		{"fewer than max words passes through", "fix the bug", 5, "fix-the-bug"},
+		{"keeps digits", "issue 42 retry logic", 5, "issue-42-retry-logic"},
+		{"empty input yields empty", "", 5, ""},
+		{"whitespace-only yields empty", "   \n\t ", 5, ""},
+		{"punctuation-only yields empty", "!?-.,", 5, ""},
+		{"punctuation between words splits them", "auth-middleware bug", 5, "auth-middleware-bug"},
+		{"non-positive max words clamps to one", "alpha beta gamma", 0, "alpha"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := slugifyTopic(tc.text, tc.maxWords); got != tc.want {
+				t.Errorf("slugifyTopic(%q, %d) = %q, want %q", tc.text, tc.maxWords, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeriveTopic_TopicWordsBound confirms the configured topic_words bounds the
+// derived slug through the full derive path, and that the default (5) applies
+// when the knob is unset.
+func TestDeriveTopic_TopicWordsBound(t *testing.T) {
+	t.Setenv("TMUX_PANE", "%env")
+	failRun := func(context.Context, string, []byte) (string, error) {
+		t.Fatal("command runner must not be called without topic_command")
+		return "", nil
+	}
+	payload := `{"prompt":"alpha beta gamma delta epsilon zeta eta"}`
+
+	t.Run("default caps at 5 words", func(t *testing.T) {
+		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, &config.Config{}, "claude", noPrevTopic, failRun)
+		if !ok || topic != "alpha-beta-gamma-delta-epsilon" {
+			t.Errorf("got topic=%q ok=%v", topic, ok)
+		}
+	})
+
+	t.Run("topic_words bounds the slug", func(t *testing.T) {
+		cfg := &config.Config{PaneMonitoring: &config.PaneMonitoringConfig{TopicWords: 2}}
+		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noPrevTopic, failRun)
+		if !ok || topic != "alpha-beta" {
+			t.Errorf("got topic=%q ok=%v", topic, ok)
+		}
+	})
+}
+
 // TestDeriveTopic_Truncation covers the no-command (slice 02) derive path:
 // pane id resolution, truncation, and no-op on bad/empty input. With no
 // topic_command set, the command runner and prev-topic lookup are never used.
@@ -469,7 +526,7 @@ func TestDeriveTopic_Truncation(t *testing.T) {
 		return "", nil
 	}
 
-	t.Run("derives truncated topic with env pane", func(t *testing.T) {
+	t.Run("derives normalized slug with env pane", func(t *testing.T) {
 		payload := `{"prompt":"one two three four five six seven eight nine"}`
 		pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noPrevTopic, failRun)
 		if !ok {
@@ -478,7 +535,8 @@ func TestDeriveTopic_Truncation(t *testing.T) {
 		if pane != "%env" {
 			t.Errorf("pane = %q", pane)
 		}
-		if topic != "one two three four five six seven eight…" {
+		// Slug caps at topic_words (default 5), so only the first five words land.
+		if topic != "one-two-three-four-five" {
 			t.Errorf("topic = %q", topic)
 		}
 	})
@@ -515,7 +573,7 @@ func TestDeriveTopic_Command(t *testing.T) {
 			return "auth refactor\n", nil
 		}
 		pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", noPrevTopic, run)
-		if !ok || pane != "%env" || topic != "auth refactor" {
+		if !ok || pane != "%env" || topic != "auth-refactor" {
 			t.Errorf("got pane=%q topic=%q ok=%v", pane, topic, ok)
 		}
 	})
@@ -569,16 +627,18 @@ func TestDeriveTopic_Command(t *testing.T) {
 		}
 	})
 
-	t.Run("caps long command output", func(t *testing.T) {
+	t.Run("normalizes long command output into a slug", func(t *testing.T) {
+		// capTopic truncates at the char cap (with an ellipsis); slugifyTopic then
+		// drops the punctuation, so the final Topic is a clean slug with no
+		// ellipsis and no run over the char cap.
 		long := strings.Repeat("a", topicMaxChars+10)
 		run := func(_ context.Context, _ string, _ []byte) (string, error) { return long, nil }
 		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", noPrevTopic, run)
 		if !ok {
 			t.Fatal("expected ok")
 		}
-		body := strings.TrimSuffix(topic, "…")
-		if len([]rune(body)) > topicMaxChars || !strings.HasSuffix(topic, "…") {
-			t.Errorf("topic = %q not capped", topic)
+		if strings.ContainsRune(topic, '…') || len([]rune(topic)) > topicMaxChars {
+			t.Errorf("topic = %q not normalized/capped", topic)
 		}
 	})
 
@@ -599,9 +659,9 @@ func TestDeriveTopic_Command(t *testing.T) {
 			}
 		})
 
-		t.Run("falls back to truncation with no previous topic on "+fc.name, func(t *testing.T) {
+		t.Run("falls back to a normalized truncation slug with no previous topic on "+fc.name, func(t *testing.T) {
 			pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", noPrevTopic, fc.run)
-			if !ok || pane != "%env" || topic != "refactor the auth layer" {
+			if !ok || pane != "%env" || topic != "refactor-the-auth-layer" {
 				t.Errorf("got pane=%q topic=%q ok=%v on %s", pane, topic, ok, fc.name)
 			}
 		})

@@ -3038,3 +3038,42 @@ display_depth = "two"
 		})
 	}
 }
+
+// TestPaneMonitoringTopicWords verifies the topic_words knob parses, defaults to
+// DefaultTopicWords when unset/non-positive, and otherwise reports its value.
+func TestPaneMonitoringTopicWords(t *testing.T) {
+	t.Run("parses configured value", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		os.WriteFile(configPath, []byte("[pane_monitoring]\ntopic_words = 3\n"), 0644)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if got := cfg.PaneMonitoringTopicWords(); got != 3 {
+			t.Errorf("PaneMonitoringTopicWords() = %d, want 3", got)
+		}
+	})
+
+	t.Run("defaults to 5 when unset", func(t *testing.T) {
+		if got := (&Config{}).PaneMonitoringTopicWords(); got != DefaultTopicWords {
+			t.Errorf("PaneMonitoringTopicWords() = %d, want %d", got, DefaultTopicWords)
+		}
+		cfg := &Config{PaneMonitoring: &PaneMonitoringConfig{}}
+		if got := cfg.PaneMonitoringTopicWords(); got != DefaultTopicWords {
+			t.Errorf("PaneMonitoringTopicWords() = %d, want %d", got, DefaultTopicWords)
+		}
+	})
+
+	t.Run("non-positive falls back to default", func(t *testing.T) {
+		cfg := &Config{PaneMonitoring: &PaneMonitoringConfig{TopicWords: 0}}
+		if got := cfg.PaneMonitoringTopicWords(); got != DefaultTopicWords {
+			t.Errorf("PaneMonitoringTopicWords() = %d, want %d", got, DefaultTopicWords)
+		}
+		cfg = &Config{PaneMonitoring: &PaneMonitoringConfig{TopicWords: -2}}
+		if got := cfg.PaneMonitoringTopicWords(); got != DefaultTopicWords {
+			t.Errorf("PaneMonitoringTopicWords() = %d, want %d", got, DefaultTopicWords)
+		}
+	})
+}
