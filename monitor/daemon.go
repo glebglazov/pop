@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/internal/deps"
 )
 
 const pollInterval = 5 * time.Second
@@ -100,10 +100,6 @@ func RunDaemonWith(d *Deps, statePath, pidPath, addr string, handler RequestHand
 }
 
 func pollOnce(d *Deps, statePath string) {
-	pollOnceWith(d, statePath, liveTmuxPanes)
-}
-
-func pollOnceWith(d *Deps, statePath string, livePanesFunc func() map[string]bool) {
 	state, err := LoadWith(d, statePath)
 	if err != nil {
 		debug.Error("pollOnce: load state: %v", err)
@@ -116,7 +112,7 @@ func pollOnceWith(d *Deps, statePath string, livePanesFunc func() map[string]boo
 	}
 
 	changed := false
-	livePanes := livePanesFunc()
+	livePanes := liveTmuxPanes(d.Tmux)
 	if livePanes == nil {
 		// tmux list-panes failed — can't determine which panes are alive.
 		// Bail out rather than treating every registered pane as dead.
@@ -139,15 +135,18 @@ func pollOnceWith(d *Deps, statePath string, livePanesFunc func() map[string]boo
 	}
 }
 
-// liveTmuxPanes returns the set of pane IDs that exist across all sessions
-func liveTmuxPanes() map[string]bool {
-	out, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}").Output()
+// liveTmuxPanes returns the set of pane IDs that exist across all sessions.
+// On tmux failure it returns nil (not an empty set) so the poll loop can
+// distinguish "couldn't determine liveness" from "no panes alive" and skip
+// pruning — guarding against a tmux hiccup deregistering every pane.
+func liveTmuxPanes(tmux deps.Tmux) map[string]bool {
+	out, err := tmux.Command("list-panes", "-a", "-F", "#{pane_id}")
 	if err != nil {
 		debug.Error("liveTmuxPanes: %v", err)
 		return nil
 	}
 	panes := make(map[string]bool)
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		if line != "" {
 			panes[line] = true
 		}

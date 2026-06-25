@@ -80,13 +80,15 @@ type State struct {
 
 // Deps holds external dependencies for the monitor package
 type Deps struct {
-	FS deps.FileSystem
+	FS   deps.FileSystem
+	Tmux deps.Tmux
 }
 
 // DefaultDeps returns dependencies using real implementations
 func DefaultDeps() *Deps {
 	return &Deps{
-		FS: deps.NewRealFileSystem(),
+		FS:   deps.NewRealFileSystem(),
+		Tmux: deps.NewRealTmux(),
 	}
 }
 

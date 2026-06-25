@@ -190,6 +190,7 @@ func buildTaskSetRow(reg RegisteredTaskSet, m *Manifest, regIndex int) Row {
 		PriorityShow: fmt.Sprintf("%d", reg.Priority),
 		AutoDrain:    reg.AutoDrain,
 		RegIndex:     regIndex,
+		Started:      anyDone(m),
 	}
 
 	row.Progress = BuildProgress(m, status)
@@ -275,7 +276,7 @@ func formatTable(rows []Row) string {
 func formatTableWithOutput(out *output, rows []Row) string {
 	const (
 		idW     = 28
-		stW     = 10
+		stW     = 11 // widest label is "IN PROGRESS" (11), edging out "UNVERIFIED"
 		prW     = 5
 		detailW = 96
 	)
@@ -293,11 +294,11 @@ func formatTableWithOutput(out *output, rows []Row) string {
 		if row.RunTarget {
 			id = "▶ " + id
 		}
-		line := fmt.Sprintf("%-*s  %-*s  %-*s  %s", idW, id, stW, string(row.Status), prW, row.PriorityShow, detail)
+		line := fmt.Sprintf("%-*s  %-*s  %-*s  %s", idW, id, stW, StatusLabel(row), prW, row.PriorityShow, detail)
 		if row.RunTarget {
 			line = out.styled(ansiBold+ansiCyan, line)
 		} else {
-			line = out.styled(statusStyle(row.Status), line)
+			line = out.styled(rowStatusStyle(row), line)
 		}
 		fmt.Fprintln(&b, line)
 	}

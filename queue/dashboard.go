@@ -28,9 +28,15 @@ const dashboardPollInterval = 2 * time.Second
 
 // DashboardRow is one read-only Queue dashboard table row.
 type DashboardRow struct {
-	Project   string
-	SetID     string
-	Status    string
+	Project string
+	SetID   string
+	// Status is the rendered display label (e.g. "IN PROGRESS", "DONE · merged").
+	// Logic that needs the schedulability fact must read RawStatus, never parse
+	// this string.
+	Status string
+	// RawStatus is the underlying derived Task-set status, kept for counts and
+	// comparisons so display relabels never leak into logic.
+	RawStatus tasks.TaskSetStatus
 	Worktree  string
 	Drain     string
 	AutoDrain bool
@@ -451,11 +457,12 @@ func dashboardRowsFromStatic(d *Deps, state *DaemonState, delays []time.Duration
 				}
 			}
 		}
-		status := dashboardStatus(taskRow.Status, merge, awaitingIntegration)
+		status := dashboardStatus(taskRow, merge, awaitingIntegration)
 		rows = append(rows, DashboardRow{
 			Project:            st.projectName,
 			SetID:              taskRow.ID,
 			Status:             status,
+			RawStatus:          taskRow.Status,
 			Worktree:           wt.label,
 			Drain:              drain,
 			AutoDrain:          taskRow.AutoDrain,
@@ -489,9 +496,9 @@ func staticProjectPath(st dashboardRepoStatic) string {
 	return st.rep.ProjectPath
 }
 
-func dashboardStatus(status tasks.TaskSetStatus, rec MergeabilityRecord, awaitingIntegration bool) string {
-	if status != tasks.StatusDone || !awaitingIntegration {
-		return string(status)
+func dashboardStatus(row tasks.Row, rec MergeabilityRecord, awaitingIntegration bool) string {
+	if row.Status != tasks.StatusDone || !awaitingIntegration {
+		return tasks.StatusLabel(row)
 	}
 	switch rec.Status {
 	case MergeabilityClean, MergeabilityConflicts:
@@ -2392,7 +2399,7 @@ func dashboardSummary(rows []DashboardRow) string {
 	autoDrain := 0
 	integration := 0
 	for _, row := range rows {
-		if row.Status == string(tasks.StatusReady) {
+		if row.RawStatus == tasks.StatusReady {
 			ready++
 		}
 		if strings.TrimSpace(row.Drain) != "" {
@@ -2457,13 +2464,15 @@ func renderDetailContent(b *strings.Builder, d *detailView, height int) {
 	taskRow := d.taskRow
 
 	status := tasks.DeriveStatus(manifest)
+	label := string(status)
 	progress := ""
 	if taskRow != nil {
 		status = taskRow.Status
+		label = tasks.StatusLabel(*taskRow)
 		progress = taskRow.Progress
 	}
 
-	header := fmt.Sprintf("Task · %s  [%s]", d.row.SetID, status)
+	header := fmt.Sprintf("Task · %s  [%s]", d.row.SetID, label)
 	if progress != "" {
 		header += "  " + progress
 	}

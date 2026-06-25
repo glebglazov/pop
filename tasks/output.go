@@ -13,6 +13,7 @@ const (
 	ansiRed    = "\033[31m"
 	ansiGreen  = "\033[32m"
 	ansiYellow = "\033[33m"
+	ansiBlue   = "\033[34m"
 	ansiCyan   = "\033[36m"
 )
 
@@ -51,6 +52,16 @@ func (o *output) styled(style, text string) string {
 
 func (o *output) line(style, format string, args ...any) {
 	fmt.Fprintln(o, o.styled(style, fmt.Sprintf(format, args...)))
+}
+
+// rowStatusStyle colors a row by its display label. An In-Progress row (a
+// started Ready set) renders blue to distinguish it from a fresh Ready set
+// (cyan); every other row defers to its derived status color.
+func rowStatusStyle(r Row) string {
+	if r.Status == StatusReady && r.Started {
+		return ansiBlue
+	}
+	return statusStyle(r.Status)
 }
 
 func statusStyle(status TaskSetStatus) string {

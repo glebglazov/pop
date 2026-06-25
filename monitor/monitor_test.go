@@ -663,12 +663,16 @@ func TestPollOnce_NilLivePanesPreservesPanes(t *testing.T) {
 			},
 			MkdirAllFunc: func(string, os.FileMode) error { return nil },
 		},
+		// Simulate tmux failure through the seam: Command returns an error,
+		// which liveTmuxPanes maps to nil so the poll loop skips pruning.
+		Tmux: &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				return "", fmt.Errorf("tmux unavailable")
+			},
+		},
 	}
 
-	// Simulate tmux failure: livePanesFunc returns nil
-	pollOnceWith(d, "/test/monitor.json", func() map[string]bool {
-		return nil
-	})
+	pollOnce(d, "/test/monitor.json")
 
 	// Reload state and verify panes are untouched
 	reloaded, err := LoadWith(d, "/test/monitor.json")
@@ -721,12 +725,16 @@ func TestPollOnce_DeadPanesRemoved(t *testing.T) {
 			},
 			MkdirAllFunc: func(string, os.FileMode) error { return nil },
 		},
+		// Only %1 is alive; %2 and %3 are dead. list-panes returns just %1
+		// through the seam.
+		Tmux: &deps.MockTmux{
+			CommandFunc: func(args ...string) (string, error) {
+				return "%1", nil
+			},
+		},
 	}
 
-	// Only %1 is alive; %2 and %3 are dead
-	pollOnceWith(d, "/test/monitor.json", func() map[string]bool {
-		return map[string]bool{"%1": true}
-	})
+	pollOnce(d, "/test/monitor.json")
 
 	reloaded, err := LoadWith(d, "/test/monitor.json")
 	if err != nil {

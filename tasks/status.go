@@ -24,6 +24,10 @@ const (
 type Row struct {
 	ID               string
 	Status           TaskSetStatus
+	// Started reports that the set already has at least one done task. With a
+	// Ready status it refines the display label to "IN PROGRESS" (render-only,
+	// see StatusLabel); it never affects schedulability.
+	Started          bool
 	Priority         int
 	PriorityShow     string
 	AutoDrain        bool
@@ -43,6 +47,30 @@ type Row struct {
 	RegIndex    int
 	NextPick    bool
 	RunTarget   bool
+}
+
+// StatusLabel returns a row's display label. A started Ready set (one that
+// already has a done task) is shown as "IN PROGRESS" — a presentational
+// refinement of READY, not a derived status: scheduling and summary logic key
+// on Status, never on this label. Every other row shows its raw status.
+func StatusLabel(r Row) string {
+	if r.Status == StatusReady && r.Started {
+		return "IN PROGRESS"
+	}
+	return string(r.Status)
+}
+
+// anyDone reports whether the manifest has at least one done task.
+func anyDone(m *Manifest) bool {
+	if m == nil {
+		return false
+	}
+	for _, task := range m.Tasks {
+		if task.Status == "done" {
+			return true
+		}
+	}
+	return false
 }
 
 // DeriveStatus computes Task-set status from manifest validation.
