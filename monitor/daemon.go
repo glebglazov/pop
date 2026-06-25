@@ -100,18 +100,6 @@ func RunDaemonWith(d *Deps, statePath, pidPath, addr string, handler RequestHand
 }
 
 func pollOnce(d *Deps, statePath string) {
-	state, err := LoadWith(d, statePath)
-	if err != nil {
-		debug.Error("pollOnce: load state: %v", err)
-		fmt.Fprintf(os.Stderr, "Failed to load state: %v\n", err)
-		return
-	}
-
-	if len(state.Panes) == 0 {
-		return
-	}
-
-	changed := false
 	livePanes := liveTmuxPanes(d.Tmux)
 	if livePanes == nil {
 		// tmux list-panes failed — can't determine which panes are alive.
@@ -119,19 +107,9 @@ func pollOnce(d *Deps, statePath string) {
 		return
 	}
 
-	for paneID, entry := range state.Panes {
-		if !livePanes[paneID] {
-			debug.Log("[monitor] %s (session=%s): deregistered (pane dead)", paneID, entry.Session)
-			delete(state.Panes, paneID)
-			changed = true
-		}
-	}
-
-	if changed {
-		if err := state.SaveWith(d); err != nil {
-			debug.Error("pollOnce: save state: %v", err)
-			fmt.Fprintf(os.Stderr, "Failed to save state: %v\n", err)
-		}
+	if _, err := NewStore(statePath, d).Prune(livePanes); err != nil {
+		debug.Error("pollOnce: prune state: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to prune state: %v\n", err)
 	}
 }
 

@@ -369,8 +369,8 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 
 func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", SetID: "set", Status: "READY", Worktree: "main", Drain: "picked up", AutoDrain: true, cursorKey: "pop\x00set"},
-		{Project: "pop", SetID: "done", Status: "DONE · clean", Worktree: "main", integrationBacklog: true, cursorKey: "pop\x00done"},
+		{Project: "pop", SetID: "set", Status: "READY", RawStatus: tasks.StatusReady, Worktree: "main", Drain: "picked up", AutoDrain: true, cursorKey: "pop\x00set"},
+		{Project: "pop", SetID: "done", Status: "DONE · clean", RawStatus: tasks.StatusDone, Worktree: "main", integrationBacklog: true, cursorKey: "pop\x00done"},
 	}})
 	m.width = 120
 	m.height = 8

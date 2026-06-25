@@ -89,6 +89,29 @@ func (s *Store) Remove(paneID string) error {
 	return state.SaveWith(s.deps)
 }
 
+// Prune removes every tracked pane absent from live in a single load/save and
+// returns the count removed. Unlike a loop over Remove (which saves per call),
+// the per-tick deregistration stays one atomic write. Nothing to remove means
+// no save.
+func (s *Store) Prune(live map[string]bool) (int, error) {
+	state, err := LoadWith(s.deps, s.path)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for paneID, entry := range state.Panes {
+		if !live[paneID] {
+			debug.Log("[monitor] %s (session=%s): deregistered (pane dead)", paneID, entry.Session)
+			delete(state.Panes, paneID)
+			removed++
+		}
+	}
+	if removed == 0 {
+		return 0, nil
+	}
+	return removed, state.SaveWith(s.deps)
+}
+
 // RecordVisit updates a tracked pane's LastActiveAt to now without changing
 // status. Untracked panes are silently ignored (never auto-register).
 func (s *Store) RecordVisit(paneID string) error {

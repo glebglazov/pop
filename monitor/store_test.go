@@ -232,6 +232,93 @@ func TestStore_Remove(t *testing.T) {
 	})
 }
 
+func TestStore_Prune(t *testing.T) {
+	t.Run("removes multiple dead panes in one save", func(t *testing.T) {
+		d, saved := mockStoreDeps(map[string]*PaneEntry{
+			"%1": {PaneID: "%1", Session: "proj"},
+			"%2": {PaneID: "%2", Session: "proj"},
+			"%3": {PaneID: "%3", Session: "proj"},
+		})
+		store := NewStore("/mock/data/pop/monitor.json", d)
+
+		n, err := store.Prune(map[string]bool{"%2": true})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if n != 2 {
+			t.Errorf("removed = %d, want 2", n)
+		}
+
+		state := reloadStateFromSaved(t, *saved)
+		if len(state.Panes) != 1 {
+			t.Errorf("panes = %d, want 1", len(state.Panes))
+		}
+		if _, ok := state.Panes["%2"]; !ok {
+			t.Error("pane %2 should still exist")
+		}
+	})
+
+	t.Run("empty live set removes all panes", func(t *testing.T) {
+		d, saved := mockStoreDeps(map[string]*PaneEntry{
+			"%1": {PaneID: "%1", Session: "proj"},
+			"%2": {PaneID: "%2", Session: "proj"},
+		})
+		store := NewStore("/mock/data/pop/monitor.json", d)
+
+		n, err := store.Prune(map[string]bool{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if n != 2 {
+			t.Errorf("removed = %d, want 2", n)
+		}
+
+		state := reloadStateFromSaved(t, *saved)
+		if len(state.Panes) != 0 {
+			t.Errorf("panes = %d, want 0", len(state.Panes))
+		}
+	})
+
+	t.Run("nil live set removes all panes", func(t *testing.T) {
+		d, saved := mockStoreDeps(map[string]*PaneEntry{
+			"%1": {PaneID: "%1", Session: "proj"},
+		})
+		store := NewStore("/mock/data/pop/monitor.json", d)
+
+		n, err := store.Prune(nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("removed = %d, want 1", n)
+		}
+
+		state := reloadStateFromSaved(t, *saved)
+		if len(state.Panes) != 0 {
+			t.Errorf("panes = %d, want 0", len(state.Panes))
+		}
+	})
+
+	t.Run("no-op when all panes alive (no save)", func(t *testing.T) {
+		d, saved := mockStoreDeps(map[string]*PaneEntry{
+			"%1": {PaneID: "%1", Session: "proj"},
+			"%2": {PaneID: "%2", Session: "proj"},
+		})
+		store := NewStore("/mock/data/pop/monitor.json", d)
+
+		n, err := store.Prune(map[string]bool{"%1": true, "%2": true})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("removed = %d, want 0", n)
+		}
+		if *saved != nil {
+			t.Error("no save expected when all panes alive")
+		}
+	})
+}
+
 func TestStore_RecordVisit(t *testing.T) {
 	t.Run("updates LastActiveAt on tracked pane without changing status", func(t *testing.T) {
 		before := time.Now().Add(-1 * time.Hour)
