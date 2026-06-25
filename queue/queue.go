@@ -7,6 +7,7 @@
 package queue
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -15,12 +16,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/glebglazov/pop/tasks/binding"
-	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/integration"
 )
 
 const drainWindowName = "pop-queue"
@@ -59,6 +60,16 @@ type Deps struct {
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
 
+	// ProbeDirective reports a config/registration-class error message when a
+	// Ready set's worktree directive cannot be satisfied in the current
+	// environment (ADR-0059) — read-only, never provisioning. Empty means
+	// satisfiable or no directive. The decision phase consults it so an
+	// unsatisfiable directive becomes a visible config error on the set instead of
+	// a dispatched drain (no crash-backoff, no silent in-place fallback). Defaults
+	// to a binding.ProbeWorktreeDirective probe surfacing only the two directive
+	// sentinels (ErrNoResolvableTrunk, ErrNamedWorktreeNotFound).
+	ProbeDirective func(checkout, setID string) string
+
 	// CompleteDetailTask, ResetDetailTask, SkipDetailTask are seams for the
 	// detail-view override keys (C/O/K). Each defaults to the corresponding
 	// tasks.*With function resolved with the Deps' Tasks, Project, and LoadConfig.
@@ -88,6 +99,45 @@ func (d *Deps) refresh(defPath string) (*tasks.RefreshResult, error) {
 		return d.Refresh(defPath)
 	}
 	return tasks.RefreshWith(d.Tasks, defPath, tasks.StatePathFor(defPath))
+}
+
+// probeDirective resolves the ProbeDirective seam, defaulting to a read-only
+// binding.ProbeWorktreeDirective probe. It returns a config-class error message
+// only for the two unsatisfiable-directive sentinels (ADR-0059); any other probe
+// error (incidental resolution failure) yields "" so the normal decision flow is
+// undisturbed.
+func (d *Deps) probeDirective(checkout, setID string) string {
+	if d.ProbeDirective != nil {
+		return d.ProbeDirective(checkout, setID)
+	}
+	var cfg *config.Config
+	if d.LoadConfig != nil {
+		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+	}
+	err := binding.ProbeWorktreeDirective(d.Tasks, d.Project, cfg, checkout, setID)
+	if errors.Is(err, binding.ErrNoResolvableTrunk) || errors.Is(err, binding.ErrNamedWorktreeNotFound) {
+		return err.Error()
+	}
+	return ""
+}
+
+// directiveConfigReason marks a decision whose Ready set was withheld because its
+// worktree directive is unsatisfiable in the current environment (ADR-0059).
+const directiveConfigReason = "worktree directive unsatisfiable"
+
+// directiveConfigDecision turns a base decision into a non-actionable config-class
+// error for an unsatisfiable worktree directive on setID (ADR-0059): TaskSetID is
+// cleared so no drain is dispatched (no crash-backoff accrues, no silent in-place
+// fallback), and the fault surfaces the same way a project/registration config
+// error does — via ProjectConfigError, which the run view routes to its scan-error
+// channel. BlockedSetID names the offending set.
+func directiveConfigDecision(base Decision, setID, msg string) Decision {
+	dec := base
+	dec.TaskSetID = ""
+	dec.Reason = directiveConfigReason
+	dec.BlockedSetID = setID
+	dec.ProjectConfigError = fmt.Sprintf("%s: %s", setID, msg)
+	return dec
 }
 
 // readLock resolves the ReadLock seam, defaulting to tasks.ReadRuntimeLockStatus.
@@ -570,6 +620,13 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 	}
 	for _, id := range ids {
 		if runningSets[id] {
+			continue
+		}
+		// An unsatisfiable worktree directive is a static config defect, not a
+		// runtime crash: withhold the set as a config error rather than dispatch a
+		// drain that could only fail and churn (ADR-0059).
+		if msg := d.probeDirective(scan.ProjectPath, id); msg != "" {
+			decisions = append(decisions, directiveConfigDecision(dec, id, msg))
 			continue
 		}
 		action := dec

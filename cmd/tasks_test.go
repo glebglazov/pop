@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -799,6 +799,61 @@ func TestTaskStatusShowsRuntimeLock(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "Runtime execution lock") || !strings.Contains(out, "PID") {
 		t.Fatalf("missing lock rendering:\n%s", out)
+	}
+}
+
+// TestTaskStatusSurfacesUnsatisfiableWorktreeDirective asserts `pop tasks status`
+// shows a `name` worktree directive that names a worktree absent on this machine
+// as a config/registration-class error on the set (ADR-0059), without provisioning
+// or draining anything.
+func TestTaskStatusSurfacesUnsatisfiableWorktreeDirective(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "demo")
+	d := tasks.DefaultDeps()
+	if _, err := tasks.RefreshWith(d, tasksDir, tasks.DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+
+	canon, err := tasks.CanonicalDefinitionPathWith(d, tasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.UpdateGlobalStateWith(d, tasks.StatePathFor(canon), func(s *tasks.GlobalState) error {
+		entry := s.Tasks[canon]
+		for i := range entry.TaskSets {
+			if entry.TaskSets[i].ID == "demo" {
+				entry.TaskSets[i].WorktreeIntent = &tasks.WorktreeDirective{Name: "absent"}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	taskProject = ""
+	taskPath = ""
+	taskDefPath = ""
+	t.Cleanup(resetTaskFlags)
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	var buf bytes.Buffer
+	if err := runTaskStatusWith(d, &buf, ""); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Config errors:") {
+		t.Fatalf("missing config-error diagnostics:\n%s", out)
+	}
+	if !strings.Contains(out, "no worktree of that name") {
+		t.Fatalf("missing the named-directive fault:\n%s", out)
 	}
 }
 

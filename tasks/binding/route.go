@@ -188,6 +188,74 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 	return RouteDrainCheckoutResult{RuntimePath: currentRuntime}, nil
 }
 
+// ProbeWorktreeDirective reports whether a set's registration worktree-intent is
+// satisfiable in the current environment without provisioning anything — the
+// read-only counterpart to RouteDrainCheckout's directive step (ADR-0059). It
+// returns nil when there is no directive, the set is already bound (the directive
+// was satisfied on a prior drain), or the directive resolves; it returns
+// ErrNoResolvableTrunk (`managed` with no resolvable Trunk worktree) or
+// ErrNamedWorktreeNotFound (`name` with no such worktree on this machine) when it
+// cannot. `pop tasks status` and the Queue decision use it to surface an
+// unsatisfiable directive as a config-class error on the set instead of
+// dispatching a drain that could only fail — no provisioning, no crash-backoff,
+// no silent in-place fallback. Incidental resolution errors (repo identity,
+// state) are returned as-is; callers distinguish the two sentinels with
+// errors.Is before treating a probe result as a config-class error.
+func ProbeWorktreeDirective(td *tasks.Deps, pd *project.Deps, cfg *config.Config, checkout, setID string) error {
+	if td == nil {
+		return fmt.Errorf("missing task dependencies")
+	}
+	setID = strings.TrimSpace(setID)
+	checkout = strings.TrimSpace(checkout)
+	if setID == "" || checkout == "" {
+		return nil
+	}
+
+	repoID, err := tasks.ResolveRepositoryIdentity(td, checkout)
+	if err != nil {
+		return err
+	}
+
+	// An existing Worktree binding means the directive was already satisfied on a
+	// prior drain (or the operator bound the set explicitly); later drains resume
+	// there, so the directive is not re-evaluated and cannot be unsatisfiable.
+	store, err := Load(td)
+	if err != nil {
+		return err
+	}
+	if existing, ok := store.Get(Key(repoID, setID)); ok && strings.TrimSpace(existing.RuntimePath) != "" {
+		return nil
+	}
+
+	defPath, err := tasks.CanonicalDefinitionPathWith(td, repoID.TasksDir)
+	if err != nil {
+		return err
+	}
+	intent, err := tasks.RegisteredWorktreeIntent(td, defPath, setID)
+	if err != nil {
+		return err
+	}
+	if intent == nil {
+		return nil
+	}
+	if intent.Managed {
+		trunkPath, bare, err := ResolveTrunkPath(td, cfg, checkout)
+		if err != nil {
+			return err
+		}
+		if bare || strings.TrimSpace(trunkPath) == "" {
+			return ErrNoResolvableTrunk
+		}
+		return nil
+	}
+	if intent.Name != "" {
+		if _, err := resolveNamedWorktree(td, checkout, intent.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // provisionManagedWorktree forks a managed worktree from the repository's Trunk
 // worktree for setID, records a provisioned (pop-owned, torn-down-on-integrate)
 // Worktree binding under key, and returns it. It is the lazy provisioner the

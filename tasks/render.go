@@ -305,6 +305,17 @@ func formatTableWithOutput(out *output, rows []Row) string {
 }
 
 func rowDetail(row Row) string {
+	if row.ConfigError != "" {
+		base := rowStatusDetail(row)
+		if base == "" {
+			return "config error: " + row.ConfigError
+		}
+		return base + " — config error: " + row.ConfigError
+	}
+	return rowStatusDetail(row)
+}
+
+func rowStatusDetail(row Row) string {
 	switch row.Status {
 	case StatusMissing:
 		return "registered task set missing"
@@ -358,12 +369,16 @@ func renderRuntimeLock(w io.Writer, lock *RuntimeLockStatus) {
 
 func renderDiagnostics(w io.Writer, rows []Row) {
 	var detailRows []Row
+	var configErrorRows []Row
 	for _, row := range rows {
 		if row.Status == StatusMalformed && len(row.DetailErrors) > 0 {
 			detailRows = append(detailRows, row)
 		}
+		if row.ConfigError != "" {
+			configErrorRows = append(configErrorRows, row)
+		}
 	}
-	if len(detailRows) == 0 {
+	if len(detailRows) == 0 && len(configErrorRows) == 0 {
 		return
 	}
 
@@ -371,12 +386,22 @@ func renderDiagnostics(w io.Writer, rows []Row) {
 	if styled, ok := w.(*output); ok {
 		out = styled
 	}
-	fmt.Fprintln(out)
-	out.line(ansiRed, "Malformed diagnostics:")
-	for _, row := range detailRows {
-		fmt.Fprintf(out, "  %s:\n", row.ID)
-		for _, err := range row.DetailErrors {
-			fmt.Fprintf(out, "    - %s\n", err)
+	if len(detailRows) > 0 {
+		fmt.Fprintln(out)
+		out.line(ansiRed, "Malformed diagnostics:")
+		for _, row := range detailRows {
+			fmt.Fprintf(out, "  %s:\n", row.ID)
+			for _, err := range row.DetailErrors {
+				fmt.Fprintf(out, "    - %s\n", err)
+			}
+		}
+	}
+	if len(configErrorRows) > 0 {
+		fmt.Fprintln(out)
+		out.line(ansiRed, "Config errors:")
+		for _, row := range configErrorRows {
+			fmt.Fprintf(out, "  %s:\n", row.ID)
+			fmt.Fprintf(out, "    - %s\n", row.ConfigError)
 		}
 	}
 }

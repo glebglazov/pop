@@ -34,9 +34,15 @@ type Row struct {
 	CompleteHint     string
 	MalformedSummary string
 	DetailErrors     []string
-	RegIndex         int
-	AutoPick         bool
-	RunTarget        bool
+	// ConfigError is a config/registration-class fault on the set that is not a
+	// manifest malformity — currently an unsatisfiable worktree directive
+	// (ADR-0059): `managed` with no resolvable Trunk worktree, or a `name` with no
+	// such worktree on this machine. It is surfaced in the status detail and
+	// diagnostics so the operator fixes the environment; the set is not drained.
+	ConfigError string
+	RegIndex    int
+	AutoPick    bool
+	RunTarget   bool
 }
 
 // DeriveStatus computes Task-set status from manifest validation.

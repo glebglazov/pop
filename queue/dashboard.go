@@ -15,12 +15,12 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/glebglazov/pop/tasks/binding"
-	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -59,8 +59,8 @@ type DashboardSnapshot struct {
 // is open. The dashboard recomputes only the volatile overlay (task statuses,
 // locks, daemon state) per poll, reusing these across ticks.
 type dashboardRepoStatic struct {
-	defPath     string
-	statePath   string
+	defPath       string
+	statePath     string
 	repoKey       string
 	repoCommonDir string
 	projectName   string
@@ -438,6 +438,18 @@ func dashboardRowsFromStatic(d *Deps, state *DaemonState, delays []time.Duration
 		drain := dashboardDrain(d, state, st.repoKey, taskRow.ID, wt.runtimePath)
 		if parked {
 			drain = "parked"
+		} else if drain == "" && taskRow.Status == tasks.StatusReady {
+			// An unsatisfiable worktree directive is a static config defect, not a
+			// runtime crash (ADR-0059): show it on the set so the operator fixes the
+			// environment. Read the registration intent first (a store read, no git);
+			// only a set that actually carries a directive pays the read-only probe
+			// (which forks git to resolve the trunk/worktree), so the no-directive
+			// common path — and the dashboard's cached rebuild — forks no git.
+			if intent, _ := tasks.RegisteredWorktreeIntent(d.Tasks, st.defPath, taskRow.ID); intent != nil {
+				if msg := d.probeDirective(staticProjectPath(st), taskRow.ID); msg != "" {
+					drain = "config error: " + msg
+				}
+			}
 		}
 		status := dashboardStatus(taskRow.Status, merge, awaitingIntegration)
 		rows = append(rows, DashboardRow{
@@ -517,10 +529,10 @@ const dashboardWorktreeMarker = "↳ "
 func dashboardWorktree(d *Deps, state *DaemonState, repoKey, setID string, rep *projectScan, repBranch string, bare bool) dashboardWorktreeView {
 	if b, ok := bindingForSet(d.Tasks, repoKey, setID); ok && strings.TrimSpace(b.RuntimePath) != "" {
 		_ = state
-			branch := b.Branch
-			if branch == "" {
-				branch = binding.CurrentBranch(d.Tasks, b.RuntimePath)
-			}
+		branch := b.Branch
+		if branch == "" {
+			branch = binding.CurrentBranch(d.Tasks, b.RuntimePath)
+		}
 		return dashboardWorktreeView{label: formatDashboardWorktree(branch, true), runtimePath: b.RuntimePath}
 	}
 	if rep != nil {

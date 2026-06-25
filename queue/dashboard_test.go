@@ -906,6 +906,54 @@ func TestDashboardLaunchDrainUnboundUsesRepresentativeCheckout(t *testing.T) {
 	assertDashboardPaneMapping(t, d, repo, setID, "%3", "dashboard")
 }
 
+// TestDashboardShowsUnsatisfiableWorktreeDirective asserts the queue dashboard
+// shows a set whose `name` worktree directive names a worktree absent on this
+// machine as a config error on the set's row (ADR-0059), read-only — no drain, no
+// provisioning.
+func TestDashboardShowsUnsatisfiableWorktreeDirective(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "named-directive", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	d, cfg, _, _ := dashboardLaunchFixture(t, repo, setID)
+
+	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonDef, err := tasks.CanonicalDefinitionPathWith(d.Tasks, id.TasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.UpdateGlobalStateWith(d.Tasks, tasks.StatePathFor(canonDef), func(s *tasks.GlobalState) error {
+		entry := s.Tasks[canonDef]
+		for i := range entry.TaskSets {
+			if entry.TaskSets[i].ID == setID {
+				entry.TaskSets[i].WorktreeIntent = &tasks.WorktreeDirective{Name: "absent"}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := BuildDashboard(d, cfg)
+	if err != nil {
+		t.Fatalf("BuildDashboard: %v", err)
+	}
+	var row *DashboardRow
+	for i := range snap.Rows {
+		if snap.Rows[i].SetID == setID {
+			row = &snap.Rows[i]
+		}
+	}
+	if row == nil {
+		t.Fatalf("set %s not in dashboard rows: %+v", setID, snap.Rows)
+	}
+	if !strings.Contains(row.Drain, "config error") || !strings.Contains(row.Drain, "no worktree of that name") {
+		t.Fatalf("Drain = %q, want a config error for the unsatisfiable named directive", row.Drain)
+	}
+}
+
 func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "bind-existing", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},

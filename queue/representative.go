@@ -8,8 +8,8 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
 // repoScanReason is the reason emitted when a repository cannot be scheduled
@@ -350,6 +350,14 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 		}
 		b, has := bindings[setScopedKey(repoKey, id)]
 		if !has || strings.TrimSpace(b.RuntimePath) == "" {
+			// A `managed` set in a bare repo with no resolvable trunk has nothing to
+			// fork from: surface it as a per-set config error (ADR-0059) rather than
+			// fold it into the generic repo "needs trunk" skip — the set is named, and
+			// no drain is dispatched.
+			if msg := d.probeDirective(base.ProjectPath, id); msg != "" {
+				decisions = append(decisions, directiveConfigDecision(skel, id, msg))
+				continue
+			}
 			unbound = true
 			continue
 		}

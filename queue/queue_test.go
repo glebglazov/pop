@@ -13,9 +13,9 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks/integration"
-	"github.com/glebglazov/pop/tasks"
 )
 
 func TestSelectReadySet(t *testing.T) {
@@ -316,7 +316,6 @@ func TestDecideProjectMalformedRepoConfigReportsAndDegrades(t *testing.T) {
 	}
 }
 
-
 func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 	// Under the adopt-current-checkout model several sets share one runtime path.
 	// A drain killed without journaling an outcome leaves a stale open-spawn; its
@@ -398,7 +397,6 @@ func TestScanTreatsDrainAtHITLGateRuntimeLockAsBusy(t *testing.T) {
 	}
 }
 
-
 func TestDecideProjectDispatchesKeepsSingleInPlaceDrain(t *testing.T) {
 	d := &Deps{
 		Tasks:    queueTestTasksDeps(true),
@@ -415,6 +413,98 @@ func TestDecideProjectDispatchesKeepsSingleInPlaceDrain(t *testing.T) {
 
 	if len(decisions) != 1 || !decisions[0].Actionable() || decisions[0].TaskSetID != "top" {
 		t.Fatalf("non-worktree-ready dispatches = %+v, want one in-place top drain", decisions)
+	}
+}
+
+// TestDecideProjectDispatchesWithholdsUnsatisfiableDirective asserts a Ready set
+// whose worktree directive is unsatisfiable is withheld as a non-actionable
+// config-class error (ADR-0059): TaskSetID cleared so no drain is dispatched,
+// Reason marks the directive fault, BlockedSetID names the set, and the error is
+// carried for status. The daemon spawns only Actionable decisions, so this is the
+// no-drain / no-churn / no-crash-backoff guarantee at the decision seam.
+func TestDecideProjectDispatchesWithholdsUnsatisfiableDirective(t *testing.T) {
+	d := &Deps{
+		Tasks:    queueTestTasksDeps(true),
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{Rows: []tasks.Row{
+				{ID: "managed", Status: tasks.StatusReady, AutoDrain: true, Priority: 30, RegIndex: 0},
+			}}, nil
+		},
+		ProbeDirective: func(checkout, setID string) string {
+			if setID == "managed" {
+				return "managed worktree directive: no resolvable Trunk worktree"
+			}
+			return ""
+		},
+	}
+
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, &DaemonState{Version: 1}, time.Now())
+
+	if len(decisions) != 1 {
+		t.Fatalf("decisions = %+v, want one config-error decision", decisions)
+	}
+	dec := decisions[0]
+	if dec.Actionable() {
+		t.Fatalf("unsatisfiable directive must not be actionable: %+v", dec)
+	}
+	if dec.Reason != directiveConfigReason {
+		t.Fatalf("reason = %q, want %q", dec.Reason, directiveConfigReason)
+	}
+	if dec.BlockedSetID != "managed" {
+		t.Fatalf("BlockedSetID = %q, want managed", dec.BlockedSetID)
+	}
+	if !strings.Contains(dec.ProjectConfigError, "managed") || !strings.Contains(dec.ProjectConfigError, "Trunk") {
+		t.Fatalf("ProjectConfigError = %q, want the directive fault", dec.ProjectConfigError)
+	}
+}
+
+// TestUnsatisfiableDirectiveSurfacesInStatusNotBackoff asserts the withheld
+// config-error decision surfaces the same way a project config error does — in
+// the run view's scan-error channel — and never as a queued drain or a backoff
+// timer (a static defect is not a runtime crash, ADR-0059).
+func TestUnsatisfiableDirectiveSurfacesInStatusNotBackoff(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdg"))
+	td := tasks.DefaultDeps()
+	d := &Deps{
+		Tasks:    td,
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{Rows: []tasks.Row{
+				{ID: "named", Status: tasks.StatusReady, AutoDrain: true, Priority: 30, RegIndex: 0},
+			}}, nil
+		},
+		ProbeDirective: func(checkout, setID string) string {
+			return `named worktree directive: no worktree of that name on this machine: "absent"`
+		},
+	}
+
+	state := &DaemonState{Version: 1}
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, state, time.Now())
+
+	snap, err := statusFromDecisions(d, decisions, state)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	snap.Tasks = td
+	view := BuildRunView(snap, time.Now())
+
+	msg, ok := view.ScanErrors["proj"]
+	if !ok || !strings.Contains(msg, "named") {
+		t.Fatalf("ScanErrors[proj] = %q (ok=%v), want the directive config error", msg, ok)
+	}
+	for _, q := range view.Queued {
+		if q.ReadySet == "named" {
+			t.Fatalf("unsatisfiable set must not be queued for drain: %+v", q)
+		}
+	}
+	for _, b := range view.Blocked {
+		if b.SetID == "named" {
+			t.Fatalf("unsatisfiable set must not appear blocked/backed-off: %+v", b)
+		}
+	}
+	if len(state.SetBackoffs) != 0 {
+		t.Fatalf("SetBackoffs = %v, want none — a static directive defect accrues no backoff", state.SetBackoffs)
 	}
 }
 

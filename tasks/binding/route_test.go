@@ -1,7 +1,9 @@
 package binding
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -568,6 +570,111 @@ func TestResolveTrunkPathUsesConfigOverride(t *testing.T) {
 	}
 	if bare || gotPath != want {
 		t.Fatalf("path = %q bare = %v, want %q false", gotPath, bare, want)
+	}
+}
+
+// initBareWithWorktree creates a bare repository (no working tree) with one
+// linked worktree and returns the worktree path. A `managed` directive resolved
+// from this worktree finds no Trunk worktree to fork from — bare with no
+// trunk = true override — so it is unsatisfiable.
+func initBareWithWorktree(t *testing.T, name string) string {
+	t.Helper()
+	seed := initAdoptRepo(t)
+	bare := filepath.Join(t.TempDir(), "bare.git")
+	if out, err := exec.Command("git", "clone", "--bare", seed, bare).CombinedOutput(); err != nil {
+		t.Fatalf("clone --bare: %v\n%s", err, out)
+	}
+	wt := filepath.Join(t.TempDir(), name)
+	adoptRunGit(t, bare, "worktree", "add", "-b", "feature", wt, "HEAD")
+	return wt
+}
+
+// TestProbeWorktreeDirectiveManagedNoTrunk asserts a `managed` directive over a
+// bare repo with no resolvable Trunk worktree is reported as the
+// ErrNoResolvableTrunk config-class error — read-only, no provisioning (ADR-0059).
+func TestProbeWorktreeDirectiveManagedNoTrunk(t *testing.T) {
+	td := routeTestDeps(t)
+	wt := initBareWithWorktree(t, "wt-managed")
+	calls := countingGit(t, td)
+	seedManagedIntent(t, td, wt, "managed-set")
+
+	err := ProbeWorktreeDirective(td, nil, nil, wt, "managed-set")
+	if !errors.Is(err, ErrNoResolvableTrunk) {
+		t.Fatalf("probe err = %v, want ErrNoResolvableTrunk", err)
+	}
+	if *calls != 0 {
+		t.Fatalf("worktree add calls = %d, want 0 — probe must not provision", *calls)
+	}
+}
+
+// TestProbeWorktreeDirectiveManagedSatisfiable asserts a `managed` directive over
+// a normal repo (a resolvable git main worktree) probes clean.
+func TestProbeWorktreeDirectiveManagedSatisfiable(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	seedManagedIntent(t, td, repo, "managed-set")
+
+	if err := ProbeWorktreeDirective(td, nil, nil, repo, "managed-set"); err != nil {
+		t.Fatalf("probe err = %v, want nil", err)
+	}
+}
+
+// TestProbeWorktreeDirectiveNamedAbsent asserts a `name` directive naming a
+// worktree that does not exist on this machine is reported as
+// ErrNamedWorktreeNotFound.
+func TestProbeWorktreeDirectiveNamedAbsent(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	calls := countingGit(t, td)
+	seedNamedIntent(t, td, repo, "named-set", "absent")
+
+	err := ProbeWorktreeDirective(td, nil, nil, repo, "named-set")
+	if !errors.Is(err, ErrNamedWorktreeNotFound) {
+		t.Fatalf("probe err = %v, want ErrNamedWorktreeNotFound", err)
+	}
+	if *calls != 0 {
+		t.Fatalf("worktree add calls = %d, want 0 — probe must not provision", *calls)
+	}
+}
+
+// TestProbeWorktreeDirectiveNamedPresent asserts a `name` directive whose
+// worktree exists on this machine probes clean — resolving the environment (here,
+// creating the named worktree) lets the next drain proceed (ADR-0059).
+func TestProbeWorktreeDirectiveNamedPresent(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	addNamedWorktree(t, repo, "feature-x", "feature-x")
+	seedNamedIntent(t, td, repo, "named-set", "feature-x")
+
+	if err := ProbeWorktreeDirective(td, nil, nil, repo, "named-set"); err != nil {
+		t.Fatalf("probe err = %v, want nil", err)
+	}
+}
+
+// TestProbeWorktreeDirectiveNoIntent asserts a set with no worktree directive
+// probes clean (the no-directive default drains in the current checkout).
+func TestProbeWorktreeDirectiveNoIntent(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+
+	if err := ProbeWorktreeDirective(td, nil, nil, repo, "plain-set"); err != nil {
+		t.Fatalf("probe err = %v, want nil", err)
+	}
+}
+
+// TestProbeWorktreeDirectiveBoundSatisfied asserts an already-bound set probes
+// clean even when the raw directive would be unsatisfiable: the binding records
+// that the directive was satisfied on a prior drain, and later drains resume
+// there (ADR-0059).
+func TestProbeWorktreeDirectiveBoundSatisfied(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	wt := addLinkedWorktree(t, repo, "feature")
+	seedNamedIntent(t, td, repo, "named-set", "absent")
+	seedBinding(t, td, repo, "named-set", Adopt(wt, "feature", "proj"))
+
+	if err := ProbeWorktreeDirective(td, nil, nil, repo, "named-set"); err != nil {
+		t.Fatalf("probe err = %v, want nil for a bound set", err)
 	}
 }
 

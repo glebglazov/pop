@@ -284,8 +284,30 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		}
 	}
 
+	attachWorktreeDirectiveErrors(d, resolved.ProjectPath, result.Rows)
+
 	tasks.Render(w, result)
 	return nil
+}
+
+// attachWorktreeDirectiveErrors surfaces an unsatisfiable worktree directive
+// (ADR-0059) as a config/registration-class error on each Ready set's status row.
+// The probe is read-only — it never provisions — so a `managed` set with no
+// resolvable trunk, or a `name` set with no such worktree on this machine, shows
+// the fault in `pop tasks status` without the drain ever running. Only the two
+// directive sentinels become a config error; incidental resolution failures are
+// ignored so status still renders.
+func attachWorktreeDirectiveErrors(d *tasks.Deps, checkout string, rows []tasks.Row) {
+	cfg, _ := taskConfigLoad(config.DefaultConfigPath())
+	for i := range rows {
+		if rows[i].Status != tasks.StatusReady {
+			continue
+		}
+		err := binding.ProbeWorktreeDirective(d, taskProjectDeps(), cfg, checkout, rows[i].ID)
+		if errors.Is(err, binding.ErrNoResolvableTrunk) || errors.Is(err, binding.ErrNamedWorktreeNotFound) {
+			rows[i].ConfigError = err.Error()
+		}
+	}
 }
 
 func runTaskArchive(cmd *cobra.Command, args []string) error {

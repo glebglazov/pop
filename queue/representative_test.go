@@ -153,6 +153,56 @@ func TestDecideRepoDispatchesExecutionRenameIsFatal(t *testing.T) {
 	}
 }
 
+// TestDecideRepoDispatchesBareManagedDirectiveIsConfigError asserts a `managed`
+// worktree directive in a bare repo with no resolvable trunk is surfaced as a
+// per-set config-class error (ADR-0059) rather than dispatched or folded into the
+// generic "needs trunk" repo skip: the set is named, not actionable, and carries
+// the directive fault for status — no drain, no crash-backoff.
+func TestDecideRepoDispatchesBareManagedDirectiveIsConfigError(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdg"))
+	_, wts := initBareRepoWithWorktrees(t, 2)
+	d := repoDispatchDeps(t, []tasks.Row{{ID: "managed", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
+
+	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, wts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonDef, err := tasks.CanonicalDefinitionPathWith(d.Tasks, id.TasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.UpdateGlobalStateWith(d.Tasks, tasks.StatePathFor(canonDef), func(s *tasks.GlobalState) error {
+		s.Entry(canonDef).TaskSets = []tasks.RegisteredTaskSet{
+			{ID: "managed", WorktreeIntent: &tasks.WorktreeDirective{Managed: true}},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	scans := scansForCheckouts(wts, canonDef)
+	decisions := decideRepoDispatches(d, &config.Config{}, scans, &DaemonState{Version: 1}, time.Now())
+
+	var cfgErr *Decision
+	for i := range decisions {
+		if decisions[i].Actionable() {
+			t.Fatalf("unsatisfiable managed directive must not be actionable: %+v", decisions[i])
+		}
+		if decisions[i].Reason == directiveConfigReason {
+			cfgErr = &decisions[i]
+		}
+	}
+	if cfgErr == nil {
+		t.Fatalf("want a config-error decision for the managed directive, got %+v", decisions)
+	}
+	if cfgErr.BlockedSetID != "managed" {
+		t.Fatalf("BlockedSetID = %q, want managed", cfgErr.BlockedSetID)
+	}
+	if !strings.Contains(cfgErr.ProjectConfigError, "Trunk") {
+		t.Fatalf("ProjectConfigError = %q, want the no-resolvable-trunk fault", cfgErr.ProjectConfigError)
+	}
+}
+
 func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 	_, wts := initBareRepoWithWorktrees(t, 2)
 	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
