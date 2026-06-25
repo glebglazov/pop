@@ -620,13 +620,17 @@ the topic.
 Pass --derive to read an agent hook payload on stdin and set a derived topic.
 Use --label to name the agent whose payload is on stdin (claude, codex, cursor,
 pi, opencode); each agent's prompt-submit hook delivers the prompt differently,
-so the label selects the matching payload adapter. By default the user's prompt
-is truncated; when [pane_monitoring] topic_command is configured, the prompt is
-piped to that command as a normalized JSON payload and its stdout becomes the
-topic. Either way the result is normalized into a lowercase kebab slug of at
-most [pane_monitoring] topic_words words (default 5; ADR 0057) before it is
-written. A missing/unparseable payload, an agent whose hook exposes no prompt
-text, or a command failure is a no-op and never clobbers an existing topic.
+so the label selects the matching payload adapter. pop owns the Topic recipes
+(ADR 0057): when [pane_monitoring] topic_agents is configured (e.g.
+["claude", "ollama:llama3.2"]) pop builds a model prompt and runs each recipe
+in order, using the first non-empty result — any nonzero exit / error / empty /
+timeout falls through reason-blind to the next recipe. pop runs no model itself
+and reads no keys; each recipe shells out to an already-authed CLI. With no
+recipes configured the user's prompt is truncated. Either way the result is
+normalized into a lowercase kebab slug of at most [pane_monitoring] topic_words
+words (default 5) before it is written. A missing/unparseable payload, an agent
+whose hook exposes no prompt text, or every recipe failing with no prior topic
+falls back to truncation; a non-empty existing topic is never clobbered.
 
 Derive runs once per pane (ADR 0025): a pane whose @pop_topic is already
 non-empty is left untouched. The option dies with the pane, so retiring or
@@ -674,7 +678,7 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 // production prev-Topic lookup and command runner; see deriveTopicWith for the
 // injectable core.
 func deriveTopic(r io.Reader, args []string, cfg *config.Config, label string) (paneID, topic string, ok bool) {
-	return deriveTopicWith(r, args, cfg, label, defaultTopicOptionLookup, runTopicCommand)
+	return deriveTopicWith(r, args, cfg, label, defaultTopicOptionLookup, runTopicRecipe)
 }
 
 // prevTopicLookup returns the pane's current Topic (its @pop_topic user-option,
@@ -682,16 +686,17 @@ func deriveTopic(r io.Reader, args []string, cfg *config.Config, label string) (
 // once-per-pane guard; the session rides through into the command payload.
 type prevTopicLookup func(paneID string) (prevTopic, session string)
 
-// topicCommandRunner runs the user's topic command with the JSON payload on
-// stdin and returns its stdout. A non-nil error covers non-zero exit and
-// timeout (via the context).
-type topicCommandRunner func(ctx context.Context, command string, stdin []byte) (string, error)
+// topicRecipeRunner runs one Topic recipe: it executes argv (with optional
+// stdin) under the context's deadline and returns the process stdout. A non-nil
+// error covers a non-zero exit and a timeout (via the context). Recipes shell
+// out to an already-authenticated CLI — pop makes no model call of its own.
+type topicRecipeRunner func(ctx context.Context, argv []string, stdin []byte) (string, error)
 
-// topicCommandPayload is the normalized JSON contract pop pipes to a configured
-// topic_command. prompt/pane_id/session/prev_topic are always present;
-// transcript_path is passed through only when the agent's hook exposed one.
-// See ADR 0024 — pop owns this shape and stays a pipe (no model SDK, no keys).
-type topicCommandPayload struct {
+// topicRecipePayload is the per-derive JSON contract pop builds internally and
+// feeds to recipes that want it (the "cmd:" escape hatch receives it on stdin —
+// ADR 0024's shape, preserved). prompt/pane_id/session/prev_topic are always
+// present; transcript_path rides only when the agent's hook exposed one.
+type topicRecipePayload struct {
 	PrevTopic      string `json:"prev_topic"`
 	Prompt         string `json:"prompt"`
 	TranscriptPath string `json:"transcript_path,omitempty"`
@@ -702,13 +707,15 @@ type topicCommandPayload struct {
 // deriveTopicWith is the injectable core of the derive path. It first applies
 // the once-per-pane guard (ADR 0025/0058): a pane whose @pop_topic is already
 // non-empty is a no-op, so the Topic the option holds is kept and a user note
-// overrides it in display. On a fresh pane it generates a Topic — truncating
-// the prompt when no topic_command is configured, otherwise piping the
-// normalized JSON payload to the command and using its stdout (trimmed, first
-// line, capped), falling back to truncation on command failure/timeout/empty
-// output. The caller writes the result to @pop_topic; this never blocks the
-// agent.
-func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label string, lookup prevTopicLookup, run topicCommandRunner) (paneID, topic string, ok bool) {
+// overrides it in display. On a fresh pane with prompt text it generates a
+// Topic via pop-owned recipes (ADR 0057): it builds a model prompt and runs
+// each configured topic_agents recipe in order, normalizing each result into a
+// kebab slug and using the first non-empty one. Any nonzero exit / error /
+// empty / timeout falls through reason-blind to the next recipe. If every recipe
+// fails (or none are configured) it falls back to truncating the prompt, so a
+// Topic always resolves and the agent is never blocked. The caller writes the
+// result to @pop_topic.
+func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label string, lookup prevTopicLookup, run topicRecipeRunner) (paneID, topic string, ok bool) {
 	paneID = os.Getenv("TMUX_PANE")
 	if len(args) > 0 && strings.HasPrefix(args[0], "%") {
 		paneID = args[0]
@@ -733,21 +740,21 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 		return "", "", false
 	}
 
-	// The Topic format is a pop-owned contract (ADR 0057): whatever the derive
-	// path produces is normalized into a kebab slug before it reaches @pop_topic.
-	maxWords := cfg.PaneMonitoringTopicWords()
-
-	command := cfg.PaneMonitoringTopicCommand()
-	if command == "" {
-		// No command configured: slice-02 truncation path.
-		topic = slugifyTopic(truncateTopic(prompt), maxWords)
-		if topic == "" {
-			return "", "", false
-		}
-		return paneID, topic, true
+	// No prompt text exposed: degrade to no Topic and run no recipe (a model
+	// call on an empty prompt is pointless), never clobbering an existing Topic.
+	if strings.TrimSpace(prompt) == "" {
+		return "", "", false
 	}
 
-	payload, err := json.Marshal(topicCommandPayload{
+	// The Topic format is a pop-owned contract (ADR 0057): whatever a recipe (or
+	// the truncation fallback) produces is normalized into a kebab slug before it
+	// reaches @pop_topic.
+	maxWords := cfg.PaneMonitoringTopicWords()
+
+	// Build the model prompt (instructing a <=maxWords-word lowercase hyphen
+	// slug) and the per-derive JSON payload once; both are reused across recipes.
+	modelPrompt := buildTopicModelPrompt(prompt, maxWords)
+	payload, err := json.Marshal(topicRecipePayload{
 		PrevTopic:      prevTopic,
 		Prompt:         prompt,
 		TranscriptPath: transcriptPath,
@@ -756,29 +763,152 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 	})
 	if err != nil {
 		debug.Error("pane set-topic --derive: marshal payload: %v", err)
-		return "", "", false
+		payload = nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), topicCommandTimeout)
-	defer cancel()
-	out, err := run(ctx, command, payload)
-	if err == nil {
-		if derived := slugifyTopic(capTopic(out), maxWords); derived != "" {
+	// Run each recipe in order; first non-empty (after normalization) wins.
+	// Failures fall through reason-blind: pop never branches on the error shape.
+	for _, ref := range cfg.PaneMonitoringTopicAgents() {
+		recipe, ok := resolveTopicRecipe(ref)
+		if !ok {
+			debug.Log("pane set-topic --derive: unknown topic recipe %q — skipping", ref)
+			continue
+		}
+		argv, stdin := recipe.build(modelPrompt, payload)
+		ctx, cancel := context.WithTimeout(context.Background(), topicRecipeTimeout)
+		out, runErr := run(ctx, argv, stdin)
+		cancel()
+		if runErr != nil {
+			debug.Error("pane set-topic --derive: recipe %q failed: %v", ref, runErr)
+			continue
+		}
+		// parse extracts the result text (JSON for agents that emit it, plain
+		// otherwise); capTopic first-lines and char-caps it, then slugifyTopic
+		// normalizes to the kebab contract — uniform across every recipe.
+		if derived := slugifyTopic(capTopic(recipe.parse(out)), maxWords); derived != "" {
 			return paneID, derived, true
 		}
-		debug.Log("pane set-topic --derive: topic_command produced empty output")
-	} else {
-		debug.Error("pane set-topic --derive: topic_command failed: %v", err)
+		debug.Log("pane set-topic --derive: recipe %q produced no usable topic", ref)
 	}
 
-	// Command failed, timed out, or produced nothing usable. prevTopic is empty
-	// here (the once-guard above returns early otherwise), so fall back to
-	// truncation; that truncated Topic then freezes the pane.
+	// Every recipe failed (or none configured), and prevTopic is empty here (the
+	// once-guard returns early otherwise), so fall back to truncation; that
+	// truncated Topic then freezes the pane.
 	topic = slugifyTopic(truncateTopic(prompt), maxWords)
 	if topic == "" {
 		return "", "", false
 	}
 	return paneID, topic, true
+}
+
+// topicRecipe is one curated agent-CLI invocation pop knows how to run (ADR
+// 0057). build returns the argv to exec and the bytes to feed on stdin (the
+// model prompt for curated agents, the JSON payload for the "cmd:" escape
+// hatch). parse extracts the result text from the CLI's stdout, handling
+// structured JSON for agents that emit it — pop reads only the result text and
+// never branches on the error shape.
+type topicRecipe struct {
+	build func(modelPrompt string, payload []byte) (argv []string, stdin []byte)
+	parse func(stdout string) string
+}
+
+// defaultOllamaModel is the local model the bare "ollama" recipe runs when the
+// reference carries no "ollama:<model>" argument.
+const defaultOllamaModel = "llama3.2"
+
+// resolveTopicRecipe maps a topic_agents reference to its curated recipe. The
+// reference is "<name>" or "<name>:<arg>": "claude" and "ollama[:<model>]" are
+// curated agent CLIs; "cmd:<shell command>" (alias "sh:") is the documented
+// escape hatch for any other CLI, run via `sh -c` with the JSON payload on
+// stdin. An unknown name (or an empty escape-hatch command) returns ok=false so
+// the caller skips it reason-blind.
+func resolveTopicRecipe(ref string) (topicRecipe, bool) {
+	name, arg, _ := strings.Cut(strings.TrimSpace(ref), ":")
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "claude":
+		return claudeRecipe(), true
+	case "ollama":
+		model := strings.TrimSpace(arg)
+		if model == "" {
+			model = defaultOllamaModel
+		}
+		return ollamaRecipe(model), true
+	case "cmd", "sh":
+		command := strings.TrimSpace(arg)
+		if command == "" {
+			return topicRecipe{}, false
+		}
+		return shellRecipe(command), true
+	default:
+		return topicRecipe{}, false
+	}
+}
+
+// claudeRecipe runs `claude -p --output-format json`, feeding the model prompt
+// on stdin and extracting only the structured result text from its JSON stdout.
+func claudeRecipe() topicRecipe {
+	return topicRecipe{
+		build: func(modelPrompt string, _ []byte) ([]string, []byte) {
+			return []string{"claude", "-p", "--output-format", "json"}, []byte(modelPrompt)
+		},
+		parse: parseClaudeResult,
+	}
+}
+
+// parseClaudeResult extracts the "result" field from `claude -p --output-format
+// json` output. pop reads only the result text — it does not branch on is_error
+// or any other field (ADR 0057). Non-JSON or a missing result yields "", which
+// the caller treats as empty and falls through to the next recipe.
+func parseClaudeResult(stdout string) string {
+	var r struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &r); err != nil {
+		debug.Log("pane set-topic --derive: claude recipe output not JSON: %v", err)
+		return ""
+	}
+	return r.Result
+}
+
+// ollamaRecipe runs `ollama run <model>` against a local model, feeding the
+// model prompt on stdin; the plain-text stdout is the result (the caller
+// first-lines, caps, and slugifies it).
+func ollamaRecipe(model string) topicRecipe {
+	return topicRecipe{
+		build: func(modelPrompt string, _ []byte) ([]string, []byte) {
+			return []string{"ollama", "run", model}, []byte(modelPrompt)
+		},
+		parse: plainTopicResult,
+	}
+}
+
+// shellRecipe is the "cmd:" escape hatch: an arbitrary CLI run via `sh -c`,
+// receiving the per-derive JSON payload on stdin (ADR 0024's contract). Its
+// stdout is plain text — the caller first-lines, caps, and slugifies it.
+func shellRecipe(command string) topicRecipe {
+	return topicRecipe{
+		build: func(_ string, payload []byte) ([]string, []byte) {
+			return []string{"sh", "-c", command}, payload
+		},
+		parse: plainTopicResult,
+	}
+}
+
+// plainTopicResult is the parse step for recipes whose stdout is the result
+// text verbatim (no structured wrapper). The caller applies capTopic/slugify.
+func plainTopicResult(stdout string) string { return stdout }
+
+// buildTopicModelPrompt wraps the user's prompt with instructions for the model
+// to reply with a lowercase, <=maxWords-word hyphen slug and nothing else. The
+// output is normalized regardless (slugifyTopic), so this is a quality nudge,
+// not a contract pop relies on.
+func buildTopicModelPrompt(prompt string, maxWords int) string {
+	return fmt.Sprintf(`Name the topic of this coding session.
+Reply with ONLY a short label: lowercase, at most %d words, words joined by
+single hyphens, no other punctuation, no quotes, and no explanation.
+
+The user's message:
+%s`, maxWords, prompt)
 }
 
 // topicPayloadAdapter maps one agent's "user submitted prompt" hook payload
@@ -836,7 +966,7 @@ func claudeTopicPayload(data []byte) (prompt, transcriptPath string, err error) 
 // cursor's hook JSON, and the pi/opencode extensions, which serialize the
 // submitted message into this shape themselves. transcript_path is
 // deliberately not read — these agents don't provide one, so it stays out of
-// the topic_command contract. A payload with no prompt field yields an empty
+// the recipe payload contract. A payload with no prompt field yields an empty
 // prompt and the caller degrades silently.
 func promptOnlyTopicPayload(data []byte) (prompt, transcriptPath string, err error) {
 	var payload struct {
@@ -877,11 +1007,19 @@ func topicOptionLookup(tmux deps.Tmux, paneID string) (prevTopic, session string
 	return prevTopic, session
 }
 
-// runTopicCommand runs the user's topic_command via `sh -c`, feeding it the
-// JSON payload on stdin and returning its stdout. The context bounds runtime.
-func runTopicCommand(ctx context.Context, command string, stdin []byte) (string, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	cmd.Stdin = bytes.NewReader(stdin)
+// runTopicRecipe is the production topicRecipeRunner: it execs a recipe's argv
+// (with optional stdin) under the context's deadline and returns its stdout. A
+// non-zero exit or a timeout surfaces as a non-nil error, which the caller
+// treats reason-blind. This is the single exec point for every recipe — curated
+// agent CLIs and the `sh -c` escape hatch alike — so pop links no model SDK.
+func runTopicRecipe(ctx context.Context, argv []string, stdin []byte) (string, error) {
+	if len(argv) == 0 {
+		return "", fmt.Errorf("empty recipe argv")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	if len(stdin) > 0 {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -906,9 +1044,9 @@ func capTopic(out string) string {
 }
 
 const (
-	topicMaxWords       = 8
-	topicMaxChars       = 60
-	topicCommandTimeout = 5 * time.Second
+	topicMaxWords      = 8
+	topicMaxChars      = 60
+	topicRecipeTimeout = 5 * time.Second
 )
 
 // slugifyTopic normalizes derived Topic text into pop's canonical format (ADR

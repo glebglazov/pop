@@ -49,10 +49,17 @@ type PaneMonitoringConfig struct {
 	// across any data dirs using this config, so only pin it for single-instance
 	// setups (e.g. exposing a fixed port to containers).
 	Addr string `toml:"addr"`
-	// TopicCommand, when set, is the shell command `set-topic --derive` pipes a
-	// normalized JSON payload to on stdin; its stdout becomes the pane's Topic.
-	// Empty means topics fall back to built-in prompt truncation (ADR 0024).
-	TopicCommand string `toml:"topic_command"`
+	// TopicAgents is the ordered list of pop-owned Topic recipes the derive path
+	// tries when generating a pane's Topic (ADR 0057). Each entry names a curated
+	// agent-CLI invocation pop knows how to run — "claude" (claude -p
+	// --output-format json), "ollama:<model>" for a local model (e.g.
+	// "ollama:llama3.2") — or the escape hatch "cmd:<shell command>" to reference
+	// any other CLI (the command receives the per-derive JSON payload on stdin,
+	// ADR 0024's contract). Recipes run in order; the first non-empty result wins
+	// and any failure/timeout/empty output falls through reason-blind to the next.
+	// Empty means topics fall back to built-in prompt truncation. pop links no
+	// model SDK and holds no keys — auth lives in the CLIs.
+	TopicAgents []string `toml:"topic_agents"`
 	// TopicWords bounds the word count of a derived Topic after it is normalized
 	// into a kebab slug (ADR 0057). Zero/unset means the default
 	// (DefaultTopicWords); see PaneMonitoringTopicWords.
@@ -720,13 +727,14 @@ func (c *Config) PaneMonitoringAddr() string {
 	return c.PaneMonitoring.Addr
 }
 
-// PaneMonitoringTopicCommand returns the configured topic-derivation command,
-// or "" when none is set (in which case topics fall back to prompt truncation).
-func (c *Config) PaneMonitoringTopicCommand() string {
+// PaneMonitoringTopicAgents returns the ordered list of configured Topic
+// recipes, or nil when none are set (in which case topics fall back to prompt
+// truncation). See PaneMonitoringConfig.TopicAgents for the recipe vocabulary.
+func (c *Config) PaneMonitoringTopicAgents() []string {
 	if c.PaneMonitoring == nil {
-		return ""
+		return nil
 	}
-	return c.PaneMonitoring.TopicCommand
+	return c.PaneMonitoring.TopicAgents
 }
 
 // PaneMonitoringTopicWords returns the word cap applied to a derived Topic slug,

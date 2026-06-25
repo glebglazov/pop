@@ -56,6 +56,22 @@ projects = [
 # --source tmux-global. Set this to disable auto-read on tmux navigation
 # while still allowing explicit reads from the dashboard.
 # ignore_status_from = ["tmux-global"]
+#
+# Topic recipes: an ordered list of pop-curated agent-CLI invocations pop runs
+# to derive a pane's Topic (ADR 0057). pop tries each in order and uses the
+# first non-empty result; any failure/timeout/empty output falls through to the
+# next. pop links no model SDK and reads no API keys — each recipe shells out to
+# a CLI you have already authenticated. Curated recipes:
+#   "claude"          -> claude -p --output-format json (result text extracted)
+#   "ollama:<model>"  -> a local ollama model, e.g. "ollama:llama3.2"
+#   "cmd:<command>"   -> escape hatch: any CLI, run via `sh -c`, fed pop's
+#                        per-derive JSON payload on stdin (alias "sh:")
+# With none set, Topics fall back to truncating the prompt.
+# topic_agents = ["claude", "ollama:llama3.2"]
+#
+# Word cap applied to a derived Topic after it is normalized into a lowercase
+# kebab slug (e.g. debugging-auth-middleware). Defaults to 5.
+# topic_words = 5
 
 # [updates]
 # Gate the picker Update notice and the daily background update check.

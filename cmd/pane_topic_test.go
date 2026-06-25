@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
@@ -15,9 +16,9 @@ import (
 // noPrevTopic is a prevTopicLookup that reports no existing Topic/session.
 func noPrevTopic(string) (string, string) { return "", "" }
 
-// withTopicCommand builds a config whose topic_command is set to command.
-func withTopicCommand(command string) *config.Config {
-	return &config.Config{PaneMonitoring: &config.PaneMonitoringConfig{TopicCommand: command}}
+// withTopicAgents builds a config whose topic_agents recipe list is agents.
+func withTopicAgents(agents ...string) *config.Config {
+	return &config.Config{PaneMonitoring: &config.PaneMonitoringConfig{TopicAgents: agents}}
 }
 
 // TestPaneAttentionName_TopicPrecedence locks the descriptive parenthetical
@@ -393,7 +394,7 @@ func TestParseTopicPayload_PerAgent(t *testing.T) {
 func TestDeriveTopic_DegradesWhenNoPromptText(t *testing.T) {
 	t.Setenv("TMUX_PANE", "%env")
 	cfg := &config.Config{}
-	failRun := func(context.Context, string, []byte) (string, error) {
+	failRun := func(context.Context, []string, []byte) (string, error) {
 		t.Fatal("command runner must not be called when degrading")
 		return "", nil
 	}
@@ -493,8 +494,8 @@ func TestSlugifyTopic(t *testing.T) {
 // when the knob is unset.
 func TestDeriveTopic_TopicWordsBound(t *testing.T) {
 	t.Setenv("TMUX_PANE", "%env")
-	failRun := func(context.Context, string, []byte) (string, error) {
-		t.Fatal("command runner must not be called without topic_command")
+	failRun := func(context.Context, []string, []byte) (string, error) {
+		t.Fatal("recipe runner must not be called with no recipes configured")
 		return "", nil
 	}
 	payload := `{"prompt":"alpha beta gamma delta epsilon zeta eta"}`
@@ -515,14 +516,14 @@ func TestDeriveTopic_TopicWordsBound(t *testing.T) {
 	})
 }
 
-// TestDeriveTopic_Truncation covers the no-command (slice 02) derive path:
+// TestDeriveTopic_Truncation covers the no-recipe (slice 02) derive path:
 // pane id resolution, truncation, and no-op on bad/empty input. With no
-// topic_command set, the command runner and prev-topic lookup are never used.
+// topic_agents configured, the recipe runner is never called.
 func TestDeriveTopic_Truncation(t *testing.T) {
 	t.Setenv("TMUX_PANE", "%env")
 	cfg := &config.Config{}
-	failRun := func(context.Context, string, []byte) (string, error) {
-		t.Fatal("command runner must not be called without topic_command")
+	failRun := func(context.Context, []string, []byte) (string, error) {
+		t.Fatal("recipe runner must not be called with no recipes configured")
 		return "", nil
 	}
 
@@ -561,37 +562,235 @@ func TestDeriveTopic_Truncation(t *testing.T) {
 	})
 }
 
-// TestDeriveTopic_Command covers the topic_command delegation path with stub
-// commands: success, the JSON contract piped on stdin, capping, and the
-// failure/timeout/empty-output fallbacks.
-func TestDeriveTopic_Command(t *testing.T) {
+// TestResolveTopicRecipe locks the recipe vocabulary (ADR 0057): the curated
+// claude/ollama recipes, the ollama model argument and its default, the
+// cmd:/sh: escape hatch (colons in the command survive), and the
+// unknown/empty references that do not resolve.
+func TestResolveTopicRecipe(t *testing.T) {
+	modelPrompt := "name-this"
+	payload := []byte(`{"prompt":"p"}`)
+
+	t.Run("claude runs claude -p --output-format json with the prompt on stdin", func(t *testing.T) {
+		r, ok := resolveTopicRecipe("claude")
+		if !ok {
+			t.Fatal("claude should resolve")
+		}
+		argv, stdin := r.build(modelPrompt, payload)
+		if strings.Join(argv, " ") != "claude -p --output-format json" {
+			t.Errorf("argv = %v", argv)
+		}
+		if string(stdin) != modelPrompt {
+			t.Errorf("stdin = %q, want the model prompt", stdin)
+		}
+	})
+
+	t.Run("ollama uses its model argument", func(t *testing.T) {
+		r, ok := resolveTopicRecipe("ollama:llama3.2")
+		if !ok {
+			t.Fatal("ollama:llama3.2 should resolve")
+		}
+		argv, stdin := r.build(modelPrompt, payload)
+		if strings.Join(argv, " ") != "ollama run llama3.2" {
+			t.Errorf("argv = %v", argv)
+		}
+		if string(stdin) != modelPrompt {
+			t.Errorf("stdin = %q, want the model prompt", stdin)
+		}
+	})
+
+	t.Run("bare ollama falls back to the default model", func(t *testing.T) {
+		r, _ := resolveTopicRecipe("ollama")
+		argv, _ := r.build(modelPrompt, payload)
+		if argv[len(argv)-1] != defaultOllamaModel {
+			t.Errorf("argv = %v, want default model %q", argv, defaultOllamaModel)
+		}
+	})
+
+	t.Run("cmd escape hatch runs sh -c with the JSON payload on stdin", func(t *testing.T) {
+		r, ok := resolveTopicRecipe("cmd:my-tool --flag a:b")
+		if !ok {
+			t.Fatal("cmd: should resolve")
+		}
+		argv, stdin := r.build(modelPrompt, payload)
+		// Only the first colon splits the reference, so colons in the command survive.
+		if len(argv) != 3 || argv[0] != "sh" || argv[1] != "-c" || argv[2] != "my-tool --flag a:b" {
+			t.Errorf("argv = %v", argv)
+		}
+		if string(stdin) != string(payload) {
+			t.Errorf("stdin = %q, want the JSON payload", stdin)
+		}
+	})
+
+	t.Run("sh alias resolves the same as cmd", func(t *testing.T) {
+		if _, ok := resolveTopicRecipe("sh:echo hi"); !ok {
+			t.Error("sh: should resolve")
+		}
+	})
+
+	t.Run("unknown and empty references do not resolve", func(t *testing.T) {
+		for _, ref := range []string{"gpt", "cmd:", "sh:  ", "", "  "} {
+			if _, ok := resolveTopicRecipe(ref); ok {
+				t.Errorf("ref %q should not resolve", ref)
+			}
+		}
+	})
+}
+
+// TestParseClaudeResult confirms the claude recipe extracts only the result
+// text from `claude -p --output-format json` and never branches on the error
+// shape (ADR 0057): is_error is ignored, a missing result or non-JSON yields "".
+func TestParseClaudeResult(t *testing.T) {
+	cases := []struct {
+		name   string
+		stdout string
+		want   string
+	}{
+		{"extracts result", `{"type":"result","is_error":false,"result":"auth refactor"}`, "auth refactor"},
+		{"ignores is_error true, still reads result", `{"is_error":true,"result":"some topic"}`, "some topic"},
+		{"missing result yields empty", `{"type":"result","is_error":false}`, ""},
+		{"non-JSON yields empty", "auth refactor", ""},
+		{"surrounding whitespace tolerated", "  {\"result\":\"x\"}\n", "x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseClaudeResult(tc.stdout); got != tc.want {
+				t.Errorf("parseClaudeResult(%q) = %q, want %q", tc.stdout, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeriveTopic_Recipes covers the pop-owned recipe chain (ADR 0057) with stub
+// runners: JSON extraction for the claude recipe, recipe ordering with
+// first-non-empty-wins, reason-blind fallthrough on failure/timeout/empty, the
+// per-derive JSON payload fed to the cmd: escape hatch, the derive-once guard,
+// and the all-fail-with-no-prior-topic truncation fallback.
+func TestDeriveTopic_Recipes(t *testing.T) {
 	t.Setenv("TMUX_PANE", "%env")
 	payload := `{"prompt":"refactor the auth layer","transcript_path":"/tmp/abc.jsonl"}`
 
-	t.Run("uses command stdout as topic", func(t *testing.T) {
-		run := func(_ context.Context, _ string, _ []byte) (string, error) {
-			return "auth refactor\n", nil
+	// claudeJSON wraps a result string in claude -p --output-format json shape.
+	claudeJSON := func(result string) string {
+		return fmt.Sprintf(`{"type":"result","subtype":"success","is_error":false,"result":%q}`, result)
+	}
+
+	t.Run("extracts the result text from claude JSON output", func(t *testing.T) {
+		run := func(_ context.Context, argv []string, _ []byte) (string, error) {
+			if argv[0] != "claude" {
+				t.Fatalf("unexpected argv: %v", argv)
+			}
+			return claudeJSON("Auth Refactor"), nil
 		}
-		pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", noPrevTopic, run)
+		pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", noPrevTopic, run)
 		if !ok || pane != "%env" || topic != "auth-refactor" {
 			t.Errorf("got pane=%q topic=%q ok=%v", pane, topic, ok)
 		}
 	})
 
-	t.Run("pipes the normalized JSON payload on stdin", func(t *testing.T) {
-		var got topicCommandPayload
-		run := func(_ context.Context, _ string, stdin []byte) (string, error) {
-			if err := json.Unmarshal(stdin, &got); err != nil {
-				t.Fatalf("payload not valid JSON: %v", err)
+	t.Run("runs recipes in order; first non-empty wins and stops the chain", func(t *testing.T) {
+		var calls []string
+		run := func(_ context.Context, argv []string, _ []byte) (string, error) {
+			calls = append(calls, argv[0])
+			switch argv[0] {
+			case "claude":
+				return "", fmt.Errorf("exit 1") // first recipe fails reason-blind
+			case "ollama":
+				return "Local Topic\n", nil // second recipe succeeds
+			}
+			return "", nil
+		}
+		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama:llama3.2"), "claude", noPrevTopic, run)
+		if !ok || topic != "local-topic" {
+			t.Errorf("got topic=%q ok=%v", topic, ok)
+		}
+		if strings.Join(calls, ",") != "claude,ollama" {
+			t.Errorf("recipe call order = %v, want claude then ollama", calls)
+		}
+	})
+
+	t.Run("first recipe success skips the rest", func(t *testing.T) {
+		ran := map[string]bool{}
+		run := func(_ context.Context, argv []string, _ []byte) (string, error) {
+			ran[argv[0]] = true
+			if argv[0] == "claude" {
+				return claudeJSON("auth refactor"), nil
+			}
+			return "should not run", nil
+		}
+		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama:llama3.2"), "claude", noPrevTopic, run)
+		if !ok || topic != "auth-refactor" {
+			t.Errorf("got topic=%q ok=%v", topic, ok)
+		}
+		if ran["ollama"] {
+			t.Error("ollama recipe must not run after claude succeeds")
+		}
+	})
+
+	t.Run("a recipe whose output normalizes to empty falls through", func(t *testing.T) {
+		run := func(_ context.Context, argv []string, _ []byte) (string, error) {
+			switch argv[0] {
+			case "claude":
+				return claudeJSON("!?-.,"), nil // punctuation only → slug ""
+			case "ollama":
+				return "real topic", nil
+			}
+			return "", nil
+		}
+		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama"), "claude", noPrevTopic, run)
+		if !ok || topic != "real-topic" {
+			t.Errorf("got topic=%q ok=%v", topic, ok)
+		}
+	})
+
+	t.Run("unknown recipe references are skipped reason-blind", func(t *testing.T) {
+		run := func(_ context.Context, argv []string, _ []byte) (string, error) {
+			if argv[0] != "ollama" {
+				t.Fatalf("only the ollama recipe should run, got %v", argv)
 			}
 			return "topic", nil
 		}
-		// The command only runs on a fresh pane (ADR 0025), so prev_topic is
-		// always empty; session still rides through the lookup.
-		lookup := func(string) (string, string) { return "", "sess" }
-		_, _, ok := deriveTopicWith(strings.NewReader(payload), []string{"%5"}, withTopicCommand("x"), "claude", lookup, run)
+		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("nope", "ollama:llama3.2"), "claude", noPrevTopic, run)
+		if !ok || topic != "topic" {
+			t.Errorf("got topic=%q ok=%v", topic, ok)
+		}
+	})
+
+	t.Run("claude recipe feeds the model prompt on stdin, not the JSON payload", func(t *testing.T) {
+		var stdin string
+		run := func(_ context.Context, _ []string, in []byte) (string, error) {
+			stdin = string(in)
+			return claudeJSON("topic"), nil
+		}
+		_, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", noPrevTopic, run)
 		if !ok {
 			t.Fatal("expected ok")
+		}
+		if !strings.Contains(stdin, "refactor the auth layer") {
+			t.Errorf("model prompt missing the user prompt: %q", stdin)
+		}
+		// The model prompt is not the JSON payload — only recipes that want it
+		// (the cmd: escape hatch) see transcript_path/pane_id.
+		if strings.Contains(stdin, "transcript_path") || strings.Contains(stdin, "pane_id") {
+			t.Errorf("claude stdin should be the model prompt, not the JSON payload: %q", stdin)
+		}
+	})
+
+	t.Run("cmd escape hatch receives the per-derive JSON payload on stdin", func(t *testing.T) {
+		var got topicRecipePayload
+		run := func(_ context.Context, argv []string, in []byte) (string, error) {
+			if argv[0] != "sh" || argv[1] != "-c" || argv[2] != "my-tool --topic" {
+				t.Fatalf("unexpected escape-hatch argv: %v", argv)
+			}
+			if err := json.Unmarshal(in, &got); err != nil {
+				t.Fatalf("payload not valid JSON: %v", err)
+			}
+			return "from script\n", nil
+		}
+		// prev_topic is always empty on a fresh pane (ADR 0025); session rides through.
+		lookup := func(string) (string, string) { return "", "sess" }
+		_, topic, ok := deriveTopicWith(strings.NewReader(payload), []string{"%5"}, withTopicAgents("cmd:my-tool --topic"), "claude", lookup, run)
+		if !ok || topic != "from-script" {
+			t.Errorf("got topic=%q ok=%v", topic, ok)
 		}
 		if got.PrevTopic != "" || got.Prompt != "refactor the auth layer" ||
 			got.TranscriptPath != "/tmp/abc.jsonl" || got.PaneID != "%5" || got.Session != "sess" {
@@ -599,41 +798,22 @@ func TestDeriveTopic_Command(t *testing.T) {
 		}
 	})
 
-	t.Run("derives once: skips the command when a Topic already exists", func(t *testing.T) {
-		ran := false
-		run := func(context.Context, string, []byte) (string, error) {
-			ran = true
-			return "new topic", nil
+	t.Run("derives once: skips every recipe when a Topic already exists", func(t *testing.T) {
+		run := func(context.Context, []string, []byte) (string, error) {
+			t.Fatal("no recipe must run when a Topic already exists")
+			return "", nil
 		}
 		lookup := func(string) (string, string) { return "existing topic", "sess" }
-		_, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", lookup, run)
+		_, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", lookup, run)
 		if ok {
 			t.Error("expected ok=false (keep existing Topic)")
 		}
-		if ran {
-			t.Error("command must not run when a Topic already exists")
-		}
 	})
 
-	t.Run("transcript_path omitted when absent", func(t *testing.T) {
-		var stdin []byte
-		run := func(_ context.Context, _ string, in []byte) (string, error) {
-			stdin = in
-			return "topic", nil
-		}
-		_, _, _ = deriveTopicWith(strings.NewReader(`{"prompt":"hi"}`), nil, withTopicCommand("x"), "claude", noPrevTopic, run)
-		if strings.Contains(string(stdin), "transcript_path") {
-			t.Errorf("transcript_path should be omitted: %s", stdin)
-		}
-	})
-
-	t.Run("normalizes long command output into a slug", func(t *testing.T) {
-		// capTopic truncates at the char cap (with an ellipsis); slugifyTopic then
-		// drops the punctuation, so the final Topic is a clean slug with no
-		// ellipsis and no run over the char cap.
+	t.Run("normalizes long recipe output into a capped slug", func(t *testing.T) {
 		long := strings.Repeat("a", topicMaxChars+10)
-		run := func(_ context.Context, _ string, _ []byte) (string, error) { return long, nil }
-		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", noPrevTopic, run)
+		run := func(_ context.Context, _ []string, _ []byte) (string, error) { return long, nil }
+		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("ollama"), "claude", noPrevTopic, run)
 		if !ok {
 			t.Fatal("expected ok")
 		}
@@ -642,25 +822,19 @@ func TestDeriveTopic_Command(t *testing.T) {
 		}
 	})
 
+	// Reason-blind fallthrough: a nonzero exit, a timeout, and empty output are
+	// treated identically — the recipe is skipped.
 	failureCases := []struct {
 		name string
-		run  topicCommandRunner
+		run  topicRecipeRunner
 	}{
-		{"non-zero exit", func(context.Context, string, []byte) (string, error) { return "", fmt.Errorf("exit 1") }},
-		{"timeout", func(ctx context.Context, _ string, _ []byte) (string, error) { return "", context.DeadlineExceeded }},
-		{"empty output", func(context.Context, string, []byte) (string, error) { return "  \n", nil }},
+		{"non-zero exit", func(context.Context, []string, []byte) (string, error) { return "", fmt.Errorf("exit 1") }},
+		{"timeout", func(context.Context, []string, []byte) (string, error) { return "", context.DeadlineExceeded }},
+		{"empty output", func(context.Context, []string, []byte) (string, error) { return "  \n", nil }},
 	}
 	for _, fc := range failureCases {
-		t.Run("keeps previous topic on "+fc.name, func(t *testing.T) {
-			lookup := func(string) (string, string) { return "kept topic", "sess" }
-			_, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", lookup, fc.run)
-			if ok {
-				t.Errorf("expected ok=false (keep previous) on %s", fc.name)
-			}
-		})
-
-		t.Run("falls back to a normalized truncation slug with no previous topic on "+fc.name, func(t *testing.T) {
-			pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicCommand("x"), "claude", noPrevTopic, fc.run)
+		t.Run("all recipes fail with no prior topic falls back to truncation on "+fc.name, func(t *testing.T) {
+			pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama:llama3.2"), "claude", noPrevTopic, fc.run)
 			if !ok || pane != "%env" || topic != "refactor-the-auth-layer" {
 				t.Errorf("got pane=%q topic=%q ok=%v on %s", pane, topic, ok, fc.name)
 			}
@@ -668,11 +842,11 @@ func TestDeriveTopic_Command(t *testing.T) {
 	}
 }
 
-// TestRunTopicCommand exercises the real `sh -c` runner end-to-end with stub
-// shell commands: success, non-zero exit, and timeout.
-func TestRunTopicCommand(t *testing.T) {
-	t.Run("success returns stdout", func(t *testing.T) {
-		out, err := runTopicCommand(context.Background(), "cat", []byte("hello"))
+// TestRunTopicRecipe exercises the real exec runner end-to-end: argv execution
+// with stdin, a non-zero exit, the empty-argv guard, and a real timeout.
+func TestRunTopicRecipe(t *testing.T) {
+	t.Run("execs argv and returns stdout", func(t *testing.T) {
+		out, err := runTopicRecipe(context.Background(), []string{"cat"}, []byte("hello"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -682,15 +856,21 @@ func TestRunTopicCommand(t *testing.T) {
 	})
 
 	t.Run("non-zero exit errors", func(t *testing.T) {
-		if _, err := runTopicCommand(context.Background(), "exit 3", nil); err == nil {
+		if _, err := runTopicRecipe(context.Background(), []string{"sh", "-c", "exit 3"}, nil); err == nil {
 			t.Error("expected error for non-zero exit")
 		}
 	})
 
+	t.Run("empty argv errors", func(t *testing.T) {
+		if _, err := runTopicRecipe(context.Background(), nil, nil); err == nil {
+			t.Error("expected error for empty argv")
+		}
+	})
+
 	t.Run("timeout errors", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 50_000_000) // 50ms
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
-		if _, err := runTopicCommand(ctx, "sleep 5", nil); err == nil {
+		if _, err := runTopicRecipe(ctx, []string{"sleep", "5"}, nil); err == nil {
 			t.Error("expected error for timeout")
 		}
 	})
