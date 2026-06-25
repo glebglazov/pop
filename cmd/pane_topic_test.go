@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
 )
 
@@ -20,64 +21,176 @@ func withTopicCommand(command string) *config.Config {
 }
 
 // TestPaneAttentionName_TopicPrecedence locks the descriptive parenthetical
-// precedence: Note → Topic → Label → pane_current_command.
+// precedence: Note → Topic → Label → pane_current_command. The Topic is read
+// from the @pop_topic option map (ADR 0058), not from monitor state, so a Note
+// in monitor state still overrides a Topic on the pane.
 func TestPaneAttentionName_TopicPrecedence(t *testing.T) {
 	paneCommands := map[string]string{"%1": "node"}
 
 	cases := []struct {
-		name  string
-		entry *monitor.PaneEntry
-		want  string
+		name   string
+		entry  *monitor.PaneEntry
+		topics map[string]string
+		want   string
 	}{
 		{
-			name:  "note wins over topic",
-			entry: &monitor.PaneEntry{PaneID: "%1", Session: "s", Note: "a note", Topic: "a topic", Label: "claude"},
-			want:  "s (a note)",
+			name:   "note wins over topic",
+			entry:  &monitor.PaneEntry{PaneID: "%1", Session: "s", Note: "a note", Label: "claude"},
+			topics: map[string]string{"%1": "a topic"},
+			want:   "s (a note)",
 		},
 		{
-			name:  "topic wins when no note",
-			entry: &monitor.PaneEntry{PaneID: "%1", Session: "s", Topic: "a topic", Label: "claude"},
-			want:  "s (a topic)",
+			name:   "topic wins when no note",
+			entry:  &monitor.PaneEntry{PaneID: "%1", Session: "s", Label: "claude"},
+			topics: map[string]string{"%1": "a topic"},
+			want:   "s (a topic)",
 		},
 		{
-			name:  "label used when no note or topic",
-			entry: &monitor.PaneEntry{PaneID: "%1", Session: "s", Label: "claude"},
-			want:  "s (%1, claude)",
+			name:   "label used when no note or topic",
+			entry:  &monitor.PaneEntry{PaneID: "%1", Session: "s", Label: "claude"},
+			topics: nil,
+			want:   "s (%1, claude)",
 		},
 		{
-			name:  "pane_current_command used when nothing else",
-			entry: &monitor.PaneEntry{PaneID: "%1", Session: "s"},
-			want:  "s (%1, node)",
+			name:   "pane_current_command used when nothing else",
+			entry:  &monitor.PaneEntry{PaneID: "%1", Session: "s"},
+			topics: nil,
+			want:   "s (%1, node)",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := paneAttentionName(tc.entry, paneCommands); got != tc.want {
+			if got := paneAttentionName(tc.entry, paneCommands, tc.topics); got != tc.want {
 				t.Errorf("paneAttentionName = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// TestPaneTopicDerived confirms the dimming flag is set only when a Topic shows
-// without a Note overriding it.
+// TestPaneTopicDerived confirms the dimming flag is set only when a Topic
+// (from @pop_topic) shows without a Note overriding it.
 func TestPaneTopicDerived(t *testing.T) {
 	cases := []struct {
-		name  string
-		entry *monitor.PaneEntry
-		want  bool
+		name   string
+		entry  *monitor.PaneEntry
+		topics map[string]string
+		want   bool
 	}{
-		{"topic without note", &monitor.PaneEntry{Topic: "t"}, true},
-		{"note overrides topic", &monitor.PaneEntry{Note: "n", Topic: "t"}, false},
-		{"no topic", &monitor.PaneEntry{Label: "claude"}, false},
+		{"topic without note", &monitor.PaneEntry{PaneID: "%1"}, map[string]string{"%1": "t"}, true},
+		{"note overrides topic", &monitor.PaneEntry{PaneID: "%1", Note: "n"}, map[string]string{"%1": "t"}, false},
+		{"no topic", &monitor.PaneEntry{PaneID: "%1", Label: "claude"}, nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := paneTopicDerived(tc.entry); got != tc.want {
+			if got := paneTopicDerived(tc.entry, tc.topics); got != tc.want {
 				t.Errorf("paneTopicDerived = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestSetPaneTopicOption verifies the Topic is written to the @pop_topic
+// per-pane user-option via set-option -p, and that an empty topic (--clear)
+// empties the option rather than touching monitor state.
+func TestSetPaneTopicOption(t *testing.T) {
+	t.Run("writes topic to @pop_topic", func(t *testing.T) {
+		var got []string
+		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+			got = args
+			return "", nil
+		}}
+		if err := setPaneTopicOption(tmux, "%7", "auth refactor"); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"set-option", "-p", "-t", "%7", "@pop_topic", "auth refactor"}
+		if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("tmux args = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("clear empties @pop_topic", func(t *testing.T) {
+		var got []string
+		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+			got = args
+			return "", nil
+		}}
+		if err := setPaneTopicOption(tmux, "%7", ""); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"set-option", "-p", "-t", "%7", "@pop_topic", ""}
+		if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("tmux args = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("no pane id is a no-op", func(t *testing.T) {
+		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+			t.Errorf("tmux must not be called without a pane id: %v", args)
+			return "", nil
+		}}
+		if err := setPaneTopicOption(tmux, "", "topic"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// TestTopicOptionLookup confirms the guard's source: it reads @pop_topic and
+// the session name off the pane via tmux, and yields empties on a tmux error
+// so a fresh/gone pane re-derives.
+func TestTopicOptionLookup(t *testing.T) {
+	t.Run("reads topic and session", func(t *testing.T) {
+		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+			if args[0] != "display-message" || args[len(args)-1] != "#{session_name}\t#{@pop_topic}" {
+				t.Fatalf("unexpected tmux call: %v", args)
+			}
+			return "proj-x\tauth refactor\n", nil
+		}}
+		topic, session := topicOptionLookup(tmux, "%7")
+		if topic != "auth refactor" || session != "proj-x" {
+			t.Errorf("got topic=%q session=%q", topic, session)
+		}
+	})
+
+	t.Run("empty option yields empty topic", func(t *testing.T) {
+		tmux := &deps.MockTmux{CommandFunc: func(...string) (string, error) {
+			return "proj-x\t\n", nil
+		}}
+		topic, session := topicOptionLookup(tmux, "%7")
+		if topic != "" || session != "proj-x" {
+			t.Errorf("got topic=%q session=%q, want empty topic", topic, session)
+		}
+	})
+
+	t.Run("tmux error yields empties", func(t *testing.T) {
+		tmux := &deps.MockTmux{CommandFunc: func(...string) (string, error) {
+			return "", fmt.Errorf("no such pane")
+		}}
+		if topic, session := topicOptionLookup(tmux, "%9"); topic != "" || session != "" {
+			t.Errorf("got topic=%q session=%q, want empties", topic, session)
+		}
+	})
+}
+
+// TestTmuxPaneTopics confirms the dashboard reads each pane's Topic from
+// @pop_topic via list-panes, keeping Topics with spaces intact and omitting
+// panes with no Topic.
+func TestTmuxPaneTopics(t *testing.T) {
+	tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+		if args[0] != "list-panes" || args[len(args)-1] != "#{pane_id}\t#{@pop_topic}" {
+			t.Fatalf("unexpected tmux call: %v", args)
+		}
+		return "%1\tauth refactor\n%2\t\n%3\twrite the tests\n", nil
+	}}
+	topics := tmuxPaneTopicsWith(tmux)
+	if topics["%1"] != "auth refactor" {
+		t.Errorf("%%1 topic = %q", topics["%1"])
+	}
+	if _, ok := topics["%2"]; ok {
+		t.Errorf("%%2 has no topic but is present: %q", topics["%2"])
+	}
+	if topics["%3"] != "write the tests" {
+		t.Errorf("%%3 topic = %q", topics["%3"])
 	}
 }
 

@@ -55,7 +55,6 @@ func init() {
 	paneSetStatusCmd.Flags().Bool("no-register", false, "only update already-tracked panes, never auto-register new ones")
 	paneSetStatusCmd.Flags().String("label", "", "display label for dashboard (e.g. cursor, claude); overrides tmux pane_current_command")
 	paneCmd.AddCommand(paneSetTopicCmd)
-	paneSetTopicCmd.Flags().Bool("no-register", false, "only update already-tracked panes, never auto-register new ones")
 	paneSetTopicCmd.Flags().Bool("clear", false, "clear the pane's topic")
 	paneSetTopicCmd.Flags().Bool("derive", false, "derive the topic from an agent hook payload read on stdin (e.g. Claude Code UserPromptSubmit)")
 	paneSetTopicCmd.Flags().String("label", "", "agent whose hook payload is on stdin (claude, codex, cursor, pi, opencode); selects the payload adapter for --derive")
@@ -608,12 +607,13 @@ var paneSetTopicCmd = &cobra.Command{
 	Long: `Set the topic of a tmux pane — a short, machine-set phrase
 describing what the pane's conversation is about.
 
+The topic is stored as the per-pane tmux user-option @pop_topic (set via
+'set-option -p', readable as '#{@pop_topic}' from any tmux format), which is
+its single source of truth (ADR 0058). It is not kept in monitor state.
+
 If pane_id is omitted, uses $TMUX_PANE from the environment. A leading
 pane_id is recognised by its '%' prefix; everything after it is the topic
-text (joined with spaces if passed as multiple words).
-
-Like set-status, the pane is auto-registered on the first call. Pass
---no-register to update only already-tracked panes. Pass --clear to wipe
+text (joined with spaces if passed as multiple words). Pass --clear to wipe
 the topic.
 
 Pass --derive to read an agent hook payload on stdin and set a derived topic.
@@ -625,10 +625,12 @@ piped to that command as a normalized JSON payload and its stdout becomes the
 topic. A missing/unparseable payload, an agent whose hook exposes no prompt
 text, or a command failure is a no-op and never clobbers an existing topic.
 
+Derive runs once per pane (ADR 0025): a pane whose @pop_topic is already
+non-empty is left untouched. The option dies with the pane, so retiring or
+restarting the pane re-derives, and --clear is a free manual refresh.
+
 The topic shows in the dashboard's descriptive parenthetical, dimmed to
-mark it machine-derived. A user-authored note always overrides it. The
-topic lives for the pane's whole monitored lifetime and is cleared only
-when the pane is retired; unfollow does not touch it.`,
+mark it machine-derived. A user-authored note always overrides it.`,
 	Args:   cobra.ArbitraryArgs,
 	Hidden: true,
 	RunE:   runPaneSetTopic,
@@ -643,25 +645,24 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 		cfg = &config.Config{}
 	}
 	clear, _ := cmd.Flags().GetBool("clear")
-	noRegister, _ := cmd.Flags().GetBool("no-register")
 	derive, _ := cmd.Flags().GetBool("derive")
 	label, _ := cmd.Flags().GetString("label")
 
 	if derive {
 		paneID, topic, ok := deriveTopic(cmd.InOrStdin(), args, cfg, label)
 		if !ok {
-			// Missing/unparseable payload, empty prompt, or a command failure
-			// with an existing Topic to keep: no-op so we never clobber it.
+			// Missing/unparseable payload, empty prompt, an existing Topic to
+			// keep, or a command failure: no-op so we never clobber it.
 			return nil
 		}
-		return runPaneSetTopicWith(defaultTmux, cfg, paneID, topic, noRegister)
+		return setPaneTopicOption(defaultTmux, paneID, topic)
 	}
 
 	paneID, topic, err := parseSetTopicArgs(clear, args)
 	if err != nil {
 		return err
 	}
-	return runPaneSetTopicWith(defaultTmux, cfg, paneID, topic, noRegister)
+	return setPaneTopicOption(defaultTmux, paneID, topic)
 }
 
 // deriveTopic reads an agent hook payload from r and resolves a Topic. The
@@ -670,12 +671,12 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 // production prev-Topic lookup and command runner; see deriveTopicWith for the
 // injectable core.
 func deriveTopic(r io.Reader, args []string, cfg *config.Config, label string) (paneID, topic string, ok bool) {
-	return deriveTopicWith(r, args, cfg, label, defaultPrevTopicLookup, runTopicCommand)
+	return deriveTopicWith(r, args, cfg, label, defaultTopicOptionLookup, runTopicCommand)
 }
 
-// prevTopicLookup returns the current Topic and session for a pane, used to
-// populate the command payload and to decide whether a failed derive can fall
-// back to truncation (no previous Topic) or must keep the existing one.
+// prevTopicLookup returns the pane's current Topic (its @pop_topic user-option,
+// the single source of truth — ADR 0058) and its session. The Topic gates the
+// once-per-pane guard; the session rides through into the command payload.
 type prevTopicLookup func(paneID string) (prevTopic, session string)
 
 // topicCommandRunner runs the user's topic command with the JSON payload on
@@ -695,12 +696,15 @@ type topicCommandPayload struct {
 	Session        string `json:"session"`
 }
 
-// deriveTopicWith is the injectable core of the derive path. With no
-// topic_command configured it falls back to slice-02 prompt truncation. With a
-// command set it pipes the normalized JSON payload and uses the command's
-// stdout (trimmed, first line, capped). On command failure/timeout/empty output
-// it keeps the previous Topic (ok=false), or — when there is no previous Topic —
-// falls back to truncating the prompt. It never blocks the agent.
+// deriveTopicWith is the injectable core of the derive path. It first applies
+// the once-per-pane guard (ADR 0025/0058): a pane whose @pop_topic is already
+// non-empty is a no-op, so the Topic the option holds is kept and a user note
+// overrides it in display. On a fresh pane it generates a Topic — truncating
+// the prompt when no topic_command is configured, otherwise piping the
+// normalized JSON payload to the command and using its stdout (trimmed, first
+// line, capped), falling back to truncation on command failure/timeout/empty
+// output. The caller writes the result to @pop_topic; this never blocks the
+// agent.
 func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label string, lookup prevTopicLookup, run topicCommandRunner) (paneID, topic string, ok bool) {
 	paneID = os.Getenv("TMUX_PANE")
 	if len(args) > 0 && strings.HasPrefix(args[0], "%") {
@@ -718,21 +722,22 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 		return "", "", false
 	}
 
+	// Derive once per pane (ADR 0025/0058): the Topic lives in @pop_topic, which
+	// dies with the pane. A pane that already has a non-empty @pop_topic never
+	// re-derives — every prompt after the first is a no-op that keeps it.
+	prevTopic, session := lookup(paneID)
+	if prevTopic != "" {
+		return "", "", false
+	}
+
 	command := cfg.PaneMonitoringTopicCommand()
 	if command == "" {
-		// No command configured: slice-02 truncation path, unchanged.
+		// No command configured: slice-02 truncation path.
 		topic = truncateTopic(prompt)
 		if topic == "" {
 			return "", "", false
 		}
 		return paneID, topic, true
-	}
-
-	prevTopic, session := lookup(paneID)
-	if prevTopic != "" {
-		// Derive once per pane (ADR 0025): a pane that already has a Topic never
-		// re-runs the command. Keep the existing Topic; a user note overrides it.
-		return "", "", false
 	}
 
 	payload, err := json.Marshal(topicCommandPayload{
@@ -836,19 +841,33 @@ func promptOnlyTopicPayload(data []byte) (prompt, transcriptPath string, err err
 	return payload.Prompt, "", nil
 }
 
-// defaultPrevTopicLookup reads the current Topic and session for a pane from
-// the monitor state on disk. A missing pane or read error yields empties.
-func defaultPrevTopicLookup(paneID string) (prevTopic, session string) {
-	state, err := monitor.Load(monitor.DefaultStatePath())
+// defaultTopicOptionLookup reads a pane's current Topic and session from tmux
+// using the production tmux dependency. The Topic is the @pop_topic user-option
+// (the single source of truth — ADR 0058), read alongside the session name.
+func defaultTopicOptionLookup(paneID string) (prevTopic, session string) {
+	return topicOptionLookup(defaultTmux, paneID)
+}
+
+// topicOptionLookup reads @pop_topic and the session name off a pane in one
+// tmux call. A read error or a pane that can't be found yields empties, so a
+// fresh (or gone) pane derives. The format puts the tab-free session name
+// first, so a Topic containing tabs still round-trips intact.
+func topicOptionLookup(tmux deps.Tmux, paneID string) (prevTopic, session string) {
+	if paneID == "" {
+		return "", ""
+	}
+	out, err := tmux.Command("display-message", "-p", "-t", paneID, "#{session_name}\t#{@pop_topic}")
 	if err != nil {
-		debug.Error("pane set-topic --derive: load state for prev topic: %v", err)
+		debug.Error("pane set-topic --derive: read @pop_topic: %v", err)
 		return "", ""
 	}
-	entry := state.Panes[paneID]
-	if entry == nil {
-		return "", ""
+	line := strings.TrimRight(out, "\n")
+	parts := strings.SplitN(line, "\t", 2)
+	session = parts[0]
+	if len(parts) == 2 {
+		prevTopic = parts[1]
 	}
-	return entry.Topic, entry.Session
+	return prevTopic, session
 }
 
 // runTopicCommand runs the user's topic_command via `sh -c`, feeding it the
@@ -933,46 +952,24 @@ func parseSetTopicArgs(clear bool, args []string) (paneID, topic string, err err
 	return paneID, strings.Join(rest, " "), nil
 }
 
-func runPaneSetTopicWith(tmux deps.Tmux, cfg *config.Config, paneID, topic string, noRegister bool) error {
+// setPaneTopicOption writes (or clears) a pane's Topic to the per-pane tmux
+// user-option @pop_topic — the single source of truth for the Topic (ADR 0058),
+// referenceable as #{@pop_topic} from any tmux format. An empty topic clears
+// the option. Unlike the old monitor-state path this writes straight to tmux:
+// no daemon, no socket, no registration — tmux serializes its own option
+// writes, and the option dies with the pane (the ADR 0025 lifecycle).
+func setPaneTopicOption(tmux deps.Tmux, paneID, topic string) error {
 	debug.Init()
 	defer debug.Close()
 
 	if paneID == "" {
 		return nil
 	}
-
-	// Daemon path when TCP server is enabled — keeps writes serialized with
-	// set-status under the daemon's mutex. Fall through to a direct write on
-	// connect failure (cold start), the same pattern set-status uses.
-	if cfg.PaneMonitoringTCPServer() {
-		resp, err := monitor.SendRequest(monitorAddr(cfg), monitor.Request{
-			Cmd:        "set-topic",
-			PaneID:     paneID,
-			Topic:      topic,
-			NoRegister: noRegister,
-		})
-		if err == nil {
-			if !resp.OK {
-				return fmt.Errorf("%s", resp.Error)
-			}
-			return nil
-		}
-		debug.Error("pane set-topic: socket send failed, falling back to direct write: %v", err)
-		paneOnSocketSendFailed()
+	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_topic", topic); err != nil {
+		debug.Error("pane set-topic: set @pop_topic on %s: %v", paneID, err)
+		return err
 	}
-
-	return runPaneSetTopicDirect(tmux, paneID, topic, noRegister)
-}
-
-// runPaneSetTopicDirect is the fallback path used when the daemon socket is
-// unavailable (cold start).
-func runPaneSetTopicDirect(tmux deps.Tmux, paneID, topic string, noRegister bool) error {
-	store := monitor.NewStore(monitor.DefaultStatePath(), nil)
-	return store.ReportTopic(tmux, monitor.ReportTopicInput{
-		PaneID:     paneID,
-		Topic:      topic,
-		NoRegister: noRegister,
-	})
+	return nil
 }
 
 // --- status ---

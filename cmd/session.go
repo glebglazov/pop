@@ -151,6 +151,31 @@ func tmuxPaneCommandsWith(tmux deps.Tmux) map[string]string {
 	return result
 }
 
+// tmuxPaneTopics returns a map of pane ID → Topic for all panes. The Topic is
+// the per-pane @pop_topic user-option (ADR 0058), so the dashboard reads it
+// straight off tmux rather than from monitor state. Panes with no (or an
+// empty) @pop_topic are omitted from the map.
+func tmuxPaneTopics() map[string]string {
+	return tmuxPaneTopicsWith(defaultTmux)
+}
+
+func tmuxPaneTopicsWith(tmux deps.Tmux) map[string]string {
+	// Tab-separate so a Topic containing spaces survives intact (pane ids are
+	// tab-free).
+	out, err := tmux.Command("list-panes", "-a", "-F", "#{pane_id}\t#{@pop_topic}")
+	if err != nil {
+		return nil
+	}
+	result := make(map[string]string)
+	for _, line := range strings.Split(out, "\n") {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 && parts[1] != "" {
+			result[parts[0]] = parts[1]
+		}
+	}
+	return result
+}
+
 // capturePanePreview captures the last 50 lines of a tmux pane for preview display
 // sessionHistoryPath returns the history path to record for a given tmux session name.
 // It searches existing history entries for one whose Session name matches,

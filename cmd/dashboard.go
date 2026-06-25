@@ -261,11 +261,12 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 	}
 
 	paneCommands := tmuxPaneCommands()
+	paneTopics := tmuxPaneTopics()
 
 	// Build panes with status
 	panes := make([]ui.AttentionPane, 0, len(entries))
 	for _, entry := range entries {
-		name := paneAttentionName(entry, paneCommands)
+		name := paneAttentionName(entry, paneCommands, paneTopics)
 
 		var status ui.AttentionStatus
 		switch entry.Status {
@@ -284,7 +285,7 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 			Note:         entry.Note,
 			Status:       status,
 			Following:    entry.Following,
-			TopicDerived: paneTopicDerived(entry),
+			TopicDerived: paneTopicDerived(entry, paneTopics),
 		})
 	}
 
@@ -514,13 +515,15 @@ func paneProcessLabel(entry *monitor.PaneEntry, paneCommands map[string]string) 
 // paneAttentionName builds the dashboard display name. The descriptive
 // parenthetical follows the precedence Note → Topic → Label → pane_current_command:
 // a user-authored Note wins; a machine-derived Topic shows only when no Note is
-// set (and is rendered dimmed by the UI — see paneTopicDerived).
-func paneAttentionName(entry *monitor.PaneEntry, paneCommands map[string]string) string {
+// set (and is rendered dimmed by the UI — see paneTopicDerived). The Topic is
+// read from the pane's @pop_topic user-option (ADR 0058), passed in via
+// paneTopics keyed by pane id.
+func paneAttentionName(entry *monitor.PaneEntry, paneCommands, paneTopics map[string]string) string {
 	if entry.Note != "" {
 		return entry.Session + " (" + entry.Note + ")"
 	}
-	if entry.Topic != "" {
-		return entry.Session + " (" + entry.Topic + ")"
+	if topic := paneTopics[entry.PaneID]; topic != "" {
+		return entry.Session + " (" + topic + ")"
 	}
 	if cmd := paneProcessLabel(entry, paneCommands); cmd != "" {
 		return entry.Session + " (" + entry.PaneID + ", " + cmd + ")"
@@ -529,8 +532,8 @@ func paneAttentionName(entry *monitor.PaneEntry, paneCommands map[string]string)
 }
 
 // paneTopicDerived reports whether the descriptive parenthetical is the
-// machine-derived Topic (shown only when no Note overrides it). The UI dims
-// the name in this case to mark it as machine-derived.
-func paneTopicDerived(entry *monitor.PaneEntry) bool {
-	return entry.Note == "" && entry.Topic != ""
+// machine-derived Topic (the pane's @pop_topic, shown only when no Note
+// overrides it). The UI dims the name in this case to mark it machine-derived.
+func paneTopicDerived(entry *monitor.PaneEntry, paneTopics map[string]string) bool {
+	return entry.Note == "" && paneTopics[entry.PaneID] != ""
 }

@@ -45,12 +45,8 @@ type PaneEntry struct {
 	Label     string     `json:"label,omitempty"`
 	Following bool       `json:"following,omitempty"`
 	Note      string     `json:"note,omitempty"`
-	// Topic is a short, machine-set phrase describing what the pane's
-	// conversation is about. Unlike a user-authored Note it carries no
-	// staleness/timestamp; it lives for the pane's whole monitored lifetime
-	// and is cleared only when the pane is retired (the whole entry is
-	// removed). unfollow does not touch it (it clears only Note).
-	Topic        string    `json:"topic,omitempty"`
+	// A pane's Topic is no longer kept here: it lives in the per-pane
+	// @pop_topic tmux user-option, the single source of truth (ADR 0058).
 	UpdatedAt    time.Time `json:"updated_at"`
 	LastActiveAt time.Time `json:"last_active_at,omitempty"`
 }
