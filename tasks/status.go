@@ -41,7 +41,7 @@ type Row struct {
 	// diagnostics so the operator fixes the environment; the set is not drained.
 	ConfigError string
 	RegIndex    int
-	AutoPick    bool
+	NextPick    bool
 	RunTarget   bool
 }
 

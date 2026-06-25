@@ -218,22 +218,24 @@ func TestSelectTaskSetAmbiguousHITLFallbackRejected(t *testing.T) {
 	}
 }
 
-func TestMarkRunTargetCombinedAndSeparate(t *testing.T) {
+func TestMarkRunTargetOverridesNextAndIsolated(t *testing.T) {
+	// A running set reads RUN, not NEXT RUN: the run-next badge no longer applies
+	// once the set is actually running.
 	rows := []Row{
-		{ID: "auto", Priority: 5, Status: StatusReady, AutoPick: true, PriorityShow: "5 AUTO"},
+		{ID: "next", Priority: 5, Status: StatusReady, NextPick: true, PriorityShow: "5 NEXT"},
 		{ID: "other", Priority: 1, Status: StatusReady, PriorityShow: "1"},
 	}
-	MarkRunTarget(rows, "auto")
-	if rows[0].PriorityShow != "5 AUTO RUN" {
-		t.Fatalf("combined = %q", rows[0].PriorityShow)
+	MarkRunTarget(rows, "next")
+	if rows[0].PriorityShow != "5 RUN" {
+		t.Fatalf("running next-pick = %q, want \"5 RUN\"", rows[0].PriorityShow)
 	}
 
 	rows = []Row{
-		{ID: "auto", Priority: 5, Status: StatusReady, AutoPick: true, PriorityShow: "5 AUTO"},
+		{ID: "next", Priority: 5, Status: StatusReady, NextPick: true, PriorityShow: "5 NEXT"},
 		{ID: "other", Priority: 1, Status: StatusReady, PriorityShow: "1"},
 	}
 	MarkRunTarget(rows, "other")
-	if rows[0].PriorityShow != "5 AUTO" || rows[1].PriorityShow != "1 RUN" {
+	if rows[0].PriorityShow != "5 NEXT" || rows[1].PriorityShow != "1 RUN" {
 		t.Fatalf("separate = %q, %q", rows[0].PriorityShow, rows[1].PriorityShow)
 	}
 }

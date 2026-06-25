@@ -115,7 +115,7 @@ func refreshWith(d *Deps, defPath, statePath string, showArchived bool) (*Refres
 		ShowArchived:     showArchived,
 	}
 	result.Rows = buildRows(state, canon, disc, manifests, showArchived)
-	MarkAutoPick(result.Rows)
+	MarkNextPick(result.Rows)
 	return result, nil
 }
 

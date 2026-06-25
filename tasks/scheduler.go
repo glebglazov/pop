@@ -288,31 +288,30 @@ func unknownTaskMessage(m *Manifest, taskID string) string {
 	return fmt.Sprintf("unknown task %q; valid: %s", taskID, strings.Join(ids, ", "))
 }
 
-// MarkAutoPick marks the highest-priority runnable Task-set row with AUTO.
-// Non-runnable higher-priority rows are skipped.
-func MarkAutoPick(rows []Row) {
+// MarkNextPick marks the highest-priority runnable Task-set row with NEXT — the
+// set a no-argument local `pop tasks implement` would drain next. Non-runnable
+// higher-priority rows are skipped. Display-only; unrelated to daemon consent.
+func MarkNextPick(rows []Row) {
 	for i := range rows {
 		if rows[i].Status != StatusReady {
 			continue
 		}
-		rows[i].AutoPick = true
-		rows[i].PriorityShow = fmt.Sprintf("%d AUTO", rows[i].Priority)
+		rows[i].NextPick = true
+		rows[i].PriorityShow = fmt.Sprintf("%d NEXT", rows[i].Priority)
 		return
 	}
 }
 
-// MarkRunTarget marks the selected Task-set row with RUN, combining with AUTO when applicable.
+// MarkRunTarget marks the selected Task-set row with RUN. A running set reads
+// RUN, never NEXT RUN: once it is actually running the run-next badge no longer
+// applies.
 func MarkRunTarget(rows []Row, taskSetID string) {
 	for i := range rows {
 		if rows[i].ID != taskSetID {
 			continue
 		}
 		rows[i].RunTarget = true
-		if rows[i].AutoPick {
-			rows[i].PriorityShow = fmt.Sprintf("%d AUTO RUN", rows[i].Priority)
-		} else {
-			rows[i].PriorityShow = fmt.Sprintf("%d RUN", rows[i].Priority)
-		}
+		rows[i].PriorityShow = fmt.Sprintf("%d RUN", rows[i].Priority)
 		return
 	}
 }

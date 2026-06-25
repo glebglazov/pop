@@ -198,7 +198,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	}
 
 	displayRows := cloneRows(refresh.Rows)
-	MarkAutoPick(displayRows)
+	MarkNextPick(displayRows)
 	MarkRunTarget(displayRows, taskSetID)
 	displayRefresh := *refresh
 	displayRefresh.Rows = displayRows

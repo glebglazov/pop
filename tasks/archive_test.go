@@ -176,7 +176,7 @@ func TestArchivedSetIsNotAutoSelected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(refresh.Rows) != 1 || refresh.Rows[0].ID != "active-low" || !refresh.Rows[0].AutoPick {
+	if len(refresh.Rows) != 1 || refresh.Rows[0].ID != "active-low" || !refresh.Rows[0].NextPick {
 		t.Fatalf("rows = %#v", refresh.Rows)
 	}
 	selected, _, err := SelectTaskSet(refresh, "")

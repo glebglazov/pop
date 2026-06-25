@@ -1064,7 +1064,11 @@ func resolveDrainWindowTarget(tmux deps.Tmux, session, dir string) (target, fres
 			return target, "", nil
 		}
 	}
-	out, err = tmux.Command("new-window", "-d", "-a", "-P", "-F", "#{pane_id}", "-t", session, "-n", drainWindowName, "-c", dir)
+	// No -a: the drain window is targeted by name (drainWindowName), so its
+	// index is irrelevant, and -a (insert after current) collides with an
+	// already-occupied next index in a live interactive session ("index N in
+	// use"). Let tmux append at the first free index instead.
+	out, err = tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", drainWindowName, "-c", dir)
 	if err != nil {
 		return "", "", fmt.Errorf("create queue window in %q: %w", session, err)
 	}

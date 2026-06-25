@@ -157,8 +157,8 @@ func TestTaskSetPriorityRefreshesTable(t *testing.T) {
 	if !strings.Contains(out, "Updated priority for feature: 0 -> 7") {
 		t.Fatalf("missing change report:\n%s", out)
 	}
-	if !strings.Contains(out, "7 AUTO") {
-		t.Fatalf("missing refreshed table with AUTO:\n%s", out)
+	if !strings.Contains(out, "7 NEXT") {
+		t.Fatalf("missing refreshed table with NEXT:\n%s", out)
 	}
 }
 
@@ -986,7 +986,7 @@ func TestRunTaskCmdDeclinedIsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("declined should succeed: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "AUTO RUN") {
+	if !strings.Contains(stdout.String(), "RUN") {
 		t.Fatalf("missing pre-run table:\n%s", stdout.String())
 	}
 	_ = root
@@ -1005,7 +1005,7 @@ func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set drain should proceed without AFK consent: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "AUTO RUN") {
+	if !strings.Contains(stdout.String(), "RUN") {
 		t.Fatalf("missing pre-run table:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "Run AFK tasks in this Task set?") {

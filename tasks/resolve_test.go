@@ -280,21 +280,21 @@ func TestSetPriorityRejectsInvalidTaskSetIdentifier(t *testing.T) {
 	}
 }
 
-func TestMarkAutoPickSkipsNonRunnableHigherPriority(t *testing.T) {
+func TestMarkNextPickSkipsNonRunnableHigherPriority(t *testing.T) {
 	rows := []Row{
 		{ID: "blocked-high", Status: StatusBlocked, Priority: 10, PriorityShow: "10"},
 		{ID: "ready-low", Status: StatusReady, Priority: 0, PriorityShow: "0"},
 	}
-	MarkAutoPick(rows)
-	if rows[0].AutoPick {
-		t.Fatal("blocked row should not be AUTO")
+	MarkNextPick(rows)
+	if rows[0].NextPick {
+		t.Fatal("blocked row should not be NEXT")
 	}
-	if !rows[1].AutoPick || rows[1].PriorityShow != "0 AUTO" {
+	if !rows[1].NextPick || rows[1].PriorityShow != "0 NEXT" {
 		t.Fatalf("ready row = %#v", rows[1])
 	}
 }
 
-func TestRefreshMarksAutoPickInRender(t *testing.T) {
+func TestRefreshMarksNextPickInRender(t *testing.T) {
 	root := t.TempDir()
 	setupManifest(t, root, "blocked", []Task{
 		{ID: "01-hitl", File: "01-hitl.md", Title: "H", Type: "HITL", Status: "open"},
@@ -328,8 +328,8 @@ func TestRefreshMarksAutoPickInRender(t *testing.T) {
 	var buf bytes.Buffer
 	Render(&buf, result)
 	out := buf.String()
-	if !strings.Contains(out, "0 AUTO") {
-		t.Fatalf("missing AUTO marker:\n%s", out)
+	if !strings.Contains(out, "0 NEXT") {
+		t.Fatalf("missing NEXT marker:\n%s", out)
 	}
 }
 

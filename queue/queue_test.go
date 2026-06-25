@@ -1079,6 +1079,14 @@ func TestResolveDrainWindowTargetCreatesQueueWindowWhenAbsent(t *testing.T) {
 	if !argsContain(newWindow, "-c", "/checkout") {
 		t.Fatalf("new-window must start in %q: %v", "/checkout", newWindow)
 	}
+	// -a (insert after current window) collides with an occupied next index in a
+	// live interactive session; the window is targeted by name, so it must not be
+	// passed.
+	for _, a := range newWindow {
+		if a == "-a" {
+			t.Fatalf("new-window must not pass -a (index collision in live session): %v", newWindow)
+		}
+	}
 }
 
 func TestResolveDrainWindowTargetReusesQueueWindowWhenPresent(t *testing.T) {

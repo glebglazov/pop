@@ -258,7 +258,7 @@ func TestRunTaskInteractivePrintsRefreshedTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "AUTO RUN") {
+	if !strings.Contains(out, "RUN") {
 		t.Fatalf("missing pre-run marker:\n%s", out)
 	}
 	if strings.Count(out, "STATUS") < 2 {
