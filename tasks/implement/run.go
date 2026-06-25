@@ -29,6 +29,9 @@ type WholeSetOptions struct {
 	ConfirmIn       io.Reader
 	ConfirmOut      io.Writer
 	Output          io.Writer
+	// PreSeedTopic pre-seeds the pane's Topic from each task's Title at drain
+	// spawn (ADR-0058); forwarded verbatim to the task-set executor.
+	PreSeedTopic func(taskTitle string)
 }
 
 // RunWholeSet orchestrates whole-set Implement: route → drain → epilogue.
@@ -61,6 +64,7 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		ConfirmOut:      opts.ConfirmOut,
 		Output:          opts.Output,
 		BindCheckout:    bindCheckout(d),
+		PreSeedTopic:    opts.PreSeedTopic,
 	})
 	if err != nil {
 		return result, err

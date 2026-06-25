@@ -1137,6 +1137,38 @@ func setPaneTopicOption(tmux deps.Tmux, paneID, topic string) error {
 	return nil
 }
 
+// preSeedTopicFromTitle returns the drain pre-seed hook (ADR 0058): at drain
+// spawn pop slugifies the task Title into the canonical Topic format (the same
+// slugifyTopic normalizer recipe-derived Topics use — ADR 0057) and writes it to
+// the current pane's @pop_topic. Because the once-per-pane guard reads
+// #{@pop_topic}, the agent's `set-topic --derive` hook then sees the option
+// already set and no-ops — a drained pane gets an accurate Topic with zero model
+// calls and zero recipe runs, while non-drain panes still fall through to the
+// recipe chain.
+//
+// It guards on the existing option so the first task in a whole-set drain wins
+// (matching the once-per-pane derive guard) and a later task never clobbers it;
+// an empty/punctuation-only Title that slugs to "" is left untouched. A pane
+// outside tmux ($TMUX_PANE unset) is a silent no-op.
+func preSeedTopicFromTitle(tmux deps.Tmux, maxWords int) func(taskTitle string) {
+	return func(taskTitle string) {
+		paneID := os.Getenv("TMUX_PANE")
+		if paneID == "" {
+			return
+		}
+		// Once per pane: a pane that already carries a Topic (a prior task in this
+		// drain, or a manual set) is never re-seeded.
+		if prev, _ := topicOptionLookup(tmux, paneID); prev != "" {
+			return
+		}
+		slug := slugifyTopic(taskTitle, maxWords)
+		if slug == "" {
+			return
+		}
+		_ = setPaneTopicOption(tmux, paneID, slug)
+	}
+}
+
 // --- status ---
 
 var paneStatusCmd = &cobra.Command{

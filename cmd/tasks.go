@@ -518,6 +518,19 @@ func taskBindCheckout(d *tasks.Deps) func(setID, projectPath, runtimePath string
 	}
 }
 
+// taskPreSeedTopic returns the drain pre-seed hook `pop tasks implement` passes
+// to the executor (ADR-0058): at drain spawn it slugifies the task Title into
+// pop's canonical Topic format and writes the current pane's @pop_topic, so the
+// agent's `set-topic --derive` hook no-ops and the drained pane carries an
+// accurate Topic with no model call.
+func taskPreSeedTopic() func(taskTitle string) {
+	maxWords := config.DefaultTopicWords
+	if cfg, err := taskConfigLoad(config.DefaultConfigPath()); err == nil && cfg != nil {
+		maxWords = cfg.PaneMonitoringTopicWords()
+	}
+	return preSeedTopicFromTitle(defaultTmux, maxWords)
+}
+
 func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskPath string, agentExplicit bool) error {
 	timeout, err := time.ParseDuration(taskTimeout)
 	if err != nil {
@@ -539,6 +552,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		ConfirmOut:       stderr,
 		Output:           stdout,
 		BindCheckout:     taskBindCheckout(d),
+		PreSeedTopic:     taskPreSeedTopic(),
 	})
 	if err != nil {
 		return err
@@ -575,6 +589,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		ConfirmIn:       stdin,
 		ConfirmOut:      stderr,
 		Output:          stdout,
+		PreSeedTopic:    taskPreSeedTopic(),
 	})
 	return err
 }

@@ -136,6 +136,110 @@ func TestSetPaneTopicOption(t *testing.T) {
 	})
 }
 
+// TestPreSeedTopicFromTitle covers the drain pre-seed hook (ADR 0058): at drain
+// spawn pop slugifies the task Title (with the same slugifyTopic normalizer
+// recipe-derived Topics use) and writes @pop_topic, guarding on the existing
+// option so the first task in a whole-set drain wins and a pane outside tmux or
+// an unsluggable Title is a no-op.
+func TestPreSeedTopicFromTitle(t *testing.T) {
+	t.Run("seeds @pop_topic from the slugified Title", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "%7")
+		var wrote []string
+		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "display-message": // once-per-pane guard read: no prior Topic
+				return "proj-x\t\n", nil
+			case "set-option":
+				wrote = args
+				return "", nil
+			}
+			t.Fatalf("unexpected tmux call: %v", args)
+			return "", nil
+		}}
+		preSeedTopicFromTitle(tmux, 5)("Drain pre-seeds Topic from task Title")
+		// slugifyTopic with maxWords=5 keeps the first 5 words; "pre-seeds" splits
+		// into two, so the kebab slug is drain/pre/seeds/topic/from.
+		want := []string{"set-option", "-p", "-t", "%7", "@pop_topic", "drain-pre-seeds-topic-from"}
+		if strings.Join(wrote, "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("set-option args = %v, want %v", wrote, want)
+		}
+	})
+
+	t.Run("uses the same format as recipe-derived Topics", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "%7")
+		var seeded string
+		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+			if args[0] == "display-message" {
+				return "proj-x\t\n", nil
+			}
+			if args[0] == "set-option" {
+				seeded = args[len(args)-1]
+			}
+			return "", nil
+		}}
+		title := "Refactor the Auth Layer!"
+		preSeedTopicFromTitle(tmux, 5)(title)
+		// The pre-seed and the derive path normalize through the one slugifyTopic.
+		if want := slugifyTopic(title, 5); seeded != want {
+			t.Errorf("pre-seeded slug = %q, want slugifyTopic output %q", seeded, want)
+		}
+	})
+
+	t.Run("no-op when @pop_topic is already set (first task wins)", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "%7")
+		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "display-message":
+				return "proj-x\tearlier-topic\n", nil // pane already carries a Topic
+			case "set-option":
+				t.Errorf("must not re-seed a pane that already has a Topic: %v", args)
+			}
+			return "", nil
+		}}
+		preSeedTopicFromTitle(tmux, 5)("A Later Task Title")
+	})
+
+	t.Run("no-op outside tmux", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
+		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+			t.Errorf("tmux must not be touched without a pane: %v", args)
+			return "", nil
+		}}
+		preSeedTopicFromTitle(tmux, 5)("Some Title")
+	})
+
+	t.Run("unsluggable Title is a no-op", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "%7")
+		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+			if args[0] == "set-option" {
+				t.Errorf("punctuation-only Title must not write a Topic: %v", args)
+			}
+			return "proj-x\t\n", nil
+		}}
+		preSeedTopicFromTitle(tmux, 5)("!?-.,")
+	})
+}
+
+// TestDeriveTopic_SkipsPreSeededPane confirms the payoff of the pre-seed (ADR
+// 0058): once pop has written @pop_topic at drain spawn, the agent's
+// `set-topic --derive` hook sees it via the once-per-pane guard and no-ops —
+// no recipe runs, no model call — so a drained pane never re-derives over its
+// pre-seeded Topic.
+func TestDeriveTopic_SkipsPreSeededPane(t *testing.T) {
+	t.Setenv("TMUX_PANE", "%7")
+	preSeeded := "drain-pre-seeds-topic-from-task"
+	lookup := func(string) (string, string) { return preSeeded, "proj-x" }
+	run := func(context.Context, []string, []byte) (string, error) {
+		t.Fatal("no recipe must run for a pre-seeded pane")
+		return "", nil
+	}
+	payload := `{"prompt":"refactor the auth layer"}`
+	_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", lookup, run)
+	if ok || topic != "" {
+		t.Errorf("derive on a pre-seeded pane = (topic=%q ok=%v), want no-op", topic, ok)
+	}
+}
+
 // TestTopicOptionLookup confirms the guard's source: it reads @pop_topic and
 // the session name off the pane via tmux, and yields empties on a tmux error
 // so a fresh/gone pane re-derives.

@@ -73,6 +73,13 @@ type RunTaskOptions struct {
 	// path: it adopts the current checkout into the binding model (ADR-0036)
 	// once the run has committed to its set and runtime checkout.
 	BindCheckout func(setID, projectPath, runtimePath string) error
+	// PreSeedTopic, when set, pre-seeds the pane's Topic from the task Title at
+	// drain spawn (ADR-0058): the caller slugifies the Title into the canonical
+	// Topic format and writes @pop_topic, so the agent's `set-topic --derive`
+	// hook no-ops on the first prompt — a drained pane gets an accurate Topic
+	// with no model call. Invoked once, after the task is selected and the run
+	// is confirmed, before the agent's first prompt.
+	PreSeedTopic func(taskTitle string)
 }
 
 // RunTaskResult is the outcome of a successful or declined run-task.
@@ -245,6 +252,13 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.TaskSetID, sel.TaskID, strategy, commitOverrides, confirmOut); err != nil {
 			return nil, taskExitErr(sel, ExitOperational, "dirty-runtime strategy: %v", err)
 		}
+	}
+
+	// Pre-seed the pane's Topic from the task Title before the agent's first
+	// prompt (ADR-0058), so the derive hook no-ops and the drained pane carries
+	// an accurate Topic with no model call.
+	if opts.PreSeedTopic != nil {
+		opts.PreSeedTopic(sel.Task.Title)
 	}
 
 	basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
