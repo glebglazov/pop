@@ -69,6 +69,15 @@ func ResolveRepositoryIdentity(d *Deps, cwd string) (*RepositoryIdentity, error)
 	return identityFromCommonDir(d, cwd, commonDir)
 }
 
+// IdentityFromCommonDir derives a repository identity from a canonical git
+// common directory already recorded on disk (a repo.json marker's
+// repository_path), performing no git invocation (ADR-0060). The common
+// directory is expected to be absolute, as markers record it; derivation is a
+// sha256 plus path operations.
+func IdentityFromCommonDir(d *Deps, commonDir string) (*RepositoryIdentity, error) {
+	return identityFromCommonDir(d, "", commonDir)
+}
+
 // identityFromCommonDir derives the repository identity from a git common
 // directory already obtained by the caller (relative to gitCwd, as git reports
 // it). It performs no git invocation, letting bulk resolvers fetch the common

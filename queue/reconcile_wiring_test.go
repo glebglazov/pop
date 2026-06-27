@@ -50,10 +50,10 @@ func TestBuildDashboardReconcilesBeforeReading(t *testing.T) {
 		Reconcile:  func() (int, error) { reconciled++; return 0, nil },
 	}
 
-	if _, err := BuildDashboardWith(d, cfg, nil); err != nil {
-		t.Fatalf("BuildDashboardWith: %v", err)
+	if _, err := BuildDashboard(d, cfg); err != nil {
+		t.Fatalf("BuildDashboard: %v", err)
 	}
 	if reconciled != 1 {
-		t.Fatalf("reconcile ran %d times during BuildDashboardWith, want 1", reconciled)
+		t.Fatalf("reconcile ran %d times during BuildDashboard, want 1", reconciled)
 	}
 }
