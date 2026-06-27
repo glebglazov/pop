@@ -29,7 +29,7 @@ var opencodeExtensionFile []byte
 type componentOutcome struct {
 	Agent     string
 	Component ComponentID
-	Label     string // "added" | "updated" | "already current" | "skipped (opted out)" | "skipped (conflict at <path>)"
+	Label     string // "added" | "updated" | "already current" | "skipped (opted out)" | "skipped (conflict at <path>)" | "overwritten (not owned by pop at <path>)"
 }
 
 // verboseOnly returns true when this outcome should be suppressed unless the
@@ -108,8 +108,8 @@ func installComponentCollectOutcome(d *integrateDeps, home, agent string, comp i
 	if err != nil {
 		return componentOutcome{}, fmt.Errorf("conflict check for %s/%s: %w", agent, id, err)
 	}
-	if conflict {
-		return componentOutcome{Agent: agent, Component: id, Label: "skipped (conflict at " + conflictPath + ")"}, nil
+	if conflict && !d.overwriteConflicts {
+		return componentOutcome{Agent: agent, Component: id, Label: conflictSkipLabel(agent, conflictPath)}, nil
 	}
 
 	installed, err := fileComponentInstalled(d, home, id, agent)
@@ -123,13 +123,43 @@ func installComponentCollectOutcome(d *integrateDeps, home, agent string, comp i
 		}
 	}
 
-	quietD := *d
-	quietD.stdout = nil
-	if err := installFileComponent(&quietD, home, id, agent); err != nil {
+	installD := *d
+	installD.agentName = agent
+	if !d.overwriteConflicts {
+		installD.stdout = nil
+	}
+	if err := installFileComponent(&installD, home, id, agent); err != nil {
 		return componentOutcome{}, err
+	}
+	if len(installD.overwrotePaths) > 0 {
+		return componentOutcome{
+			Agent:     agent,
+			Component: id,
+			Label:     "overwritten (not owned by pop at " + installD.overwrotePaths[0] + ")",
+		}, nil
+	}
+	if conflictPath, stillConflict, err := componentConflict(&installD, home, id, agent); err != nil {
+		return componentOutcome{}, fmt.Errorf("conflict check for %s/%s: %w", agent, id, err)
+	} else if stillConflict {
+		return componentOutcome{Agent: agent, Component: id, Label: conflictSkipLabel(agent, conflictPath)}, nil
 	}
 	label := installLabel(!installed, installed && stale)
 	return componentOutcome{Agent: agent, Component: id, Label: label}, nil
+}
+
+// conflictSkipLabel formats the reasoned outcome for an Integration conflict
+// that was skipped, naming the exact command that resolves it.
+func conflictSkipLabel(agent, conflictPath string) string {
+	return fmt.Sprintf("skipped (conflict at %s; run 'pop integrate %s --overwrite-conflicts' to replace it)", conflictPath, agent)
+}
+
+// reportOverwriteDestroyed prints a loud per-item report after hard-deleting an
+// unowned entry during --overwrite-conflicts. No backup is kept.
+func reportOverwriteDestroyed(out io.Writer, conflictPath string) {
+	if out == nil {
+		return
+	}
+	fmt.Fprintf(out, "  OVERWRITE: destroyed %s (not owned by pop — no backup kept)\n", conflictPath)
 }
 
 // integrateDeps holds the filesystem operations the integrate command depends
@@ -184,6 +214,18 @@ type integrateDeps struct {
 	DryRun    bool
 	changed   bool
 	installed bool
+
+	// Explicit-install conflict overwrite (ADR 0011): when overwriteConflicts is
+	// true, unowned entries may be destroyed after per-item confirmation
+	// (assumeYes or interactive prompt). Refresh never sets these fields.
+	overwriteConflicts bool
+	assumeYes          bool
+	interactive        bool
+	agentName          string
+
+	// overwrotePaths records agent-location paths hard-deleted during an
+	// overwrite-conflicts run; used for outcome labelling.
+	overwrotePaths []string
 }
 
 func defaultIntegrateDeps() *integrateDeps {
@@ -308,6 +350,15 @@ var integrateNoTaskSkills bool
 // "skipped (opted out)" outcomes on the --update-existing path are shown
 // instead of suppressed.
 var integrateVerbose bool
+
+// integrateOverwriteConflicts opts into the explicit-install overwrite flow:
+// per-item confirmation (or --yes) before destroying unowned entries that
+// shadow pop's integration artifacts. Invalid with --update-existing.
+var integrateOverwriteConflicts bool
+
+// integrateYes skips all integrate confirmation prompts, including conflict
+// overwrites when combined with --overwrite-conflicts.
+var integrateYes bool
 
 var integrateCmd = &cobra.Command{
 	Use:   "integrate <agent>...",
@@ -439,12 +490,19 @@ func init() {
 		"Remove the task planning skills if installed (pop-owned only) and record the opt-out")
 	integrateCmd.Flags().BoolVar(&integrateVerbose, "verbose", false,
 		"Show all outcomes including already-current no-ops and opted-out components")
+	integrateCmd.Flags().BoolVar(&integrateOverwriteConflicts, "overwrite-conflicts", false,
+		"On explicit install, prompt to destroy unowned entries that block pop's integration artifacts")
+	integrateCmd.Flags().BoolVarP(&integrateYes, "yes", "y", false,
+		"Assume yes to all integrate prompts (including conflict overwrites)")
 	integrateCmd.AddCommand(integrateRemoveCmd)
 	rootCmd.AddCommand(integrateCmd)
 }
 
 func runIntegrate(cmd *cobra.Command, args []string) error {
 	if integrateUpdateExisting {
+		if integrateOverwriteConflicts {
+			return fmt.Errorf("--overwrite-conflicts cannot be used with --update-existing")
+		}
 		return runIntegrateUpdateExisting()
 	}
 	var optins []ComponentID
@@ -487,7 +545,8 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 
 	// Install each agent in order with the same flags applied uniformly.
 	for _, agent := range args {
-		if err := runIntegrateComponents(defaultIntegrateDeps(), agent, optins, stdinIsInteractive(), integrateVerbose, explicitOptOuts); err != nil {
+		d := defaultIntegrateDeps()
+		if err := runIntegrateComponents(d, agent, optins, stdinIsInteractive(), integrateVerbose, explicitOptOuts, integrateOverwriteConflicts, integrateYes); err != nil {
 			return err
 		}
 	}
@@ -524,8 +583,12 @@ func stdinIsInteractive() bool {
 // component is installed (pop-owned), it is removed and "removed (opted out)"
 // is reported; if not installed, "skipped (opted out)" is reported. A
 // component in both installSet and explicitOptOuts is installed (install wins).
-func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID, interactive bool, verbose bool, explicitOptOuts map[ComponentID]bool) error {
+func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID, interactive bool, verbose bool, explicitOptOuts map[ComponentID]bool, overwriteConflicts, assumeYes bool) error {
 	agent = strings.ToLower(agent)
+	d.overwriteConflicts = overwriteConflicts
+	d.assumeYes = assumeYes
+	d.interactive = interactive
+	d.agentName = agent
 
 	core, ok := lookupComponent(ComponentStatusWiring)
 	if !ok {
@@ -1214,7 +1277,7 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 		if checkDeps.logf != nil {
 			checkDeps.logf("refreshFileComponent: %s/%s skipped — conflict at %s (not owned by pop)", agent, id, conflictPath)
 		}
-		return &componentOutcome{Agent: agent, Component: id, Label: "skipped (conflict at " + conflictPath + ")"}, ""
+		return &componentOutcome{Agent: agent, Component: id, Label: conflictSkipLabel(agent, conflictPath)}, ""
 	}
 
 	installed, err := fileComponentInstalled(checkDeps, home, id, agent)

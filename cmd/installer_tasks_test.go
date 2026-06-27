@@ -120,7 +120,7 @@ func TestRunIntegrateTaskSkillsInstallsExactSet(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			if err := runIntegrateComponents(d, a.name, []ComponentID{ComponentTaskSkills}, false, false, nil); err != nil {
+			if err := runIntegrateComponents(d, a.name, []ComponentID{ComponentTaskSkills}, false, false, nil, false, false); err != nil {
 				t.Fatalf("runIntegrateComponents(%s): %v", a.name, err)
 			}
 
@@ -190,7 +190,7 @@ func TestRunIntegrateTaskSkillsUnsupported(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			err := runIntegrateComponents(d, agent, []ComponentID{ComponentTaskSkills}, false, false, nil)
+			err := runIntegrateComponents(d, agent, []ComponentID{ComponentTaskSkills}, false, false, nil, false, false)
 			if err == nil {
 				t.Fatalf("expected not-supported error for %s --task-skills", agent)
 			}

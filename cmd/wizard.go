@@ -1,21 +1,27 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
-// The per-component consent wizard (ADR 0010) has been retired: `pop integrate
-// <agent>` now installs the full default set without prompting (ADR 0064). The
-// component state-computation helpers below survive because Doctor and
-// Integration refresh consume them to report and reconcile component state.
+// The Integration wizard (ADR 0010) is the interactive form of
+// `pop integrate <agent>`: a re-entrant, step-by-step consent flow over the
+// component catalog. It installs the core status wiring with no prompt (consent
+// is implied by running the command), then walks one explained y/n step per
+// opt-in component in catalog order. Declining any step skips it and the
+// wizard continues. Each step first reports the component's current state; conflict
+// and not-supported states print their report instead of prompting. The wizard
+// closes with a note that re-running adds or removes components at any time.
 
-// componentStateKind enumerates the states a component can be in for an agent.
-// Doctor reports these; refresh reconciles against them.
+// componentStateKind enumerates the states a component can be in for an agent,
+// as shown to the user before each wizard step. These mirror the states Doctor
+// reports in a later slice.
 type componentStateKind int
 
 const (
@@ -31,6 +37,108 @@ const (
 type componentStateInfo struct {
 	kind         componentStateKind
 	conflictPath string
+}
+
+// runIntegrateWizard drives the interactive wizard for an agent. It assumes the
+// agent is known and supported (the caller guards that) and that d.stdin is a
+// terminal (the caller gates on interactivity).
+func runIntegrateWizard(d *integrateDeps, home, agent string) error {
+	out := d.stdout
+	in := bufio.NewReader(stdinOrEmpty(d.stdin))
+
+	// Core step — installed with no prompt; consent is implied by running the
+	// integrate command at all (ADR 0010 consent gradient).
+	if out != nil {
+		fmt.Fprintf(out, "Integrating pop with %s.\n\n", agent)
+		fmt.Fprintf(out, "Core: status wiring\n")
+		fmt.Fprintf(out, "  Makes %s report pane status to pop's monitor. It changes no agent\n", agent)
+		fmt.Fprintf(out, "  behavior, so it installs without a prompt.\n")
+	}
+	core, ok := lookupComponent(ComponentStatusWiring)
+	if !ok {
+		return fmt.Errorf("status-wiring component missing from catalog")
+	}
+	if err := core.install(d, home, agent); err != nil {
+		return err
+	}
+
+	// Opt-in steps in catalog order.
+	for _, comp := range integrationCatalog {
+		switch comp.id {
+		case ComponentStatusWiring:
+			continue
+		case ComponentPaneSkill:
+			if err := wizardFileComponentStep(d, home, agent, in, comp.id, "Pane skill", paneSkillExplanation); err != nil {
+				return err
+			}
+		case ComponentTaskSkills:
+			if err := wizardFileComponentStep(d, home, agent, in, comp.id, "Task planning skills", taskSkillsExplanation); err != nil {
+				return err
+			}
+		}
+	}
+
+	if out != nil {
+		fmt.Fprintf(out, "\nDone. Re-run `pop integrate %s` anytime to add or remove components.\n", agent)
+	}
+	return nil
+}
+
+const paneSkillExplanation = `  The pane skill lets the agent drive tmux panes directly: running long
+  processes in named panes, watching their output, sending input, and
+  marking panes for your attention. This injects new agent behavior, so it
+  is opt-in.`
+
+const taskSkillsExplanation = `  The task planning skills install pop's planning-to-execution flow:
+  a grilling session that stress-tests your design (grill-with-docs), then
+  a PRD (to-prd), then a breakdown into independently-runnable tasks
+  (to-tasks) that ` + "`pop tasks implement`" + ` executes, one agent per task.`
+
+// wizardFileComponentStep runs one wizard step for a file-based opt-in
+// component (the pane skill, the task planning skills). It reports the
+// component's current state; for conflict and not-supported it prints the
+// report and returns without prompting, otherwise it explains the component and
+// asks y/n, installing on yes.
+func wizardFileComponentStep(d *integrateDeps, home, agent string, in *bufio.Reader, id ComponentID, title, explanation string) error {
+	out := d.stdout
+	state, err := wizardFileComponentState(d, home, id, agent)
+	if err != nil {
+		return err
+	}
+	if out != nil {
+		fmt.Fprintf(out, "\n%s\n", title)
+	}
+	switch state.kind {
+	case stateNotSupported:
+		if out != nil {
+			fmt.Fprintf(out, "  Not supported for %s — skipping (pop never installs a degraded version).\n", agent)
+		}
+		return nil
+	case stateConflict:
+		if out != nil {
+			fmt.Fprintf(out, "  Conflict: %s exists and is not owned by pop.\n", state.conflictPath)
+			fmt.Fprintf(out, "  Remove it and re-run the wizard to install pop's version.\n")
+		}
+		return nil
+	case stateInstalledCurrent:
+		fmt.Fprintf(orDiscard(out), "  Currently: installed and up to date.\n")
+	case stateStale:
+		fmt.Fprintf(orDiscard(out), "  Currently: installed but out of date.\n")
+	case stateNotInstalled:
+		fmt.Fprintf(orDiscard(out), "  Currently: not installed.\n")
+	}
+	if out != nil {
+		fmt.Fprintf(out, "%s\n", explanation)
+	}
+	yes, err := promptYesNo(in, out, "Install "+strings.ToLower(title)+"?")
+	if err != nil {
+		return err
+	}
+	if !yes {
+		fmt.Fprintf(orDiscard(out), "  Skipped.\n")
+		return nil
+	}
+	return installFileComponent(d, home, id, agent)
 }
 
 // wizardFileComponentState computes the displayable state of a file-based
@@ -75,8 +183,7 @@ func wizardFileComponentState(d *integrateDeps, home string, id ComponentID, age
 // conflict, ADR 0011).
 func componentConflict(d *integrateDeps, home string, id ComponentID, agent string) (string, bool, error) {
 	agent = strings.ToLower(agent)
-	prefix := d.resolveSkillPrefix()
-	tree, err := renderComponent(id, agent, prefix)
+	tree, err := renderComponent(id, agent)
 	if err != nil {
 		return "", false, err
 	}
@@ -96,7 +203,7 @@ func componentConflict(d *integrateDeps, home string, id ComponentID, agent stri
 			continue
 		}
 		seen[name] = true
-		p, conflict, err := skillConflict(d, agentDir, name, integrationsRoot, prefix)
+		p, conflict, err := skillConflict(d, agentDir, name, integrationsRoot)
 		if err != nil {
 			return "", false, err
 		}
@@ -113,7 +220,7 @@ func componentConflict(d *integrateDeps, home string, id ComponentID, agent stri
 // this to be meaningful; callers check installed first.
 func fileComponentStale(d *integrateDeps, home string, id ComponentID, agent string) (bool, error) {
 	agent = strings.ToLower(agent)
-	tree, err := renderComponent(id, agent, d.resolveSkillPrefix())
+	tree, err := renderComponent(id, agent)
 	if err != nil {
 		return false, err
 	}
@@ -137,62 +244,44 @@ func fileComponentStale(d *integrateDeps, home string, id ComponentID, agent str
 	return false, nil
 }
 
-// fileComponentStaleResolved reports whether the installed state of a file
-// component diverges from the expected resolved state (ADR 0063), the reconcile
-// definition of "stale". It generalises fileComponentStale's content check with
-// a resolved-name check: the caller passes the set of pop-owned entry names
-// currently installed for this component (from fileComponentInstalledNames), and
-// this compares it against the freshly resolved render names.
-//
-// Two kinds of divergence make a component stale:
-//   - Name: the set of installed owned names ≠ the set the current config/binary
-//     would render (a skill_prefix change or a base rename — `pop-pane` →
-//     `pop-tmux-pane`). The wrong name being linked, or the right name missing,
-//     both surface here even when the rendered bytes are identical.
-//   - Content: names match but the rendered bytes on disk differ from a fresh
-//     render (the original staleness, preserved).
-//
-// Re-rendering and re-linking under the resolved name and pruning the old entry
-// is handled by installFileComponent, which the caller invokes when stale.
-func fileComponentStaleResolved(d *integrateDeps, home string, id ComponentID, agent string, installedNames map[string]bool) (bool, error) {
-	agent = strings.ToLower(agent)
-	tree, err := renderComponent(id, agent, d.resolveSkillPrefix())
-	if err != nil {
-		return false, err
+// promptYesNo writes the prompt and reads one line, returning true only for an
+// affirmative answer. An empty answer, EOF, or nil input is a decline — the
+// wizard's default for every opt-in step is "no".
+func promptYesNo(in *bufio.Reader, out io.Writer, prompt string) (bool, error) {
+	if in == nil {
+		return false, nil
 	}
-	expected := map[string]bool{}
-	for rel := range tree {
-		expected[firstSegment(rel)] = true
+	if out != nil {
+		fmt.Fprintf(out, "%s [y/N]: ", prompt)
 	}
-	if !nameSetsEqual(installedNames, expected) {
-		if d.logf != nil {
-			d.logf("fileComponentStaleResolved: %s/%s resolved-name divergence installed=%v expected=%v — stale",
-				agent, id, sortedSet(installedNames), sortedSet(expected))
-		}
-		return true, nil // resolved install name differs from what's installed
+	line, err := in.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return false, fmt.Errorf("read confirmation: %w", err)
 	}
-	return fileComponentStale(d, home, id, agent)
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes", nil
 }
 
-// nameSetsEqual reports whether two name sets hold exactly the same keys.
-func nameSetsEqual(a, b map[string]bool) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k := range a {
-		if !b[k] {
-			return false
-		}
-	}
-	return true
+// promptOverwriteConflict asks whether to destroy an unowned entry blocking an
+// integration install. Default is No (empty/Enter declines).
+func promptOverwriteConflict(in io.Reader, out io.Writer, conflictPath string) (bool, error) {
+	return promptYesNo(bufio.NewReader(stdinOrEmpty(in)), out, fmt.Sprintf("Overwrite %s? It is not owned by pop", conflictPath))
 }
 
-// sortedSet returns the keys of a name set in sorted order, for stable logs.
-func sortedSet(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
+// stdinOrEmpty returns r, or an always-EOF reader when r is nil, so the wizard
+// declines every prompt rather than panicking on a nil reader.
+func stdinOrEmpty(r io.Reader) io.Reader {
+	if r == nil {
+		return strings.NewReader("")
 	}
-	sort.Strings(out)
-	return out
+	return r
+}
+
+// orDiscard returns w, or io.Discard when w is nil, so state lines can be
+// written unconditionally without nil checks at every call site.
+func orDiscard(w io.Writer) io.Writer {
+	if w == nil {
+		return io.Discard
+	}
+	return w
 }

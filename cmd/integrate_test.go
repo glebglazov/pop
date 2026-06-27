@@ -2274,11 +2274,11 @@ func TestIntegrateCmd_MultiAgentInstall(t *testing.T) {
 	// so we use non-empty optins just to test multi-agent behavior.
 	optins := []ComponentID{ComponentPaneSkill}
 
-	if err := runIntegrateComponents(fakeDeps("/h", fs, &out), "claude", optins, false, false, nil); err != nil {
+	if err := runIntegrateComponents(fakeDeps("/h", fs, &out), "claude", optins, false, false, nil, false, false); err != nil {
 		t.Fatalf("claude install: %v", err)
 	}
 
-	if err := runIntegrateComponents(fakeDeps("/h", fs, &out), "pi", optins, false, false, nil); err != nil {
+	if err := runIntegrateComponents(fakeDeps("/h", fs, &out), "pi", optins, false, false, nil, false, false); err != nil {
 		t.Fatalf("pi install: %v", err)
 	}
 
@@ -2302,12 +2302,12 @@ func TestIntegrateCmd_MultiAgentWithUniformFlags(t *testing.T) {
 	optins := []ComponentID{ComponentPaneSkill}
 
 	// Install claude with pane skill.
-	if err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "claude", optins, false, false, nil); err != nil {
+	if err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "claude", optins, false, false, nil, false, false); err != nil {
 		t.Fatalf("claude install: %v", err)
 	}
 
 	// Install pi with same flags (pane skill).
-	if err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "pi", optins, false, false, nil); err != nil {
+	if err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "pi", optins, false, false, nil, false, false); err != nil {
 		t.Fatalf("pi install: %v", err)
 	}
 
@@ -2325,7 +2325,7 @@ func TestIntegrateCmd_UnknownAgentIsRejected(t *testing.T) {
 	fs := newFakeFS()
 
 	// Unknown agent should produce an error.
-	err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "vscode", []ComponentID{}, false, false, nil)
+	err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "vscode", []ComponentID{}, false, false, nil, false, false)
 	if err == nil {
 		t.Fatal("expected error for unknown agent vscode")
 	}
@@ -2368,7 +2368,7 @@ func TestExplicitInstall_OutputAdded(t *testing.T) {
 	d := fakeDeps(installerHome, fs, &out)
 
 	// Install only status-wiring (no opt-in flags).
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil, false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2394,7 +2394,7 @@ func TestExplicitInstall_OutputUpdated(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(installerHome, fs, &out)
 
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil, false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2413,7 +2413,7 @@ func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
 	d := fakeDeps(installerHome, fs, &out)
 
 	// codex only supports status-wiring; task-skills and pane-skill are unsupported.
-	if err := runIntegrateComponents(d, "codex", []ComponentID{ComponentStatusWiring}, false, false, nil); err != nil {
+	if err := runIntegrateComponents(d, "codex", []ComponentID{ComponentStatusWiring}, false, false, nil, false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2431,7 +2431,7 @@ func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
 	out.Reset()
 	fs2 := newFakeFS()
 	d2 := fakeDeps(installerHome, fs2, &out)
-	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil); err != nil {
+	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil, false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got2 := out.String()
@@ -2452,7 +2452,7 @@ func TestExplicitInstall_OutputSkippedConflict(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(installerHome, fs, &out)
 
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil, false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2463,6 +2463,9 @@ func TestExplicitInstall_OutputSkippedConflict(t *testing.T) {
 	// The conflict path should appear in the output.
 	if !strings.Contains(got, conflictPath) {
 		t.Errorf("expected conflict path %q in output, got %q", conflictPath, got)
+	}
+	if !strings.Contains(got, "pop integrate claude --overwrite-conflicts") {
+		t.Errorf("conflict skip must name the overwrite resolve command, got %q", got)
 	}
 	// status-wiring should still be installed (conflict only affects pane-skill).
 	settingsPath := filepath.Join(installerHome, ".claude", "settings.json")
@@ -2484,14 +2487,14 @@ func TestExplicitInstall_VerboseShowsAlreadyCurrent(t *testing.T) {
 	fs := newFakeFS()
 	// First install to set up current content.
 	d0 := fakeDeps(installerHome, fs, io.Discard)
-	if err := runIntegrateComponents(d0, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil); err != nil {
+	if err := runIntegrateComponents(d0, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil, false, false); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
 	// Re-run without verbose: "already current" should be suppressed → "nothing to do" or opted-out lines only.
 	var outNoVerbose bytes.Buffer
 	d1 := fakeDeps(installerHome, fs, &outNoVerbose)
-	if err := runIntegrateComponents(d1, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil); err != nil {
+	if err := runIntegrateComponents(d1, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil, false, false); err != nil {
 		t.Fatalf("re-run no verbose: %v", err)
 	}
 	if strings.Contains(outNoVerbose.String(), "already current") {
@@ -2501,7 +2504,7 @@ func TestExplicitInstall_VerboseShowsAlreadyCurrent(t *testing.T) {
 	// Re-run with verbose: "already current" should appear for both components.
 	var outVerbose bytes.Buffer
 	d2 := fakeDeps(installerHome, fs, &outVerbose)
-	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, true, nil); err != nil {
+	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, true, nil, false, false); err != nil {
 		t.Fatalf("re-run verbose: %v", err)
 	}
 	if !strings.Contains(outVerbose.String(), "already current") {
@@ -2589,6 +2592,9 @@ func TestUpdateExisting_OutputSkippedConflict(t *testing.T) {
 	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (conflict") {
 		t.Errorf("expected 'pane-skill  skipped (conflict' line, got %q", got)
 	}
+	if !strings.Contains(got, "pop integrate claude --overwrite-conflicts") {
+		t.Errorf("refresh conflict skip must name the overwrite resolve command, got %q", got)
+	}
 }
 
 // TestUpdateExisting_VerboseShowsAlreadyCurrent: "already current" outcomes are
@@ -2655,7 +2661,7 @@ func TestOptOutRemoval_PaneSkill_RemovesInstalled(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2695,7 +2701,7 @@ func TestOptOutRemoval_TaskSkills_RemovesInstalled(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
 	optOuts := map[ComponentID]bool{ComponentTaskSkills: true}
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2721,7 +2727,7 @@ func TestOptOutRemoval_NotInstalled_SkipsOptedOut(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2749,7 +2755,7 @@ func TestOptOutRemoval_LeavesUnownedUntouched(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2784,7 +2790,7 @@ func TestOptOutRemoval_NoPrompt(t *testing.T) {
 	}
 
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("opt-out removal must succeed with nil stdin (no prompt): %v", err)
 	}
 
@@ -2808,7 +2814,7 @@ func TestOptOutRemoval_BareReAdds(t *testing.T) {
 	// Remove it via explicit opt-out.
 	d := fakeDeps(home, fs, io.Discard)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("opt-out: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; ok {
@@ -2820,7 +2826,7 @@ func TestOptOutRemoval_BareReAdds(t *testing.T) {
 	wizardIn := strings.NewReader("y\ny\n")
 	d2 := fakeDeps(home, fs, io.Discard)
 	d2.stdin = wizardIn
-	if err := runIntegrateComponents(d2, "claude", nil, true, false, nil); err != nil {
+	if err := runIntegrateComponents(d2, "claude", nil, true, false, nil, false, false); err != nil {
 		t.Fatalf("bare re-run: %v", err)
 	}
 
@@ -2838,7 +2844,7 @@ func TestOptOutRemoval_Cycle(t *testing.T) {
 
 	// Step 1: install pane-skill.
 	d := fakeDeps(home, fs, io.Discard)
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil, false, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; !ok {
@@ -2849,7 +2855,7 @@ func TestOptOutRemoval_Cycle(t *testing.T) {
 	var out bytes.Buffer
 	d2 := fakeDeps(home, fs, &out)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("opt-out: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; ok {
@@ -2861,7 +2867,7 @@ func TestOptOutRemoval_Cycle(t *testing.T) {
 
 	// Step 3: bare re-add.
 	d3 := fakeDeps(home, fs, io.Discard)
-	if err := runIntegrateComponents(d3, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil); err != nil {
+	if err := runIntegrateComponents(d3, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil, false, false); err != nil {
 		t.Fatalf("re-add: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; !ok {
@@ -2886,7 +2892,7 @@ func TestRefresh_LeavesRemovedOptedOutInPlace(t *testing.T) {
 	link := claudePaneLink(home)
 	d := fakeDeps(home, fs, io.Discard)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("opt-out: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; ok {
@@ -2916,5 +2922,187 @@ func TestRefresh_LeavesRemovedOptedOutInPlace(t *testing.T) {
 		if o.Component == ComponentPaneSkill && strings.Contains(o.Label, "removed") {
 			t.Errorf("refresh must not remove components, got outcome: %+v", o)
 		}
+	}
+}
+
+// ----- overwrite-conflicts (explicit install path) ---------------------------
+
+func overwriteConflictSetup(t *testing.T) (*fakeFS, string, string) {
+	t.Helper()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+	conflictPath := filepath.Join(home, ".claude", "skills", "pane")
+	fs.dirs[conflictPath] = true
+	fs.files[filepath.Join(conflictPath, "SKILL.md")] = []byte("user skill")
+	return fs, home, conflictPath
+}
+
+func TestOverwriteConflicts_PromptYes(t *testing.T) {
+	fs, home, conflictPath := overwriteConflictSetup(t)
+	var out bytes.Buffer
+	d := fakeDeps(home, fs, &out)
+	d.stdin = strings.NewReader("y\n")
+
+	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
+	if err := runIntegrateComponents(d, "claude", optins, true, false, nil, true, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "Overwrite "+conflictPath) {
+		t.Errorf("expected overwrite prompt naming %s, got %q", conflictPath, got)
+	}
+	if !strings.Contains(got, "OVERWRITE: destroyed "+conflictPath) {
+		t.Errorf("expected loud overwrite report, got %q", got)
+	}
+	if !strings.Contains(got, "overwritten (not owned by pop at "+conflictPath+")") {
+		t.Errorf("expected overwritten outcome, got %q", got)
+	}
+	if fs.dirs[conflictPath] {
+		t.Errorf("conflict entry must be hard-deleted")
+	}
+	if _, ok := fs.symlinks[claudePaneLink(home)]; !ok {
+		t.Errorf("pop pane-skill symlink must be installed after overwrite")
+	}
+}
+
+func TestOverwriteConflicts_PromptNo(t *testing.T) {
+	fs, home, conflictPath := overwriteConflictSetup(t)
+	var out bytes.Buffer
+	d := fakeDeps(home, fs, &out)
+	d.stdin = strings.NewReader("\n")
+
+	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
+	if err := runIntegrateComponents(d, "claude", optins, true, false, nil, true, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "Overwrite "+conflictPath) {
+		t.Errorf("expected overwrite prompt, got %q", got)
+	}
+	if strings.Contains(got, "OVERWRITE:") {
+		t.Errorf("must not overwrite on decline, got %q", got)
+	}
+	if !strings.Contains(got, "skipped (conflict at "+conflictPath) {
+		t.Errorf("expected conflict skip outcome, got %q", got)
+	}
+	if !fs.dirs[conflictPath] {
+		t.Errorf("unowned entry must be preserved on decline")
+	}
+	if string(fs.files[filepath.Join(conflictPath, "SKILL.md")]) != "user skill" {
+		t.Errorf("user skill content must be preserved")
+	}
+}
+
+func TestOverwriteConflicts_AssumeYes(t *testing.T) {
+	fs, home, conflictPath := overwriteConflictSetup(t)
+	var out bytes.Buffer
+	d := fakeDeps(home, fs, &out)
+
+	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
+	if err := runIntegrateComponents(d, "claude", optins, false, false, nil, true, true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	if strings.Contains(got, "Overwrite ") {
+		t.Errorf("--yes must skip prompt, got %q", got)
+	}
+	if !strings.Contains(got, "OVERWRITE: destroyed "+conflictPath) {
+		t.Errorf("expected loud overwrite report, got %q", got)
+	}
+	if _, ok := fs.symlinks[claudePaneLink(home)]; !ok {
+		t.Errorf("pane-skill must be linked after --yes overwrite")
+	}
+}
+
+func TestOverwriteConflicts_NoTTYSkips(t *testing.T) {
+	fs, home, conflictPath := overwriteConflictSetup(t)
+	var out bytes.Buffer
+	d := fakeDeps(home, fs, &out)
+
+	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
+	if err := runIntegrateComponents(d, "claude", optins, false, false, nil, true, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	if strings.Contains(got, "Overwrite ") || strings.Contains(got, "OVERWRITE:") {
+		t.Errorf("non-interactive overwrite must skip without prompting, got %q", got)
+	}
+	if !strings.Contains(got, "skipped (conflict at "+conflictPath) {
+		t.Errorf("expected conflict skip outcome, got %q", got)
+	}
+	if !fs.dirs[conflictPath] {
+		t.Errorf("unowned entry must be preserved without TTY")
+	}
+}
+
+func TestIntegrateCmd_OverwriteConflictsWithUpdateExistingIsError(t *testing.T) {
+	prevUpdate := integrateUpdateExisting
+	prevOverwrite := integrateOverwriteConflicts
+	integrateUpdateExisting = true
+	integrateOverwriteConflicts = true
+	t.Cleanup(func() {
+		integrateUpdateExisting = prevUpdate
+		integrateOverwriteConflicts = prevOverwrite
+	})
+
+	err := runIntegrate(integrateCmd, nil)
+	if err == nil {
+		t.Fatal("expected error when --overwrite-conflicts is combined with --update-existing")
+	}
+	if !strings.Contains(err.Error(), "--overwrite-conflicts") || !strings.Contains(err.Error(), "--update-existing") {
+		t.Errorf("error should mention both flags, got %q", err.Error())
+	}
+}
+
+func TestOverwriteConflicts_MultiAgentUniform(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+
+	claudeConflict := filepath.Join(home, ".claude", "skills", "pane")
+	fs.dirs[claudeConflict] = true
+	piConflict := filepath.Join(home, ".pi", "agent", "skills", "pane")
+	fs.dirs[piConflict] = true
+
+	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
+	for _, agent := range []string{"claude", "pi"} {
+		d := fakeDeps(home, fs, io.Discard)
+		if err := runIntegrateComponents(d, agent, optins, false, false, nil, true, true); err != nil {
+			t.Fatalf("%s install: %v", agent, err)
+		}
+	}
+
+	if fs.dirs[claudeConflict] || fs.dirs[piConflict] {
+		t.Errorf("both agents' conflicts must be overwritten with --yes")
+	}
+	claudeLink := claudePaneLink(home)
+	piLink := filepath.Join(home, ".pi", "agent", "skills", "pop-pane")
+	if _, ok := fs.symlinks[claudeLink]; !ok {
+		t.Errorf("claude pane-skill not installed")
+	}
+	if _, ok := fs.symlinks[piLink]; !ok {
+		t.Errorf("pi pane-skill not installed")
+	}
+}
+
+func TestOptOutRemoval_StillNoPromptWithOverwriteFlag(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+	seedFileComponent(t, fs, home, ComponentPaneSkill, "claude")
+
+	d := fakeDeps(home, fs, io.Discard)
+	d.stdin = nil
+	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, true, true); err != nil {
+		t.Fatalf("opt-out removal must succeed: %v", err)
+	}
+	if _, ok := fs.symlinks[claudePaneLink(home)]; ok {
+		t.Errorf("pane-skill symlink should be removed by opt-out")
 	}
 }

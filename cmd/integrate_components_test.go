@@ -13,7 +13,7 @@ func TestRunIntegrateComponentsFlagsInstallExactSet(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := runIntegrateComponents(d, "claude", []ComponentID{ComponentPaneSkill}, false, false, nil)
+	err := runIntegrateComponents(d, "claude", []ComponentID{ComponentPaneSkill}, false, false, nil, false, false)
 	if err != nil {
 		t.Fatalf("runIntegrateComponents: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestRunIntegrateComponentsNonInteractiveNoFlagsFails(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := runIntegrateComponents(d, "claude", nil, false, false, nil)
+	err := runIntegrateComponents(d, "claude", nil, false, false, nil, false, false)
 	if err == nil {
 		t.Fatalf("expected error for non-interactive run without flags")
 	}
@@ -50,7 +50,7 @@ func TestRunIntegrateComponentsInteractiveNoFlagsWiringOnly(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := runIntegrateComponents(d, "claude", nil, true, false, nil)
+	err := runIntegrateComponents(d, "claude", nil, true, false, nil, false, false)
 	if err != nil {
 		t.Fatalf("runIntegrateComponents: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestRunIntegrateComponentsPaneSkillNewAgents(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			if err := runIntegrateComponents(d, a.name, []ComponentID{ComponentPaneSkill}, false, false, nil); err != nil {
+			if err := runIntegrateComponents(d, a.name, []ComponentID{ComponentPaneSkill}, false, false, nil, false, false); err != nil {
 				t.Fatalf("runIntegrateComponents(%s): %v", a.name, err)
 			}
 			if fs.symlinks[a.linkDest] != a.linkTarget {
@@ -90,7 +90,7 @@ func TestRunIntegrateComponentsCodexPaneSkillNotSupported(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := runIntegrateComponents(d, "codex", []ComponentID{ComponentPaneSkill}, false, false, nil)
+	err := runIntegrateComponents(d, "codex", []ComponentID{ComponentPaneSkill}, false, false, nil, false, false)
 	if err == nil {
 		t.Fatalf("expected not-supported error for codex --pane-skill")
 	}
@@ -106,7 +106,7 @@ func TestRunIntegrateComponentsCodexPaneSkillNotSupported(t *testing.T) {
 func TestRunIntegrateComponentsUnknownAgent(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
-	if err := runIntegrateComponents(d, "bogus", []ComponentID{ComponentPaneSkill}, false, false, nil); err == nil {
+	if err := runIntegrateComponents(d, "bogus", []ComponentID{ComponentPaneSkill}, false, false, nil, false, false); err == nil {
 		t.Fatalf("expected error for unknown agent")
 	}
 }

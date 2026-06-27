@@ -184,7 +184,7 @@ func TestRunIntegrateRemoveSingleComponent(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	// Install status wiring + pane skill.
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentPaneSkill}, false, false, nil); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentPaneSkill}, false, false, nil, false, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	settings := filepath.Join(installerHome, ".claude", "settings.json")
@@ -213,7 +213,7 @@ func TestRunIntegrateRemoveSeveralComponents(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	if err := runIntegrateComponents(d, "claude",
-		[]ComponentID{ComponentPaneSkill, ComponentTaskSkills}, false, false, nil); err != nil {
+		[]ComponentID{ComponentPaneSkill, ComponentTaskSkills}, false, false, nil, false, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -242,7 +242,7 @@ func TestRunIntegrateRemoveDefaultSet(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	if err := runIntegrateComponents(d, "claude",
-		[]ComponentID{ComponentPaneSkill, ComponentTaskSkills}, false, false, nil); err != nil {
+		[]ComponentID{ComponentPaneSkill, ComponentTaskSkills}, false, false, nil, false, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 

@@ -97,13 +97,33 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 			return fmt.Errorf("failed to check ownership of %s: %w", dest, err)
 		}
 		if conflict {
-			if d.logf != nil {
-				d.logf("installFileComponent: skipping %s — conflict at %s (not owned by pop)", name, conflictPath)
+			if d.overwriteConflicts {
+				overwrite, err := resolveConflictOverwrite(d, conflictPath)
+				if err != nil {
+					return fmt.Errorf("failed to resolve conflict at %s: %w", conflictPath, err)
+				}
+				if !overwrite {
+					if d.logf != nil {
+						d.logf("installFileComponent: skipping %s — conflict at %s (not owned by pop)", name, conflictPath)
+					}
+					continue
+				}
+				if err := d.removeAll(conflictPath); err != nil {
+					return fmt.Errorf("failed to remove unowned entry %s: %w", conflictPath, err)
+				}
+				d.overwrotePaths = append(d.overwrotePaths, conflictPath)
+				reportOverwriteDestroyed(d.stdout, conflictPath)
+			} else {
+				if d.logf != nil {
+					d.logf("installFileComponent: skipping %s — conflict at %s (not owned by pop)", name, conflictPath)
+				}
+				if d.stdout != nil && d.agentName != "" {
+					fmt.Fprintf(d.stdout, "  skipped %s: %s exists and is not owned by pop — run 'pop integrate %s --overwrite-conflicts' to replace it\n", name, conflictPath, d.agentName)
+				} else if d.stdout != nil {
+					fmt.Fprintf(d.stdout, "  skipped %s: %s exists and is not owned by pop — remove it and re-run integrate to install pop's version\n", name, conflictPath)
+				}
+				continue
 			}
-			if d.stdout != nil {
-				fmt.Fprintf(d.stdout, "  skipped %s: %s exists and is not owned by pop — remove it and re-run integrate to install pop's version\n", name, conflictPath)
-			}
-			continue
 		}
 		// Remove the existing entry (a stale symlink, or a pop-owned copy-mode
 		// directory being migrated) and link to the render tree.
@@ -379,6 +399,19 @@ func skillConflict(d *integrateDeps, agentDir, name, integrationsRoot, prefix st
 		}
 	}
 	return "", false, nil
+}
+
+// resolveConflictOverwrite decides whether to destroy an unowned conflict entry
+// during --overwrite-conflicts. --yes overwrites unattended; an interactive TTY
+// prompts; a non-interactive run skips without blocking.
+func resolveConflictOverwrite(d *integrateDeps, conflictPath string) (bool, error) {
+	if d.assumeYes {
+		return true, nil
+	}
+	if d.interactive {
+		return promptOverwriteConflict(d.stdin, d.stdout, conflictPath)
+	}
+	return false, nil
 }
 
 // conflictCandidates returns the entry names a render-tree entry can collide
