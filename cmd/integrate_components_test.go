@@ -129,7 +129,7 @@ func TestRunIntegrateVariadicAgentsSameBaseline(t *testing.T) {
 	if _, ok := fs.files[piExt]; !ok {
 		t.Error("pi status wiring not installed")
 	}
-	claudePane := filepath.Join(home, ".claude", "skills", "pop-pane")
+	claudePane := filepath.Join(home, ".claude", "skills", "pop-tmux-pane")
 	if _, ok := fs.symlinks[claudePane]; !ok {
 		t.Error("claude pane-skill not installed")
 	}
@@ -167,7 +167,7 @@ func TestRunIntegrateComponentsCodexInstallsMergedBaseline(t *testing.T) {
 	if _, ok := fs.files[hooksPath]; !ok {
 		t.Fatalf("codex status wiring not installed")
 	}
-	paneDest := filepath.Join(installerHome, ".codex", "skills", "pop-pane")
+	paneDest := filepath.Join(installerHome, ".codex", "skills", "pop-tmux-pane")
 	if _, ok := fs.symlinks[paneDest]; !ok {
 		t.Fatalf("codex pane skill not symlinked: %v", fs.symlinks)
 	}
@@ -194,7 +194,7 @@ func TestRunIntegrateComponentsOpencodeInstallsMergedBaseline(t *testing.T) {
 	if _, ok := fs.files[pluginPath]; !ok {
 		t.Fatalf("opencode status wiring not installed")
 	}
-	paneDest := filepath.Join(installerHome, ".config", "opencode", "agent", "pop-pane.md")
+	paneDest := filepath.Join(installerHome, ".config", "opencode", "agent", "pop-tmux-pane.md")
 	if _, ok := fs.symlinks[paneDest]; !ok {
 		t.Fatalf("opencode pane skill not symlinked: %v", fs.symlinks)
 	}

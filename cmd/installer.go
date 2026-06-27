@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/glebglazov/pop/config"
 )
 
 // installFileComponent installs a file-based Integration component (a skill)
@@ -12,14 +14,16 @@ import (
 // data directory and the agent's location receives a symlink into that tree.
 //
 // Ownership is machine-checkable — an agent-location entry pop owns is a
-// symlink resolving into pop's render tree. Re-running is idempotent (the
-// symlink is rewritten), and an existing copy-mode artifact owned by a prior
-// pop install (a real entry under the `pop-` name prefix) is migrated to a
-// symlink transparently by the same wipe-and-rewrite path.
+// symlink resolving into pop's render tree, or a real entry carrying the
+// `pop-owned: true` frontmatter marker. Re-running is idempotent (the symlink
+// is rewritten), an existing marker-owned copy-mode artifact is migrated to a
+// symlink by the same wipe-and-rewrite path, and entries left under a previous
+// skills_prefix are pruned (ADR 0063).
 func installFileComponent(d *integrateDeps, home string, id ComponentID, agent string) error {
 	agent = strings.ToLower(agent)
+	prefix := d.resolveSkillsPrefix()
 
-	tree, err := renderComponent(id, agent)
+	tree, err := renderComponent(id, agent, prefix)
 	if err != nil {
 		return err
 	}
@@ -37,12 +41,9 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 	}
 
 	if d.logf != nil {
-		d.logf("installFileComponent: agent=%s id=%s agentDir=%s renderRoot=%s", agent, id, agentDir, renderRoot)
+		d.logf("installFileComponent: agent=%s id=%s prefix=%q agentDir=%s renderRoot=%s", agent, id, prefix, agentDir, renderRoot)
 	}
 
-	// Remove any legacy copy-mode artifacts this component supersedes (e.g. the
-	// claude command-style pane install) so the switch to skills leaves nothing
-	// behind.
 	for _, p := range legacyArtifacts(home, agent, id) {
 		if d.logf != nil {
 			d.logf("installFileComponent: removing legacy artifact %s", p)
@@ -52,8 +53,6 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		}
 	}
 
-	// Render the tree fresh under the data dir. Clear the prior render root
-	// first so a renamed or removed file does not linger.
 	if d.logf != nil {
 		d.logf("installFileComponent: clearing render root %s", renderRoot)
 	}
@@ -83,12 +82,7 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		dest := filepath.Join(agentDir, name)
 		target := filepath.Join(renderRoot, name)
 
-		// Integration conflict check (ADR 0011): a same-named entry pop does
-		// not own — under the embedded skill's canonical `pop-` name OR the bare
-		// (prefix-stripped) form — is never touched. The skill is skipped:
-		// never overwritten, never removed, never refreshed. Non-conflicting
-		// skills in the same run still install.
-		conflictPath, conflict, err := skillConflict(d, agentDir, name, integrationsRoot)
+		conflictPath, conflict, err := skillConflict(d, agentDir, name, integrationsRoot, prefix)
 		if err != nil {
 			return fmt.Errorf("failed to check ownership of %s: %w", dest, err)
 		}
@@ -121,8 +115,6 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 				continue
 			}
 		}
-		// Remove the existing entry (a stale symlink, or a pop-owned copy-mode
-		// directory being migrated) and link to the render tree.
 		if err := d.removeAll(dest); err != nil {
 			return fmt.Errorf("failed to remove %s: %w", dest, err)
 		}
@@ -137,18 +129,130 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		}
 	}
 
+	if err := pruneStaleAgentEntries(d, agentDir, renderRoot, id, agent, topLevel); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-// ownership reports whether an entry exists at dest and whether pop owns it.
-//
-// Ownership is decided in two ways, strongest first:
-//   - A symlink whose target resolves under pop's integrations root — the
-//     canonical ADR 0011 marker.
-//   - A real entry whose name carries the legacy `pop-` prefix — a copy-mode
-//     install from before symlinks, eligible for migration.
-//
-// Anything else that exists is not owned by pop.
+// pruneStaleAgentEntries performs the agent-location half of stale-name cleanup
+// (ADR 0063). After this component's fresh names have been linked, any
+// pop-owned entry left at the agent location that this component no longer
+// renders is stale — it was installed under a different skills_prefix — and is
+// removed.
+func pruneStaleAgentEntries(d *integrateDeps, agentDir, renderRoot string, id ComponentID, agent string, keep map[string]bool) error {
+	if d.readDirNames == nil {
+		return nil
+	}
+	names, err := d.readDirNames(agentDir)
+	if err != nil {
+		return fmt.Errorf("failed to list %s: %w", agentDir, err)
+	}
+	possible := componentPossibleNames(id, agent, config.DefaultSkillsPrefix, "")
+	cleanRenderRoot := filepath.Clean(renderRoot)
+
+	for _, name := range names {
+		if keep[name] {
+			continue
+		}
+		dest := filepath.Join(agentDir, name)
+		mode, err := d.lstatMode(dest)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("failed to stat %s: %w", dest, err)
+		}
+
+		if !componentOwnsAgentEntry(d, name, dest, mode, cleanRenderRoot, possible) {
+			continue
+		}
+		if d.logf != nil {
+			d.logf("installFileComponent: pruning stale %s — no longer a rendered name for %s/%s", dest, agent, id)
+		}
+		if err := d.removeAll(dest); err != nil {
+			return fmt.Errorf("failed to remove stale entry %s: %w", dest, err)
+		}
+		if d.stdout != nil {
+			fmt.Fprintf(d.stdout, "  removed stale %s\n", dest)
+		}
+	}
+	return nil
+}
+
+func componentPossibleNames(id ComponentID, agent string, prefixes ...string) map[string]bool {
+	names := map[string]bool{}
+	for _, p := range prefixes {
+		tree, err := renderComponent(id, agent, p)
+		if err != nil {
+			continue
+		}
+		for rel := range tree {
+			names[firstSegment(rel)] = true
+		}
+	}
+	return names
+}
+
+func componentOwnsAgentEntry(d *integrateDeps, name, dest string, mode os.FileMode, cleanRenderRoot string, possible map[string]bool) bool {
+	switch {
+	case mode&os.ModeSymlink != 0:
+		target, err := d.readlink(dest)
+		if err != nil {
+			return false
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(dest), target)
+		}
+		target = filepath.Clean(target)
+		return target == cleanRenderRoot || strings.HasPrefix(target, cleanRenderRoot+string(filepath.Separator))
+	case possible[name]:
+		return ownedByMarker(d, dest, mode)
+	default:
+		return false
+	}
+}
+
+// fileComponentInstalledNames returns pop-owned agent-location entry names for
+// this component, regardless of prefix or base name (ADR 0063).
+func fileComponentInstalledNames(d *integrateDeps, home string, id ComponentID, agent string) (map[string]bool, error) {
+	agent = strings.ToLower(agent)
+	dataDir, err := d.dataDir()
+	if err != nil {
+		return nil, err
+	}
+	renderRoot := filepath.Join(dataDir, "integrations", agent, string(id))
+	agentDir, err := agentSkillDir(home, agent, id)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	if d.readDirNames == nil {
+		return out, nil
+	}
+	names, err := d.readDirNames(agentDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list %s: %w", agentDir, err)
+	}
+	possible := componentPossibleNames(id, agent, config.DefaultSkillsPrefix, "")
+	cleanRenderRoot := filepath.Clean(renderRoot)
+	for _, name := range names {
+		dest := filepath.Join(agentDir, name)
+		mode, err := d.lstatMode(dest)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to stat %s: %w", dest, err)
+		}
+		if componentOwnsAgentEntry(d, name, dest, mode, cleanRenderRoot, possible) {
+			out[name] = true
+		}
+	}
+	return out, nil
+}
+
 func ownership(d *integrateDeps, dest, integrationsRoot string) (exists, owned bool, err error) {
 	mode, err := d.lstatMode(dest)
 	if err != nil {
@@ -168,23 +272,35 @@ func ownership(d *integrateDeps, dest, integrationsRoot string) (exists, owned b
 		target = filepath.Clean(target)
 		root := filepath.Clean(integrationsRoot)
 		inTree := target == root || strings.HasPrefix(target, root+string(filepath.Separator))
+		if d.logf != nil {
+			d.logf("ownership: %s is symlink -> %s (inTree=%v)", dest, target, inTree)
+		}
 		return true, inTree, nil
 	}
-	return true, strings.HasPrefix(filepath.Base(dest), "pop-"), nil
+	return true, ownedByMarker(d, dest, mode), nil
 }
 
-// skillConflict reports whether installing the render-tree entry `name` into
-// agentDir would collide with a skill pop does not own. The match is
-// prefix-insensitive: the embedded skill's canonical name is `pop-<base>`, but
-// a hand-written skill could sit under that exact name OR under the bare
-// `<base>` form, and either shadows pop's version. Both candidate locations are
-// checked; the first existing entry that pop does not own is the conflict.
-//
-// A pop-owned entry (a symlink resolving into pop's render tree, or a legacy
-// `pop-` copy-mode directory eligible for migration) is never a conflict, so
-// re-install and refresh proceed normally.
-func skillConflict(d *integrateDeps, agentDir, name, integrationsRoot string) (conflictPath string, conflict bool, err error) {
-	for _, cand := range conflictCandidates(name) {
+func ownedByMarker(d *integrateDeps, dest string, mode os.FileMode) bool {
+	target := dest
+	if mode.IsDir() {
+		target = filepath.Join(dest, "SKILL.md")
+	}
+	data, err := d.readFile(target)
+	if err != nil {
+		if d.logf != nil {
+			d.logf("ownership: %s not pop-owned (cannot read %s: %v)", dest, target, err)
+		}
+		return false
+	}
+	owned := frontmatterHasOwnershipMarker(string(data))
+	if d.logf != nil {
+		d.logf("ownership: %s pop-owned=%v via marker in %s", dest, owned, target)
+	}
+	return owned
+}
+
+func skillConflict(d *integrateDeps, agentDir, name, integrationsRoot, prefix string) (conflictPath string, conflict bool, err error) {
+	for _, cand := range conflictCandidates(name, prefix) {
 		p := filepath.Join(agentDir, cand)
 		exists, owned, err := ownership(d, p, integrationsRoot)
 		if err != nil {
@@ -197,9 +313,6 @@ func skillConflict(d *integrateDeps, agentDir, name, integrationsRoot string) (c
 	return "", false, nil
 }
 
-// resolveConflictOverwrite decides whether to destroy an unowned conflict entry
-// during --overwrite-conflicts. --yes overwrites unattended; an interactive TTY
-// prompts; a non-interactive run skips without blocking.
 func resolveConflictOverwrite(d *integrateDeps, conflictPath string) (bool, error) {
 	if d.assumeYes {
 		return true, nil
@@ -210,23 +323,16 @@ func resolveConflictOverwrite(d *integrateDeps, conflictPath string) (bool, erro
 	return false, nil
 }
 
-// conflictCandidates returns the entry names a render-tree entry can collide
-// with at the agent location: the canonical `pop-` form as rendered, plus the
-// bare form with the prefix stripped (e.g. `pop-pane` → `pane`, `pop-pane.md`
-// → `pane.md`). Render-tree names are always `pop-` prefixed; a name without
-// the prefix yields only itself.
-func conflictCandidates(name string) []string {
-	if bare := strings.TrimPrefix(name, "pop-"); bare != name {
+func conflictCandidates(name, prefix string) []string {
+	if prefix == "" {
+		return []string{name}
+	}
+	if bare := strings.TrimPrefix(name, prefix); bare != name {
 		return []string{name, bare}
 	}
 	return []string{name}
 }
 
-// agentSkillDir returns the directory at the agent's location where pop's skill
-// entries are symlinked. claude switched from slash commands to skills, so its
-// location is the skills directory (not commands/pop). opencode hosts the pane
-// skill as a flat agent file under ~/.config/opencode/agent/ and the task
-// planning skills as directories under ~/.config/opencode/skills/.
 func agentSkillDir(home, agent string, id ComponentID) (string, error) {
 	switch strings.ToLower(agent) {
 	case "claude":
@@ -247,9 +353,6 @@ func agentSkillDir(home, agent string, id ComponentID) (string, error) {
 	}
 }
 
-// legacyArtifacts lists copy-mode paths a component's new install must clean up.
-// For claude's pane skill this is the old slash-command file under
-// ~/.claude/commands/pop/, removed when the skill takes over.
 func legacyArtifacts(home, agent string, id ComponentID) []string {
 	if strings.ToLower(agent) == "claude" && id == ComponentPaneSkill {
 		return []string{filepath.Join(home, ".claude", "commands", "pop", "pane.md")}
@@ -257,7 +360,6 @@ func legacyArtifacts(home, agent string, id ComponentID) []string {
 	return nil
 }
 
-// firstSegment returns the first path component of a relative path.
 func firstSegment(rel string) string {
 	rel = filepath.ToSlash(rel)
 	if i := strings.IndexByte(rel, '/'); i >= 0 {

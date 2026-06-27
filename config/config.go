@@ -127,9 +127,27 @@ const (
 // DefaultIntegrationSkills is the embedded pop default for [integrations] skills.
 var DefaultIntegrationSkills = []string{IntegrationSkillTasks, IntegrationSkillPane}
 
+// DefaultSkillsPrefix is the prefix applied to every embedded skill's installed
+// name when [integrations] skills_prefix is absent. With it, the installed name
+// of an embedded skill is `pop-<base>` — byte-identical to pop's original
+// behaviour (ADR 0063).
+const DefaultSkillsPrefix = "pop-"
+
 // IntegrationsConfig holds global integration preferences (ADR 0065).
 type IntegrationsConfig struct {
-	Skills []string `toml:"skills"`
+	Skills       []string `toml:"skills"`
+	SkillsPrefix *string  `toml:"skills_prefix"`
+}
+
+// ResolveSkillsPrefix returns the configured skill-name prefix. An absent
+// [integrations] section or skills_prefix key resolves to DefaultSkillsPrefix
+// (`pop-`); an explicit empty string resolves to "" (bare base names). The
+// receiver may be nil.
+func (c *Config) ResolveSkillsPrefix() string {
+	if c == nil || c.Integrations == nil || c.Integrations.SkillsPrefix == nil {
+		return DefaultSkillsPrefix
+	}
+	return *c.Integrations.SkillsPrefix
 }
 
 // UpdatesConfig holds update-check / Update-notice configuration.

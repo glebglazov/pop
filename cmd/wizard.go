@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -75,7 +76,8 @@ func wizardFileComponentState(d *integrateDeps, home string, id ComponentID, age
 // conflict, ADR 0011).
 func componentConflict(d *integrateDeps, home string, id ComponentID, agent string) (string, bool, error) {
 	agent = strings.ToLower(agent)
-	tree, err := renderComponent(id, agent)
+	prefix := d.resolveSkillsPrefix()
+	tree, err := renderComponent(id, agent, prefix)
 	if err != nil {
 		return "", false, err
 	}
@@ -95,7 +97,7 @@ func componentConflict(d *integrateDeps, home string, id ComponentID, agent stri
 			continue
 		}
 		seen[name] = true
-		p, conflict, err := skillConflict(d, agentDir, name, integrationsRoot)
+		p, conflict, err := skillConflict(d, agentDir, name, integrationsRoot, prefix)
 		if err != nil {
 			return "", false, err
 		}
@@ -112,7 +114,7 @@ func componentConflict(d *integrateDeps, home string, id ComponentID, agent stri
 // this to be meaningful; callers check installed first.
 func fileComponentStale(d *integrateDeps, home string, id ComponentID, agent string) (bool, error) {
 	agent = strings.ToLower(agent)
-	tree, err := renderComponent(id, agent)
+	tree, err := renderComponent(id, agent, d.resolveSkillsPrefix())
 	if err != nil {
 		return false, err
 	}
@@ -134,6 +136,47 @@ func fileComponentStale(d *integrateDeps, home string, id ComponentID, agent str
 		}
 	}
 	return false, nil
+}
+
+func fileComponentStaleResolved(d *integrateDeps, home string, id ComponentID, agent string, installedNames map[string]bool) (bool, error) {
+	agent = strings.ToLower(agent)
+	tree, err := renderComponent(id, agent, d.resolveSkillsPrefix())
+	if err != nil {
+		return false, err
+	}
+	expected := map[string]bool{}
+	for rel := range tree {
+		expected[firstSegment(rel)] = true
+	}
+	if !nameSetsEqual(installedNames, expected) {
+		if d.logf != nil {
+			d.logf("fileComponentStaleResolved: %s/%s resolved-name divergence installed=%v expected=%v — stale",
+				agent, id, sortedSet(installedNames), sortedSet(expected))
+		}
+		return true, nil
+	}
+	return fileComponentStale(d, home, id, agent)
+}
+
+func nameSetsEqual(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
+}
+
+func sortedSet(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // promptYesNo writes the prompt and reads one line, returning true only for an

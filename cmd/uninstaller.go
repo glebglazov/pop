@@ -31,15 +31,10 @@ func removeComponent(d *integrateDeps, home string, id ComponentID, agent string
 // an agent: the agent-location symlinks pop owns and the component's render
 // tree under pop's data directory. Ownership is the same machine-checkable test
 // the installer uses (ADR 0011) — a symlink resolving into pop's render tree,
-// or a legacy `pop-` copy-mode entry. A same-named entry pop does not own is
-// never deleted; it is left in place and reported.
+// or a copy-mode entry with the `pop-owned: true` marker. A same-named entry
+// pop does not own is never deleted; it is left in place and reported.
 func removeFileComponent(d *integrateDeps, home string, id ComponentID, agent string) error {
 	agent = strings.ToLower(agent)
-
-	tree, err := renderComponent(id, agent)
-	if err != nil {
-		return err
-	}
 
 	dataDir, err := d.dataDir()
 	if err != nil {
@@ -53,14 +48,11 @@ func removeFileComponent(d *integrateDeps, home string, id ComponentID, agent st
 		return err
 	}
 
-	// pop only ever links its artifacts at the canonical render-tree names
-	// (`pop-<base>`), so those are the only agent-location entries removal
-	// inspects. Each is removed only when pop owns it.
-	topLevel := map[string]bool{}
-	for rel := range tree {
-		topLevel[firstSegment(rel)] = true
+	installedNames, err := fileComponentInstalledNames(d, home, id, agent)
+	if err != nil {
+		return err
 	}
-	for name := range topLevel {
+	for name := range installedNames {
 		dest := filepath.Join(agentDir, name)
 		exists, owned, err := ownership(d, dest, integrationsRoot)
 		if err != nil {
@@ -282,37 +274,11 @@ func fileExists(d *integrateDeps, path string) (bool, error) {
 // fileComponentInstalled reports whether any pop-owned artifact for a
 // file-based component is present at the agent's location.
 func fileComponentInstalled(d *integrateDeps, home string, id ComponentID, agent string) (bool, error) {
-	agent = strings.ToLower(agent)
-	tree, err := renderComponent(id, agent)
+	names, err := fileComponentInstalledNames(d, home, id, agent)
 	if err != nil {
 		return false, err
 	}
-	dataDir, err := d.dataDir()
-	if err != nil {
-		return false, err
-	}
-	integrationsRoot := filepath.Join(dataDir, "integrations")
-	agentDir, err := agentSkillDir(home, agent, id)
-	if err != nil {
-		return false, err
-	}
-	seen := map[string]bool{}
-	for rel := range tree {
-		name := firstSegment(rel)
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
-		dest := filepath.Join(agentDir, name)
-		exists, owned, err := ownership(d, dest, integrationsRoot)
-		if err != nil {
-			return false, err
-		}
-		if exists && owned {
-			return true, nil
-		}
-	}
-	return false, nil
+	return len(names) > 0, nil
 }
 
 // runIntegrateRemoveComponents is the entry point for `pop integrate remove

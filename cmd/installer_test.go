@@ -14,9 +14,9 @@ const installerHome = "/home/u"
 // claude, derived from installerHome.
 func paneSkillPaths() (renderFile, linkDest, linkTarget string) {
 	renderRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "claude", "pane-skill")
-	renderFile = filepath.Join(renderRoot, "pop-pane", "SKILL.md")
-	linkDest = filepath.Join(installerHome, ".claude", "skills", "pop-pane")
-	linkTarget = filepath.Join(renderRoot, "pop-pane")
+	renderFile = filepath.Join(renderRoot, "pop-tmux-pane", "SKILL.md")
+	linkDest = filepath.Join(installerHome, ".claude", "skills", "pop-tmux-pane")
+	linkTarget = filepath.Join(renderRoot, "pop-tmux-pane")
 	return
 }
 
@@ -36,8 +36,8 @@ func TestInstallFileComponentInstall(t *testing.T) {
 	if !ok {
 		t.Fatalf("render file not written: %s (have %v)", renderFile, sortedKeys(fs.files))
 	}
-	src, _ := skillFiles.ReadFile("skills/pop/pane.md")
-	want := injectFrontmatterName(string(src), "pop-pane")
+	src, _ := skillFiles.ReadFile("skills/pop/tmux-pane.md")
+	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-tmux-pane"))
 	if string(data) != want {
 		t.Fatalf("render bytes mismatch")
 	}
@@ -84,7 +84,7 @@ func TestInstallFileComponentCopyToSymlinkMigration(t *testing.T) {
 	// agent's skill location.
 	fs.dirs[linkDest] = true
 	copyFile := filepath.Join(linkDest, "SKILL.md")
-	fs.files[copyFile] = []byte("old copy-mode body")
+	fs.files[copyFile] = []byte(injectOwnershipMarker("---\nname: pop-tmux-pane\n---\nold copy-mode body"))
 
 	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
@@ -140,8 +140,8 @@ type paneSkillAgent struct {
 // paneSkillAgents returns the install layout for every agent newly wired in
 // this slice (codex, pi, cursor, opencode), derived from installerHome.
 func paneSkillAgents() []paneSkillAgent {
-	src, _ := skillFiles.ReadFile("skills/pop/pane.md")
-	skillDirBytes := []byte(injectFrontmatterName(string(src), "pop-pane"))
+	src, _ := skillFiles.ReadFile("skills/pop/tmux-pane.md")
+	skillDirBytes := []byte(injectOwnershipMarker(injectFrontmatterName(string(src), "pop-tmux-pane")))
 
 	dataRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations")
 
@@ -150,42 +150,42 @@ func paneSkillAgents() []paneSkillAgent {
 	curRoot := filepath.Join(dataRoot, "cursor", "pane-skill")
 	ocRoot := filepath.Join(dataRoot, "opencode", "pane-skill")
 
-	codexDest := filepath.Join(installerHome, ".codex", "skills", "pop-pane")
-	piDest := filepath.Join(installerHome, ".pi", "agent", "skills", "pop-pane")
-	curDest := filepath.Join(installerHome, ".cursor", "skills", "pop-pane")
-	ocDest := filepath.Join(installerHome, ".config", "opencode", "agent", "pop-pane.md")
+	codexDest := filepath.Join(installerHome, ".codex", "skills", "pop-tmux-pane")
+	piDest := filepath.Join(installerHome, ".pi", "agent", "skills", "pop-tmux-pane")
+	curDest := filepath.Join(installerHome, ".cursor", "skills", "pop-tmux-pane")
+	ocDest := filepath.Join(installerHome, ".config", "opencode", "agent", "pop-tmux-pane.md")
 
 	return []paneSkillAgent{
 		{
 			name:       "codex",
-			renderFile: filepath.Join(codexRoot, "pop-pane", "SKILL.md"),
+			renderFile: filepath.Join(codexRoot, "pop-tmux-pane", "SKILL.md"),
 			linkDest:   codexDest,
-			linkTarget: filepath.Join(codexRoot, "pop-pane"),
+			linkTarget: filepath.Join(codexRoot, "pop-tmux-pane"),
 			wantBytes:  skillDirBytes,
 			legacyDir:  codexDest,
 		},
 		{
 			name:       "pi",
-			renderFile: filepath.Join(piRoot, "pop-pane", "SKILL.md"),
+			renderFile: filepath.Join(piRoot, "pop-tmux-pane", "SKILL.md"),
 			linkDest:   piDest,
-			linkTarget: filepath.Join(piRoot, "pop-pane"),
+			linkTarget: filepath.Join(piRoot, "pop-tmux-pane"),
 			wantBytes:  skillDirBytes,
 			legacyDir:  piDest,
 		},
 		{
 			name:       "cursor",
-			renderFile: filepath.Join(curRoot, "pop-pane", "SKILL.md"),
+			renderFile: filepath.Join(curRoot, "pop-tmux-pane", "SKILL.md"),
 			linkDest:   curDest,
-			linkTarget: filepath.Join(curRoot, "pop-pane"),
+			linkTarget: filepath.Join(curRoot, "pop-tmux-pane"),
 			wantBytes:  skillDirBytes,
 			legacyDir:  curDest,
 		},
 		{
 			name:       "opencode",
-			renderFile: filepath.Join(ocRoot, "pop-pane.md"),
+			renderFile: filepath.Join(ocRoot, "pop-tmux-pane.md"),
 			linkDest:   ocDest,
-			linkTarget: filepath.Join(ocRoot, "pop-pane.md"),
-			wantBytes:  src,
+			linkTarget: filepath.Join(ocRoot, "pop-tmux-pane.md"),
+			wantBytes:  []byte(injectOwnershipMarker(string(src))),
 			legacyFile: ocDest,
 		},
 	}
@@ -242,22 +242,21 @@ func TestInstallFileComponentIdempotentNewAgents(t *testing.T) {
 	}
 }
 
-// TestInstallFileComponentMigrationNewAgents covers a pre-existing copy-mode
-// install being replaced by a symlink: a real skill directory for pi/cursor, a
-// real flat file for opencode. Both live under the pop- name prefix at the
-// agent location, so ownership recognizes them as pop-owned and migrates them.
+// TestInstallFileComponentMigrationNewAgents covers a pre-existing marker-owned
+// copy-mode install being replaced by a symlink.
 func TestInstallFileComponentMigrationNewAgents(t *testing.T) {
 	for _, a := range paneSkillAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
+			markerBody := injectOwnershipMarker("---\nname: pop-tmux-pane\n---\nold copy-mode body")
 
 			if a.legacyDir != "" {
 				fs.dirs[a.legacyDir] = true
-				fs.files[filepath.Join(a.legacyDir, "SKILL.md")] = []byte("old copy-mode body")
+				fs.files[filepath.Join(a.legacyDir, "SKILL.md")] = []byte(markerBody)
 			}
 			if a.legacyFile != "" {
-				fs.files[a.legacyFile] = []byte("old copy-mode body")
+				fs.files[a.legacyFile] = []byte(markerBody)
 			}
 
 			if err := installFileComponent(d, installerHome, ComponentPaneSkill, a.name); err != nil {
@@ -293,7 +292,7 @@ func TestInstallFileComponentConflictSkipped(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	_, linkDest, _ := paneSkillPaths()
-	foreign := "/somewhere/else/pop-pane"
+	foreign := "/somewhere/else/pop-tmux-pane"
 	fs.symlinks[linkDest] = foreign
 
 	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
@@ -310,7 +309,7 @@ func TestOwnership(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 	integrationsRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations")
-	dest := filepath.Join(installerHome, ".claude", "skills", "pop-pane")
+	dest := filepath.Join(installerHome, ".claude", "skills", "pop-tmux-pane")
 
 	// Missing entry.
 	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || exists || owned {
@@ -318,22 +317,31 @@ func TestOwnership(t *testing.T) {
 	}
 
 	// Symlink into pop's tree → owned.
-	fs.symlinks[dest] = filepath.Join(integrationsRoot, "claude", "pane-skill", "pop-pane")
+	fs.symlinks[dest] = filepath.Join(integrationsRoot, "claude", "pane-skill", "pop-tmux-pane")
 	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || !exists || !owned {
 		t.Fatalf("in-tree symlink: exists=%v owned=%v err=%v", exists, owned, err)
 	}
 
 	// Symlink outside pop's tree → not owned.
-	fs.symlinks[dest] = "/elsewhere/pop-pane"
+	fs.symlinks[dest] = "/elsewhere/pop-tmux-pane"
 	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || !exists || owned {
 		t.Fatalf("foreign symlink: exists=%v owned=%v err=%v", exists, owned, err)
 	}
 	delete(fs.symlinks, dest)
 
-	// Real pop- prefixed directory → owned (copy-mode).
+	// Real marker-owned copy-mode directory → owned.
 	fs.dirs[dest] = true
+	fs.files[filepath.Join(dest, "SKILL.md")] = []byte(injectOwnershipMarker("---\nname: pop-tmux-pane\n---\nbody"))
 	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || !exists || !owned {
-		t.Fatalf("pop- copy dir: exists=%v owned=%v err=%v", exists, owned, err)
+		t.Fatalf("marker copy dir: exists=%v owned=%v err=%v", exists, owned, err)
+	}
+	delete(fs.dirs, dest)
+	delete(fs.files, filepath.Join(dest, "SKILL.md"))
+
+	// Real pop- prefixed directory without marker → not owned.
+	fs.dirs[dest] = true
+	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || !exists || owned {
+		t.Fatalf("legacy pop- copy dir without marker: exists=%v owned=%v err=%v", exists, owned, err)
 	}
 	delete(fs.dirs, dest)
 
@@ -350,22 +358,24 @@ func TestOwnership(t *testing.T) {
 // a hand-written skill under either name is caught.
 func TestConflictCandidates(t *testing.T) {
 	tests := []struct {
-		name string
-		want []string
+		name   string
+		prefix string
+		want   []string
 	}{
-		{"pop-pane", []string{"pop-pane", "pane"}},
-		{"pop-pane.md", []string{"pop-pane.md", "pane.md"}},
-		{"pop-grill-with-docs", []string{"pop-grill-with-docs", "grill-with-docs"}},
-		{"no-prefix", []string{"no-prefix"}},
+		{"pop-tmux-pane", "pop-", []string{"pop-tmux-pane", "tmux-pane"}},
+		{"pop-tmux-pane.md", "pop-", []string{"pop-tmux-pane.md", "tmux-pane.md"}},
+		{"pop-grill-with-docs", "pop-", []string{"pop-grill-with-docs", "grill-with-docs"}},
+		{"no-prefix", "pop-", []string{"no-prefix"}},
+		{"tmux-pane", "", []string{"tmux-pane"}},
 	}
 	for _, tt := range tests {
-		got := conflictCandidates(tt.name)
+		got := conflictCandidates(tt.name, tt.prefix)
 		if len(got) != len(tt.want) {
-			t.Fatalf("conflictCandidates(%q) = %v, want %v", tt.name, got, tt.want)
+			t.Fatalf("conflictCandidates(%q, %q) = %v, want %v", tt.name, tt.prefix, got, tt.want)
 		}
 		for i := range got {
 			if got[i] != tt.want[i] {
-				t.Fatalf("conflictCandidates(%q) = %v, want %v", tt.name, got, tt.want)
+				t.Fatalf("conflictCandidates(%q, %q) = %v, want %v", tt.name, tt.prefix, got, tt.want)
 			}
 		}
 	}
@@ -382,8 +392,8 @@ func TestInstallFileComponentConflictReportsPathAndResolution(t *testing.T) {
 
 	_, linkDest, _ := paneSkillPaths()
 	// A user's own skill, a real directory pop does not own, under the bare
-	// name (the prefix-stripped form of pop's pop-pane).
-	bareDest := filepath.Join(filepath.Dir(linkDest), "pane")
+	// name (the prefix-stripped form of pop's pop-tmux-pane).
+	bareDest := filepath.Join(filepath.Dir(linkDest), "tmux-pane")
 	fs.dirs[bareDest] = true
 	userFile := filepath.Join(bareDest, "SKILL.md")
 	fs.files[userFile] = []byte("hand-written skill")
@@ -415,14 +425,14 @@ func TestInstallFileComponentConflictReportsPathAndResolution(t *testing.T) {
 
 // TestInstallFileComponentConflictPrefixInsensitive covers the prefix-insensitive
 // match: a non-pop entry under the bare name (`pane`) OR the canonical prefixed
-// name (`pop-pane`) both block the install. The bare-name conflict is a user's
+// name (`pop-tmux-pane`) both block the install. The bare-name conflict is a user's
 // real directory; the prefixed-name conflict is a foreign symlink (a real
 // pop- entry is a pop-owned copy-mode install, eligible for migration, not a
 // conflict).
 func TestInstallFileComponentConflictPrefixInsensitive(t *testing.T) {
 	_, linkDest, _ := paneSkillPaths()
 	agentDir := filepath.Dir(linkDest)
-	bareDest := filepath.Join(agentDir, "pane")
+	bareDest := filepath.Join(agentDir, "tmux-pane")
 
 	cases := []struct {
 		name  string
@@ -434,7 +444,7 @@ func TestInstallFileComponentConflictPrefixInsensitive(t *testing.T) {
 			return bareDest
 		}},
 		{"prefixed form", func(fs *fakeFS) string {
-			fs.symlinks[linkDest] = "/somewhere/else/pop-pane"
+			fs.symlinks[linkDest] = "/somewhere/else/pop-tmux-pane"
 			return linkDest
 		}},
 	}
@@ -575,7 +585,7 @@ func TestInstallFileComponentDebugConflict(t *testing.T) {
 
 	_, linkDest, _ := paneSkillPaths()
 	// User's own skill at the bare name — not owned by pop.
-	bareDest := filepath.Join(filepath.Dir(linkDest), "pane")
+	bareDest := filepath.Join(filepath.Dir(linkDest), "tmux-pane")
 	fs.dirs[bareDest] = true
 	fs.files[filepath.Join(bareDest, "SKILL.md")] = []byte("mine")
 
@@ -695,7 +705,7 @@ func TestRefreshFileComponentDebugStale(t *testing.T) {
 func TestRefreshFileComponentDebugConflict(t *testing.T) {
 	fs := newFakeFS()
 	// Place a non-pop entry at the bare name to create a conflict.
-	conflict := filepath.Join("/h", ".claude", "skills", "pane")
+	conflict := filepath.Join("/h", ".claude", "skills", "tmux-pane")
 	fs.dirs[conflict] = true
 
 	logf, lines := captureLogf()

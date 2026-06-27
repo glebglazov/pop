@@ -180,6 +180,14 @@ func mergeIntegrationsConfig(base, overlay *IntegrationsConfig, md toml.MetaData
 	if md.IsDefined("integrations", "skills") {
 		result.Skills = append([]string(nil), overlay.Skills...)
 	}
+	if md.IsDefined("integrations", "skills_prefix") {
+		if overlay.SkillsPrefix == nil {
+			result.SkillsPrefix = nil
+		} else {
+			v := *overlay.SkillsPrefix
+			result.SkillsPrefix = &v
+		}
+	}
 	return result
 }
 
@@ -187,8 +195,14 @@ func cloneIntegrationsConfig(src *IntegrationsConfig) *IntegrationsConfig {
 	if src == nil {
 		return nil
 	}
+	var prefix *string
+	if src.SkillsPrefix != nil {
+		v := *src.SkillsPrefix
+		prefix = &v
+	}
 	return &IntegrationsConfig{
-		Skills: append([]string(nil), src.Skills...),
+		Skills:       append([]string(nil), src.Skills...),
+		SkillsPrefix: prefix,
 	}
 }
 

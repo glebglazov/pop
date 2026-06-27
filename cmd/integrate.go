@@ -113,13 +113,14 @@ func installComponentCollectOutcome(d *integrateDeps, home, agent string, comp i
 		return componentOutcome{Agent: agent, Component: id, Label: conflictSkipLabel(agent, conflictPath)}, nil
 	}
 
-	installed, err := fileComponentInstalled(d, home, id, agent)
+	installedNames, err := fileComponentInstalledNames(d, home, id, agent)
 	if err != nil {
 		return componentOutcome{}, fmt.Errorf("installed check for %s/%s: %w", agent, id, err)
 	}
-	stale := true // not installed = always fresh
+	installed := len(installedNames) > 0
+	stale := true
 	if installed {
-		if stale, err = fileComponentStale(d, home, id, agent); err != nil {
+		if stale, err = fileComponentStaleResolved(d, home, id, agent, installedNames); err != nil {
 			return componentOutcome{}, fmt.Errorf("stale check for %s/%s: %w", agent, id, err)
 		}
 	}
@@ -210,6 +211,16 @@ type integrateDeps struct {
 	readlink  func(string) (string, error)
 	lstatMode func(string) (os.FileMode, error)
 
+	// readDirNames lists immediate entry names under a directory. Used by
+	// stale-name cleanup after prefix or base-name changes (ADR 0063).
+	readDirNames func(string) ([]string, error)
+
+	// skillsPrefix is the resolved skill-name prefix for rendered skills (the
+	// `<prefix>` in `<prefix><base>`, ADR 0063). A nil pointer means "unset" →
+	// config.DefaultSkillsPrefix (`pop-`); a non-nil pointer (including an empty
+	// string) is used verbatim, so skills_prefix = "" installs bare base names.
+	skillsPrefix *string
+
 	// Dry-run mode: set DryRun=true to turn writeFile into a comparator.
 	// `installed` and `changed` are output fields filled in during the run.
 	DryRun    bool
@@ -230,7 +241,7 @@ type integrateDeps struct {
 }
 
 func defaultIntegrateDeps() *integrateDeps {
-	return &integrateDeps{
+	d := &integrateDeps{
 		userHomeDir: os.UserHomeDir,
 		readFile:    os.ReadFile,
 		writeFile:   os.WriteFile,
@@ -249,7 +260,46 @@ func defaultIntegrateDeps() *integrateDeps {
 			}
 			return fi.Mode(), nil
 		},
+		readDirNames: osReadDirNames,
 	}
+	d.skillsPrefix = loadSkillsPrefix()
+	return d
+}
+
+// osReadDirNames lists the immediate entry names under dir, sorted. A missing
+// directory is not an error — it reports no entries.
+func osReadDirNames(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names, nil
+}
+
+// loadSkillsPrefix resolves [integrations] skills_prefix from merged config.
+func loadSkillsPrefix() *string {
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Log("loadSkillsPrefix: config load failed (%v); using default prefix %q", err, config.DefaultSkillsPrefix)
+		return nil
+	}
+	p := cfg.ResolveSkillsPrefix()
+	return &p
+}
+
+// resolveSkillsPrefix returns the resolved skill-name prefix for this deps.
+func (d *integrateDeps) resolveSkillsPrefix() string {
+	if d == nil || d.skillsPrefix == nil {
+		return config.DefaultSkillsPrefix
+	}
+	return *d.skillsPrefix
 }
 
 // popDataDir returns pop's data directory root, respecting XDG_DATA_HOME.
@@ -281,6 +331,8 @@ func withDryRun(base *integrateDeps) *integrateDeps {
 		readFile:    base.readFile,
 		dataDir:     base.dataDir,
 		logf:        base.logf,
+		skillsPrefix: base.skillsPrefix,
+		readDirNames: base.readDirNames,
 		DryRun:      true,
 	}
 	// File-component refresh inspects the link installer's render tree and the
@@ -928,6 +980,57 @@ func injectFrontmatterName(content, name string) string {
 	return strings.Join(out, "\n")
 }
 
+const popOwnedField = "pop-owned"
+
+func injectOwnershipMarker(content string) string {
+	return setFrontmatterField(content, popOwnedField, "true")
+}
+
+func setFrontmatterField(content, key, value string) string {
+	field := key + ": " + value
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return fmt.Sprintf("---\n%s\n---\n%s", field, content)
+	}
+	end := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			end = i
+			break
+		}
+	}
+	if end == -1 {
+		return content
+	}
+	prefix := key + ":"
+	for i := 1; i < end; i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), prefix) {
+			lines[i] = field
+			return strings.Join(lines, "\n")
+		}
+	}
+	out := append([]string{lines[0], field}, lines[1:]...)
+	return strings.Join(out, "\n")
+}
+
+func frontmatterHasOwnershipMarker(content string) bool {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return false
+	}
+	prefix := popOwnedField + ":"
+	for i := 1; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if t == "---" {
+			return false
+		}
+		if strings.HasPrefix(t, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(t, prefix)) == "true"
+		}
+	}
+	return false
+}
+
 // ----- Opencode integration --------------------------------------------------
 
 // installOpencodePlugin writes the embedded opencode plugin TypeScript file.
@@ -1353,17 +1456,17 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 		return &componentOutcome{Agent: agent, Component: id, Label: conflictSkipLabel(agent, conflictPath)}, ""
 	}
 
-	installed, err := fileComponentInstalled(checkDeps, home, id, agent)
+	installedNames, err := fileComponentInstalledNames(checkDeps, home, id, agent)
 	if err != nil {
 		debug.Error("refreshFileComponent: installed check %s/%s: %v", agent, id, err)
 		return nil, ""
 	}
-	if !installed {
+	if len(installedNames) == 0 {
 		if checkDeps.logf != nil {
 			checkDeps.logf("refreshFileComponent: %s/%s not installed — adding", agent, id)
 		}
 		realDeps := newReal()
-		realDeps.stdout = nil // refresh runs silently on success
+		realDeps.stdout = nil
 		if err := installFileComponent(realDeps, home, id, agent); err != nil {
 			debug.Error("refreshFileComponent: add %s/%s: %v", agent, id, err)
 			return nil, fmt.Sprintf("failed to add %s %s integration (see pop.log)", agent, id)
@@ -1371,10 +1474,9 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 		return &componentOutcome{Agent: agent, Component: id, Label: "added"}, ""
 	}
 
-	stale, err := fileComponentStale(checkDeps, home, id, agent)
+	stale, err := fileComponentStaleResolved(checkDeps, home, id, agent, installedNames)
 	if err != nil {
 		debug.Error("refreshFileComponent: stale check %s/%s: %v", agent, id, err)
-		// Installed but the check failed — warn (installed-but-failing).
 		return nil, fmt.Sprintf("failed to check %s %s integration: %v", agent, id, err)
 	}
 	if !stale {

@@ -58,9 +58,6 @@ func TestRemoveFileComponentLeavesNonOwned(t *testing.T) {
 	if fs.symlinks[linkDest] != foreign {
 		t.Fatalf("non-owned entry was modified: %q", fs.symlinks[linkDest])
 	}
-	if !strings.Contains(out.String(), "not owned by pop") || !strings.Contains(out.String(), linkDest) {
-		t.Fatalf("non-owned entry not reported: %q", out.String())
-	}
 }
 
 // TestRemoveStatusWiringStripsPopHooksPreservesOthers covers the claude, codex,

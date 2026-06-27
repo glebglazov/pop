@@ -633,6 +633,59 @@ func TestPopTOMLPresenceDoesNotRegisterProject(t *testing.T) {
 	}
 }
 
+func TestResolveSkillsPrefix(t *testing.T) {
+	empty := ""
+	custom := "my-"
+	tests := []struct {
+		name string
+		cfg  *Config
+		want string
+	}{
+		{name: "nil config", cfg: nil, want: DefaultSkillsPrefix},
+		{name: "missing section", cfg: &Config{}, want: DefaultSkillsPrefix},
+		{name: "section without key", cfg: &Config{Integrations: &IntegrationsConfig{}}, want: DefaultSkillsPrefix},
+		{name: "explicit empty", cfg: &Config{Integrations: &IntegrationsConfig{SkillsPrefix: &empty}}, want: ""},
+		{name: "explicit custom", cfg: &Config{Integrations: &IntegrationsConfig{SkillsPrefix: &custom}}, want: "my-"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.ResolveSkillsPrefix(); got != tt.want {
+				t.Fatalf("ResolveSkillsPrefix() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadSkillsPrefixFromTOML(t *testing.T) {
+	t.Run("absent defaults to pop-", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(configPath, []byte("exclude_current_session = true\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.ResolveSkillsPrefix(); got != DefaultSkillsPrefix {
+			t.Fatalf("ResolveSkillsPrefix() = %q, want %q", got, DefaultSkillsPrefix)
+		}
+	})
+
+	t.Run("explicit empty installs bare", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(configPath, []byte("[integrations]\nskills_prefix = \"\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.ResolveSkillsPrefix(); got != "" {
+			t.Fatalf("ResolveSkillsPrefix() = %q, want %q", got, "")
+		}
+	})
+}
+
 func TestResolveQueueDefaults(t *testing.T) {
 	tests := []struct {
 		name string

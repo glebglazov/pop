@@ -201,7 +201,7 @@ func TestDoctorNestedChecksAreCommandFamilyScopedAndActionable(t *testing.T) {
 
 func TestDoctorDoesNotRenderPaneSkillConflictAsPrimaryIntegrateRow(t *testing.T) {
 	fs := newFakeFS()
-	conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
+	conflictPath := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
 	fs.files[conflictPath] = []byte("my own skill")
 
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
@@ -359,7 +359,7 @@ func TestDoctorPathOnlyAgentsAreSuggestionsAndDoNotAffectReadiness(t *testing.T)
 
 func TestDoctorPathOnlyConflictIsNotReportedWithoutIntent(t *testing.T) {
 	fs := newFakeFS()
-	conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
+	conflictPath := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
 	fs.files[conflictPath] = []byte("user-owned skill")
 	intent, err := doctorDetectAgentIntent(fakeDeps(installerHome, fs, nil), installerHome, func(string) (*config.Config, error) {
 		return nil, os.ErrNotExist

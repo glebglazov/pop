@@ -124,6 +124,35 @@ func (f *fakeFS) lstatMode(path string) (os.FileMode, error) {
 	return 0, os.ErrNotExist
 }
 
+func (f *fakeFS) readDirNames(dir string) ([]string, error) {
+	dir = filepath.Clean(dir)
+	names := map[string]bool{}
+	for p := range f.files {
+		if filepath.Dir(p) == dir {
+			names[filepath.Base(p)] = true
+		}
+	}
+	for p := range f.dirs {
+		if p == dir {
+			continue
+		}
+		if filepath.Dir(p) == dir {
+			names[filepath.Base(p)] = true
+		}
+	}
+	for p := range f.symlinks {
+		if filepath.Dir(p) == dir {
+			names[filepath.Base(p)] = true
+		}
+	}
+	out := make([]string, 0, len(names))
+	for n := range names {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // fakeDeps wires a fakeFS into the integrateDeps shape.
 func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 	return &integrateDeps{
@@ -138,6 +167,7 @@ func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 		symlink:     fs.symlink,
 		readlink:    fs.readlink,
 		lstatMode:   fs.lstatMode,
+		readDirNames: fs.readDirNames,
 	}
 }
 
@@ -263,25 +293,25 @@ func TestInjectFrontmatterName(t *testing.T) {
 		{
 			name:    "no frontmatter at all",
 			input:   "# Hello\nbody\n",
-			want:    "---\nname: pop-pane\n---\n# Hello\nbody\n",
+			want:    "---\nname: pop-tmux-pane\n---\n# Hello\nbody\n",
 			comment: "should wrap content in fresh frontmatter",
 		},
 		{
 			name:    "frontmatter without name",
 			input:   "---\ndescription: a thing\n---\nbody\n",
-			want:    "---\nname: pop-pane\ndescription: a thing\n---\nbody\n",
+			want:    "---\nname: pop-tmux-pane\ndescription: a thing\n---\nbody\n",
 			comment: "should insert name immediately after opening ---",
 		},
 		{
 			name:    "frontmatter with existing name",
 			input:   "---\nname: old-name\ndescription: x\n---\nbody\n",
-			want:    "---\nname: pop-pane\ndescription: x\n---\nbody\n",
+			want:    "---\nname: pop-tmux-pane\ndescription: x\n---\nbody\n",
 			comment: "should replace existing name in place",
 		},
 		{
 			name:    "frontmatter with name not first",
 			input:   "---\ndescription: x\nname: old\n---\nbody\n",
-			want:    "---\ndescription: x\nname: pop-pane\n---\nbody\n",
+			want:    "---\ndescription: x\nname: pop-tmux-pane\n---\nbody\n",
 			comment: "should replace name regardless of position",
 		},
 		{
@@ -293,14 +323,14 @@ func TestInjectFrontmatterName(t *testing.T) {
 		{
 			name:    "empty input",
 			input:   "",
-			want:    "---\nname: pop-pane\n---\n",
+			want:    "---\nname: pop-tmux-pane\n---\n",
 			comment: "should wrap an empty file",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := injectFrontmatterName(tt.input, "pop-pane")
+			got := injectFrontmatterName(tt.input, "pop-tmux-pane")
 			if got != tt.want {
 				t.Errorf("%s\ngot:\n%q\nwant:\n%q", tt.comment, got, tt.want)
 			}
@@ -1773,11 +1803,11 @@ func seedBaselineComponents(t *testing.T, fs *fakeFS, home, agent string) {
 // claudePaneRenderFile is the rendered SKILL.md path for claude's pane skill
 // under the fake FS data dir — the file refresh tests corrupt to force stale.
 func claudePaneRenderFile(home string) string {
-	return filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-pane", "SKILL.md")
+	return filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-tmux-pane", "SKILL.md")
 }
 
 func claudePaneLink(home string) string {
-	return filepath.Join(home, ".claude", "skills", "pop-pane")
+	return filepath.Join(home, ".claude", "skills", "pop-tmux-pane")
 }
 
 func TestEnsureIntegrations_RefreshesStaleFileComponent(t *testing.T) {
@@ -1891,7 +1921,7 @@ func TestRefresh_SkipsConflictWithoutOverwrite(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
-	conflictPath := filepath.Join("/h", ".claude", "skills", "pane")
+	conflictPath := filepath.Join("/h", ".claude", "skills", "tmux-pane")
 	fs.dirs[conflictPath] = true
 	delete(fs.symlinks, claudePaneLink("/h"))
 
@@ -1943,7 +1973,7 @@ func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
 	// Integration conflict. Refresh must skip it silently — no update, no
 	// warning, and no symlink written over the user's entry.
 	fs := newFakeFS()
-	conflict := filepath.Join("/h", ".claude", "skills", "pane")
+	conflict := filepath.Join("/h", ".claude", "skills", "tmux-pane")
 	fs.dirs[conflict] = true
 
 	dry, real := fakeFactories("/h", fs)
@@ -1997,7 +2027,7 @@ func TestRefreshComponent_SkipsUnknownComponentSilently(t *testing.T) {
 }
 
 func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
-	// A pre-symlink copy-mode install (a real `pop-pane` directory at the agent
+	// A pre-symlink copy-mode install (a real `pop-tmux-pane` directory at the agent
 	// location, no render tree under the data dir) is pop-owned but stale.
 	// Refresh must migrate it to a symlink into the freshly rendered tree.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
@@ -2007,7 +2037,7 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 	link := claudePaneLink("/h")
 	fs.dirs[link] = true
 	copyFile := filepath.Join(link, "SKILL.md")
-	fs.files[copyFile] = []byte("old copy-mode body")
+	fs.files[copyFile] = []byte(injectOwnershipMarker("---\nname: pop-tmux-pane\n---\nold copy-mode body"))
 
 	dry, real := fakeFactories("/h", fs)
 	warnings := ensureIntegrationsForRevisionWith("rev-fc3", dry, real)
@@ -2020,7 +2050,7 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 	if fs.dirs[link] {
 		t.Errorf("copy-mode directory not removed during migration: %s", link)
 	}
-	target := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-pane")
+	target := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-tmux-pane")
 	if fs.symlinks[link] != target {
 		t.Errorf("expected migration to symlink %q -> %q, got %q", link, target, fs.symlinks[link])
 	}
@@ -2347,10 +2377,10 @@ func TestIntegrateCmd_MultiAgentWithUniformFlags(t *testing.T) {
 	}
 
 	// Verify pane skill was installed for claude.
-	claudeLinkPath := filepath.Join("/h", ".claude", "skills", "pop-pane")
+	claudeLinkPath := filepath.Join("/h", ".claude", "skills", "pop-tmux-pane")
 	if target, ok := fs.symlinks[claudeLinkPath]; !ok {
 		t.Error("claude pane-skill symlink not created")
-	} else if !strings.Contains(target, "pop-pane") {
+	} else if !strings.Contains(target, "pop-tmux-pane") {
 		t.Errorf("claude pane-skill symlink target unexpected: %v", target)
 	}
 }
@@ -2482,7 +2512,7 @@ func TestExplicitInstall_OutputSkippedConflict(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	// Place a non-pop entry at the bare pane name to trigger a conflict.
-	conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
+	conflictPath := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
 	fs.dirs[conflictPath] = true
 
 	var out bytes.Buffer
@@ -2510,7 +2540,7 @@ func TestExplicitInstall_OutputSkippedConflict(t *testing.T) {
 	}
 	// pane-skill symlink must not exist.
 	for k := range fs.symlinks {
-		if strings.Contains(k, "pop-pane") {
+		if strings.Contains(k, "pop-tmux-pane") {
 			t.Errorf("pane-skill symlink must not be created on conflict: %s", k)
 		}
 	}
@@ -2619,7 +2649,7 @@ func TestUpdateExisting_OutputSkippedConflict(t *testing.T) {
 	// Seed pane-skill as installed.
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
 	// Place a non-pop entry at the bare pane name to create a conflict.
-	conflictPath := filepath.Join("/h", ".claude", "skills", "pane")
+	conflictPath := filepath.Join("/h", ".claude", "skills", "tmux-pane")
 	fs.dirs[conflictPath] = true
 	// Remove the pop-owned symlink so ownership check sees the conflict first.
 	delete(fs.symlinks, claudePaneLink("/h"))
@@ -2792,7 +2822,7 @@ func TestOptOutRemoval_LeavesUnownedUntouched(t *testing.T) {
 	home := "/h"
 
 	// Place a user-owned (non-pop) entry at the bare pane-skill name.
-	userEntry := filepath.Join(home, ".claude", "skills", "pane")
+	userEntry := filepath.Join(home, ".claude", "skills", "tmux-pane")
 	fs.dirs[userEntry] = true
 
 	var out bytes.Buffer
@@ -2829,6 +2859,7 @@ func TestOptOutRemoval_NoPrompt(t *testing.T) {
 		symlink:     fs.symlink,
 		readlink:    fs.readlink,
 		lstatMode:   fs.lstatMode,
+		readDirNames: fs.readDirNames,
 		stdin:       nil, // no stdin → any prompt read would return EOF (decline), but removal must not need it
 	}
 
@@ -2990,7 +3021,7 @@ func overwriteConflictSetup(t *testing.T) (*fakeFS, string, string) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	home := "/h"
-	conflictPath := filepath.Join(home, ".claude", "skills", "pane")
+	conflictPath := filepath.Join(home, ".claude", "skills", "tmux-pane")
 	fs.dirs[conflictPath] = true
 	fs.files[filepath.Join(conflictPath, "SKILL.md")] = []byte("user skill")
 	return fs, home, conflictPath
@@ -3122,9 +3153,9 @@ func TestOverwriteConflicts_MultiAgentUniform(t *testing.T) {
 	fs := newFakeFS()
 	home := "/h"
 
-	claudeConflict := filepath.Join(home, ".claude", "skills", "pane")
+	claudeConflict := filepath.Join(home, ".claude", "skills", "tmux-pane")
 	fs.dirs[claudeConflict] = true
-	piConflict := filepath.Join(home, ".pi", "agent", "skills", "pane")
+	piConflict := filepath.Join(home, ".pi", "agent", "skills", "tmux-pane")
 	fs.dirs[piConflict] = true
 
 	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
@@ -3139,7 +3170,7 @@ func TestOverwriteConflicts_MultiAgentUniform(t *testing.T) {
 		t.Errorf("both agents' conflicts must be overwritten with --yes")
 	}
 	claudeLink := claudePaneLink(home)
-	piLink := filepath.Join(home, ".pi", "agent", "skills", "pop-pane")
+	piLink := filepath.Join(home, ".pi", "agent", "skills", "pop-tmux-pane")
 	if _, ok := fs.symlinks[claudeLink]; !ok {
 		t.Errorf("claude pane-skill not installed")
 	}

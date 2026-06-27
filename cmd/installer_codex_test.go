@@ -9,14 +9,14 @@ import (
 
 func codexPaneSkillPaths() (renderFile, linkDest, linkTarget string) {
 	renderRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "codex", "pane-skill")
-	renderFile = filepath.Join(renderRoot, "pop-pane", "SKILL.md")
-	linkDest = filepath.Join(installerHome, ".codex", "skills", "pop-pane")
-	linkTarget = filepath.Join(renderRoot, "pop-pane")
+	renderFile = filepath.Join(renderRoot, "pop-tmux-pane", "SKILL.md")
+	linkDest = filepath.Join(installerHome, ".codex", "skills", "pop-tmux-pane")
+	linkTarget = filepath.Join(renderRoot, "pop-tmux-pane")
 	return
 }
 
 // TestInstallCodexPaneSkill covers the clean codex pane-skill install: render
-// tree under the data dir and a symlink at ~/.codex/skills/pop-pane.
+// tree under the data dir and a symlink at ~/.codex/skills/pop-tmux-pane.
 func TestInstallCodexPaneSkill(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
@@ -56,8 +56,8 @@ func TestRefreshCodexPaneSkillStale(t *testing.T) {
 	if warning != "" {
 		t.Fatalf("unexpected warning: %q", warning)
 	}
-	src, _ := skillFiles.ReadFile("skills/pop/pane.md")
-	want := injectFrontmatterName(string(src), "pop-pane")
+	src, _ := skillFiles.ReadFile("skills/pop/tmux-pane.md")
+	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-tmux-pane"))
 	if string(fs.files[renderFile]) != want {
 		t.Fatalf("render tree not refreshed: got %q", fs.files[renderFile])
 	}
@@ -76,7 +76,7 @@ func TestInstallCodexPaneSkillConflictSkipWithOverwriteHint(t *testing.T) {
 	d.agentName = "codex"
 
 	skillsDir := filepath.Join(installerHome, ".codex", "skills")
-	conflictPath := filepath.Join(skillsDir, "pane")
+	conflictPath := filepath.Join(skillsDir, "tmux-pane")
 	fs.dirs[conflictPath] = true
 	fs.files[filepath.Join(conflictPath, "SKILL.md")] = []byte("mine")
 
@@ -84,7 +84,7 @@ func TestInstallCodexPaneSkillConflictSkipWithOverwriteHint(t *testing.T) {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
-	if _, linked := fs.symlinks[filepath.Join(skillsDir, "pop-pane")]; linked {
+	if _, linked := fs.symlinks[filepath.Join(skillsDir, "pop-tmux-pane")]; linked {
 		t.Fatal("conflicting pane skill was installed despite unowned entry")
 	}
 	got := out.String()
