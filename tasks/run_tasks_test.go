@@ -254,7 +254,10 @@ func TestRunTaskSetBareDrainFallsBackToSoleHITLGate(t *testing.T) {
 	}
 }
 
-func TestRunTaskSetHoldsRuntimeLockAtInitialHITLGatePrompt(t *testing.T) {
+// A whole-set drain parked at the initial HITL gate menu holds no Runtime
+// execution lock (ADR-0063): ReadRuntimeLockStatus reports not-locked and a
+// second drain can claim the same checkout while the human sits at the menu.
+func TestRunTaskSetReleasesRuntimeLockAtInitialHITLGatePrompt(t *testing.T) {
 	env, agent := setupSoleHumanBlockedFixture(t)
 	d := env.deps()
 	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
@@ -265,9 +268,17 @@ func TestRunTaskSetHoldsRuntimeLockAtInitialHITLGatePrompt(t *testing.T) {
 
 	check := func(t *testing.T) {
 		t.Helper()
-		status := ReadRuntimeLockStatus(d, runtimePath)
-		if !status.Locked || status.Metadata == nil || status.Metadata.SetID != "solo" {
-			t.Fatalf("runtime lock at HITL prompt = %#v, want live solo lock", status)
+		if status := ReadRuntimeLockStatus(d, runtimePath); status.Locked {
+			t.Fatalf("runtime lock at HITL prompt = %#v, want parked (not locked)", status)
+		}
+		// A concurrent drain can claim the freed checkout while the human is at the
+		// gate menu; finish it so it does not leak into the post-run assertion.
+		handle, err := BeginDrain(d, runtimePath, "second", io.Discard)
+		if err != nil {
+			t.Fatalf("second drain must claim the parked checkout: %v", err)
+		}
+		if err := handle.Finish(DrainOutcomeFinished, "", false, time.Time{}); err != nil {
+			t.Fatalf("finish second drain: %v", err)
 		}
 	}
 
@@ -281,6 +292,148 @@ func TestRunTaskSetHoldsRuntimeLockAtInitialHITLGatePrompt(t *testing.T) {
 	status := ReadRuntimeLockStatus(d, runtimePath)
 	if status.Locked {
 		t.Fatalf("runtime lock leaked after HITL gate exit: %#v", status)
+	}
+}
+
+// A whole-set drain parked at the Failed gate menu holds no Runtime execution
+// lock (ADR-0063), mirroring the HITL gate: ReadRuntimeLockStatus reports
+// not-locked and a second drain can claim the same checkout during the menu.
+func TestRunTaskSetReleasesRuntimeLockAtFailedGatePrompt(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+	runtimePath, err := ResolveRuntimePathWith(d, env.root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(t *testing.T) {
+		t.Helper()
+		if status := ReadRuntimeLockStatus(d, runtimePath); status.Locked {
+			t.Fatalf("runtime lock at Failed prompt = %#v, want parked (not locked)", status)
+		}
+		handle, err := BeginDrain(d, runtimePath, "second", io.Discard)
+		if err != nil {
+			t.Fatalf("second drain must claim the parked checkout: %v", err)
+		}
+		if err := handle.Finish(DrainOutcomeFinished, "", false, time.Time{}); err != nil {
+			t.Fatalf("finish second drain: %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	opts.ConfirmIn = &checkingPromptReader{t: t, check: check, response: "0\n"}
+
+	_, err = RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+
+	if status := ReadRuntimeLockStatus(d, runtimePath); status.Locked {
+		t.Fatalf("runtime lock leaked after Failed gate exit: %#v", status)
+	}
+}
+
+// A set that *starts* at a gate records the same clean Drain terminal the --yes
+// path produces (DrainOutcomeFinished) without ever holding a live lock during
+// the menu (ADR-0056/0063). The blocked/failed disposition stays
+// manifest-derived, so the recorded outcome is identical across both paths.
+func TestRunTaskSetParkAtGateRecordsFinishedDrain(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		yes     bool
+		confirm string
+	}{
+		{name: "interactive", yes: false, confirm: "0\n"},
+		{name: "yes", yes: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupRunTaskSetFixture(t, "demo", []Task{
+				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+			})
+			agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+			d := env.deps()
+			d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+			runtimePath, err := ResolveRuntimePathWith(d, env.root, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var buf bytes.Buffer
+			opts := env.runTaskSetOpts(tc.yes, agent, &buf)
+			opts.TaskSetOverride = "demo"
+			if tc.confirm != "" {
+				opts.ConfirmIn = strings.NewReader(tc.confirm)
+			}
+
+			_, err = RunTaskSetWith(d, nil, nil, opts)
+			assertExitCode(t, err, ExitOperational)
+
+			rec, err := ReadDrainOutcome(d, runtimePath)
+			if err != nil {
+				t.Fatalf("read drain outcome: %v", err)
+			}
+			if rec.Outcome != DrainOutcomeFinished {
+				t.Fatalf("park outcome = %q, want %q", rec.Outcome, DrainOutcomeFinished)
+			}
+			if status := ReadRuntimeLockStatus(d, runtimePath); status.Locked {
+				t.Fatalf("runtime lock held after park: %#v", status)
+			}
+		})
+	}
+}
+
+// On gate clear the loop re-acquires a fresh Drain before resuming AFK work; a
+// collision with a concurrent drain that grabbed the checkout meanwhile refuses
+// cleanly with the "already in progress" error, and the gate decision already
+// persisted to the manifest is left intact (ADR-0063).
+func TestRunTaskSetResumeAfterGateRefusesOnConcurrentDrain(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-hitl", File: "01-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+		{ID: "02-a", File: "02-a.md", Title: "A", Type: "AFK", Status: "open", BlockedBy: []string{"01-hitl"}},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "should-not-run"})
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+	runtimePath, err := ResolveRuntimePathWith(d, env.root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rival *DrainHandle
+	check := func(t *testing.T) {
+		t.Helper()
+		// A concurrent drain grabs the freed checkout while the human clears the
+		// gate; it stays live so the resume re-acquire collides.
+		h, err := BeginDrain(d, runtimePath, "rival", io.Discard)
+		if err != nil {
+			t.Fatalf("rival drain must claim the parked checkout: %v", err)
+		}
+		rival = h
+	}
+	t.Cleanup(func() {
+		if rival != nil {
+			_ = rival.Finish(DrainOutcomeFinished, "", false, time.Time{})
+		}
+	})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	// Complete the HITL at the gate (2), after which the loop resumes AFK work.
+	opts.ConfirmIn = &checkingPromptReader{t: t, check: check, response: "2\n"}
+
+	_, err = RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "already in progress") {
+		t.Fatalf("resume must refuse on concurrent drain: %v", err)
+	}
+	// The gate decision persisted despite the refused resume.
+	assertTaskDone(t, env.execFixture(), "01-hitl")
+	if strings.Contains(buf.String(), "━━ Running task demo/02-a") {
+		t.Fatalf("AFK task must not run after a refused resume:\n%s", buf.String())
 	}
 }
 
