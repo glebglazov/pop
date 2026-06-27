@@ -631,9 +631,10 @@ func TestRefreshFileComponentDebugNotInstalled(t *testing.T) {
 	}
 	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
 
-	updated, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	outcome, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	updated := outcome != nil && (outcome.Label == "updated" || outcome.Label == "added")
 	if updated || warning != "" {
-		t.Errorf("expected no update/warning, got updated=%v warning=%q", updated, warning)
+		t.Errorf("expected no update/warning, got outcome=%v warning=%q", outcome, warning)
 	}
 	got := lines()
 	if !hasLog(got, "not installed") {
@@ -659,9 +660,10 @@ func TestRefreshFileComponentDebugCurrent(t *testing.T) {
 	}
 	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
 
-	updated, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	outcome, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	updated := outcome != nil && (outcome.Label == "updated" || outcome.Label == "added")
 	if updated || warning != "" {
-		t.Errorf("expected no update/warning, got updated=%v warning=%q", updated, warning)
+		t.Errorf("expected no update/warning, got outcome=%v warning=%q", outcome, warning)
 	}
 	got := lines()
 	if !hasLog(got, "current") {
@@ -694,9 +696,9 @@ func TestRefreshFileComponentDebugStale(t *testing.T) {
 	}
 	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
 
-	updated, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
-	if !updated {
-		t.Errorf("expected component to be refreshed")
+	outcome, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	if outcome == nil || outcome.Label != "updated" {
+		t.Errorf("expected component to be refreshed, got outcome=%v", outcome)
 	}
 	if warning != "" {
 		t.Errorf("unexpected warning: %q", warning)
@@ -726,9 +728,10 @@ func TestRefreshFileComponentDebugConflict(t *testing.T) {
 	}
 	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
 
-	updated, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	outcome, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	updated := outcome != nil && (outcome.Label == "updated" || outcome.Label == "added")
 	if updated || warning != "" {
-		t.Errorf("expected no update/warning on conflict, got updated=%v warning=%q", updated, warning)
+		t.Errorf("expected no update/warning on conflict, got outcome=%v warning=%q", outcome, warning)
 	}
 	got := lines()
 	if !hasLog(got, conflict) {

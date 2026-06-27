@@ -731,12 +731,12 @@ func TestIntegrateClaude_RefreshRendersTopicHook(t *testing.T) {
 	newReal := func() *integrateDeps { return fakeDeps("/h", fs, io.Discard) }
 	newDry := func() *integrateDeps { return withDryRun(fakeDeps("/h", fs, io.Discard)) }
 
-	updated, warning := refreshStatusWiring(newDry, newReal, "claude")
+	outcome, warning := refreshStatusWiring(newDry, newReal, "claude")
 	if warning != "" {
 		t.Fatalf("unexpected warning: %s", warning)
 	}
-	if !updated {
-		t.Fatal("expected refresh to update claude status wiring (topic hook added)")
+	if outcome == nil || outcome.Label != "updated" {
+		t.Fatalf("expected refresh to update claude status wiring (topic hook added), got outcome=%v", outcome)
 	}
 	cmds := claudeUserPromptCommands(t, fs)
 	if got := countContains(cmds, "pop pane set-topic --derive"); got != 1 {
@@ -997,12 +997,12 @@ func TestIntegrateCodex_RefreshRendersAndRemovesTopicHook(t *testing.T) {
 	newReal := func() *integrateDeps { return fakeDeps("/h", fs, io.Discard) }
 	newDry := func() *integrateDeps { return withDryRun(fakeDeps("/h", fs, io.Discard)) }
 
-	updated, warning := refreshStatusWiring(newDry, newReal, "codex")
+	outcome, warning := refreshStatusWiring(newDry, newReal, "codex")
 	if warning != "" {
 		t.Fatalf("unexpected warning: %s", warning)
 	}
-	if !updated {
-		t.Fatal("expected refresh to add the codex topic hook")
+	if outcome == nil || outcome.Label != "updated" {
+		t.Fatalf("expected refresh to add the codex topic hook, got outcome=%v", outcome)
 	}
 	cmds := nestedEventCommands(t, fs, hooksPath, "UserPromptSubmit")
 	if got := countContains(cmds, "pop pane set-topic --derive --label codex"); got != 1 {
@@ -1388,12 +1388,12 @@ func TestIntegrateCursor_RefreshRendersAndRemovesTopicHook(t *testing.T) {
 	newReal := func() *integrateDeps { return fakeDeps("/h", fs, io.Discard) }
 	newDry := func() *integrateDeps { return withDryRun(fakeDeps("/h", fs, io.Discard)) }
 
-	updated, warning := refreshStatusWiring(newDry, newReal, "cursor")
+	outcome, warning := refreshStatusWiring(newDry, newReal, "cursor")
 	if warning != "" {
 		t.Fatalf("unexpected warning: %s", warning)
 	}
-	if !updated {
-		t.Fatal("expected refresh to add the cursor topic hook")
+	if outcome == nil || outcome.Label != "updated" {
+		t.Fatalf("expected refresh to add the cursor topic hook, got outcome=%v", outcome)
 	}
 	cmds := flatEventCommands(t, fs, hooksPath, "beforeSubmitPrompt")
 	if got := countContains(cmds, "pop pane set-topic --derive --label cursor"); got != 1 {
@@ -1916,9 +1916,9 @@ func TestEnsureIntegrations_LeavesCurrentFileComponentUntouched(t *testing.T) {
 	if len(result.Warnings) != 0 {
 		t.Errorf("expected no warnings for current component, got %v", result.Warnings)
 	}
-	for _, a := range result.Updated {
-		if a == "claude" {
-			t.Errorf("claude reported updated though its components are current")
+	for _, o := range result.Outcomes {
+		if o.Agent == "claude" && (o.Label == "updated" || o.Label == "added") {
+			t.Errorf("claude reported updated though its components are current (outcome: %v)", o)
 		}
 	}
 	if fs.symlinks[link] != targetBefore {
@@ -1935,7 +1935,8 @@ func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
 	fs.dirs[conflict] = true
 
 	dry, real := fakeFactories("/h", fs)
-	updated, warning := refreshComponent(dry, real, "claude", ComponentPaneSkill)
+	outcome, warning := refreshComponent(dry, real, "claude", ComponentPaneSkill)
+	updated := outcome != nil && (outcome.Label == "updated" || outcome.Label == "added")
 	if updated {
 		t.Errorf("expected no update on conflict")
 	}
@@ -1954,9 +1955,9 @@ func TestRefreshComponent_SkipsNotSupportedSilently(t *testing.T) {
 	dry, real := fakeFactories("/h", fs)
 
 	for _, id := range []ComponentID{ComponentPaneSkill, ComponentTaskSkills} {
-		updated, warning := refreshComponent(dry, real, "codex", id)
-		if updated || warning != "" {
-			t.Errorf("codex/%s: expected silent no-op, got updated=%v warning=%q", id, updated, warning)
+		outcome, warning := refreshComponent(dry, real, "codex", id)
+		if outcome != nil || warning != "" {
+			t.Errorf("codex/%s: expected nil outcome and no warning (not supported), got outcome=%v warning=%q", id, outcome, warning)
 		}
 	}
 }
@@ -1999,9 +2000,9 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 }
 
 func TestUpdateExisting_RefreshesFileComponentPerAgent(t *testing.T) {
-	// The packaging path refreshes file components too, keeping its one-line-
-	// per-agent output. Seed claude's pane skill stale; the update-existing run
-	// should print exactly one "Updated claude" line and stamp the revision.
+	// The packaging path refreshes file components too. Seed claude's pane skill
+	// stale; the update-existing run should print a per-component updated line
+	// for pane-skill and stamp the revision.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
@@ -2009,11 +2010,11 @@ func TestUpdateExisting_RefreshesFileComponentPerAgent(t *testing.T) {
 
 	dry, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
-	if err := runIntegrateUpdateExistingWith("rev-fc4", dry, real, &stdout, &stderr); err != nil {
+	if err := runIntegrateUpdateExistingWith("rev-fc4", dry, real, &stdout, &stderr, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got, want := stdout.String(), "✓ Updated claude integration\n"; got != want {
-		t.Errorf("stdout = %q, want %q", got, want)
+	if !strings.Contains(stdout.String(), "claude") || !strings.Contains(stdout.String(), "pane-skill") || !strings.Contains(stdout.String(), "updated") {
+		t.Errorf("stdout = %q, want a line containing claude, pane-skill, updated", stdout.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("expected no warnings, got %q", stderr.String())
@@ -2066,20 +2067,20 @@ func TestAppState_SaveThenLoadRoundTrip(t *testing.T) {
 // ----- runIntegrateUpdateExistingWith (pop integrate --update-existing) -----
 
 func TestUpdateExisting_SilentOnNoInstallations(t *testing.T) {
-	// No agents installed anywhere: the command should print nothing and
-	// stamp state.json with the current revision (so the runtime fast-path
-	// has nothing to do on the next launch either).
+	// No agents installed anywhere: opted-out outcomes are verbose-gated on
+	// the update-existing path, so default output is "nothing to do".
+	// state.json is stamped regardless (runtime fast-path can skip next launch).
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)
 
 	var stdout, stderr bytes.Buffer
-	err := runIntegrateUpdateExistingWith("rev1", dry, real, &stdout, &stderr)
+	err := runIntegrateUpdateExistingWith("rev1", dry, real, &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if stdout.Len() != 0 {
-		t.Errorf("expected silent stdout, got %q", stdout.String())
+	if got := stdout.String(); got != "nothing to do\n" {
+		t.Errorf("expected 'nothing to do', got %q", got)
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("expected silent stderr, got %q", stderr.String())
@@ -2091,9 +2092,9 @@ func TestUpdateExisting_SilentOnNoInstallations(t *testing.T) {
 
 func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
 	// Seed claude + pi as installed-but-stale. Both should update; stdout
-	// should get one line per updated agent in the declaration order of
-	// integrationAgents (claude, codex, pi, opencode). codex and opencode
-	// aren't installed and must not appear.
+	// should contain per-component "updated" lines for both (in agent order:
+	// claude before pi). codex and opencode aren't installed and must not
+	// appear as updated.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
@@ -2108,13 +2109,23 @@ func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
 	dry, real := fakeFactories("/h", fs)
 
 	var stdout, stderr bytes.Buffer
-	if err := runIntegrateUpdateExistingWith("rev2", dry, real, &stdout, &stderr); err != nil {
+	if err := runIntegrateUpdateExistingWith("rev2", dry, real, &stdout, &stderr, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := "✓ Updated claude integration\n✓ Updated pi integration\n"
-	if got := stdout.String(); got != want {
-		t.Errorf("stdout = %q, want %q", got, want)
+	got := stdout.String()
+	// Both stale agents should appear with their component updated.
+	if !strings.Contains(got, "claude") || !strings.Contains(got, "updated") {
+		t.Errorf("stdout missing claude updated line, got %q", got)
+	}
+	if !strings.Contains(got, "pi") {
+		t.Errorf("stdout missing pi updated line, got %q", got)
+	}
+	// claude must appear before pi (agent declaration order).
+	if claudeIdx := strings.Index(got, "claude"); claudeIdx < 0 {
+		t.Errorf("stdout missing claude, got %q", got)
+	} else if piIdx := strings.Index(got, "pi"); piIdx >= 0 && claudeIdx > piIdx {
+		t.Errorf("claude must appear before pi in output, got %q", got)
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("expected no warnings, got %q", stderr.String())
@@ -2127,18 +2138,20 @@ func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
 func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
 	// Seed claude's full default set at the exact embedded content. Dry-run sees
 	// every component installed but not changed → no updates, no warnings, no
-	// missing default to add, stamp state.json anyway.
+	// missing default to add, stamp state.json anyway. "Already current" outcomes
+	// are verbose-gated on the update-existing path → default output is
+	// "nothing to do".
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installFullDefaultViaFake(t, fs, "/h", "claude")
 
 	dry, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
-	if err := runIntegrateUpdateExistingWith("rev3", dry, real, &stdout, &stderr); err != nil {
+	if err := runIntegrateUpdateExistingWith("rev3", dry, real, &stdout, &stderr, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if stdout.Len() != 0 {
-		t.Errorf("expected silent stdout on up-to-date install, got %q", stdout.String())
+	if got := stdout.String(); got != "nothing to do\n" {
+		t.Errorf("expected 'nothing to do' on up-to-date install, got %q", got)
 	}
 	if got := readStateRevision(t); got != "rev3" {
 		t.Errorf("state.json revision = %q, want %q", got, "rev3")
@@ -2148,8 +2161,8 @@ func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
 func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
 	// Seed claude's full default set so nothing is missing to add, then make the
 	// status wiring stale and inject a write failure on it. The command should
-	// print the warning to stderr, leave stdout empty (nothing actually
-	// updated), and NOT stamp state.json so the next runtime check retries.
+	// print "nothing to do" to stdout (nothing actually updated), print the
+	// warning to stderr, and NOT stamp state.json so the next runtime check retries.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installFullDefaultViaFake(t, fs, "/h", "claude")
@@ -2160,14 +2173,14 @@ func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
 
 	dry, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
-	err := runIntegrateUpdateExistingWith("rev4", dry, real, &stdout, &stderr)
+	err := runIntegrateUpdateExistingWith("rev4", dry, real, &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("expected nil error (non-fatal), got %v", err)
 	}
 
-	// Nothing successfully updated.
-	if stdout.Len() != 0 {
-		t.Errorf("expected no success lines, got stdout %q", stdout.String())
+	// Nothing successfully updated — "nothing to do" (no updated outcomes).
+	if got := stdout.String(); got != "nothing to do\n" {
+		t.Errorf("expected 'nothing to do' on failed update, got stdout %q", got)
 	}
 	// Warning for claude.
 	if !strings.Contains(stderr.String(), "claude") {
@@ -2190,7 +2203,7 @@ func TestUpdateExisting_DevRevisionDoesNotStamp(t *testing.T) {
 	dry, real := fakeFactories("/h", fs)
 
 	var stdout, stderr bytes.Buffer
-	if err := runIntegrateUpdateExistingWith("dev", dry, real, &stdout, &stderr); err != nil {
+	if err := runIntegrateUpdateExistingWith("dev", dry, real, &stdout, &stderr, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := readStateRevision(t); got != "" {
@@ -2240,5 +2253,282 @@ func TestIntegrateCmd_WithoutFlagRequiresExactlyOneArg(t *testing.T) {
 	}
 	if err := integrateCmd.Args(integrateCmd, []string{"claude", "pi"}); err == nil {
 		t.Error("expected error when more than one agent is provided")
+	}
+}
+
+// ----- reasoned output: explicit install path --------------------------------
+
+// TestExplicitInstall_OutputAdded: fresh install prints "added" for installed
+// components and "skipped (opted out)" for supported-but-not-requested ones.
+func TestExplicitInstall_OutputAdded(t *testing.T) {
+	fs := newFakeFS()
+	var out bytes.Buffer
+	d := fakeDeps(installerHome, fs, &out)
+
+	// Install only status-wiring (no opt-in flags).
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	// status-wiring was not present before → "added"
+	if !strings.Contains(got, "status-wiring") || !strings.Contains(got, "added") {
+		t.Errorf("expected 'status-wiring  added' line, got %q", got)
+	}
+	// pane-skill and task-skills are supported but not requested → "skipped (opted out)"
+	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (opted out)") {
+		t.Errorf("expected 'pane-skill  skipped (opted out)' line, got %q", got)
+	}
+}
+
+// TestExplicitInstall_OutputUpdated: re-running with stale content prints "updated".
+func TestExplicitInstall_OutputUpdated(t *testing.T) {
+	fs := newFakeFS()
+	settingsPath := filepath.Join(installerHome, ".claude", "settings.json")
+
+	// Seed an old pop hook so the dry-run sees installed+changed.
+	fs.files[settingsPath] = []byte(staleClaudeSettings)
+
+	var out bytes.Buffer
+	d := fakeDeps(installerHome, fs, &out)
+
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "status-wiring") || !strings.Contains(got, "updated") {
+		t.Errorf("expected 'status-wiring  updated' line, got %q", got)
+	}
+}
+
+// TestExplicitInstall_OutputSkippedOptedOut: unsupported components produce no
+// line; supported-but-not-requested ones show "skipped (opted out)".
+func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	var out bytes.Buffer
+	d := fakeDeps(installerHome, fs, &out)
+
+	// codex only supports status-wiring; task-skills and pane-skill are unsupported.
+	if err := runIntegrateComponents(d, "codex", []ComponentID{ComponentStatusWiring}, false, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	// codex has no supported opt-in components so no "opted out" lines — only status-wiring.
+	if !strings.Contains(got, "status-wiring") {
+		t.Errorf("expected status-wiring line, got %q", got)
+	}
+	// task-skills and pane-skill are not supported for codex — must not appear.
+	if strings.Contains(got, "task-skills") || strings.Contains(got, "pane-skill") {
+		t.Errorf("unsupported components must not appear in output, got %q", got)
+	}
+
+	// claude supports pane-skill and task-skills — not selecting them shows opted-out.
+	out.Reset()
+	fs2 := newFakeFS()
+	d2 := fakeDeps(installerHome, fs2, &out)
+	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring}, false, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got2 := out.String()
+	if !strings.Contains(got2, "pane-skill") || !strings.Contains(got2, "skipped (opted out)") {
+		t.Errorf("expected 'pane-skill  skipped (opted out)' for claude, got %q", got2)
+	}
+}
+
+// TestExplicitInstall_OutputSkippedConflict: a component with a conflict shows
+// "skipped (conflict at ...)" and is not installed.
+func TestExplicitInstall_OutputSkippedConflict(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	// Place a non-pop entry at the bare pane name to trigger a conflict.
+	conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
+	fs.dirs[conflictPath] = true
+
+	var out bytes.Buffer
+	d := fakeDeps(installerHome, fs, &out)
+
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (conflict") {
+		t.Errorf("expected 'pane-skill  skipped (conflict' line, got %q", got)
+	}
+	// The conflict path should appear in the output.
+	if !strings.Contains(got, conflictPath) {
+		t.Errorf("expected conflict path %q in output, got %q", conflictPath, got)
+	}
+	// status-wiring should still be installed (conflict only affects pane-skill).
+	settingsPath := filepath.Join(installerHome, ".claude", "settings.json")
+	if _, ok := fs.files[settingsPath]; !ok {
+		t.Errorf("status wiring should still be installed despite pane-skill conflict")
+	}
+	// pane-skill symlink must not exist.
+	for k := range fs.symlinks {
+		if strings.Contains(k, "pop-pane") {
+			t.Errorf("pane-skill symlink must not be created on conflict: %s", k)
+		}
+	}
+}
+
+// TestExplicitInstall_VerboseShowsAlreadyCurrent: without --verbose, "already
+// current" lines are suppressed; with --verbose, they appear.
+func TestExplicitInstall_VerboseShowsAlreadyCurrent(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	// First install to set up current content.
+	d0 := fakeDeps(installerHome, fs, io.Discard)
+	if err := runIntegrateComponents(d0, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+
+	// Re-run without verbose: "already current" should be suppressed → "nothing to do" or opted-out lines only.
+	var outNoVerbose bytes.Buffer
+	d1 := fakeDeps(installerHome, fs, &outNoVerbose)
+	if err := runIntegrateComponents(d1, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false); err != nil {
+		t.Fatalf("re-run no verbose: %v", err)
+	}
+	if strings.Contains(outNoVerbose.String(), "already current") {
+		t.Errorf("'already current' must be suppressed without --verbose, got %q", outNoVerbose.String())
+	}
+
+	// Re-run with verbose: "already current" should appear for both components.
+	var outVerbose bytes.Buffer
+	d2 := fakeDeps(installerHome, fs, &outVerbose)
+	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, true); err != nil {
+		t.Fatalf("re-run verbose: %v", err)
+	}
+	if !strings.Contains(outVerbose.String(), "already current") {
+		t.Errorf("'already current' must appear with --verbose, got %q", outVerbose.String())
+	}
+}
+
+// ----- reasoned output: --update-existing path --------------------------------
+
+// TestUpdateExisting_OutputAdded: a newly-appearing component shows "updated"
+// (refresh never truly "adds" — it only refreshes stale installed ones, so
+// status-wiring changed is "updated").
+func TestUpdateExisting_OutputUpdated(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	// Make claude stale.
+	stalePath := filepath.Join("/h", ".claude", "settings.json")
+	fs.files[stalePath] = []byte(staleClaudeSettings)
+
+	dry, real := fakeFactories("/h", fs)
+	var stdout, stderr bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev-out1", dry, real, &stdout, &stderr, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := stdout.String()
+	if !strings.Contains(got, "claude") || !strings.Contains(got, "status-wiring") || !strings.Contains(got, "updated") {
+		t.Errorf("expected 'claude  status-wiring  updated' line, got %q", got)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("expected no warnings, got %q", stderr.String())
+	}
+}
+
+// TestUpdateExisting_OutputSkippedOptedOut: not-installed components appear as
+// "skipped (opted out)" only with --verbose on the update-existing path.
+func TestUpdateExisting_OutputSkippedOptedOut(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	// Nothing installed anywhere.
+	dry, real := fakeFactories("/h", fs)
+
+	// Without verbose: opted-out outcomes are suppressed → "nothing to do".
+	var stdoutNoVerbose bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev-out2", dry, real, &stdoutNoVerbose, io.Discard, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := stdoutNoVerbose.String(); got != "nothing to do\n" {
+		t.Errorf("without verbose, expected 'nothing to do', got %q", got)
+	}
+
+	// With verbose: opted-out outcomes appear.
+	var stdoutVerbose bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev-out2", dry, real, &stdoutVerbose, io.Discard, true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := stdoutVerbose.String()
+	if !strings.Contains(got, "skipped (opted out)") {
+		t.Errorf("with verbose, expected 'skipped (opted out)' lines, got %q", got)
+	}
+}
+
+// TestUpdateExisting_OutputSkippedConflict: a conflict on a file component
+// shows "skipped (conflict at ...)" by default on the update-existing path.
+func TestUpdateExisting_OutputSkippedConflict(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	// Seed pane-skill as installed.
+	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
+	// Place a non-pop entry at the bare pane name to create a conflict.
+	conflictPath := filepath.Join("/h", ".claude", "skills", "pane")
+	fs.dirs[conflictPath] = true
+	// Remove the pop-owned symlink so ownership check sees the conflict first.
+	delete(fs.symlinks, claudePaneLink("/h"))
+
+	dry, real := fakeFactories("/h", fs)
+	var stdout bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev-out3", dry, real, &stdout, io.Discard, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := stdout.String()
+	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (conflict") {
+		t.Errorf("expected 'pane-skill  skipped (conflict' line, got %q", got)
+	}
+}
+
+// TestUpdateExisting_VerboseShowsAlreadyCurrent: "already current" outcomes are
+// suppressed without --verbose and shown with --verbose.
+func TestUpdateExisting_VerboseShowsAlreadyCurrent(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	dry, real := fakeFactories("/h", fs)
+
+	// Without verbose: "already current" is suppressed → "nothing to do".
+	var stdoutNoVerbose bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev-out4", dry, real, &stdoutNoVerbose, io.Discard, false); err != nil {
+		t.Fatalf("without verbose: %v", err)
+	}
+	if got := stdoutNoVerbose.String(); got != "nothing to do\n" {
+		t.Errorf("without verbose, expected 'nothing to do', got %q", got)
+	}
+
+	// With verbose: "already current" lines appear.
+	var stdoutVerbose bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev-out4", dry, real, &stdoutVerbose, io.Discard, true); err != nil {
+		t.Fatalf("with verbose: %v", err)
+	}
+	if !strings.Contains(stdoutVerbose.String(), "already current") {
+		t.Errorf("with verbose, expected 'already current' lines, got %q", stdoutVerbose.String())
+	}
+}
+
+// TestUpdateExisting_NothingToDoMessage: a fully up-to-date refresh with
+// nothing installed prints "nothing to do" rather than per-component rows.
+func TestUpdateExisting_NothingToDoMessage(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	dry, real := fakeFactories("/h", fs)
+
+	var stdout bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev-out5", dry, real, &stdout, io.Discard, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := stdout.String(); got != "nothing to do\n" {
+		t.Errorf("expected 'nothing to do', got %q", got)
 	}
 }
