@@ -1842,6 +1842,15 @@ func seedFileComponent(t *testing.T, fs *fakeFS, home string, id ComponentID, ag
 	}
 }
 
+// seedBaselineComponents installs every optional component in the embedded default
+// baseline for agent. Use after installViaFake when refresh should not add skills.
+func seedBaselineComponents(t *testing.T, fs *fakeFS, home, agent string) {
+	t.Helper()
+	for _, id := range defaultIntegrationBaseline() {
+		seedFileComponent(t, fs, home, id, agent)
+	}
+}
+
 // claudePaneRenderFile is the rendered SKILL.md path for claude's pane skill
 // under the fake FS data dir — the file refresh tests corrupt to force stale.
 func claudePaneRenderFile(home string) string {
@@ -1858,6 +1867,7 @@ func TestEnsureIntegrations_RefreshesStaleFileComponent(t *testing.T) {
 	// it, record claude as updated, and stamp state.json.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
 
 	renderFile := claudePaneRenderFile("/h")
@@ -1902,12 +1912,95 @@ func TestEnsureIntegrations_NeverAddsUninstalledFileComponent(t *testing.T) {
 	}
 }
 
+func TestUpdateExisting_AddsMissingBaselineComponent(t *testing.T) {
+	// Integrated agent missing a baseline-listed component gets it installed.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	dry, real := fakeFactories("/h", fs)
+	var stdout bytes.Buffer
+	if err := runIntegrateUpdateExistingWith("rev-add1", dry, real, &stdout, io.Discard, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	link := claudePaneLink("/h")
+	if _, ok := fs.symlinks[link]; !ok {
+		t.Fatalf("expected pane-skill symlink at %s", link)
+	}
+	if !strings.Contains(stdout.String(), "pane-skill") || !strings.Contains(stdout.String(), "added") {
+		t.Errorf("stdout = %q, want pane-skill added line", stdout.String())
+	}
+}
+
+func TestEnsureIntegrations_AddsMissingBaselineComponent(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	dry, real := fakeFactories("/h", fs)
+	warnings := ensureIntegrationsForRevisionWith("rev-add2", dry, real)
+	if warnings != nil {
+		t.Errorf("expected no warnings, got %v", warnings)
+	}
+	if _, ok := fs.symlinks[claudePaneLink("/h")]; !ok {
+		t.Errorf("auto-refresh must install missing baseline pane-skill")
+	}
+}
+
+func TestRefresh_SkipsOptedOutBaselineComponent(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	writeIntegrateRuntimeFile(t, `
+[integrations]
+skills = ["tasks"]
+`)
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	dry, real := fakeFactories("/h", fs)
+	result := updateStaleIntegrations(dry, real)
+	if _, ok := fs.symlinks[claudePaneLink("/h")]; ok {
+		t.Fatal("refresh must not install pane-skill omitted from merged baseline")
+	}
+	for _, o := range result.Outcomes {
+		if o.Agent == "claude" && o.Component == ComponentPaneSkill && o.Label != "skipped (opted out)" {
+			t.Errorf("pane-skill outcome = %q, want skipped (opted out)", o.Label)
+		}
+	}
+}
+
+func TestRefresh_SkipsConflictWithoutOverwrite(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+	conflictPath := filepath.Join("/h", ".claude", "skills", "pane")
+	fs.dirs[conflictPath] = true
+	delete(fs.symlinks, claudePaneLink("/h"))
+
+	dry, real := fakeFactories("/h", fs)
+	result := updateStaleIntegrations(dry, real)
+	if _, ok := fs.symlinks[claudePaneLink("/h")]; ok {
+		t.Fatal("refresh must not install over an Integration conflict")
+	}
+	for _, o := range result.Outcomes {
+		if o.Component == ComponentPaneSkill {
+			if !strings.Contains(o.Label, "skipped (conflict") {
+				t.Errorf("pane-skill outcome = %q, want conflict skip", o.Label)
+			}
+			if !strings.Contains(o.Label, "pop integrate claude --overwrite-conflicts") {
+				t.Errorf("conflict skip must name overwrite resolve command, got %q", o.Label)
+			}
+		}
+	}
+}
+
 func TestEnsureIntegrations_LeavesCurrentFileComponentUntouched(t *testing.T) {
 	// An installed-and-current file component must not be touched by refresh:
 	// no warnings, and the agent is not reported as updated.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
+	seedFileComponent(t, fs, "/h", ComponentTaskSkills, "claude")
 
 	link := claudePaneLink("/h")
 	targetBefore := fs.symlinks[link]
@@ -1935,7 +2028,7 @@ func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
 	fs.dirs[conflict] = true
 
 	dry, real := fakeFactories("/h", fs)
-	outcome, warning := refreshComponent(dry, real, "claude", ComponentPaneSkill)
+	outcome, warning := refreshComponent(dry, real, "claude", ComponentPaneSkill, baselineComponentSet(defaultIntegrationBaseline()))
 	updated := outcome != nil && (outcome.Label == "updated" || outcome.Label == "added")
 	if updated {
 		t.Errorf("expected no update on conflict")
@@ -1955,7 +2048,7 @@ func TestRefreshComponent_SkipsNotSupportedSilently(t *testing.T) {
 	dry, real := fakeFactories("/h", fs)
 
 	for _, id := range []ComponentID{ComponentPaneSkill, ComponentTaskSkills} {
-		outcome, warning := refreshComponent(dry, real, "codex", id)
+		outcome, warning := refreshComponent(dry, real, "codex", id, baselineComponentSet(defaultIntegrationBaseline()))
 		if outcome != nil || warning != "" {
 			t.Errorf("codex/%s: expected nil outcome and no warning (not supported), got outcome=%v warning=%q", id, outcome, warning)
 		}
@@ -1969,6 +2062,7 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 	// into the freshly rendered tree.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
 
 	link := claudePaneLink("/h")
 	fs.dirs[link] = true
@@ -2005,6 +2099,7 @@ func TestUpdateExisting_RefreshesFileComponentPerAgent(t *testing.T) {
 	// for pane-skill and stamp the revision.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
 	fs.files[claudePaneRenderFile("/h")] = []byte("stale skill body")
 
@@ -2143,7 +2238,8 @@ func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
 	// "nothing to do".
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
-	installFullDefaultViaFake(t, fs, "/h", "claude")
+	installViaFake(t, fs, "/h", "claude")
+	seedBaselineComponents(t, fs, "/h", "claude")
 
 	dry, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
@@ -2165,7 +2261,8 @@ func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
 	// warning to stderr, and NOT stamp state.json so the next runtime check retries.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
-	installFullDefaultViaFake(t, fs, "/h", "claude")
+	installViaFake(t, fs, "/h", "claude")
+	seedBaselineComponents(t, fs, "/h", "claude")
 
 	stalePath := filepath.Join("/h", ".claude", "settings.json")
 	fs.files[stalePath] = []byte(staleClaudeSettings)
@@ -2541,12 +2638,17 @@ func TestUpdateExisting_OutputUpdated(t *testing.T) {
 	}
 }
 
-// TestUpdateExisting_OutputSkippedOptedOut: not-installed components appear as
+// TestUpdateExisting_OutputSkippedOptedOut: baseline omissions appear as
 // "skipped (opted out)" only with --verbose on the update-existing path.
 func TestUpdateExisting_OutputSkippedOptedOut(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	writeIntegrateRuntimeFile(t, `
+[integrations]
+skills = ["tasks"]
+`)
 	fs := newFakeFS()
-	// Nothing installed anywhere.
+	installViaFake(t, fs, "/h", "claude")
+	seedFileComponent(t, fs, "/h", ComponentTaskSkills, "claude")
 	dry, real := fakeFactories("/h", fs)
 
 	// Without verbose: opted-out outcomes are suppressed → "nothing to do".
@@ -2558,14 +2660,14 @@ func TestUpdateExisting_OutputSkippedOptedOut(t *testing.T) {
 		t.Errorf("without verbose, expected 'nothing to do', got %q", got)
 	}
 
-	// With verbose: opted-out outcomes appear.
+	// With verbose: opted-out outcomes appear for baseline omissions.
 	var stdoutVerbose bytes.Buffer
 	if err := runIntegrateUpdateExistingWith("rev-out2", dry, real, &stdoutVerbose, io.Discard, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := stdoutVerbose.String()
-	if !strings.Contains(got, "skipped (opted out)") {
-		t.Errorf("with verbose, expected 'skipped (opted out)' lines, got %q", got)
+	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (opted out)") {
+		t.Errorf("with verbose, expected pane-skill opted-out line, got %q", got)
 	}
 }
 
@@ -2574,6 +2676,7 @@ func TestUpdateExisting_OutputSkippedOptedOut(t *testing.T) {
 func TestUpdateExisting_OutputSkippedConflict(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
 	// Seed pane-skill as installed.
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
 	// Place a non-pop entry at the bare pane name to create a conflict.
@@ -2603,6 +2706,7 @@ func TestUpdateExisting_VerboseShowsAlreadyCurrent(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
+	seedBaselineComponents(t, fs, "/h", "claude")
 
 	dry, real := fakeFactories("/h", fs)
 
@@ -2889,9 +2993,13 @@ func TestOptOutRemoval_Cycle(t *testing.T) {
 // TestRefresh_LeavesRemovedOptedOutInPlace: the Integration refresh
 // (--update-existing / auto-update) never removes an installed-but-opted-out
 // component. After an explicit opt-out removal, refresh must not try to re-add
-// or remove the component — it just sees it's not installed and skips it.
+// or remove the component — it just sees it's not in the merged baseline.
 func TestRefresh_LeavesRemovedOptedOutInPlace(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	writeIntegrateRuntimeFile(t, `
+[integrations]
+skills = ["tasks"]
+`)
 	fs := newFakeFS()
 	home := "/h"
 

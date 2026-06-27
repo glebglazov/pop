@@ -620,7 +620,7 @@ func TestInstallFileComponentDebugConflict(t *testing.T) {
 }
 
 // TestRefreshFileComponentDebugNotInstalled asserts that refresh logs a
-// "not installed — skip" line when the component is absent.
+// "not installed — adding" line and installs when the component is absent.
 func TestRefreshFileComponentDebugNotInstalled(t *testing.T) {
 	fs := newFakeFS()
 	logf, lines := captureLogf()
@@ -632,13 +632,18 @@ func TestRefreshFileComponentDebugNotInstalled(t *testing.T) {
 	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
 
 	outcome, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
-	updated := outcome != nil && (outcome.Label == "updated" || outcome.Label == "added")
-	if updated || warning != "" {
-		t.Errorf("expected no update/warning, got outcome=%v warning=%q", outcome, warning)
+	if outcome == nil || outcome.Label != "added" {
+		t.Errorf("expected added outcome, got outcome=%v warning=%q", outcome, warning)
+	}
+	if warning != "" {
+		t.Errorf("unexpected warning: %q", warning)
 	}
 	got := lines()
 	if !hasLog(got, "not installed") {
 		t.Errorf("expected 'not installed' in debug lines, got %v", got)
+	}
+	if !hasLog(got, "adding") {
+		t.Errorf("expected 'adding' in debug lines, got %v", got)
 	}
 }
 
