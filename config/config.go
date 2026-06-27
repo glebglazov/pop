@@ -118,6 +118,20 @@ type ProjectConfig struct {
 	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled"`
 }
 
+// Integration skill alias values for optional integration components.
+const (
+	IntegrationSkillTasks = "tasks"
+	IntegrationSkillPane  = "pane"
+)
+
+// DefaultIntegrationSkills is the embedded pop default for [integrations] skills.
+var DefaultIntegrationSkills = []string{IntegrationSkillTasks, IntegrationSkillPane}
+
+// IntegrationsConfig holds global integration preferences (ADR 0065).
+type IntegrationsConfig struct {
+	Skills []string `toml:"skills"`
+}
+
 // UpdatesConfig holds update-check / Update-notice configuration.
 type UpdatesConfig struct {
 	// NoticeEnabled gates both the picker Update notice and the daily
@@ -641,6 +655,19 @@ func (c *Config) TaskAgentOutput(agent string) string {
 	return agentConfig.Output
 }
 
+// IntegrationsSkills returns the merged [integrations] skills list. The error
+// is non-nil iff a blocking integrations finding exists (an unknown skill
+// alias in any config layer); per ADR 0054 the caller decides severity.
+func (c *Config) IntegrationsSkills() ([]string, error) {
+	if err := c.blockingFindingFor("integrations"); err != nil {
+		return nil, err
+	}
+	if c == nil || c.Integrations == nil || len(c.Integrations.Skills) == 0 {
+		return append([]string(nil), DefaultIntegrationSkills...), nil
+	}
+	return append([]string(nil), c.Integrations.Skills...), nil
+}
+
 // UpdateNoticeEnabled reports whether the picker Update notice and the daily
 // background Update check are enabled. Defaults to true; only an explicit
 // [updates] notice_enabled = false disables them (CONTEXT.md "Update check").
@@ -891,6 +918,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	var cfg Config
 	md, err := toml.DecodeFile(path, &cfg)
 	if err != nil {
+		return nil, err
+	}
+	if err := applyConfigLayerMerge(d, &cfg, path, md); err != nil {
 		return nil, err
 	}
 	for _, f := range effortConfigFindings(path, md) {
