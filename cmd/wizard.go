@@ -1,28 +1,21 @@
 package cmd
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
 
-// The Integration wizard (ADR 0010) is the interactive form of
-// `pop integrate <agent>`: a re-entrant, step-by-step consent flow over the
-// component catalog. It installs the core status wiring with no prompt (consent
-// is implied by running the command), then walks one explained y/n step per
-// opt-in component in catalog order. Declining any step skips it and the
-// wizard continues. Each step first reports the component's current state; conflict
-// and not-supported states print their report instead of prompting. The wizard
-// closes with a note that re-running adds or removes components at any time.
+// The per-component consent wizard (ADR 0010) has been retired: `pop integrate
+// <agent>` now installs the full default set without prompting (ADR 0064). The
+// component state-computation helpers below survive because Doctor and
+// Integration refresh consume them to report and reconcile component state.
 
-// componentStateKind enumerates the states a component can be in for an agent,
-// as shown to the user before each wizard step. These mirror the states Doctor
-// reports in a later slice.
+// componentStateKind enumerates the states a component can be in for an agent.
+// Doctor reports these; refresh reconciles against them.
 type componentStateKind int
 
 const (
@@ -38,108 +31,6 @@ const (
 type componentStateInfo struct {
 	kind         componentStateKind
 	conflictPath string
-}
-
-// runIntegrateWizard drives the interactive wizard for an agent. It assumes the
-// agent is known and supported (the caller guards that) and that d.stdin is a
-// terminal (the caller gates on interactivity).
-func runIntegrateWizard(d *integrateDeps, home, agent string) error {
-	out := d.stdout
-	in := bufio.NewReader(stdinOrEmpty(d.stdin))
-
-	// Core step — installed with no prompt; consent is implied by running the
-	// integrate command at all (ADR 0010 consent gradient).
-	if out != nil {
-		fmt.Fprintf(out, "Integrating pop with %s.\n\n", agent)
-		fmt.Fprintf(out, "Core: status wiring\n")
-		fmt.Fprintf(out, "  Makes %s report pane status to pop's monitor. It changes no agent\n", agent)
-		fmt.Fprintf(out, "  behavior, so it installs without a prompt.\n")
-	}
-	core, ok := lookupComponent(ComponentStatusWiring)
-	if !ok {
-		return fmt.Errorf("status-wiring component missing from catalog")
-	}
-	if err := core.install(d, home, agent); err != nil {
-		return err
-	}
-
-	// Opt-in steps in catalog order.
-	for _, comp := range integrationCatalog {
-		switch comp.id {
-		case ComponentStatusWiring:
-			continue
-		case ComponentPaneSkill:
-			if err := wizardFileComponentStep(d, home, agent, in, comp.id, "Pane skill", paneSkillExplanation); err != nil {
-				return err
-			}
-		case ComponentTaskSkills:
-			if err := wizardFileComponentStep(d, home, agent, in, comp.id, "Task planning skills", taskSkillsExplanation); err != nil {
-				return err
-			}
-		}
-	}
-
-	if out != nil {
-		fmt.Fprintf(out, "\nDone. Re-run `pop integrate %s` anytime to add or remove components.\n", agent)
-	}
-	return nil
-}
-
-const paneSkillExplanation = `  The pane skill lets the agent drive tmux panes directly: running long
-  processes in named panes, watching their output, sending input, and
-  marking panes for your attention. This injects new agent behavior, so it
-  is opt-in.`
-
-const taskSkillsExplanation = `  The task planning skills install pop's planning-to-execution flow:
-  a grilling session that stress-tests your design (grill-with-docs), then
-  a PRD (to-prd), then a breakdown into independently-runnable tasks
-  (to-tasks) that ` + "`pop tasks implement`" + ` executes, one agent per task.`
-
-// wizardFileComponentStep runs one wizard step for a file-based opt-in
-// component (the pane skill, the task planning skills). It reports the
-// component's current state; for conflict and not-supported it prints the
-// report and returns without prompting, otherwise it explains the component and
-// asks y/n, installing on yes.
-func wizardFileComponentStep(d *integrateDeps, home, agent string, in *bufio.Reader, id ComponentID, title, explanation string) error {
-	out := d.stdout
-	state, err := wizardFileComponentState(d, home, id, agent)
-	if err != nil {
-		return err
-	}
-	if out != nil {
-		fmt.Fprintf(out, "\n%s\n", title)
-	}
-	switch state.kind {
-	case stateNotSupported:
-		if out != nil {
-			fmt.Fprintf(out, "  Not supported for %s — skipping (pop never installs a degraded version).\n", agent)
-		}
-		return nil
-	case stateConflict:
-		if out != nil {
-			fmt.Fprintf(out, "  Conflict: %s exists and is not owned by pop.\n", state.conflictPath)
-			fmt.Fprintf(out, "  Remove it and re-run the wizard to install pop's version.\n")
-		}
-		return nil
-	case stateInstalledCurrent:
-		fmt.Fprintf(orDiscard(out), "  Currently: installed and up to date.\n")
-	case stateStale:
-		fmt.Fprintf(orDiscard(out), "  Currently: installed but out of date.\n")
-	case stateNotInstalled:
-		fmt.Fprintf(orDiscard(out), "  Currently: not installed.\n")
-	}
-	if out != nil {
-		fmt.Fprintf(out, "%s\n", explanation)
-	}
-	yes, err := promptYesNo(in, out, "Install "+strings.ToLower(title)+"?")
-	if err != nil {
-		return err
-	}
-	if !yes {
-		fmt.Fprintf(orDiscard(out), "  Skipped.\n")
-		return nil
-	}
-	return installFileComponent(d, home, id, agent)
 }
 
 // wizardFileComponentState computes the displayable state of a file-based
@@ -304,40 +195,4 @@ func sortedSet(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// promptYesNo writes the prompt and reads one line, returning true only for an
-// affirmative answer. An empty answer, EOF, or nil input is a decline — the
-// wizard's default for every opt-in step is "no".
-func promptYesNo(in *bufio.Reader, out io.Writer, prompt string) (bool, error) {
-	if in == nil {
-		return false, nil
-	}
-	if out != nil {
-		fmt.Fprintf(out, "%s [y/N]: ", prompt)
-	}
-	line, err := in.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return false, fmt.Errorf("read confirmation: %w", err)
-	}
-	answer := strings.ToLower(strings.TrimSpace(line))
-	return answer == "y" || answer == "yes", nil
-}
-
-// stdinOrEmpty returns r, or an always-EOF reader when r is nil, so the wizard
-// declines every prompt rather than panicking on a nil reader.
-func stdinOrEmpty(r io.Reader) io.Reader {
-	if r == nil {
-		return strings.NewReader("")
-	}
-	return r
-}
-
-// orDiscard returns w, or io.Discard when w is nil, so state lines can be
-// written unconditionally without nil checks at every call site.
-func orDiscard(w io.Writer) io.Writer {
-	if w == nil {
-		return io.Discard
-	}
-	return w
 }

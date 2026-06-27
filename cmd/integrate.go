@@ -57,11 +57,6 @@ type integrateDeps struct {
 	// override to capture what was logged without needing POP_LOG set.
 	logf func(string, ...any)
 
-	// stdin is the wizard's prompt input. Production uses os.Stdin; tests
-	// supply a scripted reader. Nil disables prompting (declines every step),
-	// which keeps the dry-run/refresh deps inert.
-	stdin io.Reader
-
 	// File-based component installer (link installer, ADR 0011). dataDir
 	// resolves pop's data directory root (the parent of integrations/);
 	// symlink/readlink/lstatMode manage the agent-location symlinks and the
@@ -100,7 +95,6 @@ func defaultIntegrateDeps() *integrateDeps {
 		removeAll:   os.RemoveAll,
 		stdout:      os.Stdout,
 		logf:        debug.Log,
-		stdin:       os.Stdin,
 		dataDir:     popDataDir,
 		symlink:     os.Symlink,
 		readlink:    os.Readlink,
@@ -239,48 +233,57 @@ func withDryRun(base *integrateDeps) *integrateDeps {
 // embedded content instead of installing for a specific agent.
 var integrateUpdateExisting bool
 
-// integratePaneSkill is the --pane-skill component flag. When set, the pane
-// skill is installed for the agent alongside the core status wiring.
+// integratePaneSkill is the deprecated --pane-skill flag. The pane skill now
+// installs by default (ADR 0064), so the flag is a no-op kept only to print a
+// deprecation notice instead of erroring on an unknown flag.
 var integratePaneSkill bool
 
-// integrateTaskSkills is the --task-skills component flag. When set,
-// the task planning skills (grill-with-docs, to-prd, to-tasks) are
-// installed for the agent alongside the core status wiring.
+// integrateTaskSkills is the deprecated --task-skills flag. The task planning
+// skills now install by default (ADR 0064); the flag is a no-op that prints a
+// deprecation notice.
 var integrateTaskSkills bool
+
+// integrateNoPaneSkill is the --no-pane-skill opt-out flag: exclude the pane
+// skill from this invocation's default set.
+var integrateNoPaneSkill bool
+
+// integrateNoTaskSkills is the --no-task-skills opt-out flag: exclude the task
+// planning skills from this invocation's default set.
+var integrateNoTaskSkills bool
 
 var integrateCmd = &cobra.Command{
 	Use:   "integrate [agent]",
 	Short: "Install pop status wiring for a coding agent",
-	Long: `Install pop's status wiring for a coding agent.
+	Long: `Install pop's full integration toolkit for a coding agent.
 
-The status wiring makes the agent report pane status to pop's monitor; it
-changes no agent behavior. Skills (the pane skill and the task planning
-skills) are separate opt-ins selected with component flags:
+By default, with no flags, integrate installs everything for the agent — no
+prompting (ADR 0064):
 
-  --pane-skill  Also install the pane skill, which lets the agent drive tmux
-                panes. It lands as a symlink into pop's data directory: a skill
-                directory for claude, pi, and cursor (e.g.
-                ~/.claude/skills/pop-tmux-pane) and a flat file for opencode
-                (~/.config/opencode/agent/pop-tmux-pane.md). Not supported for codex.
+  - Status wiring: makes the agent report pane status to pop's monitor. It
+    changes no agent behavior.
+  - Pane skill: lets the agent drive tmux panes. It lands as a symlink into
+    pop's data directory: a skill directory for claude, pi, and cursor (e.g.
+    ~/.claude/skills/pop-tmux-pane) and a flat file for opencode
+    (~/.config/opencode/agent/pop-tmux-pane.md).
+  - Task planning skills (grill-with-docs, grill-consolidate, to-prd,
+    to-tasks), each a multi-file skill directory symlinked into pop's data
+    directory (e.g. ~/.claude/skills/pop-grill-with-docs/).
 
-  --task-skills
-                Also install the task planning skills (grill-with-docs,
-                to-prd, to-tasks), each as a multi-file skill directory
-                symlinked into pop's data directory (e.g.
-                ~/.claude/skills/pop-grill-with-docs/). grill-with-docs ships
-                with its companion format documents so its references resolve.
-                Supported for claude, pi, and cursor only; reported as not
-                supported for opencode and codex (no degraded install).
+A component an agent cannot host is skipped silently rather than installed in a
+degraded form: codex hosts neither skill, and opencode hosts the pane skill but
+not the task planning skills.
 
-Run in a terminal with no component flags to launch the interactive
-Integration wizard: it installs the core status wiring (no prompt), then
-walks one explained y/n step per supported opt-in component — the pane skill
-and the task planning skills. Declining any step skips it; re-run anytime
-to add or remove components.
+Decline a component for this invocation:
 
-Component flags select an exact set: the status wiring plus exactly the
-requested components, with no prompting. A non-interactive run with no
-component flags fails rather than installing a default.
+  --no-pane-skill   Skip the pane skill.
+  --no-task-skills  Skip the task planning skills.
+
+The positive --pane-skill / --task-skills flags are deprecated no-ops kept for
+compatibility — the components they named are now installed by default. Passing
+one prints a deprecation notice and otherwise has no effect.
+
+Conflicts are never overwritten: a same-named skill at the agent's location that
+pop does not own is skipped and reported, leaving the user's version untouched.
 
 Supported agents:
   claude    Install pane monitoring hooks in ~/.claude/settings.json.
@@ -354,10 +357,14 @@ not own is left untouched and reported.`,
 func init() {
 	integrateCmd.Flags().BoolVar(&integrateUpdateExisting, "update-existing", false,
 		"Refresh already-installed agent integrations to match the current binary (no agent argument)")
+	integrateCmd.Flags().BoolVar(&integrateNoPaneSkill, "no-pane-skill", false,
+		"Skip the pane skill (installed by default)")
+	integrateCmd.Flags().BoolVar(&integrateNoTaskSkills, "no-task-skills", false,
+		"Skip the task planning skills (installed by default)")
 	integrateCmd.Flags().BoolVar(&integratePaneSkill, "pane-skill", false,
-		"Install the pane skill (lets the agent drive tmux panes) alongside the status wiring")
+		"Deprecated: the pane skill installs by default; this flag is a no-op")
 	integrateCmd.Flags().BoolVar(&integrateTaskSkills, "task-skills", false,
-		"Install the task planning skills (grill-with-docs, to-prd, to-tasks) alongside the status wiring")
+		"Deprecated: the task planning skills install by default; this flag is a no-op")
 	integrateCmd.AddCommand(integrateRemoveCmd)
 	rootCmd.AddCommand(integrateCmd)
 }
@@ -366,39 +373,84 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 	if integrateUpdateExisting {
 		return runIntegrateUpdateExisting()
 	}
-	var optins []ComponentID
-	if integratePaneSkill {
-		optins = append(optins, ComponentPaneSkill)
-	}
-	if integrateTaskSkills {
-		optins = append(optins, ComponentTaskSkills)
-	}
-	return runIntegrateComponents(defaultIntegrateDeps(), args[0], optins, stdinIsInteractive())
+	return runIntegrateInstall(
+		defaultIntegrateDeps(),
+		args[0],
+		integratePaneSkill, integrateTaskSkills,
+		integrateNoPaneSkill, integrateNoTaskSkills,
+	)
 }
 
-// stdinIsInteractive reports whether stdin is a terminal. Mirrors the task
-// execution-confirmation detection: a non-terminal stdin (pipe, redirect, CI)
-// is treated as non-interactive.
-func stdinIsInteractive() bool {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return false
+// runIntegrateInstall is the testable core behind `pop integrate <agent>`
+// (ADR 0064). It emits a deprecation notice for any positive component flag,
+// translates the `--no-*` opt-out flags into an opt-out set, and installs the
+// resolved default set. The positive flags carry no install meaning — the
+// components they named install by default.
+func runIntegrateInstall(d *integrateDeps, agent string, paneSkillFlag, taskSkillsFlag, noPaneSkill, noTaskSkills bool) error {
+	noteDeprecatedPositiveFlags(d.stdout, paneSkillFlag, taskSkillsFlag)
+
+	var optOut []ComponentID
+	if noPaneSkill {
+		optOut = append(optOut, ComponentPaneSkill)
 	}
-	return (info.Mode() & os.ModeCharDevice) != 0
+	if noTaskSkills {
+		optOut = append(optOut, ComponentTaskSkills)
+	}
+	return runIntegrateComponents(d, agent, optOut)
 }
 
-// runIntegrateComponents is the entry point for `pop integrate <agent>` with
-// the per-component consent contract (ADR 0010):
+// noteDeprecatedPositiveFlags prints a deprecation notice for each positive
+// component flag that was set. The flags are no-ops — the components they named
+// install by default (ADR 0064) — so this is the only effect they have.
+func noteDeprecatedPositiveFlags(out io.Writer, paneSkill, taskSkills bool) {
+	if out == nil {
+		return
+	}
+	if paneSkill {
+		fmt.Fprintln(out, "Note: --pane-skill is deprecated and now a no-op — the pane skill installs by default. Use --no-pane-skill to opt out.")
+	}
+	if taskSkills {
+		fmt.Fprintln(out, "Note: --task-skills is deprecated and now a no-op — the task planning skills install by default. Use --no-task-skills to opt out.")
+	}
+}
+
+// runIntegrateComponents installs the default component set for an agent
+// (ADR 0064): the core status wiring plus every default opt-in component except
+// those named in optOut. There is no prompting. The set is resolved here; the
+// per-component install (skipping unsupported agents and conflicts) lives in
+// installComponentSet.
+func runIntegrateComponents(d *integrateDeps, agent string, optOut []ComponentID) error {
+	skip := map[ComponentID]bool{}
+	for _, id := range optOut {
+		skip[id] = true
+	}
+	var ids []ComponentID
+	for _, id := range defaultComponentIDs() {
+		if skip[id] {
+			if d.logf != nil {
+				d.logf("runIntegrateComponents: %s/%s opted out via flag — excluding from install", strings.ToLower(agent), id)
+			}
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return installComponentSet(d, agent, ids)
+}
+
+// installComponentSet installs the core status wiring plus exactly the given
+// opt-in components for an agent, with no prompting. It is the shared install
+// engine behind the default integrate path and the exact-set installs tests
+// drive directly.
 //
-//   - With explicit component flags (optins non-empty): install the core
-//     status wiring plus exactly the requested components, no prompting, in
-//     either a TTY or non-interactively.
-//   - Without flags, non-interactively: fail loudly and install nothing, so
-//     nothing lands by surprise default.
-//   - Without flags, interactively: run the Integration wizard — install the
-//     core status wiring, then walk one explained y/n step per supported opt-in
-//     component, closing with a note that re-running adds or removes components.
-func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID, interactive bool) error {
+//   - The core status wiring always installs first (the integrate verb implies
+//     it).
+//   - A component the agent cannot host is skipped silently — pop never installs
+//     a degraded version (ADR 0064).
+//   - Conflicts (a same-named entry pop does not own) are skipped, never
+//     overwritten — installFileComponent enforces this per top-level entry.
+//
+// New install paths log per slice 01.
+func installComponentSet(d *integrateDeps, agent string, ids []ComponentID) error {
 	agent = strings.ToLower(agent)
 
 	core, ok := lookupComponent(ComponentStatusWiring)
@@ -416,35 +468,24 @@ func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	if len(optins) == 0 {
-		if !interactive {
-			return fmt.Errorf("no component flags given: refusing to install a default non-interactively (pass e.g. --pane-skill)")
-		}
-		// Bare interactive invocation: run the Integration wizard.
-		return runIntegrateWizard(d, home, agent)
+	if d.logf != nil {
+		d.logf("installComponentSet: agent=%s components=%v", agent, ids)
 	}
 
-	// Pre-flight: every requested opt-in must be supported by this agent before
-	// anything is installed. This makes an unsupported pair (e.g.
-	// `pop integrate codex --pane-skill`) report not-supported and install
-	// nothing — not even the core status wiring.
-	for _, id := range optins {
+	if err := core.install(d, home, agent); err != nil {
+		return err
+	}
+	for _, id := range ids {
 		comp, ok := lookupComponent(id)
 		if !ok {
 			return fmt.Errorf("unknown component %q", id)
 		}
 		if !comp.supported(agent) {
-			return fmt.Errorf("component %q is not supported for agent %q", id, agent)
+			if d.logf != nil {
+				d.logf("installComponentSet: %s/%s not supported — skipping (no degraded install)", agent, id)
+			}
+			continue
 		}
-	}
-
-	// Explicit flags select an exact set: the core wiring plus the requested
-	// opt-in components.
-	if err := core.install(d, home, agent); err != nil {
-		return err
-	}
-	for _, id := range optins {
-		comp, _ := lookupComponent(id)
 		// A component carrying its own install func is applied directly;
 		// file-based components go through the link installer.
 		if comp.install != nil {
