@@ -2621,12 +2621,28 @@ func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 		t.Fatalf("C confirmation = %q, want 'complete'", got.detail.statusMsg)
 	}
 
-	// Done task: no verbs apply, so the menu does not open.
+	// Done task: Complete does not apply, but Open (reopen) does — the menu
+	// opens with O only, mirroring CanReopen.
 	doneTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "done"}
-	m2, completeCalls2, _, _ := detailOverrideModel(row, doneTask, nil, nil, nil)
+	m2, completeCalls2, resetCalls2, _ := detailOverrideModel(row, doneTask, nil, nil, nil)
 	m2 = openTaskMenu(t, m2)
-	if m2.taskMenu != nil {
-		t.Fatalf("a on done task: expected no menu (no verbs), got %v", taskMenuItemKeys(m2.taskMenu))
+	if m2.taskMenu == nil {
+		t.Fatal("a on done task: expected task menu to open with Open verb")
+	}
+	keys := taskMenuItemKeys(m2.taskMenu)
+	if slices.Contains(keys, "C") {
+		t.Fatalf("done task menu = %v, want NOT to contain C", keys)
+	}
+	if !slices.Contains(keys, "O") {
+		t.Fatalf("done task menu = %v, want to contain O", keys)
+	}
+	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	if cmd2 == nil {
+		t.Fatal("O on done task: expected a command")
+	}
+	cmd2()
+	if *resetCalls2 != 1 {
+		t.Fatalf("O on done: resetCalls = %d, want 1", *resetCalls2)
 	}
 	if *completeCalls2 != 0 {
 		t.Fatalf("done task: completeCalls = %d, want 0", *completeCalls2)
@@ -2674,7 +2690,7 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 		t.Fatalf("O on skipped: resetCalls = %d, want 1", *resetCalls2)
 	}
 
-	// Open is NOT offered for an already-open task (filtered to failed/skipped).
+	// Open is NOT offered for an already-open task (CanReopen excludes open).
 	openTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "open"}
 	m3, _, resetCalls3, _ := detailOverrideModel(row, openTask, nil, nil, nil)
 	m3 = openTaskMenu(t, m3)

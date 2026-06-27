@@ -957,13 +957,14 @@ type taskMenu struct {
 
 // taskMenuItems returns the task verbs applicable to task, filtered to its
 // status: Complete for open/failed/skipped (anything not already done), Open for
-// failed/skipped, and Skip for open. A done task yields no verbs.
+// any non-open task (done/failed/skipped, mirroring CanReopen), and Skip for
+// open. A done task yields Open.
 func taskMenuItems(task tasks.Task) []taskMenuItem {
 	var items []taskMenuItem
 	if task.Status != "done" {
 		items = append(items, taskMenuItem{key: "C", label: "complete"})
 	}
-	if task.Status == "failed" || task.Status == "skipped" {
+	if tasks.CanReopen(task.Status) {
 		items = append(items, taskMenuItem{key: "O", label: "open"})
 	}
 	if task.Status == "open" {
