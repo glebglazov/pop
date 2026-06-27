@@ -23,7 +23,7 @@ branch: master
   was: An individually consented unit `pop integrate` can install for one agent: the status wiring (core), the **Pane skill**, or the **Task planning skills**. Running integrate implies consent to the status wiring only; every other component is an explicit per-component opt-in.
 
 ~ Integration refresh
-  The automatic re-render of installed **Integration components** when the pop binary changes; it also installs any default component that is missing and not opted-out, and leaves uninstalled agents alone. Never prompts; never re-adds an opted-out component (see **Component opt-out**).
+  Reconciling installed **Integration components** to the state pop now expects: it re-renders by resolved name (not just content), so prefix/name changes are applied and stale old-named entries pruned; it installs any default component that is missing and not opted-out; and it leaves uninstalled agents alone. Runs on the binary-revision-gated picker-launch path and on `pop integrate --update-existing`. Never prompts; never re-adds or updates an opted-out component (see **Component opt-out**).
   was: The automatic re-render of already-installed **Integration components** when the pop binary changes. Refresh never adds components the user did not opt into, never prompts, and leaves uninstalled agents alone.
 
 + Component opt-out
