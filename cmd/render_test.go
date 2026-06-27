@@ -109,9 +109,8 @@ func TestRenderCaseInsensitiveAgent(t *testing.T) {
 // TestRenderUnsupportedAgent confirms unsupported (agent, component) pairs error
 // rather than producing a degraded tree.
 func TestRenderUnsupportedAgent(t *testing.T) {
-	// Task skills remain unsupported for opencode (flat layout, no companions).
-	if _, err := renderComponent(ComponentTaskSkills, "opencode"); err == nil {
-		t.Fatalf("expected error rendering task skills for opencode")
+	if _, err := renderComponent(ComponentPaneSkill, "bogus"); err == nil {
+		t.Fatalf("expected error rendering pane skill for unknown agent")
 	}
 }
 

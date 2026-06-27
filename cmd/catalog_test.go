@@ -47,15 +47,14 @@ func TestCatalog_StableIdentifiers(t *testing.T) {
 	}
 }
 
-// TestCatalog_SupportMatrix asserts the per-agent support matrix: opencode
-// hosts the pane skill but not the task planning skills.
+// TestCatalog_SupportMatrix asserts the per-agent support matrix: every agent
+// hosts all file-based skill components once its install path exists.
 func TestCatalog_SupportMatrix(t *testing.T) {
 	allAgents := []string{"claude", "codex", "pi", "opencode", "cursor"}
 
 	cases := []struct {
 		id        ComponentID
 		supported []string
-		denied    []string
 	}{
 		{
 			id:        ComponentStatusWiring,
@@ -63,12 +62,11 @@ func TestCatalog_SupportMatrix(t *testing.T) {
 		},
 		{
 			id:        ComponentPaneSkill,
-			supported: []string{"claude", "codex", "pi", "cursor", "opencode"},
+			supported: allAgents,
 		},
 		{
 			id:        ComponentTaskSkills,
-			supported: []string{"claude", "codex", "pi", "cursor"},
-			denied:    []string{"opencode"},
+			supported: allAgents,
 		},
 	}
 
@@ -81,11 +79,6 @@ func TestCatalog_SupportMatrix(t *testing.T) {
 			for _, a := range tc.supported {
 				if !comp.supported(a) {
 					t.Errorf("%s should support %s", tc.id, a)
-				}
-			}
-			for _, a := range tc.denied {
-				if comp.supported(a) {
-					t.Errorf("%s should NOT support %s", tc.id, a)
 				}
 			}
 		})

@@ -67,10 +67,10 @@ func agentSet(agents ...string) map[string]bool {
 // later slices) consumes the catalog rather than hardcoding component
 // knowledge. Adding a future component means adding an entry here.
 //
-// Support matrix: opencode hosts the pane skill (in its flat single-file form)
-// but not the task planning skills (multi-file layout). Unsupported pairs are
-// reported as not-supported rather than receiving a degraded install. See ADR
-// 0010.
+// Support matrix: opencode hosts the pane skill as a flat agent file and the
+// task planning skills as skill directories under ~/.config/opencode/skills/.
+// Unsupported pairs are reported as not-supported rather than receiving a
+// degraded install. See ADR 0010.
 var integrationCatalog = []integrationComponent{
 	{
 		id:       ComponentStatusWiring,
@@ -84,7 +84,7 @@ var integrationCatalog = []integrationComponent{
 	},
 	{
 		id:       ComponentTaskSkills,
-		supports: agentSet("claude", "codex", "pi", "cursor"),
+		supports: agentSet("claude", "codex", "pi", "cursor", "opencode"),
 		// Each source is a skill directory (SKILL.md plus any companion
 		// documents). grill-with-docs ships two companion format files that
 		// must ride alongside its body so its relative references resolve.

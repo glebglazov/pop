@@ -2041,15 +2041,39 @@ func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
 	}
 }
 
-func TestRefreshComponent_SkipsNotSupportedSilently(t *testing.T) {
-	// opencode cannot host task skills. Refresh of an unsupported pair must
-	// be a silent no-op regardless of on-disk state.
+// TestRefreshComponent_OpencodeTaskSkillsAddsMissing covers refresh installing
+// missing baseline-listed task skills for opencode once status wiring is present.
+func TestRefreshComponent_OpencodeTaskSkillsAddsMissing(t *testing.T) {
 	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "opencode")
 	dry, real := fakeFactories("/h", fs)
 
 	outcome, warning := refreshComponent(dry, real, "opencode", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
+	if warning != "" {
+		t.Fatalf("unexpected warning: %q", warning)
+	}
+	if outcome == nil || outcome.Label != "added" {
+		t.Fatalf("expected added outcome, got %v", outcome)
+	}
+	grillDest := filepath.Join("/h", ".config", "opencode", "skills", "pop-grill-with-docs")
+	if fs.symlinks[grillDest] == "" {
+		t.Fatalf("task skill not symlinked for opencode: %v", fs.symlinks)
+	}
+	for _, c := range []string{"ADR-FORMAT.md", "CONTEXT-FORMAT.md"} {
+		p := filepath.Join("/h", ".local", "share", "pop", "integrations", "opencode", "task-skills", "pop-grill-with-docs", c)
+		if _, ok := fs.files[p]; !ok {
+			t.Fatalf("companion not written: %s", p)
+		}
+	}
+}
+
+func TestRefreshComponent_SkipsUnknownComponentSilently(t *testing.T) {
+	fs := newFakeFS()
+	dry, real := fakeFactories("/h", fs)
+
+	outcome, warning := refreshComponent(dry, real, "opencode", ComponentID("bogus"), baselineComponentSet(defaultIntegrationBaseline()))
 	if outcome != nil || warning != "" {
-		t.Errorf("opencode/task-skills: expected nil outcome and no warning (not supported), got outcome=%v warning=%q", outcome, warning)
+		t.Errorf("unknown component: expected nil outcome and no warning, got outcome=%v warning=%q", outcome, warning)
 	}
 }
 

@@ -35,7 +35,7 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 	integrationsRoot := filepath.Join(dataDir, "integrations")
 	renderRoot := filepath.Join(integrationsRoot, agent, string(id))
 
-	agentDir, err := agentSkillDir(home, agent)
+	agentDir, err := agentSkillDir(home, agent, id)
 	if err != nil {
 		return err
 	}
@@ -432,10 +432,10 @@ func conflictCandidates(name, prefix string) []string {
 
 // agentSkillDir returns the directory at the agent's location where pop's skill
 // entries are symlinked. claude switched from slash commands to skills, so its
-// location is the skills directory (not commands/pop). opencode hosts skills as
-// flat single files under its agent directory, so the symlinked entry there is
-// a `pop-<name>.md` file rather than a skill directory.
-func agentSkillDir(home, agent string) (string, error) {
+// location is the skills directory (not commands/pop). opencode hosts the pane
+// skill as a flat agent file under ~/.config/opencode/agent/ and the task
+// planning skills as directories under ~/.config/opencode/skills/.
+func agentSkillDir(home, agent string, id ComponentID) (string, error) {
 	switch strings.ToLower(agent) {
 	case "claude":
 		return filepath.Join(home, ".claude", "skills"), nil
@@ -446,7 +446,10 @@ func agentSkillDir(home, agent string) (string, error) {
 	case "cursor":
 		return filepath.Join(home, ".cursor", "skills"), nil
 	case "opencode":
-		return filepath.Join(home, ".config", "opencode", "agent"), nil
+		if id == ComponentPaneSkill {
+			return filepath.Join(home, ".config", "opencode", "agent"), nil
+		}
+		return filepath.Join(home, ".config", "opencode", "skills"), nil
 	default:
 		return "", fmt.Errorf("agent %q has no skill location", agent)
 	}

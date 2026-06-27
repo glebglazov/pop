@@ -180,6 +180,33 @@ func TestRunIntegrateComponentsCodexInstallsMergedBaseline(t *testing.T) {
 	}
 }
 
+// TestRunIntegrateComponentsOpencodeInstallsMergedBaseline: opencode hosts every
+// baseline skill component — status wiring plus pane and task skills.
+func TestRunIntegrateComponentsOpencodeInstallsMergedBaseline(t *testing.T) {
+	fs := newFakeFS()
+	d := fakeDeps(installerHome, fs, nil)
+
+	err := runIntegrateComponents(d, "opencode", defaultIntegrationBaseline(), false, false, nil, false, false)
+	if err != nil {
+		t.Fatalf("runIntegrateComponents: %v", err)
+	}
+	pluginPath := filepath.Join(installerHome, ".config", "opencode", "plugins", "pop-status-sync.ts")
+	if _, ok := fs.files[pluginPath]; !ok {
+		t.Fatalf("opencode status wiring not installed")
+	}
+	paneDest := filepath.Join(installerHome, ".config", "opencode", "agent", "pop-pane.md")
+	if _, ok := fs.symlinks[paneDest]; !ok {
+		t.Fatalf("opencode pane skill not symlinked: %v", fs.symlinks)
+	}
+	grillDest := filepath.Join(installerHome, ".config", "opencode", "skills", "pop-grill-with-docs")
+	if _, ok := fs.symlinks[grillDest]; !ok {
+		t.Fatalf("opencode task skill not symlinked: %v", fs.symlinks)
+	}
+	if len(fs.symlinks) != 5 { // pane + 4 task skills
+		t.Fatalf("expected 5 skill symlinks, got %d: %v", len(fs.symlinks), fs.symlinks)
+	}
+}
+
 // TestRunIntegrateComponentsUnknownAgent: an unknown agent errors.
 func TestRunIntegrateComponentsUnknownAgent(t *testing.T) {
 	fs := newFakeFS()

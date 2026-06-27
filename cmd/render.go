@@ -77,15 +77,13 @@ func renderSingleFileSkill(tree map[string][]byte, agent, src string) error {
 
 // renderMultiFileSkill renders a directory-shaped skill source: its `SKILL.md`
 // becomes the skill body (with the frontmatter name injected) and every other
-// file is emitted verbatim alongside it under `pop-<base>/`. Only the
-// directory-hosting agents (claude, codex, pi, cursor) can host a multi-file
-// skill; an agent with a flat skill layout (opencode) is rejected rather than
-// given a skill whose companion files would be lost. The catalog support matrix
-// keeps this branch from being reached for an unsupported pair.
+// file is emitted verbatim alongside it under `pop-<base>/`. Directory-hosting
+// agents (claude, codex, pi, cursor, opencode) preserve companion documents
+// so relative references in the skill body resolve.
 func renderMultiFileSkill(tree map[string][]byte, agent, dir string) error {
 	skillName := "pop-" + path.Base(dir)
 	switch agent {
-	case "claude", "codex", "pi", "cursor":
+	case "claude", "codex", "pi", "cursor", "opencode":
 	default:
 		return fmt.Errorf("agent %q cannot host multi-file skill %q (no skill-directory layout)", agent, skillName)
 	}

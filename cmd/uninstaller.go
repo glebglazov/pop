@@ -48,7 +48,7 @@ func removeFileComponent(d *integrateDeps, home string, id ComponentID, agent st
 	integrationsRoot := filepath.Join(dataDir, "integrations")
 	renderRoot := filepath.Join(integrationsRoot, agent, string(id))
 
-	agentDir, err := agentSkillDir(home, agent)
+	agentDir, err := agentSkillDir(home, agent, id)
 	if err != nil {
 		return err
 	}
@@ -292,7 +292,7 @@ func fileComponentInstalled(d *integrateDeps, home string, id ComponentID, agent
 		return false, err
 	}
 	integrationsRoot := filepath.Join(dataDir, "integrations")
-	agentDir, err := agentSkillDir(home, agent)
+	agentDir, err := agentSkillDir(home, agent, id)
 	if err != nil {
 		return false, err
 	}

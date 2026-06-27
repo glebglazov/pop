@@ -15,7 +15,8 @@ type taskAgent struct {
 }
 
 // taskAgents returns the install layout for every agent the task-skills
-// component supports (claude, codex, pi, cursor), derived from installerHome.
+// component supports (claude, codex, pi, cursor, opencode), derived from
+// installerHome.
 func taskAgents() []taskAgent {
 	dataRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations")
 	return []taskAgent{
@@ -38,6 +39,11 @@ func taskAgents() []taskAgent {
 			name:      "cursor",
 			renderDir: filepath.Join(dataRoot, "cursor", "task-skills"),
 			skillDir:  filepath.Join(installerHome, ".cursor", "skills"),
+		},
+		{
+			name:      "opencode",
+			renderDir: filepath.Join(dataRoot, "opencode", "task-skills"),
+			skillDir:  filepath.Join(installerHome, ".config", "opencode", "skills"),
 		},
 	}
 }
@@ -183,22 +189,5 @@ func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
 				t.Fatalf("leftover old-name skill %s was deleted", leftover)
 			}
 		})
-	}
-}
-
-// TestRunIntegrateTaskSkillsUnsupported covers opencode: task skills are not
-// supported and are skipped silently while status wiring installs.
-func TestRunIntegrateTaskSkillsUnsupported(t *testing.T) {
-	fs := newFakeFS()
-	d := fakeDeps(installerHome, fs, nil)
-
-	if err := runIntegrateComponents(d, "opencode", []ComponentID{ComponentTaskSkills}, false, false, nil, false, false); err != nil {
-		t.Fatalf("runIntegrateComponents(opencode): %v", err)
-	}
-	if len(fs.files) == 0 {
-		t.Fatalf("status wiring should be installed for opencode")
-	}
-	if len(fs.symlinks) != 0 {
-		t.Fatalf("task skills should be skipped for opencode: symlinks=%v", fs.symlinks)
 	}
 }

@@ -278,14 +278,14 @@ func TestRunIntegrateRemoveNothingInstalled(t *testing.T) {
 	}
 }
 
-// TestRunIntegrateRemoveUnsupportedComponent: an explicit component the agent
-// cannot host errors and removes nothing.
-func TestRunIntegrateRemoveUnsupportedComponent(t *testing.T) {
+// TestRunIntegrateRemoveUnknownComponent: an unknown component identifier
+// errors and removes nothing.
+func TestRunIntegrateRemoveUnknownComponent(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := runIntegrateRemoveComponents(d, "opencode", []ComponentID{ComponentTaskSkills})
-	if err == nil || !strings.Contains(err.Error(), "not supported") {
-		t.Fatalf("expected not-supported error, got: %v", err)
+	err := runIntegrateRemoveComponents(d, "opencode", []ComponentID{"bogus"})
+	if err == nil || !strings.Contains(err.Error(), "unknown component") {
+		t.Fatalf("expected unknown-component error, got: %v", err)
 	}
 }

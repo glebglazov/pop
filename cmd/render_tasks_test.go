@@ -16,11 +16,12 @@ var taskSkillDirs = map[string][]string{
 }
 
 // TestRenderTaskSkillsDirAgents pins the task-skills rendered tree for
-// each agent that hosts skills as directories (claude, codex, pi, cursor): four
-// skill directories, each with a name-injected SKILL.md, and grill-with-docs
-// carrying its two companion format documents verbatim alongside the body.
+// each agent that hosts skills as directories (claude, codex, pi, cursor,
+// opencode): four skill directories, each with a name-injected SKILL.md, and
+// grill-with-docs carrying its two companion format documents verbatim alongside
+// the body.
 func TestRenderTaskSkillsDirAgents(t *testing.T) {
-	for _, agent := range []string{"claude", "codex", "pi", "cursor"} {
+	for _, agent := range []string{"claude", "codex", "pi", "cursor", "opencode"} {
 		t.Run(agent, func(t *testing.T) {
 			tree, err := renderComponent(ComponentTaskSkills, agent)
 			if err != nil {
@@ -113,13 +114,5 @@ func TestRenderTaskSkillsContentUsesShowPath(t *testing.T) {
 		if strings.Contains(body, "workload") || strings.Contains(body, "to-issues") {
 			t.Errorf("%s SKILL.md still mentions issue/workload vocabulary: %q", skill, body)
 		}
-	}
-}
-
-// TestRenderTaskSkillsUnsupportedAgents confirms opencode errors rather than
-// producing a degraded (flat, companion-less) tree.
-func TestRenderTaskSkillsUnsupportedAgents(t *testing.T) {
-	if _, err := renderComponent(ComponentTaskSkills, "opencode"); err == nil {
-		t.Fatalf("expected error rendering task skills for opencode")
 	}
 }
