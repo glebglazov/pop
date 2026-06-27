@@ -1,5 +1,7 @@
 # Integrate is a per-component consent wizard
 
+> **Superseded by [ADR-0064](0064-integrate-installs-all-components-by-default.md).** Integrate now installs all components by default with persisted opt-out; the per-component consent wizard described below no longer applies.
+
 `pop integrate <agent>` is a re-entrant **Integration wizard** over individually consented **Integration components**: the status wiring (hooks or agent extension) installs as the core component implied by running the command at all; the **Pane skill** and the **Workload planning skills** (with their global-gitignore sub-step) each require an explicit per-component opt-in, preceded by an explanation of what the component brings. **Integration refresh** only ever re-renders components the user previously opted into — it never adds, never prompts. Non-interactive runs require explicit component flags and fail without them rather than installing a default.
 
 ## Why
