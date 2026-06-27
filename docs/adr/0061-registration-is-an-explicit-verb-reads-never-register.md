@@ -32,4 +32,5 @@ This makes `auto_drain` (ADR-0047) seed at the explicit registration rather than
 
 - A freshly authored set does not appear in the dashboard or get scheduled until `pop tasks register` is run in its repo. This is the intended "draft → activate" gate, and it removes auto-drain-by-looking.
 - `refreshWith`'s register flag is the whole mechanism; no scattered conditionals.
+- **Embedded planning skills must call `register`, not `status`.** `cmd/skills/pop/to-tasks/SKILL.md` (lines ~152, ~159) currently runs `pop tasks status <set>` precisely to "trigger lazy discovery and confirm the set registered" — the side effect this ADR removes. Those steps must switch to `pop tasks register <set>`, which both activates the set and reports its status. Any other embedded skill that relies on a read to register must do the same (only `to-tasks` does today).
 - Glossary: **Registration** is now an explicit act, not a discovery side effect; the **`Auto-registration`** term remains reserved for the pane-monitoring domain.
