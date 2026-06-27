@@ -63,6 +63,10 @@ type DashboardRow struct {
 	// orthogonal to Task-set status — a set of any status may be orphaned. A set
 	// with no binding can never be orphaned.
 	orphaned bool
+	// bound is true when the set holds a Worktree binding with a non-blank runtime
+	// path — the dedicated-checkout fact the action menu gates unbind on. Derived
+	// per-build from the binding snapshot (no git fork), mirroring dashboardSetBound.
+	bound bool
 }
 
 // DashboardSnapshot is the data model for `pop queue dashboard`.
@@ -559,6 +563,7 @@ func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonStat
 		bnd, hasBinding := snap.bindingFor(st.repoKey, taskRow.ID)
 		awaitingIntegration := taskRow.Status == tasks.StatusDone && hasBinding
 		orphaned := dashboardOrphaned(d, bnd, hasBinding)
+		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
 		if !dashboardShowRow(taskRow, awaitingIntegration) {
 			continue
 		}
@@ -609,6 +614,7 @@ func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonStat
 			integrationBacklog: awaitingIntegration,
 			parked:             parked,
 			orphaned:           orphaned,
+			bound:              bound,
 		})
 	}
 	return rows, nil
@@ -865,6 +871,64 @@ type dashboardAbandonModal struct {
 	loading bool
 }
 
+// dashboardMenuAction identifies the verb a menu item dispatches.
+type dashboardMenuAction int
+
+const (
+	menuActionDrain dashboardMenuAction = iota
+	menuActionIntegrate
+	menuActionBind
+	menuActionUnbind
+	menuActionAutoDrain
+	menuActionPreview
+	menuActionUnpark
+	menuActionShell
+)
+
+// dashboardMenuItem is one verb in the action menu overlay: the flat shortcut
+// letter it keeps, the label shown beside it, and the verb it dispatches.
+type dashboardMenuItem struct {
+	key    string
+	label  string
+	action dashboardMenuAction
+}
+
+// dashboardMenu is the layered action overlay opened with `a` over the focused
+// row. It carries the snapshot of the row it was opened on and the verbs
+// applicable to that row, with a highlight cursor for j/k + Enter selection.
+type dashboardMenu struct {
+	row    DashboardRow
+	items  []dashboardMenuItem
+	cursor int
+}
+
+// dashboardMenuItems returns the verbs applicable to row, in a stable order.
+// Conditional verbs are filtered to the row's context: integrate is offered only
+// for integration-backlog rows, unbind only for bound rows, auto-drain only for
+// non-orphaned rows, and unpark only for parked rows. Drain, bind, preview, and
+// the runtime shell apply to every row.
+func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
+	items := []dashboardMenuItem{
+		{key: "i", label: "drain", action: menuActionDrain},
+	}
+	if DashboardRowCanIntegrate(row) {
+		items = append(items, dashboardMenuItem{key: "I", label: "integrate", action: menuActionIntegrate})
+	}
+	items = append(items, dashboardMenuItem{key: "b", label: "bind worktree", action: menuActionBind})
+	if row.bound {
+		items = append(items, dashboardMenuItem{key: "U", label: "unbind worktree", action: menuActionUnbind})
+	}
+	if !row.orphaned {
+		items = append(items, dashboardMenuItem{key: "d", label: "auto-drain", action: menuActionAutoDrain})
+	}
+	items = append(items, dashboardMenuItem{key: "p", label: "preview", action: menuActionPreview})
+	if row.parked {
+		items = append(items, dashboardMenuItem{key: "P", label: "unpark", action: menuActionUnpark})
+	}
+	items = append(items, dashboardMenuItem{key: "O", label: "shell", action: menuActionShell})
+	return items
+}
+
 // detailView is the full-screen task-set detail that replaces the table. The
 // cursor is pinned by task ID so it survives manifest refreshes.
 type detailView struct {
@@ -947,6 +1011,7 @@ type dashboardModel struct {
 	drainPick *dashboardDrainModal
 	abandon   *dashboardAbandonModal
 	detail    *detailView
+	menu      *dashboardMenu
 
 	filterMode  bool
 	filterInput textinput.Model
@@ -982,6 +1047,10 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.detail != nil {
 			return m.updateDetailView(msg)
+		}
+		if m.menu != nil {
+			m.pendingG = false
+			return m.updateMenu(msg)
 		}
 		if m.filterMode {
 			m.pendingG = false
@@ -1026,27 +1095,10 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			row := m.snap.Rows[m.cursor]
-			m.snap.Rows[m.cursor].AutoDrain = !m.snap.Rows[m.cursor].AutoDrain
+			m.menu = &dashboardMenu{row: row, items: dashboardMenuItems(row)}
 			m.err = nil
-			return m, m.toggleAutoDrain(row)
-		case "i":
-			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
-				return m, nil
-			}
-			m.err = nil
-			return m, m.launchDrain(m.snap.Rows[m.cursor])
-		case "I":
-			if !m.selectedRowCanIntegrate() {
-				return m, nil
-			}
-			m.err = nil
-			return m, m.launchIntegrate(m.snap.Rows[m.cursor])
-		case "p":
-			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
-				return m, nil
-			}
-			m.err = nil
-			return m, m.previewDrain(m.snap.Rows[m.cursor])
+			m.statusMsg = ""
+			return m, nil
 		case "l", "enter":
 			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
 				return m, nil
@@ -1055,50 +1107,6 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			row := m.snap.Rows[m.cursor]
 			m.detail = &detailView{row: row, loading: true}
 			return m, m.loadDetail(row)
-		case "b":
-			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
-				return m, nil
-			}
-			m.err = nil
-			row := m.snap.Rows[m.cursor]
-			m.bind = &dashboardBindModal{row: row, loading: true}
-			return m, m.loadBindWorktrees(row)
-		case "U":
-			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
-				return m, nil
-			}
-			m.err = nil
-			m.abandon = &dashboardAbandonModal{row: m.snap.Rows[m.cursor]}
-			return m, nil
-		case "P":
-			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
-				return m, nil
-			}
-			row := m.snap.Rows[m.cursor]
-			if !row.parked {
-				m.statusMsg = "task set is not parked"
-				return m, nil
-			}
-			m.err = nil
-			m.statusMsg = ""
-			return m, m.unparkSet(row)
-		case "O":
-			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
-				return m, nil
-			}
-			row := m.snap.Rows[m.cursor]
-			if strings.TrimSpace(row.runtimePath) == "" {
-				m.statusMsg = "no checkout bound to this task set"
-				return m, nil
-			}
-			m.statusMsg = ""
-			shell := os.Getenv("SHELL")
-			if shell == "" {
-				shell = "/bin/sh"
-			}
-			cmd := exec.Command(shell)
-			cmd.Dir = row.runtimePath
-			return m, tea.ExecProcess(cmd, nil)
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1242,10 +1250,6 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m dashboardModel) selectedRowCanIntegrate() bool {
-	return len(m.snap.Rows) > 0 && m.cursor >= 0 && m.cursor < len(m.snap.Rows) && DashboardRowCanIntegrate(m.snap.Rows[m.cursor])
-}
-
 func (m dashboardModel) updateBindModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
@@ -1284,6 +1288,119 @@ func (m dashboardModel) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		}
 		m.abandon.loading = true
 		return m, m.abandonWorktree(m.abandon.row)
+	}
+	return m, nil
+}
+
+// updateMenu drives the action overlay: esc/ctrl+c close it, j/k move the
+// highlight, Enter runs the highlighted verb, and any matching verb letter runs
+// that verb directly. Non-matching keys are inert while the menu is open.
+func (m dashboardModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.menu == nil {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.menu = nil
+		return m, nil
+	case "j", "down":
+		m.moveMenuCursor(1)
+		return m, nil
+	case "k", "up":
+		m.moveMenuCursor(-1)
+		return m, nil
+	case "enter":
+		return m.invokeMenuItem(m.menu.cursor)
+	}
+	for i, item := range m.menu.items {
+		if msg.String() == item.key {
+			return m.invokeMenuItem(i)
+		}
+	}
+	return m, nil
+}
+
+func (m *dashboardModel) moveMenuCursor(delta int) {
+	if m.menu == nil {
+		return
+	}
+	n := len(m.menu.items)
+	if n == 0 {
+		return
+	}
+	m.menu.cursor += delta
+	if m.menu.cursor < 0 {
+		m.menu.cursor = n - 1
+	}
+	if m.menu.cursor >= n {
+		m.menu.cursor = 0
+	}
+}
+
+// invokeMenuItem closes the menu and dispatches the verb at idx against the row
+// the menu was opened on.
+func (m dashboardModel) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
+	if m.menu == nil || idx < 0 || idx >= len(m.menu.items) {
+		return m, nil
+	}
+	item := m.menu.items[idx]
+	row := m.menu.row
+	m.menu = nil
+	return m.dispatchMenuAction(item.action, row)
+}
+
+// dispatchMenuAction runs the verb. The conditional guards mirror
+// dashboardMenuItems' context filtering — an item present in the menu always
+// passes its guard, but the guards keep dispatch self-contained.
+func (m dashboardModel) dispatchMenuAction(action dashboardMenuAction, row DashboardRow) (tea.Model, tea.Cmd) {
+	m.err = nil
+	switch action {
+	case menuActionDrain:
+		return m, m.launchDrain(row)
+	case menuActionIntegrate:
+		if !DashboardRowCanIntegrate(row) {
+			return m, nil
+		}
+		return m, m.launchIntegrate(row)
+	case menuActionBind:
+		m.bind = &dashboardBindModal{row: row, loading: true}
+		return m, m.loadBindWorktrees(row)
+	case menuActionUnbind:
+		if !row.bound {
+			return m, nil
+		}
+		m.abandon = &dashboardAbandonModal{row: row}
+		return m, nil
+	case menuActionAutoDrain:
+		if row.orphaned {
+			return m, nil
+		}
+		if m.cursor >= 0 && m.cursor < len(m.snap.Rows) {
+			m.snap.Rows[m.cursor].AutoDrain = !m.snap.Rows[m.cursor].AutoDrain
+		}
+		return m, m.toggleAutoDrain(row)
+	case menuActionPreview:
+		return m, m.previewDrain(row)
+	case menuActionUnpark:
+		if !row.parked {
+			m.statusMsg = "task set is not parked"
+			return m, nil
+		}
+		m.statusMsg = ""
+		return m, m.unparkSet(row)
+	case menuActionShell:
+		if strings.TrimSpace(row.runtimePath) == "" {
+			m.statusMsg = "no checkout bound to this task set"
+			return m, nil
+		}
+		m.statusMsg = ""
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = "/bin/sh"
+		}
+		cmd := exec.Command(shell)
+		cmd.Dir = row.runtimePath
+		return m, tea.ExecProcess(cmd, nil)
 	}
 	return m, nil
 }
@@ -2511,10 +2628,16 @@ func (m dashboardModel) View() tea.View {
 	}
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.snap.Rows, m.cursor, m.width)
-	hint := "j/k move · gg/G top/bottom · l/enter status · i drain · I integrate · O shell · p preview · b bind worktree · U unbind worktree · P unpark · a auto-drain · / filter · h/esc quit"
+	if m.menu != nil {
+		renderDashboardTableWithMenu(&body, m.snap.Rows, m.cursor, m.width, m.height, m.menu)
+	} else {
+		renderDashboardTable(&body, m.snap.Rows, m.cursor, m.width)
+	}
+	hint := "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · h/esc quit"
 	footer := true
-	if m.bind != nil {
+	if m.menu != nil {
+		hint = "j/k move · enter/letter run · esc close"
+	} else if m.bind != nil {
 		renderDashboardBindModal(&body, m.bind)
 		footer = false
 	} else if m.drainPick != nil {
@@ -2858,6 +2981,14 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal) {
 }
 
 func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
+	renderDashboardTableWithMenu(w, rows, cursor, width, 0, nil)
+}
+
+// renderDashboardTableWithMenu renders the task-set table and, when menu is
+// non-nil, splices the action overlay in next to the cursored row: below it by
+// default, flipping above when the cursor sits too low for the menu to fit
+// beneath it within height (dashboardMenuPlaceBelow).
+func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
 	headers := []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", "DRAIN", ""}
 	widths := []int{len(headers[0]), len(headers[1]), len(headers[2]), len(headers[3]), len(headers[4])}
 	widths = append(widths, len(headers[5]))
@@ -2871,7 +3002,22 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
 	}
 	fmt.Fprintf(w, "%s\n", truncateToWidth("  "+dashboardTableLine(headers, widths), width))
 	fmt.Fprintf(w, "%s\n", truncateToWidth("  "+dashboardTableSeparator(widths), width))
+
+	var menuLines []string
+	placeBelow := true
+	if menu != nil {
+		menuLines = dashboardMenuLines(menu, width)
+		placeBelow = dashboardMenuPlaceBelow(cursor, len(menuLines), height)
+	}
+	writeMenu := func() {
+		for _, ml := range menuLines {
+			fmt.Fprintf(w, "%s\n", ml)
+		}
+	}
 	for i, row := range rows {
+		if menu != nil && i == cursor && !placeBelow {
+			writeMenu()
+		}
 		var prefix string
 		if i == cursor {
 			prefix = ui.IndicatorStyle.Render("█") + " "
@@ -2880,7 +3026,46 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
 		}
 		line := truncateToWidth(prefix+dashboardTableLine(dashboardRowValues(row), widths), width)
 		fmt.Fprintf(w, "%s\n", line)
+		if menu != nil && i == cursor && placeBelow {
+			writeMenu()
+		}
 	}
+}
+
+// dashboardTableTopOffset is the number of lines above the first table row in
+// the dashboard view: the summary line, a blank, the header, and the separator.
+const dashboardTableTopOffset = 4
+
+// dashboardMenuPlaceBelow reports whether the action menu of menuHeight lines
+// should render below the cursor row (true) or flip above it (false). It flips
+// above only when the cursor sits low enough that the menu would not fit beneath
+// it within the viewport. A non-positive height (no WindowSizeMsg yet) keeps the
+// menu below.
+func dashboardMenuPlaceBelow(cursor, menuHeight, height int) bool {
+	if height <= 0 {
+		return true
+	}
+	linesBelowCursor := height - 1 - dashboardTableTopOffset - cursor
+	return linesBelowCursor >= menuHeight
+}
+
+// dashboardMenuLines renders the action overlay as a block of lines indented to
+// nest under the cursored row, with the highlighted item carrying the shared
+// cursor block. The first line is a dimmed "actions" caption.
+func dashboardMenuLines(menu *dashboardMenu, width int) []string {
+	if menu == nil {
+		return nil
+	}
+	lines := []string{truncateToWidth("    "+ui.HintStyle.Render("actions"), width)}
+	for i, item := range menu.items {
+		marker := "  "
+		if i == menu.cursor {
+			marker = ui.IndicatorStyle.Render("█") + " "
+		}
+		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
+		lines = append(lines, truncateToWidth(line, width))
+	}
+	return lines
 }
 
 func writeDashboardFooter(b *strings.Builder, height int, hint string) {

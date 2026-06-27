@@ -488,8 +488,17 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 		Project: "pop", SetID: "plain", Status: "READY", Worktree: "/repo/main (main)",
 		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00plain",
 	}}})
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// Auto-drain now lives behind the action menu: open with `a`, toggle with `d`.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(dashboardModel)
+	if got.menu == nil {
+		t.Fatal("a did not open the action menu")
+	}
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	got = updated.(dashboardModel)
+	if got.menu != nil {
+		t.Fatal("d did not close the action menu after dispatch")
+	}
 	if !got.snap.Rows[0].AutoDrain {
 		t.Fatalf("toggle did not update badge immediately: %+v", got.snap.Rows[0])
 	}
@@ -509,14 +518,240 @@ func TestDashboardBKeyOpensBindModal(t *testing.T) {
 		Project: "pop", SetID: "set-bind", Status: "READY", Worktree: "/repo/main (main)",
 		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set-bind",
 	}}})
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	// Bind now lives behind the action menu: open with `a`, then `b`.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(dashboardModel)
+	if got.menu == nil {
+		t.Fatal("a did not open the action menu")
+	}
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	got = updated.(dashboardModel)
+	if got.menu != nil {
+		t.Fatal("b did not close the action menu after dispatch")
+	}
 	if got.bind == nil || !got.bind.loading || got.bind.row.SetID != "set-bind" {
 		t.Fatalf("bind modal = %+v, want loading modal for set-bind", got.bind)
 	}
 	if cmd == nil {
 		t.Fatalf("b key did not return a worktree-loading command")
 	}
+}
+
+func TestDashboardActionMenuOpenAndClose(t *testing.T) {
+	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", SetID: "set", Status: "READY", runtimePath: "/repo/wt", cursorKey: "pop\x00set"},
+	}})
+	m.width = 120
+	m.height = 20
+
+	// `a` opens the overlay, anchored to the cursored row, with the menu hint.
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(dashboardModel)
+	if got.menu == nil {
+		t.Fatal("a did not open the action menu")
+	}
+	if cmd != nil {
+		t.Fatal("opening the menu should not dispatch a command")
+	}
+	if got.menu.row.SetID != "set" {
+		t.Fatalf("menu opened on %q, want set", got.menu.row.SetID)
+	}
+	view := got.View().Content
+	if !strings.Contains(view, "actions") {
+		t.Fatalf("menu caption not rendered:\n%s", view)
+	}
+	if !strings.Contains(view, "enter/letter run · esc close") {
+		t.Fatalf("menu hint not rendered:\n%s", view)
+	}
+
+	// `esc` closes the overlay without quitting.
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got = updated.(dashboardModel)
+	if got.menu != nil {
+		t.Fatal("esc did not close the action menu")
+	}
+	if cmd != nil {
+		t.Fatal("closing the menu should not quit or dispatch")
+	}
+}
+
+func TestDashboardFormerDirectKeysInertAtTopLevel(t *testing.T) {
+	for _, key := range []string{"i", "I", "b", "U", "p", "P", "O", "d"} {
+		m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+			Project: "pop", SetID: "set", Status: "READY", Worktree: "/repo/wt (main)",
+			defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set",
+			runtimePath: "/repo/wt", bound: true, integrationBacklog: true, parked: true,
+		}}})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
+		got := updated.(dashboardModel)
+		if cmd != nil {
+			t.Fatalf("%q at top level dispatched a command; verbs must run only through the menu", key)
+		}
+		if got.menu != nil || got.bind != nil || got.abandon != nil || got.drainPick != nil {
+			t.Fatalf("%q at top level opened a modal: menu=%v bind=%v abandon=%v drain=%v",
+				key, got.menu, got.bind, got.abandon, got.drainPick)
+		}
+		if got.snap.Rows[0].AutoDrain {
+			t.Fatalf("%q at top level toggled auto-drain", key)
+		}
+	}
+}
+
+func TestDashboardActionMenuContextFiltering(t *testing.T) {
+	keysFor := func(row DashboardRow) []string {
+		var keys []string
+		for _, item := range dashboardMenuItems(row) {
+			keys = append(keys, item.key)
+		}
+		return keys
+	}
+
+	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
+	plain := keysFor(DashboardRow{SetID: "plain", runtimePath: "/wt"})
+	if want := []string{"i", "b", "d", "p", "O"}; !reflect.DeepEqual(plain, want) {
+		t.Fatalf("plain row verbs = %v, want %v", plain, want)
+	}
+
+	// Integration-backlog row gains integrate.
+	if got := keysFor(DashboardRow{SetID: "done", integrationBacklog: true}); !contains(got, "I") {
+		t.Fatalf("integration-backlog row missing integrate: %v", got)
+	}
+	if got := keysFor(DashboardRow{SetID: "ready"}); contains(got, "I") {
+		t.Fatalf("non-backlog row should not offer integrate: %v", got)
+	}
+
+	// Bound row gains unbind; unbound row does not.
+	if got := keysFor(DashboardRow{SetID: "bound", bound: true}); !contains(got, "U") {
+		t.Fatalf("bound row missing unbind: %v", got)
+	}
+	if got := keysFor(DashboardRow{SetID: "unbound"}); contains(got, "U") {
+		t.Fatalf("unbound row should not offer unbind: %v", got)
+	}
+
+	// Parked row gains unpark; non-parked row does not.
+	if got := keysFor(DashboardRow{SetID: "parked", parked: true}); !contains(got, "P") {
+		t.Fatalf("parked row missing unpark: %v", got)
+	}
+	if got := keysFor(DashboardRow{SetID: "live"}); contains(got, "P") {
+		t.Fatalf("non-parked row should not offer unpark: %v", got)
+	}
+
+	// Auto-drain is offered for non-orphaned rows only.
+	if got := keysFor(DashboardRow{SetID: "orphan", orphaned: true}); contains(got, "d") {
+		t.Fatalf("orphaned row should not offer auto-drain: %v", got)
+	}
+}
+
+func TestDashboardActionMenuVerbDispatch(t *testing.T) {
+	newModel := func() dashboardModel {
+		return newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+			Project: "pop", SetID: "set", Status: "READY", Worktree: "/repo/wt (main)",
+			defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set",
+			runtimePath: "/repo/wt", bound: true,
+		}}})
+	}
+
+	// Letter path: `a` then `U` opens the unbind confirm and closes the menu.
+	updated, _ := newModel().Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(dashboardModel)
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	got = updated.(dashboardModel)
+	if got.menu != nil {
+		t.Fatal("letter dispatch did not close the menu")
+	}
+	if got.abandon == nil {
+		t.Fatal("letter dispatch did not open the unbind confirm")
+	}
+	if cmd != nil {
+		t.Fatal("unbind confirm should not dispatch before confirmation")
+	}
+
+	// Highlight + Enter path: move onto the bind verb, press Enter.
+	updated, _ = newModel().Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got = updated.(dashboardModel)
+	bindIdx := -1
+	for i, item := range got.menu.items {
+		if item.key == "b" {
+			bindIdx = i
+		}
+	}
+	if bindIdx < 0 {
+		t.Fatalf("bind verb absent from menu: %+v", got.menu.items)
+	}
+	for got.menu.cursor != bindIdx {
+		updated, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		got = updated.(dashboardModel)
+	}
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got = updated.(dashboardModel)
+	if got.menu != nil {
+		t.Fatal("enter dispatch did not close the menu")
+	}
+	if got.bind == nil || got.bind.row.SetID != "set" {
+		t.Fatalf("enter dispatch did not open bind modal: %+v", got.bind)
+	}
+	if cmd == nil {
+		t.Fatal("bind dispatch should return a worktree-loading command")
+	}
+}
+
+func TestDashboardActionMenuAnchorsBelowAndFlipsAbove(t *testing.T) {
+	// dashboardMenuPlaceBelow: a cursor near the top fits the menu below it; a
+	// cursor low in the list does not, so it flips above.
+	if !dashboardMenuPlaceBelow(0, 6, 24) {
+		t.Fatal("menu should render below a top-of-list cursor")
+	}
+	if dashboardMenuPlaceBelow(18, 6, 24) {
+		t.Fatal("menu should flip above a bottom-of-list cursor")
+	}
+	if !dashboardMenuPlaceBelow(5, 6, 0) {
+		t.Fatal("menu should default below when height is unknown")
+	}
+
+	rows := make([]DashboardRow, 20)
+	for i := range rows {
+		id := fmt.Sprintf("set-%02d", i)
+		rows[i] = DashboardRow{Project: "pop", SetID: id, Status: "READY", cursorKey: "pop\x00" + id}
+	}
+
+	// Cursor at the top: the menu caption sits below the cursor row.
+	mTop := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	mTop.width = 120
+	mTop.height = 24
+	mTop.cursor = 0
+	updated, _ := mTop.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	topView := updated.(dashboardModel).View().Content
+	if got := menuCaptionLine(topView); got <= cursorRowLine(topView, "set-00") {
+		t.Fatalf("top cursor: caption line %d should be below cursor row:\n%s", got, topView)
+	}
+
+	// Cursor at the bottom: the menu caption flips above the cursor row.
+	mBot := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	mBot.width = 120
+	mBot.height = 24
+	mBot.cursor = len(rows) - 1
+	updated, _ = mBot.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	botView := updated.(dashboardModel).View().Content
+	if got := menuCaptionLine(botView); got >= cursorRowLine(botView, "set-19") {
+		t.Fatalf("bottom cursor: caption line %d should be above cursor row:\n%s", got, botView)
+	}
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func menuCaptionLine(view string) int {
+	return dashboardTestLineIndex(strings.Split(view, "\n"), "actions")
+}
+
+func cursorRowLine(view, setID string) int {
+	return dashboardTestLineIndex(strings.Split(view, "\n"), setID)
 }
 
 func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) {
@@ -981,16 +1216,43 @@ func TestDashboardIKeyOnlyEnabledForIntegrationBacklog(t *testing.T) {
 		{Project: "pop", SetID: "ready", Status: "READY"},
 		{Project: "pop", SetID: "done", Status: "DONE · clean", integrationBacklog: true},
 	}})
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
+	// Non-backlog row: the menu offers no integrate verb, so `I` is inert.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(dashboardModel)
+	if menuHasKey(got.menu, "I") {
+		t.Fatalf("integrate offered on non-backlog row: %+v", got.menu.items)
+	}
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd != nil {
 		t.Fatalf("I key on non-integration row returned command")
 	}
-	got := updated.(dashboardModel)
+	got = updated.(dashboardModel)
+
+	// Backlog row: the menu offers integrate and `I` dispatches it.
+	got.menu = nil
 	got.cursor = 1
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got = updated.(dashboardModel)
+	if !menuHasKey(got.menu, "I") {
+		t.Fatalf("integrate not offered on backlog row: %+v", got.menu.items)
+	}
 	_, cmd = got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
 		t.Fatalf("I key on integration backlog row returned nil command")
 	}
+}
+
+// menuHasKey reports whether the action menu offers a verb bound to key.
+func menuHasKey(menu *dashboardMenu, key string) bool {
+	if menu == nil {
+		return false
+	}
+	for _, item := range menu.items {
+		if item.key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDashboardLaunchIntegrateDispatchesExistingWizardAndSwitchesPane(t *testing.T) {
@@ -1583,12 +1845,27 @@ func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
 		Project: "pop", SetID: "set-unbind", Status: "FAILED", Worktree: "/repo/bound (branch)",
 		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set-unbind",
+		bound: true,
 	}}})
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
-	got := updated.(dashboardModel)
+	// Unbind now lives behind the action menu: open with `a`, then `U`.
+	openMenu := func(model dashboardModel) dashboardModel {
+		updated, _ := model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		got := updated.(dashboardModel)
+		if !menuHasKey(got.menu, "U") {
+			t.Fatalf("unbind not offered on bound row: %+v", got.menu)
+		}
+		return got
+	}
+
+	got := openMenu(m)
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	got = updated.(dashboardModel)
 	if cmd != nil {
 		t.Fatalf("U key returned command before confirmation")
+	}
+	if got.menu != nil {
+		t.Fatal("U did not close the action menu")
 	}
 	if got.abandon == nil || got.abandon.row.SetID != "set-unbind" {
 		t.Fatalf("abandon modal = %+v, want set-unbind", got.abandon)
@@ -1606,7 +1883,8 @@ func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 		t.Fatalf("abandon modal after confirm = %+v, want loading", got.abandon)
 	}
 
-	updated, cmd = m.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	got = openMenu(m)
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
 	got = updated.(dashboardModel)
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	got = updated.(dashboardModel)
@@ -2023,7 +2301,7 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 	if called {
 		t.Fatal("bare-letter actions must be inert in filter mode")
 	}
-	if m.bind != nil || m.abandon != nil || m.detail != nil {
+	if m.bind != nil || m.abandon != nil || m.detail != nil || m.menu != nil {
 		t.Fatal("modals must not open while in filter mode")
 	}
 }
@@ -2360,11 +2638,21 @@ func TestDetailViewOverrideStatusRendered(t *testing.T) {
 }
 
 func TestMainListRuntimeShell(t *testing.T) {
+	// runtimeShell opens the action menu and dispatches the shell verb (`O`).
+	runtimeShell := func(m dashboardModel) (dashboardModel, tea.Cmd) {
+		updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		got := updated.(dashboardModel)
+		if got.menu == nil {
+			t.Fatal("a did not open the action menu")
+		}
+		updated, cmd := got.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+		return updated.(dashboardModel), cmd
+	}
+
 	t.Run("O with empty runtimePath is no-op with statusMsg hint", func(t *testing.T) {
 		row := DashboardRow{SetID: "set-x", defPath: "/def", runtimePath: ""}
 		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
-		updated, cmd := m.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
-		got := updated.(dashboardModel)
+		got, cmd := runtimeShell(m)
 		if cmd != nil {
 			t.Fatal("O with empty runtimePath: expected no cmd")
 		}
@@ -2376,8 +2664,7 @@ func TestMainListRuntimeShell(t *testing.T) {
 	t.Run("O with whitespace-only runtimePath is no-op with statusMsg hint", func(t *testing.T) {
 		row := DashboardRow{SetID: "set-y", defPath: "/def", runtimePath: "   "}
 		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
-		updated, cmd := m.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
-		got := updated.(dashboardModel)
+		got, cmd := runtimeShell(m)
 		if cmd != nil {
 			t.Fatal("O with whitespace runtimePath: expected no cmd")
 		}
@@ -2386,15 +2673,18 @@ func TestMainListRuntimeShell(t *testing.T) {
 		}
 	})
 
-	t.Run("O with no rows is no-op", func(t *testing.T) {
+	t.Run("a with no rows does not open the menu", func(t *testing.T) {
 		m := newDashboardModel(nil, nil, DashboardSnapshot{})
-		updated, cmd := m.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		got := updated.(dashboardModel)
 		if cmd != nil {
-			t.Fatal("O with no rows: expected no cmd")
+			t.Fatal("a with no rows: expected no cmd")
+		}
+		if got.menu != nil {
+			t.Fatal("a with no rows: menu must not open")
 		}
 		if got.statusMsg != "" {
-			t.Fatalf("O with no rows: expected no statusMsg, got %q", got.statusMsg)
+			t.Fatalf("a with no rows: expected no statusMsg, got %q", got.statusMsg)
 		}
 	})
 
@@ -2408,12 +2698,17 @@ func TestMainListRuntimeShell(t *testing.T) {
 		}
 	})
 
-	t.Run("footer hint includes O shell", func(t *testing.T) {
+	t.Run("menu offers the shell verb", func(t *testing.T) {
 		row := DashboardRow{SetID: "set-hint", defPath: "/def"}
 		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
-		v := m.View()
-		if !strings.Contains(v.Content, "O shell") {
-			t.Fatalf("footer missing 'O shell':\n%s", v.Content)
+		updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		got := updated.(dashboardModel)
+		view := got.View().Content
+		if !menuHasKey(got.menu, "O") {
+			t.Fatalf("menu missing shell verb: %+v", got.menu)
+		}
+		if !strings.Contains(view, "O  shell") {
+			t.Fatalf("menu view missing 'O  shell':\n%s", view)
 		}
 	})
 }
