@@ -168,6 +168,54 @@ func TestDashboardSortOrder(t *testing.T) {
 	}
 }
 
+// TestDashboardTieredSortOrder drives the full agreed total order across a
+// mixed fixture that exercises every membership tier and the per-project
+// status sink. Tier precedence is running → auto-drain → orphaned → the rest;
+// the orphaned + auto-drain set must land in the auto-drain tier; "the rest"
+// groups by project then sinks UNVERIFIED below normal and DONE below those;
+// and SetID descending is the global tiebreak.
+func TestDashboardTieredSortOrder(t *testing.T) {
+	rows := []DashboardRow{
+		// "the rest" — project bravo, status sink within the project.
+		{Project: "bravo", SetID: "2026-02-01-done", RawStatus: tasks.StatusDone},
+		{Project: "bravo", SetID: "2026-02-02-unver", RawStatus: tasks.StatusUnverified},
+		{Project: "bravo", SetID: "2026-02-03-ready", RawStatus: tasks.StatusReady},
+		// "the rest" — project alpha sorts before bravo.
+		{Project: "alpha", SetID: "2026-03-01-a", RawStatus: tasks.StatusReady},
+		{Project: "alpha", SetID: "2026-03-02-b", RawStatus: tasks.StatusReady},
+		// Orphaned tier.
+		{Project: "zoo", SetID: "2026-04-01-orph", RawStatus: tasks.StatusReady, orphaned: true},
+		// Auto-drain tier — the orphaned+auto-drain set belongs here, not orphaned.
+		{Project: "kilo", SetID: "2026-05-01-ad", RawStatus: tasks.StatusReady, AutoDrain: true},
+		{Project: "kilo", SetID: "2026-05-02-ado", RawStatus: tasks.StatusReady, AutoDrain: true, orphaned: true},
+		// Running / Picked-up tier — highest precedence even with auto-drain set.
+		{Project: "delta", SetID: "2026-06-01-run", RawStatus: tasks.StatusReady, Drain: "picked up", AutoDrain: true},
+	}
+	sortDashboardRows(rows)
+	got := make([]string, len(rows))
+	for i, r := range rows {
+		got[i] = r.Project + "/" + r.SetID
+	}
+	want := []string{
+		// Tier 1: running.
+		"delta/2026-06-01-run",
+		// Tier 2: auto-drain, project name then SetID descending.
+		"kilo/2026-05-02-ado",
+		"kilo/2026-05-01-ad",
+		// Tier 3: orphaned.
+		"zoo/2026-04-01-orph",
+		// Tier 4: the rest, grouped by project, status sink per project.
+		"alpha/2026-03-02-b",
+		"alpha/2026-03-01-a",
+		"bravo/2026-02-03-ready",  // normal first
+		"bravo/2026-02-02-unver",  // UNVERIFIED sinks below normal
+		"bravo/2026-02-01-done",   // DONE sinks below UNVERIFIED
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
 func TestDashboardColumnDerivation(t *testing.T) {
 	rows := []tasks.Row{
 		{ID: "done", Status: tasks.StatusDone},

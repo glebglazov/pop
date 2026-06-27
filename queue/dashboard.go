@@ -26,6 +26,10 @@ import (
 
 const dashboardPollInterval = 2 * time.Second
 
+// dashboardDrainPickedUp is the Drain-column value for a set whose checkout is
+// held by a live drain (running / Picked-up). It is the tier-1 sort signal.
+const dashboardDrainPickedUp = "picked up"
+
 // DashboardRow is one read-only Queue dashboard table row.
 type DashboardRow struct {
 	Project string
@@ -452,16 +456,68 @@ func pathWithinOrEqual(p, base string) bool {
 	return p == base || strings.HasPrefix(p, base+string(filepath.Separator))
 }
 
-// worktreeBranchByPath parses `git worktree list --porcelain` into a map from
-// each worktree's canonical path to its branch (empty when detached). One
-// porcelain read — already cached for the build by scanGitCache — yields every
-// checkout's branch, replacing a `git branch --show-current` fork per repo.
+// Queue dashboard membership tiers, in precedence order. A row lands in the
+// first tier it qualifies for, so an orphaned + auto-drain set sorts under the
+// auto-drain tier (auto-drain is checked before orphaned).
+const (
+	dashboardTierRunning  = iota // live drain holds the checkout (Picked-up)
+	dashboardTierAutoDrain        // auto-drain enabled
+	dashboardTierOrphaned         // Worktree binding points at a missing checkout
+	dashboardTierRest             // everything else
+)
+
+// dashboardSortTier returns a row's membership tier (see the dashboardTier*
+// constants). The order of these checks encodes the precedence: a row that is
+// both orphaned and auto-drain qualifies for the auto-drain tier first.
+func dashboardSortTier(r DashboardRow) int {
+	switch {
+	case r.Drain == dashboardDrainPickedUp:
+		return dashboardTierRunning
+	case r.AutoDrain:
+		return dashboardTierAutoDrain
+	case r.orphaned:
+		return dashboardTierOrphaned
+	default:
+		return dashboardTierRest
+	}
+}
+
+// dashboardStatusRank orders statuses within a single project for the "the
+// rest" tier (Reading A): normal rows first, then UNVERIFIED, then DONE sink to
+// that project's bottom. The sink is per-project, not global — a project's own
+// terminal statuses cluster at that project's bottom.
+func dashboardStatusRank(s tasks.TaskSetStatus) int {
+	switch s {
+	case tasks.StatusUnverified:
+		return 1
+	case tasks.StatusDone:
+		return 2
+	default:
+		return 0
+	}
+}
+
+// sortDashboardRows applies the agreed total order: rows fall into membership
+// tiers (running, auto-drain, orphaned, the rest); within a tier they group by
+// project name ascending; within a project in "the rest" UNVERIFIED then DONE
+// sink to the bottom; and the global tiebreak is SetID descending.
 func sortDashboardRows(rows []DashboardRow) {
 	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Project != rows[j].Project {
-			return rows[i].Project < rows[j].Project
+		a, b := rows[i], rows[j]
+		if ta, tb := dashboardSortTier(a), dashboardSortTier(b); ta != tb {
+			return ta < tb
 		}
-		return rows[i].SetID > rows[j].SetID
+		if a.Project != b.Project {
+			return a.Project < b.Project
+		}
+		// Status sink applies only within "the rest"; tiers 1–3 go straight to
+		// the SetID tiebreak after project name.
+		if dashboardSortTier(a) == dashboardTierRest {
+			if ra, rb := dashboardStatusRank(a.RawStatus), dashboardStatusRank(b.RawStatus); ra != rb {
+				return ra < rb
+			}
+		}
+		return a.SetID > b.SetID
 	})
 }
 
@@ -651,7 +707,7 @@ func dashboardDrain(snap *dashboardSnapshot, state *DaemonState, repoKey, setID,
 	_ = state
 	for path := range paths {
 		if dr, ok := snap.liveDrains[path]; ok && dr.SetID == setID {
-			return "picked up"
+			return dashboardDrainPickedUp
 		}
 	}
 	return ""
