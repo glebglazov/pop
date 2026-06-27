@@ -694,7 +694,7 @@ func TestResolveTopicRecipe(t *testing.T) {
 			t.Fatal("ollama:llama3.2 should resolve")
 		}
 		argv, stdin := r.build(modelPrompt, payload)
-		if strings.Join(argv, " ") != "ollama run llama3.2" {
+		if strings.Join(argv, " ") != "ollama run --hidethinking llama3.2" {
 			t.Errorf("argv = %v", argv)
 		}
 		if string(stdin) != modelPrompt {

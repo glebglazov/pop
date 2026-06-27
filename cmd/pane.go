@@ -731,6 +731,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 		debug.Error("pane set-topic --derive: %v", err)
 		return "", "", false
 	}
+	debug.Log("pane set-topic --derive: label=%q parsed prompt=%q transcript_path=%q", label, prompt, transcriptPath)
 
 	// Derive once per pane (ADR 0025/0058): the Topic lives in @pop_topic, which
 	// dies with the pane. A pane that already has a non-empty @pop_topic never
@@ -879,7 +880,10 @@ func parseClaudeResult(stdout string) string {
 func ollamaRecipe(model string) topicRecipe {
 	return topicRecipe{
 		build: func(modelPrompt string, _ []byte) ([]string, []byte) {
-			return []string{"ollama", "run", model}, []byte(modelPrompt)
+			// --hidethinking strips a reasoning model's "Thinking..." block from
+			// stdout; without it capTopic first-lines that block and every Topic
+			// slugifies to "thinking". A no-op on non-reasoning models.
+			return []string{"ollama", "run", "--hidethinking", model}, []byte(modelPrompt)
 		},
 		parse: plainTopicResult,
 	}
