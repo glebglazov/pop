@@ -52,6 +52,10 @@ type integrateDeps struct {
 	removeAll   func(string) error
 	stdout      io.Writer
 
+	// logf emits a debug log line. Production wires debug.Log; tests can
+	// override to capture what was logged without needing POP_LOG set.
+	logf func(string, ...any)
+
 	// stdin is the wizard's prompt input. Production uses os.Stdin; tests
 	// supply a scripted reader. Nil disables prompting (declines every step),
 	// which keeps the dry-run/refresh deps inert.
@@ -81,6 +85,7 @@ func defaultIntegrateDeps() *integrateDeps {
 		mkdirAll:    os.MkdirAll,
 		removeAll:   os.RemoveAll,
 		stdout:      os.Stdout,
+		logf:        debug.Log,
 		stdin:       os.Stdin,
 		dataDir:     popDataDir,
 		symlink:     os.Symlink,
@@ -123,6 +128,7 @@ func withDryRun(base *integrateDeps) *integrateDeps {
 		userHomeDir: base.userHomeDir,
 		readFile:    base.readFile,
 		dataDir:     base.dataDir,
+		logf:        base.logf,
 		DryRun:      true,
 	}
 	// File-component refresh inspects the link installer's render tree and the
@@ -969,10 +975,13 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 		return false, "" // can't resolve home — treat as not actionable
 	}
 
-	if _, conflict, err := componentConflict(checkDeps, home, id, agent); err != nil {
+	if conflictPath, conflict, err := componentConflict(checkDeps, home, id, agent); err != nil {
 		debug.Error("refreshFileComponent: conflict check %s/%s: %v", agent, id, err)
 		return false, ""
 	} else if conflict {
+		if checkDeps.logf != nil {
+			checkDeps.logf("refreshFileComponent: %s/%s skipped — conflict at %s (not owned by pop)", agent, id, conflictPath)
+		}
 		return false, "" // an unowned entry shadows pop's — skip silently
 	}
 
@@ -982,6 +991,9 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 		return false, ""
 	}
 	if !installed {
+		if checkDeps.logf != nil {
+			checkDeps.logf("refreshFileComponent: %s/%s not installed — skip", agent, id)
+		}
 		return false, "" // never add an opted-out component
 	}
 
@@ -992,14 +1004,23 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 		return false, fmt.Sprintf("failed to check %s %s integration: %v", agent, id, err)
 	}
 	if !stale {
+		if checkDeps.logf != nil {
+			checkDeps.logf("refreshFileComponent: %s/%s installed and current — no-op", agent, id)
+		}
 		return false, "" // installed and current
 	}
 
+	if checkDeps.logf != nil {
+		checkDeps.logf("refreshFileComponent: %s/%s stale — refreshing", agent, id)
+	}
 	realDeps := newReal()
 	realDeps.stdout = nil // refresh runs silently on success
 	if err := installFileComponent(realDeps, home, id, agent); err != nil {
 		debug.Error("refreshFileComponent: update %s/%s: %v", agent, id, err)
 		return false, fmt.Sprintf("failed to update %s %s integration (see pop.log)", agent, id)
+	}
+	if checkDeps.logf != nil {
+		checkDeps.logf("refreshFileComponent: %s/%s refreshed", agent, id)
 	}
 	return true, ""
 }

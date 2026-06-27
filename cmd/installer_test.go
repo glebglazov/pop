@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -505,5 +506,198 @@ func TestInstallFileComponentOwnershipExemption(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "not owned by pop") {
 		t.Fatalf("pop-owned symlink reported as conflict: %q", out.String())
+	}
+}
+
+// captureLogf returns a logf func and a getter for the accumulated lines.
+func captureLogf() (logf func(string, ...any), lines func() []string) {
+	var captured []string
+	logf = func(format string, args ...any) {
+		captured = append(captured, fmt.Sprintf(format, args...))
+	}
+	lines = func() []string { return captured }
+	return logf, lines
+}
+
+// hasLog reports whether any captured line contains substr.
+func hasLog(lines []string, substr string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestInstallFileComponentDebugInstall asserts that a clean install emits debug
+// lines naming the component/agent and the link action taken.
+func TestInstallFileComponentDebugInstall(t *testing.T) {
+	fs := newFakeFS()
+	d := fakeDeps(installerHome, fs, nil)
+	logf, lines := captureLogf()
+	d.logf = logf
+
+	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+		t.Fatalf("installFileComponent: %v", err)
+	}
+
+	got := lines()
+	if !hasLog(got, "agent=claude") {
+		t.Errorf("expected agent=claude in debug lines, got %v", got)
+	}
+	if !hasLog(got, string(ComponentPaneSkill)) {
+		t.Errorf("expected component id %q in debug lines, got %v", ComponentPaneSkill, got)
+	}
+	_, linkDest, linkTarget := paneSkillPaths()
+	wantLink := fmt.Sprintf("linked %s -> %s", linkDest, linkTarget)
+	if !hasLog(got, wantLink) {
+		t.Errorf("expected link action %q in debug lines, got %v", wantLink, got)
+	}
+}
+
+// TestInstallFileComponentDebugConflict asserts that a conflict emits a debug
+// line naming the conflicting path and stating it is not owned by pop.
+func TestInstallFileComponentDebugConflict(t *testing.T) {
+	fs := newFakeFS()
+	d := fakeDeps(installerHome, fs, nil)
+	logf, lines := captureLogf()
+	d.logf = logf
+
+	_, linkDest, _ := paneSkillPaths()
+	// User's own skill at the bare name — not owned by pop.
+	bareDest := filepath.Join(filepath.Dir(linkDest), "pane")
+	fs.dirs[bareDest] = true
+	fs.files[filepath.Join(bareDest, "SKILL.md")] = []byte("mine")
+
+	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+		t.Fatalf("installFileComponent: %v", err)
+	}
+
+	got := lines()
+	if !hasLog(got, bareDest) {
+		t.Errorf("expected conflicting path %q in debug lines, got %v", bareDest, got)
+	}
+	if !hasLog(got, "not owned by pop") {
+		t.Errorf("expected 'not owned by pop' reason in debug lines, got %v", got)
+	}
+}
+
+// TestRefreshFileComponentDebugNotInstalled asserts that refresh logs a
+// "not installed — skip" line when the component is absent.
+func TestRefreshFileComponentDebugNotInstalled(t *testing.T) {
+	fs := newFakeFS()
+	logf, lines := captureLogf()
+	dry := func() *integrateDeps {
+		d := withDryRun(fakeDeps("/h", fs, nil))
+		d.logf = logf
+		return d
+	}
+	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
+
+	updated, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	if updated || warning != "" {
+		t.Errorf("expected no update/warning, got updated=%v warning=%q", updated, warning)
+	}
+	got := lines()
+	if !hasLog(got, "not installed") {
+		t.Errorf("expected 'not installed' in debug lines, got %v", got)
+	}
+}
+
+// TestRefreshFileComponentDebugCurrent asserts that refresh logs a
+// "current — no-op" line when the component is installed and up to date.
+func TestRefreshFileComponentDebugCurrent(t *testing.T) {
+	// First install the component for real so the render tree matches.
+	fs := newFakeFS()
+	realDeps := fakeDeps("/h", fs, nil)
+	if err := installFileComponent(realDeps, "/h", ComponentPaneSkill, "claude"); err != nil {
+		t.Fatalf("setup install: %v", err)
+	}
+
+	logf, lines := captureLogf()
+	dry := func() *integrateDeps {
+		d := withDryRun(fakeDeps("/h", fs, nil))
+		d.logf = logf
+		return d
+	}
+	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
+
+	updated, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	if updated || warning != "" {
+		t.Errorf("expected no update/warning, got updated=%v warning=%q", updated, warning)
+	}
+	got := lines()
+	if !hasLog(got, "current") {
+		t.Errorf("expected 'current' in debug lines, got %v", got)
+	}
+}
+
+// TestRefreshFileComponentDebugStale asserts that refresh logs "stale —
+// refreshing" and "refreshed" when the component is installed but outdated.
+func TestRefreshFileComponentDebugStale(t *testing.T) {
+	fs := newFakeFS()
+	// Install the component so the symlink is present (marks it as installed),
+	// then corrupt the render tree to make it stale.
+	realDeps := fakeDeps("/h", fs, nil)
+	if err := installFileComponent(realDeps, "/h", ComponentPaneSkill, "claude"); err != nil {
+		t.Fatalf("setup install: %v", err)
+	}
+	renderRoot := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill")
+	for k := range fs.files {
+		if strings.HasPrefix(k, renderRoot) {
+			fs.files[k] = []byte("stale content")
+		}
+	}
+
+	logf, lines := captureLogf()
+	dry := func() *integrateDeps {
+		d := withDryRun(fakeDeps("/h", fs, nil))
+		d.logf = logf
+		return d
+	}
+	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
+
+	updated, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	if !updated {
+		t.Errorf("expected component to be refreshed")
+	}
+	if warning != "" {
+		t.Errorf("unexpected warning: %q", warning)
+	}
+	got := lines()
+	if !hasLog(got, "stale") {
+		t.Errorf("expected 'stale' in debug lines, got %v", got)
+	}
+	if !hasLog(got, "refreshed") {
+		t.Errorf("expected 'refreshed' in debug lines, got %v", got)
+	}
+}
+
+// TestRefreshFileComponentDebugConflict asserts that refresh logs the conflict
+// path and reason when an unowned entry shadows pop's skill.
+func TestRefreshFileComponentDebugConflict(t *testing.T) {
+	fs := newFakeFS()
+	// Place a non-pop entry at the bare name to create a conflict.
+	conflict := filepath.Join("/h", ".claude", "skills", "pane")
+	fs.dirs[conflict] = true
+
+	logf, lines := captureLogf()
+	dry := func() *integrateDeps {
+		d := withDryRun(fakeDeps("/h", fs, nil))
+		d.logf = logf
+		return d
+	}
+	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
+
+	updated, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	if updated || warning != "" {
+		t.Errorf("expected no update/warning on conflict, got updated=%v warning=%q", updated, warning)
+	}
+	got := lines()
+	if !hasLog(got, conflict) {
+		t.Errorf("expected conflict path %q in debug lines, got %v", conflict, got)
+	}
+	if !hasLog(got, "not owned by pop") {
+		t.Errorf("expected 'not owned by pop' in debug lines, got %v", got)
 	}
 }

@@ -133,6 +133,7 @@ func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 		mkdirAll:    fs.mkdirAll,
 		removeAll:   fs.removeAll,
 		stdout:      stdout,
+		logf:        func(string, ...any) {}, // no-op; override per-test to capture
 		dataDir:     func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
 		symlink:     fs.symlink,
 		readlink:    fs.readlink,

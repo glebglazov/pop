@@ -36,10 +36,17 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		return err
 	}
 
+	if d.logf != nil {
+		d.logf("installFileComponent: agent=%s id=%s agentDir=%s renderRoot=%s", agent, id, agentDir, renderRoot)
+	}
+
 	// Remove any legacy copy-mode artifacts this component supersedes (e.g. the
 	// claude command-style pane install) so the switch to skills leaves nothing
 	// behind.
 	for _, p := range legacyArtifacts(home, agent, id) {
+		if d.logf != nil {
+			d.logf("installFileComponent: removing legacy artifact %s", p)
+		}
 		if err := d.removeAll(p); err != nil {
 			return fmt.Errorf("failed to remove legacy artifact %s: %w", p, err)
 		}
@@ -47,6 +54,9 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 
 	// Render the tree fresh under the data dir. Clear the prior render root
 	// first so a renamed or removed file does not linger.
+	if d.logf != nil {
+		d.logf("installFileComponent: clearing render root %s", renderRoot)
+	}
 	if err := d.removeAll(renderRoot); err != nil {
 		return fmt.Errorf("failed to clean %s: %w", renderRoot, err)
 	}
@@ -58,6 +68,9 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		}
 		if err := d.writeFile(full, data, 0o644); err != nil {
 			return fmt.Errorf("failed to write %s: %w", full, err)
+		}
+		if d.logf != nil {
+			d.logf("installFileComponent: wrote render file %s (%d bytes)", full, len(data))
 		}
 		topLevel[firstSegment(rel)] = true
 	}
@@ -80,6 +93,9 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 			return fmt.Errorf("failed to check ownership of %s: %w", dest, err)
 		}
 		if conflict {
+			if d.logf != nil {
+				d.logf("installFileComponent: skipping %s — conflict at %s (not owned by pop)", name, conflictPath)
+			}
 			if d.stdout != nil {
 				fmt.Fprintf(d.stdout, "  skipped %s: %s exists and is not owned by pop — remove it and re-run integrate to install pop's version\n", name, conflictPath)
 			}
@@ -92,6 +108,9 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		}
 		if err := d.symlink(target, dest); err != nil {
 			return fmt.Errorf("failed to symlink %s -> %s: %w", dest, target, err)
+		}
+		if d.logf != nil {
+			d.logf("installFileComponent: linked %s -> %s", dest, target)
 		}
 		if d.stdout != nil {
 			fmt.Fprintf(d.stdout, "  linked %s -> %s\n", dest, target)
