@@ -930,7 +930,7 @@ func installedState(installed bool) componentStateInfo {
 // component a bare `pop integrate <agent>` installs.
 var doctorComponentFlag = map[ComponentID]string{
 	ComponentStatusWiring: "",
-	ComponentPaneSkill:    "--pane-skill",
+	ComponentPaneSkill:    "--no-pane-skills",
 	ComponentTaskSkills:   "--task-skills",
 }
 

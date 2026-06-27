@@ -23,7 +23,7 @@ const (
 	// ComponentPaneSkill is the opt-in pane skill that lets the agent drive
 	// tmux panes. Behavior injection, never installed by the bare integrate
 	// path; it returns behind an explicit opt-in in a later slice.
-	ComponentPaneSkill ComponentID = "pane-skill"
+	ComponentPaneSkill ComponentID = "pane-skills"
 
 	// ComponentTaskSkills is the opt-in task planning skill set
 	// (grill-with-docs, grill-consolidate, to-prd, to-tasks).

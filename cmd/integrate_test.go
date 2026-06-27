@@ -1803,7 +1803,7 @@ func seedBaselineComponents(t *testing.T, fs *fakeFS, home, agent string) {
 // claudePaneRenderFile is the rendered SKILL.md path for claude's pane skill
 // under the fake FS data dir — the file refresh tests corrupt to force stale.
 func claudePaneRenderFile(home string) string {
-	return filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-tmux-pane", "SKILL.md")
+	return filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skills", "pop-tmux-pane", "SKILL.md")
 }
 
 func claudePaneLink(home string) string {
@@ -1876,8 +1876,8 @@ func TestUpdateExisting_AddsMissingBaselineComponent(t *testing.T) {
 	if _, ok := fs.symlinks[link]; !ok {
 		t.Fatalf("expected pane-skill symlink at %s", link)
 	}
-	if !strings.Contains(stdout.String(), "pane-skill") || !strings.Contains(stdout.String(), "added") {
-		t.Errorf("stdout = %q, want pane-skill added line", stdout.String())
+	if !strings.Contains(stdout.String(), "pop-tmux-pane") || !strings.Contains(stdout.String(), "added") {
+		t.Errorf("stdout = %q, want pop-tmux-pane added line", stdout.String())
 	}
 }
 
@@ -1911,8 +1911,8 @@ skills = ["tasks"]
 		t.Fatal("refresh must not install pane-skill omitted from merged baseline")
 	}
 	for _, o := range result.Outcomes {
-		if o.Agent == "claude" && o.Component == ComponentPaneSkill && o.Label != "skipped (opted out)" {
-			t.Errorf("pane-skill outcome = %q, want skipped (opted out)", o.Label)
+		if o.Agent == "claude" && o.Skill == "pop-tmux-pane" && o.Label != "skipped (opted out)" {
+			t.Errorf("pane skill outcome = %q, want skipped (opted out)", o.Label)
 		}
 	}
 }
@@ -1931,9 +1931,9 @@ func TestRefresh_SkipsConflictWithoutOverwrite(t *testing.T) {
 		t.Fatal("refresh must not install over an Integration conflict")
 	}
 	for _, o := range result.Outcomes {
-		if o.Component == ComponentPaneSkill {
+		if o.Skill == "pop-tmux-pane" {
 			if !strings.Contains(o.Label, "skipped (conflict") {
-				t.Errorf("pane-skill outcome = %q, want conflict skip", o.Label)
+				t.Errorf("pane skill outcome = %q, want conflict skip", o.Label)
 			}
 			if !strings.Contains(o.Label, "pop integrate claude --overwrite-conflicts") {
 				t.Errorf("conflict skip must name overwrite resolve command, got %q", o.Label)
@@ -1977,10 +1977,11 @@ func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
 	fs.dirs[conflict] = true
 
 	dry, real := fakeFactories("/h", fs)
-	outcome, warning := refreshComponent(dry, real, "claude", ComponentPaneSkill, baselineComponentSet(defaultIntegrationBaseline()))
-	updated := outcome != nil && (outcome.Label == "updated" || outcome.Label == "added")
-	if updated {
-		t.Errorf("expected no update on conflict")
+	outcomes, warning := refreshComponent(dry, real, "claude", ComponentPaneSkill, baselineComponentSet(defaultIntegrationBaseline()))
+	for _, o := range outcomes {
+		if o.Label == "updated" || o.Label == "added" {
+			t.Errorf("expected no update on conflict, got %v", outcomes)
+		}
 	}
 	if warning != "" {
 		t.Errorf("conflict must be silent, got warning %q", warning)
@@ -1997,12 +1998,12 @@ func TestRefreshComponent_OpencodeTaskSkillsAddsMissing(t *testing.T) {
 	installViaFake(t, fs, "/h", "opencode")
 	dry, real := fakeFactories("/h", fs)
 
-	outcome, warning := refreshComponent(dry, real, "opencode", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
+	outcomes, warning := refreshComponent(dry, real, "opencode", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
 	if warning != "" {
 		t.Fatalf("unexpected warning: %q", warning)
 	}
-	if outcome == nil || outcome.Label != "added" {
-		t.Fatalf("expected added outcome, got %v", outcome)
+	if !integrateOutcomesInclude(outcomes, "pop-grill-with-docs", "added") {
+		t.Fatalf("expected pop-grill-with-docs added outcome, got %v", outcomes)
 	}
 	grillDest := filepath.Join("/h", ".config", "opencode", "skills", "pop-grill-with-docs")
 	if fs.symlinks[grillDest] == "" {
@@ -2020,9 +2021,9 @@ func TestRefreshComponent_SkipsUnknownComponentSilently(t *testing.T) {
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)
 
-	outcome, warning := refreshComponent(dry, real, "opencode", ComponentID("bogus"), baselineComponentSet(defaultIntegrationBaseline()))
-	if outcome != nil || warning != "" {
-		t.Errorf("unknown component: expected nil outcome and no warning, got outcome=%v warning=%q", outcome, warning)
+	outcomes, warning := refreshComponent(dry, real, "opencode", ComponentID("bogus"), baselineComponentSet(defaultIntegrationBaseline()))
+	if len(outcomes) != 0 || warning != "" {
+		t.Errorf("unknown component: expected no outcomes and no warning, got outcomes=%v warning=%q", outcomes, warning)
 	}
 }
 
@@ -2050,7 +2051,7 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 	if fs.dirs[link] {
 		t.Errorf("copy-mode directory not removed during migration: %s", link)
 	}
-	target := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-tmux-pane")
+	target := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skills", "pop-tmux-pane")
 	if fs.symlinks[link] != target {
 		t.Errorf("expected migration to symlink %q -> %q, got %q", link, target, fs.symlinks[link])
 	}
@@ -2078,8 +2079,8 @@ func TestUpdateExisting_RefreshesFileComponentPerAgent(t *testing.T) {
 	if err := runIntegrateUpdateExistingWith("rev-fc4", dry, real, &stdout, &stderr, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "claude") || !strings.Contains(stdout.String(), "pane-skill") || !strings.Contains(stdout.String(), "updated") {
-		t.Errorf("stdout = %q, want a line containing claude, pane-skill, updated", stdout.String())
+	if !strings.Contains(stdout.String(), "claude") || !strings.Contains(stdout.String(), "pop-tmux-pane") || !strings.Contains(stdout.String(), "updated") {
+		t.Errorf("stdout = %q, want claude pop-tmux-pane updated line", stdout.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("expected no warnings, got %q", stderr.String())
@@ -2443,8 +2444,8 @@ func TestExplicitInstall_OutputAdded(t *testing.T) {
 		t.Errorf("expected 'status-wiring  added' line, got %q", got)
 	}
 	// pane-skill and task-skills are supported but not requested → "skipped (opted out)"
-	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (opted out)") {
-		t.Errorf("expected 'pane-skill  skipped (opted out)' line, got %q", got)
+	if !strings.Contains(got, "pop-tmux-pane") || !strings.Contains(got, "skipped (opted out)") {
+		t.Errorf("expected pop-tmux-pane skipped (opted out) line, got %q", got)
 	}
 }
 
@@ -2486,11 +2487,11 @@ func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
 	if !strings.Contains(got, "status-wiring") {
 		t.Errorf("expected status-wiring line, got %q", got)
 	}
-	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (opted out)") {
-		t.Errorf("expected opted-out pane-skill for codex, got %q", got)
+	if !strings.Contains(got, "pop-tmux-pane") || !strings.Contains(got, "skipped (opted out)") {
+		t.Errorf("expected opted-out pop-tmux-pane for codex, got %q", got)
 	}
-	if !strings.Contains(got, "task-skills") {
-		t.Errorf("expected opted-out task-skills for codex, got %q", got)
+	if !strings.Contains(got, "pop-grill-with-docs") || !strings.Contains(got, "skipped (opted out)") {
+		t.Errorf("expected opted-out pop-grill-with-docs for codex, got %q", got)
 	}
 
 	// claude supports pane-skill and task-skills — not selecting them shows opted-out.
@@ -2501,8 +2502,8 @@ func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got2 := out.String()
-	if !strings.Contains(got2, "pane-skill") || !strings.Contains(got2, "skipped (opted out)") {
-		t.Errorf("expected 'pane-skill  skipped (opted out)' for claude, got %q", got2)
+	if !strings.Contains(got2, "pop-tmux-pane") || !strings.Contains(got2, "skipped (opted out)") {
+		t.Errorf("expected pop-tmux-pane skipped (opted out) for claude, got %q", got2)
 	}
 }
 
@@ -2523,8 +2524,8 @@ func TestExplicitInstall_OutputSkippedConflict(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (conflict") {
-		t.Errorf("expected 'pane-skill  skipped (conflict' line, got %q", got)
+	if !strings.Contains(got, "pop-tmux-pane") || !strings.Contains(got, "skipped (conflict") {
+		t.Errorf("expected pop-tmux-pane skipped (conflict line, got %q", got)
 	}
 	// The conflict path should appear in the output.
 	if !strings.Contains(got, conflictPath) {
@@ -2635,8 +2636,8 @@ skills = ["tasks"]
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := stdoutVerbose.String()
-	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (opted out)") {
-		t.Errorf("with verbose, expected pane-skill opted-out line, got %q", got)
+	if !strings.Contains(got, "pop-tmux-pane") || !strings.Contains(got, "skipped (opted out)") {
+		t.Errorf("with verbose, expected pop-tmux-pane opted-out line, got %q", got)
 	}
 }
 
@@ -2661,8 +2662,8 @@ func TestUpdateExisting_OutputSkippedConflict(t *testing.T) {
 	}
 
 	got := stdout.String()
-	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (conflict") {
-		t.Errorf("expected 'pane-skill  skipped (conflict' line, got %q", got)
+	if !strings.Contains(got, "pop-tmux-pane") || !strings.Contains(got, "skipped (conflict") {
+		t.Errorf("expected pop-tmux-pane skipped (conflict line, got %q", got)
 	}
 	if !strings.Contains(got, "pop integrate claude --overwrite-conflicts") {
 		t.Errorf("refresh conflict skip must name the overwrite resolve command, got %q", got)
@@ -2745,8 +2746,8 @@ func TestOptOutRemoval_PaneSkill_RemovesInstalled(t *testing.T) {
 
 	// Output must contain "removed (opted out)" for pane-skill.
 	got := out.String()
-	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "removed (opted out)") {
-		t.Errorf("expected 'pane-skill  removed (opted out)' line, got %q", got)
+	if !strings.Contains(got, "pop-tmux-pane") || !strings.Contains(got, "removed (opted out)") {
+		t.Errorf("expected pop-tmux-pane removed (opted out) line, got %q", got)
 	}
 }
 
@@ -2784,8 +2785,8 @@ func TestOptOutRemoval_TaskSkills_RemovesInstalled(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "task-skills") || !strings.Contains(got, "removed (opted out)") {
-		t.Errorf("expected 'task-skills  removed (opted out)' line, got %q", got)
+	if !strings.Contains(got, "pop-grill-with-docs") || !strings.Contains(got, "removed (opted out)") {
+		t.Errorf("expected task skill removed (opted out) line, got %q", got)
 	}
 }
 
@@ -2805,8 +2806,8 @@ func TestOptOutRemoval_NotInstalled_SkipsOptedOut(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (opted out)") {
-		t.Errorf("expected 'pane-skill  skipped (opted out)' when not installed, got %q", got)
+	if !strings.Contains(got, "pop-tmux-pane") || !strings.Contains(got, "skipped (opted out)") {
+		t.Errorf("expected pop-tmux-pane skipped (opted out) when not installed, got %q", got)
 	}
 	// Must not contain "removed".
 	if strings.Contains(got, "removed") {
@@ -3008,7 +3009,7 @@ skills = ["tasks"]
 
 	// Refresh must not have emitted a "removed" outcome — removal is not its job.
 	for _, o := range result.Outcomes {
-		if o.Component == ComponentPaneSkill && strings.Contains(o.Label, "removed") {
+		if o.Skill == "pop-tmux-pane" && strings.Contains(o.Label, "removed") {
 			t.Errorf("refresh must not remove components, got outcome: %+v", o)
 		}
 	}
@@ -3045,8 +3046,8 @@ func TestOverwriteConflicts_PromptYes(t *testing.T) {
 	if !strings.Contains(got, "OVERWRITE: destroyed "+conflictPath) {
 		t.Errorf("expected loud overwrite report, got %q", got)
 	}
-	if !strings.Contains(got, "overwritten (not owned by pop at "+conflictPath+")") {
-		t.Errorf("expected overwritten outcome, got %q", got)
+	if !strings.Contains(got, "pop-tmux-pane") || !strings.Contains(got, "overwritten (not owned by pop at "+conflictPath+")") {
+		t.Errorf("expected pop-tmux-pane overwritten outcome, got %q", got)
 	}
 	if fs.dirs[conflictPath] {
 		t.Errorf("conflict entry must be hard-deleted")

@@ -33,7 +33,7 @@ func reconcileFactories(home string, fs *fakeFS, prefix *string, logs *[]string)
 // on-disk shape left behind by a prior binary before the base rename to
 // `tmux-pane`, which the current sources can no longer render.
 func seedOldNamePaneSkill(fs *fakeFS, home, oldName string) (link string) {
-	renderRoot := filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skill")
+	renderRoot := filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skills")
 	renderDir := filepath.Join(renderRoot, oldName)
 	fs.dirs[renderDir] = true
 	fs.files[filepath.Join(renderDir, "SKILL.md")] =
@@ -147,15 +147,18 @@ func TestUpdateExisting_AppliesSkillPrefixChange(t *testing.T) {
 	}
 
 	bareLink := filepath.Join("/h", ".claude", "skills", "tmux-pane")
-	bareTarget := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "tmux-pane")
+	bareTarget := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skills", "tmux-pane")
 	if fs.symlinks[bareLink] != bareTarget {
 		t.Fatalf("bare name not linked: %q -> %q (want -> %q)", bareLink, fs.symlinks[bareLink], bareTarget)
 	}
 	if _, ok := fs.symlinks[popLink]; ok {
 		t.Fatalf("old pop- link not pruned: %s still -> %q", popLink, fs.symlinks[popLink])
 	}
-	if !bytes.Contains(out.Bytes(), []byte("updated")) {
-		t.Fatalf("expected update outcome for claude, got %q", out.String())
+	if !bytes.Contains(out.Bytes(), []byte("pop-tmux-pane  removed (stale)")) {
+		t.Fatalf("expected stale removal outcome, got %q", out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("tmux-pane  added")) && !bytes.Contains(out.Bytes(), []byte("tmux-pane  updated")) {
+		t.Fatalf("expected tmux-pane install outcome, got %q", out.String())
 	}
 	// New paths log per slice 01: the resolved-name divergence and the prune.
 	if !containsSubstr(logs, "resolved-name divergence") {
@@ -184,7 +187,7 @@ func TestEnsureIntegrations_MigratesBaseRename(t *testing.T) {
 	}
 
 	newLink := claudePaneLink("/h") // pop-tmux-pane
-	newTarget := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-tmux-pane")
+	newTarget := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skills", "pop-tmux-pane")
 	if fs.symlinks[newLink] != newTarget {
 		t.Fatalf("renamed name not linked: %q -> %q (want -> %q)", newLink, fs.symlinks[newLink], newTarget)
 	}
@@ -231,7 +234,7 @@ func TestReconcile_SkipsUnownedConflictOnPrefixChange(t *testing.T) {
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude") // pop-tmux-pane
 	seedFileComponent(t, fs, "/h", ComponentTaskSkills, "claude")
 	popLink := claudePaneLink("/h")
-	popTarget := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-tmux-pane")
+	popTarget := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skills", "pop-tmux-pane")
 
 	// A user's own skill at the resolved bare name.
 	bareDir := filepath.Join("/h", ".claude", "skills", "tmux-pane")
@@ -257,8 +260,8 @@ func TestReconcile_SkipsUnownedConflictOnPrefixChange(t *testing.T) {
 	}
 	// pane-skill not reported as updated/added (conflict-blocked).
 	for _, o := range result.Outcomes {
-		if o.Component == ComponentPaneSkill && (o.Label == "updated" || o.Label == "added") {
-			t.Fatalf("pane-skill must not be updated when blocked by unowned bare-name conflict, got %+v", o)
+		if o.Skill == "pop-tmux-pane" && (o.Label == "updated" || o.Label == "added") {
+			t.Fatalf("pane skill must not be updated when blocked by unowned bare-name conflict, got %+v", o)
 		}
 	}
 }

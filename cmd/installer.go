@@ -44,12 +44,24 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		d.logf("installFileComponent: agent=%s id=%s prefix=%q agentDir=%s renderRoot=%s", agent, id, prefix, agentDir, renderRoot)
 	}
 
+	d.prunedStale = nil
+
 	for _, p := range legacyArtifacts(home, agent, id) {
 		if d.logf != nil {
 			d.logf("installFileComponent: removing legacy artifact %s", p)
 		}
 		if err := d.removeAll(p); err != nil {
 			return fmt.Errorf("failed to remove legacy artifact %s: %w", p, err)
+		}
+	}
+
+	for _, legacyRoot := range legacyComponentIDs(id) {
+		legacyRender := filepath.Join(integrationsRoot, agent, legacyRoot)
+		if d.logf != nil {
+			d.logf("installFileComponent: clearing legacy render root %s", legacyRender)
+		}
+		if err := d.removeAll(legacyRender); err != nil {
+			return fmt.Errorf("failed to clean legacy %s: %w", legacyRender, err)
 		}
 	}
 
@@ -129,7 +141,7 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		}
 	}
 
-	if err := pruneStaleAgentEntries(d, agentDir, renderRoot, id, agent, topLevel); err != nil {
+	if err := pruneStaleAgentEntries(d, agentDir, renderRoot, id, agent, topLevel, prefix); err != nil {
 		return err
 	}
 
@@ -141,7 +153,7 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 // pop-owned entry left at the agent location that this component no longer
 // renders is stale — it was installed under a different skills_prefix — and is
 // removed.
-func pruneStaleAgentEntries(d *integrateDeps, agentDir, renderRoot string, id ComponentID, agent string, keep map[string]bool) error {
+func pruneStaleAgentEntries(d *integrateDeps, agentDir, renderRoot string, id ComponentID, agent string, keep map[string]bool, prefix string) error {
 	if d.readDirNames == nil {
 		return nil
 	}
@@ -149,8 +161,12 @@ func pruneStaleAgentEntries(d *integrateDeps, agentDir, renderRoot string, id Co
 	if err != nil {
 		return fmt.Errorf("failed to list %s: %w", agentDir, err)
 	}
-	possible := componentPossibleNames(id, agent, config.DefaultSkillsPrefix, "")
-	cleanRenderRoot := filepath.Clean(renderRoot)
+	dataDir, err := d.dataDir()
+	if err != nil {
+		return err
+	}
+	renderRoots := fileComponentRenderRoots(dataDir, agent, id)
+	possible := componentPossibleNames(id, agent, config.DefaultSkillsPrefix, prefix, "")
 
 	for _, name := range names {
 		if keep[name] {
@@ -165,7 +181,7 @@ func pruneStaleAgentEntries(d *integrateDeps, agentDir, renderRoot string, id Co
 			return fmt.Errorf("failed to stat %s: %w", dest, err)
 		}
 
-		if !componentOwnsAgentEntry(d, name, dest, mode, cleanRenderRoot, possible) {
+		if !componentOwnsAgentEntry(d, name, dest, mode, renderRoots, possible) {
 			continue
 		}
 		if d.logf != nil {
@@ -174,9 +190,7 @@ func pruneStaleAgentEntries(d *integrateDeps, agentDir, renderRoot string, id Co
 		if err := d.removeAll(dest); err != nil {
 			return fmt.Errorf("failed to remove stale entry %s: %w", dest, err)
 		}
-		if d.stdout != nil {
-			fmt.Fprintf(d.stdout, "  removed stale %s\n", dest)
-		}
+		d.prunedStale = append(d.prunedStale, name)
 	}
 	return nil
 }
@@ -195,7 +209,7 @@ func componentPossibleNames(id ComponentID, agent string, prefixes ...string) ma
 	return names
 }
 
-func componentOwnsAgentEntry(d *integrateDeps, name, dest string, mode os.FileMode, cleanRenderRoot string, possible map[string]bool) bool {
+func componentOwnsAgentEntry(d *integrateDeps, name, dest string, mode os.FileMode, renderRoots []string, possible map[string]bool) bool {
 	switch {
 	case mode&os.ModeSymlink != 0:
 		target, err := d.readlink(dest)
@@ -205,8 +219,7 @@ func componentOwnsAgentEntry(d *integrateDeps, name, dest string, mode os.FileMo
 		if !filepath.IsAbs(target) {
 			target = filepath.Join(filepath.Dir(dest), target)
 		}
-		target = filepath.Clean(target)
-		return target == cleanRenderRoot || strings.HasPrefix(target, cleanRenderRoot+string(filepath.Separator))
+		return symlinkUnderRenderRoot(target, renderRoots)
 	case possible[name]:
 		return ownedByMarker(d, dest, mode)
 	default:
@@ -222,7 +235,6 @@ func fileComponentInstalledNames(d *integrateDeps, home string, id ComponentID, 
 	if err != nil {
 		return nil, err
 	}
-	renderRoot := filepath.Join(dataDir, "integrations", agent, string(id))
 	agentDir, err := agentSkillDir(home, agent, id)
 	if err != nil {
 		return nil, err
@@ -235,8 +247,9 @@ func fileComponentInstalledNames(d *integrateDeps, home string, id ComponentID, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list %s: %w", agentDir, err)
 	}
-	possible := componentPossibleNames(id, agent, config.DefaultSkillsPrefix, "")
-	cleanRenderRoot := filepath.Clean(renderRoot)
+	renderRoots := fileComponentRenderRoots(dataDir, agent, id)
+	prefix := d.resolveSkillsPrefix()
+	possible := componentPossibleNames(id, agent, config.DefaultSkillsPrefix, prefix, "")
 	for _, name := range names {
 		dest := filepath.Join(agentDir, name)
 		mode, err := d.lstatMode(dest)
@@ -246,7 +259,7 @@ func fileComponentInstalledNames(d *integrateDeps, home string, id ComponentID, 
 			}
 			return nil, fmt.Errorf("failed to stat %s: %w", dest, err)
 		}
-		if componentOwnsAgentEntry(d, name, dest, mode, cleanRenderRoot, possible) {
+		if componentOwnsAgentEntry(d, name, dest, mode, renderRoots, possible) {
 			out[name] = true
 		}
 	}

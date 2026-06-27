@@ -12,7 +12,7 @@ import (
 func TestCatalog_StableIdentifiers(t *testing.T) {
 	want := map[ComponentID]bool{
 		"status-wiring": true,
-		"pane-skill":    true,
+		"pane-skills":    true,
 		"task-skills":   true,
 	}
 
@@ -39,8 +39,8 @@ func TestCatalog_StableIdentifiers(t *testing.T) {
 	if ComponentStatusWiring != "status-wiring" {
 		t.Errorf("ComponentStatusWiring = %q, want status-wiring", ComponentStatusWiring)
 	}
-	if ComponentPaneSkill != "pane-skill" {
-		t.Errorf("ComponentPaneSkill = %q, want pane-skill", ComponentPaneSkill)
+	if ComponentPaneSkill != "pane-skills" {
+		t.Errorf("ComponentPaneSkill = %q, want pane-skills", ComponentPaneSkill)
 	}
 	if ComponentTaskSkills != "task-skills" {
 		t.Errorf("ComponentTaskSkills = %q, want task-skills", ComponentTaskSkills)

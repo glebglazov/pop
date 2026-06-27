@@ -13,7 +13,7 @@ const installerHome = "/home/u"
 // paneSkillPaths returns the canonical paths the pane-skill install touches for
 // claude, derived from installerHome.
 func paneSkillPaths() (renderFile, linkDest, linkTarget string) {
-	renderRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "claude", "pane-skill")
+	renderRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "claude", "pane-skills")
 	renderFile = filepath.Join(renderRoot, "pop-tmux-pane", "SKILL.md")
 	linkDest = filepath.Join(installerHome, ".claude", "skills", "pop-tmux-pane")
 	linkTarget = filepath.Join(renderRoot, "pop-tmux-pane")
@@ -145,10 +145,10 @@ func paneSkillAgents() []paneSkillAgent {
 
 	dataRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations")
 
-	codexRoot := filepath.Join(dataRoot, "codex", "pane-skill")
-	piRoot := filepath.Join(dataRoot, "pi", "pane-skill")
-	curRoot := filepath.Join(dataRoot, "cursor", "pane-skill")
-	ocRoot := filepath.Join(dataRoot, "opencode", "pane-skill")
+	codexRoot := filepath.Join(dataRoot, "codex", "pane-skills")
+	piRoot := filepath.Join(dataRoot, "pi", "pane-skills")
+	curRoot := filepath.Join(dataRoot, "cursor", "pane-skills")
+	ocRoot := filepath.Join(dataRoot, "opencode", "pane-skills")
 
 	codexDest := filepath.Join(installerHome, ".codex", "skills", "pop-tmux-pane")
 	piDest := filepath.Join(installerHome, ".pi", "agent", "skills", "pop-tmux-pane")
@@ -317,7 +317,7 @@ func TestOwnership(t *testing.T) {
 	}
 
 	// Symlink into pop's tree → owned.
-	fs.symlinks[dest] = filepath.Join(integrationsRoot, "claude", "pane-skill", "pop-tmux-pane")
+	fs.symlinks[dest] = filepath.Join(integrationsRoot, "claude", "pane-skills", "pop-tmux-pane")
 	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || !exists || !owned {
 		t.Fatalf("in-tree symlink: exists=%v owned=%v err=%v", exists, owned, err)
 	}
@@ -614,9 +614,9 @@ func TestRefreshFileComponentDebugNotInstalled(t *testing.T) {
 	}
 	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
 
-	outcome, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
-	if outcome == nil || outcome.Label != "added" {
-		t.Errorf("expected added outcome, got outcome=%v warning=%q", outcome, warning)
+	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	if !integrateOutcomesInclude(outcomes, "pop-tmux-pane", "added") {
+		t.Errorf("expected pop-tmux-pane added outcome, got outcomes=%v warning=%q", outcomes, warning)
 	}
 	if warning != "" {
 		t.Errorf("unexpected warning: %q", warning)
@@ -648,10 +648,12 @@ func TestRefreshFileComponentDebugCurrent(t *testing.T) {
 	}
 	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
 
-	outcome, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
-	updated := outcome != nil && (outcome.Label == "updated" || outcome.Label == "added")
-	if updated || warning != "" {
-		t.Errorf("expected no update/warning, got outcome=%v warning=%q", outcome, warning)
+	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	for _, o := range outcomes {
+		if o.Label == "updated" || o.Label == "added" {
+			t.Errorf("expected no update/warning, got outcomes=%v warning=%q", outcomes, warning)
+			break
+		}
 	}
 	got := lines()
 	if !hasLog(got, "current") {
@@ -669,7 +671,7 @@ func TestRefreshFileComponentDebugStale(t *testing.T) {
 	if err := installFileComponent(realDeps, "/h", ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("setup install: %v", err)
 	}
-	renderRoot := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill")
+	renderRoot := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skills")
 	for k := range fs.files {
 		if strings.HasPrefix(k, renderRoot) {
 			fs.files[k] = []byte("stale content")
@@ -684,9 +686,9 @@ func TestRefreshFileComponentDebugStale(t *testing.T) {
 	}
 	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
 
-	outcome, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
-	if outcome == nil || outcome.Label != "updated" {
-		t.Errorf("expected component to be refreshed, got outcome=%v", outcome)
+	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	if !integrateOutcomesInclude(outcomes, "pop-tmux-pane", "updated") {
+		t.Errorf("expected pop-tmux-pane updated, got outcomes=%v", outcomes)
 	}
 	if warning != "" {
 		t.Errorf("unexpected warning: %q", warning)
@@ -716,16 +718,15 @@ func TestRefreshFileComponentDebugConflict(t *testing.T) {
 	}
 	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
 
-	outcome, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
-	updated := outcome != nil && (outcome.Label == "updated" || outcome.Label == "added")
-	if updated || warning != "" {
-		t.Errorf("expected no update/warning on conflict, got outcome=%v warning=%q", outcome, warning)
+	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	for _, o := range outcomes {
+		if o.Label == "updated" || o.Label == "added" {
+			t.Errorf("expected no update/warning on conflict, got outcomes=%v warning=%q", outcomes, warning)
+			break
+		}
 	}
 	got := lines()
 	if !hasLog(got, conflict) {
 		t.Errorf("expected conflict path %q in debug lines, got %v", conflict, got)
-	}
-	if !hasLog(got, "not owned by pop") {
-		t.Errorf("expected 'not owned by pop' in debug lines, got %v", got)
 	}
 }

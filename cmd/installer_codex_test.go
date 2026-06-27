@@ -8,7 +8,7 @@ import (
 )
 
 func codexPaneSkillPaths() (renderFile, linkDest, linkTarget string) {
-	renderRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "codex", "pane-skill")
+	renderRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "codex", "pane-skills")
 	renderFile = filepath.Join(renderRoot, "pop-tmux-pane", "SKILL.md")
 	linkDest = filepath.Join(installerHome, ".codex", "skills", "pop-tmux-pane")
 	linkTarget = filepath.Join(renderRoot, "pop-tmux-pane")
@@ -49,9 +49,9 @@ func TestRefreshCodexPaneSkillStale(t *testing.T) {
 	dry := func() *integrateDeps { return withDryRun(fakeDeps(installerHome, fs, nil)) }
 	real := func() *integrateDeps { return fakeDeps(installerHome, fs, nil) }
 
-	outcome, warning := refreshFileComponent(dry, real, "codex", ComponentPaneSkill)
-	if outcome == nil || outcome.Label != "updated" {
-		t.Fatalf("expected updated outcome, got outcome=%v warning=%q", outcome, warning)
+	outcomes, warning := refreshFileComponent(dry, real, "codex", ComponentPaneSkill)
+	if !integrateOutcomesInclude(outcomes, "pop-tmux-pane", "updated") {
+		t.Fatalf("expected pop-tmux-pane updated outcome, got outcomes=%v warning=%q", outcomes, warning)
 	}
 	if warning != "" {
 		t.Fatalf("unexpected warning: %q", warning)

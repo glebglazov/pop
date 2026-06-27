@@ -18,7 +18,7 @@ func withPrefix(d *integrateDeps, prefix string) *integrateDeps {
 
 // paneRenderRoot / paneLink helpers, parameterized by the resolved skill name.
 func paneRenderRoot() string {
-	return filepath.Join(installerHome, ".local", "share", "pop", "integrations", "claude", "pane-skill")
+	return filepath.Join(installerHome, ".local", "share", "pop", "integrations", "claude", "pane-skills")
 }
 
 // TestInstallFileComponentDefaultPrefixParity pins that a deps with no

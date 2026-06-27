@@ -24,104 +24,35 @@ var piExtensionFile []byte
 //go:embed extensions/opencode/pop-status-sync.ts
 var opencodeExtensionFile []byte
 
-// componentOutcome records what happened to one (agent, component) pair during
-// an integrate run. It drives the human-readable output: one line per pair,
-// grouped by agent order, with the reason stated.
-type componentOutcome struct {
-	Agent     string
-	Component ComponentID
-	Label     string // "added" | "updated" | "already current" | "skipped (opted out)" | "skipped (conflict at <path>)" | "overwritten (not owned by pop at <path>)"
-}
-
-// verboseOnly returns true when this outcome should be suppressed unless the
-// --verbose flag is on. "already current" is always a no-op. "skipped (opted
-// out)" is noisy on the update-existing path (many agent×component pairs) so it
-// is suppressed there too; it is always shown on the explicit install path
-// (bounded list, informative about what was left out).
-func (o componentOutcome) verboseOnly(updateExistingPath bool) bool {
-	switch o.Label {
-	case "already current":
-		return true
-	case "skipped (opted out)":
-		return updateExistingPath
-	default:
-		return false
-	}
-}
-
-// printComponentOutcomes writes one line per outcome to out, filtered by
-// verbose and path. "already current" is always suppressed without verbose.
-// "skipped (opted out)" is suppressed without verbose on the update-existing
-// path. When all outcomes are suppressed a "nothing to do" summary is printed.
-func printComponentOutcomes(out io.Writer, outcomes []componentOutcome, verbose, explicitPath bool) {
-	if out == nil {
-		return
-	}
-	printed := 0
-	for _, o := range outcomes {
-		if o.verboseOnly(!explicitPath) && !verbose {
-			continue
-		}
-		fmt.Fprintf(out, "  %s  %s  %s\n", o.Agent, o.Component, o.Label)
-		printed++
-	}
-	if printed == 0 {
-		fmt.Fprintln(out, "nothing to do")
-	}
-}
-
-// installLabel maps pre-install state to the outcome label used in output.
-func installLabel(isNew, isUpdate bool) string {
-	switch {
-	case isNew:
-		return "added"
-	case isUpdate:
-		return "updated"
-	default:
-		return "already current"
-	}
-}
-
-// installComponentCollectOutcome installs one component for agent and returns
-// the outcome (what happened and why). The install functions' own stdout output
-// is suppressed so callers can print a single outcome line instead.
-func installComponentCollectOutcome(d *integrateDeps, home, agent string, comp integrationComponent) (componentOutcome, error) {
+// installComponentCollectOutcomes installs one component for agent and returns
+// per-skill (or status-wiring) outcome lines.
+func installComponentCollectOutcomes(d *integrateDeps, home, agent string, comp integrationComponent) ([]integrateOutcome, error) {
 	id := comp.id
 
 	if comp.install != nil {
-		// Status-wiring style: dry-run first to detect add vs update vs current.
 		dryD := withDryRun(d)
 		if err := comp.install(dryD, home, agent); err != nil {
-			return componentOutcome{}, err
+			return nil, err
 		}
-		// Real install with output suppressed — outcome line is printed by caller.
 		quietD := *d
 		quietD.stdout = nil
 		if err := comp.install(&quietD, home, agent); err != nil {
-			return componentOutcome{}, err
+			return nil, err
 		}
 		label := installLabel(!dryD.installed, dryD.installed && dryD.changed)
-		return componentOutcome{Agent: agent, Component: id, Label: label}, nil
+		return []integrateOutcome{statusWiringOutcome(agent, label)}, nil
 	}
 
-	// File-based component: check conflict and pre-install state before installing.
-	conflictPath, conflict, err := componentConflict(d, home, id, agent)
-	if err != nil {
-		return componentOutcome{}, fmt.Errorf("conflict check for %s/%s: %w", agent, id, err)
-	}
-	if conflict && !d.overwriteConflicts {
-		return componentOutcome{Agent: agent, Component: id, Label: conflictSkipLabel(agent, conflictPath)}, nil
-	}
+	prefix := d.resolveSkillsPrefix()
 
-	installedNames, err := fileComponentInstalledNames(d, home, id, agent)
+	installedBefore, err := fileComponentInstalledNames(d, home, id, agent)
 	if err != nil {
-		return componentOutcome{}, fmt.Errorf("installed check for %s/%s: %w", agent, id, err)
+		return nil, fmt.Errorf("installed check for %s/%s: %w", agent, id, err)
 	}
-	installed := len(installedNames) > 0
-	stale := true
-	if installed {
-		if stale, err = fileComponentStaleResolved(d, home, id, agent, installedNames); err != nil {
-			return componentOutcome{}, fmt.Errorf("stale check for %s/%s: %w", agent, id, err)
+	staleBefore := true
+	if len(installedBefore) > 0 {
+		if staleBefore, err = fileComponentStaleResolved(d, home, id, agent, installedBefore); err != nil {
+			return nil, fmt.Errorf("stale check for %s/%s: %w", agent, id, err)
 		}
 	}
 
@@ -131,22 +62,19 @@ func installComponentCollectOutcome(d *integrateDeps, home, agent string, comp i
 		installD.stdout = nil
 	}
 	if err := installFileComponent(&installD, home, id, agent); err != nil {
-		return componentOutcome{}, err
+		return nil, err
 	}
-	if len(installD.overwrotePaths) > 0 {
-		return componentOutcome{
-			Agent:     agent,
-			Component: id,
-			Label:     "overwritten (not owned by pop at " + installD.overwrotePaths[0] + ")",
-		}, nil
+
+	overwritten := overwrittenSkillPaths(prefix, id, agent, installD.overwrotePaths)
+	postConflict, err := preInstallSkillConflicts(&installD, home, agent, id, prefix)
+	if err != nil {
+		return nil, fmt.Errorf("conflict check for %s/%s: %w", agent, id, err)
 	}
-	if conflictPath, stillConflict, err := componentConflict(&installD, home, id, agent); err != nil {
-		return componentOutcome{}, fmt.Errorf("conflict check for %s/%s: %w", agent, id, err)
-	} else if stillConflict {
-		return componentOutcome{Agent: agent, Component: id, Label: conflictSkipLabel(agent, conflictPath)}, nil
-	}
-	label := installLabel(!installed, installed && stale)
-	return componentOutcome{Agent: agent, Component: id, Label: label}, nil
+
+	return fileComponentOutcomesInCatalogOrder(
+		agent, id, prefix, installedBefore, staleBefore, installD.prunedStale,
+		nil, postConflict, overwritten,
+	), nil
 }
 
 // conflictSkipLabel formats the reasoned outcome for an Integration conflict
@@ -238,6 +166,10 @@ type integrateDeps struct {
 	// overwrotePaths records agent-location paths hard-deleted during an
 	// overwrite-conflicts run; used for outcome labelling.
 	overwrotePaths []string
+
+	// prunedStale records resolved install names removed during the latest
+	// file-based install; drives removed (stale) outcome lines.
+	prunedStale []string
 }
 
 func defaultIntegrateDeps() *integrateDeps {
@@ -428,13 +360,14 @@ component in the merged baseline — no prompts, TTY or not. Re-running
 re-asserts the full merged baseline (bare integrate clears runtime
 overrides).
 
-  --no-pane-skill
+  --no-pane-skills
                 Remove the pane skill if it is currently installed (pop-owned
                 artifacts only) and record the opt-out in config.runtime.toml.
 
   --no-task-skills
-                Remove the task planning skills if currently installed and
-                record the opt-out. Same semantics as --no-pane-skill.
+                Remove the task planning skills if currently installed
+                (pop-owned only) and record the opt-out. Same semantics as
+                --no-pane-skills.
 
   --overwrite-conflicts
                 On install, prompt to destroy unowned entries that block
@@ -494,7 +427,7 @@ var integrateRemoveCmd = &cobra.Command{
 
 With no component identifiers, every pop component currently installed for the
 agent is removed. With identifiers, exactly that set is removed. Valid
-identifiers: status-wiring, pane-skill, task-skills.
+identifiers: status-wiring, pane-skills, task-skills.
 
 Removal only ever deletes artifacts pop owns: status wiring strips pop's hook
 entries while preserving unrelated hooks (claude, codex, cursor) or deletes the
@@ -524,7 +457,7 @@ func init() {
 		"Install the pane skill (lets the agent drive tmux panes) alongside the status wiring")
 	integrateCmd.Flags().BoolVar(&integrateTaskSkills, "task-skills", false,
 		"Install the task planning skills (grill-with-docs, to-prd, to-tasks) alongside the status wiring")
-	integrateCmd.Flags().BoolVar(&integrateNoPaneSkill, "no-pane-skill", false,
+	integrateCmd.Flags().BoolVar(&integrateNoPaneSkill, "no-pane-skills", false,
 		"Remove the pane skill if installed (pop-owned only) and record the opt-out")
 	integrateCmd.Flags().BoolVar(&integrateNoTaskSkills, "no-task-skills", false,
 		"Remove the task planning skills if installed (pop-owned only) and record the opt-out")
@@ -720,59 +653,40 @@ func runIntegrateComponents(d *integrateDeps, agent string, baseline []Component
 		installSet[id] = true
 	}
 
-	// Collect one outcome per supported (agent, component) pair.
-	var outcomes []componentOutcome
+	// Collect outcome lines per supported (agent, component) pair.
+	var outcomes []integrateOutcome
 	for _, comp := range integrationCatalog {
 		if !comp.supported(agent) {
-			continue // unsupported — skip silently (no line)
+			continue
 		}
 		if installSet[comp.id] {
-			outcome, err := installComponentCollectOutcome(d, home, agent, comp)
+			compOutcomes, err := installComponentCollectOutcomes(d, home, agent, comp)
 			if err != nil {
 				return err
 			}
-			outcomes = append(outcomes, outcome)
+			outcomes = append(outcomes, compOutcomes...)
 		} else if explicitOptOuts[comp.id] {
-			// Explicit --no-* opt-out: remove pop-owned artifacts if present,
-			// then record the outcome. No prompt — pop freely manages what it owns.
-			outcome, err := removeOptOutCollectOutcome(d, home, agent, comp.id)
+			compOutcomes, err := optOutRemoveOutcomes(d, home, agent, comp.id)
 			if err != nil {
 				return err
 			}
-			outcomes = append(outcomes, outcome)
-		} else {
-			outcomes = append(outcomes, componentOutcome{
-				Agent:     agent,
-				Component: comp.id,
-				Label:     "skipped (opted out)",
-			})
+			outcomes = append(outcomes, compOutcomes...)
+		} else if comp.id != ComponentStatusWiring {
+			compOutcomes, err := optOutSkipOutcomes(d, agent, comp.id)
+			if err != nil {
+				return err
+			}
+			outcomes = append(outcomes, compOutcomes...)
 		}
 	}
 
-	printComponentOutcomes(d.stdout, outcomes, verbose, true /* explicit path */)
+	printIntegrateOutcomes(d.stdout, outcomes, verbose, true /* explicit path */)
 	return nil
 }
 
-// removeOptOutCollectOutcome handles a component that was explicitly declined
-// via a --no-* flag. If the component is currently installed (pop-owned
-// artifacts present), it is removed without prompting and "removed (opted out)"
-// is returned. If it is not installed, "skipped (opted out)" is returned — the
-// opt-out is a no-op on a component that is already absent.
-func removeOptOutCollectOutcome(d *integrateDeps, home, agent string, id ComponentID) (componentOutcome, error) {
-	installed, err := componentInstalled(d, home, id, agent)
-	if err != nil {
-		return componentOutcome{}, fmt.Errorf("installed check for %s/%s: %w", agent, id, err)
-	}
-	if !installed {
-		return componentOutcome{Agent: agent, Component: id, Label: "skipped (opted out)"}, nil
-	}
-	// Component is installed — remove pop-owned artifacts; no prompt.
-	quietD := *d
-	quietD.stdout = nil
-	if err := removeComponent(&quietD, home, id, agent); err != nil {
-		return componentOutcome{}, fmt.Errorf("remove %s/%s: %w", agent, id, err)
-	}
-	return componentOutcome{Agent: agent, Component: id, Label: "removed (opted out)"}, nil
+// removeOptOutCollectOutcome is retained for tests that call it directly.
+func removeOptOutCollectOutcome(d *integrateDeps, home, agent string, id ComponentID) ([]integrateOutcome, error) {
+	return optOutRemoveOutcomes(d, home, agent, id)
 }
 
 // runIntegrateWith installs the status-wiring component for the given agent.
@@ -1298,7 +1212,7 @@ func ensureIntegrations() []string {
 // integrationUpdateResult reports what updateStaleIntegrations did during
 // one pass: per-component outcomes for CLI display and warnings to surface.
 type integrationUpdateResult struct {
-	Outcomes []componentOutcome
+	Outcomes []integrateOutcome
 	Warnings []string
 }
 
@@ -1336,14 +1250,16 @@ func updateStaleIntegrations(newDry, newReal func() *integrateDeps) integrationU
 
 		agentUpdated := false
 		for _, comp := range integrationCatalog {
-			outcome, warning := refreshComponent(newDry, newReal, agent, comp.id, baselineSet)
+			compOutcomes, warning := refreshComponent(newDry, newReal, agent, comp.id, baselineSet)
 			if warning != "" {
 				result.Warnings = append(result.Warnings, warning)
 			}
-			if outcome != nil {
-				result.Outcomes = append(result.Outcomes, *outcome)
-				if outcome.Label == "updated" || outcome.Label == "added" {
-					agentUpdated = true
+			if len(compOutcomes) > 0 {
+				result.Outcomes = append(result.Outcomes, compOutcomes...)
+				for _, o := range compOutcomes {
+					if o.Label == "updated" || o.Label == "added" {
+						agentUpdated = true
+					}
 				}
 			}
 		}
@@ -1378,20 +1294,29 @@ func agentIntegratedViaStatusWiring(newDry func() *integrateDeps, agent string) 
 // A component not supported by the agent is skipped silently (nil outcome, no
 // warning). Callers must only invoke this for agents already integrated via
 // status wiring.
-func refreshComponent(newDry, newReal func() *integrateDeps, agent string, id ComponentID, baselineSet map[ComponentID]bool) (outcome *componentOutcome, warning string) {
+func refreshComponent(newDry, newReal func() *integrateDeps, agent string, id ComponentID, baselineSet map[ComponentID]bool) ([]integrateOutcome, string) {
 	comp, ok := lookupComponent(id)
 	if !ok {
 		return nil, ""
 	}
 	if !comp.supported(agent) {
-		return nil, "" // not supported — skip silently, never a degraded install
+		return nil, ""
 	}
 	switch id {
 	case ComponentStatusWiring:
-		return refreshStatusWiring(newDry, newReal, agent)
+		outcome, warning := refreshStatusWiring(newDry, newReal, agent)
+		if outcome == nil {
+			return nil, warning
+		}
+		return []integrateOutcome{*outcome}, warning
 	default:
 		if !baselineSet[id] {
-			return &componentOutcome{Agent: agent, Component: id, Label: "skipped (opted out)"}, ""
+			outcomes, err := optOutSkipOutcomes(newReal(), agent, id)
+			if err != nil {
+				debug.Error("refreshComponent: opt-out outcomes %s/%s: %v", agent, id, err)
+				return nil, ""
+			}
+			return outcomes, ""
 		}
 		return refreshFileComponent(newDry, newReal, agent, id)
 	}
@@ -1401,7 +1326,7 @@ func refreshComponent(newDry, newReal func() *integrateDeps, agent string, id Co
 // agent. It dry-runs the install to learn changed state and, only when stale,
 // performs the real install. Warnings are returned solely for an agent
 // demonstrably installed but failing to check or update.
-func refreshStatusWiring(newDry, newReal func() *integrateDeps, agent string) (outcome *componentOutcome, warning string) {
+func refreshStatusWiring(newDry, newReal func() *integrateDeps, agent string) (*integrateOutcome, string) {
 	dryDeps := newDry()
 	if err := runIntegrateWith(dryDeps, agent); err != nil {
 		debug.Error("refreshStatusWiring: dry-run %s: %v", agent, err)
@@ -1414,16 +1339,18 @@ func refreshStatusWiring(newDry, newReal func() *integrateDeps, agent string) (o
 		return nil, ""
 	}
 	if !dryDeps.changed {
-		return &componentOutcome{Agent: agent, Component: ComponentStatusWiring, Label: "already current"}, ""
+		o := statusWiringOutcome(agent, "already current")
+		return &o, ""
 	}
 
 	realDeps := newReal()
-	realDeps.stdout = nil // refresh runs silently on success
+	realDeps.stdout = nil
 	if err := runIntegrateWith(realDeps, agent); err != nil {
 		debug.Error("refreshStatusWiring: update %s: %v", agent, err)
 		return nil, fmt.Sprintf("failed to update %s integration (see pop.log)", agent)
 	}
-	return &componentOutcome{Agent: agent, Component: ComponentStatusWiring, Label: "updated"}, ""
+	o := statusWiringOutcome(agent, "updated")
+	return &o, ""
 }
 
 // refreshFileComponent reconciles a baseline-listed file-based skill component
@@ -1438,30 +1365,32 @@ func refreshStatusWiring(newDry, newReal func() *integrateDeps, agent string) (o
 //
 // Warnings follow the status-wiring contract: only an installed component that
 // fails its staleness check or its re-install warns; everything else is silent.
-func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, id ComponentID) (outcome *componentOutcome, warning string) {
+func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, id ComponentID) ([]integrateOutcome, string) {
 	checkDeps := newDry()
 	home, err := checkDeps.userHomeDir()
 	if err != nil {
 		debug.Error("refreshFileComponent: home %s/%s: %v", agent, id, err)
-		return nil, "" // can't resolve home — treat as not actionable
+		return nil, ""
 	}
 
-	if conflictPath, conflict, err := componentConflict(checkDeps, home, id, agent); err != nil {
+	prefix := checkDeps.resolveSkillsPrefix()
+	preConflict, err := preInstallSkillConflicts(checkDeps, home, agent, id, prefix)
+	if err != nil {
 		debug.Error("refreshFileComponent: conflict check %s/%s: %v", agent, id, err)
 		return nil, ""
-	} else if conflict {
-		if checkDeps.logf != nil {
-			checkDeps.logf("refreshFileComponent: %s/%s skipped — conflict at %s (not owned by pop)", agent, id, conflictPath)
-		}
-		return &componentOutcome{Agent: agent, Component: id, Label: conflictSkipLabel(agent, conflictPath)}, ""
 	}
 
-	installedNames, err := fileComponentInstalledNames(checkDeps, home, id, agent)
+	installedBefore, err := fileComponentInstalledNames(checkDeps, home, id, agent)
 	if err != nil {
 		debug.Error("refreshFileComponent: installed check %s/%s: %v", agent, id, err)
 		return nil, ""
 	}
-	if len(installedNames) == 0 {
+	if len(preConflict) > 0 {
+		return fileComponentOutcomesInCatalogOrder(
+			agent, id, prefix, installedBefore, false, nil, preConflict, nil, nil,
+		), ""
+	}
+	if len(installedBefore) == 0 {
 		if checkDeps.logf != nil {
 			checkDeps.logf("refreshFileComponent: %s/%s not installed — adding", agent, id)
 		}
@@ -1471,26 +1400,30 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 			debug.Error("refreshFileComponent: add %s/%s: %v", agent, id, err)
 			return nil, fmt.Sprintf("failed to add %s %s integration (see pop.log)", agent, id)
 		}
-		return &componentOutcome{Agent: agent, Component: id, Label: "added"}, ""
+		return fileComponentOutcomesInCatalogOrder(
+			agent, id, prefix, nil, true, realDeps.prunedStale, preConflict, nil, nil,
+		), ""
 	}
 
-	stale, err := fileComponentStaleResolved(checkDeps, home, id, agent, installedNames)
+	staleBefore, err := fileComponentStaleResolved(checkDeps, home, id, agent, installedBefore)
 	if err != nil {
 		debug.Error("refreshFileComponent: stale check %s/%s: %v", agent, id, err)
 		return nil, fmt.Sprintf("failed to check %s %s integration: %v", agent, id, err)
 	}
-	if !stale {
+	if !staleBefore {
 		if checkDeps.logf != nil {
 			checkDeps.logf("refreshFileComponent: %s/%s installed and current — no-op", agent, id)
 		}
-		return &componentOutcome{Agent: agent, Component: id, Label: "already current"}, ""
+		return fileComponentOutcomesInCatalogOrder(
+			agent, id, prefix, installedBefore, false, nil, preConflict, nil, nil,
+		), ""
 	}
 
 	if checkDeps.logf != nil {
 		checkDeps.logf("refreshFileComponent: %s/%s stale — refreshing", agent, id)
 	}
 	realDeps := newReal()
-	realDeps.stdout = nil // refresh runs silently on success
+	realDeps.stdout = nil
 	if err := installFileComponent(realDeps, home, id, agent); err != nil {
 		debug.Error("refreshFileComponent: update %s/%s: %v", agent, id, err)
 		return nil, fmt.Sprintf("failed to update %s %s integration (see pop.log)", agent, id)
@@ -1498,7 +1431,14 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 	if checkDeps.logf != nil {
 		checkDeps.logf("refreshFileComponent: %s/%s refreshed", agent, id)
 	}
-	return &componentOutcome{Agent: agent, Component: id, Label: "updated"}, ""
+	postConflict, err := preInstallSkillConflicts(realDeps, home, agent, id, prefix)
+	if err != nil {
+		debug.Error("refreshFileComponent: post conflict check %s/%s: %v", agent, id, err)
+	}
+	return fileComponentOutcomesInCatalogOrder(
+		agent, id, prefix, installedBefore, true, realDeps.prunedStale,
+		nil, postConflict, nil,
+	), ""
 }
 
 // stampRevisionIfSuccess writes the given revision to state.json, but only
@@ -1584,7 +1524,7 @@ func runIntegrateUpdateExistingWith(
 ) error {
 	result := updateStaleIntegrations(newDry, newReal)
 
-	printComponentOutcomes(stdout, result.Outcomes, verbose, false /* update-existing path */)
+	printIntegrateOutcomes(stdout, result.Outcomes, verbose, false /* update-existing path */)
 
 	for _, w := range result.Warnings {
 		fmt.Fprintf(stderr, "⚠ %s\n", w)
