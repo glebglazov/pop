@@ -31,10 +31,6 @@ type fakeFS struct {
 	writeErr  map[string]error  // path → error to return from writeFile
 	mkdirErr  map[string]error
 	removeErr map[string]error
-	// optOuts stands in for state.json's per-agent Component opt-out set, so
-	// install/remove/refresh tests can seed and assert opt-outs without touching
-	// the real state.json. Keyed by lowercased agent name.
-	optOuts map[string]map[ComponentID]bool
 }
 
 func newFakeFS() *fakeFS {
@@ -46,33 +42,7 @@ func newFakeFS() *fakeFS {
 		writeErr:  map[string]error{},
 		mkdirErr:  map[string]error{},
 		removeErr: map[string]error{},
-		optOuts:   map[string]map[ComponentID]bool{},
 	}
-}
-
-// loadOptOut returns a copy of the agent's opt-out set (matching the production
-// seam, which never hands out the stored map for mutation).
-func (f *fakeFS) loadOptOut(agent string) map[ComponentID]bool {
-	out := map[ComponentID]bool{}
-	for id := range f.optOuts[strings.ToLower(agent)] {
-		out[id] = true
-	}
-	return out
-}
-
-// saveOptOut replaces the agent's opt-out set; an empty set clears the entry.
-func (f *fakeFS) saveOptOut(agent string, set map[ComponentID]bool) error {
-	agent = strings.ToLower(agent)
-	if len(set) == 0 {
-		delete(f.optOuts, agent)
-		return nil
-	}
-	copied := map[ComponentID]bool{}
-	for id := range set {
-		copied[id] = true
-	}
-	f.optOuts[agent] = copied
-	return nil
 }
 
 func (f *fakeFS) writeFile(path string, data []byte, _ os.FileMode) error {
@@ -140,42 +110,6 @@ func (f *fakeFS) readlink(link string) (string, error) {
 	return target, nil
 }
 
-// readDirNames lists the immediate child entry names under dir across the
-// files, dirs, and symlinks maps, sorted. A missing directory yields no entries
-// (matching osReadDirNames), so the stale-name prune is a no-op on a fresh
-// agent location.
-func (f *fakeFS) readDirNames(dir string) ([]string, error) {
-	prefix := dir + string(filepath.Separator)
-	set := map[string]bool{}
-	add := func(p string) {
-		if !strings.HasPrefix(p, prefix) {
-			return
-		}
-		rest := p[len(prefix):]
-		if i := strings.IndexByte(rest, filepath.Separator); i >= 0 {
-			rest = rest[:i]
-		}
-		if rest != "" {
-			set[rest] = true
-		}
-	}
-	for k := range f.files {
-		add(k)
-	}
-	for k := range f.dirs {
-		add(k)
-	}
-	for k := range f.symlinks {
-		add(k)
-	}
-	names := make([]string, 0, len(set))
-	for n := range set {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
 // lstatMode reports the mode bits for an entry without following symlinks.
 func (f *fakeFS) lstatMode(path string) (os.FileMode, error) {
 	if _, ok := f.symlinks[path]; ok {
@@ -193,20 +127,17 @@ func (f *fakeFS) lstatMode(path string) (os.FileMode, error) {
 // fakeDeps wires a fakeFS into the integrateDeps shape.
 func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 	return &integrateDeps{
-		userHomeDir:  func() (string, error) { return home, nil },
-		readFile:     fs.readFile,
-		writeFile:    fs.writeFile,
-		mkdirAll:     fs.mkdirAll,
-		removeAll:    fs.removeAll,
-		stdout:       stdout,
-		logf:         func(string, ...any) {}, // no-op; override per-test to capture
-		dataDir:      func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
-		symlink:      fs.symlink,
-		readlink:     fs.readlink,
-		lstatMode:    fs.lstatMode,
-		readDirNames: fs.readDirNames,
-		loadOptOut:   fs.loadOptOut,
-		saveOptOut:   fs.saveOptOut,
+		userHomeDir: func() (string, error) { return home, nil },
+		readFile:    fs.readFile,
+		writeFile:   fs.writeFile,
+		mkdirAll:    fs.mkdirAll,
+		removeAll:   fs.removeAll,
+		stdout:      stdout,
+		logf:        func(string, ...any) {}, // no-op; override per-test to capture
+		dataDir:     func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
+		symlink:     fs.symlink,
+		readlink:    fs.readlink,
+		lstatMode:   fs.lstatMode,
 	}
 }
 
@@ -1456,18 +1387,6 @@ func installViaFake(t *testing.T, fs *fakeFS, home, agent string) {
 	}
 }
 
-// installFullDefaultViaFake seeds the complete default set for an agent (status
-// wiring plus every default-on component it can host), so refresh finds nothing
-// missing to add. Used by the "installed and current" refresh tests, which must
-// look at a fully integrated agent rather than one with only status wiring (an
-// agent missing a default component is now refreshed to add it, ADR 0064).
-func installFullDefaultViaFake(t *testing.T, fs *fakeFS, home, agent string) {
-	t.Helper()
-	if err := installComponentSet(fakeDeps(home, fs, io.Discard), agent, defaultComponentIDs()); err != nil {
-		t.Fatalf("seed full default install %s: %v", agent, err)
-	}
-}
-
 func TestDryRun_NoInstallation(t *testing.T) {
 	// Empty fake FS: no pop artifacts for any agent. Every dry-run should
 	// report neither installed nor changed.
@@ -1854,11 +1773,11 @@ func seedBaselineComponents(t *testing.T, fs *fakeFS, home, agent string) {
 // claudePaneRenderFile is the rendered SKILL.md path for claude's pane skill
 // under the fake FS data dir — the file refresh tests corrupt to force stale.
 func claudePaneRenderFile(home string) string {
-	return filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-tmux-pane", "SKILL.md")
+	return filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-pane", "SKILL.md")
 }
 
 func claudePaneLink(home string) string {
-	return filepath.Join(home, ".claude", "skills", "pop-tmux-pane")
+	return filepath.Join(home, ".claude", "skills", "pop-pane")
 }
 
 func TestEnsureIntegrations_RefreshesStaleFileComponent(t *testing.T) {
@@ -2020,11 +1939,11 @@ func TestEnsureIntegrations_LeavesCurrentFileComponentUntouched(t *testing.T) {
 }
 
 func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
-	// An unowned entry shadowing pop's skill (the bare `tmux-pane` name) is an
+	// An unowned entry shadowing pop's skill (the bare `pane` name) is an
 	// Integration conflict. Refresh must skip it silently — no update, no
 	// warning, and no symlink written over the user's entry.
 	fs := newFakeFS()
-	conflict := filepath.Join("/h", ".claude", "skills", "tmux-pane")
+	conflict := filepath.Join("/h", ".claude", "skills", "pane")
 	fs.dirs[conflict] = true
 
 	dry, real := fakeFactories("/h", fs)
@@ -2078,10 +1997,9 @@ func TestRefreshComponent_SkipsUnknownComponentSilently(t *testing.T) {
 }
 
 func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
-	// A pre-symlink copy-mode install (a real `pop-tmux-pane` directory at the agent
-	// location whose SKILL.md carries the pop-owned marker, no render tree under
-	// the data dir) is pop-owned but stale. Refresh must migrate it to a symlink
-	// into the freshly rendered tree.
+	// A pre-symlink copy-mode install (a real `pop-pane` directory at the agent
+	// location, no render tree under the data dir) is pop-owned but stale.
+	// Refresh must migrate it to a symlink into the freshly rendered tree.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
@@ -2089,7 +2007,7 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 	link := claudePaneLink("/h")
 	fs.dirs[link] = true
 	copyFile := filepath.Join(link, "SKILL.md")
-	fs.files[copyFile] = []byte("---\npop-owned: true\n---\nold copy-mode body")
+	fs.files[copyFile] = []byte("old copy-mode body")
 
 	dry, real := fakeFactories("/h", fs)
 	warnings := ensureIntegrationsForRevisionWith("rev-fc3", dry, real)
@@ -2102,7 +2020,7 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 	if fs.dirs[link] {
 		t.Errorf("copy-mode directory not removed during migration: %s", link)
 	}
-	target := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-tmux-pane")
+	target := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-pane")
 	if fs.symlinks[link] != target {
 		t.Errorf("expected migration to symlink %q -> %q, got %q", link, target, fs.symlinks[link])
 	}
@@ -2253,11 +2171,9 @@ func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
 }
 
 func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
-	// Seed claude's full default set at the exact embedded content. Dry-run sees
-	// every component installed but not changed → no updates, no warnings, no
-	// missing default to add, stamp state.json anyway. "Already current" outcomes
+	// Seed claude at the exact embedded content. "already current" outcomes
 	// are verbose-gated on the update-existing path → default output is
-	// "nothing to do".
+	// "nothing to do". state.json is stamped anyway.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
@@ -2277,10 +2193,10 @@ func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
 }
 
 func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
-	// Seed claude's full default set so nothing is missing to add, then make the
-	// status wiring stale and inject a write failure on it. The command should
-	// print "nothing to do" to stdout (nothing actually updated), print the
-	// warning to stderr, and NOT stamp state.json so the next runtime check retries.
+	// Seed claude stale, inject a write failure on the target. The command
+	// should print "nothing to do" to stdout (nothing actually updated),
+	// print the warning to stderr, and NOT stamp state.json so the next
+	// runtime check retries.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")

@@ -36,7 +36,7 @@ func removeComponent(d *integrateDeps, home string, id ComponentID, agent string
 func removeFileComponent(d *integrateDeps, home string, id ComponentID, agent string) error {
 	agent = strings.ToLower(agent)
 
-	tree, err := renderComponent(id, agent, d.resolveSkillPrefix())
+	tree, err := renderComponent(id, agent)
 	if err != nil {
 		return err
 	}
@@ -283,7 +283,7 @@ func fileExists(d *integrateDeps, path string) (bool, error) {
 // file-based component is present at the agent's location.
 func fileComponentInstalled(d *integrateDeps, home string, id ComponentID, agent string) (bool, error) {
 	agent = strings.ToLower(agent)
-	tree, err := renderComponent(id, agent, d.resolveSkillPrefix())
+	tree, err := renderComponent(id, agent)
 	if err != nil {
 		return false, err
 	}
@@ -375,40 +375,5 @@ func runIntegrateRemoveComponents(d *integrateDeps, agent string, ids []Componen
 			return err
 		}
 	}
-	// Record the removed default-on components as persisted opt-outs (negative
-	// consent, ADR 0064 slice 08) so refresh does not re-add them. A bare
-	// `pop integrate <agent>` later clears these.
-	return persistRemoveOptOut(d, agent, ids)
-}
-
-// persistRemoveOptOut merges the default-on components just removed into the
-// agent's persisted opt-out set, so a later refresh never re-adds them. Removal
-// is targeted, so this merges (unlike the install path, which replaces). The
-// core status wiring and unknown ids are not opt-outs and are ignored. New path
-// logs per slice 01.
-func persistRemoveOptOut(d *integrateDeps, agent string, removed []ComponentID) error {
-	if d.saveOptOut == nil || d.loadOptOut == nil {
-		return nil
-	}
-	agent = strings.ToLower(agent)
-	set := d.loadOptOut(agent)
-	if set == nil {
-		set = map[ComponentID]bool{}
-	}
-	changed := false
-	for _, id := range removed {
-		comp, ok := lookupComponent(id)
-		if !ok || !comp.defaultOn || set[id] {
-			continue
-		}
-		set[id] = true
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	if d.logf != nil {
-		d.logf("persistRemoveOptOut: %s opt-out set -> %v", agent, sortedComponentIDs(set))
-	}
-	return d.saveOptOut(agent, set)
+	return nil
 }
