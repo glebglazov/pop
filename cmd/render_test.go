@@ -9,7 +9,7 @@ import (
 // single skill-directory entry whose bytes are the embedded source with the
 // frontmatter name injected to match the directory.
 func TestRenderPaneSkillClaude(t *testing.T) {
-	tree, err := renderComponent(ComponentPaneSkill, "claude")
+	tree, err := renderComponent(ComponentPaneSkill, "claude", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
 
 	for _, agent := range []string{"pi", "cursor"} {
 		t.Run(agent, func(t *testing.T) {
-			tree, err := renderComponent(ComponentPaneSkill, agent)
+			tree, err := renderComponent(ComponentPaneSkill, agent, "pop-")
 			if err != nil {
 				t.Fatalf("renderComponent(%s): %v", agent, err)
 			}
@@ -75,7 +75,7 @@ func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
 // name injected (opencode has no skill-directory layout; the file name carries
 // the identity) but with the name-independent pop-owned marker added.
 func TestRenderPaneSkillOpencode(t *testing.T) {
-	tree, err := renderComponent(ComponentPaneSkill, "opencode")
+	tree, err := renderComponent(ComponentPaneSkill, "opencode", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent(opencode): %v", err)
 	}
@@ -103,7 +103,7 @@ func TestRenderPaneSkillOpencode(t *testing.T) {
 
 // TestRenderCaseInsensitiveAgent confirms the agent name is normalized.
 func TestRenderCaseInsensitiveAgent(t *testing.T) {
-	tree, err := renderComponent(ComponentPaneSkill, "Claude")
+	tree, err := renderComponent(ComponentPaneSkill, "Claude", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent(Claude): %v", err)
 	}
@@ -115,12 +115,12 @@ func TestRenderCaseInsensitiveAgent(t *testing.T) {
 // TestRenderUnsupportedAgent confirms unsupported (agent, component) pairs error
 // rather than producing a degraded tree.
 func TestRenderUnsupportedAgent(t *testing.T) {
-	if _, err := renderComponent(ComponentPaneSkill, "codex"); err == nil {
+	if _, err := renderComponent(ComponentPaneSkill, "codex", "pop-"); err == nil {
 		t.Fatalf("expected error rendering pane skill for codex")
 	}
 	// Task skills remain unsupported for opencode even though the pane
 	// skill is now supported there.
-	if _, err := renderComponent(ComponentTaskSkills, "opencode"); err == nil {
+	if _, err := renderComponent(ComponentTaskSkills, "opencode", "pop-"); err == nil {
 		t.Fatalf("expected error rendering task skills for opencode")
 	}
 }
@@ -128,7 +128,7 @@ func TestRenderUnsupportedAgent(t *testing.T) {
 // TestRenderNonFileComponent confirms the status-wiring component has no
 // file-based render.
 func TestRenderNonFileComponent(t *testing.T) {
-	if _, err := renderComponent(ComponentStatusWiring, "claude"); err == nil {
+	if _, err := renderComponent(ComponentStatusWiring, "claude", "pop-"); err == nil {
 		t.Fatalf("expected error: status-wiring has no file-based render")
 	}
 }

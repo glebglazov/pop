@@ -110,6 +110,42 @@ func (f *fakeFS) readlink(link string) (string, error) {
 	return target, nil
 }
 
+// readDirNames lists the immediate child entry names under dir across the
+// files, dirs, and symlinks maps, sorted. A missing directory yields no entries
+// (matching osReadDirNames), so the stale-name prune is a no-op on a fresh
+// agent location.
+func (f *fakeFS) readDirNames(dir string) ([]string, error) {
+	prefix := dir + string(filepath.Separator)
+	set := map[string]bool{}
+	add := func(p string) {
+		if !strings.HasPrefix(p, prefix) {
+			return
+		}
+		rest := p[len(prefix):]
+		if i := strings.IndexByte(rest, filepath.Separator); i >= 0 {
+			rest = rest[:i]
+		}
+		if rest != "" {
+			set[rest] = true
+		}
+	}
+	for k := range f.files {
+		add(k)
+	}
+	for k := range f.dirs {
+		add(k)
+	}
+	for k := range f.symlinks {
+		add(k)
+	}
+	names := make([]string, 0, len(set))
+	for n := range set {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
 // lstatMode reports the mode bits for an entry without following symlinks.
 func (f *fakeFS) lstatMode(path string) (os.FileMode, error) {
 	if _, ok := f.symlinks[path]; ok {
@@ -127,17 +163,18 @@ func (f *fakeFS) lstatMode(path string) (os.FileMode, error) {
 // fakeDeps wires a fakeFS into the integrateDeps shape.
 func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 	return &integrateDeps{
-		userHomeDir: func() (string, error) { return home, nil },
-		readFile:    fs.readFile,
-		writeFile:   fs.writeFile,
-		mkdirAll:    fs.mkdirAll,
-		removeAll:   fs.removeAll,
-		stdout:      stdout,
-		logf:        func(string, ...any) {}, // no-op; override per-test to capture
-		dataDir:     func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
-		symlink:     fs.symlink,
-		readlink:    fs.readlink,
-		lstatMode:   fs.lstatMode,
+		userHomeDir:  func() (string, error) { return home, nil },
+		readFile:     fs.readFile,
+		writeFile:    fs.writeFile,
+		mkdirAll:     fs.mkdirAll,
+		removeAll:    fs.removeAll,
+		stdout:       stdout,
+		logf:         func(string, ...any) {}, // no-op; override per-test to capture
+		dataDir:      func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
+		symlink:      fs.symlink,
+		readlink:     fs.readlink,
+		lstatMode:    fs.lstatMode,
+		readDirNames: fs.readDirNames,
 	}
 }
 

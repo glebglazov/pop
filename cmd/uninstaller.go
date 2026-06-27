@@ -36,7 +36,7 @@ func removeComponent(d *integrateDeps, home string, id ComponentID, agent string
 func removeFileComponent(d *integrateDeps, home string, id ComponentID, agent string) error {
 	agent = strings.ToLower(agent)
 
-	tree, err := renderComponent(id, agent)
+	tree, err := renderComponent(id, agent, d.resolveSkillPrefix())
 	if err != nil {
 		return err
 	}
@@ -283,7 +283,7 @@ func fileExists(d *integrateDeps, path string) (bool, error) {
 // file-based component is present at the agent's location.
 func fileComponentInstalled(d *integrateDeps, home string, id ComponentID, agent string) (bool, error) {
 	agent = strings.ToLower(agent)
-	tree, err := renderComponent(id, agent)
+	tree, err := renderComponent(id, agent, d.resolveSkillPrefix())
 	if err != nil {
 		return false, err
 	}

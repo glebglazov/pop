@@ -364,27 +364,35 @@ func TestOwnership(t *testing.T) {
 	}
 }
 
-// TestConflictCandidates pins the prefix-insensitive candidate expansion: a
-// render-tree name yields both its canonical `pop-` form and the bare form, so
-// a hand-written skill under either name is caught.
+// TestConflictCandidates pins the candidate expansion derived from the resolved
+// name and the configured prefix (ADR 0063): a prefixed render-tree name yields
+// both the resolved form and the bare form, so a hand-written skill under
+// either name is caught. With an empty prefix the resolved name is already
+// bare, so it is the sole candidate.
 func TestConflictCandidates(t *testing.T) {
 	tests := []struct {
-		name string
-		want []string
+		name   string
+		prefix string
+		want   []string
 	}{
-		{"pop-pane", []string{"pop-pane", "pane"}},
-		{"pop-pane.md", []string{"pop-pane.md", "pane.md"}},
-		{"pop-grill-with-docs", []string{"pop-grill-with-docs", "grill-with-docs"}},
-		{"no-prefix", []string{"no-prefix"}},
+		{"pop-pane", "pop-", []string{"pop-pane", "pane"}},
+		{"pop-pane.md", "pop-", []string{"pop-pane.md", "pane.md"}},
+		{"pop-grill-with-docs", "pop-", []string{"pop-grill-with-docs", "grill-with-docs"}},
+		{"no-prefix", "pop-", []string{"no-prefix"}},
+		// Empty prefix: the resolved name is already bare — sole candidate.
+		{"pane", "", []string{"pane"}},
+		{"pane.md", "", []string{"pane.md"}},
+		// Custom prefix: resolved form plus bare form.
+		{"my-pane", "my-", []string{"my-pane", "pane"}},
 	}
 	for _, tt := range tests {
-		got := conflictCandidates(tt.name)
+		got := conflictCandidates(tt.name, tt.prefix)
 		if len(got) != len(tt.want) {
-			t.Fatalf("conflictCandidates(%q) = %v, want %v", tt.name, got, tt.want)
+			t.Fatalf("conflictCandidates(%q, %q) = %v, want %v", tt.name, tt.prefix, got, tt.want)
 		}
 		for i := range got {
 			if got[i] != tt.want[i] {
-				t.Fatalf("conflictCandidates(%q) = %v, want %v", tt.name, got, tt.want)
+				t.Fatalf("conflictCandidates(%q, %q) = %v, want %v", tt.name, tt.prefix, got, tt.want)
 			}
 		}
 	}

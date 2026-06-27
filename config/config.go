@@ -127,6 +127,34 @@ type UpdatesConfig struct {
 	NoticeEnabled *bool `toml:"notice_enabled"`
 }
 
+// DefaultSkillPrefix is the prefix applied to every embedded skill's installed
+// name when [integrations] skill_prefix is absent. With it, the installed name
+// of an embedded skill is `pop-<base>` — byte-identical to pop's original
+// behaviour (ADR 0063).
+const DefaultSkillPrefix = "pop-"
+
+// IntegrationsConfig holds [integrations] settings governing how pop installs
+// its agent integrations (skills and status wiring).
+type IntegrationsConfig struct {
+	// SkillPrefix is the prefix applied to every embedded skill's installed
+	// name (`<prefix><base>`). A nil pointer (absent key) resolves to
+	// DefaultSkillPrefix; an explicit empty string installs skills under their
+	// bare base names. Ownership is the frontmatter marker / symlink, not the
+	// name (ADR 0063, skill-prefix slice 02), so an empty prefix is safe.
+	SkillPrefix *string `toml:"skill_prefix"`
+}
+
+// ResolveSkillPrefix returns the configured skill-name prefix. An absent
+// [integrations] section or skill_prefix key resolves to DefaultSkillPrefix
+// (`pop-`); an explicit empty string resolves to "" (bare base names). The
+// receiver may be nil.
+func (c *Config) ResolveSkillPrefix() string {
+	if c == nil || c.Integrations == nil || c.Integrations.SkillPrefix == nil {
+		return DefaultSkillPrefix
+	}
+	return *c.Integrations.SkillPrefix
+}
+
 // TaskConfig holds task-execution configuration.
 type TaskConfig struct {
 	Agents map[string]TaskAgentConfig `toml:"agents"`
@@ -381,10 +409,11 @@ type Config struct {
 	Dashboard      *DashboardConfig      `toml:"dashboard"`
 	// The TOML key stays "workload" for backward compatibility with existing
 	// user config files; the rename is internal only.
-	Task    *TaskConfig             `toml:"workload"`
-	Effort  map[string]EffortConfig `toml:"effort"`
-	Queue   *QueueConfig            `toml:"queue"`
-	Updates *UpdatesConfig          `toml:"updates"`
+	Task         *TaskConfig             `toml:"workload"`
+	Effort       map[string]EffortConfig `toml:"effort"`
+	Queue        *QueueConfig            `toml:"queue"`
+	Updates      *UpdatesConfig          `toml:"updates"`
+	Integrations *IntegrationsConfig     `toml:"integrations"`
 	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
 	// The key is canonicalized (~ expanded, symlinks resolved) at resolution
 	// time; any worktree path or bare dir of the same repo resolves to the

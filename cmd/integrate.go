@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/spf13/cobra"
 )
@@ -64,11 +65,24 @@ type integrateDeps struct {
 	// File-based component installer (link installer, ADR 0011). dataDir
 	// resolves pop's data directory root (the parent of integrations/);
 	// symlink/readlink/lstatMode manage the agent-location symlinks and the
-	// ownership check.
-	dataDir   func() (string, error)
-	symlink   func(target, link string) error
-	readlink  func(string) (string, error)
-	lstatMode func(string) (os.FileMode, error)
+	// ownership check. readDirNames lists an agent-location directory so the
+	// installer can prune stale-named pop-owned entries (set subtraction,
+	// ADR 0063).
+	dataDir      func() (string, error)
+	symlink      func(target, link string) error
+	readlink     func(string) (string, error)
+	lstatMode    func(string) (os.FileMode, error)
+	readDirNames func(string) ([]string, error)
+
+	// skillPrefix is the resolved skill-name prefix for rendered skills (the
+	// `<prefix>` in `<prefix><base>`, ADR 0063). A nil pointer means "unset" →
+	// config.DefaultSkillPrefix (`pop-`); a non-nil pointer (including an empty
+	// string) is used verbatim, so skill_prefix = "" installs bare base names.
+	// Resolved once from [integrations] skill_prefix so the render-tree names,
+	// the agent-location link names, and conflict detection all agree within a
+	// run. Read through resolveSkillPrefix so a zero-value deps (tests) defaults
+	// to `pop-`.
+	skillPrefix *string
 
 	// Dry-run mode: set DryRun=true to turn writeFile into a comparator.
 	// `installed` and `changed` are output fields filled in during the run.
@@ -78,7 +92,7 @@ type integrateDeps struct {
 }
 
 func defaultIntegrateDeps() *integrateDeps {
-	return &integrateDeps{
+	d := &integrateDeps{
 		userHomeDir: os.UserHomeDir,
 		readFile:    os.ReadFile,
 		writeFile:   os.WriteFile,
@@ -97,7 +111,53 @@ func defaultIntegrateDeps() *integrateDeps {
 			}
 			return fi.Mode(), nil
 		},
+		readDirNames: osReadDirNames,
 	}
+	d.skillPrefix = loadSkillPrefix()
+	return d
+}
+
+// osReadDirNames lists the immediate entry names under dir, sorted. A missing
+// directory is not an error — it reports no entries, so the stale-name prune is
+// a no-op on a fresh agent.
+func osReadDirNames(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names, nil
+}
+
+// loadSkillPrefix resolves [integrations] skill_prefix from the user's config,
+// returning a pointer suitable for integrateDeps.skillPrefix. A config that
+// fails to load (missing file, malformed TOML) yields nil → the default
+// `pop-` prefix, so a broken config never blocks integrate or changes the
+// installed names.
+func loadSkillPrefix() *string {
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Log("loadSkillPrefix: config load failed (%v); using default prefix %q", err, config.DefaultSkillPrefix)
+		return nil
+	}
+	p := cfg.ResolveSkillPrefix()
+	return &p
+}
+
+// resolveSkillPrefix returns the resolved skill-name prefix for this deps,
+// defaulting to config.DefaultSkillPrefix (`pop-`) when unset so a zero-value
+// integrateDeps (constructed directly in tests) renders the canonical names.
+func (d *integrateDeps) resolveSkillPrefix() string {
+	if d == nil || d.skillPrefix == nil {
+		return config.DefaultSkillPrefix
+	}
+	return *d.skillPrefix
 }
 
 // popDataDir returns pop's data directory root, respecting XDG_DATA_HOME.
@@ -129,7 +189,12 @@ func withDryRun(base *integrateDeps) *integrateDeps {
 		readFile:    base.readFile,
 		dataDir:     base.dataDir,
 		logf:        base.logf,
-		DryRun:      true,
+		// The resolved skill prefix and the directory listing are read-only,
+		// so they pass through unchanged — the dry-run check must render and
+		// enumerate exactly what the real run would.
+		skillPrefix:  base.skillPrefix,
+		readDirNames: base.readDirNames,
+		DryRun:       true,
 	}
 	// File-component refresh inspects the link installer's render tree and the
 	// agent-location symlinks to decide installed/stale/conflict, so the dry-run

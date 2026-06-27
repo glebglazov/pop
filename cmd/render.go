@@ -17,7 +17,11 @@ import (
 // Every per-agent transform lives here: frontmatter name injection and the
 // skill-directory layout. Agents that cannot host the component (per the
 // catalog support matrix) return an error rather than a degraded tree.
-func renderComponent(id ComponentID, agent string) (map[string][]byte, error) {
+// The installed name of each skill is `<prefix><base>`; prefix is the resolved
+// skill_prefix (default `pop-`, empty for bare names — ADR 0063). The same
+// prefix must reach the render-tree names, the agent-location link names, and
+// conflict detection, so it is resolved once by the caller and threaded in.
+func renderComponent(id ComponentID, agent, prefix string) (map[string][]byte, error) {
 	comp, ok := lookupComponent(id)
 	if !ok {
 		return nil, fmt.Errorf("unknown component %q", id)
@@ -29,7 +33,7 @@ func renderComponent(id ComponentID, agent string) (map[string][]byte, error) {
 
 	switch id {
 	case ComponentPaneSkill, ComponentTaskSkills:
-		return renderSkillComponent(comp, agent)
+		return renderSkillComponent(comp, agent, prefix)
 	default:
 		return nil, fmt.Errorf("component %q has no file-based render", id)
 	}
@@ -39,21 +43,21 @@ func renderComponent(id ComponentID, agent string) (map[string][]byte, error) {
 // into the agent's skill layout. A source is one of two shapes:
 //
 //   - A single `.md` file `skills/pop/<base>.md` — a one-file skill named
-//     `pop-<base>` (the pane skill).
+//     `<prefix><base>` (the pane skill).
 //   - A directory `skills/pop/<base>` holding `SKILL.md` plus any companion
-//     documents — a multi-file skill named `pop-<base>`. The companion files
-//     ride alongside the skill body so the body's relative references resolve
-//     (grill-with-docs and its two format documents).
-func renderSkillComponent(comp integrationComponent, agent string) (map[string][]byte, error) {
+//     documents — a multi-file skill named `<prefix><base>`. The companion
+//     files ride alongside the skill body so the body's relative references
+//     resolve (grill-with-docs and its two format documents).
+func renderSkillComponent(comp integrationComponent, agent, prefix string) (map[string][]byte, error) {
 	tree := make(map[string][]byte, len(comp.sources))
 	for _, src := range comp.sources {
 		if strings.HasSuffix(src, ".md") {
-			if err := renderSingleFileSkill(tree, agent, src); err != nil {
+			if err := renderSingleFileSkill(tree, agent, prefix, src); err != nil {
 				return nil, err
 			}
 			continue
 		}
-		if err := renderMultiFileSkill(tree, agent, src); err != nil {
+		if err := renderMultiFileSkill(tree, agent, prefix, src); err != nil {
 			return nil, err
 		}
 	}
@@ -61,12 +65,12 @@ func renderSkillComponent(comp integrationComponent, agent string) (map[string][
 }
 
 // renderSingleFileSkill renders a one-file skill source into the agent's layout.
-func renderSingleFileSkill(tree map[string][]byte, agent, src string) error {
+func renderSingleFileSkill(tree map[string][]byte, agent, prefix, src string) error {
 	data, err := skillFiles.ReadFile(src)
 	if err != nil {
 		return fmt.Errorf("failed to read embedded skill %s: %w", src, err)
 	}
-	skillName := "pop-" + strings.TrimSuffix(filepath.Base(src), ".md")
+	skillName := prefix + strings.TrimSuffix(filepath.Base(src), ".md")
 	rel, content, err := renderSkillFile(agent, skillName, string(data))
 	if err != nil {
 		return err
@@ -77,13 +81,13 @@ func renderSingleFileSkill(tree map[string][]byte, agent, src string) error {
 
 // renderMultiFileSkill renders a directory-shaped skill source: its `SKILL.md`
 // becomes the skill body (with the frontmatter name injected) and every other
-// file is emitted verbatim alongside it under `pop-<base>/`. Only the
+// file is emitted verbatim alongside it under `<prefix><base>/`. Only the
 // directory-hosting agents (claude, pi, cursor) can host a multi-file skill; an
 // agent with a flat skill layout (opencode) is rejected rather than given a
 // skill whose companion files would be lost. The catalog support matrix keeps
 // this branch from being reached for an unsupported pair.
-func renderMultiFileSkill(tree map[string][]byte, agent, dir string) error {
-	skillName := "pop-" + path.Base(dir)
+func renderMultiFileSkill(tree map[string][]byte, agent, prefix, dir string) error {
+	skillName := prefix + path.Base(dir)
 	switch agent {
 	case "claude", "pi", "cursor":
 	default:

@@ -183,7 +183,8 @@ func wizardFileComponentState(d *integrateDeps, home string, id ComponentID, age
 // conflict, ADR 0011).
 func componentConflict(d *integrateDeps, home string, id ComponentID, agent string) (string, bool, error) {
 	agent = strings.ToLower(agent)
-	tree, err := renderComponent(id, agent)
+	prefix := d.resolveSkillPrefix()
+	tree, err := renderComponent(id, agent, prefix)
 	if err != nil {
 		return "", false, err
 	}
@@ -203,7 +204,7 @@ func componentConflict(d *integrateDeps, home string, id ComponentID, agent stri
 			continue
 		}
 		seen[name] = true
-		p, conflict, err := skillConflict(d, agentDir, name, integrationsRoot)
+		p, conflict, err := skillConflict(d, agentDir, name, integrationsRoot, prefix)
 		if err != nil {
 			return "", false, err
 		}
@@ -220,7 +221,7 @@ func componentConflict(d *integrateDeps, home string, id ComponentID, agent stri
 // this to be meaningful; callers check installed first.
 func fileComponentStale(d *integrateDeps, home string, id ComponentID, agent string) (bool, error) {
 	agent = strings.ToLower(agent)
-	tree, err := renderComponent(id, agent)
+	tree, err := renderComponent(id, agent, d.resolveSkillPrefix())
 	if err != nil {
 		return false, err
 	}

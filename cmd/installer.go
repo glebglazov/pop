@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/glebglazov/pop/config"
 )
 
 // installFileComponent installs a file-based Integration component (a skill)
@@ -12,14 +14,16 @@ import (
 // data directory and the agent's location receives a symlink into that tree.
 //
 // Ownership is machine-checkable — an agent-location entry pop owns is a
-// symlink resolving into pop's render tree. Re-running is idempotent (the
-// symlink is rewritten), and an existing copy-mode artifact owned by a prior
-// pop install (a real entry under the `pop-` name prefix) is migrated to a
-// symlink transparently by the same wipe-and-rewrite path.
+// symlink resolving into pop's render tree, or a real entry carrying the
+// `pop-owned: true` frontmatter marker. Re-running is idempotent (the symlink
+// is rewritten), an existing marker-owned copy-mode artifact is migrated to a
+// symlink by the same wipe-and-rewrite path, and entries left under a previous
+// skill_prefix are pruned (ADR 0063).
 func installFileComponent(d *integrateDeps, home string, id ComponentID, agent string) error {
 	agent = strings.ToLower(agent)
+	prefix := d.resolveSkillPrefix()
 
-	tree, err := renderComponent(id, agent)
+	tree, err := renderComponent(id, agent, prefix)
 	if err != nil {
 		return err
 	}
@@ -37,7 +41,7 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 	}
 
 	if d.logf != nil {
-		d.logf("installFileComponent: agent=%s id=%s agentDir=%s renderRoot=%s", agent, id, agentDir, renderRoot)
+		d.logf("installFileComponent: agent=%s id=%s prefix=%q agentDir=%s renderRoot=%s", agent, id, prefix, agentDir, renderRoot)
 	}
 
 	// Remove any legacy copy-mode artifacts this component supersedes (e.g. the
@@ -84,11 +88,11 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		target := filepath.Join(renderRoot, name)
 
 		// Integration conflict check (ADR 0011): a same-named entry pop does
-		// not own — under the embedded skill's canonical `pop-` name OR the bare
-		// (prefix-stripped) form — is never touched. The skill is skipped:
-		// never overwritten, never removed, never refreshed. Non-conflicting
-		// skills in the same run still install.
-		conflictPath, conflict, err := skillConflict(d, agentDir, name, integrationsRoot)
+		// not own — under the resolved install name OR the bare (prefix-stripped)
+		// form — is never touched. The skill is skipped: never overwritten,
+		// never removed, never refreshed. Non-conflicting skills in the same run
+		// still install.
+		conflictPath, conflict, err := skillConflict(d, agentDir, name, integrationsRoot, prefix)
 		if err != nil {
 			return fmt.Errorf("failed to check ownership of %s: %w", dest, err)
 		}
@@ -117,7 +121,113 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 		}
 	}
 
+	// Stale-name cleanup (ADR 0063): the resolved name can change between runs
+	// (e.g. a new skill_prefix flips `pop-pane` → `pane`). The render-tree side
+	// is already pruned — the removeAll(renderRoot) above wiped any old-named
+	// directory before the fresh tree was written. The agent location still
+	// holds the old-named pop-owned symlink, so subtract the freshly rendered
+	// names from what's there and remove the leftovers.
+	if err := pruneStaleAgentEntries(d, agentDir, renderRoot, id, agent, topLevel); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// pruneStaleAgentEntries performs the agent-location half of stale-name cleanup
+// (ADR 0063). After this component's fresh names have been linked, any
+// pop-owned entry left at the agent location that this component no longer
+// renders is stale — it was installed under a different skill_prefix — and is
+// removed. This is set subtraction: `keep` is the set of freshly rendered
+// top-level names; an entry whose name is in `keep` is left as-is.
+//
+// Ownership and scoping mirror the install path so cleanup never reaches across
+// components or touches a user's own skill (criterion: never remove an unowned
+// entry):
+//
+//   - A symlink resolving into THIS component's render root is a leftover link
+//     from a prior install of this component under a different prefix → removed.
+//     This covers any old prefix, including a custom one, because the render
+//     root is per-component, not per-name.
+//   - A real, marker-owned entry whose name is one this component could have
+//     produced under the default (`pop-`) or bare prefix is a stale copy-mode
+//     artifact → removed.
+//   - Anything else — a symlink into another component's render tree, an
+//     unowned entry, a foreign skill — is left untouched.
+func pruneStaleAgentEntries(d *integrateDeps, agentDir, renderRoot string, id ComponentID, agent string, keep map[string]bool) error {
+	if d.readDirNames == nil {
+		return nil // no directory listing available — nothing to prune
+	}
+	names, err := d.readDirNames(agentDir)
+	if err != nil {
+		return fmt.Errorf("failed to list %s: %w", agentDir, err)
+	}
+	// Names this component could have produced under the default or bare prefix
+	// — the scope for pruning real (copy-mode) marker-owned leftovers, which
+	// carry no render-tree target to attribute them to a component.
+	possible := componentPossibleNames(id, agent, config.DefaultSkillPrefix, "")
+	cleanRenderRoot := filepath.Clean(renderRoot)
+
+	for _, name := range names {
+		if keep[name] {
+			continue // a freshly rendered name — keep it
+		}
+		dest := filepath.Join(agentDir, name)
+		mode, err := d.lstatMode(dest)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("failed to stat %s: %w", dest, err)
+		}
+
+		stale := false
+		switch {
+		case mode&os.ModeSymlink != 0:
+			target, rerr := d.readlink(dest)
+			if rerr == nil {
+				if !filepath.IsAbs(target) {
+					target = filepath.Join(filepath.Dir(dest), target)
+				}
+				target = filepath.Clean(target)
+				stale = target == cleanRenderRoot || strings.HasPrefix(target, cleanRenderRoot+string(filepath.Separator))
+			}
+		case possible[name]:
+			stale = ownedByMarker(d, dest, mode)
+		}
+
+		if !stale {
+			continue
+		}
+		if d.logf != nil {
+			d.logf("installFileComponent: pruning stale %s — no longer a rendered name for %s/%s", dest, agent, id)
+		}
+		if err := d.removeAll(dest); err != nil {
+			return fmt.Errorf("failed to remove stale entry %s: %w", dest, err)
+		}
+		if d.stdout != nil {
+			fmt.Fprintf(d.stdout, "  removed stale %s\n", dest)
+		}
+	}
+	return nil
+}
+
+// componentPossibleNames returns the union of the top-level render-tree names a
+// component produces under each of the given prefixes. Used to scope stale
+// marker-owned (copy-mode) cleanup to names this component owns, so a prune of
+// one component never removes another's entries.
+func componentPossibleNames(id ComponentID, agent string, prefixes ...string) map[string]bool {
+	names := map[string]bool{}
+	for _, p := range prefixes {
+		tree, err := renderComponent(id, agent, p)
+		if err != nil {
+			continue
+		}
+		for rel := range tree {
+			names[firstSegment(rel)] = true
+		}
+	}
+	return names
 }
 
 // ownership reports whether an entry exists at dest and whether pop owns it.
@@ -183,17 +293,19 @@ func ownedByMarker(d *integrateDeps, dest string, mode os.FileMode) bool {
 }
 
 // skillConflict reports whether installing the render-tree entry `name` into
-// agentDir would collide with a skill pop does not own. The match is
-// prefix-insensitive: the embedded skill's canonical name is `pop-<base>`, but
-// a hand-written skill could sit under that exact name OR under the bare
-// `<base>` form, and either shadows pop's version. Both candidate locations are
-// checked; the first existing entry that pop does not own is the conflict.
+// agentDir would collide with a skill pop does not own. The candidates derive
+// from the resolved install name (ADR 0063): the resolved name as rendered,
+// plus the bare form with the configured prefix stripped (e.g. with prefix
+// `pop-`, `pop-pane` → also check `pane`). A hand-written skill could sit under
+// either, and either shadows pop's version. The first existing entry that pop
+// does not own is the conflict. With an empty prefix the resolved name is
+// already bare, so it is the sole candidate.
 //
-// A pop-owned entry (a symlink resolving into pop's render tree, or a legacy
-// `pop-` copy-mode directory eligible for migration) is never a conflict, so
-// re-install and refresh proceed normally.
-func skillConflict(d *integrateDeps, agentDir, name, integrationsRoot string) (conflictPath string, conflict bool, err error) {
-	for _, cand := range conflictCandidates(name) {
+// A pop-owned entry (a symlink resolving into pop's render tree, or a
+// marker-owned copy-mode directory eligible for migration) is never a conflict,
+// so re-install and refresh proceed normally.
+func skillConflict(d *integrateDeps, agentDir, name, integrationsRoot, prefix string) (conflictPath string, conflict bool, err error) {
+	for _, cand := range conflictCandidates(name, prefix) {
 		p := filepath.Join(agentDir, cand)
 		exists, owned, err := ownership(d, p, integrationsRoot)
 		if err != nil {
@@ -207,12 +319,16 @@ func skillConflict(d *integrateDeps, agentDir, name, integrationsRoot string) (c
 }
 
 // conflictCandidates returns the entry names a render-tree entry can collide
-// with at the agent location: the canonical `pop-` form as rendered, plus the
-// bare form with the prefix stripped (e.g. `pop-pane` → `pane`, `pop-pane.md`
-// → `pane.md`). Render-tree names are always `pop-` prefixed; a name without
-// the prefix yields only itself.
-func conflictCandidates(name string) []string {
-	if bare := strings.TrimPrefix(name, "pop-"); bare != name {
+// with at the agent location, derived from the resolved install `name` and the
+// configured `prefix` (ADR 0063): the resolved name as rendered, plus the bare
+// form with the prefix stripped (e.g. with prefix `pop-`, `pop-pane` → `pane`,
+// `pop-pane.md` → `pane.md`). An empty prefix, or a name that does not carry
+// the prefix, yields only the name itself.
+func conflictCandidates(name, prefix string) []string {
+	if prefix == "" {
+		return []string{name}
+	}
+	if bare := strings.TrimPrefix(name, prefix); bare != name {
 		return []string{name, bare}
 	}
 	return []string{name}
