@@ -1665,7 +1665,7 @@ func TestDashboardLaunchDrainRefusesBareWithoutTrunk(t *testing.T) {
 	setDir := filepath.Join(id.TasksDir, setID)
 	writeSpawnTaskMD(t, setDir, "01-a.md")
 	writeSpawnManifest(t, setDir, []spawnTestTask{{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"}})
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), id.TasksDir, tasks.StatePathFor(id.TasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), id.TasksDir, tasks.StatePathFor(id.TasksDir)); err != nil {
 		t.Fatal(err)
 	}
 	d, cfg, row, rt := dashboardLaunchFixture(t, checkout, setID)

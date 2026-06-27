@@ -260,7 +260,7 @@ func TestSetPriorityRejectsInvalidTaskSetIdentifier(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 
-	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -342,7 +342,7 @@ func TestDefinitionOverrideUsesCanonicalPathAsStateKey(t *testing.T) {
 	})
 
 	d := DefaultDeps()
-	result, err := RefreshWith(d, defRoot, DefaultStatePath())
+	result, err := RegisterWith(d, defRoot, DefaultStatePath())
 	if err != nil {
 		t.Fatal(err)
 	}

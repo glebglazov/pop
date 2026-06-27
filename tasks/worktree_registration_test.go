@@ -17,7 +17,7 @@ func TestDiscoverySeedsManagedWorktreeFromManifest(t *testing.T) {
 	}, map[string]any{"worktree": map[string]any{"managed": true}})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(DefaultDeps(), root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestDiscoverySeedsNamedWorktreeFromManifest(t *testing.T) {
 	}, map[string]any{"worktree": map[string]any{"name": "feature-wt"}})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(DefaultDeps(), root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestDiscoverySeedsNoWorktreeWhenAbsent(t *testing.T) {
 	})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(DefaultDeps(), root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestWorktreeIntentNoResyncAfterManifestEdit(t *testing.T) {
 	})
 	statePath := filepath.Join(root, "state.json")
 
-	if _, err := RefreshWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
 		t.Fatal(err)
 	}
 

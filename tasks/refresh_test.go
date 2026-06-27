@@ -9,15 +9,15 @@ import (
 	"testing"
 )
 
-func TestRefreshAutoRegistration(t *testing.T) {
+func TestRegisterRegistersDiscoveredSet(t *testing.T) {
 	root := t.TempDir()
-	// An Task set without any PRD is discovered and registered.
+	// An Task set without any PRD is discovered and registered by RegisterWith.
 	setupManifest(t, root, "new-feature", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(DefaultDeps(), root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,6 +40,45 @@ func TestRefreshAutoRegistration(t *testing.T) {
 	// Registration is persisted in the store, not a per-repo state.json file.
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("retired state.json was written: stat err = %v", err)
+	}
+}
+
+func TestRefreshIsPureReadDoesNotRegister(t *testing.T) {
+	root := t.TempDir()
+	// A discovered-but-unregistered set must stay inert under a read (ADR-0061):
+	// no Task state write, no rows, no registration line.
+	setupManifest(t, root, "draft", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	statePath := filepath.Join(root, "state.json")
+
+	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.NewRegistrations) != 0 {
+		t.Fatalf("read registered sets: %v", result.NewRegistrations)
+	}
+	if len(result.Rows) != 0 {
+		t.Fatalf("unregistered set rendered rows: %#v", result.Rows)
+	}
+
+	state, err := LoadGlobalState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canon, _ := CanonicalDefinitionPath(root)
+	if entry := state.Tasks[canon]; entry != nil && len(entry.TaskSets) != 0 {
+		t.Fatalf("read mutated Task state: %#v", entry)
+	}
+
+	// Explicit registration activates it.
+	reg, err := RegisterWith(DefaultDeps(), root, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.Rows) != 1 || reg.Rows[0].ID != "draft" {
+		t.Fatalf("register rows = %#v", reg.Rows)
 	}
 }
 
@@ -122,7 +161,7 @@ func TestTaskSetWithoutPRDIsRegisteredAndReady(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 
-	result, err := RefreshWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
+	result, err := RegisterWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +187,7 @@ func TestStatusDerivation(t *testing.T) {
 	})
 
 	statePath := filepath.Join(root, "state.json")
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(DefaultDeps(), root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +216,7 @@ func TestRenderDiagnostics(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "in_progress"},
 	})
 
-	result, err := RefreshWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
+	result, err := RegisterWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +243,7 @@ func TestUnknownEffortMarksTaskSetMalformed(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Effort: "extreme"},
 	})
 
-	result, err := RefreshWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
+	result, err := RegisterWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +276,7 @@ func TestInvalidAutoDrainMarksTaskSetMalformed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := RefreshWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
+	result, err := RegisterWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +297,7 @@ func TestFailedRowResetHints(t *testing.T) {
 		{ID: "01-broken", File: "repair-broken.md", Title: "B", Type: "AFK", Status: "failed"},
 	})
 
-	result, err := RefreshWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
+	result, err := RegisterWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +321,7 @@ func TestBlockedReasonInTable(t *testing.T) {
 		{ID: "01-hitl", File: "01-hitl.md", Title: "H", Type: "HITL", Status: "open"},
 	})
 
-	result, err := RefreshWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
+	result, err := RegisterWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +350,7 @@ func TestUnreadableDiscoveryDoesNotMutateState(t *testing.T) {
 	})
 	statePath := filepath.Join(root, "state.json")
 
-	if _, err := RefreshWith(DefaultDeps(), tasksDir, statePath); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, statePath); err != nil {
 		t.Fatal(err)
 	}
 

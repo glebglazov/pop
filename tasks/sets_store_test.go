@@ -99,10 +99,10 @@ func TestMigrateLegacyStateFileStoreWins(t *testing.T) {
 	}
 }
 
-// TestRefreshRegistersIntoStoreTable verifies lazy discovery writes a newly-seen
-// set's registration (auto-drain seeded from the manifest) into the sets table,
-// read back from the store directly.
-func TestRefreshRegistersIntoStoreTable(t *testing.T) {
+// TestRegisterWritesIntoStoreTable verifies explicit registration writes a
+// newly-seen set's registration (auto-drain seeded from the manifest) into the
+// sets table, read back from the store directly.
+func TestRegisterWritesIntoStoreTable(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "tbl-set")
@@ -112,7 +112,7 @@ func TestRefreshRegistersIntoStoreTable(t *testing.T) {
 	}, map[string]any{"auto_drain": true})
 
 	d := DefaultDeps()
-	result, err := RefreshWith(d, root, StatePathFor(root))
+	result, err := RegisterWith(d, root, StatePathFor(root))
 	if err != nil {
 		t.Fatal(err)
 	}

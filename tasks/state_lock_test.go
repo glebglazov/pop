@@ -363,7 +363,7 @@ func TestRefreshConcurrentRegistrationAndPriority(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, err := RefreshWith(d, defA, statePath)
+		_, err := RegisterWith(d, defA, statePath)
 		errs <- err
 	}()
 	go func() {

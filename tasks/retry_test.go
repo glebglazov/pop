@@ -420,7 +420,7 @@ func TestFailedRowMultipleResetHints(t *testing.T) {
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "failed"},
 	})
 
-	result, err := RefreshWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
+	result, err := RegisterWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

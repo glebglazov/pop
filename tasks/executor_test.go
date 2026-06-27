@@ -70,7 +70,7 @@ func TestRunTaskTargetsEligibleTaskPath(t *testing.T) {
 	setupManifest(t, env.tasksDir, "target", []Task{
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
-	if _, err := RefreshWith(DefaultDeps(), env.tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), env.tasksDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
@@ -510,7 +510,7 @@ func TestRunTaskSeparateRuntimePath(t *testing.T) {
 	setupManifest(t, tasksDir, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -643,7 +643,7 @@ func setupExecutorFixture(t *testing.T, interactive bool) *execFixture {
 	setupManifest(t, tasksDir, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	_ = interactive

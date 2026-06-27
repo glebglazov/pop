@@ -145,7 +145,7 @@ func TestTaskSetPriorityRefreshesTable(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -179,7 +179,7 @@ func TestTaskArchiveCommandsAndArchivedStatus(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -222,6 +222,59 @@ func TestTaskArchiveCommandsAndArchivedStatus(t *testing.T) {
 	}
 }
 
+// TestTaskRegisterActivatesAndStatusStaysPure verifies the ADR-0061 contract:
+// a freshly authored set is inert under reads (status writes nothing, shows
+// nothing), and `pop tasks register` is the deliberate writer that activates it.
+func TestTaskRegisterActivatesAndStatusStaysPure(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "draft")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	// A read does not register: status shows no sets and Task state stays empty.
+	var beforeOut bytes.Buffer
+	if err := runTaskStatusWith(tasks.DefaultDeps(), &beforeOut, ""); err != nil {
+		t.Fatalf("status failed: %v", err)
+	}
+	if strings.Contains(beforeOut.String(), "draft") {
+		t.Fatalf("unregistered set leaked into status:\n%s", beforeOut.String())
+	}
+	if snap := registrationSnapshot(t, tasksDir); snap != "" {
+		t.Fatalf("read registered a set: %q", snap)
+	}
+
+	// register activates it and prints the resulting status.
+	var regOut bytes.Buffer
+	if err := runTaskRegisterWith(tasks.DefaultDeps(), &regOut, ""); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+	if !strings.Contains(regOut.String(), "draft") {
+		t.Fatalf("register output missing the activated set:\n%s", regOut.String())
+	}
+	if snap := registrationSnapshot(t, tasksDir); !strings.Contains(snap, "draft") {
+		t.Fatalf("register did not persist registration: %q", snap)
+	}
+
+	// After registration, status (a read) shows it without re-registering.
+	var afterOut bytes.Buffer
+	if err := runTaskStatusWith(tasks.DefaultDeps(), &afterOut, ""); err != nil {
+		t.Fatalf("status after register failed: %v", err)
+	}
+	if !strings.Contains(afterOut.String(), "draft") {
+		t.Fatalf("status after register missing the set:\n%s", afterOut.String())
+	}
+}
+
 func TestTaskArchiveSelectionPrechecksDoneOnlyAndCancelWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	resetTaskFlags()
@@ -232,7 +285,7 @@ func TestTaskArchiveSelectionPrechecksDoneOnlyAndCancelWritesNothing(t *testing.
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "done", "done")
 	writeTaskThoughtsWithStatus(t, tasksDir, "ready", "open")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -282,7 +335,7 @@ func TestTaskArchiveSelectionConfirmArchivesBatch(t *testing.T) {
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "done", "done")
 	writeTaskThoughtsWithStatus(t, tasksDir, "ready", "open")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -321,7 +374,7 @@ func TestTaskUnarchiveSelectionListsArchivedOnlyUncheckedAndCancelWritesNothing(
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "archived", "open")
 	writeTaskThoughtsWithStatus(t, tasksDir, "active", "open")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{DefinitionOverride: tasksDir, CWD: root}, "archived"); err != nil {
@@ -374,7 +427,7 @@ func TestTaskUnarchiveSelectionConfirmRestoresBatch(t *testing.T) {
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "one", "open")
 	writeTaskThoughtsWithStatus(t, tasksDir, "two", "open")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"one", "two"} {
@@ -418,7 +471,7 @@ func TestTaskArchiveYesArchivesDoneOnly(t *testing.T) {
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "done", "done")
 	writeTaskThoughtsWithStatus(t, tasksDir, "ready", "open")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -453,7 +506,7 @@ func TestTaskArchiveYesNoDoneNoop(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "ready", "open")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -486,7 +539,7 @@ func TestTaskArchiveNoArgNonInteractiveRejected(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "done", "done")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -519,7 +572,7 @@ func TestTaskUnarchiveNoArgNonInteractiveRejected(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "demo", "open")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{DefinitionOverride: tasksDir, CWD: root}, "demo"); err != nil {
@@ -555,7 +608,7 @@ func TestTaskActionVerbsRejectArchivedTargets(t *testing.T) {
 	t.Cleanup(resetTaskFlags)
 
 	tasksDir := cmdTasksDir(t, root)
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{}, "demo"); err != nil {
@@ -617,7 +670,7 @@ func TestTaskSnapshotVerbsAcceptArchivedTargets(t *testing.T) {
 	t.Cleanup(resetTaskFlags)
 
 	tasksDir := cmdTasksDir(t, root)
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{}, "demo"); err != nil {
@@ -766,7 +819,7 @@ func TestTaskStatusShowsRuntimeLock(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughts(t, tasksDir, "demo")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -813,7 +866,7 @@ func TestTaskStatusSurfacesUnsatisfiableWorktreeDirective(t *testing.T) {
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughts(t, tasksDir, "demo")
 	d := tasks.DefaultDeps()
-	if _, err := tasks.RefreshWith(d, tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(d, tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -864,7 +917,7 @@ func TestTaskStatusSetArgDrillsIn(t *testing.T) {
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughts(t, tasksDir, "alpha")
 	writeTaskThoughts(t, tasksDir, "beta")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -905,7 +958,7 @@ func TestTaskStatusUnknownSetArgErrors(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughts(t, tasksDir, "alpha")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1463,7 +1516,7 @@ func setupRunTaskCmdFixture(t *testing.T) string {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughts(t, tasksDir, "demo")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	return root

@@ -31,22 +31,35 @@ type CheckoutStatus struct {
 	Branch   string
 }
 
-// Refresh discovers Task sets, auto-registers them, and builds table rows.
+// Refresh discovers Task sets and builds table rows. It is a pure read: it
+// never registers discovered sets (ADR-0061). Use RegisterWith to register.
 func Refresh(defPath string) (*RefreshResult, error) {
 	return RefreshWith(defaultDeps, defPath, StatePathFor(defPath))
 }
 
-// RefreshWith performs refresh using injected dependencies and state path.
+// RefreshWith performs a pure-read refresh using injected dependencies and
+// state path. It never writes Task state — discovered-but-unregistered sets
+// are inert (ADR-0061).
 func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
-	return refreshWith(d, defPath, statePath, false)
+	return refreshWith(d, defPath, statePath, false, false)
 }
 
-// RefreshArchivedWith performs refresh and returns only Archived Task sets.
+// RefreshArchivedWith performs a pure-read refresh and returns only Archived
+// Task sets. Like RefreshWith, it never registers.
 func RefreshArchivedWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
-	return refreshWith(d, defPath, statePath, true)
+	return refreshWith(d, defPath, statePath, false, true)
 }
 
-func refreshWith(d *Deps, defPath, statePath string, showArchived bool) (*RefreshResult, error) {
+// RegisterWith is the sole writer of Task-set registration (ADR-0061): it
+// discovers on-disk sets, registers the new ones (assigning order, seeding
+// auto_drain per ADR-0047 and the worktree directive per ADR-0059), and
+// returns the resulting status. It must be run from inside the repo so its
+// cwd is a valid checkout.
+func RegisterWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
+	return refreshWith(d, defPath, statePath, true, false)
+}
+
+func refreshWith(d *Deps, defPath, statePath string, register, showArchived bool) (*RefreshResult, error) {
 	canon, err := CanonicalDefinitionPathWith(d, defPath)
 	if err != nil {
 		return nil, err
@@ -76,28 +89,32 @@ func refreshWith(d *Deps, defPath, statePath string, showArchived bool) (*Refres
 		return nil, err
 	}
 
-	registered := state.RegisteredIDs(canon)
+	// Registration is an explicit write performed only by RegisterWith
+	// (ADR-0061). Pure reads pass register=false and never mutate Task state:
+	// a discovered-but-unregistered set stays inert.
 	needsSave := false
-	for id := range disc.Manifests {
-		if _, ok := registered[id]; !ok {
-			needsSave = true
-			break
-		}
-	}
-
 	var newRegs []string
-	if needsSave {
-		err := UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-			mergeNewRegistrations(d, canon, disc, state, &newRegs)
-			return nil
-		})
-		if err != nil {
-			return nil, err
+	if register {
+		registered := state.RegisteredIDs(canon)
+		for id := range disc.Manifests {
+			if _, ok := registered[id]; !ok {
+				needsSave = true
+				break
+			}
 		}
-		sort.Strings(newRegs)
-		state, err = LoadGlobalStateWith(d, statePath)
-		if err != nil {
-			return nil, err
+		if needsSave {
+			err := UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
+				mergeNewRegistrations(d, canon, disc, state, &newRegs)
+				return nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			sort.Strings(newRegs)
+			state, err = LoadGlobalStateWith(d, statePath)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 

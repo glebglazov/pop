@@ -19,7 +19,7 @@ func TestDiscoverySeedsAutoDrainFromManifest(t *testing.T) {
 	}, map[string]any{"auto_drain": true})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(DefaultDeps(), root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestDiscoverySeedsAutoDrainOffWhenAbsent(t *testing.T) {
 	})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(DefaultDeps(), root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestDiscoverySeedsAutoDrainOffWhenFalse(t *testing.T) {
 	}, map[string]any{"auto_drain": false})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(DefaultDeps(), root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestAutoDrainNoResyncAfterDashboardToggle(t *testing.T) {
 	}, map[string]any{"auto_drain": true})
 	statePath := StatePathFor(root)
 
-	if _, err := RefreshWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ToggleAutoDrainWith(DefaultDeps(), root, statePath, "toggle-set"); err != nil {
@@ -121,7 +121,7 @@ func TestAutoDrainNoResyncAfterManifestEdit(t *testing.T) {
 	})
 	statePath := filepath.Join(root, "state.json")
 
-	if _, err := RefreshWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
 		t.Fatal(err)
 	}
 

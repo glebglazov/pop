@@ -51,6 +51,13 @@ var taskStatusCmd = &cobra.Command{
 	RunE:  runTaskStatus,
 }
 
+var taskRegisterCmd = &cobra.Command{
+	Use:   "register [TASK_SET]",
+	Short: "Register newly authored task sets so they become visible and schedulable, then show status",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runTaskRegister,
+}
+
 var taskArchiveCmd = &cobra.Command{
 	Use:   "archive [TASK_SET]",
 	Short: "Hide a registered task set from default task status and selection",
@@ -182,6 +189,7 @@ var taskUnbindWorktreeCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
+	taskCmd.AddCommand(taskRegisterCmd)
 	taskCmd.AddCommand(taskArchiveCmd)
 	taskCmd.AddCommand(taskUnarchiveCmd)
 	taskCmd.AddCommand(taskSetPriorityCmd)
@@ -239,6 +247,58 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 		taskSetID = args[0]
 	}
 	return runTaskStatusWith(tasks.DefaultDeps(), os.Stdout, taskSetID)
+}
+
+func runTaskRegister(cmd *cobra.Command, args []string) error {
+	var taskSetID string
+	if len(args) > 0 {
+		taskSetID = args[0]
+	}
+	return runTaskRegisterWith(tasks.DefaultDeps(), os.Stdout, taskSetID)
+}
+
+// runTaskRegisterWith is the sole entry point that registers discovered task
+// sets (ADR-0061): it activates newly authored on-disk sets — assigning order,
+// seeding auto_drain (ADR-0047) and the worktree directive (ADR-0059) — and then
+// prints status exactly like `pop tasks status`. Run from inside the repo so the
+// cwd is a valid checkout. A read (status/dashboard) never registers.
+func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
+	resolved, err := tasks.ResolvePathsWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput())
+	if err != nil {
+		return fmt.Errorf("tasks register: %w", err)
+	}
+
+	result, err := tasks.RegisterWith(d, resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
+	if err != nil {
+		return fmt.Errorf("tasks register: %w", err)
+	}
+
+	// With a set argument, drill into that one set's per-task breakdown after
+	// registering; absent, render the whole-repo overview.
+	if strings.TrimSpace(taskSetID) != "" {
+		id, err := tasks.ResolveTaskSetTarget(result, taskSetID)
+		if err != nil {
+			return fmt.Errorf("tasks register: %w", err)
+		}
+		tasks.RenderTaskSetDetail(w, id, tasks.FindRow(result, id), result.Manifests[id])
+		return nil
+	}
+
+	if runtimePath, err := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath); err == nil {
+		result.RuntimeLock = tasks.ReadRuntimeLockStatus(d, runtimePath)
+		if linked, err := binding.IsLinkedWorktree(d, runtimePath); err == nil {
+			cs := &tasks.CheckoutStatus{Path: runtimePath, Worktree: linked}
+			if linked {
+				cs.Branch = binding.CurrentBranch(d, runtimePath)
+			}
+			result.Checkout = cs
+		}
+	}
+
+	attachWorktreeDirectiveErrors(d, resolved.ProjectPath, result.Rows)
+
+	tasks.Render(w, result)
+	return nil
 }
 
 var taskConfigLoad = func(path string) (*config.Config, error) {

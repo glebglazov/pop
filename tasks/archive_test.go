@@ -39,7 +39,7 @@ func TestArchiveRoundTripStateOnlyAndStatusViews(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
 	statePath := StatePathFor(root)
-	if _, err := RefreshWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
 		t.Fatal(err)
 	}
 
@@ -214,7 +214,7 @@ func TestBuildArchiveSetSelectionPrechecksDoneOnly(t *testing.T) {
 	}
 
 	statePath := StatePathFor(root)
-	if _, err := RefreshWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
 		t.Fatal(err)
 	}
 	canon, err := CanonicalDefinitionPath(root)
@@ -272,7 +272,7 @@ func TestLoadUnarchiveSetSelectionListsArchivedOnlyUncheckedFromRegistration(t *
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := StatePathFor(root)
-	if _, err := RefreshWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
 		t.Fatal(err)
 	}
 	canon, err := CanonicalDefinitionPath(root)
@@ -327,7 +327,7 @@ func TestArchiveTaskSetsBatchArchivesAll(t *testing.T) {
 	setupManifest(t, root, "ready", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if _, err := RefreshWith(DefaultDeps(), root, StatePathFor(root)); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), root, StatePathFor(root)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -363,7 +363,7 @@ func TestUnarchiveTaskSetsRestoresSelection(t *testing.T) {
 	setupManifest(t, root, "two", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if _, err := RefreshWith(DefaultDeps(), root, StatePathFor(root)); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), root, StatePathFor(root)); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"one", "two"} {

@@ -147,16 +147,16 @@ The JSON is the source of truth for automation. The rules above — the eligibil
 
 Keep `index.json` and the markdown files in sync — every markdown file has exactly one manifest entry and vice versa.
 
-### 6. Verify registration
+### 6. Register the set
 
-Run `pop tasks status <task-set-name>` to trigger pop's lazy discovery and confirm the set registered correctly. Pop prints `Registered new task set(s): <task-set-name>` on first sighting.
+Run `pop tasks register <task-set-name>` to register the set and confirm it activated correctly. Registration is an explicit verb — writing the set files only *drafts* it; until you `register`, the set is inert (invisible to the dashboard, never scheduled, never auto-drained). Reads like `pop tasks status` never register. Pop prints `Registered new task set(s): <task-set-name>` on first registration.
 
 Check the output:
 
 - The task set appears in the table with status `READY` (or `DEFERRED` if every open task is HITL).
 - It is **not** `MALFORMED` or `MISSING`.
 
-If `MALFORMED`, read the diagnostics, fix the markdown/manifest issues they name, and re-run `pop tasks status <task-set-name>` until the set is `READY` or `DEFERRED`.
+If `MALFORMED`, read the diagnostics, fix the markdown/manifest issues they name, and re-run `pop tasks register <task-set-name>` until the set is `READY` or `DEFERRED`.
 
 Tell the user the task-set name, its status, and how many tasks are open.
 

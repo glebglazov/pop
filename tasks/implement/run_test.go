@@ -45,7 +45,7 @@ func setupImplementFixture(t *testing.T) (root string, d *Deps) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	tasksDir := implementTasksDir(t, root)
 	writeImplementThoughts(t, tasksDir, "demo")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -349,7 +349,7 @@ func TestResolveTaskSetRuntimeInWorktreeRefusesWithoutTrunk(t *testing.T) {
 
 	tasksDir := implementTasksDir(t, wt)
 	writeImplementThoughts(t, tasksDir, "demo")
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 

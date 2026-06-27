@@ -213,7 +213,7 @@ func setupAbandonTaskManifest(t *testing.T, repo string, status tasks.TaskSetSta
   ]
 }`
 	writeFile(t, filepath.Join(tasksDir, "set-1", "index.json"), manifest)
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 	return tasksDir

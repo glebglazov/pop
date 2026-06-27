@@ -15,7 +15,7 @@ func setupCustomTaskFixture(t *testing.T, tasks []Task) *execFixture {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	tasksDir := storageTasksDir(t, root)
 	setupManifest(t, tasksDir, "demo", tasks)
-	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	return &execFixture{root: root, tasksDir: tasksDir}

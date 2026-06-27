@@ -138,7 +138,7 @@ func TestCompletionsFilterArchivedTaskSets(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	if _, err := RefreshWith(DefaultDeps(), tasksDir, StatePathFor(tasksDir)); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ArchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{}, "archived"); err != nil {

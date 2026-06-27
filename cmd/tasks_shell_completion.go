@@ -31,6 +31,7 @@ func registerTaskShellCompletions() {
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent-output", completeTaskAgentOutputs)
 
 	taskStatusCmd.ValidArgsFunction = completeTaskStatusArgs
+	taskRegisterCmd.ValidArgsFunction = completeTaskStatusArgs
 	taskArchiveCmd.ValidArgsFunction = completeTaskArchiveArgs
 	taskUnarchiveCmd.ValidArgsFunction = completeTaskUnarchiveArgs
 	taskSetPriorityCmd.ValidArgsFunction = completeTaskSetPriorityArgs

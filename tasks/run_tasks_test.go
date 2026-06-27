@@ -163,7 +163,7 @@ func TestRunTaskSetTargetedTaskSet(t *testing.T) {
 	setupManifest(t, tasksDir, "low", []Task{
 		{ID: "01-x", File: "01-x.md", Title: "X", Type: "AFK", Status: "open"},
 	})
-	refresh, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath())
+	refresh, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func setupTwoSetHumanBlockedFixture(t *testing.T) (*runTaskSetFixture, string) {
 	setupManifest(t, tasksDir, "ready", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkTask: true, summary: "ready done"})
@@ -218,7 +218,7 @@ func setupSoleHumanBlockedFixture(t *testing.T) (*runTaskSetFixture, string) {
 	setupManifest(t, tasksDir, "solo", []Task{
 		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
 	})
-	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkTask: true, summary: "done"})
@@ -1004,7 +1004,7 @@ func TestRunTaskSetDoesNotContinueIntoAnotherTaskSet(t *testing.T) {
 	setupManifest(t, tasksDir, "two", []Task{
 		{ID: "01-x", File: "01-x.md", Title: "X", Type: "AFK", Status: "open"},
 	})
-	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := SetPriorityWith(DefaultDeps(), nil, nil, ResolveInput{CWD: root}, "two", 10); err != nil {
@@ -1912,7 +1912,7 @@ func setupRunTaskSetFixture(t *testing.T, stem string, tasks []Task) *runTaskSet
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	tasksDir := storageTasksDir(t, root)
 	setupManifest(t, tasksDir, stem, tasks)
-	if _, err := RefreshWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 	return &runTaskSetFixture{root: root, tasksDir: tasksDir}
