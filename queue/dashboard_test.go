@@ -608,7 +608,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{SetID: "plain", runtimePath: "/wt"})
-	if want := []string{"i", "b", "d", "p", "O"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"i", "b", "d", "p", "O", "A"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 
@@ -692,6 +692,144 @@ func TestDashboardActionMenuVerbDispatch(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("bind dispatch should return a worktree-loading command")
+	}
+}
+
+func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
+	var archivedDef, archivedSet string
+	d := &Deps{
+		ArchiveSet: func(defPath, setID string) error {
+			archivedDef, archivedSet = defPath, setID
+			return nil
+		},
+	}
+	// A DONE, bound row: archive is offered regardless of status.
+	m := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+		Project: "pop", SetID: "set", Status: "DONE", Worktree: "/repo/wt (main)",
+		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set",
+		runtimePath: "/repo/wt", bound: true,
+	}}})
+
+	// Archive lives behind the action menu: open with `a`, archive with `A`.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(dashboardModel)
+	if got.menu == nil {
+		t.Fatal("a did not open the action menu")
+	}
+	var keys []string
+	for _, item := range got.menu.items {
+		keys = append(keys, item.key)
+	}
+	if !contains(keys, "A") {
+		t.Fatalf("archive verb absent from a DONE bound row's menu: %v", keys)
+	}
+
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	got = updated.(dashboardModel)
+	if got.menu != nil {
+		t.Fatal("A did not close the action menu after dispatch")
+	}
+	// No confirmation prompt: archiving opens no modal (it is fully reversible).
+	if got.bind != nil || got.abandon != nil || got.drainPick != nil {
+		t.Fatalf("archive opened a confirmation modal: bind=%v abandon=%v drain=%v", got.bind, got.abandon, got.drainPick)
+	}
+	if cmd == nil {
+		t.Fatal("archive dispatch returned no command")
+	}
+	msg, ok := cmd().(dashboardArchiveMsg)
+	if !ok {
+		t.Fatalf("archive cmd produced %T, want dashboardArchiveMsg", msg)
+	}
+	if msg.err != nil {
+		t.Fatalf("archive msg err = %v", msg.err)
+	}
+	if archivedDef != "/repo/tasks" || archivedSet != "set" {
+		t.Fatalf("archive target = (%q, %q), want (/repo/tasks, set)", archivedDef, archivedSet)
+	}
+
+	updated, _ = got.Update(msg)
+	got = updated.(dashboardModel)
+	if got.err != nil {
+		t.Fatalf("archive result err = %v", got.err)
+	}
+	if !strings.Contains(got.statusMsg, "archived") {
+		t.Fatalf("status = %q, want archived confirmation", got.statusMsg)
+	}
+}
+
+// TestDashboardArchiveRetainsBinding exercises the default archive flag-write
+// path end to end: archiving a bound set sets the reversible archived flag in
+// Task state (so the row drops out on the next build, which excludes Archived
+// sets) while leaving the set's Worktree binding intact.
+func TestDashboardArchiveRetainsBinding(t *testing.T) {
+	td := queueDataDeps(t)
+
+	tasksDir := filepath.Join(t.TempDir(), "tasks")
+	statePath := tasks.StatePathFor(tasksDir)
+	canon, err := tasks.CanonicalDefinitionPathWith(td, tasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Register a non-archived set directly in Task state.
+	if err := tasks.UpdateGlobalStateWith(td, statePath, func(state *tasks.GlobalState) error {
+		if state.Tasks == nil {
+			state.Tasks = map[string]*tasks.TaskEntry{}
+		}
+		state.Tasks[canon] = &tasks.TaskEntry{TaskSets: []tasks.RegisteredTaskSet{{ID: "set-1"}}}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	// A Worktree binding exists for the set before archiving.
+	seedBindingStore(t, td, map[string]WorktreeBinding{
+		"proj\x00set-1": {RuntimePath: "/repo/wt", Branch: "set-1", Project: "proj"},
+	})
+
+	d := &Deps{Tasks: td}
+	m := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+		Project: "proj", SetID: "set-1", Status: "DONE",
+		defPath: tasksDir, statePath: statePath, cursorKey: "proj\x00set-1",
+		runtimePath: "/repo/wt", bound: true,
+	}}})
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(dashboardModel)
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	got = updated.(dashboardModel)
+	if cmd == nil {
+		t.Fatal("archive dispatch returned no command")
+	}
+	msg, ok := cmd().(dashboardArchiveMsg)
+	if !ok {
+		t.Fatalf("archive msg type = %T", cmd())
+	}
+	if msg.err != nil {
+		t.Fatalf("archive msg err = %v", msg.err)
+	}
+
+	// The reversible archived flag is now set through the real flag-write path,
+	// so the dashboard's next build (which excludes Archived sets) drops the row.
+	state, err := tasks.LoadGlobalStateWith(td, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := state.Tasks[canon]
+	if entry == nil || len(entry.TaskSets) != 1 {
+		t.Fatalf("registered sets = %+v, want one", entry)
+	}
+	if !entry.TaskSets[0].Archived {
+		t.Fatalf("set-1 not archived after dispatch: %+v", entry.TaskSets[0])
+	}
+
+	// The Worktree binding is retained — archive never touches it.
+	after := loadBindingStore(t, td)
+	if len(after) != 1 {
+		t.Fatalf("binding state = %+v, want retained after archive", after)
+	}
+	if _, ok := after["proj\x00set-1"]; !ok {
+		t.Fatalf("binding for set-1 lost after archive: %+v", after)
 	}
 }
 

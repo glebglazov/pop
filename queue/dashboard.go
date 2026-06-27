@@ -767,6 +767,10 @@ type dashboardUnparkMsg struct {
 	setID string
 	err   error
 }
+type dashboardArchiveMsg struct {
+	setID string
+	err   error
+}
 type dashboardPreviewMsg struct {
 	err error
 }
@@ -883,6 +887,7 @@ const (
 	menuActionPreview
 	menuActionUnpark
 	menuActionShell
+	menuActionArchive
 )
 
 // dashboardMenuItem is one verb in the action menu overlay: the flat shortcut
@@ -905,8 +910,8 @@ type dashboardMenu struct {
 // dashboardMenuItems returns the verbs applicable to row, in a stable order.
 // Conditional verbs are filtered to the row's context: integrate is offered only
 // for integration-backlog rows, unbind only for bound rows, auto-drain only for
-// non-orphaned rows, and unpark only for parked rows. Drain, bind, preview, and
-// the runtime shell apply to every row.
+// non-orphaned rows, and unpark only for parked rows. Drain, bind, preview, the
+// runtime shell, and archive apply to every row regardless of status.
 func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	items := []dashboardMenuItem{
 		{key: "i", label: "drain", action: menuActionDrain},
@@ -926,6 +931,7 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 		items = append(items, dashboardMenuItem{key: "P", label: "unpark", action: menuActionUnpark})
 	}
 	items = append(items, dashboardMenuItem{key: "O", label: "shell", action: menuActionShell})
+	items = append(items, dashboardMenuItem{key: "A", label: "archive", action: menuActionArchive})
 	return items
 }
 
@@ -1176,6 +1182,13 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("%s unparked", msg.setID)
 		}
 		return m, m.reload()
+	case dashboardArchiveMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		} else {
+			m.statusMsg = fmt.Sprintf("%s archived", msg.setID)
+		}
+		return m, m.reload()
 	case dashboardDrainListMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -1401,6 +1414,9 @@ func (m dashboardModel) dispatchMenuAction(action dashboardMenuAction, row Dashb
 		cmd := exec.Command(shell)
 		cmd.Dir = row.runtimePath
 		return m, tea.ExecProcess(cmd, nil)
+	case menuActionArchive:
+		m.statusMsg = ""
+		return m, m.archiveSet(row)
 	}
 	return m, nil
 }
@@ -1710,6 +1726,18 @@ func UnparkDashboardRow(d *Deps, row DashboardRow) error {
 		commonDir = id.CommonDir
 	}
 	return tasks.RecordParkClear(d.Tasks, commonDir, row.SetID)
+}
+
+// archiveSet sets the reversible archived flag on the cursored set through the
+// existing archive flag-write path. It touches only Task state, leaving the
+// set's Worktree binding intact; the archived row drops out on the next build,
+// which excludes Archived sets. Archiving is fully reversible, so no
+// confirmation is required (ADR cleanup path for Done and Orphaned sets alike).
+func (m dashboardModel) archiveSet(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		err := m.d.archiveSet(row.defPath, row.SetID)
+		return dashboardArchiveMsg{setID: row.SetID, err: err}
+	}
 }
 
 func (m dashboardModel) toggleAutoDrain(row DashboardRow) tea.Cmd {

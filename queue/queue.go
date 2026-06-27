@@ -59,6 +59,10 @@ type Deps struct {
 	// ToggleAutoDrain flips a registered Task-set auto-drain bit in Task state.
 	// Defaults to tasks.ToggleAutoDrainWith.
 	ToggleAutoDrain func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error)
+	// ArchiveSet sets the reversible archived flag on one registered Task set in
+	// Task state, leaving its Worktree binding untouched. Defaults to
+	// tasks.SetTaskSetArchived.
+	ArchiveSet func(defPath, setID string) error
 	// AcquireRuntimeLock serializes human-triggered integration with normal
 	// runtime execution. Defaults to tasks.AcquireRuntimeLock.
 	AcquireRuntimeLock func(runtimePath string) (runtimeLock, error)
@@ -195,6 +199,15 @@ func (d *Deps) toggleAutoDrain(defPath, statePath, setID string) (*tasks.AutoDra
 		return d.ToggleAutoDrain(defPath, statePath, setID)
 	}
 	return tasks.ToggleAutoDrainWith(d.Tasks, defPath, statePath, setID)
+}
+
+// archiveSet resolves the ArchiveSet seam, defaulting to tasks.SetTaskSetArchived.
+// It writes only the archived flag; the set's Worktree binding is never touched.
+func (d *Deps) archiveSet(defPath, setID string) error {
+	if d.ArchiveSet != nil {
+		return d.ArchiveSet(defPath, setID)
+	}
+	return tasks.SetTaskSetArchived(d.Tasks, defPath, []string{setID}, true)
 }
 
 func (d *Deps) acquireRuntimeLock(runtimePath string) (runtimeLock, error) {
