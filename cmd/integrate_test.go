@@ -2800,8 +2800,8 @@ func TestOptOutRemoval_NoPrompt(t *testing.T) {
 	}
 }
 
-// TestOptOutRemoval_BareReAdds: after an explicit opt-out removal, a bare
-// interactive run (wizard) with y to pane-skill re-installs the component.
+// TestOptOutRemoval_BareReAdds: after an explicit opt-out removal, bare
+// integrate clears runtime overrides and re-installs the merged baseline.
 func TestOptOutRemoval_BareReAdds(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
@@ -2814,24 +2814,35 @@ func TestOptOutRemoval_BareReAdds(t *testing.T) {
 	// Remove it via explicit opt-out.
 	d := fakeDeps(home, fs, io.Discard)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
+	if err := applyIntegrateRuntimeConfig(false, optOuts); err != nil {
+		t.Fatalf("applyIntegrateRuntimeConfig: %v", err)
+	}
+	baseline, err := integrationBaselineLoader()
+	if err != nil {
+		t.Fatalf("integrationBaselineLoader: %v", err)
+	}
+	if err := runIntegrateComponents(d, "claude", baseline, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("opt-out: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; ok {
 		t.Fatalf("pane-skill should be removed after opt-out")
 	}
 
-	// Bare interactive run with yes to pane-skill should re-add it.
-	// Provide "y\ny\n" as scripted stdin so wizard says yes to both pane-skill and task-skills.
-	wizardIn := strings.NewReader("y\ny\n")
+	// Bare integrate clears runtime and re-asserts the full merged baseline.
+	if err := applyIntegrateRuntimeConfig(true, nil); err != nil {
+		t.Fatalf("applyIntegrateRuntimeConfig bare: %v", err)
+	}
+	baseline, err = integrationBaselineLoader()
+	if err != nil {
+		t.Fatalf("integrationBaselineLoader after bare clear: %v", err)
+	}
 	d2 := fakeDeps(home, fs, io.Discard)
-	d2.stdin = wizardIn
-	if err := runIntegrateComponents(d2, "claude", nil, true, false, nil, false, false); err != nil {
+	if err := runIntegrateComponents(d2, "claude", baseline, true, false, nil, false, false); err != nil {
 		t.Fatalf("bare re-run: %v", err)
 	}
 
 	if _, ok := fs.symlinks[link]; !ok {
-		t.Errorf("pane-skill not re-installed after bare interactive re-run with y")
+		t.Errorf("pane-skill not re-installed after bare integrate")
 	}
 }
 

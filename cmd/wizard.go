@@ -10,18 +10,12 @@ import (
 	"strings"
 )
 
-// The Integration wizard (ADR 0010) is the interactive form of
-// `pop integrate <agent>`: a re-entrant, step-by-step consent flow over the
-// component catalog. It installs the core status wiring with no prompt (consent
-// is implied by running the command), then walks one explained y/n step per
-// opt-in component in catalog order. Declining any step skips it and the
-// wizard continues. Each step first reports the component's current state; conflict
-// and not-supported states print their report instead of prompting. The wizard
-// closes with a note that re-running adds or removes components at any time.
+// Shared integration component state helpers and conflict/overwrite prompts.
+// The Integration wizard (ADR 0010) was retired in ADR 0065; bare integrate
+// installs the merged baseline with no per-component prompts.
 
-// componentStateKind enumerates the states a component can be in for an agent,
-// as shown to the user before each wizard step. These mirror the states Doctor
-// reports in a later slice.
+// componentStateKind enumerates the states a component can be in for an agent.
+// These mirror the states Doctor reports.
 type componentStateKind int
 
 const (
@@ -37,108 +31,6 @@ const (
 type componentStateInfo struct {
 	kind         componentStateKind
 	conflictPath string
-}
-
-// runIntegrateWizard drives the interactive wizard for an agent. It assumes the
-// agent is known and supported (the caller guards that) and that d.stdin is a
-// terminal (the caller gates on interactivity).
-func runIntegrateWizard(d *integrateDeps, home, agent string) error {
-	out := d.stdout
-	in := bufio.NewReader(stdinOrEmpty(d.stdin))
-
-	// Core step — installed with no prompt; consent is implied by running the
-	// integrate command at all (ADR 0010 consent gradient).
-	if out != nil {
-		fmt.Fprintf(out, "Integrating pop with %s.\n\n", agent)
-		fmt.Fprintf(out, "Core: status wiring\n")
-		fmt.Fprintf(out, "  Makes %s report pane status to pop's monitor. It changes no agent\n", agent)
-		fmt.Fprintf(out, "  behavior, so it installs without a prompt.\n")
-	}
-	core, ok := lookupComponent(ComponentStatusWiring)
-	if !ok {
-		return fmt.Errorf("status-wiring component missing from catalog")
-	}
-	if err := core.install(d, home, agent); err != nil {
-		return err
-	}
-
-	// Opt-in steps in catalog order.
-	for _, comp := range integrationCatalog {
-		switch comp.id {
-		case ComponentStatusWiring:
-			continue
-		case ComponentPaneSkill:
-			if err := wizardFileComponentStep(d, home, agent, in, comp.id, "Pane skill", paneSkillExplanation); err != nil {
-				return err
-			}
-		case ComponentTaskSkills:
-			if err := wizardFileComponentStep(d, home, agent, in, comp.id, "Task planning skills", taskSkillsExplanation); err != nil {
-				return err
-			}
-		}
-	}
-
-	if out != nil {
-		fmt.Fprintf(out, "\nDone. Re-run `pop integrate %s` anytime to add or remove components.\n", agent)
-	}
-	return nil
-}
-
-const paneSkillExplanation = `  The pane skill lets the agent drive tmux panes directly: running long
-  processes in named panes, watching their output, sending input, and
-  marking panes for your attention. This injects new agent behavior, so it
-  is opt-in.`
-
-const taskSkillsExplanation = `  The task planning skills install pop's planning-to-execution flow:
-  a grilling session that stress-tests your design (grill-with-docs), then
-  a PRD (to-prd), then a breakdown into independently-runnable tasks
-  (to-tasks) that ` + "`pop tasks implement`" + ` executes, one agent per task.`
-
-// wizardFileComponentStep runs one wizard step for a file-based opt-in
-// component (the pane skill, the task planning skills). It reports the
-// component's current state; for conflict and not-supported it prints the
-// report and returns without prompting, otherwise it explains the component and
-// asks y/n, installing on yes.
-func wizardFileComponentStep(d *integrateDeps, home, agent string, in *bufio.Reader, id ComponentID, title, explanation string) error {
-	out := d.stdout
-	state, err := wizardFileComponentState(d, home, id, agent)
-	if err != nil {
-		return err
-	}
-	if out != nil {
-		fmt.Fprintf(out, "\n%s\n", title)
-	}
-	switch state.kind {
-	case stateNotSupported:
-		if out != nil {
-			fmt.Fprintf(out, "  Not supported for %s — skipping (pop never installs a degraded version).\n", agent)
-		}
-		return nil
-	case stateConflict:
-		if out != nil {
-			fmt.Fprintf(out, "  Conflict: %s exists and is not owned by pop.\n", state.conflictPath)
-			fmt.Fprintf(out, "  Remove it and re-run the wizard to install pop's version.\n")
-		}
-		return nil
-	case stateInstalledCurrent:
-		fmt.Fprintf(orDiscard(out), "  Currently: installed and up to date.\n")
-	case stateStale:
-		fmt.Fprintf(orDiscard(out), "  Currently: installed but out of date.\n")
-	case stateNotInstalled:
-		fmt.Fprintf(orDiscard(out), "  Currently: not installed.\n")
-	}
-	if out != nil {
-		fmt.Fprintf(out, "%s\n", explanation)
-	}
-	yes, err := promptYesNo(in, out, "Install "+strings.ToLower(title)+"?")
-	if err != nil {
-		return err
-	}
-	if !yes {
-		fmt.Fprintf(orDiscard(out), "  Skipped.\n")
-		return nil
-	}
-	return installFileComponent(d, home, id, agent)
 }
 
 // wizardFileComponentState computes the displayable state of a file-based

@@ -367,43 +367,30 @@ var integrateCmd = &cobra.Command{
 	Long: `Install pop's status wiring for one or more coding agents.
 
 The status wiring makes the agent report pane status to pop's monitor; it
-changes no agent behavior. Skills (the pane skill and the task planning
-skills) are separate opt-ins selected with component flags:
+changes no agent behavior. Optional skills (the pane skill and the task
+planning skills) resolve from the merged [integrations] skills list in pop
+config (embedded defaults, then config.runtime.toml, then user config).
 
-  --pane-skill  Also install the pane skill, which lets the agent drive tmux
-                panes. It lands as a symlink into pop's data directory: a skill
-                directory for claude, pi, and cursor (e.g.
-                ~/.claude/skills/pop-pane) and a flat file for opencode
-                (~/.config/opencode/agent/pop-pane.md). Not supported for codex.
-
-  --task-skills
-                Also install the task planning skills (grill-with-docs,
-                to-prd, to-tasks), each as a multi-file skill directory
-                symlinked into pop's data directory (e.g.
-                ~/.claude/skills/pop-grill-with-docs/). grill-with-docs ships
-                with its companion format documents so its references resolve.
-                Supported for claude, pi, and cursor only; reported as not
-                supported for opencode and codex (no degraded install).
+Run with no flags to install the core status wiring plus every optional
+component in the merged baseline — no prompts, TTY or not. Re-running
+re-asserts the full merged baseline (bare integrate clears runtime
+overrides).
 
   --no-pane-skill
                 Remove the pane skill if it is currently installed (pop-owned
-                artifacts only) and record the opt-out. Has no effect if the
-                component is not installed. Takes no effect when --pane-skill
-                is also set.
+                artifacts only) and record the opt-out in config.runtime.toml.
 
   --no-task-skills
                 Remove the task planning skills if currently installed and
                 record the opt-out. Same semantics as --no-pane-skill.
 
-Run in a terminal with no component flags to launch the interactive
-Integration wizard: it installs the core status wiring (no prompt), then
-walks one explained y/n step per supported opt-in component — the pane skill
-and the task planning skills. Declining any step skips it; re-run anytime
-to add or remove components.
+  --overwrite-conflicts
+                On install, prompt to destroy unowned entries that block
+                pop's integration artifacts. Plain integrate skips unowned
+                conflicts and names this command.
 
-Component flags select an exact set: the status wiring plus exactly the
-requested components, with no prompting. A non-interactive run with no
-component flags fails rather than installing a default.
+The --pane-skill and --task-skills flags are no longer supported; configure
+[integrations] skills in ~/.config/pop/config.toml instead.
 
 Supported agents:
   claude    Install pane monitoring hooks in ~/.claude/settings.json.
@@ -510,6 +497,46 @@ func integrationSkillAliasForOptOut(id ComponentID) (string, bool) {
 	}
 }
 
+func integrationComponentForSkillAlias(alias string) (ComponentID, bool) {
+	switch alias {
+	case config.IntegrationSkillPane:
+		return ComponentPaneSkill, true
+	case config.IntegrationSkillTasks:
+		return ComponentTaskSkills, true
+	default:
+		return "", false
+	}
+}
+
+// integrationBaselineLoader loads pop config and returns optional skill
+// components from the merged [integrations] skills list. Status wiring is
+// not included — callers always install it separately.
+var integrationBaselineLoader = func() ([]ComponentID, error) {
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	skills, err := cfg.IntegrationsSkills()
+	if err != nil {
+		return nil, err
+	}
+	seen := map[ComponentID]bool{}
+	var baseline []ComponentID
+	for _, alias := range skills {
+		id, ok := integrationComponentForSkillAlias(alias)
+		if !ok || seen[id] {
+			continue
+		}
+		seen[id] = true
+		baseline = append(baseline, id)
+	}
+	return baseline, nil
+}
+
+func positiveIntegrateFlagError(flag string) error {
+	return fmt.Errorf("%s is no longer supported: configure optional components via [integrations] skills in pop config, or run 'pop integrate <agent>' to install the merged baseline", flag)
+}
+
 // applyIntegrateRuntimeConfig mutates config.runtime.toml once per integrate
 // invocation. Bare integrate clears runtime [integrations] overrides; --no-*
 // removes the corresponding skill aliases from the runtime layer (ADR 0065).
@@ -538,25 +565,21 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 		}
 		return runIntegrateUpdateExisting()
 	}
-	var optins []ComponentID
 	if integratePaneSkill {
-		optins = append(optins, ComponentPaneSkill)
+		return positiveIntegrateFlagError("--pane-skill")
 	}
 	if integrateTaskSkills {
-		optins = append(optins, ComponentTaskSkills)
+		return positiveIntegrateFlagError("--task-skills")
 	}
 
-	// Build explicit opt-out set: --no-* flags that are not overridden by the
-	// corresponding --* install flag. --pane-skill wins over --no-pane-skill;
-	// likewise for task-skills.
 	var explicitOptOuts map[ComponentID]bool
-	if integrateNoPaneSkill && !integratePaneSkill {
+	if integrateNoPaneSkill {
 		if explicitOptOuts == nil {
 			explicitOptOuts = make(map[ComponentID]bool)
 		}
 		explicitOptOuts[ComponentPaneSkill] = true
 	}
-	if integrateNoTaskSkills && !integrateTaskSkills {
+	if integrateNoTaskSkills {
 		if explicitOptOuts == nil {
 			explicitOptOuts = make(map[ComponentID]bool)
 		}
@@ -576,15 +599,20 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	bareIntegrate := len(optins) == 0 && len(explicitOptOuts) == 0
+	bareIntegrate := len(explicitOptOuts) == 0
 	if err := applyIntegrateRuntimeConfig(bareIntegrate, explicitOptOuts); err != nil {
 		return fmt.Errorf("runtime config: %w", err)
 	}
 
-	// Install each agent in order with the same flags applied uniformly.
+	baseline, err := integrationBaselineLoader()
+	if err != nil {
+		return err
+	}
+
+	// Install each agent in order with the same merged baseline applied uniformly.
 	for _, agent := range args {
 		d := defaultIntegrateDeps()
-		if err := runIntegrateComponents(d, agent, optins, stdinIsInteractive(), integrateVerbose, explicitOptOuts, integrateOverwriteConflicts, integrateYes); err != nil {
+		if err := runIntegrateComponents(d, agent, baseline, stdinIsInteractive(), integrateVerbose, explicitOptOuts, integrateOverwriteConflicts, integrateYes); err != nil {
 			return err
 		}
 	}
@@ -602,26 +630,16 @@ func stdinIsInteractive() bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-// runIntegrateComponents is the entry point for `pop integrate <agent>` with
-// the per-component consent contract (ADR 0010):
+// runIntegrateComponents is the entry point for `pop integrate <agent>`. It
+// installs the core status wiring plus every component in baseline (from merged
+// [integrations] skills), with no prompting. Prints one outcome line per
+// (agent, component) pair: added, updated, already-current, skipped.
 //
-//   - With explicit component flags (optins non-empty): install the core
-//     status wiring plus exactly the requested components, no prompting, in
-//     either a TTY or non-interactively. Prints one outcome line per
-//     (agent, component) pair: added, updated, already-current, skipped.
-//   - Without flags, non-interactively: fail loudly and install nothing, so
-//     nothing lands by surprise default.
-//   - Without flags, interactively: run the Integration wizard — install the
-//     core status wiring, then walk one explained y/n step per supported opt-in
-//     component, closing with a note that re-running adds or removes components.
-//
-// explicitOptOuts lists components that were actively declined via --no-*
-// flags. A nil map means no explicit opt-outs. For a component in this set
-// that is not in the install set, removeOptOutCollectOutcome is called: if the
-// component is installed (pop-owned), it is removed and "removed (opted out)"
-// is reported; if not installed, "skipped (opted out)" is reported. A
-// component in both installSet and explicitOptOuts is installed (install wins).
-func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID, interactive bool, verbose bool, explicitOptOuts map[ComponentID]bool, overwriteConflicts, assumeYes bool) error {
+// explicitOptOuts lists components actively declined via --no-* flags. For a
+// component in this set that is not in the install set, removeOptOutCollectOutcome
+// is called: if installed (pop-owned), it is removed and "removed (opted out)"
+// is reported; if not installed, "skipped (opted out)" is reported.
+func runIntegrateComponents(d *integrateDeps, agent string, baseline []ComponentID, interactive bool, verbose bool, explicitOptOuts map[ComponentID]bool, overwriteConflicts, assumeYes bool) error {
 	agent = strings.ToLower(agent)
 	d.overwriteConflicts = overwriteConflicts
 	d.assumeYes = assumeYes
@@ -643,32 +661,10 @@ func runIntegrateComponents(d *integrateDeps, agent string, optins []ComponentID
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	if len(optins) == 0 && len(explicitOptOuts) == 0 {
-		if !interactive {
-			return fmt.Errorf("no component flags given: refusing to install a default non-interactively (pass e.g. --pane-skill)")
-		}
-		// Bare interactive invocation: run the Integration wizard.
-		return runIntegrateWizard(d, home, agent)
-	}
-
-	// Pre-flight: every requested opt-in must be supported by this agent before
-	// anything is installed. This makes an unsupported pair (e.g.
-	// `pop integrate codex --pane-skill`) report not-supported and install
-	// nothing — not even the core status wiring.
-	for _, id := range optins {
-		comp, ok := lookupComponent(id)
-		if !ok {
-			return fmt.Errorf("unknown component %q", id)
-		}
-		if !comp.supported(agent) {
-			return fmt.Errorf("component %q is not supported for agent %q", id, agent)
-		}
-	}
-
-	// Build the install set: status-wiring is always included; optins are added
-	// by explicit flag.
+	// Build the install set: status-wiring is always included; baseline lists
+	// optional skill components from merged config.
 	installSet := map[ComponentID]bool{ComponentStatusWiring: true}
-	for _, id := range optins {
+	for _, id := range baseline {
 		installSet[id] = true
 	}
 

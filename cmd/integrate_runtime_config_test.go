@@ -82,7 +82,11 @@ func TestIntegrateRuntimeConfig_NoPaneSkill_WritesRuntimeAndRemovesArtifacts(t *
 
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
+	baseline, err := integrationBaselineLoader()
+	if err != nil {
+		t.Fatalf("integrationBaselineLoader: %v", err)
+	}
+	if err := runIntegrateComponents(d, "claude", baseline, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("runIntegrateComponents: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; ok {
@@ -114,7 +118,11 @@ func TestIntegrateRuntimeConfig_NoTaskSkills_WritesRuntimeAndRemovesArtifacts(t 
 
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
+	baseline, err := integrationBaselineLoader()
+	if err != nil {
+		t.Fatalf("integrationBaselineLoader: %v", err)
+	}
+	if err := runIntegrateComponents(d, "claude", baseline, false, false, optOuts, false, false); err != nil {
 		t.Fatalf("runIntegrateComponents: %v", err)
 	}
 	if len(fs.symlinks) >= linksBefore {

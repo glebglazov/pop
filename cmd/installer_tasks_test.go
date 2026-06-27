@@ -181,21 +181,22 @@ func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
 	}
 }
 
-// TestRunIntegrateTaskSkillsUnsupported covers opencode and codex: the
-// component is reported as not supported and nothing is installed — not even
-// the core status wiring.
+// TestRunIntegrateTaskSkillsUnsupported covers opencode and codex: task skills
+// are not supported and are skipped silently while status wiring installs.
 func TestRunIntegrateTaskSkillsUnsupported(t *testing.T) {
 	for _, agent := range []string{"opencode", "codex"} {
 		t.Run(agent, func(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			err := runIntegrateComponents(d, agent, []ComponentID{ComponentTaskSkills}, false, false, nil, false, false)
-			if err == nil {
-				t.Fatalf("expected not-supported error for %s --task-skills", agent)
+			if err := runIntegrateComponents(d, agent, []ComponentID{ComponentTaskSkills}, false, false, nil, false, false); err != nil {
+				t.Fatalf("runIntegrateComponents(%s): %v", agent, err)
 			}
-			if len(fs.files) != 0 || len(fs.symlinks) != 0 {
-				t.Fatalf("nothing should be installed for %s: files=%v symlinks=%v", agent, sortedKeys(fs.files), fs.symlinks)
+			if len(fs.files) == 0 {
+				t.Fatalf("status wiring should be installed for %s", agent)
+			}
+			if len(fs.symlinks) != 0 {
+				t.Fatalf("task skills should be skipped for %s: symlinks=%v", agent, fs.symlinks)
 			}
 		})
 	}
