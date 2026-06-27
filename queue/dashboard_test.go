@@ -278,6 +278,72 @@ func TestDashboardPickedUpIndicator(t *testing.T) {
 	}
 }
 
+// TestDashboardOrphanedIndicator covers the three orphaned-detection cases: a
+// set whose bound checkout is missing on disk is orphaned; a set whose bound
+// checkout still stats present is not; and a set with no binding can never be
+// orphaned. Detection is a filesystem stat only — the mocked Git would error on
+// any command, so this also asserts the build adds no git subprocess.
+func TestDashboardOrphanedIndicator(t *testing.T) {
+	rows := []tasks.Row{
+		{ID: "present", Status: tasks.StatusBlocked},
+		{ID: "missing", Status: tasks.StatusBlocked},
+		{ID: "unbound", Status: tasks.StatusBlocked},
+	}
+	d := dashboardTestDeps(t, rows, nil)
+	dataHome := t.TempDir()
+	real := deps.NewRealFileSystem()
+	origFS := d.Tasks.FS.(*deps.MockFileSystem)
+	const presentPath = "/repo/present"
+	d.Tasks.FS = &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataHome
+			}
+			return ""
+		},
+		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
+		ReadFileFunc:     real.ReadFile,
+		WriteFileFunc:    real.WriteFile,
+		MkdirAllFunc:     real.MkdirAll,
+		RenameFunc:       real.Rename,
+		StatFunc: func(path string) (os.FileInfo, error) {
+			if path == presentPath {
+				return deps.MockFileInfo{NameVal: "present", IsDirVal: true}, nil
+			}
+			return nil, os.ErrNotExist
+		},
+	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey("repo-key", "present"): {RuntimePath: presentPath, Branch: "present-branch"},
+		setScopedKey("repo-key", "missing"): {RuntimePath: "/repo/gone", Branch: "missing-branch"},
+	})
+	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
+
+	got, err := dashboardRowsForStatic(d, &config.Config{}, &DaemonState{Version: 1}, staticForScan(scan, "main", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]DashboardRow{}
+	for _, row := range got {
+		byID[row.SetID] = row
+	}
+	if !byID["missing"].orphaned {
+		t.Fatalf("missing set should be orphaned: %+v", byID["missing"])
+	}
+	if byID["present"].orphaned {
+		t.Fatalf("present set should not be orphaned: %+v", byID["present"])
+	}
+	if byID["unbound"].orphaned {
+		t.Fatalf("unbound set should not be orphaned: %+v", byID["unbound"])
+	}
+	// The orphaned set must render its indicator; the present/unbound sets must not.
+	var rendered strings.Builder
+	renderDashboardTable(&rendered, []DashboardRow{byID["missing"]}, 0, 0)
+	if !strings.Contains(rendered.String(), "orphaned") {
+		t.Fatalf("orphaned indicator missing from row render:\n%s", rendered.String())
+	}
+}
+
 // TestDashboardBuildBoundedStoreOpens asserts the per-build snapshot reads the
 // store a bounded number of times no matter how many rows the build renders: the
 // binding, mergeability, and live-drain reads are served from one snapshot, not

@@ -53,6 +53,12 @@ type DashboardRow struct {
 	// parked is true when the set's repeated abnormal terminals have parked it
 	// (derived from Drain history); unpark writes a park-clear event (ADR-0055).
 	parked bool
+	// orphaned is true when the set's Worktree binding points at a checkout that
+	// no longer exists on disk. Like Picked-up, it is a derived per-build fact
+	// (a cheap filesystem stat, never a git fork), not a persisted status, and is
+	// orthogonal to Task-set status — a set of any status may be orphaned. A set
+	// with no binding can never be orphaned.
+	orphaned bool
 }
 
 // DashboardSnapshot is the data model for `pop queue dashboard`.
@@ -494,8 +500,9 @@ func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonStat
 		// non-trunk bindings — a trunk drain records none — so a Done set's
 		// having a binding is the backlog test; Mergeability is left-joined and
 		// renders as "unknown" when no record exists.
-		_, hasBinding := snap.bindingFor(st.repoKey, taskRow.ID)
+		bnd, hasBinding := snap.bindingFor(st.repoKey, taskRow.ID)
 		awaitingIntegration := taskRow.Status == tasks.StatusDone && hasBinding
+		orphaned := dashboardOrphaned(d, bnd, hasBinding)
 		if !dashboardShowRow(taskRow, awaitingIntegration) {
 			continue
 		}
@@ -545,6 +552,7 @@ func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonStat
 			paneID:             dashboardPaneID(state, st.repoKey, taskRow.ID),
 			integrationBacklog: awaitingIntegration,
 			parked:             parked,
+			orphaned:           orphaned,
 		})
 	}
 	return rows, nil
@@ -647,6 +655,27 @@ func dashboardDrain(snap *dashboardSnapshot, state *DaemonState, repoKey, setID,
 		}
 	}
 	return ""
+}
+
+// dashboardOrphaned reports whether a set's Worktree binding points at a
+// checkout that no longer exists on disk. Detection is a single cheap
+// filesystem stat of the binding's runtime path — never a git subprocess — so
+// the fork-free dashboard build stays fork-free. A set with no binding (or one
+// with a blank runtime path) can never be orphaned; a binding whose runtime
+// path still stats present is not orphaned.
+func dashboardOrphaned(d *Deps, bnd WorktreeBinding, hasBinding bool) bool {
+	if !hasBinding {
+		return false
+	}
+	path := strings.TrimSpace(bnd.RuntimePath)
+	if path == "" {
+		return false
+	}
+	if d == nil || d.Tasks == nil || d.Tasks.FS == nil {
+		return false
+	}
+	_, err := d.Tasks.FS.Stat(path)
+	return err != nil
 }
 
 func dashboardPaneID(state *DaemonState, repoKey, setID string) string {
@@ -2832,11 +2861,14 @@ func truncateToWidth(s string, width int) string {
 }
 
 func dashboardRowValues(row DashboardRow) []string {
-	badge := ""
-	if row.AutoDrain {
-		badge = "Auto-drain"
+	var badges []string
+	if row.orphaned {
+		badges = append(badges, "orphaned")
 	}
-	return []string{row.Project, row.SetID, row.Status, row.Worktree, row.Drain, badge}
+	if row.AutoDrain {
+		badges = append(badges, "Auto-drain")
+	}
+	return []string{row.Project, row.SetID, row.Status, row.Worktree, row.Drain, strings.Join(badges, " ")}
 }
 
 func dashboardTableLine(values []string, widths []int) string {
