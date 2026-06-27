@@ -37,7 +37,7 @@ func TestInstallFileComponentInstall(t *testing.T) {
 		t.Fatalf("render file not written: %s (have %v)", renderFile, sortedKeys(fs.files))
 	}
 	src, _ := skillFiles.ReadFile("skills/pop/pane.md")
-	want := injectFrontmatterName(string(src), "pop-pane")
+	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-pane"))
 	if string(data) != want {
 		t.Fatalf("render bytes mismatch")
 	}
@@ -73,18 +73,18 @@ func TestInstallFileComponentIdempotent(t *testing.T) {
 }
 
 // TestInstallFileComponentCopyToSymlinkMigration covers a pre-existing copy-mode
-// install (a real directory under the pop- name prefix) being replaced by a
-// symlink.
+// install (a real directory whose SKILL.md carries the pop-owned marker) being
+// replaced by a symlink.
 func TestInstallFileComponentCopyToSymlinkMigration(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
 	_, linkDest, linkTarget := paneSkillPaths()
-	// Simulate an older copy-mode install: a real directory + file at the
-	// agent's skill location.
+	// Simulate an older copy-mode install: a real directory + marker-bearing
+	// SKILL.md at the agent's skill location.
 	fs.dirs[linkDest] = true
 	copyFile := filepath.Join(linkDest, "SKILL.md")
-	fs.files[copyFile] = []byte("old copy-mode body")
+	fs.files[copyFile] = []byte("---\npop-owned: true\n---\nold copy-mode body")
 
 	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
@@ -141,7 +141,8 @@ type paneSkillAgent struct {
 // this slice (pi, cursor, opencode), derived from installerHome.
 func paneSkillAgents() []paneSkillAgent {
 	src, _ := skillFiles.ReadFile("skills/pop/pane.md")
-	skillDirBytes := []byte(injectFrontmatterName(string(src), "pop-pane"))
+	skillDirBytes := []byte(injectOwnershipMarker(injectFrontmatterName(string(src), "pop-pane")))
+	flatBytes := []byte(injectOwnershipMarker(string(src)))
 
 	dataRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations")
 
@@ -175,7 +176,7 @@ func paneSkillAgents() []paneSkillAgent {
 			renderFile: filepath.Join(ocRoot, "pop-pane.md"),
 			linkDest:   ocDest,
 			linkTarget: filepath.Join(ocRoot, "pop-pane.md"),
-			wantBytes:  src,
+			wantBytes:  flatBytes,
 			legacyFile: ocDest,
 		},
 	}
@@ -234,20 +235,21 @@ func TestInstallFileComponentIdempotentNewAgents(t *testing.T) {
 
 // TestInstallFileComponentMigrationNewAgents covers a pre-existing copy-mode
 // install being replaced by a symlink: a real skill directory for pi/cursor, a
-// real flat file for opencode. Both live under the pop- name prefix at the
-// agent location, so ownership recognizes them as pop-owned and migrates them.
+// real flat file for opencode. Both carry the pop-owned marker in their
+// frontmatter, so ownership recognizes them as pop-owned and migrates them.
 func TestInstallFileComponentMigrationNewAgents(t *testing.T) {
 	for _, a := range paneSkillAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
+			markerBody := []byte("---\npop-owned: true\n---\nold copy-mode body")
 			if a.legacyDir != "" {
 				fs.dirs[a.legacyDir] = true
-				fs.files[filepath.Join(a.legacyDir, "SKILL.md")] = []byte("old copy-mode body")
+				fs.files[filepath.Join(a.legacyDir, "SKILL.md")] = markerBody
 			}
 			if a.legacyFile != "" {
-				fs.files[a.legacyFile] = []byte("old copy-mode body")
+				fs.files[a.legacyFile] = markerBody
 			}
 
 			if err := installFileComponent(d, installerHome, ComponentPaneSkill, a.name); err != nil {
@@ -320,16 +322,43 @@ func TestOwnership(t *testing.T) {
 	}
 	delete(fs.symlinks, dest)
 
-	// Real pop- prefixed directory → owned (copy-mode).
-	fs.dirs[dest] = true
+	// Dangling symlink into pop's tree (target file does not exist) → still
+	// owned: the prefix decides, and there is no frontmatter to read.
+	fs.symlinks[dest] = filepath.Join(integrationsRoot, "claude", "pane-skill", "pop-pane", "SKILL.md")
 	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || !exists || !owned {
-		t.Fatalf("pop- copy dir: exists=%v owned=%v err=%v", exists, owned, err)
+		t.Fatalf("dangling in-tree symlink: exists=%v owned=%v err=%v", exists, owned, err)
 	}
-	delete(fs.dirs, dest)
+	delete(fs.symlinks, dest)
 
-	// Real directory without the pop- prefix → not owned.
+	// Real directory whose SKILL.md carries the pop-owned marker → owned,
+	// regardless of name (here a bare, non-pop- name).
+	bare := filepath.Join(installerHome, ".claude", "skills", "pane")
+	fs.dirs[bare] = true
+	fs.files[filepath.Join(bare, "SKILL.md")] = []byte("---\npop-owned: true\nname: pane\n---\nbody")
+	if exists, owned, err := ownership(d, bare, integrationsRoot); err != nil || !exists || !owned {
+		t.Fatalf("marker copy dir: exists=%v owned=%v err=%v", exists, owned, err)
+	}
+
+	// Real flat file carrying the marker → owned (opencode copy-mode shape).
+	flat := filepath.Join(installerHome, ".config", "opencode", "agent", "pane.md")
+	fs.files[flat] = []byte("---\npop-owned: true\n---\nbody")
+	if exists, owned, err := ownership(d, flat, integrationsRoot); err != nil || !exists || !owned {
+		t.Fatalf("marker flat file: exists=%v owned=%v err=%v", exists, owned, err)
+	}
+
+	// Real pop- named directory WITHOUT the marker → not owned: the name no
+	// longer confers ownership (legacy name test removed in favour of marker).
+	popNamed := filepath.Join(installerHome, ".claude", "skills", "pop-pane")
+	fs.dirs[popNamed] = true
+	fs.files[filepath.Join(popNamed, "SKILL.md")] = []byte("---\nname: pop-pane\n---\nuser body")
+	if exists, owned, err := ownership(d, popNamed, integrationsRoot); err != nil || !exists || owned {
+		t.Fatalf("pop- named dir without marker: exists=%v owned=%v err=%v", exists, owned, err)
+	}
+
+	// Hand-written skill, no marker, not a render-tree symlink → not owned.
 	other := filepath.Join(installerHome, ".claude", "skills", "my-skill")
 	fs.dirs[other] = true
+	fs.files[filepath.Join(other, "SKILL.md")] = []byte("---\nname: my-skill\n---\nmine")
 	if exists, owned, err := ownership(d, other, integrationsRoot); err != nil || !exists || owned {
 		t.Fatalf("foreign dir: exists=%v owned=%v err=%v", exists, owned, err)
 	}

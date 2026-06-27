@@ -571,10 +571,31 @@ func installPiExtension(d *integrateDeps, home string) error {
 // field set to the given value. If the file already has a name, it is
 // replaced. If there is no frontmatter at all, one is created.
 func injectFrontmatterName(content, name string) string {
+	return setFrontmatterField(content, "name", name)
+}
+
+// popOwnedField is the name-independent frontmatter marker pop writes into
+// every rendered skill. Ownership of a real (copy-mode) entry is decided by
+// this marker rather than the `pop-` name prefix (ADR 0011, skill-prefix slice
+// 02), decoupling ownership from the configurable skill-name prefix.
+const popOwnedField = "pop-owned"
+
+// injectOwnershipMarker guarantees the YAML frontmatter carries the
+// name-independent `pop-owned: true` ownership marker, creating frontmatter if
+// none exists. See popOwnedField.
+func injectOwnershipMarker(content string) string {
+	return setFrontmatterField(content, popOwnedField, "true")
+}
+
+// setFrontmatterField guarantees the YAML frontmatter contains `<key>: <value>`.
+// An existing entry for the key is replaced; absent frontmatter is created;
+// malformed frontmatter (no closing fence) is left untouched.
+func setFrontmatterField(content, key, value string) string {
+	field := key + ": " + value
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		// No frontmatter — wrap the content in one.
-		return fmt.Sprintf("---\nname: %s\n---\n%s", name, content)
+		return fmt.Sprintf("---\n%s\n---\n%s", field, content)
 	}
 	// Find the closing `---`.
 	end := -1
@@ -588,16 +609,39 @@ func injectFrontmatterName(content, name string) string {
 		// Malformed frontmatter — leave it alone.
 		return content
 	}
-	// Replace existing name: line if present.
+	// Replace existing `<key>:` line if present.
+	prefix := key + ":"
 	for i := 1; i < end; i++ {
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), "name:") {
-			lines[i] = "name: " + name
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), prefix) {
+			lines[i] = field
 			return strings.Join(lines, "\n")
 		}
 	}
-	// Otherwise insert `name:` directly after the opening `---`.
-	out := append([]string{lines[0], "name: " + name}, lines[1:]...)
+	// Otherwise insert the field directly after the opening `---`.
+	out := append([]string{lines[0], field}, lines[1:]...)
 	return strings.Join(out, "\n")
+}
+
+// frontmatterHasOwnershipMarker reports whether content's YAML frontmatter
+// carries `pop-owned: true` — the canonical ownership signal for a real
+// copy-mode entry. Any other value, a missing key, or absent frontmatter means
+// not owned.
+func frontmatterHasOwnershipMarker(content string) bool {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return false
+	}
+	prefix := popOwnedField + ":"
+	for i := 1; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if t == "---" {
+			return false
+		}
+		if strings.HasPrefix(t, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(t, prefix)) == "true"
+		}
+	}
+	return false
 }
 
 // ----- Opencode integration --------------------------------------------------

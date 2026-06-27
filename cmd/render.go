@@ -102,7 +102,7 @@ func renderMultiFileSkill(tree map[string][]byte, agent, dir string) error {
 			return fmt.Errorf("failed to read embedded skill file %s/%s: %w", dir, e.Name(), err)
 		}
 		if e.Name() == "SKILL.md" {
-			tree[skillName+"/SKILL.md"] = []byte(injectFrontmatterName(string(data), skillName))
+			tree[skillName+"/SKILL.md"] = []byte(injectOwnershipMarker(injectFrontmatterName(string(data), skillName)))
 			continue
 		}
 		// Companion document — rides alongside the body, byte-for-byte.
@@ -118,14 +118,18 @@ func renderMultiFileSkill(tree map[string][]byte, agent, dir string) error {
 // with the frontmatter `name` injected so the body matches the directory name.
 //
 // opencode hosts skills as a flat single file `<skillName>.md` — it has no
-// skill-directory layout, so the content is emitted verbatim (no name
-// injection; the file name itself carries the identity).
+// skill-directory layout, so the name is not injected (the file name itself
+// carries the identity), but the ownership marker still is.
+//
+// Every rendered skill carries the name-independent `pop-owned: true` marker so
+// ownership is decided by the marker rather than the skill name (ADR 0011,
+// skill-prefix slice 02).
 func renderSkillFile(agent, skillName, content string) (rel, rendered string, err error) {
 	switch agent {
 	case "claude", "pi", "cursor":
-		return skillName + "/SKILL.md", injectFrontmatterName(content, skillName), nil
+		return skillName + "/SKILL.md", injectOwnershipMarker(injectFrontmatterName(content, skillName)), nil
 	case "opencode":
-		return skillName + ".md", content, nil
+		return skillName + ".md", injectOwnershipMarker(content), nil
 	default:
 		return "", "", fmt.Errorf("agent %q has no skill render layout", agent)
 	}

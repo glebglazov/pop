@@ -85,7 +85,7 @@ func TestRenderTaskSkillsBodyMatchesInjectedSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded source: %v", err)
 	}
-	want := injectFrontmatterName(string(src), "pop-grill-with-docs")
+	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-grill-with-docs"))
 	got := tree["pop-grill-with-docs/SKILL.md"]
 	if string(got) != want {
 		t.Fatalf("grill-with-docs body mismatch:\n got: %q\nwant: %q", string(got), want)

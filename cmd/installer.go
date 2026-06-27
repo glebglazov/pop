@@ -124,9 +124,12 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 //
 // Ownership is decided in two ways, strongest first:
 //   - A symlink whose target resolves under pop's integrations root — the
-//     canonical ADR 0011 marker.
-//   - A real entry whose name carries the legacy `pop-` prefix — a copy-mode
-//     install from before symlinks, eligible for migration.
+//     canonical ADR 0011 marker (also covers dangling symlinks, which have no
+//     frontmatter to read).
+//   - A real entry whose frontmatter carries the `pop-owned: true` marker — a
+//     copy-mode install rendered by pop, eligible for migration. The marker is
+//     name-independent (skill-prefix slice 02), replacing the legacy `pop-`
+//     name-prefix test.
 //
 // Anything else that exists is not owned by pop.
 func ownership(d *integrateDeps, dest, integrationsRoot string) (exists, owned bool, err error) {
@@ -148,9 +151,35 @@ func ownership(d *integrateDeps, dest, integrationsRoot string) (exists, owned b
 		target = filepath.Clean(target)
 		root := filepath.Clean(integrationsRoot)
 		inTree := target == root || strings.HasPrefix(target, root+string(filepath.Separator))
+		if d.logf != nil {
+			d.logf("ownership: %s is symlink -> %s (inTree=%v)", dest, target, inTree)
+		}
 		return true, inTree, nil
 	}
-	return true, strings.HasPrefix(filepath.Base(dest), "pop-"), nil
+	return true, ownedByMarker(d, dest, mode), nil
+}
+
+// ownedByMarker reports whether a real (non-symlink) entry is pop-owned by
+// reading its frontmatter for the `pop-owned: true` marker. A multi-file skill
+// carries the marker in its `SKILL.md`; a flat copy-mode skill carries it in
+// the file itself. An unreadable file (or one without the marker) is not owned.
+func ownedByMarker(d *integrateDeps, dest string, mode os.FileMode) bool {
+	target := dest
+	if mode.IsDir() {
+		target = filepath.Join(dest, "SKILL.md")
+	}
+	data, err := d.readFile(target)
+	if err != nil {
+		if d.logf != nil {
+			d.logf("ownership: %s not pop-owned (cannot read %s: %v)", dest, target, err)
+		}
+		return false
+	}
+	owned := frontmatterHasOwnershipMarker(string(data))
+	if d.logf != nil {
+		d.logf("ownership: %s pop-owned=%v via marker in %s", dest, owned, target)
+	}
+	return owned
 }
 
 // skillConflict reports whether installing the render-tree entry `name` into

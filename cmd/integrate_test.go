@@ -1882,15 +1882,16 @@ func TestRefreshComponent_SkipsNotSupportedSilently(t *testing.T) {
 
 func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 	// A pre-symlink copy-mode install (a real `pop-pane` directory at the agent
-	// location, no render tree under the data dir) is pop-owned but stale.
-	// Refresh must migrate it to a symlink into the freshly rendered tree.
+	// location whose SKILL.md carries the pop-owned marker, no render tree under
+	// the data dir) is pop-owned but stale. Refresh must migrate it to a symlink
+	// into the freshly rendered tree.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 
 	link := claudePaneLink("/h")
 	fs.dirs[link] = true
 	copyFile := filepath.Join(link, "SKILL.md")
-	fs.files[copyFile] = []byte("old copy-mode body")
+	fs.files[copyFile] = []byte("---\npop-owned: true\n---\nold copy-mode body")
 
 	dry, real := fakeFactories("/h", fs)
 	warnings := ensureIntegrationsForRevisionWith("rev-fc3", dry, real)

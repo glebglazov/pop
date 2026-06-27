@@ -26,7 +26,7 @@ func TestRenderPaneSkillClaude(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded source: %v", err)
 	}
-	want := injectFrontmatterName(string(src), "pop-pane")
+	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-pane"))
 	if string(got) != want {
 		t.Fatalf("rendered bytes mismatch:\n got: %q\nwant: %q", string(got), want)
 	}
@@ -45,7 +45,7 @@ func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded source: %v", err)
 	}
-	want := injectFrontmatterName(string(src), "pop-pane")
+	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-pane"))
 
 	for _, agent := range []string{"pi", "cursor"} {
 		t.Run(agent, func(t *testing.T) {
@@ -71,9 +71,9 @@ func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
 }
 
 // TestRenderPaneSkillOpencode pins the pane skill's rendered tree for opencode:
-// a single flat `pop-pane.md` entry whose bytes are the embedded source
-// verbatim — opencode has no skill-directory layout and requires no name
-// injection (the file name carries the identity).
+// a single flat `pop-pane.md` entry whose bytes are the embedded source with no
+// name injected (opencode has no skill-directory layout; the file name carries
+// the identity) but with the name-independent pop-owned marker added.
 func TestRenderPaneSkillOpencode(t *testing.T) {
 	tree, err := renderComponent(ComponentPaneSkill, "opencode")
 	if err != nil {
@@ -90,8 +90,14 @@ func TestRenderPaneSkillOpencode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded source: %v", err)
 	}
-	if string(got) != string(src) {
-		t.Fatalf("opencode render should be verbatim source:\n got: %q\nwant: %q", string(got), string(src))
+	// opencode injects no name, but every rendered skill carries the
+	// name-independent pop-owned marker (skill-prefix slice 02).
+	want := injectOwnershipMarker(string(src))
+	if string(got) != want {
+		t.Fatalf("opencode render mismatch:\n got: %q\nwant: %q", string(got), want)
+	}
+	if !frontmatterHasOwnershipMarker(string(got)) {
+		t.Fatalf("opencode render missing pop-owned marker: %q", string(got))
 	}
 }
 
