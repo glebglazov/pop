@@ -92,6 +92,206 @@ func TestRouteDrainCheckoutUnboundUsesCurrentCheckout(t *testing.T) {
 	}
 }
 
+// TestRouteDrainCheckoutNoDirectiveForegroundBindsCurrentCheckout asserts a first
+// no-directive foreground drain persists a default (adopted, never-delete) Worktree
+// binding to the current checkout, recording its path and branch (ADR-0062).
+func TestRouteDrainCheckoutNoDirectiveForegroundBindsCurrentCheckout(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	wt := addLinkedWorktree(t, repo, "feature")
+	addCalls := countingGit(t, td)
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: wt,
+		SetID:           "set-a",
+		Trigger:         TriggerImplementForeground,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	currentRuntime, err := tasks.ResolveRuntimePathWith(td, wt, "")
+	if err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+	if !got.BoundDefault || got.RuntimePath != currentRuntime {
+		t.Fatalf("result = %+v, want default binding at %q", got, currentRuntime)
+	}
+	if got.Binding.Branch != "feature" {
+		t.Fatalf("binding branch = %q, want %q", got.Binding.Branch, "feature")
+	}
+	if got.Binding.Provisioned {
+		t.Fatalf("default binding must be adopted (Provisioned=false), got %+v", got.Binding)
+	}
+	if *addCalls != 0 {
+		t.Fatalf("worktree add calls = %d, want 0 — default binding never provisions", *addCalls)
+	}
+
+	id, err := tasks.ResolveRepositoryIdentity(td, wt)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	store, err := Load(td)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	b, ok := store.Get(Key(id, "set-a"))
+	if !ok || b.RuntimePath != currentRuntime || b.Branch != "feature" {
+		t.Fatalf("persisted binding = %+v ok=%v, want path %q branch feature", b, ok, currentRuntime)
+	}
+	if store.ShouldTeardown(Key(id, "set-a")) {
+		t.Fatalf("default binding must never be torn down")
+	}
+}
+
+// TestRouteDrainCheckoutNoDirectiveQueueBindsIntegrationTarget asserts a first
+// no-directive headless Queue drain persists a default binding to the integration
+// target the Queue routes into (the checkout it passed as the current checkout) —
+// ADR-0062. The Queue resolves the integration target (non-bare: main worktree)
+// before calling routing and feeds it as CurrentCheckout.
+func TestRouteDrainCheckoutNoDirectiveQueueBindsIntegrationTarget(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	addCalls := countingGit(t, td)
+
+	// The Queue routes the repo into its integration target. For a non-bare repo
+	// that is the main worktree (trunk), which it passes as CurrentCheckout.
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo,
+		SetID:           "set-a",
+		Trigger:         TriggerQueueSpawn,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	integrationTarget, err := tasks.ResolveRuntimePathWith(td, repo, "")
+	if err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+	if !got.BoundDefault || got.RuntimePath != integrationTarget {
+		t.Fatalf("result = %+v, want default binding at integration target %q", got, integrationTarget)
+	}
+	if got.Binding.Provisioned {
+		t.Fatalf("default binding must be adopted (Provisioned=false), got %+v", got.Binding)
+	}
+	if *addCalls != 0 {
+		t.Fatalf("worktree add calls = %d, want 0 — default binding never provisions", *addCalls)
+	}
+
+	id, err := tasks.ResolveRepositoryIdentity(td, repo)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	store, err := Load(td)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if b, ok := store.Get(Key(id, "set-a")); !ok || b.RuntimePath != integrationTarget {
+		t.Fatalf("persisted binding = %+v ok=%v, want integration target %q", b, ok, integrationTarget)
+	}
+}
+
+// TestRouteDrainCheckoutNoDirectiveSecondDrainResumesBoundCheckout asserts the
+// second drain of a no-directive set resumes the checkout the first drain bound,
+// not the (different) current cwd — the set is sticky to where it first ran
+// (ADR-0062).
+func TestRouteDrainCheckoutNoDirectiveSecondDrainResumesBoundCheckout(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	first := addLinkedWorktree(t, repo, "first")
+	second := addLinkedWorktree(t, repo, "second")
+
+	firstRes, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: first,
+		SetID:           "set-a",
+		Trigger:         TriggerImplementForeground,
+	})
+	if err != nil {
+		t.Fatalf("first route: %v", err)
+	}
+	if !firstRes.BoundDefault {
+		t.Fatalf("first drain must persist a default binding, got %+v", firstRes)
+	}
+
+	// A later drain from a *different* checkout resumes the bound one, not the cwd.
+	secondRes, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: second,
+		SetID:           "set-a",
+		Trigger:         TriggerImplementForeground,
+	})
+	if err != nil {
+		t.Fatalf("second route: %v", err)
+	}
+	if !secondRes.UsedExistingBinding {
+		t.Fatalf("second drain must resume the existing binding, got %+v", secondRes)
+	}
+	if secondRes.RuntimePath != firstRes.RuntimePath {
+		t.Fatalf("second runtime %q != first %q; must resume bound checkout not cwd", secondRes.RuntimePath, firstRes.RuntimePath)
+	}
+}
+
+// TestRouteDrainCheckoutOperatorBindingWinsOverDefault asserts a pre-existing
+// operator binding is resumed and the no-directive default never overwrites it
+// (ADR-0062: bind/override consulted first).
+func TestRouteDrainCheckoutOperatorBindingWinsOverDefault(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	bound := addLinkedWorktree(t, repo, "operator")
+	seedBinding(t, td, repo, "set-a", Adopt(bound, "operator", "proj"))
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo, // cwd differs from the operator-bound checkout
+		SetID:           "set-a",
+		Trigger:         TriggerImplementForeground,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if !got.UsedExistingBinding || got.BoundDefault || got.RuntimePath != bound {
+		t.Fatalf("result = %+v, want operator binding at %q to win", got, bound)
+	}
+}
+
+// TestRouteDrainCheckoutOverrideWinsOverDefault asserts an explicit runtime-path
+// override resolves to that checkout with no default binding persisted (ADR-0062
+// precedence: override before the default step).
+func TestRouteDrainCheckoutOverrideWinsOverDefault(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	override := addLinkedWorktree(t, repo, "override")
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo,
+		SetID:           "set-a",
+		Trigger:         TriggerImplementForeground,
+		RuntimeOverride: override,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	canonOverride, _ := filepath.EvalSymlinks(override)
+	if got.BoundDefault || got.UsedExistingBinding || got.RuntimePath != canonOverride {
+		t.Fatalf("result = %+v, want override checkout %q with no default binding", got, canonOverride)
+	}
+
+	id, err := tasks.ResolveRepositoryIdentity(td, repo)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	store, err := Load(td)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if _, ok := store.Get(Key(id, "set-a")); ok {
+		t.Fatalf("an explicit override must not persist a default binding")
+	}
+}
+
 // seedManagedIntent registers setID under checkout's repository with a `managed`
 // worktree directive (ADR-0059), the registration seed routing consults.
 func seedManagedIntent(t *testing.T, td *tasks.Deps, checkout, setID string) {

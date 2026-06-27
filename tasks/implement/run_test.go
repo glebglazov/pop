@@ -88,10 +88,12 @@ func writeImplementFile(t *testing.T, path, content string) {
 	}
 }
 
-// TestResolveTaskSetRuntimeUnboundUsesCurrentCheckout asserts an unbound
-// whole-set drain with no flags stays in the current checkout and provisions no
-// managed worktree — routing never provisions (ADR-0052).
-func TestResolveTaskSetRuntimeUnboundUsesCurrentCheckout(t *testing.T) {
+// TestResolveTaskSetRuntimeUnboundBindsCurrentCheckout asserts an unbound
+// whole-set foreground drain with no flags stays in the current checkout,
+// provisions no managed worktree (routing never provisions — ADR-0052), and
+// persists a default (adopted) Worktree binding to that current checkout so later
+// drains resume there (ADR-0062).
+func TestResolveTaskSetRuntimeUnboundBindsCurrentCheckout(t *testing.T) {
 	root, d := setupImplementFixture(t)
 
 	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
@@ -116,8 +118,16 @@ func TestResolveTaskSetRuntimeUnboundUsesCurrentCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, ok := store.Get(binding.Key(id, "demo")); ok {
-		t.Fatalf("unexpected worktree binding for unbound drain: %+v", b)
+	b, ok := store.Get(binding.Key(id, "demo"))
+	if !ok {
+		t.Fatalf("expected a default binding for the unbound foreground drain")
+	}
+	gotBound, _ := filepath.EvalSymlinks(b.RuntimePath)
+	if gotBound != wantRoot {
+		t.Fatalf("default binding RuntimePath = %q, want current checkout %q", gotBound, wantRoot)
+	}
+	if b.Provisioned {
+		t.Fatalf("default binding must be adopted (Provisioned=false), got %+v", b)
 	}
 }
 

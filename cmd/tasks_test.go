@@ -1072,7 +1072,9 @@ func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
 
 // TestRunTasksCmdUnboundDrainsInCurrentCheckout asserts a default (non-inline)
 // whole-set run does not auto-provision a managed worktree: it drains inline in
-// the current checkout and records no Worktree binding (ADR-0052).
+// the current checkout (routing never provisions — ADR-0052) and persists a
+// default (adopted, never-provisioned) Worktree binding to that checkout so later
+// drains resume there (ADR-0062).
 func TestRunTasksCmdUnboundDrainsInCurrentCheckout(t *testing.T) {
 	root := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
@@ -1093,8 +1095,17 @@ func TestRunTasksCmdUnboundDrainsInCurrentCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, ok := store.Get(binding.Key(id, "demo")); ok {
-		t.Fatalf("unexpected worktree binding for unbound run: %+v", b)
+	b, ok := store.Get(binding.Key(id, "demo"))
+	if !ok {
+		t.Fatalf("expected a default binding for the unbound run")
+	}
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	gotBound, _ := filepath.EvalSymlinks(b.RuntimePath)
+	if gotBound != wantRoot {
+		t.Fatalf("default binding RuntimePath = %q, want current checkout %q", gotBound, wantRoot)
+	}
+	if b.Provisioned {
+		t.Fatalf("default binding must be adopted (Provisioned=false), got %+v", b)
 	}
 }
 

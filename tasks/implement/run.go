@@ -132,8 +132,10 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 	// An existing binding resumes at its bound checkout, an explicit override
 	// resolves to that checkout, a `managed` directive provisions a fresh managed
 	// worktree, and a `name` directive adopts the named worktree — all are resolved
-	// checkouts the executor must be pointed at. Otherwise the drain stays in the
-	// current checkout, which the executor already resolves, so leave it empty.
+	// checkouts the executor must be pointed at. The no-directive final step now
+	// persists a default binding to the current checkout (ADR-0062), but its
+	// RuntimePath is that same current checkout the executor already resolves, so it
+	// needs no re-pointing here.
 	if route.UsedExistingBinding || route.ProvisionedManaged || route.AdoptedNamed || strings.TrimSpace(in.RuntimeOverride) != "" {
 		in.RuntimeOverride = route.RuntimePath
 	}

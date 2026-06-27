@@ -23,12 +23,15 @@ const (
 
 // RouteDrainCheckoutRequest carries inputs for drain checkout resolution.
 // Precedence: existing Worktree binding → runtime-path override → registration
-// worktree-intent → current checkout (ADR-0059). The directive step is the only
-// place routing provisions a worktree, and only on the first unbound drain of a
-// set whose registration carries one; every other path resolves an existing
-// checkout. Config, PD, and Now are consulted only by that directive step (to
-// resolve the Trunk worktree, label the binding, and stamp the provisioned
-// branch); a request that never hits it may leave them zero.
+// worktree-intent → default binding to the chosen checkout (ADR-0059, ADR-0062).
+// The directive step is the only place routing provisions a worktree, and only on
+// the first unbound drain of a set whose registration carries one; every other
+// path resolves an existing checkout. The final step no longer runs transiently:
+// the first no-directive drain persists a default (adopted) binding to the chosen
+// checkout, so later drains resume there. Config and PD are consulted by the
+// directive step (to resolve the Trunk worktree and label/stamp the binding) and
+// PD/Config also label the default binding; a request that resumes an existing
+// binding may leave them zero.
 type RouteDrainCheckoutRequest struct {
 	TD              *tasks.Deps
 	PD              *project.Deps
@@ -55,6 +58,13 @@ type RouteDrainCheckoutResult struct {
 	// ProvisionedManaged it marks RuntimePath as a resolved checkout the executor
 	// must be pointed at; unlike it, pop never tears the checkout down.
 	AdoptedNamed bool
+	// BoundDefault is true when this route hit the no-directive final step and
+	// persisted a default Worktree binding to the chosen checkout — the current
+	// checkout for foreground, the integration target for the Queue (ADR-0062).
+	// Like AdoptedNamed it records a never-deleted (adopted) binding; later drains
+	// resume via step 1. RuntimePath is the checkout the executor already resolves
+	// on its own, so unlike the other flags the caller need not re-point at it.
+	BoundDefault bool
 	Binding      Binding
 }
 
@@ -76,16 +86,18 @@ var (
 
 // RouteDrainCheckout resolves which checkout a set drain runs in, honoring the
 // precedence binding → runtime-path override → registration worktree-intent →
-// current checkout (ADR-0059). An existing Worktree binding resumes there; an
-// explicit runtime-path override resolves to that checkout; an unbound set whose
-// registration carries a `managed` worktree directive forks a managed worktree
-// from the Trunk worktree, records a managed binding, and drains there; otherwise
-// the drain runs in the current checkout. "Drain where you are" still follows for
-// the no-directive case — a linked current checkout is adopted (a never-delete
-// adopted binding recorded by the executor), the trunk drains inline with no
-// binding. The directive is consulted only when unbound and unoverridden, so an
-// operator's bind/override always wins and provisioning stays lazy and one-time:
-// later drains resume via the binding recorded here.
+// default binding to the chosen checkout (ADR-0059, ADR-0062). An existing
+// Worktree binding resumes there; an explicit runtime-path override resolves to
+// that checkout; an unbound set whose registration carries a `managed` worktree
+// directive forks a managed worktree from the Trunk worktree, records a managed
+// binding, and drains there; a `name` directive adopts the named worktree.
+// Otherwise the first no-directive drain persists a default (adopted) Worktree
+// binding to the checkout it chose — the current checkout for a foreground
+// implement, the integration target the Queue routes into for a headless spawn —
+// and resumes there on later drains (ADR-0062). The directive and the default
+// binding are reached only when unbound and unoverridden, so an operator's
+// bind/override always wins and any provisioning stays lazy and one-time: later
+// drains resume via the binding recorded here.
 func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult, error) {
 	if req.TD == nil {
 		return RouteDrainCheckoutResult{}, fmt.Errorf("missing task dependencies")
@@ -184,8 +196,25 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 		}, nil
 	}
 
-	// 4. Otherwise the drain runs in the current checkout — no provisioning.
-	return RouteDrainCheckoutResult{RuntimePath: currentRuntime}, nil
+	// 4. Otherwise the first no-directive drain persists a default Worktree binding
+	// to the checkout it resolved and resumes there on later drains (ADR-0062),
+	// rather than running transiently. Foreground binds to the current checkout;
+	// the Queue feeds the repo's integration target as the current checkout, so
+	// both bind to currentRuntime — the difference is which checkout the caller
+	// chose, not what routing re-derives. The binding is adopted (Provisioned=false,
+	// never torn down): routing chose the checkout but never created it, and the
+	// integration target especially must never be removed. It records the branch
+	// too, so the dashboard reads execution checkout and branch from the table.
+	b := Adopt(currentRuntime, CurrentBranch(req.TD, currentRuntime), DetectProject(req.PD, req.TD, req.Config, repoID))
+	store.Put(key, b)
+	if err := Save(req.TD, store); err != nil {
+		return RouteDrainCheckoutResult{}, err
+	}
+	return RouteDrainCheckoutResult{
+		RuntimePath:  b.RuntimePath,
+		BoundDefault: true,
+		Binding:      b,
+	}, nil
 }
 
 // ProbeWorktreeDirective reports whether a set's registration worktree-intent is
