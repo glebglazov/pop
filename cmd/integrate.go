@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/spf13/cobra"
 )
@@ -498,6 +499,38 @@ func init() {
 	rootCmd.AddCommand(integrateCmd)
 }
 
+func integrationSkillAliasForOptOut(id ComponentID) (string, bool) {
+	switch id {
+	case ComponentPaneSkill:
+		return config.IntegrationSkillPane, true
+	case ComponentTaskSkills:
+		return config.IntegrationSkillTasks, true
+	default:
+		return "", false
+	}
+}
+
+// applyIntegrateRuntimeConfig mutates config.runtime.toml once per integrate
+// invocation. Bare integrate clears runtime [integrations] overrides; --no-*
+// removes the corresponding skill aliases from the runtime layer (ADR 0065).
+func applyIntegrateRuntimeConfig(bareIntegrate bool, explicitOptOuts map[ComponentID]bool) error {
+	if bareIntegrate {
+		return config.ClearRuntimeIntegrations()
+	}
+	if len(explicitOptOuts) == 0 {
+		return nil
+	}
+	var aliases []string
+	for id := range explicitOptOuts {
+		alias, ok := integrationSkillAliasForOptOut(id)
+		if !ok {
+			continue
+		}
+		aliases = append(aliases, alias)
+	}
+	return config.RemoveRuntimeIntegrationSkills(aliases...)
+}
+
 func runIntegrate(cmd *cobra.Command, args []string) error {
 	if integrateUpdateExisting {
 		if integrateOverwriteConflicts {
@@ -541,6 +574,11 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 		if !core.supported(agent) {
 			return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
 		}
+	}
+
+	bareIntegrate := len(optins) == 0 && len(explicitOptOuts) == 0
+	if err := applyIntegrateRuntimeConfig(bareIntegrate, explicitOptOuts); err != nil {
+		return fmt.Errorf("runtime config: %w", err)
 	}
 
 	// Install each agent in order with the same flags applied uniformly.
