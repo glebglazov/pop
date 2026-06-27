@@ -181,22 +181,7 @@ func pruneStaleAgentEntries(d *integrateDeps, agentDir, renderRoot string, id Co
 			return fmt.Errorf("failed to stat %s: %w", dest, err)
 		}
 
-		stale := false
-		switch {
-		case mode&os.ModeSymlink != 0:
-			target, rerr := d.readlink(dest)
-			if rerr == nil {
-				if !filepath.IsAbs(target) {
-					target = filepath.Join(filepath.Dir(dest), target)
-				}
-				target = filepath.Clean(target)
-				stale = target == cleanRenderRoot || strings.HasPrefix(target, cleanRenderRoot+string(filepath.Separator))
-			}
-		case possible[name]:
-			stale = ownedByMarker(d, dest, mode)
-		}
-
-		if !stale {
+		if !componentOwnsAgentEntry(d, name, dest, mode, cleanRenderRoot, possible) {
 			continue
 		}
 		if d.logf != nil {
@@ -228,6 +213,84 @@ func componentPossibleNames(id ComponentID, agent string, prefixes ...string) ma
 		}
 	}
 	return names
+}
+
+// componentOwnsAgentEntry reports whether the agent-location entry `name` (with
+// the given lstat `mode`) is a pop-owned artifact attributable to THIS
+// component — the shared predicate behind both stale-name pruning and the
+// name-agnostic installed check (ADR 0063). Attribution mirrors the install
+// path so it never reaches across components or touches a user's own skill:
+//
+//   - A symlink resolving into the component's render root — a link this
+//     component installed, under any prefix (the render root is per-component,
+//     not per-name), so a renamed/re-prefixed entry is still recognised.
+//   - A real, marker-owned entry whose name this component could produce under
+//     the default (`pop-`) or bare prefix — a copy-mode artifact, which carries
+//     no render-tree target to attribute it by, so it is scoped by name.
+//
+// Anything else — a symlink into another component's render tree, an unowned
+// entry, a foreign skill — is not owned by this component.
+func componentOwnsAgentEntry(d *integrateDeps, name, dest string, mode os.FileMode, cleanRenderRoot string, possible map[string]bool) bool {
+	switch {
+	case mode&os.ModeSymlink != 0:
+		target, err := d.readlink(dest)
+		if err != nil {
+			return false
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(dest), target)
+		}
+		target = filepath.Clean(target)
+		return target == cleanRenderRoot || strings.HasPrefix(target, cleanRenderRoot+string(filepath.Separator))
+	case possible[name]:
+		return ownedByMarker(d, dest, mode)
+	default:
+		return false
+	}
+}
+
+// fileComponentInstalledNames returns the set of agent-location entry names that
+// are pop-owned artifacts attributable to this component, regardless of the
+// prefix or base name they were installed under (ADR 0063). It is the
+// name-agnostic "is this component opted in" probe used by refresh: a skill
+// installed as `pop-pane` is still found after the base renames to
+// `pop-tmux-pane` or the prefix flips to bare, because attribution keys on the
+// per-component render root, not the entry's name.
+func fileComponentInstalledNames(d *integrateDeps, home string, id ComponentID, agent string) (map[string]bool, error) {
+	agent = strings.ToLower(agent)
+	dataDir, err := d.dataDir()
+	if err != nil {
+		return nil, err
+	}
+	renderRoot := filepath.Join(dataDir, "integrations", agent, string(id))
+	agentDir, err := agentSkillDir(home, agent)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	if d.readDirNames == nil {
+		return out, nil
+	}
+	names, err := d.readDirNames(agentDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list %s: %w", agentDir, err)
+	}
+	possible := componentPossibleNames(id, agent, config.DefaultSkillPrefix, "")
+	cleanRenderRoot := filepath.Clean(renderRoot)
+	for _, name := range names {
+		dest := filepath.Join(agentDir, name)
+		mode, err := d.lstatMode(dest)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to stat %s: %w", dest, err)
+		}
+		if componentOwnsAgentEntry(d, name, dest, mode, cleanRenderRoot, possible) {
+			out[name] = true
+		}
+	}
+	return out, nil
 }
 
 // ownership reports whether an entry exists at dest and whether pop owns it.

@@ -1094,19 +1094,27 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 		return false, "" // an unowned entry shadows pop's — skip silently
 	}
 
-	installed, err := fileComponentInstalled(checkDeps, home, id, agent)
+	// Opted-in check (name-agnostic): is any pop-owned artifact for this
+	// component present at the agent location, under whatever name it was last
+	// installed with? An empty set means the user never opted in (or removed it)
+	// — refresh never adds it back.
+	installedNames, err := fileComponentInstalledNames(checkDeps, home, id, agent)
 	if err != nil {
 		debug.Error("refreshFileComponent: installed check %s/%s: %v", agent, id, err)
 		return false, ""
 	}
-	if !installed {
+	if len(installedNames) == 0 {
 		if checkDeps.logf != nil {
 			checkDeps.logf("refreshFileComponent: %s/%s not installed — skip", agent, id)
 		}
 		return false, "" // never add an opted-out component
 	}
 
-	stale, err := fileComponentStale(checkDeps, home, id, agent)
+	// Reconcile decision: installed state ≠ expected resolved state is stale
+	// (ADR 0063). Divergence covers the resolved install name (an owned entry
+	// under the old/renamed name, or the correctly-named entry missing) as well
+	// as the rendered content — not just byte-equality under the current name.
+	stale, err := fileComponentStaleResolved(checkDeps, home, id, agent, installedNames)
 	if err != nil {
 		debug.Error("refreshFileComponent: stale check %s/%s: %v", agent, id, err)
 		// Installed but the check failed — warn (installed-but-failing).
