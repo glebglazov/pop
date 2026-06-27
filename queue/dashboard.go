@@ -89,6 +89,75 @@ type dashboardCache struct {
 	resolved    bool
 }
 
+// dashboardSnapshot is a single point-in-time read of pop.db taken once per
+// dashboard build. Each rendered row used to reopen pop.db ~5× (bindings thrice,
+// mergeability once, the drain lock once) every poll; the per-row overlay now
+// consults these in-memory maps instead, so the whole view is one consistent
+// snapshot and the store is opened a bounded number of times per build, not per
+// row. It holds every binding and mergeability record keyed by scoped key, plus
+// the live (PID-alive) running drains keyed by runtime path.
+type dashboardSnapshot struct {
+	bindings     map[string]WorktreeBinding
+	mergeability map[string]integration.Record
+	liveDrains   map[string]tasks.RunningDrain
+}
+
+// newDashboardSnapshot reads the volatile per-build store state once: AllBindings,
+// AllRecords (mergeability), and the live running drains (RunningDrains filtered
+// to PID-alive in memory). It is the single point at which a build touches pop.db
+// for the overlay.
+func newDashboardSnapshot(d *Deps) (*dashboardSnapshot, error) {
+	snap := &dashboardSnapshot{
+		bindings:     map[string]WorktreeBinding{},
+		mergeability: map[string]integration.Record{},
+		liveDrains:   map[string]tasks.RunningDrain{},
+	}
+	if d == nil || d.Tasks == nil {
+		return snap, nil
+	}
+	bindings, err := binding.AllBindings(d.Tasks)
+	if err != nil {
+		return nil, err
+	}
+	for k, b := range bindings {
+		snap.bindings[k] = b
+	}
+	records, err := integration.AllRecords(d.Tasks)
+	if err != nil {
+		return nil, err
+	}
+	for k, rec := range records {
+		snap.mergeability[k] = rec
+	}
+	drains, err := d.liveDrains()
+	if err != nil {
+		return nil, err
+	}
+	for _, dr := range drains {
+		snap.liveDrains[dr.RuntimePath] = dr
+	}
+	return snap, nil
+}
+
+// bindingFor returns the snapshot binding for (repoKey, setID), the
+// snapshot-backed equivalent of bindingForSet.
+func (s *dashboardSnapshot) bindingFor(repoKey, setID string) (WorktreeBinding, bool) {
+	b, ok := s.bindings[setScopedKey(repoKey, setID)]
+	return b, ok
+}
+
+// mergeabilityFor returns the snapshot mergeability record for (repoKey, setID),
+// the snapshot-backed equivalent of the per-row integration.GetForSet read. It
+// applies the same AwaitsIntegration gate GetForSet does, so a no-op record
+// (target == source) reads as absent.
+func (s *dashboardSnapshot) mergeabilityFor(repoKey, setID string) (MergeabilityRecord, bool) {
+	rec, ok := s.mergeability[setScopedKey(repoKey, setID)]
+	if !ok || !integration.AwaitsIntegration(rec) {
+		return MergeabilityRecord{}, false
+	}
+	return mergeabilityRecordFromIntegration(rec), true
+}
+
 // BuildDashboard derives the Queue dashboard rows from registered projects and
 // on-disk task/queue state. It is read-only except for the same refresh
 // auto-registration behavior used by `pop queue status`.
@@ -153,9 +222,15 @@ func BuildDashboardWith(d *Deps, cfg *config.Config, cache *dashboardCache) (Das
 		delays = qcfg.CrashRetryDelays
 	}
 	now := d.now().UTC()
+	// One pop.db read per build, not per row: every row's binding, mergeability,
+	// and live-drain lookup is served from this snapshot.
+	snap, err := newDashboardSnapshot(d)
+	if err != nil {
+		return DashboardSnapshot{}, err
+	}
 	var rows []DashboardRow
 	for _, st := range statics {
-		groupRows, err := dashboardRowsFromStatic(d, state, delays, now, st)
+		groupRows, err := dashboardRowsFromStatic(d, snap, state, delays, now, st)
 		if err != nil {
 			return DashboardSnapshot{}, err
 		}
@@ -372,7 +447,11 @@ func dashboardRowsForRepo(d *Deps, cfg *config.Config, state *DaemonState, scans
 	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
 		delays = qcfg.CrashRetryDelays
 	}
-	return dashboardRowsFromStatic(d, state, delays, d.now().UTC(), st)
+	snap, err := newDashboardSnapshot(d)
+	if err != nil {
+		return nil, err
+	}
+	return dashboardRowsFromStatic(d, snap, state, delays, d.now().UTC(), st)
 }
 
 // resolveRepoStatic resolves one repo group's tick-stable coordinates: repo key,
@@ -417,7 +496,7 @@ func resolveRepoStatic(d *Deps, cfg *config.Config, scans []projectScan) (dashbo
 // resolution plus the current volatile state: task statuses (refresh), runtime
 // locks, and daemon-state columns. It forks no git, so it is the cheap per-poll
 // half the cross-tick cache exists to isolate.
-func dashboardRowsFromStatic(d *Deps, state *DaemonState, delays []time.Duration, now time.Time, st dashboardRepoStatic) ([]DashboardRow, error) {
+func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonState, delays []time.Duration, now time.Time, st dashboardRepoStatic) ([]DashboardRow, error) {
 	refresh, err := d.refresh(st.defPath)
 	if err != nil {
 		return nil, err
@@ -425,23 +504,23 @@ func dashboardRowsFromStatic(d *Deps, state *DaemonState, delays []time.Duration
 	backoff := d.setBackoffLookup(st.repoCommonDir, delays, now)
 	var rows []DashboardRow
 	for _, taskRow := range refresh.Rows {
-		merge, _ := mergeabilityForSet(d, st.repoKey, taskRow.ID)
+		merge, _ := snap.mergeabilityFor(st.repoKey, taskRow.ID)
 		// Integration-backlog membership is binding-driven, not gated on a
 		// recorded Mergeability (ADR-0051). The bindings table only ever holds
 		// non-trunk bindings — a trunk drain records none — so a Done set's
 		// having a binding is the backlog test; Mergeability is left-joined and
 		// renders as "unknown" when no record exists.
-		_, hasBinding := bindingForSet(d.Tasks, st.repoKey, taskRow.ID)
+		_, hasBinding := snap.bindingFor(st.repoKey, taskRow.ID)
 		awaitingIntegration := taskRow.Status == tasks.StatusDone && hasBinding
 		if !dashboardShowRow(taskRow, awaitingIntegration) {
 			continue
 		}
-		wt := dashboardWorktree(d, state, st.repoKey, taskRow.ID, st.rep, st.repBranch, st.bare)
+		wt := dashboardWorktree(d, snap, state, st.repoKey, taskRow.ID, st.rep, st.repBranch, st.bare)
 		parked := false
 		if backoff != nil {
 			parked, _ = backoff(taskRow.ID)
 		}
-		drain := dashboardDrain(d, state, st.repoKey, taskRow.ID, wt.runtimePath)
+		drain := dashboardDrain(snap, state, st.repoKey, taskRow.ID, wt.runtimePath)
 		if parked {
 			drain = "parked"
 		} else if drain == "" && taskRow.Status == tasks.StatusReady {
@@ -508,17 +587,6 @@ func dashboardStatus(row tasks.Row, rec MergeabilityRecord, awaitingIntegration 
 	}
 }
 
-func mergeabilityForSet(d *Deps, repoKey, setID string) (MergeabilityRecord, bool) {
-	if d == nil || d.Tasks == nil {
-		return MergeabilityRecord{}, false
-	}
-	rec, ok, err := integration.GetForSet(d.Tasks, repoKey, setID)
-	if err != nil || !ok {
-		return MergeabilityRecord{}, false
-	}
-	return mergeabilityRecordFromIntegration(rec), true
-}
-
 type dashboardWorktreeView struct {
 	label       string
 	runtimePath string
@@ -533,8 +601,8 @@ const dashboardWorktreeMarker = "↳ "
 // a Worktree binding exists (marked), else the trunk worktree (unmarked), else
 // "(no base)" for an unconfigured bare repo. Routing never auto-provisions, so a
 // set with no binding always lands on the trunk and the column says so honestly.
-func dashboardWorktree(d *Deps, state *DaemonState, repoKey, setID string, rep *projectScan, repBranch string, bare bool) dashboardWorktreeView {
-	if b, ok := bindingForSet(d.Tasks, repoKey, setID); ok && strings.TrimSpace(b.RuntimePath) != "" {
+func dashboardWorktree(d *Deps, snap *dashboardSnapshot, state *DaemonState, repoKey, setID string, rep *projectScan, repBranch string, bare bool) dashboardWorktreeView {
+	if b, ok := snap.bindingFor(repoKey, setID); ok && strings.TrimSpace(b.RuntimePath) != "" {
 		_ = state
 		branch := b.Branch
 		if branch == "" {
@@ -565,21 +633,23 @@ func formatDashboardWorktree(branch string, worktree bool) string {
 	return branch
 }
 
-func dashboardDrain(d *Deps, state *DaemonState, repoKey, setID, runtimePath string) string {
+// dashboardDrain reports "picked up" when a live drain holds the set's checkout,
+// reading the per-build snapshot's live-drain map (one RunningDrains read plus
+// in-memory PID-liveness) instead of reopening the runtime lock per row. The
+// snapshot keys live drains by runtime path; a drain at the set's checkout (or
+// its bound checkout) whose SetID matches is the same fact ReadRuntimeLockStatus
+// derived per row before.
+func dashboardDrain(snap *dashboardSnapshot, state *DaemonState, repoKey, setID, runtimePath string) string {
 	paths := map[string]bool{}
 	if runtimePath != "" {
 		paths[runtimePath] = true
 	}
-	if b, ok := bindingForSet(d.Tasks, repoKey, setID); ok && b.RuntimePath != "" {
+	if b, ok := snap.bindingFor(repoKey, setID); ok && b.RuntimePath != "" {
 		paths[b.RuntimePath] = true
 	}
 	_ = state
 	for path := range paths {
-		lock := d.readLock(path)
-		if lock == nil || !lock.Locked || lock.Metadata == nil {
-			continue
-		}
-		if lock.Metadata.SetID == setID {
+		if dr, ok := snap.liveDrains[path]; ok && dr.SetID == setID {
 			return "picked up"
 		}
 	}

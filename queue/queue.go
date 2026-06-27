@@ -41,6 +41,11 @@ type Deps struct {
 	// ReadLock returns the runtime execution lock status for a runtime
 	// checkout. Defaults to tasks.ReadRuntimeLockStatus.
 	ReadLock func(runtimePath string) *tasks.RuntimeLockStatus
+	// LiveDrains returns every running Drain whose owning process is still
+	// alive. The dashboard build reads it once per build into its snapshot so the
+	// drain column is served by an in-memory map lookup per row rather than a
+	// per-row runtime-lock open. Defaults to tasks.LiveRunningDrains.
+	LiveDrains func() ([]tasks.RunningDrain, error)
 	// ReadOutcome returns the latest terminal drain outcome for a runtime
 	// checkout. Defaults to tasks.ReadDrainOutcome.
 	ReadOutcome func(runtimePath string) (*tasks.DrainOutcomeRecord, error)
@@ -146,6 +151,14 @@ func (d *Deps) readLock(runtimePath string) *tasks.RuntimeLockStatus {
 		return d.ReadLock(runtimePath)
 	}
 	return tasks.ReadRuntimeLockStatus(d.Tasks, runtimePath)
+}
+
+// liveDrains resolves the LiveDrains seam, defaulting to tasks.LiveRunningDrains.
+func (d *Deps) liveDrains() ([]tasks.RunningDrain, error) {
+	if d.LiveDrains != nil {
+		return d.LiveDrains()
+	}
+	return tasks.LiveRunningDrains(d.Tasks)
 }
 
 // readOutcome resolves the ReadOutcome seam, defaulting to tasks.ReadDrainOutcome.

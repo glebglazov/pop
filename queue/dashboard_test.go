@@ -2,6 +2,7 @@ package queue
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -222,17 +224,18 @@ func TestDashboardNoBaseWorktree(t *testing.T) {
 }
 
 func TestDashboardPickedUpIndicator(t *testing.T) {
-	locks := map[string]*tasks.RuntimeLockStatus{
-		"/repo/main": {
-			RuntimePath: "/repo/main",
-			Locked:      true,
-			Metadata:    &tasks.RuntimeLockMetadata{PID: 123, RuntimePath: "/repo/main", SetID: "ready"},
-		},
-	}
 	d := dashboardTestDeps(t, []tasks.Row{
 		{ID: "ready", Status: tasks.StatusReady, AutoDrain: true},
 		{ID: "other", Status: tasks.StatusReady, AutoDrain: true},
-	}, locks)
+	}, nil)
+	// The drain column is served from the per-build snapshot's live-drain map
+	// (one RunningDrains read), so the live drain is injected through the
+	// LiveDrains seam rather than a per-row runtime-lock open.
+	d.LiveDrains = func() ([]tasks.RunningDrain, error) {
+		return []tasks.RunningDrain{
+			{RuntimePath: "/repo/main", SetID: "ready", PID: 123},
+		}, nil
+	}
 	scans := []projectScan{{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}}
 
 	got, err := dashboardRowsForRepo(d, &config.Config{}, &DaemonState{Version: 1}, scans)
@@ -248,6 +251,80 @@ func TestDashboardPickedUpIndicator(t *testing.T) {
 	}
 	if byID["other"].Drain != "" {
 		t.Fatalf("other drain = %q, want empty", byID["other"].Drain)
+	}
+}
+
+// TestDashboardBuildBoundedStoreOpens asserts the per-build snapshot reads the
+// store a bounded number of times no matter how many rows the build renders: the
+// binding, mergeability, and live-drain reads are served from one snapshot, not
+// reopened per row. It builds the same repo twice — once with a handful of rows,
+// once with ten times as many — and asserts the store-open delta is identical
+// (and small), which it cannot be if any of those reads scaled with row count.
+func TestDashboardBuildBoundedStoreOpens(t *testing.T) {
+	rowsN := func(n int) []tasks.Row {
+		out := make([]tasks.Row, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, tasks.Row{ID: fmt.Sprintf("set-%02d", i), Status: tasks.StatusFailed})
+		}
+		return out
+	}
+
+	build := func(t *testing.T, rows []tasks.Row) int64 {
+		t.Helper()
+		d := dashboardTestDeps(t, rows, nil)
+		dataHome := t.TempDir()
+		real := deps.NewRealFileSystem()
+		origFS := d.Tasks.FS.(*deps.MockFileSystem)
+		d.Tasks.FS = &deps.MockFileSystem{
+			GetenvFunc: func(key string) string {
+				if key == "XDG_DATA_HOME" {
+					return dataHome
+				}
+				return ""
+			},
+			EvalSymlinksFunc: origFS.EvalSymlinksFunc,
+			ReadFileFunc: func(path string) ([]byte, error) {
+				if origFS.ReadFileFunc != nil {
+					if data, err := origFS.ReadFileFunc(path); err == nil || !errors.Is(err, os.ErrNotExist) {
+						return data, err
+					}
+				}
+				return real.ReadFile(path)
+			},
+			WriteFileFunc: real.WriteFile,
+			MkdirAllFunc:  real.MkdirAll,
+			RenameFunc:    real.Rename,
+			StatFunc:      origFS.StatFunc,
+		}
+		// Seed the binding and mergeability stores so pop.db exists: the snapshot's
+		// reads only open the store when its file is already present.
+		seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+			setScopedKey("repo-key", "set-00"): {RuntimePath: "/repo/bound", Branch: "bound-branch"},
+		})
+		seedMergeabilityStore(t, d.Tasks, map[string]MergeabilityRecord{
+			setScopedKey("repo-key", "set-00"): {RuntimePath: "/repo/bound", SetID: "set-00", Status: MergeabilityConflicts},
+		})
+		scans := []projectScan{{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}}
+
+		before := store.OpenCount()
+		if _, err := dashboardRowsForRepo(d, &config.Config{}, &DaemonState{Version: 1}, scans); err != nil {
+			t.Fatal(err)
+		}
+		return store.OpenCount() - before
+	}
+
+	small := build(t, rowsN(3))
+	large := build(t, rowsN(30))
+	if large == 0 {
+		t.Fatalf("build performed no store opens; the test is not exercising the snapshot reads")
+	}
+	if small != large {
+		t.Fatalf("store opens scaled with row count: 3 rows = %d opens, 30 rows = %d opens", small, large)
+	}
+	// One snapshot per build: AllBindings + AllRecords + LiveRunningDrains. Allow a
+	// little slack for incidental opens, but it must not grow with rows.
+	if large > 6 {
+		t.Fatalf("per-build store opens = %d, want a small bounded count", large)
 	}
 }
 
