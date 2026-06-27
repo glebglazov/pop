@@ -51,8 +51,12 @@ No attention is required — either you've acknowledged the pane or nothing new 
 _Avoid_: Idle, read
 
 **Topic**:
-A short, agent-derived phrase describing the subject currently under discussion in an **Agentic pane** (e.g. "debugging auth middleware"). Distinct from a **Note**, which the user authors by hand: a Topic is machine-guessed and overwritten as the conversation moves. It is displayed, dimmed, in the parenthetical slot only when no Note is set, and lives for the pane's whole monitored lifetime — cleared only on retirement, never by `unfollow`.
-_Avoid_: Note (user-authored), Label (process identity), summary, title
+A normalized lowercase kebab slug (≤5 words, e.g. `debugging-auth-middleware`) naming the subject of an **Agentic pane**. It is single-sourced as a per-pane tmux property, so any tmux surface — not just pop's dashboard — can display it, and it is reusable in custom tmux labels. pop derives it once per pane via **Topic recipe**s and normalizes the result; a **Note** still outranks it in display.
+_Avoid_: Note (user-authored), summarization, title, pane name, label, summary
+
+**Topic recipe**:
+A pop-curated invocation of an agent CLI (local or remote) that pop runs to derive a **Topic**. pop tries configured recipes in order and uses the first non-empty result, so a failed or rate-limited agent falls through to the next. pop owns the recipes, prompt, and output normalization but links no model SDK and holds no API keys — auth lives in the CLIs.
+_Avoid_: topic command, topic model
 
 **Note**:
 A short annotation the **user** types for a pane in the dashboard. Human intent; outranks a **Topic** in display and is cleared by `unfollow`.
@@ -93,15 +97,11 @@ The per-agent wiring that makes a coding agent report pane status into the **Mon
 _Avoid_: Skill install, setup, framework
 
 **Integration component**:
-An individually consented unit `pop integrate` can install for one agent: the status wiring (core), the **Pane skill**, or the **Task planning skills**. Running integrate implies consent to the status wiring only; every other component is an explicit per-component opt-in.
+An individually-installable unit `pop integrate` lands for one agent: the status wiring (core), the **Pane skill**, or the **Task planning skills**. `pop integrate <agent>` installs them all by default; each non-core component can be declined with a `--no-<component>` flag, and the decline is persisted (see **Component opt-out**).
 _Avoid_: Bundle, default install
 
-**Integration wizard**:
-The re-entrant interactive flow of `pop integrate <agent>`. It shows each **Integration component**'s current state, explains what the component brings before asking, and may be re-run at any time to add or remove components. Non-interactive runs require explicit component flags; without them they fail rather than installing a default.
-_Avoid_: One-shot installer, setup command
-
 **Integration refresh**:
-The automatic re-render of already-installed **Integration components** when the pop binary changes. Refresh never adds components the user did not opt into, never prompts, and leaves uninstalled agents alone.
+Reconciling installed **Integration components** to the state pop now expects: it re-renders by resolved name (not just content), so **Skills prefix** or base-name changes are applied and stale old-named entries pruned; it installs any baseline-listed component that is missing and not opted-out; and it leaves uninstalled agents alone. Runs on the binary-revision-gated picker-launch path and on `pop integrate --update-existing`. Never prompts; never re-adds or updates an opted-out component.
 _Avoid_: Auto-install, update prompt
 
 **Doctor**:
@@ -113,7 +113,7 @@ The aggregate readiness state for one command family in **Doctor**. OK means the
 _Avoid_: Health score, severity level
 
 **Doctor rendering**:
-The terminal presentation of **Doctor**. It should be visually scannable with ANSI color and stable ASCII/Unicode-safe status labels rather than emoji or custom pictograms; alignment must remain reliable in plain terminals, logs, and CI output. The primary structure is one row per top-level command family, with terse assessment checks printed directly beneath that family when they explain how the status was reached.
+The terminal presentation of **Doctor**. Integrate-family sub-checks for file-based components name the resolved install name (same as **Integrate outcome line**), not the **Integration component id**; status wiring checks stay at component level (`<agent> status-wiring`). Otherwise unchanged: scannable ANSI, stable ASCII/Unicode-safe status labels rather than emoji, reliable alignment in plain terminals/logs/CI, one row per top-level command family with terse assessment checks printed directly beneath.
 _Avoid_: Emoji health report, decorative symbols
 
 **Doctor intent**:
@@ -121,16 +121,76 @@ The set of variants Doctor has reason to evaluate for a command family. Doctor r
 _Avoid_: Supported agents matrix, all possible integrations
 
 **Integration conflict**:
-A skill already present at an agent's skill location under an embedded skill's name (with or without the `pop-` prefix) that pop does not own. Pop never installs over, removes, or refreshes a conflicting skill; the wizard and health check report the conflict and leave resolution to the user.
+A skill already present at an embedded skill's resolved install name (see **Skills prefix**) that pop does not recognise as its own (see **Pop-owned marker**). Pop never installs over, removes, or refreshes a conflicting skill; integrate and the health check report the conflict and leave resolution to the user.
 _Avoid_: Stale integration, collision overwrite
 
 **Pane skill**:
-The embedded skill that teaches an agent to drive `pop pane`. An opt-in **Integration component**; pane monitoring works without it.
+The embedded skill that teaches an agent to drive `pop pane`. Installed via the **Integration component id** `pane-skills` (one resolved skill, typically `tmux-pane` when **Skills prefix** is empty). Still selected in config via the **Integration skill alias** `pane`. An opt-in **Integration component**; pane monitoring works without it.
 _Avoid_: Agent integration, hooks
 
 **Task planning skills**:
 The embedded, pop-independent skills (grill-with-docs, to-prd, to-tasks) whose output feeds Task sets. Versioned with the pop binary and installed only by explicit opt-in; pop's task scheduling and execution do not depend on them being installed. grill-consolidate also ships embedded, but is a glossary-maintenance pass that folds CONTEXT fragments into the base — not a Task-set producer.
 _Avoid_: Workload framework, workload skills bundle, agent integration
+
+**Skills prefix**:
+The configurable string prepended to an embedded skill's base name to form its installed name (`<prefix><base>`). Set via `skills_prefix` in `[integrations]`, default `pop-`; an empty value installs skills under their bare base name.
+_Avoid_: skill_prefix, pop- prefix, namespace
+
+**Pop-owned marker**:
+How pop recognises an installed artifact as its own, independent of the skill's name: a symlink resolving into pop's render tree, or — for copy-mode installs — a `pop-owned: true` frontmatter field written into every rendered skill. The legacy `pop-` name-prefix ownership check is retired; the **Skills prefix** can be empty without losing ownership detection for newly rendered skills.
+_Avoid_: ownership convention, pop- name check
+
+**Integration skill alias**:
+The short name for an optional **Integration component** in the merged `skills` config array: `"pane"` → pane skill, `"tasks"` → task planning skills. Config and **Integration runtime config** use aliases; reasoned integrate output and `--no-*` flags use **Integration component id**s (`pane-skills`, `task-skills`). Unknown aliases are a config error.
+_Avoid_: component shorthand, skill name
+
+**Integration component id**:
+The stable slug naming one **Integration component** in pop's machine-facing contract: `status-wiring`, `pane-skills`, `task-skills`. Used for CLI flags (`--no-pane-skills` only — the old `--no-pane-skill` flag is not accepted), render-tree directory names under `$XDG_DATA_HOME/pop/integrations/<agent>/`, **Doctor** evidence keys, and catalog lookup — not for individual installed skill names (`tmux-pane`, `grill-with-docs`, …). Skill-bundle components use plural ids; status wiring stays singular because it is hooks/plumbing, not a skill set.
+_Avoid_: component slug-per-skill
+
+**Integration baseline**:
+The global `skills` array of **Integration skill alias** values declaring which optional **Integration components** pop may install (e.g. `["tasks", "pane"]`). Pop ships embedded defaults; user declares intent in `config.toml`; CLI mutations land in **Integration runtime config**. Resolved by **Config merge order**. Status wiring is never listed. The baseline is a contract: pop must install every listed component on every integrated agent once each **Agent install path** exists.
+_Avoid_: default skills, integration policy
+
+**Integration runtime config**:
+The middle layer in pop's three-layer config merge: `$XDG_DATA_HOME/pop/config.runtime.toml`, written by integrate commands (`--no-*` shrinks `skills`; **Bare integrate** clears this file's overrides). Pop embedded defaults load first; user `~/.config/pop/config.toml` wins last. Integrate reads the merged result — no separate preference store.
+_Avoid_: runtime settings, persisted opt-out json, integrations.toml
+
+**Config merge order**:
+How pop resolves effective configuration: embedded pop defaults, then **Integration runtime config** (`config.runtime.toml`), then user `config.toml` — each layer overrides the previous for the fields it sets. The merge mechanism is global (all config keys); v1 only integrate writes the runtime file, for `[integrations]` only. Integrate, refresh, and **Doctor** consume the merged config.
+_Avoid_: three-layer integrate-only merge
+
+**Component opt-out**:
+Declining an optional **Integration component** by removing it from the global `skills` list in **Integration runtime config** (the middle config layer). Set by `--no-<component>` or `pop integrate remove`; cleared when bare `pop integrate <agent>` drops the runtime override and the merged config re-inherits pop defaults. **Integration baseline** in user config outranks runtime — editing `skills` there solidifies the set. Opt-out is global: declining pane applies to every agent, not one.
+_Avoid_: negative consent, decline list
+
+**Bare integrate**:
+`pop integrate <agent>` with no component flags: installs status wiring for the named agent(s) plus every optional component in the merged **Integration baseline**, with no prompts. Clears **Integration runtime config** overrides (restores pop defaults unless user config constrains `skills`). Re-adds globally opted-out components unless solidified in user config.
+_Avoid_: wizard path, default install flags
+
+**Agent install path**:
+Where pop lands a file-based **Integration component** for one agent (e.g. claude's skills directory, opencode's flat agent file). Each agent may need a different shape (directory symlink vs single file). A component is installable for an agent only once pop implements that agent's path; until then **Doctor** reports the gap and integrate records a reasoned skip — not a degraded partial install.
+_Avoid_: agent support matrix, supported agents list
+
+**Integration conflict overwrite**:
+Destroying an unowned entry that blocks a pop **Integration component** requires an explicit `--overwrite-conflicts` on integrate; plain integrate and **Integration refresh** skip and name that command. The only integrate prompt is `Overwrite <path>? [y/N]` during that flow (or `--yes` to skip it). Pop-owned reinstalls and opt-out removals never prompt.
+_Avoid_: conflict prompt, overwrite wizard
+
+**Stale agent entry cleanup**:
+After integrate links a component's freshly rendered skill names at an agent location, pop removes any remaining pop-owned entries there whose names are no longer in that render set — typically leftovers from a prior **Skills prefix** or base-name change. Scoped per component; never removes unowned or foreign skills.
+_Avoid_: prune stale, stale-name prune
+
+**Integrate outcome line**:
+One stdout line per successful or skipped integrate action, naming what changed. File-based **Integration components** emit one line per resolved installed skill (not one line per component bundle); status wiring stays one line per agent with no skill name. Labels (`added`, `updated`, `skipped (conflict at …)`, `skipped (opted out)`, `removed (opted out)`, etc.) attach to that named unit — same per-skill granularity for skips and removals as for adds and updates. The named skill is the resolved install name — what appears at the agent's skill location after **Skills prefix** is applied — not the **Integration skill alias** or embed base alone.
+_Avoid_: component outcome, integrate row
+
+**Stale skill removal line**:
+An **Integrate outcome line** emitted when **Stale agent entry cleanup** deletes a pop-owned skill whose resolved install name is no longer expected — e.g. after a **Skills prefix** change (`pop-tmux-pane` → `tmux-pane`) or **Integration component id** rename. Label: `removed (stale)`. Distinct from `removed (opted out)`.
+_Avoid_: pruned line, stale prune report
+
+**Integrate outcome ordering**:
+**Integrate outcome line**s group by agent (existing configured agent order). Within an agent: status wiring first, then file-based skills in embed catalog source order (`tmux-pane`; then `grill-with-docs`, `grill-consolidate`, `to-prd`, `to-tasks`). For each embed base, emit any **Stale skill removal line** for superseded resolved names immediately before that base's current line — so `pop-grill-consolidate  removed (stale)` sits next to `grill-consolidate  updated`, not in a separate trailing block.
+_Avoid_: alphabetical integrate output, sort by label
 
 ### Pickers
 
@@ -139,7 +199,7 @@ The fuzzy-search picker opened by the project command — for choosing a project
 _Avoid_: Session picker, select view, normal mode
 
 **Worktree picker**:
-The fuzzy-search picker in `pop worktree` for choosing or deleting git worktrees in the current repository. Interactive picker creation remains out of scope for ordinary worktree navigation, but queue worktree parallelism is the explicit exception where pop owns `git worktree add` for a **Worktree-ready project**. User-defined creation commands may still hand a new path back via **Switch**. Deleting a worktree also removes its **History** entry; its tmux session is left alone (killing it stays an explicit, separate action).
+The fuzzy-search picker in `pop worktree` for choosing or deleting git worktrees in the current repository. Interactive picker creation remains out of scope for ordinary worktree navigation, but queue worktree parallelism is the explicit exception where pop owns `git worktree add` for **managed** **Worktree set**s forked from the **Trunk worktree**. User-defined creation commands may still hand a new path back via **Switch**. Deleting a worktree also removes its **History** entry; its tmux session is left alone (killing it stays an explicit, separate action).
 _Avoid_: Repo picker
 
 **Dashboard picker**:
@@ -195,16 +255,16 @@ This overview relates the terms defined below; read it before changing task beha
 A **task** moves between four statuses. The executor drives the solid transitions; the human drives the dashed ones through manual override commands.
 
 ```
-                       Implement (agent success)
-        open ──────────────────────────────────────────▶ done
-         │ ▲                                              ▲ ▲
-         │ │ Open task                         Complete   │ │ Complete
-         │ └──────────── failed ◀── attempt ───┐ task ────┘ │  task
-         │                  │   exhaustion/timeout           │
-         │ Skip task        │ Open task                      │
-         ▼                  ▼                                │
-      skipped ─────────────┴────────────────────────────────┘
-              Open task (skipped → open) / Complete task (skipped → done)
+Executor drives the solid (───▶) edges; the human drives the dashed (- -▶) ones.
+
+  open    ───────▶ done      Implement (agent success)
+  open    ───────▶ failed    attempt exhaustion / timeout
+  failed  - - - -▶ open      Open task
+  failed  - - - -▶ done      Complete task
+  open    - - - -▶ skipped   Skip task
+  skipped - - - -▶ open      Open task
+  skipped - - - -▶ done      Complete task
+  done    - - - -▶ open      Open task   (a Done task is reopenable)
 ```
 
 - A task is **eligible** when it is `open`, type AFK, and every `blocked_by` prerequisite is satisfied. A prerequisite counts as satisfied when it is `done` **or** `skipped` — a Skipped task unblocks its dependents even though it was deferred, not completed.
@@ -277,13 +337,17 @@ _Avoid_: Workload runtime path, task storage, shared git root
 A **Task set** drained in its own pop-provisioned git worktree under a **Worktree binding**. The checkout is an ephemeral execution context, not a navigable project peer: pop does not auto-create a session for it. It is still a registered git worktree, so it remains reachable on demand via the Worktree picker, which creates a session only when the human selects it.
 _Avoid_: Worktree task, per-task worktree, queue shard
 
-**Worktree-ready project**:
-A Project whose repo-root `.pop.toml` declares `worktree_ready = true`, meaning a bare `git worktree add` yields a runnable checkout without a project-specific setup command. The flag is declarative capability, not project registration and not executable provisioning.
-_Avoid_: Provisioning command, queue-enabled project, registered project
-
 **Drain routing**:
-Resolving which checkout a whole-set drain runs in, following fixed precedence: an existing **Worktree binding** wins; then an explicit Runtime-path override; then a managed worktree forked from the **Execution base** when the project is **Worktree-ready** and `--inline` is not set; otherwise the current checkout (trunk drains inline). **Implement** and the **Queue** share one routing policy; only error handling on provision failure differs by trigger (foreground Implement fails; Queue spawn may fall back to in-place). Single-task file runs are out of scope — they stay current-checkout operations.
+Resolving which checkout a whole-set drain runs in. Precedence: an existing **Worktree binding** wins (resume in the bound checkout); otherwise an explicit Runtime-path override; otherwise the set's **Worktree directive** seeded at registration (provision a managed worktree or adopt a named one, recording a binding on the first unbound drain); otherwise a **Default binding** to the chosen checkout (the current checkout for **Implement**, the **Integration target** for the **Queue**), recorded so later drains resume there. Pop still never auto-provisions from a *repo* capability while routing — provisioning happens only from an explicit operator act or a per-set authored directive, never inferred. **Implement** and the **Queue** share this policy (one `RouteDrainCheckout`). An unsatisfiable directive (managed with no **Trunk worktree**, or a named worktree absent on this machine) is a config/registration-class error: the set is not drained, surfaced like a registration fault, with no backoff and no silent in-place fallback. Single-task file runs stay current-checkout.
 _Avoid_: checkout picker, runtime resolver, workspace routing
+
+**Integration target**:
+The checkout a **Task set**'s work merges into, and the checkout the **Queue** drains an unbound set into. Derived per repository with no git: a **non-bare** repo's target is its main worktree (the parent of its git common directory); a **bare** repo's target is its **Trunk worktree** declared in config. Distinct from the execution checkout (where a drain runs): a set executes on its bound worktree but integrates into this target. A bare repo with no configured trunk has no integration target and its sets surface a config-class error.
+_Avoid_: execution checkout, merge target
+
+**Default binding**:
+The **Worktree binding** a no-directive drain records to the checkout it resolved on its first run — the **current checkout** for a foreground **Implement**, the **Integration target** for a headless **Queue** drain. It makes an otherwise-unbound set sticky to where it first ran, so later drains resume the same checkout and branch. An operator **Bind worktree** or runtime override still takes precedence.
+_Avoid_: implicit binding, auto-bind
 
 **Worktree binding**:
 A durable association between one **Task set** and one git checkout for that set's execution, recorded in shared per-repository drain state and owned by a provisioning module that both **`pop queue run`** and **`pop tasks implement`** call — not a **Queue**-private structure. It is the universal per-set drain router: **Drain routing** consults bindings first, then applies the remaining precedence rules. The bound checkout is either the project's trunk checkout or a worktree, and only worktree (non-trunk) bindings enter the **Integration backlog**. A binding carries a `Provisioned` bit recording who owns the checkout's teardown: **managed** (pop ran `git worktree add` under its data dir; pop tears the checkout and branch down on integration or **Unbind worktree**) versus **adopted** (a human pointed an existing, owned checkout at the set via **Bind worktree**, or a foreground **`pop tasks implement`** ran in and thereby adopted its current checkout; pop drains into it but never deletes it — unbind only forgets the association). Bindings default to adopted/never-delete, so a hand-written or unrecognized binding can never trigger a directory deletion; pop deletes only what it demonstrably created. A managed binding's checkout lives at a stable path derived from the set identifier and persists across drain exits, failures, and supervisor restarts so re-spawns resume the same branch rather than forking afresh. If a binding's checkout is missing or no longer registered with git, pop refuses to spawn and directs the human to repair git state or **Unbind worktree** — it never silently re-provisions. **Archive** does not release a binding.
@@ -298,7 +362,7 @@ The human act of pointing an existing, human-owned git checkout at a **Task set*
 _Avoid_: adopt worktree, claim worktree, queue bind
 
 **Integration backlog**:
-The derived set of **Task set**s whose drain landed in a worktree checkout (not trunk) and now await reconciliation into the working branch they forked from. Membership is determined by which checkout a set drained in, not by how it was triggered: a set that a bare **`pop tasks implement`** ran in a worktree is in the backlog exactly as one a **`pop queue run`** drained there is — and a set drained in trunk never enters it. It is a read-only view over non-trunk **Worktree binding**s plus their **Mergeability**, not a scheduler and not owned by the **Queue** command family. **Integrate** operates on the backlog regardless of trigger. Distinct from **Queue** (the per-project drain supervisor): the backlog routes integration, the Queue routes execution.
+The derived set of **Task set**s whose drain landed in a worktree checkout (not trunk) and now await reconciliation into the working branch they forked from. Membership is determined by which checkout a set drained in, not by how it was triggered: a set that a bare **`pop tasks implement`** ran in a worktree is in the backlog exactly as one a **`pop queue run`** drained there is — and a set drained in trunk never enters it. It is a read-only view over non-trunk **Worktree binding**s plus their **Mergeability**, not a scheduler and not owned by the **Queue** command family. Membership is the binding's existence alone — never gated on a recorded **Mergeability**: a member whose mergeability has never been computed is still a member, shown as `unknown`, and still actionable (its integrate hint stands; **Integrate** computes mergeability when run). Listing the backlog is read-only and never computes mergeability. The dashboard and `pop queue status` both render this one source, so a Done worktree set can never be visible to one surface and invisible to the other. **Integrate** operates on the backlog regardless of trigger. Distinct from **Queue** (the per-project drain supervisor): the backlog routes integration, the Queue routes execution.
 _Avoid_: merge queue, integration queue
 
 **Mergeability**:
@@ -314,8 +378,16 @@ A commit created by the task executor from runtime-checkout changes. After succe
 _Avoid_: Task artifact update, progress record
 
 **Task manifest**:
-The `index.json` within a Task set. It remains the source of truth for task eligibility and completion. It may optionally carry set-level keys beside the `tasks` array — today `auto_drain` — that express authoring intent consumed at first registration into **Task state**; those keys are not re-applied on refresh. Set-level keys must match their declared types; a non-boolean `auto_drain` is a contract fault that makes the Task set **Malformed**. Planning skills such as **to-tasks** write `"auto_drain": true` only when the human explicitly requests it in that session; otherwise the key is omitted.
+The `index.json` within a Task set. It remains the source of truth for task eligibility and completion. It may optionally carry set-level keys beside the `tasks` array — today `auto_drain` and the **Worktree directive** (`worktree`) — that express authoring intent consumed once at first registration into **Task state** as **Registration seed**s; those keys are not re-applied on refresh. Set-level keys must match their declared types; a non-boolean `auto_drain` or a malformed `worktree` value is a contract fault that makes the Task set **Malformed**. Planning skills such as **to-tasks** write these keys only when the human explicitly requests them in that session; otherwise they are omitted.
 _Avoid_: Issue manifest, workload, dashboard
+
+**Worktree directive**:
+An optional `worktree` key in a **Task manifest**, beside `auto_drain`, declaring where the set should drain: `{ "managed": true }` provisions a **managed** worktree forked from the **Trunk worktree** (torn down on integration or **Unbind worktree**), or `{ "name": "<worktree>" }` adopts the existing worktree of that name on this machine (never deleted). Absent leaves the drain in the **current checkout** — the directive is a default-shut seam. It is a **Registration seed** (read once into **Task state** at first registration, never re-read) and **lazy**: registration records only the intent; the first *unbound* drain provisions or adopts and records a **Worktree binding**, after which the binding — and any operator **Bind worktree** — takes precedence. Honoured by every drain, foreground **Implement** and **Queue** alike. The portable identifier is the worktree *name* (the operator-facing label, as shown in the **Worktree picker**), never a path: a path would be machine-specific, and a name absent on a given machine is an explicit failure, not a fallback.
+_Avoid_: worktree_ready, worktree mode, per-set worktree flag, isolation flag
+
+**Registration seed**:
+A set-level key in a **Task manifest** whose value is applied once into the persisted **Task state** at a Task set's first **Task set registration**, then never re-read from the manifest — authoring intent, not live config. The category covers `auto_drain` (the **Manifest auto-drain seed**) and the **Worktree directive** (`worktree`). Editing a seed key after a set is registered has no effect; the durable registry row — and, for the worktree directive, the resulting **Worktree binding** — is authoritative thereafter.
+_Avoid_: manifest config, live setting, manifest sync key
 
 **Manifest auto-drain seed**:
 The one-time application of a **Task manifest**'s `"auto_drain"` key into **Task state** at first registration. When the key is the boolean `true`, pop sets the set's **Auto-drain** bit on; absent or `false` seeds off. Pop prints `(auto-drain)` on the registration line only when it seeded true. The key is never re-read after registration.
@@ -337,6 +409,14 @@ _Avoid_: Task dependency, task-manifest order
 The status derived from a discovered Task set whenever a tasks command runs. A **Ready** Task set has at least one eligible task; a **Done** Task set has only done tasks; a **Failed** Task set has at least one failed task. When no AFK task is eligible and the set is neither Done, Failed, nor Deferred, the disposition splits by whether agent work remains: an **Unverified** Task set has no open AFK task left — only human verification (HITL) stands before Done; a **Blocked** Task set still has an open AFK task gated behind a human-in-the-loop task. Pop does not persist a separate completion flag, so artifact changes naturally affect the next derived status.
 _Avoid_: Pane status, persisted Task set completion
 
+**In Progress**:
+A presentational refinement of the **Ready** display label, shown when a Ready **Task set** already has at least one `done` task — signalling that draining has begun on the set. It is NOT a derived **Task set status**: schedulability is still Ready (drainable), and all scheduling and summary logic keys on the underlying Ready status, never on this label. Rendered blue to distinguish it from a fresh Ready set (cyan); applied identically in both the `pop tasks status` table and the **Queue dashboard**.
+_Avoid_: Started, Working, In-progress status, Active
+
+**Run-next badge**:
+The `NEXT` marker `pop tasks status` prints on the single highest-priority **Ready** **Task set** — the set a no-argument `pop tasks implement` would drain next in the local runner. Display-only (a derived row flag), unrelated to daemon consent; once the set is actually running the badge reads `RUN`, not `NEXT RUN`.
+_Avoid_: AUTO badge, auto-pick, auto-picked, auto-pick badge
+
 **Next task**:
 Selecting and executing one task from the highest-priority Ready Task set. Non-runnable Task sets are reported and skipped; among Ready Task sets, equal priority retains registration order.
 _Avoid_: First registered Task set, highest-priority Task set regardless of status
@@ -346,8 +426,8 @@ The mechanism that runs a selected task through an agent, verifies completion, u
 _Avoid_: Workload executor, scheduler
 
 **Implement**:
-The single task-execution command, `pop tasks implement`, that runs tasks through the **Task executor** and dispatches by **Task target reference** shape — there is no separate one-vs-many verb. Given a Task-set-relative file reference `<task-set>/<file>.md`, it executes exactly that one task in the current checkout by default, which must be Open, AFK, and have satisfied dependencies — and asks **Execution confirmation** once before that task. Given a bare Task set identifier — or no argument, in which case pop chooses the highest-priority Ready Task set — it **drains** that set without an AFK start prompt, executing eligible tasks sequentially until the set becomes Done, Blocked, Deferred, or Failed, or until an **Agent quota pause** stops cleanly; it does not continue into another Task set. Mid-drain, **HITL gate prompt** and **Failed gate prompt** menus stay interactive when the pane has a TTY. There is no way to run a single auto-picked task: a no-argument implement always drains, and exactly one task runs only when a file reference names it. Only when no Ready Task set exists may a no-argument implement instead attend one unambiguous Human-blocked Task set through a **HITL gate prompt**; multiple Human-blocked sets are ambiguous and require an explicit target, and an explicitly targeted Human-blocked set may be attended even when Ready sets exist elsewhere. Paths, bare filenames, and bare task identifiers are rejected. A valid existing **Worktree binding** wins for whole-set drains; `--inline` does not bypass it, so the human must unbind before forcing a trunk/current-checkout drain. For unbound whole-set drains in a **Worktree-ready project**, Implement defaults to draining in a managed worktree forked from the repository's **Execution base**; `--inline` forces a trunk/current-checkout drain. An explicit Runtime-path override wins over both defaults: a linked override is adopted into the **Integration backlog**, while a trunk override drains inline; `--inline` with a linked Runtime-path override is contradictory. Running Implement inside an existing worktree still adopts that checkout as a never-delete **adopted** **Worktree binding** and places the set in the backlog. When a drain reaches Done in a worktree, an interactive run's completion prompt offers integration alongside the final HITL completion; `--yes` never integrates a worktree drain unless the repo opted in with `auto_merge_clean`.
-_Avoid_: Run, Drain, separate one-vs-many verbs, run issue, run issues, run all, next Task set, Run PRD
+The single task-execution command, `pop tasks implement`, that runs tasks through the **Task executor** and dispatches by **Task target reference** shape. A `<task-set>/<file>.md` reference runs exactly that one task in the current checkout (**Execution confirmation** prompt once). A bare set identifier — or no argument, choosing the highest-priority Ready set — **drains** the set with no AFK start prompt until it reaches Done, Blocked, Deferred, Failed, or an **Agent quota pause**; mid-drain **HITL gate prompt** and **Failed gate prompt** stay interactive on a TTY. For a whole-set drain: a valid existing **Worktree binding** wins (resume in the bound checkout); otherwise the set's **Worktree directive** routes it (provision a managed worktree or adopt a named one); otherwise pop records a **Default binding** to the **current checkout** and drains there; `--in-worktree` instead provisions a **managed** worktree forked from the **Trunk worktree** and drains there. There is no automatic worktree default and no `--inline` flag — the current checkout is the baseline, and `--in-worktree` is the explicit opt-in to isolation. The interactive **Drain target picker** is a **Queue dashboard** affordance only; bare `pop tasks implement` never prompts for a target, so the Queue's spawned drains never block. When a drain lands Done in a non-trunk checkout, an interactive run's completion prompt offers integration; `--yes` integrates only if the repo opted in with `auto_merge_clean`.
+_Avoid_: Run, Drain, separate one-vs-many verbs, --inline, auto-worktree default, run issue, run issues, run all, next Task set, Run PRD
 
 **Agent preset**:
 A headless agent the task executor recognizes — `claude`, `opencode`, `cursor`, `codex`, or `pi` — selected by name and optionally augmented with extra invocation arguments (e.g. `claude --model opus4.8`). Pop runs the supplied command as given, exactly as it runs a **Custom agent command**; the sole difference is recognition. Because the first token names a known agent, the **Agent adapter** appends the flags Pop owns — the output protocol governed by **Agent output mode** — after the user's arguments, then the generated prompt as the final positional argument with stdin disconnected. Appending last makes those flags authoritative: a user value for an owned flag is overridden, not rejected. Recognition is what lets Pop parse the structured stream and keep every adapter capability; augmenting a recognized preset this way is distinct from replacing the invocation with a Custom agent command.
@@ -370,11 +450,11 @@ An optional per-task `effort` key in the **Manifest** — `light`, `standard`, o
 _Avoid_: Priority, weight, tier, task size, difficulty
 
 **Effort ladder**:
-A per-agent, per-tier ordered list of **(model, Reasoning effort)** bundles that resolves an **Effort** to a concrete `--model` plus a reasoning flag for whichever agent was chosen. Pop ships built-in ladders for `claude`, `codex`, `cursor`, and `pi`; every other agent (e.g. `opencode`) has none built-in and is configured in `config.toml` under `[effort.<agent>]`, which fully replaces the built-in for an agent it names. Each tier is a TOML array of `{ model, reasoning }` tables, reasoning optional. Resolution uses the head of the chosen tier; the ordered tail is reserved for a deferred runtime fallback, and each fallback element carries its own reasoning. Reasoning is rendered per-adapter — `claude --effort`, `codex -c model_reasoning_effort=`, `cursor` folds `[effort=…]` into the model token, `pi --thinking` — and an agent with no reasoning mechanism (`opencode`) or no ladder makes that part a graceful no-op. Surfaced per agent in `pop tasks agents` with built-in-versus-configured provenance.
+A per-agent, per-tier ordered list of **(model, Reasoning effort)** bundles that resolves an **Effort** to a concrete `--model` plus a reasoning flag for whichever agent was chosen. Pop ships built-in ladders for `claude`, `codex`, `cursor`, and `pi`; every other agent (e.g. `opencode`) has none built-in and is configured in `config.toml` under `[effort.<agent>]`, which fully replaces the built-in for an agent it names. Each tier is a TOML array of `{ model, reasoning }` tables, reasoning optional. Resolution uses the head of the chosen tier; the ordered tail is reserved for a deferred runtime fallback, and each fallback element carries its own reasoning. Reasoning is rendered per-adapter — `claude --effort`, `codex -c model_reasoning_effort=`, `pi --thinking` — except for `cursor`, which selects a full concrete model name per tier and does not emit a separate reasoning parameter. Agents with no reasoning mechanism (`opencode`) or no ladder make that part a graceful no-op. Surfaced per agent in `pop tasks agents` with built-in-versus-configured provenance.
 _Avoid_: Model catalog, effort table, model tier map, model priority list
 
 **Reasoning effort**:
-The model's thinking-intensity level (e.g. `low`/`medium`/`high`/`xhigh`/`max`), distinct from pop's **Effort** tier despite the shared word. Not a user-facing knob: it is bundled into each **Effort ladder** tier alongside the model and resolved together, so a tier sets both which model runs and how hard it thinks. Passed per-adapter (claude `--effort`, codex `-c model_reasoning_effort=`, cursor `model[effort=…]`, pi `--thinking`); agents with no mechanism (`opencode`) ignore it. A value hand-set in `--agent` args is respected over the ladder's.
+The model's thinking-intensity level (e.g. `low`/`medium`/`high`/`xhigh`/`max`), distinct from pop's **Effort** tier despite the shared word. Not a user-facing knob: it is bundled into each **Effort ladder** tier alongside the model and resolved together, so a tier sets both which model runs and how hard it thinks. Passed per-adapter (`claude --effort`, `codex -c model_reasoning_effort=`, `pi --thinking`); `cursor` has no separate reasoning parameter and instead selects a full model name that already encodes the desired capability. Agents with no mechanism (`opencode`) ignore it. A value hand-set in `--agent` args is respected over the ladder's.
 _Avoid_: Effort (pop's task tier), thinking budget, depth
 
 **Interactive agent preset**:
@@ -486,8 +566,8 @@ A task whose active agent process was terminated by user interruption or process
 _Avoid_: Exhausted task, failed task
 
 **Open task**:
-Explicitly returning Failed or Skipped tasks to Open via `pop tasks open` so they may be attempted again — the command is named for the target status. It accepts either a Task-set-relative file reference `<task-set>/<file>.md`, which opens exactly that one task, or a whole-set form (`<task-set>` or `<task-set>/`), which opens a **Multi-task selection** of the set's Failed and Skipped tasks. It removes any recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit. Open task batches need no ordering — each transition is independent. The status table prints copy-paste open hints in the `<task-set>/<file>.md` form.
-_Avoid_: Issue reset, reset, automatic retry
+Explicitly returning Failed, Skipped, or Done tasks to Open via `pop tasks open`, regardless of task type — the command is named for the target status. It is the inverse of **Complete task**: undoing a premature completion (e.g. a human-in-the-loop task marked Done before its verification was actually finished) is as valid as retrying a Failed task or re-running a Done AFK task. Reopening a Done task flips the derived **Task set status** out of DONE; for a Done AFK task it becomes eligible again, so a later **Implement** — or the **Queue daemon** in an auto-drain set — re-fires an agent on it. It accepts either a Task-set-relative file reference `<task-set>/<file>.md`, which opens exactly that one task with no prompt, or a whole-set form (`<task-set>` or `<task-set>/`), which opens a **Multi-task selection** where Failed, Skipped, and Done tasks are all checkable (no row pre-checked) and an already-Open task is locked at-target. It removes any recorded attempt count, appends a local progress entry, preserves runtime files, and does not commit. Open task batches need no ordering. The status table prints copy-paste open hints only for Failed tasks; Done and Skipped tasks are reopenable but never advertised there.
+_Avoid_: Issue reset, reset, automatic retry, uncomplete
 
 **Complete task**:
 Manually marking Open, Failed, or Skipped tasks Done via `pop tasks complete` without running an agent, regardless of task type. Used primarily to clear a human-in-the-loop task after the human performs the work, to conclude a Skipped task once its deferred verification is satisfied, and also valid for finishing AFK or Failed tasks by hand. The command accepts either a Task-set-relative file reference `<task-set>/<file>.md`, which completes exactly that one task, or a whole-set form (`<task-set>` or `<task-set>/`), which opens a **Multi-task selection** of the set's non-Done tasks. Every selected task's `blocked_by` dependencies must be satisfied — already Done/Skipped or also selected in the same batch — so a fully selected chain completes in dependency order; an unsatisfied, unselected blocker rejects the whole batch before any write. It bypasses the Completion sentinel — it does not verify acceptance criteria, does not prompt for a separate yes/no confirmation (the selection itself is the decision), and does not stage or commit implementation changes; the human owns and commits that work. It appends a local COMPLETE progress record per task noting the prior state.
@@ -534,11 +614,11 @@ An attended interactive subshell (`$SHELL`, fallback `/bin/sh`) rooted at the **
 _Avoid_: assistance session, subshell escape, terminal
 
 **Runtime execution lock**:
-A machine-local lock held while implement executes for a canonical runtime path. Implement acquires it at the start of a drain or single-task run — before any mid-run menu — so the **Queue daemon** treats a pane waiting at **HITL gate prompt** or **Failed gate prompt** as busy and never double-spawns. It prevents concurrent task execution in one checkout while allowing unrelated projects or isolated runtime worktrees to execute concurrently. Non-execution tasks commands remain available. Lock metadata records the executor PID and running set identifier; a dead PID is reported and replaced as a stale lock.
+A machine-local lock held only while implement is actively executing in a checkout — it is the running **Drain** row, not a claim spanning the whole invocation. It is acquired around each contiguous run of AFK attempts and released at every wait for human input: the pre-run confirmation, the **HITL gate prompt**, and the **Failed gate prompt**. A drain that reaches a gate finishes (recording its park outcome) and the menu, plus any **HITL assistance session** or **Runtime shell** launched from it, runs lock-free; resuming after the human clears the gate re-acquires, refusing cleanly if another drain grabbed the checkout meanwhile. It prevents concurrent task execution in one checkout while allowing unrelated projects or isolated runtime worktrees to execute concurrently; a parked-at-gate pane is no longer treated as busy, so the **Queue daemon**'s anti-double-spawn relies on worktree isolation, not the lock. Lock metadata records the executor PID and running set identifier; a dead PID is reported and replaced as a stale lock.
 _Avoid_: Global task lock, project-name lock
 
 **Status table**:
-The non-interactive summary printed by `pop tasks status` after discovery refresh. **Archived Task set**s are excluded from the default table; when at least one exists, a quiet footer reports the archived count and the `pop tasks status --archived` command that lists them, so filed-away work stays discoverable. `--archived` instead renders only the Archived Task sets. In the default table, Missing Task sets appear first as stale registrations, followed by Done Task sets. Remaining discovered Task sets then appear in scheduler order: descending priority with stable registration order for ties, so the user can read the active schedule top-to-bottom to understand which Ready work will be selected first. The automatically selected Ready Task set is marked explicitly. Before execution, the actual implement target is also marked; when an explicit Task set override differs from the automatic selection, the table shows both markers on their respective rows. The checkout note describes where a whole-set **Implement** would run by default: for a **Worktree-ready project**, it reports managed-worktree execution from the **Execution base** instead of saying trunk drains inline; for a non-Worktree-ready project at its base checkout, it says whole-set Implement drains inline at the execution base. Single task-file runs are still current-checkout operations. An interactive tasks dashboard is deferred until the table workflow is exercised.
+The non-interactive summary printed by `pop tasks status` after discovery refresh. **Archived Task set**s are excluded from the default table; when at least one exists, a quiet footer reports the archived count and the `pop tasks status --archived` command that lists them, so filed-away work stays discoverable. `--archived` instead renders only the Archived Task sets. In the default table, Missing Task sets appear first as stale registrations, followed by Done Task sets. Remaining discovered Task sets then appear in scheduler order: descending priority with stable registration order for ties, so the user can read the active schedule top-to-bottom to understand which Ready work will be selected first. The automatically selected Ready Task set is marked explicitly. Before execution, the actual implement target is also marked; when an explicit Task set override differs from the automatic selection, the table shows both markers on their respective rows. The checkout note describes where a whole-set **Implement** would run by default: the bound checkout when the set has a **Worktree binding**, the target of its **Worktree directive** when one is seeded, otherwise the **current checkout** (a **Default binding** is recorded there on first drain). Single task-file runs are still current-checkout operations. An interactive tasks dashboard is deferred until the table workflow is exercised.
 _Avoid_: Workload status table, dashboard
 
 **Execution confirmation**:
@@ -586,7 +666,7 @@ The interactive checkbox UI that **Archive** and **Unarchive** open across whole
 _Avoid_: Multi-task selection (within-set, task-level), Project picker, `--all`
 
 **Queue**:
-The scheduling concern over Task-set draining across repositories, surfaced by two drivers: the **Queue daemon** (`pop queue run`, automatic, polls and fans out unattended over **Auto-drain**-marked Ready sets) and the **Queue dashboard** (`pop queue dashboard`, manual, the primary way a human starts drains). Both schedule onto the same substrate — **Repository identity** as the scheduling unit (a repo's worktrees collapse to one unit sharing one **Task storage**, not the picker **Project**), **Worktree binding** as the per-set drain router, **Execution base** as the fallback checkout, and the **Integration backlog** for reconciliation. The daemon dispatches at most one drain per idle repository per Ready set — never once per worktree — targeting one specific not-currently-running Ready set rather than no-argument implement; each repository drains serially by local **Task set priority** under the **Runtime execution lock** while repositories run in parallel. Absent a per-set binding it routes to the repository's Execution base: an explicit configured checkout when set, otherwise a non-bare repo's git main worktree; a **bare** repo has none, so it must name an Execution base or the Queue refuses to schedule it (it never guesses a checkout). Global cross-project priority ordering is a non-goal.
+The scheduling concern over Task-set draining across repositories, surfaced by two drivers: the **Queue daemon** (`pop queue run`, automatic, polls and fans out unattended over **Auto-drain**-marked Ready sets) and the **Queue dashboard** (`pop queue dashboard`, manual, the primary way a human starts drains). Both schedule onto the same substrate — **Repository identity** as the scheduling unit (a repo's worktrees collapse to one unit sharing one **Task storage**, not the picker **Project**), **Worktree binding** as the per-set drain router, the **Integration target** as the fallback checkout, and the **Integration backlog** for reconciliation. The daemon dispatches at most one drain per idle repository per Ready set — never once per worktree — targeting one specific not-currently-running Ready set rather than no-argument implement; each repository drains serially by local **Task set priority** under the **Runtime execution lock** while repositories run in parallel. Absent a per-set binding it records a **Default binding** to the repository's **Integration target**: a non-bare repo's git main worktree, or a **bare** repo's configured **Trunk worktree**; a bare repo with no configured trunk has no integration target, so the Queue refuses to schedule it (it never guesses a checkout). Global cross-project priority ordering is a non-goal.
 _Avoid_: Machine-global scheduler, per-worktree scheduler
 
 **Picked-up Task set**:
@@ -605,9 +685,13 @@ _Avoid_: Per-project queue opt-in, global priority queue, per-drain --yes
 The durable append-only record in pop's data dir of every Queue drain event: started, done, failed, HITL-blocked, quota-paused-and-agent-switched, crashed, backing-off, or parked. It is emitted by **Implement** as a structured drain-outcome record carrying set id, outcome, and the exhausted preset when relevant; the **Queue daemon** consumes it to drive **Agent fallback** and backoff, and persists it for observability. `pop queue status` reads live state, such as picked-up sets, cooling agents, parked sets, and idle projects; `pop queue log` reads the journal history.
 _Avoid_: Progress record, Captured attempt stream, Task state
 
+**Drain**:
+One supervised execution of draining a **Task set**, tracked through an explicit lifecycle from start to a terminal disposition (its **Drain outcome**). A Task set may be drained many times — after a reset, a crash, or a quota pause — and each is a distinct Drain; a set's Drain history is the ordered record of them. The Drain, not the Task set, carries execution lifecycle state; the set's manifest-derived **Task set status** (what work remains) is a separate, derived concern.
+_Avoid_: Run, attempt, drain record
+
 **Drain outcome**:
-The terminal disposition of a task-set drain, written to a machine-readable record on exit so the queue supervisor can react without parsing human output: done, failed, blocked, unverified, deferred, quota-paused, or interrupted. The HITL gate splits into two: `unverified` when only human verification remains, and `blocked` when open AFK work still sits behind a human gate.
-_Avoid_: drain disposition, drain result
+How a **Drain**'s process ended — its exit reason, not the set's work disposition: finished (the drain ran to its own stopping point), quota-paused (an agent preset hit quota), interrupted (deliberate SIGINT teardown), or crashed (the process died unexpectedly, recorded by reconciliation rather than by the drain itself). The set's resulting work disposition — done, failed, blocked, unverified, deferred — is read from the manifest-derived **Task set status**, never restated on the Drain. finished and quota-paused are clean exits; interrupted and crashed are abnormal and drive crash backoff.
+_Avoid_: Task set status, drain disposition, drain result
 
 **Queue run output**:
 The live stdout of `pop queue run` — an operator-facing event stream, not a repeating inventory. It prints one **Queue run baseline** on startup (the full scheduling-relevant picture of what the supervisor is watching), then only **Queue run deltas** when something changes: spawns, terminal drain outcomes, agent cooldowns, parks, integration events, and errors. A quiet tick with no change prints nothing. Drain panes keep their own implement output; `pop queue status` remains the on-demand full snapshot.
@@ -634,12 +718,16 @@ The single tmux window, named `pop-queue`, that the Queue daemon spawns its drai
 _Avoid_: Drain session, worktree session, queue tab
 
 **Auto-drain**:
-A per-set persisted consent bit in **Task state**, alongside priority and the archived flag, marking that the **Queue daemon** may automatically drain this **Task set**. It defaults off for a freshly-discovered set, inverting the old standing-consent model: `pop queue run` drains nothing until a set is marked auto-drainable from the **Queue dashboard**, or a human launches it by hand. A **Task manifest** may declare `"auto_drain": true` at the set level; pop reads that key once at first registration — whether via lazy discovery, import, or any other path that creates the registration entry — and seeds Task state accordingly; it does not re-sync on later refresh, so the **Queue dashboard** toggle remains authoritative after registration. It is orthogonal to **Archive** (which hides a set entirely) and distinct from a **Picked-up Task set**, which is a runtime fact (a live lock), not a consent fact.
+A per-set persisted consent bit in **Task state**, alongside priority and the archived flag, marking that the **Queue daemon** may automatically drain this **Task set**. It defaults off for a freshly-discovered set, inverting the old standing-consent model: `pop queue run` drains nothing until a set is marked auto-drainable from the **Queue dashboard**, or a human launches it by hand. A **Task manifest** may declare `"auto_drain": true` at the set level; pop reads that key once at first registration — whether via lazy discovery, import, or any other path that creates the registration entry — and seeds Task state accordingly; it does not re-sync on later refresh, so the **Queue dashboard** toggle remains authoritative after registration. It is orthogonal to **Archive** (which hides a set entirely), distinct from a **Picked-up Task set** (a runtime live-lock fact, not consent), and distinct from the **Run-next badge** (`NEXT`, a local-runner display marker that shares the word "auto" only in the retired `AUTO` badge — they are unrelated).
 _Avoid_: Pickable, pick-up status, auto-pickup, queue-enrolled
 
 **Queue dashboard**:
-The interactive `pop queue dashboard` TUI — the primary hands-on surface for starting and managing **Queue** work, sibling to the **Project picker** and **Worktree picker**. It is machine-global like `pop queue status`, scanning every registered repository's **Task storage** and rendering one row per non-archived **Task set** that still has outstanding queue-actionable state, excluding only a concluded **Done Task set**. Each row shows the derived **Task set status**, the set's branch, a live **Picked-up** drain indicator, and an **Auto-drain** badge; keys drain (`i`), integrate (`I`), bind or create a worktree (`b`), abandon (`U`), toggle **Auto-drain** (`a`), preview the working pane (`p`), move to the top or bottom (`gg`/`G`), go back or exit (`h`/left/`esc`), and open the **Task set detail view** (`l`/Enter). `q` and the former `s` shortcut are intentionally unbound.
+The interactive `pop queue dashboard` TUI — the primary hands-on surface for starting and managing **Queue** work, sibling to the **Project picker** and **Worktree picker**. Machine-global like `pop queue status`, it scans every registered repository's **Task storage** and renders one row per non-archived **Task set** with outstanding queue-actionable state, excluding only a concluded **Done Task set**. Each row shows the derived **Task set status**, the set's worktree/destination column (the bound checkout if bound, else the **Trunk worktree** — an honest "where auto-drain lands"), a live **Picked-up** drain indicator, and an **Auto-drain** badge. Keys: `i` opens the **Drain target picker** for an unbound set then drains, or resumes silently in the bound checkout for a bound one; `I` integrate; `b` bind or create a worktree in advance (without draining); `U` unbind; `a` toggle **Auto-drain**; `p` preview the working pane; `gg`/`G` move to top/bottom; `h`/left/`esc` back or exit; `l`/Enter open the **Task set detail view**. `q` and the former `s` shortcut are intentionally unbound.
 _Avoid_: Queue picker, queue status table, drain dashboard
+
+**Drain target picker**:
+The interactive chooser the **Queue dashboard** opens on `i` for an **unbound** **Task set**, fusing target selection with the drain into one bind-and-start action. It lists the repo's existing **non-managed** worktrees (pick → adopt as an adopted **Worktree binding**), a "new managed worktree" option (provision a managed binding forked from the **Trunk worktree**; the default cursor), and the **Trunk worktree** itself (drain inline, no binding). The chosen target is bound and then drained immediately. A set already holding a binding skips the picker and resumes in its bound checkout — retargeting requires **Unbind worktree** first. Options requiring a trunk (new managed worktree, trunk) are absent when no trunk is resolvable (an unconfigured bare repo). Managed and already-adopted worktrees are excluded from the existing-worktree list, since each checkout belongs 1:1 to one set.
+_Avoid_: checkout picker, drain wizard, runtime picker
 
 **Task set detail view**:
 The full-screen interactive drill-down entered with `l` or Enter from the **Queue dashboard**, replacing the table until dismissed with `h`/left/`esc`. It lists the focused **Task set**'s tasks, supports Vim-style list movement including top and bottom (`gg`/`G`), opens a read-only **Task text peek** for the cursored task with `l` or Enter, and applies **Complete task** (`C`), **Open task** (`O`), or **Skip** (`K`) to the single cursored task without a separate confirmation.
@@ -670,12 +758,20 @@ _Avoid_: Upgrade nag, degraded status, update row
 ### Configuration
 
 **Repo override**:
-A section in the global `config.toml` — `[repo."<path>"]`, keyed by any path that canonicalizes to a **Repository identity** — carrying the per-repo behaviour subset (the `.pop.toml` **RepoConfig** schema: `worktree_ready`, `auto_merge_clean`, plus **Execution base**) at higher priority than the repo's `.pop.toml`. Resolution is global override → `.pop.toml` → built-in default. The asymmetry is deliberate: global config may express everything `.pop.toml` can (so a user can flip behaviour without committing to the repo), but `.pop.toml` never gains global-only settings (the project registry, queue agent rotation, machine-global daemon knobs).
+A section in the global `config.toml` — `[repo."<path>"]`, keyed by any path that canonicalizes to a **Repository identity** — carrying the per-repo behaviour subset (the `.pop.toml` **RepoConfig** schema: `auto_merge_clean`, plus the **Trunk worktree** marker `trunk`) at higher priority than the repo's `.pop.toml`. Resolution is global override → `.pop.toml` → built-in default. The asymmetry is deliberate: global config may express everything `.pop.toml` can (so a user can flip behaviour without committing to the repo), but `.pop.toml` never gains global-only settings (the project registry, queue agent rotation, machine-global daemon knobs).
 _Avoid_: project entry override, glob-scoped behaviour
 
-**Execution base**:
-A per-checkout boolean (`execution_base = true`) set inside a **Repo override** block keyed by that one checkout's path, marking the single checkout that anchors a repository's task execution when no per-set **Worktree binding** or explicit Runtime-path override exists. Inline drains run and commit there, and managed **Worktree set** checkouts fork from and integrate back to its HEAD. It applies to Queue-driven drains and foreground whole-set **Implement** drains alike. When unset, a non-bare repo falls back to its git main worktree; a **bare** repo has no fallback and is refused, not guessed. It lives only in global config because it is keyed by a machine-specific checkout path. Resolution order: per-set **Worktree binding** → `execution_base` → git main worktree (non-bare only) → refuse.
-_Avoid_: Queue base, queue_base, trunk checkout, main worktree, default worktree
+**Trunk worktree**:
+A repository's single canonical integration anchor and the fork base for managed **Worktree set**s. A non-bare repo defaults its trunk to the git main worktree with no config; a bare repo has no implicit trunk and must declare one explicitly via a `trunk = true` per-checkout **Repo override**. Managed worktrees fork from the trunk's HEAD and every non-trunk binding integrates back into it. An unconfigured bare repo has no trunk, so pop can neither provision a managed worktree nor integrate there — it can only drain in place in whatever checkout the operator is currently sitting in.
+_Avoid_: Execution base, execution_base, queue base, queue_base, default worktree
+
+**Config finding**:
+A single config-validation problem discovered during load, keyed to its config path (e.g. `effort.foo`, `projects[2].display_depth`) and carried on the loaded config instead of thrown. Surfaced two ways: as the `error` from the getter for that key, and as a non-blocking entry in the picker's warning banner.
+_Avoid_: config error (when you mean a non-fatal finding, not unparseable TOML)
+
+**Core capability**:
+The one thing a command must produce to be worth running — e.g. the project list for `pop project dashboard`. A command aborts on a config problem only when a value it consumes is invalid *and* essential to this capability; every other config problem degrades to a default plus a warning, and the command still runs.
+_Avoid_: command feature, required config
 
 **Include**:
 A sidecar TOML file the global `config.toml` pulls in via `includes`, carrying only a whitelisted subset of config — registered **Project**s and **Repo override** blocks — so a user can keep which directories they work on out of the main file. Precedence is parent first, then includes in listed order; the first definition of a repo key sticks, and any other config section in an include is ignored. Distinct from `.pop.toml`, which rides in a repo and describes one already-registered project.
@@ -694,7 +790,8 @@ Removal of all deprecated aliases is gated on beta-tester sign-off, not a versio
 - `to-issues` (skill) → **to-tasks**; `run-one` (skill) → **run-task**
 - `workload definition path`, `thoughts/issues` → **Task storage**
 - `workload artifact ignore coverage` → removed; Task storage lives outside the repository tree (ADR 0039)
-- `Queue base`, `queue_base` → **Execution base**, `execution_base`
+- `Queue base`, `queue_base`, `Execution base`, `execution_base` → **Trunk worktree**, `trunk`
+- `Worktree-ready project`, `worktree_ready` → removed; there is no repo-capability auto-managed-worktree default — worktree execution is explicit via a **Worktree directive** or `pop tasks implement --in-worktree`
 - `Curated model aliases` → **Built-in model catalog**
 
 ## Flagged ambiguities

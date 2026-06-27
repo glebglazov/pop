@@ -159,7 +159,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	// Start the Drain: insert a running row keyed by (repository, set) and
 	// enforce mutual exclusion transactionally (ADR-0055), replacing the runtime
 	// execution lock file and the cross-checkout backstop. The Runtime execution
-	// lock is now held only during active execution (ADR-0063): this opening
+	// lock is now held only during active execution (ADR-0067): this opening
 	// BeginDrain is the backstop before BindCheckout, but reaching any gate menu
 	// parks (finishes) it so the menu runs lock-free, and resuming AFK work
 	// re-acquires a fresh Drain. `drain` is therefore mutable — nil while parked —
@@ -196,7 +196,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 
 	// parkDrain releases the Runtime execution lock at a human-wait gate: it
 	// finishes the held Drain with the same clean terminal the --yes path records
-	// at that point (ADR-0056/0063) — the set's blocked/unverified/failed
+	// at that point (ADR-0056/0067) — the set's blocked/unverified/failed
 	// disposition stays manifest-derived — and drops the live lock so the gate
 	// menu, assist session, and runtime shell all run lock-free. A no-op when no
 	// Drain is held (already parked).
@@ -209,7 +209,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	}
 
 	// ensureDrain re-acquires the Runtime execution lock before a contiguous run
-	// of AFK attempts resumes after a gate park (ADR-0063). It is a no-op while a
+	// of AFK attempts resumes after a gate park (ADR-0067). It is a no-op while a
 	// Drain is already held (the opening BeginDrain, or an unparked segment). A
 	// collision with a concurrent drain on the same checkout refuses cleanly with
 	// the existing "already in progress" error; the gate decision was already
@@ -320,7 +320,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				}
 				if hitl := BlockingHITLTask(currentRefresh.Manifests[taskSetID]); hitl != nil {
 					// Park the Runtime execution lock before the HITL gate menu so it
-					// runs lock-free (ADR-0063); only when the menu will actually prompt,
+					// runs lock-free (ADR-0067); only when the menu will actually prompt,
 					// so a non-prompting fall-through keeps the normal terminal.
 					if gateWillPrompt(opts.ConfirmIn, opts.Yes, currentRefresh.Manifests[taskSetID], hitl) {
 						parkDrain()
@@ -353,7 +353,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				m := currentRefresh.Manifests[taskSetID]
 				sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
 				// Park the Runtime execution lock before the Failed gate menu so it
-				// runs lock-free (ADR-0063).
+				// runs lock-free (ADR-0067).
 				if gateWillPrompt(opts.ConfirmIn, opts.Yes, m, FailedTask(m)) {
 					parkDrain()
 				}
@@ -372,7 +372,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		}
 
 		// An eligible AFK task is about to run: (re-)acquire the Runtime execution
-		// lock for the contiguous run of attempts that starts here (ADR-0063).
+		// lock for the contiguous run of attempts that starts here (ADR-0067).
 		// First iteration is a no-op (the opening BeginDrain still holds); after a
 		// gate park this is a fresh BeginDrain, and a collision refuses cleanly
 		// without touching manifest state.
@@ -422,7 +422,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				m := afterRefresh.Manifests[taskSetID]
 				sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
 				// Park the Runtime execution lock before the post-failure Failed gate
-				// menu so it runs lock-free (ADR-0063). An interrupt never reaches the
+				// menu so it runs lock-free (ADR-0067). An interrupt never reaches the
 				// menu (the task is not marked failed), so its `interrupted` terminal is
 				// preserved by the normal finalize.
 				if gateWillPrompt(opts.ConfirmIn, opts.Yes, m, FailedTask(m)) {
@@ -646,7 +646,7 @@ func spawnRuntimeShell(d *Deps, stdin io.Reader, runtimePath string, out io.Writ
 // menu loop (a real human-wait) rather than no-op. It mirrors the guard at the
 // top of handleInteractiveHITLGate / handleInteractiveFailedGate, so the caller
 // can park the Runtime execution lock exactly when the menu is about to run
-// lock-free (ADR-0063). When the gate will not prompt — under --yes, a
+// lock-free (ADR-0067). When the gate will not prompt — under --yes, a
 // non-interactive input, or with no gating task (e.g. an interrupted attempt) —
 // the lock is left held and the normal finalize records the right terminal.
 func gateWillPrompt(in io.Reader, yes bool, m *Manifest, gateTask *Task) bool {

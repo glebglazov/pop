@@ -575,7 +575,7 @@ func TestRunTaskReleasesRuntimeLockAfterExecution(t *testing.T) {
 }
 
 // While the single-task implement path waits at the pre-run confirmation
-// prompt, no Runtime execution lock is held (ADR-0063): ReadRuntimeLockStatus
+// prompt, no Runtime execution lock is held (ADR-0067): ReadRuntimeLockStatus
 // reports not-locked and a second drain can claim the same checkout. The lock
 // is acquired only after confirmation, around the actual attempt.
 func TestRunTaskReleasesRuntimeLockAtConfirmationPrompt(t *testing.T) {

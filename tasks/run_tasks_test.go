@@ -255,7 +255,7 @@ func TestRunTaskSetBareDrainFallsBackToSoleHITLGate(t *testing.T) {
 }
 
 // A whole-set drain parked at the initial HITL gate menu holds no Runtime
-// execution lock (ADR-0063): ReadRuntimeLockStatus reports not-locked and a
+// execution lock (ADR-0067): ReadRuntimeLockStatus reports not-locked and a
 // second drain can claim the same checkout while the human sits at the menu.
 func TestRunTaskSetReleasesRuntimeLockAtInitialHITLGatePrompt(t *testing.T) {
 	env, agent := setupSoleHumanBlockedFixture(t)
@@ -296,7 +296,7 @@ func TestRunTaskSetReleasesRuntimeLockAtInitialHITLGatePrompt(t *testing.T) {
 }
 
 // A whole-set drain parked at the Failed gate menu holds no Runtime execution
-// lock (ADR-0063), mirroring the HITL gate: ReadRuntimeLockStatus reports
+// lock (ADR-0067), mirroring the HITL gate: ReadRuntimeLockStatus reports
 // not-locked and a second drain can claim the same checkout during the menu.
 func TestRunTaskSetReleasesRuntimeLockAtFailedGatePrompt(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
@@ -339,7 +339,7 @@ func TestRunTaskSetReleasesRuntimeLockAtFailedGatePrompt(t *testing.T) {
 
 // A set that *starts* at a gate records the same clean Drain terminal the --yes
 // path produces (DrainOutcomeFinished) without ever holding a live lock during
-// the menu (ADR-0056/0063). The blocked/failed disposition stays
+// the menu (ADR-0056/0067). The blocked/failed disposition stays
 // manifest-derived, so the recorded outcome is identical across both paths.
 func TestRunTaskSetParkAtGateRecordsFinishedDrain(t *testing.T) {
 	for _, tc := range []struct {
@@ -389,7 +389,7 @@ func TestRunTaskSetParkAtGateRecordsFinishedDrain(t *testing.T) {
 // On gate clear the loop re-acquires a fresh Drain before resuming AFK work; a
 // collision with a concurrent drain that grabbed the checkout meanwhile refuses
 // cleanly with the "already in progress" error, and the gate decision already
-// persisted to the manifest is left intact (ADR-0063).
+// persisted to the manifest is left intact (ADR-0067).
 func TestRunTaskSetResumeAfterGateRefusesOnConcurrentDrain(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-hitl", File: "01-hitl.md", Title: "Review", Type: "HITL", Status: "open"},

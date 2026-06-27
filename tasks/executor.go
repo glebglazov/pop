@@ -188,7 +188,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		out = os.Stdout
 	}
 
-	// Lock-free front matter (ADR-0063): the set render, the dirty-runtime
+	// Lock-free front matter (ADR-0067): the set render, the dirty-runtime
 	// report, and the pre-run confirmation all run before any Drain is claimed,
 	// so the Runtime execution lock is not held while a human sits at the prompt.
 	// A declined confirmation returns here having claimed no Drain and held no
@@ -221,7 +221,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		return &RunTaskResult{Selection: sel, Refresh: refresh, Declined: true}, nil
 	}
 
-	// Start the Drain only now, around the actual attempt execution (ADR-0063):
+	// Start the Drain only now, around the actual attempt execution (ADR-0067):
 	// insert a running row keyed by (repository, set) and enforce mutual
 	// exclusion transactionally (ADR-0055), replacing the runtime execution lock
 	// file and the cross-checkout backstop. The single-task path claims a Drain
