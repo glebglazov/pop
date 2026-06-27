@@ -31,6 +31,10 @@ type fakeFS struct {
 	writeErr  map[string]error  // path → error to return from writeFile
 	mkdirErr  map[string]error
 	removeErr map[string]error
+	// optOuts stands in for state.json's per-agent Component opt-out set, so
+	// install/remove/refresh tests can seed and assert opt-outs without touching
+	// the real state.json. Keyed by lowercased agent name.
+	optOuts map[string]map[ComponentID]bool
 }
 
 func newFakeFS() *fakeFS {
@@ -42,7 +46,33 @@ func newFakeFS() *fakeFS {
 		writeErr:  map[string]error{},
 		mkdirErr:  map[string]error{},
 		removeErr: map[string]error{},
+		optOuts:   map[string]map[ComponentID]bool{},
 	}
+}
+
+// loadOptOut returns a copy of the agent's opt-out set (matching the production
+// seam, which never hands out the stored map for mutation).
+func (f *fakeFS) loadOptOut(agent string) map[ComponentID]bool {
+	out := map[ComponentID]bool{}
+	for id := range f.optOuts[strings.ToLower(agent)] {
+		out[id] = true
+	}
+	return out
+}
+
+// saveOptOut replaces the agent's opt-out set; an empty set clears the entry.
+func (f *fakeFS) saveOptOut(agent string, set map[ComponentID]bool) error {
+	agent = strings.ToLower(agent)
+	if len(set) == 0 {
+		delete(f.optOuts, agent)
+		return nil
+	}
+	copied := map[ComponentID]bool{}
+	for id := range set {
+		copied[id] = true
+	}
+	f.optOuts[agent] = copied
+	return nil
 }
 
 func (f *fakeFS) writeFile(path string, data []byte, _ os.FileMode) error {
@@ -175,6 +205,8 @@ func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 		readlink:     fs.readlink,
 		lstatMode:    fs.lstatMode,
 		readDirNames: fs.readDirNames,
+		loadOptOut:   fs.loadOptOut,
+		saveOptOut:   fs.saveOptOut,
 	}
 }
 
@@ -1424,6 +1456,18 @@ func installViaFake(t *testing.T, fs *fakeFS, home, agent string) {
 	}
 }
 
+// installFullDefaultViaFake seeds the complete default set for an agent (status
+// wiring plus every default-on component it can host), so refresh finds nothing
+// missing to add. Used by the "installed and current" refresh tests, which must
+// look at a fully integrated agent rather than one with only status wiring (an
+// agent missing a default component is now refreshed to add it, ADR 0064).
+func installFullDefaultViaFake(t *testing.T, fs *fakeFS, home, agent string) {
+	t.Helper()
+	if err := installComponentSet(fakeDeps(home, fs, io.Discard), agent, defaultComponentIDs()); err != nil {
+		t.Fatalf("seed full default install %s: %v", agent, err)
+	}
+}
+
 func TestDryRun_NoInstallation(t *testing.T) {
 	// Empty fake FS: no pop artifacts for any agent. Every dry-run should
 	// report neither installed nor changed.
@@ -2081,11 +2125,12 @@ func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
 }
 
 func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
-	// Seed claude at the exact embedded content. Dry-run sees installed but
-	// not changed → no updates, no warnings, stamp state.json anyway.
+	// Seed claude's full default set at the exact embedded content. Dry-run sees
+	// every component installed but not changed → no updates, no warnings, no
+	// missing default to add, stamp state.json anyway.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
-	installViaFake(t, fs, "/h", "claude")
+	installFullDefaultViaFake(t, fs, "/h", "claude")
 
 	dry, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
@@ -2101,13 +2146,13 @@ func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
 }
 
 func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
-	// Seed claude stale, inject a write failure on the target. The command
-	// should print the warning to stderr, leave stdout empty (nothing
-	// actually updated), and NOT stamp state.json so the next runtime
-	// check retries.
+	// Seed claude's full default set so nothing is missing to add, then make the
+	// status wiring stale and inject a write failure on it. The command should
+	// print the warning to stderr, leave stdout empty (nothing actually
+	// updated), and NOT stamp state.json so the next runtime check retries.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
-	installViaFake(t, fs, "/h", "claude")
+	installFullDefaultViaFake(t, fs, "/h", "claude")
 
 	stalePath := filepath.Join("/h", ".claude", "settings.json")
 	fs.files[stalePath] = []byte(staleClaudeSettings)

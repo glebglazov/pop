@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
@@ -79,6 +80,16 @@ type integrateDeps struct {
 	// to `pop-`.
 	skillPrefix *string
 
+	// loadOptOut / saveOptOut persist the per-agent Component opt-out set
+	// (negative consent, ADR 0064 slice 08): the default-on components the user
+	// declined via `--no-*` at install or `pop integrate remove`. Refresh reads
+	// the set so it never re-adds or updates an opted-out component; a bare
+	// `pop integrate <agent>` rewrites the set to exactly the declined components,
+	// so no flags clears it. Backed by state.json in production; tests inject an
+	// in-memory store. A nil pointer (zero-value deps) disables persistence.
+	loadOptOut func(agent string) map[ComponentID]bool
+	saveOptOut func(agent string, optOut map[ComponentID]bool) error
+
 	// Dry-run mode: set DryRun=true to turn writeFile into a comparator.
 	// `installed` and `changed` are output fields filled in during the run.
 	DryRun    bool
@@ -106,6 +117,8 @@ func defaultIntegrateDeps() *integrateDeps {
 			return fi.Mode(), nil
 		},
 		readDirNames: osReadDirNames,
+		loadOptOut:   loadAgentOptOut,
+		saveOptOut:   saveAgentOptOut,
 	}
 	d.skillPrefix = loadSkillPrefix()
 	return d
@@ -188,7 +201,12 @@ func withDryRun(base *integrateDeps) *integrateDeps {
 		// enumerate exactly what the real run would.
 		skillPrefix:  base.skillPrefix,
 		readDirNames: base.readDirNames,
-		DryRun:       true,
+		// Opt-out reads are how refresh decides whether to re-add or skip a
+		// component, so the read seam passes through. Persistence never happens
+		// during a dry-run, so saveOptOut is a no-op.
+		loadOptOut: base.loadOptOut,
+		saveOptOut: func(string, map[ComponentID]bool) error { return nil },
+		DryRun:     true,
 	}
 	// File-component refresh inspects the link installer's render tree and the
 	// agent-location symlinks to decide installed/stale/conflict, so the dry-run
@@ -273,10 +291,15 @@ A component an agent cannot host is skipped silently rather than installed in a
 degraded form: codex hosts neither skill, and opencode hosts the pane skill but
 not the task planning skills.
 
-Decline a component for this invocation:
+Decline a component:
 
   --no-pane-skill   Skip the pane skill.
   --no-task-skills  Skip the task planning skills.
+
+Declining is remembered: a component skipped with --no-* (or removed later with
+'pop integrate remove') is recorded as a per-agent opt-out, so refresh never
+re-adds it. Re-running a bare 'pop integrate <agent>' with no --no-* flags clears
+the opt-outs and re-asserts the full default set.
 
 The positive --pane-skill / --task-skills flags are deprecated no-ops kept for
 compatibility — the components they named are now installed by default. Passing
@@ -300,8 +323,10 @@ preserved.
 
 With --update-existing, no agent argument is expected: pop detects which
 agents are already integrated and refreshes them to the current binary's
-embedded content. Agents that are not installed are left alone. This is
-the command that 'make install' and the Homebrew post_install hook run
+embedded content. For each integrated agent it also installs any default
+component that is missing and not opted-out, never prompting and never touching
+an opted-out component. Agents with no pop integration at all are left alone.
+This is the command that 'make install' and the Homebrew post_install hook run
 after copying a new binary into place.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if integrateUpdateExisting {
@@ -332,6 +357,11 @@ var integrateRemoveCmd = &cobra.Command{
 With no component identifiers, every pop component currently installed for the
 agent is removed. With identifiers, exactly that set is removed. Valid
 identifiers: status-wiring, pane-skill, task-skills.
+
+Removing a default component records a per-agent opt-out, so a later refresh
+('pop integrate --update-existing' or the picker-launch auto-update) does not
+re-add it. A bare 'pop integrate <agent>' clears the opt-outs and reinstalls
+the full default set.
 
 Removal only ever deletes artifacts pop owns: status wiring strips pop's hook
 entries while preserving unrelated hooks (claude, codex, cursor) or deletes the
@@ -434,7 +464,46 @@ func runIntegrateComponents(d *integrateDeps, agent string, optOut []ComponentID
 		}
 		ids = append(ids, id)
 	}
-	return installComponentSet(d, agent, ids)
+	if err := installComponentSet(d, agent, ids); err != nil {
+		return err
+	}
+	// Persist this invocation's opt-out intent as the agent's full opt-out set
+	// (negative consent, ADR 0064 slice 08): exactly the declined default
+	// components. A bare integrate passes no opt-outs, so this clears any prior
+	// opt-out and re-asserts the full default set on the next refresh.
+	return persistInstallOptOut(d, agent, optOut)
+}
+
+// persistInstallOptOut records the opt-out set an install invocation expresses:
+// exactly the declined default-on components, replacing any prior set for the
+// agent. With an empty optOut this clears the agent's opt-outs entirely. Only
+// default-on components can be opted out — the core status wiring and unknown
+// ids are ignored. New path logs per slice 01.
+func persistInstallOptOut(d *integrateDeps, agent string, optOut []ComponentID) error {
+	if d.saveOptOut == nil {
+		return nil
+	}
+	set := map[ComponentID]bool{}
+	for _, id := range optOut {
+		if comp, ok := lookupComponent(id); ok && comp.defaultOn {
+			set[id] = true
+		}
+	}
+	if d.logf != nil {
+		d.logf("persistInstallOptOut: %s opt-out set -> %v", strings.ToLower(agent), sortedComponentIDs(set))
+	}
+	return d.saveOptOut(strings.ToLower(agent), set)
+}
+
+// sortedComponentIDs returns a name set's keys as a sorted []string for stable
+// logs.
+func sortedComponentIDs(set map[ComponentID]bool) []string {
+	out := make([]string, 0, len(set))
+	for id := range set {
+		out = append(out, string(id))
+	}
+	sort.Strings(out)
+	return out
 }
 
 // installComponentSet installs the core status wiring plus exactly the given
@@ -930,11 +999,57 @@ func isPopHookCommand(cmd string) bool {
 // ----- App state (state.json) ------------------------------------------------
 
 // appState holds cross-run markers persisted at ~/.local/share/pop/state.json.
-// Currently used only as a staleness marker for auto-updating integrations.
 type appState struct {
 	// BuildRevision is the vcs.revision of the binary that last successfully
 	// ran ensureIntegrations. An empty value means no check has run yet.
 	BuildRevision string `json:"build_revision"`
+
+	// OptOuts records, per agent (lowercased), the default-on components the
+	// user has declined: `--no-<component>` at install time or `pop integrate
+	// remove <agent> <component>` (ADR 0064 slice 08). Refresh consults this set
+	// so it never re-adds or updates an opted-out component. A bare `pop
+	// integrate <agent>` rewrites the agent's entry to exactly the declined
+	// components, so re-running with no `--no-*` flags clears it.
+	OptOuts map[string][]string `json:"opt_outs,omitempty"`
+}
+
+// loadAgentOptOut returns the persisted Component opt-out set for an agent,
+// read from state.json. A missing file, missing entry, or corrupt state all
+// yield an empty set (nothing opted out), so a broken state never silently
+// suppresses a default component.
+func loadAgentOptOut(agent string) map[ComponentID]bool {
+	state := loadAppState()
+	set := map[ComponentID]bool{}
+	for _, id := range state.OptOuts[strings.ToLower(agent)] {
+		set[ComponentID(id)] = true
+	}
+	return set
+}
+
+// saveAgentOptOut replaces the persisted opt-out set for an agent in
+// state.json. An empty (or nil) set removes the agent's entry entirely, which
+// is how a bare `pop integrate <agent>` clears prior opt-outs. The stored list
+// is sorted for a stable on-disk representation.
+func saveAgentOptOut(agent string, optOut map[ComponentID]bool) error {
+	agent = strings.ToLower(agent)
+	state := loadAppState()
+	if len(optOut) == 0 {
+		if _, ok := state.OptOuts[agent]; !ok {
+			return nil // already clear — avoid a needless rewrite
+		}
+		delete(state.OptOuts, agent)
+		return saveAppState(state)
+	}
+	ids := make([]string, 0, len(optOut))
+	for id := range optOut {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+	if state.OptOuts == nil {
+		state.OptOuts = map[string][]string{}
+	}
+	state.OptOuts[agent] = ids
+	return saveAppState(state)
 }
 
 // defaultStatePath returns the path to state.json, respecting XDG_DATA_HOME.
@@ -1105,24 +1220,39 @@ func refreshStatusWiring(newDry, newReal func() *integrateDeps, agent string) (u
 	return true, ""
 }
 
-// refreshFileComponent refreshes a file-based skill component for an agent. It
+// refreshFileComponent reconciles a file-based skill component for an agent. It
 // inspects the link installer's render tree and the agent-location symlinks
 // (through the read-only dry-run deps) to decide:
 //
+//   - opted out (persisted negative consent) → skip silently, never re-add or
+//     update;
 //   - conflict (an unowned entry shadows pop's) → skip silently;
-//   - not installed → skip (refresh never adds an opted-out component);
 //   - installed but current → no-op;
 //   - installed and stale → re-render and re-link via installFileComponent,
-//     which also migrates any lingering copy-mode artifact to a symlink.
+//     which also migrates any lingering copy-mode artifact to a symlink;
+//   - not installed, default-on, the agent already has pop integration, and not
+//     opted out → add the missing default (ADR 0064 slice 08);
+//   - not installed and the agent has no pop integration → skip (leave it
+//     alone).
 //
 // Warnings follow the status-wiring contract: only an installed component that
-// fails its staleness check or its re-install warns; everything else is silent.
+// fails its staleness check or an add/update that fails warns; everything else
+// is silent.
 func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, id ComponentID) (updated bool, warning string) {
 	checkDeps := newDry()
 	home, err := checkDeps.userHomeDir()
 	if err != nil {
 		debug.Error("refreshFileComponent: home %s/%s: %v", agent, id, err)
 		return false, "" // can't resolve home — treat as not actionable
+	}
+
+	// Persisted opt-out (negative consent, ADR 0064 slice 08): a declined
+	// component is never re-added and never updated, regardless of on-disk state.
+	if optedOut(checkDeps, agent, id) {
+		if checkDeps.logf != nil {
+			checkDeps.logf("refreshFileComponent: %s/%s opted out — skip (never re-add or update)", agent, id)
+		}
+		return false, ""
 	}
 
 	if conflictPath, conflict, err := componentConflict(checkDeps, home, id, agent); err != nil {
@@ -1137,18 +1267,16 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 
 	// Opted-in check (name-agnostic): is any pop-owned artifact for this
 	// component present at the agent location, under whatever name it was last
-	// installed with? An empty set means the user never opted in (or removed it)
-	// — refresh never adds it back.
+	// installed with? An empty set means the component is not installed — either
+	// the user removed it (handled by the opt-out short-circuit above) or it was
+	// never added.
 	installedNames, err := fileComponentInstalledNames(checkDeps, home, id, agent)
 	if err != nil {
 		debug.Error("refreshFileComponent: installed check %s/%s: %v", agent, id, err)
 		return false, ""
 	}
 	if len(installedNames) == 0 {
-		if checkDeps.logf != nil {
-			checkDeps.logf("refreshFileComponent: %s/%s not installed — skip", agent, id)
-		}
-		return false, "" // never add an opted-out component
+		return addMissingDefaultComponent(newReal, checkDeps, home, agent, id)
 	}
 
 	// Reconcile decision: installed state ≠ expected resolved state is stale
@@ -1181,6 +1309,67 @@ func refreshFileComponent(newDry, newReal func() *integrateDeps, agent string, i
 		checkDeps.logf("refreshFileComponent: %s/%s refreshed", agent, id)
 	}
 	return true, ""
+}
+
+// addMissingDefaultComponent installs a default-on component that is absent for
+// an agent, but only when that agent already has pop integration (its status
+// wiring is present). This is the refresh-adds-missing behavior (ADR 0064 slice
+// 08): a release that ships a new default component, or an agent integrated
+// before a component became default, picks it up on the next refresh without any
+// prompt. An agent with no pop integration at all is left alone, and a
+// non-default component is never auto-added. Callers must already have ruled out
+// opt-out and conflict. New path logs per slice 01.
+func addMissingDefaultComponent(newReal func() *integrateDeps, checkDeps *integrateDeps, home, agent string, id ComponentID) (updated bool, warning string) {
+	comp, ok := lookupComponent(id)
+	if !ok || !comp.defaultOn {
+		if checkDeps.logf != nil {
+			checkDeps.logf("refreshFileComponent: %s/%s not installed and not a default component — skip", agent, id)
+		}
+		return false, "" // only default-on components are auto-added
+	}
+	if !agentIntegrated(checkDeps, home, agent) {
+		if checkDeps.logf != nil {
+			checkDeps.logf("refreshFileComponent: %s/%s not installed and agent has no pop integration — leave alone", agent, id)
+		}
+		return false, ""
+	}
+	if checkDeps.logf != nil {
+		checkDeps.logf("refreshFileComponent: %s/%s missing default on an integrated agent — adding", agent, id)
+	}
+	realDeps := newReal()
+	realDeps.stdout = nil // refresh runs silently on success
+	if err := installFileComponent(realDeps, home, id, agent); err != nil {
+		debug.Error("refreshFileComponent: add %s/%s: %v", agent, id, err)
+		return false, fmt.Sprintf("failed to add %s %s integration (see pop.log)", agent, id)
+	}
+	if checkDeps.logf != nil {
+		checkDeps.logf("refreshFileComponent: %s/%s added", agent, id)
+	}
+	return true, ""
+}
+
+// optedOut reports whether the agent has a persisted opt-out for a component
+// (negative consent, ADR 0064 slice 08). A deps with no opt-out seam (zero
+// value) reports nothing opted out.
+func optedOut(d *integrateDeps, agent string, id ComponentID) bool {
+	if d.loadOptOut == nil {
+		return false
+	}
+	return d.loadOptOut(strings.ToLower(agent))[id]
+}
+
+// agentIntegrated reports whether the agent already has pop integration — the
+// gate for adding missing default components on refresh. Status wiring is the
+// integration marker the integrate verb always installs, so its presence is the
+// "this agent is integrated" signal. A check error is treated as not integrated
+// (leave the agent alone rather than touch an indeterminate state).
+func agentIntegrated(d *integrateDeps, home, agent string) bool {
+	installed, err := statusWiringInstalled(d, home, agent)
+	if err != nil {
+		debug.Error("agentIntegrated: %s: %v", agent, err)
+		return false
+	}
+	return installed
 }
 
 // stampRevisionIfSuccess writes the given revision to state.json, but only
