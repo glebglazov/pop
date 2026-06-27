@@ -200,6 +200,13 @@ func setupSupervisorSpawnRepo(t *testing.T, stem string, taskRows []spawnTestTas
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A real repo with task sets always carries a repo.json storage marker
+	// (EnsureStorage writes it on first task touch). This fixture writes task
+	// files directly, so write the marker too — Scan's storage-scoped partition
+	// (ADR-0060) only takes the decision path for repos that have one.
+	if err := tasks.EnsureStorage(tasks.DefaultDeps(), id); err != nil {
+		t.Fatal(err)
+	}
 	tasksDir := id.TasksDir
 	setDir := filepath.Join(tasksDir, stem)
 	for _, task := range taskRows {

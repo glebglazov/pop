@@ -359,6 +359,104 @@ func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 	}
 }
 
+// scanGitGuard fails the test if Scan forks any git command. The fork-free
+// partition (ADR-0060) classifies a project lacking a task-storage marker as
+// idle/no-tasks from its name alone, so a status scan over such projects forks no
+// git at all — neither identity resolution nor the integration target.
+type scanGitGuard struct{ t *testing.T }
+
+func (g *scanGitGuard) Command(args ...string) (string, error) {
+	g.t.Errorf("Scan forked git: git %s", strings.Join(args, " "))
+	return "", nil
+}
+
+func (g *scanGitGuard) CommandInDir(dir string, args ...string) (string, error) {
+	g.t.Errorf("Scan forked git in %q: git %s", dir, strings.Join(args, " "))
+	return "", nil
+}
+
+// TestScanForksNoGitForProjectsWithoutTaskStorage is the ADR-0060 guard for the
+// status read path: a scan over configured projects that carry no task-storage
+// marker forks zero git (a guard git fails the test on any invocation), yet every
+// project still appears as idle/no-tasks — the full-fleet listing is preserved.
+func TestScanForksNoGitForProjectsWithoutTaskStorage(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdg"))
+	projA := t.TempDir()
+	projB := t.TempDir()
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: projA}, {Path: projB}}}
+	guard := &scanGitGuard{t: t}
+	td := queueTestTasksDeps(t, true)
+	td.Git = guard
+	pd := project.DefaultDeps()
+	pd.Git = guard
+	d := &Deps{
+		Tasks:      td,
+		Project:    pd,
+		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
+	}
+
+	decisions, err := Scan(d, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 2 {
+		t.Fatalf("decisions = %+v, want one idle decision per configured project", decisions)
+	}
+	for _, dec := range decisions {
+		if dec.Actionable() || dec.Busy || dec.Err != nil || dec.Reason != "no ready set" {
+			t.Fatalf("a project lacking task storage must be idle/no-tasks: %+v", dec)
+		}
+	}
+
+	snap, err := statusFromDecisions(&Deps{Tasks: queueDataDeps(t)}, decisions, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	snap.Tasks = queueDataDeps(t)
+	if view := BuildRunView(snap, time.Now()); view.IdleCount != 2 {
+		t.Fatalf("IdleCount = %d, want 2 (both projects listed as idle)", view.IdleCount)
+	}
+}
+
+// TestScanRegisteredReadySetIsDispatchable is the ADR-0060 guard for the daemon
+// path: a created and registered Ready set in a task-storage repo still resolves
+// to an Actionable decision, and its spawn session name is identical to the value
+// the old git-resolved path produced — so the marker-based partition leaves
+// scheduling decisions unchanged for repos with task storage.
+func TestScanRegisteredReadySetIsDispatchable(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "scan-dispatch", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	d := &Deps{
+		Tasks:      queueTestTasksDeps(t, true),
+		Project:    project.DefaultDeps(),
+		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
+	}
+
+	decisions, err := Scan(d, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actionable *Decision
+	for i := range decisions {
+		if decisions[i].Actionable() {
+			actionable = &decisions[i]
+		}
+	}
+	if actionable == nil {
+		t.Fatalf("a created+registered ready set must be dispatchable: %+v", decisions)
+	}
+	if actionable.TaskSetID != setID {
+		t.Fatalf("dispatchable set = %q, want %q", actionable.TaskSetID, setID)
+	}
+	want := project.SessionNameWith(project.DefaultDeps(), repo)
+	if actionable.scan.SessionName != want {
+		t.Fatalf("spawn session name = %q, want %q (unchanged from the git-resolved path)", actionable.scan.SessionName, want)
+	}
+}
+
 func TestScanTreatsDrainAtHITLGateRuntimeLockAsBusy(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", xdg)
@@ -367,6 +465,9 @@ func TestScanTreatsDrainAtHITLGateRuntimeLockAsBusy(t *testing.T) {
 
 	td := tasks.DefaultDeps()
 	td.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+	// A live drain implies a registered repo; Scan only inspects locks for repos
+	// with a task-storage marker (ADR-0060), so seed one for this checkout.
+	seedTaskStorage(t, td, root, "hitl-set")
 	runtimePath, err := tasks.ResolveRuntimePathWith(td, root, "")
 	if err != nil {
 		t.Fatal(err)

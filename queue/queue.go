@@ -359,11 +359,11 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	}
 	now := d.now().UTC()
 
-	// Memoize idempotent git reads for this scan. resolveScan and
-	// decideRepoDispatches resolve the same repository coordinates repeatedly
-	// (path normalization per project, identity per project and again per group),
-	// re-forking git for the same directories. Wrap a shallow copy of the deps so
-	// the caller's git is untouched, then serve those repeated reads from cache.
+	// Memoize idempotent git reads for this scan. The static partition below
+	// forks no git (ADR-0060), but the per-group decision still forks for the few
+	// task-storage repos (worktree-directive probes, the spawn session name); wrap
+	// a shallow copy of the deps so those repeated reads serve from cache and the
+	// caller's git is untouched.
 	if d.Tasks != nil && d.Tasks.Git != nil {
 		scanDeps := *d
 		tasksDeps := *d.Tasks
@@ -372,75 +372,154 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 		d = &scanDeps
 	}
 
-	// Each project's scan resolution and each repo group's decision run several
-	// read-only git subprocesses; with many registered checkouts the serial cost
-	// dominates wall-clock. Both phases are concurrency-safe — resolveScan and
-	// decideRepoDispatches only read the shared DaemonState and Deps — so fan
-	// them out across a bounded worker pool while preserving deterministic order.
-	sem := make(chan struct{}, scanConcurrency())
-
-	// Phase 1: resolve every project's scan concurrently. A terminal decision
-	// (resolve error or out-of-scope) is recorded in place of a scan.
-	type scanResult struct {
-		scan projectScan
-		dec  *Decision
+	// Partition config projects against on-disk Task-storage markers with the
+	// same fork-free path-nesting match the dashboard uses (ADR-0060). A project
+	// matching no marker is idle/no-tasks from its name alone — no git; only
+	// repositories with task storage take the marker-based decision path.
+	groups, idleProjects, err := scanRepoStatics(d, cfg, projects)
+	if err != nil {
+		return nil, err
 	}
-	results := make([]scanResult, len(projects))
+
+	decisions := make([]Decision, 0, len(projects))
+	for _, p := range idleProjects {
+		decisions = append(decisions, Decision{Project: p.Name, Reason: "no ready set"})
+	}
+
+	// Decide each task-storage repo group concurrently, preserving group order.
+	// decideRepoDispatchesWithRep reads only the shared DaemonState and Deps, so
+	// the groups are concurrency-safe.
+	groupDecisions := make([][]Decision, len(groups))
+	sem := make(chan struct{}, scanConcurrency())
 	var wg sync.WaitGroup
-	for i, p := range projects {
+	for i := range groups {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(idx int, p project.ExpandedProject) {
+		go func(idx int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			scan, err := resolveScan(d, p)
-			if err != nil {
-				if outsideQueueScopeResolveError(err) {
-					results[idx] = scanResult{dec: &Decision{Project: p.Name, Reason: "no ready set"}}
-					return
+			g := groups[idx]
+			decs := decideRepoDispatchesWithRep(d, cfg, g.scans, g.rep, g.repErr, state, now)
+			// The fork-free static path leaves the representative's spawn session
+			// name unset (deriving it forks git). Fill it only for a drain about to
+			// be dispatched — never for the idle full-fleet listing — so a created
+			// and registered Ready set stays dispatchable. A binding-routed drain
+			// already carries its own session.
+			for j := range decs {
+				if decs[j].Actionable() && decs[j].scan.SessionName == "" && decs[j].scan.ProjectPath != "" {
+					decs[j].scan.SessionName = project.SessionNameWith(d.Project, decs[j].scan.ProjectPath)
 				}
-				results[idx] = scanResult{dec: &Decision{Project: p.Name, Err: err, Reason: "resolve"}}
-				return
 			}
-			results[idx] = scanResult{scan: scan}
-		}(i, p)
+			groupDecisions[idx] = decs
+		}(i)
 	}
 	wg.Wait()
-
-	// Group picker Projects by Repository identity. All checkouts of one repo
-	// share a Task storage definition path, so it keys the group: a bare repo's
-	// many worktrees collapse to a single scheduling unit.
-	var order []string
-	groups := map[string][]projectScan{}
-	decisions := make([]Decision, 0, len(projects))
-	for _, r := range results {
-		if r.dec != nil {
-			decisions = append(decisions, *r.dec)
-			continue
-		}
-		if _, ok := groups[r.scan.DefinitionPath]; !ok {
-			order = append(order, r.scan.DefinitionPath)
-		}
-		groups[r.scan.DefinitionPath] = append(groups[r.scan.DefinitionPath], r.scan)
-	}
-
-	// Phase 2: decide each repo group concurrently, preserving group order.
-	groupDecisions := make([][]Decision, len(order))
-	var wg2 sync.WaitGroup
-	for i, key := range order {
-		wg2.Add(1)
-		sem <- struct{}{}
-		go func(idx int, key string) {
-			defer wg2.Done()
-			defer func() { <-sem }()
-			groupDecisions[idx] = decideRepoDispatches(d, cfg, groups[key], state, now)
-		}(i, key)
-	}
-	wg2.Wait()
 	for _, gd := range groupDecisions {
 		decisions = append(decisions, gd...)
 	}
 	return decisions, nil
+}
+
+// scanRepoStatic holds one task-storage repo's fork-free scan coordinates: the
+// marker-derived projectScans for its in-config checkouts and the integration
+// representative resolved with no git (ADR-0060). repErr carries a fatal
+// config-class finding (a renamed execution key) so the group surfaces it
+// exactly as the git-resolved path did.
+type scanRepoStatic struct {
+	scans  []projectScan
+	rep    *projectScan
+	repErr error
+}
+
+// scanRepoStatics partitions config projects against on-disk Task-storage
+// markers, forking no git (ADR-0060). It mirrors the dashboard's discovery
+// (dashboardRepoStatics): every repository with a storage marker that intersects
+// config yields one decision group whose identity, paths, and integration target
+// derive from the marker's common directory plus config; config projects matching
+// no marker are returned as idle (no-tasks) projects. A registered repository
+// absent from config is dropped by the intersection (ADR-0042).
+func scanRepoStatics(d *Deps, cfg *config.Config, projects []project.ExpandedProject) ([]scanRepoStatic, []project.ExpandedProject, error) {
+	repos, err := tasks.ListTaskStorageRepos(d.Tasks)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Canonicalize each candidate project path once (cheap symlink eval, never a
+	// git fork) for path-nesting comparison against each repo's working-tree root.
+	canons := make([]string, len(projects))
+	matched := make([]bool, len(projects))
+	for i, p := range projects {
+		canon, cerr := canonicalCheckoutPath(d.Tasks, p.Path)
+		if cerr != nil {
+			canon = p.Path
+		}
+		canons[i] = canon
+	}
+
+	var groups []scanRepoStatic
+	for _, repo := range repos {
+		root := storageRepoRoot(d.Tasks, repo.RepositoryPath)
+		var scans []projectScan
+		for i := range projects {
+			if pathWithinOrEqual(canons[i], root) || pathWithinOrEqual(root, canons[i]) {
+				matched[i] = true
+				scans = append(scans, projectScan{
+					Name:        projects[i].Name,
+					ProjectPath: canons[i],
+					RuntimePath: canons[i],
+				})
+			}
+		}
+		if len(scans) == 0 {
+			continue // registered storage but de-registered from config (ADR-0042).
+		}
+		st, serr := scanRepoStaticFromMarker(d, cfg, repo.RepositoryPath, scans)
+		if serr != nil {
+			return nil, nil, serr
+		}
+		groups = append(groups, st)
+	}
+
+	var idle []project.ExpandedProject
+	for i := range projects {
+		if !matched[i] {
+			idle = append(idle, projects[i])
+		}
+	}
+	return groups, idle, nil
+}
+
+// scanRepoStaticFromMarker derives one repo group's scan coordinates from its
+// marker's common directory and config, forking no git (ADR-0060): identity and
+// paths come from IdentityFromCommonDir (sha256 + path ops), and the integration
+// representative from dashboardRepresentative (explicit config trunk, or — for a
+// non-bare repo — the parent of the common directory). The marker-derived
+// definition path, repo key, and common directory are stamped onto every scan and
+// the representative so the decision phase reuses them instead of re-forking
+// `git rev-parse` per project and per group.
+func scanRepoStaticFromMarker(d *Deps, cfg *config.Config, commonDir string, scans []projectScan) (scanRepoStatic, error) {
+	id, err := tasks.IdentityFromCommonDir(d.Tasks, commonDir)
+	if err != nil {
+		return scanRepoStatic{}, err
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(d.Tasks, id.TasksDir)
+	if err != nil {
+		return scanRepoStatic{}, err
+	}
+	repoKey := repoIdentityKey(id)
+	for i := range scans {
+		scans[i].DefinitionPath = defPath
+		scans[i].RepoKey = repoKey
+		scans[i].RepoCommonDir = id.CommonDir
+	}
+
+	rep, _, repErr := dashboardRepresentative(d, cfg, id.CommonDir, scans)
+	if rep != nil {
+		rep.DefinitionPath = defPath
+		rep.RepoKey = repoKey
+		rep.RepoCommonDir = id.CommonDir
+	}
+	return scanRepoStatic{scans: scans, rep: rep, repErr: repErr}, nil
 }
 
 // scanConcurrency bounds the worker pool used to resolve project scans and decide

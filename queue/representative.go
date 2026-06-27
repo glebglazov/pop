@@ -30,11 +30,24 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, stat
 	if len(scans) == 0 {
 		return nil
 	}
-
 	rep, _, err := resolveRepresentative(d, cfg, scans)
+	return decideRepoDispatchesWithRep(d, cfg, scans, rep, err, state, now)
+}
+
+// decideRepoDispatchesWithRep is the representative-injected variant of
+// decideRepoDispatches: the caller supplies the already-resolved representative
+// (or nil for a bare repo with no Trunk worktree) and its resolution error. Scan
+// uses it to feed a fork-free, marker-derived representative (ADR-0060) into the
+// unchanged scheduling logic, so the decisions are identical to the old
+// git-resolved path while forking no git for the static resolution. A nil rep
+// with a nil error means a bare repo refused for lack of a Trunk worktree.
+func decideRepoDispatchesWithRep(d *Deps, cfg *config.Config, scans []projectScan, rep *projectScan, repErr error, state *DaemonState, now time.Time) []Decision {
+	if len(scans) == 0 {
+		return nil
+	}
 	name := repoName(scans, rep)
-	if err != nil {
-		return []Decision{{Project: name, Err: err, Reason: "repo"}}
+	if repErr != nil {
+		return []Decision{{Project: name, Err: repErr, Reason: "repo"}}
 	}
 
 	// Crash-retry schedule (its length is the park threshold) drives the per-set

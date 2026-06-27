@@ -2,6 +2,7 @@ package queue
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,24 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
+
+// seedTaskStorage writes the repo.json marker and a task-set directory for the
+// repository containing repoPath so Scan's storage-scoped partition (ADR-0060)
+// discovers it. The set directory only needs to exist for discovery; callers that
+// fake Refresh supply the set's rows separately.
+func seedTaskStorage(t *testing.T, td *tasks.Deps, repoPath, setID string) {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(td, repoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.EnsureStorage(td, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(id.TasksDir, setID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // initBareRepoWithWorktrees clones a committed source repo into a bare repo and
 // adds n detached worktrees, returning the bare dir and the worktree paths. All
@@ -318,6 +337,10 @@ func TestScanCrossRepositoryFanOutPreserved(t *testing.T) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}}, nil
 		},
 	}
+	// Both repos are registered (each carries a task-storage marker); Scan only
+	// takes the decision path for repos with storage (ADR-0060).
+	seedTaskStorage(t, d.Tasks, repoA, "top")
+	seedTaskStorage(t, d.Tasks, repoB, "top")
 
 	decisions, err := Scan(d, cfg)
 	if err != nil {
