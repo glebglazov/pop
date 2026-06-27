@@ -14,6 +14,12 @@ import (
 func queueDataDeps(t *testing.T) *tasks.Deps {
 	t.Helper()
 	dir := t.TempDir()
+	// Pin the *real* process environment at the same temp dir too: helpers that
+	// reach the store through tasks.DefaultDeps() (e.g. RefreshWith in
+	// setupAbandonTaskManifest) resolve XDG_DATA_HOME from real env, not from the
+	// mock seam below. Without this they would write into ~/.local/share/pop and
+	// pollute the developer's machine-global store (slice 01).
+	t.Setenv("XDG_DATA_HOME", dir)
 	real := deps.NewRealFileSystem()
 	d := tasks.DefaultDeps()
 	d.FS = &deps.MockFileSystem{

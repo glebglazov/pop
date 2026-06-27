@@ -1394,7 +1394,7 @@ func dashboardLaunchFixture(t *testing.T, repo, setID string) (*Deps, *config.Co
 	}
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 	rt := newRecordingTmux(false, "0")
-	td := queueTestTasksDeps(true)
+	td := queueTestTasksDeps(t, true)
 	d := &Deps{Tasks: td, Project: project.DefaultDeps(), Tmux: rt}
 	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
 	if err != nil {

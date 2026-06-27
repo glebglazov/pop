@@ -26,7 +26,7 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 	rt := newRecordingTmux(false, "0")
-	td := queueTestTasksDeps(true)
+	td := queueTestTasksDeps(t, true)
 	d := &Deps{
 		Tasks:      td,
 		Project:    project.DefaultDeps(),
@@ -98,7 +98,7 @@ func TestSupervisorWorktreeDrainTargetsProjectSessionWithCheckoutCWD(t *testing.
 
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 	rt := newRecordingTmux(false, "0")
-	td := queueTestTasksDeps(true)
+	td := queueTestTasksDeps(t, true)
 	d := &Deps{
 		Tasks:      td,
 		Project:    project.DefaultDeps(),
@@ -154,7 +154,7 @@ func TestSupervisorTickReportsSpawnFailure(t *testing.T) {
 	})
 
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
-	td := queueTestTasksDeps(true)
+	td := queueTestTasksDeps(t, true)
 	rt := newRecordingTmux(false, "0")
 	rt.CommandFunc = func(args ...string) (string, error) {
 		rt.commands = append(rt.commands, args)

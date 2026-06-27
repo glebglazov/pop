@@ -53,6 +53,7 @@ func TestAbandonRefusesWhileBusy(t *testing.T) {
 
 func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 	repo := initMergeabilityRepo(t)
+	td := queueDataDeps(t)
 	tasksDir := setupAbandonTaskManifest(t, repo, tasks.StatusDone)
 	beforeManifest := mustReadFile(t, filepath.Join(tasksDir, "set-1", "index.json"))
 	wt := filepath.Join(t.TempDir(), "set-done")
@@ -61,7 +62,6 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 	runGit(t, wt, "add", "set.txt")
 	runGit(t, wt, "commit", "-m", "set change")
 
-	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-1")
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: {

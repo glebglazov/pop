@@ -18,7 +18,7 @@ func TestScanReconcilesBeforeReading(t *testing.T) {
 
 	reconciled := 0
 	d := &Deps{
-		Tasks:      queueTestTasksDeps(true),
+		Tasks:      queueTestTasksDeps(t, true),
 		Project:    project.DefaultDeps(),
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
 		ReadLock:   func(rt string) *tasks.RuntimeLockStatus { return idleLock(rt) },
@@ -42,7 +42,7 @@ func TestBuildDashboardReconcilesBeforeReading(t *testing.T) {
 
 	reconciled := 0
 	d := &Deps{
-		Tasks:      queueTestTasksDeps(true),
+		Tasks:      queueTestTasksDeps(t, true),
 		Project:    project.DefaultDeps(),
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
 		ReadLock:   func(rt string) *tasks.RuntimeLockStatus { return idleLock(rt) },

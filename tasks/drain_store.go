@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"testing"
 	"time"
 
 	"github.com/glebglazov/pop/store"
@@ -26,6 +27,7 @@ func DrainStorePathWith(d *Deps) string {
 // filesystem seam), so it uses os directly; the path is still derived through
 // the seam-aware popDataDirWith.
 func openDrainStore(d *Deps) (*store.Store, error) {
+	guardTestStorePath(DrainStorePathWith(d))
 	if err := os.MkdirAll(popDataDirWith(d), 0o755); err != nil {
 		return nil, exitErr(ExitOperational, "create data directory: %v", err)
 	}
@@ -41,6 +43,7 @@ func openDrainStore(d *Deps) (*store.Store, error) {
 // database as a side effect. The bool reports whether the store was opened.
 func openDrainStoreIfExists(d *Deps) (*store.Store, bool, error) {
 	path := DrainStorePathWith(d)
+	guardTestStorePath(path)
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return nil, false, nil
@@ -52,6 +55,47 @@ func openDrainStoreIfExists(d *Deps) (*store.Store, bool, error) {
 		return nil, false, err
 	}
 	return s, true, nil
+}
+
+// prodDataDirAtStartup is the developer's real machine-global data dir,
+// resolved once at package load — before any test calls t.Setenv. The guard
+// compares against this snapshot rather than the live environment so that a
+// test which redirects XDG_DATA_HOME to a temp dir (the correct isolation) is
+// recognised as safe, while a test that never isolates and lands back on the
+// real store is caught.
+var prodDataDirAtStartup = realProductionDataDir()
+
+// guardTestStorePath is the default isolation backstop (slice 01): under `go
+// test`, opening the developer's real machine-global store would pollute it
+// with throwaway rows. Any test that reaches a store open without first
+// redirecting its data dir to a temp location (via XDG_DATA_HOME / a test
+// helper such as queueDataDeps) trips this panic, so the leak can't silently
+// return. It is a no-op outside tests.
+func guardTestStorePath(path string) {
+	if !testing.Testing() {
+		return
+	}
+	if prodDataDirAtStartup == "" {
+		return
+	}
+	if filepath.Dir(path) == prodDataDirAtStartup {
+		panic("tasks: test attempted to open the real pop store at " + path +
+			"; isolate the data dir to a temp location (XDG_DATA_HOME / queueDataDeps) before touching the store")
+	}
+}
+
+// realProductionDataDir resolves pop's data directory from the *real* process
+// environment (not the filesystem seam), mirroring popDataDirWith. Evaluated at
+// package load to snapshot the true machine store location.
+func realProductionDataDir() string {
+	if xdgData := os.Getenv("XDG_DATA_HOME"); xdgData != "" {
+		return filepath.Join(xdgData, "pop")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "pop")
 }
 
 // ReconcileDrains is the opportunistic reconcile pass every layer-2 reader runs

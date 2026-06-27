@@ -103,7 +103,7 @@ func TestScanSkipsNonGitProjectsOutsideQueueScope(t *testing.T) {
 			{Path: nonGit},
 		},
 	}
-	td := queueTestTasksDeps(true)
+	td := queueTestTasksDeps(t, true)
 	d := &Deps{
 		Tasks:      td,
 		Project:    project.DefaultDeps(),
@@ -156,7 +156,7 @@ func TestScanSkipsNonGitProjectsOutsideQueueScope(t *testing.T) {
 func TestDecideProjectIdleSkip(t *testing.T) {
 	refreshCalled := false
 	d := &Deps{
-		Tasks: queueTestTasksDeps(true),
+		Tasks: queueTestTasksDeps(t, true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
 			return liveLock(runtimePath)
 		},
@@ -184,7 +184,7 @@ func TestDecideProjectIdleSkip(t *testing.T) {
 
 func TestDecideProjectSelectsHighestPriority(t *testing.T) {
 	d := &Deps{
-		Tasks: queueTestTasksDeps(true),
+		Tasks: queueTestTasksDeps(t, true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
 			return idleLock(runtimePath)
 		},
@@ -212,7 +212,7 @@ func TestDecideProjectSelectsHighestPriority(t *testing.T) {
 
 func TestDecideProjectSelectsOnlyAutoDrainReadySets(t *testing.T) {
 	d := &Deps{
-		Tasks:    queueTestTasksDeps(true),
+		Tasks:    queueTestTasksDeps(t, true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
@@ -241,7 +241,7 @@ func TestDecideProjectSelectsOnlyAutoDrainReadySets(t *testing.T) {
 
 func TestDecideProjectNoReadySet(t *testing.T) {
 	d := &Deps{
-		Tasks:    queueTestTasksDeps(true),
+		Tasks:    queueTestTasksDeps(t, true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
@@ -267,7 +267,7 @@ func TestDecideProjectWorktreeReadyCausesConfigError(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := &Deps{
-		Tasks:   queueTestTasksDeps(true),
+		Tasks:   queueTestTasksDeps(t, true),
 		Project: &project.Deps{FS: deps.NewRealFileSystem()},
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
 			return idleLock(runtimePath)
@@ -296,7 +296,7 @@ func TestDecideProjectMalformedRepoConfigReportsAndDegrades(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := &Deps{
-		Tasks:   queueTestTasksDeps(true),
+		Tasks:   queueTestTasksDeps(t, true),
 		Project: &project.Deps{FS: deps.NewRealFileSystem()},
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
 			return idleLock(runtimePath)
@@ -399,7 +399,7 @@ func TestScanTreatsDrainAtHITLGateRuntimeLockAsBusy(t *testing.T) {
 
 func TestDecideProjectDispatchesKeepsSingleInPlaceDrain(t *testing.T) {
 	d := &Deps{
-		Tasks:    queueTestTasksDeps(true),
+		Tasks:    queueTestTasksDeps(t, true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
@@ -424,7 +424,7 @@ func TestDecideProjectDispatchesKeepsSingleInPlaceDrain(t *testing.T) {
 // no-drain / no-churn / no-crash-backoff guarantee at the decision seam.
 func TestDecideProjectDispatchesWithholdsUnsatisfiableDirective(t *testing.T) {
 	d := &Deps{
-		Tasks:    queueTestTasksDeps(true),
+		Tasks:    queueTestTasksDeps(t, true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
 		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
@@ -581,7 +581,17 @@ func TestSelectReadySetSkipsParkedSet(t *testing.T) {
 	}
 }
 
-func queueTestTasksDeps(allFound bool) *tasks.Deps {
+func queueTestTasksDeps(t *testing.T, allFound bool) *tasks.Deps {
+	t.Helper()
+	// Default isolation (slice 01): point the data dir at a temp location so any
+	// store touch lands in a throwaway dir, never the developer's real
+	// machine-global store. Only set one when the caller hasn't already isolated
+	// XDG_DATA_HOME (e.g. setupSupervisorSpawnRepo pins it to repo/.xdg and seeds
+	// the store there) — clobbering it would hide the seeded rows. The
+	// guardTestStorePath backstop panics if isolation is ever missed entirely.
+	if os.Getenv("XDG_DATA_HOME") == "" {
+		t.Setenv("XDG_DATA_HOME", t.TempDir())
+	}
 	d := tasks.DefaultDeps()
 	d.LookPath = func(file string) (string, error) {
 		if allFound {

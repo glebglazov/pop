@@ -48,7 +48,7 @@ func initNonBareRepoWithLinkedWorktrees(t *testing.T, n int) (string, []string) 
 func repoDispatchDeps(t *testing.T, ready []tasks.Row, locks map[string]*tasks.RuntimeLockStatus) *Deps {
 	t.Helper()
 	return &Deps{
-		Tasks:   queueTestTasksDeps(true),
+		Tasks:   queueTestTasksDeps(t, true),
 		Project: project.DefaultDeps(),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
 			if locks != nil {
@@ -310,7 +310,7 @@ func TestScanCrossRepositoryFanOutPreserved(t *testing.T) {
 
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repoA}, {Path: repoB}}}
 	d := &Deps{
-		Tasks:      queueTestTasksDeps(true),
+		Tasks:      queueTestTasksDeps(t, true),
 		Project:    project.DefaultDeps(),
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
 		ReadLock:   func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },

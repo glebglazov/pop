@@ -17,7 +17,7 @@ func TestRunTeesSupervisorNarrationToDurableLog(t *testing.T) {
 	dataHome := filepath.Join(root, ".xdg")
 	t.Setenv("XDG_DATA_HOME", dataHome)
 
-	td := queueTestTasksDeps(true)
+	td := queueTestTasksDeps(t, true)
 	d := &Deps{
 		Tasks:      td,
 		Project:    project.DefaultDeps(),
@@ -52,7 +52,7 @@ func TestRunTeesSupervisorNarrationToDurableLog(t *testing.T) {
 func TestRotatingSupervisorLogBoundsActiveFile(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	td := queueTestTasksDeps(true)
+	td := queueTestTasksDeps(t, true)
 
 	log, err := newRotatingSupervisorLog(td, 10, 2)
 	if err != nil {

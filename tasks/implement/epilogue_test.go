@@ -130,8 +130,7 @@ func TestOfferIntegrationNonInteractiveSkips(t *testing.T) {
 }
 
 func TestOfferIntegrationYesFlagTrunkDrainSkips(t *testing.T) {
-	d := DefaultDeps()
-	d.StdinInteractive = func(io.Reader) bool { return true }
+	d := offerIntegrationTestDeps(t)
 
 	result := &tasks.RunTaskSetResult{TaskSetID: "demo", TaskSetDone: true, RuntimePath: "/some/wt"}
 	var out bytes.Buffer

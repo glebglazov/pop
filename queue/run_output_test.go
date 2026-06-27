@@ -146,7 +146,7 @@ func TestRunOutputBaselineOnceAndQuietTick(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", xdg)
 
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
-	td := queueTestTasksDeps(true)
+	td := queueTestTasksDeps(t, true)
 	d := &Deps{
 		Tasks:      td,
 		Project:    project.DefaultDeps(),
@@ -185,7 +185,7 @@ func TestRunOutputSpawnDelta(t *testing.T) {
 
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 	rt := newRecordingTmux(false, "0")
-	td := queueTestTasksDeps(true)
+	td := queueTestTasksDeps(t, true)
 	d := &Deps{
 		Tasks:      td,
 		Project:    project.DefaultDeps(),
