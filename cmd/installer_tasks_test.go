@@ -111,17 +111,17 @@ func TestInstallTaskSkillsIdempotent(t *testing.T) {
 	}
 }
 
-// TestRunIntegrateTaskSkillsInstallsExactSet covers the install-engine path:
-// installing the status wiring plus the task-skills component lands the core
-// wiring plus the four symlinked planning skills, with no prompting.
+// TestRunIntegrateTaskSkillsInstallsExactSet covers the command-level path:
+// `pop integrate <agent> --task-skills` installs the core status wiring plus
+// the four symlinked planning skills, with no prompting.
 func TestRunIntegrateTaskSkillsInstallsExactSet(t *testing.T) {
 	for _, a := range taskAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			if err := installComponentSet(d, a.name, []ComponentID{ComponentTaskSkills}); err != nil {
-				t.Fatalf("installComponentSet(%s): %v", a.name, err)
+			if err := runIntegrateComponents(d, a.name, []ComponentID{ComponentTaskSkills}, false, false, nil); err != nil {
+				t.Fatalf("runIntegrateComponents(%s): %v", a.name, err)
 			}
 
 			// Core status wiring landed.
@@ -181,26 +181,21 @@ func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
 	}
 }
 
-// TestRunIntegrateTaskSkillsUnsupported covers opencode and codex: an agent that
-// cannot host the task planning skills installs the rest of the default set
-// without error — the unsupported component is skipped silently (no degraded
-// install), never failing the run (ADR 0064).
+// TestRunIntegrateTaskSkillsUnsupported covers opencode and codex: the
+// component is reported as not supported and nothing is installed — not even
+// the core status wiring.
 func TestRunIntegrateTaskSkillsUnsupported(t *testing.T) {
 	for _, agent := range []string{"opencode", "codex"} {
 		t.Run(agent, func(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			if err := installComponentSet(d, agent, []ComponentID{ComponentTaskSkills}); err != nil {
-				t.Fatalf("installComponentSet(%s): %v", agent, err)
+			err := runIntegrateComponents(d, agent, []ComponentID{ComponentTaskSkills}, false, false, nil)
+			if err == nil {
+				t.Fatalf("expected not-supported error for %s --task-skills", agent)
 			}
-			// Core wiring lands; no task-skill symlinks for an agent that can't
-			// host them.
-			if len(fs.files) == 0 {
-				t.Fatalf("status wiring not installed for %s", agent)
-			}
-			if len(fs.symlinks) != 0 {
-				t.Fatalf("unsupported task skills installed for %s: %v", agent, fs.symlinks)
+			if len(fs.files) != 0 || len(fs.symlinks) != 0 {
+				t.Fatalf("nothing should be installed for %s: files=%v symlinks=%v", agent, sortedKeys(fs.files), fs.symlinks)
 			}
 		})
 	}

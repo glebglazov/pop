@@ -2274,11 +2274,11 @@ func TestIntegrateCmd_MultiAgentInstall(t *testing.T) {
 	// so we use non-empty optins just to test multi-agent behavior.
 	optins := []ComponentID{ComponentPaneSkill}
 
-	if err := runIntegrateComponents(fakeDeps("/h", fs, &out), "claude", optins, false, false); err != nil {
+	if err := runIntegrateComponents(fakeDeps("/h", fs, &out), "claude", optins, false, false, nil); err != nil {
 		t.Fatalf("claude install: %v", err)
 	}
 
-	if err := runIntegrateComponents(fakeDeps("/h", fs, &out), "pi", optins, false, false); err != nil {
+	if err := runIntegrateComponents(fakeDeps("/h", fs, &out), "pi", optins, false, false, nil); err != nil {
 		t.Fatalf("pi install: %v", err)
 	}
 
@@ -2302,12 +2302,12 @@ func TestIntegrateCmd_MultiAgentWithUniformFlags(t *testing.T) {
 	optins := []ComponentID{ComponentPaneSkill}
 
 	// Install claude with pane skill.
-	if err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "claude", optins, false, false); err != nil {
+	if err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "claude", optins, false, false, nil); err != nil {
 		t.Fatalf("claude install: %v", err)
 	}
 
 	// Install pi with same flags (pane skill).
-	if err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "pi", optins, false, false); err != nil {
+	if err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "pi", optins, false, false, nil); err != nil {
 		t.Fatalf("pi install: %v", err)
 	}
 
@@ -2325,7 +2325,7 @@ func TestIntegrateCmd_UnknownAgentIsRejected(t *testing.T) {
 	fs := newFakeFS()
 
 	// Unknown agent should produce an error.
-	err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "vscode", []ComponentID{}, false, false)
+	err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "vscode", []ComponentID{}, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error for unknown agent vscode")
 	}
@@ -2368,7 +2368,7 @@ func TestExplicitInstall_OutputAdded(t *testing.T) {
 	d := fakeDeps(installerHome, fs, &out)
 
 	// Install only status-wiring (no opt-in flags).
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2394,7 +2394,7 @@ func TestExplicitInstall_OutputUpdated(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(installerHome, fs, &out)
 
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2413,7 +2413,7 @@ func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
 	d := fakeDeps(installerHome, fs, &out)
 
 	// codex only supports status-wiring; task-skills and pane-skill are unsupported.
-	if err := runIntegrateComponents(d, "codex", []ComponentID{ComponentStatusWiring}, false, false); err != nil {
+	if err := runIntegrateComponents(d, "codex", []ComponentID{ComponentStatusWiring}, false, false, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2431,7 +2431,7 @@ func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
 	out.Reset()
 	fs2 := newFakeFS()
 	d2 := fakeDeps(installerHome, fs2, &out)
-	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring}, false, false); err != nil {
+	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got2 := out.String()
@@ -2452,7 +2452,7 @@ func TestExplicitInstall_OutputSkippedConflict(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(installerHome, fs, &out)
 
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false); err != nil {
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2484,14 +2484,14 @@ func TestExplicitInstall_VerboseShowsAlreadyCurrent(t *testing.T) {
 	fs := newFakeFS()
 	// First install to set up current content.
 	d0 := fakeDeps(installerHome, fs, io.Discard)
-	if err := runIntegrateComponents(d0, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false); err != nil {
+	if err := runIntegrateComponents(d0, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
 	// Re-run without verbose: "already current" should be suppressed → "nothing to do" or opted-out lines only.
 	var outNoVerbose bytes.Buffer
 	d1 := fakeDeps(installerHome, fs, &outNoVerbose)
-	if err := runIntegrateComponents(d1, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false); err != nil {
+	if err := runIntegrateComponents(d1, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil); err != nil {
 		t.Fatalf("re-run no verbose: %v", err)
 	}
 	if strings.Contains(outNoVerbose.String(), "already current") {
@@ -2501,7 +2501,7 @@ func TestExplicitInstall_VerboseShowsAlreadyCurrent(t *testing.T) {
 	// Re-run with verbose: "already current" should appear for both components.
 	var outVerbose bytes.Buffer
 	d2 := fakeDeps(installerHome, fs, &outVerbose)
-	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, true); err != nil {
+	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, true, nil); err != nil {
 		t.Fatalf("re-run verbose: %v", err)
 	}
 	if !strings.Contains(outVerbose.String(), "already current") {
@@ -2632,5 +2632,289 @@ func TestUpdateExisting_NothingToDoMessage(t *testing.T) {
 	}
 	if got := stdout.String(); got != "nothing to do\n" {
 		t.Errorf("expected 'nothing to do', got %q", got)
+	}
+}
+
+// ----- declarative opt-out removal -------------------------------------------
+
+// TestOptOutRemoval_PaneSkill_RemovesInstalled: --no-pane-skill removes an
+// already-installed pop-owned pane skill and reports "removed (opted out)".
+func TestOptOutRemoval_PaneSkill_RemovesInstalled(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+
+	// First install pane-skill.
+	seedFileComponent(t, fs, home, ComponentPaneSkill, "claude")
+	link := claudePaneLink(home)
+	if _, ok := fs.symlinks[link]; !ok {
+		t.Fatalf("seed install did not create pane-skill symlink at %s", link)
+	}
+
+	// Now run with explicit opt-out for pane-skill.
+	var out bytes.Buffer
+	d := fakeDeps(home, fs, &out)
+	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Pane-skill symlink must be gone.
+	if _, ok := fs.symlinks[link]; ok {
+		t.Errorf("pane-skill symlink still present after opt-out removal: %s", link)
+	}
+
+	// Output must contain "removed (opted out)" for pane-skill.
+	got := out.String()
+	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "removed (opted out)") {
+		t.Errorf("expected 'pane-skill  removed (opted out)' line, got %q", got)
+	}
+}
+
+// TestOptOutRemoval_TaskSkills_RemovesInstalled: --no-task-skills removes an
+// already-installed pop-owned task-skills component and reports "removed (opted out)".
+func TestOptOutRemoval_TaskSkills_RemovesInstalled(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+
+	seedFileComponent(t, fs, home, ComponentTaskSkills, "claude")
+
+	// Verify at least one task-skills link was created.
+	hasLink := false
+	for k := range fs.symlinks {
+		if strings.Contains(k, ".claude/skills") {
+			hasLink = true
+		}
+	}
+	if !hasLink {
+		t.Fatalf("seed install did not create task-skills symlinks")
+	}
+	linksBefore := len(fs.symlinks)
+
+	var out bytes.Buffer
+	d := fakeDeps(home, fs, &out)
+	optOuts := map[ComponentID]bool{ComponentTaskSkills: true}
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// All task-skills symlinks must be gone.
+	if len(fs.symlinks) >= linksBefore {
+		t.Errorf("expected task-skills symlinks removed, but symlink count unchanged (%d)", len(fs.symlinks))
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "task-skills") || !strings.Contains(got, "removed (opted out)") {
+		t.Errorf("expected 'task-skills  removed (opted out)' line, got %q", got)
+	}
+}
+
+// TestOptOutRemoval_NotInstalled_SkipsOptedOut: explicit --no-pane-skill on a
+// component that is not installed reports "skipped (opted out)" — no removal
+// needed, but the opt-out is still recorded in the outcome.
+func TestOptOutRemoval_NotInstalled_SkipsOptedOut(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+
+	var out bytes.Buffer
+	d := fakeDeps(home, fs, &out)
+	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (opted out)") {
+		t.Errorf("expected 'pane-skill  skipped (opted out)' when not installed, got %q", got)
+	}
+	// Must not contain "removed".
+	if strings.Contains(got, "removed") {
+		t.Errorf("must not emit 'removed' for a component not installed, got %q", got)
+	}
+}
+
+// TestOptOutRemoval_LeavesUnownedUntouched: an unowned same-named entry is never
+// deleted when --no-pane-skill is passed.
+func TestOptOutRemoval_LeavesUnownedUntouched(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+
+	// Place a user-owned (non-pop) entry at the bare pane-skill name.
+	userEntry := filepath.Join(home, ".claude", "skills", "pane")
+	fs.dirs[userEntry] = true
+
+	var out bytes.Buffer
+	d := fakeDeps(home, fs, &out)
+	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Unowned entry must still be present.
+	if !fs.dirs[userEntry] {
+		t.Errorf("unowned pane entry was deleted by opt-out removal — must never touch user-owned files")
+	}
+}
+
+// TestOptOutRemoval_NoPrompt: opt-out removal runs without any stdin interaction
+// (d.stdin is nil; a prompt would panic or fail).
+func TestOptOutRemoval_NoPrompt(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+	seedFileComponent(t, fs, home, ComponentPaneSkill, "claude")
+
+	// deps with nil stdin — any prompt would return an error from bufio.Reader.
+	d := &integrateDeps{
+		userHomeDir: func() (string, error) { return home, nil },
+		readFile:    fs.readFile,
+		writeFile:   fs.writeFile,
+		mkdirAll:    fs.mkdirAll,
+		removeAll:   fs.removeAll,
+		stdout:      io.Discard,
+		logf:        func(string, ...any) {},
+		dataDir:     func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
+		symlink:     fs.symlink,
+		readlink:    fs.readlink,
+		lstatMode:   fs.lstatMode,
+		stdin:       nil, // no stdin → any prompt read would return EOF (decline), but removal must not need it
+	}
+
+	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+		t.Fatalf("opt-out removal must succeed with nil stdin (no prompt): %v", err)
+	}
+
+	link := claudePaneLink(home)
+	if _, ok := fs.symlinks[link]; ok {
+		t.Errorf("pane-skill symlink not removed")
+	}
+}
+
+// TestOptOutRemoval_BareReAdds: after an explicit opt-out removal, a bare
+// interactive run (wizard) with y to pane-skill re-installs the component.
+func TestOptOutRemoval_BareReAdds(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+
+	// Install pane-skill first.
+	seedFileComponent(t, fs, home, ComponentPaneSkill, "claude")
+	link := claudePaneLink(home)
+
+	// Remove it via explicit opt-out.
+	d := fakeDeps(home, fs, io.Discard)
+	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+		t.Fatalf("opt-out: %v", err)
+	}
+	if _, ok := fs.symlinks[link]; ok {
+		t.Fatalf("pane-skill should be removed after opt-out")
+	}
+
+	// Bare interactive run with yes to pane-skill should re-add it.
+	// Provide "y\ny\n" as scripted stdin so wizard says yes to both pane-skill and task-skills.
+	wizardIn := strings.NewReader("y\ny\n")
+	d2 := fakeDeps(home, fs, io.Discard)
+	d2.stdin = wizardIn
+	if err := runIntegrateComponents(d2, "claude", nil, true, false, nil); err != nil {
+		t.Fatalf("bare re-run: %v", err)
+	}
+
+	if _, ok := fs.symlinks[link]; !ok {
+		t.Errorf("pane-skill not re-installed after bare interactive re-run with y")
+	}
+}
+
+// TestOptOutRemoval_Cycle: full install→opt-out-removal→explicit-re-add cycle.
+func TestOptOutRemoval_Cycle(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+	link := claudePaneLink(home)
+
+	// Step 1: install pane-skill.
+	d := fakeDeps(home, fs, io.Discard)
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, ok := fs.symlinks[link]; !ok {
+		t.Fatalf("pane-skill not installed in step 1")
+	}
+
+	// Step 2: opt-out removal.
+	var out bytes.Buffer
+	d2 := fakeDeps(home, fs, &out)
+	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
+	if err := runIntegrateComponents(d2, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+		t.Fatalf("opt-out: %v", err)
+	}
+	if _, ok := fs.symlinks[link]; ok {
+		t.Fatalf("pane-skill still present after opt-out")
+	}
+	if !strings.Contains(out.String(), "removed (opted out)") {
+		t.Errorf("expected 'removed (opted out)' in output, got %q", out.String())
+	}
+
+	// Step 3: bare re-add.
+	d3 := fakeDeps(home, fs, io.Discard)
+	if err := runIntegrateComponents(d3, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil); err != nil {
+		t.Fatalf("re-add: %v", err)
+	}
+	if _, ok := fs.symlinks[link]; !ok {
+		t.Errorf("pane-skill not re-added in step 3")
+	}
+}
+
+// TestRefresh_LeavesRemovedOptedOutInPlace: the Integration refresh
+// (--update-existing / auto-update) never removes an installed-but-opted-out
+// component. After an explicit opt-out removal, refresh must not try to re-add
+// or remove the component — it just sees it's not installed and skips it.
+func TestRefresh_LeavesRemovedOptedOutInPlace(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fs := newFakeFS()
+	home := "/h"
+
+	// Install status wiring for claude so the agent is "known" to refresh.
+	installViaFake(t, fs, home, "claude")
+
+	// Install pane-skill, then remove it via explicit opt-out.
+	seedFileComponent(t, fs, home, ComponentPaneSkill, "claude")
+	link := claudePaneLink(home)
+	d := fakeDeps(home, fs, io.Discard)
+	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
+	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts); err != nil {
+		t.Fatalf("opt-out: %v", err)
+	}
+	if _, ok := fs.symlinks[link]; ok {
+		t.Fatalf("pane-skill should be removed before refresh")
+	}
+
+	// Record symlink state before refresh.
+	symlinksBefore := make(map[string]string, len(fs.symlinks))
+	for k, v := range fs.symlinks {
+		symlinksBefore[k] = v
+	}
+
+	// Run the refresh path.
+	dry, real := fakeFactories(home, fs)
+	result := updateStaleIntegrations(dry, real)
+	if len(result.Warnings) != 0 {
+		t.Errorf("unexpected warnings from refresh: %v", result.Warnings)
+	}
+
+	// Pane-skill must not be re-added by refresh.
+	if _, ok := fs.symlinks[link]; ok {
+		t.Errorf("refresh must not re-add an opted-out (removed) pane-skill component")
+	}
+
+	// Refresh must not have emitted a "removed" outcome — removal is not its job.
+	for _, o := range result.Outcomes {
+		if o.Component == ComponentPaneSkill && strings.Contains(o.Label, "removed") {
+			t.Errorf("refresh must not remove components, got outcome: %+v", o)
+		}
 	}
 }
