@@ -750,6 +750,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 	// the truncation fallback) produces is normalized into a kebab slug before it
 	// reaches @pop_topic.
 	maxWords := cfg.PaneMonitoringTopicWords()
+	recipeTimeout := cfg.PaneMonitoringTopicDerivationTimeout()
 
 	// Build the model prompt (instructing a <=maxWords-word lowercase hyphen
 	// slug) and the per-derive JSON payload once; both are reused across recipes.
@@ -775,7 +776,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 			continue
 		}
 		argv, stdin := recipe.build(modelPrompt, payload)
-		ctx, cancel := context.WithTimeout(context.Background(), topicRecipeTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), recipeTimeout)
 		out, runErr := run(ctx, argv, stdin)
 		cancel()
 		if runErr != nil {
@@ -1046,9 +1047,8 @@ func capTopic(out string) string {
 }
 
 const (
-	topicMaxWords      = 8
-	topicMaxChars      = 60
-	topicRecipeTimeout = 5 * time.Second
+	topicMaxWords = 8
+	topicMaxChars = 60
 )
 
 // slugifyTopic normalizes derived Topic text into pop's canonical format (ADR

@@ -3130,3 +3130,45 @@ func TestPaneMonitoringTopicWords(t *testing.T) {
 		}
 	})
 }
+
+// TestPaneMonitoringTopicDerivationTimeout verifies the topic_derivation_timeout
+// knob parses (as seconds), defaults to DefaultTopicDerivationTimeoutSeconds when
+// unset/non-positive, and otherwise reports its value as a duration.
+func TestPaneMonitoringTopicDerivationTimeout(t *testing.T) {
+	defaultDur := time.Duration(DefaultTopicDerivationTimeoutSeconds) * time.Second
+
+	t.Run("parses configured value as seconds", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		os.WriteFile(configPath, []byte("[pane_monitoring]\ntopic_derivation_timeout = 45\n"), 0644)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if got := cfg.PaneMonitoringTopicDerivationTimeout(); got != 45*time.Second {
+			t.Errorf("PaneMonitoringTopicDerivationTimeout() = %v, want 45s", got)
+		}
+	})
+
+	t.Run("defaults when unset", func(t *testing.T) {
+		if got := (&Config{}).PaneMonitoringTopicDerivationTimeout(); got != defaultDur {
+			t.Errorf("PaneMonitoringTopicDerivationTimeout() = %v, want %v", got, defaultDur)
+		}
+		cfg := &Config{PaneMonitoring: &PaneMonitoringConfig{}}
+		if got := cfg.PaneMonitoringTopicDerivationTimeout(); got != defaultDur {
+			t.Errorf("PaneMonitoringTopicDerivationTimeout() = %v, want %v", got, defaultDur)
+		}
+	})
+
+	t.Run("non-positive falls back to default", func(t *testing.T) {
+		cfg := &Config{PaneMonitoring: &PaneMonitoringConfig{TopicDerivationTimeout: 0}}
+		if got := cfg.PaneMonitoringTopicDerivationTimeout(); got != defaultDur {
+			t.Errorf("PaneMonitoringTopicDerivationTimeout() = %v, want %v", got, defaultDur)
+		}
+		cfg = &Config{PaneMonitoring: &PaneMonitoringConfig{TopicDerivationTimeout: -3}}
+		if got := cfg.PaneMonitoringTopicDerivationTimeout(); got != defaultDur {
+			t.Errorf("PaneMonitoringTopicDerivationTimeout() = %v, want %v", got, defaultDur)
+		}
+	})
+}

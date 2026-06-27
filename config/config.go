@@ -64,11 +64,22 @@ type PaneMonitoringConfig struct {
 	// into a kebab slug (ADR 0057). Zero/unset means the default
 	// (DefaultTopicWords); see PaneMonitoringTopicWords.
 	TopicWords int `toml:"topic_words"`
+	// TopicDerivationTimeout bounds, in seconds, how long each topic_agents recipe
+	// may run before pop kills it and falls through to the next recipe (then to
+	// prompt truncation). Large local models (e.g. a multi-GB ollama model that
+	// must cold-load) need more than the default; see PaneMonitoringTopicDerivationTimeout.
+	// Zero/unset means the default (DefaultTopicDerivationTimeoutSeconds).
+	TopicDerivationTimeout int `toml:"topic_derivation_timeout"`
 }
 
 // DefaultTopicWords is the word cap applied to a derived Topic slug when
 // [pane_monitoring] topic_words is unset.
 const DefaultTopicWords = 5
+
+// DefaultTopicDerivationTimeoutSeconds is the per-recipe timeout applied to a
+// topic-derivation recipe when [pane_monitoring] topic_derivation_timeout is unset.
+// 30s gives a multi-GB local model room to cold-load before pop falls through.
+const DefaultTopicDerivationTimeoutSeconds = 30
 
 // DashboardConfig holds dashboard-specific configuration
 type DashboardConfig struct {
@@ -790,6 +801,17 @@ func (c *Config) PaneMonitoringTopicWords() int {
 		return DefaultTopicWords
 	}
 	return c.PaneMonitoring.TopicWords
+}
+
+// PaneMonitoringTopicDerivationTimeout returns the per-recipe topic-derivation
+// timeout, defaulting to DefaultTopicDerivationTimeoutSeconds when unset or
+// non-positive.
+func (c *Config) PaneMonitoringTopicDerivationTimeout() time.Duration {
+	secs := DefaultTopicDerivationTimeoutSeconds
+	if c.PaneMonitoring != nil && c.PaneMonitoring.TopicDerivationTimeout > 0 {
+		secs = c.PaneMonitoring.TopicDerivationTimeout
+	}
+	return time.Duration(secs) * time.Second
 }
 
 // DashboardZoomOnSwitch reports whether selecting a pane from the dashboard
