@@ -188,38 +188,11 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		out = os.Stdout
 	}
 
-	// Start the Drain: insert a running row keyed by (repository, set) and
-	// enforce mutual exclusion transactionally (ADR-0055), replacing the runtime
-	// execution lock file and the cross-checkout backstop. The single-task path
-	// claims a Drain too so it interlocks with whole-set drains of the same set.
-	drain, err := BeginDrain(d, runtimePath, sel.TaskSetID, confirmOut)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		var (
-			declined    bool
-			quotaPaused bool
-			preset      string
-			resetAt     time.Time
-		)
-		if result != nil {
-			declined = result.Declined
-			quotaPaused = result.QuotaPaused
-			preset = result.PausePreset
-			resetAt = result.PauseResetAt
-		}
-		finalizeDrain(drain, declined, quotaPaused, preset, false, resetAt, err)
-	}()
-
-	// Adopt this checkout into the binding model (ADR-0036): worktree-locus runs
-	// record a never-delete adopted binding; trunk-locus runs record nothing.
-	if opts.BindCheckout != nil {
-		if err := opts.BindCheckout(sel.TaskSetID, resolved.ProjectPath, runtimePath); err != nil {
-			return nil, exitErr(ExitOperational, "bind checkout: %v", err)
-		}
-	}
-
+	// Lock-free front matter (ADR-0063): the set render, the dirty-runtime
+	// report, and the pre-run confirmation all run before any Drain is claimed,
+	// so the Runtime execution lock is not held while a human sits at the prompt.
+	// A declined confirmation returns here having claimed no Drain and held no
+	// lock.
 	dirty, err := runtimeIsDirty(d, runtimePath)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
@@ -246,6 +219,43 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	}
 	if !confirmed {
 		return &RunTaskResult{Selection: sel, Refresh: refresh, Declined: true}, nil
+	}
+
+	// Start the Drain only now, around the actual attempt execution (ADR-0063):
+	// insert a running row keyed by (repository, set) and enforce mutual
+	// exclusion transactionally (ADR-0055), replacing the runtime execution lock
+	// file and the cross-checkout backstop. The single-task path claims a Drain
+	// too so it interlocks with whole-set drains of the same set. The running
+	// Drain row exists only while an attempt is actively executing, matching the
+	// whole-set lifecycle.
+	drain, err := BeginDrain(d, runtimePath, sel.TaskSetID, confirmOut)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		var (
+			declined    bool
+			quotaPaused bool
+			preset      string
+			resetAt     time.Time
+		)
+		if result != nil {
+			declined = result.Declined
+			quotaPaused = result.QuotaPaused
+			preset = result.PausePreset
+			resetAt = result.PauseResetAt
+		}
+		finalizeDrain(drain, declined, quotaPaused, preset, false, resetAt, err)
+	}()
+
+	// Adopt this checkout into the binding model (ADR-0036): worktree-locus runs
+	// record a never-delete adopted binding; trunk-locus runs record nothing.
+	// This runs before the attempt on every non-declined path, regardless of the
+	// drain timing.
+	if opts.BindCheckout != nil {
+		if err := opts.BindCheckout(sel.TaskSetID, resolved.ProjectPath, runtimePath); err != nil {
+			return nil, exitErr(ExitOperational, "bind checkout: %v", err)
+		}
 	}
 
 	if dirty {

@@ -574,6 +574,103 @@ func TestRunTaskReleasesRuntimeLockAfterExecution(t *testing.T) {
 	}
 }
 
+// While the single-task implement path waits at the pre-run confirmation
+// prompt, no Runtime execution lock is held (ADR-0063): ReadRuntimeLockStatus
+// reports not-locked and a second drain can claim the same checkout. The lock
+// is acquired only after confirmation, around the actual attempt.
+func TestRunTaskReleasesRuntimeLockAtConfirmationPrompt(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		checkTask: true,
+		summary:   "confirmed run",
+	})
+
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+	runtimePath, err := ResolveRuntimePathWith(d, env.root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(t *testing.T) {
+		t.Helper()
+		if status := ReadRuntimeLockStatus(d, runtimePath); status.Locked {
+			t.Fatalf("runtime lock at confirmation prompt = %#v, want not locked", status)
+		}
+		// A concurrent drain can claim the still-free checkout while the human is
+		// at the confirmation prompt; finish it so it does not collide with the
+		// real attempt's BeginDrain.
+		handle, err := BeginDrain(d, runtimePath, "second", io.Discard)
+		if err != nil {
+			t.Fatalf("second drain must claim the unlocked checkout: %v", err)
+		}
+		if err := handle.Finish(DrainOutcomeFinished, "", false, time.Time{}); err != nil {
+			t.Fatalf("finish second drain: %v", err)
+		}
+	}
+
+	opts := env.runOpts(false, agent)
+	opts.ConfirmIn = &checkingPromptReader{t: t, check: check, response: "y\n"}
+
+	if _, err := RunTaskWith(d, nil, nil, opts); err != nil {
+		t.Fatal(err)
+	}
+	assertTaskDone(t, env, "01-a")
+
+	if status := ReadRuntimeLockStatus(d, runtimePath); status.Locked {
+		t.Fatalf("runtime lock leaked after execution: %#v", status)
+	}
+}
+
+// BindCheckout adoption (ADR-0036) runs before the attempt on every
+// non-declined path: a bind failure aborts before the agent runs, leaving the
+// task open.
+func TestRunTaskBindsCheckoutBeforeAttempt(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+		checkTask: true,
+		summary:   "should not run",
+	})
+
+	d := env.deps()
+	opts := env.runOpts(true, agent)
+	opts.BindCheckout = func(setID, projectPath, runtimePath string) error {
+		return fmt.Errorf("bind boom")
+	}
+
+	_, err := RunTaskWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	// The agent never ran, so the task is still open — adoption gated the attempt.
+	assertTaskOpen(t, env, "01-a")
+}
+
+// A declined confirmation never reaches BindCheckout (it returns before the
+// drain claim and adoption), so adoption is scoped to non-declined paths.
+func TestRunTaskDeclinedSkipsBindCheckout(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+
+	d := env.deps()
+	bound := false
+	opts := env.runOpts(false, agent)
+	opts.ConfirmIn = strings.NewReader("n\n")
+	opts.BindCheckout = func(setID, projectPath, runtimePath string) error {
+		bound = true
+		return nil
+	}
+
+	result, err := RunTaskWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Declined {
+		t.Fatal("expected declined")
+	}
+	if bound {
+		t.Fatal("declined run must not adopt the checkout")
+	}
+}
+
 func TestRunTaskBookkeepingOrder(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
