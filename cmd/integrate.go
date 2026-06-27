@@ -384,9 +384,9 @@ var integrateNoTaskSkills bool
 var integrateVerbose bool
 
 var integrateCmd = &cobra.Command{
-	Use:   "integrate [agent]",
+	Use:   "integrate <agent>...",
 	Short: "Install pop status wiring for a coding agent",
-	Long: `Install pop's full integration toolkit for a coding agent.
+	Long: `Install pop's full integration toolkit for one or more coding agents.
 
 By default, with no flags, integrate installs everything for the agent — no
 prompting (ADR 0064):
@@ -431,6 +431,10 @@ Supported agents:
             ~/.config/opencode/plugins/pop-status-sync.ts.
   cursor    Install pane monitoring hooks in ~/.cursor/hooks.json.
 
+Multiple agents can be integrated in a single invocation (e.g. 'pop integrate
+claude pi cursor'); each is installed in order with the same component flags
+applied uniformly to all.
+
 Re-running the command for an agent is idempotent: existing pop status wiring
 for that agent is refreshed to the current version, and unrelated hooks are
 preserved.
@@ -449,8 +453,8 @@ after copying a new binary into place.`,
 			}
 			return nil
 		}
-		if len(args) != 1 {
-			return fmt.Errorf("requires exactly 1 argument: agent name (claude, codex, pi, opencode, or cursor)")
+		if len(args) < 1 {
+			return fmt.Errorf("requires at least 1 argument: agent name (claude, codex, pi, opencode, or cursor)")
 		}
 		return nil
 	},
@@ -519,12 +523,31 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 	if integrateUpdateExisting {
 		return runIntegrateUpdateExisting()
 	}
-	return runIntegrateInstall(
-		defaultIntegrateDeps(),
-		args[0],
-		integratePaneSkill, integrateTaskSkills,
-		integrateNoPaneSkill, integrateNoTaskSkills,
-	)
+	// Validate all agents upfront before installing any, so a mix of valid and
+	// invalid names does not partially install the valid ones.
+	core, ok := lookupComponent(ComponentStatusWiring)
+	if !ok {
+		return fmt.Errorf("status-wiring component missing from catalog")
+	}
+	for _, agent := range args {
+		agent = strings.ToLower(agent)
+		if !core.supported(agent) {
+			return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
+		}
+	}
+
+	d := defaultIntegrateDeps()
+	for _, agent := range args {
+		if err := runIntegrateInstall(
+			d,
+			agent,
+			integratePaneSkill, integrateTaskSkills,
+			integrateNoPaneSkill, integrateNoTaskSkills,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // runIntegrateInstall is the testable core behind `pop integrate <agent>`

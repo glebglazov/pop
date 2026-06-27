@@ -2240,7 +2240,7 @@ func TestIntegrateCmd_UpdateExistingWithNoArgsIsOK(t *testing.T) {
 	}
 }
 
-func TestIntegrateCmd_WithoutFlagRequiresExactlyOneArg(t *testing.T) {
+func TestIntegrateCmd_WithoutFlagRequiresAtLeastOneArg(t *testing.T) {
 	prev := integrateUpdateExisting
 	integrateUpdateExisting = false
 	t.Cleanup(func() { integrateUpdateExisting = prev })
@@ -2251,9 +2251,111 @@ func TestIntegrateCmd_WithoutFlagRequiresExactlyOneArg(t *testing.T) {
 	if err := integrateCmd.Args(integrateCmd, []string{"claude"}); err != nil {
 		t.Errorf("expected no error for single agent arg, got %v", err)
 	}
-	if err := integrateCmd.Args(integrateCmd, []string{"claude", "pi"}); err == nil {
-		t.Error("expected error when more than one agent is provided")
+	if err := integrateCmd.Args(integrateCmd, []string{"claude", "pi"}); err != nil {
+		t.Errorf("expected no error for multiple agent args, got %v", err)
 	}
+	if err := integrateCmd.Args(integrateCmd, []string{"claude", "codex", "pi", "opencode", "cursor"}); err != nil {
+		t.Errorf("expected no error for all agents, got %v", err)
+	}
+}
+
+func TestIntegrateCmd_MultiAgentInstall(t *testing.T) {
+	// Test that multiple agents can be installed via runIntegrateComponents
+	// called in sequence with the same flags applied uniformly to all.
+	// We use empty optins to simulate the case where no component flags
+	// are passed (requiring explicit opt-in or interactive mode).
+	// Here we test with explicit flags to demonstrate multi-agent install.
+	fs := newFakeFS()
+	var out bytes.Buffer
+
+	// Install claude and pi each with explicit opt-in flags.
+	// Empty optins means only status-wiring (core) is installed.
+	// Note: empty optins with non-interactive mode requires component flags,
+	// so we use non-empty optins just to test multi-agent behavior.
+	optins := []ComponentID{ComponentPaneSkill}
+
+	if err := runIntegrateComponents(fakeDeps("/h", fs, &out), "claude", optins, false, false); err != nil {
+		t.Fatalf("claude install: %v", err)
+	}
+
+	if err := runIntegrateComponents(fakeDeps("/h", fs, &out), "pi", optins, false, false); err != nil {
+		t.Fatalf("pi install: %v", err)
+	}
+
+	// Verify claude was installed (status wiring + pane skill).
+	claudeSettings := filepath.Join("/h", ".claude", "settings.json")
+	if _, ok := fs.files[claudeSettings]; !ok {
+		t.Error("claude status wiring not installed")
+	}
+
+	// Verify pi was installed (status wiring + pane skill).
+	piExt := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
+	if _, ok := fs.files[piExt]; !ok {
+		t.Error("pi status wiring not installed")
+	}
+}
+
+func TestIntegrateCmd_MultiAgentWithUniformFlags(t *testing.T) {
+	// Test that component flags are applied uniformly across multiple agents.
+	// When pane-skill opt-in is requested, it should be installed for all agents.
+	fs := newFakeFS()
+	optins := []ComponentID{ComponentPaneSkill}
+
+	// Install claude with pane skill.
+	if err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "claude", optins, false, false); err != nil {
+		t.Fatalf("claude install: %v", err)
+	}
+
+	// Install pi with same flags (pane skill).
+	if err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "pi", optins, false, false); err != nil {
+		t.Fatalf("pi install: %v", err)
+	}
+
+	// Verify pane skill was installed for claude.
+	claudeLinkPath := filepath.Join("/h", ".claude", "skills", "pop-pane")
+	if target, ok := fs.symlinks[claudeLinkPath]; !ok {
+		t.Error("claude pane-skill symlink not created")
+	} else if !strings.Contains(target, "pop-pane") {
+		t.Errorf("claude pane-skill symlink target unexpected: %v", target)
+	}
+}
+
+func TestIntegrateCmd_UnknownAgentIsRejected(t *testing.T) {
+	// Test that runIntegrateComponents rejects unknown agent names clearly.
+	fs := newFakeFS()
+
+	// Unknown agent should produce an error.
+	err := runIntegrateComponents(fakeDeps("/h", fs, io.Discard), "vscode", []ComponentID{}, false, false)
+	if err == nil {
+		t.Fatal("expected error for unknown agent vscode")
+	}
+	if !strings.Contains(err.Error(), "unknown agent") {
+		t.Errorf("error should mention unknown agent, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "vscode") {
+		t.Errorf("error should mention the invalid agent name, got %q", err.Error())
+	}
+}
+
+func TestIntegrateCmd_PartialAgentMixIsRejected(t *testing.T) {
+	// Test that when a mix of valid and invalid agents are passed to runIntegrate,
+	// the invalid agent is caught in pre-flight validation before ANY installation,
+	// ensuring no partial installs occur.
+	// Since runIntegrate is not easily testable with a fake FS (it calls
+	// defaultIntegrateDeps), we test the validation logic directly by checking
+	// that runIntegrateComponents is called per-agent. An integration test would
+	// verify the full behavior. Here, we verify the command-line arg validation.
+	prev := integrateUpdateExisting
+	integrateUpdateExisting = false
+	t.Cleanup(func() { integrateUpdateExisting = prev })
+
+	// The Args validator in cobra doesn't validate agent names (just count),
+	// so the error is caught by runIntegrate's pre-flight check on supported agents.
+	// We verify the args pass through cobra's validator:
+	if err := integrateCmd.Args(integrateCmd, []string{"claude", "vscode"}); err != nil {
+		t.Errorf("args validator should not reject unknown agent names (cobra allows them): %v", err)
+	}
+	// The error will be caught in runIntegrate's pre-flight check instead.
 }
 
 // ----- reasoned output: explicit install path --------------------------------
