@@ -80,7 +80,7 @@ var integrationCatalog = []integrationComponent{
 	{
 		id:       ComponentPaneSkill,
 		supports: agentSet("claude", "pi", "cursor", "opencode"),
-		sources:  []string{"skills/pop/pane.md"},
+		sources:  []string{"skills/pop/tmux-pane.md"},
 	},
 	{
 		id:       ComponentTaskSkills,

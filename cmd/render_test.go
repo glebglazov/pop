@@ -17,35 +17,35 @@ func TestRenderPaneSkillClaude(t *testing.T) {
 	if len(tree) != 1 {
 		t.Fatalf("expected 1 entry, got %d: %v", len(tree), keysOf(tree))
 	}
-	got, ok := tree["pop-pane/SKILL.md"]
+	got, ok := tree["pop-tmux-pane/SKILL.md"]
 	if !ok {
-		t.Fatalf("missing pop-pane/SKILL.md; tree has %v", keysOf(tree))
+		t.Fatalf("missing pop-tmux-pane/SKILL.md; tree has %v", keysOf(tree))
 	}
 
-	src, err := skillFiles.ReadFile("skills/pop/pane.md")
+	src, err := skillFiles.ReadFile("skills/pop/tmux-pane.md")
 	if err != nil {
 		t.Fatalf("read embedded source: %v", err)
 	}
-	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-pane"))
+	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-tmux-pane"))
 	if string(got) != want {
 		t.Fatalf("rendered bytes mismatch:\n got: %q\nwant: %q", string(got), want)
 	}
 
 	// Sanity: the injected name is present and the directory matches it.
-	if !strings.Contains(string(got), "\nname: pop-pane\n") {
+	if !strings.Contains(string(got), "\nname: pop-tmux-pane\n") {
 		t.Fatalf("rendered SKILL.md missing injected name: %q", string(got))
 	}
 }
 
 // TestRenderPaneSkillSkillDirAgents pins the pane skill's rendered tree for the
 // agents that host skills as directories (pi, cursor) — identical layout to
-// claude: a single `pop-pane/SKILL.md` entry with the frontmatter name injected.
+// claude: a single `pop-tmux-pane/SKILL.md` entry with the frontmatter name injected.
 func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
-	src, err := skillFiles.ReadFile("skills/pop/pane.md")
+	src, err := skillFiles.ReadFile("skills/pop/tmux-pane.md")
 	if err != nil {
 		t.Fatalf("read embedded source: %v", err)
 	}
-	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-pane"))
+	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-tmux-pane"))
 
 	for _, agent := range []string{"pi", "cursor"} {
 		t.Run(agent, func(t *testing.T) {
@@ -56,14 +56,14 @@ func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
 			if len(tree) != 1 {
 				t.Fatalf("expected 1 entry, got %d: %v", len(tree), keysOf(tree))
 			}
-			got, ok := tree["pop-pane/SKILL.md"]
+			got, ok := tree["pop-tmux-pane/SKILL.md"]
 			if !ok {
-				t.Fatalf("missing pop-pane/SKILL.md; tree has %v", keysOf(tree))
+				t.Fatalf("missing pop-tmux-pane/SKILL.md; tree has %v", keysOf(tree))
 			}
 			if string(got) != want {
 				t.Fatalf("rendered bytes mismatch:\n got: %q\nwant: %q", string(got), want)
 			}
-			if !strings.Contains(string(got), "\nname: pop-pane\n") {
+			if !strings.Contains(string(got), "\nname: pop-tmux-pane\n") {
 				t.Fatalf("rendered SKILL.md missing injected name: %q", string(got))
 			}
 		})
@@ -71,7 +71,7 @@ func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
 }
 
 // TestRenderPaneSkillOpencode pins the pane skill's rendered tree for opencode:
-// a single flat `pop-pane.md` entry whose bytes are the embedded source with no
+// a single flat `pop-tmux-pane.md` entry whose bytes are the embedded source with no
 // name injected (opencode has no skill-directory layout; the file name carries
 // the identity) but with the name-independent pop-owned marker added.
 func TestRenderPaneSkillOpencode(t *testing.T) {
@@ -82,11 +82,11 @@ func TestRenderPaneSkillOpencode(t *testing.T) {
 	if len(tree) != 1 {
 		t.Fatalf("expected 1 entry, got %d: %v", len(tree), keysOf(tree))
 	}
-	got, ok := tree["pop-pane.md"]
+	got, ok := tree["pop-tmux-pane.md"]
 	if !ok {
-		t.Fatalf("missing pop-pane.md; tree has %v", keysOf(tree))
+		t.Fatalf("missing pop-tmux-pane.md; tree has %v", keysOf(tree))
 	}
-	src, err := skillFiles.ReadFile("skills/pop/pane.md")
+	src, err := skillFiles.ReadFile("skills/pop/tmux-pane.md")
 	if err != nil {
 		t.Fatalf("read embedded source: %v", err)
 	}
@@ -107,8 +107,8 @@ func TestRenderCaseInsensitiveAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderComponent(Claude): %v", err)
 	}
-	if _, ok := tree["pop-pane/SKILL.md"]; !ok {
-		t.Fatalf("expected pop-pane/SKILL.md, got %v", keysOf(tree))
+	if _, ok := tree["pop-tmux-pane/SKILL.md"]; !ok {
+		t.Fatalf("expected pop-tmux-pane/SKILL.md, got %v", keysOf(tree))
 	}
 }
 

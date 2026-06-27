@@ -40,8 +40,8 @@ func TestInstallFileComponentDefaultPrefixParity(t *testing.T) {
 		t.Fatalf("default prefix symlink = %q -> %q, want -> %q", linkDest, fs.symlinks[linkDest], linkTarget)
 	}
 	// The rendered body must carry the injected `pop-` name and the marker.
-	src, _ := skillFiles.ReadFile("skills/pop/pane.md")
-	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-pane"))
+	src, _ := skillFiles.ReadFile("skills/pop/tmux-pane.md")
+	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-tmux-pane"))
 	if string(fs.files[renderFile]) != want {
 		t.Fatalf("default prefix render bytes mismatch")
 	}
@@ -58,15 +58,15 @@ func TestInstallFileComponentBarePrefix(t *testing.T) {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
-	bareRender := filepath.Join(paneRenderRoot(), "pane", "SKILL.md")
-	bareLink := filepath.Join(installerHome, ".claude", "skills", "pane")
-	bareTarget := filepath.Join(paneRenderRoot(), "pane")
+	bareRender := filepath.Join(paneRenderRoot(), "tmux-pane", "SKILL.md")
+	bareLink := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
+	bareTarget := filepath.Join(paneRenderRoot(), "tmux-pane")
 
 	if _, ok := fs.files[bareRender]; !ok {
 		t.Fatalf("bare render file not written: %s (have %v)", bareRender, sortedKeys(fs.files))
 	}
 	// No pop- form in the render tree.
-	popRender := filepath.Join(paneRenderRoot(), "pop-pane", "SKILL.md")
+	popRender := filepath.Join(paneRenderRoot(), "pop-tmux-pane", "SKILL.md")
 	if _, ok := fs.files[popRender]; ok {
 		t.Fatalf("bare install must not render the pop- form %s", popRender)
 	}
@@ -77,8 +77,8 @@ func TestInstallFileComponentBarePrefix(t *testing.T) {
 		t.Fatalf("expected exactly 1 symlink, got %d: %v", len(fs.symlinks), fs.symlinks)
 	}
 	// The injected frontmatter name is bare — the file name carries no prefix.
-	src, _ := skillFiles.ReadFile("skills/pop/pane.md")
-	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pane"))
+	src, _ := skillFiles.ReadFile("skills/pop/tmux-pane.md")
+	want := injectOwnershipMarker(injectFrontmatterName(string(src), "tmux-pane"))
 	if string(fs.files[bareRender]) != want {
 		t.Fatalf("bare render bytes mismatch:\n got %q\nwant %q", fs.files[bareRender], want)
 	}
@@ -86,7 +86,7 @@ func TestInstallFileComponentBarePrefix(t *testing.T) {
 
 // TestInstallFileComponentPrefixChangeMigration is the core stale-name cleanup
 // case (ADR 0063): a skill installed under `pop-` is re-integrated with an
-// empty prefix. The new bare name is linked, and the old `pop-pane` pop-owned
+// empty prefix. The new bare name is linked, and the old `pop-tmux-pane` pop-owned
 // symlink and its render-tree directory are pruned — no duplicate left behind.
 func TestInstallFileComponentPrefixChangeMigration(t *testing.T) {
 	fs := newFakeFS()
@@ -112,8 +112,8 @@ func TestInstallFileComponentPrefixChangeMigration(t *testing.T) {
 		t.Fatalf("re-integrate bare: %v", err)
 	}
 
-	bareLink := filepath.Join(installerHome, ".claude", "skills", "pane")
-	bareTarget := filepath.Join(paneRenderRoot(), "pane")
+	bareLink := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
+	bareTarget := filepath.Join(paneRenderRoot(), "tmux-pane")
 
 	// New bare name linked.
 	if fs.symlinks[bareLink] != bareTarget {
@@ -127,11 +127,11 @@ func TestInstallFileComponentPrefixChangeMigration(t *testing.T) {
 		t.Fatalf("expected exactly 1 symlink after migration, got %d: %v", len(fs.symlinks), fs.symlinks)
 	}
 	// Old render-tree directory pruned (removeAll(renderRoot) before re-render).
-	popRender := filepath.Join(paneRenderRoot(), "pop-pane", "SKILL.md")
+	popRender := filepath.Join(paneRenderRoot(), "pop-tmux-pane", "SKILL.md")
 	if _, ok := fs.files[popRender]; ok {
 		t.Fatalf("stale pop- render file not pruned: %s", popRender)
 	}
-	bareRender := filepath.Join(paneRenderRoot(), "pane", "SKILL.md")
+	bareRender := filepath.Join(paneRenderRoot(), "tmux-pane", "SKILL.md")
 	if _, ok := fs.files[bareRender]; !ok {
 		t.Fatalf("new bare render file missing: %s", bareRender)
 	}
@@ -224,16 +224,16 @@ func TestInstallFileComponentPrunesStaleMarkerOwned(t *testing.T) {
 
 	// A leftover copy-mode install under the pop- name: a real directory whose
 	// SKILL.md carries the pop-owned marker.
-	staleDir := filepath.Join(installerHome, ".claude", "skills", "pop-pane")
+	staleDir := filepath.Join(installerHome, ".claude", "skills", "pop-tmux-pane")
 	fs.dirs[staleDir] = true
-	fs.files[filepath.Join(staleDir, "SKILL.md")] = []byte("---\npop-owned: true\nname: pop-pane\n---\nold copy body")
+	fs.files[filepath.Join(staleDir, "SKILL.md")] = []byte("---\npop-owned: true\nname: pop-tmux-pane\n---\nold copy body")
 
 	if err := installFileComponent(withPrefix(fakeDeps(installerHome, fs, nil), ""), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
 	// The bare name is linked...
-	bareLink := filepath.Join(installerHome, ".claude", "skills", "pane")
+	bareLink := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
 	if _, ok := fs.symlinks[bareLink]; !ok {
 		t.Fatalf("bare name not linked: %s", bareLink)
 	}
@@ -255,7 +255,7 @@ func TestInstallFileComponentBarePrefixConflict(t *testing.T) {
 	out := &bytes.Buffer{}
 	d := withPrefix(fakeDeps(installerHome, fs, out), "")
 
-	bareDest := filepath.Join(installerHome, ".claude", "skills", "pane")
+	bareDest := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
 	fs.dirs[bareDest] = true
 	userFile := filepath.Join(bareDest, "SKILL.md")
 	fs.files[userFile] = []byte("hand-written skill")

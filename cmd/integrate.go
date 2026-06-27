@@ -260,8 +260,8 @@ skills) are separate opt-ins selected with component flags:
   --pane-skill  Also install the pane skill, which lets the agent drive tmux
                 panes. It lands as a symlink into pop's data directory: a skill
                 directory for claude, pi, and cursor (e.g.
-                ~/.claude/skills/pop-pane) and a flat file for opencode
-                (~/.config/opencode/agent/pop-pane.md). Not supported for codex.
+                ~/.claude/skills/pop-tmux-pane) and a flat file for opencode
+                (~/.config/opencode/agent/pop-tmux-pane.md). Not supported for codex.
 
   --task-skills
                 Also install the task planning skills (grill-with-docs,

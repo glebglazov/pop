@@ -147,7 +147,7 @@ func TestWizardStateDisplayNotInstalled(t *testing.T) {
 func TestWizardConflictReportNoPrompt(t *testing.T) {
 	fs := newFakeFS()
 	// A hand-written skill under the bare name shadows pop's pane skill.
-	conflictPath := filepath.Join(installerHome, ".claude", "skills", "pane")
+	conflictPath := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
 	fs.files[conflictPath] = []byte("my own skill")
 
 	out := &bytes.Buffer{}

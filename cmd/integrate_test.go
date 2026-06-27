@@ -1801,11 +1801,11 @@ func seedFileComponent(t *testing.T, fs *fakeFS, home string, id ComponentID, ag
 // claudePaneRenderFile is the rendered SKILL.md path for claude's pane skill
 // under the fake FS data dir — the file refresh tests corrupt to force stale.
 func claudePaneRenderFile(home string) string {
-	return filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-pane", "SKILL.md")
+	return filepath.Join(home, ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-tmux-pane", "SKILL.md")
 }
 
 func claudePaneLink(home string) string {
-	return filepath.Join(home, ".claude", "skills", "pop-pane")
+	return filepath.Join(home, ".claude", "skills", "pop-tmux-pane")
 }
 
 func TestEnsureIntegrations_RefreshesStaleFileComponent(t *testing.T) {
@@ -1883,11 +1883,11 @@ func TestEnsureIntegrations_LeavesCurrentFileComponentUntouched(t *testing.T) {
 }
 
 func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
-	// An unowned entry shadowing pop's skill (the bare `pane` name) is an
+	// An unowned entry shadowing pop's skill (the bare `tmux-pane` name) is an
 	// Integration conflict. Refresh must skip it silently — no update, no
 	// warning, and no symlink written over the user's entry.
 	fs := newFakeFS()
-	conflict := filepath.Join("/h", ".claude", "skills", "pane")
+	conflict := filepath.Join("/h", ".claude", "skills", "tmux-pane")
 	fs.dirs[conflict] = true
 
 	dry, real := fakeFactories("/h", fs)
@@ -1918,7 +1918,7 @@ func TestRefreshComponent_SkipsNotSupportedSilently(t *testing.T) {
 }
 
 func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
-	// A pre-symlink copy-mode install (a real `pop-pane` directory at the agent
+	// A pre-symlink copy-mode install (a real `pop-tmux-pane` directory at the agent
 	// location whose SKILL.md carries the pop-owned marker, no render tree under
 	// the data dir) is pop-owned but stale. Refresh must migrate it to a symlink
 	// into the freshly rendered tree.
@@ -1941,7 +1941,7 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 	if fs.dirs[link] {
 		t.Errorf("copy-mode directory not removed during migration: %s", link)
 	}
-	target := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-pane")
+	target := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skill", "pop-tmux-pane")
 	if fs.symlinks[link] != target {
 		t.Errorf("expected migration to symlink %q -> %q, got %q", link, target, fs.symlinks[link])
 	}
