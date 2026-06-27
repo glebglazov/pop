@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1014,7 +1015,7 @@ func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) 
 	if got, want := len(lines), m.height; got != want {
 		t.Fatalf("line count = %d, want %d:\n%s", got, want, view)
 	}
-	if !strings.Contains(lines[len(lines)-1], "C complete") {
+	if !strings.Contains(lines[len(lines)-1], "a actions") {
 		t.Fatalf("detail shortcut legend should be on bottom line:\n%s", view)
 	}
 	if got, want := dashboardTestLineIndex(lines, "STATUS"), 2; got != want {
@@ -1227,7 +1228,7 @@ func TestDashboardDetailViewRendersTaskList(t *testing.T) {
 		cursorID: "01-a",
 	}
 	var rendered strings.Builder
-	renderDetailContent(&rendered, d, 0)
+	renderDetailContent(&rendered, d, 0, 0, nil)
 	out := rendered.String()
 
 	for _, want := range []string{"set-normal  [READY]  1/2 done, 1 open", "STATUS", "01-a", "02-b", "01-a"} {
@@ -2570,16 +2571,42 @@ func detailOverrideModel(row DashboardRow, task tasks.Task, completeErr, resetEr
 	return m, &completeCalls, &resetCalls, &skipCalls
 }
 
-func TestDetailViewOverrideKeyC_ValidAndInvalid(t *testing.T) {
+// taskMenuItemKeys returns the verb-letter keys offered by an open task menu.
+func taskMenuItemKeys(menu *taskMenu) []string {
+	if menu == nil {
+		return nil
+	}
+	keys := make([]string, len(menu.items))
+	for i, item := range menu.items {
+		keys[i] = item.key
+	}
+	return keys
+}
+
+// openTaskMenu presses `a` in the detail view and returns the resulting model.
+func openTaskMenu(t *testing.T, m dashboardModel) dashboardModel {
+	t.Helper()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	return updated.(dashboardModel)
+}
+
+func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 	row := DashboardRow{SetID: "set-x", defPath: "/def"}
 
-	// C on open task: valid — dispatches command, no statusMsg
+	// Complete on open task: menu offers C, dispatching it runs the command.
 	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
 	m, completeCalls, _, _ := detailOverrideModel(row, openTask, nil, nil, nil)
+	m = openTaskMenu(t, m)
+	if m.taskMenu == nil {
+		t.Fatal("a on open task: expected task menu to open")
+	}
+	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "C") {
+		t.Fatalf("open task menu = %v, want to contain C", got)
+	}
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'C', Text: "C"})
 	got := updated.(dashboardModel)
-	if got.detail.statusMsg != "" {
-		t.Fatalf("C on open: statusMsg = %q, want empty", got.detail.statusMsg)
+	if got.taskMenu != nil {
+		t.Fatal("C should close the menu")
 	}
 	if cmd == nil {
 		t.Fatal("C on open task: expected a command to be dispatched")
@@ -2588,43 +2615,36 @@ func TestDetailViewOverrideKeyC_ValidAndInvalid(t *testing.T) {
 	if *completeCalls != 1 {
 		t.Fatalf("completeCalls = %d, want 1", *completeCalls)
 	}
-	// Apply the success message
 	updated, _ = got.Update(msg)
 	got = updated.(dashboardModel)
-	if got.detail.statusMsg == "" {
-		t.Fatal("C success: expected confirmation statusMsg")
-	}
 	if !strings.Contains(got.detail.statusMsg, "complete") {
 		t.Fatalf("C confirmation = %q, want 'complete'", got.detail.statusMsg)
 	}
 
-	// C on done task: invalid — statusMsg set, no dispatch
+	// Done task: no verbs apply, so the menu does not open.
 	doneTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "done"}
 	m2, completeCalls2, _, _ := detailOverrideModel(row, doneTask, nil, nil, nil)
-	updated2, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'C', Text: "C"})
-	got2 := updated2.(dashboardModel)
-	if cmd2 != nil {
-		t.Fatal("C on done: expected no command")
+	m2 = openTaskMenu(t, m2)
+	if m2.taskMenu != nil {
+		t.Fatalf("a on done task: expected no menu (no verbs), got %v", taskMenuItemKeys(m2.taskMenu))
 	}
 	if *completeCalls2 != 0 {
-		t.Fatalf("C on done: completeCalls = %d, want 0", *completeCalls2)
-	}
-	if got2.detail.statusMsg == "" {
-		t.Fatal("C on done: expected statusMsg hint")
+		t.Fatalf("done task: completeCalls = %d, want 0", *completeCalls2)
 	}
 }
 
-func TestDetailViewOverrideKeyO_ValidAndInvalid(t *testing.T) {
+func TestDetailTaskMenuOpenVerb(t *testing.T) {
 	row := DashboardRow{SetID: "set-y", defPath: "/def"}
 
-	// O on failed task: valid
+	// Open on failed task: menu offers O.
 	failedTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
 	m, _, resetCalls, _ := detailOverrideModel(row, failedTask, nil, nil, nil)
+	m = openTaskMenu(t, m)
+	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "O") {
+		t.Fatalf("failed task menu = %v, want to contain O", got)
+	}
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
 	got := updated.(dashboardModel)
-	if got.detail.statusMsg != "" {
-		t.Fatalf("O on failed: statusMsg = %q, want empty", got.detail.statusMsg)
-	}
 	if cmd == nil {
 		t.Fatal("O on failed: expected a command")
 	}
@@ -2638,9 +2658,13 @@ func TestDetailViewOverrideKeyO_ValidAndInvalid(t *testing.T) {
 		t.Fatalf("O confirmation = %q, want 'open'", got.detail.statusMsg)
 	}
 
-	// O on skipped task: also valid
+	// Open on skipped task: also offered.
 	skippedTask := tasks.Task{ID: "03-c", File: "03-c.md", Status: "skipped"}
 	m2, _, resetCalls2, _ := detailOverrideModel(row, skippedTask, nil, nil, nil)
+	m2 = openTaskMenu(t, m2)
+	if got := taskMenuItemKeys(m2.taskMenu); !slices.Contains(got, "O") {
+		t.Fatalf("skipped task menu = %v, want to contain O", got)
+	}
 	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
 	if cmd2 == nil {
 		t.Fatal("O on skipped: expected a command")
@@ -2650,49 +2674,35 @@ func TestDetailViewOverrideKeyO_ValidAndInvalid(t *testing.T) {
 		t.Fatalf("O on skipped: resetCalls = %d, want 1", *resetCalls2)
 	}
 
-	// O on done task: valid — reopening a done task undoes a completion (ADR-0053)
-	doneTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "done"}
-	m3, _, resetCalls3, _ := detailOverrideModel(row, doneTask, nil, nil, nil)
-	updated3, cmd3 := m3.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
-	got3 := updated3.(dashboardModel)
-	if got3.detail.statusMsg != "" {
-		t.Fatalf("O on done: statusMsg = %q, want empty", got3.detail.statusMsg)
-	}
-	if cmd3 == nil {
-		t.Fatal("O on done: expected a command")
-	}
-	cmd3()
-	if *resetCalls3 != 1 {
-		t.Fatalf("O on done: resetCalls = %d, want 1", *resetCalls3)
-	}
-
-	// O on already-open task: invalid — one-line hint, no mutation
+	// Open is NOT offered for an already-open task (filtered to failed/skipped).
 	openTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "open"}
-	m4, _, resetCalls4, _ := detailOverrideModel(row, openTask, nil, nil, nil)
-	updated4, cmd4 := m4.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
-	got4 := updated4.(dashboardModel)
-	if cmd4 != nil {
-		t.Fatal("O on open: expected no command")
+	m3, _, resetCalls3, _ := detailOverrideModel(row, openTask, nil, nil, nil)
+	m3 = openTaskMenu(t, m3)
+	if got := taskMenuItemKeys(m3.taskMenu); slices.Contains(got, "O") {
+		t.Fatalf("open task menu = %v, want NOT to contain O", got)
 	}
-	if *resetCalls4 != 0 {
-		t.Fatalf("O on open: resetCalls = %d, want 0", *resetCalls4)
+	// Pressing O is inert while the menu is open and has no O item.
+	_, cmd3 := m3.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	if cmd3 != nil {
+		t.Fatal("O on open task: expected no command")
 	}
-	if !strings.Contains(got4.detail.statusMsg, "already open") {
-		t.Fatalf("O on open hint = %q, want 'already open'", got4.detail.statusMsg)
+	if *resetCalls3 != 0 {
+		t.Fatalf("O on open: resetCalls = %d, want 0", *resetCalls3)
 	}
 }
 
-func TestDetailViewOverrideKeyK_ValidAndInvalid(t *testing.T) {
+func TestDetailTaskMenuSkipVerb(t *testing.T) {
 	row := DashboardRow{SetID: "set-z", defPath: "/def"}
 
-	// K on open task: valid
+	// Skip on open task: menu offers K.
 	openTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "open"}
 	m, _, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
+	m = openTaskMenu(t, m)
+	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "K") {
+		t.Fatalf("open task menu = %v, want to contain K", got)
+	}
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
 	got := updated.(dashboardModel)
-	if got.detail.statusMsg != "" {
-		t.Fatalf("K on open: statusMsg = %q, want empty", got.detail.statusMsg)
-	}
 	if cmd == nil {
 		t.Fatal("K on open: expected a command")
 	}
@@ -2706,43 +2716,77 @@ func TestDetailViewOverrideKeyK_ValidAndInvalid(t *testing.T) {
 		t.Fatalf("K confirmation = %q, want 'skip'", got.detail.statusMsg)
 	}
 
-	// K on done task: invalid — hint, no dispatch
-	doneTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "done"}
-	m2, _, _, skipCalls2 := detailOverrideModel(row, doneTask, nil, nil, nil)
-	updated2, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
-	got2 := updated2.(dashboardModel)
-	if cmd2 != nil {
-		t.Fatal("K on done: expected no command")
-	}
-	if *skipCalls2 != 0 {
-		t.Fatalf("K on done: skipCalls = %d, want 0", *skipCalls2)
-	}
-	if got2.detail.statusMsg == "" {
-		t.Fatal("K on done: expected statusMsg hint")
-	}
-
-	// K on failed task: also invalid (requires open)
+	// Skip is NOT offered for a failed task (requires open).
 	failedTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "failed"}
-	m3, _, _, skipCalls3 := detailOverrideModel(row, failedTask, nil, nil, nil)
-	updated3, cmd3 := m3.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
-	got3 := updated3.(dashboardModel)
-	if cmd3 != nil {
+	m2, _, _, skipCalls2 := detailOverrideModel(row, failedTask, nil, nil, nil)
+	m2 = openTaskMenu(t, m2)
+	if got := taskMenuItemKeys(m2.taskMenu); slices.Contains(got, "K") {
+		t.Fatalf("failed task menu = %v, want NOT to contain K", got)
+	}
+	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
+	if cmd2 != nil {
 		t.Fatal("K on failed: expected no command")
 	}
-	if *skipCalls3 != 0 {
-		t.Fatalf("K on failed: skipCalls = %d, want 0", *skipCalls3)
-	}
-	if got3.detail.statusMsg == "" {
-		t.Fatal("K on failed: expected statusMsg hint")
+	if *skipCalls2 != 0 {
+		t.Fatalf("K on failed: skipCalls = %d, want 0", *skipCalls2)
 	}
 }
 
-func TestDetailViewOverrideErrorSurfaced(t *testing.T) {
+// TestDetailTaskMenuDispatchViaEnter exercises j/k highlight + Enter dispatch.
+func TestDetailTaskMenuDispatchViaEnter(t *testing.T) {
+	row := DashboardRow{SetID: "set-enter", defPath: "/def"}
+	failedTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
+	m, completeCalls, resetCalls, _ := detailOverrideModel(row, failedTask, nil, nil, nil)
+	m = openTaskMenu(t, m)
+	// Menu order for a failed task: complete (C), open (O). Highlight O via j.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	got := updated.(dashboardModel)
+	if got.taskMenu.cursor != 1 {
+		t.Fatalf("after j cursor = %d, want 1", got.taskMenu.cursor)
+	}
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got = updated.(dashboardModel)
+	if cmd == nil {
+		t.Fatal("Enter on highlighted O: expected a command")
+	}
+	cmd()
+	if *resetCalls != 1 {
+		t.Fatalf("resetCalls = %d, want 1", *resetCalls)
+	}
+	if *completeCalls != 0 {
+		t.Fatalf("completeCalls = %d, want 0", *completeCalls)
+	}
+}
+
+// TestDetailTaskMenuEscCloses verifies esc dismisses the menu without dispatch.
+func TestDetailTaskMenuEscCloses(t *testing.T) {
+	row := DashboardRow{SetID: "set-esc", defPath: "/def"}
+	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
+	m, completeCalls, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
+	m = openTaskMenu(t, m)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got := updated.(dashboardModel)
+	if got.taskMenu != nil {
+		t.Fatal("esc should close the task menu")
+	}
+	if cmd != nil {
+		t.Fatal("esc should not dispatch a command")
+	}
+	if got.detail == nil {
+		t.Fatal("esc should keep the detail view open")
+	}
+	if *completeCalls != 0 || *skipCalls != 0 {
+		t.Fatal("esc should not dispatch any verb")
+	}
+}
+
+func TestDetailTaskMenuErrorSurfaced(t *testing.T) {
 	row := DashboardRow{SetID: "set-err", defPath: "/def"}
 	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
 	someErr := errors.New("blocked by unsatisfied")
 	m, _, _, _ := detailOverrideModel(row, openTask, someErr, nil, nil)
 
+	m = openTaskMenu(t, m)
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'C', Text: "C"})
 	got := updated.(dashboardModel)
 	msg := cmd()
@@ -2753,7 +2797,7 @@ func TestDetailViewOverrideErrorSurfaced(t *testing.T) {
 	}
 }
 
-func TestDetailViewOverrideStatusRendered(t *testing.T) {
+func TestDetailViewActionsHintRendered(t *testing.T) {
 	manifest := &tasks.Manifest{
 		Valid: true,
 		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Status: "open", Type: "AFK", Title: "A"}},
@@ -2765,13 +2809,139 @@ func TestDetailViewOverrideStatusRendered(t *testing.T) {
 		statusMsg: "completed 01-a",
 	}
 	var b strings.Builder
-	renderDetailContent(&b, d, 0)
+	renderDetailContent(&b, d, 0, 0, nil)
 	out := b.String()
 	if !strings.Contains(out, "completed 01-a") {
 		t.Fatalf("statusMsg not rendered:\n%s", out)
 	}
-	if !strings.Contains(out, "C complete") {
-		t.Fatalf("hint line missing override keys:\n%s", out)
+	if !strings.Contains(out, "a actions") {
+		t.Fatalf("hint line missing actions key:\n%s", out)
+	}
+}
+
+// TestPeekTaskMenuOpensAndDispatches verifies `a` in the task text peek opens
+// the task menu for the previewed task and dispatches a filtered verb.
+func TestPeekTaskMenuOpensAndDispatches(t *testing.T) {
+	row := DashboardRow{SetID: "set-peek", defPath: "/def"}
+	failedTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
+	m, completeCalls, resetCalls, _ := detailOverrideModel(row, failedTask, nil, nil, nil)
+	// Open a peek over the previewed task.
+	m.detail.peek = &taskTextPeek{taskID: "02-b", text: "body\n"}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(dashboardModel)
+	if got.taskMenu == nil {
+		t.Fatal("a in peek: expected task menu to open")
+	}
+	if !got.taskMenu.inPeek {
+		t.Fatal("peek-opened menu should be marked inPeek")
+	}
+	if keys := taskMenuItemKeys(got.taskMenu); !slices.Contains(keys, "O") || slices.Contains(keys, "K") {
+		t.Fatalf("peek failed-task menu = %v, want O and not K", keys)
+	}
+	// The peek stays open beneath the menu.
+	if got.detail.peek == nil {
+		t.Fatal("peek should remain open while menu is up")
+	}
+
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	got = updated.(dashboardModel)
+	if got.taskMenu != nil {
+		t.Fatal("O should close the menu")
+	}
+	if cmd == nil {
+		t.Fatal("O in peek menu: expected a command")
+	}
+	cmd()
+	if *resetCalls != 1 {
+		t.Fatalf("resetCalls = %d, want 1", *resetCalls)
+	}
+	if *completeCalls != 0 {
+		t.Fatalf("completeCalls = %d, want 0", *completeCalls)
+	}
+}
+
+// TestPeekTaskMenuRendersOverlay verifies the peek view renders the menu verbs.
+func TestPeekTaskMenuRendersOverlay(t *testing.T) {
+	row := DashboardRow{SetID: "set-peek-render", defPath: "/def"}
+	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
+	m, _, _, _ := detailOverrideModel(row, openTask, nil, nil, nil)
+	m.width = 120
+	m.height = 14
+	m.detail.peek = &taskTextPeek{taskID: "01-a", text: "body line\n"}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(dashboardModel)
+	out := got.View().Content
+	for _, want := range []string{"actions", "C  complete", "K  skip"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered peek menu missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestPeekFormerKeysInertWithoutMenu confirms C/O/K do nothing in the peek
+// outside the menu (they act only through it).
+func TestPeekFormerKeysInertWithoutMenu(t *testing.T) {
+	row := DashboardRow{SetID: "set-peek-inert", defPath: "/def"}
+	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
+	m, completeCalls, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
+	m.detail.peek = &taskTextPeek{taskID: "01-a", text: "body\n"}
+
+	for _, key := range []rune{'C', 'O', 'K'} {
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
+		got := updated.(dashboardModel)
+		if cmd != nil {
+			t.Fatalf("%c in peek (no menu): expected no command", key)
+		}
+		if got.taskMenu != nil {
+			t.Fatalf("%c in peek (no menu): should not open a menu", key)
+		}
+	}
+	if *completeCalls != 0 || *skipCalls != 0 {
+		t.Fatal("former direct keys should not dispatch in the peek")
+	}
+}
+
+// TestDetailFormerKeysInertWithoutMenu confirms C/O/K do nothing in the detail
+// list outside the menu.
+func TestDetailFormerKeysInertWithoutMenu(t *testing.T) {
+	row := DashboardRow{SetID: "set-inert", defPath: "/def"}
+	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
+	m, completeCalls, resetCalls, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
+
+	for _, key := range []rune{'C', 'O', 'K'} {
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
+		got := updated.(dashboardModel)
+		if cmd != nil {
+			t.Fatalf("%c in detail (no menu): expected no command", key)
+		}
+		if got.taskMenu != nil {
+			t.Fatalf("%c in detail (no menu): should not open a menu", key)
+		}
+	}
+	if *completeCalls != 0 || *resetCalls != 0 || *skipCalls != 0 {
+		t.Fatal("former direct keys should not dispatch in the detail list")
+	}
+}
+
+// TestDetailTaskMenuRendersOverlay verifies the open menu's verbs render in the
+// detail view, anchored under the cursored task.
+func TestDetailTaskMenuRendersOverlay(t *testing.T) {
+	row := DashboardRow{SetID: "set-render", defPath: "/def"}
+	failedTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed", Type: "AFK", Title: "B"}
+	m, _, _, _ := detailOverrideModel(row, failedTask, nil, nil, nil)
+	m.width = 120
+	m.height = 12
+	m = openTaskMenu(t, m)
+	out := m.View().Content
+	for _, want := range []string{"actions", "C  complete", "O  open"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered detail menu missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "K  skip") {
+		t.Fatalf("failed task menu should not offer skip:\n%s", out)
 	}
 }
 

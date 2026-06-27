@@ -935,6 +935,43 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	return items
 }
 
+// taskMenuItem is one verb in the task-level action menu: the flat shortcut
+// letter it keeps (also the verb code passed to applyDetailOverride) and the
+// label shown beside it.
+type taskMenuItem struct {
+	key   string
+	label string
+}
+
+// taskMenu is the action overlay opened with `a` over a single task — in the
+// task-set detail view (over the cursored task) or the task text peek (over the
+// previewed task). It carries the task snapshot and the verbs applicable to that
+// task's status, with a highlight cursor for j/k + Enter selection. inPeek marks
+// which view it was opened from so the renderer can place it correctly.
+type taskMenu struct {
+	task   tasks.Task
+	items  []taskMenuItem
+	cursor int
+	inPeek bool
+}
+
+// taskMenuItems returns the task verbs applicable to task, filtered to its
+// status: Complete for open/failed/skipped (anything not already done), Open for
+// failed/skipped, and Skip for open. A done task yields no verbs.
+func taskMenuItems(task tasks.Task) []taskMenuItem {
+	var items []taskMenuItem
+	if task.Status != "done" {
+		items = append(items, taskMenuItem{key: "C", label: "complete"})
+	}
+	if task.Status == "failed" || task.Status == "skipped" {
+		items = append(items, taskMenuItem{key: "O", label: "open"})
+	}
+	if task.Status == "open" {
+		items = append(items, taskMenuItem{key: "K", label: "skip"})
+	}
+	return items
+}
+
 // detailView is the full-screen task-set detail that replaces the table. The
 // cursor is pinned by task ID so it survives manifest refreshes.
 type detailView struct {
@@ -957,6 +994,19 @@ type taskTextPeek struct {
 	loading bool
 	err     error
 	scroll  int
+}
+
+// taskByID returns the manifest task with the given ID, or false if absent.
+func (d *detailView) taskByID(id string) (tasks.Task, bool) {
+	if d.manifest == nil {
+		return tasks.Task{}, false
+	}
+	for _, t := range d.manifest.Tasks {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return tasks.Task{}, false
 }
 
 // cursorIndex returns the index of the cursor task in the manifest, or 0.
@@ -1018,6 +1068,7 @@ type dashboardModel struct {
 	abandon   *dashboardAbandonModal
 	detail    *detailView
 	menu      *dashboardMenu
+	taskMenu  *taskMenu
 
 	filterMode  bool
 	filterInput textinput.Model
@@ -1422,6 +1473,10 @@ func (m dashboardModel) dispatchMenuAction(action dashboardMenuAction, row Dashb
 }
 
 func (m dashboardModel) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.taskMenu != nil {
+		m.pendingG = false
+		return m.updateTaskMenu(msg)
+	}
 	if m.detail != nil && m.detail.peek != nil {
 		if msg.String() == "g" {
 			if m.pendingG {
@@ -1448,6 +1503,16 @@ func (m dashboardModel) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.moveTaskTextPeek(-halfPageDelta(m.taskTextPeekPageSize()))
 		case "G":
 			m.detail.peek.scroll = m.maxTaskTextPeekScroll()
+		case "a":
+			task, ok := m.detail.taskByID(m.detail.peek.taskID)
+			if !ok {
+				return m, nil
+			}
+			items := taskMenuItems(task)
+			if len(items) == 0 {
+				return m, nil
+			}
+			m.taskMenu = &taskMenu{task: task, items: items, inPeek: true}
 		}
 		return m, nil
 	}
@@ -1492,45 +1557,87 @@ func (m dashboardModel) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		task := m.detail.manifest.Tasks[idx]
 		m.detail.peek = &taskTextPeek{taskID: task.ID, loading: true}
 		return m, m.loadTaskText(m.detail.manifest, task)
-	case "C", "O", "K":
-		return m.handleDetailOverrideKey(msg.String())
+	case "a":
+		if m.detail == nil || m.detail.loading || m.detail.manifest == nil {
+			return m, nil
+		}
+		idx := m.detail.cursorIndex()
+		if idx < 0 || idx >= len(m.detail.manifest.Tasks) {
+			return m, nil
+		}
+		task := m.detail.manifest.Tasks[idx]
+		items := taskMenuItems(task)
+		if len(items) == 0 {
+			return m, nil
+		}
+		m.detail.statusMsg = ""
+		m.taskMenu = &taskMenu{task: task, items: items}
+		return m, nil
 	}
 	return m, nil
 }
 
-// handleDetailOverrideKey applies C/O/K override verbs to the cursored task.
-// Invalid transitions set a status-line hint and perform no mutation.
-func (m dashboardModel) handleDetailOverrideKey(key string) (tea.Model, tea.Cmd) {
-	if m.detail == nil || m.detail.manifest == nil || m.detail.loading {
+// updateTaskMenu drives the task-level action overlay: esc/ctrl+c close it, j/k
+// move the highlight, Enter runs the highlighted verb, and any matching verb
+// letter runs that verb directly. Non-matching keys are inert while open.
+func (m dashboardModel) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.taskMenu == nil {
 		return m, nil
 	}
-	idx := m.detail.cursorIndex()
-	if idx < 0 || idx >= len(m.detail.manifest.Tasks) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.taskMenu = nil
+		return m, nil
+	case "j", "down":
+		m.moveTaskMenuCursor(1)
+		return m, nil
+	case "k", "up":
+		m.moveTaskMenuCursor(-1)
+		return m, nil
+	case "enter":
+		return m.invokeTaskMenuItem(m.taskMenu.cursor)
+	}
+	for i, item := range m.taskMenu.items {
+		if msg.String() == item.key {
+			return m.invokeTaskMenuItem(i)
+		}
+	}
+	return m, nil
+}
+
+func (m *dashboardModel) moveTaskMenuCursor(delta int) {
+	if m.taskMenu == nil {
+		return
+	}
+	n := len(m.taskMenu.items)
+	if n == 0 {
+		return
+	}
+	m.taskMenu.cursor += delta
+	if m.taskMenu.cursor < 0 {
+		m.taskMenu.cursor = n - 1
+	}
+	if m.taskMenu.cursor >= n {
+		m.taskMenu.cursor = 0
+	}
+}
+
+// invokeTaskMenuItem closes the menu and dispatches the verb at idx against the
+// task the menu was opened on. The items are pre-filtered to valid transitions
+// (taskMenuItems), so the verb applies without a separate confirmation.
+func (m dashboardModel) invokeTaskMenuItem(idx int) (tea.Model, tea.Cmd) {
+	if m.taskMenu == nil || idx < 0 || idx >= len(m.taskMenu.items) {
 		return m, nil
 	}
-	task := m.detail.manifest.Tasks[idx]
-
-	switch key {
-	case "C":
-		if task.Status == "done" {
-			m.detail.statusMsg = fmt.Sprintf("task %q is already done", task.ID)
-			return m, nil
-		}
-	case "O":
-		// Shares tasks.CanReopen with the main `open` command (ADR-0053).
-		if !tasks.CanReopen(task.Status) {
-			m.detail.statusMsg = fmt.Sprintf("task %q is already open", task.ID)
-			return m, nil
-		}
-	case "K":
-		if task.Status != "open" {
-			m.detail.statusMsg = fmt.Sprintf("task %q is %s; skip requires an open task", task.ID, task.Status)
-			return m, nil
-		}
+	if m.detail == nil {
+		m.taskMenu = nil
+		return m, nil
 	}
-
+	item := m.taskMenu.items[idx]
+	task := m.taskMenu.task
+	m.taskMenu = nil
 	m.detail.statusMsg = ""
-	return m, m.applyDetailOverride(m.detail.row, task, key)
+	return m, m.applyDetailOverride(m.detail.row, task, item.key)
 }
 
 // applyDetailOverride dispatches the C/O/K override verb to the appropriate
@@ -2738,7 +2845,7 @@ func (m dashboardModel) viewDetail() string {
 	var b strings.Builder
 	d := m.detail
 	if d.peek != nil {
-		renderTaskTextPeek(&b, d, m.height, m.width)
+		renderTaskTextPeek(&b, d, m.height, m.width, m.taskMenu)
 		return b.String()
 	}
 	if d.loading {
@@ -2751,13 +2858,13 @@ func (m dashboardModel) viewDetail() string {
 		writeDashboardFooter(&b, m.height, ui.HintStyle.Render("  h/esc back"))
 		return b.String()
 	}
-	renderDetailContent(&b, d, m.height)
+	renderDetailContent(&b, d, m.height, m.width, m.taskMenu)
 	return b.String()
 }
 
 // renderDetailContent renders the task list with cursor indicators for the
 // detail view. The cursor is on the task identified by detailView.cursorID.
-func renderDetailContent(b *strings.Builder, d *detailView, height int) {
+func renderDetailContent(b *strings.Builder, d *detailView, height, width int, menu *taskMenu) {
 	manifest := d.manifest
 	taskRow := d.taskRow
 
@@ -2816,7 +2923,21 @@ func renderDetailContent(b *strings.Builder, d *detailView, height int) {
 		strings.Repeat("-", 12))
 
 	cursorIdx := d.cursorIndex()
+	var menuLines []string
+	placeBelow := true
+	if menu != nil && !menu.inPeek {
+		menuLines = taskMenuLines(menu, width)
+		placeBelow = dashboardMenuPlaceBelow(cursorIdx, len(menuLines), height)
+	}
+	writeMenu := func() {
+		for _, ml := range menuLines {
+			fmt.Fprintf(b, "%s\n", ml)
+		}
+	}
 	for i, t := range manifest.Tasks {
+		if menuLines != nil && i == cursorIdx && !placeBelow {
+			writeMenu()
+		}
 		prefix := "  "
 		if i == cursorIdx {
 			prefix = ui.IndicatorStyle.Render("█") + " "
@@ -2836,22 +2957,54 @@ func renderDetailContent(b *strings.Builder, d *detailView, height int) {
 		line := fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s",
 			stW, statusCell, tyW, t.Type, idW, t.ID, titleW, title, blockedBy)
 		fmt.Fprintf(b, "%s%s\n", prefix, line)
+		if menuLines != nil && i == cursorIdx && placeBelow {
+			writeMenu()
+		}
 	}
 
 	fmt.Fprintln(b)
 	if d.statusMsg != "" {
 		fmt.Fprintf(b, "  %s\n", d.statusMsg)
 	}
-	writeDashboardFooter(b, height, ui.HintStyle.Render("  j/k · gg/G top/bottom · l/enter peek · C complete · O open · K skip · h/esc back"))
+	hint := "  j/k · gg/G top/bottom · l/enter peek · a actions · h/esc back"
+	if menu != nil {
+		hint = "  j/k move · enter/letter run · esc close"
+	}
+	writeDashboardFooter(b, height, ui.HintStyle.Render(hint))
 }
 
-func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int) {
+// taskMenuLines renders the task-level action overlay as a block of lines,
+// indented to nest under the cursored task, with the highlighted item carrying
+// the shared cursor block. The first line is a dimmed "actions" caption. It
+// mirrors dashboardMenuLines (the set-view overlay) for a consistent look.
+func taskMenuLines(menu *taskMenu, width int) []string {
+	if menu == nil {
+		return nil
+	}
+	lines := []string{truncateToWidth("    "+ui.HintStyle.Render("actions"), width)}
+	for i, item := range menu.items {
+		marker := "  "
+		if i == menu.cursor {
+			marker = ui.IndicatorStyle.Render("█") + " "
+		}
+		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
+		lines = append(lines, truncateToWidth(line, width))
+	}
+	return lines
+}
+
+func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int, menu *taskMenu) {
 	p := d.peek
 	header := d.row.SetID
 	if p.taskID != "" {
 		header += " / " + p.taskID
 	}
 	fmt.Fprintln(b, header)
+	if menu != nil && menu.inPeek {
+		for _, ml := range taskMenuLines(menu, width) {
+			fmt.Fprintln(b, ml)
+		}
+	}
 	if p.loading {
 		fmt.Fprintln(b, "  loading task text...")
 		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
@@ -2896,7 +3049,11 @@ func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int) {
 	if maxScroll > 0 {
 		position = fmt.Sprintf(" · %d/%d", p.scroll+1, len(lines))
 	}
-	writeDashboardFooter(b, height, ui.HintStyle.Render("  j/k · C-d/C-u · gg/G · h/esc back"+position))
+	hint := "  j/k · C-d/C-u · gg/G · a actions · h/esc back" + position
+	if menu != nil && menu.inPeek {
+		hint = "  j/k move · enter/letter run · esc close"
+	}
+	writeDashboardFooter(b, height, ui.HintStyle.Render(hint))
 }
 
 func taskTextPeekLines(text string) []string {
