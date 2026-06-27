@@ -786,6 +786,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 		// otherwise); capTopic first-lines and char-caps it, then slugifyTopic
 		// normalizes to the kebab contract — uniform across every recipe.
 		if derived := slugifyTopic(capTopic(recipe.parse(out)), maxWords); derived != "" {
+			debug.Log("pane set-topic --derive: recipe %q set topic %q on pane %s", ref, derived, paneID)
 			return paneID, derived, true
 		}
 		debug.Log("pane set-topic --derive: recipe %q produced no usable topic", ref)
@@ -798,6 +799,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 	if topic == "" {
 		return "", "", false
 	}
+	debug.Log("pane set-topic --derive: truncation fallback set topic %q on pane %s", topic, paneID)
 	return paneID, topic, true
 }
 
