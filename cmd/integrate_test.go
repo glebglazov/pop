@@ -2042,16 +2042,14 @@ func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
 }
 
 func TestRefreshComponent_SkipsNotSupportedSilently(t *testing.T) {
-	// codex hosts neither skill component. Refresh of an unsupported pair must
+	// opencode cannot host task skills. Refresh of an unsupported pair must
 	// be a silent no-op regardless of on-disk state.
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)
 
-	for _, id := range []ComponentID{ComponentPaneSkill, ComponentTaskSkills} {
-		outcome, warning := refreshComponent(dry, real, "codex", id, baselineComponentSet(defaultIntegrationBaseline()))
-		if outcome != nil || warning != "" {
-			t.Errorf("codex/%s: expected nil outcome and no warning (not supported), got outcome=%v warning=%q", id, outcome, warning)
-		}
+	outcome, warning := refreshComponent(dry, real, "opencode", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
+	if outcome != nil || warning != "" {
+		t.Errorf("opencode/task-skills: expected nil outcome and no warning (not supported), got outcome=%v warning=%q", outcome, warning)
 	}
 }
 
@@ -2509,19 +2507,20 @@ func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(installerHome, fs, &out)
 
-	// codex only supports status-wiring; task-skills and pane-skill are unsupported.
+	// codex supports pane-skill and task-skills — not selecting them shows opted-out.
 	if err := runIntegrateComponents(d, "codex", []ComponentID{ComponentStatusWiring}, false, false, nil, false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	got := out.String()
-	// codex has no supported opt-in components so no "opted out" lines — only status-wiring.
 	if !strings.Contains(got, "status-wiring") {
 		t.Errorf("expected status-wiring line, got %q", got)
 	}
-	// task-skills and pane-skill are not supported for codex — must not appear.
-	if strings.Contains(got, "task-skills") || strings.Contains(got, "pane-skill") {
-		t.Errorf("unsupported components must not appear in output, got %q", got)
+	if !strings.Contains(got, "pane-skill") || !strings.Contains(got, "skipped (opted out)") {
+		t.Errorf("expected opted-out pane-skill for codex, got %q", got)
+	}
+	if !strings.Contains(got, "task-skills") {
+		t.Errorf("expected opted-out task-skills for codex, got %q", got)
 	}
 
 	// claude supports pane-skill and task-skills — not selecting them shows opted-out.

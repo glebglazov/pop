@@ -47,9 +47,8 @@ func TestCatalog_StableIdentifiers(t *testing.T) {
 	}
 }
 
-// TestCatalog_SupportMatrix asserts the per-agent support matrix: codex hosts
-// neither skill component, and opencode hosts the pane skill but not the
-// task planning skills.
+// TestCatalog_SupportMatrix asserts the per-agent support matrix: opencode
+// hosts the pane skill but not the task planning skills.
 func TestCatalog_SupportMatrix(t *testing.T) {
 	allAgents := []string{"claude", "codex", "pi", "opencode", "cursor"}
 
@@ -64,13 +63,12 @@ func TestCatalog_SupportMatrix(t *testing.T) {
 		},
 		{
 			id:        ComponentPaneSkill,
-			supported: []string{"claude", "pi", "cursor", "opencode"},
-			denied:    []string{"codex"},
+			supported: []string{"claude", "codex", "pi", "cursor", "opencode"},
 		},
 		{
 			id:        ComponentTaskSkills,
-			supported: []string{"claude", "pi", "cursor"},
-			denied:    []string{"opencode", "codex"},
+			supported: []string{"claude", "codex", "pi", "cursor"},
+			denied:    []string{"opencode"},
 		},
 	}
 

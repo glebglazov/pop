@@ -284,7 +284,7 @@ func TestRunIntegrateRemoveUnsupportedComponent(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := runIntegrateRemoveComponents(d, "codex", []ComponentID{ComponentPaneSkill})
+	err := runIntegrateRemoveComponents(d, "opencode", []ComponentID{ComponentTaskSkills})
 	if err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("expected not-supported error, got: %v", err)
 	}

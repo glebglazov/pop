@@ -15,7 +15,7 @@ type taskAgent struct {
 }
 
 // taskAgents returns the install layout for every agent the task-skills
-// component supports (claude, pi, cursor), derived from installerHome.
+// component supports (claude, codex, pi, cursor), derived from installerHome.
 func taskAgents() []taskAgent {
 	dataRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations")
 	return []taskAgent{
@@ -23,6 +23,11 @@ func taskAgents() []taskAgent {
 			name:      "claude",
 			renderDir: filepath.Join(dataRoot, "claude", "task-skills"),
 			skillDir:  filepath.Join(installerHome, ".claude", "skills"),
+		},
+		{
+			name:      "codex",
+			renderDir: filepath.Join(dataRoot, "codex", "task-skills"),
+			skillDir:  filepath.Join(installerHome, ".codex", "skills"),
 		},
 		{
 			name:      "pi",
@@ -41,10 +46,10 @@ func taskAgents() []taskAgent {
 // component installs.
 var taskSkillNames = []string{"pop-grill-with-docs", "pop-grill-consolidate", "pop-to-prd", "pop-to-tasks"}
 
-// TestInstallTaskSkillsAllAgents covers the clean install for claude, pi,
-// and cursor: all four planning skills land as render trees under the data dir
-// and the agent location receives a symlink per skill. grill-with-docs keeps its
-// companion documents so its internal references resolve.
+// TestInstallTaskSkillsAllAgents covers the clean install for claude, codex,
+// pi, and cursor: all four planning skills land as render trees under the data
+// dir and the agent location receives a symlink per skill. grill-with-docs keeps
+// its companion documents so its internal references resolve.
 func TestInstallTaskSkillsAllAgents(t *testing.T) {
 	for _, a := range taskAgents() {
 		t.Run(a.name, func(t *testing.T) {
@@ -181,23 +186,19 @@ func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
 	}
 }
 
-// TestRunIntegrateTaskSkillsUnsupported covers opencode and codex: task skills
-// are not supported and are skipped silently while status wiring installs.
+// TestRunIntegrateTaskSkillsUnsupported covers opencode: task skills are not
+// supported and are skipped silently while status wiring installs.
 func TestRunIntegrateTaskSkillsUnsupported(t *testing.T) {
-	for _, agent := range []string{"opencode", "codex"} {
-		t.Run(agent, func(t *testing.T) {
-			fs := newFakeFS()
-			d := fakeDeps(installerHome, fs, nil)
+	fs := newFakeFS()
+	d := fakeDeps(installerHome, fs, nil)
 
-			if err := runIntegrateComponents(d, agent, []ComponentID{ComponentTaskSkills}, false, false, nil, false, false); err != nil {
-				t.Fatalf("runIntegrateComponents(%s): %v", agent, err)
-			}
-			if len(fs.files) == 0 {
-				t.Fatalf("status wiring should be installed for %s", agent)
-			}
-			if len(fs.symlinks) != 0 {
-				t.Fatalf("task skills should be skipped for %s: symlinks=%v", agent, fs.symlinks)
-			}
-		})
+	if err := runIntegrateComponents(d, "opencode", []ComponentID{ComponentTaskSkills}, false, false, nil, false, false); err != nil {
+		t.Fatalf("runIntegrateComponents(opencode): %v", err)
+	}
+	if len(fs.files) == 0 {
+		t.Fatalf("status wiring should be installed for opencode")
+	}
+	if len(fs.symlinks) != 0 {
+		t.Fatalf("task skills should be skipped for opencode: symlinks=%v", fs.symlinks)
 	}
 }

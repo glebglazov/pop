@@ -439,6 +439,8 @@ func agentSkillDir(home, agent string) (string, error) {
 	switch strings.ToLower(agent) {
 	case "claude":
 		return filepath.Join(home, ".claude", "skills"), nil
+	case "codex":
+		return filepath.Join(home, ".codex", "skills"), nil
 	case "pi":
 		return filepath.Join(home, ".pi", "agent", "skills"), nil
 	case "cursor":

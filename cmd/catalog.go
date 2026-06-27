@@ -36,9 +36,8 @@ const (
 //
 // A non-nil install applies the component directly (status wiring). File-based
 // components leave install nil and go through the link installer, driven by
-// their sources. ComponentStatusWiring is core — always installed by the
-// integrate verb; the components marked defaultOn install by default too, opt-out
-// only (ADR 0064).
+// their sources. ComponentStatusWiring is the sole component the bare integrate
+// path installs; the rest are explicit opt-ins.
 type integrationComponent struct {
 	id       ComponentID
 	supports map[string]bool
@@ -47,11 +46,6 @@ type integrationComponent struct {
 	// (status wiring) or not yet embedded (task skills).
 	sources []string
 	install func(d *integrateDeps, home, agent string) error
-	// defaultOn marks an opt-in component that `pop integrate <agent>` installs
-	// by default, declined per-invocation with the matching `--no-*` flag and,
-	// in slice 08, with a persisted opt-out (ADR 0064). Core status wiring is
-	// always installed and does not set this.
-	defaultOn bool
 }
 
 // supported reports whether the component can be hosted by the given agent.
@@ -69,15 +63,14 @@ func agentSet(agents ...string) map[string]bool {
 }
 
 // integrationCatalog is the single registry of Integration components. Every
-// other module (the integrate path, refresh, and Doctor) consumes the catalog
-// rather than hardcoding component knowledge. Adding a future component means
-// adding an entry here; marking it defaultOn makes integrate install it by
-// default (ADR 0064).
+// other module (the integrate path today; the wizard, refresh, and Doctor in
+// later slices) consumes the catalog rather than hardcoding component
+// knowledge. Adding a future component means adding an entry here.
 //
-// Support matrix: codex cannot host either skill component; opencode hosts the
-// pane skill (in its flat single-file form) but not the task planning
-// skills. Unsupported pairs are skipped silently rather than receiving a
-// degraded install. See ADR 0010, ADR 0064.
+// Support matrix: opencode hosts the pane skill (in its flat single-file form)
+// but not the task planning skills (multi-file layout). Unsupported pairs are
+// reported as not-supported rather than receiving a degraded install. See ADR
+// 0010.
 var integrationCatalog = []integrationComponent{
 	{
 		id:       ComponentStatusWiring,
@@ -85,15 +78,13 @@ var integrationCatalog = []integrationComponent{
 		install:  installStatusWiring,
 	},
 	{
-		id:        ComponentPaneSkill,
-		supports:  agentSet("claude", "pi", "cursor", "opencode"),
-		sources:   []string{"skills/pop/tmux-pane.md"},
-		defaultOn: true,
+		id:       ComponentPaneSkill,
+		supports: agentSet("claude", "codex", "pi", "cursor", "opencode"),
+		sources:  []string{"skills/pop/pane.md"},
 	},
 	{
-		id:        ComponentTaskSkills,
-		supports:  agentSet("claude", "pi", "cursor"),
-		defaultOn: true,
+		id:       ComponentTaskSkills,
+		supports: agentSet("claude", "codex", "pi", "cursor"),
 		// Each source is a skill directory (SKILL.md plus any companion
 		// documents). grill-with-docs ships two companion format files that
 		// must ride alongside its body so its relative references resolve.
@@ -104,19 +95,6 @@ var integrationCatalog = []integrationComponent{
 			"skills/pop/to-tasks",
 		},
 	},
-}
-
-// defaultComponentIDs returns the opt-in components installed by default, in
-// catalog order (ADR 0064). The core status wiring is always installed and is
-// not part of this set.
-func defaultComponentIDs() []ComponentID {
-	var ids []ComponentID
-	for _, c := range integrationCatalog {
-		if c.defaultOn {
-			ids = append(ids, c.id)
-		}
-	}
-	return ids
 }
 
 // lookupComponent returns the catalog entry for the given identifier.

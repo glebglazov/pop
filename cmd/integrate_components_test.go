@@ -153,9 +153,9 @@ func TestRunIntegrateComponentsPaneSkillNewAgents(t *testing.T) {
 	}
 }
 
-// TestRunIntegrateComponentsCodexSkipsUnsupportedBaseline: codex cannot host
-// skill components — they are skipped silently while status wiring installs.
-func TestRunIntegrateComponentsCodexSkipsUnsupportedBaseline(t *testing.T) {
+// TestRunIntegrateComponentsCodexInstallsMergedBaseline: codex hosts every
+// baseline skill component — status wiring plus pane and task skills.
+func TestRunIntegrateComponentsCodexInstallsMergedBaseline(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -167,8 +167,16 @@ func TestRunIntegrateComponentsCodexSkipsUnsupportedBaseline(t *testing.T) {
 	if _, ok := fs.files[hooksPath]; !ok {
 		t.Fatalf("codex status wiring not installed")
 	}
-	if len(fs.symlinks) != 0 {
-		t.Fatalf("codex should not install skill symlinks, got %v", fs.symlinks)
+	paneDest := filepath.Join(installerHome, ".codex", "skills", "pop-pane")
+	if _, ok := fs.symlinks[paneDest]; !ok {
+		t.Fatalf("codex pane skill not symlinked: %v", fs.symlinks)
+	}
+	grillDest := filepath.Join(installerHome, ".codex", "skills", "pop-grill-with-docs")
+	if _, ok := fs.symlinks[grillDest]; !ok {
+		t.Fatalf("codex task skill not symlinked: %v", fs.symlinks)
+	}
+	if len(fs.symlinks) != 5 { // pane + 4 task skills
+		t.Fatalf("expected 5 skill symlinks, got %d: %v", len(fs.symlinks), fs.symlinks)
 	}
 }
 

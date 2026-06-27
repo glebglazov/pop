@@ -16,13 +16,13 @@ var taskSkillDirs = map[string][]string{
 }
 
 // TestRenderTaskSkillsDirAgents pins the task-skills rendered tree for
-// each agent that hosts skills as directories (claude, pi, cursor): four skill
-// directories, each with a name-injected SKILL.md, and grill-with-docs carrying
-// its two companion format documents verbatim alongside the body.
+// each agent that hosts skills as directories (claude, codex, pi, cursor): four
+// skill directories, each with a name-injected SKILL.md, and grill-with-docs
+// carrying its two companion format documents verbatim alongside the body.
 func TestRenderTaskSkillsDirAgents(t *testing.T) {
-	for _, agent := range []string{"claude", "pi", "cursor"} {
+	for _, agent := range []string{"claude", "codex", "pi", "cursor"} {
 		t.Run(agent, func(t *testing.T) {
-			tree, err := renderComponent(ComponentTaskSkills, agent, "pop-")
+			tree, err := renderComponent(ComponentTaskSkills, agent)
 			if err != nil {
 				t.Fatalf("renderComponent(%s): %v", agent, err)
 			}
@@ -77,7 +77,7 @@ func TestRenderTaskSkillsDirAgents(t *testing.T) {
 // body is the embedded source with the name injected — the body is not emitted
 // verbatim like a companion file.
 func TestRenderTaskSkillsBodyMatchesInjectedSource(t *testing.T) {
-	tree, err := renderComponent(ComponentTaskSkills, "claude", "pop-")
+	tree, err := renderComponent(ComponentTaskSkills, "claude")
 	if err != nil {
 		t.Fatalf("renderComponent: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestRenderTaskSkillsBodyMatchesInjectedSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded source: %v", err)
 	}
-	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-grill-with-docs"))
+	want := injectFrontmatterName(string(src), "pop-grill-with-docs")
 	got := tree["pop-grill-with-docs/SKILL.md"]
 	if string(got) != want {
 		t.Fatalf("grill-with-docs body mismatch:\n got: %q\nwant: %q", string(got), want)
@@ -96,7 +96,7 @@ func TestRenderTaskSkillsBodyMatchesInjectedSource(t *testing.T) {
 // skills no longer assume an in-tree thoughts/ location and instead resolve
 // their write location via `pop tasks show-path` (ADR 0039, ADR 0013).
 func TestRenderTaskSkillsContentUsesShowPath(t *testing.T) {
-	tree, err := renderComponent(ComponentTaskSkills, "claude", "pop-")
+	tree, err := renderComponent(ComponentTaskSkills, "claude")
 	if err != nil {
 		t.Fatalf("renderComponent: %v", err)
 	}
@@ -116,12 +116,10 @@ func TestRenderTaskSkillsContentUsesShowPath(t *testing.T) {
 	}
 }
 
-// TestRenderTaskSkillsUnsupportedAgents confirms opencode and codex error
-// rather than producing a degraded (flat, companion-less) tree.
+// TestRenderTaskSkillsUnsupportedAgents confirms opencode errors rather than
+// producing a degraded (flat, companion-less) tree.
 func TestRenderTaskSkillsUnsupportedAgents(t *testing.T) {
-	for _, agent := range []string{"opencode", "codex"} {
-		if _, err := renderComponent(ComponentTaskSkills, agent, "pop-"); err == nil {
-			t.Fatalf("expected error rendering task skills for %s", agent)
-		}
+	if _, err := renderComponent(ComponentTaskSkills, "opencode"); err == nil {
+		t.Fatalf("expected error rendering task skills for opencode")
 	}
 }

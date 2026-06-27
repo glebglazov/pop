@@ -14,9 +14,9 @@ const installerHome = "/home/u"
 // claude, derived from installerHome.
 func paneSkillPaths() (renderFile, linkDest, linkTarget string) {
 	renderRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "claude", "pane-skill")
-	renderFile = filepath.Join(renderRoot, "pop-tmux-pane", "SKILL.md")
-	linkDest = filepath.Join(installerHome, ".claude", "skills", "pop-tmux-pane")
-	linkTarget = filepath.Join(renderRoot, "pop-tmux-pane")
+	renderFile = filepath.Join(renderRoot, "pop-pane", "SKILL.md")
+	linkDest = filepath.Join(installerHome, ".claude", "skills", "pop-pane")
+	linkTarget = filepath.Join(renderRoot, "pop-pane")
 	return
 }
 
@@ -36,8 +36,8 @@ func TestInstallFileComponentInstall(t *testing.T) {
 	if !ok {
 		t.Fatalf("render file not written: %s (have %v)", renderFile, sortedKeys(fs.files))
 	}
-	src, _ := skillFiles.ReadFile("skills/pop/tmux-pane.md")
-	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-tmux-pane"))
+	src, _ := skillFiles.ReadFile("skills/pop/pane.md")
+	want := injectFrontmatterName(string(src), "pop-pane")
 	if string(data) != want {
 		t.Fatalf("render bytes mismatch")
 	}
@@ -73,18 +73,18 @@ func TestInstallFileComponentIdempotent(t *testing.T) {
 }
 
 // TestInstallFileComponentCopyToSymlinkMigration covers a pre-existing copy-mode
-// install (a real directory whose SKILL.md carries the pop-owned marker) being
-// replaced by a symlink.
+// install (a real directory under the pop- name prefix) being replaced by a
+// symlink.
 func TestInstallFileComponentCopyToSymlinkMigration(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
 	_, linkDest, linkTarget := paneSkillPaths()
-	// Simulate an older copy-mode install: a real directory + marker-bearing
-	// SKILL.md at the agent's skill location.
+	// Simulate an older copy-mode install: a real directory + file at the
+	// agent's skill location.
 	fs.dirs[linkDest] = true
 	copyFile := filepath.Join(linkDest, "SKILL.md")
-	fs.files[copyFile] = []byte("---\npop-owned: true\n---\nold copy-mode body")
+	fs.files[copyFile] = []byte("old copy-mode body")
 
 	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
@@ -138,54 +138,63 @@ type paneSkillAgent struct {
 }
 
 // paneSkillAgents returns the install layout for every agent newly wired in
-// this slice (pi, cursor, opencode), derived from installerHome.
+// this slice (codex, pi, cursor, opencode), derived from installerHome.
 func paneSkillAgents() []paneSkillAgent {
-	src, _ := skillFiles.ReadFile("skills/pop/tmux-pane.md")
-	skillDirBytes := []byte(injectOwnershipMarker(injectFrontmatterName(string(src), "pop-tmux-pane")))
-	flatBytes := []byte(injectOwnershipMarker(string(src)))
+	src, _ := skillFiles.ReadFile("skills/pop/pane.md")
+	skillDirBytes := []byte(injectFrontmatterName(string(src), "pop-pane"))
 
 	dataRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations")
 
+	codexRoot := filepath.Join(dataRoot, "codex", "pane-skill")
 	piRoot := filepath.Join(dataRoot, "pi", "pane-skill")
 	curRoot := filepath.Join(dataRoot, "cursor", "pane-skill")
 	ocRoot := filepath.Join(dataRoot, "opencode", "pane-skill")
 
-	piDest := filepath.Join(installerHome, ".pi", "agent", "skills", "pop-tmux-pane")
-	curDest := filepath.Join(installerHome, ".cursor", "skills", "pop-tmux-pane")
-	ocDest := filepath.Join(installerHome, ".config", "opencode", "agent", "pop-tmux-pane.md")
+	codexDest := filepath.Join(installerHome, ".codex", "skills", "pop-pane")
+	piDest := filepath.Join(installerHome, ".pi", "agent", "skills", "pop-pane")
+	curDest := filepath.Join(installerHome, ".cursor", "skills", "pop-pane")
+	ocDest := filepath.Join(installerHome, ".config", "opencode", "agent", "pop-pane.md")
 
 	return []paneSkillAgent{
 		{
+			name:       "codex",
+			renderFile: filepath.Join(codexRoot, "pop-pane", "SKILL.md"),
+			linkDest:   codexDest,
+			linkTarget: filepath.Join(codexRoot, "pop-pane"),
+			wantBytes:  skillDirBytes,
+			legacyDir:  codexDest,
+		},
+		{
 			name:       "pi",
-			renderFile: filepath.Join(piRoot, "pop-tmux-pane", "SKILL.md"),
+			renderFile: filepath.Join(piRoot, "pop-pane", "SKILL.md"),
 			linkDest:   piDest,
-			linkTarget: filepath.Join(piRoot, "pop-tmux-pane"),
+			linkTarget: filepath.Join(piRoot, "pop-pane"),
 			wantBytes:  skillDirBytes,
 			legacyDir:  piDest,
 		},
 		{
 			name:       "cursor",
-			renderFile: filepath.Join(curRoot, "pop-tmux-pane", "SKILL.md"),
+			renderFile: filepath.Join(curRoot, "pop-pane", "SKILL.md"),
 			linkDest:   curDest,
-			linkTarget: filepath.Join(curRoot, "pop-tmux-pane"),
+			linkTarget: filepath.Join(curRoot, "pop-pane"),
 			wantBytes:  skillDirBytes,
 			legacyDir:  curDest,
 		},
 		{
 			name:       "opencode",
-			renderFile: filepath.Join(ocRoot, "pop-tmux-pane.md"),
+			renderFile: filepath.Join(ocRoot, "pop-pane.md"),
 			linkDest:   ocDest,
-			linkTarget: filepath.Join(ocRoot, "pop-tmux-pane.md"),
-			wantBytes:  flatBytes,
+			linkTarget: filepath.Join(ocRoot, "pop-pane.md"),
+			wantBytes:  src,
 			legacyFile: ocDest,
 		},
 	}
 }
 
-// TestInstallFileComponentInstallNewAgents covers the clean install for pi,
-// cursor, and opencode: the rendered tree lands under the data dir and the
-// agent location is a symlink into it (a skill directory for pi/cursor, a flat
-// file for opencode).
+// TestInstallFileComponentInstallNewAgents covers the clean install for codex,
+// pi, cursor, and opencode: the rendered tree lands under the data dir and the
+// agent location is a symlink into it (a skill directory for codex/pi/cursor, a
+// flat file for opencode).
 func TestInstallFileComponentInstallNewAgents(t *testing.T) {
 	for _, a := range paneSkillAgents() {
 		t.Run(a.name, func(t *testing.T) {
@@ -235,21 +244,20 @@ func TestInstallFileComponentIdempotentNewAgents(t *testing.T) {
 
 // TestInstallFileComponentMigrationNewAgents covers a pre-existing copy-mode
 // install being replaced by a symlink: a real skill directory for pi/cursor, a
-// real flat file for opencode. Both carry the pop-owned marker in their
-// frontmatter, so ownership recognizes them as pop-owned and migrates them.
+// real flat file for opencode. Both live under the pop- name prefix at the
+// agent location, so ownership recognizes them as pop-owned and migrates them.
 func TestInstallFileComponentMigrationNewAgents(t *testing.T) {
 	for _, a := range paneSkillAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			markerBody := []byte("---\npop-owned: true\n---\nold copy-mode body")
 			if a.legacyDir != "" {
 				fs.dirs[a.legacyDir] = true
-				fs.files[filepath.Join(a.legacyDir, "SKILL.md")] = markerBody
+				fs.files[filepath.Join(a.legacyDir, "SKILL.md")] = []byte("old copy-mode body")
 			}
 			if a.legacyFile != "" {
-				fs.files[a.legacyFile] = markerBody
+				fs.files[a.legacyFile] = []byte("old copy-mode body")
 			}
 
 			if err := installFileComponent(d, installerHome, ComponentPaneSkill, a.name); err != nil {
@@ -302,7 +310,7 @@ func TestOwnership(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 	integrationsRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations")
-	dest := filepath.Join(installerHome, ".claude", "skills", "pop-tmux-pane")
+	dest := filepath.Join(installerHome, ".claude", "skills", "pop-pane")
 
 	// Missing entry.
 	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || exists || owned {
@@ -310,89 +318,54 @@ func TestOwnership(t *testing.T) {
 	}
 
 	// Symlink into pop's tree → owned.
-	fs.symlinks[dest] = filepath.Join(integrationsRoot, "claude", "pane-skill", "pop-tmux-pane")
+	fs.symlinks[dest] = filepath.Join(integrationsRoot, "claude", "pane-skill", "pop-pane")
 	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || !exists || !owned {
 		t.Fatalf("in-tree symlink: exists=%v owned=%v err=%v", exists, owned, err)
 	}
 
 	// Symlink outside pop's tree → not owned.
-	fs.symlinks[dest] = "/elsewhere/pop-tmux-pane"
+	fs.symlinks[dest] = "/elsewhere/pop-pane"
 	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || !exists || owned {
 		t.Fatalf("foreign symlink: exists=%v owned=%v err=%v", exists, owned, err)
 	}
 	delete(fs.symlinks, dest)
 
-	// Dangling symlink into pop's tree (target file does not exist) → still
-	// owned: the prefix decides, and there is no frontmatter to read.
-	fs.symlinks[dest] = filepath.Join(integrationsRoot, "claude", "pane-skill", "pop-tmux-pane", "SKILL.md")
+	// Real pop- prefixed directory → owned (copy-mode).
+	fs.dirs[dest] = true
 	if exists, owned, err := ownership(d, dest, integrationsRoot); err != nil || !exists || !owned {
-		t.Fatalf("dangling in-tree symlink: exists=%v owned=%v err=%v", exists, owned, err)
+		t.Fatalf("pop- copy dir: exists=%v owned=%v err=%v", exists, owned, err)
 	}
-	delete(fs.symlinks, dest)
+	delete(fs.dirs, dest)
 
-	// Real directory whose SKILL.md carries the pop-owned marker → owned,
-	// regardless of name (here a bare, non-pop- name).
-	bare := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
-	fs.dirs[bare] = true
-	fs.files[filepath.Join(bare, "SKILL.md")] = []byte("---\npop-owned: true\nname: tmux-pane\n---\nbody")
-	if exists, owned, err := ownership(d, bare, integrationsRoot); err != nil || !exists || !owned {
-		t.Fatalf("marker copy dir: exists=%v owned=%v err=%v", exists, owned, err)
-	}
-
-	// Real flat file carrying the marker → owned (opencode copy-mode shape).
-	flat := filepath.Join(installerHome, ".config", "opencode", "agent", "tmux-pane.md")
-	fs.files[flat] = []byte("---\npop-owned: true\n---\nbody")
-	if exists, owned, err := ownership(d, flat, integrationsRoot); err != nil || !exists || !owned {
-		t.Fatalf("marker flat file: exists=%v owned=%v err=%v", exists, owned, err)
-	}
-
-	// Real pop- named directory WITHOUT the marker → not owned: the name no
-	// longer confers ownership (legacy name test removed in favour of marker).
-	popNamed := filepath.Join(installerHome, ".claude", "skills", "pop-tmux-pane")
-	fs.dirs[popNamed] = true
-	fs.files[filepath.Join(popNamed, "SKILL.md")] = []byte("---\nname: pop-tmux-pane\n---\nuser body")
-	if exists, owned, err := ownership(d, popNamed, integrationsRoot); err != nil || !exists || owned {
-		t.Fatalf("pop- named dir without marker: exists=%v owned=%v err=%v", exists, owned, err)
-	}
-
-	// Hand-written skill, no marker, not a render-tree symlink → not owned.
+	// Real directory without the pop- prefix → not owned.
 	other := filepath.Join(installerHome, ".claude", "skills", "my-skill")
 	fs.dirs[other] = true
-	fs.files[filepath.Join(other, "SKILL.md")] = []byte("---\nname: my-skill\n---\nmine")
 	if exists, owned, err := ownership(d, other, integrationsRoot); err != nil || !exists || owned {
 		t.Fatalf("foreign dir: exists=%v owned=%v err=%v", exists, owned, err)
 	}
 }
 
-// TestConflictCandidates pins the candidate expansion derived from the resolved
-// name and the configured prefix (ADR 0063): a prefixed render-tree name yields
-// both the resolved form and the bare form, so a hand-written skill under
-// either name is caught. With an empty prefix the resolved name is already
-// bare, so it is the sole candidate.
+// TestConflictCandidates pins the prefix-insensitive candidate expansion: a
+// render-tree name yields both its canonical `pop-` form and the bare form, so
+// a hand-written skill under either name is caught.
 func TestConflictCandidates(t *testing.T) {
 	tests := []struct {
-		name   string
-		prefix string
-		want   []string
+		name string
+		want []string
 	}{
-		{"pop-tmux-pane", "pop-", []string{"pop-tmux-pane", "tmux-pane"}},
-		{"pop-tmux-pane.md", "pop-", []string{"pop-tmux-pane.md", "tmux-pane.md"}},
-		{"pop-grill-with-docs", "pop-", []string{"pop-grill-with-docs", "grill-with-docs"}},
-		{"no-prefix", "pop-", []string{"no-prefix"}},
-		// Empty prefix: the resolved name is already bare — sole candidate.
-		{"tmux-pane", "", []string{"tmux-pane"}},
-		{"tmux-pane.md", "", []string{"tmux-pane.md"}},
-		// Custom prefix: resolved form plus bare form.
-		{"my-tmux-pane", "my-", []string{"my-tmux-pane", "tmux-pane"}},
+		{"pop-pane", []string{"pop-pane", "pane"}},
+		{"pop-pane.md", []string{"pop-pane.md", "pane.md"}},
+		{"pop-grill-with-docs", []string{"pop-grill-with-docs", "grill-with-docs"}},
+		{"no-prefix", []string{"no-prefix"}},
 	}
 	for _, tt := range tests {
-		got := conflictCandidates(tt.name, tt.prefix)
+		got := conflictCandidates(tt.name)
 		if len(got) != len(tt.want) {
-			t.Fatalf("conflictCandidates(%q, %q) = %v, want %v", tt.name, tt.prefix, got, tt.want)
+			t.Fatalf("conflictCandidates(%q) = %v, want %v", tt.name, got, tt.want)
 		}
 		for i := range got {
 			if got[i] != tt.want[i] {
-				t.Fatalf("conflictCandidates(%q, %q) = %v, want %v", tt.name, tt.prefix, got, tt.want)
+				t.Fatalf("conflictCandidates(%q) = %v, want %v", tt.name, got, tt.want)
 			}
 		}
 	}
@@ -409,8 +382,8 @@ func TestInstallFileComponentConflictReportsPathAndResolution(t *testing.T) {
 
 	_, linkDest, _ := paneSkillPaths()
 	// A user's own skill, a real directory pop does not own, under the bare
-	// name (the prefix-stripped form of pop's pop-tmux-pane).
-	bareDest := filepath.Join(filepath.Dir(linkDest), "tmux-pane")
+	// name (the prefix-stripped form of pop's pop-pane).
+	bareDest := filepath.Join(filepath.Dir(linkDest), "pane")
 	fs.dirs[bareDest] = true
 	userFile := filepath.Join(bareDest, "SKILL.md")
 	fs.files[userFile] = []byte("hand-written skill")
@@ -441,15 +414,15 @@ func TestInstallFileComponentConflictReportsPathAndResolution(t *testing.T) {
 }
 
 // TestInstallFileComponentConflictPrefixInsensitive covers the prefix-insensitive
-// match: a non-pop entry under the bare name (`tmux-pane`) OR the canonical prefixed
-// name (`pop-tmux-pane`) both block the install. The bare-name conflict is a user's
+// match: a non-pop entry under the bare name (`pane`) OR the canonical prefixed
+// name (`pop-pane`) both block the install. The bare-name conflict is a user's
 // real directory; the prefixed-name conflict is a foreign symlink (a real
 // pop- entry is a pop-owned copy-mode install, eligible for migration, not a
 // conflict).
 func TestInstallFileComponentConflictPrefixInsensitive(t *testing.T) {
 	_, linkDest, _ := paneSkillPaths()
 	agentDir := filepath.Dir(linkDest)
-	bareDest := filepath.Join(agentDir, "tmux-pane")
+	bareDest := filepath.Join(agentDir, "pane")
 
 	cases := []struct {
 		name  string
@@ -461,7 +434,7 @@ func TestInstallFileComponentConflictPrefixInsensitive(t *testing.T) {
 			return bareDest
 		}},
 		{"prefixed form", func(fs *fakeFS) string {
-			fs.symlinks[linkDest] = "/somewhere/else/pop-tmux-pane"
+			fs.symlinks[linkDest] = "/somewhere/else/pop-pane"
 			return linkDest
 		}},
 	}
@@ -602,7 +575,7 @@ func TestInstallFileComponentDebugConflict(t *testing.T) {
 
 	_, linkDest, _ := paneSkillPaths()
 	// User's own skill at the bare name — not owned by pop.
-	bareDest := filepath.Join(filepath.Dir(linkDest), "tmux-pane")
+	bareDest := filepath.Join(filepath.Dir(linkDest), "pane")
 	fs.dirs[bareDest] = true
 	fs.files[filepath.Join(bareDest, "SKILL.md")] = []byte("mine")
 
@@ -722,7 +695,7 @@ func TestRefreshFileComponentDebugStale(t *testing.T) {
 func TestRefreshFileComponentDebugConflict(t *testing.T) {
 	fs := newFakeFS()
 	// Place a non-pop entry at the bare name to create a conflict.
-	conflict := filepath.Join("/h", ".claude", "skills", "tmux-pane")
+	conflict := filepath.Join("/h", ".claude", "skills", "pane")
 	fs.dirs[conflict] = true
 
 	logf, lines := captureLogf()
@@ -744,39 +717,5 @@ func TestRefreshFileComponentDebugConflict(t *testing.T) {
 	}
 	if !hasLog(got, "not owned by pop") {
 		t.Errorf("expected 'not owned by pop' in debug lines, got %v", got)
-	}
-}
-
-// TestInstallFileComponentPopPaneToTmuxPaneMigration covers the rename from the
-// old `pop-pane` base to `pop-tmux-pane`: an existing pop-owned symlink at the
-// old agent-location name is pruned by stale-name cleanup, and the new
-// `pop-tmux-pane` link is written in its place. No duplicate pane skills remain.
-func TestInstallFileComponentPopPaneToTmuxPaneMigration(t *testing.T) {
-	fs := newFakeFS()
-	d := fakeDeps(installerHome, fs, nil)
-
-	renderRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "claude", "pane-skill")
-	agentDir := filepath.Join(installerHome, ".claude", "skills")
-
-	// Simulate a pre-rename install: a pop-owned symlink at the old name
-	// pointing into the component's render root.
-	oldLink := filepath.Join(agentDir, "pop-pane")
-	fs.symlinks[oldLink] = filepath.Join(renderRoot, "pop-pane")
-
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
-		t.Fatalf("installFileComponent: %v", err)
-	}
-
-	// New name is linked.
-	_, newLink, newTarget := paneSkillPaths()
-	if fs.symlinks[newLink] != newTarget {
-		t.Fatalf("new symlink %q = %q, want %q", newLink, fs.symlinks[newLink], newTarget)
-	}
-	// Old pop-pane symlink is pruned — no duplicate.
-	if _, ok := fs.symlinks[oldLink]; ok {
-		t.Fatalf("stale pop-pane symlink not pruned: %s -> %q", oldLink, fs.symlinks[oldLink])
-	}
-	if len(fs.symlinks) != 1 {
-		t.Fatalf("expected exactly 1 symlink after migration, got %d: %v", len(fs.symlinks), fs.symlinks)
 	}
 }
