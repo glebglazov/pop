@@ -233,9 +233,9 @@ func TestResolveTaskAgentSpecForEffortCursorModels(t *testing.T) {
 		effort    string
 		want      string
 	}{
-		{name: "heavy", agentSpec: "cursor", effort: "heavy", want: `cursor --model 'composer-2.5[effort=high]'`},
-		{name: "standard", agentSpec: "cursor", effort: "standard", want: `cursor --model 'composer-2.5[effort=medium]'`},
-		{name: "light", agentSpec: "cursor", effort: "light", want: `cursor --model 'composer-2.5[effort=low]'`},
+		{name: "heavy", agentSpec: "cursor", effort: "heavy", want: `cursor --model composer-2.5`},
+		{name: "standard", agentSpec: "cursor", effort: "standard", want: `cursor --model composer-2.5`},
+		{name: "light", agentSpec: "cursor", effort: "light", want: `cursor --model composer-2.5-fast`},
 		{name: "preserves explicit model", agentSpec: "cursor --model custom", effort: "heavy", want: "cursor --model custom"},
 		{name: "preserves explicit bracketed model", agentSpec: `cursor --model "composer-2.5[effort=low]"`, effort: "heavy", want: `cursor --model "composer-2.5[effort=low]"`},
 	}
@@ -391,18 +391,18 @@ func TestResolveTaskAgentSpecEffortModelPrecedence(t *testing.T) {
 			wantSpecs:      []string{`codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
 		},
 		{
-			name:           "cursor composes with bracketed effort",
+			name:           "cursor composes with explicit model",
 			defaultSpecs:   []string{"cursor"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpecs:      []string{`cursor --model 'composer-2.5[effort=high]'`},
+			wantSpecs:      []string{`cursor --model composer-2.5`},
 		},
 		{
 			name:           "fallback list entries each resolve effort",
 			defaultSpecs:   []string{"claude", "cursor", "codex"},
 			effort:         "heavy",
 			effortExplicit: true,
-			wantSpecs:      []string{"claude --model opus --effort high", `cursor --model 'composer-2.5[effort=high]'`, `codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
+			wantSpecs:      []string{"claude --model opus --effort high", `cursor --model composer-2.5`, `codex --model gpt-5.5 -c 'model_reasoning_effort="high"'`},
 		},
 		{
 			name:           "agent-cmd leaves fallback list untouched",

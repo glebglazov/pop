@@ -6,7 +6,7 @@ superseded:
 
 # Cursor effort uses explicit model names
 
-Cursor-agent rejects the bracketed `--model` token that ADR-0049 prescribed (`composer-2.5[effort=medium]`) and has no `--effort` flag. Its accepted model list is flat tokens whose names already encode capability (`composer-2.5`, `composer-2.5-fast`, `claude-opus-4-8-thinking-high`, etc.). Therefore the cursor adapter selects a full concrete model name per **Effort** tier and does not emit a separate **Reasoning effort** parameter. The built-in cursor ladder now maps `heavy` → `claude-opus-4-8-thinking-high`, `standard` → `composer-2.5`, and `light` → `composer-2.5-fast`.
+Cursor-agent rejects the bracketed `--model` token that ADR-0049 prescribed (`composer-2.5[effort=medium]`) and has no `--effort` flag. Its accepted model list is flat tokens whose names already encode capability (`composer-2.5`, `composer-2.5-fast`, `claude-opus-4-8-thinking-high`, etc.). Therefore the cursor adapter selects a full concrete model name per **Effort** tier and does not emit a separate **Reasoning effort** parameter. The built-in cursor ladder now maps `heavy` → `composer-2.5`, `standard` → `composer-2.5`, and `light` → `composer-2.5-fast`.
 
 ## Considered Options
 

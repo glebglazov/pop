@@ -1070,11 +1070,11 @@ func renderTaskAgents(w io.Writer, rows []tasks.AgentCatalogRow) {
 		if row.Found {
 			found = "yes"
 		}
-		fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", row.Agent, row.Binary, found, renderEffortLadder(row.EffortLadder))
+		fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", row.Agent, row.Binary, found, renderEffortLadder(row.Agent, row.EffortLadder))
 	}
 }
 
-func renderEffortLadder(ladder []tasks.AgentCatalogEffortTier) string {
+func renderEffortLadder(agent string, ladder []tasks.AgentCatalogEffortTier) string {
 	if len(ladder) == 0 {
 		return "none"
 	}
@@ -1085,7 +1085,7 @@ func renderEffortLadder(ladder []tasks.AgentCatalogEffortTier) string {
 			rendered := make([]string, 0, len(tier.Entries))
 			for _, entry := range tier.Entries {
 				model := entry.Model
-				if entry.Reasoning != "" {
+				if agent != "cursor" && entry.Reasoning != "" {
 					model += "[reasoning=" + entry.Reasoning + "]"
 				}
 				rendered = append(rendered, model)

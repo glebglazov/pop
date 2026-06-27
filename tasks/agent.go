@@ -203,9 +203,9 @@ var codexEffortModels = map[string][]config.EffortModel{
 }
 
 var cursorEffortModels = map[string][]config.EffortModel{
-	"heavy":    {{Model: "composer-2.5", Reasoning: "high"}},
-	"standard": {{Model: "composer-2.5", Reasoning: "medium"}},
-	"light":    {{Model: "composer-2.5", Reasoning: "low"}},
+	"heavy":    {{Model: "composer-2.5"}},
+	"standard": {{Model: "composer-2.5"}},
+	"light":    {{Model: "composer-2.5-fast"}},
 }
 
 var piEffortModels = map[string][]config.EffortModel{
@@ -624,12 +624,7 @@ func resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort string, effortExp
 }
 
 func effortModelTokenForAgent(agent string, bundle config.EffortModel, adapter AgentAdapter, extraArgs []string) string {
-	model := strings.TrimSpace(bundle.Model)
-	reasoning := strings.TrimSpace(bundle.Reasoning)
-	if agent == "cursor" && reasoning != "" && (adapter == nil || !adapter.ArgsContainReasoning(extraArgs)) {
-		return model + "[effort=" + reasoning + "]"
-	}
-	return model
+	return strings.TrimSpace(bundle.Model)
 }
 
 func effortModelsForAgent(cfg *config.Config, agent, effort string) []config.EffortModel {

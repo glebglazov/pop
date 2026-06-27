@@ -48,7 +48,7 @@ func TestTaskAgentsCatalogListsPresetsWithEffortLadders(t *testing.T) {
 		{"agent", "binary", "found", "effort ladder"},
 		{"claude", "claude", "yes", "heavy: opus[reasoning=high] (built-in); standard: sonnet[reasoning=high] (built-in); light: haiku[reasoning=high] (built-in)"},
 		{"opencode", "opencode", "yes", "heavy: opencode/claude-opus-4-8[reasoning=high], opencode/kimi-k2.6 (configured); standard: opencode/claude-sonnet-4-6[reasoning=medium] (configured); light: opencode/kimi-k2.6 (configured)"},
-		{"cursor", "cursor-agent", "no", "heavy: composer-2.5[reasoning=high] (built-in); standard: composer-2.5[reasoning=medium] (built-in); light: composer-2.5[reasoning=low] (built-in)"},
+		{"cursor", "cursor-agent", "no", "heavy: composer-2.5 (built-in); standard: composer-2.5 (built-in); light: composer-2.5-fast (built-in)"},
 		{"codex", "codex", "yes", "heavy: gpt-5.5[reasoning=high] (built-in); standard: gpt-5.5[reasoning=medium] (built-in); light: gpt-5.4-mini[reasoning=low] (built-in)"},
 		{"pi", "pi", "no", "heavy: opencode-go/qwen3.7-max[reasoning=high] (built-in); standard: opencode-go/kimi-k2.6[reasoning=medium] (built-in); light: opencode-go/deepseek-v4-flash[reasoning=low] (built-in)"},
 	}
