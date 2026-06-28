@@ -72,10 +72,15 @@ projects = [
 #   "ollama:<model>"  -> a local ollama model, e.g. "ollama:llama3.2"
 #   "cmd:<command>"   -> escape hatch: any CLI, run via `sh -c`, fed pop's
 #                        per-derive JSON payload on stdin (alias "sh:")
+# Agent steps may also set `args = ["..."]` (appended to the curated argv) and
+# `timeout = <seconds>` (overriding the global topic_derivation_timeout). The
+# cmd: payload includes `prev_topic_kind` (`seed`/`final`/empty) alongside
+# `prev_topic` so scripts know what they are replacing.
 #
 # topic_agents = [
 #   { type = "truncate", set_if = "empty" },
 #   { type = "agent", command = "claude", set_if = "empty_or_seed" },
+#   { type = "agent", command = "ollama:gemma4:e4b", args = ["--thinking", "no"], timeout = 120 },
 # ]
 # topic_agents = ["claude", "ollama:llama3.2"]  # back-compat bare strings
 #

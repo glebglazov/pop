@@ -141,7 +141,14 @@ History file: `~/.local/share/pop/history.json` (respects XDG_DATA_HOME)
 - `truncate` — local prompt truncation, writes a **Topic seed** (`@pop_topic_kind = seed`)
 - `agent` — curated CLI recipe (`claude`, `ollama:<model>`, `cmd:<shell>`), writes a final Topic (`@pop_topic_kind = final`)
 
-Each step has a `set_if` guard (`empty` | `empty_or_seed` | `always`) checked against `@pop_topic_kind`. A bare string entry is sugar for `{ type = "agent", command = "<string>" }`. When `topic_agents` is unset, the default is a single truncate step with `set_if = "empty"`. A pane with a Note skips agent steps. There is no hidden truncation fallback beyond configured steps.
+Each step has a `set_if` guard (`empty` | `empty_or_seed` | `always`) checked against `@pop_topic_kind`. A bare string entry is sugar for `{ type = "agent", command = "<string>" }`. When `topic_agents` is unset, the default is a single truncate step with `set_if = "empty"`. A pane with a Note skips agent steps.
+
+An `agent` step may also specify:
+
+- `args` — a string array appended to the curated argv (e.g. `args = ["--thinking", "no"]`)
+- `timeout` — per-step seconds value; when omitted, the global `topic_derivation_timeout` applies
+
+The `cmd:` recipe receives a JSON payload on stdin that includes `prev_topic` and `prev_topic_kind` (`seed`/`final`/empty) so scripts can see what they are replacing. There is no hidden truncation fallback beyond configured steps.
 
 ### Dependencies
 

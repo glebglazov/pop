@@ -728,7 +728,7 @@ func TestResolveTopicRecipe(t *testing.T) {
 		if !ok {
 			t.Fatal("claude should resolve")
 		}
-		argv, stdin := r.build(modelPrompt, payload)
+		argv, stdin := r.build(modelPrompt, payload, nil)
 		if strings.Join(argv, " ") != "claude -p --output-format json" {
 			t.Errorf("argv = %v", argv)
 		}
@@ -742,7 +742,7 @@ func TestResolveTopicRecipe(t *testing.T) {
 		if !ok {
 			t.Fatal("ollama:llama3.2 should resolve")
 		}
-		argv, stdin := r.build(modelPrompt, payload)
+		argv, stdin := r.build(modelPrompt, payload, nil)
 		if strings.Join(argv, " ") != "ollama run --hidethinking llama3.2" {
 			t.Errorf("argv = %v", argv)
 		}
@@ -753,7 +753,7 @@ func TestResolveTopicRecipe(t *testing.T) {
 
 	t.Run("bare ollama falls back to the default model", func(t *testing.T) {
 		r, _ := resolveTopicRecipe("ollama")
-		argv, _ := r.build(modelPrompt, payload)
+		argv, _ := r.build(modelPrompt, payload, nil)
 		if argv[len(argv)-1] != defaultOllamaModel {
 			t.Errorf("argv = %v, want default model %q", argv, defaultOllamaModel)
 		}
@@ -764,7 +764,7 @@ func TestResolveTopicRecipe(t *testing.T) {
 		if !ok {
 			t.Fatal("cmd: should resolve")
 		}
-		argv, stdin := r.build(modelPrompt, payload)
+		argv, stdin := r.build(modelPrompt, payload, nil)
 		// Only the first colon splits the reference, so colons in the command survive.
 		if len(argv) != 3 || argv[0] != "sh" || argv[1] != "-c" || argv[2] != "my-tool --flag a:b" {
 			t.Errorf("argv = %v", argv)
@@ -785,6 +785,41 @@ func TestResolveTopicRecipe(t *testing.T) {
 			if _, ok := resolveTopicRecipe(ref); ok {
 				t.Errorf("ref %q should not resolve", ref)
 			}
+		}
+	})
+}
+
+// TestResolveTopicRecipe_ArgsAppended confirms per-step args are appended to
+// the curated argv for claude, ollama, and cmd: recipes.
+func TestResolveTopicRecipe_ArgsAppended(t *testing.T) {
+	modelPrompt := "name-this"
+	payload := []byte(`{"prompt":"p"}`)
+	args := []string{"--thinking", "no"}
+
+	t.Run("claude appends args after the curated flags", func(t *testing.T) {
+		r, _ := resolveTopicRecipe("claude")
+		argv, _ := r.build(modelPrompt, payload, args)
+		want := []string{"claude", "-p", "--output-format", "json", "--thinking", "no"}
+		if strings.Join(argv, "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("argv = %v, want %v", argv, want)
+		}
+	})
+
+	t.Run("ollama appends args after the model", func(t *testing.T) {
+		r, _ := resolveTopicRecipe("ollama:llama3.2")
+		argv, _ := r.build(modelPrompt, payload, args)
+		want := []string{"ollama", "run", "--hidethinking", "llama3.2", "--thinking", "no"}
+		if strings.Join(argv, "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("argv = %v, want %v", argv, want)
+		}
+	})
+
+	t.Run("cmd appends args after the shell command", func(t *testing.T) {
+		r, _ := resolveTopicRecipe("cmd:my-tool --topic")
+		argv, _ := r.build(modelPrompt, payload, args)
+		want := []string{"sh", "-c", "my-tool --topic", "--thinking", "no"}
+		if strings.Join(argv, "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("argv = %v, want %v", argv, want)
 		}
 	})
 }
@@ -1128,4 +1163,83 @@ func TestDeriveTopic_ProvenanceAndGating(t *testing.T) {
 			t.Error("expected no-op when only agent steps are configured and pane has a Note")
 		}
 	})
+}
+
+// TestDeriveTopic_PerStepTimeout confirms a step-level timeout overrides the
+// global topic_derivation_timeout, while a step with no timeout falls back.
+func TestDeriveTopic_PerStepTimeout(t *testing.T) {
+	t.Setenv("TMUX_PANE", "%env")
+	payload := `{"prompt":"refactor the auth layer"}`
+
+	t.Run("per-step timeout shorter than global is used", func(t *testing.T) {
+		var deadline time.Duration
+		run := func(ctx context.Context, _ []string, _ []byte) (string, error) {
+			dl, _ := ctx.Deadline()
+			deadline = time.Until(dl)
+			return "topic", nil
+		}
+		cfg := &config.Config{
+			PaneMonitoring: &config.PaneMonitoringConfig{
+				TopicAgents: config.TopicSteps{
+					{Type: config.TopicStepAgent, Command: "ollama", SetIf: config.TopicSetIfEmpty, Timeout: 2},
+				},
+				TopicDerivationTimeout: 600,
+			},
+		}
+		deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noTopicState, noPaneNote, run)
+		if deadline <= 0 || deadline > 3*time.Second {
+			t.Errorf("deadline = %v, want around 2s", deadline)
+		}
+	})
+
+	t.Run("zero per-step timeout falls back to global", func(t *testing.T) {
+		var deadline time.Duration
+		run := func(ctx context.Context, _ []string, _ []byte) (string, error) {
+			dl, _ := ctx.Deadline()
+			deadline = time.Until(dl)
+			return "topic", nil
+		}
+		cfg := &config.Config{
+			PaneMonitoring: &config.PaneMonitoringConfig{
+				TopicAgents: config.TopicSteps{
+					{Type: config.TopicStepAgent, Command: "ollama", SetIf: config.TopicSetIfEmpty},
+				},
+				TopicDerivationTimeout: 17,
+			},
+		}
+		deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noTopicState, noPaneNote, run)
+		if deadline <= 10*time.Second || deadline > 18*time.Second {
+			t.Errorf("deadline = %v, want around 17s", deadline)
+		}
+	})
+}
+
+// TestDeriveTopic_PayloadPrevTopicKind confirms the recipe payload carries
+// prev_topic_kind alongside prev_topic.
+func TestDeriveTopic_PayloadPrevTopicKind(t *testing.T) {
+	t.Setenv("TMUX_PANE", "%env")
+	payload := `{"prompt":"refactor the auth layer","transcript_path":"/tmp/abc.jsonl"}`
+
+	var got topicRecipePayload
+	run := func(_ context.Context, argv []string, in []byte) (string, error) {
+		if argv[0] != "sh" {
+			t.Fatalf("expected cmd: recipe, got %v", argv)
+		}
+		if err := json.Unmarshal(in, &got); err != nil {
+			t.Fatalf("payload not valid JSON: %v", err)
+		}
+		return "script-topic", nil
+	}
+	lookup := func(string) (string, string, string) { return "old-topic", config.TopicKindSeed, "sess" }
+	cfg := withTopicSteps(config.TopicStep{Type: config.TopicStepAgent, Command: "cmd:my-tool", SetIf: config.TopicSetIfEmptyOrSeed})
+	_, topic, kind, ok := deriveTopicWith(strings.NewReader(payload), []string{"%5"}, cfg, "claude", lookup, noPaneNote, run)
+	if !ok || topic != "script-topic" || kind != config.TopicKindFinal {
+		t.Errorf("got topic=%q kind=%q ok=%v", topic, kind, ok)
+	}
+	if got.PrevTopic != "old-topic" {
+		t.Errorf("prev_topic = %q, want old-topic", got.PrevTopic)
+	}
+	if got.PrevTopicKind != config.TopicKindSeed {
+		t.Errorf("prev_topic_kind = %q, want seed", got.PrevTopicKind)
+	}
 }

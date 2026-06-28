@@ -641,10 +641,12 @@ a Note skips all agent steps — the Note outranks the Topic in display, so
 re-deriving it would be invisible work.
 
 Agent commands use the existing reference grammar: "claude", "ollama:<model>",
-"cmd:<shell command>". pop builds a model prompt, runs each eligible agent step
-in order, and normalizes the result to a lowercase kebab slug of at most
-[pane_monitoring] topic_words words (default 5). There is no hidden truncation
-fallback beyond the steps you configure.
+"cmd:<shell command>". An agent step may also set args = ["..."] to append extra
+arguments to the curated argv, and timeout = <seconds> to override the global
+[pane_monitoring] topic_derivation_timeout for that step. pop builds a model
+prompt, runs each eligible agent step in order, and normalizes the result to a
+lowercase kebab slug of at most [pane_monitoring] topic_words words (default 5).
+There is no hidden truncation fallback beyond the steps you configure.
 
 The topic shows in the dashboard's descriptive parenthetical, dimmed to
 mark it machine-derived. A user-authored note always overrides it.`,
@@ -714,6 +716,7 @@ type topicRecipeRunner func(ctx context.Context, argv []string, stdin []byte) (s
 // present; transcript_path rides only when the agent's hook exposed one.
 type topicRecipePayload struct {
 	PrevTopic      string `json:"prev_topic"`
+	PrevTopicKind  string `json:"prev_topic_kind"`
 	Prompt         string `json:"prompt"`
 	TranscriptPath string `json:"transcript_path,omitempty"`
 	PaneID         string `json:"pane_id"`
@@ -763,6 +766,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 	modelPrompt := buildTopicModelPrompt(prompt, maxWords)
 	payload, err := json.Marshal(topicRecipePayload{
 		PrevTopic:      prevTopic,
+		PrevTopicKind:  topicKind,
 		Prompt:         prompt,
 		TranscriptPath: transcriptPath,
 		PaneID:         paneID,
@@ -802,8 +806,9 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 				debug.Log("pane set-topic --derive: unknown topic recipe %q — skipping", step.Command)
 				continue
 			}
-			argv, stdin := recipe.build(modelPrompt, payload)
-			ctx, cancel := context.WithTimeout(context.Background(), recipeTimeout)
+			argv, stdin := recipe.build(modelPrompt, payload, step.Args)
+			stepTimeout := step.DerivationTimeout(recipeTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), stepTimeout)
 			out, runErr := run(ctx, argv, stdin)
 			cancel()
 			if runErr != nil {
@@ -834,7 +839,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 // structured JSON for agents that emit it — pop reads only the result text and
 // never branches on the error shape.
 type topicRecipe struct {
-	build func(modelPrompt string, payload []byte) (argv []string, stdin []byte)
+	build func(modelPrompt string, payload []byte, args []string) (argv []string, stdin []byte)
 	parse func(stdout string) string
 }
 
@@ -874,8 +879,8 @@ func resolveTopicRecipe(ref string) (topicRecipe, bool) {
 // on stdin and extracting only the structured result text from its JSON stdout.
 func claudeRecipe() topicRecipe {
 	return topicRecipe{
-		build: func(modelPrompt string, _ []byte) ([]string, []byte) {
-			return []string{"claude", "-p", "--output-format", "json"}, []byte(modelPrompt)
+		build: func(modelPrompt string, _ []byte, args []string) ([]string, []byte) {
+			return append([]string{"claude", "-p", "--output-format", "json"}, args...), []byte(modelPrompt)
 		},
 		parse: parseClaudeResult,
 	}
@@ -901,11 +906,11 @@ func parseClaudeResult(stdout string) string {
 // first-lines, caps, and slugifies it).
 func ollamaRecipe(model string) topicRecipe {
 	return topicRecipe{
-		build: func(modelPrompt string, _ []byte) ([]string, []byte) {
+		build: func(modelPrompt string, _ []byte, args []string) ([]string, []byte) {
 			// --hidethinking strips a reasoning model's "Thinking..." block from
 			// stdout; without it capTopic first-lines that block and every Topic
 			// slugifies to "thinking". A no-op on non-reasoning models.
-			return []string{"ollama", "run", "--hidethinking", model}, []byte(modelPrompt)
+			return append([]string{"ollama", "run", "--hidethinking", model}, args...), []byte(modelPrompt)
 		},
 		parse: plainTopicResult,
 	}
@@ -916,8 +921,8 @@ func ollamaRecipe(model string) topicRecipe {
 // stdout is plain text — the caller first-lines, caps, and slugifies it.
 func shellRecipe(command string) topicRecipe {
 	return topicRecipe{
-		build: func(_ string, payload []byte) ([]string, []byte) {
-			return []string{"sh", "-c", command}, payload
+		build: func(_ string, payload []byte, args []string) ([]string, []byte) {
+			return append([]string{"sh", "-c", command}, args...), payload
 		},
 		parse: plainTopicResult,
 	}
