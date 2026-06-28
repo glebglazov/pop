@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0068
+---
+
 # Topic command derives once per pane
 
 A configured `topic_command` runs **at most once per pane**: the first prompt with no existing Topic derives one, and every prompt after that is a no-op that keeps it. We chose this over re-deriving each prompt because the LLM call is the user's cost and latency, a Topic is meant to be the pane's stable *subject* (not a running echo of the latest prompt), and a frozen-but-good Topic plus a manual-note override is more useful than a fresh-but-expensive one. This narrows the per-prompt scope ADR-0024 implied.
