@@ -128,7 +128,7 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 	// Binding-driven membership (ADR-0051): a Done set is in the integration
 	// backlog because it has a non-trunk Worktree binding, not because a
 	// mergeability record exists. done-integrating has a binding but no record
-	// (the self-heal case) and still shows as DONE · unknown; done-concluded has
+	// (the self-heal case) and still shows as DONE; done-concluded has
 	// neither and stays hidden.
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey("repo-key", "done-integrating"): {RuntimePath: "/repo/done", Branch: "done-branch"},
@@ -150,8 +150,8 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 	if !reflect.DeepEqual(ids, want) {
 		t.Fatalf("ids = %v, want %v", ids, want)
 	}
-	if got := byID["done-integrating"]; got.Status != "DONE · unknown" || !got.integrationBacklog {
-		t.Fatalf("done-integrating row = %+v, want DONE · unknown in backlog", got)
+	if got := byID["done-integrating"]; got.Status != "DONE" || !got.integrationBacklog {
+		t.Fatalf("done-integrating row = %+v, want DONE in backlog", got)
 	}
 }
 
@@ -266,7 +266,7 @@ func TestDashboardColumnDerivation(t *testing.T) {
 	for _, row := range got {
 		byID[row.SetID] = row
 	}
-	if byID["done"].Status != "DONE · conflicts" || byID["done"].Worktree != "↳ done-branch" {
+	if byID["done"].Status != "DONE" || byID["done"].Worktree != "↳ done-branch" {
 		t.Fatalf("done row = %+v", byID["done"])
 	}
 	if byID["ready"].Status != "READY" || byID["ready"].Worktree != "main" {
@@ -959,7 +959,7 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set", Status: "READY", RawStatus: tasks.StatusReady, Worktree: "main", Drain: "picked up", AutoDrain: true, cursorKey: "pop\x00set"},
-		{Project: "pop", SetID: "done", Status: "DONE · clean", RawStatus: tasks.StatusDone, Worktree: "main", integrationBacklog: true, cursorKey: "pop\x00done"},
+		{Project: "pop", SetID: "done", Status: "DONE", RawStatus: tasks.StatusDone, Worktree: "main", integrationBacklog: true, cursorKey: "pop\x00done"},
 	}})
 	m.width = 120
 	m.height = 8
@@ -1353,7 +1353,7 @@ func TestDashboardDetailViewVimNavigation(t *testing.T) {
 func TestDashboardIKeyOnlyEnabledForIntegrationBacklog(t *testing.T) {
 	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "ready", Status: "READY"},
-		{Project: "pop", SetID: "done", Status: "DONE · clean", integrationBacklog: true},
+		{Project: "pop", SetID: "done", Status: "DONE", integrationBacklog: true},
 	}})
 	// Non-backlog row: the menu offers no integrate verb, so `I` is inert.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})

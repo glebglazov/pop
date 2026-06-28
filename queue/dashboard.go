@@ -639,12 +639,7 @@ func dashboardStatus(row tasks.Row, rec MergeabilityRecord, awaitingIntegration 
 	if row.Status != tasks.StatusDone || !awaitingIntegration {
 		return tasks.StatusLabel(row)
 	}
-	switch rec.Status {
-	case MergeabilityClean, MergeabilityConflicts:
-		return string(tasks.StatusDone) + " · " + rec.Status
-	default:
-		return string(tasks.StatusDone) + " · unknown"
-	}
+	return string(tasks.StatusDone)
 }
 
 type dashboardWorktreeView struct {
