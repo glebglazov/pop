@@ -1,2 +1,6 @@
 /pop
 config.toml
+
+# compiled go test binaries
+tasks.test
+*.test
