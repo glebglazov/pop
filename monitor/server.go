@@ -19,6 +19,13 @@ type Request struct {
 	// Following is used by the "set-following" command. A pointer so that
 	// the absent-vs-false distinction survives JSON round-tripping.
 	Following *bool `json:"following,omitempty"`
+	// Prompt and TranscriptPath carry the parsed agent hook payload for the
+	// "derive-topic" command (ADR 0068). The hook already ran the payload
+	// adapter; the daemon runs the agent steps in the background. Prompt is
+	// the user's submitted text; TranscriptPath rides only for agents that
+	// expose one (forwarded verbatim into the recipe payload).
+	Prompt         string `json:"prompt,omitempty"`
+	TranscriptPath string `json:"transcript_path,omitempty"`
 }
 
 // Response is the daemon's reply to a request.

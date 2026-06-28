@@ -65,7 +65,13 @@ projects = [
 # default is a single truncate step with set_if = "empty" (today's truncation
 # behaviour). Each step carries a set_if guard checked against @pop_topic_kind
 # (empty | empty_or_seed | always). Provenance (seed | final) lives in
-# @pop_topic_kind alongside the display slug @pop_topic.
+# @pop_topic_kind alongside the display slug @pop_topic. The truncate step runs
+# synchronously in the prompt hook and writes the seed; the agent-step chain is
+# then enqueued on the pop monitor daemon and runs on the daemon (not in the
+# hook), upgrading the Topic to final when an agent step lands, with per-pane
+# single-flight so set_if = "always" regeneration can't pile up overlapping
+# model calls. When the monitor TCP server is off the agent steps fall back to
+# running synchronously in the hook.
 #
 # Curated agent commands:
 #   "claude"          -> claude -p --output-format json (result text extracted)

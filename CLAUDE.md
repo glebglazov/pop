@@ -143,6 +143,8 @@ History file: `~/.local/share/pop/history.json` (respects XDG_DATA_HOME)
 
 Each step has a `set_if` guard (`empty` | `empty_or_seed` | `always`) checked against `@pop_topic_kind`. A bare string entry is sugar for `{ type = "agent", command = "<string>" }`. When `topic_agents` is unset, the default is a single truncate step with `set_if = "empty"`. A pane with a Note skips agent steps.
 
+The `truncate` step runs synchronously in the prompt hook and writes the seed, so the submit returns immediately. The `agent`-step chain is then enqueued on the pop monitor daemon and runs on the daemon, not in the hook; the Topic upgrades to `final` when an agent step lands. Per-pane single-flight keeps at most one agent derivation in flight per pane — a newer prompt supersedes an in-flight derivation rather than queuing behind it, so `set_if = "always"` regeneration on a fast typist can't pile up overlapping ollama calls. `set_if = "always"` re-derives on each prompt and overwrites even a `final` Topic. When the monitor daemon's TCP server is disabled (no IPC channel), agent steps fall back to running synchronously in the hook so a `final` Topic still lands.
+
 An `agent` step may also specify:
 
 - `args` — a string array appended to the curated argv (e.g. `args = ["--thinking", "no"]`)

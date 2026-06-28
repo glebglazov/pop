@@ -635,10 +635,17 @@ A final Topic is never overwritten by empty or empty_or_seed steps.
 
 Provenance (seed | final) lives in a second per-pane tmux user-option
 @pop_topic_kind alongside @pop_topic — the slug stays a pure display value
-(ADR 0058). Truncate steps run synchronously in the hook; agent steps in this
-release also run synchronously (async execution is a later slice). A pane with
-a Note skips all agent steps — the Note outranks the Topic in display, so
-re-deriving it would be invisible work.
+(ADR 0058). Truncate steps run synchronously in the hook and write the seed,
+so the prompt submit returns immediately. The agent-step chain is then
+enqueued on the pop monitor daemon and runs on the daemon, not in the hook;
+the Topic upgrades to final when an agent step lands (ADR 0068). Per-pane
+single-flight keeps at most one agent derivation in flight per pane, so a fast
+typist re-deriving with set_if = "always" can't pile up overlapping model
+calls — a newer prompt supersedes an in-flight derivation. A pane with a Note
+skips all agent steps — the Note outranks the Topic in display, so re-deriving
+it would be invisible work. When the monitor daemon's TCP server is disabled
+(no IPC channel), the agent steps fall back to running synchronously in the
+hook so a final Topic still lands.
 
 Agent commands use the existing reference grammar: "claude", "ollama:<model>",
 "cmd:<shell command>". An agent step may also set args = ["..."] to append extra
@@ -668,13 +675,7 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 	label, _ := cmd.Flags().GetString("label")
 
 	if derive {
-		paneID, topic, kind, ok := deriveTopic(cmd.InOrStdin(), args, cfg, label)
-		if !ok {
-			// Missing/unparseable payload, empty prompt, no matching step, or
-			// every eligible step failed: no-op so we never clobber a final Topic.
-			return nil
-		}
-		return setPaneTopicWithKind(defaultTmux, paneID, topic, kind)
+		return runPaneSetTopicDerive(cmd.InOrStdin(), args, cfg, label)
 	}
 
 	paneID, topic, err := parseSetTopicArgs(clear, args)
@@ -687,13 +688,75 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 	return setPaneTopicOption(defaultTmux, paneID, topic)
 }
 
-// deriveTopic reads an agent hook payload from r and resolves a Topic. The
-// optional leading pane_id (a '%' prefixed arg) overrides $TMUX_PANE. label
-// names the agent so the right payload adapter is chosen. It uses the
-// production topic-state lookup, note lookup, and command runner; see
-// deriveTopicWith for the injectable core.
-func deriveTopic(r io.Reader, args []string, cfg *config.Config, label string) (paneID, topic, kind string, ok bool) {
-	return deriveTopicWith(r, args, cfg, label, defaultTopicStateLookup, defaultPaneHasNote, runTopicRecipe)
+// runPaneSetTopicDerive is the `set-topic --derive` hook path (ADR 0068). It
+// runs the truncate steps synchronously (writing the seed so the prompt submit
+// never blocks) and then enqueues the agent-step chain on the pop daemon —
+// the agent steps run on the daemon, not in the hook, so the hook returns
+// immediately after the seed. The daemon upgrades @pop_topic_kind to final
+// when an agent step lands, with per-pane single-flight so a fast typist can't
+// pile up overlapping model calls.
+//
+// When the TCP server is disabled (no IPC channel to the daemon) or the socket
+// send fails, it falls back to running the agent steps synchronously in the
+// hook (the slice-01 path) so users who haven't opted into the monitor daemon
+// still get a final Topic.
+func runPaneSetTopicDerive(r io.Reader, args []string, cfg *config.Config, label string) error {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	job, enqueue := deriveTopicSeedWith(r, args, cfg, label, defaultTopicStateLookup, defaultPaneHasNote, func(paneID, topic, kind string) error {
+		return setPaneTopicWithKind(defaultTmux, paneID, topic, kind)
+	})
+	if !enqueue {
+		// Missing/unparseable payload, empty prompt, no eligible agent step, or
+		// the pane has a Note: no agent work to enqueue. The seed (if a truncate
+		// step ran) was already written above.
+		return nil
+	}
+
+	// No IPC channel to the daemon: run the agent steps synchronously in the
+	// hook (slice-01 behaviour) so a final Topic still lands.
+	if !cfg.PaneMonitoringTCPServer() {
+		enqueueTopicDerivationForeground(context.Background(), job)
+		return nil
+	}
+
+	addr := monitorAddr(cfg)
+	resp, err := monitor.SendRequest(addr, monitor.Request{
+		Cmd:            "derive-topic",
+		PaneID:         job.PaneID,
+		Prompt:         job.Prompt,
+		TranscriptPath: job.TranscriptPath,
+	})
+	if err != nil {
+		debug.Error("pane set-topic --derive: daemon send failed, running agent steps in the hook: %v", err)
+		paneOnSocketSendFailed()
+		enqueueTopicDerivationForeground(context.Background(), job)
+		return nil
+	}
+	if !resp.OK {
+		debug.Error("pane set-topic --derive: daemon error: %s", resp.Error)
+	}
+	return nil
+}
+
+// enqueueTopicDerivationForeground runs the agent phase synchronously in the
+// hook, writing a final Topic directly to tmux. It is the fallback used when the
+// daemon is unreachable (TCP server disabled or socket send failed),
+// preserving a final Topic for users who have not opted into the monitor
+// daemon. The dispatcher's single-flight does not apply here — this is a
+// one-shot synchronous run, and the hook process exits right after.
+func enqueueTopicDerivationForeground(parent context.Context, job topicDeriveJob) {
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil {
+		debug.Error("pane set-topic --derive: load config: %v", err)
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	runTopicAgentDerivationWith(parent, job, cfg, defaultTopicStateLookup, defaultPaneHasNote, runTopicRecipe, func(paneID, topic, kind string) error {
+		return setPaneTopicWithKind(defaultTmux, paneID, topic, kind)
+	})
 }
 
 // topicStateLookup returns the pane's current Topic (@pop_topic), its provenance

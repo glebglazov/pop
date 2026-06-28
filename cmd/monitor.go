@@ -98,8 +98,11 @@ func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 // buildMonitorHandler returns a RequestHandler that dispatches by req.Cmd.
 // Each branch loads config and state from disk on every call — no in-memory
 // cache for V1. An empty Cmd is treated as "set-status" for backward
-// compatibility with older clients.
+// compatibility with older clients. The "derive-topic" command shares a
+// single per-handler topicDerivationDispatcher so agent-step derivations are
+// single-flight per pane across requests (ADR 0068).
 func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandler {
+	topicDispatcher := newTopicDerivationDispatcher()
 	return func(req monitor.Request) monitor.Response {
 		debug.Init()
 		defer debug.Close()
@@ -111,6 +114,8 @@ func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandle
 			return handleSetFollowing(tmux, statePath, req)
 		case "visit":
 			return handleVisit(statePath, req)
+		case "derive-topic":
+			return handleDeriveTopic(topicDispatcher, req)
 		case "identify":
 			return handleIdentify()
 		case "shutdown":
@@ -119,6 +124,23 @@ func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandle
 			return monitor.Response{OK: false, Error: "unknown command: " + req.Cmd}
 		}
 	}
+}
+
+// handleDeriveTopic enqueues the agent-phase Topic derivation on the daemon's
+// per-pane single-flight dispatcher (ADR 0068). It returns immediately — the
+// agent steps run on a background goroutine on the daemon, never in the hook.
+// A request with no pane id or empty prompt is a silent no-op (the hook already
+// wrote the seed and decided there was agent work to do).
+func handleDeriveTopic(disp *topicDerivationDispatcher, req monitor.Request) monitor.Response {
+	if req.PaneID == "" || strings.TrimSpace(req.Prompt) == "" {
+		return monitor.Response{OK: true}
+	}
+	disp.Enqueue(topicDeriveJob{
+		PaneID:         req.PaneID,
+		Prompt:         req.Prompt,
+		TranscriptPath: req.TranscriptPath,
+	})
+	return monitor.Response{OK: true}
 }
 
 // handleIdentify reports the running daemon's identity so a challenger can
