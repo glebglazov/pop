@@ -12,22 +12,21 @@ import (
 // provider; --model mimo-v2.5-pro selects a non-thinking model that streams
 // cleanly. Event shapes are pi's provider-independent normalization layer.
 
-func TestPiLineRendererTextDeltaNoNewline(t *testing.T) {
+func TestPiLineRendererTextDeltaBuffersAndRendersNothing(t *testing.T) {
 	render := piLineRenderer(false)
 	line := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"The file"}}`
 	got, handled := render([]byte(line))
 	if !handled {
 		t.Fatal("text_delta event should be handled")
 	}
-	if got != "The file" {
-		t.Fatalf("got %q, want %q (no trailing newline)", got, "The file")
+	if got != "" {
+		t.Fatalf("got %q, want %q (deltas buffer until text_end)", got, "")
 	}
 }
 
-func TestPiLineRendererTextDeltaConcatenationWithoutFraming(t *testing.T) {
+func TestPiLineRendererProseJoinedOnTextEnd(t *testing.T) {
 	render := piLineRenderer(false)
 	deltas := []string{"The file", " `hello.txt`", " contains:\n\n>", " The quick brown fox"}
-	var b strings.Builder
 	for _, d := range deltas {
 		// json-encode the delta so embedded quotes/newlines are valid JSON
 		line := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":` + jsonString(d) + `}}`
@@ -35,23 +34,43 @@ func TestPiLineRendererTextDeltaConcatenationWithoutFraming(t *testing.T) {
 		if !handled {
 			t.Fatalf("text_delta %q should be handled", d)
 		}
-		b.WriteString(got)
+		if got != "" {
+			t.Fatalf("delta %q should buffer, got %q", d, got)
+		}
 	}
-	want := "The file `hello.txt` contains:\n\n> The quick brown fox"
-	if b.String() != want {
-		t.Fatalf("concatenated deltas = %q, want %q", b.String(), want)
+	got, handled := render([]byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":1}}`))
+	if !handled {
+		t.Fatal("text_end event should be handled")
+	}
+	want := "The file `hello.txt` contains:\n\n> The quick brown fox\n"
+	if got != want {
+		t.Fatalf("joined prose = %q, want %q", got, want)
 	}
 }
 
-func TestPiLineRendererTextEndNewline(t *testing.T) {
+func TestPiLineRendererTextEndWithoutProseRendersNothing(t *testing.T) {
 	render := piLineRenderer(false)
-	line := `{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":1,"content":"The file ` + "`hello.txt`" + ` contains:"}}`
+	line := `{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":1}}`
 	got, handled := render([]byte(line))
 	if !handled {
 		t.Fatal("text_end event should be handled")
 	}
-	if got != "\n" {
-		t.Fatalf("got %q, want %q", got, "\n")
+	if got != "" {
+		t.Fatalf("text_end with no buffered prose should render nothing, got %q", got)
+	}
+}
+
+func TestPiLineRendererToolTickDrainsOpenProse(t *testing.T) {
+	render := piLineRenderer(false)
+	// A tool tick arriving before text_end drains the buffered prose first, so an
+	// unclosed message is never swallowed.
+	if got, _ := render([]byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"thinking out loud"}}`)); got != "" {
+		t.Fatalf("delta should buffer, got %q", got)
+	}
+	got, _ := render([]byte(`{"type":"tool_execution_start","toolName":"read","args":{"path":"a.txt"}}`))
+	want := "thinking out loud\n→ read a.txt\n"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 

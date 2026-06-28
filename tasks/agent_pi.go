@@ -43,18 +43,34 @@ func normalizePiJSONL(raw string) AgentResult {
 	return normalizedTranscript(transcript, diagnostics)
 }
 
-// piLineRenderer renders pi-jsonl events live. Assistant prose streams
-// incrementally: text_delta sub-events emit their raw delta with no trailing
-// newline and a single newline is emitted on text_end. tool_execution_start
-// emits a dim "→ toolName hint" tick. Assistant error messages are surfaced
-// live; thinking_* and other lifecycle/framing events render nothing. Non-JSON
-// lines are reported as unhandled so the writer passes them through raw.
+// piLineRenderer renders pi-jsonl events live. pi streams assistant prose as
+// many token-level text_delta sub-events, each on its own JSONL line; the
+// line-based live writer would prefix and newline-terminate every one, scattering
+// a single sentence across dozens of "+0.0s" entries. So deltas are buffered and
+// the message is emitted as one entry when text_end closes it (a tool tick or
+// message_end also drains any open prose, in case the close is missing).
+// tool_execution_start emits a dim "→ toolName hint" tick. Assistant error
+// messages are surfaced live; thinking_* and other lifecycle/framing events
+// render nothing. Non-JSON lines are reported as unhandled so the writer passes
+// them through raw.
 func piLineRenderer(color bool) lineRenderer {
 	dim := func(s string) string {
 		if !color {
 			return s
 		}
 		return ansiDim + s + ansiReset
+	}
+	var prose strings.Builder
+	flushProse := func() string {
+		if prose.Len() == 0 {
+			return ""
+		}
+		text := strings.TrimRight(prose.String(), "\n")
+		prose.Reset()
+		if text == "" {
+			return ""
+		}
+		return text + "\n"
 	}
 	return func(line []byte) (string, bool) {
 		var event struct {
@@ -77,19 +93,21 @@ func piLineRenderer(color bool) lineRenderer {
 		case "message_update":
 			switch event.AssistantMessageEvent.Type {
 			case "text_delta":
-				return event.AssistantMessageEvent.Delta, true
+				prose.WriteString(event.AssistantMessageEvent.Delta)
+				return "", true
 			case "text_end":
-				return "\n", true
+				return flushProse(), true
 			default:
 				return "", true
 			}
 		case "tool_execution_start":
-			return dim(piToolTick(event.ToolName, event.Args)) + "\n", true
+			return flushProse() + dim(piToolTick(event.ToolName, event.Args)) + "\n", true
 		case "message_end":
+			out := flushProse()
 			if event.Message.Role == "assistant" && event.Message.ErrorMessage != "" {
-				return event.Message.ErrorMessage + "\n", true
+				return out + event.Message.ErrorMessage + "\n", true
 			}
-			return "", true
+			return out, true
 		default:
 			return "", true
 		}
