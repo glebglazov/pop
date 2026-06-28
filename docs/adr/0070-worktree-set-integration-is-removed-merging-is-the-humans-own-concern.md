@@ -18,6 +18,7 @@ We also retire the **Integration target** abstraction in *both* of its roles. It
 ## Consequences
 
 - A Done set's work is discoverable via the dashboard destination column (its branch) and `pop worktree`; pop offers no merge action and computes no mergeability verdict.
+- The Queue dashboard status column loses the mergeability suffix. Today `dashboardStatus` (queue/dashboard.go) appends the verdict — `DONE · clean`, `DONE · conflicts`, or `DONE · unknown` when the dry run never ran. With mergeability gone it collapses to the bare status string, so a Done row reads simply **`DONE`**. The `awaitingIntegration`/`MergeabilityRecord` inputs to that function are removed.
 - The Queue dashboard keeps showing a Done set **only while it still holds a managed Worktree binding**, as a clean-up reminder, since the backlog that used to track it is gone.
 - The managed-worktree lifecycle loses its "torn down on integration" trigger; teardown moves entirely to Archive (ADR-0071).
 - ADR-0030 and ADR-0051 are tombstoned — their entire subject (attended integration, binding-driven backlog membership) no longer exists.
