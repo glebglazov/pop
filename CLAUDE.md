@@ -134,6 +134,15 @@ Each project entry is an object with:
 
 History file: `~/.local/share/pop/history.json` (respects XDG_DATA_HOME)
 
+### Topic Derivation
+
+`[pane_monitoring] topic_agents` is an ordered pipeline of typed steps (ADR 0068):
+
+- `truncate` — local prompt truncation, writes a **Topic seed** (`@pop_topic_kind = seed`)
+- `agent` — curated CLI recipe (`claude`, `ollama:<model>`, `cmd:<shell>`), writes a final Topic (`@pop_topic_kind = final`)
+
+Each step has a `set_if` guard (`empty` | `empty_or_seed` | `always`) checked against `@pop_topic_kind`. A bare string entry is sugar for `{ type = "agent", command = "<string>" }`. When `topic_agents` is unset, the default is a single truncate step with `set_if = "empty"`. A pane with a Note skips agent steps. There is no hidden truncation fallback beyond configured steps.
+
 ### Dependencies
 
 - `spf13/cobra` - CLI framework

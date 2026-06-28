@@ -49,17 +49,14 @@ type PaneMonitoringConfig struct {
 	// across any data dirs using this config, so only pin it for single-instance
 	// setups (e.g. exposing a fixed port to containers).
 	Addr string `toml:"addr"`
-	// TopicAgents is the ordered list of pop-owned Topic recipes the derive path
-	// tries when generating a pane's Topic (ADR 0057). Each entry names a curated
-	// agent-CLI invocation pop knows how to run — "claude" (claude -p
-	// --output-format json), "ollama:<model>" for a local model (e.g.
-	// "ollama:llama3.2") — or the escape hatch "cmd:<shell command>" to reference
-	// any other CLI (the command receives the per-derive JSON payload on stdin,
-	// ADR 0024's contract). Recipes run in order; the first non-empty result wins
-	// and any failure/timeout/empty output falls through reason-blind to the next.
-	// Empty means topics fall back to built-in prompt truncation. pop links no
-	// model SDK and holds no keys — auth lives in the CLIs.
-	TopicAgents []string `toml:"topic_agents"`
+	// TopicAgents is the ordered list of typed Topic derivation steps (ADR 0068).
+	// Each entry is a truncate step (local prompt truncation → seed) or an agent
+	// step (a curated agent-CLI Topic recipe → final). A bare string is sugar for
+	// { type = "agent", command = "<string>" }. Each step carries a set_if guard
+	// checked against @pop_topic_kind. Unset/nil defaults to a single truncate
+	// step; an explicit empty array disables derivation. pop links no model SDK
+	// and holds no keys — auth lives in the CLIs.
+	TopicAgents TopicSteps `toml:"topic_agents"`
 	// TopicWords bounds the word count of a derived Topic after it is normalized
 	// into a kebab slug (ADR 0057). Zero/unset means the default
 	// (DefaultTopicWords); see PaneMonitoringTopicWords.
@@ -784,12 +781,13 @@ func (c *Config) PaneMonitoringAddr() string {
 	return c.PaneMonitoring.Addr
 }
 
-// PaneMonitoringTopicAgents returns the ordered list of configured Topic
-// recipes, or nil when none are set (in which case topics fall back to prompt
-// truncation). See PaneMonitoringConfig.TopicAgents for the recipe vocabulary.
-func (c *Config) PaneMonitoringTopicAgents() []string {
-	if c.PaneMonitoring == nil {
-		return nil
+// PaneMonitoringTopicSteps returns the ordered Topic derivation pipeline.
+// When topic_agents is unset, a single truncate / set_if="empty" step is
+// returned (today's truncation behaviour). An explicit empty array yields no
+// steps. See PaneMonitoringConfig.TopicAgents for the step vocabulary.
+func (c *Config) PaneMonitoringTopicSteps() TopicSteps {
+	if c.PaneMonitoring == nil || c.PaneMonitoring.TopicAgents == nil {
+		return DefaultTopicSteps()
 	}
 	return c.PaneMonitoring.TopicAgents
 }

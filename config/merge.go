@@ -254,7 +254,7 @@ func clonePaneMonitoringConfig(src *PaneMonitoringConfig) *PaneMonitoringConfig 
 	}
 	dst := *src
 	dst.IgnoreStatusFrom = append([]string(nil), src.IgnoreStatusFrom...)
-	dst.TopicAgents = append([]string(nil), src.TopicAgents...)
+	dst.TopicAgents = append(TopicSteps(nil), src.TopicAgents...)
 	return &dst
 }
 

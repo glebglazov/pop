@@ -57,17 +57,27 @@ projects = [
 # while still allowing explicit reads from the dashboard.
 # ignore_status_from = ["tmux-global"]
 #
-# Topic recipes: an ordered list of pop-curated agent-CLI invocations pop runs
-# to derive a pane's Topic (ADR 0057). pop tries each in order and uses the
-# first non-empty result; any failure/timeout/empty output falls through to the
-# next. pop links no model SDK and reads no API keys — each recipe shells out to
-# a CLI you have already authenticated. Curated recipes:
+# Topic derivation pipeline: an ordered list of typed steps pop runs to derive a
+# pane's Topic (ADR 0068). Each step is either type = "truncate" (cheap local
+# prompt truncation → a provisional seed) or type = "agent" (a curated agent-CLI
+# Topic recipe → a final Topic). A bare string is sugar for
+# { type = "agent", command = "<string>" }. When topic_agents is unset, the
+# default is a single truncate step with set_if = "empty" (today's truncation
+# behaviour). Each step carries a set_if guard checked against @pop_topic_kind
+# (empty | empty_or_seed | always). Provenance (seed | final) lives in
+# @pop_topic_kind alongside the display slug @pop_topic.
+#
+# Curated agent commands:
 #   "claude"          -> claude -p --output-format json (result text extracted)
 #   "ollama:<model>"  -> a local ollama model, e.g. "ollama:llama3.2"
 #   "cmd:<command>"   -> escape hatch: any CLI, run via `sh -c`, fed pop's
 #                        per-derive JSON payload on stdin (alias "sh:")
-# With none set, Topics fall back to truncating the prompt.
-# topic_agents = ["claude", "ollama:llama3.2"]
+#
+# topic_agents = [
+#   { type = "truncate", set_if = "empty" },
+#   { type = "agent", command = "claude", set_if = "empty_or_seed" },
+# ]
+# topic_agents = ["claude", "ollama:llama3.2"]  # back-compat bare strings
 #
 # Word cap applied to a derived Topic after it is normalized into a lowercase
 # kebab slug (e.g. debugging-auth-middleware). Defaults to 5.

@@ -51,12 +51,20 @@ No attention is required — either you've acknowledged the pane or nothing new 
 _Avoid_: Idle, read
 
 **Topic**:
-A normalized lowercase kebab slug (≤5 words, e.g. `debugging-auth-middleware`) naming the subject of an **Agentic pane**. It is single-sourced as a per-pane tmux property, so any tmux surface — not just pop's dashboard — can display it, and it is reusable in custom tmux labels. pop derives it once per pane via **Topic recipe**s and normalizes the result; a **Note** still outranks it in display.
+A normalized lowercase kebab slug (≤5 words) naming the subject of an **Agentic pane**, single-sourced as a per-pane tmux property any tmux surface can display. pop fills it in stages — an instant **Topic seed** from truncating the prompt, then optionally a higher-quality agent-derived final value, and optionally re-derived as the conversation drifts. A **Note** still outranks it in display.
 _Avoid_: Note (user-authored), summarization, title, pane name, label, summary
 
 **Topic recipe**:
-A pop-curated invocation of an agent CLI (local or remote) that pop runs to derive a **Topic**. pop tries configured recipes in order and uses the first non-empty result, so a failed or rate-limited agent falls through to the next. pop owns the recipes, prompt, and output normalization but links no model SDK and holds no API keys — auth lives in the CLIs.
+One step in pop's ordered Topic-derivation list. A step is either a **truncate step** (cheap, local, no model — produces a seed) or an **agent step** (a curated agent-CLI invocation — produces a final Topic). Each step declares a `set_if` guard for when it may run against the current **Topic provenance**, and may carry its own appended arguments and timeout. pop owns the prompt and output normalization but links no model SDK and holds no API keys — auth lives in the CLIs.
 _Avoid_: topic command, topic model
+
+**Topic seed**:
+A provisional Topic written instantly by the truncate step, before any model runs, so a pane has an immediate subject. An agent step may overwrite a seed; a final Topic or a Note may not be overwritten by it.
+_Avoid_: provisional topic, draft topic
+
+**Topic provenance**:
+Whether a pane's current Topic is a provisional seed or a final value (`@pop_topic_kind`). It is the gate every derivation step is checked against — the basis for seed-then-refine and for opt-in regeneration via `set_if = "always"`.
+_Avoid_: topic kind, topic state
 
 **Note**:
 A short annotation the **user** types for a pane in the dashboard. Human intent; outranks a **Topic** in display and is cleared by `unfollow`.

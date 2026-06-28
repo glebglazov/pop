@@ -620,21 +620,31 @@ the topic.
 Pass --derive to read an agent hook payload on stdin and set a derived topic.
 Use --label to name the agent whose payload is on stdin (claude, codex, cursor,
 pi, opencode); each agent's prompt-submit hook delivers the prompt differently,
-so the label selects the matching payload adapter. pop owns the Topic recipes
-(ADR 0057): when [pane_monitoring] topic_agents is configured (e.g.
-["claude", "ollama:llama3.2"]) pop builds a model prompt and runs each recipe
-in order, using the first non-empty result — any nonzero exit / error / empty /
-timeout falls through reason-blind to the next recipe. pop runs no model itself
-and reads no keys; each recipe shells out to an already-authed CLI. With no
-recipes configured the user's prompt is truncated. Either way the result is
-normalized into a lowercase kebab slug of at most [pane_monitoring] topic_words
-words (default 5) before it is written. A missing/unparseable payload, an agent
-whose hook exposes no prompt text, or every recipe failing with no prior topic
-falls back to truncation; a non-empty existing topic is never clobbered.
+so the label selects the matching payload adapter.
 
-Derive runs once per pane (ADR 0025): a pane whose @pop_topic is already
-non-empty is left untouched. The option dies with the pane, so retiring or
-restarting the pane re-derives, and --clear is a free manual refresh.
+Topic derivation is an ordered pipeline of typed steps configured as
+[pane_monitoring] topic_agents (ADR 0068). Each step is either type = "truncate"
+(cheap local prompt truncation → a provisional seed) or type = "agent" (a curated
+agent-CLI Topic recipe → a final Topic). A bare string entry is sugar for
+{ type = "agent", command = "<string>" }. When topic_agents is unset, the
+default is a single truncate step with set_if = "empty" (today's truncation
+behaviour). Each step carries a set_if guard checked against @pop_topic_kind
+(empty | empty_or_seed | always): empty runs only when no provenance is set;
+empty_or_seed runs on an unset or seed Topic; always re-derives every prompt.
+A final Topic is never overwritten by empty or empty_or_seed steps.
+
+Provenance (seed | final) lives in a second per-pane tmux user-option
+@pop_topic_kind alongside @pop_topic — the slug stays a pure display value
+(ADR 0058). Truncate steps run synchronously in the hook; agent steps in this
+release also run synchronously (async execution is a later slice). A pane with
+a Note skips all agent steps — the Note outranks the Topic in display, so
+re-deriving it would be invisible work.
+
+Agent commands use the existing reference grammar: "claude", "ollama:<model>",
+"cmd:<shell command>". pop builds a model prompt, runs each eligible agent step
+in order, and normalizes the result to a lowercase kebab slug of at most
+[pane_monitoring] topic_words words (default 5). There is no hidden truncation
+fallback beyond the steps you configure.
 
 The topic shows in the dashboard's descriptive parenthetical, dimmed to
 mark it machine-derived. A user-authored note always overrides it.`,
@@ -656,18 +666,21 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 	label, _ := cmd.Flags().GetString("label")
 
 	if derive {
-		paneID, topic, ok := deriveTopic(cmd.InOrStdin(), args, cfg, label)
+		paneID, topic, kind, ok := deriveTopic(cmd.InOrStdin(), args, cfg, label)
 		if !ok {
-			// Missing/unparseable payload, empty prompt, an existing Topic to
-			// keep, or a command failure: no-op so we never clobber it.
+			// Missing/unparseable payload, empty prompt, no matching step, or
+			// every eligible step failed: no-op so we never clobber a final Topic.
 			return nil
 		}
-		return setPaneTopicOption(defaultTmux, paneID, topic)
+		return setPaneTopicWithKind(defaultTmux, paneID, topic, kind)
 	}
 
 	paneID, topic, err := parseSetTopicArgs(clear, args)
 	if err != nil {
 		return err
+	}
+	if clear {
+		return clearPaneTopic(defaultTmux, paneID)
 	}
 	return setPaneTopicOption(defaultTmux, paneID, topic)
 }
@@ -675,16 +688,19 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 // deriveTopic reads an agent hook payload from r and resolves a Topic. The
 // optional leading pane_id (a '%' prefixed arg) overrides $TMUX_PANE. label
 // names the agent so the right payload adapter is chosen. It uses the
-// production prev-Topic lookup and command runner; see deriveTopicWith for the
-// injectable core.
-func deriveTopic(r io.Reader, args []string, cfg *config.Config, label string) (paneID, topic string, ok bool) {
-	return deriveTopicWith(r, args, cfg, label, defaultTopicOptionLookup, runTopicRecipe)
+// production topic-state lookup, note lookup, and command runner; see
+// deriveTopicWith for the injectable core.
+func deriveTopic(r io.Reader, args []string, cfg *config.Config, label string) (paneID, topic, kind string, ok bool) {
+	return deriveTopicWith(r, args, cfg, label, defaultTopicStateLookup, defaultPaneHasNote, runTopicRecipe)
 }
 
-// prevTopicLookup returns the pane's current Topic (its @pop_topic user-option,
-// the single source of truth — ADR 0058) and its session. The Topic gates the
-// once-per-pane guard; the session rides through into the command payload.
-type prevTopicLookup func(paneID string) (prevTopic, session string)
+// topicStateLookup returns the pane's current Topic (@pop_topic), its provenance
+// (@pop_topic_kind), and its session name for the recipe payload.
+type topicStateLookup func(paneID string) (prevTopic, topicKind, session string)
+
+// paneNoteLookup reports whether the pane carries a user-authored Note in
+// monitor state. Agent steps are skipped when true (ADR 0068).
+type paneNoteLookup func(paneID string) bool
 
 // topicRecipeRunner runs one Topic recipe: it executes argv (with optional
 // stdin) under the context's deadline and returns the process stdout. A non-nil
@@ -704,18 +720,14 @@ type topicRecipePayload struct {
 	Session        string `json:"session"`
 }
 
-// deriveTopicWith is the injectable core of the derive path. It first applies
-// the once-per-pane guard (ADR 0025/0058): a pane whose @pop_topic is already
-// non-empty is a no-op, so the Topic the option holds is kept and a user note
-// overrides it in display. On a fresh pane with prompt text it generates a
-// Topic via pop-owned recipes (ADR 0057): it builds a model prompt and runs
-// each configured topic_agents recipe in order, normalizing each result into a
-// kebab slug and using the first non-empty one. Any nonzero exit / error /
-// empty / timeout falls through reason-blind to the next recipe. If every recipe
-// fails (or none are configured) it falls back to truncating the prompt, so a
-// Topic always resolves and the agent is never blocked. The caller writes the
-// result to @pop_topic.
-func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label string, lookup prevTopicLookup, run topicRecipeRunner) (paneID, topic string, ok bool) {
+// deriveTopicWith is the injectable core of the derive path. It walks the
+// configured topic_agents pipeline (ADR 0068): each step is gated by set_if
+// against @pop_topic_kind, truncate steps write a seed synchronously, and agent
+// steps (skipped when the pane has a Note) shell out to curated CLIs and write a
+// final Topic. Steps may run in one hook invocation — e.g. a truncate seed
+// followed by an agent upgrade when both set_if guards match. There is no
+// hidden truncation fallback beyond configured steps.
+func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label string, lookup topicStateLookup, hasNote paneNoteLookup, run topicRecipeRunner) (paneID, topic, kind string, ok bool) {
 	paneID = os.Getenv("TMUX_PANE")
 	if len(args) > 0 && strings.HasPrefix(args[0], "%") {
 		paneID = args[0]
@@ -724,37 +736,30 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 	data, err := io.ReadAll(r)
 	if err != nil {
 		debug.Error("pane set-topic --derive: read stdin: %v", err)
-		return "", "", false
+		return "", "", "", false
 	}
 	prompt, transcriptPath, err := parseTopicPayload(data, label)
 	if err != nil {
 		debug.Error("pane set-topic --derive: %v", err)
-		return "", "", false
+		return "", "", "", false
 	}
 	debug.Log("pane set-topic --derive: label=%q parsed prompt=%q transcript_path=%q", label, prompt, transcriptPath)
 
-	// Derive once per pane (ADR 0025/0058): the Topic lives in @pop_topic, which
-	// dies with the pane. A pane that already has a non-empty @pop_topic never
-	// re-derives — every prompt after the first is a no-op that keeps it.
-	prevTopic, session := lookup(paneID)
-	if prevTopic != "" {
-		return "", "", false
-	}
+	prevTopic, topicKind, session := lookup(paneID)
 
-	// No prompt text exposed: degrade to no Topic and run no recipe (a model
-	// call on an empty prompt is pointless), never clobbering an existing Topic.
+	// No prompt text exposed: degrade to no Topic and run no step (a model call
+	// on an empty prompt is pointless).
 	if strings.TrimSpace(prompt) == "" {
-		return "", "", false
+		return "", "", "", false
 	}
 
-	// The Topic format is a pop-owned contract (ADR 0057): whatever a recipe (or
-	// the truncation fallback) produces is normalized into a kebab slug before it
-	// reaches @pop_topic.
 	maxWords := cfg.PaneMonitoringTopicWords()
 	recipeTimeout := cfg.PaneMonitoringTopicDerivationTimeout()
+	steps := cfg.PaneMonitoringTopicSteps()
+	if len(steps) == 0 {
+		return "", "", "", false
+	}
 
-	// Build the model prompt (instructing a <=maxWords-word lowercase hyphen
-	// slug) and the per-derive JSON payload once; both are reused across recipes.
 	modelPrompt := buildTopicModelPrompt(prompt, maxWords)
 	payload, err := json.Marshal(topicRecipePayload{
 		PrevTopic:      prevTopic,
@@ -768,41 +773,58 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 		payload = nil
 	}
 
-	// Run each recipe in order; first non-empty (after normalization) wins.
-	// Failures fall through reason-blind: pop never branches on the error shape.
-	for _, ref := range cfg.PaneMonitoringTopicAgents() {
-		recipe, ok := resolveTopicRecipe(ref)
-		if !ok {
-			debug.Log("pane set-topic --derive: unknown topic recipe %q — skipping", ref)
+	var resultTopic, resultKind string
+	gotResult := false
+	currentKind := topicKind
+
+	for _, step := range steps {
+		if !config.TopicSetIfAllows(step.SetIf, currentKind) {
 			continue
 		}
-		argv, stdin := recipe.build(modelPrompt, payload)
-		ctx, cancel := context.WithTimeout(context.Background(), recipeTimeout)
-		out, runErr := run(ctx, argv, stdin)
-		cancel()
-		if runErr != nil {
-			debug.Error("pane set-topic --derive: recipe %q failed: %v", ref, runErr)
-			continue
+		switch step.Type {
+		case config.TopicStepTruncate:
+			derived := slugifyTopic(truncateTopic(prompt), maxWords)
+			if derived == "" {
+				continue
+			}
+			resultTopic, resultKind = derived, config.TopicKindSeed
+			gotResult = true
+			currentKind = config.TopicKindSeed
+			debug.Log("pane set-topic --derive: truncate step set seed %q on pane %s", derived, paneID)
+
+		case config.TopicStepAgent:
+			if hasNote(paneID) {
+				debug.Log("pane set-topic --derive: skipping agent step %q — pane has a Note", step.Command)
+				continue
+			}
+			recipe, ok := resolveTopicRecipe(step.Command)
+			if !ok {
+				debug.Log("pane set-topic --derive: unknown topic recipe %q — skipping", step.Command)
+				continue
+			}
+			argv, stdin := recipe.build(modelPrompt, payload)
+			ctx, cancel := context.WithTimeout(context.Background(), recipeTimeout)
+			out, runErr := run(ctx, argv, stdin)
+			cancel()
+			if runErr != nil {
+				debug.Error("pane set-topic --derive: recipe %q failed: %v", step.Command, runErr)
+				continue
+			}
+			if derived := slugifyTopic(capTopic(recipe.parse(out)), maxWords); derived != "" {
+				resultTopic, resultKind = derived, config.TopicKindFinal
+				gotResult = true
+				currentKind = config.TopicKindFinal
+				debug.Log("pane set-topic --derive: agent step %q set final topic %q on pane %s", step.Command, derived, paneID)
+			} else {
+				debug.Log("pane set-topic --derive: agent step %q produced no usable topic", step.Command)
+			}
 		}
-		// parse extracts the result text (JSON for agents that emit it, plain
-		// otherwise); capTopic first-lines and char-caps it, then slugifyTopic
-		// normalizes to the kebab contract — uniform across every recipe.
-		if derived := slugifyTopic(capTopic(recipe.parse(out)), maxWords); derived != "" {
-			debug.Log("pane set-topic --derive: recipe %q set topic %q on pane %s", ref, derived, paneID)
-			return paneID, derived, true
-		}
-		debug.Log("pane set-topic --derive: recipe %q produced no usable topic", ref)
 	}
 
-	// Every recipe failed (or none configured), and prevTopic is empty here (the
-	// once-guard returns early otherwise), so fall back to truncation; that
-	// truncated Topic then freezes the pane.
-	topic = slugifyTopic(truncateTopic(prompt), maxWords)
-	if topic == "" {
-		return "", "", false
+	if !gotResult {
+		return "", "", "", false
 	}
-	debug.Log("pane set-topic --derive: truncation fallback set topic %q on pane %s", topic, paneID)
-	return paneID, topic, true
+	return paneID, resultTopic, resultKind, true
 }
 
 // topicRecipe is one curated agent-CLI invocation pop knows how to run (ADR
@@ -985,33 +1007,47 @@ func promptOnlyTopicPayload(data []byte) (prompt, transcriptPath string, err err
 	return payload.Prompt, "", nil
 }
 
-// defaultTopicOptionLookup reads a pane's current Topic and session from tmux
-// using the production tmux dependency. The Topic is the @pop_topic user-option
-// (the single source of truth — ADR 0058), read alongside the session name.
-func defaultTopicOptionLookup(paneID string) (prevTopic, session string) {
-	return topicOptionLookup(defaultTmux, paneID)
+// defaultTopicStateLookup reads a pane's current Topic, provenance, and session
+// from tmux using the production tmux dependency.
+func defaultTopicStateLookup(paneID string) (prevTopic, topicKind, session string) {
+	return readPaneTopicState(defaultTmux, paneID)
 }
 
-// topicOptionLookup reads @pop_topic and the session name off a pane in one
-// tmux call. A read error or a pane that can't be found yields empties, so a
-// fresh (or gone) pane derives. The format puts the tab-free session name
-// first, so a Topic containing tabs still round-trips intact.
-func topicOptionLookup(tmux deps.Tmux, paneID string) (prevTopic, session string) {
+// readPaneTopicState reads @pop_topic, @pop_topic_kind, and the session name off
+// a pane in one tmux call. A read error or a pane that can't be found yields
+// empties, so a fresh (or gone) pane derives.
+func readPaneTopicState(tmux deps.Tmux, paneID string) (prevTopic, topicKind, session string) {
 	if paneID == "" {
-		return "", ""
+		return "", "", ""
 	}
-	out, err := tmux.Command("display-message", "-p", "-t", paneID, "#{session_name}\t#{@pop_topic}")
+	out, err := tmux.Command("display-message", "-p", "-t", paneID, "#{session_name}\t#{@pop_topic}\t#{@pop_topic_kind}")
 	if err != nil {
-		debug.Error("pane set-topic --derive: read @pop_topic: %v", err)
-		return "", ""
+		debug.Error("pane set-topic --derive: read topic state: %v", err)
+		return "", "", ""
 	}
 	line := strings.TrimRight(out, "\n")
-	parts := strings.SplitN(line, "\t", 2)
+	parts := strings.SplitN(line, "\t", 3)
 	session = parts[0]
-	if len(parts) == 2 {
+	if len(parts) >= 2 {
 		prevTopic = parts[1]
 	}
-	return prevTopic, session
+	if len(parts) == 3 {
+		topicKind = parts[2]
+	}
+	return prevTopic, topicKind, session
+}
+
+// defaultPaneHasNote reports whether the pane carries a Note in monitor state.
+func defaultPaneHasNote(paneID string) bool {
+	if paneID == "" {
+		return false
+	}
+	state, err := monitor.Load(monitor.DefaultStatePath())
+	if err != nil || state == nil {
+		return false
+	}
+	entry, ok := state.Panes[paneID]
+	return ok && entry.Note != ""
 }
 
 // runTopicRecipe is the production topicRecipeRunner: it execs a recipe's argv
@@ -1123,12 +1159,8 @@ func parseSetTopicArgs(clear bool, args []string) (paneID, topic string, err err
 	return paneID, strings.Join(rest, " "), nil
 }
 
-// setPaneTopicOption writes (or clears) a pane's Topic to the per-pane tmux
-// user-option @pop_topic — the single source of truth for the Topic (ADR 0058),
-// referenceable as #{@pop_topic} from any tmux format. An empty topic clears
-// the option. Unlike the old monitor-state path this writes straight to tmux:
-// no daemon, no socket, no registration — tmux serializes its own option
-// writes, and the option dies with the pane (the ADR 0025 lifecycle).
+// setPaneTopicOption writes (or clears) a pane's Topic to @pop_topic without
+// changing @pop_topic_kind. Prefer setPaneTopicWithKind for derived Topics.
 func setPaneTopicOption(tmux deps.Tmux, paneID, topic string) error {
 	debug.Init()
 	defer debug.Close()
@@ -1143,35 +1175,68 @@ func setPaneTopicOption(tmux deps.Tmux, paneID, topic string) error {
 	return nil
 }
 
+// setPaneTopicWithKind writes @pop_topic and @pop_topic_kind (ADR 0068).
+func setPaneTopicWithKind(tmux deps.Tmux, paneID, topic, kind string) error {
+	debug.Init()
+	defer debug.Close()
+
+	if paneID == "" {
+		return nil
+	}
+	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_topic", topic); err != nil {
+		debug.Error("pane set-topic: set @pop_topic on %s: %v", paneID, err)
+		return err
+	}
+	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_topic_kind", kind); err != nil {
+		debug.Error("pane set-topic: set @pop_topic_kind on %s: %v", paneID, err)
+		return err
+	}
+	return nil
+}
+
+// clearPaneTopic clears @pop_topic and @pop_topic_kind on a pane.
+func clearPaneTopic(tmux deps.Tmux, paneID string) error {
+	debug.Init()
+	defer debug.Close()
+
+	if paneID == "" {
+		return nil
+	}
+	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_topic", ""); err != nil {
+		debug.Error("pane set-topic --clear: set @pop_topic on %s: %v", paneID, err)
+		return err
+	}
+	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_topic_kind", ""); err != nil {
+		debug.Error("pane set-topic --clear: set @pop_topic_kind on %s: %v", paneID, err)
+		return err
+	}
+	return nil
+}
+
 // preSeedTopicFromTitle returns the drain pre-seed hook (ADR 0058): at drain
 // spawn pop slugifies the task Title into the canonical Topic format (the same
 // slugifyTopic normalizer recipe-derived Topics use — ADR 0057) and writes it to
-// the current pane's @pop_topic. Because the once-per-pane guard reads
-// #{@pop_topic}, the agent's `set-topic --derive` hook then sees the option
-// already set and no-ops — a drained pane gets an accurate Topic with zero model
-// calls and zero recipe runs, while non-drain panes still fall through to the
-// recipe chain.
+// the current pane's @pop_topic with @pop_topic_kind = final. A pane that
+// already carries a Topic is never re-seeded.
 //
 // It guards on the existing option so the first task in a whole-set drain wins
-// (matching the once-per-pane derive guard) and a later task never clobbers it;
-// an empty/punctuation-only Title that slugs to "" is left untouched. A pane
-// outside tmux ($TMUX_PANE unset) is a silent no-op.
+// (matching the derive pipeline's final-topic guard) and a later task never
+// clobbers it; an empty/punctuation-only Title that slugs to "" is left
+// untouched. A pane outside tmux ($TMUX_PANE unset) is a silent no-op.
 func preSeedTopicFromTitle(tmux deps.Tmux, maxWords int) func(taskTitle string) {
 	return func(taskTitle string) {
 		paneID := os.Getenv("TMUX_PANE")
 		if paneID == "" {
 			return
 		}
-		// Once per pane: a pane that already carries a Topic (a prior task in this
-		// drain, or a manual set) is never re-seeded.
-		if prev, _ := topicOptionLookup(tmux, paneID); prev != "" {
+		if prev, _, _ := readPaneTopicState(tmux, paneID); prev != "" {
 			return
 		}
 		slug := slugifyTopic(taskTitle, maxWords)
 		if slug == "" {
 			return
 		}
-		_ = setPaneTopicOption(tmux, paneID, slug)
+		_ = setPaneTopicWithKind(tmux, paneID, slug, config.TopicKindFinal)
 	}
 }
 

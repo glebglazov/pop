@@ -13,12 +13,27 @@ import (
 	"github.com/glebglazov/pop/monitor"
 )
 
-// noPrevTopic is a prevTopicLookup that reports no existing Topic/session.
-func noPrevTopic(string) (string, string) { return "", "" }
+// noTopicState is a topicStateLookup that reports no existing Topic/provenance.
+func noTopicState(string) (string, string, string) { return "", "", "" }
 
-// withTopicAgents builds a config whose topic_agents recipe list is agents.
+// noPaneNote is a paneNoteLookup that reports no Note on the pane.
+func noPaneNote(string) bool { return false }
+
+// paneHasNote is a paneNoteLookup that always reports a Note.
+func paneHasNote(string) bool { return true }
+
+// withTopicAgents builds a config whose topic_agents list is bare agent steps.
 func withTopicAgents(agents ...string) *config.Config {
-	return &config.Config{PaneMonitoring: &config.PaneMonitoringConfig{TopicAgents: agents}}
+	steps := make(config.TopicSteps, len(agents))
+	for i, a := range agents {
+		steps[i] = config.TopicStep{Type: config.TopicStepAgent, Command: a, SetIf: config.TopicSetIfEmpty}
+	}
+	return &config.Config{PaneMonitoring: &config.PaneMonitoringConfig{TopicAgents: steps}}
+}
+
+// withTopicSteps builds a config with an explicit typed step list.
+func withTopicSteps(steps ...config.TopicStep) *config.Config {
+	return &config.Config{PaneMonitoring: &config.PaneMonitoringConfig{TopicAgents: steps}}
 }
 
 // TestPaneAttentionName_TopicPrecedence locks the descriptive parenthetical
@@ -110,18 +125,26 @@ func TestSetPaneTopicOption(t *testing.T) {
 		}
 	})
 
-	t.Run("clear empties @pop_topic", func(t *testing.T) {
-		var got []string
+	t.Run("clear empties @pop_topic and @pop_topic_kind", func(t *testing.T) {
+		var calls [][]string
 		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			got = args
+			calls = append(calls, args)
 			return "", nil
 		}}
-		if err := setPaneTopicOption(tmux, "%7", ""); err != nil {
+		if err := clearPaneTopic(tmux, "%7"); err != nil {
 			t.Fatal(err)
 		}
-		want := []string{"set-option", "-p", "-t", "%7", "@pop_topic", ""}
-		if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-			t.Errorf("tmux args = %v, want %v", got, want)
+		want := [][]string{
+			{"set-option", "-p", "-t", "%7", "@pop_topic", ""},
+			{"set-option", "-p", "-t", "%7", "@pop_topic_kind", ""},
+		}
+		if len(calls) != 2 {
+			t.Fatalf("tmux calls = %v, want 2", calls)
+		}
+		for i, w := range want {
+			if strings.Join(calls[i], "\x00") != strings.Join(w, "\x00") {
+				t.Errorf("call[%d] = %v, want %v", i, calls[i], w)
+			}
 		}
 	})
 
@@ -136,6 +159,28 @@ func TestSetPaneTopicOption(t *testing.T) {
 	})
 }
 
+// TestSetPaneTopicWithKind verifies derived Topics write provenance alongside
+// the slug.
+func TestSetPaneTopicWithKind(t *testing.T) {
+	var calls [][]string
+	tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
+		calls = append(calls, args)
+		return "", nil
+	}}
+	if err := setPaneTopicWithKind(tmux, "%7", "auth-refactor", config.TopicKindSeed); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"set-option", "-p", "-t", "%7", "@pop_topic", "auth-refactor"},
+		{"set-option", "-p", "-t", "%7", "@pop_topic_kind", "seed"},
+	}
+	for i, w := range want {
+		if strings.Join(calls[i], "\x00") != strings.Join(w, "\x00") {
+			t.Errorf("call[%d] = %v, want %v", i, calls[i], w)
+		}
+	}
+}
+
 // TestPreSeedTopicFromTitle covers the drain pre-seed hook (ADR 0058): at drain
 // spawn pop slugifies the task Title (with the same slugifyTopic normalizer
 // recipe-derived Topics use) and writes @pop_topic, guarding on the existing
@@ -144,24 +189,30 @@ func TestSetPaneTopicOption(t *testing.T) {
 func TestPreSeedTopicFromTitle(t *testing.T) {
 	t.Run("seeds @pop_topic from the slugified Title", func(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%7")
-		var wrote []string
+		var wrote [][]string
 		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
 			switch args[0] {
-			case "display-message": // once-per-pane guard read: no prior Topic
+			case "display-message":
 				return "proj-x\t\n", nil
 			case "set-option":
-				wrote = args
+				wrote = append(wrote, args)
 				return "", nil
 			}
 			t.Fatalf("unexpected tmux call: %v", args)
 			return "", nil
 		}}
 		preSeedTopicFromTitle(tmux, 5)("Drain pre-seeds Topic from task Title")
-		// slugifyTopic with maxWords=5 keeps the first 5 words; "pre-seeds" splits
-		// into two, so the kebab slug is drain/pre/seeds/topic/from.
-		want := []string{"set-option", "-p", "-t", "%7", "@pop_topic", "drain-pre-seeds-topic-from"}
-		if strings.Join(wrote, "\x00") != strings.Join(want, "\x00") {
-			t.Errorf("set-option args = %v, want %v", wrote, want)
+		want := [][]string{
+			{"set-option", "-p", "-t", "%7", "@pop_topic", "drain-pre-seeds-topic-from"},
+			{"set-option", "-p", "-t", "%7", "@pop_topic_kind", "final"},
+		}
+		if len(wrote) != 2 {
+			t.Fatalf("set-option calls = %v, want 2", wrote)
+		}
+		for i, w := range want {
+			if strings.Join(wrote[i], "\x00") != strings.Join(w, "\x00") {
+				t.Errorf("call[%d] = %v, want %v", i, wrote[i], w)
+			}
 		}
 	})
 
@@ -172,7 +223,7 @@ func TestPreSeedTopicFromTitle(t *testing.T) {
 			if args[0] == "display-message" {
 				return "proj-x\t\n", nil
 			}
-			if args[0] == "set-option" {
+			if args[0] == "set-option" && len(args) >= 2 && args[len(args)-2] == "@pop_topic" {
 				seeded = args[len(args)-1]
 			}
 			return "", nil
@@ -221,49 +272,46 @@ func TestPreSeedTopicFromTitle(t *testing.T) {
 }
 
 // TestDeriveTopic_SkipsPreSeededPane confirms the payoff of the pre-seed (ADR
-// 0058): once pop has written @pop_topic at drain spawn, the agent's
-// `set-topic --derive` hook sees it via the once-per-pane guard and no-ops —
-// no recipe runs, no model call — so a drained pane never re-derives over its
-// pre-seeded Topic.
+// 0058): once pop has written @pop_topic with final provenance at drain spawn,
+// the agent's `set-topic --derive` hook no-ops — no recipe runs.
 func TestDeriveTopic_SkipsPreSeededPane(t *testing.T) {
 	t.Setenv("TMUX_PANE", "%7")
 	preSeeded := "drain-pre-seeds-topic-from-task"
-	lookup := func(string) (string, string) { return preSeeded, "proj-x" }
+	lookup := func(string) (string, string, string) { return preSeeded, config.TopicKindFinal, "proj-x" }
 	run := func(context.Context, []string, []byte) (string, error) {
 		t.Fatal("no recipe must run for a pre-seeded pane")
 		return "", nil
 	}
 	payload := `{"prompt":"refactor the auth layer"}`
-	_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", lookup, run)
+	_, topic, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", lookup, noPaneNote, run)
 	if ok || topic != "" {
 		t.Errorf("derive on a pre-seeded pane = (topic=%q ok=%v), want no-op", topic, ok)
 	}
 }
 
-// TestTopicOptionLookup confirms the guard's source: it reads @pop_topic and
-// the session name off the pane via tmux, and yields empties on a tmux error
-// so a fresh/gone pane re-derives.
-func TestTopicOptionLookup(t *testing.T) {
-	t.Run("reads topic and session", func(t *testing.T) {
+// TestTopicStateLookup confirms the derive path reads @pop_topic, @pop_topic_kind,
+// and the session name off the pane via tmux.
+func TestTopicStateLookup(t *testing.T) {
+	t.Run("reads topic, kind, and session", func(t *testing.T) {
 		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			if args[0] != "display-message" || args[len(args)-1] != "#{session_name}\t#{@pop_topic}" {
+			if args[0] != "display-message" || args[len(args)-1] != "#{session_name}\t#{@pop_topic}\t#{@pop_topic_kind}" {
 				t.Fatalf("unexpected tmux call: %v", args)
 			}
-			return "proj-x\tauth refactor\n", nil
+			return "proj-x\tauth refactor\tseed\n", nil
 		}}
-		topic, session := topicOptionLookup(tmux, "%7")
-		if topic != "auth refactor" || session != "proj-x" {
-			t.Errorf("got topic=%q session=%q", topic, session)
+		topic, kind, session := readPaneTopicState(tmux, "%7")
+		if topic != "auth refactor" || kind != "seed" || session != "proj-x" {
+			t.Errorf("got topic=%q kind=%q session=%q", topic, kind, session)
 		}
 	})
 
-	t.Run("empty option yields empty topic", func(t *testing.T) {
+	t.Run("empty options yield empties", func(t *testing.T) {
 		tmux := &deps.MockTmux{CommandFunc: func(...string) (string, error) {
 			return "proj-x\t\n", nil
 		}}
-		topic, session := topicOptionLookup(tmux, "%7")
-		if topic != "" || session != "proj-x" {
-			t.Errorf("got topic=%q session=%q, want empty topic", topic, session)
+		topic, kind, session := readPaneTopicState(tmux, "%7")
+		if topic != "" || kind != "" || session != "proj-x" {
+			t.Errorf("got topic=%q kind=%q session=%q", topic, kind, session)
 		}
 	})
 
@@ -271,8 +319,8 @@ func TestTopicOptionLookup(t *testing.T) {
 		tmux := &deps.MockTmux{CommandFunc: func(...string) (string, error) {
 			return "", fmt.Errorf("no such pane")
 		}}
-		if topic, session := topicOptionLookup(tmux, "%9"); topic != "" || session != "" {
-			t.Errorf("got topic=%q session=%q, want empties", topic, session)
+		if topic, kind, session := readPaneTopicState(tmux, "%9"); topic != "" || kind != "" || session != "" {
+			t.Errorf("got topic=%q kind=%q session=%q, want empties", topic, kind, session)
 		}
 	})
 }
@@ -504,14 +552,14 @@ func TestDeriveTopic_DegradesWhenNoPromptText(t *testing.T) {
 	}
 
 	t.Run("opencode payload without prompt", func(t *testing.T) {
-		_, _, ok := deriveTopicWith(strings.NewReader(`{"sessionID":"abc"}`), nil, cfg, "opencode", noPrevTopic, failRun)
+		_, _, _, ok := deriveTopicWith(strings.NewReader(`{"sessionID":"abc"}`), nil, cfg, "opencode", noTopicState, noPaneNote, failRun)
 		if ok {
 			t.Error("expected no Topic for prompt-less payload")
 		}
 	})
 
 	t.Run("unknown label", func(t *testing.T) {
-		_, _, ok := deriveTopicWith(strings.NewReader(`{"prompt":"hi"}`), nil, cfg, "future-agent", noPrevTopic, failRun)
+		_, _, _, ok := deriveTopicWith(strings.NewReader(`{"prompt":"hi"}`), nil, cfg, "future-agent", noTopicState, noPaneNote, failRun)
 		if ok {
 			t.Error("expected no Topic for unknown label")
 		}
@@ -605,7 +653,7 @@ func TestDeriveTopic_TopicWordsBound(t *testing.T) {
 	payload := `{"prompt":"alpha beta gamma delta epsilon zeta eta"}`
 
 	t.Run("default caps at 5 words", func(t *testing.T) {
-		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, &config.Config{}, "claude", noPrevTopic, failRun)
+		_, topic, _, ok := deriveTopicWith(strings.NewReader(payload), nil, &config.Config{}, "claude", noTopicState, noPaneNote, failRun)
 		if !ok || topic != "alpha-beta-gamma-delta-epsilon" {
 			t.Errorf("got topic=%q ok=%v", topic, ok)
 		}
@@ -613,54 +661,55 @@ func TestDeriveTopic_TopicWordsBound(t *testing.T) {
 
 	t.Run("topic_words bounds the slug", func(t *testing.T) {
 		cfg := &config.Config{PaneMonitoring: &config.PaneMonitoringConfig{TopicWords: 2}}
-		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noPrevTopic, failRun)
+		_, topic, _, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noTopicState, noPaneNote, failRun)
 		if !ok || topic != "alpha-beta" {
 			t.Errorf("got topic=%q ok=%v", topic, ok)
 		}
 	})
 }
 
-// TestDeriveTopic_Truncation covers the no-recipe (slice 02) derive path:
-// pane id resolution, truncation, and no-op on bad/empty input. With no
-// topic_agents configured, the recipe runner is never called.
+// TestDeriveTopic_Truncation covers the default truncate step when topic_agents
+// is unset: pane id resolution, seed provenance, and no-op on bad/empty input.
 func TestDeriveTopic_Truncation(t *testing.T) {
 	t.Setenv("TMUX_PANE", "%env")
 	cfg := &config.Config{}
 	failRun := func(context.Context, []string, []byte) (string, error) {
-		t.Fatal("recipe runner must not be called with no recipes configured")
+		t.Fatal("recipe runner must not be called with default truncate-only config")
 		return "", nil
 	}
 
-	t.Run("derives normalized slug with env pane", func(t *testing.T) {
+	t.Run("derives normalized seed slug with env pane", func(t *testing.T) {
 		payload := `{"prompt":"one two three four five six seven eight nine"}`
-		pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noPrevTopic, failRun)
+		pane, topic, kind, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noTopicState, noPaneNote, failRun)
 		if !ok {
 			t.Fatal("expected ok")
 		}
 		if pane != "%env" {
 			t.Errorf("pane = %q", pane)
 		}
-		// Slug caps at topic_words (default 5), so only the first five words land.
 		if topic != "one-two-three-four-five" {
 			t.Errorf("topic = %q", topic)
+		}
+		if kind != config.TopicKindSeed {
+			t.Errorf("kind = %q, want seed", kind)
 		}
 	})
 
 	t.Run("explicit pane id overrides env", func(t *testing.T) {
-		pane, topic, ok := deriveTopicWith(strings.NewReader(`{"prompt":"hi"}`), []string{"%7"}, cfg, "claude", noPrevTopic, failRun)
+		pane, topic, _, ok := deriveTopicWith(strings.NewReader(`{"prompt":"hi"}`), []string{"%7"}, cfg, "claude", noTopicState, noPaneNote, failRun)
 		if !ok || pane != "%7" || topic != "hi" {
 			t.Errorf("got pane=%q topic=%q ok=%v", pane, topic, ok)
 		}
 	})
 
 	t.Run("unparseable payload is no-op", func(t *testing.T) {
-		if _, _, ok := deriveTopicWith(strings.NewReader("garbage"), nil, cfg, "claude", noPrevTopic, failRun); ok {
+		if _, _, _, ok := deriveTopicWith(strings.NewReader("garbage"), nil, cfg, "claude", noTopicState, noPaneNote, failRun); ok {
 			t.Error("expected ok=false for unparseable payload")
 		}
 	})
 
 	t.Run("empty prompt is no-op", func(t *testing.T) {
-		if _, _, ok := deriveTopicWith(strings.NewReader(`{"prompt":"   "}`), nil, cfg, "claude", noPrevTopic, failRun); ok {
+		if _, _, _, ok := deriveTopicWith(strings.NewReader(`{"prompt":"   "}`), nil, cfg, "claude", noTopicState, noPaneNote, failRun); ok {
 			t.Error("expected ok=false for empty prompt")
 		}
 	})
@@ -785,7 +834,7 @@ func TestDeriveTopic_Recipes(t *testing.T) {
 			}
 			return claudeJSON("Auth Refactor"), nil
 		}
-		pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", noPrevTopic, run)
+		pane, topic, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", noTopicState, noPaneNote, run)
 		if !ok || pane != "%env" || topic != "auth-refactor" {
 			t.Errorf("got pane=%q topic=%q ok=%v", pane, topic, ok)
 		}
@@ -803,7 +852,7 @@ func TestDeriveTopic_Recipes(t *testing.T) {
 			}
 			return "", nil
 		}
-		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama:llama3.2"), "claude", noPrevTopic, run)
+		_, topic, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama:llama3.2"), "claude", noTopicState, noPaneNote, run)
 		if !ok || topic != "local-topic" {
 			t.Errorf("got topic=%q ok=%v", topic, ok)
 		}
@@ -821,7 +870,7 @@ func TestDeriveTopic_Recipes(t *testing.T) {
 			}
 			return "should not run", nil
 		}
-		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama:llama3.2"), "claude", noPrevTopic, run)
+		_, topic, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama:llama3.2"), "claude", noTopicState, noPaneNote, run)
 		if !ok || topic != "auth-refactor" {
 			t.Errorf("got topic=%q ok=%v", topic, ok)
 		}
@@ -840,7 +889,7 @@ func TestDeriveTopic_Recipes(t *testing.T) {
 			}
 			return "", nil
 		}
-		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama"), "claude", noPrevTopic, run)
+		_, topic, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama"), "claude", noTopicState, noPaneNote, run)
 		if !ok || topic != "real-topic" {
 			t.Errorf("got topic=%q ok=%v", topic, ok)
 		}
@@ -853,7 +902,7 @@ func TestDeriveTopic_Recipes(t *testing.T) {
 			}
 			return "topic", nil
 		}
-		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("nope", "ollama:llama3.2"), "claude", noPrevTopic, run)
+		_, topic, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("nope", "ollama:llama3.2"), "claude", noTopicState, noPaneNote, run)
 		if !ok || topic != "topic" {
 			t.Errorf("got topic=%q ok=%v", topic, ok)
 		}
@@ -865,7 +914,7 @@ func TestDeriveTopic_Recipes(t *testing.T) {
 			stdin = string(in)
 			return claudeJSON("topic"), nil
 		}
-		_, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", noPrevTopic, run)
+		_, _, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", noTopicState, noPaneNote, run)
 		if !ok {
 			t.Fatal("expected ok")
 		}
@@ -890,9 +939,9 @@ func TestDeriveTopic_Recipes(t *testing.T) {
 			}
 			return "from script\n", nil
 		}
-		// prev_topic is always empty on a fresh pane (ADR 0025); session rides through.
-		lookup := func(string) (string, string) { return "", "sess" }
-		_, topic, ok := deriveTopicWith(strings.NewReader(payload), []string{"%5"}, withTopicAgents("cmd:my-tool --topic"), "claude", lookup, run)
+		// prev_topic is always empty on a fresh pane; session rides through.
+		lookup := func(string) (string, string, string) { return "", "", "sess" }
+		_, topic, _, ok := deriveTopicWith(strings.NewReader(payload), []string{"%5"}, withTopicAgents("cmd:my-tool --topic"), "claude", lookup, noPaneNote, run)
 		if !ok || topic != "from-script" {
 			t.Errorf("got topic=%q ok=%v", topic, ok)
 		}
@@ -902,22 +951,22 @@ func TestDeriveTopic_Recipes(t *testing.T) {
 		}
 	})
 
-	t.Run("derives once: skips every recipe when a Topic already exists", func(t *testing.T) {
+	t.Run("skips every step when a final Topic already exists", func(t *testing.T) {
 		run := func(context.Context, []string, []byte) (string, error) {
-			t.Fatal("no recipe must run when a Topic already exists")
+			t.Fatal("no step must run when a final Topic already exists")
 			return "", nil
 		}
-		lookup := func(string) (string, string) { return "existing topic", "sess" }
-		_, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", lookup, run)
+		lookup := func(string) (string, string, string) { return "existing topic", config.TopicKindFinal, "sess" }
+		_, _, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", lookup, noPaneNote, run)
 		if ok {
-			t.Error("expected ok=false (keep existing Topic)")
+			t.Error("expected ok=false (keep existing final Topic)")
 		}
 	})
 
 	t.Run("normalizes long recipe output into a capped slug", func(t *testing.T) {
 		long := strings.Repeat("a", topicMaxChars+10)
 		run := func(_ context.Context, _ []string, _ []byte) (string, error) { return long, nil }
-		_, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("ollama"), "claude", noPrevTopic, run)
+		_, topic, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("ollama"), "claude", noTopicState, noPaneNote, run)
 		if !ok {
 			t.Fatal("expected ok")
 		}
@@ -937,10 +986,10 @@ func TestDeriveTopic_Recipes(t *testing.T) {
 		{"empty output", func(context.Context, []string, []byte) (string, error) { return "  \n", nil }},
 	}
 	for _, fc := range failureCases {
-		t.Run("all recipes fail with no prior topic falls back to truncation on "+fc.name, func(t *testing.T) {
-			pane, topic, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama:llama3.2"), "claude", noPrevTopic, fc.run)
-			if !ok || pane != "%env" || topic != "refactor-the-auth-layer" {
-				t.Errorf("got pane=%q topic=%q ok=%v on %s", pane, topic, ok, fc.name)
+		t.Run("all agent steps fail with no truncate step is a no-op on "+fc.name, func(t *testing.T) {
+			_, topic, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude", "ollama:llama3.2"), "claude", noTopicState, noPaneNote, fc.run)
+			if ok || topic != "" {
+				t.Errorf("got topic=%q ok=%v on %s, want no-op", topic, ok, fc.name)
 			}
 		})
 	}
@@ -976,6 +1025,107 @@ func TestRunTopicRecipe(t *testing.T) {
 		defer cancel()
 		if _, err := runTopicRecipe(ctx, []string{"sleep", "5"}, nil); err == nil {
 			t.Error("expected error for timeout")
+		}
+	})
+}
+
+// TestDeriveTopic_ProvenanceAndGating covers set_if guards and provenance kinds
+// written by truncate and agent steps.
+func TestDeriveTopic_ProvenanceAndGating(t *testing.T) {
+	t.Setenv("TMUX_PANE", "%env")
+	payload := `{"prompt":"refactor the auth layer"}`
+	claudeJSON := func(result string) string {
+		return fmt.Sprintf(`{"type":"result","is_error":false,"result":%q}`, result)
+	}
+
+	t.Run("truncate step writes seed provenance", func(t *testing.T) {
+		failRun := func(context.Context, []string, []byte) (string, error) {
+			t.Fatal("agent runner must not be called for truncate-only")
+			return "", nil
+		}
+		_, topic, kind, ok := deriveTopicWith(strings.NewReader(payload), nil, &config.Config{}, "claude", noTopicState, noPaneNote, failRun)
+		if !ok || topic != "refactor-the-auth-layer" || kind != config.TopicKindSeed {
+			t.Errorf("got topic=%q kind=%q ok=%v", topic, kind, ok)
+		}
+	})
+
+	t.Run("agent step writes final provenance", func(t *testing.T) {
+		run := func(_ context.Context, _ []string, _ []byte) (string, error) {
+			return claudeJSON("Auth Refactor"), nil
+		}
+		_, topic, kind, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", noTopicState, noPaneNote, run)
+		if !ok || topic != "auth-refactor" || kind != config.TopicKindFinal {
+			t.Errorf("got topic=%q kind=%q ok=%v", topic, kind, ok)
+		}
+	})
+
+	t.Run("final topic blocks empty and empty_or_seed steps", func(t *testing.T) {
+		run := func(context.Context, []string, []byte) (string, error) {
+			t.Fatal("no step must run against a final Topic with empty/empty_or_seed guards")
+			return "", nil
+		}
+		lookup := func(string) (string, string, string) { return "existing", config.TopicKindFinal, "sess" }
+		cfg := withTopicSteps(
+			config.TopicStep{Type: config.TopicStepTruncate, SetIf: config.TopicSetIfEmpty},
+			config.TopicStep{Type: config.TopicStepAgent, Command: "claude", SetIf: config.TopicSetIfEmptyOrSeed},
+		)
+		_, _, _, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", lookup, noPaneNote, run)
+		if ok {
+			t.Error("expected no-op when final Topic blocks gated steps")
+		}
+	})
+
+	t.Run("seed topic allows empty_or_seed agent upgrade", func(t *testing.T) {
+		run := func(_ context.Context, _ []string, _ []byte) (string, error) {
+			return claudeJSON("Better Topic"), nil
+		}
+		lookup := func(string) (string, string, string) { return "old-seed", config.TopicKindSeed, "sess" }
+		cfg := withTopicSteps(
+			config.TopicStep{Type: config.TopicStepAgent, Command: "claude", SetIf: config.TopicSetIfEmptyOrSeed},
+		)
+		_, topic, kind, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", lookup, noPaneNote, run)
+		if !ok || topic != "better-topic" || kind != config.TopicKindFinal {
+			t.Errorf("got topic=%q kind=%q ok=%v", topic, kind, ok)
+		}
+	})
+
+	t.Run("truncate then agent in one hook upgrades seed to final", func(t *testing.T) {
+		run := func(_ context.Context, _ []string, _ []byte) (string, error) {
+			return claudeJSON("Auth Refactor"), nil
+		}
+		cfg := withTopicSteps(
+			config.TopicStep{Type: config.TopicStepTruncate, SetIf: config.TopicSetIfEmpty},
+			config.TopicStep{Type: config.TopicStepAgent, Command: "claude", SetIf: config.TopicSetIfEmptyOrSeed},
+		)
+		_, topic, kind, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noTopicState, noPaneNote, run)
+		if !ok || topic != "auth-refactor" || kind != config.TopicKindFinal {
+			t.Errorf("got topic=%q kind=%q ok=%v", topic, kind, ok)
+		}
+	})
+
+	t.Run("pane with a Note skips agent steps but truncate still runs", func(t *testing.T) {
+		run := func(context.Context, []string, []byte) (string, error) {
+			t.Fatal("agent step must not run when pane has a Note")
+			return "", nil
+		}
+		cfg := withTopicSteps(
+			config.TopicStep{Type: config.TopicStepTruncate, SetIf: config.TopicSetIfEmpty},
+			config.TopicStep{Type: config.TopicStepAgent, Command: "claude", SetIf: config.TopicSetIfEmptyOrSeed},
+		)
+		_, topic, kind, ok := deriveTopicWith(strings.NewReader(payload), nil, cfg, "claude", noTopicState, paneHasNote, run)
+		if !ok || topic != "refactor-the-auth-layer" || kind != config.TopicKindSeed {
+			t.Errorf("got topic=%q kind=%q ok=%v", topic, kind, ok)
+		}
+	})
+
+	t.Run("pane with a Note skips agent-only config", func(t *testing.T) {
+		run := func(context.Context, []string, []byte) (string, error) {
+			t.Fatal("agent step must not run when pane has a Note")
+			return "", nil
+		}
+		_, _, _, ok := deriveTopicWith(strings.NewReader(payload), nil, withTopicAgents("claude"), "claude", noTopicState, paneHasNote, run)
+		if ok {
+			t.Error("expected no-op when only agent steps are configured and pane has a Note")
 		}
 	})
 }
