@@ -1,6 +1,10 @@
+---
+status: deferred
+---
+
 # Worktree-parallel execution is a deferred Task-set feature, not a Queue feature
 
-Status: accepted — original design; implementation decisions recorded in ADR-0029 and ADR-0030
+> ⚠️ **DEFERRED — intended design, not shipped behavior.** Original design; implementation decisions recorded in ADR-0029 and ADR-0030.
 
 The parked note `queue-worktree-parallelism.dormant.md` framed "drain several of a project's Task
 sets concurrently, each in its own worktree" as a future **Queue** capability. A design pass

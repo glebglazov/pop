@@ -1,6 +1,8 @@
-# Queue is a parallel per-project supervisor, not a serial global scheduler
+---
+status: accepted
+---
 
-Status: accepted
+# Queue is a parallel per-project supervisor, not a serial global scheduler
 
 ADR-0013 reserved the word "queue" — and CONTEXT.md restated it — for "a future machine-global
 scheduler that picks the next Task set across *all* projects by priority and runs it": a single

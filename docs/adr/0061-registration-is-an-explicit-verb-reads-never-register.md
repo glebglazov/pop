@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # Task-set registration is an explicit verb; reads never register
 
-Status: accepted — amends [ADR-0047](0047-manifest-auto-drain-seeds-at-registration.md) (auto-drain seeds at registration) and removes the auto-registration side effect from the read path that [ADR-0060](0060-queue-resolves-from-markers-not-live-git.md) makes a pure read.
+> **Relates:** amends [ADR-0047](0047-manifest-auto-drain-seeds-at-registration.md) (auto-drain seeds at registration) and removes the auto-registration side effect from the read path that [ADR-0060](0060-queue-resolves-from-markers-not-live-git.md) makes a pure read.
 
 ## Context
 

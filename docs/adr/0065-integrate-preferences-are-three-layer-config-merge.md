@@ -1,5 +1,6 @@
 ---
-status: accepted (amends [0064](0064-integrate-installs-all-components-by-default.md))
+status: accepted
+relates: "amends [0064](0064-integrate-installs-all-components-by-default.md)"
 ---
 
 # Integrate preferences are a three-layer config merge

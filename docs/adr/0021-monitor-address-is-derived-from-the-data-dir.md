@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # The monitor daemon address is derived from the data dir, with an env/config override
 
 The monitor daemon's TCP address defaults to a port **derived from the data dir** (the `XDG_DATA_HOME`-scoped pop directory that holds `monitor.json`), rather than a single hardcoded constant. Resolution precedence is **`POP_MONITOR_ADDR` env > `[pane_monitoring] addr` config > derived default**. Within one data dir there is exactly one daemon: on startup a new daemon handshakes whoever holds the port and, if it is a pop daemon of any version, reaps it and reclaims the port (version-restart). A bind failure against a non-pop process is surfaced (Doctor / loud log), never swallowed.

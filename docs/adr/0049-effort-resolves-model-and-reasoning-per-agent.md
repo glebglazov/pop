@@ -1,5 +1,6 @@
 ---
-status: accepted (amends ADR-0032)
+status: accepted
+relates: "amends ADR-0032"
 ---
 
 # Effort resolves to a (model, reasoning) bundle per agent

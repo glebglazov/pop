@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Dashboard picker reuses Dashboard without navigation side effects
 
 `pop monitor dashboard --pick` reuses the **Dashboard** UI as a selection-only **Dashboard picker**: it returns the selected **Pane ID target** to the caller and does not switch tmux focus, record History, clear Unread, or apply other dashboard maintenance mutations. Message-sending callers use **Session-local panes** by default, excluding the current pane itself; picker mode auto-selects when exactly one candidate exists and exits unsuccessfully without output when no candidate exists. Quick selection is enabled for picker mode only in the first pass, reusing the existing `quick_access_modifier` setting; fuzzy text filtering is deferred.

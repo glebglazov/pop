@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # HITL disposition splits by remaining agent work (UNVERIFIED vs BLOCKED)
 
 A Task set that stops at a human-in-the-loop gate now derives one of two statuses instead of a single `BLOCKED`. The discriminator is whether any **open AFK task remains**: if none does — only open HITL tasks stand before Done — the set is `UNVERIFIED` (the agents are finished; the only thing left is a human's eyes on the result); if an open AFK task is still gated behind a human task, it stays `BLOCKED` (real agent work remains). The same split rides the durable `unverified` / `blocked` **Drain outcome**, so `pop queue status`, the run baseline, and the journal surface "awaiting your check" as its own bucket rather than burying it inside "blocked".

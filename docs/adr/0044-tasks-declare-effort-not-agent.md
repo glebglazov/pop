@@ -1,6 +1,6 @@
 ---
 status: accepted
-superseded:
+supersedes:
   - ADR-0018 (tasks may declare a per-task agent)
 ---
 

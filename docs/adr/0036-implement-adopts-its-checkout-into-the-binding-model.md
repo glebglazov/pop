@@ -1,6 +1,10 @@
+---
+status: deferred
+---
+
 # `pop tasks implement` adopts its current checkout into the binding model
 
-Status: accepted — deferred/unbuilt (same posture as ADR-0028); amends ADR-0031 (binding state home), extends ADR-0028/ADR-0030 (integration is trigger-agnostic)
+> ⚠️ **DEFERRED — intended design, not shipped behavior.** Same posture as ADR-0028; amends ADR-0031 (binding state home), extends ADR-0028/ADR-0030 (integration is trigger-agnostic).
 
 ## Context
 

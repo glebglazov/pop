@@ -1,6 +1,8 @@
-# Worktree sets bind one checkout per Task set
+---
+status: accepted
+---
 
-Status: accepted
+# Worktree sets bind one checkout per Task set
 
 ADR-0029 made Pop own `git worktree add` for **Worktree sets**, but the first implementation
 provisioned a **new timestamped checkout on every queue spawn**. That contradicted ADR-0028's

@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Skill install names are a configurable prefix plus a frontmatter ownership marker
 
 The installed name of an embedded skill is `<prefix><base>`, where `prefix` comes from `skills_prefix` in `[integrations]` (default `pop-`, empty for bare names). Because an empty prefix erases the `pop-` name signal that copy-mode installs once relied on for ownership, ownership is no longer inferred from the name at all: a symlink is owned when it resolves into pop's render tree (unchanged from [ADR-0011](0011-integration-artifacts-render-to-pop-data-dir.md)), and a real file/dir is owned when its frontmatter carries `pop-owned: true`, written into every rendered skill. The legacy `pop-` name-prefix ownership check is retired. The pane skill's embed base is `tmux-pane` so the bare form stays collision-resistant; it is still selected via the **Integration skill alias** `pane` in `[integrations] skills`.

@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Integration backlog membership is binding-driven, not mergeability-record-driven
 
 The **Integration backlog** is the set of non-trunk **Worktree binding**s for Done sets awaiting reconciliation. Membership is the binding's existence alone; **Mergeability** is a left-joined property of a member, never the gate for membership. A member whose mergeability has never been computed is shown as `unknown` and stays actionable (its `pop tasks integrate <set>` hint stands, and Integrate computes mergeability when run). Both the dashboard and `pop queue status` derive their "awaiting integration" view from this one binding-driven source, so a Done worktree set can never be visible to one surface and invisible to the other.

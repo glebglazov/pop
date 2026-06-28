@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # Archive is a reversible Task-state flag
 
-Status: accepted (extends ADR 0039's per-repository Task state and ADR 0020's whole-set Multi-task selection)
+> **Relates:** extends ADR 0039's per-repository Task state and ADR 0020's whole-set Multi-task selection
 
 Done Task sets never leave the **Status table** — they pile up at the top of `pop tasks status` and stay in `pop tasks timings` completion forever, even after the work is long finished. There was no way to say "I'm done with this set, get it out of my way" short of deleting its directory. Users wanted a declutter affordance: review the finished sets, file them away, and have them stop surfacing in status and completion — most of the time, every Done set at once.
 

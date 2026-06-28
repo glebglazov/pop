@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Topic lives in the `@pop_topic` tmux user-option
 
 A pane's **Topic** is stored as the per-pane tmux user-option `@pop_topic` (set via `tmux set-option -p`, read via `#{@pop_topic}`), which becomes its **single source of truth** — the Monitor no longer keeps a separate Topic field, and the dashboard reads the option directly. We chose this so the Topic is reusable across *any* tmux surface (pane-border-format, status line, `list-panes`), not just pop's dashboard — the user can drop `#{@pop_topic}` into custom tmux labels. The existing `@pop_set` option (queue) establishes the per-pane user-option pattern this follows.

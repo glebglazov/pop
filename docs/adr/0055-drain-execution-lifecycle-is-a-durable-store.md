@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Drain execution lifecycle is a durable store; Drain is the first-class entity
 
 Pop's execution and integration state — currently scattered across drain-outcome

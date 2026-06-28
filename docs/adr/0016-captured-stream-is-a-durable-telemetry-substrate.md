@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # The captured agent stream is a durable telemetry substrate
 
 When an **Agent output adapter** runs in adapter mode, pop already tees the structured agent stream to an in-memory capture buffer that is the single source of truth for completion-sentinel assessment and **Agent quota detection** (ADR 0008). This decision makes that capture *durable*: for each structured **Task attempt**, pop also writes the raw stream — every event verbatim, each tagged with its arrival time relative to the attempt's start — to a per-attempt file under the Task set's `streams/` directory. The files are gzipped and accumulate over the task's lifetime; they are the **Captured attempt stream**, and every timing or usage figure pop reports is *derived* from them rather than computed inline.

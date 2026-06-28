@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Pop stays a pipe for Topic derivation
 
 Pop derives a pane's **Topic** without ever linking a model SDK or managing API keys. By default it truncates the user's prompt (~8 words) to a built-in label. For better quality, the user sets `topic_command` under `[pane_monitoring]` to *any* shell command — a local model, a cloud CLI, a script. Pop normalizes whatever the agent's hook handed it into a stable JSON object on stdin and reads the resulting topic off stdout. Pop owns the contract; the user owns the model, keys, and runtime. This keeps Pop's first foray into summarization config-free (consistent with ADR-0001) and lets users run fully local models, at the cost of a turnkey experience.

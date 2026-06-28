@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # AFK retries carry forward a stream-derived, failure-typed digest of prior attempts
 
-Status: accepted (qualifies ADR 0020's "the structured reason is the durable signal" for the unattended retry loop; extends the **Captured attempt stream** of ADR 0016 from a read-only telemetry substrate to a prompt input)
+> **Relates:** qualifies ADR 0020's "the structured reason is the durable signal" for the unattended retry loop; extends the **Captured attempt stream** of ADR 0016 from a read-only telemetry substrate to a prompt input
 
 A **Task attempt** that fails is retried with the runtime checkout's files preserved but with a byte-identical prompt: `BuildAgentPrompt` carries no memory of the prior attempt, so attempt N+1 re-discovers everything from scratch and is free to repeat attempt N's mistake. The attended gates already feed history (the HITL assistance prompt summarizes completed AFK work; the Failed gate reads the last attempt's footer reason), but the **unattended worker** — the one actually looping — flies blind. The concrete failure that motivated this: a long-running command (a Playwright suite) backgrounded and polled in a single non-interactive `claude -p` session, where the agent yields its turn to "wait", the session ends with no **Completion sentinel**, the attempt is assessed failed, and a fresh retry repeats it — `FAILED → RESET → FAILED`.
 

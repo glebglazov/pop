@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Queue auto-drain is opt-in, and the dashboard is the primary launcher
 
 ## Status

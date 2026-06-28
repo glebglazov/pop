@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Topic derivation rides core status wiring
 
 A **Topic** — a short, agent-derived phrase describing what a pane's conversation is about — is reported into the **Monitor** by a dedicated `pop pane set-topic` command on its own `UserPromptSubmit` hook, installed automatically as part of **core status wiring** rather than as a separate opt-in **Integration component**. Running `pop integrate` therefore now implies consent to topic derivation as well as `set-status`, deliberately expanding the scope of the one implied-consent component. We chose this because the feature's whole value is being low-key: a user who must opt in, configure, and remember it will not get glanceable topics, whereas folding it into core makes dimmed topics simply appear on the next integration refresh.

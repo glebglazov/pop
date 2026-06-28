@@ -1,6 +1,8 @@
-# Worktree-set integration is human or agent attended
+---
+status: accepted
+---
 
-Status: accepted
+# Worktree-set integration is human or agent attended
 
 ADR-0028 also deferred the merge-reconciliation boundary: Pop may compute mergeability for
 completed Worktree sets, but it must not silently integrate them. That boundary now stands as the

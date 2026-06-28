@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # Agent cooldown ends at the agent's own reported reset time
 
-Status: accepted (refines **Queue agent fallback** of ADR 0027: recovery moves from a blind fixed interval to a reset-aware deadline; rides the **Agent quota detection** signal without reopening the **Agent quota reporting** deferral)
+> **Relates:** refines **Queue agent fallback** of ADR 0027: recovery moves from a blind fixed interval to a reset-aware deadline; rides the **Agent quota detection** signal without reopening the **Agent quota reporting** deferral
 
 When an **Agent quota pause** is detected, the **Queue daemon** cools that preset down for a blind fixed interval (`agent_quota_retry_after`, default 30m) and re-probes by re-attempting. But the pause signal already carries the agent's real reset time — codex emits `…try again at 2:28 AM.`, claude emits `… · resets Mon 12:00am` — and we throw it away, so the queue re-attempts an agent that is still exhausted (reset is further out) or leaves it cold long after it recovered (reset was minutes away). The reset time is right there in the stream we already trust for detection.
 

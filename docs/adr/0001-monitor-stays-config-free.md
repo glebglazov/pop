@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # The Monitor stays config-free; policy is resolved in the command layer
 
 The `monitor` package must not import `config`. Pane-report transition rules (status, following, visit) live in the Monitor next to the pane state they govern, but any config-driven policy is resolved in the command layer and passed to the Monitor's primitives as already-decided values. In practice this is one boolean — the Unread→Clear-on-active downgrade gate — plus the "ignore status from this source" check, which stays in the command layer as a pre-check that runs before any state work.

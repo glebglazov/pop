@@ -1,6 +1,8 @@
-# CalVer month-based versioning, no stability contract
+---
+status: accepted
+---
 
-Status: accepted
+# CalVer month-based versioning, no stability contract
 
 Pop gains versioning for three consumers: identifying a beta tester's binary in bug reports, driving release automation, and the picker Update notice. None of them needs a compatibility signal — alias removal is already gated on beta-tester sign-off (CLEANUP.md), not a version number — so the version is deliberately just a date.
 

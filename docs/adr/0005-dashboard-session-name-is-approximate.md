@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Dashboard history matching uses approximate session names for speed
 
 The dashboard's `sessionAccessTime` function derives session names from history entry paths using `project.FastSessionName(path)` instead of `project.SessionName(path)`. The latter calls git commands (`rev-parse`, `config`, walking `.git` directories) to determine whether a path is a bare-repo worktree, a regular-repo worktree, or a plain directory. For a typical history of ~20 entries and a dashboard with ~10 panes, the git-based approach triggers 200+ subprocess invocations on every dashboard open, making the picker feel sluggish (≈1.8s).

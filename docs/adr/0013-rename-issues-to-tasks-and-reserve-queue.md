@@ -1,6 +1,8 @@
-# Rename issues to tasks; reserve "queue" for a global scheduler
+---
+status: accepted
+---
 
-Status: accepted
+# Rename issues to tasks; reserve "queue" for a global scheduler
 
 The "issue" vocabulary was inherited from Matt Pocock's original skill, where items became GitHub issues. Pop's items drifted into something else — agent-runnable work units with acceptance criteria, statuses, and dependencies — and the CLI naming had two tab-completion collisions: `run-issue`/`run-issues` (long shared prefix) and `pop worktree`/`pop workload` (shared first letter).
 

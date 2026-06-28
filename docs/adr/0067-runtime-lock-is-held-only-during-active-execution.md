@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Runtime execution lock is held only during active execution
 
 The **Runtime execution lock** (the running Drain row, ADR-0055) is now held only while a drain is *actively executing* in its checkout. Every wait for human input releases it: the pre-run confirmation, the [HITL gate prompt](0012-hitl-gates-offer-attended-agent-assistance.md) menu, and the Failed gate prompt menu. Concretely, `BeginDrain` wraps only the contiguous run of AFK attempts; reaching any gate `Finish`es the drain with its park outcome (`unverified`/`blocked`/`failed` — the same disposition the `--yes`/daemon path already records), the menu runs lock-free, and resuming after the human clears the gate `BeginDrain`s afresh. Assist sessions and the runtime shell launched from a gate also run lock-free. This applies uniformly to whole-set drains and single-task `implement`.

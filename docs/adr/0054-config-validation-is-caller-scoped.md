@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Config validation is caller-scoped, never global
 
 A config problem may degrade the *quality* of a command but must never prevent

@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Workload target references resolve from the current working directory
 
 > Superseded by [ADR 0039](./0039-issue-sets-live-in-pop-data-dir-keyed-per-repository.md): path-form targets removed; targets are bare identifiers resolved via repository identity from the CWD.

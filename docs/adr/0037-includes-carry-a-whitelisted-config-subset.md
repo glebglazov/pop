@@ -1,6 +1,8 @@
-# `includes` carry a whitelisted config subset with parent-first precedence
+---
+status: accepted
+---
 
-Status: accepted
+# `includes` carry a whitelisted config subset with parent-first precedence
 
 ## Context
 

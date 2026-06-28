@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Agent preset augmentation rides on `--agent`, not a parsed `--agent-cmd`
 
 Extra agent flags (e.g. `--agent "claude --model opus4.8"`) augment a recognized **Agent preset** on the `--agent` flag. Pop runs the supplied command as given — the same treatment as a **Custom agent command** — then appends the flags it owns (the output protocol governed by **Agent output mode**) followed by the generated prompt. Recognition of the first token as a known preset is the single discriminator that earns structured handling: stream parsing, **Agent quota detection**, and a **Captured attempt stream**. `--agent-cmd` stays the opaque, unrecognized, plain-output escape hatch.

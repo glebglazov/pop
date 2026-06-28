@@ -1,5 +1,6 @@
 ---
-status: accepted (supersedes ADR-0010)
+status: accepted
+relates: "supersedes ADR-0010"
 ---
 
 # Integrate installs all components by default; consent is opt-out

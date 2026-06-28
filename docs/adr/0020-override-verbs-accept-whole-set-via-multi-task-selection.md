@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # Override verbs accept a whole-set target via a multi-task selection
 
-Status: accepted (extends ADR 0015's target-shape dispatch to the manual override verbs)
+> **Relates:** extends ADR 0015's target-shape dispatch to the manual override verbs
 
 ADR 0015 made `implement` dispatch on **Task target reference** shape rather than on a verb: a `<task-set>/<file>.md` reference runs one task, a bare `<task-set>` drains the set. The manual override verbs — `complete`, `open`, `skip` — stayed single-task-only, *requiring* a file reference and rejecting a bare set (the "exactly two forms, file reference required" invariant in the glossary). Clearing several hand-finished tasks therefore meant typing one `<task-set>/<file>.md` command per task.
 

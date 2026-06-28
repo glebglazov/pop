@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Drain outcome is the process exit reason, not the set's work disposition
 
 A Drain's terminal state records only *how its process ended* — `finished`,

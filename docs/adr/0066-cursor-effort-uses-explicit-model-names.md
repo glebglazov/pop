@@ -1,6 +1,6 @@
 ---
 status: accepted
-superseded:
+supersedes:
   - [ADR-0049](0049-effort-resolves-model-and-reasoning-per-agent.md) (cursor-specific encoding only)
 ---
 

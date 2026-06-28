@@ -1,6 +1,8 @@
-# Pop owns `git worktree add` for Worktree sets
+---
+status: accepted
+---
 
-Status: accepted
+# Pop owns `git worktree add` for Worktree sets
 
 ADR-0028 deferred worktree-parallel execution but called out one deliberate reversal: the standing
 Worktree-picker language said worktree creation was not built in. Now that Worktree sets exist,

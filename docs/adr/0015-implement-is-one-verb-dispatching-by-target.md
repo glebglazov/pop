@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # `implement` is one verb dispatching by target shape
 
-Status: accepted (supersedes the `run`/`drain` verb split in ADR 0013)
+> **Relates:** supersedes the `run`/`drain` verb split in ADR 0013
 
 ADR 0013 split task execution into two sibling verbs — `run` (one task) and `drain` (whole set) — partly to avoid the `run-issue`/`run-issues` tab-completion collision. In practice the operator almost always drains a whole set and rarely targets a single task, and the singular-vs-plural verb pair became a recurring "which one was the single one again?" friction with no upside.
 

@@ -1,6 +1,10 @@
+---
+status: deferred
+---
+
 # Binding lifecycle verbs move from `queue` to `tasks`; `abandon` becomes `unbind-worktree`
 
-Status: accepted — deferred/unbuilt (same posture as ADR-0036); amends ADR-0035 (which introduced `queue bind-worktree`/`queue abandon`), builds on ADR-0036 (binding is shared/module-owned and trigger-agnostic), and refines ADR-0013 (issues→tasks rename, `queue` reserved for the scheduler)
+> ⚠️ **DEFERRED — intended design, not shipped behavior.** Same posture as ADR-0036; amends ADR-0035 (which introduced `queue bind-worktree`/`queue abandon`), builds on ADR-0036 (binding is shared/module-owned and trigger-agnostic), and refines ADR-0013 (issues→tasks rename, `queue` reserved for the scheduler).
 
 ## Context
 

@@ -1,6 +1,6 @@
 ---
 status: accepted
-superseded:
+supersedes:
   - ADR-0034 (in part — cooldown ownership moves out of the daemon)
 ---
 

@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Dirty runtime continues by default with confirmation
 
 `pop workload run-issue` and `run-issues` start from a dirty runtime checkout by default. Previously a dirty checkout was rejected unless the operator passed an explicit `--allow-dirty` strategy; the absence of a strategy meant "require a clean checkout". Now `continue` is the default. Whenever the runtime is dirty — under any strategy — the command prints the full `git status`, states what the chosen strategy will do to the dirty state, and requires interactive `y` confirmation before proceeding. `--yes` auto-confirms; a non-interactive run (no TTY) without `--yes` is rejected. The `reject` sentinel that encoded the old fail-on-dirty default is removed.

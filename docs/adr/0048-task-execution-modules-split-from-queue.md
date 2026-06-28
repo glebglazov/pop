@@ -1,6 +1,10 @@
+---
+status: deferred
+---
+
 # Task execution modules split from queue
 
-Status: accepted — deferred/unbuilt
+> ⚠️ **DEFERRED — intended design, not shipped behavior.**
 
 Worktree binding, drain routing, integration, and Implement orchestration were scattered across root `binding/`, `cmd/tasks.go`, and `queue/` (including a `DaemonState.WorktreeBindings` mirror of `bindings.json`). ADR-0036 and ADR-0046 established shared routing semantics; ADR-0038 moved binding lifecycle CLI verbs to `pop tasks` but left implementations under `queue/`.
 

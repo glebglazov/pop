@@ -1,6 +1,8 @@
-# Queue drains share a per-project `pop-queue` window
+---
+status: accepted
+---
 
-Status: accepted
+# Queue drains share a per-project `pop-queue` window
 
 ADR-0029/0031 made Pop own `git worktree add` for **Worktree sets** and bind one checkout per
 set. The first implementation spawned each worktree-set drain into its **own tmux session**, named

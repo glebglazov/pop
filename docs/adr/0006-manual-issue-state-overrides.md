@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Manual issue-state overrides outside the executor
 
 `pop workload` exposes manual commands that move an issue between statuses without the executor: `complete-issue` (Open/Failed/Skipped → Done), `skip-issue` (Open → Skipped), and `reset-issue` extended to accept Skipped (Failed/Skipped → Open). Completion bypasses the Completion sentinel — no agent run, no acceptance-criteria verification, no commit; the human is the verifier and commits their own work. A Skipped issue is never executed yet **satisfies `blocked_by` for its dependents**, and a set whose remaining issues are all Done or Skipped becomes the new terminal status Deferred rather than Done.

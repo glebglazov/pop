@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Workload execution is self-contained and AFK-only
 
 `pop workload` implements its issue executor inside the pop binary. The executor runs eligible AFK issues only; HITL issues remain a human stop condition. Workload artifacts beneath `thoughts/` are updated locally but are not committed with implementation changes.

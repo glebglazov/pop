@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # A no-directive drain persists a default Worktree binding to its chosen checkout
 
-Status: accepted — amends [ADR-0052](0052-drain-checkout-is-chosen-not-auto-provisioned.md) (the no-directive default ran transiently) and redefines the final step of Drain routing established in [ADR-0059](0059-task-set-may-declare-a-worktree-directive.md).
+> **Relates:** amends [ADR-0052](0052-drain-checkout-is-chosen-not-auto-provisioned.md) (the no-directive default ran transiently) and redefines the final step of Drain routing established in [ADR-0059](0059-task-set-may-declare-a-worktree-directive.md).
 
 ## Context
 

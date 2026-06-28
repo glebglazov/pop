@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Integration artifacts render to pop's data dir; agent locations are symlinks
 
 File-based **Integration components** (skills, agent extensions) are rendered per agent into pop's data directory (`~/.local/share/pop/integrations/<agent>/...`, respecting `XDG_DATA_HOME`) and the agent's own location receives a symlink into that tree. Hook-based wiring is excluded — hooks are JSON entries merged into agent settings files, not files pop can own. The render is per agent, not a single shared copy, because agent formats diverge (frontmatter name injection for pi and cursor, flat files for opencode, skill directories for claude).

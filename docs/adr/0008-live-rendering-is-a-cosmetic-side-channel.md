@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Live agent rendering is a cosmetic side-channel
 
 > Refined by [ADR 0016](0016-captured-stream-is-a-durable-telemetry-substrate.md). The invariant below still holds — the live-render parse is never the source of truth — but "cosmetic" undersells what is now the primary user-facing flow. 0016 reframes it: the *captured stream* is the authoritative substrate (for completion assessment and for telemetry), and the live render is one derived view among several.

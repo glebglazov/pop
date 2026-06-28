@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Planning skills are embedded in the binary
 
 The **Workload planning skills** (grill-with-docs, to-prd, to-issues) and the **Pane skill** are `go:embed`-ed into the pop binary, like the existing pane skill content, rather than fetched from an external registry. A skill's version is therefore the binary's version: shipping a skill fix requires a pop release, and users pick it up on their next binary update via **Integration refresh**.

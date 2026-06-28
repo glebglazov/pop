@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # Queue identity and integration target resolve from markers and config, not live git
 
-Status: accepted — extends [ADR-0042](0042-queue-dashboard-scoped-to-task-storage.md) (dashboard discovery) and revisits its "the surviving projects take the existing git-resolution path unchanged" clause for both the dashboard and `Scan`.
+> **Relates:** extends [ADR-0042](0042-queue-dashboard-scoped-to-task-storage.md) (dashboard discovery) and revisits its "the surviving projects take the existing git-resolution path unchanged" clause for both the dashboard and `Scan`.
 
 ## Context
 

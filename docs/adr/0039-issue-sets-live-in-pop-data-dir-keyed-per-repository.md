@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Issue sets live in pop's data dir, keyed per repository
 
 > Supersedes [ADR 0003](./0003-personal-workloads-live-in-a-designated-worktree.md) and [ADR 0004](./0004-workload-target-references-resolve-from-cwd.md).

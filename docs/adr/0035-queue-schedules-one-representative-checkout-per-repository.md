@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # Queue schedules one representative checkout per repository; bindings route per-set and may adopt user worktrees
 
-Status: accepted — amends ADR-0027 (scheduling unit) and reverses the "no auto-adopt" stance of ADR-0028
+> **Relates:** amends ADR-0027 (scheduling unit) and reverses the "no auto-adopt" stance of ADR-0028
 
 ## Context
 

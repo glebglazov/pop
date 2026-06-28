@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # The Queue dashboard discovers its repositories from Task storage, intersected with registered projects
 
-Status: accepted — refines ADR-0035 (scheduling unit) for the read-only dashboard's discovery path
+> **Relates:** refines ADR-0035 (scheduling unit) for the read-only dashboard's discovery path
 
 ## Context
 

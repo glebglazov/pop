@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Personal workloads live in a designated worktree
 
 > Superseded by [ADR 0039](./0039-issue-sets-live-in-pop-data-dir-keyed-per-repository.md): Issue sets moved out of the repository tree into pop's data dir.

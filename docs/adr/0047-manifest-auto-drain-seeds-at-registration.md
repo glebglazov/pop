@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Task manifest auto_drain seeds Task state at first registration
 
 ## Status

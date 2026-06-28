@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # Drain checkout is an explicit choice; pop never auto-provisions a worktree
 
-Status: accepted — supersedes ADR-0046 (worktree-default for unbound drains), amends ADR-0028 (auto-fanout), ADR-0035 (`execution_base` / representative resolution), ADR-0036 (adopt model), and ADR-0051 (integration target)
+> **Relates:** supersedes ADR-0046 (worktree-default for unbound drains), amends ADR-0028 (auto-fanout), ADR-0035 (`execution_base` / representative resolution), ADR-0036 (adopt model), and ADR-0051 (integration target)
 
 ## Context
 

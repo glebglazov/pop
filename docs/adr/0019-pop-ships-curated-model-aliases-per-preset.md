@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Pop ships curated model aliases per preset, not live listings
 
 The recognized-agent catalog (`pop tasks agents`) shows, for each **Agent preset**, a short curated list of model aliases Pop ships in its binary — recommended value first — alongside the preset's binary and PATH availability. The list is a suggestion surface for filling a **Task agent**'s `--model`; it is advisory only and never gates **Manifest** validation. Each preset carries one such list, ordered most-recommended first; the concrete entries live in the code and are not fixed here. There is no live model listing and no model-source provenance: the curated alias list is the only mechanism, exposed to adapters as a plain `[]string`.

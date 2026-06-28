@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # Task sets may declare a worktree directive, applied as a registration seed
 
-Status: accepted — amends [ADR-0052](0052-drain-checkout-is-chosen-not-auto-provisioned.md) (drain-routing precedence) and respects ADR-0035 (machine-specific routing stays out of branch-riding files); builds on [ADR-0036](0036-implement-adopts-its-checkout-into-the-binding-model.md) (adopt/managed binding model).
+> **Relates:** amends [ADR-0052](0052-drain-checkout-is-chosen-not-auto-provisioned.md) (drain-routing precedence) and respects ADR-0035 (machine-specific routing stays out of branch-riding files); builds on [ADR-0036](0036-implement-adopts-its-checkout-into-the-binding-model.md) (adopt/managed binding model).
 
 ## Context
 

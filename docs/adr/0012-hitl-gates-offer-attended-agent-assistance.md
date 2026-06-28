@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # HITL gates offer attended agent assistance
 
 When `pop tasks drain` reaches a **Human-blocked Task set**, execution remains AFK-only but an interactive terminal may show a **HITL gate prompt** instead of only stop-and-advice text. The prompt defaults to **Get agent assistance**, which starts a **HITL assistance session** with a **HITL assistance prompt**; completion and deferral remain explicit human choices in the gate prompt and then let Drain continue. Choosing complete or defer in that menu is the confirmation; Pop does not ask for an additional yes/no prompt.

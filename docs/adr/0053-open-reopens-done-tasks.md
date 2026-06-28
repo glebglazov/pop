@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # Open reopens Done tasks, not just Failed and Skipped
 
-Status: accepted (extends [ADR-0006](0006-manual-issue-state-overrides.md) manual state overrides; inverse of `complete` per the task state machine)
+> **Relates:** extends [ADR-0006](0006-manual-issue-state-overrides.md) manual state overrides; inverse of `complete` per the task state machine
 
 `pop tasks open` previously reset only Failed and Skipped tasks back to Open; a Done task was inert in the picker (`·`) and rejected by the file-reference form. There was no way to undo a completion — most painfully, a human-in-the-loop task marked Done by a premature `pop tasks complete` could not be returned to "awaiting verification." We make `open` accept **any non-Open task — Failed, Skipped, or Done — of any type**, so it is the clean inverse of `complete` and adds the `done → open` edge to the task state machine.
 

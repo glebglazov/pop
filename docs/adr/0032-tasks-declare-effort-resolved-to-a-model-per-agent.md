@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Tasks declare effort; pop resolves it to a model per agent
 
 A task entry in the **Manifest** may carry an optional `effort` key — `light`, `standard`, or `heavy` — that names *how strong a model* the task wants, independent of *which agent* runs it. This is the **model axis**, orthogonal to the agent axis that **Task agent** (ADR-0018) and **Queue agent fallback** already own. pop resolves `effort` to a concrete `--model` for whichever agent was chosen, by consulting that agent's **effort ladder**: a per-tier ordered list of models. pop ships a built-in ladder for `claude` only; every other agent has no built-in ladder and is configured by the user in `config.toml` under `[effort.<agent>]`, which may also override `claude` by full replacement. For the model axis the precedence is: an explicit `--model` (in a `--agent` flag or a **Task agent** pin) wins, then the `effort`-resolved model, then the agent's plain default. `effort` never selects an agent. An absent `effort` key means `standard`; an unknown token is a contract fault that makes the Task set **Malformed**, mirroring ADR-0018. When the chosen agent has no ladder, `effort` is a graceful no-op and the agent runs its own default model.
