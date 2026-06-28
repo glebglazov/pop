@@ -176,6 +176,35 @@ func TestPiLineRendererColorStylesToolTick(t *testing.T) {
 	}
 }
 
+func TestPiLineRendererDropsLeakedClosingThinkTag(t *testing.T) {
+	render := piLineRenderer(false)
+	// qwen via opencode-go leaks the closing </think> tag plus trailing
+	// whitespace into the text channel as its own content block.
+	deltas := []string{"</think>", "\n\n", "         "}
+	for _, d := range deltas {
+		line := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":` + jsonString(d) + `}}`
+		if got, _ := render([]byte(line)); got != "" {
+			t.Fatalf("delta %q should buffer, got %q", d, got)
+		}
+	}
+	if got, _ := render([]byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_end"}}`)); got != "" {
+		t.Fatalf("whitespace-only think-tag block should render nothing, got %q", got)
+	}
+}
+
+func TestPiLineRendererDropsWholeLeakedThinkSpan(t *testing.T) {
+	render := piLineRenderer(false)
+	deltas := []string{"<think>", "weighing options", "</think>", "\n\nThe answer is 42."}
+	for _, d := range deltas {
+		line := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":` + jsonString(d) + `}}`
+		render([]byte(line))
+	}
+	got, _ := render([]byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_end"}}`))
+	if got != "The answer is 42.\n" {
+		t.Fatalf("leaked think span should be stripped, got %q", got)
+	}
+}
+
 // jsonString quotes a Go string as a JSON string literal for use in test lines.
 func jsonString(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)

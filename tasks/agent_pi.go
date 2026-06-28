@@ -2,8 +2,28 @@ package tasks
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 )
+
+// Some reasoning models (e.g. qwen via opencode-go) wrap chain-of-thought in
+// literal <think>...</think> tags. pi routes the reasoning body to the thinking
+// channel (suppressed), but the closing </think> tag plus trailing whitespace
+// leaks into the text channel as its own content block, surfacing as a stray
+// "</think>" entry live. thinkSpanRe drops complete spans (if a whole block ever
+// leaks as text); thinkTagRe drops orphan opening/closing tags left behind when
+// only one side leaks.
+var (
+	thinkSpanRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
+	thinkTagRe  = regexp.MustCompile(`</?think>`)
+)
+
+// stripThinkTags removes leaked reasoning tags from pi prose. The remainder is
+// returned untrimmed so callers decide how to handle whitespace-only results.
+func stripThinkTags(s string) string {
+	s = thinkSpanRe.ReplaceAllString(s, "")
+	return thinkTagRe.ReplaceAllString(s, "")
+}
 
 func normalizePiJSONL(raw string) AgentResult {
 	var transcript string
@@ -36,7 +56,7 @@ func normalizePiJSONL(raw string) AgentResult {
 			}
 		}
 		if message != "" {
-			transcript = message
+			transcript = strings.TrimSpace(stripThinkTags(message))
 		}
 		return true
 	})
@@ -65,7 +85,7 @@ func piLineRenderer(color bool) lineRenderer {
 		if prose.Len() == 0 {
 			return ""
 		}
-		text := strings.TrimRight(prose.String(), "\n")
+		text := strings.TrimSpace(stripThinkTags(prose.String()))
 		prose.Reset()
 		if text == "" {
 			return ""
