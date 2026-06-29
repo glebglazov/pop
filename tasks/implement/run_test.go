@@ -132,8 +132,8 @@ func TestResolveTaskSetRuntimeUnboundBindsCurrentCheckout(t *testing.T) {
 }
 
 // TestResolveTaskSetRuntimeInWorktreeProvisionsAndBinds asserts --in-worktree
-// forks a managed worktree off the trunk, records a provisioned binding, and
-// points the drain at the new checkout (ADR-0052).
+// forks a managed worktree off the current checkout, records a provisioned
+// binding, and points the drain at the new checkout (ADR-0072).
 func TestResolveTaskSetRuntimeInWorktreeProvisionsAndBinds(t *testing.T) {
 	root, d := setupImplementFixture(t)
 
@@ -316,10 +316,113 @@ func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {
 	}
 }
 
-// TestResolveTaskSetRuntimeInWorktreeRefusesWithoutTrunk asserts --in-worktree in
-// a bare repo with no configured trunk refuses with the "set `trunk`" message —
-// there is no canonical fork base to provision from (ADR-0052).
-func TestResolveTaskSetRuntimeInWorktreeRefusesWithoutTrunk(t *testing.T) {
+// TestResolveTaskSetRuntimeInWorktreeForksFromCurrentCheckoutHEAD asserts
+// --in-worktree provisions a managed worktree whose branch starts at the
+// current checkout's HEAD, not the Trunk worktree's (ADR-0072).
+func TestResolveTaskSetRuntimeInWorktreeForksFromCurrentCheckoutHEAD(t *testing.T) {
+	oldWd, _ := os.Getwd()
+	parent := t.TempDir()
+
+	trunkRoot := filepath.Join(parent, "repo")
+	if err := os.MkdirAll(trunkRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@test"},
+		{"config", "user.name", "test"},
+	} {
+		if out, err := runImplementGit(trunkRoot, args...); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	writeImplementFile(t, filepath.Join(trunkRoot, "README.md"), "# trunk\n")
+	if out, err := runImplementGit(trunkRoot, "add", "-A"); err != nil {
+		t.Fatal(err, out)
+	}
+	if out, err := runImplementGit(trunkRoot, "commit", "-m", "init"); err != nil {
+		t.Fatal(err, out)
+	}
+	trunkHead, err := runImplementGit(trunkRoot, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trunkHead = strings.TrimSpace(trunkHead)
+
+	featureWT := filepath.Join(parent, "feature")
+	if out, err := runImplementGit(trunkRoot, "worktree", "add", "-b", "feature", featureWT, "HEAD"); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	writeImplementFile(t, filepath.Join(featureWT, "feature.txt"), "ahead\n")
+	if out, err := runImplementGit(featureWT, "add", "-A"); err != nil {
+		t.Fatal(err, out)
+	}
+	if out, err := runImplementGit(featureWT, "commit", "-m", "feature"); err != nil {
+		t.Fatal(err, out)
+	}
+	currentHead, err := runImplementGit(featureWT, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentHead = strings.TrimSpace(currentHead)
+	if currentHead == trunkHead {
+		t.Fatalf("test setup: feature HEAD %q must differ from trunk HEAD %q", currentHead, trunkHead)
+	}
+
+	if err := os.Chdir(featureWT); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	t.Setenv("XDG_DATA_HOME", filepath.Join(parent, ".xdg"))
+
+	tasksDir := implementTasksDir(t, featureWT)
+	writeImplementThoughts(t, tasksDir, "demo")
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+
+	d := DefaultDeps()
+	d.StdinInteractive = func(io.Reader) bool { return false }
+
+	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
+	if err != nil {
+		t.Fatalf("resolve runtime: %v", err)
+	}
+
+	store, err := binding.Load(d.tasksDeps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), featureWT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, ok := store.Get(binding.Key(id, "demo"))
+	if !ok || !b.Provisioned {
+		t.Fatalf("binding = %+v ok=%v, want provisioned managed binding", b, ok)
+	}
+	if b.RuntimePath != resolved.RuntimeOverride {
+		t.Fatalf("RuntimeOverride = %q, want provisioned worktree %q", resolved.RuntimeOverride, b.RuntimePath)
+	}
+
+	wtHead, err := runImplementGit(b.RuntimePath, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wtHead = strings.TrimSpace(wtHead)
+	if wtHead != currentHead {
+		t.Fatalf("provisioned worktree HEAD %q != current checkout HEAD %q", wtHead, currentHead)
+	}
+	if wtHead == trunkHead {
+		t.Fatalf("provisioned worktree HEAD %q == trunk HEAD %q; want fork from current checkout", wtHead, trunkHead)
+	}
+}
+
+// TestResolveTaskSetRuntimeInWorktreeWorksWithoutTrunk asserts --in-worktree in
+// a bare repo with no configured trunk still provisions from the current
+// checkout's HEAD — trunk is only required for Queue managed provisioning
+// (ADR-0072).
+func TestResolveTaskSetRuntimeInWorktreeWorksWithoutTrunk(t *testing.T) {
 	oldWd, _ := os.Getwd()
 	parent := t.TempDir()
 
@@ -368,8 +471,32 @@ func TestResolveTaskSetRuntimeInWorktreeRefusesWithoutTrunk(t *testing.T) {
 	d.StdinInteractive = func(io.Reader) bool { return false }
 
 	_, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
-	if err == nil || !strings.Contains(err.Error(), "Trunk worktree configured") || !strings.Contains(err.Error(), "trunk = true") {
-		t.Fatalf("err = %v, want \"set trunk\" refusal", err)
+	if err != nil {
+		t.Fatalf("resolve runtime: %v", err)
+	}
+
+	store, err := binding.Load(d.tasksDeps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, ok := store.Get(binding.Key(id, "demo"))
+	if !ok || !b.Provisioned {
+		t.Fatalf("binding = %+v ok=%v, want provisioned managed binding without trunk", b, ok)
+	}
+	currentHead, err := runImplementGit(wt, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wtHead, err := runImplementGit(b.RuntimePath, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(wtHead) != strings.TrimSpace(currentHead) {
+		t.Fatalf("provisioned worktree HEAD %q != current checkout HEAD %q", wtHead, currentHead)
 	}
 }
 

@@ -106,8 +106,9 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 	}
 
 	// --in-worktree is the explicit opt-in to isolation: provision a managed
-	// worktree forked from the trunk, bind it, and drain there (ADR-0052). It
-	// runs before routing so the subsequent route resolves the fresh binding.
+	// worktree forked from the current checkout's HEAD, bind it, and drain there
+	// (ADR-0072). It runs before routing so the subsequent route resolves the
+	// fresh binding.
 	if inWorktree {
 		return provisionInWorktree(d, in, resolved.ProjectPath, taskSetID)
 	}
@@ -140,10 +141,9 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 }
 
 // provisionInWorktree implements `--in-worktree`: it forks a managed worktree
-// from the Trunk worktree's HEAD, records a provisioned Worktree binding for the
-// set, and points the drain at the new checkout. A binding wins — an already
-// bound set is rejected so the operator unbinds to retarget — and a repo with no
-// resolvable trunk refuses, since there is nothing to fork from.
+// from the current checkout's HEAD, records a provisioned Worktree binding for
+// the set, and points the drain at the new checkout. An already bound set is
+// rejected so the operator unbinds to retarget.
 func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID string) (tasks.ResolveInput, error) {
 	td := d.tasksDeps()
 	cfg, _ := d.loadConfig(config.DefaultConfigPath())
@@ -156,19 +156,11 @@ func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID stri
 		return in, fmt.Errorf("tasks implement: task set %s is already bound; run `pop tasks unbind-worktree %s` to retarget --in-worktree", setID, setID)
 	}
 
-	trunkPath, bare, err := binding.ResolveTrunkPath(td, cfg, projectPath)
+	b, err := binding.ProvisionWorktree(td, binding.ManagedWorktreesRoot(td), projectPath, setID, d.now())
 	if err != nil {
 		return in, err
 	}
-	if bare || strings.TrimSpace(trunkPath) == "" {
-		return in, fmt.Errorf("tasks implement: --in-worktree: no Trunk worktree configured; set trunk = true in a global [repo.\"<path>\"] block")
-	}
-
-	b, err := binding.ProvisionWorktree(td, binding.ManagedWorktreesRoot(td), trunkPath, setID, d.now())
-	if err != nil {
-		return in, err
-	}
-	if id, err := tasks.ResolveRepositoryIdentity(td, trunkPath); err == nil {
+	if id, err := tasks.ResolveRepositoryIdentity(td, projectPath); err == nil {
 		b.Project = binding.DetectProject(d.projectDeps(), td, cfg, id)
 	}
 	if err := binding.Put(td, key, b); err != nil {

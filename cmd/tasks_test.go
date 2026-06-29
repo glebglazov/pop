@@ -1110,8 +1110,8 @@ func TestRunTasksCmdUnboundDrainsInCurrentCheckout(t *testing.T) {
 }
 
 // TestRunTasksCmdInWorktreeProvisionsAndBinds asserts `--in-worktree` forks a
-// managed worktree off the trunk and records a provisioned Worktree binding so
-// the set enters the Integration backlog (ADR-0052).
+// managed worktree off the current checkout and records a provisioned Worktree
+// binding (ADR-0072).
 func TestRunTasksCmdInWorktreeProvisionsAndBinds(t *testing.T) {
 	root := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)

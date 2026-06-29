@@ -295,9 +295,10 @@ func ProbeWorktreeDirective(td *tasks.Deps, pd *project.Deps, cfg *config.Config
 // worktree for setID, records a provisioned (pop-owned, torn-down-on-integrate)
 // Worktree binding under key, and returns it. It is the lazy provisioner the
 // `managed` registration directive triggers on the first unbound Queue drain
-// (ADR-0072) — the same fork-from-trunk act as `pop tasks implement --in-worktree`,
-// which is the explicit foreground opt-in. A repo with no resolvable trunk yields
-// ErrNoResolvableTrunk; routing never falls back in place.
+// (ADR-0072). Foreground `pop tasks implement --in-worktree` forks from the
+// current checkout instead; only the Queue has no "current" and uses trunk. A
+// repo with no resolvable trunk yields ErrNoResolvableTrunk; routing never
+// falls back in place.
 func provisionManagedWorktree(req RouteDrainCheckoutRequest, checkout, setID, key string, store *Store) (Binding, error) {
 	trunkPath, bare, err := ResolveTrunkPath(req.TD, req.Config, checkout)
 	if err != nil {
