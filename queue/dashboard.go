@@ -52,9 +52,13 @@ type DashboardRow struct {
 	projectPath        string
 	runtimePath        string
 	paneID         string
-	// doneStillBound is true when a Done set still holds a Worktree binding. The
-	// dashboard keeps such a row visible as a clean-up reminder (ADR-0070).
-	doneStillBound bool
+	// doneStillManagedBound is true when a Done set still holds a pop-provisioned
+	// (managed) Worktree binding. The dashboard keeps such a row visible as a
+	// clean-up reminder until archived or unbound (ADR-0070).
+	doneStillManagedBound bool
+	// destKind selects how the destination column is styled; Worktree holds the
+	// plain label (branch name, "[managed wt]", or "needs bind").
+	destKind dashboardDestKind
 	// parked is true when the set's repeated abnormal terminals have parked it
 	// (derived from Drain history); unpark writes a park-clear event (ADR-0055).
 	parked bool
@@ -530,20 +534,20 @@ func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonStat
 	if err != nil {
 		return nil, err
 	}
+	intents := dashboardWorktreeIntents(d, st.defPath)
 	backoff := d.setBackoffLookup(st.repoCommonDir, delays, now)
 	var rows []DashboardRow
 	for _, taskRow := range refresh.Rows {
-		// A Done set keeps its dashboard row only while it still holds a Worktree
-		// binding, as a clean-up reminder (ADR-0070); the bindings table only ever
-		// holds non-trunk bindings, so a Done set's having a binding is the test.
+		// A Done set keeps its dashboard row only while it still holds a managed
+		// (pop-provisioned) Worktree binding, as a clean-up reminder (ADR-0070).
 		bnd, hasBinding := snap.bindingFor(st.repoKey, taskRow.ID)
-		doneStillBound := taskRow.Status == tasks.StatusDone && hasBinding
-		orphaned := dashboardOrphaned(d, bnd, hasBinding)
 		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
-		if !dashboardShowRow(taskRow, doneStillBound) {
+		doneStillManagedBound := taskRow.Status == tasks.StatusDone && bound && bnd.Provisioned
+		orphaned := dashboardOrphaned(d, bnd, hasBinding)
+		if !dashboardShowRow(taskRow, doneStillManagedBound) {
 			continue
 		}
-		wt := dashboardWorktree(d, snap, state, st.repoKey, taskRow.ID, st.rep, st.repBranch, st.bare)
+		wt := dashboardWorktree(d, snap, intents, st.repoKey, taskRow.ID, taskRow.Status, bnd, bound)
 		parked := false
 		if backoff != nil {
 			parked, _ = backoff(taskRow.ID)
@@ -587,17 +591,18 @@ func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonStat
 			projectPath:    staticProjectPath(st),
 			runtimePath:    wt.runtimePath,
 			paneID:         dashboardPaneID(state, st.repoKey, taskRow.ID),
-			doneStillBound: doneStillBound,
-			parked:         parked,
-			orphaned:       orphaned,
-			bound:          bound,
+			doneStillManagedBound: doneStillManagedBound,
+			parked:                parked,
+			orphaned:              orphaned,
+			bound:                 bound,
+			destKind:              wt.destKind,
 		})
 	}
 	return rows, nil
 }
 
-func dashboardShowRow(row tasks.Row, doneStillBound bool) bool {
-	return row.Status != tasks.StatusDone || doneStillBound
+func dashboardShowRow(row tasks.Row, doneStillManagedBound bool) bool {
+	return row.Status != tasks.StatusDone || doneStillManagedBound
 }
 
 // staticProjectPath returns the repo group's representative checkout, the path
@@ -615,53 +620,99 @@ func dashboardStatus(row tasks.Row) string {
 	return tasks.StatusLabel(row)
 }
 
+type dashboardDestKind int
+
+const (
+	dashboardDestBound dashboardDestKind = iota
+	dashboardDestManagedDirective
+	dashboardDestNeedsBind
+	dashboardDestDoneManagedBound
+)
+
+// dashboardManagedWtStyle colors the [managed wt] destination badge.
+var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+
 type dashboardWorktreeView struct {
 	label       string
 	runtimePath string
+	destKind    dashboardDestKind
 }
 
-// dashboardWorktreeMarker prefixes a branch running in a dedicated (non-trunk)
-// Worktree binding. The representative checkout (trunk) is left unmarked.
-const dashboardWorktreeMarker = "↳ "
+const (
+	dashboardDestLabelManagedWt = "[managed wt]"
+	dashboardDestLabelNeedsBind = "needs bind"
+)
 
-// dashboardWorktree resolves the destination column — where an auto-drain of the
-// set lands under the collapsed routing model (ADR-0052): the bound checkout when
-// a Worktree binding exists (marked), else the trunk worktree (unmarked), else
-// "(no base)" for an unconfigured bare repo. Routing never auto-provisions, so a
-// set with no binding always lands on the trunk and the column says so honestly.
-func dashboardWorktree(d *Deps, snap *dashboardSnapshot, state *DaemonState, repoKey, setID string, rep *projectScan, repBranch string, bare bool) dashboardWorktreeView {
-	if b, ok := snap.bindingFor(repoKey, setID); ok && strings.TrimSpace(b.RuntimePath) != "" {
-		_ = state
-		// A bound set's branch is recorded on its binding row (ADR-0060/0062); a
-		// missing one falls back to a fork-free HEAD-file read, never
-		// `git branch --show-current`.
-		branch := b.Branch
-		if branch == "" {
-			branch = headBranchFromCheckout(d.Tasks, b.RuntimePath, "")
+// dashboardWorktreeIntents loads seeded worktree directives for one definition
+// path in a single store read, keyed by set ID. The per-row destination column
+// consults this map instead of reopening the store for each unbound row.
+func dashboardWorktreeIntents(d *Deps, defPath string) map[string]*tasks.WorktreeDirective {
+	intents := map[string]*tasks.WorktreeDirective{}
+	if d == nil || d.Tasks == nil {
+		return intents
+	}
+	state, err := tasks.LoadGlobalStateWith(d.Tasks, tasks.StatePathFor(defPath))
+	if err != nil {
+		return intents
+	}
+	entry := state.Tasks[defPath]
+	if entry == nil {
+		return intents
+	}
+	for _, set := range entry.TaskSets {
+		if set.WorktreeIntent != nil {
+			intents[set.ID] = set.WorktreeIntent
 		}
-		return dashboardWorktreeView{label: formatDashboardWorktree(branch, true), runtimePath: b.RuntimePath}
 	}
-	if rep != nil {
-		return dashboardWorktreeView{label: formatDashboardWorktree(repBranch, false), runtimePath: rep.RuntimePath}
-	}
-	if bare {
-		return dashboardWorktreeView{label: "(no base)"}
-	}
-	return dashboardWorktreeView{label: "(no base)"}
+	return intents
 }
 
-// formatDashboardWorktree renders a row's checkout as its branch, marking a
-// dedicated (non-trunk) worktree with a leading glyph. The on-disk path is not
-// shown inline; the detail view carries the broader task-set context.
-func formatDashboardWorktree(branch string, worktree bool) string {
+// dashboardWorktree resolves the destination column per ADR-0070/0072: a bound
+// set shows its branch plainly; an unbound set with a managed directive shows a
+// [managed wt] badge (the Queue will provision on drain); an unbound set with no
+// directive shows dim needs bind (the Queue will not drain it). A Done set that
+// still holds a managed binding shows [managed wt <branch>] as a clean-up reminder.
+func dashboardWorktree(d *Deps, snap *dashboardSnapshot, intents map[string]*tasks.WorktreeDirective, repoKey, setID string, status tasks.TaskSetStatus, bnd WorktreeBinding, bound bool) dashboardWorktreeView {
+	if bound {
+		branch := bnd.Branch
+		if branch == "" {
+			branch = headBranchFromCheckout(d.Tasks, bnd.RuntimePath, "")
+		}
+		branch = formatDashboardBranch(branch)
+		kind := dashboardDestBound
+		if status == tasks.StatusDone && bnd.Provisioned {
+			kind = dashboardDestDoneManagedBound
+		}
+		return dashboardWorktreeView{label: branch, runtimePath: bnd.RuntimePath, destKind: kind}
+	}
+	intent := intents[setID]
+	if intent != nil && intent.Managed {
+		return dashboardWorktreeView{label: dashboardDestLabelManagedWt, destKind: dashboardDestManagedDirective}
+	}
+	return dashboardWorktreeView{label: dashboardDestLabelNeedsBind, destKind: dashboardDestNeedsBind}
+}
+
+// formatDashboardBranch normalizes a branch name for the destination column.
+func formatDashboardBranch(branch string) string {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
-		branch = "detached"
-	}
-	if worktree {
-		return dashboardWorktreeMarker + branch
+		return "detached"
 	}
 	return branch
+}
+
+// renderDashboardDest applies destination-column styling to the plain label.
+func renderDashboardDest(kind dashboardDestKind, label string) string {
+	switch kind {
+	case dashboardDestManagedDirective:
+		return dashboardManagedWtStyle.Render(dashboardDestLabelManagedWt)
+	case dashboardDestNeedsBind:
+		return ui.HintStyle.Render(dashboardDestLabelNeedsBind)
+	case dashboardDestDoneManagedBound:
+		return dashboardManagedWtStyle.Render("[managed wt " + label + "]")
+	default:
+		return label
+	}
 }
 
 // dashboardDrain reports "picked up" when a live drain holds the set's checkout,
@@ -3140,7 +3191,7 @@ func dashboardRowValues(row DashboardRow) []string {
 	if row.AutoDrain {
 		badges = append(badges, "Auto-drain")
 	}
-	return []string{row.Project, row.SetID, row.Status, row.Worktree, row.Drain, strings.Join(badges, " ")}
+	return []string{row.Project, row.SetID, row.Status, renderDashboardDest(row.destKind, row.Worktree), row.Drain, strings.Join(badges, " ")}
 }
 
 func dashboardTableLine(values []string, widths []int) string {
