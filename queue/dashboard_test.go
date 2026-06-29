@@ -1949,7 +1949,7 @@ func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 	}
 }
 
-func TestDashboardUnbindManagedTearsDownAndRefreshShowsTrunkWorktree(t *testing.T) {
+func TestDashboardUnbindManagedOnlyForgetsBindingAndKeepsCheckout(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "dashboard-unbind-managed", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
 	})
@@ -1981,11 +1981,11 @@ func TestDashboardUnbindManagedTearsDownAndRefreshShowsTrunkWorktree(t *testing.
 	if got.Noop {
 		t.Fatalf("unbind result = %+v, want success", got)
 	}
-	if _, err := os.Stat(wt); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("managed checkout stat err = %v, want not exist", err)
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("managed checkout should remain: %v", err)
 	}
-	if branch := runGitOutput(t, repo, "branch", "--list", "managed-unbind"); strings.TrimSpace(branch) != "" {
-		t.Fatalf("managed branch still exists: %q", branch)
+	if branch := runGitOutput(t, repo, "branch", "--list", "managed-unbind"); strings.TrimSpace(branch) == "" {
+		t.Fatalf("managed branch was removed")
 	}
 	if len(loadBindingStore(t, d.Tasks)) != 0 {
 		t.Fatalf("bindings = %+v, want cleared", loadBindingStore(t, d.Tasks))
@@ -1993,13 +1993,6 @@ func TestDashboardUnbindManagedTearsDownAndRefreshShowsTrunkWorktree(t *testing.
 	afterManifest := mustReadFile(t, filepath.Join(id.TasksDir, setID, "index.json"))
 	if string(beforeManifest) != string(afterManifest) {
 		t.Fatalf("manifest changed:\nbefore:%s\nafter:%s", beforeManifest, afterManifest)
-	}
-	snap, err := BuildDashboard(d, cfg)
-	if err != nil {
-		t.Fatalf("BuildDashboard: %v", err)
-	}
-	if len(snap.Rows) == 0 || canon(t, d, snap.Rows[0].runtimePath) != canon(t, d, repo) || snap.Rows[0].Worktree != "main" {
-		t.Fatalf("dashboard rows = %+v, want execution base worktree", snap.Rows)
 	}
 }
 

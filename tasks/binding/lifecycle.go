@@ -12,10 +12,7 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-const (
-	unbindConfirmPromptManaged = "Abandon worktree for %s? This removes the bound checkout and branch without integrating. Task statuses are unchanged. [y/N]: "
-	unbindConfirmPromptAdopted = "Abandon binding for %s? This forgets the association; the checkout and branch are kept. Task statuses are unchanged. [y/N]: "
-)
+const unbindConfirmPrompt = "Abandon binding for %s? This forgets the association; the checkout and branch are kept. Task statuses are unchanged. [y/N]: "
 
 // BindWorktreeOptions controls bind-worktree behaviour.
 type BindWorktreeOptions struct {
@@ -211,10 +208,7 @@ func unbindResolvedBinding(td *tasks.Deps, pd *project.Deps, cfg *config.Config,
 			return UnbindWorktreeResult{}, err
 		}
 		if needsConfirm {
-			prompt := fmt.Sprintf(unbindConfirmPromptManaged, setID)
-			if !wt.Provisioned {
-				prompt = fmt.Sprintf(unbindConfirmPromptAdopted, setID)
-			}
+			prompt := fmt.Sprintf(unbindConfirmPrompt, setID)
 			confirmed, err := confirmUnbind(opts.In, out, opts.Yes, prompt)
 			if err != nil {
 				return UnbindWorktreeResult{}, err
@@ -226,25 +220,7 @@ func unbindResolvedBinding(td *tasks.Deps, pd *project.Deps, cfg *config.Config,
 		}
 	}
 
-	var branch string
-	if wt.Provisioned {
-		workingPath, err := resolveTeardownWorkingPath(td, pd, cfg, wt, hooks)
-		if err != nil {
-			return UnbindWorktreeResult{}, err
-		}
-		branch = strings.TrimSpace(wt.Branch)
-		if branch == "" {
-			branch, err = resolveRuntimeBranch(td, wt.RuntimePath)
-			if err != nil {
-				return UnbindWorktreeResult{}, err
-			}
-		}
-		if err := TeardownWorktree(td, workingPath, wt.RuntimePath, branch, true); err != nil {
-			return UnbindWorktreeResult{}, err
-		}
-	} else {
-		branch = strings.TrimSpace(wt.Branch)
-	}
+	branch := strings.TrimSpace(wt.Branch)
 
 	if err := Delete(td, key); err != nil {
 		return UnbindWorktreeResult{}, err
@@ -254,12 +230,32 @@ func unbindResolvedBinding(td *tasks.Deps, pd *project.Deps, cfg *config.Config,
 			return UnbindWorktreeResult{}, err
 		}
 	}
-	if wt.Provisioned {
-		fmt.Fprintf(out, "Unbound %s and removed worktree %s\n", setID, wt.RuntimePath)
-	} else {
-		fmt.Fprintf(out, "Unbound %s (adopted checkout retained at %s)\n", setID, wt.RuntimePath)
-	}
+	fmt.Fprintf(out, "Unbound %s (checkout retained at %s)\n", setID, wt.RuntimePath)
 	return UnbindWorktreeResult{SetID: setID}, nil
+}
+
+// TeardownManagedWorktree removes a managed binding's checkout and branch.
+// It must only be called for provisioned bindings; adopted checkouts are never
+// torn down.
+func TeardownManagedWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, b Binding, hooks LifecycleHooks) error {
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
+	if pd == nil {
+		pd = project.DefaultDeps()
+	}
+	workingPath, err := resolveTeardownWorkingPath(td, pd, cfg, b, hooks)
+	if err != nil {
+		return err
+	}
+	branch := strings.TrimSpace(b.Branch)
+	if branch == "" {
+		branch, err = resolveRuntimeBranch(td, b.RuntimePath)
+		if err != nil {
+			return err
+		}
+	}
+	return TeardownWorktree(td, workingPath, b.RuntimePath, branch, true)
 }
 
 func resolveRuntimeBranch(td *tasks.Deps, runtimePath string) (string, error) {
@@ -328,7 +324,7 @@ func confirmUnbind(in io.Reader, out io.Writer, yes bool, prompt string) (bool, 
 		}
 	}
 	if prompt == "" {
-		prompt = unbindConfirmPromptManaged
+		prompt = unbindConfirmPrompt
 	}
 	fmt.Fprintf(out, "%s", prompt)
 	answer, err := bufio.NewReader(in).ReadString('\n')

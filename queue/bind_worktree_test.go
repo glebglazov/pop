@@ -2,7 +2,6 @@ package queue
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -90,9 +89,9 @@ func TestAbandonAdoptedRetainsCheckout(t *testing.T) {
 	}
 }
 
-// TestAbandonProvisionedTearsDown verifies that abandoning a provisioned binding
-// still removes the worktree and branch.
-func TestAbandonProvisionedTearsDown(t *testing.T) {
+// TestAbandonProvisionedOnlyForgetsBinding verifies that abandoning a provisioned
+// binding drops the association but retains the checkout and branch.
+func TestAbandonProvisionedOnlyForgetsBinding(t *testing.T) {
 	repo := initGitRepoWithBase(t)
 	wt := filepath.Join(t.TempDir(), "provisioned-wt")
 	runGit(t, repo, "worktree", "add", "-b", "provisioned-branch", wt, "HEAD")
@@ -114,14 +113,20 @@ func TestAbandonProvisionedTearsDown(t *testing.T) {
 	d := &Deps{Tasks: td}
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 
-	_, err := AbandonWithOptions(d, cfg, "set-p", io.Discard, AbandonOptions{Yes: true, In: tasks.NonInteractiveReader{}})
+	var out bytes.Buffer
+	_, err := AbandonWithOptions(d, cfg, "set-p", &out, AbandonOptions{Yes: true, In: tasks.NonInteractiveReader{}})
 	if err != nil {
 		t.Fatalf("abandon: %v", err)
 	}
 
-	// Directory must be removed
-	if _, err := os.Stat(wt); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("provisioned worktree should be removed, stat err = %v", err)
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("provisioned worktree must be retained: %v", err)
+	}
+	if branch := runGitOutput(t, repo, "branch", "--list", "provisioned-branch"); strings.TrimSpace(branch) == "" {
+		t.Fatalf("provisioned branch should still exist after abandon")
+	}
+	if !strings.Contains(out.String(), "retained") {
+		t.Fatalf("output = %q, want mention of retained checkout", out.String())
 	}
 }
 

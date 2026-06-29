@@ -2,7 +2,6 @@ package queue
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -82,11 +81,11 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 	if got.Noop {
 		t.Fatalf("result = %+v, want success", got)
 	}
-	if _, err := os.Stat(wt); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("worktree stat err = %v, want not exist", err)
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("worktree should be retained after unbind: %v", err)
 	}
-	if branch := runGitOutput(t, repo, "branch", "--list", "set-done"); strings.TrimSpace(branch) != "" {
-		t.Fatalf("branch still exists: %q", branch)
+	if branch := runGitOutput(t, repo, "branch", "--list", "set-done"); strings.TrimSpace(branch) == "" {
+		t.Fatalf("branch should still exist after unbind")
 	}
 
 	afterBindings := loadBindingStore(t, td)
@@ -99,8 +98,8 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 		t.Fatalf("manifest changed:\nbefore:%s\nafter:%s", beforeManifest, afterManifest)
 	}
 
-	if !strings.Contains(out.String(), "Unbound set-1") {
-		t.Fatalf("output = %q, want clear unbind message", out.String())
+	if !strings.Contains(out.String(), "Unbound set-1") || !strings.Contains(out.String(), "retained") {
+		t.Fatalf("output = %q, want clear unbind message with retained checkout", out.String())
 	}
 }
 

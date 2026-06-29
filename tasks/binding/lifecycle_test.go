@@ -85,7 +85,7 @@ func TestUnbindAdoptedRetainsCheckout(t *testing.T) {
 	}
 }
 
-func TestUnbindProvisionedTearsDown(t *testing.T) {
+func TestUnbindProvisionedRetainsCheckout(t *testing.T) {
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "provisioned-branch")
 	td := lifecycleTestDeps(t)
@@ -97,12 +97,51 @@ func TestUnbindProvisionedTearsDown(t *testing.T) {
 	})
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 
-	_, err := UnbindWorktree(td, nil, cfg, "set-p", UnbindWorktreeOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	var out bytes.Buffer
+	got, err := UnbindWorktree(td, nil, cfg, "set-p", UnbindWorktreeOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, &out)
 	if err != nil {
 		t.Fatalf("unbind: %v", err)
 	}
+	if got.Noop {
+		t.Fatalf("result = %+v, want success", got)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("provisioned worktree must be retained: %v", err)
+	}
+	if branch := runGitOutput(t, repo, "branch", "--list", "provisioned-branch"); strings.TrimSpace(branch) == "" {
+		t.Fatalf("provisioned branch should still exist after unbind")
+	}
+	if len(loadLifecycleBindings(t, td)) != 0 {
+		t.Fatalf("binding = %+v, want cleared", loadLifecycleBindings(t, td))
+	}
+	if !strings.Contains(out.String(), "retained") {
+		t.Fatalf("output = %q, want mention of retained checkout", out.String())
+	}
+	if strings.Contains(out.String(), "removed worktree") {
+		t.Fatalf("output = %q, must not claim worktree removal", out.String())
+	}
+}
+
+func TestTeardownManagedWorktreeRemovesCheckoutAndBranch(t *testing.T) {
+	repo := initAdoptRepo(t)
+	wt := addLinkedWorktree(t, repo, "managed-teardown")
+	td := lifecycleTestDeps(t)
+	b := Binding{
+		RuntimePath: wt,
+		Branch:      "managed-teardown",
+		Project:     filepath.Base(repo),
+		Provisioned: true,
+	}
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	if err := TeardownManagedWorktree(td, nil, cfg, b, LifecycleHooks{}); err != nil {
+		t.Fatalf("TeardownManagedWorktree: %v", err)
+	}
 	if _, err := os.Stat(wt); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("provisioned worktree should be removed, stat err = %v", err)
+		t.Fatalf("managed worktree should be removed, stat err = %v", err)
+	}
+	if branch := runGitOutput(t, repo, "branch", "--list", "managed-teardown"); strings.TrimSpace(branch) != "" {
+		t.Fatalf("managed branch should be deleted, still have %q", branch)
 	}
 }
 
