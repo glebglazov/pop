@@ -139,6 +139,48 @@ output = "auto"
 	}
 }
 
+func TestLoadSessionTemplates(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[[session_templates]]
+name = "dev"
+
+[[session_templates.windows]]
+name = "work"
+
+[session_templates.windows.pane]
+name = "server"
+command = "go test ./..."
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SessionTemplates) != 1 {
+		t.Fatalf("got %d session templates, want 1", len(cfg.SessionTemplates))
+	}
+	tmpl := cfg.SessionTemplates[0]
+	if tmpl.Name != "dev" {
+		t.Fatalf("template name = %q, want dev", tmpl.Name)
+	}
+	if len(tmpl.Windows) != 1 {
+		t.Fatalf("got %d windows, want 1", len(tmpl.Windows))
+	}
+	window := tmpl.Windows[0]
+	if window.Name != "work" {
+		t.Fatalf("window name = %q, want work", window.Name)
+	}
+	if window.Pane == nil {
+		t.Fatal("pane spec did not parse")
+	}
+	if window.Pane.Name != "server" || window.Pane.Command != "go test ./..." {
+		t.Fatalf("pane spec = %#v, want name server and command go test ./...", *window.Pane)
+	}
+}
+
 func TestLoadEffortConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`

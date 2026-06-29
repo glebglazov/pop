@@ -196,6 +196,24 @@ type TaskGitConfig struct {
 	CommitConfigOverrides []string `toml:"commit_config_overrides"`
 }
 
+// SessionTemplate is a named blueprint for tmux windows and panes. This first
+// slice supports one named window with one leaf Pane spec; split trees and
+// multi-window templates are intentionally deferred.
+type SessionTemplate struct {
+	Name    string                  `toml:"name"`
+	Windows []SessionTemplateWindow `toml:"windows"`
+}
+
+type SessionTemplateWindow struct {
+	Name string                   `toml:"name"`
+	Pane *SessionTemplatePaneSpec `toml:"pane"`
+}
+
+type SessionTemplatePaneSpec struct {
+	Name    string `toml:"name"`
+	Command string `toml:"command"`
+}
+
 // EffortModel is one entry in an effort ladder. Reasoning is optional because
 // not every agent has a reasoning-effort mechanism.
 type EffortModel struct {
@@ -421,11 +439,12 @@ type Config struct {
 	Dashboard      *DashboardConfig      `toml:"dashboard"`
 	// The TOML key stays "workload" for backward compatibility with existing
 	// user config files; the rename is internal only.
-	Task    *TaskConfig             `toml:"workload"`
-	Effort  map[string]EffortConfig `toml:"effort"`
-	Queue        *QueueConfig        `toml:"queue"`
-	Updates      *UpdatesConfig      `toml:"updates"`
-	Integrations *IntegrationsConfig `toml:"integrations"`
+	Task             *TaskConfig             `toml:"workload"`
+	Effort           map[string]EffortConfig `toml:"effort"`
+	SessionTemplates []SessionTemplate       `toml:"session_templates"`
+	Queue            *QueueConfig            `toml:"queue"`
+	Updates          *UpdatesConfig          `toml:"updates"`
+	Integrations     *IntegrationsConfig     `toml:"integrations"`
 	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
 	// The key is canonicalized (~ expanded, symlinks resolved) at resolution
 	// time; any worktree path or bare dir of the same repo resolves to the

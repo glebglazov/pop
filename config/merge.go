@@ -148,6 +148,9 @@ func mergeConfigOverlay(dst, src *Config, md toml.MetaData) {
 	if md.IsDefined("effort") {
 		dst.Effort = cloneEffortMap(src.Effort)
 	}
+	if md.IsDefined("session_templates") {
+		dst.SessionTemplates = cloneSessionTemplates(src.SessionTemplates)
+	}
 	if md.IsDefined("queue") {
 		dst.Queue = cloneQueueConfig(src.Queue)
 	}
@@ -204,6 +207,27 @@ func cloneIntegrationsConfig(src *IntegrationsConfig) *IntegrationsConfig {
 		Skills:       append([]string(nil), src.Skills...),
 		SkillsPrefix: prefix,
 	}
+}
+
+func cloneSessionTemplates(src []SessionTemplate) []SessionTemplate {
+	if src == nil {
+		return nil
+	}
+	out := make([]SessionTemplate, len(src))
+	for i, tmpl := range src {
+		out[i] = SessionTemplate{
+			Name:    tmpl.Name,
+			Windows: make([]SessionTemplateWindow, len(tmpl.Windows)),
+		}
+		for j, window := range tmpl.Windows {
+			out[i].Windows[j].Name = window.Name
+			if window.Pane != nil {
+				pane := *window.Pane
+				out[i].Windows[j].Pane = &pane
+			}
+		}
+	}
+	return out
 }
 
 func integrationsSkillsFindings(path string, integrations *IntegrationsConfig, md toml.MetaData) []Finding {
