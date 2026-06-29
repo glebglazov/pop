@@ -84,7 +84,6 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 		"Queued ready sets:",
 		"waiting [worktree-ready]: waiting ready set set-ready",
 		"Queue: 1 running, 1 queued",
-		"Integration: none awaiting",
 		"Scan errors:",
 		"idle: /repo/idle/.pop.toml: expected value",
 	} {
@@ -107,7 +106,7 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 // standalone journal file (ADR-0055).
 func TestBuildLogFromStore(t *testing.T) {
 	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	commonDir := testRepoCommonDir(t, td, repo)
 
 	// A drain that quota-paused: contributes a spawn and a quota_paused outcome.
@@ -150,7 +149,7 @@ func TestBuildLogFromStore(t *testing.T) {
 
 func TestRecordPinnedQuotaCooldownsBacksOffPinnedQuotaSet(t *testing.T) {
 	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	key := testScopedKeyFor(t, td, repo, repo, "set-1")
 	writtenAt := time.Now().UTC()
 	d := &Deps{
@@ -197,7 +196,7 @@ func TestRecordPinnedQuotaCooldownsBacksOffPinnedQuotaSet(t *testing.T) {
 
 func TestRecordPinnedQuotaCooldownsFromResetAt(t *testing.T) {
 	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	key := testScopedKeyFor(t, td, repo, repo, "set-1")
 	resetAt := time.Now().UTC().Add(45 * time.Minute).Truncate(time.Second)
 	d := &Deps{
@@ -239,7 +238,7 @@ func TestRecordPinnedQuotaCooldownsFromResetAt(t *testing.T) {
 // and, once elapsed, never re-blocks the set.
 func TestRecordPinnedQuotaCooldownsIdempotent(t *testing.T) {
 	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	key := testScopedKeyFor(t, td, repo, repo, "set-1")
 	writtenAt := time.Now().UTC()
 	d := &Deps{
@@ -306,7 +305,7 @@ func TestAgentQuotaCooldownUntilPolicy(t *testing.T) {
 
 func TestRecordPinnedQuotaCooldownsDefaultQuotaDoesNotBackOffSet(t *testing.T) {
 	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	key := testScopedKeyFor(t, td, repo, repo, "set-1")
 	d := &Deps{
 		Tasks: td,
@@ -383,7 +382,7 @@ func seedAbnormalDrain(t *testing.T, td *tasks.Deps, runtimePath, setID string) 
 
 func TestCrashBackoffEscalatesThenParksFromDrainHistory(t *testing.T) {
 	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	commonDir := testRepoCommonDir(t, td, repo)
 	delays := []time.Duration{time.Minute, 5 * time.Minute}
 
@@ -431,7 +430,7 @@ func TestCrashBackoffEscalatesThenParksFromDrainHistory(t *testing.T) {
 
 func TestCleanTerminalResetsBackoffCountFromDrainHistory(t *testing.T) {
 	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	commonDir := testRepoCommonDir(t, td, repo)
 
 	seedAbnormalDrain(t, td, repo, "set-1")
@@ -464,7 +463,7 @@ func TestCleanTerminalResetsBackoffCountFromDrainHistory(t *testing.T) {
 
 func TestUnparkDashboardRowClearsPark(t *testing.T) {
 	td := queueDataDeps(t)
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	commonDir := testRepoCommonDir(t, td, repo)
 	delays := []time.Duration{time.Minute}
 
@@ -495,7 +494,6 @@ func TestUnparkDashboardRowClearsPark(t *testing.T) {
 }
 
 func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
-	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	repoKey := "test-repo"
 	key := setScopedKey(repoKey, "set-1")
 	td := queueDataDeps(t)
@@ -504,15 +502,6 @@ func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
 			Project:     "pop",
 			RuntimePath: "/runtime",
 			Branch:      "set-1",
-		},
-	})
-	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
-		key: {
-			Project:     "pop",
-			RuntimePath: "/runtime",
-			SetID:       "set-1",
-			Status:      MergeabilityConflicts,
-			CheckedAt:   now,
 		},
 	})
 	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{{
@@ -531,11 +520,9 @@ func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
 	for _, want := range []string{
 		"set-1",
 		"Blocked:",
-		"Awaiting integration:",
 		"Active worktrees:",
-		"pop: set-1 branch=set-1 at /runtime — conflicts",
+		"pop: set-1 branch=set-1 at /runtime — bound",
 		"pop: set-1 parked",
-		"integrate: pop tasks integrate set-1",
 	} {
 		if !strings.Contains(statusText, want) {
 			t.Fatalf("status output missing %q:\n%s", want, statusText)

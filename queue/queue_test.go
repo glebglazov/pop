@@ -15,7 +15,6 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
-	"github.com/glebglazov/pop/tasks/integration"
 )
 
 func TestSelectReadySet(t *testing.T) {
@@ -200,13 +199,16 @@ func TestDecideProjectSelectsHighestPriority(t *testing.T) {
 	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
 
 	if dec.Busy || dec.Err != nil {
-		t.Fatalf("idle project with ready work should be actionable, got %+v", dec)
+		t.Fatalf("idle project with ready work should not be busy/errored, got %+v", dec)
 	}
-	if dec.TaskSetID != "top" {
-		t.Fatalf("expected highest-priority ready set 'top', got %q", dec.TaskSetID)
+	// The highest-priority ready set is selected first, but unbound and carrying
+	// no worktree directive it is not Queue-drainable (ADR-0070/0072): it is
+	// surfaced as needs-bind rather than dispatched.
+	if dec.Reason != needsBindReason || dec.BlockedSetID != "top" {
+		t.Fatalf("expected needs-bind skip for highest-priority set 'top', got %+v", dec)
 	}
-	if !dec.Actionable() {
-		t.Fatalf("expected actionable decision, got %+v", dec)
+	if dec.Actionable() {
+		t.Fatalf("an unbound no-directive set must not be actionable: %+v", dec)
 	}
 }
 
@@ -224,8 +226,10 @@ func TestDecideProjectSelectsOnlyAutoDrainReadySets(t *testing.T) {
 
 	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
 
-	if dec.TaskSetID != "marked" {
-		t.Fatalf("TaskSetID = %q, want marked; decision=%+v", dec.TaskSetID, dec)
+	// Only the auto-drain set is a Queue candidate; unbound and directive-free it
+	// surfaces as needs-bind rather than dispatching (ADR-0070/0072).
+	if dec.Reason != needsBindReason || dec.BlockedSetID != "marked" {
+		t.Fatalf("want needs-bind skip for auto-drain set 'marked', got %+v", dec)
 	}
 
 	d.Refresh = func(defPath string) (*tasks.RefreshResult, error) {
@@ -324,7 +328,7 @@ func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 	// duplicate picked-up line).
 	xdg := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", xdg)
-	root := initMergeabilityRepo(t)
+	root := initGitRepoWithBase(t)
 	td := queueDataDeps(t)
 	td.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
 	d := &Deps{
@@ -434,6 +438,7 @@ func TestScanRegisteredReadySetIsDispatchable(t *testing.T) {
 		Project:    project.DefaultDeps(),
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
 	}
+	bindSetInPlace(t, d, repo, setID)
 
 	decisions, err := Scan(d, cfg)
 	if err != nil {
@@ -512,8 +517,11 @@ func TestDecideProjectDispatchesKeepsSingleInPlaceDrain(t *testing.T) {
 
 	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, &DaemonState{Version: 1}, time.Now())
 
-	if len(decisions) != 1 || !decisions[0].Actionable() || decisions[0].TaskSetID != "top" {
-		t.Fatalf("non-worktree-ready dispatches = %+v, want one in-place top drain", decisions)
+	// Non-worktree-ready still collapses to a single set (the highest priority),
+	// but unbound and directive-free it is surfaced as needs-bind rather than
+	// dispatched in-place (ADR-0070/0072) — never a multi-set fan-out.
+	if len(decisions) != 1 || decisions[0].Actionable() || decisions[0].Reason != needsBindReason || decisions[0].BlockedSetID != "top" {
+		t.Fatalf("non-worktree-ready dispatches = %+v, want one needs-bind skip for top", decisions)
 	}
 }
 
@@ -1436,33 +1444,6 @@ func loadBindingStore(t *testing.T, td *tasks.Deps) map[string]WorktreeBinding {
 	out := make(map[string]WorktreeBinding, len(store.Bindings))
 	for k, v := range store.Bindings {
 		out[k] = v
-	}
-	return out
-}
-
-func seedMergeabilityStore(t *testing.T, td *tasks.Deps, records map[string]MergeabilityRecord) {
-	t.Helper()
-	store := &integration.Store{}
-	for key, rec := range records {
-		store.Put(key, integration.Record(rec))
-	}
-	if err := integration.Save(td, store); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func loadMergeabilityStore(t *testing.T, td *tasks.Deps) map[string]MergeabilityRecord {
-	t.Helper()
-	store, err := integration.Load(td)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if store == nil || len(store.Records) == 0 {
-		return nil
-	}
-	out := make(map[string]MergeabilityRecord, len(store.Records))
-	for k, v := range store.Records {
-		out[k] = MergeabilityRecord(v)
 	}
 	return out
 }

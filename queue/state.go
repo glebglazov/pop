@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/tasks/binding"
-	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -18,7 +17,7 @@ import (
 // cooldown timers and drain panes. Abnormal-driven backoff and parking are no
 // longer persisted here — they are derived from Drain history plus a durable
 // park-clear event (ADR-0055). Worktree bindings and mergeability live in the
-// shared per-repository stores owned by tasks/binding and tasks/integration.
+// shared per-repository store owned by tasks/binding.
 type DaemonState struct {
 	Version     int                  `json:"version"`
 	UpdatedAt   time.Time            `json:"updated_at,omitempty"`
@@ -55,15 +54,6 @@ func bindingProvisioned(d *tasks.Deps, key string) bool {
 func bindingShouldTeardown(d *tasks.Deps, key string) bool {
 	return binding.ShouldTeardown(d, key)
 }
-
-const (
-	MergeabilityClean     = integration.StatusClean
-	MergeabilityConflicts = integration.StatusConflicts
-)
-
-// MergeabilityRecord records whether a DONE set branch can be textually merged
-// into the working branch.
-type MergeabilityRecord = integration.Record
 
 // bindingForSet returns the shared-store binding for (repoKey, setID).
 func bindingForSet(d *tasks.Deps, repoKey, setID string) (WorktreeBinding, bool) {
@@ -109,8 +99,7 @@ func ReadDaemonState(d *tasks.Deps) (*DaemonState, error) {
 	}
 	var envelope struct {
 		DaemonState
-		LegacyBindings     map[string]WorktreeBinding    `json:"worktree_bindings,omitempty"`
-		LegacyMergeability map[string]MergeabilityRecord `json:"mergeability,omitempty"`
+		LegacyBindings map[string]WorktreeBinding `json:"worktree_bindings,omitempty"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, fmt.Errorf("parse queue daemon state: %w", err)
@@ -119,15 +108,6 @@ func ReadDaemonState(d *tasks.Deps) (*DaemonState, error) {
 	migrateDaemonState(&state)
 	if len(envelope.LegacyBindings) > 0 {
 		if err := migrateLegacyBindings(d, envelope.LegacyBindings); err != nil {
-			return nil, err
-		}
-	}
-	if len(envelope.LegacyMergeability) > 0 {
-		legacy := make(map[string]integration.Record, len(envelope.LegacyMergeability))
-		for k, v := range envelope.LegacyMergeability {
-			legacy[k] = integration.Record(v)
-		}
-		if err := integration.MigrateLegacyFromDaemonState(d, legacy); err != nil {
 			return nil, err
 		}
 	}

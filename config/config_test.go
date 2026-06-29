@@ -540,21 +540,18 @@ crash_retry_delays = ["10s", "1m", "5m"]
 	}
 }
 
-func TestLoadRepoConfigAutoMergeClean(t *testing.T) {
+func TestLoadRepoConfigDirectives(t *testing.T) {
 	tests := []struct {
-		name          string
-		body          *string
-		wantAutoMerge bool
-		wantErr       string
+		name    string
+		body    *string
+		wantErr string
 	}{
 		{name: "absent"},
-		{name: "auto merge present true", body: strPtr("auto_merge_clean = true\n"), wantAutoMerge: true},
-		{name: "auto merge present false", body: strPtr("auto_merge_clean = false\n")},
 		{name: "worktree_ready causes error", body: strPtr("worktree_ready = true\n"), wantErr: "worktree_ready was removed"},
 		{name: "execution_base causes error", body: strPtr("execution_base = true\n"), wantErr: "execution_base was renamed to trunk"},
 		{name: "queue_base causes error", body: strPtr("queue_base = true\n"), wantErr: "queue_base was renamed to trunk"},
 		{name: "trunk in pop.toml causes error", body: strPtr("trunk = true\n"), wantErr: "trunk is only valid in a global"},
-		{name: "malformed", body: strPtr("auto_merge_clean =\n"), wantErr: ".pop.toml"},
+		{name: "malformed", body: strPtr("trunk =\n"), wantErr: ".pop.toml"},
 	}
 
 	for _, tt := range tests {
@@ -570,16 +567,13 @@ func TestLoadRepoConfigAutoMergeClean(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
 				}
-				if got.AutoMergeClean {
+				if got.Trunk {
 					t.Fatalf("malformed config must degrade to zero repo config, got %+v", got)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
-			}
-			if got.AutoMergeClean != tt.wantAutoMerge {
-				t.Fatalf("AutoMergeClean = %v, want %v", got.AutoMergeClean, tt.wantAutoMerge)
 			}
 		})
 	}
@@ -595,7 +589,7 @@ func TestPopTOMLPresenceDoesNotRegisterProject(t *testing.T) {
 	if err := os.MkdirAll(unregistered, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(unregistered, ".pop.toml"), []byte("auto_merge_clean = true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(unregistered, ".pop.toml"), []byte("# pop repo config\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1913,7 +1907,6 @@ projects = [{ path = "/main" }]
 		writeFile("private.toml", `
 [repo."/home/user/secret"]
 trunk = true
-auto_merge_clean = true
 `)
 		configPath := writeFile("config.toml", `
 includes = ["private.toml"]
@@ -1930,9 +1923,6 @@ projects = [{ path = "/main" }]
 		}
 		if block.Trunk == nil || !*block.Trunk {
 			t.Error("trunk should be true")
-		}
-		if block.AutoMergeClean == nil || !*block.AutoMergeClean {
-			t.Error("auto_merge_clean should be true")
 		}
 		if len(cfg.Warnings) != 0 {
 			t.Errorf("expected no warnings, got: %v", cfg.Warnings)
@@ -2682,10 +2672,6 @@ func makeFSWithBare(bareDir string) *deps.MockFileSystem {
 
 func TestResolveRepoConfigPrecedence(t *testing.T) {
 	root := t.TempDir()
-	// Write .pop.toml at root with auto_merge_clean = true (trunk cannot be set in .pop.toml)
-	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("auto_merge_clean = true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
 	real := deps.NewRealFileSystem()
 	d := &Deps{FS: &deps.MockFileSystem{
@@ -2695,8 +2681,7 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 		UserHomeDirFunc:  real.UserHomeDir,
 	}}
 
-	t.Run("global override wins over pop.toml", func(t *testing.T) {
-		// Override sets trunk = true; auto_merge_clean not in override → .pop.toml wins
+	t.Run("global override sets trunk", func(t *testing.T) {
 		cfg := &Config{
 			Repo: map[string]RepoOverrideConfig{
 				root: {Trunk: boolPtr(true)},
@@ -2709,12 +2694,9 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 		if !got.Trunk {
 			t.Errorf("Trunk = false, want true (override wins)")
 		}
-		if !got.AutoMergeClean {
-			t.Errorf("AutoMergeClean = false, want true (.pop.toml wins when override absent)")
-		}
 	})
 
-	t.Run("no override uses pop.toml", func(t *testing.T) {
+	t.Run("no override yields defaults", func(t *testing.T) {
 		cfg := &Config{}
 		got, err := cfg.ResolveRepoConfig(d, root)
 		if err != nil {
@@ -2722,9 +2704,6 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 		}
 		if got.Trunk {
 			t.Errorf("Trunk = true, want false (no override)")
-		}
-		if !got.AutoMergeClean {
-			t.Errorf("AutoMergeClean = false, want true (.pop.toml)")
 		}
 	})
 
@@ -2738,7 +2717,7 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Trunk || got.AutoMergeClean {
+		if got.Trunk {
 			t.Errorf("expected zero defaults, got %+v", got)
 		}
 	})
@@ -2768,40 +2747,6 @@ func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
 	}
 }
 
-func TestResolveRepoConfigCanonicalizationBareRepo(t *testing.T) {
-	// A bare repo at /bare with worktrees at /bare/main and /bare/feature.
-	// A block keyed by /bare/main should propagate auto_merge_clean to /bare/feature too
-	// (auto_merge_clean is repo-wide; trunk is per-checkout and does not propagate).
-	bareDir := "/bare"
-	d := &Deps{FS: makeFSWithBare(bareDir)}
-
-	cfg := &Config{
-		Repo: map[string]RepoOverrideConfig{
-			bareDir + "/main": {AutoMergeClean: boolPtr(true)},
-		},
-	}
-
-	// Both worktrees should see auto_merge_clean = true (repo-wide propagation)
-	for _, checkout := range []string{bareDir + "/main", bareDir + "/feature"} {
-		got, err := cfg.ResolveRepoConfig(d, checkout)
-		if err != nil {
-			t.Fatalf("checkout=%q: unexpected error: %v", checkout, err)
-		}
-		if !got.AutoMergeClean {
-			t.Errorf("checkout=%q: AutoMergeClean = false, want true", checkout)
-		}
-	}
-
-	// Bare dir itself also resolves to same identity
-	got, err := cfg.ResolveRepoConfig(d, bareDir)
-	if err != nil {
-		t.Fatalf("bare dir: unexpected error: %v", err)
-	}
-	if !got.AutoMergeClean {
-		t.Errorf("bare dir: AutoMergeClean = false, want true")
-	}
-}
-
 func TestResolveRepoConfigTrunkPerCheckout(t *testing.T) {
 	// trunk=true block keyed by /bare/main must NOT propagate to /bare/feature.
 	bareDir := "/bare"
@@ -2809,7 +2754,7 @@ func TestResolveRepoConfigTrunkPerCheckout(t *testing.T) {
 
 	cfg := &Config{
 		Repo: map[string]RepoOverrideConfig{
-			bareDir + "/main": {Trunk: boolPtr(true), AutoMergeClean: boolPtr(true)},
+			bareDir + "/main": {Trunk: boolPtr(true)},
 		},
 	}
 
@@ -2820,9 +2765,6 @@ func TestResolveRepoConfigTrunkPerCheckout(t *testing.T) {
 	if !mainGot.Trunk {
 		t.Errorf("main: Trunk = false, want true (keyed checkout)")
 	}
-	if !mainGot.AutoMergeClean {
-		t.Errorf("main: AutoMergeClean = false, want true")
-	}
 
 	featureGot, err := cfg.ResolveRepoConfig(d, bareDir+"/feature")
 	if err != nil {
@@ -2830,9 +2772,6 @@ func TestResolveRepoConfigTrunkPerCheckout(t *testing.T) {
 	}
 	if featureGot.Trunk {
 		t.Errorf("feature: Trunk = true, want false (not the keyed checkout)")
-	}
-	if !featureGot.AutoMergeClean {
-		t.Errorf("feature: AutoMergeClean = false, want true (repo-wide override still applies)")
 	}
 }
 

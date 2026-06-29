@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -39,18 +38,6 @@ type IdleProject struct {
 	ProjectConfigError string
 }
 
-// AwaitingIntegrationSet is a DONE set whose branch has not been integrated by
-// queue. Mergeability is advisory and recomputed when the DONE outcome is seen.
-type AwaitingIntegrationSet struct {
-	Project     string
-	SetID       string
-	RuntimePath string
-	Status      string
-	Target      string
-	Source      string
-	CheckedAt   time.Time
-}
-
 // SkippedRepo is a repository the Queue refused to schedule because it could
 // resolve no representative checkout (a bare repo with no Trunk worktree and no
 // per-set Worktree binding). It is reported, never scheduled (ADR-0035).
@@ -64,7 +51,6 @@ type StatusSnapshot struct {
 	PickedUp             []PickedUpSet
 	Idle                 []IdleProject
 	Skipped              []SkippedRepo
-	AwaitingIntegration  []AwaitingIntegrationSet
 	DaemonState          *DaemonState
 	ActiveAgentCooldowns map[string]time.Time
 	Tasks                *tasks.Deps
@@ -139,21 +125,6 @@ func statusFromDecisions(d *Deps, decisions []Decision, state *DaemonState) (Sta
 	sort.SliceStable(snap.PickedUp, func(i, j int) bool { return snap.PickedUp[i].Project < snap.PickedUp[j].Project })
 	sort.SliceStable(snap.Idle, func(i, j int) bool { return snap.Idle[i].Project < snap.Idle[j].Project })
 	sort.SliceStable(snap.Skipped, func(i, j int) bool { return snap.Skipped[i].Project < snap.Skipped[j].Project })
-	records, err := integration.AwaitingIntegration(d.Tasks)
-	if err != nil {
-		return StatusSnapshot{}, err
-	}
-	for _, rec := range records {
-		snap.AwaitingIntegration = append(snap.AwaitingIntegration, AwaitingIntegrationSet{
-			Project:     rec.Project,
-			SetID:       rec.SetID,
-			RuntimePath: rec.RuntimePath,
-			Status:      rec.Status,
-			Target:      rec.Target,
-			Source:      rec.Source,
-			CheckedAt:   rec.CheckedAt,
-		})
-	}
 	return snap, nil
 }
 
@@ -172,17 +143,6 @@ func statusProjectLabel(project string, worktreeReady bool, configError string) 
 		label += " [.pop.toml error: " + configError + "]"
 	}
 	return label
-}
-
-func mergeabilityLabel(status string) string {
-	switch status {
-	case MergeabilityClean:
-		return "merges clean"
-	case MergeabilityConflicts:
-		return "conflicts"
-	default:
-		return "mergeability unknown"
-	}
 }
 
 const DrainOutcomeCrashed tasks.DrainOutcome = "crashed"

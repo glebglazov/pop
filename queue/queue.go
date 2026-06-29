@@ -21,7 +21,6 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
-	"github.com/glebglazov/pop/tasks/integration"
 )
 
 const drainWindowName = "pop-queue"
@@ -53,9 +52,6 @@ type Deps struct {
 	// transitioning dead-PID running Drains to crashed. Defaults to
 	// tasks.ReconcileDrains.
 	Reconcile func() (int, error)
-	// ComputeMergeability dry-runs merging a completed runtime branch into the
-	// working checkout. Defaults to git merge-tree.
-	ComputeMergeability func(workingPath, runtimePath string) (MergeabilityRecord, error)
 	// ToggleAutoDrain flips a registered Task-set auto-drain bit in Task state.
 	// Defaults to tasks.ToggleAutoDrainWith.
 	ToggleAutoDrain func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error)
@@ -186,14 +182,6 @@ func (d *Deps) reconcile() {
 	_, _ = tasks.ReconcileDrains(d.Tasks)
 }
 
-func (d *Deps) computeMergeability(workingPath, runtimePath string) (MergeabilityRecord, error) {
-	if d.ComputeMergeability != nil {
-		return d.ComputeMergeability(workingPath, runtimePath)
-	}
-	rec, err := integration.Compute(d.Tasks, workingPath, runtimePath)
-	return mergeabilityRecordFromIntegration(rec), err
-}
-
 func (d *Deps) toggleAutoDrain(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {
 	if d.ToggleAutoDrain != nil {
 		return d.ToggleAutoDrain(defPath, statePath, setID)
@@ -243,21 +231,13 @@ func (d *Deps) completeDetailTask(defPath, taskPath string) error {
 	if td == nil {
 		td = tasks.DefaultDeps()
 	}
-	result, err := tasks.CompleteTaskWith(td, d.projectDeps(), d.loadConfig(), tasks.CompleteTaskOptions{
+	_, err := tasks.CompleteTaskWith(td, d.projectDeps(), d.loadConfig(), tasks.CompleteTaskOptions{
 		ResolveInput: d.resolveInput(defPath),
 		TaskPath:     taskPath,
 	})
 	if err != nil {
 		return err
 	}
-	// Record Mergeability when this completion concluded a worktree-bound set,
-	// so the dashboard backlog shows a merge verdict rather than "unknown"
-	// (ADR-0051). Best-effort and silent: the completion already succeeded,
-	// Mergeability is recomputed at integrate time, and the dashboard runs an
-	// alt-screen TUI where a stderr warning would corrupt the display.
-	id := integration.DefaultDeps()
-	id.Tasks = td
-	_ = integration.RecordCompletionMergeability(id, result.ProjectPath, result.TaskSetID, result.Refresh)
 	return nil
 }
 
@@ -723,6 +703,7 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 	if !dec.WorktreeReady && len(ids) > 1 {
 		ids = ids[:1]
 	}
+	bindings, _ := binding.AllBindings(d.Tasks)
 	for _, id := range ids {
 		if runningSets[id] {
 			continue
@@ -734,6 +715,18 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 			decisions = append(decisions, directiveConfigDecision(dec, id, msg))
 			continue
 		}
+		// The Queue routes only bound sets and sets carrying a worktree directive
+		// (ADR-0072). An unbound, no-directive set is not Queue-drainable: with the
+		// Integration-target fallback gone (ADR-0070) there is no checkout to invent,
+		// so it is skipped rather than silently landed on the representative (trunk).
+		// Task 08 surfaces it as a needs-bind fault.
+		if !queueDrainable(d, scan.DefinitionPath, repoKey, id, bindings) {
+			skip := dec
+			skip.Reason = needsBindReason
+			skip.BlockedSetID = id
+			decisions = append(decisions, skip)
+			continue
+		}
 		action := dec
 		action.TaskSetID = id
 		decisions = append(decisions, action)
@@ -743,6 +736,25 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 		return []Decision{dec}
 	}
 	return decisions
+}
+
+// needsBindReason is the Decision reason for an unbound, no-directive set the
+// Queue refuses to route (ADR-0070/0072). It is reported, never dispatched; the
+// human binds a worktree (or authors a directive) to make it Queue-drainable.
+const needsBindReason = "unbound set with no worktree directive; bind a worktree to drain it"
+
+// queueDrainable reports whether the Queue may route setID: it has either an
+// existing Worktree binding or an authored worktree directive (ADR-0072). An
+// unbound, no-directive set is not routable — the Queue never invents a checkout.
+func queueDrainable(d *Deps, defPath, repoKey, setID string, bindings map[string]WorktreeBinding) bool {
+	if b, ok := bindings[setScopedKey(repoKey, setID)]; ok && strings.TrimSpace(b.RuntimePath) != "" {
+		return true
+	}
+	if defPath == "" {
+		return false
+	}
+	intent, err := tasks.RegisteredWorktreeIntent(d.Tasks, defPath, setID)
+	return err == nil && intent != nil
 }
 
 func appendOrOnly(decisions []Decision, dec Decision) []Decision {

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/tasks/binding"
-	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -25,7 +24,6 @@ type RunView struct {
 	Queued              []IdleProject
 	Blocked             []BlockedItem
 	Unverified          []UnverifiedItem
-	AwaitingIntegration []AwaitingIntegrationSet
 	WorktreeBindings    []WorktreeBindingView
 	Skipped             []SkippedRepo
 	IdleCount           int
@@ -39,7 +37,6 @@ type WorktreeBindingView struct {
 	Branch      string
 	RuntimePath string
 	Phase       string
-	MergeStatus string
 	PID         int
 }
 
@@ -66,10 +63,9 @@ func newRunOutputState() *runOutputState {
 // BuildRunView derives the queue run view from a status snapshot.
 func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 	view := RunView{
-		Running:             append([]PickedUpSet(nil), snap.PickedUp...),
-		AwaitingIntegration: append([]AwaitingIntegrationSet(nil), snap.AwaitingIntegration...),
-		Skipped:             append([]SkippedRepo(nil), snap.Skipped...),
-		ScanErrors:          map[string]string{},
+		Running:    append([]PickedUpSet(nil), snap.PickedUp...),
+		Skipped:    append([]SkippedRepo(nil), snap.Skipped...),
+		ScanErrors: map[string]string{},
 	}
 	blockedProjects := map[string]bool{}
 
@@ -276,7 +272,14 @@ func projectSetFromScopedKey(td *tasks.Deps, key string) (project, setID string)
 }
 
 func projectForScopedKey(td *tasks.Deps, key string) string {
-	return integration.ProjectForScopedKey(td, key)
+	setID := binding.SetIDFromKey(key)
+	bindings, _ := binding.AllBindings(td)
+	for k, b := range bindings {
+		if binding.SetIDFromKey(k) == setID && b.Project != "" {
+			return b.Project
+		}
+	}
+	return ""
 }
 
 func formatQueueWorkSummary(view RunView) string {
@@ -299,39 +302,10 @@ func formatQueueWorkSummary(view RunView) string {
 	return strings.Join(parts, ", ")
 }
 
-func formatIntegrationSummary(view RunView) string {
-	if len(view.AwaitingIntegration) == 0 {
-		return "none awaiting"
-	}
-	clean, conflicts, unknown := 0, 0, 0
-	for _, set := range view.AwaitingIntegration {
-		switch set.Status {
-		case MergeabilityClean:
-			clean++
-		case MergeabilityConflicts:
-			conflicts++
-		default:
-			unknown++
-		}
-	}
-	parts := []string{fmt.Sprintf("%d awaiting integration", len(view.AwaitingIntegration))}
-	if clean > 0 {
-		parts = append(parts, fmt.Sprintf("%d ready to merge", clean))
-	}
-	if conflicts > 0 {
-		parts = append(parts, fmt.Sprintf("%d conflicts", conflicts))
-	}
-	if unknown > 0 {
-		parts = append(parts, fmt.Sprintf("%d mergeability unknown", unknown))
-	}
-	return strings.Join(parts, ", ")
-}
-
-// RenderRunSummary prints the aggregate queue and integration headline.
+// RenderRunSummary prints the aggregate queue headline.
 func RenderRunSummary(out io.Writer, view RunView) {
 	fmt.Fprintln(out, "Summary:")
 	fmt.Fprintf(out, "  Queue: %s\n", formatQueueWorkSummary(view))
-	fmt.Fprintf(out, "  Integration: %s\n", formatIntegrationSummary(view))
 }
 
 // RenderRunBaseline prints the one-time queue run inventory.
@@ -403,32 +377,6 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 		}
 	}
 
-	fmt.Fprintln(out, "Awaiting integration:")
-	if len(view.AwaitingIntegration) == 0 {
-		fmt.Fprintln(out, "  none")
-	} else {
-		for _, set := range view.AwaitingIntegration {
-			project := set.Project
-			if project == "" {
-				project = "(unknown project)"
-			}
-			setID := set.SetID
-			if setID == "" {
-				setID = "(unknown set)"
-			}
-			checked := ""
-			if !set.CheckedAt.IsZero() {
-				checked = " checked " + set.CheckedAt.UTC().Format(time.RFC3339)
-			}
-			hint := integrationHint(set.Status, setID)
-			if hint != "" {
-				fmt.Fprintf(out, "  %s: %s (%s%s)  %s\n", project, setID, mergeabilityLabel(set.Status), checked, hint)
-				continue
-			}
-			fmt.Fprintf(out, "  %s: %s (%s%s)\n", project, setID, mergeabilityLabel(set.Status), checked)
-		}
-	}
-
 	if len(view.ScanErrors) > 0 {
 		fmt.Fprintln(out, "Scan errors:")
 		projects := make([]string, 0, len(view.ScanErrors))
@@ -478,12 +426,6 @@ func buildWorktreeBindingViews(d *tasks.Deps, state *DaemonState, view RunView) 
 			runningBySet[p.SetID] = p
 		}
 	}
-	awaitingBySet := make(map[string]AwaitingIntegrationSet, len(view.AwaitingIntegration))
-	for _, set := range view.AwaitingIntegration {
-		if set.SetID != "" {
-			awaitingBySet[set.SetID] = set
-		}
-	}
 
 	keys := make([]string, 0, len(bindings))
 	for key := range bindings {
@@ -508,9 +450,6 @@ func buildWorktreeBindingViews(d *tasks.Deps, state *DaemonState, view RunView) 
 		if picked, ok := runningBySet[setID]; ok {
 			item.Phase = "draining"
 			item.PID = picked.PID
-		} else if awaiting, ok := awaitingBySet[setID]; ok {
-			item.MergeStatus = awaiting.Status
-			item.Phase = mergeabilityLabel(awaiting.Status)
 		} else {
 			item.Phase = "bound"
 		}
@@ -541,22 +480,7 @@ func formatWorktreeBindingLine(binding WorktreeBindingView) string {
 	if binding.PID > 0 {
 		line += fmt.Sprintf(" pid=%d", binding.PID)
 	}
-	if hint := integrationHint(binding.MergeStatus, setID); hint != "" {
-		line += "  " + hint
-	}
 	return line
-}
-
-func integrationHint(mergeStatus, setID string) string {
-	if setID == "" || setID == "(unknown set)" {
-		return ""
-	}
-	switch mergeStatus {
-	case MergeabilityClean, MergeabilityConflicts:
-		return "integrate: pop tasks integrate " + setID
-	default:
-		return ""
-	}
 }
 
 func formatBlockedLine(b BlockedItem) string {
@@ -636,21 +560,6 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 			continue
 		}
 		lines = append(lines, formatBlockedDelta(b, true))
-	}
-
-	prevAwait := awaitingIndex(prev.AwaitingIntegration)
-	currAwait := awaitingIndex(curr.AwaitingIntegration)
-	for key, a := range currAwait {
-		if _, ok := prevAwait[key]; ok {
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("queue: %s: %s awaiting integration (%s)", a.Project, a.SetID, mergeabilityLabel(a.Status)))
-	}
-	for key, a := range prevAwait {
-		if _, ok := currAwait[key]; ok {
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("queue: %s: %s integrated", a.Project, a.SetID))
 	}
 
 	prevSkipped := skippedIndex(prev.Skipped)
@@ -744,15 +653,6 @@ func skippedIndex(items []SkippedRepo) map[string]SkippedRepo {
 	out := make(map[string]SkippedRepo, len(items))
 	for _, item := range items {
 		out[item.Project] = item
-	}
-	return out
-}
-
-func awaitingIndex(items []AwaitingIntegrationSet) map[string]AwaitingIntegrationSet {
-	out := make(map[string]AwaitingIntegrationSet, len(items))
-	for _, item := range items {
-		key := item.Project + "\x00" + item.SetID
-		out[key] = item
 	}
 	return out
 }

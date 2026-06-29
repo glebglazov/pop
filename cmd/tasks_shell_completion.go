@@ -42,7 +42,6 @@ func registerTaskShellCompletions() {
 	taskTimingsCmd.ValidArgsFunction = completeTaskTimingsArgs
 	taskShowPathCmd.ValidArgsFunction = completeTaskShowPathArgs
 	taskExportCmd.ValidArgsFunction = completeTaskExportArgs
-	taskIntegrateCmd.ValidArgsFunction = completeTaskIntegrateArgs
 	taskBindWorktreeCmd.ValidArgsFunction = completeTaskBindWorktreeArgs
 	taskUnbindWorktreeCmd.ValidArgsFunction = completeTaskUnbindWorktreeArgs
 }
@@ -75,17 +74,6 @@ func completeTaskExportArgs(cmd *cobra.Command, args []string, toComplete string
 		completionInputFromCmd(cmd),
 		toComplete,
 	)
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
-}
-
-func completeTaskIntegrateArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if len(args) > 0 {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	ids, err := completion.IntegrationSetIDs(taskCompletionDeps())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

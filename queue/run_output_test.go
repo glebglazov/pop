@@ -45,10 +45,6 @@ func TestFormatRunSummary(t *testing.T) {
 			{Project: "c", ReadySet: "set-c"},
 		},
 		Blocked: []BlockedItem{{Project: "d", SetID: "set-d", Kind: "parked"}},
-		AwaitingIntegration: []AwaitingIntegrationSet{
-			{Project: "e", SetID: "set-e", Status: MergeabilityClean},
-			{Project: "f", SetID: "set-f", Status: MergeabilityConflicts},
-		},
 	}
 
 	var out bytes.Buffer
@@ -57,7 +53,6 @@ func TestFormatRunSummary(t *testing.T) {
 	for _, want := range []string{
 		"Summary:",
 		"Queue: 1 running, 2 queued, 1 blocked",
-		"Integration: 2 awaiting integration, 1 ready to merge, 1 conflicts",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("summary missing %q:\n%s", want, text)
@@ -192,6 +187,7 @@ func TestRunOutputSpawnDelta(t *testing.T) {
 		Tmux:       rt,
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
 	}
+	bindSetInPlace(t, d, repo, setID)
 
 	var out bytes.Buffer
 	tick(d, &out, newRunOutputState())

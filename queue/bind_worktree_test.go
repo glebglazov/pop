@@ -40,7 +40,7 @@ func TestBindingProvisionedTrue(t *testing.T) {
 // TestAbandonAdoptedRetainsCheckout verifies that abandoning an adopted binding
 // forgets the association but leaves the directory and branch untouched.
 func TestAbandonAdoptedRetainsCheckout(t *testing.T) {
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	wt := filepath.Join(t.TempDir(), "adopted-wt")
 	runGit(t, repo, "worktree", "add", "-b", "adopted-branch", wt, "HEAD")
 
@@ -93,7 +93,7 @@ func TestAbandonAdoptedRetainsCheckout(t *testing.T) {
 // TestAbandonProvisionedTearsDown verifies that abandoning a provisioned binding
 // still removes the worktree and branch.
 func TestAbandonProvisionedTearsDown(t *testing.T) {
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	wt := filepath.Join(t.TempDir(), "provisioned-wt")
 	runGit(t, repo, "worktree", "add", "-b", "provisioned-branch", wt, "HEAD")
 
@@ -128,7 +128,7 @@ func TestAbandonProvisionedTearsDown(t *testing.T) {
 // TestBindWorktreeCreatesAdoptedBinding verifies that bind-worktree creates a
 // Provisioned=false binding pointing to the current checkout.
 func TestBindWorktreeCreatesAdoptedBinding(t *testing.T) {
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	wt := filepath.Join(t.TempDir(), "my-checkout")
 	runGit(t, repo, "worktree", "add", "-b", "my-branch", wt, "HEAD")
 
@@ -171,7 +171,7 @@ func TestBindWorktreeCreatesAdoptedBinding(t *testing.T) {
 // TestBindWorktreeRefusesAlreadyBoundWithoutForce verifies that re-pointing a
 // set to a different path requires --force.
 func TestBindWorktreeRefusesAlreadyBoundWithoutForce(t *testing.T) {
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	wt1 := filepath.Join(t.TempDir(), "checkout-1")
 	wt2 := filepath.Join(t.TempDir(), "checkout-2")
 	runGit(t, repo, "worktree", "add", "-b", "branch-1", wt1, "HEAD")
@@ -231,7 +231,7 @@ func TestBindWorktreeRefusesAlreadyBoundWithoutForce(t *testing.T) {
 // TestBindWorktreeRefusesWhileLocked verifies that bind-worktree refuses when
 // the existing binding's runtime path holds a live execution lock.
 func TestBindWorktreeRefusesWhileLocked(t *testing.T) {
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	wt1 := filepath.Join(t.TempDir(), "checkout-locked")
 	wt2 := filepath.Join(t.TempDir(), "checkout-new")
 	runGit(t, repo, "worktree", "add", "-b", "branch-locked", wt1, "HEAD")
@@ -269,80 +269,5 @@ func TestBindWorktreeRefusesWhileLocked(t *testing.T) {
 	}
 	if !foundWt1 {
 		t.Fatalf("binding = %+v, want wt1 unchanged", afterBindings)
-	}
-}
-
-// TestIntegrateAdoptedBindingRetainsCheckout verifies that integrating a set
-// with an adopted (Provisioned=false) binding merges but does not delete the
-// worktree directory or the branch.
-func TestIntegrateAdoptedBindingRetainsCheckout(t *testing.T) {
-	repo := initMergeabilityRepo(t)
-	wt := filepath.Join(t.TempDir(), "adopted-int")
-	runGit(t, repo, "worktree", "add", "-b", "adopted-int-branch", wt, "HEAD")
-	writeFile(t, filepath.Join(wt, "adopted.txt"), "adopted\n")
-	runGit(t, wt, "add", "adopted.txt")
-	runGit(t, wt, "commit", "-m", "adopted change")
-
-	td := queueDataDeps(t)
-	key := testScopedKey(t, repo, "set-adopted")
-	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
-		key: {
-			Project:     filepath.Base(repo),
-			RuntimePath: wt,
-			SetID:       "set-adopted",
-			Status:      MergeabilityClean,
-		},
-	})
-	seedBindingStore(t, td, map[string]WorktreeBinding{
-		key: {
-			RuntimePath: wt,
-			Branch:      "adopted-int-branch",
-			Project:     filepath.Base(repo),
-			Provisioned: false, // adopted
-		},
-	})
-
-	d := &Deps{
-		Tasks: td,
-		AcquireRuntimeLock: func(runtimePath string) (runtimeLock, error) {
-			return tasks.AcquireRuntimeLock(td, runtimePath, nil)
-		},
-	}
-	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
-
-	var out bytes.Buffer
-	got, err := Integrate(d, cfg, "set-adopted", &out)
-	if err != nil {
-		t.Fatalf("integrate: %v", err)
-	}
-	if got.Noop {
-		t.Fatalf("result = %+v, want success", got)
-	}
-
-	// Merge must have landed
-	if _, err := os.Stat(filepath.Join(repo, "adopted.txt")); err != nil {
-		t.Fatalf("merged file missing from working branch: %v", err)
-	}
-
-	// Adopted checkout must be retained
-	if _, err := os.Stat(wt); err != nil {
-		t.Fatalf("adopted worktree must be retained after integrate: %v", err)
-	}
-	// Branch must be retained
-	if branch := runGitOutput(t, repo, "branch", "--list", "adopted-int-branch"); strings.TrimSpace(branch) == "" {
-		t.Fatalf("adopted branch should still exist after integrate")
-	}
-
-	// Binding and mergeability must be cleared from state
-	if len(loadBindingStore(t, td)) != 0 {
-		t.Fatalf("worktree bindings = %+v, want cleared", loadBindingStore(t, td))
-	}
-	if len(loadMergeabilityStore(t, td)) != 0 {
-		t.Fatalf("mergeability = %+v, want cleared", loadMergeabilityStore(t, td))
-	}
-
-	// Output should mention "retained"
-	if !strings.Contains(out.String(), "retained") {
-		t.Fatalf("output = %q, want mention of retained checkout", out.String())
 	}
 }

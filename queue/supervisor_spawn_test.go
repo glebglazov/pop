@@ -33,6 +33,7 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 		Tmux:       rt,
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
 	}
+	bindSetInPlace(t, d, repo, setID)
 
 	var supervisorOut bytes.Buffer
 	tick(d, &supervisorOut, newRunOutputState())
@@ -105,6 +106,7 @@ func TestSupervisorWorktreeDrainTargetsProjectSessionWithCheckoutCWD(t *testing.
 		Tmux:       rt,
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
 	}
+	bindSetInPlace(t, d, repo, setID)
 
 	var supervisorOut bytes.Buffer
 	tick(d, &supervisorOut, newRunOutputState())
@@ -172,6 +174,7 @@ func TestSupervisorTickReportsSpawnFailure(t *testing.T) {
 		Tmux:       rt,
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
 	}
+	bindSetInPlace(t, d, repo, setID)
 
 	var out bytes.Buffer
 	tick(d, &out, newRunOutputState())

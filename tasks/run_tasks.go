@@ -66,8 +66,7 @@ type RunTaskSetResult struct {
 	PauseResetAt     time.Time
 	PausePinnedAgent bool
 	// RuntimePath and ProjectPath are set once the drain has committed to its
-	// runtime checkout, making them available to the caller even on Done so
-	// post-drain work (e.g. mergeability recording) does not need to re-resolve.
+	// runtime checkout, making them available to the caller even on Done.
 	RuntimePath string
 	ProjectPath string
 }

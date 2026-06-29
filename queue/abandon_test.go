@@ -8,14 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
 )
 
 func TestAbandonRefusesWhileBusy(t *testing.T) {
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	wt := filepath.Join(t.TempDir(), "set-busy")
 	runGit(t, repo, "worktree", "add", "-b", "set-busy", wt, "HEAD")
 
@@ -52,7 +51,7 @@ func TestAbandonRefusesWhileBusy(t *testing.T) {
 }
 
 func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
 	td := queueDataDeps(t)
 	tasksDir := setupAbandonTaskManifest(t, repo, tasks.StatusDone)
 	beforeManifest := mustReadFile(t, filepath.Join(tasksDir, "set-1", "index.json"))
@@ -69,15 +68,6 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 			Branch:      "set-done",
 			Project:     filepath.Base(repo),
 			Provisioned: true,
-		},
-	})
-	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
-		key: {
-			Project:     filepath.Base(repo),
-			RuntimePath: wt,
-			SetID:       "set-1",
-			Status:      MergeabilityClean,
-			CheckedAt:   time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
 		},
 	})
 
@@ -102,9 +92,6 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 	afterBindings := loadBindingStore(t, td)
 	if len(afterBindings) != 0 {
 		t.Fatalf("bindings = %+v, want cleared", afterBindings)
-	}
-	if len(loadMergeabilityStore(t, td)) != 0 {
-		t.Fatalf("mergeability = %+v, want cleared", loadMergeabilityStore(t, td))
 	}
 
 	afterManifest := mustReadFile(t, filepath.Join(tasksDir, "set-1", "index.json"))
@@ -144,11 +131,11 @@ func TestAbandonNoopWhenUnbound(t *testing.T) {
 }
 
 func TestAbandonDoneSetRequiresConfirmationUnlessYes(t *testing.T) {
-	repo := initMergeabilityRepo(t)
+	repo := initGitRepoWithBase(t)
+	td := queueDataDeps(t)
 	wt := filepath.Join(t.TempDir(), "set-done")
 	runGit(t, repo, "worktree", "add", "-b", "set-done", wt, "HEAD")
 
-	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-1")
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: {
@@ -158,16 +145,11 @@ func TestAbandonDoneSetRequiresConfirmationUnlessYes(t *testing.T) {
 			Provisioned: true,
 		},
 	})
-	seedMergeabilityStore(t, td, map[string]MergeabilityRecord{
-		key: {
-			Project:     filepath.Base(repo),
-			RuntimePath: wt,
-			SetID:       "set-1",
-			Status:      MergeabilityClean,
-			CheckedAt:   time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
-		},
-	})
-	d := &Deps{Tasks: td}
+	// A Done task status is the confirm trigger now that integration is gone
+	// (ADR-0070): unbinding it would quietly forget completed work.
+	d := &Deps{Tasks: td, Refresh: func(string) (*tasks.RefreshResult, error) {
+		return &tasks.RefreshResult{Rows: []tasks.Row{{ID: "set-1", Status: tasks.StatusDone}}}, nil
+	}}
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 
 	_, err := AbandonWithOptions(d, cfg, "set-1", io.Discard, AbandonOptions{In: tasks.NonInteractiveReader{}})
@@ -195,8 +177,8 @@ func TestAbandonDoneSetRequiresConfirmationUnlessYes(t *testing.T) {
 	if got.Noop {
 		t.Fatalf("confirmed result = %+v, want success", got)
 	}
-	if len(loadMergeabilityStore(t, td)) != 0 || len(loadBindingStore(t, td)) != 0 {
-		t.Fatalf("mergeability = %+v bindings = %+v, want cleared", loadMergeabilityStore(t, td), loadBindingStore(t, td))
+	if len(loadBindingStore(t, td)) != 0 {
+		t.Fatalf("bindings = %+v, want cleared", loadBindingStore(t, td))
 	}
 }
 

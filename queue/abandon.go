@@ -5,7 +5,6 @@ import (
 
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -44,55 +43,48 @@ func queueUnbindHooks(d *Deps, cfg *config.Config) binding.LifecycleHooks {
 			}
 			return abandonNeedsConfirm(d, cfg, state, setID, b)
 		},
-		ResolveTeardownBase: func(b binding.Binding) (string, error) {
-			scan, err := resolveBindingScan(d, cfg, b)
-			if err != nil {
-				return "", err
-			}
-			return scan.RuntimePath, nil
-		},
-		AfterUnbind: func(key, setID string, b binding.Binding, branch string) error {
-			return integration.DeleteRecord(d.Tasks, key)
-		},
 	}
 }
 
+// abandonNeedsConfirm reports whether unbinding setID should prompt first. With
+// integration removed (ADR-0070), the only confirm trigger is a terminal set
+// state whose work would be quietly forgotten — Done or Failed.
 func abandonNeedsConfirm(d *Deps, cfg *config.Config, state *DaemonState, setID string, wt WorktreeBinding) (bool, error) {
-	if _, _, ok, err := findIntegrationRecord(d, setID); err != nil {
-		return false, err
-	} else if ok {
-		return true, nil
-	}
-	if wt.Project == "" {
-		return false, nil
-	}
-	failed, err := setHasStatus(d, cfg, wt, setID, tasks.StatusFailed)
-	if err != nil {
-		return false, err
-	}
-	return failed, nil
+	_ = state
+	return setHasStatus(d, wt, setID, tasks.StatusDone, tasks.StatusFailed)
 }
 
-func setHasStatus(d *Deps, cfg *config.Config, binding WorktreeBinding, setID string, status tasks.TaskSetStatus) (bool, error) {
-	scan, err := resolveBindingScan(d, cfg, binding)
-	if err != nil {
+func setHasStatus(d *Deps, wt WorktreeBinding, setID string, statuses ...tasks.TaskSetStatus) (bool, error) {
+	defPath, err := bindingDefinitionPath(d, wt)
+	if err != nil || defPath == "" {
 		return false, err
 	}
-	refresh, err := d.refresh(scan.DefinitionPath)
+	refresh, err := d.refresh(defPath)
 	if err != nil {
 		return false, err
 	}
 	for _, row := range refresh.Rows {
-		if row.ID == setID && row.Status == status {
-			return true, nil
+		if row.ID != setID {
+			continue
+		}
+		for _, status := range statuses {
+			if row.Status == status {
+				return true, nil
+			}
 		}
 	}
 	return false, nil
 }
 
-func resolveBindingScan(d *Deps, cfg *config.Config, binding WorktreeBinding) (projectScan, error) {
-	return resolveIntegrationScan(d, cfg, MergeabilityRecord{
-		Project:     binding.Project,
-		RuntimePath: binding.RuntimePath,
-	})
+// bindingDefinitionPath resolves the canonical Task-set definition path for a
+// binding from its runtime checkout, so the set's manifest can be refreshed.
+func bindingDefinitionPath(d *Deps, wt WorktreeBinding) (string, error) {
+	if d == nil || d.Tasks == nil || wt.RuntimePath == "" {
+		return "", nil
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, wt.RuntimePath)
+	if err != nil {
+		return "", err
+	}
+	return tasks.CanonicalDefinitionPathWith(d.Tasks, id.TasksDir)
 }

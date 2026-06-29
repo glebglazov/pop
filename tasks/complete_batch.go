@@ -38,9 +38,7 @@ type CompleteTransition struct {
 type CompleteTasksResult struct {
 	TaskSetID   string
 	Transitions []CompleteTransition
-	// ProjectPath is the resolved checkout the batch ran against, carried so
-	// callers can record Mergeability when the batch flips a worktree-bound set
-	// to Done (ADR-0051).
+	// ProjectPath is the resolved checkout the batch ran against.
 	ProjectPath string
 	Refresh     *RefreshResult
 }

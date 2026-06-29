@@ -36,7 +36,7 @@ func seedTaskStorage(t *testing.T, td *tasks.Deps, repoPath, setID string) {
 // worktrees share one Repository identity.
 func initBareRepoWithWorktrees(t *testing.T, n int) (string, []string) {
 	t.Helper()
-	src := initMergeabilityRepo(t)
+	src := initGitRepoWithBase(t)
 	parent := t.TempDir()
 	runGit(t, parent, "clone", "--bare", src, "repo.git")
 	bareDir := filepath.Join(parent, "repo.git")
@@ -53,7 +53,7 @@ func initBareRepoWithWorktrees(t *testing.T, n int) (string, []string) {
 // worktree) and adds n linked worktrees beside it.
 func initNonBareRepoWithLinkedWorktrees(t *testing.T, n int) (string, []string) {
 	t.Helper()
-	main := initMergeabilityRepo(t)
+	main := initGitRepoWithBase(t)
 	parent := t.TempDir()
 	var linked []string
 	for i := 0; i < n; i++ {
@@ -118,6 +118,10 @@ func TestDecideRepoDispatchesBareMultiWorktreeCollapsesToOneDrain(t *testing.T) 
 	cfg := &config.Config{Repo: map[string]config.RepoOverrideConfig{
 		wts[0]: {Trunk: ptrBool(true)},
 	}}
+	// The set is bound to the trunk checkout so it is Queue-drainable (ADR-0072);
+	// this guards the multi-worktree collapse to a single drain, not the routing
+	// default the integration target once provided (ADR-0070).
+	bindSetInPlace(t, d, wts[0], "top")
 	scans := scansForCheckouts(wts, "/def")
 
 	decisions := decideRepoDispatches(d, cfg, scans, &DaemonState{Version: 1}, time.Now())
@@ -297,8 +301,9 @@ func TestDecideRepoDispatchesNonBareRoutesToGitMainWorktree(t *testing.T) {
 	main, linked := initNonBareRepoWithLinkedWorktrees(t, 2)
 	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
 
-	// Picker order lists a linked worktree first; with no config the drain must
-	// still route to the repo's git main worktree.
+	// Picker order lists a linked worktree first; with the set bound to the git
+	// main worktree the drain must route there (ADR-0072).
+	bindSetInPlace(t, d, main, "top")
 	checkouts := []string{linked[0], linked[1], main}
 	scans := scansForCheckouts(checkouts, "/def")
 
@@ -322,8 +327,8 @@ func TestDecideRepoDispatchesNonBareRoutesToGitMainWorktree(t *testing.T) {
 }
 
 func TestScanCrossRepositoryFanOutPreserved(t *testing.T) {
-	repoA := initMergeabilityRepo(t)
-	repoB := initMergeabilityRepo(t)
+	repoA := initGitRepoWithBase(t)
+	repoB := initGitRepoWithBase(t)
 	xdg := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", xdg)
 
@@ -341,6 +346,10 @@ func TestScanCrossRepositoryFanOutPreserved(t *testing.T) {
 	// takes the decision path for repos with storage (ADR-0060).
 	seedTaskStorage(t, d.Tasks, repoA, "top")
 	seedTaskStorage(t, d.Tasks, repoB, "top")
+	// Each set is bound in-place so it is Queue-drainable (ADR-0072); the
+	// cross-repo fan-out is what this guards, not the routing default.
+	bindSetInPlace(t, d, repoA, "top")
+	bindSetInPlace(t, d, repoB, "top")
 
 	decisions, err := Scan(d, cfg)
 	if err != nil {

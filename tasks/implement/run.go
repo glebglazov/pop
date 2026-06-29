@@ -11,8 +11,9 @@ import (
 	"github.com/glebglazov/pop/tasks/binding"
 )
 
-// WholeSetOptions configures whole-set Implement orchestration: drain routing,
-// task-set drain, and integration epilogue.
+// WholeSetOptions configures whole-set Implement orchestration: drain routing
+// and the task-set drain. Integration was removed (ADR-0070): a Done drain in a
+// worktree is the human's own concern, so there is no merge epilogue.
 type WholeSetOptions struct {
 	ResolveInput    tasks.ResolveInput
 	TaskSetOverride string
@@ -34,7 +35,7 @@ type WholeSetOptions struct {
 	PreSeedTopic func(taskTitle string)
 }
 
-// RunWholeSet orchestrates whole-set Implement: route → drain → epilogue.
+// RunWholeSet orchestrates whole-set Implement: route → drain.
 func RunWholeSet(opts WholeSetOptions) (*tasks.RunTaskSetResult, error) {
 	return RunWholeSetWith(DefaultDeps(), opts)
 }
@@ -68,10 +69,6 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 	})
 	if err != nil {
 		return result, err
-	}
-	if result != nil && result.TaskSetDone {
-		recordMergeabilityOnDone(d, result, opts.ConfirmOut)
-		OfferIntegration(d, result, opts)
 	}
 	if result != nil && result.QuotaPaused {
 		return result, &tasks.ExitError{Code: tasks.ExitQuotaPaused}

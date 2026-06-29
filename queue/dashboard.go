@@ -20,7 +20,6 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
-	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -52,8 +51,10 @@ type DashboardRow struct {
 	repoCommonDir      string
 	projectPath        string
 	runtimePath        string
-	paneID             string
-	integrationBacklog bool
+	paneID         string
+	// doneStillBound is true when a Done set still holds a Worktree binding. The
+	// dashboard keeps such a row visible as a clean-up reminder (ADR-0070).
+	doneStillBound bool
 	// parked is true when the set's repeated abnormal terminals have parked it
 	// (derived from Drain history); unpark writes a park-clear event (ADR-0055).
 	parked bool
@@ -94,27 +95,24 @@ type dashboardRepoStatic struct {
 }
 
 // dashboardSnapshot is a single point-in-time read of pop.db taken once per
-// dashboard build. Each rendered row used to reopen pop.db ~5× (bindings thrice,
-// mergeability once, the drain lock once) every poll; the per-row overlay now
+// dashboard build. Each rendered row used to reopen pop.db several times
+// (bindings thrice, the drain lock once) every poll; the per-row overlay now
 // consults these in-memory maps instead, so the whole view is one consistent
 // snapshot and the store is opened a bounded number of times per build, not per
-// row. It holds every binding and mergeability record keyed by scoped key, plus
-// the live (PID-alive) running drains keyed by runtime path.
+// row. It holds every binding keyed by scoped key, plus the live (PID-alive)
+// running drains keyed by runtime path.
 type dashboardSnapshot struct {
-	bindings     map[string]WorktreeBinding
-	mergeability map[string]integration.Record
-	liveDrains   map[string]tasks.RunningDrain
+	bindings   map[string]WorktreeBinding
+	liveDrains map[string]tasks.RunningDrain
 }
 
-// newDashboardSnapshot reads the volatile per-build store state once: AllBindings,
-// AllRecords (mergeability), and the live running drains (RunningDrains filtered
-// to PID-alive in memory). It is the single point at which a build touches pop.db
-// for the overlay.
+// newDashboardSnapshot reads the volatile per-build store state once: AllBindings
+// and the live running drains (RunningDrains filtered to PID-alive in memory). It
+// is the single point at which a build touches pop.db for the overlay.
 func newDashboardSnapshot(d *Deps) (*dashboardSnapshot, error) {
 	snap := &dashboardSnapshot{
-		bindings:     map[string]WorktreeBinding{},
-		mergeability: map[string]integration.Record{},
-		liveDrains:   map[string]tasks.RunningDrain{},
+		bindings:   map[string]WorktreeBinding{},
+		liveDrains: map[string]tasks.RunningDrain{},
 	}
 	if d == nil || d.Tasks == nil {
 		return snap, nil
@@ -125,13 +123,6 @@ func newDashboardSnapshot(d *Deps) (*dashboardSnapshot, error) {
 	}
 	for k, b := range bindings {
 		snap.bindings[k] = b
-	}
-	records, err := integration.AllRecords(d.Tasks)
-	if err != nil {
-		return nil, err
-	}
-	for k, rec := range records {
-		snap.mergeability[k] = rec
 	}
 	drains, err := d.liveDrains()
 	if err != nil {
@@ -148,18 +139,6 @@ func newDashboardSnapshot(d *Deps) (*dashboardSnapshot, error) {
 func (s *dashboardSnapshot) bindingFor(repoKey, setID string) (WorktreeBinding, bool) {
 	b, ok := s.bindings[setScopedKey(repoKey, setID)]
 	return b, ok
-}
-
-// mergeabilityFor returns the snapshot mergeability record for (repoKey, setID),
-// the snapshot-backed equivalent of the per-row integration.GetForSet read. It
-// applies the same AwaitsIntegration gate GetForSet does, so a no-op record
-// (target == source) reads as absent.
-func (s *dashboardSnapshot) mergeabilityFor(repoKey, setID string) (MergeabilityRecord, bool) {
-	rec, ok := s.mergeability[setScopedKey(repoKey, setID)]
-	if !ok || !integration.AwaitsIntegration(rec) {
-		return MergeabilityRecord{}, false
-	}
-	return mergeabilityRecordFromIntegration(rec), true
 }
 
 // BuildDashboard derives the Queue dashboard rows from registered projects and
@@ -554,17 +533,14 @@ func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonStat
 	backoff := d.setBackoffLookup(st.repoCommonDir, delays, now)
 	var rows []DashboardRow
 	for _, taskRow := range refresh.Rows {
-		merge, _ := snap.mergeabilityFor(st.repoKey, taskRow.ID)
-		// Integration-backlog membership is binding-driven, not gated on a
-		// recorded Mergeability (ADR-0051). The bindings table only ever holds
-		// non-trunk bindings — a trunk drain records none — so a Done set's
-		// having a binding is the backlog test; Mergeability is left-joined and
-		// renders as "unknown" when no record exists.
+		// A Done set keeps its dashboard row only while it still holds a Worktree
+		// binding, as a clean-up reminder (ADR-0070); the bindings table only ever
+		// holds non-trunk bindings, so a Done set's having a binding is the test.
 		bnd, hasBinding := snap.bindingFor(st.repoKey, taskRow.ID)
-		awaitingIntegration := taskRow.Status == tasks.StatusDone && hasBinding
+		doneStillBound := taskRow.Status == tasks.StatusDone && hasBinding
 		orphaned := dashboardOrphaned(d, bnd, hasBinding)
 		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
-		if !dashboardShowRow(taskRow, awaitingIntegration) {
+		if !dashboardShowRow(taskRow, doneStillBound) {
 			continue
 		}
 		wt := dashboardWorktree(d, snap, state, st.repoKey, taskRow.ID, st.rep, st.repBranch, st.bare)
@@ -594,34 +570,34 @@ func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonStat
 				}
 			}
 		}
-		status := dashboardStatus(taskRow, merge, awaitingIntegration)
+		status := dashboardStatus(taskRow)
 		rows = append(rows, DashboardRow{
-			Project:            st.projectName,
-			SetID:              taskRow.ID,
-			Status:             status,
-			RawStatus:          taskRow.Status,
-			Worktree:           wt.label,
-			Drain:              drain,
-			AutoDrain:          taskRow.AutoDrain,
-			defPath:            st.defPath,
-			statePath:          st.statePath,
-			cursorKey:          st.projectName + "\x00" + taskRow.ID,
-			repoKey:            st.repoKey,
-			repoCommonDir:      st.repoCommonDir,
-			projectPath:        staticProjectPath(st),
-			runtimePath:        wt.runtimePath,
-			paneID:             dashboardPaneID(state, st.repoKey, taskRow.ID),
-			integrationBacklog: awaitingIntegration,
-			parked:             parked,
-			orphaned:           orphaned,
-			bound:              bound,
+			Project:        st.projectName,
+			SetID:          taskRow.ID,
+			Status:         status,
+			RawStatus:      taskRow.Status,
+			Worktree:       wt.label,
+			Drain:          drain,
+			AutoDrain:      taskRow.AutoDrain,
+			defPath:        st.defPath,
+			statePath:      st.statePath,
+			cursorKey:      st.projectName + "\x00" + taskRow.ID,
+			repoKey:        st.repoKey,
+			repoCommonDir:  st.repoCommonDir,
+			projectPath:    staticProjectPath(st),
+			runtimePath:    wt.runtimePath,
+			paneID:         dashboardPaneID(state, st.repoKey, taskRow.ID),
+			doneStillBound: doneStillBound,
+			parked:         parked,
+			orphaned:       orphaned,
+			bound:          bound,
 		})
 	}
 	return rows, nil
 }
 
-func dashboardShowRow(row tasks.Row, awaitingIntegration bool) bool {
-	return row.Status != tasks.StatusDone || awaitingIntegration
+func dashboardShowRow(row tasks.Row, doneStillBound bool) bool {
+	return row.Status != tasks.StatusDone || doneStillBound
 }
 
 // staticProjectPath returns the repo group's representative checkout, the path
@@ -635,11 +611,8 @@ func staticProjectPath(st dashboardRepoStatic) string {
 	return st.rep.ProjectPath
 }
 
-func dashboardStatus(row tasks.Row, rec MergeabilityRecord, awaitingIntegration bool) string {
-	if row.Status != tasks.StatusDone || !awaitingIntegration {
-		return tasks.StatusLabel(row)
-	}
-	return string(tasks.StatusDone)
+func dashboardStatus(row tasks.Row) string {
+	return tasks.StatusLabel(row)
 }
 
 type dashboardWorktreeView struct {
@@ -875,7 +848,6 @@ type dashboardMenuAction int
 
 const (
 	menuActionDrain dashboardMenuAction = iota
-	menuActionIntegrate
 	menuActionBind
 	menuActionUnbind
 	menuActionAutoDrain
@@ -903,16 +875,13 @@ type dashboardMenu struct {
 }
 
 // dashboardMenuItems returns the verbs applicable to row, in a stable order.
-// Conditional verbs are filtered to the row's context: integrate is offered only
-// for integration-backlog rows, unbind only for bound rows, auto-drain only for
-// non-orphaned rows, and unpark only for parked rows. Drain, bind, preview, the
-// runtime shell, and archive apply to every row regardless of status.
+// Conditional verbs are filtered to the row's context: unbind only for bound
+// rows, auto-drain only for non-orphaned rows, and unpark only for parked rows.
+// Drain, bind, preview, the runtime shell, and archive apply to every row
+// regardless of status.
 func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	items := []dashboardMenuItem{
 		{key: "i", label: "drain", action: menuActionDrain},
-	}
-	if DashboardRowCanIntegrate(row) {
-		items = append(items, dashboardMenuItem{key: "I", label: "integrate", action: menuActionIntegrate})
 	}
 	items = append(items, dashboardMenuItem{key: "b", label: "bind worktree", action: menuActionBind})
 	if row.bound {
@@ -1417,11 +1386,6 @@ func (m dashboardModel) dispatchMenuAction(action dashboardMenuAction, row Dashb
 	switch action {
 	case menuActionDrain:
 		return m, m.launchDrain(row)
-	case menuActionIntegrate:
-		if !DashboardRowCanIntegrate(row) {
-			return m, nil
-		}
-		return m, m.launchIntegrate(row)
 	case menuActionBind:
 		m.bind = &dashboardBindModal{row: row, loading: true}
 		return m, m.loadBindWorktrees(row)
@@ -1939,13 +1903,6 @@ func defaultDrainCursor(entries []dashboardDrainEntry) int {
 	return 0
 }
 
-func (m dashboardModel) launchIntegrate(row DashboardRow) tea.Cmd {
-	return func() tea.Msg {
-		_, err := LaunchDashboardIntegrate(m.d, m.cfg, row)
-		return dashboardDrainMsg{err: err}
-	}
-}
-
 func (m dashboardModel) previewDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		err := PreviewDashboardDrain(m.d, row)
@@ -2060,11 +2017,6 @@ type DashboardDrainResult struct {
 	RuntimePath string
 }
 
-type DashboardIntegrateResult struct {
-	PaneID      string
-	RuntimePath string
-}
-
 // LaunchDashboardDrain manually launches the highlighted dashboard row through
 // the same Queue provisioning and tmux spawn path used by the supervisor.
 func LaunchDashboardDrain(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainResult, error) {
@@ -2142,101 +2094,6 @@ func LaunchDashboardDrain(d *Deps, cfg *config.Config, row DashboardRow) (Dashbo
 		return DashboardDrainResult{}, err
 	}
 	return DashboardDrainResult{PaneID: spawn.PaneID, RuntimePath: dec.scan.RuntimePath}, nil
-}
-
-// DashboardRowCanIntegrate reports whether the dashboard's `I` action is
-// enabled. Only DONE sets that have a mergeability record are in the
-// Integration backlog; all other rows intentionally no-op.
-func DashboardRowCanIntegrate(row DashboardRow) bool {
-	return row.integrationBacklog
-}
-
-// LaunchDashboardIntegrate opens the existing `pop tasks integrate <set>`
-// wizard in the shared pop-queue window and switches the current tmux client to
-// that pane so the attended conflict path has a TTY.
-func LaunchDashboardIntegrate(d *Deps, cfg *config.Config, row DashboardRow) (DashboardIntegrateResult, error) {
-	if !DashboardRowCanIntegrate(row) {
-		return DashboardIntegrateResult{}, nil
-	}
-	if d == nil {
-		d = DefaultDeps()
-	}
-	if d.Tasks == nil {
-		d.Tasks = tasks.DefaultDeps()
-	}
-	if d.Project == nil {
-		d.Project = project.DefaultDeps()
-	}
-	if d.Tmux == nil {
-		d.Tmux = deps.NewRealTmux()
-	}
-	session, dir, err := dashboardIntegrateTarget(d, cfg, row)
-	if err != nil {
-		return DashboardIntegrateResult{}, err
-	}
-	paneID, err := spawnIntegrateWizard(d.Tmux, session, dir, "pop tasks integrate "+shellQuote(row.SetID))
-	if err != nil {
-		return DashboardIntegrateResult{}, err
-	}
-	return DashboardIntegrateResult{PaneID: paneID, RuntimePath: dir}, nil
-}
-
-func dashboardIntegrateTarget(d *Deps, cfg *config.Config, row DashboardRow) (session, dir string, err error) {
-	scans, err := dashboardScansForDefinition(d, cfg, row.defPath)
-	if err != nil {
-		return "", "", err
-	}
-	if len(scans) == 0 {
-		return "", "", fmt.Errorf("task set %s is no longer in a registered queue project", row.SetID)
-	}
-	rep, _, err := resolveRepresentative(d, cfg, scans)
-	if err != nil {
-		return "", "", err
-	}
-	if rep != nil {
-		return rep.SessionName, rep.ProjectPath, nil
-	}
-	if strings.TrimSpace(row.runtimePath) != "" {
-		dir := row.runtimePath
-		return project.SessionNameWith(d.Project, dir), dir, nil
-	}
-	return "", "", fmt.Errorf("no checkout available for integrating %s", row.SetID)
-}
-
-func spawnIntegrateWizard(tmux deps.Tmux, session, dir, command string) (string, error) {
-	if !tmux.HasSession(session) {
-		if err := tmux.NewSession(session, dir); err != nil {
-			return "", fmt.Errorf("create session %q: %w", session, err)
-		}
-	}
-	windowTarget, freshPaneID, err := resolveDrainWindowTarget(tmux, session, dir)
-	if err != nil {
-		return "", err
-	}
-	paneID := freshPaneID
-	if paneID == "" {
-		out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", windowTarget, "-c", dir)
-		if err != nil {
-			return "", fmt.Errorf("create integrate pane: %w", err)
-		}
-		paneID = strings.TrimSpace(out)
-		if paneID == "" {
-			return "", fmt.Errorf("create integrate pane: tmux returned no pane id")
-		}
-		if _, err := tmux.Command("select-layout", "-t", windowTarget, "tiled"); err != nil {
-			return "", fmt.Errorf("retile queue window: %w", err)
-		}
-	}
-	if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
-		return "", fmt.Errorf("send integrate command: %w", err)
-	}
-	if _, err := tmux.Command("select-pane", "-t", paneID); err != nil {
-		return "", err
-	}
-	if _, err := tmux.Command("switch-client", "-t", paneID); err != nil {
-		return "", err
-	}
-	return paneID, nil
 }
 
 func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([]projectScan, error) {
@@ -2798,7 +2655,6 @@ func dashboardSummary(rows []DashboardRow) string {
 	ready := 0
 	running := 0
 	autoDrain := 0
-	integration := 0
 	for _, row := range rows {
 		if row.RawStatus == tasks.StatusReady {
 			ready++
@@ -2808,9 +2664,6 @@ func dashboardSummary(rows []DashboardRow) string {
 		}
 		if row.AutoDrain {
 			autoDrain++
-		}
-		if row.integrationBacklog {
-			integration++
 		}
 	}
 	parts := []string{countPhrase(total, "task set", "task sets")}
@@ -2822,9 +2675,6 @@ func dashboardSummary(rows []DashboardRow) string {
 	}
 	if autoDrain > 0 {
 		parts = append(parts, countPhrase(autoDrain, "auto-drain", "auto-drain"))
-	}
-	if integration > 0 {
-		parts = append(parts, countPhrase(integration, "awaiting integration", "awaiting integration"))
 	}
 	return strings.Join(parts, " · ")
 }

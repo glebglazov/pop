@@ -115,11 +115,6 @@ func ReconcileDrains(d *Deps) (int, error) {
 	n, err := s.ReconcileCrashed(func(dr store.Drain) bool {
 		return drainProcessAlive(d, dr.PID, dr.ProcStart)
 	}, now)
-	// SHA-gated mergeability refresh shares the reconcile pass (ADR-0055): it
-	// recomputes only sets whose HEADs moved, so a transient `unknown` is filled
-	// and a once-clean verdict flips to conflicts after trunk advances. Advisory:
-	// a refresh error never fails the crash reconcile a reader depends on.
-	_ = reconcileMergeability(d, s, now)
 	return n, err
 }
 

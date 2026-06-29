@@ -11,10 +11,8 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
-	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
-	"github.com/glebglazov/pop/tasks/integration"
 	"github.com/spf13/cobra"
 )
 
@@ -221,38 +219,6 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 			assertShellCompContains(t, out, sub)
 		}
 	})
-}
-
-func TestTaskIntegrateShellCompletionCandidates(t *testing.T) {
-	dir := t.TempDir()
-	td := queueShellCompletionDeps(t, dir)
-	store := &integration.Store{Records: map[string]integration.Record{
-		"pop|set-ready": {
-			Project: "pop",
-			SetID:   "set-ready",
-			Status:  queue.MergeabilityClean,
-		},
-		"pop|set-conflict": {
-			Project: "pop",
-			SetID:   "set-conflict",
-			Status:  queue.MergeabilityConflicts,
-		},
-	}}
-	if err := integration.Save(td, store); err != nil {
-		t.Fatal(err)
-	}
-
-	prev := taskCompletionDeps
-	taskCompletionDeps = func() *tasks.Deps { return td }
-	t.Cleanup(func() { taskCompletionDeps = prev })
-
-	out := shellCompNoDesc(t, "tasks", "integrate")
-	assertShellCompContains(t, out, "set-ready", "set-conflict")
-	assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
-
-	out = shellCompNoDescCompleting(t, "tasks", "integrate", "set-r")
-	assertShellCompContains(t, out, "set-ready")
-	assertShellCompOmitsExact(t, out, "set-conflict")
 }
 
 func TestTasksUnbindWorktreeShellCompletionCandidates(t *testing.T) {

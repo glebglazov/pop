@@ -504,12 +504,11 @@ func (c *Config) ProjectEntries() ([]ProjectEntry, error) {
 // from Config: global config.toml registers projects, while .pop.toml only
 // describes behavior for an already-registered project.
 type RepoConfig struct {
-	AutoMergeClean bool `toml:"auto_merge_clean"`
 	// Trunk marks a specific checkout as the Trunk worktree — the repository's
-	// integration anchor and fork base for managed worktrees. Meaningful only in
-	// a [repo."<path>"] global override block keyed to that checkout; a bare repo
-	// must declare trunk = true to enable managed-worktree provisioning and
-	// integration. Repo-local .pop.toml cannot name a machine-specific trunk.
+	// fork base for managed worktrees. Meaningful only in a [repo."<path>"]
+	// global override block keyed to that checkout; a bare repo must declare
+	// trunk = true to enable managed-worktree provisioning. Repo-local .pop.toml
+	// cannot name a machine-specific trunk.
 	Trunk bool `toml:"-"`
 }
 
@@ -518,7 +517,6 @@ type RepoConfig struct {
 // global-only settings (project registry, daemon knobs, etc.) are not.
 // Pointer fields allow field-level merge semantics (nil = not set).
 type RepoOverrideConfig struct {
-	AutoMergeClean *bool `toml:"auto_merge_clean"`
 	// Trunk is meaningful only for the specific checkout path that keys this
 	// block; it is not propagated to other worktrees of the same repo.
 	Trunk *bool `toml:"trunk"`
@@ -629,9 +627,6 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 	// Merge: start with .pop.toml, then layer global override on top.
 	result := popTOML
 	if override != nil {
-		if override.AutoMergeClean != nil {
-			result.AutoMergeClean = *override.AutoMergeClean
-		}
 		if override.Trunk != nil && executionBaseApplies {
 			result.Trunk = *override.Trunk
 		}
@@ -1193,7 +1188,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 		findings = append(findings, Finding{
 			Path: "config.unknown_repo_key",
 			Message: fmt.Sprintf(
-				"%s: [repo.%q] unknown key %q ignored (only trunk, auto_merge_clean are accepted)",
+				"%s: [repo.%q] unknown key %q ignored (only trunk is accepted)",
 				path, key[1], key[2],
 			),
 		})

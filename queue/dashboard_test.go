@@ -125,11 +125,9 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 		RenameFunc:       real.Rename,
 		StatFunc:         origFS.StatFunc,
 	}
-	// Binding-driven membership (ADR-0051): a Done set is in the integration
-	// backlog because it has a non-trunk Worktree binding, not because a
-	// mergeability record exists. done-integrating has a binding but no record
-	// (the self-heal case) and still shows as DONE; done-concluded has
-	// neither and stays hidden.
+	// Binding-driven membership (ADR-0051): a Done set stays listed because it
+	// has a non-trunk Worktree binding. done-integrating has a binding and
+	// still shows as DONE; done-concluded has none and stays hidden.
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey("repo-key", "done-integrating"): {RuntimePath: "/repo/done", Branch: "done-branch"},
 	})
@@ -150,8 +148,8 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 	if !reflect.DeepEqual(ids, want) {
 		t.Fatalf("ids = %v, want %v", ids, want)
 	}
-	if got := byID["done-integrating"]; got.Status != "DONE" || !got.integrationBacklog {
-		t.Fatalf("done-integrating row = %+v, want DONE in backlog", got)
+	if got := byID["done-integrating"]; got.Status != "DONE" {
+		t.Fatalf("done-integrating row = %+v, want DONE", got)
 	}
 }
 
@@ -249,9 +247,6 @@ func TestDashboardColumnDerivation(t *testing.T) {
 		StatFunc:      origFS.StatFunc,
 	}
 	state := &DaemonState{Version: 1}
-	seedMergeabilityStore(t, d.Tasks, map[string]MergeabilityRecord{
-		setScopedKey("repo-key", "done"): {RuntimePath: "/repo/done", SetID: "done", Status: MergeabilityConflicts},
-	})
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey("repo-key", "done"):  {RuntimePath: "/repo/done", Branch: "done-branch"},
 		setScopedKey("repo-key", "bound"): {RuntimePath: "/repo/bound", Branch: "bound-branch"},
@@ -274,12 +269,6 @@ func TestDashboardColumnDerivation(t *testing.T) {
 	}
 	if byID["bound"].Worktree != "↳ bound-branch" {
 		t.Fatalf("bound row = %+v", byID["bound"])
-	}
-	if !DashboardRowCanIntegrate(byID["done"]) {
-		t.Fatalf("done row should be integration-enabled: %+v", byID["done"])
-	}
-	if DashboardRowCanIntegrate(byID["ready"]) || DashboardRowCanIntegrate(byID["bound"]) {
-		t.Fatalf("non-integration rows should not be integration-enabled: ready=%+v bound=%+v", byID["ready"], byID["bound"])
 	}
 }
 
@@ -435,13 +424,10 @@ func TestDashboardBuildBoundedStoreOpens(t *testing.T) {
 			RenameFunc:    real.Rename,
 			StatFunc:      origFS.StatFunc,
 		}
-		// Seed the binding and mergeability stores so pop.db exists: the snapshot's
-		// reads only open the store when its file is already present.
+		// Seed the binding store so pop.db exists: the snapshot's reads only open
+		// the store when its file is already present.
 		seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 			setScopedKey("repo-key", "set-00"): {RuntimePath: "/repo/bound", Branch: "bound-branch"},
-		})
-		seedMergeabilityStore(t, d.Tasks, map[string]MergeabilityRecord{
-			setScopedKey("repo-key", "set-00"): {RuntimePath: "/repo/bound", SetID: "set-00", Status: MergeabilityConflicts},
 		})
 		scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
 
@@ -460,7 +446,7 @@ func TestDashboardBuildBoundedStoreOpens(t *testing.T) {
 	if small != large {
 		t.Fatalf("store opens scaled with row count: 3 rows = %d opens, 30 rows = %d opens", small, large)
 	}
-	// One snapshot per build: AllBindings + AllRecords + LiveRunningDrains. Allow a
+	// One snapshot per build: AllBindings + LiveRunningDrains. Allow a
 	// little slack for incidental opens, but it must not grow with rows.
 	if large > 6 {
 		t.Fatalf("per-build store opens = %d, want a small bounded count", large)
@@ -581,7 +567,7 @@ func TestDashboardFormerDirectKeysInertAtTopLevel(t *testing.T) {
 		m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
 			Project: "pop", SetID: "set", Status: "READY", Worktree: "/repo/wt (main)",
 			defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set",
-			runtimePath: "/repo/wt", bound: true, integrationBacklog: true, parked: true,
+			runtimePath: "/repo/wt", bound: true, parked: true,
 		}}})
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
 		got := updated.(dashboardModel)
@@ -611,14 +597,6 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 	plain := keysFor(DashboardRow{SetID: "plain", runtimePath: "/wt"})
 	if want := []string{"i", "b", "d", "p", "O", "A"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
-	}
-
-	// Integration-backlog row gains integrate.
-	if got := keysFor(DashboardRow{SetID: "done", integrationBacklog: true}); !contains(got, "I") {
-		t.Fatalf("integration-backlog row missing integrate: %v", got)
-	}
-	if got := keysFor(DashboardRow{SetID: "ready"}); contains(got, "I") {
-		t.Fatalf("non-backlog row should not offer integrate: %v", got)
 	}
 
 	// Bound row gains unbind; unbound row does not.
@@ -959,7 +937,7 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set", Status: "READY", RawStatus: tasks.StatusReady, Worktree: "main", Drain: "picked up", AutoDrain: true, cursorKey: "pop\x00set"},
-		{Project: "pop", SetID: "done", Status: "DONE", RawStatus: tasks.StatusDone, Worktree: "main", integrationBacklog: true, cursorKey: "pop\x00done"},
+		{Project: "pop", SetID: "done", Status: "DONE", RawStatus: tasks.StatusDone, Worktree: "main", cursorKey: "pop\x00done"},
 	}})
 	m.width = 120
 	m.height = 8
@@ -968,7 +946,7 @@ func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	if strings.Contains(view, "Queue dashboard") {
 		t.Fatalf("task-set list should use summary instead of dashboard title:\n%s", view)
 	}
-	if !strings.Contains(view, "Queue · 2 task sets · 1 ready · 1 running · 1 auto-drain · 1 awaiting integration") {
+	if !strings.Contains(view, "Queue · 2 task sets · 1 ready · 1 running · 1 auto-drain") {
 		t.Fatalf("task-set list should render useful summary:\n%s", view)
 	}
 	for _, want := range []string{"PROJECT  TASK SET  STATUS", "-------  --------  ------"} {
@@ -1350,37 +1328,6 @@ func TestDashboardDetailViewVimNavigation(t *testing.T) {
 	}
 }
 
-func TestDashboardIKeyOnlyEnabledForIntegrationBacklog(t *testing.T) {
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", SetID: "ready", Status: "READY"},
-		{Project: "pop", SetID: "done", Status: "DONE", integrationBacklog: true},
-	}})
-	// Non-backlog row: the menu offers no integrate verb, so `I` is inert.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
-	if menuHasKey(got.menu, "I") {
-		t.Fatalf("integrate offered on non-backlog row: %+v", got.menu.items)
-	}
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
-	if cmd != nil {
-		t.Fatalf("I key on non-integration row returned command")
-	}
-	got = updated.(dashboardModel)
-
-	// Backlog row: the menu offers integrate and `I` dispatches it.
-	got.menu = nil
-	got.cursor = 1
-	updated, _ = got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got = updated.(dashboardModel)
-	if !menuHasKey(got.menu, "I") {
-		t.Fatalf("integrate not offered on backlog row: %+v", got.menu.items)
-	}
-	_, cmd = got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
-	if cmd == nil {
-		t.Fatalf("I key on integration backlog row returned nil command")
-	}
-}
-
 // menuHasKey reports whether the action menu offers a verb bound to key.
 func menuHasKey(menu *dashboardMenu, key string) bool {
 	if menu == nil {
@@ -1392,36 +1339,6 @@ func menuHasKey(menu *dashboardMenu, key string) bool {
 		}
 	}
 	return false
-}
-
-func TestDashboardLaunchIntegrateDispatchesExistingWizardAndSwitchesPane(t *testing.T) {
-	repo, setID, _ := setupSupervisorSpawnRepo(t, "dashboard-integrate", []spawnTestTask{
-		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
-	})
-	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
-	row.integrationBacklog = true
-
-	result, err := LaunchDashboardIntegrate(d, cfg, row)
-	if err != nil {
-		t.Fatalf("LaunchDashboardIntegrate: %v", err)
-	}
-	if result.PaneID != "%3" {
-		t.Fatalf("pane = %q, want fresh queue pane %%3", result.PaneID)
-	}
-	sendKeys, ok := rt.findCommand("send-keys")
-	if !ok {
-		t.Fatal("expected integrate command to be sent")
-	}
-	if got := strings.Join(sendKeys, " "); !strings.Contains(got, "pop tasks integrate "+setID) {
-		t.Fatalf("send-keys = %v, want existing integrate entry point", sendKeys)
-	}
-	if _, ok := rt.findCommand("select-pane"); !ok {
-		t.Fatal("expected integrate pane to be selected")
-	}
-	switchClient, ok := rt.findCommand("switch-client")
-	if !ok || !argsContain(switchClient, "-t", "%3") {
-		t.Fatalf("switch-client = %v, want pane %%3", switchClient)
-	}
 }
 
 func TestDashboardBaseRefsMainMasterFirst(t *testing.T) {

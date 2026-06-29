@@ -17,9 +17,7 @@ type CompleteTaskOptions struct {
 type CompleteTaskResult struct {
 	TaskSetID string
 	TaskID    string
-	// ProjectPath is the resolved checkout the completion ran against, carried
-	// so callers can record Mergeability when this completion flips a
-	// worktree-bound set to Done (ADR-0051).
+	// ProjectPath is the resolved checkout the completion ran against.
 	ProjectPath string
 	Refresh     *RefreshResult
 }
