@@ -255,8 +255,8 @@ func TestResolveTaskSetRuntimeManagedDirectiveForegroundIgnored(t *testing.T) {
 }
 
 // TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding asserts a
-// pre-existing binding shadows the `managed` directive: the drain resumes the
-// bound checkout and no managed worktree is provisioned (ADR-0059 precedence).
+// pre-existing binding at a different checkout is silently re-bound to the
+// current checkout on foreground implement; the directive is ignored (ADR-0072).
 func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing.T) {
 	root, d := setupImplementFixture(t)
 	seedManagedIntentImplement(t, d, root, "demo")
@@ -279,16 +279,25 @@ func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
-	if resolved.RuntimeOverride != wt {
-		t.Fatalf("RuntimeOverride = %q, want bound checkout %q (directive must not provision)", resolved.RuntimeOverride, wt)
+	// Rebound to current checkout (trunk); executor already resolves it.
+	if resolved.RuntimeOverride != "" {
+		t.Fatalf("RuntimeOverride = %q, want empty after silent rebind to current", resolved.RuntimeOverride)
 	}
-	// The bound (adopted) binding is untouched — the directive provisioned nothing.
+
 	after, err := binding.Load(d.tasksDeps())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := after.Get(binding.Key(id, "demo")); b.Provisioned || b.RuntimePath != wt {
-		t.Fatalf("binding = %+v, want the adopted binding at %q unchanged", b, wt)
+	currentRuntime, err := tasks.ResolveRuntimePathWith(d.tasksDeps(), root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, ok := after.Get(binding.Key(id, "demo"))
+	if !ok || b.Provisioned || b.RuntimePath != currentRuntime {
+		t.Fatalf("binding = %+v ok=%v, want adopted rebind at current %q", b, ok, currentRuntime)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("old adopted worktree must remain on disk: %v", err)
 	}
 }
 
@@ -536,6 +545,13 @@ func TestResolveTaskSetRuntimeUsesExistingBinding(t *testing.T) {
 	if err := binding.Save(d.tasksDeps(), store); err != nil {
 		t.Fatal(err)
 	}
+
+	// Implement from the same checkout the set is bound to resumes there.
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(wt); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
 	if err != nil {

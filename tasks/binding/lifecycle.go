@@ -16,6 +16,8 @@ const unbindConfirmPrompt = "Abandon binding for %s? This forgets the associatio
 
 const managedWorktreeDeletePrompt = "delete managed worktree at %s? [y/N]: "
 
+const foregroundManagedRebindPrompt = "rebind to current and DELETE managed worktree %s? [y/N]: "
+
 // BindWorktreeOptions controls bind-worktree behaviour.
 type BindWorktreeOptions struct {
 	Force bool
@@ -250,6 +252,14 @@ func TeardownAndReleaseManagedBinding(td *tasks.Deps, pd *project.Deps, cfg *con
 func ConfirmManagedWorktreeDelete(in io.Reader, out io.Writer, yes bool, runtimePath string) (bool, error) {
 	prompt := fmt.Sprintf(managedWorktreeDeletePrompt, runtimePath)
 	return confirmYesNo(in, out, yes, prompt, "non-interactive archive requires --yes")
+}
+
+// ConfirmForegroundManagedRebind prompts before tearing down an idle managed
+// binding so a foreground implement can rebind the set to the current checkout.
+// yes skips the prompt; a declined answer returns (false, nil).
+func ConfirmForegroundManagedRebind(in io.Reader, out io.Writer, yes bool, runtimePath string) (bool, error) {
+	prompt := fmt.Sprintf(foregroundManagedRebindPrompt, runtimePath)
+	return confirmYesNo(in, out, yes, prompt, "non-interactive implement requires --yes to delete managed worktree when rebinding")
 }
 
 // TeardownManagedWorktree removes a managed binding's checkout and branch.

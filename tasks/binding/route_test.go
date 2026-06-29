@@ -41,7 +41,7 @@ func TestRouteDrainCheckoutExistingBindingWins(t *testing.T) {
 
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
-		CurrentCheckout: repo,
+		CurrentCheckout: wt,
 		SetID:           "set-a",
 		Trigger:         TriggerImplementForeground,
 	})
@@ -192,11 +192,10 @@ func TestRouteDrainCheckoutNoDirectiveQueueBindsIntegrationTarget(t *testing.T) 
 	}
 }
 
-// TestRouteDrainCheckoutNoDirectiveSecondDrainResumesBoundCheckout asserts the
-// second drain of a no-directive set resumes the checkout the first drain bound,
-// not the (different) current cwd — the set is sticky to where it first ran
-// (ADR-0062).
-func TestRouteDrainCheckoutNoDirectiveSecondDrainResumesBoundCheckout(t *testing.T) {
+// TestRouteDrainCheckoutNoDirectiveSecondDrainRebindsForeground asserts a later
+// foreground drain from a different checkout re-points the binding to the current
+// checkout rather than resuming the first bound worktree (ADR-0072).
+func TestRouteDrainCheckoutNoDirectiveSecondDrainRebindsForeground(t *testing.T) {
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	first := addLinkedWorktree(t, repo, "first")
@@ -215,7 +214,6 @@ func TestRouteDrainCheckoutNoDirectiveSecondDrainResumesBoundCheckout(t *testing
 		t.Fatalf("first drain must persist a default binding, got %+v", firstRes)
 	}
 
-	// A later drain from a *different* checkout resumes the bound one, not the cwd.
 	secondRes, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
 		CurrentCheckout: second,
@@ -225,17 +223,24 @@ func TestRouteDrainCheckoutNoDirectiveSecondDrainResumesBoundCheckout(t *testing
 	if err != nil {
 		t.Fatalf("second route: %v", err)
 	}
-	if !secondRes.UsedExistingBinding {
-		t.Fatalf("second drain must resume the existing binding, got %+v", secondRes)
+	if !secondRes.Rebound {
+		t.Fatalf("second drain must rebind to current checkout, got %+v", secondRes)
 	}
-	if secondRes.RuntimePath != firstRes.RuntimePath {
-		t.Fatalf("second runtime %q != first %q; must resume bound checkout not cwd", secondRes.RuntimePath, firstRes.RuntimePath)
+	secondRuntime, err := tasks.ResolveRuntimePathWith(td, second, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondRes.RuntimePath != secondRuntime {
+		t.Fatalf("second runtime %q != current %q", secondRes.RuntimePath, secondRuntime)
+	}
+	if _, err := os.Stat(first); err != nil {
+		t.Fatalf("first bound worktree must remain on disk after rebind: %v", err)
 	}
 }
 
 // TestRouteDrainCheckoutOperatorBindingWinsOverDefault asserts a pre-existing
-// operator binding is resumed and the no-directive default never overwrites it
-// (ADR-0062: bind/override consulted first).
+// operator binding is resumed on a Queue spawn and the no-directive default never
+// overwrites it (ADR-0062: bind/override consulted first).
 func TestRouteDrainCheckoutOperatorBindingWinsOverDefault(t *testing.T) {
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
@@ -244,9 +249,9 @@ func TestRouteDrainCheckoutOperatorBindingWinsOverDefault(t *testing.T) {
 
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
-		CurrentCheckout: repo, // cwd differs from the operator-bound checkout
+		CurrentCheckout: repo,
 		SetID:           "set-a",
-		Trigger:         TriggerImplementForeground,
+		Trigger:         TriggerQueueSpawn,
 	})
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -512,8 +517,9 @@ func TestRouteDrainCheckoutManagedDirectiveSecondDrainResumes(t *testing.T) {
 }
 
 // TestRouteDrainCheckoutBindingWinsOverManagedDirective asserts a pre-existing
-// binding takes precedence over the directive: routing resumes the bound checkout
-// and never consults the directive, so no managed worktree is provisioned.
+// binding takes precedence over the directive on a Queue spawn: routing resumes
+// the bound checkout and never consults the directive, so no managed worktree is
+// provisioned.
 func TestRouteDrainCheckoutBindingWinsOverManagedDirective(t *testing.T) {
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
@@ -527,7 +533,7 @@ func TestRouteDrainCheckoutBindingWinsOverManagedDirective(t *testing.T) {
 		Now:             time.Date(2026, 6, 24, 9, 8, 7, 0, time.UTC),
 		CurrentCheckout: repo,
 		SetID:           "managed-set",
-		Trigger:         TriggerImplementForeground,
+		Trigger:         TriggerQueueSpawn,
 	})
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -734,8 +740,8 @@ func TestRouteDrainCheckoutNamedDirectiveSecondDrainResumes(t *testing.T) {
 }
 
 // TestRouteDrainCheckoutBindingWinsOverNamedDirective asserts a pre-existing
-// binding shadows the `name` directive: routing resumes the bound checkout and
-// never consults the directive.
+// binding shadows the `name` directive on a Queue spawn: routing resumes the
+// bound checkout and never consults the directive.
 func TestRouteDrainCheckoutBindingWinsOverNamedDirective(t *testing.T) {
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
@@ -748,7 +754,7 @@ func TestRouteDrainCheckoutBindingWinsOverNamedDirective(t *testing.T) {
 		TD:              td,
 		CurrentCheckout: repo,
 		SetID:           "named-set",
-		Trigger:         TriggerImplementForeground,
+		Trigger:         TriggerQueueSpawn,
 	})
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -941,6 +947,158 @@ func TestProbeWorktreeDirectiveBoundSatisfied(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// TestRouteDrainCheckoutForegroundRebindsAdoptedSilently asserts an idle
+// adopted binding at a different checkout is silently re-pointed to the current
+// checkout; the old worktree stays on disk (ADR-0072).
+func TestRouteDrainCheckoutForegroundRebindsAdoptedSilently(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	oldWT := addLinkedWorktree(t, repo, "old-bound")
+	currentWT := addLinkedWorktree(t, repo, "current")
+	seedBinding(t, td, repo, "set-a", Adopt(oldWT, "old-bound", "proj"))
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: currentWT,
+		SetID:           "set-a",
+		Trigger:         TriggerImplementForeground,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	currentRuntime, err := tasks.ResolveRuntimePathWith(td, currentWT, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Rebound || got.UsedExistingBinding || got.RuntimePath != currentRuntime {
+		t.Fatalf("result = %+v, want silent rebind to %q", got, currentRuntime)
+	}
+	if _, err := os.Stat(oldWT); err != nil {
+		t.Fatalf("old adopted worktree must remain on disk: %v", err)
+	}
+	_, b, ok, err := GetForSet(td, currentWT, "set-a")
+	if err != nil || !ok || b.RuntimePath != currentRuntime || b.Provisioned {
+		t.Fatalf("binding = %+v ok=%v, want adopted rebind at %q", b, ok, currentRuntime)
+	}
+}
+
+// TestRouteDrainCheckoutForegroundManagedRebindConfirmDeletes asserts confirming
+// the managed rebind prompt tears down the old managed worktree and rebinds to
+// current (ADR-0072).
+func TestRouteDrainCheckoutForegroundManagedRebindConfirmDeletes(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	currentWT := addLinkedWorktree(t, repo, "current")
+	managedWT := addLinkedWorktree(t, repo, "managed-old")
+	seedBinding(t, td, repo, "set-m", Binding{
+		RuntimePath: managedWT,
+		Branch:      "managed-old",
+		Provisioned: true,
+	})
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: currentWT,
+		SetID:           "set-m",
+		Trigger:         TriggerImplementForeground,
+		Yes:             true,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	currentRuntime, err := tasks.ResolveRuntimePathWith(td, currentWT, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Rebound || got.RuntimePath != currentRuntime {
+		t.Fatalf("result = %+v, want rebind to %q", got, currentRuntime)
+	}
+	if _, err := os.Stat(managedWT); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("managed worktree should be deleted, stat err = %v", err)
+	}
+	if branch := runRouteGitOutput(t, repo, "branch", "--list", "managed-old"); strings.TrimSpace(branch) != "" {
+		t.Fatalf("managed branch should be deleted, still have %q", branch)
+	}
+	_, b, ok, err := GetForSet(td, currentWT, "set-m")
+	if err != nil || !ok || b.RuntimePath != currentRuntime || b.Provisioned {
+		t.Fatalf("binding = %+v ok=%v, want adopted rebind at %q", b, ok, currentRuntime)
+	}
+}
+
+// TestRouteDrainCheckoutForegroundManagedRebindDeclineAborts asserts declining
+// the managed rebind prompt leaves the binding at the old managed checkout.
+func TestRouteDrainCheckoutForegroundManagedRebindDeclineAborts(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	currentWT := addLinkedWorktree(t, repo, "current")
+	managedWT := addLinkedWorktree(t, repo, "managed-old")
+	seedBinding(t, td, repo, "set-m", Binding{
+		RuntimePath: managedWT,
+		Branch:      "managed-old",
+		Provisioned: true,
+	})
+
+	_, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: currentWT,
+		SetID:           "set-m",
+		Trigger:         TriggerImplementForeground,
+		ConfirmIn:       strings.NewReader("n\n"),
+	})
+	if !errors.Is(err, ErrForegroundRebindDeclined) {
+		t.Fatalf("route err = %v, want ErrForegroundRebindDeclined", err)
+	}
+	if _, err := os.Stat(managedWT); err != nil {
+		t.Fatalf("managed worktree must remain after decline: %v", err)
+	}
+	_, b, ok, err := GetForSet(td, repo, "set-m")
+	if err != nil || !ok || b.RuntimePath != managedWT || !b.Provisioned {
+		t.Fatalf("binding = %+v ok=%v, want unchanged managed binding at %q", b, ok, managedWT)
+	}
+}
+
+// TestRouteDrainCheckoutForegroundRebindRefusesLiveLock asserts foreground
+// implement refuses to rebind while the bound checkout holds a live Runtime
+// execution lock.
+func TestRouteDrainCheckoutForegroundRebindRefusesLiveLock(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	oldWT := addLinkedWorktree(t, repo, "locked")
+	currentWT := addLinkedWorktree(t, repo, "current")
+	seedBinding(t, td, repo, "set-a", Adopt(oldWT, "locked", "proj"))
+
+	_, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: currentWT,
+		SetID:           "set-a",
+		Trigger:         TriggerImplementForeground,
+		Hooks: LifecycleHooks{
+			ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
+				if runtimePath == oldWT {
+					return &tasks.RuntimeLockStatus{Locked: true, Metadata: &tasks.RuntimeLockMetadata{SetID: "set-a"}}
+				}
+				return &tasks.RuntimeLockStatus{RuntimePath: runtimePath}
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "currently executing") {
+		t.Fatalf("route err = %v, want live-lock refusal", err)
+	}
+	_, b, ok, err := GetForSet(td, repo, "set-a")
+	if err != nil || !ok || b.RuntimePath != oldWT {
+		t.Fatalf("binding = %+v ok=%v, want unchanged at %q", b, ok, oldWT)
+	}
+}
+
+func runRouteGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := deps.NewRealGit().CommandInDir(dir, args...)
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return out
+}
 
 type interceptGit struct {
 	inner          deps.Git

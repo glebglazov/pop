@@ -3,6 +3,7 @@ package binding
 import (
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -41,6 +42,12 @@ type RouteDrainCheckoutRequest struct {
 	SetID           string
 	Trigger         DrainTrigger
 	RuntimeOverride string
+	// Yes, ConfirmIn, and ConfirmOut gate managed-worktree teardown when a
+	// foreground implement rebinds off an idle managed binding (ADR-0072).
+	Yes        bool
+	ConfirmIn  io.Reader
+	ConfirmOut io.Writer
+	Hooks      LifecycleHooks
 }
 
 // RouteDrainCheckoutResult describes the resolved drain checkout.
@@ -65,6 +72,9 @@ type RouteDrainCheckoutResult struct {
 	// resume via step 1. RuntimePath is the checkout the executor already resolves
 	// on its own, so unlike the other flags the caller need not re-point at it.
 	BoundDefault bool
+	// Rebound is true when a foreground implement re-pointed an idle binding at a
+	// different checkout to the current checkout (ADR-0072).
+	Rebound bool
 	Binding      Binding
 }
 
@@ -82,6 +92,9 @@ var (
 	// refuses rather than silently draining in place. Surfacing it as a visible
 	// config-class error on the set is a later slice.
 	ErrNamedWorktreeNotFound = errors.New("named worktree directive: no worktree of that name on this machine")
+	// ErrForegroundRebindDeclined reports that the operator declined to delete an
+	// idle managed worktree when rebinding a set to the current checkout.
+	ErrForegroundRebindDeclined = errors.New("foreground rebind cancelled")
 )
 
 // RouteDrainCheckout resolves which checkout a set drain runs in, honoring the
@@ -128,7 +141,8 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 		return RouteDrainCheckoutResult{}, err
 	}
 
-	// 1. An existing Worktree binding resumes there.
+	// 1. An existing Worktree binding resumes there (Queue) or is re-pointed to
+	// the current checkout (foreground implement, ADR-0072).
 	if existing, ok := store.Get(key); ok && strings.TrimSpace(existing.RuntimePath) != "" {
 		if override := strings.TrimSpace(req.RuntimeOverride); override != "" {
 			overridePath, err := tasks.ResolveRuntimePathWith(req.TD, checkout, override)
@@ -143,11 +157,59 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 			if err := ValidateBoundWorktree(req.TD, checkout, existing); err != nil {
 				return RouteDrainCheckoutResult{}, fmt.Errorf("%w: %v", ErrBoundWorktreeInvalid, err)
 			}
+			return RouteDrainCheckoutResult{
+				RuntimePath:         existing.RuntimePath,
+				UsedExistingBinding: true,
+				Binding:             existing,
+			}, nil
+		}
+		existingCanon, err := canonicalCheckoutPath(req.TD, existing.RuntimePath)
+		if err != nil {
+			return RouteDrainCheckoutResult{}, fmt.Errorf("canonicalize bound checkout: %w", err)
+		}
+		currentCanon, err := canonicalCheckoutPath(req.TD, currentRuntime)
+		if err != nil {
+			return RouteDrainCheckoutResult{}, fmt.Errorf("canonicalize current checkout: %w", err)
+		}
+		if existingCanon == currentCanon {
+			return RouteDrainCheckoutResult{
+				RuntimePath:         existing.RuntimePath,
+				UsedExistingBinding: true,
+				Binding:             existing,
+			}, nil
+		}
+		lock := readRuntimeLock(req.Hooks, existing.RuntimePath)
+		if lock != nil && lock.Locked {
+			if lock.Metadata != nil && lock.Metadata.SetID != "" && lock.Metadata.SetID != setID {
+				return RouteDrainCheckoutResult{}, fmt.Errorf("refusing implement: %s runtime checkout is locked for another set (%s)", setID, lock.Metadata.SetID)
+			}
+			return RouteDrainCheckoutResult{}, fmt.Errorf("refusing implement: %s is currently executing", setID)
+		}
+		if existing.Provisioned {
+			confirmOut := req.ConfirmOut
+			if confirmOut == nil {
+				confirmOut = io.Discard
+			}
+			confirmed, err := ConfirmForegroundManagedRebind(req.ConfirmIn, confirmOut, req.Yes, existing.RuntimePath)
+			if err != nil {
+				return RouteDrainCheckoutResult{}, err
+			}
+			if !confirmed {
+				return RouteDrainCheckoutResult{}, ErrForegroundRebindDeclined
+			}
+			if err := TeardownManagedWorktree(req.TD, req.PD, req.Config, existing, req.Hooks); err != nil {
+				return RouteDrainCheckoutResult{}, err
+			}
+		}
+		b := Adopt(currentRuntime, CurrentBranch(req.TD, currentRuntime), DetectProject(req.PD, req.TD, req.Config, repoID))
+		store.Put(key, b)
+		if err := Save(req.TD, store); err != nil {
+			return RouteDrainCheckoutResult{}, err
 		}
 		return RouteDrainCheckoutResult{
-			RuntimePath:         existing.RuntimePath,
-			UsedExistingBinding: true,
-			Binding:             existing,
+			RuntimePath: currentRuntime,
+			Rebound:     true,
+			Binding:     b,
 		}, nil
 	}
 

@@ -35,6 +35,13 @@ type WholeSetOptions struct {
 	PreSeedTopic func(taskTitle string)
 }
 
+// RuntimeConfirmOptions carries confirmation inputs for foreground rebind prompts.
+type RuntimeConfirmOptions struct {
+	Yes        bool
+	ConfirmIn  io.Reader
+	ConfirmOut io.Writer
+}
+
 // RunWholeSet orchestrates whole-set Implement: route → drain.
 func RunWholeSet(opts WholeSetOptions) (*tasks.RunTaskSetResult, error) {
 	return RunWholeSetWith(DefaultDeps(), opts)
@@ -45,7 +52,11 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 	if d == nil {
 		d = DefaultDeps()
 	}
-	resolveInput, err := resolveTaskSetRuntime(d, opts.ResolveInput, opts.TaskSetOverride, opts.InWorktree)
+	resolveInput, err := resolveTaskSetRuntime(d, opts.ResolveInput, opts.TaskSetOverride, opts.InWorktree, RuntimeConfirmOptions{
+		Yes:        opts.Yes,
+		ConfirmIn:  opts.ConfirmIn,
+		ConfirmOut: opts.ConfirmOut,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -79,10 +90,10 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 // ResolveTaskSetRuntime applies drain checkout routing for tests and returns
 // the ResolveInput the executor should use.
 func ResolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool) (tasks.ResolveInput, error) {
-	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree)
+	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, RuntimeConfirmOptions{})
 }
 
-func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool) (tasks.ResolveInput, error) {
+func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, error) {
 	resolved, err := tasks.ResolvePathsWith(d.tasksDeps(), d.projectDeps(), d.loadConfig, in)
 	if err != nil {
 		return in, err
@@ -114,8 +125,9 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 	}
 
 	cfg, _ := d.loadConfig(config.DefaultConfigPath())
+	td := d.tasksDeps()
 	route, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
-		TD:              d.tasksDeps(),
+		TD:              td,
 		PD:              d.projectDeps(),
 		Config:          cfg,
 		Now:             d.now(),
@@ -123,13 +135,22 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 		SetID:           taskSetID,
 		Trigger:         binding.TriggerImplementForeground,
 		RuntimeOverride: in.RuntimeOverride,
+		Yes:             confirm.Yes,
+		ConfirmIn:       confirm.ConfirmIn,
+		ConfirmOut:      confirm.ConfirmOut,
+		Hooks: binding.LifecycleHooks{
+			ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
+				return tasks.ReadRuntimeLockStatus(td, runtimePath)
+			},
+		},
 	})
 	if err != nil {
 		return in, err
 	}
 	// Foreground implement never reaches the Queue-only worktree directive
-	// (ADR-0072), so ProvisionedManaged/AdoptedNamed are never set here: an existing
-	// binding resumes at its bound checkout and an explicit override resolves to that
+	// (ADR-0072), so ProvisionedManaged/AdoptedNamed are never set here. An existing
+	// binding at the current checkout resumes there; rebinding off a different idle
+	// checkout re-points to current (Rebound). An explicit override resolves to that
 	// checkout — both resolved checkouts the executor must be pointed at. The
 	// directive is ignored; the final step persists a default binding to the current
 	// checkout (ADR-0062), but its RuntimePath is that same current checkout the
