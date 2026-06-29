@@ -35,11 +35,11 @@ is config-only and inert until applied.
 
 - **Geometry is an explicit weighted split tree, not a tmux preset.** A window is the
   root container; each node is either a Pane spec (leaf) or an unnamed split container
-  (has nested `panes`). A container has `direction = row | column` and weighted
+  (has nested `panes`). A container has `children = rows | columns` and weighted
   children; `weight` is a relative integer **normalized within its siblings**, default
-  `1`. Recursion is **unbounded**. We use `row`/`column` (flexbox) rather than tmux's
-  `horizontal`/`vertical`, which are the most confusing words in tmux (`split -h` draws
-  a *vertical* divider); the mapping to `-h`/`-v` is internal. tmux splits are binary
+  `1`. Recursion is **unbounded**. `children = "rows"` stacks panes top-to-bottom
+  (`-v`); `children = "columns"` places them side-by-side (`-h`); the mapping to
+  `-h`/`-v` is internal. tmux splits are binary
   and size by cells, so an N-ary weighted container is realized as a sequence of
   `split-window` + `resize-pane`, honoring weights to the nearest cell.
 

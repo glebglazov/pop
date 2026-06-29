@@ -212,9 +212,9 @@ type SessionTemplateWindow struct {
 type SessionTemplatePaneSpec struct {
 	Name    string `toml:"name"`
 	Command string `toml:"command"`
-	// Direction is "row" (side-by-side) or "column" (stacked). Only meaningful
-	// when Panes is non-empty (making this a container node).
-	Direction string `toml:"direction"`
+	// Children is "rows" (stacked top-to-bottom) or "columns" (side-by-side). Only
+	// meaningful when Panes is non-empty (making this a container node).
+	Children string `toml:"children"`
 	// Panes holds child pane specs. When non-empty, this node is a container
 	// and Command is ignored. When empty, this is a leaf node.
 	Panes []SessionTemplatePaneSpec `toml:"panes"`

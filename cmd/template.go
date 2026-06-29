@@ -227,7 +227,7 @@ func realizePaneTree(tmux deps.Tmux, pane *config.SessionTemplatePaneSpec, paneI
 	}
 
 	// Container node: create child panes and realize them
-	return realizeContainer(tmux, paneID, pane.Panes, pane.Direction, sessionDir, parentCwd, homeDir)
+	return realizeContainer(tmux, paneID, pane.Panes, pane.Children, sessionDir, parentCwd, homeDir)
 }
 
 // realizeContainer creates child panes for a container and realizes them recursively.
@@ -270,10 +270,10 @@ func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.
 		totalWeight += weight
 	}
 
-	// Determine split flag based on direction
-	splitFlag := "-h" // row = side-by-side
-	if direction == "column" {
-		splitFlag = "-v" // column = stacked
+	// Determine split flag based on children orientation
+	splitFlag := "-h" // columns = side-by-side
+	if direction == "rows" {
+		splitFlag = "-v" // rows = stacked
 	}
 
 	// Create panes by splitting
@@ -359,7 +359,7 @@ func resizePanesByWeight(tmux deps.Tmux, paneIDs []string, children []config.Ses
 	// Determine which dimension to resize
 	var totalSize int
 	var resizeFlag string
-	if direction == "row" {
+	if direction == "columns" {
 		totalSize = width
 		resizeFlag = "-x"
 	} else {
@@ -467,8 +467,8 @@ func validatePaneSpec(pane *config.SessionTemplatePaneSpec, path string) error {
 	
 	if isContainer {
 		// Container node
-		if pane.Direction != "row" && pane.Direction != "column" {
-			return fmt.Errorf("%spane must have direction 'row' or 'column' when it has nested panes", path)
+		if pane.Children != "rows" && pane.Children != "columns" {
+			return fmt.Errorf("%spane must have children 'rows' or 'columns' when it has nested panes", path)
 		}
 		// Recursively validate children
 		for i := range pane.Panes {

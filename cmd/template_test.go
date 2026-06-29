@@ -158,7 +158,7 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
 				Pane: &config.SessionTemplatePaneSpec{
-					Direction: "row",
+					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "left", Command: "echo left", Weight: 1},
 						{Name: "middle", Command: "echo middle", Weight: 2},
@@ -242,7 +242,7 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
 				Pane: &config.SessionTemplatePaneSpec{
-					Direction: "column",
+					Children: "rows",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "top", Command: "echo top"},
 						{Name: "bottom", Command: "echo bottom"},
@@ -322,11 +322,11 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
 				Pane: &config.SessionTemplatePaneSpec{
-					Direction: "row",
+					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{
-							Direction: "column",
-							Weight:    1,
+							Children: "rows",
+							Weight:   1,
 							Panes: []config.SessionTemplatePaneSpec{
 								{Name: "top-left", Command: "echo tl", Weight: 1},
 								{Name: "bottom-left", Command: "echo bl", Weight: 1},
@@ -394,9 +394,9 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
 				Pane: &config.SessionTemplatePaneSpec{
-					Direction: "row",
+					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
-						{Name: "left", Command: "echo left"},  // weight omitted = 1
+						{Name: "left", Command: "echo left"},   // weight omitted = 1
 						{Name: "right", Command: "echo right"}, // weight omitted = 1
 					},
 				},
@@ -463,13 +463,13 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
 				Pane: &config.SessionTemplatePaneSpec{
-					Direction: "row",
+					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{
-							Direction: "column",
+							Children: "rows",
 							Panes: []config.SessionTemplatePaneSpec{
 								{
-									Direction: "row",
+									Children: "columns",
 									Panes: []config.SessionTemplatePaneSpec{
 										{Name: "deep-left", Command: "echo dl"},
 										{Name: "deep-right", Command: "echo dr"},
@@ -718,8 +718,8 @@ func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
 				Pane: &config.SessionTemplatePaneSpec{
-					Direction: "column",
-					Cwd:       "backend",
+					Children: "rows",
+					Cwd:      "backend",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "inherited", Command: "echo inherited"},
 						{Name: "override", Command: "echo override", Cwd: "api"},
@@ -775,7 +775,7 @@ func TestRunTemplateApplyWithCwdTildeAndAbsolute(t *testing.T) {
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
 				Pane: &config.SessionTemplatePaneSpec{
-					Direction: "column",
+					Children: "rows",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "home", Command: "echo home", Cwd: "~/docs"},
 						{Name: "abs", Command: "echo abs", Cwd: "/tmp"},
@@ -823,7 +823,7 @@ func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
 				Pane: &config.SessionTemplatePaneSpec{
-					Direction: "row",
+					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "left", Command: "echo left"},
 						{Name: "right", Command: "echo right", Focus: true},
@@ -875,7 +875,7 @@ func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
 				Pane: &config.SessionTemplatePaneSpec{
-					Direction: "row",
+					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "first", Command: "echo first", Focus: true},
 						{Name: "second", Command: "echo second", Focus: true},

@@ -24,6 +24,6 @@ branch: master
   from a Pane: a spec has no pane ID or attention status and carries a
   birth command/weight; a Pane is the live tracked result it produces when a
   template is applied. Internal (non-leaf) tree nodes are unnamed splits
-  (a direction of row/column over weighted children), not Pane specs.
+  (children = "rows"/"columns" over weighted children), not Pane specs.
   avoid: Pane (the live tracked pane), pane template, pane definition
   under: Language
