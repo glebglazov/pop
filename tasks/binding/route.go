@@ -85,19 +85,20 @@ var (
 )
 
 // RouteDrainCheckout resolves which checkout a set drain runs in, honoring the
-// precedence binding → runtime-path override → registration worktree-intent →
-// default binding to the chosen checkout (ADR-0059, ADR-0062). An existing
-// Worktree binding resumes there; an explicit runtime-path override resolves to
-// that checkout; an unbound set whose registration carries a `managed` worktree
-// directive forks a managed worktree from the Trunk worktree, records a managed
-// binding, and drains there; a `name` directive adopts the named worktree.
-// Otherwise the first no-directive drain persists a default (adopted) Worktree
-// binding to the checkout it chose — the current checkout for a foreground
-// implement, the integration target the Queue routes into for a headless spawn —
-// and resumes there on later drains (ADR-0062). The directive and the default
-// binding are reached only when unbound and unoverridden, so an operator's
-// bind/override always wins and any provisioning stays lazy and one-time: later
-// drains resume via the binding recorded here.
+// precedence binding → runtime-path override → (Queue-only) registration
+// worktree-intent → default binding to the chosen checkout (ADR-0059, ADR-0062,
+// ADR-0072). An existing Worktree binding resumes there; an explicit runtime-path
+// override resolves to that checkout. The worktree directive is Queue-only: on a
+// Queue spawn an unbound set whose registration carries a `managed` directive
+// forks a managed worktree from the Trunk worktree (records a managed binding) and
+// a `name` directive adopts the named worktree, but a foreground implement ignores
+// the directive entirely. Otherwise the first such drain persists a default
+// (adopted) Worktree binding to the checkout it chose — the current checkout for a
+// foreground implement, the integration target the Queue routes into for a
+// headless spawn — and resumes there on later drains (ADR-0062). The directive and
+// the default binding are reached only when unbound and unoverridden, so an
+// operator's bind/override always wins and any provisioning stays lazy and
+// one-time: later drains resume via the binding recorded here.
 func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult, error) {
 	if req.TD == nil {
 		return RouteDrainCheckoutResult{}, fmt.Errorf("missing task dependencies")
@@ -159,41 +160,46 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 		return RouteDrainCheckoutResult{RuntimePath: runtimePath}, nil
 	}
 
-	// 3. An unbound set whose registration carries a worktree directive resolves it
-	// once, lazily, and binds the result (ADR-0059); the binding above resumes later
-	// drains. The `managed` arm forks a managed worktree from the Trunk worktree —
-	// the only path routing provisions. The `name` arm adopts the existing worktree
-	// of that name on this machine, matched by its operator-facing name (never a
-	// path), recording a never-delete adopted binding.
-	defPath, err := tasks.CanonicalDefinitionPathWith(req.TD, repoID.TasksDir)
-	if err != nil {
-		return RouteDrainCheckoutResult{}, err
-	}
-	intent, err := tasks.RegisteredWorktreeIntent(req.TD, defPath, setID)
-	if err != nil {
-		return RouteDrainCheckoutResult{}, err
-	}
-	if intent != nil && intent.Managed {
-		b, err := provisionManagedWorktree(req, checkout, setID, key, store)
+	// 3. The Worktree directive is Queue-only (ADR-0072). On a Queue spawn an unbound
+	// set whose registration carries a directive resolves it once, lazily, and binds
+	// the result (ADR-0059); the binding above resumes later drains. The `managed` arm
+	// forks a managed worktree from the Trunk worktree — the only path routing
+	// provisions. The `name` arm adopts the existing worktree of that name on this
+	// machine, matched by its operator-facing name (never a path), recording a
+	// never-delete adopted binding. A foreground implement skips this arm entirely:
+	// it ignores the directive and falls through to step 4, binding the current
+	// checkout (rebinding an already-bound set is a separate slice).
+	if req.Trigger == TriggerQueueSpawn {
+		defPath, err := tasks.CanonicalDefinitionPathWith(req.TD, repoID.TasksDir)
 		if err != nil {
 			return RouteDrainCheckoutResult{}, err
 		}
-		return RouteDrainCheckoutResult{
-			RuntimePath:        b.RuntimePath,
-			ProvisionedManaged: true,
-			Binding:            b,
-		}, nil
-	}
-	if intent != nil && intent.Name != "" {
-		b, err := adoptNamedWorktree(req, checkout, intent.Name, setID, key, store)
+		intent, err := tasks.RegisteredWorktreeIntent(req.TD, defPath, setID)
 		if err != nil {
 			return RouteDrainCheckoutResult{}, err
 		}
-		return RouteDrainCheckoutResult{
-			RuntimePath:  b.RuntimePath,
-			AdoptedNamed: true,
-			Binding:      b,
-		}, nil
+		if intent != nil && intent.Managed {
+			b, err := provisionManagedWorktree(req, checkout, setID, key, store)
+			if err != nil {
+				return RouteDrainCheckoutResult{}, err
+			}
+			return RouteDrainCheckoutResult{
+				RuntimePath:        b.RuntimePath,
+				ProvisionedManaged: true,
+				Binding:            b,
+			}, nil
+		}
+		if intent != nil && intent.Name != "" {
+			b, err := adoptNamedWorktree(req, checkout, intent.Name, setID, key, store)
+			if err != nil {
+				return RouteDrainCheckoutResult{}, err
+			}
+			return RouteDrainCheckoutResult{
+				RuntimePath:  b.RuntimePath,
+				AdoptedNamed: true,
+				Binding:      b,
+			}, nil
+		}
 	}
 
 	// 4. Otherwise the first no-directive drain persists a default Worktree binding
@@ -288,11 +294,10 @@ func ProbeWorktreeDirective(td *tasks.Deps, pd *project.Deps, cfg *config.Config
 // provisionManagedWorktree forks a managed worktree from the repository's Trunk
 // worktree for setID, records a provisioned (pop-owned, torn-down-on-integrate)
 // Worktree binding under key, and returns it. It is the lazy provisioner the
-// `managed` registration directive triggers on the first unbound drain — the
-// same fork-from-trunk act as `pop tasks implement --in-worktree`, routed so both
-// foreground implement and the Queue reach it through RouteDrainCheckout. A repo
-// with no resolvable trunk yields ErrNoResolvableTrunk; routing never falls back
-// in place.
+// `managed` registration directive triggers on the first unbound Queue drain
+// (ADR-0072) — the same fork-from-trunk act as `pop tasks implement --in-worktree`,
+// which is the explicit foreground opt-in. A repo with no resolvable trunk yields
+// ErrNoResolvableTrunk; routing never falls back in place.
 func provisionManagedWorktree(req RouteDrainCheckoutRequest, checkout, setID, key string, store *Store) (Binding, error) {
 	trunkPath, bare, err := ResolveTrunkPath(req.TD, req.Config, checkout)
 	if err != nil {

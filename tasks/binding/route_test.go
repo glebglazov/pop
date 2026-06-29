@@ -368,75 +368,110 @@ func countingGit(t *testing.T, td *tasks.Deps) *int {
 
 // TestRouteDrainCheckoutManagedDirectiveProvisions asserts an unbound set
 // carrying a `managed` directive forks a managed worktree from the Trunk
-// worktree's HEAD, records a provisioned binding, and drains there — identically
-// whether the trigger is foreground implement or a Queue spawn (ADR-0059).
+// worktree's HEAD, records a provisioned binding, and drains there. The worktree
+// directive is Queue-only (ADR-0072): only a Queue spawn reaches this arm — a
+// foreground implement ignores the directive (see
+// TestRouteDrainCheckoutManagedDirectiveForegroundIgnored).
 func TestRouteDrainCheckoutManagedDirectiveProvisions(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		trigger DrainTrigger
-	}{
-		{"implement", TriggerImplementForeground},
-		{"queue", TriggerQueueSpawn},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			td := routeTestDeps(t)
-			repo := initAdoptRepo(t)
-			seedManagedIntent(t, td, repo, "managed-set")
-			addCalls := countingGit(t, td)
-			now := time.Date(2026, 6, 24, 9, 8, 7, 0, time.UTC)
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	seedManagedIntent(t, td, repo, "managed-set")
+	addCalls := countingGit(t, td)
+	now := time.Date(2026, 6, 24, 9, 8, 7, 0, time.UTC)
 
-			got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
-				TD:              td,
-				Now:             now,
-				CurrentCheckout: repo,
-				SetID:           "managed-set",
-				Trigger:         tc.trigger,
-			})
-			if err != nil {
-				t.Fatalf("route: %v", err)
-			}
-			if !got.ProvisionedManaged || got.UsedExistingBinding {
-				t.Fatalf("result = %+v, want a freshly provisioned managed worktree", got)
-			}
-			if *addCalls != 1 {
-				t.Fatalf("worktree add calls = %d, want 1", *addCalls)
-			}
-			root := ManagedWorktreesRoot(td)
-			if !strings.HasPrefix(got.RuntimePath, root) {
-				t.Fatalf("provisioned worktree %q not under managed root %q", got.RuntimePath, root)
-			}
-			canonRepo, _ := filepath.EvalSymlinks(repo)
-			if got.RuntimePath == canonRepo {
-				t.Fatalf("provisioned worktree is the current checkout %q, want a distinct managed worktree", canonRepo)
-			}
-			if _, err := os.Stat(got.RuntimePath); err != nil {
-				t.Fatalf("provisioned worktree missing on disk: %v", err)
-			}
-			if !strings.HasPrefix(got.Binding.Branch, "pop/managed-set/") {
-				t.Fatalf("branch = %q, want pop/managed-set/ prefix", got.Binding.Branch)
-			}
-			// Forked from trunk: the new worktree's HEAD equals the Trunk worktree's.
-			trunkHead, err := deps.NewRealGit().CommandInDir(repo, "rev-parse", "HEAD")
-			if err != nil {
-				t.Fatalf("trunk head: %v", err)
-			}
-			wtHead, err := deps.NewRealGit().CommandInDir(got.RuntimePath, "rev-parse", "HEAD")
-			if err != nil {
-				t.Fatalf("worktree head: %v", err)
-			}
-			if strings.TrimSpace(trunkHead) != strings.TrimSpace(wtHead) {
-				t.Fatalf("worktree HEAD %q != trunk HEAD %q; not forked from trunk", wtHead, trunkHead)
-			}
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		Now:             now,
+		CurrentCheckout: repo,
+		SetID:           "managed-set",
+		Trigger:         TriggerQueueSpawn,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if !got.ProvisionedManaged || got.UsedExistingBinding {
+		t.Fatalf("result = %+v, want a freshly provisioned managed worktree", got)
+	}
+	if *addCalls != 1 {
+		t.Fatalf("worktree add calls = %d, want 1", *addCalls)
+	}
+	root := ManagedWorktreesRoot(td)
+	if !strings.HasPrefix(got.RuntimePath, root) {
+		t.Fatalf("provisioned worktree %q not under managed root %q", got.RuntimePath, root)
+	}
+	canonRepo, _ := filepath.EvalSymlinks(repo)
+	if got.RuntimePath == canonRepo {
+		t.Fatalf("provisioned worktree is the current checkout %q, want a distinct managed worktree", canonRepo)
+	}
+	if _, err := os.Stat(got.RuntimePath); err != nil {
+		t.Fatalf("provisioned worktree missing on disk: %v", err)
+	}
+	if !strings.HasPrefix(got.Binding.Branch, "pop/managed-set/") {
+		t.Fatalf("branch = %q, want pop/managed-set/ prefix", got.Binding.Branch)
+	}
+	// Forked from trunk: the new worktree's HEAD equals the Trunk worktree's.
+	trunkHead, err := deps.NewRealGit().CommandInDir(repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("trunk head: %v", err)
+	}
+	wtHead, err := deps.NewRealGit().CommandInDir(got.RuntimePath, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("worktree head: %v", err)
+	}
+	if strings.TrimSpace(trunkHead) != strings.TrimSpace(wtHead) {
+		t.Fatalf("worktree HEAD %q != trunk HEAD %q; not forked from trunk", wtHead, trunkHead)
+	}
 
-			// The binding is recorded as managed (provisioned) and resolvable.
-			_, b, ok, err := GetForSet(td, repo, "managed-set")
-			if err != nil {
-				t.Fatalf("get for set: %v", err)
-			}
-			if !ok || !b.Provisioned || b.RuntimePath != got.RuntimePath {
-				t.Fatalf("binding = %+v ok=%v, want provisioned at %q", b, ok, got.RuntimePath)
-			}
-		})
+	// The binding is recorded as managed (provisioned) and resolvable.
+	_, b, ok, err := GetForSet(td, repo, "managed-set")
+	if err != nil {
+		t.Fatalf("get for set: %v", err)
+	}
+	if !ok || !b.Provisioned || b.RuntimePath != got.RuntimePath {
+		t.Fatalf("binding = %+v ok=%v, want provisioned at %q", b, ok, got.RuntimePath)
+	}
+}
+
+// TestRouteDrainCheckoutManagedDirectiveForegroundIgnored asserts a foreground
+// implement on an unbound set carrying a `managed` directive ignores the directive
+// entirely (ADR-0072): it provisions no worktree and instead records a default
+// (adopted) binding to the current checkout, draining there.
+func TestRouteDrainCheckoutManagedDirectiveForegroundIgnored(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	wt := addLinkedWorktree(t, repo, "feature")
+	seedManagedIntent(t, td, repo, "managed-set")
+	addCalls := countingGit(t, td)
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		Now:             time.Date(2026, 6, 24, 9, 8, 7, 0, time.UTC),
+		CurrentCheckout: wt,
+		SetID:           "managed-set",
+		Trigger:         TriggerImplementForeground,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	currentRuntime, err := tasks.ResolveRuntimePathWith(td, wt, "")
+	if err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+	if !got.BoundDefault || got.ProvisionedManaged || got.RuntimePath != currentRuntime {
+		t.Fatalf("result = %+v, want a default binding at the current checkout %q with no provisioning", got, currentRuntime)
+	}
+	if *addCalls != 0 {
+		t.Fatalf("worktree add calls = %d, want 0 — foreground ignores the directive", *addCalls)
+	}
+	if got.Binding.Provisioned {
+		t.Fatalf("default binding must be adopted (Provisioned=false), got %+v", got.Binding)
+	}
+	_, b, ok, err := GetForSet(td, wt, "managed-set")
+	if err != nil {
+		t.Fatalf("get for set: %v", err)
+	}
+	if !ok || b.RuntimePath != currentRuntime {
+		t.Fatalf("binding = %+v ok=%v, want default binding at %q", b, ok, currentRuntime)
 	}
 }
 
@@ -455,7 +490,7 @@ func TestRouteDrainCheckoutManagedDirectiveSecondDrainResumes(t *testing.T) {
 		Now:             now,
 		CurrentCheckout: repo,
 		SetID:           "managed-set",
-		Trigger:         TriggerImplementForeground,
+		Trigger:         TriggerQueueSpawn,
 	}
 	first, err := RouteDrainCheckout(req)
 	if err != nil {
@@ -535,69 +570,96 @@ func TestRouteDrainCheckoutOverrideWinsOverManagedDirective(t *testing.T) {
 	}
 }
 
-// TestRouteDrainCheckoutNamedDirectiveAdopts asserts an unbound set carrying a
-// `name` directive resolves the worktree of that name on this machine, records an
-// adopted (never-delete) binding to it, and drains there — identically whether the
-// trigger is foreground implement or a Queue spawn, and without routing ever
-// running `git worktree add` (ADR-0059).
+// TestRouteDrainCheckoutNamedDirectiveAdopts asserts a Queue spawn on an unbound
+// set carrying a `name` directive resolves the worktree of that name on this
+// machine, records an adopted (never-delete) binding to it, and drains there
+// without routing ever running `git worktree add`. The worktree directive is
+// Queue-only (ADR-0072): a foreground implement ignores it (see
+// TestRouteDrainCheckoutNamedDirectiveForegroundIgnored).
 func TestRouteDrainCheckoutNamedDirectiveAdopts(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		trigger DrainTrigger
-	}{
-		{"implement", TriggerImplementForeground},
-		{"queue", TriggerQueueSpawn},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			td := routeTestDeps(t)
-			repo := initAdoptRepo(t)
-			named := addNamedWorktree(t, repo, "feature-x", "feature-x")
-			seedNamedIntent(t, td, repo, "named-set", "feature-x")
-			addCalls := countingGit(t, td)
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	named := addNamedWorktree(t, repo, "feature-x", "feature-x")
+	seedNamedIntent(t, td, repo, "named-set", "feature-x")
+	addCalls := countingGit(t, td)
 
-			got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
-				TD:              td,
-				CurrentCheckout: repo,
-				SetID:           "named-set",
-				Trigger:         tc.trigger,
-			})
-			if err != nil {
-				t.Fatalf("route: %v", err)
-			}
-			if !got.AdoptedNamed || got.UsedExistingBinding || got.ProvisionedManaged {
-				t.Fatalf("result = %+v, want a freshly adopted named worktree", got)
-			}
-			if *addCalls != 0 {
-				t.Fatalf("worktree add calls = %d, want 0 — adopting an existing worktree never provisions", *addCalls)
-			}
-			if filepath.Base(got.RuntimePath) != "feature-x" {
-				t.Fatalf("runtime %q, want a worktree named feature-x", got.RuntimePath)
-			}
-			canonNamed, _ := filepath.EvalSymlinks(named)
-			canonGot, _ := filepath.EvalSymlinks(got.RuntimePath)
-			if canonGot != canonNamed {
-				t.Fatalf("runtime %q != named worktree %q", canonGot, canonNamed)
-			}
-			if _, err := os.Stat(got.RuntimePath); err != nil {
-				t.Fatalf("named worktree missing on disk: %v", err)
-			}
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo,
+		SetID:           "named-set",
+		Trigger:         TriggerQueueSpawn,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if !got.AdoptedNamed || got.UsedExistingBinding || got.ProvisionedManaged {
+		t.Fatalf("result = %+v, want a freshly adopted named worktree", got)
+	}
+	if *addCalls != 0 {
+		t.Fatalf("worktree add calls = %d, want 0 — adopting an existing worktree never provisions", *addCalls)
+	}
+	if filepath.Base(got.RuntimePath) != "feature-x" {
+		t.Fatalf("runtime %q, want a worktree named feature-x", got.RuntimePath)
+	}
+	canonNamed, _ := filepath.EvalSymlinks(named)
+	canonGot, _ := filepath.EvalSymlinks(got.RuntimePath)
+	if canonGot != canonNamed {
+		t.Fatalf("runtime %q != named worktree %q", canonGot, canonNamed)
+	}
+	if _, err := os.Stat(got.RuntimePath); err != nil {
+		t.Fatalf("named worktree missing on disk: %v", err)
+	}
 
-			// The binding is recorded as adopted (never-delete) and resolvable.
-			key, b, ok, err := GetForSet(td, repo, "named-set")
-			if err != nil {
-				t.Fatalf("get for set: %v", err)
-			}
-			if !ok || b.Provisioned || b.RuntimePath != got.RuntimePath {
-				t.Fatalf("binding = %+v ok=%v, want adopted at %q", b, ok, got.RuntimePath)
-			}
-			if b.Branch != "feature-x" {
-				t.Fatalf("binding branch = %q, want feature-x", b.Branch)
-			}
-			// Adopted: unbinding leaves the checkout and branch on disk.
-			if ShouldTeardown(td, key) {
-				t.Fatalf("ShouldTeardown = true for an adopted binding; the checkout must never be torn down")
-			}
-		})
+	// The binding is recorded as adopted (never-delete) and resolvable.
+	key, b, ok, err := GetForSet(td, repo, "named-set")
+	if err != nil {
+		t.Fatalf("get for set: %v", err)
+	}
+	if !ok || b.Provisioned || b.RuntimePath != got.RuntimePath {
+		t.Fatalf("binding = %+v ok=%v, want adopted at %q", b, ok, got.RuntimePath)
+	}
+	if b.Branch != "feature-x" {
+		t.Fatalf("binding branch = %q, want feature-x", b.Branch)
+	}
+	// Adopted: unbinding leaves the checkout and branch on disk.
+	if ShouldTeardown(td, key) {
+		t.Fatalf("ShouldTeardown = true for an adopted binding; the checkout must never be torn down")
+	}
+}
+
+// TestRouteDrainCheckoutNamedDirectiveForegroundIgnored asserts a foreground
+// implement on an unbound set carrying a `name` directive ignores the directive
+// entirely (ADR-0072): it adopts no named worktree and instead records a default
+// binding to the current checkout, draining there.
+func TestRouteDrainCheckoutNamedDirectiveForegroundIgnored(t *testing.T) {
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	addNamedWorktree(t, repo, "feature-x", "feature-x")
+	wt := addLinkedWorktree(t, repo, "current")
+	seedNamedIntent(t, td, repo, "named-set", "feature-x")
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: wt,
+		SetID:           "named-set",
+		Trigger:         TriggerImplementForeground,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	currentRuntime, err := tasks.ResolveRuntimePathWith(td, wt, "")
+	if err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+	if !got.BoundDefault || got.AdoptedNamed || got.RuntimePath != currentRuntime {
+		t.Fatalf("result = %+v, want a default binding at the current checkout %q with no adoption", got, currentRuntime)
+	}
+	_, b, ok, err := GetForSet(td, wt, "named-set")
+	if err != nil {
+		t.Fatalf("get for set: %v", err)
+	}
+	if !ok || b.RuntimePath != currentRuntime {
+		t.Fatalf("binding = %+v ok=%v, want default binding at %q", b, ok, currentRuntime)
 	}
 }
 
@@ -615,7 +677,7 @@ func TestRouteDrainCheckoutNamedDirectiveUnbindLeavesCheckout(t *testing.T) {
 		TD:              td,
 		CurrentCheckout: repo,
 		SetID:           "named-set",
-		Trigger:         TriggerImplementForeground,
+		Trigger:         TriggerQueueSpawn,
 	}); err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -653,7 +715,7 @@ func TestRouteDrainCheckoutNamedDirectiveSecondDrainResumes(t *testing.T) {
 		TD:              td,
 		CurrentCheckout: repo,
 		SetID:           "named-set",
-		Trigger:         TriggerImplementForeground,
+		Trigger:         TriggerQueueSpawn,
 	}
 	first, err := RouteDrainCheckout(req)
 	if err != nil {
@@ -735,7 +797,7 @@ func TestRouteDrainCheckoutNamedDirectiveMatchesNameNotPath(t *testing.T) {
 		TD:              td,
 		CurrentCheckout: repo,
 		SetID:           "named-set",
-		Trigger:         TriggerImplementForeground,
+		Trigger:         TriggerQueueSpawn,
 	})
 	if err != nil {
 		t.Fatalf("route: %v", err)

@@ -201,19 +201,24 @@ func seedManagedIntentImplement(t *testing.T, d *Deps, repoRoot, setID string) {
 	}
 }
 
-// TestResolveTaskSetRuntimeManagedDirectiveProvisionsAndResumes asserts a plain
-// `pop tasks implement` drain (no --in-worktree) of a set carrying a `managed`
-// directive lands in a fresh worktree forked from trunk and binds it, and that a
-// second drain resumes that binding rather than provisioning again (ADR-0059).
-// This is the foreground half of "implement and the Queue route identically":
-// the Queue spawns `pop tasks implement`, so it reaches the same routing.
-func TestResolveTaskSetRuntimeManagedDirectiveProvisionsAndResumes(t *testing.T) {
+// TestResolveTaskSetRuntimeManagedDirectiveForegroundIgnored asserts a plain `pop
+// tasks implement` drain (no --in-worktree) of a set carrying a `managed`
+// directive ignores the directive entirely (ADR-0072): the worktree directive is
+// Queue-only, so a foreground drain provisions nothing and records a default
+// (adopted) binding to the current checkout instead, draining there. A second
+// drain resumes that binding.
+func TestResolveTaskSetRuntimeManagedDirectiveForegroundIgnored(t *testing.T) {
 	root, d := setupImplementFixture(t)
 	seedManagedIntentImplement(t, d, root, "demo")
 
 	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
+	}
+	// The default binding's checkout is the current checkout the executor already
+	// resolves, so routing leaves RuntimeOverride untouched (no re-pointing).
+	if resolved.RuntimeOverride != "" {
+		t.Fatalf("RuntimeOverride = %q, want empty — foreground default binding needs no re-pointing", resolved.RuntimeOverride)
 	}
 
 	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
@@ -225,31 +230,27 @@ func TestResolveTaskSetRuntimeManagedDirectiveProvisionsAndResumes(t *testing.T)
 		t.Fatal(err)
 	}
 	b, ok := store.Get(binding.Key(id, "demo"))
-	if !ok || !b.Provisioned {
-		t.Fatalf("binding = %+v ok=%v, want a provisioned managed binding", b, ok)
+	if !ok || b.Provisioned {
+		t.Fatalf("binding = %+v ok=%v, want an adopted default binding (Provisioned=false)", b, ok)
 	}
-	if b.RuntimePath != resolved.RuntimeOverride {
-		t.Fatalf("RuntimeOverride = %q, want provisioned worktree %q", resolved.RuntimeOverride, b.RuntimePath)
+	currentRuntime, err := tasks.ResolveRuntimePathWith(d.tasksDeps(), root, "")
+	if err != nil {
+		t.Fatalf("runtime: %v", err)
 	}
-	wantRoot, _ := filepath.EvalSymlinks(root)
-	gotRuntime, _ := filepath.EvalSymlinks(b.RuntimePath)
-	if gotRuntime == wantRoot {
-		t.Fatalf("managed worktree = current checkout %q, want a distinct worktree", wantRoot)
+	if b.RuntimePath != currentRuntime {
+		t.Fatalf("binding runtime = %q, want the current checkout %q", b.RuntimePath, currentRuntime)
 	}
-	if !strings.HasPrefix(b.RuntimePath, binding.ManagedWorktreesRoot(d.tasksDeps())) {
-		t.Fatalf("managed worktree %q not under managed root", b.RuntimePath)
-	}
-	if _, err := os.Stat(b.RuntimePath); err != nil {
-		t.Fatalf("managed worktree missing on disk: %v", err)
+	if strings.HasPrefix(b.RuntimePath, binding.ManagedWorktreesRoot(d.tasksDeps())) {
+		t.Fatalf("binding %q under managed root — foreground must not provision a managed worktree", b.RuntimePath)
 	}
 
-	// A second drain resumes the same binding — no second worktree.
+	// A second drain resumes the same default binding.
 	resumed, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
 	if err != nil {
 		t.Fatalf("second resolve runtime: %v", err)
 	}
-	if resumed.RuntimeOverride != resolved.RuntimeOverride {
-		t.Fatalf("second drain runtime = %q, want resumed %q", resumed.RuntimeOverride, resolved.RuntimeOverride)
+	if resumed.RuntimeOverride != currentRuntime {
+		t.Fatalf("second drain runtime = %q, want resumed bound checkout %q", resumed.RuntimeOverride, currentRuntime)
 	}
 }
 
