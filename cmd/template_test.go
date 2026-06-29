@@ -93,7 +93,7 @@ func TestRunTemplateApplyWith(t *testing.T) {
 	want := [][]string{
 		{"display-message", "-p", "#S"},
 		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
-		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session", "-n", "work", "-c", "/repo/checkout"},
+		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/checkout"},
 		{"select-pane", "-t", "%42", "-T", "server"},
 		{"send-keys", "-t", "%42", "go test ./...", "Enter"},
 		{"select-window", "-t", "current-session:work"},
@@ -576,10 +576,10 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 	want := [][]string{
 		{"display-message", "-p", "#S"},
 		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
-		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session", "-n", "work", "-c", "/repo/checkout"},
+		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/checkout"},
 		{"select-pane", "-t", "%0", "-T", "server"},
 		{"send-keys", "-t", "%0", "go test ./...", "Enter"},
-		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session", "-n", "logs", "-c", "/repo/checkout"},
+		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "logs", "-c", "/repo/checkout"},
 		{"select-pane", "-t", "%1", "-T", "tail"},
 		{"send-keys", "-t", "%1", "tail -f app.log", "Enter"},
 		{"select-window", "-t", "current-session:work"},
@@ -635,7 +635,7 @@ func TestRunTemplateApplyWithSkipExistingWindow(t *testing.T) {
 	want := [][]string{
 		{"display-message", "-p", "#S"},
 		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
-		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session", "-n", "logs", "-c", "/repo/checkout"},
+		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "logs", "-c", "/repo/checkout"},
 		{"select-pane", "-t", "%0", "-T", "tail"},
 		{"send-keys", "-t", "%0", "tail -f app.log", "Enter"},
 		{"select-window", "-t", "current-session:logs"},
@@ -757,7 +757,7 @@ func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
 	}
 
 	// The window should be created in the container's cwd.
-	assertContainsCall(t, calls, []string{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session", "-n", "work", "-c", "/repo/backend"})
+	assertContainsCall(t, calls, []string{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/backend"})
 	// The override pane should be split into its own cwd.
 	assertContainsCall(t, calls, []string{"split-window", "-v", "-t", "%0", "-p", "50", "-P", "-F", "#{pane_id}", "-c", "/repo/api"})
 	// No respawn-pane is needed because the first child inherits.

@@ -1140,6 +1140,14 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		mergeIncludedTask(&cfg, included.Task, expanded)
 		mergeIncludedEffort(&cfg, included.Effort, expanded)
 
+		if included.SessionTemplates != nil {
+			tmplFindings, validTemplates := sessionTemplateFindings(expanded, included.SessionTemplates)
+			for _, f := range tmplFindings {
+				cfg.recordFinding(f)
+			}
+			cfg.SessionTemplates = append(cfg.SessionTemplates, validTemplates...)
+		}
+
 		for key, block := range included.Repo {
 			if _, exists := cfg.Repo[key]; exists {
 				cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
@@ -1377,7 +1385,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 
 // includeFileWarnings returns load-time warnings for non-whitelisted top-level
 // keys and nested includes in an included file. Includes carry a fixed whitelist:
-// `projects`, `[workload]`, `[effort.<agent>]`, and `[repo."<path>"]`.
+// `projects`, `session_templates`, `[workload]`, `[effort.<agent>]`, and `[repo."<path>"]`.
 func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	var warnings []string
 
@@ -1403,11 +1411,12 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 
 	// Whitelisted top-level keys
 	whitelisted := map[string]bool{
-		"projects": true,
-		"repo":     true,
-		"workload": true,
-		"effort":   true,
-		"includes": true, // mentioned in includes, so we track it for warning above
+		"projects":          true,
+		"session_templates": true,
+		"repo":              true,
+		"workload":          true,
+		"effort":            true,
+		"includes":          true, // mentioned in includes, so we track it for warning above
 	}
 
 	// Check for non-whitelisted keys
@@ -1416,7 +1425,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 		if !whitelisted[key] && !seen[key] {
 			seen[key] = true
 			warnings = append(warnings, fmt.Sprintf(
-				"%s: %q ignored (includes only support projects and repo blocks)",
+				"%s: %q ignored (includes only support projects, session_templates, repo, workload, and effort blocks)",
 				path, key,
 			))
 		}

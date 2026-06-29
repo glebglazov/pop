@@ -154,7 +154,7 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 		windowRef := session + ":" + window.Name
 
 		// Create the window with the initial pane
-		paneID, err := d.Tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", window.Name, "-c", rootCwd)
+		paneID, err := d.Tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":", "-n", window.Name, "-c", rootCwd)
 		if err != nil {
 			return fmt.Errorf("failed to create template window %q: %w", window.Name, err)
 		}
