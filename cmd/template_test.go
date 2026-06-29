@@ -47,7 +47,7 @@ func TestRunTemplateListWith(t *testing.T) {
 	}
 	var out bytes.Buffer
 
-	if err := runTemplateListWith(cfg, &out); err != nil {
+	if err := runTemplateListWith(cfg.SessionTemplates, &out); err != nil {
 		t.Fatalf("runTemplateListWith() error: %v", err)
 	}
 	if got, want := out.String(), "dev\nreview\n"; got != want {
@@ -86,7 +86,7 @@ func TestRunTemplateApplyWith(t *testing.T) {
 		ErrOut: io.Discard,
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "dev"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestRunTemplateApplyWith(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithUnknownName(t *testing.T) {
-	err := runTemplateApplyWith(templateRuntimeDeps{Tmux: &deps.MockTmux{}}, &config.Config{}, "missing")
+	err := runTemplateApplyWith(templateRuntimeDeps{Tmux: &deps.MockTmux{}}, []config.SessionTemplate{}, "missing")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -141,7 +141,7 @@ func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	err := runTemplateApplyWith(d, cfg, "dev")
+	err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -200,7 +200,7 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "weighted"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "weighted"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -281,7 +281,7 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "stacked"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "stacked"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -369,7 +369,7 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "nested"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "nested"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -433,7 +433,7 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "equal"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "equal"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -515,7 +515,7 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "deep"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "deep"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -569,7 +569,7 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 		ErrOut: io.Discard,
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "dev"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -627,7 +627,7 @@ func TestRunTemplateApplyWithSkipExistingWindow(t *testing.T) {
 		ErrOut: &warnings,
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "dev"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -752,7 +752,7 @@ func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "cwd-test"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "cwd-test"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -808,7 +808,7 @@ func TestRunTemplateApplyWithCwdTildeAndAbsolute(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "cwd-test"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "cwd-test"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -856,7 +856,7 @@ func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "focus-test"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "focus-test"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -909,7 +909,7 @@ func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
 		ErrOut:      &warnings,
 	}
 
-	if err := runTemplateApplyWith(d, cfg, "focus-test"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "focus-test"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 

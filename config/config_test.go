@@ -3269,3 +3269,320 @@ func TestPaneMonitoringTopicDerivationTimeout(t *testing.T) {
 		}
 	})
 }
+
+func TestSessionTemplateThreeHomeResolution(t *testing.T) {
+	// Test that templates are resolved from three homes with most-specific-wins:
+	// [repo."<path>"] > .pop.toml > global library
+
+	t.Run("global templates only", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(`
+[[session_templates]]
+name = "dev"
+windows = [{name = "main", pane = {name = "editor", command = "vim"}}]
+`), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		d := &Deps{
+			FS: &deps.MockFileSystem{
+				StatFunc: func(path string) (os.FileInfo, error) {
+					// No .bare directory, no .pop.toml
+					return nil, os.ErrNotExist
+				},
+				ReadFileFunc: func(path string) ([]byte, error) {
+					if path == configPath {
+						return os.ReadFile(configPath)
+					}
+					return nil, os.ErrNotExist
+				},
+				EvalSymlinksFunc: func(path string) (string, error) {
+					return path, nil
+				},
+				UserHomeDirFunc: func() (string, error) {
+					return tmpDir, nil
+				},
+			},
+		}
+
+		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		if len(warnings) != 0 {
+			t.Errorf("expected no warnings, got %v", warnings)
+		}
+		if len(templates) != 1 {
+			t.Fatalf("expected 1 template, got %d", len(templates))
+		}
+		if templates[0].Name != "dev" {
+			t.Errorf("expected template name 'dev', got %q", templates[0].Name)
+		}
+	})
+
+	t.Run(".pop.toml templates only", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		popTomlPath := filepath.Join(tmpDir, ".pop.toml")
+		if err := os.WriteFile(popTomlPath, []byte(`
+[[session_templates]]
+name = "work"
+windows = [{name = "main", pane = {name = "editor", command = "vim"}}]
+`), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		d := &Deps{
+			FS: &deps.MockFileSystem{
+				StatFunc: func(path string) (os.FileInfo, error) {
+					if path == filepath.Join(tmpDir, ".bare") {
+						return nil, os.ErrNotExist
+					}
+					return nil, os.ErrNotExist
+				},
+				ReadFileFunc: func(path string) ([]byte, error) {
+					if path == configPath {
+						return os.ReadFile(configPath)
+					}
+					if path == popTomlPath {
+						return os.ReadFile(popTomlPath)
+					}
+					return nil, os.ErrNotExist
+				},
+				EvalSymlinksFunc: func(path string) (string, error) {
+					return path, nil
+				},
+				UserHomeDirFunc: func() (string, error) {
+					return tmpDir, nil
+				},
+			},
+		}
+
+		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		if len(warnings) != 0 {
+			t.Errorf("expected no warnings, got %v", warnings)
+		}
+		if len(templates) != 1 {
+			t.Fatalf("expected 1 template, got %d", len(templates))
+		}
+		if templates[0].Name != "work" {
+			t.Errorf("expected template name 'work', got %q", templates[0].Name)
+		}
+	})
+
+	t.Run("[repo] override templates only", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`
+[repo."%s"]
+session_templates = [
+  {name = "review", windows = [{name = "main", pane = {name = "editor", command = "vim"}}]}
+]
+`, tmpDir)), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		d := &Deps{
+			FS: &deps.MockFileSystem{
+				StatFunc: func(path string) (os.FileInfo, error) {
+					return nil, os.ErrNotExist
+				},
+				ReadFileFunc: func(path string) ([]byte, error) {
+					if path == configPath {
+						return os.ReadFile(configPath)
+					}
+					return nil, os.ErrNotExist
+				},
+				EvalSymlinksFunc: func(path string) (string, error) {
+					return path, nil
+				},
+				UserHomeDirFunc: func() (string, error) {
+					return tmpDir, nil
+				},
+			},
+		}
+
+		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		if len(warnings) != 0 {
+			t.Errorf("expected no warnings, got %v", warnings)
+		}
+		if len(templates) != 1 {
+			t.Fatalf("expected 1 template, got %d", len(templates))
+		}
+		if templates[0].Name != "review" {
+			t.Errorf("expected template name 'review', got %q", templates[0].Name)
+		}
+	})
+
+	t.Run("precedence: [repo] > .pop.toml > global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		// Global template named "dev"
+		// [repo] override template also named "dev"
+		if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`
+[[session_templates]]
+name = "dev"
+windows = [{name = "main", pane = {name = "editor", command = "vim"}}]
+
+[repo."%s"]
+session_templates = [
+  {name = "dev", windows = [{name = "main", pane = {name = "editor", command = "code"}}]}
+]
+`, tmpDir)), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// .pop.toml also has "dev"
+		popTomlPath := filepath.Join(tmpDir, ".pop.toml")
+		if err := os.WriteFile(popTomlPath, []byte(`
+[[session_templates]]
+name = "dev"
+windows = [{name = "main", pane = {name = "editor", command = "nano"}}]
+`), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		d := &Deps{
+			FS: &deps.MockFileSystem{
+				StatFunc: func(path string) (os.FileInfo, error) {
+					return nil, os.ErrNotExist
+				},
+				ReadFileFunc: func(path string) ([]byte, error) {
+					if path == configPath {
+						return os.ReadFile(configPath)
+					}
+					if path == popTomlPath {
+						return os.ReadFile(popTomlPath)
+					}
+					return nil, os.ErrNotExist
+				},
+				EvalSymlinksFunc: func(path string) (string, error) {
+					return path, nil
+				},
+				UserHomeDirFunc: func() (string, error) {
+					return tmpDir, nil
+				},
+			},
+		}
+
+		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		// Should have 2 warnings: global vs .pop.toml, and .pop.toml vs [repo]
+		if len(warnings) != 2 {
+			t.Errorf("expected 2 warnings, got %d: %v", len(warnings), warnings)
+		}
+		if len(templates) != 1 {
+			t.Fatalf("expected 1 template, got %d", len(templates))
+		}
+		if templates[0].Name != "dev" {
+			t.Errorf("expected template name 'dev', got %q", templates[0].Name)
+		}
+		// The [repo] override should win, so command should be "code"
+		if len(templates[0].Windows) == 0 || templates[0].Windows[0].Pane == nil {
+			t.Fatal("template has no windows or pane")
+		}
+		if templates[0].Windows[0].Pane.Command != "code" {
+			t.Errorf("expected [repo] override to win with command 'code', got %q",
+				templates[0].Windows[0].Pane.Command)
+		}
+	})
+
+	t.Run("bare repo .pop.toml applies to all worktrees", func(t *testing.T) {
+		// Create a bare repo structure: bare/.bare/ and bare/worktrees/...
+		bareDir := t.TempDir()
+		bareSubdir := filepath.Join(bareDir, ".bare")
+		if err := os.MkdirAll(bareSubdir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		configPath := filepath.Join(bareDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// .pop.toml in bare repo root
+		popTomlPath := filepath.Join(bareDir, ".pop.toml")
+		if err := os.WriteFile(popTomlPath, []byte(`
+[[session_templates]]
+name = "bare-template"
+windows = [{name = "main", pane = {name = "editor", command = "vim"}}]
+`), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		// Create a worktree path
+		worktreeDir := filepath.Join(bareDir, "worktrees", "feature-1")
+		if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		d := &Deps{
+			FS: &deps.MockFileSystem{
+				StatFunc: func(path string) (os.FileInfo, error) {
+					// .bare directory exists in bareDir
+					if path == bareSubdir {
+						return &deps.MockFileInfo{
+							NameVal:  ".bare",
+							IsDirVal: true,
+						}, nil
+					}
+					return nil, os.ErrNotExist
+				},
+				ReadFileFunc: func(path string) ([]byte, error) {
+					if path == configPath {
+						return os.ReadFile(configPath)
+					}
+					// .pop.toml is in bareDir, not worktreeDir
+					if path == popTomlPath {
+						return os.ReadFile(popTomlPath)
+					}
+					return nil, os.ErrNotExist
+				},
+				EvalSymlinksFunc: func(path string) (string, error) {
+					return path, nil
+				},
+				UserHomeDirFunc: func() (string, error) {
+					return bareDir, nil
+				},
+			},
+		}
+
+		// Resolve from worktree path - should find .pop.toml in bare repo root
+		templates, warnings := cfg.ResolveSessionTemplatesWith(d, worktreeDir)
+		if len(warnings) != 0 {
+			t.Errorf("expected no warnings, got %v", warnings)
+		}
+		if len(templates) != 1 {
+			t.Fatalf("expected 1 template, got %d", len(templates))
+		}
+		if templates[0].Name != "bare-template" {
+			t.Errorf("expected template name 'bare-template', got %q", templates[0].Name)
+		}
+	})
+}

@@ -546,6 +546,10 @@ type RepoConfig struct {
 	// trunk = true to enable managed-worktree provisioning. Repo-local .pop.toml
 	// cannot name a machine-specific trunk.
 	Trunk bool `toml:"-"`
+	// SessionTemplates are repo-local session template blueprints loaded from
+	// .pop.toml. They override same-named global templates and are overridden
+	// by same-named templates in a global [repo."<path>"] block.
+	SessionTemplates []SessionTemplate `toml:"session_templates"`
 }
 
 // RepoOverrideConfig is the shape of a [repo."<path>"] block in global
@@ -556,6 +560,10 @@ type RepoOverrideConfig struct {
 	// Trunk is meaningful only for the specific checkout path that keys this
 	// block; it is not propagated to other worktrees of the same repo.
 	Trunk *bool `toml:"trunk"`
+	// SessionTemplates are per-repo session template blueprints defined in a
+	// global [repo."<path>"] block. They are the highest-precedence home:
+	// they override same-named templates from .pop.toml and the global library.
+	SessionTemplates []SessionTemplate `toml:"session_templates"`
 }
 
 // LoadRepoConfig reads repo-root .pop.toml. A missing file is not an error and
@@ -669,6 +677,79 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 	}
 
 	return result, popErr
+}
+
+// ResolveSessionTemplatesWith returns the union of session templates from all
+// three homes (global config, .pop.toml, and [repo."<path>"]), resolved with
+// most-specific-wins precedence: [repo."<path>"] > .pop.toml > global library.
+// Name collisions emit warnings. A bare repo's .pop.toml templates are visible
+// from all its worktrees via Repository identity.
+func (c *Config) ResolveSessionTemplatesWith(d *Deps, checkoutPath string) ([]SessionTemplate, []string) {
+	// Start with global templates (lowest precedence, already validated at Load)
+	var result []SessionTemplate
+	seen := make(map[string]string) // name -> source for collision warnings
+	var warnings []string
+
+	if c != nil {
+		for _, tmpl := range c.SessionTemplates {
+			result = append(result, tmpl)
+			seen[tmpl.Name] = "global config"
+		}
+	}
+
+	// Load .pop.toml from repo identity root (medium precedence)
+	identity := repoIdentity(d, checkoutPath)
+	popTOML, _ := LoadRepoConfigWith(d, identity)
+	for _, tmpl := range popTOML.SessionTemplates {
+		if source, exists := seen[tmpl.Name]; exists {
+			warnings = append(warnings, fmt.Sprintf(
+				"session template %q defined in both %s and .pop.toml; using .pop.toml",
+				tmpl.Name, source,
+			))
+			// Remove the lower-precedence version
+			for i := len(result) - 1; i >= 0; i-- {
+				if result[i].Name == tmpl.Name {
+					result = append(result[:i], result[i+1:]...)
+					break
+				}
+			}
+		}
+		result = append(result, tmpl)
+		seen[tmpl.Name] = ".pop.toml"
+	}
+
+	// Find matching [repo."<path>"] override (highest precedence)
+	if c != nil {
+		for rawKey, block := range c.Repo {
+			keyCanon := canonicalPath(d, rawKey)
+			keyIdentity := repoIdentity(d, rawKey)
+			// Match by identity (repo-level) not exact path (worktree-level)
+			if keyIdentity != identity {
+				continue
+			}
+			// Apply templates from this override block
+			for _, tmpl := range block.SessionTemplates {
+				if source, exists := seen[tmpl.Name]; exists {
+					warnings = append(warnings, fmt.Sprintf(
+						"session template %q defined in both %s and [repo.%q]; using [repo.%q]",
+						tmpl.Name, source, keyCanon, keyCanon,
+					))
+					// Remove the lower-precedence version
+					for i := len(result) - 1; i >= 0; i-- {
+						if result[i].Name == tmpl.Name {
+							result = append(result[:i], result[i+1:]...)
+							break
+						}
+					}
+				}
+				result = append(result, tmpl)
+				seen[tmpl.Name] = fmt.Sprintf("[repo.%q]", keyCanon)
+			}
+			break // Only one override block can match per identity
+		}
+	}
+
+	return result, warnings
 }
 
 // TaskAgentOutput returns the configured output mode for one agent preset.
@@ -1286,7 +1367,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 		findings = append(findings, Finding{
 			Path: "config.unknown_repo_key",
 			Message: fmt.Sprintf(
-				"%s: [repo.%q] unknown key %q ignored (only trunk is accepted)",
+				"%s: [repo.%q] unknown key %q ignored (only trunk and session_templates are accepted)",
 				path, key[1], key[2],
 			),
 		})

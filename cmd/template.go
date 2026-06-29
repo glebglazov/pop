@@ -17,6 +17,7 @@ type templateRuntimeDeps struct {
 	LoadConfig  func() (*config.Config, error)
 	Getwd       func() (string, error)
 	UserHomeDir func() (string, error)
+	ConfigDeps  *config.Deps
 	ErrOut      io.Writer
 }
 
@@ -32,6 +33,7 @@ func defaultTemplateRuntimeDeps() templateRuntimeDeps {
 		},
 		Getwd:       os.Getwd,
 		UserHomeDir: os.UserHomeDir,
+		ConfigDeps:  config.DefaultDeps(),
 		ErrOut:      os.Stderr,
 	}
 }
@@ -67,14 +69,19 @@ func runTemplateList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return runTemplateListWith(cfg, cmd.OutOrStdout())
+	dir, err := d.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+	templates, warnings := cfg.ResolveSessionTemplatesWith(d.ConfigDeps, dir)
+	for _, w := range warnings {
+		warnf(d, "%s\n", w)
+	}
+	return runTemplateListWith(templates, cmd.OutOrStdout())
 }
 
-func runTemplateListWith(cfg *config.Config, out io.Writer) error {
-	if cfg == nil {
-		return nil
-	}
-	for _, tmpl := range cfg.SessionTemplates {
+func runTemplateListWith(templates []config.SessionTemplate, out io.Writer) error {
+	for _, tmpl := range templates {
 		if tmpl.Name == "" {
 			continue
 		}
@@ -91,11 +98,19 @@ func runTemplateApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return runTemplateApplyWith(d, cfg, args[0])
+	dir, err := d.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+	templates, warnings := cfg.ResolveSessionTemplatesWith(d.ConfigDeps, dir)
+	for _, w := range warnings {
+		warnf(d, "%s\n", w)
+	}
+	return runTemplateApplyWith(d, templates, args[0])
 }
 
-func runTemplateApplyWith(d templateRuntimeDeps, cfg *config.Config, name string) error {
-	tmpl, ok := findSessionTemplate(cfg, name)
+func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTemplate, name string) error {
+	tmpl, ok := findSessionTemplate(templates, name)
 	if !ok {
 		return fmt.Errorf("session template %q not found", name)
 	}
@@ -369,11 +384,8 @@ func resizePanesByWeight(tmux deps.Tmux, paneIDs []string, children []config.Ses
 	return nil
 }
 
-func findSessionTemplate(cfg *config.Config, name string) (config.SessionTemplate, bool) {
-	if cfg == nil {
-		return config.SessionTemplate{}, false
-	}
-	for _, tmpl := range cfg.SessionTemplates {
+func findSessionTemplate(templates []config.SessionTemplate, name string) (config.SessionTemplate, bool) {
+	for _, tmpl := range templates {
 		if tmpl.Name == name {
 			return tmpl, true
 		}
