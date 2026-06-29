@@ -220,6 +220,15 @@ type SessionTemplatePaneSpec struct {
 	Panes []SessionTemplatePaneSpec `toml:"panes"`
 	// Weight is the relative size within siblings. Defaults to 1 when omitted.
 	Weight int `toml:"weight"`
+	// Cwd is the working directory for this pane and its descendants.
+	// Relative paths are resolved against the session directory; ~ and
+	// absolute paths are accepted. Empty means inherit the parent cwd,
+	// defaulting to the session directory at the root.
+	Cwd string `toml:"cwd"`
+	// Focus requests that this pane be the focused pane after the template
+	// is applied. Only meaningful on leaf panes. If multiple panes request
+	// focus, the first one wins and a warning is emitted.
+	Focus bool `toml:"focus"`
 }
 
 // EffortModel is one entry in an effort ladder. Reasoning is optional because

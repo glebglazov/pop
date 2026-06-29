@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
@@ -12,10 +13,11 @@ import (
 )
 
 type templateRuntimeDeps struct {
-	Tmux       deps.Tmux
-	LoadConfig func() (*config.Config, error)
-	Getwd      func() (string, error)
-	ErrOut     io.Writer
+	Tmux        deps.Tmux
+	LoadConfig  func() (*config.Config, error)
+	Getwd       func() (string, error)
+	UserHomeDir func() (string, error)
+	ErrOut      io.Writer
 }
 
 func defaultTemplateRuntimeDeps() templateRuntimeDeps {
@@ -28,8 +30,9 @@ func defaultTemplateRuntimeDeps() templateRuntimeDeps {
 			}
 			return config.Load(path)
 		},
-		Getwd:  os.Getwd,
-		ErrOut: os.Stderr,
+		Getwd:       os.Getwd,
+		UserHomeDir: os.UserHomeDir,
+		ErrOut:      os.Stderr,
 	}
 }
 
@@ -108,11 +111,23 @@ func runTemplateApplyWith(d templateRuntimeDeps, cfg *config.Config, name string
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
+	homeDir, err := d.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
 
 	existing, err := sessionWindowNames(d.Tmux, session)
 	if err != nil {
 		return fmt.Errorf("failed to list existing windows: %w", err)
 	}
+
+	type focusTarget struct {
+		windowRef string
+		paneID    string
+	}
+	var focusTargets []focusTarget
+	var firstCreatedWindowRef string
+	var firstCreatedWindowLeaf string
 
 	for _, window := range tmpl.Windows {
 		if existing[window.Name] {
@@ -120,54 +135,114 @@ func runTemplateApplyWith(d templateRuntimeDeps, cfg *config.Config, name string
 			continue
 		}
 
+		rootCwd := effectiveCwd(dir, dir, window.Pane.Cwd, homeDir)
+		windowRef := session + ":" + window.Name
+
 		// Create the window with the initial pane
-		paneID, err := d.Tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", window.Name, "-c", dir)
+		paneID, err := d.Tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", window.Name, "-c", rootCwd)
 		if err != nil {
 			return fmt.Errorf("failed to create template window %q: %w", window.Name, err)
 		}
 
 		// Realize the pane tree
-		if err := realizePaneTree(d.Tmux, window.Pane, paneID); err != nil {
+		result, err := realizePaneTree(d.Tmux, window.Pane, paneID, dir, rootCwd, homeDir)
+		if err != nil {
 			return fmt.Errorf("failed to realize pane tree for window %q: %w", window.Name, err)
+		}
+
+		if firstCreatedWindowRef == "" && len(result.leafIDs) > 0 {
+			firstCreatedWindowRef = windowRef
+			firstCreatedWindowLeaf = result.leafIDs[0]
+		}
+		for _, focusID := range result.focusIDs {
+			focusTargets = append(focusTargets, focusTarget{windowRef: windowRef, paneID: focusID})
+		}
+	}
+
+	// Activate the requested window and pane. Default to the first created
+	// window's first leaf pane when no explicit focus was requested.
+	if len(focusTargets) > 1 {
+		warnf(d, "multiple panes requested focus; using the first one\n")
+	}
+	if len(focusTargets) > 0 {
+		target := focusTargets[0]
+		if _, err := d.Tmux.Command("select-window", "-t", target.windowRef); err != nil {
+			return fmt.Errorf("failed to select window %q: %w", target.windowRef, err)
+		}
+		if _, err := d.Tmux.Command("select-pane", "-t", target.paneID); err != nil {
+			return fmt.Errorf("failed to select pane %q: %w", target.paneID, err)
+		}
+	} else if firstCreatedWindowRef != "" {
+		if _, err := d.Tmux.Command("select-window", "-t", firstCreatedWindowRef); err != nil {
+			return fmt.Errorf("failed to select window %q: %w", firstCreatedWindowRef, err)
+		}
+		if _, err := d.Tmux.Command("select-pane", "-t", firstCreatedWindowLeaf); err != nil {
+			return fmt.Errorf("failed to select pane %q: %w", firstCreatedWindowLeaf, err)
 		}
 	}
 
 	return nil
+}
+
+// paneTreeResult collects the leaf pane IDs created by a pane tree, plus any
+// panes that requested focus.
+type paneTreeResult struct {
+	leafIDs  []string
+	focusIDs []string
 }
 
 // realizePaneTree realizes a pane spec recursively. If the pane is a leaf,
 // it sets the title and sends the command. If it's a container, it creates
-// child panes via splits and recursively realizes them.
-func realizePaneTree(tmux deps.Tmux, pane *config.SessionTemplatePaneSpec, paneID string) error {
+// child panes via splits and recursively realizes them. parentCwd is the
+// already-resolved effective working directory inherited from ancestors.
+func realizePaneTree(tmux deps.Tmux, pane *config.SessionTemplatePaneSpec, paneID, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
 	if len(pane.Panes) == 0 {
 		// Leaf node: set title and send command
 		if _, err := tmux.Command("select-pane", "-t", paneID, "-T", pane.Name); err != nil {
-			return fmt.Errorf("failed to set pane title %q: %w", pane.Name, err)
+			return paneTreeResult{}, fmt.Errorf("failed to set pane title %q: %w", pane.Name, err)
 		}
 		if _, err := tmux.Command("send-keys", "-t", paneID, pane.Command, "Enter"); err != nil {
-			return fmt.Errorf("failed to send pane command %q: %w", pane.Command, err)
+			return paneTreeResult{}, fmt.Errorf("failed to send pane command %q: %w", pane.Command, err)
 		}
-		return nil
+		result := paneTreeResult{leafIDs: []string{paneID}}
+		if pane.Focus {
+			result.focusIDs = append(result.focusIDs, paneID)
+		}
+		return result, nil
 	}
 
 	// Container node: create child panes and realize them
-	if err := realizeContainer(tmux, paneID, pane.Panes, pane.Direction); err != nil {
-		return err
-	}
-	return nil
+	return realizeContainer(tmux, paneID, pane.Panes, pane.Direction, sessionDir, parentCwd, homeDir)
 }
 
 // realizeContainer creates child panes for a container and realizes them recursively.
 // It splits the container pane N-1 times to create N child panes, then resizes
-// them according to their weights.
-func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.SessionTemplatePaneSpec, direction string) error {
+// them according to their weights. parentCwd is the already-resolved effective
+// working directory for this container.
+func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.SessionTemplatePaneSpec, direction, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
 	n := len(children)
 	if n == 0 {
-		return nil
+		return paneTreeResult{}, nil
 	}
 	if n == 1 {
 		// Single child: reuse the container pane
-		return realizePaneTree(tmux, &children[0], containerPaneID)
+		childCwd := effectiveCwd(sessionDir, parentCwd, children[0].Cwd, homeDir)
+		if children[0].Cwd != "" {
+			if _, err := tmux.Command("respawn-pane", "-c", childCwd, "-t", containerPaneID, "-k"); err != nil {
+				return paneTreeResult{}, fmt.Errorf("failed to set pane directory to %q: %w", childCwd, err)
+			}
+		}
+		return realizePaneTree(tmux, &children[0], containerPaneID, sessionDir, childCwd, homeDir)
+	}
+
+	// If the first child overrides the container's cwd, the container pane
+	// (which was created with parentCwd) must be respawned in the child's cwd
+	// before it is reused.
+	child0Cwd := effectiveCwd(sessionDir, parentCwd, children[0].Cwd, homeDir)
+	if children[0].Cwd != "" {
+		if _, err := tmux.Command("respawn-pane", "-c", child0Cwd, "-t", containerPaneID, "-k"); err != nil {
+			return paneTreeResult{}, fmt.Errorf("failed to set pane directory to %q: %w", child0Cwd, err)
+		}
 	}
 
 	// Calculate total weight
@@ -191,7 +266,8 @@ func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.
 	for i := 1; i < n; i++ {
 		// Split the last pane to create a new one
 		lastPaneID := paneIDs[len(paneIDs)-1]
-		
+		childCwd := effectiveCwd(sessionDir, parentCwd, children[i].Cwd, homeDir)
+
 		// Calculate percentage for the new pane
 		// The new pane should get: (weight[i] + ... + weight[n-1]) / (weight[i-1] + ... + weight[n-1])
 		remainingWeight := 0
@@ -208,29 +284,34 @@ func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.
 			weightPrev = 1
 		}
 		previousRemaining += weightPrev
-		
+
 		percentage := (remainingWeight * 100) / previousRemaining
-		
-		newPaneID, err := tmux.Command("split-window", splitFlag, "-t", lastPaneID, "-p", fmt.Sprintf("%d", percentage), "-P", "-F", "#{pane_id}", "-c", "#{pane_current_path}")
+
+		newPaneID, err := tmux.Command("split-window", splitFlag, "-t", lastPaneID, "-p", fmt.Sprintf("%d", percentage), "-P", "-F", "#{pane_id}", "-c", childCwd)
 		if err != nil {
-			return fmt.Errorf("failed to split pane: %w", err)
+			return paneTreeResult{}, fmt.Errorf("failed to split pane: %w", err)
 		}
 		paneIDs = append(paneIDs, newPaneID)
 	}
 
 	// Resize panes to exact sizes based on weights
 	if err := resizePanesByWeight(tmux, paneIDs, children, direction); err != nil {
-		return fmt.Errorf("failed to resize panes: %w", err)
+		return paneTreeResult{}, fmt.Errorf("failed to resize panes: %w", err)
 	}
 
 	// Recursively realize child panes
+	var combined paneTreeResult
 	for i := range children {
-		if err := realizePaneTree(tmux, &children[i], paneIDs[i]); err != nil {
-			return err
+		childCwd := effectiveCwd(sessionDir, parentCwd, children[i].Cwd, homeDir)
+		result, err := realizePaneTree(tmux, &children[i], paneIDs[i], sessionDir, childCwd, homeDir)
+		if err != nil {
+			return paneTreeResult{}, err
 		}
+		combined.leafIDs = append(combined.leafIDs, result.leafIDs...)
+		combined.focusIDs = append(combined.focusIDs, result.focusIDs...)
 	}
 
-	return nil
+	return combined, nil
 }
 
 // resizePanesByWeight resizes panes to match their weights. It queries the
@@ -334,6 +415,29 @@ func sessionWindowNames(tmux deps.Tmux, session string) (map[string]bool, error)
 		}
 	}
 	return names, nil
+}
+
+// effectiveCwd returns the working directory for a pane given its raw cwd
+// value and the inherited parent cwd. Relative paths are resolved under the
+// session directory; paths starting with ~/ expand to the home directory;
+// absolute paths are used as-is.
+func effectiveCwd(sessionDir, parentCwd, rawCwd, homeDir string) string {
+	if rawCwd == "" {
+		return parentCwd
+	}
+	return resolveCwd(sessionDir, rawCwd, homeDir)
+}
+
+// resolveCwd resolves a non-empty cwd value relative to the session directory,
+// expanding ~/ to the home directory and preserving absolute paths.
+func resolveCwd(sessionDir, rawCwd, homeDir string) string {
+	if strings.HasPrefix(rawCwd, "~/") {
+		return filepath.Join(homeDir, rawCwd[2:])
+	}
+	if filepath.IsAbs(rawCwd) {
+		return rawCwd
+	}
+	return filepath.Join(sessionDir, rawCwd)
 }
 
 func warnf(d templateRuntimeDeps, format string, args ...any) {
