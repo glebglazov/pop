@@ -368,6 +368,23 @@ func runTaskArchive(cmd *cobra.Command, args []string) error {
 }
 
 func runTaskArchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
+	return runTaskArchiveWithConfirm(d, w, os.Stdin, taskRunYes, taskSetID)
+}
+
+func runTaskArchiveWithConfirm(d *tasks.Deps, w io.Writer, stdin io.Reader, yes bool, taskSetID string) error {
+	cfg, err := taskConfigLoad(config.DefaultConfigPath())
+	if err != nil {
+		return err
+	}
+	if err := binding.PrepareManagedWorktreesForArchive(d, taskProjectDeps(), cfg, []string{taskSetID}, binding.ArchiveConfirmOptions{
+		Yes: yes,
+		In:  stdin,
+		Out: w,
+	}); errors.Is(err, binding.ErrArchiveCancelled) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("tasks archive: %w", err)
+	}
 	result, err := tasks.ArchiveTaskSetWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput(), taskSetID)
 	if err != nil {
 		return fmt.Errorf("tasks archive: %w", err)
@@ -417,6 +434,20 @@ func runTaskArchiveSelectionWith(d *tasks.Deps, w io.Writer, stdin io.Reader, ye
 		if len(selectedIDs) == 0 {
 			return nil
 		}
+	}
+
+	cfg, err := taskConfigLoad(config.DefaultConfigPath())
+	if err != nil {
+		return fmt.Errorf("tasks archive: %w", err)
+	}
+	if err := binding.PrepareManagedWorktreesForArchive(d, taskProjectDeps(), cfg, selectedIDs, binding.ArchiveConfirmOptions{
+		Yes: yes,
+		In:  stdin,
+		Out: w,
+	}); errors.Is(err, binding.ErrArchiveCancelled) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("tasks archive: %w", err)
 	}
 
 	result, err := tasks.ArchiveTaskSetsWith(d, taskProjectDeps(), taskConfigLoad, tasks.ArchiveTaskSetsOptions{

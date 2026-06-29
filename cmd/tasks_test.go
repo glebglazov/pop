@@ -530,6 +530,155 @@ func TestTaskArchiveYesNoDoneNoop(t *testing.T) {
 	}
 }
 
+func TestTaskArchiveManagedWorktreeConfirmAndDecline(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughtsWithStatus(t, tasksDir, "managed-done", "done")
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	wt := cmdArchiveTestWorktree(t, root, "managed-branch")
+	td := tasks.DefaultDeps()
+	id, err := tasks.ResolveRepositoryIdentity(td, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &binding.Store{}
+	store.Put(binding.Key(id, "managed-done"), binding.Binding{
+		RuntimePath: wt,
+		Branch:      "managed-branch",
+		Project:     filepath.Base(root),
+		Provisioned: true,
+	})
+	if err := binding.Save(td, store); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	var declined bytes.Buffer
+	if err := runTaskArchiveWithConfirm(td, &declined, strings.NewReader("n\n"), false, "managed-done"); err != nil {
+		t.Fatalf("declined archive: %v", err)
+	}
+	if strings.Contains(declined.String(), "Archived task set") {
+		t.Fatalf("decline should not archive:\n%s", declined.String())
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("worktree should remain after decline: %v", err)
+	}
+
+	var confirmed bytes.Buffer
+	if err := runTaskArchiveWithConfirm(td, &confirmed, strings.NewReader("y\n"), false, "managed-done"); err != nil {
+		t.Fatalf("confirmed archive: %v", err)
+	}
+	if !strings.Contains(confirmed.String(), "Archived task set managed-done") {
+		t.Fatalf("missing archive report:\n%s", confirmed.String())
+	}
+	if _, err := os.Stat(wt); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("worktree should be removed after confirm")
+	}
+}
+
+func TestTaskArchiveManagedWorktreeYesAndMetadataOnly(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughtsWithStatus(t, tasksDir, "managed-yes", "done")
+	writeTaskThoughtsWithStatus(t, tasksDir, "adopted-done", "done")
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	managedWT := cmdArchiveTestWorktree(t, root, "managed-yes-branch")
+	adoptedWT := cmdArchiveTestWorktree(t, root, "adopted-branch")
+	td := tasks.DefaultDeps()
+	id, err := tasks.ResolveRepositoryIdentity(td, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &binding.Store{}
+	store.Put(binding.Key(id, "managed-yes"), binding.Binding{
+		RuntimePath: managedWT,
+		Branch:      "managed-yes-branch",
+		Project:     filepath.Base(root),
+		Provisioned: true,
+	})
+	store.Put(binding.Key(id, "adopted-done"), binding.Binding{
+		RuntimePath: adoptedWT,
+		Branch:      "adopted-branch",
+		Project:     filepath.Base(root),
+		Provisioned: false,
+	})
+	if err := binding.Save(td, store); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	var managedOut bytes.Buffer
+	if err := runTaskArchiveWithConfirm(td, &managedOut, tasks.NonInteractiveReader{}, true, "managed-yes"); err != nil {
+		t.Fatalf("--yes managed archive: %v", err)
+	}
+	if _, err := os.Stat(managedWT); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("managed worktree should be removed with --yes")
+	}
+
+	var adoptedOut bytes.Buffer
+	if err := runTaskArchiveWithConfirm(td, &adoptedOut, tasks.NonInteractiveReader{}, false, "adopted-done"); err != nil {
+		t.Fatalf("adopted archive: %v", err)
+	}
+	if _, err := os.Stat(adoptedWT); err != nil {
+		t.Fatalf("adopted worktree must remain: %v", err)
+	}
+	if _, err := tasks.UnarchiveTaskSetWith(td, nil, taskConfigLoad, tasks.ResolveInput{DefinitionOverride: tasksDir, CWD: root}, "adopted-done"); err != nil {
+		t.Fatalf("unarchive adopted: %v", err)
+	}
+}
+
+func cmdArchiveTestWorktree(t *testing.T, repo, branch string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", repo, "commit", "--allow-empty", "-m", "base")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("initial commit: %v\n%s", err, out)
+	}
+	wt := filepath.Join(t.TempDir(), "wt-"+branch)
+	cmd = exec.Command("git", "-C", repo, "worktree", "add", "-b", branch, wt, "HEAD")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	return wt
+}
+
 func TestTaskArchiveNoArgNonInteractiveRejected(t *testing.T) {
 	root := t.TempDir()
 	resetTaskFlags()

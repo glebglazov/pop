@@ -14,6 +14,8 @@ import (
 
 const unbindConfirmPrompt = "Abandon binding for %s? This forgets the association; the checkout and branch are kept. Task statuses are unchanged. [y/N]: "
 
+const managedWorktreeDeletePrompt = "delete managed worktree at %s? [y/N]: "
+
 // BindWorktreeOptions controls bind-worktree behaviour.
 type BindWorktreeOptions struct {
 	Force bool
@@ -234,6 +236,22 @@ func unbindResolvedBinding(td *tasks.Deps, pd *project.Deps, cfg *config.Config,
 	return UnbindWorktreeResult{SetID: setID}, nil
 }
 
+// TeardownAndReleaseManagedBinding removes a managed binding's checkout and
+// branch, then forgets the binding association.
+func TeardownAndReleaseManagedBinding(td *tasks.Deps, pd *project.Deps, cfg *config.Config, key string, b Binding, hooks LifecycleHooks) error {
+	if err := TeardownManagedWorktree(td, pd, cfg, b, hooks); err != nil {
+		return err
+	}
+	return Delete(td, key)
+}
+
+// ConfirmManagedWorktreeDelete prompts to delete a managed worktree before
+// archive. yes skips the prompt; a declined answer returns (false, nil).
+func ConfirmManagedWorktreeDelete(in io.Reader, out io.Writer, yes bool, runtimePath string) (bool, error) {
+	prompt := fmt.Sprintf(managedWorktreeDeletePrompt, runtimePath)
+	return confirmYesNo(in, out, yes, prompt, "non-interactive archive requires --yes")
+}
+
 // TeardownManagedWorktree removes a managed binding's checkout and branch.
 // It must only be called for provisioned bindings; adopted checkouts are never
 // torn down.
@@ -306,11 +324,18 @@ func resolveTeardownWorkingPath(td *tasks.Deps, pd *project.Deps, cfg *config.Co
 }
 
 func confirmUnbind(in io.Reader, out io.Writer, yes bool, prompt string) (bool, error) {
+	if prompt == "" {
+		prompt = unbindConfirmPrompt
+	}
+	return confirmYesNo(in, out, yes, prompt, "non-interactive abandon requires --yes")
+}
+
+func confirmYesNo(in io.Reader, out io.Writer, yes bool, prompt, nonInteractiveErr string) (bool, error) {
 	if yes {
 		return true, nil
 	}
 	if _, ok := in.(tasks.NonInteractiveReader); ok {
-		return false, fmt.Errorf("non-interactive abandon requires --yes")
+		return false, fmt.Errorf("%s", nonInteractiveErr)
 	}
 	if in == nil {
 		in = os.Stdin
@@ -319,17 +344,14 @@ func confirmUnbind(in io.Reader, out io.Writer, yes bool, prompt string) (bool, 
 		if f, ok := in.(*os.File); ok {
 			info, err := f.Stat()
 			if err != nil || info.Mode()&os.ModeCharDevice == 0 {
-				return false, fmt.Errorf("non-interactive abandon requires --yes")
+				return false, fmt.Errorf("%s", nonInteractiveErr)
 			}
 		}
-	}
-	if prompt == "" {
-		prompt = unbindConfirmPrompt
 	}
 	fmt.Fprintf(out, "%s", prompt)
 	answer, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && err != io.EOF {
-		return false, fmt.Errorf("read abandon confirmation: %w", err)
+		return false, fmt.Errorf("read confirmation: %w", err)
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == "y" || answer == "yes", nil
