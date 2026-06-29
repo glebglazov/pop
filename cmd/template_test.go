@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -79,8 +80,9 @@ func TestRunTemplateApplyWith(t *testing.T) {
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:  tmux,
-		Getwd: func() (string, error) { return "/repo/checkout", nil },
+		Tmux:   tmux,
+		Getwd:  func() (string, error) { return "/repo/checkout", nil },
+		ErrOut: io.Discard,
 	}
 
 	if err := runTemplateApplyWith(d, cfg, "dev"); err != nil {
@@ -89,6 +91,7 @@ func TestRunTemplateApplyWith(t *testing.T) {
 
 	want := [][]string{
 		{"display-message", "-p", "#S"},
+		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
 		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session", "-n", "work", "-c", "/repo/checkout"},
 		{"select-pane", "-t", "%42", "-T", "server"},
 		{"send-keys", "-t", "%42", "go test ./...", "Enter"},
@@ -518,5 +521,116 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 	// 4 leaf panes: deep-left, deep-right, bottom, right
 	if sendKeysCount != 4 {
 		t.Errorf("expected 4 send-keys calls for 4 leaf panes, got %d", sendKeysCount)
+	}
+}
+
+func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name: "dev",
+			Windows: []config.SessionTemplateWindow{
+				{Name: "work", Pane: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}},
+				{Name: "logs", Pane: &config.SessionTemplatePaneSpec{Name: "tail", Command: "tail -f app.log"}},
+			},
+		}},
+	}
+	var calls [][]string
+	newWindowCount := 0
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch args[0] {
+			case "display-message":
+				return "current-session", nil
+			case "list-windows":
+				return "", nil
+			case "new-window":
+				id := fmt.Sprintf("%%%d", newWindowCount)
+				newWindowCount++
+				return id, nil
+			default:
+				return "", nil
+			}
+		},
+	}
+	d := templateRuntimeDeps{
+		Tmux:   tmux,
+		Getwd:  func() (string, error) { return "/repo/checkout", nil },
+		ErrOut: io.Discard,
+	}
+
+	if err := runTemplateApplyWith(d, cfg, "dev"); err != nil {
+		t.Fatalf("runTemplateApplyWith() error: %v", err)
+	}
+
+	want := [][]string{
+		{"display-message", "-p", "#S"},
+		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
+		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session", "-n", "work", "-c", "/repo/checkout"},
+		{"select-pane", "-t", "%0", "-T", "server"},
+		{"send-keys", "-t", "%0", "go test ./...", "Enter"},
+		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session", "-n", "logs", "-c", "/repo/checkout"},
+		{"select-pane", "-t", "%1", "-T", "tail"},
+		{"send-keys", "-t", "%1", "tail -f app.log", "Enter"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("tmux calls = %#v, want %#v", calls, want)
+	}
+}
+
+func TestRunTemplateApplyWithSkipExistingWindow(t *testing.T) {
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name: "dev",
+			Windows: []config.SessionTemplateWindow{
+				{Name: "work", Pane: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}},
+				{Name: "logs", Pane: &config.SessionTemplatePaneSpec{Name: "tail", Command: "tail -f app.log"}},
+			},
+		}},
+	}
+	var calls [][]string
+	var warnings bytes.Buffer
+	newWindowCount := 0
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch args[0] {
+			case "display-message":
+				return "current-session", nil
+			case "list-windows":
+				return "work\n", nil
+			case "new-window":
+				id := fmt.Sprintf("%%%d", newWindowCount)
+				newWindowCount++
+				return id, nil
+			default:
+				return "", nil
+			}
+		},
+	}
+	d := templateRuntimeDeps{
+		Tmux:   tmux,
+		Getwd:  func() (string, error) { return "/repo/checkout", nil },
+		ErrOut: &warnings,
+	}
+
+	if err := runTemplateApplyWith(d, cfg, "dev"); err != nil {
+		t.Fatalf("runTemplateApplyWith() error: %v", err)
+	}
+
+	// Only the "logs" window should be created; "work" is skipped.
+	want := [][]string{
+		{"display-message", "-p", "#S"},
+		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
+		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session", "-n", "logs", "-c", "/repo/checkout"},
+		{"select-pane", "-t", "%0", "-T", "tail"},
+		{"send-keys", "-t", "%0", "tail -f app.log", "Enter"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("tmux calls = %#v, want %#v", calls, want)
+	}
+	warnStr := warnings.String()
+	if !strings.Contains(warnStr, "work") || !strings.Contains(warnStr, "skipping") {
+		t.Fatalf("expected skip warning for existing window, got %q", warnStr)
 	}
 }

@@ -181,6 +181,122 @@ command = "go test ./..."
 	}
 }
 
+func TestLoadSessionTemplatesMissingWindowName(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[[session_templates]]
+name = "bad"
+
+[[session_templates.windows]]
+# missing name
+
+[session_templates.windows.pane]
+name = "server"
+command = "go test ./..."
+
+[[session_templates]]
+name = "good"
+
+[[session_templates.windows]]
+name = "work"
+
+[session_templates.windows.pane]
+name = "server"
+command = "go test ./..."
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SessionTemplates) != 1 {
+		t.Fatalf("got %d session templates, want 1", len(cfg.SessionTemplates))
+	}
+	if cfg.SessionTemplates[0].Name != "good" {
+		t.Fatalf("remaining template = %q, want good", cfg.SessionTemplates[0].Name)
+	}
+
+	foundFinding := false
+	for _, f := range cfg.Findings {
+		if strings.Contains(f.Message, "bad") && strings.Contains(f.Message, "missing") {
+			foundFinding = true
+			break
+		}
+	}
+	if !foundFinding {
+		t.Fatalf("expected missing-window-name finding, got %#v", cfg.Findings)
+	}
+
+	foundWarning := false
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w, "bad") && strings.Contains(w, "missing") {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected missing-window-name warning, got %#v", cfg.Warnings)
+	}
+}
+
+func TestLoadSessionTemplatesDuplicateWindowName(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[[session_templates]]
+name = "bad"
+
+[[session_templates.windows]]
+name = "work"
+
+[session_templates.windows.pane]
+name = "server"
+command = "go test ./..."
+
+[[session_templates.windows]]
+name = "work"
+
+[session_templates.windows.pane]
+name = "shell"
+command = "bash"
+
+[[session_templates]]
+name = "good"
+
+[[session_templates.windows]]
+name = "review"
+
+[session_templates.windows.pane]
+name = "server"
+command = "go test ./..."
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SessionTemplates) != 1 {
+		t.Fatalf("got %d session templates, want 1", len(cfg.SessionTemplates))
+	}
+	if cfg.SessionTemplates[0].Name != "good" {
+		t.Fatalf("remaining template = %q, want good", cfg.SessionTemplates[0].Name)
+	}
+
+	foundFinding := false
+	for _, f := range cfg.Findings {
+		if strings.Contains(f.Message, "bad") && strings.Contains(f.Message, "duplicate") {
+			foundFinding = true
+			break
+		}
+	}
+	if !foundFinding {
+		t.Fatalf("expected duplicate-window-name finding, got %#v", cfg.Findings)
+	}
+}
+
 func TestLoadEffortConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`

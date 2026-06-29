@@ -196,9 +196,9 @@ type TaskGitConfig struct {
 	CommitConfigOverrides []string `toml:"commit_config_overrides"`
 }
 
-// SessionTemplate is a named blueprint for tmux windows and panes. This first
-// slice supports one named window with one leaf Pane spec; split trees and
-// multi-window templates are intentionally deferred.
+// SessionTemplate is a named blueprint for an ordered list of tmux windows,
+// each with a named pane tree. Split trees and multi-window templates are now
+// supported; a template with invalid window names is excluded at load time.
 type SessionTemplate struct {
 	Name    string                  `toml:"name"`
 	Windows []SessionTemplateWindow `toml:"windows"`
@@ -961,6 +961,13 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	for _, f := range projectEntryFindings(path, cfg.Projects) {
 		cfg.recordFinding(f)
 	}
+	if cfg.SessionTemplates != nil {
+		tmplFindings, validTemplates := sessionTemplateFindings(path, cfg.SessionTemplates)
+		for _, f := range tmplFindings {
+			cfg.recordFinding(f)
+		}
+		cfg.SessionTemplates = validTemplates
+	}
 	for _, f := range repoRenameFindings(path, md) {
 		cfg.recordFinding(f)
 	}
@@ -1059,6 +1066,61 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// sessionTemplateFindings validates session templates at load time. A template
+// with a missing or duplicate window name is recorded as a non-fatal finding
+// and excluded from the returned slice; the rest of the config still loads.
+func sessionTemplateFindings(path string, templates []SessionTemplate) ([]Finding, []SessionTemplate) {
+	if templates == nil {
+		return nil, nil
+	}
+	var findings []Finding
+	valid := make([]SessionTemplate, 0, len(templates))
+
+	for i, tmpl := range templates {
+		if tmpl.Name == "" {
+			findings = append(findings, Finding{
+				Path:    fmt.Sprintf("session_templates[%d]", i),
+				Message: fmt.Sprintf("%s: session_templates[%d] has no name; excluding", path, i),
+			})
+			continue
+		}
+
+		names := make(map[string]bool)
+		invalid := false
+		for j, w := range tmpl.Windows {
+			if w.Name == "" {
+				findings = append(findings, Finding{
+					Path: fmt.Sprintf("session_templates[%d].windows[%d].name", i, j),
+					Message: fmt.Sprintf(
+						"%s: session template %q window[%d] is missing a name; excluding template",
+						path, tmpl.Name, j,
+					),
+				})
+				invalid = true
+				break
+			}
+			if names[w.Name] {
+				findings = append(findings, Finding{
+					Path: fmt.Sprintf("session_templates[%d].windows[%d].name", i, j),
+					Message: fmt.Sprintf(
+						"%s: session template %q has duplicate window name %q; excluding template",
+						path, tmpl.Name, w.Name,
+					),
+				})
+				invalid = true
+				break
+			}
+			names[w.Name] = true
+		}
+
+		if !invalid {
+			valid = append(valid, tmpl)
+		}
+	}
+
+	return findings, valid
 }
 
 // projectEntryFindings collects a finding for every project entry whose

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
@@ -14,6 +15,7 @@ type templateRuntimeDeps struct {
 	Tmux       deps.Tmux
 	LoadConfig func() (*config.Config, error)
 	Getwd      func() (string, error)
+	ErrOut     io.Writer
 }
 
 func defaultTemplateRuntimeDeps() templateRuntimeDeps {
@@ -26,7 +28,8 @@ func defaultTemplateRuntimeDeps() templateRuntimeDeps {
 			}
 			return config.Load(path)
 		},
-		Getwd: os.Getwd,
+		Getwd:  os.Getwd,
+		ErrOut: os.Stderr,
 	}
 }
 
@@ -93,8 +96,7 @@ func runTemplateApplyWith(d templateRuntimeDeps, cfg *config.Config, name string
 	if !ok {
 		return fmt.Errorf("session template %q not found", name)
 	}
-	window, pane, err := walkingSkeletonTemplateSpec(tmpl)
-	if err != nil {
+	if err := validateSessionTemplate(tmpl); err != nil {
 		return fmt.Errorf("session template %q: %w", name, err)
 	}
 
@@ -107,15 +109,27 @@ func runTemplateApplyWith(d templateRuntimeDeps, cfg *config.Config, name string
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// Create the window with the initial pane
-	paneID, err := d.Tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", window.Name, "-c", dir)
+	existing, err := sessionWindowNames(d.Tmux, session)
 	if err != nil {
-		return fmt.Errorf("failed to create template window %q: %w", window.Name, err)
+		return fmt.Errorf("failed to list existing windows: %w", err)
 	}
 
-	// Realize the pane tree
-	if err := realizePaneTree(d.Tmux, &pane, paneID); err != nil {
-		return fmt.Errorf("failed to realize pane tree: %w", err)
+	for _, window := range tmpl.Windows {
+		if existing[window.Name] {
+			warnf(d, "template window %q already exists in session %q, skipping\n", window.Name, session)
+			continue
+		}
+
+		// Create the window with the initial pane
+		paneID, err := d.Tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", window.Name, "-c", dir)
+		if err != nil {
+			return fmt.Errorf("failed to create template window %q: %w", window.Name, err)
+		}
+
+		// Realize the pane tree
+		if err := realizePaneTree(d.Tmux, window.Pane, paneID); err != nil {
+			return fmt.Errorf("failed to realize pane tree for window %q: %w", window.Name, err)
+		}
 	}
 
 	return nil
@@ -286,25 +300,48 @@ func findSessionTemplate(cfg *config.Config, name string) (config.SessionTemplat
 	return config.SessionTemplate{}, false
 }
 
-func walkingSkeletonTemplateSpec(tmpl config.SessionTemplate) (config.SessionTemplateWindow, config.SessionTemplatePaneSpec, error) {
+func validateSessionTemplate(tmpl config.SessionTemplate) error {
 	if tmpl.Name == "" {
-		return config.SessionTemplateWindow{}, config.SessionTemplatePaneSpec{}, fmt.Errorf("name is required")
+		return fmt.Errorf("name is required")
 	}
-	if len(tmpl.Windows) != 1 {
-		return config.SessionTemplateWindow{}, config.SessionTemplatePaneSpec{}, fmt.Errorf("exactly one window is required")
+	if len(tmpl.Windows) == 0 {
+		return fmt.Errorf("at least one window is required")
 	}
-	window := tmpl.Windows[0]
-	if window.Name == "" {
-		return config.SessionTemplateWindow{}, config.SessionTemplatePaneSpec{}, fmt.Errorf("window name is required")
+	for i, window := range tmpl.Windows {
+		if window.Name == "" {
+			return fmt.Errorf("window[%d] name is required", i)
+		}
+		if window.Pane == nil {
+			return fmt.Errorf("window %q requires a pane spec", window.Name)
+		}
+		if err := validatePaneSpec(window.Pane, ""); err != nil {
+			return err
+		}
 	}
-	if window.Pane == nil {
-		return config.SessionTemplateWindow{}, config.SessionTemplatePaneSpec{}, fmt.Errorf("window %q requires one pane spec", window.Name)
+	return nil
+}
+
+// sessionWindowNames returns the set of window names in the given tmux session.
+func sessionWindowNames(tmux deps.Tmux, session string) (map[string]bool, error) {
+	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
+	if err != nil {
+		return nil, err
 	}
-	pane := *window.Pane
-	if err := validatePaneSpec(&pane, ""); err != nil {
-		return config.SessionTemplateWindow{}, config.SessionTemplatePaneSpec{}, err
+	names := make(map[string]bool)
+	for _, line := range strings.Split(out, "\n") {
+		if line != "" {
+			names[line] = true
+		}
 	}
-	return window, pane, nil
+	return names, nil
+}
+
+func warnf(d templateRuntimeDeps, format string, args ...any) {
+	if d.ErrOut != nil {
+		fmt.Fprintf(d.ErrOut, format, args...)
+	} else {
+		fmt.Fprintf(os.Stderr, format, args...)
+	}
 }
 
 // validatePaneSpec validates a pane spec recursively. A pane is either a leaf
