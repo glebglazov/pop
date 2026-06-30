@@ -491,18 +491,18 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 			return &tasks.AutoDrainResult{TaskSetID: setID, AutoDrain: true}, nil
 		},
 	}
-	m := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
 		Project: "pop", SetID: "plain", Status: "READY", Worktree: "/repo/main (main)",
 		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00plain",
 	}}})
 	// Auto-drain now lives behind the action menu: open with `a`, toggle with `d`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.menu == nil {
 		t.Fatal("a did not open the action menu")
 	}
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.menu != nil {
 		t.Fatal("d did not close the action menu after dispatch")
 	}
@@ -511,7 +511,7 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 	}
 	msg := cmd().(dashboardToggleMsg)
 	updated, _ = got.Update(msg)
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if toggledDef != "/repo/tasks" || toggledState != "/repo/state.json" || toggledSet != "plain" {
 		t.Fatalf("toggle target = (%q, %q, %q)", toggledDef, toggledState, toggledSet)
 	}
@@ -521,18 +521,18 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 }
 
 func TestDashboardBKeyOpensBindModal(t *testing.T) {
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
 		Project: "pop", SetID: "set-bind", Status: "READY", Worktree: "/repo/main (main)",
 		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set-bind",
 	}}})
 	// Bind now lives behind the action menu: open with `a`, then `b`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.menu == nil {
 		t.Fatal("a did not open the action menu")
 	}
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.menu != nil {
 		t.Fatal("b did not close the action menu after dispatch")
 	}
@@ -545,7 +545,7 @@ func TestDashboardBKeyOpensBindModal(t *testing.T) {
 }
 
 func TestDashboardActionMenuOpenAndClose(t *testing.T) {
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set", Status: "READY", runtimePath: "/repo/wt", cursorKey: "pop\x00set"},
 	}})
 	m.width = 120
@@ -553,7 +553,7 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 
 	// `a` opens the overlay, anchored to the cursored row, with the menu hint.
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.menu == nil {
 		t.Fatal("a did not open the action menu")
 	}
@@ -573,7 +573,7 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 
 	// `esc` closes the overlay without quitting.
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.menu != nil {
 		t.Fatal("esc did not close the action menu")
 	}
@@ -584,13 +584,13 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 
 func TestDashboardFormerDirectKeysInertAtTopLevel(t *testing.T) {
 	for _, key := range []string{"i", "I", "b", "U", "p", "P", "O", "d"} {
-		m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
 			Project: "pop", SetID: "set", Status: "READY", Worktree: "/repo/wt (main)",
 			defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set",
 			runtimePath: "/repo/wt", bound: true, parked: true,
 		}}})
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
-		got := updated.(dashboardModel)
+		got := updated.(QueueDashboard)
 		if cmd != nil {
 			t.Fatalf("%q at top level dispatched a command; verbs must run only through the menu", key)
 		}
@@ -642,8 +642,8 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 }
 
 func TestDashboardActionMenuVerbDispatch(t *testing.T) {
-	newModel := func() dashboardModel {
-		return newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+	newModel := func() QueueDashboard {
+		return newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
 			Project: "pop", SetID: "set", Status: "READY", Worktree: "/repo/wt (main)",
 			defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set",
 			runtimePath: "/repo/wt", bound: true,
@@ -652,9 +652,9 @@ func TestDashboardActionMenuVerbDispatch(t *testing.T) {
 
 	// Letter path: `a` then `U` opens the unbind confirm and closes the menu.
 	updated, _ := newModel().Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.menu != nil {
 		t.Fatal("letter dispatch did not close the menu")
 	}
@@ -667,7 +667,7 @@ func TestDashboardActionMenuVerbDispatch(t *testing.T) {
 
 	// Highlight + Enter path: move onto the bind verb, press Enter.
 	updated, _ = newModel().Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	bindIdx := -1
 	for i, item := range got.menu.items {
 		if item.key == "b" {
@@ -679,10 +679,10 @@ func TestDashboardActionMenuVerbDispatch(t *testing.T) {
 	}
 	for got.menu.cursor != bindIdx {
 		updated, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-		got = updated.(dashboardModel)
+		got = updated.(QueueDashboard)
 	}
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.menu != nil {
 		t.Fatal("enter dispatch did not close the menu")
 	}
@@ -703,7 +703,7 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 		},
 	}
 	// A DONE, bound row: archive is offered regardless of status.
-	m := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
 		Project: "pop", SetID: "set", Status: "DONE", Worktree: "/repo/wt (main)",
 		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set",
 		runtimePath: "/repo/wt", bound: true,
@@ -711,7 +711,7 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 
 	// Archive lives behind the action menu: open with `a`, archive with `A`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.menu == nil {
 		t.Fatal("a did not open the action menu")
 	}
@@ -724,7 +724,7 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 	}
 
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'A', Text: "A"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.menu != nil {
 		t.Fatal("A did not close the action menu after dispatch")
 	}
@@ -747,7 +747,7 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 	}
 
 	updated, _ = got.Update(msg)
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.err != nil {
 		t.Fatalf("archive result err = %v", got.err)
 	}
@@ -787,16 +787,16 @@ func TestDashboardArchiveRetainsBinding(t *testing.T) {
 	})
 
 	d := &Deps{Tasks: td}
-	m := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
 		Project: "proj", SetID: "set-1", Status: "DONE",
 		defPath: tasksDir, statePath: statePath, cursorKey: "proj\x00set-1",
 		runtimePath: "/repo/wt", bound: true,
 	}}})
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'A', Text: "A"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatal("archive dispatch returned no command")
 	}
@@ -852,23 +852,23 @@ func TestDashboardActionMenuAnchorsBelowAndFlipsAbove(t *testing.T) {
 	}
 
 	// Cursor at the top: the menu caption sits below the cursor row.
-	mTop := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	mTop := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	mTop.width = 120
 	mTop.height = 24
 	mTop.cursor = 0
 	updated, _ := mTop.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	topView := updated.(dashboardModel).View().Content
+	topView := updated.(QueueDashboard).View().Content
 	if got := menuCaptionLine(topView); got <= cursorRowLine(topView, "set-00") {
 		t.Fatalf("top cursor: caption line %d should be below cursor row:\n%s", got, topView)
 	}
 
 	// Cursor at the bottom: the menu caption flips above the cursor row.
-	mBot := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	mBot := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	mBot.width = 120
 	mBot.height = 24
 	mBot.cursor = len(rows) - 1
 	updated, _ = mBot.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	botView := updated.(dashboardModel).View().Content
+	botView := updated.(QueueDashboard).View().Content
 	if got := menuCaptionLine(botView); got >= cursorRowLine(botView, "set-19") {
 		t.Fatalf("bottom cursor: caption line %d should be above cursor row:\n%s", got, botView)
 	}
@@ -892,14 +892,14 @@ func cursorRowLine(view, setID string) int {
 }
 
 func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) {
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "first", Status: "READY", cursorKey: "pop\x00first"},
 		{Project: "pop", SetID: "second", Status: "READY", cursorKey: "pop\x00second"},
 	}})
 	m.cursor = 1
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.detail == nil || !got.detail.loading || got.detail.row.SetID != "second" {
 		t.Fatalf("detail view = %+v, want loading for second", got.detail)
 	}
@@ -914,7 +914,7 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 
 	// Exit: h closes detail, returns to queue table, cursor unchanged.
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if cmd != nil {
 		t.Fatalf("h in detail view should close without quitting")
 	}
@@ -923,12 +923,12 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 	}
 
 	// Exit via esc also works.
-	m2 := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m2 := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "alpha", Status: "READY", cursorKey: "pop\x00alpha"},
 	}})
 	updated, _ = m2.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	updated, cmd = updated.(dashboardModel).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if cmd != nil || updated.(dashboardModel).detail != nil {
+	updated, cmd = updated.(QueueDashboard).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if cmd != nil || updated.(QueueDashboard).detail != nil {
 		t.Fatalf("esc should close detail view without quitting")
 	}
 
@@ -939,11 +939,11 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 		{name: "enter", msg: tea.KeyPressMsg{Code: tea.KeyEnter}},
 	} {
 		t.Run(tc.name+" opens detail", func(t *testing.T) {
-			m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+			m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 				{Project: "pop", SetID: "target", Status: "READY", cursorKey: "pop\x00target"},
 			}})
 			updated, cmd := m.Update(tc.msg)
-			got := updated.(dashboardModel)
+			got := updated.(QueueDashboard)
 			if got.detail == nil || !got.detail.loading || got.detail.row.SetID != "target" {
 				t.Fatalf("detail view = %+v, want loading for target", got.detail)
 			}
@@ -955,7 +955,7 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 }
 
 func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set", Status: "READY", RawStatus: tasks.StatusReady, Worktree: "main", Drain: "picked up", AutoDrain: true, cursorKey: "pop\x00set"},
 		{Project: "pop", SetID: "done", Status: "DONE", RawStatus: tasks.StatusDone, Worktree: "main", cursorKey: "pop\x00done"},
 	}})
@@ -991,7 +991,7 @@ func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) 
 		Valid: true,
 		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Title: "First", Type: "AFK", Status: "open"}},
 	}
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set-normal", Status: "READY", cursorKey: "pop\x00set-normal"},
 	}})
 	m.width = 120
@@ -1031,13 +1031,13 @@ func dashboardTestLineIndex(lines []string, needle string) int {
 }
 
 func TestDashboardQAndSAreUnbound(t *testing.T) {
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set", Status: "READY", cursorKey: "pop\x00set"},
 	}})
 	got := m
 	for _, key := range []string{"q", "s"} {
 		updated, cmd := got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
-		got = updated.(dashboardModel)
+		got = updated.(QueueDashboard)
 		if cmd != nil {
 			t.Fatalf("%s at top level returned command, want no-op", key)
 		}
@@ -1049,7 +1049,7 @@ func TestDashboardQAndSAreUnbound(t *testing.T) {
 	got.detail = &detailView{row: got.snap.Rows[0], loading: true}
 	for _, key := range []string{"q", "s"} {
 		updated, cmd := got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
-		got = updated.(dashboardModel)
+		got = updated.(QueueDashboard)
 		if cmd != nil {
 			t.Fatalf("%s in detail returned command, want no-op", key)
 		}
@@ -1074,13 +1074,13 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 		Valid: true,
 		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "open"}},
 	}
-	m := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set-peek", Status: "READY", cursorKey: "pop\x00set-peek"},
 	}})
 	m.detail = &detailView{row: m.snap.Rows[0], manifest: manifest, cursorID: "01-a"}
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.taskID != "01-a" {
 		t.Fatalf("peek = %+v, want loading peek for 01-a", got.detail.peek)
 	}
@@ -1089,7 +1089,7 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 	}
 	msg := cmd()
 	updated, _ = got.Update(msg)
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.detail.peek == nil || got.detail.peek.loading || got.detail.peek.err != nil {
 		t.Fatalf("loaded peek = %+v, want loaded text", got.detail.peek)
 	}
@@ -1101,7 +1101,7 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 	}
 
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if cmd != nil {
 		t.Fatalf("h from task-text peek returned command")
 	}
@@ -1109,12 +1109,12 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 		t.Fatalf("h should close peek but keep detail: detail=%+v", got.detail)
 	}
 
-	m2 := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m2 := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set-peek", Status: "READY", cursorKey: "pop\x00set-peek"},
 	}})
 	m2.detail = &detailView{row: m2.snap.Rows[0], manifest: manifest, cursorID: "01-a"}
 	updated, cmd = m2.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.taskID != "01-a" {
 		t.Fatalf("enter peek = %+v, want loading peek for 01-a", got.detail.peek)
 	}
@@ -1124,7 +1124,7 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 }
 
 func TestDashboardTaskTextPeekScrolls(t *testing.T) {
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set-scroll", Status: "READY", cursorKey: "pop\x00set-scroll"},
 	}})
 	m.height = 8
@@ -1149,7 +1149,7 @@ func TestDashboardTaskTextPeekScrolls(t *testing.T) {
 	}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.detail.peek.scroll != 1 {
 		t.Fatalf("after j scroll = %d, want 1", got.detail.peek.scroll)
 	}
@@ -1159,7 +1159,7 @@ func TestDashboardTaskTextPeekScrolls(t *testing.T) {
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.detail.peek.scroll != 3 {
 		t.Fatalf("after G scroll = %d, want 3", got.detail.peek.scroll)
 	}
@@ -1169,37 +1169,37 @@ func TestDashboardTaskTextPeekScrolls(t *testing.T) {
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.detail.peek.scroll != 3 {
 		t.Fatalf("first g scroll = %d, want 3", got.detail.peek.scroll)
 	}
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.detail.peek.scroll != 0 {
 		t.Fatalf("after gg scroll = %d, want 0", got.detail.peek.scroll)
 	}
 }
 
 func TestDashboardTopLevelVimNavigation(t *testing.T) {
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "first", Status: "READY", cursorKey: "pop\x00first"},
 		{Project: "pop", SetID: "second", Status: "READY", cursorKey: "pop\x00second"},
 		{Project: "pop", SetID: "third", Status: "READY", cursorKey: "pop\x00third"},
 	}})
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.cursor != 2 {
 		t.Fatalf("G cursor = %d, want 2", got.cursor)
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.cursor != 2 {
 		t.Fatalf("first g cursor = %d, want 2", got.cursor)
 	}
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.cursor != 0 {
 		t.Fatalf("gg cursor = %d, want 0", got.cursor)
 	}
@@ -1304,45 +1304,45 @@ func TestDashboardDetailViewVimNavigation(t *testing.T) {
 			{ID: "03-c", Type: "AFK", Status: "open"},
 		},
 	}
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", SetID: "set-nav", Status: "READY", cursorKey: "pop\x00set-nav"},
 	}})
 	m.detail = &detailView{row: m.snap.Rows[0], manifest: manifest, cursorID: "01-a"}
 
 	// j moves cursor down.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.detail.cursorID != "02-b" {
 		t.Fatalf("after j: cursorID = %q, want 02-b", got.detail.cursorID)
 	}
 
 	// k moves cursor up.
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.detail.cursorID != "01-a" {
 		t.Fatalf("after k: cursorID = %q, want 01-a", got.detail.cursorID)
 	}
 
 	// j/k clamp at boundaries.
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.detail.cursorID != "01-a" {
 		t.Fatalf("k at top should clamp: cursorID = %q, want 01-a", got.detail.cursorID)
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.detail.cursorID != "03-c" {
 		t.Fatalf("G should move to bottom: cursorID = %q, want 03-c", got.detail.cursorID)
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.detail.cursorID != "03-c" {
 		t.Fatalf("first g should not move cursor: cursorID = %q, want 03-c", got.detail.cursorID)
 	}
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.detail.cursorID != "01-a" {
 		t.Fatalf("gg should move to top: cursorID = %q, want 01-a", got.detail.cursorID)
 	}
@@ -2034,16 +2034,16 @@ func TestDashboardBindRefusesLiveLock(t *testing.T) {
 }
 
 func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{
 		Project: "pop", SetID: "set-unbind", Status: "FAILED", Worktree: "/repo/bound (branch)",
 		defPath: "/repo/tasks", statePath: "/repo/state.json", cursorKey: "pop\x00set-unbind",
 		bound: true,
 	}}})
 
 	// Unbind now lives behind the action menu: open with `a`, then `U`.
-	openMenu := func(model dashboardModel) dashboardModel {
+	openMenu := func(model QueueDashboard) QueueDashboard {
 		updated, _ := model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-		got := updated.(dashboardModel)
+		got := updated.(QueueDashboard)
 		if !menuHasKey(got.menu, "U") {
 			t.Fatalf("unbind not offered on bound row: %+v", got.menu)
 		}
@@ -2052,7 +2052,7 @@ func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 
 	got := openMenu(m)
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if cmd != nil {
 		t.Fatalf("U key returned command before confirmation")
 	}
@@ -2067,7 +2067,7 @@ func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 	}
 
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatalf("confirm did not return unbind command")
 	}
@@ -2077,9 +2077,9 @@ func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 
 	got = openMenu(m)
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if cmd != nil || got.abandon != nil {
 		t.Fatalf("cancel should close modal without command: modal=%+v cmd=%v", got.abandon, cmd)
 	}
@@ -2326,13 +2326,13 @@ func assertDashboardPaneMapping(t *testing.T, d *Deps, repo, setID, paneID, sour
 	}
 }
 
-func filterTestModel() dashboardModel {
+func filterTestModel() QueueDashboard {
 	rows := []DashboardRow{
 		{Project: "alpha", SetID: "set-one", Status: "READY", cursorKey: "alpha\x00set-one"},
 		{Project: "beta", SetID: "set-two", Status: "READY", cursorKey: "beta\x00set-two"},
 		{Project: "gamma", SetID: "feature", Status: "FAILED", cursorKey: "gamma\x00feature"},
 	}
-	m := newDashboardModel(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	m.cursor = 2
 	return m
 }
@@ -2340,7 +2340,7 @@ func filterTestModel() dashboardModel {
 func TestDashboardFilterMode_SlashEntersFilterMode(t *testing.T) {
 	m := filterTestModel()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if !got.filterMode {
 		t.Fatal("expected filterMode = true after /")
 	}
@@ -2353,16 +2353,16 @@ func TestDashboardFilterMode_EscExitsAndClearsFilter(t *testing.T) {
 	m := filterTestModel()
 	// Enter filter mode
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(dashboardModel)
+	m = updated.(QueueDashboard)
 	// Type a filter
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
-	m = updated.(dashboardModel)
+	m = updated.(QueueDashboard)
 	if len(m.snap.Rows) != 1 {
 		t.Fatalf("after 'b' filter: rows = %d, want 1", len(m.snap.Rows))
 	}
 	// Esc exits filter mode and restores all rows
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.filterMode {
 		t.Fatal("expected filterMode = false after esc")
 	}
@@ -2377,12 +2377,12 @@ func TestDashboardFilterMode_EscExitsAndClearsFilter(t *testing.T) {
 func TestDashboardFilterMode_TypingNarrowsRows(t *testing.T) {
 	m := filterTestModel()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(dashboardModel)
+	m = updated.(QueueDashboard)
 
 	// Type "alpha" — matches Project "alpha"
 	for _, ch := range "alpha" {
 		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
-		m = updated.(dashboardModel)
+		m = updated.(QueueDashboard)
 	}
 	if len(m.snap.Rows) != 1 {
 		t.Fatalf("after 'alpha': rows = %d, want 1", len(m.snap.Rows))
@@ -2395,12 +2395,12 @@ func TestDashboardFilterMode_TypingNarrowsRows(t *testing.T) {
 func TestDashboardFilterMode_MatchesSetID(t *testing.T) {
 	m := filterTestModel()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(dashboardModel)
+	m = updated.(QueueDashboard)
 
 	// "feature" matches SetID "feature" in project "gamma"
 	for _, ch := range "feature" {
 		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
-		m = updated.(dashboardModel)
+		m = updated.(QueueDashboard)
 	}
 	if len(m.snap.Rows) != 1 {
 		t.Fatalf("after 'feature': rows = %d, want 1", len(m.snap.Rows))
@@ -2414,12 +2414,12 @@ func TestDashboardFilterMode_CursorClampedToFilteredRows(t *testing.T) {
 	m := filterTestModel()
 	m.cursor = 2 // on gamma/feature
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(dashboardModel)
+	m = updated.(QueueDashboard)
 
 	// Type "alpha" — only alpha/set-one matches; cursor must move within bounds
 	for _, ch := range "alpha" {
 		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
-		m = updated.(dashboardModel)
+		m = updated.(QueueDashboard)
 	}
 	if m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
 		t.Fatalf("cursor = %d, out of bounds for %d filtered rows", m.cursor, len(m.snap.Rows))
@@ -2429,23 +2429,23 @@ func TestDashboardFilterMode_CursorClampedToFilteredRows(t *testing.T) {
 func TestDashboardFilterMode_NavigationWorksInsideFilter(t *testing.T) {
 	m := filterTestModel()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(dashboardModel)
+	m = updated.(QueueDashboard)
 	// Type "set" to match two rows
 	for _, ch := range "set" {
 		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
-		m = updated.(dashboardModel)
+		m = updated.(QueueDashboard)
 	}
 	if len(m.snap.Rows) != 2 {
 		t.Fatalf("after 'set': rows = %d, want 2", len(m.snap.Rows))
 	}
 	m.cursor = 0
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.cursor != 1 {
 		t.Fatalf("j in filter mode: cursor = %d, want 1", got.cursor)
 	}
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.cursor != 0 {
 		t.Fatalf("k in filter mode: cursor = %d, want 0", got.cursor)
 	}
@@ -2463,11 +2463,11 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 		{Project: "alpha", SetID: "set-one", Status: "READY", cursorKey: "alpha\x00set-one",
 			defPath: "/def", statePath: "/state"},
 	}
-	m := newDashboardModel(d, &config.Config{}, DashboardSnapshot{Rows: rows})
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: rows})
 	m.cursor = 0
 	// Enter filter mode
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(dashboardModel)
+	m = updated.(QueueDashboard)
 	// Action keys should NOT trigger actions — they go to the filter input
 	for _, key := range []tea.KeyPressMsg{
 		{Code: 'i', Text: "i"},
@@ -2481,7 +2481,7 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 		{Code: tea.KeyEnter},
 	} {
 		updated, _ = m.Update(key)
-		m = updated.(dashboardModel)
+		m = updated.(QueueDashboard)
 	}
 	if called {
 		t.Fatal("bare-letter actions must be inert in filter mode")
@@ -2494,10 +2494,10 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 func TestDashboardFilterMode_QKeyGoesToInputNotQuit(t *testing.T) {
 	m := filterTestModel()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(dashboardModel)
+	m = updated.(QueueDashboard)
 	// 'q' in filter mode goes to the input box, not quit
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if !got.filterMode {
 		t.Fatal("q in filter mode must not exit filter mode")
 	}
@@ -2509,10 +2509,10 @@ func TestDashboardFilterMode_QKeyGoesToInputNotQuit(t *testing.T) {
 func TestDashboardFilterMode_ReloadPreservesFilter(t *testing.T) {
 	m := filterTestModel()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(dashboardModel)
+	m = updated.(QueueDashboard)
 	for _, ch := range "alpha" {
 		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
-		m = updated.(dashboardModel)
+		m = updated.(QueueDashboard)
 	}
 	if len(m.snap.Rows) != 1 {
 		t.Fatalf("before reload: rows = %d, want 1", len(m.snap.Rows))
@@ -2525,7 +2525,7 @@ func TestDashboardFilterMode_ReloadPreservesFilter(t *testing.T) {
 		{Project: "delta", SetID: "alpha-task", Status: "READY", cursorKey: "delta\x00alpha-task"},
 	}
 	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: newRows}})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 
 	if !got.filterMode {
 		t.Fatal("filter mode must persist across reload")
@@ -2586,9 +2586,9 @@ func TestFilterDashboardRows(t *testing.T) {
 	})
 }
 
-// detailOverrideModel builds a dashboardModel with a loaded detailView and
+// detailOverrideModel builds a QueueDashboard with a loaded detailView and
 // injectable override seams. The seams record calls and return the provided error.
-func detailOverrideModel(row DashboardRow, task tasks.Task, completeErr, resetErr, skipErr error) (dashboardModel, *int, *int, *int) {
+func detailOverrideModel(row DashboardRow, task tasks.Task, completeErr, resetErr, skipErr error) (QueueDashboard, *int, *int, *int) {
 	completeCalls, resetCalls, skipCalls := 0, 0, 0
 	d := &Deps{
 		CompleteDetailTask: func(defPath, taskPath string) error {
@@ -2608,7 +2608,7 @@ func detailOverrideModel(row DashboardRow, task tasks.Task, completeErr, resetEr
 		Valid: true,
 		Tasks: []tasks.Task{task},
 	}
-	m := newDashboardModel(d, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
 	m.detail = &detailView{
 		row:      row,
 		manifest: manifest,
@@ -2630,10 +2630,10 @@ func taskMenuItemKeys(menu *taskMenu) []string {
 }
 
 // openTaskMenu presses `a` in the detail view and returns the resulting model.
-func openTaskMenu(t *testing.T, m dashboardModel) dashboardModel {
+func openTaskMenu(t *testing.T, m QueueDashboard) QueueDashboard {
 	t.Helper()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	return updated.(dashboardModel)
+	return updated.(QueueDashboard)
 }
 
 func TestDetailTaskMenuCompleteVerb(t *testing.T) {
@@ -2650,7 +2650,7 @@ func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 		t.Fatalf("open task menu = %v, want to contain C", got)
 	}
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'C', Text: "C"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.taskMenu != nil {
 		t.Fatal("C should close the menu")
 	}
@@ -2662,7 +2662,7 @@ func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 		t.Fatalf("completeCalls = %d, want 1", *completeCalls)
 	}
 	updated, _ = got.Update(msg)
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if !strings.Contains(got.detail.statusMsg, "complete") {
 		t.Fatalf("C confirmation = %q, want 'complete'", got.detail.statusMsg)
 	}
@@ -2706,7 +2706,7 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 		t.Fatalf("failed task menu = %v, want to contain O", got)
 	}
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatal("O on failed: expected a command")
 	}
@@ -2715,7 +2715,7 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 		t.Fatalf("resetCalls = %d, want 1", *resetCalls)
 	}
 	updated, _ = got.Update(msg)
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if !strings.Contains(got.detail.statusMsg, "open") {
 		t.Fatalf("O confirmation = %q, want 'open'", got.detail.statusMsg)
 	}
@@ -2764,7 +2764,7 @@ func TestDetailTaskMenuSkipVerb(t *testing.T) {
 		t.Fatalf("open task menu = %v, want to contain K", got)
 	}
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatal("K on open: expected a command")
 	}
@@ -2773,7 +2773,7 @@ func TestDetailTaskMenuSkipVerb(t *testing.T) {
 		t.Fatalf("skipCalls = %d, want 1", *skipCalls)
 	}
 	updated, _ = got.Update(msg)
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if !strings.Contains(got.detail.statusMsg, "skip") {
 		t.Fatalf("K confirmation = %q, want 'skip'", got.detail.statusMsg)
 	}
@@ -2802,12 +2802,12 @@ func TestDetailTaskMenuDispatchViaEnter(t *testing.T) {
 	m = openTaskMenu(t, m)
 	// Menu order for a failed task: complete (C), open (O). Highlight O via j.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.taskMenu.cursor != 1 {
 		t.Fatalf("after j cursor = %d, want 1", got.taskMenu.cursor)
 	}
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatal("Enter on highlighted O: expected a command")
 	}
@@ -2827,7 +2827,7 @@ func TestDetailTaskMenuEscCloses(t *testing.T) {
 	m, completeCalls, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
 	m = openTaskMenu(t, m)
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.taskMenu != nil {
 		t.Fatal("esc should close the task menu")
 	}
@@ -2850,10 +2850,10 @@ func TestDetailTaskMenuErrorSurfaced(t *testing.T) {
 
 	m = openTaskMenu(t, m)
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'C', Text: "C"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	msg := cmd()
 	updated, _ = got.Update(msg)
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if !strings.Contains(got.detail.statusMsg, "error") {
 		t.Fatalf("error not surfaced in statusMsg: %q", got.detail.statusMsg)
 	}
@@ -2891,7 +2891,7 @@ func TestPeekTaskMenuOpensAndDispatches(t *testing.T) {
 	m.detail.peek = &taskTextPeek{taskID: "02-b", text: "body\n"}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	if got.taskMenu == nil {
 		t.Fatal("a in peek: expected task menu to open")
 	}
@@ -2907,7 +2907,7 @@ func TestPeekTaskMenuOpensAndDispatches(t *testing.T) {
 	}
 
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.taskMenu != nil {
 		t.Fatal("O should close the menu")
 	}
@@ -2933,7 +2933,7 @@ func TestPeekTaskMenuRendersOverlay(t *testing.T) {
 	m.detail.peek = &taskTextPeek{taskID: "01-a", text: "body line\n"}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	out := got.View().Content
 	for _, want := range []string{"actions", "C  complete", "K  skip"} {
 		if !strings.Contains(out, want) {
@@ -2952,7 +2952,7 @@ func TestPeekFormerKeysInertWithoutMenu(t *testing.T) {
 
 	for _, key := range []rune{'C', 'O', 'K'} {
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
-		got := updated.(dashboardModel)
+		got := updated.(QueueDashboard)
 		if cmd != nil {
 			t.Fatalf("%c in peek (no menu): expected no command", key)
 		}
@@ -2974,7 +2974,7 @@ func TestDetailFormerKeysInertWithoutMenu(t *testing.T) {
 
 	for _, key := range []rune{'C', 'O', 'K'} {
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
-		got := updated.(dashboardModel)
+		got := updated.(QueueDashboard)
 		if cmd != nil {
 			t.Fatalf("%c in detail (no menu): expected no command", key)
 		}
@@ -3009,19 +3009,19 @@ func TestDetailTaskMenuRendersOverlay(t *testing.T) {
 
 func TestMainListRuntimeShell(t *testing.T) {
 	// runtimeShell opens the action menu and dispatches the shell verb (`O`).
-	runtimeShell := func(m dashboardModel) (dashboardModel, tea.Cmd) {
+	runtimeShell := func(m QueueDashboard) (QueueDashboard, tea.Cmd) {
 		updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-		got := updated.(dashboardModel)
+		got := updated.(QueueDashboard)
 		if got.menu == nil {
 			t.Fatal("a did not open the action menu")
 		}
 		updated, cmd := got.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
-		return updated.(dashboardModel), cmd
+		return updated.(QueueDashboard), cmd
 	}
 
 	t.Run("O with empty runtimePath is no-op with statusMsg hint", func(t *testing.T) {
 		row := DashboardRow{SetID: "set-x", defPath: "/def", runtimePath: ""}
-		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
 		got, cmd := runtimeShell(m)
 		if cmd != nil {
 			t.Fatal("O with empty runtimePath: expected no cmd")
@@ -3033,7 +3033,7 @@ func TestMainListRuntimeShell(t *testing.T) {
 
 	t.Run("O with whitespace-only runtimePath is no-op with statusMsg hint", func(t *testing.T) {
 		row := DashboardRow{SetID: "set-y", defPath: "/def", runtimePath: "   "}
-		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
 		got, cmd := runtimeShell(m)
 		if cmd != nil {
 			t.Fatal("O with whitespace runtimePath: expected no cmd")
@@ -3044,9 +3044,9 @@ func TestMainListRuntimeShell(t *testing.T) {
 	})
 
 	t.Run("a with no rows does not open the menu", func(t *testing.T) {
-		m := newDashboardModel(nil, nil, DashboardSnapshot{})
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-		got := updated.(dashboardModel)
+		got := updated.(QueueDashboard)
 		if cmd != nil {
 			t.Fatal("a with no rows: expected no cmd")
 		}
@@ -3060,7 +3060,7 @@ func TestMainListRuntimeShell(t *testing.T) {
 
 	t.Run("statusMsg hint rendered in view", func(t *testing.T) {
 		row := DashboardRow{SetID: "set-z", defPath: "/def", runtimePath: ""}
-		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
 		m.statusMsg = "no checkout bound to this task set"
 		v := m.View()
 		if !strings.Contains(v.Content, "no checkout bound to this task set") {
@@ -3070,9 +3070,9 @@ func TestMainListRuntimeShell(t *testing.T) {
 
 	t.Run("menu offers the shell verb", func(t *testing.T) {
 		row := DashboardRow{SetID: "set-hint", defPath: "/def"}
-		m := newDashboardModel(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
 		updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-		got := updated.(dashboardModel)
+		got := updated.(QueueDashboard)
 		view := got.View().Content
 		if !menuHasKey(got.menu, "O") {
 			t.Fatalf("menu missing shell verb: %+v", got.menu)

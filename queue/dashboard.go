@@ -1070,7 +1070,7 @@ func (d *detailView) syncManifest(m *tasks.Manifest, row *tasks.Row) {
 	d.cursorID = m.Tasks[0].ID
 }
 
-type dashboardModel struct {
+type QueueDashboard struct {
 	d         *Deps
 	cfg       *config.Config
 	snap      DashboardSnapshot
@@ -1092,18 +1092,18 @@ type dashboardModel struct {
 	statusMsg   string
 }
 
-func newDashboardModel(d *Deps, cfg *config.Config, snap DashboardSnapshot) dashboardModel {
+func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
 	if d == nil {
 		d = DefaultDeps()
 	}
-	return dashboardModel{d: d, cfg: cfg, snap: snap, allRows: snap.Rows}
+	return QueueDashboard{d: d, cfg: cfg, snap: snap, allRows: snap.Rows}
 }
 
-func (m dashboardModel) Init() tea.Cmd {
+func (m QueueDashboard) Init() tea.Cmd {
 	return dashboardTick()
 }
 
-func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.bind != nil {
@@ -1330,7 +1330,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m dashboardModel) updateBindModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) updateBindModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.bind = nil
@@ -1357,7 +1357,7 @@ func (m dashboardModel) updateBindModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m dashboardModel) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c", "n":
 		m.abandon = nil
@@ -1375,7 +1375,7 @@ func (m dashboardModel) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 // updateMenu drives the action overlay: esc/ctrl+c close it, j/k move the
 // highlight, Enter runs the highlighted verb, and any matching verb letter runs
 // that verb directly. Non-matching keys are inert while the menu is open.
-func (m dashboardModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu == nil {
 		return m, nil
 	}
@@ -1400,7 +1400,7 @@ func (m dashboardModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *dashboardModel) moveMenuCursor(delta int) {
+func (m *QueueDashboard) moveMenuCursor(delta int) {
 	if m.menu == nil {
 		return
 	}
@@ -1419,7 +1419,7 @@ func (m *dashboardModel) moveMenuCursor(delta int) {
 
 // invokeMenuItem closes the menu and dispatches the verb at idx against the row
 // the menu was opened on.
-func (m dashboardModel) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.menu == nil || idx < 0 || idx >= len(m.menu.items) {
 		return m, nil
 	}
@@ -1432,7 +1432,7 @@ func (m dashboardModel) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 // dispatchMenuAction runs the verb. The conditional guards mirror
 // dashboardMenuItems' context filtering — an item present in the menu always
 // passes its guard, but the guards keep dispatch self-contained.
-func (m dashboardModel) dispatchMenuAction(action dashboardMenuAction, row DashboardRow) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row DashboardRow) (tea.Model, tea.Cmd) {
 	m.err = nil
 	switch action {
 	case menuActionDrain:
@@ -1483,7 +1483,7 @@ func (m dashboardModel) dispatchMenuAction(action dashboardMenuAction, row Dashb
 	return m, nil
 }
 
-func (m dashboardModel) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.taskMenu != nil {
 		m.pendingG = false
 		return m.updateTaskMenu(msg)
@@ -1591,7 +1591,7 @@ func (m dashboardModel) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateTaskMenu drives the task-level action overlay: esc/ctrl+c close it, j/k
 // move the highlight, Enter runs the highlighted verb, and any matching verb
 // letter runs that verb directly. Non-matching keys are inert while open.
-func (m dashboardModel) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.taskMenu == nil {
 		return m, nil
 	}
@@ -1616,7 +1616,7 @@ func (m dashboardModel) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *dashboardModel) moveTaskMenuCursor(delta int) {
+func (m *QueueDashboard) moveTaskMenuCursor(delta int) {
 	if m.taskMenu == nil {
 		return
 	}
@@ -1636,7 +1636,7 @@ func (m *dashboardModel) moveTaskMenuCursor(delta int) {
 // invokeTaskMenuItem closes the menu and dispatches the verb at idx against the
 // task the menu was opened on. The items are pre-filtered to valid transitions
 // (taskMenuItems), so the verb applies without a separate confirmation.
-func (m dashboardModel) invokeTaskMenuItem(idx int) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) invokeTaskMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.taskMenu == nil || idx < 0 || idx >= len(m.taskMenu.items) {
 		return m, nil
 	}
@@ -1653,7 +1653,7 @@ func (m dashboardModel) invokeTaskMenuItem(idx int) (tea.Model, tea.Cmd) {
 
 // applyDetailOverride dispatches the C/O/K override verb to the appropriate
 // tasks.*With function via the Deps seam.
-func (m dashboardModel) applyDetailOverride(row DashboardRow, task tasks.Task, verb string) tea.Cmd {
+func (m QueueDashboard) applyDetailOverride(row DashboardRow, task tasks.Task, verb string) tea.Cmd {
 	d := m.d
 	if d == nil {
 		d = DefaultDeps()
@@ -1674,7 +1674,7 @@ func (m dashboardModel) applyDetailOverride(row DashboardRow, task tasks.Task, v
 	}
 }
 
-func (m dashboardModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -1707,7 +1707,7 @@ func (m dashboardModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m dashboardModel) moveTaskTextPeek(delta int) {
+func (m QueueDashboard) moveTaskTextPeek(delta int) {
 	if m.detail == nil || m.detail.peek == nil || delta == 0 {
 		return
 	}
@@ -1720,7 +1720,7 @@ func (m dashboardModel) moveTaskTextPeek(delta int) {
 	}
 }
 
-func (m dashboardModel) maxTaskTextPeekScroll() int {
+func (m QueueDashboard) maxTaskTextPeekScroll() int {
 	if m.detail == nil || m.detail.peek == nil {
 		return 0
 	}
@@ -1732,7 +1732,7 @@ func (m dashboardModel) maxTaskTextPeekScroll() int {
 	return maxScroll
 }
 
-func (m dashboardModel) taskTextPeekPageSize() int {
+func (m QueueDashboard) taskTextPeekPageSize() int {
 	if m.detail == nil || m.detail.peek == nil {
 		return 1
 	}
@@ -1756,7 +1756,7 @@ func filterDashboardRows(rows []DashboardRow, query string) []DashboardRow {
 	return filtered
 }
 
-func (m *dashboardModel) moveBindCursor(delta int) {
+func (m *QueueDashboard) moveBindCursor(delta int) {
 	if m.bind == nil {
 		return
 	}
@@ -1776,7 +1776,7 @@ func (m *dashboardModel) moveBindCursor(delta int) {
 	}
 }
 
-func (m dashboardModel) confirmBindModal() (tea.Model, tea.Cmd) {
+func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 	if m.bind == nil || m.bind.loading {
 		return m, nil
 	}
@@ -1812,7 +1812,7 @@ func (m dashboardModel) confirmBindModal() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m dashboardModel) reload() tea.Cmd {
+func (m QueueDashboard) reload() tea.Cmd {
 	return func() tea.Msg {
 		snap, err := BuildDashboard(m.d, m.cfg)
 		return dashboardRowsMsg{snap: snap, err: err}
@@ -1821,7 +1821,7 @@ func (m dashboardModel) reload() tea.Cmd {
 
 // unparkSet handles the `P` key: it writes a durable park-clear event for the
 // selected parked set so the daemon may auto-spawn it again (ADR-0055).
-func (m dashboardModel) unparkSet(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) unparkSet(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		err := UnparkDashboardRow(m.d, row)
 		return dashboardUnparkMsg{setID: row.SetID, err: err}
@@ -1851,14 +1851,14 @@ func UnparkDashboardRow(d *Deps, row DashboardRow) error {
 // set's Worktree binding intact; the archived row drops out on the next build,
 // which excludes Archived sets. Archiving is fully reversible, so no
 // confirmation is required (ADR cleanup path for Done and Orphaned sets alike).
-func (m dashboardModel) archiveSet(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) archiveSet(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		err := m.d.archiveSet(row.defPath, row.SetID)
 		return dashboardArchiveMsg{setID: row.SetID, err: err}
 	}
 }
 
-func (m dashboardModel) toggleAutoDrain(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) toggleAutoDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.d.toggleAutoDrain(row.defPath, row.statePath, row.SetID)
 		if err != nil {
@@ -1871,7 +1871,7 @@ func (m dashboardModel) toggleAutoDrain(row DashboardRow) tea.Cmd {
 // launchDrain handles the `i` key. A set that already holds a Worktree binding
 // resumes in it immediately (no picker). An unbound set opens the Drain target
 // picker so the operator chooses where the drain lands (ADR-0052).
-func (m dashboardModel) launchDrain(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) launchDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		bound, err := dashboardSetBound(m.d, m.cfg, row)
 		if err != nil {
@@ -1886,7 +1886,7 @@ func (m dashboardModel) launchDrain(row DashboardRow) tea.Cmd {
 	}
 }
 
-func (m dashboardModel) updateDrainModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m QueueDashboard) updateDrainModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.drainPick = nil
@@ -1903,7 +1903,7 @@ func (m dashboardModel) updateDrainModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *dashboardModel) moveDrainCursor(delta int) {
+func (m *QueueDashboard) moveDrainCursor(delta int) {
 	if m.drainPick == nil {
 		return
 	}
@@ -1920,7 +1920,7 @@ func (m *dashboardModel) moveDrainCursor(delta int) {
 	}
 }
 
-func (m dashboardModel) confirmDrainModal() (tea.Model, tea.Cmd) {
+func (m QueueDashboard) confirmDrainModal() (tea.Model, tea.Cmd) {
 	if m.drainPick == nil || m.drainPick.loading {
 		return m, nil
 	}
@@ -1935,7 +1935,7 @@ func (m dashboardModel) confirmDrainModal() (tea.Model, tea.Cmd) {
 
 // launchDrainTarget binds the chosen target (adopt, provision, or leave unbound
 // for trunk) and drains in one action.
-func (m dashboardModel) launchDrainTarget(row DashboardRow, target dashboardDrainEntry) tea.Cmd {
+func (m QueueDashboard) launchDrainTarget(row DashboardRow, target dashboardDrainEntry) tea.Cmd {
 	return func() tea.Msg {
 		_, err := LaunchDashboardDrainTarget(m.d, m.cfg, row, target)
 		return dashboardDrainMsg{err: err}
@@ -1954,14 +1954,14 @@ func defaultDrainCursor(entries []dashboardDrainEntry) int {
 	return 0
 }
 
-func (m dashboardModel) previewDrain(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) previewDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		err := PreviewDashboardDrain(m.d, row)
 		return dashboardPreviewMsg{err: err}
 	}
 }
 
-func (m dashboardModel) loadDetail(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		d := m.d
 		if d == nil {
@@ -1980,7 +1980,7 @@ func (m dashboardModel) loadDetail(row DashboardRow) tea.Cmd {
 	}
 }
 
-func (m dashboardModel) loadTaskText(manifest *tasks.Manifest, task tasks.Task) tea.Cmd {
+func (m QueueDashboard) loadTaskText(manifest *tasks.Manifest, task tasks.Task) tea.Cmd {
 	return func() tea.Msg {
 		if manifest == nil {
 			return dashboardTaskTextMsg{taskID: task.ID, err: fmt.Errorf("manifest not loaded")}
@@ -2001,7 +2001,7 @@ func (m dashboardModel) loadTaskText(manifest *tasks.Manifest, task tasks.Task) 
 	}
 }
 
-func (m dashboardModel) loadBindWorktrees(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) loadBindWorktrees(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		entries, err := DashboardBindWorktreeEntries(m.d, m.cfg, row)
 		return dashboardBindListMsg{row: row, entries: entries, err: err}
@@ -2035,28 +2035,28 @@ func DashboardStatusDetailLines(d *Deps, row DashboardRow) ([]string, error) {
 	return lines, nil
 }
 
-func (m dashboardModel) loadBindRefs(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) loadBindRefs(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		refs, err := DashboardBindBaseRefs(m.d, m.cfg, row)
 		return dashboardBindRefsMsg{refs: refs, err: err}
 	}
 }
 
-func (m dashboardModel) adoptBindWorktree(row DashboardRow, checkoutPath string) tea.Cmd {
+func (m QueueDashboard) adoptBindWorktree(row DashboardRow, checkoutPath string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := DashboardAdoptWorktree(m.d, m.cfg, row, checkoutPath)
 		return dashboardBindMsg{err: err}
 	}
 }
 
-func (m dashboardModel) createBindWorktree(row DashboardRow, baseRef, name string) tea.Cmd {
+func (m QueueDashboard) createBindWorktree(row DashboardRow, baseRef, name string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := DashboardCreateWorktree(m.d, m.cfg, row, baseRef, name)
 		return dashboardBindMsg{err: err}
 	}
 }
 
-func (m dashboardModel) abandonWorktree(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) abandonWorktree(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		_, err := DashboardUnbindWorktree(m.d, m.cfg, row)
 		return dashboardAbandonMsg{err: err}
@@ -2637,7 +2637,7 @@ func dashboardCursorAfterReload(rows []DashboardRow, key string, previous int) i
 	return previous
 }
 
-func (m dashboardModel) View() tea.View {
+func (m QueueDashboard) View() tea.View {
 	if m.detail != nil {
 		content := m.viewDetail()
 		v := tea.NewView(content)
@@ -2738,7 +2738,7 @@ func countPhrase(n int, singular, plural string) string {
 }
 
 // viewDetail renders the full-screen task-set detail view.
-func (m dashboardModel) viewDetail() string {
+func (m QueueDashboard) viewDetail() string {
 	var b strings.Builder
 	d := m.detail
 	if d.peek != nil {
@@ -3219,7 +3219,7 @@ func padDashboardCell(s string, width int) string {
 
 // RunDashboard opens the read-only Queue dashboard TUI.
 func RunDashboard(d *Deps, cfg *config.Config) error {
-	m := newDashboardModel(d, cfg, DashboardSnapshot{})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{})
 	snap, err := BuildDashboard(d, cfg)
 	if err != nil {
 		return err

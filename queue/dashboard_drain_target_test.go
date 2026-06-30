@@ -213,12 +213,12 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 	row.repoKey = repoKey
 	row.cursorKey = "pop\x00" + setID
 
-	m := newDashboardModel(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	// Drain now lives behind the action menu: open with `a`, then `i`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatal("i did not return a command")
 	}
@@ -231,7 +231,7 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 		t.Fatalf("drain target list err = %v", listMsg.err)
 	}
 	updated, _ = got.Update(listMsg)
-	got = updated.(dashboardModel)
+	got = updated.(QueueDashboard)
 	if got.drainPick == nil {
 		t.Fatal("i on unbound set did not open the drain target picker")
 	}
@@ -258,10 +258,10 @@ func TestDashboardIKeyBoundDrainsWithoutPicker(t *testing.T) {
 		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "bound", Project: "pop", Provisioned: false},
 	})
 
-	m := newDashboardModel(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	// Drain now lives behind the action menu: open with `a`, then `i`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got := updated.(dashboardModel)
+	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
 	if cmd == nil {
 		t.Fatal("i did not return a command")
