@@ -143,13 +143,20 @@ func (m *MultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		height := msg.Height - 3 // reserve title (1) + blank (1) + hints (1)
-		if height < 3 {
-			height = 3
-		}
-		m.list.Resize(height)
+		m.list.Resize(m.frameSpec().BodyHeight(msg.Height))
 	}
 	return m, nil
+}
+
+// frameSpec builds the Frame describing MultiSelect's screen chrome: a
+// header (the title) and a static hint line, with no notice, input box, or
+// warnings.
+func (m *MultiSelect) frameSpec() Frame {
+	return Frame{
+		Width:  m.width,
+		Header: m.title,
+		Hints:  "  Space toggle · Enter confirm · Esc cancel",
+	}
 }
 
 // checkedIndices returns the indices of checked, unlocked rows in list order.
@@ -171,20 +178,7 @@ func (m *MultiSelect) View() tea.View {
 }
 
 func (m *MultiSelect) view() string {
-	var b strings.Builder
-
-	b.WriteString(headerStyle.Render(m.title))
-	b.WriteString("\n\n")
-
-	for _, line := range m.list.VisibleRows() {
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("  Space toggle · Enter confirm · Esc cancel"))
-
-	return b.String()
+	return m.frameSpec().Render(strings.Join(m.list.VisibleRows(), "\n"))
 }
 
 // Result returns the outcome after the program exits.
