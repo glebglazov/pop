@@ -459,16 +459,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		p.width = msg.Width
-		p.height = msg.Height - 4 // Reserve space for hints (1 line) + input box (3 lines)
-		if p.updateNotice != "" {
-			p.height-- // reserve the top line for the dimmed Update notice
-		}
-		if p.header != "" {
-			p.height-- // reserve the top line for the header caption
-		}
-		if p.height < 3 {
-			p.height = 3
-		}
+		p.height = p.frameSpec().BodyHeight(msg.Height)
 		p.list.Resize(p.height)
 		p.syncFromList()
 	}
@@ -547,6 +538,23 @@ func (p *Picker) filter() {
 // buildHints returns the hints string based on enabled features
 func (p *Picker) buildHints() string {
 	return "  Enter open · Esc quit · F1 help"
+}
+
+// frameSpec builds the Frame describing the picker's screen chrome: the
+// update notice, header, input box, warnings, and hints.
+func (p *Picker) frameSpec() Frame {
+	header := p.header
+	if header != "" {
+		header = "  " + header
+	}
+	return Frame{
+		Width:    p.width,
+		Notice:   p.updateNotice,
+		Header:   header,
+		InputBox: p.input.View(),
+		Warnings: p.warnings,
+		Hints:    p.buildHints(),
+	}
 }
 
 // formatKeyHint converts a key binding to a display-friendly hint format
@@ -750,37 +758,7 @@ func (p *Picker) viewHelp() string {
 }
 
 func (p *Picker) viewProject() string {
-	var b strings.Builder
-
-	if p.updateNotice != "" {
-		b.WriteString(renderUpdateNotice(p.width, p.updateNotice))
-		b.WriteString("\n")
-	}
-
-	if p.header != "" {
-		b.WriteString(headerStyle.Render("  " + p.header))
-		b.WriteString("\n")
-	}
-
-	for _, line := range p.list.VisibleRows() {
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-
-	writeInputBox(&b, p.width, p.input.View())
-
-	if len(p.warnings) > 0 {
-		warnStyle := lipgloss.NewStyle().Foreground(colorWorking)
-		for _, w := range p.warnings {
-			b.WriteString(warnStyle.Render("  ⚠ " + w))
-			b.WriteString("\n")
-		}
-	}
-
-	hints := p.buildHints()
-	b.WriteString(hintStyle.Render(hints))
-
-	return b.String()
+	return p.frameSpec().Render(strings.Join(p.list.VisibleRows(), "\n"))
 }
 
 // Result returns the picker result after running
