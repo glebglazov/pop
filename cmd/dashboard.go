@@ -101,7 +101,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	// Restore following mode from monitor state
-	var opts []ui.DashboardOption
+	var opts []ui.MonitorDashboardOption
 	state := loadMonitorStateAlways()
 	if state != nil && state.DashboardFollowing {
 		opts = append(opts, ui.WithFollowing(true))
@@ -110,13 +110,13 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	allWarnings = append(allWarnings, cfg.Warnings...)
 	allWarnings = append(allWarnings, systemWarnings...)
 	if len(allWarnings) > 0 {
-		opts = append(opts, ui.WithDashboardWarnings(allWarnings))
+		opts = append(opts, ui.WithMonitorDashboardWarnings(allWarnings))
 	}
 	// Gating the call (not just the badge) also prevents the background Update
 	// fetch when [updates] notice_enabled = false.
 	if cfg.UpdateNoticeEnabled() {
 		if notice := pickerUpdateNotice(); notice != "" {
-			opts = append(opts, ui.WithDashboardUpdateNotice(notice))
+			opts = append(opts, ui.WithMonitorDashboardUpdateNotice(notice))
 		}
 	}
 
@@ -131,18 +131,18 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		initialPaneID = ""
-		opts = append(opts, ui.WithDashboardPickerMode(cfg.GetQuickAccessModifier()))
+		opts = append(opts, ui.WithMonitorDashboardPickerMode(cfg.GetQuickAccessModifier()))
 	}
 	if initialPaneID != "" {
 		opts = append(opts, ui.WithInitialPaneID(initialPaneID))
 	}
-	result, err := ui.RunDashboard("dashboard", panes, attentionCallbacks(), buildPanes, opts...)
+	result, err := ui.RunMonitorDashboard("dashboard", panes, attentionCallbacks(), buildPanes, opts...)
 	if err != nil {
 		return err
 	}
 
 	if dashboardPick {
-		if result.Action == ui.DashboardActionConfirm && result.Selected != nil {
+		if result.Action == ui.MonitorDashboardActionConfirm && result.Selected != nil {
 			fmt.Println(result.Selected.PaneID)
 			return nil
 		}
@@ -153,15 +153,15 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	saveDashboardFollowing(result.Following)
 
 	switch result.Action {
-	case ui.DashboardActionConfirm:
+	case ui.MonitorDashboardActionConfirm:
 		if target := handleDashboardSwitch(result, true); target != "" {
 			return switchToDashboardTarget(cfg, target)
 		}
-	case ui.DashboardActionPeek:
+	case ui.MonitorDashboardActionPeek:
 		if target := handleDashboardSwitch(result, false); target != "" {
 			return switchToDashboardTarget(cfg, target)
 		}
-	case ui.DashboardActionCancel:
+	case ui.MonitorDashboardActionCancel:
 		os.Exit(1)
 	}
 
@@ -201,7 +201,7 @@ func sessionLocalDashboardPanes(panes []ui.AttentionPane, session, currentPaneID
 //   - false (peek / ActionSwitchToPaneKeepUnread): leave monitor state
 //     untouched so the pane remains unread in the dashboard even after
 //     the user glances at it.
-func handleDashboardSwitch(result ui.DashboardResult, dismissUnread bool) string {
+func handleDashboardSwitch(result ui.MonitorDashboardResult, dismissUnread bool) string {
 	if result.Selected == nil {
 		return ""
 	}

@@ -67,33 +67,33 @@ type AttentionCallbacks struct {
 	SetNote      func(paneID, note string)  // sets note on a pane
 }
 
-// DashboardAction represents what action the user wants to take in the dashboard
-type DashboardAction int
+// MonitorDashboardAction represents what action the user wants to take in the dashboard
+type MonitorDashboardAction int
 
 const (
-	DashboardActionCancel DashboardAction = iota
-	DashboardActionConfirm
-	DashboardActionPeek
-	DashboardActionRefresh
+	MonitorDashboardActionCancel MonitorDashboardAction = iota
+	MonitorDashboardActionConfirm
+	MonitorDashboardActionPeek
+	MonitorDashboardActionRefresh
 )
 
-// DashboardResult holds the dashboard result
-type DashboardResult struct {
+// MonitorDashboardResult holds the dashboard result
+type MonitorDashboardResult struct {
 	Selected    *AttentionPane
-	Action      DashboardAction
+	Action      MonitorDashboardAction
 	Following   bool
 	CursorIndex int
 }
 
-// Dashboard is a tea.Model for browsing monitored panes
-type Dashboard struct {
+// MonitorDashboard is a tea.Model for browsing monitored panes
+type MonitorDashboard struct {
 	panes    []AttentionPane
 	allPanes []AttentionPane // full list (source of truth)
 	cursor   int
 	scroll   int
 	width    int
 	height   int
-	result   DashboardResult
+	result   MonitorDashboardResult
 
 	following    bool
 	dirty        bool
@@ -128,57 +128,57 @@ type Dashboard struct {
 	quickAccessModifier string
 }
 
-// DashboardOption configures the dashboard
-type DashboardOption func(*Dashboard)
+// MonitorDashboardOption configures the dashboard
+type MonitorDashboardOption func(*MonitorDashboard)
 
 // WithFollowing sets the initial following mode for the dashboard.
-func WithFollowing(following bool) DashboardOption {
-	return func(d *Dashboard) {
+func WithFollowing(following bool) MonitorDashboardOption {
+	return func(d *MonitorDashboard) {
 		d.following = following
 	}
 }
 
 // WithInitialPaneID selects the initial dashboard cursor by pane ID.
-func WithInitialPaneID(paneID string) DashboardOption {
-	return func(d *Dashboard) {
+func WithInitialPaneID(paneID string) MonitorDashboardOption {
+	return func(d *MonitorDashboard) {
 		d.initialPaneID = paneID
 	}
 }
 
-// WithDashboardWarnings adds warning messages to display in the dashboard.
-func WithDashboardWarnings(warnings []string) DashboardOption {
-	return func(d *Dashboard) {
+// WithMonitorDashboardWarnings adds warning messages to display in the dashboard.
+func WithMonitorDashboardWarnings(warnings []string) MonitorDashboardOption {
+	return func(d *MonitorDashboard) {
 		d.warnings = warnings
 	}
 }
 
-// WithDashboardUpdateNotice sets the dimmed top-right Update notice text. Empty
+// WithMonitorDashboardUpdateNotice sets the dimmed top-right Update notice text. Empty
 // text shows nothing. The notice occupies a reserved top line so it never
 // shifts the pane list or preview.
-func WithDashboardUpdateNotice(text string) DashboardOption {
-	return func(d *Dashboard) {
+func WithMonitorDashboardUpdateNotice(text string) MonitorDashboardOption {
+	return func(d *MonitorDashboard) {
 		d.updateNotice = text
 	}
 }
 
 // WithEmptyNote sets a note line shown below the "No panes need attention" message.
-func WithEmptyNote(note string) DashboardOption {
-	return func(d *Dashboard) {
+func WithEmptyNote(note string) MonitorDashboardOption {
+	return func(d *MonitorDashboard) {
 		d.emptyNote = note
 	}
 }
 
-// WithDashboardPickerMode makes the dashboard a pure selection UI.
-func WithDashboardPickerMode(quickAccessModifier string) DashboardOption {
-	return func(d *Dashboard) {
+// WithMonitorDashboardPickerMode makes the dashboard a pure selection UI.
+func WithMonitorDashboardPickerMode(quickAccessModifier string) MonitorDashboardOption {
+	return func(d *MonitorDashboard) {
 		d.pickerMode = true
 		d.quickAccessModifier = quickAccessModifier
 	}
 }
 
-// NewDashboard creates a new dashboard with the given panes and callbacks
-func NewDashboard(panes []AttentionPane, cb AttentionCallbacks, reloadFn func() []AttentionPane, opts ...DashboardOption) *Dashboard {
-	d := &Dashboard{
+// NewMonitorDashboard creates a new dashboard with the given panes and callbacks
+func NewMonitorDashboard(panes []AttentionPane, cb AttentionCallbacks, reloadFn func() []AttentionPane, opts ...MonitorDashboardOption) *MonitorDashboard {
+	d := &MonitorDashboard{
 		allPanes:         panes,
 		panes:            make([]AttentionPane, len(panes)),
 		height:           10,
@@ -197,7 +197,7 @@ func NewDashboard(panes []AttentionPane, cb AttentionCallbacks, reloadFn func() 
 	return d
 }
 
-func (d *Dashboard) hasWorkingPanes() bool {
+func (d *MonitorDashboard) hasWorkingPanes() bool {
 	for _, pane := range d.panes {
 		if pane.Status == AttentionWorking {
 			return true
@@ -207,7 +207,7 @@ func (d *Dashboard) hasWorkingPanes() bool {
 }
 
 // Init implements tea.Model
-func (d *Dashboard) Init() tea.Cmd {
+func (d *MonitorDashboard) Init() tea.Cmd {
 	if len(d.panes) > 0 {
 		d.cursor = len(d.panes) - 1
 		if d.initialPaneID != "" {
@@ -231,7 +231,7 @@ func (d *Dashboard) Init() tea.Cmd {
 }
 
 // Update implements tea.Model
-func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg.(type) {
 	case spinnerTickMsg:
 		d.spinnerFrame = (d.spinnerFrame + 1) % len(spinnerFrames)
@@ -309,7 +309,7 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, dashboardKeys.Back):
 			if d.dirty {
-				d.result = DashboardResult{Action: DashboardActionRefresh}
+				d.result = MonitorDashboardResult{Action: MonitorDashboardActionRefresh}
 				return d, tea.Quit
 			}
 			return d, tea.Quit
@@ -317,24 +317,24 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, dashboardKeys.Quit):
 			if msg.Code == 0x1b { // esc
 				if d.dirty {
-					d.result = DashboardResult{Action: DashboardActionRefresh}
+					d.result = MonitorDashboardResult{Action: MonitorDashboardActionRefresh}
 					return d, tea.Quit
 				}
 				return d, tea.Quit
 			}
 			// ctrl+c — quit
-			d.result = DashboardResult{Action: DashboardActionCancel}
+			d.result = MonitorDashboardResult{Action: MonitorDashboardActionCancel}
 			return d, tea.Quit
 
 		case key.Matches(msg, dashboardKeys.Enter):
 			if len(d.panes) == 0 {
-				d.result = DashboardResult{Action: DashboardActionCancel}
+				d.result = MonitorDashboardResult{Action: MonitorDashboardActionCancel}
 				return d, tea.Quit
 			}
 			pane := d.panes[d.cursor]
-			d.result = DashboardResult{
+			d.result = MonitorDashboardResult{
 				Selected: &pane,
-				Action:   DashboardActionConfirm,
+				Action:   MonitorDashboardActionConfirm,
 			}
 			return d, tea.Quit
 
@@ -347,9 +347,9 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return d, nil
 			}
 			pane := d.panes[d.cursor]
-			d.result = DashboardResult{
+			d.result = MonitorDashboardResult{
 				Selected: &pane,
-				Action:   DashboardActionPeek,
+				Action:   MonitorDashboardActionPeek,
 			}
 			return d, tea.Quit
 
@@ -508,7 +508,7 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				d.panes = append(d.panes[:d.cursor], d.panes[d.cursor+1:]...)
 				if len(d.panes) == 0 {
-					d.result = DashboardResult{Action: DashboardActionCancel}
+					d.result = MonitorDashboardResult{Action: MonitorDashboardActionCancel}
 					return d, tea.Quit
 				}
 				if d.cursor >= len(d.panes) {
@@ -523,9 +523,9 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			targetIdx := d.cursor - d.quickAccessDigit(msg)
 			if targetIdx >= 0 && targetIdx < len(d.panes) {
 				pane := d.panes[targetIdx]
-				d.result = DashboardResult{
+				d.result = MonitorDashboardResult{
 					Selected: &pane,
-					Action:   DashboardActionConfirm,
+					Action:   MonitorDashboardActionConfirm,
 				}
 				return d, tea.Quit
 			}
@@ -547,15 +547,15 @@ func (d *Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return d, nil
 }
 
-func (d *Dashboard) quickAccessEnabled() bool {
+func (d *MonitorDashboard) quickAccessEnabled() bool {
 	return d.pickerMode && d.quickAccessModifier != "" && d.quickAccessModifier != "disabled"
 }
 
-func (d *Dashboard) isQuickAccessKey(msg tea.KeyPressMsg) bool {
+func (d *MonitorDashboard) isQuickAccessKey(msg tea.KeyPressMsg) bool {
 	return d.quickAccessDigit(msg) >= 1
 }
 
-func (d *Dashboard) quickAccessDigit(msg tea.KeyPressMsg) int {
+func (d *MonitorDashboard) quickAccessDigit(msg tea.KeyPressMsg) int {
 	if !d.quickAccessEnabled() || msg.Code < '1' || msg.Code > '9' {
 		return 0
 	}
@@ -573,7 +573,7 @@ func (d *Dashboard) quickAccessDigit(msg tea.KeyPressMsg) int {
 	return 0
 }
 
-func (d *Dashboard) quickAccessLabel(n int) string {
+func (d *MonitorDashboard) quickAccessLabel(n int) string {
 	switch d.quickAccessModifier {
 	case "ctrl":
 		return fmt.Sprintf("^%d", n)
@@ -586,7 +586,7 @@ func (d *Dashboard) quickAccessLabel(n int) string {
 
 // reloadPanes refreshes the pane list from the reload function,
 // preserving the cursor on the same pane when possible.
-func (d *Dashboard) reloadPanes() {
+func (d *MonitorDashboard) reloadPanes() {
 	if d.reloadFunc == nil {
 		return
 	}
@@ -621,7 +621,7 @@ func (d *Dashboard) reloadPanes() {
 
 // sortPanes performs a stable sort of panes by status group:
 // clear (top) → working (middle) → unread (bottom, closest to cursor).
-func (d *Dashboard) sortPanes() {
+func (d *MonitorDashboard) sortPanes() {
 	sort.SliceStable(d.allPanes, func(i, j int) bool {
 		return attentionStatusOrder(d.allPanes[i].Status) < attentionStatusOrder(d.allPanes[j].Status)
 	})
@@ -645,7 +645,7 @@ func attentionStatusOrder(s AttentionStatus) int {
 }
 
 // updateAllPanesStatus syncs a status change to the allPanes source-of-truth list.
-func (d *Dashboard) updateAllPanesStatus(paneID string, status AttentionStatus) {
+func (d *MonitorDashboard) updateAllPanesStatus(paneID string, status AttentionStatus) {
 	for i := range d.allPanes {
 		if d.allPanes[i].PaneID == paneID {
 			d.allPanes[i].Status = status
@@ -656,7 +656,7 @@ func (d *Dashboard) updateAllPanesStatus(paneID string, status AttentionStatus) 
 
 // protectSelectedPane anchors a row mutated in place until the user navigates
 // away. Reloads may continue to reorder the surrounding rows.
-func (d *Dashboard) protectSelectedPane() {
+func (d *MonitorDashboard) protectSelectedPane() {
 	if d.cursor < 0 || d.cursor >= len(d.panes) {
 		return
 	}
@@ -664,14 +664,14 @@ func (d *Dashboard) protectSelectedPane() {
 	d.protectedCursorIndex = d.cursor
 }
 
-func (d *Dashboard) clearProtectedPane() {
+func (d *MonitorDashboard) clearProtectedPane() {
 	d.protectedPaneID = ""
 	d.protectedCursorIndex = 0
 }
 
 // pinProtectedPane moves the protected pane back to its anchored row after a
 // sort or reload. It returns false when no protected pane remains visible.
-func (d *Dashboard) pinProtectedPane() bool {
+func (d *MonitorDashboard) pinProtectedPane() bool {
 	if d.protectedPaneID == "" {
 		return false
 	}
@@ -702,7 +702,7 @@ func (d *Dashboard) pinProtectedPane() bool {
 }
 
 // rebuildView filters allPanes into panes based on the current view mode.
-func (d *Dashboard) rebuildView() {
+func (d *MonitorDashboard) rebuildView() {
 	var selectedPaneID string
 	if d.cursor >= 0 && d.cursor < len(d.panes) {
 		selectedPaneID = d.panes[d.cursor].PaneID
@@ -750,7 +750,7 @@ func (d *Dashboard) rebuildView() {
 }
 
 // fetchPreview calls the preview function for the currently selected pane.
-func (d *Dashboard) fetchPreview() {
+func (d *MonitorDashboard) fetchPreview() {
 	if d.previewFunc == nil || len(d.panes) == 0 {
 		d.preview = ""
 		return
@@ -759,7 +759,7 @@ func (d *Dashboard) fetchPreview() {
 }
 
 // adjustAttentionScroll ensures the attention cursor is visible.
-func (d *Dashboard) adjustScroll() {
+func (d *MonitorDashboard) adjustScroll() {
 	listHeight := d.height + 2
 	if listHeight <= 0 {
 		listHeight = 1
@@ -780,7 +780,7 @@ func (d *Dashboard) adjustScroll() {
 }
 
 // View implements tea.Model
-func (d *Dashboard) View() tea.View {
+func (d *MonitorDashboard) View() tea.View {
 	var content string
 	if d.showHelp {
 		content = d.viewHelp()
@@ -793,7 +793,7 @@ func (d *Dashboard) View() tea.View {
 	return v
 }
 
-func (d *Dashboard) viewHelp() string {
+func (d *MonitorDashboard) viewHelp() string {
 	var b strings.Builder
 
 	type helpEntry struct {
@@ -843,7 +843,7 @@ func (d *Dashboard) viewHelp() string {
 	return b.String()
 }
 
-func (d *Dashboard) viewDashboard() string {
+func (d *MonitorDashboard) viewDashboard() string {
 	var b strings.Builder
 
 	// Dimmed Update notice on a reserved top line, anchored top-right. The line
@@ -1100,15 +1100,15 @@ func (d *Dashboard) viewDashboard() string {
 }
 
 // Result returns the dashboard result after running
-func (d *Dashboard) Result() DashboardResult {
+func (d *MonitorDashboard) Result() MonitorDashboardResult {
 	d.result.CursorIndex = d.cursor
 	d.result.Following = d.following
 	return d.result
 }
 
-// RunDashboard starts the dashboard and returns the result
-func RunDashboard(title string, panes []AttentionPane, cb AttentionCallbacks, reloadFn func() []AttentionPane, opts ...DashboardOption) (DashboardResult, error) {
-	d := NewDashboard(panes, cb, reloadFn, opts...)
+// RunMonitorDashboard starts the dashboard and returns the result
+func RunMonitorDashboard(title string, panes []AttentionPane, cb AttentionCallbacks, reloadFn func() []AttentionPane, opts ...MonitorDashboardOption) (MonitorDashboardResult, error) {
+	d := NewMonitorDashboard(panes, cb, reloadFn, opts...)
 	d.title = title
 	if d.following {
 		d.rebuildView()
@@ -1129,9 +1129,9 @@ func RunDashboard(title string, panes []AttentionPane, cb AttentionCallbacks, re
 	program := tea.NewProgram(d)
 	m, err := program.Run()
 	if err != nil {
-		return DashboardResult{Action: DashboardActionCancel}, err
+		return MonitorDashboardResult{Action: MonitorDashboardActionCancel}, err
 	}
-	return m.(*Dashboard).Result(), nil
+	return m.(*MonitorDashboard).Result(), nil
 }
 
 // dashboardKeys holds key bindings for the dashboard

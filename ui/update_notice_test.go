@@ -54,7 +54,7 @@ func TestDashboardViewRendersUpdateNotice(t *testing.T) {
 	panes := []AttentionPane{
 		{PaneID: "%1", Session: "proj", Name: "proj (%1)", Status: AttentionUnread},
 	}
-	d := NewDashboard(panes, AttentionCallbacks{}, nil, WithDashboardUpdateNotice("update available: 2026.6.1"))
+	d := NewMonitorDashboard(panes, AttentionCallbacks{}, nil, WithMonitorDashboardUpdateNotice("update available: 2026.6.1"))
 	d.width = 80
 	d.height = 12
 
@@ -68,7 +68,7 @@ func TestDashboardViewRendersUpdateNotice(t *testing.T) {
 }
 
 func TestDashboardEmptyViewRendersUpdateNotice(t *testing.T) {
-	d := NewDashboard(nil, AttentionCallbacks{}, nil, WithDashboardUpdateNotice("update available: 2026.6.1"))
+	d := NewMonitorDashboard(nil, AttentionCallbacks{}, nil, WithMonitorDashboardUpdateNotice("update available: 2026.6.1"))
 	d.width = 80
 	d.height = 12
 
