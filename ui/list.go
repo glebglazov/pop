@@ -55,6 +55,11 @@ func (l *List[T]) Cursor() int {
 	return l.cursor
 }
 
+// Scroll returns the scroll offset (index of the first visible item).
+func (l *List[T]) Scroll() int {
+	return l.scroll
+}
+
 // SetCursor moves the cursor to index i, clamped to bounds.
 func (l *List[T]) SetCursor(i int) {
 	if len(l.items) == 0 {
@@ -143,6 +148,14 @@ func (l *List[T]) Selected() (T, bool) {
 		return zero, false
 	}
 	return l.items[l.cursor], true
+}
+
+// SetItems swaps the item slice and reclamps the cursor without re-anchoring
+// by Key. Callers that need identity restore use SetCursorToKey afterward.
+func (l *List[T]) SetItems(items []T) {
+	l.items = items
+	l.clampCursor()
+	l.adjustScroll()
 }
 
 // ReplaceItems swaps the item slice, re-anchoring the cursor by Key when

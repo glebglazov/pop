@@ -108,6 +108,34 @@ func truncateToWidth(s string, width int) string {
 	return string(r[:width])
 }
 
+// truncateString truncates s to maxWidth visible characters, respecting ANSI escapes.
+func truncateString(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	visibleWidth := 0
+	inEscape := false
+	lastSafe := 0
+	for i, r := range s {
+		if inEscape {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEscape = false
+			}
+			continue
+		}
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if visibleWidth >= maxWidth {
+			return s[:lastSafe]
+		}
+		visibleWidth++
+		lastSafe = i + len(string(r))
+	}
+	return s
+}
+
 // adjustScroll ensures cursor is visible by adjusting scroll offset.
 // margin is the number of extra lines to keep above the cursor (0 for no margin).
 func adjustScroll(cursor, scroll, height, itemCount, margin int) (newScroll int) {

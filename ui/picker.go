@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
@@ -65,8 +64,9 @@ type Picker struct {
 	items    []Item
 	filtered []Item
 	input    textinput.Model
-	cursor   int
-	scroll   int // scroll offset (index of first visible item)
+	list     *List[Item]
+	cursor   int // synced from list; kept for test access
+	scroll   int // synced from list; kept for test access
 	height   int
 	width    int
 	result   Result
@@ -79,39 +79,24 @@ type Picker struct {
 	showOpenWindow  bool
 	cursorAtEnd     bool
 
-	// Quick access: modifier+digit to select items above cursor
-	quickAccessModifier string // "alt" (default), "ctrl", or "disabled"
+	quickAccessModifier string
+	quickAccess         *QuickAccess
 
-	// Cursor memory: remembers selected item per filter query
-	cursorMemory map[string]cursorState // filter query -> cursor state
-	lastQuery    string                 // previous filter query (to detect changes)
+	// Cursor memory: remembers selected item path per filter query
+	cursorMemory map[string]string
+	lastQuery    string
 
-	// Custom commands
 	customCommands []UserDefinedKeyBinding
-
-	// Icon legend entries for help view
-	iconLegend []iconLegendEntry
-
-	// Initial cursor index override (-1 = not set)
+	iconLegend     []iconLegendEntry
 	initialCursorIdx int
-
-	// Warnings to display in the picker
-	warnings []string
-
-	// updateNotice is the dimmed top-right Update notice text (empty = none).
-	updateNotice string
+	warnings         []string
+	updateNotice     string
 }
 
 // iconLegendEntry maps an icon to its description in the help view
 type iconLegendEntry struct {
 	icon string
 	desc string
-}
-
-// cursorState stores cursor position info for a filter query
-type cursorState struct {
-	path      string // selected item's path
-	screenPos int    // cursor position relative to visible area (0 = top of visible)
 }
 
 // UserDefinedKeyBinding holds a custom key binding and its associated command
@@ -249,7 +234,7 @@ func NewPicker(items []Item, opts ...PickerOption) *Picker {
 		filtered:         items,
 		input:            ti,
 		height:           10,
-		cursorMemory:     make(map[string]cursorState),
+		cursorMemory:     make(map[string]string),
 		initialCursorIdx: -1,
 	}
 
@@ -257,23 +242,63 @@ func NewPicker(items []Item, opts ...PickerOption) *Picker {
 		opt(p)
 	}
 
+	p.quickAccess = p.newQuickAccess()
+	scrollMargin := 0
+	if p.quickAccess.Enabled() {
+		scrollMargin = 9
+	}
+
+	p.list = NewList(items, Opts[Item]{
+		Key:          func(it Item) string { return it.Path },
+		Wrap:         true,
+		Anchor:       AnchorBottom,
+		ScrollMargin: scrollMargin,
+		QuickLabel:   p.quickAccess.LabelFunc(),
+	})
+	p.list.opts.Cell = p.pickerCell
+
 	return p
+}
+
+func (p *Picker) newQuickAccess() *QuickAccess {
+	modifier := p.quickAccessModifier
+	if modifier == "" {
+		modifier = "disabled"
+	}
+	return NewQuickAccess(modifier)
+}
+
+func (p *Picker) syncFromList() {
+	p.cursor = p.list.Cursor()
+	p.scroll = p.list.Scroll()
+}
+
+func (p *Picker) syncToList() {
+	if p.cursor != p.list.Cursor() {
+		p.list.SetCursor(p.cursor)
+	}
+}
+
+func (p *Picker) selectedItem() (*Item, bool) {
+	item, ok := p.list.Selected()
+	if !ok {
+		return nil, false
+	}
+	return &item, true
 }
 
 func (p *Picker) Init() tea.Cmd {
 	if p.initialCursorIdx >= 0 && len(p.filtered) > 0 {
-		p.cursor = p.initialCursorIdx
-		if p.cursor >= len(p.filtered) {
-			p.cursor = len(p.filtered) - 1
-		}
+		p.list.SetCursor(p.initialCursorIdx)
 	} else if p.cursorAtEnd && len(p.filtered) > 0 {
-		p.cursor = len(p.filtered) - 1
+		p.list.SetCursor(len(p.filtered) - 1)
 	}
-	p.adjustScroll()
+	p.syncFromList()
 	return nil
 }
 
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	p.syncToList()
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -297,62 +322,32 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, tea.Quit
 
 		case key.Matches(msg, keys.Enter):
-			if len(p.filtered) > 0 {
+			if item, ok := p.selectedItem(); ok {
 				p.result = Result{
-					Selected: &p.filtered[p.cursor],
+					Selected: item,
 					Action:   ActionConfirm,
 				}
 			}
 			return p, tea.Quit
 
 		case key.Matches(msg, keys.Up):
-			if len(p.filtered) > 0 {
-				if p.cursor > 0 {
-					p.cursor--
-				} else {
-					p.cursor = len(p.filtered) - 1 // wrap to bottom
-				}
-				p.adjustScroll()
-			}
+			p.list.MoveUp()
+			p.syncFromList()
 			return p, nil
 
 		case key.Matches(msg, keys.Down):
-			if len(p.filtered) > 0 {
-				if p.cursor < len(p.filtered)-1 {
-					p.cursor++
-				} else {
-					p.cursor = 0 // wrap to top
-				}
-				p.adjustScroll()
-			}
+			p.list.MoveDown()
+			p.syncFromList()
 			return p, nil
 
 		case key.Matches(msg, keys.HalfPageUp):
-			if len(p.filtered) > 0 {
-				page := p.height
-				if page < 1 {
-					page = 1
-				}
-				p.cursor -= page
-				if p.cursor < 0 {
-					p.cursor = 0
-				}
-				p.adjustScroll()
-			}
+			p.list.HalfPageUp()
+			p.syncFromList()
 			return p, nil
 
 		case key.Matches(msg, keys.HalfPageDown):
-			if len(p.filtered) > 0 {
-				page := p.height
-				if page < 1 {
-					page = 1
-				}
-				p.cursor += page
-				if p.cursor >= len(p.filtered) {
-					p.cursor = len(p.filtered) - 1
-				}
-				p.adjustScroll()
-			}
+			p.list.HalfPageDown()
+			p.syncFromList()
 			return p, nil
 
 		case p.matchUserDefinedCommand(msg) != nil:
@@ -364,60 +359,70 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Exit:    cc.Exit,
 				},
 			}
-			if len(p.filtered) > 0 {
-				p.result.Selected = &p.filtered[p.cursor]
+			if item, ok := p.selectedItem(); ok {
+				p.result.Selected = item
 			}
 			return p, tea.Quit
 
 		case key.Matches(msg, keys.Delete):
-			if p.showDelete && len(p.filtered) > 0 {
-				p.result = Result{
-					Selected: &p.filtered[p.cursor],
-					Action:   ActionDelete,
+			if p.showDelete {
+				if item, ok := p.selectedItem(); ok {
+					p.result = Result{
+						Selected: item,
+						Action:   ActionDelete,
+					}
+					return p, tea.Quit
 				}
-				return p, tea.Quit
 			}
 
 		case key.Matches(msg, keys.ForceDelete):
-			if p.showDelete && len(p.filtered) > 0 {
-				p.result = Result{
-					Selected: &p.filtered[p.cursor],
-					Action:   ActionForceDelete,
+			if p.showDelete {
+				if item, ok := p.selectedItem(); ok {
+					p.result = Result{
+						Selected: item,
+						Action:   ActionForceDelete,
+					}
+					return p, tea.Quit
 				}
-				return p, tea.Quit
 			}
 
 		case key.Matches(msg, keys.KillSession):
-			if p.showKillSession && len(p.filtered) > 0 {
-				p.result = Result{
-					Selected: &p.filtered[p.cursor],
-					Action:   ActionKillSession,
+			if p.showKillSession {
+				if item, ok := p.selectedItem(); ok {
+					p.result = Result{
+						Selected: item,
+						Action:   ActionKillSession,
+					}
+					return p, tea.Quit
 				}
-				return p, tea.Quit
 			}
 
 		case key.Matches(msg, keys.Reset):
-			if p.showReset && len(p.filtered) > 0 {
-				p.result = Result{
-					Selected: &p.filtered[p.cursor],
-					Action:   ActionReset,
+			if p.showReset {
+				if item, ok := p.selectedItem(); ok {
+					p.result = Result{
+						Selected: item,
+						Action:   ActionReset,
+					}
+					return p, tea.Quit
 				}
-				return p, tea.Quit
 			}
 
 		case key.Matches(msg, keys.OpenWindow):
-			if p.showOpenWindow && len(p.filtered) > 0 {
-				p.result = Result{
-					Selected: &p.filtered[p.cursor],
-					Action:   ActionOpenWindow,
+			if p.showOpenWindow {
+				if item, ok := p.selectedItem(); ok {
+					p.result = Result{
+						Selected: item,
+						Action:   ActionOpenWindow,
+					}
+					return p, tea.Quit
 				}
-				return p, tea.Quit
 			}
 
 		case key.Matches(msg, keys.YankPath):
-			if len(p.filtered) > 0 {
+			if item, ok := p.selectedItem(); ok {
 				p.result = Result{
-					Selected: &p.filtered[p.cursor],
+					Selected: item,
 					Action:   ActionYankPath,
 				}
 				return p, tea.Quit
@@ -430,7 +435,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case p.isQuickAccessKey(msg):
 			n := p.quickAccessDigit(msg)
-			targetIdx := p.cursor - n
+			targetIdx := p.list.Cursor() - n
 			if targetIdx >= 0 && targetIdx < len(p.filtered) {
 				p.result = Result{
 					Selected: &p.filtered[targetIdx],
@@ -451,6 +456,8 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if p.height < 3 {
 			p.height = 3
 		}
+		p.list.Resize(p.height)
+		p.syncFromList()
 	}
 
 	// Update text input
@@ -473,21 +480,17 @@ func (p *Picker) filter() {
 	query := p.input.Value()
 	queryChanged := query != p.lastQuery
 
-	// Save current selection and screen position before changing filter
+	// Save current selection before changing filter
 	if queryChanged && len(p.filtered) > 0 && p.cursor < len(p.filtered) {
-		state := cursorState{
-			path:      p.filtered[p.cursor].Path,
-			screenPos: p.cursor - p.scroll,
-		}
-		p.cursorMemory[p.lastQuery] = state
-		debug.Log("filter: query %q -> %q, saving cursor for %q: path=%q screenPos=%d", p.lastQuery, query, p.lastQuery, state.path, state.screenPos)
+		path := p.filtered[p.cursor].Path
+		p.cursorMemory[p.lastQuery] = path
+		debug.Log("filter: query %q -> %q, saving cursor for %q: path=%q", p.lastQuery, query, p.lastQuery, path)
 	}
 
 	// Build filtered list
 	if query == "" {
 		p.filtered = p.items
 	} else {
-		// Use fzf's algorithm for fuzzy matching
 		pattern := []rune(strings.ToLower(query))
 		slab := util.MakeSlab(100*1024, 2048)
 
@@ -510,45 +513,22 @@ func (p *Picker) filter() {
 		}
 	}
 
-	// Position cursor and scroll
+	p.list.SetItems(p.filtered)
+
 	if queryChanged {
-		if state, ok := p.cursorMemory[query]; ok {
-			// Restore cursor to remembered item for this query
-			idx := p.findItemIndex(state.path)
-			debug.Log("filter: restoring cursor for %q: path=%q idx=%d screenPos=%d", query, state.path, idx, state.screenPos)
-			p.cursor = idx
-			// Restore relative screen position
-			p.scroll = p.cursor - state.screenPos
-		} else {
-			// First time seeing this query: cursor at best match (bottom)
-			p.cursor = len(p.filtered) - 1
-			p.scroll = 0 // will be adjusted below
-			debug.Log("filter: first time query %q, cursor at bottom (%d), %d items", query, p.cursor, len(p.filtered))
+		if path, ok := p.cursorMemory[query]; ok {
+			debug.Log("filter: restoring cursor for %q: path=%q", query, path)
+			if !p.list.SetCursorToKey(path) {
+				p.list.SetCursor(len(p.filtered) - 1)
+			}
+		} else if len(p.filtered) > 0 {
+			p.list.SetCursor(len(p.filtered) - 1)
+			debug.Log("filter: first time query %q, cursor at bottom (%d), %d items", query, p.list.Cursor(), len(p.filtered))
 		}
 	}
 
 	p.lastQuery = query
-
-	// Ensure cursor is in bounds
-	if p.cursor >= len(p.filtered) {
-		p.cursor = len(p.filtered) - 1
-	}
-	if p.cursor < 0 {
-		p.cursor = 0
-	}
-
-	p.adjustScroll()
-}
-
-// findItemIndex returns the index of the item with the given path, or -1 if not found
-func (p *Picker) findItemIndex(path string) int {
-	for i, item := range p.filtered {
-		if item.Path == path {
-			return i
-		}
-	}
-	debug.Log("findItemIndex: path %q not found in %d filtered items", path, len(p.filtered))
-	return -1
+	p.syncFromList()
 }
 
 // buildHints returns the hints string based on enabled features
@@ -563,7 +543,6 @@ func formatKeyHint(b key.Binding) string {
 		return ""
 	}
 	k := keys[0]
-	// Convert common key formats to hint format
 	k = strings.ReplaceAll(k, "ctrl+", "C-")
 	k = strings.ReplaceAll(k, "ctrl-", "C-")
 	k = strings.ReplaceAll(k, "alt+", "A-")
@@ -596,62 +575,65 @@ func (p *Picker) isKeyOverridden(builtinKeys ...string) bool {
 	return false
 }
 
-// isQuickAccessKey returns true if the key message is a quick access trigger
-func (p *Picker) isQuickAccessKey(msg tea.KeyPressMsg) bool {
-	return p.quickAccessDigit(msg) >= 1
+func pickerKeyPress(msg tea.KeyPressMsg) KeyPress {
+	return KeyPress{
+		Code: msg.Code,
+		Alt:  msg.Mod.Contains(tea.ModAlt),
+		Ctrl: msg.Mod.Contains(tea.ModCtrl),
+	}
 }
 
-// quickAccessDigit extracts the digit (1-9) from a quick access key message.
-// Returns 0 if the key is not a valid quick access trigger.
+func (p *Picker) isQuickAccessKey(msg tea.KeyPressMsg) bool {
+	return p.quickAccess.Digit(pickerKeyPress(msg)) >= 1
+}
+
 func (p *Picker) quickAccessDigit(msg tea.KeyPressMsg) int {
-	if msg.Code < '1' || msg.Code > '9' {
+	return p.quickAccess.Digit(pickerKeyPress(msg))
+}
+
+func (p *Picker) pickerHasIcons() bool {
+	for j := range p.items {
+		if p.items[j].Icon != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Picker) pickerMaxContextLen() int {
+	if !p.showContext {
 		return 0
 	}
-	digit := int(msg.Code - '0')
-	switch p.quickAccessModifier {
-	case "alt":
-		if msg.Mod.Contains(tea.ModAlt) {
-			return digit
-		}
-	case "ctrl":
-		if msg.Mod.Contains(tea.ModCtrl) {
-			return digit
+	maxContextLen := 0
+	for _, item := range p.filtered {
+		if len(item.Context) > maxContextLen {
+			maxContextLen = len(item.Context)
 		}
 	}
-	return 0
+	return maxContextLen
 }
 
-// quickAccessLabel returns the display label for a quick access number (e.g., "^1", "⌥2")
-func (p *Picker) quickAccessLabel(n int) string {
-	switch p.quickAccessModifier {
-	case "ctrl":
-		return fmt.Sprintf("^%d", n)
-	case "alt":
-		return fmt.Sprintf("⌥%d", n)
-	default:
-		return "  "
+func (p *Picker) pickerCell(item Item, _ RowState) string {
+	maxContextLen := p.pickerMaxContextLen()
+	hasIcons := p.pickerHasIcons()
+
+	var line string
+	if p.showContext && item.Context != "" {
+		contextPadding := maxContextLen - len(item.Context)
+		line = " [" + item.Context + "]" + strings.Repeat(" ", contextPadding) + " " + item.Name
+	} else {
+		line = " " + item.Name
 	}
-}
 
-// quickAccessPadding returns the blank padding matching quickAccessLabel width
-func (p *Picker) quickAccessPadding() string {
-	if p.quickAccessEnabled() {
-		return "  "
+	if hasIcons {
+		if item.Icon != "" {
+			line = " " + item.Icon + line
+		} else {
+			line = "  " + line
+		}
 	}
-	return " "
-}
 
-// quickAccessEnabled returns true if quick access is active (not disabled or empty)
-func (p *Picker) quickAccessEnabled() bool {
-	return p.quickAccessModifier != "" && p.quickAccessModifier != "disabled"
-}
-
-func (p *Picker) adjustScroll() {
-	margin := 0
-	if p.quickAccessEnabled() {
-		margin = 9
-	}
-	p.scroll = adjustScroll(p.cursor, p.scroll, p.height, len(p.filtered), margin)
+	return line
 }
 
 func (p *Picker) View() tea.View {
@@ -710,7 +692,6 @@ func (p *Picker) viewHelp() string {
 		entries = append(entries, helpEntry{formatKeyHint(cc.Binding), cc.Label})
 	}
 
-	// Icon legend: show entries for icons present in the item list
 	iconsSeen := make(map[string]bool)
 	for _, item := range p.items {
 		if item.Icon != "" {
@@ -718,7 +699,7 @@ func (p *Picker) viewHelp() string {
 		}
 	}
 	if len(iconsSeen) > 0 {
-		entries = append(entries, helpEntry{"", ""}) // blank separator
+		entries = append(entries, helpEntry{"", ""})
 		for _, legend := range p.iconLegend {
 			if iconsSeen[legend.icon] {
 				entries = append(entries, helpEntry{legend.icon, legend.desc})
@@ -726,7 +707,6 @@ func (p *Picker) viewHelp() string {
 		}
 	}
 
-	// Find max key display width for alignment
 	maxKeyWidth := 0
 	for _, e := range entries {
 		if w := lipgloss.Width(e.key); w > maxKeyWidth {
@@ -734,14 +714,12 @@ func (p *Picker) viewHelp() string {
 		}
 	}
 
-	// Build help lines
 	var helpLines []string
 	for _, e := range entries {
 		padding := maxKeyWidth - lipgloss.Width(e.key)
 		helpLines = append(helpLines, "  "+e.key+strings.Repeat(" ", padding)+"   "+e.desc)
 	}
 
-	// Push content to bottom
 	emptyLines := p.height - len(helpLines)
 	for i := 0; i < emptyLines; i++ {
 		b.WriteString("\n")
@@ -753,128 +731,26 @@ func (p *Picker) viewHelp() string {
 	}
 
 	writeInputBox(&b, p.width, " Help")
-
-	// Hints line
 	b.WriteString(hintStyle.Render("  Esc back"))
 
 	return b.String()
 }
 
-func truncateString(s string, maxWidth int) string {
-	if maxWidth <= 0 {
-		return ""
-	}
-	visibleWidth := 0
-	inEscape := false
-	lastSafe := 0
-	for i, r := range s {
-		if inEscape {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				inEscape = false
-			}
-			continue
-		}
-		if r == '\x1b' {
-			inEscape = true
-			continue
-		}
-		if visibleWidth >= maxWidth {
-			return s[:lastSafe]
-		}
-		visibleWidth++
-		lastSafe = i + len(string(r))
-	}
-	return s
-}
-
 func (p *Picker) viewProject() string {
 	var b strings.Builder
 
-	// Dimmed Update notice on a reserved top line, anchored top-right. The line
-	// is accounted for in p.height (see WindowSizeMsg), so it never shifts the
-	// list, input box, or hints.
 	if p.updateNotice != "" {
 		b.WriteString(renderUpdateNotice(p.width, p.updateNotice))
 		b.WriteString("\n")
 	}
 
-	// Items
-	visible := p.height
-	if visible > len(p.filtered) {
-		visible = len(p.filtered)
-	}
-
-	// Use stored scroll offset
-	start := p.scroll
-
-	// Add empty lines to push content to bottom
-	emptyLines := p.height - visible
-	for i := 0; i < emptyLines; i++ {
-		b.WriteString("\n")
-	}
-
-	// Calculate max context length for alignment (only if showing context)
-	maxContextLen := 0
-	if p.showContext {
-		for i := start; i < start+visible && i < len(p.filtered); i++ {
-			if len(p.filtered[i].Context) > maxContextLen {
-				maxContextLen = len(p.filtered[i].Context)
-			}
-		}
-	}
-
-	// Check if any item has an icon (not just visible ones, to keep stable layout)
-	hasIcons := false
-	for j := range p.items {
-		if p.items[j].Icon != "" {
-			hasIcons = true
-			break
-		}
-	}
-
-	for i := start; i < start+visible && i < len(p.filtered); i++ {
-		item := p.filtered[i]
-
-		// Build display line with optional context
-		var line string
-		if p.showContext && item.Context != "" {
-			contextPadding := maxContextLen - len(item.Context)
-			line = " [" + item.Context + "]" + strings.Repeat(" ", contextPadding) + " " + item.Name
-		} else {
-			line = " " + item.Name
-		}
-
-		// Prepend icon column when any item has an icon
-		if hasIcons {
-			if item.Icon != "" {
-				line = " " + item.Icon + line
-			} else {
-				line = "  " + line
-			}
-		}
-
-		prefixWidth := len(p.quickAccessPadding())
-		distFromCursor := p.cursor - i
-		hasNumber := p.quickAccessEnabled() && distFromCursor >= 1 && distFromCursor <= 9
-
-		if i == p.cursor {
-			b.WriteString(strings.Repeat(" ", prefixWidth-1))
-			b.WriteString(indicatorStyle.Render("█"))
-			b.WriteString(line)
-		} else {
-			if hasNumber {
-				b.WriteString(dimStyle.Render(p.quickAccessLabel(distFromCursor)))
-			} else {
-				b.WriteString(p.quickAccessPadding())
-			}
-			b.WriteString(line)
-		}
+	for _, line := range p.list.VisibleRows() {
+		b.WriteString(line)
 		b.WriteString("\n")
 	}
 
 	writeInputBox(&b, p.width, p.input.View())
 
-	// Warnings
 	if len(p.warnings) > 0 {
 		warnStyle := lipgloss.NewStyle().Foreground(colorWorking)
 		for _, w := range p.warnings {
@@ -883,7 +759,6 @@ func (p *Picker) viewProject() string {
 		}
 	}
 
-	// Hints line
 	hints := p.buildHints()
 	b.WriteString(hintStyle.Render(hints))
 
@@ -892,7 +767,7 @@ func (p *Picker) viewProject() string {
 
 // Result returns the picker result after running
 func (p *Picker) Result() Result {
-	p.result.CursorIndex = p.cursor
+	p.result.CursorIndex = p.list.Cursor()
 	return p.result
 }
 
