@@ -24,6 +24,12 @@ type MultiSelectResult struct {
 	Checked []int
 }
 
+// msRow pairs a MultiSelectItem with its original index for checkbox state.
+type msRow struct {
+	item  MultiSelectItem
+	index int
+}
+
 // MultiSelect is a checkbox list: rows can be toggled on and off, with some
 // rows locked (a status indicator, not a removable selection). Unlike the
 // fuzzy Picker it returns many selections at once and has no filter input.
@@ -31,23 +37,50 @@ type MultiSelect struct {
 	title   string
 	items   []MultiSelectItem
 	checked []bool
+	list    *List[msRow]
 	cursor  int
-	scroll  int
-	height  int
 	width   int
 	result  MultiSelectResult
 }
 
 var multiSelectToggle = key.NewBinding(key.WithKeys("space"))
 
+func multiSelectCell(m *MultiSelect) func(msRow, RowState) string {
+	return func(row msRow, _ RowState) string {
+		it := row.item
+		i := row.index
+
+		var box string
+		if it.Locked {
+			mark := it.LockedMark
+			if mark == "" {
+				mark = " "
+			}
+			box = dimStyle.Render(mark)
+		} else if m.checked[i] {
+			box = "[x]"
+		} else {
+			box = "[ ]"
+		}
+
+		line := box + " " + it.Label
+		if it.Locked {
+			line = box + " " + dimStyle.Render(it.Label)
+		}
+		return line
+	}
+}
+
 // NewMultiSelect builds a multi-select over the given rows. The cursor starts
 // on the first unlocked row (or the first row if all are locked), and each
 // unlocked row's initial checkbox state comes from its Checked field.
 func NewMultiSelect(title string, items []MultiSelectItem) *MultiSelect {
 	checked := make([]bool, len(items))
+	rows := make([]msRow, len(items))
 	cursor := 0
 	cursorSet := false
 	for i, it := range items {
+		rows[i] = msRow{item: it, index: i}
 		if !it.Locked {
 			checked[i] = it.Checked
 			if !cursorSet {
@@ -56,17 +89,26 @@ func NewMultiSelect(title string, items []MultiSelectItem) *MultiSelect {
 			}
 		}
 	}
-	return &MultiSelect{
+
+	m := &MultiSelect{
 		title:   title,
 		items:   items,
 		checked: checked,
-		cursor:  cursor,
-		height:  10,
+		list: NewList(rows, Opts[msRow]{
+			Key:          func(r msRow) string { return r.item.Label },
+			Cell:         nil, // set below after m exists
+			Wrap:         true,
+			Anchor:       AnchorTop,
+			ScrollMargin: 0,
+		}),
+		cursor: cursor,
 	}
+	m.list.opts.Cell = multiSelectCell(m)
+	m.list.SetCursor(cursor)
+	return m
 }
 
 func (m *MultiSelect) Init() tea.Cmd {
-	m.adjustScroll()
 	return nil
 }
 
@@ -89,35 +131,23 @@ func (m *MultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, keys.Up):
-			if len(m.items) > 0 {
-				if m.cursor > 0 {
-					m.cursor--
-				} else {
-					m.cursor = len(m.items) - 1
-				}
-				m.adjustScroll()
-			}
+			m.list.MoveUp()
+			m.cursor = m.list.Cursor()
 			return m, nil
 
 		case key.Matches(msg, keys.Down):
-			if len(m.items) > 0 {
-				if m.cursor < len(m.items)-1 {
-					m.cursor++
-				} else {
-					m.cursor = 0
-				}
-				m.adjustScroll()
-			}
+			m.list.MoveDown()
+			m.cursor = m.list.Cursor()
 			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		m.height = msg.Height - 3 // reserve title (1) + blank (1) + hints (1)
-		if m.height < 3 {
-			m.height = 3
+		height := msg.Height - 3 // reserve title (1) + blank (1) + hints (1)
+		if height < 3 {
+			height = 3
 		}
-		m.adjustScroll()
+		m.list.Resize(height)
 	}
 	return m, nil
 }
@@ -133,10 +163,6 @@ func (m *MultiSelect) checkedIndices() []int {
 	return out
 }
 
-func (m *MultiSelect) adjustScroll() {
-	m.scroll = adjustScroll(m.cursor, m.scroll, m.height, len(m.items), 0)
-}
-
 func (m *MultiSelect) View() tea.View {
 	v := tea.NewView(m.view())
 	v.AltScreen = true
@@ -150,36 +176,8 @@ func (m *MultiSelect) view() string {
 	b.WriteString(headerStyle.Render(m.title))
 	b.WriteString("\n\n")
 
-	visible := m.height
-	if visible > len(m.items) {
-		visible = len(m.items)
-	}
-	for i := m.scroll; i < m.scroll+visible && i < len(m.items); i++ {
-		it := m.items[i]
-
-		var box string
-		if it.Locked {
-			mark := it.LockedMark
-			if mark == "" {
-				mark = " "
-			}
-			box = dimStyle.Render(mark)
-		} else if m.checked[i] {
-			box = "[x]"
-		} else {
-			box = "[ ]"
-		}
-
-		line := box + " " + it.Label
-		if it.Locked {
-			line = box + " " + dimStyle.Render(it.Label)
-		}
-
-		if i == m.cursor {
-			b.WriteString(indicatorStyle.Render("█") + " " + line)
-		} else {
-			b.WriteString("  " + line)
-		}
+	for _, line := range m.list.VisibleRows() {
+		b.WriteString(line)
 		b.WriteString("\n")
 	}
 
