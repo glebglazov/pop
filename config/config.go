@@ -196,6 +196,9 @@ type TaskGitConfig struct {
 	CommitConfigOverrides []string `toml:"commit_config_overrides"`
 }
 
+// WorkbenchOptions holds [workbench] table options (empty; future options land here).
+type WorkbenchOptions struct{}
+
 // SessionTemplate is a named blueprint for an ordered list of tmux windows,
 // each with a named pane tree. Split trees and multi-window templates are now
 // supported; a template with invalid window names is excluded at load time.
@@ -458,8 +461,14 @@ type Config struct {
 	// user config files; the rename is internal only.
 	Task             *TaskConfig             `toml:"workload"`
 	Effort           map[string]EffortConfig `toml:"effort"`
-	SessionTemplates []SessionTemplate       `toml:"session_templates"`
-	Queue            *QueueConfig            `toml:"queue"`
+	// Workbenches is the canonical TOML key for session blueprints.
+	Workbenches []SessionTemplate `toml:"workbenches"`
+	// SessionTemplates is the deprecated TOML alias for Workbenches. Still loads;
+	// a deprecation finding is emitted (ADR-0054 style).
+	SessionTemplates []SessionTemplate `toml:"session_templates"`
+	// WorkbenchOpts holds the [workbench] options table (empty for now).
+	WorkbenchOpts *WorkbenchOptions `toml:"workbench"`
+	Queue         *QueueConfig      `toml:"queue"`
 	Updates          *UpdatesConfig          `toml:"updates"`
 	Integrations     *IntegrationsConfig     `toml:"integrations"`
 	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
@@ -546,9 +555,10 @@ type RepoConfig struct {
 	// trunk = true to enable managed-worktree provisioning. Repo-local .pop.toml
 	// cannot name a machine-specific trunk.
 	Trunk bool `toml:"-"`
+	// Workbenches are repo-local session blueprints (canonical key).
+	Workbenches []SessionTemplate `toml:"workbenches"`
 	// SessionTemplates are repo-local session template blueprints loaded from
-	// .pop.toml. They override same-named global templates and are overridden
-	// by same-named templates in a global [repo."<path>"] block.
+	// .pop.toml. Deprecated alias for Workbenches; both are accepted.
 	SessionTemplates []SessionTemplate `toml:"session_templates"`
 }
 
@@ -560,9 +570,10 @@ type RepoOverrideConfig struct {
 	// Trunk is meaningful only for the specific checkout path that keys this
 	// block; it is not propagated to other worktrees of the same repo.
 	Trunk *bool `toml:"trunk"`
+	// Workbenches are per-repo session blueprints (canonical key).
+	Workbenches []SessionTemplate `toml:"workbenches"`
 	// SessionTemplates are per-repo session template blueprints defined in a
-	// global [repo."<path>"] block. They are the highest-precedence home:
-	// they override same-named templates from .pop.toml and the global library.
+	// global [repo."<path>"] block. Deprecated alias for Workbenches; both accepted.
 	SessionTemplates []SessionTemplate `toml:"session_templates"`
 }
 
@@ -700,7 +711,9 @@ func (c *Config) ResolveSessionTemplatesWith(d *Deps, checkoutPath string) ([]Se
 	// Load .pop.toml from repo identity root (medium precedence)
 	identity := repoIdentity(d, checkoutPath)
 	popTOML, _ := LoadRepoConfigWith(d, identity)
-	for _, tmpl := range popTOML.SessionTemplates {
+	// Merge both keys: workbenches (canonical) and session_templates (deprecated alias).
+	popTOMLTemplates := append(popTOML.Workbenches, popTOML.SessionTemplates...)
+	for _, tmpl := range popTOMLTemplates {
 		if source, exists := seen[tmpl.Name]; exists {
 			warnings = append(warnings, fmt.Sprintf(
 				"session template %q defined in both %s and .pop.toml; using .pop.toml",
@@ -727,8 +740,9 @@ func (c *Config) ResolveSessionTemplatesWith(d *Deps, checkoutPath string) ([]Se
 			if keyIdentity != identity {
 				continue
 			}
-			// Apply templates from this override block
-			for _, tmpl := range block.SessionTemplates {
+			// Apply templates from this override block; workbenches (canonical) + session_templates (alias).
+			blockTemplates := append(block.Workbenches, block.SessionTemplates...)
+			for _, tmpl := range blockTemplates {
 				if source, exists := seen[tmpl.Name]; exists {
 					warnings = append(warnings, fmt.Sprintf(
 						"session template %q defined in both %s and [repo.%q]; using [repo.%q]",
@@ -1051,6 +1065,19 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	for _, f := range projectEntryFindings(path, cfg.Projects) {
 		cfg.recordFinding(f)
 	}
+	// Merge Workbenches (canonical new TOML key) into SessionTemplates (internal field).
+	// workbenches entries prepend so they take priority when both keys co-exist.
+	if len(cfg.Workbenches) > 0 {
+		cfg.SessionTemplates = append(cfg.Workbenches, cfg.SessionTemplates...)
+		cfg.Workbenches = nil
+	}
+	// Emit a non-fatal deprecation finding when the old TOML key was present.
+	if md.IsDefined("session_templates") {
+		cfg.recordFinding(Finding{
+			Path:    "deprecated.session_templates",
+			Message: "[[session_templates]] is deprecated; rename to [[workbenches]]",
+		})
+	}
 	if cfg.SessionTemplates != nil {
 		tmplFindings, validTemplates := sessionTemplateFindings(path, cfg.SessionTemplates)
 		for _, f := range tmplFindings {
@@ -1140,6 +1167,14 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		mergeIncludedTask(&cfg, included.Task, expanded)
 		mergeIncludedEffort(&cfg, included.Effort, expanded)
 
+		// Handle both canonical (workbenches) and deprecated (session_templates) keys in includes.
+		if included.Workbenches != nil {
+			tmplFindings, validTemplates := sessionTemplateFindings(expanded, included.Workbenches)
+			for _, f := range tmplFindings {
+				cfg.recordFinding(f)
+			}
+			cfg.SessionTemplates = append(cfg.SessionTemplates, validTemplates...)
+		}
 		if included.SessionTemplates != nil {
 			tmplFindings, validTemplates := sessionTemplateFindings(expanded, included.SessionTemplates)
 			for _, f := range tmplFindings {
@@ -1360,6 +1395,11 @@ func queueAgentsWarnings(path string, md toml.MetaData) []Finding {
 // [repo."<path>"] blocks. Only the RepoConfig subset is valid there; any
 // other key is silently degraded but surfaced as a finding.
 func repoBlockWarnings(path string, md toml.MetaData) []Finding {
+	validRepoKeys := map[string]bool{
+		"trunk":             true,
+		"workbenches":       true,
+		"session_templates": true, // deprecated alias, still accepted
+	}
 	var findings []Finding
 	seen := make(map[string]bool)
 	for _, key := range md.Undecoded() {
@@ -1367,7 +1407,11 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 			continue
 		}
 		// key[1] = block path, key[2] = unknown field name
-		uniq := key[1] + "\x00" + key[2]
+		fieldName := key[2]
+		if validRepoKeys[fieldName] {
+			continue
+		}
+		uniq := key[1] + "\x00" + fieldName
 		if seen[uniq] {
 			continue
 		}
@@ -1375,8 +1419,8 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 		findings = append(findings, Finding{
 			Path: "config.unknown_repo_key",
 			Message: fmt.Sprintf(
-				"%s: [repo.%q] unknown key %q ignored (only trunk and session_templates are accepted)",
-				path, key[1], key[2],
+				"%s: [repo.%q] unknown key %q ignored (only trunk, workbenches, and session_templates are accepted)",
+				path, key[1], fieldName,
 			),
 		})
 	}
@@ -1412,7 +1456,8 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	// Whitelisted top-level keys
 	whitelisted := map[string]bool{
 		"projects":          true,
-		"session_templates": true,
+		"workbenches":       true,
+		"session_templates": true, // deprecated alias, still accepted
 		"repo":              true,
 		"workload":          true,
 		"effort":            true,
@@ -1425,7 +1470,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 		if !whitelisted[key] && !seen[key] {
 			seen[key] = true
 			warnings = append(warnings, fmt.Sprintf(
-				"%s: %q ignored (includes only support projects, session_templates, repo, workload, and effort blocks)",
+				"%s: %q ignored (includes only support projects, workbenches, repo, workload, and effort blocks)",
 				path, key,
 			))
 		}

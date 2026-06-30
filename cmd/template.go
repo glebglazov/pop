@@ -38,26 +38,54 @@ func defaultTemplateRuntimeDeps() templateRuntimeDeps {
 	}
 }
 
-var layoutCmd = &cobra.Command{
-	Use:   "layout",
-	Short: "Manage session templates",
+var workbenchCmd = &cobra.Command{
+	Use:     "workbench",
+	Aliases: []string{"wb"},
+	Short:   "Manage workbenches",
 }
 
-var layoutListCmd = &cobra.Command{
+var workbenchListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List session templates",
+	Short: "List workbenches",
 	Args:  cobra.NoArgs,
 	RunE:  runTemplateList,
 }
 
-var layoutApplyCmd = &cobra.Command{
+var workbenchApplyCmd = &cobra.Command{
 	Use:   "apply <name>",
-	Short: "Apply a session template to the current tmux session",
+	Short: "Apply a workbench to the current tmux session",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTemplateApply,
 }
 
+// layoutCmd is a hidden backward-compat alias; use workbench instead.
+var layoutCmd = &cobra.Command{
+	Use:    "layout",
+	Short:  "Manage workbenches (deprecated: use workbench)",
+	Hidden: true,
+}
+
+var layoutListCmd = &cobra.Command{
+	Use:    "list",
+	Short:  "List workbenches",
+	Args:   cobra.NoArgs,
+	RunE:   runTemplateList,
+	Hidden: true,
+}
+
+var layoutApplyCmd = &cobra.Command{
+	Use:    "apply <name>",
+	Short:  "Apply a workbench to the current tmux session",
+	Args:   cobra.ExactArgs(1),
+	RunE:   runTemplateApply,
+	Hidden: true,
+}
+
 func init() {
+	rootCmd.AddCommand(workbenchCmd)
+	workbenchCmd.AddCommand(workbenchListCmd)
+	workbenchCmd.AddCommand(workbenchApplyCmd)
+
 	rootCmd.AddCommand(layoutCmd)
 	layoutCmd.AddCommand(layoutListCmd)
 	layoutCmd.AddCommand(layoutApplyCmd)

@@ -18,6 +18,13 @@ func TestTemplateCommandTree(t *testing.T) {
 		wantCmd any
 		wantRun any
 	}{
+		// New canonical paths
+		{path: []string{"workbench", "list"}, wantCmd: workbenchListCmd, wantRun: runTemplateList},
+		{path: []string{"workbench", "apply"}, wantCmd: workbenchApplyCmd, wantRun: runTemplateApply},
+		// Alias
+		{path: []string{"wb", "list"}, wantCmd: workbenchListCmd, wantRun: runTemplateList},
+		{path: []string{"wb", "apply"}, wantCmd: workbenchApplyCmd, wantRun: runTemplateApply},
+		// Deprecated hidden alias still works
 		{path: []string{"layout", "list"}, wantCmd: layoutListCmd, wantRun: runTemplateList},
 		{path: []string{"layout", "apply"}, wantCmd: layoutApplyCmd, wantRun: runTemplateApply},
 	}
@@ -35,6 +42,15 @@ func TestTemplateCommandTree(t *testing.T) {
 				t.Fatalf("%q does not use the expected handler", got.CommandPath())
 			}
 		})
+	}
+}
+
+func TestWorkbenchCmdIsVisibleLayoutCmdIsHidden(t *testing.T) {
+	if workbenchCmd.Hidden {
+		t.Fatal("workbench command should not be hidden")
+	}
+	if !layoutCmd.Hidden {
+		t.Fatal("layout command must be hidden (deprecated alias)")
 	}
 }
 

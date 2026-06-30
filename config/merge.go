@@ -148,6 +148,9 @@ func mergeConfigOverlay(dst, src *Config, md toml.MetaData) {
 	if md.IsDefined("effort") {
 		dst.Effort = cloneEffortMap(src.Effort)
 	}
+	if md.IsDefined("workbenches") {
+		dst.Workbenches = cloneSessionTemplates(src.Workbenches)
+	}
 	if md.IsDefined("session_templates") {
 		dst.SessionTemplates = cloneSessionTemplates(src.SessionTemplates)
 	}

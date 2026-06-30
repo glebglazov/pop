@@ -297,6 +297,235 @@ command = "go test ./..."
 	}
 }
 
+func TestLoadWorkbenches(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[[workbenches]]
+name = "dev"
+
+[[workbenches.windows]]
+name = "work"
+
+[workbenches.windows.layout]
+name = "server"
+command = "go test ./..."
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// workbenches key merges into SessionTemplates internally
+	if len(cfg.SessionTemplates) != 1 {
+		t.Fatalf("got %d session templates, want 1", len(cfg.SessionTemplates))
+	}
+	if cfg.SessionTemplates[0].Name != "dev" {
+		t.Fatalf("template name = %q, want dev", cfg.SessionTemplates[0].Name)
+	}
+	// No deprecation finding for the new key
+	for _, f := range cfg.Findings {
+		if strings.Contains(f.Path, "deprecated.session_templates") {
+			t.Fatalf("unexpected deprecation finding for [[workbenches]] key: %s", f.Message)
+		}
+	}
+}
+
+func TestLoadSessionTemplatesDeprecationFinding(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[[session_templates]]
+name = "dev"
+
+[[session_templates.windows]]
+name = "work"
+
+[session_templates.windows.layout]
+name = "server"
+command = "go test ./..."
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Old key still loads the data
+	if len(cfg.SessionTemplates) != 1 {
+		t.Fatalf("got %d session templates, want 1", len(cfg.SessionTemplates))
+	}
+	if cfg.SessionTemplates[0].Name != "dev" {
+		t.Fatalf("template name = %q, want dev", cfg.SessionTemplates[0].Name)
+	}
+	// Deprecation finding must be present
+	found := false
+	for _, f := range cfg.Findings {
+		if f.Path == "deprecated.session_templates" && strings.Contains(f.Message, "workbenches") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected deprecation finding for [[session_templates]], got %#v", cfg.Findings)
+	}
+}
+
+func TestLoadWorkbenchesAndSessionTemplatesBothKeys(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[[workbenches]]
+name = "new"
+
+[[workbenches.windows]]
+name = "main"
+
+[workbenches.windows.layout]
+name = "editor"
+command = "vim"
+
+[[session_templates]]
+name = "old"
+
+[[session_templates.windows]]
+name = "main"
+
+[session_templates.windows.layout]
+name = "editor"
+command = "vim"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SessionTemplates) != 2 {
+		t.Fatalf("got %d session templates, want 2", len(cfg.SessionTemplates))
+	}
+	// workbenches prepend, so "new" comes first
+	if cfg.SessionTemplates[0].Name != "new" {
+		t.Fatalf("first template = %q, want new (workbenches key takes priority)", cfg.SessionTemplates[0].Name)
+	}
+}
+
+func TestResolveSessionTemplatesWithWorkbenchesKey(t *testing.T) {
+	t.Run("global [[workbenches]] resolves", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(`
+[[workbenches]]
+name = "dev"
+windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
+`), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		d := &Deps{
+			FS: &deps.MockFileSystem{
+				StatFunc:         func(path string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+				ReadFileFunc:     func(path string) ([]byte, error) { return nil, os.ErrNotExist },
+				EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
+				UserHomeDirFunc:  func() (string, error) { return tmpDir, nil },
+			},
+		}
+
+		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		if len(warnings) != 0 {
+			t.Errorf("expected no warnings, got %v", warnings)
+		}
+		if len(templates) != 1 || templates[0].Name != "dev" {
+			t.Fatalf("expected template 'dev', got %+v", templates)
+		}
+	})
+
+	t.Run(".pop.toml [[workbenches]] resolves", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		popTomlPath := filepath.Join(tmpDir, ".pop.toml")
+		if err := os.WriteFile(popTomlPath, []byte(`
+[[workbenches]]
+name = "repo-wb"
+windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
+`), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		d := &Deps{
+			FS: &deps.MockFileSystem{
+				StatFunc:     func(path string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+				ReadFileFunc: func(path string) ([]byte, error) {
+					if path == popTomlPath {
+						return os.ReadFile(popTomlPath)
+					}
+					return nil, os.ErrNotExist
+				},
+				EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
+				UserHomeDirFunc:  func() (string, error) { return tmpDir, nil },
+			},
+		}
+
+		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		if len(warnings) != 0 {
+			t.Errorf("expected no warnings, got %v", warnings)
+		}
+		if len(templates) != 1 || templates[0].Name != "repo-wb" {
+			t.Fatalf("expected template 'repo-wb', got %+v", templates)
+		}
+	})
+
+	t.Run("[repo] [[workbenches]] resolves", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`
+[repo."%s"]
+workbenches = [
+  {name = "override", windows = [{name = "main", layout = {name = "editor", command = "vim"}}]}
+]
+`, tmpDir)), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		d := &Deps{
+			FS: &deps.MockFileSystem{
+				StatFunc:         func(path string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+				ReadFileFunc:     func(path string) ([]byte, error) { return nil, os.ErrNotExist },
+				EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
+				UserHomeDirFunc:  func() (string, error) { return tmpDir, nil },
+			},
+		}
+
+		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		if len(warnings) != 0 {
+			t.Errorf("expected no warnings, got %v", warnings)
+		}
+		if len(templates) != 1 || templates[0].Name != "override" {
+			t.Fatalf("expected template 'override', got %+v", templates)
+		}
+	})
+}
+
 func TestLoadEffortConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
