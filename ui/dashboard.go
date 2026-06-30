@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -89,8 +88,8 @@ type MonitorDashboardResult struct {
 type MonitorDashboard struct {
 	panes    []AttentionPane
 	allPanes []AttentionPane // full list (source of truth)
-	cursor   int
-	scroll   int
+	list     *List[AttentionPane]
+	cursor   int // synced from list; kept for test access
 	width    int
 	height   int
 	result   MonitorDashboardResult
@@ -126,6 +125,7 @@ type MonitorDashboard struct {
 
 	pickerMode          bool
 	quickAccessModifier string
+	quickAccess         *QuickAccess
 }
 
 // MonitorDashboardOption configures the dashboard
@@ -194,7 +194,60 @@ func NewMonitorDashboard(panes []AttentionPane, cb AttentionCallbacks, reloadFn 
 	for _, opt := range opts {
 		opt(d)
 	}
+	d.initList()
 	return d
+}
+
+func (d *MonitorDashboard) initList() {
+	modifier := d.quickAccessModifier
+	if !d.pickerMode {
+		modifier = "disabled"
+	}
+	d.quickAccess = NewQuickAccess(modifier)
+	scrollMargin := 0
+	if d.quickAccess.Enabled() {
+		scrollMargin = 9
+	}
+	d.list = NewList(d.panes, Opts[AttentionPane]{
+		Key:          func(p AttentionPane) string { return p.PaneID },
+		Wrap:         true,
+		Anchor:       AnchorBottom,
+		ScrollMargin: scrollMargin,
+		QuickLabel:   d.quickAccess.LabelFunc(),
+	})
+	d.list.opts.Cell = d.dashboardCell
+}
+
+func (d *MonitorDashboard) syncFromList() {
+	d.cursor = d.list.Cursor()
+}
+
+func (d *MonitorDashboard) syncToList() {
+	if d.cursor != d.list.Cursor() {
+		d.list.SetCursor(d.cursor)
+	}
+}
+
+func (d *MonitorDashboard) listBodyHeight() int {
+	return d.height + 2
+}
+
+func (d *MonitorDashboard) leftWidth() int {
+	leftWidth := d.width * 3 / 10
+	if leftWidth < 15 {
+		leftWidth = 15
+	}
+	return leftWidth
+}
+
+func (d *MonitorDashboard) syncPanesToList() {
+	if d.protectedPaneID != "" {
+		d.list.SetItems(d.panes)
+		d.list.SetCursor(d.cursor)
+	} else {
+		d.list.ReplaceItems(d.panes)
+	}
+	d.syncFromList()
 }
 
 func (d *MonitorDashboard) hasWorkingPanes() bool {
@@ -209,17 +262,12 @@ func (d *MonitorDashboard) hasWorkingPanes() bool {
 // Init implements tea.Model
 func (d *MonitorDashboard) Init() tea.Cmd {
 	if len(d.panes) > 0 {
-		d.cursor = len(d.panes) - 1
+		d.list.SetCursor(len(d.panes) - 1)
 		if d.initialPaneID != "" {
-			for i, pane := range d.panes {
-				if pane.PaneID == d.initialPaneID {
-					d.cursor = i
-					break
-				}
-			}
+			d.list.SetCursorToKey(d.initialPaneID)
 		}
 	}
-	d.adjustScroll()
+	d.syncFromList()
 	var cmds []tea.Cmd
 	if d.hasWorkingPanes() {
 		cmds = append(cmds, spinnerTick())
@@ -232,6 +280,8 @@ func (d *MonitorDashboard) Init() tea.Cmd {
 
 // Update implements tea.Model
 func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	d.syncToList()
+
 	switch msg.(type) {
 	case spinnerTickMsg:
 		d.spinnerFrame = (d.spinnerFrame + 1) % len(spinnerFrames)
@@ -356,12 +406,8 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, dashboardKeys.Up):
 			if len(d.panes) > 0 {
 				d.clearProtectedPane()
-				if d.cursor > 0 {
-					d.cursor--
-				} else {
-					d.cursor = len(d.panes) - 1
-				}
-				d.adjustScroll()
+				d.list.MoveUp()
+				d.syncFromList()
 				d.fetchPreview()
 			}
 			return d, nil
@@ -369,12 +415,8 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, dashboardKeys.Down):
 			if len(d.panes) > 0 {
 				d.clearProtectedPane()
-				if d.cursor < len(d.panes)-1 {
-					d.cursor++
-				} else {
-					d.cursor = 0
-				}
-				d.adjustScroll()
+				d.list.MoveDown()
+				d.syncFromList()
 				d.fetchPreview()
 			}
 			return d, nil
@@ -401,9 +443,9 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				d.sortPanes()
 				if d.cursor >= len(d.panes) {
 					d.cursor = len(d.panes) - 1
+					d.list.SetCursor(d.cursor)
 				}
 				d.dirty = true
-				d.adjustScroll()
 				d.fetchPreview()
 			}
 			return d, nil
@@ -424,9 +466,9 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				d.sortPanes()
 				if d.cursor >= len(d.panes) {
 					d.cursor = len(d.panes) - 1
+					d.list.SetCursor(d.cursor)
 				}
 				d.dirty = true
-				d.adjustScroll()
 				d.fetchPreview()
 			}
 			return d, nil
@@ -514,13 +556,15 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if d.cursor >= len(d.panes) {
 					d.cursor = 0
 				}
-				d.adjustScroll()
+				d.list.SetItems(d.panes)
+				d.list.SetCursor(d.cursor)
+				d.syncFromList()
 				d.fetchPreview()
 			}
 			return d, nil
 
 		case d.isQuickAccessKey(msg):
-			targetIdx := d.cursor - d.quickAccessDigit(msg)
+			targetIdx := d.list.Cursor() - d.quickAccessDigit(msg)
 			if targetIdx >= 0 && targetIdx < len(d.panes) {
 				pane := d.panes[targetIdx]
 				d.result = MonitorDashboardResult{
@@ -541,47 +585,19 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if d.height < 3 {
 			d.height = 3
 		}
-		d.adjustScroll()
+		d.list.Resize(d.listBodyHeight())
+		d.syncFromList()
 	}
 
 	return d, nil
 }
 
-func (d *MonitorDashboard) quickAccessEnabled() bool {
-	return d.pickerMode && d.quickAccessModifier != "" && d.quickAccessModifier != "disabled"
-}
-
 func (d *MonitorDashboard) isQuickAccessKey(msg tea.KeyPressMsg) bool {
-	return d.quickAccessDigit(msg) >= 1
+	return d.quickAccess.Digit(pickerKeyPress(msg)) >= 1
 }
 
 func (d *MonitorDashboard) quickAccessDigit(msg tea.KeyPressMsg) int {
-	if !d.quickAccessEnabled() || msg.Code < '1' || msg.Code > '9' {
-		return 0
-	}
-	digit := int(msg.Code - '0')
-	switch d.quickAccessModifier {
-	case "alt":
-		if msg.Mod.Contains(tea.ModAlt) {
-			return digit
-		}
-	case "ctrl":
-		if msg.Mod.Contains(tea.ModCtrl) {
-			return digit
-		}
-	}
-	return 0
-}
-
-func (d *MonitorDashboard) quickAccessLabel(n int) string {
-	switch d.quickAccessModifier {
-	case "ctrl":
-		return fmt.Sprintf("^%d", n)
-	case "alt":
-		return fmt.Sprintf("⌥%d", n)
-	default:
-		return "  "
-	}
+	return d.quickAccess.Digit(pickerKeyPress(msg))
 }
 
 // reloadPanes refreshes the pane list from the reload function,
@@ -590,33 +606,8 @@ func (d *MonitorDashboard) reloadPanes() {
 	if d.reloadFunc == nil {
 		return
 	}
-	var selectedPaneID string
-	if d.cursor < len(d.panes) {
-		selectedPaneID = d.panes[d.cursor].PaneID
-	}
-
 	d.allPanes = d.reloadFunc()
 	d.rebuildView()
-
-	restored := false
-	if selectedPaneID != "" {
-		for i, pane := range d.panes {
-			if pane.PaneID == selectedPaneID {
-				d.cursor = i
-				restored = true
-				break
-			}
-		}
-	}
-	if !restored {
-		if len(d.panes) > 0 {
-			d.cursor = len(d.panes) - 1
-		} else {
-			d.cursor = 0
-		}
-	}
-	d.adjustScroll()
-	d.fetchPreview()
 }
 
 // sortPanes performs a stable sort of panes by status group:
@@ -629,6 +620,7 @@ func (d *MonitorDashboard) sortPanes() {
 		return attentionStatusOrder(d.panes[i].Status) < attentionStatusOrder(d.panes[j].Status)
 	})
 	d.pinProtectedPane()
+	d.syncPanesToList()
 }
 
 func attentionStatusOrder(s AttentionStatus) int {
@@ -704,8 +696,8 @@ func (d *MonitorDashboard) pinProtectedPane() bool {
 // rebuildView filters allPanes into panes based on the current view mode.
 func (d *MonitorDashboard) rebuildView() {
 	var selectedPaneID string
-	if d.cursor >= 0 && d.cursor < len(d.panes) {
-		selectedPaneID = d.panes[d.cursor].PaneID
+	if pane, ok := d.list.Selected(); ok {
+		selectedPaneID = pane.PaneID
 	}
 
 	if d.following {
@@ -722,30 +714,30 @@ func (d *MonitorDashboard) rebuildView() {
 	}
 
 	if d.pinProtectedPane() {
-		d.adjustScroll()
+		d.list.SetItems(d.panes)
+		d.list.SetCursor(d.cursor)
+		d.syncFromList()
 		d.fetchPreview()
 		return
 	}
 
-	restored := false
+	d.list.SetItems(d.panes)
 	if selectedPaneID != "" {
-		for i, pane := range d.panes {
-			if pane.PaneID == selectedPaneID {
-				d.cursor = i
-				restored = true
-				break
+		if !d.list.SetCursorToKey(selectedPaneID) {
+			if len(d.panes) > 0 {
+				d.list.SetCursor(len(d.panes) - 1)
 			}
 		}
-	}
-	if !restored {
-		if d.cursor >= len(d.panes) {
-			d.cursor = len(d.panes) - 1
+	} else if d.cursor >= len(d.panes) {
+		if len(d.panes) > 0 {
+			d.list.SetCursor(len(d.panes) - 1)
+		} else {
+			d.list.SetCursor(0)
 		}
-		if d.cursor < 0 {
-			d.cursor = 0
-		}
+	} else if d.cursor < 0 {
+		d.list.SetCursor(0)
 	}
-	d.adjustScroll()
+	d.syncFromList()
 	d.fetchPreview()
 }
 
@@ -758,25 +750,53 @@ func (d *MonitorDashboard) fetchPreview() {
 	d.preview = d.previewFunc(d.panes[d.cursor].PaneID)
 }
 
-// adjustAttentionScroll ensures the attention cursor is visible.
-func (d *MonitorDashboard) adjustScroll() {
-	listHeight := d.height + 2
-	if listHeight <= 0 {
-		listHeight = 1
+func (d *MonitorDashboard) dashboardCell(pane AttentionPane, rs RowState) string {
+	leftWidth := d.leftWidth()
+	if rs.Width > 0 {
+		leftWidth = rs.Width
 	}
-	maxScroll := len(d.panes) - listHeight
-	if maxScroll < 0 {
-		maxScroll = 0
+
+	prefixWidth := 2
+	cellWidth := leftWidth - prefixWidth
+
+	attentionIconStyle := lipgloss.NewStyle().Foreground(colorAttention)
+	workingIconStyle := lipgloss.NewStyle().Foreground(colorWorking)
+	clearIconStyle := lipgloss.NewStyle().Foreground(colorClear)
+
+	var icon string
+	switch pane.Status {
+	case AttentionVirtual:
+		icon = clearIconStyle.Render("○")
+	case AttentionWorking:
+		icon = workingIconStyle.Render(spinnerFrames[d.spinnerFrame])
+	case AttentionUnread:
+		icon = attentionIconStyle.Render("●")
+	case AttentionClear:
+		icon = clearIconStyle.Render("●")
 	}
-	if d.scroll > maxScroll {
-		d.scroll = maxScroll
+	iconWidth := 2
+	if pane.Following {
+		icon += "📌"
+		iconWidth = 4
 	}
-	if d.cursor < d.scroll {
-		d.scroll = d.cursor
+	icon += " "
+
+	nameWidth := cellWidth - iconWidth
+	if nameWidth < 0 {
+		nameWidth = 0
 	}
-	if d.cursor >= d.scroll+listHeight {
-		d.scroll = d.cursor - listHeight + 1
+	name := truncateString(pane.Name, nameWidth)
+	displayName := name
+	if pane.TopicDerived {
+		displayName = dimStyle.Render(name)
 	}
+
+	contentWidth := iconWidth + len([]rune(name))
+	padding := cellWidth - contentWidth
+	if padding < 0 {
+		padding = 0
+	}
+	return icon + displayName + strings.Repeat(" ", padding)
 }
 
 // View implements tea.Model
@@ -856,16 +876,11 @@ func (d *MonitorDashboard) viewDashboard() string {
 
 	sepStyle := lipgloss.NewStyle().Foreground(colorSeparator)
 
-	leftWidth := d.width * 3 / 10
-	if leftWidth < 15 {
-		leftWidth = 15
-	}
+	leftWidth := d.leftWidth()
 	rightWidth := d.width - leftWidth - 1
 	if rightWidth < 10 {
 		rightWidth = 10
 	}
-
-	listHeight := d.height + 2
 
 	// Empty panes
 	if len(d.panes) == 0 {
@@ -961,110 +976,24 @@ func (d *MonitorDashboard) viewDashboard() string {
 		previewLines = previewLines[:len(previewLines)-1]
 	}
 
-	start := d.scroll
-	if start > len(d.panes) {
-		start = len(d.panes)
-	}
-	visible := listHeight
-	if visible > len(d.panes)-start {
-		visible = len(d.panes) - start
-	}
-
+	listHeight := d.listBodyHeight()
 	previewStart := 0
 	if len(previewLines) > listHeight {
 		previewStart = len(previewLines) - listHeight
 	}
 
-	emptyLines := listHeight - visible
-	for i := 0; i < emptyLines; i++ {
+	for i, left := range d.list.VisibleRows() {
 		previewIdx := previewStart + i
 		rightContent := ""
 		if previewIdx < len(previewLines) {
 			rightContent = truncateString(previewLines[previewIdx], rightWidth)
 		}
-		b.WriteString(strings.Repeat(" ", leftWidth))
-		b.WriteString(sepStyle.Render("│"))
-		b.WriteString(rightContent)
-		b.WriteString("\x1b[0m\n")
-	}
-
-	attentionIconStyle := lipgloss.NewStyle().Foreground(colorAttention)
-	workingIconStyle := lipgloss.NewStyle().Foreground(colorWorking)
-	clearIconStyle := lipgloss.NewStyle().Foreground(colorClear)
-
-	for i := 0; i < visible; i++ {
-		listIdx := start + i
-		previewIdx := previewStart + emptyLines + i
-
-		var left string
-		pane := d.panes[listIdx]
-
-		var icon string
-		switch pane.Status {
-		case AttentionVirtual:
-			icon = clearIconStyle.Render("○")
-		case AttentionWorking:
-			icon = workingIconStyle.Render(spinnerFrames[d.spinnerFrame])
-		case AttentionUnread:
-			icon = attentionIconStyle.Render("●")
-		case AttentionClear:
-			icon = clearIconStyle.Render("●")
-		}
-		iconWidth := 2
-		if pane.Following {
-			icon += "📌"
-			iconWidth = 4
-		}
-		icon += " "
-
-		quickPrefixWidth := 0
-		if d.quickAccessEnabled() {
-			quickPrefixWidth = 2
-		}
-		nameWidth := leftWidth - quickPrefixWidth - iconWidth - 3
-		name := truncateString(pane.Name, nameWidth)
-		// A machine-derived Topic name renders dimmed. Width math stays on the
-		// plain (un-styled) name so padding is unaffected.
-		displayName := name
-		if pane.TopicDerived {
-			displayName = dimStyle.Render(name)
-		}
-
-		if listIdx == d.cursor {
-			prefix := indicatorStyle.Render("█")
-			prefixWidth := 1
-			if d.quickAccessEnabled() {
-				prefix = " " + prefix
-				prefixWidth = 2
-			}
-			padding := leftWidth - len([]rune(name)) - iconWidth - prefixWidth - 1
-			if padding < 0 {
-				padding = 0
-			}
-			left = prefix + " " + icon + displayName + strings.Repeat(" ", padding)
+		if left == "" {
+			b.WriteString(strings.Repeat(" ", leftWidth))
 		} else {
-			prefix := "  "
-			prefixWidth := 2
-			if d.quickAccessEnabled() {
-				distFromCursor := d.cursor - listIdx
-				if distFromCursor >= 1 && distFromCursor <= 9 {
-					prefix = dimStyle.Render(d.quickAccessLabel(distFromCursor))
-				}
-			}
-			padding := leftWidth - len([]rune(name)) - iconWidth - prefixWidth
-			if padding < 0 {
-				padding = 0
-			}
-			left = prefix + icon + displayName + strings.Repeat(" ", padding)
+			b.WriteString("\x1b[0m")
+			b.WriteString(left)
 		}
-
-		rightContent := ""
-		if previewIdx < len(previewLines) {
-			rightContent = truncateString(previewLines[previewIdx], rightWidth)
-		}
-
-		b.WriteString("\x1b[0m")
-		b.WriteString(left)
 		b.WriteString(sepStyle.Render("│"))
 		b.WriteString(rightContent)
 		b.WriteString("\x1b[0m\n")
@@ -1114,17 +1043,12 @@ func RunMonitorDashboard(title string, panes []AttentionPane, cb AttentionCallba
 		d.rebuildView()
 	}
 	if len(d.panes) > 0 {
-		d.cursor = len(d.panes) - 1
+		d.list.SetCursor(len(d.panes) - 1)
 		if d.initialPaneID != "" {
-			for i, pane := range d.panes {
-				if pane.PaneID == d.initialPaneID {
-					d.cursor = i
-					break
-				}
-			}
+			d.list.SetCursorToKey(d.initialPaneID)
 		}
 	}
-	d.adjustScroll()
+	d.syncFromList()
 	d.fetchPreview()
 	program := tea.NewProgram(d)
 	m, err := program.Run()
