@@ -89,14 +89,18 @@ type ProjectDeps struct {
 	AttentionSessions func() map[string]bool
 
 	// Side effects (take deps.Tmux as first arg to match *With signatures)
-	OpenSession      func(tmux deps.Tmux, item *ui.Item) error
-	OpenWindow       func(tmux deps.Tmux, item *ui.Item) error
-	KillSession      func(tmux deps.Tmux, name string)
-	SendCDToPane     func(tmux deps.Tmux, paneID, path string) error
-	YankPathToPane   func(tmux deps.Tmux, paneID, path string) error
-	SwitchToTarget   func(tmux deps.Tmux, target string) error
-	SwitchAndZoom    func(tmux deps.Tmux, target string) error
-	RunCustomCommand func(command string, item *ui.Item)
+	OpenSession func(tmux deps.Tmux, item *ui.Item) error
+	// OpenSessionWithWorkbench creates a session that is exactly the named
+	// Workbench (stray shell window removed) and attaches to it. Used by the
+	// picker create-path when [workbench] pick_on_create is on (ADR-0075).
+	OpenSessionWithWorkbench func(tmux deps.Tmux, item *ui.Item, workbenchName string) error
+	OpenWindow               func(tmux deps.Tmux, item *ui.Item) error
+	KillSession              func(tmux deps.Tmux, name string)
+	SendCDToPane             func(tmux deps.Tmux, paneID, path string) error
+	YankPathToPane           func(tmux deps.Tmux, paneID, path string) error
+	SwitchToTarget           func(tmux deps.Tmux, target string) error
+	SwitchAndZoom            func(tmux deps.Tmux, target string) error
+	RunCustomCommand         func(command string, item *ui.Item)
 	// EnsureSystemState synchronously runs integration checks and kicks off
 	// the monitor daemon in a goroutine. Returns warnings for the picker.
 	EnsureSystemState func() []string
@@ -105,6 +109,11 @@ type ProjectDeps struct {
 	// UpdateNotice returns the dimmed top-right Update notice text, or "" for
 	// none. It is a seam so tests never touch the real cache or network.
 	UpdateNotice func() string
+
+	// ResolveWorkbenches returns the Workbenches resolved for a project path,
+	// used by the create-path prompt (ADR-0075). A seam so tests can supply a
+	// fixed set without touching .pop.toml or the global library.
+	ResolveWorkbenches func(cfg *config.Config, path string) []config.SessionTemplate
 
 	// Environment
 	InTmux         func() bool
@@ -138,15 +147,16 @@ func DefaultProjectDeps() *ProjectDeps {
 		SessionActivity:   history.TmuxSessionActivity,
 		AttentionSessions: monitorAttentionSessions,
 
-		OpenSession:       openTmuxSessionWith,
-		OpenWindow:        openTmuxWindowWith,
-		KillSession:       killTmuxSessionWith,
-		SendCDToPane:      sendCDToPaneWith,
-		YankPathToPane:    yankPathToPaneWith,
-		SwitchToTarget:    switchToTmuxTargetWith,
-		SwitchAndZoom:     switchToTmuxTargetAndZoomWith,
-		RunCustomCommand:  executeProjectCustomCommand,
-		EnsureSystemState: ensureSystemState,
+		OpenSession:              openTmuxSessionWith,
+		OpenSessionWithWorkbench: openTmuxSessionWithWorkbenchWith,
+		OpenWindow:               openTmuxWindowWith,
+		KillSession:              killTmuxSessionWith,
+		SendCDToPane:             sendCDToPaneWith,
+		YankPathToPane:           yankPathToPaneWith,
+		SwitchToTarget:           switchToTmuxTargetWith,
+		SwitchAndZoom:            switchToTmuxTargetAndZoomWith,
+		RunCustomCommand:         executeProjectCustomCommand,
+		EnsureSystemState:        ensureSystemState,
 		RunConfigure: func() error {
 			cd := defaultConfigureDeps()
 			cd.ShowWelcome = true
@@ -154,6 +164,11 @@ func DefaultProjectDeps() *ProjectDeps {
 		},
 
 		UpdateNotice: pickerUpdateNotice,
+
+		ResolveWorkbenches: func(cfg *config.Config, path string) []config.SessionTemplate {
+			templates, _ := cfg.ResolveSessionTemplatesWith(config.DefaultDeps(), path)
+			return templates
+		},
 
 		InTmux:         func() bool { return os.Getenv("TMUX") != "" },
 		CurrentSession: currentTmuxSessionWith,
@@ -373,6 +388,29 @@ func RunProject(d *ProjectDeps) error {
 			if d.TMuxCDPane != "" {
 				return d.SendCDToPane(d.Tmux, d.TMuxCDPane, result.Selected.Path)
 			}
+			// Picker-time Workbench selection (ADR-0075), opt-in via
+			// [workbench] pick_on_create. Fires only when this selection
+			// creates a brand-new session and at least one Workbench resolves
+			// for the project path; otherwise the create-path is unchanged.
+			if cfg.WorkbenchPickOnCreate() && !d.Tmux.HasSession(result.Selected.SessionName) {
+				workbenches := d.ResolveWorkbenches(cfg, result.Selected.Path)
+				if len(workbenches) > 0 {
+					name, confirmed, err := promptWorkbenchForCreate(d, workbenches)
+					if err != nil {
+						return err
+					}
+					if !confirmed {
+						// Esc in the Workbench list: nothing created, return
+						// to the project picker with the cursor preserved.
+						restoreCursorIdx = result.CursorIndex
+						continue
+					}
+					if name != "" {
+						return d.OpenSessionWithWorkbench(d.Tmux, result.Selected, name)
+					}
+					// "no workbench": fall through to today's flat session.
+				}
+			}
 			return d.OpenSession(d.Tmux, result.Selected)
 
 		case ui.ActionOpenWindow:
@@ -556,6 +594,67 @@ func openTmuxSessionWith(tmux deps.Tmux, item *ui.Item) error {
 		Tmux:   tmux,
 		InTmux: func() bool { return os.Getenv("TMUX") != "" },
 	}, item.SessionName, item.Path)
+}
+
+// noWorkbenchLabel is the first, preselected entry in the create-path Workbench
+// prompt; choosing it creates today's flat session unchanged (ADR-0075). It is
+// distinguished from real Workbenches by its empty Item.Path sentinel, so a
+// Workbench that happens to share this display name is still picked correctly.
+const noWorkbenchLabel = "no workbench"
+
+// workbenchItemPathPrefix prefixes the Item.Path of each resolved Workbench in
+// the create-path prompt so every entry has a unique, non-empty picker key,
+// reserving the empty path for the no-workbench sentinel.
+const workbenchItemPathPrefix = "workbench:"
+
+// promptWorkbenchForCreate shows a quick-search list of resolved Workbenches with
+// "no workbench" first and preselected (ADR-0075). It returns the chosen Workbench
+// name ("" for the no-workbench entry) and whether the user confirmed a choice
+// (false when Esc was pressed, i.e. return to the project picker, create nothing).
+func promptWorkbenchForCreate(d *ProjectDeps, workbenches []config.SessionTemplate) (name string, confirmed bool, err error) {
+	items := make([]ui.Item, 0, len(workbenches)+1)
+	items = append(items, ui.Item{Name: noWorkbenchLabel})
+	for _, wb := range workbenches {
+		items = append(items, ui.Item{Name: wb.Name, Path: workbenchItemPathPrefix + wb.Name})
+	}
+
+	result, err := d.RunPicker(items, ui.WithInitialCursorIndex(0))
+	if err != nil {
+		return "", false, err
+	}
+	if result.Action != ui.ActionConfirm || result.Selected == nil {
+		return "", false, nil
+	}
+	if result.Selected.Path == "" {
+		// The no-workbench sentinel → today's flat session.
+		return "", true, nil
+	}
+	return result.Selected.Name, true, nil
+}
+
+// openTmuxSessionWithWorkbenchWith creates a brand-new tmux session that is
+// exactly the named Workbench (stray shell window removed) and attaches to it.
+// It is the production implementation of ProjectDeps.OpenSessionWithWorkbench
+// (ADR-0075 picker create-path).
+func openTmuxSessionWithWorkbenchWith(tmux deps.Tmux, item *ui.Item, workbenchName string) error {
+	td := defaultTemplateRuntimeDeps()
+	td.Tmux = tmux
+	cfg, err := td.LoadConfig()
+	if err != nil {
+		return err
+	}
+	templates, warnings := cfg.ResolveSessionTemplatesWith(td.ConfigDeps, item.Path)
+	for _, w := range warnings {
+		warnf(td, "%s\n", w)
+	}
+	tmpl, ok := findSessionTemplate(templates, workbenchName)
+	if !ok {
+		return fmt.Errorf("workbench %q not found", workbenchName)
+	}
+	if err := createSessionFromWorkbench(td, tmpl, item.SessionName, item.Path); err != nil {
+		return err
+	}
+	return switchToTmuxTargetWith(tmux, item.SessionName)
 }
 
 func openTmuxWindow(item *ui.Item) error {

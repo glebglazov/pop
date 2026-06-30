@@ -196,8 +196,15 @@ type TaskGitConfig struct {
 	CommitConfigOverrides []string `toml:"commit_config_overrides"`
 }
 
-// WorkbenchOptions holds [workbench] table options (empty; future options land here).
-type WorkbenchOptions struct{}
+// WorkbenchOptions holds [workbench] table options.
+type WorkbenchOptions struct {
+	// PickOnCreate gates the picker create-path Workbench prompt (ADR-0075).
+	// When true, selecting a project with no live session and ≥1 resolved
+	// Workbench shows a quick-search list to pick a Workbench (or "no workbench")
+	// before the session is created. Default false ⇒ the project picker behaves
+	// exactly as today (no prompt).
+	PickOnCreate bool `toml:"pick_on_create"`
+}
 
 // SessionTemplate is a named blueprint for an ordered list of tmux windows,
 // each with a named pane tree. Split trees and multi-window templates are now
@@ -808,6 +815,17 @@ func (c *Config) UpdateNoticeEnabled() bool {
 		return true
 	}
 	return *c.Updates.NoticeEnabled
+}
+
+// WorkbenchPickOnCreate reports whether the picker create-path should prompt for
+// a Workbench when creating a new session. Defaults to false (no prompt); only an
+// explicit [workbench] pick_on_create = true enables it (ADR-0075). The receiver
+// may be nil.
+func (c *Config) WorkbenchPickOnCreate() bool {
+	if c == nil || c.WorkbenchOpts == nil {
+		return false
+	}
+	return c.WorkbenchOpts.PickOnCreate
 }
 
 // ExpandedPath represents a resolved project path with display metadata

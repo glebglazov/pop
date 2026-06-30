@@ -1000,15 +1000,18 @@ func testProjectDeps(t *testing.T) *ProjectDeps {
 		SessionActivity:   func() map[string]int64 { return nil },
 		AttentionSessions: func() map[string]bool { return nil },
 
-		OpenSession:       func(tmux deps.Tmux, item *ui.Item) error { return nil },
-		OpenWindow:        func(tmux deps.Tmux, item *ui.Item) error { return nil },
-		KillSession:       func(tmux deps.Tmux, name string) {},
-		SendCDToPane:      func(tmux deps.Tmux, paneID, path string) error { return nil },
-		SwitchToTarget:    func(tmux deps.Tmux, target string) error { return nil },
-		SwitchAndZoom:     func(tmux deps.Tmux, target string) error { return nil },
-		RunCustomCommand:  func(command string, item *ui.Item) {},
-		EnsureSystemState: func() []string { return nil },
-		RunConfigure:      func() error { return nil },
+		OpenSession:              func(tmux deps.Tmux, item *ui.Item) error { return nil },
+		OpenSessionWithWorkbench: func(tmux deps.Tmux, item *ui.Item, workbenchName string) error { return nil },
+		OpenWindow:               func(tmux deps.Tmux, item *ui.Item) error { return nil },
+		KillSession:              func(tmux deps.Tmux, name string) {},
+		SendCDToPane:             func(tmux deps.Tmux, paneID, path string) error { return nil },
+		SwitchToTarget:           func(tmux deps.Tmux, target string) error { return nil },
+		SwitchAndZoom:            func(tmux deps.Tmux, target string) error { return nil },
+		RunCustomCommand:         func(command string, item *ui.Item) {},
+		EnsureSystemState:        func() []string { return nil },
+		RunConfigure:             func() error { return nil },
+
+		ResolveWorkbenches: func(cfg *config.Config, path string) []config.SessionTemplate { return nil },
 
 		InTmux:         func() bool { return false },
 		CurrentSession: func(tmux deps.Tmux) string { return "" },
@@ -1417,5 +1420,325 @@ func TestRunProject_UnparseableTOMLAborts(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to load config") {
 		t.Errorf("error = %v, want a clear config-load failure message", err)
+	}
+}
+
+// --- Picker create-path Workbench selection (ADR-0075) ---
+
+// projectDepsForWorkbenchPrompt builds a ProjectDeps with [workbench]
+// pick_on_create = true and a fixed resolved-Workbench set, so the create-path
+// prompt can be exercised without touching .pop.toml or the global library.
+func projectDepsForWorkbenchPrompt(t *testing.T, workbenches []config.SessionTemplate) *ProjectDeps {
+	t.Helper()
+	d := testProjectDeps(t)
+	orig := d.LoadConfig
+	d.LoadConfig = func() (*config.Config, error) {
+		cfg, err := orig()
+		if err != nil {
+			return nil, err
+		}
+		cfg.WorkbenchOpts = &config.WorkbenchOptions{PickOnCreate: true}
+		return cfg, nil
+	}
+	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.SessionTemplate {
+		return workbenches
+	}
+	return d
+}
+
+// TestRunProject_WorkbenchPickDisabledNoPrompt asserts the default (toggle off)
+// path is byte-for-byte today's behavior: one picker, flat session, and the
+// Workbench machinery is never consulted.
+func TestRunProject_WorkbenchPickDisabledNoPrompt(t *testing.T) {
+	d := testProjectDeps(t) // pick_on_create defaults false
+	resolveCalled := false
+	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.SessionTemplate {
+		resolveCalled = true
+		return []config.SessionTemplate{{Name: "dev"}}
+	}
+	openFlat := false
+	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	openWB := false
+	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+
+	calls := 0
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		calls++
+		return ui.Result{Action: ui.ActionConfirm, Selected: &items[0]}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if !openFlat {
+		t.Error("expected flat OpenSession when pick_on_create is off")
+	}
+	if openWB {
+		t.Error("OpenSessionWithWorkbench must not run when pick_on_create is off")
+	}
+	if resolveCalled {
+		t.Error("ResolveWorkbenches must not be consulted when pick_on_create is off")
+	}
+	if calls != 1 {
+		t.Errorf("picker shown %d times, want 1 (no Workbench prompt)", calls)
+	}
+}
+
+// TestRunProject_WorkbenchPickEmptySetSkipsPrompt asserts that with the toggle on
+// but no Workbenches resolving for the project, the prompt is skipped entirely
+// and a flat session is created.
+func TestRunProject_WorkbenchPickEmptySetSkipsPrompt(t *testing.T) {
+	d := projectDepsForWorkbenchPrompt(t, nil) // empty resolved set
+	openFlat := false
+	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	openWB := false
+	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+
+	calls := 0
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		calls++
+		return ui.Result{Action: ui.ActionConfirm, Selected: &items[0]}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if !openFlat {
+		t.Error("expected flat OpenSession when no Workbenches resolve")
+	}
+	if openWB {
+		t.Error("OpenSessionWithWorkbench must not run with an empty Workbench set")
+	}
+	if calls != 1 {
+		t.Errorf("picker shown %d times, want 1 (empty set => no prompt)", calls)
+	}
+}
+
+// TestRunProject_WorkbenchPickSelectsWorkbench asserts that with the toggle on
+// and ≥1 Workbench, the second (quick-search) list shows "no workbench" first and
+// selecting a real Workbench routes to OpenSessionWithWorkbench (not the flat path).
+func TestRunProject_WorkbenchPickSelectsWorkbench(t *testing.T) {
+	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}})
+
+	openFlat := false
+	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	var gotName string
+	openWB := false
+	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error {
+		openWB = true
+		gotName = name
+		return nil
+	}
+
+	var wbItems []ui.Item
+	calls := 0
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		calls++
+		if calls == 1 {
+			// Project picker: choose the (only) project.
+			return ui.Result{Action: ui.ActionConfirm, Selected: &items[0]}, nil
+		}
+		// Workbench quick-search list: select the first real Workbench (gs-dev).
+		wbItems = items
+		return ui.Result{Action: ui.ActionConfirm, Selected: &items[1]}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if len(wbItems) != 3 {
+		t.Fatalf("Workbench list had %d items, want 3 (no workbench + 2)", len(wbItems))
+	}
+	if wbItems[0].Name != noWorkbenchLabel {
+		t.Errorf("Workbench list first entry = %q, want %q", wbItems[0].Name, noWorkbenchLabel)
+	}
+	if wbItems[0].Path != "" {
+		t.Errorf("no-workbench entry Path = %q, want empty sentinel", wbItems[0].Path)
+	}
+	if !openWB {
+		t.Fatal("expected OpenSessionWithWorkbench to run")
+	}
+	if gotName != "gs-dev" {
+		t.Errorf("OpenSessionWithWorkbench name = %q, want %q", gotName, "gs-dev")
+	}
+	if openFlat {
+		t.Error("flat OpenSession must not run when a Workbench was chosen")
+	}
+}
+
+// TestRunProject_WorkbenchPickNoWorkbenchYieldsFlat asserts that choosing the
+// "no workbench" entry creates today's flat session.
+func TestRunProject_WorkbenchPickNoWorkbenchYieldsFlat(t *testing.T) {
+	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}})
+
+	openFlat := false
+	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	openWB := false
+	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+
+	calls := 0
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		calls++
+		if calls == 1 {
+			return ui.Result{Action: ui.ActionConfirm, Selected: &items[0]}, nil
+		}
+		// Pick the preselected first entry: "no workbench".
+		return ui.Result{Action: ui.ActionConfirm, Selected: &items[0]}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if !openFlat {
+		t.Error("expected flat OpenSession for the no-workbench choice")
+	}
+	if openWB {
+		t.Error("OpenSessionWithWorkbench must not run for the no-workbench choice")
+	}
+}
+
+// TestRunProject_WorkbenchPickEscReturnsToProjectPicker asserts that Esc in the
+// Workbench list creates nothing and returns to the project picker.
+func TestRunProject_WorkbenchPickEscReturnsToProjectPicker(t *testing.T) {
+	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}})
+
+	openFlat := false
+	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	openWB := false
+	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+
+	calls := 0
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		calls++
+		switch calls {
+		case 1:
+			// Project picker: choose the project.
+			return ui.Result{Action: ui.ActionConfirm, Selected: &items[0]}, nil
+		case 2:
+			// Workbench list: Esc.
+			return ui.Result{Action: ui.ActionCancel}, nil
+		default:
+			// Back at the project picker: quit cleanly.
+			return ui.Result{Action: ui.ActionCancel}, nil
+		}
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if openFlat || openWB {
+		t.Error("Esc in the Workbench list must create nothing")
+	}
+	if calls != 3 {
+		t.Errorf("picker shown %d times, want 3 (project, workbench-esc, project-cancel)", calls)
+	}
+}
+
+// TestRunProject_WorkbenchPickLiveSessionNoPrompt asserts the prompt fires only
+// on selections that create a session: a project whose session is already live
+// skips the prompt and reattaches via the flat path.
+func TestRunProject_WorkbenchPickLiveSessionNoPrompt(t *testing.T) {
+	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}})
+	d.Tmux = &deps.MockTmux{HasSessionFunc: func(name string) bool { return true }}
+
+	resolveCalled := false
+	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.SessionTemplate {
+		resolveCalled = true
+		return []config.SessionTemplate{{Name: "gs-dev"}}
+	}
+	openFlat := false
+	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	openWB := false
+	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+
+	calls := 0
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		calls++
+		return ui.Result{Action: ui.ActionConfirm, Selected: &items[0]}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if !openFlat {
+		t.Error("expected flat OpenSession (reattach) for a live session")
+	}
+	if openWB {
+		t.Error("OpenSessionWithWorkbench must not run when the session is already live")
+	}
+	if resolveCalled {
+		t.Error("ResolveWorkbenches must not be consulted when the session is already live")
+	}
+	if calls != 1 {
+		t.Errorf("picker shown %d times, want 1 (no prompt for a live session)", calls)
+	}
+}
+
+// TestRunProject_WorkbenchPickOpenWindowUnaffected asserts that the
+// open-in-new-window action never triggers the Workbench prompt, even with the
+// toggle on.
+func TestRunProject_WorkbenchPickOpenWindowUnaffected(t *testing.T) {
+	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}})
+
+	resolveCalled := false
+	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.SessionTemplate {
+		resolveCalled = true
+		return []config.SessionTemplate{{Name: "gs-dev"}}
+	}
+	openWindow := false
+	d.OpenWindow = func(tmux deps.Tmux, item *ui.Item) error { openWindow = true; return nil }
+	openWB := false
+	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+
+	calls := 0
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		calls++
+		return ui.Result{Action: ui.ActionOpenWindow, Selected: &items[0]}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if !openWindow {
+		t.Error("expected OpenWindow for the open-in-new-window action")
+	}
+	if openWB || resolveCalled {
+		t.Error("open-in-new-window must not trigger the Workbench prompt")
+	}
+	if calls != 1 {
+		t.Errorf("picker shown %d times, want 1", calls)
+	}
+}
+
+// TestRunProject_WorkbenchPickStandaloneUnaffected asserts that selecting a
+// standalone session switches to it without any Workbench prompt.
+func TestRunProject_WorkbenchPickStandaloneUnaffected(t *testing.T) {
+	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}})
+
+	resolveCalled := false
+	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.SessionTemplate {
+		resolveCalled = true
+		return []config.SessionTemplate{{Name: "gs-dev"}}
+	}
+	var switched string
+	d.SwitchToTarget = func(tmux deps.Tmux, target string) error { switched = target; return nil }
+	openWB := false
+	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		return ui.Result{
+			Action:   ui.ActionConfirm,
+			Selected: &ui.Item{Name: "scratch", Path: tmuxSessionPathPrefix + "scratch"},
+		}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if switched != "scratch" {
+		t.Errorf("SwitchToTarget target = %q, want %q", switched, "scratch")
+	}
+	if openWB || resolveCalled {
+		t.Error("standalone selection must not trigger the Workbench prompt")
 	}
 }

@@ -116,6 +116,40 @@ default_agents = ["claude --model opus4.8", "codex"]
 	}
 }
 
+func TestWorkbenchPickOnCreate(t *testing.T) {
+	// Defaults to false: nil receiver, nil section, and an empty section.
+	var nilCfg *Config
+	if nilCfg.WorkbenchPickOnCreate() {
+		t.Error("nil config: WorkbenchPickOnCreate() = true, want false")
+	}
+	if (&Config{}).WorkbenchPickOnCreate() {
+		t.Error("absent [workbench]: WorkbenchPickOnCreate() = true, want false")
+	}
+	if (&Config{WorkbenchOpts: &WorkbenchOptions{}}).WorkbenchPickOnCreate() {
+		t.Error("[workbench] without pick_on_create: = true, want false")
+	}
+	if !(&Config{WorkbenchOpts: &WorkbenchOptions{PickOnCreate: true}}).WorkbenchPickOnCreate() {
+		t.Error("pick_on_create=true: = false, want true")
+	}
+}
+
+func TestLoadWorkbenchPickOnCreate(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[workbench]
+pick_on_create = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.WorkbenchPickOnCreate() {
+		t.Fatal("expected [workbench] pick_on_create = true to load as enabled")
+	}
+}
+
 func TestLoadTaskAgentOutput(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
@@ -515,7 +549,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 
 		d := &Deps{
 			FS: &deps.MockFileSystem{
-				StatFunc:     func(path string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+				StatFunc: func(path string) (os.FileInfo, error) { return nil, os.ErrNotExist },
 				ReadFileFunc: func(path string) ([]byte, error) {
 					if path == popTomlPath {
 						return os.ReadFile(popTomlPath)

@@ -154,6 +154,9 @@ func mergeConfigOverlay(dst, src *Config, md toml.MetaData) {
 	if md.IsDefined("session_templates") {
 		dst.SessionTemplates = cloneSessionTemplates(src.SessionTemplates)
 	}
+	if md.IsDefined("workbench") {
+		dst.WorkbenchOpts = cloneWorkbenchOptions(src.WorkbenchOpts)
+	}
 	if md.IsDefined("queue") {
 		dst.Queue = cloneQueueConfig(src.Queue)
 	}
@@ -210,6 +213,14 @@ func cloneIntegrationsConfig(src *IntegrationsConfig) *IntegrationsConfig {
 		Skills:       append([]string(nil), src.Skills...),
 		SkillsPrefix: prefix,
 	}
+}
+
+func cloneWorkbenchOptions(src *WorkbenchOptions) *WorkbenchOptions {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	return &clone
 }
 
 func cloneSessionTemplates(src []SessionTemplate) []SessionTemplate {

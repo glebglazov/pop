@@ -171,6 +171,16 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
+	return applyWorkbench(d, tmpl, session, dir)
+}
+
+// applyWorkbench realizes a validated Workbench into the existing tmux session
+// `session`, with cwd = `dir`. It runs before_apply, then merges each window into
+// a live pop-owned match or creates it fresh, and finally focuses. It is the
+// shared core of both entry points (ADR-0075): the `workbench apply` command
+// (into the current session) and the picker create-path (into a session just
+// born for the Workbench).
+func applyWorkbench(d templateRuntimeDeps, tmpl config.SessionTemplate, session, dir string) error {
 	homeDir, err := d.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
@@ -283,6 +293,35 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 		}
 	}
 
+	return nil
+}
+
+// createSessionFromWorkbench creates a brand-new detached tmux session named
+// sessionName at path, realizes the Workbench into it, and removes the stray
+// shell window that `tmux new-session` always births so the session is *exactly*
+// the Workbench (ADR-0075). It does not attach — the caller switches/attaches
+// afterward. The Workbench must already be validated by the caller.
+func createSessionFromWorkbench(d templateRuntimeDeps, tmpl config.SessionTemplate, sessionName, path string) error {
+	if err := validateSessionTemplate(tmpl); err != nil {
+		return fmt.Errorf("workbench %q: %w", tmpl.Name, err)
+	}
+
+	// Create the detached session and capture its initial (stray) window id.
+	// Every Workbench window is created fresh — the stray window carries no
+	// @pop_wb_window stamp, so the merge walk never matches it — leaving the
+	// stray to be killed once the Workbench is realized.
+	strayWindow, err := d.Tmux.Command("new-session", "-d", "-s", sessionName, "-c", path, "-P", "-F", "#{window_id}")
+	if err != nil {
+		return fmt.Errorf("failed to create session %q: %w", sessionName, err)
+	}
+
+	if err := applyWorkbench(d, tmpl, sessionName, path); err != nil {
+		return err
+	}
+
+	if _, err := d.Tmux.Command("kill-window", "-t", strayWindow); err != nil {
+		return fmt.Errorf("failed to remove stray shell window: %w", err)
+	}
 	return nil
 }
 

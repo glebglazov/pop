@@ -1411,6 +1411,101 @@ func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 	}
 }
 
+func TestCreateSessionFromWorkbenchRemovesStrayWindow(t *testing.T) {
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name:        "dev",
+			BeforeApply: []string{"git pull"},
+			Windows: []config.SessionTemplateWindow{{
+				Name:   "work",
+				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
+			}},
+		}},
+	}
+
+	var calls [][]string
+	var beforeApplyRan bool
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch args[0] {
+			case "new-session":
+				return "@0", nil // the stray initial window id
+			case "list-windows":
+				// A brand-new session carries no @pop_wb_window stamp, so the
+				// merge probe finds nothing and every window is created fresh.
+				return "", nil
+			case "new-window":
+				return "%1", nil
+			default:
+				return "", nil
+			}
+		},
+	}
+	d := templateRuntimeDeps{
+		Tmux:        tmux,
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+		ErrOut:      io.Discard,
+		RunBeforeApply: func(command, dir string) error {
+			beforeApplyRan = true
+			if dir != "/repo/checkout" {
+				t.Fatalf("before_apply cwd = %q, want session directory %q", dir, "/repo/checkout")
+			}
+			return nil
+		},
+	}
+
+	tmpl, _ := findSessionTemplate(cfg.SessionTemplates, "dev")
+	if err := createSessionFromWorkbench(d, tmpl, "mysess", "/repo/checkout"); err != nil {
+		t.Fatalf("createSessionFromWorkbench() error: %v", err)
+	}
+
+	// The session is created detached first, capturing the stray window id.
+	want0 := []string{"new-session", "-d", "-s", "mysess", "-c", "/repo/checkout", "-P", "-F", "#{window_id}"}
+	if !reflect.DeepEqual(calls[0], want0) {
+		t.Fatalf("first call = %v, want %v", calls[0], want0)
+	}
+
+	if !beforeApplyRan {
+		t.Error("before_apply must run on the create path (run-every-apply)")
+	}
+
+	// The Workbench window is realized fresh (no live match), then stamped.
+	assertContainsCall(t, calls, []string{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "mysess:", "-n", "work", "-c", "/repo/checkout"})
+	assertContainsCall(t, calls, []string{"set-option", "-w", "-t", "mysess:work", "@pop_wb_window", "work"})
+
+	// The stray shell window is removed last, so the session is exactly the
+	// Workbench with no junk window.
+	last := calls[len(calls)-1]
+	wantLast := []string{"kill-window", "-t", "@0"}
+	if !reflect.DeepEqual(last, wantLast) {
+		t.Fatalf("last call = %v, want %v (stray window must be killed last)", last, wantLast)
+	}
+}
+
+func TestCreateSessionFromWorkbenchInvalidTemplate(t *testing.T) {
+	// A Workbench with no windows is invalid; nothing should be created.
+	var calls [][]string
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			return "", nil
+		},
+	}
+	d := templateRuntimeDeps{
+		Tmux:        tmux,
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+		ErrOut:      io.Discard,
+	}
+	err := createSessionFromWorkbench(d, config.SessionTemplate{Name: "empty"}, "mysess", "/repo")
+	if err == nil {
+		t.Fatal("expected error for a Workbench with no windows")
+	}
+	if len(calls) != 0 {
+		t.Fatalf("no tmux calls expected for an invalid Workbench, got %v", calls)
+	}
+}
+
 func assertContainsCall(t *testing.T, calls [][]string, want []string) {
 	t.Helper()
 	for _, call := range calls {
