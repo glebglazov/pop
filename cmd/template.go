@@ -159,7 +159,10 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	existing, err := sessionWindowNames(d.Tmux, session)
+	// Match target windows to live windows by pop-owned identity (ADR-0075),
+	// never by the clobberable window_name. A matched window is merged into; an
+	// unmatched one is created fresh.
+	liveWindows, err := liveWorkbenchWindows(d.Tmux, session)
 	if err != nil {
 		return fmt.Errorf("failed to list existing windows: %w", err)
 	}
@@ -169,51 +172,67 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 		paneID    string
 	}
 	var focusTargets []focusTarget
-	var firstCreatedWindowRef string
-	var firstCreatedWindowLeaf string
+	var firstWindowRef string
+	var firstWindowLeaf string
 
 	for _, window := range tmpl.Windows {
-		if existing[window.Name] {
-			warnf(d, "template window %q already exists in session %q, skipping\n", window.Name, session)
-			continue
-		}
-
 		rootCwd := effectiveCwd(dir, dir, window.Layout.Cwd, homeDir)
-		windowRef := session + ":" + window.Name
 
-		// Create the window with the initial pane
-		paneID, err := d.Tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":", "-n", window.Name, "-c", rootCwd)
-		if err != nil {
-			return fmt.Errorf("failed to create template window %q: %w", window.Name, err)
+		var windowRef string
+		var leafIDs, focusIDs []string
+
+		if liveRef, ok := liveWindows[window.Name]; ok {
+			// Matched a live pop-owned window: recurse and merge instead of
+			// skipping (ADR-0075), growing it without killing running panes.
+			windowRef = liveRef
+			liveNames, fallbackAnchor, err := livePaneIdentities(d.Tmux, liveRef)
+			if err != nil {
+				return fmt.Errorf("failed to inspect live window %q: %w", window.Name, err)
+			}
+			merged, err := mergeWindow(d.Tmux, window.Layout, liveNames, fallbackAnchor, dir, rootCwd, homeDir)
+			if err != nil {
+				return fmt.Errorf("failed to merge workbench window %q: %w", window.Name, err)
+			}
+			leafIDs, focusIDs = merged.leafIDs, merged.focusIDs
+		} else {
+			// No live match: create the window fresh.
+			windowRef = session + ":" + window.Name
+
+			// Create the window with the initial pane
+			paneID, err := d.Tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":", "-n", window.Name, "-c", rootCwd)
+			if err != nil {
+				return fmt.Errorf("failed to create template window %q: %w", window.Name, err)
+			}
+
+			// Stamp pop-owned window identity (ADR-0075): record the spec name in a
+			// user option that survives auto-rename, and disable auto-rename so the
+			// display name stays stable for humans.
+			if _, err := d.Tmux.Command("set-option", "-w", "-t", windowRef, "@pop_wb_window", window.Name); err != nil {
+				return fmt.Errorf("failed to stamp window identity for %q: %w", window.Name, err)
+			}
+			if _, err := d.Tmux.Command("set-option", "-w", "-t", windowRef, "automatic-rename", "off"); err != nil {
+				return fmt.Errorf("failed to disable automatic-rename for window %q: %w", window.Name, err)
+			}
+
+			// Realize the pane tree
+			result, err := realizePaneTree(d.Tmux, window.Layout, paneID, dir, rootCwd, homeDir)
+			if err != nil {
+				return fmt.Errorf("failed to realize pane tree for window %q: %w", window.Name, err)
+			}
+			leafIDs, focusIDs = result.leafIDs, result.focusIDs
 		}
 
-		// Stamp pop-owned window identity (ADR-0075): record the spec name in a
-		// user option that survives auto-rename, and disable auto-rename so the
-		// display name stays stable for humans.
-		if _, err := d.Tmux.Command("set-option", "-w", "-t", windowRef, "@pop_wb_window", window.Name); err != nil {
-			return fmt.Errorf("failed to stamp window identity for %q: %w", window.Name, err)
+		if firstWindowRef == "" && len(leafIDs) > 0 {
+			firstWindowRef = windowRef
+			firstWindowLeaf = leafIDs[0]
 		}
-		if _, err := d.Tmux.Command("set-option", "-w", "-t", windowRef, "automatic-rename", "off"); err != nil {
-			return fmt.Errorf("failed to disable automatic-rename for window %q: %w", window.Name, err)
-		}
-
-		// Realize the pane tree
-		result, err := realizePaneTree(d.Tmux, window.Layout, paneID, dir, rootCwd, homeDir)
-		if err != nil {
-			return fmt.Errorf("failed to realize pane tree for window %q: %w", window.Name, err)
-		}
-
-		if firstCreatedWindowRef == "" && len(result.leafIDs) > 0 {
-			firstCreatedWindowRef = windowRef
-			firstCreatedWindowLeaf = result.leafIDs[0]
-		}
-		for _, focusID := range result.focusIDs {
+		for _, focusID := range focusIDs {
 			focusTargets = append(focusTargets, focusTarget{windowRef: windowRef, paneID: focusID})
 		}
 	}
 
-	// Activate the requested window and pane. Default to the first created
-	// window's first leaf pane when no explicit focus was requested.
+	// Activate the requested window and pane. Default to the first window's
+	// first leaf pane when no explicit focus was requested.
 	if len(focusTargets) > 1 {
 		warnf(d, "multiple panes requested focus; using the first one\n")
 	}
@@ -225,16 +244,177 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 		if _, err := d.Tmux.Command("select-pane", "-t", target.paneID); err != nil {
 			return fmt.Errorf("failed to select pane %q: %w", target.paneID, err)
 		}
-	} else if firstCreatedWindowRef != "" {
-		if _, err := d.Tmux.Command("select-window", "-t", firstCreatedWindowRef); err != nil {
-			return fmt.Errorf("failed to select window %q: %w", firstCreatedWindowRef, err)
+	} else if firstWindowRef != "" {
+		if _, err := d.Tmux.Command("select-window", "-t", firstWindowRef); err != nil {
+			return fmt.Errorf("failed to select window %q: %w", firstWindowRef, err)
 		}
-		if _, err := d.Tmux.Command("select-pane", "-t", firstCreatedWindowLeaf); err != nil {
-			return fmt.Errorf("failed to select pane %q: %w", firstCreatedWindowLeaf, err)
+		if _, err := d.Tmux.Command("select-pane", "-t", firstWindowLeaf); err != nil {
+			return fmt.Errorf("failed to select pane %q: %w", firstWindowLeaf, err)
 		}
 	}
 
 	return nil
+}
+
+// mergeResult collects the leaf pane IDs touched by a merge walk (live survivors
+// plus newly appended panes), any panes requesting focus, and the subtree's
+// anchor pane — the representative pane a parent container splits off and resizes.
+type mergeResult struct {
+	anchor   string
+	leafIDs  []string
+	focusIDs []string
+}
+
+// mergeWindow merges a target window's layout into a live, pop-owned window
+// (ADR-0075). It is the entry point that decides whether the window root is a
+// single leaf or a container.
+func mergeWindow(tmux deps.Tmux, layout *config.SessionTemplatePaneSpec, liveNames map[string]string, fallbackAnchor, sessionDir, rootCwd, homeDir string) (mergeResult, error) {
+	if len(layout.Panes) == 0 {
+		if id := liveNames[layout.Name]; id != "" {
+			// The sole pane survived: leave its process intact.
+			res := mergeResult{anchor: id, leafIDs: []string{id}}
+			if layout.Focus {
+				res.focusIDs = append(res.focusIDs, id)
+			}
+			return res, nil
+		}
+		// Window matched but its only named pane is gone — rebuild into the
+		// window's surviving pane rather than spawning a duplicate window.
+		realized, err := realizePaneTree(tmux, layout, fallbackAnchor, sessionDir, rootCwd, homeDir)
+		if err != nil {
+			return mergeResult{}, err
+		}
+		return mergeResult{anchor: fallbackAnchor, leafIDs: realized.leafIDs, focusIDs: realized.focusIDs}, nil
+	}
+	return mergeContainer(tmux, layout.Panes, layout.Children, liveNames, fallbackAnchor, sessionDir, rootCwd, homeDir)
+}
+
+// mergePaneTree merges a present-live subtree. A matched leaf is left untouched
+// (its process survives); a present container recurses. Wholly-missing subtrees
+// are never routed here — their container parent builds them fresh.
+func mergePaneTree(tmux deps.Tmux, pane *config.SessionTemplatePaneSpec, liveNames map[string]string, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
+	if len(pane.Panes) == 0 {
+		id := liveNames[pane.Name]
+		res := mergeResult{anchor: id, leafIDs: []string{id}}
+		if pane.Focus {
+			res.focusIDs = append(res.focusIDs, id)
+		}
+		return res, nil
+	}
+	return mergeContainer(tmux, pane.Panes, pane.Children, liveNames, "", sessionDir, parentCwd, homeDir)
+}
+
+// mergeContainer walks a container's children in target order. Present children
+// are merged (recursing into live panes); missing children are appended by
+// splitting off the nearest live sibling — forward off the last placed sibling,
+// or before the next live sibling when none precedes. After placement the
+// container is reproportioned to the target weights, which may resize (never
+// kill) surviving panes. fallbackAnchor seeds the split when the container has no
+// live children at all (only reachable at a matched window root).
+func mergeContainer(tmux deps.Tmux, children []config.SessionTemplatePaneSpec, direction string, liveNames map[string]string, fallbackAnchor, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
+	n := len(children)
+	if n == 0 {
+		return mergeResult{}, nil
+	}
+
+	splitFlag := "-h" // columns = side-by-side
+	if direction == "rows" {
+		splitFlag = "-v" // rows = stacked
+	}
+
+	present := make([]bool, n)
+	for i := range children {
+		present[i] = subtreeLive(&children[i], liveNames)
+	}
+
+	childAnchors := make([]string, n)
+	var combined mergeResult
+	lastAnchor := ""
+
+	for i := range children {
+		childCwd := effectiveCwd(sessionDir, parentCwd, children[i].Cwd, homeDir)
+
+		if present[i] {
+			merged, err := mergePaneTree(tmux, &children[i], liveNames, sessionDir, childCwd, homeDir)
+			if err != nil {
+				return mergeResult{}, err
+			}
+			childAnchors[i] = merged.anchor
+			combined.leafIDs = append(combined.leafIDs, merged.leafIDs...)
+			combined.focusIDs = append(combined.focusIDs, merged.focusIDs...)
+			lastAnchor = merged.anchor
+			continue
+		}
+
+		// Missing child: splice it in beside its live siblings, preserving
+		// target order. Split forward off the last placed sibling; if none
+		// precedes it, split before the next live sibling (-b).
+		var splitArgs []string
+		if lastAnchor != "" {
+			splitArgs = []string{"split-window", splitFlag, "-t", lastAnchor, "-P", "-F", "#{pane_id}", "-c", childCwd}
+		} else {
+			anchor := nextLiveAnchor(children, present, liveNames, i)
+			if anchor == "" {
+				anchor = fallbackAnchor
+			}
+			splitArgs = []string{"split-window", splitFlag, "-b", "-t", anchor, "-P", "-F", "#{pane_id}", "-c", childCwd}
+		}
+		newPaneID, err := tmux.Command(splitArgs...)
+		if err != nil {
+			return mergeResult{}, fmt.Errorf("failed to split for pane %q: %w", children[i].Name, err)
+		}
+		realized, err := realizePaneTree(tmux, &children[i], newPaneID, sessionDir, childCwd, homeDir)
+		if err != nil {
+			return mergeResult{}, err
+		}
+		childAnchors[i] = newPaneID
+		combined.leafIDs = append(combined.leafIDs, realized.leafIDs...)
+		combined.focusIDs = append(combined.focusIDs, realized.focusIDs...)
+		lastAnchor = newPaneID
+	}
+
+	// Reproportion to honor target weights. Surviving panes may shrink or grow
+	// (a new sibling must take cells) but are never killed.
+	if n > 1 {
+		if err := resizePanesByWeight(tmux, childAnchors, children, direction); err != nil {
+			return mergeResult{}, fmt.Errorf("failed to reproportion panes: %w", err)
+		}
+	}
+	combined.anchor = childAnchors[0]
+	return combined, nil
+}
+
+// subtreeLive reports whether any named leaf in the subtree matches a live pane.
+func subtreeLive(pane *config.SessionTemplatePaneSpec, liveNames map[string]string) bool {
+	return firstLiveLeaf(pane, liveNames) != ""
+}
+
+// firstLiveLeaf returns the live pane id of the first named leaf in the subtree
+// (tree order) that matches a live pane, or "" if none is present.
+func firstLiveLeaf(pane *config.SessionTemplatePaneSpec, liveNames map[string]string) string {
+	if len(pane.Panes) == 0 {
+		if pane.Name == "" {
+			return ""
+		}
+		return liveNames[pane.Name]
+	}
+	for i := range pane.Panes {
+		if id := firstLiveLeaf(&pane.Panes[i], liveNames); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// nextLiveAnchor returns the anchor pane of the first present sibling after
+// index `from`, or "" if every following sibling is missing.
+func nextLiveAnchor(children []config.SessionTemplatePaneSpec, present []bool, liveNames map[string]string, from int) string {
+	for j := from + 1; j < len(children); j++ {
+		if present[j] {
+			return firstLiveLeaf(&children[j], liveNames)
+		}
+	}
+	return ""
 }
 
 // paneTreeResult collects the leaf pane IDs created by a pane tree, plus any
@@ -460,19 +640,59 @@ func validateSessionTemplate(tmpl config.SessionTemplate) error {
 	return nil
 }
 
-// sessionWindowNames returns the set of window names in the given tmux session.
-func sessionWindowNames(tmux deps.Tmux, session string) (map[string]bool, error) {
-	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
+// liveWorkbenchWindows maps each pop-stamped window's @pop_wb_window identity to
+// its tmux window id within the session. Windows lacking the stamp (anything not
+// born of a Workbench apply) are skipped — identity never lives in the
+// clobberable window_name (ADR-0075).
+func liveWorkbenchWindows(tmux deps.Tmux, session string) (map[string]string, error) {
+	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{@pop_wb_window}\t#{window_id}")
 	if err != nil {
 		return nil, err
 	}
-	names := make(map[string]bool)
+	windows := make(map[string]string)
 	for _, line := range strings.Split(out, "\n") {
-		if line != "" {
-			names[line] = true
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 || parts[0] == "" {
+			continue
+		}
+		if _, ok := windows[parts[0]]; !ok {
+			windows[parts[0]] = parts[1]
 		}
 	}
-	return names, nil
+	return windows, nil
+}
+
+// livePaneIdentities maps the @pop_pane identity of each stamped pane in a window
+// to its tmux pane id, and returns the window's first pane id as a fallback
+// anchor for the rare matched-window-with-no-recognizable-panes case.
+func livePaneIdentities(tmux deps.Tmux, windowRef string) (map[string]string, string, error) {
+	out, err := tmux.Command("list-panes", "-t", windowRef, "-F", "#{@pop_pane}\t#{pane_id}")
+	if err != nil {
+		return nil, "", err
+	}
+	names := make(map[string]string)
+	fallback := ""
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if fallback == "" {
+			fallback = parts[1]
+		}
+		if parts[0] != "" {
+			if _, ok := names[parts[0]]; !ok {
+				names[parts[0]] = parts[1]
+			}
+		}
+	}
+	return names, fallback, nil
 }
 
 // effectiveCwd returns the working directory for a pane given its raw cwd
@@ -507,10 +727,12 @@ func warnf(d templateRuntimeDeps, format string, args ...any) {
 }
 
 // validatePaneSpec validates a pane spec recursively. A pane is either a leaf
-// (has name and command, no panes) or a container (has direction and panes).
+// (has a command, no panes) or a container (has direction and panes). A leaf
+// name is optional: an unnamed leaf is anonymous and always (re)created on
+// reapply (ADR-0075 B1), trading reapply-safety for not having to name it.
 func validatePaneSpec(pane *config.SessionTemplatePaneSpec, path string) error {
 	isContainer := len(pane.Panes) > 0
-	
+
 	if isContainer {
 		// Container node
 		if pane.Children != "rows" && pane.Children != "columns" {
@@ -525,9 +747,6 @@ func validatePaneSpec(pane *config.SessionTemplatePaneSpec, path string) error {
 		}
 	} else {
 		// Leaf node
-		if pane.Name == "" {
-			return fmt.Errorf("%spane name is required", path)
-		}
 		if pane.Command == "" {
 			return fmt.Errorf("%spane command is required", path)
 		}

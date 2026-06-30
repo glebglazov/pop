@@ -108,7 +108,7 @@ func TestRunTemplateApplyWith(t *testing.T) {
 
 	want := [][]string{
 		{"display-message", "-p", "#S"},
-		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
+		{"list-windows", "-t", "current-session", "-F", "#{@pop_wb_window}\t#{window_id}"},
 		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/checkout"},
 		{"set-option", "-w", "-t", "current-session:work", "@pop_wb_window", "work"},
 		{"set-option", "-w", "-t", "current-session:work", "automatic-rename", "off"},
@@ -594,7 +594,7 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 
 	want := [][]string{
 		{"display-message", "-p", "#S"},
-		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
+		{"list-windows", "-t", "current-session", "-F", "#{@pop_wb_window}\t#{window_id}"},
 		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/checkout"},
 		{"set-option", "-w", "-t", "current-session:work", "@pop_wb_window", "work"},
 		{"set-option", "-w", "-t", "current-session:work", "automatic-rename", "off"},
@@ -615,19 +615,19 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 	}
 }
 
-func TestRunTemplateApplyWithSkipExistingWindow(t *testing.T) {
+func TestRunTemplateApplyWithUnstampedWindowCreatesFresh(t *testing.T) {
+	// A live window whose display name happens to equal a target window but
+	// which carries no @pop_wb_window stamp is NOT matched (identity never lives
+	// in window_name, ADR-0075): the target window is created fresh.
 	cfg := &config.Config{
 		SessionTemplates: []config.SessionTemplate{{
 			Name: "dev",
 			Windows: []config.SessionTemplateWindow{
 				{Name: "work", Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}},
-				{Name: "logs", Layout: &config.SessionTemplatePaneSpec{Name: "tail", Command: "tail -f app.log"}},
 			},
 		}},
 	}
 	var calls [][]string
-	var warnings bytes.Buffer
-	newWindowCount := 0
 	tmux := &deps.MockTmux{
 		CommandFunc: func(args ...string) (string, error) {
 			calls = append(calls, append([]string(nil), args...))
@@ -635,46 +635,42 @@ func TestRunTemplateApplyWithSkipExistingWindow(t *testing.T) {
 			case "display-message":
 				return "current-session", nil
 			case "list-windows":
-				return "work\n", nil
+				// One live window with display name "work" but no stamp:
+				// empty @pop_wb_window field before the tab.
+				return "\t@5\n", nil
 			case "new-window":
-				id := fmt.Sprintf("%%%d", newWindowCount)
-				newWindowCount++
-				return id, nil
+				return "%0", nil
 			default:
 				return "", nil
 			}
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:   tmux,
-		Getwd:  func() (string, error) { return "/repo/checkout", nil },
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
-		ErrOut: &warnings,
+		ErrOut:      io.Discard,
 	}
 
 	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// Only the "logs" window should be created; "work" is skipped.
+	// The window is built fresh (no merge, no list-panes inspection).
 	want := [][]string{
 		{"display-message", "-p", "#S"},
-		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
-		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "logs", "-c", "/repo/checkout"},
-		{"set-option", "-w", "-t", "current-session:logs", "@pop_wb_window", "logs"},
-		{"set-option", "-w", "-t", "current-session:logs", "automatic-rename", "off"},
-		{"select-pane", "-t", "%0", "-T", "tail"},
-		{"set-option", "-p", "-t", "%0", "@pop_pane", "tail"},
-		{"send-keys", "-t", "%0", "tail -f app.log", "Enter"},
-		{"select-window", "-t", "current-session:logs"},
+		{"list-windows", "-t", "current-session", "-F", "#{@pop_wb_window}\t#{window_id}"},
+		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/checkout"},
+		{"set-option", "-w", "-t", "current-session:work", "@pop_wb_window", "work"},
+		{"set-option", "-w", "-t", "current-session:work", "automatic-rename", "off"},
+		{"select-pane", "-t", "%0", "-T", "server"},
+		{"set-option", "-p", "-t", "%0", "@pop_pane", "server"},
+		{"send-keys", "-t", "%0", "go test ./...", "Enter"},
+		{"select-window", "-t", "current-session:work"},
 		{"select-pane", "-t", "%0"},
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("tmux calls = %#v, want %#v", calls, want)
-	}
-	warnStr := warnings.String()
-	if !strings.Contains(warnStr, "work") || !strings.Contains(warnStr, "skipping") {
-		t.Fatalf("expected skip warning for existing window, got %q", warnStr)
 	}
 }
 
@@ -977,6 +973,288 @@ func TestRealizePaneTreeStampsNamedLeafSkipsUnnamed(t *testing.T) {
 	for _, call := range calls {
 		if len(call) >= 5 && call[0] == "set-option" && call[1] == "-p" && call[4] == "@pop_pane" {
 			t.Fatalf("unnamed leaf must not be stamped with @pop_pane, got %v", call)
+		}
+	}
+}
+
+// mergeMockTmux returns a MockTmux for merge tests: it reports the live window
+// `dev` (id @1) carrying the given @pop_pane→pane_id panes, fixed window
+// dimensions, and deterministic split-window ids starting at %10.
+func mergeMockTmux(calls *[][]string, livePanes, width, height string) *deps.MockTmux {
+	splitN := 0
+	return &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			*calls = append(*calls, append([]string(nil), args...))
+			switch args[0] {
+			case "display-message":
+				if len(args) > 2 && args[1] == "-p" {
+					switch args[2] {
+					case "#{window_width}":
+						return width, nil
+					case "#{window_height}":
+						return height, nil
+					}
+				}
+				return "current-session", nil
+			case "list-windows":
+				return "dev\t@1\n", nil
+			case "list-panes":
+				return livePanes, nil
+			case "split-window":
+				splitN++
+				return fmt.Sprintf("%%%d", 9+splitN), nil
+			default:
+				return "", nil
+			}
+		},
+	}
+}
+
+func sentCommands(calls [][]string) map[string]bool {
+	sent := make(map[string]bool)
+	for _, call := range calls {
+		if call[0] == "send-keys" && len(call) >= 4 {
+			sent[call[3]] = true
+		}
+	}
+	return sent
+}
+
+func sentToPane(calls [][]string, paneID string) bool {
+	for _, call := range calls {
+		if call[0] == "send-keys" && len(call) >= 3 && call[2] == paneID {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRunTemplateApplyMergeSupersetAppend(t *testing.T) {
+	// Reference transition (ADR-0075): a live window shaped by `minimal`
+	// (rows: vim, claude) reapplied with `gs-dev` (those two rows plus a third
+	// row of three columns) keeps the live vim/claude panes and appends only
+	// the third row.
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name: "gs-dev",
+			Windows: []config.SessionTemplateWindow{{
+				Name: "dev",
+				Layout: &config.SessionTemplatePaneSpec{
+					Children: "rows",
+					Panes: []config.SessionTemplatePaneSpec{
+						{Name: "vim", Command: "vim"},
+						{Name: "claude", Command: "claude"},
+						{
+							Children: "columns",
+							Panes: []config.SessionTemplatePaneSpec{
+								{Name: "build", Command: "echo build"},
+								{Name: "services", Command: "echo services"},
+								{Name: "vite", Command: "echo vite"},
+							},
+						},
+					},
+				},
+			}},
+		}},
+	}
+	var calls [][]string
+	tmux := mergeMockTmux(&calls, "vim\t%1\nclaude\t%2\n", "200", "60")
+	d := templateRuntimeDeps{
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+		ErrOut:      io.Discard,
+	}
+
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "gs-dev"); err != nil {
+		t.Fatalf("runTemplateApplyWith() error: %v", err)
+	}
+
+	// Live vim/claude panes survive: their commands are never re-sent (process
+	// intact) and they are never respawned or killed.
+	if sentToPane(calls, "%1") {
+		t.Error("vim pane %1 should be left untouched, but a command was sent to it")
+	}
+	if sentToPane(calls, "%2") {
+		t.Error("claude pane %2 should be left untouched, but a command was sent to it")
+	}
+	for _, call := range calls {
+		if call[0] == "respawn-pane" || call[0] == "kill-pane" {
+			t.Fatalf("merge must never respawn or kill panes, got %v", call)
+		}
+	}
+
+	// The third row is appended by splitting -v off the live claude pane (%2).
+	assertContainsCall(t, calls, []string{"split-window", "-v", "-t", "%2", "-P", "-F", "#{pane_id}", "-c", "/repo"})
+
+	// Only the third row's three panes are built (commands sent + identity stamped).
+	sent := sentCommands(calls)
+	for _, cmd := range []string{"echo build", "echo services", "echo vite"} {
+		if !sent[cmd] {
+			t.Errorf("expected the appended row to run %q", cmd)
+		}
+	}
+	if sent["vim"] || sent["claude"] {
+		t.Error("survivor commands must not be re-run on reapply")
+	}
+	for _, name := range []string{"build", "services", "vite"} {
+		found := false
+		for _, call := range calls {
+			if call[0] == "set-option" && len(call) >= 6 && call[1] == "-p" && call[4] == "@pop_pane" && call[5] == name {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("appended pane %q should be stamped with @pop_pane", name)
+		}
+	}
+
+	// Survivors are reproportioned to the target weights (three equal rows of a
+	// 60-cell window = 20 cells each); no pane is killed.
+	assertContainsCall(t, calls, []string{"resize-pane", "-t", "%1", "-y", "20"})
+	assertContainsCall(t, calls, []string{"resize-pane", "-t", "%2", "-y", "20"})
+}
+
+func TestRunTemplateApplyMergeMidRowColumnInsertion(t *testing.T) {
+	// A missing column inside an otherwise-live row is spliced in beside its
+	// live left sibling, in the correct position.
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name: "row",
+			Windows: []config.SessionTemplateWindow{{
+				Name: "dev",
+				Layout: &config.SessionTemplatePaneSpec{
+					Children: "columns",
+					Panes: []config.SessionTemplatePaneSpec{
+						{Name: "left", Command: "echo left"},
+						{Name: "middle", Command: "echo middle"},
+						{Name: "right", Command: "echo right"},
+					},
+				},
+			}},
+		}},
+	}
+	var calls [][]string
+	// middle is missing; left=%1, right=%2 are live.
+	tmux := mergeMockTmux(&calls, "left\t%1\nright\t%2\n", "90", "30")
+	d := templateRuntimeDeps{
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+		ErrOut:      io.Discard,
+	}
+
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "row"); err != nil {
+		t.Fatalf("runTemplateApplyWith() error: %v", err)
+	}
+
+	// middle is inserted by splitting -h off the live left pane (%1), so it
+	// lands between left and right rather than after right.
+	assertContainsCall(t, calls, []string{"split-window", "-h", "-t", "%1", "-P", "-F", "#{pane_id}", "-c", "/repo"})
+
+	sent := sentCommands(calls)
+	if !sent["echo middle"] {
+		t.Error("the missing middle column should be created")
+	}
+	if sent["echo left"] || sent["echo right"] {
+		t.Error("live left/right columns must not be re-run")
+	}
+	if sentToPane(calls, "%1") || sentToPane(calls, "%2") {
+		t.Error("live columns must be left untouched")
+	}
+}
+
+func TestRunTemplateApplyMergeReproportionsSurvivors(t *testing.T) {
+	// Reapplying with new weights reproportions the surviving panes without
+	// re-running or killing them.
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name: "grow",
+			Windows: []config.SessionTemplateWindow{{
+				Name: "dev",
+				Layout: &config.SessionTemplatePaneSpec{
+					Children: "rows",
+					Panes: []config.SessionTemplatePaneSpec{
+						{Name: "vim", Command: "vim", Weight: 3},
+						{Name: "claude", Command: "claude", Weight: 1},
+					},
+				},
+			}},
+		}},
+	}
+	var calls [][]string
+	tmux := mergeMockTmux(&calls, "vim\t%1\nclaude\t%2\n", "100", "80")
+	d := templateRuntimeDeps{
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+		ErrOut:      io.Discard,
+	}
+
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "grow"); err != nil {
+		t.Fatalf("runTemplateApplyWith() error: %v", err)
+	}
+
+	// No panes are added (both survive) and none are re-run.
+	for _, call := range calls {
+		if call[0] == "split-window" {
+			t.Fatalf("no split expected when all panes survive, got %v", call)
+		}
+		if call[0] == "send-keys" {
+			t.Fatalf("survivors must not be re-run, got %v", call)
+		}
+	}
+
+	// vim weight 3 / claude weight 1 over an 80-cell window → 60 / 20 cells.
+	assertContainsCall(t, calls, []string{"resize-pane", "-t", "%1", "-y", "60"})
+	assertContainsCall(t, calls, []string{"resize-pane", "-t", "%2", "-y", "20"})
+}
+
+func TestRunTemplateApplyMergeRecreatesUnnamedLeaf(t *testing.T) {
+	// Unnamed leaves are anonymous (ADR-0075 B1): with no identity they cannot
+	// be matched, so a reapply always (re)creates them — even when a named
+	// sibling survives.
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name: "mixed",
+			Windows: []config.SessionTemplateWindow{{
+				Name: "dev",
+				Layout: &config.SessionTemplatePaneSpec{
+					Children: "rows",
+					Panes: []config.SessionTemplatePaneSpec{
+						{Name: "vim", Command: "vim"},
+						{Command: "htop"}, // unnamed leaf
+					},
+				},
+			}},
+		}},
+	}
+	var calls [][]string
+	tmux := mergeMockTmux(&calls, "vim\t%1\n", "100", "40")
+	d := templateRuntimeDeps{
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+		ErrOut:      io.Discard,
+	}
+
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "mixed"); err != nil {
+		t.Fatalf("runTemplateApplyWith() error: %v", err)
+	}
+
+	// The unnamed leaf is appended (split off the live vim pane) and its
+	// command run; vim itself is untouched.
+	assertContainsCall(t, calls, []string{"split-window", "-v", "-t", "%1", "-P", "-F", "#{pane_id}", "-c", "/repo"})
+	if !sentCommands(calls)["htop"] {
+		t.Error("unnamed leaf should be recreated on reapply")
+	}
+	if sentToPane(calls, "%1") {
+		t.Error("live vim pane must be left untouched")
+	}
+	// The recreated unnamed leaf is never stamped with @pop_pane.
+	for _, call := range calls {
+		if call[0] == "set-option" && len(call) >= 5 && call[1] == "-p" && call[4] == "@pop_pane" {
+			t.Fatalf("unnamed leaf must not be stamped, got %v", call)
 		}
 	}
 }

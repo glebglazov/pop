@@ -297,6 +297,52 @@ command = "go test ./..."
 	}
 }
 
+func TestLoadSessionTemplatesDuplicatePaneNameIsReapplyUnsafe(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[[session_templates]]
+name = "unsafe"
+
+[[session_templates.windows]]
+name = "dev"
+
+[session_templates.windows.layout]
+children = "rows"
+
+[[session_templates.windows.layout.panes]]
+name = "shell"
+command = "bash"
+
+[[session_templates.windows.layout.panes]]
+name = "shell"
+command = "zsh"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Duplicate pane names are non-fatal: the template still loads (unlike a
+	// duplicate window name, which excludes it).
+	if len(cfg.SessionTemplates) != 1 || cfg.SessionTemplates[0].Name != "unsafe" {
+		t.Fatalf("template should still load despite duplicate pane name, got %#v", cfg.SessionTemplates)
+	}
+
+	foundFinding := false
+	for _, f := range cfg.Findings {
+		if strings.Contains(f.Message, "duplicate pane name") && strings.Contains(f.Message, "reapply-unsafe") {
+			foundFinding = true
+			break
+		}
+	}
+	if !foundFinding {
+		t.Fatalf("expected reapply-unsafe duplicate-pane-name finding, got %#v", cfg.Findings)
+	}
+}
+
 func TestLoadWorkbenches(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`

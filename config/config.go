@@ -1246,6 +1246,21 @@ func sessionTemplateFindings(path string, templates []SessionTemplate) ([]Findin
 				break
 			}
 			names[w.Name] = true
+
+			// A duplicate pane name within one window makes that Workbench
+			// reapply-unsafe (ADR-0075): merge matches live panes by name, so
+			// two leaves sharing a name cannot be told apart. This is a
+			// non-fatal finding — the template still loads and applies; it just
+			// loses its reapply guarantee for that window.
+			for _, dup := range duplicatePaneSpecNames(w.Layout) {
+				findings = append(findings, Finding{
+					Path: fmt.Sprintf("session_templates[%d].windows[%d]", i, j),
+					Message: fmt.Sprintf(
+						"%s: workbench %q window %q has duplicate pane name %q; reapply-unsafe",
+						path, tmpl.Name, w.Name, dup,
+					),
+				})
+			}
 		}
 
 		if !invalid {
@@ -1254,6 +1269,37 @@ func sessionTemplateFindings(path string, templates []SessionTemplate) ([]Findin
 	}
 
 	return findings, valid
+}
+
+// duplicatePaneSpecNames returns the leaf pane-spec names that appear more than
+// once anywhere in a window's layout tree, in first-duplicate order. Unnamed
+// leaves are anonymous (ADR-0075 B1) and never collide.
+func duplicatePaneSpecNames(layout *SessionTemplatePaneSpec) []string {
+	if layout == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	flagged := make(map[string]bool)
+	var dups []string
+	var walk func(p *SessionTemplatePaneSpec)
+	walk = func(p *SessionTemplatePaneSpec) {
+		if len(p.Panes) == 0 {
+			if p.Name == "" {
+				return
+			}
+			if seen[p.Name] && !flagged[p.Name] {
+				flagged[p.Name] = true
+				dups = append(dups, p.Name)
+			}
+			seen[p.Name] = true
+			return
+		}
+		for i := range p.Panes {
+			walk(&p.Panes[i])
+		}
+	}
+	walk(layout)
+	return dups
 }
 
 // projectEntryFindings collects a finding for every project entry whose
