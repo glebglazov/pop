@@ -187,6 +187,16 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 			return fmt.Errorf("failed to create template window %q: %w", window.Name, err)
 		}
 
+		// Stamp pop-owned window identity (ADR-0075): record the spec name in a
+		// user option that survives auto-rename, and disable auto-rename so the
+		// display name stays stable for humans.
+		if _, err := d.Tmux.Command("set-option", "-w", "-t", windowRef, "@pop_wb_window", window.Name); err != nil {
+			return fmt.Errorf("failed to stamp window identity for %q: %w", window.Name, err)
+		}
+		if _, err := d.Tmux.Command("set-option", "-w", "-t", windowRef, "automatic-rename", "off"); err != nil {
+			return fmt.Errorf("failed to disable automatic-rename for window %q: %w", window.Name, err)
+		}
+
 		// Realize the pane tree
 		result, err := realizePaneTree(d.Tmux, window.Layout, paneID, dir, rootCwd, homeDir)
 		if err != nil {
@@ -243,6 +253,14 @@ func realizePaneTree(tmux deps.Tmux, pane *config.SessionTemplatePaneSpec, paneI
 		// Leaf node: set title and send command
 		if _, err := tmux.Command("select-pane", "-t", paneID, "-T", pane.Name); err != nil {
 			return paneTreeResult{}, fmt.Errorf("failed to set pane title %q: %w", pane.Name, err)
+		}
+		// Stamp pop-owned pane identity (ADR-0075/ADR-0058) on named leaves so a
+		// later reapply can match this pane via #{@pop_pane} regardless of how its
+		// display title gets clobbered. Unnamed leaves are anonymous (B1) — no stamp.
+		if pane.Name != "" {
+			if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_pane", pane.Name); err != nil {
+				return paneTreeResult{}, fmt.Errorf("failed to stamp pane identity %q: %w", pane.Name, err)
+			}
 		}
 		if _, err := tmux.Command("send-keys", "-t", paneID, pane.Command, "Enter"); err != nil {
 			return paneTreeResult{}, fmt.Errorf("failed to send pane command %q: %w", pane.Command, err)

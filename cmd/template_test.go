@@ -110,7 +110,10 @@ func TestRunTemplateApplyWith(t *testing.T) {
 		{"display-message", "-p", "#S"},
 		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
 		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/checkout"},
+		{"set-option", "-w", "-t", "current-session:work", "@pop_wb_window", "work"},
+		{"set-option", "-w", "-t", "current-session:work", "automatic-rename", "off"},
 		{"select-pane", "-t", "%42", "-T", "server"},
+		{"set-option", "-p", "-t", "%42", "@pop_pane", "server"},
 		{"send-keys", "-t", "%42", "go test ./...", "Enter"},
 		{"select-window", "-t", "current-session:work"},
 		{"select-pane", "-t", "%42"},
@@ -593,10 +596,16 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 		{"display-message", "-p", "#S"},
 		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
 		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/checkout"},
+		{"set-option", "-w", "-t", "current-session:work", "@pop_wb_window", "work"},
+		{"set-option", "-w", "-t", "current-session:work", "automatic-rename", "off"},
 		{"select-pane", "-t", "%0", "-T", "server"},
+		{"set-option", "-p", "-t", "%0", "@pop_pane", "server"},
 		{"send-keys", "-t", "%0", "go test ./...", "Enter"},
 		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "logs", "-c", "/repo/checkout"},
+		{"set-option", "-w", "-t", "current-session:logs", "@pop_wb_window", "logs"},
+		{"set-option", "-w", "-t", "current-session:logs", "automatic-rename", "off"},
 		{"select-pane", "-t", "%1", "-T", "tail"},
+		{"set-option", "-p", "-t", "%1", "@pop_pane", "tail"},
 		{"send-keys", "-t", "%1", "tail -f app.log", "Enter"},
 		{"select-window", "-t", "current-session:work"},
 		{"select-pane", "-t", "%0"},
@@ -652,7 +661,10 @@ func TestRunTemplateApplyWithSkipExistingWindow(t *testing.T) {
 		{"display-message", "-p", "#S"},
 		{"list-windows", "-t", "current-session", "-F", "#{window_name}"},
 		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "logs", "-c", "/repo/checkout"},
+		{"set-option", "-w", "-t", "current-session:logs", "@pop_wb_window", "logs"},
+		{"set-option", "-w", "-t", "current-session:logs", "automatic-rename", "off"},
 		{"select-pane", "-t", "%0", "-T", "tail"},
+		{"set-option", "-p", "-t", "%0", "@pop_pane", "tail"},
 		{"send-keys", "-t", "%0", "tail -f app.log", "Enter"},
 		{"select-window", "-t", "current-session:logs"},
 		{"select-pane", "-t", "%0"},
@@ -936,6 +948,37 @@ func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
 	// First focus wins: the initial pane (%0) is focused, not the split pane.
 	assertContainsCall(t, calls, []string{"select-pane", "-t", "%0"})
 	assertNotContainsCall(t, calls, []string{"select-pane", "-t", "%1"})
+}
+
+func TestRealizePaneTreeStampsNamedLeafSkipsUnnamed(t *testing.T) {
+	var calls [][]string
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			return "", nil
+		},
+	}
+
+	// Named leaf: identity is stamped.
+	calls = nil
+	named := &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}
+	if _, err := realizePaneTree(tmux, named, "%7", "/repo", "/repo", "/home/user"); err != nil {
+		t.Fatalf("realizePaneTree(named) error: %v", err)
+	}
+	assertContainsCall(t, calls, []string{"select-pane", "-t", "%7", "-T", "server"})
+	assertContainsCall(t, calls, []string{"set-option", "-p", "-t", "%7", "@pop_pane", "server"})
+
+	// Unnamed leaf: no @pop_pane stamp.
+	calls = nil
+	unnamed := &config.SessionTemplatePaneSpec{Command: "htop"}
+	if _, err := realizePaneTree(tmux, unnamed, "%8", "/repo", "/repo", "/home/user"); err != nil {
+		t.Fatalf("realizePaneTree(unnamed) error: %v", err)
+	}
+	for _, call := range calls {
+		if len(call) >= 5 && call[0] == "set-option" && call[1] == "-p" && call[4] == "@pop_pane" {
+			t.Fatalf("unnamed leaf must not be stamped with @pop_pane, got %v", call)
+		}
+	}
 }
 
 func assertContainsCall(t *testing.T, calls [][]string, want []string) {
