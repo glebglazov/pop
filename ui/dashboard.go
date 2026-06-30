@@ -508,10 +508,10 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		d.width = msg.Width
-		d.height = msg.Height - 4 // Reserve space for hints (1 line) + input box (3 lines)
-		if d.updateNotice != "" {
-			d.height-- // reserve the top line for the dimmed Update notice
-		}
+		// frameSpec's BodyHeight covers the header row, the per-row list, and
+		// (with this fix) warnings; back out those 3 lines to get the raw list
+		// budget that listBodyHeight() re-adds.
+		d.height = d.frameSpec().BodyHeight(msg.Height) - 3
 		if d.height < 3 {
 			d.height = 3
 		}
@@ -680,6 +680,33 @@ func (d *MonitorDashboard) fetchPreview() {
 	d.preview = d.previewFunc(d.panes[d.cursor].PaneID)
 }
 
+// frameSpec builds the Frame describing the dashboard's screen chrome: the
+// update notice, warnings, and hints. No Header — the two-column header row
+// is part of the body composition itself, not a separate Frame region.
+func (d *MonitorDashboard) frameSpec() Frame {
+	return Frame{
+		Width:    d.width,
+		Notice:   d.updateNotice,
+		Warnings: d.warnings,
+		Hints:    d.buildHints(),
+	}
+}
+
+// buildHints returns the hints string based on the current mode.
+func (d *MonitorDashboard) buildHints() string {
+	hints := "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel"
+	if d.pickerMode {
+		hints = "  Enter select · F follow view · Esc cancel"
+		switch d.quickAccessModifier {
+		case "alt":
+			hints += " · A-1..9 quick select"
+		case "ctrl":
+			hints += " · C-1..9 quick select"
+		}
+	}
+	return hints
+}
+
 func (d *MonitorDashboard) dashboardCell(pane AttentionPane, rs RowState) string {
 	leftWidth := d.leftWidth()
 	if rs.Width > 0 {
@@ -794,14 +821,6 @@ func (d *MonitorDashboard) viewHelp() string {
 
 func (d *MonitorDashboard) viewDashboard() string {
 	var b strings.Builder
-
-	// Dimmed Update notice on a reserved top line, anchored top-right. The line
-	// is accounted for in d.height (see WindowSizeMsg), so it never shifts the
-	// pane list, preview, or hints.
-	if d.updateNotice != "" {
-		b.WriteString(renderUpdateNotice(d.width, d.updateNotice))
-		b.WriteString("\n")
-	}
 
 	sepStyle := lipgloss.NewStyle().Foreground(colorSeparator)
 
@@ -928,29 +947,7 @@ func (d *MonitorDashboard) viewDashboard() string {
 		b.WriteString("\x1b[0m\n")
 	}
 
-	// Warnings
-	if len(d.warnings) > 0 {
-		warnStyle := lipgloss.NewStyle().Foreground(colorWorking)
-		for _, w := range d.warnings {
-			b.WriteString(warnStyle.Render("  ⚠ " + w))
-			b.WriteString("\n")
-		}
-	}
-
-	// Hints
-	hints := "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel"
-	if d.pickerMode {
-		hints = "  Enter select · F follow view · Esc cancel"
-		switch d.quickAccessModifier {
-		case "alt":
-			hints += " · A-1..9 quick select"
-		case "ctrl":
-			hints += " · C-1..9 quick select"
-		}
-	}
-	b.WriteString(hintStyle.Render(hints))
-
-	return b.String()
+	return d.frameSpec().Render(strings.TrimSuffix(b.String(), "\n"))
 }
 
 // Result returns the dashboard result after running
