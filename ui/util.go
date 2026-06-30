@@ -96,8 +96,8 @@ func renderUpdateNotice(width int, text string) string {
 	return strings.Repeat(" ", padding) + dimStyle.Render(text)
 }
 
-// truncateToWidth trims s to at most width runes (plain text, no ANSI).
-func truncateToWidth(s string, width int) string {
+// TruncateToWidth trims s to at most width runes (plain text, no ANSI).
+func TruncateToWidth(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
@@ -108,10 +108,16 @@ func truncateToWidth(s string, width int) string {
 	return string(r[:width])
 }
 
-// truncateString truncates s to maxWidth visible characters, respecting ANSI escapes.
-func truncateString(s string, maxWidth int) string {
+// truncateToWidth is an internal alias for TruncateToWidth; used by renderUpdateNotice.
+func truncateToWidth(s string, width int) string {
+	return TruncateToWidth(s, width)
+}
+
+// TruncateString truncates s to maxWidth visible characters, respecting ANSI escapes.
+// Non-positive maxWidth leaves s unchanged (used when terminal width not yet available).
+func TruncateString(s string, maxWidth int) string {
 	if maxWidth <= 0 {
-		return ""
+		return s
 	}
 	visibleWidth := 0
 	inEscape := false
@@ -134,6 +140,11 @@ func truncateString(s string, maxWidth int) string {
 		lastSafe = i + len(string(r))
 	}
 	return s
+}
+
+// truncateString is an internal alias for TruncateString; used by ui/dashboard.go.
+func truncateString(s string, maxWidth int) string {
+	return TruncateString(s, maxWidth)
 }
 
 // adjustScroll ensures cursor is visible by adjusting scroll offset.

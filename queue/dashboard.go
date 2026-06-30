@@ -2878,14 +2878,14 @@ func taskMenuLines(menu *taskMenu, width int) []string {
 	if menu == nil {
 		return nil
 	}
-	lines := []string{truncateToWidth("    "+ui.HintStyle.Render("actions"), width)}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
 	for i, item := range menu.items {
 		marker := "  "
 		if i == menu.cursor {
 			marker = ui.IndicatorStyle.Render("█") + " "
 		}
 		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
-		lines = append(lines, truncateToWidth(line, width))
+		lines = append(lines, ui.TruncateString(line, width))
 	}
 	return lines
 }
@@ -2938,7 +2938,7 @@ func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int, me
 			end = len(lines)
 		}
 		for _, line := range lines[p.scroll:end] {
-			fmt.Fprintln(b, truncateToWidth(line, width))
+			fmt.Fprintln(b, ui.TruncateString(line, width))
 		}
 	}
 	fmt.Fprintln(b)
@@ -3082,8 +3082,8 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 			}
 		}
 	}
-	fmt.Fprintf(w, "%s\n", truncateToWidth("  "+dashboardTableLine(headers, widths), width))
-	fmt.Fprintf(w, "%s\n", truncateToWidth("  "+dashboardTableSeparator(widths), width))
+	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableLine(headers, widths), width))
+	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableSeparator(widths), width))
 
 	var menuLines []string
 	placeBelow := true
@@ -3106,7 +3106,7 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 		} else {
 			prefix = "  "
 		}
-		line := truncateToWidth(prefix+dashboardTableLine(dashboardRowValues(row), widths), width)
+		line := ui.TruncateString(prefix+dashboardTableLine(dashboardRowValues(row), widths), width)
 		fmt.Fprintf(w, "%s\n", line)
 		if menu != nil && i == cursor && placeBelow {
 			writeMenu()
@@ -3138,14 +3138,14 @@ func dashboardMenuLines(menu *dashboardMenu, width int) []string {
 	if menu == nil {
 		return nil
 	}
-	lines := []string{truncateToWidth("    "+ui.HintStyle.Render("actions"), width)}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
 	for i, item := range menu.items {
 		marker := "  "
 		if i == menu.cursor {
 			marker = ui.IndicatorStyle.Render("█") + " "
 		}
 		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
-		lines = append(lines, truncateToWidth(line, width))
+		lines = append(lines, ui.TruncateString(line, width))
 	}
 	return lines
 }
@@ -3166,22 +3166,6 @@ func writeDashboardFooter(b *strings.Builder, height int, hint string) {
 	fmt.Fprint(b, hint)
 }
 
-// truncateToWidth clips a rendered line that overflows the viewport, replacing
-// the tail with an ellipsis. A non-positive width (no WindowSizeMsg yet) leaves
-// the line untouched.
-func truncateToWidth(s string, width int) string {
-	if width <= 0 || lipgloss.Width(s) <= width {
-		return s
-	}
-	if width <= 1 {
-		return "…"
-	}
-	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
-		runes = runes[:len(runes)-1]
-	}
-	return string(runes) + "…"
-}
 
 func dashboardRowValues(row DashboardRow) []string {
 	var badges []string
