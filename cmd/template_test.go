@@ -18,8 +18,8 @@ func TestTemplateCommandTree(t *testing.T) {
 		wantCmd any
 		wantRun any
 	}{
-		{path: []string{"template", "list"}, wantCmd: templateListCmd, wantRun: runTemplateList},
-		{path: []string{"template", "apply"}, wantCmd: templateApplyCmd, wantRun: runTemplateApply},
+		{path: []string{"layout", "list"}, wantCmd: layoutListCmd, wantRun: runTemplateList},
+		{path: []string{"layout", "apply"}, wantCmd: layoutApplyCmd, wantRun: runTemplateApply},
 	}
 
 	for _, tt := range tests {

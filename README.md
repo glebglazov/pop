@@ -71,13 +71,13 @@ Fuzzy-pick a worktree in the current repo. Prints the selected path (useful for 
 
 Flag: `-s, --switch` — switch tmux session instead of printing path.
 
-### `pop template`
+### `pop layout`
 
 Apply a named [session template](#session-templates) to shape the current tmux session.
 
 ```bash
-pop template list           # list resolved templates for the current repo
-pop template apply gs-dev   # build the template's windows in the current session
+pop layout list           # list resolved templates for the current repo
+pop layout apply gs-dev   # build the template's windows in the current session
 ```
 
 `apply` runs inside an existing tmux session and is **non-destructive**: windows are matched by name, so re-applying skips windows that already exist and never touches their live panes.
@@ -118,7 +118,7 @@ Available environment variables: `POP_WORKTREE_PATH`, `POP_WORKTREE_NAME`, `POP_
 A session template is a named blueprint for a tmux session's windows and their
 pane geometry. Define them in `~/.config/pop/config.toml` (a repo `.pop.toml` or a
 global `[repo."<path>"]` block can add or override templates per checkout). Apply
-one with [`pop template apply <name>`](#pop-template).
+one with [`pop layout apply <name>`](#pop-layout).
 
 A window's `layout` is a tree. A leaf runs a `command`; a container splits its
 `children` either into `"rows"` (stacked top→bottom) or `"columns"` (side-by-side),

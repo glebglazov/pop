@@ -38,19 +38,19 @@ func defaultTemplateRuntimeDeps() templateRuntimeDeps {
 	}
 }
 
-var templateCmd = &cobra.Command{
-	Use:   "template",
+var layoutCmd = &cobra.Command{
+	Use:   "layout",
 	Short: "Manage session templates",
 }
 
-var templateListCmd = &cobra.Command{
+var layoutListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List session templates",
 	Args:  cobra.NoArgs,
 	RunE:  runTemplateList,
 }
 
-var templateApplyCmd = &cobra.Command{
+var layoutApplyCmd = &cobra.Command{
 	Use:   "apply <name>",
 	Short: "Apply a session template to the current tmux session",
 	Args:  cobra.ExactArgs(1),
@@ -58,9 +58,9 @@ var templateApplyCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(templateCmd)
-	templateCmd.AddCommand(templateListCmd)
-	templateCmd.AddCommand(templateApplyCmd)
+	rootCmd.AddCommand(layoutCmd)
+	layoutCmd.AddCommand(layoutListCmd)
+	layoutCmd.AddCommand(layoutApplyCmd)
 }
 
 func runTemplateList(cmd *cobra.Command, args []string) error {

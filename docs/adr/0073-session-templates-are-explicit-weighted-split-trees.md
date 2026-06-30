@@ -52,8 +52,8 @@ is config-only and inert until applied.
   **required and unique** within a template; a missing/duplicate name is a non-fatal
   load finding (per ADR 0054), degrading that one template rather than aborting load.
 
-- **Apply is a manual, non-destructive verb.** `pop template apply <name>` (plus
-  `pop template list`) instantiates a template into the current session (`-t` to
+- **Apply is a manual, non-destructive verb.** `pop layout apply <name>` (plus
+  `pop layout list`) instantiates a template into the current session (`-t` to
   override). It is **additive + skip-by-name**: each template window is created fresh,
   but a window whose name already exists in the target is skipped (warn). It **never**
   destroys existing windows or panes. There is no `pop tmux` namespace — tmux is the
