@@ -4,6 +4,13 @@ status: accepted
 
 # Session templates are explicit weighted split trees applied on demand
 
+> Amended by [ADR-0074](0074-workbench-is-the-session-noun-layout-is-per-window.md)
+> (the *Session template* is renamed **Workbench**; *Layout* is pinned to the
+> per-window tier) and [ADR-0075](0075-workbench-apply-reconciles-by-pane-identity.md)
+> (apply becomes a name-keyed reconciling merge; "healing is descoped" is reversed).
+> The weighted-split-tree geometry model below stands; read the term names here as
+> their ADR-0074 successors.
+
 ## Context
 
 pop creates flat sessions: `tmux new-session -ds <name> -c <dir>` gives one window,
