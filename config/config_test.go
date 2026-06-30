@@ -148,7 +148,7 @@ name = "dev"
 [[session_templates.windows]]
 name = "work"
 
-[session_templates.windows.pane]
+[session_templates.windows.layout]
 name = "server"
 command = "go test ./..."
 `), 0o644); err != nil {
@@ -173,11 +173,11 @@ command = "go test ./..."
 	if window.Name != "work" {
 		t.Fatalf("window name = %q, want work", window.Name)
 	}
-	if window.Pane == nil {
-		t.Fatal("pane spec did not parse")
+	if window.Layout == nil {
+		t.Fatal("layout spec did not parse")
 	}
-	if window.Pane.Name != "server" || window.Pane.Command != "go test ./..." {
-		t.Fatalf("pane spec = %#v, want name server and command go test ./...", *window.Pane)
+	if window.Layout.Name != "server" || window.Layout.Command != "go test ./..." {
+		t.Fatalf("layout spec = %#v, want name server and command go test ./...", *window.Layout)
 	}
 }
 
@@ -190,7 +190,7 @@ name = "bad"
 [[session_templates.windows]]
 # missing name
 
-[session_templates.windows.pane]
+[session_templates.windows.layout]
 name = "server"
 command = "go test ./..."
 
@@ -200,7 +200,7 @@ name = "good"
 [[session_templates.windows]]
 name = "work"
 
-[session_templates.windows.pane]
+[session_templates.windows.layout]
 name = "server"
 command = "go test ./..."
 `), 0o644); err != nil {
@@ -250,14 +250,14 @@ name = "bad"
 [[session_templates.windows]]
 name = "work"
 
-[session_templates.windows.pane]
+[session_templates.windows.layout]
 name = "server"
 command = "go test ./..."
 
 [[session_templates.windows]]
 name = "work"
 
-[session_templates.windows.pane]
+[session_templates.windows.layout]
 name = "shell"
 command = "bash"
 
@@ -267,7 +267,7 @@ name = "good"
 [[session_templates.windows]]
 name = "review"
 
-[session_templates.windows.pane]
+[session_templates.windows.layout]
 name = "server"
 command = "go test ./..."
 `), 0o644); err != nil {
@@ -3280,7 +3280,7 @@ func TestSessionTemplateThreeHomeResolution(t *testing.T) {
 		if err := os.WriteFile(configPath, []byte(`
 [[session_templates]]
 name = "dev"
-windows = [{name = "main", pane = {name = "editor", command = "vim"}}]
+windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 `), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -3334,7 +3334,7 @@ windows = [{name = "main", pane = {name = "editor", command = "vim"}}]
 		if err := os.WriteFile(popTomlPath, []byte(`
 [[session_templates]]
 name = "work"
-windows = [{name = "main", pane = {name = "editor", command = "vim"}}]
+windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 `), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -3388,7 +3388,7 @@ windows = [{name = "main", pane = {name = "editor", command = "vim"}}]
 		if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`
 [repo."%s"]
 session_templates = [
-  {name = "review", windows = [{name = "main", pane = {name = "editor", command = "vim"}}]}
+  {name = "review", windows = [{name = "main", layout = {name = "editor", command = "vim"}}]}
 ]
 `, tmpDir)), 0644); err != nil {
 			t.Fatal(err)
@@ -3439,11 +3439,11 @@ session_templates = [
 		if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`
 [[session_templates]]
 name = "dev"
-windows = [{name = "main", pane = {name = "editor", command = "vim"}}]
+windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 
 [repo."%s"]
 session_templates = [
-  {name = "dev", windows = [{name = "main", pane = {name = "editor", command = "code"}}]}
+  {name = "dev", windows = [{name = "main", layout = {name = "editor", command = "code"}}]}
 ]
 `, tmpDir)), 0644); err != nil {
 			t.Fatal(err)
@@ -3454,7 +3454,7 @@ session_templates = [
 		if err := os.WriteFile(popTomlPath, []byte(`
 [[session_templates]]
 name = "dev"
-windows = [{name = "main", pane = {name = "editor", command = "nano"}}]
+windows = [{name = "main", layout = {name = "editor", command = "nano"}}]
 `), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -3499,12 +3499,12 @@ windows = [{name = "main", pane = {name = "editor", command = "nano"}}]
 			t.Errorf("expected template name 'dev', got %q", templates[0].Name)
 		}
 		// The [repo] override should win, so command should be "code"
-		if len(templates[0].Windows) == 0 || templates[0].Windows[0].Pane == nil {
-			t.Fatal("template has no windows or pane")
+		if len(templates[0].Windows) == 0 || templates[0].Windows[0].Layout == nil {
+			t.Fatal("template has no windows or layout")
 		}
-		if templates[0].Windows[0].Pane.Command != "code" {
+		if templates[0].Windows[0].Layout.Command != "code" {
 			t.Errorf("expected [repo] override to win with command 'code', got %q",
-				templates[0].Windows[0].Pane.Command)
+				templates[0].Windows[0].Layout.Command)
 		}
 	})
 
@@ -3526,7 +3526,7 @@ windows = [{name = "main", pane = {name = "editor", command = "nano"}}]
 		if err := os.WriteFile(popTomlPath, []byte(`
 [[session_templates]]
 name = "bare-template"
-windows = [{name = "main", pane = {name = "editor", command = "vim"}}]
+windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 `), 0644); err != nil {
 			t.Fatal(err)
 		}

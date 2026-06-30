@@ -150,7 +150,7 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 			continue
 		}
 
-		rootCwd := effectiveCwd(dir, dir, window.Pane.Cwd, homeDir)
+		rootCwd := effectiveCwd(dir, dir, window.Layout.Cwd, homeDir)
 		windowRef := session + ":" + window.Name
 
 		// Create the window with the initial pane
@@ -160,7 +160,7 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 		}
 
 		// Realize the pane tree
-		result, err := realizePaneTree(d.Tmux, window.Pane, paneID, dir, rootCwd, homeDir)
+		result, err := realizePaneTree(d.Tmux, window.Layout, paneID, dir, rootCwd, homeDir)
 		if err != nil {
 			return fmt.Errorf("failed to realize pane tree for window %q: %w", window.Name, err)
 		}
@@ -404,10 +404,10 @@ func validateSessionTemplate(tmpl config.SessionTemplate) error {
 		if window.Name == "" {
 			return fmt.Errorf("window[%d] name is required", i)
 		}
-		if window.Pane == nil {
-			return fmt.Errorf("window %q requires a pane spec", window.Name)
+		if window.Layout == nil {
+			return fmt.Errorf("window %q requires a layout spec", window.Name)
 		}
-		if err := validatePaneSpec(window.Pane, ""); err != nil {
+		if err := validatePaneSpec(window.Layout, ""); err != nil {
 			return err
 		}
 	}

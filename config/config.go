@@ -205,8 +205,8 @@ type SessionTemplate struct {
 }
 
 type SessionTemplateWindow struct {
-	Name string                   `toml:"name"`
-	Pane *SessionTemplatePaneSpec `toml:"pane"`
+	Name   string                   `toml:"name"`
+	Layout *SessionTemplatePaneSpec `toml:"layout"`
 }
 
 type SessionTemplatePaneSpec struct {

@@ -61,7 +61,7 @@ func TestRunTemplateApplyWith(t *testing.T) {
 			Name: "dev",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
+				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
 			}},
 		}},
 	}
@@ -120,7 +120,7 @@ func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
 			Name: "dev",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
+				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
 			}},
 		}},
 	}
@@ -157,7 +157,7 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 			Name: "weighted",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{
+				Layout: &config.SessionTemplatePaneSpec{
 					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "left", Command: "echo left", Weight: 1},
@@ -241,7 +241,7 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 			Name: "stacked",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{
+				Layout: &config.SessionTemplatePaneSpec{
 					Children: "rows",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "top", Command: "echo top"},
@@ -321,7 +321,7 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 			Name: "nested",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{
+				Layout: &config.SessionTemplatePaneSpec{
 					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{
@@ -393,7 +393,7 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 			Name: "equal",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{
+				Layout: &config.SessionTemplatePaneSpec{
 					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "left", Command: "echo left"},   // weight omitted = 1
@@ -462,7 +462,7 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 			Name: "deep",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{
+				Layout: &config.SessionTemplatePaneSpec{
 					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{
@@ -538,8 +538,8 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 		SessionTemplates: []config.SessionTemplate{{
 			Name: "dev",
 			Windows: []config.SessionTemplateWindow{
-				{Name: "work", Pane: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}},
-				{Name: "logs", Pane: &config.SessionTemplatePaneSpec{Name: "tail", Command: "tail -f app.log"}},
+				{Name: "work", Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}},
+				{Name: "logs", Layout: &config.SessionTemplatePaneSpec{Name: "tail", Command: "tail -f app.log"}},
 			},
 		}},
 	}
@@ -595,8 +595,8 @@ func TestRunTemplateApplyWithSkipExistingWindow(t *testing.T) {
 		SessionTemplates: []config.SessionTemplate{{
 			Name: "dev",
 			Windows: []config.SessionTemplateWindow{
-				{Name: "work", Pane: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}},
-				{Name: "logs", Pane: &config.SessionTemplatePaneSpec{Name: "tail", Command: "tail -f app.log"}},
+				{Name: "work", Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}},
+				{Name: "logs", Layout: &config.SessionTemplatePaneSpec{Name: "tail", Command: "tail -f app.log"}},
 			},
 		}},
 	}
@@ -717,7 +717,7 @@ func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
 			Name: "cwd-test",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{
+				Layout: &config.SessionTemplatePaneSpec{
 					Children: "rows",
 					Cwd:      "backend",
 					Panes: []config.SessionTemplatePaneSpec{
@@ -774,7 +774,7 @@ func TestRunTemplateApplyWithCwdTildeAndAbsolute(t *testing.T) {
 			Name: "cwd-test",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{
+				Layout: &config.SessionTemplatePaneSpec{
 					Children: "rows",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "home", Command: "echo home", Cwd: "~/docs"},
@@ -822,7 +822,7 @@ func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
 			Name: "focus-test",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{
+				Layout: &config.SessionTemplatePaneSpec{
 					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "left", Command: "echo left"},
@@ -874,7 +874,7 @@ func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
 			Name: "focus-test",
 			Windows: []config.SessionTemplateWindow{{
 				Name: "work",
-				Pane: &config.SessionTemplatePaneSpec{
+				Layout: &config.SessionTemplatePaneSpec{
 					Children: "columns",
 					Panes: []config.SessionTemplatePaneSpec{
 						{Name: "first", Command: "echo first", Focus: true},

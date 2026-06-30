@@ -221,9 +221,9 @@ func cloneSessionTemplates(src []SessionTemplate) []SessionTemplate {
 		}
 		for j, window := range tmpl.Windows {
 			out[i].Windows[j].Name = window.Name
-			if window.Pane != nil {
-				pane := *window.Pane
-				out[i].Windows[j].Pane = &pane
+			if window.Layout != nil {
+				layout := *window.Layout
+				out[i].Windows[j].Layout = &layout
 			}
 		}
 	}

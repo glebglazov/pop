@@ -17,11 +17,13 @@ template**.
 A **Session template** is a named blueprint for the shape of a tmux **Session**. It
 is config-only and inert until applied.
 
-- **Naming.** The whole-session blueprint is a *Session template*. The per-window
-  pane geometry keeps tmux's own word, **layout** (`main-vertical`, `tiled`). A
-  template's leaf node is a **Pane spec** (name/command/cwd/weight) — deliberately
-  distinct from the glossary's **Pane** (the live, tracked tmux pane with an id and
-  attention status that a spec *produces* on apply).
+- **Naming.** The whole-session blueprint is a *Session template*. Each window's
+  pane geometry is its **layout** — our own weighted split tree (the window's
+  `layout` field), *not* tmux's preset names (`main-vertical`, `tiled`), which this
+  design rejects (see Alternatives). A template's leaf node is a **Pane spec**
+  (name/command/cwd/weight) — deliberately distinct from the glossary's **Pane**
+  (the live, tracked tmux pane with an id and attention status that a spec
+  *produces* on apply).
 
 - **Where templates live, and resolution.** Templates are defined in three homes:
   the global `config.toml` `[[session_templates]]` library, a repo's `.pop.toml`,
