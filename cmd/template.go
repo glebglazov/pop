@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -19,6 +20,9 @@ type templateRuntimeDeps struct {
 	UserHomeDir func() (string, error)
 	ConfigDeps  *config.Deps
 	ErrOut      io.Writer
+	// RunBeforeApply runs one before_apply shell command with cwd = dir
+	// (the session directory). Injected so tests can observe ordering and cwd.
+	RunBeforeApply func(command, dir string) error
 }
 
 func defaultTemplateRuntimeDeps() templateRuntimeDeps {
@@ -31,11 +35,24 @@ func defaultTemplateRuntimeDeps() templateRuntimeDeps {
 			}
 			return config.Load(path)
 		},
-		Getwd:       os.Getwd,
-		UserHomeDir: os.UserHomeDir,
-		ConfigDeps:  config.DefaultDeps(),
-		ErrOut:      os.Stderr,
+		Getwd:          os.Getwd,
+		UserHomeDir:    os.UserHomeDir,
+		ConfigDeps:     config.DefaultDeps(),
+		ErrOut:         os.Stderr,
+		RunBeforeApply: runBeforeApplyCommand,
 	}
+}
+
+// runBeforeApplyCommand runs a single before_apply shell command synchronously
+// with cwd = dir (the session directory), streaming its output to the user's
+// terminal. It is the production implementation of templateRuntimeDeps.RunBeforeApply.
+func runBeforeApplyCommand(command, dir string) error {
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Dir = dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
 }
 
 var workbenchCmd = &cobra.Command{
@@ -157,6 +174,19 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 	homeDir, err := d.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	// Run the Workbench's before_apply commands for one-time side effects
+	// (repo setup) before any window is realized, with cwd = the session
+	// directory (ADR-0075). They run on every apply, including a reapply over a
+	// live session; the Workbench author owns idempotency.
+	for i, command := range tmpl.BeforeApply {
+		if d.RunBeforeApply == nil {
+			break
+		}
+		if err := d.RunBeforeApply(command, dir); err != nil {
+			return fmt.Errorf("before_apply[%d] %q failed: %w", i, command, err)
+		}
 	}
 
 	// Match target windows to live windows by pop-owned identity (ADR-0075),
@@ -600,7 +630,7 @@ func resizePanesByWeight(tmux deps.Tmux, paneIDs []string, children []config.Ses
 			weight = 1
 		}
 		targetSize := (totalSize * weight) / totalWeight
-		
+
 		_, err := tmux.Command("resize-pane", "-t", paneID, resizeFlag, fmt.Sprintf("%d", targetSize))
 		if err != nil {
 			return fmt.Errorf("failed to resize pane %s: %w", paneID, err)

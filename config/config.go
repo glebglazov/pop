@@ -203,8 +203,15 @@ type WorkbenchOptions struct{}
 // each with a named pane tree. Split trees and multi-window templates are now
 // supported; a template with invalid window names is excluded at load time.
 type SessionTemplate struct {
-	Name    string                  `toml:"name"`
-	Windows []SessionTemplateWindow `toml:"windows"`
+	Name string `toml:"name"`
+	// BeforeApply is an ordered list of shell commands run for one-time
+	// side effects (repo setup: pull, decrypt, mkdir) before any window of
+	// this Workbench is realized, with cwd = the session directory (ADR-0075).
+	// They run on every apply, including a reapply over a live session — the
+	// caller owns idempotency. This is side-effecting commands only, not
+	// shell-environment propagation: exported vars would not reach sibling panes.
+	BeforeApply []string                `toml:"before_apply"`
+	Windows     []SessionTemplateWindow `toml:"windows"`
 }
 
 type SessionTemplateWindow struct {
@@ -459,18 +466,18 @@ type Config struct {
 	Dashboard      *DashboardConfig      `toml:"dashboard"`
 	// The TOML key stays "workload" for backward compatibility with existing
 	// user config files; the rename is internal only.
-	Task             *TaskConfig             `toml:"workload"`
-	Effort           map[string]EffortConfig `toml:"effort"`
+	Task   *TaskConfig             `toml:"workload"`
+	Effort map[string]EffortConfig `toml:"effort"`
 	// Workbenches is the canonical TOML key for session blueprints.
 	Workbenches []SessionTemplate `toml:"workbenches"`
 	// SessionTemplates is the deprecated TOML alias for Workbenches. Still loads;
 	// a deprecation finding is emitted (ADR-0054 style).
 	SessionTemplates []SessionTemplate `toml:"session_templates"`
 	// WorkbenchOpts holds the [workbench] options table (empty for now).
-	WorkbenchOpts *WorkbenchOptions `toml:"workbench"`
-	Queue         *QueueConfig      `toml:"queue"`
-	Updates          *UpdatesConfig          `toml:"updates"`
-	Integrations     *IntegrationsConfig     `toml:"integrations"`
+	WorkbenchOpts *WorkbenchOptions   `toml:"workbench"`
+	Queue         *QueueConfig        `toml:"queue"`
+	Updates       *UpdatesConfig      `toml:"updates"`
+	Integrations  *IntegrationsConfig `toml:"integrations"`
 	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
 	// The key is canonicalized (~ expanded, symlinks resolved) at resolution
 	// time; any worktree path or bare dir of the same repo resolves to the

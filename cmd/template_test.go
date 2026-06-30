@@ -76,7 +76,7 @@ func TestRunTemplateApplyWith(t *testing.T) {
 		SessionTemplates: []config.SessionTemplate{{
 			Name: "dev",
 			Windows: []config.SessionTemplateWindow{{
-				Name: "work",
+				Name:   "work",
 				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
 			}},
 		}},
@@ -96,10 +96,10 @@ func TestRunTemplateApplyWith(t *testing.T) {
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:   tmux,
-		Getwd:  func() (string, error) { return "/repo/checkout", nil },
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
-		ErrOut: io.Discard,
+		ErrOut:      io.Discard,
 	}
 
 	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
@@ -138,7 +138,7 @@ func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
 		SessionTemplates: []config.SessionTemplate{{
 			Name: "dev",
 			Windows: []config.SessionTemplateWindow{{
-				Name: "work",
+				Name:   "work",
 				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
 			}},
 		}},
@@ -155,8 +155,8 @@ func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:  tmux,
-		Getwd: func() (string, error) { return "/repo/checkout", nil },
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
@@ -214,8 +214,8 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:  tmux,
-		Getwd: func() (string, error) { return "/repo", nil },
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
@@ -295,8 +295,8 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:  tmux,
-		Getwd: func() (string, error) { return "/repo", nil },
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
@@ -383,8 +383,8 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:  tmux,
-		Getwd: func() (string, error) { return "/repo", nil },
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
@@ -447,8 +447,8 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:  tmux,
-		Getwd: func() (string, error) { return "/repo", nil },
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
@@ -529,8 +529,8 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:  tmux,
-		Getwd: func() (string, error) { return "/repo", nil },
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
@@ -582,10 +582,10 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:   tmux,
-		Getwd:  func() (string, error) { return "/repo/checkout", nil },
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
-		ErrOut: io.Discard,
+		ErrOut:      io.Discard,
 	}
 
 	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
@@ -1255,6 +1255,158 @@ func TestRunTemplateApplyMergeRecreatesUnnamedLeaf(t *testing.T) {
 	for _, call := range calls {
 		if call[0] == "set-option" && len(call) >= 5 && call[1] == "-p" && call[4] == "@pop_pane" {
 			t.Fatalf("unnamed leaf must not be stamped, got %v", call)
+		}
+	}
+}
+
+func TestRunTemplateApplyBeforeApplyRunsBeforeWindowRealization(t *testing.T) {
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name:        "dev",
+			BeforeApply: []string{"git pull", "make decrypt"},
+			Windows: []config.SessionTemplateWindow{{
+				Name:   "work",
+				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
+			}},
+		}},
+	}
+
+	// A combined log records before_apply commands and the tmux call that first
+	// realizes a window, so ordering can be asserted.
+	var combined []string
+	var beforeApplyDirs []string
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			if args[0] == "new-window" {
+				combined = append(combined, "tmux:new-window")
+			}
+			switch args[0] {
+			case "display-message":
+				return "current-session", nil
+			case "new-window":
+				return "%0", nil
+			default:
+				return "", nil
+			}
+		},
+	}
+	d := templateRuntimeDeps{
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo/checkout", nil },
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+		ErrOut:      io.Discard,
+		RunBeforeApply: func(command, dir string) error {
+			combined = append(combined, "before_apply:"+command)
+			beforeApplyDirs = append(beforeApplyDirs, dir)
+			return nil
+		},
+	}
+
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
+		t.Fatalf("runTemplateApplyWith() error: %v", err)
+	}
+
+	want := []string{"before_apply:git pull", "before_apply:make decrypt", "tmux:new-window"}
+	if !reflect.DeepEqual(combined, want) {
+		t.Fatalf("order = %v, want %v (commands must run, in order, before any window is realized)", combined, want)
+	}
+
+	// cwd is the session directory for every before_apply command.
+	for _, dir := range beforeApplyDirs {
+		if dir != "/repo/checkout" {
+			t.Fatalf("before_apply cwd = %q, want the session directory %q", dir, "/repo/checkout")
+		}
+	}
+}
+
+func TestRunTemplateApplyBeforeApplyRunsOnReapplyOverLiveSession(t *testing.T) {
+	// Reapply over a live, pop-owned window (merge path) must still run
+	// before_apply on every apply.
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name:        "dev",
+			BeforeApply: []string{"git pull"},
+			Windows: []config.SessionTemplateWindow{{
+				Name: "dev",
+				Layout: &config.SessionTemplatePaneSpec{
+					Children: "rows",
+					Panes: []config.SessionTemplatePaneSpec{
+						{Name: "vim", Command: "vim"},
+						{Name: "claude", Command: "claude"},
+					},
+				},
+			}},
+		}},
+	}
+	var calls [][]string
+	// Both target panes are already live: a pure reapply with no new windows.
+	tmux := mergeMockTmux(&calls, "vim\t%1\nclaude\t%2\n", "100", "40")
+	var ran []string
+	d := templateRuntimeDeps{
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+		ErrOut:      io.Discard,
+		RunBeforeApply: func(command, dir string) error {
+			ran = append(ran, command)
+			if dir != "/repo" {
+				t.Fatalf("before_apply cwd = %q, want session directory /repo", dir)
+			}
+			return nil
+		},
+	}
+
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
+		t.Fatalf("runTemplateApplyWith() error: %v", err)
+	}
+
+	if !reflect.DeepEqual(ran, []string{"git pull"}) {
+		t.Fatalf("before_apply ran = %v, want [git pull] on reapply", ran)
+	}
+}
+
+func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
+	// A failing before_apply command aborts the apply before any window is built.
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name:        "dev",
+			BeforeApply: []string{"false"},
+			Windows: []config.SessionTemplateWindow{{
+				Name:   "work",
+				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
+			}},
+		}},
+	}
+	var calls [][]string
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			if args[0] == "display-message" {
+				return "current-session", nil
+			}
+			return "", nil
+		},
+	}
+	d := templateRuntimeDeps{
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+		ErrOut:      io.Discard,
+		RunBeforeApply: func(command, dir string) error {
+			return fmt.Errorf("boom")
+		},
+	}
+
+	err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev")
+	if err == nil {
+		t.Fatal("expected error from failing before_apply")
+	}
+	if !strings.Contains(err.Error(), "before_apply[0]") {
+		t.Fatalf("error = %q, want before_apply context", err.Error())
+	}
+	for _, call := range calls {
+		if call[0] == "new-window" {
+			t.Fatal("no window should be realized after a before_apply failure")
 		}
 	}
 }
