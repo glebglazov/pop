@@ -71,6 +71,17 @@ Fuzzy-pick a worktree in the current repo. Prints the selected path (useful for 
 
 Flag: `-s, --switch` — switch tmux session instead of printing path.
 
+### `pop template`
+
+Apply a named [session template](#session-templates) to shape the current tmux session.
+
+```bash
+pop template list           # list resolved templates for the current repo
+pop template apply gs-dev   # build the template's windows in the current session
+```
+
+`apply` runs inside an existing tmux session and is **non-destructive**: windows are matched by name, so re-applying skips windows that already exist and never touches their live panes.
+
 ### `pop configure`
 
 Interactively add project directories to your config.
@@ -101,6 +112,76 @@ exit = true
 ```
 
 Available environment variables: `POP_WORKTREE_PATH`, `POP_WORKTREE_NAME`, `POP_BRANCH`, `POP_REPO_ROOT`.
+
+## Session templates
+
+A session template is a named blueprint for a tmux session's windows and their
+pane geometry. Define them in `~/.config/pop/config.toml` (a repo `.pop.toml` or a
+global `[repo."<path>"]` block can add or override templates per checkout). Apply
+one with [`pop template apply <name>`](#pop-template).
+
+A window's `layout` is a tree. A leaf runs a `command`; a container splits its
+`children` either into `"rows"` (stacked top→bottom) or `"columns"` (side-by-side),
+sizing them by relative `weight` (default `1`).
+
+### A single-pane window
+
+```toml
+[[session_templates]]
+name = "logs"
+
+[[session_templates.windows]]
+name = "tail"
+layout = { command = "tail -f app.log" }
+```
+
+### A split layout with weights and focus
+
+`vim` takes 3/5 of the height, `claude` the rest; the cursor lands on `vim`:
+
+```toml
+[[session_templates]]
+name = "dev"
+
+[[session_templates.windows]]
+name = "edit"
+layout.children = "rows"
+layout.panes = [
+  { name = "vim",    weight = 3, command = "vim", focus = true },
+  { name = "claude", weight = 1, command = "claude" },
+]
+```
+
+- `weight` is normalized within siblings — `3` and `1` mean 75% / 25%.
+- `focus = true` on one leaf makes it the active pane after apply (first wins).
+- `cwd` sets a pane's working directory (relative to the session dir, or `~`/absolute);
+  it inherits down into nested containers. Omit it to inherit the parent.
+
+### Nesting containers
+
+Containers nest to any depth. Here the bottom row is split into three columns:
+
+```toml
+[[session_templates]]
+name = "gs-dev"
+
+[[session_templates.windows]]
+name = "dev"
+layout.children = "rows"
+layout.panes = [
+  { name = "vim",    weight = 3, command = "vim", focus = true },
+  { name = "claude", weight = 1, command = "claude" },
+  { weight = 1, children = "columns", panes = [
+    { name = "build",    command = "make watch" },
+    { name = "services", command = "bin/services up" },
+    { name = "web",      command = "npm run dev" },
+  ] },
+]
+```
+
+Multiline inline tables and trailing commas are accepted, so deep trees stay
+readable. Multiple `[[session_templates.windows]]` blocks make a multi-window
+template; the first window is active after apply.
 
 ## Dashboard
 
