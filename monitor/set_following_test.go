@@ -108,33 +108,6 @@ func TestStore_SetFollowing_UnfollowOnUntrackedIsNoOp(t *testing.T) {
 	}
 }
 
-func TestStore_SetFollowing_UnfollowClearsNote(t *testing.T) {
-	statePath, store := setupSetFollowingState(t, map[string]*PaneEntry{
-		"%2": {
-			PaneID:    "%2",
-			Session:   "proj-y",
-			Status:    StatusClear,
-			Following: true,
-			Note:      "remember to check this",
-		},
-	})
-	tmux := setFollowingMockTmux(nil)
-
-	err := store.SetFollowing(tmux, "%2", false)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	state := loadSetFollowingState(t, statePath)
-	entry := state.Panes["%2"]
-	if entry.Following {
-		t.Error("expected Following = false")
-	}
-	if entry.Note != "" {
-		t.Errorf("note = %q, want cleared", entry.Note)
-	}
-}
-
 func TestStore_SetFollowing_FollowingNoOp(t *testing.T) {
 	before := time.Now().Add(-1 * time.Hour)
 	statePath, store := setupSetFollowingState(t, map[string]*PaneEntry{
@@ -173,7 +146,6 @@ func TestStore_SetFollowing_FollowTrackedPanePreservesStatus(t *testing.T) {
 			PaneID:  "%3",
 			Session: "proj-b",
 			Status:  StatusWorking,
-			Note:    "watch the deploy",
 		},
 	})
 	tmux := setFollowingMockTmux(nil)
@@ -190,9 +162,6 @@ func TestStore_SetFollowing_FollowTrackedPanePreservesStatus(t *testing.T) {
 	}
 	if entry.Status != StatusWorking {
 		t.Errorf("status = %q, want unchanged working", entry.Status)
-	}
-	if entry.Note != "watch the deploy" {
-		t.Errorf("note = %q, want unchanged", entry.Note)
 	}
 }
 

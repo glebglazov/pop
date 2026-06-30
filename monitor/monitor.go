@@ -44,7 +44,6 @@ type PaneEntry struct {
 	Status    PaneStatus `json:"status"`
 	Label     string     `json:"label,omitempty"`
 	Following bool       `json:"following,omitempty"`
-	Note      string     `json:"note,omitempty"`
 	// A pane's Topic is no longer kept here: it lives in the per-pane
 	// @pop_topic tmux user-option, the single source of truth (ADR 0058).
 	UpdatedAt    time.Time `json:"updated_at"`

@@ -1105,17 +1105,11 @@ func readPaneTopicState(tmux deps.Tmux, paneID string) (prevTopic, topicKind, se
 	return prevTopic, topicKind, session
 }
 
-// defaultPaneHasNote reports whether the pane carries a Note in monitor state.
+// defaultPaneHasNote always reports false: the per-pane Note is retired, so
+// no pane ever carries one. Kept as the paneNoteLookup production
+// implementation so callers don't need a separate code path.
 func defaultPaneHasNote(paneID string) bool {
-	if paneID == "" {
-		return false
-	}
-	state, err := monitor.Load(monitor.DefaultStatePath())
-	if err != nil || state == nil {
-		return false
-	}
-	entry, ok := state.Panes[paneID]
-	return ok && entry.Note != ""
+	return false
 }
 
 // runTopicRecipe is the production topicRecipeRunner: it execs a recipe's argv

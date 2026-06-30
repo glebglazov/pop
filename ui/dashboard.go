@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -49,10 +48,8 @@ type AttentionPane struct {
 	Name      string
 	Status    AttentionStatus
 	Following bool
-	Note      string
-	// TopicDerived marks Name's parenthetical as a machine-derived Topic
-	// (shown only when no Note overrides it). When set, the name is rendered
-	// dimmed to signal it was set by an agent rather than the user.
+	// TopicDerived marks Name's parenthetical as a machine-derived Topic.
+	// When set, the name is rendered dimmed to signal it was set by an agent.
 	TopicDerived bool
 }
 
@@ -63,7 +60,6 @@ type AttentionCallbacks struct {
 	MarkUnread   func(paneID string)        // marks a pane as unread
 	ToggleFollow func(paneID string)        // toggles following flag
 	Unmonitor    func(paneID string)        // removes a pane from monitor state
-	SetNote      func(paneID, note string)  // sets note on a pane
 }
 
 // MonitorDashboardAction represents what action the user wants to take in the dashboard
@@ -101,9 +97,6 @@ type MonitorDashboard struct {
 	emptyNote    string
 	spinnerFrame int
 
-	editingNote bool
-	noteInput   textinput.Model
-
 	showHelp bool
 
 	previewFunc      func(paneID string) string
@@ -112,7 +105,6 @@ type MonitorDashboard struct {
 	markUnreadFunc   func(paneID string)
 	toggleFollowFunc func(paneID string)
 	unmonitorFunc    func(paneID string)
-	setNoteFunc      func(paneID, note string)
 
 	warnings []string
 
@@ -188,7 +180,6 @@ func NewMonitorDashboard(panes []AttentionPane, cb AttentionCallbacks, reloadFn 
 		markUnreadFunc:   cb.MarkUnread,
 		toggleFollowFunc: cb.ToggleFollow,
 		unmonitorFunc:    cb.Unmonitor,
-		setNoteFunc:      cb.SetNote,
 	}
 	copy(d.panes, panes)
 	for _, opt := range opts {
@@ -316,44 +307,6 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, dashboardKeys.Help) {
 			d.showHelp = true
 			return d, nil
-		}
-
-		// Note editing mode: capture all keys
-		if d.editingNote {
-			switch {
-			case key.Matches(msg, dashboardKeys.Quit): // Esc/Ctrl+C
-				d.editingNote = false
-				return d, nil
-			case key.Matches(msg, dashboardKeys.Enter):
-				note := strings.TrimSpace(d.noteInput.Value())
-				pane := &d.panes[d.cursor]
-				// Auto-follow on save if not already
-				if !pane.Following && d.toggleFollowFunc != nil {
-					d.toggleFollowFunc(pane.PaneID)
-					pane.Following = true
-					for i := range d.allPanes {
-						if d.allPanes[i].PaneID == pane.PaneID {
-							d.allPanes[i].Following = true
-							break
-						}
-					}
-				}
-				d.setNoteFunc(pane.PaneID, note)
-				pane.Note = note
-				for i := range d.allPanes {
-					if d.allPanes[i].PaneID == pane.PaneID {
-						d.allPanes[i].Note = note
-						break
-					}
-				}
-				d.dirty = true
-				d.editingNote = false
-				return d, nil
-			default:
-				var cmd tea.Cmd
-				d.noteInput, cmd = d.noteInput.Update(msg)
-				return d, cmd
-			}
 		}
 
 		switch {
@@ -484,16 +437,10 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				d.toggleFollowFunc(pane.PaneID)
 				pane.Following = !pane.Following
-				// Clear note when unfollowing
-				if !pane.Following && pane.Note != "" && d.setNoteFunc != nil {
-					d.setNoteFunc(pane.PaneID, "")
-					pane.Note = ""
-				}
 				// Update source-of-truth list
 				for i := range d.allPanes {
 					if d.allPanes[i].PaneID == pane.PaneID {
 						d.allPanes[i].Following = pane.Following
-						d.allPanes[i].Note = pane.Note
 						break
 					}
 				}
@@ -510,23 +457,6 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			d.rebuildView()
 			if d.hasWorkingPanes() {
 				return d, spinnerTick()
-			}
-			return d, nil
-
-		case key.Matches(msg, dashboardKeys.EditNote):
-			if d.pickerMode {
-				return d, nil
-			}
-			if len(d.panes) > 0 && d.setNoteFunc != nil {
-				pane := d.panes[d.cursor]
-				if pane.Status == AttentionVirtual {
-					return d, nil
-				}
-				d.editingNote = true
-				d.noteInput = textinput.New()
-				d.noteInput.Prompt = "note: "
-				d.noteInput.SetValue(pane.Note)
-				d.noteInput.Focus()
 			}
 			return d, nil
 
@@ -828,7 +758,6 @@ func (d *MonitorDashboard) viewHelp() string {
 		{"r", "Toggle unread/clear"},
 		{"f", "Follow pane"},
 		{"F", "Toggle follow view"},
-		{"N", "Edit note"},
 		{"x", "Unmonitor pane"},
 		{"← / Esc", "Back / quit"},
 		{"F1", "Help"},
@@ -1008,22 +937,18 @@ func (d *MonitorDashboard) viewDashboard() string {
 		}
 	}
 
-	// Hints or note input
-	if d.editingNote {
-		b.WriteString("  " + d.noteInput.View())
-	} else {
-		hints := "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel"
-		if d.pickerMode {
-			hints = "  Enter select · F follow view · Esc cancel"
-			switch d.quickAccessModifier {
-			case "alt":
-				hints += " · A-1..9 quick select"
-			case "ctrl":
-				hints += " · C-1..9 quick select"
-			}
+	// Hints
+	hints := "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel"
+	if d.pickerMode {
+		hints = "  Enter select · F follow view · Esc cancel"
+		switch d.quickAccessModifier {
+		case "alt":
+			hints += " · A-1..9 quick select"
+		case "ctrl":
+			hints += " · C-1..9 quick select"
 		}
-		b.WriteString(hintStyle.Render(hints))
 	}
+	b.WriteString(hintStyle.Render(hints))
 
 	return b.String()
 }
@@ -1071,7 +996,6 @@ type dashboardKeyMap struct {
 	ToggleClearUnread key.Binding
 	Back              key.Binding
 	MarkUnread        key.Binding
-	EditNote          key.Binding
 	Help              key.Binding
 }
 
@@ -1108,9 +1032,6 @@ var dashboardKeys = dashboardKeyMap{
 	),
 	MarkUnread: key.NewBinding(
 		key.WithKeys("ctrl+a"),
-	),
-	EditNote: key.NewBinding(
-		key.WithKeys("N"),
 	),
 	Help: key.NewBinding(
 		key.WithKeys("f1"),

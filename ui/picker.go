@@ -91,6 +91,7 @@ type Picker struct {
 	initialCursorIdx int
 	warnings         []string
 	updateNotice     string
+	header           string
 }
 
 // iconLegendEntry maps an icon to its description in the help view
@@ -222,6 +223,15 @@ func WithWarnings(warnings []string) PickerOption {
 func WithUpdateNotice(text string) PickerOption {
 	return func(p *Picker) {
 		p.updateNotice = text
+	}
+}
+
+// WithHeader sets a caption rendered above the list (e.g. "Pick a workbench").
+// Empty text shows nothing. The header occupies a reserved top line so it never
+// shifts the list, input box, or hints.
+func WithHeader(text string) PickerOption {
+	return func(p *Picker) {
+		p.header = text
 	}
 }
 
@@ -452,6 +462,9 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.height = msg.Height - 4 // Reserve space for hints (1 line) + input box (3 lines)
 		if p.updateNotice != "" {
 			p.height-- // reserve the top line for the dimmed Update notice
+		}
+		if p.header != "" {
+			p.height-- // reserve the top line for the header caption
 		}
 		if p.height < 3 {
 			p.height = 3
@@ -741,6 +754,11 @@ func (p *Picker) viewProject() string {
 
 	if p.updateNotice != "" {
 		b.WriteString(renderUpdateNotice(p.width, p.updateNotice))
+		b.WriteString("\n")
+	}
+
+	if p.header != "" {
+		b.WriteString(headerStyle.Render("  " + p.header))
 		b.WriteString("\n")
 	}
 

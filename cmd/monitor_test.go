@@ -375,7 +375,7 @@ func assertPaneStatesMatch(t *testing.T, handlerState, directState *monitor.Stat
 			t.Fatalf("pane %s in handler state but missing from direct state", id)
 		}
 		if he.Status != de.Status || he.Session != de.Session || he.Label != de.Label ||
-			he.Following != de.Following || he.Note != de.Note {
+			he.Following != de.Following {
 			t.Errorf("pane %s: handler=%+v direct=%+v", id, he, de)
 		}
 	}

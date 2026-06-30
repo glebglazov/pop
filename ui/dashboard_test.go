@@ -206,7 +206,6 @@ func TestDashboardPickerMode(t *testing.T) {
 			MarkUnread:   func(string) { called = true },
 			ToggleFollow: func(string) { called = true },
 			Unmonitor:    func(string) { called = true },
-			SetNote:      func(string, string) { called = true },
 		}
 		d := newMonitorDashboard(panes, cb, WithMonitorDashboardPickerMode("alt"))
 		d.cursor = 0
@@ -215,7 +214,6 @@ func TestDashboardPickerMode(t *testing.T) {
 			{Code: 'a', Text: "a", Mod: tea.ModCtrl},
 			{Code: 'f', Text: "f"},
 			{Code: 'x', Text: "x"},
-			{Code: 'N', Text: "N"},
 			{Code: 'p', Text: "p"},
 		} {
 			m, _ := d.Update(msg)
@@ -443,7 +441,6 @@ func TestDashboardFollowPane(t *testing.T) {
 	}
 	cb := AttentionCallbacks{
 		ToggleFollow: func(paneID string) {},
-		SetNote:      func(paneID, note string) {},
 	}
 
 	t.Run("f toggles follow on", func(t *testing.T) {
@@ -481,22 +478,6 @@ func TestDashboardFollowPane(t *testing.T) {
 		d = m.(*MonitorDashboard)
 		if len(d.panes) != 1 {
 			t.Errorf("panes len = %d, want 1", len(d.panes))
-		}
-	})
-
-	t.Run("follow clears note", func(t *testing.T) {
-		notePanes := []AttentionPane{
-			{PaneID: "%1", Session: "s1", Following: true, Note: "keep me"},
-		}
-		noteCb := AttentionCallbacks{
-			ToggleFollow: func(paneID string) {},
-			SetNote:      func(paneID, note string) {},
-		}
-		d := newMonitorDashboard(notePanes, noteCb)
-		m, _ := d.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
-		d = m.(*MonitorDashboard)
-		if d.panes[0].Note != "" {
-			t.Errorf("note = %q, want empty", d.panes[0].Note)
 		}
 	})
 }
@@ -583,79 +564,6 @@ func TestDashboardUnmonitor(t *testing.T) {
 		}
 		if cmd == nil {
 			t.Error("expected quit cmd")
-		}
-	})
-}
-
-func TestDashboardEditNote(t *testing.T) {
-	panes := []AttentionPane{
-		{PaneID: "%1", Session: "s1"},
-		{PaneID: "%2", Session: "s2"},
-	}
-	cb := AttentionCallbacks{
-		SetNote:      func(paneID, note string) {},
-		ToggleFollow: func(paneID string) {},
-	}
-
-	t.Run("N enters note editing", func(t *testing.T) {
-		d := newMonitorDashboard(panes, cb)
-		m, _ := d.Update(tea.KeyPressMsg{Code: 'N', Text: "N"})
-		d = m.(*MonitorDashboard)
-		if !d.editingNote {
-			t.Error("expected editingNote = true")
-		}
-	})
-
-	t.Run("type and save note", func(t *testing.T) {
-		d := newMonitorDashboard(panes, cb)
-		d.cursor = 0 // ensure we're editing pane %1
-		// Enter edit mode
-		m, _ := d.Update(tea.KeyPressMsg{Code: 'N', Text: "N"})
-		d = m.(*MonitorDashboard)
-		// Type "hello"
-		for _, ch := range "hello" {
-			m, _ = d.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
-			d = m.(*MonitorDashboard)
-		}
-		// Save with Enter
-		m, _ = d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-		d = m.(*MonitorDashboard)
-		if d.panes[0].Note != "hello" {
-			t.Errorf("note = %q, want hello", d.panes[0].Note)
-		}
-		if d.editingNote {
-			t.Error("expected editingNote = false after save")
-		}
-		if !d.dirty {
-			t.Error("expected dirty = true")
-		}
-	})
-
-	t.Run("esc cancels note editing", func(t *testing.T) {
-		d := newMonitorDashboard(panes, cb)
-		m, _ := d.Update(tea.KeyPressMsg{Code: 'N', Text: "N"})
-		d = m.(*MonitorDashboard)
-		m, _ = d.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
-		d = m.(*MonitorDashboard)
-		m, _ = d.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-		d = m.(*MonitorDashboard)
-		if d.editingNote {
-			t.Error("expected editingNote = false after esc")
-		}
-		if d.panes[0].Note != "" {
-			t.Errorf("note = %q, want empty (cancel should not save)", d.panes[0].Note)
-		}
-	})
-
-	t.Run("N on virtual is no-op", func(t *testing.T) {
-		virtualPanes := []AttentionPane{
-			{PaneID: "%1", Session: "s1", Status: AttentionVirtual},
-		}
-		d := newMonitorDashboard(virtualPanes, cb)
-		m, _ := d.Update(tea.KeyPressMsg{Code: 'N', Text: "N"})
-		d = m.(*MonitorDashboard)
-		if d.editingNote {
-			t.Error("expected editingNote = false")
 		}
 	})
 }

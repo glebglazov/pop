@@ -618,7 +618,8 @@ func promptWorkbenchForCreate(d *ProjectDeps, workbenches []config.SessionTempla
 		items = append(items, ui.Item{Name: wb.Name, Path: workbenchItemPathPrefix + wb.Name})
 	}
 
-	result, err := d.RunPicker(items, ui.WithInitialCursorIndex(0))
+	result, err := d.RunPicker(items, ui.WithInitialCursorIndex(0),
+		ui.WithHeader("Pick a workbench to start a session"))
 	if err != nil {
 		return "", false, err
 	}

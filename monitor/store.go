@@ -72,13 +72,6 @@ func (s *Store) ToggleFollow(paneID string) error {
 	})
 }
 
-// SetNote sets a pane's note. No-op if pane not found.
-func (s *Store) SetNote(paneID, note string) error {
-	return s.UpdatePane(paneID, func(entry *PaneEntry) {
-		entry.Note = note
-	})
-}
-
 // Remove deletes a pane from the monitor state.
 func (s *Store) Remove(paneID string) error {
 	state, err := LoadWith(s.deps, s.path)
@@ -238,8 +231,7 @@ func applyLabel(entry *PaneEntry, label string) {
 
 // SetFollowing applies the following transition rule: auto-register an
 // untracked pane only when following (never when unfollowing); no-op when
-// the following value already matches; on unfollow, clear any attached note;
-// update timestamp on change.
+// the following value already matches; update timestamp on change.
 func (s *Store) SetFollowing(tmux deps.Tmux, paneID string, follow bool) error {
 	var registerErr error
 	err := s.upsert(paneID,
@@ -270,9 +262,6 @@ func (s *Store) SetFollowing(tmux deps.Tmux, paneID string, follow bool) error {
 			debug.Log("[set-following] %s (session=%s): %v → %v", paneID, entry.Session, entry.Following, follow)
 			entry.Following = follow
 			entry.UpdatedAt = time.Now()
-			if !follow {
-				entry.Note = ""
-			}
 			return true
 		},
 	)

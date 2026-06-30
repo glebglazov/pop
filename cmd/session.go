@@ -255,11 +255,6 @@ func attentionCallbacks() ui.AttentionCallbacks {
 				debug.Error("unmonitorPane %s: %v", paneID, err)
 			}
 		},
-		SetNote: func(paneID, note string) {
-			if err := store.SetNote(paneID, note); err != nil {
-				debug.Error("setPaneNote %s: %v", paneID, err)
-			}
-		},
 	}
 }
 

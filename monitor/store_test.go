@@ -178,22 +178,6 @@ func TestStore_ToggleFollow(t *testing.T) {
 	})
 }
 
-func TestStore_SetNote(t *testing.T) {
-	d, saved := mockStoreDeps(map[string]*PaneEntry{
-		"%1": {PaneID: "%1", Session: "proj"},
-	})
-	store := NewStore("/mock/data/pop/monitor.json", d)
-
-	if err := store.SetNote("%1", "check this"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	state := reloadStateFromSaved(t, *saved)
-	if state.Panes["%1"].Note != "check this" {
-		t.Errorf("note = %q, want %q", state.Panes["%1"].Note, "check this")
-	}
-}
-
 func TestStore_Remove(t *testing.T) {
 	t.Run("removes tracked pane", func(t *testing.T) {
 		d, saved := mockStoreDeps(map[string]*PaneEntry{

@@ -37,9 +37,8 @@ func withTopicSteps(steps ...config.TopicStep) *config.Config {
 }
 
 // TestPaneAttentionName_TopicPrecedence locks the descriptive parenthetical
-// precedence: Note → Topic → Label → pane_current_command. The Topic is read
-// from the @pop_topic option map (ADR 0058), not from monitor state, so a Note
-// in monitor state still overrides a Topic on the pane.
+// precedence: Topic → Label → pane_current_command. The Topic is read from
+// the @pop_topic option map (ADR 0058).
 func TestPaneAttentionName_TopicPrecedence(t *testing.T) {
 	paneCommands := map[string]string{"%1": "node"}
 
@@ -50,19 +49,13 @@ func TestPaneAttentionName_TopicPrecedence(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "note wins over topic",
-			entry:  &monitor.PaneEntry{PaneID: "%1", Session: "s", Note: "a note", Label: "claude"},
-			topics: map[string]string{"%1": "a topic"},
-			want:   "s (a note)",
-		},
-		{
-			name:   "topic wins when no note",
+			name:   "topic wins when set",
 			entry:  &monitor.PaneEntry{PaneID: "%1", Session: "s", Label: "claude"},
 			topics: map[string]string{"%1": "a topic"},
 			want:   "s (a topic)",
 		},
 		{
-			name:   "label used when no note or topic",
+			name:   "label used when no topic",
 			entry:  &monitor.PaneEntry{PaneID: "%1", Session: "s", Label: "claude"},
 			topics: nil,
 			want:   "s (%1, claude)",
@@ -84,8 +77,8 @@ func TestPaneAttentionName_TopicPrecedence(t *testing.T) {
 	}
 }
 
-// TestPaneTopicDerived confirms the dimming flag is set only when a Topic
-// (from @pop_topic) shows without a Note overriding it.
+// TestPaneTopicDerived confirms the dimming flag is set whenever a Topic
+// (from @pop_topic) is present.
 func TestPaneTopicDerived(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -93,8 +86,7 @@ func TestPaneTopicDerived(t *testing.T) {
 		topics map[string]string
 		want   bool
 	}{
-		{"topic without note", &monitor.PaneEntry{PaneID: "%1"}, map[string]string{"%1": "t"}, true},
-		{"note overrides topic", &monitor.PaneEntry{PaneID: "%1", Note: "n"}, map[string]string{"%1": "t"}, false},
+		{"topic present", &monitor.PaneEntry{PaneID: "%1"}, map[string]string{"%1": "t"}, true},
 		{"no topic", &monitor.PaneEntry{PaneID: "%1", Label: "claude"}, nil, false},
 	}
 	for _, tc := range cases {
