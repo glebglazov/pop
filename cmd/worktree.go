@@ -368,7 +368,7 @@ func defaultWorktreeShapeDeps() *worktreeShapeDeps {
 			return templates
 		},
 		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) {
-			return cfg.ResolvePreferredWorkbench(config.DefaultDeps(), path)
+			return cfg.ResolvePreferredWorkbench(preferredResolverConfigDeps(cfg), path)
 		},
 		PromptWorkbench: func(workbenches []config.SessionTemplate) (string, bool, error) {
 			return promptWorkbenchForCreate(&ProjectDeps{RunPicker: ui.Run}, workbenches)

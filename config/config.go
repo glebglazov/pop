@@ -17,6 +17,14 @@ import (
 // Deps holds external dependencies for the config package
 type Deps struct {
 	FS deps.FileSystem
+	// Trunk resolves the Trunk worktree checkout for a given checkout, used by
+	// the Preferred workbench inheritance layer (ADR-0078): a child worktree
+	// with no entry of its own inherits the Trunk worktree's runtime entry.
+	// Returns (path, true) for a real trunk anchor and ("", false) when there
+	// is none (e.g. an unconfigured bare repo — that step is simply skipped).
+	// config cannot import tasks/binding, so callers with git access inject
+	// this; a nil Trunk disables the inheritance layer.
+	Trunk func(checkoutPath string) (path string, ok bool)
 }
 
 // DefaultDeps returns dependencies using real implementations
@@ -841,13 +849,18 @@ func (c *Config) WorkbenchPickOnCreate() bool {
 // scope-first (ADR-0077), finest → coarsest:
 //
 //	this worktree's runtime entry ([workbench.preferred] in config.runtime.toml)
+//	  → the Trunk worktree's runtime entry (inheritance, resolved at open)
 //	  → the per-repo default (global [repo."<path>"] preferred_workbench)
 //	  → none
 //
-// The per-worktree runtime entry is a strictly finer scope than the per-repo
-// default, so it wins on specificity. It is three-valued: an explicit-none entry
-// (empty string) short-circuits to flat/prompt here, overriding the repo default;
-// a named entry uses that name; an absent entry falls through to the repo default.
+// The per-worktree runtime entry is a strictly finer scope than the inherited
+// trunk entry, which is finer than the per-repo default, so each wins on
+// specificity. Each runtime layer is three-valued: an explicit-none entry
+// (empty string) short-circuits to flat/prompt here, overriding the coarser
+// layers; a named entry uses that name; an absent entry falls through. The
+// trunk layer is dynamic — the child reflects trunk's current choice, never a
+// value snapshotted at create — and is skipped when the repo has no trunk
+// anchor (an unconfigured bare repo) or the trunk resolver is not wired.
 //
 // A stored name that does not resolve to a real Workbench for this checkout is
 // skipped with a non-fatal warning (ADR-0054 style) at each layer and resolution
@@ -896,7 +909,32 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 		warnings = append(warnings, staleWarn(name))
 	}
 
-	// Layer 2 (coarser): the per-repo default.
+	// Layer 2 (inheritance): the Trunk worktree's runtime entry (ADR-0078).
+	// A worktree with no entry of its own inherits trunk's current choice,
+	// resolved dynamically at open — re-pointing trunk follows through to
+	// un-overridden children. Skipped when there is no trunk anchor (an
+	// unconfigured bare repo) or when this checkout *is* the trunk (Layer 1
+	// already read its own entry, so re-reading would double-warn on a stale
+	// name). Explicit-none and stale-name rules apply here too.
+	if d.Trunk != nil {
+		if trunkPath, ok := d.Trunk(checkoutPath); ok && trunkPath != "" &&
+			canonicalPath(d, trunkPath) != canonicalPath(d, checkoutPath) {
+			if name, present, err := RuntimePreferredWorkbenchWith(d, trunkPath); err != nil {
+				debug.Error("config: read trunk preferred workbench for %s: %v", trunkPath, err)
+			} else if present {
+				if name == "" {
+					// Trunk opts out: flat/prompt here, overriding the repo default.
+					return "", warnings
+				}
+				if resolves(name) {
+					return name, warnings
+				}
+				warnings = append(warnings, staleWarn(name))
+			}
+		}
+	}
+
+	// Layer 3 (coarser): the per-repo default.
 	if name := c.repoPreferredWorkbench(d, checkoutPath); name != "" {
 		if resolves(name) {
 			return name, warnings
@@ -904,7 +942,7 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 		warnings = append(warnings, staleWarn(name))
 	}
 
-	// Layer 3: none.
+	// Layer 4: none.
 	return "", warnings
 }
 

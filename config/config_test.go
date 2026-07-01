@@ -3411,6 +3411,182 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 	})
 }
 
+// TestResolvePreferredWorkbenchTrunkInheritance exercises the ADR-0078 trunk
+// inheritance layer inserted between a worktree's own runtime entry and the
+// per-repo default: own runtime entry → Trunk worktree's runtime entry → repo
+// default → none, resolved dynamically at open. The Trunk resolver is injected
+// via Deps.Trunk (config cannot import tasks/binding).
+func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
+	// withTrunk returns Deps whose Trunk resolver always points at trunkPath.
+	withTrunk := func(t *testing.T, trunkPath string) *Deps {
+		d := preferredResolverDeps(t)
+		d.Trunk = func(string) (string, bool) { return trunkPath, true }
+		return d
+	}
+
+	t.Run("child with no entry inherits the trunk's runtime entry", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "minimal"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}},
+			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, child)
+		if name != "minimal" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want minimal/none (child inherits trunk)", name, warns)
+		}
+	})
+
+	t.Run("child's own name overrides the trunk", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "minimal"); err != nil {
+			t.Fatal(err)
+		}
+		if err := SetRuntimePreferredWorkbenchWith(d, child, "gs-dev"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}}
+		name, warns := cfg.ResolvePreferredWorkbench(d, child)
+		if name != "gs-dev" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want gs-dev/none (own entry wins)", name, warns)
+		}
+	})
+
+	t.Run("child's explicit none overrides the trunk", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "minimal"); err != nil {
+			t.Fatal(err)
+		}
+		if err := SetRuntimePreferredWorkbenchWith(d, child, ""); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}},
+			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, child)
+		if name != "" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want empty/none (child explicit-none wins)", name, warns)
+		}
+	})
+
+	t.Run("trunk's explicit none propagates over the repo default", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		if err := SetRuntimePreferredWorkbenchWith(d, trunk, ""); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, child)
+		if name != "" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want empty/none (trunk opts out)", name, warns)
+		}
+	})
+
+	t.Run("stale trunk name warns and falls through to the repo default", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "ghost"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, child)
+		if name != "gs-dev" {
+			t.Fatalf("name=%q, want gs-dev (stale trunk skips to repo default)", name)
+		}
+		if len(warns) != 1 || !strings.Contains(warns[0], "ghost") {
+			t.Fatalf("warns=%v, want one naming the stale trunk workbench", warns)
+		}
+	})
+
+	t.Run("bare repo without a trunk anchor skips the step without error", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		child := t.TempDir()
+		// No trunk anchor: the resolver reports (_, false).
+		d.Trunk = func(string) (string, bool) { return "", false }
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, child)
+		if name != "gs-dev" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want gs-dev/none (no trunk → repo default)", name, warns)
+		}
+	})
+
+	t.Run("nil Trunk resolver disables inheritance", func(t *testing.T) {
+		d := preferredResolverDeps(t) // Trunk left nil
+		child := t.TempDir()
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, child)
+		if name != "gs-dev" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want gs-dev/none (nil Trunk → repo default)", name, warns)
+		}
+	})
+
+	t.Run("re-pointing the trunk changes what an un-overridden child resolves to", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		cfg := &Config{SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}}
+
+		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "minimal"); err != nil {
+			t.Fatal(err)
+		}
+		if name, _ := cfg.ResolvePreferredWorkbench(d, child); name != "minimal" {
+			t.Fatalf("first open: name=%q, want minimal", name)
+		}
+		// Re-point the trunk; the child, which never set its own entry, follows.
+		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "gs-dev"); err != nil {
+			t.Fatal(err)
+		}
+		if name, _ := cfg.ResolvePreferredWorkbench(d, child); name != "gs-dev" {
+			t.Fatalf("after re-point: name=%q, want gs-dev (dynamic, not snapshotted)", name)
+		}
+	})
+
+	t.Run("checkout that is itself the trunk does not double-warn on a stale name", func(t *testing.T) {
+		trunk := t.TempDir()
+		d := withTrunk(t, trunk)
+		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "ghost"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{SessionTemplates: []SessionTemplate{{Name: "gs-dev"}}}
+		name, warns := cfg.ResolvePreferredWorkbench(d, trunk)
+		if name != "" {
+			t.Fatalf("name=%q, want empty (stale name skips)", name)
+		}
+		if len(warns) != 1 {
+			t.Fatalf("warns=%v, want exactly one (Layer 2 skipped for self-trunk)", warns)
+		}
+	})
+}
+
 // A preferred_workbench set in a repo-local .pop.toml is NOT accepted: the
 // RepoConfig schema has no such field, so it never becomes a repo default.
 func TestPreferredWorkbenchNotAcceptedFromPopTOML(t *testing.T) {

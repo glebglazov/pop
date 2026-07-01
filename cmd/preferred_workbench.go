@@ -3,11 +3,32 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
 )
+
+// preferredResolverConfigDeps returns config.Deps with the ADR-0078 trunk
+// inheritance layer wired: a worktree with no preference of its own inherits
+// the Trunk worktree's runtime entry, resolved dynamically at open. The trunk
+// is the existing Trunk worktree resolution (non-bare git main worktree, or
+// bare trunk = true via binding.ResolveTrunkPath); a bare repo with no trunk
+// anchor yields ("", false) so the inheritance layer is skipped.
+func preferredResolverConfigDeps(cfg *config.Config) *config.Deps {
+	d := config.DefaultDeps()
+	d.Trunk = func(checkoutPath string) (string, bool) {
+		trunkPath, bare, err := binding.ResolveTrunkPath(tasks.DefaultDeps(), cfg, checkoutPath)
+		if err != nil || bare || strings.TrimSpace(trunkPath) == "" {
+			return "", false
+		}
+		return trunkPath, true
+	}
+	return d
+}
 
 // preferredNonePath / preferredResetPath are sentinel Item.Path values for the
 // two synthetic entries in the Workbench-preference picker (ADR-0078). They

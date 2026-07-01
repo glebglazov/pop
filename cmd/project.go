@@ -178,7 +178,7 @@ func DefaultProjectDeps() *ProjectDeps {
 		},
 
 		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) {
-			return cfg.ResolvePreferredWorkbench(config.DefaultDeps(), path)
+			return cfg.ResolvePreferredWorkbench(preferredResolverConfigDeps(cfg), path)
 		},
 
 		InTmux:         func() bool { return os.Getenv("TMUX") != "" },
