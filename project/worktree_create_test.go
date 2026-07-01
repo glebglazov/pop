@@ -143,6 +143,39 @@ func TestWorktreePath(t *testing.T) {
 	}
 }
 
+// TestAddWorktreeNamedForksNewBranchOffBase locks the ADR-0076 semantic that the
+// human-typed name is the NEW branch name and the picked ref is only the fork
+// base. Regression guard: picking an already-checked-out branch (master) and
+// typing a fresh name must `-b <name> ... master`, not re-check-out master.
+func TestAddWorktreeNamedForksNewBranchOffBase(t *testing.T) {
+	var addArgs []string
+	d := &Deps{
+		Git: &deps.MockGit{
+			CommandInDirFunc: func(dir string, args ...string) (string, error) {
+				if len(args) > 0 && args[0] == "show-ref" {
+					return "", fmt.Errorf("not found") // no local branch named "feature-x"
+				}
+				if len(args) > 0 && args[0] == "worktree" {
+					addArgs = args
+				}
+				return "", nil
+			},
+		},
+	}
+	ctx := &RepoContext{GitRoot: "/repo", RepoName: "repo", IsBare: true}
+	path, err := AddWorktreeNamedWith(d, ctx, Branch{Ref: "master"}, "feature-x")
+	if err != nil {
+		t.Fatalf("AddWorktreeNamedWith() error: %v", err)
+	}
+	if path != "/repo/feature-x" {
+		t.Errorf("path = %q, want %q", path, "/repo/feature-x")
+	}
+	want := []string{"worktree", "add", "-b", "feature-x", "/repo/feature-x", "master"}
+	if !reflect.DeepEqual(addArgs, want) {
+		t.Errorf("git args = %v, want %v", addArgs, want)
+	}
+}
+
 func TestAddWorktreeWith(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -182,7 +215,7 @@ func TestAddWorktreeWith(t *testing.T) {
 			ctx:         &RepoContext{GitRoot: "/home/user/repo", RepoName: "repo", IsBare: false},
 			branchExist: false,
 			wantPath:    "/home/user/repo-feature-login",
-			wantAddArgs: []string{"worktree", "add", "-b", "feature/login", "/home/user/repo-feature-login", "feature/login"},
+			wantAddArgs: []string{"worktree", "add", "-b", "feature-login", "/home/user/repo-feature-login", "feature/login"},
 		},
 	}
 

@@ -16,15 +16,16 @@ func typeRune(r rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }
 
-func TestNamePromptDefaultsToDerivedName(t *testing.T) {
-	m := newNamePrompt("Name it", "feature-x")
-	if got := string(m.value); got != "feature-x" {
-		t.Errorf("initial buffer = %q, want %q", got, "feature-x")
+func TestNamePromptStartsEmptyAndDefaultsOnSubmit(t *testing.T) {
+	m := newNamePrompt("Name it", "feature-x", "master")
+	// The field starts empty (typed name = the NEW branch), not pre-filled.
+	if got := string(m.value); got != "" {
+		t.Errorf("initial buffer = %q, want empty", got)
 	}
-	if m.cursor != len("feature-x") {
-		t.Errorf("cursor = %d, want %d (end)", m.cursor, len("feature-x"))
+	if m.cursor != 0 {
+		t.Errorf("cursor = %d, want 0", m.cursor)
 	}
-	// Submitting as-is keeps the default.
+	// Submitting the empty field falls back to the branch-derived default.
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.submitted || m.cancelled {
 		t.Fatalf("Enter should submit: submitted=%v cancelled=%v", m.submitted, m.cancelled)
@@ -35,7 +36,7 @@ func TestNamePromptDefaultsToDerivedName(t *testing.T) {
 }
 
 func TestNamePromptPrintableRunes(t *testing.T) {
-	m := newNamePrompt("h", "")
+	m := newNamePrompt("h", "", "")
 	for _, r := range "abc" {
 		m = m.send(typeRune(r))
 	}
@@ -48,7 +49,10 @@ func TestNamePromptPrintableRunes(t *testing.T) {
 }
 
 func TestNamePromptBackspace(t *testing.T) {
-	m := newNamePrompt("h", "abc")
+	m := newNamePrompt("h", "", "")
+	for _, r := range "abc" {
+		m = m.send(typeRune(r))
+	}
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if got := string(m.value); got != "ab" {
 		t.Errorf("after backspace buffer = %q, want %q", got, "ab")
@@ -57,7 +61,7 @@ func TestNamePromptBackspace(t *testing.T) {
 		t.Errorf("cursor = %d, want 2", m.cursor)
 	}
 	// Backspace at start of an empty buffer is a no-op.
-	empty := newNamePrompt("h", "")
+	empty := newNamePrompt("h", "", "")
 	empty = empty.send(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if len(empty.value) != 0 || empty.cursor != 0 {
 		t.Errorf("backspace on empty buffer changed state: value=%q cursor=%d", string(empty.value), empty.cursor)
@@ -65,7 +69,10 @@ func TestNamePromptBackspace(t *testing.T) {
 }
 
 func TestNamePromptCursorMovementAndInsert(t *testing.T) {
-	m := newNamePrompt("h", "ac")
+	m := newNamePrompt("h", "", "")
+	for _, r := range "ac" {
+		m = m.send(typeRune(r))
+	}
 	// Move left once: cursor between a and c.
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.cursor != 1 {
@@ -95,7 +102,10 @@ func TestNamePromptCursorMovementAndInsert(t *testing.T) {
 }
 
 func TestNamePromptHomeEnd(t *testing.T) {
-	m := newNamePrompt("h", "abc")
+	m := newNamePrompt("h", "", "")
+	for _, r := range "abc" {
+		m = m.send(typeRune(r))
+	}
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyHome})
 	if m.cursor != 0 {
 		t.Errorf("cursor after home = %d, want 0", m.cursor)
@@ -107,7 +117,7 @@ func TestNamePromptHomeEnd(t *testing.T) {
 }
 
 func TestNamePromptEmptySubmitUsesDefault(t *testing.T) {
-	m := newNamePrompt("h", "feature-x")
+	m := newNamePrompt("h", "feature-x", "")
 	// Clear the buffer, then submit.
 	m = m.send(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 	if len(m.value) != 0 {
@@ -123,7 +133,7 @@ func TestNamePromptEmptySubmitUsesDefault(t *testing.T) {
 }
 
 func TestNamePromptEditedSubmit(t *testing.T) {
-	m := newNamePrompt("h", "feature-x")
+	m := newNamePrompt("h", "feature-x", "")
 	m = m.send(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 	for _, r := range "custom" {
 		m = m.send(typeRune(r))
@@ -135,7 +145,7 @@ func TestNamePromptEditedSubmit(t *testing.T) {
 }
 
 func TestNamePromptEscCancels(t *testing.T) {
-	m := newNamePrompt("h", "feature-x")
+	m := newNamePrompt("h", "feature-x", "")
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !m.cancelled {
 		t.Error("Esc should cancel")
@@ -146,7 +156,7 @@ func TestNamePromptEscCancels(t *testing.T) {
 }
 
 func TestNamePromptCtrlCCancels(t *testing.T) {
-	m := newNamePrompt("h", "feature-x")
+	m := newNamePrompt("h", "feature-x", "")
 	m = m.send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if !m.cancelled {
 		t.Error("ctrl+c should cancel")

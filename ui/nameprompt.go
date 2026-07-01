@@ -11,12 +11,14 @@ import (
 // pop imports zero charmbracelet/bubbles input components (ADR-0076); this
 // mirrors the picker's house style rather than pulling in bubbles/textinput.
 //
-// It backs the worktree-name step (slice 02): pre-filled with the branch-derived
-// default, the human accepts it, edits it, or cancels with Esc. Submitting an
-// empty value falls back to the default.
+// It backs the worktree-name step (ADR-0076): the human types the new branch
+// name into an empty field, or cancels with Esc. The prompt hints the base ref
+// being forked from as `(base: <ref>)`; submitting an empty value falls back to
+// the branch-derived default.
 type namePromptModel struct {
 	header       string
 	defaultValue string
+	base         string
 
 	value  []rune // current edit buffer
 	cursor int     // insertion index into value, 0..len(value)
@@ -26,13 +28,13 @@ type namePromptModel struct {
 	cancelled bool
 }
 
-func newNamePrompt(header, defaultValue string) *namePromptModel {
-	v := []rune(defaultValue)
+func newNamePrompt(header, defaultValue, base string) *namePromptModel {
 	return &namePromptModel{
 		header:       header,
 		defaultValue: defaultValue,
-		value:        v,
-		cursor:       len(v),
+		base:         base,
+		value:        nil,
+		cursor:       0,
 	}
 }
 
@@ -108,6 +110,9 @@ func (m *namePromptModel) View() tea.View {
 	var b strings.Builder
 
 	b.WriteString(headerStyle.Render("  " + m.header))
+	if m.base != "" {
+		b.WriteString(hintStyle.Render("  (base: " + m.base + ")"))
+	}
 	b.WriteString("\n\n")
 
 	// Render the edit buffer with a block cursor at the insertion point.
@@ -159,11 +164,12 @@ var namePromptKeys = namePromptKeyMap{
 	Clear:     key.NewBinding(key.WithKeys("ctrl+u", "alt+backspace")),
 }
 
-// PromptName shows a single-line editable prompt pre-filled with defaultValue.
-// It returns the chosen name and confirmed=true on Enter (an empty buffer falls
-// back to defaultValue), or confirmed=false when the human cancels with Esc.
-func PromptName(header, defaultValue string) (name string, confirmed bool, err error) {
-	m := newNamePrompt(header, defaultValue)
+// PromptName shows a single-line editable prompt with an empty field, hinting
+// the base ref as `(base: <base>)`. It returns the chosen name and
+// confirmed=true on Enter (an empty buffer falls back to defaultValue), or
+// confirmed=false when the human cancels with Esc.
+func PromptName(header, defaultValue, base string) (name string, confirmed bool, err error) {
+	m := newNamePrompt(header, defaultValue, base)
 	final, err := tea.NewProgram(m).Run()
 	if err != nil {
 		return "", false, err

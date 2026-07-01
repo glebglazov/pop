@@ -22,11 +22,15 @@ shaping for free.
 ## Decision
 
 Interactive worktree creation is a first-class action of the **Worktree picker**,
-bound to `ctrl+a` in `pop worktree dashboard`. The flow: pick a branch (local +
-remote, main/master first) → name the worktree (hand-rolled prompt, default =
-branch with `/`→`-`) → `git worktree add` (reuse-existing-branch vs. `-b` new
-branch; bare vs. non-bare path derivation — the retired script's logic, ported) →
-open the session and **attach immediately**, shaped by a **Workbench** when
+bound to `ctrl+a` in `pop worktree dashboard`. The flow: pick a **base branch**
+(local + remote, main/master first) → name the new branch/worktree (hand-rolled
+prompt, empty field, hinted `(base: <ref>)`, empty-submit derives the base with
+`/`→`-`) → `git worktree add`. The **typed name is the new branch name**; the
+picked ref is only the fork start-point. Reuse a local branch iff one matching the
+*typed name* exists, else `-b <typed-name> <path> <base-ref>` (a remote base thus
+becomes a local tracking branch); bare vs. non-bare path derivation — the retired
+script's logic, ported faithfully. Then open the session and **attach
+immediately**, shaped by a **Workbench** when
 `[workbench] pick_on_create` is set (reusing the existing picker create-path,
 [ADR-0075](0075-workbench-apply-reconciles-by-pane-identity.md)) else a flat
 session.

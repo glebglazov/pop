@@ -121,20 +121,20 @@ func AddWorktreeNamed(ctx *RepoContext, selection Branch, dir string) (string, e
 }
 
 // AddWorktreeNamedWith runs `git worktree add`, porting the retired
-// tmux-create-worktree logic: an existing local branch of the derived name is
-// reused; otherwise a new branch is created with -b based on the selection (a
-// remote selection thus becomes a local tracking branch). The worktree directory
-// name is taken from dir (the human-accepted or -edited name, slice 02), while
-// the branch is still derived from the selection. Returns the new worktree path.
+// tmux-create-worktree logic faithfully (ADR-0076): the human-typed name IS the
+// new branch name (and the directory name); the picked ref (selection) is only
+// the fork start-point. A local branch matching the typed name is reused;
+// otherwise a new branch is created with `-b <name> <path> <selection.Ref>` (a
+// remote selection thus becomes a local tracking branch). Returns the new
+// worktree path.
 func AddWorktreeNamedWith(d *Deps, ctx *RepoContext, selection Branch, dir string) (string, error) {
-	branch, _ := DeriveWorktreeName(selection.Ref, selection.IsRemote)
 	path := WorktreePath(ctx, dir)
 
 	var err error
-	if LocalBranchExistsWith(d, ctx, branch) {
-		_, err = d.Git.CommandInDir(ctx.GitRoot, "worktree", "add", path, branch)
+	if LocalBranchExistsWith(d, ctx, dir) {
+		_, err = d.Git.CommandInDir(ctx.GitRoot, "worktree", "add", path, dir)
 	} else {
-		_, err = d.Git.CommandInDir(ctx.GitRoot, "worktree", "add", "-b", branch, path, selection.Ref)
+		_, err = d.Git.CommandInDir(ctx.GitRoot, "worktree", "add", "-b", dir, path, selection.Ref)
 	}
 	if err != nil {
 		return "", err
