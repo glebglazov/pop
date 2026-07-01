@@ -40,7 +40,7 @@ func TestDashboardDrainTargetEntriesOrderAndExclusions(t *testing.T) {
 		setScopedKey(repoKey, "other-set"): {RuntimePath: wt2, Branch: "bound-other", Provisioned: false},
 	})
 
-	entries, err := DashboardDrainTargetEntries(d, cfg, row)
+	entries, err := DashboardDrainTargetEntries(d, cfg, row.SetRef)
 	if err != nil {
 		t.Fatalf("DashboardDrainTargetEntries: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestDashboardDrainTargetAdoptsWorktreeAndDrains(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := LaunchDashboardDrainTarget(d, cfg, row, dashboardDrainEntry{Kind: drainTargetWorktree, Path: wt, Branch: "adopt-here"})
+	result, err := LaunchDashboardDrainTarget(d, cfg, row.SetRef, dashboardDrainEntry{Kind: drainTargetWorktree, Path: wt, Branch: "adopt-here"})
 	if err != nil {
 		t.Fatalf("LaunchDashboardDrainTarget adopt: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestDashboardDrainTargetNewManagedProvisionsOffTrunkAndDrains(t *testing.T)
 		t.Fatal(err)
 	}
 
-	result, err := LaunchDashboardDrainTarget(d, cfg, row, dashboardDrainEntry{Kind: drainTargetNewManaged})
+	result, err := LaunchDashboardDrainTarget(d, cfg, row.SetRef, dashboardDrainEntry{Kind: drainTargetNewManaged})
 	if err != nil {
 		t.Fatalf("LaunchDashboardDrainTarget new managed: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestDashboardDrainTargetTrunkDrainsInlineNoBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := LaunchDashboardDrainTarget(d, cfg, row, dashboardDrainEntry{Kind: drainTargetTrunk, Path: repo})
+	result, err := LaunchDashboardDrainTarget(d, cfg, row.SetRef, dashboardDrainEntry{Kind: drainTargetTrunk, Path: repo})
 	if err != nil {
 		t.Fatalf("LaunchDashboardDrainTarget trunk: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestDashboardDrainTargetBareHidesTrunkOptions(t *testing.T) {
 	}
 	d, cfg, row, _ := dashboardLaunchFixture(t, checkout, setID)
 
-	entries, err := DashboardDrainTargetEntries(d, cfg, row)
+	entries, err := DashboardDrainTargetEntries(d, cfg, row.SetRef)
 	if err != nil {
 		t.Fatalf("DashboardDrainTargetEntries: %v", err)
 	}

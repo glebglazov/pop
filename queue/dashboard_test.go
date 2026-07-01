@@ -1353,7 +1353,7 @@ func TestDashboardLaunchDrainRoutesPlainTrunkWorktreeAndRecordsPane(t *testing.T
 	})
 	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
 
-	result, err := LaunchDashboardDrain(d, cfg, row)
+	result, err := LaunchDashboardDrain(d, cfg, row.SetRef)
 	if err != nil {
 		t.Fatalf("LaunchDashboardDrain: %v", err)
 	}
@@ -1388,7 +1388,7 @@ func TestDashboardLaunchDrainRoutesBoundCheckout(t *testing.T) {
 		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "bound", Project: "pop", Provisioned: false},
 	})
 
-	result, err := LaunchDashboardDrain(d, cfg, row)
+	result, err := LaunchDashboardDrain(d, cfg, row.SetRef)
 	if err != nil {
 		t.Fatalf("LaunchDashboardDrain: %v", err)
 	}
@@ -1413,7 +1413,7 @@ func TestDashboardLaunchDrainUnboundUsesRepresentativeCheckout(t *testing.T) {
 	})
 	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
 
-	result, err := LaunchDashboardDrain(d, cfg, row)
+	result, err := LaunchDashboardDrain(d, cfg, row.SetRef)
 	if err != nil {
 		t.Fatalf("LaunchDashboardDrain: %v", err)
 	}
@@ -1495,7 +1495,7 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 	runGit(t, repo, "worktree", "add", "-b", "existing-two", wt2, "HEAD")
 	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
 
-	entries, err := DashboardBindWorktreeEntries(d, cfg, row)
+	entries, err := DashboardBindWorktreeEntries(d, cfg, row.SetRef)
 	if err != nil {
 		t.Fatalf("DashboardBindWorktreeEntries: %v", err)
 	}
@@ -1512,7 +1512,7 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 		t.Fatalf("entries = %+v, want %s on branch existing-one", entries, wt1)
 	}
 
-	got, err := DashboardAdoptWorktree(d, cfg, row, wt1)
+	got, err := DashboardAdoptWorktree(d, cfg, row.SetRef, wt1)
 	if err != nil {
 		t.Fatalf("DashboardAdoptWorktree: %v", err)
 	}
@@ -1520,7 +1520,7 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 		t.Fatalf("adopt result = %+v, want %s existing-one", got, wt1)
 	}
 
-	repointed, err := DashboardAdoptWorktree(d, cfg, row, wt2)
+	repointed, err := DashboardAdoptWorktree(d, cfg, row.SetRef, wt2)
 	if err != nil {
 		t.Fatalf("idle re-point should not require force prompt: %v", err)
 	}
@@ -1939,7 +1939,7 @@ func TestDashboardCreateWorktreeManagedFreshBranchNoSession(t *testing.T) {
 	})
 	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
 
-	refs, err := DashboardBindBaseRefs(d, cfg, row)
+	refs, err := DashboardBindBaseRefs(d, cfg, row.SetRef)
 	if err != nil {
 		t.Fatalf("DashboardBindBaseRefs: %v", err)
 	}
@@ -1947,7 +1947,7 @@ func TestDashboardCreateWorktreeManagedFreshBranchNoSession(t *testing.T) {
 		t.Fatalf("refs = %v, want main first", refs)
 	}
 
-	got, err := DashboardCreateWorktree(d, cfg, row, "main", "fresh-dashboard-branch")
+	got, err := DashboardCreateWorktree(d, cfg, row.SetRef, "main", "fresh-dashboard-branch")
 	if err != nil {
 		t.Fatalf("DashboardCreateWorktree: %v", err)
 	}
@@ -2001,7 +2001,7 @@ func TestDashboardBindRefusesLiveLock(t *testing.T) {
 		return idleLock(runtimePath)
 	}
 
-	_, err = DashboardAdoptWorktree(d, cfg, row, target)
+	_, err = DashboardAdoptWorktree(d, cfg, row.SetRef, target)
 	if err == nil || !strings.Contains(err.Error(), "currently executing") {
 		t.Fatalf("DashboardAdoptWorktree err = %v, want live-lock refusal", err)
 	}
@@ -2084,7 +2084,7 @@ func TestDashboardUnbindManagedOnlyForgetsBindingAndKeepsCheckout(t *testing.T) 
 		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "managed-unbind", Project: filepath.Base(repo), Provisioned: true},
 	})
 
-	got, err := DashboardUnbindWorktree(d, cfg, row)
+	got, err := DashboardUnbindWorktree(d, cfg, row.SetRef)
 	if err != nil {
 		t.Fatalf("DashboardUnbindWorktree: %v", err)
 	}
@@ -2131,7 +2131,7 @@ func TestDashboardUnbindAdoptedOnlyForgetsBindingAndKeepsStatus(t *testing.T) {
 		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "adopted-unbind", Project: filepath.Base(repo), Provisioned: false},
 	})
 
-	got, err := DashboardUnbindWorktree(d, cfg, row)
+	got, err := DashboardUnbindWorktree(d, cfg, row.SetRef)
 	if err != nil {
 		t.Fatalf("DashboardUnbindWorktree: %v", err)
 	}
@@ -2181,7 +2181,7 @@ func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
 		return idleLock(runtimePath)
 	}
 
-	_, err = DashboardUnbindWorktree(d, cfg, row)
+	_, err = DashboardUnbindWorktree(d, cfg, row.SetRef)
 	if err == nil || !strings.Contains(err.Error(), "refusing unbind") {
 		t.Fatalf("DashboardUnbindWorktree err = %v, want live-lock refusal", err)
 	}
@@ -2195,7 +2195,7 @@ func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
 		return nil
 	}
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{})
-	got, err := DashboardUnbindWorktree(d, cfg, row)
+	got, err := DashboardUnbindWorktree(d, cfg, row.SetRef)
 	if err != nil {
 		t.Fatalf("no-binding DashboardUnbindWorktree: %v", err)
 	}
@@ -2221,7 +2221,7 @@ func TestDashboardLaunchDrainRefusesBareWithoutTrunk(t *testing.T) {
 	}
 	d, cfg, row, rt := dashboardLaunchFixture(t, checkout, setID)
 
-	_, err = LaunchDashboardDrain(d, cfg, row)
+	_, err = LaunchDashboardDrain(d, cfg, row.SetRef)
 	if err == nil || !strings.Contains(err.Error(), repoScanReason) {
 		t.Fatalf("LaunchDashboardDrain err = %v, want %q", err, repoScanReason)
 	}
@@ -2233,7 +2233,7 @@ func TestDashboardLaunchDrainRefusesBareWithoutTrunk(t *testing.T) {
 func TestDashboardPreviewDrainPaneAndNoOp(t *testing.T) {
 	rt := newRecordingTmux(true, drainWindowName)
 	d := &Deps{Tmux: rt}
-	if err := PreviewDashboardDrain(d, DashboardRow{paneID: "%9"}); err != nil {
+	if err := PreviewDashboardDrain(d, SetRef{PaneID: "%9"}); err != nil {
 		t.Fatalf("PreviewDashboardDrain: %v", err)
 	}
 	if _, ok := rt.findCommand("select-pane"); !ok {
@@ -2244,7 +2244,7 @@ func TestDashboardPreviewDrainPaneAndNoOp(t *testing.T) {
 		t.Fatalf("switch-client = %v, want pane %%9", switchClient)
 	}
 	rt.commands = nil
-	if err := PreviewDashboardDrain(d, DashboardRow{}); err != nil {
+	if err := PreviewDashboardDrain(d, SetRef{}); err != nil {
 		t.Fatalf("PreviewDashboardDrain no-op: %v", err)
 	}
 	if len(rt.commands) != 0 {
