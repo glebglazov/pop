@@ -115,6 +115,13 @@ type ProjectDeps struct {
 	// fixed set without touching .pop.toml or the global library.
 	ResolveWorkbenches func(cfg *config.Config, path string) []config.SessionTemplate
 
+	// ResolvePreferredWorkbench returns the preferred-Workbench name to
+	// auto-apply for a checkout (or "" for none) plus any non-fatal warnings
+	// (ADR-0078). When it resolves a name the create-path applies it silently and
+	// suppresses the pick_on_create prompt. A seam so tests drive the auto-apply
+	// vs prompt decision without config.
+	ResolvePreferredWorkbench func(cfg *config.Config, path string) (string, []string)
+
 	// Environment
 	InTmux         func() bool
 	CurrentSession func(tmux deps.Tmux) string
@@ -168,6 +175,10 @@ func DefaultProjectDeps() *ProjectDeps {
 		ResolveWorkbenches: func(cfg *config.Config, path string) []config.SessionTemplate {
 			templates, _ := cfg.ResolveSessionTemplatesWith(config.DefaultDeps(), path)
 			return templates
+		},
+
+		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) {
+			return cfg.ResolvePreferredWorkbench(config.DefaultDeps(), path)
 		},
 
 		InTmux:         func() bool { return os.Getenv("TMUX") != "" },
@@ -387,6 +398,20 @@ func RunProject(d *ProjectDeps) error {
 			}
 			if d.TMuxCDPane != "" {
 				return d.SendCDToPane(d.Tmux, d.TMuxCDPane, result.Selected.Path)
+			}
+			// Preferred workbench (ADR-0078): a resolved per-checkout default
+			// auto-applies silently and suppresses the prompt regardless of
+			// pick_on_create. A stale name resolves to "" with a warning and
+			// falls through to today's behavior. Fires only when this selection
+			// creates a brand-new session.
+			if !d.Tmux.HasSession(result.Selected.SessionName) {
+				preferred, warns := d.ResolvePreferredWorkbench(cfg, result.Selected.Path)
+				for _, w := range warns {
+					debug.Error("project: %s", w)
+				}
+				if preferred != "" {
+					return d.OpenSessionWithWorkbench(d.Tmux, result.Selected, preferred)
+				}
 			}
 			// Picker-time Workbench selection (ADR-0075), opt-in via
 			// [workbench] pick_on_create. Fires only when this selection

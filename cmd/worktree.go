@@ -326,9 +326,10 @@ func createWorktree(ctx *project.RepoContext) error {
 // gated-prompt and flat fall-through paths are unit-testable with mocks; the
 // branch/name/`git worktree add` steps above run once, before shaping begins.
 type worktreeShapeDeps struct {
-	LoadConfig         func() (*config.Config, error)
-	PickOnCreate       func(cfg *config.Config) bool
-	ResolveWorkbenches func(cfg *config.Config, path string) []config.SessionTemplate
+	LoadConfig                func() (*config.Config, error)
+	PickOnCreate              func(cfg *config.Config) bool
+	ResolveWorkbenches        func(cfg *config.Config, path string) []config.SessionTemplate
+	ResolvePreferredWorkbench func(cfg *config.Config, path string) (string, []string)
 	PromptWorkbench    func(workbenches []config.SessionTemplate) (name string, confirmed bool, err error)
 	FindWorkbench      func(workbenches []config.SessionTemplate, name string) (config.SessionTemplate, bool)
 	CreateSession      func(tmpl config.SessionTemplate, sessionName, path string) error
@@ -356,6 +357,9 @@ func defaultWorktreeShapeDeps() *worktreeShapeDeps {
 			templates, _ := cfg.ResolveSessionTemplatesWith(config.DefaultDeps(), path)
 			return templates
 		},
+		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) {
+			return cfg.ResolvePreferredWorkbench(config.DefaultDeps(), path)
+		},
 		PromptWorkbench: func(workbenches []config.SessionTemplate) (string, bool, error) {
 			return promptWorkbenchForCreate(&ProjectDeps{RunPicker: ui.Run}, workbenches)
 		},
@@ -381,6 +385,27 @@ func shapeWorktreeSession(d *worktreeShapeDeps, ctx *project.RepoContext, path s
 	item := &ui.Item{Name: filepath.Base(path), Path: path}
 
 	cfg, err := d.LoadConfig()
+	if err == nil {
+		// Preferred workbench (ADR-0078): a resolved per-checkout default
+		// auto-applies silently and suppresses the prompt regardless of
+		// pick_on_create. A stale name resolves to "" with a warning and falls
+		// through to the pick_on_create gate below.
+		preferred, warns := d.ResolvePreferredWorkbench(cfg, path)
+		for _, w := range warns {
+			debug.Error("worktree: %s", w)
+		}
+		if preferred != "" {
+			workbenches := d.ResolveWorkbenches(cfg, path)
+			if tmpl, ok := d.FindWorkbench(workbenches, preferred); ok {
+				sessionName := d.SessionName(path)
+				if err := d.CreateSession(tmpl, sessionName, path); err != nil {
+					return err
+				}
+				d.RecordHistory(path)
+				return d.Attach(sessionName)
+			}
+		}
+	}
 	if err == nil && d.PickOnCreate(cfg) {
 		workbenches := d.ResolveWorkbenches(cfg, path)
 		if len(workbenches) > 0 {

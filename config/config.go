@@ -589,6 +589,13 @@ type RepoOverrideConfig struct {
 	// SessionTemplates are per-repo session template blueprints defined in a
 	// global [repo."<path>"] block. Deprecated alias for Workbenches; both accepted.
 	SessionTemplates []SessionTemplate `toml:"session_templates"`
+	// PreferredWorkbench names the repo-default Workbench that auto-applies when
+	// a session is born for any checkout of this repo (ADR-0078). It is a
+	// [repo]-only key: deliberately absent from the .pop.toml RepoConfig schema
+	// because session shape is personal taste, not committed team config. Unlike
+	// trunk it is keyed by repository identity, not the exact checkout path, so
+	// it is a coarse default shared by every worktree of the repo.
+	PreferredWorkbench string `toml:"preferred_workbench"`
 }
 
 // LoadRepoConfig reads repo-root .pop.toml. A missing file is not an error and
@@ -826,6 +833,58 @@ func (c *Config) WorkbenchPickOnCreate() bool {
 		return false
 	}
 	return c.WorkbenchOpts.PickOnCreate
+}
+
+// ResolvePreferredWorkbench returns the name of the Workbench that should
+// auto-apply when a session is born for checkoutPath, or "" for none, plus any
+// non-fatal warnings the caller should surface (ADR-0078). At this slice it
+// resolves a single home: the per-repo default (a global [repo."<path>"]
+// block's preferred_workbench key, matched by repository identity). The runtime
+// store and Trunk inheritance are later slices; the resolution chain terminates
+// here at "none".
+//
+// A stored name that does not resolve to a real Workbench for this checkout is
+// skipped with a non-fatal warning (ADR-0054 style) and resolution continues
+// (here: to none) — a broken preference never blocks getting into a session and
+// never silently vanishes. The receiver may be nil.
+func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string, []string) {
+	if c == nil {
+		return "", nil
+	}
+	name := c.repoPreferredWorkbench(d, checkoutPath)
+	if name == "" {
+		return "", nil
+	}
+	workbenches, _ := c.ResolveSessionTemplatesWith(d, checkoutPath)
+	for _, tmpl := range workbenches {
+		if tmpl.Name == name {
+			return name, nil
+		}
+	}
+	return "", []string{fmt.Sprintf(
+		"preferred workbench %q does not resolve to a Workbench for %s; ignoring",
+		name, checkoutPath,
+	)}
+}
+
+// repoPreferredWorkbench returns the preferred_workbench declared on the global
+// [repo."<path>"] block whose key shares checkoutPath's repository identity, or
+// "" when none. Unlike trunk (which is per-checkout), this default is keyed by
+// identity so every worktree of the repo shares it.
+func (c *Config) repoPreferredWorkbench(d *Deps, checkoutPath string) string {
+	if c == nil {
+		return ""
+	}
+	identity := repoIdentity(d, checkoutPath)
+	for rawKey, block := range c.Repo {
+		if repoIdentity(d, rawKey) != identity {
+			continue
+		}
+		if block.PreferredWorkbench != "" {
+			return block.PreferredWorkbench
+		}
+	}
+	return ""
 }
 
 // ExpandedPath represents a resolved project path with display metadata
@@ -1467,9 +1526,10 @@ func queueAgentsWarnings(path string, md toml.MetaData) []Finding {
 // other key is silently degraded but surfaced as a finding.
 func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 	validRepoKeys := map[string]bool{
-		"trunk":             true,
-		"workbenches":       true,
-		"session_templates": true, // deprecated alias, still accepted
+		"trunk":               true,
+		"workbenches":         true,
+		"session_templates":   true, // deprecated alias, still accepted
+		"preferred_workbench": true, // ADR-0078 repo-default preferred Workbench
 	}
 	var findings []Finding
 	seen := make(map[string]bool)
@@ -1490,7 +1550,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 		findings = append(findings, Finding{
 			Path: "config.unknown_repo_key",
 			Message: fmt.Sprintf(
-				"%s: [repo.%q] unknown key %q ignored (only trunk, workbenches, and session_templates are accepted)",
+				"%s: [repo.%q] unknown key %q ignored (only trunk, workbenches, session_templates, and preferred_workbench are accepted)",
 				path, key[1], fieldName,
 			),
 		})

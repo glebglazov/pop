@@ -1011,7 +1011,8 @@ func testProjectDeps(t *testing.T) *ProjectDeps {
 		EnsureSystemState:        func() []string { return nil },
 		RunConfigure:             func() error { return nil },
 
-		ResolveWorkbenches: func(cfg *config.Config, path string) []config.SessionTemplate { return nil },
+		ResolveWorkbenches:        func(cfg *config.Config, path string) []config.SessionTemplate { return nil },
+		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) { return "", nil },
 
 		InTmux:         func() bool { return false },
 		CurrentSession: func(tmux deps.Tmux) string { return "" },
@@ -1594,6 +1595,95 @@ func TestRunProject_WorkbenchPickNoWorkbenchYieldsFlat(t *testing.T) {
 	}
 	if openWB {
 		t.Error("OpenSessionWithWorkbench must not run for the no-workbench choice")
+	}
+}
+
+// TestRunProject_PreferredWorkbenchAutoApplies asserts that a resolved preferred
+// workbench (ADR-0078) auto-applies silently and suppresses the prompt whether
+// pick_on_create is off or on — one picker, straight to OpenSessionWithWorkbench.
+func TestRunProject_PreferredWorkbenchAutoApplies(t *testing.T) {
+	for _, pickOn := range []bool{false, true} {
+		name := "pick_on_create_off"
+		if pickOn {
+			name = "pick_on_create_on"
+		}
+		t.Run(name, func(t *testing.T) {
+			d := testProjectDeps(t)
+			if pickOn {
+				orig := d.LoadConfig
+				d.LoadConfig = func() (*config.Config, error) {
+					cfg, err := orig()
+					if err != nil {
+						return nil, err
+					}
+					cfg.WorkbenchOpts = &config.WorkbenchOptions{PickOnCreate: true}
+					return cfg, nil
+				}
+			}
+			d.ResolvePreferredWorkbench = func(cfg *config.Config, path string) (string, []string) {
+				return "gs-dev", nil
+			}
+
+			openFlat := false
+			d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+			var gotName string
+			openWB := false
+			d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, n string) error {
+				openWB = true
+				gotName = n
+				return nil
+			}
+
+			calls := 0
+			d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+				calls++
+				return ui.Result{Action: ui.ActionConfirm, Selected: &items[0]}, nil
+			}
+
+			if err := RunProject(d); err != nil {
+				t.Fatalf("RunProject: %v", err)
+			}
+			if !openWB {
+				t.Fatal("expected preferred workbench to auto-apply via OpenSessionWithWorkbench")
+			}
+			if gotName != "gs-dev" {
+				t.Errorf("auto-applied workbench = %q, want %q", gotName, "gs-dev")
+			}
+			if openFlat {
+				t.Error("flat OpenSession must not run when a preferred workbench resolves")
+			}
+			if calls != 1 {
+				t.Errorf("picker shown %d times, want 1 (no prompt when preferred resolves)", calls)
+			}
+		})
+	}
+}
+
+// TestRunProject_StalePreferredFallsThrough asserts that a preferred workbench
+// that does not resolve (empty name + warning) never blocks the open: with
+// pick_on_create off it falls through to today's flat session.
+func TestRunProject_StalePreferredFallsThrough(t *testing.T) {
+	d := testProjectDeps(t) // pick_on_create defaults false
+	d.ResolvePreferredWorkbench = func(cfg *config.Config, path string) (string, []string) {
+		return "", []string{"preferred workbench \"ghost\" does not resolve; ignoring"}
+	}
+	openFlat := false
+	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	openWB := false
+	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, n string) error { openWB = true; return nil }
+
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		return ui.Result{Action: ui.ActionConfirm, Selected: &items[0]}, nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if !openFlat {
+		t.Error("expected flat OpenSession when the preferred workbench is stale")
+	}
+	if openWB {
+		t.Error("OpenSessionWithWorkbench must not run for a stale preferred workbench")
 	}
 }
 

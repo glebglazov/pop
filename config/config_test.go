@@ -3190,6 +3190,142 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 	})
 }
 
+// TestLoadPreferredWorkbenchParsesOnRepoBlock asserts preferred_workbench parses
+// on a global [repo."<path>"] block into RepoOverrideConfig and is not flagged as
+// an unknown repo key (ADR-0078).
+func TestLoadPreferredWorkbenchParsesOnRepoBlock(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	body := "projects = [{ path = \"/main\" }]\n\n" +
+		"[repo.\"/some/repo\"]\npreferred_workbench = \"gs-dev\"\n"
+	if err := os.WriteFile(configPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &Deps{FS: &deps.MockFileSystem{
+		UserHomeDirFunc: func() (string, error) { return tmpDir, nil },
+	}}
+
+	cfg, err := LoadWith(d, configPath)
+	if err != nil {
+		t.Fatalf("LoadWith() error: %v", err)
+	}
+	block, ok := cfg.Repo["/some/repo"]
+	if !ok {
+		t.Fatal("expected [repo.\"/some/repo\"] block to load")
+	}
+	if block.PreferredWorkbench != "gs-dev" {
+		t.Errorf("PreferredWorkbench = %q, want %q", block.PreferredWorkbench, "gs-dev")
+	}
+	for _, f := range cfg.Findings {
+		if f.Path == "config.unknown_repo_key" {
+			t.Errorf("preferred_workbench flagged as unknown repo key: %s", f.Message)
+		}
+	}
+}
+
+func TestResolvePreferredWorkbench(t *testing.T) {
+	root := t.TempDir()
+	real := deps.NewRealFileSystem()
+	d := &Deps{FS: &deps.MockFileSystem{
+		StatFunc:         real.Stat,
+		ReadFileFunc:     real.ReadFile,
+		EvalSymlinksFunc: real.EvalSymlinks,
+		UserHomeDirFunc:  real.UserHomeDir,
+	}}
+
+	t.Run("repo default resolves to a real workbench", func(t *testing.T) {
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}},
+			Repo: map[string]RepoOverrideConfig{
+				root: {PreferredWorkbench: "gs-dev"},
+			},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "gs-dev" {
+			t.Errorf("name = %q, want %q", name, "gs-dev")
+		}
+		if len(warns) != 0 {
+			t.Errorf("unexpected warnings: %v", warns)
+		}
+	})
+
+	t.Run("unset yields none without warning", func(t *testing.T) {
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Repo: map[string]RepoOverrideConfig{
+				root: {Trunk: boolPtr(true)},
+			},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "" {
+			t.Errorf("name = %q, want empty", name)
+		}
+		if len(warns) != 0 {
+			t.Errorf("unexpected warnings: %v", warns)
+		}
+	})
+
+	t.Run("no repo block yields none", func(t *testing.T) {
+		cfg := &Config{SessionTemplates: []SessionTemplate{{Name: "gs-dev"}}}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "" || len(warns) != 0 {
+			t.Errorf("name = %q warns = %v, want empty/none", name, warns)
+		}
+	})
+
+	t.Run("stale name skips with a warning and falls through to none", func(t *testing.T) {
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Repo: map[string]RepoOverrideConfig{
+				root: {PreferredWorkbench: "ghost"},
+			},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "" {
+			t.Errorf("name = %q, want empty (stale skips)", name)
+		}
+		if len(warns) != 1 {
+			t.Fatalf("warnings = %v, want exactly one", warns)
+		}
+		if !strings.Contains(warns[0], "ghost") {
+			t.Errorf("warning %q should name the stale workbench", warns[0])
+		}
+	})
+
+	t.Run("nil receiver is safe", func(t *testing.T) {
+		var cfg *Config
+		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "" || warns != nil {
+			t.Errorf("nil receiver: got %q/%v, want empty/nil", name, warns)
+		}
+	})
+}
+
+// A preferred_workbench set in a repo-local .pop.toml is NOT accepted: the
+// RepoConfig schema has no such field, so it never becomes a repo default.
+func TestPreferredWorkbenchNotAcceptedFromPopTOML(t *testing.T) {
+	root := t.TempDir()
+	popTOML := "preferred_workbench = \"gs-dev\"\n" +
+		"[[workbenches]]\nname = \"gs-dev\"\n"
+	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte(popTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	real := deps.NewRealFileSystem()
+	d := &Deps{FS: &deps.MockFileSystem{
+		StatFunc:         real.Stat,
+		ReadFileFunc:     real.ReadFile,
+		EvalSymlinksFunc: real.EvalSymlinks,
+		UserHomeDirFunc:  real.UserHomeDir,
+	}}
+	cfg := &Config{}
+	name, warns := cfg.ResolvePreferredWorkbench(d, root)
+	if name != "" {
+		t.Errorf("name = %q, want empty (.pop.toml must not supply a preferred workbench)", name)
+	}
+	if len(warns) != 0 {
+		t.Errorf("unexpected warnings: %v", warns)
+	}
+}
+
 func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
 	// Global override sets trunk for a repo with no .pop.toml
 	dir := t.TempDir()

@@ -210,6 +210,9 @@ func newShapeDeps(pickOn bool, workbenches []config.SessionTemplate, promptName 
 			spy.resolveCalled = true
 			return workbenches
 		},
+		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) {
+			return "", nil
+		},
 		PromptWorkbench: func(wbs []config.SessionTemplate) (string, bool, error) {
 			spy.promptCalled = true
 			return promptName, promptConfirmed, nil
@@ -257,6 +260,67 @@ func TestShapeWorktreeSession_PickAWorkbench(t *testing.T) {
 	}
 	if spy.flatCalled {
 		t.Error("flat session must not run when a Workbench is chosen")
+	}
+}
+
+// TestShapeWorktreeSession_PreferredAutoApplies asserts a resolved preferred
+// workbench (ADR-0078) auto-applies silently, building the session and attaching
+// without a prompt, whether or not pick_on_create is on.
+func TestShapeWorktreeSession_PreferredAutoApplies(t *testing.T) {
+	for _, pickOn := range []bool{false, true} {
+		name := "pick_on_create_off"
+		if pickOn {
+			name = "pick_on_create_on"
+		}
+		t.Run(name, func(t *testing.T) {
+			wbs := []config.SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}
+			d, spy := newShapeDeps(pickOn, wbs, "gs-dev", true)
+			d.ResolvePreferredWorkbench = func(cfg *config.Config, path string) (string, []string) {
+				return "gs-dev", nil
+			}
+
+			if err := shapeWorktreeSession(d, &project.RepoContext{}, "/repo/feature"); err != nil {
+				t.Fatalf("shapeWorktreeSession: %v", err)
+			}
+
+			if spy.promptCalled {
+				t.Error("prompt must be suppressed when a preferred workbench resolves")
+			}
+			if spy.createdTmpl != "gs-dev" {
+				t.Errorf("CreateSession tmpl = %q, want gs-dev", spy.createdTmpl)
+			}
+			if spy.historyPath != "/repo/feature" {
+				t.Errorf("RecordHistory path = %q, want /repo/feature", spy.historyPath)
+			}
+			if spy.attached != "sess-/repo/feature" {
+				t.Errorf("Attach target = %q, want sess-/repo/feature", spy.attached)
+			}
+			if spy.flatCalled {
+				t.Error("flat session must not run when a preferred workbench resolves")
+			}
+		})
+	}
+}
+
+// TestShapeWorktreeSession_StalePreferredFallsThrough asserts a stale preferred
+// workbench (empty name + warning) never blocks: with pick_on_create off it
+// falls through to today's flat session.
+func TestShapeWorktreeSession_StalePreferredFallsThrough(t *testing.T) {
+	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	d, spy := newShapeDeps(false, wbs, "gs-dev", true)
+	d.ResolvePreferredWorkbench = func(cfg *config.Config, path string) (string, []string) {
+		return "", []string{"preferred workbench \"ghost\" does not resolve; ignoring"}
+	}
+
+	if err := shapeWorktreeSession(d, &project.RepoContext{}, "/repo/feature"); err != nil {
+		t.Fatalf("shapeWorktreeSession: %v", err)
+	}
+
+	if spy.createdTmpl != "" {
+		t.Errorf("CreateSession must not run for a stale preferred workbench, got %q", spy.createdTmpl)
+	}
+	if !spy.flatCalled {
+		t.Error("expected the flat session fall-through for a stale preferred workbench")
 	}
 }
 
