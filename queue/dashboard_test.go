@@ -1353,9 +1353,9 @@ func TestDashboardLaunchDrainRoutesPlainTrunkWorktreeAndRecordsPane(t *testing.T
 	})
 	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
 
-	result, err := LaunchDashboardDrain(d, cfg, row.SetRef)
+	result, err := LaunchDrain(d, cfg, row.SetRef)
 	if err != nil {
-		t.Fatalf("LaunchDashboardDrain: %v", err)
+		t.Fatalf("LaunchDrain: %v", err)
 	}
 	if canon(t, d, result.RuntimePath) != canon(t, d, repo) {
 		t.Fatalf("runtime = %q, want execution base %q", result.RuntimePath, repo)
@@ -1388,9 +1388,9 @@ func TestDashboardLaunchDrainRoutesBoundCheckout(t *testing.T) {
 		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "bound", Project: "pop", Provisioned: false},
 	})
 
-	result, err := LaunchDashboardDrain(d, cfg, row.SetRef)
+	result, err := LaunchDrain(d, cfg, row.SetRef)
 	if err != nil {
-		t.Fatalf("LaunchDashboardDrain: %v", err)
+		t.Fatalf("LaunchDrain: %v", err)
 	}
 	if result.RuntimePath != bound {
 		t.Fatalf("runtime = %q, want bound checkout %q", result.RuntimePath, bound)
@@ -1413,9 +1413,9 @@ func TestDashboardLaunchDrainUnboundUsesRepresentativeCheckout(t *testing.T) {
 	})
 	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
 
-	result, err := LaunchDashboardDrain(d, cfg, row.SetRef)
+	result, err := LaunchDrain(d, cfg, row.SetRef)
 	if err != nil {
-		t.Fatalf("LaunchDashboardDrain: %v", err)
+		t.Fatalf("LaunchDrain: %v", err)
 	}
 	wantRepo, _ := filepath.EvalSymlinks(repo)
 	gotRuntime, _ := filepath.EvalSymlinks(result.RuntimePath)
@@ -1495,9 +1495,9 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 	runGit(t, repo, "worktree", "add", "-b", "existing-two", wt2, "HEAD")
 	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
 
-	entries, err := DashboardBindWorktreeEntries(d, cfg, row.SetRef)
+	entries, err := BindWorktreeEntries(d, cfg, row.SetRef)
 	if err != nil {
-		t.Fatalf("DashboardBindWorktreeEntries: %v", err)
+		t.Fatalf("BindWorktreeEntries: %v", err)
 	}
 	if len(entries) < 3 || !entries[len(entries)-1].Create {
 		t.Fatalf("entries = %+v, want existing worktrees plus create entry", entries)
@@ -1512,15 +1512,15 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 		t.Fatalf("entries = %+v, want %s on branch existing-one", entries, wt1)
 	}
 
-	got, err := DashboardAdoptWorktree(d, cfg, row.SetRef, wt1)
+	got, err := AdoptWorktree(d, cfg, row.SetRef, wt1)
 	if err != nil {
-		t.Fatalf("DashboardAdoptWorktree: %v", err)
+		t.Fatalf("AdoptWorktree: %v", err)
 	}
 	if got.RuntimePath != wt1 || got.Branch != "existing-one" {
 		t.Fatalf("adopt result = %+v, want %s existing-one", got, wt1)
 	}
 
-	repointed, err := DashboardAdoptWorktree(d, cfg, row.SetRef, wt2)
+	repointed, err := AdoptWorktree(d, cfg, row.SetRef, wt2)
 	if err != nil {
 		t.Fatalf("idle re-point should not require force prompt: %v", err)
 	}
@@ -1939,17 +1939,17 @@ func TestDashboardCreateWorktreeManagedFreshBranchNoSession(t *testing.T) {
 	})
 	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
 
-	refs, err := DashboardBindBaseRefs(d, cfg, row.SetRef)
+	refs, err := BindBaseRefs(d, cfg, row.SetRef)
 	if err != nil {
-		t.Fatalf("DashboardBindBaseRefs: %v", err)
+		t.Fatalf("BindBaseRefs: %v", err)
 	}
 	if len(refs) == 0 || refs[0] != "main" {
 		t.Fatalf("refs = %v, want main first", refs)
 	}
 
-	got, err := DashboardCreateWorktree(d, cfg, row.SetRef, "main", "fresh-dashboard-branch")
+	got, err := CreateWorktree(d, cfg, row.SetRef, "main", "fresh-dashboard-branch")
 	if err != nil {
-		t.Fatalf("DashboardCreateWorktree: %v", err)
+		t.Fatalf("CreateWorktree: %v", err)
 	}
 	if got.Branch != "fresh-dashboard-branch" || got.BaseRef != "main" {
 		t.Fatalf("create result = %+v", got)
@@ -2001,9 +2001,9 @@ func TestDashboardBindRefusesLiveLock(t *testing.T) {
 		return idleLock(runtimePath)
 	}
 
-	_, err = DashboardAdoptWorktree(d, cfg, row.SetRef, target)
+	_, err = AdoptWorktree(d, cfg, row.SetRef, target)
 	if err == nil || !strings.Contains(err.Error(), "currently executing") {
-		t.Fatalf("DashboardAdoptWorktree err = %v, want live-lock refusal", err)
+		t.Fatalf("AdoptWorktree err = %v, want live-lock refusal", err)
 	}
 	afterBindings := loadBindingStore(t, d.Tasks)
 	if got := afterBindings[setScopedKey(repoKey, setID)].RuntimePath; got != locked {
@@ -2084,9 +2084,9 @@ func TestDashboardUnbindManagedOnlyForgetsBindingAndKeepsCheckout(t *testing.T) 
 		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "managed-unbind", Project: filepath.Base(repo), Provisioned: true},
 	})
 
-	got, err := DashboardUnbindWorktree(d, cfg, row.SetRef)
+	got, err := UnbindWorktree(d, cfg, row.SetRef)
 	if err != nil {
-		t.Fatalf("DashboardUnbindWorktree: %v", err)
+		t.Fatalf("UnbindWorktree: %v", err)
 	}
 	if got.Noop {
 		t.Fatalf("unbind result = %+v, want success", got)
@@ -2131,9 +2131,9 @@ func TestDashboardUnbindAdoptedOnlyForgetsBindingAndKeepsStatus(t *testing.T) {
 		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "adopted-unbind", Project: filepath.Base(repo), Provisioned: false},
 	})
 
-	got, err := DashboardUnbindWorktree(d, cfg, row.SetRef)
+	got, err := UnbindWorktree(d, cfg, row.SetRef)
 	if err != nil {
-		t.Fatalf("DashboardUnbindWorktree: %v", err)
+		t.Fatalf("UnbindWorktree: %v", err)
 	}
 	if got.Noop {
 		t.Fatalf("unbind result = %+v, want success", got)
@@ -2181,9 +2181,9 @@ func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
 		return idleLock(runtimePath)
 	}
 
-	_, err = DashboardUnbindWorktree(d, cfg, row.SetRef)
+	_, err = UnbindWorktree(d, cfg, row.SetRef)
 	if err == nil || !strings.Contains(err.Error(), "refusing unbind") {
-		t.Fatalf("DashboardUnbindWorktree err = %v, want live-lock refusal", err)
+		t.Fatalf("UnbindWorktree err = %v, want live-lock refusal", err)
 	}
 	afterBindings := loadBindingStore(t, d.Tasks)
 	if got := afterBindings[setScopedKey(repoKey, setID)].RuntimePath; got != wt {
@@ -2195,9 +2195,9 @@ func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
 		return nil
 	}
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{})
-	got, err := DashboardUnbindWorktree(d, cfg, row.SetRef)
+	got, err := UnbindWorktree(d, cfg, row.SetRef)
 	if err != nil {
-		t.Fatalf("no-binding DashboardUnbindWorktree: %v", err)
+		t.Fatalf("no-binding UnbindWorktree: %v", err)
 	}
 	if !got.Noop {
 		t.Fatalf("no-binding result = %+v, want noop", got)
@@ -2221,9 +2221,9 @@ func TestDashboardLaunchDrainRefusesBareWithoutTrunk(t *testing.T) {
 	}
 	d, cfg, row, rt := dashboardLaunchFixture(t, checkout, setID)
 
-	_, err = LaunchDashboardDrain(d, cfg, row.SetRef)
+	_, err = LaunchDrain(d, cfg, row.SetRef)
 	if err == nil || !strings.Contains(err.Error(), repoScanReason) {
-		t.Fatalf("LaunchDashboardDrain err = %v, want %q", err, repoScanReason)
+		t.Fatalf("LaunchDrain err = %v, want %q", err, repoScanReason)
 	}
 	if len(rt.commands) != 0 {
 		t.Fatalf("bare no-base refusal must not touch tmux, got %v", rt.commands)
@@ -2233,8 +2233,8 @@ func TestDashboardLaunchDrainRefusesBareWithoutTrunk(t *testing.T) {
 func TestDashboardPreviewDrainPaneAndNoOp(t *testing.T) {
 	rt := newRecordingTmux(true, drainWindowName)
 	d := &Deps{Tmux: rt}
-	if err := PreviewDashboardDrain(d, SetRef{PaneID: "%9"}); err != nil {
-		t.Fatalf("PreviewDashboardDrain: %v", err)
+	if err := PreviewDrain(d, SetRef{PaneID: "%9"}); err != nil {
+		t.Fatalf("PreviewDrain: %v", err)
 	}
 	if _, ok := rt.findCommand("select-pane"); !ok {
 		t.Fatal("expected select-pane")
@@ -2244,8 +2244,8 @@ func TestDashboardPreviewDrainPaneAndNoOp(t *testing.T) {
 		t.Fatalf("switch-client = %v, want pane %%9", switchClient)
 	}
 	rt.commands = nil
-	if err := PreviewDashboardDrain(d, SetRef{}); err != nil {
-		t.Fatalf("PreviewDashboardDrain no-op: %v", err)
+	if err := PreviewDrain(d, SetRef{}); err != nil {
+		t.Fatalf("PreviewDrain no-op: %v", err)
 	}
 	if len(rt.commands) != 0 {
 		t.Fatalf("preview without pane must no-op, got %v", rt.commands)

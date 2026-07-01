@@ -40,9 +40,9 @@ func TestDashboardDrainTargetEntriesOrderAndExclusions(t *testing.T) {
 		setScopedKey(repoKey, "other-set"): {RuntimePath: wt2, Branch: "bound-other", Provisioned: false},
 	})
 
-	entries, err := DashboardDrainTargetEntries(d, cfg, row.SetRef)
+	entries, err := DrainTargetEntries(d, cfg, row.SetRef)
 	if err != nil {
-		t.Fatalf("DashboardDrainTargetEntries: %v", err)
+		t.Fatalf("DrainTargetEntries: %v", err)
 	}
 	if len(entries) != 3 {
 		t.Fatalf("entries = %+v, want [adopt-one, new-managed, trunk]", entries)
@@ -88,9 +88,9 @@ func TestDashboardDrainTargetAdoptsWorktreeAndDrains(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := LaunchDashboardDrainTarget(d, cfg, row.SetRef, dashboardDrainEntry{Kind: drainTargetWorktree, Path: wt, Branch: "adopt-here"})
+	result, err := LaunchDrainTarget(d, cfg, row.SetRef, dashboardDrainEntry{Kind: drainTargetWorktree, Path: wt, Branch: "adopt-here"})
 	if err != nil {
-		t.Fatalf("LaunchDashboardDrainTarget adopt: %v", err)
+		t.Fatalf("LaunchDrainTarget adopt: %v", err)
 	}
 	if result.RuntimePath != wt {
 		t.Fatalf("runtime = %q, want adopted checkout %q", result.RuntimePath, wt)
@@ -117,9 +117,9 @@ func TestDashboardDrainTargetNewManagedProvisionsOffTrunkAndDrains(t *testing.T)
 		t.Fatal(err)
 	}
 
-	result, err := LaunchDashboardDrainTarget(d, cfg, row.SetRef, dashboardDrainEntry{Kind: drainTargetNewManaged})
+	result, err := LaunchDrainTarget(d, cfg, row.SetRef, dashboardDrainEntry{Kind: drainTargetNewManaged})
 	if err != nil {
-		t.Fatalf("LaunchDashboardDrainTarget new managed: %v", err)
+		t.Fatalf("LaunchDrainTarget new managed: %v", err)
 	}
 	managedRoot := binding.ManagedWorktreesRoot(d.Tasks)
 	if !pathUnder(canon(t, d, result.RuntimePath), canon(t, d, managedRoot)) {
@@ -149,9 +149,9 @@ func TestDashboardDrainTargetTrunkDrainsInlineNoBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := LaunchDashboardDrainTarget(d, cfg, row.SetRef, dashboardDrainEntry{Kind: drainTargetTrunk, Path: repo})
+	result, err := LaunchDrainTarget(d, cfg, row.SetRef, dashboardDrainEntry{Kind: drainTargetTrunk, Path: repo})
 	if err != nil {
-		t.Fatalf("LaunchDashboardDrainTarget trunk: %v", err)
+		t.Fatalf("LaunchDrainTarget trunk: %v", err)
 	}
 	if canon(t, d, result.RuntimePath) != canon(t, d, repo) {
 		t.Fatalf("runtime = %q, want trunk %q", result.RuntimePath, repo)
@@ -184,9 +184,9 @@ func TestDashboardDrainTargetBareHidesTrunkOptions(t *testing.T) {
 	}
 	d, cfg, row, _ := dashboardLaunchFixture(t, checkout, setID)
 
-	entries, err := DashboardDrainTargetEntries(d, cfg, row.SetRef)
+	entries, err := DrainTargetEntries(d, cfg, row.SetRef)
 	if err != nil {
-		t.Fatalf("DashboardDrainTargetEntries: %v", err)
+		t.Fatalf("DrainTargetEntries: %v", err)
 	}
 	if len(entries) == 0 {
 		t.Fatalf("bare repo with worktrees should still list adopt targets")

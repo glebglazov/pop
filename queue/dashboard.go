@@ -56,7 +56,7 @@ type SetRef struct {
 	// row visible as a clean-up reminder until archived or unbound (ADR-0070).
 	DoneStillManagedBound bool
 	// PaneID is the tmux pane recorded for a live drain of this set, empty if
-	// none was recorded. It is the fact PreviewDashboardDrain branches on.
+	// none was recorded. It is the fact PreviewDrain branches on.
 	PaneID string
 }
 
@@ -1829,7 +1829,7 @@ func (m QueueDashboard) reload() tea.Cmd {
 // selected parked set so the daemon may auto-spawn it again (ADR-0055).
 func (m QueueDashboard) unparkSet(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		err := UnparkDashboardRow(m.d, row.SetRef)
+		err := UnparkSet(m.d, row.SetRef)
 		return dashboardUnparkMsg{setID: row.SetID, err: err}
 	}
 }
@@ -1866,10 +1866,10 @@ func (m QueueDashboard) launchDrain(row DashboardRow) tea.Cmd {
 			return dashboardDrainListMsg{row: row, err: err}
 		}
 		if bound {
-			_, err := LaunchDashboardDrain(m.d, m.cfg, row.SetRef)
+			_, err := LaunchDrain(m.d, m.cfg, row.SetRef)
 			return dashboardDrainMsg{err: err}
 		}
-		entries, err := DashboardDrainTargetEntries(m.d, m.cfg, row.SetRef)
+		entries, err := DrainTargetEntries(m.d, m.cfg, row.SetRef)
 		return dashboardDrainListMsg{row: row, entries: entries, err: err}
 	}
 }
@@ -1925,7 +1925,7 @@ func (m QueueDashboard) confirmDrainModal() (tea.Model, tea.Cmd) {
 // for trunk) and drains in one action.
 func (m QueueDashboard) launchDrainTarget(row DashboardRow, target dashboardDrainEntry) tea.Cmd {
 	return func() tea.Msg {
-		_, err := LaunchDashboardDrainTarget(m.d, m.cfg, row.SetRef, target)
+		_, err := LaunchDrainTarget(m.d, m.cfg, row.SetRef, target)
 		return dashboardDrainMsg{err: err}
 	}
 }
@@ -1944,7 +1944,7 @@ func defaultDrainCursor(entries []dashboardDrainEntry) int {
 
 func (m QueueDashboard) previewDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		err := PreviewDashboardDrain(m.d, row.SetRef)
+		err := PreviewDrain(m.d, row.SetRef)
 		return dashboardPreviewMsg{err: err}
 	}
 }
@@ -1991,35 +1991,35 @@ func (m QueueDashboard) loadTaskText(manifest *tasks.Manifest, task tasks.Task) 
 
 func (m QueueDashboard) loadBindWorktrees(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		entries, err := DashboardBindWorktreeEntries(m.d, m.cfg, row.SetRef)
+		entries, err := BindWorktreeEntries(m.d, m.cfg, row.SetRef)
 		return dashboardBindListMsg{row: row, entries: entries, err: err}
 	}
 }
 
 func (m QueueDashboard) loadBindRefs(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		refs, err := DashboardBindBaseRefs(m.d, m.cfg, row.SetRef)
+		refs, err := BindBaseRefs(m.d, m.cfg, row.SetRef)
 		return dashboardBindRefsMsg{refs: refs, err: err}
 	}
 }
 
 func (m QueueDashboard) adoptBindWorktree(row DashboardRow, checkoutPath string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := DashboardAdoptWorktree(m.d, m.cfg, row.SetRef, checkoutPath)
+		_, err := AdoptWorktree(m.d, m.cfg, row.SetRef, checkoutPath)
 		return dashboardBindMsg{err: err}
 	}
 }
 
 func (m QueueDashboard) createBindWorktree(row DashboardRow, baseRef, name string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := DashboardCreateWorktree(m.d, m.cfg, row.SetRef, baseRef, name)
+		_, err := CreateWorktree(m.d, m.cfg, row.SetRef, baseRef, name)
 		return dashboardBindMsg{err: err}
 	}
 }
 
 func (m QueueDashboard) abandonWorktree(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		_, err := DashboardUnbindWorktree(m.d, m.cfg, row.SetRef)
+		_, err := UnbindWorktree(m.d, m.cfg, row.SetRef)
 		return dashboardAbandonMsg{err: err}
 	}
 }

@@ -480,8 +480,8 @@ func TestUnparkDashboardRowClearsPark(t *testing.T) {
 
 	d := &Deps{Tasks: td}
 	ref := SetRef{SetID: "set-1", RepoCommonDir: commonDir, RuntimePath: repo}
-	if err := UnparkDashboardRow(d, ref); err != nil {
-		t.Fatalf("UnparkDashboardRow: %v", err)
+	if err := UnparkSet(d, ref); err != nil {
+		t.Fatalf("UnparkSet: %v", err)
 	}
 
 	info, _ = tasks.ReadSetBackoff(td, commonDir, "set-1")

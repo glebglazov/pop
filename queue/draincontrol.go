@@ -14,10 +14,10 @@ import (
 	"github.com/glebglazov/pop/tasks/binding"
 )
 
-// UnparkDashboardRow clears the park on a dashboard row's Task set by appending a
+// UnparkSet clears the park on a dashboard row's Task set by appending a
 // park-clear event keyed by the repository's common dir and set id. The row must
 // carry a resolved common dir (parked rows always do).
-func UnparkDashboardRow(d *Deps, ref SetRef) error {
+func UnparkSet(d *Deps, ref SetRef) error {
 	if d == nil || d.Tasks == nil {
 		return fmt.Errorf("missing task dependencies")
 	}
@@ -32,9 +32,9 @@ func UnparkDashboardRow(d *Deps, ref SetRef) error {
 	return tasks.RecordParkClear(d.Tasks, commonDir, ref.SetID)
 }
 
-// DashboardStatusDetailLines renders the same per-set task status detail as
+// StatusDetailLines renders the same per-set task status detail as
 // `pop tasks status <set>` for a dashboard row.
-func DashboardStatusDetailLines(d *Deps, ref SetRef) ([]string, error) {
+func StatusDetailLines(d *Deps, ref SetRef) ([]string, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -64,9 +64,9 @@ type DashboardDrainResult struct {
 	RuntimePath string
 }
 
-// LaunchDashboardDrain manually launches the highlighted dashboard row through
+// LaunchDrain manually launches the highlighted dashboard row through
 // the same Queue provisioning and tmux spawn path used by the supervisor.
-func LaunchDashboardDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
+func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -164,9 +164,9 @@ func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([
 	return scans, nil
 }
 
-// PreviewDashboardDrain switches the active tmux client to the pane associated
+// PreviewDrain switches the active tmux client to the pane associated
 // with the highlighted row. Rows without a recorded pane intentionally no-op.
-func PreviewDashboardDrain(d *Deps, ref SetRef) error {
+func PreviewDrain(d *Deps, ref SetRef) error {
 	if strings.TrimSpace(ref.PaneID) == "" {
 		return nil
 	}
@@ -183,11 +183,11 @@ func PreviewDashboardDrain(d *Deps, ref SetRef) error {
 	return err
 }
 
-// DashboardUnbindWorktree releases the highlighted set's worktree binding
+// UnbindWorktree releases the highlighted set's worktree binding
 // through the same unbind implementation used by `pop tasks unbind-worktree`.
 // The dashboard supplies its own inline confirmation, so the command-level
 // prompt is skipped here.
-func DashboardUnbindWorktree(d *Deps, cfg *config.Config, ref SetRef) (AbandonResult, error) {
+func UnbindWorktree(d *Deps, cfg *config.Config, ref SetRef) (AbandonResult, error) {
 	key := ""
 	if strings.TrimSpace(ref.RepoKey) != "" {
 		key = setScopedKey(ref.RepoKey, ref.SetID)
@@ -195,10 +195,10 @@ func DashboardUnbindWorktree(d *Deps, cfg *config.Config, ref SetRef) (AbandonRe
 	return AbandonBindingWithOptions(d, cfg, key, ref.SetID, io.Discard, AbandonOptions{Yes: true, In: tasks.NonInteractiveReader{}})
 }
 
-// DashboardBindWorktreeEntries returns the inline bind picker entries for the
+// BindWorktreeEntries returns the inline bind picker entries for the
 // highlighted dashboard row: every existing worktree in the row's repository,
 // followed by the pop-native creation entry.
-func DashboardBindWorktreeEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardBindEntry, error) {
+func BindWorktreeEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardBindEntry, error) {
 	scans, _, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
 		return nil, err
@@ -220,9 +220,9 @@ func DashboardBindWorktreeEntries(d *Deps, cfg *config.Config, ref SetRef) ([]da
 	return entries, nil
 }
 
-// DashboardBindBaseRefs lists local and remote branch refs for the create-new
+// BindBaseRefs lists local and remote branch refs for the create-new
 // flow, with main/master variants first.
-func DashboardBindBaseRefs(d *Deps, cfg *config.Config, ref SetRef) ([]string, error) {
+func BindBaseRefs(d *Deps, cfg *config.Config, ref SetRef) ([]string, error) {
 	scans, _, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
 		return nil, err
@@ -238,9 +238,9 @@ func DashboardBindBaseRefs(d *Deps, cfg *config.Config, ref SetRef) ([]string, e
 	return refs, nil
 }
 
-// DashboardAdoptWorktree binds ref.SetID to an existing checkout. The dashboard
+// AdoptWorktree binds ref.SetID to an existing checkout. The dashboard
 // action is deliberate, so idle re-pointing uses Force without a second prompt.
-func DashboardAdoptWorktree(d *Deps, cfg *config.Config, ref SetRef, checkoutPath string) (BindWorktreeResult, error) {
+func AdoptWorktree(d *Deps, cfg *config.Config, ref SetRef, checkoutPath string) (BindWorktreeResult, error) {
 	if err := refuseDashboardBindWhileLocked(d, ref); err != nil {
 		return BindWorktreeResult{}, err
 	}
@@ -254,9 +254,9 @@ type DashboardCreateWorktreeResult struct {
 	BaseRef     string
 }
 
-// DashboardCreateWorktree creates a pop-managed worktree on a fresh branch and
+// CreateWorktree creates a pop-managed worktree on a fresh branch and
 // records a provisioned binding. It never opens or attaches a tmux session.
-func DashboardCreateWorktree(d *Deps, cfg *config.Config, ref SetRef, baseRef, name string) (DashboardCreateWorktreeResult, error) {
+func CreateWorktree(d *Deps, cfg *config.Config, ref SetRef, baseRef, name string) (DashboardCreateWorktreeResult, error) {
 	baseRef = strings.TrimSpace(baseRef)
 	name = strings.TrimSpace(name)
 	if baseRef == "" {
@@ -291,14 +291,14 @@ func DashboardCreateWorktree(d *Deps, cfg *config.Config, ref SetRef, baseRef, n
 	return DashboardCreateWorktreeResult{SetID: ref.SetID, RuntimePath: path, Branch: branch, BaseRef: baseRef}, nil
 }
 
-// DashboardDrainTargetEntries builds the Drain target picker options for an
+// DrainTargetEntries builds the Drain target picker options for an
 // unbound set (ADR-0052), in order: the repo's existing non-managed, unbound
 // worktrees (adopt), "new managed worktree" (provision off the trunk), then the
 // trunk itself (drain inline). The trunk-dependent options are omitted when no
 // trunk resolves (an unconfigured bare repo). Managed worktrees, the trunk, and
 // any worktree already bound to another set are excluded from the adopt list to
 // preserve the 1:1 checkout↔set mapping.
-func DashboardDrainTargetEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardDrainEntry, error) {
+func DrainTargetEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardDrainEntry, error) {
 	scans, _, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
 		return nil, err
@@ -348,35 +348,35 @@ func DashboardDrainTargetEntries(d *Deps, cfg *config.Config, ref SetRef) ([]das
 	return entries, nil
 }
 
-// LaunchDashboardDrainTarget binds the chosen Drain target picker option and
+// LaunchDrainTarget binds the chosen Drain target picker option and
 // drains in one action (ADR-0052): an existing worktree is adopted, "new managed
 // worktree" provisions a managed checkout forked from the trunk, and trunk leaves
-// the set unbound so LaunchDashboardDrain routes it to the trunk. Once bound (or
-// for trunk, immediately), it reuses LaunchDashboardDrain to spawn the drain.
-func LaunchDashboardDrainTarget(d *Deps, cfg *config.Config, ref SetRef, target dashboardDrainEntry) (DashboardDrainResult, error) {
+// the set unbound so LaunchDrain routes it to the trunk. Once bound (or
+// for trunk, immediately), it reuses LaunchDrain to spawn the drain.
+func LaunchDrainTarget(d *Deps, cfg *config.Config, ref SetRef, target dashboardDrainEntry) (DashboardDrainResult, error) {
 	switch target.Kind {
 	case drainTargetWorktree:
-		if _, err := DashboardAdoptWorktree(d, cfg, ref, target.Path); err != nil {
+		if _, err := AdoptWorktree(d, cfg, ref, target.Path); err != nil {
 			return DashboardDrainResult{}, err
 		}
 	case drainTargetNewManaged:
-		if _, err := DashboardProvisionManagedWorktree(d, cfg, ref); err != nil {
+		if _, err := ProvisionManagedWorktree(d, cfg, ref); err != nil {
 			return DashboardDrainResult{}, err
 		}
 	case drainTargetTrunk:
-		// Leave the set unbound: LaunchDashboardDrain routes to the representative
+		// Leave the set unbound: LaunchDrain routes to the representative
 		// checkout (the trunk) and records no binding — a trunk drain is inline.
 	default:
 		return DashboardDrainResult{}, fmt.Errorf("unknown drain target")
 	}
-	return LaunchDashboardDrain(d, cfg, ref)
+	return LaunchDrain(d, cfg, ref)
 }
 
-// DashboardProvisionManagedWorktree provisions a pop-managed worktree forked
+// ProvisionManagedWorktree provisions a pop-managed worktree forked
 // from the Trunk worktree's HEAD and records a provisioned binding, reusing the
 // shared provisioning path (ADR-0052). It refuses a repo with no resolvable
 // trunk and never opens or attaches a tmux session.
-func DashboardProvisionManagedWorktree(d *Deps, cfg *config.Config, ref SetRef) (DashboardCreateWorktreeResult, error) {
+func ProvisionManagedWorktree(d *Deps, cfg *config.Config, ref SetRef) (DashboardCreateWorktreeResult, error) {
 	scans, repoKey, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
 		return DashboardCreateWorktreeResult{}, err
