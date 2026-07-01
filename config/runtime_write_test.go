@@ -234,6 +234,123 @@ func TestRuntimeWriteIsAtomic(t *testing.T) {
 	}
 }
 
+func TestRuntimePreferredWorkbenchThreeValued(t *testing.T) {
+	d, _ := runtimeTestDeps(t)
+	// Two distinct worktree paths; one gets a name, another explicit none.
+	const named = "/repo/app-feature"
+	const none = "/repo/app.trunk" // dot in the key exercises TOML quoting
+
+	// Absent → present=false.
+	if name, present, err := RuntimePreferredWorkbenchWith(d, named); err != nil || present || name != "" {
+		t.Fatalf("absent read = (%q, %v, %v), want (\"\", false, nil)", name, present, err)
+	}
+
+	// A name round-trips.
+	if err := SetRuntimePreferredWorkbenchWith(d, named, "gs-dev"); err != nil {
+		t.Fatalf("SetRuntimePreferredWorkbenchWith(name) error: %v", err)
+	}
+	if name, present, err := RuntimePreferredWorkbenchWith(d, named); err != nil || !present || name != "gs-dev" {
+		t.Fatalf("named read = (%q, %v, %v), want (\"gs-dev\", true, nil)", name, present, err)
+	}
+
+	// Explicit none is present with an empty name, distinct from absent.
+	if err := SetRuntimePreferredWorkbenchWith(d, none, ""); err != nil {
+		t.Fatalf("SetRuntimePreferredWorkbenchWith(none) error: %v", err)
+	}
+	if name, present, err := RuntimePreferredWorkbenchWith(d, none); err != nil || !present || name != "" {
+		t.Fatalf("explicit-none read = (%q, %v, %v), want (\"\", true, nil)", name, present, err)
+	}
+	// The other key is untouched.
+	if name, present, _ := RuntimePreferredWorkbenchWith(d, named); !present || name != "gs-dev" {
+		t.Fatalf("named entry lost after writing another key: (%q, %v)", name, present)
+	}
+}
+
+func TestRuntimePreferredWorkbenchClearAndDeleteFileWhenEmpty(t *testing.T) {
+	d, runtimePath := runtimeTestDeps(t)
+	const path = "/repo/app-feature"
+
+	if err := SetRuntimePreferredWorkbenchWith(d, path, "gs-dev"); err != nil {
+		t.Fatalf("set error: %v", err)
+	}
+	if _, err := os.Stat(runtimePath); err != nil {
+		t.Fatalf("runtime file should exist after set: %v", err)
+	}
+
+	if err := ClearRuntimePreferredWorkbenchWith(d, path); err != nil {
+		t.Fatalf("clear error: %v", err)
+	}
+	if _, present, _ := RuntimePreferredWorkbenchWith(d, path); present {
+		t.Fatal("entry still present after clear")
+	}
+	if _, err := os.Stat(runtimePath); !os.IsNotExist(err) {
+		t.Fatalf("runtime file should be deleted when empty, stat err = %v", err)
+	}
+
+	// Clearing an absent entry is a no-op and creates no file.
+	if err := ClearRuntimePreferredWorkbenchWith(d, path); err != nil {
+		t.Fatalf("clear-absent error: %v", err)
+	}
+	if _, err := os.Stat(runtimePath); !os.IsNotExist(err) {
+		t.Fatalf("clear-absent should not create the file, stat err = %v", err)
+	}
+}
+
+func TestRuntimePreferredWorkbenchPreservesOtherKeys(t *testing.T) {
+	d, runtimePath := runtimeTestDeps(t)
+	writeRuntimeFile(t, runtimePath, `
+[integrations]
+skills = ["tasks"]
+
+[workbench.preferred]
+"/repo/keep" = "minimal"
+`)
+
+	// Setting a second worktree keeps the first entry and [integrations].
+	if err := SetRuntimePreferredWorkbenchWith(d, "/repo/new", "gs-dev"); err != nil {
+		t.Fatalf("set error: %v", err)
+	}
+	if name, present, _ := RuntimePreferredWorkbenchWith(d, "/repo/keep"); !present || name != "minimal" {
+		t.Fatalf("sibling preferred entry lost: (%q, %v)", name, present)
+	}
+	skills, ok, err := RuntimeIntegrationsSkillsWith(d)
+	if err != nil || !ok || !reflect.DeepEqual(skills, []string{"tasks"}) {
+		t.Fatalf("integrations lost: skills=%#v ok=%v err=%v", skills, ok, err)
+	}
+
+	// Clearing one preferred entry keeps the other and does not delete the file
+	// (integrations remain).
+	if err := ClearRuntimePreferredWorkbenchWith(d, "/repo/new"); err != nil {
+		t.Fatalf("clear error: %v", err)
+	}
+	if name, present, _ := RuntimePreferredWorkbenchWith(d, "/repo/keep"); !present || name != "minimal" {
+		t.Fatalf("sibling preferred entry lost after clearing another: (%q, %v)", name, present)
+	}
+	if _, err := os.Stat(runtimePath); err != nil {
+		t.Fatalf("file should survive while integrations remain: %v", err)
+	}
+}
+
+func TestRuntimePreferredWorkbenchWriteIsAtomic(t *testing.T) {
+	d, runtimePath := runtimeTestDeps(t)
+	var renameTarget string
+	origRename := d.FS.(*deps.MockFileSystem).RenameFunc
+	d.FS.(*deps.MockFileSystem).RenameFunc = func(oldpath, newpath string) error {
+		renameTarget = newpath
+		if origRename != nil {
+			return origRename(oldpath, newpath)
+		}
+		return os.Rename(oldpath, newpath)
+	}
+
+	if err := SetRuntimePreferredWorkbenchWith(d, "/repo/app", "gs-dev"); err != nil {
+		t.Fatalf("set error: %v", err)
+	}
+	if renameTarget != runtimePath {
+		t.Fatalf("atomic rename target = %q, want %q", renameTarget, runtimePath)
+	}
+}
+
 func TestRuntimeDocumentRoundTripPreservesExtraKeys(t *testing.T) {
 	d, runtimePath := runtimeTestDeps(t)
 	writeRuntimeFile(t, runtimePath, `

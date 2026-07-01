@@ -154,6 +154,54 @@ func TestCreateWorktreeKey(t *testing.T) {
 	}
 }
 
+func TestSetPreferredWorkbenchKey(t *testing.T) {
+	items := []Item{{Name: "wt", Path: "/wt"}}
+
+	// Disabled: ctrl+w is a no-op (feature flag off).
+	picker := NewPicker(items)
+	picker.Init()
+	picker.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	if picker.result.Action == ActionSetPreferredWorkbench {
+		t.Error("ctrl+w should not fire when WithSetPreferredWorkbench is disabled")
+	}
+
+	// Enabled: ctrl+w fires ActionSetPreferredWorkbench with the selection.
+	picker = NewPicker(items, WithSetPreferredWorkbench())
+	picker.Init()
+	_, cmd := picker.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	if picker.result.Action != ActionSetPreferredWorkbench {
+		t.Errorf("ctrl+w should fire ActionSetPreferredWorkbench, got %v", picker.result.Action)
+	}
+	if picker.result.Selected == nil || picker.result.Selected.Path != "/wt" {
+		t.Errorf("ctrl+w result should carry the highlighted row, got %+v", picker.result.Selected)
+	}
+	if cmd == nil {
+		t.Error("ctrl+w should return tea.Quit cmd")
+	}
+}
+
+func TestHelpViewShowsSetPreferredWorkbench(t *testing.T) {
+	items := []Item{{Name: "test", Path: "/test"}}
+
+	// Absent when the feature flag is off.
+	off := NewPicker(items)
+	off.width, off.height, off.showHelp = 60, 20, true
+	if containsSubstring(off.viewHelp(), "Set preferred workbench") {
+		t.Error("help view should omit the ctrl+w hint when disabled")
+	}
+
+	// Present when enabled.
+	on := NewPicker(items, WithSetPreferredWorkbench())
+	on.width, on.height, on.showHelp = 60, 20, true
+	view := on.viewHelp()
+	if !containsSubstring(view, "C-w") {
+		t.Error("help view should contain the C-w key hint")
+	}
+	if !containsSubstring(view, "Set preferred workbench") {
+		t.Error("help view should contain the ctrl+w label")
+	}
+}
+
 func TestHelpOverlayToggle(t *testing.T) {
 	items := []Item{{Name: "test", Path: "/test"}}
 	picker := NewPicker(items)
@@ -1130,4 +1178,3 @@ func TestResetAction(t *testing.T) {
 		t.Errorf("action = %v, want ActionReset", p.result.Action)
 	}
 }
-

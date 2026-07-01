@@ -133,6 +133,15 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			restoreCursorIdx = result.CursorIndex
 			// Continue loop — items rebuild with fresh attention state
 
+		case ui.ActionSetPreferredWorkbench:
+			// Sets the highlighted worktree's Preferred workbench (ADR-0078);
+			// never touches a running session.
+			if result.Selected != nil {
+				warnPreferredWorkbenchErr("worktree", setPreferredWorkbench(defaultPreferredPickerDeps(), result.Selected.Path))
+			}
+			restoreCursorIdx = result.CursorIndex
+			// Continue loop to show picker again
+
 		case ui.ActionCreateWorktree:
 			if err := createWorktree(ctx); err != nil {
 				debug.Error("worktree: create: %v", err)
@@ -226,6 +235,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		ui.WithKillSession(),
 		ui.WithReset(),
 		ui.WithCreateWorktree(),
+		ui.WithSetPreferredWorkbench(),
 		ui.WithQuickAccess(quickAccessModifier),
 		ui.WithIconLegend(iconLegends...),
 	}
@@ -330,13 +340,13 @@ type worktreeShapeDeps struct {
 	PickOnCreate              func(cfg *config.Config) bool
 	ResolveWorkbenches        func(cfg *config.Config, path string) []config.SessionTemplate
 	ResolvePreferredWorkbench func(cfg *config.Config, path string) (string, []string)
-	PromptWorkbench    func(workbenches []config.SessionTemplate) (name string, confirmed bool, err error)
-	FindWorkbench      func(workbenches []config.SessionTemplate, name string) (config.SessionTemplate, bool)
-	CreateSession      func(tmpl config.SessionTemplate, sessionName, path string) error
-	SessionName        func(path string) string
-	RecordHistory      func(path string)
-	Attach             func(sessionName string) error
-	Flat               func(ctx *project.RepoContext, item *ui.Item) error
+	PromptWorkbench           func(workbenches []config.SessionTemplate) (name string, confirmed bool, err error)
+	FindWorkbench             func(workbenches []config.SessionTemplate, name string) (config.SessionTemplate, bool)
+	CreateSession             func(tmpl config.SessionTemplate, sessionName, path string) error
+	SessionName               func(path string) string
+	RecordHistory             func(path string)
+	Attach                    func(sessionName string) error
+	Flat                      func(ctx *project.RepoContext, item *ui.Item) error
 }
 
 // defaultWorktreeShapeDeps wires worktreeShapeDeps to production implementations,

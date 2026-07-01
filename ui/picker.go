@@ -58,6 +58,7 @@ const (
 	ActionRefresh
 	ActionYankPath
 	ActionCreateWorktree
+	ActionSetPreferredWorkbench
 )
 
 // Picker is a fuzzy-searchable list picker
@@ -79,6 +80,7 @@ type Picker struct {
 	showReset          bool
 	showOpenWindow     bool
 	showCreateWorktree bool
+	showSetPreferred   bool
 	cursorAtEnd        bool
 
 	quickAccessModifier string
@@ -160,6 +162,15 @@ func WithOpenWindow() PickerOption {
 func WithCreateWorktree() PickerOption {
 	return func(p *Picker) {
 		p.showCreateWorktree = true
+	}
+}
+
+// WithSetPreferredWorkbench enables the set-preferred-workbench keybinding
+// (ctrl+w). It is the feature flag gating the Workbench-preference picker
+// surface (ADR-0078); both the project picker and the worktree dashboard opt in.
+func WithSetPreferredWorkbench() PickerOption {
+	return func(p *Picker) {
+		p.showSetPreferred = true
 	}
 }
 
@@ -447,6 +458,17 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, tea.Quit
 			}
 
+		case key.Matches(msg, keys.SetPreferred):
+			if p.showSetPreferred {
+				if item, ok := p.selectedItem(); ok {
+					p.result = Result{
+						Selected: item,
+						Action:   ActionSetPreferredWorkbench,
+					}
+					return p, tea.Quit
+				}
+			}
+
 		case key.Matches(msg, keys.YankPath):
 			if item, ok := p.selectedItem(); ok {
 				p.result = Result{
@@ -716,6 +738,9 @@ func (p *Picker) viewHelp() string {
 	if p.showCreateWorktree && !p.isKeyOverridden("ctrl+a") {
 		entries = append(entries, helpEntry{"C-a", "Create worktree"})
 	}
+	if p.showSetPreferred && !p.isKeyOverridden("ctrl+w") {
+		entries = append(entries, helpEntry{"C-w", "Set preferred workbench"})
+	}
 	if p.showDelete && !p.isKeyOverridden("ctrl+d") {
 		entries = append(entries, helpEntry{"C-d", "Delete"})
 	}
@@ -816,6 +841,7 @@ type keyMap struct {
 	Help           key.Binding
 	YankPath       key.Binding
 	CreateWorktree key.Binding
+	SetPreferred   key.Binding
 }
 
 var keys = keyMap{
@@ -863,5 +889,8 @@ var keys = keyMap{
 	),
 	CreateWorktree: key.NewBinding(
 		key.WithKeys("ctrl+a"),
+	),
+	SetPreferred: key.NewBinding(
+		key.WithKeys("ctrl+w"),
 	),
 }

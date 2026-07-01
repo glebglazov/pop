@@ -3300,6 +3300,117 @@ func TestResolvePreferredWorkbench(t *testing.T) {
 	})
 }
 
+// preferredResolverDeps builds a *Deps whose runtime file lands under a temp
+// XDG_DATA_HOME while repo-identity / .pop.toml reads hit the real filesystem.
+func preferredResolverDeps(t *testing.T) *Deps {
+	t.Helper()
+	dataDir := filepath.Join(t.TempDir(), "data")
+	real := deps.NewRealFileSystem()
+	return &Deps{FS: &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataDir
+			}
+			return ""
+		},
+		StatFunc:         real.Stat,
+		ReadFileFunc:     real.ReadFile,
+		WriteFileFunc:    os.WriteFile,
+		MkdirAllFunc:     os.MkdirAll,
+		RenameFunc:       os.Rename,
+		RemoveAllFunc:    os.RemoveAll,
+		EvalSymlinksFunc: real.EvalSymlinks,
+		UserHomeDirFunc:  real.UserHomeDir,
+	}}
+}
+
+// TestResolvePreferredWorkbenchPrecedence exercises the scope-first chain
+// (ADR-0077/0078): own runtime entry → repo default → none.
+func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
+	t.Run("runtime name overrides the repo default", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		if err := SetRuntimePreferredWorkbenchWith(d, root, "minimal"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}},
+			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "minimal" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want minimal/none (finer scope wins)", name, warns)
+		}
+	})
+
+	t.Run("explicit none yields flat over a repo default", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		if err := SetRuntimePreferredWorkbenchWith(d, root, ""); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want empty/none (explicit-none short-circuits)", name, warns)
+		}
+	})
+
+	t.Run("absent runtime entry falls through to the repo default", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "gs-dev" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want gs-dev/none", name, warns)
+		}
+	})
+
+	t.Run("stale runtime name warns and falls through to a resolving repo default", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		if err := SetRuntimePreferredWorkbenchWith(d, root, "ghost"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "gs-dev" {
+			t.Fatalf("name=%q, want gs-dev (stale runtime skips to repo default)", name)
+		}
+		if len(warns) != 1 || !strings.Contains(warns[0], "ghost") {
+			t.Fatalf("warns=%v, want one naming the stale runtime name", warns)
+		}
+	})
+
+	t.Run("stale at both layers warns twice and yields none", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		if err := SetRuntimePreferredWorkbenchWith(d, root, "ghost"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{
+			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "phantom"}},
+		}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "" {
+			t.Fatalf("name=%q, want empty (both layers stale)", name)
+		}
+		if len(warns) != 2 {
+			t.Fatalf("warns=%v, want two (one per stale layer)", warns)
+		}
+	})
+}
+
 // A preferred_workbench set in a repo-local .pop.toml is NOT accepted: the
 // RepoConfig schema has no such field, so it never becomes a repo default.
 func TestPreferredWorkbenchNotAcceptedFromPopTOML(t *testing.T) {

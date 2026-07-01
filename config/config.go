@@ -837,34 +837,75 @@ func (c *Config) WorkbenchPickOnCreate() bool {
 
 // ResolvePreferredWorkbench returns the name of the Workbench that should
 // auto-apply when a session is born for checkoutPath, or "" for none, plus any
-// non-fatal warnings the caller should surface (ADR-0078). At this slice it
-// resolves a single home: the per-repo default (a global [repo."<path>"]
-// block's preferred_workbench key, matched by repository identity). The runtime
-// store and Trunk inheritance are later slices; the resolution chain terminates
-// here at "none".
+// non-fatal warnings the caller should surface (ADR-0078). Resolution is
+// scope-first (ADR-0077), finest → coarsest:
+//
+//	this worktree's runtime entry ([workbench.preferred] in config.runtime.toml)
+//	  → the per-repo default (global [repo."<path>"] preferred_workbench)
+//	  → none
+//
+// The per-worktree runtime entry is a strictly finer scope than the per-repo
+// default, so it wins on specificity. It is three-valued: an explicit-none entry
+// (empty string) short-circuits to flat/prompt here, overriding the repo default;
+// a named entry uses that name; an absent entry falls through to the repo default.
 //
 // A stored name that does not resolve to a real Workbench for this checkout is
-// skipped with a non-fatal warning (ADR-0054 style) and resolution continues
-// (here: to none) — a broken preference never blocks getting into a session and
-// never silently vanishes. The receiver may be nil.
+// skipped with a non-fatal warning (ADR-0054 style) at each layer and resolution
+// continues down the chain — a broken preference never blocks getting into a
+// session and never silently vanishes. The receiver may be nil.
 func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string, []string) {
 	if c == nil {
 		return "", nil
 	}
-	name := c.repoPreferredWorkbench(d, checkoutPath)
-	if name == "" {
-		return "", nil
-	}
-	workbenches, _ := c.ResolveSessionTemplatesWith(d, checkoutPath)
-	for _, tmpl := range workbenches {
-		if tmpl.Name == name {
-			return name, nil
+
+	var warnings []string
+	// resolves reports whether name is a real Workbench for this checkout,
+	// resolving the template set lazily (and once) so an unset chain does no work.
+	var workbenches []SessionTemplate
+	resolved := false
+	resolves := func(name string) bool {
+		if !resolved {
+			workbenches, _ = c.ResolveSessionTemplatesWith(d, checkoutPath)
+			resolved = true
 		}
+		for _, tmpl := range workbenches {
+			if tmpl.Name == name {
+				return true
+			}
+		}
+		return false
 	}
-	return "", []string{fmt.Sprintf(
-		"preferred workbench %q does not resolve to a Workbench for %s; ignoring",
-		name, checkoutPath,
-	)}
+	staleWarn := func(name string) string {
+		return fmt.Sprintf(
+			"preferred workbench %q does not resolve to a Workbench for %s; ignoring",
+			name, checkoutPath,
+		)
+	}
+
+	// Layer 1 (finest): this worktree's runtime entry.
+	if name, present, err := RuntimePreferredWorkbenchWith(d, checkoutPath); err != nil {
+		debug.Error("config: read runtime preferred workbench for %s: %v", checkoutPath, err)
+	} else if present {
+		if name == "" {
+			// Explicit none: flat/prompt here, overriding any repo default.
+			return "", warnings
+		}
+		if resolves(name) {
+			return name, warnings
+		}
+		warnings = append(warnings, staleWarn(name))
+	}
+
+	// Layer 2 (coarser): the per-repo default.
+	if name := c.repoPreferredWorkbench(d, checkoutPath); name != "" {
+		if resolves(name) {
+			return name, warnings
+		}
+		warnings = append(warnings, staleWarn(name))
+	}
+
+	// Layer 3: none.
+	return "", warnings
 }
 
 // repoPreferredWorkbench returns the preferred_workbench declared on the global
