@@ -57,6 +57,7 @@ const (
 	ActionUserDefinedCommand
 	ActionRefresh
 	ActionYankPath
+	ActionCreateWorktree
 )
 
 // Picker is a fuzzy-searchable list picker
@@ -71,13 +72,14 @@ type Picker struct {
 	width    int
 	result   Result
 
-	showHelp        bool
-	showDelete      bool
-	showContext     bool
-	showKillSession bool
-	showReset       bool
-	showOpenWindow  bool
-	cursorAtEnd     bool
+	showHelp           bool
+	showDelete         bool
+	showContext        bool
+	showKillSession    bool
+	showReset          bool
+	showOpenWindow     bool
+	showCreateWorktree bool
+	cursorAtEnd        bool
 
 	quickAccessModifier string
 	quickAccess         *QuickAccess
@@ -86,8 +88,8 @@ type Picker struct {
 	cursorMemory map[string]string
 	lastQuery    string
 
-	customCommands []UserDefinedKeyBinding
-	iconLegend     []iconLegendEntry
+	customCommands   []UserDefinedKeyBinding
+	iconLegend       []iconLegendEntry
 	initialCursorIdx int
 	warnings         []string
 	updateNotice     string
@@ -151,6 +153,13 @@ func WithReset() PickerOption {
 func WithOpenWindow() PickerOption {
 	return func(p *Picker) {
 		p.showOpenWindow = true
+	}
+}
+
+// WithCreateWorktree enables the create-worktree keybinding (ctrl+a)
+func WithCreateWorktree() PickerOption {
+	return func(p *Picker) {
+		p.showCreateWorktree = true
 	}
 }
 
@@ -429,6 +438,15 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case key.Matches(msg, keys.CreateWorktree):
+			if p.showCreateWorktree {
+				p.result = Result{Action: ActionCreateWorktree}
+				if item, ok := p.selectedItem(); ok {
+					p.result.Selected = item
+				}
+				return p, tea.Quit
+			}
+
 		case key.Matches(msg, keys.YankPath):
 			if item, ok := p.selectedItem(); ok {
 				p.result = Result{
@@ -695,6 +713,9 @@ func (p *Picker) viewHelp() string {
 	if p.showOpenWindow && !p.isKeyOverridden("ctrl+o") {
 		entries = append(entries, helpEntry{"C-o", "Open in window"})
 	}
+	if p.showCreateWorktree && !p.isKeyOverridden("ctrl+a") {
+		entries = append(entries, helpEntry{"C-a", "Create worktree"})
+	}
 	if p.showDelete && !p.isKeyOverridden("ctrl+d") {
 		entries = append(entries, helpEntry{"C-d", "Delete"})
 	}
@@ -780,20 +801,21 @@ func Run(items []Item, opts ...PickerOption) (Result, error) {
 
 // Key bindings
 type keyMap struct {
-	Up                key.Binding
-	Down              key.Binding
-	HalfPageUp        key.Binding
-	HalfPageDown      key.Binding
-	Enter             key.Binding
-	Quit              key.Binding
-	Delete            key.Binding
-	ForceDelete       key.Binding
-	KillSession       key.Binding
-	Reset             key.Binding
-	OpenWindow        key.Binding
-	ClearInput        key.Binding
-	Help              key.Binding
-	YankPath          key.Binding
+	Up             key.Binding
+	Down           key.Binding
+	HalfPageUp     key.Binding
+	HalfPageDown   key.Binding
+	Enter          key.Binding
+	Quit           key.Binding
+	Delete         key.Binding
+	ForceDelete    key.Binding
+	KillSession    key.Binding
+	Reset          key.Binding
+	OpenWindow     key.Binding
+	ClearInput     key.Binding
+	Help           key.Binding
+	YankPath       key.Binding
+	CreateWorktree key.Binding
 }
 
 var keys = keyMap{
@@ -838,5 +860,8 @@ var keys = keyMap{
 	),
 	YankPath: key.NewBinding(
 		key.WithKeys("ctrl+y"),
+	),
+	CreateWorktree: key.NewBinding(
+		key.WithKeys("ctrl+a"),
 	),
 }

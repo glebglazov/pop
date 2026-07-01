@@ -131,6 +131,29 @@ func TestUserDefinedCommandKeyMatching(t *testing.T) {
 	}
 }
 
+func TestCreateWorktreeKey(t *testing.T) {
+	items := []Item{{Name: "wt", Path: "/wt"}}
+
+	// Disabled: ctrl+a is a no-op.
+	picker := NewPicker(items)
+	picker.Init()
+	picker.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	if picker.result.Action == ActionCreateWorktree {
+		t.Error("ctrl+a should not fire when WithCreateWorktree is disabled")
+	}
+
+	// Enabled: ctrl+a fires ActionCreateWorktree.
+	picker = NewPicker(items, WithCreateWorktree())
+	picker.Init()
+	_, cmd := picker.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	if picker.result.Action != ActionCreateWorktree {
+		t.Errorf("ctrl+a should fire ActionCreateWorktree, got %v", picker.result.Action)
+	}
+	if cmd == nil {
+		t.Error("ctrl+a should return tea.Quit cmd")
+	}
+}
+
 func TestHelpOverlayToggle(t *testing.T) {
 	items := []Item{{Name: "test", Path: "/test"}}
 	picker := NewPicker(items)

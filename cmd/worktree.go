@@ -133,6 +133,15 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			restoreCursorIdx = result.CursorIndex
 			// Continue loop — items rebuild with fresh attention state
 
+		case ui.ActionCreateWorktree:
+			if err := createWorktree(ctx); err != nil {
+				debug.Error("worktree: create: %v", err)
+				fmt.Fprintf(os.Stderr, "Failed to create worktree: %v\n", err)
+				// Continue loop to show picker again
+				continue
+			}
+			return nil
+
 		case ui.ActionYankPath:
 			if result.Selected == nil {
 				return nil
@@ -216,6 +225,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		ui.WithCursorAtEnd(),
 		ui.WithKillSession(),
 		ui.WithReset(),
+		ui.WithCreateWorktree(),
 		ui.WithQuickAccess(quickAccessModifier),
 		ui.WithIconLegend(iconLegends...),
 	}
@@ -253,6 +263,47 @@ func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, 
 		}
 	}
 	return items
+}
+
+// createWorktree runs the interactive create flow (ADR-0076): pick a branch,
+// derive the worktree name/path, run `git worktree add`, record the new checkout
+// in history, and attach a flat session for it immediately.
+func createWorktree(ctx *project.RepoContext) error {
+	branches, err := project.ListBranches(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list branches: %w", err)
+	}
+	if len(branches) == 0 {
+		return fmt.Errorf("no branches found")
+	}
+
+	items := make([]ui.Item, len(branches))
+	byRef := make(map[string]project.Branch, len(branches))
+	for i, b := range branches {
+		items[i] = ui.Item{Name: b.Ref, Path: b.Ref}
+		byRef[b.Ref] = b
+	}
+
+	result, err := ui.Run(items,
+		ui.WithHeader("Pick a branch for the new worktree"),
+		ui.WithInitialCursorIndex(0))
+	if err != nil {
+		return err
+	}
+	if result.Action != ui.ActionConfirm || result.Selected == nil {
+		// Esc/cancel in the branch picker: create nothing.
+		return nil
+	}
+
+	selection := byRef[result.Selected.Path]
+	path, err := project.AddWorktree(ctx, selection)
+	if err != nil {
+		return err
+	}
+
+	// Record the new checkout and attach a flat session, reusing the existing
+	// switch/attach path.
+	return handleWorktreeSelect(ctx, &ui.Item{Name: filepath.Base(path), Path: path})
 }
 
 func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {
