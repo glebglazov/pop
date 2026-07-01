@@ -193,13 +193,11 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 			calls = append(calls, append([]string(nil), args...))
 			switch args[0] {
 			case "display-message":
-				if len(args) > 1 && args[1] == "-p" {
-					if args[2] == "#{window_width}" {
-						return "120", nil
-					}
-					if args[2] == "#{window_height}" {
-						return "40", nil
-					}
+				if args[len(args)-1] == "#{window_width}" {
+					return "120", nil
+				}
+				if args[len(args)-1] == "#{window_height}" {
+					return "40", nil
 				}
 				return "current-session", nil
 			case "new-window":
@@ -276,13 +274,11 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 			calls = append(calls, append([]string(nil), args...))
 			switch args[0] {
 			case "display-message":
-				if len(args) > 1 && args[1] == "-p" {
-					if args[2] == "#{window_width}" {
-						return "120", nil
-					}
-					if args[2] == "#{window_height}" {
-						return "40", nil
-					}
+				if args[len(args)-1] == "#{window_width}" {
+					return "120", nil
+				}
+				if args[len(args)-1] == "#{window_height}" {
+					return "40", nil
 				}
 				return "current-session", nil
 			case "new-window":
@@ -363,13 +359,11 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 			calls = append(calls, append([]string(nil), args...))
 			switch args[0] {
 			case "display-message":
-				if len(args) > 1 && args[1] == "-p" {
-					if args[2] == "#{window_width}" {
-						return "120", nil
-					}
-					if args[2] == "#{window_height}" {
-						return "40", nil
-					}
+				if args[len(args)-1] == "#{window_width}" {
+					return "120", nil
+				}
+				if args[len(args)-1] == "#{window_height}" {
+					return "40", nil
 				}
 				return "current-session", nil
 			case "new-window":
@@ -428,13 +422,11 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 			calls = append(calls, append([]string(nil), args...))
 			switch args[0] {
 			case "display-message":
-				if len(args) > 1 && args[1] == "-p" {
-					if args[2] == "#{window_width}" {
-						return "100", nil
-					}
-					if args[2] == "#{window_height}" {
-						return "50", nil
-					}
+				if args[len(args)-1] == "#{window_width}" {
+					return "100", nil
+				}
+				if args[len(args)-1] == "#{window_height}" {
+					return "50", nil
 				}
 				return "current-session", nil
 			case "new-window":
@@ -474,6 +466,80 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 	}
 }
 
+func TestResizePanesByWeightTargetsBuiltWindow(t *testing.T) {
+	// Regression: resizePanesByWeight must read the dimensions of the window
+	// actually being built — by targeting one of its panes with -t — not the
+	// current client's window (an untargeted display-message). Otherwise a
+	// detached session (born 80x24 from new-session -d) is sized against a
+	// mismatched client window and tmux clamps to a lopsided split.
+	cfg := &config.Config{
+		SessionTemplates: []config.SessionTemplate{{
+			Name: "equal",
+			Windows: []config.SessionTemplateWindow{{
+				Name: "work",
+				Layout: &config.SessionTemplatePaneSpec{
+					Children: "columns",
+					Panes: []config.SessionTemplatePaneSpec{
+						{Name: "left", Command: "echo left"},
+						{Name: "right", Command: "echo right"},
+					},
+				},
+			}},
+		}},
+	}
+	var calls [][]string
+	tmux := &deps.MockTmux{
+		CommandFunc: func(args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch args[0] {
+			case "display-message":
+				if args[len(args)-1] == "#{window_width}" {
+					return "100", nil
+				}
+				if args[len(args)-1] == "#{window_height}" {
+					return "50", nil
+				}
+				return "current-session", nil
+			case "new-window":
+				return "%0", nil
+			case "split-window":
+				return "%1", nil
+			default:
+				return "", nil
+			}
+		},
+	}
+	d := templateRuntimeDeps{
+		Tmux:        tmux,
+		Getwd:       func() (string, error) { return "/repo", nil },
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+	}
+
+	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "equal"); err != nil {
+		t.Fatalf("runTemplateApplyWith() error: %v", err)
+	}
+
+	// Every dimension query must target the container pane ("%0") of the window
+	// being built, never be untargeted.
+	dimQueries := 0
+	for _, call := range calls {
+		if call[0] != "display-message" {
+			continue
+		}
+		last := call[len(call)-1]
+		if last != "#{window_width}" && last != "#{window_height}" {
+			continue
+		}
+		dimQueries++
+		if len(call) < 3 || call[1] != "-t" || call[2] != "%0" {
+			t.Errorf("dimension query %v must target the built window's pane via -t %%0", call)
+		}
+	}
+	if dimQueries != 2 {
+		t.Fatalf("expected 2 targeted dimension queries (width+height), got %d", dimQueries)
+	}
+}
+
 func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 	// Test: 3 levels deep nesting
 	cfg := &config.Config{
@@ -509,13 +575,11 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 			calls = append(calls, append([]string(nil), args...))
 			switch args[0] {
 			case "display-message":
-				if len(args) > 1 && args[1] == "-p" {
-					if args[2] == "#{window_width}" {
-						return "120", nil
-					}
-					if args[2] == "#{window_height}" {
-						return "40", nil
-					}
+				if args[len(args)-1] == "#{window_width}" {
+					return "120", nil
+				}
+				if args[len(args)-1] == "#{window_height}" {
+					return "40", nil
 				}
 				return "current-session", nil
 			case "new-window":
@@ -987,13 +1051,11 @@ func mergeMockTmux(calls *[][]string, livePanes, width, height string) *deps.Moc
 			*calls = append(*calls, append([]string(nil), args...))
 			switch args[0] {
 			case "display-message":
-				if len(args) > 2 && args[1] == "-p" {
-					switch args[2] {
-					case "#{window_width}":
-						return width, nil
-					case "#{window_height}":
-						return height, nil
-					}
+				switch args[len(args)-1] {
+				case "#{window_width}":
+					return width, nil
+				case "#{window_height}":
+					return height, nil
 				}
 				return "current-session", nil
 			case "list-windows":

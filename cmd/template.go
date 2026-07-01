@@ -626,13 +626,24 @@ func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.
 
 // resizePanesByWeight resizes panes to match their weights. It queries the
 // window dimensions and calculates target sizes in cells.
+//
+// The dimension query is targeted at the first pane being resized (which lives
+// in the window actually being built) via -t, not left untargeted. An
+// untargeted display-message returns the *current client's* window size, which
+// for a detached session born from a Workbench (new-session -d defaults to
+// 80x24) differs from the window the panes actually occupy — the resize math
+// would then size panes against the wrong window and tmux would clamp to a
+// lopsided split that survives the attach rescale as a skewed layout.
 func resizePanesByWeight(tmux deps.Tmux, paneIDs []string, children []config.SessionTemplatePaneSpec, direction string) error {
-	// Get window dimensions
-	widthStr, err := tmux.Command("display-message", "-p", "#{window_width}")
+	// Read dimensions of the specific window being built by targeting one of its
+	// panes, so the build-time split and this resize agree on one window.
+	target := paneIDs[0]
+
+	widthStr, err := tmux.Command("display-message", "-t", target, "-p", "#{window_width}")
 	if err != nil {
 		return fmt.Errorf("failed to get window width: %w", err)
 	}
-	heightStr, err := tmux.Command("display-message", "-p", "#{window_height}")
+	heightStr, err := tmux.Command("display-message", "-t", target, "-p", "#{window_height}")
 	if err != nil {
 		return fmt.Errorf("failed to get window height: %w", err)
 	}
