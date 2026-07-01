@@ -314,21 +314,100 @@ func createWorktree(ctx *project.RepoContext) error {
 		return err
 	}
 
-	// Record the new checkout and attach a flat session, reusing the existing
-	// switch/attach path.
-	return handleWorktreeSelect(ctx, &ui.Item{Name: filepath.Base(path), Path: path})
+	// Shape the new checkout's session: a Workbench when [workbench]
+	// pick_on_create is on and one resolves (ADR-0075/0076), else today's flat
+	// session. Both paths record the checkout in History.
+	return shapeWorktreeSession(defaultWorktreeShapeDeps(), ctx, path)
+}
+
+// worktreeShapeDeps carries the seams for shaping a freshly-created worktree's
+// session (ADR-0075/0076). It is split out from createWorktree so the
+// gated-prompt and flat fall-through paths are unit-testable with mocks; the
+// branch/name/`git worktree add` steps above run once, before shaping begins.
+type worktreeShapeDeps struct {
+	LoadConfig         func() (*config.Config, error)
+	PickOnCreate       func(cfg *config.Config) bool
+	ResolveWorkbenches func(cfg *config.Config, path string) []config.SessionTemplate
+	PromptWorkbench    func(workbenches []config.SessionTemplate) (name string, confirmed bool, err error)
+	FindWorkbench      func(workbenches []config.SessionTemplate, name string) (config.SessionTemplate, bool)
+	CreateSession      func(tmpl config.SessionTemplate, sessionName, path string) error
+	SessionName        func(path string) string
+	RecordHistory      func(path string)
+	Attach             func(sessionName string) error
+	Flat               func(ctx *project.RepoContext, item *ui.Item) error
+}
+
+// defaultWorktreeShapeDeps wires worktreeShapeDeps to production implementations,
+// reusing the existing Workbench resolution (ResolveSessionTemplatesWith — so
+// bare-repo Workbenches still propagate to the new worktree), prompt
+// (promptWorkbenchForCreate), and create (createSessionFromWorkbench) helpers.
+func defaultWorktreeShapeDeps() *worktreeShapeDeps {
+	return &worktreeShapeDeps{
+		LoadConfig: func() (*config.Config, error) {
+			path := cfgFile
+			if path == "" {
+				path = config.DefaultConfigPath()
+			}
+			return config.Load(path)
+		},
+		PickOnCreate: func(cfg *config.Config) bool { return cfg.WorkbenchPickOnCreate() },
+		ResolveWorkbenches: func(cfg *config.Config, path string) []config.SessionTemplate {
+			templates, _ := cfg.ResolveSessionTemplatesWith(config.DefaultDeps(), path)
+			return templates
+		},
+		PromptWorkbench: func(workbenches []config.SessionTemplate) (string, bool, error) {
+			return promptWorkbenchForCreate(&ProjectDeps{RunPicker: ui.Run}, workbenches)
+		},
+		FindWorkbench: findSessionTemplate,
+		CreateSession: func(tmpl config.SessionTemplate, sessionName, path string) error {
+			return createSessionFromWorkbench(defaultTemplateRuntimeDeps(), tmpl, sessionName, path)
+		},
+		SessionName:   project.SessionName,
+		RecordHistory: recordWorktreeHistory,
+		Attach:        func(sessionName string) error { return switchToTmuxTargetWith(defaultTmux, sessionName) },
+		Flat:          handleWorktreeSelect,
+	}
+}
+
+// shapeWorktreeSession honors the [workbench] pick_on_create gate for the native
+// worktree-create flow (ADR-0075/0076). When the toggle is on and at least one
+// Workbench resolves for the new checkout, it prompts; a concrete Workbench
+// choice builds a session that is exactly that Workbench and attaches. The
+// "no workbench" sentinel, an Esc, a disabled toggle, and an empty resolved set
+// all fall through to today's flat session (the worktree already exists, so
+// cancelling never un-creates it).
+func shapeWorktreeSession(d *worktreeShapeDeps, ctx *project.RepoContext, path string) error {
+	item := &ui.Item{Name: filepath.Base(path), Path: path}
+
+	cfg, err := d.LoadConfig()
+	if err == nil && d.PickOnCreate(cfg) {
+		workbenches := d.ResolveWorkbenches(cfg, path)
+		if len(workbenches) > 0 {
+			name, confirmed, err := d.PromptWorkbench(workbenches)
+			if err != nil {
+				return err
+			}
+			if confirmed && name != "" {
+				tmpl, ok := d.FindWorkbench(workbenches, name)
+				if !ok {
+					return fmt.Errorf("workbench %q not found", name)
+				}
+				sessionName := d.SessionName(path)
+				if err := d.CreateSession(tmpl, sessionName, path); err != nil {
+					return err
+				}
+				d.RecordHistory(path)
+				return d.Attach(sessionName)
+			}
+			// "no workbench" or Esc → today's flat session.
+		}
+	}
+	return d.Flat(ctx, item)
 }
 
 func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {
 	// Record selection in history (paths from git are already canonical)
-	hist, err := history.Load(history.DefaultHistoryPath())
-	if err != nil {
-		debug.Error("worktree: load history: %v", err)
-	}
-	hist.Record(item.Path)
-	if err := hist.Save(); err != nil {
-		debug.Error("worktree: save history: %v", err)
-	}
+	recordWorktreeHistory(item.Path)
 
 	if switchSession {
 		return switchTmuxSession(item)
@@ -336,6 +415,20 @@ func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {
 	// Print path for shell integration
 	fmt.Println(item.Path)
 	return nil
+}
+
+// recordWorktreeHistory records a checkout path in project history, logging (not
+// propagating) failures — history bookkeeping must never block attaching to the
+// new session. Shared by the flat and Workbench create paths.
+func recordWorktreeHistory(path string) {
+	hist, err := history.Load(history.DefaultHistoryPath())
+	if err != nil {
+		debug.Error("worktree: load history: %v", err)
+	}
+	hist.Record(path)
+	if err := hist.Save(); err != nil {
+		debug.Error("worktree: save history: %v", err)
+	}
 }
 
 func switchTmuxSession(item *ui.Item) error {

@@ -7,9 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/ui"
 )
 
 // countingGitDeps swaps project's package-global dependencies for ones whose
@@ -179,6 +181,157 @@ func TestRemoveFromHistoryWith(t *testing.T) {
 			t.Errorf("saved %d entries, want 2 untouched", len(saved.Entries))
 		}
 	})
+}
+
+// --- Worktree create-path Workbench shaping (ADR-0075/0076) ---
+
+// shapeSpy records which branch of shapeWorktreeSession ran. Each closure sets
+// its flag, so a test can assert exactly one path fired.
+type shapeSpy struct {
+	resolveCalled  bool
+	promptCalled   bool
+	createdTmpl    string
+	createdSession string
+	createdPath    string
+	historyPath    string
+	attached       string
+	flatCalled     bool
+}
+
+// newShapeDeps builds worktreeShapeDeps whose behavior is driven by the given
+// pick_on_create toggle, resolved set, and prompt result. All side effects are
+// captured in the returned spy.
+func newShapeDeps(pickOn bool, workbenches []config.SessionTemplate, promptName string, promptConfirmed bool) (*worktreeShapeDeps, *shapeSpy) {
+	spy := &shapeSpy{}
+	d := &worktreeShapeDeps{
+		LoadConfig:   func() (*config.Config, error) { return &config.Config{}, nil },
+		PickOnCreate: func(cfg *config.Config) bool { return pickOn },
+		ResolveWorkbenches: func(cfg *config.Config, path string) []config.SessionTemplate {
+			spy.resolveCalled = true
+			return workbenches
+		},
+		PromptWorkbench: func(wbs []config.SessionTemplate) (string, bool, error) {
+			spy.promptCalled = true
+			return promptName, promptConfirmed, nil
+		},
+		FindWorkbench: findSessionTemplate,
+		CreateSession: func(tmpl config.SessionTemplate, sessionName, path string) error {
+			spy.createdTmpl = tmpl.Name
+			spy.createdSession = sessionName
+			spy.createdPath = path
+			return nil
+		},
+		SessionName:   func(path string) string { return "sess-" + path },
+		RecordHistory: func(path string) { spy.historyPath = path },
+		Attach:        func(sessionName string) error { spy.attached = sessionName; return nil },
+		Flat: func(ctx *project.RepoContext, item *ui.Item) error {
+			spy.flatCalled = true
+			return nil
+		},
+	}
+	return d, spy
+}
+
+func TestShapeWorktreeSession_PickAWorkbench(t *testing.T) {
+	wbs := []config.SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}
+	d, spy := newShapeDeps(true, wbs, "gs-dev", true)
+
+	if err := shapeWorktreeSession(d, &project.RepoContext{}, "/repo/feature"); err != nil {
+		t.Fatalf("shapeWorktreeSession: %v", err)
+	}
+
+	if !spy.promptCalled {
+		t.Error("expected the Workbench prompt to be shown")
+	}
+	if spy.createdTmpl != "gs-dev" {
+		t.Errorf("CreateSession tmpl = %q, want gs-dev", spy.createdTmpl)
+	}
+	if spy.createdSession != "sess-/repo/feature" || spy.createdPath != "/repo/feature" {
+		t.Errorf("CreateSession(session=%q, path=%q), want sess-/repo/feature and /repo/feature", spy.createdSession, spy.createdPath)
+	}
+	if spy.historyPath != "/repo/feature" {
+		t.Errorf("RecordHistory path = %q, want /repo/feature", spy.historyPath)
+	}
+	if spy.attached != "sess-/repo/feature" {
+		t.Errorf("Attach target = %q, want sess-/repo/feature", spy.attached)
+	}
+	if spy.flatCalled {
+		t.Error("flat session must not run when a Workbench is chosen")
+	}
+}
+
+func TestShapeWorktreeSession_NoWorkbenchFallsThrough(t *testing.T) {
+	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	// The "no workbench" sentinel: confirmed choice, empty name.
+	d, spy := newShapeDeps(true, wbs, "", true)
+
+	if err := shapeWorktreeSession(d, &project.RepoContext{}, "/repo/feature"); err != nil {
+		t.Fatalf("shapeWorktreeSession: %v", err)
+	}
+
+	if !spy.promptCalled {
+		t.Error("expected the Workbench prompt to be shown")
+	}
+	if spy.createdTmpl != "" {
+		t.Errorf("CreateSession must not run for the no-workbench sentinel, got %q", spy.createdTmpl)
+	}
+	if !spy.flatCalled {
+		t.Error("expected the flat session fall-through for the no-workbench choice")
+	}
+}
+
+func TestShapeWorktreeSession_EscFallsThrough(t *testing.T) {
+	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	// Esc: not confirmed. The worktree already exists, so fall through to flat.
+	d, spy := newShapeDeps(true, wbs, "", false)
+
+	if err := shapeWorktreeSession(d, &project.RepoContext{}, "/repo/feature"); err != nil {
+		t.Fatalf("shapeWorktreeSession: %v", err)
+	}
+
+	if spy.createdTmpl != "" {
+		t.Error("CreateSession must not run when the prompt is cancelled")
+	}
+	if !spy.flatCalled {
+		t.Error("expected the flat session fall-through when the prompt is cancelled")
+	}
+}
+
+func TestShapeWorktreeSession_ToggleOffSkipsPrompt(t *testing.T) {
+	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	d, spy := newShapeDeps(false, wbs, "gs-dev", true)
+
+	if err := shapeWorktreeSession(d, &project.RepoContext{}, "/repo/feature"); err != nil {
+		t.Fatalf("shapeWorktreeSession: %v", err)
+	}
+
+	if spy.resolveCalled {
+		t.Error("ResolveWorkbenches must not be consulted when pick_on_create is off")
+	}
+	if spy.promptCalled {
+		t.Error("Workbench prompt must not be shown when pick_on_create is off")
+	}
+	if !spy.flatCalled {
+		t.Error("expected the flat session when pick_on_create is off")
+	}
+}
+
+func TestShapeWorktreeSession_EmptySetSkipsPrompt(t *testing.T) {
+	d, spy := newShapeDeps(true, nil, "", true)
+
+	if err := shapeWorktreeSession(d, &project.RepoContext{}, "/repo/feature"); err != nil {
+		t.Fatalf("shapeWorktreeSession: %v", err)
+	}
+
+	if !spy.resolveCalled {
+		t.Error("expected ResolveWorkbenches to be consulted when pick_on_create is on")
+	}
+	if spy.promptCalled {
+		t.Error("prompt must be skipped when no Workbenches resolve")
+	}
+	if !spy.flatCalled {
+		t.Error("expected the flat session when the resolved Workbench set is empty")
+	}
 }
 
 func TestWorktreeHelpHasNoPhantomCreateBinding(t *testing.T) {
