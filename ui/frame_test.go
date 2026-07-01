@@ -34,6 +34,18 @@ func TestFrameBodyHeight(t *testing.T) {
 			want:  17,
 		},
 		{
+			name:  "status reserves one line",
+			frame: Frame{Status: "Copied to clipboard"},
+			termH: 20,
+			want:  19,
+		},
+		{
+			name:  "empty status reserves nothing",
+			frame: Frame{Status: ""},
+			termH: 20,
+			want:  20,
+		},
+		{
 			name:  "hints reserve one line",
 			frame: Frame{Hints: "  Esc back"},
 			termH: 20,
@@ -52,11 +64,12 @@ func TestFrameBodyHeight(t *testing.T) {
 				Header:   "Projects",
 				InputBox: "> ",
 				Warnings: []string{"one", "two"},
+				Status:   "Copied",
 				Hints:    "  Esc back",
 			},
 			termH: 20,
-			// 20 - 1 (notice) - 1 (header) - 3 (input box) - 2 (warnings) - 1 (hints) = 12
-			want: 12,
+			// 20 - 1 (notice) - 1 (header) - 3 (input box) - 2 (warnings) - 1 (status) - 1 (hints) = 11
+			want: 11,
 		},
 		{
 			name: "floors at 3 on a short terminal",
@@ -96,6 +109,7 @@ func TestFrameRenderOrderAndOmission(t *testing.T) {
 		Header:   "Projects",
 		InputBox: " Help",
 		Warnings: []string{"low disk space"},
+		Status:   "Copied to clipboard",
 		Hints:    "  Esc back",
 	}
 
@@ -106,11 +120,22 @@ func TestFrameRenderOrderAndOmission(t *testing.T) {
 	body := indexOf(t, out, "BODY")
 	inputBox := indexOf(t, out, "Help")
 	warning := indexOf(t, out, "low disk space")
+	status := indexOf(t, out, "Copied to clipboard")
 	hints := indexOf(t, out, "Esc back")
 
-	if !(notice < header && header < body && body < inputBox && inputBox < warning && warning < hints) {
-		t.Fatalf("regions out of order: notice=%d header=%d body=%d inputBox=%d warning=%d hints=%d",
-			notice, header, body, inputBox, warning, hints)
+	if !(notice < header && header < body && body < inputBox && inputBox < warning && warning < status && status < hints) {
+		t.Fatalf("regions out of order: notice=%d header=%d body=%d inputBox=%d warning=%d status=%d hints=%d",
+			notice, header, body, inputBox, warning, status, hints)
+	}
+}
+
+func TestFrameRenderOmitsAbsentStatus(t *testing.T) {
+	f := Frame{Width: 20, Hints: "  Esc back"}
+	out := f.Render("BODY")
+
+	// With no Status set, only body and hints render — no status line between.
+	if out != "BODY\n"+hintStyle.Render("  Esc back") {
+		t.Fatalf("Render() with absent status = %q", out)
 	}
 }
 

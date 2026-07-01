@@ -17,12 +17,13 @@ type Frame struct {
 	Header   string   // "" = absent
 	InputBox string   // "" = absent; content when present (e.g. input.View() or " Help")
 	Warnings []string // reserved AND rendered; nil/empty = none
+	Status   string   // "" = absent; transient action feedback, distinct from Warnings
 	Hints    string   // "" = absent
 }
 
 // BodyHeight returns the body row budget for a terminal of height termH: termH
 // minus every present region (1 for Notice, 1 for Header, 3 for InputBox,
-// len(Warnings) for warnings, 1 for Hints), floored at >= 3.
+// len(Warnings) for warnings, 1 for Status, 1 for Hints), floored at >= 3.
 func (f Frame) BodyHeight(termH int) int {
 	h := termH
 	if f.Notice != "" {
@@ -35,6 +36,9 @@ func (f Frame) BodyHeight(termH int) int {
 		h -= 3
 	}
 	h -= len(f.Warnings)
+	if f.Status != "" {
+		h--
+	}
 	if f.Hints != "" {
 		h--
 	}
@@ -45,9 +49,10 @@ func (f Frame) BodyHeight(termH int) int {
 }
 
 // Render composes the frame's regions around body in the fixed order notice
-// -> header -> body -> input box -> warnings -> hints, omitting absent ones.
+// -> header -> body -> input box -> warnings -> status -> hints, omitting
+// absent ones.
 func (f Frame) Render(body string) string {
-	parts := make([]string, 0, 6)
+	parts := make([]string, 0, 7)
 
 	if f.Notice != "" {
 		parts = append(parts, renderUpdateNotice(f.Width, f.Notice))
@@ -71,6 +76,11 @@ func (f Frame) Render(body string) string {
 			lines[i] = warnStyle.Render("  ⚠ " + w)
 		}
 		parts = append(parts, strings.Join(lines, "\n"))
+	}
+
+	if f.Status != "" {
+		statusStyle := lipgloss.NewStyle().Foreground(colorAccent)
+		parts = append(parts, statusStyle.Render("  "+f.Status))
 	}
 
 	if f.Hints != "" {
