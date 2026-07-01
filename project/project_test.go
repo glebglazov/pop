@@ -1,6 +1,7 @@
 package project
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -745,4 +746,46 @@ branch refs/heads/feature-branch
 			}
 		})
 	}
+}
+
+func TestCurrentCheckoutPathWith(t *testing.T) {
+	t.Run("returns cleaned worktree top-level", func(t *testing.T) {
+		d := &Deps{
+			Git: &deps.MockGit{
+				CommandInDirFunc: func(dir string, args ...string) (string, error) {
+					if dir == "/projects/repo/feature/sub" && len(args) >= 2 &&
+						args[0] == "rev-parse" && args[1] == "--show-toplevel" {
+						return "/projects/repo/feature/", nil
+					}
+					return "", os.ErrNotExist
+				},
+			},
+			FS: &deps.MockFileSystem{
+				GetwdFunc: func() (string, error) { return "/projects/repo/feature/sub", nil },
+			},
+		}
+		got, err := CurrentCheckoutPathWith(d)
+		if err != nil {
+			t.Fatalf("CurrentCheckoutPathWith error: %v", err)
+		}
+		if got != "/projects/repo/feature" {
+			t.Fatalf("got %q, want /projects/repo/feature", got)
+		}
+	})
+
+	t.Run("errors when not in a git worktree", func(t *testing.T) {
+		d := &Deps{
+			Git: &deps.MockGit{
+				CommandInDirFunc: func(dir string, args ...string) (string, error) {
+					return "", errors.New("fatal: not a git repository")
+				},
+			},
+			FS: &deps.MockFileSystem{
+				GetwdFunc: func() (string, error) { return "/tmp", nil },
+			},
+		}
+		if _, err := CurrentCheckoutPathWith(d); err == nil {
+			t.Fatal("expected error outside a git worktree, got nil")
+		}
+	})
 }

@@ -1,6 +1,7 @@
 package project
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -123,6 +124,32 @@ func DetectRepoContextFromPathWith(d *Deps, path string) (*RepoContext, error) {
 		RepoName: filepath.Base(topLevel),
 		IsBare:   false,
 	}, nil
+}
+
+// CurrentCheckoutPath returns the absolute path of the git worktree containing
+// the current directory (git rev-parse --show-toplevel). This is the exact
+// worktree path used to key the per-worktree Preferred workbench store
+// (ADR-0078), so `pop workbench prefer` writes the entry for the checkout the
+// operator is standing in — not merely their cwd. Uses default dependencies.
+func CurrentCheckoutPath() (string, error) {
+	return CurrentCheckoutPathWith(defaultDeps)
+}
+
+// CurrentCheckoutPathWith is the injectable variant.
+func CurrentCheckoutPathWith(d *Deps) (string, error) {
+	cwd, err := d.FS.Getwd()
+	if err != nil {
+		return "", err
+	}
+	topLevel, err := d.Git.CommandInDir(cwd, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("not in a git worktree")
+	}
+	topLevel = strings.TrimSpace(topLevel)
+	if topLevel == "" {
+		return "", fmt.Errorf("not in a git worktree")
+	}
+	return filepath.Clean(topLevel), nil
 }
 
 // SessionName returns the sanitized tmux session name for a checkout path.
