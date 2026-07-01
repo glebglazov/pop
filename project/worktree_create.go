@@ -108,12 +108,26 @@ func AddWorktree(ctx *RepoContext, selection Branch) (string, error) {
 	return AddWorktreeWith(defaultDeps, ctx, selection)
 }
 
-// AddWorktreeWith runs `git worktree add`, porting the retired tmux-create-worktree
-// logic: an existing local branch of the derived name is reused; otherwise a new
-// branch is created with -b based on the selection (a remote selection thus becomes
-// a local tracking branch). Returns the new worktree path.
+// AddWorktreeWith runs `git worktree add` using the branch-derived directory name.
 func AddWorktreeWith(d *Deps, ctx *RepoContext, selection Branch) (string, error) {
-	branch, dir := DeriveWorktreeName(selection.Ref, selection.IsRemote)
+	_, dir := DeriveWorktreeName(selection.Ref, selection.IsRemote)
+	return AddWorktreeNamedWith(d, ctx, selection, dir)
+}
+
+// AddWorktreeNamed creates a worktree for the selected branch at the given
+// directory name and returns its path. Uses default dependencies.
+func AddWorktreeNamed(ctx *RepoContext, selection Branch, dir string) (string, error) {
+	return AddWorktreeNamedWith(defaultDeps, ctx, selection, dir)
+}
+
+// AddWorktreeNamedWith runs `git worktree add`, porting the retired
+// tmux-create-worktree logic: an existing local branch of the derived name is
+// reused; otherwise a new branch is created with -b based on the selection (a
+// remote selection thus becomes a local tracking branch). The worktree directory
+// name is taken from dir (the human-accepted or -edited name, slice 02), while
+// the branch is still derived from the selection. Returns the new worktree path.
+func AddWorktreeNamedWith(d *Deps, ctx *RepoContext, selection Branch, dir string) (string, error) {
+	branch, _ := DeriveWorktreeName(selection.Ref, selection.IsRemote)
 	path := WorktreePath(ctx, dir)
 
 	var err error

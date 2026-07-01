@@ -296,7 +296,20 @@ func createWorktree(ctx *project.RepoContext) error {
 	}
 
 	selection := byRef[result.Selected.Path]
-	path, err := project.AddWorktree(ctx, selection)
+
+	// Name step (ADR-0076): pre-fill with the branch-derived default, let the
+	// human accept or edit it. Esc aborts creation cleanly.
+	_, defaultDir := project.DeriveWorktreeName(selection.Ref, selection.IsRemote)
+	name, confirmed, err := ui.PromptName("Name the new worktree", defaultDir)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		// Esc/cancel in the name prompt: create nothing.
+		return nil
+	}
+
+	path, err := project.AddWorktreeNamed(ctx, selection, name)
 	if err != nil {
 		return err
 	}
