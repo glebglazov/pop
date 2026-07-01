@@ -210,7 +210,7 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row.repoKey = repoKey
+	row.RepoKey = repoKey
 	row.cursorKey = "pop\x00" + setID
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
@@ -253,7 +253,7 @@ func TestDashboardIKeyBoundDrainsWithoutPicker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row.repoKey = repoKey
+	row.RepoKey = repoKey
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "bound", Project: "pop", Provisioned: false},
 	})

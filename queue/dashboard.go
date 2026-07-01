@@ -29,49 +29,53 @@ const dashboardPollInterval = 2 * time.Second
 // held by a live drain (running / Picked-up). It is the tier-1 sort signal.
 const dashboardDrainPickedUp = "picked up"
 
-// DashboardRow is one read-only Queue dashboard table row.
-type DashboardRow struct {
-	Project string
-	SetID   string
-	// Status is the rendered display label (e.g. "IN PROGRESS", "DONE · merged").
-	// Logic that needs the schedulability fact must read RawStatus, never parse
-	// this string.
-	Status string
+// SetRef holds the resolved, fork-free coordinates of one registered Task set
+// that the Queue write-path acts on, plus the per-build derived facts the
+// write-path branches on. Nothing re-resolves these; they are carried,
+// honoring the fork-free build (ADR-0060).
+type SetRef struct {
+	DefPath, StatePath, SetID string
+	RepoKey, RepoCommonDir    string
+	ProjectPath, RuntimePath  string
+	// Parked is true when the set's repeated abnormal terminals have parked it
+	// (derived from Drain history); unpark writes a park-clear event (ADR-0055).
+	// Bound is true when the set holds a Worktree binding with a non-blank
+	// runtime path — the dedicated-checkout fact the action menu gates unbind
+	// on. Derived per-build from the binding snapshot (no git fork), mirroring
+	// dashboardSetBound.
+	// Orphaned is true when the set's Worktree binding points at a checkout
+	// that no longer exists on disk. Like Picked-up, it is a derived per-build
+	// fact (a cheap filesystem stat, never a git fork), not a persisted
+	// status, and is orthogonal to Task-set status — a set of any status may
+	// be orphaned. A set with no binding can never be orphaned.
+	Parked, Bound, Orphaned bool
+	AutoDrain               bool
 	// RawStatus is the underlying derived Task-set status, kept for counts and
 	// comparisons so display relabels never leak into logic.
 	RawStatus tasks.TaskSetStatus
-	Worktree  string
-	Drain     string
-	AutoDrain bool
+	// DoneStillManagedBound is true when a Done set still holds a
+	// pop-provisioned (managed) Worktree binding. The dashboard keeps such a
+	// row visible as a clean-up reminder until archived or unbound (ADR-0070).
+	DoneStillManagedBound bool
+}
 
-	defPath            string
-	statePath          string
-	cursorKey          string
-	repoKey            string
-	repoCommonDir      string
-	projectPath        string
-	runtimePath        string
-	paneID         string
-	// doneStillManagedBound is true when a Done set still holds a pop-provisioned
-	// (managed) Worktree binding. The dashboard keeps such a row visible as a
-	// clean-up reminder until archived or unbound (ADR-0070).
-	doneStillManagedBound bool
+// DashboardRow is one read-only Queue dashboard table row.
+type DashboardRow struct {
+	SetRef
+
+	Project string
+	// Status is the rendered display label (e.g. "IN PROGRESS", "DONE · merged").
+	// Logic that needs the schedulability fact must read RawStatus, never parse
+	// this string.
+	Status   string
+	Worktree string
+	Drain    string
+
+	cursorKey string
+	paneID    string
 	// destKind selects how the destination column is styled; Worktree holds the
 	// plain label (branch name, "[managed wt]", or "needs bind").
 	destKind dashboardDestKind
-	// parked is true when the set's repeated abnormal terminals have parked it
-	// (derived from Drain history); unpark writes a park-clear event (ADR-0055).
-	parked bool
-	// orphaned is true when the set's Worktree binding points at a checkout that
-	// no longer exists on disk. Like Picked-up, it is a derived per-build fact
-	// (a cheap filesystem stat, never a git fork), not a persisted status, and is
-	// orthogonal to Task-set status — a set of any status may be orphaned. A set
-	// with no binding can never be orphaned.
-	orphaned bool
-	// bound is true when the set holds a Worktree binding with a non-blank runtime
-	// path — the dedicated-checkout fact the action menu gates unbind on. Derived
-	// per-build from the binding snapshot (no git fork), mirroring dashboardSetBound.
-	bound bool
 }
 
 // DashboardSnapshot is the data model for `pop queue dashboard`.
@@ -447,7 +451,7 @@ func pathWithinOrEqual(p, base string) bool {
 // first tier it qualifies for, so an orphaned + auto-drain set sorts under the
 // auto-drain tier (auto-drain is checked before orphaned).
 const (
-	dashboardTierRunning  = iota // live drain holds the checkout (Picked-up)
+	dashboardTierRunning   = iota // live drain holds the checkout (Picked-up)
 	dashboardTierAutoDrain        // auto-drain enabled
 	dashboardTierOrphaned         // Worktree binding points at a missing checkout
 	dashboardTierRest             // everything else
@@ -462,7 +466,7 @@ func dashboardSortTier(r DashboardRow) int {
 		return dashboardTierRunning
 	case r.AutoDrain:
 		return dashboardTierAutoDrain
-	case r.orphaned:
+	case r.Orphaned:
 		return dashboardTierOrphaned
 	default:
 		return dashboardTierRest
@@ -576,26 +580,28 @@ func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonStat
 		}
 		status := dashboardStatus(taskRow)
 		rows = append(rows, DashboardRow{
-			Project:        st.projectName,
-			SetID:          taskRow.ID,
-			Status:         status,
-			RawStatus:      taskRow.Status,
-			Worktree:       wt.label,
-			Drain:          drain,
-			AutoDrain:      taskRow.AutoDrain,
-			defPath:        st.defPath,
-			statePath:      st.statePath,
-			cursorKey:      st.projectName + "\x00" + taskRow.ID,
-			repoKey:        st.repoKey,
-			repoCommonDir:  st.repoCommonDir,
-			projectPath:    staticProjectPath(st),
-			runtimePath:    wt.runtimePath,
-			paneID:         dashboardPaneID(state, st.repoKey, taskRow.ID),
-			doneStillManagedBound: doneStillManagedBound,
-			parked:                parked,
-			orphaned:              orphaned,
-			bound:                 bound,
-			destKind:              wt.destKind,
+			SetRef: SetRef{
+				SetID:                 taskRow.ID,
+				RawStatus:             taskRow.Status,
+				AutoDrain:             taskRow.AutoDrain,
+				DefPath:               st.defPath,
+				StatePath:             st.statePath,
+				RepoKey:               st.repoKey,
+				RepoCommonDir:         st.repoCommonDir,
+				ProjectPath:           staticProjectPath(st),
+				RuntimePath:           wt.runtimePath,
+				DoneStillManagedBound: doneStillManagedBound,
+				Parked:                parked,
+				Orphaned:              orphaned,
+				Bound:                 bound,
+			},
+			Project:   st.projectName,
+			Status:    status,
+			Worktree:  wt.label,
+			Drain:     drain,
+			cursorKey: st.projectName + "\x00" + taskRow.ID,
+			paneID:    dashboardPaneID(state, st.repoKey, taskRow.ID),
+			destKind:  wt.destKind,
 		})
 	}
 	return rows, nil
@@ -935,14 +941,14 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 		{key: "i", label: "drain", action: menuActionDrain},
 	}
 	items = append(items, dashboardMenuItem{key: "b", label: "bind worktree", action: menuActionBind})
-	if row.bound {
+	if row.Bound {
 		items = append(items, dashboardMenuItem{key: "U", label: "unbind worktree", action: menuActionUnbind})
 	}
-	if !row.orphaned {
+	if !row.Orphaned {
 		items = append(items, dashboardMenuItem{key: "d", label: "auto-drain", action: menuActionAutoDrain})
 	}
 	items = append(items, dashboardMenuItem{key: "p", label: "preview", action: menuActionPreview})
-	if row.parked {
+	if row.Parked {
 		items = append(items, dashboardMenuItem{key: "P", label: "unpark", action: menuActionUnpark})
 	}
 	items = append(items, dashboardMenuItem{key: "O", label: "shell", action: menuActionShell})
@@ -1441,13 +1447,13 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 		m.bind = &dashboardBindModal{row: row, loading: true}
 		return m, m.loadBindWorktrees(row)
 	case menuActionUnbind:
-		if !row.bound {
+		if !row.Bound {
 			return m, nil
 		}
 		m.abandon = &dashboardAbandonModal{row: row}
 		return m, nil
 	case menuActionAutoDrain:
-		if row.orphaned {
+		if row.Orphaned {
 			return m, nil
 		}
 		if m.cursor >= 0 && m.cursor < len(m.snap.Rows) {
@@ -1457,14 +1463,14 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 	case menuActionPreview:
 		return m, m.previewDrain(row)
 	case menuActionUnpark:
-		if !row.parked {
+		if !row.Parked {
 			m.statusMsg = "task set is not parked"
 			return m, nil
 		}
 		m.statusMsg = ""
 		return m, m.unparkSet(row)
 	case menuActionShell:
-		if strings.TrimSpace(row.runtimePath) == "" {
+		if strings.TrimSpace(row.RuntimePath) == "" {
 			m.statusMsg = "no checkout bound to this task set"
 			return m, nil
 		}
@@ -1474,7 +1480,7 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 			shell = "/bin/sh"
 		}
 		cmd := exec.Command(shell)
-		cmd.Dir = row.runtimePath
+		cmd.Dir = row.RuntimePath
 		return m, tea.ExecProcess(cmd, nil)
 	case menuActionArchive:
 		m.statusMsg = ""
@@ -1663,11 +1669,11 @@ func (m QueueDashboard) applyDetailOverride(row DashboardRow, task tasks.Task, v
 		var err error
 		switch verb {
 		case "C":
-			err = d.completeDetailTask(row.defPath, taskPath)
+			err = d.completeDetailTask(row.DefPath, taskPath)
 		case "O":
-			err = d.resetDetailTask(row.defPath, taskPath)
+			err = d.resetDetailTask(row.DefPath, taskPath)
 		case "K":
-			err = d.skipDetailTask(row.defPath, taskPath)
+			err = d.skipDetailTask(row.DefPath, taskPath)
 		}
 		verbName := map[string]string{"C": "complete", "O": "open", "K": "skip"}[verb]
 		return dashboardDetailOverrideMsg{taskID: task.ID, verb: verbName, err: err}
@@ -1835,9 +1841,9 @@ func UnparkDashboardRow(d *Deps, row DashboardRow) error {
 	if d == nil || d.Tasks == nil {
 		return fmt.Errorf("missing task dependencies")
 	}
-	commonDir := row.repoCommonDir
+	commonDir := row.RepoCommonDir
 	if strings.TrimSpace(commonDir) == "" {
-		id, err := tasks.ResolveRepositoryIdentity(d.Tasks, row.runtimePath)
+		id, err := tasks.ResolveRepositoryIdentity(d.Tasks, row.RuntimePath)
 		if err != nil {
 			return err
 		}
@@ -1853,14 +1859,14 @@ func UnparkDashboardRow(d *Deps, row DashboardRow) error {
 // confirmation is required (ADR cleanup path for Done and Orphaned sets alike).
 func (m QueueDashboard) archiveSet(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		err := m.d.archiveSet(row.defPath, row.SetID)
+		err := m.d.archiveSet(row.DefPath, row.SetID)
 		return dashboardArchiveMsg{setID: row.SetID, err: err}
 	}
 }
 
 func (m QueueDashboard) toggleAutoDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.d.toggleAutoDrain(row.defPath, row.statePath, row.SetID)
+		result, err := m.d.toggleAutoDrain(row.DefPath, row.StatePath, row.SetID)
 		if err != nil {
 			return dashboardToggleMsg{key: row.cursorKey, err: err}
 		}
@@ -1970,7 +1976,7 @@ func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
 		if d.Tasks == nil {
 			d.Tasks = tasks.DefaultDeps()
 		}
-		refresh, err := d.refresh(row.defPath)
+		refresh, err := d.refresh(row.DefPath)
 		if err != nil {
 			return dashboardDetailMsg{dashRow: row, err: err}
 		}
@@ -2017,7 +2023,7 @@ func DashboardStatusDetailLines(d *Deps, row DashboardRow) ([]string, error) {
 	if d.Tasks == nil {
 		d.Tasks = tasks.DefaultDeps()
 	}
-	refresh, err := d.refresh(row.defPath)
+	refresh, err := d.refresh(row.DefPath)
 	if err != nil {
 		return nil, err
 	}
@@ -2029,8 +2035,8 @@ func DashboardStatusDetailLines(d *Deps, row DashboardRow) ([]string, error) {
 		text = fmt.Sprintf("%s: no status detail available", row.SetID)
 	}
 	lines := strings.Split(text, "\n")
-	if strings.TrimSpace(row.runtimePath) != "" {
-		lines = append([]string{"checkout: " + row.runtimePath, ""}, lines...)
+	if strings.TrimSpace(row.RuntimePath) != "" {
+		lines = append([]string{"checkout: " + row.RuntimePath, ""}, lines...)
 	}
 	return lines, nil
 }
@@ -2080,7 +2086,7 @@ func LaunchDashboardDrain(d *Deps, cfg *config.Config, row DashboardRow) (Dashbo
 	if d.Project == nil {
 		d.Project = project.DefaultDeps()
 	}
-	scans, err := dashboardScansForDefinition(d, cfg, row.defPath)
+	scans, err := dashboardScansForDefinition(d, cfg, row.DefPath)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -2193,8 +2199,8 @@ func PreviewDashboardDrain(d *Deps, row DashboardRow) error {
 // prompt is skipped here.
 func DashboardUnbindWorktree(d *Deps, cfg *config.Config, row DashboardRow) (AbandonResult, error) {
 	key := ""
-	if strings.TrimSpace(row.repoKey) != "" {
-		key = setScopedKey(row.repoKey, row.SetID)
+	if strings.TrimSpace(row.RepoKey) != "" {
+		key = setScopedKey(row.RepoKey, row.SetID)
 	}
 	return AbandonBindingWithOptions(d, cfg, key, row.SetID, io.Discard, AbandonOptions{Yes: true, In: tasks.NonInteractiveReader{}})
 }
@@ -2300,7 +2306,7 @@ func DashboardCreateWorktree(d *Deps, cfg *config.Config, row DashboardRow, base
 // resumes in its binding (ADR-0052).
 func dashboardSetBound(d *Deps, cfg *config.Config, row DashboardRow) (bool, error) {
 	d = ensureQueueDeps(d)
-	repoKey := row.repoKey
+	repoKey := row.RepoKey
 	if repoKey == "" {
 		_, rk, err := dashboardBindContext(d, cfg, row)
 		if err != nil {
@@ -2491,25 +2497,25 @@ func dashboardBindContext(d *Deps, cfg *config.Config, row DashboardRow) ([]proj
 	// them directly instead of re-forking `git rev-parse` across every registered
 	// project — the sequential rescan that left the inline bind picker stuck on
 	// "loading...".
-	if row.projectPath != "" && row.repoKey != "" {
+	if row.ProjectPath != "" && row.RepoKey != "" {
 		scan := projectScan{
 			Name:           row.Project,
-			ProjectPath:    row.projectPath,
-			DefinitionPath: row.defPath,
-			RuntimePath:    row.projectPath,
-			SessionName:    project.SessionNameWith(d.Project, row.projectPath),
-			RepoKey:        row.repoKey,
+			ProjectPath:    row.ProjectPath,
+			DefinitionPath: row.DefPath,
+			RuntimePath:    row.ProjectPath,
+			SessionName:    project.SessionNameWith(d.Project, row.ProjectPath),
+			RepoKey:        row.RepoKey,
 		}
-		return []projectScan{scan}, row.repoKey, nil
+		return []projectScan{scan}, row.RepoKey, nil
 	}
-	scans, err := dashboardScansForDefinition(d, cfg, row.defPath)
+	scans, err := dashboardScansForDefinition(d, cfg, row.DefPath)
 	if err != nil {
 		return nil, "", err
 	}
 	if len(scans) == 0 {
 		return nil, "", fmt.Errorf("task set %s is no longer in a registered queue project", row.SetID)
 	}
-	repoKey := row.repoKey
+	repoKey := row.RepoKey
 	if repoKey == "" {
 		repoKey, err = scanRepoKey(d, scans[0])
 		if err != nil {
@@ -2527,11 +2533,11 @@ func refuseDashboardBindWhileLocked(d *Deps, row DashboardRow) error {
 		d.Tasks = tasks.DefaultDeps()
 	}
 	paths := map[string]bool{}
-	if strings.TrimSpace(row.runtimePath) != "" {
-		paths[row.runtimePath] = true
+	if strings.TrimSpace(row.RuntimePath) != "" {
+		paths[row.RuntimePath] = true
 	}
-	if row.repoKey != "" {
-		if b, ok := bindingForSet(d.Tasks, row.repoKey, row.SetID); ok && b.RuntimePath != "" {
+	if row.RepoKey != "" {
+		if b, ok := bindingForSet(d.Tasks, row.RepoKey, row.SetID); ok && b.RuntimePath != "" {
 			paths[b.RuntimePath] = true
 		}
 	}
@@ -3166,10 +3172,9 @@ func writeDashboardFooter(b *strings.Builder, height int, hint string) {
 	fmt.Fprint(b, hint)
 }
 
-
 func dashboardRowValues(row DashboardRow) []string {
 	var badges []string
-	if row.orphaned {
+	if row.Orphaned {
 		badges = append(badges, "orphaned")
 	}
 	if row.AutoDrain {

@@ -479,7 +479,7 @@ func TestUnparkDashboardRowClearsPark(t *testing.T) {
 	}
 
 	d := &Deps{Tasks: td}
-	row := DashboardRow{SetID: "set-1", repoCommonDir: commonDir, runtimePath: repo}
+	row := DashboardRow{SetRef: SetRef{SetID: "set-1", RepoCommonDir: commonDir, RuntimePath: repo}}
 	if err := UnparkDashboardRow(d, row); err != nil {
 		t.Fatalf("UnparkDashboardRow: %v", err)
 	}
