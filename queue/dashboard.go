@@ -945,7 +945,7 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 		items = append(items, dashboardMenuItem{key: "U", label: "unbind worktree", action: menuActionUnbind})
 	}
 	if !row.Orphaned {
-		items = append(items, dashboardMenuItem{key: "d", label: "auto-drain", action: menuActionAutoDrain})
+		items = append(items, dashboardMenuItem{key: "a", label: "auto-drain", action: menuActionAutoDrain})
 	}
 	items = append(items, dashboardMenuItem{key: "p", label: "preview", action: menuActionPreview})
 	if row.Parked {

@@ -492,16 +492,16 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 		},
 	}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Status: "READY", Worktree: "/repo/main (main)", cursorKey: "pop\x00plain", SetRef: SetRef{SetID: "plain", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}}}})
-	// Auto-drain now lives behind the action menu: open with `a`, toggle with `d`.
+	// Auto-drain now lives behind the action menu: open with `a`, toggle with `a`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	if got.menu == nil {
 		t.Fatal("a did not open the action menu")
 	}
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got = updated.(QueueDashboard)
 	if got.menu != nil {
-		t.Fatal("d did not close the action menu after dispatch")
+		t.Fatal("a did not close the action menu after dispatch")
 	}
 	if !got.snap.Rows[0].AutoDrain {
 		t.Fatalf("toggle did not update badge immediately: %+v", got.snap.Rows[0])
@@ -605,7 +605,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{SetRef: SetRef{SetID: "plain", RuntimePath: "/wt"}})
-	if want := []string{"i", "b", "d", "p", "O", "A"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"i", "b", "a", "p", "O", "A"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 
@@ -626,7 +626,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 	}
 
 	// Auto-drain is offered for non-orphaned rows only.
-	if got := keysFor(DashboardRow{SetRef: SetRef{SetID: "orphan", Orphaned: true}}); contains(got, "d") {
+	if got := keysFor(DashboardRow{SetRef: SetRef{SetID: "orphan", Orphaned: true}}); contains(got, "a") {
 		t.Fatalf("orphaned row should not offer auto-drain: %v", got)
 	}
 }
