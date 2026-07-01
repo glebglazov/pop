@@ -498,6 +498,23 @@ func deleteWorktree(path string, force bool) {
 	// recency sorting or session-name matching. The tmux session (if any)
 	// is left alone; killing it stays an explicit, separate action.
 	removeFromHistory(path)
+	// Also drop its [workbench.preferred] runtime entry (ADR-0078), so
+	// path-keyed preferences don't accumulate as stale after worktrees come
+	// and go.
+	removePreferredWorkbench(path)
+}
+
+// removePreferredWorkbench deletes path's [workbench.preferred] entry in
+// config.runtime.toml, logging (not propagating) failures — like history
+// cleanup, this must never block the picker loop.
+func removePreferredWorkbench(path string) {
+	removePreferredWorkbenchWith(config.DefaultDeps(), path)
+}
+
+func removePreferredWorkbenchWith(d *config.Deps, path string) {
+	if err := config.ClearRuntimePreferredWorkbenchWith(d, path); err != nil {
+		debug.Error("worktree: clear preferred workbench: %v", err)
+	}
 }
 
 // removeFromHistory deletes path from project history, logging (not

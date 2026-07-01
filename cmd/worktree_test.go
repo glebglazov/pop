@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -179,6 +180,64 @@ func TestRemoveFromHistoryWith(t *testing.T) {
 		}
 		if len(saved.Entries) != 2 {
 			t.Errorf("saved %d entries, want 2 untouched", len(saved.Entries))
+		}
+	})
+}
+
+// workbenchRuntimeTestDeps returns config.Deps backed by a real temp dir, so
+// removePreferredWorkbenchWith exercises the real TOML read/write/prune path.
+func workbenchRuntimeTestDeps(t *testing.T) (*config.Deps, string) {
+	t.Helper()
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	d := &config.Deps{FS: &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataDir
+			}
+			return ""
+		},
+		UserHomeDirFunc: func() (string, error) { return filepath.Join(root, "home"), nil },
+		ReadFileFunc:    os.ReadFile,
+		WriteFileFunc:   os.WriteFile,
+		MkdirAllFunc:    os.MkdirAll,
+		RenameFunc:      os.Rename,
+		RemoveAllFunc:   os.RemoveAll,
+		StatFunc:        os.Stat,
+	}}
+	return d, filepath.Join(dataDir, "pop", "config.runtime.toml")
+}
+
+func TestRemovePreferredWorkbenchWith(t *testing.T) {
+	t.Run("removes the deleted worktree's entry", func(t *testing.T) {
+		d, runtimePath := workbenchRuntimeTestDeps(t)
+		if err := config.SetRuntimePreferredWorkbenchWith(d, "/repo/feature", "gs-dev"); err != nil {
+			t.Fatalf("seed set error: %v", err)
+		}
+		if err := config.SetRuntimePreferredWorkbenchWith(d, "/repo/main", "minimal"); err != nil {
+			t.Fatalf("seed set error: %v", err)
+		}
+
+		removePreferredWorkbenchWith(d, "/repo/feature")
+
+		if _, present, err := config.RuntimePreferredWorkbenchWith(d, "/repo/feature"); err != nil || present {
+			t.Fatalf("deleted worktree's entry still present: present=%v err=%v", present, err)
+		}
+		if name, present, err := config.RuntimePreferredWorkbenchWith(d, "/repo/main"); err != nil || !present || name != "minimal" {
+			t.Fatalf("sibling entry lost: name=%q present=%v err=%v", name, present, err)
+		}
+		if _, err := os.Stat(runtimePath); err != nil {
+			t.Fatalf("runtime file should still exist for sibling entry: %v", err)
+		}
+	})
+
+	t.Run("no entry is a no-op with no file churn", func(t *testing.T) {
+		d, runtimePath := workbenchRuntimeTestDeps(t)
+
+		removePreferredWorkbenchWith(d, "/repo/never-set")
+
+		if _, err := os.Stat(runtimePath); !os.IsNotExist(err) {
+			t.Fatalf("runtime file should not be created, stat err = %v", err)
 		}
 	})
 }
