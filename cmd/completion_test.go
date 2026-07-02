@@ -134,6 +134,17 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
 	})
 
+	t.Run("export orders newest-first and drops ids already on the line", func(t *testing.T) {
+		// Diverges from the shared alphabetical enumerator: reverse-identifier
+		// order (svc, mix, done; archived omitted) and no re-offer of a chosen set.
+		out := shellCompNoDesc(t, "tasks", "transfer", "export")
+		assertShellCompOrder(t, out, "svc", "mix", "done")
+
+		out = shellCompNoDescCompleting(t, "tasks", "transfer", "export", "svc", "")
+		assertShellCompContains(t, out, "mix", "done")
+		assertShellCompOmitsExact(t, out, "svc")
+	})
+
 	t.Run("reset task positional defaults to Task set IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "open")
 		assertShellCompContains(t, out, "svc")
@@ -349,6 +360,29 @@ func assertShellCompOmitsExact(t *testing.T, output string, items ...string) {
 			if line == item {
 				t.Fatalf("unexpected %q in completion output:\n%s", item, output)
 			}
+		}
+	}
+}
+
+// assertShellCompOrder asserts the named items appear in the completion body
+// in exactly the given relative order (other items between them are allowed).
+func assertShellCompOrder(t *testing.T, output string, items ...string) {
+	t.Helper()
+	lines := strings.Split(shellCompBody(output), "\n")
+	pos := make([]int, len(items))
+	for i, item := range items {
+		pos[i] = -1
+		for j, line := range lines {
+			if line == item {
+				pos[i] = j
+				break
+			}
+		}
+		if pos[i] < 0 {
+			t.Fatalf("missing %q in completion output:\n%s", item, output)
+		}
+		if i > 0 && pos[i] < pos[i-1] {
+			t.Fatalf("order violation: %q before %q\n%s", item, items[i-1], output)
 		}
 	}
 }

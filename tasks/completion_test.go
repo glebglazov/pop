@@ -178,6 +178,78 @@ func TestCompletionsFilterArchivedTaskSets(t *testing.T) {
 	}
 }
 
+func TestCompleteExportTaskSetIDsOrdersNewestFirst(t *testing.T) {
+	root := t.TempDir()
+	tasksDir := setupCompletionRepo(t, root)
+	writeCompletionTaskSet(t, tasksDir, "2026-06-01-alpha")
+	writeCompletionTaskSet(t, tasksDir, "2026-06-15-beta")
+	writeCompletionTaskSet(t, tasksDir, "2026-07-01-gamma")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	ids, err := CompleteExportTaskSetIDs(CompletionInput{}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ids, ",") != "2026-07-01-gamma,2026-06-15-beta,2026-06-01-alpha" {
+		t.Fatalf("export ids = %#v (want newest-first)", ids)
+	}
+}
+
+func TestCompleteExportTaskSetIDsExcludesAlreadyChosen(t *testing.T) {
+	root := t.TempDir()
+	tasksDir := setupCompletionRepo(t, root)
+	writeCompletionTaskSet(t, tasksDir, "2026-06-01-alpha")
+	writeCompletionTaskSet(t, tasksDir, "2026-06-15-beta")
+	writeCompletionTaskSet(t, tasksDir, "2026-07-01-gamma")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	ids, err := CompleteExportTaskSetIDs(CompletionInput{}, []string{"2026-07-01-gamma", "2026-06-01-alpha"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ids, ",") != "2026-06-15-beta" {
+		t.Fatalf("export ids = %#v (want only the unchosen set)", ids)
+	}
+}
+
+func TestCompleteExportTaskSetIDsOmitsArchived(t *testing.T) {
+	root := t.TempDir()
+	tasksDir := setupCompletionRepo(t, root)
+	writeCompletionTaskSet(t, tasksDir, "2026-06-01-active")
+	writeCompletionTaskSet(t, tasksDir, "2026-07-01-archived")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ArchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{}, "2026-07-01-archived"); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := CompleteExportTaskSetIDs(CompletionInput{}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ids, ",") != "2026-06-01-active" {
+		t.Fatalf("export ids = %#v (want archived omitted)", ids)
+	}
+}
+
 func TestCompleteProjectNamesUsesPickerVisibleNames(t *testing.T) {
 	root := t.TempDir()
 	projectDir := filepath.Join(root, "svc")

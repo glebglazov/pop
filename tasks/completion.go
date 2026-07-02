@@ -61,6 +61,36 @@ func CompleteTaskSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (
 	return completeTaskSetIDsWithArchiveMode(d, pd, loadConfig, input, toComplete, completionActiveOnly)
 }
 
+// CompleteExportTaskSetIDs returns on-disk Task-set identifiers for
+// `transfer export` completion. Alone among completion surfaces it orders
+// newest-first (reverse identifier sort) and drops ids already on the command
+// line, matching the recency-driven transfer workflow. Archived sets stay
+// omitted like every surface except unarchive.
+func CompleteExportTaskSetIDs(input CompletionInput, chosen []string, toComplete string) ([]string, error) {
+	return CompleteExportTaskSetIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input, chosen, toComplete)
+}
+
+// CompleteExportTaskSetIDsWith returns export completion candidates using injected dependencies.
+func CompleteExportTaskSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input CompletionInput, chosen []string, toComplete string) ([]string, error) {
+	ids, err := completeTaskSetIDsWithArchiveMode(d, pd, loadConfig, input, toComplete, completionActiveOnly)
+	if err != nil {
+		return nil, err
+	}
+	alreadyChosen := make(map[string]bool, len(chosen))
+	for _, id := range chosen {
+		alreadyChosen[id] = true
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if alreadyChosen[id] {
+			continue
+		}
+		out = append(out, id)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(out)))
+	return out, nil
+}
+
 // CompleteArchivedTaskSetIDs returns archived Task-set identifiers for shell completion.
 func CompleteArchivedTaskSetIDs(input CompletionInput, toComplete string) ([]string, error) {
 	return CompleteArchivedTaskSetIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input, toComplete)

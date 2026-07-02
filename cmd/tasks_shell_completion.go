@@ -63,15 +63,17 @@ func completeTaskShowPathArgs(cmd *cobra.Command, args []string, toComplete stri
 	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
+// completeTaskExportArgs diverges from the shared alphabetical enumerator:
+// export is variadic (MinimumNArgs), so completion keeps offering sets for
+// every positional, orders them newest-first, and drops ids already typed on
+// the command line so tabbing later args never re-offers a chosen set.
 func completeTaskExportArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if len(args) > 0 {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	ids, err := tasks.CompleteTaskSetIDsWith(
+	ids, err := tasks.CompleteExportTaskSetIDsWith(
 		taskCompletionDeps(),
 		taskCompletionProjectDeps(),
 		taskCompletionConfigLoad,
 		completionInputFromCmd(cmd),
+		args,
 		toComplete,
 	)
 	if err != nil {
