@@ -215,6 +215,41 @@ func TestDiffRunViewOutcomeTransition(t *testing.T) {
 	}
 }
 
+// TestSeedSpawnedRunningSuppressesDuplicateSpawnLine reproduces the double
+// "spawned drain" artifact: a just-spawned drain has not yet acquired its
+// runtime lock, so the post-spawn scan still lists its set as Ready (Queued),
+// not Running. Without seeding, the next tick's diff — where the drain finally
+// holds the lock and appears in Running — re-announces it as freshly spawned.
+// seedSpawnedRunning must fold the spawned set into the swallow snapshot so the
+// diff sees it already running and stays silent.
+func TestSeedSpawnedRunningSuppressesDuplicateSpawnLine(t *testing.T) {
+	spawned := []PickedUpSet{{Project: "pop", SetID: "set-1"}}
+	// Post-spawn scan: lock not yet held, set still shows as Ready.
+	postSpawn := RunView{Queued: []IdleProject{{Project: "pop", ReadySet: "set-1", Waiting: "ready"}}}
+	// Next tick: drain now holds the lock and shows as Running.
+	nextTick := RunView{Running: []PickedUpSet{{Project: "pop", SetID: "set-1", PID: 42}}}
+
+	// Control: without seeding, the diff re-announces the spawn.
+	if lines := DiffRunView(&postSpawn, nextTick); !containsSpawnLine(lines, "set-1") {
+		t.Fatalf("unseeded diff should re-announce spawn (the artifact), got %v", lines)
+	}
+
+	// Fixed: seed the spawned set into the swallow snapshot.
+	seeded := seedSpawnedRunning(postSpawn, spawned)
+	if lines := DiffRunView(&seeded, nextTick); containsSpawnLine(lines, "set-1") {
+		t.Fatalf("seeded diff must not re-announce spawn, got %v", lines)
+	}
+}
+
+func containsSpawnLine(lines []string, setID string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, "spawned drain for "+setID) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestBuildRunViewUnverifiedBucket checks that a project with an UNVERIFIED set is
 // placed in view.Unverified rather than view.Blocked or view.IdleCount.
 func TestBuildRunViewUnverifiedBucket(t *testing.T) {

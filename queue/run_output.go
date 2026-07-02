@@ -518,6 +518,25 @@ func formatBlockedLine(b BlockedItem) string {
 	}
 }
 
+// seedSpawnedRunning augments view.Running with any spawned set not already
+// present, keyed by Project+SetID. It bridges the gap between issuing a spawn
+// and the drain acquiring its runtime lock: the post-spawn scan cannot yet see
+// the set as Running, so without this the next tick's diff would re-report the
+// spawn a second time.
+func seedSpawnedRunning(view RunView, spawned []PickedUpSet) RunView {
+	if len(spawned) == 0 {
+		return view
+	}
+	present := runningIndex(view.Running)
+	for _, s := range spawned {
+		if _, ok := present[s.Project+"\x00"+s.SetID]; ok {
+			continue
+		}
+		view.Running = append(view.Running, s)
+	}
+	return view
+}
+
 // DiffRunView returns delta lines for scheduling-relevant changes between views.
 func DiffRunView(prev *RunView, curr RunView) []string {
 	if prev == nil {

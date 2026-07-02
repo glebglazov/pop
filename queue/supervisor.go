@@ -92,6 +92,7 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 	}
 
 	inPlaceFallbackSpawned := map[string]bool{}
+	var spawned []PickedUpSet
 	for _, dec := range decisions {
 		switch {
 		case dec.Err != nil:
@@ -114,11 +115,17 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 				fmt.Fprintf(out, "queue: %s: record drain pane %s: %v\n", dec.Project, dec.TaskSetID, err)
 			}
 			fmt.Fprintf(out, "queue: %s: spawned drain for %s\n", dec.Project, dec.TaskSetID)
+			spawned = append(spawned, PickedUpSet{Project: dec.Project, SetID: dec.TaskSetID, WorktreeReady: dec.WorktreeReady})
 		}
 	}
 
 	if snap, err := BuildStatus(d, cfg); err == nil {
-		runOut.emitPostSpawnView(out, BuildRunView(snap, time.Now()))
+		// A just-spawned drain has not yet acquired its runtime lock, so the
+		// post-spawn scan still lists its set as Ready, not Running. Seed the
+		// spawned sets into the swallow snapshot so next tick's view diff does
+		// not re-announce them as freshly "spawned drain" (they were already
+		// reported imperatively above).
+		runOut.emitPostSpawnView(out, seedSpawnedRunning(BuildRunView(snap, time.Now()), spawned))
 	}
 }
 
