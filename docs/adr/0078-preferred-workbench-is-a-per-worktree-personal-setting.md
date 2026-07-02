@@ -4,6 +4,8 @@ status: accepted
 
 # Preferred workbench is a per-worktree personal setting that auto-applies
 
+> **Amended by [ADR-0083](0083-repo-config-is-one-shared-schema-for-pop-toml-and-repo-blocks.md):** the layer *ordering* below (a worktree's runtime `preferred` entry beats the repo default) is reversed by the ownership/modality-first precedence law — hand-authored config now beats runtime at any scope, so a repo `.pop.toml` / `[repo]` default beats a worktree runtime entry, and `preferred_workbench` is now also legal in committed `.pop.toml`. The feature itself (two homes, three-valued per worktree, stale-name skip, dynamic trunk inheritance) stands; only the precedence ordering changed.
+
 ## Context
 
 [ADR-0075](0075-workbench-apply-reconciles-by-pane-identity.md) added the opt-in
