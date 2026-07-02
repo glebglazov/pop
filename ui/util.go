@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
@@ -33,25 +32,14 @@ var (
 	HintStyle = hintStyle
 )
 
-// newTextInput creates a consistently configured text input for all pickers.
-func newTextInput() textinput.Model {
-	ti := textinput.New()
-	ti.Prompt = "> "
-	styles := ti.Styles()
-	styles.Cursor.Blink = false
-	ti.SetStyles(styles)
-	ti.Focus()
-	return ti
-}
-
 // WriteInputBox writes a bordered input box to b; exported for cross-package use.
-// content is rendered inside; use textinput.View() or a static string like " Help".
+// content is rendered inside; use TextField.View() or a static string like " Help".
 func WriteInputBox(b *strings.Builder, width int, content string) {
 	writeInputBox(b, width, content)
 }
 
 // writeInputBox writes a bordered input box to b. content is rendered inside;
-// use inputView from textinput.View() or a static string like " Help".
+// use TextField.View() or a static string like " Help".
 func writeInputBox(b *strings.Builder, width int, content string) {
 	boxWidth := width
 	if boxWidth < 20 {

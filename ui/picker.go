@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/debug"
@@ -65,7 +64,7 @@ const (
 type Picker struct {
 	items    []Item
 	filtered []Item
-	input    textinput.Model
+	input    TextField
 	list     *List[Item]
 	cursor   int // synced from list; kept for test access
 	scroll   int // synced from list; kept for test access
@@ -257,12 +256,10 @@ func WithHeader(text string) PickerOption {
 
 // NewPicker creates a new picker with the given items
 func NewPicker(items []Item, opts ...PickerOption) *Picker {
-	ti := newTextInput()
-
 	p := &Picker{
 		items:            items,
 		filtered:         items,
-		input:            ti,
+		input:            NewTextField(),
 		height:           10,
 		cursorMemory:     make(map[string]string),
 		initialCursorIdx: -1,
@@ -505,13 +502,12 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Update text input
-	var cmd tea.Cmd
-	p.input, cmd = p.input.Update(msg)
+	p.input.Update(msg)
 
 	// Filter items
 	p.filter()
 
-	return p, cmd
+	return p, nil
 }
 
 // fzfMatch holds an item with its fuzzy match score

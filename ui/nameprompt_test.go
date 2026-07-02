@@ -19,11 +19,11 @@ func typeRune(r rune) tea.KeyPressMsg {
 func TestNamePromptStartsEmptyAndDefaultsOnSubmit(t *testing.T) {
 	m := newNamePrompt("Name it", "feature-x", "master")
 	// The field starts empty (typed name = the NEW branch), not pre-filled.
-	if got := string(m.value); got != "" {
+	if got := m.field.Value(); got != "" {
 		t.Errorf("initial buffer = %q, want empty", got)
 	}
-	if m.cursor != 0 {
-		t.Errorf("cursor = %d, want 0", m.cursor)
+	if m.field.cursor != 0 {
+		t.Errorf("cursor = %d, want 0", m.field.cursor)
 	}
 	// Submitting the empty field falls back to the branch-derived default.
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -40,11 +40,11 @@ func TestNamePromptPrintableRunes(t *testing.T) {
 	for _, r := range "abc" {
 		m = m.send(typeRune(r))
 	}
-	if got := string(m.value); got != "abc" {
+	if got := m.field.Value(); got != "abc" {
 		t.Errorf("buffer = %q, want %q", got, "abc")
 	}
-	if m.cursor != 3 {
-		t.Errorf("cursor = %d, want 3", m.cursor)
+	if m.field.cursor != 3 {
+		t.Errorf("cursor = %d, want 3", m.field.cursor)
 	}
 }
 
@@ -54,17 +54,17 @@ func TestNamePromptBackspace(t *testing.T) {
 		m = m.send(typeRune(r))
 	}
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if got := string(m.value); got != "ab" {
+	if got := m.field.Value(); got != "ab" {
 		t.Errorf("after backspace buffer = %q, want %q", got, "ab")
 	}
-	if m.cursor != 2 {
-		t.Errorf("cursor = %d, want 2", m.cursor)
+	if m.field.cursor != 2 {
+		t.Errorf("cursor = %d, want 2", m.field.cursor)
 	}
 	// Backspace at start of an empty buffer is a no-op.
 	empty := newNamePrompt("h", "", "")
 	empty = empty.send(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if len(empty.value) != 0 || empty.cursor != 0 {
-		t.Errorf("backspace on empty buffer changed state: value=%q cursor=%d", string(empty.value), empty.cursor)
+	if len(empty.field.value) != 0 || empty.field.cursor != 0 {
+		t.Errorf("backspace on empty buffer changed state: value=%q cursor=%d", empty.field.Value(), empty.field.cursor)
 	}
 }
 
@@ -75,29 +75,29 @@ func TestNamePromptCursorMovementAndInsert(t *testing.T) {
 	}
 	// Move left once: cursor between a and c.
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyLeft})
-	if m.cursor != 1 {
-		t.Fatalf("cursor after left = %d, want 1", m.cursor)
+	if m.field.cursor != 1 {
+		t.Fatalf("cursor after left = %d, want 1", m.field.cursor)
 	}
 	// Insert 'b' in the middle.
 	m = m.send(typeRune('b'))
-	if got := string(m.value); got != "abc" {
+	if got := m.field.Value(); got != "abc" {
 		t.Errorf("mid-insert buffer = %q, want %q", got, "abc")
 	}
-	if m.cursor != 2 {
-		t.Errorf("cursor = %d, want 2", m.cursor)
+	if m.field.cursor != 2 {
+		t.Errorf("cursor = %d, want 2", m.field.cursor)
 	}
 	// Right past end is clamped.
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyRight})
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyRight})
-	if m.cursor != 3 {
-		t.Errorf("cursor after over-right = %d, want 3", m.cursor)
+	if m.field.cursor != 3 {
+		t.Errorf("cursor after over-right = %d, want 3", m.field.cursor)
 	}
 	// Left clamps at 0.
 	for i := 0; i < 5; i++ {
 		m = m.send(tea.KeyPressMsg{Code: tea.KeyLeft})
 	}
-	if m.cursor != 0 {
-		t.Errorf("cursor after over-left = %d, want 0", m.cursor)
+	if m.field.cursor != 0 {
+		t.Errorf("cursor after over-left = %d, want 0", m.field.cursor)
 	}
 }
 
@@ -107,12 +107,12 @@ func TestNamePromptHomeEnd(t *testing.T) {
 		m = m.send(typeRune(r))
 	}
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyHome})
-	if m.cursor != 0 {
-		t.Errorf("cursor after home = %d, want 0", m.cursor)
+	if m.field.cursor != 0 {
+		t.Errorf("cursor after home = %d, want 0", m.field.cursor)
 	}
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyEnd})
-	if m.cursor != 3 {
-		t.Errorf("cursor after end = %d, want 3", m.cursor)
+	if m.field.cursor != 3 {
+		t.Errorf("cursor after end = %d, want 3", m.field.cursor)
 	}
 }
 
@@ -120,8 +120,8 @@ func TestNamePromptEmptySubmitUsesDefault(t *testing.T) {
 	m := newNamePrompt("h", "feature-x", "")
 	// Clear the buffer, then submit.
 	m = m.send(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	if len(m.value) != 0 {
-		t.Fatalf("ctrl+u should clear buffer, got %q", string(m.value))
+	if len(m.field.value) != 0 {
+		t.Fatalf("ctrl+u should clear buffer, got %q", m.field.Value())
 	}
 	m = m.send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.submitted {

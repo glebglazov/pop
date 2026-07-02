@@ -205,8 +205,8 @@ func TestConfigurePicker_DepthPhase_EscGoesBackToPath(t *testing.T) {
 		t.Errorf("expected depth preserved at 2, got %d", cp.depth)
 	}
 	// Cursor should be restored to end of "myp" (position 3)
-	if cp.input.Position() != 3 {
-		t.Errorf("expected cursor at position 3, got %d", cp.input.Position())
+	if cp.input.Cursor() != 3 {
+		t.Errorf("expected cursor at position 3, got %d", cp.input.Cursor())
 	}
 }
 
@@ -226,7 +226,7 @@ func TestConfigurePicker_CursorMemoryAcrossPhases(t *testing.T) {
 		specialKeyMsg(tea.KeyLeft),
 	)
 
-	pathCursorPos := cp.input.Position() // should be 3
+	pathCursorPos := cp.input.Cursor() // should be 3
 	if pathCursorPos != 3 {
 		t.Fatalf("expected path cursor at 3, got %d", pathCursorPos)
 	}
@@ -241,8 +241,8 @@ func TestConfigurePicker_CursorMemoryAcrossPhases(t *testing.T) {
 	// Esc back to path phase — cursor should be at saved position 3
 	cp = sendKeys(cp, specialKeyMsg(tea.KeyEscape))
 
-	if cp.input.Position() != 3 {
-		t.Errorf("expected cursor restored to 3, got %d", cp.input.Position())
+	if cp.input.Cursor() != 3 {
+		t.Errorf("expected cursor restored to 3, got %d", cp.input.Cursor())
 	}
 
 	// Enter again to depth, then move depth cursor
@@ -252,21 +252,21 @@ func TestConfigurePicker_CursorMemoryAcrossPhases(t *testing.T) {
 		specialKeyMsg(tea.KeyRight), // move to end
 	)
 
-	depthCursorPos := cp.input.Position()
+	depthCursorPos := cp.input.Cursor()
 
 	// Esc back
 	cp = sendKeys(cp, specialKeyMsg(tea.KeyEscape))
 
 	// Path cursor should still be at 3
-	if cp.input.Position() != 3 {
-		t.Errorf("expected path cursor at 3, got %d", cp.input.Position())
+	if cp.input.Cursor() != 3 {
+		t.Errorf("expected path cursor at 3, got %d", cp.input.Cursor())
 	}
 
 	// Enter again — depth cursor should be restored
 	cp = sendKeys(cp, specialKeyMsg(tea.KeyEnter))
 
-	if cp.input.Position() != depthCursorPos {
-		t.Errorf("expected depth cursor at %d, got %d", depthCursorPos, cp.input.Position())
+	if cp.input.Cursor() != depthCursorPos {
+		t.Errorf("expected depth cursor at %d, got %d", depthCursorPos, cp.input.Cursor())
 	}
 }
 

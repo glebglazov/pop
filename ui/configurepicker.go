@@ -9,7 +9,6 @@ import (
 	"unicode"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -31,7 +30,7 @@ const (
 // ConfigurePicker is a two-phase TUI for entering a project path pattern and display depth
 type ConfigurePicker struct {
 	phase         configurePhase
-	input         textinput.Model
+	input         TextField
 	path          string   // confirmed path text (preserved across transitions)
 	depth         int      // current depth (preserved across transitions)
 	expandedPaths []string // raw absolute paths from expandFn
@@ -54,11 +53,9 @@ type ConfigurePicker struct {
 
 // NewConfigurePicker creates a new configure picker with the given expand function
 func NewConfigurePicker(expandFn func(string) []string) *ConfigurePicker {
-	ti := newTextInput()
-
 	return &ConfigurePicker{
 		phase:    phasePath,
-		input:    ti,
+		input:    NewTextField(),
 		depth:    1,
 		expandFn: expandFn,
 		tabIndex: -1,
@@ -109,7 +106,7 @@ func (cp *ConfigurePicker) updatePathPhase(msg tea.KeyPressMsg) (tea.Model, tea.
 			return cp, tea.Quit
 		}
 		// Save path cursor, transition to depth phase
-		cp.pathCursor = cp.input.Position()
+		cp.pathCursor = cp.input.Cursor()
 		cp.phase = phaseDepth
 		depthStr := strconv.Itoa(cp.depth)
 		cp.input.SetValue(depthStr)
@@ -126,13 +123,12 @@ func (cp *ConfigurePicker) updatePathPhase(msg tea.KeyPressMsg) (tea.Model, tea.
 		cp.clearTabState()
 
 		// Update text input
-		var cmd tea.Cmd
-		cp.input, cmd = cp.input.Update(msg)
+		cp.input.Update(msg)
 
 		// Update preview
 		cp.updatePreview()
 
-		return cp, cmd
+		return cp, nil
 	}
 }
 
@@ -144,7 +140,7 @@ func (cp *ConfigurePicker) updateDepthPhase(msg tea.KeyPressMsg) (tea.Model, tea
 
 	case key.Matches(msg, configureKeys.Escape):
 		// Save depth cursor, go back to path phase
-		cp.depthCursor = cp.input.Position()
+		cp.depthCursor = cp.input.Cursor()
 		cp.phase = phasePath
 		cp.input.SetValue(cp.path)
 		cp.input.SetCursor(cp.pathCursor)
@@ -183,8 +179,7 @@ func (cp *ConfigurePicker) updateDepthPhase(msg tea.KeyPressMsg) (tea.Model, tea
 			}
 		}
 
-		var cmd tea.Cmd
-		cp.input, cmd = cp.input.Update(msg)
+		cp.input.Update(msg)
 
 		// Parse and update depth from input
 		if d, err := strconv.Atoi(cp.input.Value()); err == nil && d >= 1 {
@@ -192,7 +187,7 @@ func (cp *ConfigurePicker) updateDepthPhase(msg tea.KeyPressMsg) (tea.Model, tea
 			cp.updatePreviewForDepth()
 		}
 
-		return cp, cmd
+		return cp, nil
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/config"
@@ -1173,7 +1172,7 @@ type QueueDashboard struct {
 	taskMenu  *taskMenu
 
 	filterMode  bool
-	filterInput textinput.Model
+	filterInput ui.TextField
 	pendingG    bool
 	statusMsg   string
 }
@@ -1289,10 +1288,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "/":
 			m.filterMode = true
-			ti := textinput.New()
-			ti.Prompt = "> "
-			ti.Focus()
-			m.filterInput = ti
+			m.filterInput = ui.NewTextField()
 			return m, nil
 		case "j", "down":
 			m.list.MoveDown()
@@ -1793,7 +1789,7 @@ func (m QueueDashboard) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc":
 		m.filterMode = false
-		m.filterInput = textinput.Model{}
+		m.filterInput = ui.TextField{}
 		m.snap.Rows = m.allRows
 		m.syncListRows()
 		return m, nil
@@ -1804,11 +1800,10 @@ func (m QueueDashboard) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.list.MoveUp()
 		return m, nil
 	default:
-		var cmd tea.Cmd
-		m.filterInput, cmd = m.filterInput.Update(msg)
+		m.filterInput.Update(msg)
 		m.snap.Rows = filterDashboardRows(m.allRows, m.filterInput.Value())
 		m.syncListRows()
-		return m, cmd
+		return m, nil
 	}
 }
 
