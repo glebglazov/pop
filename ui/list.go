@@ -60,6 +60,11 @@ func (l *List[T]) Len() int {
 	return len(l.items)
 }
 
+// Items returns the current item slice. Callers must not mutate it.
+func (l *List[T]) Items() []T {
+	return l.items
+}
+
 // Scroll returns the scroll offset (index of the first visible item).
 func (l *List[T]) Scroll() int {
 	return l.scroll

@@ -655,15 +655,15 @@ func TestDashboardActionMenuVerbDispatch(t *testing.T) {
 	updated, _ = newModel().Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got = updated.(QueueDashboard)
 	bindIdx := -1
-	for i, item := range got.menu.items {
+	for i, item := range got.menu.list.Items() {
 		if item.key == "b" {
 			bindIdx = i
 		}
 	}
 	if bindIdx < 0 {
-		t.Fatalf("bind verb absent from menu: %+v", got.menu.items)
+		t.Fatalf("bind verb absent from menu: %+v", got.menu.list.Items())
 	}
-	for got.menu.cursor != bindIdx {
+	for got.menu.list.Cursor() != bindIdx {
 		updated, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 		got = updated.(QueueDashboard)
 	}
@@ -698,7 +698,7 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 		t.Fatal("a did not open the action menu")
 	}
 	var keys []string
-	for _, item := range got.menu.items {
+	for _, item := range got.menu.list.Items() {
 		keys = append(keys, item.key)
 	}
 	if !contains(keys, "A") {
@@ -1467,7 +1467,7 @@ func menuHasKey(menu *dashboardMenu, key string) bool {
 	if menu == nil {
 		return false
 	}
-	for _, item := range menu.items {
+	for _, item := range menu.list.Items() {
 		if item.key == key {
 			return true
 		}
@@ -2729,8 +2729,9 @@ func taskMenuItemKeys(menu *taskMenu) []string {
 	if menu == nil {
 		return nil
 	}
-	keys := make([]string, len(menu.items))
-	for i, item := range menu.items {
+	items := menu.list.Items()
+	keys := make([]string, len(items))
+	for i, item := range items {
 		keys[i] = item.key
 	}
 	return keys
@@ -2910,8 +2911,8 @@ func TestDetailTaskMenuDispatchViaEnter(t *testing.T) {
 	// Menu order for a failed task: complete (C), open (O). Highlight O via j.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got := updated.(QueueDashboard)
-	if got.taskMenu.cursor != 1 {
-		t.Fatalf("after j cursor = %d, want 1", got.taskMenu.cursor)
+	if got.taskMenu.list.Cursor() != 1 {
+		t.Fatalf("after j cursor = %d, want 1", got.taskMenu.list.Cursor())
 	}
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got = updated.(QueueDashboard)

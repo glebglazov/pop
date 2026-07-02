@@ -967,11 +967,10 @@ type dashboardMenuItem struct {
 
 // dashboardMenu is the layered action overlay opened with `a` over the focused
 // row. It carries the snapshot of the row it was opened on and the verbs
-// applicable to that row, with a highlight cursor for j/k + Enter selection.
+// applicable to that row on a ui.List whose cursor drives j/k + Enter selection.
 type dashboardMenu struct {
-	row    DashboardRow
-	items  []dashboardMenuItem
-	cursor int
+	row  DashboardRow
+	list *ui.List[dashboardMenuItem]
 }
 
 // dashboardMenuItems returns the verbs applicable to row, in a stable order.
@@ -999,6 +998,15 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	return items
 }
 
+// newDashboardMenu opens the action overlay on row, wrapping its verbs in a
+// ui.List with j/k wrap-around navigation.
+func newDashboardMenu(row DashboardRow) *dashboardMenu {
+	return &dashboardMenu{
+		row:  row,
+		list: ui.NewList(dashboardMenuItems(row), ui.Opts[dashboardMenuItem]{Wrap: true}),
+	}
+}
+
 // taskMenuItem is one verb in the task-level action menu: the flat shortcut
 // letter it keeps (also the verb code passed to applyDetailOverride) and the
 // label shown beside it.
@@ -1010,12 +1018,11 @@ type taskMenuItem struct {
 // taskMenu is the action overlay opened with `a` over a single task — in the
 // task-set detail view (over the cursored task) or the task text peek (over the
 // previewed task). It carries the task snapshot and the verbs applicable to that
-// task's status, with a highlight cursor for j/k + Enter selection. inPeek marks
-// which view it was opened from so the renderer can place it correctly.
+// task's status on a ui.List whose cursor drives j/k + Enter selection. inPeek
+// marks which view it was opened from so the renderer can place it correctly.
 type taskMenu struct {
 	task   tasks.Task
-	items  []taskMenuItem
-	cursor int
+	list   *ui.List[taskMenuItem]
 	inPeek bool
 }
 
@@ -1035,6 +1042,16 @@ func taskMenuItems(task tasks.Task) []taskMenuItem {
 		items = append(items, taskMenuItem{key: "K", label: "skip"})
 	}
 	return items
+}
+
+// newTaskMenu wraps pre-filtered task verbs in a ui.List with j/k wrap-around
+// navigation. inPeek records which detail view opened it for placement.
+func newTaskMenu(task tasks.Task, items []taskMenuItem, inPeek bool) *taskMenu {
+	return &taskMenu{
+		task:   task,
+		list:   ui.NewList(items, ui.Opts[taskMenuItem]{Wrap: true}),
+		inPeek: inPeek,
+	}
 }
 
 // detailView is the full-screen task-set detail that replaces the table. Its
@@ -1288,7 +1305,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			m.menu = &dashboardMenu{row: row, items: dashboardMenuItems(row)}
+			m.menu = newDashboardMenu(row)
 			m.err = nil
 			m.statusMsg = ""
 			return m, nil
@@ -1504,15 +1521,15 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.menu = nil
 		return m, nil
 	case "j", "down":
-		m.moveMenuCursor(1)
+		m.menu.list.MoveDown()
 		return m, nil
 	case "k", "up":
-		m.moveMenuCursor(-1)
+		m.menu.list.MoveUp()
 		return m, nil
 	case "enter":
-		return m.invokeMenuItem(m.menu.cursor)
+		return m.invokeMenuItem(m.menu.list.Cursor())
 	}
-	for i, item := range m.menu.items {
+	for i, item := range m.menu.list.Items() {
 		if msg.String() == item.key {
 			return m.invokeMenuItem(i)
 		}
@@ -1520,30 +1537,17 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *QueueDashboard) moveMenuCursor(delta int) {
-	if m.menu == nil {
-		return
-	}
-	n := len(m.menu.items)
-	if n == 0 {
-		return
-	}
-	m.menu.cursor += delta
-	if m.menu.cursor < 0 {
-		m.menu.cursor = n - 1
-	}
-	if m.menu.cursor >= n {
-		m.menu.cursor = 0
-	}
-}
-
 // invokeMenuItem closes the menu and dispatches the verb at idx against the row
 // the menu was opened on.
 func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
-	if m.menu == nil || idx < 0 || idx >= len(m.menu.items) {
+	if m.menu == nil {
 		return m, nil
 	}
-	item := m.menu.items[idx]
+	items := m.menu.list.Items()
+	if idx < 0 || idx >= len(items) {
+		return m, nil
+	}
+	item := items[idx]
 	row := m.menu.row
 	m.menu = nil
 	return m.dispatchMenuAction(item.action, row)
@@ -1647,7 +1651,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(items) == 0 {
 				return m, nil
 			}
-			m.taskMenu = &taskMenu{task: task, items: items, inPeek: true}
+			m.taskMenu = newTaskMenu(task, items, true)
 		}
 		return m, nil
 	}
@@ -1704,7 +1708,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.detail.statusMsg = ""
-		m.taskMenu = &taskMenu{task: task, items: items}
+		m.taskMenu = newTaskMenu(task, items, false)
 		return m, nil
 	}
 	return m, nil
@@ -1722,15 +1726,15 @@ func (m QueueDashboard) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.taskMenu = nil
 		return m, nil
 	case "j", "down":
-		m.moveTaskMenuCursor(1)
+		m.taskMenu.list.MoveDown()
 		return m, nil
 	case "k", "up":
-		m.moveTaskMenuCursor(-1)
+		m.taskMenu.list.MoveUp()
 		return m, nil
 	case "enter":
-		return m.invokeTaskMenuItem(m.taskMenu.cursor)
+		return m.invokeTaskMenuItem(m.taskMenu.list.Cursor())
 	}
-	for i, item := range m.taskMenu.items {
+	for i, item := range m.taskMenu.list.Items() {
 		if msg.String() == item.key {
 			return m.invokeTaskMenuItem(i)
 		}
@@ -1738,35 +1742,22 @@ func (m QueueDashboard) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *QueueDashboard) moveTaskMenuCursor(delta int) {
-	if m.taskMenu == nil {
-		return
-	}
-	n := len(m.taskMenu.items)
-	if n == 0 {
-		return
-	}
-	m.taskMenu.cursor += delta
-	if m.taskMenu.cursor < 0 {
-		m.taskMenu.cursor = n - 1
-	}
-	if m.taskMenu.cursor >= n {
-		m.taskMenu.cursor = 0
-	}
-}
-
 // invokeTaskMenuItem closes the menu and dispatches the verb at idx against the
 // task the menu was opened on. The items are pre-filtered to valid transitions
 // (taskMenuItems), so the verb applies without a separate confirmation.
 func (m QueueDashboard) invokeTaskMenuItem(idx int) (tea.Model, tea.Cmd) {
-	if m.taskMenu == nil || idx < 0 || idx >= len(m.taskMenu.items) {
+	if m.taskMenu == nil {
+		return m, nil
+	}
+	items := m.taskMenu.list.Items()
+	if idx < 0 || idx >= len(items) {
 		return m, nil
 	}
 	if m.detail == nil {
 		m.taskMenu = nil
 		return m, nil
 	}
-	item := m.taskMenu.items[idx]
+	item := items[idx]
 	task := m.taskMenu.task
 	m.taskMenu = nil
 	m.detail.statusMsg = ""
@@ -2620,9 +2611,10 @@ func taskMenuLines(menu *taskMenu, width int) []string {
 		return nil
 	}
 	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
-	for i, item := range menu.items {
+	cursor := menu.list.Cursor()
+	for i, item := range menu.list.Items() {
 		marker := "  "
-		if i == menu.cursor {
+		if i == cursor {
 			marker = ui.IndicatorStyle.Render("█") + " "
 		}
 		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
@@ -2880,9 +2872,10 @@ func dashboardMenuLines(menu *dashboardMenu, width int) []string {
 		return nil
 	}
 	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
-	for i, item := range menu.items {
+	cursor := menu.list.Cursor()
+	for i, item := range menu.list.Items() {
 		marker := "  "
-		if i == menu.cursor {
+		if i == cursor {
 			marker = ui.IndicatorStyle.Render("█") + " "
 		}
 		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
