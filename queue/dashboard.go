@@ -994,19 +994,56 @@ func taskMenuItems(task tasks.Task) []taskMenuItem {
 	return items
 }
 
-// detailView is the full-screen task-set detail that replaces the table. The
-// cursor is pinned by task ID so it survives manifest refreshes.
+// detailView is the full-screen task-set detail that replaces the table. Its
+// task list is a ui.List keyed by task ID, so the cursor survives a manifest
+// refresh — ReplaceItems re-anchors it by key (ADR-0079).
 type detailView struct {
 	row      DashboardRow
 	manifest *tasks.Manifest
 	taskRow  *tasks.Row
-	cursorID string
+	list     *ui.List[tasks.Task]
+	cols     *detailColumns
 	loading  bool
 	err      error
 	peek     *taskTextPeek
 	// statusMsg is a transient one-line message shown above the hint bar.
 	// Set to a hint on invalid transition; set to confirmation on success.
 	statusMsg string
+}
+
+// detailColumns holds the detail task list's ID-column width, precomputed over the
+// manifest tasks (the status/type/title columns are fixed). The List's Cell closure
+// closes over a pointer to it so a manifest refresh updates the width in place,
+// matching the house pattern (dashboardColumns / pickerCell).
+type detailColumns struct {
+	idW int
+}
+
+// Detail task-table column widths. Status, type, and title are fixed; the ID
+// column grows to the widest task ID (floored at the "ID" header).
+const (
+	detailStatusW = 10
+	detailTypeW   = 4
+	detailTitleW  = 40
+)
+
+// detailTableChromeLines is the number of body lines above the detail List rows:
+// the blank line under the header, the column header, and the separator.
+const detailTableChromeLines = 3
+
+// newDetailView builds a loading detail view for row with an empty task List keyed
+// by task ID. The manifest arrives via syncManifest once loaded.
+func newDetailView(row DashboardRow) *detailView {
+	cols := &detailColumns{idW: len("ID")}
+	d := &detailView{row: row, loading: true, cols: cols}
+	d.list = ui.NewList([]tasks.Task{}, ui.Opts[tasks.Task]{
+		Key:    func(t tasks.Task) string { return t.ID },
+		Anchor: ui.AnchorTop,
+		Cell: func(t tasks.Task, _ ui.RowState) string {
+			return detailTaskLine(t, cols.idW)
+		},
+	})
+	return d
 }
 
 type taskTextPeek struct {
@@ -1031,49 +1068,21 @@ func (d *detailView) taskByID(id string) (tasks.Task, bool) {
 	return tasks.Task{}, false
 }
 
-// cursorIndex returns the index of the cursor task in the manifest, or 0.
-func (d *detailView) cursorIndex() int {
-	if d.manifest == nil {
-		return 0
-	}
-	for i, t := range d.manifest.Tasks {
-		if t.ID == d.cursorID {
-			return i
-		}
-	}
-	return 0
-}
-
-// moveCursor moves the cursor by delta, clamped to valid task indices.
-func (d *detailView) moveCursor(delta int) {
-	if d.manifest == nil || len(d.manifest.Tasks) == 0 {
-		return
-	}
-	idx := d.cursorIndex() + delta
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(d.manifest.Tasks) {
-		idx = len(d.manifest.Tasks) - 1
-	}
-	d.cursorID = d.manifest.Tasks[idx].ID
-}
-
-// syncManifest updates the manifest on a tick refresh, keeping cursor on the
-// same task ID when possible.
+// syncManifest updates the manifest on load or a tick refresh, feeding the tasks
+// to the List (which re-anchors the cursor by task ID) and recomputing the ID
+// column width. It clears the loading/error state, since a synced manifest is a
+// completed load.
 func (d *detailView) syncManifest(m *tasks.Manifest, row *tasks.Row) {
 	d.manifest = m
 	d.taskRow = row
-	if m == nil || len(m.Tasks) == 0 {
-		d.cursorID = ""
-		return
+	d.loading = false
+	d.err = nil
+	var items []tasks.Task
+	if m != nil {
+		items = m.Tasks
 	}
-	for _, t := range m.Tasks {
-		if t.ID == d.cursorID {
-			return
-		}
-	}
-	d.cursorID = m.Tasks[0].ID
+	d.cols.idW = detailIDWidth(items)
+	d.list.ReplaceItems(items)
 }
 
 // dashboardColumns holds the task-set table's per-column widths, precomputed over
@@ -1246,7 +1255,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.err = nil
-			m.detail = &detailView{row: row, loading: true}
+			m.detail = newDetailView(row)
 			return m, m.loadDetail(row)
 		}
 	case tea.WindowSizeMsg:
@@ -1288,8 +1297,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.detail.syncManifest(msg.manifest, msg.taskRow)
-		m.detail.loading = false
-		m.detail.err = nil
 		return m, nil
 	case dashboardToggleMsg:
 		if msg.err != nil {
@@ -1601,8 +1608,8 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "g" {
 		if m.pendingG {
 			m.pendingG = false
-			if m.detail != nil && m.detail.manifest != nil && len(m.detail.manifest.Tasks) > 0 {
-				m.detail.cursorID = m.detail.manifest.Tasks[0].ID
+			if m.detail != nil {
+				m.detail.list.SetCursor(0)
 			}
 		} else {
 			m.pendingG = true
@@ -1618,36 +1625,34 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "j", "down":
 		if m.detail != nil {
-			m.detail.moveCursor(1)
+			m.detail.list.MoveDown()
 		}
 	case "k", "up":
 		if m.detail != nil {
-			m.detail.moveCursor(-1)
+			m.detail.list.MoveUp()
 		}
 	case "G":
-		if m.detail != nil && m.detail.manifest != nil && len(m.detail.manifest.Tasks) > 0 {
-			m.detail.cursorID = m.detail.manifest.Tasks[len(m.detail.manifest.Tasks)-1].ID
+		if m.detail != nil && m.detail.manifest != nil {
+			m.detail.list.SetCursor(len(m.detail.manifest.Tasks) - 1)
 		}
 	case "l", "enter":
-		if m.detail == nil || m.detail.loading || m.detail.manifest == nil {
+		if m.detail == nil || m.detail.loading {
 			return m, nil
 		}
-		idx := m.detail.cursorIndex()
-		if idx < 0 || idx >= len(m.detail.manifest.Tasks) {
+		task, ok := m.detail.list.Selected()
+		if !ok {
 			return m, nil
 		}
-		task := m.detail.manifest.Tasks[idx]
 		m.detail.peek = &taskTextPeek{taskID: task.ID, loading: true}
 		return m, m.loadTaskText(m.detail.manifest, task)
 	case "a":
-		if m.detail == nil || m.detail.loading || m.detail.manifest == nil {
+		if m.detail == nil || m.detail.loading {
 			return m, nil
 		}
-		idx := m.detail.cursorIndex()
-		if idx < 0 || idx >= len(m.detail.manifest.Tasks) {
+		task, ok := m.detail.list.Selected()
+		if !ok {
 			return m, nil
 		}
-		task := m.detail.manifest.Tasks[idx]
 		items := taskMenuItems(task)
 		if len(items) == 0 {
 			return m, nil
@@ -2373,30 +2378,141 @@ func countPhrase(n int, singular, plural string) string {
 	return fmt.Sprintf("%d %s", n, plural)
 }
 
-// viewDetail renders the full-screen task-set detail view.
+// viewDetail renders the full-screen task-set detail view. The task text peek
+// (ADR-0079) and the task action-menu overlay keep their bespoke rendering; the
+// loading, error, and content states compose through a Frame with the task list on
+// ui.List.
 func (m QueueDashboard) viewDetail() string {
-	var b strings.Builder
 	d := m.detail
 	if d.peek != nil {
+		var b strings.Builder
 		renderTaskTextPeek(&b, d, m.height, m.width, m.taskMenu)
 		return b.String()
 	}
-	if d.loading {
-		fmt.Fprintf(&b, "Loading %s...\n", d.row.SetID)
-		writeDashboardFooter(&b, m.height, ui.HintStyle.Render("  h/esc back"))
+	if m.taskMenu != nil {
+		var b strings.Builder
+		renderDetailContent(&b, d, m.height, m.width, m.taskMenu)
 		return b.String()
 	}
-	if d.err != nil {
-		fmt.Fprintf(&b, "error loading %s: %v\n", d.row.SetID, d.err)
-		writeDashboardFooter(&b, m.height, ui.HintStyle.Render("  h/esc back"))
-		return b.String()
-	}
-	renderDetailContent(&b, d, m.height, m.width, m.taskMenu)
-	return b.String()
+	frame, body := m.detailFrame()
+	return frame.Render(body)
 }
 
-// renderDetailContent renders the task list with cursor indicators for the
-// detail view. The cursor is on the task identified by detailView.cursorID.
+// detailFrame builds the Frame and body for the non-menu detail states: loading,
+// error, missing/malformed manifest, and the task-list content. The same Frame
+// drives the body-height budget and the render (ADR-0079); the content body's List
+// is sized to the budget the Frame leaves minus the table's own chrome, so the list
+// clamps to the terminal instead of rendering every task.
+func (m QueueDashboard) detailFrame() (ui.Frame, string) {
+	d := m.detail
+	const backHint = "h/esc back"
+	if d.loading {
+		return ui.Frame{Width: m.width, Hints: backHint}, fmt.Sprintf("Loading %s...", d.row.SetID)
+	}
+	if d.err != nil {
+		return ui.Frame{Width: m.width, Hints: backHint}, fmt.Sprintf("error loading %s: %v", d.row.SetID, d.err)
+	}
+
+	manifest := d.manifest
+	status := tasks.DeriveStatus(manifest)
+	label := string(status)
+	progress := ""
+	if d.taskRow != nil {
+		status = d.taskRow.Status
+		label = tasks.StatusLabel(*d.taskRow)
+		progress = d.taskRow.Progress
+	}
+	header := fmt.Sprintf("Task · %s  [%s]", d.row.SetID, label)
+	if progress != "" {
+		header += "  " + progress
+	}
+
+	if status == tasks.StatusMissing {
+		return ui.Frame{Width: m.width, Header: header, Hints: backHint}, "  registered task set missing"
+	}
+	if manifest == nil || !manifest.Valid {
+		lines := []string{"  malformed manifest"}
+		if manifest != nil {
+			for _, e := range manifest.Errors {
+				lines = append(lines, "  - "+e)
+			}
+		}
+		return ui.Frame{Width: m.width, Header: header, Hints: backHint}, strings.Join(lines, "\n")
+	}
+
+	frame := ui.Frame{
+		Width:  m.width,
+		Header: header,
+		Status: d.statusMsg,
+		Hints:  "j/k · gg/G top/bottom · l/enter peek · a actions · h/esc back",
+	}
+	listH := frame.BodyHeight(m.height) - detailTableChromeLines
+	if listH < 1 {
+		listH = 1
+	}
+	d.list.Resize(listH)
+	parts := []string{
+		"",
+		"  " + detailTableHeader(d.cols.idW),
+		"  " + detailTableSeparator(d.cols.idW),
+	}
+	parts = append(parts, d.list.VisibleRows()...)
+	return frame, strings.Join(parts, "\n")
+}
+
+// detailIDWidth returns the ID-column width: the widest task ID, floored at the
+// "ID" header label.
+func detailIDWidth(items []tasks.Task) int {
+	idW := len("ID")
+	for _, t := range items {
+		if len(t.ID) > idW {
+			idW = len(t.ID)
+		}
+	}
+	return idW
+}
+
+// detailTaskLine formats one task row's cells (status / type / id / title /
+// blocked-by) over the fixed and idW-derived widths, without the cursor prefix —
+// the List owns the leading indicator column.
+func detailTaskLine(t tasks.Task, idW int) string {
+	title := t.Title
+	if len(title) > detailTitleW {
+		title = title[:detailTitleW-3] + "..."
+	}
+	blockedBy := "-"
+	if len(t.BlockedBy) > 0 {
+		blockedBy = strings.Join(t.BlockedBy, ", ")
+	}
+	statusCell := t.Status
+	if t.Status == "failed" && t.FailedAfter != nil {
+		statusCell = fmt.Sprintf("failed(%d)", *t.FailedAfter)
+	}
+	return fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s",
+		detailStatusW, statusCell, detailTypeW, t.Type, idW, t.ID, detailTitleW, title, blockedBy)
+}
+
+// detailTableHeader is the detail task-table column header, idW-aligned to match
+// detailTaskLine.
+func detailTableHeader(idW int) string {
+	return fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s",
+		detailStatusW, "STATUS", detailTypeW, "TYPE", idW, "ID", detailTitleW, "TITLE", "BLOCKED-BY")
+}
+
+// detailTableSeparator is the dashed rule under detailTableHeader.
+func detailTableSeparator(idW int) string {
+	return fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s",
+		detailStatusW, strings.Repeat("-", detailStatusW),
+		detailTypeW, strings.Repeat("-", detailTypeW),
+		idW, strings.Repeat("-", idW),
+		detailTitleW, strings.Repeat("-", detailTitleW),
+		strings.Repeat("-", 12))
+}
+
+// renderDetailContent renders the detail task list with the action-menu overlay
+// spliced next to the cursored task (ADR-0079 bespoke placement; its cursor is
+// ported onto List in a later slice). It renders every task — no scroll window —
+// and reads the cursor from the List. The non-menu states render via detailFrame.
 func renderDetailContent(b *strings.Builder, d *detailView, height, width int, menu *taskMenu) {
 	manifest := d.manifest
 	taskRow := d.taskRow
@@ -2434,28 +2550,11 @@ func renderDetailContent(b *strings.Builder, d *detailView, height, width int, m
 
 	fmt.Fprintln(b)
 
-	const (
-		stW    = 10
-		tyW    = 4
-		titleW = 40
-	)
-	idW := len("ID")
-	for _, t := range manifest.Tasks {
-		if len(t.ID) > idW {
-			idW = len(t.ID)
-		}
-	}
+	idW := d.cols.idW
+	fmt.Fprintf(b, "  %s\n", detailTableHeader(idW))
+	fmt.Fprintf(b, "  %s\n", detailTableSeparator(idW))
 
-	fmt.Fprintf(b, "  %-*s  %-*s  %-*s  %-*s  %s\n",
-		stW, "STATUS", tyW, "TYPE", idW, "ID", titleW, "TITLE", "BLOCKED-BY")
-	fmt.Fprintf(b, "  %-*s  %-*s  %-*s  %-*s  %s\n",
-		stW, strings.Repeat("-", stW),
-		tyW, strings.Repeat("-", tyW),
-		idW, strings.Repeat("-", idW),
-		titleW, strings.Repeat("-", titleW),
-		strings.Repeat("-", 12))
-
-	cursorIdx := d.cursorIndex()
+	cursorIdx := d.list.Cursor()
 	var menuLines []string
 	placeBelow := true
 	if menu != nil && !menu.inPeek {
@@ -2475,21 +2574,7 @@ func renderDetailContent(b *strings.Builder, d *detailView, height, width int, m
 		if i == cursorIdx {
 			prefix = ui.IndicatorStyle.Render("█") + " "
 		}
-		title := t.Title
-		if len(title) > titleW {
-			title = title[:titleW-3] + "..."
-		}
-		blockedBy := "-"
-		if len(t.BlockedBy) > 0 {
-			blockedBy = strings.Join(t.BlockedBy, ", ")
-		}
-		statusCell := t.Status
-		if t.Status == "failed" && t.FailedAfter != nil {
-			statusCell = fmt.Sprintf("failed(%d)", *t.FailedAfter)
-		}
-		line := fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s",
-			stW, statusCell, tyW, t.Type, idW, t.ID, titleW, title, blockedBy)
-		fmt.Fprintf(b, "%s%s\n", prefix, line)
+		fmt.Fprintf(b, "%s%s\n", prefix, detailTaskLine(t, idW))
 		if menuLines != nil && i == cursorIdx && placeBelow {
 			writeMenu()
 		}

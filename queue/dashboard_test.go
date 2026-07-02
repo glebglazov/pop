@@ -993,11 +993,9 @@ func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) 
 	}})
 	m.width = 120
 	m.height = 8
-	m.detail = &detailView{
-		row:      m.snap.Rows[0],
-		manifest: manifest,
-		cursorID: "01-a",
-	}
+	d := newDetailView(m.snap.Rows[0])
+	d.syncManifest(manifest, nil)
+	m.detail = d
 
 	view := m.View().Content
 	if strings.Contains(view, "Queue dashboard") {
@@ -1015,6 +1013,31 @@ func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) 
 	}
 	if got, want := dashboardTestLineIndex(lines, "STATUS"), 2; got != want {
 		t.Fatalf("detail table header line = %d, want %d:\n%s", got, want, view)
+	}
+}
+
+func TestDashboardDetailViewClampsToBodyHeight(t *testing.T) {
+	// Many tasks on a short terminal must not overflow: the detail List scroll
+	// window caps the body at the Frame's budget instead of rendering every task.
+	manifestTasks := make([]tasks.Task, 40)
+	for i := range manifestTasks {
+		id := fmt.Sprintf("%02d-t", i)
+		manifestTasks[i] = tasks.Task{ID: id, File: id + ".md", Title: "T", Type: "AFK", Status: "open"}
+	}
+	manifest := &tasks.Manifest{Valid: true, Tasks: manifestTasks}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00set-long", SetRef: SetRef{SetID: "set-long"}},
+	}})
+	m.width = 120
+	m.height = 10
+	d := newDetailView(m.snap.Rows[0])
+	d.syncManifest(manifest, nil)
+	m.detail = d
+
+	view := m.viewDetail()
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("detail view line count = %d, want %d (clamped to body height):\n%s", got, want, view)
 	}
 }
 
@@ -1043,7 +1066,7 @@ func TestDashboardQAndSAreUnbound(t *testing.T) {
 		}
 	}
 
-	got.detail = &detailView{row: got.snap.Rows[0], loading: true}
+	got.detail = newDetailView(got.snap.Rows[0])
 	for _, key := range []string{"q", "s"} {
 		updated, cmd := got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
 		got = updated.(QueueDashboard)
@@ -1074,7 +1097,9 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", Status: "READY", cursorKey: "pop\x00set-peek", SetRef: SetRef{SetID: "set-peek"}},
 	}})
-	m.detail = &detailView{row: m.snap.Rows[0], manifest: manifest, cursorID: "01-a"}
+	d0 := newDetailView(m.snap.Rows[0])
+	d0.syncManifest(manifest, nil)
+	m.detail = d0
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	got := updated.(QueueDashboard)
@@ -1109,7 +1134,9 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 	m2 := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", Status: "READY", cursorKey: "pop\x00set-peek", SetRef: SetRef{SetID: "set-peek"}},
 	}})
-	m2.detail = &detailView{row: m2.snap.Rows[0], manifest: manifest, cursorID: "01-a"}
+	d2 := newDetailView(m2.snap.Rows[0])
+	d2.syncManifest(manifest, nil)
+	m2.detail = d2
 	updated, cmd = m2.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got = updated.(QueueDashboard)
 	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.taskID != "01-a" {
@@ -1237,17 +1264,17 @@ func TestDashboardDetailViewRendersTaskList(t *testing.T) {
 		},
 	}
 	taskRow := &tasks.Row{ID: "set-normal", Status: tasks.StatusReady, Progress: "1/2 done, 1 open"}
-	d := &detailView{
-		row:      DashboardRow{SetRef: SetRef{SetID: "set-normal"}},
-		manifest: manifest,
-		taskRow:  taskRow,
-		cursorID: "01-a",
-	}
-	var rendered strings.Builder
-	renderDetailContent(&rendered, d, 0, 0, nil)
-	out := rendered.String()
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00set-normal", SetRef: SetRef{SetID: "set-normal"}},
+	}})
+	m.width = 120
+	m.height = 20
+	d := newDetailView(m.snap.Rows[0])
+	d.syncManifest(manifest, taskRow)
+	m.detail = d
+	out := m.viewDetail()
 
-	for _, want := range []string{"set-normal  [READY]  1/2 done, 1 open", "STATUS", "01-a", "02-b", "01-a"} {
+	for _, want := range []string{"set-normal  [READY]  1/2 done, 1 open", "STATUS", "01-a", "02-b"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered detail missing %q:\n%s", want, out)
 		}
@@ -1278,38 +1305,19 @@ func TestDashboardDetailViewCursorByIDPinsAcrossRefresh(t *testing.T) {
 		},
 	}
 
-	d := &detailView{
-		row:      DashboardRow{SetRef: SetRef{SetID: "set-x"}},
-		manifest: manifest1,
-		cursorID: "02-b",
+	d := newDetailView(DashboardRow{SetRef: SetRef{SetID: "set-x"}})
+	d.syncManifest(manifest1, nil)
+	d.list.SetCursorToKey("02-b")
+
+	// Cursor is on 02-b at index 1 before refresh.
+	if sel, ok := d.list.Selected(); !ok || sel.ID != "02-b" || d.list.Cursor() != 1 {
+		t.Fatalf("before refresh selected = %+v (ok=%v) cursor=%d, want 02-b at index 1", sel, ok, d.list.Cursor())
 	}
 
-	// Cursor is at index 1 before refresh.
-	if got := d.cursorIndex(); got != 1 {
-		t.Fatalf("cursorIndex = %d, want 1", got)
-	}
-
-	// After refresh the manifest has the same task ID at index 0.
+	// After a refresh that reorders, the cursor follows 02-b to its new index.
 	d.syncManifest(manifest2, nil)
-
-	// Cursor ID is preserved; index changed because order changed.
-	if d.cursorID != "02-b" {
-		t.Fatalf("cursorID = %q, want 02-b", d.cursorID)
-	}
-	if got := d.cursorIndex(); got != 0 {
-		t.Fatalf("cursorIndex after refresh = %d, want 0", got)
-	}
-
-	// When cursor ID disappears, falls back to first task.
-	manifest3 := &tasks.Manifest{
-		Valid: true,
-		Tasks: []tasks.Task{
-			{ID: "03-c", Type: "AFK", Status: "open"},
-		},
-	}
-	d.syncManifest(manifest3, nil)
-	if d.cursorID != "03-c" {
-		t.Fatalf("cursorID after disappear = %q, want 03-c", d.cursorID)
+	if sel, ok := d.list.Selected(); !ok || sel.ID != "02-b" || d.list.Cursor() != 0 {
+		t.Fatalf("after refresh selected = %+v (ok=%v) cursor=%d, want 02-b at index 0", sel, ok, d.list.Cursor())
 	}
 }
 
@@ -1325,44 +1333,51 @@ func TestDashboardDetailViewVimNavigation(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", Status: "READY", cursorKey: "pop\x00set-nav", SetRef: SetRef{SetID: "set-nav"}},
 	}})
-	m.detail = &detailView{row: m.snap.Rows[0], manifest: manifest, cursorID: "01-a"}
+	d := newDetailView(m.snap.Rows[0])
+	d.syncManifest(manifest, nil)
+	m.detail = d
+
+	selID := func(m QueueDashboard) string {
+		task, _ := m.detail.list.Selected()
+		return task.ID
+	}
 
 	// j moves cursor down.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got := updated.(QueueDashboard)
-	if got.detail.cursorID != "02-b" {
-		t.Fatalf("after j: cursorID = %q, want 02-b", got.detail.cursorID)
+	if id := selID(got); id != "02-b" {
+		t.Fatalf("after j: selected = %q, want 02-b", id)
 	}
 
 	// k moves cursor up.
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	got = updated.(QueueDashboard)
-	if got.detail.cursorID != "01-a" {
-		t.Fatalf("after k: cursorID = %q, want 01-a", got.detail.cursorID)
+	if id := selID(got); id != "01-a" {
+		t.Fatalf("after k: selected = %q, want 01-a", id)
 	}
 
 	// j/k clamp at boundaries.
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	got = updated.(QueueDashboard)
-	if got.detail.cursorID != "01-a" {
-		t.Fatalf("k at top should clamp: cursorID = %q, want 01-a", got.detail.cursorID)
+	if id := selID(got); id != "01-a" {
+		t.Fatalf("k at top should clamp: selected = %q, want 01-a", id)
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
 	got = updated.(QueueDashboard)
-	if got.detail.cursorID != "03-c" {
-		t.Fatalf("G should move to bottom: cursorID = %q, want 03-c", got.detail.cursorID)
+	if id := selID(got); id != "03-c" {
+		t.Fatalf("G should move to bottom: selected = %q, want 03-c", id)
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
 	got = updated.(QueueDashboard)
-	if got.detail.cursorID != "03-c" {
-		t.Fatalf("first g should not move cursor: cursorID = %q, want 03-c", got.detail.cursorID)
+	if id := selID(got); id != "03-c" {
+		t.Fatalf("first g should not move cursor: selected = %q, want 03-c", id)
 	}
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
 	got = updated.(QueueDashboard)
-	if got.detail.cursorID != "01-a" {
-		t.Fatalf("gg should move to top: cursorID = %q, want 01-a", got.detail.cursorID)
+	if id := selID(got); id != "01-a" {
+		t.Fatalf("gg should move to top: selected = %q, want 01-a", id)
 	}
 }
 
@@ -2622,11 +2637,9 @@ func detailOverrideModel(row DashboardRow, task tasks.Task, completeErr, resetEr
 		Tasks: []tasks.Task{task},
 	}
 	m := newQueueDashboard(d, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
-	m.detail = &detailView{
-		row:      row,
-		manifest: manifest,
-		cursorID: task.ID,
-	}
+	dv := newDetailView(row)
+	dv.syncManifest(manifest, nil)
+	m.detail = dv
 	return m, &completeCalls, &resetCalls, &skipCalls
 }
 
@@ -2877,15 +2890,17 @@ func TestDetailViewActionsHintRendered(t *testing.T) {
 		Valid: true,
 		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Status: "open", Type: "AFK", Title: "A"}},
 	}
-	d := &detailView{
-		row:       DashboardRow{SetRef: SetRef{SetID: "set-render"}},
-		manifest:  manifest,
-		cursorID:  "01-a",
-		statusMsg: "completed 01-a",
-	}
-	var b strings.Builder
-	renderDetailContent(&b, d, 0, 0, nil)
-	out := b.String()
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00set-render", SetRef: SetRef{SetID: "set-render"}},
+	}})
+	m.width = 80
+	m.height = 12
+	d := newDetailView(m.snap.Rows[0])
+	d.syncManifest(manifest, nil)
+	d.statusMsg = "completed 01-a"
+	m.detail = d
+
+	out := m.viewDetail()
 	if !strings.Contains(out, "completed 01-a") {
 		t.Fatalf("statusMsg not rendered:\n%s", out)
 	}
