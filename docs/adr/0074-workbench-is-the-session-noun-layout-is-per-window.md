@@ -4,6 +4,10 @@ status: accepted
 
 # Workbench is the whole-session noun; Layout is the per-window tier
 
+> Amended by [ADR-0082](0082-session-templates-alias-is-removed-workbenches-is-the-only-key.md):
+> the `[[session_templates]]` back-compat alias below is removed — `[[workbenches]]`
+> is the only accepted key.
+
 ## Context
 
 [ADR-0073](0073-session-templates-are-explicit-weighted-split-trees.md) named the
