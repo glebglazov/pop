@@ -100,13 +100,16 @@ func TestExportImportRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	if imported.TaskSetID != setID {
-		t.Fatalf("imported id = %q, want %q", imported.TaskSetID, setID)
+	if len(imported.Sets) != 1 {
+		t.Fatalf("imported %d sets, want 1: %#v", len(imported.Sets), imported.Sets)
 	}
-	if canonical(t, imported.Path) != canonical(t, filepath.Join(dst.tasksDir, setID)) {
-		t.Fatalf("imported path = %q, want %q", imported.Path, filepath.Join(dst.tasksDir, setID))
+	if imported.Sets[0].TaskSetID != setID {
+		t.Fatalf("imported id = %q, want %q", imported.Sets[0].TaskSetID, setID)
 	}
-	if data, err := os.ReadFile(filepath.Join(imported.Path, "progress.txt")); err != nil || string(data) != "history\n" {
+	if canonical(t, imported.Sets[0].Path) != canonical(t, filepath.Join(dst.tasksDir, setID)) {
+		t.Fatalf("imported path = %q, want %q", imported.Sets[0].Path, filepath.Join(dst.tasksDir, setID))
+	}
+	if data, err := os.ReadFile(filepath.Join(imported.Sets[0].Path, "progress.txt")); err != nil || string(data) != "history\n" {
 		t.Fatalf("progress.txt not preserved: err=%v data=%q", err, data)
 	}
 
@@ -322,21 +325,80 @@ func TestExportMultiSetDefaultName(t *testing.T) {
 	}
 }
 
-func TestImportRejectsCollision(t *testing.T) {
-	env := newTransferEnv(t)
-	const setID = "2026-06-01-user-auth"
-	env.writeSet(t, setID, nil)
+func TestImportDisambiguatesCollidingSet(t *testing.T) {
+	const existing = "2026-06-01-user-auth"
 
-	archive := filepath.Join(env.root, setID+".tar.gz")
-	if err := writeTaskSetArchive(filepath.Join(env.tasksDir, setID), setID, archive); err != nil {
+	// Build the archive from src first; newTransferEnv resets the global
+	// XDG_DATA_HOME, so the import target (dst) must be created last.
+	src := newTransferEnv(t)
+	src.writeSet(t, existing, nil)
+	archive := filepath.Join(src.root, existing+".tar.gz")
+	if err := writeTaskSetArchive(filepath.Join(src.tasksDir, existing), existing, archive); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := ImportWith(env.deps, projectDefaultDeps(), config.Load, ImportOptions{
-		ResolveInput: env.resolveInput(),
+	dst := newTransferEnv(t)
+	dst.writeSet(t, existing, func(dir string) {
+		if err := os.WriteFile(filepath.Join(dir, "marker.txt"), []byte("original\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	fixed := time.Date(2026, 6, 13, 14, 30, 0, 0, time.Local)
+	imported, err := ImportWith(dst.deps, projectDefaultDeps(), config.Load, ImportOptions{
+		ResolveInput: dst.resolveInput(),
 		ArchivePath:  archive,
+		Now:          fixed,
+	})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	wantID := "2026-06-13-user-auth"
+	if len(imported.Sets) != 1 || imported.Sets[0].TaskSetID != wantID {
+		t.Fatalf("imported = %#v, want single set %q", imported.Sets, wantID)
+	}
+	// The existing set is left untouched.
+	if data, err := os.ReadFile(filepath.Join(dst.tasksDir, existing, "marker.txt")); err != nil || string(data) != "original\n" {
+		t.Fatalf("existing set was touched: err=%v data=%q", err, data)
+	}
+	// The imported set lands under the dated identifier.
+	if _, err := os.Stat(filepath.Join(dst.tasksDir, wantID, "index.json")); err != nil {
+		t.Fatalf("disambiguated set missing: %v", err)
+	}
+}
+
+func TestImportUnresolvableCollisionIsAtomic(t *testing.T) {
+	// Build the archive from src first; the import target (dst) is created last
+	// so its XDG_DATA_HOME wins at import time.
+	src := newTransferEnv(t)
+	src.writeSet(t, "2026-06-01-user-auth", nil)
+	src.writeSet(t, "2026-06-02-fresh", nil)
+	archive := filepath.Join(src.root, "multi.tar.gz")
+	sets := []exportSet{
+		{id: "2026-06-01-user-auth", dir: filepath.Join(src.tasksDir, "2026-06-01-user-auth")},
+		{id: "2026-06-02-fresh", dir: filepath.Join(src.tasksDir, "2026-06-02-fresh")},
+	}
+	if err := writeTaskSetsArchive(sets, archive); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := newTransferEnv(t)
+	// Occupy every rung of the disambiguation ladder for the colliding set.
+	dst.writeSet(t, "2026-06-01-user-auth", nil)
+	dst.writeSet(t, "2026-06-13-user-auth", nil)
+	dst.writeSet(t, "2026-06-13-1430-user-auth", nil)
+
+	fixed := time.Date(2026, 6, 13, 14, 30, 0, 0, time.Local)
+	_, err := ImportWith(dst.deps, projectDefaultDeps(), config.Load, ImportOptions{
+		ResolveInput: dst.resolveInput(),
+		ArchivePath:  archive,
+		Now:          fixed,
 	})
 	assertTransferExitCode(t, err, ExitSetup)
+	// The well-formed sibling must not have been installed.
+	if _, statErr := os.Stat(filepath.Join(dst.tasksDir, "2026-06-02-fresh")); !os.IsNotExist(statErr) {
+		t.Fatalf("fresh set installed despite unresolvable collision on sibling: %v", statErr)
+	}
 }
 
 func TestImportAsAddsDatePrefix(t *testing.T) {
@@ -360,8 +422,8 @@ func TestImportAsAddsDatePrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantID := "2026-06-13-user-auth"
-	if imported.TaskSetID != wantID {
-		t.Fatalf("imported id = %q, want %q", imported.TaskSetID, wantID)
+	if imported.Sets[0].TaskSetID != wantID {
+		t.Fatalf("imported id = %q, want %q", imported.Sets[0].TaskSetID, wantID)
 	}
 }
 
@@ -387,8 +449,8 @@ func TestImportAsDisambiguatesWithHHMM(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantID := "2026-06-13-1430-user-auth"
-	if imported.TaskSetID != wantID {
-		t.Fatalf("imported id = %q, want %q", imported.TaskSetID, wantID)
+	if imported.Sets[0].TaskSetID != wantID {
+		t.Fatalf("imported id = %q, want %q", imported.Sets[0].TaskSetID, wantID)
 	}
 }
 
@@ -420,10 +482,188 @@ func TestImportRejectsPathTraversal(t *testing.T) {
 	assertTransferExitCode(t, err, ExitSetup)
 }
 
-func TestImportRejectsMultipleTopLevelDirs(t *testing.T) {
+func TestImportMultipleSets(t *testing.T) {
+	src := newTransferEnv(t)
+	src.writeSet(t, "2026-06-01-alpha", nil)
+	src.writeSet(t, "2026-06-02-beta", nil)
+	archive := filepath.Join(src.root, "multi.tar.gz")
+	// Archive top-level order is reversed to prove registration re-orders by
+	// identifier.
+	sets := []exportSet{
+		{id: "2026-06-02-beta", dir: filepath.Join(src.tasksDir, "2026-06-02-beta")},
+		{id: "2026-06-01-alpha", dir: filepath.Join(src.tasksDir, "2026-06-01-alpha")},
+	}
+	if err := writeTaskSetsArchive(sets, archive); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := newTransferEnv(t)
+	imported, err := ImportWith(dst.deps, projectDefaultDeps(), config.Load, ImportOptions{
+		ResolveInput: dst.resolveInput(),
+		ArchivePath:  archive,
+	})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if len(imported.Sets) != 2 {
+		t.Fatalf("imported %d sets, want 2: %#v", len(imported.Sets), imported.Sets)
+	}
+	for i, want := range []string{"2026-06-01-alpha", "2026-06-02-beta"} {
+		if imported.Sets[i].TaskSetID != want {
+			t.Fatalf("set[%d] id = %q, want %q", i, imported.Sets[i].TaskSetID, want)
+		}
+		if !filepath.IsAbs(imported.Sets[i].Path) {
+			t.Fatalf("installed path %q is not absolute", imported.Sets[i].Path)
+		}
+		if _, err := os.Stat(filepath.Join(imported.Sets[i].Path, "index.json")); err != nil {
+			t.Fatalf("installed set %q missing manifest: %v", want, err)
+		}
+	}
+
+	statePath := StatePathFor(dst.tasksDir)
+	canonDef, err := CanonicalDefinitionPathWith(dst.deps, dst.tasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := LoadGlobalStateWith(dst.deps, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := state.Tasks[canonDef]
+	if entry == nil || len(entry.TaskSets) != 2 {
+		t.Fatalf("registration = %#v", entry)
+	}
+	if entry.TaskSets[0].ID != "2026-06-01-alpha" || entry.TaskSets[1].ID != "2026-06-02-beta" {
+		t.Fatalf("registration order = %q, %q", entry.TaskSets[0].ID, entry.TaskSets[1].ID)
+	}
+	for _, set := range entry.TaskSets {
+		if set.Priority != 0 {
+			t.Fatalf("set %q priority = %d, want 0", set.ID, set.Priority)
+		}
+	}
+}
+
+func TestImportRegistersAfterExistingRegistrations(t *testing.T) {
+	// Build the archive from src first; the import target (dst) is created last
+	// so its XDG_DATA_HOME wins at import time.
+	src := newTransferEnv(t)
+	src.writeSet(t, "2026-06-01-alpha", nil)
+	src.writeSet(t, "2026-06-02-beta", nil)
+	archive := filepath.Join(src.root, "multi.tar.gz")
+	sets := []exportSet{
+		{id: "2026-06-02-beta", dir: filepath.Join(src.tasksDir, "2026-06-02-beta")},
+		{id: "2026-06-01-alpha", dir: filepath.Join(src.tasksDir, "2026-06-01-alpha")},
+	}
+	if err := writeTaskSetsArchive(sets, archive); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := newTransferEnv(t)
+	// A pre-registered set with a high identifier must stay first — imported
+	// sets are appended after it, not merged into a global re-sort.
+	dst.writeSet(t, "2026-09-09-existing", nil)
+	statePath := StatePathFor(dst.tasksDir)
+	if _, err := RegisterWith(dst.deps, dst.tasksDir, statePath); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ImportWith(dst.deps, projectDefaultDeps(), config.Load, ImportOptions{
+		ResolveInput: dst.resolveInput(),
+		ArchivePath:  archive,
+	}); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	canonDef, err := CanonicalDefinitionPathWith(dst.deps, dst.tasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := LoadGlobalStateWith(dst.deps, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := state.Tasks[canonDef]
+	var got []string
+	for _, s := range entry.TaskSets {
+		got = append(got, s.ID)
+	}
+	want := []string{"2026-09-09-existing", "2026-06-01-alpha", "2026-06-02-beta"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("registration order = %v, want %v", got, want)
+	}
+}
+
+func TestImportMalformedSetIsAtomic(t *testing.T) {
+	src := newTransferEnv(t)
+	src.writeSet(t, "2026-06-01-good", nil)
+	src.writeSet(t, "2026-06-02-bad", func(dir string) {
+		if err := os.WriteFile(filepath.Join(dir, "index.json"), []byte("not json"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	archive := filepath.Join(src.root, "multi.tar.gz")
+	sets := []exportSet{
+		{id: "2026-06-01-good", dir: filepath.Join(src.tasksDir, "2026-06-01-good")},
+		{id: "2026-06-02-bad", dir: filepath.Join(src.tasksDir, "2026-06-02-bad")},
+	}
+	if err := writeTaskSetsArchive(sets, archive); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := newTransferEnv(t)
+	_, err := ImportWith(dst.deps, projectDefaultDeps(), config.Load, ImportOptions{
+		ResolveInput: dst.resolveInput(),
+		ArchivePath:  archive,
+	})
+	assertTransferExitCode(t, err, ExitSetup)
+	if !strings.Contains(err.Error(), "2026-06-02-bad") {
+		t.Fatalf("error does not name the malformed set: %v", err)
+	}
+	for _, id := range []string{"2026-06-01-good", "2026-06-02-bad"} {
+		if _, statErr := os.Stat(filepath.Join(dst.tasksDir, id)); !os.IsNotExist(statErr) {
+			t.Fatalf("set %q installed despite malformed sibling: %v", id, statErr)
+		}
+	}
+}
+
+func TestImportAsRejectedForMultiSet(t *testing.T) {
+	src := newTransferEnv(t)
+	src.writeSet(t, "2026-06-01-alpha", nil)
+	src.writeSet(t, "2026-06-02-beta", nil)
+	archive := filepath.Join(src.root, "multi.tar.gz")
+	sets := []exportSet{
+		{id: "2026-06-01-alpha", dir: filepath.Join(src.tasksDir, "2026-06-01-alpha")},
+		{id: "2026-06-02-beta", dir: filepath.Join(src.tasksDir, "2026-06-02-beta")},
+	}
+	if err := writeTaskSetsArchive(sets, archive); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := newTransferEnv(t)
+	_, err := ImportWith(dst.deps, projectDefaultDeps(), config.Load, ImportOptions{
+		ResolveInput: dst.resolveInput(),
+		ArchivePath:  archive,
+		AsID:         "renamed",
+	})
+	assertTransferExitCode(t, err, ExitSetup)
+	if !strings.Contains(err.Error(), "--as") {
+		t.Fatalf("error should explain the --as multi-set guard: %v", err)
+	}
+	for _, id := range []string{"2026-06-01-alpha", "2026-06-02-beta"} {
+		if _, statErr := os.Stat(filepath.Join(dst.tasksDir, id)); !os.IsNotExist(statErr) {
+			t.Fatalf("set %q installed despite --as guard rejection: %v", id, statErr)
+		}
+	}
+}
+
+func TestImportRejectsTraversalInAnyTopLevelDir(t *testing.T) {
 	env := newTransferEnv(t)
-	archive := filepath.Join(env.root, "multi.tar.gz")
-	if err := writeMultiRootArchive(t, archive); err != nil {
+	archive := filepath.Join(env.root, "evil-multi.tar.gz")
+	manifest := `{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}]}`
+	if err := writeOrderedArchive(t, archive, [][2]string{
+		{"2026-06-01-good/index.json", manifest},
+		{"2026-06-02-bad/../../escape.txt", "nope"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -432,6 +672,9 @@ func TestImportRejectsMultipleTopLevelDirs(t *testing.T) {
 		ArchivePath:  archive,
 	})
 	assertTransferExitCode(t, err, ExitSetup)
+	if _, statErr := os.Stat(filepath.Join(env.tasksDir, "2026-06-01-good")); !os.IsNotExist(statErr) {
+		t.Fatalf("good set installed despite traversal entry in a sibling dir: %v", statErr)
+	}
 }
 
 func assertTransferExitCode(t *testing.T, err error, want int) {
@@ -495,13 +738,16 @@ func writeRawTarEntry(t *testing.T, path, name string, data []byte) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
-func writeMultiRootArchive(t *testing.T, path string) error {
+// writeOrderedArchive writes a tar.gz with the given (name, content) entries in
+// order, letting tests craft archives with arbitrary — including malicious —
+// entry names.
+func writeOrderedArchive(t *testing.T, path string, entries [][2]string) error {
 	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	for _, name := range []string{"one/index.json", "two/index.json"} {
-		payload := `{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}]}`
+	for _, entry := range entries {
+		name, payload := entry[0], entry[1]
 		if err := tw.WriteHeader(&tar.Header{
 			Name:     name,
 			Mode:     0o644,
@@ -547,11 +793,14 @@ func TestExportIncludesStreams(t *testing.T) {
 	}
 
 	tempDir := t.TempDir()
-	top, err := extractTaskSetArchive(exported.Path, tempDir)
+	tops, err := extractTaskSetsArchive(exported.Path, tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := filepath.Join(tempDir, top, "streams", "01-a", "attempt-001.jsonl.gz")
+	if len(tops) != 1 {
+		t.Fatalf("extracted %d top-level dirs, want 1: %v", len(tops), tops)
+	}
+	got := filepath.Join(tempDir, tops[0], "streams", "01-a", "attempt-001.jsonl.gz")
 	if _, err := os.Stat(got); err != nil {
 		t.Fatalf("stream not in archive: %v", err)
 	}

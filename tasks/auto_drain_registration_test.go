@@ -169,8 +169,8 @@ func TestImportSeedsAutoDrainFromManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if imported.TaskSetID != setID {
-		t.Fatalf("imported id = %q, want %q", imported.TaskSetID, setID)
+	if len(imported.Sets) != 1 || imported.Sets[0].TaskSetID != setID {
+		t.Fatalf("imported = %#v, want single set %q", imported.Sets, setID)
 	}
 
 	statePath := StatePathFor(dst.tasksDir)

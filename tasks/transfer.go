@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,10 +39,15 @@ type ImportOptions struct {
 	Now          time.Time
 }
 
-// ImportResult is the outcome of importing one Task set.
-type ImportResult struct {
+// ImportedTaskSet is one Task set installed by an import.
+type ImportedTaskSet struct {
 	TaskSetID string
 	Path      string
+}
+
+// ImportResult is the outcome of importing an archive of one or more Task sets.
+type ImportResult struct {
+	Sets []ImportedTaskSet
 }
 
 // Export creates a tar.gz archive of one on-disk Task set.
@@ -185,28 +191,66 @@ func ImportWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 	}
 	defer os.RemoveAll(tempDir)
 
-	archiveID, err := extractTaskSetArchive(archivePath, tempDir)
+	// Extract every top-level set to the temp location. The per-entry traversal
+	// and absolute-path guards apply to every entry, so a bad path in any set
+	// rejects the whole archive before anything is installed.
+	archiveIDs, err := extractTaskSetsArchive(archivePath, tempDir)
 	if err != nil {
 		return nil, err
 	}
 
-	extractedDir := filepath.Join(tempDir, archiveID)
-	manifest := LoadManifest(d, archiveID, filepath.Join(extractedDir, "index.json"))
-	if !manifest.Valid {
-		if len(manifest.Errors) == 0 {
-			return nil, exitErr(ExitSetup, "imported Task set %q is malformed", archiveID)
+	// --as renames the imported set, so it is meaningful only for a single-set
+	// archive (ADR-0080).
+	asID := strings.TrimSpace(input.AsID)
+	if asID != "" && len(archiveIDs) > 1 {
+		return nil, exitErr(ExitSetup, "--as renames a single imported Task set, but the archive holds %d sets (%s); import without --as to keep their own names", len(archiveIDs), quoteJoin(archiveIDs))
+	}
+
+	// Validate every set against the task contract. Any Malformed set rejects
+	// the entire archive; nothing is written.
+	var malformed []string
+	for _, archiveID := range archiveIDs {
+		manifestPath := filepath.Join(tempDir, archiveID, "index.json")
+		manifest := LoadManifest(d, archiveID, manifestPath)
+		if manifest.Valid {
+			continue
 		}
-		return nil, exitErr(ExitSetup, "imported Task set %q is malformed: %s", archiveID, strings.Join(manifest.Errors, "; "))
+		if len(manifest.Errors) == 0 {
+			malformed = append(malformed, fmt.Sprintf("%q", archiveID))
+		} else {
+			malformed = append(malformed, fmt.Sprintf("%q (%s)", archiveID, strings.Join(manifest.Errors, "; ")))
+		}
+	}
+	if len(malformed) > 0 {
+		return nil, exitErr(ExitSetup, "imported Task set(s) malformed: %s", strings.Join(malformed, "; "))
 	}
 
-	targetID, err := resolveImportTaskSetID(d, id.TasksDir, strings.TrimSpace(input.AsID), archiveID, now)
-	if err != nil {
-		return nil, err
+	// Resolve every target identifier up front. Disambiguation may rename a set
+	// to a dated identifier; a still-unresolved collision rejects everything
+	// before any install. claimed guards against two sets in the same archive
+	// disambiguating onto the same target.
+	type importPlan struct {
+		archiveID string
+		targetID  string
+	}
+	claimed := make(map[string]bool, len(archiveIDs))
+	plans := make([]importPlan, 0, len(archiveIDs))
+	for _, archiveID := range archiveIDs {
+		targetID, err := resolveImportTaskSetID(d, id.TasksDir, asID, archiveID, now, claimed)
+		if err != nil {
+			return nil, err
+		}
+		claimed[targetID] = true
+		plans = append(plans, importPlan{archiveID: archiveID, targetID: targetID})
 	}
 
-	dst := filepath.Join(id.TasksDir, targetID)
-	if err := moveTree(d, extractedDir, dst); err != nil {
-		return nil, exitErr(ExitOperational, "install Task set %q: %v", targetID, err)
+	// Every set is well-formed and every target is free — commit all installs.
+	for _, p := range plans {
+		src := filepath.Join(tempDir, p.archiveID)
+		dst := filepath.Join(id.TasksDir, p.targetID)
+		if err := moveTree(d, src, dst); err != nil {
+			return nil, exitErr(ExitOperational, "install Task set %q: %v", p.targetID, err)
+		}
 	}
 
 	canonDefPath, err := CanonicalDefinitionPathWith(d, id.TasksDir)
@@ -214,19 +258,27 @@ func ImportWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 		return nil, exitErr(ExitSetup, "canonicalize task storage: %v", err)
 	}
 	statePath := StatePathFor(canonDefPath)
-	if err := registerImportedTaskSet(d, statePath, canonDefPath, targetID); err != nil {
+
+	// Register every installed set at priority 0, appended in identifier order.
+	sort.Slice(plans, func(i, j int) bool { return plans[i].targetID < plans[j].targetID })
+	orderedIDs := make([]string, len(plans))
+	for i, p := range plans {
+		orderedIDs[i] = p.targetID
+	}
+	if err := registerImportedTaskSets(d, statePath, canonDefPath, orderedIDs); err != nil {
 		return nil, err
 	}
 
-	absDst, err := filepath.Abs(dst)
-	if err != nil {
-		return nil, exitErr(ExitOperational, "resolve installed path: %v", err)
+	sets := make([]ImportedTaskSet, 0, len(plans))
+	for _, p := range plans {
+		absDst, err := filepath.Abs(filepath.Join(id.TasksDir, p.targetID))
+		if err != nil {
+			return nil, exitErr(ExitOperational, "resolve installed path: %v", err)
+		}
+		sets = append(sets, ImportedTaskSet{TaskSetID: p.targetID, Path: absDst})
 	}
 
-	return &ImportResult{
-		TaskSetID: targetID,
-		Path:      absDst,
-	}, nil
+	return &ImportResult{Sets: sets}, nil
 }
 
 func normalizeExportTaskSetID(raw string) (string, error) {
@@ -260,43 +312,55 @@ func taskSetDirExists(d *Deps, tasksDir, id string) bool {
 	return err == nil && info.IsDir()
 }
 
-func resolveImportTaskSetID(d *Deps, tasksDir, asID, archiveID string, now time.Time) (string, error) {
-	candidate := archiveID
-	autoPrefixed := false
-	slug := strings.TrimSpace(asID)
-
-	if slug != "" {
-		candidate = slug
-		if !hasChronologicalPrefix(slug) {
-			candidate = now.Format("2006-01-02") + "-" + slug
-			autoPrefixed = true
+// resolveImportTaskSetID picks the on-disk identifier for an imported set,
+// reusing the task-set-creation disambiguation ladder: prefer the requested
+// name (the archive directory name by default, or the --as override), then
+// prepend today's YYYY-MM-DD, then YYYY-MM-DD-HHMM. An identifier is taken when
+// a directory already exists in storage or another set in the same import has
+// claimed it. A collision that survives the HHMM form fails the whole import.
+func resolveImportTaskSetID(d *Deps, tasksDir, asID, archiveID string, now time.Time, claimed map[string]bool) (string, error) {
+	base := archiveID
+	slug := taskSetSlug(archiveID)
+	if asID != "" {
+		base = asID
+		slug = asID
+		if !hasChronologicalPrefix(asID) {
+			base = now.Format("2006-01-02") + "-" + asID
 		}
 	}
 
-	if !taskSetDirExists(d, tasksDir, candidate) {
-		return candidate, nil
-	}
-
-	if autoPrefixed {
-		disambiguated := now.Format("2006-01-02-1504") + "-" + slug
-		if !taskSetDirExists(d, tasksDir, disambiguated) {
-			return disambiguated, nil
+	for _, candidate := range []string{
+		base,
+		now.Format("2006-01-02") + "-" + slug,
+		now.Format("2006-01-02-1504") + "-" + slug,
+	} {
+		if !idTaken(d, tasksDir, claimed, candidate) {
+			return candidate, nil
 		}
-		candidate = disambiguated
 	}
 
-	return "", exitErr(ExitSetup, "Task set %q already exists in storage", candidate)
+	return "", exitErr(ExitSetup, "Task set %q already exists in storage (and dated fallbacks collide too)", base)
 }
 
-func registerImportedTaskSet(d *Deps, statePath, defPath, taskSetID string) error {
+func idTaken(d *Deps, tasksDir string, claimed map[string]bool, id string) bool {
+	return claimed[id] || taskSetDirExists(d, tasksDir, id)
+}
+
+// registerImportedTaskSets appends the installed sets to Task state at priority
+// 0 in the order given, in a single state update. A set already registered for
+// this definition path is left untouched.
+func registerImportedTaskSets(d *Deps, statePath, defPath string, taskSetIDs []string) error {
 	return UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
 		registered := state.RegisteredIDs(defPath)
-		if _, ok := registered[taskSetID]; ok {
-			return nil
-		}
 		entry := state.Entry(defPath)
-		manifestPath := filepath.Join(defPath, taskSetID, "index.json")
-		entry.TaskSets = append(entry.TaskSets, registeredTaskSetFromManifest(d, taskSetID, manifestPath))
+		for _, taskSetID := range taskSetIDs {
+			if _, ok := registered[taskSetID]; ok {
+				continue
+			}
+			manifestPath := filepath.Join(defPath, taskSetID, "index.json")
+			entry.TaskSets = append(entry.TaskSets, registeredTaskSetFromManifest(d, taskSetID, manifestPath))
+			registered[taskSetID] = len(entry.TaskSets) - 1
+		}
 		return nil
 	})
 }
@@ -381,79 +445,82 @@ func writeTaskSetTree(tw *tar.Writer, srcDir, taskSetID string) error {
 	})
 }
 
-func extractTaskSetArchive(archivePath, destDir string) (string, error) {
+// extractTaskSetsArchive extracts a transfer archive to destDir and returns the
+// names of its top-level set directories in first-seen order. The archive shape
+// is "one or more top-level directories" (a single-set archive is the N=1
+// case); every entry is guarded against path traversal and absolute paths.
+func extractTaskSetsArchive(archivePath, destDir string) ([]string, error) {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", exitErr(ExitSetup, "archive not found: %s", archivePath)
+			return nil, exitErr(ExitSetup, "archive not found: %s", archivePath)
 		}
-		return "", exitErr(ExitOperational, "open archive %q: %v", archivePath, err)
+		return nil, exitErr(ExitOperational, "open archive %q: %v", archivePath, err)
 	}
 	defer f.Close()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return "", exitErr(ExitSetup, "read archive %q: %v", archivePath, err)
+		return nil, exitErr(ExitSetup, "read archive %q: %v", archivePath, err)
 	}
 	defer gz.Close()
 
 	tr := tar.NewReader(gz)
-	var topLevel string
+	seen := make(map[string]bool)
+	var topLevels []string
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return "", exitErr(ExitSetup, "read archive %q: %v", archivePath, err)
+			return nil, exitErr(ExitSetup, "read archive %q: %v", archivePath, err)
 		}
 
 		name, err := validateArchiveEntryName(header.Name)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if name == "" {
 			continue
 		}
 
-		parts := strings.Split(name, "/")
-		root := parts[0]
-		if topLevel == "" {
-			topLevel = root
-		} else if topLevel != root {
-			return "", exitErr(ExitSetup, "archive must contain exactly one top-level directory, found %q and %q", topLevel, root)
+		root := strings.SplitN(name, "/", 2)[0]
+		if !seen[root] {
+			seen[root] = true
+			topLevels = append(topLevels, root)
 		}
 
 		target := filepath.Join(destDir, filepath.FromSlash(name))
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
-				return "", exitErr(ExitOperational, "extract archive: %v", err)
+				return nil, exitErr(ExitOperational, "extract archive: %v", err)
 			}
 		case tar.TypeReg, tar.TypeRegA:
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return "", exitErr(ExitOperational, "extract archive: %v", err)
+				return nil, exitErr(ExitOperational, "extract archive: %v", err)
 			}
 			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
 			if err != nil {
-				return "", exitErr(ExitOperational, "extract archive: %v", err)
+				return nil, exitErr(ExitOperational, "extract archive: %v", err)
 			}
 			if _, err := io.Copy(out, tr); err != nil {
 				out.Close()
-				return "", exitErr(ExitOperational, "extract archive: %v", err)
+				return nil, exitErr(ExitOperational, "extract archive: %v", err)
 			}
 			if err := out.Close(); err != nil {
-				return "", exitErr(ExitOperational, "extract archive: %v", err)
+				return nil, exitErr(ExitOperational, "extract archive: %v", err)
 			}
 		default:
-			return "", exitErr(ExitSetup, "unsupported archive entry %q", header.Name)
+			return nil, exitErr(ExitSetup, "unsupported archive entry %q", header.Name)
 		}
 	}
 
-	if topLevel == "" {
-		return "", exitErr(ExitSetup, "archive is empty")
+	if len(topLevels) == 0 {
+		return nil, exitErr(ExitSetup, "archive is empty")
 	}
-	return topLevel, nil
+	return topLevels, nil
 }
 
 func validateArchiveEntryName(name string) (string, error) {

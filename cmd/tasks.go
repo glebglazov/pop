@@ -1036,7 +1036,9 @@ func runTaskImportWith(d *tasks.Deps, w io.Writer, archivePath string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(w, result.Path)
+	for _, set := range result.Sets {
+		fmt.Fprintln(w, set.Path)
+	}
 	return nil
 }
 
