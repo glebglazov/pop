@@ -217,6 +217,9 @@ func cloneWorkbenchOptions(src *WorkbenchOptions) *WorkbenchOptions {
 		return nil
 	}
 	clone := *src
+	if src.Order != nil {
+		clone.Order = append([]string(nil), src.Order...)
+	}
 	return &clone
 }
 

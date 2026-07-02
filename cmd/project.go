@@ -421,7 +421,7 @@ func RunProject(d *ProjectDeps) error {
 			if cfg.WorkbenchPickOnCreate() && !d.Tmux.HasSession(result.Selected.SessionName) {
 				workbenches := d.ResolveWorkbenches(cfg, result.Selected.Path)
 				if len(workbenches) > 0 {
-					name, confirmed, err := promptWorkbenchForCreate(d, workbenches)
+					name, confirmed, err := promptWorkbenchForCreate(d, cfg.WorkbenchOrder(), workbenches)
 					if err != nil {
 						return err
 					}
@@ -631,8 +631,9 @@ func openTmuxSessionWith(tmux deps.Tmux, item *ui.Item) error {
 	}, item.SessionName, item.Path)
 }
 
-// noWorkbenchLabel is the first, preselected entry in the create-path Workbench
-// prompt; choosing it creates today's flat session unchanged (ADR-0075). It is
+// noWorkbenchLabel is the "<empty>" no-workbench entry in the create-path
+// Workbench prompt; choosing it creates today's flat session unchanged
+// (ADR-0075). It leads the default order but [workbench] order can move it. It is
 // distinguished from real Workbenches by its empty Item.Path sentinel, so a
 // Workbench that happens to share this display name is still picked correctly.
 const noWorkbenchLabel = "<empty>"
@@ -642,16 +643,59 @@ const noWorkbenchLabel = "<empty>"
 // reserving the empty path for the no-workbench sentinel.
 const workbenchItemPathPrefix = "workbench:"
 
-// promptWorkbenchForCreate shows a quick-search list of resolved Workbenches with
-// "<empty>" first and preselected (ADR-0075). It returns the chosen Workbench
-// name ("" for the no-workbench entry) and whether the user confirmed a choice
-// (false when Esc was pressed, i.e. return to the project picker, create nothing).
-func promptWorkbenchForCreate(d *ProjectDeps, workbenches []config.Workbench) (name string, confirmed bool, err error) {
-	items := make([]ui.Item, 0, len(workbenches)+1)
-	items = append(items, ui.Item{Name: noWorkbenchLabel})
-	for _, wb := range workbenches {
-		items = append(items, ui.Item{Name: wb.Name, Path: workbenchItemPathPrefix + wb.Name})
+// workbenchOption is one candidate row in an interactive Workbench list: its
+// on-screen Label (which is also its [workbench] order token) and the ui.Item
+// rendered for it. The special "<empty>"/"<reset>" options carry their own
+// labels here alongside real Workbenches.
+type workbenchOption struct {
+	Label string
+	Item  ui.Item
+}
+
+// orderWorkbenchOptions arranges the candidate options of an interactive
+// Workbench list per the [workbench] order rule (task 03). Both interactive
+// lists — the pick_on_create create prompt and the Preferred-workbench picker —
+// route through here so they order identically for the same inputs:
+//
+//  1. Options whose Label is named in order front-load, in the sequence they
+//     appear in order.
+//  2. Every unnamed option follows in the order candidates were given, which
+//     callers build as the default: "<empty>", Workbenches in resolution order,
+//     "<reset>".
+//  3. An order token matching no candidate Label is ignored (same tolerance as a
+//     stale Preferred workbench name).
+func orderWorkbenchOptions(order []string, candidates []workbenchOption) []ui.Item {
+	used := make([]bool, len(candidates))
+	items := make([]ui.Item, 0, len(candidates))
+	for _, token := range order {
+		for i := range candidates {
+			if !used[i] && candidates[i].Label == token {
+				used[i] = true
+				items = append(items, candidates[i].Item)
+				break
+			}
+		}
 	}
+	for i := range candidates {
+		if !used[i] {
+			items = append(items, candidates[i].Item)
+		}
+	}
+	return items
+}
+
+// promptWorkbenchForCreate shows a quick-search list of resolved Workbenches plus
+// the "<empty>" no-workbench option (ADR-0075), ordered by [workbench] order via
+// orderWorkbenchOptions (task 03). It returns the chosen Workbench name ("" for
+// the no-workbench entry) and whether the user confirmed a choice (false when
+// Esc was pressed, i.e. return to the project picker, create nothing).
+func promptWorkbenchForCreate(d *ProjectDeps, order []string, workbenches []config.Workbench) (name string, confirmed bool, err error) {
+	candidates := make([]workbenchOption, 0, len(workbenches)+1)
+	candidates = append(candidates, workbenchOption{Label: noWorkbenchLabel, Item: ui.Item{Name: noWorkbenchLabel}})
+	for _, wb := range workbenches {
+		candidates = append(candidates, workbenchOption{Label: wb.Name, Item: ui.Item{Name: wb.Name, Path: workbenchItemPathPrefix + wb.Name}})
+	}
+	items := orderWorkbenchOptions(order, candidates)
 
 	result, err := d.RunPicker(items, ui.WithInitialCursorIndex(0),
 		ui.WithHeader("Pick a workbench to start a session"))

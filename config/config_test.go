@@ -150,6 +150,42 @@ pick_on_create = true
 	}
 }
 
+func TestWorkbenchOrder(t *testing.T) {
+	// Defaults to nil: nil receiver, nil section, and an empty section.
+	var nilCfg *Config
+	if nilCfg.WorkbenchOrder() != nil {
+		t.Error("nil config: WorkbenchOrder() != nil")
+	}
+	if (&Config{}).WorkbenchOrder() != nil {
+		t.Error("absent [workbench]: WorkbenchOrder() != nil")
+	}
+	if (&Config{WorkbenchOpts: &WorkbenchOptions{}}).WorkbenchOrder() != nil {
+		t.Error("[workbench] without order: WorkbenchOrder() != nil")
+	}
+	got := (&Config{WorkbenchOpts: &WorkbenchOptions{Order: []string{"minimal", "<empty>"}}}).WorkbenchOrder()
+	if len(got) != 2 || got[0] != "minimal" || got[1] != "<empty>" {
+		t.Errorf("WorkbenchOrder() = %v, want [minimal <empty>]", got)
+	}
+}
+
+func TestLoadWorkbenchOrder(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[workbench]
+order = ["minimal", "<reset>"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.WorkbenchOrder()
+	if len(got) != 2 || got[0] != "minimal" || got[1] != "<reset>" {
+		t.Fatalf("WorkbenchOrder() = %v, want [minimal <reset>]", got)
+	}
+}
+
 func TestLoadTaskAgentOutput(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`

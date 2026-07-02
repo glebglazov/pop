@@ -340,7 +340,7 @@ type worktreeShapeDeps struct {
 	PickOnCreate              func(cfg *config.Config) bool
 	ResolveWorkbenches        func(cfg *config.Config, path string) []config.Workbench
 	ResolvePreferredWorkbench func(cfg *config.Config, path string) (string, []string)
-	PromptWorkbench           func(workbenches []config.Workbench) (name string, confirmed bool, err error)
+	PromptWorkbench           func(order []string, workbenches []config.Workbench) (name string, confirmed bool, err error)
 	FindWorkbench             func(workbenches []config.Workbench, name string) (config.Workbench, bool)
 	CreateSession             func(tmpl config.Workbench, sessionName, path string) error
 	SessionName               func(path string) string
@@ -370,8 +370,8 @@ func defaultWorktreeShapeDeps() *worktreeShapeDeps {
 		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) {
 			return cfg.ResolvePreferredWorkbench(preferredResolverConfigDeps(cfg), path)
 		},
-		PromptWorkbench: func(workbenches []config.Workbench) (string, bool, error) {
-			return promptWorkbenchForCreate(&ProjectDeps{RunPicker: ui.Run}, workbenches)
+		PromptWorkbench: func(order []string, workbenches []config.Workbench) (string, bool, error) {
+			return promptWorkbenchForCreate(&ProjectDeps{RunPicker: ui.Run}, order, workbenches)
 		},
 		FindWorkbench: findWorkbench,
 		CreateSession: func(tmpl config.Workbench, sessionName, path string) error {
@@ -419,7 +419,7 @@ func shapeWorktreeSession(d *worktreeShapeDeps, ctx *project.RepoContext, path s
 	if err == nil && d.PickOnCreate(cfg) {
 		workbenches := d.ResolveWorkbenches(cfg, path)
 		if len(workbenches) > 0 {
-			name, confirmed, err := d.PromptWorkbench(workbenches)
+			name, confirmed, err := d.PromptWorkbench(cfg.WorkbenchOrder(), workbenches)
 			if err != nil {
 				return err
 			}

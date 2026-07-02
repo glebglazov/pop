@@ -47,6 +47,39 @@ projects = [
 # Show desktop notifications when a pane becomes unread while in worktree view
 # unread_notifications_enabled = false
 
+# [workbench]
+# Workbenches are named blueprints for a session's tmux windows and pane trees.
+# When pick_on_create is on, selecting a project/worktree with no live session and
+# at least one resolved Workbench prompts you to pick one (or "<empty>" for a plain
+# session) before the session is created. Defaults to off (no prompt).
+# pick_on_create = true
+#
+# order fixes the display sequence of the interactive Workbench lists (the create
+# prompt and the ctrl+w Preferred-workbench picker). Tokens are the literal
+# on-screen labels: Workbench names plus the special options "<empty>" and
+# "<reset>". Named tokens front-load in this order; everything unnamed follows in
+# the default order ("<empty>", Workbenches in resolution order, "<reset>"). A
+# token that resolves to nothing is ignored. With the example below and both
+# Workbenches resolved, the preferred picker renders: minimal, <empty>, full-dev,
+# <reset>.
+# order = ["minimal"]
+
+# [[workbenches]]
+# name = "minimal"
+# windows = [{ name = "edit", layout = { command = "nvim" } }]
+
+# [[workbenches]]
+# name = "full-dev"
+# before_apply = ["git pull --ff-only"]
+# [[workbenches.windows]]
+# name = "edit"
+# [workbenches.windows.layout]
+# children = "columns"
+# panes = [
+#     { command = "nvim", focus = true, weight = 2 },
+#     { command = "git status", weight = 1 },
+# ]
+
 # [pane_monitoring]
 # Automatically downgrade unread to clear when the pane is currently
 # active (visible and focused). Useful if you're already watching the output.

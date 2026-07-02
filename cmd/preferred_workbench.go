@@ -54,6 +54,10 @@ type preferredPickerDeps struct {
 	CurrentEntry   func(path string) (name string, present bool)
 	SetPreferred   func(path, name string) error
 	ClearPreferred func(path string) error
+	// WorkbenchOrder returns the configured [workbench] order tokens that fix the
+	// list's display sequence (task 03), or nil for the default order. May be nil
+	// (treated as no configured order).
+	WorkbenchOrder func() []string
 }
 
 // defaultPreferredPickerDeps wires preferredPickerDeps to production
@@ -85,6 +89,18 @@ func defaultPreferredPickerDeps() *preferredPickerDeps {
 		},
 		SetPreferred:   config.SetRuntimePreferredWorkbench,
 		ClearPreferred: config.ClearRuntimePreferredWorkbench,
+		WorkbenchOrder: func() []string {
+			cfgPath := cfgFile
+			if cfgPath == "" {
+				cfgPath = config.DefaultConfigPath()
+			}
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				debug.Error("preferred workbench: load config: %v", err)
+				return nil
+			}
+			return cfg.WorkbenchOrder()
+		},
 	}
 }
 
@@ -98,14 +114,24 @@ func setPreferredWorkbench(d *preferredPickerDeps, checkoutPath string) error {
 	workbenches := d.ResolveWorkbenches(checkoutPath)
 	_, hasEntry := d.CurrentEntry(checkoutPath)
 
-	items := make([]ui.Item, 0, len(workbenches)+2)
+	// Build the candidate set in default order — "<empty>", Workbenches in
+	// resolution order, then "<reset>" only when a runtime entry exists — and hand
+	// it to the shared ordering rule so this picker sequences identically to the
+	// create prompt (task 03). "<reset>" is a candidate here only; it is never
+	// present in the create prompt regardless of [workbench] order.
+	candidates := make([]workbenchOption, 0, len(workbenches)+2)
+	candidates = append(candidates, workbenchOption{Label: preferredNoWorkbenchLabel, Item: ui.Item{Name: preferredNoWorkbenchLabel, Path: preferredNonePath}})
 	for _, wb := range workbenches {
-		items = append(items, ui.Item{Name: wb.Name, Path: workbenchItemPathPrefix + wb.Name})
+		candidates = append(candidates, workbenchOption{Label: wb.Name, Item: ui.Item{Name: wb.Name, Path: workbenchItemPathPrefix + wb.Name}})
 	}
-	items = append(items, ui.Item{Name: preferredNoWorkbenchLabel, Path: preferredNonePath})
 	if hasEntry {
-		items = append(items, ui.Item{Name: preferredResetLabel, Path: preferredResetPath})
+		candidates = append(candidates, workbenchOption{Label: preferredResetLabel, Item: ui.Item{Name: preferredResetLabel, Path: preferredResetPath}})
 	}
+	var order []string
+	if d.WorkbenchOrder != nil {
+		order = d.WorkbenchOrder()
+	}
+	items := orderWorkbenchOptions(order, candidates)
 
 	result, err := d.RunPicker(items,
 		ui.WithHeader("Set preferred workbench (sets the preference only)"),

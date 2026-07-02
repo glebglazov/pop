@@ -212,6 +212,14 @@ type WorkbenchOptions struct {
 	// before the session is created. Default false ⇒ the project picker behaves
 	// exactly as today (no prompt).
 	PickOnCreate bool `toml:"pick_on_create"`
+
+	// Order fixes the display sequence of the interactive Workbench lists (the
+	// create prompt and the Preferred-workbench picker). Tokens are the literal
+	// on-screen labels: Workbench names plus the special options "<empty>" and
+	// "<reset>". Named tokens front-load in the listed order; everything unnamed
+	// follows in default order ("<empty>", Workbenches in resolution order,
+	// "<reset>"). A token that resolves to nothing is ignored. Global-only.
+	Order []string `toml:"order"`
 }
 
 // Workbench is a named blueprint for an ordered list of tmux windows,
@@ -828,6 +836,16 @@ func (c *Config) WorkbenchPickOnCreate() bool {
 		return false
 	}
 	return c.WorkbenchOpts.PickOnCreate
+}
+
+// WorkbenchOrder returns the configured [workbench] order tokens (the fixed
+// display sequence for the interactive Workbench lists), or nil when unset. The
+// receiver may be nil.
+func (c *Config) WorkbenchOrder() []string {
+	if c == nil || c.WorkbenchOpts == nil {
+		return nil
+	}
+	return c.WorkbenchOpts.Order
 }
 
 // ResolvePreferredWorkbench returns the name of the Workbench that should

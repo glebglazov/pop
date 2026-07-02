@@ -272,7 +272,7 @@ func newShapeDeps(pickOn bool, workbenches []config.Workbench, promptName string
 		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) {
 			return "", nil
 		},
-		PromptWorkbench: func(wbs []config.Workbench) (string, bool, error) {
+		PromptWorkbench: func(order []string, wbs []config.Workbench) (string, bool, error) {
 			spy.promptCalled = true
 			return promptName, promptConfirmed, nil
 		},
