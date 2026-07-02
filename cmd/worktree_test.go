@@ -260,24 +260,24 @@ type shapeSpy struct {
 // newShapeDeps builds worktreeShapeDeps whose behavior is driven by the given
 // pick_on_create toggle, resolved set, and prompt result. All side effects are
 // captured in the returned spy.
-func newShapeDeps(pickOn bool, workbenches []config.SessionTemplate, promptName string, promptConfirmed bool) (*worktreeShapeDeps, *shapeSpy) {
+func newShapeDeps(pickOn bool, workbenches []config.Workbench, promptName string, promptConfirmed bool) (*worktreeShapeDeps, *shapeSpy) {
 	spy := &shapeSpy{}
 	d := &worktreeShapeDeps{
 		LoadConfig:   func() (*config.Config, error) { return &config.Config{}, nil },
 		PickOnCreate: func(cfg *config.Config) bool { return pickOn },
-		ResolveWorkbenches: func(cfg *config.Config, path string) []config.SessionTemplate {
+		ResolveWorkbenches: func(cfg *config.Config, path string) []config.Workbench {
 			spy.resolveCalled = true
 			return workbenches
 		},
 		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) {
 			return "", nil
 		},
-		PromptWorkbench: func(wbs []config.SessionTemplate) (string, bool, error) {
+		PromptWorkbench: func(wbs []config.Workbench) (string, bool, error) {
 			spy.promptCalled = true
 			return promptName, promptConfirmed, nil
 		},
-		FindWorkbench: findSessionTemplate,
-		CreateSession: func(tmpl config.SessionTemplate, sessionName, path string) error {
+		FindWorkbench: findWorkbench,
+		CreateSession: func(tmpl config.Workbench, sessionName, path string) error {
 			spy.createdTmpl = tmpl.Name
 			spy.createdSession = sessionName
 			spy.createdPath = path
@@ -295,7 +295,7 @@ func newShapeDeps(pickOn bool, workbenches []config.SessionTemplate, promptName 
 }
 
 func TestShapeWorktreeSession_PickAWorkbench(t *testing.T) {
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d, spy := newShapeDeps(true, wbs, "gs-dev", true)
 
 	if err := shapeWorktreeSession(d, &project.RepoContext{}, "/repo/feature"); err != nil {
@@ -332,7 +332,7 @@ func TestShapeWorktreeSession_PreferredAutoApplies(t *testing.T) {
 			name = "pick_on_create_on"
 		}
 		t.Run(name, func(t *testing.T) {
-			wbs := []config.SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}
+			wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 			d, spy := newShapeDeps(pickOn, wbs, "gs-dev", true)
 			d.ResolvePreferredWorkbench = func(cfg *config.Config, path string) (string, []string) {
 				return "gs-dev", nil
@@ -365,7 +365,7 @@ func TestShapeWorktreeSession_PreferredAutoApplies(t *testing.T) {
 // workbench (empty name + warning) never blocks: with pick_on_create off it
 // falls through to today's flat session.
 func TestShapeWorktreeSession_StalePreferredFallsThrough(t *testing.T) {
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d, spy := newShapeDeps(false, wbs, "gs-dev", true)
 	d.ResolvePreferredWorkbench = func(cfg *config.Config, path string) (string, []string) {
 		return "", []string{"preferred workbench \"ghost\" does not resolve; ignoring"}
@@ -384,7 +384,7 @@ func TestShapeWorktreeSession_StalePreferredFallsThrough(t *testing.T) {
 }
 
 func TestShapeWorktreeSession_NoWorkbenchFallsThrough(t *testing.T) {
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}}
 	// The "no workbench" sentinel: confirmed choice, empty name.
 	d, spy := newShapeDeps(true, wbs, "", true)
 
@@ -404,7 +404,7 @@ func TestShapeWorktreeSession_NoWorkbenchFallsThrough(t *testing.T) {
 }
 
 func TestShapeWorktreeSession_EscFallsThrough(t *testing.T) {
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}}
 	// Esc: not confirmed. The worktree already exists, so fall through to flat.
 	d, spy := newShapeDeps(true, wbs, "", false)
 
@@ -421,7 +421,7 @@ func TestShapeWorktreeSession_EscFallsThrough(t *testing.T) {
 }
 
 func TestShapeWorktreeSession_ToggleOffSkipsPrompt(t *testing.T) {
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d, spy := newShapeDeps(false, wbs, "gs-dev", true)
 
 	if err := shapeWorktreeSession(d, &project.RepoContext{}, "/repo/feature"); err != nil {

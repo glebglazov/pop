@@ -1011,7 +1011,7 @@ func testProjectDeps(t *testing.T) *ProjectDeps {
 		EnsureSystemState:        func() []string { return nil },
 		RunConfigure:             func() error { return nil },
 
-		ResolveWorkbenches:        func(cfg *config.Config, path string) []config.SessionTemplate { return nil },
+		ResolveWorkbenches:        func(cfg *config.Config, path string) []config.Workbench { return nil },
 		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) { return "", nil },
 
 		InTmux:         func() bool { return false },
@@ -1429,7 +1429,7 @@ func TestRunProject_UnparseableTOMLAborts(t *testing.T) {
 // projectDepsForWorkbenchPrompt builds a ProjectDeps with [workbench]
 // pick_on_create = true and a fixed resolved-Workbench set, so the create-path
 // prompt can be exercised without touching .pop.toml or the global library.
-func projectDepsForWorkbenchPrompt(t *testing.T, workbenches []config.SessionTemplate) *ProjectDeps {
+func projectDepsForWorkbenchPrompt(t *testing.T, workbenches []config.Workbench) *ProjectDeps {
 	t.Helper()
 	d := testProjectDeps(t)
 	orig := d.LoadConfig
@@ -1441,7 +1441,7 @@ func projectDepsForWorkbenchPrompt(t *testing.T, workbenches []config.SessionTem
 		cfg.WorkbenchOpts = &config.WorkbenchOptions{PickOnCreate: true}
 		return cfg, nil
 	}
-	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.SessionTemplate {
+	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.Workbench {
 		return workbenches
 	}
 	return d
@@ -1453,9 +1453,9 @@ func projectDepsForWorkbenchPrompt(t *testing.T, workbenches []config.SessionTem
 func TestRunProject_WorkbenchPickDisabledNoPrompt(t *testing.T) {
 	d := testProjectDeps(t) // pick_on_create defaults false
 	resolveCalled := false
-	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.SessionTemplate {
+	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.Workbench {
 		resolveCalled = true
-		return []config.SessionTemplate{{Name: "dev"}}
+		return []config.Workbench{{Name: "dev"}}
 	}
 	openFlat := false
 	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
@@ -1519,7 +1519,7 @@ func TestRunProject_WorkbenchPickEmptySetSkipsPrompt(t *testing.T) {
 // and ≥1 Workbench, the second (quick-search) list shows "no workbench" first and
 // selecting a real Workbench routes to OpenSessionWithWorkbench (not the flat path).
 func TestRunProject_WorkbenchPickSelectsWorkbench(t *testing.T) {
-	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}})
+	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}})
 
 	openFlat := false
 	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
@@ -1570,7 +1570,7 @@ func TestRunProject_WorkbenchPickSelectsWorkbench(t *testing.T) {
 // TestRunProject_WorkbenchPickNoWorkbenchYieldsFlat asserts that choosing the
 // "no workbench" entry creates today's flat session.
 func TestRunProject_WorkbenchPickNoWorkbenchYieldsFlat(t *testing.T) {
-	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}})
+	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	openFlat := false
 	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
@@ -1690,7 +1690,7 @@ func TestRunProject_StalePreferredFallsThrough(t *testing.T) {
 // TestRunProject_WorkbenchPickEscReturnsToProjectPicker asserts that Esc in the
 // Workbench list creates nothing and returns to the project picker.
 func TestRunProject_WorkbenchPickEscReturnsToProjectPicker(t *testing.T) {
-	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}})
+	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	openFlat := false
 	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
@@ -1728,13 +1728,13 @@ func TestRunProject_WorkbenchPickEscReturnsToProjectPicker(t *testing.T) {
 // on selections that create a session: a project whose session is already live
 // skips the prompt and reattaches via the flat path.
 func TestRunProject_WorkbenchPickLiveSessionNoPrompt(t *testing.T) {
-	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}})
+	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 	d.Tmux = &deps.MockTmux{HasSessionFunc: func(name string) bool { return true }}
 
 	resolveCalled := false
-	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.SessionTemplate {
+	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.Workbench {
 		resolveCalled = true
-		return []config.SessionTemplate{{Name: "gs-dev"}}
+		return []config.Workbench{{Name: "gs-dev"}}
 	}
 	openFlat := false
 	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
@@ -1768,12 +1768,12 @@ func TestRunProject_WorkbenchPickLiveSessionNoPrompt(t *testing.T) {
 // open-in-new-window action never triggers the Workbench prompt, even with the
 // toggle on.
 func TestRunProject_WorkbenchPickOpenWindowUnaffected(t *testing.T) {
-	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}})
+	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	resolveCalled := false
-	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.SessionTemplate {
+	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.Workbench {
 		resolveCalled = true
-		return []config.SessionTemplate{{Name: "gs-dev"}}
+		return []config.Workbench{{Name: "gs-dev"}}
 	}
 	openWindow := false
 	d.OpenWindow = func(tmux deps.Tmux, item *ui.Item) error { openWindow = true; return nil }
@@ -1803,12 +1803,12 @@ func TestRunProject_WorkbenchPickOpenWindowUnaffected(t *testing.T) {
 // TestRunProject_WorkbenchPickStandaloneUnaffected asserts that selecting a
 // standalone session switches to it without any Workbench prompt.
 func TestRunProject_WorkbenchPickStandaloneUnaffected(t *testing.T) {
-	d := projectDepsForWorkbenchPrompt(t, []config.SessionTemplate{{Name: "gs-dev"}})
+	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	resolveCalled := false
-	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.SessionTemplate {
+	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.Workbench {
 		resolveCalled = true
-		return []config.SessionTemplate{{Name: "gs-dev"}}
+		return []config.Workbench{{Name: "gs-dev"}}
 	}
 	var switched string
 	d.SwitchToTarget = func(tmux deps.Tmux, target string) error { switched = target; return nil }

@@ -48,7 +48,7 @@ const (
 // terminal, config, or runtime file.
 type preferredPickerDeps struct {
 	RunPicker          func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error)
-	ResolveWorkbenches func(path string) []config.SessionTemplate
+	ResolveWorkbenches func(path string) []config.Workbench
 	// CurrentEntry reports the runtime entry for path: present is false when
 	// absent (so "reset to default" is offered only when true).
 	CurrentEntry   func(path string) (name string, present bool)
@@ -62,7 +62,7 @@ type preferredPickerDeps struct {
 func defaultPreferredPickerDeps() *preferredPickerDeps {
 	return &preferredPickerDeps{
 		RunPicker: ui.Run,
-		ResolveWorkbenches: func(path string) []config.SessionTemplate {
+		ResolveWorkbenches: func(path string) []config.Workbench {
 			cfgPath := cfgFile
 			if cfgPath == "" {
 				cfgPath = config.DefaultConfigPath()
@@ -72,7 +72,7 @@ func defaultPreferredPickerDeps() *preferredPickerDeps {
 				debug.Error("preferred workbench: load config: %v", err)
 				return nil
 			}
-			templates, _ := cfg.ResolveSessionTemplatesWith(config.DefaultDeps(), path)
+			templates, _ := cfg.ResolveWorkbenchesWith(config.DefaultDeps(), path)
 			return templates
 		},
 		CurrentEntry: func(path string) (string, bool) {

@@ -56,14 +56,14 @@ func TestWorkbenchCmdIsVisibleLayoutCmdIsHidden(t *testing.T) {
 
 func TestRunTemplateListWith(t *testing.T) {
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{
+		Workbenches: []config.Workbench{
 			{Name: "dev"},
 			{Name: "review"},
 		},
 	}
 	var out bytes.Buffer
 
-	if err := runTemplateListWith(cfg.SessionTemplates, &out); err != nil {
+	if err := runTemplateListWith(cfg.Workbenches, &out); err != nil {
 		t.Fatalf("runTemplateListWith() error: %v", err)
 	}
 	if got, want := out.String(), "dev\nreview\n"; got != want {
@@ -73,11 +73,11 @@ func TestRunTemplateListWith(t *testing.T) {
 
 func TestRunTemplateApplyWith(t *testing.T) {
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "dev",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name:   "work",
-				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
+				Layout: &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."},
 			}},
 		}},
 	}
@@ -102,7 +102,7 @@ func TestRunTemplateApplyWith(t *testing.T) {
 		ErrOut:      io.Discard,
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "dev"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestRunTemplateApplyWith(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithUnknownName(t *testing.T) {
-	err := runTemplateApplyWith(templateRuntimeDeps{Tmux: &deps.MockTmux{}}, []config.SessionTemplate{}, "missing")
+	err := runTemplateApplyWith(templateRuntimeDeps{Tmux: &deps.MockTmux{}}, []config.Workbench{}, "missing")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -135,11 +135,11 @@ func TestRunTemplateApplyWithUnknownName(t *testing.T) {
 
 func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "dev",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name:   "work",
-				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
+				Layout: &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."},
 			}},
 		}},
 	}
@@ -160,7 +160,7 @@ func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev")
+	err := runTemplateApplyWith(d, cfg.Workbenches, "dev")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -172,13 +172,13 @@ func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
 func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 	// Test: window with 3 panes in a row with weights 1, 2, 3
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "weighted",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "work",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "columns",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "left", Command: "echo left", Weight: 1},
 						{Name: "middle", Command: "echo middle", Weight: 2},
 						{Name: "right", Command: "echo right", Weight: 3},
@@ -217,7 +217,7 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "weighted"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "weighted"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -254,13 +254,13 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 	// Test: column direction uses -v for splits and -y for resize
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "stacked",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "work",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "rows",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "top", Command: "echo top"},
 						{Name: "bottom", Command: "echo bottom"},
 					},
@@ -296,7 +296,7 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "stacked"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "stacked"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -332,17 +332,17 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 	// Test: nested containers - outer row with 2 children, first child is a column container
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "nested",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "work",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "columns",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{
 							Children: "rows",
 							Weight:   1,
-							Panes: []config.SessionTemplatePaneSpec{
+							Panes: []config.WorkbenchPaneSpec{
 								{Name: "top-left", Command: "echo tl", Weight: 1},
 								{Name: "bottom-left", Command: "echo bl", Weight: 1},
 							},
@@ -382,7 +382,7 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "nested"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "nested"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -402,13 +402,13 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 	// Test: omitted weight defaults to 1 (equal split)
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "equal",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "work",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "columns",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "left", Command: "echo left"},   // weight omitted = 1
 						{Name: "right", Command: "echo right"}, // weight omitted = 1
 					},
@@ -444,7 +444,7 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "equal"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "equal"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -473,13 +473,13 @@ func TestResizePanesByWeightTargetsBuiltWindow(t *testing.T) {
 	// detached session (born 80x24 from new-session -d) is sized against a
 	// mismatched client window and tmux clamps to a lopsided split.
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "equal",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "work",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "columns",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "left", Command: "echo left"},
 						{Name: "right", Command: "echo right"},
 					},
@@ -515,7 +515,7 @@ func TestResizePanesByWeightTargetsBuiltWindow(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "equal"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "equal"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -543,19 +543,19 @@ func TestResizePanesByWeightTargetsBuiltWindow(t *testing.T) {
 func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 	// Test: 3 levels deep nesting
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "deep",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "work",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "columns",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{
 							Children: "rows",
-							Panes: []config.SessionTemplatePaneSpec{
+							Panes: []config.WorkbenchPaneSpec{
 								{
 									Children: "columns",
-									Panes: []config.SessionTemplatePaneSpec{
+									Panes: []config.WorkbenchPaneSpec{
 										{Name: "deep-left", Command: "echo dl"},
 										{Name: "deep-right", Command: "echo dr"},
 									},
@@ -598,7 +598,7 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "deep"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "deep"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -618,11 +618,11 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 
 func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "dev",
-			Windows: []config.SessionTemplateWindow{
-				{Name: "work", Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}},
-				{Name: "logs", Layout: &config.SessionTemplatePaneSpec{Name: "tail", Command: "tail -f app.log"}},
+			Windows: []config.WorkbenchWindow{
+				{Name: "work", Layout: &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."}},
+				{Name: "logs", Layout: &config.WorkbenchPaneSpec{Name: "tail", Command: "tail -f app.log"}},
 			},
 		}},
 	}
@@ -652,7 +652,7 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 		ErrOut:      io.Discard,
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "dev"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -684,10 +684,10 @@ func TestRunTemplateApplyWithUnstampedWindowCreatesFresh(t *testing.T) {
 	// which carries no @pop_wb_window stamp is NOT matched (identity never lives
 	// in window_name, ADR-0075): the target window is created fresh.
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "dev",
-			Windows: []config.SessionTemplateWindow{
-				{Name: "work", Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}},
+			Windows: []config.WorkbenchWindow{
+				{Name: "work", Layout: &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."}},
 			},
 		}},
 	}
@@ -716,7 +716,7 @@ func TestRunTemplateApplyWithUnstampedWindowCreatesFresh(t *testing.T) {
 		ErrOut:      io.Discard,
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "dev"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -801,14 +801,14 @@ func TestEffectiveCwdAndResolveCwd(t *testing.T) {
 
 func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "cwd-test",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "work",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "rows",
 					Cwd:      "backend",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "inherited", Command: "echo inherited"},
 						{Name: "override", Command: "echo override", Cwd: "api"},
 					},
@@ -840,7 +840,7 @@ func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "cwd-test"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "cwd-test"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -858,13 +858,13 @@ func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
 
 func TestRunTemplateApplyWithCwdTildeAndAbsolute(t *testing.T) {
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "cwd-test",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "work",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "rows",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "home", Command: "echo home", Cwd: "~/docs"},
 						{Name: "abs", Command: "echo abs", Cwd: "/tmp"},
 					},
@@ -896,7 +896,7 @@ func TestRunTemplateApplyWithCwdTildeAndAbsolute(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "cwd-test"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "cwd-test"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -906,13 +906,13 @@ func TestRunTemplateApplyWithCwdTildeAndAbsolute(t *testing.T) {
 
 func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "focus-test",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "work",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "columns",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "left", Command: "echo left"},
 						{Name: "right", Command: "echo right", Focus: true},
 					},
@@ -944,7 +944,7 @@ func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "focus-test"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "focus-test"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -958,13 +958,13 @@ func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
 func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
 	var warnings bytes.Buffer
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "focus-test",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "work",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "columns",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "first", Command: "echo first", Focus: true},
 						{Name: "second", Command: "echo second", Focus: true},
 					},
@@ -997,7 +997,7 @@ func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
 		ErrOut:      &warnings,
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "focus-test"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "focus-test"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -1021,7 +1021,7 @@ func TestRealizePaneTreeStampsNamedLeafSkipsUnnamed(t *testing.T) {
 
 	// Named leaf: identity is stamped.
 	calls = nil
-	named := &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."}
+	named := &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."}
 	if _, err := realizePaneTree(tmux, named, "%7", "/repo", "/repo", "/home/user"); err != nil {
 		t.Fatalf("realizePaneTree(named) error: %v", err)
 	}
@@ -1030,7 +1030,7 @@ func TestRealizePaneTreeStampsNamedLeafSkipsUnnamed(t *testing.T) {
 
 	// Unnamed leaf: no @pop_pane stamp.
 	calls = nil
-	unnamed := &config.SessionTemplatePaneSpec{Command: "htop"}
+	unnamed := &config.WorkbenchPaneSpec{Command: "htop"}
 	if _, err := realizePaneTree(tmux, unnamed, "%8", "/repo", "/repo", "/home/user"); err != nil {
 		t.Fatalf("realizePaneTree(unnamed) error: %v", err)
 	}
@@ -1097,18 +1097,18 @@ func TestRunTemplateApplyMergeSupersetAppend(t *testing.T) {
 	// row of three columns) keeps the live vim/claude panes and appends only
 	// the third row.
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "gs-dev",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "dev",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "rows",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "vim", Command: "vim"},
 						{Name: "claude", Command: "claude"},
 						{
 							Children: "columns",
-							Panes: []config.SessionTemplatePaneSpec{
+							Panes: []config.WorkbenchPaneSpec{
 								{Name: "build", Command: "echo build"},
 								{Name: "services", Command: "echo services"},
 								{Name: "vite", Command: "echo vite"},
@@ -1128,7 +1128,7 @@ func TestRunTemplateApplyMergeSupersetAppend(t *testing.T) {
 		ErrOut:      io.Discard,
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "gs-dev"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "gs-dev"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -1181,13 +1181,13 @@ func TestRunTemplateApplyMergeMidRowColumnInsertion(t *testing.T) {
 	// A missing column inside an otherwise-live row is spliced in beside its
 	// live left sibling, in the correct position.
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "row",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "dev",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "columns",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "left", Command: "echo left"},
 						{Name: "middle", Command: "echo middle"},
 						{Name: "right", Command: "echo right"},
@@ -1206,7 +1206,7 @@ func TestRunTemplateApplyMergeMidRowColumnInsertion(t *testing.T) {
 		ErrOut:      io.Discard,
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "row"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "row"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -1230,13 +1230,13 @@ func TestRunTemplateApplyMergeReproportionsSurvivors(t *testing.T) {
 	// Reapplying with new weights reproportions the surviving panes without
 	// re-running or killing them.
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "grow",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "dev",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "rows",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "vim", Command: "vim", Weight: 3},
 						{Name: "claude", Command: "claude", Weight: 1},
 					},
@@ -1253,7 +1253,7 @@ func TestRunTemplateApplyMergeReproportionsSurvivors(t *testing.T) {
 		ErrOut:      io.Discard,
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "grow"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "grow"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -1277,13 +1277,13 @@ func TestRunTemplateApplyMergeRecreatesUnnamedLeaf(t *testing.T) {
 	// be matched, so a reapply always (re)creates them — even when a named
 	// sibling survives.
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name: "mixed",
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "dev",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "rows",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "vim", Command: "vim"},
 						{Command: "htop"}, // unnamed leaf
 					},
@@ -1300,7 +1300,7 @@ func TestRunTemplateApplyMergeRecreatesUnnamedLeaf(t *testing.T) {
 		ErrOut:      io.Discard,
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "mixed"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "mixed"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -1323,12 +1323,12 @@ func TestRunTemplateApplyMergeRecreatesUnnamedLeaf(t *testing.T) {
 
 func TestRunTemplateApplyBeforeApplyRunsBeforeWindowRealization(t *testing.T) {
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name:        "dev",
 			BeforeApply: []string{"git pull", "make decrypt"},
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name:   "work",
-				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
+				Layout: &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."},
 			}},
 		}},
 	}
@@ -1364,7 +1364,7 @@ func TestRunTemplateApplyBeforeApplyRunsBeforeWindowRealization(t *testing.T) {
 		},
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "dev"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -1385,14 +1385,14 @@ func TestRunTemplateApplyBeforeApplyRunsOnReapplyOverLiveSession(t *testing.T) {
 	// Reapply over a live, pop-owned window (merge path) must still run
 	// before_apply on every apply.
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name:        "dev",
 			BeforeApply: []string{"git pull"},
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name: "dev",
-				Layout: &config.SessionTemplatePaneSpec{
+				Layout: &config.WorkbenchPaneSpec{
 					Children: "rows",
-					Panes: []config.SessionTemplatePaneSpec{
+					Panes: []config.WorkbenchPaneSpec{
 						{Name: "vim", Command: "vim"},
 						{Name: "claude", Command: "claude"},
 					},
@@ -1418,7 +1418,7 @@ func TestRunTemplateApplyBeforeApplyRunsOnReapplyOverLiveSession(t *testing.T) {
 		},
 	}
 
-	if err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev"); err != nil {
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "dev"); err != nil {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
@@ -1430,12 +1430,12 @@ func TestRunTemplateApplyBeforeApplyRunsOnReapplyOverLiveSession(t *testing.T) {
 func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 	// A failing before_apply command aborts the apply before any window is built.
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name:        "dev",
 			BeforeApply: []string{"false"},
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name:   "work",
-				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
+				Layout: &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."},
 			}},
 		}},
 	}
@@ -1459,7 +1459,7 @@ func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 		},
 	}
 
-	err := runTemplateApplyWith(d, cfg.SessionTemplates, "dev")
+	err := runTemplateApplyWith(d, cfg.Workbenches, "dev")
 	if err == nil {
 		t.Fatal("expected error from failing before_apply")
 	}
@@ -1475,12 +1475,12 @@ func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 
 func TestCreateSessionFromWorkbenchRemovesStrayWindow(t *testing.T) {
 	cfg := &config.Config{
-		SessionTemplates: []config.SessionTemplate{{
+		Workbenches: []config.Workbench{{
 			Name:        "dev",
 			BeforeApply: []string{"git pull"},
-			Windows: []config.SessionTemplateWindow{{
+			Windows: []config.WorkbenchWindow{{
 				Name:   "work",
-				Layout: &config.SessionTemplatePaneSpec{Name: "server", Command: "go test ./..."},
+				Layout: &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."},
 			}},
 		}},
 	}
@@ -1517,7 +1517,7 @@ func TestCreateSessionFromWorkbenchRemovesStrayWindow(t *testing.T) {
 		},
 	}
 
-	tmpl, _ := findSessionTemplate(cfg.SessionTemplates, "dev")
+	tmpl, _ := findWorkbench(cfg.Workbenches, "dev")
 	if err := createSessionFromWorkbench(d, tmpl, "mysess", "/repo/checkout"); err != nil {
 		t.Fatalf("createSessionFromWorkbench() error: %v", err)
 	}
@@ -1559,7 +1559,7 @@ func TestCreateSessionFromWorkbenchInvalidTemplate(t *testing.T) {
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
 	}
-	err := createSessionFromWorkbench(d, config.SessionTemplate{Name: "empty"}, "mysess", "/repo")
+	err := createSessionFromWorkbench(d, config.Workbench{Name: "empty"}, "mysess", "/repo")
 	if err == nil {
 		t.Fatal("expected error for a Workbench with no windows")
 	}

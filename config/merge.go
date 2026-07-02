@@ -149,10 +149,7 @@ func mergeConfigOverlay(dst, src *Config, md toml.MetaData) {
 		dst.Effort = cloneEffortMap(src.Effort)
 	}
 	if md.IsDefined("workbenches") {
-		dst.Workbenches = cloneSessionTemplates(src.Workbenches)
-	}
-	if md.IsDefined("session_templates") {
-		dst.SessionTemplates = cloneSessionTemplates(src.SessionTemplates)
+		dst.Workbenches = cloneWorkbenches(src.Workbenches)
 	}
 	if md.IsDefined("workbench") {
 		dst.WorkbenchOpts = cloneWorkbenchOptions(src.WorkbenchOpts)
@@ -223,15 +220,15 @@ func cloneWorkbenchOptions(src *WorkbenchOptions) *WorkbenchOptions {
 	return &clone
 }
 
-func cloneSessionTemplates(src []SessionTemplate) []SessionTemplate {
+func cloneWorkbenches(src []Workbench) []Workbench {
 	if src == nil {
 		return nil
 	}
-	out := make([]SessionTemplate, len(src))
+	out := make([]Workbench, len(src))
 	for i, tmpl := range src {
-		out[i] = SessionTemplate{
+		out[i] = Workbench{
 			Name:    tmpl.Name,
-			Windows: make([]SessionTemplateWindow, len(tmpl.Windows)),
+			Windows: make([]WorkbenchWindow, len(tmpl.Windows)),
 		}
 		for j, window := range tmpl.Windows {
 			out[i].Windows[j].Name = window.Name

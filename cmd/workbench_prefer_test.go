@@ -12,7 +12,7 @@ import (
 // write/clear seams and resolves a fixed workbench set. checkoutErr, when
 // non-nil, makes CurrentCheckout fail. pickPath scripts the interactive picker
 // (used only for the no-arg path).
-func newWorkbenchPreferDeps(checkout string, checkoutErr error, workbenches []config.SessionTemplate, pickPath string, rec *preferredCall) *workbenchPreferDeps {
+func newWorkbenchPreferDeps(checkout string, checkoutErr error, workbenches []config.Workbench, pickPath string, rec *preferredCall) *workbenchPreferDeps {
 	picker := &preferredPickerDeps{
 		RunPicker: func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
 			if pickPath == "esc:cancel" {
@@ -25,7 +25,7 @@ func newWorkbenchPreferDeps(checkout string, checkoutErr error, workbenches []co
 			}
 			return ui.Result{Action: ui.ActionCancel}, errors.New("scripted pick path not found: " + pickPath)
 		},
-		ResolveWorkbenches: func(string) []config.SessionTemplate { return workbenches },
+		ResolveWorkbenches: func(string) []config.Workbench { return workbenches },
 		CurrentEntry:       func(string) (string, bool) { return "", false },
 		SetPreferred: func(path, name string) error {
 			rec.setPath, rec.setName = path, name
@@ -46,7 +46,7 @@ func newWorkbenchPreferDeps(checkout string, checkoutErr error, workbenches []co
 
 func TestRunWorkbenchPrefer_SetsName(t *testing.T) {
 	rec := &preferredCall{}
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d := newWorkbenchPreferDeps("/repo/app", nil, wbs, "", rec)
 
 	if err := runWorkbenchPreferWith(d, "minimal", false, false); err != nil {
@@ -62,7 +62,7 @@ func TestRunWorkbenchPrefer_SetsName(t *testing.T) {
 
 func TestRunWorkbenchPrefer_BadNameErrorsWithoutWriting(t *testing.T) {
 	rec := &preferredCall{}
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d := newWorkbenchPreferDeps("/repo/app", nil, wbs, "", rec)
 
 	err := runWorkbenchPreferWith(d, "nope", false, false)
@@ -118,7 +118,7 @@ func TestRunWorkbenchPrefer_MutuallyExclusiveFlags(t *testing.T) {
 
 func TestRunWorkbenchPrefer_NameWithFlagRejected(t *testing.T) {
 	rec := &preferredCall{}
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d := newWorkbenchPreferDeps("/repo/app", nil, wbs, "", rec)
 
 	if err := runWorkbenchPreferWith(d, "gs-dev", true, false); err == nil {
@@ -131,7 +131,7 @@ func TestRunWorkbenchPrefer_NameWithFlagRejected(t *testing.T) {
 
 func TestRunWorkbenchPrefer_NoArgsOpensPicker(t *testing.T) {
 	rec := &preferredCall{}
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d := newWorkbenchPreferDeps("/repo/app", nil, wbs, workbenchItemPathPrefix+"gs-dev", rec)
 
 	if err := runWorkbenchPreferWith(d, "", false, false); err != nil {
@@ -156,7 +156,7 @@ func TestRunWorkbenchPrefer_CheckoutErrorAborts(t *testing.T) {
 
 func TestWorkbenchPreferNames_CompletionSource(t *testing.T) {
 	rec := &preferredCall{}
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d := newWorkbenchPreferDeps("/repo/app", nil, wbs, "", rec)
 
 	names, err := workbenchPreferNames(d)

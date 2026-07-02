@@ -338,11 +338,11 @@ func createWorktree(ctx *project.RepoContext) error {
 type worktreeShapeDeps struct {
 	LoadConfig                func() (*config.Config, error)
 	PickOnCreate              func(cfg *config.Config) bool
-	ResolveWorkbenches        func(cfg *config.Config, path string) []config.SessionTemplate
+	ResolveWorkbenches        func(cfg *config.Config, path string) []config.Workbench
 	ResolvePreferredWorkbench func(cfg *config.Config, path string) (string, []string)
-	PromptWorkbench           func(workbenches []config.SessionTemplate) (name string, confirmed bool, err error)
-	FindWorkbench             func(workbenches []config.SessionTemplate, name string) (config.SessionTemplate, bool)
-	CreateSession             func(tmpl config.SessionTemplate, sessionName, path string) error
+	PromptWorkbench           func(workbenches []config.Workbench) (name string, confirmed bool, err error)
+	FindWorkbench             func(workbenches []config.Workbench, name string) (config.Workbench, bool)
+	CreateSession             func(tmpl config.Workbench, sessionName, path string) error
 	SessionName               func(path string) string
 	RecordHistory             func(path string)
 	Attach                    func(sessionName string) error
@@ -350,7 +350,7 @@ type worktreeShapeDeps struct {
 }
 
 // defaultWorktreeShapeDeps wires worktreeShapeDeps to production implementations,
-// reusing the existing Workbench resolution (ResolveSessionTemplatesWith — so
+// reusing the existing Workbench resolution (ResolveWorkbenchesWith — so
 // bare-repo Workbenches still propagate to the new worktree), prompt
 // (promptWorkbenchForCreate), and create (createSessionFromWorkbench) helpers.
 func defaultWorktreeShapeDeps() *worktreeShapeDeps {
@@ -363,18 +363,18 @@ func defaultWorktreeShapeDeps() *worktreeShapeDeps {
 			return config.Load(path)
 		},
 		PickOnCreate: func(cfg *config.Config) bool { return cfg.WorkbenchPickOnCreate() },
-		ResolveWorkbenches: func(cfg *config.Config, path string) []config.SessionTemplate {
-			templates, _ := cfg.ResolveSessionTemplatesWith(config.DefaultDeps(), path)
+		ResolveWorkbenches: func(cfg *config.Config, path string) []config.Workbench {
+			templates, _ := cfg.ResolveWorkbenchesWith(config.DefaultDeps(), path)
 			return templates
 		},
 		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) {
 			return cfg.ResolvePreferredWorkbench(preferredResolverConfigDeps(cfg), path)
 		},
-		PromptWorkbench: func(workbenches []config.SessionTemplate) (string, bool, error) {
+		PromptWorkbench: func(workbenches []config.Workbench) (string, bool, error) {
 			return promptWorkbenchForCreate(&ProjectDeps{RunPicker: ui.Run}, workbenches)
 		},
-		FindWorkbench: findSessionTemplate,
-		CreateSession: func(tmpl config.SessionTemplate, sessionName, path string) error {
+		FindWorkbench: findWorkbench,
+		CreateSession: func(tmpl config.Workbench, sessionName, path string) error {
 			return createSessionFromWorkbench(defaultTemplateRuntimeDeps(), tmpl, sessionName, path)
 		},
 		SessionName:   project.SessionName,

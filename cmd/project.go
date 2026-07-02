@@ -113,7 +113,7 @@ type ProjectDeps struct {
 	// ResolveWorkbenches returns the Workbenches resolved for a project path,
 	// used by the create-path prompt (ADR-0075). A seam so tests can supply a
 	// fixed set without touching .pop.toml or the global library.
-	ResolveWorkbenches func(cfg *config.Config, path string) []config.SessionTemplate
+	ResolveWorkbenches func(cfg *config.Config, path string) []config.Workbench
 
 	// ResolvePreferredWorkbench returns the preferred-Workbench name to
 	// auto-apply for a checkout (or "" for none) plus any non-fatal warnings
@@ -172,8 +172,8 @@ func DefaultProjectDeps() *ProjectDeps {
 
 		UpdateNotice: pickerUpdateNotice,
 
-		ResolveWorkbenches: func(cfg *config.Config, path string) []config.SessionTemplate {
-			templates, _ := cfg.ResolveSessionTemplatesWith(config.DefaultDeps(), path)
+		ResolveWorkbenches: func(cfg *config.Config, path string) []config.Workbench {
+			templates, _ := cfg.ResolveWorkbenchesWith(config.DefaultDeps(), path)
 			return templates
 		},
 
@@ -646,7 +646,7 @@ const workbenchItemPathPrefix = "workbench:"
 // "no workbench" first and preselected (ADR-0075). It returns the chosen Workbench
 // name ("" for the no-workbench entry) and whether the user confirmed a choice
 // (false when Esc was pressed, i.e. return to the project picker, create nothing).
-func promptWorkbenchForCreate(d *ProjectDeps, workbenches []config.SessionTemplate) (name string, confirmed bool, err error) {
+func promptWorkbenchForCreate(d *ProjectDeps, workbenches []config.Workbench) (name string, confirmed bool, err error) {
 	items := make([]ui.Item, 0, len(workbenches)+1)
 	items = append(items, ui.Item{Name: noWorkbenchLabel})
 	for _, wb := range workbenches {
@@ -679,11 +679,11 @@ func openTmuxSessionWithWorkbenchWith(tmux deps.Tmux, item *ui.Item, workbenchNa
 	if err != nil {
 		return err
 	}
-	templates, warnings := cfg.ResolveSessionTemplatesWith(td.ConfigDeps, item.Path)
+	templates, warnings := cfg.ResolveWorkbenchesWith(td.ConfigDeps, item.Path)
 	for _, w := range warnings {
 		warnf(td, "%s\n", w)
 	}
-	tmpl, ok := findSessionTemplate(templates, workbenchName)
+	tmpl, ok := findWorkbench(templates, workbenchName)
 	if !ok {
 		return fmt.Errorf("workbench %q not found", workbenchName)
 	}

@@ -22,7 +22,7 @@ type preferredCall struct {
 // and a scripted picker that confirms the item whose Path == pickPath (or Esc
 // when pickPath == "esc:cancel"). hasEntry drives whether "reset to default" is
 // offered. lastItems captures the items handed to the picker.
-func newPreferredDeps(workbenches []config.SessionTemplate, hasEntry bool, pickPath string, rec *preferredCall, lastItems *[]ui.Item) *preferredPickerDeps {
+func newPreferredDeps(workbenches []config.Workbench, hasEntry bool, pickPath string, rec *preferredCall, lastItems *[]ui.Item) *preferredPickerDeps {
 	return &preferredPickerDeps{
 		RunPicker: func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
 			*lastItems = items
@@ -36,7 +36,7 @@ func newPreferredDeps(workbenches []config.SessionTemplate, hasEntry bool, pickP
 			}
 			return ui.Result{Action: ui.ActionCancel}, errors.New("scripted pick path not found: " + pickPath)
 		},
-		ResolveWorkbenches: func(string) []config.SessionTemplate { return workbenches },
+		ResolveWorkbenches: func(string) []config.Workbench { return workbenches },
 		CurrentEntry:       func(string) (string, bool) { return "", hasEntry },
 		SetPreferred: func(path, name string) error {
 			rec.setPath, rec.setName = path, name
@@ -54,7 +54,7 @@ func newPreferredDeps(workbenches []config.SessionTemplate, hasEntry bool, pickP
 func TestSetPreferredWorkbench_WritesName(t *testing.T) {
 	rec := &preferredCall{}
 	var items []ui.Item
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d := newPreferredDeps(wbs, false, workbenchItemPathPrefix+"minimal", rec, &items)
 
 	if err := setPreferredWorkbench(d, "/repo/app"); err != nil {
@@ -71,7 +71,7 @@ func TestSetPreferredWorkbench_WritesName(t *testing.T) {
 func TestSetPreferredWorkbench_WritesExplicitNone(t *testing.T) {
 	rec := &preferredCall{}
 	var items []ui.Item
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d := newPreferredDeps(wbs, false, preferredNonePath, rec, &items)
 
 	if err := setPreferredWorkbench(d, "/repo/app"); err != nil {
@@ -85,7 +85,7 @@ func TestSetPreferredWorkbench_WritesExplicitNone(t *testing.T) {
 func TestSetPreferredWorkbench_ResetClearsWhenEntryExists(t *testing.T) {
 	rec := &preferredCall{}
 	var items []ui.Item
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d := newPreferredDeps(wbs, true, preferredResetPath, rec, &items)
 
 	if err := setPreferredWorkbench(d, "/repo/app"); err != nil {
@@ -100,7 +100,7 @@ func TestSetPreferredWorkbench_ResetClearsWhenEntryExists(t *testing.T) {
 }
 
 func TestSetPreferredWorkbench_ResetOfferedOnlyWithEntry(t *testing.T) {
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}}
 
 	// No entry: the reset item must be absent; the none item present.
 	rec := &preferredCall{}
@@ -131,7 +131,7 @@ func TestSetPreferredWorkbench_ResetOfferedOnlyWithEntry(t *testing.T) {
 func TestSetPreferredWorkbench_EscLeavesPreferenceUntouched(t *testing.T) {
 	rec := &preferredCall{}
 	var items []ui.Item
-	wbs := []config.SessionTemplate{{Name: "gs-dev"}}
+	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d := newPreferredDeps(wbs, true, "esc:cancel", rec, &items)
 
 	if err := setPreferredWorkbench(d, "/repo/app"); err != nil {

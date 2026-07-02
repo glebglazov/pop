@@ -214,10 +214,10 @@ type WorkbenchOptions struct {
 	PickOnCreate bool `toml:"pick_on_create"`
 }
 
-// SessionTemplate is a named blueprint for an ordered list of tmux windows,
+// Workbench is a named blueprint for an ordered list of tmux windows,
 // each with a named pane tree. Split trees and multi-window templates are now
 // supported; a template with invalid window names is excluded at load time.
-type SessionTemplate struct {
+type Workbench struct {
 	Name string `toml:"name"`
 	// BeforeApply is an ordered list of shell commands run for one-time
 	// side effects (repo setup: pull, decrypt, mkdir) before any window of
@@ -225,16 +225,16 @@ type SessionTemplate struct {
 	// They run on every apply, including a reapply over a live session — the
 	// caller owns idempotency. This is side-effecting commands only, not
 	// shell-environment propagation: exported vars would not reach sibling panes.
-	BeforeApply []string                `toml:"before_apply"`
-	Windows     []SessionTemplateWindow `toml:"windows"`
+	BeforeApply []string          `toml:"before_apply"`
+	Windows     []WorkbenchWindow `toml:"windows"`
 }
 
-type SessionTemplateWindow struct {
-	Name   string                   `toml:"name"`
-	Layout *SessionTemplatePaneSpec `toml:"layout"`
+type WorkbenchWindow struct {
+	Name   string             `toml:"name"`
+	Layout *WorkbenchPaneSpec `toml:"layout"`
 }
 
-type SessionTemplatePaneSpec struct {
+type WorkbenchPaneSpec struct {
 	Name    string `toml:"name"`
 	Command string `toml:"command"`
 	// Children is "rows" (stacked top-to-bottom) or "columns" (side-by-side). Only
@@ -242,7 +242,7 @@ type SessionTemplatePaneSpec struct {
 	Children string `toml:"children"`
 	// Panes holds child pane specs. When non-empty, this node is a container
 	// and Command is ignored. When empty, this is a leaf node.
-	Panes []SessionTemplatePaneSpec `toml:"panes"`
+	Panes []WorkbenchPaneSpec `toml:"panes"`
 	// Weight is the relative size within siblings. Defaults to 1 when omitted.
 	Weight int `toml:"weight"`
 	// Cwd is the working directory for this pane and its descendants.
@@ -484,10 +484,7 @@ type Config struct {
 	Task   *TaskConfig             `toml:"workload"`
 	Effort map[string]EffortConfig `toml:"effort"`
 	// Workbenches is the canonical TOML key for session blueprints.
-	Workbenches []SessionTemplate `toml:"workbenches"`
-	// SessionTemplates is the deprecated TOML alias for Workbenches. Still loads;
-	// a deprecation finding is emitted (ADR-0054 style).
-	SessionTemplates []SessionTemplate `toml:"session_templates"`
+	Workbenches []Workbench `toml:"workbenches"`
 	// WorkbenchOpts holds the [workbench] options table (empty for now).
 	WorkbenchOpts *WorkbenchOptions   `toml:"workbench"`
 	Queue         *QueueConfig        `toml:"queue"`
@@ -578,10 +575,7 @@ type RepoConfig struct {
 	// cannot name a machine-specific trunk.
 	Trunk bool `toml:"-"`
 	// Workbenches are repo-local session blueprints (canonical key).
-	Workbenches []SessionTemplate `toml:"workbenches"`
-	// SessionTemplates are repo-local session template blueprints loaded from
-	// .pop.toml. Deprecated alias for Workbenches; both are accepted.
-	SessionTemplates []SessionTemplate `toml:"session_templates"`
+	Workbenches []Workbench `toml:"workbenches"`
 }
 
 // RepoOverrideConfig is the shape of a [repo."<path>"] block in global
@@ -593,10 +587,7 @@ type RepoOverrideConfig struct {
 	// block; it is not propagated to other worktrees of the same repo.
 	Trunk *bool `toml:"trunk"`
 	// Workbenches are per-repo session blueprints (canonical key).
-	Workbenches []SessionTemplate `toml:"workbenches"`
-	// SessionTemplates are per-repo session template blueprints defined in a
-	// global [repo."<path>"] block. Deprecated alias for Workbenches; both accepted.
-	SessionTemplates []SessionTemplate `toml:"session_templates"`
+	Workbenches []Workbench `toml:"workbenches"`
 	// PreferredWorkbench names the repo-default Workbench that auto-applies when
 	// a session is born for any checkout of this repo (ADR-0078). It is a
 	// [repo]-only key: deliberately absent from the .pop.toml RepoConfig schema
@@ -719,19 +710,19 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 	return result, popErr
 }
 
-// ResolveSessionTemplatesWith returns the union of session templates from all
-// three homes (global config, .pop.toml, and [repo."<path>"]), resolved with
+// ResolveWorkbenchesWith returns the union of Workbenches from all three homes
+// (global config, .pop.toml, and [repo."<path>"]), resolved with
 // most-specific-wins precedence: [repo."<path>"] > .pop.toml > global library.
 // Name collisions emit warnings. A bare repo's .pop.toml templates are visible
 // from all its worktrees via Repository identity.
-func (c *Config) ResolveSessionTemplatesWith(d *Deps, checkoutPath string) ([]SessionTemplate, []string) {
+func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workbench, []string) {
 	// Start with global templates (lowest precedence, already validated at Load)
-	var result []SessionTemplate
+	var result []Workbench
 	seen := make(map[string]string) // name -> source for collision warnings
 	var warnings []string
 
 	if c != nil {
-		for _, tmpl := range c.SessionTemplates {
+		for _, tmpl := range c.Workbenches {
 			result = append(result, tmpl)
 			seen[tmpl.Name] = "global config"
 		}
@@ -740,9 +731,7 @@ func (c *Config) ResolveSessionTemplatesWith(d *Deps, checkoutPath string) ([]Se
 	// Load .pop.toml from repo identity root (medium precedence)
 	identity := repoIdentity(d, checkoutPath)
 	popTOML, _ := LoadRepoConfigWith(d, identity)
-	// Merge both keys: workbenches (canonical) and session_templates (deprecated alias).
-	popTOMLTemplates := append(popTOML.Workbenches, popTOML.SessionTemplates...)
-	for _, tmpl := range popTOMLTemplates {
+	for _, tmpl := range popTOML.Workbenches {
 		if source, exists := seen[tmpl.Name]; exists {
 			warnings = append(warnings, fmt.Sprintf(
 				"session template %q defined in both %s and .pop.toml; using .pop.toml",
@@ -769,9 +758,7 @@ func (c *Config) ResolveSessionTemplatesWith(d *Deps, checkoutPath string) ([]Se
 			if keyIdentity != identity {
 				continue
 			}
-			// Apply templates from this override block; workbenches (canonical) + session_templates (alias).
-			blockTemplates := append(block.Workbenches, block.SessionTemplates...)
-			for _, tmpl := range blockTemplates {
+			for _, tmpl := range block.Workbenches {
 				if source, exists := seen[tmpl.Name]; exists {
 					warnings = append(warnings, fmt.Sprintf(
 						"session template %q defined in both %s and [repo.%q]; using [repo.%q]",
@@ -874,11 +861,11 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 	var warnings []string
 	// resolves reports whether name is a real Workbench for this checkout,
 	// resolving the template set lazily (and once) so an unset chain does no work.
-	var workbenches []SessionTemplate
+	var workbenches []Workbench
 	resolved := false
 	resolves := func(name string) bool {
 		if !resolved {
-			workbenches, _ = c.ResolveSessionTemplatesWith(d, checkoutPath)
+			workbenches, _ = c.ResolveWorkbenchesWith(d, checkoutPath)
 			resolved = true
 		}
 		for _, tmpl := range workbenches {
@@ -1228,25 +1215,12 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	for _, f := range projectEntryFindings(path, cfg.Projects) {
 		cfg.recordFinding(f)
 	}
-	// Merge Workbenches (canonical new TOML key) into SessionTemplates (internal field).
-	// workbenches entries prepend so they take priority when both keys co-exist.
-	if len(cfg.Workbenches) > 0 {
-		cfg.SessionTemplates = append(cfg.Workbenches, cfg.SessionTemplates...)
-		cfg.Workbenches = nil
-	}
-	// Emit a non-fatal deprecation finding when the old TOML key was present.
-	if md.IsDefined("session_templates") {
-		cfg.recordFinding(Finding{
-			Path:    "deprecated.session_templates",
-			Message: "[[session_templates]] is deprecated; rename to [[workbenches]]",
-		})
-	}
-	if cfg.SessionTemplates != nil {
-		tmplFindings, validTemplates := sessionTemplateFindings(path, cfg.SessionTemplates)
+	if cfg.Workbenches != nil {
+		tmplFindings, validTemplates := workbenchFindings(path, cfg.Workbenches)
 		for _, f := range tmplFindings {
 			cfg.recordFinding(f)
 		}
-		cfg.SessionTemplates = validTemplates
+		cfg.Workbenches = validTemplates
 	}
 	for _, f := range repoRenameFindings(path, md) {
 		cfg.recordFinding(f)
@@ -1330,20 +1304,12 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		mergeIncludedTask(&cfg, included.Task, expanded)
 		mergeIncludedEffort(&cfg, included.Effort, expanded)
 
-		// Handle both canonical (workbenches) and deprecated (session_templates) keys in includes.
 		if included.Workbenches != nil {
-			tmplFindings, validTemplates := sessionTemplateFindings(expanded, included.Workbenches)
+			tmplFindings, validTemplates := workbenchFindings(expanded, included.Workbenches)
 			for _, f := range tmplFindings {
 				cfg.recordFinding(f)
 			}
-			cfg.SessionTemplates = append(cfg.SessionTemplates, validTemplates...)
-		}
-		if included.SessionTemplates != nil {
-			tmplFindings, validTemplates := sessionTemplateFindings(expanded, included.SessionTemplates)
-			for _, f := range tmplFindings {
-				cfg.recordFinding(f)
-			}
-			cfg.SessionTemplates = append(cfg.SessionTemplates, validTemplates...)
+			cfg.Workbenches = append(cfg.Workbenches, validTemplates...)
 		}
 
 		for key, block := range included.Repo {
@@ -1364,21 +1330,21 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// sessionTemplateFindings validates session templates at load time. A template
-// with a missing or duplicate window name is recorded as a non-fatal finding
-// and excluded from the returned slice; the rest of the config still loads.
-func sessionTemplateFindings(path string, templates []SessionTemplate) ([]Finding, []SessionTemplate) {
+// workbenchFindings validates Workbenches at load time. A template with a
+// missing or duplicate window name is recorded as a non-fatal finding and
+// excluded from the returned slice; the rest of the config still loads.
+func workbenchFindings(path string, templates []Workbench) ([]Finding, []Workbench) {
 	if templates == nil {
 		return nil, nil
 	}
 	var findings []Finding
-	valid := make([]SessionTemplate, 0, len(templates))
+	valid := make([]Workbench, 0, len(templates))
 
 	for i, tmpl := range templates {
 		if tmpl.Name == "" {
 			findings = append(findings, Finding{
-				Path:    fmt.Sprintf("session_templates[%d]", i),
-				Message: fmt.Sprintf("%s: session_templates[%d] has no name; excluding", path, i),
+				Path:    fmt.Sprintf("workbenches[%d]", i),
+				Message: fmt.Sprintf("%s: workbenches[%d] has no name; excluding", path, i),
 			})
 			continue
 		}
@@ -1388,9 +1354,9 @@ func sessionTemplateFindings(path string, templates []SessionTemplate) ([]Findin
 		for j, w := range tmpl.Windows {
 			if w.Name == "" {
 				findings = append(findings, Finding{
-					Path: fmt.Sprintf("session_templates[%d].windows[%d].name", i, j),
+					Path: fmt.Sprintf("workbenches[%d].windows[%d].name", i, j),
 					Message: fmt.Sprintf(
-						"%s: session template %q window[%d] is missing a name; excluding template",
+						"%s: workbench %q window[%d] is missing a name; excluding template",
 						path, tmpl.Name, j,
 					),
 				})
@@ -1399,9 +1365,9 @@ func sessionTemplateFindings(path string, templates []SessionTemplate) ([]Findin
 			}
 			if names[w.Name] {
 				findings = append(findings, Finding{
-					Path: fmt.Sprintf("session_templates[%d].windows[%d].name", i, j),
+					Path: fmt.Sprintf("workbenches[%d].windows[%d].name", i, j),
 					Message: fmt.Sprintf(
-						"%s: session template %q has duplicate window name %q; excluding template",
+						"%s: workbench %q has duplicate window name %q; excluding template",
 						path, tmpl.Name, w.Name,
 					),
 				})
@@ -1417,7 +1383,7 @@ func sessionTemplateFindings(path string, templates []SessionTemplate) ([]Findin
 			// loses its reapply guarantee for that window.
 			for _, dup := range duplicatePaneSpecNames(w.Layout) {
 				findings = append(findings, Finding{
-					Path: fmt.Sprintf("session_templates[%d].windows[%d]", i, j),
+					Path: fmt.Sprintf("workbenches[%d].windows[%d]", i, j),
 					Message: fmt.Sprintf(
 						"%s: workbench %q window %q has duplicate pane name %q; reapply-unsafe",
 						path, tmpl.Name, w.Name, dup,
@@ -1437,15 +1403,15 @@ func sessionTemplateFindings(path string, templates []SessionTemplate) ([]Findin
 // duplicatePaneSpecNames returns the leaf pane-spec names that appear more than
 // once anywhere in a window's layout tree, in first-duplicate order. Unnamed
 // leaves are anonymous (ADR-0075 B1) and never collide.
-func duplicatePaneSpecNames(layout *SessionTemplatePaneSpec) []string {
+func duplicatePaneSpecNames(layout *WorkbenchPaneSpec) []string {
 	if layout == nil {
 		return nil
 	}
 	seen := make(map[string]bool)
 	flagged := make(map[string]bool)
 	var dups []string
-	var walk func(p *SessionTemplatePaneSpec)
-	walk = func(p *SessionTemplatePaneSpec) {
+	var walk func(p *WorkbenchPaneSpec)
+	walk = func(p *WorkbenchPaneSpec) {
 		if len(p.Panes) == 0 {
 			if p.Name == "" {
 				return
@@ -1607,7 +1573,6 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 	validRepoKeys := map[string]bool{
 		"trunk":               true,
 		"workbenches":         true,
-		"session_templates":   true, // deprecated alias, still accepted
 		"preferred_workbench": true, // ADR-0078 repo-default preferred Workbench
 	}
 	var findings []Finding
@@ -1629,7 +1594,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 		findings = append(findings, Finding{
 			Path: "config.unknown_repo_key",
 			Message: fmt.Sprintf(
-				"%s: [repo.%q] unknown key %q ignored (only trunk, workbenches, session_templates, and preferred_workbench are accepted)",
+				"%s: [repo.%q] unknown key %q ignored (only trunk, workbenches, and preferred_workbench are accepted)",
 				path, key[1], fieldName,
 			),
 		})
@@ -1639,7 +1604,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 
 // includeFileWarnings returns load-time warnings for non-whitelisted top-level
 // keys and nested includes in an included file. Includes carry a fixed whitelist:
-// `projects`, `session_templates`, `[workload]`, `[effort.<agent>]`, and `[repo."<path>"]`.
+// `projects`, `workbenches`, `[workload]`, `[effort.<agent>]`, and `[repo."<path>"]`.
 func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	var warnings []string
 
@@ -1665,13 +1630,12 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 
 	// Whitelisted top-level keys
 	whitelisted := map[string]bool{
-		"projects":          true,
-		"workbenches":       true,
-		"session_templates": true, // deprecated alias, still accepted
-		"repo":              true,
-		"workload":          true,
-		"effort":            true,
-		"includes":          true, // mentioned in includes, so we track it for warning above
+		"projects":    true,
+		"workbenches": true,
+		"repo":        true,
+		"workload":    true,
+		"effort":      true,
+		"includes":    true, // mentioned in includes, so we track it for warning above
 	}
 
 	// Check for non-whitelisted keys

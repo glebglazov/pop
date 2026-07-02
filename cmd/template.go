@@ -118,14 +118,14 @@ func runTemplateList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
-	templates, warnings := cfg.ResolveSessionTemplatesWith(d.ConfigDeps, dir)
+	templates, warnings := cfg.ResolveWorkbenchesWith(d.ConfigDeps, dir)
 	for _, w := range warnings {
 		warnf(d, "%s\n", w)
 	}
 	return runTemplateListWith(templates, cmd.OutOrStdout())
 }
 
-func runTemplateListWith(templates []config.SessionTemplate, out io.Writer) error {
+func runTemplateListWith(templates []config.Workbench, out io.Writer) error {
 	for _, tmpl := range templates {
 		if tmpl.Name == "" {
 			continue
@@ -147,19 +147,19 @@ func runTemplateApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
-	templates, warnings := cfg.ResolveSessionTemplatesWith(d.ConfigDeps, dir)
+	templates, warnings := cfg.ResolveWorkbenchesWith(d.ConfigDeps, dir)
 	for _, w := range warnings {
 		warnf(d, "%s\n", w)
 	}
 	return runTemplateApplyWith(d, templates, args[0])
 }
 
-func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTemplate, name string) error {
-	tmpl, ok := findSessionTemplate(templates, name)
+func runTemplateApplyWith(d templateRuntimeDeps, templates []config.Workbench, name string) error {
+	tmpl, ok := findWorkbench(templates, name)
 	if !ok {
 		return fmt.Errorf("session template %q not found", name)
 	}
-	if err := validateSessionTemplate(tmpl); err != nil {
+	if err := validateWorkbench(tmpl); err != nil {
 		return fmt.Errorf("session template %q: %w", name, err)
 	}
 
@@ -180,7 +180,7 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.SessionTempl
 // shared core of both entry points (ADR-0075): the `workbench apply` command
 // (into the current session) and the picker create-path (into a session just
 // born for the Workbench).
-func applyWorkbench(d templateRuntimeDeps, tmpl config.SessionTemplate, session, dir string) error {
+func applyWorkbench(d templateRuntimeDeps, tmpl config.Workbench, session, dir string) error {
 	homeDir, err := d.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
@@ -301,8 +301,8 @@ func applyWorkbench(d templateRuntimeDeps, tmpl config.SessionTemplate, session,
 // shell window that `tmux new-session` always births so the session is *exactly*
 // the Workbench (ADR-0075). It does not attach — the caller switches/attaches
 // afterward. The Workbench must already be validated by the caller.
-func createSessionFromWorkbench(d templateRuntimeDeps, tmpl config.SessionTemplate, sessionName, path string) error {
-	if err := validateSessionTemplate(tmpl); err != nil {
+func createSessionFromWorkbench(d templateRuntimeDeps, tmpl config.Workbench, sessionName, path string) error {
+	if err := validateWorkbench(tmpl); err != nil {
 		return fmt.Errorf("workbench %q: %w", tmpl.Name, err)
 	}
 
@@ -337,7 +337,7 @@ type mergeResult struct {
 // mergeWindow merges a target window's layout into a live, pop-owned window
 // (ADR-0075). It is the entry point that decides whether the window root is a
 // single leaf or a container.
-func mergeWindow(tmux deps.Tmux, layout *config.SessionTemplatePaneSpec, liveNames map[string]string, fallbackAnchor, sessionDir, rootCwd, homeDir string) (mergeResult, error) {
+func mergeWindow(tmux deps.Tmux, layout *config.WorkbenchPaneSpec, liveNames map[string]string, fallbackAnchor, sessionDir, rootCwd, homeDir string) (mergeResult, error) {
 	if len(layout.Panes) == 0 {
 		if id := liveNames[layout.Name]; id != "" {
 			// The sole pane survived: leave its process intact.
@@ -361,7 +361,7 @@ func mergeWindow(tmux deps.Tmux, layout *config.SessionTemplatePaneSpec, liveNam
 // mergePaneTree merges a present-live subtree. A matched leaf is left untouched
 // (its process survives); a present container recurses. Wholly-missing subtrees
 // are never routed here — their container parent builds them fresh.
-func mergePaneTree(tmux deps.Tmux, pane *config.SessionTemplatePaneSpec, liveNames map[string]string, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
+func mergePaneTree(tmux deps.Tmux, pane *config.WorkbenchPaneSpec, liveNames map[string]string, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
 	if len(pane.Panes) == 0 {
 		id := liveNames[pane.Name]
 		res := mergeResult{anchor: id, leafIDs: []string{id}}
@@ -380,7 +380,7 @@ func mergePaneTree(tmux deps.Tmux, pane *config.SessionTemplatePaneSpec, liveNam
 // container is reproportioned to the target weights, which may resize (never
 // kill) surviving panes. fallbackAnchor seeds the split when the container has no
 // live children at all (only reachable at a matched window root).
-func mergeContainer(tmux deps.Tmux, children []config.SessionTemplatePaneSpec, direction string, liveNames map[string]string, fallbackAnchor, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
+func mergeContainer(tmux deps.Tmux, children []config.WorkbenchPaneSpec, direction string, liveNames map[string]string, fallbackAnchor, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
 	n := len(children)
 	if n == 0 {
 		return mergeResult{}, nil
@@ -454,13 +454,13 @@ func mergeContainer(tmux deps.Tmux, children []config.SessionTemplatePaneSpec, d
 }
 
 // subtreeLive reports whether any named leaf in the subtree matches a live pane.
-func subtreeLive(pane *config.SessionTemplatePaneSpec, liveNames map[string]string) bool {
+func subtreeLive(pane *config.WorkbenchPaneSpec, liveNames map[string]string) bool {
 	return firstLiveLeaf(pane, liveNames) != ""
 }
 
 // firstLiveLeaf returns the live pane id of the first named leaf in the subtree
 // (tree order) that matches a live pane, or "" if none is present.
-func firstLiveLeaf(pane *config.SessionTemplatePaneSpec, liveNames map[string]string) string {
+func firstLiveLeaf(pane *config.WorkbenchPaneSpec, liveNames map[string]string) string {
 	if len(pane.Panes) == 0 {
 		if pane.Name == "" {
 			return ""
@@ -477,7 +477,7 @@ func firstLiveLeaf(pane *config.SessionTemplatePaneSpec, liveNames map[string]st
 
 // nextLiveAnchor returns the anchor pane of the first present sibling after
 // index `from`, or "" if every following sibling is missing.
-func nextLiveAnchor(children []config.SessionTemplatePaneSpec, present []bool, liveNames map[string]string, from int) string {
+func nextLiveAnchor(children []config.WorkbenchPaneSpec, present []bool, liveNames map[string]string, from int) string {
 	for j := from + 1; j < len(children); j++ {
 		if present[j] {
 			return firstLiveLeaf(&children[j], liveNames)
@@ -497,7 +497,7 @@ type paneTreeResult struct {
 // it sets the title and sends the command. If it's a container, it creates
 // child panes via splits and recursively realizes them. parentCwd is the
 // already-resolved effective working directory inherited from ancestors.
-func realizePaneTree(tmux deps.Tmux, pane *config.SessionTemplatePaneSpec, paneID, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
+func realizePaneTree(tmux deps.Tmux, pane *config.WorkbenchPaneSpec, paneID, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
 	if len(pane.Panes) == 0 {
 		// Leaf node: set title and send command
 		if _, err := tmux.Command("select-pane", "-t", paneID, "-T", pane.Name); err != nil {
@@ -529,7 +529,7 @@ func realizePaneTree(tmux deps.Tmux, pane *config.SessionTemplatePaneSpec, paneI
 // It splits the container pane N-1 times to create N child panes, then resizes
 // them according to their weights. parentCwd is the already-resolved effective
 // working directory for this container.
-func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.SessionTemplatePaneSpec, direction, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
+func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.WorkbenchPaneSpec, direction, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
 	n := len(children)
 	if n == 0 {
 		return paneTreeResult{}, nil
@@ -634,7 +634,7 @@ func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.
 // 80x24) differs from the window the panes actually occupy — the resize math
 // would then size panes against the wrong window and tmux would clamp to a
 // lopsided split that survives the attach rescale as a skewed layout.
-func resizePanesByWeight(tmux deps.Tmux, paneIDs []string, children []config.SessionTemplatePaneSpec, direction string) error {
+func resizePanesByWeight(tmux deps.Tmux, paneIDs []string, children []config.WorkbenchPaneSpec, direction string) error {
 	// Read dimensions of the specific window being built by targeting one of its
 	// panes, so the build-time split and this resize agree on one window.
 	target := paneIDs[0]
@@ -690,16 +690,16 @@ func resizePanesByWeight(tmux deps.Tmux, paneIDs []string, children []config.Ses
 	return nil
 }
 
-func findSessionTemplate(templates []config.SessionTemplate, name string) (config.SessionTemplate, bool) {
+func findWorkbench(templates []config.Workbench, name string) (config.Workbench, bool) {
 	for _, tmpl := range templates {
 		if tmpl.Name == name {
 			return tmpl, true
 		}
 	}
-	return config.SessionTemplate{}, false
+	return config.Workbench{}, false
 }
 
-func validateSessionTemplate(tmpl config.SessionTemplate) error {
+func validateWorkbench(tmpl config.Workbench) error {
 	if tmpl.Name == "" {
 		return fmt.Errorf("name is required")
 	}
@@ -810,7 +810,7 @@ func warnf(d templateRuntimeDeps, format string, args ...any) {
 // (has a command, no panes) or a container (has direction and panes). A leaf
 // name is optional: an unnamed leaf is anonymous and always (re)created on
 // reapply (ADR-0075 B1), trading reapply-safety for not having to name it.
-func validatePaneSpec(pane *config.SessionTemplatePaneSpec, path string) error {
+func validatePaneSpec(pane *config.WorkbenchPaneSpec, path string) error {
 	isContainer := len(pane.Panes) > 0
 
 	if isContainer {

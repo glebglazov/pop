@@ -173,16 +173,16 @@ output = "auto"
 	}
 }
 
-func TestLoadSessionTemplates(t *testing.T) {
+func TestLoadWorkbenches(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[[session_templates]]
+[[workbenches]]
 name = "dev"
 
-[[session_templates.windows]]
+[[workbenches.windows]]
 name = "work"
 
-[session_templates.windows.layout]
+[workbenches.windows.layout]
 name = "server"
 command = "go test ./..."
 `), 0o644); err != nil {
@@ -193,10 +193,10 @@ command = "go test ./..."
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.SessionTemplates) != 1 {
-		t.Fatalf("got %d session templates, want 1", len(cfg.SessionTemplates))
+	if len(cfg.Workbenches) != 1 {
+		t.Fatalf("got %d workbenches, want 1", len(cfg.Workbenches))
 	}
-	tmpl := cfg.SessionTemplates[0]
+	tmpl := cfg.Workbenches[0]
 	if tmpl.Name != "dev" {
 		t.Fatalf("template name = %q, want dev", tmpl.Name)
 	}
@@ -215,26 +215,26 @@ command = "go test ./..."
 	}
 }
 
-func TestLoadSessionTemplatesMissingWindowName(t *testing.T) {
+func TestLoadWorkbenchesMissingWindowName(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[[session_templates]]
+[[workbenches]]
 name = "bad"
 
-[[session_templates.windows]]
+[[workbenches.windows]]
 # missing name
 
-[session_templates.windows.layout]
+[workbenches.windows.layout]
 name = "server"
 command = "go test ./..."
 
-[[session_templates]]
+[[workbenches]]
 name = "good"
 
-[[session_templates.windows]]
+[[workbenches.windows]]
 name = "work"
 
-[session_templates.windows.layout]
+[workbenches.windows.layout]
 name = "server"
 command = "go test ./..."
 `), 0o644); err != nil {
@@ -245,11 +245,11 @@ command = "go test ./..."
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.SessionTemplates) != 1 {
-		t.Fatalf("got %d session templates, want 1", len(cfg.SessionTemplates))
+	if len(cfg.Workbenches) != 1 {
+		t.Fatalf("got %d workbenches, want 1", len(cfg.Workbenches))
 	}
-	if cfg.SessionTemplates[0].Name != "good" {
-		t.Fatalf("remaining template = %q, want good", cfg.SessionTemplates[0].Name)
+	if cfg.Workbenches[0].Name != "good" {
+		t.Fatalf("remaining template = %q, want good", cfg.Workbenches[0].Name)
 	}
 
 	foundFinding := false
@@ -275,33 +275,33 @@ command = "go test ./..."
 	}
 }
 
-func TestLoadSessionTemplatesDuplicateWindowName(t *testing.T) {
+func TestLoadWorkbenchesDuplicateWindowName(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[[session_templates]]
+[[workbenches]]
 name = "bad"
 
-[[session_templates.windows]]
+[[workbenches.windows]]
 name = "work"
 
-[session_templates.windows.layout]
+[workbenches.windows.layout]
 name = "server"
 command = "go test ./..."
 
-[[session_templates.windows]]
+[[workbenches.windows]]
 name = "work"
 
-[session_templates.windows.layout]
+[workbenches.windows.layout]
 name = "shell"
 command = "bash"
 
-[[session_templates]]
+[[workbenches]]
 name = "good"
 
-[[session_templates.windows]]
+[[workbenches.windows]]
 name = "review"
 
-[session_templates.windows.layout]
+[workbenches.windows.layout]
 name = "server"
 command = "go test ./..."
 `), 0o644); err != nil {
@@ -312,11 +312,11 @@ command = "go test ./..."
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.SessionTemplates) != 1 {
-		t.Fatalf("got %d session templates, want 1", len(cfg.SessionTemplates))
+	if len(cfg.Workbenches) != 1 {
+		t.Fatalf("got %d workbenches, want 1", len(cfg.Workbenches))
 	}
-	if cfg.SessionTemplates[0].Name != "good" {
-		t.Fatalf("remaining template = %q, want good", cfg.SessionTemplates[0].Name)
+	if cfg.Workbenches[0].Name != "good" {
+		t.Fatalf("remaining template = %q, want good", cfg.Workbenches[0].Name)
 	}
 
 	foundFinding := false
@@ -331,23 +331,23 @@ command = "go test ./..."
 	}
 }
 
-func TestLoadSessionTemplatesDuplicatePaneNameIsReapplyUnsafe(t *testing.T) {
+func TestLoadWorkbenchesDuplicatePaneNameIsReapplyUnsafe(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[[session_templates]]
+[[workbenches]]
 name = "unsafe"
 
-[[session_templates.windows]]
+[[workbenches.windows]]
 name = "dev"
 
-[session_templates.windows.layout]
+[workbenches.windows.layout]
 children = "rows"
 
-[[session_templates.windows.layout.panes]]
+[[workbenches.windows.layout.panes]]
 name = "shell"
 command = "bash"
 
-[[session_templates.windows.layout.panes]]
+[[workbenches.windows.layout.panes]]
 name = "shell"
 command = "zsh"
 `), 0o644); err != nil {
@@ -361,8 +361,8 @@ command = "zsh"
 
 	// Duplicate pane names are non-fatal: the template still loads (unlike a
 	// duplicate window name, which excludes it).
-	if len(cfg.SessionTemplates) != 1 || cfg.SessionTemplates[0].Name != "unsafe" {
-		t.Fatalf("template should still load despite duplicate pane name, got %#v", cfg.SessionTemplates)
+	if len(cfg.Workbenches) != 1 || cfg.Workbenches[0].Name != "unsafe" {
+		t.Fatalf("template should still load despite duplicate pane name, got %#v", cfg.Workbenches)
 	}
 
 	foundFinding := false
@@ -377,42 +377,11 @@ command = "zsh"
 	}
 }
 
-func TestLoadWorkbenches(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(configPath, []byte(`
-[[workbenches]]
-name = "dev"
-
-[[workbenches.windows]]
-name = "work"
-
-[workbenches.windows.layout]
-name = "server"
-command = "go test ./..."
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// workbenches key merges into SessionTemplates internally
-	if len(cfg.SessionTemplates) != 1 {
-		t.Fatalf("got %d session templates, want 1", len(cfg.SessionTemplates))
-	}
-	if cfg.SessionTemplates[0].Name != "dev" {
-		t.Fatalf("template name = %q, want dev", cfg.SessionTemplates[0].Name)
-	}
-	// No deprecation finding for the new key
-	for _, f := range cfg.Findings {
-		if strings.Contains(f.Path, "deprecated.session_templates") {
-			t.Fatalf("unexpected deprecation finding for [[workbenches]] key: %s", f.Message)
-		}
-	}
-}
-
-func TestLoadSessionTemplatesDeprecationFinding(t *testing.T) {
+// TestLoadSessionTemplatesKeyIsUnrecognized asserts that the retired
+// session_templates alias (ADR-0082) no longer loads as Workbenches: it is an
+// ordinary unrecognized key now, not a rename nudge, so no data is loaded and
+// no deprecation finding is recorded.
+func TestLoadSessionTemplatesKeyIsUnrecognized(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
 [[session_templates]]
@@ -432,27 +401,17 @@ command = "go test ./..."
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Old key still loads the data
-	if len(cfg.SessionTemplates) != 1 {
-		t.Fatalf("got %d session templates, want 1", len(cfg.SessionTemplates))
+	if len(cfg.Workbenches) != 0 {
+		t.Fatalf("got %d workbenches, want 0 (session_templates no longer loads)", len(cfg.Workbenches))
 	}
-	if cfg.SessionTemplates[0].Name != "dev" {
-		t.Fatalf("template name = %q, want dev", cfg.SessionTemplates[0].Name)
-	}
-	// Deprecation finding must be present
-	found := false
 	for _, f := range cfg.Findings {
-		if f.Path == "deprecated.session_templates" && strings.Contains(f.Message, "workbenches") {
-			found = true
-			break
+		if strings.Contains(f.Path, "deprecated.session_templates") || strings.Contains(f.Message, "rename to") {
+			t.Fatalf("unexpected deprecation-rename finding for retired session_templates key: %s", f.Message)
 		}
-	}
-	if !found {
-		t.Fatalf("expected deprecation finding for [[session_templates]], got %#v", cfg.Findings)
 	}
 }
 
-func TestLoadWorkbenchesAndSessionTemplatesBothKeys(t *testing.T) {
+func TestLoadWorkbenchesIgnoresStaleSessionTemplatesKey(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
 [[workbenches]]
@@ -482,16 +441,16 @@ command = "vim"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.SessionTemplates) != 2 {
-		t.Fatalf("got %d session templates, want 2", len(cfg.SessionTemplates))
+	// Only the canonical key loads; the retired alias is ignored entirely.
+	if len(cfg.Workbenches) != 1 {
+		t.Fatalf("got %d workbenches, want 1", len(cfg.Workbenches))
 	}
-	// workbenches prepend, so "new" comes first
-	if cfg.SessionTemplates[0].Name != "new" {
-		t.Fatalf("first template = %q, want new (workbenches key takes priority)", cfg.SessionTemplates[0].Name)
+	if cfg.Workbenches[0].Name != "new" {
+		t.Fatalf("template = %q, want new (session_templates ignored)", cfg.Workbenches[0].Name)
 	}
 }
 
-func TestResolveSessionTemplatesWithWorkbenchesKey(t *testing.T) {
+func TestResolveWorkbenchesWith(t *testing.T) {
 	t.Run("global [[workbenches]] resolves", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.toml")
@@ -517,7 +476,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 			},
 		}
 
-		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		templates, warnings := cfg.ResolveWorkbenchesWith(d, tmpDir)
 		if len(warnings) != 0 {
 			t.Errorf("expected no warnings, got %v", warnings)
 		}
@@ -561,7 +520,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 			},
 		}
 
-		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		templates, warnings := cfg.ResolveWorkbenchesWith(d, tmpDir)
 		if len(warnings) != 0 {
 			t.Errorf("expected no warnings, got %v", warnings)
 		}
@@ -596,7 +555,7 @@ workbenches = [
 			},
 		}
 
-		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		templates, warnings := cfg.ResolveWorkbenchesWith(d, tmpDir)
 		if len(warnings) != 0 {
 			t.Errorf("expected no warnings, got %v", warnings)
 		}
@@ -3235,7 +3194,7 @@ func TestResolvePreferredWorkbench(t *testing.T) {
 
 	t.Run("repo default resolves to a real workbench", func(t *testing.T) {
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
 			Repo: map[string]RepoOverrideConfig{
 				root: {PreferredWorkbench: "gs-dev"},
 			},
@@ -3251,7 +3210,7 @@ func TestResolvePreferredWorkbench(t *testing.T) {
 
 	t.Run("unset yields none without warning", func(t *testing.T) {
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo: map[string]RepoOverrideConfig{
 				root: {Trunk: boolPtr(true)},
 			},
@@ -3266,7 +3225,7 @@ func TestResolvePreferredWorkbench(t *testing.T) {
 	})
 
 	t.Run("no repo block yields none", func(t *testing.T) {
-		cfg := &Config{SessionTemplates: []SessionTemplate{{Name: "gs-dev"}}}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}}}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "" || len(warns) != 0 {
 			t.Errorf("name = %q warns = %v, want empty/none", name, warns)
@@ -3275,7 +3234,7 @@ func TestResolvePreferredWorkbench(t *testing.T) {
 
 	t.Run("stale name skips with a warning and falls through to none", func(t *testing.T) {
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo: map[string]RepoOverrideConfig{
 				root: {PreferredWorkbench: "ghost"},
 			},
@@ -3334,7 +3293,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
 			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
@@ -3350,7 +3309,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
@@ -3363,7 +3322,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
@@ -3379,7 +3338,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
@@ -3398,7 +3357,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "phantom"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
@@ -3433,7 +3392,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
 			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
@@ -3453,7 +3412,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		if err := SetRuntimePreferredWorkbenchWith(d, child, "gs-dev"); err != nil {
 			t.Fatal(err)
 		}
-		cfg := &Config{SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}}}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "gs-dev" || len(warns) != 0 {
 			t.Fatalf("name=%q warns=%v, want gs-dev/none (own entry wins)", name, warns)
@@ -3472,7 +3431,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
 			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
@@ -3490,7 +3449,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
@@ -3508,7 +3467,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
@@ -3526,7 +3485,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		// No trunk anchor: the resolver reports (_, false).
 		d.Trunk = func(string) (string, bool) { return "", false }
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
@@ -3539,7 +3498,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		d := preferredResolverDeps(t) // Trunk left nil
 		child := t.TempDir()
 		cfg := &Config{
-			SessionTemplates: []SessionTemplate{{Name: "gs-dev"}},
+			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
@@ -3553,7 +3512,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		trunk := t.TempDir()
 		child := t.TempDir()
 		d.Trunk = func(string) (string, bool) { return trunk, true }
-		cfg := &Config{SessionTemplates: []SessionTemplate{{Name: "gs-dev"}, {Name: "minimal"}}}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}}}
 
 		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "minimal"); err != nil {
 			t.Fatal(err)
@@ -3576,7 +3535,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "ghost"); err != nil {
 			t.Fatal(err)
 		}
-		cfg := &Config{SessionTemplates: []SessionTemplate{{Name: "gs-dev"}}}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}}}
 		name, warns := cfg.ResolvePreferredWorkbench(d, trunk)
 		if name != "" {
 			t.Fatalf("name=%q, want empty (stale name skips)", name)
@@ -4002,7 +3961,7 @@ func TestPaneMonitoringTopicDerivationTimeout(t *testing.T) {
 	})
 }
 
-func TestSessionTemplateThreeHomeResolution(t *testing.T) {
+func TestWorkbenchThreeHomeResolution(t *testing.T) {
 	// Test that templates are resolved from three homes with most-specific-wins:
 	// [repo."<path>"] > .pop.toml > global library
 
@@ -4010,7 +3969,7 @@ func TestSessionTemplateThreeHomeResolution(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.toml")
 		if err := os.WriteFile(configPath, []byte(`
-[[session_templates]]
+[[workbenches]]
 name = "dev"
 windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 `), 0644); err != nil {
@@ -4043,7 +4002,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 			},
 		}
 
-		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		templates, warnings := cfg.ResolveWorkbenchesWith(d, tmpDir)
 		if len(warnings) != 0 {
 			t.Errorf("expected no warnings, got %v", warnings)
 		}
@@ -4064,7 +4023,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 
 		popTomlPath := filepath.Join(tmpDir, ".pop.toml")
 		if err := os.WriteFile(popTomlPath, []byte(`
-[[session_templates]]
+[[workbenches]]
 name = "work"
 windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 `), 0644); err != nil {
@@ -4102,7 +4061,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 			},
 		}
 
-		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		templates, warnings := cfg.ResolveWorkbenchesWith(d, tmpDir)
 		if len(warnings) != 0 {
 			t.Errorf("expected no warnings, got %v", warnings)
 		}
@@ -4119,7 +4078,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 		configPath := filepath.Join(tmpDir, "config.toml")
 		if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`
 [repo."%s"]
-session_templates = [
+workbenches = [
   {name = "review", windows = [{name = "main", layout = {name = "editor", command = "vim"}}]}
 ]
 `, tmpDir)), 0644); err != nil {
@@ -4151,7 +4110,7 @@ session_templates = [
 			},
 		}
 
-		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		templates, warnings := cfg.ResolveWorkbenchesWith(d, tmpDir)
 		if len(warnings) != 0 {
 			t.Errorf("expected no warnings, got %v", warnings)
 		}
@@ -4169,12 +4128,12 @@ session_templates = [
 		// Global template named "dev"
 		// [repo] override template also named "dev"
 		if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`
-[[session_templates]]
+[[workbenches]]
 name = "dev"
 windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 
 [repo."%s"]
-session_templates = [
+workbenches = [
   {name = "dev", windows = [{name = "main", layout = {name = "editor", command = "code"}}]}
 ]
 `, tmpDir)), 0644); err != nil {
@@ -4184,7 +4143,7 @@ session_templates = [
 		// .pop.toml also has "dev"
 		popTomlPath := filepath.Join(tmpDir, ".pop.toml")
 		if err := os.WriteFile(popTomlPath, []byte(`
-[[session_templates]]
+[[workbenches]]
 name = "dev"
 windows = [{name = "main", layout = {name = "editor", command = "nano"}}]
 `), 0644); err != nil {
@@ -4219,7 +4178,7 @@ windows = [{name = "main", layout = {name = "editor", command = "nano"}}]
 			},
 		}
 
-		templates, warnings := cfg.ResolveSessionTemplatesWith(d, tmpDir)
+		templates, warnings := cfg.ResolveWorkbenchesWith(d, tmpDir)
 		// Should have 2 warnings: global vs .pop.toml, and .pop.toml vs [repo]
 		if len(warnings) != 2 {
 			t.Errorf("expected 2 warnings, got %d: %v", len(warnings), warnings)
@@ -4256,7 +4215,7 @@ windows = [{name = "main", layout = {name = "editor", command = "nano"}}]
 		// .pop.toml in bare repo root
 		popTomlPath := filepath.Join(bareDir, ".pop.toml")
 		if err := os.WriteFile(popTomlPath, []byte(`
-[[session_templates]]
+[[workbenches]]
 name = "bare-template"
 windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 `), 0644); err != nil {
@@ -4306,7 +4265,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 		}
 
 		// Resolve from worktree path - should find .pop.toml in bare repo root
-		templates, warnings := cfg.ResolveSessionTemplatesWith(d, worktreeDir)
+		templates, warnings := cfg.ResolveWorkbenchesWith(d, worktreeDir)
 		if len(warnings) != 0 {
 			t.Errorf("expected no warnings, got %v", warnings)
 		}

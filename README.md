@@ -127,10 +127,10 @@ sizing them by relative `weight` (default `1`).
 ### A single-pane window
 
 ```toml
-[[session_templates]]
+[[workbenches]]
 name = "logs"
 
-[[session_templates.windows]]
+[[workbenches.windows]]
 name = "tail"
 layout = { command = "tail -f app.log" }
 ```
@@ -140,10 +140,10 @@ layout = { command = "tail -f app.log" }
 `vim` takes 3/5 of the height, `claude` the rest; the cursor lands on `vim`:
 
 ```toml
-[[session_templates]]
+[[workbenches]]
 name = "dev"
 
-[[session_templates.windows]]
+[[workbenches.windows]]
 name = "edit"
 layout.children = "rows"
 layout.panes = [
@@ -162,10 +162,10 @@ layout.panes = [
 Containers nest to any depth. Here the bottom row is split into three columns:
 
 ```toml
-[[session_templates]]
+[[workbenches]]
 name = "gs-dev"
 
-[[session_templates.windows]]
+[[workbenches.windows]]
 name = "dev"
 layout.children = "rows"
 layout.panes = [
@@ -180,7 +180,7 @@ layout.panes = [
 ```
 
 Multiline inline tables and trailing commas are accepted, so deep trees stay
-readable. Multiple `[[session_templates.windows]]` blocks make a multi-window
+readable. Multiple `[[workbenches.windows]]` blocks make a multi-window
 template; the first window is active after apply.
 
 ## Dashboard

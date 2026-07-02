@@ -99,7 +99,7 @@ func runWorkbenchPreferWith(d *workbenchPreferDeps, name string, clear, none boo
 }
 
 // workbenchResolves reports whether name is a real Workbench in the resolved set.
-func workbenchResolves(workbenches []config.SessionTemplate, name string) bool {
+func workbenchResolves(workbenches []config.Workbench, name string) bool {
 	for _, wb := range workbenches {
 		if wb.Name == name {
 			return true
