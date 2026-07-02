@@ -865,22 +865,39 @@ func (c *Config) WorkbenchOrder() []string {
 
 // ResolvePreferredWorkbench returns the name of the Workbench that should
 // auto-apply when a session is born for checkoutPath, or "" for none, plus any
-// non-fatal warnings the caller should surface (ADR-0078). Resolution is
-// scope-first (ADR-0077), finest → coarsest:
+// non-fatal warnings the caller should surface. Resolution follows the
+// user-first precedence law (ADR-0083): hand-authored config beats
+// runtime-generated config at any scope, and the user's central config.toml
+// beats the repo's in-tree .pop.toml. Highest → lowest, the layers that carry
+// this key:
 //
-//	this worktree's runtime entry ([workbench.preferred] in config.runtime.toml)
-//	  → the Trunk worktree's runtime entry (inheritance, resolved at open)
-//	  → the per-repo default (global [repo."<path>"] preferred_workbench)
-//	  → none
+//	1  config.toml [repo."<path>"]        user central · repo-specific
+//	   config.toml (global keys)          n/a for this key (no global home)
+//	3  ./.pop.toml                        repo in-tree, this worktree
+//	4  <trunk>/.pop.toml (→ id-root)      repo in-tree, inherited from the Trunk
+//	5  config.runtime.toml[<wt-path>]     runtime, this worktree (ctrl+w)
+//	6  config.runtime.toml[<trunk-path>]  runtime, inherited from the Trunk
+//	   → none
 //
-// The per-worktree runtime entry is a strictly finer scope than the inherited
-// trunk entry, which is finer than the per-repo default, so each wins on
-// specificity. Each runtime layer is three-valued: an explicit-none entry
-// (empty string) short-circuits to flat/prompt here, overriding the coarser
-// layers; a named entry uses that name; an absent entry falls through. The
-// trunk layer is dynamic — the child reflects trunk's current choice, never a
-// value snapshotted at create — and is skipped when the repo has no trunk
-// anchor (an unconfigured bare repo) or the trunk resolver is not wired.
+// Everything hand-authored (1–4) beats everything runtime (5–6): a repo default
+// or committed .pop.toml therefore wins over a worktree runtime entry (the
+// reverse of the shipped scope-first ordering), and runtime is now a gap-filler
+// applying only where nothing hand-authored sets the key. The in-tree .pop.toml
+// is read at two anchors — this worktree (layer 3) and the Trunk worktree, the
+// trunk read falling back to the Repository identity root for a bare repo (layer
+// 4) — with presence deciding which supplies the value: a worktree with its own
+// .pop.toml overrides the inherited trunk one, and a worktree without inherits
+// trunk's. Layer 4 reuses ADR-0078's Deps.Trunk resolver and its this-is-trunk
+// read-once guard (skipped when the inherited anchor is this very checkout, so a
+// stale name never double-warns).
+//
+// The runtime layers stay three-valued (ADR-0078): an explicit-none entry
+// (empty string) short-circuits to flat/prompt here — but only within the
+// runtime tier, since it can no longer override a hand-authored value above it;
+// a named entry uses that name; an absent entry falls through. The trunk runtime
+// layer is dynamic (the child reflects trunk's current choice, never a value
+// snapshotted at create) and is skipped when the repo has no trunk anchor or the
+// resolver is not wired.
 //
 // A stored name that does not resolve to a real Workbench for this checkout is
 // skipped with a non-fatal warning (ADR-0054 style) at each layer and resolution
@@ -914,28 +931,65 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 			name, checkoutPath,
 		)
 	}
+	// consider applies one name-only layer's value (empty means "unset, fall
+	// through"): use the name if it resolves, else warn and continue down the
+	// chain. Returns (result, done). The runtime layers handle their own
+	// explicit-none short-circuit and use consider only for the resolve-or-warn.
+	consider := func(name string) (string, bool) {
+		if name == "" {
+			return "", false
+		}
+		if resolves(name) {
+			return name, true
+		}
+		warnings = append(warnings, staleWarn(name))
+		return "", false
+	}
 
-	// Layer 1 (finest): this worktree's runtime entry.
+	// Layer 1: config.toml [repo."<path>"] — hand-authored, central, repo-specific.
+	if name, done := consider(c.repoPreferredWorkbench(d, checkoutPath)); done {
+		return name, warnings
+	}
+
+	// Layer 2: config.toml global keys — preferred_workbench has no universal
+	// global home, so this position never supplies it.
+
+	// Layer 3: ./.pop.toml — hand-authored, repo in-tree, this worktree.
+	if name, done := consider(c.popTOMLPreferredWorkbench(d, checkoutPath)); done {
+		return name, warnings
+	}
+
+	// Layer 4: <trunk>/.pop.toml — hand-authored, repo in-tree, inherited from the
+	// Trunk worktree (falling back to the Repository identity root for a bare
+	// repo). Skipped when the inherited anchor is this very checkout (read-once
+	// guard: Layer 3 already read it, and re-reading would double-warn a stale name).
+	if anchor := c.inheritedRepoConfigAnchor(d, checkoutPath); anchor != "" &&
+		canonicalPath(d, anchor) != canonicalPath(d, checkoutPath) {
+		if name, done := consider(c.popTOMLPreferredWorkbench(d, anchor)); done {
+			return name, warnings
+		}
+	}
+
+	// Layer 5: config.runtime.toml[<wt-path>] — runtime, this worktree (ctrl+w).
 	if name, present, err := RuntimePreferredWorkbenchWith(d, checkoutPath); err != nil {
 		debug.Error("config: read runtime preferred workbench for %s: %v", checkoutPath, err)
 	} else if present {
 		if name == "" {
-			// Explicit none: flat/prompt here, overriding any repo default.
+			// Explicit none: flat/prompt here, short-circuiting the trunk runtime
+			// layer below (but not the hand-authored layers above, already passed).
 			return "", warnings
 		}
-		if resolves(name) {
-			return name, warnings
+		if resolved, done := consider(name); done {
+			return resolved, warnings
 		}
-		warnings = append(warnings, staleWarn(name))
 	}
 
-	// Layer 2 (inheritance): the Trunk worktree's runtime entry (ADR-0078).
+	// Layer 6: config.runtime.toml[<trunk-path>] — runtime, inherited (ADR-0078).
 	// A worktree with no entry of its own inherits trunk's current choice,
 	// resolved dynamically at open — re-pointing trunk follows through to
 	// un-overridden children. Skipped when there is no trunk anchor (an
-	// unconfigured bare repo) or when this checkout *is* the trunk (Layer 1
-	// already read its own entry, so re-reading would double-warn on a stale
-	// name). Explicit-none and stale-name rules apply here too.
+	// unconfigured bare repo) or when this checkout *is* the trunk (Layer 5
+	// already read its own entry, so re-reading would double-warn on a stale name).
 	if d.Trunk != nil {
 		if trunkPath, ok := d.Trunk(checkoutPath); ok && trunkPath != "" &&
 			canonicalPath(d, trunkPath) != canonicalPath(d, checkoutPath) {
@@ -943,27 +997,46 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 				debug.Error("config: read trunk preferred workbench for %s: %v", trunkPath, err)
 			} else if present {
 				if name == "" {
-					// Trunk opts out: flat/prompt here, overriding the repo default.
+					// Trunk opts out: flat/prompt here.
 					return "", warnings
 				}
-				if resolves(name) {
-					return name, warnings
+				if resolved, done := consider(name); done {
+					return resolved, warnings
 				}
-				warnings = append(warnings, staleWarn(name))
 			}
 		}
 	}
 
-	// Layer 3 (coarser): the per-repo default.
-	if name := c.repoPreferredWorkbench(d, checkoutPath); name != "" {
-		if resolves(name) {
-			return name, warnings
-		}
-		warnings = append(warnings, staleWarn(name))
-	}
-
-	// Layer 4: none.
+	// None.
 	return "", warnings
+}
+
+// popTOMLPreferredWorkbench reads preferred_workbench from the committed .pop.toml
+// at dir, or "" when the file is absent, the key is unset, or the file is
+// malformed (the read error degrades to none, logged for debugging — a broken
+// in-tree file must not block getting into a session).
+func (c *Config) popTOMLPreferredWorkbench(d *Deps, dir string) string {
+	cfg, err := LoadRepoConfigWith(d, dir)
+	if err != nil {
+		debug.Error("config: read .pop.toml preferred workbench at %s: %v", dir, err)
+		return ""
+	}
+	return cfg.PreferredWorkbench
+}
+
+// inheritedRepoConfigAnchor returns the checkout whose committed .pop.toml
+// supplies the inherited (layer 4) repo-scope value for checkoutPath: the Trunk
+// worktree when the resolver reports one, otherwise the Repository identity root
+// — where a bare repo's shared .pop.toml lives (ADR-0083). A nil resolver or a
+// non-bare repo with no trunk yields the identity root, which for a non-bare
+// checkout is the checkout itself (Layer 4's read-once guard then skips it).
+func (c *Config) inheritedRepoConfigAnchor(d *Deps, checkoutPath string) string {
+	if d != nil && d.Trunk != nil {
+		if trunkPath, ok := d.Trunk(checkoutPath); ok && trunkPath != "" {
+			return trunkPath
+		}
+	}
+	return repoIdentity(d, checkoutPath)
 }
 
 // repoPreferredWorkbench returns the preferred_workbench declared on the global

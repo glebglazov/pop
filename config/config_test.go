@@ -3319,10 +3319,13 @@ func preferredResolverDeps(t *testing.T) *Deps {
 	}}
 }
 
-// TestResolvePreferredWorkbenchPrecedence exercises the scope-first chain
-// (ADR-0077/0078): own runtime entry → repo default → none.
+// TestResolvePreferredWorkbenchPrecedence exercises the runtime tier under the
+// user-first law (ADR-0083): the worktree runtime entry (layer 5) is now a
+// gap-filler that sits BELOW the hand-authored [repo] default (layer 1), the
+// reverse of the shipped scope-first ordering. It applies only where nothing
+// hand-authored sets the key; three-valued semantics still hold within the tier.
 func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
-	t.Run("runtime name overrides the repo default", func(t *testing.T) {
+	t.Run("repo default beats the worktree runtime entry (slice-01 reversal)", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		if err := SetRuntimePreferredWorkbenchWith(d, root, "minimal"); err != nil {
@@ -3330,15 +3333,41 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
-			Repo:             map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
+			Repo:        map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
-		if name != "minimal" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want minimal/none (finer scope wins)", name, warns)
+		if name != "gs-dev" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want gs-dev/none (hand-authored [repo] beats runtime)", name, warns)
 		}
 	})
 
-	t.Run("explicit none yields flat over a repo default", func(t *testing.T) {
+	t.Run("runtime entry applies where nothing hand-authored sets the key", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		if err := SetRuntimePreferredWorkbenchWith(d, root, "minimal"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}}}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "minimal" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want minimal/none (runtime gap-fills)", name, warns)
+		}
+	})
+
+	t.Run("explicit none short-circuits within the runtime tier", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		if err := SetRuntimePreferredWorkbenchWith(d, root, ""); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}}}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want empty/none (explicit-none short-circuits)", name, warns)
+		}
+	})
+
+	t.Run("explicit none does NOT override a hand-authored repo default", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		if err := SetRuntimePreferredWorkbenchWith(d, root, ""); err != nil {
@@ -3346,11 +3375,11 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
+			Repo:        map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
-		if name != "" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want empty/none (explicit-none short-circuits)", name, warns)
+		if name != "gs-dev" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want gs-dev/none (runtime explicit-none cannot beat hand-authored)", name, warns)
 		}
 	})
 
@@ -3359,7 +3388,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		root := t.TempDir()
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
+			Repo:        map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "gs-dev" || len(warns) != 0 {
@@ -3367,19 +3396,16 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 	})
 
-	t.Run("stale runtime name warns and falls through to a resolving repo default", func(t *testing.T) {
+	t.Run("stale runtime name warns and falls through to none", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		if err := SetRuntimePreferredWorkbenchWith(d, root, "ghost"); err != nil {
 			t.Fatal(err)
 		}
-		cfg := &Config{
-			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
-		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}}}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
-		if name != "gs-dev" {
-			t.Fatalf("name=%q, want gs-dev (stale runtime skips to repo default)", name)
+		if name != "" {
+			t.Fatalf("name=%q, want empty (stale runtime skips, nothing below)", name)
 		}
 		if len(warns) != 1 || !strings.Contains(warns[0], "ghost") {
 			t.Fatalf("warns=%v, want one naming the stale runtime name", warns)
@@ -3394,7 +3420,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "phantom"}}},
+			Repo:        map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "phantom"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "" {
@@ -3406,11 +3432,13 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 	})
 }
 
-// TestResolvePreferredWorkbenchTrunkInheritance exercises the ADR-0078 trunk
-// inheritance layer inserted between a worktree's own runtime entry and the
-// per-repo default: own runtime entry → Trunk worktree's runtime entry → repo
-// default → none, resolved dynamically at open. The Trunk resolver is injected
-// via Deps.Trunk (config cannot import tasks/binding).
+// TestResolvePreferredWorkbenchTrunkInheritance exercises the runtime trunk
+// inheritance layer (layer 6 under ADR-0083: config.runtime.toml[<trunk-path>]),
+// the lowest layer that carries this key. A worktree with no runtime entry of
+// its own inherits the Trunk worktree's runtime entry, resolved dynamically at
+// open. These cases isolate the runtime tier (no hand-authored [repo]/.pop.toml
+// value above), since anything hand-authored now beats runtime. The Trunk
+// resolver is injected via Deps.Trunk (config cannot import tasks/binding).
 func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 	// withTrunk returns Deps whose Trunk resolver always points at trunkPath.
 	withTrunk := func(t *testing.T, trunkPath string) *Deps {
@@ -3427,10 +3455,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "minimal"); err != nil {
 			t.Fatal(err)
 		}
-		cfg := &Config{
-			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
-			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
-		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}}}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "minimal" || len(warns) != 0 {
 			t.Fatalf("name=%q warns=%v, want minimal/none (child inherits trunk)", name, warns)
@@ -3455,7 +3480,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		}
 	})
 
-	t.Run("child's explicit none overrides the trunk", func(t *testing.T) {
+	t.Run("child's explicit none overrides the inherited trunk entry", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -3466,17 +3491,14 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		if err := SetRuntimePreferredWorkbenchWith(d, child, ""); err != nil {
 			t.Fatal(err)
 		}
-		cfg := &Config{
-			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
-			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
-		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}}}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want empty/none (child explicit-none wins)", name, warns)
+			t.Fatalf("name=%q warns=%v, want empty/none (child explicit-none wins over trunk)", name, warns)
 		}
 	})
 
-	t.Run("trunk's explicit none propagates over the repo default", func(t *testing.T) {
+	t.Run("trunk's explicit none yields none when nothing hand-authored", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -3484,17 +3506,14 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		if err := SetRuntimePreferredWorkbenchWith(d, trunk, ""); err != nil {
 			t.Fatal(err)
 		}
-		cfg := &Config{
-			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
-		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}}}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "" || len(warns) != 0 {
 			t.Fatalf("name=%q warns=%v, want empty/none (trunk opts out)", name, warns)
 		}
 	})
 
-	t.Run("stale trunk name warns and falls through to the repo default", func(t *testing.T) {
+	t.Run("stale trunk name warns and falls through to none", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -3502,13 +3521,10 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "ghost"); err != nil {
 			t.Fatal(err)
 		}
-		cfg := &Config{
-			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
-		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "gs-dev"}}}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
-		if name != "gs-dev" {
-			t.Fatalf("name=%q, want gs-dev (stale trunk skips to repo default)", name)
+		if name != "" {
+			t.Fatalf("name=%q, want empty (stale trunk skips, nothing below)", name)
 		}
 		if len(warns) != 1 || !strings.Contains(warns[0], "ghost") {
 			t.Fatalf("warns=%v, want one naming the stale trunk workbench", warns)
@@ -3522,7 +3538,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		d.Trunk = func(string) (string, bool) { return "", false }
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
+			Repo:        map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "gs-dev" || len(warns) != 0 {
@@ -3535,7 +3551,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		child := t.TempDir()
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
+			Repo:        map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "gs-dev" || len(warns) != 0 {
@@ -3577,7 +3593,173 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 			t.Fatalf("name=%q, want empty (stale name skips)", name)
 		}
 		if len(warns) != 1 {
-			t.Fatalf("warns=%v, want exactly one (Layer 2 skipped for self-trunk)", warns)
+			t.Fatalf("warns=%v, want exactly one (trunk runtime layer skipped for self-trunk)", warns)
+		}
+	})
+}
+
+// TestResolvePreferredWorkbenchUserFirstLadder exercises the ADR-0083 user-first
+// precedence ladder end to end: each layer that carries preferred_workbench in
+// isolation, the slice-01 reversal (hand-authored beats runtime), the
+// global-shadow ([repo] beats committed .pop.toml), and the two-anchor .pop.toml
+// inheritance (this worktree vs the Trunk worktree, identity-root fallback for a
+// bare repo).
+func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
+	writePopTOML := func(t *testing.T, dir, name string) {
+		t.Helper()
+		body := "preferred_workbench = \"" + name + "\"\n"
+		if err := os.WriteFile(filepath.Join(dir, ".pop.toml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("layer 1: [repo] block supplies the value", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		cfg := &Config{
+			Workbenches: []Workbench{{Name: "repo-wb"}},
+			Repo:        map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "repo-wb"}}},
+		}
+		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "repo-wb" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want repo-wb/none", name, warns)
+		}
+	})
+
+	t.Run("layer 3: this worktree's committed .pop.toml supplies the value", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		writePopTOML(t, root, "committed-wb")
+		cfg := &Config{Workbenches: []Workbench{{Name: "committed-wb"}}}
+		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "committed-wb" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want committed-wb/none", name, warns)
+		}
+	})
+
+	t.Run("layer 4: inherited trunk .pop.toml supplies the value", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		writePopTOML(t, trunk, "trunk-wb")
+		cfg := &Config{Workbenches: []Workbench{{Name: "trunk-wb"}}}
+		if name, warns := cfg.ResolvePreferredWorkbench(d, child); name != "trunk-wb" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want trunk-wb/none (child inherits trunk .pop.toml)", name, warns)
+		}
+	})
+
+	t.Run("layer 5: worktree runtime entry supplies the value", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		if err := SetRuntimePreferredWorkbenchWith(d, root, "rt-wb"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "rt-wb"}}}
+		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "rt-wb" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want rt-wb/none", name, warns)
+		}
+	})
+
+	t.Run("layer 6: inherited trunk runtime entry supplies the value", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		if err := SetRuntimePreferredWorkbenchWith(d, trunk, "rt-trunk-wb"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "rt-trunk-wb"}}}
+		if name, warns := cfg.ResolvePreferredWorkbench(d, child); name != "rt-trunk-wb" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want rt-trunk-wb/none", name, warns)
+		}
+	})
+
+	t.Run("reversal: [repo] default beats a worktree runtime entry", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		if err := SetRuntimePreferredWorkbenchWith(d, root, "rt-wb"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{
+			Workbenches: []Workbench{{Name: "repo-wb"}, {Name: "rt-wb"}},
+			Repo:        map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "repo-wb"}}},
+		}
+		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "repo-wb" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want repo-wb/none (hand-authored beats runtime)", name, warns)
+		}
+	})
+
+	t.Run("reversal: committed .pop.toml beats a worktree runtime entry", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		writePopTOML(t, root, "committed-wb")
+		if err := SetRuntimePreferredWorkbenchWith(d, root, "rt-wb"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "committed-wb"}, {Name: "rt-wb"}}}
+		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "committed-wb" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want committed-wb/none (in-tree beats runtime)", name, warns)
+		}
+	})
+
+	t.Run("global-shadow: [repo] beats committed .pop.toml for the key", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		writePopTOML(t, root, "committed-wb")
+		cfg := &Config{
+			Workbenches: []Workbench{{Name: "central-wb"}, {Name: "committed-wb"}},
+			Repo:        map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "central-wb"}}},
+		}
+		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "central-wb" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want central-wb/none (central config.toml shadows committed .pop.toml)", name, warns)
+		}
+	})
+
+	t.Run("two-anchor: worktree's own .pop.toml overrides the inherited trunk one", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		writePopTOML(t, trunk, "trunk-wb")
+		writePopTOML(t, child, "child-wb")
+		cfg := &Config{Workbenches: []Workbench{{Name: "trunk-wb"}, {Name: "child-wb"}}}
+		if name, warns := cfg.ResolvePreferredWorkbench(d, child); name != "child-wb" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want child-wb/none (own .pop.toml overrides inherited)", name, warns)
+		}
+	})
+
+	t.Run("two-anchor: bare repo falls back to the identity-root .pop.toml", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		bareRoot := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(bareRoot, ".bare"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		worktree := filepath.Join(bareRoot, "main")
+		if err := os.MkdirAll(worktree, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Shared committed config lives at the identity root; no trunk anchor.
+		writePopTOML(t, bareRoot, "id-root-wb")
+		d.Trunk = func(string) (string, bool) { return "", false }
+		cfg := &Config{Workbenches: []Workbench{{Name: "id-root-wb"}}}
+		if name, warns := cfg.ResolvePreferredWorkbench(d, worktree); name != "id-root-wb" || len(warns) != 0 {
+			t.Fatalf("name=%q warns=%v, want id-root-wb/none (bare repo inherits identity-root .pop.toml)", name, warns)
+		}
+	})
+
+	t.Run("stale .pop.toml name warns and falls through to the runtime entry", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		writePopTOML(t, root, "ghost")
+		if err := SetRuntimePreferredWorkbenchWith(d, root, "rt-wb"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &Config{Workbenches: []Workbench{{Name: "rt-wb"}}}
+		name, warns := cfg.ResolvePreferredWorkbench(d, root)
+		if name != "rt-wb" {
+			t.Fatalf("name=%q, want rt-wb (stale in-tree skips to runtime gap-filler)", name)
+		}
+		if len(warns) != 1 || !strings.Contains(warns[0], "ghost") {
+			t.Fatalf("warns=%v, want one naming the stale .pop.toml name", warns)
 		}
 	})
 }
@@ -3671,11 +3853,10 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 	})
 }
 
-// preferred_workbench in a repo-local .pop.toml is parsed into RepoConfig as of
-// ADR-0083, but ResolvePreferredWorkbench's cross-tier ladder does not yet
-// consult .pop.toml (that is slice 02). Its Layer 3 still reads only the global
-// [repo."<path>"] default, so a .pop.toml-only value yields no repo default here.
-func TestPreferredWorkbenchNotAcceptedFromPopTOML(t *testing.T) {
+// As of slice 02 (ADR-0083), ResolvePreferredWorkbench's ladder consults the
+// committed .pop.toml at layer 3, so a .pop.toml-only preferred_workbench (with
+// no [repo] override above it) now supplies the resolved value.
+func TestPreferredWorkbenchFromPopTOML(t *testing.T) {
 	root := t.TempDir()
 	popTOML := "preferred_workbench = \"gs-dev\"\n" +
 		"[[workbenches]]\nname = \"gs-dev\"\n"
@@ -3691,8 +3872,8 @@ func TestPreferredWorkbenchNotAcceptedFromPopTOML(t *testing.T) {
 	}}
 	cfg := &Config{}
 	name, warns := cfg.ResolvePreferredWorkbench(d, root)
-	if name != "" {
-		t.Errorf("name = %q, want empty (.pop.toml must not supply a preferred workbench)", name)
+	if name != "gs-dev" {
+		t.Errorf("name = %q, want gs-dev (committed .pop.toml supplies the preferred workbench)", name)
 	}
 	if len(warns) != 0 {
 		t.Errorf("unexpected warnings: %v", warns)
