@@ -572,37 +572,46 @@ func (c *Config) ProjectEntries() ([]ProjectEntry, error) {
 	return c.Projects, nil
 }
 
+// RepoScopeConfig is the single shared repo-scope key set (ADR-0083). Every key
+// here is accepted at BOTH repo-scope loci: the committed repo-root .pop.toml
+// and the user's central global [repo."<path>"] override block. Adding a
+// repo-scope key here makes both surfaces accept it without touching two structs.
+// trunk is the sole exception — it is per-checkout machine topology, never valid
+// in committed .pop.toml — so it lives on the individual structs, not here.
+type RepoScopeConfig struct {
+	// Workbenches are repo-scope session blueprints (canonical key).
+	Workbenches []Workbench `toml:"workbenches"`
+	// PreferredWorkbench names the repo-default Workbench that auto-applies when
+	// a session is born for any checkout of this repo (ADR-0078). It is keyed by
+	// repository identity, not the exact checkout path, so it is a coarse default
+	// shared by every worktree of the repo. Readable from committed .pop.toml as
+	// well as the global override; the override wins for the same key (ADR-0083).
+	PreferredWorkbench string `toml:"preferred_workbench"`
+}
+
 // RepoConfig is the repo-root .pop.toml surface. It is deliberately separate
 // from Config: global config.toml registers projects, while .pop.toml only
-// describes behavior for an already-registered project.
+// describes behavior for an already-registered project. It carries the shared
+// repo-scope key set plus a non-decoded Trunk slot (populated only by resolution
+// from a global override, never parsed from .pop.toml).
 type RepoConfig struct {
+	RepoScopeConfig
 	// Trunk marks a specific checkout as the Trunk worktree — the repository's
 	// fork base for managed worktrees. Meaningful only in a [repo."<path>"]
 	// global override block keyed to that checkout; a bare repo must declare
 	// trunk = true to enable managed-worktree provisioning. Repo-local .pop.toml
-	// cannot name a machine-specific trunk.
+	// cannot name a machine-specific trunk, so this is never decoded (toml:"-").
 	Trunk bool `toml:"-"`
-	// Workbenches are repo-local session blueprints (canonical key).
-	Workbenches []Workbench `toml:"workbenches"`
 }
 
 // RepoOverrideConfig is the shape of a [repo."<path>"] block in global
-// config.toml. Only the RepoConfig subset of fields is accepted here;
-// global-only settings (project registry, daemon knobs, etc.) are not.
-// Pointer fields allow field-level merge semantics (nil = not set).
+// config.toml. It accepts the shared repo-scope key set plus the [repo]-only
+// trunk key; global-only settings (project registry, daemon knobs, etc.) are not.
 type RepoOverrideConfig struct {
+	RepoScopeConfig
 	// Trunk is meaningful only for the specific checkout path that keys this
 	// block; it is not propagated to other worktrees of the same repo.
 	Trunk *bool `toml:"trunk"`
-	// Workbenches are per-repo session blueprints (canonical key).
-	Workbenches []Workbench `toml:"workbenches"`
-	// PreferredWorkbench names the repo-default Workbench that auto-applies when
-	// a session is born for any checkout of this repo (ADR-0078). It is a
-	// [repo]-only key: deliberately absent from the .pop.toml RepoConfig schema
-	// because session shape is personal taste, not committed team config. Unlike
-	// trunk it is keyed by repository identity, not the exact checkout path, so
-	// it is a coarse default shared by every worktree of the repo.
-	PreferredWorkbench string `toml:"preferred_workbench"`
 }
 
 // LoadRepoConfig reads repo-root .pop.toml. A missing file is not an error and
@@ -707,9 +716,15 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 	// Load .pop.toml from the repo identity root (may be zero config).
 	popTOML, popErr := LoadRepoConfigWith(d, identity)
 
-	// Merge: start with .pop.toml, then layer global override on top.
+	// Merge: start with .pop.toml, then layer global override on top. For any
+	// shared repo-scope key the personal [repo."<path>"] value beats the repo's
+	// committed .pop.toml (ADR-0083 repo-scope ordering). trunk is per-checkout,
+	// applied only when the override's key path exactly matches checkoutPath.
 	result := popTOML
 	if override != nil {
+		if override.PreferredWorkbench != "" {
+			result.PreferredWorkbench = override.PreferredWorkbench
+		}
 		if override.Trunk != nil && executionBaseApplies {
 			result.Trunk = *override.Trunk
 		}

@@ -3232,7 +3232,7 @@ func TestResolvePreferredWorkbench(t *testing.T) {
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
 			Repo: map[string]RepoOverrideConfig{
-				root: {PreferredWorkbench: "gs-dev"},
+				root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}},
 			},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
@@ -3272,7 +3272,7 @@ func TestResolvePreferredWorkbench(t *testing.T) {
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo: map[string]RepoOverrideConfig{
-				root: {PreferredWorkbench: "ghost"},
+				root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "ghost"}},
 			},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
@@ -3330,7 +3330,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
-			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "minimal" || len(warns) != 0 {
@@ -3346,7 +3346,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "" || len(warns) != 0 {
@@ -3359,7 +3359,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		root := t.TempDir()
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "gs-dev" || len(warns) != 0 {
@@ -3375,7 +3375,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "gs-dev" {
@@ -3394,7 +3394,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{root: {PreferredWorkbench: "phantom"}},
+			Repo:             map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "phantom"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "" {
@@ -3429,7 +3429,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
-			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "minimal" || len(warns) != 0 {
@@ -3468,7 +3468,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}, {Name: "minimal"}},
-			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "" || len(warns) != 0 {
@@ -3486,7 +3486,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "" || len(warns) != 0 {
@@ -3504,7 +3504,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		}
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "gs-dev" {
@@ -3522,7 +3522,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		d.Trunk = func(string) (string, bool) { return "", false }
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "gs-dev" || len(warns) != 0 {
@@ -3535,7 +3535,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		child := t.TempDir()
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
-			Repo:             map[string]RepoOverrideConfig{child: {PreferredWorkbench: "gs-dev"}},
+			Repo:             map[string]RepoOverrideConfig{child: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}}},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, child)
 		if name != "gs-dev" || len(warns) != 0 {
@@ -3582,8 +3582,99 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 	})
 }
 
-// A preferred_workbench set in a repo-local .pop.toml is NOT accepted: the
-// RepoConfig schema has no such field, so it never becomes a repo default.
+// TestResolveRepoConfigSharedSchema exercises the unified repo-scope schema
+// (ADR-0083): preferred_workbench now rides the shared key set, so it parses
+// from a committed .pop.toml as well as from a global [repo."<path>"] block, and
+// the personal override beats .pop.toml for the same key. trunk stays
+// [repo]-only and is rejected in .pop.toml.
+func TestResolveRepoConfigSharedSchema(t *testing.T) {
+	real := deps.NewRealFileSystem()
+	newDeps := func() *Deps {
+		return &Deps{FS: &deps.MockFileSystem{
+			StatFunc:         real.Stat,
+			ReadFileFunc:     real.ReadFile,
+			EvalSymlinksFunc: real.EvalSymlinks,
+			UserHomeDirFunc:  real.UserHomeDir,
+		}}
+	}
+	writePopTOML := func(t *testing.T, dir, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, ".pop.toml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("preferred_workbench parses from .pop.toml", func(t *testing.T) {
+		root := t.TempDir()
+		writePopTOML(t, root, "preferred_workbench = \"gs-dev\"\n")
+		cfg := &Config{}
+		got, err := cfg.ResolveRepoConfig(newDeps(), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PreferredWorkbench != "gs-dev" {
+			t.Errorf("PreferredWorkbench = %q, want %q (parsed from committed .pop.toml)", got.PreferredWorkbench, "gs-dev")
+		}
+	})
+
+	t.Run("preferred_workbench parses from [repo] block", func(t *testing.T) {
+		root := t.TempDir()
+		cfg := &Config{Repo: map[string]RepoOverrideConfig{
+			root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "gs-dev"}},
+		}}
+		got, err := cfg.ResolveRepoConfig(newDeps(), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PreferredWorkbench != "gs-dev" {
+			t.Errorf("PreferredWorkbench = %q, want %q (parsed from [repo] block)", got.PreferredWorkbench, "gs-dev")
+		}
+	})
+
+	t.Run("[repo] block beats .pop.toml for the same key", func(t *testing.T) {
+		root := t.TempDir()
+		writePopTOML(t, root, "preferred_workbench = \"committed\"\n")
+		cfg := &Config{Repo: map[string]RepoOverrideConfig{
+			root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "personal"}},
+		}}
+		got, err := cfg.ResolveRepoConfig(newDeps(), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PreferredWorkbench != "personal" {
+			t.Errorf("PreferredWorkbench = %q, want %q (personal [repo] beats committed .pop.toml)", got.PreferredWorkbench, "personal")
+		}
+	})
+
+	t.Run(".pop.toml retained when [repo] leaves the key unset", func(t *testing.T) {
+		root := t.TempDir()
+		writePopTOML(t, root, "preferred_workbench = \"committed\"\n")
+		cfg := &Config{Repo: map[string]RepoOverrideConfig{
+			root: {Trunk: boolPtr(true)},
+		}}
+		got, err := cfg.ResolveRepoConfig(newDeps(), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PreferredWorkbench != "committed" {
+			t.Errorf("PreferredWorkbench = %q, want %q (.pop.toml retained when override unset)", got.PreferredWorkbench, "committed")
+		}
+	})
+
+	t.Run("trunk stays [repo]-only: rejected in .pop.toml", func(t *testing.T) {
+		root := t.TempDir()
+		writePopTOML(t, root, "trunk = true\n")
+		if _, err := LoadRepoConfig(root); err == nil ||
+			!strings.Contains(err.Error(), "trunk is only valid in a global") {
+			t.Fatalf("err = %v, want trunk-only-in-global rejection", err)
+		}
+	})
+}
+
+// preferred_workbench in a repo-local .pop.toml is parsed into RepoConfig as of
+// ADR-0083, but ResolvePreferredWorkbench's cross-tier ladder does not yet
+// consult .pop.toml (that is slice 02). Its Layer 3 still reads only the global
+// [repo."<path>"] default, so a .pop.toml-only value yields no repo default here.
 func TestPreferredWorkbenchNotAcceptedFromPopTOML(t *testing.T) {
 	root := t.TempDir()
 	popTOML := "preferred_workbench = \"gs-dev\"\n" +
