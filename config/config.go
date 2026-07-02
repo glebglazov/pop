@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -602,6 +603,12 @@ type RepoConfig struct {
 	// trunk = true to enable managed-worktree provisioning. Repo-local .pop.toml
 	// cannot name a machine-specific trunk, so this is never decoded (toml:"-").
 	Trunk bool `toml:"-"`
+
+	// Findings holds non-fatal scope-legality problems collected while loading
+	// this .pop.toml (ADR-0054, ADR-0083): top-level keys that are not repo-scope
+	// keys (global/machine-only settings, or the [repo]-only trunk) are ignored
+	// but surfaced here so a command can render them in the picker warning banner.
+	Findings []Finding `toml:"-"`
 }
 
 // RepoOverrideConfig is the shape of a [repo."<path>"] block in global
@@ -639,6 +646,10 @@ func LoadRepoConfigWith(d *Deps, repoRoot string) (RepoConfig, error) {
 	if err := validateRepoConfigMetadata(path, md); err != nil {
 		return RepoConfig{}, err
 	}
+	// Scope-legality (ADR-0083): only shared repo-scope keys are honored in
+	// .pop.toml. Global/machine-only keys (and the [repo]-only trunk) are ignored
+	// but surfaced as non-fatal findings so the rest of the file still loads.
+	cfg.Findings = popTOMLScopeFindings(path, md)
 	return cfg, nil
 }
 
@@ -1621,8 +1632,6 @@ func repoRenameFindings(path string, md toml.MetaData) []Finding {
 				add(fmt.Sprintf("%s: execution_base was renamed to trunk; use trunk = true in a global [repo.%q] block", path, "<path>"))
 			case "queue_base":
 				add(fmt.Sprintf("%s: queue_base was renamed to trunk; use trunk = true in a global [repo.%q] block", path, "<path>"))
-			case "trunk":
-				add(fmt.Sprintf("%s: trunk is only valid in a global [repo.%q] override block", path, "<path>"))
 			}
 		}
 		// [repo."<path>"] block renames (len>=3)
@@ -1672,15 +1681,63 @@ func queueAgentsWarnings(path string, md toml.MetaData) []Finding {
 	return nil
 }
 
-// repoBlockWarnings returns load-time findings for unknown keys inside
-// [repo."<path>"] blocks. Only the RepoConfig subset is valid there; any
-// other key is silently degraded but surfaced as a finding.
-func repoBlockWarnings(path string, md toml.MetaData) []Finding {
-	validRepoKeys := map[string]bool{
-		"trunk":               true,
-		"workbenches":         true,
-		"preferred_workbench": true, // ADR-0078 repo-default preferred Workbench
+// repoScopeLegalKeys returns the set of TOML keys that are legal at repo scope,
+// derived by reflection from the shared RepoScopeConfig schema (ADR-0083). It is
+// the single source of truth for both repo-scope loci — the committed .pop.toml
+// and the global [repo."<path>"] override — so adding a repo-scope key to that
+// struct makes both surfaces accept it with no change to validation code. trunk
+// is deliberately absent (it is [repo]-only, not shared).
+func repoScopeLegalKeys() map[string]bool {
+	legal := make(map[string]bool)
+	t := reflect.TypeOf(RepoScopeConfig{})
+	for i := 0; i < t.NumField(); i++ {
+		name := strings.Split(t.Field(i).Tag.Get("toml"), ",")[0]
+		if name != "" && name != "-" {
+			legal[name] = true
+		}
 	}
+	return legal
+}
+
+// popTOMLScopeFindings enforces scope-legality for a committed .pop.toml
+// (ADR-0083, ADR-0054): only shared repo-scope keys (repoScopeLegalKeys) are
+// honored there. Any global/machine-only top-level key (projects, queue,
+// pane_monitoring, dashboard/daemon knobs, …) and the [repo]-only trunk key are
+// ignored but surfaced as non-fatal findings, so the rest of the file still
+// loads. The legal set is generated from the shared schema, not a second
+// hand-maintained whitelist. Renamed-key migration tripwires (worktree_ready,
+// execution_base, queue_base) stay fatal and are handled by
+// validateRepoConfigMetadata before this runs.
+func popTOMLScopeFindings(path string, md toml.MetaData) []Finding {
+	legal := repoScopeLegalKeys()
+	var findings []Finding
+	seen := make(map[string]bool)
+	for _, key := range md.Undecoded() {
+		if len(key) == 0 {
+			continue
+		}
+		name := key[0] // top-level key; nested global tables share one key[0]
+		if legal[name] || seen[name] {
+			continue
+		}
+		seen[name] = true
+		msg := fmt.Sprintf("%s: %q is not valid in .pop.toml and was ignored (only repo-scope keys are accepted)", path, name)
+		if name == "trunk" {
+			msg = fmt.Sprintf("%s: trunk is only valid in a global [repo.%q] override block and was ignored", path, "<path>")
+		}
+		findings = append(findings, Finding{Path: "repo_scope.unknown_key", Message: msg})
+	}
+	return findings
+}
+
+// repoBlockWarnings returns load-time findings for unknown keys inside
+// [repo."<path>"] blocks. Only the shared repo-scope key set (plus the
+// [repo]-only trunk) is valid there; any other key is silently degraded but
+// surfaced as a finding. The valid set is derived from the shared schema
+// (repoScopeLegalKeys), so it stays in sync with .pop.toml scope-legality.
+func repoBlockWarnings(path string, md toml.MetaData) []Finding {
+	validRepoKeys := repoScopeLegalKeys()
+	validRepoKeys["trunk"] = true // [repo]-only machine topology, not shared
 	var findings []Finding
 	seen := make(map[string]bool)
 	for _, key := range md.Undecoded() {

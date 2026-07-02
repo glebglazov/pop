@@ -1012,7 +1012,6 @@ func TestLoadRepoConfigDirectives(t *testing.T) {
 		{name: "worktree_ready causes error", body: strPtr("worktree_ready = true\n"), wantErr: "worktree_ready was removed"},
 		{name: "execution_base causes error", body: strPtr("execution_base = true\n"), wantErr: "execution_base was renamed to trunk"},
 		{name: "queue_base causes error", body: strPtr("queue_base = true\n"), wantErr: "queue_base was renamed to trunk"},
-		{name: "trunk in pop.toml causes error", body: strPtr("trunk = true\n"), wantErr: "trunk is only valid in a global"},
 		{name: "malformed", body: strPtr("trunk =\n"), wantErr: ".pop.toml"},
 	}
 
@@ -1039,6 +1038,98 @@ func TestLoadRepoConfigDirectives(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPopTOMLScopeLegality asserts that .pop.toml accepts only shared repo-scope
+// keys (ADR-0083): a global-only key or the [repo]-only trunk is ignored but
+// surfaces a non-fatal finding, while valid repo-scope keys still load
+// (ADR-0054 degrade-not-abort).
+func TestPopTOMLScopeLegality(t *testing.T) {
+	loadBody := func(t *testing.T, body string) RepoConfig {
+		t.Helper()
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadRepoConfig(root)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return cfg
+	}
+
+	findingFor := func(cfg RepoConfig, needle string) bool {
+		for _, f := range cfg.Findings {
+			if strings.Contains(f.Message, needle) {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("global-only key rejected, non-fatal", func(t *testing.T) {
+		cfg := loadBody(t, "projects = [\"~/Dev/*\"]\n")
+		if len(cfg.Findings) != 1 {
+			t.Fatalf("want 1 finding, got %d: %+v", len(cfg.Findings), cfg.Findings)
+		}
+		if !findingFor(cfg, "projects") {
+			t.Errorf("finding should name the offending key: %+v", cfg.Findings)
+		}
+	})
+
+	t.Run("global-only table key rejected", func(t *testing.T) {
+		cfg := loadBody(t, "[queue]\nmax_open = 3\n")
+		if !findingFor(cfg, "queue") {
+			t.Errorf("global-only [queue] table should produce a finding: %+v", cfg.Findings)
+		}
+	})
+
+	t.Run("valid repo key accepted with no finding", func(t *testing.T) {
+		cfg := loadBody(t, "preferred_workbench = \"gs-dev\"\n")
+		if len(cfg.Findings) != 0 {
+			t.Fatalf("valid repo key must not warn, got: %+v", cfg.Findings)
+		}
+		if cfg.PreferredWorkbench != "gs-dev" {
+			t.Errorf("preferred_workbench = %q, want gs-dev", cfg.PreferredWorkbench)
+		}
+	})
+
+	t.Run("trunk rejected as repo-only", func(t *testing.T) {
+		cfg := loadBody(t, "trunk = true\n")
+		if !findingFor(cfg, "trunk is only valid in a global") {
+			t.Fatalf("trunk should produce a [repo]-only finding: %+v", cfg.Findings)
+		}
+		if cfg.Trunk {
+			t.Error("trunk in .pop.toml must not be honored")
+		}
+	})
+
+	t.Run("mixed file partially loads", func(t *testing.T) {
+		cfg := loadBody(t, "preferred_workbench = \"gs-dev\"\nprojects = [\"~/Dev/*\"]\ntrunk = true\n")
+		// Valid key still loads.
+		if cfg.PreferredWorkbench != "gs-dev" {
+			t.Errorf("valid key lost in mixed file: preferred_workbench = %q", cfg.PreferredWorkbench)
+		}
+		// Both illegal keys warned; neither aborts.
+		if !findingFor(cfg, "projects") || !findingFor(cfg, "trunk is only valid in a global") {
+			t.Errorf("both illegal keys should warn, got: %+v", cfg.Findings)
+		}
+	})
+
+	// Criterion: adding a repo-scope key to the shared schema makes it accepted
+	// in .pop.toml with no change to validation code — the legal set is generated.
+	t.Run("legal set derived from shared schema", func(t *testing.T) {
+		legal := repoScopeLegalKeys()
+		if !legal["workbenches"] || !legal["preferred_workbench"] {
+			t.Fatalf("legal set missing shared schema keys: %+v", legal)
+		}
+		if legal["trunk"] {
+			t.Error("trunk must not be repo-scope-legal (it is [repo]-only)")
+		}
+		if legal["projects"] {
+			t.Error("global-only projects must not be repo-scope-legal")
+		}
+	})
 }
 
 func TestPopTOMLPresenceDoesNotRegisterProject(t *testing.T) {
@@ -3846,9 +3937,23 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 	t.Run("trunk stays [repo]-only: rejected in .pop.toml", func(t *testing.T) {
 		root := t.TempDir()
 		writePopTOML(t, root, "trunk = true\n")
-		if _, err := LoadRepoConfig(root); err == nil ||
-			!strings.Contains(err.Error(), "trunk is only valid in a global") {
-			t.Fatalf("err = %v, want trunk-only-in-global rejection", err)
+		// Scope-legality (slice 03): trunk in .pop.toml is now non-fatal — it is
+		// ignored and surfaced as a finding rather than aborting the load.
+		cfg, err := LoadRepoConfig(root)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.Trunk {
+			t.Error("trunk in .pop.toml must not be honored")
+		}
+		var warned bool
+		for _, f := range cfg.Findings {
+			if strings.Contains(f.Message, "trunk is only valid in a global") {
+				warned = true
+			}
+		}
+		if !warned {
+			t.Fatalf("want trunk-only-in-global finding, got %+v", cfg.Findings)
 		}
 	})
 }
