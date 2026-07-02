@@ -235,8 +235,9 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 	if got.drainPick == nil {
 		t.Fatal("i on unbound set did not open the drain target picker")
 	}
-	if got.drainPick.entries[got.drainPick.cursor].Kind != drainTargetNewManaged {
-		t.Fatalf("default cursor entry = %+v, want new managed worktree", got.drainPick.entries[got.drainPick.cursor])
+	selected, ok := got.drainPick.list.Selected()
+	if !ok || selected.Kind != drainTargetNewManaged {
+		t.Fatalf("default cursor entry = %+v (ok=%v), want new managed worktree", selected, ok)
 	}
 }
 

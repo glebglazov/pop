@@ -1041,6 +1041,87 @@ func TestDashboardDetailViewClampsToBodyHeight(t *testing.T) {
 	}
 }
 
+// TestDashboardBindModalListStagesNavigateAndSelect drives the bind modal's two
+// list stages through the List: j moves the cursor (wrapping), and Enter on the
+// base-ref stage records the highlighted ref and advances to the name stage.
+func TestDashboardBindModalListStagesNavigateAndSelect(t *testing.T) {
+	row := DashboardRow{Project: "pop", SetRef: SetRef{SetID: "set-bind"}}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+
+	// Worktree stage: entries arrive; wrap up from the top lands on the last.
+	updated, _ := m.Update(dashboardBindListMsg{row: row, entries: []dashboardBindEntry{
+		{Label: "wt-a", Path: "/a"},
+		{Label: "wt-b", Path: "/b"},
+		{Create: true, Label: "create new..."},
+	}})
+	m = updated.(QueueDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m = updated.(QueueDashboard)
+	sel, ok := m.bind.list.Selected()
+	if !ok || !sel.Create {
+		t.Fatalf("k wrap in worktree stage selected %+v (ok=%v), want the create entry", sel, ok)
+	}
+
+	// Base-ref stage: refs arrive; j moves to the second ref, Enter records it.
+	updated, _ = m.Update(dashboardBindRefsMsg{refs: []string{"main", "develop"}})
+	m = updated.(QueueDashboard)
+	if m.bind.stage != dashboardBindStageBaseRef {
+		t.Fatalf("stage = %d, want base-ref", m.bind.stage)
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = updated.(QueueDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(QueueDashboard)
+	if m.bind.stage != dashboardBindStageName {
+		t.Fatalf("stage = %d, want name after base-ref select", m.bind.stage)
+	}
+	if m.bind.baseRef != "develop" {
+		t.Fatalf("baseRef = %q, want develop", m.bind.baseRef)
+	}
+}
+
+func TestDashboardBindModalClampsToBodyHeight(t *testing.T) {
+	// A long worktree list on a short terminal must not overflow: the modal's
+	// List scroll window caps its body instead of rendering every entry.
+	entries := make([]dashboardBindEntry, 40)
+	for i := range entries {
+		entries[i] = dashboardBindEntry{Label: fmt.Sprintf("wt-%02d", i)}
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00set-bind", SetRef: SetRef{SetID: "set-bind"}},
+	}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 12})
+	m = updated.(QueueDashboard)
+	m.bind = &dashboardBindModal{row: m.snap.Rows[0], list: newBindEntryList(entries)}
+
+	view := m.View().Content
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("bind modal view line count = %d, want %d (clamped to body height):\n%s", got, want, view)
+	}
+}
+
+func TestDashboardDrainModalClampsToBodyHeight(t *testing.T) {
+	// A long drain-target list on a short terminal must not overflow: the modal's
+	// List scroll window caps its body instead of rendering every entry.
+	entries := make([]dashboardDrainEntry, 40)
+	for i := range entries {
+		entries[i] = dashboardDrainEntry{Label: fmt.Sprintf("target-%02d", i)}
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00set-drain", SetRef: SetRef{SetID: "set-drain"}},
+	}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 12})
+	m = updated.(QueueDashboard)
+	m.drainPick = newDashboardDrainModal(m.snap.Rows[0], entries)
+
+	view := m.View().Content
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("drain modal view line count = %d, want %d (clamped to body height):\n%s", got, want, view)
+	}
+}
+
 func dashboardTestLineIndex(lines []string, needle string) int {
 	for i, line := range lines {
 		if strings.Contains(line, needle) {

@@ -55,6 +55,11 @@ func (l *List[T]) Cursor() int {
 	return l.cursor
 }
 
+// Len returns the number of items in the list.
+func (l *List[T]) Len() int {
+	return len(l.items)
+}
+
 // Scroll returns the scroll offset (index of the first visible item).
 func (l *List[T]) Scroll() int {
 	return l.scroll

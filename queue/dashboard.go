@@ -854,14 +854,42 @@ type dashboardBindEntry struct {
 }
 
 type dashboardBindModal struct {
-	row     DashboardRow
-	stage   dashboardBindStage
-	entries []dashboardBindEntry
-	refs    []string
-	cursor  int
+	row   DashboardRow
+	stage dashboardBindStage
+	// list drives the worktree-pick and base-ref-pick stages (both wrapping).
+	// Base refs are held as entries with only Label set. The name stage is a
+	// plain text input and does not use the list.
+	list    *ui.List[dashboardBindEntry]
 	baseRef string
 	name    string
 	loading bool
+}
+
+// bindEntryCell renders one bind-modal row: the worktree label (falling back to
+// the checkout path) or, in the base-ref stage, the ref held in Label.
+func bindEntryCell(e dashboardBindEntry, _ ui.RowState) string {
+	if e.Label != "" {
+		return e.Label
+	}
+	return e.Path
+}
+
+// newBindEntryList builds the wrapping list backing a bind-modal list stage.
+func newBindEntryList(entries []dashboardBindEntry) *ui.List[dashboardBindEntry] {
+	return ui.NewList(entries, ui.Opts[dashboardBindEntry]{
+		Wrap: true,
+		Cell: bindEntryCell,
+	})
+}
+
+// bindRefEntries wraps base refs as bind entries so the base-ref stage reuses
+// the same wrapping list as the worktree-pick stage.
+func bindRefEntries(refs []string) []dashboardBindEntry {
+	entries := make([]dashboardBindEntry, len(refs))
+	for i, ref := range refs {
+		entries[i] = dashboardBindEntry{Label: ref}
+	}
+	return entries
 }
 
 // dashboardDrainTargetKind identifies one Drain target picker option (ADR-0052).
@@ -890,9 +918,24 @@ type dashboardDrainEntry struct {
 // picker and resumes in its binding (ADR-0052).
 type dashboardDrainModal struct {
 	row     DashboardRow
-	entries []dashboardDrainEntry
-	cursor  int
+	list    *ui.List[dashboardDrainEntry]
 	loading bool
+}
+
+// newDashboardDrainModal builds the Drain target picker with a wrapping list,
+// positioning the cursor on "new managed worktree" — the frictionless default.
+func newDashboardDrainModal(row DashboardRow, entries []dashboardDrainEntry) *dashboardDrainModal {
+	list := ui.NewList(entries, ui.Opts[dashboardDrainEntry]{
+		Wrap: true,
+		Cell: func(e dashboardDrainEntry, _ ui.RowState) string {
+			if e.Label != "" {
+				return e.Label
+			}
+			return e.Path
+		},
+	})
+	list.SetCursor(defaultDrainCursor(entries))
+	return &dashboardDrainModal{row: row, list: list}
 }
 
 type dashboardAbandonModal struct {
@@ -1339,7 +1382,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = fmt.Errorf("no drain target available for %s", msg.row.SetID)
 			return m, nil
 		}
-		m.drainPick = &dashboardDrainModal{row: msg.row, entries: msg.entries, cursor: defaultDrainCursor(msg.entries)}
+		m.drainPick = newDashboardDrainModal(msg.row, msg.entries)
 		return m, nil
 	case dashboardPreviewMsg:
 		if msg.err != nil {
@@ -1351,7 +1394,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.bind = nil
 			return m, nil
 		}
-		m.bind = &dashboardBindModal{row: msg.row, entries: msg.entries}
+		m.bind = &dashboardBindModal{row: msg.row, list: newBindEntryList(msg.entries)}
 	case dashboardBindRefsMsg:
 		if m.bind == nil {
 			return m, nil
@@ -1362,8 +1405,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.bind.stage = dashboardBindStageBaseRef
-		m.bind.refs = msg.refs
-		m.bind.cursor = 0
+		m.bind.list = newBindEntryList(bindRefEntries(msg.refs))
 		m.bind.loading = false
 	case dashboardBindMsg:
 		if msg.err != nil {
@@ -1410,10 +1452,14 @@ func (m QueueDashboard) updateBindModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.bind = nil
 		return m, nil
 	case "j", "down":
-		m.moveBindCursor(1)
+		if m.bind.stage != dashboardBindStageName && m.bind.list != nil {
+			m.bind.list.MoveDown()
+		}
 		return m, nil
 	case "k", "up":
-		m.moveBindCursor(-1)
+		if m.bind.stage != dashboardBindStageName && m.bind.list != nil {
+			m.bind.list.MoveUp()
+		}
 		return m, nil
 	case "backspace":
 		if m.bind.stage == dashboardBindStageName && len(m.bind.name) > 0 {
@@ -1824,36 +1870,16 @@ func filterDashboardRows(rows []DashboardRow, query string) []DashboardRow {
 	return filtered
 }
 
-func (m *QueueDashboard) moveBindCursor(delta int) {
-	if m.bind == nil {
-		return
-	}
-	limit := len(m.bind.entries)
-	if m.bind.stage == dashboardBindStageBaseRef {
-		limit = len(m.bind.refs)
-	}
-	if limit == 0 {
-		return
-	}
-	m.bind.cursor += delta
-	if m.bind.cursor < 0 {
-		m.bind.cursor = limit - 1
-	}
-	if m.bind.cursor >= limit {
-		m.bind.cursor = 0
-	}
-}
-
 func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 	if m.bind == nil || m.bind.loading {
 		return m, nil
 	}
 	switch m.bind.stage {
 	case dashboardBindStageWorktree:
-		if len(m.bind.entries) == 0 || m.bind.cursor < 0 || m.bind.cursor >= len(m.bind.entries) {
+		entry, ok := m.bind.list.Selected()
+		if !ok {
 			return m, nil
 		}
-		entry := m.bind.entries[m.bind.cursor]
 		if entry.Create {
 			m.bind.loading = true
 			return m, m.loadBindRefs(m.bind.row)
@@ -1861,12 +1887,12 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 		m.bind.loading = true
 		return m, m.adoptBindWorktree(m.bind.row, entry.Path)
 	case dashboardBindStageBaseRef:
-		if len(m.bind.refs) == 0 || m.bind.cursor < 0 || m.bind.cursor >= len(m.bind.refs) {
+		entry, ok := m.bind.list.Selected()
+		if !ok {
 			return m, nil
 		}
-		m.bind.baseRef = m.bind.refs[m.bind.cursor]
+		m.bind.baseRef = entry.Label
 		m.bind.stage = dashboardBindStageName
-		m.bind.cursor = 0
 		return m, nil
 	case dashboardBindStageName:
 		name := strings.TrimSpace(m.bind.name)
@@ -1942,10 +1968,14 @@ func (m QueueDashboard) updateDrainModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.drainPick = nil
 		return m, nil
 	case "j", "down":
-		m.moveDrainCursor(1)
+		if m.drainPick.list != nil {
+			m.drainPick.list.MoveDown()
+		}
 		return m, nil
 	case "k", "up":
-		m.moveDrainCursor(-1)
+		if m.drainPick.list != nil {
+			m.drainPick.list.MoveUp()
+		}
 		return m, nil
 	case "enter":
 		return m.confirmDrainModal()
@@ -1953,31 +1983,14 @@ func (m QueueDashboard) updateDrainModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *QueueDashboard) moveDrainCursor(delta int) {
-	if m.drainPick == nil {
-		return
-	}
-	n := len(m.drainPick.entries)
-	if n == 0 {
-		return
-	}
-	m.drainPick.cursor += delta
-	if m.drainPick.cursor < 0 {
-		m.drainPick.cursor = n - 1
-	}
-	if m.drainPick.cursor >= n {
-		m.drainPick.cursor = 0
-	}
-}
-
 func (m QueueDashboard) confirmDrainModal() (tea.Model, tea.Cmd) {
 	if m.drainPick == nil || m.drainPick.loading {
 		return m, nil
 	}
-	if m.drainPick.cursor < 0 || m.drainPick.cursor >= len(m.drainPick.entries) {
+	entry, ok := m.drainPick.list.Selected()
+	if !ok {
 		return m, nil
 	}
-	entry := m.drainPick.entries[m.drainPick.cursor]
 	row := m.drainPick.row
 	m.drainPick.loading = true
 	return m, m.launchDrainTarget(row, entry)
@@ -2331,11 +2344,18 @@ func (m QueueDashboard) viewWithModal() string {
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
 	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width)
+	// avail is the number of body lines left for the modal below the table, so
+	// its scroll window clamps long worktree/ref lists instead of overflowing.
+	// A non-positive avail (no WindowSizeMsg yet) means "don't clamp".
+	avail := 0
+	if m.height > 0 {
+		avail = m.height - strings.Count(body.String(), "\n")
+	}
 	switch {
 	case m.bind != nil:
-		renderDashboardBindModal(&body, m.bind)
+		renderDashboardBindModal(&body, m.bind, avail)
 	case m.drainPick != nil:
-		renderDashboardDrainModal(&body, m.drainPick)
+		renderDashboardDrainModal(&body, m.drainPick, avail)
 	case m.abandon != nil:
 		renderDashboardAbandonModal(&body, m.abandon)
 	}
@@ -2707,7 +2727,24 @@ func halfPageDelta(pageSize int) int {
 	return pageSize / 2
 }
 
-func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
+// writeModalListRows renders a modal list's scroll window: it sizes the list to
+// listH rows (or, when listH is non-positive, to its full length so the caller's
+// "don't clamp" mode renders every row) and writes the rows the List returns,
+// including its cursor/pad prefix column.
+func writeModalListRows[T any](w io.Writer, list *ui.List[T], listH int) {
+	if list == nil {
+		return
+	}
+	if listH < 1 {
+		listH = list.Len()
+	}
+	list.Resize(listH)
+	for _, line := range list.VisibleRows() {
+		fmt.Fprintln(w, line)
+	}
+}
+
+func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal, avail int) {
 	if modal == nil {
 		return
 	}
@@ -2718,27 +2755,13 @@ func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
 	}
 	switch modal.stage {
 	case dashboardBindStageWorktree:
-		for i, entry := range modal.entries {
-			prefix := "  "
-			if i == modal.cursor {
-				prefix = ui.IndicatorStyle.Render("█") + " "
-			}
-			label := entry.Label
-			if label == "" {
-				label = entry.Path
-			}
-			fmt.Fprintf(w, "%s%s\n", prefix, label)
-		}
+		// Chrome above/below the list: the "Bind worktree" title and the hint.
+		writeModalListRows(w, modal.list, modalListHeight(avail, 2))
 		fmt.Fprint(w, ui.HintStyle.Render("enter select · esc cancel"))
 	case dashboardBindStageBaseRef:
 		fmt.Fprintln(w, "Base ref")
-		for i, ref := range modal.refs {
-			prefix := "  "
-			if i == modal.cursor {
-				prefix = ui.IndicatorStyle.Render("█") + " "
-			}
-			fmt.Fprintf(w, "%s%s\n", prefix, ref)
-		}
+		// Chrome: the title, the "Base ref" caption, and the hint.
+		writeModalListRows(w, modal.list, modalListHeight(avail, 3))
 		fmt.Fprint(w, ui.HintStyle.Render("enter select · esc cancel"))
 	case dashboardBindStageName:
 		fmt.Fprintf(w, "Base: %s\n", modal.baseRef)
@@ -2747,7 +2770,7 @@ func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal) {
 	}
 }
 
-func renderDashboardDrainModal(w io.Writer, modal *dashboardDrainModal) {
+func renderDashboardDrainModal(w io.Writer, modal *dashboardDrainModal, avail int) {
 	if modal == nil {
 		return
 	}
@@ -2756,18 +2779,24 @@ func renderDashboardDrainModal(w io.Writer, modal *dashboardDrainModal) {
 		fmt.Fprintln(w, "  draining...")
 		return
 	}
-	for i, entry := range modal.entries {
-		prefix := "  "
-		if i == modal.cursor {
-			prefix = ui.IndicatorStyle.Render("█") + " "
-		}
-		label := entry.Label
-		if label == "" {
-			label = entry.Path
-		}
-		fmt.Fprintf(w, "%s%s\n", prefix, label)
-	}
+	// Chrome above/below the list: the title line and the hint.
+	writeModalListRows(w, modal.list, modalListHeight(avail, 2))
 	fmt.Fprint(w, ui.HintStyle.Render("enter drain · esc cancel"))
+}
+
+// modalListHeight derives a modal list's scroll-window height from the body
+// lines left for the modal (avail) minus its chrome lines. A non-positive avail
+// (no WindowSizeMsg yet) returns 0, signalling writeModalListRows to render every
+// row unclamped; otherwise it floors the window at one row.
+func modalListHeight(avail, chrome int) int {
+	if avail <= 0 {
+		return 0
+	}
+	h := avail - chrome
+	if h < 1 {
+		h = 1
+	}
+	return h
 }
 
 func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal) {
