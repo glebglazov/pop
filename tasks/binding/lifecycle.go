@@ -21,6 +21,11 @@ const foregroundManagedRebindPrompt = "rebind to current and DELETE managed work
 // BindWorktreeOptions controls bind-worktree behaviour.
 type BindWorktreeOptions struct {
 	Force bool
+	// ProjectName, when non-empty, is used verbatim as the binding's Project
+	// label and skips DetectProject entirely. Callers that already resolved the
+	// name fork-free (the dashboard, ADR-0060) supply it; cwd-based callers
+	// leave it empty to fall back to DetectProject.
+	ProjectName string
 }
 
 // BindWorktreeResult describes the outcome of adopting an existing checkout.
@@ -121,7 +126,13 @@ func BindWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, c
 		}
 	}
 
-	proj := DetectProject(pd, td, cfg, id)
+	// When the caller already knows the project name (dashboard rows carry it
+	// pre-resolved, ADR-0060), use it directly and skip the DetectProject
+	// fan-out that forks `git rev-parse` once per configured project.
+	proj := opts.ProjectName
+	if proj == "" {
+		proj = DetectProject(pd, td, cfg, id)
+	}
 
 	if err := Put(td, key, Adopt(checkoutPath, branch, proj)); err != nil {
 		return BindWorktreeResult{}, err

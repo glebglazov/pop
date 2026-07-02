@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -173,6 +175,73 @@ func TestBindWorktreeCreatesAdoptedBinding(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Bound") {
 		t.Fatalf("output = %q, want bind confirmation", out.String())
+	}
+}
+
+// TestBindWorktreeProjectNameSkipsDetect verifies that a supplied ProjectName is
+// used verbatim as the binding's Project label and that DetectProject's
+// per-project git fan-out is never invoked (ADR-0060). The project deps carry a
+// spy git that fails the test if touched.
+func TestBindWorktreeProjectNameSkipsDetect(t *testing.T) {
+	repo := initAdoptRepo(t)
+	wt := addLinkedWorktree(t, repo, "explicit-branch")
+	td := lifecycleTestDeps(t)
+	// A glob-heavy config would make DetectProject fan out; ProjectName must
+	// short-circuit it entirely, so pd's git is never called.
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: filepath.Join(t.TempDir(), "*", "*")}}}
+	pd := &project.Deps{Git: &deps.MockGit{
+		CommandFunc: func(args ...string) (string, error) {
+			t.Fatalf("DetectProject fan-out must not run when ProjectName is supplied; git called with %v", args)
+			return "", nil
+		},
+		CommandInDirFunc: func(dir string, args ...string) (string, error) {
+			t.Fatalf("DetectProject fan-out must not run when ProjectName is supplied; git -C %s %v", dir, args)
+			return "", nil
+		},
+	}}
+
+	got, err := BindWorktree(td, pd, cfg, "set-e", wt, BindWorktreeOptions{ProjectName: "explicit-name"}, LifecycleHooks{}, io.Discard)
+	if err != nil {
+		t.Fatalf("bind-worktree: %v", err)
+	}
+	if got.SetID != "set-e" {
+		t.Fatalf("result = %+v, want set-e", got)
+	}
+
+	bindings := loadLifecycleBindings(t, td)
+	var binding Binding
+	for _, b := range bindings {
+		binding = b
+	}
+	if binding.Project != "explicit-name" {
+		t.Fatalf("binding.Project = %q, want explicit-name (supplied, not DetectProject)", binding.Project)
+	}
+}
+
+// TestBindWorktreeEmptyProjectNameFallsBack verifies the cwd-based path (empty
+// ProjectName) still resolves the label via DetectProject.
+func TestBindWorktreeEmptyProjectNameFallsBack(t *testing.T) {
+	repo := initAdoptRepo(t)
+	wt := addLinkedWorktree(t, repo, "fallback-branch")
+	td := lifecycleTestDeps(t)
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	pd := &project.Deps{FS: routeTestDeps(t).FS, Git: routeTestDeps(t).Git}
+
+	got, err := BindWorktree(td, pd, cfg, "set-f", wt, BindWorktreeOptions{}, LifecycleHooks{}, io.Discard)
+	if err != nil {
+		t.Fatalf("bind-worktree: %v", err)
+	}
+	if got.SetID != "set-f" {
+		t.Fatalf("result = %+v, want set-f", got)
+	}
+
+	bindings := loadLifecycleBindings(t, td)
+	var binding Binding
+	for _, b := range bindings {
+		binding = b
+	}
+	if binding.Project != filepath.Base(repo) {
+		t.Fatalf("binding.Project = %q, want %q (via DetectProject)", binding.Project, filepath.Base(repo))
 	}
 }
 

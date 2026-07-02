@@ -244,7 +244,7 @@ func AdoptWorktree(d *Deps, cfg *config.Config, ref SetRef, checkoutPath string)
 	if err := refuseDashboardBindWhileLocked(d, ref); err != nil {
 		return BindWorktreeResult{}, err
 	}
-	return BindWorktree(d, cfg, ref.SetID, checkoutPath, BindWorktreeOptions{Force: true}, io.Discard)
+	return BindWorktree(d, cfg, ref.SetID, checkoutPath, BindWorktreeOptions{Force: true, ProjectName: ref.ProjectName}, io.Discard)
 }
 
 type DashboardCreateWorktreeResult struct {

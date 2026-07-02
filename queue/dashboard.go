@@ -34,6 +34,10 @@ type SetRef struct {
 	DefPath, StatePath, SetID string
 	RepoKey, RepoCommonDir    string
 	ProjectPath, RuntimePath  string
+	// ProjectName is the pre-resolved project label (dashboardRepoStatic.projectName),
+	// carried so the adopt path can skip DetectProject's per-project git fan-out
+	// (ADR-0060).
+	ProjectName string
 	// Parked is true when the set's repeated abnormal terminals have parked it
 	// (derived from Drain history); unpark writes a park-clear event (ADR-0055).
 	// Bound is true when the set holds a Worktree binding with a non-blank
@@ -588,6 +592,7 @@ func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonStat
 				RepoKey:               st.repoKey,
 				RepoCommonDir:         st.repoCommonDir,
 				ProjectPath:           staticProjectPath(st),
+				ProjectName:           st.projectName,
 				RuntimePath:           wt.runtimePath,
 				DoneStillManagedBound: doneStillManagedBound,
 				Parked:                parked,
