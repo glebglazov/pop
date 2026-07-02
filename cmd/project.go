@@ -635,7 +635,7 @@ func openTmuxSessionWith(tmux deps.Tmux, item *ui.Item) error {
 // prompt; choosing it creates today's flat session unchanged (ADR-0075). It is
 // distinguished from real Workbenches by its empty Item.Path sentinel, so a
 // Workbench that happens to share this display name is still picked correctly.
-const noWorkbenchLabel = "no workbench"
+const noWorkbenchLabel = "<empty>"
 
 // workbenchItemPathPrefix prefixes the Item.Path of each resolved Workbench in
 // the create-path prompt so every entry has a unique, non-empty picker key,
@@ -643,7 +643,7 @@ const noWorkbenchLabel = "no workbench"
 const workbenchItemPathPrefix = "workbench:"
 
 // promptWorkbenchForCreate shows a quick-search list of resolved Workbenches with
-// "no workbench" first and preselected (ADR-0075). It returns the chosen Workbench
+// "<empty>" first and preselected (ADR-0075). It returns the chosen Workbench
 // name ("" for the no-workbench entry) and whether the user confirmed a choice
 // (false when Esc was pressed, i.e. return to the project picker, create nothing).
 func promptWorkbenchForCreate(d *ProjectDeps, workbenches []config.Workbench) (name string, confirmed bool, err error) {

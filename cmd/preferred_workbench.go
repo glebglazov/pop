@@ -33,14 +33,14 @@ func preferredResolverConfigDeps(cfg *config.Config) *config.Deps {
 // preferredNonePath / preferredResetPath are sentinel Item.Path values for the
 // two synthetic entries in the Workbench-preference picker (ADR-0078). They
 // share no prefix with real Workbench items (workbenchItemPathPrefix), so a
-// Workbench that happens to be named "no workbench (here)" or "reset to default"
-// is still keyed and dispatched correctly.
+// Workbench that happens to be named "<empty>" or "<reset>" is still keyed and
+// dispatched correctly.
 const (
 	preferredNonePath  = "preferred:none"
 	preferredResetPath = "preferred:reset"
 
-	preferredNoWorkbenchLabel = "no workbench (here)"
-	preferredResetLabel       = "reset to default"
+	preferredNoWorkbenchLabel = "<empty>"
+	preferredResetLabel       = "<reset>"
 )
 
 // preferredPickerDeps carries the seams for the ctrl+w Workbench-preference
@@ -50,7 +50,7 @@ type preferredPickerDeps struct {
 	RunPicker          func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error)
 	ResolveWorkbenches func(path string) []config.Workbench
 	// CurrentEntry reports the runtime entry for path: present is false when
-	// absent (so "reset to default" is offered only when true).
+	// absent (so "<reset>" is offered only when true).
 	CurrentEntry   func(path string) (name string, present bool)
 	SetPreferred   func(path, name string) error
 	ClearPreferred func(path string) error
@@ -90,8 +90,8 @@ func defaultPreferredPickerDeps() *preferredPickerDeps {
 
 // setPreferredWorkbench opens the Workbench-preference picker for checkoutPath
 // (ADR-0078): a quick-search list of the Workbenches resolved for that checkout,
-// plus "no workbench (here)" (writes explicit none) and, when an entry already
-// exists, "reset to default" (deletes the entry). It writes the runtime
+// plus "<empty>" (writes explicit none) and, when an entry already
+// exists, "<reset>" (deletes the entry). It writes the runtime
 // preference for that checkout only — it never touches any running session. Esc
 // leaves the preference untouched.
 func setPreferredWorkbench(d *preferredPickerDeps, checkoutPath string) error {
