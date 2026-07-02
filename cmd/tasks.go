@@ -126,9 +126,9 @@ var taskTransferCmd = &cobra.Command{
 }
 
 var taskExportCmd = &cobra.Command{
-	Use:   "export TASK_SET",
-	Short: "Export a task set as a tar.gz archive",
-	Args:  cobra.ExactArgs(1),
+	Use:   "export TASK_SET [TASK_SET...]",
+	Short: "Export one or more task sets into a single tar.gz archive",
+	Args:  cobra.MinimumNArgs(1),
 	Run:   runTaskExport,
 }
 
@@ -1005,14 +1005,14 @@ func runTaskShowPathWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 }
 
 func runTaskExport(cmd *cobra.Command, args []string) {
-	err := runTaskExportWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	err := runTaskExportWith(tasks.DefaultDeps(), os.Stdout, args)
 	handleTaskExit(err)
 }
 
-func runTaskExportWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
+func runTaskExportWith(d *tasks.Deps, w io.Writer, taskSetIDs []string) error {
 	result, err := tasks.ExportWith(d, taskProjectDeps(), taskConfigLoad, tasks.ExportOptions{
 		ResolveInput: taskResolveInput(),
-		TaskSetID:    taskSetID,
+		TaskSetIDs:   taskSetIDs,
 		OutputPath:   taskExportOutput,
 	})
 	if err != nil {

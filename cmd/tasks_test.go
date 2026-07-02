@@ -848,7 +848,7 @@ func TestTaskSnapshotVerbsAcceptArchivedTargets(t *testing.T) {
 
 	t.Run("export", func(t *testing.T) {
 		var buf bytes.Buffer
-		if err := runTaskExportWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {
+		if err := runTaskExportWith(tasks.DefaultDeps(), &buf, []string{"demo"}); err != nil {
 			t.Fatalf("export: %v", err)
 		}
 		if _, err := os.Stat(strings.TrimSpace(buf.String())); err != nil {
@@ -1809,7 +1809,7 @@ func TestTaskExportImportRoundtripCmd(t *testing.T) {
 
 	d := tasks.DefaultDeps()
 	var exportBuf bytes.Buffer
-	if err := runTaskExportWith(d, &exportBuf, setID); err != nil {
+	if err := runTaskExportWith(d, &exportBuf, []string{setID}); err != nil {
 		t.Fatalf("export: %v", err)
 	}
 	archivePath := strings.TrimSpace(exportBuf.String())

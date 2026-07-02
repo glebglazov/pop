@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -81,7 +82,7 @@ func TestExportImportRoundtrip(t *testing.T) {
 
 	exported, err := ExportWith(src.deps, projectDefaultDeps(), config.Load, ExportOptions{
 		ResolveInput: src.resolveInput(),
-		TaskSetID:    setID,
+		TaskSetIDs:   []string{setID},
 		OutputPath:   filepath.Join(src.root, setID+".tar.gz"),
 	})
 	if err != nil {
@@ -130,7 +131,7 @@ func TestExportRejectsFileReference(t *testing.T) {
 
 	_, err := ExportWith(env.deps, projectDefaultDeps(), config.Load, ExportOptions{
 		ResolveInput: env.resolveInput(),
-		TaskSetID:    "demo/01-a.md",
+		TaskSetIDs:   []string{"demo/01-a.md"},
 	})
 	assertTransferExitCode(t, err, ExitSetup)
 }
@@ -151,12 +152,171 @@ func TestExportDefaultOutputName(t *testing.T) {
 
 	exported, err := ExportWith(env.deps, projectDefaultDeps(), config.Load, ExportOptions{
 		ResolveInput: env.resolveInput(),
-		TaskSetID:    setID,
+		TaskSetIDs:   []string{setID},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := canonical(t, filepath.Join(env.root, setID+".tar.gz"))
+	if canonical(t, exported.Path) != want {
+		t.Fatalf("output path = %q, want %q", exported.Path, want)
+	}
+}
+
+// archiveTopLevelDirs returns the sorted set of top-level directory names
+// contained in a tar.gz archive.
+func archiveTopLevelDirs(t *testing.T, path string) []string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	seen := map[string]bool{}
+	for {
+		header, err := tr.Next()
+		if err != nil {
+			break
+		}
+		root := strings.SplitN(filepath.ToSlash(header.Name), "/", 2)[0]
+		if root != "" {
+			seen[root] = true
+		}
+	}
+	dirs := make([]string, 0, len(seen))
+	for d := range seen {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
+// archiveHasEntry reports whether the archive contains an entry with the given
+// slash-separated name.
+func archiveHasEntry(t *testing.T, path, name string) bool {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		header, err := tr.Next()
+		if err != nil {
+			break
+		}
+		if filepath.ToSlash(header.Name) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func TestExportMultipleSets(t *testing.T) {
+	env := newTransferEnv(t)
+	env.writeSet(t, "2026-06-01-alpha", nil)
+	env.writeSet(t, "2026-06-02-beta", nil)
+
+	archive := filepath.Join(env.root, "multi.tar.gz")
+	exported, err := ExportWith(env.deps, projectDefaultDeps(), config.Load, ExportOptions{
+		ResolveInput: env.resolveInput(),
+		TaskSetIDs:   []string{"2026-06-01-alpha", "2026-06-02-beta"},
+		OutputPath:   archive,
+	})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	got := archiveTopLevelDirs(t, exported.Path)
+	want := []string{"2026-06-01-alpha", "2026-06-02-beta"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("top-level dirs = %v, want %v", got, want)
+	}
+	for _, id := range want {
+		if !archiveHasEntry(t, exported.Path, id+"/index.json") {
+			t.Fatalf("index.json for %q missing from archive", id)
+		}
+	}
+}
+
+func TestExportDedupesRepeatedIDs(t *testing.T) {
+	env := newTransferEnv(t)
+	env.writeSet(t, "2026-06-01-alpha", nil)
+	env.writeSet(t, "2026-06-02-beta", nil)
+
+	archive := filepath.Join(env.root, "dedupe.tar.gz")
+	exported, err := ExportWith(env.deps, projectDefaultDeps(), config.Load, ExportOptions{
+		ResolveInput: env.resolveInput(),
+		TaskSetIDs:   []string{"2026-06-01-alpha", "2026-06-01-alpha", "2026-06-02-beta"},
+		OutputPath:   archive,
+	})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if len(exported.TaskSetIDs) != 2 {
+		t.Fatalf("deduped ids = %v, want 2 entries", exported.TaskSetIDs)
+	}
+	got := archiveTopLevelDirs(t, exported.Path)
+	want := []string{"2026-06-01-alpha", "2026-06-02-beta"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("top-level dirs = %v, want %v", got, want)
+	}
+}
+
+func TestExportMissingIDIsAtomic(t *testing.T) {
+	env := newTransferEnv(t)
+	env.writeSet(t, "2026-06-01-alpha", nil)
+
+	archive := filepath.Join(env.root, "atomic.tar.gz")
+	_, err := ExportWith(env.deps, projectDefaultDeps(), config.Load, ExportOptions{
+		ResolveInput: env.resolveInput(),
+		TaskSetIDs:   []string{"2026-06-01-alpha", "2026-06-09-nope"},
+		OutputPath:   archive,
+	})
+	assertTransferExitCode(t, err, ExitSetup)
+	if !strings.Contains(err.Error(), "2026-06-09-nope") {
+		t.Fatalf("error does not name the missing id: %v", err)
+	}
+	if _, statErr := os.Stat(archive); !os.IsNotExist(statErr) {
+		t.Fatalf("archive was written despite missing id: %v", statErr)
+	}
+}
+
+func TestExportMultiSetDefaultName(t *testing.T) {
+	env := newTransferEnv(t)
+	env.writeSet(t, "2026-06-01-alpha", nil)
+	env.writeSet(t, "2026-06-02-beta", nil)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(env.root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	fixed := time.Date(2026, 6, 13, 14, 30, 0, 0, time.Local)
+	exported, err := ExportWith(env.deps, projectDefaultDeps(), config.Load, ExportOptions{
+		ResolveInput: env.resolveInput(),
+		TaskSetIDs:   []string{"2026-06-01-alpha", "2026-06-02-beta"},
+		Now:          fixed,
+	})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	want := canonical(t, filepath.Join(env.root, "pop-tasks-2026-06-13-1430.tar.gz"))
 	if canonical(t, exported.Path) != want {
 		t.Fatalf("output path = %q, want %q", exported.Path, want)
 	}
@@ -379,7 +539,7 @@ func TestExportIncludesStreams(t *testing.T) {
 	archive := filepath.Join(env.root, setID+".tar.gz")
 	exported, err := ExportWith(env.deps, projectDefaultDeps(), config.Load, ExportOptions{
 		ResolveInput: env.resolveInput(),
-		TaskSetID:    setID,
+		TaskSetIDs:   []string{setID},
 		OutputPath:   archive,
 	})
 	if err != nil {

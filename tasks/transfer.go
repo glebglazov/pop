@@ -3,6 +3,7 @@ package tasks
 import (
 	"archive/tar"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,17 +14,20 @@ import (
 	"github.com/glebglazov/pop/project"
 )
 
-// ExportOptions selects a Task set to export and where to write the archive.
+// ExportOptions selects one or more Task sets to export and where to write the
+// archive.
 type ExportOptions struct {
 	ResolveInput ResolveInput
-	TaskSetID    string
+	TaskSetIDs   []string
 	OutputPath   string
+	Now          time.Time
 }
 
-// ExportResult is the outcome of exporting one Task set.
+// ExportResult is the outcome of exporting one or more Task sets into a single
+// archive.
 type ExportResult struct {
-	TaskSetID string
-	Path      string
+	TaskSetIDs []string
+	Path       string
 }
 
 // ImportOptions selects an archive to import into the current repository.
@@ -47,9 +51,23 @@ func Export(input ExportOptions) (*ExportResult, error) {
 
 // ExportWith exports using injected dependencies.
 func ExportWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), input ExportOptions) (*ExportResult, error) {
-	taskSetID, err := normalizeExportTaskSetID(input.TaskSetID)
-	if err != nil {
-		return nil, err
+	if len(input.TaskSetIDs) == 0 {
+		return nil, exitErr(ExitSetup, "expected at least one bare Task set identifier")
+	}
+
+	// Normalize and dedupe, preserving first-seen order.
+	seen := make(map[string]bool, len(input.TaskSetIDs))
+	taskSetIDs := make([]string, 0, len(input.TaskSetIDs))
+	for _, raw := range input.TaskSetIDs {
+		id, err := normalizeExportTaskSetID(raw)
+		if err != nil {
+			return nil, err
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		taskSetIDs = append(taskSetIDs, id)
 	}
 
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, input.ResolveInput)
@@ -65,39 +83,70 @@ func ExportWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 		return nil, err
 	}
 
-	setDir := filepath.Join(id.TasksDir, taskSetID)
-	info, err := d.FS.Stat(setDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			valid := readTaskSetIDs(d, id.TasksDir)
-			if len(valid) == 0 {
-				return nil, exitErr(ExitSetup, "unknown Task set %q (no Task sets in storage)", taskSetID)
+	// Validate every requested set up front — the export is atomic, so a single
+	// Missing id fails the whole request and writes nothing.
+	sets := make([]exportSet, 0, len(taskSetIDs))
+	var missing []string
+	for _, tid := range taskSetIDs {
+		setDir := filepath.Join(id.TasksDir, tid)
+		info, statErr := d.FS.Stat(setDir)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				missing = append(missing, tid)
+				continue
 			}
-			return nil, exitErr(ExitSetup, "unknown Task set %q; valid identifiers: %s", taskSetID, strings.Join(valid, ", "))
+			return nil, exitErr(ExitOperational, "inspect Task set %q: %v", tid, statErr)
 		}
-		return nil, exitErr(ExitOperational, "inspect Task set %q: %v", taskSetID, err)
+		if !info.IsDir() {
+			return nil, exitErr(ExitSetup, "Task set %q is not a directory", tid)
+		}
+		sets = append(sets, exportSet{id: tid, dir: setDir})
 	}
-	if !info.IsDir() {
-		return nil, exitErr(ExitSetup, "Task set %q is not a directory", taskSetID)
+	if len(missing) > 0 {
+		valid := readTaskSetIDs(d, id.TasksDir)
+		if len(valid) == 0 {
+			return nil, exitErr(ExitSetup, "unknown Task set(s) %s (no Task sets in storage)", quoteJoin(missing))
+		}
+		return nil, exitErr(ExitSetup, "unknown Task set(s) %s; valid identifiers: %s", quoteJoin(missing), strings.Join(valid, ", "))
 	}
 
 	outputPath := input.OutputPath
 	if outputPath == "" {
-		outputPath = taskSetID + ".tar.gz"
+		outputPath = defaultExportOutput(taskSetIDs, input.Now)
 	}
 	absOutput, err := filepath.Abs(outputPath)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "resolve output path: %v", err)
 	}
 
-	if err := writeTaskSetArchive(setDir, taskSetID, absOutput); err != nil {
+	if err := writeTaskSetsArchive(sets, absOutput); err != nil {
 		return nil, err
 	}
 
 	return &ExportResult{
-		TaskSetID: taskSetID,
-		Path:      absOutput,
+		TaskSetIDs: taskSetIDs,
+		Path:       absOutput,
 	}, nil
+}
+
+// defaultExportOutput picks the default archive filename: <id>.tar.gz for a
+// single set (unchanged), pop-tasks-<YYYY-MM-DD-HHMM>.tar.gz for many.
+func defaultExportOutput(taskSetIDs []string, now time.Time) string {
+	if len(taskSetIDs) == 1 {
+		return taskSetIDs[0] + ".tar.gz"
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return "pop-tasks-" + now.Format("2006-01-02-1504") + ".tar.gz"
+}
+
+func quoteJoin(ids []string) string {
+	quoted := make([]string, len(ids))
+	for i, id := range ids {
+		quoted[i] = fmt.Sprintf("%q", id)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 // Import installs a Task set export into the current repository's Task storage.
@@ -252,7 +301,21 @@ func registerImportedTaskSet(d *Deps, statePath, defPath, taskSetID string) erro
 	})
 }
 
+// exportSet pairs a Task set identifier with its on-disk directory for archiving.
+type exportSet struct {
+	id  string
+	dir string
+}
+
+// writeTaskSetArchive writes a single Task set — the N=1 case of
+// writeTaskSetsArchive, kept as a convenience for single-set callers.
 func writeTaskSetArchive(srcDir, taskSetID, outputPath string) error {
+	return writeTaskSetsArchive([]exportSet{{id: taskSetID, dir: srcDir}}, outputPath)
+}
+
+// writeTaskSetsArchive packs one or more Task sets into a single tar.gz, each
+// under its own top-level directory named for its identifier.
+func writeTaskSetsArchive(sets []exportSet, outputPath string) error {
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil && filepath.Dir(outputPath) != "." {
 		return exitErr(ExitOperational, "create output directory: %v", err)
 	}
@@ -269,6 +332,17 @@ func writeTaskSetArchive(srcDir, taskSetID, outputPath string) error {
 	tw := tar.NewWriter(gz)
 	defer tw.Close()
 
+	for _, set := range sets {
+		if err := writeTaskSetTree(tw, set.dir, set.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeTaskSetTree walks one set directory into the tar writer, rooting every
+// entry under the set's identifier.
+func writeTaskSetTree(tw *tar.Writer, srcDir, taskSetID string) error {
 	return filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr

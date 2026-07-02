@@ -154,7 +154,7 @@ func TestImportSeedsAutoDrainFromManifest(t *testing.T) {
 
 	exported, err := ExportWith(src.deps, projectDefaultDeps(), config.Load, ExportOptions{
 		ResolveInput: src.resolveInput(),
-		TaskSetID:    setID,
+		TaskSetIDs:   []string{setID},
 		OutputPath:   filepath.Join(src.root, setID+".tar.gz"),
 	})
 	if err != nil {
