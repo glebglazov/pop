@@ -1076,12 +1076,23 @@ func (d *detailView) syncManifest(m *tasks.Manifest, row *tasks.Row) {
 	d.cursorID = m.Tasks[0].ID
 }
 
+// dashboardColumns holds the task-set table's per-column widths, precomputed over
+// the full (filtered) row set, plus the terminal width used to truncate cells.
+// The List's Cell closure closes over a pointer to it so a reload or filter can
+// update the widths in place without rebuilding the list — matching the house
+// pattern of pickerCell closing over its picker.
+type dashboardColumns struct {
+	widths []int
+	width  int
+}
+
 type QueueDashboard struct {
 	d         *Deps
 	cfg       *config.Config
 	snap      DashboardSnapshot
 	allRows   []DashboardRow // source of truth; snap.Rows is the filtered view
-	cursor    int
+	list      *ui.List[DashboardRow]
+	cols      *dashboardColumns
 	err       error
 	width     int
 	height    int
@@ -1102,7 +1113,66 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 	if d == nil {
 		d = DefaultDeps()
 	}
-	return QueueDashboard{d: d, cfg: cfg, snap: snap, allRows: snap.Rows}
+	cols := &dashboardColumns{widths: dashboardColumnWidths(snap.Rows)}
+	list := ui.NewList(snap.Rows, ui.Opts[DashboardRow]{
+		Key:    func(r DashboardRow) string { return r.cursorKey },
+		Anchor: ui.AnchorTop,
+		Cell: func(r DashboardRow, _ ui.RowState) string {
+			w := cols.width
+			if w > 2 {
+				w -= 2 // the List owns the 2-char cursor / pad prefix
+			}
+			return ui.TruncateString(dashboardTableLine(dashboardRowValues(r), cols.widths), w)
+		},
+	})
+	return QueueDashboard{d: d, cfg: cfg, snap: snap, allRows: snap.Rows, list: list, cols: cols}
+}
+
+// dashboardTableHeaders is the fixed column header row (the trailing empty header
+// backs the badges column).
+func dashboardTableHeaders() []string {
+	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", "DRAIN", ""}
+}
+
+// dashboardColumnWidths precomputes each column's width over the full row set,
+// floored at the header label width — the same derivation the hand-rolled table
+// did per render, lifted out so the Cell closure can share it.
+func dashboardColumnWidths(rows []DashboardRow) []int {
+	headers := dashboardTableHeaders()
+	widths := make([]int, len(headers))
+	for i, h := range headers {
+		widths[i] = len(h)
+	}
+	for _, row := range rows {
+		for i, v := range dashboardRowValues(row) {
+			if n := lipgloss.Width(v); n > widths[i] {
+				widths[i] = n
+			}
+		}
+	}
+	return widths
+}
+
+// dashboardTableChromeLines is the number of body lines above the List rows: the
+// blank line under the summary header, the column header, and the separator.
+const dashboardTableChromeLines = 3
+
+// syncListRows feeds the current filtered rows to the List (re-anchoring the
+// cursor by cursorKey) and recomputes the column widths over them.
+func (m QueueDashboard) syncListRows() {
+	m.list.ReplaceItems(m.snap.Rows)
+	m.cols.widths = dashboardColumnWidths(m.snap.Rows)
+}
+
+// resizeMainList sizes the List to the body budget the Frame leaves, minus the
+// table's own header chrome, so the table clamps to the terminal instead of
+// overflowing.
+func (m QueueDashboard) resizeMainList() {
+	listH := m.frameSpec().BodyHeight(m.height) - dashboardTableChromeLines
+	if listH < 1 {
+		listH = 1
+	}
+	m.list.Resize(listH)
 }
 
 func (m QueueDashboard) Init() tea.Cmd {
@@ -1138,9 +1208,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "g" {
 			if m.pendingG {
 				m.pendingG = false
-				if len(m.snap.Rows) > 0 {
-					m.cursor = 0
-				}
+				m.list.SetCursor(0)
 			} else {
 				m.pendingG = true
 			}
@@ -1158,38 +1226,34 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterInput = ti
 			return m, nil
 		case "j", "down":
-			if len(m.snap.Rows) > 0 && m.cursor < len(m.snap.Rows)-1 {
-				m.cursor++
-			}
+			m.list.MoveDown()
 		case "k", "up":
-			if len(m.snap.Rows) > 0 && m.cursor > 0 {
-				m.cursor--
-			}
+			m.list.MoveUp()
 		case "G":
-			if len(m.snap.Rows) > 0 {
-				m.cursor = len(m.snap.Rows) - 1
-			}
+			m.list.SetCursor(len(m.snap.Rows) - 1)
 		case "a":
-			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+			row, ok := m.list.Selected()
+			if !ok {
 				return m, nil
 			}
-			row := m.snap.Rows[m.cursor]
 			m.menu = &dashboardMenu{row: row, items: dashboardMenuItems(row)}
 			m.err = nil
 			m.statusMsg = ""
 			return m, nil
 		case "l", "enter":
-			if len(m.snap.Rows) == 0 || m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
+			row, ok := m.list.Selected()
+			if !ok {
 				return m, nil
 			}
 			m.err = nil
-			row := m.snap.Rows[m.cursor]
 			m.detail = &detailView{row: row, loading: true}
 			return m, m.loadDetail(row)
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.cols.width = msg.Width
+		m.resizeMainList()
 	case dashboardTickMsg:
 		cmds := []tea.Cmd{dashboardTick(), m.reload()}
 		if m.detail != nil {
@@ -1197,10 +1261,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case dashboardRowsMsg:
-		oldKey := ""
-		if m.cursor >= 0 && m.cursor < len(m.snap.Rows) {
-			oldKey = m.snap.Rows[m.cursor].cursorKey
-		}
 		m.err = msg.err
 		if msg.err == nil {
 			m.allRows = msg.snap.Rows
@@ -1208,7 +1268,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.filterMode {
 				m.snap.Rows = filterDashboardRows(m.allRows, m.filterInput.Value())
 			}
-			m.cursor = dashboardCursorAfterReload(m.snap.Rows, oldKey, m.cursor)
+			m.syncListRows()
 			if m.detail != nil {
 				for _, row := range m.snap.Rows {
 					if row.cursorKey == m.detail.row.cursorKey {
@@ -1242,6 +1302,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		m.cols.widths = dashboardColumnWidths(m.snap.Rows)
 	case dashboardDrainMsg:
 		m.drainPick = nil
 		if msg.err != nil {
@@ -1456,9 +1517,13 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 		if row.Orphaned {
 			return m, nil
 		}
-		if m.cursor >= 0 && m.cursor < len(m.snap.Rows) {
-			m.snap.Rows[m.cursor].AutoDrain = !m.snap.Rows[m.cursor].AutoDrain
+		for i := range m.snap.Rows {
+			if m.snap.Rows[i].cursorKey == row.cursorKey {
+				m.snap.Rows[i].AutoDrain = !m.snap.Rows[i].AutoDrain
+				break
+			}
 		}
+		m.cols.widths = dashboardColumnWidths(m.snap.Rows)
 		return m, m.toggleAutoDrain(row)
 	case menuActionPreview:
 		return m, m.previewDrain(row)
@@ -1688,27 +1753,19 @@ func (m QueueDashboard) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterMode = false
 		m.filterInput = textinput.Model{}
 		m.snap.Rows = m.allRows
-		m.cursor = dashboardCursorAfterReload(m.snap.Rows, "", m.cursor)
+		m.syncListRows()
 		return m, nil
 	case "j", "down":
-		if len(m.snap.Rows) > 0 && m.cursor < len(m.snap.Rows)-1 {
-			m.cursor++
-		}
+		m.list.MoveDown()
 		return m, nil
 	case "k", "up":
-		if len(m.snap.Rows) > 0 && m.cursor > 0 {
-			m.cursor--
-		}
+		m.list.MoveUp()
 		return m, nil
 	default:
-		oldKey := ""
-		if m.cursor >= 0 && m.cursor < len(m.snap.Rows) {
-			oldKey = m.snap.Rows[m.cursor].cursorKey
-		}
 		var cmd tea.Cmd
 		m.filterInput, cmd = m.filterInput.Update(msg)
 		m.snap.Rows = filterDashboardRows(m.allRows, m.filterInput.Value())
-		m.cursor = dashboardCursorAfterReload(m.snap.Rows, oldKey, m.cursor)
+		m.syncListRows()
 		return m, cmd
 	}
 }
@@ -2154,26 +2211,6 @@ func dashboardTick() tea.Cmd {
 	return tea.Tick(dashboardPollInterval, func(time.Time) tea.Msg { return dashboardTickMsg{} })
 }
 
-func dashboardCursorAfterReload(rows []DashboardRow, key string, previous int) int {
-	if len(rows) == 0 {
-		return 0
-	}
-	if key != "" {
-		for i, row := range rows {
-			if row.cursorKey == key {
-				return i
-			}
-		}
-	}
-	if previous >= len(rows) {
-		return len(rows) - 1
-	}
-	if previous < 0 {
-		return 0
-	}
-	return previous
-}
-
 func (m QueueDashboard) View() tea.View {
 	if m.detail != nil {
 		content := m.viewDetail()
@@ -2181,61 +2218,123 @@ func (m QueueDashboard) View() tea.View {
 		v.AltScreen = true
 		return v
 	}
+	m.cols.width = m.width
+	m.resizeMainList()
+
+	var content string
+	switch {
+	case m.menu != nil:
+		content = m.viewWithMenu()
+	case m.bind != nil || m.drainPick != nil || m.abandon != nil:
+		content = m.viewWithModal()
+	default:
+		content = m.frameSpec().Render(m.mainBody())
+	}
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
+}
+
+// frameSpec builds the Frame describing the main task-set view's chrome: the
+// Queue · N summary (Header), the filter input (InputBox), the refresh error
+// (Warnings), the transient statusMsg (Status), and the footer hint (Hints). The
+// same Frame drives both the body-height budget and the render, so the reserved
+// line count can never drift from what is drawn (ADR-0079).
+func (m QueueDashboard) frameSpec() ui.Frame {
+	var warnings []string
+	if m.err != nil {
+		warnings = append(warnings, fmt.Sprintf("refresh error: %v", m.err))
+	}
+	header := ""
+	if len(m.snap.Rows) > 0 {
+		header = "Queue · " + dashboardSummary(m.snap.Rows)
+	}
+	inputBox := ""
+	if m.filterMode {
+		inputBox = m.filterInput.View()
+	}
+	return ui.Frame{
+		Width:    m.width,
+		Header:   header,
+		InputBox: inputBox,
+		Warnings: warnings,
+		Status:   m.statusMsg,
+		Hints:    m.mainHint(),
+	}
+}
+
+// mainHint returns the footer hint for the main (non-modal, non-menu) view.
+func (m QueueDashboard) mainHint() string {
+	if len(m.snap.Rows) == 0 {
+		if m.filterMode {
+			return "esc clear filter"
+		}
+		return "h/esc quit"
+	}
+	if m.filterMode {
+		return "esc clear filter · j/k navigate"
+	}
+	return "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · h/esc quit"
+}
+
+// mainBody renders the table body (a blank line, the column header, the
+// separator, then the List's scroll window) or the empty-state message. It is
+// the body the Frame composes its chrome around.
+func (m QueueDashboard) mainBody() string {
+	if len(m.snap.Rows) == 0 {
+		if m.filterMode {
+			return "No matching task sets."
+		}
+		return "No queue-actionable task sets."
+	}
+	parts := []string{
+		"",
+		ui.TruncateString("  "+dashboardTableLine(dashboardTableHeaders(), m.cols.widths), m.width),
+		ui.TruncateString("  "+dashboardTableSeparator(m.cols.widths), m.width),
+	}
+	parts = append(parts, m.list.VisibleRows()...)
+	return strings.Join(parts, "\n")
+}
+
+// viewWithMenu renders the action-menu overlay: the summary, the full table with
+// the menu spliced next to the cursored row (bespoke overlay placement, ADR-0079),
+// and the menu footer. The menu overlay's own body is ported onto List in a later
+// slice; here it keeps the current rendering with the cursor read from the List.
+func (m QueueDashboard) viewWithMenu() string {
 	var body strings.Builder
 	if m.err != nil {
 		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
 	}
-	if len(m.snap.Rows) == 0 {
-		if m.filterMode {
-			fmt.Fprintln(&body, "No matching task sets.")
-		} else {
-			fmt.Fprintln(&body, "No queue-actionable task sets.")
-		}
-		hint := "h/esc quit"
-		if m.filterMode {
-			ui.WriteInputBox(&body, m.width, m.filterInput.View())
-			hint = "esc clear filter"
-		}
-		writeDashboardFooter(&body, m.height, ui.HintStyle.Render(hint))
-		content := body.String()
-		v := tea.NewView(content)
-		v.AltScreen = true
-		return v
+	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
+	fmt.Fprintln(&body)
+	renderDashboardTableWithMenu(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.menu)
+	if m.statusMsg != "" {
+		fmt.Fprintf(&body, "  %s\n", m.statusMsg)
+	}
+	writeDashboardFooter(&body, m.height, ui.HintStyle.Render("j/k move · enter/letter run · esc close"))
+	return body.String()
+}
+
+// viewWithModal renders the summary, the full table, and the active modal below
+// it, replacing the footer. The modal bodies are ported onto List in a later
+// slice; here they keep the current bespoke rendering (ADR-0079).
+func (m QueueDashboard) viewWithModal() string {
+	var body strings.Builder
+	if m.err != nil {
+		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
 	}
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
-	if m.menu != nil {
-		renderDashboardTableWithMenu(&body, m.snap.Rows, m.cursor, m.width, m.height, m.menu)
-	} else {
-		renderDashboardTable(&body, m.snap.Rows, m.cursor, m.width)
-	}
-	hint := "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · h/esc quit"
-	footer := true
-	if m.menu != nil {
-		hint = "j/k move · enter/letter run · esc close"
-	} else if m.bind != nil {
+	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width)
+	switch {
+	case m.bind != nil:
 		renderDashboardBindModal(&body, m.bind)
-		footer = false
-	} else if m.drainPick != nil {
+	case m.drainPick != nil:
 		renderDashboardDrainModal(&body, m.drainPick)
-		footer = false
-	} else if m.abandon != nil {
+	case m.abandon != nil:
 		renderDashboardAbandonModal(&body, m.abandon)
-		footer = false
-	} else if m.filterMode {
-		ui.WriteInputBox(&body, m.width, m.filterInput.View())
-		hint = "esc clear filter · j/k navigate"
 	}
-	if footer {
-		if m.statusMsg != "" {
-			fmt.Fprintf(&body, "  %s\n", m.statusMsg)
-		}
-		writeDashboardFooter(&body, m.height, ui.HintStyle.Render(hint))
-	}
-	content := body.String()
-	v := tea.NewView(content)
-	v.AltScreen = true
-	return v
+	return body.String()
 }
 
 func dashboardSummary(rows []DashboardRow) string {
@@ -2608,17 +2707,8 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
 // default, flipping above when the cursor sits too low for the menu to fit
 // beneath it within height (dashboardMenuPlaceBelow).
 func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
-	headers := []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", "DRAIN", ""}
-	widths := []int{len(headers[0]), len(headers[1]), len(headers[2]), len(headers[3]), len(headers[4])}
-	widths = append(widths, len(headers[5]))
-	for _, row := range rows {
-		values := dashboardRowValues(row)
-		for i, v := range values {
-			if n := lipgloss.Width(v); n > widths[i] {
-				widths[i] = n
-			}
-		}
-	}
+	headers := dashboardTableHeaders()
+	widths := dashboardColumnWidths(rows)
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableLine(headers, widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableSeparator(widths), width))
 
@@ -2739,12 +2829,11 @@ func padDashboardCell(s string, width int) string {
 
 // RunDashboard opens the read-only Queue dashboard TUI.
 func RunDashboard(d *Deps, cfg *config.Config) error {
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{})
 	snap, err := BuildDashboard(d, cfg)
 	if err != nil {
 		return err
 	}
-	m.snap = snap
+	m := newQueueDashboard(d, cfg, snap)
 	program := tea.NewProgram(m)
 	_, err = program.Run()
 	return err

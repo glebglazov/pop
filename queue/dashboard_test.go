@@ -833,7 +833,7 @@ func TestDashboardActionMenuAnchorsBelowAndFlipsAbove(t *testing.T) {
 	mTop := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	mTop.width = 120
 	mTop.height = 24
-	mTop.cursor = 0
+	mTop.list.SetCursor(0)
 	updated, _ := mTop.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	topView := updated.(QueueDashboard).View().Content
 	if got := menuCaptionLine(topView); got <= cursorRowLine(topView, "set-00") {
@@ -844,7 +844,7 @@ func TestDashboardActionMenuAnchorsBelowAndFlipsAbove(t *testing.T) {
 	mBot := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	mBot.width = 120
 	mBot.height = 24
-	mBot.cursor = len(rows) - 1
+	mBot.list.SetCursor(len(rows) - 1)
 	updated, _ = mBot.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	botView := updated.(QueueDashboard).View().Content
 	if got := menuCaptionLine(botView); got >= cursorRowLine(botView, "set-19") {
@@ -874,7 +874,7 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 		{Project: "pop", Status: "READY", cursorKey: "pop\x00first", SetRef: SetRef{SetID: "first"}},
 		{Project: "pop", Status: "READY", cursorKey: "pop\x00second", SetRef: SetRef{SetID: "second"}},
 	}})
-	m.cursor = 1
+	m.list.SetCursor(1)
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	got := updated.(QueueDashboard)
@@ -896,8 +896,8 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 	if cmd != nil {
 		t.Fatalf("h in detail view should close without quitting")
 	}
-	if got.detail != nil || got.cursor != 1 {
-		t.Fatalf("after close: detail=%+v cursor=%d, want nil and 1", got.detail, got.cursor)
+	if got.detail != nil || got.list.Cursor() != 1 {
+		t.Fatalf("after close: detail=%+v cursor=%d, want nil and 1", got.detail, got.list.Cursor())
 	}
 
 	// Exit via esc also works.
@@ -964,6 +964,25 @@ func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	}
 }
 
+func TestDashboardTableClampsToBodyHeight(t *testing.T) {
+	// Many rows on a short terminal must not overflow: the List scroll window
+	// caps the body at the Frame's budget instead of rendering every row.
+	rows := make([]DashboardRow, 40)
+	for i := range rows {
+		id := fmt.Sprintf("set-%02d", i)
+		rows[i] = DashboardRow{Project: "pop", Status: "READY", cursorKey: "pop\x00" + id, SetRef: SetRef{SetID: id}}
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 10})
+	m = updated.(QueueDashboard)
+
+	view := m.View().Content
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("view line count = %d, want %d (clamped to body height):\n%s", got, want, view)
+	}
+}
+
 func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) {
 	manifest := &tasks.Manifest{
 		Valid: true,
@@ -1019,8 +1038,8 @@ func TestDashboardQAndSAreUnbound(t *testing.T) {
 		if cmd != nil {
 			t.Fatalf("%s at top level returned command, want no-op", key)
 		}
-		if got.cursor != 0 || got.detail != nil {
-			t.Fatalf("%s changed model: cursor=%d detail=%+v", key, got.cursor, got.detail)
+		if got.list.Cursor() != 0 || got.detail != nil {
+			t.Fatalf("%s changed model: cursor=%d detail=%+v", key, got.list.Cursor(), got.detail)
 		}
 	}
 
@@ -1167,24 +1186,45 @@ func TestDashboardTopLevelVimNavigation(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
 	got := updated.(QueueDashboard)
-	if got.cursor != 2 {
-		t.Fatalf("G cursor = %d, want 2", got.cursor)
+	if got.list.Cursor() != 2 {
+		t.Fatalf("G cursor = %d, want 2", got.list.Cursor())
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
 	got = updated.(QueueDashboard)
-	if got.cursor != 2 {
-		t.Fatalf("first g cursor = %d, want 2", got.cursor)
+	if got.list.Cursor() != 2 {
+		t.Fatalf("first g cursor = %d, want 2", got.list.Cursor())
 	}
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
 	got = updated.(QueueDashboard)
-	if got.cursor != 0 {
-		t.Fatalf("gg cursor = %d, want 0", got.cursor)
+	if got.list.Cursor() != 0 {
+		t.Fatalf("gg cursor = %d, want 0", got.list.Cursor())
 	}
 
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if cmd == nil {
 		t.Fatalf("h should quit from top level")
+	}
+}
+
+func TestDashboardReloadPreservesCursorByKey(t *testing.T) {
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00a", SetRef: SetRef{SetID: "a"}},
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00b", SetRef: SetRef{SetID: "b"}},
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00c", SetRef: SetRef{SetID: "c"}},
+	}})
+	m.list.SetCursor(2) // on "c"
+
+	// A tick reload delivers the same sets reordered; the cursor must follow "c".
+	reordered := []DashboardRow{
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00c", SetRef: SetRef{SetID: "c"}},
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00a", SetRef: SetRef{SetID: "a"}},
+		{Project: "pop", Status: "READY", cursorKey: "pop\x00b", SetRef: SetRef{SetID: "b"}},
+	}
+	updated, _ := m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: reordered}})
+	got := updated.(QueueDashboard)
+	if sel, ok := got.list.Selected(); !ok || sel.SetID != "c" {
+		t.Fatalf("cursor after reload = %+v (ok=%v), want set c", sel, ok)
 	}
 }
 
@@ -2307,7 +2347,7 @@ func filterTestModel() QueueDashboard {
 		{Project: "gamma", Status: "FAILED", cursorKey: "gamma\x00feature", SetRef: SetRef{SetID: "feature"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
-	m.cursor = 2
+	m.list.SetCursor(2)
 	return m
 }
 
@@ -2386,7 +2426,7 @@ func TestDashboardFilterMode_MatchesSetID(t *testing.T) {
 
 func TestDashboardFilterMode_CursorClampedToFilteredRows(t *testing.T) {
 	m := filterTestModel()
-	m.cursor = 2 // on gamma/feature
+	m.list.SetCursor(2) // on gamma/feature
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	m = updated.(QueueDashboard)
 
@@ -2395,8 +2435,8 @@ func TestDashboardFilterMode_CursorClampedToFilteredRows(t *testing.T) {
 		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
 		m = updated.(QueueDashboard)
 	}
-	if m.cursor < 0 || m.cursor >= len(m.snap.Rows) {
-		t.Fatalf("cursor = %d, out of bounds for %d filtered rows", m.cursor, len(m.snap.Rows))
+	if c := m.list.Cursor(); c < 0 || c >= len(m.snap.Rows) {
+		t.Fatalf("cursor = %d, out of bounds for %d filtered rows", c, len(m.snap.Rows))
 	}
 }
 
@@ -2412,16 +2452,16 @@ func TestDashboardFilterMode_NavigationWorksInsideFilter(t *testing.T) {
 	if len(m.snap.Rows) != 2 {
 		t.Fatalf("after 'set': rows = %d, want 2", len(m.snap.Rows))
 	}
-	m.cursor = 0
+	m.list.SetCursor(0)
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got := updated.(QueueDashboard)
-	if got.cursor != 1 {
-		t.Fatalf("j in filter mode: cursor = %d, want 1", got.cursor)
+	if got.list.Cursor() != 1 {
+		t.Fatalf("j in filter mode: cursor = %d, want 1", got.list.Cursor())
 	}
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	got = updated.(QueueDashboard)
-	if got.cursor != 0 {
-		t.Fatalf("k in filter mode: cursor = %d, want 0", got.cursor)
+	if got.list.Cursor() != 0 {
+		t.Fatalf("k in filter mode: cursor = %d, want 0", got.list.Cursor())
 	}
 }
 
@@ -2437,7 +2477,7 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 		{Project: "alpha", Status: "READY", cursorKey: "alpha\x00set-one", SetRef: SetRef{SetID: "set-one", DefPath: "/def", StatePath: "/state"}},
 	}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: rows})
-	m.cursor = 0
+	m.list.SetCursor(0)
 	// Enter filter mode
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	m = updated.(QueueDashboard)
