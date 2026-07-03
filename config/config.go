@@ -474,36 +474,36 @@ type Finding struct {
 func (f Finding) Error() string { return f.Message }
 
 type Config struct {
-	Includes              []string             `toml:"includes"`
-	Projects              []ProjectEntry       `toml:"projects"`
-	Commands              []UserDefinedCommand `toml:"commands"`
-	ExcludeCurrentSession bool                 `toml:"exclude_current_session"`
+	Includes              []string             `toml:"includes" desc:"Additional config files to merge in (paths, later wins)."`
+	Projects              []ProjectEntry       `toml:"projects" desc:"Directories or globs offered in the project picker."`
+	Commands              []UserDefinedCommand `toml:"commands" desc:"User-defined commands surfaced in the picker."`
+	ExcludeCurrentSession bool                 `toml:"exclude_current_session" desc:"Hide the current tmux session from the picker."`
 	// Deprecated: use ExcludeCurrentSession. TODO: remove after v1.0.
-	ExcludeCurrentDir      bool            `toml:"exclude_current_dir"`
-	DisambiguationStrategy string          `toml:"disambiguation_strategy"`
-	QuickAccessModifier    string          `toml:"quick_access_modifier"`
-	Worktree               *WorktreeConfig `toml:"worktree"`
-	Project                *ProjectConfig  `toml:"project"`
+	ExcludeCurrentDir      bool            `toml:"exclude_current_dir" desc:"Deprecated: use exclude_current_session."`
+	DisambiguationStrategy string          `toml:"disambiguation_strategy" desc:"How to shorten duplicate display names (first_unique_segment|full_path)."`
+	QuickAccessModifier    string          `toml:"quick_access_modifier" desc:"Modifier for quick-access hotkeys (alt|ctrl|disabled)."`
+	Worktree               *WorktreeConfig `toml:"worktree" desc:"Worktree dashboard behavior ([worktree] table)."`
+	Project                *ProjectConfig  `toml:"project" desc:"Project dashboard behavior ([project] table)."`
 	// Deprecated: use Project. TODO: remove at next major release.
-	Select         *ProjectConfig        `toml:"select"`
-	PaneMonitoring *PaneMonitoringConfig `toml:"pane_monitoring"`
-	Dashboard      *DashboardConfig      `toml:"dashboard"`
+	Select         *ProjectConfig        `toml:"select" desc:"Deprecated: use [project]."`
+	PaneMonitoring *PaneMonitoringConfig `toml:"pane_monitoring" desc:"Pane attention/status monitoring daemon settings ([pane_monitoring] table)."`
+	Dashboard      *DashboardConfig      `toml:"dashboard" desc:"Shared dashboard and cursor behavior ([dashboard] table)."`
 	// The TOML key stays "workload" for backward compatibility with existing
 	// user config files; the rename is internal only.
-	Task   *TaskConfig             `toml:"workload"`
-	Effort map[string]EffortConfig `toml:"effort"`
+	Task   *TaskConfig             `toml:"workload" desc:"Task-set execution defaults ([workload] table)."`
+	Effort map[string]EffortConfig `toml:"effort" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
 	// Workbenches is the canonical TOML key for session blueprints.
-	Workbenches []Workbench `toml:"workbenches"`
+	Workbenches []Workbench `toml:"workbenches" desc:"Global session blueprints (templates)."`
 	// WorkbenchOpts holds the [workbench] options table (empty for now).
-	WorkbenchOpts *WorkbenchOptions   `toml:"workbench"`
-	Queue         *QueueConfig        `toml:"queue"`
-	Updates       *UpdatesConfig      `toml:"updates"`
-	Integrations  *IntegrationsConfig `toml:"integrations"`
+	WorkbenchOpts *WorkbenchOptions   `toml:"workbench" desc:"Workbench options ([workbench] table)."`
+	Queue         *QueueConfig        `toml:"queue" desc:"Queue supervisor settings ([queue] table)."`
+	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
+	Integrations  *IntegrationsConfig `toml:"integrations" desc:"AI-agent integration settings ([integrations] table)."`
 	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
 	// The key is canonicalized (~ expanded, symlinks resolved) at resolution
 	// time; any worktree path or bare dir of the same repo resolves to the
 	// same repository identity.
-	Repo map[string]RepoOverrideConfig `toml:"repo"`
+	Repo map[string]RepoOverrideConfig `toml:"repo" desc:"Per-repo override blocks keyed by any checkout path ([repo.\"<path>\"] tables)."`
 
 	// Findings holds semantic config problems collected at load time (ADR 0054).
 	// Each is keyed to its config path; callers consult them through value
@@ -581,13 +581,13 @@ func (c *Config) ProjectEntries() ([]ProjectEntry, error) {
 // in committed .pop.toml — so it lives on the individual structs, not here.
 type RepoScopeConfig struct {
 	// Workbenches are repo-scope session blueprints (canonical key).
-	Workbenches []Workbench `toml:"workbenches"`
+	Workbenches []Workbench `toml:"workbenches" desc:"Repo-scope session blueprints (templates)."`
 	// PreferredWorkbench names the repo-default Workbench that auto-applies when
 	// a session is born for any checkout of this repo (ADR-0078). It is keyed by
 	// repository identity, not the exact checkout path, so it is a coarse default
 	// shared by every worktree of the repo. Readable from committed .pop.toml as
 	// well as the global override; the override wins for the same key (ADR-0083).
-	PreferredWorkbench string `toml:"preferred_workbench"`
+	PreferredWorkbench string `toml:"preferred_workbench" desc:"Repo-default Workbench that auto-applies to new sessions of this repo."`
 }
 
 // RepoConfig is the repo-root .pop.toml surface. It is deliberately separate
@@ -618,7 +618,7 @@ type RepoOverrideConfig struct {
 	RepoScopeConfig
 	// Trunk is meaningful only for the specific checkout path that keys this
 	// block; it is not propagated to other worktrees of the same repo.
-	Trunk *bool `toml:"trunk"`
+	Trunk *bool `toml:"trunk" desc:"Mark this exact checkout as the repo's Trunk (fork base for managed worktrees)."`
 }
 
 // LoadRepoConfig reads repo-root .pop.toml. A missing file is not an error and
