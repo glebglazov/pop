@@ -17,15 +17,17 @@ A deep module (as opposed to a shallow module) is one which encapsulates a lot o
 
 Check with the user that these modules match their expectations. Check with the user which modules they want tests written for.
 
-3. Write the PRD using the template below, then save it as a markdown file in the PRDs directory: the `prds/` sibling of the `pop tasks show-path` output — `"$(dirname "$(pop tasks show-path)")/prds"` — which keeps PRDs in pop's per-repository storage outside the repo tree (create the `prds/` subdirectory if it doesn't exist). Use `<timestamp>-<slug>.md`, where `<slug>` is a descriptive hyphen-delimited name (e.g. `2026-05-31-user-auth.md`); the slug carries over to the task set name when this PRD is later broken down with to-tasks.
+3. Write the PRD using the template below, then save it as `prd.md` **inside its own task-set folder** (ADR-0088), co-located with the task files that to-tasks will add later: `<tasks-dir>/<task-set-name>/prd.md`, where `<tasks-dir>` is the output of `pop tasks show-path` (pop's per-repository storage, outside the repo tree). Create the `<tasks-dir>/<task-set-name>/` directory now — it holds only `prd.md` at this stage; the set stays inert (invisible to the dashboard, never scheduled) until it is later registered with `pop tasks register`.
+
+`<task-set-name>` is `<timestamp>-<slug>`, where `<slug>` is a descriptive hyphen-delimited name (e.g. `user-auth`). The slug carries over to the task set when this PRD is later broken down with to-tasks — to-tasks fills in the task markdown and `index.json` alongside this `prd.md`.
 
 <naming-convention>
-`<timestamp>` is a human-readable local date/time prefix so PRDs sort chronologically:
+`<timestamp>` is a human-readable local date/time prefix so task sets sort chronologically:
 
 - Default: `YYYY-MM-DD` (e.g. `2026-05-31`)
-- If a file with the same date and slug already exists: `YYYY-MM-DD-HHMM` (24-hour local time, e.g. `2026-05-31-2036`)
+- If a folder with the same date and slug already exists: `YYYY-MM-DD-HHMM` (24-hour local time, e.g. `2026-05-31-2036`)
 
-Examples: `2026-05-31-user-auth.md`, `2026-05-31-2036-user-auth.md`
+Examples: `2026-05-31-user-auth/prd.md`, `2026-05-31-2036-user-auth/prd.md`
 </naming-convention>
 
 <prd-template>

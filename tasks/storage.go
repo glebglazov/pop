@@ -132,6 +132,11 @@ func EnsureStorage(d *Deps, id *RepositoryIdentity) error {
 	if err := d.FS.MkdirAll(id.TasksDir, 0o755); err != nil {
 		return exitErr(ExitOperational, "create task storage: %v", err)
 	}
+	// Co-locate any PRDs authored under the retired sibling prds/ layout into
+	// their matching set folders (ADR-0088). Idempotent once drained.
+	if _, err := MigratePRDColocation(d, id.TasksDir); err != nil {
+		return err
+	}
 
 	markerPath := filepath.Join(id.StorageDir, repoMarkerFile)
 	if _, err := d.FS.Stat(markerPath); err == nil {
