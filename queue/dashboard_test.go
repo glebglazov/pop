@@ -2138,7 +2138,7 @@ func TestHeadBranchFromCheckout(t *testing.T) {
 	}
 }
 
-func TestDashboardCreateWorktreeManagedFreshBranchNoSession(t *testing.T) {
+func TestCreateWorktreeManagedFreshBranchNoSession(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "bind-create", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})

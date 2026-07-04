@@ -10,11 +10,11 @@ import (
 	"github.com/glebglazov/pop/tasks/binding"
 )
 
-// TestDashboardDrainTargetEntriesOrderAndExclusions asserts the Drain target
+// TestDrainTargetEntriesOrderAndExclusions asserts the Drain target
 // picker for an unbound set lists, in order, the repo's adoptable worktrees, a
 // "new managed worktree" option (the default cursor), and the trunk — excluding
 // the trunk itself, pop-managed worktrees, and worktrees bound to other sets.
-func TestDashboardDrainTargetEntriesOrderAndExclusions(t *testing.T) {
+func TestDrainTargetEntriesOrderAndExclusions(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "drain-target", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})

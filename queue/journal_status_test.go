@@ -461,7 +461,7 @@ func TestCleanTerminalResetsBackoffCountFromDrainHistory(t *testing.T) {
 	}
 }
 
-func TestUnparkDashboardRowClearsPark(t *testing.T) {
+func TestUnparkSetClearsPark(t *testing.T) {
 	td := queueDataDeps(t)
 	repo := initGitRepoWithBase(t)
 	commonDir := testRepoCommonDir(t, td, repo)
