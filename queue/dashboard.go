@@ -1941,7 +1941,7 @@ func (m QueueDashboard) toggleAutoDrain(row DashboardRow) tea.Cmd {
 // picker so the operator chooses where the drain lands (ADR-0052).
 func (m QueueDashboard) launchDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		bound, err := dashboardSetBound(m.d, m.cfg, row)
+		bound, err := dashboardSetBound(m.d, m.cfg, row.SetRef)
 		if err != nil {
 			return dashboardDrainListMsg{row: row, err: err}
 		}
@@ -2104,17 +2104,17 @@ func (m QueueDashboard) abandonWorktree(row DashboardRow) tea.Cmd {
 // dashboardSetBound reports whether the row's set already holds a Worktree
 // binding. The Drain target picker only opens for unbound sets; a bound set
 // resumes in its binding (ADR-0052).
-func dashboardSetBound(d *Deps, cfg *config.Config, row DashboardRow) (bool, error) {
+func dashboardSetBound(d *Deps, cfg *config.Config, ref SetRef) (bool, error) {
 	d = ensureQueueDeps(d)
-	repoKey := row.RepoKey
+	repoKey := ref.RepoKey
 	if repoKey == "" {
-		_, rk, err := dashboardBindContext(d, cfg, row.SetRef)
+		_, rk, err := dashboardBindContext(d, cfg, ref)
 		if err != nil {
 			return false, err
 		}
 		repoKey = rk
 	}
-	b, ok := bindingForSet(d.Tasks, repoKey, row.SetID)
+	b, ok := bindingForSet(d.Tasks, repoKey, ref.SetID)
 	return ok && strings.TrimSpace(b.RuntimePath) != "", nil
 }
 
