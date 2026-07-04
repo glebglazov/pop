@@ -12,6 +12,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
 func TestBuildRunViewConfigErrorIsScanError(t *testing.T) {
@@ -327,5 +328,136 @@ func TestRenderRunBaselineAwaitingApprovalSection(t *testing.T) {
 	}
 	if strings.Contains(text, "Blocked:\n  pop") {
 		t.Fatalf("awaiting-approval set must not appear under Blocked:\n%s", text)
+	}
+}
+
+// TestRepoIdentityLabelAcrossSpawnAndBackoff verifies that when several picker
+// Projects map to a single Repository identity, both the spawn delta and the
+// backoff-cleared delta print the repo-identity basename, not a picker-Project
+// name and never a blank prefix.
+func TestRepoIdentityLabelAcrossSpawnAndBackoff(t *testing.T) {
+	td := queueDataDeps(t)
+	_, wts := initBareRepoWithWorktrees(t, 2)
+	mainWT := wts[0]
+	featureWT := wts[1]
+
+	id, err := tasks.ResolveRepositoryIdentity(td, mainWT)
+	if err != nil {
+		t.Fatalf("ResolveRepositoryIdentity: %v", err)
+	}
+	if err := tasks.EnsureStorage(td, id); err != nil {
+		t.Fatalf("EnsureStorage: %v", err)
+	}
+
+	setID := "set-1"
+	repoKey := repoIdentityKey(id)
+	commonDir := id.CommonDir
+	basename := id.Basename
+
+	// Bind the set to the main worktree under one picker project name.
+	if err := binding.Put(td, setScopedKey(repoKey, setID), WorktreeBinding{RuntimePath: mainWT, Project: "game_server/main"}); err != nil {
+		t.Fatalf("binding.Put: %v", err)
+	}
+
+	// Spawn decision originates from a different picker project (feature worktree)
+	// but resolves to the same Repository identity.
+	spawnDec := Decision{
+		Project:   "game_server/feature",
+		TaskSetID: setID,
+		Reason:    "ready",
+		Busy:      true,
+		scan: projectScan{
+			Name:           "game_server/feature",
+			ProjectPath:    featureWT,
+			RuntimePath:    mainWT,
+			DefinitionPath: id.TasksDir,
+			RepoKey:        repoKey,
+			RepoCommonDir:  commonDir,
+		},
+		lockStatus: &tasks.RuntimeLockStatus{
+			Locked:      true,
+			RuntimePath: mainWT,
+			Metadata: &tasks.RuntimeLockMetadata{
+				SetID:       setID,
+				RuntimePath: mainWT,
+			},
+		},
+	}
+
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{spawnDec}, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("statusFromDecisions: %v", err)
+	}
+	snap.Tasks = td
+	snap.CrashRetryDelays = []time.Duration{time.Minute}
+
+	view := BuildRunView(snap, time.Now().UTC())
+	if len(view.Running) != 1 {
+		t.Fatalf("expected one running set, got %+v", view.Running)
+	}
+	if got := view.Running[0].RepoLabel; got != basename {
+		t.Fatalf("running RepoLabel = %q, want %q", got, basename)
+	}
+
+	lines := DiffRunView(&RunView{}, view)
+	if len(lines) != 1 || !strings.Contains(lines[0], "queue: "+basename+": spawned drain for "+setID) {
+		t.Fatalf("spawn delta = %v, want repo basename label", lines)
+	}
+
+	// Seed an abnormal terminal so the same set enters crash backoff.
+	seedAbnormalDrain(t, td, mainWT, setID)
+	info, err := tasks.ReadSetBackoff(td, commonDir, setID)
+	if err != nil {
+		t.Fatalf("ReadSetBackoff: %v", err)
+	}
+
+	blockedView := BuildRunView(snap, info.LastAbnormalAt.Add(30*time.Second))
+	if len(blockedView.Blocked) != 1 {
+		t.Fatalf("expected one blocked item, got %+v", blockedView.Blocked)
+	}
+	if got := blockedView.Blocked[0].RepoLabel; got != basename {
+		t.Fatalf("blocked RepoLabel = %q, want %q", got, basename)
+	}
+	if got := blockedView.Blocked[0].Project; got != "game_server/main" {
+		t.Fatalf("blocked Project = %q, want original picker project preserved", got)
+	}
+
+	clearedView := BuildRunView(snap, info.LastAbnormalAt.Add(2*time.Minute))
+	lines = DiffRunView(&blockedView, clearedView)
+	if len(lines) != 1 || !strings.Contains(lines[0], "queue: "+basename+": "+setID+" backoff cleared") {
+		t.Fatalf("backoff cleared delta = %v, want repo basename label", lines)
+	}
+}
+
+// TestRepoIdentityLabelFallsBackToProject preserves the familiar label for
+// single-worktree repos whose scan did not resolve a separate Repository identity.
+func TestRepoIdentityLabelFallsBackToProject(t *testing.T) {
+	td := queueDataDeps(t)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{{
+		Project:   "pop",
+		TaskSetID: "set-1",
+		Reason:    "ready",
+		Busy:      true,
+		scan:      projectScan{Name: "pop"},
+		lockStatus: &tasks.RuntimeLockStatus{
+			Locked: true,
+			Metadata: &tasks.RuntimeLockMetadata{
+				SetID: "set-1",
+			},
+		},
+	}}, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("statusFromDecisions: %v", err)
+	}
+	snap.Tasks = td
+
+	view := BuildRunView(snap, time.Now().UTC())
+	if got := view.Running[0].RepoLabel; got != "pop" {
+		t.Fatalf("running RepoLabel = %q, want project fallback", got)
+	}
+
+	lines := DiffRunView(&RunView{}, view)
+	if len(lines) != 1 || !strings.Contains(lines[0], "queue: pop: spawned drain for set-1") {
+		t.Fatalf("spawn delta = %v, want project fallback label", lines)
 	}
 }

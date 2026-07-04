@@ -42,12 +42,13 @@ type WorktreeBindingView struct {
 
 // BlockedItem is one blocked scheduling bucket: parked set, backoff, or agent cooldown.
 type BlockedItem struct {
-	Project string
-	SetID   string
-	Kind    string
-	Until   time.Time
-	Reason  string
-	Agent   string
+	Project   string
+	RepoLabel string
+	SetID     string
+	Kind      string
+	Until     time.Time
+	Reason    string
+	Agent     string
 }
 
 type runOutputState struct {
@@ -70,16 +71,20 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 	blockedProjects := map[string]bool{}
 
 	for _, idle := range snap.Idle {
+		repoLabel := idle.RepoLabel
+		if repoLabel == "" {
+			repoLabel = idle.Project
+		}
 		switch {
 		case idle.Waiting == "error":
-			appendScanError(view.ScanErrors, idle.Project, idle.Reason)
+			appendScanError(view.ScanErrors, repoLabel, idle.Reason)
 		case idle.ProjectConfigError != "":
-			appendScanError(view.ScanErrors, idle.Project, idle.ProjectConfigError)
+			appendScanError(view.ScanErrors, repoLabel, idle.ProjectConfigError)
 		case idle.ReadySet != "":
 			view.Queued = append(view.Queued, idle)
 		case isBlockedIdleReason(idle.Reason):
 			view.Blocked = append(view.Blocked, blockedItemFromIdle(idle))
-			blockedProjects[idle.Project] = true
+			blockedProjects[repoLabel] = true
 		case idle.AwaitingApprovalSetID != "":
 			view.AwaitingApproval = append(view.AwaitingApproval, AwaitingApprovalItem{
 				Project: idle.Project,
@@ -92,7 +97,11 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 
 	for _, picked := range view.Running {
 		if picked.ProjectConfigError != "" {
-			appendScanError(view.ScanErrors, picked.Project, picked.ProjectConfigError)
+			repoLabel := picked.RepoLabel
+			if repoLabel == "" {
+				repoLabel = picked.Project
+			}
+			appendScanError(view.ScanErrors, repoLabel, picked.ProjectConfigError)
 		}
 	}
 
@@ -145,12 +154,17 @@ func isBlockedIdleReason(reason string) bool {
 }
 
 func blockedItemFromIdle(idle IdleProject) BlockedItem {
+	repoLabel := idle.RepoLabel
+	if repoLabel == "" {
+		repoLabel = idle.Project
+	}
 	return BlockedItem{
-		Project: idle.Project,
-		SetID:   idle.BlockedSetID,
-		Reason:  idle.Reason,
-		Kind:    blockedKindFromReason(idle.Reason),
-		Until:   idle.WaitUntil,
+		Project:   idle.Project,
+		RepoLabel: repoLabel,
+		SetID:     idle.BlockedSetID,
+		Reason:    idle.Reason,
+		Kind:      blockedKindFromReason(idle.Reason),
+		Until:     idle.WaitUntil,
 	}
 }
 
@@ -159,22 +173,35 @@ func blockedItemFromIdle(idle IdleProject) BlockedItem {
 // parking and backoff are derived from each bound set's Drain history (ADR-0055);
 // only the pinned-agent quota cooldown still reads a persisted timer.
 func blockedItemsFromState(td *tasks.Deps, state *DaemonState, delays []time.Duration, now time.Time, seenProjects map[string]bool) []BlockedItem {
-	out := blockedItemsFromDrainHistory(td, delays, now, seenProjects)
+	bindings, _ := binding.AllBindings(td)
+	out := blockedItemsFromDrainHistory(td, bindings, delays, now, seenProjects)
 	if state != nil {
 		for key, until := range state.SetBackoffs {
 			if until.IsZero() || !until.After(now) {
 				continue
 			}
-			project, setID := projectSetFromScopedKey(td, key)
-			if seenProjects[project] {
+			setID := binding.SetIDFromKey(key)
+			repoLabel := repoLabelFromScopedKey(key)
+			if repoLabel == "" {
+				repoLabel = projectForScopedKey(td, key)
+			}
+			if seenProjects[repoLabel] {
 				continue
 			}
+			project := ""
+			if b, ok := bindings[key]; ok {
+				project = b.Project
+			}
+			if project == "" {
+				project = repoLabel
+			}
 			out = append(out, BlockedItem{
-				Project: project,
-				SetID:   setID,
-				Kind:    "quota_backoff",
-				Until:   until,
-				Reason:  "set backed off for pinned agent cooldown",
+				Project:   project,
+				RepoLabel: repoLabel,
+				SetID:     setID,
+				Kind:      "quota_backoff",
+				Until:     until,
+				Reason:    "set backed off for pinned agent cooldown",
 			})
 		}
 	}
@@ -185,17 +212,24 @@ func blockedItemsFromState(td *tasks.Deps, state *DaemonState, delays []time.Dur
 // Drain store, one per provisioned Worktree binding (a parked set ran in a
 // checkout, so it has a binding). A nil tasks dep or store-read error yields
 // nothing rather than blocking the view.
-func blockedItemsFromDrainHistory(td *tasks.Deps, delays []time.Duration, now time.Time, seenProjects map[string]bool) []BlockedItem {
+func blockedItemsFromDrainHistory(td *tasks.Deps, bindings map[string]WorktreeBinding, delays []time.Duration, now time.Time, seenProjects map[string]bool) []BlockedItem {
 	if td == nil {
 		return nil
 	}
-	bindings, err := binding.AllBindings(td)
-	if err != nil {
-		return nil
+	if bindings == nil {
+		var err error
+		bindings, err = binding.AllBindings(td)
+		if err != nil {
+			return nil
+		}
 	}
 	var out []BlockedItem
 	for key, b := range bindings {
-		if seenProjects[b.Project] || strings.TrimSpace(b.RuntimePath) == "" {
+		repoLabel := repoLabelFromScopedKey(key)
+		if repoLabel == "" {
+			repoLabel = b.Project
+		}
+		if seenProjects[repoLabel] || strings.TrimSpace(b.RuntimePath) == "" {
 			continue
 		}
 		setID := binding.SetIDFromKey(key)
@@ -211,19 +245,21 @@ func blockedItemsFromDrainHistory(td *tasks.Deps, delays []time.Duration, now ti
 		switch {
 		case parked:
 			out = append(out, BlockedItem{
-				Project: b.Project,
-				SetID:   setID,
-				Kind:    "parked",
-				Until:   info.LastAbnormalAt,
-				Reason:  "repeated abnormal drain exits",
+				Project:   b.Project,
+				RepoLabel: id.Basename,
+				SetID:     setID,
+				Kind:      "parked",
+				Until:     info.LastAbnormalAt,
+				Reason:    "repeated abnormal drain exits",
 			})
 		case !until.IsZero():
 			out = append(out, BlockedItem{
-				Project: b.Project,
-				SetID:   setID,
-				Kind:    "crash_backoff",
-				Until:   until,
-				Reason:  "set backed off after abnormal drain exit",
+				Project:   b.Project,
+				RepoLabel: id.Basename,
+				SetID:     setID,
+				Kind:      "crash_backoff",
+				Until:     until,
+				Reason:    "set backed off after abnormal drain exit",
 			})
 		}
 	}
@@ -261,16 +297,6 @@ func blockedKindFromReason(reason string) string {
 	}
 }
 
-func projectSetFromScopedKey(td *tasks.Deps, key string) (project, setID string) {
-	setID = binding.SetIDFromKey(key)
-	if bindings, err := binding.AllBindings(td); err == nil {
-		if b, ok := bindings[key]; ok && b.Project != "" {
-			return b.Project, setID
-		}
-	}
-	return projectForScopedKey(td, key), setID
-}
-
 func projectForScopedKey(td *tasks.Deps, key string) string {
 	setID := binding.SetIDFromKey(key)
 	bindings, _ := binding.AllBindings(td)
@@ -280,6 +306,37 @@ func projectForScopedKey(td *tasks.Deps, key string) string {
 		}
 	}
 	return ""
+}
+
+// repoLabelFromScopedKey extracts the repository-identity basename from a
+// repoKey\x00setID state key. The repo key is basename-shorthash, so the label
+// is the basename portion.
+func repoLabelFromScopedKey(key string) string {
+	parts := strings.Split(key, "\x00")
+	if len(parts) == 0 {
+		return ""
+	}
+	return repoLabelFromRepoKey(parts[0])
+}
+
+// repoLabelFromRepoKey returns the basename portion of a repo-identity key
+// (basename-shorthash). The short hash is always tasks.ShortHashLen hex
+// characters; if the key does not match that shape, the whole key is returned.
+func repoLabelFromRepoKey(repoKey string) string {
+	if len(repoKey) <= tasks.ShortHashLen+1 {
+		return repoKey
+	}
+	sepIdx := len(repoKey) - tasks.ShortHashLen - 1
+	if repoKey[sepIdx] != '-' {
+		return repoKey
+	}
+	for i := sepIdx + 1; i < len(repoKey); i++ {
+		c := repoKey[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return repoKey
+		}
+	}
+	return repoKey[:sepIdx]
 }
 
 func formatQueueWorkSummary(view RunView) string {
@@ -519,7 +576,7 @@ func formatBlockedLine(b BlockedItem) string {
 }
 
 // seedSpawnedRunning augments view.Running with any spawned set not already
-// present, keyed by Project+SetID. It bridges the gap between issuing a spawn
+// present, keyed by RepoLabel+SetID. It bridges the gap between issuing a spawn
 // and the drain acquiring its runtime lock: the post-spawn scan cannot yet see
 // the set as Running, so without this the next tick's diff would re-report the
 // spawn a second time.
@@ -529,7 +586,7 @@ func seedSpawnedRunning(view RunView, spawned []PickedUpSet) RunView {
 	}
 	present := runningIndex(view.Running)
 	for _, s := range spawned {
-		if _, ok := present[s.Project+"\x00"+s.SetID]; ok {
+		if _, ok := present[repoLabelOrProject(s.RepoLabel, s.Project)+"\x00"+s.SetID]; ok {
 			continue
 		}
 		view.Running = append(view.Running, s)
@@ -554,7 +611,8 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 		if setID == "" {
 			setID = "(unknown set)"
 		}
-		lines = append(lines, fmt.Sprintf("queue: %s: spawned drain for %s", p.Project, setID))
+		label := statusProjectLabel(repoLabelOrProject(p.RepoLabel, p.Project), p.WorktreeReady, p.ProjectConfigError)
+		lines = append(lines, fmt.Sprintf("queue: %s: spawned drain for %s", label, setID))
 	}
 
 	prevQueued := queuedIndex(prev.Queued)
@@ -563,7 +621,8 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 		if _, ok := prevQueued[key]; ok {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("queue: %s: ready set %s", q.Project, q.ReadySet))
+		label := statusProjectLabel(repoLabelOrProject(q.RepoLabel, q.Project), q.WorktreeReady, q.ProjectConfigError)
+		lines = append(lines, fmt.Sprintf("queue: %s: ready set %s", label, q.ReadySet))
 	}
 
 	prevBlocked := blockedIndex(prev.Blocked)
@@ -583,11 +642,11 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 
 	prevSkipped := skippedIndex(prev.Skipped)
 	currSkipped := skippedIndex(curr.Skipped)
-	for project, s := range currSkipped {
-		if _, ok := prevSkipped[project]; ok {
+	for repoLabel, s := range currSkipped {
+		if _, ok := prevSkipped[repoLabel]; ok {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("queue: %s: %s", project, s.Reason))
+		lines = append(lines, fmt.Sprintf("queue: %s: %s", repoLabel, s.Reason))
 	}
 
 	for project, msg := range curr.ScanErrors {
@@ -607,14 +666,15 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 }
 
 func formatBlockedDelta(b BlockedItem, cleared bool) string {
+	label := repoLabelOrProject(b.RepoLabel, b.Project)
 	if cleared {
 		switch b.Kind {
 		case "agent_cooldown":
 			return fmt.Sprintf("queue: agent %s cooldown cleared", b.Agent)
 		case "parked":
-			return fmt.Sprintf("queue: %s: %s unparked", b.Project, b.SetID)
+			return fmt.Sprintf("queue: %s: %s unparked", label, b.SetID)
 		default:
-			return fmt.Sprintf("queue: %s: %s backoff cleared", b.Project, b.SetID)
+			return fmt.Sprintf("queue: %s: %s backoff cleared", label, b.SetID)
 		}
 	}
 	switch b.Kind {
@@ -625,20 +685,20 @@ func formatBlockedDelta(b BlockedItem, cleared bool) string {
 		}
 		return fmt.Sprintf("queue: agent %s cooldown until=%s", b.Agent, until)
 	case "parked":
-		return fmt.Sprintf("queue: %s: %s parked reason=%s", b.Project, b.SetID, b.Reason)
+		return fmt.Sprintf("queue: %s: %s parked reason=%s", label, b.SetID, b.Reason)
 	default:
 		until := ""
 		if !b.Until.IsZero() {
 			until = b.Until.UTC().Format(time.RFC3339)
 		}
-		return fmt.Sprintf("queue: %s: %s %s until=%s", b.Project, b.SetID, b.Reason, until)
+		return fmt.Sprintf("queue: %s: %s %s until=%s", label, b.SetID, b.Reason, until)
 	}
 }
 
 func runningIndex(items []PickedUpSet) map[string]PickedUpSet {
 	out := make(map[string]PickedUpSet, len(items))
 	for _, item := range items {
-		key := item.Project + "\x00" + item.SetID
+		key := repoLabelOrProject(item.RepoLabel, item.Project) + "\x00" + item.SetID
 		out[key] = item
 	}
 	return out
@@ -647,7 +707,7 @@ func runningIndex(items []PickedUpSet) map[string]PickedUpSet {
 func queuedIndex(items []IdleProject) map[string]IdleProject {
 	out := make(map[string]IdleProject, len(items))
 	for _, item := range items {
-		key := item.Project + "\x00" + item.ReadySet
+		key := repoLabelOrProject(item.RepoLabel, item.Project) + "\x00" + item.ReadySet
 		out[key] = item
 	}
 	return out
@@ -665,19 +725,32 @@ func blockedKey(item BlockedItem) string {
 	if item.Kind == "agent_cooldown" {
 		return "agent\x00" + item.Agent
 	}
-	return item.Project + "\x00" + item.SetID + "\x00" + item.Kind
+	return repoLabelOrProject(item.RepoLabel, item.Project) + "\x00" + item.SetID + "\x00" + item.Kind
 }
 
 func skippedIndex(items []SkippedRepo) map[string]SkippedRepo {
 	out := make(map[string]SkippedRepo, len(items))
 	for _, item := range items {
-		out[item.Project] = item
+		out[repoLabelOrProject(item.RepoLabel, item.Project)] = item
 	}
 	return out
 }
 
-func formatOutcomeDelta(project, setID string, outcome tasks.DrainOutcome) string {
-	return fmt.Sprintf("queue: %s: %s outcome=%s", project, setID, outcome)
+func formatOutcomeDelta(repoLabel, setID string, outcome tasks.DrainOutcome) string {
+	return fmt.Sprintf("queue: %s: %s outcome=%s", repoLabel, setID, outcome)
+}
+
+// repoLabelOrProject returns the repository-identity label when present,
+// otherwise the picker project name. It is a convenience for callers that have
+// already derived the repo label; an empty label means "use project fallback".
+func repoLabelOrProject(repoLabel, project string) string {
+	if repoLabel != "" {
+		return repoLabel
+	}
+	if project != "" {
+		return project
+	}
+	return "(unknown project)"
 }
 
 func (s *runOutputState) emitViewTransition(out io.Writer, view RunView, eventLines []string) {

@@ -97,25 +97,27 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 		switch {
 		case dec.Err != nil:
 		case dec.Actionable():
+			repoLabel := repoLabelFromScan(dec.scan)
 			originalRuntimePath := dec.scan.RuntimePath
 			dec = prepareWorktreeDrain(d, out, dec)
 			if dec.WorktreeReady && dec.scan.RuntimePath == originalRuntimePath {
-				if inPlaceFallbackSpawned[dec.Project] {
-					fmt.Fprintf(out, "queue: %s: skip in-place fallback for %s; another set already fell back this tick\n", dec.Project, dec.TaskSetID)
+				if inPlaceFallbackSpawned[repoLabel] {
+					fmt.Fprintf(out, "queue: %s: skip in-place fallback for %s; another set already fell back this tick\n", repoLabel, dec.TaskSetID)
 					continue
 				}
-				inPlaceFallbackSpawned[dec.Project] = true
+				inPlaceFallbackSpawned[repoLabel] = true
 			}
 			spawn, err := SpawnWithResult(d, dec)
 			if err != nil {
-				fmt.Fprintf(out, "queue: %s: spawn %s: %v\n", dec.Project, dec.TaskSetID, err)
+				fmt.Fprintf(out, "queue: %s: spawn %s: %v\n", repoLabel, dec.TaskSetID, err)
 				continue
 			}
 			if err := recordDrainPane(d, dec, spawn.PaneID, "supervisor"); err != nil {
-				fmt.Fprintf(out, "queue: %s: record drain pane %s: %v\n", dec.Project, dec.TaskSetID, err)
+				fmt.Fprintf(out, "queue: %s: record drain pane %s: %v\n", repoLabel, dec.TaskSetID, err)
 			}
-			fmt.Fprintf(out, "queue: %s: spawned drain for %s\n", dec.Project, dec.TaskSetID)
-			spawned = append(spawned, PickedUpSet{Project: dec.Project, SetID: dec.TaskSetID, WorktreeReady: dec.WorktreeReady})
+			label := statusProjectLabel(repoLabel, dec.WorktreeReady, dec.ProjectConfigError)
+			fmt.Fprintf(out, "queue: %s: spawned drain for %s\n", label, dec.TaskSetID)
+			spawned = append(spawned, PickedUpSet{Project: dec.Project, RepoLabel: repoLabel, SetID: dec.TaskSetID, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError})
 		}
 	}
 

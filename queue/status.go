@@ -12,6 +12,7 @@ import (
 // PickedUpSet is a live in-flight drain derived from a runtime lock.
 type PickedUpSet struct {
 	Project            string
+	RepoLabel          string
 	SetID              string
 	RuntimePath        string
 	PID                int
@@ -22,9 +23,10 @@ type PickedUpSet struct {
 
 // IdleProject is a configured project with no live runtime lock.
 type IdleProject struct {
-	Project  string
-	Waiting  string
-	ReadySet string
+	Project   string
+	RepoLabel string
+	Waiting   string
+	ReadySet  string
 	// AwaitingApprovalSetID is the first Task-set in AWAITING-APPROVAL state
 	// (awaiting human sign-off). Non-empty only when Reason is "awaiting approval".
 	AwaitingApprovalSetID string
@@ -42,8 +44,9 @@ type IdleProject struct {
 // resolve no representative checkout (a bare repo with no Trunk worktree and no
 // per-set Worktree binding). It is reported, never scheduled (ADR-0035).
 type SkippedRepo struct {
-	Project string
-	Reason  string
+	Project   string
+	RepoLabel string
+	Reason    string
 }
 
 // StatusSnapshot is the pure data model for `pop queue status`.
@@ -90,9 +93,10 @@ func statusFromDecisions(d *Deps, decisions []Decision, state *DaemonState) (Sta
 	var snap StatusSnapshot
 	snap.DaemonState = state
 	for _, dec := range decisions {
+		repoLabel := repoLabelFromScan(dec.scan)
 		if dec.Busy {
 			lock := dec.lockStatus
-			picked := PickedUpSet{Project: dec.Project, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError}
+			picked := PickedUpSet{Project: dec.Project, RepoLabel: repoLabel, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError}
 			if lock != nil {
 				picked.RuntimePath = lock.RuntimePath
 				if lock.Metadata != nil {
@@ -106,14 +110,14 @@ func statusFromDecisions(d *Deps, decisions []Decision, state *DaemonState) (Sta
 			continue
 		}
 		if dec.Err != nil {
-			snap.Idle = append(snap.Idle, IdleProject{Project: dec.Project, Waiting: "error", Reason: dec.Err.Error(), WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError})
+			snap.Idle = append(snap.Idle, IdleProject{Project: dec.Project, RepoLabel: repoLabel, Waiting: "error", Reason: dec.Err.Error(), WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError})
 			continue
 		}
 		if dec.TaskSetID == "" && dec.Reason == repoScanReason {
-			snap.Skipped = append(snap.Skipped, SkippedRepo{Project: dec.Project, Reason: dec.Reason})
+			snap.Skipped = append(snap.Skipped, SkippedRepo{Project: dec.Project, RepoLabel: repoLabel, Reason: dec.Reason})
 			continue
 		}
-		idle := IdleProject{Project: dec.Project, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError, AwaitingApprovalSetID: dec.AwaitingApprovalSetID, BlockedSetID: dec.BlockedSetID, WaitUntil: dec.WaitUntil}
+		idle := IdleProject{Project: dec.Project, RepoLabel: repoLabel, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError, AwaitingApprovalSetID: dec.AwaitingApprovalSetID, BlockedSetID: dec.BlockedSetID, WaitUntil: dec.WaitUntil}
 		if dec.TaskSetID != "" {
 			idle.Waiting = "ready"
 			idle.ReadySet = dec.TaskSetID
@@ -132,6 +136,15 @@ func statusFromDecisions(d *Deps, decisions []Decision, state *DaemonState) (Sta
 func RenderStatus(out io.Writer, snap StatusSnapshot) {
 	view := BuildRunView(snap, time.Now())
 	RenderRunBaseline(out, view)
+}
+
+// repoLabelFromScan returns the repository-identity basename for a scan when the
+// common directory was resolved, falling back to the picker project name.
+func repoLabelFromScan(scan projectScan) string {
+	if scan.RepoCommonDir != "" {
+		return tasks.RepoBasename(scan.RepoCommonDir)
+	}
+	return scan.Name
 }
 
 func statusProjectLabel(project string, worktreeReady bool, configError string) string {

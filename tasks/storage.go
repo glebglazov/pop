@@ -14,8 +14,8 @@ import (
 // repoMarkerFile is the reverse-lookup marker written into each Task storage directory.
 const repoMarkerFile = "repo.json"
 
-// shortHashLen is the number of hex characters retained from the identity hash for directory naming.
-const shortHashLen = 12
+// ShortHashLen is the number of hex characters retained from the identity hash for directory naming.
+const ShortHashLen = 12
 
 // RepoMarker is persisted as repo.json inside a Task storage directory.
 type RepoMarker struct {
@@ -98,8 +98,8 @@ func identityFromCommonDir(d *Deps, gitCwd, commonDir string) (*RepositoryIdenti
 	}
 
 	sum := sha256.Sum256([]byte(canon))
-	shortHash := fmt.Sprintf("%x", sum)[:shortHashLen]
-	basename := repoBasename(canon)
+	shortHash := fmt.Sprintf("%x", sum)[:ShortHashLen]
+	basename := RepoBasename(canon)
 
 	storageDir := filepath.Join(popDataDirWith(d), "repos", fmt.Sprintf("%s-%s", basename, shortHash))
 	return &RepositoryIdentity{
@@ -111,8 +111,8 @@ func identityFromCommonDir(d *Deps, gitCwd, commonDir string) (*RepositoryIdenti
 	}, nil
 }
 
-// repoBasename derives a human-readable repository name from a canonical git common directory.
-func repoBasename(commonDir string) string {
+// RepoBasename derives a human-readable repository name from a canonical git common directory.
+func RepoBasename(commonDir string) string {
 	base := filepath.Base(commonDir)
 	switch base {
 	case ".git", ".bare":
