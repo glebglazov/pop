@@ -20,6 +20,7 @@ import (
 const (
 	lessonContinue = "continue — your approach stood, finish and close out the sentinel"
 	lessonReassess = "reassess"
+	lessonResume   = "resume — this attempt was cut off mid-flight (not a failure). The runtime checkout already holds the partial changes; read the uncommitted working-tree diff first and continue from it."
 )
 
 // priorAttempt is one in-scope prior attempt of the same task, summarized for
@@ -41,6 +42,8 @@ type priorAttempt struct {
 func attemptLesson(outcome, reason string, exitCode int) string {
 	r := strings.TrimSpace(reason)
 	switch {
+	case outcome == streamOutcomeInterrupted || outcome == streamOutcomeQuotaPaused:
+		return lessonResume
 	case outcome == streamOutcomeTimedOut:
 		return lessonContinue
 	case exitCode != 0:
@@ -102,9 +105,11 @@ func buildPriorAttemptDigest(d *Deps, taskSetDir, taskFile string) string {
 		if !cut.IsZero() && !header.StartTime.After(cut) {
 			continue
 		}
-		// Only failures teach a retry; completed/interrupted/quota-paused
-		// attempts are not lessons about the approach.
-		if footer.Outcome != streamOutcomeFailed && footer.Outcome != streamOutcomeTimedOut {
+		// Captured attempts from failed, timed-out, interrupted, and quota-
+		// paused runs all feed a retry. Completed attempts are intentionally
+		// excluded: they have no lesson to teach (ADR 0040/ADR 0089).
+		if footer.Outcome != streamOutcomeFailed && footer.Outcome != streamOutcomeTimedOut &&
+			footer.Outcome != streamOutcomeInterrupted && footer.Outcome != streamOutcomeQuotaPaused {
 			continue
 		}
 		attempts = append(attempts, priorAttempt{

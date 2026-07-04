@@ -616,3 +616,134 @@ type writeOrderTracker struct {
 	events []string
 	last   string
 }
+
+// customAgentPrompt extracts the prompt from a custom-agent invocation captured
+// by captureAgentRunner. Custom agents are invoked as:
+//   sh -c '<agentCmd> "$@"' task-agent <prompt>
+func customAgentPrompt(args []string) string {
+	if len(args) >= 4 {
+		return args[3]
+	}
+	return ""
+}
+
+func TestRunTaskResumesInterruptedAttemptOnFirstTry(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	start := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+	writeTimingStreamRecords(t, streamDir, "attempt-001.jsonl.gz",
+		streamHeaderRecord{Type: "header", Agent: "claude", Attempt: 1, StartTime: start},
+		[]streamEventRecord{claudeAssistantEvent(10, "Partial work from the interrupted attempt.")},
+		streamFooterRecord{Type: "footer", Outcome: streamOutcomeInterrupted, DurationMS: 100, Reason: "", ExitCode: 143})
+
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "./agent.sh")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.argLists) != 1 {
+		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
+	}
+	prompt := customAgentPrompt(runner.argLists[0])
+	if !strings.Contains(prompt, lessonResume) {
+		t.Fatalf("attempt 1 prompt missing resume lesson:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Partial work from the interrupted attempt.") {
+		t.Fatalf("attempt 1 prompt missing prior narrative:\n%s", prompt)
+	}
+}
+
+func TestRunTaskResumesQuotaPausedAttemptOnFirstTry(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	start := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+	writeTimingStreamRecords(t, streamDir, "attempt-001.jsonl.gz",
+		streamHeaderRecord{Type: "header", Agent: "claude", Attempt: 1, StartTime: start},
+		[]streamEventRecord{claudeAssistantEvent(10, "Partial work before the quota pause.")},
+		streamFooterRecord{Type: "footer", Outcome: streamOutcomeQuotaPaused, DurationMS: 100, Reason: "", ExitCode: 0})
+
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "./agent.sh")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.argLists) != 1 {
+		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
+	}
+	prompt := customAgentPrompt(runner.argLists[0])
+	if !strings.Contains(prompt, lessonResume) {
+		t.Fatalf("attempt 1 prompt missing resume lesson:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Partial work before the quota pause.") {
+		t.Fatalf("attempt 1 prompt missing prior narrative:\n%s", prompt)
+	}
+}
+
+func TestRunTaskFreshTaskPromptHasNoCarry(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "./agent.sh")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.argLists) != 1 {
+		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
+	}
+	prompt := customAgentPrompt(runner.argLists[0])
+	if strings.Contains(prompt, "Prior attempts on THIS task") {
+		t.Fatalf("fresh task prompt should not contain prior-attempt digest:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Sibling tasks already completed") {
+		t.Fatalf("fresh task prompt should not contain sibling briefs:\n%s", prompt)
+	}
+}
+
+func TestRunTaskReopenedTaskPromptHasNoPriorDigest(t *testing.T) {
+	env := setupFailedTaskFixture(t)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	preReset := time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC)
+	writeTimingStreamRecords(t, streamDir, "attempt-001.jsonl.gz",
+		streamHeaderRecord{Type: "header", Agent: "claude", Attempt: 1, StartTime: preReset},
+		[]streamEventRecord{claudeAssistantEvent(10, "Abandoned work before the reset.")},
+		streamFooterRecord{Type: "footer", Outcome: streamOutcomeInterrupted, DurationMS: 100, Reason: "", ExitCode: 143})
+
+	if _, err := ResetTaskWith(env.deps(), nil, nil, ResetTaskOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		TaskPath:     env.demoTaskRef(t, "01-a.md"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "./agent.sh")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.argLists) != 1 {
+		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
+	}
+	prompt := customAgentPrompt(runner.argLists[0])
+	if strings.Contains(prompt, "Prior attempts on THIS task") {
+		t.Fatalf("reopened task prompt should not contain pre-reset digest:\n%s", prompt)
+	}
+}

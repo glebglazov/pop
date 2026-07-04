@@ -340,19 +340,21 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	var streamPaths []string
 	for attempt := 1; attempt <= maxTries; attempt++ {
 		prompt := basePrompt
-		if attempt > 1 {
-			// A retry carries two feeds forward so it converges instead of
-			// repeating (ADR 0040): briefs of sibling tasks already completed in
-			// the set (cross-task orientation), then this task's own prior-attempt
-			// story. Both are harness-built, never a pointer to a raw stream (ADR
-			// 0020).
-			var carry strings.Builder
-			if briefs := formatSiblingCompletedBriefs(d, sel.Manifest); briefs != "" {
-				carry.WriteString("\n" + briefs)
-			}
-			if digest := buildPriorAttemptDigest(d, sel.Manifest.Dir, sel.TaskFile); digest != "" {
-				carry.WriteString("\n" + digest)
-			}
+		// Carry two harness-built feeds forward whenever they have content so
+		// a retry converges instead of repeating (ADR 0040/ADR 0089): briefs of
+		// sibling tasks already completed in the set (cross-task orientation),
+		// then this task's own prior-attempt story. They fire on attempt 1 when
+		// non-empty, which is how a resumed interrupted/quota-paused task sees
+		// its own context immediately. Both are always harness-built, never a
+		// pointer to a raw stream (ADR 0020).
+		var carry strings.Builder
+		if briefs := formatSiblingCompletedBriefs(d, sel.Manifest); briefs != "" {
+			carry.WriteString("\n" + briefs)
+		}
+		if digest := buildPriorAttemptDigest(d, sel.Manifest.Dir, sel.TaskFile); digest != "" {
+			carry.WriteString("\n" + digest)
+		}
+		if carry.Len() > 0 {
 			prompt = basePrompt + carry.String()
 		}
 		invocation, err := buildInvocation(prompt)

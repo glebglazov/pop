@@ -25,6 +25,9 @@ func TestAttemptLessonMapsEachOutcomeReasonClass(t *testing.T) {
 		{"empty output reassesses", streamOutcomeFailed, "empty agent output", 0, lessonReassess},
 		{"no reason reassesses", streamOutcomeFailed, "", 0, lessonReassess},
 		{"agent TASK_FAILED pivots with its reason", streamOutcomeFailed, "schema migration is incompatible", 0, "pivot/reassess: schema migration is incompatible"},
+		{"interrupted attempt resumes", streamOutcomeInterrupted, "", 0, lessonResume},
+		{"interrupted attempt resumes despite non-zero exit", streamOutcomeInterrupted, "", 143, lessonResume},
+		{"quota-paused attempt resumes", streamOutcomeQuotaPaused, "", 0, lessonResume},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -114,5 +117,79 @@ func TestBuildPriorAttemptDigestEmptyWhenNoStreams(t *testing.T) {
 	dir := t.TempDir()
 	if digest := buildPriorAttemptDigest(defaultDeps, dir, "01-a.md"); digest != "" {
 		t.Fatalf("expected empty digest with no streams, got:\n%s", digest)
+	}
+}
+
+func TestBuildPriorAttemptDigestInterruptedCarriesResumeLesson(t *testing.T) {
+	dir := t.TempDir()
+	streamDir := taskStreamDir(dir, "01-a.md")
+	start := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+	writeTimingStreamRecords(t, streamDir, "attempt-001.jsonl.gz",
+		streamHeaderRecord{Type: "header", Agent: "claude", Attempt: 1, StartTime: start},
+		[]streamEventRecord{
+			claudeAssistantEvent(10, "Started editing the config parser."),
+			claudeToolEvent(20, "Bash", "git diff"),
+			claudeAssistantEvent(30, "Partial diff looks right; continuing."),
+		},
+		streamFooterRecord{Type: "footer", Outcome: streamOutcomeInterrupted, DurationMS: 300000, Reason: "", ExitCode: 143})
+
+	digest := buildPriorAttemptDigest(defaultDeps, dir, "01-a.md")
+	if digest == "" {
+		t.Fatal("expected a digest for a prior interrupted attempt")
+	}
+	if !strings.Contains(digest, "Attempt 1 — "+lessonResume) {
+		t.Fatalf("expected resume lesson on attempt 1, got:\n%s", digest)
+	}
+	if !strings.Contains(digest, "partial changes") || !strings.Contains(digest, "uncommitted working-tree diff") {
+		t.Fatalf("expected resume lesson to point at working-tree diff, got:\n%s", digest)
+	}
+	if !strings.Contains(digest, "Partial diff looks right; continuing.") {
+		t.Fatalf("expected narrative to be included, got:\n%s", digest)
+	}
+}
+
+func TestBuildPriorAttemptDigestQuotaPausedCarriesResumeLesson(t *testing.T) {
+	dir := t.TempDir()
+	streamDir := taskStreamDir(dir, "01-a.md")
+	start := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+	writeTimingStreamRecords(t, streamDir, "attempt-001.jsonl.gz",
+		streamHeaderRecord{Type: "header", Agent: "claude", Attempt: 1, StartTime: start},
+		[]streamEventRecord{
+			claudeAssistantEvent(10, "Opened the renderer file."),
+			claudeAssistantEvent(20, "Added the new lesson constant."),
+		},
+		streamFooterRecord{Type: "footer", Outcome: streamOutcomeQuotaPaused, DurationMS: 200000, Reason: "", ExitCode: 0})
+
+	digest := buildPriorAttemptDigest(defaultDeps, dir, "01-a.md")
+	if digest == "" {
+		t.Fatal("expected a digest for a prior quota-paused attempt")
+	}
+	if !strings.Contains(digest, "Attempt 1 — "+lessonResume) {
+		t.Fatalf("expected resume lesson on attempt 1, got:\n%s", digest)
+	}
+	if !strings.Contains(digest, "Added the new lesson constant.") {
+		t.Fatalf("expected narrative to be included, got:\n%s", digest)
+	}
+}
+
+func TestBuildPriorAttemptDigestEmptyWhenAllPriorsPrecedeReset(t *testing.T) {
+	dir := t.TempDir()
+	streamDir := taskStreamDir(dir, "01-a.md")
+
+	preReset := time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC)
+	resetAt := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+
+	writeTimingStreamRecords(t, streamDir, "attempt-001.jsonl.gz",
+		streamHeaderRecord{Type: "header", Agent: "claude", Attempt: 1, StartTime: preReset},
+		[]streamEventRecord{claudeAssistantEvent(10, "Abandoned line of attack from before the reset.")},
+		streamFooterRecord{Type: "footer", Outcome: streamOutcomeInterrupted, DurationMS: 100, Reason: "", ExitCode: 143})
+
+	progress := resetAt.Format(time.RFC3339) + " [01-a.md] RESET\nreset demo/01-a to open (was interrupted)\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "progress.txt"), []byte(progress), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if digest := buildPriorAttemptDigest(defaultDeps, dir, "01-a.md"); digest != "" {
+		t.Fatalf("expected empty digest when all priors precede the latest reset, got:\n%s", digest)
 	}
 }
