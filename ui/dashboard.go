@@ -295,17 +295,8 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		// Help overlay: esc dismisses, all other keys are swallowed
-		if d.showHelp {
-			if key.Matches(msg, dashboardKeys.Quit) {
-				d.showHelp = false
-			}
-			return d, nil
-		}
-
-		// Toggle help overlay
-		if key.Matches(msg, dashboardKeys.Help) {
-			d.showHelp = true
+		// Help overlay: toggle, dismiss, or swallow keys while open.
+		if ToggleHelp(&d.showHelp, msg) {
 			return d, nil
 		}
 
@@ -694,9 +685,9 @@ func (d *MonitorDashboard) frameSpec() Frame {
 
 // buildHints returns the hints string based on the current mode.
 func (d *MonitorDashboard) buildHints() string {
-	hints := "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel"
+	hints := "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel · C-h help"
 	if d.pickerMode {
-		hints = "  Enter select · F follow view · Esc cancel"
+		hints = "  Enter select · F follow view · Esc cancel · C-h help"
 		switch d.quickAccessModifier {
 		case "alt":
 			hints += " · A-1..9 quick select"
@@ -770,15 +761,8 @@ func (d *MonitorDashboard) View() tea.View {
 	return v
 }
 
-func (d *MonitorDashboard) viewHelp() string {
-	var b strings.Builder
-
-	type helpEntry struct {
-		key  string
-		desc string
-	}
-
-	entries := []helpEntry{
+func (d *MonitorDashboard) helpEntries() []HelpEntry {
+	return []HelpEntry{
 		{"↑/↓ C-p/C-n", "Navigate"},
 		{"Enter", "Open and clear unread"},
 		{"Shift+Enter / p", "Peek (open without clearing)"},
@@ -787,36 +771,11 @@ func (d *MonitorDashboard) viewHelp() string {
 		{"F", "Toggle follow view"},
 		{"x", "Unmonitor pane"},
 		{"← / Esc", "Back / quit"},
-		{"F1", "Help"},
 	}
+}
 
-	maxKeyWidth := 0
-	for _, e := range entries {
-		if w := lipgloss.Width(e.key); w > maxKeyWidth {
-			maxKeyWidth = w
-		}
-	}
-
-	var helpLines []string
-	for _, e := range entries {
-		padding := maxKeyWidth - lipgloss.Width(e.key)
-		helpLines = append(helpLines, "  "+e.key+strings.Repeat(" ", padding)+"   "+e.desc)
-	}
-
-	emptyLines := d.height - len(helpLines)
-	for i := 0; i < emptyLines; i++ {
-		b.WriteString("\n")
-	}
-
-	for _, line := range helpLines {
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-
-	writeInputBox(&b, d.width, " Help")
-	b.WriteString(hintStyle.Render("  Esc back"))
-
-	return b.String()
+func (d *MonitorDashboard) viewHelp() string {
+	return RenderHelpOverlay("Help", d.helpEntries(), d.width, d.height)
 }
 
 func (d *MonitorDashboard) viewDashboard() string {
@@ -993,7 +952,6 @@ type dashboardKeyMap struct {
 	ToggleClearUnread key.Binding
 	Back              key.Binding
 	MarkUnread        key.Binding
-	Help              key.Binding
 }
 
 var dashboardKeys = dashboardKeyMap{
@@ -1029,8 +987,5 @@ var dashboardKeys = dashboardKeyMap{
 	),
 	MarkUnread: key.NewBinding(
 		key.WithKeys("ctrl+a"),
-	),
-	Help: key.NewBinding(
-		key.WithKeys("f1"),
 	),
 }

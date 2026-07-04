@@ -6,7 +6,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/debug"
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
@@ -329,17 +328,8 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		// Help overlay: esc dismisses, all other keys are swallowed
-		if p.showHelp {
-			if key.Matches(msg, keys.Quit) {
-				p.showHelp = false
-			}
-			return p, nil
-		}
-
-		// Toggle help overlay
-		if key.Matches(msg, keys.Help) {
-			p.showHelp = true
+		// Help overlay: toggle, dismiss, or swallow keys while open.
+		if ToggleHelp(&p.showHelp, msg) {
 			return p, nil
 		}
 
@@ -573,7 +563,7 @@ func (p *Picker) filter() {
 
 // buildHints returns the hints string based on enabled features
 func (p *Picker) buildHints() string {
-	return "  Enter open · Esc quit · F1 help"
+	return "  Enter open · Esc quit · C-h help"
 }
 
 // frameSpec builds the Frame describing the picker's screen chrome: the
@@ -706,15 +696,8 @@ func (p *Picker) View() tea.View {
 	return v
 }
 
-func (p *Picker) viewHelp() string {
-	var b strings.Builder
-
-	type helpEntry struct {
-		key  string
-		desc string
-	}
-
-	entries := []helpEntry{
+func (p *Picker) helpEntries() []HelpEntry {
+	entries := []HelpEntry{
 		{"↑/↓ C-p/C-n", "Navigate"},
 		{"C-b/C-f", "Page up / down"},
 		{"C-u", "Clear filter"},
@@ -723,36 +706,38 @@ func (p *Picker) viewHelp() string {
 	}
 
 	if p.showKillSession && !p.isKeyOverridden("ctrl+k") {
-		entries = append(entries, helpEntry{"C-k", "Kill tmux session"})
+		entries = append(entries, HelpEntry{"C-k", "Kill tmux session"})
 	}
 	if p.showReset && !p.isKeyOverridden("ctrl+r") {
-		entries = append(entries, helpEntry{"C-r", "Reset history"})
+		entries = append(entries, HelpEntry{"C-r", "Reset history"})
 	}
 	if p.showOpenWindow && !p.isKeyOverridden("ctrl+o") {
-		entries = append(entries, helpEntry{"C-o", "Open in window"})
+		entries = append(entries, HelpEntry{"C-o", "Open in window"})
 	}
 	if p.showCreateWorktree && !p.isKeyOverridden("ctrl+a") {
-		entries = append(entries, helpEntry{"C-a", "Create worktree"})
+		entries = append(entries, HelpEntry{"C-a", "Create worktree"})
 	}
 	if p.showSetPreferred && !p.isKeyOverridden("ctrl+w") {
-		entries = append(entries, helpEntry{"C-w", "Set preferred workbench"})
+		entries = append(entries, HelpEntry{"C-w", "Set preferred workbench"})
 	}
 	if p.showDelete && !p.isKeyOverridden("ctrl+d") {
-		entries = append(entries, helpEntry{"C-d", "Delete"})
+		entries = append(entries, HelpEntry{"C-d", "Delete"})
 	}
-	entries = append(entries, helpEntry{"C-y", "Yank path to pane"})
+	if !p.isKeyOverridden("ctrl+y") {
+		entries = append(entries, HelpEntry{"C-y", "Yank path to pane"})
+	}
 	if p.showDelete && !p.isKeyOverridden("ctrl+x") {
-		entries = append(entries, helpEntry{"C-x", "Force delete"})
+		entries = append(entries, HelpEntry{"C-x", "Force delete"})
 	}
 	switch p.quickAccessModifier {
 	case "alt":
-		entries = append(entries, helpEntry{"A-1..9", "Quick select"})
+		entries = append(entries, HelpEntry{"A-1..9", "Quick select"})
 	case "ctrl":
-		entries = append(entries, helpEntry{"C-1..9", "Quick select"})
+		entries = append(entries, HelpEntry{"C-1..9", "Quick select"})
 	}
 
 	for _, cc := range p.customCommands {
-		entries = append(entries, helpEntry{formatKeyHint(cc.Binding), cc.Label})
+		entries = append(entries, HelpEntry{formatKeyHint(cc.Binding), cc.Label})
 	}
 
 	iconsSeen := make(map[string]bool)
@@ -762,41 +747,19 @@ func (p *Picker) viewHelp() string {
 		}
 	}
 	if len(iconsSeen) > 0 {
-		entries = append(entries, helpEntry{"", ""})
+		entries = append(entries, HelpEntry{"", ""})
 		for _, legend := range p.iconLegend {
 			if iconsSeen[legend.icon] {
-				entries = append(entries, helpEntry{legend.icon, legend.desc})
+				entries = append(entries, HelpEntry{legend.icon, legend.desc})
 			}
 		}
 	}
 
-	maxKeyWidth := 0
-	for _, e := range entries {
-		if w := lipgloss.Width(e.key); w > maxKeyWidth {
-			maxKeyWidth = w
-		}
-	}
+	return entries
+}
 
-	var helpLines []string
-	for _, e := range entries {
-		padding := maxKeyWidth - lipgloss.Width(e.key)
-		helpLines = append(helpLines, "  "+e.key+strings.Repeat(" ", padding)+"   "+e.desc)
-	}
-
-	emptyLines := p.height - len(helpLines)
-	for i := 0; i < emptyLines; i++ {
-		b.WriteString("\n")
-	}
-
-	for _, line := range helpLines {
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-
-	writeInputBox(&b, p.width, " Help")
-	b.WriteString(hintStyle.Render("  Esc back"))
-
-	return b.String()
+func (p *Picker) viewHelp() string {
+	return RenderHelpOverlay("Help", p.helpEntries(), p.width, p.height)
 }
 
 func (p *Picker) viewProject() string {
@@ -834,7 +797,6 @@ type keyMap struct {
 	Reset          key.Binding
 	OpenWindow     key.Binding
 	ClearInput     key.Binding
-	Help           key.Binding
 	YankPath       key.Binding
 	CreateWorktree key.Binding
 	SetPreferred   key.Binding
@@ -876,9 +838,6 @@ var keys = keyMap{
 	),
 	ClearInput: key.NewBinding(
 		key.WithKeys("alt+backspace", "ctrl+u"),
-	),
-	Help: key.NewBinding(
-		key.WithKeys("f1"),
 	),
 	YankPath: key.NewBinding(
 		key.WithKeys("ctrl+y"),

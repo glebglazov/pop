@@ -97,7 +97,7 @@ func TestBuildHintsShowsHelp(t *testing.T) {
 
 	hints := picker.buildHints()
 
-	if !containsSubstring(hints, "F1 help") {
+	if !containsSubstring(hints, "C-h help") {
 		t.Errorf("hints should contain help shortcut, got: %q", hints)
 	}
 	if !containsSubstring(hints, "Enter open") {
@@ -211,26 +211,40 @@ func TestHelpOverlayToggle(t *testing.T) {
 		t.Fatal("showHelp should be false initially")
 	}
 
-	// F1 activates help
-	helpMsg := tea.KeyPressMsg{Code: tea.KeyF1}
-	if key.Matches(helpMsg, keys.Help) {
-		picker.Update(helpMsg)
-		if !picker.showHelp {
-			t.Error("showHelp should be true after F1")
-		}
-	} else {
-		// Manually set to test the rest of the flow
-		picker.showHelp = true
+	// C-h activates help
+	picker.Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !picker.showHelp {
+		t.Error("showHelp should be true after C-h")
+	}
+
+	// second C-h dismisses help
+	picker.Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if picker.showHelp {
+		t.Error("showHelp should be false after second C-h")
 	}
 
 	// esc in help mode dismisses help (doesn't quit)
-	escMsg := tea.KeyPressMsg{Code: tea.KeyEscape}
-	picker.Update(escMsg)
+	picker.showHelp = true
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if picker.showHelp {
 		t.Error("showHelp should be false after esc in help mode")
 	}
 	if picker.result.Action == ActionCancel {
 		t.Error("esc in help mode should not quit")
+	}
+}
+
+func TestF1DoesNothing(t *testing.T) {
+	items := []Item{{Name: "test", Path: "/test"}}
+	picker := NewPicker(items)
+	picker.Init()
+
+	picker.Update(tea.KeyPressMsg{Code: tea.KeyF1})
+	if picker.showHelp {
+		t.Error("F1 should not open help")
+	}
+	if picker.result.Action != 0 {
+		t.Errorf("F1 should not trigger an action, got %v", picker.result.Action)
 	}
 }
 
@@ -306,9 +320,12 @@ func TestHelpViewRendersContent(t *testing.T) {
 		t.Error("help view should contain Delete")
 	}
 
-	// Should show "Esc back" hint
-	if !containsSubstring(view, "Esc back") {
-		t.Error("help view should show 'Esc back' hint")
+	// Should show help footer hint
+	if !containsSubstring(view, "C-h toggle") {
+		t.Error("help view should show 'C-h toggle' footer")
+	}
+	if !containsSubstring(view, "Esc close") {
+		t.Error("help view should show 'Esc close' footer")
 	}
 
 	// Should show Help title

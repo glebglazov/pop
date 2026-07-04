@@ -572,8 +572,8 @@ func TestDashboardHelpOverlay(t *testing.T) {
 	panes := []AttentionPane{{PaneID: "%1", Session: "s1"}}
 	d := newMonitorDashboard(panes, AttentionCallbacks{})
 
-	t.Run("f1 shows help", func(t *testing.T) {
-		m, _ := d.Update(tea.KeyPressMsg{Code: tea.KeyF1})
+	t.Run("C-h shows help", func(t *testing.T) {
+		m, _ := d.Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 		d = m.(*MonitorDashboard)
 		if !d.showHelp {
 			t.Error("expected showHelp = true")
