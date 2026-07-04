@@ -1150,14 +1150,15 @@ func (d *detailView) syncManifest(m *tasks.Manifest, row *tasks.Row) {
 	d.list.ReplaceItems(items)
 }
 
-// dashboardColumns holds the task-set table's per-column widths, precomputed over
-// the full (filtered) row set, plus the terminal width used to truncate cells.
-// The List's Cell closure closes over a pointer to it so a reload or filter can
-// update the widths in place without rebuilding the list — matching the house
-// pattern of pickerCell closing over its picker.
+// dashboardColumns holds the task-set table's natural column widths (derived from
+// content) and the fitted widths clamped to the terminal budget. The List's Cell
+// closure closes over a pointer to it so a reload or filter can update widths in
+// place without rebuilding the list — matching the house pattern of pickerCell
+// closing over its picker.
 type dashboardColumns struct {
-	widths []int
-	width  int
+	natural []int
+	widths  []int
+	width   int
 }
 
 type QueueDashboard struct {
@@ -1181,36 +1182,67 @@ type QueueDashboard struct {
 	filterInput ui.TextField
 	pendingG    bool
 	statusMsg   string
+	showHelp    bool
 }
 
 func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
 	if d == nil {
 		d = DefaultDeps()
 	}
-	cols := &dashboardColumns{widths: dashboardColumnWidths(snap.Rows)}
+	cols := &dashboardColumns{}
+	cols.syncNatural(snap.Rows)
 	list := ui.NewList(snap.Rows, ui.Opts[DashboardRow]{
 		Key:    func(r DashboardRow) string { return r.cursorKey },
 		Anchor: ui.AnchorTop,
 		Cell: func(r DashboardRow, _ ui.RowState) string {
-			w := cols.width
-			if w > 2 {
-				w -= 2 // the List owns the 2-char cursor / pad prefix
-			}
+			w := dashboardListCellBudget(cols.width)
 			return ui.TruncateString(dashboardTableLine(dashboardRowValues(r), cols.widths), w)
 		},
 	})
 	return QueueDashboard{d: d, cfg: cfg, snap: snap, allRows: snap.Rows, list: list, cols: cols}
 }
 
-// dashboardTableHeaders is the fixed column header row (the trailing empty header
-// backs the badges column).
-func dashboardTableHeaders() []string {
-	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", "DRAIN", ""}
+const (
+	dashboardColProject = iota
+	dashboardColSetID
+	dashboardColFlags
+	dashboardColStatus
+	dashboardColWorktree
+	dashboardColDrain
+)
+
+const dashboardColSep = 2
+
+// dashboardColShrinkOrder lists elastic columns in shrink priority: WORKTREE and
+// DRAIN give way first; FLAGS is intentionally absent and never shrinks.
+var dashboardColShrinkOrder = []int{
+	dashboardColDrain,
+	dashboardColWorktree,
+	dashboardColStatus,
+	dashboardColSetID,
+	dashboardColProject,
 }
 
-// dashboardColumnWidths precomputes each column's width over the full row set,
-// floored at the header label width — the same derivation the hand-rolled table
-// did per render, lifted out so the Cell closure can share it.
+// dashboardTableHeaders is the fixed column header row.
+func dashboardTableHeaders() []string {
+	return []string{"PROJECT", "TASK SET", "FLAGS", "STATUS", "WORKTREE", "DRAIN"}
+}
+
+// dashboardRowFlags renders compact, protected queue flags for the FLAGS column:
+// AD (auto-drain) and OR (orphaned).
+func dashboardRowFlags(row DashboardRow) string {
+	var flags []string
+	if row.AutoDrain {
+		flags = append(flags, "AD")
+	}
+	if row.Orphaned {
+		flags = append(flags, "OR")
+	}
+	return strings.Join(flags, " ")
+}
+
+// dashboardColumnWidths precomputes each column's natural width over the full row
+// set, floored at the header label width.
 func dashboardColumnWidths(rows []DashboardRow) []int {
 	headers := dashboardTableHeaders()
 	widths := make([]int, len(headers))
@@ -1227,6 +1259,77 @@ func dashboardColumnWidths(rows []DashboardRow) []int {
 	return widths
 }
 
+func dashboardTableLineWidth(widths []int) int {
+	if len(widths) == 0 {
+		return 0
+	}
+	total := 0
+	for _, w := range widths {
+		total += w
+	}
+	return total + dashboardColSep*(len(widths)-1)
+}
+
+// dashboardFitColumnWidths shrinks elastic columns until the table fits budget.
+// FLAGS is protected; when budget is still exceeded after shrinking, cells are
+// truncated at render time via padDashboardCell.
+func dashboardFitColumnWidths(natural []int, budget int) []int {
+	if budget <= 0 || len(natural) == 0 {
+		return append([]int(nil), natural...)
+	}
+	widths := append([]int(nil), natural...)
+	headers := dashboardTableHeaders()
+	mins := make([]int, len(headers))
+	for i, h := range headers {
+		mins[i] = len(h)
+	}
+	for dashboardTableLineWidth(widths) > budget {
+		shrunk := false
+		for _, col := range dashboardColShrinkOrder {
+			if widths[col] > mins[col] {
+				widths[col]--
+				shrunk = true
+				break
+			}
+		}
+		if !shrunk {
+			break
+		}
+	}
+	return widths
+}
+
+// dashboardListCellBudget is the visible width available to a List row's table
+// cells after the List's 2-char cursor / pad prefix.
+func dashboardListCellBudget(termWidth int) int {
+	if termWidth > 2 {
+		return termWidth - 2
+	}
+	return termWidth
+}
+
+// dashboardTableBodyBudget is the visible width available to a table line that
+// carries a 2-char body indent ("  " prefix before the cells).
+func dashboardTableBodyBudget(termWidth int) int {
+	if termWidth > 2 {
+		return termWidth - 2
+	}
+	return termWidth
+}
+
+func (c *dashboardColumns) syncNatural(rows []DashboardRow) {
+	c.natural = dashboardColumnWidths(rows)
+	c.refit()
+}
+
+func (c *dashboardColumns) refit() {
+	c.widths = dashboardFitColumnWidths(c.natural, dashboardListCellBudget(c.width))
+}
+
+func dashboardTableWidthsForRows(rows []DashboardRow, termWidth int) []int {
+	return dashboardFitColumnWidths(dashboardColumnWidths(rows), dashboardTableBodyBudget(termWidth))
+}
+
 // dashboardTableChromeLines is the number of body lines above the List rows: the
 // blank line under the summary header, the column header, and the separator.
 const dashboardTableChromeLines = 3
@@ -1235,7 +1338,7 @@ const dashboardTableChromeLines = 3
 // cursor by cursorKey) and recomputes the column widths over them.
 func (m QueueDashboard) syncListRows() {
 	m.list.ReplaceItems(m.snap.Rows)
-	m.cols.widths = dashboardColumnWidths(m.snap.Rows)
+	m.cols.syncNatural(m.snap.Rows)
 }
 
 // resizeMainList sizes the List to the body budget the Frame leaves, minus the
@@ -1256,6 +1359,14 @@ func (m QueueDashboard) Init() tea.Cmd {
 func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if kpm, ok := msg.(tea.KeyPressMsg); ok {
+			if ui.ToggleHelp(&m.showHelp, kpm) {
+				return m, nil
+			}
+			if m.showHelp {
+				return m, nil
+			}
+		}
 		if m.bind != nil {
 			m.pendingG = false
 			return m.updateBindModal(msg)
@@ -1324,6 +1435,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.cols.width = msg.Width
+		m.cols.refit()
 		m.resizeMainList()
 	case dashboardTickMsg:
 		cmds := []tea.Cmd{dashboardTick(), m.reload()}
@@ -1371,7 +1483,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
-		m.cols.widths = dashboardColumnWidths(m.snap.Rows)
+		m.cols.syncNatural(m.snap.Rows)
 	case dashboardDrainMsg:
 		m.drainPick = nil
 		if msg.err != nil {
@@ -1582,7 +1694,7 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 				break
 			}
 		}
-		m.cols.widths = dashboardColumnWidths(m.snap.Rows)
+		m.cols.syncNatural(m.snap.Rows)
 		return m, m.toggleAutoDrain(row)
 	case menuActionPreview:
 		return m, m.previewDrain(row)
@@ -2231,7 +2343,139 @@ func dashboardTick() tea.Cmd {
 	return tea.Tick(dashboardPollInterval, func(time.Time) tea.Msg { return dashboardTickMsg{} })
 }
 
+func (m QueueDashboard) helpEntries() []ui.HelpEntry {
+	// Determine current mode and return contextual help entries
+	switch {
+	case m.bind != nil:
+		// Bind modal - contextual based on stage
+		switch m.bind.stage {
+		case dashboardBindStageWorktree:
+			return []ui.HelpEntry{
+				{Key: "j/k", Desc: "navigate worktrees"},
+				{Key: "enter", Desc: "select"},
+				{Key: "esc", Desc: "cancel"},
+			}
+		case dashboardBindStageBaseRef:
+			return []ui.HelpEntry{
+				{Key: "j/k", Desc: "navigate refs"},
+				{Key: "enter", Desc: "select base ref"},
+				{Key: "esc", Desc: "cancel"},
+			}
+		case dashboardBindStageName:
+			return []ui.HelpEntry{
+				{Key: "typing", Desc: "enter worktree name"},
+				{Key: "backspace", Desc: "delete character"},
+				{Key: "enter", Desc: "create worktree"},
+				{Key: "esc", Desc: "cancel"},
+			}
+		}
+	case m.drainPick != nil:
+		// Drain picker modal
+		return []ui.HelpEntry{
+			{Key: "j/k", Desc: "navigate targets"},
+			{Key: "enter", Desc: "drain to selected"},
+			{Key: "esc", Desc: "cancel"},
+		}
+	case m.abandon != nil:
+		// Abandon/unbind confirmation modal
+		return []ui.HelpEntry{
+			{Key: "y/enter", Desc: "confirm unbind"},
+			{Key: "n/esc", Desc: "cancel"},
+		}
+	case m.taskMenu != nil:
+		// Task-level action menu (in detail or peek)
+		return []ui.HelpEntry{
+			{Key: "C", Desc: "complete task"},
+			{Key: "O", Desc: "open/reopen task"},
+			{Key: "K", Desc: "skip task"},
+			{Key: "j/k", Desc: "navigate"},
+			{Key: "enter", Desc: "run action"},
+			{Key: "esc", Desc: "close menu"},
+		}
+	case m.menu != nil:
+		// Dashboard action menu
+		return []ui.HelpEntry{
+			{Key: "i", Desc: "drain"},
+			{Key: "b", Desc: "bind worktree"},
+			{Key: "U", Desc: "unbind worktree"},
+			{Key: "a", Desc: "toggle auto-drain"},
+			{Key: "p", Desc: "preview drain"},
+			{Key: "P", Desc: "unpark"},
+			{Key: "O", Desc: "shell"},
+			{Key: "A", Desc: "archive"},
+			{Key: "j/k", Desc: "navigate"},
+			{Key: "enter", Desc: "run action"},
+			{Key: "esc", Desc: "close menu"},
+		}
+	case m.detail != nil && m.detail.peek != nil:
+		// Detail peek view
+		return []ui.HelpEntry{
+			{Key: "j/k", Desc: "scroll line"},
+			{Key: "ctrl+d", Desc: "page down"},
+			{Key: "ctrl+u", Desc: "page up"},
+			{Key: "gg", Desc: "top"},
+			{Key: "G", Desc: "bottom"},
+			{Key: "a", Desc: "task actions"},
+			{Key: "h/esc", Desc: "close peek"},
+		}
+	case m.detail != nil:
+		// Detail view (task list)
+		return []ui.HelpEntry{
+			{Key: "j/k", Desc: "navigate tasks"},
+			{Key: "gg", Desc: "first task"},
+			{Key: "G", Desc: "last task"},
+			{Key: "l/enter", Desc: "peek task text"},
+			{Key: "a", Desc: "task actions"},
+			{Key: "h/esc", Desc: "back to list"},
+		}
+	case m.filterMode:
+		// Filter mode
+		return []ui.HelpEntry{
+			{Key: "typing", Desc: "filter rows"},
+			{Key: "j/k", Desc: "navigate filtered"},
+			{Key: "esc", Desc: "clear filter"},
+		}
+	default:
+		// Main list view
+		return []ui.HelpEntry{
+			{Key: "j/k", Desc: "navigate"},
+			{Key: "gg", Desc: "first row"},
+			{Key: "G", Desc: "last row"},
+			{Key: "l/enter", Desc: "open detail"},
+			{Key: "a", Desc: "action menu"},
+			{Key: "/", Desc: "filter"},
+			{Key: "h/esc", Desc: "quit"},
+		}
+	}
+	return nil
+}
+
 func (m QueueDashboard) View() tea.View {
+	if m.showHelp {
+		title := "Queue"
+		if m.filterMode {
+			title = "Queue · filter"
+		} else if m.detail != nil && m.detail.peek != nil {
+			title = "Queue · peek"
+		} else if m.detail != nil {
+			title = "Queue · detail"
+		} else if m.menu != nil {
+			title = "Queue · action menu"
+		} else if m.taskMenu != nil {
+			title = "Queue · task menu"
+		} else if m.bind != nil {
+			title = "Queue · bind"
+		} else if m.drainPick != nil {
+			title = "Queue · drain"
+		} else if m.abandon != nil {
+			title = "Queue · unbind"
+		}
+		content := ui.RenderHelpOverlay(title, m.helpEntries(), m.width, m.height)
+		v := tea.NewView(content)
+		v.AltScreen = true
+		return v
+	}
+
 	if m.detail != nil {
 		content := m.viewDetail()
 		v := tea.NewView(content)
@@ -2239,6 +2483,7 @@ func (m QueueDashboard) View() tea.View {
 		return v
 	}
 	m.cols.width = m.width
+	m.cols.refit()
 	m.resizeMainList()
 
 	var content string
@@ -2294,7 +2539,7 @@ func (m QueueDashboard) mainHint() string {
 	if m.filterMode {
 		return "esc clear filter · j/k navigate"
 	}
-	return "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · h/esc quit"
+	return "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · C-h help · h/esc quit"
 }
 
 // mainBody renders the table body (a blank line, the column header, the
@@ -2825,7 +3070,7 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
 // beneath it within height (dashboardMenuPlaceBelow).
 func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
 	headers := dashboardTableHeaders()
-	widths := dashboardColumnWidths(rows)
+	widths := dashboardTableWidthsForRows(rows, width)
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableLine(headers, widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableSeparator(widths), width))
 
@@ -2912,14 +3157,14 @@ func writeDashboardFooter(b *strings.Builder, height int, hint string) {
 }
 
 func dashboardRowValues(row DashboardRow) []string {
-	var badges []string
-	if row.Orphaned {
-		badges = append(badges, "orphaned")
+	return []string{
+		row.Project,
+		row.SetID,
+		dashboardRowFlags(row),
+		row.Status,
+		renderDashboardDest(row.destKind, row.Worktree),
+		row.Drain,
 	}
-	if row.AutoDrain {
-		badges = append(badges, "Auto-drain")
-	}
-	return []string{row.Project, row.SetID, row.Status, renderDashboardDest(row.destKind, row.Worktree), row.Drain, strings.Join(badges, " ")}
 }
 
 func dashboardTableLine(values []string, widths []int) string {
@@ -2939,6 +3184,12 @@ func dashboardTableSeparator(widths []int) string {
 }
 
 func padDashboardCell(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	if lipgloss.Width(s) > width {
+		s = ui.TruncateString(s, width)
+	}
 	if pad := width - lipgloss.Width(s); pad > 0 {
 		return s + strings.Repeat(" ", pad)
 	}

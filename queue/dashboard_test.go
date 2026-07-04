@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
@@ -466,8 +467,8 @@ func TestDashboardOrphanedIndicator(t *testing.T) {
 	// The orphaned set must render its indicator; the present/unbound sets must not.
 	var rendered strings.Builder
 	renderDashboardTable(&rendered, []DashboardRow{byID["missing"]}, 0, 0)
-	if !strings.Contains(rendered.String(), "orphaned") {
-		t.Fatalf("orphaned indicator missing from row render:\n%s", rendered.String())
+	if !strings.Contains(rendered.String(), " OR ") {
+		t.Fatalf("orphaned flag missing from row render:\n%s", rendered.String())
 	}
 }
 
@@ -549,8 +550,8 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 	}
 	var rendered strings.Builder
 	renderDashboardTable(&rendered, rows, 0, 0)
-	if !strings.Contains(rendered.String(), "Auto-drain") {
-		t.Fatalf("missing auto-drain badge:\n%s", rendered.String())
+	if !strings.Contains(rendered.String(), "AD") {
+		t.Fatalf("missing auto-drain flag:\n%s", rendered.String())
 	}
 
 	var toggledDef, toggledState, toggledSet string
@@ -1016,7 +1017,7 @@ func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	if !strings.Contains(view, "Queue · 2 task sets · 1 ready · 1 running · 1 auto-drain") {
 		t.Fatalf("task-set list should render useful summary:\n%s", view)
 	}
-	for _, want := range []string{"PROJECT  TASK SET  STATUS", "-------  --------  ------"} {
+	for _, want := range []string{"PROJECT  TASK SET  FLAGS  STATUS", "-------  --------  -----  ------"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
@@ -1050,6 +1051,68 @@ func TestDashboardTableClampsToBodyHeight(t *testing.T) {
 	if got, want := len(lines), m.height; got != want {
 		t.Fatalf("view line count = %d, want %d (clamped to body height):\n%s", got, want, view)
 	}
+}
+
+func TestDashboardTableFitsTerminalWidth(t *testing.T) {
+	// Wide row content on a narrow pane must not spill horizontally; compact
+	// FLAGS (AD/OR) stay visible even when WORKTREE and DRAIN shrink.
+	row := DashboardRow{
+		Project:   "very-long-project-name-here",
+		Status:    "AWAITING-APPROVAL · verified @ abcdef123456",
+		Worktree:  "feature/super-long-branch-name-for-testing",
+		Drain:     "config error: no trunk worktree configured",
+		cursorKey: "pop\x00set1",
+		SetRef: SetRef{
+			SetID:     "2026-06-01-super-long-task-set-id",
+			AutoDrain: true,
+			Orphaned:  true,
+		},
+	}
+	for _, termW := range []int{40, 60, 80} {
+		t.Run(fmt.Sprintf("width=%d", termW), func(t *testing.T) {
+			m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: termW, Height: 20})
+			m = updated.(QueueDashboard)
+			view := m.View().Content
+			if !strings.Contains(view, "AD") || !strings.Contains(view, "OR") {
+				t.Fatalf("missing compact flags in view:\n%s", view)
+			}
+			for _, line := range dashboardTestTableLines(view) {
+				if got := lipgloss.Width(line); got > termW {
+					t.Fatalf("table line width %d exceeds terminal width %d:\n%q", got, termW, line)
+				}
+			}
+		})
+	}
+}
+
+func TestDashboardFitColumnWidthsProtectsFlags(t *testing.T) {
+	natural := []int{20, 30, 5, 40, 25, 35} // PROJECT … DRAIN; FLAGS width 5 ("AD OR")
+	fitted := dashboardFitColumnWidths(natural, 50)
+	if fitted[dashboardColFlags] != 5 {
+		t.Fatalf("FLAGS width = %d, want 5 (protected)", fitted[dashboardColFlags])
+	}
+	if dashboardTableLineWidth(fitted) > 50 {
+		t.Fatalf("fitted line width %d exceeds budget 50: %v", dashboardTableLineWidth(fitted), fitted)
+	}
+}
+
+func dashboardTestTableLines(view string) []string {
+	var lines []string
+	inTable := false
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "PROJECT") && strings.Contains(line, "FLAGS") {
+			inTable = true
+		}
+		if !inTable {
+			continue
+		}
+		if strings.Contains(line, "j/k move") || strings.Contains(line, "h/esc quit") {
+			break
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) {
