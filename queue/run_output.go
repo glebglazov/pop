@@ -3,6 +3,7 @@ package queue
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,9 @@ type AwaitingApprovalItem struct {
 	Project   string
 	RepoLabel string
 	SetID     string
+	// RuntimePath is the bound checkout for this set, used to render an
+	// adopted-worktree suffix when the checkout basename differs from SetID.
+	RuntimePath string
 }
 
 // RunView is the scheduling-relevant snapshot used for queue run baseline and deltas.
@@ -51,6 +55,9 @@ type BlockedItem struct {
 	Until     time.Time
 	Reason    string
 	Agent     string
+	// RuntimePath is the bound checkout for this set, used to render an
+	// adopted-worktree suffix when the checkout basename differs from SetID.
+	RuntimePath string
 }
 
 type runOutputState struct {
@@ -63,8 +70,58 @@ func newRunOutputState() *runOutputState {
 	return &runOutputState{firstTick: true}
 }
 
+// loadBindingPaths returns a map from repo-basename\x00setID to the bound
+// checkout path. It is used to surface an adopted-worktree suffix only when
+// the checkout basename differs from the set identifier, without introducing
+// any new git lookup.
+func loadBindingPaths(td *tasks.Deps) map[string]string {
+	if td == nil {
+		return nil
+	}
+	bindings, err := binding.AllBindings(td)
+	if err != nil || len(bindings) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(bindings))
+	for key, b := range bindings {
+		parts := strings.Split(key, "\x00")
+		if len(parts) != 2 {
+			continue
+		}
+		basename := repoLabelFromRepoKey(parts[0])
+		setID := parts[1]
+		if basename == "" || setID == "" || strings.TrimSpace(b.RuntimePath) == "" {
+			continue
+		}
+		out[basename+"\x00"+setID] = b.RuntimePath
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // BuildRunView derives the queue run view from a status snapshot.
 func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
+	bindingPaths := loadBindingPaths(snap.Tasks)
+	for i := range snap.PickedUp {
+		if snap.PickedUp[i].RuntimePath == "" {
+			snap.PickedUp[i].RuntimePath = bindingPaths[snap.PickedUp[i].RepoLabel+"\x00"+snap.PickedUp[i].SetID]
+		}
+	}
+	for i := range snap.Idle {
+		setID := firstNonEmpty(snap.Idle[i].AwaitingApprovalSetID, snap.Idle[i].BlockedSetID, snap.Idle[i].ReadySet)
+		if setID != "" {
+			snap.Idle[i].RuntimePath = bindingPaths[snap.Idle[i].RepoLabel+"\x00"+setID]
+		}
+	}
+
 	view := RunView{
 		Running:    append([]PickedUpSet(nil), snap.PickedUp...),
 		Skipped:    append([]SkippedRepo(nil), snap.Skipped...),
@@ -89,9 +146,10 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 			blockedProjects[repoLabel] = true
 		case idle.AwaitingApprovalSetID != "":
 			view.AwaitingApproval = append(view.AwaitingApproval, AwaitingApprovalItem{
-				Project:   idle.Project,
-				RepoLabel: repoLabel,
-				SetID:     idle.AwaitingApprovalSetID,
+				Project:     idle.Project,
+				RepoLabel:   repoLabel,
+				SetID:       idle.AwaitingApprovalSetID,
+				RuntimePath: idle.RuntimePath,
 			})
 		default:
 			view.IdleCount++
@@ -162,12 +220,13 @@ func blockedItemFromIdle(idle IdleProject) BlockedItem {
 		repoLabel = idle.Project
 	}
 	return BlockedItem{
-		Project:   idle.Project,
-		RepoLabel: repoLabel,
-		SetID:     idle.BlockedSetID,
-		Reason:    idle.Reason,
-		Kind:      blockedKindFromReason(idle.Reason),
-		Until:     idle.WaitUntil,
+		Project:     idle.Project,
+		RepoLabel:   repoLabel,
+		SetID:       idle.BlockedSetID,
+		Reason:      idle.Reason,
+		Kind:        blockedKindFromReason(idle.Reason),
+		Until:       idle.WaitUntil,
+		RuntimePath: idle.RuntimePath,
 	}
 }
 
@@ -192,19 +251,22 @@ func blockedItemsFromState(td *tasks.Deps, state *DaemonState, delays []time.Dur
 				continue
 			}
 			project := ""
+			runtimePath := ""
 			if b, ok := bindings[key]; ok {
 				project = b.Project
+				runtimePath = b.RuntimePath
 			}
 			if project == "" {
 				project = repoLabel
 			}
 			out = append(out, BlockedItem{
-				Project:   project,
-				RepoLabel: repoLabel,
-				SetID:     setID,
-				Kind:      "quota_backoff",
-				Until:     until,
-				Reason:    "set backed off for pinned agent cooldown",
+				Project:     project,
+				RepoLabel:   repoLabel,
+				SetID:       setID,
+				Kind:        "quota_backoff",
+				Until:       until,
+				Reason:      "set backed off for pinned agent cooldown",
+				RuntimePath: runtimePath,
 			})
 		}
 	}
@@ -248,21 +310,23 @@ func blockedItemsFromDrainHistory(td *tasks.Deps, bindings map[string]WorktreeBi
 		switch {
 		case parked:
 			out = append(out, BlockedItem{
-				Project:   b.Project,
-				RepoLabel: id.Basename,
-				SetID:     setID,
-				Kind:      "parked",
-				Until:     info.LastAbnormalAt,
-				Reason:    "repeated abnormal drain exits",
+				Project:     b.Project,
+				RepoLabel:   id.Basename,
+				SetID:       setID,
+				Kind:        "parked",
+				Until:       info.LastAbnormalAt,
+				Reason:      "repeated abnormal drain exits",
+				RuntimePath: b.RuntimePath,
 			})
 		case !until.IsZero():
 			out = append(out, BlockedItem{
-				Project:   b.Project,
-				RepoLabel: id.Basename,
-				SetID:     setID,
-				Kind:      "crash_backoff",
-				Until:     until,
-				Reason:    "set backed off after abnormal drain exit",
+				Project:     b.Project,
+				RepoLabel:   id.Basename,
+				SetID:       setID,
+				Kind:        "crash_backoff",
+				Until:       until,
+				Reason:      "set backed off after abnormal drain exit",
+				RuntimePath: b.RuntimePath,
 			})
 		}
 	}
@@ -395,7 +459,7 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 		fmt.Fprintln(out, "  none")
 	} else {
 		for _, q := range view.Queued {
-			projectLabel := statusProjectLabel(repoLabelOrProject(q.RepoLabel, q.Project), q.WorktreeReady, q.ProjectConfigError)
+			projectLabel := projectLabelWithWorktree(repoLabelOrProject(q.RepoLabel, q.Project), q.RuntimePath, q.ReadySet, q.WorktreeReady, q.ProjectConfigError)
 			fmt.Fprintf(out, "  %s: waiting ready set %s\n", projectLabel, q.ReadySet)
 		}
 	}
@@ -422,6 +486,7 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 			if setID == "" {
 				setID = "(unknown set)"
 			}
+			project += worktreeSuffix(u.RuntimePath, setID)
 			fmt.Fprintf(out, "  %s: %s — awaiting your sign-off\n", project, setID)
 		}
 	}
@@ -459,11 +524,11 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 }
 
 func formatRunningLine(p PickedUpSet) string {
-	projectLabel := statusProjectLabel(repoLabelOrProject(p.RepoLabel, p.Project), p.WorktreeReady, p.ProjectConfigError)
 	setID := p.SetID
 	if setID == "" {
 		setID = "(unknown set)"
 	}
+	projectLabel := projectLabelWithWorktree(repoLabelOrProject(p.RepoLabel, p.Project), p.RuntimePath, setID, p.WorktreeReady, p.ProjectConfigError)
 	started := ""
 	if !p.StartedAt.IsZero() {
 		started = " since " + p.StartedAt.UTC().Format(time.RFC3339)
@@ -524,14 +589,15 @@ func buildWorktreeBindingViews(d *tasks.Deps, state *DaemonState, view RunView) 
 }
 
 func formatWorktreeBindingLine(binding WorktreeBindingView) string {
-	project := repoLabelOrProject(binding.RepoLabel, binding.Project)
-	if project == "" {
-		project = "(unknown project)"
-	}
 	setID := binding.SetID
 	if setID == "" {
 		setID = "(unknown set)"
 	}
+	project := repoLabelOrProject(binding.RepoLabel, binding.Project)
+	if project == "" {
+		project = "(unknown project)"
+	}
+	project += worktreeSuffix(binding.RuntimePath, setID)
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%s: %s", project, setID))
 	if binding.Branch != "" {
@@ -565,6 +631,7 @@ func formatBlockedLine(b BlockedItem) string {
 		if project == "" {
 			project = "(unknown project)"
 		}
+		project += worktreeSuffix(b.RuntimePath, setID)
 		return fmt.Sprintf("%s: %s parked (%s)", project, setID, b.Reason)
 	default:
 		setID := b.SetID
@@ -575,6 +642,7 @@ func formatBlockedLine(b BlockedItem) string {
 		if project == "" {
 			project = "(unknown project)"
 		}
+		project += worktreeSuffix(b.RuntimePath, setID)
 		until := ""
 		if !b.Until.IsZero() {
 			until = " until " + b.Until.UTC().Format(time.RFC3339)
@@ -619,7 +687,7 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 		if setID == "" {
 			setID = "(unknown set)"
 		}
-		label := statusProjectLabel(repoLabelOrProject(p.RepoLabel, p.Project), p.WorktreeReady, p.ProjectConfigError)
+		label := projectLabelWithWorktree(repoLabelOrProject(p.RepoLabel, p.Project), p.RuntimePath, setID, p.WorktreeReady, p.ProjectConfigError)
 		lines = append(lines, fmt.Sprintf("queue: %s: spawned drain for %s", label, setID))
 	}
 
@@ -629,7 +697,7 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 		if _, ok := prevQueued[key]; ok {
 			continue
 		}
-		label := statusProjectLabel(repoLabelOrProject(q.RepoLabel, q.Project), q.WorktreeReady, q.ProjectConfigError)
+		label := projectLabelWithWorktree(repoLabelOrProject(q.RepoLabel, q.Project), q.RuntimePath, q.ReadySet, q.WorktreeReady, q.ProjectConfigError)
 		lines = append(lines, fmt.Sprintf("queue: %s: ready set %s", label, q.ReadySet))
 	}
 
@@ -674,7 +742,7 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 }
 
 func formatBlockedDelta(b BlockedItem, cleared bool) string {
-	label := repoLabelOrProject(b.RepoLabel, b.Project)
+	label := repoLabelOrProject(b.RepoLabel, b.Project) + worktreeSuffix(b.RuntimePath, b.SetID)
 	if cleared {
 		switch b.Kind {
 		case "agent_cooldown":
@@ -744,8 +812,30 @@ func skippedIndex(items []SkippedRepo) map[string]SkippedRepo {
 	return out
 }
 
-func formatOutcomeDelta(repoLabel, setID string, outcome tasks.DrainOutcome) string {
-	return fmt.Sprintf("queue: %s: %s outcome=%s", repoLabel, setID, outcome)
+func formatOutcomeDelta(repoLabel, setID string, runtimePath string, outcome tasks.DrainOutcome) string {
+	return fmt.Sprintf("queue: %s: %s outcome=%s", repoLabel+worktreeSuffix(runtimePath, setID), setID, outcome)
+}
+
+// worktreeSuffix returns " (in <basename>)" when runtimePath points to a
+// worktree whose basename differs from the set identifier. Managed worktrees
+// are named after the setID, so the suffix is suppressed for them; adopted
+// worktrees with an operator-chosen name surface that name.
+func worktreeSuffix(runtimePath, setID string) string {
+	if runtimePath == "" || setID == "" {
+		return ""
+	}
+	base := filepath.Base(runtimePath)
+	if base == "" || base == setID {
+		return ""
+	}
+	return " (in " + base + ")"
+}
+
+// projectLabelWithWorktree returns the project/repo label with annotations and
+// an adopted-worktree suffix when the bound checkout basename differs from the
+// set identifier.
+func projectLabelWithWorktree(project, runtimePath, setID string, worktreeReady bool, configError string) string {
+	return statusProjectLabel(project+worktreeSuffix(runtimePath, setID), worktreeReady, configError)
 }
 
 // repoLabelOrProject returns the repository-identity label when present,

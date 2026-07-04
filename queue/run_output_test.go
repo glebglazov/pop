@@ -349,12 +349,14 @@ func TestRepoIdentityLabelAcrossSpawnAndBackoff(t *testing.T) {
 		t.Fatalf("EnsureStorage: %v", err)
 	}
 
-	setID := "set-1"
+	setID := "wt0"
 	repoKey := repoIdentityKey(id)
 	commonDir := id.CommonDir
 	basename := id.Basename
 
-	// Bind the set to the main worktree under one picker project name.
+	// Bind the set to the main worktree under one picker project name. The
+	// worktree basename matches the setID, so this exercises the managed case
+	// where no adopted-worktree suffix is rendered.
 	if err := binding.Put(td, setScopedKey(repoKey, setID), WorktreeBinding{RuntimePath: mainWT, Project: "game_server/main"}); err != nil {
 		t.Fatalf("binding.Put: %v", err)
 	}
@@ -448,8 +450,8 @@ func TestRepoIdentityLabelBaselineDeltaParity(t *testing.T) {
 
 	basename := id.Basename
 	repoKey := repoIdentityKey(id)
-	setIDRunning := "set-running"
-	setIDQueued := "set-queued"
+	setIDRunning := "wt0"
+	setIDQueued := "wt1"
 
 	// Bind the running set under one picker project name.
 	if err := binding.Put(td, setScopedKey(repoKey, setIDRunning), WorktreeBinding{RuntimePath: mainWT, Project: "game_server/main"}); err != nil {
@@ -585,5 +587,210 @@ func TestRepoIdentityLabelFallsBackToProject(t *testing.T) {
 	lines := DiffRunView(&RunView{}, view)
 	if len(lines) != 1 || !strings.Contains(lines[0], "queue: pop: spawned drain for set-1") {
 		t.Fatalf("spawn delta = %v, want project fallback label", lines)
+	}
+}
+
+// TestAdoptedWorktreeSuffixOnBaselineAndDelta verifies that when a set's bound
+// checkout basename differs from the set identifier, the worktree name is
+// surfaced on both baseline rows and delta lines.
+func TestAdoptedWorktreeSuffixOnBaselineAndDelta(t *testing.T) {
+	td := queueDataDeps(t)
+	_, wts := initBareRepoWithWorktrees(t, 2)
+	mainWT := wts[0] // basename "wt0"
+
+	id, err := tasks.ResolveRepositoryIdentity(td, mainWT)
+	if err != nil {
+		t.Fatalf("ResolveRepositoryIdentity: %v", err)
+	}
+	if err := tasks.EnsureStorage(td, id); err != nil {
+		t.Fatalf("EnsureStorage: %v", err)
+	}
+
+	basename := id.Basename
+	repoKey := repoIdentityKey(id)
+	setID := "set-adopted" // differs from worktree basename "wt0"
+
+	if err := binding.Put(td, setScopedKey(repoKey, setID), WorktreeBinding{RuntimePath: mainWT, Project: "game_server/main"}); err != nil {
+		t.Fatalf("binding.Put: %v", err)
+	}
+
+	dec := Decision{
+		Project:   "game_server/main",
+		TaskSetID: setID,
+		Reason:    "ready",
+		Busy:      true,
+		scan: projectScan{
+			Name:           "game_server/main",
+			ProjectPath:    mainWT,
+			RuntimePath:    mainWT,
+			DefinitionPath: id.TasksDir,
+			RepoKey:        repoKey,
+			RepoCommonDir:  id.CommonDir,
+		},
+		lockStatus: &tasks.RuntimeLockStatus{
+			Locked:      true,
+			RuntimePath: mainWT,
+			Metadata: &tasks.RuntimeLockMetadata{
+				SetID:       setID,
+				RuntimePath: mainWT,
+				PID:         100,
+			},
+		},
+	}
+
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{dec}, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("statusFromDecisions: %v", err)
+	}
+	snap.Tasks = td
+
+	view := BuildRunView(snap, time.Now().UTC())
+
+	var buf bytes.Buffer
+	RenderRunBaseline(&buf, view)
+	baselineText := buf.String()
+
+	wantLabel := basename + " (in wt0): " + setID
+	if !strings.Contains(baselineText, wantLabel) {
+		t.Fatalf("baseline missing adopted-worktree suffix %q:\n%s", wantLabel, baselineText)
+	}
+
+	lines := DiffRunView(&RunView{}, view)
+	wantDelta := "queue: " + basename + " (in wt0): spawned drain for " + setID
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, wantDelta) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("spawn delta missing adopted-worktree suffix %q, got:\n%s", wantDelta, strings.Join(lines, "\n"))
+	}
+}
+
+// TestManagedWorktreeSuffixSuppressed verifies that when a pop-provisioned
+// (managed) worktree's checkout basename equals the set identifier, no
+// redundant worktree suffix is appended.
+func TestManagedWorktreeSuffixSuppressed(t *testing.T) {
+	td := queueDataDeps(t)
+	_, wts := initBareRepoWithWorktrees(t, 2)
+	mainWT := wts[0] // basename "wt0"
+
+	id, err := tasks.ResolveRepositoryIdentity(td, mainWT)
+	if err != nil {
+		t.Fatalf("ResolveRepositoryIdentity: %v", err)
+	}
+	if err := tasks.EnsureStorage(td, id); err != nil {
+		t.Fatalf("EnsureStorage: %v", err)
+	}
+
+	basename := id.Basename
+	repoKey := repoIdentityKey(id)
+	setID := "wt0" // matches worktree basename, so managed/no suffix
+
+	if err := binding.Put(td, setScopedKey(repoKey, setID), WorktreeBinding{RuntimePath: mainWT, Project: "game_server/main"}); err != nil {
+		t.Fatalf("binding.Put: %v", err)
+	}
+
+	dec := Decision{
+		Project:   "game_server/main",
+		TaskSetID: setID,
+		Reason:    "ready",
+		Busy:      true,
+		scan: projectScan{
+			Name:           "game_server/main",
+			ProjectPath:    mainWT,
+			RuntimePath:    mainWT,
+			DefinitionPath: id.TasksDir,
+			RepoKey:        repoKey,
+			RepoCommonDir:  id.CommonDir,
+		},
+		lockStatus: &tasks.RuntimeLockStatus{
+			Locked:      true,
+			RuntimePath: mainWT,
+			Metadata: &tasks.RuntimeLockMetadata{
+				SetID:       setID,
+				RuntimePath: mainWT,
+				PID:         100,
+			},
+		},
+	}
+
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{dec}, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("statusFromDecisions: %v", err)
+	}
+	snap.Tasks = td
+
+	view := BuildRunView(snap, time.Now().UTC())
+
+	var buf bytes.Buffer
+	RenderRunBaseline(&buf, view)
+	baselineText := buf.String()
+
+	if strings.Contains(baselineText, "(in wt0)") {
+		t.Fatalf("managed worktree must not render adopted suffix:\n%s", baselineText)
+	}
+	wantLabel := basename + ": " + setID
+	if !strings.Contains(baselineText, wantLabel) {
+		t.Fatalf("baseline missing managed label %q:\n%s", wantLabel, baselineText)
+	}
+
+	lines := DiffRunView(&RunView{}, view)
+	for _, line := range lines {
+		if strings.Contains(line, "(in wt0)") {
+			t.Fatalf("managed spawn delta must not render adopted suffix: %q", line)
+		}
+	}
+	wantDelta := "queue: " + basename + ": spawned drain for " + setID
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, wantDelta) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("spawn delta missing managed label %q, got:\n%s", wantDelta, strings.Join(lines, "\n"))
+	}
+}
+
+// TestInPlaceDrainNoWorktreeSuffix verifies that a trunk/in-place drain with
+// no worktree binding shows no worktree suffix.
+func TestInPlaceDrainNoWorktreeSuffix(t *testing.T) {
+	td := queueDataDeps(t)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{{
+		Project:   "pop",
+		TaskSetID: "set-1",
+		Reason:    "ready",
+		Busy:      true,
+		scan:      projectScan{Name: "pop", RepoKey: "pop"},
+		lockStatus: &tasks.RuntimeLockStatus{
+			Locked: true,
+			Metadata: &tasks.RuntimeLockMetadata{
+				SetID: "set-1",
+			},
+		},
+	}}, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("statusFromDecisions: %v", err)
+	}
+	snap.Tasks = td
+
+	view := BuildRunView(snap, time.Now().UTC())
+
+	var buf bytes.Buffer
+	RenderRunBaseline(&buf, view)
+	baselineText := buf.String()
+	if strings.Contains(baselineText, "(in ") {
+		t.Fatalf("in-place drain must not render worktree suffix:\n%s", baselineText)
+	}
+
+	lines := DiffRunView(&RunView{}, view)
+	for _, line := range lines {
+		if strings.Contains(line, "(in ") {
+			t.Fatalf("in-place spawn delta must not render worktree suffix: %q", line)
+		}
 	}
 }

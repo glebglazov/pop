@@ -38,6 +38,10 @@ type IdleProject struct {
 	WaitUntil          time.Time
 	WorktreeReady      bool
 	ProjectConfigError string
+	// RuntimePath is the bound checkout for the set represented by this idle
+	// project, when one exists. It is used to surface an adopted-worktree suffix
+	// only when the checkout basename differs from the set identifier.
+	RuntimePath string
 }
 
 // SkippedRepo is a repository the Queue refused to schedule because it could

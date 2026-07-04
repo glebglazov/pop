@@ -46,11 +46,11 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 			Project: "busy",
 			Busy:    true,
 			lockStatus: &tasks.RuntimeLockStatus{
-				RuntimePath: "/runtime/busy",
+				RuntimePath: "/runtime/set-busy",
 				Locked:      true,
 				Metadata: &tasks.RuntimeLockMetadata{
 					PID:         1234,
-					RuntimePath: "/runtime/busy",
+					RuntimePath: "/runtime/set-busy",
 					StartedAt:   started,
 					SetID:       "set-busy",
 				},
@@ -500,7 +500,7 @@ func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: {
 			Project:     "pop",
-			RuntimePath: "/runtime",
+			RuntimePath: "/runtime/set-1",
 			Branch:      "set-1",
 		},
 	})
@@ -521,7 +521,7 @@ func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
 		"set-1",
 		"Blocked:",
 		"Active worktrees:",
-		"test-repo: set-1 branch=set-1 at /runtime — bound",
+		"test-repo: set-1 branch=set-1 at /runtime/set-1 — bound",
 		"pop: set-1 parked",
 	} {
 		if !strings.Contains(statusText, want) {
