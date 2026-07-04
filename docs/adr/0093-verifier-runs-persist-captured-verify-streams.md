@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: superseded
+superseded_by: 0094
 ---
 
 # Verifier runs persist Captured verify streams
