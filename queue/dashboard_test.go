@@ -3324,3 +3324,339 @@ func TestMainListRuntimeShell(t *testing.T) {
 		}
 	})
 }
+
+
+func TestQueueDashboardHelpOverlay(t *testing.T) {
+	ctrlH := tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}
+	
+	t.Run("C-h opens help in main list", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Error("C-h should open help overlay")
+		}
+	})
+
+	t.Run("second C-h closes help", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Fatal("first C-h should open help")
+		}
+		updated, _ = got.Update(ctrlH)
+		got = updated.(QueueDashboard)
+		if got.showHelp {
+			t.Error("second C-h should close help")
+		}
+	})
+
+	t.Run("Esc closes help", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Fatal("C-h should open help")
+		}
+		updated, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+		got = updated.(QueueDashboard)
+		if got.showHelp {
+			t.Error("Esc should close help")
+		}
+	})
+
+	t.Run("help swallows other keys when open", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Fatal("C-h should open help")
+		}
+		// Try pressing 'j' which would normally move cursor
+		updated, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		got = updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Error("help should remain open when other keys pressed")
+		}
+	})
+
+	t.Run("help works in filter mode", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+		got := updated.(QueueDashboard)
+		if !got.filterMode {
+			t.Fatal("/ should enter filter mode")
+		}
+		updated, _ = got.Update(ctrlH)
+		got = updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Error("C-h should open help in filter mode")
+		}
+	})
+
+	t.Run("help works in detail view", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.detail = &detailView{}
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Error("C-h should open help in detail view")
+		}
+	})
+
+	t.Run("help works in peek mode", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.detail = &detailView{peek: &taskTextPeek{}}
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Error("C-h should open help in peek mode")
+		}
+	})
+
+	t.Run("help works in action menu", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.menu = &dashboardMenu{}
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Error("C-h should open help in action menu")
+		}
+	})
+
+	t.Run("help works in task menu", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.taskMenu = &taskMenu{}
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Error("C-h should open help in task menu")
+		}
+	})
+
+	t.Run("help works in bind modal", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.bind = &dashboardBindModal{}
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Error("C-h should open help in bind modal")
+		}
+	})
+
+	t.Run("help works in drain picker", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.drainPick = &dashboardDrainModal{}
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Error("C-h should open help in drain picker")
+		}
+	})
+
+	t.Run("help works in abandon modal", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.abandon = &dashboardAbandonModal{}
+		updated, _ := m.Update(ctrlH)
+		got := updated.(QueueDashboard)
+		if !got.showHelp {
+			t.Error("C-h should open help in abandon modal")
+		}
+	})
+
+	t.Run("F1 does nothing", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyF1})
+		got := updated.(QueueDashboard)
+		if got.showHelp {
+			t.Error("F1 should not open help")
+		}
+	})
+}
+
+func TestQueueDashboardHelpContent(t *testing.T) {
+	t.Run("main list shows main bindings", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		entries := m.helpEntries()
+		if len(entries) == 0 {
+			t.Fatal("main list should have help entries")
+		}
+		// Check for key bindings
+		found := map[string]bool{}
+		for _, e := range entries {
+			found[e.Key] = true
+		}
+		required := []string{"j/k", "gg", "G", "l/enter", "a", "/", "h/esc"}
+		for _, key := range required {
+			if !found[key] {
+				t.Errorf("main list help missing key: %s", key)
+			}
+		}
+	})
+
+	t.Run("filter mode shows filter bindings", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.filterMode = true
+		entries := m.helpEntries()
+		found := map[string]bool{}
+		for _, e := range entries {
+			found[e.Key] = true
+		}
+		if !found["typing"] {
+			t.Error("filter mode help missing 'typing'")
+		}
+		if !found["j/k"] {
+			t.Error("filter mode help missing 'j/k'")
+		}
+		if !found["esc"] {
+			t.Error("filter mode help missing 'esc'")
+		}
+	})
+
+	t.Run("detail view shows detail bindings", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.detail = &detailView{}
+		entries := m.helpEntries()
+		found := map[string]bool{}
+		for _, e := range entries {
+			found[e.Key] = true
+		}
+		if !found["l/enter"] {
+			t.Error("detail view help missing 'l/enter'")
+		}
+		if !found["a"] {
+			t.Error("detail view help missing 'a'")
+		}
+	})
+
+	t.Run("peek mode shows peek bindings", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.detail = &detailView{peek: &taskTextPeek{}}
+		entries := m.helpEntries()
+		found := map[string]bool{}
+		for _, e := range entries {
+			found[e.Key] = true
+		}
+		if !found["ctrl+d"] {
+			t.Error("peek mode help missing 'ctrl+d'")
+		}
+		if !found["ctrl+u"] {
+			t.Error("peek mode help missing 'ctrl+u'")
+		}
+	})
+
+	t.Run("action menu shows menu verbs", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.menu = &dashboardMenu{}
+		entries := m.helpEntries()
+		found := map[string]bool{}
+		for _, e := range entries {
+			found[e.Key] = true
+		}
+		// Should show menu-specific verbs
+		if !found["i"] {
+			t.Error("action menu help missing 'i' (drain)")
+		}
+		if !found["b"] {
+			t.Error("action menu help missing 'b' (bind)")
+		}
+		if !found["esc"] {
+			t.Error("action menu help missing 'esc'")
+		}
+	})
+
+	t.Run("task menu shows task verbs", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.taskMenu = &taskMenu{}
+		entries := m.helpEntries()
+		found := map[string]bool{}
+		for _, e := range entries {
+			found[e.Key] = true
+		}
+		if !found["C"] {
+			t.Error("task menu help missing 'C' (complete)")
+		}
+		if !found["O"] {
+			t.Error("task menu help missing 'O' (open)")
+		}
+		if !found["K"] {
+			t.Error("task menu help missing 'K' (skip)")
+		}
+	})
+
+	t.Run("bind modal shows bind bindings", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.bind = &dashboardBindModal{}
+		entries := m.helpEntries()
+		found := map[string]bool{}
+		for _, e := range entries {
+			found[e.Key] = true
+		}
+		if !found["j/k"] {
+			t.Error("bind modal help missing 'j/k'")
+		}
+		if !found["enter"] {
+			t.Error("bind modal help missing 'enter'")
+		}
+	})
+
+	t.Run("drain picker shows picker bindings", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.drainPick = &dashboardDrainModal{}
+		entries := m.helpEntries()
+		found := map[string]bool{}
+		for _, e := range entries {
+			found[e.Key] = true
+		}
+		if !found["j/k"] {
+			t.Error("drain picker help missing 'j/k'")
+		}
+		if !found["enter"] {
+			t.Error("drain picker help missing 'enter'")
+		}
+	})
+
+	t.Run("abandon modal shows abandon bindings", func(t *testing.T) {
+		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+		m.abandon = &dashboardAbandonModal{}
+		entries := m.helpEntries()
+		found := map[string]bool{}
+		for _, e := range entries {
+			found[e.Key] = true
+		}
+		if !found["y/enter"] {
+			t.Error("abandon modal help missing 'y/enter'")
+		}
+		if !found["n/esc"] {
+			t.Error("abandon modal help missing 'n/esc'")
+		}
+	})
+}
+
+func TestQueueDashboardHelpRendering(t *testing.T) {
+	m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+	m.width = 80
+	m.height = 24
+	m.showHelp = true
+	view := m.View()
+
+	// Check that help overlay is rendered
+	if !strings.Contains(view.Content, "Help") {
+		t.Error("help overlay should contain 'Help' title")
+	}
+	if !strings.Contains(view.Content, "C-h toggle") {
+		t.Error("help overlay should contain 'C-h toggle' footer")
+	}
+	if !strings.Contains(view.Content, "Esc close") {
+		t.Error("help overlay should contain 'Esc close' footer")
+	}
+}
+
+func TestQueueDashboardHelpFooterHint(t *testing.T) {
+	m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+	hint := m.mainHint()
+	if !strings.Contains(hint, "C-h help") {
+		t.Error("main footer hint should include 'C-h help'")
+	}
+}

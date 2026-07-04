@@ -2452,19 +2452,19 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 
 func (m QueueDashboard) View() tea.View {
 	if m.showHelp {
-		title := "Queue"
+		title := "Help · Queue"
 		if m.filterMode {
-			title = "Queue · filter"
+			title = "Help · Queue · filter"
 		} else if m.detail != nil && m.detail.peek != nil {
-			title = "Queue · peek"
+			title = "Help · Queue · peek"
 		} else if m.detail != nil {
-			title = "Queue · detail"
+			title = "Help · Queue · detail"
 		} else if m.menu != nil {
-			title = "Queue · action menu"
+			title = "Help · Queue · action menu"
 		} else if m.taskMenu != nil {
-			title = "Queue · task menu"
+			title = "Help · Queue · task menu"
 		} else if m.bind != nil {
-			title = "Queue · bind"
+			title = "Help · Queue · bind"
 		} else if m.drainPick != nil {
 			title = "Queue · drain"
 		} else if m.abandon != nil {
@@ -2532,12 +2532,12 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 func (m QueueDashboard) mainHint() string {
 	if len(m.snap.Rows) == 0 {
 		if m.filterMode {
-			return "esc clear filter"
+			return "esc clear filter · C-h help"
 		}
-		return "h/esc quit"
+		return "C-h help · h/esc quit"
 	}
 	if m.filterMode {
-		return "esc clear filter · j/k navigate"
+		return "esc clear filter · j/k navigate · C-h help"
 	}
 	return "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · C-h help · h/esc quit"
 }
