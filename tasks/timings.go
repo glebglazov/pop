@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/config"
@@ -21,7 +22,9 @@ import (
 // per-invocation "Attempt N/max" line (ADR 0016). Tools holds the per-tool
 // breakdown for agents with a pairing parser; empty otherwise. Model is the
 // attempt's Model time — the residual of the total not covered by any tool
-// window — and is meaningful only when Tools is non-empty.
+// window — and is meaningful only when Tools is non-empty. Tokens is the
+// read-time-derived token spend (input/output/cache); it is absent when the
+// agent's stream reports no usage.
 type AttemptTiming struct {
 	Agent          string
 	RequestedAgent string
@@ -31,12 +34,32 @@ type AttemptTiming struct {
 	Duration       time.Duration
 	Tools          []ToolTiming
 	Model          time.Duration
+	Tokens         TokenUsage
 	// Reason is the structured failure verdict from the footer and ExitCode the
 	// agent's exit status; both are meaningful only when Outcome is a failure
 	// and empty otherwise (ADR 0020). The timing lens does not render them — they
 	// feed the Failed Task re-entry path via LatestFailureReason.
 	Reason   string
 	ExitCode int
+}
+
+// TokenUsage is the per-attempt token spend derived from a structured agent
+// stream. Presence flags distinguish a reported zero from an absent field;
+// a zero-value TokenUsage means the stream reported no usage.
+type TokenUsage struct {
+	Input         int64
+	Output        int64
+	CacheRead     int64
+	CacheWrite    int64
+	HasInput      bool
+	HasOutput     bool
+	HasCacheRead  bool
+	HasCacheWrite bool
+}
+
+// HasUsage reports whether any token field was reported.
+func (u TokenUsage) HasUsage() bool {
+	return u.HasInput || u.HasOutput || u.HasCacheRead || u.HasCacheWrite
 }
 
 // ToolTiming aggregates one tool's paired invocations within an attempt:
@@ -70,6 +93,10 @@ var toolTimingParsers = map[string]func([]streamEventRecord) ([]ToolTiming, []to
 
 var actualModelParsers = map[string]func([]streamEventRecord) string{
 	"claude": claudeActualModel,
+}
+
+var tokenUsageParsers = map[string]func([]streamEventRecord) TokenUsage{
+	"claude": claudeTokenUsage,
 }
 
 // modelTime derives Model time: the attempt's total duration minus the union
@@ -272,6 +299,13 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 	if !hasFooter {
 		return AttemptTiming{}, fmt.Errorf("missing footer record")
 	}
+	return deriveAttemptTiming(header, footer, events), nil
+}
+
+// deriveAttemptTiming builds an AttemptTiming from the parsed stream records.
+// It is shared by the timings reader and the stream tracer so both lenses agree
+// on the derived header; nothing is persisted.
+func deriveAttemptTiming(header streamHeaderRecord, footer streamFooterRecord, events []streamEventRecord) AttemptTiming {
 	requestedAgent := header.RequestedAgent
 	if requestedAgent == "" {
 		requestedAgent = header.Agent
@@ -289,6 +323,10 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 			model = modelTime(windows, footer.DurationMS)
 		}
 	}
+	var tokens TokenUsage
+	if parse := tokenUsageParsers[header.Agent]; parse != nil {
+		tokens = parse(events)
+	}
 	return AttemptTiming{
 		Agent:          header.Agent,
 		RequestedAgent: requestedAgent,
@@ -298,9 +336,10 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 		Duration:       time.Duration(footer.DurationMS) * time.Millisecond,
 		Tools:          tools,
 		Model:          model,
+		Tokens:         tokens,
 		Reason:         footer.Reason,
 		ExitCode:       footer.ExitCode,
-	}, nil
+	}
 }
 
 // LatestFailureReason returns the structured failure reason recorded on the
@@ -339,9 +378,10 @@ func RenderTimings(w io.Writer, result *TimingsResult) {
 	}
 }
 
-// renderAttemptRows writes one task's attempt rows: agent, outcome, and total
-// duration per attempt, with per-tool rows beneath. Shared by the timings
-// reader and the inline breakdown so the two views render identically.
+// renderAttemptRows writes one task's attempt rows: agent, outcome, total
+// duration, and derived token spend per attempt, with per-tool rows beneath.
+// Shared by the timings reader and the inline breakdown so the two views
+// render identically.
 func renderAttemptRows(out *output, attempts []AttemptTiming) {
 	agentW, actualModelW, outcomeW := 0, 0, 0
 	for _, a := range attempts {
@@ -350,15 +390,43 @@ func renderAttemptRows(out *output, attempts []AttemptTiming) {
 		outcomeW = max(outcomeW, len(a.Outcome))
 	}
 	for _, a := range attempts {
+		tokens := formatTokenUsage(a.Tokens)
 		if actualModelW > 0 {
-			out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %-*s  %s",
-				a.Start.Format(time.RFC3339), agentW, displayAttemptAgent(a), actualModelW, a.ActualModel, outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
+			out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %-*s  %s  %s",
+				a.Start.Format(time.RFC3339), agentW, displayAttemptAgent(a), actualModelW, a.ActualModel, outcomeW, a.Outcome, formatAttemptDuration(a.Duration), tokens)
 		} else {
-			out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %s",
-				a.Start.Format(time.RFC3339), agentW, displayAttemptAgent(a), outcomeW, a.Outcome, formatAttemptDuration(a.Duration))
+			out.line(timingOutcomeStyle(a.Outcome), "  %s  %-*s  %-*s  %s  %s",
+				a.Start.Format(time.RFC3339), agentW, displayAttemptAgent(a), outcomeW, a.Outcome, formatAttemptDuration(a.Duration), tokens)
 		}
 		renderToolTimings(out, a.Tools, a.Model)
 	}
+}
+
+// formatTokenUsage renders a TokenUsage for the attempt row. When no usage was
+// reported it returns an em dash; otherwise it shows input/output and any
+// reported cache read/write figures.
+func formatTokenUsage(u TokenUsage) string {
+	if !u.HasUsage() {
+		return "—"
+	}
+	var parts []string
+	if u.HasInput {
+		parts = append(parts, fmt.Sprintf("in %d", u.Input))
+	}
+	if u.HasOutput {
+		parts = append(parts, fmt.Sprintf("out %d", u.Output))
+	}
+	if u.HasCacheRead || u.HasCacheWrite {
+		var cache []string
+		if u.HasCacheRead {
+			cache = append(cache, fmt.Sprintf("%dr", u.CacheRead))
+		}
+		if u.HasCacheWrite {
+			cache = append(cache, fmt.Sprintf("%dw", u.CacheWrite))
+		}
+		parts = append(parts, "cache "+strings.Join(cache, " "))
+	}
+	return strings.Join(parts, " / ")
 }
 
 func displayAttemptAgent(a AttemptTiming) string {

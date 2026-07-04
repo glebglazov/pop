@@ -70,7 +70,7 @@ func TestStreamWholeSetSpansAttemptsOrderedByStartTime(t *testing.T) {
 func TestStreamSingleTaskTarget(t *testing.T) {
 	env := streamFixture(t)
 	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
-	
+
 	claudeEvents := []streamEventRecord{
 		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init","model":"claude-sonnet-4-20250514"}`},
 		{Type: "event", AtMS: 100, Raw: `{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}`},
@@ -145,6 +145,39 @@ func TestStreamEmptyCase(t *testing.T) {
 
 	if !strings.Contains(out, "no captured attempt streams for demo") {
 		t.Fatalf("output should show no captured streams message:\n%s", out)
+	}
+}
+
+func TestStreamIncludesClaudeTokenUsage(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":1234,"output_tokens":567,"cache_read_input_tokens":89,"cache_creation_input_tokens":12}}`},
+	}
+	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "claude", "", 1, base, "completed", 60_000, events)
+
+	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := result.Tasks[0].Attempts[0].Timing
+	if !at.Tokens.HasUsage() {
+		t.Fatal("expected token usage")
+	}
+	if at.Tokens.Input != 1234 || at.Tokens.Output != 567 || at.Tokens.CacheRead != 89 || at.Tokens.CacheWrite != 12 {
+		t.Fatalf("tokens = %+v", at.Tokens)
+	}
+
+	var buf bytes.Buffer
+	RenderStream(&buf, result, RenderStreamOptions{})
+	out := buf.String()
+	if !strings.Contains(out, "in 1234 / out 567 / cache 89r 12w") {
+		t.Fatalf("output missing token summary:\n%s", out)
 	}
 }
 
@@ -268,9 +301,9 @@ func TestRenderStreamHandlesMixedOutcomes(t *testing.T) {
 				Attempts: []AttemptStream{
 					{
 						Timing: AttemptTiming{
-							Agent:   "claude",
-							Start:   base,
-							Outcome: "failed",
+							Agent:    "claude",
+							Start:    base,
+							Outcome:  "failed",
 							Duration: 45 * time.Second,
 						},
 						Events: []StreamEvent{
@@ -279,9 +312,9 @@ func TestRenderStreamHandlesMixedOutcomes(t *testing.T) {
 					},
 					{
 						Timing: AttemptTiming{
-							Agent:   "claude",
-							Start:   base.Add(10 * time.Minute),
-							Outcome: "completed",
+							Agent:    "claude",
+							Start:    base.Add(10 * time.Minute),
+							Outcome:  "completed",
 							Duration: 30 * time.Second,
 						},
 						Events: []StreamEvent{

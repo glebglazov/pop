@@ -228,36 +228,7 @@ func loadAttemptStream(d *Deps, path string) (AttemptStream, error) {
 		return AttemptStream{}, fmt.Errorf("missing footer record")
 	}
 
-	requestedAgent := header.RequestedAgent
-	if requestedAgent == "" {
-		requestedAgent = header.Agent
-	}
-	var actualModel string
-	if parse := actualModelParsers[header.Agent]; parse != nil {
-		actualModel = parse(events)
-	}
-	var tools []ToolTiming
-	var model time.Duration
-	if parse := toolTimingParsers[header.Agent]; parse != nil {
-		var windows []toolWindow
-		tools, windows = parse(events)
-		if len(tools) > 0 {
-			model = modelTime(windows, footer.DurationMS)
-		}
-	}
-
-	timing := AttemptTiming{
-		Agent:          header.Agent,
-		RequestedAgent: requestedAgent,
-		ActualModel:    actualModel,
-		Start:          header.StartTime,
-		Outcome:        footer.Outcome,
-		Duration:       time.Duration(footer.DurationMS) * time.Millisecond,
-		Tools:          tools,
-		Model:          model,
-		Reason:         footer.Reason,
-		ExitCode:       footer.ExitCode,
-	}
+	timing := deriveAttemptTiming(header, footer, events)
 
 	renderedEvents := renderStreamEvents(header.Agent, events)
 
@@ -312,11 +283,11 @@ func renderClaudeEvent(ev streamEventRecord) []StreamEvent {
 		Model   string `json:"model"`
 		Message struct {
 			Content []struct {
-				Type  string          `json:"type"`
-				Text  string          `json:"text"`
-				Name  string          `json:"name"`
-				ID    string          `json:"id"`
-				Input json.RawMessage `json:"input"`
+				Type    string          `json:"type"`
+				Text    string          `json:"text"`
+				Name    string          `json:"name"`
+				ID      string          `json:"id"`
+				Input   json.RawMessage `json:"input"`
 				Content []struct {
 					Type string `json:"type"`
 					Text string `json:"text"`
@@ -583,12 +554,13 @@ func renderAttemptStreams(out *output, attempts []AttemptStream, opts RenderStre
 // renderAttemptTimingHeader writes the timing breakdown for one attempt,
 // mirroring the format used by RenderTimings.
 func renderAttemptTimingHeader(out *output, a AttemptTiming) {
+	tokens := formatTokenUsage(a.Tokens)
 	if a.ActualModel != "" {
-		out.line(timingOutcomeStyle(a.Outcome), "  %s  %s  %s  %s  %s",
-			a.Start.Format(time.RFC3339), displayAttemptAgent(a), a.ActualModel, a.Outcome, formatAttemptDuration(a.Duration))
+		out.line(timingOutcomeStyle(a.Outcome), "  %s  %s  %s  %s  %s  %s",
+			a.Start.Format(time.RFC3339), displayAttemptAgent(a), a.ActualModel, a.Outcome, formatAttemptDuration(a.Duration), tokens)
 	} else {
-		out.line(timingOutcomeStyle(a.Outcome), "  %s  %s  %s  %s",
-			a.Start.Format(time.RFC3339), displayAttemptAgent(a), a.Outcome, formatAttemptDuration(a.Duration))
+		out.line(timingOutcomeStyle(a.Outcome), "  %s  %s  %s  %s  %s",
+			a.Start.Format(time.RFC3339), displayAttemptAgent(a), a.Outcome, formatAttemptDuration(a.Duration), tokens)
 	}
 	renderToolTimings(out, a.Tools, a.Model)
 }

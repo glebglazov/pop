@@ -307,6 +307,122 @@ func claudeResult(toolUseID string) string {
 	return `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"` + toolUseID + `","content":"ok"}]}}`
 }
 
+func TestClaudeTokenUsageDerivesFromResultEvent(t *testing.T) {
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
+		{Type: "event", AtMS: 100, Raw: `{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}`},
+		{Type: "event", AtMS: 200, Raw: `{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":123,"output_tokens":456,"cache_read_input_tokens":78,"cache_creation_input_tokens":90}}`},
+	}
+	u := claudeTokenUsage(events)
+	if !u.HasUsage() {
+		t.Fatal("expected usage")
+	}
+	if u.Input != 123 || !u.HasInput {
+		t.Fatalf("input = %d/%v", u.Input, u.HasInput)
+	}
+	if u.Output != 456 || !u.HasOutput {
+		t.Fatalf("output = %d/%v", u.Output, u.HasOutput)
+	}
+	if u.CacheRead != 78 || !u.HasCacheRead {
+		t.Fatalf("cache read = %d/%v", u.CacheRead, u.HasCacheRead)
+	}
+	if u.CacheWrite != 90 || !u.HasCacheWrite {
+		t.Fatalf("cache write = %d/%v", u.CacheWrite, u.HasCacheWrite)
+	}
+}
+
+func TestClaudeTokenUsageSumsMultipleUsageEvents(t *testing.T) {
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"result","subtype":"success","usage":{"input_tokens":100,"output_tokens":50}}`},
+		{Type: "event", AtMS: 10, Raw: `{"type":"result","subtype":"success","usage":{"input_tokens":25,"output_tokens":75,"cache_read_input_tokens":10}}`},
+	}
+	u := claudeTokenUsage(events)
+	if u.Input != 125 {
+		t.Fatalf("input = %d", u.Input)
+	}
+	if u.Output != 125 {
+		t.Fatalf("output = %d", u.Output)
+	}
+	if u.CacheRead != 10 || !u.HasCacheRead {
+		t.Fatalf("cache read = %d/%v", u.CacheRead, u.HasCacheRead)
+	}
+	if u.HasCacheWrite {
+		t.Fatal("cache write should be absent")
+	}
+}
+
+func TestClaudeTokenUsageIgnoresNonAPIUsage(t *testing.T) {
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"task_progress","usage":{"total_tokens":100,"tool_uses":1}}`},
+	}
+	u := claudeTokenUsage(events)
+	if u.HasUsage() {
+		t.Fatalf("unexpected usage from task_progress: %+v", u)
+	}
+}
+
+func TestTimingsIncludesClaudeTokenUsage(t *testing.T) {
+	env := timingsFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":1234,"output_tokens":567,"cache_read_input_tokens":89,"cache_creation_input_tokens":12}}`},
+	}
+	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "claude", "", 1, base, "completed", 60_000, events)
+
+	result, err := TimingsWith(env.deps(), nil, nil, TimingsOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := result.Tasks[0].Attempts[0]
+	if !at.Tokens.HasUsage() {
+		t.Fatal("expected token usage")
+	}
+	if at.Tokens.Input != 1234 || at.Tokens.Output != 567 || at.Tokens.CacheRead != 89 || at.Tokens.CacheWrite != 12 {
+		t.Fatalf("tokens = %+v", at.Tokens)
+	}
+
+	var buf bytes.Buffer
+	RenderTimings(&buf, result)
+	out := buf.String()
+	if !strings.Contains(out, "in 1234 / out 567 / cache 89r 12w") {
+		t.Fatalf("output missing token summary:\n%s", out)
+	}
+}
+
+func TestTimingsOmitsTokenUsageForCodex(t *testing.T) {
+	env := timingsFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"turn.completed","usage":{"total_tokens":999}}`},
+	}
+	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "codex", "", 1, base, "completed", 60_000, events)
+
+	result, err := TimingsWith(env.deps(), nil, nil, TimingsOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := result.Tasks[0].Attempts[0]
+	if at.Tokens.HasUsage() {
+		t.Fatalf("codex tokens should be absent, got %+v", at.Tokens)
+	}
+
+	var buf bytes.Buffer
+	RenderTimings(&buf, result)
+	out := buf.String()
+	if !strings.Contains(out, "1m0s  —") {
+		t.Fatalf("output missing absent token marker:\n%s", out)
+	}
+}
+
 func TestClaudeToolTimingsPairsUseWithResultByID(t *testing.T) {
 	tools, _ := claudeToolTimings([]streamEventRecord{
 		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},

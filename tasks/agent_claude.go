@@ -93,6 +93,47 @@ func claudeActualModel(events []streamEventRecord) string {
 	return ""
 }
 
+// claudeTokenUsage derives per-attempt token spend from one stored Captured
+// claude stream. Claude reports cumulative usage on the final result event
+// (and on any event carrying Anthropic API-style usage fields), so we sum
+// every reported usage block and treat a present zero as a reported value.
+// Cache write maps from cache_creation_input_tokens; cache read from
+// cache_read_input_tokens. Other claude events (e.g. task_progress) use a
+// different usage shape and are ignored because they lack the API fields.
+func claudeTokenUsage(events []streamEventRecord) TokenUsage {
+	var u TokenUsage
+	for _, ev := range events {
+		var usage struct {
+			Usage struct {
+				InputTokens              *int64 `json:"input_tokens"`
+				OutputTokens             *int64 `json:"output_tokens"`
+				CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
+				CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &usage); err != nil {
+			continue
+		}
+		if v := usage.Usage.InputTokens; v != nil {
+			u.Input += *v
+			u.HasInput = true
+		}
+		if v := usage.Usage.OutputTokens; v != nil {
+			u.Output += *v
+			u.HasOutput = true
+		}
+		if v := usage.Usage.CacheReadInputTokens; v != nil {
+			u.CacheRead += *v
+			u.HasCacheRead = true
+		}
+		if v := usage.Usage.CacheCreationInputTokens; v != nil {
+			u.CacheWrite += *v
+			u.HasCacheWrite = true
+		}
+	}
+	return u
+}
+
 // claudeToolTick formats a compact "→ Name hint" line, probing the tool input
 // for the first recognized salient key without knowing per-tool schemas.
 func claudeToolTick(name string, input json.RawMessage) string {
