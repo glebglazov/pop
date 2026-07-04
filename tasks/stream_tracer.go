@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -20,6 +21,30 @@ import (
 type StreamOptions struct {
 	ResolveInput
 	Target string
+}
+
+// RenderStreamOptions configures how the stream replay is rendered.
+type RenderStreamOptions struct {
+	// Full disables payload truncation and prints every payload verbatim.
+	Full bool
+}
+
+// streamTruncationLimits defines the default head/tail truncation thresholds
+// for large tool payloads in the rendered replay.
+var streamTruncationLimits = struct {
+	MaxLines  int
+	HeadLines int
+	TailLines int
+	MaxBytes  int
+	HeadBytes int
+	TailBytes int
+}{
+	MaxLines:  40,
+	HeadLines: 15,
+	TailLines: 15,
+	MaxBytes:  4096,
+	HeadBytes: 1536,
+	TailBytes: 1536,
 }
 
 // StreamResult is the per-task attempt stream replay for one Task set.
@@ -366,7 +391,7 @@ func renderClaudeEvent(ev streamEventRecord) []StreamEvent {
 // RenderStream writes the attempt stream replay: per task, attempts ordered by
 // start time, each showing the timing breakdown header followed by the event
 // sequence with +Xs offsets.
-func RenderStream(w io.Writer, result *StreamResult) {
+func RenderStream(w io.Writer, result *StreamResult, opts RenderStreamOptions) {
 	out := outputFor(w)
 	hasAnyAttempts := false
 	for _, task := range result.Tasks {
@@ -390,13 +415,13 @@ func RenderStream(w io.Writer, result *StreamResult) {
 			out.line(ansiDim, "  no captured attempt streams")
 			continue
 		}
-		renderAttemptStreams(out, task.Attempts)
+		renderAttemptStreams(out, task.Attempts, opts)
 	}
 }
 
 // renderAttemptStreams writes one task's attempt streams: the timing breakdown
 // header followed by the event replay with +Xs offsets.
-func renderAttemptStreams(out *output, attempts []AttemptStream) {
+func renderAttemptStreams(out *output, attempts []AttemptStream, opts RenderStreamOptions) {
 	// First render the timing breakdown header for each attempt
 	for _, a := range attempts {
 		renderAttemptTimingHeader(out, a.Timing)
@@ -407,7 +432,7 @@ func renderAttemptStreams(out *output, attempts []AttemptStream) {
 		if i > 0 {
 			fmt.Fprintln(out)
 		}
-		renderAttemptEventReplay(out, a)
+		renderAttemptEventReplay(out, a, opts)
 	}
 }
 
@@ -425,7 +450,7 @@ func renderAttemptTimingHeader(out *output, a AttemptTiming) {
 }
 
 // renderAttemptEventReplay writes one attempt's event sequence with +Xs offsets.
-func renderAttemptEventReplay(out *output, a AttemptStream) {
+func renderAttemptEventReplay(out *output, a AttemptStream, opts RenderStreamOptions) {
 	if len(a.Events) == 0 {
 		out.line(ansiDim, "  no events")
 		return
@@ -440,11 +465,13 @@ func renderAttemptEventReplay(out *output, a AttemptStream) {
 		case "assistant":
 			fmt.Fprintf(out, "    %s  %s\n", offset, ev.Text)
 		case "tool_use":
-			out.line(ansiDim, "    %s  → %s %s", offset, ev.ToolName, ev.ToolArgs)
+			args := truncatePayload(ev.ToolArgs, opts.Full)
+			out.line(ansiDim, "    %s  → %s %s", offset, ev.ToolName, args)
 		case "tool_result":
 			if ev.Text != "" {
 				// Indent multiline results
-				lines := strings.Split(ev.Text, "\n")
+				text := truncatePayload(ev.Text, opts.Full)
+				lines := strings.Split(text, "\n")
 				for i, line := range lines {
 					if i == 0 {
 						out.line(ansiDim, "    %s    %s", offset, line)
@@ -457,6 +484,64 @@ func renderAttemptEventReplay(out *output, a AttemptStream) {
 			out.line(ansiDim, "    %s  %s", offset, ev.Text)
 		}
 	}
+}
+
+// truncatePayload clips oversized tool payloads to a head+tail excerpt with an
+// elision marker. Assistant text and small payloads are returned unchanged.
+func truncatePayload(text string, full bool) string {
+	if full || text == "" {
+		return text
+	}
+
+	lim := streamTruncationLimits
+
+	lines := strings.Split(text, "\n")
+	if len(lines) > lim.MaxLines {
+		head := strings.Join(lines[:lim.HeadLines], "\n")
+		tail := strings.Join(lines[len(lines)-lim.TailLines:], "\n")
+		elidedLines := len(lines) - lim.HeadLines - lim.TailLines
+		elidedBytes := len(text) - len(head) - len(tail)
+		if head != "" && tail != "" {
+			elidedBytes-- // the newline that joined head and tail in the original text
+		}
+		marker := fmt.Sprintf("… %s / %d lines elided …", humanizeBytes(elidedBytes), elidedLines)
+		if head == "" {
+			return marker + "\n" + tail
+		}
+		if tail == "" {
+			return head + "\n" + marker
+		}
+		return head + "\n" + marker + "\n" + tail
+	}
+
+	if len(text) > lim.MaxBytes {
+		head := text[:lim.HeadBytes]
+		for !utf8.ValidString(head) && len(head) > 0 {
+			head = head[:len(head)-1]
+		}
+		tail := text[len(text)-lim.TailBytes:]
+		for !utf8.ValidString(tail) && len(tail) > 0 {
+			tail = tail[1:]
+		}
+		elidedBytes := len(text) - len(head) - len(tail)
+		marker := fmt.Sprintf("… %s / 0 lines elided …", humanizeBytes(elidedBytes))
+		return head + "\n" + marker + "\n" + tail
+	}
+
+	return text
+}
+
+// humanizeBytes formats a byte count as a compact, human-readable string.
+func humanizeBytes(n int) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	kb := float64(n) / 1024
+	if kb < 1024 {
+		return fmt.Sprintf("%.1f KB", kb)
+	}
+	mb := kb / 1024
+	return fmt.Sprintf("%.1f MB", mb)
 }
 
 // formatOffset formats a millisecond offset as +Xs or +Xm Ys.

@@ -41,6 +41,7 @@ var (
 	taskStatusArchived        bool
 	taskBindWorktreeForce     bool
 	taskUnbindWorktreeYes     bool
+	taskStreamFull            bool
 )
 
 var taskCmd = &cobra.Command{
@@ -210,6 +211,7 @@ func init() {
 	taskCmd.AddCommand(taskSkipTaskCmd)
 	taskCmd.AddCommand(taskTimingsCmd)
 	taskCmd.AddCommand(taskStreamCmd)
+	taskStreamCmd.Flags().BoolVar(&taskStreamFull, "full", false, "Print all tool payloads verbatim without truncation")
 	taskCmd.AddCommand(taskShowPathCmd)
 	taskCmd.AddCommand(taskTransferCmd)
 	taskTransferCmd.AddCommand(taskExportCmd)
@@ -1068,7 +1070,7 @@ func runTaskStreamWith(d *tasks.Deps, w io.Writer, target string) error {
 	if err != nil {
 		return err
 	}
-	tasks.RenderStream(w, result)
+	tasks.RenderStream(w, result, tasks.RenderStreamOptions{Full: taskStreamFull})
 	return nil
 }
 

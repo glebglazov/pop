@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -135,7 +136,7 @@ func TestStreamEmptyCase(t *testing.T) {
 
 	// Render should show "no captured attempt streams"
 	var buf bytes.Buffer
-	RenderStream(&buf, result)
+	RenderStream(&buf, result, RenderStreamOptions{})
 	out := buf.String()
 
 	if !strings.Contains(out, "no captured attempt streams for demo") {
@@ -201,7 +202,7 @@ func TestRenderStreamShowsTimingHeaderAndEventReplay(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	RenderStream(&buf, result)
+	RenderStream(&buf, result, RenderStreamOptions{})
 	out := buf.String()
 
 	// Should show timing header
@@ -289,7 +290,7 @@ func TestRenderStreamHandlesMixedOutcomes(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	RenderStream(&buf, result)
+	RenderStream(&buf, result, RenderStreamOptions{})
 	out := buf.String()
 
 	// Should show both attempts
@@ -328,6 +329,210 @@ func TestFormatOffset(t *testing.T) {
 		got := formatOffset(tc.ms)
 		if got != tc.want {
 			t.Errorf("formatOffset(%d) = %q, want %q", tc.ms, got, tc.want)
+		}
+	}
+}
+
+func TestTruncatePayloadLineThreshold(t *testing.T) {
+	// Build a 50-line payload that exceeds the default 40-line threshold.
+	var lines []string
+	for i := 0; i < 50; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i+1))
+	}
+	payload := strings.Join(lines, "\n")
+
+	truncated := truncatePayload(payload, false)
+	if truncated == payload {
+		t.Fatal("expected payload to be truncated")
+	}
+	if !strings.Contains(truncated, "elided") {
+		t.Fatalf("expected elision marker, got:\n%s", truncated)
+	}
+	// Head and tail should be present.
+	if !strings.Contains(truncated, "line 1") {
+		t.Fatalf("missing head line:\n%s", truncated)
+	}
+	if !strings.Contains(truncated, "line 50") {
+		t.Fatalf("missing tail line:\n%s", truncated)
+	}
+	// Middle lines should be elided.
+	if strings.Contains(truncated, "line 25") {
+		t.Fatalf("middle line should be elided:\n%s", truncated)
+	}
+
+	// Full mode returns the payload verbatim.
+	full := truncatePayload(payload, true)
+	if full != payload {
+		t.Fatalf("--full should return payload verbatim")
+	}
+}
+
+func TestTruncatePayloadByteThreshold(t *testing.T) {
+	// Single-line payload longer than the default 4 KB byte threshold.
+	payload := strings.Repeat("x", 5000)
+
+	truncated := truncatePayload(payload, false)
+	if truncated == payload {
+		t.Fatal("expected payload to be truncated")
+	}
+	if !strings.Contains(truncated, "elided") {
+		t.Fatalf("expected elision marker, got:\n%s", truncated)
+	}
+	if !strings.HasPrefix(truncated, strings.Repeat("x", streamTruncationLimits.HeadBytes)) {
+		t.Fatal("missing head bytes")
+	}
+	if !strings.HasSuffix(truncated, strings.Repeat("x", streamTruncationLimits.TailBytes)) {
+		t.Fatal("missing tail bytes")
+	}
+
+	full := truncatePayload(payload, true)
+	if full != payload {
+		t.Fatal("--full should return payload verbatim")
+	}
+}
+
+func TestTruncatePayloadSmallPayloadUnchanged(t *testing.T) {
+	payload := "small payload\nwith a few lines"
+
+	if got := truncatePayload(payload, false); got != payload {
+		t.Fatalf("small payload changed in default mode: %q", got)
+	}
+	if got := truncatePayload(payload, true); got != payload {
+		t.Fatalf("small payload changed in full mode: %q", got)
+	}
+}
+
+func TestRenderStreamTruncatesLargeToolResult(t *testing.T) {
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	var lines []string
+	for i := 0; i < 50; i++ {
+		lines = append(lines, fmt.Sprintf("result line %d", i+1))
+	}
+	resultText := strings.Join(lines, "\n")
+
+	res := &StreamResult{
+		TaskSetID: "demo",
+		Tasks: []TaskStream{
+			{
+				TaskID: "01-a",
+				File:   "01-a.md",
+				Title:  "A",
+				Attempts: []AttemptStream{
+					{
+						Timing: AttemptTiming{
+							Agent:    "claude",
+							Start:    base,
+							Outcome:  "completed",
+							Duration: 10 * time.Second,
+						},
+						Events: []StreamEvent{
+							{AtMS: 100, Type: "tool_result", Text: resultText},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	RenderStream(&buf, res, RenderStreamOptions{})
+	out := buf.String()
+
+	if !strings.Contains(out, "elided") {
+		t.Fatalf("expected elision marker, got:\n%s", out)
+	}
+	if !strings.Contains(out, "result line 1") {
+		t.Fatalf("missing head:\n%s", out)
+	}
+	if !strings.Contains(out, "result line 50") {
+		t.Fatalf("missing tail:\n%s", out)
+	}
+	if strings.Contains(out, "result line 25") {
+		t.Fatalf("middle should be elided:\n%s", out)
+	}
+
+	buf.Reset()
+	RenderStream(&buf, res, RenderStreamOptions{Full: true})
+	fullOut := buf.String()
+
+	if strings.Contains(fullOut, "elided") {
+		t.Fatalf("--full should not contain elision marker:\n%s", fullOut)
+	}
+	if !strings.Contains(fullOut, "result line 25") {
+		t.Fatalf("--full should contain middle lines:\n%s", fullOut)
+	}
+}
+
+func TestRenderStreamTruncatesLargeToolUseArgs(t *testing.T) {
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	var lines []string
+	for i := 0; i < 50; i++ {
+		lines = append(lines, fmt.Sprintf("arg line %d", i+1))
+	}
+	args := strings.Join(lines, "\n")
+
+	res := &StreamResult{
+		TaskSetID: "demo",
+		Tasks: []TaskStream{
+			{
+				TaskID: "01-a",
+				File:   "01-a.md",
+				Title:  "A",
+				Attempts: []AttemptStream{
+					{
+						Timing: AttemptTiming{
+							Agent:    "claude",
+							Start:    base,
+							Outcome:  "completed",
+							Duration: 10 * time.Second,
+						},
+						Events: []StreamEvent{
+							{AtMS: 100, Type: "tool_use", ToolName: "Write", ToolArgs: args},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	RenderStream(&buf, res, RenderStreamOptions{})
+	out := buf.String()
+
+	if !strings.Contains(out, "elided") {
+		t.Fatalf("expected elision marker, got:\n%s", out)
+	}
+
+	buf.Reset()
+	RenderStream(&buf, res, RenderStreamOptions{Full: true})
+	fullOut := buf.String()
+
+	if strings.Contains(fullOut, "elided") {
+		t.Fatalf("--full should not contain elision marker:\n%s", fullOut)
+	}
+	if !strings.Contains(fullOut, "arg line 25") {
+		t.Fatalf("--full should contain middle lines:\n%s", fullOut)
+	}
+}
+
+func TestHumanizeBytes(t *testing.T) {
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1024, "1.0 KB"},
+		{1536, "1.5 KB"},
+		{1024 * 1024, "1.0 MB"},
+		{2 * 1024 * 1024, "2.0 MB"},
+	}
+	for _, tc := range cases {
+		got := humanizeBytes(tc.n)
+		if got != tc.want {
+			t.Errorf("humanizeBytes(%d) = %q, want %q", tc.n, got, tc.want)
 		}
 	}
 }
