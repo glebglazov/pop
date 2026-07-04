@@ -786,6 +786,182 @@ func TestStreamRawRejectsInvalidTargets(t *testing.T) {
 	}
 }
 
+func TestStreamLastMultiAttemptTask(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+
+	// Three attempts for task 01-a with different start times.
+	writeTimingStream(t, streamDir, "attempt-001.jsonl.gz", "claude", 1, base.Add(-20*time.Minute), "failed", 30_000)
+	writeTimingStream(t, streamDir, "attempt-002.jsonl.gz", "claude", 2, base.Add(-10*time.Minute), "failed", 45_000)
+	writeTimingStream(t, streamDir, "attempt-003.jsonl.gz", "claude", 3, base, "completed", 60_000)
+
+	// Without --last we get all three.
+	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tasks[0].Attempts) != 3 {
+		t.Fatalf("without --last: expected 3 attempts, got %d", len(result.Tasks[0].Attempts))
+	}
+
+	// With --last we get only the most recent (attempt-003, completed).
+	result, err = StreamWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+		Last:         true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tasks[0].Attempts) != 1 {
+		t.Fatalf("with --last: expected 1 attempt, got %d", len(result.Tasks[0].Attempts))
+	}
+	last := result.Tasks[0].Attempts[0]
+	if last.Timing.Outcome != "completed" {
+		t.Fatalf("with --last: expected outcome 'completed', got %q", last.Timing.Outcome)
+	}
+	if !last.Timing.Start.Equal(base) {
+		t.Fatalf("with --last: expected start %v, got %v", base, last.Timing.Start)
+	}
+
+	// Render output should only mention the most recent attempt.
+	var buf bytes.Buffer
+	RenderStream(&buf, result, RenderStreamOptions{})
+	out := buf.String()
+	if strings.Count(out, "Attempt starting") != 1 {
+		t.Fatalf("with --last: expected 1 'Attempt starting' line, got %d:\n%s", strings.Count(out, "Attempt starting"), out)
+	}
+	if strings.Contains(out, "failed") {
+		t.Fatalf("with --last: output should not contain 'failed':\n%s", out)
+	}
+}
+
+func TestStreamLastBareSet(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	// Task 01-a: two attempts.
+	dirA := taskStreamDir(env.demoDir(), "01-a.md")
+	writeTimingStream(t, dirA, "attempt-001.jsonl.gz", "claude", 1, base.Add(-20*time.Minute), "failed", 30_000)
+	writeTimingStream(t, dirA, "attempt-002.jsonl.gz", "claude", 2, base, "completed", 60_000)
+
+	// Task 02-b: one attempt.
+	dirB := taskStreamDir(env.demoDir(), "02-b.md")
+	writeTimingStream(t, dirB, "attempt-001.jsonl.gz", "claude", 1, base.Add(-10*time.Minute), "failed", 15_000)
+
+	// With --last, each task should show only its most recent attempt.
+	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo",
+		Last:         true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(result.Tasks))
+	}
+
+	// Task 01-a: should have only the latest attempt (completed).
+	if len(result.Tasks[0].Attempts) != 1 {
+		t.Fatalf("task 01-a: expected 1 attempt with --last, got %d", len(result.Tasks[0].Attempts))
+	}
+	if result.Tasks[0].Attempts[0].Timing.Outcome != "completed" {
+		t.Fatalf("task 01-a: expected 'completed', got %q", result.Tasks[0].Attempts[0].Timing.Outcome)
+	}
+
+	// Task 02-b: should have the single attempt (failed).
+	if len(result.Tasks[1].Attempts) != 1 {
+		t.Fatalf("task 02-b: expected 1 attempt with --last, got %d", len(result.Tasks[1].Attempts))
+	}
+	if result.Tasks[1].Attempts[0].Timing.Outcome != "failed" {
+		t.Fatalf("task 02-b: expected 'failed', got %q", result.Tasks[1].Attempts[0].Timing.Outcome)
+	}
+}
+
+func TestStreamLastWithRaw(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+
+	// Two attempts: --last should emit only the most recent.
+	writeTimingStream(t, streamDir, "attempt-001.jsonl.gz", "claude", 1, base.Add(-10*time.Minute), "failed", 45_000)
+	writeTimingStream(t, streamDir, "attempt-002.jsonl.gz", "claude", 2, base, "completed", 60_000)
+
+	var buf bytes.Buffer
+	err := StreamRawWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+		Last:         true,
+	}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	// Should contain only the latest attempt (attempt=2).
+	if !strings.Contains(out, `"attempt":2`) {
+		t.Fatalf("--last --raw output should contain attempt 2:\n%s", out)
+	}
+	if strings.Contains(out, `"attempt":1`) {
+		t.Fatalf("--last --raw output should NOT contain attempt 1:\n%s", out)
+	}
+	// No delimiter needed for a single attempt.
+	if strings.Contains(out, "delimiter") {
+		t.Fatalf("--last --raw output should not contain delimiter:\n%s", out)
+	}
+}
+
+func TestStreamLastWithFull(t *testing.T) {
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	// Build a result with two attempts and apply --last filtering like StreamWith does.
+	result := &StreamResult{
+		TaskSetID: "demo",
+		Tasks: []TaskStream{
+			{
+				TaskID: "01-a",
+				File:   "01-a.md",
+				Title:  "A",
+				Attempts: []AttemptStream{
+					{
+						Timing: AttemptTiming{Agent: "claude", Start: base.Add(-10 * time.Minute), Outcome: "failed", Duration: 45 * time.Second},
+						Events: []StreamEvent{{AtMS: 100, Type: "tool_result", Text: strings.Repeat("long output line\n", 50)}},
+					},
+					{
+						Timing: AttemptTiming{Agent: "claude", Start: base, Outcome: "completed", Duration: 60 * time.Second},
+						Events: []StreamEvent{{AtMS: 100, Type: "tool_result", Text: "short result"}},
+					},
+				},
+			},
+		},
+	}
+
+	// Simulate --last filtering.
+	result.Tasks[0].Attempts = result.Tasks[0].Attempts[len(result.Tasks[0].Attempts)-1:]
+
+	// Render with --full (no truncation).
+	var buf bytes.Buffer
+	RenderStream(&buf, result, RenderStreamOptions{Full: true})
+	out := buf.String()
+
+	// Should have only the latest attempt (completed).
+	if !strings.Contains(out, "completed") {
+		t.Fatalf("--last --full output should contain 'completed':\n%s", out)
+	}
+	if strings.Contains(out, "failed") {
+		t.Fatalf("--last --full output should NOT contain 'failed':\n%s", out)
+	}
+	// Full mode renders the payload verbatim.
+	if strings.Contains(out, "elided") {
+		t.Fatalf("--last --full should not contain elision marker:\n%s", out)
+	}
+}
+
 func TestHumanizeBytes(t *testing.T) {
 	cases := []struct {
 		n    int

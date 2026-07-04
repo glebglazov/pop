@@ -21,6 +21,9 @@ import (
 type StreamOptions struct {
 	ResolveInput
 	Target string
+	// Last restricts the output to only the most recent attempt per task
+	// (by start time).
+	Last bool
 }
 
 // RenderStreamOptions configures how the stream replay is rendered.
@@ -128,6 +131,9 @@ func StreamWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 		attempts, err := readTaskAttemptStreams(d, m.Dir, task.File)
 		if err != nil {
 			return nil, exitErr(ExitOperational, "read attempt streams for %s/%s: %v", taskSetID, task.ID, err)
+		}
+		if opts.Last && len(attempts) > 0 {
+			attempts = attempts[len(attempts)-1:]
 		}
 		result.Tasks = append(result.Tasks, TaskStream{
 			TaskID:   task.ID,
@@ -438,6 +444,10 @@ func StreamRawWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 		}
 
 		sort.SliceStable(attempts, func(i, j int) bool { return attempts[i].start.Before(attempts[j].start) })
+
+		if opts.Last && len(attempts) > 0 {
+			attempts = attempts[len(attempts)-1:]
+		}
 
 		for _, na := range attempts {
 			path := filepath.Join(dir, na.name)
