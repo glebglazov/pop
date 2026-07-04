@@ -20,23 +20,27 @@ import (
 )
 
 var (
-	taskProject           string
-	taskPath              string
-	taskDefPath           string
-	taskRuntimePath       string
-	taskAgentPreset       string
-	taskAgentPresets      []string
-	taskAgentCmd          string
-	taskAgentOutput       tasks.AgentOutputMode
-	taskRunYes            bool
-	taskInWorktree        bool
-	taskAllowDirty        tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
-	taskMaxTries          int
-	taskTimeout           string
-	taskVerifyTimeout     string
-	taskStatusArchived    bool
-	taskBindWorktreeForce bool
-	taskUnbindWorktreeYes bool
+	taskProject               string
+	taskPath                  string
+	taskDefPath               string
+	taskRuntimePath           string
+	taskAgentPreset           string
+	taskAgentPresets          []string
+	taskAgentCmd              string
+	taskAgentOutput           tasks.AgentOutputMode
+	taskRunYes                bool
+	taskInWorktree            bool
+	taskAllowDirty            tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
+	taskMaxTries              int
+	taskTimeout               string
+	taskVerifyTimeout         string
+	taskVerifyAgents          []string
+	taskVerifyEffort          string
+	taskImplementVerifyAgents []string
+	taskImplementVerifyEffort string
+	taskStatusArchived        bool
+	taskBindWorktreeForce     bool
+	taskUnbindWorktreeYes     bool
 )
 
 var taskCmd = &cobra.Command{
@@ -226,8 +230,12 @@ func init() {
 	taskImplementCmd.Flags().StringVar(&taskTimeout, "timeout", "1h", "Maximum duration per attempt")
 	taskImplementCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip confirmation prompt")
 	taskImplementCmd.Flags().BoolVar(&taskInWorktree, "in-worktree", false, "Provision a managed worktree forked from the current checkout and drain there")
+	taskImplementCmd.Flags().StringArrayVar(&taskImplementVerifyAgents, "verify-agent", nil, "Verifier agent preset for the in-drain verify phase; repeat to define an ordered fallback list (steers verification independently of --agent)")
+	taskImplementCmd.Flags().StringVar(&taskImplementVerifyEffort, "verify-effort", "", "Verifier model-strength tier for the in-drain verify phase: light, standard, or heavy (default heavy)")
 
 	taskVerifyCmd.Flags().StringVar(&taskVerifyTimeout, "timeout", "1h", "Maximum duration for the Verifier attempt")
+	taskVerifyCmd.Flags().StringArrayVar(&taskVerifyAgents, "agent", nil, "Verifier agent preset; repeat to define an ordered quota/missing-binary fallback list")
+	taskVerifyCmd.Flags().StringVar(&taskVerifyEffort, "effort", "", "Verifier model-strength tier: light, standard, or heavy (default heavy)")
 
 	taskExportCmd.Flags().StringVarP(&taskExportOutput, "output", "o", "", "Output archive path (default: <task-set-id>.tar.gz in the current directory)")
 	taskImportCmd.Flags().StringVar(&taskImportAs, "as", "", "Install under a different task set identifier")
@@ -600,6 +608,8 @@ func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	if _, err := tasks.VerifyTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.VerifyOptions{
 		ResolveInput: taskResolveInput(),
 		TaskSetID:    taskSetID,
+		Agents:       append([]string(nil), taskVerifyAgents...),
+		Effort:       taskVerifyEffort,
 		Timeout:      timeout,
 		Output:       w,
 	}); err != nil {
@@ -715,6 +725,8 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		AllowDirty:      taskAllowDirty,
 		MaxTries:        taskMaxTries,
 		Timeout:         timeout,
+		VerifyAgents:    append([]string(nil), taskImplementVerifyAgents...),
+		VerifyEffort:    taskImplementVerifyEffort,
 		Yes:             taskRunYes,
 		ConfirmIn:       stdin,
 		ConfirmOut:      stderr,

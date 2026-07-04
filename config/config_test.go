@@ -140,6 +140,32 @@ max_remediation_depth = 2
 	}
 }
 
+func TestLoadWorkloadVerifyAgentsEffort(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[workload.verify]
+enabled = true
+agents = ["codex", "claude"]
+effort = "standard"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Task == nil || cfg.Task.Verify == nil {
+		t.Fatal("expected [workload.verify] section to parse")
+	}
+	want := []string{"codex", "claude"}
+	if !reflect.DeepEqual(cfg.Task.Verify.Agents, want) {
+		t.Fatalf("verify agents = %#v, want %#v", cfg.Task.Verify.Agents, want)
+	}
+	if cfg.Task.Verify.Effort != "standard" {
+		t.Fatalf("verify effort = %q, want standard", cfg.Task.Verify.Effort)
+	}
+}
+
 func TestWorkbenchPickOnCreate(t *testing.T) {
 	// Defaults to false: nil receiver, nil section, and an empty section.
 	var nilCfg *Config

@@ -1783,6 +1783,32 @@ func TestImplementAgentFlagExplicitness(t *testing.T) {
 	}
 }
 
+func TestVerifierSteeringFlagsRegistered(t *testing.T) {
+	// `pop tasks verify` accepts repeatable --agent and an --effort override.
+	agent := taskVerifyCmd.Flags().Lookup("agent")
+	if agent == nil {
+		t.Fatal("tasks verify --agent flag not registered")
+	}
+	if agent.Value.Type() != "stringArray" {
+		t.Fatalf("tasks verify --agent type = %q, want stringArray (repeatable)", agent.Value.Type())
+	}
+	if taskVerifyCmd.Flags().Lookup("effort") == nil {
+		t.Fatal("tasks verify --effort flag not registered")
+	}
+
+	// `pop tasks implement` accepts repeatable --verify-agent and --verify-effort.
+	verifyAgent := taskImplementCmd.Flags().Lookup("verify-agent")
+	if verifyAgent == nil {
+		t.Fatal("tasks implement --verify-agent flag not registered")
+	}
+	if verifyAgent.Value.Type() != "stringArray" {
+		t.Fatalf("tasks implement --verify-agent type = %q, want stringArray (repeatable)", verifyAgent.Value.Type())
+	}
+	if taskImplementCmd.Flags().Lookup("verify-effort") == nil {
+		t.Fatal("tasks implement --verify-effort flag not registered")
+	}
+}
+
 func TestTaskExportImportRoundtripCmd(t *testing.T) {
 	root := t.TempDir()
 	initGitRepoCmd(t, root)

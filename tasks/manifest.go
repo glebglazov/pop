@@ -412,3 +412,33 @@ func (m *Manifest) VerifyOptedOut() bool {
 	}
 	return !enabled
 }
+
+// VerifierDirective is a set's per-set Verifier override, read from the
+// manifest's `"verifier": {"agents": [...], "effort": "..."}` object (ADR-0086).
+// It overrides the [workload.verify] config default (agents, effort) for that
+// set, but it is opt-out only for participation: user config is the master gate,
+// so a directive can steer *how* a set is verified but never opt it *in* while
+// the feature is globally off (that stays VerifyOptedOut / the config switch).
+type VerifierDirective struct {
+	Agents []string `json:"agents,omitempty"`
+	Effort string   `json:"effort,omitempty"`
+}
+
+// VerifierOverride returns the set's per-set Verifier override, or nil when the
+// manifest carries no `verifier` object (or a malformed one — a bad value is
+// ignored so it falls through to the config default). The key rides through
+// WriteManifestAtomic in Unknown, so a rewrite preserves it.
+func (m *Manifest) VerifierOverride() *VerifierDirective {
+	if m == nil {
+		return nil
+	}
+	raw, ok := m.Unknown["verifier"]
+	if !ok {
+		return nil
+	}
+	var over VerifierDirective
+	if err := json.Unmarshal(raw, &over); err != nil {
+		return nil
+	}
+	return &over
+}

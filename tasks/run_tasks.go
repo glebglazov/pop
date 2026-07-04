@@ -46,6 +46,13 @@ type RunTaskSetOptions struct {
 	// task in the set wins and the agent's `set-topic --derive` hook no-ops for
 	// the whole drain — the pane carries an accurate Topic with no model call.
 	PreSeedTopic func(taskTitle string)
+	// VerifyAgents and VerifyEffort steer the in-drain pre-approval Verifier
+	// independently of the implementing agents (`--verify-agent`, repeatable, and
+	// `--verify-effort`): they are the highest-precedence Verifier overrides.
+	// Empty ⇒ resolution falls through to the per-set override, then
+	// [workload.verify], then default_agents / DefaultVerifyEffort.
+	VerifyAgents []string
+	VerifyEffort string
 	// verifyRunner overrides the pre-approval Verifier's agent spawn, mirroring
 	// verifyCoreOptions.runVerifier. Unexported and test-only: production always
 	// resolves the real Verifier agent. Nil ⇒ the configured Verifier runs.
@@ -333,6 +340,8 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					Repo:        repo,
 					RuntimePath: runtimePath,
 					SetID:       taskSetID,
+					Agents:      opts.VerifyAgents,
+					Effort:      opts.VerifyEffort,
 					Timeout:     timeout,
 					Output:      out,
 					runVerifier: opts.verifyRunner,

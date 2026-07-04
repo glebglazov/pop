@@ -190,21 +190,27 @@ type TaskConfig struct {
 	// Verify holds Agent-verification settings (ADR-0086). The TOML sub-table
 	// is `[workload.verify]` (the parent key stays "workload"; see Config.Task).
 	// A nil pointer means the feature is unconfigured ⇒ off, so status derives
-	// from the manifest alone exactly as before. The full config surface
-	// (agents, effort, remediation cap) lands with slice 06; only the master
-	// opt-in switch exists today.
+	// from the manifest alone exactly as before.
 	Verify *VerifyConfig `toml:"verify" desc:"Agent-verification settings ([workload.verify] table)."`
 }
 
 // VerifyConfig holds Agent-verification settings (ADR-0086). It is the
 // master, off-by-default gate for the feature: only when Enabled does status
-// derivation gate Done on a SHA-keyed Verify verdict. Later slices extend this
-// with the agent fallback list and effort.
+// derivation gate Done on a SHA-keyed Verify verdict. Agents and Effort steer
+// which agent renders that verdict and at what model strength.
 type VerifyConfig struct {
 	// Enabled is the master opt-in switch. Absent/false ⇒ the Verifier never
 	// runs and status derives from the manifest alone, exactly as before this
 	// feature (ADR-0086/0087).
 	Enabled bool `toml:"enabled" desc:"Enable Agent verification as a Done gate (default false)."`
+	// Agents is the ordered fallback list of agent presets the Verifier walks,
+	// mirroring [workload] default_agents: it falls through to the next agent on
+	// a quota pause or a missing binary. An empty list falls back to
+	// default_agents (and, failing that, the built-in default agent).
+	Agents []string `toml:"agents" desc:"Ordered fallback agent list for the Verifier (falls back to default_agents when omitted)."`
+	// Effort selects the Verifier's model-strength tier (light, standard, or
+	// heavy). Absent ⇒ heavy — verification runs at the strongest tier by default.
+	Effort string `toml:"effort" desc:"Verifier model-strength tier: light, standard, or heavy (default heavy)."`
 	// MaxRemediationDepth bounds the verify→remediate→re-verify loop (ADR-0086):
 	// a FIXABLE verdict spawns a Remediation task only while the set is under this
 	// many cycles, after which it parks at VERIFY-FAILED. A nil pointer ⇒ the

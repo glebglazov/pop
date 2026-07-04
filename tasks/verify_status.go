@@ -6,10 +6,11 @@ import (
 )
 
 // verifyEnabled reports whether Agent verification is enabled in user config
-// (ADR-0086). The full [tasks.verify] surface — the agent fallback list, effort,
-// and remediation cap — lands in a later slice; until then this reads only the
-// master opt-in switch, which defaults off, so status derives from the manifest
-// alone exactly as before the feature.
+// (ADR-0086). This is the master opt-in switch, which defaults off, so an
+// unconfigured or disabled [workload.verify] leaves status deriving from the
+// manifest alone exactly as before the feature. The rest of the surface (the
+// agent fallback list, effort, and remediation cap) drives selection only once
+// this gate is on.
 func verifyEnabled(cfg *config.Config) bool {
 	return cfg != nil && cfg.Task != nil && cfg.Task.Verify != nil && cfg.Task.Verify.Enabled
 }

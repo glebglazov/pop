@@ -14,7 +14,7 @@ import (
 // user config sets no explicit cap (ADR-0086): after this many Verifier-produced
 // Remediation tasks, a set that still returns FIXABLE parks at VERIFY-FAILED
 // rather than spawning another. The configurable `[workload.verify]
-// .max_remediation_depth` overrides it (full config surface lands in slice 06).
+// .max_remediation_depth` overrides it.
 const DefaultMaxRemediationDepth = 3
 
 // remediationIDPattern matches a Verifier-produced Remediation task's id

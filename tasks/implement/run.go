@@ -26,10 +26,15 @@ type WholeSetOptions struct {
 	AllowDirty      tasks.DirtyRuntimeStrategy
 	MaxTries        int
 	Timeout         time.Duration
-	Yes             bool
-	ConfirmIn       io.Reader
-	ConfirmOut      io.Writer
-	Output          io.Writer
+	// VerifyAgents and VerifyEffort steer the in-drain pre-approval Verifier
+	// independently of the implementing agents (`--verify-agent`, repeatable, and
+	// `--verify-effort`), forwarded verbatim to the task-set executor.
+	VerifyAgents []string
+	VerifyEffort string
+	Yes          bool
+	ConfirmIn    io.Reader
+	ConfirmOut   io.Writer
+	Output       io.Writer
 	// PreSeedTopic pre-seeds the pane's Topic from each task's Title at drain
 	// spawn (ADR-0058); forwarded verbatim to the task-set executor.
 	PreSeedTopic func(taskTitle string)
@@ -71,6 +76,8 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		AllowDirty:      opts.AllowDirty,
 		MaxTries:        opts.MaxTries,
 		Timeout:         opts.Timeout,
+		VerifyAgents:    opts.VerifyAgents,
+		VerifyEffort:    opts.VerifyEffort,
 		Yes:             opts.Yes,
 		ConfirmIn:       opts.ConfirmIn,
 		ConfirmOut:      opts.ConfirmOut,

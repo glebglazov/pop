@@ -3,6 +3,7 @@ package tasks
 import (
 	"fmt"
 	"io"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -32,11 +33,23 @@ const (
 // when the set's earliest commit is a root commit with no parent.
 const emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
+// DefaultVerifyEffort is the model-strength tier the Verifier runs at when
+// neither a CLI flag, a per-set override, nor [workload.verify].effort names one
+// (ADR-0086): verification defaults to the strongest tier.
+const DefaultVerifyEffort = "heavy"
+
 // VerifyOptions configures a `pop tasks verify <set>` run.
 type VerifyOptions struct {
 	ResolveInput ResolveInput
 	// TaskSetID is the bare Task-set identifier to verify.
 	TaskSetID string
+	// Agents is the ordered CLI Verifier fallback list (`--agent`, repeatable).
+	// Empty ⇒ resolution falls through to the per-set override, then config,
+	// then default_agents.
+	Agents []string
+	// Effort is the CLI Verifier effort override (`--effort`). Empty ⇒ resolution
+	// falls through to the per-set override, then config, then DefaultVerifyEffort.
+	Effort string
 	// Timeout bounds the single Verifier attempt. Zero uses DefaultAttemptTimeout.
 	Timeout time.Duration
 	// Output receives the live agent stream and the rendered verdict.
@@ -60,6 +73,11 @@ type verifyCoreOptions struct {
 	DefPath     string
 	RuntimePath string
 	SetID       string
+	// Agents and Effort are the CLI-level Verifier overrides (highest
+	// precedence). Empty ⇒ resolution falls through to the per-set manifest
+	// override, then [workload.verify], then default_agents / DefaultVerifyEffort.
+	Agents      []string
+	Effort      string
 	Timeout     time.Duration
 	Output      io.Writer
 	runVerifier func(prompt string) (string, error)
@@ -95,6 +113,8 @@ func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		DefPath:     resolved.DefinitionPath,
 		RuntimePath: runtimePath,
 		SetID:       strings.TrimSpace(opts.TaskSetID),
+		Agents:      opts.Agents,
+		Effort:      opts.Effort,
 		Timeout:     opts.Timeout,
 		Output:      opts.Output,
 	})
@@ -152,8 +172,9 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 
 	run := opts.runVerifier
 	if run == nil {
+		sel := resolveVerifier(opts.Agents, opts.Effort, m, cfg)
 		run = func(prompt string) (string, error) {
-			return runDefaultVerifier(d, cfg, opts.RuntimePath, prompt, opts.Output, opts.Timeout)
+			return runConfiguredVerifier(d, cfg, sel, opts.RuntimePath, prompt, opts.Output, opts.Timeout)
 		}
 	}
 	raw, err := run(prompt)
@@ -224,32 +245,128 @@ func drainVerifyPhase(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Ma
 	return DeriveStatusWithVerdict(m, true, &verdict), v, nil
 }
 
-// runDefaultVerifier resolves the Verifier agent from the set's configured
-// default_agents at heavy effort (the configurable fallback list and effort
-// flags land in a later slice) and runs a single attempt, returning the
-// provider-neutral agent text. A timeout or empty result yields empty output,
-// which ParseVerdict turns into a NEEDS-HUMAN the human is told about.
-func runDefaultVerifier(d *Deps, cfg *config.Config, runtimePath, prompt string, out io.Writer, timeout time.Duration) (string, error) {
+// verifierSelection is the resolved Verifier agent fallback list and effort tier
+// after the precedence chain has been applied.
+type verifierSelection struct {
+	Agents []string
+	Effort string
+}
+
+// resolveVerifier applies the Verifier precedence chain (ADR-0086), highest
+// first: CLI flags (cliAgents / cliEffort) → the per-set manifest `verifier`
+// override → [workload.verify] config → default_agents / DefaultVerifyEffort.
+// Agents and effort resolve independently, so a CLI effort can steer a
+// config-listed agent list, and vice versa. When no layer names an agent list it
+// falls back to default_agents (ResolveDefaultAgentPresets), so the Verifier
+// always has at least one agent to walk.
+func resolveVerifier(cliAgents []string, cliEffort string, m *Manifest, cfg *config.Config) verifierSelection {
+	agents := nonEmptyStrings(cliAgents)
+	effort := strings.TrimSpace(cliEffort)
+
+	if over := m.VerifierOverride(); over != nil {
+		if len(agents) == 0 {
+			agents = nonEmptyStrings(over.Agents)
+		}
+		if effort == "" {
+			effort = strings.TrimSpace(over.Effort)
+		}
+	}
+	if cfg != nil && cfg.Task != nil && cfg.Task.Verify != nil {
+		v := cfg.Task.Verify
+		if len(agents) == 0 {
+			agents = nonEmptyStrings(v.Agents)
+		}
+		if effort == "" {
+			effort = strings.TrimSpace(v.Effort)
+		}
+	}
+	if len(agents) == 0 {
+		agents = ResolveDefaultAgentPresets(nil, "", false, cfg)
+	}
+	if effort == "" {
+		effort = DefaultVerifyEffort
+	}
+	return verifierSelection{Agents: agents, Effort: effort}
+}
+
+// nonEmptyStrings returns the non-blank entries of specs, preserving order.
+func nonEmptyStrings(specs []string) []string {
+	var out []string
+	for _, s := range specs {
+		if strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// runConfiguredVerifier walks the resolved Verifier agent list at the resolved
+// effort and runs the first available agent, returning the provider-neutral
+// agent text. It falls through to the next agent on a missing binary or an Agent
+// quota pause — exactly the implement quota-fallback semantics — so a configured
+// backup verifies at the same effort when the primary is unavailable. A timeout,
+// an empty result, or an exhausted list all yield empty output, which
+// ParseVerdict turns into a NEEDS-HUMAN the human is told about.
+func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, runtimePath, prompt string, out io.Writer, timeout time.Duration) (string, error) {
 	if timeout <= 0 {
 		timeout = DefaultAttemptTimeout
 	}
-	specs := ResolveDefaultAgentPresets(nil, "", false, cfg)
-	spec := resolveTaskAgentSpecForEffortWithConfig(specs[0], "heavy", true, cfg)
-	invocation, err := ResolveAgentInvocationWithMode(spec, "", prompt, runtimePath, AgentOutputAuto)
+	for _, agentSpec := range nonEmptyAgentSpecs(sel.Agents, DefaultAgentPreset) {
+		preset, err := AgentPresetName(agentSpec)
+		if err != nil {
+			return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
+		}
+		// Missing-binary fall-through: an agent whose binary is not on PATH is
+		// skipped so the next configured agent gets a turn.
+		if !verifierBinaryAvailable(d, preset) {
+			if out != nil {
+				outputFor(out).line(ansiDim, "   Verifier agent %s unavailable (binary not found); trying next", preset)
+			}
+			continue
+		}
+		spec := resolveTaskAgentSpecForEffortWithConfig(agentSpec, sel.Effort, true, cfg)
+		invocation, err := ResolveAgentInvocationWithMode(spec, "", prompt, runtimePath, AgentOutputAuto)
+		if err != nil {
+			return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
+		}
+		if out != nil {
+			outputFor(out).line(ansiBold+ansiCyan, "━━ Verifying with %s", invocation.RequestedAgent)
+		}
+		raw, outcome, err := runAgentAttempt(d, runtimePath, out, timeout, invocation)
+		if err != nil {
+			return "", exitErr(ExitOperational, "run verifier: %v", err)
+		}
+		if outcome != nil && outcome.interrupted {
+			return "", exitErr(ExitInterrupted, "interrupted")
+		}
+		normalized := invocation.NormalizeOutput(raw)
+		// Quota fall-through: a paused agent renders no verdict, so try the next.
+		if normalized.QuotaPause != nil {
+			if out != nil {
+				outputFor(out).line(ansiDim, "   Verifier agent %s quota-paused; trying next", preset)
+			}
+			continue
+		}
+		return normalized.Output, nil
+	}
+	// Every configured agent was unavailable or quota-paused: return empty output
+	// so the verdict resolves to NEEDS-HUMAN rather than silently passing.
+	return "", nil
+}
+
+// verifierBinaryAvailable reports whether the agent preset's binary is resolvable
+// on PATH, so a missing agent can be skipped before it is invoked.
+func verifierBinaryAvailable(d *Deps, preset string) bool {
+	adapter, err := ResolveAgentAdapter(preset)
 	if err != nil {
-		return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
+		return false
 	}
-	if out != nil {
-		outputFor(out).line(ansiBold+ansiCyan, "━━ Verifying with %s", invocation.RequestedAgent)
+	lookPath := exec.LookPath
+	if d != nil && d.LookPath != nil {
+		lookPath = d.LookPath
 	}
-	raw, outcome, err := runAgentAttempt(d, runtimePath, out, timeout, invocation)
-	if err != nil {
-		return "", exitErr(ExitOperational, "run verifier: %v", err)
-	}
-	if outcome != nil && outcome.interrupted {
-		return "", exitErr(ExitInterrupted, "interrupted")
-	}
-	return invocation.NormalizeOutput(raw).Output, nil
+	_, err = lookPath(AgentBinary(adapter))
+	return err == nil
 }
 
 // verifyWorkSHA reads the runtime checkout's HEAD — the set's current work SHA.
