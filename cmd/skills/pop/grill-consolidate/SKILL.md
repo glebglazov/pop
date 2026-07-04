@@ -54,6 +54,16 @@ Do not silently ignore malformed ops. If the intended meaning is obvious, preser
 - Put terms without a clear home into the best existing section when obvious; otherwise ask the user.
 - Preserve the `CONTEXT.md` contract: it is a glossary only, not a spec or implementation notes file.
 
+## Already In The Base
+
+A fragment op is often a **no-op** because the base already reflects it — that is exactly how legacy fragments accumulate on disk unremoved. An op that changes nothing is still an op that has *taken effect*; it does not exempt its fragment from deletion. Judge each op that touches a term already present in the base:
+
+- **Satisfied** — the base already expresses the op's intent. For `+`/`~`, the base holds an equivalent-or-fuller definition (for `~`, compare against the op's *new* definition, not its `was:`); for `-`, the term is already absent. A satisfied op counts as **applied**: write nothing, but do not let it block deletion.
+- **Base older/thinner** — the base predates the op and misses its contribution. Fold normally (the op beats the base); the fragment is then applied.
+- **Ambiguous** — you cannot tell whether the base already covers the op or diverged from it. Contested: keep the fragment, surface it, decide with the user.
+
+**Anti-regression guard:** a satisfied-check must never rewrite the base to an *older* fragment's wording. When the base already carries a newer, polished definition (folded from a higher generation) and a lower-generation fragment repeats an older phrasing of the same term, the op is **satisfied** — delete the fragment and leave the base untouched. Never let a stale low-generation fragment clobber a newer base definition.
+
 ## Glossary Format
 
 Keep base files in this shape:
@@ -102,12 +112,14 @@ Do not invent ADR content, merge ADRs, or change their bodies beyond the cross-r
 After all conflicts are resolved:
 
 1. Update the base `CONTEXT.md`.
-2. Delete only the fragments that were folded in, wherever they live — `.grill-context/` and legacy colocated alike. Remove `.grill-context/` itself if it ends up empty.
+2. Delete every fragment whose ops are all **applied** — folded this pass *or* already satisfied by the base (see [Already In The Base](#already-in-the-base)) — wherever they live: `.grill-context/` and legacy colocated alike. A fragment that changed nothing because the base already covers it is still done; delete it. Remove `.grill-context/` itself if it ends up empty.
 3. Apply the ADR renumbering: the loser renames (`git mv`) and every link edit they required.
 4. Inspect `git status --short` and identify only the artifacts produced by this consolidation pass — the base `CONTEXT.md` files, folded fragment deletions, ADR renames, and ADR link edits.
 5. Stage exactly those files. Do not stage unrelated existing work.
-6. Commit immediately with a concise message in the form `Consolidate context fragments` (mention `+ reconcile ADR numbers` when this pass renumbered any ADRs).
+6. Commit immediately. First **sample the repo's house style** — `git log -5 --format='%s%n%b'` — and infer the prevailing convention: conventional-commits `type(scope): subject` or not, subject capitalization, and any trailer (e.g. `Co-Authored-By`). Compose the message to match that grammar and reproduce the trailer convention. Infer the *grammar*, don't copy the sampled type/scope verbatim — a skewed window (say five `fix(...)` commits) must not relabel this docs/maintenance pass. When the repo uses conventional commits, default to `docs(context): consolidate glossary fragments` (append `+ reconcile ADR numbers` when this pass renumbered any ADRs); when it has no discernible convention, fall back to `Consolidate context fragments`.
 7. Show the user the commit hash, the changed files, any terms that were added, redefined, retired, or manually resolved, and any ADRs renumbered (old → new) with the link rewrites that followed.
 
-Never delete a fragment that was not fully applied.
+Never delete a fragment with an unresolved op (contested, or only partially applied). A fully **satisfied** fragment is applied — delete it; do not mistake "changed nothing" for "not applied."
 Never commit if any folded output is ambiguous, contested, only partially applied, or mixed with unrelated edits that cannot be staged separately.
+
+**Success invariant:** when this pass commits, no fragment remains on disk except ones deliberately held back as contested. If any non-contested fragment survives — including one the base already covered — the pass is not finished.
