@@ -125,7 +125,7 @@ func TestCommitsCarryNoOverridesWhenUnconfigured(t *testing.T) {
 // up front, ahead of the dirty-runtime checkpoint that commits earliest.
 func TestRunTaskMalformedOverridesFailsDrainHard(t *testing.T) {
 	loadConfig := func(string) (*config.Config, error) {
-		return &config.Config{Task: &config.TaskConfig{Git: &config.TaskGitConfig{
+		return &config.Config{Task: &config.TasksConfig{Git: &config.TaskGitConfig{
 			CommitConfigOverrides: []string{"this-is-not-valid"},
 		}}}, nil
 	}

@@ -165,7 +165,7 @@ func TestApplyVerifyVerdictsDisabledIsNoOp(t *testing.T) {
 }
 
 func TestApplyVerifyVerdictsEnabledGatesOnVerdict(t *testing.T) {
-	enabled := &config.Config{Task: &config.TaskConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 
 	cases := []struct {
 		name         string
@@ -210,7 +210,7 @@ func TestApplyVerifyVerdictsEnabledGatesOnVerdict(t *testing.T) {
 // a missing row (no manifest) and a ready row must be untouched even with the
 // feature enabled, so re-derivation never corrupts a MISSING set into MALFORMED.
 func TestApplyVerifyVerdictsLeavesNonTerminalRows(t *testing.T) {
-	enabled := &config.Config{Task: &config.TaskConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 
 	readyM := &Manifest{Valid: true, Stem: "live", Tasks: []Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "open"}}}
@@ -235,7 +235,7 @@ func TestApplyVerifyVerdictsLeavesNonTerminalRows(t *testing.T) {
 // row carries the Verifier findings and that a formerly-Done set moves out of
 // the Done group, and that `pop tasks status` renders the new label.
 func TestApplyVerifyVerdictsSurfacesFindingsAndReorders(t *testing.T) {
-	enabled := &config.Config{Task: &config.TaskConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "demo", "shaCUR", "NEEDS-HUMAN", "the API contract drifted\nsecond line")
 

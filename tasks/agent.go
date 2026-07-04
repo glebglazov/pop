@@ -546,14 +546,14 @@ func AgentPresetName(spec string) (string, error) {
 }
 
 // ResolveDefaultAgentPresets returns the ordered agent preset list for a run.
-// Explicit CLI --agent flags win; otherwise [workload] default_agents applies;
+// Explicit CLI --agent flags win; otherwise [tasks.implement].agents applies;
 // the final fallback is claude.
 func ResolveDefaultAgentPresets(cliPresets []string, cliPreset string, agentExplicit bool, cfg *config.Config) []string {
 	if agentExplicit {
 		return nonEmptyAgentSpecs(cliPresets, cliPreset)
 	}
-	if cfg != nil && cfg.Task != nil && len(cfg.Task.DefaultAgents) > 0 {
-		return nonEmptyAgentSpecs(cfg.Task.DefaultAgents, DefaultAgentPreset)
+	if cfg != nil && cfg.Task != nil && cfg.Task.Implement != nil && len(cfg.Task.Implement.Agents) > 0 {
+		return nonEmptyAgentSpecs(cfg.Task.Implement.Agents, DefaultAgentPreset)
 	}
 	return nonEmptyAgentSpecs(nil, cliPreset)
 }

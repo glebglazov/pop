@@ -263,7 +263,7 @@ func TestDoctorDerivesIntendedAgentsFromTaskConfiguration(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	intent, err := doctorDetectAgentIntent(d, installerHome, func(string) (*config.Config, error) {
-		return &config.Config{Task: &config.TaskConfig{Agents: map[string]config.TaskAgentConfig{
+		return &config.Config{Task: &config.TasksConfig{Presets: map[string]config.TaskAgentConfig{
 			"cursor": {Output: "text"},
 		}}}, nil
 	}, nil, func(string) bool { return false })

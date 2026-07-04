@@ -690,7 +690,7 @@ func doctorDetectAgentIntent(d *integrateDeps, home string, loadConfig func(stri
 				return nil, fmt.Errorf("load task config for agent intent: %w", err)
 			}
 		} else if cfg != nil && cfg.Task != nil {
-			for agent := range cfg.Task.Agents {
+			for agent := range cfg.Task.Presets {
 				addIntent(agent, "task config")
 			}
 		}

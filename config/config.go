@@ -176,22 +176,25 @@ type UpdatesConfig struct {
 	NoticeEnabled *bool `toml:"notice_enabled" desc:"Enable the update notice and daily background update check (default true)."`
 }
 
-// TaskConfig holds task-execution configuration.
-type TaskConfig struct {
-	Agents map[string]TaskAgentConfig `toml:"agents" desc:"Per-agent task presets ([workload.agents.<name>] tables)."`
-	// DefaultAgents is the ordered in-process fallback list used by
+// TasksConfig holds task-execution configuration under the [tasks] TOML table.
+type TasksConfig struct {
+	// Implement holds the ordered worker fallback list for `pop tasks implement`.
+	Implement *ImplementConfig `toml:"implement" desc:"Implement sub-command settings ([tasks.implement] table)."`
+	// Presets is the per-preset settings map (e.g. output mode). Keyed by agent
+	// preset name. Renamed from [workload.agents] so "agents" no longer means
+	// both an ordered list and a settings map.
+	Presets map[string]TaskAgentConfig `toml:"presets" desc:"Per-agent preset settings ([tasks.presets.<name>] tables)."`
+	// Git holds commit-time git overrides for Pop's own commits.
+	Git *TaskGitConfig `toml:"git" desc:"Commit-time git overrides for Pop's commits ([tasks.git] table)."`
+	// Verify holds Agent-verification settings (ADR-0086).
+	Verify *VerifyConfig `toml:"verify" desc:"Agent-verification settings ([tasks.verify] table)."`
+}
+
+// ImplementConfig holds settings for the `pop tasks implement` sub-command.
+type ImplementConfig struct {
+	// Agents is the ordered in-process fallback list used by
 	// `pop tasks implement` for unpinned tasks when --agent is absent.
-	DefaultAgents []string `toml:"default_agents" desc:"Ordered fallback agent list for unpinned tasks."`
-	// Git holds commit-time git overrides for Pop's own commits. The TOML
-	// sub-table is `[workload.git]` because the parent key stays "workload"
-	// for backward compatibility (see Config.Task). A nil pointer means the
-	// section is absent ⇒ no overrides; Pop's commits behave exactly as today.
-	Git *TaskGitConfig `toml:"git" desc:"Commit-time git overrides for Pop's commits ([workload.git] table)."`
-	// Verify holds Agent-verification settings (ADR-0086). The TOML sub-table
-	// is `[workload.verify]` (the parent key stays "workload"; see Config.Task).
-	// A nil pointer means the feature is unconfigured ⇒ off, so status derives
-	// from the manifest alone exactly as before.
-	Verify *VerifyConfig `toml:"verify" desc:"Agent-verification settings ([workload.verify] table)."`
+	Agents []string `toml:"agents" desc:"Ordered fallback agent list for unpinned tasks."`
 }
 
 // VerifyConfig holds Agent-verification settings (ADR-0086). It is the
@@ -311,7 +314,7 @@ type EffortConfig struct {
 	Light    []EffortModel `toml:"light" desc:"Light-tier model/reasoning ladder (array)."`
 }
 
-// ResolveCommitConfigOverrides validates the [workload.git]
+// ResolveCommitConfigOverrides validates the [tasks.git]
 // commit_config_overrides entries and returns them as `key=value` strings ready
 // to be prepended as `-c key=value` pairs to Pop's commit invocations. Each
 // entry must split into a non-empty key on the first `=` (an empty value is
@@ -321,8 +324,8 @@ type EffortConfig struct {
 // path, never at global config load — so a typo never breaks the picker or
 // dashboard. A malformed entry is a hard error: callers must fail the drain
 // rather than silently proceed (proceeding could re-trigger the very signing
-// hang this feature exists to prevent). The receiver may be nil (no [workload]
-// or [workload.git] section), in which case no overrides apply.
+// hang this feature exists to prevent). The receiver may be nil (no [tasks]
+// or [tasks.git] section), in which case no overrides apply.
 func (c *Config) ResolveCommitConfigOverrides() ([]string, error) {
 	if c == nil || c.Task == nil || c.Task.Git == nil {
 		return nil, nil
@@ -518,9 +521,7 @@ type Config struct {
 	Select         *ProjectConfig        `toml:"select" desc:"Deprecated: use [project]."`
 	PaneMonitoring *PaneMonitoringConfig `toml:"pane_monitoring" desc:"Pane attention/status monitoring daemon settings ([pane_monitoring] table)."`
 	Dashboard      *DashboardConfig      `toml:"dashboard" desc:"Shared dashboard and cursor behavior ([dashboard] table)."`
-	// The TOML key stays "workload" for backward compatibility with existing
-	// user config files; the rename is internal only.
-	Task   *TaskConfig             `toml:"workload" desc:"Task-set execution defaults ([workload] table)."`
+	Task   *TasksConfig            `toml:"tasks" desc:"Task-set execution defaults ([tasks] table)."`
 	Effort map[string]EffortConfig `toml:"effort" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
 	// Workbenches is the canonical TOML key for session blueprints.
 	Workbenches []Workbench `toml:"workbenches" desc:"Global session blueprints (templates)."`
@@ -852,7 +853,7 @@ func (c *Config) TaskAgentOutput(agent string) string {
 	if c == nil || c.Task == nil {
 		return "auto"
 	}
-	agentConfig, ok := c.Task.Agents[agent]
+	agentConfig, ok := c.Task.Presets[agent]
 	if !ok || agentConfig.Output == "" {
 		return "auto"
 	}
@@ -1702,7 +1703,7 @@ func queueAgentsWarnings(path string, md toml.MetaData) []Finding {
 			return []Finding{{
 				Path: "deprecated.queue.agents",
 				Message: fmt.Sprintf(
-					"%s: [queue] agents is ignored; configure agent fallback under [workload] default_agents",
+					"%s: [queue] agents is ignored; configure agent fallback under [tasks.implement].agents",
 					path,
 				),
 			}}
@@ -1797,7 +1798,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 
 // includeFileWarnings returns load-time warnings for non-whitelisted top-level
 // keys and nested includes in an included file. Includes carry a fixed whitelist:
-// `projects`, `workbenches`, `[workload]`, `[effort.<agent>]`, and `[repo."<path>"]`.
+// `projects`, `workbenches`, `[tasks]`, `[effort.<agent>]`, and `[repo."<path>"]`.
 func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	var warnings []string
 
@@ -1826,7 +1827,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 		"projects":    true,
 		"workbenches": true,
 		"repo":        true,
-		"workload":    true,
+		"tasks":       true,
 		"effort":      true,
 		"includes":    true, // mentioned in includes, so we track it for warning above
 	}
@@ -1837,7 +1838,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 		if !whitelisted[key] && !seen[key] {
 			seen[key] = true
 			warnings = append(warnings, fmt.Sprintf(
-				"%s: %q ignored (includes only support projects, workbenches, repo, workload, and effort blocks)",
+				"%s: %q ignored (includes only support projects, workbenches, repo, tasks, and effort blocks)",
 				path, key,
 			))
 		}
@@ -1846,7 +1847,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	return warnings
 }
 
-func mergeIncludedTask(cfg *Config, included *TaskConfig, path string) {
+func mergeIncludedTask(cfg *Config, included *TasksConfig, path string) {
 	if included == nil {
 		return
 	}
@@ -1854,33 +1855,38 @@ func mergeIncludedTask(cfg *Config, included *TaskConfig, path string) {
 		cfg.Task = cloneTaskConfig(included)
 		return
 	}
-	if len(included.DefaultAgents) > 0 {
-		if len(cfg.Task.DefaultAgents) > 0 {
+	// Merge Implement sub-table (agents list)
+	if included.Implement != nil && len(included.Implement.Agents) > 0 {
+		if cfg.Task.Implement == nil {
+			cfg.Task.Implement = &ImplementConfig{}
+		}
+		if len(cfg.Task.Implement.Agents) > 0 {
 			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [workload] default_agents skipped, already defined (first definition wins)",
+				"%s: [tasks.implement].agents skipped, already defined (first definition wins)",
 				path,
 			))
 		} else {
-			cfg.Task.DefaultAgents = append([]string(nil), included.DefaultAgents...)
+			cfg.Task.Implement.Agents = append([]string(nil), included.Implement.Agents...)
 		}
 	}
-	for agent, block := range included.Agents {
-		if cfg.Task.Agents == nil {
-			cfg.Task.Agents = make(map[string]TaskAgentConfig)
+	// Merge Presets map
+	for preset, block := range included.Presets {
+		if cfg.Task.Presets == nil {
+			cfg.Task.Presets = make(map[string]TaskAgentConfig)
 		}
-		if _, exists := cfg.Task.Agents[agent]; exists {
+		if _, exists := cfg.Task.Presets[preset]; exists {
 			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [workload.agents.%s] skipped, already defined (first definition wins)",
-				path, agent,
+				"%s: [tasks.presets.%s] skipped, already defined (first definition wins)",
+				path, preset,
 			))
 			continue
 		}
-		cfg.Task.Agents[agent] = block
+		cfg.Task.Presets[preset] = block
 	}
 	if included.Git != nil {
 		if cfg.Task.Git != nil {
 			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [workload.git] skipped, already defined (first definition wins)",
+				"%s: [tasks.git] skipped, already defined (first definition wins)",
 				path,
 			))
 		} else {
@@ -1890,7 +1896,7 @@ func mergeIncludedTask(cfg *Config, included *TaskConfig, path string) {
 	if included.Verify != nil {
 		if cfg.Task.Verify != nil {
 			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [workload.verify] skipped, already defined (first definition wins)",
+				"%s: [tasks.verify] skipped, already defined (first definition wins)",
 				path,
 			))
 		} else {
@@ -1919,17 +1925,20 @@ func mergeIncludedEffort(cfg *Config, included map[string]EffortConfig, path str
 	}
 }
 
-func cloneTaskConfig(src *TaskConfig) *TaskConfig {
+func cloneTaskConfig(src *TasksConfig) *TasksConfig {
 	if src == nil {
 		return nil
 	}
-	dst := &TaskConfig{
-		DefaultAgents: append([]string(nil), src.DefaultAgents...),
+	dst := &TasksConfig{}
+	if src.Implement != nil {
+		dst.Implement = &ImplementConfig{
+			Agents: append([]string(nil), src.Implement.Agents...),
+		}
 	}
-	if len(src.Agents) > 0 {
-		dst.Agents = make(map[string]TaskAgentConfig, len(src.Agents))
-		for agent, block := range src.Agents {
-			dst.Agents[agent] = block
+	if len(src.Presets) > 0 {
+		dst.Presets = make(map[string]TaskAgentConfig, len(src.Presets))
+		for preset, block := range src.Presets {
+			dst.Presets[preset] = block
 		}
 	}
 	if src.Git != nil {

@@ -71,16 +71,16 @@ func TestTaskAgentOutput(t *testing.T) {
 	}{
 		{name: "nil config", want: "auto"},
 		{name: "missing section", cfg: &Config{}, want: "auto"},
-		{name: "empty value", cfg: &Config{Task: &TaskConfig{}}, want: "auto"},
+		{name: "empty value", cfg: &Config{Task: &TasksConfig{}}, want: "auto"},
 		{
 			name:  "configured text",
-			cfg:   &Config{Task: &TaskConfig{Agents: map[string]TaskAgentConfig{"claude": {Output: "text"}}}},
+			cfg:   &Config{Task: &TasksConfig{Presets: map[string]TaskAgentConfig{"claude": {Output: "text"}}}},
 			agent: "claude",
 			want:  "text",
 		},
 		{
 			name:  "other agent remains auto",
-			cfg:   &Config{Task: &TaskConfig{Agents: map[string]TaskAgentConfig{"claude": {Output: "text"}}}},
+			cfg:   &Config{Task: &TasksConfig{Presets: map[string]TaskAgentConfig{"claude": {Output: "text"}}}},
 			agent: "cursor",
 			want:  "auto",
 		},
@@ -94,11 +94,11 @@ func TestTaskAgentOutput(t *testing.T) {
 	}
 }
 
-func TestLoadWorkloadDefaultAgents(t *testing.T) {
+func TestLoadTasksImplementAgents(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[workload]
-default_agents = ["claude --model opus4.8", "codex"]
+[tasks.implement]
+agents = ["claude --model opus4.8", "codex"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -107,19 +107,19 @@ default_agents = ["claude --model opus4.8", "codex"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Task == nil {
-		t.Fatal("expected [workload] section to parse")
+	if cfg.Task == nil || cfg.Task.Implement == nil {
+		t.Fatal("expected [tasks.implement] section to parse")
 	}
 	want := []string{"claude --model opus4.8", "codex"}
-	if !reflect.DeepEqual(cfg.Task.DefaultAgents, want) {
-		t.Fatalf("default_agents = %#v, want %#v", cfg.Task.DefaultAgents, want)
+	if !reflect.DeepEqual(cfg.Task.Implement.Agents, want) {
+		t.Fatalf("implement agents = %#v, want %#v", cfg.Task.Implement.Agents, want)
 	}
 }
 
 func TestLoadWorkloadVerifyEnabled(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[workload.verify]
+[tasks.verify]
 enabled = true
 max_remediation_depth = 2
 `), 0o644); err != nil {
@@ -130,20 +130,20 @@ max_remediation_depth = 2
 		t.Fatal(err)
 	}
 	if cfg.Task == nil || cfg.Task.Verify == nil {
-		t.Fatal("expected [workload.verify] section to parse")
+		t.Fatal("expected [tasks.verify] section to parse")
 	}
 	if !cfg.Task.Verify.Enabled {
-		t.Fatal("expected [workload.verify] enabled = true to load as enabled")
+		t.Fatal("expected [tasks.verify] enabled = true to load as enabled")
 	}
 	if cfg.Task.Verify.MaxRemediationDepth == nil || *cfg.Task.Verify.MaxRemediationDepth != 2 {
 		t.Fatalf("expected max_remediation_depth = 2, got %v", cfg.Task.Verify.MaxRemediationDepth)
 	}
 }
 
-func TestLoadWorkloadVerifyAgentsEffort(t *testing.T) {
+func TestLoadTasksVerifyAgentsEffort(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[workload.verify]
+[tasks.verify]
 enabled = true
 agents = ["codex", "claude"]
 effort = "standard"
@@ -155,7 +155,7 @@ effort = "standard"
 		t.Fatal(err)
 	}
 	if cfg.Task == nil || cfg.Task.Verify == nil {
-		t.Fatal("expected [workload.verify] section to parse")
+		t.Fatal("expected [tasks.verify] section to parse")
 	}
 	want := []string{"codex", "claude"}
 	if !reflect.DeepEqual(cfg.Task.Verify.Agents, want) {
@@ -239,10 +239,10 @@ order = ["minimal", "<reset>"]
 func TestLoadTaskAgentOutput(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[workload.agents.claude]
+[tasks.presets.claude]
 output = "text"
 
-[workload.agents.cursor]
+[tasks.presets.cursor]
 output = "auto"
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -922,32 +922,32 @@ func TestResolveCommitConfigOverrides(t *testing.T) {
 		},
 		{
 			name: "no git sub-table",
-			cfg:  &Config{Task: &TaskConfig{}},
+			cfg:  &Config{Task: &TasksConfig{}},
 			want: nil,
 		},
 		{
 			name: "empty overrides",
-			cfg:  &Config{Task: &TaskConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{}}}},
+			cfg:  &Config{Task: &TasksConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{}}}},
 			want: nil,
 		},
 		{
 			name: "valid entries including empty value",
-			cfg:  &Config{Task: &TaskConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"commit.gpgsign=false", "user.signingkey="}}}},
+			cfg:  &Config{Task: &TasksConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"commit.gpgsign=false", "user.signingkey="}}}},
 			want: []string{"commit.gpgsign=false", "user.signingkey="},
 		},
 		{
 			name:    "missing equals",
-			cfg:     &Config{Task: &TaskConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"commit.gpgsign"}}}},
+			cfg:     &Config{Task: &TasksConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"commit.gpgsign"}}}},
 			wantErr: "[tasks.git] commit_config_overrides[0]:",
 		},
 		{
 			name:    "empty key",
-			cfg:     &Config{Task: &TaskConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"=value"}}}},
+			cfg:     &Config{Task: &TasksConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"=value"}}}},
 			wantErr: "[tasks.git] commit_config_overrides[0]:",
 		},
 		{
 			name:    "bad entry reports its index",
-			cfg:     &Config{Task: &TaskConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"commit.gpgsign=false", "oops"}}}},
+			cfg:     &Config{Task: &TasksConfig{Git: &TaskGitConfig{CommitConfigOverrides: []string{"commit.gpgsign=false", "oops"}}}},
 			wantErr: "[tasks.git] commit_config_overrides[1]:",
 		},
 	}
@@ -976,7 +976,7 @@ func TestResolveCommitConfigOverrides(t *testing.T) {
 func TestLoadCommitConfigOverridesDoesNotBreakGlobalLoad(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[workload.git]
+[tasks.git]
 commit_config_overrides = ["this-is-not-valid"]
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -994,7 +994,7 @@ commit_config_overrides = ["this-is-not-valid"]
 func TestLoadCommitConfigOverrides(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[workload.git]
+[tasks.git]
 commit_config_overrides = ["commit.gpgsign=false"]
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -1034,8 +1034,8 @@ crash_retry_delays = ["10s", "1m", "5m"]
 	if len(cfg.Warnings) != 1 {
 		t.Fatalf("expected 1 warning for deprecated [queue].agents, got %d: %v", len(cfg.Warnings), cfg.Warnings)
 	}
-	if !strings.Contains(cfg.Warnings[0], "[queue] agents") || !strings.Contains(cfg.Warnings[0], "[workload] default_agents") {
-		t.Fatalf("warning = %q, want [queue] agents ignored with pointer to [workload] default_agents", cfg.Warnings[0])
+	if !strings.Contains(cfg.Warnings[0], "[queue] agents") || !strings.Contains(cfg.Warnings[0], "[tasks.implement].agents") {
+		t.Fatalf("warning = %q, want [queue] agents ignored with pointer to [tasks.implement].agents", cfg.Warnings[0])
 	}
 	resolved, err := cfg.ResolveQueue()
 	if err != nil {
@@ -2613,7 +2613,7 @@ includes = ["first.toml", "second.toml"]
 		}
 	})
 
-	t.Run("include-only workload default_agents is merged", func(t *testing.T) {
+	t.Run("include-only tasks implement agents is merged", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		writeFile := func(name, content string) string {
 			p := filepath.Join(tmpDir, name)
@@ -2624,8 +2624,8 @@ includes = ["first.toml", "second.toml"]
 		}
 
 		writeFile("private.toml", `
-[workload]
-default_agents = ["codex", "claude"]
+[tasks.implement]
+agents = ["codex", "claude"]
 `)
 		configPath := writeFile("config.toml", `
 includes = ["private.toml"]
@@ -2636,20 +2636,20 @@ projects = [{ path = "/main" }]
 		if err != nil {
 			t.Fatalf("Load() error: %v", err)
 		}
-		if cfg.Task == nil {
-			t.Fatal("expected [workload] to be merged from include")
+		if cfg.Task == nil || cfg.Task.Implement == nil {
+			t.Fatal("expected [tasks.implement] to be merged from include")
 		}
-		if got, want := cfg.Task.DefaultAgents, []string{"codex", "claude"}; !reflect.DeepEqual(got, want) {
-			t.Fatalf("default_agents = %#v, want %#v", got, want)
+		if got, want := cfg.Task.Implement.Agents, []string{"codex", "claude"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("implement agents = %#v, want %#v", got, want)
 		}
 		for _, w := range cfg.Warnings {
-			if strings.Contains(w, "workload") && strings.Contains(w, "ignored") {
-				t.Fatalf("unexpected workload warning: %q", w)
+			if strings.Contains(w, "tasks") && strings.Contains(w, "ignored") {
+				t.Fatalf("unexpected tasks warning: %q", w)
 			}
 		}
 	})
 
-	t.Run("parent workload default_agents wins over include collision", func(t *testing.T) {
+	t.Run("parent tasks implement agents wins over include collision", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		writeFile := func(name, content string) string {
 			p := filepath.Join(tmpDir, name)
@@ -2660,32 +2660,32 @@ projects = [{ path = "/main" }]
 		}
 
 		writeFile("private.toml", `
-[workload]
-default_agents = ["codex"]
+[tasks.implement]
+agents = ["codex"]
 `)
 		configPath := writeFile("config.toml", `
 includes = ["private.toml"]
 
-[workload]
-default_agents = ["claude"]
+[tasks.implement]
+agents = ["claude"]
 `)
 
 		cfg, err := Load(configPath)
 		if err != nil {
 			t.Fatalf("Load() error: %v", err)
 		}
-		if got, want := cfg.Task.DefaultAgents, []string{"claude"}; !reflect.DeepEqual(got, want) {
-			t.Fatalf("default_agents = %#v, want %#v", got, want)
+		if got, want := cfg.Task.Implement.Agents, []string{"claude"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("implement agents = %#v, want %#v", got, want)
 		}
 		found := false
 		for _, w := range cfg.Warnings {
-			if strings.Contains(w, "default_agents skipped") {
+			if strings.Contains(w, "agents skipped") {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Fatalf("expected default_agents collision warning, got: %v", cfg.Warnings)
+			t.Fatalf("expected agents collision warning, got: %v", cfg.Warnings)
 		}
 	})
 

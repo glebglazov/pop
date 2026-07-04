@@ -142,7 +142,7 @@ func mergeConfigOverlay(dst, src *Config, md toml.MetaData) {
 	if md.IsDefined("dashboard") {
 		dst.Dashboard = cloneDashboardConfig(src.Dashboard)
 	}
-	if md.IsDefined("workload") {
+	if md.IsDefined("tasks") {
 		dst.Task = cloneTaskConfig(src.Task)
 	}
 	if md.IsDefined("effort") {

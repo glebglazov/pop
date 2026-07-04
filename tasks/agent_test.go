@@ -718,8 +718,8 @@ func TestAgentCmdIgnoredForAttendedAssistance(t *testing.T) {
 
 func TestResolveAgentOutputModePrecedence(t *testing.T) {
 	loadText := func(string) (*config.Config, error) {
-		return &config.Config{Task: &config.TaskConfig{
-			Agents: map[string]config.TaskAgentConfig{"claude": {Output: "text"}},
+		return &config.Config{Task: &config.TasksConfig{
+			Presets: map[string]config.TaskAgentConfig{"claude": {Output: "text"}},
 		}}, nil
 	}
 	mode, err := resolveAgentOutputMode(loadText, "claude", "")
@@ -742,8 +742,8 @@ func TestResolveAgentOutputModePrecedence(t *testing.T) {
 
 func TestResolveAgentOutputModeRejectsInvalidConfig(t *testing.T) {
 	loadInvalid := func(string) (*config.Config, error) {
-		return &config.Config{Task: &config.TaskConfig{
-			Agents: map[string]config.TaskAgentConfig{"claude": {Output: "structured-ish"}},
+		return &config.Config{Task: &config.TasksConfig{
+			Presets: map[string]config.TaskAgentConfig{"claude": {Output: "structured-ish"}},
 		}}, nil
 	}
 	_, err := resolveAgentOutputMode(loadInvalid, "claude", "")
