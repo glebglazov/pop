@@ -416,6 +416,119 @@ func TestDrainVerifyPhaseWritesWhileDrainHeld(t *testing.T) {
 	}
 }
 
+// TestRunTaskSetHITLGateOffersReverify: with verification enabled and the set at
+// the AWAITING-APPROVAL HITL gate (a PASS verdict let the terminal status
+// stand), the gate menu offers a Re-verify option, and choosing it force-runs
+// the Verifier again against the current work (bypassing the SHA cache) before
+// returning to the menu (ADR-0012).
+func TestRunTaskSetHITLGateOffersReverify(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+
+	calls := 0
+	verify := func(string) (string, error) {
+		calls++
+		return "VERDICT: PASS\n", nil
+	}
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.verifyRunner = verify
+	// Re-verify (5), then exit (0).
+	opts.ConfirmIn = strings.NewReader("5\n0\n")
+
+	_, err := RunTaskSetWith(d, nil, func(string) (*config.Config, error) {
+		return verifyEnabledConfig(), nil
+	}, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	out := buf.String()
+	if !strings.Contains(out, "5. Re-verify") {
+		t.Fatalf("HITL gate menu missing Re-verify option:\n%s", out)
+	}
+	// The Verifier ran at least twice: once in the drain's pre-approval phase
+	// (PASS → reaches the gate) and once more for the forced re-verify.
+	if calls < 2 {
+		t.Fatalf("verifier calls = %d, want >= 2 (drain phase + forced re-verify)", calls)
+	}
+}
+
+// TestRunTaskSetHITLGateReverifyRefreshesLabel: when a forced re-verify at the
+// gate comes back non-PASS, the set's rendered state refreshes to VERIFY-FAILED
+// and control returns to the gate menu (still offering Re-verify), so a human
+// can keep iterating without a fresh drain (ADR-0012).
+func TestRunTaskSetHITLGateReverifyRefreshesLabel(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+
+	calls := 0
+	verify := func(string) (string, error) {
+		calls++
+		if calls == 1 {
+			// The drain's pre-approval phase passes, so the set reaches the gate.
+			return "VERDICT: PASS\n", nil
+		}
+		// The forced re-verify now finds a problem the human must resolve.
+		return "VERDICT: NEEDS-HUMAN\nFINDINGS: criterion 1 regressed\n", nil
+	}
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.verifyRunner = verify
+	// Re-verify (5), then exit (0).
+	opts.ConfirmIn = strings.NewReader("5\n0\n")
+
+	_, err := RunTaskSetWith(d, nil, func(string) (*config.Config, error) {
+		return verifyEnabledConfig(), nil
+	}, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	out := buf.String()
+	if !strings.Contains(out, "VERIFY-FAILED") {
+		t.Fatalf("re-verify NEEDS-HUMAN verdict must refresh the label to VERIFY-FAILED:\n%s", out)
+	}
+	// The gate re-displayed after the re-verify (two Choose [1]: prompts).
+	if strings.Count(out, "Choose [1]:") < 2 {
+		t.Fatalf("gate must re-display after re-verify:\n%s", out)
+	}
+	if calls != 2 {
+		t.Fatalf("verifier calls = %d, want 2 (drain phase + one forced re-verify)", calls)
+	}
+}
+
+// TestRunTaskSetHITLGateHidesReverifyWhenDisabled: with verification off, the
+// HITL gate menu omits the Re-verify option entirely — the force-verify path is
+// gated by the same config opt-in as the rest of the feature (ADR-0086).
+func TestRunTaskSetHITLGateHidesReverifyWhenDisabled(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = strings.NewReader("0\n")
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	out := buf.String()
+	if strings.Contains(out, "Re-verify") {
+		t.Fatalf("HITL gate must not offer Re-verify when verification is disabled:\n%s", out)
+	}
+}
+
 func TestVerifyEnabledGate(t *testing.T) {
 	if verifyEnabled(nil) {
 		t.Fatal("nil config should be disabled")

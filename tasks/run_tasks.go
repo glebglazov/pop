@@ -410,7 +410,14 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					if gateWillPrompt(opts.ConfirmIn, opts.Yes, currentRefresh.Manifests[taskSetID], hitl) {
 						parkDrain()
 					}
-					handled, err := handleInteractiveHITLGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, currentRefresh.Manifests[taskSetID], hitl)
+					rv := &reverifyGateContext{
+						cfg:         cfg,
+						agents:      opts.VerifyAgents,
+						effort:      opts.VerifyEffort,
+						timeout:     timeout,
+						runVerifier: opts.verifyRunner,
+					}
+					handled, err := handleInteractiveHITLGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, currentRefresh.Manifests[taskSetID], hitl, rv)
 					if err != nil {
 						return nil, err
 					}
@@ -628,9 +635,10 @@ const (
 	hitlGateAssist
 	hitlGateDefer
 	hitlGateShell
+	hitlGateReverify
 )
 
-func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *bufio.Reader, yes bool, agentPreset, agentCmd, cwd, runtimePath, definitionPath, statePath, taskSetID string, m *Manifest, hitl *Task) (bool, error) {
+func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *bufio.Reader, yes bool, agentPreset, agentCmd, cwd, runtimePath, definitionPath, statePath, taskSetID string, m *Manifest, hitl *Task, rv *reverifyGateContext) (bool, error) {
 	if yes || !canPrompt(in) || m == nil || hitl == nil {
 		return false, nil
 	}
@@ -649,11 +657,46 @@ func handleInteractiveHITLGate(d *Deps, out io.Writer, in io.Reader, reader *buf
 	}
 
 	for {
-		action, err := promptHITLGateAction(out, reader, taskSetID, hitl, body, invocation)
+		// The gate offers Re-verify only when Agent verification is enabled for
+		// this set (ADR-0086/ADR-0012); the option force-re-runs the Verifier so a
+		// human who edited the work inline can re-check it without a fresh drain.
+		showReverify := gateReverifyEnabled(rv, m)
+		action, err := promptHITLGateAction(out, reader, taskSetID, hitl, body, invocation, showReverify)
 		if err != nil {
 			return true, err
 		}
 		switch action {
+		case hitlGateReverify:
+			repo := ""
+			if id, idErr := ResolveRepositoryIdentity(d, runtimePath); idErr == nil {
+				repo = id.CommonDir
+			}
+			if rerr := reverifyAtGate(d, rv, out, repo, runtimePath, taskSetID, m); rerr != nil {
+				fmt.Fprintf(outputFor(out), "Could not re-verify: %v\n", rerr)
+				continue
+			}
+			// Refresh the set and overlay the fresh verdict so the rendered table
+			// reflects the new state/label (PASS → still AWAITING-APPROVAL, a
+			// non-PASS verdict → VERIFY-FAILED), then return to the gate menu.
+			afterRefresh, err := RefreshWith(d, definitionPath, statePath)
+			if err != nil {
+				return true, exitErr(ExitOperational, "refresh after re-verify: %v", err)
+			}
+			ApplyVerifyVerdicts(d, afterRefresh, rv.cfg, runtimePath)
+			fmt.Fprintln(out)
+			Render(out, afterRefresh)
+			afterManifest := afterRefresh.Manifests[taskSetID]
+			if BlockingHITLTask(afterManifest) == nil {
+				return true, nil
+			}
+			m = afterManifest
+			hitl = BlockingHITLTask(m)
+			body = gateTaskBody(d, m, hitl)
+			prompt = BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+			if err != nil {
+				return true, exitErr(ExitSetup, "%v", err)
+			}
 		case hitlGateComplete:
 			result, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, hitl.File)})
 			if err != nil {
@@ -786,7 +829,14 @@ func renderGateTaskBody(display *output, taskFile, body string) {
 	fmt.Fprintln(display, strings.Repeat("-", len(heading)))
 }
 
-func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string, hitl *Task, body string, invocation *AgentAssistanceInvocation) (hitlGateAction, error) {
+// gateReverifyEnabled reports whether the HITL gate should offer the Re-verify
+// option for the current set: only when a Verifier context is present, Agent
+// verification is enabled in config, and the set has not opted out (ADR-0086).
+func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
+	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
+}
+
+func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool) (hitlGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiYellow, "Human-blocked: %s/%s needs human work before the set can continue.", taskSetID, hitl.ID)
@@ -801,6 +851,9 @@ func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string,
 	fmt.Fprintln(display, "  2. Complete task")
 	fmt.Fprintln(display, "  3. Defer task")
 	fmt.Fprintln(display, "  4. Open a shell in the checkout")
+	if showReverify {
+		fmt.Fprintln(display, "  5. Re-verify (re-run the Verifier against the current work)")
+	}
 	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
@@ -808,7 +861,11 @@ func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string,
 	if err != nil {
 		return hitlGateExit, err
 	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
+	choice := strings.ToLower(strings.TrimSpace(answer))
+	if choice == "5" && showReverify {
+		return hitlGateReverify, nil
+	}
+	switch choice {
 	case "", "1":
 		return hitlGateAssist, nil
 	case "2":
@@ -820,8 +877,12 @@ func promptHITLGateAction(out io.Writer, reader *bufio.Reader, taskSetID string,
 	case "0", "q", "quit", "exit":
 		return hitlGateExit, nil
 	default:
-		fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
-		return promptHITLGateAction(out, reader, taskSetID, hitl, body, invocation)
+		if showReverify {
+			fmt.Fprintln(display, "Choose 1, 2, 3, 4, 5, or 0.")
+		} else {
+			fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
+		}
+		return promptHITLGateAction(out, reader, taskSetID, hitl, body, invocation, showReverify)
 	}
 }
 

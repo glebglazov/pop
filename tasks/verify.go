@@ -140,6 +140,44 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: verdict, Findings: v.Findings}, nil
 }
 
+// reverifyGateContext carries the resolved Verifier inputs a HITL gate needs to
+// force a re-verify (ADR-0086/ADR-0012). It mirrors the drain's Verifier
+// overrides so the gate re-check honours the same agent/effort precedence, and
+// keeps the test-only runVerifier seam so gate tests never spawn a real agent.
+type reverifyGateContext struct {
+	cfg         *config.Config
+	agents      []string
+	effort      string
+	timeout     time.Duration
+	runVerifier func(prompt string) (string, error)
+}
+
+// reverifyAtGate force-runs the Verifier against the set's current work SHA
+// (bypassing the SHA cache), stores the fresh verdict, and prints it. It is the
+// gate's re-verify path (ADR-0012) and reuses the exact force machinery behind
+// `pop tasks verify` — runAndStoreVerdict always re-invokes the Verifier and
+// overwrites the verdict at the current SHA, so a human who made inline changes
+// re-checks the work without kicking off a fresh drain.
+func reverifyAtGate(d *Deps, rv *reverifyGateContext, out io.Writer, repo, runtimePath, setID string, m *Manifest) error {
+	opts := verifyCoreOptions{
+		Repo:        repo,
+		RuntimePath: runtimePath,
+		SetID:       setID,
+		Agents:      rv.agents,
+		Effort:      rv.effort,
+		Timeout:     rv.timeout,
+		Output:      out,
+		runVerifier: rv.runVerifier,
+	}
+	workSHA := verifyWorkSHA(d, runtimePath)
+	v, err := runAndStoreVerdict(d, rv.cfg, opts, m, workSHA)
+	if err != nil {
+		return err
+	}
+	printVerdict(out, setID, workSHA, Verdict(v.Verdict), v.Findings)
+	return nil
+}
+
 // loadVerifiableManifest resolves and validates the set named in opts from its
 // definition path, returning a hard error for an absent identifier, an unknown
 // set, or a malformed manifest.
