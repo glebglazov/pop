@@ -36,6 +36,7 @@ func registerTaskShellCompletions() {
 	taskUnarchiveCmd.ValidArgsFunction = completeTaskUnarchiveArgs
 	taskSetPriorityCmd.ValidArgsFunction = completeTaskSetPriorityArgs
 	taskImplementCmd.ValidArgsFunction = completeTaskImplementArgs
+	taskVerifyCmd.ValidArgsFunction = completeTaskStatusArgs
 	taskResetTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskCompleteTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskSkipTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs

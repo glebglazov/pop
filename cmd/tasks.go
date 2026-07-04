@@ -33,6 +33,7 @@ var (
 	taskAllowDirty        tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
 	taskMaxTries          int
 	taskTimeout           string
+	taskVerifyTimeout     string
 	taskStatusArchived    bool
 	taskBindWorktreeForce bool
 	taskUnbindWorktreeYes bool
@@ -83,6 +84,13 @@ var taskImplementCmd = &cobra.Command{
 	Short: "Implement tasks through a coding agent: drain a task set, or run one targeted task",
 	Args:  cobra.MaximumNArgs(1),
 	Run:   runTaskImplement,
+}
+
+var taskVerifyCmd = &cobra.Command{
+	Use:   "verify TASK_SET",
+	Short: "Run an independent Verifier agent over a task set and record a PASS/FIXABLE/NEEDS-HUMAN verdict",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskVerify,
 }
 
 var taskResetTaskCmd = &cobra.Command{
@@ -185,6 +193,7 @@ func init() {
 	taskCmd.AddCommand(taskUnarchiveCmd)
 	taskCmd.AddCommand(taskSetPriorityCmd)
 	taskCmd.AddCommand(taskImplementCmd)
+	taskCmd.AddCommand(taskVerifyCmd)
 	taskCmd.AddCommand(taskResetTaskCmd)
 	taskCmd.AddCommand(taskCompleteTaskCmd)
 	taskCmd.AddCommand(taskSkipTaskCmd)
@@ -217,6 +226,8 @@ func init() {
 	taskImplementCmd.Flags().StringVar(&taskTimeout, "timeout", "1h", "Maximum duration per attempt")
 	taskImplementCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip confirmation prompt")
 	taskImplementCmd.Flags().BoolVar(&taskInWorktree, "in-worktree", false, "Provision a managed worktree forked from the current checkout and drain there")
+
+	taskVerifyCmd.Flags().StringVar(&taskVerifyTimeout, "timeout", "1h", "Maximum duration for the Verifier attempt")
 
 	taskExportCmd.Flags().StringVarP(&taskExportOutput, "output", "o", "", "Output archive path (default: <task-set-id>.tar.gz in the current directory)")
 	taskImportCmd.Flags().StringVar(&taskImportAs, "as", "", "Install under a different task set identifier")
@@ -556,6 +567,26 @@ func runTaskSetPriorityWith(d *tasks.Deps, w io.Writer, taskSetID, priorityArg s
 	tasks.RenderPriorityUpdate(w, result.TaskSetID, result.OldPriority, result.NewPriority)
 	fmt.Fprintln(w)
 	tasks.Render(w, result.Refresh)
+	return nil
+}
+
+func runTaskVerify(cmd *cobra.Command, args []string) error {
+	return runTaskVerifyWith(tasks.DefaultDeps(), os.Stdout, args[0])
+}
+
+func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
+	timeout, err := time.ParseDuration(taskVerifyTimeout)
+	if err != nil {
+		return fmt.Errorf("tasks verify: invalid --timeout %q: %w", taskVerifyTimeout, err)
+	}
+	if _, err := tasks.VerifyTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.VerifyOptions{
+		ResolveInput: taskResolveInput(),
+		TaskSetID:    taskSetID,
+		Timeout:      timeout,
+		Output:       w,
+	}); err != nil {
+		return fmt.Errorf("tasks verify: %w", err)
+	}
 	return nil
 }
 

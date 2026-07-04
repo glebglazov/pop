@@ -198,6 +198,25 @@ var migrations = []string{
 	// Intent only — no provisioning happens at registration (lazy, per ADR-0059).
 	`ALTER TABLE sets ADD COLUMN worktree_managed INTEGER NOT NULL DEFAULT 0;
 	 ALTER TABLE sets ADD COLUMN worktree_name TEXT NOT NULL DEFAULT '';`,
+	// 10: verify_verdicts — the SHA-gated Verify verdict for a Task set (ADR-0086):
+	// an independent Verifier agent's PASS / FIXABLE / NEEDS-HUMAN judgment of the
+	// set's completed AFK work, cached by the work SHA it was computed at, keyed
+	// (repo, set_id, work_sha) where repo is the repository's git common dir (the
+	// same identity the drains table uses). It is a cache, not a completion flag:
+	// when the work SHA moves the verdict for the new SHA is simply absent, so the
+	// set returns to needing verification. `pop tasks verify` always overwrites the
+	// row for the current SHA (force). findings carries the Verifier's human-facing
+	// text (the reasons behind a non-PASS, empty for PASS).
+	`CREATE TABLE verify_verdicts (
+		repo        TEXT NOT NULL,
+		set_id      TEXT NOT NULL,
+		work_sha    TEXT NOT NULL,
+		verdict     TEXT NOT NULL,
+		findings    TEXT NOT NULL DEFAULT '',
+		computed_at TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (repo, set_id, work_sha)
+	);
+	CREATE INDEX idx_verify_verdicts_repo_set ON verify_verdicts(repo, set_id);`,
 }
 
 func (s *Store) migrate() error {

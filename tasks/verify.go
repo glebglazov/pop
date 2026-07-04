@@ -1,0 +1,415 @@
+package tasks
+
+import (
+	"fmt"
+	"io"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/store"
+)
+
+// Verdict is the three-way Verify verdict (ADR-0086): the cached judgment an
+// independent Verifier agent renders over a Task set's completed AFK work.
+type Verdict string
+
+const (
+	// VerdictPass — every acceptance criterion is met; the set may advance.
+	VerdictPass Verdict = "PASS"
+	// VerdictFixable — the work falls short, but the findings are things an agent
+	// can resolve (a later slice spawns a Remediation task from them).
+	VerdictFixable Verdict = "FIXABLE"
+	// VerdictNeedsHuman — only a human can resolve the findings; the set parks.
+	// A malformed or absent Verifier response also resolves here, so an
+	// unparseable result never silently reads as PASS.
+	VerdictNeedsHuman Verdict = "NEEDS-HUMAN"
+)
+
+// emptyTreeSHA is git's well-known hash of the empty tree, used as the diff base
+// when the set's earliest commit is a root commit with no parent.
+const emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// VerifyOptions configures a `pop tasks verify <set>` run.
+type VerifyOptions struct {
+	ResolveInput ResolveInput
+	// TaskSetID is the bare Task-set identifier to verify.
+	TaskSetID string
+	// Timeout bounds the single Verifier attempt. Zero uses DefaultAttemptTimeout.
+	Timeout time.Duration
+	// Output receives the live agent stream and the rendered verdict.
+	Output io.Writer
+}
+
+// VerifyResult is the outcome of one verification, returned after the verdict is
+// persisted.
+type VerifyResult struct {
+	SetID    string
+	WorkSHA  string
+	Verdict  Verdict
+	Findings string
+}
+
+// verifyCoreOptions carries the already-resolved inputs to the core verify
+// routine, so tests can drive it without real path-resolution git calls. The
+// runVerifier seam replaces the real agent spawn in tests (no real agent calls).
+type verifyCoreOptions struct {
+	Repo        string
+	DefPath     string
+	RuntimePath string
+	SetID       string
+	Timeout     time.Duration
+	Output      io.Writer
+	runVerifier func(prompt string) (string, error)
+}
+
+// VerifyTaskSet runs the Verifier over a set using default dependencies.
+func VerifyTaskSet(opts VerifyOptions) (*VerifyResult, error) {
+	return VerifyTaskSetWith(defaultDeps, project.DefaultDeps(), config.Load, opts)
+}
+
+// VerifyTaskSetWith is the tracer bullet for Agent verification (ADR-0086): it
+// resolves the set, hands its acceptance criteria, task bodies, and accumulated
+// work diff to an independent Verifier agent, parses a three-way verdict, writes
+// it to the Drain store keyed by (set, work SHA), and prints it. It always
+// re-runs the Verifier and overwrites the verdict for the current SHA (force);
+// it never reads a cached verdict.
+func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts VerifyOptions) (*VerifyResult, error) {
+	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
+	if err != nil {
+		return nil, err
+	}
+	runtimePath, err := ResolveRuntimePathWith(d, resolved.ProjectPath, opts.ResolveInput.RuntimeOverride)
+	if err != nil {
+		return nil, err
+	}
+	id, err := ResolveRepositoryIdentity(d, runtimePath)
+	if err != nil {
+		return nil, err
+	}
+	cfg, _ := loadConfig(config.DefaultConfigPath())
+	return verifyResolvedSet(d, cfg, verifyCoreOptions{
+		Repo:        id.CommonDir,
+		DefPath:     resolved.DefinitionPath,
+		RuntimePath: runtimePath,
+		SetID:       strings.TrimSpace(opts.TaskSetID),
+		Timeout:     opts.Timeout,
+		Output:      opts.Output,
+	})
+}
+
+// verifyResolvedSet is the resolved-path core: it loads the set, builds the
+// Verifier prompt, runs the Verifier, parses the verdict, persists it, and
+// prints it. All external effects go through injectable seams (d.Git for SHA and
+// diff, runVerifier for the agent, the store for persistence).
+func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*VerifyResult, error) {
+	if opts.SetID == "" {
+		return nil, exitErr(ExitSetup, "a task set identifier is required")
+	}
+	disc, err := DiscoverWith(d, opts.DefPath)
+	if err != nil {
+		return nil, exitErr(ExitOperational, "discover task sets: %v", err)
+	}
+	manifestPath, ok := disc.Manifests[opts.SetID]
+	if !ok {
+		return nil, exitErr(ExitSetup, "unknown task set %q", opts.SetID)
+	}
+	m := LoadManifest(d, opts.SetID, manifestPath)
+	if !m.Valid {
+		return nil, exitErr(ExitSetup, "task set %q is malformed: %s", opts.SetID, MalformedSummary(m))
+	}
+
+	workSHA := verifyWorkSHA(d, opts.RuntimePath)
+	diff := verifyWorkDiff(d, opts.RuntimePath, opts.SetID)
+	prompt := buildVerifierPrompt(d, m, workSHA, diff)
+
+	run := opts.runVerifier
+	if run == nil {
+		run = func(prompt string) (string, error) {
+			return runDefaultVerifier(d, cfg, opts.RuntimePath, prompt, opts.Output, opts.Timeout)
+		}
+	}
+	raw, err := run(prompt)
+	if err != nil {
+		return nil, err
+	}
+
+	verdict, findings := ParseVerdict(raw)
+
+	s, err := openDrainStore(d)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = s.Close() }()
+	if err := s.PutVerifyVerdict(store.VerifyVerdict{
+		Repo:       opts.Repo,
+		SetID:      opts.SetID,
+		WorkSHA:    workSHA,
+		Verdict:    string(verdict),
+		Findings:   findings,
+		ComputedAt: time.Now().UTC(),
+	}); err != nil {
+		return nil, exitErr(ExitOperational, "record verify verdict: %v", err)
+	}
+
+	printVerdict(opts.Output, opts.SetID, workSHA, verdict, findings)
+	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: verdict, Findings: findings}, nil
+}
+
+// runDefaultVerifier resolves the Verifier agent from the set's configured
+// default_agents at heavy effort (the configurable fallback list and effort
+// flags land in a later slice) and runs a single attempt, returning the
+// provider-neutral agent text. A timeout or empty result yields empty output,
+// which ParseVerdict turns into a NEEDS-HUMAN the human is told about.
+func runDefaultVerifier(d *Deps, cfg *config.Config, runtimePath, prompt string, out io.Writer, timeout time.Duration) (string, error) {
+	if timeout <= 0 {
+		timeout = DefaultAttemptTimeout
+	}
+	specs := ResolveDefaultAgentPresets(nil, "", false, cfg)
+	spec := resolveTaskAgentSpecForEffortWithConfig(specs[0], "heavy", true, cfg)
+	invocation, err := ResolveAgentInvocationWithMode(spec, "", prompt, runtimePath, AgentOutputAuto)
+	if err != nil {
+		return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
+	}
+	if out != nil {
+		outputFor(out).line(ansiBold+ansiCyan, "━━ Verifying with %s", invocation.RequestedAgent)
+	}
+	raw, outcome, err := runAgentAttempt(d, runtimePath, out, timeout, invocation)
+	if err != nil {
+		return "", exitErr(ExitOperational, "run verifier: %v", err)
+	}
+	if outcome != nil && outcome.interrupted {
+		return "", exitErr(ExitInterrupted, "interrupted")
+	}
+	return invocation.NormalizeOutput(raw).Output, nil
+}
+
+// verifyWorkSHA reads the runtime checkout's HEAD — the set's current work SHA.
+// A checkout with no commits (or not a repo) has no work SHA; the verdict then
+// keys on the empty string, which is fine for a set with nothing committed yet.
+func verifyWorkSHA(d *Deps, runtimePath string) string {
+	out, err := d.Git.CommandInDir(runtimePath, "rev-parse", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// verifyWorkDiff returns the accumulated diff of the set's committed work. The
+// drain commits every task as a `tasks(<slug>): <id>` commit, so the set's work
+// is the range from the parent of its earliest such commit to HEAD. Absent set
+// commits (nothing drained yet) yields an empty diff — the Verifier still judges
+// the criteria, just against no changes. Diff computation is best-effort: any git
+// failure yields an empty diff rather than aborting the verification.
+func verifyWorkDiff(d *Deps, runtimePath, setID string) string {
+	prefix := commitSubjectPrefix(setID)
+	out, err := d.Git.CommandInDir(runtimePath, "log", "--format=%H", "--fixed-strings", "--grep", prefix, "HEAD")
+	if err != nil {
+		return ""
+	}
+	hashes := strings.Fields(strings.TrimSpace(out))
+	if len(hashes) == 0 {
+		return ""
+	}
+	earliest := hashes[len(hashes)-1]
+	if diff, err := d.Git.CommandInDir(runtimePath, "diff", earliest+"^..HEAD"); err == nil {
+		return strings.TrimSpace(diff)
+	}
+	// The earliest set commit is a root commit (no parent); diff from the empty tree.
+	diff, err := d.Git.CommandInDir(runtimePath, "diff", emptyTreeSHA+".."+earliest)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(diff)
+}
+
+// commitSubjectPrefix is the leading text every implementation commit for a set
+// shares (see CommitSubject), used to find the set's commits.
+func commitSubjectPrefix(taskSetID string) string {
+	return fmt.Sprintf("tasks(%s):", taskSetSlug(taskSetID))
+}
+
+// buildVerifierPrompt assembles the Verifier's input: the authoritative
+// acceptance criteria and task bodies for every task in the set, plus the
+// accumulated work diff at the current SHA, and the exact response format the
+// parser expects.
+func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff string) string {
+	var b strings.Builder
+	b.WriteString("You are an independent Verifier. A separate agent has already implemented this Task set; ")
+	b.WriteString("your job is to confirm reality, not to trust its self-report.\n\n")
+	b.WriteString(fmt.Sprintf("Task set: %s\n", m.Stem))
+	if workSHA != "" {
+		b.WriteString(fmt.Sprintf("Work SHA: %s\n", workSHA))
+	}
+	b.WriteString("\nThe checkboxes under each task's \"## Acceptance criteria\" heading are authoritative. ")
+	b.WriteString("Judge the whole set against them using the accumulated work diff below.\n\n")
+
+	b.WriteString("## Tasks\n")
+	for _, task := range m.Tasks {
+		b.WriteString(fmt.Sprintf("\n### %s [%s] (%s): %s\n", task.ID, task.Type, task.Status, task.Title))
+		body, err := d.FS.ReadFile(filepath.Join(m.Dir, task.File))
+		if err != nil {
+			b.WriteString(fmt.Sprintf("(could not read task body: %v)\n", err))
+			continue
+		}
+		b.WriteString(strings.TrimSpace(string(body)))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n## Accumulated work diff")
+	if workSHA != "" {
+		b.WriteString(fmt.Sprintf(" (at %s)", workSHA))
+	}
+	b.WriteString("\n")
+	if strings.TrimSpace(diff) == "" {
+		b.WriteString("(no committed changes for this set)\n")
+	} else {
+		b.WriteString("```diff\n")
+		b.WriteString(diff)
+		b.WriteString("\n```\n")
+	}
+
+	b.WriteString("\n## Respond in exactly this format\n")
+	b.WriteString("On the first line, one of:\n")
+	b.WriteString("VERDICT: PASS\n")
+	b.WriteString("VERDICT: FIXABLE\n")
+	b.WriteString("VERDICT: NEEDS-HUMAN\n")
+	b.WriteString("Then, on the following lines:\n")
+	b.WriteString("FINDINGS: <what fails a criterion and why — leave empty for PASS>\n\n")
+	b.WriteString("PASS = every acceptance criterion is met. ")
+	b.WriteString("FIXABLE = criteria are unmet but an agent could resolve the findings. ")
+	b.WriteString("NEEDS-HUMAN = the findings need a human decision.\n")
+	return b.String()
+}
+
+// printVerdict renders the verdict and findings to the operator.
+func printVerdict(w io.Writer, setID, workSHA string, verdict Verdict, findings string) {
+	if w == nil {
+		return
+	}
+	out := outputFor(w)
+	out.line(ansiBold, "━━ Verify verdict for %s", setID)
+	if workSHA != "" {
+		out.line(ansiDim, "   Work SHA: %s", shortSHA(workSHA))
+	}
+	out.line(verdictStyle(verdict), "   Verdict:  %s", string(verdict))
+	if strings.TrimSpace(findings) != "" {
+		out.line(ansiBold, "   Findings:")
+		for _, line := range strings.Split(strings.TrimRight(findings, "\n"), "\n") {
+			fmt.Fprintf(out, "     %s\n", line)
+		}
+	}
+}
+
+func verdictStyle(v Verdict) string {
+	switch v {
+	case VerdictPass:
+		return ansiGreen
+	case VerdictFixable:
+		return ansiYellow
+	default:
+		return ansiRed
+	}
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
+// ParseVerdict extracts the three-way verdict and findings from a Verifier's raw
+// response. It looks for a `VERDICT:` line naming PASS, FIXABLE, or NEEDS-HUMAN
+// (tolerating markdown decoration and spelling variants) and takes the findings
+// from a `FINDINGS:` line or, failing that, everything after the verdict line. A
+// missing verdict, an unrecognized token, or an empty response all resolve to
+// NEEDS-HUMAN with findings that tell the human what happened — so a malformed
+// or absent response never reads as PASS.
+func ParseVerdict(raw string) (Verdict, string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return VerdictNeedsHuman, unparsedFindings(raw)
+	}
+	lines := strings.Split(trimmed, "\n")
+	for i, line := range lines {
+		value, ok := verdictLabelValue(line)
+		if !ok {
+			continue
+		}
+		v, ok := canonicalVerdict(value)
+		if !ok {
+			return VerdictNeedsHuman, unparsedFindings(raw)
+		}
+		return v, extractFindings(lines, i)
+	}
+	return VerdictNeedsHuman, unparsedFindings(raw)
+}
+
+// verdictLabelValue reports whether a line is the `VERDICT:` label line and, if
+// so, returns the text after the label. Leading markdown decoration (bullets,
+// headings, bold) is tolerated.
+func verdictLabelValue(line string) (string, bool) {
+	stripped := stripMarkdown(line)
+	if !strings.HasPrefix(strings.ToUpper(stripped), "VERDICT") {
+		return "", false
+	}
+	rest := stripped[len("VERDICT"):]
+	rest = strings.TrimLeft(rest, "*: \t")
+	return rest, true
+}
+
+// canonicalVerdict maps a verdict token to its canonical Verdict, tolerating
+// trailing text and spelling variants (NEEDS_HUMAN, NEEDS HUMAN, …).
+func canonicalVerdict(s string) (Verdict, bool) {
+	up := strings.ToUpper(strings.TrimSpace(stripMarkdown(s)))
+	switch {
+	case strings.HasPrefix(up, "PASS"):
+		return VerdictPass, true
+	case strings.HasPrefix(up, "FIXABLE"):
+		return VerdictFixable, true
+	case strings.HasPrefix(up, "NEEDS") && strings.Contains(up, "HUMAN"):
+		return VerdictNeedsHuman, true
+	}
+	return "", false
+}
+
+// extractFindings returns the findings text: the value of a `FINDINGS:` label
+// (and everything after it) when present, otherwise every line after the verdict.
+func extractFindings(lines []string, verdictIdx int) string {
+	for i, line := range lines {
+		stripped := stripMarkdown(line)
+		if !strings.HasPrefix(strings.ToUpper(stripped), "FINDINGS") {
+			continue
+		}
+		rest := strings.TrimLeft(stripped[len("FINDINGS"):], "*: \t")
+		body := rest
+		if i+1 < len(lines) {
+			body = rest + "\n" + strings.Join(lines[i+1:], "\n")
+		}
+		return strings.TrimSpace(body)
+	}
+	if verdictIdx+1 < len(lines) {
+		return strings.TrimSpace(strings.Join(lines[verdictIdx+1:], "\n"))
+	}
+	return ""
+}
+
+// unparsedFindings is the findings text for a malformed or absent response, so
+// the human is told the Verifier could not be understood rather than seeing a
+// bare NEEDS-HUMAN.
+func unparsedFindings(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "The Verifier produced no output; a human must review this set."
+	}
+	return "The Verifier's response could not be parsed into a verdict; a human must review it.\n\nRaw response:\n" + trimmed
+}
+
+// stripMarkdown removes leading whitespace and common markdown decoration so a
+// label check sees the bare token.
+func stripMarkdown(line string) string {
+	return strings.TrimLeft(line, " \t*#`>-")
+}
