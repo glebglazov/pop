@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/deps"
 )
 
 // manifestWithVerifier builds a bare manifest carrying a per-set `verifier`
@@ -131,7 +132,7 @@ func TestRunConfiguredVerifierAllMissingYieldsEmpty(t *testing.T) {
 	d := &Deps{LookPath: func(string) (string, error) { return "", exec.ErrNotFound }}
 	out, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
-	}, t.TempDir(), "prompt", &bytes.Buffer{}, time.Minute)
+	}, t.TempDir(), "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -154,10 +155,11 @@ func TestRunConfiguredVerifierFallsThroughMissingBinary(t *testing.T) {
 	// Only binDir is on PATH: cursor-agent is missing, the fake claude is found.
 	t.Setenv("PATH", binDir)
 
-	d := &Deps{Runner: RealCommandRunner{}, LookPath: exec.LookPath}
+	taskSetDir := t.TempDir()
+	d := &Deps{FS: deps.NewRealFileSystem(), Runner: RealCommandRunner{}, LookPath: exec.LookPath}
 	out, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
-	}, t.TempDir(), "prompt", &bytes.Buffer{}, time.Minute)
+	}, taskSetDir, "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -166,5 +168,18 @@ func TestRunConfiguredVerifierFallsThroughMissingBinary(t *testing.T) {
 	}
 	if v, _ := ParseVerdict(out); v != VerdictPass {
 		t.Fatalf("verdict = %q, want PASS from the fallback agent", v)
+	}
+
+	// The fallback claude invocation is persisted as a verify Captured run.
+	pairs := listRunFilePairs(t, capturedRunsDir(taskSetDir))
+	if len(pairs) != 1 {
+		t.Fatalf("want 1 persisted verify run, got %d", len(pairs))
+	}
+	meta := readCapturedRunMeta(t, pairs[0].meta)
+	if meta.Phase != "verify" || meta.TaskSetID != "demo" || meta.WorkSHA != "sha1" {
+		t.Fatalf("persisted meta = %+v", meta)
+	}
+	if meta.Verdict != "PASS" {
+		t.Fatalf("verdict = %q, want PASS", meta.Verdict)
 	}
 }

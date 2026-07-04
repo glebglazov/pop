@@ -212,7 +212,7 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 	if run == nil {
 		sel := resolveVerifier(opts.Agents, opts.Effort, m, cfg)
 		run = func(prompt string) (string, error) {
-			return runConfiguredVerifier(d, cfg, sel, opts.RuntimePath, prompt, opts.Output, opts.Timeout)
+			return runConfiguredVerifier(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Output, opts.Timeout)
 		}
 	}
 	raw, err := run(prompt)
@@ -290,6 +290,39 @@ type verifierSelection struct {
 	Effort string
 }
 
+// verifyAttemptOutcome maps an attempt outcome to the persisted stream outcome
+// for a Verifier run.
+func verifyAttemptOutcome(outcome *attemptOutcome) string {
+	if outcome == nil {
+		return streamOutcomeFailed
+	}
+	switch {
+	case outcome.interrupted:
+		return streamOutcomeInterrupted
+	case outcome.timedOut:
+		return streamOutcomeTimedOut
+	case outcome.runErr != nil || outcome.exitCode != 0:
+		return streamOutcomeFailed
+	default:
+		return streamOutcomeCompleted
+	}
+}
+
+// verifyAttemptReason returns a human-facing reason for a failed verifier
+// attempt, or an empty string for non-failure terminal outcomes.
+func verifyAttemptReason(outcome *attemptOutcome) string {
+	if outcome == nil {
+		return ""
+	}
+	if outcome.runErr != nil {
+		return fmt.Sprintf("agent execution error: %v", outcome.runErr)
+	}
+	if outcome.exitCode != 0 {
+		return fmt.Sprintf("agent exited with status %d", outcome.exitCode)
+	}
+	return ""
+}
+
 // resolveVerifier applies the Verifier precedence chain (ADR-0086), highest
 // first: CLI flags (cliAgents / cliEffort) → the per-set manifest `verifier`
 // override → [tasks.verify] config → [tasks.implement].agents / DefaultVerifyEffort.
@@ -345,11 +378,16 @@ func nonEmptyStrings(specs []string) []string {
 // backup verifies at the same effort when the primary is unavailable. A timeout,
 // an empty result, or an exhausted list all yield empty output, which
 // ParseVerdict turns into a NEEDS-HUMAN the human is told about.
-func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, runtimePath, prompt string, out io.Writer, timeout time.Duration) (string, error) {
+//
+// Every structured adapter-mode invocation is persisted as a Captured run pair
+// under <task-set>/streams/runs/. Quota-paused fall-through attempts are
+// persisted without a verdict; the parsed invocation is persisted with its
+// verdict. Persistence is best-effort and never fails the verify command.
+func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, taskSetDir, setID, workSHA, runtimePath, prompt string, out, errOut io.Writer, timeout time.Duration) (string, error) {
 	if timeout <= 0 {
 		timeout = DefaultAttemptTimeout
 	}
-	for _, agentSpec := range nonEmptyAgentSpecs(sel.Agents, DefaultAgentPreset) {
+	for attempt, agentSpec := range nonEmptyAgentSpecs(sel.Agents, DefaultAgentPreset) {
 		preset, err := AgentPresetName(agentSpec)
 		if err != nil {
 			return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
@@ -374,17 +412,29 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, r
 		if err != nil {
 			return "", exitErr(ExitOperational, "run verifier: %v", err)
 		}
+		outcomeStr := verifyAttemptOutcome(outcome)
+		reason := verifyAttemptReason(outcome)
+		exitCode := 0
+		if outcome != nil {
+			exitCode = outcome.exitCode
+		}
+		// Interrupted attempts are persisted but yield no verdict.
 		if outcome != nil && outcome.interrupted {
+			_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, attempt+1, outcomeStr, reason, exitCode, "")
 			return "", exitErr(ExitInterrupted, "interrupted")
 		}
 		normalized := invocation.NormalizeOutput(raw)
 		// Quota fall-through: a paused agent renders no verdict, so try the next.
 		if normalized.QuotaPause != nil {
+			_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, attempt+1, streamOutcomeQuotaPaused, "", exitCode, "")
 			if out != nil {
 				outputFor(out).line(ansiDim, "   Verifier agent %s quota-paused; trying next", preset)
 			}
 			continue
 		}
+		// This invocation's output will be parsed into the Verify verdict.
+		verdict, _ := ParseVerdict(normalized.Output)
+		_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, attempt+1, outcomeStr, reason, exitCode, string(verdict))
 		return normalized.Output, nil
 	}
 	// Every configured agent was unavailable or quota-paused: return empty output

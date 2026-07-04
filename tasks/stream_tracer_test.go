@@ -205,6 +205,37 @@ func TestStreamWholeSetTieBreaksImplementBeforeVerify(t *testing.T) {
 	}
 }
 
+func TestStreamWholeSetIncludesVerifyRunsAsSyntheticTask(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	// Implement run for 01-a.
+	writeCapturedRunDirect(t, env.demoDir(), "01-a.md", "01-a", "implement", 1, base, "completed")
+	// Set-level verify run (no task file) at base+5m.
+	writeCapturedRunDirect(t, env.demoDir(), "", "", "verify", 1, base.Add(5*time.Minute), "completed")
+
+	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d: %#v", len(result.Tasks), result.Tasks)
+	}
+	// Verify run should appear as a synthetic task ordered by its start time.
+	if result.Tasks[0].TaskID != "01-a" || result.Tasks[1].TaskID != "verify" {
+		t.Fatalf("tasks not ordered correctly: %#v", result.Tasks)
+	}
+	if result.Tasks[1].File != "" || result.Tasks[1].Title != "Verify" {
+		t.Fatalf("verify task stream = %#v", result.Tasks[1])
+	}
+	if len(result.Tasks[1].Attempts) != 1 {
+		t.Fatalf("expected 1 verify attempt, got %d", len(result.Tasks[1].Attempts))
+	}
+}
+
 func TestStreamSingleTaskTarget(t *testing.T) {
 	env := streamFixture(t)
 	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)

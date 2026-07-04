@@ -86,6 +86,8 @@ type capturedRunMeta struct {
 	Agent          string    `json:"agent"`
 	RequestedAgent string    `json:"requested_agent,omitempty"`
 	Attempt        int       `json:"attempt"`
+	WorkSHA        string    `json:"work_sha,omitempty"`
+	Verdict        string    `json:"verdict,omitempty"`
 }
 
 // capturedRun is an in-memory representation of one persisted run, pairing its
@@ -240,7 +242,7 @@ var attemptStreamNamePattern = regexp.MustCompile(`^attempt-(\d+)\.jsonl\.gz$`)
 // meta.json index and a matching events.jsonl.gz payload. Both files are
 // written best-effort; if the meta write fails the events file is removed so
 // an orphan payload never lacks an index.
-func writeCapturedRun(d *Deps, taskSetDir string, sel *Selection, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int) (string, string, error) {
+func writeCapturedRun(d *Deps, taskSetDir, phase, taskSetID, taskID, taskFile string, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int, workSHA, verdict string) (string, string, error) {
 	dir := capturedRunsDir(taskSetDir)
 	if err := d.FS.MkdirAll(dir, 0o755); err != nil {
 		return "", "", err
@@ -253,10 +255,10 @@ func writeCapturedRun(d *Deps, taskSetDir string, sel *Selection, rec *streamRec
 	}
 	meta := capturedRunMeta{
 		RunID:          runID,
-		Phase:          "implement",
-		TaskSetID:      sel.TaskSetID,
-		TaskID:         sel.TaskID,
-		TaskFile:       sel.TaskFile,
+		Phase:          phase,
+		TaskSetID:      taskSetID,
+		TaskID:         taskID,
+		TaskFile:       taskFile,
 		StartTime:      rec.start.UTC(),
 		EndTime:        end.UTC(),
 		Outcome:        outcome,
@@ -265,6 +267,8 @@ func writeCapturedRun(d *Deps, taskSetDir string, sel *Selection, rec *streamRec
 		Agent:          agent,
 		RequestedAgent: requestedAgent,
 		Attempt:        attempt,
+		WorkSHA:        workSHA,
+		Verdict:        verdict,
 	}
 
 	eventsPath := filepath.Join(dir, runID+".events.jsonl.gz")
@@ -305,9 +309,26 @@ func persistAttemptStream(d *Deps, errOut io.Writer, sel *Selection, rec *stream
 	if rec == nil {
 		return ""
 	}
-	metaPath, _, err := writeCapturedRun(d, sel.Manifest.Dir, sel, rec, agent, requestedAgent, attempt, outcome, reason, exitCode)
+	metaPath, _, err := writeCapturedRun(d, sel.Manifest.Dir, "implement", sel.TaskSetID, sel.TaskID, sel.TaskFile, rec, agent, requestedAgent, attempt, outcome, reason, exitCode, "", "")
 	if err != nil {
 		fmt.Fprintf(errOut, "warning: persist attempt stream for %s/%s: %v\n", sel.TaskSetID, sel.TaskID, err)
+		return ""
+	}
+	return metaPath
+}
+
+// persistVerifyRun writes one Captured run pair for a Verifier invocation,
+// best-effort. A nil recorder records nothing. Returns the written meta file's
+// path, or "" when nothing was persisted.
+func persistVerifyRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int, verdict string) string {
+	if rec == nil {
+		return ""
+	}
+	metaPath, _, err := writeCapturedRun(d, taskSetDir, "verify", setID, "", "", rec, agent, requestedAgent, attempt, outcome, reason, exitCode, workSHA, verdict)
+	if err != nil {
+		if errOut != nil {
+			fmt.Fprintf(errOut, "warning: persist verify run for %s: %v\n", setID, err)
+		}
 		return ""
 	}
 	return metaPath

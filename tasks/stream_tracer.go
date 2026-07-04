@@ -168,14 +168,20 @@ func readSetAttemptStreams(d *Deps, m *Manifest, last bool) ([]TaskStream, error
 	}
 	if last {
 		run := runs[len(runs)-1]
-		task := taskByFile(m, run.meta.TaskFile)
-		if task == nil {
-			return nil, fmt.Errorf("run references unknown task file %q", run.meta.TaskFile)
+		var ts TaskStream
+		if run.meta.TaskFile == "" && run.meta.Phase == "verify" {
+			ts = TaskStream{TaskID: "verify", File: "", Title: "Verify"}
+		} else {
+			task := taskByFile(m, run.meta.TaskFile)
+			if task == nil {
+				return nil, fmt.Errorf("run references unknown task file %q", run.meta.TaskFile)
+			}
+			ts = TaskStream{TaskID: task.ID, File: task.File, Title: task.Title}
 		}
 		return []TaskStream{{
-			TaskID:   task.ID,
-			File:     task.File,
-			Title:    task.Title,
+			TaskID:   ts.TaskID,
+			File:     ts.File,
+			Title:    ts.Title,
 			Attempts: []AttemptStream{attemptStreamFromRun(run)},
 		}}, nil
 	}
@@ -193,24 +199,31 @@ func taskByFile(m *Manifest, file string) *Task {
 }
 
 // groupRunsIntoTaskStreams groups chronologically sorted runs by task, preserving
-// the order in which each task first appears in the run timeline.
+// the order in which each task first appears in the run timeline. Verify runs
+// (set-level, no task file) are grouped into a synthetic "verify" task.
 func groupRunsIntoTaskStreams(m *Manifest, runs []capturedRun) []TaskStream {
 	var groups []TaskStream
 	seen := map[string]int{}
 	for _, run := range runs {
-		idx, ok := seen[run.meta.TaskFile]
+		key := run.meta.TaskFile
+		if key == "" && run.meta.Phase == "verify" {
+			key = "__verify__"
+		}
+		idx, ok := seen[key]
 		if !ok {
-			task := taskByFile(m, run.meta.TaskFile)
-			if task == nil {
-				continue
+			var ts TaskStream
+			if key == "__verify__" {
+				ts = TaskStream{TaskID: "verify", File: "", Title: "Verify"}
+			} else {
+				task := taskByFile(m, key)
+				if task == nil {
+					continue
+				}
+				ts = TaskStream{TaskID: task.ID, File: task.File, Title: task.Title}
 			}
-			groups = append(groups, TaskStream{
-				TaskID: task.ID,
-				File:   task.File,
-				Title:  task.Title,
-			})
+			groups = append(groups, ts)
 			idx = len(groups) - 1
-			seen[run.meta.TaskFile] = idx
+			seen[key] = idx
 		}
 		groups[idx].Attempts = append(groups[idx].Attempts, attemptStreamFromRun(run))
 	}
@@ -571,7 +584,11 @@ func RenderStream(w io.Writer, result *StreamResult, opts RenderStreamOptions) {
 		if i > 0 {
 			fmt.Fprintln(out)
 		}
-		fmt.Fprintf(out, "%s/%s  %s\n", result.TaskSetID, task.File, task.Title)
+		if task.File != "" {
+			fmt.Fprintf(out, "%s/%s  %s\n", result.TaskSetID, task.File, task.Title)
+		} else {
+			fmt.Fprintf(out, "%s  %s\n", result.TaskSetID, task.Title)
+		}
 		if len(task.Attempts) == 0 {
 			out.line(ansiDim, "  no captured attempt streams")
 			continue

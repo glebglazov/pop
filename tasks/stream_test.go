@@ -316,7 +316,7 @@ func TestWriteCapturedRunCreatesMetaAndEventsPair(t *testing.T) {
 	}
 	rec.finish()
 
-	metaPath, eventsPath, err := writeCapturedRun(d, taskSetDir, sel, rec, "claude", "claude --model opus", 1, streamOutcomeCompleted, "", 0)
+	metaPath, eventsPath, err := writeCapturedRun(d, taskSetDir, "implement", sel.TaskSetID, sel.TaskID, sel.TaskFile, rec, "claude", "claude --model opus", 1, streamOutcomeCompleted, "", 0, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestWriteCapturedRunCreatesMetaAndEventsPair(t *testing.T) {
 	}
 
 	// Two runs for the same task get distinct uuids.
-	metaPath2, eventsPath2, err := writeCapturedRun(d, taskSetDir, sel, rec, "claude", "claude --model opus", 2, streamOutcomeFailed, "missing sentinel", 1)
+	metaPath2, eventsPath2, err := writeCapturedRun(d, taskSetDir, "implement", sel.TaskSetID, sel.TaskID, sel.TaskFile, rec, "claude", "claude --model opus", 2, streamOutcomeFailed, "missing sentinel", 1, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestListTaskRunsMergesNewAndLegacyLayouts(t *testing.T) {
 			t.Fatal(err)
 		}
 		rec.finish()
-		if _, _, err := writeCapturedRun(d, taskSetDir, sel, rec, "claude", "claude", attempt, outcome, "", 0); err != nil {
+		if _, _, err := writeCapturedRun(d, taskSetDir, "implement", sel.TaskSetID, sel.TaskID, sel.TaskFile, rec, "claude", "claude", attempt, outcome, "", 0, "", ""); err != nil {
 			t.Fatal(err)
 		}
 	}

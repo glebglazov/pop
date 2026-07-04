@@ -2,10 +2,14 @@ package tasks
 
 import (
 	"bytes"
+	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/store"
@@ -330,5 +334,176 @@ func TestFormatVerifyCommand(t *testing.T) {
 				t.Fatalf("FormatVerifyCommand() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// scriptedVerifyRunner is a CommandRunner that replays canned claude-stream-json
+// output per attempt. It lets tests exercise multi-agent verifier fall-through
+// without spawning real agents.
+type scriptedVerifyRunner struct {
+	calls   int
+	scripts []string // raw output to emit for each Start call
+	names   []string
+}
+
+func (r *scriptedVerifyRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	proc, err := r.Start(ctx, dir, stdout, stderr, name, args...)
+	if err != nil {
+		return 1, err
+	}
+	return proc.Wait()
+}
+
+func (r *scriptedVerifyRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	r.calls++
+	r.names = append(r.names, name)
+	script := ""
+	if r.calls <= len(r.scripts) {
+		script = r.scripts[r.calls-1]
+	}
+	for _, line := range strings.Split(script, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fmt.Fprintln(stdout, line)
+	}
+	proc := &ManagedProcess{done: make(chan waitResult, 1)}
+	proc.done <- waitResult{exitCode: 0}
+	return proc, nil
+}
+
+func TestRunConfiguredVerifierPersistsMultiAgentFallback(t *testing.T) {
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"You've hit your session limit"}`,
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\nFINDINGS:\n"}`,
+		},
+	}
+	d := &Deps{
+		FS:       deps.NewRealFileSystem(),
+		Git:      stubGit("sha1\n", "", ""),
+		LookPath: func(string) (string, error) { return "/bin/claude", nil },
+		Runner:   runner,
+	}
+
+	var out bytes.Buffer
+	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
+		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "VERDICT: PASS") {
+		t.Fatalf("raw = %q, want PASS verdict", raw)
+	}
+
+	// Both invocations are persisted: the quota-paused attempt and the parsed one.
+	runsDir := capturedRunsDir(taskSetDir)
+	pairs := listRunFilePairs(t, runsDir)
+	if len(pairs) != 2 {
+		t.Fatalf("want 2 verify runs, got %d", len(pairs))
+	}
+
+	// First run: quota-paused fall-through, no verdict.
+	meta1 := readCapturedRunMeta(t, pairs[0].meta)
+	if meta1.Phase != "verify" {
+		t.Fatalf("run1 phase = %q, want verify", meta1.Phase)
+	}
+	if meta1.Outcome != streamOutcomeQuotaPaused {
+		t.Fatalf("run1 outcome = %q, want %s", meta1.Outcome, streamOutcomeQuotaPaused)
+	}
+	if meta1.WorkSHA != "sha1" {
+		t.Fatalf("run1 work_sha = %q, want sha1", meta1.WorkSHA)
+	}
+	if meta1.Verdict != "" {
+		t.Fatalf("run1 should have no verdict, got %q", meta1.Verdict)
+	}
+
+	// Second run: parsed invocation carries the PASS verdict.
+	meta2 := readCapturedRunMeta(t, pairs[1].meta)
+	if meta2.Phase != "verify" || meta2.Outcome != streamOutcomeCompleted {
+		t.Fatalf("run2 meta = %+v", meta2)
+	}
+	if meta2.WorkSHA != "sha1" {
+		t.Fatalf("run2 work_sha = %q, want sha1", meta2.WorkSHA)
+	}
+	if meta2.Verdict != "PASS" {
+		t.Fatalf("run2 verdict = %q, want PASS", meta2.Verdict)
+	}
+}
+
+func TestRunConfiguredVerifierUnparseableOutputPersistsWithNeedsHumanVerdict(t *testing.T) {
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"I think it looks okay"}`,
+		},
+	}
+	d := &Deps{
+		FS:       deps.NewRealFileSystem(),
+		Git:      stubGit("sha1\n", "", ""),
+		LookPath: func(string) (string, error) { return "/bin/claude", nil },
+		Runner:   runner,
+	}
+
+	var out bytes.Buffer
+	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
+		Agents: []string{"claude"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "I think it looks okay") {
+		t.Fatalf("raw = %q", raw)
+	}
+
+	pairs := listRunFilePairs(t, capturedRunsDir(taskSetDir))
+	if len(pairs) != 1 {
+		t.Fatalf("want 1 verify run, got %d", len(pairs))
+	}
+	meta := readCapturedRunMeta(t, pairs[0].meta)
+	if meta.Verdict != "NEEDS-HUMAN" {
+		t.Fatalf("verdict = %q, want NEEDS-HUMAN", meta.Verdict)
+	}
+}
+
+func TestVerifyResolvedSetCacheHitWritesNoRun(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
+	// Seed a cached verdict at sha1.
+	s, err := openDrainStore(d)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := s.PutVerifyVerdict(store.VerifyVerdict{
+		Repo:    "/repo/.git",
+		SetID:   "demo",
+		WorkSHA: "sha1",
+		Verdict: "PASS",
+	}); err != nil {
+		t.Fatalf("seed verdict: %v", err)
+	}
+	_ = s.Close()
+
+	// ensureVerifyVerdict is the cache-first path used by the drain. A cache hit
+	// must not invoke the verifier and therefore must not write a Captured run.
+	m, err := loadVerifiableManifest(d, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+	})
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	v, err := ensureVerifyVerdict(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+	}, m, "sha1")
+	if err != nil {
+		t.Fatalf("ensureVerifyVerdict: %v", err)
+	}
+	if v == nil || v.Verdict != "PASS" {
+		t.Fatalf("cached verdict = %+v", v)
+	}
+
+	if _, err := os.Stat(capturedRunsDir(filepath.Join(defPath, "demo"))); !os.IsNotExist(err) {
+		t.Fatalf("cache hit wrote a verify run")
 	}
 }
