@@ -5,10 +5,11 @@ branch: fix-worktree-branch-picker-cursor
 ---
 
 + Attempt stream replay
-  The `pop tasks stream TASK_SET[/FILE.md]` command — the second read-only lens
-  over the Captured attempt stream, after the Attempt timing breakdown lens
-  (`timings`). For each structured attempt it renders the full Attempt timing
-  breakdown as a header (including read-time-derived token spend), then the
+  The `pop tasks stream TASK_SET[/FILE.md]` command — the read-only lens over
+  the Captured attempt stream. It supersedes and retires the earlier `pop tasks
+  timings` lens, of which it is a strict superset. For each structured attempt
+  it renders the full Attempt timing breakdown as a header (including
+  read-time-derived token spend), then the
   attempt's event sequence as human- and agent-legible text: per event a `+Xs`
   offset, assistant text, tool invocation name and arguments, and tool result,
   with oversized tool payloads truncated to a head+tail excerpt. It is pure
@@ -28,9 +29,10 @@ branch: fix-worktree-branch-picker-cursor
   and absent for adapters that report none), and — for agents whose stream pairs
   a tool invocation with its result — a per-tool count and duration, followed by
   Model time. Tool figures are reported under the agent that ran the attempt
-  because tool vocabularies differ by agent. It is the shared header both lenses
-  render: implement prints it as a task finishes, `pop tasks timings` reprints
-  the full per-task history ordered by attempt start time, and Attempt stream
-  replay prints it above each attempt's replayed events. There is no
-  cross-Task-set rollup.
+  because tool vocabularies differ by agent. It is the shared header rendered in
+  two places: implement prints it as a task finishes, and Attempt stream replay
+  prints it above each attempt's replayed events (ordered by attempt start
+  time). The standalone `pop tasks timings` lens that once reprinted the
+  per-task history is retired in favour of stream. There is no cross-Task-set
+  rollup.
   was: The agent-specific accounting of where a Task attempt's wall-clock time went, derived from its Captured attempt stream: each attempt's outcome and total duration, and — for agents whose stream pairs a tool invocation with its result — a per-tool count and duration, followed by Model time. Tool figures are reported under the agent that ran the attempt because tool vocabularies differ by agent. Implement prints the breakdown for a task as the task finishes, showing the attempts made in that invocation; `pop tasks timings` reprints the full per-task history, ordered by attempt start time. There is no cross-Task-set rollup.
