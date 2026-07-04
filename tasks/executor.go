@@ -329,7 +329,11 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		errOut = os.Stderr
 	}
 	display := outputFor(out)
-	display.line(ansiBold+ansiCyan, "━━ Running task %s/%s: %s", sel.TaskSetID, sel.TaskID, sel.Task.Title)
+	if pos, total := afkOrdinal(sel.Manifest, sel.TaskID); pos > 0 {
+		display.line(ansiBold+ansiCyan, "━━ Running task %s/%s (%d/%d): %s", sel.TaskSetID, sel.TaskID, pos, total, sel.Task.Title)
+	} else {
+		display.line(ansiBold+ansiCyan, "━━ Running task %s/%s: %s", sel.TaskSetID, sel.TaskID, sel.Task.Title)
+	}
 	// Captured attempt streams written by this invocation, for the inline
 	// breakdown when the task reaches a terminal state. Full history stays
 	// with `pop tasks timings`.

@@ -13,6 +13,27 @@ type SelectionRow struct {
 	LockedMark string
 }
 
+// afkOrdinal returns the 1-based position of taskID among AFK-typed tasks in
+// manifest order and the total count of AFK tasks in the set. The position is a
+// fixed property of the task (all statuses counted), so it is stable across
+// skips, retries, and re-drains. Returns (0, 0) when the manifest is nil or
+// taskID is not an AFK task in it, and the caller then omits the counter.
+func afkOrdinal(m *Manifest, taskID string) (pos, total int) {
+	if m == nil {
+		return 0, 0
+	}
+	for _, task := range m.Tasks {
+		if task.Type != "AFK" {
+			continue
+		}
+		total++
+		if task.ID == taskID {
+			pos = total
+		}
+	}
+	return pos, total
+}
+
 // EligibilityFunc classifies a task status for one verb's Multi-task selection,
 // returning whether the row is locked and the glyph to render for a locked row.
 // This is the per-verb policy that drives the three-way row split (checkable /

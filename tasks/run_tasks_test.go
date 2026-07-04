@@ -1496,7 +1496,7 @@ func TestRunTaskSetYesPrintsConciseSummary(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"━━ Running task demo/01-a: A",
+		"━━ Running task demo/01-a (1/1): A",
 		"   Attempt 1/3",
 		"── Agent output",
 		"── Agent finished for demo/01-a",
