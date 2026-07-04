@@ -17,10 +17,15 @@ week of 2026-06-08, after beta-tester sign-off.
 3. **Single phase — data migrations are removed too.** Beta testers update
    frequently; stranded data fails loudly enough (missing task sets) to diagnose.
    This makes the sign-off checklist's per-repo verification mandatory.
-4. **`[workload]` config section is renamed in this cleanup.** It was never
-   deprecated — it is currently the *only* key for task config. The cleanup
-   introduces `[tasks]` and hard-errors on `[workload]`, same treatment as the other
-   removed keys. One announcement, one migration, no second breaking cycle.
+4. **`[workload]` config section is renamed *and restructured* to `[tasks]`
+   (ADR-0092).** Supersedes the earlier assumption of a flat `[workload]`→`[tasks]`
+   rename: the same move re-parents the internals into verb-named phase sub-tables
+   (`[tasks.implement].agents`, `[tasks.verify]`), renames `[workload.git]`→`[tasks.git]`
+   and the per-preset map `[workload.agents.<name>]`→`[tasks.presets.<name>]`. Unlike the
+   original "never deprecated → straight to hard-error" plan, `[tasks]` ships first with
+   the whole `[workload]` tree kept as an **honored read-compat alias + load-time warning**
+   (matching every other renamed key); this cleanup then flips `[workload]` to a hard-error
+   tombstone. One breaking cycle at removal, not at introduction.
 5. **Stale installed integration artifacts are the tester's migration step.**
    Pre-rename artifacts send old status names; the opencode plugin swallows errors
    (`.catch(() => {})` in `cmd/extensions/opencode/pop-status-sync.ts:22`), so a
@@ -49,15 +54,23 @@ week of 2026-06-08, after beta-tester sign-off.
 | `attention_notifications_enabled` (in `[worktree]`, `[project]`, `[select]`) | `unread_notifications_enabled` | `config/config.go:81,90`, warnings `config.go:374-380` |
 | `current_pane_always_under_cursor` | `cursor_position` | `DashboardConfig`, resolution ~`config.go:223` |
 | sort value `pane_last_visit_at` | `pane_last_active_at` | `config/config.go:69` (`SortByPaneLastVisitAt`) |
-| `[workload]` section | `[tasks]` (NEW — introduce first) | `config/config.go:135-137` (`Task *TaskConfig \`toml:"workload"\``) |
+| `[workload]` section (whole tree) | `[tasks]` | `config/config.go` (`Task *TaskConfig \`toml:"workload"\``) — see restructure rows below (ADR-0092) |
+| `[workload] default_agents` | `[tasks.implement].agents` | `TaskConfig.DefaultAgents`; resolution `ResolveDefaultAgentPresets` (`tasks/agent.go:551`); includes-merge `config.go:1857` |
+| `[workload.verify]` | `[tasks.verify]` | `TaskConfig.Verify`; includes-merge `config.go:1890` |
+| `[workload.git]` | `[tasks.git]` | `TaskConfig.Git`; includes-merge `config.go:1880` |
+| `[workload.agents.<name>]` (per-preset map) | `[tasks.presets.<name>]` | `TaskConfig.Agents`; includes-merge `config.go:1867` |
+| `[queue] agents ignored` warning text | point at `[tasks.implement].agents` | `config/config.go:1705` |
+| includes whitelist enumerates `workload` | accept both `workload` (deprecated) + `tasks` | `config/config.go:1840` |
 
 Tombstone behavior: presence of any old key → config load fails with
 `"<old key> was removed; use <new key>"`. Implementation keeps the old struct
 field solely for detection; mark each with a comment `// Tombstone: delete after
 <date/condition>` so the second-phase delete is greppable.
 
-Note: `[workload]` needs the *new* key added (`toml:"tasks"`) before the old one can
-hard-error. README must document `[tasks.agents.<name>]` from the same commit.
+Note: `[tasks]` and its restructured sub-tables ship with `[workload]` kept as an
+honored read-compat alias first (ADR-0092); this cleanup flips `[workload]` to the
+hard-error tombstone. README must document `[tasks.implement].agents`,
+`[tasks.verify]`, and `[tasks.presets.<name>]` from the alias-removal commit.
 
 ### C. Status aliases (sent by integration hooks)
 
@@ -85,7 +98,7 @@ message naming the new status (loud-failure preference). Current embedded templa
 | Item | Location | Action |
 |---|---|---|
 | Doctor "auto-migrated on next tasks command" message | `cmd/doctor.go:391-414` | Message becomes a lie once migration is gone. Repurpose: detect leftover `workloads/` dirs and warn "stranded pre-rename storage; migrate by hand" — or delete the check |
-| README documents `[workload.agents.claude]` | `README.md:27` | Rewrite to `[tasks.agents.claude]` |
+| README documents `[workload.agents.claude]` | `README.md:27` | Rewrite to `[tasks.presets.claude]` (per-preset map renamed, ADR-0092) |
 | Smoke script carries retired name | `scripts/live-workload-agent-smoke.sh` (referenced at `README.md:81`) | Rename script + README reference |
 | CONTEXT.md "Deprecated aliases" section | `CONTEXT.md:412` | Prune removed aliases after cleanup lands — glossary describes current language; git history keeps the past |
 | CONTEXT.md `pop select` entry says "remove at the next major release" | `CONTEXT.md:12` | Already updated to point here |
