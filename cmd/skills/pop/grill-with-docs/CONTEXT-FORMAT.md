@@ -59,21 +59,33 @@ The skill infers which structure applies:
 
 When multiple contexts exist, infer which one the current topic relates to. If unclear, ask.
 
+A context's **link text** in the map (`Ordering`, `Billing`) is its canonical identifier: it names the context in prose and, slugified, prefixes that context's fragment files (see the fragment scheme below). The bullet-link map layout above is the canonical `CONTEXT-MAP.md` format — keep to it so the slug is derivable.
+
 ## Concurrent writes: fragments
 
 `CONTEXT.md` is one shared file. When agents run in parallel — or a team uses this skill — concurrent writes to it conflict. The fix: **never write the base file during a normal session.** Each session writes its own delta fragment; readers union base + fragments; a human folds fragments back in on demand.
 
 ### Write to your own fragment
 
-The first time a session resolves a term, create one fragment beside the base it deltas:
+All session fragments live in **one hidden directory at the repository root, `.grill-context/`** — never beside the base `CONTEXT.md`. This keeps the churn of parallel sessions out of the working directories, and keeps a multi-context repo to a single fragment dir instead of one per context. Create `.grill-context/` lazily the first time this session resolves a term.
+
+The filename says which context the fragment deltas and its generation:
 
 ```
-<dir>/CONTEXT.<counter>.<uuid>.md
+# multi-context repo (CONTEXT-MAP.md exists)
+.grill-context/<slug>.<counter>.<uuid>.md
+
+# single-context repo (only a root CONTEXT.md, no map)
+.grill-context/CONTEXT.<counter>.<uuid>.md
 ```
 
-`counter` is a zero-padded, context-directory generation such as `0001`, `0002`, `0003`. Pick it by scanning the colocated `CONTEXT.*.*.md` fragments and using `max(counter) + 1`; if no numbered fragments exist, use `0001`. `uuid` comes from `uuidgen | head -c8`.
+- `slug` binds the fragment to its context. Derive it from `CONTEXT-MAP.md`: take the context's link text, lowercase it, and collapse every run of non-alphanumeric characters to a single `-` (`Ordering` → `ordering`, `Order Fulfillment` → `order-fulfillment`). The slug prefix is the *only* thing separating one context's fragments from another's in the shared dir, so context link text must be unique after slugifying. In a single-context repo there is no map — use the literal `CONTEXT` in the slug position.
+- `counter` is a zero-padded, **per-context** generation such as `0001`, `0002`, `0003`. Pick it by scanning **all** fragments for this context — both `.grill-context/<slug>.*.*.md` and any legacy fragments colocated beside the base (see below) — and using `max(counter) + 1`; if none exist, use `0001`. Scope the scan to this context's slug so parallel contexts never inflate each other's generations.
+- `uuid` comes from `uuidgen | head -c8`.
 
-Reuse that one file for every term you resolve this session. It's co-located with its base `CONTEXT.md` (same directory — in multi-context repos, the context's own dir). Because every session writes a different uuid, parallel work never collides at the file level. If two agents both start from the same visible fragments, they may create the same counter with different uuids; that is fine.
+A fragment's context is given entirely by its filename slug (or, for a legacy fragment, the directory it sits in) — there is no `context:` field in the body.
+
+Reuse that one file for every term you resolve this session. Because every session writes a different uuid, parallel work never collides at the file level. If two agents both start from the same visible fragments, they may create the same counter with different uuids; that is fine.
 
 A fragment is a list of **delta ops**, not a full glossary:
 
@@ -104,12 +116,17 @@ Provenance is just `fragment:` (= the uuid), `generation:` (= the filename count
 
 ### Read = union, in memory
 
-The effective glossary is **base `CONTEXT.md` overlaid with every `CONTEXT.*.md` in the same directory**, computed at read time. This is read-only — globbing and unioning never mutates a file, so it never conflicts. Glob the fragments at session start and treat the union as the glossary you challenge terms against.
+The effective glossary for a context is its **base `CONTEXT.md` overlaid with every fragment that deltas it**, computed at read time. Fragments live in two places, and you read both:
+
+- `.grill-context/<slug>.*.*.md` at the repo root — where this scheme writes them now. (Single-context: `.grill-context/CONTEXT.*.*.md`.) Select this context's fragments by slug prefix.
+- legacy `<dir>/CONTEXT.*.*.md` colocated beside the base — where older sessions wrote them. Still read so nothing is lost; `grill-consolidate` drains these into the base over time.
+
+This is read-only — globbing and unioning never mutates a file, so it never conflicts. Glob both locations at session start and treat the union as the glossary you challenge terms against. `.grill-context/` is a dotdir, so include hidden paths when you glob it — `rg --hidden`, `ls -a`, or shell `dotglob` — since default ripgrep skips hidden paths.
 
 Overlay rules:
 
 - A fragment op beats the base (`~` redefinition wins over the base definition; `-` removes it).
-- Higher generations beat lower generations for the same term. This means `CONTEXT.0002.<uuid>.md` can intentionally override a delta from `CONTEXT.0001.<other-uuid>.md` that was visible when the later session started.
+- Higher generations beat lower generations for the same term. This means a generation-`0002` fragment can intentionally override a delta from a generation-`0001` fragment that was visible when the later session started.
 - **Two fragments in the same generation touching the same term = collision.** Render both, marked `⚠ contested — needs consolidation`. Do *not* silently pick one. This is where a genuine parallel semantic conflict announces itself instead of hiding.
 - A `+` term whose `under:` matches an existing heading slots there; with no hint or a novel heading, it renders under `## Unfiled (pending consolidation)`.
 

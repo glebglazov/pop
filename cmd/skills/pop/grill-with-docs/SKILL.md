@@ -96,7 +96,7 @@ Why this matters: these artifacts often get carried into downstream work via a f
 To commit:
 
 1. **Skip if nothing to do.** If the working directory is not a git repository, or this session created/modified no committable repository files, say so and skip.
-2. **Identify session paths.** From this conversation's history, list *exactly* the repository files this session created or modified — CONTEXT base/fragments (`CONTEXT*.md`), ADRs (`docs/adr/**`), `CONTEXT-MAP.md`, and any code or prototype the session touched. Commit CONTEXT fragments **as-is** — do not consolidate them (consolidation is a separate pass). Do **not** include files this session never touched, even if dirty; prior-session artifacts are intentionally out of scope.
+2. **Identify session paths.** From this conversation's history, list *exactly* the repository files this session created or modified — the base glossary (`CONTEXT.md`, `CONTEXT-MAP.md`), session fragments (`.grill-context/**`, plus any legacy `CONTEXT.*.md` colocated beside a base), ADRs (`docs/adr/**`), and any code or prototype the session touched. Commit CONTEXT fragments **as-is** — do not consolidate them (consolidation is a separate pass). Do **not** include files this session never touched, even if dirty; prior-session artifacts are intentionally out of scope.
 3. **Stage exactly those paths** (never `git add -A`) and create a **single commit**. Derive a short `<topic-slug>` from the subject of the grilling session (the term or area discussed). The type follows content:
    - docs-only → `docs(<topic-slug>): <summary> (ADR-NNNN + glossary)` (drop whichever parenthetical part doesn't apply)
    - mixed code + docs → a fitting conventional type (`feat`, `chore`, …), still scoped `(<topic-slug>)`

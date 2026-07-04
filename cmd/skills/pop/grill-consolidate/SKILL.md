@@ -1,13 +1,13 @@
 ---
 name: grill-consolidate
-description: Fold accumulated CONTEXT.<counter>.<uuid>.md glossary fragments into canonical CONTEXT.md files, and reconcile clashing sequential ADR numbers (re-sequencing duplicates and fixing the links that pointed at them), as a deliberate single-writer maintenance pass. Use when the user asks to consolidate, fold, merge, reconcile, clean up, or resolve concurrent context/glossary fragments or duplicate ADR numbers produced by grill-with-docs.
+description: Fold accumulated glossary fragments (from `.grill-context/`, plus any legacy colocated CONTEXT.<counter>.<uuid>.md) into canonical CONTEXT.md files, and reconcile clashing sequential ADR numbers (re-sequencing duplicates and fixing the links that pointed at them), as a deliberate single-writer maintenance pass. Use when the user asks to consolidate, fold, merge, reconcile, clean up, or resolve concurrent context/glossary fragments or duplicate ADR numbers produced by grill-with-docs.
 ---
 
 # Grill Consolidate
 
 Use this skill for the single-writer maintenance pass over the artifacts `grill-with-docs` produces under parallel use:
 
-1. Merge colocated `CONTEXT.<counter>.<uuid>.md` glossary fragments into their base `CONTEXT.md`.
+1. Merge session glossary fragments into their base `CONTEXT.md`. Fragments live in `.grill-context/` at the repo root (`<slug>.<counter>.<uuid>.md`, or `CONTEXT.<counter>.<uuid>.md` in a single-context repo), plus any legacy `CONTEXT.<counter>.<uuid>.md` colocated beside a base.
 2. Reconcile sequential ADR numbers under `docs/adr/` — detect duplicate `NNNN`, re-sequence the clash losers, and fix the links that referenced them.
 
 This is a single-writer operation. Do not run it speculatively, automatically, or in parallel with another consolidation pass. If a contested term or an ambiguous link requires a semantic decision, ask the user and wait.
@@ -16,23 +16,24 @@ This is a single-writer operation. Do not run it speculatively, automatically, o
 
 Start at the repository root.
 
-- If `CONTEXT-MAP.md` exists, read it and inspect each listed context path.
-- If a root `CONTEXT.md` exists, inspect that context.
-- Also search for colocated fragment files with `rg --files -g 'CONTEXT.*.md'`.
-- A fragment belongs to the `CONTEXT.md` in the same directory.
+- If `CONTEXT-MAP.md` exists, read it. Each context's **link text**, slugified (lowercase, non-alphanumeric runs → `-`), is its slug; the link target's directory holds its base `CONTEXT.md`.
+- If a root `CONTEXT.md` exists (no map), inspect that single context; its fragment slug is the literal `CONTEXT`.
+- Find fragments in both locations:
+  - `.grill-context/` at the root — `rg --files --hidden -g '.grill-context/*.md'`. Pass `--hidden`: `.grill-context/` is a dotdir, and default ripgrep skips hidden paths. A fragment `<slug>.<counter>.<uuid>.md` belongs to the context whose slug matches its prefix.
+  - legacy colocated — `rg --files -g 'CONTEXT.*.md'`. A legacy fragment belongs to the `CONTEXT.md` in the same directory.
 
-If a directory has fragments but no `CONTEXT.md`, create a base `CONTEXT.md` only after at least one fragment will be folded into it.
+For each context, its fragment set is the union of the matching `.grill-context/` files and any legacy colocated ones. If a slug has fragments but no base `CONTEXT.md`, create the base only after at least one fragment will be folded into it.
 
 ## Read Inputs
 
-For each context directory:
+For each context:
 
 1. Read the base `CONTEXT.md`, if present.
-2. Read every colocated fragment matching `CONTEXT.*.md`.
-3. Parse each fragment filename as `CONTEXT.<counter>.<uuid>.md`.
-   - `counter` is a numeric generation. Sort it numerically, not lexicographically.
+2. Read every fragment in this context's set — `.grill-context/<slug>.*.*.md` (or `.grill-context/CONTEXT.*.*.md` for a single-context repo) and any legacy `CONTEXT.*.md` beside the base.
+3. Parse each fragment filename. Dot-dir fragments are `<slug>.<counter>.<uuid>.md`; legacy fragments are `CONTEXT.<counter>.<uuid>.md`.
+   - `counter` is a numeric generation, shared across both locations for this context. Sort it numerically, not lexicographically.
    - `uuid` identifies the writer/session, but does not decide precedence.
-   - Legacy `CONTEXT.<uuid>.md` fragments, if present, have no ordering metadata; treat same-term overlap involving them as contested.
+   - Legacy `CONTEXT.<uuid>.md` fragments (no counter), if present, have no ordering metadata; treat same-term overlap involving them as contested.
 4. Parse fragment ops:
    - `+ Term` adds a term.
    - `~ Term` redefines a term and should include `was:`.
@@ -101,7 +102,7 @@ Do not invent ADR content, merge ADRs, or change their bodies beyond the cross-r
 After all conflicts are resolved:
 
 1. Update the base `CONTEXT.md`.
-2. Delete only the fragments that were folded in.
+2. Delete only the fragments that were folded in, wherever they live — `.grill-context/` and legacy colocated alike. Remove `.grill-context/` itself if it ends up empty.
 3. Apply the ADR renumbering: the loser renames (`git mv`) and every link edit they required.
 4. Inspect `git status --short` and identify only the artifacts produced by this consolidation pass — the base `CONTEXT.md` files, folded fragment deletions, ADR renames, and ADR link edits.
 5. Stage exactly those files. Do not stage unrelated existing work.
