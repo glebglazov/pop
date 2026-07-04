@@ -429,6 +429,132 @@ func TestRepoIdentityLabelAcrossSpawnAndBackoff(t *testing.T) {
 	}
 }
 
+// TestRepoIdentityLabelBaselineDeltaParity verifies that for a bare repo with
+// multiple picker Projects, every baseline section and every delta line uses the
+// same repo-identity label (the basename), not a picker-Project name.
+func TestRepoIdentityLabelBaselineDeltaParity(t *testing.T) {
+	td := queueDataDeps(t)
+	_, wts := initBareRepoWithWorktrees(t, 2)
+	mainWT := wts[0]
+	featureWT := wts[1]
+
+	id, err := tasks.ResolveRepositoryIdentity(td, mainWT)
+	if err != nil {
+		t.Fatalf("ResolveRepositoryIdentity: %v", err)
+	}
+	if err := tasks.EnsureStorage(td, id); err != nil {
+		t.Fatalf("EnsureStorage: %v", err)
+	}
+
+	basename := id.Basename
+	repoKey := repoIdentityKey(id)
+	setIDRunning := "set-running"
+	setIDQueued := "set-queued"
+
+	// Bind the running set under one picker project name.
+	if err := binding.Put(td, setScopedKey(repoKey, setIDRunning), WorktreeBinding{RuntimePath: mainWT, Project: "game_server/main"}); err != nil {
+		t.Fatalf("binding.Put: %v", err)
+	}
+
+	// Create running decision from one picker project.
+	runningDec := Decision{
+		Project:   "game_server/main",
+		TaskSetID: setIDRunning,
+		Reason:    "ready",
+		Busy:      true,
+		scan: projectScan{
+			Name:           "game_server/main",
+			ProjectPath:    mainWT,
+			RuntimePath:    mainWT,
+			DefinitionPath: id.TasksDir,
+			RepoKey:        repoKey,
+			RepoCommonDir:  id.CommonDir,
+		},
+		lockStatus: &tasks.RuntimeLockStatus{
+			Locked:      true,
+			RuntimePath: mainWT,
+			Metadata: &tasks.RuntimeLockMetadata{
+				SetID:       setIDRunning,
+				RuntimePath: mainWT,
+				PID:         100,
+			},
+		},
+	}
+
+	// Create queued decision from a different picker project.
+	queuedDec := Decision{
+		Project:   "game_server/feature",
+		TaskSetID: setIDQueued,
+		Reason:    "ready",
+		scan: projectScan{
+			Name:           "game_server/feature",
+			ProjectPath:    featureWT,
+			RuntimePath:    featureWT,
+			DefinitionPath: id.TasksDir,
+			RepoKey:        repoKey,
+			RepoCommonDir:  id.CommonDir,
+		},
+	}
+
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{runningDec, queuedDec}, &DaemonState{Version: 1})
+	if err != nil {
+		t.Fatalf("statusFromDecisions: %v", err)
+	}
+	snap.Tasks = td
+
+	view := BuildRunView(snap, time.Now().UTC())
+
+	// -- Baseline assertions --
+	var buf bytes.Buffer
+	RenderRunBaseline(&buf, view)
+	baselineText := buf.String()
+
+	// Picked-up sets uses repo-identity label.
+	if !strings.Contains(baselineText, basename+": "+setIDRunning) {
+		t.Fatalf("baseline Picked-up sets must use repo-identity label %q:\n%s", basename, baselineText)
+	}
+	// Must NOT contain any picker-Project name as a row prefix.
+	if strings.Contains(baselineText, "game_server/main: "+setIDRunning) {
+		t.Fatalf("baseline must not use picker-Project name:\n%s", baselineText)
+	}
+
+	// Active worktrees uses repo-identity label.
+	if !strings.Contains(baselineText, basename+": "+setIDRunning) {
+		t.Fatalf("baseline Active worktrees must use repo-identity label %q:\n%s", basename, baselineText)
+	}
+
+	// Queued ready sets uses repo-identity label.
+	if !strings.Contains(baselineText, basename+": waiting ready set "+setIDQueued) {
+		t.Fatalf("baseline Queued ready sets must use repo-identity label %q:\n%s", basename, baselineText)
+	}
+
+	// -- Delta assertions (same label as baseline) --
+	lines := DiffRunView(&RunView{}, view)
+	spawnFound := false
+	readyFound := false
+	for _, line := range lines {
+		if strings.Contains(line, "queue: "+basename+": spawned drain for "+setIDRunning) {
+			spawnFound = true
+		}
+		if strings.Contains(line, "queue: "+basename+": ready set "+setIDQueued) {
+			readyFound = true
+		}
+	}
+	if !spawnFound {
+		t.Fatalf("delta lines must contain spawn with repo-identity label %q, got:\n%s", basename, strings.Join(lines, "\n"))
+	}
+	if !readyFound {
+		t.Fatalf("delta lines must contain ready-set with repo-identity label %q, got:\n%s", basename, strings.Join(lines, "\n"))
+	}
+
+	// Verify spawn delta label matches baseline label exactly (same basename).
+	for _, line := range lines {
+		if strings.Contains(line, "game_server") && !strings.Contains(line, basename) {
+			t.Fatalf("delta line must not reference picker-Project name: %q", line)
+		}
+	}
+}
+
 // TestRepoIdentityLabelFallsBackToProject preserves the familiar label for
 // single-worktree repos whose scan did not resolve a separate Repository identity.
 func TestRepoIdentityLabelFallsBackToProject(t *testing.T) {

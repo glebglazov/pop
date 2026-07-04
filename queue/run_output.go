@@ -14,8 +14,9 @@ import (
 // AwaitingApprovalItem is a Task-set whose AFK work is finished but a terminal HITL
 // approval gate remains before it can be marked Done.
 type AwaitingApprovalItem struct {
-	Project string
-	SetID   string
+	Project   string
+	RepoLabel string
+	SetID     string
 }
 
 // RunView is the scheduling-relevant snapshot used for queue run baseline and deltas.
@@ -33,6 +34,7 @@ type RunView struct {
 // WorktreeBindingView is one provisioned checkout tracked in queue daemon state.
 type WorktreeBindingView struct {
 	Project     string
+	RepoLabel   string
 	SetID       string
 	Branch      string
 	RuntimePath string
@@ -87,8 +89,9 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 			blockedProjects[repoLabel] = true
 		case idle.AwaitingApprovalSetID != "":
 			view.AwaitingApproval = append(view.AwaitingApproval, AwaitingApprovalItem{
-				Project: idle.Project,
-				SetID:   idle.AwaitingApprovalSetID,
+				Project:   idle.Project,
+				RepoLabel: repoLabel,
+				SetID:     idle.AwaitingApprovalSetID,
 			})
 		default:
 			view.IdleCount++
@@ -392,7 +395,7 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 		fmt.Fprintln(out, "  none")
 	} else {
 		for _, q := range view.Queued {
-			projectLabel := statusProjectLabel(q.Project, q.WorktreeReady, q.ProjectConfigError)
+			projectLabel := statusProjectLabel(repoLabelOrProject(q.RepoLabel, q.Project), q.WorktreeReady, q.ProjectConfigError)
 			fmt.Fprintf(out, "  %s: waiting ready set %s\n", projectLabel, q.ReadySet)
 		}
 	}
@@ -411,7 +414,7 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 		fmt.Fprintln(out, "  none")
 	} else {
 		for _, u := range view.AwaitingApproval {
-			project := u.Project
+			project := repoLabelOrProject(u.RepoLabel, u.Project)
 			if project == "" {
 				project = "(unknown project)"
 			}
@@ -426,7 +429,7 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 	if len(view.Skipped) > 0 {
 		fmt.Fprintln(out, "Skipped repositories:")
 		for _, s := range view.Skipped {
-			project := s.Project
+			project := repoLabelOrProject(s.RepoLabel, s.Project)
 			if project == "" {
 				project = "(unknown project)"
 			}
@@ -456,7 +459,7 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 }
 
 func formatRunningLine(p PickedUpSet) string {
-	projectLabel := statusProjectLabel(p.Project, p.WorktreeReady, p.ProjectConfigError)
+	projectLabel := statusProjectLabel(repoLabelOrProject(p.RepoLabel, p.Project), p.WorktreeReady, p.ProjectConfigError)
 	setID := p.SetID
 	if setID == "" {
 		setID = "(unknown set)"
@@ -498,8 +501,13 @@ func buildWorktreeBindingViews(d *tasks.Deps, state *DaemonState, view RunView) 
 		if project == "" {
 			project = projectForScopedKey(d, key)
 		}
+		repoLabel := repoLabelFromScopedKey(key)
+		if repoLabel == "" {
+			repoLabel = project
+		}
 		item := WorktreeBindingView{
 			Project:     project,
+			RepoLabel:   repoLabel,
 			SetID:       setID,
 			Branch:      b.Branch,
 			RuntimePath: b.RuntimePath,
@@ -516,7 +524,7 @@ func buildWorktreeBindingViews(d *tasks.Deps, state *DaemonState, view RunView) 
 }
 
 func formatWorktreeBindingLine(binding WorktreeBindingView) string {
-	project := binding.Project
+	project := repoLabelOrProject(binding.RepoLabel, binding.Project)
 	if project == "" {
 		project = "(unknown project)"
 	}
@@ -553,7 +561,7 @@ func formatBlockedLine(b BlockedItem) string {
 		if setID == "" {
 			setID = "(unknown set)"
 		}
-		project := b.Project
+		project := repoLabelOrProject(b.RepoLabel, b.Project)
 		if project == "" {
 			project = "(unknown project)"
 		}
@@ -563,7 +571,7 @@ func formatBlockedLine(b BlockedItem) string {
 		if setID == "" {
 			setID = "(unknown set)"
 		}
-		project := b.Project
+		project := repoLabelOrProject(b.RepoLabel, b.Project)
 		if project == "" {
 			project = "(unknown project)"
 		}

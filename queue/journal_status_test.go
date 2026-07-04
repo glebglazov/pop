@@ -521,7 +521,7 @@ func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
 		"set-1",
 		"Blocked:",
 		"Active worktrees:",
-		"pop: set-1 branch=set-1 at /runtime — bound",
+		"test-repo: set-1 branch=set-1 at /runtime — bound",
 		"pop: set-1 parked",
 	} {
 		if !strings.Contains(statusText, want) {
