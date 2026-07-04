@@ -24,11 +24,28 @@ projects = [
     { path = "~/.local/share/chezmoi" },
 ]
 
-[workload.agents.claude]
+[tasks.implement]
+# Ordered fallback agent list for `pop tasks implement` when no --agent flag
+# is given. The first live agent runs the task; on a quota pause the next is
+# tried. Defaults to ["claude"].
+# agents = ["claude", "codex"]
+
+[tasks.verify]
+# Enable Agent verification as a pre-approval Done gate (default false).
+enabled = false
+# Ordered fallback agent list for the Verifier (falls back to
+# [tasks.implement].agents when omitted).
+# agents = ["claude"]
+# Verifier model-strength tier: light, standard, or heavy (default heavy).
+# effort = "heavy"
+# Max verify→remediate cycles before parking at VERIFY-FAILED (default 3).
+# max_remediation_depth = 3
+
+[tasks.presets.claude]
 # Use "text" as a compatibility fallback if an agent's structured output fails.
 output = "auto"
 
-[workload.git]
+[tasks.git]
 # Commit-time git config applied only to pop's own commits during a task drain.
 # Each entry is a git `-c`-style `key=value` pair. Disable GPG signing so an
 # unattended `pop queue` drain never blocks on a 1Password presence prompt:
@@ -95,7 +112,7 @@ Print a read-only command-family readiness report for `pop project`, `pop worktr
 To exercise task execution against real agent CLIs, run the opt-in smoke script:
 
 ```bash
-scripts/live-workload-agent-smoke.sh codex
+scripts/live-agent-smoke.sh codex
 make live-agent-smoke AGENTS="codex claude"
 ```
 

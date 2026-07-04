@@ -747,7 +747,7 @@ func TestResolveAgentOutputModeRejectsInvalidConfig(t *testing.T) {
 		}}, nil
 	}
 	_, err := resolveAgentOutputMode(loadInvalid, "claude", "")
-	if err == nil || !strings.Contains(err.Error(), "[workload.agents.claude] output") {
+	if err == nil || !strings.Contains(err.Error(), "[tasks.presets.claude] output") {
 		t.Fatalf("err = %v", err)
 	}
 }

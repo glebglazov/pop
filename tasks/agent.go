@@ -809,7 +809,7 @@ func resolveAgentOutputMode(loadConfig func(string) (*config.Config, error), pre
 	}
 	mode := AgentOutputMode(cfg.TaskAgentOutput(name))
 	if err := validateAgentOutputMode(mode); err != nil {
-		return "", fmt.Errorf("[workload.agents.%s] output: %w", name, err)
+		return "", fmt.Errorf("[tasks.presets.%s] output: %w", name, err)
 	}
 	return mode, nil
 }

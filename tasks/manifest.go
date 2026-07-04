@@ -415,7 +415,7 @@ func (m *Manifest) VerifyOptedOut() bool {
 
 // VerifierDirective is a set's per-set Verifier override, read from the
 // manifest's `"verifier": {"agents": [...], "effort": "..."}` object (ADR-0086).
-// It overrides the [workload.verify] config default (agents, effort) for that
+// It overrides the [tasks.verify] config default (agents, effort) for that
 // set, but it is opt-out only for participation: user config is the master gate,
 // so a directive can steer *how* a set is verified but never opt it *in* while
 // the feature is globally off (that stays VerifyOptedOut / the config switch).

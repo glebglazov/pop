@@ -4,10 +4,10 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/live-workload-agent-smoke.sh AGENT [AGENT...]
-  POP_LIVE_AGENTS="codex claude" scripts/live-workload-agent-smoke.sh
+  scripts/live-agent-smoke.sh AGENT [AGENT...]
+  POP_LIVE_AGENTS="codex claude" scripts/live-agent-smoke.sh
 
-Runs real workload execution against real agent CLIs in disposable git repos.
+Runs real task execution against real agent CLIs in disposable git repos.
 This consumes local agent auth/quota and is intentionally opt-in.
 
 Environment:
@@ -30,7 +30,7 @@ if [[ ${#agents[@]} -eq 0 ]]; then
   exit 64
 fi
 
-tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/pop-live-workload.XXXXXX")"
+tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/pop-live-agent.XXXXXX")"
 if [[ "${POP_LIVE_KEEP:-}" != "1" ]]; then
   trap 'rm -rf "$tmp_root"' EXIT
 else
@@ -107,7 +107,7 @@ init_runtime_repo() {
   git -C "$runtime" config user.email "pop-live-smoke@example.invalid"
   git -C "$runtime" config user.name "pop live smoke"
   printf 'thoughts/\n.xdg/\n' >"$runtime/.gitignore"
-  printf '# pop live workload smoke\n' >"$runtime/README.md"
+  printf '# pop live task smoke\n' >"$runtime/README.md"
   git -C "$runtime" add -A
   git -C "$runtime" commit -m "init" >/dev/null
 }
@@ -154,7 +154,7 @@ for agent in "${agents[@]}"; do
   init_runtime_repo "$runtime"
   write_issue_set "$runtime" "$agent"
 
-  printf '\n==> Running live workload smoke for %s in %s\n' "$agent" "$runtime"
+  printf '\n==> Running live agent smoke for %s in %s\n' "$agent" "$runtime"
   if (
     cd "$runtime"
     XDG_DATA_HOME="$xdg" "$pop_bin" tasks \
@@ -179,7 +179,7 @@ for agent in "${agents[@]}"; do
   fi
 done
 
-printf '\n==> Live workload smoke summary\n'
+printf '\n==> Live agent smoke summary\n'
 if [[ ${#passes[@]} -gt 0 ]]; then
   printf 'Passed: %s\n' "${passes[*]}"
 fi

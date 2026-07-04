@@ -13,7 +13,7 @@ import (
 // DefaultMaxRemediationDepth bounds the verify→remediate→re-verify loop when
 // user config sets no explicit cap (ADR-0086): after this many Verifier-produced
 // Remediation tasks, a set that still returns FIXABLE parks at VERIFY-FAILED
-// rather than spawning another. The configurable `[workload.verify]
+// rather than spawning another. The configurable `[tasks.verify]
 // .max_remediation_depth` overrides it.
 const DefaultMaxRemediationDepth = 3
 

@@ -29,6 +29,6 @@ live-agent-smoke:
 		echo 'usage: make live-agent-smoke AGENTS="codex claude"'; \
 		exit 64; \
 	fi
-	scripts/live-workload-agent-smoke.sh $(AGENTS)
+	scripts/live-agent-smoke.sh $(AGENTS)
 
 .PHONY: build install install-dev test live-agent-smoke

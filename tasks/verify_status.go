@@ -7,7 +7,7 @@ import (
 
 // verifyEnabled reports whether Agent verification is enabled in user config
 // (ADR-0086). This is the master opt-in switch, which defaults off, so an
-// unconfigured or disabled [workload.verify] leaves status deriving from the
+// unconfigured or disabled [tasks.verify] leaves status deriving from the
 // manifest alone exactly as before the feature. The rest of the surface (the
 // agent fallback list, effort, and remediation cap) drives selection only once
 // this gate is on.

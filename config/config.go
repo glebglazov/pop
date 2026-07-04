@@ -207,10 +207,10 @@ type VerifyConfig struct {
 	// feature (ADR-0086/0087).
 	Enabled bool `toml:"enabled" desc:"Enable Agent verification as a Done gate (default false)."`
 	// Agents is the ordered fallback list of agent presets the Verifier walks,
-	// mirroring [workload] default_agents: it falls through to the next agent on
+	// mirroring [tasks.implement].agents: it falls through to the next agent on
 	// a quota pause or a missing binary. An empty list falls back to
-	// default_agents (and, failing that, the built-in default agent).
-	Agents []string `toml:"agents" desc:"Ordered fallback agent list for the Verifier (falls back to default_agents when omitted)."`
+	// [tasks.implement].agents (and, failing that, the built-in default agent).
+	Agents []string `toml:"agents" desc:"Ordered fallback agent list for the Verifier (falls back to [tasks.implement].agents when omitted)."`
 	// Effort selects the Verifier's model-strength tier (light, standard, or
 	// heavy). Absent ⇒ heavy — verification runs at the strongest tier by default.
 	Effort string `toml:"effort" desc:"Verifier model-strength tier: light, standard, or heavy (default heavy)."`
@@ -1901,7 +1901,7 @@ func cloneWorkloadConfig(src *WorkloadConfig) *WorkloadConfig {
 
 // queueAgentsWarnings returns a load-time finding when a config file still
 // sets the deleted [queue].agents key. Agent selection is owned by
-// [workload] default_agents; the old key is ignored (fail-soft).
+// [tasks.implement].agents; the old key is ignored (fail-soft).
 func queueAgentsWarnings(path string, md toml.MetaData) []Finding {
 	for _, key := range md.Undecoded() {
 		if len(key) == 2 && key[0] == "queue" && key[1] == "agents" {

@@ -50,7 +50,7 @@ type RunTaskSetOptions struct {
 	// independently of the implementing agents (`--verify-agent`, repeatable, and
 	// `--verify-effort`): they are the highest-precedence Verifier overrides.
 	// Empty ⇒ resolution falls through to the per-set override, then
-	// [workload.verify], then default_agents / DefaultVerifyEffort.
+	// [tasks.verify], then [tasks.implement].agents / DefaultVerifyEffort.
 	VerifyAgents []string
 	VerifyEffort string
 	// verifyRunner overrides the pre-approval Verifier's agent spawn, mirroring
@@ -117,7 +117,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	strategy := resolveDirtyRuntimeStrategy(opts.AllowDirty)
 
 	// Resolve commit-config overrides up front (the lazy validation point) so a
-	// malformed [workload.git] entry fails the drain hard before any commit —
+	// malformed [tasks.git] entry fails the drain hard before any commit —
 	// including the per-task dirty-runtime checkpoint, which commits earliest.
 	commitOverrides, err := resolveCommitConfigOverrides(loadConfig)
 	if err != nil {

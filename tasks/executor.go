@@ -136,7 +136,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	strategy := resolveDirtyRuntimeStrategy(opts.AllowDirty)
 
 	// Resolve commit-config overrides up front (the lazy validation point) so a
-	// malformed [workload.git] entry fails the drain hard before any commit —
+	// malformed [tasks.git] entry fails the drain hard before any commit —
 	// including the dirty-runtime checkpoint, which commits earliest.
 	commitOverrides, err := resolveCommitConfigOverrides(loadConfig)
 	if err != nil {
