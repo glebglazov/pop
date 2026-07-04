@@ -138,6 +138,9 @@ func TestVerifyResolvedSetRunsPrintsAndPersists(t *testing.T) {
 	if !strings.Contains(out.String(), "FIXABLE") || !strings.Contains(out.String(), "criterion 2 unmet") {
 		t.Fatalf("output missing verdict/findings:\n%s", out.String())
 	}
+	if !strings.Contains(out.String(), "Re-run: pop tasks verify demo") {
+		t.Fatalf("output missing re-run command:\n%s", out.String())
+	}
 	// Verdict is persisted keyed by set + work SHA.
 	stored := readStoredVerdict(t, d, "/repo/.git", "demo", "abc123abc123")
 	if stored == nil || stored.Verdict != "FIXABLE" || stored.Findings != "criterion 2 unmet" {
@@ -291,5 +294,41 @@ func TestCommitSubjectPrefixMatchesCommitSubject(t *testing.T) {
 	subject := CommitSubject(setID, "01-a")
 	if !strings.HasPrefix(subject, prefix) {
 		t.Fatalf("CommitSubject %q does not start with prefix %q", subject, prefix)
+	}
+}
+
+func TestFormatVerifyCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		setID    string
+		agents   []string
+		effort   string
+		want     string
+	}{
+		{
+			name:  "set id only",
+			setID: "2026-07-04-resume-context",
+			want:  "pop tasks verify 2026-07-04-resume-context",
+		},
+		{
+			name:   "with agent and effort",
+			setID:  "demo",
+			agents: []string{"claude", "codex"},
+			effort: "high",
+			want:   "pop tasks verify demo --agent claude --agent codex --effort high",
+		},
+		{
+			name:  "quoted set id",
+			setID: "my set",
+			want:  "pop tasks verify 'my set'",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatVerifyCommand(tt.setID, tt.agents, tt.effort)
+			if got != tt.want {
+				t.Fatalf("FormatVerifyCommand() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

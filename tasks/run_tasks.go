@@ -73,6 +73,8 @@ type RunTaskSetResult struct {
 	// parked the drain. VerifyFindings carries the Verifier's human-facing reasons.
 	TaskSetVerifyFailed bool
 	VerifyFindings      string
+	// VerifyRerunCmd is a copy-pasteable `pop tasks verify …` when verification failed.
+	VerifyRerunCmd string
 	SkippedTasks        []string
 	BlockedReason       string
 	QuotaPaused         bool
@@ -367,6 +369,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					if verdict != nil {
 						result.VerifyFindings = verdict.Findings
 					}
+					result.VerifyRerunCmd = FormatVerifyCommand(taskSetID, opts.VerifyAgents, opts.VerifyEffort)
 					// Overlay the verdict-derived disposition on the display row so the
 					// rendered table reads VERIFY-FAILED, matching `pop tasks status`.
 					row.Status = StatusVerifyFailed
@@ -378,7 +381,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					} else {
 						printTaskSetSummary(out, result)
 					}
-					return result, exitErr(ExitNoRunnable, "Task set %q verification failed — a human must review it", taskSetID)
+					return result, exitErr(ExitNoRunnable, "Task set %q verification failed — a human must review it\n%s", taskSetID, result.VerifyRerunCmd)
 				}
 			}
 
@@ -609,6 +612,9 @@ func printTaskSetSummary(w io.Writer, result *RunTaskSetResult) {
 		out.line(ansiRed, "Verification failed: task set %s needs a human review", result.TaskSetID)
 		if reason := firstFindingsLine(result.VerifyFindings); reason != "" {
 			out.line(ansiDim, "  %s", reason)
+		}
+		if result.VerifyRerunCmd != "" {
+			out.line(ansiDim, "  Re-run: %s", result.VerifyRerunCmd)
 		}
 		return
 	}

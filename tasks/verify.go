@@ -136,7 +136,7 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 		return nil, err
 	}
 	verdict := Verdict(v.Verdict)
-	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings)
+	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings, opts.Agents, opts.Effort)
 	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: verdict, Findings: v.Findings}, nil
 }
 
@@ -174,7 +174,7 @@ func reverifyAtGate(d *Deps, rv *reverifyGateContext, out io.Writer, repo, runti
 	if err != nil {
 		return err
 	}
-	printVerdict(out, setID, workSHA, Verdict(v.Verdict), v.Findings)
+	printVerdict(out, setID, workSHA, Verdict(v.Verdict), v.Findings, rv.agents, rv.effort)
 	return nil
 }
 
@@ -279,7 +279,7 @@ func drainVerifyPhase(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Ma
 		return manifestStatus, nil, err
 	}
 	verdict := Verdict(v.Verdict)
-	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings)
+	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings, opts.Agents, opts.Effort)
 	return DeriveStatusWithVerdict(m, true, &verdict), v, nil
 }
 
@@ -534,8 +534,22 @@ func readPRD(d *Deps, m *Manifest) (string, bool) {
 	return trimmed, true
 }
 
+// FormatVerifyCommand builds a copy-pasteable `pop tasks verify` invocation.
+// Only explicit CLI overrides (agents, effort) are included; config and manifest
+// defaults are picked up automatically on re-run.
+func FormatVerifyCommand(setID string, cliAgents []string, cliEffort string) string {
+	parts := []string{"pop", "tasks", "verify", shellQuote(setID)}
+	for _, agent := range nonEmptyStrings(cliAgents) {
+		parts = append(parts, "--agent", shellQuote(agent))
+	}
+	if effort := strings.TrimSpace(cliEffort); effort != "" {
+		parts = append(parts, "--effort", shellQuote(effort))
+	}
+	return strings.Join(parts, " ")
+}
+
 // printVerdict renders the verdict and findings to the operator.
-func printVerdict(w io.Writer, setID, workSHA string, verdict Verdict, findings string) {
+func printVerdict(w io.Writer, setID, workSHA string, verdict Verdict, findings string, cliAgents []string, cliEffort string) {
 	if w == nil {
 		return
 	}
@@ -550,6 +564,9 @@ func printVerdict(w io.Writer, setID, workSHA string, verdict Verdict, findings 
 		for _, line := range strings.Split(strings.TrimRight(findings, "\n"), "\n") {
 			fmt.Fprintf(out, "     %s\n", line)
 		}
+	}
+	if verdict != VerdictPass {
+		out.line(ansiDim, "   Re-run: %s", FormatVerifyCommand(setID, cliAgents, cliEffort))
 	}
 }
 
