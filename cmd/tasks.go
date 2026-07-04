@@ -274,6 +274,15 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return fmt.Errorf("tasks register: %w", err)
 	}
 
+	// Resolve the runtime checkout once (see runTaskStatusWith): it feeds the
+	// SHA-gated Verify-verdict pass and the overview's runtime-lock/checkout
+	// badges. Register prints status exactly like `pop tasks status`.
+	runtimePath, runtimeErr := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath)
+	if runtimeErr == nil {
+		cfg, _ := taskConfigLoad(config.DefaultConfigPath())
+		tasks.ApplyVerifyVerdicts(d, result, cfg, runtimePath)
+	}
+
 	// With a set argument, drill into that one set's per-task breakdown after
 	// registering; absent, render the whole-repo overview.
 	if strings.TrimSpace(taskSetID) != "" {
@@ -285,7 +294,7 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return nil
 	}
 
-	if runtimePath, err := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath); err == nil {
+	if runtimeErr == nil {
 		result.RuntimeLock = tasks.ReadRuntimeLockStatus(d, runtimePath)
 		if linked, err := binding.IsLinkedWorktree(d, runtimePath); err == nil {
 			cs := &tasks.CheckoutStatus{Path: runtimePath, Worktree: linked}
@@ -322,6 +331,15 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return fmt.Errorf("tasks status: %w", err)
 	}
 
+	// Resolve the runtime checkout once: it feeds the SHA-gated Verify-verdict
+	// pass (ADR-0086) that gates status derivation for both the overview and the
+	// per-set drill-in, plus the overview's runtime-lock and checkout badges.
+	runtimePath, runtimeErr := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath)
+	if runtimeErr == nil {
+		cfg, _ := taskConfigLoad(config.DefaultConfigPath())
+		tasks.ApplyVerifyVerdicts(d, result, cfg, runtimePath)
+	}
+
 	// A set argument drills into that one set's per-task breakdown; absent, the
 	// no-arg overview lists every set. ResolveTaskSetTarget rejects file and
 	// path forms and errors with the valid identifiers on an unknown set.
@@ -334,7 +352,7 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return nil
 	}
 
-	if runtimePath, err := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath); err == nil {
+	if runtimeErr == nil {
 		result.RuntimeLock = tasks.ReadRuntimeLockStatus(d, runtimePath)
 		if linked, err := binding.IsLinkedWorktree(d, runtimePath); err == nil {
 			cs := &tasks.CheckoutStatus{Path: runtimePath, Worktree: linked}

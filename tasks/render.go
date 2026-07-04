@@ -151,7 +151,7 @@ func archivedCount(state *GlobalState, defPath string) int {
 }
 
 func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests map[string]*Manifest, showArchived bool) []Row {
-	var missing, done, active []Row
+	var rows []Row
 
 	entry := state.Tasks[defPath]
 
@@ -161,7 +161,7 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 				continue
 			}
 			if _, ok := disc.Manifests[reg.ID]; !ok {
-				missing = append(missing, Row{
+				rows = append(rows, Row{
 					ID:           reg.ID,
 					Status:       StatusMissing,
 					Priority:     reg.Priority,
@@ -171,13 +171,28 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 				})
 				continue
 			}
-			row := buildTaskSetRow(reg, manifests[reg.ID], i)
-			switch row.Status {
-			case StatusDone:
-				done = append(done, row)
-			default:
-				active = append(active, row)
-			}
+			rows = append(rows, buildTaskSetRow(reg, manifests[reg.ID], i))
+		}
+	}
+
+	return orderStatusRows(rows)
+}
+
+// orderStatusRows returns rows in status-table display order: missing sets
+// first, then Done sets (by registration order), then every active set (by
+// priority, then registration order). It is applied after building rows and
+// re-applied after Verify verdicts change statuses, so a formerly-Done set that
+// now needs verification moves out of the Done group into the active group.
+func orderStatusRows(rows []Row) []Row {
+	var missing, done, active []Row
+	for _, row := range rows {
+		switch row.Status {
+		case StatusMissing:
+			missing = append(missing, row)
+		case StatusDone:
+			done = append(done, row)
+		default:
+			active = append(active, row)
 		}
 	}
 
@@ -192,10 +207,10 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 		return active[i].RegIndex < active[j].RegIndex
 	})
 
-	rows := append([]Row{}, missing...)
-	rows = append(rows, done...)
-	rows = append(rows, active...)
-	return rows
+	ordered := append([]Row{}, missing...)
+	ordered = append(ordered, done...)
+	ordered = append(ordered, active...)
+	return ordered
 }
 
 func buildTaskSetRow(reg RegisteredTaskSet, m *Manifest, regIndex int) Row {
@@ -357,9 +372,30 @@ func rowStatusDetail(row Row) string {
 			parts = append(parts, "complete: "+row.CompleteHint)
 		}
 		return strings.Join(parts, " — ")
+	case StatusNeedsVerify:
+		return strings.Join([]string{row.Progress, "verify: pop tasks verify " + row.ID}, " — ")
+	case StatusVerifyFailed:
+		parts := []string{row.Progress}
+		if f := firstFindingsLine(row.VerifyFindings); f != "" {
+			parts = append(parts, "findings: "+f)
+		}
+		parts = append(parts, "re-verify: pop tasks verify "+row.ID)
+		return strings.Join(parts, " — ")
 	default:
 		return row.Progress
 	}
+}
+
+// firstFindingsLine returns the first non-empty line of a Verifier's findings,
+// so a VERIFY-FAILED row's one-line detail carries a hint of why without
+// spilling the whole (possibly multi-paragraph) findings text into the table.
+func firstFindingsLine(findings string) string {
+	for _, line := range strings.Split(findings, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func renderRuntimeLock(w io.Writer, lock *RuntimeLockStatus) {

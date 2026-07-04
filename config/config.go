@@ -187,6 +187,24 @@ type TaskConfig struct {
 	// for backward compatibility (see Config.Task). A nil pointer means the
 	// section is absent ⇒ no overrides; Pop's commits behave exactly as today.
 	Git *TaskGitConfig `toml:"git" desc:"Commit-time git overrides for Pop's commits ([workload.git] table)."`
+	// Verify holds Agent-verification settings (ADR-0086). The TOML sub-table
+	// is `[workload.verify]` (the parent key stays "workload"; see Config.Task).
+	// A nil pointer means the feature is unconfigured ⇒ off, so status derives
+	// from the manifest alone exactly as before. The full config surface
+	// (agents, effort, remediation cap) lands with slice 06; only the master
+	// opt-in switch exists today.
+	Verify *VerifyConfig `toml:"verify" desc:"Agent-verification settings ([workload.verify] table)."`
+}
+
+// VerifyConfig holds Agent-verification settings (ADR-0086). It is the
+// master, off-by-default gate for the feature: only when Enabled does status
+// derivation gate Done on a SHA-keyed Verify verdict. Later slices extend this
+// with the agent fallback list, effort, and remediation depth cap.
+type VerifyConfig struct {
+	// Enabled is the master opt-in switch. Absent/false ⇒ the Verifier never
+	// runs and status derives from the manifest alone, exactly as before this
+	// feature (ADR-0086/0087).
+	Enabled bool `toml:"enabled" desc:"Enable Agent verification as a Done gate (default false)."`
 }
 
 // TaskAgentConfig holds configuration for one task agent preset.
@@ -1857,6 +1875,17 @@ func mergeIncludedTask(cfg *Config, included *TaskConfig, path string) {
 			cfg.Task.Git = cloneTaskGitConfig(included.Git)
 		}
 	}
+	if included.Verify != nil {
+		if cfg.Task.Verify != nil {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+				"%s: [workload.verify] skipped, already defined (first definition wins)",
+				path,
+			))
+		} else {
+			v := *included.Verify
+			cfg.Task.Verify = &v
+		}
+	}
 }
 
 func mergeIncludedEffort(cfg *Config, included map[string]EffortConfig, path string) {
@@ -1893,6 +1922,10 @@ func cloneTaskConfig(src *TaskConfig) *TaskConfig {
 	}
 	if src.Git != nil {
 		dst.Git = cloneTaskGitConfig(src.Git)
+	}
+	if src.Verify != nil {
+		v := *src.Verify
+		dst.Verify = &v
 	}
 	return dst
 }

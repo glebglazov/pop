@@ -116,6 +116,26 @@ default_agents = ["claude --model opus4.8", "codex"]
 	}
 }
 
+func TestLoadWorkloadVerifyEnabled(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[workload.verify]
+enabled = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Task == nil || cfg.Task.Verify == nil {
+		t.Fatal("expected [workload.verify] section to parse")
+	}
+	if !cfg.Task.Verify.Enabled {
+		t.Fatal("expected [workload.verify] enabled = true to load as enabled")
+	}
+}
+
 func TestWorkbenchPickOnCreate(t *testing.T) {
 	// Defaults to false: nil receiver, nil section, and an empty section.
 	var nilCfg *Config
