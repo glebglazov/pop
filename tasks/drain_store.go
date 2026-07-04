@@ -188,11 +188,11 @@ func (h *DrainHandle) Cancel() error {
 
 // finalizeDrain records the appropriate exit-reason terminal for a finished
 // drain, or cancels the row when the drain was declined and never executed.
-func finalizeDrain(h *DrainHandle, declined, quotaPaused bool, preset string, pinned bool, resetAt time.Time, err error) {
+func finalizeDrain(h *DrainHandle, declined, quotaPaused, verifyFailed bool, preset string, pinned bool, resetAt time.Time, err error) {
 	if h == nil {
 		return
 	}
-	terminal, p, pin, r, executed := drainTerminal(declined, quotaPaused, preset, pinned, resetAt, err)
+	terminal, p, pin, r, executed := drainTerminal(declined, quotaPaused, verifyFailed, preset, pinned, resetAt, err)
 	if !executed {
 		_ = h.Cancel()
 		return
@@ -202,11 +202,12 @@ func finalizeDrain(h *DrainHandle, declined, quotaPaused bool, preset string, pi
 
 // drainTerminal maps the observable end of a drain to its exit-reason terminal
 // (ADR-0056). A declined run never executed, so it returns executed=false and
-// the caller cancels the Drain row. Quota pause and SIGINT are the only two
-// non-finished terminals on the clean-exit path; everything else — success,
+// the caller cancels the Drain row. Quota pause, SIGINT, and a failed
+// pre-approval verification (NEEDS-HUMAN or an exhausted remediation cap,
+// ADR-0086/0087) are the non-finished terminals; everything else — success,
 // failure, blocked, setup error after the drain began — is a finished process
 // whose disposition is read from the manifest, not the Drain.
-func drainTerminal(declined, quotaPaused bool, preset string, pinned bool, resetAt time.Time, err error) (terminal DrainOutcome, _ string, _ bool, _ time.Time, executed bool) {
+func drainTerminal(declined, quotaPaused, verifyFailed bool, preset string, pinned bool, resetAt time.Time, err error) (terminal DrainOutcome, _ string, _ bool, _ time.Time, executed bool) {
 	if declined {
 		return "", "", false, time.Time{}, false
 	}
@@ -216,6 +217,9 @@ func drainTerminal(declined, quotaPaused bool, preset string, pinned bool, reset
 	var ee *ExitError
 	if errors.As(err, &ee) && ee.Code == ExitInterrupted {
 		return DrainOutcomeInterrupted, "", false, time.Time{}, true
+	}
+	if verifyFailed {
+		return DrainOutcomeVerifyFailed, "", false, time.Time{}, true
 	}
 	return DrainOutcomeFinished, "", false, time.Time{}, true
 }

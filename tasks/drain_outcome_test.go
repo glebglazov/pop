@@ -139,6 +139,7 @@ func TestDrainTerminal(t *testing.T) {
 		name         string
 		declined     bool
 		quotaPaused  bool
+		verifyFailed bool
 		preset       string
 		pinned       bool
 		resetAt      time.Time
@@ -178,6 +179,13 @@ func TestDrainTerminal(t *testing.T) {
 			wantExecuted: true,
 		},
 		{
+			name:         "verify failure records verify_failed",
+			verifyFailed: true,
+			err:          exitErr(ExitNoRunnable, "verification failed"),
+			wantTerminal: DrainOutcomeVerifyFailed,
+			wantExecuted: true,
+		},
+		{
 			name:         "interrupted is abnormal",
 			err:          exitErr(ExitInterrupted, "interrupted"),
 			wantTerminal: DrainOutcomeInterrupted,
@@ -192,7 +200,7 @@ func TestDrainTerminal(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			terminal, preset, pinned, gotReset, executed := drainTerminal(tc.declined, tc.quotaPaused, tc.preset, tc.pinned, tc.resetAt, tc.err)
+			terminal, preset, pinned, gotReset, executed := drainTerminal(tc.declined, tc.quotaPaused, tc.verifyFailed, tc.preset, tc.pinned, tc.resetAt, tc.err)
 			if executed != tc.wantExecuted {
 				t.Fatalf("executed = %v, want %v", executed, tc.wantExecuted)
 			}

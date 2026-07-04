@@ -46,6 +46,10 @@ type RunTaskSetOptions struct {
 	// task in the set wins and the agent's `set-topic --derive` hook no-ops for
 	// the whole drain — the pane carries an accurate Topic with no model call.
 	PreSeedTopic func(taskTitle string)
+	// verifyRunner overrides the pre-approval Verifier's agent spawn, mirroring
+	// verifyCoreOptions.runVerifier. Unexported and test-only: production always
+	// resolves the real Verifier agent. Nil ⇒ the configured Verifier runs.
+	verifyRunner func(prompt string) (string, error)
 }
 
 // RunTaskSetResult is the outcome of a run-tasks invocation.
@@ -64,8 +68,8 @@ type RunTaskSetResult struct {
 	VerifyFindings      string
 	SkippedTasks        []string
 	BlockedReason       string
-	QuotaPaused             bool
-	PauseReason             string
+	QuotaPaused         bool
+	PauseReason         string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
 	PausePreset      string
 	PauseResetAt     time.Time
@@ -182,20 +186,22 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	// recorded the segment's terminal.
 	defer func() {
 		var (
-			declined    bool
-			quotaPaused bool
-			preset      string
-			pinned      bool
-			resetAt     time.Time
+			declined     bool
+			quotaPaused  bool
+			verifyFailed bool
+			preset       string
+			pinned       bool
+			resetAt      time.Time
 		)
 		if result != nil {
 			declined = result.Declined
 			quotaPaused = result.QuotaPaused
+			verifyFailed = result.TaskSetVerifyFailed
 			preset = result.PausePreset
 			pinned = result.PausePinnedAgent
 			resetAt = result.PauseResetAt
 		}
-		finalizeDrain(drain, declined, quotaPaused, preset, pinned, resetAt, err)
+		finalizeDrain(drain, declined, quotaPaused, verifyFailed, preset, pinned, resetAt, err)
 	}()
 
 	// parkDrain releases the Runtime execution lock at a human-wait gate: it
@@ -308,10 +314,15 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			// terminal status stands. The verdict is cache-first — a re-drain at an
 			// unchanged work SHA reuses the stored verdict and never re-invokes the
 			// Verifier, so a parked set does not loop. A PASS lets DONE / AWAITING-
-			// APPROVAL stand and falls through to the switch; a FIXABLE or NEEDS-
-			// HUMAN verdict parks the set as VERIFY-FAILED (automatic remediation
-			// lands in a later slice). The Runtime execution lock is still held
-			// here, so the Verifier runs under it.
+			// APPROVAL stand and falls through to the switch. A FIXABLE verdict
+			// makes the Verifier a task producer: while the set is under its
+			// remediation depth cap it spawns a new AFK Remediation task whose body
+			// is the findings and keeps draining — the Drain picks the task up, its
+			// completion moves the work SHA, the cached verdict goes stale, and the
+			// Verifier re-fires, closing the loop. At or over the cap (or on a
+			// NEEDS-HUMAN verdict) the set parks as VERIFY-FAILED and the drain
+			// records the verify_failed terminal. The Runtime execution lock is
+			// still held here, so the Verifier and the remediation write run under it.
 			if m := currentRefresh.Manifests[taskSetID]; verifyEnabled(cfg) && !m.VerifyOptedOut() &&
 				(row.Status == StatusDone || row.Status == StatusAwaitingApproval) {
 				repo := ""
@@ -324,11 +335,25 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					SetID:       taskSetID,
 					Timeout:     timeout,
 					Output:      out,
+					runVerifier: opts.verifyRunner,
 				}, m, row.Status)
 				if verr != nil {
 					return result, verr
 				}
 				if effective == StatusVerifyFailed {
+					// A FIXABLE verdict under the cap spawns a Remediation task and
+					// keeps draining; only a NEEDS-HUMAN verdict or an exhausted cap
+					// actually parks the set.
+					if verdict != nil && Verdict(verdict.Verdict) == VerdictFixable {
+						spawned, remID, rerr := spawnRemediationIfUnderCap(d, m, verdict.WorkSHA, verdict.Findings, maxRemediationDepth(cfg))
+						if rerr != nil {
+							return result, rerr
+						}
+						if spawned {
+							outputFor(out).line(ansiBold+ansiCyan, "━━ Spawned remediation task %s — resuming the drain", remID)
+							continue
+						}
+					}
 					result.TaskSetVerifyFailed = true
 					if verdict != nil {
 						result.VerifyFindings = verdict.Findings

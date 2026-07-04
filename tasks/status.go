@@ -125,8 +125,12 @@ func DeriveStatus(m *Manifest) TaskSetStatus {
 //     current work SHA) → NEEDS-VERIFY
 //   - PASS → the manifest status stands (DONE when nothing is open, or
 //     AWAITING-APPROVAL when a terminal HITL approval task is still open)
-//   - any non-PASS verdict (NEEDS-HUMAN, and — until remediation ships in a
-//     later slice — FIXABLE) → VERIFY-FAILED
+//   - any non-PASS verdict (NEEDS-HUMAN or FIXABLE) → VERIFY-FAILED
+//
+// A cached FIXABLE verdict reads as VERIFY-FAILED here because the set at this
+// SHA did not pass; the drain's remediation loop (ADR-0086) responds to FIXABLE
+// by spawning a Remediation task, which makes the set carry open AFK work again
+// so DeriveStatus returns a non-terminal base and the verdict is not consulted.
 //
 // Every other manifest status is returned untouched, so READY/FAILED/DEFERRED/
 // MALFORMED/MISSING are never gated, and a BLOCKED set (an open AFK task still

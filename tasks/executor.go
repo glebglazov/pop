@@ -245,7 +245,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 			preset = result.PausePreset
 			resetAt = result.PauseResetAt
 		}
-		finalizeDrain(drain, declined, quotaPaused, preset, false, resetAt, err)
+		finalizeDrain(drain, declined, quotaPaused, false, preset, false, resetAt, err)
 	}()
 
 	// Adopt this checkout into the binding model (ADR-0036): worktree-locus runs

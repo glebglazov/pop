@@ -1,0 +1,168 @@
+package tasks
+
+import (
+	"fmt"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/glebglazov/pop/config"
+)
+
+// DefaultMaxRemediationDepth bounds the verify→remediate→re-verify loop when
+// user config sets no explicit cap (ADR-0086): after this many Verifier-produced
+// Remediation tasks, a set that still returns FIXABLE parks at VERIFY-FAILED
+// rather than spawning another. The configurable `[workload.verify]
+// .max_remediation_depth` overrides it (full config surface lands in slice 06).
+const DefaultMaxRemediationDepth = 3
+
+// remediationIDPattern matches a Verifier-produced Remediation task's id
+// (`NN-remediation`), so the set's remediation depth is the count of these.
+var remediationIDPattern = regexp.MustCompile(`^\d+-remediation$`)
+
+// taskNumberPattern extracts the leading zero-padded ordinal from a task id or
+// file (`07-foo` → 7), so the next Remediation task takes the next number.
+var taskNumberPattern = regexp.MustCompile(`^(\d+)-`)
+
+// maxRemediationDepth resolves the per-set remediation depth cap from user
+// config, falling back to DefaultMaxRemediationDepth when unconfigured (ADR-0086).
+func maxRemediationDepth(cfg *config.Config) int {
+	if cfg != nil && cfg.Task != nil && cfg.Task.Verify != nil && cfg.Task.Verify.MaxRemediationDepth != nil {
+		return *cfg.Task.Verify.MaxRemediationDepth
+	}
+	return DefaultMaxRemediationDepth
+}
+
+// remediationDepth counts the Remediation tasks already in the set — the number
+// of verify→remediate cycles it has undergone (ADR-0086). Each FIXABLE verdict
+// under the cap appends exactly one such task, so this count is the loop's
+// bound; it reads straight off the manifest, needing no separate counter.
+func remediationDepth(m *Manifest) int {
+	if m == nil {
+		return 0
+	}
+	n := 0
+	for _, t := range m.Tasks {
+		if remediationIDPattern.MatchString(t.ID) {
+			n++
+		}
+	}
+	return n
+}
+
+// nextTaskNumber returns the next free ordinal for a task in the set — one past
+// the highest leading number across existing task ids, so a new task never
+// collides with an existing file or id.
+func nextTaskNumber(m *Manifest) int {
+	max := 0
+	if m == nil {
+		return 1
+	}
+	for _, t := range m.Tasks {
+		if match := taskNumberPattern.FindStringSubmatch(t.ID); match != nil {
+			if n, err := strconv.Atoi(match[1]); err == nil && n > max {
+				max = n
+			}
+		}
+	}
+	return max + 1
+}
+
+// remediationBody assembles a Remediation task's markdown body (ADR-0086): the
+// Verifier's findings for the work at workSHA, framed as fixable work, with an
+// Acceptance criteria section (the manifest validator requires one). Findings
+// live only here — never edited into another task's spec, which stays stable,
+// task-scoped intent.
+func remediationBody(workSHA, findings string, cycle int) string {
+	var b strings.Builder
+	b.WriteString("## What to build\n\n")
+	b.WriteString("Resolve the verification findings below. An independent Verifier judged this task set's completed work")
+	if workSHA != "" {
+		b.WriteString(fmt.Sprintf(" at %s", shortSHA(workSHA)))
+	}
+	b.WriteString(" and returned FIXABLE: the acceptance criteria are not yet met, but the gaps are ones an agent can close. ")
+	b.WriteString("Make the changes needed to satisfy the set's acceptance criteria. Do not edit the other task specs — they are stable, task-scoped intent; fix the code and artifacts they describe.\n\n")
+	b.WriteString(fmt.Sprintf("This is remediation cycle %d.\n\n", cycle))
+	b.WriteString("## Findings\n\n")
+	f := neutralizeACHeaders(strings.TrimSpace(findings))
+	if f == "" {
+		f = "(the Verifier recorded no specific findings)"
+	}
+	b.WriteString(f)
+	b.WriteString("\n\n## Acceptance criteria\n\n")
+	b.WriteString("- [ ] Every finding above is resolved and the task set's acceptance criteria are met\n")
+	return b.String()
+}
+
+// neutralizeACHeaders demotes any line in the free-text findings that would
+// otherwise be parsed as an "## Acceptance criteria" heading (the manifest
+// validator rejects a task body with more than one). The verifier's findings
+// are untrusted text; without this, findings that echo that exact heading would
+// produce an invalid Remediation task that the drain could not pick up.
+func neutralizeACHeaders(findings string) string {
+	if findings == "" {
+		return ""
+	}
+	lines := strings.Split(findings, "\n")
+	for i, line := range lines {
+		if acHeaderPattern.MatchString(strings.TrimSpace(line)) {
+			lines[i] = "#" + line // demote to "### …" so it no longer matches ^##\s
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// spawnRemediationTask writes a new AFK Remediation task into the set (ADR-0086):
+// a markdown body carrying the findings plus an atomically-appended index.json
+// entry at the next number. The markdown is written first — the manifest entry
+// references it and the validator requires the file to exist — then the manifest
+// entry, so a reader never sees an index entry without its body. A manifest-write
+// failure rolls the orphan markdown back, keeping the two in sync. It mutates the
+// passed manifest's task list and returns the new task's id.
+func spawnRemediationTask(d *Deps, m *Manifest, workSHA, findings string) (string, error) {
+	if m == nil {
+		return "", exitErr(ExitOperational, "spawn remediation task: nil manifest")
+	}
+	cycle := remediationDepth(m) + 1
+	id := fmt.Sprintf("%02d-remediation", nextTaskNumber(m))
+	file := id + ".md"
+
+	mdPath := filepath.Join(m.Dir, file)
+	if err := WriteAtomicWith(d, mdPath, []byte(remediationBody(workSHA, findings, cycle)), 0o644); err != nil {
+		return "", exitErr(ExitOperational, "write remediation task body: %v", err)
+	}
+
+	m.Tasks = append(m.Tasks, Task{
+		ID:        id,
+		File:      file,
+		Title:     fmt.Sprintf("Remediation %d: resolve verification findings", cycle),
+		Type:      "AFK",
+		Status:    "open",
+		BlockedBy: []string{},
+	})
+	if err := WriteManifestAtomic(d, m); err != nil {
+		// Roll the orphan markdown back so markdown and index.json stay in sync.
+		_ = d.FS.RemoveAll(mdPath)
+		m.Tasks = m.Tasks[:len(m.Tasks)-1]
+		return "", exitErr(ExitOperational, "append remediation task to manifest: %v", err)
+	}
+	return id, nil
+}
+
+// spawnRemediationIfUnderCap enacts a FIXABLE verdict (ADR-0086). While the set
+// is under its remediation depth cap it spawns a new AFK Remediation task whose
+// body is the findings and returns spawned=true — the Drain picks it up, and its
+// completion moves the work SHA so the cached verdict goes stale and the Verifier
+// re-fires, closing the loop. At or over the cap it writes nothing and returns
+// spawned=false, so the caller parks the set at VERIFY-FAILED.
+func spawnRemediationIfUnderCap(d *Deps, m *Manifest, workSHA, findings string, maxDepth int) (spawned bool, id string, err error) {
+	if remediationDepth(m) >= maxDepth {
+		return false, "", nil
+	}
+	id, err = spawnRemediationTask(d, m, workSHA, findings)
+	if err != nil {
+		return false, "", err
+	}
+	return true, id, nil
+}

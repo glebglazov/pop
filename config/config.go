@@ -199,12 +199,18 @@ type TaskConfig struct {
 // VerifyConfig holds Agent-verification settings (ADR-0086). It is the
 // master, off-by-default gate for the feature: only when Enabled does status
 // derivation gate Done on a SHA-keyed Verify verdict. Later slices extend this
-// with the agent fallback list, effort, and remediation depth cap.
+// with the agent fallback list and effort.
 type VerifyConfig struct {
 	// Enabled is the master opt-in switch. Absent/false ⇒ the Verifier never
 	// runs and status derives from the manifest alone, exactly as before this
 	// feature (ADR-0086/0087).
 	Enabled bool `toml:"enabled" desc:"Enable Agent verification as a Done gate (default false)."`
+	// MaxRemediationDepth bounds the verify→remediate→re-verify loop (ADR-0086):
+	// a FIXABLE verdict spawns a Remediation task only while the set is under this
+	// many cycles, after which it parks at VERIFY-FAILED. A nil pointer ⇒ the
+	// built-in default; a value ≤ 0 disables remediation (a FIXABLE verdict parks
+	// immediately).
+	MaxRemediationDepth *int `toml:"max_remediation_depth" desc:"Max verify→remediate cycles before parking at VERIFY-FAILED (default 3)."`
 }
 
 // TaskAgentConfig holds configuration for one task agent preset.

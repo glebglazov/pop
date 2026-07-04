@@ -121,6 +121,7 @@ func TestLoadWorkloadVerifyEnabled(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 [workload.verify]
 enabled = true
+max_remediation_depth = 2
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +134,9 @@ enabled = true
 	}
 	if !cfg.Task.Verify.Enabled {
 		t.Fatal("expected [workload.verify] enabled = true to load as enabled")
+	}
+	if cfg.Task.Verify.MaxRemediationDepth == nil || *cfg.Task.Verify.MaxRemediationDepth != 2 {
+		t.Fatalf("expected max_remediation_depth = 2, got %v", cfg.Task.Verify.MaxRemediationDepth)
 	}
 }
 

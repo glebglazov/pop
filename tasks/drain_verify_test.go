@@ -373,13 +373,14 @@ func TestRunTaskSetVerifyCachedNeedsHumanParks(t *testing.T) {
 	if !strings.Contains(result.VerifyFindings, "ambiguous") {
 		t.Fatalf("VerifyFindings = %q, want the Verifier's reasons", result.VerifyFindings)
 	}
-	// The drain stopped cleanly: its terminal is a finished process, not a crash.
+	// The drain stopped cleanly on a NEEDS-HUMAN verdict: it records the
+	// verify_failed terminal (ADR-0087), not a crash.
 	rec, err := ReadDrainOutcome(d, runtimePath)
 	if err != nil {
 		t.Fatalf("read drain outcome: %v", err)
 	}
-	if rec.Outcome != DrainOutcomeFinished {
-		t.Fatalf("park outcome = %q, want %q", rec.Outcome, DrainOutcomeFinished)
+	if rec.Outcome != DrainOutcomeVerifyFailed {
+		t.Fatalf("park outcome = %q, want %q", rec.Outcome, DrainOutcomeVerifyFailed)
 	}
 }
 
