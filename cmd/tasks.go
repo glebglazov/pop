@@ -125,6 +125,13 @@ var taskTimingsCmd = &cobra.Command{
 	Run:   runTaskTimings,
 }
 
+var taskStreamCmd = &cobra.Command{
+	Use:   "stream TASK_SET[/FILE.md]",
+	Short: "Show per-task attempt stream replay derived from captured attempt streams",
+	Args:  cobra.ExactArgs(1),
+	Run:   runTaskStream,
+}
+
 var taskShowPathCmd = &cobra.Command{
 	Use:   "show-path [TASK_SET]",
 	Short: "Print this repository's task storage directory, creating it on demand",
@@ -202,6 +209,7 @@ func init() {
 	taskCmd.AddCommand(taskCompleteTaskCmd)
 	taskCmd.AddCommand(taskSkipTaskCmd)
 	taskCmd.AddCommand(taskTimingsCmd)
+	taskCmd.AddCommand(taskStreamCmd)
 	taskCmd.AddCommand(taskShowPathCmd)
 	taskCmd.AddCommand(taskTransferCmd)
 	taskTransferCmd.AddCommand(taskExportCmd)
@@ -1044,6 +1052,23 @@ func runTaskTimingsWith(d *tasks.Deps, w io.Writer, target string) error {
 		return err
 	}
 	tasks.RenderTimings(w, result)
+	return nil
+}
+
+func runTaskStream(cmd *cobra.Command, args []string) {
+	err := runTaskStreamWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	handleTaskExit(err)
+}
+
+func runTaskStreamWith(d *tasks.Deps, w io.Writer, target string) error {
+	result, err := tasks.StreamWith(d, taskProjectDeps(), taskConfigLoad, tasks.StreamOptions{
+		ResolveInput: taskResolveInput(),
+		Target:       target,
+	})
+	if err != nil {
+		return err
+	}
+	tasks.RenderStream(w, result)
 	return nil
 }
 
