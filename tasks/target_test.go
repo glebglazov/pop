@@ -238,7 +238,7 @@ func TestActionableTaskTargetCompletionsNeverOfferDoneThings(t *testing.T) {
 		t.Fatalf("actionable files = %#v", files)
 	}
 
-	// The unfiltered variant still offers Done sets and done tasks (timings).
+	// The unfiltered variant still offers Done sets and done tasks (stream).
 	all := taskTargetIdentifierCompletions(refresh, "")
 	if strings.Join(all, ",") != "broken/,deferred/,finished/,mixed/" {
 		t.Fatalf("unfiltered identifiers = %#v", all)

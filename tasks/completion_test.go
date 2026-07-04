@@ -112,7 +112,7 @@ func TestCompleteActionableTaskTargetsOmitsDoneSetsAndTasks(t *testing.T) {
 		t.Fatalf("set-relative files = %#v", files)
 	}
 
-	// The unfiltered variant (timings) still offers the Done set and done task.
+	// The unfiltered variant (stream) still offers the Done set and done task.
 	all, err := CompleteTaskTargets(CompletionInput{}, "")
 	if err != nil {
 		t.Fatal(err)

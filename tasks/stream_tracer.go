@@ -94,7 +94,7 @@ func Stream(opts StreamOptions) (*StreamResult, error) {
 }
 
 // StreamWith derives the attempt stream replay using injected dependencies.
-// The target grammar mirrors implement and timings: a bare Task set identifier
+// The target grammar mirrors implement: a bare Task set identifier
 // covers every task in the set; a <task-set>/<file>.md reference covers one task.
 func StreamWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts StreamOptions) (*StreamResult, error) {
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)

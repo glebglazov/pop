@@ -180,7 +180,7 @@ func TimingsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		return nil, err
 	}
 	if taskSetID == "" {
-		return nil, exitErr(ExitSetup, "timings requires a task set or <task-set>/<file>.md target")
+		return nil, exitErr(ExitSetup, "requires a task set or <task-set>/<file>.md target")
 	}
 
 	m := refresh.Manifests[taskSetID]
@@ -303,7 +303,7 @@ func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
 }
 
 // deriveAttemptTiming builds an AttemptTiming from the parsed stream records.
-// It is shared by the timings reader and the stream tracer so both lenses agree
+// It is shared by the stream tracer and the inline breakdown so both lenses agree
 // on the derived header; nothing is persisted.
 func deriveAttemptTiming(header streamHeaderRecord, footer streamFooterRecord, events []streamEventRecord) AttemptTiming {
 	requestedAgent := header.RequestedAgent
@@ -380,7 +380,7 @@ func RenderTimings(w io.Writer, result *TimingsResult) {
 
 // renderAttemptRows writes one task's attempt rows: agent, outcome, total
 // duration, and derived token spend per attempt, with per-tool rows beneath.
-// Shared by the timings reader and the inline breakdown so the two views
+// Shared by the stream tracer and the inline breakdown so the two views
 // render identically.
 func renderAttemptRows(out *output, attempts []AttemptTiming) {
 	agentW, actualModelW, outcomeW := 0, 0, 0
@@ -439,7 +439,7 @@ func displayAttemptAgent(a AttemptTiming) string {
 // printAttemptBreakdown prints the Attempt timing breakdown for the Captured
 // attempt streams written by this invocation, as a task reaches a terminal
 // state during implement. It re-reads the stored files through the reader's
-// derivation (readAttemptTiming), so the inline view and `pop tasks timings`
+// derivation (readAttemptTiming), so the inline view and the stream replay
 // can never disagree; full history stays with the reader. Best-effort like
 // the write path: an unreadable stream is skipped, never an error. No paths
 // (plain-output or custom-command attempts) prints nothing.

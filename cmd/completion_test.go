@@ -157,18 +157,6 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
 	})
 
-	t.Run("timings positional defaults to Task set IDs", func(t *testing.T) {
-		out := shellCompNoDesc(t, "tasks", "timings")
-		assertShellCompContains(t, out, "svc")
-		assertShellCompOmits(t, out, "thoughts/issues/svc")
-		assertShellCompOmitsExact(t, out, "01-a")
-	})
-
-	t.Run("timings positional task set relative path", func(t *testing.T) {
-		out := shellCompNoDescCompleting(t, "tasks", "timings", "svc/")
-		assertShellCompContains(t, out, "svc/01-a.md", "svc/02-b.md")
-	})
-
 	t.Run("set priority positional IDs", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "set-priority")
 		assertShellCompContains(t, out, "svc")
@@ -191,15 +179,15 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		}
 	})
 
-	t.Run("timings keeps Done sets and done tasks", func(t *testing.T) {
-		out := shellCompNoDesc(t, "tasks", "timings")
+	t.Run("stream keeps Done sets and done tasks", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "stream")
 		assertShellCompContains(t, out, "done/")
-		out = shellCompNoDescCompleting(t, "tasks", "timings", "mix/")
+		out = shellCompNoDescCompleting(t, "tasks", "stream", "mix/")
 		assertShellCompContains(t, out, "mix/01-open.md", "mix/02-done.md")
 	})
 
 	t.Run("all task target completions omit archived sets", func(t *testing.T) {
-		for _, verb := range []string{"implement", "open", "complete", "skip", "timings"} {
+		for _, verb := range []string{"implement", "open", "complete", "skip", "stream"} {
 			out := shellCompNoDesc(t, "tasks", verb)
 			assertShellCompOmitsExact(t, out, "archived/")
 		}
@@ -226,7 +214,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 
 	t.Run("subcommands", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks")
-		for _, sub := range []string{"status", "set-priority", "implement", "open", "timings", "agents"} {
+		for _, sub := range []string{"status", "set-priority", "implement", "open", "stream", "agents"} {
 			assertShellCompContains(t, out, sub)
 		}
 	})

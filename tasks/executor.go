@@ -336,7 +336,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	}
 	// Captured attempt streams written by this invocation, for the inline
 	// breakdown when the task reaches a terminal state. Full history stays
-	// with `pop tasks timings`.
+	// with `pop tasks stream`.
 	var streamPaths []string
 	for attempt := 1; attempt <= maxTries; attempt++ {
 		prompt := basePrompt

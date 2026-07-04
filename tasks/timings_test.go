@@ -784,7 +784,7 @@ func TestRunTaskPrintsInlineBreakdownOnDone(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	installClaudeStreamAgent(t, env.root, true)
 	// A stream from a previous invocation: it must stay with `pop tasks
-	// timings`, not reappear inline.
+	// stream`, not reappear inline.
 	writeTimingStream(t, taskStreamDir(env.demoDir(), "01-a.md"), "attempt-001.jsonl.gz",
 		"codex", 1, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), "timed_out", 9_000)
 
@@ -811,7 +811,7 @@ func TestRunTaskPrintsInlineBreakdownOnDone(t *testing.T) {
 		}
 	}
 
-	// Full history — both invocations — stays with the timings reader.
+	// Full history — both invocations — stays with the reader.
 	result, err := TimingsWith(env.deps(), nil, nil, TimingsOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
 		Target:       "demo/01-a.md",

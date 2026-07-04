@@ -828,16 +828,6 @@ func TestTaskSnapshotVerbsAcceptArchivedTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("timings", func(t *testing.T) {
-		var buf bytes.Buffer
-		if err := runTaskTimingsWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {
-			t.Fatalf("timings: %v", err)
-		}
-		if !strings.Contains(buf.String(), "demo") {
-			t.Fatalf("timings output missing task set:\n%s", buf.String())
-		}
-	})
-
 	t.Run("show-path", func(t *testing.T) {
 		var buf bytes.Buffer
 		if err := runTaskShowPathWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {

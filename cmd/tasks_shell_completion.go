@@ -40,7 +40,6 @@ func registerTaskShellCompletions() {
 	taskResetTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskCompleteTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskSkipTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
-	taskTimingsCmd.ValidArgsFunction = completeTaskTimingsArgs
 	taskStreamCmd.ValidArgsFunction = completeTaskStreamArgs
 	taskShowPathCmd.ValidArgsFunction = completeTaskShowPathArgs
 	taskExportCmd.ValidArgsFunction = completeTaskExportArgs
@@ -143,7 +142,7 @@ func completeTaskTaskTargets(cmd *cobra.Command, args []string, toComplete strin
 }
 
 // completeActionableTaskTargets omits Done sets and done tasks; implement and
-// the override verbs use it, while timings keeps the unfiltered list.
+// the override verbs use it, while stream keeps the unfiltered list.
 func completeActionableTaskTargets(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	return completeTaskTargetCandidates(cmd, toComplete, tasks.CompleteActionableTaskTargetsWith)
 }
@@ -226,13 +225,6 @@ func completeTaskImplementArgs(cmd *cobra.Command, args []string, toComplete str
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	return completeActionableTaskTargets(cmd, args, toComplete)
-}
-
-func completeTaskTimingsArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if len(args) > 0 {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	return completeTaskTaskTargets(cmd, args, toComplete)
 }
 
 func completeTaskStreamArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
