@@ -729,11 +729,14 @@ type hookSpec struct {
 //
 // The topic hook is a *separate* UserPromptSubmit entry alongside the
 // set-status one (ADR 0023): it pipes the same payload to `set-topic --derive`
-// to derive a pane topic from the prompt. It installs whenever the core status
-// wiring installs — no extra opt-in — and rides the same idempotent
-// install/remove/refresh paths (both commands match isPopHookCommand).
+// to derive a pane topic from the prompt. SessionStart also clears the Topic
+// so a new agent session in the same pane can re-derive on its first prompt.
+// It installs whenever the core status wiring installs — no extra opt-in —
+// and rides the same idempotent install/remove/refresh paths (both commands
+// match isPopHookCommand).
 var popHooks = []hookSpec{
 	{"SessionStart", "pop pane set-status clear 2>/dev/null || true"},
+	{"SessionStart", "pop pane set-topic --clear 2>/dev/null || true"},
 	{"UserPromptSubmit", "pop pane set-status working 2>/dev/null || true"},
 	{"UserPromptSubmit", "pop pane set-topic --derive 2>/dev/null || true"},
 	{"PreToolUse", "pop pane set-status working 2>/dev/null || true"},
@@ -827,6 +830,7 @@ func installJSONHooks(d *integrateDeps, settingsPath string, hooksToInstall []ho
 
 var codexPopHooks = []hookSpec{
 	{"SessionStart", "pop pane set-status clear 2>/dev/null || true"},
+	{"SessionStart", "pop pane set-topic --clear 2>/dev/null || true"},
 	{"UserPromptSubmit", "pop pane set-status working 2>/dev/null || true"},
 	// Topic hook: a separate UserPromptSubmit entry alongside set-status,
 	// riding core status wiring (ADR 0023). --label codex selects codex's
@@ -975,6 +979,7 @@ type cursorHookSpec struct {
 // Event names follow the Cursor CLI hooks schema (camelCase).
 var cursorPopHooks = []cursorHookSpec{
 	{"sessionStart", "pop pane set-status clear --label cursor 2>/dev/null || true"},
+	{"sessionStart", "pop pane set-topic --clear 2>/dev/null || true"},
 	{"beforeSubmitPrompt", "pop pane set-status working --label cursor 2>/dev/null || true"},
 	// Topic hook: a separate beforeSubmitPrompt entry alongside set-status,
 	// riding core status wiring (ADR 0023). --label cursor selects cursor's

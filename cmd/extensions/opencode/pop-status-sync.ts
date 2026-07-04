@@ -7,7 +7,8 @@
  *   - unread  → opencode finished a turn, awaiting the user
  *
  * `clear` is sent on plugin load and on session.created/deleted to clear any
- * stale "working" status left over from a crashed previous run.
+ * stale "working" status left over from a crashed previous run, and to wipe
+ * the pane Topic so the next prompt can re-derive it for the new session.
  *
  * It also derives a pane *topic* from each submitted message (`set-topic
  * --derive --label opencode`), riding the same status wiring (ADR 0023).
@@ -25,6 +26,10 @@ export const PopStatusSync = async ({ $ }) => {
 		$`pop pane set-status ${paneID} ${status}`.catch(() => {});
 	};
 
+	const clearTopic = () => {
+		$`pop pane set-topic --clear ${paneID}`.catch(() => {});
+	};
+
 	// Derive a pane topic from a submitted user message. opencode's plugin
 	// events carry no transcript path, so we serialize the message text into
 	// the {prompt} shape pop's opencode adapter reads and pipe it on stdin
@@ -38,8 +43,9 @@ export const PopStatusSync = async ({ $ }) => {
 		);
 	};
 
-	// Clear any stale "working" status left over from a previous run.
+	// Clear any stale "working" status and Topic left over from a previous run.
 	setStatus("clear");
+	clearTopic();
 
 	// Dedupe redundant transitions: `tool.execute.before` (named hook) and
 	// `session.status` (event handler) can both fire for the same busy period,
@@ -65,8 +71,9 @@ export const PopStatusSync = async ({ $ }) => {
 			switch (event.type) {
 			case "session.created":
 			case "session.deleted":
-				// Housekeeping — clear stale status.
-					markClear();
+				// Housekeeping — clear stale status and Topic.
+				markClear();
+				clearTopic();
 				break;
 			case "session.idle":
 				// Agent finished a turn — flag the user.

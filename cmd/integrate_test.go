@@ -416,6 +416,9 @@ func TestIntegrateClaude_FreshSettings(t *testing.T) {
 			t.Errorf("missing hooks for event %q", event)
 		}
 	}
+	if got := countContains(nestedEventCommands(t, fs, settingsPath, "SessionStart"), "pop pane set-topic --clear"); got != 1 {
+		t.Errorf("expected exactly 1 set-topic --clear SessionStart hook, got %d", got)
+	}
 }
 
 func TestIntegrateClaude_PreservesExistingHooks(t *testing.T) {
@@ -749,6 +752,9 @@ func TestIntegrateCodex_FreshHooks(t *testing.T) {
 		if !ok || len(entries) == 0 {
 			t.Errorf("missing hooks for event %q", event)
 		}
+	}
+	if got := countContains(nestedEventCommands(t, fs, hooksPath, "SessionStart"), "pop pane set-topic --clear"); got != 1 {
+		t.Errorf("expected exactly 1 set-topic --clear SessionStart hook, got %d", got)
 	}
 }
 
@@ -1170,9 +1176,16 @@ func TestIntegrateCursor_FreshHooks(t *testing.T) {
 			t.Errorf("missing hooks for event %q", event)
 		}
 	}
-	firstHook := hooks["sessionStart"].([]interface{})[0].(map[string]interface{})
+	sessionStart := hooks["sessionStart"].([]interface{})
+	if len(sessionStart) != 2 {
+		t.Fatalf("sessionStart hooks = %d, want 2 (status clear + topic clear)", len(sessionStart))
+	}
+	if got := countContains(flatEventCommands(t, fs, hooksPath, "sessionStart"), "pop pane set-topic --clear"); got != 1 {
+		t.Errorf("expected exactly 1 set-topic --clear sessionStart hook, got %d", got)
+	}
+	firstHook := sessionStart[0].(map[string]interface{})
 	if cmd := firstHook["command"].(string); !strings.Contains(cmd, "--label cursor") {
-		t.Errorf("sessionStart hook = %q, want --label cursor", cmd)
+		t.Errorf("sessionStart status hook = %q, want --label cursor", cmd)
 	}
 }
 
@@ -1377,8 +1390,14 @@ func TestExtensions_DeriveTopic(t *testing.T) {
 	if !bytes.Contains(piExtensionFile, []byte("set-topic --derive --label pi")) {
 		t.Error("pi extension missing topic derivation call")
 	}
+	if !bytes.Contains(piExtensionFile, []byte(`"set-topic", "--clear"`)) {
+		t.Error("pi extension missing topic clear on session start")
+	}
 	if !bytes.Contains(opencodeExtensionFile, []byte("set-topic --derive --label opencode")) {
 		t.Error("opencode extension missing topic derivation call")
+	}
+	if !bytes.Contains(opencodeExtensionFile, []byte("set-topic --clear")) {
+		t.Error("opencode extension missing topic clear on session start")
 	}
 
 	// Removal of the extension file (status-wiring removal for pi/opencode)

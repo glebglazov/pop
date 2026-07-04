@@ -7,7 +7,8 @@
  *   - unread  → pi finished a turn, awaiting the user
  *
  * `clear` is sent on `session_start` to clear any stale "working" status
- * left over from a crashed previous run.
+ * left over from a crashed previous run, and to wipe the pane Topic so the
+ * next prompt can re-derive it for the new session.
  *
  * It also derives a pane *topic* from each submitted prompt (`set-topic
  * --derive --label pi`), riding the same status wiring (ADR 0023).
@@ -25,6 +26,10 @@ export default function (pi: ExtensionAPI) {
 		// Fire-and-forget; swallow errors so a missing `pop` binary never
 		// breaks the agent.
 		pi.exec("pop", ["pane", "set-status", paneID, status]).catch(() => {});
+	};
+
+	const clearTopic = () => {
+		pi.exec("pop", ["pane", "set-topic", "--clear", paneID]).catch(() => {});
 	};
 
 	// Derive a pane topic from the submitted prompt. pi.exec runs a binary
@@ -69,8 +74,10 @@ export default function (pi: ExtensionAPI) {
 
 	// Housekeeping: clear any stale "working" status left over from a
 	// previous run on session start, so a freshly resumed pane isn't stuck
-	// "working".
+	// "working". Wipe the Topic too so the next prompt re-derives for this
+	// session.
 	pi.on("session_start", async () => {
 		setStatus("clear");
+		clearTopic();
 	});
 }
