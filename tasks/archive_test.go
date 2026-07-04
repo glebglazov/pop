@@ -250,7 +250,7 @@ func TestBuildArchiveSetSelectionPrechecksDoneOnly(t *testing.T) {
 		"ready":     StatusReady,
 		"deferred":  StatusDeferred,
 		"failed":    StatusFailed,
-		"blocked":   StatusUnverified,
+		"blocked":   StatusAwaitingApproval,
 		"malformed": StatusMalformed,
 		"missing":   StatusMissing,
 	} {
@@ -414,4 +414,3 @@ func TestUnarchiveTaskSetsRestoresSelection(t *testing.T) {
 		}
 	}
 }
-

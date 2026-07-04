@@ -3,10 +3,10 @@ package queue
 import (
 	"io"
 
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
 // BindWorktreeOptions controls bind-worktree behaviour.

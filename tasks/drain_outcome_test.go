@@ -218,9 +218,9 @@ func TestDrainTerminal(t *testing.T) {
 	}
 }
 
-func TestDrainOutcomeUnverifiedIsClean(t *testing.T) {
-	if DrainOutcomeUnverified.Abnormal() {
-		t.Fatal("DrainOutcomeUnverified must be a clean (non-abnormal) terminal stop")
+func TestDrainOutcomeAwaitingApprovalIsClean(t *testing.T) {
+	if DrainOutcomeAwaitingApproval.Abnormal() {
+		t.Fatal("DrainOutcomeAwaitingApproval must be a clean (non-abnormal) terminal stop")
 	}
 }
 
@@ -247,6 +247,47 @@ func TestReadDrainOutcomeProjectsLatestTerminal(t *testing.T) {
 	}
 	if got.WrittenAt.IsZero() {
 		t.Fatalf("Finish should stamp the terminal time")
+	}
+}
+
+// TestDrainOutcomeVocabularyValues locks the durable string spellings retired to
+// (and added by) ADR-0087: the terminal-HITL disposition persists as
+// "awaiting_approval", and verify_failed is a recognized value.
+func TestDrainOutcomeVocabularyValues(t *testing.T) {
+	if DrainOutcomeAwaitingApproval != "awaiting_approval" {
+		t.Fatalf("DrainOutcomeAwaitingApproval = %q, want awaiting_approval", DrainOutcomeAwaitingApproval)
+	}
+	if DrainOutcomeVerifyFailed != "verify_failed" {
+		t.Fatalf("DrainOutcomeVerifyFailed = %q, want verify_failed", DrainOutcomeVerifyFailed)
+	}
+	// verify_failed is a clean terminal (the drain finished; the Verifier just
+	// could not clear the set), not an abnormal teardown.
+	if DrainOutcomeVerifyFailed.Abnormal() {
+		t.Fatal("DrainOutcomeVerifyFailed must be a clean (non-abnormal) terminal stop")
+	}
+}
+
+// TestReadDrainOutcomeReadsLegacyUnverifiedForward verifies the durable,
+// append-only guarantee of ADR-0087: a record written with the pre-rename
+// "unverified" value stays on disk verbatim and reads forward to
+// DrainOutcomeAwaitingApproval.
+func TestReadDrainOutcomeReadsLegacyUnverifiedForward(t *testing.T) {
+	d, repo := drainTestRepo(t)
+
+	h, err := BeginDrain(d, repo, "demo", nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := h.Finish(drainOutcomeLegacyUnverified, "", false, time.Time{}); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	got, err := ReadDrainOutcome(d, repo)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got.Outcome != DrainOutcomeAwaitingApproval {
+		t.Fatalf("Outcome = %q, want %q (legacy unverified must read forward)", got.Outcome, DrainOutcomeAwaitingApproval)
 	}
 }
 

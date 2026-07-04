@@ -10,20 +10,20 @@ import (
 type TaskSetStatus string
 
 const (
-	StatusMissing    TaskSetStatus = "MISSING"
-	StatusDone       TaskSetStatus = "DONE"
-	StatusMalformed  TaskSetStatus = "MALFORMED"
-	StatusFailed     TaskSetStatus = "FAILED"
-	StatusReady      TaskSetStatus = "READY"
-	StatusDeferred   TaskSetStatus = "DEFERRED"
-	StatusBlocked    TaskSetStatus = "BLOCKED"
-	StatusUnverified TaskSetStatus = "UNVERIFIED"
+	StatusMissing          TaskSetStatus = "MISSING"
+	StatusDone             TaskSetStatus = "DONE"
+	StatusMalformed        TaskSetStatus = "MALFORMED"
+	StatusFailed           TaskSetStatus = "FAILED"
+	StatusReady            TaskSetStatus = "READY"
+	StatusDeferred         TaskSetStatus = "DEFERRED"
+	StatusBlocked          TaskSetStatus = "BLOCKED"
+	StatusAwaitingApproval TaskSetStatus = "AWAITING-APPROVAL"
 )
 
 // Row is one line in the task status table.
 type Row struct {
-	ID               string
-	Status           TaskSetStatus
+	ID     string
+	Status TaskSetStatus
 	// Started reports that the set already has at least one done task. With a
 	// Ready status it refines the display label to "IN PROGRESS" (render-only,
 	// see StatusLabel); it never affects schedulability.
@@ -93,12 +93,13 @@ func DeriveStatus(m *Manifest) TaskSetStatus {
 	if isDeferred(m) {
 		return StatusDeferred
 	}
-	// Terminal HITL: all AFK work is done/skipped, only the human-gate remains.
+	// Terminal HITL: all AFK work is done/skipped, only the human approval gate
+	// remains (the agent has already verified — the human signs off).
 	// Gating HITL: at least one open AFK task is still waiting behind the gate.
 	if hasOpenAFKTask(m) {
 		return StatusBlocked
 	}
-	return StatusUnverified
+	return StatusAwaitingApproval
 }
 
 // isDeferred reports whether every task is Done or Skipped with at least one

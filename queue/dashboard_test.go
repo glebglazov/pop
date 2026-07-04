@@ -171,13 +171,13 @@ func TestDashboardSortOrder(t *testing.T) {
 // mixed fixture that exercises every membership tier and the per-project
 // status sink. Tier precedence is running → auto-drain → orphaned → the rest;
 // the orphaned + auto-drain set must land in the auto-drain tier; "the rest"
-// groups by project then sinks UNVERIFIED below normal and DONE below those;
+// groups by project then sinks AWAITING-APPROVAL below normal and DONE below those;
 // and SetID descending is the global tiebreak.
 func TestDashboardTieredSortOrder(t *testing.T) {
 	rows := []DashboardRow{
 		// "the rest" — project bravo, status sink within the project.
 		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-01-done", RawStatus: tasks.StatusDone}},
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-02-unver", RawStatus: tasks.StatusUnverified}},
+		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-02-unver", RawStatus: tasks.StatusAwaitingApproval}},
 		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-03-ready", RawStatus: tasks.StatusReady}},
 		// "the rest" — project alpha sorts before bravo.
 		{Project: "alpha", SetRef: SetRef{SetID: "2026-03-01-a", RawStatus: tasks.StatusReady}},
@@ -207,8 +207,8 @@ func TestDashboardTieredSortOrder(t *testing.T) {
 		"alpha/2026-03-02-b",
 		"alpha/2026-03-01-a",
 		"bravo/2026-02-03-ready", // normal first
-		"bravo/2026-02-02-unver", // UNVERIFIED sinks below normal
-		"bravo/2026-02-01-done",  // DONE sinks below UNVERIFIED
+		"bravo/2026-02-02-unver", // AWAITING-APPROVAL sinks below normal
+		"bravo/2026-02-01-done",  // DONE sinks below AWAITING-APPROVAL
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)

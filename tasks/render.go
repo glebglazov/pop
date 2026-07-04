@@ -211,7 +211,7 @@ func buildTaskSetRow(reg RegisteredTaskSet, m *Manifest, regIndex int) Row {
 	}
 
 	row.Progress = BuildProgress(m, status)
-	if status == StatusBlocked || status == StatusUnverified {
+	if status == StatusBlocked || status == StatusAwaitingApproval {
 		row.BlockedReason = BuildBlockedReason(m)
 		if hitl := BlockingHITLTask(m); hitl != nil {
 			row.CompleteHint = completeTaskHint(reg.ID, hitl.File)
@@ -293,7 +293,7 @@ func formatTable(rows []Row) string {
 func formatTableWithOutput(out *output, rows []Row) string {
 	const (
 		idW     = 28
-		stW     = 11 // widest label is "IN PROGRESS" (11), edging out "UNVERIFIED"
+		stW     = 17 // widest label is "AWAITING-APPROVAL" (17)
 		prW     = 5
 		detailW = 96
 	)
@@ -348,7 +348,7 @@ func rowStatusDetail(row Row) string {
 			parts = append(parts, "reset: "+row.ResetHints[0])
 		}
 		return strings.Join(parts, " — ")
-	case StatusBlocked, StatusUnverified:
+	case StatusBlocked, StatusAwaitingApproval:
 		parts := []string{row.Progress}
 		if row.BlockedReason != "" {
 			parts = append(parts, row.BlockedReason)

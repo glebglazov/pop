@@ -302,9 +302,10 @@ type Decision struct {
 	WaitUntil          time.Time
 	WorktreeReady      bool
 	ProjectConfigError string
-	// UnverifiedSetID is the first Task-set in UNVERIFIED state (AFK done, terminal
-	// HITL gate awaits human sign-off). Empty when the project has no unverified set.
-	UnverifiedSetID string
+	// AwaitingApprovalSetID is the first Task-set in AWAITING-APPROVAL state (AFK
+	// done, terminal HITL gate awaits human sign-off). Empty when the project has
+	// no awaiting-approval set.
+	AwaitingApprovalSetID string
 	// BlockedSetID names the set whose abnormal-backoff or parking produced
 	// Reason. It lets the dashboard attribute a backoff/park to a specific set
 	// without reading any persisted flag (ADR-0055).
@@ -692,9 +693,9 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 		} else if waitReason != "" {
 			dec.Reason = waitReason
 			dec.BlockedSetID = blockedID
-		} else if id := firstUnverifiedSetID(refresh.Rows); id != "" {
-			dec.Reason = "awaiting verification"
-			dec.UnverifiedSetID = id
+		} else if id := firstAwaitingApprovalSetID(refresh.Rows); id != "" {
+			dec.Reason = "awaiting approval"
+			dec.AwaitingApprovalSetID = id
 		} else {
 			dec.Reason = "no ready set"
 		}
@@ -856,11 +857,12 @@ func selectReadySetID(rows []tasks.Row) (string, bool) {
 	return ready[0].ID, true
 }
 
-// firstUnverifiedSetID returns the ID of the first Task-set in UNVERIFIED state
-// (all AFK work done/skipped, only a terminal HITL gate remains). Empty when none.
-func firstUnverifiedSetID(rows []tasks.Row) string {
+// firstAwaitingApprovalSetID returns the ID of the first Task-set in
+// AWAITING-APPROVAL state (all AFK work done/skipped, only a terminal HITL gate
+// remains). Empty when none.
+func firstAwaitingApprovalSetID(rows []tasks.Row) string {
 	for _, row := range rows {
-		if row.Status == tasks.StatusUnverified {
+		if row.Status == tasks.StatusAwaitingApproval {
 			return row.ID
 		}
 	}

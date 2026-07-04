@@ -3,9 +3,9 @@ package queue
 import (
 	"io"
 
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
 // AbandonResult describes the outcome of releasing a worktree binding.

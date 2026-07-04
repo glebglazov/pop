@@ -128,7 +128,7 @@ func TestSelectTaskSetExplicitHumanBlockedAttendable(t *testing.T) {
 	refresh := &RefreshResult{
 		Rows: []Row{
 			{ID: "ready", Status: StatusReady, Priority: 10},
-			{ID: "target", Status: StatusUnverified, Priority: 0, BlockedReason: "HITL: 02-gate"},
+			{ID: "target", Status: StatusAwaitingApproval, Priority: 0, BlockedReason: "HITL: 02-gate"},
 		},
 		Manifests: map[string]*Manifest{
 			"ready": {Stem: "ready", Valid: true, Tasks: []Task{
@@ -182,8 +182,8 @@ func TestSelectTaskSetAmbiguousHITLFallbackRejected(t *testing.T) {
 	// to pick by priority and advise targeting one explicitly.
 	refresh := &RefreshResult{
 		Rows: []Row{
-			{ID: "beta", Status: StatusUnverified, Priority: 100, BlockedReason: "HITL: 01-gate"},
-			{ID: "alpha", Status: StatusUnverified, Priority: 0, BlockedReason: "HITL: 01-gate"},
+			{ID: "beta", Status: StatusAwaitingApproval, Priority: 100, BlockedReason: "HITL: 01-gate"},
+			{ID: "alpha", Status: StatusAwaitingApproval, Priority: 0, BlockedReason: "HITL: 01-gate"},
 		},
 		Manifests: map[string]*Manifest{
 			"beta": {Stem: "beta", Valid: true, Tasks: []Task{

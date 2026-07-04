@@ -7,7 +7,7 @@ import (
 
 // DrainOutcome is a Drain's terminal exit reason — how its process ended, never
 // the set's resulting work disposition (ADR-0056). Whether a finished drain left
-// the set done, failed, blocked, unverified, or deferred is read from the
+// the set done, failed, blocked, awaiting approval, or deferred is read from the
 // manifest-derived Task set status, not from the Drain.
 //
 // The disposition constants below are retained for the queue journal and
@@ -28,10 +28,20 @@ const (
 	// remains gated behind a human (setup or mid-flow HITL), so draining could
 	// not proceed.
 	DrainOutcomeBlocked DrainOutcome = "blocked"
-	// DrainOutcomeUnverified — all AFK work is done/skipped; only a terminal
-	// HITL verification gate stands before Done. Agents are finished; human
-	// sign-off is all that remains.
-	DrainOutcomeUnverified DrainOutcome = "unverified"
+	// DrainOutcomeAwaitingApproval — all AFK work is done/skipped; only a terminal
+	// HITL approval gate stands before Done. Agents are finished (and, once the
+	// Verifier ships, have already verified); human sign-off is all that remains.
+	// Retires the legacy "unverified" value (ADR-0087); a stored "unverified" is
+	// read forward to this value by ReadDrainOutcome.
+	DrainOutcomeAwaitingApproval DrainOutcome = "awaiting_approval"
+	// DrainOutcomeVerifyFailed — the Verifier could not clear the set (NEEDS-HUMAN,
+	// or the remediation cap was exhausted). A recognized value (ADR-0087); not yet
+	// emitted anywhere — the Verifier that writes it lands in a later slice.
+	DrainOutcomeVerifyFailed DrainOutcome = "verify_failed"
+	// drainOutcomeLegacyUnverified is the pre-ADR-0087 spelling of
+	// DrainOutcomeAwaitingApproval. It is never written; it exists so durable,
+	// append-only records already on disk read forward to the new vocabulary.
+	drainOutcomeLegacyUnverified DrainOutcome = "unverified"
 	// DrainOutcomeDeferred — the set finished with skipped tasks deferred.
 	DrainOutcomeDeferred DrainOutcome = "deferred"
 	// DrainOutcomeQuotaPaused — draining stopped because an agent's quota ran
@@ -44,6 +54,17 @@ const (
 	// inferred from a missing record (ADR-0055).
 	DrainOutcomeCrashed DrainOutcome = "crashed"
 )
+
+// canonicalizeOutcome reads a stored outcome value forward to the current
+// vocabulary. The outcome journal is durable and append-only, so a legacy
+// "unverified" record written before ADR-0087 stays on disk verbatim; every
+// reader maps it to DrainOutcomeAwaitingApproval rather than rewriting history.
+func canonicalizeOutcome(o DrainOutcome) DrainOutcome {
+	if o == drainOutcomeLegacyUnverified {
+		return DrainOutcomeAwaitingApproval
+	}
+	return o
+}
 
 // Abnormal reports whether the drain ended abnormally — interrupted or crashed —
 // rather than reaching a clean terminal stop. A clean stop (finished,
@@ -100,7 +121,7 @@ func ReadDrainOutcome(d *Deps, runtimeRoot string) (*DrainOutcomeRecord, error) 
 	}
 	return &DrainOutcomeRecord{
 		SetID:            drain.SetID,
-		Outcome:          DrainOutcome(drain.State),
+		Outcome:          canonicalizeOutcome(DrainOutcome(drain.State)),
 		ExhaustedPreset:  drain.ExhaustedPreset,
 		ExhaustedPinned:  drain.ExhaustedPinned,
 		ExhaustedResetAt: drain.ExhaustedResetAt,

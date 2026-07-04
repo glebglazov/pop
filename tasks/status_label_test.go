@@ -12,7 +12,7 @@ func TestStatusLabelInProgress(t *testing.T) {
 		{"ready started is in progress", StatusReady, true, "IN PROGRESS"},
 		{"ready fresh is ready", StatusReady, false, "READY"},
 		{"blocked never relabels", StatusBlocked, true, "BLOCKED"},
-		{"unverified never relabels", StatusUnverified, true, "UNVERIFIED"},
+		{"awaiting-approval never relabels", StatusAwaitingApproval, true, "AWAITING-APPROVAL"},
 		{"done never relabels", StatusDone, true, "DONE"},
 	}
 	for _, tc := range cases {

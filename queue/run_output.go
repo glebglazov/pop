@@ -7,27 +7,27 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
-// UnverifiedItem is a Task-set whose AFK work is finished but a terminal HITL
-// verification gate remains before it can be marked Done.
-type UnverifiedItem struct {
+// AwaitingApprovalItem is a Task-set whose AFK work is finished but a terminal HITL
+// approval gate remains before it can be marked Done.
+type AwaitingApprovalItem struct {
 	Project string
 	SetID   string
 }
 
 // RunView is the scheduling-relevant snapshot used for queue run baseline and deltas.
 type RunView struct {
-	Running             []PickedUpSet
-	Queued              []IdleProject
-	Blocked             []BlockedItem
-	Unverified          []UnverifiedItem
-	WorktreeBindings    []WorktreeBindingView
-	Skipped             []SkippedRepo
-	IdleCount           int
-	ScanErrors          map[string]string
+	Running          []PickedUpSet
+	Queued           []IdleProject
+	Blocked          []BlockedItem
+	AwaitingApproval []AwaitingApprovalItem
+	WorktreeBindings []WorktreeBindingView
+	Skipped          []SkippedRepo
+	IdleCount        int
+	ScanErrors       map[string]string
 }
 
 // WorktreeBindingView is one provisioned checkout tracked in queue daemon state.
@@ -80,10 +80,10 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 		case isBlockedIdleReason(idle.Reason):
 			view.Blocked = append(view.Blocked, blockedItemFromIdle(idle))
 			blockedProjects[idle.Project] = true
-		case idle.UnverifiedSetID != "":
-			view.Unverified = append(view.Unverified, UnverifiedItem{
+		case idle.AwaitingApprovalSetID != "":
+			view.AwaitingApproval = append(view.AwaitingApproval, AwaitingApprovalItem{
 				Project: idle.Project,
-				SetID:   idle.UnverifiedSetID,
+				SetID:   idle.AwaitingApprovalSetID,
 			})
 		default:
 			view.IdleCount++
@@ -112,11 +112,11 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 		}
 		return view.Blocked[i].Kind < view.Blocked[j].Kind
 	})
-	sort.SliceStable(view.Unverified, func(i, j int) bool {
-		if view.Unverified[i].Project != view.Unverified[j].Project {
-			return view.Unverified[i].Project < view.Unverified[j].Project
+	sort.SliceStable(view.AwaitingApproval, func(i, j int) bool {
+		if view.AwaitingApproval[i].Project != view.AwaitingApproval[j].Project {
+			return view.AwaitingApproval[i].Project < view.AwaitingApproval[j].Project
 		}
-		return view.Unverified[i].SetID < view.Unverified[j].SetID
+		return view.AwaitingApproval[i].SetID < view.AwaitingApproval[j].SetID
 	})
 	return view
 }
@@ -293,8 +293,8 @@ func formatQueueWorkSummary(view RunView) string {
 	if n := len(view.Blocked); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d blocked", n))
 	}
-	if n := len(view.Unverified); n > 0 {
-		parts = append(parts, fmt.Sprintf("%d awaiting verification", n))
+	if n := len(view.AwaitingApproval); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d awaiting approval", n))
 	}
 	if len(parts) == 0 {
 		return "none"
@@ -349,11 +349,11 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 		}
 	}
 
-	fmt.Fprintln(out, "Awaiting verification:")
-	if len(view.Unverified) == 0 {
+	fmt.Fprintln(out, "Awaiting approval:")
+	if len(view.AwaitingApproval) == 0 {
 		fmt.Fprintln(out, "  none")
 	} else {
-		for _, u := range view.Unverified {
+		for _, u := range view.AwaitingApproval {
 			project := u.Project
 			if project == "" {
 				project = "(unknown project)"
@@ -362,7 +362,7 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 			if setID == "" {
 				setID = "(unknown set)"
 			}
-			fmt.Fprintf(out, "  %s: %s — awaiting your check\n", project, setID)
+			fmt.Fprintf(out, "  %s: %s — awaiting your sign-off\n", project, setID)
 		}
 	}
 

@@ -58,7 +58,7 @@ func TestDeriveStatusAllDoneIsDoneNotDeferred(t *testing.T) {
 	}
 }
 
-// TestDeriveStatusPrecedence locks DONE → FAILED → READY → DEFERRED → BLOCKED/UNVERIFIED.
+// TestDeriveStatusPrecedence locks DONE → FAILED → READY → DEFERRED → BLOCKED/AWAITING-APPROVAL.
 func TestDeriveStatusPrecedence(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -108,37 +108,37 @@ func TestDeriveStatusPrecedence(t *testing.T) {
 	}
 }
 
-// TestDeriveStatusUnverifiedVsBlocked covers the terminal-HITL discriminator:
-// UNVERIFIED when no open AFK remains, BLOCKED when an open AFK is still gated.
-func TestDeriveStatusUnverifiedVsBlocked(t *testing.T) {
+// TestDeriveStatusAwaitingApprovalVsBlocked covers the terminal-HITL discriminator:
+// AWAITING-APPROVAL when no open AFK remains, BLOCKED when an open AFK is still gated.
+func TestDeriveStatusAwaitingApprovalVsBlocked(t *testing.T) {
 	cases := []struct {
 		name  string
 		tasks []Task
 		want  TaskSetStatus
 	}{
 		{
-			name: "terminal HITL only → UNVERIFIED",
+			name: "terminal HITL only → AWAITING-APPROVAL",
 			tasks: []Task{
 				{ID: "01-gate", Type: "HITL", Status: "open"},
 			},
-			want: StatusUnverified,
+			want: StatusAwaitingApproval,
 		},
 		{
-			name: "all AFK done, HITL open → UNVERIFIED",
+			name: "all AFK done, HITL open → AWAITING-APPROVAL",
 			tasks: []Task{
 				{ID: "01-a", Type: "AFK", Status: "done"},
 				{ID: "02-gate", Type: "HITL", Status: "open"},
 			},
-			want: StatusUnverified,
+			want: StatusAwaitingApproval,
 		},
 		{
-			name: "AFK done and skipped, HITL open → UNVERIFIED",
+			name: "AFK done and skipped, HITL open → AWAITING-APPROVAL",
 			tasks: []Task{
 				{ID: "01-a", Type: "AFK", Status: "done"},
 				{ID: "02-b", Type: "AFK", Status: "skipped"},
 				{ID: "03-gate", Type: "HITL", Status: "open"},
 			},
-			want: StatusUnverified,
+			want: StatusAwaitingApproval,
 		},
 		{
 			name: "open AFK gated by HITL → BLOCKED",

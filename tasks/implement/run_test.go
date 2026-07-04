@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
 func setupImplementFixture(t *testing.T) (root string, d *Deps) {

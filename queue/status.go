@@ -22,13 +22,13 @@ type PickedUpSet struct {
 
 // IdleProject is a configured project with no live runtime lock.
 type IdleProject struct {
-	Project            string
-	Waiting            string
-	ReadySet           string
-	// UnverifiedSetID is the first Task-set in UNVERIFIED state (awaiting human
-	// sign-off). Non-empty only when Reason is "awaiting verification".
-	UnverifiedSetID    string
-	Reason             string
+	Project  string
+	Waiting  string
+	ReadySet string
+	// AwaitingApprovalSetID is the first Task-set in AWAITING-APPROVAL state
+	// (awaiting human sign-off). Non-empty only when Reason is "awaiting approval".
+	AwaitingApprovalSetID string
+	Reason                string
 	// BlockedSetID names the set whose abnormal backoff or parking produced
 	// Reason; WaitUntil is when a backed-off set next becomes spawnable (zero for
 	// a parked set). Both are derived from Drain history (ADR-0055).
@@ -113,7 +113,7 @@ func statusFromDecisions(d *Deps, decisions []Decision, state *DaemonState) (Sta
 			snap.Skipped = append(snap.Skipped, SkippedRepo{Project: dec.Project, Reason: dec.Reason})
 			continue
 		}
-		idle := IdleProject{Project: dec.Project, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError, UnverifiedSetID: dec.UnverifiedSetID, BlockedSetID: dec.BlockedSetID, WaitUntil: dec.WaitUntil}
+		idle := IdleProject{Project: dec.Project, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError, AwaitingApprovalSetID: dec.AwaitingApprovalSetID, BlockedSetID: dec.BlockedSetID, WaitUntil: dec.WaitUntil}
 		if dec.TaskSetID != "" {
 			idle.Waiting = "ready"
 			idle.ReadySet = dec.TaskSetID

@@ -75,7 +75,7 @@ type RouteDrainCheckoutResult struct {
 	// Rebound is true when a foreground implement re-pointed an idle binding at a
 	// different checkout to the current checkout (ADR-0072).
 	Rebound bool
-	Binding      Binding
+	Binding Binding
 }
 
 var (

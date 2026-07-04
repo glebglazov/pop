@@ -250,15 +250,15 @@ func containsSpawnLine(lines []string, setID string) bool {
 	return false
 }
 
-// TestBuildRunViewUnverifiedBucket checks that a project with an UNVERIFIED set is
-// placed in view.Unverified rather than view.Blocked or view.IdleCount.
-func TestBuildRunViewUnverifiedBucket(t *testing.T) {
+// TestBuildRunViewAwaitingApprovalBucket checks that a project with an AWAITING-APPROVAL set is
+// placed in view.AwaitingApproval rather than view.Blocked or view.IdleCount.
+func TestBuildRunViewAwaitingApprovalBucket(t *testing.T) {
 	td := queueDataDeps(t)
 	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{
 		{
-			Project:         "pop",
-			Reason:          "awaiting verification",
-			UnverifiedSetID: "set-hitl",
+			Project:               "pop",
+			Reason:                "awaiting approval",
+			AwaitingApprovalSetID: "set-hitl",
 		},
 	}, &DaemonState{Version: 1})
 	if err != nil {
@@ -269,25 +269,25 @@ func TestBuildRunViewUnverifiedBucket(t *testing.T) {
 	view := BuildRunView(snap, time.Now())
 
 	if view.IdleCount != 0 {
-		t.Fatalf("IdleCount = %d, want 0 for unverified project", view.IdleCount)
+		t.Fatalf("IdleCount = %d, want 0 for awaiting-approval project", view.IdleCount)
 	}
 	if len(view.Blocked) != 0 {
-		t.Fatalf("Blocked = %v, want empty — unverified must not be in blocked bucket", view.Blocked)
+		t.Fatalf("Blocked = %v, want empty — awaiting-approval must not be in blocked bucket", view.Blocked)
 	}
-	if len(view.Unverified) != 1 {
-		t.Fatalf("Unverified = %v, want one item", view.Unverified)
+	if len(view.AwaitingApproval) != 1 {
+		t.Fatalf("AwaitingApproval = %v, want one item", view.AwaitingApproval)
 	}
-	if view.Unverified[0].Project != "pop" || view.Unverified[0].SetID != "set-hitl" {
-		t.Fatalf("Unverified[0] = %+v, want pop/set-hitl", view.Unverified[0])
+	if view.AwaitingApproval[0].Project != "pop" || view.AwaitingApproval[0].SetID != "set-hitl" {
+		t.Fatalf("AwaitingApproval[0] = %+v, want pop/set-hitl", view.AwaitingApproval[0])
 	}
 }
 
-// TestFormatRunSummaryUnverified checks the queue summary counts unverified in its own bucket.
-func TestFormatRunSummaryUnverified(t *testing.T) {
+// TestFormatRunSummaryAwaitingApproval checks the queue summary counts awaiting-approval in its own bucket.
+func TestFormatRunSummaryAwaitingApproval(t *testing.T) {
 	view := RunView{
-		Running:    []PickedUpSet{{Project: "a", SetID: "set-a"}},
-		Blocked:    []BlockedItem{{Project: "b", SetID: "set-b", Kind: "parked"}},
-		Unverified: []UnverifiedItem{{Project: "c", SetID: "set-c"}},
+		Running:          []PickedUpSet{{Project: "a", SetID: "set-a"}},
+		Blocked:          []BlockedItem{{Project: "b", SetID: "set-b", Kind: "parked"}},
+		AwaitingApproval: []AwaitingApprovalItem{{Project: "c", SetID: "set-c"}},
 	}
 
 	var out bytes.Buffer
@@ -297,7 +297,7 @@ func TestFormatRunSummaryUnverified(t *testing.T) {
 	for _, want := range []string{
 		"1 running",
 		"1 blocked",
-		"1 awaiting verification",
+		"1 awaiting approval",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("summary missing %q:\n%s", want, text)
@@ -305,12 +305,12 @@ func TestFormatRunSummaryUnverified(t *testing.T) {
 	}
 }
 
-// TestRenderRunBaselineUnverifiedSection checks the baseline renders a distinct
-// "Awaiting verification:" section for UNVERIFIED sets.
-func TestRenderRunBaselineUnverifiedSection(t *testing.T) {
+// TestRenderRunBaselineAwaitingApprovalSection checks the baseline renders a distinct
+// "Awaiting approval:" section for AWAITING-APPROVAL sets.
+func TestRenderRunBaselineAwaitingApprovalSection(t *testing.T) {
 	view := RunView{
-		Unverified: []UnverifiedItem{{Project: "pop", SetID: "hitl-set"}},
-		ScanErrors: map[string]string{},
+		AwaitingApproval: []AwaitingApprovalItem{{Project: "pop", SetID: "hitl-set"}},
+		ScanErrors:       map[string]string{},
 	}
 
 	var out bytes.Buffer
@@ -318,15 +318,14 @@ func TestRenderRunBaselineUnverifiedSection(t *testing.T) {
 	text := out.String()
 
 	for _, want := range []string{
-		"Awaiting verification:",
-		"pop: hitl-set — awaiting your check",
+		"Awaiting approval:",
+		"pop: hitl-set — awaiting your sign-off",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("baseline missing %q:\n%s", want, text)
 		}
 	}
 	if strings.Contains(text, "Blocked:\n  pop") {
-		t.Fatalf("unverified set must not appear under Blocked:\n%s", text)
+		t.Fatalf("awaiting-approval set must not appear under Blocked:\n%s", text)
 	}
 }
-

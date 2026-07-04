@@ -50,17 +50,17 @@ type RunTaskSetOptions struct {
 
 // RunTaskSetResult is the outcome of a run-tasks invocation.
 type RunTaskSetResult struct {
-	TaskSetID         string
-	Completed         []*RunTaskResult
-	Refresh           *RefreshResult
-	Declined          bool
-	TaskSetDone       bool
-	TaskSetDeferred   bool
-	TaskSetUnverified bool
-	SkippedTasks      []string
-	BlockedReason     string
-	QuotaPaused       bool
-	PauseReason       string
+	TaskSetID               string
+	Completed               []*RunTaskResult
+	Refresh                 *RefreshResult
+	Declined                bool
+	TaskSetDone             bool
+	TaskSetDeferred         bool
+	TaskSetAwaitingApproval bool
+	SkippedTasks            []string
+	BlockedReason           string
+	QuotaPaused             bool
+	PauseReason             string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
 	PausePreset      string
 	PauseResetAt     time.Time
@@ -195,7 +195,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 
 	// parkDrain releases the Runtime execution lock at a human-wait gate: it
 	// finishes the held Drain with the same clean terminal the --yes path records
-	// at that point (ADR-0056/0067) — the set's blocked/unverified/failed
+	// at that point (ADR-0056/0067) — the set's blocked/awaiting_approval/failed
 	// disposition stays manifest-derived — and drops the live lock so the gate
 	// menu, assist session, and runtime shell all run lock-free. A no-op when no
 	// Drain is held (already parked).
@@ -306,10 +306,10 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				result.SkippedTasks = SkippedTaskIDs(currentRefresh.Manifests[taskSetID])
 				finishRunTaskSet(out, opts.Yes, result)
 				return result, nil
-			case StatusBlocked, StatusUnverified:
+			case StatusBlocked, StatusAwaitingApproval:
 				result.BlockedReason = row.BlockedReason
-				if row.Status == StatusUnverified {
-					result.TaskSetUnverified = true
+				if row.Status == StatusAwaitingApproval {
+					result.TaskSetAwaitingApproval = true
 				}
 				if !opts.Yes {
 					fmt.Fprintln(out)
@@ -331,15 +331,15 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					if handled {
 						continue
 					}
-					if result.TaskSetUnverified {
+					if result.TaskSetAwaitingApproval {
 						printTerminalHITLAdvice(d, out, taskSetID, currentRefresh.Manifests[taskSetID].Dir, hitl)
 					} else {
 						printHITLGateAdvice(d, out, taskSetID, currentRefresh.Manifests[taskSetID].Dir, hitl)
 					}
 				}
 				if result.BlockedReason != "" {
-					if result.TaskSetUnverified {
-						return result, exitErr(ExitNoRunnable, "Task set %q agents done — verify: %s", taskSetID, result.BlockedReason)
+					if result.TaskSetAwaitingApproval {
+						return result, exitErr(ExitNoRunnable, "Task set %q agents done — awaiting approval: %s", taskSetID, result.BlockedReason)
 					}
 					return nil, exitErr(ExitNoRunnable, "Task set %q blocked: %s", taskSetID, result.BlockedReason)
 				}
@@ -466,7 +466,7 @@ func finishRunTaskSet(out io.Writer, yes bool, result *RunTaskSetResult) {
 
 func selectedTaskSetStartsAtHITLGate(refresh *RefreshResult, taskSetID string) bool {
 	row := findRow(refresh, taskSetID)
-	return row != nil && (row.Status == StatusBlocked || row.Status == StatusUnverified) && BlockingHITLTask(refresh.Manifests[taskSetID]) != nil
+	return row != nil && (row.Status == StatusBlocked || row.Status == StatusAwaitingApproval) && BlockingHITLTask(refresh.Manifests[taskSetID]) != nil
 }
 
 // selectedTaskSetStartsAtFailedGate reports whether draining re-enters an
@@ -512,8 +512,8 @@ func printTaskSetSummary(w io.Writer, result *RunTaskSetResult) {
 		out.line(ansiYellow, "%s", deferralMessage(result))
 		return
 	}
-	if result.TaskSetUnverified {
-		out.line(ansiCyan, "Agents done — verify: task set %s is ready for sign-off: %s", result.TaskSetID, result.BlockedReason)
+	if result.TaskSetAwaitingApproval {
+		out.line(ansiCyan, "Agents done — awaiting approval: task set %s is ready for sign-off: %s", result.TaskSetID, result.BlockedReason)
 		return
 	}
 	if result.BlockedReason != "" {

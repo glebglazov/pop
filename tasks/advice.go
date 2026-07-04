@@ -28,14 +28,14 @@ func printHITLGateAdvice(d *Deps, w io.Writer, stem, dir string, task *Task) {
 }
 
 // printTerminalHITLAdvice prints the recovery options when run-tasks stops at a
-// terminal HITL gate — all AFK work is done, only the final verification task
+// terminal HITL gate — all AFK work is done, only the final approval task
 // remains. Framing differs from printHITLGateAdvice: agents are finished, the
 // human's sign-off is all that stands between the set and Done.
 func printTerminalHITLAdvice(d *Deps, w io.Writer, stem, dir string, task *Task) {
 	out := outputFor(w)
 	hint := taskPathHint(stem, task.File)
 	fmt.Fprintln(out)
-	out.line(ansiCyan, "Agents done — verify: %s/%s is the final task. Options:", stem, task.ID)
+	out.line(ansiCyan, "Agents done — awaiting approval: %s/%s is the final task. Options:", stem, task.ID)
 	printHITLTaskBody(d, out, hint, filepath.Join(dir, task.File))
 	fmt.Fprintln(out, "  finish by hand:")
 	fmt.Fprintf(out, "                  %s\n", completeTaskHint(stem, task.File))

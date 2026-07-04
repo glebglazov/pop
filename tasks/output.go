@@ -72,7 +72,7 @@ func statusStyle(status TaskSetStatus) string {
 		return ansiRed
 	case StatusReady:
 		return ansiCyan
-	case StatusBlocked, StatusUnverified, StatusDeferred:
+	case StatusBlocked, StatusAwaitingApproval, StatusDeferred:
 		return ansiYellow
 	default:
 		return ansiDim

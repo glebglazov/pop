@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
 // DaemonState is persisted supervisor-owned state. It tracks pinned-agent quota

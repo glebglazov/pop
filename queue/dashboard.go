@@ -477,12 +477,12 @@ func dashboardSortTier(r DashboardRow) int {
 }
 
 // dashboardStatusRank orders statuses within a single project for the "the
-// rest" tier (Reading A): normal rows first, then UNVERIFIED, then DONE sink to
-// that project's bottom. The sink is per-project, not global — a project's own
-// terminal statuses cluster at that project's bottom.
+// rest" tier (Reading A): normal rows first, then AWAITING-APPROVAL, then DONE
+// sink to that project's bottom. The sink is per-project, not global — a
+// project's own terminal statuses cluster at that project's bottom.
 func dashboardStatusRank(s tasks.TaskSetStatus) int {
 	switch s {
-	case tasks.StatusUnverified:
+	case tasks.StatusAwaitingApproval:
 		return 1
 	case tasks.StatusDone:
 		return 2
@@ -493,8 +493,8 @@ func dashboardStatusRank(s tasks.TaskSetStatus) int {
 
 // sortDashboardRows applies the agreed total order: rows fall into membership
 // tiers (running, auto-drain, orphaned, the rest); within a tier they group by
-// project name ascending; within a project in "the rest" UNVERIFIED then DONE
-// sink to the bottom; and the global tiebreak is SetID descending.
+// project name ascending; within a project in "the rest" AWAITING-APPROVAL then
+// DONE sink to the bottom; and the global tiebreak is SetID descending.
 func sortDashboardRows(rows []DashboardRow) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		a, b := rows[i], rows[j]
