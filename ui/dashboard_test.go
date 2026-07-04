@@ -580,6 +580,15 @@ func TestDashboardHelpOverlay(t *testing.T) {
 		}
 	})
 
+	t.Run("second C-h dismisses help", func(t *testing.T) {
+		d.showHelp = true
+		m, _ := d.Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+		d = m.(*MonitorDashboard)
+		if d.showHelp {
+			t.Error("expected showHelp = false")
+		}
+	})
+
 	t.Run("esc dismisses help", func(t *testing.T) {
 		d.showHelp = true
 		m, _ := d.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -598,6 +607,61 @@ func TestDashboardHelpOverlay(t *testing.T) {
 		}
 		if !d.showHelp {
 			t.Error("expected showHelp still true")
+		}
+	})
+
+	t.Run("F1 does nothing", func(t *testing.T) {
+		d := newMonitorDashboard(panes, AttentionCallbacks{})
+		m, _ := d.Update(tea.KeyPressMsg{Code: tea.KeyF1})
+		d = m.(*MonitorDashboard)
+		if d.showHelp {
+			t.Error("F1 should not open help")
+		}
+		if d.result.Action != 0 {
+			t.Errorf("F1 should not trigger an action, got %v", d.result.Action)
+		}
+	})
+}
+
+func TestDashboardHelpContent(t *testing.T) {
+	panes := []AttentionPane{{PaneID: "%1", Session: "s1"}}
+
+	t.Run("normal mode lists monitor bindings", func(t *testing.T) {
+		d := newMonitorDashboard(panes, AttentionCallbacks{})
+		d.showHelp = true
+		view := d.View().Content
+		for _, want := range []string{"Peek", "Follow pane", "Toggle follow view", "Unmonitor pane", "Mark unread", "C-a", "C-h toggle", "Esc close"} {
+			if !containsSubstring(view, want) {
+				t.Errorf("help view missing %q", want)
+			}
+		}
+	})
+
+	t.Run("picker mode lists picker bindings", func(t *testing.T) {
+		d := newMonitorDashboard(panes, AttentionCallbacks{}, WithMonitorDashboardPickerMode("alt"))
+		d.showHelp = true
+		view := d.View().Content
+		for _, want := range []string{"Select", "A-1..9", "Quick select", "C-h toggle", "Esc close"} {
+			if !containsSubstring(view, want) {
+				t.Errorf("picker help view missing %q", want)
+			}
+		}
+		for _, omit := range []string{"Peek", "Unmonitor pane", "Follow pane", "Mark unread"} {
+			if containsSubstring(view, omit) {
+				t.Errorf("picker help view should not contain %q", omit)
+			}
+		}
+	})
+
+	t.Run("F1 not in help content or hints", func(t *testing.T) {
+		d := newMonitorDashboard(panes, AttentionCallbacks{})
+		d.showHelp = true
+		helpView := d.View().Content
+		hints := d.buildHints()
+		for _, src := range []string{helpView, hints} {
+			if containsSubstring(src, "F1") {
+				t.Errorf("F1 should not appear in %q", src)
+			}
 		}
 	})
 }

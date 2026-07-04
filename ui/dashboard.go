@@ -762,15 +762,34 @@ func (d *MonitorDashboard) View() tea.View {
 }
 
 func (d *MonitorDashboard) helpEntries() []HelpEntry {
+	if d.pickerMode {
+		entries := []HelpEntry{
+			{"↑/↓ C-p/C-n", "Navigate"},
+			{"Enter", "Select"},
+			{"F", "Toggle follow view"},
+			{"← / h", "Back / quit"},
+			{"Esc / C-c", "Cancel"},
+		}
+		switch d.quickAccessModifier {
+		case "alt":
+			entries = append(entries, HelpEntry{"A-1..9", "Quick select"})
+		case "ctrl":
+			entries = append(entries, HelpEntry{"C-1..9", "Quick select"})
+		}
+		return entries
+	}
+
 	return []HelpEntry{
 		{"↑/↓ C-p/C-n", "Navigate"},
 		{"Enter", "Open and clear unread"},
 		{"Shift+Enter / p", "Peek (open without clearing)"},
 		{"r", "Toggle unread/clear"},
+		{"C-a", "Mark unread"},
 		{"f", "Follow pane"},
 		{"F", "Toggle follow view"},
 		{"x", "Unmonitor pane"},
-		{"← / Esc", "Back / quit"},
+		{"← / h", "Back / quit"},
+		{"Esc / C-c", "Cancel"},
 	}
 }
 
