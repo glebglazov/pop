@@ -161,6 +161,58 @@ func TestRunTaskNonInteractiveRefusal(t *testing.T) {
 	assertExitCode(t, err, ExitOperational)
 }
 
+func TestRunTaskPiQuotaPause(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	quotaLine := "429 5-hour usage limit reached. Resets in 7min. Upgrade to continue."
+	writeFakePiAgent(t, env.root, quotaLine)
+	t.Setenv("PATH", filepath.Join(env.root, ".agent")+":"+os.Getenv("PATH"))
+
+	d := env.deps()
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "pi"
+	opts.MaxTries = 3
+	opts.Output = io.Discard
+
+	result, err := RunTaskWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !result.QuotaPaused {
+		t.Fatalf("expected quota pause, got %#v", result)
+	}
+	if result.PausePreset != "pi" {
+		t.Fatalf("pause preset = %q, want pi", result.PausePreset)
+	}
+	if result.PauseResetAt.IsZero() {
+		t.Fatal("expected non-zero PauseResetAt")
+	}
+	wantReset := time.Now().Add(7*time.Minute + opencodeGoQuotaAssuranceOffset)
+	if result.PauseResetAt.Before(wantReset.Add(-time.Minute)) || result.PauseResetAt.After(wantReset.Add(time.Minute)) {
+		t.Fatalf("PauseResetAt = %s, want near %s", result.PauseResetAt, wantReset)
+	}
+
+	assertTaskOpen(t, env, "01-a")
+
+	progressPath := filepath.Join(env.demoDir(), "progress.txt")
+	if _, statErr := os.Stat(progressPath); !os.IsNotExist(statErr) {
+		t.Fatalf("progress.txt should not exist on quota pause")
+	}
+
+	runs, err := listSetRuns(d, env.demoDir())
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected exactly one captured run, got %d", len(runs))
+	}
+	if runs[0].meta.Outcome != streamOutcomeQuotaPaused {
+		t.Fatalf("run outcome = %q, want quota_paused", runs[0].meta.Outcome)
+	}
+	if runs[0].meta.Attempt != 1 {
+		t.Fatalf("run attempt = %d, want 1", runs[0].meta.Attempt)
+	}
+}
+
 func TestRunTaskAgentFailureExitCode(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{exitCode: 1})
@@ -794,6 +846,25 @@ func writeFakeAgent(t *testing.T, root string, cfg fakeAgentConfig) string {
 	if cfg.exitCode != 0 {
 		fmt.Fprintf(&b, "exit %d\n", cfg.exitCode)
 	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// writeFakePiAgent installs a fake `pi` binary into root/.agent/pi so the pi
+// preset can be exercised through the real command runner. The binary prints
+// the given quota line and exits non-zero, matching the live failure mode.
+func writeFakePiAgent(t *testing.T, root, quotaLine string) string {
+	t.Helper()
+	path := filepath.Join(root, ".agent", "pi")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	fmt.Fprintf(&b, "printf '%%s\\n' %q\n", quotaLine)
+	b.WriteString("exit 1\n")
 	if err := os.WriteFile(path, []byte(b.String()), 0o755); err != nil {
 		t.Fatal(err)
 	}
