@@ -296,16 +296,20 @@ func createWorktree(ctx *project.RepoContext) error {
 		return fmt.Errorf("no branches found")
 	}
 
+	// ListBranches orders main/master first, but the picker anchors to the
+	// bottom with the cursor there (like the dashboards). Reverse into items so
+	// main/master land on the bottom row under the cursor — unified cursor
+	// position AND the sensible fork base stays the default.
 	items := make([]ui.Item, len(branches))
 	byRef := make(map[string]project.Branch, len(branches))
 	for i, b := range branches {
-		items[i] = ui.Item{Name: b.Ref, Path: b.Ref}
+		items[len(branches)-1-i] = ui.Item{Name: b.Ref, Path: b.Ref}
 		byRef[b.Ref] = b
 	}
 
 	result, err := ui.Run(items,
 		ui.WithHeader("Pick a branch for the new worktree"),
-		ui.WithInitialCursorIndex(0))
+		ui.WithCursorAtEnd())
 	if err != nil {
 		return err
 	}
