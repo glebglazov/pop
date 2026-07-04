@@ -870,7 +870,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 				continue
 			}
 			argv, stdin := recipe.build(modelPrompt, payload, step.Args)
-			debug.Log("pane set-topic --derive: recipe %q model prompt=%q", step.Command, modelPrompt)
+			debug.Log("pane set-topic --derive: pane %s recipe %q model prompt=%q", paneID, step.Command, modelPrompt)
 			stepTimeout := step.DerivationTimeout(recipeTimeout)
 			ctx, cancel := context.WithTimeout(context.Background(), stepTimeout)
 			out, runErr := run(ctx, argv, stdin)
@@ -879,7 +879,7 @@ func deriveTopicWith(r io.Reader, args []string, cfg *config.Config, label strin
 				debug.Error("pane set-topic --derive: recipe %q failed: %v", step.Command, runErr)
 				continue
 			}
-			debug.Log("pane set-topic --derive: recipe %q raw model output=%q", step.Command, out)
+			debug.Log("pane set-topic --derive: pane %s recipe %q raw model output=%q", paneID, step.Command, out)
 			if derived := slugifyTopic(capTopic(recipe.parse(out)), maxWords); derived != "" {
 				resultTopic, resultKind = derived, config.TopicKindFinal
 				gotResult = true

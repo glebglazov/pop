@@ -184,7 +184,7 @@ func runTopicAgentDerivationWith(parent context.Context, job topicDeriveJob, cfg
 			continue
 		}
 		argv, stdin := recipe.build(modelPrompt, payload, step.Args)
-		debug.Log("topic agent derive: recipe %q model prompt=%q", step.Command, modelPrompt)
+		debug.Log("topic agent derive: pane %s recipe %q model prompt=%q", job.PaneID, step.Command, modelPrompt)
 		stepTimeout := step.DerivationTimeout(recipeTimeout)
 		ctx, cancel := context.WithTimeout(parent, stepTimeout)
 		out, runErr := run(ctx, argv, stdin)
@@ -193,7 +193,7 @@ func runTopicAgentDerivationWith(parent context.Context, job topicDeriveJob, cfg
 			debug.Error("topic agent derive: recipe %q failed: %v", step.Command, runErr)
 			continue
 		}
-		debug.Log("topic agent derive: recipe %q raw model output=%q", step.Command, out)
+		debug.Log("topic agent derive: pane %s recipe %q raw model output=%q", job.PaneID, step.Command, out)
 		derived := slugifyTopic(capTopic(recipe.parse(out)), maxWords)
 		if derived == "" {
 			debug.Log("topic agent derive: recipe %q produced no usable topic", step.Command)

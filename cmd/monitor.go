@@ -104,9 +104,12 @@ func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandler {
 	topicDispatcher := newTopicDerivationDispatcher()
 	return func(req monitor.Request) monitor.Response {
-		debug.Init()
-		defer debug.Close()
-
+		// NB: no per-request debug.Init/Close here. Execute() already opened the
+		// logger for the daemon's whole lifetime; a per-request defer Close would
+		// nil the shared logger the instant this handler returns — silently
+		// dropping both the server's post-handler "resp" log and, worse, every
+		// line the async derive-topic dispatcher goroutine emits after it (the
+		// model prompt + raw output land seconds later, long after Close ran).
 		switch req.Cmd {
 		case "", "set-status":
 			return handleSetStatus(tmux, statePath, req)
