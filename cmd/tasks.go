@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -897,6 +898,42 @@ var taskStdinInteractive = func(stdin io.Reader) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
+// taskStdoutInteractive reports whether stdout is an interactive terminal. It is a
+// package variable so tests can simulate either case for pager logic.
+var taskStdoutInteractive = func() bool {
+	info, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+// taskOpenPager starts the user's pager (respecting $PAGER, defaulting to
+// less -F -R) and returns a WriteCloser connected to the pager's stdin, plus
+// a done function that closes the pipe and waits for the pager to finish.
+// It is a package variable so tests can mock the pager or bypass it.
+var taskOpenPager = func() (io.WriteCloser, func() error, error) {
+	pager := os.Getenv("PAGER")
+	if pager == "" {
+		pager = "less -F -R"
+	}
+	cmd := exec.Command("sh", "-c", pager)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	pw, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		pw.Close()
+		return nil, nil, err
+	}
+	return pw, func() error {
+		pw.Close()
+		return cmd.Wait()
+	}, nil
+}
+
 // selectionRowLabel renders one Multi-task selection row's display label,
 // shared across verbs.
 func selectionRowLabel(r tasks.SelectionRow) string {
@@ -1062,6 +1099,16 @@ func runTaskTimingsWith(d *tasks.Deps, w io.Writer, target string) error {
 }
 
 func runTaskStream(cmd *cobra.Command, args []string) {
+	if taskStdoutInteractive() {
+		pw, done, err := taskOpenPager()
+		if err == nil {
+			err = runTaskStreamWith(tasks.DefaultDeps(), pw, args[0])
+			_ = done() // pager exit is best-effort (e.g. `q` to quit is fine)
+			handleTaskExit(err)
+			return
+		}
+		// Pager startup failure is not fatal — fall through to direct output.
+	}
 	err := runTaskStreamWith(tasks.DefaultDeps(), os.Stdout, args[0])
 	handleTaskExit(err)
 }

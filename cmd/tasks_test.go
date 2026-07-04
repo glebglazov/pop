@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1641,6 +1643,9 @@ func resetTaskFlags() {
 	taskAllowDirty = tasks.DirtyRuntimeContinue
 	taskExportOutput = ""
 	taskImportAs = ""
+	taskStreamFull = false
+	taskStreamRaw = false
+	taskStreamLast = false
 }
 
 func setupRunTaskCmdFixture(t *testing.T) string {
@@ -1861,3 +1866,189 @@ func TestTaskExportImportRoundtripCmd(t *testing.T) {
 		t.Fatalf("imported set missing manifest: %v", err)
 	}
 }
+
+// writeStreamData writes a gzipped attempt stream file at dir/name with
+// the given header, events, and footer records.
+func writeStreamData(t *testing.T, dir, name string, agent string, attempt int, start time.Time, outcome string, durationMS int64) {
+	t.Helper()
+	var jsonl bytes.Buffer
+	enc := json.NewEncoder(&jsonl)
+	if err := enc.Encode(map[string]any{
+		"type": "header", "agent": agent, "attempt": attempt, "start_time": start.UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Encode(map[string]any{
+		"type": "event", "at_ms": int64(5), "raw": `{"type":"system","subtype":"init"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Encode(map[string]any{
+		"type": "event", "at_ms": int64(100), "raw": `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Encode(map[string]any{
+		"type": "footer", "outcome": outcome, "duration_ms": durationMS,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write(jsonl.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), gz.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setupStreamCmdFixture creates a git repo with one registered task set
+// ("demo") and writes one attempt stream for the task, returning the root.
+func setupStreamCmdFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "demo")
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write stream data for the single task.
+	streamDir := filepath.Join(tasksDir, "demo", "streams", "01-a")
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	writeStreamData(t, streamDir, "attempt-001.jsonl.gz", "claude", 1, base, "completed", 60_000)
+
+	return root
+}
+
+// TestTaskStreamNonTTYBypassesPager verifies that when stdout is not
+// interactive (piped/redirected), the stream output is written directly
+// to the provided writer without passing through a pager, for both the
+// rendered path and the --raw path.
+func TestTaskStreamNonTTYBypassesPager(t *testing.T) {
+	setupStreamCmdFixture(t)
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	// Rendered output through a buffer (pipded path) — pager must not intervene.
+	var buf bytes.Buffer
+	if err := runTaskStreamWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {
+		t.Fatalf("runTaskStreamWith: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "demo") {
+		t.Fatalf("expected rendered output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "claude") {
+		t.Fatalf("expected agent info in output:\n%s", out)
+	}
+	if !strings.Contains(out, "completed") {
+		t.Fatalf("expected outcome in output:\n%s", out)
+	}
+	if !strings.Contains(out, "hello") {
+		t.Fatalf("expected event text in output:\n%s", out)
+	}
+}
+
+func TestTaskStreamRawNonTTYBypassesPager(t *testing.T) {
+	setupStreamCmdFixture(t)
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	// --raw output through a buffer (pipded path) — pager must not intervene.
+	taskStreamRaw = true
+	var buf bytes.Buffer
+	if err := runTaskStreamWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {
+		t.Fatalf("runTaskStreamWith (--raw): %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"agent":"claude"`) {
+		t.Fatalf("expected raw JSONL with agent, got:\n%s", out)
+	}
+	if !strings.Contains(out, `"attempt":1`) {
+		t.Fatalf("expected raw JSONL with attempt, got:\n%s", out)
+	}
+}
+
+func TestTaskStreamTTYPipesThroughPager(t *testing.T) {
+	setupStreamCmdFixture(t)
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	origInteractive := taskStdoutInteractive
+	origPager := taskOpenPager
+	t.Cleanup(func() {
+		taskStdoutInteractive = origInteractive
+		taskOpenPager = origPager
+	})
+
+	taskStdoutInteractive = func() bool { return true }
+
+	// Mock pager that captures output into a buffer.
+	var pagerBuf bytes.Buffer
+	taskOpenPager = func() (io.WriteCloser, func() error, error) {
+		return &nopWriteCloser{&pagerBuf}, func() error { return nil }, nil
+	}
+
+	runTaskStream(taskStreamCmd, []string{"demo"})
+
+	if pagerBuf.Len() == 0 {
+		t.Fatal("expected output through pager, but pager buffer is empty")
+	}
+	if !strings.Contains(pagerBuf.String(), "hello") {
+		t.Fatalf("expected event text in pager output, got:\n%s", pagerBuf.String())
+	}
+}
+
+func TestTaskStreamRawTTYPipesThroughPager(t *testing.T) {
+	setupStreamCmdFixture(t)
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	origInteractive := taskStdoutInteractive
+	origPager := taskOpenPager
+	t.Cleanup(func() {
+		taskStdoutInteractive = origInteractive
+		taskOpenPager = origPager
+	})
+
+	taskStdoutInteractive = func() bool { return true }
+
+	var pagerBuf bytes.Buffer
+	taskOpenPager = func() (io.WriteCloser, func() error, error) {
+		return &nopWriteCloser{&pagerBuf}, func() error { return nil }, nil
+	}
+
+	taskStreamRaw = true
+	runTaskStream(taskStreamCmd, []string{"demo"})
+
+	if pagerBuf.Len() == 0 {
+		t.Fatal("expected --raw output through pager, but pager buffer is empty")
+	}
+	if !strings.Contains(pagerBuf.String(), `"agent":"claude"`) {
+		t.Fatalf("expected raw JSONL in pager output, got:\n%s", pagerBuf.String())
+	}
+}
+
+// nopWriteCloser wraps a byte buffer as an io.WriteCloser.
+type nopWriteCloser struct {
+	*bytes.Buffer
+}
+
+func (nopWriteCloser) Close() error { return nil }
