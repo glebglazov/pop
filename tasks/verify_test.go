@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -201,6 +202,71 @@ func TestVerifyResolvedSetIncludesWorkDiffInPrompt(t *testing.T) {
 	}
 	if !strings.Contains(gotPrompt, "DIFF-BODY-MARKER") || !strings.Contains(gotPrompt, "```diff") {
 		t.Fatalf("prompt missing work diff:\n%s", gotPrompt)
+	}
+}
+
+func TestVerifyResolvedSetIncludesPRDInPromptWhenPresent(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
+	prdPath := filepath.Join(defPath, "demo", "prd.md")
+	if err := os.WriteFile(prdPath, []byte("PRD-BODY-MARKER\n"), 0o644); err != nil {
+		t.Fatalf("write prd.md: %v", err)
+	}
+	var gotPrompt string
+	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output: &bytes.Buffer{},
+		runVerifier: func(prompt string) (string, error) {
+			gotPrompt = prompt
+			return "VERDICT: PASS\n", nil
+		},
+	}); err != nil {
+		t.Fatalf("verifyResolvedSet: %v", err)
+	}
+	if !strings.Contains(gotPrompt, "PRD-BODY-MARKER") {
+		t.Fatalf("prompt missing PRD content:\n%s", gotPrompt)
+	}
+	if !strings.Contains(gotPrompt, "acceptance criteria above remain authoritative") {
+		t.Fatalf("prompt missing PRD-is-context-only framing:\n%s", gotPrompt)
+	}
+}
+
+func TestVerifyResolvedSetOmitsPRDSectionWhenAbsent(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
+	var gotPrompt string
+	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output: &bytes.Buffer{},
+		runVerifier: func(prompt string) (string, error) {
+			gotPrompt = prompt
+			return "VERDICT: PASS\n", nil
+		},
+	}); err != nil {
+		t.Fatalf("verifyResolvedSet: %v", err)
+	}
+	if strings.Contains(gotPrompt, "## PRD") {
+		t.Fatalf("prompt should omit PRD section when prd.md is absent:\n%s", gotPrompt)
+	}
+}
+
+func TestReadPRDAbsentIsNotError(t *testing.T) {
+	root := t.TempDir()
+	m := &Manifest{Dir: root}
+	d := &Deps{FS: deps.NewRealFileSystem()}
+	if _, ok := readPRD(d, m); ok {
+		t.Fatal("readPRD: expected false for absent prd.md")
+	}
+}
+
+func TestReadPRDPresentReturnsContent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "prd.md"), []byte("  hello prd  \n"), 0o644); err != nil {
+		t.Fatalf("write prd.md: %v", err)
+	}
+	m := &Manifest{Dir: root}
+	d := &Deps{FS: deps.NewRealFileSystem()}
+	got, ok := readPRD(d, m)
+	if !ok || got != "hello prd" {
+		t.Fatalf("readPRD = %q, %v, want %q, true", got, ok, "hello prd")
 	}
 }
 

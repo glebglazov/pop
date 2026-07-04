@@ -414,10 +414,17 @@ func commitSubjectPrefix(taskSetID string) string {
 	return fmt.Sprintf("tasks(%s):", taskSetSlug(taskSetID))
 }
 
+// prdFileName is the optional co-located enrichment file a Verifier prompt
+// includes when present (see buildVerifierPrompt).
+const prdFileName = "prd.md"
+
 // buildVerifierPrompt assembles the Verifier's input: the authoritative
 // acceptance criteria and task bodies for every task in the set, plus the
 // accumulated work diff at the current SHA, and the exact response format the
-// parser expects.
+// parser expects. When the set folder has a co-located prd.md, its content is
+// folded in as optional context that sharpens judgment — it never replaces the
+// acceptance criteria as the authoritative contract, and its absence is not an
+// error.
 func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff string) string {
 	var b strings.Builder
 	b.WriteString("You are an independent Verifier. A separate agent has already implemented this Task set; ")
@@ -428,6 +435,12 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff string) string {
 	}
 	b.WriteString("\nThe checkboxes under each task's \"## Acceptance criteria\" heading are authoritative. ")
 	b.WriteString("Judge the whole set against them using the accumulated work diff below.\n\n")
+
+	if prd, ok := readPRD(d, m); ok {
+		b.WriteString("## PRD (context only — the acceptance criteria above remain authoritative)\n")
+		b.WriteString(prd)
+		b.WriteString("\n\n")
+	}
 
 	b.WriteString("## Tasks\n")
 	for _, task := range m.Tasks {
@@ -465,6 +478,22 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff string) string {
 	b.WriteString("FIXABLE = criteria are unmet but an agent could resolve the findings. ")
 	b.WriteString("NEEDS-HUMAN = the findings need a human decision.\n")
 	return b.String()
+}
+
+// readPRD returns the trimmed content of the set folder's co-located prd.md
+// and true when it exists and is non-blank. Any read failure (most commonly:
+// the file does not exist) is treated as "no PRD" rather than an error — a
+// missing prd.md must never fail verification.
+func readPRD(d *Deps, m *Manifest) (string, bool) {
+	body, err := d.FS.ReadFile(filepath.Join(m.Dir, prdFileName))
+	if err != nil {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return "", false
+	}
+	return trimmed, true
 }
 
 // printVerdict renders the verdict and findings to the operator.
