@@ -18,6 +18,14 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
+func mkdirDrainStoreDir(t *testing.T, td *tasks.Deps) {
+	t.Helper()
+	dir := filepath.Dir(tasks.DrainStorePathWith(td))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll drain store dir: %v", err)
+	}
+}
+
 func dashboardTestDeps(t *testing.T, rows []tasks.Row, locks map[string]*tasks.RuntimeLockStatus) *Deps {
 	t.Helper()
 	fs := &deps.MockFileSystem{
@@ -93,6 +101,67 @@ func staticForScan(scan projectScan, repBranch string, bare bool) dashboardRepoS
 		rep:           rep,
 		repBranch:     repBranch,
 		bare:          bare,
+	}
+}
+
+// TestDashboardRowsVerifyFailedStatus confirms the dashboard applies the same
+// SHA-gated Verify overlay as `pop tasks status`, not manifest status alone.
+func TestDashboardRowsVerifyFailedStatus(t *testing.T) {
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	doneManifest := &tasks.Manifest{
+		Valid: true,
+		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "done"}},
+	}
+	rows := []tasks.Row{{ID: "demo", Status: tasks.StatusDone}}
+	td := queueDataDeps(t)
+	d := dashboardTestDeps(t, rows, nil)
+	d.Tasks = td
+	d.Refresh = func(string) (*tasks.RefreshResult, error) {
+		return &tasks.RefreshResult{
+			Rows:      rows,
+			Manifests: map[string]*tasks.Manifest{"demo": doneManifest},
+		}, nil
+	}
+	d.Tasks.Git = &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+		switch {
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir":
+			return "/repo/.git", nil
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
+			return "shaCUR", nil
+		}
+		return "", nil
+	}}
+	mkdirDrainStoreDir(t, td)
+	s, err := store.Open(tasks.DrainStorePathWith(td))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := s.PutVerifyVerdict(store.VerifyVerdict{
+		Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaCUR", Verdict: "NEEDS-HUMAN", Findings: "criterion drift",
+	}); err != nil {
+		t.Fatalf("PutVerifyVerdict: %v", err)
+	}
+	_ = s.Close()
+
+	scan := projectScan{
+		Name:           "pop",
+		ProjectPath:    "/repo/main",
+		DefinitionPath: "/def",
+		RepoKey:        "repo-key",
+		RepoCommonDir:  "/repo/.git",
+	}
+	got, err := dashboardRowsForStatic(d, enabled, &DaemonState{Version: 1}, staticForScan(scan, "main", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows = %+v, want one", got)
+	}
+	if got[0].RawStatus != tasks.StatusVerifyFailed {
+		t.Fatalf("RawStatus = %q, want VERIFY-FAILED", got[0].RawStatus)
+	}
+	if got[0].Status != "VERIFY-FAILED" {
+		t.Fatalf("Status = %q, want VERIFY-FAILED", got[0].Status)
 	}
 }
 

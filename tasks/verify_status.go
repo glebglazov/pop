@@ -21,21 +21,30 @@ func verifyEnabled(cfg *config.Config) bool {
 // the active sets. It is a no-op when the feature is disabled — status then
 // derives from the manifest alone, exactly as before.
 //
-// The verdict lookup is keyed by the runtime checkout's current work SHA, so a
-// verdict recorded at an earlier SHA simply misses (stale → nil → NEEDS-VERIFY).
-// The pass is best-effort: an unresolvable repo or work SHA, or the absence of a
+// Every row shares one runtime checkout — the cwd checkout `pop tasks status`
+// resolves. Call ApplyVerifyVerdictsWith when each set may drain in its own
+// checkout (the queue dashboard, queue scan).
+//
+// The verdict lookup is keyed by each set's runtime checkout HEAD, so a verdict
+// recorded at an earlier SHA simply misses (stale → nil → NEEDS-VERIFY). The
+// pass is best-effort: an unresolvable repo or work SHA, or the absence of a
 // store, resolves every terminal set to NEEDS-VERIFY (a nil verdict) rather than
 // leaving it falsely Done — the gate never fails open.
 func ApplyVerifyVerdicts(d *Deps, result *RefreshResult, cfg *config.Config, runtimePath string) {
+	ApplyVerifyVerdictsWith(d, result, cfg, func(string) string { return runtimePath })
+}
+
+// ApplyVerifyVerdictsWith is ApplyVerifyVerdicts with a per-set runtime checkout
+// resolver. runtimeForSet returns the checkout whose HEAD gates Verify verdict
+// lookup for that set — typically its Worktree binding path when bound, else
+// the repo's representative checkout.
+func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config, runtimeForSet func(setID string) string) {
 	if result == nil || !verifyEnabled(cfg) {
 		return
 	}
-
-	repo := ""
-	if id, err := ResolveRepositoryIdentity(d, runtimePath); err == nil {
-		repo = id.CommonDir
+	if runtimeForSet == nil {
+		runtimeForSet = func(string) string { return "" }
 	}
-	workSHA := verifyWorkSHA(d, runtimePath)
 
 	var s *store.Store
 	if st, ok, err := openDrainStoreIfExists(d); err == nil && ok {
@@ -46,8 +55,16 @@ func ApplyVerifyVerdicts(d *Deps, result *RefreshResult, cfg *config.Config, run
 	changed := false
 	for i := range result.Rows {
 		row := &result.Rows[i]
+		runtimePath := runtimeForSet(row.ID)
+		repo := ""
+		if runtimePath != "" {
+			if id, err := ResolveRepositoryIdentity(d, runtimePath); err == nil {
+				repo = id.CommonDir
+			}
+		}
+		workSHA := verifyWorkSHA(d, runtimePath)
 		var verdict *store.VerifyVerdict
-		if s != nil && repo != "" {
+		if s != nil && repo != "" && workSHA != "" {
 			if v, err := s.GetVerifyVerdict(repo, row.ID, workSHA); err == nil {
 				verdict = v
 			}

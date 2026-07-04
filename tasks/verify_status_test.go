@@ -206,6 +206,27 @@ func TestApplyVerifyVerdictsEnabledGatesOnVerdict(t *testing.T) {
 	}
 }
 
+func TestApplyVerifyVerdictsWithPerSetRuntime(t *testing.T) {
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
+	putStatusVerdict(t, d, "/repo/.git", "bound", "shaCUR", "NEEDS-HUMAN", "bound set failed")
+
+	result := doneResult()
+	result.Rows[0].ID = "bound"
+	result.Manifests["bound"] = result.Manifests["demo"]
+	delete(result.Manifests, "demo")
+
+	ApplyVerifyVerdictsWith(d, result, enabled, func(setID string) string {
+		if setID == "bound" {
+			return "/wt/bound"
+		}
+		return "/trunk"
+	})
+	if got := rowStatus(result, "bound"); got != StatusVerifyFailed {
+		t.Fatalf("bound status = %q, want VERIFY-FAILED", got)
+	}
+}
+
 // TestApplyVerifyVerdictsLeavesNonTerminalRows guards the terminal-zone gate:
 // a missing row (no manifest) and a ready row must be untouched even with the
 // feature enabled, so re-derivation never corrupts a MISSING set into MALFORMED.

@@ -213,7 +213,7 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 	}
 	var rows []DashboardRow
 	for _, st := range statics {
-		groupRows, err := dashboardRowsFromStatic(d, snap, state, delays, now, st)
+		groupRows, err := dashboardRowsFromStatic(d, cfg, snap, state, delays, now, st)
 		if err != nil {
 			return DashboardSnapshot{}, err
 		}
@@ -482,7 +482,7 @@ func dashboardSortTier(r DashboardRow) int {
 // project's own terminal statuses cluster at that project's bottom.
 func dashboardStatusRank(s tasks.TaskSetStatus) int {
 	switch s {
-	case tasks.StatusAwaitingApproval:
+	case tasks.StatusAwaitingApproval, tasks.StatusNeedsVerify, tasks.StatusVerifyFailed:
 		return 1
 	case tasks.StatusDone:
 		return 2
@@ -529,18 +529,19 @@ func dashboardRowsForStatic(d *Deps, cfg *config.Config, state *DaemonState, st 
 	if err != nil {
 		return nil, err
 	}
-	return dashboardRowsFromStatic(d, snap, state, delays, d.now().UTC(), st)
+	return dashboardRowsFromStatic(d, cfg, snap, state, delays, d.now().UTC(), st)
 }
 
 // dashboardRowsFromStatic builds a repo group's rows from its static resolution
 // plus the current volatile state: task statuses (refresh), runtime locks, and
 // daemon-state columns. It forks no git — the static side is marker/config
 // derived (ADR-0060) and this overlay is cheap file/store reads.
-func dashboardRowsFromStatic(d *Deps, snap *dashboardSnapshot, state *DaemonState, delays []time.Duration, now time.Time, st dashboardRepoStatic) ([]DashboardRow, error) {
+func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapshot, state *DaemonState, delays []time.Duration, now time.Time, st dashboardRepoStatic) ([]DashboardRow, error) {
 	refresh, err := d.refresh(st.defPath)
 	if err != nil {
 		return nil, err
 	}
+	d.applyVerifyVerdicts(refresh, cfg, st.repoKey, staticProjectPath(st), snap.bindings)
 	intents := dashboardWorktreeIntents(d, st.defPath)
 	backoff := d.setBackoffLookup(st.repoCommonDir, delays, now)
 	var rows []DashboardRow
@@ -2028,6 +2029,16 @@ func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
 		if err != nil {
 			return dashboardDetailMsg{dashRow: row, err: err}
 		}
+		snap, _ := newDashboardSnapshot(d)
+		var bindings map[string]WorktreeBinding
+		if snap != nil {
+			bindings = snap.bindings
+		}
+		var cfg *config.Config
+		if d.LoadConfig != nil {
+			cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+		}
+		d.applyVerifyVerdicts(refresh, cfg, row.RepoKey, row.ProjectPath, bindings)
 		taskRow := tasks.FindRow(refresh, row.SetID)
 		manifest := refresh.Manifests[row.SetID]
 		return dashboardDetailMsg{dashRow: row, manifest: manifest, taskRow: taskRow}
