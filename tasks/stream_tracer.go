@@ -6,9 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -147,29 +144,17 @@ func StreamWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 
 // readTaskAttemptStreams reads every stored captured attempt stream for one
 // task, ordered by start time, returning both the timing summary and the full
-// event sequence for each attempt.
+// event sequence for each attempt. It merges the uuid-keyed Captured run
+// layout (ADR-0094) with legacy task-stem gzips.
 func readTaskAttemptStreams(d *Deps, taskSetDir, taskFile string) ([]AttemptStream, error) {
-	dir := taskStreamDir(taskSetDir, taskFile)
-	entries, err := d.FS.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
+	runs, err := listTaskRuns(d, taskSetDir, taskFile)
 	if err != nil {
 		return nil, err
 	}
-
-	var out []AttemptStream
-	for _, e := range entries {
-		if !attemptStreamNamePattern.MatchString(e.Name()) {
-			continue
-		}
-		at, err := loadAttemptStream(d, filepath.Join(dir, e.Name()))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", e.Name(), err)
-		}
-		out = append(out, at)
+	out := make([]AttemptStream, len(runs))
+	for i, run := range runs {
+		out[i] = attemptStreamFromRun(run)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Timing.Start.Before(out[j].Timing.Start) })
 	return out, nil
 }
 
@@ -413,67 +398,34 @@ func StreamRawWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 		if taskID != "" && task.ID != taskID {
 			continue
 		}
-		dir := taskStreamDir(m.Dir, task.File)
-		entries, err := d.FS.ReadDir(dir)
-		if os.IsNotExist(err) {
-			continue
-		}
+		runs, err := listTaskRuns(d, m.Dir, task.File)
 		if err != nil {
-			return exitErr(ExitOperational, "read stream dir for %s/%s: %v", taskSetID, task.ID, err)
+			return exitErr(ExitOperational, "list runs for %s/%s: %v", taskSetID, task.ID, err)
 		}
-
-		// Collect matching attempt files with their start time for chronological order.
-		type namedAttempt struct {
-			name  string
-			start time.Time
-		}
-		var attempts []namedAttempt
-		for _, e := range entries {
-			if !attemptStreamNamePattern.MatchString(e.Name()) {
-				continue
-			}
-			path := filepath.Join(dir, e.Name())
-			start, err := peekAttemptStart(d, path)
-			if err != nil {
-				return exitErr(ExitOperational, "peek start time for %s: %v", e.Name(), err)
-			}
-			attempts = append(attempts, namedAttempt{name: e.Name(), start: start})
-		}
-		if len(attempts) == 0 {
+		if len(runs) == 0 {
 			continue
 		}
-
-		sort.SliceStable(attempts, func(i, j int) bool { return attempts[i].start.Before(attempts[j].start) })
-
-		if opts.Last && len(attempts) > 0 {
-			attempts = attempts[len(attempts)-1:]
+		if opts.Last && len(runs) > 0 {
+			runs = runs[len(runs)-1:]
 		}
 
-		for _, na := range attempts {
-			path := filepath.Join(dir, na.name)
-			data, err := d.FS.ReadFile(path)
-			if err != nil {
-				return exitErr(ExitOperational, "read %s: %v", na.name, err)
-			}
-			zr, err := gzip.NewReader(bytes.NewReader(data))
-			if err != nil {
-				return exitErr(ExitOperational, "decompress %s: %v", na.name, err)
-			}
-			jsonl, err := io.ReadAll(zr)
-			_ = zr.Close()
-			if err != nil {
-				return exitErr(ExitOperational, "decompress %s: %v", na.name, err)
-			}
+		for _, run := range runs {
+			name := rawRunFileName(run)
 
 			// Write delimiter when this is not the first attempt file overall.
 			// For a single attempt (most common case) no delimiter is emitted,
 			// preserving pure JSONL for the simplest path.
 			if !first {
-				if err := enc.Encode(streamDelimiter{Type: "delimiter", File: na.name}); err != nil {
+				if err := enc.Encode(streamDelimiter{Type: "delimiter", File: name}); err != nil {
 					return fmt.Errorf("write delimiter: %w", err)
 				}
 			}
 			first = false
+
+			jsonl, err := rawRunJSONL(d, m.Dir, run)
+			if err != nil {
+				return exitErr(ExitOperational, "read %s: %v", name, err)
+			}
 
 			if _, err := w.Write(bytes.TrimSpace(jsonl)); err != nil {
 				return fmt.Errorf("write decompressed stream: %w", err)

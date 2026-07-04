@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -211,37 +210,34 @@ func TimingsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 }
 
 // readTaskAttemptTimings summarizes every stored Captured attempt stream for
-// one task, ordered by start time. History spans the task's whole lifetime:
-// every attempt-NNN file in the directory, regardless of which implement
-// invocation wrote it. A missing directory means no recorded attempts.
+// one task, ordered by start time. History spans the task's whole lifetime
+// across both the uuid-keyed Captured run layout (ADR-0094) and the legacy
+// task-stem gzips.
 func readTaskAttemptTimings(d *Deps, taskSetDir, taskFile string) ([]AttemptTiming, error) {
-	dir := taskStreamDir(taskSetDir, taskFile)
-	entries, err := d.FS.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
+	runs, err := listTaskRuns(d, taskSetDir, taskFile)
 	if err != nil {
 		return nil, err
 	}
-
-	var out []AttemptTiming
-	for _, e := range entries {
-		if !attemptStreamNamePattern.MatchString(e.Name()) {
-			continue
-		}
-		at, err := readAttemptTiming(d, filepath.Join(dir, e.Name()))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", e.Name(), err)
-		}
-		out = append(out, at)
+	out := make([]AttemptTiming, len(runs))
+	for i, run := range runs {
+		out[i] = attemptTimingFromRun(run)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Start.Before(out[j].Start) })
 	return out, nil
 }
 
 // readAttemptTiming reads one Captured attempt stream — gzip via the stdlib,
 // so no external decompressor is needed — and summarizes its header and footer.
+// The path may be either a legacy attempt-NNN.jsonl.gz file or a new-format
+// <uuid>.meta.json index file.
 func readAttemptTiming(d *Deps, path string) (AttemptTiming, error) {
+	if strings.HasSuffix(path, ".meta.json") {
+		run, err := loadCapturedRun(d, filepath.Dir(path), filepath.Base(path))
+		if err != nil {
+			return AttemptTiming{}, err
+		}
+		return attemptTimingFromRun(run), nil
+	}
+
 	data, err := d.FS.ReadFile(path)
 	if err != nil {
 		return AttemptTiming{}, err

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,123 @@ func decodeStreamRecords(t *testing.T, jsonl []byte) []map[string]any {
 		records = append(records, rec)
 	}
 	return records
+}
+
+// demoRunsDir returns the Captured runs directory for the demo task set's
+// first task (01-a.md).
+func demoRunsDir(env *execFixture) string {
+	return capturedRunsDir(env.demoDir())
+}
+
+// findRunFiles lists the captured run files in dir and returns the single
+// meta/events pair. It fails the test if the count is not exactly one pair.
+func findRunFiles(t *testing.T, dir string) (metaPath, eventsPath string) {
+	t.Helper()
+	pairs := listRunFilePairs(t, dir)
+	if len(pairs) != 1 {
+		t.Fatalf("want 1 meta + 1 events file, got %d pairs in %s", len(pairs), dir)
+	}
+	return pairs[0].meta, pairs[0].events
+}
+
+// runFilePair is one captured run's meta and events paths.
+type runFilePair struct {
+	meta   string
+	events string
+	metaData capturedRunMeta
+}
+
+// listRunFilePairs returns every captured run pair in dir, sorted by meta
+// start_time so attempt ordering is stable.
+func listRunFilePairs(t *testing.T, dir string) []runFilePair {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("read runs dir: %v", err)
+	}
+	byBase := map[string]*runFilePair{}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".meta.json") {
+			base := strings.TrimSuffix(e.Name(), ".meta.json")
+			if byBase[base] == nil {
+				byBase[base] = &runFilePair{}
+			}
+			byBase[base].meta = filepath.Join(dir, e.Name())
+			byBase[base].metaData = readCapturedRunMeta(t, byBase[base].meta)
+		} else if strings.HasSuffix(e.Name(), ".events.jsonl.gz") {
+			base := strings.TrimSuffix(e.Name(), ".events.jsonl.gz")
+			if byBase[base] == nil {
+				byBase[base] = &runFilePair{}
+			}
+			byBase[base].events = filepath.Join(dir, e.Name())
+		}
+	}
+	var pairs []runFilePair
+	for _, p := range byBase {
+		if p.meta == "" || p.events == "" {
+			t.Fatalf("incomplete run pair: meta=%q events=%q", p.meta, p.events)
+		}
+		pairs = append(pairs, *p)
+	}
+	sort.SliceStable(pairs, func(i, j int) bool {
+		return pairs[i].metaData.StartTime.Before(pairs[j].metaData.StartTime)
+	})
+	return pairs
+}
+
+// assertNoLegacyAttemptFiles ensures no attempt-NNN.jsonl.gz files exist under
+// the task's legacy task-stem stream directory.
+func assertNoLegacyAttemptFiles(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("read legacy stream dir: %v", err)
+	}
+	for _, e := range entries {
+		if attemptStreamNamePattern.MatchString(e.Name()) {
+			t.Fatalf("unexpected legacy attempt file: %s", filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+// readCapturedRunMeta reads and parses a captured run meta file.
+func readCapturedRunMeta(t *testing.T, path string) capturedRunMeta {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read meta %s: %v", path, err)
+	}
+	var meta capturedRunMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("parse meta %s: %v", path, err)
+	}
+	return meta
+}
+
+// readCapturedRunEvents decompresses and decodes a captured run events file.
+func readCapturedRunEvents(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open events %s: %v", path, err)
+	}
+	defer f.Close()
+	zr, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatalf("gzip open %s: %v", path, err)
+	}
+	defer zr.Close()
+	jsonl, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatalf("read events %s: %v", path, err)
+	}
+	return decodeStreamRecords(t, jsonl)
 }
 
 func TestStreamRecorderRecordFormat(t *testing.T) {
@@ -182,61 +300,156 @@ func realFSDeps() *Deps {
 	return &Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit()}
 }
 
-func TestWriteAttemptStreamNumberingIsMonotonic(t *testing.T) {
+func TestWriteCapturedRunCreatesMetaAndEventsPair(t *testing.T) {
 	d := realFSDeps()
-	dir := filepath.Join(t.TempDir(), "streams", "01-a")
+	taskSetDir := t.TempDir()
+	sel := &Selection{
+		TaskSetID: "demo",
+		TaskID:    "01-a",
+		TaskFile:  "01-a.md",
+		Manifest:  &Manifest{Dir: taskSetDir},
+	}
+	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	rec := newStreamRecorder(io.Discard, fakeClock(start, 100*time.Millisecond))
+	if _, err := rec.Write([]byte(`{"type":"system"}` + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	rec.finish()
 
-	first, err := writeAttemptStream(d, dir, []byte("{}\n"))
+	metaPath, eventsPath, err := writeCapturedRun(d, taskSetDir, sel, rec, "claude", "claude --model opus", 1, streamOutcomeCompleted, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(first) != "attempt-001.jsonl.gz" {
-		t.Fatalf("first = %s", first)
+	if !strings.HasSuffix(metaPath, ".meta.json") {
+		t.Fatalf("meta path = %s", metaPath)
+	}
+	if !strings.HasSuffix(eventsPath, ".events.jsonl.gz") {
+		t.Fatalf("events path = %s", eventsPath)
+	}
+	if filepath.Dir(metaPath) != filepath.Dir(eventsPath) {
+		t.Fatalf("meta and events not in same dir: %s vs %s", metaPath, eventsPath)
 	}
 
-	second, err := writeAttemptStream(d, dir, []byte("{}\n"))
+	meta := readCapturedRunMeta(t, metaPath)
+	if meta.RunID == "" {
+		t.Fatalf("meta missing run_id")
+	}
+	if meta.Phase != "implement" {
+		t.Fatalf("meta phase = %q, want implement", meta.Phase)
+	}
+	if meta.TaskSetID != "demo" || meta.TaskID != "01-a" || meta.TaskFile != "01-a.md" {
+		t.Fatalf("meta task identity = %+v", meta)
+	}
+	if meta.Agent != "claude" || meta.RequestedAgent != "claude --model opus" {
+		t.Fatalf("meta agent = %+v", meta)
+	}
+	if meta.Attempt != 1 {
+		t.Fatalf("meta attempt = %d, want 1", meta.Attempt)
+	}
+	if meta.Outcome != streamOutcomeCompleted {
+		t.Fatalf("meta outcome = %q", meta.Outcome)
+	}
+	if !meta.StartTime.Equal(rec.start.UTC()) {
+		t.Fatalf("meta start_time = %v, want %v", meta.StartTime, rec.start.UTC())
+	}
+	if meta.EndTime.Before(meta.StartTime) {
+		t.Fatalf("meta end_time %v before start_time %v", meta.EndTime, meta.StartTime)
+	}
+
+	events := readCapturedRunEvents(t, eventsPath)
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if events[0]["type"] != "event" || events[0]["raw"] != `{"type":"system"}` {
+		t.Fatalf("event = %v", events[0])
+	}
+
+	// Two runs for the same task get distinct uuids.
+	metaPath2, eventsPath2, err := writeCapturedRun(d, taskSetDir, sel, rec, "claude", "claude --model opus", 2, streamOutcomeFailed, "missing sentinel", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(second) != "attempt-002.jsonl.gz" {
-		t.Fatalf("second = %s", second)
+	if metaPath == metaPath2 || eventsPath == eventsPath2 {
+		t.Fatalf("second run reused paths")
 	}
-
-	// Numbering continues past the highest persisted attempt, never reuses gaps.
-	if err := os.Remove(first); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "attempt-007.jsonl.gz"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	third, err := writeAttemptStream(d, dir, []byte("{}\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if filepath.Base(third) != "attempt-008.jsonl.gz" {
-		t.Fatalf("third = %s", third)
+	meta2 := readCapturedRunMeta(t, metaPath2)
+	if meta2.Attempt != 2 || meta2.Outcome != streamOutcomeFailed || meta2.Reason != "missing sentinel" || meta2.ExitCode != 1 {
+		t.Fatalf("meta2 = %+v", meta2)
 	}
 }
 
-func TestWriteAttemptStreamBumpsNumberOnCollision(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "attempt-001.jsonl.gz"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// A stale directory listing simulates the cross-worktree race: the scan
-	// misses attempt-001, so the exclusive open must collide and bump.
-	real := deps.NewRealFileSystem()
-	d := &Deps{FS: &deps.MockFileSystem{
-		MkdirAllFunc: real.MkdirAll,
-		ReadDirFunc:  func(string) ([]os.DirEntry, error) { return nil, nil },
-	}}
+func TestListTaskRunsMergesNewAndLegacyLayouts(t *testing.T) {
+	d := realFSDeps()
+	taskSetDir := t.TempDir()
 
-	path, err := writeAttemptStream(d, dir, []byte("{}\n"))
+	writeNewRun := func(taskFile string, attempt int, start time.Time, outcome string) {
+		t.Helper()
+		stem := strings.TrimSuffix(taskFile, filepath.Ext(taskFile))
+		sel := &Selection{
+			TaskSetID: "demo",
+			TaskID:    stem,
+			TaskFile:  taskFile,
+			Manifest:  &Manifest{Dir: taskSetDir},
+		}
+		rec := newStreamRecorder(io.Discard, func() time.Time { return start })
+		if _, err := rec.Write([]byte(`{"type":"system"}` + "\n")); err != nil {
+			t.Fatal(err)
+		}
+		rec.finish()
+		if _, _, err := writeCapturedRun(d, taskSetDir, sel, rec, "claude", "claude", attempt, outcome, "", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	// New-format run for 01-a at base + 5 minutes.
+	writeNewRun("01-a.md", 1, base.Add(5*time.Minute), streamOutcomeCompleted)
+
+	// Legacy run for 01-a at base (earlier than the new-format run).
+	legacyDir := taskStreamDir(taskSetDir, "01-a.md")
+	writeTimingStreamWithEvents(t, legacyDir, "attempt-001.jsonl.gz", "claude", "", 1, base, "failed", 30_000, []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
+	})
+
+	// Legacy run for 02-b should not appear when filtering 01-a.
+	writeTimingStream(t, taskStreamDir(taskSetDir, "02-b.md"), "attempt-001.jsonl.gz", "claude", 1, base.Add(10*time.Minute), "completed", 60_000)
+
+	runs, err := listTaskRuns(d, taskSetDir, "01-a.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(path) != "attempt-002.jsonl.gz" {
-		t.Fatalf("path = %s, want collision bump to attempt-002", path)
+	if len(runs) != 2 {
+		t.Fatalf("want 2 runs for 01-a, got %d", len(runs))
+	}
+
+	// Ordered by start time: legacy first, then new-format.
+	if !runs[0].meta.StartTime.Equal(base) {
+		t.Fatalf("run[0] start = %v, want %v", runs[0].meta.StartTime, base)
+	}
+	if !runs[1].meta.StartTime.Equal(base.Add(5*time.Minute)) {
+		t.Fatalf("run[1] start = %v", runs[1].meta.StartTime)
+	}
+
+	// Legacy run synthesized meta carries the task file and implement phase.
+	legacy := runs[0].meta
+	if legacy.Phase != "implement" {
+		t.Fatalf("legacy phase = %q, want implement", legacy.Phase)
+	}
+	if legacy.TaskFile != "01-a.md" {
+		t.Fatalf("legacy task_file = %q, want 01-a.md", legacy.TaskFile)
+	}
+	if !strings.HasPrefix(legacy.RunID, "legacy:01-a:attempt-") {
+		t.Fatalf("legacy run_id = %q", legacy.RunID)
+	}
+	if legacy.Outcome != "failed" {
+		t.Fatalf("legacy outcome = %q, want failed", legacy.Outcome)
+	}
+
+	// New-format run meta fields.
+	newRun := runs[1].meta
+	if newRun.Phase != "implement" || newRun.TaskFile != "01-a.md" || newRun.Outcome != streamOutcomeCompleted {
+		t.Fatalf("new run meta = %+v", newRun)
 	}
 }
 
@@ -273,28 +486,6 @@ func installClaudeStreamAgent(t *testing.T, root string, tick bool) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func readAttemptStream(t *testing.T, path string) []map[string]any {
-	t.Helper()
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	zr, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatalf("gzip open %s: %v", path, err)
-	}
-	defer zr.Close()
-	jsonl, err := io.ReadAll(zr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return decodeStreamRecords(t, jsonl)
-}
-
-func demoStreamDir(env *execFixture) string {
-	return filepath.Join(env.demoDir(), "streams", "01-a")
-}
 
 func TestRunTaskStructuredAttemptWritesStream(t *testing.T) {
 	env := setupExecutorFixture(t, false)
@@ -307,15 +498,35 @@ func TestRunTaskStructuredAttemptWritesStream(t *testing.T) {
 	}
 	assertTaskDone(t, env, "01-a")
 
-	records := readAttemptStream(t, filepath.Join(demoStreamDir(env), "attempt-001.jsonl.gz"))
-	header := records[0]
-	if header["type"] != "header" || header["agent"] != "claude" || header["attempt"] != float64(1) {
-		t.Fatalf("header = %v", header)
+	metaPath, eventsPath := findRunFiles(t, demoRunsDir(env))
+	meta := readCapturedRunMeta(t, metaPath)
+	if meta.Phase != "implement" {
+		t.Fatalf("meta phase = %q, want implement", meta.Phase)
 	}
+	if meta.TaskSetID != "demo" || meta.TaskID != "01-a" || meta.TaskFile != "01-a.md" {
+		t.Fatalf("meta task identity = %+v", meta)
+	}
+	if meta.Agent != "claude" {
+		t.Fatalf("meta agent = %q", meta.Agent)
+	}
+	if meta.RequestedAgent == "" {
+		t.Fatalf("meta requested_agent empty")
+	}
+	if meta.Attempt != 1 {
+		t.Fatalf("meta attempt = %d, want 1", meta.Attempt)
+	}
+	if meta.Outcome != "completed" {
+		t.Fatalf("meta outcome = %q", meta.Outcome)
+	}
+	if meta.StartTime.IsZero() || meta.EndTime.IsZero() || meta.EndTime.Before(meta.StartTime) {
+		t.Fatalf("meta times invalid: %v -> %v", meta.StartTime, meta.EndTime)
+	}
+
+	events := readCapturedRunEvents(t, eventsPath)
 	var raws []string
-	for _, rec := range records[1 : len(records)-1] {
+	for _, rec := range events {
 		if rec["type"] != "event" {
-			t.Fatalf("middle record not event: %v", rec)
+			t.Fatalf("record not event: %v", rec)
 		}
 		if _, ok := rec["at_ms"].(float64); !ok {
 			t.Fatalf("event missing at_ms: %v", rec)
@@ -327,13 +538,6 @@ func TestRunTaskStructuredAttemptWritesStream(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("events missing %q:\n%s", want, joined)
 		}
-	}
-	footer := records[len(records)-1]
-	if footer["type"] != "footer" || footer["outcome"] != "completed" {
-		t.Fatalf("footer = %v", footer)
-	}
-	if _, ok := footer["duration_ms"].(float64); !ok {
-		t.Fatalf("footer missing duration_ms: %v", footer)
 	}
 }
 
@@ -347,14 +551,32 @@ func TestRunTaskFailedAttemptsWriteOneStreamEach(t *testing.T) {
 	_, err := RunTaskWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
 
-	for i, name := range []string{"attempt-001.jsonl.gz", "attempt-002.jsonl.gz"} {
-		records := readAttemptStream(t, filepath.Join(demoStreamDir(env), name))
-		if got := records[0]["attempt"]; got != float64(i+1) {
-			t.Fatalf("%s header attempt = %v, want %d", name, got, i+1)
+	pairs := listRunFilePairs(t, demoRunsDir(env))
+	if len(pairs) != 2 {
+		t.Fatalf("want 2 captured run pairs, got %d", len(pairs))
+	}
+	assertNoLegacyAttemptFiles(t, taskStreamDir(env.demoDir(), "01-a.md"))
+
+	for i, p := range pairs {
+		meta := readCapturedRunMeta(t, p.meta)
+		if meta.Attempt != i+1 {
+			t.Fatalf("pair[%d] attempt = %d, want %d", i, meta.Attempt, i+1)
 		}
-		footer := records[len(records)-1]
-		if footer["outcome"] != "failed" {
-			t.Fatalf("%s footer = %v", name, footer)
+		if meta.Outcome != "failed" {
+			t.Fatalf("pair[%d] outcome = %q, want failed", i, meta.Outcome)
+		}
+		if meta.Phase != "implement" {
+			t.Fatalf("pair[%d] phase = %q, want implement", i, meta.Phase)
+		}
+		if meta.TaskFile != "01-a.md" {
+			t.Fatalf("pair[%d] task_file = %q", i, meta.TaskFile)
+		}
+		// Events payload carries only raw event lines, no inline header/footer.
+		events := readCapturedRunEvents(t, p.events)
+		for _, rec := range events {
+			if rec["type"] != "event" {
+				t.Fatalf("events contain non-event record: %v", rec)
+			}
 		}
 	}
 }
@@ -433,22 +655,31 @@ func installClaudeHangingAgent(t *testing.T, root string, trapTerm bool) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// assertKilledStreamFinalized decompresses the attempt's stream end-to-end
-// (gzip.NewReader + ReadAll validates the gzip trailer, so a truncated file
-// fails here) and checks the footer carries the kill outcome.
+// assertKilledStreamFinalized checks that a killed single-attempt run wrote
+// exactly one new-format captured run pair whose meta carries the kill outcome
+// and whose events payload is a valid gzip.
 func assertKilledStreamFinalized(t *testing.T, env *execFixture, outcome string) {
 	t.Helper()
-	records := readAttemptStream(t, filepath.Join(demoStreamDir(env), "attempt-001.jsonl.gz"))
-	header := records[0]
-	if header["type"] != "header" || header["agent"] != "claude" {
-		t.Fatalf("header = %v", header)
+	metaPath, eventsPath := findRunFiles(t, demoRunsDir(env))
+	meta := readCapturedRunMeta(t, metaPath)
+	if meta.Agent != "claude" {
+		t.Fatalf("meta agent = %q, want claude", meta.Agent)
 	}
-	footer := records[len(records)-1]
-	if footer["type"] != "footer" || footer["outcome"] != outcome {
-		t.Fatalf("footer = %v, want outcome %q", footer, outcome)
+	if meta.Outcome != outcome {
+		t.Fatalf("meta outcome = %q, want %q", meta.Outcome, outcome)
 	}
-	if _, ok := footer["duration_ms"].(float64); !ok {
-		t.Fatalf("footer missing duration_ms: %v", footer)
+	if meta.Phase != "implement" {
+		t.Fatalf("meta phase = %q, want implement", meta.Phase)
+	}
+	assertNoLegacyAttemptFiles(t, taskStreamDir(env.demoDir(), "01-a.md"))
+
+	// Decompressing the events file validates the gzip trailer; a truncated
+	// file would fail here.
+	events := readCapturedRunEvents(t, eventsPath)
+	for _, rec := range events {
+		if rec["type"] != "event" {
+			t.Fatalf("events contain non-event record: %v", rec)
+		}
 	}
 }
 

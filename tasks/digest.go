@@ -74,49 +74,38 @@ func isContractReason(reason string) bool {
 
 // buildPriorAttemptDigest derives the prompt section that carries this task's
 // own prior-attempt story into a retry (ADR 0040). It reads the task's Captured
-// attempt stream files, scopes them to attempts since the latest Open-task
-// reset (a human reopens precisely because the prior line of attack was
-// abandoned), and renders a failure-type lesson plus a short approach narrative
-// per attempt. Returns "" when there is nothing to carry — the caller injects
-// it only on attempt > 1, and the agent never sees a raw stream file (ADR 0020).
+// runs (ADR-0094) and legacy attempt stream files, scopes them to attempts
+// since the latest Open-task reset (a human reopens precisely because the
+// prior line of attack was abandoned), and renders a failure-type lesson plus
+// a short approach narrative per attempt. Returns "" when there is nothing to
+// carry — the caller injects it only on attempt > 1, and the agent never sees
+// a raw stream file (ADR 0020).
 func buildPriorAttemptDigest(d *Deps, taskSetDir, taskFile string) string {
-	dir := taskStreamDir(taskSetDir, taskFile)
-	entries, err := d.FS.ReadDir(dir)
+	runs, err := listTaskRuns(d, taskSetDir, taskFile)
 	if err != nil {
 		return ""
 	}
 	cut := latestResetTime(d, taskSetDir, taskFile)
 
 	var attempts []priorAttempt
-	for _, e := range entries {
-		if !attemptStreamNamePattern.MatchString(e.Name()) {
-			continue
-		}
-		data, err := d.FS.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			continue
-		}
-		header, events, footer, err := parseAttemptStream(data)
-		if err != nil {
-			continue
-		}
+	for _, run := range runs {
 		// Drop attempts from the abandoned line of attack: a human reopen marks
 		// everything up to its RESET timestamp stale.
-		if !cut.IsZero() && !header.StartTime.After(cut) {
+		if !cut.IsZero() && !run.meta.StartTime.After(cut) {
 			continue
 		}
 		// Captured attempts from failed, timed-out, interrupted, and quota-
 		// paused runs all feed a retry. Completed attempts are intentionally
 		// excluded: they have no lesson to teach (ADR 0040/ADR 0089).
-		if footer.Outcome != streamOutcomeFailed && footer.Outcome != streamOutcomeTimedOut &&
-			footer.Outcome != streamOutcomeInterrupted && footer.Outcome != streamOutcomeQuotaPaused {
+		if run.meta.Outcome != streamOutcomeFailed && run.meta.Outcome != streamOutcomeTimedOut &&
+			run.meta.Outcome != streamOutcomeInterrupted && run.meta.Outcome != streamOutcomeQuotaPaused {
 			continue
 		}
 		attempts = append(attempts, priorAttempt{
-			Attempt:   header.Attempt,
-			Lesson:    attemptLesson(footer.Outcome, footer.Reason, footer.ExitCode),
-			Narrative: attemptNarrative(header.Agent, events),
-			sortKey:   header.StartTime,
+			Attempt:   run.meta.Attempt,
+			Lesson:    attemptLesson(run.meta.Outcome, run.meta.Reason, run.meta.ExitCode),
+			Narrative: attemptNarrative(run.meta.Agent, run.events),
+			sortKey:   run.meta.StartTime,
 		})
 	}
 	if len(attempts) == 0 {
