@@ -222,6 +222,37 @@ type VerifyConfig struct {
 	MaxRemediationDepth *int `toml:"max_remediation_depth" desc:"Max verify→remediate cycles before parking at VERIFY-FAILED (default 3)."`
 }
 
+// WorkloadConfig is the deprecated [workload] table, the predecessor of
+// [tasks] (ADR-0092). Old configs using [workload] still load and behave
+// identically to their [tasks.*] equivalent; a load-time deprecation warning
+// names the replacement. The structural mapping is:
+//
+//	[workload] default_agents  → [tasks.implement].agents
+//	[workload.verify]          → [tasks.verify]
+//	[workload.git]             → [tasks.git]
+//	[workload.agents.<name>]   → [tasks.presets.<name>]
+type WorkloadConfig struct {
+	DefaultAgents []string                               `toml:"default_agents" desc:"Deprecated: use [tasks.implement].agents."`
+	Verify        *WorkloadVerifyConfig                  `toml:"verify" desc:"Deprecated: use [tasks.verify]."`
+	Git           *TaskGitConfig                         `toml:"git" desc:"Deprecated: use [tasks.git]."`
+	Agents        map[string]WorkloadAgentConfig         `toml:"agents" desc:"Deprecated: use [tasks.presets]."`
+}
+
+// WorkloadVerifyConfig is the deprecated [workload.verify] table. Fields match
+// the old shape; MaxRetries is the pre-rename name for MaxRemediationDepth.
+type WorkloadVerifyConfig struct {
+	Enabled    bool     `toml:"enabled" desc:"Deprecated: use [tasks.verify].enabled."`
+	Agents     []string `toml:"agents" desc:"Deprecated: use [tasks.verify].agents."`
+	Effort     string   `toml:"effort" desc:"Deprecated: use [tasks.verify].effort."`
+	MaxRetries int      `toml:"max_retries" desc:"Deprecated: use [tasks.verify].max_remediation_depth."`
+}
+
+// WorkloadAgentConfig is the deprecated [workload.agents.<name>] table,
+// renamed to [tasks.presets.<name>] in ADR-0092.
+type WorkloadAgentConfig struct {
+	Output string `toml:"output" desc:"Deprecated: use [tasks.presets.<name>].output."`
+}
+
 // TaskAgentConfig holds configuration for one task agent preset.
 type TaskAgentConfig struct {
 	Output string `toml:"output" desc:"Output mode for this agent preset."`
@@ -522,6 +553,10 @@ type Config struct {
 	PaneMonitoring *PaneMonitoringConfig `toml:"pane_monitoring" desc:"Pane attention/status monitoring daemon settings ([pane_monitoring] table)."`
 	Dashboard      *DashboardConfig      `toml:"dashboard" desc:"Shared dashboard and cursor behavior ([dashboard] table)."`
 	Task   *TasksConfig            `toml:"tasks" desc:"Task-set execution defaults ([tasks] table)."`
+	// Deprecated: use Task. The [workload] table was renamed to [tasks] in
+	// ADR-0092. Old configs still load and warn; the alias is structural
+	// (not 1:1). Removal is gated in CLEANUP.md.
+	Workload *WorkloadConfig `toml:"workload" desc:"Deprecated: use [tasks] (ADR-0092)."`
 	Effort map[string]EffortConfig `toml:"effort" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
 	// Workbenches is the canonical TOML key for session blueprints.
 	Workbenches []Workbench `toml:"workbenches" desc:"Global session blueprints (templates)."`
@@ -1357,6 +1392,11 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	if err := applyConfigLayerMerge(d, &cfg, path, md); err != nil {
 		return nil, err
 	}
+	// Migrate deprecated [workload] → [tasks] (ADR-0092). This runs after
+	// layer merge so it sees the merged workload/tasks state.
+	for _, f := range workloadMigrationFindings(&cfg, path) {
+		cfg.recordFinding(f)
+	}
 	for _, f := range effortConfigFindings(path, md) {
 		cfg.recordFinding(f)
 	}
@@ -1444,6 +1484,10 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 			cfg.recordFinding(f)
 		}
 		for _, f := range repoBlockWarnings(expanded, includedMD) {
+			cfg.recordFinding(f)
+		}
+		// Migrate deprecated [workload] → [tasks] in included file (ADR-0092)
+		for _, f := range workloadMigrationFindings(&included, expanded) {
 			cfg.recordFinding(f)
 		}
 		cfg.Warnings = append(cfg.Warnings, includeFileWarnings(expanded, &included, d)...)
@@ -1694,6 +1738,167 @@ func validateRepoConfigMetadata(path string, md toml.MetaData) error {
 	return nil
 }
 
+// workloadMigrationFindings detects the deprecated [workload] table and
+// migrates its fields into the canonical [tasks] structure (ADR-0092). When
+// both are present, [tasks] wins per-key; [workload] fills gaps and emits a
+// deprecation warning naming the replacement. The mapping is structural:
+//
+//	[workload] default_agents  → [tasks.implement].agents
+//	[workload.verify]          → [tasks.verify]
+//	[workload.git]             → [tasks.git]
+//	[workload.agents.<name>]   → [tasks.presets.<name>]
+//
+// Returns findings for each aliased key present; the caller records them.
+func workloadMigrationFindings(cfg *Config, path string) []Finding {
+	if cfg.Workload == nil {
+		return nil
+	}
+
+	// Emit deprecation warnings for the deprecated [workload] table and each
+	// aliased sub-key present. Each warning names the [tasks.*] replacement.
+	var findings []Finding
+	findings = append(findings, Finding{
+		Path:    "deprecated.workload",
+		Message: fmt.Sprintf("%s: [workload] is deprecated; rename to [tasks]", path),
+	})
+	if len(cfg.Workload.DefaultAgents) > 0 {
+		findings = append(findings, Finding{
+			Path:    "deprecated.workload.default_agents",
+			Message: fmt.Sprintf("%s: [workload] default_agents is deprecated; rename to [tasks.implement].agents", path),
+		})
+	}
+	if cfg.Workload.Verify != nil {
+		findings = append(findings, Finding{
+			Path:    "deprecated.workload.verify",
+			Message: fmt.Sprintf("%s: [workload.verify] is deprecated; rename to [tasks.verify]", path),
+		})
+	}
+	if cfg.Workload.Git != nil {
+		findings = append(findings, Finding{
+			Path:    "deprecated.workload.git",
+			Message: fmt.Sprintf("%s: [workload.git] is deprecated; rename to [tasks.git]", path),
+		})
+	}
+	if len(cfg.Workload.Agents) > 0 {
+		findings = append(findings, Finding{
+			Path:    "deprecated.workload.agents",
+			Message: fmt.Sprintf("%s: [workload.agents] is deprecated; rename to [tasks.presets]", path),
+		})
+	}
+
+	// Migrate [workload] → [tasks], honoring per-key precedence: [tasks] wins
+	// when both set the same field; [workload] fills gaps.
+	if cfg.Task == nil {
+		cfg.Task = &TasksConfig{}
+	}
+
+	// [workload] default_agents → [tasks.implement].agents
+	if len(cfg.Workload.DefaultAgents) > 0 {
+		if cfg.Task.Implement == nil {
+			cfg.Task.Implement = &ImplementConfig{
+				Agents: append([]string(nil), cfg.Workload.DefaultAgents...),
+			}
+		} else if len(cfg.Task.Implement.Agents) == 0 {
+			cfg.Task.Implement.Agents = append([]string(nil), cfg.Workload.DefaultAgents...)
+		}
+		// else: [tasks.implement].agents already set, [tasks] wins
+	}
+
+	// [workload.verify] → [tasks.verify]
+	if cfg.Workload.Verify != nil {
+		if cfg.Task.Verify == nil {
+			cfg.Task.Verify = cloneWorkloadVerifyAsVerify(cfg.Workload.Verify)
+		} else {
+			// Merge per-field: [tasks.verify] wins when set
+			wv := cfg.Workload.Verify
+			tv := cfg.Task.Verify
+			if !tv.Enabled && wv.Enabled {
+				tv.Enabled = true
+			}
+			if len(tv.Agents) == 0 && len(wv.Agents) > 0 {
+				tv.Agents = append([]string(nil), wv.Agents...)
+			}
+			if tv.Effort == "" && wv.Effort != "" {
+				tv.Effort = wv.Effort
+			}
+			if tv.MaxRemediationDepth == nil && wv.MaxRetries > 0 {
+				v := wv.MaxRetries
+				tv.MaxRemediationDepth = &v
+			}
+		}
+	}
+
+	// [workload.git] → [tasks.git]
+	if cfg.Workload.Git != nil {
+		if cfg.Task.Git == nil {
+			cfg.Task.Git = cloneTaskGitConfig(cfg.Workload.Git)
+		} else if len(cfg.Task.Git.CommitConfigOverrides) == 0 &&
+			len(cfg.Workload.Git.CommitConfigOverrides) > 0 {
+			cfg.Task.Git.CommitConfigOverrides = append([]string(nil), cfg.Workload.Git.CommitConfigOverrides...)
+		}
+	}
+
+	// [workload.agents.<name>] → [tasks.presets.<name>]
+	if len(cfg.Workload.Agents) > 0 {
+		if cfg.Task.Presets == nil {
+			cfg.Task.Presets = make(map[string]TaskAgentConfig, len(cfg.Workload.Agents))
+		}
+		for name, wac := range cfg.Workload.Agents {
+			if _, exists := cfg.Task.Presets[name]; !exists {
+				cfg.Task.Presets[name] = TaskAgentConfig{Output: wac.Output}
+			}
+		}
+	}
+
+	return findings
+}
+
+// cloneWorkloadVerifyAsVerify converts a deprecated WorkloadVerifyConfig into
+// the canonical VerifyConfig, mapping MaxRetries → MaxRemediationDepth.
+func cloneWorkloadVerifyAsVerify(src *WorkloadVerifyConfig) *VerifyConfig {
+	if src == nil {
+		return nil
+	}
+	dst := &VerifyConfig{
+		Enabled: src.Enabled,
+		Agents:  append([]string(nil), src.Agents...),
+		Effort:  src.Effort,
+	}
+	if src.MaxRetries > 0 {
+		v := src.MaxRetries
+		dst.MaxRemediationDepth = &v
+	}
+	return dst
+}
+
+// cloneWorkloadConfig deep-copies a WorkloadConfig for layer merge.
+func cloneWorkloadConfig(src *WorkloadConfig) *WorkloadConfig {
+	if src == nil {
+		return nil
+	}
+	dst := &WorkloadConfig{
+		DefaultAgents: append([]string(nil), src.DefaultAgents...),
+	}
+	if src.Verify != nil {
+		dst.Verify = &WorkloadVerifyConfig{
+			Enabled:    src.Verify.Enabled,
+			Agents:     append([]string(nil), src.Verify.Agents...),
+			Effort:     src.Verify.Effort,
+			MaxRetries: src.Verify.MaxRetries,
+		}
+	}
+	if src.Git != nil {
+		dst.Git = cloneTaskGitConfig(src.Git)
+	}
+	if len(src.Agents) > 0 {
+		dst.Agents = make(map[string]WorkloadAgentConfig, len(src.Agents))
+		for name, wac := range src.Agents {
+			dst.Agents[name] = wac
+		}
+	}
+	return dst
+}
+
 // queueAgentsWarnings returns a load-time finding when a config file still
 // sets the deleted [queue].agents key. Agent selection is owned by
 // [workload] default_agents; the old key is ignored (fail-soft).
@@ -1828,6 +2033,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 		"workbenches": true,
 		"repo":        true,
 		"tasks":       true,
+		"workload":    true, // deprecated alias for tasks (ADR-0092)
 		"effort":      true,
 		"includes":    true, // mentioned in includes, so we track it for warning above
 	}
@@ -1842,6 +2048,14 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 				path, key,
 			))
 		}
+	}
+
+	// Emit deprecation warning if deprecated [workload] key is present
+	if _, hasWorkload := rawInclude["workload"]; hasWorkload {
+		warnings = append(warnings, fmt.Sprintf(
+			"%s: [workload] is deprecated; rename to [tasks]",
+			path,
+		))
 	}
 
 	return warnings

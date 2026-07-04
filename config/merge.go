@@ -145,6 +145,9 @@ func mergeConfigOverlay(dst, src *Config, md toml.MetaData) {
 	if md.IsDefined("tasks") {
 		dst.Task = cloneTaskConfig(src.Task)
 	}
+	if md.IsDefined("workload") {
+		dst.Workload = cloneWorkloadConfig(src.Workload)
+	}
 	if md.IsDefined("effort") {
 		dst.Effort = cloneEffortMap(src.Effort)
 	}
