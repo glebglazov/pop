@@ -4,7 +4,9 @@ status: accepted
 
 # Agent verification is a pre-approval drain phase that produces remediation tasks
 
-Once a Drain exhausts a Task set's open AFK work, an independent **Verifier** agent judges the whole set — acceptance criteria (authoritative), task bodies, the accumulated diff, and the optional `prd.md` (enrichment; PRD-less sets verify fully) — before any human is asked to approve. This makes "all AFK done" derive **NEEDS-VERIFY**, not immediately Done: a set reaches Done (pure-AFK) or AWAITING-APPROVAL (has a terminal HITL task) only with a **PASS** verdict at the current work SHA. Verification is **on by default** for any set with AFK work (`[tasks.verify].enabled`, opt out per set with `"verify": false`).
+Once a Drain exhausts a Task set's open AFK work, an independent **Verifier** agent judges the whole set — acceptance criteria (authoritative), task bodies, the accumulated diff, and the optional `prd.md` (enrichment; PRD-less sets verify fully) — before any human is asked to approve. When enabled, this makes "all AFK done" derive **NEEDS-VERIFY**, not immediately Done: a set reaches Done (pure-AFK) or AWAITING-APPROVAL (has a terminal HITL task) only with a **PASS** verdict at the current work SHA.
+
+The feature is **gated by user config and off by default**: verification runs only when `[tasks.verify].enabled = true` (explicit opt-in). Unconfigured, the Verifier never runs, status derivation never gates Done on a verdict, and Pop behaves exactly as before this feature. When enabled, a set may narrow that with `"verify": false` (per-set opt-out only — user config is the master gate, so there is no per-set opt-*in* while the feature is globally off).
 
 The verdict is three-way. **PASS** advances the set. **FIXABLE** makes the Verifier a *task producer*: it writes a new AFK **Remediation task** (markdown + atomic `index.json` entry) whose body is the findings, which Drain then picks up normally; the verify→remediate→re-verify loop is bounded by a per-set **remediation depth cap** (`max_remediation_depth`), after which the set parks. **NEEDS-HUMAN** (or an exhausted cap) parks the set at VERIFY-FAILED with the findings.
 
@@ -21,6 +23,7 @@ Verifier selection reuses the implement machinery: an ordered fallback list (`[t
 - **Verify per task on completion.** Rejected as the primary model: a single task's slice is too narrow for whole-feature/integration judgment. Whole-set verification, cached by SHA, is the gate.
 - **Reuse the implementing agent (fresh context) as the verifier.** Rejected as the default: the same model family shares blind spots and may bless its own mistakes. Independence is the point; a distinct fallback list is cheap.
 - **Unbounded remediation.** Rejected: a verifier that never fully passes would drain agent quota forever with no human off-ramp. Hence the depth cap → park.
+- **On by default (opt-out).** Rejected: the feature is new and spends agent quota. Gating it behind an explicit `[tasks.verify].enabled` opt-in avoids changing the behaviour of every existing set unannounced and lets the gate prove out before it could ever become a default.
 
 ## Consequences
 
