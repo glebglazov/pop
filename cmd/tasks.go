@@ -42,6 +42,7 @@ var (
 	taskBindWorktreeForce     bool
 	taskUnbindWorktreeYes     bool
 	taskStreamFull            bool
+	taskStreamRaw             bool
 )
 
 var taskCmd = &cobra.Command{
@@ -212,6 +213,7 @@ func init() {
 	taskCmd.AddCommand(taskTimingsCmd)
 	taskCmd.AddCommand(taskStreamCmd)
 	taskStreamCmd.Flags().BoolVar(&taskStreamFull, "full", false, "Print all tool payloads verbatim without truncation")
+	taskStreamCmd.Flags().BoolVar(&taskStreamRaw, "raw", false, "Decompress and write raw JSONL without rendering (ignores --full)")
 	taskCmd.AddCommand(taskShowPathCmd)
 	taskCmd.AddCommand(taskTransferCmd)
 	taskTransferCmd.AddCommand(taskExportCmd)
@@ -1063,6 +1065,12 @@ func runTaskStream(cmd *cobra.Command, args []string) {
 }
 
 func runTaskStreamWith(d *tasks.Deps, w io.Writer, target string) error {
+	if taskStreamRaw {
+		return tasks.StreamRawWith(d, taskProjectDeps(), taskConfigLoad, tasks.StreamOptions{
+			ResolveInput: taskResolveInput(),
+			Target:       target,
+		}, w)
+	}
 	result, err := tasks.StreamWith(d, taskProjectDeps(), taskConfigLoad, tasks.StreamOptions{
 		ResolveInput: taskResolveInput(),
 		Target:       target,

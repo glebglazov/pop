@@ -29,6 +29,14 @@ type RenderStreamOptions struct {
 	Full bool
 }
 
+// streamDelimiter is written as a JSON line before each attempt file in raw
+// concatenated output so downstream parsers can identify attempt boundaries.
+// It is a valid JSONL line with a unique "delimiter" type.
+type streamDelimiter struct {
+	Type string `json:"type"`
+	File string `json:"file"`
+}
+
 // streamTruncationLimits defines the default head/tail truncation thresholds
 // for large tool payloads in the rendered replay.
 var streamTruncationLimits = struct {
@@ -386,6 +394,142 @@ func renderClaudeEvent(ev streamEventRecord) []StreamEvent {
 	}
 
 	return out
+}
+
+// StreamRawWith resolves the target, finds every stored captured attempt stream,
+// decompresses each gzip file via the stdlib, and writes the JSONL verbatim to
+// w in the same chronological / manifest order the rendered view uses. For
+// multi-attempt or bare-set targets, a lightweight JSON delimiter record is
+// inserted before each attempt file so boundaries stay parseable.
+func StreamRawWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts StreamOptions, w io.Writer) error {
+	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
+	if err != nil {
+		return exitErr(ExitSetup, "%v", err)
+	}
+
+	refresh, err := RefreshWith(d, resolved.DefinitionPath, StatePathFor(resolved.DefinitionPath))
+	if err != nil {
+		return exitErr(ExitSetup, "%v", err)
+	}
+
+	taskSetID, taskID, err := ResolveTaskTarget(refresh, opts.Target)
+	if err != nil {
+		return err
+	}
+	if taskSetID == "" {
+		return exitErr(ExitSetup, "stream requires a task set or <task-set>/<file>.md target")
+	}
+
+	m := refresh.Manifests[taskSetID]
+	if m == nil {
+		return exitErr(ExitNoRunnable, "task set %q has no task manifest", taskSetID)
+	}
+	if !m.Valid {
+		return exitErr(ExitNoRunnable, "task set %q is malformed", taskSetID)
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	first := true
+
+	for _, task := range m.Tasks {
+		if taskID != "" && task.ID != taskID {
+			continue
+		}
+		dir := taskStreamDir(m.Dir, task.File)
+		entries, err := d.FS.ReadDir(dir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return exitErr(ExitOperational, "read stream dir for %s/%s: %v", taskSetID, task.ID, err)
+		}
+
+		// Collect matching attempt files with their start time for chronological order.
+		type namedAttempt struct {
+			name  string
+			start time.Time
+		}
+		var attempts []namedAttempt
+		for _, e := range entries {
+			if !attemptStreamNamePattern.MatchString(e.Name()) {
+				continue
+			}
+			path := filepath.Join(dir, e.Name())
+			start, err := peekAttemptStart(d, path)
+			if err != nil {
+				return exitErr(ExitOperational, "peek start time for %s: %v", e.Name(), err)
+			}
+			attempts = append(attempts, namedAttempt{name: e.Name(), start: start})
+		}
+		if len(attempts) == 0 {
+			continue
+		}
+
+		sort.SliceStable(attempts, func(i, j int) bool { return attempts[i].start.Before(attempts[j].start) })
+
+		for _, na := range attempts {
+			path := filepath.Join(dir, na.name)
+			data, err := d.FS.ReadFile(path)
+			if err != nil {
+				return exitErr(ExitOperational, "read %s: %v", na.name, err)
+			}
+			zr, err := gzip.NewReader(bytes.NewReader(data))
+			if err != nil {
+				return exitErr(ExitOperational, "decompress %s: %v", na.name, err)
+			}
+			jsonl, err := io.ReadAll(zr)
+			_ = zr.Close()
+			if err != nil {
+				return exitErr(ExitOperational, "decompress %s: %v", na.name, err)
+			}
+
+			// Write delimiter when this is not the first attempt file overall.
+			// For a single attempt (most common case) no delimiter is emitted,
+			// preserving pure JSONL for the simplest path.
+			if !first {
+				if err := enc.Encode(streamDelimiter{Type: "delimiter", File: na.name}); err != nil {
+					return fmt.Errorf("write delimiter: %w", err)
+				}
+			}
+			first = false
+
+			if _, err := w.Write(bytes.TrimSpace(jsonl)); err != nil {
+				return fmt.Errorf("write decompressed stream: %w", err)
+			}
+			if _, err := w.Write([]byte("\n")); err != nil {
+				return fmt.Errorf("write newline: %w", err)
+			}
+		}
+	}
+
+	if first {
+		fmt.Fprintf(w, "no captured attempt streams for %s\n", taskSetID)
+	}
+	return nil
+}
+
+// peekAttemptStart reads the header record from a gzipped attempt stream to
+// extract the start time without fully decompressing the file.
+func peekAttemptStart(d *Deps, path string) (time.Time, error) {
+	data, err := d.FS.ReadFile(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer zr.Close()
+	dec := json.NewDecoder(zr)
+	var header streamHeaderRecord
+	if err := dec.Decode(&header); err != nil {
+		return time.Time{}, err
+	}
+	if header.Type != "header" {
+		return time.Time{}, fmt.Errorf("first record is not a header")
+	}
+	return header.StartTime, nil
 }
 
 // RenderStream writes the attempt stream replay: per task, attempts ordered by

@@ -2,7 +2,11 @@ package tasks
 
 import (
 	"bytes"
+	"compress/gzip"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -514,6 +518,238 @@ func TestRenderStreamTruncatesLargeToolUseArgs(t *testing.T) {
 	}
 	if !strings.Contains(fullOut, "arg line 25") {
 		t.Fatalf("--full should contain middle lines:\n%s", fullOut)
+	}
+}
+
+func TestStreamRawSingleTaskSingleAttemptRoundTrip(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	// Write one gzipped attempt stream for the first task.
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "claude", "claude --model opus4.8", 1, base, "completed", 60_000, []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
+		{Type: "event", AtMS: 100, Raw: `{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}`},
+	})
+
+	// Read the raw gzip file to compare against.
+	rawPath := filepath.Join(streamDir, "attempt-001.jsonl.gz")
+	rawGz, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(rawGz))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantJSONL, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = zr.Close()
+	wantJSONL = bytes.TrimSpace(wantJSONL) // StreamRawWith trims trailing whitespace
+
+	var buf bytes.Buffer
+	err = StreamRawWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := strings.TrimSpace(buf.String())
+	if got != string(wantJSONL) {
+		t.Fatalf("raw output mismatch:\ngot:\n%s\n\nwant:\n%s", got, string(wantJSONL))
+	}
+}
+
+func TestStreamRawMultiAttemptDelimiter(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	// Write two attempts with different start times.
+	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "claude", "", 1, base, "failed", 45_000, []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
+	})
+	writeTimingStreamWithEvents(t, streamDir, "attempt-002.jsonl.gz", "claude", "", 2, base.Add(10*time.Minute), "completed", 30_000, []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init"}`},
+	})
+
+	var buf bytes.Buffer
+	err := StreamRawWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	// Should contain both attempt files' JSONL content.
+	if !strings.Contains(out, `"attempt":1`) {
+		t.Fatalf("output missing attempt 1 header:\n%s", out)
+	}
+	if !strings.Contains(out, `"attempt":2`) {
+		t.Fatalf("output missing attempt 2 header:\n%s", out)
+	}
+
+	// Should contain delimiter between the two attempts.
+	if !strings.Contains(out, `{"type":"delimiter","file":"attempt-002.jsonl.gz"}`) {
+		t.Fatalf("output missing delimiter:\n%s", out)
+	}
+
+	// Verify the delimiter appears after attempt 1 and before attempt 2.
+	attempt1Pos := strings.Index(out, `"attempt":1`)
+	delimPos := strings.Index(out, `"type":"delimiter"`)
+	attempt2Pos := strings.Index(out, `"attempt":2`)
+	if delimPos < attempt1Pos {
+		t.Fatalf("delimiter before attempt 1")
+	}
+	if attempt2Pos < delimPos {
+		t.Fatalf("attempt 2 before delimiter")
+	}
+}
+
+func TestStreamRawWholeSetMultipleTasks(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	// Write attempt for task 01-a.
+	dirA := taskStreamDir(env.demoDir(), "01-a.md")
+	writeTimingStream(t, dirA, "attempt-001.jsonl.gz", "claude", 1, base, "completed", 60_000)
+
+	// Write attempt for task 02-b.
+	dirB := taskStreamDir(env.demoDir(), "02-b.md")
+	writeTimingStream(t, dirB, "attempt-001.jsonl.gz", "claude", 1, base.Add(5*time.Minute), "failed", 30_000)
+
+	var buf bytes.Buffer
+	err := StreamRawWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo",
+	}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	// Both tasks should appear.
+	if !strings.Contains(out, `"attempt":1`) {
+		t.Fatalf("output missing attempt data:\n%s", out)
+	}
+
+	// Count delimiters: one between the two tasks' attempts.
+	delimCount := strings.Count(out, `"type":"delimiter"`)
+	if delimCount != 1 {
+		t.Fatalf("expected 1 delimiter between tasks, got %d:\n%s", delimCount, out)
+	}
+}
+
+func TestStreamRawEmptyNoCapturedStreams(t *testing.T) {
+	env := streamFixture(t)
+
+	var buf bytes.Buffer
+	err := StreamRawWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo",
+	}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "no captured attempt streams for demo") {
+		t.Fatalf("expected 'no captured attempt streams' message, got:\n%s", out)
+	}
+}
+
+func TestStreamRawRoundTripStoredGzip(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
+	writeTimingStream(t, streamDir, "attempt-001.jsonl.gz", "claude", 1, base, "completed", 60_000)
+
+	// Read the stored gzip and decompress to get the original JSONL.
+	rawPath := filepath.Join(streamDir, "attempt-001.jsonl.gz")
+	rawGz, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(rawGz))
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalJSONL, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = zr.Close()
+
+	// StreamRawWith should emit exactly the same decompressed bytes.
+	var buf bytes.Buffer
+	err = StreamRawWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := strings.TrimSpace(buf.String())
+	want := strings.TrimSpace(string(originalJSONL))
+	if got != want {
+		t.Fatalf("raw bytes round-trip mismatch:\ngot:  %q\nwant: %q", got, want)
+	}
+
+	// Re-compress the raw output and verify it decompresses back to the same bytes,
+	// confirming the gzip round-trip is lossless.
+	var reGz bytes.Buffer
+	zw := gzip.NewWriter(&reGz)
+	if _, err := zw.Write([]byte(buf.String())); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	zr2, err := gzip.NewReader(&reGz)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reRead, err := io.ReadAll(zr2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = zr2.Close()
+
+	if string(reRead) != buf.String() {
+		t.Fatalf("re-compress/re-decompress round-trip mismatch:\ngot:  %q\nwant: %q", string(reRead), buf.String())
+	}
+}
+
+func TestStreamRawRejectsInvalidTargets(t *testing.T) {
+	env := streamFixture(t)
+
+	tests := []struct {
+		name   string
+		target string
+		code   int
+	}{
+		{"unknown set", "missing", ExitNoRunnable},
+		{"unknown task file", "demo/99-z.md", ExitNoRunnable},
+		{"bare filename", "01-a.md", ExitSetup},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := StreamRawWith(env.deps(), nil, nil, StreamOptions{
+				ResolveInput: ResolveInput{CWD: env.root},
+				Target:       tc.target,
+			}, &buf)
+			assertExitCode(t, err, tc.code)
+		})
 	}
 }
 
