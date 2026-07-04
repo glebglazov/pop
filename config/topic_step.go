@@ -31,15 +31,15 @@ const (
 
 // TopicStep is one typed entry in [pane_monitoring] topic_agents.
 type TopicStep struct {
-	Type    TopicStepType `toml:"type"`
-	Command string        `toml:"command"`
-	SetIf   TopicSetIf    `toml:"set_if"`
+	Type    TopicStepType `toml:"type" desc:"Step kind (truncate|agent)."`
+	Command string        `toml:"command" desc:"Agent-CLI command for an agent step (claude, ollama, cmd:...)."`
+	SetIf   TopicSetIf    `toml:"set_if" desc:"Guard checked against @pop_topic_kind before running this step."`
 	// Args are appended to the curated argv for agent steps (claude, ollama,
 	// cmd:). They are ignored by truncate steps.
-	Args []string `toml:"args"`
+	Args []string `toml:"args" desc:"Extra argv appended to the curated agent command (array; agent steps only)."`
 	// Timeout is an optional per-step timeout in seconds. When zero, the step
 	// falls back to the global topic_derivation_timeout.
-	Timeout int `toml:"timeout"`
+	Timeout int `toml:"timeout" desc:"Per-step timeout in seconds (0 = fall back to topic_derivation_timeout)."`
 }
 
 // TopicSteps is the ordered topic_agents list. A bare string entry is sugar for

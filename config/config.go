@@ -39,25 +39,25 @@ var defaultDeps = DefaultDeps()
 
 // UserDefinedCommand defines a custom keybinding for a picker
 type UserDefinedCommand struct {
-	Key     string `toml:"key"`     // Key binding (e.g., "ctrl-l")
-	Label   string `toml:"label"`   // Display label for hints
-	Command string `toml:"command"` // Shell command to execute
-	Exit    bool   `toml:"exit"`    // Whether to exit picker after execution
+	Key     string `toml:"key" desc:"Key binding that triggers this command (e.g. \"ctrl-l\")."`
+	Label   string `toml:"label" desc:"Display label shown in the picker hint bar."`
+	Command string `toml:"command" desc:"Shell command to execute."`
+	Exit    bool   `toml:"exit" desc:"Exit the picker after running the command."`
 }
 
 // PaneMonitoringConfig holds pane monitoring configuration
 type PaneMonitoringConfig struct {
-	DismissUnreadInActivePane bool `toml:"dismiss_unread_in_active_pane"`
+	DismissUnreadInActivePane bool `toml:"dismiss_unread_in_active_pane" desc:"Auto-clear unread status when its pane is the active one."`
 	// Deprecated: use DismissUnreadInActivePane. The old key is read for
 	// backwards compat; a warning is emitted when it is present.
-	DismissAttentionInActivePane bool     `toml:"dismiss_attention_in_active_pane"`
-	IgnoreStatusFrom             []string `toml:"ignore_status_from"`
-	TCPServer                    bool     `toml:"tcp_server"`
+	DismissAttentionInActivePane bool     `toml:"dismiss_attention_in_active_pane" desc:"Deprecated: use dismiss_unread_in_active_pane."`
+	IgnoreStatusFrom             []string `toml:"ignore_status_from" desc:"Status sources to ignore (array of source names)."`
+	TCPServer                    bool     `toml:"tcp_server" desc:"Bind a TCP listener for daemon IPC instead of direct state writes."`
 	// Addr pins the monitor daemon's TCP address (host:port). Empty means the
 	// address is derived from the data dir (ADR 0021). A pinned addr is shared
 	// across any data dirs using this config, so only pin it for single-instance
 	// setups (e.g. exposing a fixed port to containers).
-	Addr string `toml:"addr"`
+	Addr string `toml:"addr" desc:"Pin the monitor daemon's TCP address (host:port); empty derives it from the data dir."`
 	// TopicAgents is the ordered list of typed Topic derivation steps (ADR 0068).
 	// Each entry is a truncate step (local prompt truncation → seed) or an agent
 	// step (a curated agent-CLI Topic recipe → final). A bare string is sugar for
@@ -65,17 +65,17 @@ type PaneMonitoringConfig struct {
 	// checked against @pop_topic_kind. Unset/nil defaults to a single truncate
 	// step; an explicit empty array disables derivation. pop links no model SDK
 	// and holds no keys — auth lives in the CLIs.
-	TopicAgents TopicSteps `toml:"topic_agents"`
+	TopicAgents TopicSteps `toml:"topic_agents" desc:"Ordered Topic-derivation steps (truncate/agent recipes)."`
 	// TopicWords bounds the word count of a derived Topic after it is normalized
 	// into a kebab slug (ADR 0057). Zero/unset means the default
 	// (DefaultTopicWords); see PaneMonitoringTopicWords.
-	TopicWords int `toml:"topic_words"`
+	TopicWords int `toml:"topic_words" desc:"Max words in a derived Topic slug (0 = default)."`
 	// TopicDerivationTimeout bounds, in seconds, how long each topic_agents recipe
 	// may run before pop kills it and falls through to the next recipe (then to
 	// prompt truncation). Large local models (e.g. a multi-GB ollama model that
 	// must cold-load) need more than the default; see PaneMonitoringTopicDerivationTimeout.
 	// Zero/unset means the default (DefaultTopicDerivationTimeoutSeconds).
-	TopicDerivationTimeout int `toml:"topic_derivation_timeout"`
+	TopicDerivationTimeout int `toml:"topic_derivation_timeout" desc:"Per-recipe topic-derivation timeout in seconds (0 = default)."`
 }
 
 // DefaultTopicWords is the word cap applied to a derived Topic slug when
@@ -89,10 +89,10 @@ const DefaultTopicDerivationTimeoutSeconds = 30
 
 // DashboardConfig holds dashboard-specific configuration
 type DashboardConfig struct {
-	CurrentPaneAlwaysUnderCursor bool     `toml:"current_pane_always_under_cursor"`
-	CursorPosition               string   `toml:"cursor_position"`
-	SortCriteria                 []string `toml:"sort_criteria"`
-	ZoomOnSwitch                 *bool    `toml:"zoom_on_switch"`
+	CurrentPaneAlwaysUnderCursor bool     `toml:"current_pane_always_under_cursor" desc:"Deprecated: place the current pane under the cursor (use cursor_position)."`
+	CursorPosition               string   `toml:"cursor_position" desc:"Initial cursor strategy (current_registered|current_any|first_active)."`
+	SortCriteria                 []string `toml:"sort_criteria" desc:"Dashboard sort order (array of status|pane_last_active_at|session_last_visit_at|alphabetical)."`
+	ZoomOnSwitch                 *bool    `toml:"zoom_on_switch" desc:"Zoom the target pane when switching to it."`
 }
 
 // Valid dashboard cursor position strategies.
@@ -119,20 +119,20 @@ var DefaultSortCriteria = []string{SortByStatus, SortByPaneLastActiveAt, SortByA
 
 // WorktreeConfig holds worktree-specific configuration
 type WorktreeConfig struct {
-	Commands                   []UserDefinedCommand `toml:"commands"`
-	UnreadNotificationsEnabled bool                 `toml:"unread_notifications_enabled"`
+	Commands                   []UserDefinedCommand `toml:"commands" desc:"User-defined commands for the worktree picker."`
+	UnreadNotificationsEnabled bool                 `toml:"unread_notifications_enabled" desc:"Enable unread-status notifications in worktree mode."`
 	// Deprecated: use UnreadNotificationsEnabled. The old key is read for
 	// backwards compat; a warning is emitted when it is present.
-	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled"`
+	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled" desc:"Deprecated: use unread_notifications_enabled."`
 }
 
 // ProjectConfig holds project-picker-specific configuration
 type ProjectConfig struct {
-	Commands                   []UserDefinedCommand `toml:"commands"`
-	UnreadNotificationsEnabled bool                 `toml:"unread_notifications_enabled"`
+	Commands                   []UserDefinedCommand `toml:"commands" desc:"User-defined commands for the project picker."`
+	UnreadNotificationsEnabled bool                 `toml:"unread_notifications_enabled" desc:"Enable unread-status notifications in project mode."`
 	// Deprecated: use UnreadNotificationsEnabled. The old key is read for
 	// backwards compat; a warning is emitted when it is present.
-	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled"`
+	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled" desc:"Deprecated: use unread_notifications_enabled."`
 }
 
 // Integration skill alias values for optional integration components.
@@ -152,8 +152,8 @@ const DefaultSkillsPrefix = "pop-"
 
 // IntegrationsConfig holds global integration preferences (ADR 0065).
 type IntegrationsConfig struct {
-	Skills       []string `toml:"skills"`
-	SkillsPrefix *string  `toml:"skills_prefix"`
+	Skills       []string `toml:"skills" desc:"Embedded skills to install (array of skill aliases)."`
+	SkillsPrefix *string  `toml:"skills_prefix" desc:"Prefix for installed skill names (default \"pop-\"; empty = bare names)."`
 }
 
 // ResolveSkillsPrefix returns the configured skill-name prefix. An absent
@@ -173,25 +173,25 @@ type UpdatesConfig struct {
 	// background Update check. A nil pointer (absent section or key) defaults
 	// to enabled; an explicit false disables both so pop makes zero automatic
 	// network calls (CONTEXT.md "Update check", "Update notice").
-	NoticeEnabled *bool `toml:"notice_enabled"`
+	NoticeEnabled *bool `toml:"notice_enabled" desc:"Enable the update notice and daily background update check (default true)."`
 }
 
 // TaskConfig holds task-execution configuration.
 type TaskConfig struct {
-	Agents map[string]TaskAgentConfig `toml:"agents"`
+	Agents map[string]TaskAgentConfig `toml:"agents" desc:"Per-agent task presets ([workload.agents.<name>] tables)."`
 	// DefaultAgents is the ordered in-process fallback list used by
 	// `pop tasks implement` for unpinned tasks when --agent is absent.
-	DefaultAgents []string `toml:"default_agents"`
+	DefaultAgents []string `toml:"default_agents" desc:"Ordered fallback agent list for unpinned tasks."`
 	// Git holds commit-time git overrides for Pop's own commits. The TOML
 	// sub-table is `[workload.git]` because the parent key stays "workload"
 	// for backward compatibility (see Config.Task). A nil pointer means the
 	// section is absent ⇒ no overrides; Pop's commits behave exactly as today.
-	Git *TaskGitConfig `toml:"git"`
+	Git *TaskGitConfig `toml:"git" desc:"Commit-time git overrides for Pop's commits ([workload.git] table)."`
 }
 
 // TaskAgentConfig holds configuration for one task agent preset.
 type TaskAgentConfig struct {
-	Output string `toml:"output"`
+	Output string `toml:"output" desc:"Output mode for this agent preset."`
 }
 
 // TaskGitConfig holds commit-time git configuration applied to Pop's own
@@ -202,7 +202,7 @@ type TaskGitConfig struct {
 	// (e.g. "commit.gpgsign=false") prepended as `-c key=value` pairs to Pop's
 	// commit invocations. Absent/empty ⇒ no overrides. Validation is lazy: see
 	// Config.ResolveCommitConfigOverrides.
-	CommitConfigOverrides []string `toml:"commit_config_overrides"`
+	CommitConfigOverrides []string `toml:"commit_config_overrides" desc:"git -c key=value overrides prepended to Pop's commits (array)."`
 }
 
 // WorkbenchOptions holds [workbench] table options.
@@ -212,7 +212,7 @@ type WorkbenchOptions struct {
 	// Workbench shows a quick-search list to pick a Workbench (or "no workbench")
 	// before the session is created. Default false ⇒ the project picker behaves
 	// exactly as today (no prompt).
-	PickOnCreate bool `toml:"pick_on_create"`
+	PickOnCreate bool `toml:"pick_on_create" desc:"Prompt to pick a Workbench when creating a session with no live one."`
 
 	// Order fixes the display sequence of the interactive Workbench lists (the
 	// create prompt and the Preferred-workbench picker). Tokens are the literal
@@ -220,65 +220,65 @@ type WorkbenchOptions struct {
 	// "<reset>". Named tokens front-load in the listed order; everything unnamed
 	// follows in default order ("<empty>", Workbenches in resolution order,
 	// "<reset>"). A token that resolves to nothing is ignored. Global-only.
-	Order []string `toml:"order"`
+	Order []string `toml:"order" desc:"Fixed display order of Workbench-list tokens (array of on-screen labels)."`
 }
 
 // Workbench is a named blueprint for an ordered list of tmux windows,
 // each with a named pane tree. Split trees and multi-window templates are now
 // supported; a template with invalid window names is excluded at load time.
 type Workbench struct {
-	Name string `toml:"name"`
+	Name string `toml:"name" desc:"Workbench name (referenced by preferred_workbench)."`
 	// BeforeApply is an ordered list of shell commands run for one-time
 	// side effects (repo setup: pull, decrypt, mkdir) before any window of
 	// this Workbench is realized, with cwd = the session directory (ADR-0075).
 	// They run on every apply, including a reapply over a live session — the
 	// caller owns idempotency. This is side-effecting commands only, not
 	// shell-environment propagation: exported vars would not reach sibling panes.
-	BeforeApply []string          `toml:"before_apply"`
-	Windows     []WorkbenchWindow `toml:"windows"`
+	BeforeApply []string          `toml:"before_apply" desc:"Shell commands run once before realizing windows (array)."`
+	Windows     []WorkbenchWindow `toml:"windows" desc:"Ordered tmux windows ([[workbenches.windows]] tables)."`
 }
 
 type WorkbenchWindow struct {
-	Name   string             `toml:"name"`
-	Layout *WorkbenchPaneSpec `toml:"layout"`
+	Name   string             `toml:"name" desc:"Window name."`
+	Layout *WorkbenchPaneSpec `toml:"layout" desc:"Root pane layout for the window ([workbenches.windows.layout] table)."`
 }
 
 type WorkbenchPaneSpec struct {
-	Name    string `toml:"name"`
-	Command string `toml:"command"`
+	Name    string `toml:"name" desc:"Pane name."`
+	Command string `toml:"command" desc:"Shell command to run in this leaf pane."`
 	// Children is "rows" (stacked top-to-bottom) or "columns" (side-by-side). Only
 	// meaningful when Panes is non-empty (making this a container node).
-	Children string `toml:"children"`
+	Children string `toml:"children" desc:"Split direction for child panes (rows|columns); container nodes only."`
 	// Panes holds child pane specs. When non-empty, this node is a container
 	// and Command is ignored. When empty, this is a leaf node.
-	Panes []WorkbenchPaneSpec `toml:"panes"`
+	Panes []WorkbenchPaneSpec `toml:"panes" desc:"Child pane specs; non-empty makes this a container node."`
 	// Weight is the relative size within siblings. Defaults to 1 when omitted.
-	Weight int `toml:"weight"`
+	Weight int `toml:"weight" desc:"Relative size within siblings (default 1)."`
 	// Cwd is the working directory for this pane and its descendants.
 	// Relative paths are resolved against the session directory; ~ and
 	// absolute paths are accepted. Empty means inherit the parent cwd,
 	// defaulting to the session directory at the root.
-	Cwd string `toml:"cwd"`
+	Cwd string `toml:"cwd" desc:"Working directory for this pane and its descendants."`
 	// Focus requests that this pane be the focused pane after the template
 	// is applied. Only meaningful on leaf panes. If multiple panes request
 	// focus, the first one wins and a warning is emitted.
-	Focus bool `toml:"focus"`
+	Focus bool `toml:"focus" desc:"Focus this pane after the template is applied (leaf panes only)."`
 }
 
 // EffortModel is one entry in an effort ladder. Reasoning is optional because
 // not every agent has a reasoning-effort mechanism.
 type EffortModel struct {
-	Model     string `toml:"model"`
-	Reasoning string `toml:"reasoning"`
+	Model     string `toml:"model" desc:"Model identifier for this ladder entry."`
+	Reasoning string `toml:"reasoning" desc:"Reasoning-effort level (optional; agent-dependent)."`
 }
 
 // EffortConfig holds the model/reasoning ladder for one agent preset. Each
 // tier is an ordered, user-owned fallback list; current resolution uses the
 // head entry.
 type EffortConfig struct {
-	Heavy    []EffortModel `toml:"heavy"`
-	Standard []EffortModel `toml:"standard"`
-	Light    []EffortModel `toml:"light"`
+	Heavy    []EffortModel `toml:"heavy" desc:"Heavy-tier model/reasoning ladder (array)."`
+	Standard []EffortModel `toml:"standard" desc:"Standard-tier model/reasoning ladder (array)."`
+	Light    []EffortModel `toml:"light" desc:"Light-tier model/reasoning ladder (array)."`
 }
 
 // ResolveCommitConfigOverrides validates the [workload.git]
@@ -316,13 +316,13 @@ func (c *Config) ResolveCommitConfigOverrides() ([]string, error) {
 // as standard duration strings (e.g. "60s", "1h") and parsed by ResolveQueue.
 type QueueConfig struct {
 	// PollInterval is the supervisor's scan cadence. Empty ⇒ DefaultQueuePollInterval.
-	PollInterval string `toml:"poll_interval"`
+	PollInterval string `toml:"poll_interval" desc:"Supervisor scan cadence as a duration string (e.g. \"60s\")."`
 	// AgentQuotaRetryAfter is the global cooldown applied after an agent reports
 	// a quota exit, before it re-enters rotation. Empty ⇒ DefaultQueueQuotaRetryAfter.
-	AgentQuotaRetryAfter string `toml:"agent_quota_retry_after"`
+	AgentQuotaRetryAfter string `toml:"agent_quota_retry_after" desc:"Cooldown after an agent quota exit, as a duration string."`
 	// CrashRetryDelays is the ordered backoff schedule for crash retries; its
 	// length is the park threshold. Empty ⇒ DefaultQueueCrashRetryDelays.
-	CrashRetryDelays []string `toml:"crash_retry_delays"`
+	CrashRetryDelays []string `toml:"crash_retry_delays" desc:"Crash-retry backoff schedule (array of duration strings); length = park threshold."`
 }
 
 // Queue default values applied when the [queue] section or individual fields
@@ -395,8 +395,8 @@ func (c *Config) ResolveQueue() (ResolvedQueueConfig, error) {
 
 // ProjectEntry represents a project configuration entry.
 type ProjectEntry struct {
-	Path         string `toml:"path"`
-	DisplayDepth int    `toml:"display_depth"` // number of path segments to show in display name; 0 means use default (1)
+	Path         string `toml:"path" desc:"Exact path or glob pattern to a project directory."`
+	DisplayDepth int    `toml:"display_depth" desc:"Trailing path segments to show in the picker name (0 = default 1)."`
 
 	// displayDepthInvalid records that the configured display_depth had the
 	// wrong type (e.g. a string) so the value could not be decoded. Per ADR 0054
