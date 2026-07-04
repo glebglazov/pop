@@ -98,6 +98,29 @@ type capturedRun struct {
 	legacyPath string
 }
 
+// phaseOrder returns a sort rank for run phases. Lower values sort earlier.
+func phaseOrder(phase string) int {
+	switch phase {
+	case "implement":
+		return 0
+	case "verify":
+		return 1
+	default:
+		return 2
+	}
+}
+
+// sortRunsChronologically sorts runs by start time, with implement before
+// verify at equal timestamps. The sort is stable.
+func sortRunsChronologically(runs []capturedRun) {
+	sort.SliceStable(runs, func(i, j int) bool {
+		if !runs[i].meta.StartTime.Equal(runs[j].meta.StartTime) {
+			return runs[i].meta.StartTime.Before(runs[j].meta.StartTime)
+		}
+		return phaseOrder(runs[i].meta.Phase) < phaseOrder(runs[j].meta.Phase)
+	})
+}
+
 // newRunID produces a fresh run identifier. It is a variable so tests can
 // substitute a deterministic generator.
 var newRunID = func() string { return uuid.New().String() }
@@ -290,10 +313,10 @@ func persistAttemptStream(d *Deps, errOut io.Writer, sel *Selection, rec *stream
 	return metaPath
 }
 
-// listTaskRuns returns every captured run for one task, reading both the
-// uuid-keyed Captured run directory (ADR-0094) and the legacy task-stem
-// gzipped JSONL files. Results are merged and ordered by start time.
-func listTaskRuns(d *Deps, taskSetDir, taskFile string) ([]capturedRun, error) {
+// collectAllRuns reads every captured run under a task set, both uuid-keyed
+// Captured run pairs (ADR-0094) and legacy task-stem gzipped JSONL files
+// synthesized into virtual metas. Results are unordered.
+func collectAllRuns(d *Deps, taskSetDir string) ([]capturedRun, error) {
 	var runs []capturedRun
 
 	// New-format runs: <task-set>/streams/runs/<uuid>.meta.json plus
@@ -308,9 +331,6 @@ func listTaskRuns(d *Deps, taskSetDir, taskFile string) ([]capturedRun, error) {
 			if err != nil {
 				return nil, fmt.Errorf("load captured run %s: %w", e.Name(), err)
 			}
-			if run.meta.TaskFile != taskFile {
-				continue
-			}
 			runs = append(runs, run)
 		}
 	} else if !os.IsNotExist(err) {
@@ -318,24 +338,74 @@ func listTaskRuns(d *Deps, taskSetDir, taskFile string) ([]capturedRun, error) {
 	}
 
 	// Legacy runs: <task-set>/streams/<task-stem>/attempt-NNN.jsonl.gz.
-	legacyDir := taskStreamDir(taskSetDir, taskFile)
-	if entries, err := d.FS.ReadDir(legacyDir); err == nil {
+	legacyBase := filepath.Join(taskSetDir, streamsDirName)
+	if entries, err := d.FS.ReadDir(legacyBase); err == nil {
 		for _, e := range entries {
-			if !attemptStreamNamePattern.MatchString(e.Name()) {
+			if e.Name() == capturedRunsDirName {
 				continue
 			}
-			run, err := loadLegacyRun(d, filepath.Join(legacyDir, e.Name()), taskFile)
-			if err != nil {
-				return nil, fmt.Errorf("load legacy run %s: %w", e.Name(), err)
+			legacyDir := filepath.Join(legacyBase, e.Name())
+			info, err := d.FS.Stat(legacyDir)
+			if err != nil || !info.IsDir() {
+				continue
 			}
-			runs = append(runs, run)
+			subEntries, err := d.FS.ReadDir(legacyDir)
+			if err != nil {
+				return nil, err
+			}
+			// The legacy directory name is the task stem; task files are .md.
+			taskFile := e.Name() + ".md"
+			for _, se := range subEntries {
+				if !attemptStreamNamePattern.MatchString(se.Name()) {
+					continue
+				}
+				run, err := loadLegacyRun(d, filepath.Join(legacyDir, se.Name()), taskFile)
+				if err != nil {
+					return nil, fmt.Errorf("load legacy run %s: %w", se.Name(), err)
+				}
+				runs = append(runs, run)
+			}
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
 
-	sort.SliceStable(runs, func(i, j int) bool { return runs[i].meta.StartTime.Before(runs[j].meta.StartTime) })
 	return runs, nil
+}
+
+// listSetRuns returns every captured run under a task set, sorted
+// chronologically by start time. At equal timestamps implement runs sort
+// before verify runs.
+func listSetRuns(d *Deps, taskSetDir string) ([]capturedRun, error) {
+	runs, err := collectAllRuns(d, taskSetDir)
+	if err != nil {
+		return nil, err
+	}
+	sortRunsChronologically(runs)
+	return runs, nil
+}
+
+// listTaskRuns returns every implement-phase captured run for one task,
+// reading both the uuid-keyed Captured run directory (ADR-0094) and the
+// legacy task-stem gzipped JSONL files. Results are merged and ordered by
+// start time.
+func listTaskRuns(d *Deps, taskSetDir, taskFile string) ([]capturedRun, error) {
+	runs, err := collectAllRuns(d, taskSetDir)
+	if err != nil {
+		return nil, err
+	}
+	var filtered []capturedRun
+	for _, run := range runs {
+		if run.meta.TaskFile != taskFile {
+			continue
+		}
+		if run.meta.Phase != "implement" {
+			continue
+		}
+		filtered = append(filtered, run)
+	}
+	sortRunsChronologically(filtered)
+	return filtered, nil
 }
 
 // loadCapturedRun reads one Captured run pair from its meta file.
@@ -446,6 +516,7 @@ func loadLegacyRun(d *Deps, path, taskFile string) (capturedRun, error) {
 	meta := capturedRunMeta{
 		RunID:          fmt.Sprintf("legacy:%s:%s", stem, strings.TrimSuffix(name, ".jsonl.gz")),
 		Phase:          "implement",
+		TaskID:         stem,
 		TaskFile:       taskFile,
 		StartTime:      header.StartTime,
 		EndTime:        end,

@@ -3,6 +3,7 @@ package tasks
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func streamFixture(t *testing.T) *execFixture {
@@ -33,9 +36,11 @@ func TestStreamWholeSetSpansAttemptsOrderedByStartTime(t *testing.T) {
 		{Type: "event", AtMS: 3000, Raw: `{"type":"assistant","message":{"content":[{"type":"text","text":"Now I'll make the changes."}]}}`},
 	}
 
+	// 01-a: two legacy attempts at base and base+10m.
 	writeTimingStreamWithEvents(t, streamDir, "attempt-001.jsonl.gz", "claude", "", 1, base.Add(10*time.Minute), "failed", 45_000, claudeEvents)
 	writeTimingStreamWithEvents(t, streamDir, "attempt-002.jsonl.gz", "claude", "", 2, base, "timed_out", 83_000, claudeEvents)
-	writeTimingStream(t, taskStreamDir(env.demoDir(), "02-b.md"), "attempt-001.jsonl.gz", "claude", 1, base.Add(20*time.Minute), "completed", 500)
+	// 02-b: a legacy attempt at base-5m, earlier than 01-a's earliest run.
+	writeTimingStream(t, taskStreamDir(env.demoDir(), "02-b.md"), "attempt-001.jsonl.gz", "claude", 1, base.Add(-5*time.Minute), "completed", 500)
 
 	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
@@ -47,23 +52,156 @@ func TestStreamWholeSetSpansAttemptsOrderedByStartTime(t *testing.T) {
 	if result.TaskSetID != "demo" {
 		t.Fatalf("task set = %q", result.TaskSetID)
 	}
-	if len(result.Tasks) != 2 || result.Tasks[0].TaskID != "01-a" || result.Tasks[1].TaskID != "02-b" {
+
+	// Tasks should be ordered by their earliest run, so 02-b (base-5m) comes first.
+	if len(result.Tasks) != 2 || result.Tasks[0].TaskID != "02-b" || result.Tasks[1].TaskID != "01-a" {
 		t.Fatalf("tasks = %#v", result.Tasks)
 	}
 
-	attempts := result.Tasks[0].Attempts
-	if len(attempts) != 2 {
-		t.Fatalf("attempts = %d, want all stored attempts", len(attempts))
+	// Within each task, attempts are ordered by start time.
+	attemptsA := result.Tasks[1].Attempts
+	if len(attemptsA) != 2 {
+		t.Fatalf("01-a attempts = %d, want 2", len(attemptsA))
+	}
+	if attemptsA[0].Timing.Start.After(attemptsA[1].Timing.Start) {
+		t.Fatalf("01-a attempts not ordered by start time")
+	}
+	if attemptsA[0].Timing.Outcome != "timed_out" || attemptsA[1].Timing.Outcome != "failed" {
+		t.Fatalf("01-a attempt outcomes = %q, %q", attemptsA[0].Timing.Outcome, attemptsA[1].Timing.Outcome)
 	}
 
-	// Verify chronological order
-	if attempts[0].Timing.Start.After(attempts[1].Timing.Start) {
-		t.Fatalf("attempts not ordered by start time")
+	attemptsB := result.Tasks[0].Attempts
+	if len(attemptsB) != 1 || attemptsB[0].Timing.Outcome != "completed" {
+		t.Fatalf("02-b attempts = %#v", attemptsB)
 	}
 
-	// Verify events were parsed
-	if len(attempts[0].Events) == 0 {
+	// Verify events were parsed.
+	if len(attemptsA[0].Events) == 0 {
 		t.Fatalf("no events parsed for attempt")
+	}
+}
+
+// writeCapturedRunDirect writes a new-format captured run pair with explicit
+// phase and timing. It is useful for testing set-scope ordering across phases.
+func writeCapturedRunDirect(t *testing.T, taskSetDir, taskFile, taskID, phase string, attempt int, start time.Time, outcome string) {
+	t.Helper()
+	dir := capturedRunsDir(taskSetDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runID := uuid.New().String()
+	meta := capturedRunMeta{
+		RunID:     runID,
+		Phase:     phase,
+		TaskSetID: "demo",
+		TaskID:    taskID,
+		TaskFile:  taskFile,
+		StartTime: start.UTC(),
+		EndTime:   start.Add(time.Minute).UTC(),
+		Outcome:   outcome,
+		Agent:     "claude",
+		Attempt:   attempt,
+	}
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, runID+".meta.json"), metaData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var events bytes.Buffer
+	enc := json.NewEncoder(&events)
+	if err := enc.Encode(streamEventRecord{Type: "event", AtMS: 0, Raw: `{"type":"system","subtype":"init"}`}); err != nil {
+		t.Fatal(err)
+	}
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write(events.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, runID+".events.jsonl.gz"), gz.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStreamWholeSetOrdersTasksByEarliestRun(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	// 02-b has the earliest run, so it should appear before 01-a even though
+	// the manifest lists 01-a first.
+	writeTimingStream(t, taskStreamDir(env.demoDir(), "02-b.md"), "attempt-001.jsonl.gz", "claude", 1, base.Add(-5*time.Minute), "completed", 60_000)
+	writeTimingStream(t, taskStreamDir(env.demoDir(), "01-a.md"), "attempt-001.jsonl.gz", "claude", 1, base, "failed", 30_000)
+
+	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(result.Tasks))
+	}
+	if result.Tasks[0].TaskID != "02-b" || result.Tasks[1].TaskID != "01-a" {
+		t.Fatalf("tasks not ordered by earliest run: %#v", result.Tasks)
+	}
+}
+
+func TestStreamWholeSetMixesNewAndLegacyLayouts(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	// New-format run for 01-a at base+5m.
+	writeCapturedRunDirect(t, env.demoDir(), "01-a.md", "01-a", "implement", 1, base.Add(5*time.Minute), "completed")
+	// Legacy run for 02-b at base (earlier than 01-a's new-format run).
+	writeTimingStream(t, taskStreamDir(env.demoDir(), "02-b.md"), "attempt-001.jsonl.gz", "claude", 1, base, "failed", 30_000)
+
+	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(result.Tasks))
+	}
+	// 02-b's legacy run is earlier, so 02-b comes first.
+	if result.Tasks[0].TaskID != "02-b" || result.Tasks[1].TaskID != "01-a" {
+		t.Fatalf("tasks not ordered by start time: %#v", result.Tasks)
+	}
+	// Verify the legacy run synthesized meta carries the expected fields.
+	legacy := result.Tasks[0].Attempts[0]
+	if legacy.Timing.Outcome != "failed" {
+		t.Fatalf("legacy outcome = %q, want failed", legacy.Timing.Outcome)
+	}
+}
+
+func TestStreamWholeSetTieBreaksImplementBeforeVerify(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	// 01-a verify run at base.
+	writeCapturedRunDirect(t, env.demoDir(), "01-a.md", "01-a", "verify", 1, base, "completed")
+	// 02-b implement run at the same timestamp; implement should sort first.
+	writeCapturedRunDirect(t, env.demoDir(), "02-b.md", "02-b", "implement", 1, base, "completed")
+
+	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(result.Tasks))
+	}
+	if result.Tasks[0].TaskID != "02-b" || result.Tasks[1].TaskID != "01-a" {
+		t.Fatalf("implement did not sort before verify at equal start time: %#v", result.Tasks)
 	}
 }
 
@@ -679,6 +817,93 @@ func TestStreamRawWholeSetMultipleTasks(t *testing.T) {
 	}
 }
 
+func TestStreamRawWholeSetOrdersChronologically(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	// 02-b run is earlier than 01-a run, so it should be emitted first.
+	writeTimingStream(t, taskStreamDir(env.demoDir(), "02-b.md"), "attempt-001.jsonl.gz", "claude", 1, base.Add(-5*time.Minute), "completed", 60_000)
+	writeTimingStream(t, taskStreamDir(env.demoDir(), "01-a.md"), "attempt-001.jsonl.gz", "claude", 1, base, "failed", 30_000)
+
+	var buf bytes.Buffer
+	err := StreamRawWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo",
+	}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	// Verify the order of header records in the raw output.
+	starts := rawHeaderStartTimes(t, out)
+	if len(starts) != 2 {
+		t.Fatalf("expected 2 header start times, got %d:\n%s", len(starts), out)
+	}
+	if !starts[0].Equal(base.Add(-5 * time.Minute)) {
+		t.Fatalf("first header start = %v, want %v", starts[0], base.Add(-5*time.Minute))
+	}
+	if !starts[1].Equal(base) {
+		t.Fatalf("second header start = %v, want %v", starts[1], base)
+	}
+
+	// Delimiter separates the two runs.
+	if strings.Count(out, `"type":"delimiter"`) != 1 {
+		t.Fatalf("expected 1 delimiter:\n%s", out)
+	}
+}
+
+// rawHeaderStartTimes extracts the start_time from every header record in raw
+// JSONL output, in order.
+func rawHeaderStartTimes(t *testing.T, out string) []time.Time {
+	t.Helper()
+	var starts []time.Time
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			Type      string    `json:"type"`
+			StartTime time.Time `json:"start_time"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		if rec.Type == "header" {
+			starts = append(starts, rec.StartTime)
+		}
+	}
+	return starts
+}
+
+func TestStreamRawLastBareSetReturnsLatestRun(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	writeTimingStream(t, taskStreamDir(env.demoDir(), "01-a.md"), "attempt-001.jsonl.gz", "claude", 1, base.Add(-5*time.Minute), "failed", 30_000)
+	writeTimingStream(t, taskStreamDir(env.demoDir(), "02-b.md"), "attempt-001.jsonl.gz", "claude", 1, base, "completed", 60_000)
+
+	var buf bytes.Buffer
+	err := StreamRawWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo",
+		Last:         true,
+	}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	if strings.Contains(out, `"type":"delimiter"`) {
+		t.Fatalf("--last --raw should emit no delimiter:\n%s", out)
+	}
+	starts := rawHeaderStartTimes(t, out)
+	if len(starts) != 1 || !starts[0].Equal(base) {
+		t.Fatalf("--last --raw starts = %v, want latest %v", starts, base)
+	}
+}
+
 func TestStreamRawEmptyNoCapturedStreams(t *testing.T) {
 	env := streamFixture(t)
 
@@ -844,16 +1069,16 @@ func TestStreamLastBareSet(t *testing.T) {
 	env := streamFixture(t)
 	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 
-	// Task 01-a: two attempts.
+	// Task 01-a: two attempts, the latest at base.
 	dirA := taskStreamDir(env.demoDir(), "01-a.md")
 	writeTimingStream(t, dirA, "attempt-001.jsonl.gz", "claude", 1, base.Add(-20*time.Minute), "failed", 30_000)
 	writeTimingStream(t, dirA, "attempt-002.jsonl.gz", "claude", 2, base, "completed", 60_000)
 
-	// Task 02-b: one attempt.
+	// Task 02-b: one attempt earlier than 01-a's latest.
 	dirB := taskStreamDir(env.demoDir(), "02-b.md")
 	writeTimingStream(t, dirB, "attempt-001.jsonl.gz", "claude", 1, base.Add(-10*time.Minute), "failed", 15_000)
 
-	// With --last, each task should show only its most recent attempt.
+	// With --last at set scope, only the single most recent run overall is returned.
 	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
 		Target:       "demo",
@@ -862,24 +1087,21 @@ func TestStreamLastBareSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tasks) != 2 {
-		t.Fatalf("expected 2 tasks, got %d", len(result.Tasks))
+	if len(result.Tasks) != 1 {
+		t.Fatalf("expected 1 task (the one with the latest run), got %d", len(result.Tasks))
 	}
-
-	// Task 01-a: should have only the latest attempt (completed).
+	if result.Tasks[0].TaskID != "01-a" {
+		t.Fatalf("expected latest run from 01-a, got %s", result.Tasks[0].TaskID)
+	}
 	if len(result.Tasks[0].Attempts) != 1 {
-		t.Fatalf("task 01-a: expected 1 attempt with --last, got %d", len(result.Tasks[0].Attempts))
+		t.Fatalf("expected 1 attempt with --last, got %d", len(result.Tasks[0].Attempts))
 	}
-	if result.Tasks[0].Attempts[0].Timing.Outcome != "completed" {
-		t.Fatalf("task 01-a: expected 'completed', got %q", result.Tasks[0].Attempts[0].Timing.Outcome)
+	last := result.Tasks[0].Attempts[0]
+	if last.Timing.Outcome != "completed" {
+		t.Fatalf("expected 'completed', got %q", last.Timing.Outcome)
 	}
-
-	// Task 02-b: should have the single attempt (failed).
-	if len(result.Tasks[1].Attempts) != 1 {
-		t.Fatalf("task 02-b: expected 1 attempt with --last, got %d", len(result.Tasks[1].Attempts))
-	}
-	if result.Tasks[1].Attempts[0].Timing.Outcome != "failed" {
-		t.Fatalf("task 02-b: expected 'failed', got %q", result.Tasks[1].Attempts[0].Timing.Outcome)
+	if !last.Timing.Start.Equal(base) {
+		t.Fatalf("expected latest start %v, got %v", base, last.Timing.Start)
 	}
 }
 

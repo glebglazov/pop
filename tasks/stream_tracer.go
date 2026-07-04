@@ -121,25 +121,100 @@ func StreamWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 	}
 
 	result := &StreamResult{TaskSetID: taskSetID}
-	for _, task := range m.Tasks {
-		if taskID != "" && task.ID != taskID {
-			continue
-		}
-		attempts, err := readTaskAttemptStreams(d, m.Dir, task.File)
+	if taskID == "" {
+		taskStreams, err := readSetAttemptStreams(d, m, opts.Last)
 		if err != nil {
-			return nil, exitErr(ExitOperational, "read attempt streams for %s/%s: %v", taskSetID, task.ID, err)
+			return nil, exitErr(ExitOperational, "read attempt streams for %s: %v", taskSetID, err)
 		}
-		if opts.Last && len(attempts) > 0 {
-			attempts = attempts[len(attempts)-1:]
+		result.Tasks = taskStreams
+	} else {
+		for _, task := range m.Tasks {
+			if task.ID != taskID {
+				continue
+			}
+			attempts, err := readTaskAttemptStreams(d, m.Dir, task.File)
+			if err != nil {
+				return nil, exitErr(ExitOperational, "read attempt streams for %s/%s: %v", taskSetID, task.ID, err)
+			}
+			if opts.Last && len(attempts) > 0 {
+				attempts = attempts[len(attempts)-1:]
+			}
+			result.Tasks = append(result.Tasks, TaskStream{
+				TaskID:   task.ID,
+				File:     task.File,
+				Title:    task.Title,
+				Attempts: attempts,
+			})
 		}
-		result.Tasks = append(result.Tasks, TaskStream{
+	}
+	return result, nil
+}
+
+// readSetAttemptStreams reads every captured attempt stream under a task set,
+// groups them by task in chronological order of first appearance, and returns
+// the per-task attempt streams. With last=true only the single most recent
+// run overall is returned.
+func readSetAttemptStreams(d *Deps, m *Manifest, last bool) ([]TaskStream, error) {
+	runs, err := listSetRuns(d, m.Dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(runs) == 0 {
+		out := make([]TaskStream, len(m.Tasks))
+		for i, task := range m.Tasks {
+			out[i] = TaskStream{TaskID: task.ID, File: task.File, Title: task.Title}
+		}
+		return out, nil
+	}
+	if last {
+		run := runs[len(runs)-1]
+		task := taskByFile(m, run.meta.TaskFile)
+		if task == nil {
+			return nil, fmt.Errorf("run references unknown task file %q", run.meta.TaskFile)
+		}
+		return []TaskStream{{
 			TaskID:   task.ID,
 			File:     task.File,
 			Title:    task.Title,
-			Attempts: attempts,
-		})
+			Attempts: []AttemptStream{attemptStreamFromRun(run)},
+		}}, nil
 	}
-	return result, nil
+	return groupRunsIntoTaskStreams(m, runs), nil
+}
+
+// taskByFile returns the manifest task with the given file name, or nil.
+func taskByFile(m *Manifest, file string) *Task {
+	for i := range m.Tasks {
+		if m.Tasks[i].File == file {
+			return &m.Tasks[i]
+		}
+	}
+	return nil
+}
+
+// groupRunsIntoTaskStreams groups chronologically sorted runs by task, preserving
+// the order in which each task first appears in the run timeline.
+func groupRunsIntoTaskStreams(m *Manifest, runs []capturedRun) []TaskStream {
+	var groups []TaskStream
+	seen := map[string]int{}
+	for _, run := range runs {
+		idx, ok := seen[run.meta.TaskFile]
+		if !ok {
+			task := taskByFile(m, run.meta.TaskFile)
+			if task == nil {
+				continue
+			}
+			groups = append(groups, TaskStream{
+				TaskID: task.ID,
+				File:   task.File,
+				Title:  task.Title,
+			})
+			idx = len(groups) - 1
+			seen[run.meta.TaskFile] = idx
+		}
+		groups[idx].Attempts = append(groups[idx].Attempts, attemptStreamFromRun(run))
+	}
+	return groups
 }
 
 // readTaskAttemptStreams reads every stored captured attempt stream for one
@@ -394,45 +469,54 @@ func StreamRawWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 	enc.SetEscapeHTML(false)
 	first := true
 
-	for _, task := range m.Tasks {
-		if taskID != "" && task.ID != taskID {
-			continue
-		}
-		runs, err := listTaskRuns(d, m.Dir, task.File)
+	var allRuns []capturedRun
+	if taskID == "" {
+		allRuns, err = listSetRuns(d, m.Dir)
 		if err != nil {
-			return exitErr(ExitOperational, "list runs for %s/%s: %v", taskSetID, task.ID, err)
+			return exitErr(ExitOperational, "list runs for %s: %v", taskSetID, err)
 		}
-		if len(runs) == 0 {
-			continue
+		if opts.Last && len(allRuns) > 0 {
+			allRuns = allRuns[len(allRuns)-1:]
 		}
-		if opts.Last && len(runs) > 0 {
-			runs = runs[len(runs)-1:]
-		}
-
-		for _, run := range runs {
-			name := rawRunFileName(run)
-
-			// Write delimiter when this is not the first attempt file overall.
-			// For a single attempt (most common case) no delimiter is emitted,
-			// preserving pure JSONL for the simplest path.
-			if !first {
-				if err := enc.Encode(streamDelimiter{Type: "delimiter", File: name}); err != nil {
-					return fmt.Errorf("write delimiter: %w", err)
-				}
+	} else {
+		for _, task := range m.Tasks {
+			if task.ID != taskID {
+				continue
 			}
-			first = false
-
-			jsonl, err := rawRunJSONL(d, m.Dir, run)
+			runs, err := listTaskRuns(d, m.Dir, task.File)
 			if err != nil {
-				return exitErr(ExitOperational, "read %s: %v", name, err)
+				return exitErr(ExitOperational, "list runs for %s/%s: %v", taskSetID, task.ID, err)
 			}
+			if opts.Last && len(runs) > 0 {
+				runs = runs[len(runs)-1:]
+			}
+			allRuns = append(allRuns, runs...)
+		}
+	}
 
-			if _, err := w.Write(bytes.TrimSpace(jsonl)); err != nil {
-				return fmt.Errorf("write decompressed stream: %w", err)
+	for _, run := range allRuns {
+		name := rawRunFileName(run)
+
+		// Write delimiter when this is not the first attempt file overall.
+		// For a single attempt (most common case) no delimiter is emitted,
+		// preserving pure JSONL for the simplest path.
+		if !first {
+			if err := enc.Encode(streamDelimiter{Type: "delimiter", File: name}); err != nil {
+				return fmt.Errorf("write delimiter: %w", err)
 			}
-			if _, err := w.Write([]byte("\n")); err != nil {
-				return fmt.Errorf("write newline: %w", err)
-			}
+		}
+		first = false
+
+		jsonl, err := rawRunJSONL(d, m.Dir, run)
+		if err != nil {
+			return exitErr(ExitOperational, "read %s: %v", name, err)
+		}
+
+		if _, err := w.Write(bytes.TrimSpace(jsonl)); err != nil {
+			return fmt.Errorf("write decompressed stream: %w", err)
+		}
+		if _, err := w.Write([]byte("\n")); err != nil {
+			return fmt.Errorf("write newline: %w", err)
 		}
 	}
 
