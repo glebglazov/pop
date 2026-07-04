@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -160,5 +161,150 @@ func TestNamePromptCtrlCCancels(t *testing.T) {
 	m = m.send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if !m.cancelled {
 		t.Error("ctrl+c should cancel")
+	}
+}
+
+// --- Help overlay tests ---
+
+func TestNamePromptHelp_OpensOnCtrlH(t *testing.T) {
+	m := newNamePrompt("h", "feature-x", "")
+	m = m.send(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !m.showHelp {
+		t.Error("showHelp should be true after C-h")
+	}
+}
+
+func TestNamePromptHelp_SecondCtrlHDismisses(t *testing.T) {
+	m := newNamePrompt("h", "feature-x", "")
+	m = m.send(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !m.showHelp {
+		t.Fatal("showHelp should be true after first C-h")
+	}
+	m = m.send(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if m.showHelp {
+		t.Error("showHelp should be false after second C-h")
+	}
+}
+
+func TestNamePromptHelp_EscDismisses(t *testing.T) {
+	m := newNamePrompt("h", "feature-x", "")
+	m = m.send(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !m.showHelp {
+		t.Fatal("showHelp should be true after C-h")
+	}
+	m = m.send(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.showHelp {
+		t.Error("showHelp should be false after Esc in help mode")
+	}
+}
+
+func TestNamePromptHelp_SwallowsKeysWhileOpen(t *testing.T) {
+	m := newNamePrompt("h", "feature-x", "")
+	m = m.send(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !m.showHelp {
+		t.Fatal("showHelp should be true after C-h")
+	}
+
+	// Typing should be swallowed
+	m = m.send(typeRune('a'))
+	if m.field.Value() != "" {
+		t.Error("typing in help mode should not modify buffer")
+	}
+	if !m.showHelp {
+		t.Error("showHelp should remain true after swallowed key")
+	}
+
+	// Enter should be swallowed (not submit)
+	m = m.send(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.submitted {
+		t.Error("Enter in help mode should not submit")
+	}
+}
+
+func TestNamePromptHelp_ContentRendered(t *testing.T) {
+	m := newNamePrompt("h", "feature-x", "base-branch")
+	m = m.send(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+
+	view := m.viewHelp()
+	if !containsSubstring(view, "Help") {
+		t.Error("help view should contain Help title")
+	}
+	if !containsSubstring(view, "Name") {
+		t.Error("help view should contain 'Name' subtitle")
+	}
+	if !containsSubstring(view, "Confirm and submit") {
+		t.Error("help view should contain submit description")
+	}
+	if !containsSubstring(view, "Cancel") {
+		t.Error("help view should contain cancel description")
+	}
+	if !containsSubstring(view, "C-h toggle") {
+		t.Error("help view should contain 'C-h toggle' footer")
+	}
+	if !containsSubstring(view, "Esc close") {
+		t.Error("help view should contain 'Esc close' footer")
+	}
+}
+
+func TestNamePromptHelp_HintIncludesCtrlH(t *testing.T) {
+	m := newNamePrompt("h", "feature-x", "base-branch")
+	m.width = 60
+	m.height = 20
+
+	view := fmt.Sprint(m.viewNormal())
+	if !containsSubstring(view, "C-h help") {
+		t.Error("hint should include 'C-h help'")
+	}
+}
+
+func TestNamePromptHelp_F1DoesNothing(t *testing.T) {
+	m := newNamePrompt("h", "feature-x", "")
+	m = m.send(tea.KeyPressMsg{Code: tea.KeyF1})
+	if m.showHelp {
+		t.Error("F1 should not open help")
+	}
+	// Cancel should not have been triggered
+	if m.cancelled {
+		t.Error("F1 should not cancel")
+	}
+}
+
+func TestNamePromptHelp_TextEntryStillWorksAfterDismiss(t *testing.T) {
+	m := newNamePrompt("h", "feature-x", "")
+
+	// Open and close help
+	m = m.send(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	m = m.send(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+
+	if m.showHelp {
+		t.Fatal("showHelp should be false after dismiss")
+	}
+
+	// Typing should work again
+	m = m.send(typeRune('a'))
+	if m.field.Value() != "a" {
+		t.Errorf("buffer should contain 'a', got %q", m.field.Value())
+	}
+}
+
+func TestNamePromptHelp_ViewSwitchesToHelp(t *testing.T) {
+	m := newNamePrompt("h", "feature-x", "base-branch")
+	m.width = 60
+	m.height = 20
+
+	// Normal view
+	view := fmt.Sprint(m.View())
+	if !containsSubstring(view, "enter confirm") {
+		t.Error("normal view should contain hint")
+	}
+	if containsSubstring(view, "C-h toggle") {
+		t.Error("normal view should not contain help footer")
+	}
+
+	// Help view
+	m = m.send(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	view = fmt.Sprint(m.View())
+	if !containsSubstring(view, "C-h toggle") {
+		t.Error("help view should contain help footer")
 	}
 }

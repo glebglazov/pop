@@ -49,6 +49,8 @@ type ConfigurePicker struct {
 	tabMatches []string // current completion candidates
 	tabIndex   int      // current position in cycle (-1 = none)
 	tabPrefix  string   // the text that was present when Tab was first pressed
+
+	showHelp bool
 }
 
 // NewConfigurePicker creates a new configure picker with the given expand function
@@ -78,6 +80,11 @@ func (cp *ConfigurePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return cp, nil
 
 	case tea.KeyPressMsg:
+		// Help overlay: toggle, dismiss, or swallow keys while open.
+		if ToggleHelp(&cp.showHelp, msg) {
+			return cp, nil
+		}
+
 		switch cp.phase {
 		case phasePath:
 			return cp.updatePathPhase(msg)
@@ -294,9 +301,48 @@ func (cp *ConfigurePicker) applyTabCompletion() {
 	cp.updatePreview()
 }
 
+// helpEntries returns phase-appropriate help entries.
+func (cp *ConfigurePicker) helpEntries() []HelpEntry {
+	switch cp.phase {
+	case phasePath:
+		return []HelpEntry{
+			{"Tab", "Complete directory paths"},
+			{"Enter", "Confirm path, go to depth"},
+			{"Esc", "Cancel"},
+			{"*", "Wildcard glob matching"},
+		}
+	case phaseDepth:
+		return []HelpEntry{
+			{"↑", "Increase display depth"},
+			{"↓", "Decrease display depth"},
+			{"Enter", "Confirm and save"},
+			{"Esc", "Back to path entry"},
+		}
+	}
+	return nil
+}
+
+func (cp *ConfigurePicker) viewHelp() string {
+	title := "Help"
+	// Phase-specific mode header
+	switch cp.phase {
+	case phasePath:
+		title = "Help · Path"
+	case phaseDepth:
+		title = "Help · Depth"
+	}
+	return RenderHelpOverlay(title, cp.helpEntries(), cp.width, cp.height)
+}
+
 // View renders the configure picker
 
 func (cp *ConfigurePicker) View() tea.View {
+	if cp.showHelp {
+		v := tea.NewView(cp.viewHelp())
+		v.AltScreen = true
+		return v
+	}
+
 	var b strings.Builder
 
 	previewStyle := lipgloss.NewStyle().Foreground(colorPreview)
@@ -387,9 +433,9 @@ func (cp *ConfigurePicker) View() tea.View {
 	var hints string
 	switch cp.phase {
 	case phasePath:
-		hints = "  Tab complete · Enter confirm · Esc cancel · use * for glob patterns"
+		hints = "  Tab complete · Enter confirm · Esc cancel · use * for glob patterns · C-h help"
 	case phaseDepth:
-		hints = "  ↑/↓ adjust depth · Enter confirm · Esc back"
+		hints = "  ↑/↓ adjust depth · Enter confirm · Esc back · C-h help"
 	}
 	b.WriteString(hintStyle.Render(hints))
 

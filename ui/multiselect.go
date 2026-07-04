@@ -40,7 +40,10 @@ type MultiSelect struct {
 	list    *List[msRow]
 	cursor  int
 	width   int
+	height  int
 	result  MultiSelectResult
+
+	showHelp bool
 }
 
 var multiSelectToggle = key.NewBinding(key.WithKeys("space"))
@@ -114,7 +117,17 @@ func (m *MultiSelect) Init() tea.Cmd {
 
 func (m *MultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.list.Resize(m.frameSpec().BodyHeight(msg.Height))
+
 	case tea.KeyPressMsg:
+		// Help overlay: toggle, dismiss, or swallow keys while open.
+		if ToggleHelp(&m.showHelp, msg) {
+			return m, nil
+		}
+
 		switch {
 		case key.Matches(msg, keys.Quit):
 			m.result = MultiSelectResult{Confirmed: false}
@@ -140,12 +153,25 @@ func (m *MultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = m.list.Cursor()
 			return m, nil
 		}
-
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.list.Resize(m.frameSpec().BodyHeight(msg.Height))
 	}
 	return m, nil
+}
+
+func (m *MultiSelect) helpEntries() []HelpEntry {
+	return []HelpEntry{
+		{"Space", "Toggle selection"},
+		{"Enter", "Confirm selections"},
+		{"↑/↓", "Navigate"},
+		{"Esc", "Cancel"},
+	}
+}
+
+func (m *MultiSelect) viewHelp() string {
+	height := m.height
+	if height <= 0 {
+		height = 10
+	}
+	return RenderHelpOverlay("Help · Select", m.helpEntries(), m.width, height)
 }
 
 // frameSpec builds the Frame describing MultiSelect's screen chrome: a
@@ -155,7 +181,7 @@ func (m *MultiSelect) frameSpec() Frame {
 	return Frame{
 		Width:  m.width,
 		Header: m.title,
-		Hints:  "  Space toggle · Enter confirm · Esc cancel",
+		Hints:  "  Space toggle · Enter confirm · Esc cancel · C-h help",
 	}
 }
 
@@ -171,7 +197,13 @@ func (m *MultiSelect) checkedIndices() []int {
 }
 
 func (m *MultiSelect) View() tea.View {
-	v := tea.NewView(m.view())
+	var content string
+	if m.showHelp {
+		content = m.viewHelp()
+	} else {
+		content = m.view()
+	}
+	v := tea.NewView(content)
 	v.AltScreen = true
 	v.KeyboardEnhancements = tea.KeyboardEnhancements{}
 	return v

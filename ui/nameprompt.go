@@ -25,6 +25,10 @@ type namePromptModel struct {
 	// submitted is true after Enter; cancelled is true after Esc/ctrl+c.
 	submitted bool
 	cancelled bool
+
+	showHelp bool
+	width    int
+	height   int
 }
 
 func newNamePrompt(header, defaultValue, base string) *namePromptModel {
@@ -47,27 +51,57 @@ func (m *namePromptModel) result() string {
 func (m *namePromptModel) Init() tea.Cmd { return nil }
 
 func (m *namePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyPressMsg)
-	if !ok {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
+	case tea.KeyPressMsg:
+		// Help overlay: toggle, dismiss, or swallow keys while open.
+		if ToggleHelp(&m.showHelp, msg) {
+			return m, nil
+		}
+
+		// Intercept the domain's reserved keys first; the field handles the rest.
+		switch {
+		case key.Matches(msg, namePromptKeys.Cancel):
+			m.cancelled = true
+			return m, tea.Quit
+
+		case key.Matches(msg, namePromptKeys.Submit):
+			m.submitted = true
+			return m, tea.Quit
+		}
+
+		m.field.Update(msg)
 		return m, nil
 	}
 
-	// Intercept the domain's reserved keys first; the field handles the rest.
-	switch {
-	case key.Matches(keyMsg, namePromptKeys.Cancel):
-		m.cancelled = true
-		return m, tea.Quit
-
-	case key.Matches(keyMsg, namePromptKeys.Submit):
-		m.submitted = true
-		return m, tea.Quit
-	}
-
-	m.field.Update(msg)
 	return m, nil
 }
 
-func (m *namePromptModel) View() tea.View {
+func (m *namePromptModel) helpEntries() []HelpEntry {
+	return []HelpEntry{
+		{"Enter", "Confirm and submit"},
+		{"Esc", "Cancel"},
+		{"←/→ C-b/C-f", "Move cursor"},
+		{"Backspace", "Delete character before cursor"},
+		{"C-a", "Go to start of line"},
+		{"C-e", "Go to end of line"},
+		{"C-u", "Clear all text"},
+	}
+}
+
+func (m *namePromptModel) viewHelp() string {
+	height := m.height
+	if height <= 0 {
+		height = 10
+	}
+	return RenderHelpOverlay("Help · Name", m.helpEntries(), m.width, height)
+}
+
+func (m *namePromptModel) viewNormal() tea.View {
 	var b strings.Builder
 
 	b.WriteString(headerStyle.Render("  " + m.header))
@@ -81,12 +115,19 @@ func (m *namePromptModel) View() tea.View {
 	b.WriteString(m.field.View())
 	b.WriteString("\n\n")
 
-	b.WriteString(hintStyle.Render("  enter confirm · esc cancel"))
+	b.WriteString(hintStyle.Render("  enter confirm · esc cancel · C-h help"))
 
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	v.KeyboardEnhancements = tea.KeyboardEnhancements{}
 	return v
+}
+
+func (m *namePromptModel) View() tea.View {
+	if m.showHelp {
+		return tea.NewView(m.viewHelp())
+	}
+	return m.viewNormal()
 }
 
 type namePromptKeyMap struct {

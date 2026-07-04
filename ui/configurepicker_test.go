@@ -470,3 +470,208 @@ func TestConfigurePicker_View_ShowsDepthInPreviewHeader(t *testing.T) {
 	}
 }
 
+// --- Help overlay tests ---
+
+func TestConfigurePicker_Help_PathPhaseOpensOnCtrlH(t *testing.T) {
+	cp := NewConfigurePicker(mockExpandFn(nil))
+	cp = sendKeys(cp, tea.WindowSizeMsg{Width: 60, Height: 24})
+
+	if cp.showHelp {
+		t.Fatal("showHelp should be false initially")
+	}
+
+	cp = sendKeys(cp, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !cp.showHelp {
+		t.Error("showHelp should be true after C-h in path phase")
+	}
+}
+
+func TestConfigurePicker_Help_DepthPhaseOpensOnCtrlH(t *testing.T) {
+	paths := []string{"/a/b/foo"}
+	cp := NewConfigurePicker(mockExpandFn(paths))
+
+	cp = sendKeys(cp,
+		tea.WindowSizeMsg{Width: 60, Height: 24},
+		charKeyMsg("x"),
+		specialKeyMsg(tea.KeyEnter), // transition to depth phase
+	)
+
+	cp = sendKeys(cp, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !cp.showHelp {
+		t.Error("showHelp should be true after C-h in depth phase")
+	}
+}
+
+func TestConfigurePicker_Help_SecondCtrlHDismisses(t *testing.T) {
+	cp := NewConfigurePicker(mockExpandFn(nil))
+	cp = sendKeys(cp, tea.WindowSizeMsg{Width: 60, Height: 24})
+
+	cp = sendKeys(cp, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !cp.showHelp {
+		t.Fatal("showHelp should be true after first C-h")
+	}
+
+	cp = sendKeys(cp, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if cp.showHelp {
+		t.Error("showHelp should be false after second C-h")
+	}
+}
+
+func TestConfigurePicker_Help_EscDismisses(t *testing.T) {
+	cp := NewConfigurePicker(mockExpandFn(nil))
+	cp = sendKeys(cp, tea.WindowSizeMsg{Width: 60, Height: 24})
+
+	cp = sendKeys(cp, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !cp.showHelp {
+		t.Fatal("showHelp should be true after C-h")
+	}
+
+	cp = sendKeys(cp, specialKeyMsg(tea.KeyEscape))
+	if cp.showHelp {
+		t.Error("showHelp should be false after Esc in help mode")
+	}
+
+	// Esc after help dismissed should cancel, not quit
+	if cp.cancelled {
+		t.Error("Esc in help mode should not cancel the picker")
+	}
+}
+
+func TestConfigurePicker_Help_F1DoesNothing(t *testing.T) {
+	cp := NewConfigurePicker(mockExpandFn(nil))
+	cp = sendKeys(cp, tea.WindowSizeMsg{Width: 60, Height: 24})
+
+	cp = sendKeys(cp, tea.KeyPressMsg{Code: tea.KeyF1})
+	if cp.showHelp {
+		t.Error("F1 should not open help")
+	}
+}
+
+func TestConfigurePicker_Help_SwallowsKeysInPathPhase(t *testing.T) {
+	paths := []string{"/home/user/Dev/foo", "/home/user/Dev/bar"}
+	cp := NewConfigurePicker(mockExpandFn(paths))
+	cp = sendKeys(cp, tea.WindowSizeMsg{Width: 60, Height: 24})
+
+	// Open help
+	cp = sendKeys(cp, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !cp.showHelp {
+		t.Fatal("showHelp should be true after C-h")
+	}
+
+	// Type a character — should be swallowed
+	oldPreviewLen := len(cp.preview)
+	cp = sendKeys(cp, charKeyMsg("x"))
+	if len(cp.preview) != oldPreviewLen {
+		t.Error("typing in help mode should not change preview")
+	}
+
+	// Help should still be true
+	if !cp.showHelp {
+		t.Error("showHelp should remain true after swallowed key")
+	}
+}
+
+func TestConfigurePicker_Help_SwallowsKeysInDepthPhase(t *testing.T) {
+	paths := []string{"/a/b/foo"}
+	cp := NewConfigurePicker(mockExpandFn(paths))
+	cp = sendKeys(cp,
+		tea.WindowSizeMsg{Width: 60, Height: 24},
+		charKeyMsg("x"),
+		specialKeyMsg(tea.KeyEnter), // transition to depth phase
+	)
+
+	// Open help
+	cp = sendKeys(cp, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !cp.showHelp {
+		t.Fatal("showHelp should be true after C-h")
+	}
+
+	oldDepth := cp.depth
+	cp = sendKeys(cp, specialKeyMsg(tea.KeyUp))
+	if cp.depth != oldDepth {
+		t.Error("Up arrow in help mode should not change depth")
+	}
+
+	// Help should still be true
+	if !cp.showHelp {
+		t.Error("showHelp should remain true after swallowed key")
+	}
+}
+
+func TestConfigurePicker_Help_ViewContentPathPhase(t *testing.T) {
+	cp := NewConfigurePicker(mockExpandFn(nil))
+	cp = sendKeys(cp, tea.WindowSizeMsg{Width: 60, Height: 20})
+	cp.showHelp = true
+
+	view := cp.View()
+	s := fmt.Sprint(view)
+
+	if !containsSubstring(s, "Help") {
+		t.Error("help view should contain Help title")
+	}
+	if !containsSubstring(s, "Path") {
+		t.Error("help view should contain phase name 'Path'")
+	}
+	if !containsSubstring(s, "Tab") {
+		t.Error("help view should contain Tab entry")
+	}
+	if !containsSubstring(s, "Enter") {
+		t.Error("help view should contain Enter entry")
+	}
+	if !containsSubstring(s, "C-h toggle") {
+		t.Error("help view should contain 'C-h toggle' footer")
+	}
+	if !containsSubstring(s, "Esc close") {
+		t.Error("help view should contain 'Esc close' footer")
+	}
+}
+
+func TestConfigurePicker_Help_ViewContentDepthPhase(t *testing.T) {
+	paths := []string{"/a/b/foo"}
+	cp := NewConfigurePicker(mockExpandFn(paths))
+	cp = sendKeys(cp,
+		tea.WindowSizeMsg{Width: 60, Height: 20},
+		charKeyMsg("x"),
+		specialKeyMsg(tea.KeyEnter), // transition to depth phase
+	)
+	cp.showHelp = true
+
+	view := cp.View()
+	s := fmt.Sprint(view)
+
+	if !containsSubstring(s, "Help") {
+		t.Error("help view should contain Help title")
+	}
+	if !containsSubstring(s, "Depth") {
+		t.Error("help view should contain phase name 'Depth'")
+	}
+	if !containsSubstring(s, "↑") {
+		t.Error("help view should contain up arrow entry")
+	}
+	if !containsSubstring(s, "↓") {
+		t.Error("help view should contain down arrow entry")
+	}
+	if !containsSubstring(s, "C-h toggle") {
+		t.Error("help view should contain 'C-h toggle' footer")
+	}
+}
+
+func TestConfigurePicker_Help_HintsIncludeCtrH(t *testing.T) {
+	paths := []string{"/a/b/foo"}
+	cp := NewConfigurePicker(mockExpandFn(paths))
+	cp = sendKeys(cp, tea.WindowSizeMsg{Width: 60, Height: 20})
+
+	// Path phase hint
+	view := fmt.Sprint(cp.View())
+	if !containsSubstring(view, "C-h help") {
+		t.Error("path phase hint should include 'C-h help'")
+	}
+
+	// Depth phase hint
+	cp = sendKeys(cp, charKeyMsg("x"), specialKeyMsg(tea.KeyEnter))
+	view = fmt.Sprint(cp.View())
+	if !containsSubstring(view, "C-h help") {
+		t.Error("depth phase hint should include 'C-h help'")
+	}
+}
+
