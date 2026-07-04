@@ -97,3 +97,63 @@ func TestNormalizePiJSONLNonLimitErrorIsNotQuotaPause(t *testing.T) {
 		t.Fatalf("unexpected quota pause: %#v", result.QuotaPause)
 	}
 }
+
+func TestNormalizeOpenCodeJSONDetectsQuotaPauseFromPlainLine(t *testing.T) {
+	raw := "429 5-hour usage limit reached. Resets in 7min. Upgrade to continue.\n"
+	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
+	if result.QuotaPause == nil {
+		t.Fatal("expected quota pause")
+	}
+	if !strings.Contains(result.QuotaPause.Reason, "5-hour usage limit reached") {
+		t.Fatalf("reason = %q", result.QuotaPause.Reason)
+	}
+	if result.Output != "" {
+		t.Fatalf("output = %q, want empty on quota pause", result.Output)
+	}
+}
+
+func TestNormalizeOpenCodeJSONDetectsQuotaPauseFromJSONError(t *testing.T) {
+	raw := `{"type":"step_start","sessionID":"1","part":{}}` + "\n" +
+		`{"type":"error","sessionID":"1","error":{"message":"429 5-hour usage limit reached. Resets in 12min. Upgrade to continue."}}` + "\n"
+	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
+	if result.QuotaPause == nil {
+		t.Fatal("expected quota pause from JSON error diagnostic")
+	}
+	if !strings.Contains(result.QuotaPause.Reason, "5-hour usage limit reached") {
+		t.Fatalf("reason = %q", result.QuotaPause.Reason)
+	}
+}
+
+func TestNormalizeOpenCodeJSONNonQuotaErrorIsNotQuotaPause(t *testing.T) {
+	raw := `{"type":"error","sessionID":"1","error":{"message":"opencode failed"}}` + "\n"
+	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
+	if result.QuotaPause != nil {
+		t.Fatalf("unexpected quota pause: %#v", result.QuotaPause)
+	}
+	if result.Output != "opencode failed\n" {
+		t.Fatalf("output = %q, want diagnostic fallback", result.Output)
+	}
+}
+
+func TestOpencodeQuotaResetAtSharesPiLogic(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	reason := "429 5-hour usage limit reached. Resets in 7min. Upgrade to continue."
+	want := now.Add(7 * time.Minute).Add(opencodeGoQuotaAssuranceOffset)
+	if got := agentQuotaResetAt("opencode", reason, now); !got.Equal(want) {
+		t.Fatalf("reset = %s, want %s", got, want)
+	}
+}
+
+func TestOpencodeQuotaResetAtReturnsZeroWhenPatternMissing(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	for _, reason := range []string{
+		"429 5-hour usage limit reached.",
+		"",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			if got := agentQuotaResetAt("opencode", reason, now); !got.IsZero() {
+				t.Fatalf("reset = %s, want zero", got)
+			}
+		})
+	}
+}

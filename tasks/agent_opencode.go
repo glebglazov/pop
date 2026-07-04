@@ -6,8 +6,12 @@ import (
 )
 
 func normalizeOpenCodeJSON(raw string) AgentResult {
+	if pause := opencodeGoQuotaPauseReason(raw); pause != nil {
+		return AgentResult{QuotaPause: pause}
+	}
 	var transcript strings.Builder
 	var diagnostics []string
+	var pause *AgentQuotaPause
 	scanAgentJSONLines(raw, nil, func(line []byte) bool {
 		var event struct {
 			Type  string          `json:"type"`
@@ -23,10 +27,19 @@ func normalizeOpenCodeJSON(raw string) AgentResult {
 		case "text":
 			transcript.WriteString(event.Part.Text)
 		case "error":
-			appendAgentDiagnostic(&diagnostics, agentJSONDiagnostic(event.Error))
+			detail := agentJSONDiagnostic(event.Error)
+			if pause == nil {
+				pause = opencodeGoQuotaPauseReason(detail)
+			}
+			if pause == nil {
+				appendAgentDiagnostic(&diagnostics, detail)
+			}
 		}
 		return true
 	})
+	if pause != nil {
+		return AgentResult{QuotaPause: pause}
+	}
 	return normalizedTranscript(transcript.String(), diagnostics)
 }
 

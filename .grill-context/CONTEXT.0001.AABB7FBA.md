@@ -5,7 +5,7 @@ branch: master
 ---
 
 + Help overlay
-  A modal layer listing every binding active in the current TUI surface; Esc dismisses, other keys are swallowed while it is open.
+  A modal layer listing every binding active in the current TUI surface; Esc dismisses, other keys are swallowed while it is open. Bindings shown are **contextual** — only what applies in the surface's present mode (main list, action menu, filter, modal, configure phase, etc.), with a header naming the mode.
   avoid: help screen, help mode, F1 screen
   under: Pickers
 
