@@ -100,11 +100,30 @@ func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 	})
 }
 
-// verifyResolvedSet is the resolved-path core: it loads the set, builds the
-// Verifier prompt, runs the Verifier, parses the verdict, persists it, and
-// prints it. All external effects go through injectable seams (d.Git for SHA and
-// diff, runVerifier for the agent, the store for persistence).
+// verifyResolvedSet is the resolved-path core of `pop tasks verify`: it loads
+// the set, runs the Verifier (force — it never reads the SHA cache), persists
+// the verdict, and prints it. All external effects go through injectable seams
+// (d.Git for SHA and diff, runVerifier for the agent, the store for
+// persistence).
 func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*VerifyResult, error) {
+	m, err := loadVerifiableManifest(d, opts)
+	if err != nil {
+		return nil, err
+	}
+	workSHA := verifyWorkSHA(d, opts.RuntimePath)
+	v, err := runAndStoreVerdict(d, cfg, opts, m, workSHA)
+	if err != nil {
+		return nil, err
+	}
+	verdict := Verdict(v.Verdict)
+	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings)
+	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: verdict, Findings: v.Findings}, nil
+}
+
+// loadVerifiableManifest resolves and validates the set named in opts from its
+// definition path, returning a hard error for an absent identifier, an unknown
+// set, or a malformed manifest.
+func loadVerifiableManifest(d *Deps, opts verifyCoreOptions) (*Manifest, error) {
 	if opts.SetID == "" {
 		return nil, exitErr(ExitSetup, "a task set identifier is required")
 	}
@@ -120,8 +139,14 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 	if !m.Valid {
 		return nil, exitErr(ExitSetup, "task set %q is malformed: %s", opts.SetID, MalformedSummary(m))
 	}
+	return m, nil
+}
 
-	workSHA := verifyWorkSHA(d, opts.RuntimePath)
+// runAndStoreVerdict runs the Verifier once for the resolved set at workSHA,
+// parses the three-way verdict, upserts it into the Drain store keyed by (repo,
+// set, work SHA), and returns the stored record. It always invokes the Verifier
+// (the force path shared by `pop tasks verify` and, on a cache miss, the drain).
+func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, workSHA string) (*store.VerifyVerdict, error) {
 	diff := verifyWorkDiff(d, opts.RuntimePath, opts.SetID)
 	prompt := buildVerifierPrompt(d, m, workSHA, diff)
 
@@ -137,25 +162,66 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 	}
 
 	verdict, findings := ParseVerdict(raw)
-
-	s, err := openDrainStore(d)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = s.Close() }()
-	if err := s.PutVerifyVerdict(store.VerifyVerdict{
+	v := store.VerifyVerdict{
 		Repo:       opts.Repo,
 		SetID:      opts.SetID,
 		WorkSHA:    workSHA,
 		Verdict:    string(verdict),
 		Findings:   findings,
 		ComputedAt: time.Now().UTC(),
-	}); err != nil {
-		return nil, exitErr(ExitOperational, "record verify verdict: %v", err)
 	}
 
-	printVerdict(opts.Output, opts.SetID, workSHA, verdict, findings)
-	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: verdict, Findings: findings}, nil
+	s, err := openDrainStore(d)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = s.Close() }()
+	if err := s.PutVerifyVerdict(v); err != nil {
+		return nil, exitErr(ExitOperational, "record verify verdict: %v", err)
+	}
+	return &v, nil
+}
+
+// ensureVerifyVerdict returns the Verify verdict for the set at workSHA,
+// computing and persisting one only when none is cached at that SHA. The
+// cache-first read is what keeps a re-drain from re-invoking the Verifier: once
+// a verdict is stored at the current work SHA, reaching it is a stopping point,
+// so a drain with unchanged work reuses the verdict instead of looping
+// (ADR-0086).
+func ensureVerifyVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, workSHA string) (*store.VerifyVerdict, error) {
+	if s, ok, err := openDrainStoreIfExists(d); err == nil && ok {
+		cached, gerr := s.GetVerifyVerdict(opts.Repo, opts.SetID, workSHA)
+		_ = s.Close()
+		if gerr == nil && cached != nil {
+			return cached, nil
+		}
+	}
+	return runAndStoreVerdict(d, cfg, opts, m, workSHA)
+}
+
+// drainVerifyPhase runs the pre-approval Verifier phase for a drain that has
+// exhausted a set's AFK work (ADR-0086), returning the verdict-derived effective
+// status the drain should act on plus the verdict behind it. It gates only the
+// terminal zone — a manifestStatus of DONE (pure-AFK) or AWAITING-APPROVAL
+// (terminal HITL open); any other status is returned unchanged with a nil
+// verdict, so a READY/BLOCKED/FAILED set is never verified. It is cache-first:
+// a verdict already stored at the current work SHA is reused and the Verifier is
+// not re-invoked. A PASS verdict lets the terminal status stand; a FIXABLE or
+// NEEDS-HUMAN verdict resolves to VERIFY-FAILED, parking the set (automatic
+// remediation from a FIXABLE verdict lands in a later slice). The caller has
+// already checked that verification is enabled and the set has not opted out.
+func drainVerifyPhase(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, manifestStatus TaskSetStatus) (TaskSetStatus, *store.VerifyVerdict, error) {
+	if manifestStatus != StatusDone && manifestStatus != StatusAwaitingApproval {
+		return manifestStatus, nil, nil
+	}
+	workSHA := verifyWorkSHA(d, opts.RuntimePath)
+	v, err := ensureVerifyVerdict(d, cfg, opts, m, workSHA)
+	if err != nil {
+		return manifestStatus, nil, err
+	}
+	verdict := Verdict(v.Verdict)
+	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings)
+	return DeriveStatusWithVerdict(m, true, &verdict), v, nil
 }
 
 // runDefaultVerifier resolves the Verifier agent from the set's configured

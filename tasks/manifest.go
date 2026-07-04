@@ -390,3 +390,25 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 	}
 	return WriteAtomicWith(d, m.Path, data, 0o644)
 }
+
+// VerifyOptedOut reports whether the set explicitly opted out of Agent
+// verification with `"verify": false` in its manifest (ADR-0086). Verification
+// is a per-set opt-out only: user config is the master gate, so an absent or
+// truthy `verify` key means the set participates when the feature is globally
+// enabled, and there is no per-set opt-*in* while the feature is off. A
+// malformed value is treated as participating (fail toward verifying); the key
+// rides through WriteManifestAtomic in Unknown, so a rewrite preserves it.
+func (m *Manifest) VerifyOptedOut() bool {
+	if m == nil {
+		return false
+	}
+	raw, ok := m.Unknown["verify"]
+	if !ok {
+		return false
+	}
+	var enabled bool
+	if err := json.Unmarshal(raw, &enabled); err != nil {
+		return false
+	}
+	return !enabled
+}

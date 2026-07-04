@@ -57,8 +57,13 @@ type RunTaskSetResult struct {
 	TaskSetDone             bool
 	TaskSetDeferred         bool
 	TaskSetAwaitingApproval bool
-	SkippedTasks            []string
-	BlockedReason           string
+	// TaskSetVerifyFailed reports the pre-approval Verifier could not clear the
+	// set at its current work SHA (ADR-0086): a FIXABLE or NEEDS-HUMAN verdict
+	// parked the drain. VerifyFindings carries the Verifier's human-facing reasons.
+	TaskSetVerifyFailed bool
+	VerifyFindings      string
+	SkippedTasks        []string
+	BlockedReason       string
 	QuotaPaused             bool
 	PauseReason             string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
@@ -296,6 +301,53 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				return nil, selErr
 			}
 			result.Refresh = currentRefresh
+
+			// Pre-approval Verifier phase (ADR-0086): with Agent verification
+			// enabled and the set not opted out, a drain that has exhausted the
+			// set's AFK work must clear a SHA-gated Verify verdict before its
+			// terminal status stands. The verdict is cache-first — a re-drain at an
+			// unchanged work SHA reuses the stored verdict and never re-invokes the
+			// Verifier, so a parked set does not loop. A PASS lets DONE / AWAITING-
+			// APPROVAL stand and falls through to the switch; a FIXABLE or NEEDS-
+			// HUMAN verdict parks the set as VERIFY-FAILED (automatic remediation
+			// lands in a later slice). The Runtime execution lock is still held
+			// here, so the Verifier runs under it.
+			if m := currentRefresh.Manifests[taskSetID]; verifyEnabled(cfg) && !m.VerifyOptedOut() &&
+				(row.Status == StatusDone || row.Status == StatusAwaitingApproval) {
+				repo := ""
+				if id, idErr := ResolveRepositoryIdentity(d, runtimePath); idErr == nil {
+					repo = id.CommonDir
+				}
+				effective, verdict, verr := drainVerifyPhase(d, cfg, verifyCoreOptions{
+					Repo:        repo,
+					RuntimePath: runtimePath,
+					SetID:       taskSetID,
+					Timeout:     timeout,
+					Output:      out,
+				}, m, row.Status)
+				if verr != nil {
+					return result, verr
+				}
+				if effective == StatusVerifyFailed {
+					result.TaskSetVerifyFailed = true
+					if verdict != nil {
+						result.VerifyFindings = verdict.Findings
+					}
+					// Overlay the verdict-derived disposition on the display row so the
+					// rendered table reads VERIFY-FAILED, matching `pop tasks status`.
+					row.Status = StatusVerifyFailed
+					row.Progress = BuildProgress(m, StatusVerifyFailed)
+					row.VerifyFindings = result.VerifyFindings
+					if !opts.Yes {
+						fmt.Fprintln(out)
+						Render(out, currentRefresh)
+					} else {
+						printTaskSetSummary(out, result)
+					}
+					return result, exitErr(ExitNoRunnable, "Task set %q verification failed — a human must review it", taskSetID)
+				}
+			}
+
 			switch row.Status {
 			case StatusDone:
 				result.TaskSetDone = true
@@ -510,6 +562,13 @@ func printTaskSetSummary(w io.Writer, result *RunTaskSetResult) {
 	}
 	if result.TaskSetDeferred {
 		out.line(ansiYellow, "%s", deferralMessage(result))
+		return
+	}
+	if result.TaskSetVerifyFailed {
+		out.line(ansiRed, "Verification failed: task set %s needs a human review", result.TaskSetID)
+		if reason := firstFindingsLine(result.VerifyFindings); reason != "" {
+			out.line(ansiDim, "  %s", reason)
+		}
 		return
 	}
 	if result.TaskSetAwaitingApproval {
