@@ -22,6 +22,6 @@ branch: master
   Clearing every cached **Verify verdict** row for a `(repo, set)` in the Drain store when a **Task set** leaves the terminal zone — ending the current **verification episode** so the next completion requires fresh Agent verification. Implemented as `DELETE` of all `verify_verdicts` rows for that key (not a soft epoch). Triggered on human **Open task** / batch reopen and on **Remediation task** spawn. The table is a cache, not the audit trail; **Captured verify run**s remain on disk.
   avoid: verdict expiry, SHA staleness, verify reset, verify epoch
 
-+ Verified-at SHA
-  The work SHA recorded on the set's latest PASS **Verify verdict** in the current **verification episode**, shown in yellow on status surfaces when runtime HEAD differs — signalling "cleared at this commit, HEAD has moved since" without regressing DONE or AWAITING-APPROVAL to NEEDS-VERIFY. Absent when HEAD matches the verified SHA or the set has no PASS in the episode.
+~ Verified-at SHA
+  The work SHA recorded on the set's latest PASS **Verify verdict** in the current **verification episode**, surfaced when runtime HEAD differs — signalling "cleared at this commit, HEAD has moved since" without regressing DONE or AWAITING-APPROVAL to NEEDS-VERIFY. Shown in yellow as `verified @ <shortSHA>` (12-char prefix, matching verify output) on **`pop tasks status`** in the Details column and on the **Queue dashboard** in the main STATUS column (and in the detail-view header when a set is opened). Absent when HEAD matches the verified SHA or the set has no PASS in the episode.
   avoid: stale SHA, verified commit, work SHA badge
