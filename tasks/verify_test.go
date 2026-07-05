@@ -172,6 +172,37 @@ func TestVerifyResolvedSetForceOverwritesForSHA(t *testing.T) {
 	}
 }
 
+// TestVerifyResolvedSetForceRunsDespiteCachedPass: the explicit `pop tasks verify`
+// path always invokes the Verifier, even when a PASS verdict is already cached
+// at the current HEAD, and overwrites it with the new result (ADR-0096).
+func TestVerifyResolvedSetForceRunsDespiteCachedPass(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaX\n", "", ""))
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaX", Verdict: "PASS"})
+
+	called := false
+	res, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output: &bytes.Buffer{},
+		runVerifier: func(string) (string, error) {
+			called = true
+			return "VERDICT: NEEDS-HUMAN\nFINDINGS: forced re-run\n", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("verifyResolvedSet: %v", err)
+	}
+	if !called {
+		t.Fatal("explicit verify path did not force-run despite a cached PASS")
+	}
+	if res.Verdict != VerdictNeedsHuman {
+		t.Fatalf("verdict = %q, want NEEDS-HUMAN", res.Verdict)
+	}
+	stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaX")
+	if stored == nil || stored.Verdict != "NEEDS-HUMAN" || stored.Findings != "forced re-run" {
+		t.Fatalf("stored verdict = %+v, want NEEDS-HUMAN forced re-run", stored)
+	}
+}
+
 func TestVerifyResolvedSetMalformedResponseParksNeedsHuman(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
 	res, err := verifyResolvedSet(d, nil, verifyCoreOptions{
@@ -303,11 +334,11 @@ func TestCommitSubjectPrefixMatchesCommitSubject(t *testing.T) {
 
 func TestFormatVerifyCommand(t *testing.T) {
 	tests := []struct {
-		name     string
-		setID    string
-		agents   []string
-		effort   string
-		want     string
+		name   string
+		setID  string
+		agents []string
+		effort string
+		want   string
 	}{
 		{
 			name:  "set id only",

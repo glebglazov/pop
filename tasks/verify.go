@@ -246,13 +246,18 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 // cache-first read is what keeps a re-drain from re-invoking the Verifier: once
 // a verdict is stored at the current work SHA, reaching it is a stopping point,
 // so a drain with unchanged work reuses the verdict instead of looping
-// (ADR-0086).
+// (ADR-0086). When no verdict exists at the current SHA, the most recent PASS
+// verdict for the set immunizes the terminal status against later commits, so
+// that stale PASS is returned without re-invoking the Verifier (ADR-0096). Only
+// when no PASS verdict exists in the episode does the Verifier actually run.
 func ensureVerifyVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, workSHA string) (*store.VerifyVerdict, error) {
 	if s, ok, err := openDrainStoreIfExists(d); err == nil && ok {
-		cached, gerr := s.GetVerifyVerdict(opts.Repo, opts.SetID, workSHA)
-		_ = s.Close()
-		if gerr == nil && cached != nil {
+		defer func() { _ = s.Close() }()
+		if cached, gerr := s.GetVerifyVerdict(opts.Repo, opts.SetID, workSHA); gerr == nil && cached != nil {
 			return cached, nil
+		}
+		if pass, gerr := s.GetLatestPassVerifyVerdict(opts.Repo, opts.SetID); gerr == nil && pass != nil {
+			return pass, nil
 		}
 	}
 	return runAndStoreVerdict(d, cfg, opts, m, workSHA)
@@ -265,10 +270,11 @@ func ensureVerifyVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m 
 // (terminal HITL open); any other status is returned unchanged with a nil
 // verdict, so a READY/BLOCKED/FAILED set is never verified. It is cache-first:
 // a verdict already stored at the current work SHA is reused and the Verifier is
-// not re-invoked. A PASS verdict lets the terminal status stand; a FIXABLE or
-// NEEDS-HUMAN verdict resolves to VERIFY-FAILED, parking the set (automatic
-// remediation from a FIXABLE verdict lands in a later slice). The caller has
-// already checked that verification is enabled and the set has not opted out.
+// not re-invoked. A PASS verdict (at the current SHA or an older immunizing
+// SHA) lets the terminal status stand; a FIXABLE or NEEDS-HUMAN verdict at the
+// current SHA resolves to VERIFY-FAILED, parking the set (automatic remediation
+// from a FIXABLE verdict lands in a later slice). The caller has already
+// checked that verification is enabled and the set has not opted out.
 func drainVerifyPhase(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, manifestStatus TaskSetStatus) (TaskSetStatus, *store.VerifyVerdict, error) {
 	if manifestStatus != StatusDone && manifestStatus != StatusAwaitingApproval {
 		return manifestStatus, nil, nil
@@ -279,8 +285,20 @@ func drainVerifyPhase(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Ma
 		return manifestStatus, nil, err
 	}
 	verdict := Verdict(v.Verdict)
+	var currentVerdict, latestPass *Verdict
+	if v.WorkSHA == workSHA {
+		currentVerdict = &verdict
+	} else if verdict == VerdictPass {
+		// Stale immunizing PASS: let DeriveStatusWithVerdict see it as the
+		// episode's latest PASS rather than a current verdict.
+		latestPass = &verdict
+	} else {
+		// Defensive: ensureVerifyVerdict only returns a stale verdict when it
+		// is a PASS, so this preserves any non-PASS failure signal.
+		currentVerdict = &verdict
+	}
 	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings, opts.Agents, opts.Effort)
-	return DeriveStatusWithVerdict(m, true, &verdict, nil), v, nil
+	return DeriveStatusWithVerdict(m, true, currentVerdict, latestPass), v, nil
 }
 
 // verifierSelection is the resolved Verifier agent fallback list and effort tier

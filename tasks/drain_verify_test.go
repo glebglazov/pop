@@ -170,12 +170,12 @@ func TestDrainVerifyPhaseReusesCachedVerdict(t *testing.T) {
 	}
 }
 
-// TestDrainVerifyPhaseStaleCachedVerdictReRuns: a verdict stored at a different
-// (stale) work SHA misses the cache, so the Verifier runs and records a fresh
-// verdict at the current SHA.
-func TestDrainVerifyPhaseStaleCachedVerdictReRuns(t *testing.T) {
+// TestDrainVerifyPhaseStaleNonPassReRuns: a non-PASS verdict stored at a
+// different (stale) work SHA does not immunize the set, so the Verifier runs
+// and records a fresh verdict at the current SHA.
+func TestDrainVerifyPhaseStaleNonPassReRuns(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), doneAFKSet(), nil)
-	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "PASS"})
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "NEEDS-HUMAN", Findings: "stale"})
 	called := false
 	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
 		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
@@ -185,13 +185,70 @@ func TestDrainVerifyPhaseStaleCachedVerdictReRuns(t *testing.T) {
 		t.Fatalf("drainVerifyPhase: %v", err)
 	}
 	if !called {
-		t.Fatal("Verifier not invoked despite a stale (different-SHA) cached verdict")
+		t.Fatal("Verifier not invoked despite a stale non-PASS cached verdict")
 	}
 	if status != StatusVerifyFailed || verdict == nil || verdict.Verdict != "NEEDS-HUMAN" {
 		t.Fatalf("status/verdict = %q/%+v, want VERIFY-FAILED/NEEDS-HUMAN", status, verdict)
 	}
 	if stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaNEW"); stored == nil || stored.Verdict != "NEEDS-HUMAN" {
 		t.Fatalf("stored verdict at shaNEW = %+v, want NEEDS-HUMAN", stored)
+	}
+}
+
+// TestDrainVerifyPhaseImmunizingPassAtOldSHANoRun: a PASS verdict stored at an
+// older work SHA immunizes the set (ADR-0096), so the drain reuses it without
+// re-invoking the Verifier even though HEAD has moved on.
+func TestDrainVerifyPhaseImmunizingPassAtOldSHANoRun(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), doneAFKSet(), nil)
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "PASS"})
+	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
+		runVerifier: func(string) (string, error) {
+			t.Fatal("Verifier re-invoked despite an immunizing PASS at an older SHA")
+			return "", nil
+		},
+	}, m, StatusDone)
+	if err != nil {
+		t.Fatalf("drainVerifyPhase: %v", err)
+	}
+	if status != StatusDone || verdict == nil || verdict.Verdict != "PASS" || verdict.WorkSHA != "shaOLD" {
+		t.Fatalf("status/verdict = %q/%+v, want DONE/PASS at shaOLD", status, verdict)
+	}
+	// No fresh verdict is written at the new SHA; the immunizing PASS remains.
+	if stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaNEW"); stored != nil {
+		t.Fatalf("unexpected stored verdict at shaNEW: %+v", stored)
+	}
+}
+
+// TestDrainVerifyPhaseAfterInvalidationRunsAgain: invalidating the verify
+// verdicts for a set (e.g., on reopen/remediation, ADR-0096) removes the
+// immunizing PASS, so the next terminal drain re-invokes the Verifier.
+func TestDrainVerifyPhaseAfterInvalidationRunsAgain(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), doneAFKSet(), nil)
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "PASS"})
+
+	s, err := openDrainStore(d)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := s.InvalidateVerifyVerdicts("/repo/.git", "demo"); err != nil {
+		t.Fatalf("InvalidateVerifyVerdicts: %v", err)
+	}
+	_ = s.Close()
+
+	called := false
+	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
+		runVerifier: func(string) (string, error) { called = true; return "VERDICT: PASS\n", nil },
+	}, m, StatusDone)
+	if err != nil {
+		t.Fatalf("drainVerifyPhase: %v", err)
+	}
+	if !called {
+		t.Fatal("Verifier not invoked after invalidation removed the immunizing PASS")
+	}
+	if status != StatusDone || verdict == nil || verdict.Verdict != "PASS" || verdict.WorkSHA != "shaNEW" {
+		t.Fatalf("status/verdict = %q/%+v, want DONE/PASS at shaNEW", status, verdict)
 	}
 }
 
