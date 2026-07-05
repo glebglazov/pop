@@ -73,6 +73,87 @@ func TestPutVerifyVerdictOverwritesSameSHA(t *testing.T) {
 	}
 }
 
+func TestGetLatestPassVerifyVerdictMissingReturnsNil(t *testing.T) {
+	s := openTestStore(t)
+	got, err := s.GetLatestPassVerifyVerdict("/repo/.git", "set-a")
+	if err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict = %+v, want nil", got)
+	}
+}
+
+func TestGetLatestPassVerifyVerdictNonPassReturnsNil(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "sha1", Verdict: "NEEDS-HUMAN"}); err != nil {
+		t.Fatalf("PutVerifyVerdict: %v", err)
+	}
+	got, err := s.GetLatestPassVerifyVerdict("/repo/.git", "set-a")
+	if err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict = %+v, want nil", got)
+	}
+}
+
+func TestGetLatestPassVerifyVerdictReturnsMostRecentPass(t *testing.T) {
+	s := openTestStore(t)
+	base := time.Now().UTC().Truncate(time.Second)
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "sha-old", Verdict: "PASS", ComputedAt: base.Add(-time.Hour)}); err != nil {
+		t.Fatalf("PutVerifyVerdict old: %v", err)
+	}
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "sha-new", Verdict: "PASS", ComputedAt: base}); err != nil {
+		t.Fatalf("PutVerifyVerdict new: %v", err)
+	}
+	got, err := s.GetLatestPassVerifyVerdict("/repo/.git", "set-a")
+	if err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict: %v", err)
+	}
+	if got == nil || got.WorkSHA != "sha-new" {
+		t.Fatalf("GetLatestPassVerifyVerdict = %+v, want sha-new", got)
+	}
+}
+
+func TestGetLatestPassVerifyVerdictIgnoresNonPassRows(t *testing.T) {
+	s := openTestStore(t)
+	base := time.Now().UTC().Truncate(time.Second)
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "sha-pass", Verdict: "PASS", ComputedAt: base.Add(-time.Hour)}); err != nil {
+		t.Fatalf("PutVerifyVerdict pass: %v", err)
+	}
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "sha-fail", Verdict: "NEEDS-HUMAN", Findings: "nope", ComputedAt: base}); err != nil {
+		t.Fatalf("PutVerifyVerdict fail: %v", err)
+	}
+	got, err := s.GetLatestPassVerifyVerdict("/repo/.git", "set-a")
+	if err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict: %v", err)
+	}
+	if got == nil || got.WorkSHA != "sha-pass" {
+		t.Fatalf("GetLatestPassVerifyVerdict = %+v, want sha-pass", got)
+	}
+}
+
+func TestGetLatestPassVerifyVerdictIsolatedByRepoAndSet(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo-a/.git", SetID: "set-a", WorkSHA: "sha1", Verdict: "PASS"}); err != nil {
+		t.Fatalf("PutVerifyVerdict repo-a: %v", err)
+	}
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo-b/.git", SetID: "set-a", WorkSHA: "sha1", Verdict: "PASS"}); err != nil {
+		t.Fatalf("PutVerifyVerdict repo-b: %v", err)
+	}
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo-a/.git", SetID: "set-b", WorkSHA: "sha1", Verdict: "PASS"}); err != nil {
+		t.Fatalf("PutVerifyVerdict set-b: %v", err)
+	}
+	got, err := s.GetLatestPassVerifyVerdict("/repo-a/.git", "set-a")
+	if err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict: %v", err)
+	}
+	if got == nil || got.Repo != "/repo-a/.git" || got.SetID != "set-a" {
+		t.Fatalf("GetLatestPassVerifyVerdict = %+v, want repo-a set-a", got)
+	}
+}
+
 func TestVerifyVerdictKeyedBySHA(t *testing.T) {
 	s := openTestStore(t)
 	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "old", Verdict: "PASS"}); err != nil {

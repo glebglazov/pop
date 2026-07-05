@@ -114,18 +114,19 @@ func DeriveStatus(m *Manifest) TaskSetStatus {
 	return StatusAwaitingApproval
 }
 
-// DeriveStatusWithVerdict layers the SHA-gated Verify verdict onto the
-// manifest-derived status (ADR-0086). When verification is disabled it returns
-// the manifest status unchanged — all-AFK-done still reaches DONE and no
+// DeriveStatusWithVerdict layers the Verify verdict onto the manifest-derived
+// status (ADR-0086/0096). When verification is disabled it returns the manifest
+// status unchanged — all-AFK-done still reaches DONE and no
 // NEEDS-VERIFY/VERIFY-FAILED state ever appears. When enabled, the verdict
 // becomes a real gate on the terminal zone (a set whose AFK work is complete —
 // manifest status DONE or AWAITING-APPROVAL):
 //
-//   - verdict absent or stale (nil, because the caller looks it up at the set's
-//     current work SHA) → NEEDS-VERIFY
-//   - PASS → the manifest status stands (DONE when nothing is open, or
-//     AWAITING-APPROVAL when a terminal HITL approval task is still open)
-//   - any non-PASS verdict (NEEDS-HUMAN or FIXABLE) → VERIFY-FAILED
+//   - a PASS verdict at the current work SHA lets the terminal status stand;
+//   - any non-PASS verdict at the current work SHA → VERIFY-FAILED;
+//   - no verdict at the current work SHA, but a PASS verdict exists for the set
+//     at an older work SHA → terminal status stands (immunized against later
+//     commits, ADR-0096);
+//   - no PASS verdict in the episode → NEEDS-VERIFY.
 //
 // A cached FIXABLE verdict reads as VERIFY-FAILED here because the set at this
 // SHA did not pass; the drain's remediation loop (ADR-0086) responds to FIXABLE
@@ -135,10 +136,8 @@ func DeriveStatus(m *Manifest) TaskSetStatus {
 // Every other manifest status is returned untouched, so READY/FAILED/DEFERRED/
 // MALFORMED/MISSING are never gated, and a BLOCKED set (an open AFK task still
 // gated behind a human) stays BLOCKED — its work is not complete, so there is
-// nothing to verify yet. The verdict is a SHA-keyed cache, not a completion
-// flag: when the work SHA moves the caller's lookup misses, verdict is nil, and
-// the set returns to NEEDS-VERIFY, so "artifacts drive status" still holds.
-func DeriveStatusWithVerdict(m *Manifest, verifyEnabled bool, verdict *Verdict) TaskSetStatus {
+// nothing to verify yet.
+func DeriveStatusWithVerdict(m *Manifest, verifyEnabled bool, currentVerdict, latestPass *Verdict) TaskSetStatus {
 	base := DeriveStatus(m)
 	if !verifyEnabled {
 		return base
@@ -149,13 +148,16 @@ func DeriveStatusWithVerdict(m *Manifest, verifyEnabled bool, verdict *Verdict) 
 	default:
 		return base
 	}
-	if verdict == nil {
-		return StatusNeedsVerify
+	if currentVerdict != nil {
+		if *currentVerdict == VerdictPass {
+			return base
+		}
+		return StatusVerifyFailed
 	}
-	if *verdict == VerdictPass {
+	if latestPass != nil && *latestPass == VerdictPass {
 		return base
 	}
-	return StatusVerifyFailed
+	return StatusNeedsVerify
 }
 
 // isDeferred reports whether every task is Done or Skipped with at least one

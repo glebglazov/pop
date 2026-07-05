@@ -25,19 +25,21 @@ func TestDeriveStatusWithVerdictDisabled(t *testing.T) {
 		{ID: "02-gate", Type: "HITL", Status: "open"},
 	}
 	cases := []struct {
-		name    string
-		tasks   []Task
-		verdict *Verdict
-		want    TaskSetStatus
+		name       string
+		tasks      []Task
+		verdict    *Verdict
+		latestPass *Verdict
+		want       TaskSetStatus
 	}{
-		{"all AFK done, no verdict → DONE", pureAFKDone, nil, StatusDone},
-		{"all AFK done, NEEDS-HUMAN verdict ignored → DONE", pureAFKDone, verdictPtr(VerdictNeedsHuman), StatusDone},
-		{"AFK done + HITL open → AWAITING-APPROVAL", afkDoneHITLOpen, nil, StatusAwaitingApproval},
+		{"all AFK done, no verdict → DONE", pureAFKDone, nil, nil, StatusDone},
+		{"all AFK done, NEEDS-HUMAN verdict ignored → DONE", pureAFKDone, verdictPtr(VerdictNeedsHuman), nil, StatusDone},
+		{"AFK done + HITL open → AWAITING-APPROVAL", afkDoneHITLOpen, nil, nil, StatusAwaitingApproval},
+		{"all AFK done, stale PASS ignored → DONE", pureAFKDone, nil, verdictPtr(VerdictPass), StatusDone},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := &Manifest{Valid: true, Tasks: tc.tasks}
-			if got := DeriveStatusWithVerdict(m, false, tc.verdict); got != tc.want {
+			if got := DeriveStatusWithVerdict(m, false, tc.verdict, tc.latestPass); got != tc.want {
 				t.Fatalf("status = %q, want %q", got, tc.want)
 			}
 		})
@@ -68,27 +70,33 @@ func TestDeriveStatusWithVerdictEnabled(t *testing.T) {
 	}
 
 	cases := []struct {
-		name    string
-		tasks   []Task
-		verdict *Verdict
-		want    TaskSetStatus
+		name       string
+		tasks      []Task
+		verdict    *Verdict
+		latestPass *Verdict
+		want       TaskSetStatus
 	}{
-		{"all AFK done, absent verdict → NEEDS-VERIFY", pureAFKDone, nil, StatusNeedsVerify},
-		{"all AFK done, PASS → DONE", pureAFKDone, verdictPtr(VerdictPass), StatusDone},
-		{"all AFK done, NEEDS-HUMAN → VERIFY-FAILED", pureAFKDone, verdictPtr(VerdictNeedsHuman), StatusVerifyFailed},
-		{"all AFK done, FIXABLE → VERIFY-FAILED", pureAFKDone, verdictPtr(VerdictFixable), StatusVerifyFailed},
-		{"AFK done + HITL open, absent → NEEDS-VERIFY", afkDoneHITLOpen, nil, StatusNeedsVerify},
-		{"AFK done + HITL open, PASS → AWAITING-APPROVAL", afkDoneHITLOpen, verdictPtr(VerdictPass), StatusAwaitingApproval},
-		{"AFK done + HITL open, NEEDS-HUMAN → VERIFY-FAILED", afkDoneHITLOpen, verdictPtr(VerdictNeedsHuman), StatusVerifyFailed},
-		{"open AFK gated behind HITL stays BLOCKED even with PASS", blocked, verdictPtr(VerdictPass), StatusBlocked},
-		{"ready set untouched by absent verdict", ready, nil, StatusReady},
-		{"failed set untouched by PASS", failed, verdictPtr(VerdictPass), StatusFailed},
-		{"deferred set untouched by absent verdict", deferred, nil, StatusDeferred},
+		{"all AFK done, absent verdict → NEEDS-VERIFY", pureAFKDone, nil, nil, StatusNeedsVerify},
+		{"all AFK done, PASS → DONE", pureAFKDone, verdictPtr(VerdictPass), nil, StatusDone},
+		{"all AFK done, NEEDS-HUMAN → VERIFY-FAILED", pureAFKDone, verdictPtr(VerdictNeedsHuman), nil, StatusVerifyFailed},
+		{"all AFK done, FIXABLE → VERIFY-FAILED", pureAFKDone, verdictPtr(VerdictFixable), nil, StatusVerifyFailed},
+		{"AFK done + HITL open, absent → NEEDS-VERIFY", afkDoneHITLOpen, nil, nil, StatusNeedsVerify},
+		{"AFK done + HITL open, PASS → AWAITING-APPROVAL", afkDoneHITLOpen, verdictPtr(VerdictPass), nil, StatusAwaitingApproval},
+		{"AFK done + HITL open, NEEDS-HUMAN → VERIFY-FAILED", afkDoneHITLOpen, verdictPtr(VerdictNeedsHuman), nil, StatusVerifyFailed},
+		{"open AFK gated behind HITL stays BLOCKED even with PASS", blocked, verdictPtr(VerdictPass), nil, StatusBlocked},
+		{"ready set untouched by absent verdict", ready, nil, nil, StatusReady},
+		{"failed set untouched by PASS", failed, verdictPtr(VerdictPass), nil, StatusFailed},
+		{"deferred set untouched by absent verdict", deferred, nil, nil, StatusDeferred},
+		// ADR-0096: an older PASS immunizes the terminal status against later commits.
+		{"all AFK done, stale PASS immunizes → DONE", pureAFKDone, nil, verdictPtr(VerdictPass), StatusDone},
+		{"AFK done + HITL open, stale PASS immunizes → AWAITING-APPROVAL", afkDoneHITLOpen, nil, verdictPtr(VerdictPass), StatusAwaitingApproval},
+		{"all AFK done, current non-PASS beats stale PASS → VERIFY-FAILED", pureAFKDone, verdictPtr(VerdictNeedsHuman), verdictPtr(VerdictPass), StatusVerifyFailed},
+		{"AFK done + HITL open, current non-PASS beats stale PASS → VERIFY-FAILED", afkDoneHITLOpen, verdictPtr(VerdictFixable), verdictPtr(VerdictPass), StatusVerifyFailed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := &Manifest{Valid: true, Tasks: tc.tasks}
-			if got := DeriveStatusWithVerdict(m, true, tc.verdict); got != tc.want {
+			if got := DeriveStatusWithVerdict(m, true, tc.verdict, tc.latestPass); got != tc.want {
 				t.Fatalf("status = %q, want %q", got, tc.want)
 			}
 		})
@@ -188,9 +196,17 @@ func TestApplyVerifyVerdictsEnabledGatesOnVerdict(t *testing.T) {
 			want:         StatusVerifyFailed,
 		},
 		{
-			name:         "stale-SHA verdict ignored → NEEDS-VERIFY",
+			name:         "stale-SHA PASS immunizes → DONE",
 			writeVerdict: func(d *Deps) { putStatusVerdict(t, d, "/repo/.git", "demo", "shaOLD", "PASS", "") },
-			want:         StatusNeedsVerify,
+			want:         StatusDone,
+		},
+		{
+			name: "stale-SHA PASS ignored when current HEAD non-PASS → VERIFY-FAILED",
+			writeVerdict: func(d *Deps) {
+				putStatusVerdict(t, d, "/repo/.git", "demo", "shaOLD", "PASS", "")
+				putStatusVerdict(t, d, "/repo/.git", "demo", "shaCUR", "NEEDS-HUMAN", "contract drift")
+			},
+			want: StatusVerifyFailed,
 		},
 	}
 	for _, tc := range cases {

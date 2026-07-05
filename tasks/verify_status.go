@@ -15,8 +15,8 @@ func verifyEnabled(cfg *config.Config) bool {
 	return cfg != nil && cfg.Task != nil && cfg.Task.Verify != nil && cfg.Task.Verify.Enabled
 }
 
-// ApplyVerifyVerdicts re-derives each row's status through the SHA-gated Verify
-// verdict (ADR-0086) when Agent verification is enabled, then restores the
+// ApplyVerifyVerdicts re-derives each row's status through the Verify verdict
+// (ADR-0086/0096) when Agent verification is enabled, then restores the
 // display order so a formerly-Done set that now needs verification lands with
 // the active sets. It is a no-op when the feature is disabled — status then
 // derives from the manifest alone, exactly as before.
@@ -25,11 +25,14 @@ func verifyEnabled(cfg *config.Config) bool {
 // resolves. Call ApplyVerifyVerdictsWith when each set may drain in its own
 // checkout (the queue dashboard, queue scan).
 //
-// The verdict lookup is keyed by each set's runtime checkout HEAD, so a verdict
-// recorded at an earlier SHA simply misses (stale → nil → NEEDS-VERIFY). The
-// pass is best-effort: an unresolvable repo or work SHA, or the absence of a
-// store, resolves every terminal set to NEEDS-VERIFY (a nil verdict) rather than
-// leaving it falsely Done — the gate never fails open.
+// The verdict lookup first checks the current work SHA. A PASS verdict at HEAD
+// lets the terminal status stand; any non-PASS verdict at HEAD forces
+// VERIFY-FAILED. When there is no verdict at HEAD, the most recent PASS
+// verdict for the set immunizes the terminal status against later commits
+// (ADR-0096). Only when no PASS verdict exists in the episode does the set
+// regress to NEEDS-VERIFY. The pass is best-effort: an unresolvable repo or work
+// SHA, or the absence of a store, resolves every terminal set to NEEDS-VERIFY
+// rather than leaving it falsely Done — the gate never fails open.
 func ApplyVerifyVerdicts(d *Deps, result *RefreshResult, cfg *config.Config, runtimePath string) {
 	ApplyVerifyVerdictsWith(d, result, cfg, func(string) string { return runtimePath })
 }
@@ -63,13 +66,17 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 			}
 		}
 		workSHA := verifyWorkSHA(d, runtimePath)
-		var verdict *store.VerifyVerdict
+		var current *store.VerifyVerdict
+		var latestPass *store.VerifyVerdict
 		if s != nil && repo != "" && workSHA != "" {
 			if v, err := s.GetVerifyVerdict(repo, row.ID, workSHA); err == nil {
-				verdict = v
+				current = v
+			}
+			if v, err := s.GetLatestPassVerifyVerdict(repo, row.ID); err == nil {
+				latestPass = v
 			}
 		}
-		if decorateRowWithVerdict(row, result.Manifests[row.ID], verdict) {
+		if decorateRowWithVerdict(row, result.Manifests[row.ID], current, latestPass) {
 			changed = true
 		}
 	}
@@ -79,31 +86,36 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 }
 
 // decorateRowWithVerdict re-derives one row's status through its Verify verdict
-// (nil = absent or stale) and refreshes the status-dependent display fields.
-// It reports whether the status changed, so the caller can re-order the table.
+// and refreshes the status-dependent display fields. It reports whether the
+// status changed, so the caller can re-order the table.
 //
 // The verdict gates only the terminal zone — a set whose manifest status is
 // already DONE or AWAITING-APPROVAL. Every other row (missing, malformed,
 // ready, failed, deferred, blocked) is left untouched; in particular a missing
 // row carries no manifest, so re-deriving it would wrongly read as MALFORMED.
-func decorateRowWithVerdict(row *Row, m *Manifest, verdict *store.VerifyVerdict) bool {
+func decorateRowWithVerdict(row *Row, m *Manifest, currentVerdict, latestPass *store.VerifyVerdict) bool {
 	if row.Status != StatusDone && row.Status != StatusAwaitingApproval {
 		return false
 	}
-	var v *Verdict
-	if verdict != nil {
-		vv := Verdict(verdict.Verdict)
-		v = &vv
+	var current *Verdict
+	if currentVerdict != nil {
+		vv := Verdict(currentVerdict.Verdict)
+		current = &vv
 	}
-	status := DeriveStatusWithVerdict(m, true, v)
+	var pass *Verdict
+	if latestPass != nil {
+		vv := Verdict(latestPass.Verdict)
+		pass = &vv
+	}
+	status := DeriveStatusWithVerdict(m, true, current, pass)
 	if status == row.Status {
 		return false
 	}
 	row.Status = status
 	row.Progress = BuildProgress(m, status)
 	row.VerifyFindings = ""
-	if status == StatusVerifyFailed && verdict != nil {
-		row.VerifyFindings = verdict.Findings
+	if status == StatusVerifyFailed && currentVerdict != nil {
+		row.VerifyFindings = currentVerdict.Findings
 	}
 	return true
 }

@@ -280,7 +280,7 @@ func drainVerifyPhase(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Ma
 	}
 	verdict := Verdict(v.Verdict)
 	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings, opts.Agents, opts.Effort)
-	return DeriveStatusWithVerdict(m, true, &verdict), v, nil
+	return DeriveStatusWithVerdict(m, true, &verdict, nil), v, nil
 }
 
 // verifierSelection is the resolved Verifier agent fallback list and effort tier

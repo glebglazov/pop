@@ -44,6 +44,33 @@ func (s *Store) GetVerifyVerdict(repo, setID, workSHA string) (*VerifyVerdict, e
 	return &v, nil
 }
 
+// GetLatestPassVerifyVerdict returns the most recent PASS verdict stored for
+// (repo, set), regardless of work SHA. It is used by status derivation to
+// immunize a terminal Task set against later commits: once a PASS verdict has
+// been recorded for the set, the set does not regress to NEEDS-VERIFY when the
+// work SHA moves, unless a fresh non-PASS verdict at HEAD overrides it
+// (ADR-0096). Returns nil when no PASS verdict exists for the set.
+func (s *Store) GetLatestPassVerifyVerdict(repo, setID string) (*VerifyVerdict, error) {
+	row := s.db.QueryRow(
+		`SELECT repo, set_id, work_sha, verdict, findings, computed_at
+		 FROM verify_verdicts
+		 WHERE repo = ? AND set_id = ? AND verdict = 'PASS'
+		 ORDER BY computed_at DESC, work_sha DESC
+		 LIMIT 1`,
+		repo, setID)
+	var v VerifyVerdict
+	var computed string
+	err := row.Scan(&v.Repo, &v.SetID, &v.WorkSHA, &v.Verdict, &v.Findings, &computed)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	v.ComputedAt = parseTime(computed)
+	return &v, nil
+}
+
 // PutVerifyVerdict upserts the verdict for (repo, set, work SHA). Re-running the
 // Verifier at the same SHA overwrites the row (force semantics).
 func (s *Store) PutVerifyVerdict(v VerifyVerdict) error {
