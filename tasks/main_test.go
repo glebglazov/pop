@@ -1,9 +1,20 @@
 package tasks
 
 import (
+	"io"
 	"os"
 	"testing"
+	"time"
 )
+
+// testRetryDelayWaitHook skips wall-clock retry sleeps in the package test run
+// while preserving the retry notice tests assert on.
+func testRetryDelayWaitHook(out io.Writer, delay time.Duration, _ retryWaiter) bool {
+	if delay > 0 {
+		outputFor(out).line(ansiYellow, "↻ Retrying with preserved changes...")
+	}
+	return false
+}
 
 // TestMain points the data dir (and thus the global execution-state store) at a
 // throwaway temp dir for the whole package run, so registration tests never read
@@ -17,7 +28,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	_ = os.Setenv("XDG_DATA_HOME", dir)
+	retryDelayWaitHook = testRetryDelayWaitHook
 	code := m.Run()
+	retryDelayWaitHook = nil
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }

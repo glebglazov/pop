@@ -1016,6 +1016,7 @@ func TestRunTaskConfiguredEffortResolvesOpencodeModel(t *testing.T) {
 	opts := env.runOpts(true, "")
 	opts.AgentPreset = "opencode"
 	opts.MaxTries = 1
+	opts.MaxTriesExplicit = true
 	opts.Output = io.Discard
 
 	_, err := RunTaskWith(d, nil, loadConfig, opts)

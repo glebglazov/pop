@@ -24,8 +24,9 @@ type WholeSetOptions struct {
 	AgentCmd        string
 	AgentOutput     tasks.AgentOutputMode
 	AllowDirty      tasks.DirtyRuntimeStrategy
-	MaxTries        int
-	Timeout         time.Duration
+	MaxTries         int
+	MaxTriesExplicit bool
+	Timeout          time.Duration
 	// VerifyAgents and VerifyEffort steer the in-drain pre-approval Verifier
 	// independently of the implementing agents (`--verify-agent`, repeatable, and
 	// `--verify-effort`), forwarded verbatim to the task-set executor.
@@ -74,8 +75,9 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		AgentCmd:        opts.AgentCmd,
 		AgentOutput:     opts.AgentOutput,
 		AllowDirty:      opts.AllowDirty,
-		MaxTries:        opts.MaxTries,
-		Timeout:         opts.Timeout,
+		MaxTries:         opts.MaxTries,
+		MaxTriesExplicit: opts.MaxTriesExplicit,
+		Timeout:          opts.Timeout,
 		VerifyAgents:    opts.VerifyAgents,
 		VerifyEffort:    opts.VerifyEffort,
 		Yes:             opts.Yes,

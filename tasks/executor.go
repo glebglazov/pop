@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	DefaultMaxTries       = 3
+	DefaultMaxTries       = config.DefaultTaskMaxTries
 	DefaultAttemptTimeout = 1 * time.Hour
 
 	DirtyRuntimeContinue          DirtyRuntimeStrategy = "continue"
@@ -63,8 +63,9 @@ type RunTaskOptions struct {
 	AgentCmd      string
 	AgentOutput   AgentOutputMode
 	AllowDirty    DirtyRuntimeStrategy
-	MaxTries      int
-	Timeout       time.Duration
+	MaxTries         int
+	MaxTriesExplicit bool
+	Timeout          time.Duration
 	Yes           bool
 	ConfirmIn     io.Reader
 	ConfirmOut    io.Writer
@@ -286,9 +287,13 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		}, nil
 	}
 
-	maxTries := opts.MaxTries
-	if maxTries <= 0 {
-		maxTries = DefaultMaxTries
+	maxTries, err := resolveImplementMaxTries(cfg, opts.MaxTriesExplicit, opts.MaxTries)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
+	retryDelays, err := resolveAttemptRetryDelays(cfg)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
 	}
 	timeout := opts.Timeout
 	if timeout <= 0 {
@@ -296,7 +301,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	}
 
 	agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
-	result, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter)
+	result, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil && !opts.Yes {
@@ -324,7 +329,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 // per attempt (via buildInvocation over basePrompt) so a retry can carry this
 // task's own prior-attempt digest forward; attempt 1 runs the base prompt
 // unchanged (ADR 0040).
-func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, buildInvocation func(prompt string) (*AgentInvocation, error), maxTries int, timeout time.Duration, commitOverrides []string) (*RunTaskResult, error) {
+func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, buildInvocation func(prompt string) (*AgentInvocation, error), maxTries int, timeout time.Duration, commitOverrides []string, retryDelays []time.Duration) (*RunTaskResult, error) {
 	if errOut == nil {
 		errOut = os.Stderr
 	}
@@ -436,7 +441,12 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 
 		display.line(ansiRed, "✗ Attempt %d/%d failed: %s", attempt, maxTries, reason)
 		if attempt < maxTries {
-			display.line(ansiYellow, "↻ Retrying with preserved changes...")
+			delay := attemptRetryDelay(retryDelays, attempt)
+			if delay <= 0 {
+				display.line(ansiYellow, "↻ Retrying with preserved changes...")
+			} else if waitRetryDelay(out, delay) {
+				return nil, taskExitErr(sel, ExitInterrupted, "interrupted")
+			}
 			continue
 		}
 
@@ -450,7 +460,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	return nil, taskExitErr(sel, ExitOperational, "unexpected attempt loop exit")
 }
 
-func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, agentSpecs []string, buildForAgent func(agentSpec string) (func(prompt string) (*AgentInvocation, error), error), maxTries int, timeout time.Duration, commitOverrides []string, agentQuotaRetryAfter time.Duration) (*RunTaskResult, error) {
+func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, agentSpecs []string, buildForAgent func(agentSpec string) (func(prompt string) (*AgentInvocation, error), error), maxTries int, timeout time.Duration, commitOverrides []string, agentQuotaRetryAfter time.Duration, retryDelays []time.Duration) (*RunTaskResult, error) {
 	cooldowns, err := readAgentCooldowns(d)
 	if err != nil {
 		return nil, taskExitErr(sel, ExitOperational, "%v", err)
@@ -476,7 +486,7 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 		if err != nil {
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)
 		}
-		result, execErr := executeTaskAttempts(d, sel, runtimePath, out, errOut, basePrompt, buildInvocation, maxTries, timeout, commitOverrides)
+		result, execErr := executeTaskAttempts(d, sel, runtimePath, out, errOut, basePrompt, buildInvocation, maxTries, timeout, commitOverrides, retryDelays)
 		if execErr != nil || result == nil || !result.QuotaPaused {
 			return result, execErr
 		}

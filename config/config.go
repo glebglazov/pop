@@ -176,8 +176,24 @@ type UpdatesConfig struct {
 	NoticeEnabled *bool `toml:"notice_enabled" desc:"Enable the update notice and daily background update check (default true)."`
 }
 
+// DefaultTaskMaxTries is the default started-attempt cap for implement and verify
+// when neither config nor an explicit CLI flag names a value (ADR-0099).
+const DefaultTaskMaxTries = 3
+
+// DefaultTaskAttemptRetryDelays is the default inter-attempt wait schedule when
+// [tasks] attempt_retry_delays is omitted (ADR-0099).
+var DefaultTaskAttemptRetryDelays = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
+
 // TasksConfig holds task-execution configuration under the [tasks] TOML table.
 type TasksConfig struct {
+	// MaxTries is the default started-attempt cap for both implement and verify.
+	// Zero/unset ⇒ DefaultTaskMaxTries. [tasks.implement] and [tasks.verify] may
+	// each override their side independently.
+	MaxTries *int `toml:"max_tries" desc:"Default started-attempt cap for implement and verify (default 3)."`
+	// AttemptRetryDelays is the ordered inter-attempt wait schedule shared by
+	// implement and verify retries. Omitted ⇒ DefaultTaskAttemptRetryDelays; an
+	// explicit empty array ⇒ zero delay (instant retries).
+	AttemptRetryDelays []string `toml:"attempt_retry_delays" desc:"Inter-attempt retry delay schedule (array of duration strings); shared by implement and verify."`
 	// Implement holds the ordered worker fallback list for `pop tasks implement`.
 	Implement *ImplementConfig `toml:"implement" desc:"Implement sub-command settings ([tasks.implement] table)."`
 	// Presets is the per-preset settings map (e.g. output mode). Keyed by agent
@@ -195,6 +211,9 @@ type ImplementConfig struct {
 	// Agents is the ordered in-process fallback list used by
 	// `pop tasks implement` for unpinned tasks when --agent is absent.
 	Agents []string `toml:"agents" desc:"Ordered fallback agent list for unpinned tasks."`
+	// MaxTries overrides [tasks].max_tries for implement only. Zero/unset falls
+	// through to the root cap. An explicit --max-tries flag still wins.
+	MaxTries *int `toml:"max_tries" desc:"Implement started-attempt cap override (falls back to [tasks].max_tries)."`
 }
 
 // VerifyConfig holds Agent-verification settings (ADR-0086). It is the
@@ -220,6 +239,9 @@ type VerifyConfig struct {
 	// built-in default; a value ≤ 0 disables remediation (a FIXABLE verdict parks
 	// immediately).
 	MaxRemediationDepth *int `toml:"max_remediation_depth" desc:"Max verify→remediate cycles before parking at VERIFY-FAILED (default 3)."`
+	// MaxTries overrides [tasks].max_tries for verify only. Zero/unset falls
+	// through to the root cap.
+	MaxTries *int `toml:"max_tries" desc:"Verify started-attempt cap override (falls back to [tasks].max_tries)."`
 }
 
 // WorkloadConfig is the deprecated [workload] table, the predecessor of
@@ -880,6 +902,52 @@ func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workben
 	}
 
 	return result, warnings
+}
+
+// ResolveAttemptRetryDelays parses [tasks].attempt_retry_delays, applying
+// defaults for an omitted key. An explicit empty array yields zero delay
+// (instant retries). The receiver may be nil.
+func (c *Config) ResolveAttemptRetryDelays() ([]time.Duration, error) {
+	if c == nil || c.Task == nil || c.Task.AttemptRetryDelays == nil {
+		return append([]time.Duration(nil), DefaultTaskAttemptRetryDelays...), nil
+	}
+	delays := make([]time.Duration, 0, len(c.Task.AttemptRetryDelays))
+	for i, raw := range c.Task.AttemptRetryDelays {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return nil, fmt.Errorf("[tasks] attempt_retry_delays[%d]: %w", i, err)
+		}
+		delays = append(delays, d)
+	}
+	return delays, nil
+}
+
+func (c *Config) resolveTaskMaxTries() int {
+	if c != nil && c.Task != nil && c.Task.MaxTries != nil && *c.Task.MaxTries > 0 {
+		return *c.Task.MaxTries
+	}
+	return DefaultTaskMaxTries
+}
+
+// ResolveImplementMaxTries returns the started-attempt cap for implement from
+// config: [tasks.implement].max_tries, else [tasks].max_tries, else
+// DefaultTaskMaxTries. An explicit --max-tries flag is resolved by the caller.
+func (c *Config) ResolveImplementMaxTries() int {
+	if c != nil && c.Task != nil && c.Task.Implement != nil &&
+		c.Task.Implement.MaxTries != nil && *c.Task.Implement.MaxTries > 0 {
+		return *c.Task.Implement.MaxTries
+	}
+	return c.resolveTaskMaxTries()
+}
+
+// ResolveVerifyMaxTries returns the started-attempt cap for verify from config:
+// [tasks.verify].max_tries, else [tasks].max_tries, else DefaultTaskMaxTries.
+func (c *Config) ResolveVerifyMaxTries() int {
+	if c != nil && c.Task != nil && c.Task.Verify != nil &&
+		c.Task.Verify.MaxTries != nil && *c.Task.Verify.MaxTries > 0 {
+		return *c.Task.Verify.MaxTries
+	}
+	return c.resolveTaskMaxTries()
 }
 
 // TaskAgentOutput returns the configured output mode for one agent preset.
@@ -2070,17 +2138,51 @@ func mergeIncludedTask(cfg *Config, included *TasksConfig, path string) {
 		return
 	}
 	// Merge Implement sub-table (agents list)
-	if included.Implement != nil && len(included.Implement.Agents) > 0 {
+	if included.Implement != nil {
 		if cfg.Task.Implement == nil {
 			cfg.Task.Implement = &ImplementConfig{}
 		}
-		if len(cfg.Task.Implement.Agents) > 0 {
+		if len(included.Implement.Agents) > 0 {
+			if len(cfg.Task.Implement.Agents) > 0 {
+				cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+					"%s: [tasks.implement].agents skipped, already defined (first definition wins)",
+					path,
+				))
+			} else {
+				cfg.Task.Implement.Agents = append([]string(nil), included.Implement.Agents...)
+			}
+		}
+		if included.Implement.MaxTries != nil {
+			if cfg.Task.Implement.MaxTries != nil {
+				cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+					"%s: [tasks.implement].max_tries skipped, already defined (first definition wins)",
+					path,
+				))
+			} else {
+				v := *included.Implement.MaxTries
+				cfg.Task.Implement.MaxTries = &v
+			}
+		}
+	}
+	if included.MaxTries != nil {
+		if cfg.Task.MaxTries != nil {
 			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [tasks.implement].agents skipped, already defined (first definition wins)",
+				"%s: [tasks].max_tries skipped, already defined (first definition wins)",
 				path,
 			))
 		} else {
-			cfg.Task.Implement.Agents = append([]string(nil), included.Implement.Agents...)
+			v := *included.MaxTries
+			cfg.Task.MaxTries = &v
+		}
+	}
+	if included.AttemptRetryDelays != nil {
+		if cfg.Task.AttemptRetryDelays != nil {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+				"%s: [tasks].attempt_retry_delays skipped, already defined (first definition wins)",
+				path,
+			))
+		} else {
+			cfg.Task.AttemptRetryDelays = append([]string(nil), included.AttemptRetryDelays...)
 		}
 	}
 	// Merge Presets map
@@ -2148,6 +2250,17 @@ func cloneTaskConfig(src *TasksConfig) *TasksConfig {
 		dst.Implement = &ImplementConfig{
 			Agents: append([]string(nil), src.Implement.Agents...),
 		}
+		if src.Implement.MaxTries != nil {
+			v := *src.Implement.MaxTries
+			dst.Implement.MaxTries = &v
+		}
+	}
+	if src.MaxTries != nil {
+		v := *src.MaxTries
+		dst.MaxTries = &v
+	}
+	if src.AttemptRetryDelays != nil {
+		dst.AttemptRetryDelays = append([]string(nil), src.AttemptRetryDelays...)
 	}
 	if len(src.Presets) > 0 {
 		dst.Presets = make(map[string]TaskAgentConfig, len(src.Presets))

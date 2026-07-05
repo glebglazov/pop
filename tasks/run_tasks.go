@@ -26,8 +26,9 @@ type RunTaskSetOptions struct {
 	AgentCmd      string
 	AgentOutput   AgentOutputMode
 	AllowDirty    DirtyRuntimeStrategy
-	MaxTries      int
-	Timeout       time.Duration
+	MaxTries         int
+	MaxTriesExplicit bool
+	Timeout          time.Duration
 	Yes           bool
 	ConfirmIn     io.Reader
 	ConfirmOut    io.Writer
@@ -291,9 +292,13 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
 	}
 
-	maxTries := opts.MaxTries
-	if maxTries <= 0 {
-		maxTries = DefaultMaxTries
+	maxTries, err := resolveImplementMaxTries(cfg, opts.MaxTriesExplicit, opts.MaxTries)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
+	retryDelays, err := resolveAttemptRetryDelays(cfg)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
 	}
 	timeout := opts.Timeout
 	if timeout <= 0 {
@@ -505,7 +510,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		}
 
 		agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
-		taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter)
+		taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays)
 		if execErr != nil {
 			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 			if refreshErr == nil {

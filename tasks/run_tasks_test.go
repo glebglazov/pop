@@ -1822,6 +1822,7 @@ printf 'SUMMARY_START\ncodex done\nSUMMARY_END\nTASK_COMPLETE\n'
 		var buf bytes.Buffer
 		opts := env.runTaskSetOpts(true, "", &buf)
 		opts.MaxTries = 1
+		opts.MaxTriesExplicit = true
 
 		result, err := RunTaskSetWith(env.deps(), nil, loadConfig, opts)
 		if err != nil {
@@ -1845,6 +1846,7 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 		opts.AgentPresets = []string{"claude"}
 		opts.AgentExplicit = true
 		opts.MaxTries = 1
+		opts.MaxTriesExplicit = true
 
 		result, err := RunTaskSetWith(env.deps(), nil, loadConfig, opts)
 		if err != nil {

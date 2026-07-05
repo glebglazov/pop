@@ -633,11 +633,12 @@ func runTaskImplement(cmd *cobra.Command, args []string) {
 	// Explicitness, not the resolved value, decides whether --agent supplies
 	// the fallback list or config/default fallback should be used.
 	agentExplicit := cmd.Flags().Changed("agent")
+	maxTriesExplicit := cmd.Flags().Changed("max-tries")
 	var err error
 	if isTaskFileTarget(target) {
-		err = runTaskRunTaskWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target, agentExplicit)
+		err = runTaskRunTaskWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target, agentExplicit, maxTriesExplicit)
 	} else {
-		err = runTaskRunTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target, agentExplicit)
+		err = runTaskRunTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target, agentExplicit, maxTriesExplicit)
 	}
 	handleTaskExit(err)
 }
@@ -678,7 +679,7 @@ func taskPreSeedTopic() func(taskTitle string) {
 	return preSeedTopicFromTitle(defaultTmux, maxWords)
 }
 
-func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskPath string, agentExplicit bool) error {
+func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskPath string, agentExplicit, maxTriesExplicit bool) error {
 	timeout, err := time.ParseDuration(taskTimeout)
 	if err != nil {
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
@@ -693,6 +694,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		AgentOutput:      taskAgentOutput,
 		AllowDirty:       taskAllowDirty,
 		MaxTries:         taskMaxTries,
+		MaxTriesExplicit: maxTriesExplicit,
 		Timeout:          timeout,
 		Yes:              taskRunYes,
 		ConfirmIn:        stdin,
@@ -710,7 +712,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 	return nil
 }
 
-func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskSetPath string, agentExplicit bool) error {
+func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskSetPath string, agentExplicit, maxTriesExplicit bool) error {
 	timeout, err := time.ParseDuration(taskTimeout)
 	if err != nil {
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
@@ -730,8 +732,9 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		AgentCmd:        taskAgentCmd,
 		AgentOutput:     taskAgentOutput,
 		AllowDirty:      taskAllowDirty,
-		MaxTries:        taskMaxTries,
-		Timeout:         timeout,
+		MaxTries:         taskMaxTries,
+		MaxTriesExplicit: maxTriesExplicit,
+		Timeout:          timeout,
 		VerifyAgents:    append([]string(nil), taskImplementVerifyAgents...),
 		VerifyEffort:    taskImplementVerifyEffort,
 		Yes:             taskRunYes,

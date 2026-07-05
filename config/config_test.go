@@ -1368,6 +1368,94 @@ func TestResolveQueueDurationErrors(t *testing.T) {
 	}
 }
 
+func TestResolveAttemptRetryDelays(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want []time.Duration
+	}{
+		{name: "nil config", cfg: nil, want: DefaultTaskAttemptRetryDelays},
+		{name: "missing section", cfg: &Config{}, want: DefaultTaskAttemptRetryDelays},
+		{name: "empty list", cfg: &Config{Task: &TasksConfig{AttemptRetryDelays: []string{}}}, want: []time.Duration{}},
+		{
+			name: "custom list",
+			cfg: &Config{Task: &TasksConfig{AttemptRetryDelays: []string{"10s", "1m"}}},
+			want: []time.Duration{10 * time.Second, time.Minute},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.cfg.ResolveAttemptRetryDelays()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("delays = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveAttemptRetryDelaysError(t *testing.T) {
+	_, err := (&Config{Task: &TasksConfig{AttemptRetryDelays: []string{"bad"}}}).ResolveAttemptRetryDelays()
+	if err == nil || !strings.Contains(err.Error(), "[tasks] attempt_retry_delays[0]") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveImplementMaxTriesFromConfig(t *testing.T) {
+	root := 4
+	impl := 7
+	tests := []struct {
+		name string
+		cfg  *Config
+		want int
+	}{
+		{name: "nil config", cfg: nil, want: DefaultTaskMaxTries},
+		{name: "root cap", cfg: &Config{Task: &TasksConfig{MaxTries: &root}}, want: 4},
+		{name: "implement override", cfg: &Config{Task: &TasksConfig{
+			MaxTries:    &root,
+			Implement:   &ImplementConfig{MaxTries: &impl},
+		}}, want: 7},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.ResolveImplementMaxTries(); got != tt.want {
+				t.Fatalf("max tries = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadTasksRetryConfig(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[tasks]
+max_tries = 5
+attempt_retry_delays = ["10s", "30s"]
+
+[tasks.implement]
+max_tries = 8
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.ResolveImplementMaxTries(); got != 8 {
+		t.Fatalf("implement max tries = %d, want 8", got)
+	}
+	delays, err := cfg.ResolveAttemptRetryDelays()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []time.Duration{10 * time.Second, 30 * time.Second}
+	if !reflect.DeepEqual(delays, want) {
+		t.Fatalf("delays = %#v, want %#v", delays, want)
+	}
+}
+
 func TestExpandProjectsWith(t *testing.T) {
 	tests := []struct {
 		name     string
