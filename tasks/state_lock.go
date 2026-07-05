@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -210,10 +211,16 @@ func parseStateLockMetadata(data []byte) (*StateLockMetadata, error) {
 func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *GlobalState, added *[]string) {
 	entry := state.Entry(defPath)
 	registered := state.RegisteredIDs(defPath)
-	for id, manifestPath := range disc.Manifests {
+	ids := make([]string, 0, len(disc.Manifests))
+	for id := range disc.Manifests {
 		if _, ok := registered[id]; ok {
 			continue
 		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		manifestPath := disc.Manifests[id]
 		reg := registeredTaskSetFromManifest(d, id, manifestPath)
 		entry.TaskSets = append(entry.TaskSets, reg)
 		registered[id] = len(entry.TaskSets) - 1

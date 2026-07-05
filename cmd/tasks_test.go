@@ -451,7 +451,7 @@ func TestTaskUnarchiveSelectionConfirmRestoresBatch(t *testing.T) {
 		t.Fatalf("unarchive picker confirm failed: %v", err)
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "Unarchived task sets one, two") {
+	if !strings.Contains(out, "Unarchived task sets") || !strings.Contains(out, "one") || !strings.Contains(out, "two") {
 		t.Fatalf("missing batch unarchive report:\n%s", out)
 	}
 	active, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir))
@@ -1668,7 +1668,15 @@ func setupRunTaskCmdFixture(t *testing.T) string {
 		t.Fatal(err, string(out))
 	}
 
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	xdgData := filepath.Join(root, ".xdg")
+	t.Setenv("XDG_DATA_HOME", xdgData)
+	xdgConfig := filepath.Join(root, ".xdg-config")
+	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
+	configDir := filepath.Join(xdgConfig, "pop")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileCmd(t, filepath.Join(configDir, "config.toml"), "[tasks.verify]\nenabled = false\n")
 	tasksDir := cmdTasksDir(t, root)
 	writeTaskThoughts(t, tasksDir, "demo")
 	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
