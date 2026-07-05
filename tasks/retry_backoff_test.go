@@ -57,6 +57,24 @@ func TestResolveImplementMaxTries(t *testing.T) {
 	}
 }
 
+func TestResolveVerifyMaxTries(t *testing.T) {
+	root := 4
+	verify := 6
+	cfg := &config.Config{Task: &config.TasksConfig{
+		MaxTries: &root,
+		Verify:   &config.VerifyConfig{MaxTries: &verify},
+	}}
+	if got, err := resolveVerifyMaxTries(cfg); err != nil || got != 6 {
+		t.Fatalf("verify override = (%d, %v), want (6, nil)", got, err)
+	}
+	if got, err := resolveVerifyMaxTries(&config.Config{Task: &config.TasksConfig{MaxTries: &root}}); err != nil || got != 4 {
+		t.Fatalf("root cap = (%d, %v), want (4, nil)", got, err)
+	}
+	if got, err := resolveVerifyMaxTries(nil); err != nil || got != config.DefaultTaskMaxTries {
+		t.Fatalf("default = (%d, %v), want (%d, nil)", got, err, config.DefaultTaskMaxTries)
+	}
+}
+
 func TestResolveAttemptRetryDelaysFromConfig(t *testing.T) {
 	got, err := resolveAttemptRetryDelays(&config.Config{Task: &config.TasksConfig{
 		AttemptRetryDelays: []string{},

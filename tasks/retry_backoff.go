@@ -24,6 +24,13 @@ func attemptRetryDelay(delays []time.Duration, failedAttempt int) time.Duration 
 	return delays[idx]
 }
 
+func resolveVerifyMaxTries(cfg *config.Config) (int, error) {
+	if cfg != nil {
+		return cfg.ResolveVerifyMaxTries(), nil
+	}
+	return config.DefaultTaskMaxTries, nil
+}
+
 func resolveImplementMaxTries(cfg *config.Config, explicit bool, flagValue int) (int, error) {
 	if explicit {
 		if flagValue > 0 {

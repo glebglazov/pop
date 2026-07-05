@@ -1414,8 +1414,8 @@ func TestResolveImplementMaxTriesFromConfig(t *testing.T) {
 		{name: "nil config", cfg: nil, want: DefaultTaskMaxTries},
 		{name: "root cap", cfg: &Config{Task: &TasksConfig{MaxTries: &root}}, want: 4},
 		{name: "implement override", cfg: &Config{Task: &TasksConfig{
-			MaxTries:    &root,
-			Implement:   &ImplementConfig{MaxTries: &impl},
+			MaxTries:  &root,
+			Implement: &ImplementConfig{MaxTries: &impl},
 		}}, want: 7},
 	}
 	for _, tt := range tests {
@@ -1424,6 +1424,21 @@ func TestResolveImplementMaxTriesFromConfig(t *testing.T) {
 				t.Fatalf("max tries = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveVerifyMaxTriesFromConfig(t *testing.T) {
+	root := 4
+	verify := 9
+	cfg := &Config{Task: &TasksConfig{
+		MaxTries: &root,
+		Verify:   &VerifyConfig{MaxTries: &verify},
+	}}
+	if got := cfg.ResolveVerifyMaxTries(); got != verify {
+		t.Fatalf("verify max tries = %d, want %d", got, verify)
+	}
+	if got := cfg.ResolveImplementMaxTries(); got != root {
+		t.Fatalf("implement max tries = %d, want root cap %d", got, root)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/store"
 )
@@ -469,6 +470,8 @@ func TestRunConfiguredVerifierUnparseableOutputPersistsWithNeedsHumanVerdict(t *
 	runner := &scriptedVerifyRunner{
 		scripts: []string{
 			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"I think it looks okay"}`,
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"I think it looks okay"}`,
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"I think it looks okay"}`,
 		},
 	}
 	d := &Deps{
@@ -490,10 +493,10 @@ func TestRunConfiguredVerifierUnparseableOutputPersistsWithNeedsHumanVerdict(t *
 	}
 
 	pairs := listRunFilePairs(t, capturedRunsDir(taskSetDir))
-	if len(pairs) != 1 {
-		t.Fatalf("want 1 verify run, got %d", len(pairs))
+	if len(pairs) != 3 {
+		t.Fatalf("want 3 verify runs (default max tries), got %d", len(pairs))
 	}
-	meta := readCapturedRunMeta(t, pairs[0].meta)
+	meta := readCapturedRunMeta(t, pairs[2].meta)
 	if meta.Verdict != "NEEDS-HUMAN" {
 		t.Fatalf("verdict = %q, want NEEDS-HUMAN", meta.Verdict)
 	}
@@ -537,4 +540,174 @@ func TestVerifyResolvedSetCacheHitWritesNoRun(t *testing.T) {
 	if _, err := os.Stat(capturedRunsDir(filepath.Join(defPath, "demo"))); !os.IsNotExist(err) {
 		t.Fatalf("cache hit wrote a verify run")
 	}
+}
+
+func verifyRetryDeps(t *testing.T, runner CommandRunner) *Deps {
+	t.Helper()
+	return &Deps{
+		FS:       deps.NewRealFileSystem(),
+		Git:      stubGit("sha1\n", "", ""),
+		LookPath: func(string) (string, error) { return "/bin/claude", nil },
+		Runner:   runner,
+	}
+}
+
+func instantVerifyRetryConfig(maxTries int) *config.Config {
+	v := maxTries
+	return &config.Config{Task: &config.TasksConfig{
+		MaxTries:           &v,
+		AttemptRetryDelays: []string{},
+	}}
+}
+
+func TestRunConfiguredVerifierDoesNotRetryCleanNeedsHuman(t *testing.T) {
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: NEEDS-HUMAN\nFINDINGS: ambiguous spec"}`,
+		},
+	}
+	d := verifyRetryDeps(t, runner)
+
+	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(3), verifierSelection{
+		Agents: []string{"claude"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "NEEDS-HUMAN") {
+		t.Fatalf("raw = %q", raw)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("calls = %d, want 1 (no retry on clean NEEDS-HUMAN)", runner.calls)
+	}
+}
+
+func TestRunConfiguredVerifierRetriesUnparseableWithDelayNotice(t *testing.T) {
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"garbled"}`,
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\n"}`,
+		},
+	}
+	d := verifyRetryDeps(t, runner)
+	var out bytes.Buffer
+
+	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(2), verifierSelection{
+		Agents: []string{"claude"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "VERDICT: PASS") {
+		t.Fatalf("raw = %q, want PASS on retry", raw)
+	}
+	if runner.calls != 2 {
+		t.Fatalf("calls = %d, want 2", runner.calls)
+	}
+	if !strings.Contains(out.String(), "Retrying with preserved changes") {
+		t.Fatalf("missing retry notice:\n%s", out.String())
+	}
+}
+
+func TestRunConfiguredVerifierFallsThroughAfterRetryExhausted(t *testing.T) {
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"garbled one"}`,
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"garbled two"}`,
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\nFINDINGS:\n"}`,
+		},
+	}
+	d := verifyRetryDeps(t, runner)
+	two := 2
+	cfg := &config.Config{Task: &config.TasksConfig{
+		MaxTries:           &two,
+		AttemptRetryDelays: []string{},
+	}}
+
+	raw, err := runConfiguredVerifier(d, cfg, verifierSelection{
+		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "VERDICT: PASS") {
+		t.Fatalf("raw = %q, want PASS from fallback agent", raw)
+	}
+	if runner.calls != 3 {
+		t.Fatalf("calls = %d, want 2 retries on first agent + 1 on second", runner.calls)
+	}
+}
+
+func TestRunConfiguredVerifierTimeoutStopsWithoutRetryOrFallback(t *testing.T) {
+	taskSetDir := t.TempDir()
+	runner := &slowVerifyRunner{delay: 2 * time.Second}
+	d := verifyRetryDeps(t, runner)
+
+	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(3), verifierSelection{
+		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("calls = %d, want 1 (timeout stops immediately)", runner.calls)
+	}
+	if strings.TrimSpace(raw) != "" {
+		t.Fatalf("raw = %q, want empty output on timeout", raw)
+	}
+}
+
+func TestRunConfiguredVerifierUsesVerifyMaxTriesOverride(t *testing.T) {
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"garbled"}`,
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"garbled"}`,
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\n"}`,
+		},
+	}
+	d := verifyRetryDeps(t, runner)
+	root := 3
+	verify := 2
+	cfg := &config.Config{Task: &config.TasksConfig{
+		MaxTries:           &root,
+		Verify:             &config.VerifyConfig{MaxTries: &verify},
+		AttemptRetryDelays: []string{},
+	}}
+
+	_, err := runConfiguredVerifier(d, cfg, verifierSelection{
+		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if runner.calls != 3 {
+		t.Fatalf("calls = %d, want 2 on first agent + 1 on fallback (verify cap 2)", runner.calls)
+	}
+}
+
+type slowVerifyRunner struct {
+	delay time.Duration
+	calls int
+}
+
+func (r *slowVerifyRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	proc, err := r.Start(ctx, dir, stdout, stderr, name, args...)
+	if err != nil {
+		return 1, err
+	}
+	return proc.Wait()
+}
+
+func (r *slowVerifyRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	r.calls++
+	proc := &ManagedProcess{done: make(chan waitResult, 1)}
+	go func() {
+		time.Sleep(r.delay)
+		proc.done <- waitResult{exitCode: 0}
+	}()
+	return proc, nil
 }
