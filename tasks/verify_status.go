@@ -76,7 +76,7 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 				latestPass = v
 			}
 		}
-		if decorateRowWithVerdict(row, result.Manifests[row.ID], current, latestPass) {
+		if decorateRowWithVerdict(row, result.Manifests[row.ID], workSHA, current, latestPass) {
 			changed = true
 		}
 	}
@@ -93,8 +93,9 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 // already DONE or AWAITING-APPROVAL. Every other row (missing, malformed,
 // ready, failed, deferred, blocked) is left untouched; in particular a missing
 // row carries no manifest, so re-deriving it would wrongly read as MALFORMED.
-func decorateRowWithVerdict(row *Row, m *Manifest, currentVerdict, latestPass *store.VerifyVerdict) bool {
+func decorateRowWithVerdict(row *Row, m *Manifest, workSHA string, currentVerdict, latestPass *store.VerifyVerdict) bool {
 	if row.Status != StatusDone && row.Status != StatusAwaitingApproval {
+		row.VerifiedAtSHA = ""
 		return false
 	}
 	var current *Verdict
@@ -108,6 +109,15 @@ func decorateRowWithVerdict(row *Row, m *Manifest, currentVerdict, latestPass *s
 		pass = &vv
 	}
 	status := DeriveStatusWithVerdict(m, true, current, pass)
+
+	// ADR-0096: surface the SHA of an immunizing PASS when HEAD has moved on.
+	row.VerifiedAtSHA = ""
+	if status == StatusDone || status == StatusAwaitingApproval {
+		if currentVerdict == nil && latestPass != nil && latestPass.Verdict == string(VerdictPass) && latestPass.WorkSHA != workSHA {
+			row.VerifiedAtSHA = ShortSHA(latestPass.WorkSHA)
+		}
+	}
+
 	if status == row.Status {
 		return false
 	}

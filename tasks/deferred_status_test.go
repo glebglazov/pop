@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 )
@@ -180,7 +181,7 @@ func TestDeferredRowRendersSkippedCount(t *testing.T) {
 	if row.Status != StatusDeferred {
 		t.Fatalf("row status = %q, want DEFERRED", row.Status)
 	}
-	detail := rowDetail(row)
+	detail := rowDetail(outputFor(io.Discard), row)
 	if !strings.Contains(detail, "1 skipped") {
 		t.Fatalf("detail = %q, want %q segment", detail, "1 skipped")
 	}

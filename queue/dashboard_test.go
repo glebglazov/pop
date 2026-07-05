@@ -1173,6 +1173,74 @@ func TestDashboardDetailViewClampsToBodyHeight(t *testing.T) {
 	}
 }
 
+// TestDashboardStatusAppendsVerifiedAtSHA confirms the main table STATUS column
+// appends a yellow `verified @ <shortSHA>` suffix when the row carries one.
+func TestDashboardStatusAppendsVerifiedAtSHA(t *testing.T) {
+	row := tasks.Row{Status: tasks.StatusAwaitingApproval, VerifiedAtSHA: "abcdef1234567890"}
+	got := dashboardStatus(row)
+	if !strings.Contains(got, "AWAITING-APPROVAL") {
+		t.Fatalf("status label missing: %q", got)
+	}
+	if !strings.Contains(got, "verified @ abcdef123456") {
+		t.Fatalf("verified suffix missing: %q", got)
+	}
+	// The suffix should carry a yellow ANSI color code (256-color palette 33).
+	if !strings.Contains(got, "\x1b[38;5;33m") {
+		t.Fatalf("verified suffix should be yellow: %q", got)
+	}
+
+	// No suffix when VerifiedAtSHA is empty.
+	plain := tasks.Row{Status: tasks.StatusAwaitingApproval}
+	if got := dashboardStatus(plain); strings.Contains(got, "verified @") {
+		t.Fatalf("plain status should not contain suffix: %q", got)
+	}
+}
+
+// TestDashboardDetailHeaderIncludesVerifiedAtSHA confirms the detail view header
+// includes the yellow suffix inside the status brackets when applicable.
+func TestDashboardDetailHeaderIncludesVerifiedAtSHA(t *testing.T) {
+	header := detailHeader("demo", "AWAITING-APPROVAL", "1/1 done", "abcdef1234567890")
+	if !strings.Contains(header, "Task · demo") {
+		t.Fatalf("header missing set prefix: %q", header)
+	}
+	if !strings.Contains(header, "[AWAITING-APPROVAL") {
+		t.Fatalf("header missing status bracket: %q", header)
+	}
+	if !strings.Contains(header, "verified @ abcdef123456") {
+		t.Fatalf("header missing verified suffix: %q", header)
+	}
+	if !strings.Contains(header, "\x1b[38;5;33m") {
+		t.Fatalf("verified suffix should be yellow: %q", header)
+	}
+
+	plain := detailHeader("demo", "AWAITING-APPROVAL", "1/1 done", "")
+	if strings.Contains(plain, "verified @") {
+		t.Fatalf("plain header should not contain suffix: %q", plain)
+	}
+}
+
+// TestDashboardTableRendersVerifiedAtSHA confirms a row produced through the
+// dashboard status pipeline renders the suffix in the STATUS column.
+func TestDashboardTableRendersVerifiedAtSHA(t *testing.T) {
+	row := DashboardRow{
+		Project:   "pop",
+		Status:    dashboardStatus(tasks.Row{Status: tasks.StatusDone, VerifiedAtSHA: "abcdef1234567890"}),
+		Worktree:  "main",
+		cursorKey: "pop\x00set",
+		SetRef:    SetRef{SetID: "set", RawStatus: tasks.StatusDone},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 8})
+	m = updated.(QueueDashboard)
+	view := m.View().Content
+	if !strings.Contains(view, "DONE") {
+		t.Fatalf("view missing DONE status:\n%s", view)
+	}
+	if !strings.Contains(view, "verified @ abcdef123456") {
+		t.Fatalf("view missing verified suffix:\n%s", view)
+	}
+}
+
 // TestDashboardBindModalListStagesNavigateAndSelect drives the bind modal's two
 // list stages through the List: j moves the cursor (wrapping), and Enter on the
 // base-ref stage records the highlighted ref and advances to the name stage.

@@ -79,7 +79,7 @@ func remediationBody(workSHA, findings string, cycle int) string {
 	b.WriteString("## What to build\n\n")
 	b.WriteString("Resolve the verification findings below. An independent Verifier judged this task set's completed work")
 	if workSHA != "" {
-		b.WriteString(fmt.Sprintf(" at %s", shortSHA(workSHA)))
+		b.WriteString(fmt.Sprintf(" at %s", ShortSHA(workSHA)))
 	}
 	b.WriteString(" and returned FIXABLE: the acceptance criteria are not yet met, but the gaps are ones an agent can close. ")
 	b.WriteString("Make the changes needed to satisfy the set's acceptance criteria. Do not edit the other task specs — they are stable, task-scoped intent; fix the code and artifacts they describe.\n\n")

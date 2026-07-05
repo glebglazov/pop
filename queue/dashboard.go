@@ -628,7 +628,12 @@ func staticProjectPath(st dashboardRepoStatic) string {
 }
 
 func dashboardStatus(row tasks.Row) string {
-	return tasks.StatusLabel(row)
+	label := tasks.StatusLabel(row)
+	if row.VerifiedAtSHA != "" {
+		suffix := lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Render("verified @ " + row.VerifiedAtSHA)
+		label += " · " + suffix
+	}
+	return label
 }
 
 type dashboardDestKind int
@@ -2684,15 +2689,14 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	status := tasks.DeriveStatus(manifest)
 	label := string(status)
 	progress := ""
+	verifiedSHA := ""
 	if d.taskRow != nil {
 		status = d.taskRow.Status
 		label = tasks.StatusLabel(*d.taskRow)
 		progress = d.taskRow.Progress
+		verifiedSHA = d.taskRow.VerifiedAtSHA
 	}
-	header := fmt.Sprintf("Task · %s  [%s]", d.row.SetID, label)
-	if progress != "" {
-		header += "  " + progress
-	}
+	header := detailHeader(d.row.SetID, label, progress, verifiedSHA)
 
 	if status == tasks.StatusMissing {
 		return ui.Frame{Width: m.width, Header: header, Hints: backHint}, "  registered task set missing"
@@ -2725,6 +2729,21 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	}
 	parts = append(parts, d.list.VisibleRows()...)
 	return frame, strings.Join(parts, "\n")
+}
+
+// detailHeader builds the detail view's title line: "Task · <set>  [<status>]"
+// plus progress and, when applicable, a yellow "verified @ <shortSHA>" suffix
+// inside the status brackets (ADR-0096).
+func detailHeader(setID, label, progress, verifiedSHA string) string {
+	if verifiedSHA != "" {
+		suffix := lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Render("verified @ " + verifiedSHA)
+		label += " · " + suffix
+	}
+	header := fmt.Sprintf("Task · %s  [%s]", setID, label)
+	if progress != "" {
+		header += "  " + progress
+	}
+	return header
 }
 
 // detailIDWidth returns the ID-column width: the widest task ID, floored at the
@@ -2787,16 +2806,15 @@ func renderDetailContent(b *strings.Builder, d *detailView, height, width int, m
 	status := tasks.DeriveStatus(manifest)
 	label := string(status)
 	progress := ""
+	verifiedSHA := ""
 	if taskRow != nil {
 		status = taskRow.Status
 		label = tasks.StatusLabel(*taskRow)
 		progress = taskRow.Progress
+		verifiedSHA = taskRow.VerifiedAtSHA
 	}
 
-	header := fmt.Sprintf("Task · %s  [%s]", d.row.SetID, label)
-	if progress != "" {
-		header += "  " + progress
-	}
+	header := detailHeader(d.row.SetID, label, progress, verifiedSHA)
 	fmt.Fprintln(b, header)
 
 	if status == tasks.StatusMissing {

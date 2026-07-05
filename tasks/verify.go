@@ -622,7 +622,7 @@ func printVerdict(w io.Writer, setID, workSHA string, verdict Verdict, findings 
 	out := outputFor(w)
 	out.line(ansiBold, "━━ Verify verdict for %s", setID)
 	if workSHA != "" {
-		out.line(ansiDim, "   Work SHA: %s", shortSHA(workSHA))
+		out.line(ansiDim, "   Work SHA: %s", ShortSHA(workSHA))
 	}
 	out.line(verdictStyle(verdict), "   Verdict:  %s", string(verdict))
 	if strings.TrimSpace(findings) != "" {
@@ -647,7 +647,7 @@ func verdictStyle(v Verdict) string {
 	}
 }
 
-func shortSHA(sha string) string {
+func ShortSHA(sha string) string {
 	if len(sha) > 12 {
 		return sha[:12]
 	}

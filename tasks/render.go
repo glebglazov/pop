@@ -318,7 +318,7 @@ func formatTableWithOutput(out *output, rows []Row) string {
 	fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", idW, strings.Repeat("-", idW), stW, strings.Repeat("-", stW), prW, strings.Repeat("-", prW), strings.Repeat("-", detailW))
 
 	for _, row := range rows {
-		detail := rowDetail(row)
+		detail := rowDetail(out, row)
 		if len(detail) > detailW {
 			detail = detail[:detailW-3] + "..."
 		}
@@ -337,18 +337,18 @@ func formatTableWithOutput(out *output, rows []Row) string {
 	return b.String()
 }
 
-func rowDetail(row Row) string {
+func rowDetail(out *output, row Row) string {
 	if row.ConfigError != "" {
-		base := rowStatusDetail(row)
+		base := rowStatusDetail(out, row)
 		if base == "" {
 			return "config error: " + row.ConfigError
 		}
 		return base + " — config error: " + row.ConfigError
 	}
-	return rowStatusDetail(row)
+	return rowStatusDetail(out, row)
 }
 
-func rowStatusDetail(row Row) string {
+func rowStatusDetail(out *output, row Row) string {
 	switch row.Status {
 	case StatusMissing:
 		return "registered task set missing"
@@ -371,6 +371,9 @@ func rowStatusDetail(row Row) string {
 		if row.CompleteHint != "" {
 			parts = append(parts, "complete: "+row.CompleteHint)
 		}
+		if suffix := verifiedAtSuffix(row); suffix != "" {
+			parts = append(parts, out.styled(ansiYellow, suffix))
+		}
 		return strings.Join(parts, " — ")
 	case StatusNeedsVerify:
 		return strings.Join([]string{row.Progress, "verify: pop tasks verify " + row.ID}, " — ")
@@ -381,9 +384,24 @@ func rowStatusDetail(row Row) string {
 		}
 		parts = append(parts, "re-verify: pop tasks verify "+row.ID)
 		return strings.Join(parts, " — ")
+	case StatusDone:
+		if suffix := verifiedAtSuffix(row); suffix != "" {
+			return row.Progress + " — " + out.styled(ansiYellow, suffix)
+		}
+		return row.Progress
 	default:
 		return row.Progress
 	}
+}
+
+// verifiedAtSuffix returns the yellow display suffix for an immunized terminal
+// row whose HEAD differs from the PASS verdict's work SHA. Empty when the row
+// carries no such SHA.
+func verifiedAtSuffix(row Row) string {
+	if row.VerifiedAtSHA == "" {
+		return ""
+	}
+	return "verified @ " + row.VerifiedAtSHA
 }
 
 // firstFindingsLine returns the first non-empty line of a Verifier's findings,

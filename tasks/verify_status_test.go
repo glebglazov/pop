@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -290,7 +291,114 @@ func TestApplyVerifyVerdictsSurfacesFindingsAndReorders(t *testing.T) {
 	if !strings.Contains(table, "VERIFY-FAILED") {
 		t.Fatalf("status table missing VERIFY-FAILED disposition:\n%s", table)
 	}
-	if !strings.Contains(rowDetail(*row), "API contract drifted") {
-		t.Fatalf("detail missing findings hint: %q", rowDetail(*row))
+	plainOut := outputFor(io.Discard)
+	if !strings.Contains(rowDetail(plainOut, *row), "API contract drifted") {
+		t.Fatalf("detail missing findings hint: %q", rowDetail(plainOut, *row))
+	}
+}
+
+// TestApplyVerifyVerdictsSetsVerifiedAtSHA confirms an immunized terminal row
+// whose HEAD differs from the PASS verdict's work SHA carries VerifiedAtSHA,
+// and that fresh PASS, non-PASS, and non-immunized rows leave it empty.
+func TestApplyVerifyVerdictsSetsVerifiedAtSHA(t *testing.T) {
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+
+	cases := []struct {
+		name          string
+		workSHA       string
+		verdictSHA    string
+		verdict       string
+		wantStatus    TaskSetStatus
+		wantVerified  string
+	}{
+		{"fresh PASS at HEAD", "shaCUR", "shaCUR", "PASS", StatusDone, ""},
+		{"stale PASS immunizes with different SHA", "shaCUR", "shaOLD", "PASS", StatusDone, "shaOLD"},
+		{"no verdict → NEEDS-VERIFY", "shaCUR", "", "", StatusNeedsVerify, ""},
+		{"current NEEDS-HUMAN → VERIFY-FAILED", "shaCUR", "shaCUR", "NEEDS-HUMAN", StatusVerifyFailed, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := setupVerifyStatusDeps(t, "/repo/.git\n", tc.workSHA+"\n")
+			if tc.verdictSHA != "" {
+				putStatusVerdict(t, d, "/repo/.git", "demo", tc.verdictSHA, tc.verdict, "")
+			}
+			result := doneResult()
+			ApplyVerifyVerdicts(d, result, enabled, "/rt")
+			row := FindRow(result, "demo")
+			if row == nil {
+				t.Fatalf("row missing")
+			}
+			if row.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", row.Status, tc.wantStatus)
+			}
+			if row.VerifiedAtSHA != tc.wantVerified {
+				t.Fatalf("VerifiedAtSHA = %q, want %q", row.VerifiedAtSHA, tc.wantVerified)
+			}
+		})
+	}
+}
+
+// TestApplyVerifyVerdictsAwaitingApprovalVerifiedAtSHA confirms an
+// AWAITING-APPROVAL set immunized at a different SHA also carries VerifiedAtSHA.
+func TestApplyVerifyVerdictsAwaitingApprovalVerifiedAtSHA(t *testing.T) {
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
+	putStatusVerdict(t, d, "/repo/.git", "demo", "shaOLD", "PASS", "")
+
+	m := &Manifest{Valid: true, Stem: "demo", Tasks: []Task{
+		{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "done"},
+		{ID: "02-gate", File: "02-gate.md", Type: "HITL", Status: "open"},
+	}}
+	result := &RefreshResult{
+		Rows:      []Row{buildTaskSetRow(RegisteredTaskSet{ID: "demo"}, m, 0)},
+		Manifests: map[string]*Manifest{"demo": m},
+	}
+	ApplyVerifyVerdicts(d, result, enabled, "/rt")
+
+	row := FindRow(result, "demo")
+	if row == nil || row.Status != StatusAwaitingApproval {
+		t.Fatalf("row = %+v, want AWAITING-APPROVAL", row)
+	}
+	if row.VerifiedAtSHA != "shaOLD" {
+		t.Fatalf("VerifiedAtSHA = %q, want shaOLD", row.VerifiedAtSHA)
+	}
+}
+
+// TestRenderVerifiedAtSHASuffix confirms the yellow `verified @ <shortSHA>`
+// suffix appears in the Details column for immunized DONE and AWAITING-APPROVAL
+// rows, and is absent for NEEDS-VERIFY / VERIFY-FAILED rows.
+func TestRenderVerifiedAtSHASuffix(t *testing.T) {
+	plainOut := outputFor(io.Discard)
+
+	done := Row{ID: "done", Status: StatusDone, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890"}
+	if got := rowDetail(plainOut, done); !strings.Contains(got, "verified @ abcdef123456") {
+		t.Fatalf("DONE detail missing suffix: %q", got)
+	}
+
+	await := Row{ID: "await", Status: StatusAwaitingApproval, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890"}
+	if got := rowDetail(plainOut, await); !strings.Contains(got, "verified @ abcdef123456") {
+		t.Fatalf("AWAITING-APPROVAL detail missing suffix: %q", got)
+	}
+
+	needs := Row{ID: "needs", Status: StatusNeedsVerify, Progress: "1/1 done", VerifiedAtSHA: ""}
+	if got := rowDetail(plainOut, needs); strings.Contains(got, "verified @") {
+		t.Fatalf("NEEDS-VERIFY detail should not contain suffix: %q", got)
+	}
+
+	failed := Row{ID: "failed", Status: StatusVerifyFailed, Progress: "1/1 done", VerifiedAtSHA: ""}
+	if got := rowDetail(plainOut, failed); strings.Contains(got, "verified @") {
+		t.Fatalf("VERIFY-FAILED detail should not contain suffix: %q", got)
+	}
+
+	// A DONE row whose HEAD matches the verified SHA shows no suffix.
+	matched := Row{ID: "matched", Status: StatusDone, Progress: "1/1 done", VerifiedAtSHA: ""}
+	if got := rowDetail(plainOut, matched); strings.Contains(got, "verified @") {
+		t.Fatalf("matched DONE detail should not contain suffix: %q", got)
+	}
+
+	// With color enabled the suffix is wrapped in yellow ANSI codes.
+	colorOut := &output{Writer: io.Discard, color: true}
+	if got := rowDetail(colorOut, done); !strings.Contains(got, ansiYellow+"verified @") {
+		t.Fatalf("color output should wrap suffix in yellow: %q", got)
 	}
 }
