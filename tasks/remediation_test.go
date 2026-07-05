@@ -48,7 +48,7 @@ func TestNextTaskNumber(t *testing.T) {
 func TestSpawnRemediationTaskWritesMarkdownAndIndex(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 
-	id, err := spawnRemediationTask(d, m, "deadbeefcafe", "criterion 2 unmet: the widget never renders")
+	id, err := spawnRemediationTask(d, m, "", "deadbeefcafe", "criterion 2 unmet: the widget never renders")
 	if err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestSpawnRemediationTaskFindingsNotWrittenIntoOtherSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := spawnRemediationTask(d, m, "sha1", "some finding"); err != nil {
+	if _, err := spawnRemediationTask(d, m, "", "sha1", "some finding"); err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
 	after, err := os.ReadFile(filepath.Join(m.Dir, "01-a.md"))
@@ -118,7 +118,7 @@ func TestSpawnRemediationTaskFindingsNotWrittenIntoOtherSpecs(t *testing.T) {
 func TestSpawnRemediationTaskFindingsWithACHeaderStaysValid(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 	findings := "The set does not meet:\n## Acceptance criteria\n- the second box is unchecked"
-	if _, err := spawnRemediationTask(d, m, "sha1", findings); err != nil {
+	if _, err := spawnRemediationTask(d, m, "", "sha1", findings); err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
 	reloaded := LoadManifest(d, "demo", m.Path)
@@ -140,7 +140,7 @@ func TestSpawnRemediationTaskFindingsWithACHeaderStaysValid(t *testing.T) {
 func TestSpawnRemediationIfUnderCap(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 
-	spawned, id, err := spawnRemediationIfUnderCap(d, m, "sha1", "f1", 2)
+	spawned, id, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "f1", 2)
 	if err != nil || !spawned {
 		t.Fatalf("first spawn: spawned=%v err=%v, want true/nil", spawned, err)
 	}
@@ -151,7 +151,7 @@ func TestSpawnRemediationIfUnderCap(t *testing.T) {
 		t.Fatalf("depth after first spawn = %d, want 1", remediationDepth(m))
 	}
 
-	spawned, id, err = spawnRemediationIfUnderCap(d, m, "sha1", "f2", 2)
+	spawned, id, err = spawnRemediationIfUnderCap(d, m, "", "sha1", "f2", 2)
 	if err != nil || !spawned {
 		t.Fatalf("second spawn: spawned=%v err=%v, want true/nil", spawned, err)
 	}
@@ -162,7 +162,7 @@ func TestSpawnRemediationIfUnderCap(t *testing.T) {
 		t.Fatalf("depth after second spawn = %d, want 2", remediationDepth(m))
 	}
 
-	spawned, _, err = spawnRemediationIfUnderCap(d, m, "sha1", "f3", 2)
+	spawned, _, err = spawnRemediationIfUnderCap(d, m, "", "sha1", "f3", 2)
 	if err != nil {
 		t.Fatalf("third spawn err = %v", err)
 	}
@@ -178,7 +178,7 @@ func TestSpawnRemediationIfUnderCap(t *testing.T) {
 // entirely — a FIXABLE verdict spawns nothing.
 func TestSpawnRemediationCapZeroNeverSpawns(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
-	spawned, _, err := spawnRemediationIfUnderCap(d, m, "sha1", "f", 0)
+	spawned, _, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "f", 0)
 	if err != nil {
 		t.Fatalf("spawn err = %v", err)
 	}

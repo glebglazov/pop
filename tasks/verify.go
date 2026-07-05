@@ -468,6 +468,22 @@ func verifyWorkSHA(d *Deps, runtimePath string) string {
 	return strings.TrimSpace(out)
 }
 
+// invalidateVerifyVerdicts ends the cached verification episode for (repo, set)
+// by deleting every stored Verify verdict. It is best-effort: an unresolvable
+// repo, missing store, or store error is silently ignored so that reopen and
+// remediation always succeed (ADR-0096).
+func invalidateVerifyVerdicts(d *Deps, repo, setID string) {
+	if d == nil || repo == "" || setID == "" {
+		return
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil || !ok {
+		return
+	}
+	defer func() { _ = s.Close() }()
+	_ = s.InvalidateVerifyVerdicts(repo, setID)
+}
+
 // verifyWorkDiff returns the accumulated diff of the set's committed work. The
 // drain commits every task as a `tasks(<slug>): <id>` commit, so the set's work
 // is the range from the parent of its earliest such commit to HEAD. Absent set

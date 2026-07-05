@@ -120,7 +120,13 @@ func neutralizeACHeaders(findings string) string {
 // entry, so a reader never sees an index entry without its body. A manifest-write
 // failure rolls the orphan markdown back, keeping the two in sync. It mutates the
 // passed manifest's task list and returns the new task's id.
-func spawnRemediationTask(d *Deps, m *Manifest, workSHA, findings string) (string, error) {
+//
+// repo is the canonical git common directory for the set's repository. When
+// non-empty, the new open AFK work ends any cached verification episode for the
+// set so the Verifier re-fires against the next work SHA (ADR-0096). An empty
+// repo or a store error skips invalidation silently — remediation must still
+// succeed.
+func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings string) (string, error) {
 	if m == nil {
 		return "", exitErr(ExitOperational, "spawn remediation task: nil manifest")
 	}
@@ -147,6 +153,9 @@ func spawnRemediationTask(d *Deps, m *Manifest, workSHA, findings string) (strin
 		m.Tasks = m.Tasks[:len(m.Tasks)-1]
 		return "", exitErr(ExitOperational, "append remediation task to manifest: %v", err)
 	}
+	// The set is no longer terminal: any cached verdict is for the old episode
+	// and must be discarded so the Verifier re-fires at the new work SHA.
+	invalidateVerifyVerdicts(d, repo, m.Stem)
 	return id, nil
 }
 
@@ -156,11 +165,11 @@ func spawnRemediationTask(d *Deps, m *Manifest, workSHA, findings string) (strin
 // completion moves the work SHA so the cached verdict goes stale and the Verifier
 // re-fires, closing the loop. At or over the cap it writes nothing and returns
 // spawned=false, so the caller parks the set at VERIFY-FAILED.
-func spawnRemediationIfUnderCap(d *Deps, m *Manifest, workSHA, findings string, maxDepth int) (spawned bool, id string, err error) {
+func spawnRemediationIfUnderCap(d *Deps, m *Manifest, repo, workSHA, findings string, maxDepth int) (spawned bool, id string, err error) {
 	if remediationDepth(m) >= maxDepth {
 		return false, "", nil
 	}
-	id, err = spawnRemediationTask(d, m, workSHA, findings)
+	id, err = spawnRemediationTask(d, m, repo, workSHA, findings)
 	if err != nil {
 		return false, "", err
 	}

@@ -84,6 +84,11 @@ func ResetTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 	if err := WriteManifestAtomic(d, m); err != nil {
 		return nil, manualRepairErr(fmt.Errorf("update manifest after reset progress: %w", err))
 	}
+	// Leaving the terminal zone ends the verification episode: drop any cached
+	// verdict so the set must re-verify after the reset (ADR-0096).
+	if id, idErr := ResolveRepositoryIdentity(d, resolved.ProjectPath); idErr == nil {
+		invalidateVerifyVerdicts(d, id.CommonDir, taskSetID)
+	}
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
 	if err != nil {

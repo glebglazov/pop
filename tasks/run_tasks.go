@@ -356,7 +356,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					// keeps draining; only a NEEDS-HUMAN verdict or an exhausted cap
 					// actually parks the set.
 					if verdict != nil && Verdict(verdict.Verdict) == VerdictFixable {
-						spawned, remID, rerr := spawnRemediationIfUnderCap(d, m, verdict.WorkSHA, verdict.Findings, maxRemediationDepth(cfg))
+						spawned, remID, rerr := spawnRemediationIfUnderCap(d, m, repo, verdict.WorkSHA, verdict.Findings, maxRemediationDepth(cfg))
 						if rerr != nil {
 							return result, rerr
 						}

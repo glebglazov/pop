@@ -82,3 +82,14 @@ func (s *Store) PutVerifyVerdict(v VerifyVerdict) error {
 		v.Repo, v.SetID, v.WorkSHA, v.Verdict, v.Findings, mergeTime(v.ComputedAt))
 	return err
 }
+
+// InvalidateVerifyVerdicts deletes every cached Verify verdict for (repo, set_id).
+// It is called when a verification episode ends — a set leaves the terminal zone
+// through reopen or remediation — so the set must re-verify from scratch
+// (ADR-0096). Returns nil when no rows exist.
+func (s *Store) InvalidateVerifyVerdicts(repo, setID string) error {
+	_, err := s.db.Exec(
+		`DELETE FROM verify_verdicts WHERE repo = ? AND set_id = ?`,
+		repo, setID)
+	return err
+}

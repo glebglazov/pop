@@ -178,3 +178,43 @@ func TestVerifyVerdictKeyedBySHA(t *testing.T) {
 		t.Fatalf("new verdict = %+v, want NEEDS-HUMAN", fresh)
 	}
 }
+
+func TestInvalidateVerifyVerdictsDeletesAllRowsForRepoSet(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "sha1", Verdict: "PASS"}); err != nil {
+		t.Fatalf("PutVerifyVerdict sha1: %v", err)
+	}
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "sha2", Verdict: "FIXABLE", Findings: "x"}); err != nil {
+		t.Fatalf("PutVerifyVerdict sha2: %v", err)
+	}
+	// A different set in the same repo should be untouched.
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-b", WorkSHA: "sha1", Verdict: "PASS"}); err != nil {
+		t.Fatalf("PutVerifyVerdict set-b: %v", err)
+	}
+
+	if err := s.InvalidateVerifyVerdicts("/repo/.git", "set-a"); err != nil {
+		t.Fatalf("InvalidateVerifyVerdicts: %v", err)
+	}
+
+	got, err := s.GetLatestPassVerifyVerdict("/repo/.git", "set-a")
+	if err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("set-a still has a verdict after invalidation: %+v", got)
+	}
+	other, err := s.GetLatestPassVerifyVerdict("/repo/.git", "set-b")
+	if err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict set-b: %v", err)
+	}
+	if other == nil {
+		t.Fatal("set-b verdict was incorrectly invalidated")
+	}
+}
+
+func TestInvalidateVerifyVerdictsMissingIsNoOp(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.InvalidateVerifyVerdicts("/repo/.git", "set-a"); err != nil {
+		t.Fatalf("InvalidateVerifyVerdicts on empty store: %v", err)
+	}
+}
