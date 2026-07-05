@@ -161,6 +161,40 @@ func TestRunTaskNonInteractiveRefusal(t *testing.T) {
 	assertExitCode(t, err, ExitOperational)
 }
 
+func TestRunTaskPiWeeklyQuotaPause(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	quotaLine := "429 Weekly usage limit reached. Resets in 9hr 4min. To continue using this model now, enable usage from your available balance."
+	writeFakePiAgent(t, env.root, quotaLine)
+	t.Setenv("PATH", filepath.Join(env.root, ".agent")+":"+os.Getenv("PATH"))
+
+	d := env.deps()
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "pi"
+	opts.MaxTries = 3
+	opts.Output = io.Discard
+
+	result, err := RunTaskWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !result.QuotaPaused {
+		t.Fatalf("expected quota pause, got %#v", result)
+	}
+	if result.PausePreset != "pi" {
+		t.Fatalf("pause preset = %q, want pi", result.PausePreset)
+	}
+	if result.PauseResetAt.IsZero() {
+		t.Fatal("expected non-zero PauseResetAt")
+	}
+	wantReset := time.Now().Add(9*time.Hour + 4*time.Minute + opencodeGoQuotaAssuranceOffset)
+	if result.PauseResetAt.Before(wantReset.Add(-time.Minute)) || result.PauseResetAt.After(wantReset.Add(time.Minute)) {
+		t.Fatalf("PauseResetAt = %s, want near %s", result.PauseResetAt, wantReset)
+	}
+	if !strings.Contains(strings.ToLower(result.PauseReason), "weekly usage limit reached") {
+		t.Fatalf("pause reason = %q, want weekly quota diagnostic", result.PauseReason)
+	}
+}
+
 func TestRunTaskPiQuotaPause(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	quotaLine := "429 5-hour usage limit reached. Resets in 7min. Upgrade to continue."

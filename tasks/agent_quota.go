@@ -3,19 +3,26 @@ package tasks
 import (
 	"bufio"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	opencodeGoQuotaSignal          = "5-hour usage limit reached"
-	opencodeGoQuotaAssuranceOffset = 2 * time.Minute
+	opencodeGoFiveHourQuotaSignal   = "5-hour usage limit reached"
+	opencodeGoWeeklyQuotaSignal     = "weekly usage limit reached"
+	opencodeGoQuotaAssuranceOffset  = 2 * time.Minute
+	opencodeGoFiveHourQuotaFallback = time.Hour
+	opencodeGoWeeklyQuotaFallback   = 24 * time.Hour
 )
 
-var opencodeGoQuotaResetPattern = regexp.MustCompile(`(?i)\bResets in\s+([0-9]+)\s*min\b`)
+var (
+	opencodeGoQuotaResetCompoundPattern = regexp.MustCompile(`(?i)\bResets in\s+([0-9]+)\s*hr\s+([0-9]+)\s*min\b`)
+	opencodeGoQuotaResetMinutesPattern  = regexp.MustCompile(`(?i)\bResets in\s+([0-9]+)\s*min\b`)
+)
 
 // opencodeGoQuotaPauseReason scans the raw agent capture line-by-line and
-// returns an AgentQuotaPause when any line contains the opencode-go quota
+// returns an AgentQuotaPause when any line contains an opencode-go quota
 // signal. The full matching line becomes the pause reason so downstream reset
 // parsing can inspect provider-specific phrasing.
 func opencodeGoQuotaPauseReason(raw string) *AgentQuotaPause {
@@ -26,24 +33,59 @@ func opencodeGoQuotaPauseReason(raw string) *AgentQuotaPause {
 		if line == "" {
 			continue
 		}
-		if strings.Contains(strings.ToLower(line), opencodeGoQuotaSignal) {
+		if opencodeGoQuotaSignalInLine(line) {
 			return &AgentQuotaPause{Reason: line}
 		}
 	}
 	return nil
 }
 
-// piQuotaResetAt parses the "Resets in <N>min" phrase reported by opencode-go
-// through the pi preset. The reset instant is now + N + a fixed assurance
-// offset. When the pattern is absent or unparseable, a zero time is returned.
+func opencodeGoQuotaSignalInLine(line string) bool {
+	lower := strings.ToLower(line)
+	return strings.Contains(lower, opencodeGoFiveHourQuotaSignal) ||
+		strings.Contains(lower, opencodeGoWeeklyQuotaSignal)
+}
+
+// piQuotaResetAt derives PauseResetAt from opencode-go quota diagnostics.
+// When the diagnostic includes "Resets in <N>min" or "Resets in <H>hr <M>min",
+// the reset instant is now + parsed duration + a fixed assurance offset.
+// When the reset phrase is absent or unparseable, a signal-specific backoff
+// applies: one hour for the five-hour signal, one day for the weekly signal
+// (each plus the assurance offset).
 func piQuotaResetAt(reason string, now time.Time) time.Time {
-	m := opencodeGoQuotaResetPattern.FindStringSubmatch(reason)
-	if m == nil {
-		return time.Time{}
+	if duration, ok := opencodeGoQuotaResetDuration(reason); ok {
+		return now.Add(duration).Add(opencodeGoQuotaAssuranceOffset)
 	}
-	minutes, err := time.ParseDuration(m[1] + "m")
-	if err != nil {
-		return time.Time{}
+	if fallback := opencodeGoQuotaFallbackDuration(reason); fallback > 0 {
+		return now.Add(fallback).Add(opencodeGoQuotaAssuranceOffset)
 	}
-	return now.Add(minutes).Add(opencodeGoQuotaAssuranceOffset)
+	return time.Time{}
+}
+
+func opencodeGoQuotaResetDuration(reason string) (time.Duration, bool) {
+	if m := opencodeGoQuotaResetCompoundPattern.FindStringSubmatch(reason); m != nil {
+		hours, err1 := strconv.Atoi(m[1])
+		minutes, err2 := strconv.Atoi(m[2])
+		if err1 == nil && err2 == nil {
+			return time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute, true
+		}
+	}
+	if m := opencodeGoQuotaResetMinutesPattern.FindStringSubmatch(reason); m != nil {
+		minutes, err := strconv.Atoi(m[1])
+		if err == nil {
+			return time.Duration(minutes) * time.Minute, true
+		}
+	}
+	return 0, false
+}
+
+func opencodeGoQuotaFallbackDuration(reason string) time.Duration {
+	lower := strings.ToLower(reason)
+	if strings.Contains(lower, opencodeGoWeeklyQuotaSignal) {
+		return opencodeGoWeeklyQuotaFallback
+	}
+	if strings.Contains(lower, opencodeGoFiveHourQuotaSignal) {
+		return opencodeGoFiveHourQuotaFallback
+	}
+	return 0
 }
