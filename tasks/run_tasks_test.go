@@ -1098,6 +1098,9 @@ func TestRunTaskSetClaudeQuotaPauseStopsCleanly(t *testing.T) {
 	if !strings.Contains(buf.String(), "Task set demo paused") {
 		t.Fatalf("missing pause summary:\n%s", buf.String())
 	}
+	if strings.Contains(buf.String(), "trying next") {
+		t.Fatalf("single-agent quota pause must not print fallback line:\n%s", buf.String())
+	}
 }
 
 func TestRunTaskSetTimeoutPropagation(t *testing.T) {
@@ -1564,18 +1567,19 @@ func TestRunTaskSetAgentFallbackAdvancesOnQuota(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	installAgentShim(t, env.root, "claude", `#!/bin/sh
-printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You'\''ve hit your weekly limit · resets Mon 12:00am"}'
+	installAgentShim(t, env.root, "pi", `#!/bin/sh
+printf '%s\n' '429 Weekly usage limit reached. Resets in 9hr 4min. To continue using this model now, enable usage from your available balance.'
+exit 1
 `)
-	installAgentShim(t, env.root, "codex", `#!/bin/sh
+	installAgentShim(t, env.root, "claude", `#!/bin/sh
 TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
-printf 'SUMMARY_START\ncodex done\nSUMMARY_END\nTASK_COMPLETE\n'
+printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(true, "", &buf)
-	opts.AgentPresets = []string{"claude", "codex"}
+	opts.AgentPresets = []string{"pi", "claude"}
 	opts.AgentExplicit = true
 	opts.MaxTries = 1
 
@@ -1587,8 +1591,11 @@ printf 'SUMMARY_START\ncodex done\nSUMMARY_END\nTASK_COMPLETE\n'
 		t.Fatalf("result = %#v", result)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "Attempt 1/1 · claude") || !strings.Contains(out, "Attempt 1/1 · codex") {
+	if !strings.Contains(out, "Attempt 1/1 · pi") || !strings.Contains(out, "Attempt 1/1 · claude") {
 		t.Fatalf("fallback attempts not rendered:\n%s", out)
+	}
+	if !strings.Contains(out, "Agent pi quota-paused; trying next") {
+		t.Fatalf("missing implement quota fallback line:\n%s", out)
 	}
 	assertTaskDone(t, env.execFixture(), "01-a")
 }

@@ -466,8 +466,9 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 		return nil, taskExitErr(sel, ExitOperational, "%v", err)
 	}
 	activeCooldowns := activeAgentCooldowns(cooldowns, time.Now())
+	specs := nonEmptyAgentSpecs(agentSpecs, DefaultAgentPreset)
 	var quotaResults []*RunTaskResult
-	for _, agentSpec := range nonEmptyAgentSpecs(agentSpecs, DefaultAgentPreset) {
+	for i, agentSpec := range specs {
 		preset, err := AgentPresetName(agentSpec)
 		if err != nil {
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)
@@ -496,6 +497,9 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 		}
 		activeCooldowns[result.PausePreset] = until
 		quotaResults = append(quotaResults, result)
+		if i+1 < len(specs) && out != nil {
+			outputFor(out).line(ansiDim, "   Agent %s quota-paused; trying next", result.PausePreset)
+		}
 	}
 	if len(quotaResults) == 0 {
 		return nil, taskExitErr(sel, ExitOperational, "no agent attempts were run")
