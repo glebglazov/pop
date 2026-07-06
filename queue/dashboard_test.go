@@ -3860,3 +3860,156 @@ func TestQueueDashboardHelpFooterHint(t *testing.T) {
 		t.Error("main footer hint should include 'C-h help'")
 	}
 }
+
+// TestDashboardMainViewTwoLineIntegration wires two-line mode into the default
+// Frame + List path: at a narrow width with a long set id every row renders two
+// physical lines, the full set id appears on line 2, and the view clamps to the
+// terminal height instead of overflowing.
+func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
+	longID := strings.Repeat("a", 37)
+	rows := []DashboardRow{
+		{Project: "pop", Status: "READY", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{SetID: longID}},
+		{Project: "pop", Status: "DONE", Worktree: "main", cursorKey: "pop\x00bbb", SetRef: SetRef{SetID: "bbb"}},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	m = updated.(QueueDashboard)
+
+	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+		t.Fatalf("expected two-line mode at width 40 with a long set id")
+	}
+	if m.list.LinesPerItem() != 2 {
+		t.Fatalf("LinesPerItem = %d, want 2", m.list.LinesPerItem())
+	}
+
+	view := m.View().Content
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("view line count = %d, want %d (clamped to terminal height):\n%s", got, want, view)
+	}
+
+	// Every data row should be rendered on two consecutive physical lines.
+	for _, row := range rows {
+		if dashboardTestLineIndex(lines, row.SetID) < 0 {
+			t.Fatalf("full set id %q missing from view:\n%s", row.SetID, view)
+		}
+	}
+
+	// The two-line header line (line 1 of the table body) contains the
+	// operational columns and omits the TASK SET column.
+	headerIdx := dashboardTestLineIndex(lines, "PROJECT")
+	if headerIdx < 0 {
+		t.Fatalf("two-line header missing PROJECT:\n%s", view)
+	}
+	header := lines[headerIdx]
+	for _, want := range []string{"FLAGS", "STATUS", "WORKTREE"} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("two-line header missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(header, longID) {
+		t.Fatalf("two-line header must not contain the set id:\n%s", view)
+	}
+
+	// The data row's first physical line contains status/worktree columns but
+	// not the set id; the set id appears on the following physical line.
+	dataLine1 := lines[dashboardTestLineIndex(lines, "READY")]
+	if strings.Contains(dataLine1, longID) {
+		t.Fatalf("row line 1 must not contain the set id:\n%s", view)
+	}
+	dataLine2 := lines[dashboardTestLineIndex(lines, longID)]
+	if !strings.HasSuffix(dataLine2, longID) {
+		t.Fatalf("row line 2 must end with the full set id:\n%s", view)
+	}
+}
+
+// TestDashboardTwoLineCursorMovesByLogicalRow confirms that j/k/gg/G move the
+// cursor one logical task-set row at a time even though each row renders two
+// physical terminal lines.
+func TestDashboardTwoLineCursorMovesByLogicalRow(t *testing.T) {
+	longID := strings.Repeat("a", 37)
+	rows := make([]DashboardRow, 5)
+	for i := range rows {
+		id := fmt.Sprintf("%s-%d", longID, i)
+		rows[i] = DashboardRow{Project: "pop", Status: "READY", cursorKey: "pop\x00" + id, SetRef: SetRef{SetID: id}}
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	m = updated.(QueueDashboard)
+
+	if m.list.LinesPerItem() != 2 {
+		t.Fatalf("LinesPerItem = %d, want 2", m.list.LinesPerItem())
+	}
+
+	assertCursor := func(name string, want int) {
+		t.Helper()
+		if m.list.Cursor() != want {
+			t.Fatalf("%s: cursor = %d, want %d", name, m.list.Cursor(), want)
+		}
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = updated.(QueueDashboard)
+	assertCursor("j", 1)
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = updated.(QueueDashboard)
+	assertCursor("jj", 2)
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m = updated.(QueueDashboard)
+	assertCursor("jjk", 1)
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	m = updated.(QueueDashboard)
+	assertCursor("G", len(rows)-1)
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = updated.(QueueDashboard)
+	assertCursor("first g", len(rows)-1)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = updated.(QueueDashboard)
+	assertCursor("gg", 0)
+}
+
+// TestDashboardTwoLineClampsToBodyHeight asserts that many rows on a short
+// terminal do not overflow the viewport in two-line mode. Each logical item
+// consumes two physical lines, so the visible logical row count is halved, but
+// the total rendered line count still equals the terminal height.
+func TestDashboardTwoLineClampsToBodyHeight(t *testing.T) {
+	longID := strings.Repeat("a", 37)
+	rows := make([]DashboardRow, 40)
+	for i := range rows {
+		id := fmt.Sprintf("%s-%02d", longID, i)
+		rows[i] = DashboardRow{Project: "pop", Status: "READY", cursorKey: "pop\x00" + id, SetRef: SetRef{SetID: id}}
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	m = updated.(QueueDashboard)
+
+	if m.list.LinesPerItem() != 2 {
+		t.Fatalf("LinesPerItem = %d, want 2", m.list.LinesPerItem())
+	}
+
+	view := m.View().Content
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("view line count = %d, want %d (clamped to body height):\n%s", got, want, view)
+	}
+
+	// With a 10-line terminal, the chrome consumes 4 lines (summary, blank,
+	// header, separator) and the List body gets 6 physical lines, which is 3
+	// logical rows in two-line mode.
+	bodyH := m.frameSpec().BodyHeight(m.height) - dashboardTableChromeLines
+	visible := m.list.VisibleRows()
+	if got := len(visible); got != bodyH {
+		t.Fatalf("List VisibleRows = %d, want %d", got, bodyH)
+	}
+	selected, ok := m.list.Selected()
+	if !ok {
+		t.Fatal("expected a selected row")
+	}
+	if selected.SetID != rows[0].SetID {
+		t.Fatalf("selected = %q, want %q", selected.SetID, rows[0].SetID)
+	}
+}
