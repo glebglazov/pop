@@ -31,8 +31,13 @@ branch: quota-recovery-coordinator
   was: An idle set whose latest terminal drain quota-paused on a pinned agent waits out a per-set SetBackoff keyed in daemon state until the pinned preset's reset instant passes.
   avoid: set backed off for pinned agent cooldown, quota_backoff
 
-+ Recovery turn
-  One granted slot to resume agent work on a given **Runtime path** after the waiter's exhausted **Agent preset** cooldown clears globally. A waiter acquires a turn only when no other drain is actively executing on that checkout and the waiter is first under **Recovery turn ordering** for that path. The turn is preset-agnostic — at most one recovery resume per checkout at a time regardless of which **Agent preset** each waiter exhausted. Parallel worktrees resume independently; the guard is against multiple sets mutating the same checkout.
++ Checkout gate hold
+  A lightweight registration with the **Agent quota recovery coordinator** when implement parks at a **Failed gate prompt** or **HITL gate prompt** (runtime lock released per ADR-0067). It names the task set and **Runtime path** and blocks **Recovery turn** acquisition on that checkout until the gate session ends — resume, exit, or interrupt — so a quota waiter on another set cannot resume agent work on the same dirty tree while a human sits at a gate.
+  avoid: runtime lock through gate, gate checkout mutex, parked drain hold
+
+~ Recovery turn
+  One granted slot to resume agent work on a given **Runtime path** after the waiter's exhausted **Agent preset** cooldown clears globally. A waiter acquires a turn only when no other drain is actively executing on that checkout, no **Checkout gate hold** is active there, and the waiter is first under **Recovery turn ordering** for that path. The turn is preset-agnostic — at most one recovery resume per checkout at a time regardless of which **Agent preset** each waiter exhausted. Parallel worktrees resume independently; the guard is against multiple sets mutating the same checkout.
+  was: One granted slot to resume agent work on a given **Runtime path** after the waiter's exhausted **Agent preset** cooldown clears globally. A waiter acquires a turn only when no other drain is actively executing on that checkout and the waiter is first under **Recovery turn ordering** for that path. The turn is preset-agnostic — at most one recovery resume per checkout at a time regardless of which **Agent preset** each waiter exhausted. Parallel worktrees resume independently; the guard is against multiple sets mutating the same checkout.
   avoid: next shot, quota lease, recovery gate, per-preset queue
 
 + Recovery turn ordering

@@ -23,3 +23,4 @@ The queue reads recovery waiters (and live drains) to skip duplicate spawns; pin
 - Implement grows a recovery poll loop and store tables for waiters/turns; queue's `recordPinnedQuotaCooldowns` and quota **SetBackoff** display paths shrink.
 - A weekly quota wait can hold a pane for days with no runtime lock; recovery registration is the occupancy signal instead.
 - Cross-worktree resume on the same preset may hit quota again quickly; accepted in favour of checkout isolation.
+- **Failed gate prompt** and **HITL gate prompt** park registers a **Checkout gate hold** on the runtime path so **Recovery turn** acquisition waits until the gate session ends — ADR-0067 lock release stays, but checkout occupancy is tracked in the coordinator.
