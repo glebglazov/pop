@@ -466,7 +466,7 @@ func TestDashboardOrphanedIndicator(t *testing.T) {
 	}
 	// The orphaned set must render its indicator; the present/unbound sets must not.
 	var rendered strings.Builder
-	renderDashboardTable(&rendered, []DashboardRow{byID["missing"]}, 0, 0)
+	renderDashboardTable(&rendered, []DashboardRow{byID["missing"]}, 0, 120)
 	if !strings.Contains(rendered.String(), " OR ") {
 		t.Fatalf("orphaned flag missing from row render:\n%s", rendered.String())
 	}
@@ -1066,8 +1066,9 @@ func TestDashboardTableClampsToBodyHeight(t *testing.T) {
 }
 
 func TestDashboardTableFitsTerminalWidth(t *testing.T) {
-	// Wide row content on a narrow pane must not spill horizontally; compact
-	// FLAGS (AD/OR) stay visible even when WORKTREE and DRAIN shrink.
+	// Wide row content on a narrow pane must not spill horizontally. Compact
+	// FLAGS (AD/OR) stay visible in single-line mode; two-line mode drops the
+	// FLAGS column entirely.
 	row := DashboardRow{
 		Project:   "very-long-project-name-here",
 		Status:    "AWAITING-APPROVAL · verified @ abcdef123456",
@@ -1086,8 +1087,10 @@ func TestDashboardTableFitsTerminalWidth(t *testing.T) {
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: termW, Height: 20})
 			m = updated.(QueueDashboard)
 			view := m.View().Content
-			if !strings.Contains(view, "AD") || !strings.Contains(view, "OR") {
-				t.Fatalf("missing compact flags in view:\n%s", view)
+			if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+				if !strings.Contains(view, "AD") || !strings.Contains(view, "OR") {
+					t.Fatalf("missing compact flags in single-line view:\n%s", view)
+				}
 			}
 			for _, line := range dashboardTestTableLines(view) {
 				if got := lipgloss.Width(line); got > termW {
@@ -1113,7 +1116,9 @@ func dashboardTestTableLines(view string) []string {
 	var lines []string
 	inTable := false
 	for _, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, "PROJECT") && strings.Contains(line, "FLAGS") {
+		singleHeader := strings.Contains(line, "PROJECT") && strings.Contains(line, "FLAGS")
+		twoLineHeader := strings.Contains(line, "TASK SET") && strings.Contains(line, "WORKTREE")
+		if singleHeader || twoLineHeader {
 			inTable = true
 		}
 		if !inTable {
@@ -1148,7 +1153,7 @@ func TestDashboardTwoLineMode(t *testing.T) {
 	}
 }
 
-func TestDashboardTwoLineRowLine1OmitsTaskSet(t *testing.T) {
+func TestDashboardTwoLineRowLine1ShowsIdentityWorktreeDrain(t *testing.T) {
 	row := DashboardRow{
 		Project:   "pop",
 		Status:    "READY",
@@ -1160,42 +1165,29 @@ func TestDashboardTwoLineRowLine1OmitsTaskSet(t *testing.T) {
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
 	line1 := dashboardTwoLineRowLine1(row, widths)
 
-	if strings.Contains(line1, row.SetID) {
-		t.Fatalf("two-line row line 1 must not contain the Task set id: %q", line1)
-	}
-	for _, want := range []string{"pop", "READY", "main", "picked up"} {
+	// Line 1 is the identity plus WORKTREE and DRAIN; STATUS lives on line 2.
+	for _, want := range []string{"pop · " + row.SetID, "main", "picked up"} {
 		if !strings.Contains(line1, want) {
 			t.Fatalf("two-line row line 1 missing expected value %q: %q", want, line1)
 		}
 	}
+	if strings.Contains(line1, "READY") {
+		t.Fatalf("two-line row line 1 must not contain the status: %q", line1)
+	}
 }
 
-func TestDashboardTwoLineRowLine2ShowsFullSetID(t *testing.T) {
+func TestDashboardTwoLineRowLine2ShowsStatus(t *testing.T) {
 	row := DashboardRow{
 		Project: "pop",
+		Status:  "IN PROGRESS",
 		SetRef:  SetRef{SetID: "2026-07-05-queue-dashboard-two-line"},
 	}
-	rows := []DashboardRow{row}
-	singleWidths := dashboardTableWidthsForRows(rows, 120)
-	wantStart := dashboardTwoLineSetIDStart(singleWidths)
-
-	line2 := dashboardTwoLineRowLine2(row, singleWidths)
-	if !strings.HasSuffix(line2, row.SetID) {
-		t.Fatalf("two-line row line 2 must end with the full set id: %q", line2)
+	line2 := dashboardTwoLineRowLine2(row)
+	if line2 != "IN PROGRESS" {
+		t.Fatalf("two-line row line 2 = %q, want the status %q", line2, "IN PROGRESS")
 	}
-	if strings.Contains(line2, "…") {
-		t.Fatalf("two-line row line 2 must not ellipsize the set id: %q", line2)
-	}
-
-	gotSpaces := 0
-	for _, r := range line2 {
-		if r != ' ' {
-			break
-		}
-		gotSpaces++
-	}
-	if gotSpaces != wantStart {
-		t.Fatalf("two-line row line 2 indent = %d, want %d (single-line TASK SET start): %q", gotSpaces, wantStart, line2)
+	if strings.Contains(line2, row.SetID) {
+		t.Fatalf("two-line row line 2 must not contain the set id: %q", line2)
 	}
 }
 
@@ -3874,9 +3866,9 @@ func TestQueueDashboardHelpFooterHint(t *testing.T) {
 }
 
 // TestDashboardMainViewTwoLineIntegration wires two-line mode into the default
-// Frame + List path: at a narrow width with a long set id every row renders two
-// physical lines, the full set id appears on line 2, and the view clamps to the
-// terminal height instead of overflowing.
+// Frame + List path: with a long set id every row renders two physical lines —
+// the "PROJECT · SETID" identity (plus WORKTREE/DRAIN) on line 1 and STATUS on
+// line 2 — and the view clamps to the terminal height instead of overflowing.
 func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
 	longID := strings.Repeat("a", 37)
 	rows := []DashboardRow{
@@ -3884,11 +3876,11 @@ func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
 		{Project: "pop", Status: "DONE", Worktree: "main", cursorKey: "pop\x00bbb", SetRef: SetRef{SetID: "bbb"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
 	m = updated.(QueueDashboard)
 
 	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
-		t.Fatalf("expected two-line mode at width 40 with a long set id")
+		t.Fatalf("expected two-line mode with a long set id")
 	}
 	if m.list.LinesPerItem() != 2 {
 		t.Fatalf("LinesPerItem = %d, want 2", m.list.LinesPerItem())
@@ -3900,38 +3892,36 @@ func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
 		t.Fatalf("view line count = %d, want %d (clamped to terminal height):\n%s", got, want, view)
 	}
 
-	// Every data row should be rendered on two consecutive physical lines.
-	for _, row := range rows {
-		if dashboardTestLineIndex(lines, row.SetID) < 0 {
-			t.Fatalf("full set id %q missing from view:\n%s", row.SetID, view)
-		}
-	}
-
-	// The two-line header line (line 1 of the table body) contains the
-	// operational columns and omits the TASK SET column.
-	headerIdx := dashboardTestLineIndex(lines, "PROJECT")
+	// The line-1 header labels the identity, WORKTREE and DRAIN columns and
+	// omits FLAGS; the line-2 header labels STATUS.
+	headerIdx := dashboardTestLineIndex(lines, "TASK SET")
 	if headerIdx < 0 {
-		t.Fatalf("two-line header missing PROJECT:\n%s", view)
+		t.Fatalf("two-line header missing TASK SET:\n%s", view)
 	}
 	header := lines[headerIdx]
-	for _, want := range []string{"FLAGS", "STATUS", "WORKTREE"} {
+	for _, want := range []string{"TASK SET", "WORKTREE", "DRAIN"} {
 		if !strings.Contains(header, want) {
-			t.Fatalf("two-line header missing %q:\n%s", want, view)
+			t.Fatalf("two-line line-1 header missing %q:\n%s", want, view)
 		}
 	}
-	if strings.Contains(header, longID) {
-		t.Fatalf("two-line header must not contain the set id:\n%s", view)
+	if strings.Contains(header, "FLAGS") {
+		t.Fatalf("two-line header must not contain FLAGS:\n%s", view)
+	}
+	if !strings.Contains(lines[headerIdx+1], "STATUS") {
+		t.Fatalf("two-line line-2 header missing STATUS:\n%s", view)
 	}
 
-	// The data row's first physical line contains status/worktree columns but
-	// not the set id; the set id appears on the following physical line.
-	dataLine1 := lines[dashboardTestLineIndex(lines, "READY")]
-	if strings.Contains(dataLine1, longID) {
-		t.Fatalf("row line 1 must not contain the set id:\n%s", view)
+	// The data row's first physical line carries the identity (PROJECT · SETID);
+	// STATUS appears on the following physical line, not line 1.
+	idIdx := dashboardTestLineIndex(lines, "pop · "+longID)
+	if idIdx < 0 {
+		t.Fatalf("identity %q missing from view:\n%s", "pop · "+longID, view)
 	}
-	dataLine2 := lines[dashboardTestLineIndex(lines, longID)]
-	if !strings.HasSuffix(dataLine2, longID) {
-		t.Fatalf("row line 2 must end with the full set id:\n%s", view)
+	if strings.Contains(lines[idIdx], "READY") {
+		t.Fatalf("row line 1 must not contain the status:\n%s", view)
+	}
+	if !strings.Contains(lines[idIdx+1], "READY") {
+		t.Fatalf("row line 2 must contain the status READY:\n%s", view)
 	}
 }
 
@@ -4009,10 +3999,10 @@ func TestDashboardTwoLineClampsToBodyHeight(t *testing.T) {
 		t.Fatalf("view line count = %d, want %d (clamped to body height):\n%s", got, want, view)
 	}
 
-	// With a 10-line terminal, the chrome consumes 4 lines (summary, blank,
-	// header, separator) and the List body gets 6 physical lines, which is 3
-	// logical rows in two-line mode.
-	bodyH := m.frameSpec().BodyHeight(m.height) - dashboardTableChromeLines
+	// In two-line mode the chrome consumes an extra line for the second header
+	// (blank, line-1 header, line-2 STATUS header, separator), and each logical
+	// row occupies two physical lines.
+	bodyH := m.frameSpec().BodyHeight(m.height) - dashboardTwoLineChromeLines
 	visible := m.list.VisibleRows()
 	if got := len(visible); got != bodyH {
 		t.Fatalf("List VisibleRows = %d, want %d", got, bodyH)
@@ -4036,7 +4026,7 @@ func TestDashboardMenuTwoLineOverlay(t *testing.T) {
 		{Project: "pop", Status: "DONE", Worktree: "main", cursorKey: "pop\x00bbb", SetRef: SetRef{SetID: "bbb"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 50, Height: 24})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updated.(QueueDashboard)
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
@@ -4049,17 +4039,16 @@ func TestDashboardMenuTwoLineOverlay(t *testing.T) {
 	lines := strings.Split(view, "\n")
 
 	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
-		t.Fatalf("expected two-line mode at width 50 with a long set id")
+		t.Fatalf("expected two-line mode with a long set id")
 	}
 
-	// The long set id must appear on its own physical line (line 2 of its row).
+	// The set id rides on line 1 (the identity); STATUS follows on line 2.
 	idx := dashboardTestLineIndex(lines, longID)
 	if idx < 0 {
-		t.Fatalf("full set id %q missing from menu overlay:\n%s", longID, view)
+		t.Fatalf("set id %q missing from menu overlay:\n%s", longID, view)
 	}
-	// Line 1 of the same row must not contain the set id.
-	if strings.Contains(lines[idx-1], longID) {
-		t.Fatalf("row line 1 must not contain the set id:\n%s", view)
+	if !strings.Contains(lines[idx+1], "READY") {
+		t.Fatalf("row line 2 must contain the status:\n%s", view)
 	}
 
 	// The menu must be rendered with the "actions" caption.
@@ -4084,7 +4073,7 @@ func TestDashboardBindModalTwoLineOverlay(t *testing.T) {
 		{Project: "pop", Status: "READY", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{SetID: longID}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = updated.(QueueDashboard)
 
 	// Inject a bind modal directly so the test does not depend on filesystem/git.
@@ -4101,16 +4090,16 @@ func TestDashboardBindModalTwoLineOverlay(t *testing.T) {
 	lines := strings.Split(view, "\n")
 
 	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
-		t.Fatalf("expected two-line mode at width 50 with a long set id")
+		t.Fatalf("expected two-line mode with a long set id")
 	}
 
-	// The long set id must appear on its own physical line (line 2 of its row).
+	// The set id rides on line 1 (the identity); STATUS follows on line 2.
 	idx := dashboardTestLineIndex(lines, longID)
 	if idx < 0 {
-		t.Fatalf("full set id %q missing from bind modal overlay:\n%s", longID, view)
+		t.Fatalf("set id %q missing from bind modal overlay:\n%s", longID, view)
 	}
-	if strings.Contains(lines[idx-1], longID) {
-		t.Fatalf("row line 1 must not contain the set id:\n%s", view)
+	if !strings.Contains(lines[idx+1], "READY") {
+		t.Fatalf("row line 2 must contain the status:\n%s", view)
 	}
 
 	// No rendered line may exceed the terminal width (no horizontal spill).
@@ -4134,7 +4123,7 @@ func TestDashboardDrainModalTwoLineOverlay(t *testing.T) {
 		{Project: "pop", Status: "READY", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{SetID: longID}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = updated.(QueueDashboard)
 
 	m.drainPick = newDashboardDrainModal(rows[0], []dashboardDrainEntry{
@@ -4146,15 +4135,15 @@ func TestDashboardDrainModalTwoLineOverlay(t *testing.T) {
 	lines := strings.Split(view, "\n")
 
 	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
-		t.Fatalf("expected two-line mode at width 50 with a long set id")
+		t.Fatalf("expected two-line mode with a long set id")
 	}
 
 	idx := dashboardTestLineIndex(lines, longID)
 	if idx < 0 {
-		t.Fatalf("full set id %q missing from drain modal overlay:\n%s", longID, view)
+		t.Fatalf("set id %q missing from drain modal overlay:\n%s", longID, view)
 	}
-	if strings.Contains(lines[idx-1], longID) {
-		t.Fatalf("row line 1 must not contain the set id:\n%s", view)
+	if !strings.Contains(lines[idx+1], "READY") {
+		t.Fatalf("row line 2 must contain the status:\n%s", view)
 	}
 
 	for i, line := range lines {

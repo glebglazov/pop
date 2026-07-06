@@ -1203,7 +1203,7 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 		Cell: func(r DashboardRow, rs ui.RowState) string {
 			budget := dashboardListCellBudget(cols.width)
 			if rs.LineIndex == 1 {
-				return dashboardTwoLineRowLine2(r, cols.widths)
+				return ui.TruncateString(dashboardTwoLineRowLine2(r), budget)
 			}
 			if list.LinesPerItem() == 2 {
 				line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(list.Items()), budget)
@@ -1365,19 +1365,32 @@ func dashboardTwoLineMode(rows []DashboardRow, termWidth int) bool {
 }
 
 // dashboardTwoLineHeaders returns the line-1 column headers for two-line mode:
-// PROJECT, FLAGS, STATUS, WORKTREE, DRAIN. TASK SET is intentionally absent
-// from line 1 and rendered on line 2.
+// TASK SET (the "PROJECT · SETID" identity), WORKTREE, DRAIN. STATUS is rendered
+// alone on line 2 (see dashboardTwoLineStatusHeader).
 func dashboardTwoLineHeaders() []string {
-	return []string{"PROJECT", "FLAGS", "STATUS", "WORKTREE", "DRAIN"}
+	return []string{"TASK SET", "WORKTREE", "DRAIN"}
+}
+
+// dashboardTwoLineStatusHeader is the line-2 header label. STATUS occupies the
+// second physical line of every two-line row by itself.
+func dashboardTwoLineStatusHeader() string {
+	return "STATUS"
+}
+
+// dashboardTwoLineIdentity renders the line-1 identity cell as "PROJECT · SETID",
+// falling back to the bare set id when the row has no project.
+func dashboardTwoLineIdentity(row DashboardRow) string {
+	if row.Project == "" {
+		return row.SetID
+	}
+	return row.Project + " · " + row.SetID
 }
 
 // dashboardTwoLineRowValuesLine1 returns the cell values for line 1 of a two-line
-// row: PROJECT, FLAGS, STATUS, WORKTREE, DRAIN.
+// row: the TASK SET identity, WORKTREE, DRAIN.
 func dashboardTwoLineRowValuesLine1(row DashboardRow) []string {
 	return []string{
-		row.Project,
-		dashboardRowFlags(row),
-		row.Status,
+		dashboardTwoLineIdentity(row),
 		renderDashboardDest(row.destKind, row.Worktree),
 		row.Drain,
 	}
@@ -1415,13 +1428,12 @@ func dashboardTwoLineTableLineWidth(widths []int) int {
 }
 
 // dashboardTwoLineColShrinkOrder lists elastic line-1 columns in shrink
-// priority: DRAIN and WORKTREE give way first; FLAGS is protected and never
-// shrinks, matching the single-line policy.
+// priority: DRAIN and WORKTREE give way first so the TASK SET identity keeps as
+// much width as possible and only truncates when nothing else can shrink.
 var dashboardTwoLineColShrinkOrder = []int{
-	4, // DRAIN
-	3, // WORKTREE
-	2, // STATUS
-	0, // PROJECT
+	2, // DRAIN
+	1, // WORKTREE
+	0, // TASK SET identity
 }
 
 // dashboardTwoLineFitWidths shrinks the line-1 columns until the row fits budget.
@@ -1461,30 +1473,36 @@ func dashboardTwoLineTableSeparator(widths []int) string {
 	return dashboardTableSeparator(widths)
 }
 
-// dashboardTwoLineSetIDStart returns the indent (in spaces) for line 2 of a
-// two-line row so the full Task set identifier aligns under the TASK SET column
-// position from the single-line header.
-func dashboardTwoLineSetIDStart(singleLineWidths []int) int {
-	if len(singleLineWidths) <= dashboardColSetID {
-		return 0
-	}
-	return singleLineWidths[dashboardColProject] + dashboardColSep
-}
-
 // dashboardTwoLineRowLine1 renders the padded line-1 cells of a two-line row.
 func dashboardTwoLineRowLine1(row DashboardRow, widths []int) string {
 	return dashboardTableLine(dashboardTwoLineRowValuesLine1(row), widths)
 }
 
-// dashboardTwoLineRowLine2 renders line 2 of a two-line row: the full Task set
-// identifier indented to the single-line TASK SET column position.
-func dashboardTwoLineRowLine2(row DashboardRow, singleLineWidths []int) string {
-	return strings.Repeat(" ", dashboardTwoLineSetIDStart(singleLineWidths)) + row.SetID
+// dashboardTwoLineRowLine2 renders line 2 of a two-line row: the STATUS value.
+// The List (and the bespoke overlay path) supply the two-space gutter, so the
+// value sits under the TASK SET identity on line 1.
+func dashboardTwoLineRowLine2(row DashboardRow) string {
+	return row.Status
 }
 
-// dashboardTableChromeLines is the number of body lines above the List rows: the
-// blank line under the summary header, the column header, and the separator.
+// dashboardTableChromeLines is the number of body lines above the List rows in
+// single-line mode: the blank line under the summary header, the column header,
+// and the separator.
 const dashboardTableChromeLines = 3
+
+// dashboardTwoLineChromeLines is the chrome height in two-line mode: the blank
+// line, the line-1 (TASK SET/WORKTREE/DRAIN) header, the line-2 (STATUS) header,
+// and the separator.
+const dashboardTwoLineChromeLines = dashboardTableChromeLines + 1
+
+// dashboardChromeLines returns the chrome height above the List rows for the
+// current render mode.
+func (m QueueDashboard) dashboardChromeLines() int {
+	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+		return dashboardTwoLineChromeLines
+	}
+	return dashboardTableChromeLines
+}
 
 // syncListRows feeds the current filtered rows to the List (re-anchoring the
 // cursor by cursorKey) and recomputes the column widths over them.
@@ -1498,7 +1516,7 @@ func (m QueueDashboard) syncListRows() {
 // overflowing. In two-line mode each List item renders two terminal lines, so
 // the List's LinesPerItem is set to 2 and the physical body budget is unchanged.
 func (m QueueDashboard) resizeMainList() {
-	listH := m.frameSpec().BodyHeight(m.height) - dashboardTableChromeLines
+	listH := m.frameSpec().BodyHeight(m.height) - m.dashboardChromeLines()
 	if listH < 1 {
 		listH = 1
 	}
@@ -2716,6 +2734,7 @@ func (m QueueDashboard) mainBody() string {
 		parts = []string{
 			"",
 			ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), m.width),
+			ui.TruncateString("  "+dashboardTwoLineStatusHeader(), m.width),
 			ui.TruncateString("  "+dashboardTwoLineTableSeparator(line1Widths), m.width),
 		}
 	} else {
@@ -3291,13 +3310,12 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 
 // renderDashboardTableTwoLineWithMenu renders the two-line task-set table and,
 // when menu is non-nil, splices the action overlay next to the cursored row.
-// Each row occupies two terminal lines: line 1 holds PROJECT/FLAGS/STATUS/
-// WORKTREE/DRAIN, line 2 holds the full Task set identifier aligned under the
-// single-line TASK SET column.
+// Each row occupies two terminal lines: line 1 holds the TASK SET identity
+// (PROJECT · SETID), WORKTREE and DRAIN; line 2 holds STATUS.
 func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
-	singleWidths := dashboardTableWidthsForRows(rows, width)
 	line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(rows), dashboardTableBodyBudget(width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), width))
+	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineStatusHeader(), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableSeparator(line1Widths), width))
 
 	var menuLines []string
@@ -3322,7 +3340,7 @@ func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, curso
 			prefix = "  "
 		}
 		line1 := ui.TruncateString(prefix+dashboardTwoLineRowLine1(row, line1Widths), width)
-		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(row, singleWidths), width)
+		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(row), width)
 		fmt.Fprintf(w, "%s\n", line1)
 		fmt.Fprintf(w, "%s\n", line2)
 		if menu != nil && i == cursor && placeBelow {
@@ -3338,7 +3356,7 @@ func dashboardMenuPlaceBelowTwoLine(cursor, menuHeight, height int) bool {
 	if height <= 0 {
 		return true
 	}
-	linesBelowCursor := height - dashboardTableTopOffset - 2*(cursor+1)
+	linesBelowCursor := height - (dashboardTableTopOffset + 1) - 2*(cursor+1)
 	return linesBelowCursor >= menuHeight
 }
 
