@@ -1153,7 +1153,7 @@ func TestDashboardTwoLineMode(t *testing.T) {
 	}
 }
 
-func TestDashboardTwoLineRowLine1ShowsIdentityWorktreeDrain(t *testing.T) {
+func TestDashboardTwoLineRowLine1ShowsProjectSetIDWorktreeDrain(t *testing.T) {
 	row := DashboardRow{
 		Project:   "pop",
 		Status:    "READY",
@@ -1165,8 +1165,8 @@ func TestDashboardTwoLineRowLine1ShowsIdentityWorktreeDrain(t *testing.T) {
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
 	line1 := dashboardTwoLineRowLine1(row, widths)
 
-	// Line 1 is the identity plus WORKTREE and DRAIN; STATUS lives on line 2.
-	for _, want := range []string{"pop · " + row.SetID, "main", "picked up"} {
+	// Line 1 carries PROJECT, TASK SET, WORKTREE and DRAIN; STATUS lives on line 2.
+	for _, want := range []string{"pop", row.SetID, "main", "picked up"} {
 		if !strings.Contains(line1, want) {
 			t.Fatalf("two-line row line 1 missing expected value %q: %q", want, line1)
 		}
@@ -1176,15 +1176,23 @@ func TestDashboardTwoLineRowLine1ShowsIdentityWorktreeDrain(t *testing.T) {
 	}
 }
 
-func TestDashboardTwoLineRowLine2ShowsStatus(t *testing.T) {
+func TestDashboardTwoLineRowLine2ShowsStatusUnderTaskSet(t *testing.T) {
 	row := DashboardRow{
 		Project: "pop",
 		Status:  "IN PROGRESS",
 		SetRef:  SetRef{SetID: "2026-07-05-queue-dashboard-two-line"},
 	}
-	line2 := dashboardTwoLineRowLine2(row)
-	if line2 != "IN PROGRESS" {
-		t.Fatalf("two-line row line 2 = %q, want the status %q", line2, "IN PROGRESS")
+	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
+	line2 := dashboardTwoLineRowLine2(row, widths)
+
+	if strings.TrimLeft(line2, " ") != "IN PROGRESS" {
+		t.Fatalf("two-line row line 2 = %q, want the status %q (indented)", line2, "IN PROGRESS")
+	}
+	// STATUS must be indented to start under the TASK SET column, i.e. past the
+	// PROJECT column and its separator.
+	wantIndent := dashboardTwoLineStatusIndent(widths)
+	if got := len(line2) - len(strings.TrimLeft(line2, " ")); got != wantIndent {
+		t.Fatalf("two-line row line 2 indent = %d, want %d (under TASK SET): %q", got, wantIndent, line2)
 	}
 	if strings.Contains(line2, row.SetID) {
 		t.Fatalf("two-line row line 2 must not contain the set id: %q", line2)
@@ -3911,11 +3919,14 @@ func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
 		t.Fatalf("two-line line-2 header missing STATUS:\n%s", view)
 	}
 
-	// The data row's first physical line carries the identity (PROJECT · SETID);
-	// STATUS appears on the following physical line, not line 1.
-	idIdx := dashboardTestLineIndex(lines, "pop · "+longID)
+	// The data row's first physical line carries PROJECT and the set id; STATUS
+	// appears on the following physical line, not line 1.
+	idIdx := dashboardTestLineIndex(lines, longID)
 	if idIdx < 0 {
-		t.Fatalf("identity %q missing from view:\n%s", "pop · "+longID, view)
+		t.Fatalf("set id %q missing from view:\n%s", longID, view)
+	}
+	if !strings.Contains(lines[idIdx], "pop") {
+		t.Fatalf("row line 1 must carry the project:\n%s", view)
 	}
 	if strings.Contains(lines[idIdx], "READY") {
 		t.Fatalf("row line 1 must not contain the status:\n%s", view)

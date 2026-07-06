@@ -1206,11 +1206,11 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 		Anchor: ui.AnchorTop,
 		Cell: func(r DashboardRow, rs ui.RowState) string {
 			budget := dashboardListCellBudget(cols.width)
-			if rs.LineIndex == 1 {
-				return ui.TruncateString(dashboardTwoLineRowLine2(r), budget)
-			}
 			if list.LinesPerItem() == 2 {
 				line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(list.Items()), budget)
+				if rs.LineIndex == 1 {
+					return ui.TruncateString(dashboardTwoLineRowLine2(r, line1Widths), budget)
+				}
 				return ui.TruncateString(dashboardTwoLineRowLine1(r, line1Widths), budget)
 			}
 			return ui.TruncateString(dashboardTableLine(dashboardRowValues(r), cols.widths), budget)
@@ -1442,12 +1442,13 @@ func dashboardTwoLineTableLineWidth(widths []int) int {
 }
 
 // dashboardTwoLineColShrinkOrder lists elastic line-1 columns in shrink
-// priority: DRAIN and WORKTREE give way first so the TASK SET identity keeps as
-// much width as possible and only truncates when nothing else can shrink.
+// priority: DRAIN and WORKTREE give way first, then PROJECT, so the TASK SET set
+// id keeps as much width as possible and only truncates as a last resort.
 var dashboardTwoLineColShrinkOrder = []int{
-	2, // DRAIN
-	1, // WORKTREE
-	0, // TASK SET identity
+	dashboardTwoLineColDrain,
+	dashboardTwoLineColWorktree,
+	dashboardTwoLineColProject,
+	dashboardTwoLineColSetID,
 }
 
 // dashboardTwoLineFitWidths shrinks the line-1 columns until the row fits budget.
@@ -1492,11 +1493,11 @@ func dashboardTwoLineRowLine1(row DashboardRow, widths []int) string {
 	return dashboardTableLine(dashboardTwoLineRowValuesLine1(row), widths)
 }
 
-// dashboardTwoLineRowLine2 renders line 2 of a two-line row: the STATUS value.
-// The List (and the bespoke overlay path) supply the two-space gutter, so the
-// value sits under the TASK SET identity on line 1.
-func dashboardTwoLineRowLine2(row DashboardRow) string {
-	return row.Status
+// dashboardTwoLineRowLine2 renders line 2 of a two-line row: the STATUS value,
+// indented to sit under the TASK SET column on line 1. The List (and the bespoke
+// overlay path) supply the two-space gutter on top of this indent.
+func dashboardTwoLineRowLine2(row DashboardRow, line1Widths []int) string {
+	return strings.Repeat(" ", dashboardTwoLineStatusIndent(line1Widths)) + row.Status
 }
 
 // dashboardTableChromeLines is the number of body lines above the List rows in
@@ -2748,7 +2749,7 @@ func (m QueueDashboard) mainBody() string {
 		parts = []string{
 			"",
 			ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), m.width),
-			ui.TruncateString("  "+dashboardTwoLineStatusHeader(), m.width),
+			ui.TruncateString("  "+dashboardTwoLineStatusHeader(line1Widths), m.width),
 			ui.TruncateString("  "+dashboardTwoLineTableSeparator(line1Widths), m.width),
 		}
 	} else {
@@ -3324,12 +3325,12 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 
 // renderDashboardTableTwoLineWithMenu renders the two-line task-set table and,
 // when menu is non-nil, splices the action overlay next to the cursored row.
-// Each row occupies two terminal lines: line 1 holds the TASK SET identity
-// (PROJECT · SETID), WORKTREE and DRAIN; line 2 holds STATUS.
+// Each row occupies two terminal lines: line 1 holds PROJECT, TASK SET (the set
+// id), WORKTREE and DRAIN; line 2 holds STATUS indented under the TASK SET column.
 func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
 	line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(rows), dashboardTableBodyBudget(width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), width))
-	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineStatusHeader(), width))
+	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineStatusHeader(line1Widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableSeparator(line1Widths), width))
 
 	var menuLines []string
@@ -3354,7 +3355,7 @@ func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, curso
 			prefix = "  "
 		}
 		line1 := ui.TruncateString(prefix+dashboardTwoLineRowLine1(row, line1Widths), width)
-		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(row), width)
+		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(row, line1Widths), width)
 		fmt.Fprintf(w, "%s\n", line1)
 		fmt.Fprintf(w, "%s\n", line2)
 		if menu != nil && i == cursor && placeBelow {
