@@ -13,11 +13,14 @@ const (
 	AnchorBottom
 )
 
-// RowState is passed to the Cell renderer for each visible row.
+// RowState is passed to the Cell renderer for each visible row/sub-line.
 type RowState struct {
 	Selected   bool
 	QuickLabel string
 	Width      int
+	// LineIndex is the zero-based sub-line inside a multi-line item. It is 0
+	// for single-line items and for the first line of multi-line items.
+	LineIndex int
 }
 
 // Opts configures a List's identity, rendering, and navigation behavior.
@@ -28,6 +31,9 @@ type Opts[T any] struct {
 	Anchor       Anchor                   // Top | Bottom (fzf-style)
 	ScrollMargin int                      // lines kept above cursor (quick-access reserves ~9)
 	QuickLabel   func(dist int) string    // optional; nil = no quick-access column
+	// LinesPerItem is the number of terminal lines each logical item occupies.
+	// Defaults to 1. Cursor movement still operates on logical items.
+	LinesPerItem int
 }
 
 // List is a passive, generic scrolling-list viewport. It owns cursor, scroll,
@@ -203,29 +209,37 @@ func (l *List[T]) SetCursorToKey(key string) bool {
 }
 
 // VisibleRows returns exactly bodyHeight rendered lines. List owns the █
-// indicator, quick-access prefix column, padding, and anchor blank lines.
+// indicator, quick-access prefix column, padding, and anchor blank lines. When
+// LinesPerItem > 1, each logical item is rendered over that many physical lines;
+// the cursor prefix and quick-access label appear only on the first line.
 func (l *List[T]) VisibleRows() []string {
 	height := l.height
 	if height <= 0 {
 		return nil
 	}
 
+	lpi := l.opts.LinesPerItem
+	if lpi <= 0 {
+		lpi = 1
+	}
+
 	lines := make([]string, height)
 	itemCount := len(l.items)
 
-	visible := height
-	if visible > itemCount {
-		visible = itemCount
+	logicalVisible := height / lpi
+	if logicalVisible > itemCount {
+		logicalVisible = itemCount
 	}
 
 	start := l.scroll
+	emptyLines := height - logicalVisible*lpi
 	emptyBefore := 0
 	emptyAfter := 0
 
 	if l.opts.Anchor == AnchorBottom {
-		emptyBefore = height - visible
+		emptyBefore = emptyLines
 	} else {
-		emptyAfter = height - visible
+		emptyAfter = emptyLines
 	}
 
 	quickAccess := l.opts.QuickLabel != nil
@@ -237,7 +251,7 @@ func (l *List[T]) VisibleRows() []string {
 		lineIdx++
 	}
 
-	for i := 0; i < visible; i++ {
+	for i := 0; i < logicalVisible; i++ {
 		itemIdx := start + i
 		if itemIdx >= itemCount {
 			break
@@ -253,17 +267,21 @@ func (l *List[T]) VisibleRows() []string {
 			}
 		}
 
-		cell := ""
-		if l.opts.Cell != nil {
-			cell = l.opts.Cell(item, RowState{
-				Selected:   selected,
-				QuickLabel: quickLabel,
-				Width:      0,
-			})
-		}
+		for sub := 0; sub < lpi; sub++ {
+			cell := ""
+			if l.opts.Cell != nil {
+				cell = l.opts.Cell(item, RowState{
+					Selected:   selected,
+					QuickLabel: quickLabel,
+					Width:      0,
+					LineIndex:  sub,
+				})
+			}
 
-		lines[lineIdx] = l.renderPrefix(selected, quickLabel, prefixWidth) + cell
-		lineIdx++
+			isFirstLine := sub == 0
+			lines[lineIdx] = l.renderPrefix(isFirstLine && selected, quickLabel, prefixWidth) + cell
+			lineIdx++
+		}
 	}
 
 	for i := 0; i < emptyAfter; i++ {
@@ -303,6 +321,29 @@ func (l *List[T]) clampCursor() {
 	}
 }
 
+// LinesPerItem returns the current number of terminal lines per logical item.
+func (l *List[T]) LinesPerItem() int {
+	if l.opts.LinesPerItem <= 0 {
+		return 1
+	}
+	return l.opts.LinesPerItem
+}
+
+// SetLinesPerItem changes the number of terminal lines each logical item
+// occupies and reclamps scroll. Values below 1 are treated as 1.
+func (l *List[T]) SetLinesPerItem(n int) {
+	if n < 1 {
+		n = 1
+	}
+	l.opts.LinesPerItem = n
+	l.adjustScroll()
+}
+
 func (l *List[T]) adjustScroll() {
-	l.scroll = adjustScroll(l.cursor, l.scroll, l.height, len(l.items), l.opts.ScrollMargin)
+	lpi := l.opts.LinesPerItem
+	if lpi <= 0 {
+		lpi = 1
+	}
+	effectiveHeight := l.height / lpi
+	l.scroll = adjustScroll(l.cursor, l.scroll, effectiveHeight, len(l.items), l.opts.ScrollMargin)
 }

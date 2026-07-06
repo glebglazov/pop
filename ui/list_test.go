@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -236,5 +237,117 @@ func TestListResizeReclampsScroll(t *testing.T) {
 	rows := l.VisibleRows()
 	if len(rows) != 5 {
 		t.Fatalf("after resize VisibleRows len = %d, want 5", len(rows))
+	}
+}
+
+func newMultilineTestList(items []string) *List[string] {
+	return NewList(items, Opts[string]{
+		Key:  func(s string) string { return s },
+		Cell: func(s string, rs RowState) string { return fmt.Sprintf("%s/%d", s, rs.LineIndex) },
+		LinesPerItem: 2,
+	})
+}
+
+func TestListMultilineVisibleRowsCount(t *testing.T) {
+	l := newMultilineTestList(strItems(5))
+	l.Resize(6)
+	rows := l.VisibleRows()
+	if len(rows) != 6 {
+		t.Fatalf("VisibleRows() len = %d, want 6", len(rows))
+	}
+	want := []string{
+		"item-0/0", "item-0/1",
+		"item-1/0", "item-1/1",
+		"item-2/0", "item-2/1",
+	}
+	for i, w := range want {
+		plain := StripANSI(rows[i])
+		if !strings.HasSuffix(plain, w) {
+			t.Fatalf("row %d = %q, want suffix %q", i, plain, w)
+		}
+	}
+}
+
+func TestListMultilineMoveDownSkipsTwoLines(t *testing.T) {
+	l := newMultilineTestList(strItems(5))
+	l.Resize(6)
+	l.SetCursor(0)
+	l.MoveDown()
+	if l.Cursor() != 1 {
+		t.Fatalf("MoveDown cursor = %d, want 1", l.Cursor())
+	}
+	rows := l.VisibleRows()
+	if len(rows) != 6 {
+		t.Fatalf("VisibleRows() len = %d, want 6", len(rows))
+	}
+	// The selected item (item-1) occupies rows[2] and rows[3]; only the first
+	// row of the selected item carries the cursor indicator.
+	selectedFirst := false
+	selectedSecond := false
+	for i, row := range rows {
+		plain := StripANSI(row)
+		if strings.Contains(plain, "item-1/0") && strings.Contains(plain, "█") {
+			selectedFirst = true
+		}
+		if strings.Contains(plain, "item-1/1") && strings.Contains(plain, "█") {
+			selectedSecond = true
+		}
+		if i < 2 && strings.Contains(plain, "█") {
+			t.Fatalf("cursor indicator appeared above selected item at row %d", i)
+		}
+	}
+	if !selectedFirst {
+		t.Fatalf("selected item's first line missing indicator")
+	}
+	if selectedSecond {
+		t.Fatalf("selected item's second line should not carry the indicator")
+	}
+}
+
+func TestListMultilineScrollWindow(t *testing.T) {
+	l := newMultilineTestList(strItems(10))
+	l.Resize(4)
+	l.SetCursor(8)
+
+	if l.Scroll() != 7 {
+		t.Fatalf("scroll = %d, want 7", l.Scroll())
+	}
+	rows := l.VisibleRows()
+	if len(rows) != 4 {
+		t.Fatalf("VisibleRows() len = %d, want 4", len(rows))
+	}
+	for _, row := range rows {
+		plain := StripANSI(row)
+		if plain == "" {
+			continue
+		}
+		if !strings.Contains(plain, "item-7") && !strings.Contains(plain, "item-8") {
+			t.Fatalf("unexpected visible item in row %q", plain)
+		}
+	}
+}
+
+func TestListMultilineAnchorBottom(t *testing.T) {
+	l := NewList(strItems(2), Opts[string]{
+		Key:          func(s string) string { return s },
+		Cell:         func(s string, rs RowState) string { return fmt.Sprintf("%s/%d", s, rs.LineIndex) },
+		Anchor:       AnchorBottom,
+		LinesPerItem: 2,
+	})
+	l.Resize(6)
+	rows := l.VisibleRows()
+	if len(rows) != 6 {
+		t.Fatalf("VisibleRows() len = %d, want 6", len(rows))
+	}
+	for i := 0; i < 2; i++ {
+		if rows[i] != "" {
+			t.Fatalf("anchor bottom should pad above: rows[%d] = %q", i, rows[i])
+		}
+	}
+	for i, want := range []string{"item-0/0", "item-0/1", "item-1/0", "item-1/1"} {
+		plain := StripANSI(rows[i+2])
+		if !strings.HasSuffix(plain, want) {
+			t.Fatalf("row %d = %q, want suffix %q", i+2, plain, want)
+		}
 	}
 }

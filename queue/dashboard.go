@@ -1200,16 +1200,16 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 	list = ui.NewList(snap.Rows, ui.Opts[DashboardRow]{
 		Key:    func(r DashboardRow) string { return r.cursorKey },
 		Anchor: ui.AnchorTop,
-		Cell: func(r DashboardRow, _ ui.RowState) string {
-			if !dashboardTwoLineMode(list.Items(), cols.width) {
-				w := dashboardListCellBudget(cols.width)
-				return ui.TruncateString(dashboardTableLine(dashboardRowValues(r), cols.widths), w)
-			}
+		Cell: func(r DashboardRow, rs ui.RowState) string {
 			budget := dashboardListCellBudget(cols.width)
-			line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(list.Items()), budget)
-			l1 := ui.TruncateString(dashboardTwoLineRowLine1(r, line1Widths), budget)
-			l2 := dashboardTwoLineRowLine2(r, cols.widths)
-			return l1 + "\n  " + l2
+			if rs.LineIndex == 1 {
+				return dashboardTwoLineRowLine2(r, cols.widths)
+			}
+			if list.LinesPerItem() == 2 {
+				line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(list.Items()), budget)
+				return ui.TruncateString(dashboardTwoLineRowLine1(r, line1Widths), budget)
+			}
+			return ui.TruncateString(dashboardTableLine(dashboardRowValues(r), cols.widths), budget)
 		},
 	})
 	return QueueDashboard{d: d, cfg: cfg, snap: snap, allRows: snap.Rows, list: list, cols: cols}
@@ -1496,14 +1496,16 @@ func (m QueueDashboard) syncListRows() {
 // resizeMainList sizes the List to the body budget the Frame leaves, minus the
 // table's own header chrome, so the table clamps to the terminal instead of
 // overflowing. In two-line mode each List item renders two terminal lines, so
-// the List viewport height is halved (floored).
+// the List's LinesPerItem is set to 2 and the physical body budget is unchanged.
 func (m QueueDashboard) resizeMainList() {
 	listH := m.frameSpec().BodyHeight(m.height) - dashboardTableChromeLines
-	if dashboardTwoLineMode(m.snap.Rows, m.width) {
-		listH = listH / 2
-	}
 	if listH < 1 {
 		listH = 1
+	}
+	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+		m.list.SetLinesPerItem(2)
+	} else {
+		m.list.SetLinesPerItem(1)
 	}
 	m.list.Resize(listH)
 }
