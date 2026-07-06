@@ -31,7 +31,7 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, stat
 		return nil
 	}
 	rep, _, err := resolveRepresentative(d, cfg, scans)
-	return decideRepoDispatchesWithRep(d, cfg, scans, rep, err, state, now)
+	return decideRepoDispatchesWithRep(d, cfg, scans, rep, err, state, loadRecoveryWaiters(d), now)
 }
 
 // decideRepoDispatchesWithRep is the representative-injected variant of
@@ -41,7 +41,7 @@ func decideRepoDispatches(d *Deps, cfg *config.Config, scans []projectScan, stat
 // unchanged scheduling logic, so the decisions are identical to the old
 // git-resolved path while forking no git for the static resolution. A nil rep
 // with a nil error means a bare repo refused for lack of a Trunk worktree.
-func decideRepoDispatchesWithRep(d *Deps, cfg *config.Config, scans []projectScan, rep *projectScan, repErr error, state *DaemonState, now time.Time) []Decision {
+func decideRepoDispatchesWithRep(d *Deps, cfg *config.Config, scans []projectScan, rep *projectScan, repErr error, state *DaemonState, recoveryWaiters map[string]tasks.RecoveryWaiter, now time.Time) []Decision {
 	if len(scans) == 0 {
 		return nil
 	}
@@ -68,10 +68,10 @@ func decideRepoDispatchesWithRep(d *Deps, cfg *config.Config, scans []projectSca
 		// Bare repo with no Trunk worktree configured. A per-set Worktree binding
 		// is still a valid drain router; without one the repository is refused and
 		// reported.
-		return append(extraBusy, decideBareWithoutBase(d, cfg, scans, name, delays, state, now, runningElsewhere)...)
+		return append(extraBusy, decideBareWithoutBase(d, cfg, scans, name, delays, state, recoveryWaiters, now, runningElsewhere)...)
 	}
 
-	decisions := decideProjectDispatches(d, *rep, delays, state, now)
+	decisions := decideProjectDispatches(d, *rep, delays, state, recoveryWaiters, now)
 	decisions = filterRunningElsewhere(decisions, runningElsewhere)
 	applyBindingRouting(d, scans, state, decisions)
 	return append(extraBusy, decisions...)
@@ -311,7 +311,7 @@ func applyBindingRouting(d *Deps, scans []projectScan, state *DaemonState, decis
 // configured: each Ready set with a per-set binding routes to that bound
 // checkout; any Ready set without one leaves the repository refused and
 // reported (a single skip decision), never scheduled.
-func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, name string, delays []time.Duration, state *DaemonState, now time.Time, runningElsewhere map[string]bool) []Decision {
+func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, name string, delays []time.Duration, state *DaemonState, recoveryWaiters map[string]tasks.RecoveryWaiter, now time.Time, runningElsewhere map[string]bool) []Decision {
 	base := scans[0]
 	worktreeReady, configErr := readRepoConfig(d, base.ProjectPath)
 	skel := Decision{
@@ -335,7 +335,7 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 	}
 
 	backoff := d.setBackoffLookup(scanRepoCommonDir(d, base), delays, now)
-	ids, waitUntil, waitReason, blockedID, ok := selectReadySets(refresh, repoKey, state, backoff, now)
+	ids, waitUntil, waitReason, blockedID, ok := selectReadySets(refresh, backoff, recoveryWaiters)
 	if !ok {
 		if !waitUntil.IsZero() {
 			skel.Reason = waitReason

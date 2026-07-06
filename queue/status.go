@@ -60,6 +60,7 @@ type StatusSnapshot struct {
 	Skipped              []SkippedRepo
 	DaemonState          *DaemonState
 	ActiveAgentCooldowns map[string]time.Time
+	RecoveryWaiters      map[string]tasks.RecoveryWaiter
 	Tasks                *tasks.Deps
 	// CrashRetryDelays is the resolved abnormal-backoff escalation schedule (its
 	// length is the park threshold). The run view derives each set's parked /
@@ -86,6 +87,7 @@ func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
 		return StatusSnapshot{}, err
 	}
 	snap.ActiveAgentCooldowns = cooldowns
+	snap.RecoveryWaiters = loadRecoveryWaiters(d)
 	snap.Tasks = d.Tasks
 	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
 		snap.CrashRetryDelays = qcfg.CrashRetryDelays

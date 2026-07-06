@@ -166,7 +166,8 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 		}
 	}
 
-	view.Blocked = append(view.Blocked, blockedItemsFromState(snap.Tasks, snap.DaemonState, snap.CrashRetryDelays, now, blockedProjects)...)
+	view.Blocked = append(view.Blocked, blockedItemsFromState(snap.Tasks, snap.CrashRetryDelays, now, blockedProjects)...)
+	view.Blocked = append(view.Blocked, blockedItemsFromRecoveryWaiters(snap.Tasks, snap.RecoveryWaiters, blockedProjects)...)
 	if snap.DaemonState != nil {
 		view.WorktreeBindings = buildWorktreeBindingViews(snap.Tasks, snap.DaemonState, view)
 	}
@@ -206,7 +207,7 @@ func isBlockedIdleReason(reason string) bool {
 	switch reason {
 	case "set parked after repeated abnormal drain exits",
 		"set backed off after abnormal drain exit",
-		"set backed off for pinned agent cooldown",
+		"set waiting for quota recovery",
 		"all agents cooling":
 		return true
 	default:
@@ -232,43 +233,56 @@ func blockedItemFromIdle(idle IdleProject) BlockedItem {
 
 // blockedItemsFromState surfaces parked / backed-off sets whose project is not
 // already shown as idle (e.g. a repo busy running another set). Abnormal-driven
-// parking and backoff are derived from each bound set's Drain history (ADR-0055);
-// only the pinned-agent quota cooldown still reads a persisted timer.
-func blockedItemsFromState(td *tasks.Deps, state *DaemonState, delays []time.Duration, now time.Time, seenProjects map[string]bool) []BlockedItem {
+// parking and backoff are derived from each bound set's Drain history (ADR-0055).
+func blockedItemsFromState(td *tasks.Deps, delays []time.Duration, now time.Time, seenProjects map[string]bool) []BlockedItem {
 	bindings, _ := binding.AllBindings(td)
-	out := blockedItemsFromDrainHistory(td, bindings, delays, now, seenProjects)
-	if state != nil {
-		for key, until := range state.SetBackoffs {
-			if until.IsZero() || !until.After(now) {
+	return blockedItemsFromDrainHistory(td, bindings, delays, now, seenProjects)
+}
+
+func blockedItemsFromRecoveryWaiters(td *tasks.Deps, waiters map[string]tasks.RecoveryWaiter, seenProjects map[string]bool) []BlockedItem {
+	if td == nil || len(waiters) == 0 {
+		return nil
+	}
+	bindings, _ := binding.AllBindings(td)
+	var out []BlockedItem
+	for setID, w := range waiters {
+		var project, repoLabel, runtimePath string
+		for key, b := range bindings {
+			if binding.SetIDFromKey(key) != setID {
 				continue
 			}
-			setID := binding.SetIDFromKey(key)
-			repoLabel := repoLabelFromScopedKey(key)
-			if repoLabel == "" {
-				repoLabel = projectForScopedKey(td, key)
-			}
-			if seenProjects[repoLabel] {
-				continue
-			}
-			project := ""
-			runtimePath := ""
-			if b, ok := bindings[key]; ok {
-				project = b.Project
-				runtimePath = b.RuntimePath
-			}
-			if project == "" {
-				project = repoLabel
-			}
-			out = append(out, BlockedItem{
-				Project:     project,
-				RepoLabel:   repoLabel,
-				SetID:       setID,
-				Kind:        "quota_backoff",
-				Until:       until,
-				Reason:      "set backed off for pinned agent cooldown",
-				RuntimePath: runtimePath,
-			})
+			project = b.Project
+			runtimePath = b.RuntimePath
+			repoLabel = repoLabelFromScopedKey(key)
+			break
 		}
+		if runtimePath == "" {
+			runtimePath = w.RuntimePath
+		}
+		if repoLabel == "" && w.RuntimePath != "" {
+			if id, err := tasks.ResolveRepositoryIdentity(td, w.RuntimePath); err == nil {
+				repoLabel = id.Basename
+			}
+		}
+		if repoLabel == "" {
+			repoLabel = project
+		}
+		if project == "" {
+			project = repoLabel
+		}
+		if seenProjects[repoLabel] {
+			continue
+		}
+		out = append(out, BlockedItem{
+			Project:     project,
+			RepoLabel:   repoLabel,
+			SetID:       setID,
+			Kind:        "recovery_wait",
+			Until:       w.ResetAt,
+			Reason:      "waiting for quota recovery",
+			RuntimePath: runtimePath,
+			Agent:       w.Preset,
+		})
 	}
 	return out
 }
@@ -355,8 +369,8 @@ func blockedKindFromReason(reason string) string {
 		return "parked"
 	case "set backed off after abnormal drain exit":
 		return "crash_backoff"
-	case "set backed off for pinned agent cooldown":
-		return "quota_backoff"
+	case "set waiting for quota recovery":
+		return "recovery_wait"
 	case "all agents cooling":
 		return "agent_cooldown"
 	default:
@@ -633,6 +647,25 @@ func formatBlockedLine(b BlockedItem) string {
 		}
 		project += worktreeSuffix(b.RuntimePath, setID)
 		return fmt.Sprintf("%s: %s parked (%s)", project, setID, b.Reason)
+	case "recovery_wait":
+		setID := b.SetID
+		if setID == "" {
+			setID = "(unknown set)"
+		}
+		project := repoLabelOrProject(b.RepoLabel, b.Project)
+		if project == "" {
+			project = "(unknown project)"
+		}
+		project += worktreeSuffix(b.RuntimePath, setID)
+		until := ""
+		if !b.Until.IsZero() {
+			until = " until " + b.Until.UTC().Format(time.RFC3339)
+		}
+		agent := ""
+		if b.Agent != "" {
+			agent = " agent=" + b.Agent
+		}
+		return fmt.Sprintf("%s: %s waiting for quota recovery%s%s", project, setID, agent, until)
 	default:
 		setID := b.SetID
 		if setID == "" {
@@ -749,6 +782,8 @@ func formatBlockedDelta(b BlockedItem, cleared bool) string {
 			return fmt.Sprintf("queue: agent %s cooldown cleared", b.Agent)
 		case "parked":
 			return fmt.Sprintf("queue: %s: %s unparked", label, b.SetID)
+		case "recovery_wait":
+			return fmt.Sprintf("queue: %s: %s quota recovery cleared", label, b.SetID)
 		default:
 			return fmt.Sprintf("queue: %s: %s backoff cleared", label, b.SetID)
 		}
@@ -762,6 +797,16 @@ func formatBlockedDelta(b BlockedItem, cleared bool) string {
 		return fmt.Sprintf("queue: agent %s cooldown until=%s", b.Agent, until)
 	case "parked":
 		return fmt.Sprintf("queue: %s: %s parked reason=%s", label, b.SetID, b.Reason)
+	case "recovery_wait":
+		until := ""
+		if !b.Until.IsZero() {
+			until = b.Until.UTC().Format(time.RFC3339)
+		}
+		agent := ""
+		if b.Agent != "" {
+			agent = " agent=" + b.Agent
+		}
+		return fmt.Sprintf("queue: %s: %s waiting for quota recovery%s until=%s", label, b.SetID, agent, until)
 	default:
 		until := ""
 		if !b.Until.IsZero() {

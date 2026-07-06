@@ -14,9 +14,6 @@ import (
 	"github.com/glebglazov/pop/tasks/binding"
 )
 
-const agentQuotaResetSkew = 2 * time.Minute
-const maxAgentQuotaResetHorizon = 8 * 24 * time.Hour
-
 // Run starts the foreground supervisor loop: it acquires the single-instance
 // lock, then every poll interval scans every registered project and spawns a
 // drain into tmux for each idle project with a Ready set. It returns when a
@@ -74,15 +71,6 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 		return
 	}
 	runOut.lastScan = ""
-	if err := recordPinnedQuotaCooldowns(d, cfg, decisions); err != nil {
-		fmt.Fprintf(out, "queue: record pinned quota cooldowns: %v\n", err)
-	} else {
-		decisions, err = Scan(d, cfg)
-		if err != nil {
-			runOut.emitScanError(out, fmt.Sprintf("queue: scan: %v", err))
-			return
-		}
-	}
 
 	if snap, err := BuildStatus(d, cfg); err == nil {
 		preSpawn := BuildRunView(snap, time.Now())
@@ -205,72 +193,6 @@ func canonicalCheckoutPath(d *tasks.Deps, path string) (string, error) {
 		return "", err
 	}
 	return d.FS.EvalSymlinks(abs)
-}
-
-// recordPinnedQuotaCooldowns records the per-set pinned-agent quota cooldown for
-// any idle set whose latest terminal Drain quota-paused on a pinned agent. A
-// pinned set cannot fall back to another agent, so it must wait out the pinned
-// preset's reset; that wait is a daemon-state SetBackoff keyed by scoped key
-// (the agent-global cooldown in the store covers the fallback chain — a
-// different axis, ADR-0055/0056). The cooldown instant is derived from the
-// Drain's terminal (its reset instant, or its finish time plus the configured
-// retry-after) so re-observing the same terminal across ticks is idempotent: an
-// elapsed cooldown is never re-written, so it stops blocking the set.
-func recordPinnedQuotaCooldowns(d *Deps, cfg *config.Config, decisions []Decision) error {
-	qcfg, err := resolvedQueueConfig(cfg)
-	if err != nil {
-		return err
-	}
-	state, err := EnsureDaemonState(d.Tasks)
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	changed := false
-	for _, dec := range decisions {
-		if dec.Busy || dec.scan.RuntimePath == "" {
-			continue
-		}
-		rec, err := d.readOutcome(dec.scan.RuntimePath)
-		if err != nil || rec == nil || rec.SetID == "" {
-			continue
-		}
-		if rec.Outcome != tasks.DrainOutcomeQuotaPaused || !rec.ExhaustedPinned || rec.ExhaustedPreset == "" {
-			continue
-		}
-		until := agentQuotaCooldownUntil(rec.ExhaustedResetAt, rec.WrittenAt, qcfg.AgentQuotaRetryAfter)
-		if !until.After(now) {
-			continue
-		}
-		scopedKey, err := scopedKeyForPaths(d, dec.scan.ProjectPath, rec.RuntimePath, rec.SetID)
-		if err != nil {
-			return err
-		}
-		if state.SetBackoffs == nil {
-			state.SetBackoffs = map[string]time.Time{}
-		}
-		if existing, ok := state.SetBackoffs[scopedKey]; ok && existing.Equal(until) {
-			continue
-		}
-		state.SetBackoffs[scopedKey] = until
-		changed = true
-	}
-	if changed {
-		return WriteDaemonState(d.Tasks, state)
-	}
-	return nil
-}
-
-func agentQuotaCooldownUntil(resetAt, now time.Time, fallback time.Duration) time.Time {
-	now = now.UTC()
-	if resetAt.IsZero() {
-		return now.Add(fallback)
-	}
-	resetAt = resetAt.UTC()
-	if !resetAt.After(now) || resetAt.Sub(now) > maxAgentQuotaResetHorizon {
-		return now.Add(fallback)
-	}
-	return resetAt.Add(agentQuotaResetSkew)
 }
 
 func drainOutcomeAbnormal(outcome tasks.DrainOutcome) bool {

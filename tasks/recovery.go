@@ -229,6 +229,39 @@ func GetRecoveryWaiter(d *Deps, setID string) (*RecoveryWaiter, error) {
 	}, nil
 }
 
+// AllRecoveryWaiters returns every registered recovery waiter keyed by set ID.
+// A missing store or read error yields an empty map so queue dispatch degrades
+// to spawnable rather than blocking on a transient store problem.
+func AllRecoveryWaiters(d *Deps) (map[string]RecoveryWaiter, error) {
+	if d == nil {
+		return map[string]RecoveryWaiter{}, nil
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return map[string]RecoveryWaiter{}, nil
+	}
+	defer func() { _ = s.Close() }()
+	list, err := s.AllRecoveryWaiters()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]RecoveryWaiter, len(list))
+	for _, w := range list {
+		out[w.SetID] = RecoveryWaiter{
+			SetID:        w.SetID,
+			Preset:       w.Preset,
+			ResetAt:      w.ResetAt,
+			RuntimePath:  w.RuntimePath,
+			Priority:     w.Priority,
+			RegisteredAt: w.RegisteredAt,
+		}
+	}
+	return out, nil
+}
+
 // WaitForRecovery polls until the preset's cooldown elapses and a recovery turn
 // is acquired. It prints a dim status line with reset/cooldown timing during the
 // poll loop. SIGINT during the wait deregisters the waiter and returns

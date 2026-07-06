@@ -377,6 +377,7 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 		return nil, err
 	}
 	now := d.now().UTC()
+	recoveryWaiters := loadRecoveryWaiters(d)
 
 	// Memoize idempotent git reads for this scan. The static partition below
 	// forks no git (ADR-0060), but the per-group decision still forks for the few
@@ -418,7 +419,7 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			g := groups[idx]
-			decs := decideRepoDispatchesWithRep(d, cfg, g.scans, g.rep, g.repErr, state, now)
+			decs := decideRepoDispatchesWithRep(d, cfg, g.scans, g.rep, g.repErr, state, recoveryWaiters, now)
 			// The fork-free static path leaves the representative's spawn session
 			// name unset (deriving it forks git). Fill it only for a drain about to
 			// be dispatched — never for the idle full-fleet listing — so a created
@@ -630,7 +631,7 @@ func scanRepoCommonDir(d *Deps, scan projectScan) string {
 // v1 single-decision view; Scan uses decideProjectDispatches to expose
 // worktree-ready multi-set fan-out.
 func decideProject(d *Deps, scan projectScan, state *DaemonState, now time.Time) Decision {
-	decisions := decideProjectDispatches(d, scan, nil, state, now)
+	decisions := decideProjectDispatches(d, scan, nil, state, loadRecoveryWaiters(d), now)
 	if len(decisions) == 0 {
 		return Decision{Project: scan.Name, scan: scan, Reason: "no ready set"}
 	}
@@ -642,7 +643,7 @@ func decideProject(d *Deps, scan projectScan, state *DaemonState, now time.Time)
 // highest-priority Ready set is selected. A project with an explicit
 // WorktreeReady Decision keeps live worktree drains as per-checkout busy
 // Decisions but may still dispatch other Ready sets into fresh worktrees.
-func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, state *DaemonState, now time.Time) []Decision {
+func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, state *DaemonState, recoveryWaiters map[string]tasks.RecoveryWaiter, now time.Time) []Decision {
 	dec := Decision{Project: scan.Name, scan: scan}
 	dec.WorktreeReady, dec.ProjectConfigError = readRepoConfig(d, scan.ProjectPath)
 
@@ -716,7 +717,7 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 	d.applyVerifyVerdicts(refresh, cfg, repoKey, scan.ProjectPath, bindings)
 
 	backoff := d.setBackoffLookup(scanRepoCommonDir(d, scan), delays, now)
-	ids, waitUntil, waitReason, blockedID, ok := selectReadySets(refresh, repoKey, state, backoff, now)
+	ids, waitUntil, waitReason, blockedID, ok := selectReadySets(refresh, backoff, recoveryWaiters)
 	if !ok {
 		if !waitUntil.IsZero() {
 			dec.Reason = waitReason
@@ -900,8 +901,8 @@ func firstAwaitingApprovalSetID(rows []tasks.Row) string {
 	return ""
 }
 
-func selectReadySet(refresh *tasks.RefreshResult, repoKey string, state *DaemonState, backoff setBackoffFunc, now time.Time) (string, time.Time, string, bool) {
-	ids, waitUntil, reason, _, ok := selectReadySets(refresh, repoKey, state, backoff, now)
+func selectReadySet(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter) (string, time.Time, string, bool) {
+	ids, waitUntil, reason, _, ok := selectReadySets(refresh, backoff, recoveryWaiters)
 	if !ok || len(ids) == 0 {
 		return "", waitUntil, reason, false
 	}
@@ -915,7 +916,7 @@ func selectReadySet(refresh *tasks.RefreshResult, repoKey string, state *DaemonS
 // a nil func (tests, callers without a store) means "always spawnable".
 type setBackoffFunc func(setID string) (parked bool, until time.Time)
 
-func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *DaemonState, backoff setBackoffFunc, now time.Time) ([]string, time.Time, string, string, bool) {
+func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter) ([]string, time.Time, string, string, bool) {
 	if refresh == nil {
 		return nil, time.Time{}, "", "", false
 	}
@@ -935,7 +936,7 @@ func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *Daemon
 		return ready[i].RegIndex < ready[j].RegIndex
 	})
 	var earliest time.Time
-	var parkedID, backoffID, quotaID string
+	var parkedID, backoffID, recoveryID string
 	var ids []string
 	for _, row := range ready {
 		if backoff != nil {
@@ -954,12 +955,12 @@ func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *Daemon
 				continue
 			}
 		}
-		if until := setBackoffUntil(state, repoKey, row.ID, now); !until.IsZero() {
-			if quotaID == "" {
-				quotaID = row.ID
+		if w, ok := recoveryWaiters[row.ID]; ok {
+			if recoveryID == "" {
+				recoveryID = row.ID
 			}
-			if earliest.IsZero() || until.Before(earliest) {
-				earliest = until
+			if earliest.IsZero() || w.ResetAt.Before(earliest) {
+				earliest = w.ResetAt
 			}
 			continue
 		}
@@ -971,24 +972,13 @@ func selectReadySets(refresh *tasks.RefreshResult, repoKey string, state *Daemon
 	switch {
 	case !earliest.IsZero() && backoffID != "":
 		return nil, earliest, "set backed off after abnormal drain exit", backoffID, false
-	case !earliest.IsZero() && quotaID != "":
-		return nil, earliest, "set backed off for pinned agent cooldown", quotaID, false
+	case !earliest.IsZero() && recoveryID != "":
+		return nil, earliest, "set waiting for quota recovery", recoveryID, false
 	case parkedID != "":
 		return nil, time.Time{}, "set parked after repeated abnormal drain exits", parkedID, false
 	default:
 		return nil, time.Time{}, "no ready set", "", false
 	}
-}
-
-func setBackoffUntil(state *DaemonState, repoKey, setID string, now time.Time) time.Time {
-	if state == nil || state.SetBackoffs == nil {
-		return time.Time{}
-	}
-	until := state.SetBackoffs[setScopedKey(repoKey, setID)]
-	if until.IsZero() || !until.After(now) {
-		return time.Time{}
-	}
-	return until
 }
 
 // setBackoffStatus derives a set's abnormal-driven Queue eligibility from its

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -89,6 +90,44 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("HITL gate menu missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestSupervisorSkipsSpawnWithActiveRecoveryWaiter(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "quota-wait", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	rt := newRecordingTmux(false, "0")
+	td := queueTestTasksDeps(t, true)
+	d := &Deps{
+		Tasks:      td,
+		Project:    project.DefaultDeps(),
+		Tmux:       rt,
+		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
+	}
+	bindSetInPlace(t, d, repo, setID)
+
+	resetAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	if _, err := tasks.RegisterRecoveryWaiter(td, tasks.RecoveryWaiter{
+		SetID:       setID,
+		Preset:      "codex",
+		ResetAt:     resetAt,
+		RuntimePath: repo,
+	}); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter: %v", err)
+	}
+
+	var supervisorOut bytes.Buffer
+	tick(d, &supervisorOut, newRunOutputState())
+
+	if _, ok := extractSpawnCommand(rt); ok {
+		t.Fatalf("supervisor must not spawn while recovery waiter is active, got commands: %v", rt.commands)
+	}
+	out := supervisorOut.String()
+	if !strings.Contains(out, "waiting for quota recovery") {
+		t.Fatalf("supervisor output missing recovery wait status:\n%s", out)
 	}
 }
 

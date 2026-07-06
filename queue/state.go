@@ -13,15 +13,16 @@ import (
 	"github.com/glebglazov/pop/tasks/binding"
 )
 
-// DaemonState is persisted supervisor-owned state. It tracks pinned-agent quota
-// cooldown timers and drain panes. Abnormal-driven backoff and parking are no
-// longer persisted here — they are derived from Drain history plus a durable
-// park-clear event (ADR-0055). Worktree bindings and mergeability live in the
-// shared per-repository store owned by tasks/binding.
+// DaemonState is persisted supervisor-owned state. It tracks drain panes.
+// Abnormal-driven backoff and parking are derived from Drain history plus a
+// durable park-clear event (ADR-0055). SetBackoffs is retained only for
+// backward compatibility with older daemon state files; quota spawn-skip reads
+// recovery waiters from pop.db instead (ADR-0100). Worktree bindings and
+// mergeability live in the shared per-repository store owned by tasks/binding.
 type DaemonState struct {
 	Version     int                  `json:"version"`
 	UpdatedAt   time.Time            `json:"updated_at,omitempty"`
-	SetBackoffs map[string]time.Time `json:"set_backoffs,omitempty"`
+	SetBackoffs map[string]time.Time `json:"set_backoffs,omitempty"` // deprecated: no longer read or written
 	DrainPanes  map[string]DrainPane `json:"drain_panes,omitempty"`
 }
 

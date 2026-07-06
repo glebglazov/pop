@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
 )
@@ -147,192 +146,58 @@ func TestBuildLogFromStore(t *testing.T) {
 	}
 }
 
-func TestRecordPinnedQuotaCooldownsBacksOffPinnedQuotaSet(t *testing.T) {
+func TestRenderStatusShowsRecoveryWaiter(t *testing.T) {
+	resetAt := time.Date(2026, 6, 15, 14, 0, 0, 0, time.UTC)
 	td := queueDataDeps(t)
-	repo := initGitRepoWithBase(t)
-	key := testScopedKeyFor(t, td, repo, repo, "set-1")
-	writtenAt := time.Now().UTC()
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			return &tasks.DrainOutcomeRecord{
-				SetID:           "set-1",
-				Outcome:         tasks.DrainOutcomeQuotaPaused,
-				ExhaustedPreset: "codex",
-				ExhaustedPinned: true,
-				RuntimePath:     repo,
-				WrittenAt:       writtenAt,
-			}, nil
-		},
-	}
-	cfg := &config.Config{Queue: &config.QueueConfig{AgentQuotaRetryAfter: "30m"}}
-
-	if err := recordPinnedQuotaCooldowns(d, cfg, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo, DefinitionPath: "/def"},
-	}}); err != nil {
-		t.Fatalf("record cooldowns: %v", err)
-	}
-
-	state, err := ReadDaemonState(td)
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{{
+		Project:      "pop",
+		Reason:       "set waiting for quota recovery",
+		BlockedSetID: "set-1",
+		WaitUntil:    resetAt,
+	}}, &DaemonState{Version: 1})
 	if err != nil {
-		t.Fatalf("read state: %v", err)
+		t.Fatalf("status: %v", err)
 	}
-	want := writtenAt.Add(30 * time.Minute)
-	if got := state.SetBackoffs[key]; !got.Equal(want) {
-		t.Fatalf("set backoff = %s, want finishedAt+30m %s", got, want)
-	}
-
-	// The queue must not write the agent-global cooldown store — the executor
-	// fallback owns that axis (ADR-0055/0056).
-	cooldowns, err := tasks.ActiveAgentCooldownsWith(td, time.Now())
-	if err != nil {
-		t.Fatalf("read cooldown store: %v", err)
-	}
-	if len(cooldowns) != 0 {
-		t.Fatalf("queue must not write agent cooldown store, got %+v", cooldowns)
-	}
-}
-
-func TestRecordPinnedQuotaCooldownsFromResetAt(t *testing.T) {
-	td := queueDataDeps(t)
-	repo := initGitRepoWithBase(t)
-	key := testScopedKeyFor(t, td, repo, repo, "set-1")
-	resetAt := time.Now().UTC().Add(45 * time.Minute).Truncate(time.Second)
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			return &tasks.DrainOutcomeRecord{
-				SetID:            "set-1",
-				Outcome:          tasks.DrainOutcomeQuotaPaused,
-				ExhaustedPreset:  "codex",
-				ExhaustedPinned:  true,
-				ExhaustedResetAt: resetAt,
-				RuntimePath:      repo,
-				WrittenAt:        time.Now().UTC(),
-			}, nil
-		},
-	}
-	cfg := &config.Config{Queue: &config.QueueConfig{AgentQuotaRetryAfter: "30m"}}
-
-	if err := recordPinnedQuotaCooldowns(d, cfg, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo, DefinitionPath: "/def"},
-	}}); err != nil {
-		t.Fatalf("record cooldowns: %v", err)
-	}
-
-	state, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	want := resetAt.Add(2 * time.Minute)
-	if got := state.SetBackoffs[key]; !got.Equal(want) {
-		t.Fatalf("set backoff = %s, want reset+2m %s", got, want)
-	}
-}
-
-// TestRecordPinnedQuotaCooldownsIdempotent checks re-observing the same
-// quota_paused terminal across ticks does not drift the cooldown — the instant
-// is derived from the Drain's finish time, so a second pass writes the same value
-// and, once elapsed, never re-blocks the set.
-func TestRecordPinnedQuotaCooldownsIdempotent(t *testing.T) {
-	td := queueDataDeps(t)
-	repo := initGitRepoWithBase(t)
-	key := testScopedKeyFor(t, td, repo, repo, "set-1")
-	writtenAt := time.Now().UTC()
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			return &tasks.DrainOutcomeRecord{
-				SetID:           "set-1",
-				Outcome:         tasks.DrainOutcomeQuotaPaused,
-				ExhaustedPreset: "codex",
-				ExhaustedPinned: true,
-				RuntimePath:     repo,
-				WrittenAt:       writtenAt,
-			}, nil
-		},
-	}
-	cfg := &config.Config{Queue: &config.QueueConfig{AgentQuotaRetryAfter: "30m"}}
-	dec := []Decision{{Project: "pop", scan: projectScan{ProjectPath: repo, RuntimePath: repo}}}
-
-	if err := recordPinnedQuotaCooldowns(d, cfg, dec); err != nil {
-		t.Fatalf("first pass: %v", err)
-	}
-	first := mustReadState(t, td).SetBackoffs[key]
-	if err := recordPinnedQuotaCooldowns(d, cfg, dec); err != nil {
-		t.Fatalf("second pass: %v", err)
-	}
-	second := mustReadState(t, td).SetBackoffs[key]
-	if !first.Equal(second) {
-		t.Fatalf("cooldown drifted across ticks: %s then %s", first, second)
-	}
-}
-
-func mustReadState(t *testing.T, td *tasks.Deps) *DaemonState {
-	t.Helper()
-	state, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
-	}
-	return state
-}
-
-func TestAgentQuotaCooldownUntilPolicy(t *testing.T) {
-	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
-	fallback := 30 * time.Minute
-
-	tests := []struct {
-		name    string
-		resetAt time.Time
-		want    time.Time
-	}{
-		{name: "zero fallback", resetAt: time.Time{}, want: now.Add(fallback)},
-		{name: "past fallback", resetAt: now.Add(-time.Second), want: now.Add(fallback)},
-		{name: "too far fallback", resetAt: now.Add(8*24*time.Hour + time.Second), want: now.Add(fallback)},
-		{name: "sane reset with skew", resetAt: now.Add(time.Hour), want: now.Add(time.Hour + 2*time.Minute)},
-		{name: "eight days exactly with skew", resetAt: now.Add(8 * 24 * time.Hour), want: now.Add(8*24*time.Hour + 2*time.Minute)},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := agentQuotaCooldownUntil(tc.resetAt, now, fallback); !got.Equal(tc.want) {
-				t.Fatalf("cooldown = %s, want %s", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestRecordPinnedQuotaCooldownsDefaultQuotaDoesNotBackOffSet(t *testing.T) {
-	td := queueDataDeps(t)
-	repo := initGitRepoWithBase(t)
-	key := testScopedKeyFor(t, td, repo, repo, "set-1")
-	d := &Deps{
-		Tasks: td,
-		ReadOutcome: func(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-			return &tasks.DrainOutcomeRecord{
-				SetID:           "set-1",
-				Outcome:         tasks.DrainOutcomeQuotaPaused,
-				ExhaustedPreset: "codex",
-				RuntimePath:     repo,
-				WrittenAt:       time.Now().UTC(),
-			}, nil
+	snap.Tasks = td
+	snap.RecoveryWaiters = map[string]tasks.RecoveryWaiter{
+		"set-1": {
+			SetID:       "set-1",
+			Preset:      "codex",
+			ResetAt:     resetAt,
+			RuntimePath: "/runtime/set-1",
 		},
 	}
 
-	if err := recordPinnedQuotaCooldowns(d, &config.Config{}, []Decision{{
-		Project: "pop",
-		scan:    projectScan{ProjectPath: repo, RuntimePath: repo},
-	}}); err != nil {
-		t.Fatalf("record cooldowns: %v", err)
+	var statusOut bytes.Buffer
+	RenderStatus(&statusOut, snap)
+	statusText := statusOut.String()
+	for _, want := range []string{
+		"set-1",
+		"Blocked:",
+		"waiting for quota recovery",
+		"agent=codex",
+		"2026-06-15T14:00:00Z",
+	} {
+		if !strings.Contains(statusText, want) {
+			t.Fatalf("status output missing %q:\n%s", want, statusText)
+		}
 	}
+}
 
-	state, err := ReadDaemonState(td)
-	if err != nil {
-		t.Fatalf("read state: %v", err)
+func TestRecoveryWaiterRunDeltaClearsWhenRemoved(t *testing.T) {
+	resetAt := time.Date(2026, 6, 15, 14, 0, 0, 0, time.UTC)
+	td := queueDataDeps(t)
+	waiter := map[string]tasks.RecoveryWaiter{
+		"set-1": {SetID: "set-1", Preset: "codex", ResetAt: resetAt, RuntimePath: "/runtime/set-1"},
 	}
-	if got := state.SetBackoffs[key]; !got.IsZero() {
-		t.Fatalf("set backoff = %s, want none for rotating default quota pause", got)
+	blocked := BuildRunView(StatusSnapshot{
+		Tasks:           td,
+		RecoveryWaiters: waiter,
+	}, time.Now())
+	cleared := BuildRunView(StatusSnapshot{Tasks: td}, time.Now())
+	lines := DiffRunView(&blocked, cleared)
+	if len(lines) != 1 || !strings.Contains(lines[0], "quota recovery cleared") {
+		t.Fatalf("recovery waiter cleared delta = %v", lines)
 	}
 }
 
