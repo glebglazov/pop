@@ -1196,12 +1196,20 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 	}
 	cols := &dashboardColumns{}
 	cols.syncNatural(snap.Rows)
-	list := ui.NewList(snap.Rows, ui.Opts[DashboardRow]{
+	var list *ui.List[DashboardRow]
+	list = ui.NewList(snap.Rows, ui.Opts[DashboardRow]{
 		Key:    func(r DashboardRow) string { return r.cursorKey },
 		Anchor: ui.AnchorTop,
 		Cell: func(r DashboardRow, _ ui.RowState) string {
-			w := dashboardListCellBudget(cols.width)
-			return ui.TruncateString(dashboardTableLine(dashboardRowValues(r), cols.widths), w)
+			if !dashboardTwoLineMode(list.Items(), cols.width) {
+				w := dashboardListCellBudget(cols.width)
+				return ui.TruncateString(dashboardTableLine(dashboardRowValues(r), cols.widths), w)
+			}
+			budget := dashboardListCellBudget(cols.width)
+			line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(list.Items()), budget)
+			l1 := ui.TruncateString(dashboardTwoLineRowLine1(r, line1Widths), budget)
+			l2 := dashboardTwoLineRowLine2(r, cols.widths)
+			return l1 + "\n  " + l2
 		},
 	})
 	return QueueDashboard{d: d, cfg: cfg, snap: snap, allRows: snap.Rows, list: list, cols: cols}
@@ -1335,6 +1343,145 @@ func dashboardTableWidthsForRows(rows []DashboardRow, termWidth int) []int {
 	return dashboardFitColumnWidths(dashboardColumnWidths(rows), dashboardTableBodyBudget(termWidth))
 }
 
+const (
+	dashboardTwoLineWidthThreshold = 80
+	dashboardTwoLineSetIDThreshold = 36
+)
+
+// dashboardTwoLineMode reports whether the Queue dashboard should render each
+// row on two lines. It activates when the terminal is narrow (< 80 columns) or
+// when any visible Task set identifier is long (> 36 characters). When active,
+// every row uses the same two-line shape (uniform height).
+func dashboardTwoLineMode(rows []DashboardRow, termWidth int) bool {
+	if termWidth < dashboardTwoLineWidthThreshold {
+		return true
+	}
+	for _, row := range rows {
+		if len(row.SetID) > dashboardTwoLineSetIDThreshold {
+			return true
+		}
+	}
+	return false
+}
+
+// dashboardTwoLineHeaders returns the line-1 column headers for two-line mode:
+// PROJECT, FLAGS, STATUS, WORKTREE, DRAIN. TASK SET is intentionally absent
+// from line 1 and rendered on line 2.
+func dashboardTwoLineHeaders() []string {
+	return []string{"PROJECT", "FLAGS", "STATUS", "WORKTREE", "DRAIN"}
+}
+
+// dashboardTwoLineRowValuesLine1 returns the cell values for line 1 of a two-line
+// row: PROJECT, FLAGS, STATUS, WORKTREE, DRAIN.
+func dashboardTwoLineRowValuesLine1(row DashboardRow) []string {
+	return []string{
+		row.Project,
+		dashboardRowFlags(row),
+		row.Status,
+		renderDashboardDest(row.destKind, row.Worktree),
+		row.Drain,
+	}
+}
+
+// dashboardTwoLineNaturalWidths returns the natural widths of the line-1 columns
+// in two-line mode, floored at the header label width.
+func dashboardTwoLineNaturalWidths(rows []DashboardRow) []int {
+	headers := dashboardTwoLineHeaders()
+	widths := make([]int, len(headers))
+	for i, h := range headers {
+		widths[i] = len(h)
+	}
+	for _, row := range rows {
+		for i, v := range dashboardTwoLineRowValuesLine1(row) {
+			if n := lipgloss.Width(v); n > widths[i] {
+				widths[i] = n
+			}
+		}
+	}
+	return widths
+}
+
+// dashboardTwoLineTableLineWidth returns the rendered width of a line-1 row or
+// header given the two-line column widths.
+func dashboardTwoLineTableLineWidth(widths []int) int {
+	if len(widths) == 0 {
+		return 0
+	}
+	total := 0
+	for _, w := range widths {
+		total += w
+	}
+	return total + dashboardColSep*(len(widths)-1)
+}
+
+// dashboardTwoLineColShrinkOrder lists elastic line-1 columns in shrink
+// priority: DRAIN and WORKTREE give way first; FLAGS is protected and never
+// shrinks, matching the single-line policy.
+var dashboardTwoLineColShrinkOrder = []int{
+	4, // DRAIN
+	3, // WORKTREE
+	2, // STATUS
+	0, // PROJECT
+}
+
+// dashboardTwoLineFitWidths shrinks the line-1 columns until the row fits budget.
+func dashboardTwoLineFitWidths(natural []int, budget int) []int {
+	if budget <= 0 || len(natural) == 0 {
+		return append([]int(nil), natural...)
+	}
+	widths := append([]int(nil), natural...)
+	headers := dashboardTwoLineHeaders()
+	mins := make([]int, len(headers))
+	for i, h := range headers {
+		mins[i] = len(h)
+	}
+	for dashboardTwoLineTableLineWidth(widths) > budget {
+		shrunk := false
+		for _, col := range dashboardTwoLineColShrinkOrder {
+			if widths[col] > mins[col] {
+				widths[col]--
+				shrunk = true
+				break
+			}
+		}
+		if !shrunk {
+			break
+		}
+	}
+	return widths
+}
+
+// dashboardTwoLineTableHeader renders the two-line mode line-1 header.
+func dashboardTwoLineTableHeader(widths []int) string {
+	return dashboardTableLine(dashboardTwoLineHeaders(), widths)
+}
+
+// dashboardTwoLineTableSeparator renders the two-line mode line-1 separator.
+func dashboardTwoLineTableSeparator(widths []int) string {
+	return dashboardTableSeparator(widths)
+}
+
+// dashboardTwoLineSetIDStart returns the indent (in spaces) for line 2 of a
+// two-line row so the full Task set identifier aligns under the TASK SET column
+// position from the single-line header.
+func dashboardTwoLineSetIDStart(singleLineWidths []int) int {
+	if len(singleLineWidths) <= dashboardColSetID {
+		return 0
+	}
+	return singleLineWidths[dashboardColProject] + dashboardColSep
+}
+
+// dashboardTwoLineRowLine1 renders the padded line-1 cells of a two-line row.
+func dashboardTwoLineRowLine1(row DashboardRow, widths []int) string {
+	return dashboardTableLine(dashboardTwoLineRowValuesLine1(row), widths)
+}
+
+// dashboardTwoLineRowLine2 renders line 2 of a two-line row: the full Task set
+// identifier indented to the single-line TASK SET column position.
+func dashboardTwoLineRowLine2(row DashboardRow, singleLineWidths []int) string {
+	return strings.Repeat(" ", dashboardTwoLineSetIDStart(singleLineWidths)) + row.SetID
+}
+
 // dashboardTableChromeLines is the number of body lines above the List rows: the
 // blank line under the summary header, the column header, and the separator.
 const dashboardTableChromeLines = 3
@@ -1348,9 +1495,13 @@ func (m QueueDashboard) syncListRows() {
 
 // resizeMainList sizes the List to the body budget the Frame leaves, minus the
 // table's own header chrome, so the table clamps to the terminal instead of
-// overflowing.
+// overflowing. In two-line mode each List item renders two terminal lines, so
+// the List viewport height is halved (floored).
 func (m QueueDashboard) resizeMainList() {
 	listH := m.frameSpec().BodyHeight(m.height) - dashboardTableChromeLines
+	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+		listH = listH / 2
+	}
 	if listH < 1 {
 		listH = 1
 	}
@@ -2557,10 +2708,20 @@ func (m QueueDashboard) mainBody() string {
 		}
 		return "No queue-actionable task sets."
 	}
-	parts := []string{
-		"",
-		ui.TruncateString("  "+dashboardTableLine(dashboardTableHeaders(), m.cols.widths), m.width),
-		ui.TruncateString("  "+dashboardTableSeparator(m.cols.widths), m.width),
+	var parts []string
+	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+		line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(m.snap.Rows), dashboardTableBodyBudget(m.width))
+		parts = []string{
+			"",
+			ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), m.width),
+			ui.TruncateString("  "+dashboardTwoLineTableSeparator(line1Widths), m.width),
+		}
+	} else {
+		parts = []string{
+			"",
+			ui.TruncateString("  "+dashboardTableLine(dashboardTableHeaders(), m.cols.widths), m.width),
+			ui.TruncateString("  "+dashboardTableSeparator(m.cols.widths), m.width),
+		}
 	}
 	parts = append(parts, m.list.VisibleRows()...)
 	return strings.Join(parts, "\n")
@@ -3087,6 +3248,10 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
 // default, flipping above when the cursor sits too low for the menu to fit
 // beneath it within height (dashboardMenuPlaceBelow).
 func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
+	if dashboardTwoLineMode(rows, width) {
+		renderDashboardTableTwoLineWithMenu(w, rows, cursor, width, height, menu)
+		return
+	}
 	headers := dashboardTableHeaders()
 	widths := dashboardTableWidthsForRows(rows, width)
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableLine(headers, widths), width))
@@ -3119,6 +3284,59 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 			writeMenu()
 		}
 	}
+}
+
+// renderDashboardTableTwoLineWithMenu renders the two-line task-set table and,
+// when menu is non-nil, splices the action overlay next to the cursored row.
+// Each row occupies two terminal lines: line 1 holds PROJECT/FLAGS/STATUS/
+// WORKTREE/DRAIN, line 2 holds the full Task set identifier aligned under the
+// single-line TASK SET column.
+func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
+	singleWidths := dashboardTableWidthsForRows(rows, width)
+	line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(rows), dashboardTableBodyBudget(width))
+	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), width))
+	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableSeparator(line1Widths), width))
+
+	var menuLines []string
+	placeBelow := true
+	if menu != nil {
+		menuLines = dashboardMenuLines(menu, width)
+		placeBelow = dashboardMenuPlaceBelowTwoLine(cursor, len(menuLines), height)
+	}
+	writeMenu := func() {
+		for _, ml := range menuLines {
+			fmt.Fprintf(w, "%s\n", ml)
+		}
+	}
+	for i, row := range rows {
+		if menu != nil && i == cursor && !placeBelow {
+			writeMenu()
+		}
+		var prefix string
+		if i == cursor {
+			prefix = ui.IndicatorStyle.Render("█") + " "
+		} else {
+			prefix = "  "
+		}
+		line1 := ui.TruncateString(prefix+dashboardTwoLineRowLine1(row, line1Widths), width)
+		line2 := "  " + dashboardTwoLineRowLine2(row, singleWidths)
+		fmt.Fprintf(w, "%s\n", line1)
+		fmt.Fprintf(w, "%s\n", line2)
+		if menu != nil && i == cursor && placeBelow {
+			writeMenu()
+		}
+	}
+}
+
+// dashboardMenuPlaceBelowTwoLine is the two-line-mode variant of
+// dashboardMenuPlaceBelow. Each row consumes two terminal lines, so the space
+// below the cursored row is reduced accordingly.
+func dashboardMenuPlaceBelowTwoLine(cursor, menuHeight, height int) bool {
+	if height <= 0 {
+		return true
+	}
+	linesBelowCursor := height - dashboardTableTopOffset - 2*(cursor+1)
+	return linesBelowCursor >= menuHeight
 }
 
 // dashboardTableTopOffset is the number of lines above the first table row in

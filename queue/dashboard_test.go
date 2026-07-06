@@ -1063,7 +1063,7 @@ func TestDashboardTableFitsTerminalWidth(t *testing.T) {
 		Drain:     "config error: no trunk worktree configured",
 		cursorKey: "pop\x00set1",
 		SetRef: SetRef{
-			SetID:     "2026-06-01-super-long-task-set-id",
+			SetID:     "set1",
 			AutoDrain: true,
 			Orphaned:  true,
 		},
@@ -1113,6 +1113,139 @@ func dashboardTestTableLines(view string) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+func TestDashboardTwoLineMode(t *testing.T) {
+	short := DashboardRow{SetRef: SetRef{SetID: "short-id"}}
+	long := DashboardRow{SetRef: SetRef{SetID: strings.Repeat("a", 37)}}
+
+	if !dashboardTwoLineMode([]DashboardRow{short}, 40) {
+		t.Fatalf("narrow terminal (40 cols) should activate two-line mode")
+	}
+	if !dashboardTwoLineMode([]DashboardRow{short}, 79) {
+		t.Fatalf("terminal just below threshold (79 cols) should activate two-line mode")
+	}
+	if dashboardTwoLineMode([]DashboardRow{short}, 80) {
+		t.Fatalf("terminal at threshold (80 cols) with short ids should stay single-line")
+	}
+	if !dashboardTwoLineMode([]DashboardRow{short, long}, 80) {
+		t.Fatalf("one long set id should activate two-line mode for all rows")
+	}
+	if !dashboardTwoLineMode([]DashboardRow{long, short}, 100) {
+		t.Fatalf("long set id should activate two-line mode even on wide terminals")
+	}
+}
+
+func TestDashboardTwoLineRowLine1OmitsTaskSet(t *testing.T) {
+	row := DashboardRow{
+		Project:   "pop",
+		Status:    "READY",
+		Worktree:  "main",
+		Drain:     "picked up",
+		SetRef:    SetRef{SetID: "2026-07-05-queue-dashboard-two-line"},
+		cursorKey: "pop\x00set",
+	}
+	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
+	line1 := dashboardTwoLineRowLine1(row, widths)
+
+	if strings.Contains(line1, row.SetID) {
+		t.Fatalf("two-line row line 1 must not contain the Task set id: %q", line1)
+	}
+	for _, want := range []string{"pop", "READY", "main", "picked up"} {
+		if !strings.Contains(line1, want) {
+			t.Fatalf("two-line row line 1 missing expected value %q: %q", want, line1)
+		}
+	}
+}
+
+func TestDashboardTwoLineRowLine2ShowsFullSetID(t *testing.T) {
+	row := DashboardRow{
+		Project: "pop",
+		SetRef:  SetRef{SetID: "2026-07-05-queue-dashboard-two-line"},
+	}
+	rows := []DashboardRow{row}
+	singleWidths := dashboardTableWidthsForRows(rows, 120)
+	wantStart := dashboardTwoLineSetIDStart(singleWidths)
+
+	line2 := dashboardTwoLineRowLine2(row, singleWidths)
+	if !strings.HasSuffix(line2, row.SetID) {
+		t.Fatalf("two-line row line 2 must end with the full set id: %q", line2)
+	}
+	if strings.Contains(line2, "…") {
+		t.Fatalf("two-line row line 2 must not ellipsize the set id: %q", line2)
+	}
+
+	gotSpaces := 0
+	for _, r := range line2 {
+		if r != ' ' {
+			break
+		}
+		gotSpaces++
+	}
+	if gotSpaces != wantStart {
+		t.Fatalf("two-line row line 2 indent = %d, want %d (single-line TASK SET start): %q", gotSpaces, wantStart, line2)
+	}
+}
+
+func TestDashboardTwoLineRowsFitTerminalWidth(t *testing.T) {
+	cases := []struct {
+		termW int
+		setID string
+	}{
+		// Narrow widths activate two-line mode regardless of set id length.
+		{40, "set"},
+		{60, "set"},
+		// At the width threshold, a long set id is required to keep two-line
+		// mode active; pick one that still fits within the 80-column budget.
+		{80, "2026-07-05-queue-dashboard-two-line-mode"},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("width=%d", tc.termW), func(t *testing.T) {
+			row := DashboardRow{
+				Project:   "pop",
+				Status:    "READY",
+				Worktree:  "main",
+				Drain:     "",
+				SetRef:    SetRef{SetID: tc.setID},
+				cursorKey: "pop\x00" + tc.setID,
+			}
+			m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.termW, Height: 20})
+			m = updated.(QueueDashboard)
+			if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+				t.Fatalf("expected two-line mode at width %d", tc.termW)
+			}
+			view := m.View().Content
+			for _, line := range dashboardTestTableLines(view) {
+				if got := lipgloss.Width(line); got > tc.termW {
+					t.Fatalf("table line width %d exceeds terminal width %d:\n%q", got, tc.termW, line)
+				}
+			}
+		})
+	}
+}
+
+func TestDashboardTwoLineSingleLineLayoutUnchanged(t *testing.T) {
+	row := DashboardRow{
+		Project:   "pop",
+		Status:    "READY",
+		Worktree:  "main",
+		Drain:     "",
+		SetRef:    SetRef{SetID: "set1"},
+		cursorKey: "pop\x00set1",
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	m = updated.(QueueDashboard)
+	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+		t.Fatalf("wide terminal with short ids should not activate two-line mode")
+	}
+	view := m.View().Content
+	for _, want := range []string{"PROJECT  TASK SET  FLAGS  STATUS", "pop      set1"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("single-line layout missing %q:\n%s", want, view)
+		}
+	}
 }
 
 func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) {
@@ -3393,10 +3526,9 @@ func TestMainListRuntimeShell(t *testing.T) {
 	})
 }
 
-
 func TestQueueDashboardHelpOverlay(t *testing.T) {
 	ctrlH := tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}
-	
+
 	t.Run("C-h opens help in main list", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
 		updated, _ := m.Update(ctrlH)
