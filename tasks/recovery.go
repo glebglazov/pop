@@ -11,6 +11,82 @@ import (
 	"github.com/glebglazov/pop/store"
 )
 
+// CheckoutGateHold records that a drain is parked at a human-wait gate on a
+// runtime checkout. While active it blocks recovery turn acquisition on that
+// path (ADR-0100).
+type CheckoutGateHold struct {
+	SetID        string
+	RuntimePath  string
+	RegisteredAt time.Time
+}
+
+// RegisterCheckoutGateHold records a gate hold for one runtime path. The
+// runtime_path is UNIQUE: a second registration for the same checkout replaces
+// the first.
+func RegisterCheckoutGateHold(d *Deps, setID, runtimePath string) error {
+	if setID == "" || runtimePath == "" {
+		return nil
+	}
+	s, err := openDrainStore(d)
+	if err != nil {
+		return exitErr(ExitOperational, "register checkout gate hold: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+	if err := s.PutCheckoutGateHold(store.CheckoutGateHold{
+		SetID:        setID,
+		RuntimePath:  runtimePath,
+		RegisteredAt: time.Now().UTC(),
+	}); err != nil {
+		return exitErr(ExitOperational, "register checkout gate hold: %v", err)
+	}
+	return nil
+}
+
+// ReleaseCheckoutGateHold removes the gate hold for one runtime path. A missing
+// row is not an error.
+func ReleaseCheckoutGateHold(d *Deps, runtimePath string) error {
+	if runtimePath == "" {
+		return nil
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	defer func() { _ = s.Close() }()
+	return s.DeleteCheckoutGateHold(runtimePath)
+}
+
+// GetCheckoutGateHold returns the active gate hold for one runtime path, or nil
+// when no hold is registered.
+func GetCheckoutGateHold(d *Deps, runtimePath string) (*CheckoutGateHold, error) {
+	if runtimePath == "" {
+		return nil, nil
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	defer func() { _ = s.Close() }()
+	h, err := s.GetCheckoutGateHold(runtimePath)
+	if err != nil {
+		return nil, err
+	}
+	if h == nil {
+		return nil, nil
+	}
+	return &CheckoutGateHold{
+		SetID:        h.SetID,
+		RuntimePath:  h.RuntimePath,
+		RegisteredAt: h.RegisteredAt,
+	}, nil
+}
+
 // RecoveryWaiter is a registered quota-recovery wait for a task set. When an
 // agent's quota is exhausted during a task attempt, instead of exiting with
 // ExitQuotaPaused, the drain parks, registers a waiter, and polls until the
@@ -224,21 +300,16 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 // acquireRecoveryTurn attempts to acquire a recovery turn for the waiter.
 // Returns true when the turn is acquired and the caller can proceed to resume
 // the task. Returns false when the turn is not yet available.
-//
-// For now, this is preset-agnostic and checkout-independent: any waiter whose
-// cooldown has elapsed can proceed. Task 03 adds checkout-scoped gating (a
-// checkout gate hold that serializes recovery attempts on the same checkout).
 func acquireRecoveryTurn(d *Deps, w *RecoveryWaiter) (bool, error) {
-	now := time.Now().UTC()
-	resetAt := w.ResetAt.UTC()
-	
-	// Check if this waiter's cooldown has elapsed.
-	if now.Before(resetAt) {
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
 		return false, nil
 	}
-	
-	// Cooldown elapsed: acquire the turn.
-	return true, nil
+	defer func() { _ = s.Close() }()
+	return acquireRecoveryTurnWithStore(s, w)
 }
 
 // acquireRecoveryTurnWithStore is like acquireRecoveryTurn but takes an already-open
@@ -246,13 +317,19 @@ func acquireRecoveryTurn(d *Deps, w *RecoveryWaiter) (bool, error) {
 func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter) (bool, error) {
 	now := time.Now().UTC()
 	resetAt := w.ResetAt.UTC()
-	
-	// Check if this waiter's cooldown has elapsed.
+
 	if now.Before(resetAt) {
 		return false, nil
 	}
-	
-	// Cooldown elapsed: acquire the turn.
+
+	hold, err := s.GetCheckoutGateHold(w.RuntimePath)
+	if err != nil {
+		return false, exitErr(ExitOperational, "check checkout gate hold: %v", err)
+	}
+	if hold != nil {
+		return false, nil
+	}
+
 	return true, nil
 }
 

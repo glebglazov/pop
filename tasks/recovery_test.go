@@ -125,6 +125,81 @@ func TestAcquireRecoveryTurn_PresetAgnostic(t *testing.T) {
 	}
 }
 
+func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
+	d, repo := drainTestRepo(t)
+
+	waiter := RecoveryWaiter{
+		SetID:       "set-b",
+		Preset:      "claude",
+		ResetAt:     time.Now().Add(-time.Hour),
+		RuntimePath: repo,
+	}
+	_, err := RegisterRecoveryWaiter(d, waiter)
+	if err != nil {
+		t.Fatalf("RegisterRecoveryWaiter failed: %v", err)
+	}
+
+	if err := RegisterCheckoutGateHold(d, "set-a", repo); err != nil {
+		t.Fatalf("RegisterCheckoutGateHold failed: %v", err)
+	}
+
+	acquired, err := acquireRecoveryTurn(d, &waiter)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn failed: %v", err)
+	}
+	if acquired {
+		t.Fatal("recovery turn must not be acquired while checkout gate hold is active")
+	}
+
+	if err := ReleaseCheckoutGateHold(d, repo); err != nil {
+		t.Fatalf("ReleaseCheckoutGateHold failed: %v", err)
+	}
+
+	acquired, err = acquireRecoveryTurn(d, &waiter)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn after release failed: %v", err)
+	}
+	if !acquired {
+		t.Fatal("recovery turn should be acquired after gate hold is released")
+	}
+}
+
+func TestRegisterCheckoutGateHold(t *testing.T) {
+	d, repo := drainTestRepo(t)
+
+	if err := RegisterCheckoutGateHold(d, "set-a", repo); err != nil {
+		t.Fatalf("RegisterCheckoutGateHold failed: %v", err)
+	}
+
+	hold, err := GetCheckoutGateHold(d, repo)
+	if err != nil {
+		t.Fatalf("GetCheckoutGateHold failed: %v", err)
+	}
+	if hold == nil {
+		t.Fatal("gate hold not found after registration")
+	}
+	if hold.SetID != "set-a" {
+		t.Errorf("SetID = %q, want set-a", hold.SetID)
+	}
+	if hold.RuntimePath != repo {
+		t.Errorf("RuntimePath = %q, want %q", hold.RuntimePath, repo)
+	}
+	if hold.RegisteredAt.IsZero() {
+		t.Error("RegisteredAt should be set")
+	}
+
+	if err := ReleaseCheckoutGateHold(d, repo); err != nil {
+		t.Fatalf("ReleaseCheckoutGateHold failed: %v", err)
+	}
+	hold, err = GetCheckoutGateHold(d, repo)
+	if err != nil {
+		t.Fatalf("GetCheckoutGateHold after release failed: %v", err)
+	}
+	if hold != nil {
+		t.Error("gate hold should be nil after release")
+	}
+}
+
 func TestAcquireRecoveryTurn_BeforeReset(t *testing.T) {
 	d, _ := drainTestRepo(t)
 	

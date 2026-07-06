@@ -228,6 +228,20 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		drain = nil
 	}
 
+	// parkAtGate parks the drain and registers a checkout gate hold so quota
+	// recovery waiters on the same runtime path cannot resume until the gate
+	// session ends (ADR-0100).
+	parkAtGate := func(m *Manifest, gateTask *Task) {
+		if !gateWillPrompt(opts.ConfirmIn, opts.Yes, m, gateTask) {
+			return
+		}
+		parkDrain()
+		_ = RegisterCheckoutGateHold(d, taskSetID, runtimePath)
+	}
+	releaseGateHold := func() {
+		_ = ReleaseCheckoutGateHold(d, runtimePath)
+	}
+
 	// ensureDrain re-acquires the Runtime execution lock before a contiguous run
 	// of AFK attempts resumes after a gate park (ADR-0067). It is a no-op while a
 	// Drain is already held (the opening BeginDrain, or an unparked segment). A
@@ -415,9 +429,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					// Park the Runtime execution lock before the HITL gate menu so it
 					// runs lock-free (ADR-0067); only when the menu will actually prompt,
 					// so a non-prompting fall-through keeps the normal terminal.
-					if gateWillPrompt(opts.ConfirmIn, opts.Yes, currentRefresh.Manifests[taskSetID], hitl) {
-						parkDrain()
-					}
+					parkAtGate(currentRefresh.Manifests[taskSetID], hitl)
 					rv := &reverifyGateContext{
 						cfg:         cfg,
 						agents:      opts.VerifyAgents,
@@ -426,6 +438,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 						runVerifier: opts.verifyRunner,
 					}
 					handled, err := handleInteractiveHITLGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, currentRefresh.Manifests[taskSetID], hitl, rv)
+					releaseGateHold()
 					if err != nil {
 						return nil, err
 					}
@@ -454,10 +467,9 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
 				// Park the Runtime execution lock before the Failed gate menu so it
 				// runs lock-free (ADR-0067).
-				if gateWillPrompt(opts.ConfirmIn, opts.Yes, m, FailedTask(m)) {
-					parkDrain()
-				}
+				parkAtGate(m, FailedTask(m))
 				handled, err := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, m, FailedTask(m))
+				releaseGateHold()
 				if err != nil {
 					return nil, err
 				}
@@ -525,10 +537,9 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				// menu so it runs lock-free (ADR-0067). An interrupt never reaches the
 				// menu (the task is not marked failed), so its `interrupted` terminal is
 				// preserved by the normal finalize.
-				if gateWillPrompt(opts.ConfirmIn, opts.Yes, m, FailedTask(m)) {
-					parkDrain()
-				}
+				parkAtGate(m, FailedTask(m))
 				handled, gateErr := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, m, FailedTask(m))
+				releaseGateHold()
 				if gateErr != nil {
 					return result, gateErr
 				}

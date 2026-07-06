@@ -235,6 +235,16 @@ var migrations = []string{
 		priority      INTEGER NOT NULL DEFAULT 0,
 		registered_at TEXT NOT NULL
 	);`,
+	// 12: checkout_gate_holds — occupancy while a drain is parked at a Failed or
+	// HITL gate (ADR-0100). The runtime lock is released per ADR-0067, but the
+	// coordinator must still treat the checkout as busy so a quota recovery waiter
+	// on another set cannot resume agent work on the same dirty tree while a human
+	// sits at a gate. Keyed by runtime_path (one gate session per checkout).
+	`CREATE TABLE checkout_gate_holds (
+		runtime_path  TEXT PRIMARY KEY,
+		set_id        TEXT NOT NULL,
+		registered_at TEXT NOT NULL
+	);`,
 }
 
 func (s *Store) migrate() error {

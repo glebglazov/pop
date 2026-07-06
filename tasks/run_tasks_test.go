@@ -337,7 +337,191 @@ func TestRunTaskSetReleasesRuntimeLockAtFailedGatePrompt(t *testing.T) {
 	}
 }
 
-// A set that *starts* at a gate records the same clean Drain terminal the --yes
+// A drain parked at the Failed gate registers a checkout gate hold for the
+// duration of the menu and releases it when the gate session ends.
+func TestRunTaskSetRegistersGateHoldAtFailedGate(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+	d := env.deps()
+	runtimePath, err := ResolveRuntimePathWith(d, env.root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(t *testing.T) {
+		t.Helper()
+		hold, err := GetCheckoutGateHold(d, runtimePath)
+		if err != nil {
+			t.Fatalf("GetCheckoutGateHold: %v", err)
+		}
+		if hold == nil {
+			t.Fatal("checkout gate hold missing at Failed gate prompt")
+		}
+		if hold.SetID != "demo" {
+			t.Errorf("hold set_id = %q, want demo", hold.SetID)
+		}
+	}
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	opts.ConfirmIn = &checkingPromptReader{t: t, check: check, response: "0\n"}
+
+	_, err = RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+
+	hold, err := GetCheckoutGateHold(d, runtimePath)
+	if err != nil {
+		t.Fatalf("GetCheckoutGateHold after gate exit: %v", err)
+	}
+	if hold != nil {
+		t.Fatalf("checkout gate hold leaked after Failed gate exit: %#v", hold)
+	}
+}
+
+// A drain parked at the HITL gate registers and releases a checkout gate hold
+// the same way as the Failed gate.
+func TestRunTaskSetRegistersGateHoldAtHITLGate(t *testing.T) {
+	env, agent := setupSoleHumanBlockedFixture(t)
+	d := env.deps()
+	runtimePath, err := ResolveRuntimePathWith(d, env.root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(t *testing.T) {
+		t.Helper()
+		hold, err := GetCheckoutGateHold(d, runtimePath)
+		if err != nil {
+			t.Fatalf("GetCheckoutGateHold: %v", err)
+		}
+		if hold == nil {
+			t.Fatal("checkout gate hold missing at HITL gate prompt")
+		}
+		if hold.SetID != "solo" {
+			t.Errorf("hold set_id = %q, want solo", hold.SetID)
+		}
+	}
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.ConfirmIn = &checkingPromptReader{t: t, check: check, response: "0\n"}
+
+	_, err = RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	hold, err := GetCheckoutGateHold(d, runtimePath)
+	if err != nil {
+		t.Fatalf("GetCheckoutGateHold after gate exit: %v", err)
+	}
+	if hold != nil {
+		t.Fatalf("checkout gate hold leaked after HITL gate exit: %#v", hold)
+	}
+}
+
+// Set A at the Failed gate on checkout R blocks set B's recovery waiter on R
+// from acquiring a turn until A clears the gate.
+func TestRunTaskSetFailedGateBlocksRecoveryTurnOnSameCheckout(t *testing.T) {
+	root := t.TempDir()
+	initExecutorGitRepo(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := storageTasksDir(t, root)
+	setupManifest(t, tasksDir, "set-a", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+	})
+	setupManifest(t, tasksDir, "set-b", []Task{
+		{ID: "01-b", File: "01-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+		t.Fatal(err)
+	}
+	installClaudeQuotaAgent(t, root)
+	agent := writeFakeAgent(t, root, fakeAgentConfig{summary: "unused"})
+
+	d := &Deps{
+		FS:     deps.NewRealFileSystem(),
+		Git:    deps.NewRealGit(),
+		Runner: RealCommandRunner{},
+	}
+	runtimePath, err := ResolveRuntimePathWith(d, root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	atGate := make(chan struct{})
+	resumeGate := make(chan struct{})
+	gateReader := &blockingGateReader{
+		atGate:   atGate,
+		resume:   resumeGate,
+		response: "0\n",
+	}
+
+	gateDone := make(chan struct{})
+	go func() {
+		defer close(gateDone)
+		var buf bytes.Buffer
+		opts := RunTaskSetOptions{
+			ResolveInput:    ResolveInput{CWD: root},
+			AgentCmd:        agent,
+			TaskSetOverride: "set-a",
+			ConfirmIn:       gateReader,
+			Output:          &buf,
+		}
+		_, _ = RunTaskSetWith(d, nil, nil, opts)
+	}()
+
+	select {
+	case <-atGate:
+	case <-time.After(5 * time.Second):
+		t.Fatal("set-a did not reach Failed gate within 5 seconds")
+	}
+
+	waiter := RecoveryWaiter{
+		SetID:       "set-b",
+		Preset:      "claude",
+		ResetAt:     time.Now().Add(-time.Hour),
+		RuntimePath: runtimePath,
+	}
+	if _, err := RegisterRecoveryWaiter(d, waiter); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter: %v", err)
+	}
+
+	acquired, err := acquireRecoveryTurn(d, &waiter)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn while gate active: %v", err)
+	}
+	if acquired {
+		t.Fatal("recovery turn must not be acquired while set-a sits at Failed gate")
+	}
+
+	close(resumeGate)
+
+	select {
+	case <-gateDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("set-a did not exit Failed gate within 5 seconds")
+	}
+
+	hold, err := GetCheckoutGateHold(d, runtimePath)
+	if err != nil {
+		t.Fatalf("GetCheckoutGateHold after gate exit: %v", err)
+	}
+	if hold != nil {
+		t.Fatalf("checkout gate hold leaked: %#v", hold)
+	}
+
+	acquired, err = acquireRecoveryTurn(d, &waiter)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn after gate cleared: %v", err)
+	}
+	if !acquired {
+		t.Fatal("recovery turn should be acquirable after gate hold is released")
+	}
+}
+
+// A whole-set drain parked at the Failed gate menu holds no Runtime execution
 // path produces (DrainOutcomeFinished) without ever holding a live lock during
 // the menu (ADR-0056/0067). The blocked/failed disposition stays
 // manifest-derived, so the recorded outcome is identical across both paths.
@@ -2330,6 +2514,23 @@ func (r *checkingPromptReader) Read(p []byte) (int, error) {
 	r.check(r.t)
 	r.done = true
 	return copy(p, r.response), nil
+}
+
+type blockingGateReader struct {
+	atGate   chan struct{}
+	resume   chan struct{}
+	response string
+	once     bool
+}
+
+func (r *blockingGateReader) Read(p []byte) (int, error) {
+	if !r.once {
+		r.once = true
+		close(r.atGate)
+		<-r.resume
+		return copy(p, r.response), nil
+	}
+	return 0, io.EOF
 }
 
 type hitlAssistanceRunner struct {
