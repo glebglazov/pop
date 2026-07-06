@@ -1,0 +1,273 @@
+package tasks
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/glebglazov/pop/store"
+)
+
+// RecoveryWaiter is a registered quota-recovery wait for a task set. When an
+// agent's quota is exhausted during a task attempt, instead of exiting with
+// ExitQuotaPaused, the drain parks, registers a waiter, and polls until the
+// preset's cooldown elapses and a recovery turn is acquired (ADR-0100).
+type RecoveryWaiter struct {
+	SetID        string
+	Preset       string
+	ResetAt      time.Time
+	RuntimePath  string
+	Priority     int
+	RegisteredAt time.Time
+}
+
+// RegisterRecoveryWaiter records a quota-recovery wait in the global store. The
+// set_id is UNIQUE: a second registration for the same set replaces the first,
+// so a crash-restart does not duplicate the row. Returns the registered waiter.
+func RegisterRecoveryWaiter(d *Deps, w RecoveryWaiter) (*RecoveryWaiter, error) {
+	if w.SetID == "" || w.Preset == "" || w.ResetAt.IsZero() || w.RuntimePath == "" {
+		return nil, exitErr(ExitOperational, "invalid recovery waiter: missing required fields")
+	}
+	s, err := openDrainStore(d)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = s.Close() }()
+
+	if w.RegisteredAt.IsZero() {
+		w.RegisteredAt = time.Now().UTC()
+	}
+	if err := s.PutRecoveryWaiter(store.RecoveryWaiter{
+		SetID:        w.SetID,
+		Preset:       w.Preset,
+		ResetAt:      w.ResetAt,
+		RuntimePath:  w.RuntimePath,
+		Priority:     w.Priority,
+		RegisteredAt: w.RegisteredAt,
+	}); err != nil {
+		return nil, exitErr(ExitOperational, "register recovery waiter: %v", err)
+	}
+	return &w, nil
+}
+
+// DeregisterRecoveryWaiter removes the recovery waiter for one task set. A
+// missing row is not an error. Called on SIGINT during the wait loop or after
+// successful recovery.
+func DeregisterRecoveryWaiter(d *Deps, setID string) error {
+	if setID == "" {
+		return nil
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	defer func() { _ = s.Close() }()
+	return s.DeleteRecoveryWaiter(setID)
+}
+
+// GetRecoveryWaiter returns the recovery waiter for one task set, or nil when
+// no waiter is registered.
+func GetRecoveryWaiter(d *Deps, setID string) (*RecoveryWaiter, error) {
+	if setID == "" {
+		return nil, nil
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	defer func() { _ = s.Close() }()
+	w, err := s.GetRecoveryWaiter(setID)
+	if err != nil {
+		return nil, err
+	}
+	if w == nil {
+		return nil, nil
+	}
+	return &RecoveryWaiter{
+		SetID:        w.SetID,
+		Preset:       w.Preset,
+		ResetAt:      w.ResetAt,
+		RuntimePath:  w.RuntimePath,
+		Priority:     w.Priority,
+		RegisteredAt: w.RegisteredAt,
+	}, nil
+}
+
+// WaitForRecovery polls until the preset's cooldown elapses and a recovery turn
+// is acquired. It prints a dim status line with reset/cooldown timing during the
+// poll loop. SIGINT during the wait deregisters the waiter and returns
+// ExitInterrupted. The caller must have already parked the drain (released the
+// runtime lock) before calling this.
+//
+// Returns nil when recovery is ready (cooldown elapsed and turn acquired).
+// Returns an ExitError with ExitInterrupted on SIGINT.
+func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
+	if w == nil {
+		return exitErr(ExitOperational, "nil recovery waiter")
+	}
+
+	// Open the store once and reuse it for all checks to avoid connection contention.
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil {
+		return exitErr(ExitOperational, "open store for recovery wait: %v", err)
+	}
+	if !ok {
+		return exitErr(ExitOperational, "store not available for recovery wait")
+	}
+	defer func() { _ = s.Close() }()
+
+	// Install signal handler for SIGINT during the wait loop.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	// Poll interval: check every 30 seconds, or every 5 seconds if reset is
+	// imminent (within 5 minutes).
+	pollInterval := func() time.Duration {
+		if time.Until(w.ResetAt) < 5*time.Minute {
+			return 5 * time.Second
+		}
+		return 30 * time.Second
+	}
+
+	ticker := time.NewTicker(pollInterval())
+	defer ticker.Stop()
+
+	// Fast check interval for detecting external deregistration.
+	fastCheckInterval := 2 * time.Second
+	fastTicker := time.NewTicker(fastCheckInterval)
+	defer fastTicker.Stop()
+
+	for {
+		now := time.Now().UTC()
+		resetAt := w.ResetAt.UTC()
+
+		// Check if cooldown has elapsed.
+		if !now.Before(resetAt) {
+			// Cooldown elapsed. Try to acquire a recovery turn.
+			// For now, preset-agnostic: any waiter whose cooldown elapsed can
+			// proceed. Task 03 adds checkout-scoped gating.
+			acquired, err := acquireRecoveryTurnWithStore(s, w)
+			if err != nil {
+				return err
+			}
+			if acquired {
+				// Success: deregister the waiter and return ready.
+				_ = s.DeleteRecoveryWaiter(w.SetID)
+				return nil
+			}
+			// Turn not acquired yet (another waiter may have priority). Keep
+			// polling.
+		}
+
+		// Print status line.
+		waitDur := time.Until(resetAt)
+		if waitDur < 0 {
+			waitDur = 0
+		}
+		if out != nil {
+			out.line(ansiDim, "⏳ Waiting for quota recovery: %s resets at %s (in %s)",
+				w.Preset,
+				resetAt.Format("15:04:05"),
+				formatDuration(waitDur))
+		}
+
+		// Adjust poll interval if we're getting close.
+		ticker.Reset(pollInterval())
+
+		// Wait for next tick or signal.
+		select {
+		case <-fastTicker.C:
+			// Fast check: see if the waiter still exists in the store. If it was
+			// deregistered externally (e.g., by a test or another process),
+			// exit the wait loop immediately.
+			existing, err := s.GetRecoveryWaiter(w.SetID)
+			if err != nil {
+				return exitErr(ExitOperational, "check recovery waiter: %v", err)
+			}
+			if existing == nil {
+				if out != nil {
+					out.line(ansiYellow, "Recovery waiter deregistered externally")
+				}
+				return exitErr(ExitInterrupted, "recovery waiter deregistered")
+			}
+			// Continue waiting.
+		case <-ticker.C:
+			// Regular poll: print status and check if we can acquire recovery turn.
+			continue
+		case sig := <-sigCh:
+			_ = sig
+			// SIGINT: deregister and exit interrupted.
+			if out != nil {
+				out.line(ansiYellow, "Interrupted: deregistering recovery waiter")
+			}
+			_ = s.DeleteRecoveryWaiter(w.SetID)
+			return exitErr(ExitInterrupted, "interrupted during quota recovery wait")
+		case <-ctx.Done():
+			return exitErr(ExitInterrupted, "context cancelled during quota recovery wait")
+		}
+	}
+}
+
+// acquireRecoveryTurn attempts to acquire a recovery turn for the waiter.
+// Returns true when the turn is acquired and the caller can proceed to resume
+// the task. Returns false when the turn is not yet available.
+//
+// For now, this is preset-agnostic and checkout-independent: any waiter whose
+// cooldown has elapsed can proceed. Task 03 adds checkout-scoped gating (a
+// checkout gate hold that serializes recovery attempts on the same checkout).
+func acquireRecoveryTurn(d *Deps, w *RecoveryWaiter) (bool, error) {
+	now := time.Now().UTC()
+	resetAt := w.ResetAt.UTC()
+	
+	// Check if this waiter's cooldown has elapsed.
+	if now.Before(resetAt) {
+		return false, nil
+	}
+	
+	// Cooldown elapsed: acquire the turn.
+	return true, nil
+}
+
+// acquireRecoveryTurnWithStore is like acquireRecoveryTurn but takes an already-open
+// store to avoid connection contention when called in a tight loop.
+func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter) (bool, error) {
+	now := time.Now().UTC()
+	resetAt := w.ResetAt.UTC()
+	
+	// Check if this waiter's cooldown has elapsed.
+	if now.Before(resetAt) {
+		return false, nil
+	}
+	
+	// Cooldown elapsed: acquire the turn.
+	return true, nil
+}
+
+// parseTime parses a time string in RFC3339Nano format, returning the zero
+// value when the input is empty or unparseable.
+// formatDuration formats a duration as a human-readable string, e.g. "2h 15m"
+// or "45s".
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	hours := int(d.Hours())
+	minutes := int(d.Minutes()) % 60
+	return fmt.Sprintf("%dh %dm", hours, minutes)
+}

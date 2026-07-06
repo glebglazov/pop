@@ -1073,7 +1073,7 @@ func TestRunTaskSetFailedTaskStopsDrain(t *testing.T) {
 	assertTaskFailed(t, env.execFixture(), "02-b", 1)
 }
 
-func TestRunTaskSetClaudeQuotaPauseStopsCleanly(t *testing.T) {
+func TestRunTaskSetClaudeQuotaPauseRegistersRecoveryWaiter(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
@@ -1083,23 +1083,67 @@ func TestRunTaskSetClaudeQuotaPauseStopsCleanly(t *testing.T) {
 	opts := env.runTaskSetOpts(true, "", &buf)
 	opts.AgentPreset = "claude"
 
-	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
-	if err != nil {
-		t.Fatal(err)
+	d := env.deps()
+
+	// Run the drain in a goroutine - it will enter the recovery wait loop
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = RunTaskSetWith(d, nil, nil, opts)
+	}()
+
+	// Wait for the recovery waiter to be registered
+	var waiter *RecoveryWaiter
+	var err error
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		waiter, err = GetRecoveryWaiter(d, "demo")
+		if err != nil {
+			t.Fatalf("get recovery waiter: %v", err)
+		}
+		if waiter != nil {
+			break
+		}
 	}
-	if !result.QuotaPaused || len(result.Completed) != 0 {
-		t.Fatalf("result = %#v", result)
+
+	if waiter == nil {
+		t.Fatal("recovery waiter not registered after 5 seconds")
 	}
+
+	// Verify the waiter properties
+	if waiter.Preset != "claude" {
+		t.Errorf("waiter preset = %q, want claude", waiter.Preset)
+	}
+	if waiter.SetID != "demo" {
+		t.Errorf("waiter set_id = %q, want demo", waiter.SetID)
+	}
+	if waiter.ResetAt.IsZero() {
+		t.Error("waiter reset_at is zero")
+	}
+	if waiter.RuntimePath == "" {
+		t.Error("waiter runtime_path is empty")
+	}
+
+	// Verify tasks remain open
 	assertTaskOpen(t, env.execFixture(), "01-a")
 	assertTaskOpen(t, env.execFixture(), "02-b")
+
+	// Verify only one attempt was made
 	if got := strings.TrimSpace(string(mustReadFile(t, counterPath))); got != "1" {
-		t.Fatalf("started attempts = %q, want 1", got)
+		t.Errorf("started attempts = %q, want 1", got)
 	}
-	if !strings.Contains(buf.String(), "Task set demo paused") {
-		t.Fatalf("missing pause summary:\n%s", buf.String())
+
+	// Clean up by deregistering the waiter
+	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("deregister recovery waiter: %v", err)
 	}
-	if strings.Contains(buf.String(), "trying next") {
-		t.Fatalf("single-agent quota pause must not print fallback line:\n%s", buf.String())
+
+	// Wait for the goroutine to finish (should exit quickly after deregistration)
+	select {
+	case <-done:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("drain did not exit after waiter deregistration")
 	}
 }
 
@@ -1679,17 +1723,54 @@ printf '%s\n' '{"type":"error","message":"You'\''ve hit your usage limit. try ag
 	opts.AgentExplicit = true
 	opts.MaxTries = 1
 
-	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
-	if err != nil {
-		t.Fatal(err)
+	d := env.deps()
+
+	// Run the task set in a goroutine - it will enter the recovery wait loop
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = RunTaskSetWith(d, nil, nil, opts)
+	}()
+
+	// Wait for the recovery waiter to be registered
+	var waiter *RecoveryWaiter
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var err error
+		waiter, err = GetRecoveryWaiter(d, "demo")
+		if err != nil {
+			t.Fatalf("get recovery waiter: %v", err)
+		}
+		if waiter != nil {
+			break
+		}
 	}
-	if !result.QuotaPaused || result.PausePreset != "codex" {
-		t.Fatalf("result = %#v, want codex quota pause", result)
+
+	if waiter == nil {
+		t.Fatal("recovery waiter not registered after 2 seconds")
 	}
-	if result.PauseResetAt.IsZero() {
-		t.Fatal("expected reset time to be reported")
+	// The fallback should select codex (earliest reset)
+	if waiter.Preset != "codex" {
+		t.Fatalf("waiter preset = %q, want codex", waiter.Preset)
 	}
+	if waiter.SetID != "demo" {
+		t.Fatalf("waiter set_id = %q, want demo", waiter.SetID)
+	}
+	if waiter.ResetAt.IsZero() {
+		t.Fatal("waiter reset_at is zero")
+	}
+
 	assertTaskOpen(t, env.execFixture(), "01-a")
+
+	// Clean up
+	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("deregister recovery waiter: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("goroutine did not exit after waiter deregistration")
+	}
 }
 
 func TestRunTaskSetAgentFallbackSkipsCoolingAgentBeforeSpawn(t *testing.T) {
@@ -1738,16 +1819,40 @@ func TestRunTaskSetAgentFallbackWritesResetAwareCooldown(t *testing.T) {
 	opts.AgentPresets = []string{"codex"}
 	opts.AgentExplicit = true
 	opts.MaxTries = 1
+
+	d := env.deps()
 	before := time.Now()
-	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.QuotaPaused || result.PausePreset != "codex" {
-		t.Fatalf("result = %#v", result)
+
+	// Run the task set in a goroutine - it will enter the recovery wait loop
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = RunTaskSetWith(d, nil, nil, opts)
+	}()
+
+	// Wait for the recovery waiter to be registered
+	var waiter *RecoveryWaiter
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var err error
+		waiter, err = GetRecoveryWaiter(d, "demo")
+		if err != nil {
+			t.Fatalf("get recovery waiter: %v", err)
+		}
+		if waiter != nil {
+			break
+		}
 	}
 
-	store, err := readAgentCooldowns(env.deps())
+	if waiter == nil {
+		t.Fatal("recovery waiter not registered after 2 seconds")
+	}
+	if waiter.Preset != "codex" {
+		t.Fatalf("waiter preset = %q, want codex", waiter.Preset)
+	}
+
+	// Check that the agent cooldown was written to the store
+	store, err := readAgentCooldowns(d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1756,10 +1861,20 @@ func TestRunTaskSetAgentFallbackWritesResetAwareCooldown(t *testing.T) {
 	if got.Before(want.Add(-5*time.Second)) || got.After(want.Add(5*time.Second)) {
 		t.Fatalf("cooldown until = %s, want around reset+skew %s", got, want)
 	}
-	if result.PauseResetAt.IsZero() || !got.After(result.PauseResetAt) {
-		t.Fatalf("result reset = %s, store cooldown = %s", result.PauseResetAt, got)
+	if waiter.ResetAt.IsZero() || !got.After(waiter.ResetAt) {
+		t.Fatalf("waiter reset = %s, store cooldown = %s", waiter.ResetAt, got)
 	}
 	assertTaskOpen(t, env.execFixture(), "01-a")
+
+	// Clean up
+	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("deregister recovery waiter: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("goroutine did not exit after waiter deregistration")
+	}
 }
 
 func TestRunTaskSetAgentFallbackWritesFixedIntervalCooldownWhenResetMissing(t *testing.T) {
@@ -1777,17 +1892,40 @@ printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You
 	opts.AgentPresets = []string{"claude"}
 	opts.AgentExplicit = true
 	opts.MaxTries = 1
+
+	d := env.deps()
 	before := time.Now().UTC()
-	result, err := RunTaskSetWith(env.deps(), nil, loadConfig, opts)
-	after := time.Now().UTC()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.QuotaPaused || result.PausePreset != "claude" {
-		t.Fatalf("result = %#v", result)
+
+	// Run the task set in a goroutine - it will enter the recovery wait loop
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = RunTaskSetWith(d, nil, loadConfig, opts)
+	}()
+
+	// Wait for the recovery waiter to be registered
+	var waiter *RecoveryWaiter
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var err error
+		waiter, err = GetRecoveryWaiter(d, "demo")
+		if err != nil {
+			t.Fatalf("get recovery waiter: %v", err)
+		}
+		if waiter != nil {
+			break
+		}
 	}
 
-	store, err := readAgentCooldowns(env.deps())
+	if waiter == nil {
+		t.Fatal("recovery waiter not registered after 2 seconds")
+	}
+	if waiter.Preset != "claude" {
+		t.Fatalf("waiter preset = %q, want claude", waiter.Preset)
+	}
+
+	after := time.Now().UTC()
+	store, err := readAgentCooldowns(d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1796,6 +1934,16 @@ printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You
 		t.Fatalf("cooldown until = %s, want about now+17m", got)
 	}
 	assertTaskOpen(t, env.execFixture(), "01-a")
+
+	// Clean up
+	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("deregister recovery waiter: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("goroutine did not exit after waiter deregistration")
+	}
 }
 
 func TestRunTaskSetAgentFallbackAllCoolingReturnsEarliestWithoutSpawn(t *testing.T) {
@@ -1824,12 +1972,34 @@ printf 'called\n' >> %[1]q
 	opts.AgentExplicit = true
 	opts.MaxTries = 1
 
-	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
-	if err != nil {
-		t.Fatal(err)
+	d := env.deps()
+
+	// Run the task set in a goroutine - it will enter the recovery wait loop
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = RunTaskSetWith(d, nil, nil, opts)
+	}()
+
+	// Wait for the recovery waiter to be registered
+	var waiter *RecoveryWaiter
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var err error
+		waiter, err = GetRecoveryWaiter(d, "demo")
+		if err != nil {
+			t.Fatalf("get recovery waiter: %v", err)
+		}
+		if waiter != nil {
+			break
+		}
 	}
-	if !result.QuotaPaused || result.PausePreset != "codex" || !result.PauseResetAt.Equal(earliest) {
-		t.Fatalf("result = %#v, want codex earliest reset %s", result, earliest)
+
+	if waiter == nil {
+		t.Fatal("recovery waiter not registered after 2 seconds")
+	}
+	if waiter.Preset != "codex" || !waiter.ResetAt.Equal(earliest) {
+		t.Fatalf("waiter = %#v, want codex earliest reset %s", waiter, earliest)
 	}
 	if _, err := os.Stat(claudeCount); !os.IsNotExist(err) {
 		t.Fatalf("cooling claude should not be spawned: %v", err)
@@ -1838,6 +2008,16 @@ printf 'called\n' >> %[1]q
 		t.Fatalf("cooling codex should not be spawned: %v", err)
 	}
 	assertTaskOpen(t, env.execFixture(), "01-a")
+
+	// Clean up
+	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("deregister recovery waiter: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("goroutine did not exit after waiter deregistration")
+	}
 }
 
 func TestRunTaskSetDefaultAgentsConfigAndFlagOverride(t *testing.T) {

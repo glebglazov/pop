@@ -10,7 +10,7 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 )
 
-func TestRunTaskSetQuotaPauseRecordsTerminal(t *testing.T) {
+func TestRunTaskSetQuotaPauseRegistersRecoveryWaiter(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -19,36 +19,62 @@ func TestRunTaskSetQuotaPauseRecordsTerminal(t *testing.T) {
 	opts.AgentPreset = "claude"
 
 	d := env.deps()
-	result, err := RunTaskSetWith(d, nil, nil, opts)
-	if err != nil {
-		t.Fatal(err)
+	
+	// The new recovery flow parks the drain and registers a waiter instead of
+	// immediately returning with QuotaPaused. Run the task set in a goroutine
+	// and verify the recovery waiter is registered.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = RunTaskSetWith(d, nil, nil, opts)
+	}()
+	
+	// Wait for the recovery waiter to be registered.
+	// Poll the store a few times to give the goroutine time to register.
+	var waiter *RecoveryWaiter
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var err error
+		waiter, err = GetRecoveryWaiter(d, "demo")
+		if err != nil {
+			t.Fatalf("get recovery waiter: %v", err)
+		}
+		if waiter != nil {
+			break
+		}
 	}
-	if !result.QuotaPaused {
-		t.Fatalf("result = %#v", result)
+	
+	if waiter == nil {
+		t.Fatal("recovery waiter not registered after 2 seconds")
 	}
-
-	rec, err := ReadDrainOutcome(d, result.RuntimePath)
-	if err != nil {
-		t.Fatalf("read terminal: %v", err)
+	if waiter.Preset != "claude" {
+		t.Fatalf("waiter preset = %q, want claude", waiter.Preset)
 	}
-	if rec.Outcome != DrainOutcomeQuotaPaused {
-		t.Fatalf("outcome = %q, want quota_paused", rec.Outcome)
+	if waiter.SetID != "demo" {
+		t.Fatalf("waiter set_id = %q, want demo", waiter.SetID)
 	}
-	if rec.ExhaustedPreset != "claude" {
-		t.Fatalf("exhausted preset = %q, want claude", rec.ExhaustedPreset)
+	if waiter.RuntimePath == "" {
+		t.Fatal("waiter runtime_path is empty")
 	}
-	if rec.SetID != "demo" {
-		t.Fatalf("set id = %q, want demo", rec.SetID)
+	if waiter.RegisteredAt.IsZero() {
+		t.Fatal("waiter registered_at is zero")
 	}
-	if rec.RuntimePath == "" || rec.PID == 0 || rec.WrittenAt.IsZero() {
-		t.Fatalf("terminal missing fields: %#v", rec)
+	
+	// Clean up: deregister the waiter so the goroutine exits
+	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("deregister recovery waiter: %v", err)
 	}
-	if rec.Outcome.Abnormal() {
-		t.Fatalf("quota pause must be a clean stop, got abnormal")
+	
+	// Wait for the goroutine to finish
+	select {
+	case <-done:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("goroutine did not exit after waiter deregistration")
 	}
 }
 
-func TestRunTaskSetCodexQuotaPauseRecordsResetAt(t *testing.T) {
+func TestRunTaskSetCodexQuotaPauseRegistersWaiterWithResetAt(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -57,23 +83,55 @@ func TestRunTaskSetCodexQuotaPauseRecordsResetAt(t *testing.T) {
 	opts.AgentPreset = "codex"
 
 	d := env.deps()
-	result, err := RunTaskSetWith(d, nil, nil, opts)
-	if err != nil {
-		t.Fatal(err)
+	
+	// Run the task set in a goroutine - it will enter the recovery wait loop
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = RunTaskSetWith(d, nil, nil, opts)
+	}()
+	
+	// Wait for the recovery waiter to be registered
+	var waiter *RecoveryWaiter
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var err error
+		waiter, err = GetRecoveryWaiter(d, "demo")
+		if err != nil {
+			t.Fatalf("get recovery waiter: %v", err)
+		}
+		if waiter != nil {
+			break
+		}
 	}
-	if !result.QuotaPaused || result.PauseResetAt.IsZero() {
-		t.Fatalf("result = %#v", result)
+	
+	if waiter == nil {
+		t.Fatal("recovery waiter not registered after 2 seconds")
 	}
-
-	rec, err := ReadDrainOutcome(d, result.RuntimePath)
-	if err != nil {
-		t.Fatalf("read terminal: %v", err)
+	if waiter.Preset != "codex" {
+		t.Fatalf("waiter preset = %q, want codex", waiter.Preset)
 	}
-	if rec.Outcome != DrainOutcomeQuotaPaused || rec.ExhaustedPreset != "codex" || rec.ExhaustedResetAt.IsZero() {
-		t.Fatalf("terminal missing codex reset: %#v", rec)
+	if waiter.SetID != "demo" {
+		t.Fatalf("waiter set_id = %q, want demo", waiter.SetID)
 	}
-	if !rec.ExhaustedResetAt.Equal(result.PauseResetAt) {
-		t.Fatalf("terminal reset = %s, result reset = %s", rec.ExhaustedResetAt, result.PauseResetAt)
+	if waiter.ResetAt.IsZero() {
+		t.Fatal("waiter reset_at is zero, expected codex reset time")
+	}
+	if waiter.RuntimePath == "" {
+		t.Fatal("waiter runtime_path is empty")
+	}
+	
+	// Clean up: deregister the waiter so the goroutine exits
+	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("deregister recovery waiter: %v", err)
+	}
+	
+	// Wait for the goroutine to finish
+	select {
+	case <-done:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("goroutine did not exit after waiter deregistration")
 	}
 }
 

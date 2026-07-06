@@ -217,6 +217,24 @@ var migrations = []string{
 		PRIMARY KEY (repo, set_id, work_sha)
 	);
 	CREATE INDEX idx_verify_verdicts_repo_set ON verify_verdicts(repo, set_id);`,
+	// 11: recovery_waiters — the quota recovery wait registration (ADR-0100): when
+	// agent quota detection exhausts the fallback chain on a task attempt, instead
+	// of terminal-exit the drain parks, registers a waiter, and polls until the
+	// cooldown elapses and a recovery turn is acquired. The waiter claims the set
+	// against duplicate work (UNIQUE on set_id). Preset-agnostic recovery turn
+	// acquisition is handled in-memory by the coordinator; this table records only
+	// the wait registration so a crash can be reconciled (stale waiters cleared by
+	// dead-PID check on the associated drain, or by explicit deregistration on
+	// SIGINT). Priority mirrors the task-set registration priority for turn
+	// ordering when multiple waiters contend.
+	`CREATE TABLE recovery_waiters (
+		set_id        TEXT PRIMARY KEY,
+		preset        TEXT NOT NULL,
+		reset_at      TEXT NOT NULL,
+		runtime_path  TEXT NOT NULL,
+		priority      INTEGER NOT NULL DEFAULT 0,
+		registered_at TEXT NOT NULL
+	);`,
 }
 
 func (s *Store) migrate() error {

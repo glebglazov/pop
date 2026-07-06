@@ -540,13 +540,63 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			return result, execErr
 		}
 		if taskResult.QuotaPaused {
-			result.QuotaPaused = true
-			result.PauseReason = taskResult.PauseReason
-			result.PausePreset = taskResult.PausePreset
-			result.PauseResetAt = taskResult.PauseResetAt
-			result.Refresh = currentRefresh
-			printTaskSetSummary(out, result)
-			return result, nil
+			// Quota recovery wait (ADR-0100): instead of exiting with ExitQuotaPaused,
+			// park the drain, register a recovery waiter, and poll until the preset's
+			// cooldown elapses and a recovery turn is acquired. Both foreground and
+			// unattended drains enter the wait loop.
+
+			// Use the cooldown time if PauseResetAt is zero (agent didn't provide a parseable reset time)
+			resetAt := taskResult.PauseResetAt
+			if resetAt.IsZero() {
+				cooldowns, err := readAgentCooldowns(d)
+				if err == nil {
+					if entry, ok := cooldowns[taskResult.PausePreset]; ok {
+						resetAt = entry.ExhaustedUntil
+					}
+				}
+			}
+
+			// Park with quota_paused terminal, releasing the runtime lock (ADR-0067).
+			if drain != nil {
+				_ = drain.Finish(DrainOutcomeQuotaPaused, taskResult.PausePreset, false, resetAt)
+				drain = nil
+			}
+
+			// Register recovery waiter. Priority defaults to 0; the recovery coordinator
+			// orders waiters by priority DESC, registered_at ASC.
+			waiter, regErr := RegisterRecoveryWaiter(d, RecoveryWaiter{
+				SetID:        taskSetID,
+				Preset:       taskResult.PausePreset,
+				ResetAt:      resetAt,
+				RuntimePath:  runtimePath,
+				Priority:     0,
+				RegisteredAt: time.Now().UTC(),
+			})
+			if regErr != nil {
+				// Registration failed: fall back to the old behavior (exit with QuotaPaused).
+				result.QuotaPaused = true
+				result.PauseReason = taskResult.PauseReason
+				result.PausePreset = taskResult.PausePreset
+				result.PauseResetAt = taskResult.PauseResetAt
+				result.Refresh = currentRefresh
+				printTaskSetSummary(out, result)
+				return result, nil
+			}
+
+			// Wait for recovery (poll loop with SIGINT handling).
+			if waitErr := WaitForRecovery(d, waiter, outputFor(out)); waitErr != nil {
+				// SIGINT or other error during wait: the waiter is already deregistered
+				// by WaitForRecovery. Return the error (ExitInterrupted for SIGINT).
+				return result, waitErr
+			}
+
+			// Recovery ready: re-acquire the drain and continue the task loop. The
+			// same open task will be re-selected by SelectTaskInSet since it wasn't
+			// marked done/failed/skipped.
+			if err := ensureDrain(); err != nil {
+				return result, err
+			}
+			continue
 		}
 
 		result.Completed = append(result.Completed, taskResult)
