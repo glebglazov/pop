@@ -1,6 +1,8 @@
 package tasks
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -81,23 +83,23 @@ func TestGetRecoveryWaiter_NotFound(t *testing.T) {
 	}
 }
 
-func TestAcquireRecoveryTurn_PresetAgnostic(t *testing.T) {
+func TestAcquireRecoveryTurn_PresetAgnosticDifferentCheckouts(t *testing.T) {
 	d, _ := drainTestRepo(t)
-	
-	// Register two waiters with different presets
+
+	// Register two waiters with different presets on different checkouts.
 	waiter1 := RecoveryWaiter{
 		SetID:       "demo1",
 		Preset:      "claude",
-		ResetAt:     time.Now().Add(-time.Hour), // Already past
+		ResetAt:     time.Now().Add(-time.Hour),
 		RuntimePath: "/test/path1",
 	}
 	waiter2 := RecoveryWaiter{
 		SetID:       "demo2",
 		Preset:      "codex",
-		ResetAt:     time.Now().Add(-time.Hour), // Already past
+		ResetAt:     time.Now().Add(-time.Hour),
 		RuntimePath: "/test/path2",
 	}
-	
+
 	_, err := RegisterRecoveryWaiter(d, waiter1)
 	if err != nil {
 		t.Fatalf("RegisterRecoveryWaiter failed: %v", err)
@@ -106,22 +108,213 @@ func TestAcquireRecoveryTurn_PresetAgnostic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterRecoveryWaiter failed: %v", err)
 	}
-	
-	// Both should be able to acquire a turn (preset-agnostic)
+
 	acquired1, err := acquireRecoveryTurn(d, &waiter1)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn failed: %v", err)
 	}
 	if !acquired1 {
-		t.Error("waiter1 should acquire turn")
+		t.Error("waiter1 should acquire turn on its checkout")
 	}
-	
+
 	acquired2, err := acquireRecoveryTurn(d, &waiter2)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn failed: %v", err)
 	}
 	if !acquired2 {
-		t.Error("waiter2 should acquire turn")
+		t.Error("waiter2 should acquire turn on a different checkout")
+	}
+}
+
+func TestAcquireRecoveryTurn_PresetAgnosticOnePerCheckout(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	resetAt := time.Now().Add(-time.Hour)
+
+	waiter1 := RecoveryWaiter{
+		SetID:       "claude-set",
+		Preset:      "claude",
+		ResetAt:     resetAt,
+		RuntimePath: repo,
+		Priority:    5,
+	}
+	waiter2 := RecoveryWaiter{
+		SetID:       "codex-set",
+		Preset:      "codex",
+		ResetAt:     resetAt,
+		RuntimePath: repo,
+		Priority:    5,
+	}
+
+	_, err := RegisterRecoveryWaiter(d, waiter1)
+	if err != nil {
+		t.Fatalf("RegisterRecoveryWaiter waiter1: %v", err)
+	}
+	_, err = RegisterRecoveryWaiter(d, waiter2)
+	if err != nil {
+		t.Fatalf("RegisterRecoveryWaiter waiter2: %v", err)
+	}
+
+	acquired1, err := acquireRecoveryTurn(d, &waiter1)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn waiter1: %v", err)
+	}
+	acquired2, err := acquireRecoveryTurn(d, &waiter2)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn waiter2: %v", err)
+	}
+	if !acquired1 {
+		t.Fatal("first waiter on checkout should acquire turn")
+	}
+	if acquired2 {
+		t.Fatal("second waiter on same checkout must not acquire while turn is held")
+	}
+
+	if err := ReleaseRecoveryTurn(d, repo); err != nil {
+		t.Fatalf("ReleaseRecoveryTurn: %v", err)
+	}
+	if err := DeregisterRecoveryWaiter(d, waiter1.SetID); err != nil {
+		t.Fatalf("DeregisterRecoveryWaiter waiter1: %v", err)
+	}
+
+	acquired2, err = acquireRecoveryTurn(d, &waiter2)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn waiter2 after release: %v", err)
+	}
+	if !acquired2 {
+		t.Fatal("second waiter should acquire after turn is released")
+	}
+}
+
+func TestAcquireRecoveryTurn_PrioritySameCheckout(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	resetAt := time.Now().Add(-time.Hour)
+	now := time.Now().UTC()
+
+	low := RecoveryWaiter{
+		SetID:        "low",
+		Preset:       "claude",
+		ResetAt:      resetAt,
+		RuntimePath:  repo,
+		Priority:     0,
+		RegisteredAt: now.Add(-2 * time.Hour),
+	}
+	high := RecoveryWaiter{
+		SetID:        "high",
+		Preset:       "claude",
+		ResetAt:      resetAt,
+		RuntimePath:  repo,
+		Priority:     10,
+		RegisteredAt: now.Add(-1 * time.Hour),
+	}
+
+	if _, err := RegisterRecoveryWaiter(d, low); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter low: %v", err)
+	}
+	if _, err := RegisterRecoveryWaiter(d, high); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter high: %v", err)
+	}
+
+	acquiredLow, err := acquireRecoveryTurn(d, &low)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn low: %v", err)
+	}
+	acquiredHigh, err := acquireRecoveryTurn(d, &high)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn high: %v", err)
+	}
+	if acquiredLow {
+		t.Fatal("lower-priority waiter must not acquire before higher-priority waiter")
+	}
+	if !acquiredHigh {
+		t.Fatal("higher-priority waiter should acquire first")
+	}
+}
+
+func TestAcquireRecoveryTurn_FIFOEqualPriority(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	resetAt := time.Now().Add(-time.Hour)
+	now := time.Now().UTC()
+
+	first := RecoveryWaiter{
+		SetID:        "first",
+		Preset:       "claude",
+		ResetAt:      resetAt,
+		RuntimePath:  repo,
+		Priority:     5,
+		RegisteredAt: now.Add(-2 * time.Hour),
+	}
+	second := RecoveryWaiter{
+		SetID:        "second",
+		Preset:       "claude",
+		ResetAt:      resetAt,
+		RuntimePath:  repo,
+		Priority:     5,
+		RegisteredAt: now.Add(-1 * time.Hour),
+	}
+
+	if _, err := RegisterRecoveryWaiter(d, first); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter first: %v", err)
+	}
+	if _, err := RegisterRecoveryWaiter(d, second); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter second: %v", err)
+	}
+
+	acquiredSecond, err := acquireRecoveryTurn(d, &second)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn second: %v", err)
+	}
+	acquiredFirst, err := acquireRecoveryTurn(d, &first)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn first: %v", err)
+	}
+	if acquiredSecond {
+		t.Fatal("later-registered waiter must not jump ahead at equal priority")
+	}
+	if !acquiredFirst {
+		t.Fatal("earlier-registered waiter should acquire at equal priority")
+	}
+}
+
+func TestAcquireRecoveryTurn_DifferentCheckoutsParallel(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	path2 := filepath.Join(filepath.Dir(repo), "worktree-b")
+	if err := os.MkdirAll(path2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resetAt := time.Now().Add(-time.Hour)
+
+	waiterA := RecoveryWaiter{
+		SetID:       "set-a",
+		Preset:      "claude",
+		ResetAt:     resetAt,
+		RuntimePath: repo,
+		Priority:    0,
+	}
+	waiterB := RecoveryWaiter{
+		SetID:       "set-b",
+		Preset:      "claude",
+		ResetAt:     resetAt,
+		RuntimePath: path2,
+		Priority:    100,
+	}
+
+	if _, err := RegisterRecoveryWaiter(d, waiterA); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter set-a: %v", err)
+	}
+	if _, err := RegisterRecoveryWaiter(d, waiterB); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter set-b: %v", err)
+	}
+
+	acquiredA, err := acquireRecoveryTurn(d, &waiterA)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn set-a: %v", err)
+	}
+	acquiredB, err := acquireRecoveryTurn(d, &waiterB)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn set-b: %v", err)
+	}
+	if !acquiredA || !acquiredB {
+		t.Fatalf("both checkouts should acquire independently: a=%v b=%v", acquiredA, acquiredB)
 	}
 }
 
@@ -162,6 +355,7 @@ func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
 	if !acquired {
 		t.Fatal("recovery turn should be acquired after gate hold is released")
 	}
+	_ = ReleaseRecoveryTurn(d, repo)
 }
 
 func TestRegisterCheckoutGateHold(t *testing.T) {

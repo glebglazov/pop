@@ -369,7 +369,11 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				}, m, row.Status)
 				if verr != nil {
 					if qp, ok := AsVerifyQuotaPause(verr); ok {
-						regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &drain, taskSetID, qp.Preset, qp.ResetAt, runtimePath, out, ensureDrain)
+						priority := 0
+						if row := findRow(currentRefresh, taskSetID); row != nil {
+							priority = row.Priority
+						}
+						regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &drain, taskSetID, qp.Preset, qp.ResetAt, runtimePath, priority, out, ensureDrain)
 						if waitErr != nil {
 							return result, waitErr
 						}
@@ -571,7 +575,11 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			// park the drain, register a recovery waiter, and poll until the preset's
 			// cooldown elapses and a recovery turn is acquired. Both foreground and
 			// unattended drains enter the wait loop.
-			regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &drain, taskSetID, taskResult.PausePreset, taskResult.PauseResetAt, runtimePath, out, ensureDrain)
+			priority := 0
+			if row := findRow(currentRefresh, taskSetID); row != nil {
+				priority = row.Priority
+			}
+			regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &drain, taskSetID, taskResult.PausePreset, taskResult.PauseResetAt, runtimePath, priority, out, ensureDrain)
 			if waitErr != nil {
 				return result, waitErr
 			}

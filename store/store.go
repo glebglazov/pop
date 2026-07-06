@@ -221,9 +221,9 @@ var migrations = []string{
 	// agent quota detection exhausts the fallback chain on a task attempt, instead
 	// of terminal-exit the drain parks, registers a waiter, and polls until the
 	// cooldown elapses and a recovery turn is acquired. The waiter claims the set
-	// against duplicate work (UNIQUE on set_id). Preset-agnostic recovery turn
-	// acquisition is handled in-memory by the coordinator; this table records only
-	// the wait registration so a crash can be reconciled (stale waiters cleared by
+	// against duplicate work (UNIQUE on set_id). Recovery turn ordering and the
+	// per-checkout turn claim live in recovery_turns; this table records only the
+	// wait registration so a crash can be reconciled (stale waiters cleared by
 	// dead-PID check on the associated drain, or by explicit deregistration on
 	// SIGINT). Priority mirrors the task-set registration priority for turn
 	// ordering when multiple waiters contend.
@@ -244,6 +244,15 @@ var migrations = []string{
 		runtime_path  TEXT PRIMARY KEY,
 		set_id        TEXT NOT NULL,
 		registered_at TEXT NOT NULL
+	);`,
+	// 13: recovery_turns — checkout-scoped recovery turn claim (ADR-0100). At most
+	// one waiter may hold a turn per runtime path between grant and BeginDrain so
+	// parallel poll loops cannot both resume on the same checkout. Released when
+	// the owning process re-acquires the drain or abandons recovery.
+	`CREATE TABLE recovery_turns (
+		runtime_path TEXT PRIMARY KEY,
+		set_id       TEXT NOT NULL,
+		acquired_at  TEXT NOT NULL
 	);`,
 }
 

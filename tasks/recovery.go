@@ -100,6 +100,7 @@ func ParkAndWaitForQuotaRecovery(
 	setID, preset string,
 	resetAt time.Time,
 	runtimePath string,
+	priority int,
 	out io.Writer,
 	ensureDrain func() error,
 ) (registrationFailed bool, err error) {
@@ -122,7 +123,7 @@ func ParkAndWaitForQuotaRecovery(
 		Preset:       preset,
 		ResetAt:      resetAt,
 		RuntimePath:  runtimePath,
-		Priority:     0,
+		Priority:     priority,
 		RegisteredAt: time.Now().UTC(),
 	})
 	if regErr != nil {
@@ -134,8 +135,11 @@ func ParkAndWaitForQuotaRecovery(
 	}
 
 	if err := ensureDrain(); err != nil {
+		_ = ReleaseRecoveryTurn(d, runtimePath)
 		return false, err
 	}
+	_ = DeregisterRecoveryWaiter(d, setID)
+	_ = ReleaseRecoveryTurn(d, runtimePath)
 	return false, nil
 }
 
@@ -317,15 +321,13 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 		// Check if cooldown has elapsed.
 		if !now.Before(resetAt) {
 			// Cooldown elapsed. Try to acquire a recovery turn.
-			// For now, preset-agnostic: any waiter whose cooldown elapsed can
-			// proceed. Task 03 adds checkout-scoped gating.
-			acquired, err := acquireRecoveryTurnWithStore(s, w)
+			acquired, err := acquireRecoveryTurnWithStore(s, w, func(dr store.Drain) bool {
+				return drainProcessAlive(d, dr.PID, dr.ProcStart)
+			})
 			if err != nil {
 				return err
 			}
 			if acquired {
-				// Success: deregister the waiter and return ready.
-				_ = s.DeleteRecoveryWaiter(w.SetID)
 				return nil
 			}
 			// Turn not acquired yet (another waiter may have priority). Keep
@@ -393,28 +395,39 @@ func acquireRecoveryTurn(d *Deps, w *RecoveryWaiter) (bool, error) {
 		return false, nil
 	}
 	defer func() { _ = s.Close() }()
-	return acquireRecoveryTurnWithStore(s, w)
+	return acquireRecoveryTurnWithStore(s, w, func(dr store.Drain) bool {
+		return drainProcessAlive(d, dr.PID, dr.ProcStart)
+	})
 }
 
 // acquireRecoveryTurnWithStore is like acquireRecoveryTurn but takes an already-open
 // store to avoid connection contention when called in a tight loop.
-func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter) (bool, error) {
-	now := time.Now().UTC()
-	resetAt := w.ResetAt.UTC()
+func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter, isAlive func(store.Drain) bool) (bool, error) {
+	return s.TryAcquireRecoveryTurn(store.RecoveryWaiter{
+		SetID:        w.SetID,
+		Preset:       w.Preset,
+		ResetAt:      w.ResetAt,
+		RuntimePath:  w.RuntimePath,
+		Priority:     w.Priority,
+		RegisteredAt: w.RegisteredAt,
+	}, time.Now().UTC(), isAlive)
+}
 
-	if now.Before(resetAt) {
-		return false, nil
+// ReleaseRecoveryTurn drops the checkout-scoped recovery turn for one runtime
+// path. A missing row is not an error.
+func ReleaseRecoveryTurn(d *Deps, runtimePath string) error {
+	if runtimePath == "" {
+		return nil
 	}
-
-	hold, err := s.GetCheckoutGateHold(w.RuntimePath)
+	s, ok, err := openDrainStoreIfExists(d)
 	if err != nil {
-		return false, exitErr(ExitOperational, "check checkout gate hold: %v", err)
+		return err
 	}
-	if hold != nil {
-		return false, nil
+	if !ok {
+		return nil
 	}
-
-	return true, nil
+	defer func() { _ = s.Close() }()
+	return s.ReleaseRecoveryTurn(runtimePath)
 }
 
 // parseTime parses a time string in RFC3339Nano format, returning the zero

@@ -519,6 +519,7 @@ func TestRunTaskSetFailedGateBlocksRecoveryTurnOnSameCheckout(t *testing.T) {
 	if !acquired {
 		t.Fatal("recovery turn should be acquirable after gate hold is released")
 	}
+	_ = ReleaseRecoveryTurn(d, runtimePath)
 }
 
 // A whole-set drain parked at the Failed gate menu holds no Runtime execution
