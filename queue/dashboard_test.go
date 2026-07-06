@@ -893,6 +893,18 @@ func TestDashboardActionMenuAnchorsBelowAndFlipsAbove(t *testing.T) {
 		t.Fatal("menu should default below when height is unknown")
 	}
 
+	// dashboardMenuPlaceBelowTwoLine: each logical row consumes two physical
+	// lines, so the available space below the cursor is halved.
+	if !dashboardMenuPlaceBelowTwoLine(0, 6, 24) {
+		t.Fatal("two-line menu should render below a top-of-list cursor")
+	}
+	if dashboardMenuPlaceBelowTwoLine(8, 6, 24) {
+		t.Fatal("two-line menu should flip above a low cursor (each row is two lines)")
+	}
+	if !dashboardMenuPlaceBelowTwoLine(5, 6, 0) {
+		t.Fatal("two-line menu should default below when height is unknown")
+	}
+
 	rows := make([]DashboardRow, 20)
 	for i := range rows {
 		id := fmt.Sprintf("set-%02d", i)
@@ -4011,5 +4023,213 @@ func TestDashboardTwoLineClampsToBodyHeight(t *testing.T) {
 	}
 	if selected.SetID != rows[0].SetID {
 		t.Fatalf("selected = %q, want %q", selected.SetID, rows[0].SetID)
+	}
+}
+
+// TestDashboardMenuTwoLineOverlay verifies that opening the action menu (`a`)
+// on a narrow pane renders the table rows in two-line mode and anchors the menu
+// relative to the cursor's two-line block.
+func TestDashboardMenuTwoLineOverlay(t *testing.T) {
+	longID := strings.Repeat("a", 37)
+	rows := []DashboardRow{
+		{Project: "pop", Status: "READY", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{SetID: longID}},
+		{Project: "pop", Status: "DONE", Worktree: "main", cursorKey: "pop\x00bbb", SetRef: SetRef{SetID: "bbb"}},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 50, Height: 24})
+	m = updated.(QueueDashboard)
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(QueueDashboard)
+	if m.menu == nil {
+		t.Fatal("a did not open the action menu")
+	}
+
+	view := m.View().Content
+	lines := strings.Split(view, "\n")
+
+	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+		t.Fatalf("expected two-line mode at width 50 with a long set id")
+	}
+
+	// The long set id must appear on its own physical line (line 2 of its row).
+	idx := dashboardTestLineIndex(lines, longID)
+	if idx < 0 {
+		t.Fatalf("full set id %q missing from menu overlay:\n%s", longID, view)
+	}
+	// Line 1 of the same row must not contain the set id.
+	if strings.Contains(lines[idx-1], longID) {
+		t.Fatalf("row line 1 must not contain the set id:\n%s", view)
+	}
+
+	// The menu must be rendered with the "actions" caption.
+	if !strings.Contains(view, "actions") {
+		t.Fatalf("menu caption not rendered:\n%s", view)
+	}
+
+	// No rendered line may exceed the terminal width.
+	for i, line := range lines {
+		if lipgloss.Width(line) > m.width {
+			t.Fatalf("line %d exceeds terminal width (%d > %d): %q", i, lipgloss.Width(line), m.width, line)
+		}
+	}
+}
+
+// TestDashboardBindModalTwoLineOverlay verifies that the bind modal renders the
+// table above its body in two-line mode on a narrow pane without spilling past
+// the terminal width.
+func TestDashboardBindModalTwoLineOverlay(t *testing.T) {
+	longID := strings.Repeat("a", 37)
+	rows := []DashboardRow{
+		{Project: "pop", Status: "READY", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{SetID: longID}},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
+	m = updated.(QueueDashboard)
+
+	// Inject a bind modal directly so the test does not depend on filesystem/git.
+	m.bind = &dashboardBindModal{
+		row:   rows[0],
+		stage: dashboardBindStageWorktree,
+		list: newBindEntryList([]dashboardBindEntry{
+			{Label: "existing worktree"},
+			{Label: "create new"},
+		}),
+	}
+
+	view := m.View().Content
+	lines := strings.Split(view, "\n")
+
+	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+		t.Fatalf("expected two-line mode at width 50 with a long set id")
+	}
+
+	// The long set id must appear on its own physical line (line 2 of its row).
+	idx := dashboardTestLineIndex(lines, longID)
+	if idx < 0 {
+		t.Fatalf("full set id %q missing from bind modal overlay:\n%s", longID, view)
+	}
+	if strings.Contains(lines[idx-1], longID) {
+		t.Fatalf("row line 1 must not contain the set id:\n%s", view)
+	}
+
+	// No rendered line may exceed the terminal width (no horizontal spill).
+	for i, line := range lines {
+		if lipgloss.Width(line) > m.width {
+			t.Fatalf("line %d exceeds terminal width (%d > %d): %q", i, lipgloss.Width(line), m.width, line)
+		}
+	}
+
+	// The modal body must be rendered below the table.
+	if !strings.Contains(view, "Bind worktree") {
+		t.Fatalf("bind modal body not rendered:\n%s", view)
+	}
+}
+
+// TestDashboardDrainModalTwoLineOverlay verifies that the drain target modal
+// renders the table above its body in two-line mode on a narrow pane.
+func TestDashboardDrainModalTwoLineOverlay(t *testing.T) {
+	longID := strings.Repeat("a", 37)
+	rows := []DashboardRow{
+		{Project: "pop", Status: "READY", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{SetID: longID}},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
+	m = updated.(QueueDashboard)
+
+	m.drainPick = newDashboardDrainModal(rows[0], []dashboardDrainEntry{
+		{Label: "new managed worktree"},
+		{Label: "trunk"},
+	})
+
+	view := m.View().Content
+	lines := strings.Split(view, "\n")
+
+	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+		t.Fatalf("expected two-line mode at width 50 with a long set id")
+	}
+
+	idx := dashboardTestLineIndex(lines, longID)
+	if idx < 0 {
+		t.Fatalf("full set id %q missing from drain modal overlay:\n%s", longID, view)
+	}
+	if strings.Contains(lines[idx-1], longID) {
+		t.Fatalf("row line 1 must not contain the set id:\n%s", view)
+	}
+
+	for i, line := range lines {
+		if lipgloss.Width(line) > m.width {
+			t.Fatalf("line %d exceeds terminal width (%d > %d): %q", i, lipgloss.Width(line), m.width, line)
+		}
+	}
+
+	if !strings.Contains(view, "Drain target") {
+		t.Fatalf("drain modal body not rendered:\n%s", view)
+	}
+}
+
+// TestDashboardFilterReevaluatesTwoLineMode verifies that filter mode re-evaluates
+// two-line mode against the filtered row set: starting with a mix that triggers
+// two-line mode and filtering down to short ids deactivates it; clearing the
+// filter reactivates it.
+func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
+	longID := strings.Repeat("a", 37)
+	rows := []DashboardRow{
+		{Project: "pop", Status: "READY", Worktree: "main", cursorKey: "pop\x00short", SetRef: SetRef{SetID: "short"}},
+		{Project: "pop", Status: "READY", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{SetID: longID}},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	m = updated.(QueueDashboard)
+
+	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+		t.Fatalf("expected two-line mode initially because of the long set id")
+	}
+	if m.list.LinesPerItem() != 2 {
+		t.Fatalf("LinesPerItem = %d, want 2 before filter", m.list.LinesPerItem())
+	}
+
+	// Enter filter mode and type a query that matches only the short id.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(QueueDashboard)
+	if !m.filterMode {
+		t.Fatal("/ did not enter filter mode")
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	m = updated.(QueueDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	m = updated.(QueueDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
+	m = updated.(QueueDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	m = updated.(QueueDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
+	m = updated.(QueueDashboard)
+
+	if len(m.snap.Rows) != 1 {
+		t.Fatalf("filtered rows = %d, want 1", len(m.snap.Rows))
+	}
+	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+		t.Fatalf("expected single-line mode after filtering to short id")
+	}
+
+	// A render must update LinesPerItem to match the filtered rows.
+	_ = m.View()
+	if m.list.LinesPerItem() != 1 {
+		t.Fatalf("LinesPerItem = %d, want 1 after filtering to short id", m.list.LinesPerItem())
+	}
+
+	// Clear the filter: two-line mode must return because the long id is back.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(QueueDashboard)
+	if m.filterMode {
+		t.Fatal("esc did not clear filter mode")
+	}
+	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+		t.Fatalf("expected two-line mode after clearing filter")
+	}
+	_ = m.View()
+	if m.list.LinesPerItem() != 2 {
+		t.Fatalf("LinesPerItem = %d, want 2 after clearing filter", m.list.LinesPerItem())
 	}
 }

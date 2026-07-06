@@ -2768,11 +2768,11 @@ func (m QueueDashboard) viewWithModal() string {
 	}
 	switch {
 	case m.bind != nil:
-		renderDashboardBindModal(&body, m.bind, avail)
+		renderDashboardBindModal(&body, m.bind, avail, m.width)
 	case m.drainPick != nil:
-		renderDashboardDrainModal(&body, m.drainPick, avail)
+		renderDashboardDrainModal(&body, m.drainPick, avail, m.width)
 	case m.abandon != nil:
-		renderDashboardAbandonModal(&body, m.abandon)
+		renderDashboardAbandonModal(&body, m.abandon, m.width)
 	}
 	return body.String()
 }
@@ -3159,8 +3159,9 @@ func halfPageDelta(pageSize int) int {
 // writeModalListRows renders a modal list's scroll window: it sizes the list to
 // listH rows (or, when listH is non-positive, to its full length so the caller's
 // "don't clamp" mode renders every row) and writes the rows the List returns,
-// including its cursor/pad prefix column.
-func writeModalListRows[T any](w io.Writer, list *ui.List[T], listH int) {
+// including its cursor/pad prefix column. Each row is truncated to width so the
+// modal never spills past the terminal edge.
+func writeModalListRows[T any](w io.Writer, list *ui.List[T], listH, width int) {
 	if list == nil {
 		return
 	}
@@ -3169,48 +3170,48 @@ func writeModalListRows[T any](w io.Writer, list *ui.List[T], listH int) {
 	}
 	list.Resize(listH)
 	for _, line := range list.VisibleRows() {
-		fmt.Fprintln(w, line)
+		fmt.Fprintln(w, ui.TruncateString(line, width))
 	}
 }
 
-func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal, avail int) {
+func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal, avail, width int) {
 	if modal == nil {
 		return
 	}
-	fmt.Fprintln(w, "Bind worktree")
+	fmt.Fprintln(w, ui.TruncateString("Bind worktree", width))
 	if modal.loading {
-		fmt.Fprintln(w, "  loading...")
+		fmt.Fprintln(w, ui.TruncateString("  loading...", width))
 		return
 	}
 	switch modal.stage {
 	case dashboardBindStageWorktree:
 		// Chrome above/below the list: the "Bind worktree" title and the hint.
-		writeModalListRows(w, modal.list, modalListHeight(avail, 2))
-		fmt.Fprint(w, ui.HintStyle.Render("enter select · esc cancel"))
+		writeModalListRows(w, modal.list, modalListHeight(avail, 2), width)
+		fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter select · esc cancel", width)))
 	case dashboardBindStageBaseRef:
-		fmt.Fprintln(w, "Base ref")
+		fmt.Fprintln(w, ui.TruncateString("Base ref", width))
 		// Chrome: the title, the "Base ref" caption, and the hint.
-		writeModalListRows(w, modal.list, modalListHeight(avail, 3))
-		fmt.Fprint(w, ui.HintStyle.Render("enter select · esc cancel"))
+		writeModalListRows(w, modal.list, modalListHeight(avail, 3), width)
+		fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter select · esc cancel", width)))
 	case dashboardBindStageName:
-		fmt.Fprintf(w, "Base: %s\n", modal.baseRef)
-		fmt.Fprintf(w, "Name: %s\n", modal.name)
-		fmt.Fprint(w, ui.HintStyle.Render("enter create · esc cancel"))
+		fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Base: %s", modal.baseRef), width))
+		fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Name: %s", modal.name), width))
+		fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter create · esc cancel", width)))
 	}
 }
 
-func renderDashboardDrainModal(w io.Writer, modal *dashboardDrainModal, avail int) {
+func renderDashboardDrainModal(w io.Writer, modal *dashboardDrainModal, avail, width int) {
 	if modal == nil {
 		return
 	}
-	fmt.Fprintf(w, "Drain target for %s\n", modal.row.SetID)
+	fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Drain target for %s", modal.row.SetID), width))
 	if modal.loading {
-		fmt.Fprintln(w, "  draining...")
+		fmt.Fprintln(w, ui.TruncateString("  draining...", width))
 		return
 	}
 	// Chrome above/below the list: the title line and the hint.
-	writeModalListRows(w, modal.list, modalListHeight(avail, 2))
-	fmt.Fprint(w, ui.HintStyle.Render("enter drain · esc cancel"))
+	writeModalListRows(w, modal.list, modalListHeight(avail, 2), width)
+	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter drain · esc cancel", width)))
 }
 
 // modalListHeight derives a modal list's scroll-window height from the body
@@ -3228,17 +3229,17 @@ func modalListHeight(avail, chrome int) int {
 	return h
 }
 
-func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal) {
+func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, width int) {
 	if modal == nil {
 		return
 	}
-	fmt.Fprintf(w, "Unbind worktree for %s\n", modal.row.SetID)
+	fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Unbind worktree for %s", modal.row.SetID), width))
 	if modal.loading {
-		fmt.Fprintln(w, "  unbinding...")
+		fmt.Fprintln(w, ui.TruncateString("  unbinding...", width))
 		return
 	}
-	fmt.Fprintln(w, "This releases the binding without integrating. Task statuses are unchanged.")
-	fmt.Fprint(w, ui.HintStyle.Render("enter/y confirm · n/esc cancel"))
+	fmt.Fprintln(w, ui.TruncateString("This releases the binding without integrating. Task statuses are unchanged.", width))
+	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter/y confirm · n/esc cancel", width)))
 }
 
 func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
@@ -3321,7 +3322,7 @@ func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, curso
 			prefix = "  "
 		}
 		line1 := ui.TruncateString(prefix+dashboardTwoLineRowLine1(row, line1Widths), width)
-		line2 := "  " + dashboardTwoLineRowLine2(row, singleWidths)
+		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(row, singleWidths), width)
 		fmt.Fprintf(w, "%s\n", line1)
 		fmt.Fprintf(w, "%s\n", line2)
 		if menu != nil && i == cursor && placeBelow {
