@@ -1225,6 +1225,33 @@ func TestRunTaskSetFailedReentryNonInteractiveFallsBack(t *testing.T) {
 	}
 }
 
+// Re-entering an already-Failed set with an open sibling must land on the
+// Failed gate for the failed task and must not advance to the open sibling.
+func TestRunTaskSetFailedReentryStopsBeforeOpenSibling(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{summary: "unused"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
+	opts.TaskSetOverride = "demo"
+
+	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+
+	out := buf.String()
+	if !strings.Contains(out, "pop tasks open demo/01-a.md") {
+		t.Fatalf("static advice missing reset hint for failed task:\n%s", out)
+	}
+	if strings.Contains(out, "Running task demo/02-b") {
+		t.Fatalf("must not run the open sibling 02-b:\n%s", out)
+	}
+	assertTaskFailed(t, env.execFixture(), "01-a", 3)
+	assertTaskOpen(t, env.execFixture(), "02-b")
+}
+
 // Re-run (empty input selects the default) resets the failed task and retries
 // it in the same invocation, with no second AFK consent prompt.
 func TestRunTaskSetFailedGateRerunRetriesInProcess(t *testing.T) {

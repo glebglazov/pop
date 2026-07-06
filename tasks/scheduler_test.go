@@ -124,6 +124,22 @@ func TestSelectTaskFailedTaskSetRejected(t *testing.T) {
 	}
 }
 
+func TestSelectTaskInSetRoutesToFailedTaskOverOpenSibling(t *testing.T) {
+	refresh := &RefreshResult{
+		Rows: []Row{{ID: "demo", Status: StatusFailed, Priority: 0}},
+		Manifests: map[string]*Manifest{
+			"demo": {Stem: "demo", Valid: true, Tasks: []Task{
+				{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "failed"},
+				{ID: "02-b", File: "02-b.md", Type: "AFK", Status: "open"},
+			}},
+		},
+	}
+	_, err := SelectTaskInSet(refresh, "demo")
+	if err == nil || !strings.Contains(err.Error(), "failed task \"01-a\"") {
+		t.Fatalf("expected failed-task routing error, got %v", err)
+	}
+}
+
 func TestSelectTaskSetExplicitHumanBlockedAttendable(t *testing.T) {
 	refresh := &RefreshResult{
 		Rows: []Row{

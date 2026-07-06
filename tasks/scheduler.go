@@ -115,11 +115,16 @@ func selectExplicitTaskSet(refresh *RefreshResult, taskSetID string) (string, er
 }
 
 // SelectTaskInSet chooses the first eligible AFK task in manifest-array order
-// for one Task set.
+// for one Task set. When the set already contains a failed task, selection
+// routes to the Failed gate instead of advancing to an open sibling, so a
+// set-wide failure is a hard stop until the human disposes of it.
 func SelectTaskInSet(refresh *RefreshResult, taskSetID string) (*Selection, error) {
 	m := refresh.Manifests[taskSetID]
 	if m == nil {
 		return nil, exitErr(ExitNoRunnable, "Task set %q has no task manifest", taskSetID)
+	}
+	if failed := FailedTask(m); failed != nil {
+		return nil, exitErr(ExitNoRunnable, "task set %q has failed task %q", taskSetID, failed.ID)
 	}
 	return firstEligibleTask(taskSetID, m)
 }
