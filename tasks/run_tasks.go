@@ -368,6 +368,22 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					runVerifier: opts.verifyRunner,
 				}, m, row.Status)
 				if verr != nil {
+					if qp, ok := AsVerifyQuotaPause(verr); ok {
+						regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &drain, taskSetID, qp.Preset, qp.ResetAt, runtimePath, out, ensureDrain)
+						if waitErr != nil {
+							return result, waitErr
+						}
+						if regFailed {
+							result.QuotaPaused = true
+							result.PauseReason = qp.Reason
+							result.PausePreset = qp.Preset
+							result.PauseResetAt = qp.ResetAt
+							result.Refresh = currentRefresh
+							printTaskSetSummary(out, result)
+							return result, nil
+						}
+						continue
+					}
 					return result, verr
 				}
 				if effective == StatusVerifyFailed {
@@ -555,36 +571,11 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			// park the drain, register a recovery waiter, and poll until the preset's
 			// cooldown elapses and a recovery turn is acquired. Both foreground and
 			// unattended drains enter the wait loop.
-
-			// Use the cooldown time if PauseResetAt is zero (agent didn't provide a parseable reset time)
-			resetAt := taskResult.PauseResetAt
-			if resetAt.IsZero() {
-				cooldowns, err := readAgentCooldowns(d)
-				if err == nil {
-					if entry, ok := cooldowns[taskResult.PausePreset]; ok {
-						resetAt = entry.ExhaustedUntil
-					}
-				}
+			regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &drain, taskSetID, taskResult.PausePreset, taskResult.PauseResetAt, runtimePath, out, ensureDrain)
+			if waitErr != nil {
+				return result, waitErr
 			}
-
-			// Park with quota_paused terminal, releasing the runtime lock (ADR-0067).
-			if drain != nil {
-				_ = drain.Finish(DrainOutcomeQuotaPaused, taskResult.PausePreset, false, resetAt)
-				drain = nil
-			}
-
-			// Register recovery waiter. Priority defaults to 0; the recovery coordinator
-			// orders waiters by priority DESC, registered_at ASC.
-			waiter, regErr := RegisterRecoveryWaiter(d, RecoveryWaiter{
-				SetID:        taskSetID,
-				Preset:       taskResult.PausePreset,
-				ResetAt:      resetAt,
-				RuntimePath:  runtimePath,
-				Priority:     0,
-				RegisteredAt: time.Now().UTC(),
-			})
-			if regErr != nil {
-				// Registration failed: fall back to the old behavior (exit with QuotaPaused).
+			if regFailed {
 				result.QuotaPaused = true
 				result.PauseReason = taskResult.PauseReason
 				result.PausePreset = taskResult.PausePreset
@@ -592,20 +583,6 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				result.Refresh = currentRefresh
 				printTaskSetSummary(out, result)
 				return result, nil
-			}
-
-			// Wait for recovery (poll loop with SIGINT handling).
-			if waitErr := WaitForRecovery(d, waiter, outputFor(out)); waitErr != nil {
-				// SIGINT or other error during wait: the waiter is already deregistered
-				// by WaitForRecovery. Return the error (ExitInterrupted for SIGINT).
-				return result, waitErr
-			}
-
-			// Recovery ready: re-acquire the drain and continue the task loop. The
-			// same open task will be re-selected by SelectTaskInSet since it wasn't
-			// marked done/failed/skipped.
-			if err := ensureDrain(); err != nil {
-				return result, err
 			}
 			continue
 		}

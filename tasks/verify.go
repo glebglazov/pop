@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -12,6 +13,56 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/store"
 )
+
+// VerifyQuotaPause reports that every configured Verifier agent was exhausted
+// by Agent quota pause with no verdict rendered (ADR-0100).
+type VerifyQuotaPause struct {
+	Preset  string
+	ResetAt time.Time
+	Reason  string
+}
+
+type verifyQuotaPauseError struct {
+	VerifyQuotaPause
+}
+
+func (e *verifyQuotaPauseError) Error() string {
+	return fmt.Sprintf("verifier quota paused: %s", e.Preset)
+}
+
+func newVerifyQuotaPause(pause VerifyQuotaPause) error {
+	return &verifyQuotaPauseError{VerifyQuotaPause: pause}
+}
+
+// AsVerifyQuotaPause reports whether err is a Verifier quota pause.
+func AsVerifyQuotaPause(err error) (*VerifyQuotaPause, bool) {
+	var pause *verifyQuotaPauseError
+	if errors.As(err, &pause) {
+		return &pause.VerifyQuotaPause, true
+	}
+	return nil, false
+}
+
+func earliestVerifyQuotaPause(pauses []VerifyQuotaPause) VerifyQuotaPause {
+	var best *VerifyQuotaPause
+	for i := range pauses {
+		p := &pauses[i]
+		if best == nil {
+			best = p
+			continue
+		}
+		if p.ResetAt.IsZero() {
+			continue
+		}
+		if best.ResetAt.IsZero() || p.ResetAt.Before(best.ResetAt) {
+			best = p
+		}
+	}
+	if best == nil {
+		return VerifyQuotaPause{}
+	}
+	return *best
+}
 
 // Verdict is the three-way Verify verdict (ADR-0086): the cached judgment an
 // independent Verifier agent renders over a Task set's completed AFK work.
@@ -217,6 +268,9 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 	}
 	raw, err := run(prompt)
 	if err != nil {
+		if _, ok := AsVerifyQuotaPause(err); ok {
+			return nil, err
+		}
 		return nil, err
 	}
 
@@ -450,7 +504,15 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 		return "", exitErr(ExitSetup, "%v", err)
 	}
 
-	var lastRaw string
+	quotaRetryAfter, err := resolveAgentQuotaRetryAfter(cfg)
+	if err != nil {
+		return "", exitErr(ExitSetup, "%v", err)
+	}
+
+	var (
+		lastRaw     string
+		quotaPauses []VerifyQuotaPause
+	)
 	for _, agentSpec := range nonEmptyAgentSpecs(sel.Agents, DefaultAgentPreset) {
 		preset, err := AgentPresetName(agentSpec)
 		if err != nil {
@@ -496,6 +558,15 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 			// Quota fall-through: a paused agent renders no verdict, so try the next.
 			if normalized.QuotaPause != nil {
 				_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeQuotaPaused, "", exitCode, "")
+				pause := *normalized.QuotaPause
+				resetAt := agentQuotaResetAt(preset, pause.Reason, time.Now())
+				until := agentQuotaCooldownUntil(resetAt, time.Now(), quotaRetryAfter)
+				_ = updateAgentCooldown(d, preset, until)
+				quotaPauses = append(quotaPauses, VerifyQuotaPause{
+					Preset:  preset,
+					ResetAt: resetAt,
+					Reason:  pause.Reason,
+				})
 				if out != nil {
 					outputFor(out).line(ansiDim, "   Verifier agent %s quota-paused; trying next", preset)
 				}
@@ -528,8 +599,11 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 			}
 		}
 	}
-	// Every configured agent was unavailable, quota-paused, or exhausted: return
-	// the last invocation output when present so ParseVerdict can surface why.
+	// Every configured agent was unavailable, quota-paused, or exhausted.
+	if len(quotaPauses) > 0 && strings.TrimSpace(lastRaw) == "" {
+		return "", newVerifyQuotaPause(earliestVerifyQuotaPause(quotaPauses))
+	}
+	// Return the last invocation output when present so ParseVerdict can surface why.
 	return lastRaw, nil
 }
 

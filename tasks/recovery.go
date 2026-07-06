@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -87,7 +88,57 @@ func GetCheckoutGateHold(d *Deps, runtimePath string) (*CheckoutGateHold, error)
 	}, nil
 }
 
-// RecoveryWaiter is a registered quota-recovery wait for a task set. When an
+// ParkAndWaitForQuotaRecovery parks the drain with quota_paused, registers a
+// recovery waiter, polls until the preset's cooldown elapses and a recovery turn
+// is acquired, then re-acquires the drain via ensureDrain. Returns
+// (registrationFailed, err): when registrationFailed is true the caller should
+// fall back to the legacy quota-paused exit; err is non-nil on wait/interrupt
+// failures or when ensureDrain refuses.
+func ParkAndWaitForQuotaRecovery(
+	d *Deps,
+	drain **DrainHandle,
+	setID, preset string,
+	resetAt time.Time,
+	runtimePath string,
+	out io.Writer,
+	ensureDrain func() error,
+) (registrationFailed bool, err error) {
+	if resetAt.IsZero() {
+		cooldowns, readErr := readAgentCooldowns(d)
+		if readErr == nil {
+			if entry, ok := cooldowns[preset]; ok {
+				resetAt = entry.ExhaustedUntil
+			}
+		}
+	}
+
+	if *drain != nil {
+		_ = (*drain).Finish(DrainOutcomeQuotaPaused, preset, false, resetAt)
+		*drain = nil
+	}
+
+	waiter, regErr := RegisterRecoveryWaiter(d, RecoveryWaiter{
+		SetID:        setID,
+		Preset:       preset,
+		ResetAt:      resetAt,
+		RuntimePath:  runtimePath,
+		Priority:     0,
+		RegisteredAt: time.Now().UTC(),
+	})
+	if regErr != nil {
+		return true, nil
+	}
+
+	if waitErr := WaitForRecovery(d, waiter, outputFor(out)); waitErr != nil {
+		return false, waitErr
+	}
+
+	if err := ensureDrain(); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 // agent's quota is exhausted during a task attempt, instead of exiting with
 // ExitQuotaPaused, the drain parks, registers a waiter, and polls until the
 // preset's cooldown elapses and a recovery turn is acquired (ADR-0100).

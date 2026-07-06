@@ -542,6 +542,47 @@ func TestVerifyResolvedSetCacheHitWritesNoRun(t *testing.T) {
 	}
 }
 
+func TestRunConfiguredVerifierAllAgentsQuotaPausedReturnsQuotaPause(t *testing.T) {
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"error","message":"You've hit your usage limit. try again at 11:59 PM."}`,
+		},
+	}
+	d := &Deps{
+		FS:       deps.NewRealFileSystem(),
+		Git:      stubGit("sha1\n", "", ""),
+		LookPath: func(string) (string, error) { return "/bin/codex", nil },
+		Runner:   runner,
+	}
+
+	_, err := runConfiguredVerifier(d, nil, verifierSelection{
+		Agents: []string{"codex"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	if err == nil {
+		t.Fatal("expected verifier quota pause error")
+	}
+	qp, ok := AsVerifyQuotaPause(err)
+	if !ok {
+		t.Fatalf("expected VerifyQuotaPause, got %v", err)
+	}
+	if qp.Preset != "codex" {
+		t.Fatalf("preset = %q, want codex", qp.Preset)
+	}
+	if qp.ResetAt.IsZero() {
+		t.Fatal("expected non-zero reset time")
+	}
+
+	s, err := openDrainStore(d)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+	if v, err := s.GetVerifyVerdict("/repo/.git", "demo", "sha1"); err != nil || v != nil {
+		t.Fatalf("quota pause must not persist a verdict: v=%+v err=%v", v, err)
+	}
+}
+
 func verifyRetryDeps(t *testing.T, runner CommandRunner) *Deps {
 	t.Helper()
 	return &Deps{

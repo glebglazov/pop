@@ -600,3 +600,81 @@ func TestVerifyEnabledGate(t *testing.T) {
 		t.Fatal("enabled=true should be enabled")
 	}
 }
+
+// TestDrainVerifyPhaseQuotaPausePropagates: when every Verifier agent is
+// quota-paused, the phase returns a quota pause error without persisting a
+// NEEDS-HUMAN verdict.
+func TestDrainVerifyPhaseQuotaPausePropagates(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
+	_, _, err := drainVerifyPhase(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
+		runVerifier: func(string) (string, error) {
+			return "", newVerifyQuotaPause(VerifyQuotaPause{
+				Preset:  "claude",
+				ResetAt: time.Now().Add(-time.Hour),
+				Reason:  "quota exhausted",
+			})
+		},
+	}, m, StatusDone)
+	if err == nil {
+		t.Fatal("expected quota pause error")
+	}
+	if _, ok := AsVerifyQuotaPause(err); !ok {
+		t.Fatalf("expected VerifyQuotaPause, got %v", err)
+	}
+	s, ok, storeErr := openDrainStoreIfExists(d)
+	if storeErr != nil {
+		t.Fatalf("open store: %v", storeErr)
+	}
+	if ok {
+		defer func() { _ = s.Close() }()
+		if v, err := s.GetVerifyVerdict("/repo/.git", "demo", "sha1"); err != nil || v != nil {
+			t.Fatalf("quota pause must not store a verdict: v=%+v err=%v", v, err)
+		}
+	}
+}
+
+// TestRunTaskSetVerifyQuotaPauseRecoversAndCompletes: verifier quota exhaustion
+// enters recovery wait; after the cooldown elapses the drain re-enters at verify
+// only and can complete without re-running finished tasks.
+func TestRunTaskSetVerifyQuotaPauseRecoversAndCompletes(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", openAFKSet())
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+
+	calls := 0
+	verify := func(string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "", newVerifyQuotaPause(VerifyQuotaPause{
+				Preset:  "claude",
+				ResetAt: time.Now().Add(-time.Hour),
+				Reason:  "verifier quota exhausted",
+			})
+		}
+		return "VERDICT: PASS\n", nil
+	}
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	opts.verifyRunner = verify
+
+	result, err := RunTaskSetWith(d, nil, func(string) (*config.Config, error) {
+		return verifyEnabledConfig(), nil
+	}, opts)
+	if err != nil {
+		t.Fatalf("RunTaskSetWith: %v", err)
+	}
+	if !result.TaskSetDone {
+		t.Fatalf("result = %+v, want TaskSetDone", result)
+	}
+	if calls != 2 {
+		t.Fatalf("verifier calls = %d, want 2 (quota pause then resume)", calls)
+	}
+	repo, _, head := runtimeHead(t, d, env.root)
+	if stored := readStoredVerdict(t, d, repo, "demo", head); stored == nil || stored.Verdict != "PASS" {
+		t.Fatalf("stored verdict = %+v, want PASS", stored)
+	}
+}
