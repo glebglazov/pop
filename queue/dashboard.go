@@ -630,7 +630,7 @@ func staticProjectPath(st dashboardRepoStatic) string {
 func dashboardStatus(row tasks.Row) string {
 	label := tasks.StatusLabel(row)
 	if row.VerifiedAtSHA != "" {
-		suffix := lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Render("verified @ " + row.VerifiedAtSHA)
+		suffix := dashboardVerifiedAtStyle.Render("verified @ " + row.VerifiedAtSHA)
 		label += " · " + suffix
 	}
 	return label
@@ -647,6 +647,10 @@ const (
 
 // dashboardManagedWtStyle colors the [managed wt] destination badge.
 var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+
+// dashboardVerifiedAtStyle colors the immunized "verified @ <shortSHA>" suffix
+// (same ANSI yellow as pop tasks status Details output).
+var dashboardVerifiedAtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 
 type dashboardWorktreeView struct {
 	label       string
@@ -1365,32 +1369,42 @@ func dashboardTwoLineMode(rows []DashboardRow, termWidth int) bool {
 }
 
 // dashboardTwoLineHeaders returns the line-1 column headers for two-line mode:
-// TASK SET (the "PROJECT · SETID" identity), WORKTREE, DRAIN. STATUS is rendered
-// alone on line 2 (see dashboardTwoLineStatusHeader).
+// PROJECT, TASK SET, WORKTREE, DRAIN. STATUS is rendered on line 2, indented to
+// sit under the TASK SET column (see dashboardTwoLineStatusHeader).
 func dashboardTwoLineHeaders() []string {
-	return []string{"TASK SET", "WORKTREE", "DRAIN"}
+	return []string{"PROJECT", "TASK SET", "WORKTREE", "DRAIN"}
 }
 
-// dashboardTwoLineStatusHeader is the line-2 header label. STATUS occupies the
-// second physical line of every two-line row by itself.
-func dashboardTwoLineStatusHeader() string {
-	return "STATUS"
-}
+// Line-1 column indices for two-line mode.
+const (
+	dashboardTwoLineColProject = iota
+	dashboardTwoLineColSetID
+	dashboardTwoLineColWorktree
+	dashboardTwoLineColDrain
+)
 
-// dashboardTwoLineIdentity renders the line-1 identity cell as "PROJECT · SETID",
-// falling back to the bare set id when the row has no project.
-func dashboardTwoLineIdentity(row DashboardRow) string {
-	if row.Project == "" {
-		return row.SetID
+// dashboardTwoLineStatusIndent is the leading padding for the line-2 STATUS cell
+// so it aligns under the TASK SET column, past the PROJECT column and its
+// separator.
+func dashboardTwoLineStatusIndent(line1Widths []int) int {
+	if len(line1Widths) <= dashboardTwoLineColProject {
+		return 0
 	}
-	return row.Project + " · " + row.SetID
+	return line1Widths[dashboardTwoLineColProject] + dashboardColSep
+}
+
+// dashboardTwoLineStatusHeader renders the line-2 header: STATUS indented under
+// the TASK SET column.
+func dashboardTwoLineStatusHeader(line1Widths []int) string {
+	return strings.Repeat(" ", dashboardTwoLineStatusIndent(line1Widths)) + "STATUS"
 }
 
 // dashboardTwoLineRowValuesLine1 returns the cell values for line 1 of a two-line
-// row: the TASK SET identity, WORKTREE, DRAIN.
+// row: PROJECT, TASK SET (the set id), WORKTREE, DRAIN.
 func dashboardTwoLineRowValuesLine1(row DashboardRow) []string {
 	return []string{
-		dashboardTwoLineIdentity(row),
+		row.Project,
+		row.SetID,
 		renderDashboardDest(row.destKind, row.Worktree),
 		row.Drain,
 	}
@@ -2918,7 +2932,7 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 // inside the status brackets (ADR-0096).
 func detailHeader(setID, label, progress, verifiedSHA string) string {
 	if verifiedSHA != "" {
-		suffix := lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Render("verified @ " + verifiedSHA)
+		suffix := dashboardVerifiedAtStyle.Render("verified @ " + verifiedSHA)
 		label += " · " + suffix
 	}
 	header := fmt.Sprintf("Task · %s  [%s]", setID, label)

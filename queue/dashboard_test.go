@@ -1321,8 +1321,8 @@ func TestDashboardStatusAppendsVerifiedAtSHA(t *testing.T) {
 	if !strings.Contains(got, "verified @ abcdef123456") {
 		t.Fatalf("verified suffix missing: %q", got)
 	}
-	// The suffix should carry a yellow ANSI color code (256-color palette 33).
-	if !strings.Contains(got, "\x1b[38;5;33m") {
+	// The suffix should carry ANSI yellow (same as pop tasks status Details).
+	if !strings.Contains(got, "\x1b[33m") {
 		t.Fatalf("verified suffix should be yellow: %q", got)
 	}
 
@@ -1346,7 +1346,7 @@ func TestDashboardDetailHeaderIncludesVerifiedAtSHA(t *testing.T) {
 	if !strings.Contains(header, "verified @ abcdef123456") {
 		t.Fatalf("header missing verified suffix: %q", header)
 	}
-	if !strings.Contains(header, "\x1b[38;5;33m") {
+	if !strings.Contains(header, "\x1b[33m") {
 		t.Fatalf("verified suffix should be yellow: %q", header)
 	}
 
