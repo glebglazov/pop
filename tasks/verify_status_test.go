@@ -223,6 +223,25 @@ func TestApplyVerifyVerdictsEnabledGatesOnVerdict(t *testing.T) {
 	}
 }
 
+// TestApplyVerifyVerdictsSkipsArchivedView confirms the archived listing
+// (result.ShowArchived) is outside the verification loop (ADR-0026): a
+// formerly-Done archived set keeps its manifest-derived DONE status even with
+// a NEEDS-HUMAN verdict at the current SHA that would otherwise force
+// VERIFY-FAILED / NEEDS-VERIFY.
+func TestApplyVerifyVerdictsSkipsArchivedView(t *testing.T) {
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
+	putStatusVerdict(t, d, "/repo/.git", "demo", "shaCUR", "NEEDS-HUMAN", "would fail if graded")
+
+	result := doneResult()
+	result.ShowArchived = true
+
+	ApplyVerifyVerdicts(d, result, enabled, "/rt")
+	if got := rowStatus(result, "demo"); got != StatusDone {
+		t.Fatalf("archived status = %q, want DONE (verdict overlay skipped)", got)
+	}
+}
+
 func TestApplyVerifyVerdictsWithPerSetRuntime(t *testing.T) {
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")

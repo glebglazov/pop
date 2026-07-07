@@ -41,8 +41,15 @@ func ApplyVerifyVerdicts(d *Deps, result *RefreshResult, cfg *config.Config, run
 // resolver. runtimeForSet returns the checkout whose HEAD gates Verify verdict
 // lookup for that set — typically its Worktree binding path when bound, else
 // the repo's representative checkout.
+//
+// The pass is also a no-op on an archived view (result.ShowArchived): an
+// Archived Task set is outside the verification loop (ADR-0026), so
+// `pop tasks status --archived` lists each set at its manifest-derived status
+// rather than regressing a formerly-Done set to NEEDS-VERIFY. Only
+// RefreshArchivedWith sets ShowArchived; the active, register, and queue
+// callers all leave it false.
 func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config, runtimeForSet func(setID string) string) {
-	if result == nil || !verifyEnabled(cfg) {
+	if result == nil || result.ShowArchived || !verifyEnabled(cfg) {
 		return
 	}
 	if runtimeForSet == nil {
