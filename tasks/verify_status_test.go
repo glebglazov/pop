@@ -242,6 +242,59 @@ func TestApplyVerifyVerdictsSkipsArchivedView(t *testing.T) {
 	}
 }
 
+// TestApplyVerifyVerdictsMemoizesCheckoutResolution guards the dashboard perf
+// path: sets sharing one checkout resolve its repo identity and HEAD once, not
+// per row, and a non-terminal row forks no git at all.
+func TestApplyVerifyVerdictsMemoizesCheckoutResolution(t *testing.T) {
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	var commonDirCalls, headCalls int
+	git := &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+		switch {
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir":
+			commonDirCalls++
+			return "/repo/.git\n", nil
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
+			headCalls++
+			return "shaCUR\n", nil
+		}
+		return "", nil
+	}}
+	d := &Deps{FS: deps.NewRealFileSystem(), Git: git}
+
+	doneM := &Manifest{Valid: true, Stem: "d", Tasks: []Task{{ID: "01", File: "01.md", Type: "AFK", Status: "done"}}}
+	readyM := &Manifest{Valid: true, Stem: "r", Tasks: []Task{{ID: "01", File: "01.md", Type: "AFK", Status: "open"}}}
+	result := &RefreshResult{
+		Rows: []Row{
+			buildTaskSetRow(RegisteredTaskSet{ID: "a"}, doneM, 0),
+			buildTaskSetRow(RegisteredTaskSet{ID: "b"}, doneM, 1),
+			buildTaskSetRow(RegisteredTaskSet{ID: "c"}, doneM, 2),
+			buildTaskSetRow(RegisteredTaskSet{ID: "ready"}, readyM, 3),
+		},
+		Manifests: map[string]*Manifest{"a": doneM, "b": doneM, "c": doneM, "ready": readyM},
+	}
+
+	// All three done sets share one checkout ("/rt"); the ready set is non-terminal.
+	ApplyVerifyVerdicts(d, result, enabled, "/rt")
+
+	if commonDirCalls != 1 {
+		t.Fatalf("git common-dir resolved %d times, want 1 (memoized per checkout)", commonDirCalls)
+	}
+	if headCalls != 1 {
+		t.Fatalf("git HEAD resolved %d times, want 1 (memoized per checkout)", headCalls)
+	}
+	// No PASS verdict at HEAD ⇒ every terminal set regresses to NEEDS-VERIFY.
+	for _, id := range []string{"a", "b", "c"} {
+		if got := rowStatus(result, id); got != StatusNeedsVerify {
+			t.Fatalf("set %s status = %q, want NEEDS-VERIFY", id, got)
+		}
+	}
+	if got := rowStatus(result, "ready"); got != StatusReady {
+		t.Fatalf("ready set status = %q, want READY (untouched, no git)", got)
+	}
+}
+
 func TestApplyVerifyVerdictsWithPerSetRuntime(t *testing.T) {
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")

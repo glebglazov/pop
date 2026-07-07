@@ -62,28 +62,55 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 		defer func() { _ = s.Close() }()
 	}
 
+	// Resolving a checkout's repo identity and HEAD each forks git, and sets
+	// that share a checkout (the common case: every unbound set resolves the
+	// repo's representative path) resolve the identical pair. Memoize per
+	// runtimePath so a dashboard with N terminal sets on one checkout forks git
+	// twice, not 2N times.
+	type checkoutInfo struct {
+		repo    string
+		workSHA string
+	}
+	checkoutCache := map[string]checkoutInfo{}
+	resolveCheckout := func(runtimePath string) checkoutInfo {
+		if info, ok := checkoutCache[runtimePath]; ok {
+			return info
+		}
+		info := checkoutInfo{}
+		if runtimePath != "" {
+			if id, err := ResolveRepositoryIdentity(d, runtimePath); err == nil {
+				info.repo = id.CommonDir
+			}
+		}
+		info.workSHA = verifyWorkSHA(d, runtimePath)
+		checkoutCache[runtimePath] = info
+		return info
+	}
+
 	changed := false
 	for i := range result.Rows {
 		row := &result.Rows[i]
-		runtimePath := runtimeForSet(row.ID)
-		repo := ""
-		if runtimePath != "" {
-			if id, err := ResolveRepositoryIdentity(d, runtimePath); err == nil {
-				repo = id.CommonDir
-			}
+		// Only a terminal row (DONE/AWAITING-APPROVAL) consults the verdict;
+		// decorateRowWithVerdict is a no-op for every other status. Skip the
+		// git-forking checkout resolution and store lookup for non-terminal rows
+		// entirely, mirroring decorateRowWithVerdict's own non-terminal branch by
+		// clearing the immunized-SHA badge.
+		if row.Status != StatusDone && row.Status != StatusAwaitingApproval {
+			row.VerifiedAtSHA = ""
+			continue
 		}
-		workSHA := verifyWorkSHA(d, runtimePath)
+		info := resolveCheckout(runtimeForSet(row.ID))
 		var current *store.VerifyVerdict
 		var latestPass *store.VerifyVerdict
-		if s != nil && repo != "" && workSHA != "" {
-			if v, err := s.GetVerifyVerdict(repo, row.ID, workSHA); err == nil {
+		if s != nil && info.repo != "" && info.workSHA != "" {
+			if v, err := s.GetVerifyVerdict(info.repo, row.ID, info.workSHA); err == nil {
 				current = v
 			}
-			if v, err := s.GetLatestPassVerifyVerdict(repo, row.ID); err == nil {
+			if v, err := s.GetLatestPassVerifyVerdict(info.repo, row.ID); err == nil {
 				latestPass = v
 			}
 		}
-		if decorateRowWithVerdict(row, result.Manifests[row.ID], workSHA, current, latestPass) {
+		if decorateRowWithVerdict(row, result.Manifests[row.ID], info.workSHA, current, latestPass) {
 			changed = true
 		}
 	}
