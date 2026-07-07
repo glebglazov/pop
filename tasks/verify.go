@@ -338,21 +338,25 @@ func drainVerifyPhase(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Ma
 	if err != nil {
 		return manifestStatus, nil, err
 	}
-	verdict := Verdict(v.Verdict)
-	var currentVerdict, latestPass *Verdict
+	// Map the single cache-first verdict into the two Verified status resolution
+	// slots. This is the drain's run-decision leftover: ensureVerifyVerdict
+	// returned one verdict (current, stale immunizing PASS, or freshly run), so
+	// which slot it fills is decided here by SHA, not in the shared resolver.
+	var currentAtSHA, latestPass *store.VerifyVerdict
 	if v.WorkSHA == workSHA {
-		currentVerdict = &verdict
-	} else if verdict == VerdictPass {
-		// Stale immunizing PASS: let DeriveStatusWithVerdict see it as the
-		// episode's latest PASS rather than a current verdict.
-		latestPass = &verdict
+		currentAtSHA = v
+	} else if Verdict(v.Verdict) == VerdictPass {
+		// Stale immunizing PASS: feed it as the episode's latest PASS.
+		latestPass = v
 	} else {
 		// Defensive: ensureVerifyVerdict only returns a stale verdict when it
 		// is a PASS, so this preserves any non-PASS failure signal.
-		currentVerdict = &verdict
+		currentAtSHA = v
 	}
-	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings, opts.Agents, opts.Effort)
-	return DeriveStatusWithVerdict(m, true, currentVerdict, latestPass), v, nil
+	printVerdict(opts.Output, opts.SetID, workSHA, Verdict(v.Verdict), v.Findings, opts.Agents, opts.Effort)
+	// verifiedAtSHA is discarded: the drain does not yet surface it (deferred).
+	status, _ := ResolveVerifiedStatus(m, workSHA, currentAtSHA, latestPass)
+	return status, v, nil
 }
 
 // verifierSelection is the resolved Verifier agent fallback list and effort tier

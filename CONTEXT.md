@@ -455,6 +455,10 @@ _Avoid_: reviewer, checker, judge agent
 The cached result of **Agent verification** for a **Task set** at a specific work SHA, held in the **Drain** store: PASS (proceed to approval or Done), FIXABLE (findings an agent can resolve), or NEEDS-HUMAN (only a human can resolve). A verdict is stale once the work SHA moves, which returns the set to needing verification.
 _Avoid_: verify result, verification status
 
+**Verified status resolution**:
+The single read-side derivation that layers **Verify verdict**s onto a manifest to produce a **Task set status** — the shared core every surface routes through (`pop tasks status`, the **Queue dashboard**, `pop queue status`/daemon scan, and the pre-approval **Drain** phase). Its inputs are a manifest, the set's current work SHA, and two verdicts: the current-at-SHA verdict and the latest-PASS verdict. It gates only the terminal zone (a DONE or AWAITING-APPROVAL manifest status): a current PASS lets the terminal status stand, any non-PASS current forces VERIFY-FAILED, an older PASS immunizes against later commits (ADR-0096) and surfaces that PASS's SHA, and no PASS in the episode regresses to NEEDS-VERIFY. It is read-only and side-effect free — the decision to *run* the **Verifier** on a cache miss belongs to the **Drain** phase, not here — so it is exercised without a store or git. Callers hold the verdicts they pass in; the resolution echoes none back.
+_Avoid_: verdict gate, status gate, verify check
+
 **Remediation task**:
 An AFK task the **Verifier** writes into a set (a new markdown file plus an atomic `index.json` entry) when **Agent verification** returns FIXABLE, whose body is the findings to resolve. **Drain** picks it up like any eligible AFK task; the verify→remediate→re-verify loop is bounded by a per-set remediation depth cap (`max_remediation_depth`), after which the set parks at VERIFY-FAILED. Findings live only as a Remediation task's body — never as annotations inside another task's spec.
 _Avoid_: fix task, verification findings file, verify note

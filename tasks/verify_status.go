@@ -98,25 +98,8 @@ func decorateRowWithVerdict(row *Row, m *Manifest, workSHA string, currentVerdic
 		row.VerifiedAtSHA = ""
 		return false
 	}
-	var current *Verdict
-	if currentVerdict != nil {
-		vv := Verdict(currentVerdict.Verdict)
-		current = &vv
-	}
-	var pass *Verdict
-	if latestPass != nil {
-		vv := Verdict(latestPass.Verdict)
-		pass = &vv
-	}
-	status := DeriveStatusWithVerdict(m, true, current, pass)
-
-	// ADR-0096: surface the SHA of an immunizing PASS when HEAD has moved on.
-	row.VerifiedAtSHA = ""
-	if status == StatusDone || status == StatusAwaitingApproval {
-		if currentVerdict == nil && latestPass != nil && latestPass.Verdict == string(VerdictPass) && latestPass.WorkSHA != workSHA {
-			row.VerifiedAtSHA = ShortSHA(latestPass.WorkSHA)
-		}
-	}
+	status, verifiedAtSHA := ResolveVerifiedStatus(m, workSHA, currentVerdict, latestPass)
+	row.VerifiedAtSHA = verifiedAtSHA
 
 	if status == row.Status {
 		return false
