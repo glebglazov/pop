@@ -71,6 +71,31 @@ func terminalHITLSet() []Task {
 	}
 }
 
+// TestBuildVerifierPromptScopesToDoneAFK: the Verifier prompt carries only the
+// set's `done` AFK tasks (ADR-0102). Open/not-`done` AFK tasks and HITL tasks of
+// any status are omitted from the judged criteria — an agent cannot judge a
+// human sign-off, and a not-yet-run task is not an unmet criterion.
+func TestBuildVerifierPromptScopesToDoneAFK(t *testing.T) {
+	mixed := []Task{
+		{ID: "01-afk-done", File: "01-afk-done.md", Title: "Done AFK", Type: "AFK", Status: "done"},
+		{ID: "02-afk-open", File: "02-afk-open.md", Title: "Open AFK", Type: "AFK", Status: "open"},
+		{ID: "03-hitl-open", File: "03-hitl-open.md", Title: "Sign off", Type: "HITL", Status: "open"},
+		{ID: "04-hitl-done", File: "04-hitl-done.md", Title: "Approved", Type: "HITL", Status: "done"},
+	}
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), mixed, nil)
+
+	prompt := buildVerifierPrompt(d, m, "sha1", "")
+
+	if !strings.Contains(prompt, "01-afk-done") {
+		t.Fatalf("prompt must include the done AFK task:\n%s", prompt)
+	}
+	for _, omitted := range []string{"02-afk-open", "03-hitl-open", "04-hitl-done", "[HITL]"} {
+		if strings.Contains(prompt, omitted) {
+			t.Fatalf("prompt must omit %q (only done AFK work is judged):\n%s", omitted, prompt)
+		}
+	}
+}
+
 // TestDrainVerifyPhasePassReachesDone: a PASS verdict on a pure-AFK exhausted
 // set lets the drain reach DONE, and the verdict is recorded at the work SHA.
 func TestDrainVerifyPhasePassReachesDone(t *testing.T) {
@@ -583,6 +608,53 @@ func TestRunTaskSetHITLGateHidesReverifyWhenDisabled(t *testing.T) {
 	out := buf.String()
 	if strings.Contains(out, "Re-verify") {
 		t.Fatalf("HITL gate must not offer Re-verify when verification is disabled:\n%s", out)
+	}
+}
+
+// TestRunTaskSetOpenHITLScopedVerifyReachesGate: with verification enabled, a
+// set whose AFK work is done and whose only remaining task is an open terminal
+// HITL sign-off verifies PASS on the AFK work and reaches the HITL gate — no
+// premature VERIFY-FAILED return (ADR-0102). The verifier here returns
+// NEEDS-HUMAN if it is ever shown the HITL task, so the set reaching the gate is
+// a direct consequence of the prompt being scoped to done AFK work only.
+func TestRunTaskSetOpenHITLScopedVerifyReachesGate(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Sign off", Type: "HITL", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+
+	// The verdict depends on the prompt: a scoped prompt (done AFK only) PASSes;
+	// an unscoped prompt showing the open HITL task would deadlock at NEEDS-HUMAN.
+	verify := func(prompt string) (string, error) {
+		if strings.Contains(prompt, "[HITL]") {
+			return "VERDICT: NEEDS-HUMAN\nFINDINGS: an agent cannot judge a human sign-off\n", nil
+		}
+		return "VERDICT: PASS\n", nil
+	}
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, agent, &buf)
+	opts.verifyRunner = verify
+	// Exit at the gate menu.
+	opts.ConfirmIn = strings.NewReader("0\n")
+
+	result, err := RunTaskSetWith(d, nil, func(string) (*config.Config, error) {
+		return verifyEnabledConfig(), nil
+	}, opts)
+	assertExitCode(t, err, ExitNoRunnable)
+
+	if result == nil || !result.TaskSetAwaitingApproval {
+		t.Fatalf("result = %+v, want TaskSetAwaitingApproval (reached the HITL gate)", result)
+	}
+	if result.TaskSetVerifyFailed {
+		t.Fatalf("scoped PASS must not park the set as VERIFY-FAILED:\n%s", buf.String())
+	}
+	repo, _, head := runtimeHead(t, d, env.root)
+	if stored := readStoredVerdict(t, d, repo, "demo", head); stored == nil || stored.Verdict != "PASS" {
+		t.Fatalf("stored verdict = %+v, want PASS at the current work SHA", stored)
 	}
 }
 

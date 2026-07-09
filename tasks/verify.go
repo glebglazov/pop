@@ -692,12 +692,16 @@ func commitSubjectPrefix(taskSetID string) string {
 const prdFileName = "prd.md"
 
 // buildVerifierPrompt assembles the Verifier's input: the authoritative
-// acceptance criteria and task bodies for every task in the set, plus the
-// accumulated work diff at the current SHA, and the exact response format the
-// parser expects. When the set folder has a co-located prd.md, its content is
-// folded in as optional context that sharpens judgment — it never replaces the
-// acceptance criteria as the authoritative contract, and its absence is not an
-// error.
+// acceptance criteria and task bodies for the set's `done` AFK tasks only, plus
+// the accumulated work diff at the current SHA, and the exact response format
+// the parser expects. Open/not-`done` AFK tasks and HITL tasks of any status are
+// excluded (ADR-0102): an agent cannot judge a human sign-off, and a not-yet-run
+// task is not an unmet criterion — emitting either made a still-open terminal
+// HITL gate read as a failing criterion, deadlocking the drain before the gate
+// that would clear it. When the set folder has a co-located prd.md, its content
+// is folded in as optional context that sharpens judgment — it never replaces
+// the acceptance criteria as the authoritative contract, and its absence is not
+// an error.
 func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff string) string {
 	var b strings.Builder
 	b.WriteString("You are an independent Verifier. A separate agent has already implemented this Task set; ")
@@ -707,7 +711,8 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff string) string {
 		b.WriteString(fmt.Sprintf("Work SHA: %s\n", workSHA))
 	}
 	b.WriteString("\nThe checkboxes under each task's \"## Acceptance criteria\" heading are authoritative. ")
-	b.WriteString("Judge the whole set against them using the accumulated work diff below.\n\n")
+	b.WriteString("Judge the done AFK work below against them using the accumulated work diff. ")
+	b.WriteString("Tasks awaiting a human sign-off, and tasks not yet done, are deliberately omitted — do not treat their absence as a failure.\n\n")
 
 	if prd, ok := readPRD(d, m); ok {
 		b.WriteString("## PRD (context only — the acceptance criteria above remain authoritative)\n")
@@ -717,6 +722,11 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff string) string {
 
 	b.WriteString("## Tasks\n")
 	for _, task := range m.Tasks {
+		// Scope to done AFK work only (ADR-0102): open/not-done AFK tasks and
+		// HITL tasks of any status are not judged criteria.
+		if task.Type != "AFK" || task.Status != "done" {
+			continue
+		}
 		b.WriteString(fmt.Sprintf("\n### %s [%s] (%s): %s\n", task.ID, task.Type, task.Status, task.Title))
 		body, err := d.FS.ReadFile(filepath.Join(m.Dir, task.File))
 		if err != nil {
