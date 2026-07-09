@@ -66,9 +66,10 @@ func TestSelectTaskExplicitRejectsDoneFailedHITLBlocked(t *testing.T) {
 	}{
 		{"01-done", "already done"},
 		{"02-failed", "failed"},
-		{"03-hitl", "HITL"},
 		{"04-blocked", "blocked by"},
 	}
+	// A ready HITL target (03-hitl) is deliberately absent: it no longer errors
+	// but routes to the HITL gate — see TestSelectTaskExplicitReadyHITLRoutesToGate.
 	for _, tt := range tests {
 		_, err := SelectTask(base, "demo", tt.task)
 		if err == nil {
@@ -81,6 +82,62 @@ func TestSelectTaskExplicitRejectsDoneFailedHITLBlocked(t *testing.T) {
 		if !ok || ee.Code != ExitNoRunnable {
 			t.Fatalf("task %s: code = %v", tt.task, err)
 		}
+	}
+}
+
+func TestSelectTaskExplicitReadyHITLRoutesToGate(t *testing.T) {
+	refresh := &RefreshResult{
+		Rows: []Row{{ID: "demo", Status: StatusAwaitingApproval, Priority: 0}},
+		Manifests: map[string]*Manifest{
+			"demo": {Stem: "demo", Valid: true, Tasks: []Task{
+				{ID: "01-afk", File: "01-afk.md", Type: "AFK", Status: "done"},
+				{ID: "02-hitl", File: "02-hitl.md", Type: "HITL", Status: "open", BlockedBy: []string{"01-afk"}},
+				{ID: "03-hitl", File: "03-hitl.md", Type: "HITL", Status: "open", BlockedBy: []string{"01-afk"}},
+			}},
+		},
+	}
+
+	// Both HITL tasks are ready; the scheduler's auto-pick reaches only the first.
+	// Targeting 03-hitl explicitly must route to *its* gate, not error.
+	sel, err := SelectTask(refresh, "demo", "03-hitl")
+	if err != nil {
+		t.Fatalf("ready HITL target: unexpected error %v", err)
+	}
+	if !sel.HITLGate {
+		t.Fatalf("ready HITL target must route to the gate: %+v", sel)
+	}
+	if sel.TaskID != "03-hitl" || sel.TaskSetID != "demo" {
+		t.Fatalf("selection = %+v, want demo/03-hitl", sel)
+	}
+	if sel.Task.Type != "HITL" {
+		t.Fatalf("selection task type = %q, want HITL", sel.Task.Type)
+	}
+}
+
+func TestSelectTaskExplicitBlockedHITLRejectedWithDependency(t *testing.T) {
+	refresh := &RefreshResult{
+		Rows: []Row{{ID: "demo", Status: StatusBlocked, Priority: 0}},
+		Manifests: map[string]*Manifest{
+			"demo": {Stem: "demo", Valid: true, Tasks: []Task{
+				{ID: "01-afk", File: "01-afk.md", Type: "AFK", Status: "open"},
+				{ID: "02-hitl", File: "02-hitl.md", Type: "HITL", Status: "open", BlockedBy: []string{"01-afk"}},
+			}},
+		},
+	}
+
+	_, err := SelectTask(refresh, "demo", "02-hitl")
+	if err == nil {
+		t.Fatal("HITL target with an unsatisfied blocker must be rejected")
+	}
+	if !strings.Contains(err.Error(), "blocked by 01-afk") {
+		t.Fatalf("want dependency-specific message, got %v", err)
+	}
+	if strings.Contains(err.Error(), "is HITL") {
+		t.Fatalf("must not fall back to the generic non-AFK message: %v", err)
+	}
+	ee, ok := err.(*ExitError)
+	if !ok || ee.Code != ExitNoRunnable {
+		t.Fatalf("code = %v", err)
 	}
 }
 

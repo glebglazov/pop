@@ -684,6 +684,106 @@ func printTaskSetSummary(w io.Writer, result *RunTaskSetResult) {
 	fmt.Fprintf(out, "Task set %s stopped after %d task(s)\n", result.TaskSetID, len(result.Completed))
 }
 
+// targetedHITLGateOptions carries the context runTargetedHITLGate needs to open
+// one explicitly targeted HITL task's gate. It is populated by the single-task
+// executor when `pop tasks implement <set>/<hitl>.md` names a ready HITL task.
+type targetedHITLGateOptions struct {
+	out            io.Writer
+	in             io.Reader
+	yes            bool
+	agentPreset    string
+	agentCmd       string
+	cwd            string
+	runtimePath    string
+	definitionPath string
+	statePath      string
+	cfg            *config.Config
+	timeout        time.Duration
+	refresh        *RefreshResult
+	sel            *Selection
+}
+
+// runTargetedHITLGate opens the HITL gate for one explicitly targeted HITL task
+// (ADR-0102): it renders the set, then runs the same interactive HITL menu the
+// whole-set drain reaches via BlockingHITLTask — except the gate targets the
+// named task, so a set holding several attendable HITL gates can be disposed of
+// one at a time rather than only the single blocking one the scheduler auto-picks.
+// It runs no agent and claims no Drain; the human's choice (complete / defer /
+// assist / re-verify) mutates task state directly. A handled choice returns a
+// clean result; an exit or a non-promptable run (--yes / non-interactive) falls
+// back to the static gate advice and a no-runnable exit, mirroring the drain.
+func runTargetedHITLGate(d *Deps, opts targetedHITLGateOptions) (*RunTaskResult, error) {
+	taskSetID := opts.sel.TaskSetID
+	m := opts.refresh.Manifests[taskSetID]
+	// Re-resolve the target against the refreshed manifest so gate mutations
+	// operate on a live *Task, not the selection snapshot.
+	hitl := findTaskInManifest(m, opts.sel.TaskID)
+	if m == nil || hitl == nil {
+		return nil, exitErr(ExitNoRunnable, "%s", unknownTaskMessage(m, opts.sel.TaskID))
+	}
+
+	out := opts.out
+	result := &RunTaskResult{Selection: opts.sel, Refresh: opts.refresh}
+
+	displayRows := cloneRows(opts.refresh.Rows)
+	MarkRunTarget(displayRows, taskSetID)
+	displayRefresh := *opts.refresh
+	displayRefresh.Rows = displayRows
+	fmt.Fprintln(out)
+	Render(out, &displayRefresh)
+	RenderTaskList(out, taskSetID, m)
+
+	// Register a checkout gate hold only while the menu will actually prompt, so a
+	// concurrent quota-recovery drain on the same checkout cannot resume mid-gate
+	// (ADR-0100); a non-promptable run leaves no hold and falls straight to advice.
+	willPrompt := gateWillPrompt(opts.in, opts.yes, m, hitl)
+	if willPrompt {
+		_ = RegisterCheckoutGateHold(d, taskSetID, opts.runtimePath)
+	}
+	rv := &reverifyGateContext{cfg: opts.cfg, timeout: opts.timeout}
+	handled, err := handleInteractiveHITLGate(d, out, opts.in, nil, opts.yes, opts.agentPreset, opts.agentCmd, opts.cwd, opts.runtimePath, opts.definitionPath, opts.statePath, taskSetID, m, hitl, rv)
+	if willPrompt {
+		_ = ReleaseCheckoutGateHold(d, opts.runtimePath)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if handled {
+		if afterRefresh, refreshErr := RefreshWith(d, opts.definitionPath, opts.statePath); refreshErr == nil {
+			result.Refresh = afterRefresh
+			if !opts.yes {
+				fmt.Fprintln(out)
+				Render(out, afterRefresh)
+			}
+		}
+		return result, nil
+	}
+
+	// Not handled: the human exited or the run cannot prompt. Print the same
+	// static advice the drain shows and exit no-runnable so callers see the set
+	// is still Human-blocked.
+	if row := findRow(opts.refresh, taskSetID); row != nil && row.Status == StatusAwaitingApproval {
+		printTerminalHITLAdvice(d, out, taskSetID, m.Dir, hitl)
+		return result, exitErr(ExitNoRunnable, "Task set %q agents done — awaiting approval: HITL: %s", taskSetID, hitl.ID)
+	}
+	printHITLGateAdvice(d, out, taskSetID, m.Dir, hitl)
+	return result, exitErr(ExitNoRunnable, "Task set %q is Human-blocked: HITL: %s", taskSetID, hitl.ID)
+}
+
+// findTaskInManifest returns a pointer to the task with the given ID in the
+// manifest, or nil when none matches.
+func findTaskInManifest(m *Manifest, taskID string) *Task {
+	if m == nil {
+		return nil
+	}
+	for i := range m.Tasks {
+		if m.Tasks[i].ID == taskID {
+			return &m.Tasks[i]
+		}
+	}
+	return nil
+}
+
 type hitlGateAction int
 
 const (

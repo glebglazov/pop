@@ -189,6 +189,32 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		out = os.Stdout
 	}
 
+	// A ready HITL target routes to that task's HITL gate instead of an agent
+	// run: it never claims a Drain, runs no agent, and asks no "Run task?"
+	// confirmation, so this branch precedes all execution front matter. The gate
+	// itself is the whole-set drain's HITL menu, reused verbatim.
+	if sel.HITLGate {
+		timeout := opts.Timeout
+		if timeout <= 0 {
+			timeout = DefaultAttemptTimeout
+		}
+		return runTargetedHITLGate(d, targetedHITLGateOptions{
+			out:            out,
+			in:             opts.ConfirmIn,
+			yes:            opts.Yes,
+			agentPreset:    opts.AgentPreset,
+			agentCmd:       opts.AgentCmd,
+			cwd:            opts.CWD,
+			runtimePath:    runtimePath,
+			definitionPath: resolved.DefinitionPath,
+			statePath:      statePath,
+			cfg:            cfg,
+			timeout:        timeout,
+			refresh:        refresh,
+			sel:            sel,
+		})
+	}
+
 	// Lock-free front matter (ADR-0067): the set render, the dirty-runtime
 	// report, and the pre-run confirmation all run before any Drain is claimed,
 	// so the Runtime execution lock is not held while a human sits at the prompt.

@@ -16,6 +16,11 @@ type Selection struct {
 	Manifest  *Manifest
 	Task      Task
 	TaskIndex int
+	// HITLGate marks a selection that opens the named HITL task's gate rather
+	// than running an agent. It is set only by an explicit `<set>/<hitl>.md`
+	// target naming a ready HITL task (its blockers all satisfied); every AFK
+	// selection leaves it false, so the executor keeps running agents as before.
+	HITLGate bool
 }
 
 // SelectTaskSet chooses the Task set to drain using the same readiness and failed-set
@@ -230,7 +235,28 @@ func selectExplicitTask(taskSetID string, m *Manifest, taskID string) (*Selectio
 		return nil, exitErr(ExitNoRunnable, "task %q is skipped", taskID)
 	}
 	if task.Type == "HITL" {
-		return nil, exitErr(ExitNoRunnable, "task %q is HITL", taskID)
+		// A HITL target is no longer rejected outright: a ready HITL task routes
+		// to its own HITL gate (assist / complete / defer / shell / exit), giving
+		// explicit disambiguation when a set holds several HITL gates that the
+		// scheduler's auto-pick (the single blocking one) would never reach. A
+		// target whose dependencies are still open is rejected with the same
+		// dependency-specific message an AFK target gets — not the generic non-AFK
+		// error — so the human sees *why* the gate is not yet attendable.
+		for _, blocker := range task.BlockedBy {
+			if !blockerSatisfied(m, blocker) {
+				return nil, exitErr(ExitNoRunnable, "task %q blocked by %s", taskID, blocker)
+			}
+		}
+		return &Selection{
+			TaskSetID: taskSetID,
+			TaskID:    taskID,
+			TaskPath:  filepath.Join(m.Dir, task.File),
+			TaskFile:  task.File,
+			Manifest:  m,
+			Task:      task,
+			TaskIndex: idx,
+			HITLGate:  true,
+		}, nil
 	}
 	if task.Type != "AFK" {
 		return nil, exitErr(ExitNoRunnable, "task %q is not AFK", taskID)

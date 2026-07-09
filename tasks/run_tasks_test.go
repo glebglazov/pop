@@ -916,6 +916,63 @@ func TestRunTaskSetHITLGateEOFDefaultExits(t *testing.T) {
 	assertTaskOpen(t, &execFixture{root: env.root, tasksDir: env.tasksDir}, "02-hitl")
 }
 
+// TestRunTaskReadyHITLTargetOpensGate proves `pop tasks implement <set>/<hitl>.md`
+// on a ready HITL task routes to that task's HITL gate (not the generic
+// non-AFK rejection) and that a gate action mutates the targeted task.
+func TestRunTaskReadyHITLTargetOpensGate(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-afk", File: "01-afk.md", Title: "Build", Type: "AFK", Status: "done"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open", BlockedBy: []string{"01-afk"}},
+	})
+
+	var buf bytes.Buffer
+	result, err := RunTaskWith(env.deps(), nil, nil, RunTaskOptions{
+		ResolveInput:     ResolveInput{CWD: env.root},
+		TaskPathOverride: "demo/02-hitl.md",
+		Output:           &buf,
+		ConfirmIn:        strings.NewReader("2\n"), // Complete task
+	})
+	if err != nil {
+		t.Fatalf("ready HITL target: unexpected error %v", err)
+	}
+	if result == nil || result.Selection == nil || !result.Selection.HITLGate {
+		t.Fatalf("expected a HITL-gate selection, got %#v", result)
+	}
+	if out := buf.String(); !strings.Contains(out, "2. Complete task") {
+		t.Fatalf("HITL gate menu was not shown:\n%s", out)
+	}
+	assertTaskDone(t, env.execFixture(), "02-hitl")
+}
+
+// TestRunTaskBlockedHITLTargetRejectedWithDependency proves a HITL target whose
+// blockers are still open is rejected with a dependency-specific message, never
+// the generic "is HITL" non-AFK error, and never opens a gate or mutates state.
+func TestRunTaskBlockedHITLTargetRejectedWithDependency(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-afk", File: "01-afk.md", Title: "Build", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open", BlockedBy: []string{"01-afk"}},
+	})
+
+	var buf bytes.Buffer
+	_, err := RunTaskWith(env.deps(), nil, nil, RunTaskOptions{
+		ResolveInput:     ResolveInput{CWD: env.root},
+		TaskPathOverride: "demo/02-hitl.md",
+		Output:           &buf,
+		Yes:              true,
+	})
+	assertExitCode(t, err, ExitNoRunnable)
+	if err == nil || !strings.Contains(err.Error(), "blocked by 01-afk") {
+		t.Fatalf("want dependency-specific rejection, got %v", err)
+	}
+	if strings.Contains(err.Error(), "is HITL") {
+		t.Fatalf("must not fall back to the generic non-AFK message: %v", err)
+	}
+	if strings.Contains(buf.String(), "Complete task") {
+		t.Fatalf("a blocked HITL target must not open the gate:\n%s", buf.String())
+	}
+	assertTaskOpen(t, env.execFixture(), "02-hitl")
+}
+
 func TestRunTaskSetInteractiveHITLGateDefaultGetsAgentAssistance(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
