@@ -11,13 +11,19 @@ import (
 // runtime HEAD the verdict was computed from, so a reader gates on a SHA change
 // (a verdict at a different SHA is stale). Findings carries the Verifier's
 // human-facing reasons (empty for PASS). Repo is the repository's git common
-// dir, the same identity the drains table keys by.
+// dir, the same identity the drains table keys by. Scope is the count of AFK
+// tasks the verdict certified (ADR-0101): a reader compares the set's current
+// AFK count against it to tell an incidental SHA move (coast on the immunizing
+// PASS per ADR-0096) apart from a scope increase (re-verify the enlarged set).
+// A zero Scope means unknown (legacy rows, or a verdict written before the
+// scope was recorded) and disables the growth check.
 type VerifyVerdict struct {
 	Repo       string
 	SetID      string
 	WorkSHA    string
 	Verdict    string
 	Findings   string
+	Scope      int
 	ComputedAt time.Time
 }
 
@@ -27,13 +33,13 @@ type VerifyVerdict struct {
 // re-verified.
 func (s *Store) GetVerifyVerdict(repo, setID, workSHA string) (*VerifyVerdict, error) {
 	row := s.db.QueryRow(
-		`SELECT repo, set_id, work_sha, verdict, findings, computed_at
+		`SELECT repo, set_id, work_sha, verdict, findings, scope, computed_at
 		 FROM verify_verdicts
 		 WHERE repo = ? AND set_id = ? AND work_sha = ?`,
 		repo, setID, workSHA)
 	var v VerifyVerdict
 	var computed string
-	err := row.Scan(&v.Repo, &v.SetID, &v.WorkSHA, &v.Verdict, &v.Findings, &computed)
+	err := row.Scan(&v.Repo, &v.SetID, &v.WorkSHA, &v.Verdict, &v.Findings, &v.Scope, &computed)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -52,7 +58,7 @@ func (s *Store) GetVerifyVerdict(repo, setID, workSHA string) (*VerifyVerdict, e
 // (ADR-0096). Returns nil when no PASS verdict exists for the set.
 func (s *Store) GetLatestPassVerifyVerdict(repo, setID string) (*VerifyVerdict, error) {
 	row := s.db.QueryRow(
-		`SELECT repo, set_id, work_sha, verdict, findings, computed_at
+		`SELECT repo, set_id, work_sha, verdict, findings, scope, computed_at
 		 FROM verify_verdicts
 		 WHERE repo = ? AND set_id = ? AND verdict = 'PASS'
 		 ORDER BY computed_at DESC, work_sha DESC
@@ -60,7 +66,7 @@ func (s *Store) GetLatestPassVerifyVerdict(repo, setID string) (*VerifyVerdict, 
 		repo, setID)
 	var v VerifyVerdict
 	var computed string
-	err := row.Scan(&v.Repo, &v.SetID, &v.WorkSHA, &v.Verdict, &v.Findings, &computed)
+	err := row.Scan(&v.Repo, &v.SetID, &v.WorkSHA, &v.Verdict, &v.Findings, &v.Scope, &computed)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -75,11 +81,11 @@ func (s *Store) GetLatestPassVerifyVerdict(repo, setID string) (*VerifyVerdict, 
 // Verifier at the same SHA overwrites the row (force semantics).
 func (s *Store) PutVerifyVerdict(v VerifyVerdict) error {
 	_, err := s.db.Exec(
-		`INSERT INTO verify_verdicts (repo, set_id, work_sha, verdict, findings, computed_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO verify_verdicts (repo, set_id, work_sha, verdict, findings, scope, computed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(repo, set_id, work_sha) DO UPDATE SET
-		   verdict=excluded.verdict, findings=excluded.findings, computed_at=excluded.computed_at`,
-		v.Repo, v.SetID, v.WorkSHA, v.Verdict, v.Findings, mergeTime(v.ComputedAt))
+		   verdict=excluded.verdict, findings=excluded.findings, scope=excluded.scope, computed_at=excluded.computed_at`,
+		v.Repo, v.SetID, v.WorkSHA, v.Verdict, v.Findings, v.Scope, mergeTime(v.ComputedAt))
 	return err
 }
 

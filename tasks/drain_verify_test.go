@@ -750,3 +750,71 @@ func TestRunTaskSetVerifyQuotaPauseRecoversAndCompletes(t *testing.T) {
 		t.Fatalf("stored verdict = %+v, want PASS", stored)
 	}
 }
+
+// twoDoneAFKSet is a set enlarged past a one-task PASS: two done AFK tasks, as
+// after a new AFK task was added by a direct manifest edit (e.g. a HITL assist
+// session) and drained to completion.
+func twoDoneAFKSet() []Task {
+	return []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "done"},
+	}
+}
+
+// TestDrainVerifyPhaseScopeGrowthInvalidatesStalePass: an AFK task added to a
+// set that already holds a PASS (recorded at the smaller scope) invalidates the
+// stale PASS, so the enlarged set is re-verified at the new work SHA rather than
+// coasting on ADR-0096 idempotency (ADR-0101).
+func TestDrainVerifyPhaseScopeGrowthInvalidatesStalePass(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), twoDoneAFKSet(), nil)
+	// The PASS was recorded when the set had a single AFK task (scope 1).
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "PASS", Scope: 1})
+
+	called := false
+	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
+		runVerifier: func(string) (string, error) { called = true; return "VERDICT: PASS\n", nil },
+	}, m, StatusDone)
+	if err != nil {
+		t.Fatalf("drainVerifyPhase: %v", err)
+	}
+	if !called {
+		t.Fatal("Verifier not re-invoked despite the set growing a new AFK task past the PASS scope")
+	}
+	if status != StatusDone || verdict == nil || verdict.Verdict != "PASS" {
+		t.Fatalf("status/verdict = %q/%+v, want DONE/PASS from the re-verify", status, verdict)
+	}
+	// The fresh verdict is recorded at the new SHA carrying the enlarged scope.
+	stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaNEW")
+	if stored == nil || stored.Verdict != "PASS" || stored.Scope != 2 {
+		t.Fatalf("stored verdict at shaNEW = %+v, want PASS with scope 2", stored)
+	}
+	// The stale PASS at the smaller scope was invalidated, not left to immunize.
+	if old := readStoredVerdict(t, d, "/repo/.git", "demo", "shaOLD"); old != nil {
+		t.Fatalf("stale PASS at shaOLD survived scope growth: %+v", old)
+	}
+}
+
+// TestDrainVerifyPhaseUnchangedScopeStillImmunizes: a commit that only moves the
+// work SHA without adding a task (scope unchanged) still coasts on the immunizing
+// PASS, so the Verifier is not re-invoked — ADR-0096 is not regressed by the
+// scope-growth check (ADR-0101).
+func TestDrainVerifyPhaseUnchangedScopeStillImmunizes(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), twoDoneAFKSet(), nil)
+	// The PASS was recorded at the same scope the set still has (2 AFK tasks).
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "PASS", Scope: 2})
+
+	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
+		runVerifier: func(string) (string, error) {
+			t.Fatal("Verifier re-invoked despite an unchanged scope (incidental SHA move)")
+			return "", nil
+		},
+	}, m, StatusDone)
+	if err != nil {
+		t.Fatalf("drainVerifyPhase: %v", err)
+	}
+	if status != StatusDone || verdict == nil || verdict.Verdict != "PASS" || verdict.WorkSHA != "shaOLD" {
+		t.Fatalf("status/verdict = %q/%+v, want DONE/PASS at shaOLD from the immunizing cache", status, verdict)
+	}
+}

@@ -254,6 +254,14 @@ var migrations = []string{
 		set_id       TEXT NOT NULL,
 		acquired_at  TEXT NOT NULL
 	);`,
+	// 14: verify_verdicts.scope — the count of AFK tasks the verdict certified
+	// (ADR-0101). A PASS certifies a set as verified *as scoped*; recording the
+	// scope lets a reader tell an incidental SHA move (scope unchanged, coast on
+	// the immunizing PASS per ADR-0096) apart from a scope increase (a new AFK
+	// task added by a direct manifest edit), which ends the episode so the
+	// Verifier re-fires against the enlarged set. Legacy rows and verdicts written
+	// before the scope was known default to 0, read as "unknown" (no growth check).
+	`ALTER TABLE verify_verdicts ADD COLUMN scope INTEGER NOT NULL DEFAULT 0;`,
 }
 
 func (s *Store) migrate() error {

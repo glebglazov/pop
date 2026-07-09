@@ -281,6 +281,7 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 		WorkSHA:    workSHA,
 		Verdict:    string(verdict),
 		Findings:   findings,
+		Scope:      afkTaskCount(m),
 		ComputedAt: time.Now().UTC(),
 	}
 
@@ -311,10 +312,40 @@ func ensureVerifyVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m 
 			return cached, nil
 		}
 		if pass, gerr := s.GetLatestPassVerifyVerdict(opts.Repo, opts.SetID); gerr == nil && pass != nil {
-			return pass, nil
+			// A PASS certifies the set as verified *as scoped* (ADR-0101). When the
+			// set has since grown a new AFK task — a direct manifest edit during a
+			// HITL assistance session, drained back to terminal at a new work SHA —
+			// the stale PASS no longer covers the enlarged scope. End the episode so
+			// the Verifier re-fires against the added work, symmetric with the
+			// remediation add-work path. A scope that only equals or trails the PASS
+			// (an incidental commit that moved the SHA without adding a task) still
+			// coasts on the immunizing PASS (ADR-0096). A zero recorded scope means
+			// unknown (legacy verdict) and never triggers the growth check.
+			if pass.Scope > 0 && afkTaskCount(m) > pass.Scope {
+				_ = s.InvalidateVerifyVerdicts(opts.Repo, opts.SetID)
+			} else {
+				return pass, nil
+			}
 		}
 	}
 	return runAndStoreVerdict(d, cfg, opts, m, workSHA)
+}
+
+// afkTaskCount returns the number of AFK-typed tasks in the set — the scope a
+// Verify verdict certifies (ADR-0101). HITL tasks are excluded: the Verifier
+// judges only AFK work, and adding a HITL sign-off does not enlarge what
+// "verified end-to-end" means for the agent-completed work.
+func afkTaskCount(m *Manifest) int {
+	if m == nil {
+		return 0
+	}
+	n := 0
+	for _, t := range m.Tasks {
+		if t.Type == "AFK" {
+			n++
+		}
+	}
+	return n
 }
 
 // drainVerifyPhase runs the pre-approval Verifier phase for a drain that has
