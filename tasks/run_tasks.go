@@ -417,7 +417,39 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					if !opts.Yes {
 						fmt.Fprintln(out)
 						Render(out, currentRefresh)
-					} else {
+					}
+					// Verify-fail gate (ADR-0103): on a TTY, let a human disposition the
+					// set — Accept / Remediate / shell / exit. Accept and Remediate invoke
+					// the same store/spawn behavior as the CLI flags, and both keep the
+					// drain going (Accept flips the set to verified via a human-authored
+					// PASS; Remediate spawns drainable fix work). Park the Runtime
+					// execution lock first so the menu runs lock-free (ADR-0067) and a
+					// concurrent quota-recovery drain cannot resume mid-gate (ADR-0100).
+					verifyGateWillPrompt := !opts.Yes && canPrompt(opts.ConfirmIn) && m != nil
+					if verifyGateWillPrompt {
+						parkDrain()
+						_ = RegisterCheckoutGateHold(d, taskSetID, runtimePath)
+					}
+					sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
+					findings := ""
+					if verdict != nil {
+						findings = verdict.Findings
+					}
+					handled, gateErr := handleInteractiveVerifyFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, repo, runtimePath, taskSetID, m, verifyWorkSHA(d, runtimePath), findings)
+					if verifyGateWillPrompt {
+						releaseGateHold()
+					}
+					if gateErr != nil {
+						return result, gateErr
+					}
+					if handled {
+						// The human disposed of the set; clear the verify-failed terminal so
+						// the deferred finalize does not record verify_failed, and resume.
+						result.TaskSetVerifyFailed = false
+						result.VerifyFindings = ""
+						continue
+					}
+					if opts.Yes {
 						printTaskSetSummary(out, result)
 					}
 					return result, exitErr(ExitNoRunnable, "Task set %q verification failed — a human must review it\n%s", taskSetID, result.VerifyRerunCmd)
@@ -1190,4 +1222,140 @@ func promptFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID strin
 		fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
 		return promptFailedGateAction(out, reader, taskSetID, failed, body, invocation)
 	}
+}
+
+type verifyFailedGateAction int
+
+const (
+	verifyFailedGateExit verifyFailedGateAction = iota
+	verifyFailedGateAccept
+	verifyFailedGateRemediate
+	verifyFailedGateShell
+)
+
+// handleInteractiveVerifyFailedGate is the interactive counterpart to the
+// VERIFY-FAILED park (ADR-0103): when a drain lands on a Verify-failed set on a
+// TTY it presents the findings and lets a human disposition the set — Accept
+// (record a human-authored PASS with a note), Remediate (spawn a Remediation
+// task with a note), open a shell in the checkout, or exit. Accept and Remediate
+// invoke the exact store/spawn behavior behind the `--accept` / `--remediate`
+// CLI flags. Re-verify is deliberately not offered here — re-running the Verifier
+// is a separate force action, not a finding response. Returns (true, nil) when
+// the caller should keep draining in-process (Accept flipped the set to verified,
+// Remediate spawned drainable work) and (false, nil) when it should fall back to
+// the static advice and exit (Exit chosen, or the prompt cannot run under --yes /
+// a non-interactive input).
+func handleInteractiveVerifyFailedGate(d *Deps, out io.Writer, in io.Reader, reader *bufio.Reader, yes bool, repo, runtimePath, taskSetID string, m *Manifest, workSHA, findings string) (bool, error) {
+	if yes || !canPrompt(in) || m == nil {
+		return false, nil
+	}
+	if in == nil {
+		in = os.Stdin
+	}
+	if reader == nil {
+		reader = bufio.NewReader(in)
+	}
+
+	for {
+		action, err := promptVerifyFailedGateAction(out, reader, taskSetID, findings)
+		if err != nil {
+			return true, err
+		}
+		switch action {
+		case verifyFailedGateAccept:
+			note, err := readGateNote(out, reader, "Accept note (why this is acceptable, optional): ")
+			if err != nil {
+				return true, err
+			}
+			if _, err := acceptResolvedSet(d, verifyCoreOptions{
+				Repo:        repo,
+				RuntimePath: runtimePath,
+				SetID:       taskSetID,
+				Output:      out,
+				Accept:      true,
+				AcceptNote:  note,
+			}, m, workSHA); err != nil {
+				return true, err
+			}
+			return true, nil
+		case verifyFailedGateRemediate:
+			note, err := readGateNote(out, reader, "Remediation note (what to fix, optional): ")
+			if err != nil {
+				return true, err
+			}
+			if _, err := remediateResolvedSet(d, verifyCoreOptions{
+				Repo:          repo,
+				RuntimePath:   runtimePath,
+				SetID:         taskSetID,
+				Output:        out,
+				Remediate:     true,
+				RemediateNote: note,
+			}, m, workSHA); err != nil {
+				return true, err
+			}
+			return true, nil
+		case verifyFailedGateShell:
+			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
+				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
+			}
+			// No state change, no refresh — loop back to the gate menu unchanged.
+		case verifyFailedGateExit:
+			return false, nil
+		}
+	}
+}
+
+func promptVerifyFailedGateAction(out io.Writer, reader *bufio.Reader, taskSetID, findings string) (verifyFailedGateAction, error) {
+	display := outputFor(out)
+	fmt.Fprintln(display)
+	display.line(ansiRed, "Verify-failed: %s did not clear the Verifier and needs a human decision.", taskSetID)
+	renderVerifyGateFindings(display, findings)
+	fmt.Fprintln(display, "  1. Accept (record a human-authored PASS)")
+	fmt.Fprintln(display, "  2. Remediate (spawn a fix task)")
+	fmt.Fprintln(display, "  3. Open a shell in the checkout")
+	fmt.Fprintln(display, "  0. Exit")
+	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [0]: "))
+
+	answer, err := readPromptLine(reader, "0")
+	if err != nil {
+		return verifyFailedGateExit, err
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "1":
+		return verifyFailedGateAccept, nil
+	case "2":
+		return verifyFailedGateRemediate, nil
+	case "3":
+		return verifyFailedGateShell, nil
+	case "", "0", "q", "quit", "exit":
+		return verifyFailedGateExit, nil
+	default:
+		fmt.Fprintln(display, "Choose 1, 2, 3, or 0.")
+		return promptVerifyFailedGateAction(out, reader, taskSetID, findings)
+	}
+}
+
+// renderVerifyGateFindings prints the recorded Verifier findings above the gate
+// menu so the human reads what failed before choosing a disposition.
+func renderVerifyGateFindings(display *output, findings string) {
+	if strings.TrimSpace(findings) == "" {
+		return
+	}
+	display.line(ansiBold, "  Findings:")
+	for _, line := range strings.Split(strings.TrimRight(findings, "\n"), "\n") {
+		fmt.Fprintf(display, "    %s\n", line)
+	}
+}
+
+// readGateNote prompts for a single-line note at a gate. It returns "" on an
+// empty answer or a closed input, so Accept / Remediate remain usable without a
+// note (both trim and tolerate an empty rationale).
+func readGateNote(out io.Writer, reader *bufio.Reader, label string) (string, error) {
+	display := outputFor(out)
+	fmt.Fprintf(display, "%s", display.styled(ansiCyan, label))
+	answer, err := readPromptLine(reader, "")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(answer), nil
 }
