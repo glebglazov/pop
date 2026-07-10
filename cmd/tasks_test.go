@@ -1802,6 +1802,10 @@ func TestVerifierSteeringFlagsRegistered(t *testing.T) {
 	if taskVerifyCmd.Flags().Lookup("accept") == nil {
 		t.Fatal("tasks verify --accept flag not registered")
 	}
+	// `pop tasks verify --remediate "<note>"` spawns a human-triggered Remediation task (ADR-0103).
+	if taskVerifyCmd.Flags().Lookup("remediate") == nil {
+		t.Fatal("tasks verify --remediate flag not registered")
+	}
 
 	// `pop tasks implement` accepts repeatable --verify-agent and --verify-effort.
 	verifyAgent := taskImplementCmd.Flags().Lookup("verify-agent")

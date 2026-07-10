@@ -109,8 +109,14 @@ type VerifyOptions struct {
 	// running the Verifier (ADR-0103): a human overriding a non-PASS verdict. The
 	// set derives verified from the resulting ordinary PASS row.
 	Accept bool
-	// Note is the human's rationale carried on the Accepted verdict; it feeds
-	// forward as context into later Verifier prompts.
+	// Remediate spawns a Remediation task from the set's findings carrying the
+	// human's Note (ADR-0103): a human turning findings into a fix past the auto
+	// FIXABLE-under-cap path (from NEEDS-HUMAN, or when the depth cap is
+	// exhausted). Mutually exclusive with Accept.
+	Remediate bool
+	// Note is the human's rationale: carried on the Accepted verdict (and fed
+	// forward as context into later Verifier prompts), or written into the
+	// human-triggered Remediation task's body.
 	Note string
 }
 
@@ -134,15 +140,20 @@ type verifyCoreOptions struct {
 	// Agents and Effort are the CLI-level Verifier overrides (highest
 	// precedence). Empty ⇒ resolution falls through to the per-set manifest
 	// override, then [tasks.verify], then [tasks.implement].agents / DefaultVerifyEffort.
-	Agents      []string
-	Effort      string
-	Timeout     time.Duration
-	Output      io.Writer
+	Agents  []string
+	Effort  string
+	Timeout time.Duration
+	Output  io.Writer
 	// Accept records a human-authored PASS (ADR-0103) instead of running the
 	// Verifier; AcceptNote carries the human's rationale onto that PASS row.
-	Accept      bool
-	AcceptNote  string
-	runVerifier func(prompt string) (string, error)
+	Accept     bool
+	AcceptNote string
+	// Remediate spawns a human-triggered Remediation task (ADR-0103) instead of
+	// running the Verifier; RemediateNote carries the human's rationale into its
+	// body. Mutually exclusive with Accept.
+	Remediate     bool
+	RemediateNote string
+	runVerifier   func(prompt string) (string, error)
 }
 
 // VerifyTaskSet runs the Verifier over a set using default dependencies.
@@ -171,16 +182,18 @@ func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 	}
 	cfg, _ := loadConfig(config.DefaultConfigPath())
 	return verifyResolvedSet(d, cfg, verifyCoreOptions{
-		Repo:        id.CommonDir,
-		DefPath:     resolved.DefinitionPath,
-		RuntimePath: runtimePath,
-		SetID:       strings.TrimSpace(opts.TaskSetID),
-		Agents:      opts.Agents,
-		Effort:      opts.Effort,
-		Timeout:     opts.Timeout,
-		Output:      opts.Output,
-		Accept:      opts.Accept,
-		AcceptNote:  opts.Note,
+		Repo:          id.CommonDir,
+		DefPath:       resolved.DefinitionPath,
+		RuntimePath:   runtimePath,
+		SetID:         strings.TrimSpace(opts.TaskSetID),
+		Agents:        opts.Agents,
+		Effort:        opts.Effort,
+		Timeout:       opts.Timeout,
+		Output:        opts.Output,
+		Accept:        opts.Accept,
+		AcceptNote:    opts.Note,
+		Remediate:     opts.Remediate,
+		RemediateNote: opts.Note,
 	})
 }
 
@@ -197,6 +210,9 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 	workSHA := verifyWorkSHA(d, opts.RuntimePath)
 	if opts.Accept {
 		return acceptResolvedSet(d, opts, m, workSHA)
+	}
+	if opts.Remediate {
+		return remediateResolvedSet(d, opts, m, workSHA)
 	}
 	v, err := runAndStoreVerdict(d, cfg, opts, m, workSHA, latestAcceptedNote(d, opts.Repo, opts.SetID))
 	if err != nil {
@@ -236,6 +252,46 @@ func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA str
 	}
 	printAcceptedVerdict(opts.Output, opts.SetID, workSHA, note)
 	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: VerdictPass}, nil
+}
+
+// remediateResolvedSet enacts a human-triggered Remediate (ADR-0103): a human
+// turns the set's findings into a fix by spawning a Remediation task carrying
+// their own note, without running the Verifier. Unlike the automatic
+// FIXABLE-under-cap spawn, this works from any current verdict (a NEEDS-HUMAN, or
+// a FIXABLE whose depth cap is exhausted) — the human authorises the fix the auto
+// path will not. It reuses spawnRemediationTask wholesale, so the new open AFK
+// work invalidates the set's cached verdicts and the Drain then picks the task up
+// like any eligible AFK task. The Remediation body carries the set's current
+// findings (the verdict recorded at the work SHA, when any) plus the human note.
+func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA string) (*VerifyResult, error) {
+	note := strings.TrimSpace(opts.RemediateNote)
+	findings := latestVerdictFindings(d, opts.Repo, opts.SetID, workSHA)
+	id, err := spawnRemediationTask(d, m, opts.Repo, workSHA, findings, note)
+	if err != nil {
+		return nil, err
+	}
+	printRemediationSpawned(opts.Output, opts.SetID, id, note)
+	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Findings: findings}, nil
+}
+
+// latestVerdictFindings returns the findings of the verdict recorded for
+// (repo, set) at workSHA, or "" when none exists or the store is unavailable. It
+// is best-effort: a human-triggered Remediation carries the findings as context
+// for the fixing agent, but the human note is the authoritative directive, so an
+// absent or unreadable verdict simply yields no findings rather than an error.
+func latestVerdictFindings(d *Deps, repo, setID, workSHA string) string {
+	if d == nil || repo == "" || setID == "" {
+		return ""
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil || !ok {
+		return ""
+	}
+	defer func() { _ = s.Close() }()
+	if v, err := s.GetVerifyVerdict(repo, setID, workSHA); err == nil && v != nil {
+		return v.Findings
+	}
+	return ""
 }
 
 // latestAcceptedNote returns the most recent human-authored Accept note for
@@ -951,6 +1007,26 @@ func printAcceptedVerdict(w io.Writer, setID, workSHA, note string) {
 			fmt.Fprintf(out, "     %s\n", line)
 		}
 	}
+}
+
+// printRemediationSpawned renders the outcome of a human-triggered Remediate
+// (ADR-0103): the Remediation task that was spawned and the human note it
+// carries. The set's cached verdicts are now invalidated and the task is
+// drainable.
+func printRemediationSpawned(w io.Writer, setID, remediationID, note string) {
+	if w == nil {
+		return
+	}
+	out := outputFor(w)
+	out.line(ansiBold, "━━ Spawned remediation task for %s", setID)
+	out.line(ansiCyan, "   Task: %s", remediationID)
+	if strings.TrimSpace(note) != "" {
+		out.line(ansiBold, "   Human note:")
+		for _, line := range strings.Split(strings.TrimRight(note, "\n"), "\n") {
+			fmt.Fprintf(out, "     %s\n", line)
+		}
+	}
+	out.line(ansiDim, "   Cached verdicts invalidated; the task is now drainable.")
 }
 
 func verdictStyle(v Verdict) string {

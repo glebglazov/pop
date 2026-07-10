@@ -599,6 +599,110 @@ func TestVerifyResolvedSetAcceptOverridesNonPassAtSameSHA(t *testing.T) {
 	}
 }
 
+// setupVerifyFixtureTasks is setupVerifyFixture with a caller-supplied task list,
+// so a test can stand up a set that already carries Remediation tasks (to
+// exercise the human over-cap path).
+func setupVerifyFixtureTasks(t *testing.T, git *deps.MockGit, tasks []Task) (*Deps, string) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	defPath := filepath.Join(root, "tasks")
+	setupManifest(t, defPath, "demo", tasks)
+	return &Deps{FS: deps.NewRealFileSystem(), Git: git}, defPath
+}
+
+// TestVerifyResolvedSetRemediateFromNeedsHumanSpawnsTask: `pop tasks verify <set>
+// --remediate "<note>"` spawns a Remediation task from a NEEDS-HUMAN verdict —
+// where the auto path would park — carrying both the recorded findings and the
+// human note, and invalidates the set's cached verdicts (ADR-0103). The Verifier
+// is not run.
+func TestVerifyResolvedSetRemediateFromNeedsHumanSpawnsTask(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaNH\n", "", ""))
+	// The auto path parks a NEEDS-HUMAN; a human authorises a remediation instead.
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaNH", Verdict: "NEEDS-HUMAN", Findings: "the retry policy needs a human call"})
+
+	var out bytes.Buffer
+	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output:        &out,
+		Remediate:     true,
+		RemediateNote: "cap the retries at 3 and log the drop",
+		runVerifier:   func(string) (string, error) { t.Fatal("remediate must not invoke the Verifier"); return "", nil },
+	}); err != nil {
+		t.Fatalf("verifyResolvedSet remediate: %v", err)
+	}
+
+	// The Remediation task body carries the findings and the human note.
+	body, err := os.ReadFile(filepath.Join(defPath, "demo", "02-remediation.md"))
+	if err != nil {
+		t.Fatalf("read remediation body: %v", err)
+	}
+	for _, want := range []string{"the retry policy needs a human call", "cap the retries at 3 and log the drop", "## Human note", "## Acceptance criteria"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("remediation body missing %q:\n%s", want, body)
+		}
+	}
+
+	// The manifest reloads valid with a new open AFK task — the set is drainable.
+	reloaded := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
+	if !reloaded.Valid {
+		t.Fatalf("reloaded manifest invalid: %v", reloaded.Errors)
+	}
+	var rem *Task
+	for i := range reloaded.Tasks {
+		if reloaded.Tasks[i].ID == "02-remediation" {
+			rem = &reloaded.Tasks[i]
+		}
+	}
+	if rem == nil || rem.Type != "AFK" || rem.Status != "open" {
+		t.Fatalf("remediation task = %+v, want a new open AFK task", rem)
+	}
+
+	// Spawning invalidated the set's cached verdicts.
+	if stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaNH"); stored != nil {
+		t.Fatalf("cached verdict = %+v, want nil after remediation invalidated the episode", stored)
+	}
+	if !strings.Contains(out.String(), "Spawned remediation") || !strings.Contains(out.String(), "cap the retries at 3 and log the drop") {
+		t.Fatalf("output missing spawned-remediation summary/note:\n%s", out.String())
+	}
+}
+
+// TestVerifyResolvedSetRemediateOverCapSpawnsTask: a human-triggered remediation
+// spawns a task even when the set has already exhausted the auto remediation
+// depth cap (ADR-0103) — the human authorises the fix the auto path refuses.
+func TestVerifyResolvedSetRemediateOverCapSpawnsTask(t *testing.T) {
+	// The set already carries DefaultMaxRemediationDepth remediation tasks: the
+	// auto FIXABLE-under-cap path would spawn nothing.
+	d, defPath := setupVerifyFixtureTasks(t, stubGit("shaCap\n", "", ""), remediationSet(DefaultMaxRemediationDepth))
+
+	var out bytes.Buffer
+	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output:        &out,
+		Remediate:     true,
+		RemediateNote: "the last gap is small; push past the cap",
+	}); err != nil {
+		t.Fatalf("verifyResolvedSet remediate over cap: %v", err)
+	}
+
+	reloaded := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
+	if !reloaded.Valid {
+		t.Fatalf("reloaded manifest invalid: %v", reloaded.Errors)
+	}
+	if got := remediationDepth(reloaded); got != DefaultMaxRemediationDepth+1 {
+		t.Fatalf("remediation depth = %d, want %d (human push past the cap)", got, DefaultMaxRemediationDepth+1)
+	}
+	// The new task is numbered one past the highest existing ordinal.
+	nextID := fmt.Sprintf("%02d-remediation", DefaultMaxRemediationDepth+2)
+	body, err := os.ReadFile(filepath.Join(defPath, "demo", nextID+".md"))
+	if err != nil {
+		t.Fatalf("read remediation body %q: %v", nextID, err)
+	}
+	if !strings.Contains(string(body), "the last gap is small; push past the cap") {
+		t.Fatalf("remediation body missing human note:\n%s", body)
+	}
+}
+
 // TestBuildVerifierPromptForwardFeedsAcceptedNote: a non-empty prior human note
 // is folded into the Verifier prompt as context (ADR-0103), explicitly framed as
 // non-suppressing; an empty note adds no such section.

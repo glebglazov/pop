@@ -74,16 +74,39 @@ func nextTaskNumber(m *Manifest) int {
 // Acceptance criteria section (the manifest validator requires one). Findings
 // live only here — never edited into another task's spec, which stays stable,
 // task-scoped intent.
-func remediationBody(workSHA, findings string, cycle int) string {
+//
+// A non-empty humanNote marks a human-triggered remediation (ADR-0103): a human
+// turned the findings into a fix by authorising this task, past the auto path's
+// FIXABLE-under-cap gate (from a NEEDS-HUMAN verdict, or when the depth cap is
+// exhausted). The note is folded into a "## Human note" section and the "What to
+// build" framing reflects the human authorisation rather than the automatic
+// FIXABLE spawn — the untrusted note is neutralized the same way findings are so
+// an echoed AC heading can never invalidate the task.
+func remediationBody(workSHA, findings, humanNote string, cycle int) string {
+	note := neutralizeACHeaders(strings.TrimSpace(humanNote))
 	var b strings.Builder
 	b.WriteString("## What to build\n\n")
-	b.WriteString("Resolve the verification findings below. An independent Verifier judged this task set's completed work")
-	if workSHA != "" {
-		b.WriteString(fmt.Sprintf(" at %s", ShortSHA(workSHA)))
+	if note != "" {
+		b.WriteString("Resolve the verification findings below. A human reviewed this task set's completed work")
+		if workSHA != "" {
+			b.WriteString(fmt.Sprintf(" at %s", ShortSHA(workSHA)))
+		}
+		b.WriteString(" and authorised this remediation: the acceptance criteria are not yet met, and the human has directed an agent to close the gaps (see their note below). ")
+		b.WriteString("Make the changes needed to satisfy the set's acceptance criteria. Do not edit the other task specs — they are stable, task-scoped intent; fix the code and artifacts they describe.\n\n")
+	} else {
+		b.WriteString("Resolve the verification findings below. An independent Verifier judged this task set's completed work")
+		if workSHA != "" {
+			b.WriteString(fmt.Sprintf(" at %s", ShortSHA(workSHA)))
+		}
+		b.WriteString(" and returned FIXABLE: the acceptance criteria are not yet met, but the gaps are ones an agent can close. ")
+		b.WriteString("Make the changes needed to satisfy the set's acceptance criteria. Do not edit the other task specs — they are stable, task-scoped intent; fix the code and artifacts they describe.\n\n")
 	}
-	b.WriteString(" and returned FIXABLE: the acceptance criteria are not yet met, but the gaps are ones an agent can close. ")
-	b.WriteString("Make the changes needed to satisfy the set's acceptance criteria. Do not edit the other task specs — they are stable, task-scoped intent; fix the code and artifacts they describe.\n\n")
 	b.WriteString(fmt.Sprintf("This is remediation cycle %d.\n\n", cycle))
+	if note != "" {
+		b.WriteString("## Human note\n\n")
+		b.WriteString(note)
+		b.WriteString("\n\n")
+	}
 	b.WriteString("## Findings\n\n")
 	f := neutralizeACHeaders(strings.TrimSpace(findings))
 	if f == "" {
@@ -126,7 +149,12 @@ func neutralizeACHeaders(findings string) string {
 // set so the Verifier re-fires against the next work SHA (ADR-0096). An empty
 // repo or a store error skips invalidation silently — remediation must still
 // succeed.
-func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings string) (string, error) {
+//
+// A non-empty humanNote marks a human-triggered remediation (ADR-0103): the
+// human's rationale is carried into the task body alongside the findings and the
+// framing reflects that a human authorised the fix (the auto FIXABLE path passes
+// an empty note).
+func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings, humanNote string) (string, error) {
 	if m == nil {
 		return "", exitErr(ExitOperational, "spawn remediation task: nil manifest")
 	}
@@ -135,7 +163,7 @@ func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings string) 
 	file := id + ".md"
 
 	mdPath := filepath.Join(m.Dir, file)
-	if err := WriteAtomicWith(d, mdPath, []byte(remediationBody(workSHA, findings, cycle)), 0o644); err != nil {
+	if err := WriteAtomicWith(d, mdPath, []byte(remediationBody(workSHA, findings, humanNote, cycle)), 0o644); err != nil {
 		return "", exitErr(ExitOperational, "write remediation task body: %v", err)
 	}
 
@@ -169,7 +197,7 @@ func spawnRemediationIfUnderCap(d *Deps, m *Manifest, repo, workSHA, findings st
 	if remediationDepth(m) >= maxDepth {
 		return false, "", nil
 	}
-	id, err = spawnRemediationTask(d, m, repo, workSHA, findings)
+	id, err = spawnRemediationTask(d, m, repo, workSHA, findings, "")
 	if err != nil {
 		return false, "", err
 	}

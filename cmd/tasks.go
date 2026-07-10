@@ -38,6 +38,7 @@ var (
 	taskVerifyAgents          []string
 	taskVerifyEffort          string
 	taskVerifyAccept          string
+	taskVerifyRemediate       string
 	taskImplementVerifyAgents []string
 	taskImplementVerifyEffort string
 	taskStatusArchived        bool
@@ -245,6 +246,7 @@ func init() {
 	taskVerifyCmd.Flags().StringArrayVar(&taskVerifyAgents, "agent", nil, "Verifier agent preset; repeat to define an ordered quota/missing-binary fallback list")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyEffort, "effort", "", "Verifier model-strength tier: light, standard, or heavy (default heavy)")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyAccept, "accept", "", "Accept a non-PASS verdict: record a human-authored PASS at the current work SHA carrying this note (skips the Verifier); the note feeds forward as context into later verifier prompts")
+	taskVerifyCmd.Flags().StringVar(&taskVerifyRemediate, "remediate", "", "Remediate a non-PASS verdict: spawn a Remediation task from the set's findings carrying this note (skips the Verifier), even from NEEDS-HUMAN or past the remediation depth cap; the Drain then picks it up")
 
 	taskExportCmd.Flags().StringVarP(&taskExportOutput, "output", "o", "", "Output archive path (default: <task-set-id>.tar.gz in the current directory)")
 	taskImportCmd.Flags().StringVar(&taskImportAs, "as", "", "Install under a different task set identifier")
@@ -606,13 +608,24 @@ func runTaskSetPriorityWith(d *tasks.Deps, w io.Writer, taskSetID, priorityArg s
 }
 
 func runTaskVerify(cmd *cobra.Command, args []string) error {
-	return runTaskVerifyWith(tasks.DefaultDeps(), os.Stdout, args[0], cmd.Flags().Changed("accept"), taskVerifyAccept)
+	return runTaskVerifyWith(tasks.DefaultDeps(), os.Stdout, args[0],
+		cmd.Flags().Changed("accept"), taskVerifyAccept,
+		cmd.Flags().Changed("remediate"), taskVerifyRemediate)
 }
 
-func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool, note string) error {
+func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool, acceptNote string, remediate bool, remediateNote string) error {
+	if accept && remediate {
+		return fmt.Errorf("tasks verify: --accept and --remediate are mutually exclusive")
+	}
 	timeout, err := time.ParseDuration(taskVerifyTimeout)
 	if err != nil {
 		return fmt.Errorf("tasks verify: invalid --timeout %q: %w", taskVerifyTimeout, err)
+	}
+	// One disposition is active at a time (guarded above), so the single Note
+	// field carries whichever note was supplied.
+	note := acceptNote
+	if remediate {
+		note = remediateNote
 	}
 	if _, err := tasks.VerifyTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.VerifyOptions{
 		ResolveInput: taskResolveInput(),
@@ -622,6 +635,7 @@ func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool
 		Timeout:      timeout,
 		Output:       w,
 		Accept:       accept,
+		Remediate:    remediate,
 		Note:         note,
 	}); err != nil {
 		return fmt.Errorf("tasks verify: %w", err)
@@ -727,25 +741,25 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 	impl.LoadConfig = taskConfigLoad
 	impl.StdinInteractive = taskStdinInteractive
 	_, err = implement.RunWholeSetWith(impl, implement.WholeSetOptions{
-		ResolveInput:    taskResolveInput(),
-		TaskSetOverride: taskSetPath,
-		InWorktree:      taskInWorktree,
-		AgentPreset:     selectedTaskAgentPreset(),
-		AgentPresets:    selectedTaskAgentPresets(),
-		AgentExplicit:   agentExplicit,
-		AgentCmd:        taskAgentCmd,
-		AgentOutput:     taskAgentOutput,
-		AllowDirty:      taskAllowDirty,
+		ResolveInput:     taskResolveInput(),
+		TaskSetOverride:  taskSetPath,
+		InWorktree:       taskInWorktree,
+		AgentPreset:      selectedTaskAgentPreset(),
+		AgentPresets:     selectedTaskAgentPresets(),
+		AgentExplicit:    agentExplicit,
+		AgentCmd:         taskAgentCmd,
+		AgentOutput:      taskAgentOutput,
+		AllowDirty:       taskAllowDirty,
 		MaxTries:         taskMaxTries,
 		MaxTriesExplicit: maxTriesExplicit,
 		Timeout:          timeout,
-		VerifyAgents:    append([]string(nil), taskImplementVerifyAgents...),
-		VerifyEffort:    taskImplementVerifyEffort,
-		Yes:             taskRunYes,
-		ConfirmIn:       stdin,
-		ConfirmOut:      stderr,
-		Output:          stdout,
-		PreSeedTopic:    taskPreSeedTopic(),
+		VerifyAgents:     append([]string(nil), taskImplementVerifyAgents...),
+		VerifyEffort:     taskImplementVerifyEffort,
+		Yes:              taskRunYes,
+		ConfirmIn:        stdin,
+		ConfirmOut:       stderr,
+		Output:           stdout,
+		PreSeedTopic:     taskPreSeedTopic(),
 	})
 	return err
 }
