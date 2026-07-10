@@ -2931,6 +2931,120 @@ projects = [{ path = "/main" }]
 			t.Error("repo block from include should be present")
 		}
 	})
+
+	t.Run("include-only workbench options block is merged without warning", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("private.toml", `
+[workbench]
+pick_on_create = true
+order = ["minimal", "<empty>"]
+`)
+		configPath := writeFile("config.toml", `
+includes = ["private.toml"]
+projects = [{ path = "/main" }]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if !cfg.WorkbenchPickOnCreate() {
+			t.Error("pick_on_create from include should be enabled")
+		}
+		if got := cfg.WorkbenchOrder(); len(got) != 2 || got[0] != "minimal" || got[1] != "<empty>" {
+			t.Errorf("WorkbenchOrder() = %v, want [minimal <empty>]", got)
+		}
+		if len(cfg.Warnings) != 0 {
+			t.Errorf("expected no warnings, got: %v", cfg.Warnings)
+		}
+	})
+
+	t.Run("main config workbench options win over include per field", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("private.toml", `
+[workbench]
+pick_on_create = true
+order = ["from-include"]
+`)
+		configPath := writeFile("config.toml", `
+includes = ["private.toml"]
+
+[workbench]
+pick_on_create = false
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		// Main defined pick_on_create=false → wins; include's true is skipped.
+		if cfg.WorkbenchPickOnCreate() {
+			t.Error("main's pick_on_create=false should win over include's true")
+		}
+		// Main left order unset → include fills it (field-level merge).
+		if got := cfg.WorkbenchOrder(); len(got) != 1 || got[0] != "from-include" {
+			t.Errorf("WorkbenchOrder() = %v, want [from-include] from include", got)
+		}
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("expected 1 skip warning, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+		}
+		if !strings.Contains(cfg.Warnings[0], "pick_on_create") {
+			t.Errorf("warning should name pick_on_create, got: %q", cfg.Warnings[0])
+		}
+	})
+
+	t.Run("earlier include workbench options win over later include", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("first.toml", `
+[workbench]
+order = ["first"]
+`)
+		writeFile("second.toml", `
+[workbench]
+order = ["second"]
+`)
+		configPath := writeFile("config.toml", `
+includes = ["first.toml", "second.toml"]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if got := cfg.WorkbenchOrder(); len(got) != 1 || got[0] != "first" {
+			t.Errorf("WorkbenchOrder() = %v, want [first] (first definition wins)", got)
+		}
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("expected 1 skip warning, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+		}
+		if !strings.Contains(cfg.Warnings[0], "second.toml") || !strings.Contains(cfg.Warnings[0], "order") {
+			t.Errorf("warning should name second.toml and order, got: %q", cfg.Warnings[0])
+		}
+	})
 }
 
 func TestCommandsForMode(t *testing.T) {

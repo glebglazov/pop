@@ -305,7 +305,8 @@ type WorkbenchOptions struct {
 	// on-screen labels: Workbench names plus the special options "<empty>" and
 	// "<reset>". Named tokens front-load in the listed order; everything unnamed
 	// follows in default order ("<empty>", Workbenches in resolution order,
-	// "<reset>"). A token that resolves to nothing is ignored. Global-only.
+	// "<reset>"). A token that resolves to nothing is ignored. Settable from an
+	// included file (first definition wins; the main config wins over includes).
 	Order []string `toml:"order" desc:"Fixed display order of Workbench-list tokens (array of on-screen labels)."`
 }
 
@@ -582,7 +583,7 @@ type Config struct {
 	Effort map[string]EffortConfig `toml:"effort" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
 	// Workbenches is the canonical TOML key for session blueprints.
 	Workbenches []Workbench `toml:"workbenches" desc:"Global session blueprints (templates)."`
-	// WorkbenchOpts holds the [workbench] options table (empty for now).
+	// WorkbenchOpts holds the [workbench] options table (pick_on_create, order).
 	WorkbenchOpts *WorkbenchOptions   `toml:"workbench" desc:"Workbench options ([workbench] table)."`
 	Queue         *QueueConfig        `toml:"queue" desc:"Queue supervisor settings ([queue] table)."`
 	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
@@ -1527,6 +1528,13 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	}
 
 	configDir := filepath.Dir(path)
+	// [workbench] options merge with "first definition wins": the main file wins,
+	// and the first include to set a field wins over later includes. Seed the
+	// per-field claims from the main file's MetaData — never from cfg.WorkbenchOpts
+	// being non-nil, since the runtime [workbench.preferred] table (ADR-0078) can
+	// leave it non-nil with pick_on_create/order unset.
+	workbenchPickClaimed := md.IsDefined("workbench", "pick_on_create")
+	workbenchOrderClaimed := md.IsDefined("workbench", "order")
 	for _, include := range cfg.Includes {
 		expanded := expandHomeWith(d, include)
 		if !filepath.IsAbs(expanded) {
@@ -1571,6 +1579,8 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 			}
 			cfg.Workbenches = append(cfg.Workbenches, validTemplates...)
 		}
+
+		mergeIncludedWorkbenchOpts(&cfg, included.WorkbenchOpts, includedMD, expanded, &workbenchPickClaimed, &workbenchOrderClaimed)
 
 		for key, block := range included.Repo {
 			if _, exists := cfg.Repo[key]; exists {
@@ -2071,7 +2081,8 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 
 // includeFileWarnings returns load-time warnings for non-whitelisted top-level
 // keys and nested includes in an included file. Includes carry a fixed whitelist:
-// `projects`, `workbenches`, `[tasks]`, `[effort.<agent>]`, and `[repo."<path>"]`.
+// `projects`, `workbenches`, `[workbench]`, `[tasks]`, `[effort.<agent>]`, and
+// `[repo."<path>"]`.
 func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	var warnings []string
 
@@ -2099,6 +2110,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	whitelisted := map[string]bool{
 		"projects":    true,
 		"workbenches": true,
+		"workbench":   true, // [workbench] options block (pick_on_create, order)
 		"repo":        true,
 		"tasks":       true,
 		"workload":    true, // deprecated alias for tasks (ADR-0092)
@@ -2112,7 +2124,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 		if !whitelisted[key] && !seen[key] {
 			seen[key] = true
 			warnings = append(warnings, fmt.Sprintf(
-				"%s: %q ignored (includes only support projects, workbenches, repo, tasks, and effort blocks)",
+				"%s: %q ignored (includes only support projects, workbenches, workbench, repo, tasks, and effort blocks)",
 				path, key,
 			))
 		}
@@ -2127,6 +2139,46 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	}
 
 	return warnings
+}
+
+// mergeIncludedWorkbenchOpts folds an included file's [workbench] options block
+// into cfg. Each field merges independently with "first definition wins": the
+// main config's fields win, and among includes the first to set a field wins;
+// a later definition is skipped with a warning. pickClaimed/orderClaimed carry
+// prior definedness across the include loop (seeded from the main file's
+// MetaData). Definedness is driven off the include's MetaData, never off value
+// zero-ness, so an include that sets pick_on_create = false still claims it.
+func mergeIncludedWorkbenchOpts(cfg *Config, included *WorkbenchOptions, md toml.MetaData, path string, pickClaimed, orderClaimed *bool) {
+	if included == nil {
+		return
+	}
+	if md.IsDefined("workbench", "pick_on_create") {
+		if *pickClaimed {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+				"%s: [workbench] pick_on_create skipped, already defined (first definition wins)", path))
+		} else {
+			ensureWorkbenchOpts(cfg).PickOnCreate = included.PickOnCreate
+			*pickClaimed = true
+		}
+	}
+	if md.IsDefined("workbench", "order") {
+		if *orderClaimed {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+				"%s: [workbench] order skipped, already defined (first definition wins)", path))
+		} else {
+			ensureWorkbenchOpts(cfg).Order = append([]string(nil), included.Order...)
+			*orderClaimed = true
+		}
+	}
+}
+
+// ensureWorkbenchOpts returns cfg.WorkbenchOpts, allocating an empty block first
+// when absent so include-only [workbench] fields have somewhere to land.
+func ensureWorkbenchOpts(cfg *Config) *WorkbenchOptions {
+	if cfg.WorkbenchOpts == nil {
+		cfg.WorkbenchOpts = &WorkbenchOptions{}
+	}
+	return cfg.WorkbenchOpts
 }
 
 func mergeIncludedTask(cfg *Config, included *TasksConfig, path string) {
