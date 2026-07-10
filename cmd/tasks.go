@@ -37,6 +37,7 @@ var (
 	taskVerifyTimeout         string
 	taskVerifyAgents          []string
 	taskVerifyEffort          string
+	taskVerifyAccept          string
 	taskImplementVerifyAgents []string
 	taskImplementVerifyEffort string
 	taskStatusArchived        bool
@@ -243,6 +244,7 @@ func init() {
 	taskVerifyCmd.Flags().StringVar(&taskVerifyTimeout, "timeout", "1h", "Maximum duration for the Verifier attempt")
 	taskVerifyCmd.Flags().StringArrayVar(&taskVerifyAgents, "agent", nil, "Verifier agent preset; repeat to define an ordered quota/missing-binary fallback list")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyEffort, "effort", "", "Verifier model-strength tier: light, standard, or heavy (default heavy)")
+	taskVerifyCmd.Flags().StringVar(&taskVerifyAccept, "accept", "", "Accept a non-PASS verdict: record a human-authored PASS at the current work SHA carrying this note (skips the Verifier); the note feeds forward as context into later verifier prompts")
 
 	taskExportCmd.Flags().StringVarP(&taskExportOutput, "output", "o", "", "Output archive path (default: <task-set-id>.tar.gz in the current directory)")
 	taskImportCmd.Flags().StringVar(&taskImportAs, "as", "", "Install under a different task set identifier")
@@ -604,10 +606,10 @@ func runTaskSetPriorityWith(d *tasks.Deps, w io.Writer, taskSetID, priorityArg s
 }
 
 func runTaskVerify(cmd *cobra.Command, args []string) error {
-	return runTaskVerifyWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	return runTaskVerifyWith(tasks.DefaultDeps(), os.Stdout, args[0], cmd.Flags().Changed("accept"), taskVerifyAccept)
 }
 
-func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
+func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool, note string) error {
 	timeout, err := time.ParseDuration(taskVerifyTimeout)
 	if err != nil {
 		return fmt.Errorf("tasks verify: invalid --timeout %q: %w", taskVerifyTimeout, err)
@@ -619,6 +621,8 @@ func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		Effort:       taskVerifyEffort,
 		Timeout:      timeout,
 		Output:       w,
+		Accept:       accept,
+		Note:         note,
 	}); err != nil {
 		return fmt.Errorf("tasks verify: %w", err)
 	}

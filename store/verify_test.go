@@ -45,6 +45,76 @@ func TestPutGetVerifyVerdictRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPutGetVerifyVerdictHumanAuthoredRoundTrip: an Accepted verdict (ADR-0103)
+// round-trips its human-authored provenance and note, and GetLatestAcceptedNote
+// returns that note. Pre-existing agent-authored rows read as not-human with no
+// note, and never surface through GetLatestAcceptedNote.
+func TestPutGetVerifyVerdictHumanAuthoredRoundTrip(t *testing.T) {
+	s := openTestStore(t)
+	accepted := VerifyVerdict{
+		Repo:          "/repo/.git",
+		SetID:         "set-a",
+		WorkSHA:       "sha1",
+		Verdict:       "PASS",
+		Scope:         2,
+		HumanAuthored: true,
+		Note:          "the timeout is intentional",
+	}
+	if err := s.PutVerifyVerdict(accepted); err != nil {
+		t.Fatalf("PutVerifyVerdict accepted: %v", err)
+	}
+	got, err := s.GetVerifyVerdict("/repo/.git", "set-a", "sha1")
+	if err != nil {
+		t.Fatalf("GetVerifyVerdict: %v", err)
+	}
+	if got == nil || !got.HumanAuthored || got.Note != "the timeout is intentional" {
+		t.Fatalf("GetVerifyVerdict = %+v, want human-authored PASS carrying the note", got)
+	}
+	// The latest PASS read carries provenance too (status derivation is unchanged;
+	// this only proves the columns survive the PASS query path).
+	pass, err := s.GetLatestPassVerifyVerdict("/repo/.git", "set-a")
+	if err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict: %v", err)
+	}
+	if pass == nil || !pass.HumanAuthored || pass.Note != "the timeout is intentional" {
+		t.Fatalf("GetLatestPassVerifyVerdict = %+v, want human-authored PASS carrying the note", pass)
+	}
+	note, err := s.GetLatestAcceptedNote("/repo/.git", "set-a")
+	if err != nil {
+		t.Fatalf("GetLatestAcceptedNote: %v", err)
+	}
+	if note != "the timeout is intentional" {
+		t.Fatalf("GetLatestAcceptedNote = %q, want the accepted note", note)
+	}
+}
+
+// TestGetLatestAcceptedNoteIgnoresAgentAndEmptyNotes: an agent-authored verdict
+// (the default shape) never surfaces as an accepted note, and a human-authored
+// row with an empty note is skipped in favour of the most recent noted accept.
+func TestGetLatestAcceptedNoteIgnoresAgentAndEmptyNotes(t *testing.T) {
+	s := openTestStore(t)
+	base := time.Now().UTC().Truncate(time.Second)
+	// An ordinary agent PASS (no provenance, no note).
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "sha-agent", Verdict: "PASS", ComputedAt: base.Add(-2 * time.Hour)}); err != nil {
+		t.Fatalf("PutVerifyVerdict agent: %v", err)
+	}
+	// No accepted note yet.
+	if note, err := s.GetLatestAcceptedNote("/repo/.git", "set-a"); err != nil || note != "" {
+		t.Fatalf("GetLatestAcceptedNote = (%q, %v), want empty before any accept", note, err)
+	}
+	// A human accept carrying a note.
+	if err := s.PutVerifyVerdict(VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "sha-accept", Verdict: "PASS", HumanAuthored: true, Note: "known non-issue", ComputedAt: base}); err != nil {
+		t.Fatalf("PutVerifyVerdict accept: %v", err)
+	}
+	note, err := s.GetLatestAcceptedNote("/repo/.git", "set-a")
+	if err != nil {
+		t.Fatalf("GetLatestAcceptedNote: %v", err)
+	}
+	if note != "known non-issue" {
+		t.Fatalf("GetLatestAcceptedNote = %q, want the human accept note", note)
+	}
+}
+
 func TestPutVerifyVerdictOverwritesSameSHA(t *testing.T) {
 	s := openTestStore(t)
 	base := VerifyVerdict{Repo: "/repo/.git", SetID: "set-a", WorkSHA: "sha1", Verdict: "FIXABLE", Findings: "first"}

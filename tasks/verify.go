@@ -105,6 +105,13 @@ type VerifyOptions struct {
 	Timeout time.Duration
 	// Output receives the live agent stream and the rendered verdict.
 	Output io.Writer
+	// Accept records a human-authored PASS at the current work SHA instead of
+	// running the Verifier (ADR-0103): a human overriding a non-PASS verdict. The
+	// set derives verified from the resulting ordinary PASS row.
+	Accept bool
+	// Note is the human's rationale carried on the Accepted verdict; it feeds
+	// forward as context into later Verifier prompts.
+	Note string
 }
 
 // VerifyResult is the outcome of one verification, returned after the verdict is
@@ -131,6 +138,10 @@ type verifyCoreOptions struct {
 	Effort      string
 	Timeout     time.Duration
 	Output      io.Writer
+	// Accept records a human-authored PASS (ADR-0103) instead of running the
+	// Verifier; AcceptNote carries the human's rationale onto that PASS row.
+	Accept      bool
+	AcceptNote  string
 	runVerifier func(prompt string) (string, error)
 }
 
@@ -168,6 +179,8 @@ func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		Effort:      opts.Effort,
 		Timeout:     opts.Timeout,
 		Output:      opts.Output,
+		Accept:      opts.Accept,
+		AcceptNote:  opts.Note,
 	})
 }
 
@@ -182,13 +195,67 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 		return nil, err
 	}
 	workSHA := verifyWorkSHA(d, opts.RuntimePath)
-	v, err := runAndStoreVerdict(d, cfg, opts, m, workSHA)
+	if opts.Accept {
+		return acceptResolvedSet(d, opts, m, workSHA)
+	}
+	v, err := runAndStoreVerdict(d, cfg, opts, m, workSHA, latestAcceptedNote(d, opts.Repo, opts.SetID))
 	if err != nil {
 		return nil, err
 	}
 	verdict := Verdict(v.Verdict)
 	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings, opts.Agents, opts.Effort)
 	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: verdict, Findings: v.Findings}, nil
+}
+
+// acceptResolvedSet records a human-authored PASS at workSHA (ADR-0103) without
+// running the Verifier — a human overriding a non-PASS verdict. It is an
+// ordinary PASS row (flagged human-authored, carrying the note), so it reuses
+// PASS idempotency at the SHA (overwriting any non-PASS verdict there), the
+// scope-growth invalidation (ADR-0101), and status derivation: the set flips to
+// verified with no change to ResolveVerifiedStatus. The note is captured on the
+// row and fed forward as context into later Verifier prompts.
+func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA string) (*VerifyResult, error) {
+	note := strings.TrimSpace(opts.AcceptNote)
+	v := store.VerifyVerdict{
+		Repo:          opts.Repo,
+		SetID:         opts.SetID,
+		WorkSHA:       workSHA,
+		Verdict:       string(VerdictPass),
+		Scope:         afkTaskCount(m),
+		HumanAuthored: true,
+		Note:          note,
+		ComputedAt:    time.Now().UTC(),
+	}
+	s, err := openDrainStore(d)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = s.Close() }()
+	if err := s.PutVerifyVerdict(v); err != nil {
+		return nil, exitErr(ExitOperational, "record accepted verdict: %v", err)
+	}
+	printAcceptedVerdict(opts.Output, opts.SetID, workSHA, note)
+	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: VerdictPass}, nil
+}
+
+// latestAcceptedNote returns the most recent human-authored Accept note for
+// (repo, set), or "" when none exists or the store is unavailable. It is
+// best-effort: forward-feeding a prior note is context that sharpens the next
+// Verifier run, never a correctness gate, so any lookup failure yields "".
+func latestAcceptedNote(d *Deps, repo, setID string) string {
+	if d == nil || repo == "" || setID == "" {
+		return ""
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil || !ok {
+		return ""
+	}
+	defer func() { _ = s.Close() }()
+	note, err := s.GetLatestAcceptedNote(repo, setID)
+	if err != nil {
+		return ""
+	}
+	return note
 }
 
 // reverifyGateContext carries the resolved Verifier inputs a HITL gate needs to
@@ -221,7 +288,7 @@ func reverifyAtGate(d *Deps, rv *reverifyGateContext, out io.Writer, repo, runti
 		runVerifier: rv.runVerifier,
 	}
 	workSHA := verifyWorkSHA(d, runtimePath)
-	v, err := runAndStoreVerdict(d, rv.cfg, opts, m, workSHA)
+	v, err := runAndStoreVerdict(d, rv.cfg, opts, m, workSHA, latestAcceptedNote(d, repo, setID))
 	if err != nil {
 		return err
 	}
@@ -255,9 +322,12 @@ func loadVerifiableManifest(d *Deps, opts verifyCoreOptions) (*Manifest, error) 
 // parses the three-way verdict, upserts it into the Drain store keyed by (repo,
 // set, work SHA), and returns the stored record. It always invokes the Verifier
 // (the force path shared by `pop tasks verify` and, on a cache miss, the drain).
-func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, workSHA string) (*store.VerifyVerdict, error) {
+// A non-empty priorNote is folded into the prompt as context (ADR-0103) so a
+// human-accepted non-issue is not re-flagged, without suppressing fresh
+// judgment; the freshly recorded verdict is agent-authored (not human-authored).
+func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, workSHA, priorNote string) (*store.VerifyVerdict, error) {
 	diff := verifyWorkDiff(d, opts.RuntimePath, opts.SetID)
-	prompt := buildVerifierPrompt(d, m, workSHA, diff)
+	prompt := buildVerifierPrompt(d, m, workSHA, diff, priorNote)
 
 	run := opts.runVerifier
 	if run == nil {
@@ -306,6 +376,7 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 // that stale PASS is returned without re-invoking the Verifier (ADR-0096). Only
 // when no PASS verdict exists in the episode does the Verifier actually run.
 func ensureVerifyVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, workSHA string) (*store.VerifyVerdict, error) {
+	priorNote := ""
 	if s, ok, err := openDrainStoreIfExists(d); err == nil && ok {
 		defer func() { _ = s.Close() }()
 		if cached, gerr := s.GetVerifyVerdict(opts.Repo, opts.SetID, workSHA); gerr == nil && cached != nil {
@@ -322,13 +393,17 @@ func ensureVerifyVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m 
 			// coasts on the immunizing PASS (ADR-0096). A zero recorded scope means
 			// unknown (legacy verdict) and never triggers the growth check.
 			if pass.Scope > 0 && afkTaskCount(m) > pass.Scope {
+				// Capture any human Accept note (ADR-0103) before the row is deleted, so
+				// it still feeds forward as context into the fresh Verifier run even
+				// though the invalidated PASS itself no longer immunizes.
+				priorNote = pass.Note
 				_ = s.InvalidateVerifyVerdicts(opts.Repo, opts.SetID)
 			} else {
 				return pass, nil
 			}
 		}
 	}
-	return runAndStoreVerdict(d, cfg, opts, m, workSHA)
+	return runAndStoreVerdict(d, cfg, opts, m, workSHA, priorNote)
 }
 
 // afkTaskCount returns the number of AFK-typed tasks in the set — the scope a
@@ -732,8 +807,11 @@ const prdFileName = "prd.md"
 // that would clear it. When the set folder has a co-located prd.md, its content
 // is folded in as optional context that sharpens judgment — it never replaces
 // the acceptance criteria as the authoritative contract, and its absence is not
-// an error.
-func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff string) string {
+// an error. A non-empty priorNote carries a human's earlier Accept rationale
+// (ADR-0103): it is folded in as context so the known non-issue it describes is
+// not re-flagged, but it is explicitly not a suppression — a genuine regression
+// at that spot must still fail.
+func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff, priorNote string) string {
 	var b strings.Builder
 	b.WriteString("You are an independent Verifier. A separate agent has already implemented this Task set; ")
 	b.WriteString("your job is to confirm reality, not to trust its self-report.\n\n")
@@ -744,6 +822,15 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff string) string {
 	b.WriteString("\nThe checkboxes under each task's \"## Acceptance criteria\" heading are authoritative. ")
 	b.WriteString("Judge the done AFK work below against them using the accumulated work diff. ")
 	b.WriteString("Tasks awaiting a human sign-off, and tasks not yet done, are deliberately omitted — do not treat their absence as a failure.\n\n")
+
+	if note := strings.TrimSpace(priorNote); note != "" {
+		b.WriteString("## Prior human note (context only — a real regression here still fails)\n")
+		b.WriteString("A human previously reviewed a Verifier finding on this set and recorded the note below. ")
+		b.WriteString("Treat the non-issue it describes as already adjudicated — do not re-flag it — but this note does not gag your judgment: ")
+		b.WriteString("if a criterion genuinely fails now, still say so.\n")
+		b.WriteString(note)
+		b.WriteString("\n\n")
+	}
 
 	if prd, ok := readPRD(d, m); ok {
 		b.WriteString("## PRD (context only — the acceptance criteria above remain authoritative)\n")
@@ -843,6 +930,26 @@ func printVerdict(w io.Writer, setID, workSHA string, verdict Verdict, findings 
 	}
 	if verdict != VerdictPass {
 		out.line(ansiDim, "   Re-run: %s", FormatVerifyCommand(setID, cliAgents, cliEffort))
+	}
+}
+
+// printAcceptedVerdict renders the outcome of an Accept (ADR-0103): a
+// human-authored PASS recorded at the work SHA, with the note that was captured.
+func printAcceptedVerdict(w io.Writer, setID, workSHA, note string) {
+	if w == nil {
+		return
+	}
+	out := outputFor(w)
+	out.line(ansiBold, "━━ Accepted verify verdict for %s", setID)
+	if workSHA != "" {
+		out.line(ansiDim, "   Work SHA: %s", ShortSHA(workSHA))
+	}
+	out.line(ansiGreen, "   Verdict:  %s (human-authored)", string(VerdictPass))
+	if strings.TrimSpace(note) != "" {
+		out.line(ansiBold, "   Note:")
+		for _, line := range strings.Split(strings.TrimRight(note, "\n"), "\n") {
+			fmt.Fprintf(out, "     %s\n", line)
+		}
 	}
 }
 

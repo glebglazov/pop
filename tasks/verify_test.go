@@ -542,6 +542,86 @@ func TestVerifyResolvedSetCacheHitWritesNoRun(t *testing.T) {
 	}
 }
 
+// TestVerifyResolvedSetAcceptWritesHumanAuthoredPass: `pop tasks verify <set>
+// --accept "<note>"` records a human-authored PASS at the current work SHA
+// without running the Verifier (ADR-0103). The stored row is a plain PASS
+// flagged human-authored, carrying the note and the set's AFK scope — so status
+// derivation flips the set to verified with no change to ResolveVerifiedStatus.
+func TestVerifyResolvedSetAcceptWritesHumanAuthoredPass(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaACC\n", "", ""))
+	var out bytes.Buffer
+	res, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output:      &out,
+		Accept:      true,
+		AcceptNote:  "the flaky-looking retry is intentional",
+		runVerifier: func(string) (string, error) { t.Fatal("accept must not invoke the Verifier"); return "", nil },
+	})
+	if err != nil {
+		t.Fatalf("verifyResolvedSet: %v", err)
+	}
+	if res.Verdict != VerdictPass || res.WorkSHA != "shaACC" {
+		t.Fatalf("result = %+v, want PASS at shaACC", res)
+	}
+	stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaACC")
+	if stored == nil || stored.Verdict != "PASS" {
+		t.Fatalf("stored verdict = %+v, want PASS", stored)
+	}
+	if !stored.HumanAuthored || stored.Note != "the flaky-looking retry is intentional" {
+		t.Fatalf("stored verdict = %+v, want human-authored PASS carrying the note", stored)
+	}
+	// Scope is the set's AFK count (one done AFK task), so the accept behaves like
+	// any PASS under scope-growth invalidation (ADR-0101).
+	if stored.Scope != 1 {
+		t.Fatalf("stored scope = %d, want 1 (the set's AFK count)", stored.Scope)
+	}
+	if !strings.Contains(out.String(), "Accepted") || !strings.Contains(out.String(), "the flaky-looking retry is intentional") {
+		t.Fatalf("output missing accepted verdict/note:\n%s", out.String())
+	}
+}
+
+// TestVerifyResolvedSetAcceptOverridesNonPassAtSameSHA: accepting overwrites a
+// non-PASS verdict already recorded at the current SHA (PASS idempotency on the
+// (repo, set, work_sha) key), so the human override wins.
+func TestVerifyResolvedSetAcceptOverridesNonPassAtSameSHA(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaX\n", "", ""))
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaX", Verdict: "NEEDS-HUMAN", Findings: "needs a human decision"})
+
+	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output: &bytes.Buffer{}, Accept: true, AcceptNote: "reviewed — non-blocking",
+	}); err != nil {
+		t.Fatalf("verifyResolvedSet accept: %v", err)
+	}
+	stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaX")
+	if stored == nil || stored.Verdict != "PASS" || !stored.HumanAuthored || stored.Findings != "" {
+		t.Fatalf("stored verdict = %+v, want the accept to overwrite NEEDS-HUMAN with a clean human PASS", stored)
+	}
+}
+
+// TestBuildVerifierPromptForwardFeedsAcceptedNote: a non-empty prior human note
+// is folded into the Verifier prompt as context (ADR-0103), explicitly framed as
+// non-suppressing; an empty note adds no such section.
+func TestBuildVerifierPromptForwardFeedsAcceptedNote(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
+
+	withNote := buildVerifierPrompt(d, m, "sha1", "", "the retry cap is deliberate")
+	if !strings.Contains(withNote, "Prior human note") {
+		t.Fatalf("prompt must carry a prior-human-note section:\n%s", withNote)
+	}
+	if !strings.Contains(withNote, "the retry cap is deliberate") {
+		t.Fatalf("prompt must include the note text:\n%s", withNote)
+	}
+	if !strings.Contains(withNote, "still") { // "a real regression here still fails" — context, not suppression
+		t.Fatalf("prompt must frame the note as context, not suppression:\n%s", withNote)
+	}
+
+	withoutNote := buildVerifierPrompt(d, m, "sha1", "", "")
+	if strings.Contains(withoutNote, "Prior human note") {
+		t.Fatalf("prompt must omit the note section when no note is given:\n%s", withoutNote)
+	}
+}
+
 func TestRunConfiguredVerifierAllAgentsQuotaPausedReturnsQuotaPause(t *testing.T) {
 	taskSetDir := t.TempDir()
 	runner := &scriptedVerifyRunner{

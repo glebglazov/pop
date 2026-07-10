@@ -84,7 +84,7 @@ func TestBuildVerifierPromptScopesToDoneAFK(t *testing.T) {
 	}
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), mixed, nil)
 
-	prompt := buildVerifierPrompt(d, m, "sha1", "")
+	prompt := buildVerifierPrompt(d, m, "sha1", "", "")
 
 	if !strings.Contains(prompt, "01-afk-done") {
 		t.Fatalf("prompt must include the done AFK task:\n%s", prompt)
@@ -816,5 +816,74 @@ func TestDrainVerifyPhaseUnchangedScopeStillImmunizes(t *testing.T) {
 	}
 	if status != StatusDone || verdict == nil || verdict.Verdict != "PASS" || verdict.WorkSHA != "shaOLD" {
 		t.Fatalf("status/verdict = %q/%+v, want DONE/PASS at shaOLD from the immunizing cache", status, verdict)
+	}
+}
+
+// TestDrainVerifyPhaseAcceptedPassDerivesVerified: a human-authored PASS
+// (ADR-0103) at the current work SHA is an ordinary PASS row, so the cache-first
+// read reuses it and the set derives verified without re-invoking the Verifier —
+// exactly as an agent PASS does.
+func TestDrainVerifyPhaseAcceptedPassDerivesVerified(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("shaACC\n", "", ""), doneAFKSet(), nil)
+	seedVerdict(t, d, store.VerifyVerdict{
+		Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaACC", Verdict: "PASS",
+		Scope: 1, HumanAuthored: true, Note: "known non-issue",
+	})
+
+	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
+		runVerifier: func(string) (string, error) {
+			t.Fatal("Verifier re-invoked despite a human-authored PASS at the current SHA")
+			return "", nil
+		},
+	}, m, StatusDone)
+	if err != nil {
+		t.Fatalf("drainVerifyPhase: %v", err)
+	}
+	if status != StatusDone || verdict == nil || verdict.Verdict != "PASS" || !verdict.HumanAuthored {
+		t.Fatalf("status/verdict = %q/%+v, want DONE/human-authored PASS", status, verdict)
+	}
+}
+
+// TestDrainVerifyPhaseScopeGrowthInvalidatesAcceptedPassAndForwardFeedsNote:
+// growing the AFK scope invalidates a human-authored PASS just like any PASS
+// (ADR-0101) — the stale accept no longer immunizes and the Verifier re-fires at
+// the new SHA. The accepted note is captured before the row is deleted and folded
+// into that fresh Verifier prompt as context (ADR-0103), so the known non-issue
+// is not re-flagged while a real regression could still fail.
+func TestDrainVerifyPhaseScopeGrowthInvalidatesAcceptedPassAndForwardFeedsNote(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), twoDoneAFKSet(), nil)
+	// A human accepted the set when it held a single AFK task (scope 1).
+	seedVerdict(t, d, store.VerifyVerdict{
+		Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "PASS",
+		Scope: 1, HumanAuthored: true, Note: "the extra allocation is deliberate",
+	})
+
+	var gotPrompt string
+	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
+		runVerifier: func(prompt string) (string, error) { gotPrompt = prompt; return "VERDICT: PASS\n", nil },
+	}, m, StatusDone)
+	if err != nil {
+		t.Fatalf("drainVerifyPhase: %v", err)
+	}
+	if status != StatusDone || verdict == nil || verdict.Verdict != "PASS" {
+		t.Fatalf("status/verdict = %q/%+v, want DONE/PASS from the re-verify", status, verdict)
+	}
+	// The invalidated accept no longer immunizes: its row is gone and the fresh
+	// verdict is agent-authored at the new SHA carrying the enlarged scope.
+	if old := readStoredVerdict(t, d, "/repo/.git", "demo", "shaOLD"); old != nil {
+		t.Fatalf("stale accepted PASS at shaOLD survived scope growth: %+v", old)
+	}
+	fresh := readStoredVerdict(t, d, "/repo/.git", "demo", "shaNEW")
+	if fresh == nil || fresh.Verdict != "PASS" || fresh.Scope != 2 || fresh.HumanAuthored {
+		t.Fatalf("stored verdict at shaNEW = %+v, want agent-authored PASS with scope 2", fresh)
+	}
+	// The accepted note fed forward into the fresh Verifier prompt as context.
+	if !strings.Contains(gotPrompt, "the extra allocation is deliberate") {
+		t.Fatalf("re-verify prompt must forward-feed the accepted note:\n%s", gotPrompt)
+	}
+	if !strings.Contains(gotPrompt, "Prior human note") {
+		t.Fatalf("re-verify prompt must frame the note as a prior-human-note context section:\n%s", gotPrompt)
 	}
 }

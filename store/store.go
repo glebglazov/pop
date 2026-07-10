@@ -262,6 +262,16 @@ var migrations = []string{
 	// Verifier re-fires against the enlarged set. Legacy rows and verdicts written
 	// before the scope was known default to 0, read as "unknown" (no growth check).
 	`ALTER TABLE verify_verdicts ADD COLUMN scope INTEGER NOT NULL DEFAULT 0;`,
+	// 15: verify_verdicts human-authored provenance + note (ADR-0103). An
+	// Accepted verdict is a human overriding a non-PASS Verifier judgment: an
+	// ordinary PASS row flagged human_authored=1 and carrying the human's note.
+	// Because it is a plain PASS it inherits PASS idempotency and the scope-growth
+	// invalidation (ADR-0101), so status derivation needs no change. The note
+	// feeds forward as context into later Verifier prompts so the known non-issue
+	// is not re-flagged, without ever suppressing a fresh judgment. Existing rows
+	// default to human_authored=0 / note='' — the agent-authored verdict shape.
+	`ALTER TABLE verify_verdicts ADD COLUMN human_authored INTEGER NOT NULL DEFAULT 0;
+	 ALTER TABLE verify_verdicts ADD COLUMN note TEXT NOT NULL DEFAULT '';`,
 }
 
 func (s *Store) migrate() error {
