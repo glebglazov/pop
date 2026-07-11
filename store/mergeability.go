@@ -68,32 +68,6 @@ func (s *Store) DeleteMergeability(scopedKey string) error {
 	return err
 }
 
-// ReplaceAllMergeability replaces the entire mergeability table with all in one
-// transaction. It mirrors the whole-store rewrite the file-backed store did,
-// kept atomic by the single writer.
-func (s *Store) ReplaceAllMergeability(all map[string]Mergeability) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`DELETE FROM mergeability`); err != nil {
-		return err
-	}
-	for key, m := range all {
-		m.ScopedKey = key
-		if _, err := tx.Exec(
-			`INSERT INTO mergeability
-			   (scoped_key, project, runtime_path, working_path, set_id, verdict, base_sha, branch_sha, computed_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			m.ScopedKey, m.Project, m.RuntimePath, m.WorkingPath, m.SetID,
-			m.Verdict, m.BaseSHA, m.BranchSHA, mergeTime(m.ComputedAt)); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
 func mergeTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
