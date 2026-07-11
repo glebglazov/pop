@@ -163,5 +163,3 @@ func statusProjectLabel(project string, worktreeReady bool, configError string) 
 	}
 	return label
 }
-
-const DrainOutcomeCrashed tasks.DrainOutcome = "crashed"

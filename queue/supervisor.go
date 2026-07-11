@@ -195,10 +195,6 @@ func canonicalCheckoutPath(d *tasks.Deps, path string) (string, error) {
 	return d.FS.EvalSymlinks(abs)
 }
 
-func drainOutcomeAbnormal(outcome tasks.DrainOutcome) bool {
-	return outcome == DrainOutcomeCrashed || outcome.Abnormal()
-}
-
 // splitLines splits tmux output into non-empty lines.
 func splitLines(s string) []string {
 	var lines []string

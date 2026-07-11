@@ -47,7 +47,7 @@ func (l *RuntimeLock) Release() error {
 	if l == nil || l.drain == nil {
 		return nil
 	}
-	return l.drain.Finish(DrainOutcomeFinished, "", false, time.Time{})
+	return l.drain.Finish(store.StateFinished, "", false, time.Time{})
 }
 
 // ReadRuntimeLockStatus reports whether a runtime checkout is being drained,

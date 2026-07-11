@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/store"
 )
 
 // seedRunningDrain stands up a running Drain owned by the current process,
@@ -54,15 +55,12 @@ func TestReconcileDrainsDeadPIDBecomesCrashed(t *testing.T) {
 	if status := ReadRuntimeLockStatus(dead, repo); status.Locked {
 		t.Fatalf("crashed drain still reads as live: %#v", status)
 	}
-	rec, err := ReadDrainOutcome(dead, repo)
-	if err != nil {
-		t.Fatalf("read terminal: %v", err)
+	rec := latestTerminalDrain(t, dead, repo)
+	if rec == nil {
+		t.Fatal("no terminal drain recorded")
 	}
-	if rec.Outcome != DrainOutcomeCrashed {
-		t.Fatalf("terminal = %q, want crashed", rec.Outcome)
-	}
-	if !rec.Outcome.Abnormal() {
-		t.Fatalf("crashed must be an abnormal terminal")
+	if rec.State != store.StateCrashed {
+		t.Fatalf("terminal = %q, want crashed", rec.State)
 	}
 }
 
@@ -107,12 +105,12 @@ func TestReconcileDrainsReusedPIDBecomesCrashed(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("crashed %d, want 1 (PID reused)", n)
 	}
-	rec, err := ReadDrainOutcome(reused, repo)
-	if err != nil {
-		t.Fatalf("read terminal: %v", err)
+	rec := latestTerminalDrain(t, reused, repo)
+	if rec == nil {
+		t.Fatal("no terminal drain recorded")
 	}
-	if rec.Outcome != DrainOutcomeCrashed {
-		t.Fatalf("terminal = %q, want crashed", rec.Outcome)
+	if rec.State != store.StateCrashed {
+		t.Fatalf("terminal = %q, want crashed", rec.State)
 	}
 }
 

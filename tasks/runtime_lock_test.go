@@ -9,7 +9,29 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/store"
 )
+
+// latestTerminalDrain reads the latest terminal Drain for runtimePath directly
+// from the store — the store drain state is the surviving vocabulary now that the
+// DrainOutcome bridge is retired. It returns nil when no terminal drain (or no
+// store) exists, standing in for the old ReadDrainOutcome os.ErrNotExist contract.
+func latestTerminalDrain(t *testing.T, d *Deps, runtimePath string) *store.Drain {
+	t.Helper()
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if !ok {
+		return nil
+	}
+	defer func() { _ = s.Close() }()
+	dr, err := s.LatestTerminalByRuntimePath(runtimePath)
+	if err != nil {
+		t.Fatalf("latest terminal: %v", err)
+	}
+	return dr
+}
 
 // drainTestRepo stands up a real git repo and a private data dir, returning deps
 // whose store-backed Drain lifecycle resolves repository identity from it. The
@@ -69,12 +91,12 @@ func TestAcquireRuntimeLockForSetReleaseClearsLive(t *testing.T) {
 		t.Fatalf("drain still live after release: %#v", status)
 	}
 	// Release records a finished terminal, not a running row.
-	rec, err := ReadDrainOutcome(d, repo)
-	if err != nil {
-		t.Fatalf("read terminal: %v", err)
+	rec := latestTerminalDrain(t, d, repo)
+	if rec == nil {
+		t.Fatal("no terminal drain recorded")
 	}
-	if rec.Outcome != DrainOutcomeFinished {
-		t.Fatalf("terminal = %q, want finished", rec.Outcome)
+	if rec.State != store.StateFinished {
+		t.Fatalf("terminal = %q, want finished", rec.State)
 	}
 }
 

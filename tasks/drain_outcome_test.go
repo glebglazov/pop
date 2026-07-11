@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/store"
 )
 
 func TestRunTaskSetQuotaPauseRegistersRecoveryWaiter(t *testing.T) {
@@ -173,12 +174,12 @@ func TestRunTaskSetDoneRecordsFinished(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 
-	rec, err := ReadDrainOutcome(d, result.RuntimePath)
-	if err != nil {
-		t.Fatalf("read terminal: %v", err)
+	rec := latestTerminalDrain(t, d, result.RuntimePath)
+	if rec == nil {
+		t.Fatal("no terminal drain recorded")
 	}
-	if rec.Outcome != DrainOutcomeFinished {
-		t.Fatalf("outcome = %q, want finished", rec.Outcome)
+	if rec.State != store.StateFinished {
+		t.Fatalf("state = %q, want finished", rec.State)
 	}
 	if rec.ExhaustedPreset != "" {
 		t.Fatalf("finished terminal should carry no exhausted preset, got %q", rec.ExhaustedPreset)
@@ -186,8 +187,9 @@ func TestRunTaskSetDoneRecordsFinished(t *testing.T) {
 	if rec.SetID != "demo" {
 		t.Fatalf("set id = %q, want demo", rec.SetID)
 	}
-	if rec.Outcome.Abnormal() {
-		t.Fatalf("finished must be a clean stop, got abnormal")
+	// finished is a clean stop, never an abnormal teardown (crashed/interrupted).
+	if rec.State == store.StateCrashed || rec.State == store.StateInterrupted {
+		t.Fatalf("finished must be a clean stop, got %q", rec.State)
 	}
 }
 
@@ -202,7 +204,7 @@ func TestDrainTerminal(t *testing.T) {
 		pinned       bool
 		resetAt      time.Time
 		err          error
-		wantTerminal DrainOutcome
+		wantTerminal string
 		wantPreset   string
 		wantPinned   bool
 		wantExecuted bool
@@ -214,39 +216,39 @@ func TestDrainTerminal(t *testing.T) {
 			preset:       "claude",
 			pinned:       true,
 			resetAt:      resetAt,
-			wantTerminal: DrainOutcomeQuotaPaused,
+			wantTerminal: store.StateQuotaPaused,
 			wantPreset:   "claude",
 			wantPinned:   true,
 			wantExecuted: true,
 		},
 		{
 			name:         "done is a finished process",
-			wantTerminal: DrainOutcomeFinished,
+			wantTerminal: store.StateFinished,
 			wantExecuted: true,
 		},
 		{
 			name:         "failure is a finished process",
 			err:          exitErr(ExitOperational, "task failed"),
-			wantTerminal: DrainOutcomeFinished,
+			wantTerminal: store.StateFinished,
 			wantExecuted: true,
 		},
 		{
 			name:         "no-runnable block is a finished process",
 			err:          exitErr(ExitNoRunnable, "no eligible AFK task"),
-			wantTerminal: DrainOutcomeFinished,
+			wantTerminal: store.StateFinished,
 			wantExecuted: true,
 		},
 		{
 			name:         "verify failure records verify_failed",
 			verifyFailed: true,
 			err:          exitErr(ExitNoRunnable, "verification failed"),
-			wantTerminal: DrainOutcomeVerifyFailed,
+			wantTerminal: store.StateVerifyFailed,
 			wantExecuted: true,
 		},
 		{
 			name:         "interrupted is abnormal",
 			err:          exitErr(ExitInterrupted, "interrupted"),
-			wantTerminal: DrainOutcomeInterrupted,
+			wantTerminal: store.StateInterrupted,
 			wantExecuted: true,
 			wantAbnorm:   true,
 		},
@@ -277,22 +279,17 @@ func TestDrainTerminal(t *testing.T) {
 			if tc.quotaPaused && !gotReset.Equal(tc.resetAt) {
 				t.Fatalf("reset = %v, want %v", gotReset, tc.resetAt)
 			}
-			if terminal.Abnormal() != tc.wantAbnorm {
-				t.Fatalf("abnormal = %v, want %v", terminal.Abnormal(), tc.wantAbnorm)
+			gotAbnorm := terminal == store.StateInterrupted || terminal == store.StateCrashed
+			if gotAbnorm != tc.wantAbnorm {
+				t.Fatalf("abnormal = %v, want %v", gotAbnorm, tc.wantAbnorm)
 			}
 		})
 	}
 }
 
-func TestDrainOutcomeAwaitingApprovalIsClean(t *testing.T) {
-	if DrainOutcomeAwaitingApproval.Abnormal() {
-		t.Fatal("DrainOutcomeAwaitingApproval must be a clean (non-abnormal) terminal stop")
-	}
-}
-
-// TestReadDrainOutcomeProjectsLatestTerminal round-trips a quota-paused terminal
-// through the store: BeginDrain → Finish → ReadDrainOutcome.
-func TestReadDrainOutcomeProjectsLatestTerminal(t *testing.T) {
+// TestReadTerminalDrainProjectsLatestTerminal round-trips a quota-paused terminal
+// through the store: BeginDrain → Finish → read the latest terminal drain.
+func TestReadTerminalDrainProjectsLatestTerminal(t *testing.T) {
 	d, repo := drainTestRepo(t)
 	resetAt := time.Date(2026, 6, 15, 2, 28, 0, 0, time.UTC)
 
@@ -300,67 +297,26 @@ func TestReadDrainOutcomeProjectsLatestTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := h.Finish(DrainOutcomeQuotaPaused, "codex", true, resetAt); err != nil {
+	if err := h.Finish(store.StateQuotaPaused, "codex", true, resetAt); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
-	got, err := ReadDrainOutcome(d, repo)
-	if err != nil {
-		t.Fatalf("read: %v", err)
+	got := latestTerminalDrain(t, d, repo)
+	if got == nil {
+		t.Fatal("no terminal drain recorded")
 	}
-	if got.SetID != "demo" || got.Outcome != DrainOutcomeQuotaPaused || got.ExhaustedPreset != "codex" || !got.ExhaustedPinned || !got.ExhaustedResetAt.Equal(resetAt) {
+	if got.SetID != "demo" || got.State != store.StateQuotaPaused || got.ExhaustedPreset != "codex" || !got.ExhaustedPinned || !got.ExhaustedResetAt.Equal(resetAt) {
 		t.Fatalf("terminal mismatch: %#v", got)
 	}
-	if got.WrittenAt.IsZero() {
+	if got.FinishedAt.IsZero() {
 		t.Fatalf("Finish should stamp the terminal time")
 	}
 }
 
-// TestDrainOutcomeVocabularyValues locks the durable string spellings retired to
-// (and added by) ADR-0087: the terminal-HITL disposition persists as
-// "awaiting_approval", and verify_failed is a recognized value.
-func TestDrainOutcomeVocabularyValues(t *testing.T) {
-	if DrainOutcomeAwaitingApproval != "awaiting_approval" {
-		t.Fatalf("DrainOutcomeAwaitingApproval = %q, want awaiting_approval", DrainOutcomeAwaitingApproval)
-	}
-	if DrainOutcomeVerifyFailed != "verify_failed" {
-		t.Fatalf("DrainOutcomeVerifyFailed = %q, want verify_failed", DrainOutcomeVerifyFailed)
-	}
-	// verify_failed is a clean terminal (the drain finished; the Verifier just
-	// could not clear the set), not an abnormal teardown.
-	if DrainOutcomeVerifyFailed.Abnormal() {
-		t.Fatal("DrainOutcomeVerifyFailed must be a clean (non-abnormal) terminal stop")
-	}
-}
-
-// TestReadDrainOutcomeReadsLegacyUnverifiedForward verifies the durable,
-// append-only guarantee of ADR-0087: a record written with the pre-rename
-// "unverified" value stays on disk verbatim and reads forward to
-// DrainOutcomeAwaitingApproval.
-func TestReadDrainOutcomeReadsLegacyUnverifiedForward(t *testing.T) {
+func TestReadTerminalDrainMissingIsNil(t *testing.T) {
 	d, repo := drainTestRepo(t)
-
-	h, err := BeginDrain(d, repo, "demo", nil)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	if err := h.Finish(drainOutcomeLegacyUnverified, "", false, time.Time{}); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
-
-	got, err := ReadDrainOutcome(d, repo)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if got.Outcome != DrainOutcomeAwaitingApproval {
-		t.Fatalf("Outcome = %q, want %q (legacy unverified must read forward)", got.Outcome, DrainOutcomeAwaitingApproval)
-	}
-}
-
-func TestReadDrainOutcomeMissingIsNotExist(t *testing.T) {
-	d, repo := drainTestRepo(t)
-	if _, err := ReadDrainOutcome(d, repo); !os.IsNotExist(err) {
-		t.Fatalf("err = %v, want os.ErrNotExist for a checkout with no terminal", err)
+	if got := latestTerminalDrain(t, d, repo); got != nil {
+		t.Fatalf("got = %#v, want nil for a checkout with no terminal", got)
 	}
 }
 

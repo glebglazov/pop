@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -113,7 +114,7 @@ func TestBuildLogFromStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	if err := h.Finish(tasks.DrainOutcomeQuotaPaused, "codex", false, time.Time{}); err != nil {
+	if err := h.Finish(store.StateQuotaPaused, "codex", false, time.Time{}); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 	// A park-clear (unpark) event.
@@ -201,26 +202,6 @@ func TestRecoveryWaiterRunDeltaClearsWhenRemoved(t *testing.T) {
 	}
 }
 
-func TestDrainOutcomeAbnormalClassification(t *testing.T) {
-	if !drainOutcomeAbnormal(DrainOutcomeCrashed) {
-		t.Fatal("crashed outcome must be abnormal")
-	}
-	if !drainOutcomeAbnormal(tasks.DrainOutcomeInterrupted) {
-		t.Fatal("interrupted outcome must be abnormal")
-	}
-	for _, outcome := range []tasks.DrainOutcome{
-		tasks.DrainOutcomeDone,
-		tasks.DrainOutcomeFailed,
-		tasks.DrainOutcomeBlocked,
-		tasks.DrainOutcomeDeferred,
-		tasks.DrainOutcomeQuotaPaused,
-	} {
-		if drainOutcomeAbnormal(outcome) {
-			t.Fatalf("%s must be classified as clean", outcome)
-		}
-	}
-}
-
 // testRepoCommonDir resolves the Drain row's repo key (the canonical git common
 // dir) for a checkout, matching what BeginDrain records.
 func testRepoCommonDir(t *testing.T, td *tasks.Deps, path string) string {
@@ -240,7 +221,7 @@ func seedAbnormalDrain(t *testing.T, td *tasks.Deps, runtimePath, setID string) 
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	if err := h.Finish(tasks.DrainOutcomeInterrupted, "", false, time.Time{}); err != nil {
+	if err := h.Finish(store.StateInterrupted, "", false, time.Time{}); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 }
@@ -314,7 +295,7 @@ func TestCleanTerminalResetsBackoffCountFromDrainHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	if err := h.Finish(tasks.DrainOutcomeFinished, "", false, time.Time{}); err != nil {
+	if err := h.Finish(store.StateFinished, "", false, time.Time{}); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 	info, _ = tasks.ReadSetBackoff(td, commonDir, "set-1")

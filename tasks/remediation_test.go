@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/store"
 )
 
 // remediationSet is a set with the given number of Remediation tasks already
@@ -321,11 +322,11 @@ func TestRunTaskSetRemediationDepthCapParks(t *testing.T) {
 	}
 
 	// The drain recorded the verify_failed terminal, not a bare finished.
-	rec, err := ReadDrainOutcome(d, runtimePath)
-	if err != nil {
-		t.Fatalf("read drain outcome: %v", err)
+	rec := latestTerminalDrain(t, d, runtimePath)
+	if rec == nil {
+		t.Fatal("no terminal drain recorded")
 	}
-	if rec.Outcome != DrainOutcomeVerifyFailed {
-		t.Fatalf("outcome = %q, want %q", rec.Outcome, DrainOutcomeVerifyFailed)
+	if rec.State != store.StateVerifyFailed {
+		t.Fatalf("outcome = %q, want %q", rec.State, store.StateVerifyFailed)
 	}
 }

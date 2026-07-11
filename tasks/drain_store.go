@@ -164,16 +164,16 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 	return &DrainHandle{store: s, id: drain.ID}, nil
 }
 
-// Finish transitions the Drain to a terminal exit reason and closes the store.
-// The exhausted-preset arguments are meaningful only for a quota-paused
-// terminal. The set's work disposition is never recorded — it stays derived
-// from the manifest (ADR-0056).
-func (h *DrainHandle) Finish(terminal DrainOutcome, exhaustedPreset string, exhaustedPinned bool, exhaustedResetAt time.Time) error {
+// Finish transitions the Drain to a terminal exit-reason store state (one of the
+// store.State* terminals) and closes the store. The exhausted-preset arguments
+// are meaningful only for a quota-paused terminal. The set's work disposition is
+// never recorded — it stays derived from the manifest (ADR-0056).
+func (h *DrainHandle) Finish(terminal string, exhaustedPreset string, exhaustedPinned bool, exhaustedResetAt time.Time) error {
 	if h == nil {
 		return nil
 	}
 	defer func() { _ = h.store.Close() }()
-	return h.store.FinishDrain(h.id, string(terminal), exhaustedPreset, exhaustedPinned, exhaustedResetAt, time.Now().UTC())
+	return h.store.FinishDrain(h.id, terminal, exhaustedPreset, exhaustedPinned, exhaustedResetAt, time.Now().UTC())
 }
 
 // Cancel removes the Drain row and closes the store. It is used when the drain
@@ -200,26 +200,26 @@ func finalizeDrain(h *DrainHandle, declined, quotaPaused, verifyFailed bool, pre
 	_ = h.Finish(terminal, p, pin, r)
 }
 
-// drainTerminal maps the observable end of a drain to its exit-reason terminal
-// (ADR-0056). A declined run never executed, so it returns executed=false and
-// the caller cancels the Drain row. Quota pause, SIGINT, and a failed
+// drainTerminal maps the observable end of a drain to its exit-reason store
+// state (ADR-0056). A declined run never executed, so it returns executed=false
+// and the caller cancels the Drain row. Quota pause, SIGINT, and a failed
 // pre-approval verification (NEEDS-HUMAN or an exhausted remediation cap,
 // ADR-0086/0087) are the non-finished terminals; everything else — success,
 // failure, blocked, setup error after the drain began — is a finished process
 // whose disposition is read from the manifest, not the Drain.
-func drainTerminal(declined, quotaPaused, verifyFailed bool, preset string, pinned bool, resetAt time.Time, err error) (terminal DrainOutcome, _ string, _ bool, _ time.Time, executed bool) {
+func drainTerminal(declined, quotaPaused, verifyFailed bool, preset string, pinned bool, resetAt time.Time, err error) (terminal string, _ string, _ bool, _ time.Time, executed bool) {
 	if declined {
 		return "", "", false, time.Time{}, false
 	}
 	if quotaPaused {
-		return DrainOutcomeQuotaPaused, preset, pinned, resetAt, true
+		return store.StateQuotaPaused, preset, pinned, resetAt, true
 	}
 	var ee *ExitError
 	if errors.As(err, &ee) && ee.Code == ExitInterrupted {
-		return DrainOutcomeInterrupted, "", false, time.Time{}, true
+		return store.StateInterrupted, "", false, time.Time{}, true
 	}
 	if verifyFailed {
-		return DrainOutcomeVerifyFailed, "", false, time.Time{}, true
+		return store.StateVerifyFailed, "", false, time.Time{}, true
 	}
-	return DrainOutcomeFinished, "", false, time.Time{}, true
+	return store.StateFinished, "", false, time.Time{}, true
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/store"
 )
 
 func TestRunTaskSetDrainsMultipleAFKTasksInOrder(t *testing.T) {
@@ -277,7 +278,7 @@ func TestRunTaskSetReleasesRuntimeLockAtInitialHITLGatePrompt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second drain must claim the parked checkout: %v", err)
 		}
-		if err := handle.Finish(DrainOutcomeFinished, "", false, time.Time{}); err != nil {
+		if err := handle.Finish(store.StateFinished, "", false, time.Time{}); err != nil {
 			t.Fatalf("finish second drain: %v", err)
 		}
 	}
@@ -319,7 +320,7 @@ func TestRunTaskSetReleasesRuntimeLockAtFailedGatePrompt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second drain must claim the parked checkout: %v", err)
 		}
-		if err := handle.Finish(DrainOutcomeFinished, "", false, time.Time{}); err != nil {
+		if err := handle.Finish(store.StateFinished, "", false, time.Time{}); err != nil {
 			t.Fatalf("finish second drain: %v", err)
 		}
 	}
@@ -523,7 +524,7 @@ func TestRunTaskSetFailedGateBlocksRecoveryTurnOnSameCheckout(t *testing.T) {
 }
 
 // A whole-set drain parked at the Failed gate menu holds no Runtime execution
-// path produces (DrainOutcomeFinished) without ever holding a live lock during
+// path produces (store.StateFinished) without ever holding a live lock during
 // the menu (ADR-0056/0067). The blocked/failed disposition stays
 // manifest-derived, so the recorded outcome is identical across both paths.
 func TestRunTaskSetParkAtGateRecordsFinishedDrain(t *testing.T) {
@@ -557,12 +558,12 @@ func TestRunTaskSetParkAtGateRecordsFinishedDrain(t *testing.T) {
 			_, err = RunTaskSetWith(d, nil, nil, opts)
 			assertExitCode(t, err, ExitOperational)
 
-			rec, err := ReadDrainOutcome(d, runtimePath)
-			if err != nil {
-				t.Fatalf("read drain outcome: %v", err)
+			rec := latestTerminalDrain(t, d, runtimePath)
+			if rec == nil {
+				t.Fatal("no terminal drain recorded")
 			}
-			if rec.Outcome != DrainOutcomeFinished {
-				t.Fatalf("park outcome = %q, want %q", rec.Outcome, DrainOutcomeFinished)
+			if rec.State != store.StateFinished {
+				t.Fatalf("park outcome = %q, want %q", rec.State, store.StateFinished)
 			}
 			if status := ReadRuntimeLockStatus(d, runtimePath); status.Locked {
 				t.Fatalf("runtime lock held after park: %#v", status)
@@ -601,7 +602,7 @@ func TestRunTaskSetResumeAfterGateRefusesOnConcurrentDrain(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if rival != nil {
-			_ = rival.Finish(DrainOutcomeFinished, "", false, time.Time{})
+			_ = rival.Finish(store.StateFinished, "", false, time.Time{})
 		}
 	})
 

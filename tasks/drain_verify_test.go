@@ -457,12 +457,12 @@ func TestRunTaskSetVerifyCachedNeedsHumanParks(t *testing.T) {
 	}
 	// The drain stopped cleanly on a NEEDS-HUMAN verdict: it records the
 	// verify_failed terminal (ADR-0087), not a crash.
-	rec, err := ReadDrainOutcome(d, runtimePath)
-	if err != nil {
-		t.Fatalf("read drain outcome: %v", err)
+	rec := latestTerminalDrain(t, d, runtimePath)
+	if rec == nil {
+		t.Fatal("no terminal drain recorded")
 	}
-	if rec.Outcome != DrainOutcomeVerifyFailed {
-		t.Fatalf("park outcome = %q, want %q", rec.Outcome, DrainOutcomeVerifyFailed)
+	if rec.State != store.StateVerifyFailed {
+		t.Fatalf("park outcome = %q, want %q", rec.State, store.StateVerifyFailed)
 	}
 }
 
@@ -481,7 +481,7 @@ func TestDrainVerifyPhaseWritesWhileDrainHeld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	defer func() { _ = handle.Finish(DrainOutcomeFinished, "", false, time.Time{}) }()
+	defer func() { _ = handle.Finish(store.StateFinished, "", false, time.Time{}) }()
 
 	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
 		Repo: repo, RuntimePath: runtimePath, SetID: "demo", Output: &bytes.Buffer{},

@@ -7,13 +7,16 @@ import (
 
 // Drain states. A row is born running and reaches exactly one terminal — an
 // exit reason describing how the process ended, never the set's work
-// disposition (ADR-0056). Crashed is reserved for the reconciliation slice.
+// disposition (ADR-0056). Finished, quota_paused, and verify_failed are clean
+// stops; interrupted and crashed are abnormal teardowns (see drainStateAbnormal),
+// the axis that feeds backoff and parking.
 const (
-	StateRunning     = "running"
-	StateFinished    = "finished"
-	StateQuotaPaused = "quota_paused"
-	StateInterrupted = "interrupted"
-	StateCrashed     = "crashed"
+	StateRunning      = "running"
+	StateFinished     = "finished"
+	StateQuotaPaused  = "quota_paused"
+	StateVerifyFailed = "verify_failed"
+	StateInterrupted  = "interrupted"
+	StateCrashed      = "crashed"
 )
 
 // Drain is one supervised execution of draining a Task set, keyed by

@@ -857,10 +857,6 @@ func skippedIndex(items []SkippedRepo) map[string]SkippedRepo {
 	return out
 }
 
-func formatOutcomeDelta(repoLabel, setID string, runtimePath string, outcome tasks.DrainOutcome) string {
-	return fmt.Sprintf("queue: %s: %s outcome=%s", repoLabel+worktreeSuffix(runtimePath, setID), setID, outcome)
-}
-
 // worktreeSuffix returns " (in <basename>)" when runtimePath points to a
 // worktree whose basename differs from the set identifier. Managed worktrees
 // are named after the setID, so the suffix is suppressed for them; adopted

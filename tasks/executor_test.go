@@ -15,6 +15,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/store"
 )
 
 func TestRunTaskHappyPathWithCommit(t *testing.T) {
@@ -143,8 +144,8 @@ func TestRunTaskDeclinedConfirmationReleasesEarlyRuntimeLockAndWritesNoDrainOutc
 	if status.Locked {
 		t.Fatalf("runtime lock leaked after declined run: %#v", status)
 	}
-	if _, err := ReadDrainOutcome(d, runtimePath); !os.IsNotExist(err) {
-		t.Fatalf("declined single-task run recorded a drain terminal: %v", err)
+	if rec := latestTerminalDrain(t, d, runtimePath); rec != nil {
+		t.Fatalf("declined single-task run recorded a drain terminal: %#v", rec)
 	}
 	assertTaskOpen(t, env, "01-a")
 }
@@ -690,7 +691,7 @@ func TestRunTaskReleasesRuntimeLockAtConfirmationPrompt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second drain must claim the unlocked checkout: %v", err)
 		}
-		if err := handle.Finish(DrainOutcomeFinished, "", false, time.Time{}); err != nil {
+		if err := handle.Finish(store.StateFinished, "", false, time.Time{}); err != nil {
 			t.Fatalf("finish second drain: %v", err)
 		}
 	}

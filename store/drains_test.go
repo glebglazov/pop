@@ -224,6 +224,29 @@ func TestReadSetBackoffCleanTerminalResetsCount(t *testing.T) {
 	}
 }
 
+// TestVerifyFailedIsCleanTerminal locks the durable "verify_failed" spelling and
+// proves it is a clean stop (the drain finished; the Verifier just could not
+// clear the set), so it never accrues abnormal backoff.
+func TestVerifyFailedIsCleanTerminal(t *testing.T) {
+	if StateVerifyFailed != "verify_failed" {
+		t.Fatalf("StateVerifyFailed = %q, want verify_failed", StateVerifyFailed)
+	}
+	if drainStateAbnormal(StateVerifyFailed) {
+		t.Fatal("verify_failed must be a clean (non-abnormal) terminal stop")
+	}
+	s := openTestStore(t)
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	finishAt(t, s, "repo", "set", StateInterrupted, base)
+	finishAt(t, s, "repo", "set", StateVerifyFailed, base.Add(time.Minute))
+	info, err := s.ReadSetBackoff("repo", "set")
+	if err != nil {
+		t.Fatalf("ReadSetBackoff: %v", err)
+	}
+	if info.ConsecutiveAbnormal != 0 {
+		t.Fatalf("consecutive abnormal after verify_failed = %d, want 0", info.ConsecutiveAbnormal)
+	}
+}
+
 func TestRecordParkClearTracksLatest(t *testing.T) {
 	s := openTestStore(t)
 	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)

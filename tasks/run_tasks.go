@@ -12,6 +12,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/store"
 )
 
 // RunTaskSetOptions configures sequential Task-set draining.
@@ -224,7 +225,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		if drain == nil {
 			return
 		}
-		_ = drain.Finish(DrainOutcomeFinished, "", false, time.Time{})
+		_ = drain.Finish(store.StateFinished, "", false, time.Time{})
 		drain = nil
 	}
 

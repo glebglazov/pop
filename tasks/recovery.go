@@ -114,7 +114,7 @@ func ParkAndWaitForQuotaRecovery(
 	}
 
 	if *drain != nil {
-		_ = (*drain).Finish(DrainOutcomeQuotaPaused, preset, false, resetAt)
+		_ = (*drain).Finish(store.StateQuotaPaused, preset, false, resetAt)
 		*drain = nil
 	}
 

@@ -45,9 +45,6 @@ type Deps struct {
 	// drain column is served by an in-memory map lookup per row rather than a
 	// per-row runtime-lock open. Defaults to tasks.LiveRunningDrains.
 	LiveDrains func() ([]tasks.RunningDrain, error)
-	// ReadOutcome returns the latest terminal drain outcome for a runtime
-	// checkout. Defaults to tasks.ReadDrainOutcome.
-	ReadOutcome func(runtimePath string) (*tasks.DrainOutcomeRecord, error)
 	// Reconcile runs the opportunistic crash-detection pass before a read,
 	// transitioning dead-PID running Drains to crashed. Defaults to
 	// tasks.ReconcileDrains.
@@ -184,14 +181,6 @@ func (d *Deps) liveDrains() ([]tasks.RunningDrain, error) {
 		return d.LiveDrains()
 	}
 	return tasks.LiveRunningDrains(d.Tasks)
-}
-
-// readOutcome resolves the ReadOutcome seam, defaulting to tasks.ReadDrainOutcome.
-func (d *Deps) readOutcome(runtimePath string) (*tasks.DrainOutcomeRecord, error) {
-	if d.ReadOutcome != nil {
-		return d.ReadOutcome(runtimePath)
-	}
-	return tasks.ReadDrainOutcome(d.Tasks, runtimePath)
 }
 
 // reconcile runs the opportunistic crash-detection pass before a read pass,
