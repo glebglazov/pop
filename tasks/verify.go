@@ -500,24 +500,14 @@ func drainVerifyPhase(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Ma
 	if err != nil {
 		return manifestStatus, nil, err
 	}
-	// Map the single cache-first verdict into the two Verified status resolution
-	// slots. This is the drain's run-decision leftover: ensureVerifyVerdict
-	// returned one verdict (current, stale immunizing PASS, or freshly run), so
-	// which slot it fills is decided here by SHA, not in the shared resolver.
-	var currentAtSHA, latestPass *store.VerifyVerdict
-	if v.WorkSHA == workSHA {
-		currentAtSHA = v
-	} else if Verdict(v.Verdict) == VerdictPass {
-		// Stale immunizing PASS: feed it as the episode's latest PASS.
-		latestPass = v
-	} else {
-		// Defensive: ensureVerifyVerdict only returns a stale verdict when it
-		// is a PASS, so this preserves any non-PASS failure signal.
-		currentAtSHA = v
-	}
 	printVerdict(opts.Output, opts.SetID, workSHA, Verdict(v.Verdict), v.Findings, opts.Agents, opts.Effort)
-	// verifiedAtSHA is discarded: the drain does not yet surface it (deferred).
-	status, _ := ResolveVerifiedStatus(m, workSHA, currentAtSHA, latestPass)
+	// ensureVerifyVerdict already resolved the one verdict that governs this
+	// episode (current, immunizing PASS, or freshly run), so a PASS lets the
+	// terminal manifestStatus stand and anything else parks the set.
+	status := manifestStatus
+	if Verdict(v.Verdict) != VerdictPass {
+		status = StatusVerifyFailed
+	}
 	return status, v, nil
 }
 
