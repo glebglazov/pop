@@ -1,6 +1,9 @@
 /pop
 config.toml
 
+# local planning / handoff docs
+/plans/
+
 # compiled go test binaries
 tasks.test
 *.test
