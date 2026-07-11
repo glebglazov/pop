@@ -88,39 +88,24 @@ func openCodeLineRenderer(color bool) lineRenderer {
 // input for the first recognized salient key, then falling back to the
 // pre-rendered part.title.
 func openCodeToolTick(tool string, input json.RawMessage, title string) string {
-	tick := "→ " + tool
 	hint := openCodeToolHint(input)
 	if hint == "" {
-		hint = strings.TrimSpace(strings.ReplaceAll(title, "\n", " "))
-		if len(hint) > 80 {
-			hint = hint[:77] + "..."
-		}
+		hint = collapseHint(title)
 	}
-	if hint != "" {
-		tick += " " + hint
-	}
-	return tick
+	return toolTick(tool, hint)
+}
+
+type openCodeToolHintProbe struct {
+	FilePath string `json:"filePath"`
+	Path     string `json:"path"`
+	Command  string `json:"command"`
+	Pattern  string `json:"pattern"`
+	Query    string `json:"query"`
+	URL      string `json:"url"`
 }
 
 func openCodeToolHint(input json.RawMessage) string {
-	if len(input) == 0 {
-		return ""
-	}
-	var probe struct {
-		FilePath string `json:"filePath"`
-		Path     string `json:"path"`
-		Command  string `json:"command"`
-		Pattern  string `json:"pattern"`
-		Query    string `json:"query"`
-		URL      string `json:"url"`
-	}
-	if err := json.Unmarshal(input, &probe); err != nil {
-		return ""
-	}
-	hint := firstNonEmpty(probe.FilePath, probe.Path, probe.Command, probe.Pattern, probe.Query, probe.URL)
-	hint = strings.TrimSpace(strings.ReplaceAll(hint, "\n", " "))
-	if len(hint) > 80 {
-		hint = hint[:77] + "..."
-	}
-	return hint
+	return toolHint(input, func(p openCodeToolHintProbe) string {
+		return firstNonEmpty(p.FilePath, p.Path, p.Command, p.Pattern, p.Query, p.URL)
+	})
 }

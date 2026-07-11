@@ -80,6 +80,77 @@ type toolWindow struct {
 
 const openWindowEndMS = int64(-1)
 
+// toolOpen is one tool invocation start yielded by an agent's tool-timings
+// extractor: the pairing id and the tool name observed at start time.
+type toolOpen struct {
+	ID   string
+	Name string
+}
+
+// toolClose is one tool invocation end yielded by an agent's tool-timings
+// extractor: the pairing id, plus an optional Rename that refines the name
+// recorded at open time (codex only: the mcp server/tool fields may only
+// arrive on completion, not on start).
+type toolClose struct {
+	ID     string
+	Rename func(pendingName string) string
+}
+
+// accumulateToolTimings is the pairing/aggregation/sort core shared by every
+// agent's tool-timings parser (ADR 0016): extract yields each event's opens
+// and closes by pairing id in that agent's own event shape; this function
+// pairs opens with closes, accumulates duration and count per tool name, and
+// reports a still-open window for any invocation with no matching close by
+// the time the attempt ended. Only the event shape and id/name extraction
+// differ between agents.
+func accumulateToolTimings(events []streamEventRecord, extract func(streamEventRecord) ([]toolOpen, []toolClose)) ([]ToolTiming, []toolWindow) {
+	type pendingUse struct {
+		name string
+		atMS int64
+	}
+	pending := map[string]pendingUse{}
+	totals := map[string]*ToolTiming{}
+	var windows []toolWindow
+	for _, ev := range events {
+		opens, closes := extract(ev)
+		for _, open := range opens {
+			pending[open.ID] = pendingUse{name: open.Name, atMS: ev.AtMS}
+		}
+		for _, cl := range closes {
+			use, ok := pending[cl.ID]
+			if !ok {
+				continue
+			}
+			delete(pending, cl.ID)
+			if cl.Rename != nil {
+				use.name = cl.Rename(use.name)
+			}
+			agg := totals[use.name]
+			if agg == nil {
+				agg = &ToolTiming{Name: use.name}
+				totals[use.name] = agg
+			}
+			agg.Count++
+			agg.Total += time.Duration(ev.AtMS-use.atMS) * time.Millisecond
+			windows = append(windows, toolWindow{StartMS: use.atMS, EndMS: ev.AtMS})
+		}
+	}
+	for _, use := range pending {
+		windows = append(windows, toolWindow{StartMS: use.atMS, EndMS: openWindowEndMS})
+	}
+	out := make([]ToolTiming, 0, len(totals))
+	for _, t := range totals {
+		out = append(out, *t)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Total != out[j].Total {
+			return out[i].Total > out[j].Total
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, windows
+}
+
 // toolTimingParsers maps agent preset → pairing parser over one attempt's
 // stored events. Pairing tool_use with tool_result is per-adapter work because
 // the stream shape differs across agents (ADR 0016); agents without a parser

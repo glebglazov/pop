@@ -141,33 +141,20 @@ func piLineRenderer(color bool) lineRenderer {
 // the first recognized salient key. pi's read tool uses path (not file_path),
 // so both are probed.
 func piToolTick(name string, args json.RawMessage) string {
-	tick := "→ " + name
-	hint := piToolHint(args)
-	if hint != "" {
-		tick += " " + hint
-	}
-	return tick
+	return toolTick(name, piToolHint(args))
+}
+
+type piToolHintProbe struct {
+	Path     string `json:"path"`
+	FilePath string `json:"file_path"`
+	Command  string `json:"command"`
+	Pattern  string `json:"pattern"`
+	URL      string `json:"url"`
+	Query    string `json:"query"`
 }
 
 func piToolHint(args json.RawMessage) string {
-	if len(args) == 0 {
-		return ""
-	}
-	var probe struct {
-		Path     string `json:"path"`
-		FilePath string `json:"file_path"`
-		Command  string `json:"command"`
-		Pattern  string `json:"pattern"`
-		URL      string `json:"url"`
-		Query    string `json:"query"`
-	}
-	if err := json.Unmarshal(args, &probe); err != nil {
-		return ""
-	}
-	hint := firstNonEmpty(probe.Path, probe.FilePath, probe.Command, probe.Pattern, probe.URL, probe.Query)
-	hint = strings.TrimSpace(strings.ReplaceAll(hint, "\n", " "))
-	if len(hint) > 80 {
-		hint = hint[:77] + "..."
-	}
-	return hint
+	return toolHint(args, func(p piToolHintProbe) string {
+		return firstNonEmpty(p.Path, p.FilePath, p.Command, p.Pattern, p.URL, p.Query)
+	})
 }

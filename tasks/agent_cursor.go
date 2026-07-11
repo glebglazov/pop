@@ -116,33 +116,20 @@ func cursorToolCall(raw json.RawMessage) (string, json.RawMessage) {
 // cursorToolTick formats a compact "→ <toolName> hint" line. The tool name is
 // the oneof case (e.g. readToolCall, shellToolCall) and the hint probes args.
 func cursorToolTick(toolName string, args json.RawMessage) string {
-	tick := "→ " + toolName
-	hint := cursorToolHint(args)
-	if hint != "" {
-		tick += " " + hint
-	}
-	return tick
+	return toolTick(toolName, cursorToolHint(args))
+}
+
+type cursorToolHintProbe struct {
+	Command     string `json:"command"`
+	Pattern     string `json:"pattern"`
+	GlobPattern string `json:"globPattern"`
+	Query       string `json:"query"`
+	Path        string `json:"path"`
+	URL         string `json:"url"`
 }
 
 func cursorToolHint(args json.RawMessage) string {
-	if len(args) == 0 {
-		return ""
-	}
-	var probe struct {
-		Command     string `json:"command"`
-		Pattern     string `json:"pattern"`
-		GlobPattern string `json:"globPattern"`
-		Query       string `json:"query"`
-		Path        string `json:"path"`
-		URL         string `json:"url"`
-	}
-	if err := json.Unmarshal(args, &probe); err != nil {
-		return ""
-	}
-	hint := firstNonEmpty(probe.Command, probe.Pattern, probe.GlobPattern, probe.Query, probe.Path, probe.URL)
-	hint = strings.TrimSpace(strings.ReplaceAll(hint, "\n", " "))
-	if len(hint) > 80 {
-		hint = hint[:77] + "..."
-	}
-	return hint
+	return toolHint(args, func(p cursorToolHintProbe) string {
+		return firstNonEmpty(p.Command, p.Pattern, p.GlobPattern, p.Query, p.Path, p.URL)
+	})
 }

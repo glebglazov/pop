@@ -3,7 +3,6 @@ package tasks
 import (
 	"encoding/json"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -137,44 +136,22 @@ func claudeTokenUsage(events []streamEventRecord) TokenUsage {
 // claudeToolTick formats a compact "→ Name hint" line, probing the tool input
 // for the first recognized salient key without knowing per-tool schemas.
 func claudeToolTick(name string, input json.RawMessage) string {
-	tick := "→ " + name
-	hint := claudeToolHint(input)
-	if hint != "" {
-		tick += " " + hint
-	}
-	return tick
+	return toolTick(name, claudeToolHint(input))
+}
+
+type claudeToolHintProbe struct {
+	FilePath string `json:"file_path"`
+	Path     string `json:"path"`
+	Command  string `json:"command"`
+	Pattern  string `json:"pattern"`
+	URL      string `json:"url"`
+	Query    string `json:"query"`
 }
 
 func claudeToolHint(input json.RawMessage) string {
-	if len(input) == 0 {
-		return ""
-	}
-	var probe struct {
-		FilePath string `json:"file_path"`
-		Path     string `json:"path"`
-		Command  string `json:"command"`
-		Pattern  string `json:"pattern"`
-		URL      string `json:"url"`
-		Query    string `json:"query"`
-	}
-	if err := json.Unmarshal(input, &probe); err != nil {
-		return ""
-	}
-	hint := firstNonEmpty(probe.FilePath, probe.Path, probe.Command, probe.Pattern, probe.URL, probe.Query)
-	hint = strings.TrimSpace(strings.ReplaceAll(hint, "\n", " "))
-	if len(hint) > 80 {
-		hint = hint[:77] + "..."
-	}
-	return hint
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
+	return toolHint(input, func(p claudeToolHintProbe) string {
+		return firstNonEmpty(p.FilePath, p.Path, p.Command, p.Pattern, p.URL, p.Query)
+	})
 }
 
 // claudeToolTimings derives per-tool durations from one stored Captured
@@ -187,14 +164,7 @@ func firstNonEmpty(values ...string) string {
 // Model time never absorbs the wait on a tool that was running when the
 // attempt ended. Results aggregate per tool name, longest total first.
 func claudeToolTimings(events []streamEventRecord) ([]ToolTiming, []toolWindow) {
-	type pendingUse struct {
-		name string
-		atMS int64
-	}
-	pending := map[string]pendingUse{}
-	totals := map[string]*ToolTiming{}
-	var windows []toolWindow
-	for _, ev := range events {
+	return accumulateToolTimings(events, func(ev streamEventRecord) ([]toolOpen, []toolClose) {
 		var msg struct {
 			Type    string `json:"type"`
 			Message struct {
@@ -207,50 +177,29 @@ func claudeToolTimings(events []streamEventRecord) ([]ToolTiming, []toolWindow) 
 			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(ev.Raw), &msg); err != nil {
-			continue
+			return nil, nil
 		}
 		switch msg.Type {
 		case "assistant":
+			var opens []toolOpen
 			for _, c := range msg.Message.Content {
 				if c.Type == "tool_use" && c.ID != "" {
-					pending[c.ID] = pendingUse{name: c.Name, atMS: ev.AtMS}
+					opens = append(opens, toolOpen{ID: c.ID, Name: c.Name})
 				}
 			}
+			return opens, nil
 		case "user":
+			var closes []toolClose
 			for _, c := range msg.Message.Content {
-				if c.Type != "tool_result" {
-					continue
+				if c.Type == "tool_result" {
+					closes = append(closes, toolClose{ID: c.ToolUseID})
 				}
-				use, ok := pending[c.ToolUseID]
-				if !ok {
-					continue
-				}
-				delete(pending, c.ToolUseID)
-				agg := totals[use.name]
-				if agg == nil {
-					agg = &ToolTiming{Name: use.name}
-					totals[use.name] = agg
-				}
-				agg.Count++
-				agg.Total += time.Duration(ev.AtMS-use.atMS) * time.Millisecond
-				windows = append(windows, toolWindow{StartMS: use.atMS, EndMS: ev.AtMS})
 			}
+			return nil, closes
+		default:
+			return nil, nil
 		}
-	}
-	for _, use := range pending {
-		windows = append(windows, toolWindow{StartMS: use.atMS, EndMS: openWindowEndMS})
-	}
-	out := make([]ToolTiming, 0, len(totals))
-	for _, t := range totals {
-		out = append(out, *t)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Total != out[j].Total {
-			return out[i].Total > out[j].Total
-		}
-		return out[i].Name < out[j].Name
 	})
-	return out, windows
 }
 
 func claudeQuotaPauseReason(result string) *AgentQuotaPause {

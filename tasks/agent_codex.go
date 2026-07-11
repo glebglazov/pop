@@ -3,7 +3,6 @@ package tasks
 import (
 	"encoding/json"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 )
@@ -176,22 +175,13 @@ func codexLineRenderer(color bool) lineRenderer {
 // codexItemTick formats a compact "→ kind hint" line, where kind is the item
 // type discriminator and hint is the first salient field found.
 func codexItemTick(kind, hint string) string {
-	tick := "→ " + kind
-	if hint != "" {
-		tick += " " + hint
-	}
-	return tick
+	return toolTick(kind, hint)
 }
 
 // codexItemHint returns the first non-empty probe value, collapsed to a single
 // line and truncated to ~80 chars, matching claudeToolHint.
 func codexItemHint(values ...string) string {
-	hint := firstNonEmpty(values...)
-	hint = strings.TrimSpace(strings.ReplaceAll(hint, "\n", " "))
-	if len(hint) > 80 {
-		hint = hint[:77] + "..."
-	}
-	return hint
+	return collapseHint(firstNonEmpty(values...))
 }
 
 // codexArgumentsHint extracts a hint from mcp_tool_call.arguments, whose JSON
@@ -220,14 +210,7 @@ func codexArgumentsHint(args json.RawMessage) string {
 // never absorbs the wait on a tool that was running at the end. Results
 // aggregate per tool name, longest total first.
 func codexToolTimings(events []streamEventRecord) ([]ToolTiming, []toolWindow) {
-	type pendingUse struct {
-		name string
-		atMS int64
-	}
-	pending := map[string]pendingUse{}
-	totals := map[string]*ToolTiming{}
-	var windows []toolWindow
-	for _, ev := range events {
+	return accumulateToolTimings(events, func(ev streamEventRecord) ([]toolOpen, []toolClose) {
 		var msg struct {
 			Type string `json:"type"`
 			Item struct {
@@ -238,53 +221,33 @@ func codexToolTimings(events []streamEventRecord) ([]ToolTiming, []toolWindow) {
 			} `json:"item"`
 		}
 		if err := json.Unmarshal([]byte(ev.Raw), &msg); err != nil {
-			continue
+			return nil, nil
 		}
 		if msg.Item.ID == "" || !codexToolItemTypes[msg.Item.Type] {
-			continue
+			return nil, nil
 		}
 		switch msg.Type {
 		case "item.started":
-			pending[msg.Item.ID] = pendingUse{
-				name: codexToolName(msg.Item.Type, msg.Item.Server, msg.Item.Tool),
-				atMS: ev.AtMS,
-			}
+			name := codexToolName(msg.Item.Type, msg.Item.Server, msg.Item.Tool)
+			return []toolOpen{{ID: msg.Item.ID, Name: name}}, nil
 		case "item.completed":
-			use, ok := pending[msg.Item.ID]
-			if !ok {
-				continue
-			}
-			delete(pending, msg.Item.ID)
 			// The mcp server/tool fields may arrive on the completed event rather
 			// than the started one; prefer a name the completed event names more
 			// richly than the bare item type.
-			if completed := codexToolName(msg.Item.Type, msg.Item.Server, msg.Item.Tool); use.name == msg.Item.Type && completed != msg.Item.Type {
-				use.name = completed
-			}
-			agg := totals[use.name]
-			if agg == nil {
-				agg = &ToolTiming{Name: use.name}
-				totals[use.name] = agg
-			}
-			agg.Count++
-			agg.Total += time.Duration(ev.AtMS-use.atMS) * time.Millisecond
-			windows = append(windows, toolWindow{StartMS: use.atMS, EndMS: ev.AtMS})
+			completed := codexToolName(msg.Item.Type, msg.Item.Server, msg.Item.Tool)
+			return nil, []toolClose{{
+				ID: msg.Item.ID,
+				Rename: func(pendingName string) string {
+					if pendingName == msg.Item.Type && completed != msg.Item.Type {
+						return completed
+					}
+					return pendingName
+				},
+			}}
+		default:
+			return nil, nil
 		}
-	}
-	for _, use := range pending {
-		windows = append(windows, toolWindow{StartMS: use.atMS, EndMS: openWindowEndMS})
-	}
-	out := make([]ToolTiming, 0, len(totals))
-	for _, t := range totals {
-		out = append(out, *t)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Total != out[j].Total {
-			return out[i].Total > out[j].Total
-		}
-		return out[i].Name < out[j].Name
 	})
-	return out, windows
 }
 
 // codexToolName names a codex tool row. command_execution, file_change, and
