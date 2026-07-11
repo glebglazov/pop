@@ -40,6 +40,16 @@ func selectAutomaticTaskSet(refresh *RefreshResult) (string, bool, error) {
 	if manifests == nil {
 		manifests = make(map[string]*Manifest)
 	}
+	// Intentional divergence from the queue's selectReadySets (supervisor dispatch):
+	// this is the interactive local picker for `pop tasks implement`/`drain`. It
+	// shares the priority-desc/RegIndex ordering — refresh.Rows arrives already
+	// sorted that way (tasks/render.go orderRows) so first-Ready-wins == highest
+	// priority — but deliberately drops the dispatch-only gates. It ignores the
+	// AutoDrain flag (a human drives this pick, so consent to unattended drain is
+	// irrelevant), applies no backoff/parking or quota-recovery waits (those govern
+	// the unattended supervisor, not a person at the terminal), and falls back to a
+	// HITL gate when no Ready set exists. Do not fold these back into the queue
+	// selector: the two answer different questions.
 	for _, row := range refresh.Rows {
 		if row.Status != StatusReady {
 			continue

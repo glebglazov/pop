@@ -70,9 +70,13 @@ func TestSelectReadySet(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := selectReadySetID(tt.rows)
+			ids, _, _, _, ok := selectReadySets(&tasks.RefreshResult{Rows: tt.rows}, nil, nil)
+			got := ""
+			if ok && len(ids) > 0 {
+				got = ids[0]
+			}
 			if ok != tt.ok || got != tt.want {
-				t.Fatalf("selectReadySet = (%q, %v), want (%q, %v)", got, ok, tt.want, tt.ok)
+				t.Fatalf("selectReadySets = (%q, %v), want (%q, %v)", got, ok, tt.want, tt.ok)
 			}
 		})
 	}
@@ -613,6 +617,17 @@ func TestUnsatisfiableDirectiveSurfacesInStatusNotBackoff(t *testing.T) {
 	}
 }
 
+// firstReadySet is a test convenience over the single selectReadySets selector,
+// returning only its top pick the way the retired selectReadySet wrapper read:
+// the highest-priority spawnable set, or the wait instant/reason on none.
+func firstReadySet(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter) (string, time.Time, string, bool) {
+	ids, until, reason, _, ok := selectReadySets(refresh, backoff, recoveryWaiters)
+	if !ok || len(ids) == 0 {
+		return "", until, reason, false
+	}
+	return ids[0], time.Time{}, "", true
+}
+
 func TestSelectReadySetSkipsRecoveryWaiter(t *testing.T) {
 	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
 		{ID: "waiting", Status: tasks.StatusReady, AutoDrain: true, Priority: 100, RegIndex: 0},
@@ -626,7 +641,7 @@ func TestSelectReadySetSkipsRecoveryWaiter(t *testing.T) {
 		},
 	}
 
-	id, _, _, ok := selectReadySet(refresh, nil, recoveryWaiters)
+	id, _, _, ok := firstReadySet(refresh, nil, recoveryWaiters)
 	if !ok || id != "fallback" {
 		t.Fatalf("selectReadySet = (%q,%v), want fallback,true", id, ok)
 	}
@@ -651,13 +666,13 @@ func TestSelectReadySetSkipsCrashBackoffUntilElapsed(t *testing.T) {
 		"crashy": {ConsecutiveAbnormal: 1, LastAbnormalAt: now},
 	}
 
-	id, until, reason, ok := selectReadySet(refresh, backoffFor(history, delays, now), nil)
+	id, until, reason, ok := firstReadySet(refresh, backoffFor(history, delays, now), nil)
 	if ok || id != "" || !until.Equal(now.Add(time.Minute)) || reason != "set backed off after abnormal drain exit" {
 		t.Fatalf("selectReadySet during backoff = (%q,%s,%q,%v)", id, until, reason, ok)
 	}
 
 	later := now.Add(2 * time.Minute)
-	id, _, _, ok = selectReadySet(refresh, backoffFor(history, delays, later), nil)
+	id, _, _, ok = firstReadySet(refresh, backoffFor(history, delays, later), nil)
 	if !ok || id != "crashy" {
 		t.Fatalf("selectReadySet after backoff = (%q,%v), want crashy,true", id, ok)
 	}
@@ -675,14 +690,14 @@ func TestSelectReadySetSkipsParkedSet(t *testing.T) {
 		"parked": {ConsecutiveAbnormal: 2, LastAbnormalAt: now},
 	}
 
-	id, until, reason, ok := selectReadySet(refresh, backoffFor(history, delays, now), nil)
+	id, until, reason, ok := firstReadySet(refresh, backoffFor(history, delays, now), nil)
 	if ok || id != "" || !until.IsZero() || reason != "set parked after repeated abnormal drain exits" {
 		t.Fatalf("selectReadySet parked = (%q,%s,%q,%v)", id, until, reason, ok)
 	}
 
 	// A park-clear newer than the latest abnormal terminal lifts the park.
 	history["parked"] = tasks.SetBackoffInfo{ConsecutiveAbnormal: 2, LastAbnormalAt: now, ParkClearedAt: now.Add(time.Second)}
-	id, _, _, ok = selectReadySet(refresh, backoffFor(history, delays, now), nil)
+	id, _, _, ok = firstReadySet(refresh, backoffFor(history, delays, now), nil)
 	if !ok || id != "parked" {
 		t.Fatalf("selectReadySet after park-clear = (%q,%v), want parked,true", id, ok)
 	}

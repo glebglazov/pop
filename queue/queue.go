@@ -851,29 +851,6 @@ func loadRepoConfig(d *Deps, repoRoot string) (config.RepoConfig, error) {
 	return config.LoadRepoConfigWith(&config.Deps{FS: pd.FS}, repoRoot)
 }
 
-// selectReadySetID returns the highest-priority Auto-drain Ready set among
-// refresh rows. RefreshWith returns only non-Archived sets, so Archived sets are
-// already dropped here. Higher priority integers rank first; ties break by
-// registration order, matching the status table's active-set ordering.
-func selectReadySetID(rows []tasks.Row) (string, bool) {
-	var ready []tasks.Row
-	for _, row := range rows {
-		if row.Status == tasks.StatusReady && row.AutoDrain {
-			ready = append(ready, row)
-		}
-	}
-	if len(ready) == 0 {
-		return "", false
-	}
-	sort.SliceStable(ready, func(i, j int) bool {
-		if ready[i].Priority != ready[j].Priority {
-			return ready[i].Priority > ready[j].Priority
-		}
-		return ready[i].RegIndex < ready[j].RegIndex
-	})
-	return ready[0].ID, true
-}
-
 // firstAwaitingApprovalSetID returns the ID of the first Task-set in
 // AWAITING-APPROVAL state (all AFK work done/skipped, only a terminal HITL gate
 // remains). Empty when none.
@@ -886,14 +863,6 @@ func firstAwaitingApprovalSetID(rows []tasks.Row) string {
 	return ""
 }
 
-func selectReadySet(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter) (string, time.Time, string, bool) {
-	ids, waitUntil, reason, _, ok := selectReadySets(refresh, backoff, recoveryWaiters)
-	if !ok || len(ids) == 0 {
-		return "", waitUntil, reason, false
-	}
-	return ids[0], time.Time{}, "", true
-}
-
 // setBackoffFunc reports a set's abnormal-derived Queue eligibility: parked
 // reports whether repeated abnormal terminals have parked it (skip indefinitely
 // until a human unparks); a non-zero until is the instant it next becomes
@@ -901,6 +870,15 @@ func selectReadySet(refresh *tasks.RefreshResult, backoff setBackoffFunc, recove
 // a nil func (tests, callers without a store) means "always spawnable".
 type setBackoffFunc func(setID string) (parked bool, until time.Time)
 
+// selectReadySets is the single queue-side readiness selector: it returns the
+// Auto-drain Ready sets eligible for supervisor dispatch, highest priority
+// first. RefreshWith returns only non-Archived sets, so Archived sets are
+// already dropped. The one ordering definition lives here — higher priority
+// integers rank first, ties break by registration order, matching the status
+// table's active-set ordering — and backoff/parking (abnormal-drain history)
+// and quota-recovery waiters gate which of those ready sets are spawnable now.
+// On no eligible set it reports why (backoff until, parked, recovery wait) via
+// the returned instant/reason/blocked-id so callers render a specific decision.
 func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter) ([]string, time.Time, string, string, bool) {
 	if refresh == nil {
 		return nil, time.Time{}, "", "", false
