@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/queue"
@@ -73,34 +72,16 @@ var (
 
 const queueLogLimit = 50
 
-type queueRunConfig struct {
-	PollInterval         time.Duration
-	AgentQuotaRetryAfter time.Duration
-	CrashRetryDelays     []time.Duration
-}
-
-func resolveQueueRunConfig(loadConfig func(string) (*config.Config, error), path string) (queueRunConfig, error) {
-	cfg, err := loadConfig(path)
-	if err != nil {
-		return queueRunConfig{}, err
-	}
-	resolved, err := cfg.ResolveQueue()
-	if err != nil {
-		return queueRunConfig{}, err
-	}
-	return queueRunConfig{
-		PollInterval:         resolved.PollInterval,
-		AgentQuotaRetryAfter: resolved.AgentQuotaRetryAfter,
-		CrashRetryDelays:     append([]time.Duration(nil), resolved.CrashRetryDelays...),
-	}, nil
-}
-
 func runQueueRun(cmd *cobra.Command, args []string) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
 		cfgPath = config.DefaultConfigPath()
 	}
-	qcfg, err := resolveQueueRunConfig(queueConfigLoad, cfgPath)
+	cfg, err := queueConfigLoad(cfgPath)
+	if err != nil {
+		return err
+	}
+	resolved, err := cfg.ResolveQueue()
 	if err != nil {
 		return err
 	}
@@ -109,7 +90,7 @@ func runQueueRun(cmd *cobra.Command, args []string) error {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	err = queueRun(queue.DefaultDeps(), qcfg.PollInterval, os.Stdout, sigCh)
+	err = queueRun(queue.DefaultDeps(), resolved.PollInterval, os.Stdout, sigCh)
 	if err != nil {
 		var exitErr *tasks.ExitError
 		if errors.As(err, &exitErr) {
