@@ -67,7 +67,7 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 			Reason:             "no ready set",
 			ProjectConfigError: "/repo/idle/.pop.toml: expected value",
 		},
-	}, &DaemonState{Version: 1})
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestRenderStatusShowsRecoveryWaiter(t *testing.T) {
 		Reason:       "set waiting for quota recovery",
 		BlockedSetID: "set-1",
 		WaitUntil:    resetAt,
-	}}, &DaemonState{Version: 1})
+	}})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -264,14 +264,6 @@ func TestCrashBackoffEscalatesThenParksFromDrainHistory(t *testing.T) {
 	if parked, _ := setBackoffStatus(info, delays, info.LastAbnormalAt); !parked {
 		t.Fatalf("third abnormal terminal must park the set")
 	}
-
-	// No abnormal-backoff or park flags are persisted in daemon state (ADR-0055).
-	data, _ := td.FS.ReadFile(DaemonStatePath(td))
-	for _, omit := range []string{"set_crash_backoffs", "set_crash_counts", "parked_sets"} {
-		if strings.Contains(string(data), omit) {
-			t.Fatalf("daemon state must not persist %q: %s", omit, data)
-		}
-	}
 }
 
 func TestCleanTerminalResetsBackoffCountFromDrainHistory(t *testing.T) {
@@ -354,7 +346,7 @@ func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
 		Project:      "pop",
 		Reason:       "set parked after repeated abnormal drain exits",
 		BlockedSetID: "set-1",
-	}}, &DaemonState{Version: 1})
+	}})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}

@@ -110,20 +110,23 @@ type dashboardRepoStatic struct {
 // (bindings thrice, the drain lock once) every poll; the per-row overlay now
 // consults these in-memory maps instead, so the whole view is one consistent
 // snapshot and the store is opened a bounded number of times per build, not per
-// row. It holds every binding keyed by scoped key, plus the live (PID-alive)
-// running drains keyed by runtime path.
+// row. It holds every binding keyed by scoped key, the live (PID-alive) running
+// drains keyed by runtime path, and the recorded drain panes keyed by scoped key.
 type dashboardSnapshot struct {
 	bindings   map[string]WorktreeBinding
 	liveDrains map[string]tasks.RunningDrain
+	drainPanes map[string]tasks.DrainPane
 }
 
-// newDashboardSnapshot reads the volatile per-build store state once: AllBindings
-// and the live running drains (RunningDrains filtered to PID-alive in memory). It
-// is the single point at which a build touches pop.db for the overlay.
+// newDashboardSnapshot reads the volatile per-build store state once: AllBindings,
+// the live running drains (RunningDrains filtered to PID-alive in memory), and the
+// recorded drain panes. It is the single point at which a build touches pop.db for
+// the overlay.
 func newDashboardSnapshot(d *Deps) (*dashboardSnapshot, error) {
 	snap := &dashboardSnapshot{
 		bindings:   map[string]WorktreeBinding{},
 		liveDrains: map[string]tasks.RunningDrain{},
+		drainPanes: map[string]tasks.DrainPane{},
 	}
 	if d == nil || d.Tasks == nil {
 		return snap, nil
@@ -141,6 +144,13 @@ func newDashboardSnapshot(d *Deps) (*dashboardSnapshot, error) {
 	}
 	for _, dr := range drains {
 		snap.liveDrains[dr.RuntimePath] = dr
+	}
+	panes, err := tasks.AllDrainPanes(d.Tasks)
+	if err != nil {
+		return nil, err
+	}
+	for k, p := range panes {
+		snap.drainPanes[k] = p
 	}
 	return snap, nil
 }
@@ -174,10 +184,6 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 	// volatile overlay below reads locks from them (ADR-0055). A foreground drain
 	// that crashed is healed by whoever next opens the dashboard.
 	d.reconcile()
-	state, err := EnsureDaemonState(d.Tasks)
-	if err != nil {
-		return DashboardSnapshot{}, err
-	}
 	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
 	if err != nil {
 		return DashboardSnapshot{}, err
@@ -213,7 +219,7 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 	}
 	var rows []DashboardRow
 	for _, st := range statics {
-		groupRows, err := dashboardRowsFromStatic(d, cfg, snap, state, delays, now, st)
+		groupRows, err := dashboardRowsFromStatic(d, cfg, snap, delays, now, st)
 		if err != nil {
 			return DashboardSnapshot{}, err
 		}
@@ -520,7 +526,7 @@ func sortDashboardRows(rows []DashboardRow) {
 // taking the single per-build store snapshot. It is the seam tests use to drive
 // dashboardRowsFromStatic with a hand-built static, mirroring what BuildDashboard
 // does per group after deriving statics fork-free from markers.
-func dashboardRowsForStatic(d *Deps, cfg *config.Config, state *DaemonState, st dashboardRepoStatic) ([]DashboardRow, error) {
+func dashboardRowsForStatic(d *Deps, cfg *config.Config, st dashboardRepoStatic) ([]DashboardRow, error) {
 	var delays []time.Duration
 	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
 		delays = qcfg.CrashRetryDelays
@@ -529,14 +535,14 @@ func dashboardRowsForStatic(d *Deps, cfg *config.Config, state *DaemonState, st 
 	if err != nil {
 		return nil, err
 	}
-	return dashboardRowsFromStatic(d, cfg, snap, state, delays, d.now().UTC(), st)
+	return dashboardRowsFromStatic(d, cfg, snap, delays, d.now().UTC(), st)
 }
 
 // dashboardRowsFromStatic builds a repo group's rows from its static resolution
 // plus the current volatile state: task statuses (refresh), runtime locks, and
 // daemon-state columns. It forks no git — the static side is marker/config
 // derived (ADR-0060) and this overlay is cheap file/store reads.
-func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapshot, state *DaemonState, delays []time.Duration, now time.Time, st dashboardRepoStatic) ([]DashboardRow, error) {
+func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapshot, delays []time.Duration, now time.Time, st dashboardRepoStatic) ([]DashboardRow, error) {
 	refresh, err := d.refresh(st.defPath)
 	if err != nil {
 		return nil, err
@@ -560,7 +566,7 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 		if backoff != nil {
 			parked, _ = backoff(taskRow.ID)
 		}
-		drain := dashboardDrain(snap, state, st.repoKey, taskRow.ID, wt.runtimePath)
+		drain := dashboardDrain(snap, st.repoKey, taskRow.ID, wt.runtimePath)
 		if parked {
 			drain = "parked"
 		} else if st.configErr != "" && !hasBinding && drain == "" {
@@ -599,7 +605,7 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 				Parked:                parked,
 				Orphaned:              orphaned,
 				Bound:                 bound,
-				PaneID:                dashboardPaneID(state, st.repoKey, taskRow.ID),
+				PaneID:                dashboardPaneID(snap, st.repoKey, taskRow.ID),
 			},
 			Project:   st.projectName,
 			Status:    status,
@@ -741,7 +747,7 @@ func renderDashboardDest(kind dashboardDestKind, label string) string {
 // snapshot keys live drains by runtime path; a drain at the set's checkout (or
 // its bound checkout) whose SetID matches is the same fact ReadRuntimeLockStatus
 // derived per row before.
-func dashboardDrain(snap *dashboardSnapshot, state *DaemonState, repoKey, setID, runtimePath string) string {
+func dashboardDrain(snap *dashboardSnapshot, repoKey, setID, runtimePath string) string {
 	paths := map[string]bool{}
 	if runtimePath != "" {
 		paths[runtimePath] = true
@@ -749,7 +755,6 @@ func dashboardDrain(snap *dashboardSnapshot, state *DaemonState, repoKey, setID,
 	if b, ok := snap.bindingFor(repoKey, setID); ok && b.RuntimePath != "" {
 		paths[b.RuntimePath] = true
 	}
-	_ = state
 	for path := range paths {
 		if dr, ok := snap.liveDrains[path]; ok && dr.SetID == setID {
 			return dashboardDrainPickedUp
@@ -779,11 +784,11 @@ func dashboardOrphaned(d *Deps, bnd WorktreeBinding, hasBinding bool) bool {
 	return err != nil
 }
 
-func dashboardPaneID(state *DaemonState, repoKey, setID string) string {
-	if state == nil || state.DrainPanes == nil {
+func dashboardPaneID(snap *dashboardSnapshot, repoKey, setID string) string {
+	if snap == nil || snap.drainPanes == nil {
 		return ""
 	}
-	if pane, ok := state.DrainPanes[setScopedKey(repoKey, setID)]; ok {
+	if pane, ok := snap.drainPanes[setScopedKey(repoKey, setID)]; ok {
 		return pane.PaneID
 	}
 	return ""

@@ -58,7 +58,6 @@ type StatusSnapshot struct {
 	PickedUp             []PickedUpSet
 	Idle                 []IdleProject
 	Skipped              []SkippedRepo
-	DaemonState          *DaemonState
 	ActiveAgentCooldowns map[string]time.Time
 	RecoveryWaiters      map[string]tasks.RecoveryWaiter
 	Tasks                *tasks.Deps
@@ -70,15 +69,11 @@ type StatusSnapshot struct {
 
 // BuildStatus derives queue status from on-disk lock/state truth.
 func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
-	state, err := EnsureDaemonState(d.Tasks)
-	if err != nil {
-		return StatusSnapshot{}, err
-	}
 	decisions, err := Scan(d, cfg)
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
-	snap, err := statusFromDecisions(d, decisions, state)
+	snap, err := statusFromDecisions(d, decisions)
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
@@ -95,9 +90,8 @@ func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
 	return snap, nil
 }
 
-func statusFromDecisions(d *Deps, decisions []Decision, state *DaemonState) (StatusSnapshot, error) {
+func statusFromDecisions(d *Deps, decisions []Decision) (StatusSnapshot, error) {
 	var snap StatusSnapshot
-	snap.DaemonState = state
 	for _, dec := range decisions {
 		repoLabel := repoLabelFromScan(dec.scan)
 		if dec.Busy {

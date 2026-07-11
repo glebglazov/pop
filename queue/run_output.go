@@ -168,9 +168,7 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 
 	view.Blocked = append(view.Blocked, blockedItemsFromState(snap.Tasks, snap.CrashRetryDelays, now, blockedProjects)...)
 	view.Blocked = append(view.Blocked, blockedItemsFromRecoveryWaiters(snap.Tasks, snap.RecoveryWaiters, blockedProjects)...)
-	if snap.DaemonState != nil {
-		view.WorktreeBindings = buildWorktreeBindingViews(snap.Tasks, snap.DaemonState, view)
-	}
+	view.WorktreeBindings = buildWorktreeBindingViews(snap.Tasks, view)
 	view.Blocked = append(view.Blocked, blockedItemsFromAgentCooldowns(snap.ActiveAgentCooldowns, now)...)
 
 	sort.SliceStable(view.Queued, func(i, j int) bool { return view.Queued[i].Project < view.Queued[j].Project })
@@ -554,7 +552,7 @@ func formatRunningLine(p PickedUpSet) string {
 	return fmt.Sprintf("%s: %s%s%s", projectLabel, setID, pid, started)
 }
 
-func buildWorktreeBindingViews(d *tasks.Deps, state *DaemonState, view RunView) []WorktreeBindingView {
+func buildWorktreeBindingViews(d *tasks.Deps, view RunView) []WorktreeBindingView {
 	bindings, err := binding.AllBindings(d)
 	if err != nil || len(bindings) == 0 {
 		return nil

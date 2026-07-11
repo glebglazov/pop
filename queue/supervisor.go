@@ -33,9 +33,6 @@ func Run(d *Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal)
 	}
 	defer func() { _ = lock.Release() }()
 
-	if _, err := EnsureDaemonState(d.Tasks); err != nil {
-		return err
-	}
 	if _, err := d.LoadConfig(config.DefaultConfigPath()); err != nil {
 		return err
 	}

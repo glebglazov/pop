@@ -151,7 +151,7 @@ func TestDashboardRowsVerifyFailedStatus(t *testing.T) {
 		RepoKey:        "repo-key",
 		RepoCommonDir:  "/repo/.git",
 	}
-	got, err := dashboardRowsForStatic(d, enabled, &DaemonState{Version: 1}, staticForScan(scan, "main", false))
+	got, err := dashboardRowsForStatic(d, enabled, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,10 +201,9 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey("repo-key", "done-integrating"): {RuntimePath: "/repo/done", Branch: "done-branch", Provisioned: true},
 	})
-	state := &DaemonState{Version: 1}
 	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
 
-	got, err := dashboardRowsForStatic(d, &config.Config{}, state, staticForScan(scan, "main", false))
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,14 +315,13 @@ func TestDashboardColumnDerivation(t *testing.T) {
 		RenameFunc:    real.Rename,
 		StatFunc:      origFS.StatFunc,
 	}
-	state := &DaemonState{Version: 1}
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey("repo-key", "done"):  {RuntimePath: "/repo/done", Branch: "done-branch", Provisioned: true},
 		setScopedKey("repo-key", "bound"): {RuntimePath: "/repo/bound", Branch: "bound-branch"},
 	})
 	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
 
-	got, err := dashboardRowsForStatic(d, &config.Config{}, state, staticForScan(scan, "main", false))
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +344,7 @@ func TestDashboardNoBaseWorktree(t *testing.T) {
 	d := dashboardTestDeps(t, []tasks.Row{{ID: "missing", Status: tasks.StatusMissing}}, nil)
 	scan := projectScan{Name: "bare", ProjectPath: "/repo/bare.git", RuntimePath: "/repo/bare.git", DefinitionPath: "/def", RepoKey: "bare-key"}
 
-	got, err := dashboardRowsForStatic(d, &config.Config{}, &DaemonState{Version: 1}, staticForScan(scan, "", true))
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "", true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +388,7 @@ func TestDashboardPickedUpIndicator(t *testing.T) {
 	})
 	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
 
-	got, err := dashboardRowsForStatic(d, &config.Config{}, &DaemonState{Version: 1}, staticForScan(scan, "main", false))
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +445,7 @@ func TestDashboardOrphanedIndicator(t *testing.T) {
 	})
 	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
 
-	got, err := dashboardRowsForStatic(d, &config.Config{}, &DaemonState{Version: 1}, staticForScan(scan, "main", false))
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +520,7 @@ func TestDashboardBuildBoundedStoreOpens(t *testing.T) {
 		scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
 
 		before := store.OpenCount()
-		if _, err := dashboardRowsForStatic(d, &config.Config{}, &DaemonState{Version: 1}, staticForScan(scan, "main", false)); err != nil {
+		if _, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false)); err != nil {
 			t.Fatal(err)
 		}
 		return store.OpenCount() - before
@@ -1862,9 +1860,6 @@ func TestDashboardLaunchDrainRoutesBoundCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1}); err != nil {
-		t.Fatal(err)
-	}
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "bound", Project: "pop", Provisioned: false},
 	})
@@ -2175,7 +2170,7 @@ func TestDashboardBareWithoutTrunkRendersConfigError(t *testing.T) {
 		bare:        true,
 		configErr:   repoScanReason,
 	}
-	got, err := dashboardRowsForStatic(d, &config.Config{}, &DaemonState{Version: 1}, st)
+	got, err := dashboardRowsForStatic(d, &config.Config{}, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2228,7 +2223,7 @@ func TestDashboardBranchColumnSources(t *testing.T) {
 		repBranch:   "trunk-branch",
 		bare:        false,
 	}
-	got, err := dashboardRowsForStatic(d, &config.Config{}, &DaemonState{Version: 1}, st)
+	got, err := dashboardRowsForStatic(d, &config.Config{}, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2279,7 +2274,7 @@ func TestDashboardManagedDirectiveDestColumn(t *testing.T) {
 	}
 	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: defPath, RepoKey: "repo-key"}
 
-	got, err := dashboardRowsForStatic(d, &config.Config{}, &DaemonState{Version: 1}, staticForScan(scan, "main", false))
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2329,7 +2324,7 @@ func TestDashboardDoneAdoptedBindingExcluded(t *testing.T) {
 	})
 	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
 
-	got, err := dashboardRowsForStatic(d, &config.Config{}, &DaemonState{Version: 1}, staticForScan(scan, "main", false))
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2350,7 +2345,7 @@ func TestDashboardDoneAdoptedBindingExcluded(t *testing.T) {
 func TestDashboardNeedsBindRenderedDim(t *testing.T) {
 	d := dashboardTestDeps(t, []tasks.Row{{ID: "plain", Status: tasks.StatusReady}}, nil)
 	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
-	got, err := dashboardRowsForStatic(d, &config.Config{}, &DaemonState{Version: 1}, staticForScan(scan, "main", false))
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2467,9 +2462,6 @@ func TestDashboardBindRefusesLiveLock(t *testing.T) {
 	}
 	row.RepoKey = repoKey
 	row.RuntimePath = locked
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1}); err != nil {
-		t.Fatal(err)
-	}
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey(repoKey, setID): {RuntimePath: locked, Branch: "locked-branch", Project: "pop", Provisioned: false},
 	})
@@ -2558,9 +2550,6 @@ func TestDashboardUnbindManagedOnlyForgetsBindingAndKeepsCheckout(t *testing.T) 
 	}
 	row.RepoKey = repoKey
 	row.RuntimePath = wt
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1}); err != nil {
-		t.Fatal(err)
-	}
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "managed-unbind", Project: filepath.Base(repo), Provisioned: true},
 	})
@@ -2605,9 +2594,6 @@ func TestDashboardUnbindAdoptedOnlyForgetsBindingAndKeepsStatus(t *testing.T) {
 	}
 	row.RepoKey = repoKey
 	row.RuntimePath = wt
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1}); err != nil {
-		t.Fatal(err)
-	}
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "adopted-unbind", Project: filepath.Base(repo), Provisioned: false},
 	})
@@ -2647,9 +2633,6 @@ func TestDashboardUnbindRefusesLiveLockAndNoopsWithoutBinding(t *testing.T) {
 	}
 	row.RepoKey = repoKey
 	row.RuntimePath = wt
-	if err := WriteDaemonState(d.Tasks, &DaemonState{Version: 1}); err != nil {
-		t.Fatal(err)
-	}
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey(repoKey, setID): {RuntimePath: wt, Branch: "locked-unbind", Project: filepath.Base(repo), Provisioned: false},
 	})
@@ -2767,7 +2750,7 @@ func dashboardLaunchFixture(t *testing.T, repo, setID string) (*Deps, *config.Co
 
 func assertDashboardPaneMapping(t *testing.T, d *Deps, repo, setID, paneID, source string) {
 	t.Helper()
-	state, err := ReadDaemonState(d.Tasks)
+	panes, err := tasks.AllDrainPanes(d.Tasks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2775,7 +2758,7 @@ func assertDashboardPaneMapping(t *testing.T, d *Deps, repo, setID, paneID, sour
 	if err != nil {
 		t.Fatal(err)
 	}
-	pane := state.DrainPanes[setScopedKey(repoKey, setID)]
+	pane := panes[setScopedKey(repoKey, setID)]
 	if pane.PaneID != paneID || pane.SetID != setID || pane.Source != source {
 		t.Fatalf("pane mapping = %+v, want pane=%s set=%s source=%s", pane, paneID, setID, source)
 	}

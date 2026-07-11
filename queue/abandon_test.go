@@ -105,9 +105,6 @@ func TestAbandonSuccessfulPreservesTaskStatus(t *testing.T) {
 
 func TestAbandonNoopWhenUnbound(t *testing.T) {
 	td := queueDataDeps(t)
-	if _, err := EnsureDaemonState(td); err != nil {
-		t.Fatalf("ensure state: %v", err)
-	}
 	d := &Deps{
 		Tasks: td,
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {

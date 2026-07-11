@@ -272,6 +272,21 @@ var migrations = []string{
 	// default to human_authored=0 / note='' — the agent-authored verdict shape.
 	`ALTER TABLE verify_verdicts ADD COLUMN human_authored INTEGER NOT NULL DEFAULT 0;
 	 ALTER TABLE verify_verdicts ADD COLUMN note TEXT NOT NULL DEFAULT '';`,
+	// 16: drain_panes — the tmux pane the queue supervisor associates with a Task
+	// set drain, surfaced in the dashboard preview. ADR-0055 completes the daemon
+	// state consolidation by moving this last live state.json payload into the
+	// store; it is transient preview data (no migration of the retired file — an
+	// empty start is fine), keyed by the caller-built scoped key (repository
+	// identity plus set id). The latest write for a set wins.
+	`CREATE TABLE drain_panes (
+		scoped_key   TEXT PRIMARY KEY,
+		project      TEXT NOT NULL DEFAULT '',
+		runtime_path TEXT NOT NULL DEFAULT '',
+		set_id       TEXT NOT NULL,
+		pane_id      TEXT NOT NULL,
+		recorded_at  TEXT NOT NULL DEFAULT '',
+		source       TEXT NOT NULL DEFAULT ''
+	);`,
 }
 
 func (s *Store) migrate() error {

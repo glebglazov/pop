@@ -138,7 +138,7 @@ func TestScanSkipsNonGitProjectsOutsideQueueScope(t *testing.T) {
 		t.Fatalf("non-git project Reason = %q, want no ready set", nonGitDec.Reason)
 	}
 
-	snap, err := statusFromDecisions(&Deps{Tasks: td}, decisions, &DaemonState{Version: 1})
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, decisions)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestDecideProjectIdleSkip(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, time.Now())
 
 	if !dec.Busy {
 		t.Fatalf("expected Busy decision for a live lock, got %+v", dec)
@@ -196,7 +196,7 @@ func TestDecideProjectSelectsHighestPriority(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, time.Now())
 
 	if dec.Busy || dec.Err != nil {
 		t.Fatalf("idle project with ready work should not be busy/errored, got %+v", dec)
@@ -224,7 +224,7 @@ func TestDecideProjectSelectsOnlyAutoDrainReadySets(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, time.Now())
 
 	// Only the auto-drain set is a Queue candidate; unbound and directive-free it
 	// surfaces as needs-bind rather than dispatching (ADR-0070/0072).
@@ -237,7 +237,7 @@ func TestDecideProjectSelectsOnlyAutoDrainReadySets(t *testing.T) {
 			{ID: "unmarked", Status: tasks.StatusReady, Priority: 100, RegIndex: 0},
 		}}, nil
 	}
-	dec = decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
+	dec = decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, time.Now())
 	if dec.Actionable() || dec.Reason != "no ready set" {
 		t.Fatalf("unmarked ready set should be skipped, got %+v", dec)
 	}
@@ -255,7 +255,7 @@ func TestDecideProjectNoReadySet(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, time.Now())
 
 	if dec.Actionable() {
 		t.Fatalf("a project with no ready set must not be actionable: %+v", dec)
@@ -281,7 +281,7 @@ func TestDecideProjectWorktreeReadyCausesConfigError(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, time.Now())
 
 	if dec.WorktreeReady {
 		t.Fatalf("WorktreeReady must always be false from config, got %+v", dec)
@@ -310,7 +310,7 @@ func TestDecideProjectMalformedRepoConfigReportsAndDegrades(t *testing.T) {
 		},
 	}
 
-	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, &DaemonState{Version: 1}, time.Now())
+	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, time.Now())
 
 	if dec.WorktreeReady {
 		t.Fatalf("malformed .pop.toml must degrade to not worktree-ready: %+v", dec)
@@ -350,7 +350,7 @@ func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 	}
 	// Only "live" holds the runtime lock (a live running Drain); the busy
 	// detection must report that set alone and never a set with no live drain.
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, nil, &DaemonState{Version: 1}, nil, time.Now())
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, nil, nil, time.Now())
 
 	var busy []string
 	for _, dec := range decisions {
@@ -413,7 +413,7 @@ func TestScanForksNoGitForProjectsWithoutTaskStorage(t *testing.T) {
 		}
 	}
 
-	snap, err := statusFromDecisions(&Deps{Tasks: queueDataDeps(t)}, decisions, &DaemonState{Version: 1})
+	snap, err := statusFromDecisions(&Deps{Tasks: queueDataDeps(t)}, decisions)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestDecideProjectDispatchesKeepsSingleInPlaceDrain(t *testing.T) {
 		},
 	}
 
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, &DaemonState{Version: 1}, nil, time.Now())
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, nil, time.Now())
 
 	// Non-worktree-ready still collapses to a single set (the highest priority),
 	// but unbound and directive-free it is surfaced as needs-bind rather than
@@ -548,7 +548,7 @@ func TestDecideProjectDispatchesWithholdsUnsatisfiableDirective(t *testing.T) {
 		},
 	}
 
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, &DaemonState{Version: 1}, nil, time.Now())
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, nil, time.Now())
 
 	if len(decisions) != 1 {
 		t.Fatalf("decisions = %+v, want one config-error decision", decisions)
@@ -588,10 +588,9 @@ func TestUnsatisfiableDirectiveSurfacesInStatusNotBackoff(t *testing.T) {
 		},
 	}
 
-	state := &DaemonState{Version: 1}
-	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, state, nil, time.Now())
+	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, nil, time.Now())
 
-	snap, err := statusFromDecisions(d, decisions, state)
+	snap, err := statusFromDecisions(d, decisions)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -611,9 +610,6 @@ func TestUnsatisfiableDirectiveSurfacesInStatusNotBackoff(t *testing.T) {
 		if b.SetID == "named" {
 			t.Fatalf("unsatisfiable set must not appear blocked/backed-off: %+v", b)
 		}
-	}
-	if len(state.SetBackoffs) != 0 {
-		t.Fatalf("SetBackoffs = %v, want none — a static directive defect accrues no backoff", state.SetBackoffs)
 	}
 }
 

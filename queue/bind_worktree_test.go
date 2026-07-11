@@ -45,9 +45,6 @@ func TestAbandonAdoptedRetainsCheckout(t *testing.T) {
 
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-a")
-	if err := WriteDaemonState(td, &DaemonState{Version: 1}); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: {
 			RuntimePath: wt,
@@ -98,9 +95,6 @@ func TestAbandonProvisionedOnlyForgetsBinding(t *testing.T) {
 
 	td := queueDataDeps(t)
 	key := testScopedKey(t, repo, "set-p")
-	if err := WriteDaemonState(td, &DaemonState{Version: 1}); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
 	seedBindingStore(t, td, map[string]WorktreeBinding{
 		key: {
 			RuntimePath: wt,

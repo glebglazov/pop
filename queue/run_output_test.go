@@ -23,7 +23,7 @@ func TestBuildRunViewConfigErrorIsScanError(t *testing.T) {
 			Reason:             "no ready set",
 			ProjectConfigError: "/repo/broken/.pop.toml: expected value",
 		},
-	}, &DaemonState{Version: 1})
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
 		{Project: "idle-a", Reason: "no ready set"},
 		{Project: "idle-b", Reason: "no ready set"},
 		{Project: "idle-c", Reason: "no ready set"},
-	}, &DaemonState{Version: 1})
+	})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestBuildRunViewAwaitingApprovalBucket(t *testing.T) {
 			Reason:                "awaiting approval",
 			AwaitingApprovalSetID: "set-hitl",
 		},
-	}, &DaemonState{Version: 1})
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func TestRepoIdentityLabelAcrossSpawnAndBackoff(t *testing.T) {
 		},
 	}
 
-	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{spawnDec}, &DaemonState{Version: 1})
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{spawnDec})
 	if err != nil {
 		t.Fatalf("statusFromDecisions: %v", err)
 	}
@@ -498,7 +498,7 @@ func TestRepoIdentityLabelBaselineDeltaParity(t *testing.T) {
 		},
 	}
 
-	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{runningDec, queuedDec}, &DaemonState{Version: 1})
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{runningDec, queuedDec})
 	if err != nil {
 		t.Fatalf("statusFromDecisions: %v", err)
 	}
@@ -573,7 +573,7 @@ func TestRepoIdentityLabelFallsBackToProject(t *testing.T) {
 				SetID: "set-1",
 			},
 		},
-	}}, &DaemonState{Version: 1})
+	}})
 	if err != nil {
 		t.Fatalf("statusFromDecisions: %v", err)
 	}
@@ -638,7 +638,7 @@ func TestAdoptedWorktreeSuffixOnBaselineAndDelta(t *testing.T) {
 		},
 	}
 
-	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{dec}, &DaemonState{Version: 1})
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{dec})
 	if err != nil {
 		t.Fatalf("statusFromDecisions: %v", err)
 	}
@@ -717,7 +717,7 @@ func TestManagedWorktreeSuffixSuppressed(t *testing.T) {
 		},
 	}
 
-	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{dec}, &DaemonState{Version: 1})
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, []Decision{dec})
 	if err != nil {
 		t.Fatalf("statusFromDecisions: %v", err)
 	}
@@ -772,7 +772,7 @@ func TestInPlaceDrainNoWorktreeSuffix(t *testing.T) {
 				SetID: "set-1",
 			},
 		},
-	}}, &DaemonState{Version: 1})
+	}})
 	if err != nil {
 		t.Fatalf("statusFromDecisions: %v", err)
 	}

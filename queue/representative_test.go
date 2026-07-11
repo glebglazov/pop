@@ -124,7 +124,7 @@ func TestDecideRepoDispatchesBareMultiWorktreeCollapsesToOneDrain(t *testing.T) 
 	bindSetInPlace(t, d, wts[0], "top")
 	scans := scansForCheckouts(wts, "/def")
 
-	decisions := decideRepoDispatches(d, cfg, scans, &DaemonState{Version: 1}, time.Now())
+	decisions := decideRepoDispatches(d, cfg, scans, time.Now())
 
 	var actionable []Decision
 	for _, dec := range decisions {
@@ -162,7 +162,7 @@ func TestDecideRepoDispatchesExecutionRenameIsFatal(t *testing.T) {
 		Message: "config.toml: [repo.\"/some/repo\"] queue_base was renamed to trunk",
 	}}}
 
-	decisions := decideRepoDispatches(d, cfg, scans, &DaemonState{Version: 1}, time.Now())
+	decisions := decideRepoDispatches(d, cfg, scans, time.Now())
 
 	if len(decisions) != 1 {
 		t.Fatalf("execution rename: %d decisions, want 1 fatal\n%+v", len(decisions), decisions)
@@ -204,7 +204,7 @@ func TestDecideRepoDispatchesBareManagedDirectiveIsConfigError(t *testing.T) {
 	}
 
 	scans := scansForCheckouts(wts, canonDef)
-	decisions := decideRepoDispatches(d, &config.Config{}, scans, &DaemonState{Version: 1}, time.Now())
+	decisions := decideRepoDispatches(d, &config.Config{}, scans, time.Now())
 
 	var cfgErr *Decision
 	for i := range decisions {
@@ -231,7 +231,7 @@ func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 	d := repoDispatchDeps(t, []tasks.Row{{ID: "top", Status: tasks.StatusReady, AutoDrain: true, Priority: 1}}, nil)
 	scans := scansForCheckouts(wts, "/def")
 
-	decisions := decideRepoDispatches(d, &config.Config{}, scans, &DaemonState{Version: 1}, time.Now())
+	decisions := decideRepoDispatches(d, &config.Config{}, scans, time.Now())
 
 	if len(decisions) != 1 {
 		t.Fatalf("bare repo without base: %d decisions, want 1 skip\n%+v", len(decisions), decisions)
@@ -246,7 +246,7 @@ func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 
 	// The refusal is reported in status and run output, never silently dropped.
 	td := queueDataDeps(t)
-	snap, err := statusFromDecisions(&Deps{Tasks: td}, decisions, &DaemonState{Version: 1})
+	snap, err := statusFromDecisions(&Deps{Tasks: td}, decisions)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -275,10 +275,9 @@ func TestDecideRepoDispatchesBindingRoutesRegardlessOfTrunkConfig(t *testing.T) 
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey(repoIdentityKey(id), "top"): {RuntimePath: wts[1], Branch: "pop/top", Project: "repo"},
 	})
-	state := &DaemonState{Version: 1}
 	scans := scansForCheckouts(wts, "/def")
 
-	decisions := decideRepoDispatches(d, &config.Config{}, scans, state, time.Now())
+	decisions := decideRepoDispatches(d, &config.Config{}, scans, time.Now())
 
 	var actionable []Decision
 	for _, dec := range decisions {
@@ -307,7 +306,7 @@ func TestDecideRepoDispatchesNonBareRoutesToGitMainWorktree(t *testing.T) {
 	checkouts := []string{linked[0], linked[1], main}
 	scans := scansForCheckouts(checkouts, "/def")
 
-	decisions := decideRepoDispatches(d, &config.Config{}, scans, &DaemonState{Version: 1}, time.Now())
+	decisions := decideRepoDispatches(d, &config.Config{}, scans, time.Now())
 
 	var actionable []Decision
 	for _, dec := range decisions {

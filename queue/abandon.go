@@ -37,11 +37,7 @@ func queueUnbindHooks(d *Deps, cfg *config.Config) binding.LifecycleHooks {
 	return binding.LifecycleHooks{
 		ReadLock: d.readLock,
 		NeedsConfirm: func(setID string, b binding.Binding) (bool, error) {
-			state, err := EnsureDaemonState(d.Tasks)
-			if err != nil {
-				return false, err
-			}
-			return abandonNeedsConfirm(d, cfg, state, setID, b)
+			return abandonNeedsConfirm(d, cfg, setID, b)
 		},
 	}
 }
@@ -49,8 +45,7 @@ func queueUnbindHooks(d *Deps, cfg *config.Config) binding.LifecycleHooks {
 // abandonNeedsConfirm reports whether unbinding setID should prompt first. With
 // integration removed (ADR-0070), the only confirm trigger is a terminal set
 // state whose work would be quietly forgotten — Done or Failed.
-func abandonNeedsConfirm(d *Deps, cfg *config.Config, state *DaemonState, setID string, wt WorktreeBinding) (bool, error) {
-	_ = state
+func abandonNeedsConfirm(d *Deps, cfg *config.Config, setID string, wt WorktreeBinding) (bool, error) {
 	return setHasStatus(d, wt, setID, tasks.StatusDone, tasks.StatusFailed)
 }
 

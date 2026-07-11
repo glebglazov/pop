@@ -361,10 +361,6 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	if _, err := resolvedQueueConfig(cfg); err != nil {
 		return nil, err
 	}
-	state, err := EnsureDaemonState(d.Tasks)
-	if err != nil {
-		return nil, err
-	}
 	now := d.now().UTC()
 	recoveryWaiters := loadRecoveryWaiters(d)
 
@@ -396,8 +392,8 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	}
 
 	// Decide each task-storage repo group concurrently, preserving group order.
-	// decideRepoDispatchesWithRep reads only the shared DaemonState and Deps, so
-	// the groups are concurrency-safe.
+	// decideRepoDispatchesWithRep reads only the shared Deps, so the groups are
+	// concurrency-safe.
 	groupDecisions := make([][]Decision, len(groups))
 	sem := make(chan struct{}, scanConcurrency())
 	var wg sync.WaitGroup
@@ -408,7 +404,7 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			g := groups[idx]
-			decs := decideRepoDispatchesWithRep(d, cfg, g.scans, g.rep, g.repErr, state, recoveryWaiters, now)
+			decs := decideRepoDispatchesWithRep(d, cfg, g.scans, g.rep, g.repErr, recoveryWaiters, now)
 			// The fork-free static path leaves the representative's spawn session
 			// name unset (deriving it forks git). Fill it only for a drain about to
 			// be dispatched — never for the idle full-fleet listing — so a created
@@ -619,8 +615,8 @@ func scanRepoCommonDir(d *Deps, scan projectScan) string {
 // returns the first Decision. It is retained for tests and callers that need the
 // v1 single-decision view; Scan uses decideProjectDispatches to expose
 // worktree-ready multi-set fan-out.
-func decideProject(d *Deps, scan projectScan, state *DaemonState, now time.Time) Decision {
-	decisions := decideProjectDispatches(d, scan, nil, state, loadRecoveryWaiters(d), now)
+func decideProject(d *Deps, scan projectScan, now time.Time) Decision {
+	decisions := decideProjectDispatches(d, scan, nil, loadRecoveryWaiters(d), now)
 	if len(decisions) == 0 {
 		return Decision{Project: scan.Name, scan: scan, Reason: "no ready set"}
 	}
@@ -632,7 +628,7 @@ func decideProject(d *Deps, scan projectScan, state *DaemonState, now time.Time)
 // highest-priority Ready set is selected. A project with an explicit
 // WorktreeReady Decision keeps live worktree drains as per-checkout busy
 // Decisions but may still dispatch other Ready sets into fresh worktrees.
-func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, state *DaemonState, recoveryWaiters map[string]tasks.RecoveryWaiter, now time.Time) []Decision {
+func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, recoveryWaiters map[string]tasks.RecoveryWaiter, now time.Time) []Decision {
 	dec := Decision{Project: scan.Name, scan: scan}
 	dec.WorktreeReady, dec.ProjectConfigError = readRepoConfig(d, scan.ProjectPath)
 
@@ -1082,22 +1078,15 @@ func recordDrainPane(d *Deps, dec Decision, paneID, source string) error {
 	if err != nil {
 		return err
 	}
-	state, err := EnsureDaemonState(d.Tasks)
-	if err != nil {
-		return err
-	}
-	if state.DrainPanes == nil {
-		state.DrainPanes = map[string]DrainPane{}
-	}
-	state.DrainPanes[key] = DrainPane{
+	return tasks.RecordDrainPane(d.Tasks, tasks.DrainPane{
+		ScopedKey:   key,
 		Project:     dec.Project,
 		RuntimePath: dec.scan.RuntimePath,
 		SetID:       dec.TaskSetID,
 		PaneID:      paneID,
 		RecordedAt:  d.now().UTC(),
 		Source:      source,
-	}
-	return WriteDaemonState(d.Tasks, state)
+	})
 }
 
 // spawnDrain creates (if needed) the detached session and shared queue window,
