@@ -155,6 +155,22 @@ func neutralizeACHeaders(findings string) string {
 // framing reflects that a human authorised the fix (the auto FIXABLE path passes
 // an empty note).
 func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings, humanNote string) (string, error) {
+	id, err := writeRemediationTask(d, m, workSHA, findings, humanNote)
+	if err != nil {
+		return "", err
+	}
+	// The set is no longer terminal: any cached verdict is for the old episode
+	// and must be discarded so the Verifier re-fires at the new work SHA.
+	invalidateVerifyVerdicts(d, repo, m.Stem)
+	return id, nil
+}
+
+// writeRemediationTask writes the Remediation task's markdown body and appends
+// it to the manifest, returning the new task id. It performs only the filesystem
+// half of spawning — the caller invalidates the set's cached verdicts. The human
+// out-of-band Remediate path (ADR-0104) drives this directly so the manifest
+// append and the verdict invalidation ride one quiescence-gated transaction.
+func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote string) (string, error) {
 	if m == nil {
 		return "", exitErr(ExitOperational, "spawn remediation task: nil manifest")
 	}
@@ -181,9 +197,6 @@ func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings, humanNo
 		m.Tasks = m.Tasks[:len(m.Tasks)-1]
 		return "", exitErr(ExitOperational, "append remediation task to manifest: %v", err)
 	}
-	// The set is no longer terminal: any cached verdict is for the old episode
-	// and must be discarded so the Verifier re-fires at the new work SHA.
-	invalidateVerifyVerdicts(d, repo, m.Stem)
 	return id, nil
 }
 

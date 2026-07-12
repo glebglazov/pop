@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -242,13 +243,19 @@ func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA str
 		Note:          note,
 		ComputedAt:    time.Now().UTC(),
 	}
+	// An Accept mutates the checkout's verdict out of band, so it is refused unless
+	// the checkout is quiescent — no live drain could then overwrite the
+	// human-authored PASS (ADR-0104). The check and the upsert share one
+	// transaction.
 	s, err := openDrainStore(d)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = s.Close() }()
-	if err := s.PutVerifyVerdict(v); err != nil {
-		return nil, exitErr(ExitOperational, "record accepted verdict: %v", err)
+	if err := mutateWithCheckoutQuiescence(d, s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
+		return store.PutVerifyVerdictExec(ctx, ex, v)
+	}); err != nil {
+		return nil, err
 	}
 	printAcceptedVerdict(opts.Output, opts.SetID, workSHA, note)
 	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: VerdictPass}, nil
@@ -266,8 +273,24 @@ func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA str
 func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA string) (*VerifyResult, error) {
 	note := strings.TrimSpace(opts.RemediateNote)
 	findings := latestVerdictFindings(d, opts.Repo, opts.SetID, workSHA)
-	id, err := spawnRemediationTask(d, m, opts.Repo, workSHA, findings, note)
+	// A human Remediate appends to the manifest and invalidates the set's cached
+	// verdicts out of band, so it is refused unless the checkout is quiescent — a
+	// live drain must not race the manifest append (ADR-0104). The manifest write
+	// and the verdict invalidation ride one quiescence-gated transaction: the
+	// invalidation only commits when the append succeeded and the checkout is idle.
+	s, err := openDrainStore(d)
 	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = s.Close() }()
+	var id string
+	if err := mutateWithCheckoutQuiescence(d, s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
+		var werr error
+		if id, werr = writeRemediationTask(d, m, workSHA, findings, note); werr != nil {
+			return werr
+		}
+		return store.InvalidateVerifyVerdictsExec(ctx, ex, opts.Repo, m.Stem)
+	}); err != nil {
 		return nil, err
 	}
 	printRemediationSpawned(opts.Output, opts.SetID, id, note)

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"time"
 )
@@ -108,7 +109,15 @@ func scanVerifyVerdict(row *sql.Row) (*VerifyVerdict, error) {
 // PutVerifyVerdict upserts the verdict for (repo, set, work SHA). Re-running the
 // Verifier at the same SHA overwrites the row (force semantics).
 func (s *Store) PutVerifyVerdict(v VerifyVerdict) error {
-	_, err := s.db.Exec(
+	return PutVerifyVerdictExec(context.Background(), s.db, v)
+}
+
+// PutVerifyVerdictExec is the executor-scoped body of PutVerifyVerdict: it runs
+// against any Execer — the store's shared *sql.DB in the common path, or the
+// connection holding an open transaction so a quiescence-gated Accept upserts
+// the verdict inside the same transaction as its check (ADR-0104).
+func PutVerifyVerdictExec(ctx context.Context, ex Execer, v VerifyVerdict) error {
+	_, err := ex.ExecContext(ctx,
 		`INSERT INTO verify_verdicts (repo, set_id, work_sha, verdict, findings, scope, human_authored, note, computed_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(repo, set_id, work_sha) DO UPDATE SET
@@ -123,7 +132,15 @@ func (s *Store) PutVerifyVerdict(v VerifyVerdict) error {
 // through reopen or remediation — so the set must re-verify from scratch
 // (ADR-0096). Returns nil when no rows exist.
 func (s *Store) InvalidateVerifyVerdicts(repo, setID string) error {
-	_, err := s.db.Exec(
+	return InvalidateVerifyVerdictsExec(context.Background(), s.db, repo, setID)
+}
+
+// InvalidateVerifyVerdictsExec is the executor-scoped body of
+// InvalidateVerifyVerdicts: it runs against any Execer so a quiescence-gated
+// Remediate can discard the stale verdicts inside the same transaction that
+// verified the checkout was quiescent (ADR-0104).
+func InvalidateVerifyVerdictsExec(ctx context.Context, ex Execer, repo, setID string) error {
+	_, err := ex.ExecContext(ctx,
 		`DELETE FROM verify_verdicts WHERE repo = ? AND set_id = ?`,
 		repo, setID)
 	return err
