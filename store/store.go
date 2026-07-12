@@ -287,6 +287,16 @@ var migrations = []string{
 		recorded_at  TEXT NOT NULL DEFAULT '',
 		source       TEXT NOT NULL DEFAULT ''
 	);`,
+	// 17: checkout_gate_holds owner identity — the PID and process start token of
+	// the process that registered the hold, mirroring the drains table so the same
+	// opportunistic reconcile pass can sweep a hold whose owner died (a crash while
+	// a human sat at a Failed/HITL gate would otherwise leave an orphan row that
+	// blocks Recovery-turn acquisition on that checkout forever). proc_start is
+	// nullable and pid defaults to 0: a legacy row (written before these columns
+	// existed) carries no owner and reads dead, so the first reconcile sweeps it —
+	// the correct outcome, since its registering process is long gone.
+	`ALTER TABLE checkout_gate_holds ADD COLUMN pid INTEGER NOT NULL DEFAULT 0;
+	 ALTER TABLE checkout_gate_holds ADD COLUMN proc_start TEXT;`,
 }
 
 func (s *Store) migrate() error {

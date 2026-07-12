@@ -101,10 +101,13 @@ func realProductionDataDir() string {
 // ReconcileDrains is the opportunistic reconcile pass every layer-2 reader runs
 // before reading (ADR-0055): it transitions running Drains whose owning process
 // is no longer alive to crashed, so a foreground drain that died is healed by
-// whoever next reads — no always-on daemon. It opens the store only when it
-// already exists (a pure reader never materialises an empty database), forks
-// nothing (it reads only the drains table), and does a single bounded
-// transaction. It returns the number of Drains transitioned to crashed.
+// whoever next reads — no always-on daemon. The same pass also sweeps checkout
+// gate holds whose registering process died (a crash while a human sat at a
+// Failed/HITL gate would otherwise orphan the hold and block Recovery-turn
+// acquisition on that checkout forever). It opens the store only when it already
+// exists (a pure reader never materialises an empty database), forks nothing (it
+// reads only the drains and checkout_gate_holds tables), and does bounded
+// transactions. It returns the number of Drains transitioned to crashed.
 func ReconcileDrains(d *Deps) (int, error) {
 	s, ok, err := openDrainStoreIfExists(d)
 	if err != nil || !ok {
@@ -115,6 +118,14 @@ func ReconcileDrains(d *Deps) (int, error) {
 	n, err := s.ReconcileCrashed(func(dr store.Drain) bool {
 		return drainProcessAlive(d, dr.PID, dr.ProcStart)
 	}, now)
+	// Sweep dead-owner gate holds in the same pass. A sweep error must not mask a
+	// successful drain reconcile, so it is only surfaced when the drain arm was
+	// clean.
+	if _, sweepErr := s.ReconcileGateHolds(func(pid int, procStart string) bool {
+		return drainProcessAlive(d, pid, procStart)
+	}); sweepErr != nil && err == nil {
+		err = sweepErr
+	}
 	return n, err
 }
 

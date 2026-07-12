@@ -358,6 +358,83 @@ func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
 	_ = ReleaseRecoveryTurn(d, repo)
 }
 
+// TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn exercises the full path:
+// a gate hold registered by a process that then dies must not block a recovery
+// turn on that checkout forever — the reconcile pass sweeps the dead-owner hold,
+// after which the waiting set acquires its turn.
+func TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	d.ProcessStartToken = func(int) (string, bool) { return "gate-token", true }
+
+	waiter := RecoveryWaiter{
+		SetID:       "set-b",
+		Preset:      "claude",
+		ResetAt:     time.Now().Add(-time.Hour),
+		RuntimePath: repo,
+	}
+	if _, err := RegisterRecoveryWaiter(d, waiter); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter: %v", err)
+	}
+
+	// A gate hold owned by this process (its PID, gate-token) blocks acquisition.
+	if err := RegisterCheckoutGateHold(d, "set-a", repo); err != nil {
+		t.Fatalf("RegisterCheckoutGateHold: %v", err)
+	}
+	acquired, err := acquireRecoveryTurn(d, &waiter)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn (blocked): %v", err)
+	}
+	if acquired {
+		t.Fatal("recovery turn must not be acquired while a gate hold is active")
+	}
+
+	// The gate owner dies. The reconcile pass (run by whoever next reads) sweeps
+	// the dead-owner hold using the same PID+start-token liveness as drains.
+	dead := *d
+	dead.ProcessAlive = func(int) bool { return false }
+	if _, err := ReconcileDrains(&dead); err != nil {
+		t.Fatalf("ReconcileDrains: %v", err)
+	}
+	if hold, _ := GetCheckoutGateHold(d, repo); hold != nil {
+		t.Fatalf("dead-owner gate hold survived reconcile: %+v", hold)
+	}
+
+	// With the orphan swept, the waiting set acquires its recovery turn.
+	acquired, err = acquireRecoveryTurn(d, &waiter)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn (after sweep): %v", err)
+	}
+	if !acquired {
+		t.Fatal("recovery turn should be acquired after the dead gate hold is swept")
+	}
+	_ = ReleaseRecoveryTurn(d, repo)
+}
+
+// TestReconcileLeavesLiveGateHold guards the survival case: a gate hold whose
+// owner is still alive must never be swept.
+func TestReconcileLeavesLiveGateHold(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	d.ProcessStartToken = func(int) (string, bool) { return "gate-token", true }
+
+	if err := RegisterCheckoutGateHold(d, "set-a", repo); err != nil {
+		t.Fatalf("RegisterCheckoutGateHold: %v", err)
+	}
+	// d.ProcessAlive reports the current process (the hold owner) alive.
+	if _, err := ReconcileDrains(d); err != nil {
+		t.Fatalf("ReconcileDrains: %v", err)
+	}
+	hold, err := GetCheckoutGateHold(d, repo)
+	if err != nil {
+		t.Fatalf("GetCheckoutGateHold: %v", err)
+	}
+	if hold == nil {
+		t.Fatal("live gate hold was wrongly swept by reconcile")
+	}
+	if hold.PID != os.Getpid() || hold.ProcStart != "gate-token" {
+		t.Fatalf("gate hold owner identity not persisted: %+v", hold)
+	}
+}
+
 func TestRegisterCheckoutGateHold(t *testing.T) {
 	d, repo := drainTestRepo(t)
 

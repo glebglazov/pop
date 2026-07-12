@@ -14,16 +14,21 @@ import (
 
 // CheckoutGateHold records that a drain is parked at a human-wait gate on a
 // runtime checkout. While active it blocks recovery turn acquisition on that
-// path (ADR-0100).
+// path (ADR-0100). PID and ProcStart identify the registering process so a hold
+// whose owner dies (a crash while a human sat at the gate) is swept by the
+// reconcile pass rather than blocking the checkout forever.
 type CheckoutGateHold struct {
 	SetID        string
 	RuntimePath  string
+	PID          int
+	ProcStart    string
 	RegisteredAt time.Time
 }
 
 // RegisterCheckoutGateHold records a gate hold for one runtime path. The
 // runtime_path is UNIQUE: a second registration for the same checkout replaces
-// the first.
+// the first. The hold captures the registering process's PID and start token so
+// the reconcile pass can sweep it if that process dies while parked at the gate.
 func RegisterCheckoutGateHold(d *Deps, setID, runtimePath string) error {
 	if setID == "" || runtimePath == "" {
 		return nil
@@ -33,9 +38,13 @@ func RegisterCheckoutGateHold(d *Deps, setID, runtimePath string) error {
 		return exitErr(ExitOperational, "register checkout gate hold: %v", err)
 	}
 	defer func() { _ = s.Close() }()
+	pid := os.Getpid()
+	procStart, _ := procStartToken(d, pid)
 	if err := s.PutCheckoutGateHold(store.CheckoutGateHold{
 		SetID:        setID,
 		RuntimePath:  runtimePath,
+		PID:          pid,
+		ProcStart:    procStart,
 		RegisteredAt: time.Now().UTC(),
 	}); err != nil {
 		return exitErr(ExitOperational, "register checkout gate hold: %v", err)
@@ -84,6 +93,8 @@ func GetCheckoutGateHold(d *Deps, runtimePath string) (*CheckoutGateHold, error)
 	return &CheckoutGateHold{
 		SetID:        h.SetID,
 		RuntimePath:  h.RuntimePath,
+		PID:          h.PID,
+		ProcStart:    h.ProcStart,
 		RegisteredAt: h.RegisteredAt,
 	}, nil
 }
