@@ -9,6 +9,8 @@ package queue
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -49,6 +51,10 @@ type Deps struct {
 	// transitioning dead-PID running Drains to crashed. Defaults to
 	// tasks.ReconcileDrains.
 	Reconcile func() (int, error)
+	// ReconcileOut receives a message when the opportunistic reconcile pass
+	// fails, so a transient store failure is visible to whoever is watching
+	// queue output instead of being silently discarded. Defaults to os.Stderr.
+	ReconcileOut io.Writer
 	// ToggleAutoDrain flips a registered Task-set auto-drain bit in Task state.
 	// Defaults to tasks.ToggleAutoDrainWith.
 	ToggleAutoDrain func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error)
@@ -186,14 +192,26 @@ func (d *Deps) liveDrains() ([]tasks.RunningDrain, error) {
 // reconcile runs the opportunistic crash-detection pass before a read pass,
 // healing dead-PID running Drains into crashed (ADR-0055). It defaults to
 // tasks.ReconcileDrains. The result count is advisory; reconciliation never
-// blocks a read, so a reconcile error is swallowed (the read still reflects the
-// pre-reconcile truth, which is no worse than before this pass existed).
+// blocks a read, so a reconcile error never fails the pass — the read still
+// reflects the pre-reconcile truth, which is no worse than before this pass
+// existed. The error is not silently discarded, though: it is logged to
+// ReconcileOut (default os.Stderr) so a human watching queue output notices a
+// transient store failure instead of unknowingly acting on stale liveness.
 func (d *Deps) reconcile() {
+	var err error
 	if d.Reconcile != nil {
-		_, _ = d.Reconcile()
+		_, err = d.Reconcile()
+	} else {
+		_, err = tasks.ReconcileDrains(d.Tasks)
+	}
+	if err == nil {
 		return
 	}
-	_, _ = tasks.ReconcileDrains(d.Tasks)
+	out := d.ReconcileOut
+	if out == nil {
+		out = os.Stderr
+	}
+	fmt.Fprintf(out, "queue: reconcile: %v (continuing with pre-reconcile snapshot)\n", err)
 }
 
 func (d *Deps) toggleAutoDrain(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {
