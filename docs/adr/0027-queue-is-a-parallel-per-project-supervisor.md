@@ -47,8 +47,10 @@ Unlike the Monitor daemon (ADR-0001/0021), which auto-starts detached because ev
 it, the Queue runs in the **foreground** and is started only by explicit `pop queue run`. It
 launches coding agents that edit and commit code unattended across every registered project, so
 it must never auto-start from a picker, and the operator wants to park it in a pane and Ctrl-C
-it. Consequently it needs no control socket: it persists agent cooldowns, parked sets, and a
-Queue journal to disk, and `pop queue status` / `pop queue log` are pure file readers.
+it. Consequently it needs no control socket: durable state lives in the SQLite store (ADR-0055) —
+agent cooldowns in a table, drain lifecycle in the `drains` table — from which parked sets,
+backoff, and the Queue journal are *derived views*, not persisted timers or an append-only file.
+`pop queue status` / `pop queue log` are pure store readers.
 
 ## Considered options
 
@@ -69,10 +71,10 @@ Queue journal to disk, and `pop queue status` / `pop queue log` are pure file re
 - The reserved-term note in CONTEXT.md is replaced by a full **Queue** glossary entry (parallel
   per-project supervisor); related terms (Picked-up Task set, Queue daemon, Queue agent
   fallback, Queue journal, Queue backoff, Queue scope) are added.
-- `pop tasks implement` gains a machine-readable **drain-outcome record** (set, outcome,
-  exhausted preset). Today a quota pause exits `0`, indistinguishable from success; the
-  supervisor's agent-fallback and crash-backoff both depend on telling these apart, so this
-  signal is required new plumbing in the executor.
+- `pop tasks implement` records the drain's terminal exit reason as the `drains.state` column
+  (ADR-0055/0056) — a plain string (`finished`/`quota_paused`/`interrupted`/`crashed`/`verify_failed`),
+  not the retired `DrainOutcome` enum record. A quota pause is thereby distinguishable from success,
+  which the supervisor's agent-fallback and crash-backoff both depend on.
 - Worktree-level parallelism *within* a project is deliberately out of scope; the lock-per-checkout
   source of truth already accommodates it when revived. A design pass reframed it as a deferred
   Task-set/Runtime-path feature (not a Queue feature) in ADR-0028.

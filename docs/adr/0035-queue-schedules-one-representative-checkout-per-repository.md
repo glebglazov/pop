@@ -4,7 +4,7 @@ status: accepted
 
 # Queue schedules one representative checkout per repository; bindings route per-set and may adopt user worktrees
 
-> **Relates:** amends ADR-0027 (scheduling unit) and reverses the "no auto-adopt" stance of ADR-0028
+> **Relates:** amends ADR-0027 (scheduling unit) and reverses the "no auto-adopt" stance of ADR-0028. **Routing surface since renamed:** the `execution_base` flag is now `trunk` and resolution is marker-based, not live-git (ADR-0052, ADR-0060); the `worktree_ready` key is removed; `bind-worktree` moved from `pop queue` to `pop tasks` (ADR-0038). The per-repository scheduling decision below is unchanged; only the config/verb names drifted.
 
 ## Context
 
@@ -17,11 +17,11 @@ Root cause is a unit mismatch. All worktrees of one repo share one **Repository 
 The Queue's scheduling unit is **Repository identity**, not the picker Project. It collapses a repo's worktrees and dispatches at most one drain per idle repository per Ready set, routing to a single representative checkout resolved in order:
 
 1. **per-set Worktree binding** — explicit routing for one set (see below);
-2. **explicit `execution_base = true`** — a per-checkout flag in a global-config `[repo."<path>"]` override block; applies to any layout, and designates a non-bare repo's base when its git main worktree is not the wanted one;
+2. **explicit `trunk = true`** (originally `execution_base`; ADR-0052) — a per-checkout flag in a global-config `[repo."<path>"]` override block; applies to any layout, and designates a non-bare repo's base when its git main worktree is not the wanted one;
 3. **the repo's git main worktree** — the no-config fallback for any non-bare repo, even one with linked worktrees;
 4. otherwise (bare repo, no `execution_base`) — **refuse and report**; a bare repo has no git main worktree, and the Queue never guesses a checkout.
 
-**Worktree binding becomes the universal drain router**, decoupled from `worktree_ready`. A binding carries a `Provisioned` bit: **managed** (pop ran `git worktree add`; pop tears the checkout down on integration/abandon — ADR-0028/0029) versus **adopted** (a human pointed an existing, owned worktree at a set via `pop queue bind-worktree <set>`; pop drains into it but **never deletes it**; `abandon` only forgets the binding). Bindings default to adopted/never-delete so a hand-written or unrecognized binding can never trigger a directory deletion — pop deletes only what it demonstrably created.
+**Worktree binding becomes the universal drain router** (the removed `worktree_ready` key no longer gates it). A binding carries a `Provisioned` bit: **managed** (pop ran `git worktree add`; pop tears the checkout down on integration/abandon — ADR-0028/0029) versus **adopted** (a human pointed an existing, owned worktree at a set via `pop tasks bind-worktree <set>` — the verb moved from `pop queue` in ADR-0038; pop drains into it but **never deletes it**; `abandon` only forgets the binding). Bindings default to adopted/never-delete so a hand-written or unrecognized binding can never trigger a directory deletion — pop deletes only what it demonstrably created.
 
 As a backstop, `pop tasks implement` refuses to start if the same (repository, set) is already live in **any** checkout — grouping the SetID-carrying runtime locks by Repository identity — so at most one agent per (repo, set) ever launches, even under a future scheduler bug, a daemon restart, or a hand-run drain.
 
@@ -30,7 +30,7 @@ As a backstop, `pop tasks implement` refuses to start if the same (repository, s
 - **Aggregate picked-up across a repo's checkouts but keep per-worktree dispatch.** Rejected: state is read at tick start, so within one tick every worktree still sees "not running" and all dispatch. Fixes nothing for the single-tick storm that actually occurred.
 - **A genuine per-set advisory lock** (the rejected "global task lock"). Rejected: re-implements the runtime lock's PID-liveness machinery, still spawns N wasted panes, and leaves the target checkout nondeterministic.
 - **Heuristic representative (folder named `main`, or the trunk branch).** Rejected: game_server has no checkout on trunk (`master`) and its folder named `main` is on a feature branch — both heuristics either misfire or skip the repo. Git's main worktree (non-bare default) plus an explicit `execution_base` override is unambiguous.
-- **Make `execution_base` bare-only.** Rejected: a non-bare layout may also want a checkout other than git's main worktree as its base, so the flag overrides for any layout; the git main worktree is only the no-config fallback.
+- **Make the base-override flag bare-only** (then `execution_base`, now `trunk`). Rejected: a non-bare layout may also want a checkout other than git's main worktree as its base, so the flag overrides for any layout; the git main worktree is only the no-config fallback.
 - **Universal opt-in (every repo must declare a base).** Rejected: the storm came only from bare/multi-checkout repos; single-checkout and non-bare repos were never ambiguous, so forcing a declaration there is friction without safety.
 - **Auto-pick the most-recently-active checkout for unbound bare repos.** Rejected: trades a loud 10× storm for a silent "why did my work land on *that* branch?" — the same surprise, quieter.
 
@@ -38,5 +38,5 @@ As a backstop, `pop tasks implement` refuses to start if the same (repository, s
 
 - Amends ADR-0027: "one drain per idle **project**" becomes "per idle **repository**." Cross-project (cross-repository) parallel fan-out is unchanged for the common single-checkout / non-bare case.
 - Reverses ADR-0028's "pre-binding orphan checkouts are not auto-adopted": `bind-worktree` is deliberate human adoption, and the `Provisioned` bit keeps teardown safe.
-- New global-config surface: `[repo."<path>"]` override blocks (the `.pop.toml` RepoConfig subset — `worktree_ready`, `auto_merge_clean` — plus the global-only `execution_base`) at higher priority than `.pop.toml`, keyed by any path that canonicalizes to a Repository identity. Machine-specific routing lives here, never in branch-riding `.pop.toml`.
-- New command `pop queue bind-worktree <set>`, sibling to `pop queue abandon`; refuses to re-point a bound set without `--force` and never while the set holds a live lock.
+- New global-config surface: `[repo."<path>"]` override blocks at higher priority than `.pop.toml`, keyed by any path that canonicalizes to a Repository identity, carrying the global-only base flag (then `execution_base`, now `trunk` — ADR-0052). Machine-specific routing lives here, never in branch-riding `.pop.toml`. (The `worktree_ready` / `auto_merge_clean` keys this block originally also carried are gone — ADR-0060/0070.)
+- New command `bind-worktree <set>` (landed under `pop queue`, moved to `pop tasks` in ADR-0038), sibling to `abandon`; refuses to re-point a bound set without `--force` and never while the set holds a live lock.

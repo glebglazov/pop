@@ -17,5 +17,5 @@ This refines [ADR-0045](0045-hitl-disposition-splits-by-remaining-agent-work.md)
 
 ## Consequences
 
-- The outcome journal is durable and append-only. `awaiting_approval` and `verify_failed` are appended; the legacy `unverified` value is **not** rewritten on disk — every reader maps a stored `unverified` forward to `awaiting_approval`. The vocabulary cannot be cleanly un-shipped, which is why this is recorded.
-- Surfaces that named UNVERIFIED (`pop queue status`, dashboard, journal, the to-tasks planning skill's "verification at the end" role) re-label to approval/sign-off.
+- State lives in the SQLite store (ADR-0055/0056), not an append-only journal file: `awaiting_approval` is a manifest-derived **Task set status** (`StatusAwaitingApproval`), and `verify_failed` is a drain terminal `state` value (`store.StateVerifyFailed`). There is no legacy `unverified` value read forward — the `unverified` vocabulary was retired with no stored records to migrate (grep finds zero `unverified` matches in code).
+- Surfaces that named UNVERIFIED (`pop queue status`, dashboard, the Queue journal view, the to-tasks planning skill's "verification at the end" role) re-label to approval/sign-off.

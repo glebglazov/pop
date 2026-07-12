@@ -776,7 +776,7 @@ A Task set currently being drained, identified by a live **Runtime execution loc
 _Avoid_: In-progress task, pane state
 
 **Queue daemon**:
-The supervisor process behind `pop queue run`. It is foreground and explicit, never auto-started from a picker, because it runs coding agents unattended across projects; the operator parks it in a pane and Ctrl-C (`SIGINT`) is graceful shutdown. It is single-instance via a PID/lock file. Unlike the **Monitor** daemon, it needs no control socket: it persists agent cooldowns, parked sets, backoff timers, and the **Queue journal** to disk, so `pop queue status` and `pop queue log` are pure file readers. On `run`, it reconciles in-flight drains from live **Runtime execution lock**s, so a restart never disturbs them. Its command surface is `run`, `status`, and `log`; Ctrl-C is stop.
+The supervisor process behind `pop queue run`. It is foreground and explicit, never auto-started from a picker, because it runs coding agents unattended across projects; the operator parks it in a pane and Ctrl-C (`SIGINT`) is graceful shutdown. It is single-instance via a PID/lock file. Unlike the **Monitor** daemon, it needs no control socket: it persists agent cooldowns and drain lifecycle to the SQLite store, from which parked sets, backoff, and the **Queue journal** are derived, so `pop queue status` and `pop queue log` are pure store readers. On `run`, it reconciles in-flight drains from live **Runtime execution lock**s, so a restart never disturbs them. Its command surface is `run`, `status`, and `log`; Ctrl-C is stop.
 _Avoid_: Monitor daemon, background service
 
 **Queue scope**:
@@ -784,7 +784,7 @@ The set of work the **Queue daemon** supervises: **Auto-drain**-marked Ready Tas
 _Avoid_: Per-project queue opt-in, global priority queue, per-drain --yes
 
 **Queue journal**:
-The durable append-only record in pop's data dir of every Queue drain event: started, done, failed, HITL-blocked, quota-paused-and-agent-switched, crashed, backing-off, or parked. It is emitted by **Implement** as a structured drain-outcome record carrying set id, outcome, and the exhausted preset when relevant; the **Queue daemon** consumes it to drive **Agent fallback** and backoff, and persists it for observability. `pop queue status` reads live state, such as picked-up sets, cooling agents, parked sets, and idle projects; `pop queue log` reads the journal history.
+The Queue journal *view* — not a separate persisted file. `pop queue log` reconstructs the event history (started, done, failed, HITL-blocked, quota-paused-and-agent-switched, crashed, backing-off, or parked) at read time by reading each **Drain** row, integration event, and park-clear from the SQLite store; there is no append-only journal file and **Implement** emits no separate drain-outcome record. **Agent fallback** and backoff are likewise derived from that stored Drain history. `pop queue status` reads live state, such as picked-up sets, cooling agents, parked sets, and idle projects; `pop queue log` reconstructs the journal history from the store.
 _Avoid_: Progress record, Captured attempt stream, Task state
 
 **Drain**:
@@ -792,7 +792,7 @@ One supervised execution of draining a **Task set**, tracked through an explicit
 _Avoid_: Run, attempt, drain record
 
 **Drain outcome**:
-How a **Drain**'s process ended — its exit reason, not the set's work disposition: finished (the drain ran to its own stopping point), quota-paused (an agent preset hit quota), interrupted (deliberate SIGINT teardown), or crashed (the process died unexpectedly, recorded by reconciliation rather than by the drain itself). The set's resulting work disposition — done, failed, blocked, awaiting_approval, verify_failed, deferred — is read from the manifest-derived **Task set status** (now also gated on the **Verify verdict**), never restated on the Drain. `awaiting_approval` and `verify_failed` are appended to the durable, append-only outcome journal; the legacy `unverified` value is retained on disk and read forward as `awaiting_approval`. finished and quota-paused are clean exits; interrupted and crashed are abnormal and drive crash backoff.
+How a **Drain**'s process ended — its exit reason, not the set's work disposition: finished (the drain ran to its own stopping point), quota-paused (an agent preset hit quota), interrupted (deliberate SIGINT teardown), or crashed (the process died unexpectedly, recorded by reconciliation rather than by the drain itself). The set's resulting work disposition — done, failed, blocked, awaiting_approval, verify_failed, deferred — is read from the manifest-derived **Task set status** (now also gated on the **Verify verdict**), never restated on the Drain. The drain's terminal `state` (`finished`/`quota_paused`/`interrupted`/`crashed`/`verify_failed`) is a column on the SQLite `drains` row — there is no separate outcome journal file, and no legacy `unverified` value is read forward (that vocabulary was retired outright). finished, quota-paused, and verify_failed are clean exits; interrupted and crashed are abnormal and drive crash backoff.
 _Avoid_: Task set status, drain disposition, drain result
 
 **Queue run output**:
@@ -800,7 +800,7 @@ The live stdout of `pop queue run` — an operator-facing event stream, not a re
 _Avoid_: Per-tick status dump, queue log replay
 
 **Queue run baseline**:
-The one-time inventory printed when `pop queue run` starts. It opens with a **Queue status summary** — aggregate queue work (running, queued, blocked) — then lists every scheduling-relevant bucket the supervisor is watching: running drains, queued ready sets, blocked state (parked sets, crash backoffs, agent cooldowns), and scan errors for in-scope projects that failed to scan or have a broken repo-root `.pop.toml` — in the same human-readable shape as `pop queue status` (without the raw daemon-state JSON dump). Projects outside **Queue scope** and in-scope projects with no ready work and no active drain are not listed individually; they collapse into a single count line (e.g. "12 other projects: no ready work").
+The one-time inventory printed when `pop queue run` starts. It opens with a **Queue status summary** — aggregate queue work (running, queued, blocked) — then lists every scheduling-relevant bucket the supervisor is watching: running drains, queued ready sets, blocked state (parked sets, crash backoffs, agent cooldowns), and scan errors for in-scope projects that failed to scan or have a broken repo-root `.pop.toml` — in the same human-readable shape as `pop queue status`. Projects outside **Queue scope** and in-scope projects with no ready work and no active drain are not listed individually; they collapse into a single count line (e.g. "12 other projects: no ready work").
 _Avoid_: Per-project idle listing, repeating status table
 
 **Queue status summary**:
@@ -812,7 +812,7 @@ A single stdout line emitted by `pop queue run` when supervisor-relevant state c
 _Avoid_: Heartbeat line, per-tick inventory repeat
 
 **Queue backoff**:
-The daemon's response to an abnormal drain exit, such as crash, kill, or interrupt. Unlike a clean failure or quota pause, an abnormal exit leaves the set Ready with nothing cooled and would otherwise re-spawn immediately. The daemon applies an escalating per-set delay and, after N consecutive abnormal exits, parks the set until a human clears it. A clean exit resets the counter. Distinguishing abnormal from clean exits requires the **Queue journal**'s outcome record; storage status alone cannot tell a crash from a quota pause.
+The daemon's response to an abnormal drain exit, such as crash, kill, or interrupt. Unlike a clean failure or quota pause, an abnormal exit leaves the set Ready with nothing cooled and would otherwise re-spawn immediately. The daemon applies an escalating per-set delay and, after N consecutive abnormal exits, parks the set until a human clears it. A clean exit resets the counter. Distinguishing abnormal (crash/interrupt/kill) from clean (finished/quota-paused/verify-failed) exits reads the **Drain**'s terminal `state` directly (`store.drainStateAbnormal`); backoff and park are projected from that Drain history plus the `park_clears` table.
 _Avoid_: Failed task, Agent quota pause
 
 **Queue window**:
