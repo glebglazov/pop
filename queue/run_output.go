@@ -141,7 +141,7 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 			appendScanError(view.ScanErrors, repoLabel, idle.ProjectConfigError)
 		case idle.ReadySet != "":
 			view.Queued = append(view.Queued, idle)
-		case isBlockedIdleReason(idle.Reason):
+		case idle.Deferral.Deferred():
 			view.Blocked = append(view.Blocked, blockedItemFromIdle(idle))
 			blockedProjects[repoLabel] = true
 		case idle.AwaitingApprovalSetID != "":
@@ -201,18 +201,6 @@ func appendScanError(scanErrors map[string]string, project, msg string) {
 	scanErrors[project] = msg
 }
 
-func isBlockedIdleReason(reason string) bool {
-	switch reason {
-	case "set parked after repeated abnormal drain exits",
-		"set backed off after abnormal drain exit",
-		"set waiting for quota recovery",
-		"all agents cooling":
-		return true
-	default:
-		return false
-	}
-}
-
 func blockedItemFromIdle(idle IdleProject) BlockedItem {
 	repoLabel := idle.RepoLabel
 	if repoLabel == "" {
@@ -221,10 +209,10 @@ func blockedItemFromIdle(idle IdleProject) BlockedItem {
 	return BlockedItem{
 		Project:     idle.Project,
 		RepoLabel:   repoLabel,
-		SetID:       idle.BlockedSetID,
-		Reason:      idle.Reason,
-		Kind:        blockedKindFromReason(idle.Reason),
-		Until:       idle.WaitUntil,
+		SetID:       idle.Deferral.SetID,
+		Reason:      idle.Deferral.Reason.Message(),
+		Kind:        idle.Deferral.Reason.Kind(),
+		Until:       idle.Deferral.Until,
 		RuntimePath: idle.RuntimePath,
 	}
 }
@@ -359,21 +347,6 @@ func blockedItemsFromAgentCooldowns(cooldowns map[string]time.Time, now time.Tim
 		})
 	}
 	return out
-}
-
-func blockedKindFromReason(reason string) string {
-	switch reason {
-	case "set parked after repeated abnormal drain exits":
-		return "parked"
-	case "set backed off after abnormal drain exit":
-		return "crash_backoff"
-	case "set waiting for quota recovery":
-		return "recovery_wait"
-	case "all agents cooling":
-		return "agent_cooldown"
-	default:
-		return "blocked"
-	}
 }
 
 func projectForScopedKey(td *tasks.Deps, key string) string {

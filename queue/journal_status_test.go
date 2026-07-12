@@ -155,6 +155,7 @@ func TestRenderStatusShowsRecoveryWaiter(t *testing.T) {
 		Reason:       "set waiting for quota recovery",
 		BlockedSetID: "set-1",
 		WaitUntil:    resetAt,
+		Deferral:     SpawnDeferral{Reason: DeferQuotaRecovery, SetID: "set-1", Until: resetAt},
 	}})
 	if err != nil {
 		t.Fatalf("status: %v", err)
@@ -346,6 +347,7 @@ func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
 		Project:      "pop",
 		Reason:       "set parked after repeated abnormal drain exits",
 		BlockedSetID: "set-1",
+		Deferral:     SpawnDeferral{Reason: DeferParked, SetID: "set-1"},
 	}})
 	if err != nil {
 		t.Fatalf("status: %v", err)

@@ -34,8 +34,12 @@ type IdleProject struct {
 	// BlockedSetID names the set whose abnormal backoff or parking produced
 	// Reason; WaitUntil is when a backed-off set next becomes spawnable (zero for
 	// a parked set). Both are derived from Drain history (ADR-0055).
-	BlockedSetID       string
-	WaitUntil          time.Time
+	BlockedSetID string
+	WaitUntil    time.Time
+	// Deferral is the readiness selector's typed "Ready but not spawning" verdict
+	// (ADR-0106) carried through from the Decision. The run view classifies and
+	// renders blocked rows from it rather than re-matching Reason strings.
+	Deferral           SpawnDeferral
 	WorktreeReady      bool
 	ProjectConfigError string
 	// RuntimePath is the bound checkout for the set represented by this idle
@@ -117,7 +121,7 @@ func statusFromDecisions(d *Deps, decisions []Decision) (StatusSnapshot, error) 
 			snap.Skipped = append(snap.Skipped, SkippedRepo{Project: dec.Project, RepoLabel: repoLabel, Reason: dec.Reason})
 			continue
 		}
-		idle := IdleProject{Project: dec.Project, RepoLabel: repoLabel, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError, AwaitingApprovalSetID: dec.AwaitingApprovalSetID, BlockedSetID: dec.BlockedSetID, WaitUntil: dec.WaitUntil}
+		idle := IdleProject{Project: dec.Project, RepoLabel: repoLabel, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError, AwaitingApprovalSetID: dec.AwaitingApprovalSetID, BlockedSetID: dec.BlockedSetID, WaitUntil: dec.WaitUntil, Deferral: dec.Deferral}
 		if dec.TaskSetID != "" {
 			idle.Waiting = "ready"
 			idle.ReadySet = dec.TaskSetID

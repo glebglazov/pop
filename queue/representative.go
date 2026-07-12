@@ -334,15 +334,10 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 	}
 
 	backoff := d.setBackoffLookup(scanRepoCommonDir(d, base), delays, now)
-	ids, waitUntil, waitReason, blockedID, ok := selectReadySets(refresh, backoff, recoveryWaiters)
+	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters)
 	if !ok {
-		if !waitUntil.IsZero() {
-			skel.Reason = waitReason
-			skel.WaitUntil = waitUntil
-			skel.BlockedSetID = blockedID
-		} else if waitReason != "" {
-			skel.Reason = waitReason
-			skel.BlockedSetID = blockedID
+		if deferral.Deferred() {
+			applyDeferral(&skel, deferral)
 		} else {
 			skel.Reason = "no ready set"
 		}

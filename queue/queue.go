@@ -342,9 +342,25 @@ type Decision struct {
 	// Reason. It lets the dashboard attribute a backoff/park to a specific set
 	// without reading any persisted flag (ADR-0055).
 	BlockedSetID string
-	Err          error
-	scan         projectScan
-	lockStatus   *tasks.RuntimeLockStatus
+	// Deferral is the readiness selector's single "Ready but not spawning" verdict
+	// (ADR-0106) when one applies — its reason species drives Reason/WaitUntil/
+	// BlockedSetID, which are a pure projection of it. Zero (DeferNone) for every
+	// non-deferral outcome (busy, error, needs-bind, awaiting approval, no ready set).
+	Deferral   SpawnDeferral
+	Err        error
+	scan       projectScan
+	lockStatus *tasks.RuntimeLockStatus
+}
+
+// applyDeferral projects a readiness SpawnDeferral onto a Decision: it records
+// the typed verdict and mirrors it into the display fields (Reason from the
+// reason species, plus the set and until-instant) so dispatch, dashboard, and
+// run output all read one source (ADR-0106).
+func applyDeferral(dec *Decision, d SpawnDeferral) {
+	dec.Deferral = d
+	dec.Reason = d.Reason.Message()
+	dec.WaitUntil = d.Until
+	dec.BlockedSetID = d.SetID
 }
 
 // Actionable reports whether the decision selected a Task set to drain.
@@ -734,15 +750,10 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 	d.applyVerifyVerdicts(refresh, cfg, repoKey, scan.ProjectPath, bindings)
 
 	backoff := d.setBackoffLookup(scanRepoCommonDir(d, scan), delays, now)
-	ids, waitUntil, waitReason, blockedID, ok := selectReadySets(refresh, backoff, recoveryWaiters)
+	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters)
 	if !ok {
-		if !waitUntil.IsZero() {
-			dec.Reason = waitReason
-			dec.WaitUntil = waitUntil
-			dec.BlockedSetID = blockedID
-		} else if waitReason != "" {
-			dec.Reason = waitReason
-			dec.BlockedSetID = blockedID
+		if deferral.Deferred() {
+			applyDeferral(&dec, deferral)
 		} else if id := firstAwaitingApprovalSetID(refresh.Rows); id != "" {
 			dec.Reason = "awaiting approval"
 			dec.AwaitingApprovalSetID = id
@@ -934,11 +945,12 @@ type setBackoffFunc func(setID string) (parked bool, until time.Time)
 // integers rank first, ties break by registration order, matching the status
 // table's active-set ordering — and backoff/parking (abnormal-drain history)
 // and quota-recovery waiters gate which of those ready sets are spawnable now.
-// On no eligible set it reports why (backoff until, parked, recovery wait) via
-// the returned instant/reason/blocked-id so callers render a specific decision.
-func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter) ([]string, time.Time, string, string, bool) {
+// On no eligible set it reports why via a single SpawnDeferral (ADR-0106) —
+// reason species, the blocked set, and an optional until-instant — so every
+// caller renders the same decision without re-deriving per-subsystem strings.
+func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter) ([]string, SpawnDeferral, bool) {
 	if refresh == nil {
-		return nil, time.Time{}, "", "", false
+		return nil, SpawnDeferral{}, false
 	}
 	var ready []tasks.Row
 	for _, row := range refresh.Rows {
@@ -947,7 +959,7 @@ func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recov
 		}
 	}
 	if len(ready) == 0 {
-		return nil, time.Time{}, "", "", false
+		return nil, SpawnDeferral{}, false
 	}
 	sort.SliceStable(ready, func(i, j int) bool {
 		if ready[i].Priority != ready[j].Priority {
@@ -987,17 +999,17 @@ func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recov
 		ids = append(ids, row.ID)
 	}
 	if len(ids) > 0 {
-		return ids, time.Time{}, "", "", true
+		return ids, SpawnDeferral{}, true
 	}
 	switch {
 	case !earliest.IsZero() && backoffID != "":
-		return nil, earliest, "set backed off after abnormal drain exit", backoffID, false
+		return nil, SpawnDeferral{Reason: DeferCrashBackoff, SetID: backoffID, Until: earliest}, false
 	case !earliest.IsZero() && recoveryID != "":
-		return nil, earliest, "set waiting for quota recovery", recoveryID, false
+		return nil, SpawnDeferral{Reason: DeferQuotaRecovery, SetID: recoveryID, Until: earliest}, false
 	case parkedID != "":
-		return nil, time.Time{}, "set parked after repeated abnormal drain exits", parkedID, false
+		return nil, SpawnDeferral{Reason: DeferParked, SetID: parkedID}, false
 	default:
-		return nil, time.Time{}, "no ready set", "", false
+		return nil, SpawnDeferral{}, false
 	}
 }
 
