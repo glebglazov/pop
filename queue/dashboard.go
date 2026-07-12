@@ -680,13 +680,24 @@ func dashboardComposeStatus(row DashboardRow, styled bool) string {
 		}
 		label += " · " + verified
 	}
-	if row.AutoDrain {
+	if dashboardAutoDrainWaiting(row) {
 		label += " · auto-drain"
 	}
 	if row.Orphaned {
 		label += " · orphaned"
 	}
 	return label
+}
+
+// dashboardAutoDrainWaiting reports whether a set's auto-drain consent should
+// surface as "waiting to be picked up" — the single predicate the per-row
+// marker and the header tally both read (ADR-0108). A consented set counts and
+// shows the marker only while it is not Picked-up; once a live drain holds the
+// checkout (Drain == "picked up") the DRAIN column already signals the activity,
+// so the marker is silenced and the set drops out of the "still needs picking
+// up" count. The persisted consent bit is untouched — this is display-only.
+func dashboardAutoDrainWaiting(row DashboardRow) bool {
+	return row.AutoDrain && row.Drain != dashboardDrainPickedUp
 }
 
 type dashboardDestKind int
@@ -2871,7 +2882,7 @@ func dashboardSummary(rows []DashboardRow) string {
 		if strings.TrimSpace(row.Drain) != "" {
 			running++
 		}
-		if row.AutoDrain {
+		if dashboardAutoDrainWaiting(row) {
 			autoDrain++
 		}
 	}

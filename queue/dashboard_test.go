@@ -626,6 +626,48 @@ func TestDashboardAutoDrainToggleReflectsInRowAndCount(t *testing.T) {
 	}
 }
 
+// TestDashboardAutoDrainWaitingMarkerAndCount pins the ADR-0108 auto-drain
+// display rules: the `· auto-drain` marker and the header tally both key on the
+// same waiting predicate (consented AND not Picked-up). A consented+idle set
+// shows the marker and is counted; a consented set held by a live drain (Drain
+// == "picked up") hides the marker and drops out of the count while its
+// persisted AutoDrain bit stays true; a non-consented set has neither.
+func TestDashboardAutoDrainWaitingMarkerAndCount(t *testing.T) {
+	idle := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}}
+	pickedUp := DashboardRow{Drain: dashboardDrainPickedUp, SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}}
+	plain := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}
+
+	// Per-row marker.
+	if got := dashboardStatusCell(idle); !strings.Contains(got, "· auto-drain") {
+		t.Errorf("consented+idle marker: got %q, want auto-drain suffix", got)
+	}
+	if got := dashboardStatusCell(pickedUp); strings.Contains(got, "auto-drain") {
+		t.Errorf("consented+picked-up marker: got %q, want no auto-drain suffix", got)
+	}
+	if got := dashboardStatusCell(plain); strings.Contains(got, "auto-drain") {
+		t.Errorf("not-consented marker: got %q, want no auto-drain suffix", got)
+	}
+
+	// Silencing is display-only: the persisted consent bit is untouched.
+	if !pickedUp.AutoDrain {
+		t.Error("Picked-up silencing mutated the persisted AutoDrain bit")
+	}
+
+	// Header count — waiting-only. idle counts, pickedUp does not, plain does not.
+	summary := dashboardSummary([]DashboardRow{idle, pickedUp, plain})
+	if !strings.Contains(summary, "1 auto-drain") {
+		t.Errorf("summary count: got %q, want exactly 1 auto-drain (waiting-only)", summary)
+	}
+
+	// Marker and count agree: both driven by the shared predicate.
+	if dashboardAutoDrainWaiting(idle) != strings.Contains(dashboardStatusCell(idle), "· auto-drain") {
+		t.Error("idle: predicate and marker disagree")
+	}
+	if dashboardAutoDrainWaiting(pickedUp) != strings.Contains(dashboardStatusCell(pickedUp), "· auto-drain") {
+		t.Error("picked-up: predicate and marker disagree")
+	}
+}
+
 func TestDashboardBKeyOpensBindModal(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/main (main)", cursorKey: "pop\x00set-bind", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-bind", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}}}})
 	// Bind now lives behind the action menu: open with `a`, then `b`.
@@ -1065,8 +1107,13 @@ func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	if strings.Contains(view, "Queue dashboard") {
 		t.Fatalf("task-set list should use summary instead of dashboard title:\n%s", view)
 	}
-	if !strings.Contains(view, "Queue · 2 task sets · 1 ready · 1 running · 1 auto-drain") {
+	// The auto-drain set here is Picked-up, so per ADR-0108 it drops out of the
+	// waiting-only auto-drain tally (the DRAIN column already signals it).
+	if !strings.Contains(view, "Queue · 2 task sets · 1 ready · 1 running") {
 		t.Fatalf("task-set list should render useful summary:\n%s", view)
+	}
+	if strings.Contains(view, "auto-drain") {
+		t.Fatalf("Picked-up auto-drain set should not surface an auto-drain marker/count:\n%s", view)
 	}
 	for _, want := range []string{"PROJECT  TASK SET  STATUS", "-------  --------  ------"} {
 		if !strings.Contains(view, want) {
