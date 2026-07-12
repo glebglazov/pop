@@ -145,3 +145,53 @@ func InvalidateVerifyVerdictsExec(ctx context.Context, ex Execer, repo, setID st
 		repo, setID)
 	return err
 }
+
+// CaptureNoteThenInvalidate ends a Verify verdict episode for (repo, setID) the
+// same as InvalidateVerifyVerdicts, but first captures any human Accept note
+// recorded there (ADR-0103) into the durable verify_forwarded_notes side table so
+// it survives the delete and still forward-feeds into the next Verifier run
+// (ADR-0105). It is the one shared capture-then-invalidate path every
+// invalidation site uses — scope growth, every remediation spawn (auto or human
+// origin), and manual reopen — so note preservation cannot drift between them.
+func (s *Store) CaptureNoteThenInvalidate(repo, setID string) error {
+	return CaptureNoteThenInvalidateExec(context.Background(), s.db, repo, setID)
+}
+
+// CaptureNoteThenInvalidateExec is the executor-scoped body of
+// CaptureNoteThenInvalidate: it runs against any Execer so a quiescence-gated
+// human Remediate can capture-then-invalidate inside the same transaction as its
+// check (ADR-0104).
+func CaptureNoteThenInvalidateExec(ctx context.Context, ex Execer, repo, setID string) error {
+	if _, err := ex.ExecContext(ctx,
+		`INSERT INTO verify_forwarded_notes (repo, set_id, note)
+		 SELECT repo, set_id, note FROM verify_verdicts
+		 WHERE repo = ? AND set_id = ? AND human_authored = 1 AND note != ''
+		 ORDER BY computed_at DESC, work_sha DESC LIMIT 1
+		 ON CONFLICT(repo, set_id) DO UPDATE SET note = excluded.note`,
+		repo, setID); err != nil {
+		return err
+	}
+	return InvalidateVerifyVerdictsExec(ctx, ex, repo, setID)
+}
+
+// TakeForwardedNote returns and clears the note captured by the most recent
+// CaptureNoteThenInvalidate for (repo, setID) — a read-then-delete so the note
+// feeds forward into exactly one Verifier run before disappearing naturally,
+// the same way a fresh agent-authored verdict supersedes a human one. Returns ""
+// when no note was captured.
+func (s *Store) TakeForwardedNote(repo, setID string) (string, error) {
+	row := s.db.QueryRow(
+		`SELECT note FROM verify_forwarded_notes WHERE repo = ? AND set_id = ?`,
+		repo, setID)
+	var note string
+	if err := row.Scan(&note); err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", err
+	}
+	if _, err := s.db.Exec(`DELETE FROM verify_forwarded_notes WHERE repo = ? AND set_id = ?`, repo, setID); err != nil {
+		return "", err
+	}
+	return note, nil
+}

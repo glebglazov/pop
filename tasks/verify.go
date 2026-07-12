@@ -215,7 +215,7 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 	if opts.Remediate {
 		return remediateResolvedSet(d, opts, m, workSHA)
 	}
-	v, err := runAndStoreVerdict(d, cfg, opts, m, workSHA, latestAcceptedNote(d, opts.Repo, opts.SetID))
+	v, err := runAndStoreVerdict(d, cfg, opts, m, workSHA, priorAcceptedNote(d, opts.Repo, opts.SetID))
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +289,7 @@ func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA 
 		if id, werr = writeRemediationTask(d, m, workSHA, findings, note, RemediationOriginHuman); werr != nil {
 			return werr
 		}
-		return store.InvalidateVerifyVerdictsExec(ctx, ex, opts.Repo, m.Stem)
+		return store.CaptureNoteThenInvalidateExec(ctx, ex, opts.Repo, m.Stem)
 	}); err != nil {
 		return nil, err
 	}
@@ -337,6 +337,41 @@ func latestAcceptedNote(d *Deps, repo, setID string) string {
 	return note
 }
 
+// takeForwardedNote returns and clears the note captured by the most recent
+// CaptureNoteThenInvalidate for (repo, setID) — the durable counterpart to
+// latestAcceptedNote for when the human-authored row that carried the note was
+// already deleted by a prior invalidation (scope growth, or any remediation
+// spawn — auto or human origin, ADR-0105). Best-effort: any lookup failure
+// yields "".
+func takeForwardedNote(d *Deps, repo, setID string) string {
+	if d == nil || repo == "" || setID == "" {
+		return ""
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil || !ok {
+		return ""
+	}
+	defer func() { _ = s.Close() }()
+	note, err := s.TakeForwardedNote(repo, setID)
+	if err != nil {
+		return ""
+	}
+	return note
+}
+
+// priorAcceptedNote resolves the human Accept note to forward into the next
+// Verifier run for (repo, setID) (ADR-0103): a still-live human-authored PASS
+// row when nothing has invalidated it yet, or the note captured across an
+// invalidation that already ended the prior episode (scope growth, or any
+// remediation spawn — ADR-0105). Checking both keeps preservation uniform
+// regardless of which path ended the episode.
+func priorAcceptedNote(d *Deps, repo, setID string) string {
+	if note := latestAcceptedNote(d, repo, setID); note != "" {
+		return note
+	}
+	return takeForwardedNote(d, repo, setID)
+}
+
 // reverifyGateContext carries the resolved Verifier inputs a HITL gate needs to
 // force a re-verify (ADR-0086/ADR-0012). It mirrors the drain's Verifier
 // overrides so the gate re-check honours the same agent/effort precedence, and
@@ -367,7 +402,7 @@ func reverifyAtGate(d *Deps, rv *reverifyGateContext, out io.Writer, repo, runti
 		runVerifier: rv.runVerifier,
 	}
 	workSHA := verifyWorkSHA(d, runtimePath)
-	v, err := runAndStoreVerdict(d, rv.cfg, opts, m, workSHA, latestAcceptedNote(d, repo, setID))
+	v, err := runAndStoreVerdict(d, rv.cfg, opts, m, workSHA, priorAcceptedNote(d, repo, setID))
 	if err != nil {
 		return err
 	}
@@ -472,14 +507,18 @@ func ensureVerifyVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m 
 			// coasts on the immunizing PASS (ADR-0096). A zero recorded scope means
 			// unknown (legacy verdict) and never triggers the growth check.
 			if pass.Scope > 0 && afkTaskCount(m) > pass.Scope {
-				// Capture any human Accept note (ADR-0103) before the row is deleted, so
-				// it still feeds forward as context into the fresh Verifier run even
-				// though the invalidated PASS itself no longer immunizes.
-				priorNote = pass.Note
-				_ = s.InvalidateVerifyVerdicts(opts.Repo, opts.SetID)
+				// Capture-then-invalidate (ADR-0103/ADR-0105): any human Accept note is
+				// captured into the durable forwarded-note side table before the row is
+				// deleted, the same shared path every remediation spawn uses.
+				_ = s.CaptureNoteThenInvalidate(opts.Repo, opts.SetID)
 			} else {
 				return pass, nil
 			}
+		}
+		// Take the captured note (if any) — one-shot, so it feeds forward into
+		// exactly the fresh Verifier run below.
+		if note, nerr := s.TakeForwardedNote(opts.Repo, opts.SetID); nerr == nil {
+			priorNote = note
 		}
 	}
 	return runAndStoreVerdict(d, cfg, opts, m, workSHA, priorNote)
@@ -813,7 +852,10 @@ func verifyWorkSHA(d *Deps, runtimePath string) string {
 }
 
 // invalidateVerifyVerdicts ends the cached verification episode for (repo, set)
-// by deleting every stored Verify verdict. It is best-effort: an unresolvable
+// by capturing any human Accept note (ADR-0103) and then deleting every stored
+// Verify verdict (the shared CaptureNoteThenInvalidate path, ADR-0105) — used by
+// reopen (single and batch) and every remediation spawn, so note preservation is
+// uniform across every invalidation site. It is best-effort: an unresolvable
 // repo, missing store, or store error is silently ignored so that reopen and
 // remediation always succeed (ADR-0096).
 func invalidateVerifyVerdicts(d *Deps, repo, setID string) {
@@ -825,7 +867,7 @@ func invalidateVerifyVerdicts(d *Deps, repo, setID string) {
 		return
 	}
 	defer func() { _ = s.Close() }()
-	_ = s.InvalidateVerifyVerdicts(repo, setID)
+	_ = s.CaptureNoteThenInvalidate(repo, setID)
 }
 
 // verifyWorkDiff returns the accumulated diff of the set's committed work. The

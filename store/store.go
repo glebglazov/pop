@@ -318,6 +318,24 @@ var migrations = []string{
 		created_at   TEXT NOT NULL,
 		PRIMARY KEY (repo, set_id)
 	);`,
+	// 19: verify_forwarded_notes — a human Accept note (ADR-0103) captured across a
+	// Verify verdict invalidation, so it survives even when the human-authored row
+	// that carried it is deleted (a scope-growth invalidation, or any remediation
+	// spawn — auto or human origin, ADR-0105). Previously only the scope-growth
+	// path preserved the note, by threading it as a local variable straight into
+	// the immediately-following re-verify; a remediation spawn's re-verify happens
+	// much later (after the Remediation task drains, often a different process),
+	// so the note needs a durable home to survive that gap. One row per (repo,
+	// set_id): CaptureNoteThenInvalidate upserts it right before deleting the
+	// verdicts, and TakeForwardedNote reads-then-deletes it (one-shot) so it
+	// forward-feeds into exactly the next Verifier run before disappearing, the
+	// same way the live human-authored row would have.
+	`CREATE TABLE verify_forwarded_notes (
+		repo   TEXT NOT NULL,
+		set_id TEXT NOT NULL,
+		note   TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (repo, set_id)
+	);`,
 }
 
 func (s *Store) migrate() error {
