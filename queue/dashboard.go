@@ -68,12 +68,18 @@ type DashboardRow struct {
 	SetRef
 
 	Project string
-	// Status is the rendered display label (e.g. "IN PROGRESS", "DONE · merged").
-	// Logic that needs the schedulability fact must read RawStatus, never parse
-	// this string.
-	Status   string
-	Worktree string
-	Drain    string
+	// Started mirrors tasks.Row.Started: a started READY set renders as
+	// "IN PROGRESS". It is a presentational input to the render-time STATUS
+	// composition (dashboardStatusCell), never a schedulability fact — logic keys
+	// on RawStatus.
+	Started bool
+	// VerifiedAtSHA mirrors tasks.Row.VerifiedAtSHA: the short SHA of the
+	// immunizing PASS verdict, rendered as a yellow "verified @ <sha>" suffix when
+	// non-empty. It is carried on the row so the STATUS cell is composed at render
+	// time from live fields instead of a pre-baked string (ADR-0108).
+	VerifiedAtSHA string
+	Worktree      string
+	Drain         string
 
 	cursorKey string
 	// destKind selects how the destination column is styled; Worktree holds the
@@ -588,10 +594,6 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 				}
 			}
 		}
-		status := dashboardStatus(taskRow)
-		if orphaned {
-			status += " · orphaned"
-		}
 		rows = append(rows, DashboardRow{
 			SetRef: SetRef{
 				SetID:                 taskRow.ID,
@@ -610,12 +612,13 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 				Bound:                 bound,
 				PaneID:                dashboardPaneID(snap, st.repoKey, taskRow.ID),
 			},
-			Project:   st.projectName,
-			Status:    status,
-			Worktree:  wt.label,
-			Drain:     drain,
-			cursorKey: st.projectName + "\x00" + taskRow.ID,
-			destKind:  wt.destKind,
+			Project:       st.projectName,
+			Started:       taskRow.Started,
+			VerifiedAtSHA: taskRow.VerifiedAtSHA,
+			Worktree:      wt.label,
+			Drain:         drain,
+			cursorKey:     st.projectName + "\x00" + taskRow.ID,
+			destKind:      wt.destKind,
 		})
 	}
 	return rows, nil
@@ -636,14 +639,52 @@ func staticProjectPath(st dashboardRepoStatic) string {
 	return st.rep.ProjectPath
 }
 
-func dashboardStatus(row tasks.Row) string {
-	label := tasks.StatusLabel(row)
+// dashboardStatusLabel reproduces tasks.StatusLabel from a dashboard row's live
+// fields: a started READY set shows "IN PROGRESS", every other row shows its raw
+// status. It reads RawStatus/Started so the label is recomposed on each render
+// pass rather than baked in at row-build time.
+func dashboardStatusLabel(row DashboardRow) string {
+	return tasks.StatusLabel(tasks.Row{Status: row.RawStatus, Started: row.Started})
+}
+
+// dashboardStatusCell composes a row's STATUS cell from its live fields — the
+// single source of truth every render path and the header count read (ADR-0108).
+// It returns the plain, un-styled text: the display label followed by the
+// verified-at, auto-drain and orphaned suffixes in that fixed order. Column
+// width-fitting measures this plain form, so no ANSI leaks into column math;
+// dashboardStatusCellStyled layers styling for the rendered output. Because the
+// cell is derived from the row on each View pass, any action that mutates a row
+// field (the auto-drain toggle, a drain kick) updates the cell and the header
+// count together on the same render.
+func dashboardStatusCell(row DashboardRow) string {
+	return dashboardComposeStatus(row, false)
+}
+
+// dashboardStatusCellStyled is dashboardStatusCell with the immunized
+// "verified @ <sha>" token rendered yellow for display (same ANSI as pop tasks
+// status Details). The styling is layered only here so width measurement stays
+// ANSI-free.
+func dashboardStatusCellStyled(row DashboardRow) string {
+	return dashboardComposeStatus(row, true)
+}
+
+// dashboardComposeStatus assembles the STATUS cell from live row fields. When
+// styled, the verified-at token carries ANSI yellow; the auto-drain and orphaned
+// suffixes are always plain text.
+func dashboardComposeStatus(row DashboardRow, styled bool) string {
+	label := dashboardStatusLabel(row)
 	if row.VerifiedAtSHA != "" {
-		suffix := dashboardVerifiedAtStyle.Render("verified @ " + row.VerifiedAtSHA)
-		label += " · " + suffix
+		verified := "verified @ " + row.VerifiedAtSHA
+		if styled {
+			verified = dashboardVerifiedAtStyle.Render(verified)
+		}
+		label += " · " + verified
 	}
 	if row.AutoDrain {
 		label += " · auto-drain"
+	}
+	if row.Orphaned {
+		label += " · orphaned"
 	}
 	return label
 }
@@ -1264,7 +1305,7 @@ func dashboardColumnWidths(rows []DashboardRow) []int {
 		widths[i] = len(h)
 	}
 	for _, row := range rows {
-		for i, v := range dashboardRowValues(row) {
+		for i, v := range dashboardRowNaturalValues(row) {
 			if n := lipgloss.Width(v); n > widths[i] {
 				widths[i] = n
 			}
@@ -1504,7 +1545,7 @@ func dashboardTwoLineRowLine1(row DashboardRow, widths []int) string {
 // indented to sit under the TASK SET column on line 1. The List (and the bespoke
 // overlay path) supply the two-space gutter on top of this indent.
 func dashboardTwoLineRowLine2(row DashboardRow, line1Widths []int) string {
-	return strings.Repeat(" ", dashboardTwoLineStatusIndent(line1Widths)) + row.Status
+	return strings.Repeat(" ", dashboardTwoLineStatusIndent(line1Widths)) + dashboardStatusCellStyled(row)
 }
 
 // dashboardTableChromeLines is the number of body lines above the List rows in
@@ -3435,11 +3476,26 @@ func writeDashboardFooter(b *strings.Builder, height int, hint string) {
 	fmt.Fprint(b, hint)
 }
 
+// dashboardRowValues returns a row's rendered column cells, with the STATUS cell
+// composed at render time from the row's live fields (styled for display).
 func dashboardRowValues(row DashboardRow) []string {
 	return []string{
 		row.Project,
 		row.SetID,
-		row.Status,
+		dashboardStatusCellStyled(row),
+		renderDashboardDest(row.destKind, row.Worktree),
+		row.Drain,
+	}
+}
+
+// dashboardRowNaturalValues returns a row's column cells for width measurement.
+// It matches dashboardRowValues but uses the plain, un-styled composed status so
+// no ANSI ever reaches column-width math (ADR-0108).
+func dashboardRowNaturalValues(row DashboardRow) []string {
+	return []string{
+		row.Project,
+		row.SetID,
+		dashboardStatusCell(row),
 		renderDashboardDest(row.destKind, row.Worktree),
 		row.Drain,
 	}
