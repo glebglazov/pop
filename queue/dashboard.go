@@ -589,6 +589,9 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 			}
 		}
 		status := dashboardStatus(taskRow)
+		if orphaned {
+			status += " · orphaned"
+		}
 		rows = append(rows, DashboardRow{
 			SetRef: SetRef{
 				SetID:                 taskRow.ID,
@@ -638,6 +641,9 @@ func dashboardStatus(row tasks.Row) string {
 	if row.VerifiedAtSHA != "" {
 		suffix := dashboardVerifiedAtStyle.Render("verified @ " + row.VerifiedAtSHA)
 		label += " · " + suffix
+	}
+	if row.AutoDrain {
+		label += " · auto-drain"
 	}
 	return label
 }

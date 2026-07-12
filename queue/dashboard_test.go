@@ -217,7 +217,7 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 	if !reflect.DeepEqual(ids, want) {
 		t.Fatalf("ids = %v, want %v", ids, want)
 	}
-	if got := byID["done-integrating"]; got.Status != "DONE" {
+	if got := byID["done-integrating"]; !strings.HasPrefix(got.Status, "DONE") {
 		t.Fatalf("done-integrating row = %+v, want DONE", got)
 	}
 }
@@ -329,10 +329,10 @@ func TestDashboardColumnDerivation(t *testing.T) {
 	for _, row := range got {
 		byID[row.SetID] = row
 	}
-	if byID["done"].Status != "DONE" || byID["done"].Worktree != "done-branch" || byID["done"].destKind != dashboardDestDoneManagedBound {
+	if !strings.HasPrefix(byID["done"].Status, "DONE") || byID["done"].Worktree != "done-branch" || byID["done"].destKind != dashboardDestDoneManagedBound {
 		t.Fatalf("done row = %+v", byID["done"])
 	}
-	if byID["ready"].Status != "READY" || byID["ready"].Worktree != dashboardDestLabelNeedsBind || byID["ready"].destKind != dashboardDestNeedsBind {
+	if !strings.HasPrefix(byID["ready"].Status, "READY") || byID["ready"].Worktree != dashboardDestLabelNeedsBind || byID["ready"].destKind != dashboardDestNeedsBind {
 		t.Fatalf("ready row = %+v", byID["ready"])
 	}
 	if byID["bound"].Worktree != "bound-branch" || byID["bound"].destKind != dashboardDestBound {
@@ -4214,5 +4214,107 @@ func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
 	_ = m.View()
 	if m.list.LinesPerItem() != 2 {
 		t.Fatalf("LinesPerItem = %d, want 2 after clearing filter", m.list.LinesPerItem())
+	}
+}
+
+// TestDashboardStatusAppendsAutoDrain confirms the status-label assembly appends
+// a plain-text ` · auto-drain` suffix for an auto-drain row (after the yellow
+// verify suffix), and nothing for a non-auto-drain row.
+func TestDashboardStatusAppendsAutoDrain(t *testing.T) {
+	ad := dashboardStatus(tasks.Row{Status: tasks.StatusReady, AutoDrain: true})
+	if !strings.Contains(ad, "READY · auto-drain") {
+		t.Fatalf("auto-drain suffix missing/misplaced: %q", ad)
+	}
+	if plain := dashboardStatus(tasks.Row{Status: tasks.StatusReady}); strings.Contains(plain, "auto-drain") {
+		t.Fatalf("non-auto-drain row should not carry suffix: %q", plain)
+	}
+
+	// The yellow verify suffix must still render and precede the uncolored
+	// auto-drain suffix: <label> · verified @ <sha> · auto-drain.
+	ordered := dashboardStatus(tasks.Row{Status: tasks.StatusAwaitingApproval, VerifiedAtSHA: "abcdef1234567890", AutoDrain: true})
+	vIdx := strings.Index(ordered, "verified @")
+	aIdx := strings.Index(ordered, "auto-drain")
+	if vIdx < 0 || aIdx < 0 || vIdx > aIdx {
+		t.Fatalf("verify suffix must precede auto-drain: %q", ordered)
+	}
+	if !strings.Contains(ordered, "\x1b[33m") {
+		t.Fatalf("verify suffix should stay yellow: %q", ordered)
+	}
+	if !strings.Contains(ordered, " · auto-drain") {
+		t.Fatalf("auto-drain suffix should be uncolored plain text: %q", ordered)
+	}
+}
+
+// TestDashboardStatusSuffixesRender drives the fork-free build so a bound-but-
+// missing checkout appends ` · orphaned` at the row-assembly site, an auto-drain
+// row appends ` · auto-drain`, and a row that is both shows them ordered
+// `... · auto-drain · orphaned` — surfaced in both single-line and two-line
+// render modes off the one precomputed status string.
+func TestDashboardStatusSuffixesRender(t *testing.T) {
+	rows := []tasks.Row{
+		{ID: "ad", Status: tasks.StatusBlocked, AutoDrain: true},
+		{ID: "orph", Status: tasks.StatusBlocked},
+		{ID: "both", Status: tasks.StatusBlocked, AutoDrain: true},
+	}
+	d := dashboardTestDeps(t, rows, nil)
+	dataHome := t.TempDir()
+	real := deps.NewRealFileSystem()
+	origFS := d.Tasks.FS.(*deps.MockFileSystem)
+	const presentPath = "/repo/present"
+	d.Tasks.FS = &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataHome
+			}
+			return ""
+		},
+		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
+		ReadFileFunc:     real.ReadFile,
+		WriteFileFunc:    real.WriteFile,
+		MkdirAllFunc:     real.MkdirAll,
+		RenameFunc:       real.Rename,
+		StatFunc: func(path string) (os.FileInfo, error) {
+			if path == presentPath {
+				return deps.MockFileInfo{NameVal: "present", IsDirVal: true}, nil
+			}
+			return nil, os.ErrNotExist
+		},
+	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey("repo-key", "ad"):   {RuntimePath: presentPath, Branch: "ad-branch"},
+		setScopedKey("repo-key", "orph"): {RuntimePath: "/repo/gone", Branch: "orph-branch"},
+		setScopedKey("repo-key", "both"): {RuntimePath: "/repo/gone2", Branch: "both-branch"},
+	})
+	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
+
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]DashboardRow{}
+	for _, row := range got {
+		byID[row.SetID] = row
+	}
+
+	if s := byID["ad"].Status; !strings.Contains(s, " · auto-drain") || strings.Contains(s, "orphaned") {
+		t.Fatalf("auto-drain row status = %q", s)
+	}
+	if s := byID["orph"].Status; !strings.Contains(s, " · orphaned") || strings.Contains(s, "auto-drain") {
+		t.Fatalf("orphaned row status = %q", s)
+	}
+	if s := byID["both"].Status; !strings.Contains(s, " · auto-drain · orphaned") {
+		t.Fatalf("both row status = %q", s)
+	}
+
+	// Both render modes read the same precomputed status; widths are wide enough
+	// that no truncation clips the suffixes.
+	widths := []int{20, 20, 8, 60, 20, 20}
+	single := dashboardTableLine(dashboardRowValues(byID["both"]), widths)
+	if !strings.Contains(single, "· auto-drain · orphaned") {
+		t.Fatalf("single-line render missing suffixes:\n%s", single)
+	}
+	twoLine := dashboardTwoLineRowLine2(byID["both"], []int{10, 10, 10, 10})
+	if !strings.Contains(twoLine, "· auto-drain · orphaned") {
+		t.Fatalf("two-line render missing suffixes:\n%s", twoLine)
 	}
 }
