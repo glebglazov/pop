@@ -618,7 +618,8 @@ func TestDashboardAutoDrainToggleReflectsInRowAndCount(t *testing.T) {
 
 	// The same View pass — no poll tick — must reflect the toggle in both places.
 	after := m.View().Content
-	if !strings.Contains(after, "READY · auto-drain") {
+	// The base label is bucket-colored; the auto-drain marker follows it plainly.
+	if !strings.Contains(after, "\x1b[34mREADY\x1b[m · auto-drain") {
 		t.Fatalf("row cell missing auto-drain marker after toggle:\n%s", after)
 	}
 	if !strings.Contains(after, "1 auto-drain") {
@@ -1288,8 +1289,10 @@ func TestDashboardTwoLineRowLine2ShowsStatusUnderTaskSet(t *testing.T) {
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
 	line2 := dashboardTwoLineRowLine2(row, widths)
 
-	if strings.TrimLeft(line2, " ") != "IN PROGRESS" {
-		t.Fatalf("two-line row line 2 = %q, want the status %q (indented)", line2, "IN PROGRESS")
+	// The base label is bucket-colored (started READY → blue "IN PROGRESS").
+	wantStatus := dashboardStatusCellStyled(row)
+	if strings.TrimLeft(line2, " ") != wantStatus {
+		t.Fatalf("two-line row line 2 = %q, want the status %q (indented)", line2, wantStatus)
 	}
 	// STATUS must be indented to start under the TASK SET column, i.e. past the
 	// PROJECT column and its separator.
@@ -1439,6 +1442,64 @@ func TestDashboardStatusAppendsVerifiedAtSHA(t *testing.T) {
 	plain := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval}}
 	if got := dashboardStatusCellStyled(plain); strings.Contains(got, "verified @") {
 		t.Fatalf("plain status should not contain suffix: %q", got)
+	}
+}
+
+// TestDashboardStatusBucketColors confirms the base status label is colored by
+// semantic bucket, and only the base token — the label carries the bucket ANSI
+// while width measurement (dashboardStatusCell) stays plain.
+func TestDashboardStatusBucketColors(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  tasks.TaskSetStatus
+		started bool
+		ansi    string // expected bucket color prefixing the base label
+	}{
+		{"DONE green", tasks.StatusDone, false, "\x1b[32m"},
+		{"READY blue", tasks.StatusReady, false, "\x1b[34m"},
+		{"IN PROGRESS blue", tasks.StatusReady, true, "\x1b[34m"},
+		{"NEEDS-VERIFY yellow", tasks.StatusNeedsVerify, false, "\x1b[33m"},
+		{"AWAITING-APPROVAL yellow", tasks.StatusAwaitingApproval, false, "\x1b[33m"},
+		{"BLOCKED yellow", tasks.StatusBlocked, false, "\x1b[33m"},
+		{"FAILED red", tasks.StatusFailed, false, "\x1b[31m"},
+		{"VERIFY-FAILED red", tasks.StatusVerifyFailed, false, "\x1b[31m"},
+		{"MALFORMED red", tasks.StatusMalformed, false, "\x1b[31m"},
+		{"MISSING red", tasks.StatusMissing, false, "\x1b[31m"},
+		{"DEFERRED faint", tasks.StatusDeferred, false, "\x1b[2m"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			row := DashboardRow{SetRef: SetRef{RawStatus: c.status}, Started: c.started}
+			styled := dashboardStatusCellStyled(row)
+			label := dashboardStatusLabel(row)
+			// The bucket ANSI must wrap the base label token.
+			if !strings.Contains(styled, c.ansi+label) {
+				t.Fatalf("styled label = %q, want bucket %q on %q", styled, c.ansi, label)
+			}
+			// Width measurement stays plain: no ANSI in the un-styled cell.
+			if plain := dashboardStatusCell(row); strings.Contains(plain, "\x1b[") {
+				t.Fatalf("plain cell should carry no ANSI: %q", plain)
+			}
+		})
+	}
+}
+
+// TestDashboardStatusBucketColorOnlyBaseToken confirms styling colors only the
+// base label, leaving suffixes to their own styling: the auto-drain/orphaned
+// suffixes stay plain and the label ANSI resets before them.
+func TestDashboardStatusBucketColorOnlyBaseToken(t *testing.T) {
+	row := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusBlocked, AutoDrain: true, Orphaned: true}}
+	styled := dashboardStatusCellStyled(row)
+	// Base label is yellow and reset before the suffixes.
+	if !strings.Contains(styled, "\x1b[33mBLOCKED\x1b[m") {
+		t.Fatalf("base BLOCKED token should be yellow-and-reset: %q", styled)
+	}
+	// Suffixes carry no color of the base bucket.
+	if !strings.Contains(styled, "· auto-drain") || !strings.Contains(styled, "· orphaned") {
+		t.Fatalf("suffixes missing: %q", styled)
+	}
+	if strings.Contains(styled, "\x1b[33m· auto-drain") || strings.Contains(styled, "\x1b[33m· orphaned") {
+		t.Fatalf("suffixes should not inherit base bucket color: %q", styled)
 	}
 }
 
@@ -4375,7 +4436,8 @@ func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
 // verify suffix), and nothing for a non-auto-drain row.
 func TestDashboardStatusAppendsAutoDrain(t *testing.T) {
 	ad := dashboardStatusCellStyled(DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}})
-	if !strings.Contains(ad, "READY · auto-drain") {
+	// The base label is bucket-colored (READY → blue); the marker follows plainly.
+	if !strings.Contains(ad, "\x1b[34mREADY\x1b[m · auto-drain") {
 		t.Fatalf("auto-drain suffix missing/misplaced: %q", ad)
 	}
 	if plain := dashboardStatusCellStyled(DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}); strings.Contains(plain, "auto-drain") {

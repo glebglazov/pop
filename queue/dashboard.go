@@ -673,6 +673,11 @@ func dashboardStatusCellStyled(row DashboardRow) string {
 // suffixes are always plain text.
 func dashboardComposeStatus(row DashboardRow, styled bool) string {
 	label := dashboardStatusLabel(row)
+	if styled {
+		if st, ok := dashboardStatusBucketStyle[label]; ok {
+			label = st.Render(label)
+		}
+	}
 	if row.VerifiedAtSHA != "" {
 		verified := "verified @ " + row.VerifiedAtSHA
 		if styled {
@@ -715,6 +720,39 @@ var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"
 // dashboardVerifiedAtStyle colors the immunized "verified @ <shortSHA>" suffix
 // (same ANSI yellow as pop tasks status Details output).
 var dashboardVerifiedAtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+
+// dashboardStatusBucketStyle maps a base status label to its semantic bucket
+// color. Only the base label token is colored here; the verified@/auto-drain/
+// orphaned suffixes keep their own styling, so this is applied to the label
+// before suffixes are appended in dashboardComposeStatus. The map is keyed by
+// the display label, so "IN PROGRESS" (the started-READY refinement) shares
+// READY's blue bucket.
+//
+// Bucket rationale (from the grilling session):
+//   - green  DONE — terminal success.
+//   - blue   READY / IN PROGRESS — in-flight work, nothing wrong.
+//   - yellow NEEDS-VERIFY / AWAITING-APPROVAL / BLOCKED — "needs-you": each
+//     waits on a human decision. BLOCKED is a needs-you gate, not a failure,
+//     so it sits with the amber attention bucket rather than red.
+//   - red    FAILED / VERIFY-FAILED / MALFORMED / MISSING — the problem bucket;
+//     MALFORMED (bad task file) and MISSING (no manifest) fold in here as
+//     structural problems alongside outright failures.
+//   - faint  DEFERRED — intentionally shelved, dimmed to recede.
+//
+// The mapping is trivially reversible, so no ADR backs it.
+var dashboardStatusBucketStyle = map[string]lipgloss.Style{
+	string(tasks.StatusDone):             lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
+	string(tasks.StatusReady):            lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
+	"IN PROGRESS":                        lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
+	string(tasks.StatusNeedsVerify):      lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
+	string(tasks.StatusAwaitingApproval): lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
+	string(tasks.StatusBlocked):          lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
+	string(tasks.StatusFailed):           lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+	string(tasks.StatusVerifyFailed):     lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+	string(tasks.StatusMalformed):        lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+	string(tasks.StatusMissing):          lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+	string(tasks.StatusDeferred):         lipgloss.NewStyle().Faint(true),
+}
 
 type dashboardWorktreeView struct {
 	label       string
