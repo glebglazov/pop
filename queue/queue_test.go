@@ -367,6 +367,57 @@ func TestLiveOpenSpawnsExcludesStaleSpawnOnSharedCheckout(t *testing.T) {
 	}
 }
 
+func hasActionable(decisions []Decision, setID string) bool {
+	for _, dec := range decisions {
+		if dec.Actionable() && dec.TaskSetID == setID {
+			return true
+		}
+	}
+	return false
+}
+
+// TestPendingSpawnIntentBlocksFastRePoll is the double-spawn-window guard: between
+// the supervisor sending an implement into a pane and that drain reaching
+// BeginDrain the store has no running Drain row, so a fast re-poll would re-select
+// the same set and send a second implement. The durable spawn-intent record — not
+// in-memory view seeding — closes the window. decideProjectDispatches carries no
+// run view, so a pass through it exercises the store guard alone.
+func TestPendingSpawnIntentBlocksFastRePoll(t *testing.T) {
+	root := initGitRepoWithBase(t)
+	td := queueDataDeps(t)
+	td.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
+	d := &Deps{
+		Tasks:    td,
+		Project:  &project.Deps{FS: deps.NewRealFileSystem()},
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
+		Refresh: func(defPath string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{Rows: []tasks.Row{
+				{ID: "set-a", Status: tasks.StatusReady, AutoDrain: true, Priority: 10, RegIndex: 0},
+			}}, nil
+		},
+	}
+	bindSetInPlace(t, d, root, "set-a")
+	scan := projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}
+
+	// First poll: the set is idle and Queue-drainable, so it dispatches.
+	if first := decideProjectDispatches(d, scan, nil, nil, time.Now()); !hasActionable(first, "set-a") {
+		t.Fatalf("first poll must dispatch set-a: %+v", first)
+	}
+
+	// The supervisor records the spawn intent before sending the drain command.
+	if err := tasks.RecordSpawnIntent(td, root, "set-a"); err != nil {
+		t.Fatalf("RecordSpawnIntent: %v", err)
+	}
+
+	// Second poll before the drain reaches BeginDrain: no running row exists yet,
+	// but the live pending-spawn marker makes the set read busy, so it is NOT
+	// re-dispatched — closing the window against durable state.
+	second := decideProjectDispatches(d, scan, nil, nil, time.Now())
+	if hasActionable(second, "set-a") {
+		t.Fatalf("fast re-poll re-dispatched set-a despite a pending spawn intent: %+v", second)
+	}
+}
+
 // scanGitGuard fails the test if Scan forks any git command. The fork-free
 // partition (ADR-0060) classifies a project lacking a task-storage marker as
 // idle/no-tasks from its name alone, so a status scan over such projects forks no

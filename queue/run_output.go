@@ -683,10 +683,12 @@ func formatBlockedLine(b BlockedItem) string {
 }
 
 // seedSpawnedRunning augments view.Running with any spawned set not already
-// present, keyed by RepoLabel+SetID. It bridges the gap between issuing a spawn
-// and the drain acquiring its runtime lock: the post-spawn scan cannot yet see
-// the set as Running, so without this the next tick's diff would re-report the
-// spawn a second time.
+// present, keyed by RepoLabel+SetID. It is DISPLAY-ONLY: it seeds the run
+// output's swallow snapshot (s.prev) so the next tick's diff does not re-report a
+// spawn already announced imperatively, and never feeds a dispatch decision. The
+// double-spawn window itself is closed against durable state by the spawn-intent
+// guard (RecordSpawnIntent / pendingSpawnSets) — correctness no longer depends on
+// this seeding surviving across polls; it only keeps the log tidy.
 func seedSpawnedRunning(view RunView, spawned []PickedUpSet) RunView {
 	if len(spawned) == 0 {
 		return view

@@ -652,6 +652,20 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 
 	var decisions []Decision
 	runningSets := map[string]bool{}
+	// A set with a live pending-spawn marker was dispatched in a prior tick but has
+	// not yet reached BeginDrain (no running Drain row exists yet). Treat it as busy
+	// so this poll does not re-select it and send a second implement into the pane.
+	// This closes the double-spawn window against durable state, so correctness no
+	// longer depends on the in-memory post-spawn view seeding surviving the tick.
+	if pending, err := pendingSpawnSets(d, scan); err != nil {
+		dec.Err = err
+		dec.Reason = "drain store"
+		return []Decision{dec}
+	} else {
+		for id := range pending {
+			runningSets[id] = true
+		}
+	}
 	if dec.WorktreeReady {
 		openSpawns, err := liveOpenSpawns(d, scan)
 		if err != nil {
@@ -812,6 +826,31 @@ type liveOpenSpawn struct {
 // execution claim, so the store's running drains are the source of truth. Each
 // is surfaced with a synthesized RuntimeLockStatus so callers read it exactly as
 // they read a single-checkout lock.
+// pendingSpawnSets returns the set IDs of the scan's repository that carry a
+// live pending-spawn marker (dispatched but not yet running). It is the durable
+// half of the double-spawn guard: a set here has an implement command already in
+// flight, so the dispatcher must not select it again this tick.
+func pendingSpawnSets(d *Deps, scan projectScan) (map[string]bool, error) {
+	if d == nil || d.Tasks == nil {
+		return nil, nil
+	}
+	commonDir := scanRepoCommonDir(d, scan)
+	if commonDir == "" {
+		return nil, nil
+	}
+	pending, err := tasks.PendingSpawns(d.Tasks, commonDir)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(pending))
+	for _, ps := range pending {
+		if ps.SetID != "" {
+			out[ps.SetID] = true
+		}
+	}
+	return out, nil
+}
+
 func liveOpenSpawns(d *Deps, scan projectScan) ([]liveOpenSpawn, error) {
 	if d == nil || d.Tasks == nil {
 		return nil, nil
@@ -1058,12 +1097,34 @@ func SpawnWithResult(d *Deps, dec Decision) (SpawnResult, error) {
 	if !dec.Actionable() {
 		return SpawnResult{}, nil
 	}
+	// Record the pending-spawn marker in durable state *before* sending the drain
+	// command, so the window between the send and the drain reaching BeginDrain is
+	// covered by the store, not merely by in-memory view seeding: a fast re-poll
+	// reads the intent and treats the set as busy instead of dispatching a second
+	// implement into the same pane (ADR item: double-spawn window).
+	if err := recordSpawnIntent(d, dec); err != nil {
+		return SpawnResult{}, fmt.Errorf("record spawn intent: %w", err)
+	}
 	command := fmt.Sprintf("pop tasks implement %s", shellQuote(dec.TaskSetID))
 	if dec.WorktreeReady && dec.scan.RuntimePath != "" {
 		command += " --task-runtime-path " + shellQuote(dec.scan.RuntimePath)
 	}
 	paneID, err := spawnDrain(d.Tmux, dec.scan.SessionName, dec.scan.ProjectPath, dec.TaskSetID, command)
 	return SpawnResult{PaneID: paneID}, err
+}
+
+// recordSpawnIntent persists the pending-spawn marker for a just-selected drain.
+// The runtime path resolves to the repository the intent is keyed by; it falls
+// back to the project path for the v1 in-place case where the two coincide.
+func recordSpawnIntent(d *Deps, dec Decision) error {
+	if d == nil || d.Tasks == nil {
+		return nil
+	}
+	runtimePath := dec.scan.RuntimePath
+	if runtimePath == "" {
+		runtimePath = dec.scan.ProjectPath
+	}
+	return tasks.RecordSpawnIntent(d.Tasks, runtimePath, dec.TaskSetID)
 }
 
 func recordDrainPane(d *Deps, dec Decision, paneID, source string) error {

@@ -297,6 +297,27 @@ var migrations = []string{
 	// the correct outcome, since its registering process is long gone.
 	`ALTER TABLE checkout_gate_holds ADD COLUMN pid INTEGER NOT NULL DEFAULT 0;
 	 ALTER TABLE checkout_gate_holds ADD COLUMN proc_start TEXT;`,
+	// 18: spawn_intents — a durable pending-spawn marker closing the supervisor
+	// double-spawn window (item 1 of the recovery-quiescence hardening). Between
+	// the supervisor sending `pop tasks implement` into a pane and that drain
+	// reaching BeginDrain the store has no running row, so a fast re-poll would
+	// re-select the same set and send a second implement (bouncing off
+	// ErrDrainInProgress — safe but noisy). The dispatcher now records an intent
+	// before the send and treats a set with a live intent as busy, so correctness
+	// no longer depends on in-memory view seeding surviving across polls. The row
+	// carries the recording process's owner identity (PID + start token, mirroring
+	// drains) so it can be reconciled if that process dies, and created_at so it
+	// expires: BeginDrain deletes it on success, and the opportunistic reconcile
+	// pass sweeps any that never reached BeginDrain. Keyed by (repo, set_id).
+	`CREATE TABLE spawn_intents (
+		repo         TEXT NOT NULL,
+		set_id       TEXT NOT NULL,
+		runtime_path TEXT NOT NULL DEFAULT '',
+		pid          INTEGER NOT NULL DEFAULT 0,
+		proc_start   TEXT,
+		created_at   TEXT NOT NULL,
+		PRIMARY KEY (repo, set_id)
+	);`,
 }
 
 func (s *Store) migrate() error {

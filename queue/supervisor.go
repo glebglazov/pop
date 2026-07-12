@@ -112,7 +112,9 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 		// post-spawn scan still lists its set as Ready, not Running. Seed the
 		// spawned sets into the swallow snapshot so next tick's view diff does
 		// not re-announce them as freshly "spawned drain" (they were already
-		// reported imperatively above).
+		// reported imperatively above). This seeding is display-only — the
+		// double-spawn window is closed against the store by the spawn-intent
+		// guard, not by this view patch (see seedSpawnedRunning).
 		runOut.emitPostSpawnView(out, seedSpawnedRunning(BuildRunView(snap, time.Now()), spawned))
 	}
 }

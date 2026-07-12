@@ -126,6 +126,15 @@ func ReconcileDrains(d *Deps) (int, error) {
 	}); sweepErr != nil && err == nil {
 		err = sweepErr
 	}
+	// Sweep pending-spawn markers whose owner died or whose TTL lapsed (a spawn
+	// that never reached BeginDrain), so a stale intent cannot itself block
+	// re-selection forever. Same rule: a sweep error only surfaces when the drain
+	// arm was clean.
+	if _, sweepErr := s.ReconcileSpawnIntents(now.Add(-spawnIntentTTL), func(pid int, procStart string) bool {
+		return drainProcessAlive(d, pid, procStart)
+	}); sweepErr != nil && err == nil {
+		err = sweepErr
+	}
 	return n, err
 }
 
@@ -172,6 +181,11 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 		}
 		return nil, exitErr(ExitOperational, "record drain start: %v", err)
 	}
+	// The running Drain row now covers this set, so its pending-spawn marker (if
+	// the supervisor recorded one at dispatch) has served its purpose: drop it so
+	// it stops shadowing the now-visible drain. Best-effort — a lingering intent
+	// expires on its own and never blocks this drain.
+	_ = s.DeleteSpawnIntent(id.CommonDir, setID)
 	return &DrainHandle{store: s, id: drain.ID}, nil
 }
 
