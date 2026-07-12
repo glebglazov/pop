@@ -464,7 +464,7 @@ func TestDashboardOrphanedIndicator(t *testing.T) {
 	}
 	// The orphaned set must render its status suffix; the present/unbound sets must not.
 	var rendered strings.Builder
-	renderDashboardTable(&rendered, []DashboardRow{byID["missing"]}, 0, 120)
+	renderDashboardTable(&rendered, []DashboardRow{byID["missing"]}, 0, 120, 20)
 	if !strings.Contains(rendered.String(), "· orphaned") {
 		t.Fatalf("orphaned suffix missing from row render:\n%s", rendered.String())
 	}
@@ -547,7 +547,7 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 		{Project: "pop", Status: "READY", Worktree: "/repo/main (main)", SetRef: SetRef{SetID: "plain"}},
 	}
 	var rendered strings.Builder
-	renderDashboardTable(&rendered, rows, 0, 0)
+	renderDashboardTable(&rendered, rows, 0, 0, 20)
 	if !strings.Contains(rendered.String(), "AD") {
 		t.Fatalf("missing auto-drain flag:\n%s", rendered.String())
 	}
@@ -1128,20 +1128,43 @@ func TestDashboardTwoLineMode(t *testing.T) {
 	short := DashboardRow{SetRef: SetRef{SetID: "short-id"}}
 	long := DashboardRow{SetRef: SetRef{SetID: strings.Repeat("a", 37)}}
 
-	if !dashboardTwoLineMode([]DashboardRow{short}, 40) {
+	// roomy is a pane height at/above the floor; two-line decisions apply.
+	const roomy = 20
+
+	if !dashboardTwoLineMode([]DashboardRow{short}, 40, roomy) {
 		t.Fatalf("narrow terminal (40 cols) should activate two-line mode")
 	}
-	if !dashboardTwoLineMode([]DashboardRow{short}, 79) {
-		t.Fatalf("terminal just below threshold (79 cols) should activate two-line mode")
+	if !dashboardTwoLineMode([]DashboardRow{short}, 119, roomy) {
+		t.Fatalf("terminal just below threshold (119 cols) should activate two-line mode")
 	}
-	if dashboardTwoLineMode([]DashboardRow{short}, 80) {
-		t.Fatalf("terminal at threshold (80 cols) with short ids should stay single-line")
+	if dashboardTwoLineMode([]DashboardRow{short}, 120, roomy) {
+		t.Fatalf("terminal at threshold (120 cols) with short ids should stay single-line")
 	}
-	if !dashboardTwoLineMode([]DashboardRow{short, long}, 80) {
+	if !dashboardTwoLineMode([]DashboardRow{short, long}, 120, roomy) {
 		t.Fatalf("one long set id should activate two-line mode for all rows")
 	}
-	if !dashboardTwoLineMode([]DashboardRow{long, short}, 100) {
+	if !dashboardTwoLineMode([]DashboardRow{long, short}, 140, roomy) {
 		t.Fatalf("long set id should activate two-line mode even on wide terminals")
+	}
+}
+
+func TestDashboardTwoLineModeHeightGate(t *testing.T) {
+	short := DashboardRow{SetRef: SetRef{SetID: "short-id"}}
+	long := DashboardRow{SetRef: SetRef{SetID: strings.Repeat("a", 37)}}
+
+	// Below the height floor, neither a narrow terminal nor a long set id may
+	// activate two-line mode: a short popup stays single-line for row density.
+	const short_pane = dashboardTwoLineHeightFloor - 1
+	if dashboardTwoLineMode([]DashboardRow{short}, 40, short_pane) {
+		t.Fatalf("narrow terminal below height floor should stay single-line")
+	}
+	if dashboardTwoLineMode([]DashboardRow{long, short}, 200, short_pane) {
+		t.Fatalf("long set id below height floor should stay single-line")
+	}
+
+	// Exactly at the floor the pane is roomy again.
+	if !dashboardTwoLineMode([]DashboardRow{short}, 40, dashboardTwoLineHeightFloor) {
+		t.Fatalf("narrow terminal at the height floor should activate two-line mode")
 	}
 }
 
@@ -1216,7 +1239,7 @@ func TestDashboardTwoLineRowsFitTerminalWidth(t *testing.T) {
 			m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.termW, Height: 20})
 			m = updated.(QueueDashboard)
-			if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+			if !dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 				t.Fatalf("expected two-line mode at width %d", tc.termW)
 			}
 			view := m.View().Content
@@ -1241,7 +1264,7 @@ func TestDashboardTwoLineSingleLineLayoutUnchanged(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
 	m = updated.(QueueDashboard)
-	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		t.Fatalf("wide terminal with short ids should not activate two-line mode")
 	}
 	view := m.View().Content
@@ -2279,7 +2302,7 @@ func TestDashboardManagedDirectiveDestColumn(t *testing.T) {
 		t.Fatalf("managed row = %+v, want [managed wt] badge", got[0])
 	}
 	var rendered strings.Builder
-	renderDashboardTable(&rendered, got, 0, 0)
+	renderDashboardTable(&rendered, got, 0, 0, 20)
 	out := rendered.String()
 	if !strings.Contains(out, "[managed wt]") {
 		t.Fatalf("render missing [managed wt] badge:\n%s", out)
@@ -2344,7 +2367,7 @@ func TestDashboardNeedsBindRenderedDim(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rendered strings.Builder
-	renderDashboardTable(&rendered, got, 0, 0)
+	renderDashboardTable(&rendered, got, 0, 0, 20)
 	if !strings.Contains(rendered.String(), "needs bind") {
 		t.Fatalf("render missing needs bind:\n%s", rendered.String())
 	}
@@ -3861,10 +3884,10 @@ func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
 		{Project: "pop", Status: "DONE", Worktree: "main", cursorKey: "pop\x00bbb", SetRef: SetRef{SetID: "bbb"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = updated.(QueueDashboard)
 
-	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if !dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		t.Fatalf("expected two-line mode with a long set id")
 	}
 	if m.list.LinesPerItem() != 2 {
@@ -3971,7 +3994,9 @@ func TestDashboardTwoLineClampsToBodyHeight(t *testing.T) {
 		rows[i] = DashboardRow{Project: "pop", Status: "READY", cursorKey: "pop\x00" + id, SetRef: SetRef{SetID: id}}
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	// Height at the two-line floor (16): roomy enough for two-line mode, still
+	// short enough that 40 rows overflow and must clamp to the viewport.
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 16})
 	m = updated.(QueueDashboard)
 
 	if m.list.LinesPerItem() != 2 {
@@ -4001,6 +4026,55 @@ func TestDashboardTwoLineClampsToBodyHeight(t *testing.T) {
 	}
 }
 
+// TestDashboardShortPaneCollapsesToSingleLine asserts that a pane below the
+// two-line height floor renders single-line rows even when the terminal is
+// narrow and a set id is long — a short tmux popup trades id completeness for
+// visible-row density (ADR-0107). The collapse must hold in both the main body
+// and the action-menu overlay.
+func TestDashboardShortPaneCollapsesToSingleLine(t *testing.T) {
+	longID := strings.Repeat("a", 37)
+	rows := []DashboardRow{
+		{Project: "pop", Status: "READY", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{SetID: longID}},
+		{Project: "pop", Status: "DONE", Worktree: "main", cursorKey: "pop\x00bbb", SetRef: SetRef{SetID: "bbb"}},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	// A wide pane (width >= 120) with a long id would force two-line mode were the
+	// pane roomy — the id, not the width, is the trigger. But the height is one
+	// row below the floor, so the table stays single-line. The width is wide
+	// enough that the single-line header renders in full for the assertions.
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 130, Height: dashboardTwoLineHeightFloor - 1})
+	m = updated.(QueueDashboard)
+
+	if dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
+		t.Fatalf("short pane must not activate two-line mode")
+	}
+	if m.list.LinesPerItem() != 1 {
+		t.Fatalf("LinesPerItem = %d, want 1 on a short pane", m.list.LinesPerItem())
+	}
+	// In single-line mode the id and its status share one physical line; in
+	// two-line mode the status would sit on the following line instead.
+	assertSingleLineRow := func(view, label string) {
+		t.Helper()
+		lines := strings.Split(view, "\n")
+		idx := dashboardTestLineIndex(lines, longID)
+		if idx < 0 {
+			t.Fatalf("%s: set id %q missing from render:\n%s", label, longID, view)
+		}
+		if !strings.Contains(lines[idx], "READY") {
+			t.Fatalf("%s: status must share the id's line in single-line mode:\n%s", label, view)
+		}
+	}
+	assertSingleLineRow(m.View().Content, "main body")
+
+	// The action-menu overlay must share the same single-line decision.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(QueueDashboard)
+	if m.menu == nil {
+		t.Fatal("a did not open the action menu")
+	}
+	assertSingleLineRow(m.View().Content, "menu overlay")
+}
+
 // TestDashboardMenuTwoLineOverlay verifies that opening the action menu (`a`)
 // on a narrow pane renders the table rows in two-line mode and anchors the menu
 // relative to the cursor's two-line block.
@@ -4023,7 +4097,7 @@ func TestDashboardMenuTwoLineOverlay(t *testing.T) {
 	view := m.View().Content
 	lines := strings.Split(view, "\n")
 
-	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if !dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		t.Fatalf("expected two-line mode with a long set id")
 	}
 
@@ -4074,7 +4148,7 @@ func TestDashboardBindModalTwoLineOverlay(t *testing.T) {
 	view := m.View().Content
 	lines := strings.Split(view, "\n")
 
-	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if !dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		t.Fatalf("expected two-line mode with a long set id")
 	}
 
@@ -4119,7 +4193,7 @@ func TestDashboardDrainModalTwoLineOverlay(t *testing.T) {
 	view := m.View().Content
 	lines := strings.Split(view, "\n")
 
-	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if !dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		t.Fatalf("expected two-line mode with a long set id")
 	}
 
@@ -4153,10 +4227,12 @@ func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
 		{Project: "pop", Status: "READY", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{SetID: longID}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	// Width at the forced-fit threshold (120): only the long set id, not width,
+	// may trigger two-line mode, so filtering it away must drop back to one line.
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
 	m = updated.(QueueDashboard)
 
-	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if !dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		t.Fatalf("expected two-line mode initially because of the long set id")
 	}
 	if m.list.LinesPerItem() != 2 {
@@ -4183,7 +4259,7 @@ func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
 	if len(m.snap.Rows) != 1 {
 		t.Fatalf("filtered rows = %d, want 1", len(m.snap.Rows))
 	}
-	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		t.Fatalf("expected single-line mode after filtering to short id")
 	}
 
@@ -4199,7 +4275,7 @@ func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
 	if m.filterMode {
 		t.Fatal("esc did not clear filter mode")
 	}
-	if !dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if !dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		t.Fatalf("expected two-line mode after clearing filter")
 	}
 	_ = m.View()

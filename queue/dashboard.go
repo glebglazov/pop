@@ -1345,15 +1345,25 @@ func dashboardTableWidthsForRows(rows []DashboardRow, termWidth int) []int {
 }
 
 const (
-	dashboardTwoLineWidthThreshold = 80
+	dashboardTwoLineWidthThreshold = 120
 	dashboardTwoLineSetIDThreshold = 36
+	// dashboardTwoLineHeightFloor is the pane-height floor below which the table
+	// stays single-line regardless of width or set-id length (ADR-0107). In a
+	// short tmux popup, visible-row density beats id completeness.
+	dashboardTwoLineHeightFloor = 16
 )
 
 // dashboardTwoLineMode reports whether the Queue dashboard should render each
-// row on two lines. It activates when the terminal is narrow (< 80 columns) or
-// when any visible Task set identifier is long (> 36 characters). When active,
-// every row uses the same two-line shape (uniform height).
-func dashboardTwoLineMode(rows []DashboardRow, termWidth int) bool {
+// row on two lines. Two-line mode is height-gated (ADR-0107): it engages only
+// when the pane is roomy (termHeight >= dashboardTwoLineHeightFloor). When
+// roomy, it activates if the terminal is narrow (< 120 columns) or any visible
+// Task set identifier is long (> 36 characters). Below the height floor every
+// row stays single-line. When active, every row uses the same two-line shape
+// (uniform height).
+func dashboardTwoLineMode(rows []DashboardRow, termWidth, termHeight int) bool {
+	if termHeight < dashboardTwoLineHeightFloor {
+		return false
+	}
 	if termWidth < dashboardTwoLineWidthThreshold {
 		return true
 	}
@@ -1510,7 +1520,7 @@ const dashboardTwoLineChromeLines = dashboardTableChromeLines + 1
 // dashboardChromeLines returns the chrome height above the List rows for the
 // current render mode.
 func (m QueueDashboard) dashboardChromeLines() int {
-	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		return dashboardTwoLineChromeLines
 	}
 	return dashboardTableChromeLines
@@ -1532,7 +1542,7 @@ func (m QueueDashboard) resizeMainList() {
 	if listH < 1 {
 		listH = 1
 	}
-	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		m.list.SetLinesPerItem(2)
 	} else {
 		m.list.SetLinesPerItem(1)
@@ -2741,7 +2751,7 @@ func (m QueueDashboard) mainBody() string {
 		return "No queue-actionable task sets."
 	}
 	var parts []string
-	if dashboardTwoLineMode(m.snap.Rows, m.width) {
+	if dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
 		line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(m.snap.Rows), dashboardTableBodyBudget(m.width))
 		parts = []string{
 			"",
@@ -2789,7 +2799,7 @@ func (m QueueDashboard) viewWithModal() string {
 	}
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width)
+	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height)
 	// avail is the number of body lines left for the modal below the table, so
 	// its scroll window clamps long worktree/ref lists instead of overflowing.
 	// A non-positive avail (no WindowSizeMsg yet) means "don't clamp".
@@ -3273,8 +3283,8 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, widt
 	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter/y confirm · n/esc cancel", width)))
 }
 
-func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
-	renderDashboardTableWithMenu(w, rows, cursor, width, 0, nil)
+func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width, height int) {
+	renderDashboardTableWithMenu(w, rows, cursor, width, height, nil)
 }
 
 // renderDashboardTableWithMenu renders the task-set table and, when menu is
@@ -3282,7 +3292,7 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width int) {
 // default, flipping above when the cursor sits too low for the menu to fit
 // beneath it within height (dashboardMenuPlaceBelow).
 func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
-	if dashboardTwoLineMode(rows, width) {
+	if dashboardTwoLineMode(rows, width, height) {
 		renderDashboardTableTwoLineWithMenu(w, rows, cursor, width, height, menu)
 		return
 	}
