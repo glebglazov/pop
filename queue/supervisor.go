@@ -38,6 +38,7 @@ func Run(d *Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal)
 	}
 
 	fmt.Fprintf(out, "pop queue supervisor started (PID %d); poll every %s. Ctrl-C to stop.\n", os.Getpid(), interval)
+	tasks.WarnProcStartUnsupported(out)
 
 	output := newRunOutputState()
 	for {

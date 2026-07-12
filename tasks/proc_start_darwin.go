@@ -8,6 +8,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// procStartSupported: darwin reads process start time via sysctl(KERN_PROC_PID).
+const procStartSupported = true
+
 // defaultProcStartToken reads the process's start time from the kernel via
 // sysctl(KERN_PROC_PID). The token is stable for the life of the process and
 // distinct after a PID is reused, so pairing it with the PID defeats reuse in

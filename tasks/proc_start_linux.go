@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// procStartSupported: linux reads process start time from /proc/<pid>/stat.
+const procStartSupported = true
+
 // defaultProcStartToken reads the process's start time from /proc/<pid>/stat
 // (field 22, starttime in clock ticks since boot). The token is stable for the
 // life of the process and distinct after a PID is reused, so pairing it with the

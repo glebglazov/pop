@@ -5,16 +5,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/glebglazov/pop/tasks"
 )
 
 // SupervisorLockMetadata is persisted in the single-instance supervisor lock.
+// ProcStart records the owning process's start token so a recycled PID does not
+// make a stale lock read "already running" — liveness pairs PID with start
+// token, the same standard drain rows use (ADR-0055). It is empty on platforms
+// that cannot read process start time (see tasks.ProcStartSupported) and on
+// locks written before the column existed, in which case liveness degrades to
+// bare PID.
 type SupervisorLockMetadata struct {
 	PID       int       `json:"pid"`
 	StartedAt time.Time `json:"started_at"`
+	ProcStart string    `json:"proc_start,omitempty"`
 }
 
 // SupervisorLock is a held single-instance supervisor lock.
@@ -75,9 +81,12 @@ func acquireSupervisorLock(d *tasks.Deps, retried bool) (*SupervisorLock, error)
 	}
 
 	lockPath := SupervisorLockPath(d)
+	pid := os.Getpid()
+	procStart, _ := tasks.ProcessStartTokenFor(d, pid)
 	meta := SupervisorLockMetadata{
-		PID:       os.Getpid(),
+		PID:       pid,
 		StartedAt: time.Now().UTC(),
+		ProcStart: procStart,
 	}
 	payload, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
@@ -119,7 +128,7 @@ func acquireSupervisorLock(d *tasks.Deps, retried bool) (*SupervisorLock, error)
 		return acquireSupervisorLock(d, true)
 	}
 
-	if processAlive(d, existingMeta.PID) {
+	if tasks.ProcessLiveWithToken(d, existingMeta.PID, existingMeta.ProcStart) {
 		return nil, &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf(
 			"queue supervisor already running (PID %d since %s)",
 			existingMeta.PID,
@@ -145,20 +154,4 @@ func parseSupervisorLockMetadata(data []byte) (*SupervisorLockMetadata, error) {
 		return nil, fmt.Errorf("incomplete supervisor lock metadata")
 	}
 	return &meta, nil
-}
-
-// processAlive reports whether a PID is running, honoring an injected probe so
-// tests can simulate live and stale holders.
-func processAlive(d *tasks.Deps, pid int) bool {
-	if d != nil && d.ProcessAlive != nil {
-		return d.ProcessAlive(pid)
-	}
-	if pid <= 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
 }

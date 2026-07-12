@@ -9,7 +9,8 @@ import (
 )
 
 // lockDeps wires a tasks.Deps whose lock directory resolves under a temp XDG
-// data home, with an injectable process-liveness probe.
+// data home, with an injectable process-liveness probe and a deterministic
+// process-start token so liveness is exercised the same way on every platform.
 func lockDeps(t *testing.T, alive bool) *tasks.Deps {
 	t.Helper()
 	dir := t.TempDir()
@@ -27,6 +28,7 @@ func lockDeps(t *testing.T, alive bool) *tasks.Deps {
 		MkdirAllFunc: deps.NewRealFileSystem().MkdirAll,
 	}
 	d.ProcessAlive = func(pid int) bool { return alive }
+	d.ProcessStartToken = func(int) (string, bool) { return "start-token", true }
 	return d
 }
 
@@ -49,6 +51,36 @@ func TestAcquireSupervisorLockRefusesSecondLiveInstance(t *testing.T) {
 	}
 	if exitErr.Code != tasks.ExitOperational {
 		t.Fatalf("expected operational exit code, got %d", exitErr.Code)
+	}
+}
+
+func TestAcquireSupervisorLockTakesOverRecycledPID(t *testing.T) {
+	// The first holder writes a lock with start token A, then crashes leaving the
+	// file behind. The OS later hands the same PID to an unrelated process, so the
+	// PID reads alive but its start token differs. Bare-PID liveness would wrongly
+	// refuse; pairing PID with the start token detects the recycle and takes over.
+	d := lockDeps(t, true)
+	token := "start-A"
+	d.ProcessStartToken = func(int) (string, bool) { return token, true }
+
+	first, err := AcquireSupervisorLock(d)
+	if err != nil {
+		t.Fatalf("first acquire: %v", err)
+	}
+	// Do not release; simulate a crash that left the file behind.
+	_ = first
+
+	// PID recycled by a different process => same live PID, different start token.
+	token = "start-B"
+	second, err := AcquireSupervisorLock(d)
+	if err != nil {
+		t.Fatalf("expected recycled-PID lock to be taken over, got: %v", err)
+	}
+	if second == nil {
+		t.Fatal("expected a held lock after taking over a recycled-PID lock")
+	}
+	if err := second.Release(); err != nil {
+		t.Fatalf("release: %v", err)
 	}
 }
 

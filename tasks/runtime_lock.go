@@ -129,6 +129,23 @@ func procStartToken(d *Deps, pid int) (string, bool) {
 	return defaultProcStartToken(pid)
 }
 
+// ProcessStartTokenFor resolves the process-start token for pid through the
+// configured seam (or the platform default), reporting whether one could be
+// determined. Exported so lock owners outside this package (the supervisor
+// lock) record the same PID+start-token identity that drain rows use.
+func ProcessStartTokenFor(d *Deps, pid int) (string, bool) {
+	return procStartToken(d, pid)
+}
+
+// ProcessLiveWithToken reports whether the process that recorded a lock (or
+// Drain row) is still running, pairing PID liveness with the stored start token
+// to defeat PID reuse. Exported so the supervisor lock shares one liveness
+// standard with drains; see drainProcessAlive for the conservative-on-alive
+// contract when a token cannot be compared.
+func ProcessLiveWithToken(d *Deps, pid int, storedToken string) bool {
+	return drainProcessAlive(d, pid, storedToken)
+}
+
 // drainProcessAlive reports whether the process that owns a Drain is still
 // running, using PID liveness plus the recorded start token to defeat PID reuse.
 // It is conservative on the side of "alive": when no start token can be compared
