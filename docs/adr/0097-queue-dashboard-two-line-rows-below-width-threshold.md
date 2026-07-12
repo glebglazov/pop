@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0107
 ---
 
 # Queue dashboard switches all rows to two lines below a width threshold
