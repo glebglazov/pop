@@ -669,10 +669,12 @@ func TestVerifyResolvedSetRemediateFromNeedsHumanSpawnsTask(t *testing.T) {
 
 // TestVerifyResolvedSetRemediateOverCapSpawnsTask: a human-triggered remediation
 // spawns a task even when the set has already exhausted the auto remediation
-// depth cap (ADR-0103) — the human authorises the fix the auto path refuses.
+// depth cap (ADR-0103) — the human authorises the fix the auto path refuses. The
+// spawned task is human-origin, so the derived depth resets to zero and the auto
+// budget is re-enabled (ADR-0105): the human push does not itself count.
 func TestVerifyResolvedSetRemediateOverCapSpawnsTask(t *testing.T) {
-	// The set already carries DefaultMaxRemediationDepth remediation tasks: the
-	// auto FIXABLE-under-cap path would spawn nothing.
+	// The set already carries DefaultMaxRemediationDepth auto remediation tasks:
+	// the auto FIXABLE-under-cap path would spawn nothing.
 	d, defPath := setupVerifyFixtureTasks(t, stubGit("shaCap\n", "", ""), remediationSet(DefaultMaxRemediationDepth))
 
 	var out bytes.Buffer
@@ -689,11 +691,26 @@ func TestVerifyResolvedSetRemediateOverCapSpawnsTask(t *testing.T) {
 	if !reloaded.Valid {
 		t.Fatalf("reloaded manifest invalid: %v", reloaded.Errors)
 	}
-	if got := remediationDepth(reloaded); got != DefaultMaxRemediationDepth+1 {
-		t.Fatalf("remediation depth = %d, want %d (human push past the cap)", got, DefaultMaxRemediationDepth+1)
+	// A human remediation resets the auto budget: depth counts only consecutive
+	// auto-origin tasks since the last human one, so it drops to zero (ADR-0105).
+	if got := remediationDepth(reloaded); got != 0 {
+		t.Fatalf("remediation depth = %d, want 0 (human remediation resets the auto budget)", got)
 	}
-	// The new task is numbered one past the highest existing ordinal.
+	// The new task is numbered one past the highest existing ordinal and tagged
+	// human-origin.
 	nextID := fmt.Sprintf("%02d-remediation", DefaultMaxRemediationDepth+2)
+	var spawned *Task
+	for i := range reloaded.Tasks {
+		if reloaded.Tasks[i].ID == nextID {
+			spawned = &reloaded.Tasks[i]
+		}
+	}
+	if spawned == nil {
+		t.Fatalf("reloaded manifest missing spawned task %q", nextID)
+	}
+	if spawned.Origin != RemediationOriginHuman {
+		t.Fatalf("spawned task origin = %q, want human", spawned.Origin)
+	}
 	body, err := os.ReadFile(filepath.Join(defPath, "demo", nextID+".md"))
 	if err != nil {
 		t.Fatalf("read remediation body %q: %v", nextID, err)

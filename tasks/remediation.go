@@ -17,9 +17,27 @@ import (
 // .max_remediation_depth` overrides it.
 const DefaultMaxRemediationDepth = 3
 
-// remediationIDPattern matches a Verifier-produced Remediation task's id
-// (`NN-remediation`), so the set's remediation depth is the count of these.
+// remediationIDPattern matches a Remediation task's id (`NN-remediation`), so
+// the set's remediation depth is derived from these entries.
 var remediationIDPattern = regexp.MustCompile(`^\d+-remediation$`)
+
+// Remediation origins (ADR-0105) tag a Remediation task's provenance so depth
+// counts only the unattended run. Auto = Verifier-spawned on FIXABLE, human =
+// spawned via the Remediate disposition.
+const (
+	RemediationOriginAuto  = "auto"
+	RemediationOriginHuman = "human"
+)
+
+// remediationOrigin reads a task's remediation origin, defaulting an absent or
+// empty origin to auto (ADR-0105) so legacy Remediation entries written before
+// origins existed keep their prior depth-cap contribution.
+func remediationOrigin(t Task) string {
+	if t.Origin == RemediationOriginHuman {
+		return RemediationOriginHuman
+	}
+	return RemediationOriginAuto
+}
 
 // taskNumberPattern extracts the leading zero-padded ordinal from a task id or
 // file (`07-foo` → 7), so the next Remediation task takes the next number.
@@ -34,17 +52,25 @@ func maxRemediationDepth(cfg *config.Config) int {
 	return DefaultMaxRemediationDepth
 }
 
-// remediationDepth counts the Remediation tasks already in the set — the number
-// of verify→remediate cycles it has undergone (ADR-0086). Each FIXABLE verdict
-// under the cap appends exactly one such task, so this count is the loop's
-// bound; it reads straight off the manifest, needing no separate counter.
+// remediationDepth is the count of consecutive auto-origin Remediation tasks
+// since the most recent human-origin one (ADR-0105) — the unattended loop's
+// bound. A human remediation resets the count to zero: human intervention is a
+// fresh grant of trust, so it re-enables the auto budget rather than consuming
+// it. Derived straight off the manifest in order, needing no stored counter
+// (the same idiom as crash backoff from drain history). Legacy entries without
+// an origin read as auto, so pre-ADR-0105 sets keep their prior cap behavior.
 func remediationDepth(m *Manifest) int {
 	if m == nil {
 		return 0
 	}
 	n := 0
 	for _, t := range m.Tasks {
-		if remediationIDPattern.MatchString(t.ID) {
+		if !remediationIDPattern.MatchString(t.ID) {
+			continue
+		}
+		if remediationOrigin(t) == RemediationOriginHuman {
+			n = 0
+		} else {
 			n++
 		}
 	}
@@ -154,8 +180,8 @@ func neutralizeACHeaders(findings string) string {
 // human's rationale is carried into the task body alongside the findings and the
 // framing reflects that a human authorised the fix (the auto FIXABLE path passes
 // an empty note).
-func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings, humanNote string) (string, error) {
-	id, err := writeRemediationTask(d, m, workSHA, findings, humanNote)
+func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings, humanNote, origin string) (string, error) {
+	id, err := writeRemediationTask(d, m, workSHA, findings, humanNote, origin)
 	if err != nil {
 		return "", err
 	}
@@ -170,7 +196,7 @@ func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings, humanNo
 // half of spawning — the caller invalidates the set's cached verdicts. The human
 // out-of-band Remediate path (ADR-0104) drives this directly so the manifest
 // append and the verdict invalidation ride one quiescence-gated transaction.
-func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote string) (string, error) {
+func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote, origin string) (string, error) {
 	if m == nil {
 		return "", exitErr(ExitOperational, "spawn remediation task: nil manifest")
 	}
@@ -190,6 +216,7 @@ func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote str
 		Type:      "AFK",
 		Status:    "open",
 		BlockedBy: []string{},
+		Origin:    origin,
 	})
 	if err := WriteManifestAtomic(d, m); err != nil {
 		// Roll the orphan markdown back so markdown and index.json stay in sync.
@@ -210,7 +237,7 @@ func spawnRemediationIfUnderCap(d *Deps, m *Manifest, repo, workSHA, findings st
 	if remediationDepth(m) >= maxDepth {
 		return false, "", nil
 	}
-	id, err = spawnRemediationTask(d, m, repo, workSHA, findings, "")
+	id, err = spawnRemediationTask(d, m, repo, workSHA, findings, "", RemediationOriginAuto)
 	if err != nil {
 		return false, "", err
 	}

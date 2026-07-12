@@ -33,6 +33,12 @@ type Task struct {
 	// present so legacy manifests keep their previous invocation shape.
 	Effort         string `json:"-"`
 	EffortExplicit bool   `json:"-"`
+	// Origin tags a Remediation task's provenance (ADR-0105): auto = Verifier
+	// spawned on FIXABLE, human = spawned via the Remediate disposition. Empty on
+	// non-remediation tasks and on legacy Remediation entries; an absent origin
+	// reads as auto so old sets keep their prior depth-cap behavior. It rides
+	// through as `origin`, omitted when empty so unrelated rewrites stay quiet.
+	Origin string `json:"-"`
 }
 
 type taskJSON struct {
@@ -44,6 +50,7 @@ type taskJSON struct {
 	BlockedBy   []string `json:"blocked_by"`
 	FailedAfter *int     `json:"failed_after,omitempty"`
 	Effort      *string  `json:"effort,omitempty"`
+	Origin      string   `json:"origin,omitempty"`
 }
 
 // UnmarshalJSON preserves the difference between an absent effort key and an
@@ -60,6 +67,7 @@ func (t *Task) UnmarshalJSON(data []byte) error {
 	t.Status = raw.Status
 	t.BlockedBy = raw.BlockedBy
 	t.FailedAfter = raw.FailedAfter
+	t.Origin = raw.Origin
 	t.Effort = DefaultTaskEffort
 	t.EffortExplicit = false
 	if raw.Effort != nil {
@@ -80,6 +88,7 @@ func (t Task) MarshalJSON() ([]byte, error) {
 		Status:      t.Status,
 		BlockedBy:   t.BlockedBy,
 		FailedAfter: t.FailedAfter,
+		Origin:      t.Origin,
 	}
 	if t.EffortExplicit || (t.Effort != "" && t.Effort != DefaultTaskEffort) {
 		effort := t.Effort

@@ -286,7 +286,7 @@ func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA 
 	var id string
 	if err := mutateWithCheckoutQuiescence(d, s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
 		var werr error
-		if id, werr = writeRemediationTask(d, m, workSHA, findings, note); werr != nil {
+		if id, werr = writeRemediationTask(d, m, workSHA, findings, note, RemediationOriginHuman); werr != nil {
 			return werr
 		}
 		return store.InvalidateVerifyVerdictsExec(ctx, ex, opts.Repo, m.Stem)

@@ -32,6 +32,41 @@ func TestRemediationDepth(t *testing.T) {
 	}
 }
 
+// remediationTask builds a Remediation manifest entry at ordinal n with the
+// given origin, for exercising the origin-aware depth derivation.
+func remediationTask(n int, origin string) Task {
+	id := fmt.Sprintf("%02d-remediation", n)
+	return Task{ID: id, File: id + ".md", Title: "Remediation", Type: "AFK", Status: "done", Origin: origin}
+}
+
+// TestRemediationDepthCountsAutoSinceLastHuman: depth is the count of
+// consecutive auto-origin Remediation tasks after the most recent human-origin
+// one (ADR-0105) — a human remediation resets the auto budget, and legacy
+// entries with no origin read as auto.
+func TestRemediationDepthCountsAutoSinceLastHuman(t *testing.T) {
+	base := Task{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"}
+	a, h := RemediationOriginAuto, RemediationOriginHuman
+	cases := []struct {
+		name  string
+		tasks []Task
+		want  int
+	}{
+		{"all auto at cap", []Task{base, remediationTask(2, a), remediationTask(3, a), remediationTask(4, a)}, 3},
+		{"human reset mid-sequence", []Task{base, remediationTask(2, a), remediationTask(3, a), remediationTask(4, h), remediationTask(5, a)}, 1},
+		{"trailing human is depth zero", []Task{base, remediationTask(2, a), remediationTask(3, a), remediationTask(4, h)}, 0},
+		{"legacy entries without origin count as auto", []Task{base, remediationTask(2, ""), remediationTask(3, "")}, 2},
+		{"human then auto burst", []Task{base, remediationTask(2, h), remediationTask(3, a), remediationTask(4, a)}, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Manifest{Tasks: tc.tasks}
+			if got := remediationDepth(m); got != tc.want {
+				t.Fatalf("remediationDepth() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNextTaskNumber(t *testing.T) {
 	_, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
@@ -49,7 +84,7 @@ func TestNextTaskNumber(t *testing.T) {
 func TestSpawnRemediationTaskWritesMarkdownAndIndex(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 
-	id, err := spawnRemediationTask(d, m, "", "deadbeefcafe", "criterion 2 unmet: the widget never renders", "")
+	id, err := spawnRemediationTask(d, m, "", "deadbeefcafe", "criterion 2 unmet: the widget never renders", "", RemediationOriginAuto)
 	if err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
@@ -101,7 +136,7 @@ func TestSpawnRemediationTaskFindingsNotWrittenIntoOtherSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := spawnRemediationTask(d, m, "", "sha1", "some finding", ""); err != nil {
+	if _, err := spawnRemediationTask(d, m, "", "sha1", "some finding", "", RemediationOriginAuto); err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
 	after, err := os.ReadFile(filepath.Join(m.Dir, "01-a.md"))
@@ -119,7 +154,7 @@ func TestSpawnRemediationTaskFindingsNotWrittenIntoOtherSpecs(t *testing.T) {
 func TestSpawnRemediationTaskFindingsWithACHeaderStaysValid(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 	findings := "The set does not meet:\n## Acceptance criteria\n- the second box is unchecked"
-	if _, err := spawnRemediationTask(d, m, "", "sha1", findings, ""); err != nil {
+	if _, err := spawnRemediationTask(d, m, "", "sha1", findings, "", RemediationOriginAuto); err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
 	reloaded := LoadManifest(d, "demo", m.Path)
@@ -185,6 +220,64 @@ func TestSpawnRemediationCapZeroNeverSpawns(t *testing.T) {
 	}
 	if spawned || remediationDepth(m) != 0 {
 		t.Fatalf("cap 0 spawned=%v depth=%d, want false/0", spawned, remediationDepth(m))
+	}
+}
+
+// TestHumanRemediationReenablesAutoBudget: once the auto-origin remediations
+// reach the cap the Verifier refuses to spawn (spawned=false), but a
+// human-origin Remediation resets the derived depth to zero, so the next
+// FIXABLE verdict spawns again under a fresh budget (ADR-0105).
+func TestHumanRemediationReenablesAutoBudget(t *testing.T) {
+	set := []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+		remediationTask(2, RemediationOriginAuto),
+		remediationTask(3, RemediationOriginAuto),
+	}
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), set, nil)
+
+	const cap = 2
+	// Auto budget exhausted: at the cap the Verifier spawns nothing.
+	spawned, _, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "still failing", cap)
+	if err != nil {
+		t.Fatalf("capped spawn err = %v", err)
+	}
+	if spawned {
+		t.Fatal("auto spawn at cap returned spawned=true; want refusal")
+	}
+
+	// A human Remediate authorises a fix, resetting the auto budget.
+	if _, err := writeRemediationTask(d, m, "sha1", "finding", "please fix", RemediationOriginHuman); err != nil {
+		t.Fatalf("human writeRemediationTask: %v", err)
+	}
+	if got := remediationDepth(m); got != 0 {
+		t.Fatalf("depth after human remediation = %d, want 0 (auto budget reset)", got)
+	}
+
+	// Fresh budget: the next FIXABLE spawns an auto task again.
+	spawned, id, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "new finding", cap)
+	if err != nil || !spawned {
+		t.Fatalf("post-reset spawn: spawned=%v err=%v, want true/nil", spawned, err)
+	}
+	if got := remediationDepth(m); got != 1 {
+		t.Fatalf("depth after post-reset auto spawn = %d, want 1", got)
+	}
+
+	// The reloaded manifest is valid and records the origins verbatim.
+	reloaded := LoadManifest(d, "demo", m.Path)
+	if !reloaded.Valid {
+		t.Fatalf("reloaded manifest invalid: %v", reloaded.Errors)
+	}
+	origins := map[string]string{}
+	for _, tk := range reloaded.Tasks {
+		if remediationIDPattern.MatchString(tk.ID) {
+			origins[tk.ID] = tk.Origin
+		}
+	}
+	if origins[id] != RemediationOriginAuto {
+		t.Fatalf("post-reset task %q origin = %q, want auto", id, origins[id])
+	}
+	if origins["04-remediation"] != RemediationOriginHuman {
+		t.Fatalf("human task origin = %q, want human", origins["04-remediation"])
 	}
 }
 
