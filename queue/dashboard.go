@@ -1233,7 +1233,6 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 const (
 	dashboardColProject = iota
 	dashboardColSetID
-	dashboardColFlags
 	dashboardColStatus
 	dashboardColWorktree
 	dashboardColDrain
@@ -1242,7 +1241,7 @@ const (
 const dashboardColSep = 2
 
 // dashboardColShrinkOrder lists elastic columns in shrink priority: WORKTREE and
-// DRAIN give way first; FLAGS is intentionally absent and never shrinks.
+// DRAIN give way first.
 var dashboardColShrinkOrder = []int{
 	dashboardColDrain,
 	dashboardColWorktree,
@@ -1253,20 +1252,7 @@ var dashboardColShrinkOrder = []int{
 
 // dashboardTableHeaders is the fixed column header row.
 func dashboardTableHeaders() []string {
-	return []string{"PROJECT", "TASK SET", "FLAGS", "STATUS", "WORKTREE", "DRAIN"}
-}
-
-// dashboardRowFlags renders compact, protected queue flags for the FLAGS column:
-// AD (auto-drain) and OR (orphaned).
-func dashboardRowFlags(row DashboardRow) string {
-	var flags []string
-	if row.AutoDrain {
-		flags = append(flags, "AD")
-	}
-	if row.Orphaned {
-		flags = append(flags, "OR")
-	}
-	return strings.Join(flags, " ")
+	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", "DRAIN"}
 }
 
 // dashboardColumnWidths precomputes each column's natural width over the full row
@@ -1299,8 +1285,8 @@ func dashboardTableLineWidth(widths []int) int {
 }
 
 // dashboardFitColumnWidths shrinks elastic columns until the table fits budget.
-// FLAGS is protected; when budget is still exceeded after shrinking, cells are
-// truncated at render time via padDashboardCell.
+// When budget is still exceeded after shrinking, cells are truncated at render
+// time via padDashboardCell.
 func dashboardFitColumnWidths(natural []int, budget int) []int {
 	if budget <= 0 || len(natural) == 0 {
 		return append([]int(nil), natural...)
@@ -3443,7 +3429,6 @@ func dashboardRowValues(row DashboardRow) []string {
 	return []string{
 		row.Project,
 		row.SetID,
-		dashboardRowFlags(row),
 		row.Status,
 		renderDashboardDest(row.destKind, row.Worktree),
 		row.Drain,

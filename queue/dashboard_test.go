@@ -462,11 +462,11 @@ func TestDashboardOrphanedIndicator(t *testing.T) {
 	if byID["unbound"].Orphaned {
 		t.Fatalf("unbound set should not be orphaned: %+v", byID["unbound"])
 	}
-	// The orphaned set must render its indicator; the present/unbound sets must not.
+	// The orphaned set must render its status suffix; the present/unbound sets must not.
 	var rendered strings.Builder
 	renderDashboardTable(&rendered, []DashboardRow{byID["missing"]}, 0, 120)
-	if !strings.Contains(rendered.String(), " OR ") {
-		t.Fatalf("orphaned flag missing from row render:\n%s", rendered.String())
+	if !strings.Contains(rendered.String(), "· orphaned") {
+		t.Fatalf("orphaned suffix missing from row render:\n%s", rendered.String())
 	}
 }
 
@@ -1027,7 +1027,7 @@ func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	if !strings.Contains(view, "Queue · 2 task sets · 1 ready · 1 running · 1 auto-drain") {
 		t.Fatalf("task-set list should render useful summary:\n%s", view)
 	}
-	for _, want := range []string{"PROJECT  TASK SET  FLAGS  STATUS", "-------  --------  -----  ------"} {
+	for _, want := range []string{"PROJECT  TASK SET  STATUS", "-------  --------  ------"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
@@ -1064,12 +1064,14 @@ func TestDashboardTableClampsToBodyHeight(t *testing.T) {
 }
 
 func TestDashboardTableFitsTerminalWidth(t *testing.T) {
-	// Wide row content on a narrow pane must not spill horizontally. Compact
-	// FLAGS (AD/OR) stay visible in single-line mode; two-line mode drops the
-	// FLAGS column entirely.
+	// Wide row content on a narrow pane must not spill horizontally. Auto-drain
+	// and orphaned suffixes ride inside STATUS now that FLAGS is gone, so a
+	// pane tight enough to shrink STATUS may truncate them — this test only
+	// asserts the table never spills past termW; suffix visibility at
+	// generous widths is covered by TestDashboardStatusSuffixesRender.
 	row := DashboardRow{
 		Project:   "very-long-project-name-here",
-		Status:    "AWAITING-APPROVAL · verified @ abcdef123456",
+		Status:    "AWAITING-APPROVAL · verified @ abcdef123456 · auto-drain · orphaned",
 		Worktree:  "feature/super-long-branch-name-for-testing",
 		Drain:     "config error: no trunk worktree configured",
 		cursorKey: "pop\x00set1",
@@ -1085,11 +1087,6 @@ func TestDashboardTableFitsTerminalWidth(t *testing.T) {
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: termW, Height: 20})
 			m = updated.(QueueDashboard)
 			view := m.View().Content
-			if !dashboardTwoLineMode(m.snap.Rows, m.width) {
-				if !strings.Contains(view, "AD") || !strings.Contains(view, "OR") {
-					t.Fatalf("missing compact flags in single-line view:\n%s", view)
-				}
-			}
 			for _, line := range dashboardTestTableLines(view) {
 				if got := lipgloss.Width(line); got > termW {
 					t.Fatalf("table line width %d exceeds terminal width %d:\n%q", got, termW, line)
@@ -1099,12 +1096,9 @@ func TestDashboardTableFitsTerminalWidth(t *testing.T) {
 	}
 }
 
-func TestDashboardFitColumnWidthsProtectsFlags(t *testing.T) {
-	natural := []int{20, 30, 5, 40, 25, 35} // PROJECT … DRAIN; FLAGS width 5 ("AD OR")
+func TestDashboardFitColumnWidths(t *testing.T) {
+	natural := []int{20, 30, 40, 25, 35} // PROJECT, TASK SET, STATUS, WORKTREE, DRAIN
 	fitted := dashboardFitColumnWidths(natural, 50)
-	if fitted[dashboardColFlags] != 5 {
-		t.Fatalf("FLAGS width = %d, want 5 (protected)", fitted[dashboardColFlags])
-	}
 	if dashboardTableLineWidth(fitted) > 50 {
 		t.Fatalf("fitted line width %d exceeds budget 50: %v", dashboardTableLineWidth(fitted), fitted)
 	}
@@ -1114,7 +1108,7 @@ func dashboardTestTableLines(view string) []string {
 	var lines []string
 	inTable := false
 	for _, line := range strings.Split(view, "\n") {
-		singleHeader := strings.Contains(line, "PROJECT") && strings.Contains(line, "FLAGS")
+		singleHeader := strings.Contains(line, "PROJECT") && strings.Contains(line, "STATUS")
 		twoLineHeader := strings.Contains(line, "TASK SET") && strings.Contains(line, "WORKTREE")
 		if singleHeader || twoLineHeader {
 			inTable = true
@@ -1251,7 +1245,7 @@ func TestDashboardTwoLineSingleLineLayoutUnchanged(t *testing.T) {
 		t.Fatalf("wide terminal with short ids should not activate two-line mode")
 	}
 	view := m.View().Content
-	for _, want := range []string{"PROJECT  TASK SET  FLAGS  STATUS", "pop      set1"} {
+	for _, want := range []string{"PROJECT  TASK SET  STATUS", "pop      set1"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("single-line layout missing %q:\n%s", want, view)
 		}
@@ -3883,8 +3877,8 @@ func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
 		t.Fatalf("view line count = %d, want %d (clamped to terminal height):\n%s", got, want, view)
 	}
 
-	// The line-1 header labels the identity, WORKTREE and DRAIN columns and
-	// omits FLAGS; the line-2 header labels STATUS.
+	// The line-1 header labels the identity, WORKTREE and DRAIN columns; the
+	// line-2 header labels STATUS.
 	headerIdx := dashboardTestLineIndex(lines, "TASK SET")
 	if headerIdx < 0 {
 		t.Fatalf("two-line header missing TASK SET:\n%s", view)
@@ -3894,9 +3888,6 @@ func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
 		if !strings.Contains(header, want) {
 			t.Fatalf("two-line line-1 header missing %q:\n%s", want, view)
 		}
-	}
-	if strings.Contains(header, "FLAGS") {
-		t.Fatalf("two-line header must not contain FLAGS:\n%s", view)
 	}
 	if !strings.Contains(lines[headerIdx+1], "STATUS") {
 		t.Fatalf("two-line line-2 header missing STATUS:\n%s", view)
@@ -4308,7 +4299,7 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 
 	// Both render modes read the same precomputed status; widths are wide enough
 	// that no truncation clips the suffixes.
-	widths := []int{20, 20, 8, 60, 20, 20}
+	widths := []int{20, 20, 60, 20, 20}
 	single := dashboardTableLine(dashboardRowValues(byID["both"]), widths)
 	if !strings.Contains(single, "· auto-drain · orphaned") {
 		t.Fatalf("single-line render missing suffixes:\n%s", single)
