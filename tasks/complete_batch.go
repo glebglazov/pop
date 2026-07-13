@@ -155,26 +155,20 @@ func CompleteTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		return nil, exitErr(ExitNoRunnable, "%v", err)
 	}
 
-	// Append progress records first, then one manifest write — matching the
-	// single-task ordering so a crash leaves a recoverable trail.
+	// Build one transition op per selected task in blocked_by order and route the
+	// whole batch through the Task-transition chokepoint as Human — one atomic
+	// manifest write plus one COMPLETE progress record per task.
+	ops := make([]TransitionOp, 0, len(order))
 	transitions := make([]CompleteTransition, 0, len(order))
 	for _, id := range order {
 		idx := indexByID[id]
 		task := m.Tasks[idx]
 		summary := fmt.Sprintf("manually completed %s/%s (was %s)", taskSetID, task.ID, task.Status)
-		if err := AppendProgress(d, m.Dir, task.File, "COMPLETE", summary); err != nil {
-			return nil, manualRepairErr(err)
-		}
+		ops = append(ops, TransitionOp{TaskID: task.ID, To: TaskDone, Actor: ActorHuman, Marker: "COMPLETE", Summary: summary})
 		transitions = append(transitions, CompleteTransition{TaskID: task.ID, File: task.File, Prior: task.Status})
 	}
-
-	for _, id := range order {
-		idx := indexByID[id]
-		m.Tasks[idx].Status = "done"
-		m.Tasks[idx].FailedAfter = nil
-	}
-	if err := WriteManifestAtomic(d, m); err != nil {
-		return nil, manualRepairErr(fmt.Errorf("update manifest after complete progress: %w", err))
+	if err := ApplyTransitions(d, m, ops); err != nil {
+		return nil, err
 	}
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)

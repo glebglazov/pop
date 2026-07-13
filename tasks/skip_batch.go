@@ -100,28 +100,22 @@ func SkipTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 		selected[id] = true
 	}
 
-	// Append progress records first, then one manifest write — matching the
-	// single-task ordering so a crash leaves a recoverable trail. Apply in
-	// manifest order; each skip transition is independent.
+	// Build one transition op per selected task in manifest order (each skip is
+	// independent) and route the whole batch through the Task-transition
+	// chokepoint as Human — one atomic manifest write plus one SKIP progress
+	// record per task.
+	ops := make([]TransitionOp, 0, len(selected))
 	transitions := make([]SkipTransition, 0, len(selected))
 	for _, task := range m.Tasks {
 		if !selected[task.ID] {
 			continue
 		}
 		summary := fmt.Sprintf("skipped %s/%s (was %s)", taskSetID, task.ID, task.Status)
-		if err := AppendProgress(d, m.Dir, task.File, "SKIP", summary); err != nil {
-			return nil, manualRepairErr(err)
-		}
+		ops = append(ops, TransitionOp{TaskID: task.ID, To: TaskSkipped, Actor: ActorHuman, Marker: "SKIP", Summary: summary})
 		transitions = append(transitions, SkipTransition{TaskID: task.ID, File: task.File, Prior: task.Status})
 	}
-
-	for id := range selected {
-		idx := indexByID[id]
-		m.Tasks[idx].Status = "skipped"
-		m.Tasks[idx].FailedAfter = nil
-	}
-	if err := WriteManifestAtomic(d, m); err != nil {
-		return nil, manualRepairErr(fmt.Errorf("update manifest after skip progress: %w", err))
+	if err := ApplyTransitions(d, m, ops); err != nil {
+		return nil, err
 	}
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)

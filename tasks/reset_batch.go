@@ -97,28 +97,22 @@ func OpenTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 		selected[id] = true
 	}
 
-	// Append progress records first, then one manifest write — matching the
-	// single-task ordering so a crash leaves a recoverable trail. Apply in
-	// manifest order; each open transition is independent.
+	// Build one transition op per selected task in manifest order (each reopen is
+	// independent) and route the whole batch through the Task-transition
+	// chokepoint as Human — one atomic manifest write plus one RESET progress
+	// record per task.
+	ops := make([]TransitionOp, 0, len(selected))
 	transitions := make([]OpenTransition, 0, len(selected))
 	for _, task := range m.Tasks {
 		if !selected[task.ID] {
 			continue
 		}
 		summary := fmt.Sprintf("reset %s/%s to open (was %s)", taskSetID, task.ID, task.Status)
-		if err := AppendProgress(d, m.Dir, task.File, "RESET", summary); err != nil {
-			return nil, manualRepairErr(err)
-		}
+		ops = append(ops, TransitionOp{TaskID: task.ID, To: TaskOpen, Actor: ActorHuman, Marker: "RESET", Summary: summary})
 		transitions = append(transitions, OpenTransition{TaskID: task.ID, File: task.File, Prior: task.Status})
 	}
-
-	for id := range selected {
-		idx := indexByID[id]
-		m.Tasks[idx].Status = "open"
-		m.Tasks[idx].FailedAfter = nil
-	}
-	if err := WriteManifestAtomic(d, m); err != nil {
-		return nil, manualRepairErr(fmt.Errorf("update manifest after open progress: %w", err))
+	if err := ApplyTransitions(d, m, ops); err != nil {
+		return nil, err
 	}
 	// Leaving the terminal zone ends the verification episode: drop any cached
 	// verdict so the set must re-verify after the batch reopen (ADR-0096).
