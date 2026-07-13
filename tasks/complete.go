@@ -83,14 +83,16 @@ func CompleteTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*confi
 
 	priorStatus := task.Status
 	summary := fmt.Sprintf("manually completed %s/%s (was %s)", taskSetID, taskID, priorStatus)
-	if err := AppendProgress(d, m.Dir, task.File, "COMPLETE", summary); err != nil {
-		return nil, manualRepairErr(err)
-	}
-
-	m.Tasks[idx].Status = "done"
-	m.Tasks[idx].FailedAfter = nil
-	if err := WriteManifestAtomic(d, m); err != nil {
-		return nil, manualRepairErr(fmt.Errorf("update manifest after complete progress: %w", err))
+	// Route the status write through the Task-transition chokepoint as Human;
+	// the verb keeps its own already-done and blocked-by preconditions above.
+	if err := ApplyTransitions(d, m, []TransitionOp{{
+		TaskID:  taskID,
+		To:      TaskDone,
+		Actor:   ActorHuman,
+		Marker:  "COMPLETE",
+		Summary: summary,
+	}}); err != nil {
+		return nil, err
 	}
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
