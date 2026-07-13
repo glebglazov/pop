@@ -72,7 +72,7 @@ func printFailedStopAdvice(w io.Writer, stem string, m *Manifest) {
 	}
 	var failed []Task
 	for _, task := range m.Tasks {
-		if task.Status == "failed" {
+		if task.Status == TaskFailed {
 			failed = append(failed, task)
 		}
 	}

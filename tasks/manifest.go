@@ -11,7 +11,7 @@ import (
 
 var (
 	allowedTaskTypes    = map[string]bool{"AFK": true, "HITL": true}
-	allowedTaskStatuses = map[string]bool{"open": true, "done": true, "failed": true, "skipped": true}
+	allowedTaskStatuses = map[TaskStatus]bool{TaskOpen: true, TaskDone: true, TaskFailed: true, TaskSkipped: true}
 	allowedTaskEfforts  = map[string]bool{"light": true, "standard": true, "heavy": true}
 	acHeaderPattern     = regexp.MustCompile(`(?i)^##\s+Acceptance criteria\s*$`)
 	checkboxPattern     = regexp.MustCompile(`^-\s+\[[ xX]\]`)
@@ -21,13 +21,13 @@ const DefaultTaskEffort = "standard"
 
 // Task represents one entry in an task manifest.
 type Task struct {
-	ID          string   `json:"id"`
-	File        string   `json:"file"`
-	Title       string   `json:"title"`
-	Type        string   `json:"type"`
-	Status      string   `json:"status"`
-	BlockedBy   []string `json:"blocked_by"`
-	FailedAfter *int     `json:"failed_after,omitempty"`
+	ID          string     `json:"id"`
+	File        string     `json:"file"`
+	Title       string     `json:"title"`
+	Type        string     `json:"type"`
+	Status      TaskStatus `json:"status"`
+	BlockedBy   []string   `json:"blocked_by"`
+	FailedAfter *int       `json:"failed_after,omitempty"`
 	// Effort selects the model-strength tier for this task. Missing manifests
 	// resolve to DefaultTaskEffort; EffortExplicit records whether the key was
 	// present so legacy manifests keep their previous invocation shape.
@@ -42,15 +42,15 @@ type Task struct {
 }
 
 type taskJSON struct {
-	ID          string   `json:"id"`
-	File        string   `json:"file"`
-	Title       string   `json:"title"`
-	Type        string   `json:"type"`
-	Status      string   `json:"status"`
-	BlockedBy   []string `json:"blocked_by"`
-	FailedAfter *int     `json:"failed_after,omitempty"`
-	Effort      *string  `json:"effort,omitempty"`
-	Origin      string   `json:"origin,omitempty"`
+	ID          string     `json:"id"`
+	File        string     `json:"file"`
+	Title       string     `json:"title"`
+	Type        string     `json:"type"`
+	Status      TaskStatus `json:"status"`
+	BlockedBy   []string   `json:"blocked_by"`
+	FailedAfter *int       `json:"failed_after,omitempty"`
+	Effort      *string    `json:"effort,omitempty"`
+	Origin      string     `json:"origin,omitempty"`
 }
 
 // UnmarshalJSON preserves the difference between an absent effort key and an

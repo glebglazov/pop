@@ -35,7 +35,7 @@ type OpenTasksOptions struct {
 type OpenTransition struct {
 	TaskID string
 	File   string
-	Prior  string
+	Prior  TaskStatus
 }
 
 // OpenTasksResult is the outcome of a whole-set batch reopen.

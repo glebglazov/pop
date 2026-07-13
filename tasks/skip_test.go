@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func taskStatus(t *testing.T, env *execFixture, taskID string) string {
+func taskStatus(t *testing.T, env *execFixture, taskID string) TaskStatus {
 	t.Helper()
 	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
 	for _, task := range m.Tasks {

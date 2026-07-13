@@ -102,7 +102,7 @@ func ApplyTransitions(d *Deps, m *Manifest, projectPath string, ops []Transition
 			return fmt.Errorf("apply transitions: unknown task %q", op.TaskID)
 		}
 		idxs[i] = idx
-		from := TaskStatus(m.Tasks[idx].Status)
+		from := m.Tasks[idx].Status
 		if !legalTransitions[transitionEdge{From: from, To: op.To, Actor: op.Actor}] {
 			return fmt.Errorf("illegal task transition %s→%s by %s (task %q)", from, op.To, op.Actor, op.TaskID)
 		}
@@ -120,7 +120,7 @@ func ApplyTransitions(d *Deps, m *Manifest, projectPath string, ops []Transition
 	// Apply status + attempt bookkeeping, then one atomic manifest write.
 	for i, op := range ops {
 		idx := idxs[i]
-		m.Tasks[idx].Status = string(op.To)
+		m.Tasks[idx].Status = op.To
 		if op.To == TaskFailed {
 			count := op.AttemptCount
 			m.Tasks[idx].FailedAfter = &count

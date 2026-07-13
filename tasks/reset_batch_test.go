@@ -9,7 +9,7 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 )
 
-func assertOpenTaskStatus(t *testing.T, env *execFixture, taskID, want string) {
+func assertOpenTaskStatus(t *testing.T, env *execFixture, taskID string, want TaskStatus) {
 	t.Helper()
 	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
 	for _, task := range m.Tasks {

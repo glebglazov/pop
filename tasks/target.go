@@ -206,7 +206,7 @@ func taskTargetCompletions(refresh *RefreshResult, toComplete string, omitDone b
 		prefix := head + "/"
 		var out []string
 		for _, task := range m.Tasks {
-			if omitDone && task.Status == "done" {
+			if omitDone && task.Status == TaskDone {
 				continue
 			}
 			candidate := prefix + task.File

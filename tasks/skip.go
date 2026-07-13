@@ -69,7 +69,7 @@ func SkipTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	}
 
 	task := m.Tasks[idx]
-	if task.Status != "open" {
+	if task.Status != TaskOpen {
 		return nil, exitErr(ExitNoRunnable, "task %q is %s; skip requires an open task", taskID, task.Status)
 	}
 

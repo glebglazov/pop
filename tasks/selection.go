@@ -8,7 +8,7 @@ type SelectionRow struct {
 	TaskID     string
 	File       string
 	Title      string
-	Status     string
+	Status     TaskStatus
 	Locked     bool
 	LockedMark string
 }
@@ -38,7 +38,7 @@ func afkOrdinal(m *Manifest, taskID string) (pos, total int) {
 // returning whether the row is locked and the glyph to render for a locked row.
 // This is the per-verb policy that drives the three-way row split (checkable /
 // locked-at-target / inert) on top of the shared multi-select component.
-type EligibilityFunc func(status string) (locked bool, lockedMark string)
+type EligibilityFunc func(status TaskStatus) (locked bool, lockedMark string)
 
 // BuildSelection lists every task in manifest order, classifying each row with
 // the verb's eligibility predicate. Returns nil for a nil manifest.
@@ -63,8 +63,8 @@ func BuildSelection(m *Manifest, eligible EligibilityFunc) []SelectionRow {
 
 // completeEligibility is the per-verb predicate for `complete`: Done tasks are
 // locked (already at the target), every other status is checkable.
-func completeEligibility(status string) (bool, string) {
-	if status == "done" {
+func completeEligibility(status TaskStatus) (bool, string) {
+	if status == TaskDone {
 		return true, "✓"
 	}
 	return false, ""
@@ -74,11 +74,11 @@ func completeEligibility(status string) (bool, string) {
 // checkable, an already-Skipped task is locked at-target (✓ — already in the
 // target state), and Done/Failed tasks are inert locked context that cannot be
 // skipped (·).
-func skipEligibility(status string) (bool, string) {
+func skipEligibility(status TaskStatus) (bool, string) {
 	switch status {
-	case "open":
+	case TaskOpen:
 		return false, ""
-	case "skipped":
+	case TaskSkipped:
 		return true, "✓"
 	default:
 		return true, "·"
@@ -90,14 +90,14 @@ func skipEligibility(status string) (bool, string) {
 // retries, done is undoing a completion (ADR-0053). Only an already-open task
 // cannot. This is the single source of truth shared by the single-task, batch,
 // picker, and queue-dashboard open paths.
-func CanReopen(status string) bool {
-	return status != "open"
+func CanReopen(status TaskStatus) bool {
+	return status != TaskOpen
 }
 
 // openEligibility is the per-verb predicate for `open`: every CanReopen status
 // is checkable (no row pre-checked; the human selects each), and an already-Open
 // task is locked at-target (✓ — already in the target state).
-func openEligibility(status string) (bool, string) {
+func openEligibility(status TaskStatus) (bool, string) {
 	if !CanReopen(status) {
 		return true, "✓"
 	}

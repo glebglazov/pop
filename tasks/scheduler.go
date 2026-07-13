@@ -237,11 +237,11 @@ func selectExplicitTask(taskSetID string, m *Manifest, taskID string) (*Selectio
 
 	task := m.Tasks[idx]
 	switch task.Status {
-	case "done":
+	case TaskDone:
 		return nil, exitErr(ExitNoRunnable, "task %q is already done", taskID)
-	case "failed":
+	case TaskFailed:
 		return nil, exitErr(ExitNoRunnable, "task %q failed; reset required", taskID)
-	case "skipped":
+	case TaskSkipped:
 		return nil, exitErr(ExitNoRunnable, "task %q is skipped", taskID)
 	}
 	if task.Type == "HITL" {

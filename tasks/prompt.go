@@ -252,7 +252,7 @@ func completedAFKProgress(d *Deps, m *Manifest) []completedAFKProgressItem {
 	latest := make(map[string]completedAFKProgressItem)
 	for _, record := range parseProgressRecords(string(data)) {
 		task, ok := tasksByFile[record.File]
-		if !ok || task.Type != "AFK" || task.Status != "done" {
+		if !ok || task.Type != "AFK" || task.Status != TaskDone {
 			continue
 		}
 		if record.Outcome != "DONE" && record.Outcome != "COMPLETE" {

@@ -214,7 +214,7 @@ func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote, or
 		File:      file,
 		Title:     fmt.Sprintf("Remediation %d: resolve verification findings", cycle),
 		Type:      "AFK",
-		Status:    "open",
+		Status:    TaskOpen,
 		BlockedBy: []string{},
 		Origin:    origin,
 	})

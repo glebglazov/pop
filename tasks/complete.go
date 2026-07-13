@@ -71,7 +71,7 @@ func CompleteTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*confi
 	}
 
 	task := m.Tasks[idx]
-	if task.Status == "done" {
+	if task.Status == TaskDone {
 		return nil, exitErr(ExitNoRunnable, "task %q is already done", taskID)
 	}
 

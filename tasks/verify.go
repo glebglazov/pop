@@ -953,7 +953,7 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff, priorNote string) 
 	for _, task := range m.Tasks {
 		// Scope to done AFK work only (ADR-0102): open/not-done AFK tasks and
 		// HITL tasks of any status are not judged criteria.
-		if task.Type != "AFK" || task.Status != "done" {
+		if task.Type != "AFK" || task.Status != TaskDone {
 			continue
 		}
 		b.WriteString(fmt.Sprintf("\n### %s [%s] (%s): %s\n", task.ID, task.Type, task.Status, task.Title))

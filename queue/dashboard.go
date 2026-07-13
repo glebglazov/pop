@@ -1147,13 +1147,13 @@ type taskMenu struct {
 // open. A done task yields Open.
 func taskMenuItems(task tasks.Task) []taskMenuItem {
 	var items []taskMenuItem
-	if task.Status != "done" {
+	if task.Status != tasks.TaskDone {
 		items = append(items, taskMenuItem{key: "C", label: "complete"})
 	}
 	if tasks.CanReopen(task.Status) {
 		items = append(items, taskMenuItem{key: "O", label: "open"})
 	}
-	if task.Status == "open" {
+	if task.Status == tasks.TaskOpen {
 		items = append(items, taskMenuItem{key: "K", label: "skip"})
 	}
 	return items
@@ -3064,8 +3064,8 @@ func detailTaskLine(t tasks.Task, idW int) string {
 	if len(t.BlockedBy) > 0 {
 		blockedBy = strings.Join(t.BlockedBy, ", ")
 	}
-	statusCell := t.Status
-	if t.Status == "failed" && t.FailedAfter != nil {
+	statusCell := string(t.Status)
+	if t.Status == tasks.TaskFailed && t.FailedAfter != nil {
 		statusCell = fmt.Sprintf("failed(%d)", *t.FailedAfter)
 	}
 	return fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s",

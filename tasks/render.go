@@ -566,19 +566,19 @@ func renderTaskSetDetail(out *output, taskSetID string, row *Row, m *Manifest) {
 // retry count into a failed task's cell (failed(N)) so the table needs no
 // separate column for it.
 func taskStatusCell(task Task) string {
-	if task.Status == "failed" && task.FailedAfter != nil {
+	if task.Status == TaskFailed && task.FailedAfter != nil {
 		return fmt.Sprintf("failed(%d)", *task.FailedAfter)
 	}
-	return task.Status
+	return string(task.Status)
 }
 
 func taskStyle(m *Manifest, task Task) string {
 	switch task.Status {
-	case "done":
+	case TaskDone:
 		return ansiGreen
-	case "failed":
+	case TaskFailed:
 		return ansiRed
-	case "skipped":
+	case TaskSkipped:
 		return ansiYellow
 	}
 	if task.Type == "HITL" || !isEligible(m, task) {
@@ -589,11 +589,11 @@ func taskStyle(m *Manifest, task Task) string {
 
 func taskSymbol(m *Manifest, task Task) string {
 	switch task.Status {
-	case "done":
+	case TaskDone:
 		return "✓"
-	case "failed", "skipped":
+	case TaskFailed, TaskSkipped:
 		return "⊘"
-	case "open":
+	case TaskOpen:
 		if task.Type == "HITL" && blockersResolved(m, task) {
 			return "◐"
 		}

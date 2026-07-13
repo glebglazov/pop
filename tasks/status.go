@@ -83,7 +83,7 @@ func anyDone(m *Manifest) bool {
 		return false
 	}
 	for _, task := range m.Tasks {
-		if task.Status == "done" {
+		if task.Status == TaskDone {
 			return true
 		}
 	}
@@ -175,9 +175,9 @@ func isDeferred(m *Manifest) bool {
 	anySkipped := false
 	for _, task := range m.Tasks {
 		switch task.Status {
-		case "skipped":
+		case TaskSkipped:
 			anySkipped = true
-		case "done":
+		case TaskDone:
 		default:
 			return false
 		}
@@ -192,7 +192,7 @@ func SkippedTaskIDs(m *Manifest) []string {
 	}
 	var ids []string
 	for _, task := range m.Tasks {
-		if task.Status == "skipped" {
+		if task.Status == TaskSkipped {
 			ids = append(ids, task.ID)
 		}
 	}
@@ -204,7 +204,7 @@ func allDone(m *Manifest) bool {
 		return false
 	}
 	for _, task := range m.Tasks {
-		if task.Status != "done" {
+		if task.Status != TaskDone {
 			return false
 		}
 	}
@@ -213,7 +213,7 @@ func allDone(m *Manifest) bool {
 
 func anyFailed(m *Manifest) bool {
 	for _, task := range m.Tasks {
-		if task.Status == "failed" {
+		if task.Status == TaskFailed {
 			return true
 		}
 	}
@@ -223,7 +223,7 @@ func anyFailed(m *Manifest) bool {
 func taskDone(m *Manifest, id string) bool {
 	for _, task := range m.Tasks {
 		if task.ID == id {
-			return task.Status == "done"
+			return task.Status == TaskDone
 		}
 	}
 	return false
@@ -235,7 +235,7 @@ func taskDone(m *Manifest, id string) bool {
 func blockerSatisfied(m *Manifest, id string) bool {
 	for _, task := range m.Tasks {
 		if task.ID == id {
-			return task.Status == "done" || task.Status == "skipped"
+			return task.Status == TaskDone || task.Status == TaskSkipped
 		}
 	}
 	return false
@@ -251,7 +251,7 @@ func hasEligibleTask(m *Manifest) bool {
 }
 
 func isEligible(m *Manifest, task Task) bool {
-	if task.Status != "open" || task.Type != "AFK" {
+	if task.Status != TaskOpen || task.Type != "AFK" {
 		return false
 	}
 	for _, blocker := range task.BlockedBy {
@@ -265,7 +265,7 @@ func isEligible(m *Manifest, task Task) bool {
 // hasOpenAFKTask reports whether any AFK task is still open (eligible or not).
 func hasOpenAFKTask(m *Manifest) bool {
 	for _, task := range m.Tasks {
-		if task.Status == "open" && task.Type == "AFK" {
+		if task.Status == TaskOpen && task.Type == "AFK" {
 			return true
 		}
 	}
@@ -285,13 +285,13 @@ func BuildProgress(m *Manifest, status TaskSetStatus) string {
 	done, open, failed, hitl, skipped := 0, 0, 0, 0, 0
 	for _, task := range m.Tasks {
 		switch task.Status {
-		case "done":
+		case TaskDone:
 			done++
-		case "failed":
+		case TaskFailed:
 			failed++
-		case "skipped":
+		case TaskSkipped:
 			skipped++
-		case "open":
+		case TaskOpen:
 			if task.Type == "HITL" {
 				hitl++
 			} else {
@@ -323,7 +323,7 @@ func BuildBlockedReason(m *Manifest) string {
 	}
 
 	for _, task := range m.Tasks {
-		if task.Status != "open" {
+		if task.Status != TaskOpen {
 			continue
 		}
 		if task.Type == "HITL" && blockersResolved(m, task) {
@@ -332,7 +332,7 @@ func BuildBlockedReason(m *Manifest) string {
 	}
 
 	for _, task := range m.Tasks {
-		if task.Status != "open" || task.Type != "AFK" {
+		if task.Status != TaskOpen || task.Type != "AFK" {
 			continue
 		}
 		for _, blocker := range task.BlockedBy {
@@ -353,7 +353,7 @@ func BlockingHITLTask(m *Manifest) *Task {
 	}
 	for i := range m.Tasks {
 		task := m.Tasks[i]
-		if task.Status == "open" && task.Type == "HITL" && blockersResolved(m, task) {
+		if task.Status == TaskOpen && task.Type == "HITL" && blockersResolved(m, task) {
 			return &m.Tasks[i]
 		}
 	}
@@ -368,7 +368,7 @@ func FailedTask(m *Manifest) *Task {
 		return nil
 	}
 	for i := range m.Tasks {
-		if m.Tasks[i].Status == "failed" {
+		if m.Tasks[i].Status == TaskFailed {
 			return &m.Tasks[i]
 		}
 	}
@@ -411,7 +411,7 @@ func BuildFailedInfo(stem string, m *Manifest) (ids []string, hints []string) {
 		return nil, nil
 	}
 	for _, task := range m.Tasks {
-		if task.Status == "failed" {
+		if task.Status == TaskFailed {
 			ids = append(ids, task.ID)
 			hints = append(hints, resetTaskHint(stem, task.File))
 		}

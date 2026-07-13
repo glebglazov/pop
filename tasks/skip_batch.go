@@ -35,7 +35,7 @@ type SkipTasksOptions struct {
 type SkipTransition struct {
 	TaskID string
 	File   string
-	Prior  string
+	Prior  TaskStatus
 }
 
 // SkipTasksResult is the outcome of a whole-set batch skip.
@@ -91,8 +91,8 @@ func SkipTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 			return nil, exitErr(ExitNoRunnable, "%s", unknownTaskMessage(m, id))
 		}
 		status := m.Tasks[idx].Status
-		if status != "open" {
-			if status == "skipped" {
+		if status != TaskOpen {
+			if status == TaskSkipped {
 				return nil, exitErr(ExitNoRunnable, "task %q is already skipped", id)
 			}
 			return nil, exitErr(ExitNoRunnable, "task %q is %s; skip requires an open task", id, status)

@@ -2837,7 +2837,7 @@ func (r *configurableHITLAssistanceRunner) Start(ctx context.Context, dir string
 	return RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
 }
 
-func setTaskStatus(t *testing.T, tasksDir, taskID, status string, failedAfter *int) {
+func setTaskStatus(t *testing.T, tasksDir, taskID string, status TaskStatus, failedAfter *int) {
 	t.Helper()
 	m := LoadManifest(DefaultDeps(), "demo", filepath.Join(tasksDir, "demo", "index.json"))
 	for i := range m.Tasks {

@@ -31,7 +31,7 @@ type CompleteTasksOptions struct {
 type CompleteTransition struct {
 	TaskID string
 	File   string
-	Prior  string
+	Prior  TaskStatus
 }
 
 // CompleteTasksResult is the outcome of a whole-set batch completion.
@@ -129,7 +129,7 @@ func CompleteTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		if !ok {
 			return nil, exitErr(ExitNoRunnable, "%s", unknownTaskMessage(m, id))
 		}
-		if m.Tasks[idx].Status == "done" {
+		if m.Tasks[idx].Status == TaskDone {
 			return nil, exitErr(ExitNoRunnable, "task %q is already done", id)
 		}
 		selected[id] = true

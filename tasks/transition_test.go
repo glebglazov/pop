@@ -45,7 +45,7 @@ func TestApplyTransitionsLegalEdgesPerActor(t *testing.T) {
 		t.Run(string(tc.actor)+"_"+string(tc.from)+"_to_"+string(tc.to), func(t *testing.T) {
 			d := realFSDeps()
 			m := newTransitionManifest(t, []Task{
-				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: string(tc.from)},
+				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: tc.from},
 			})
 			err := ApplyTransitions(d, m, "", []TransitionOp{{
 				TaskID:  "01-a",
@@ -57,7 +57,7 @@ func TestApplyTransitionsLegalEdgesPerActor(t *testing.T) {
 			if err != nil {
 				t.Fatalf("legal edge %s→%s by %s rejected: %v", tc.from, tc.to, tc.actor, err)
 			}
-			if got := TaskStatus(m.Tasks[0].Status); got != tc.to {
+			if got := m.Tasks[0].Status; got != tc.to {
 				t.Fatalf("status = %q, want %q", got, tc.to)
 			}
 			// Manifest and progress were written.
@@ -98,7 +98,7 @@ func TestApplyTransitionsIllegalEdgesRejected(t *testing.T) {
 		t.Run(string(tc.actor)+"_"+string(tc.from)+"_to_"+string(tc.to), func(t *testing.T) {
 			d := realFSDeps()
 			m := newTransitionManifest(t, []Task{
-				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: string(tc.from)},
+				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: tc.from},
 			})
 			err := ApplyTransitions(d, m, "", []TransitionOp{{
 				TaskID:  "01-a",
@@ -116,7 +116,7 @@ func TestApplyTransitionsIllegalEdgesRejected(t *testing.T) {
 				t.Fatalf("error does not name edge: %v", err)
 			}
 			// Nothing was written: status unchanged, no manifest, no progress.
-			if got := TaskStatus(m.Tasks[0].Status); got != tc.from {
+			if got := m.Tasks[0].Status; got != tc.from {
 				t.Fatalf("status mutated to %q on rejected edge", got)
 			}
 			if _, statErr := os.Stat(m.Path); !os.IsNotExist(statErr) {

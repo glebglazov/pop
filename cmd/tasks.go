@@ -950,7 +950,7 @@ var taskOpenPager = func() (io.WriteCloser, func() error, error) {
 // selectionRowLabel renders one Multi-task selection row's display label,
 // shared across verbs.
 func selectionRowLabel(r tasks.SelectionRow) string {
-	label := fmt.Sprintf("%-9s %s", "["+r.Status+"]", r.File)
+	label := fmt.Sprintf("%-9s %s", "["+string(r.Status)+"]", r.File)
 	if r.Title != "" {
 		label += "  " + r.Title
 	}
