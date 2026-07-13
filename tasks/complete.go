@@ -85,7 +85,7 @@ func CompleteTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*confi
 	summary := fmt.Sprintf("manually completed %s/%s (was %s)", taskSetID, taskID, priorStatus)
 	// Route the status write through the Task-transition chokepoint as Human;
 	// the verb keeps its own already-done and blocked-by preconditions above.
-	if err := ApplyTransitions(d, m, []TransitionOp{{
+	if err := ApplyTransitions(d, m, resolved.ProjectPath, []TransitionOp{{
 		TaskID:  taskID,
 		To:      TaskDone,
 		Actor:   ActorHuman,

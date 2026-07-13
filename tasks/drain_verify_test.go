@@ -400,19 +400,20 @@ func TestRunTaskSetVerifyOptOutReachesDone(t *testing.T) {
 	}
 }
 
-// TestRunTaskSetVerifyCachedPassReachesDone: with verification enabled and a
-// PASS verdict already cached at the current work SHA, the drain reuses it and
-// reaches DONE without re-invoking the Verifier (a re-drain does not loop).
-func TestRunTaskSetVerifyCachedPassReachesDone(t *testing.T) {
+// TestRunTaskSetVerifyPassReachesDone: with verification enabled, draining the
+// open set to exhaustion runs the pre-approval Verifier fresh (an open AFK task
+// means no prior episode's verdict may be reused — ADR-0109); a PASS reaches
+// DONE. Cache reuse at unchanged work is exercised at the drainVerifyPhase level
+// (TestDrainVerifyPhaseReusesCachedVerdict).
+func TestRunTaskSetVerifyPassReachesDone(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", openAFKSet())
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
 	d := env.deps()
-	repo, _, head := runtimeHead(t, d, env.root)
-	seedVerdict(t, d, store.VerifyVerdict{Repo: repo, SetID: "demo", WorkSHA: head, Verdict: "PASS"})
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(true, agent, &buf)
 	opts.TaskSetOverride = "demo"
+	opts.verifyRunner = func(string) (string, error) { return "VERDICT: PASS\n", nil }
 
 	result, err := RunTaskSetWith(d, nil, func(string) (*config.Config, error) {
 		return verifyEnabledConfig(), nil
@@ -421,26 +422,27 @@ func TestRunTaskSetVerifyCachedPassReachesDone(t *testing.T) {
 		t.Fatalf("RunTaskSetWith: %v", err)
 	}
 	if !result.TaskSetDone {
-		t.Fatalf("result = %+v, want TaskSetDone from cached PASS", result)
+		t.Fatalf("result = %+v, want TaskSetDone from a PASS verdict", result)
 	}
 }
 
-// TestRunTaskSetVerifyCachedNeedsHumanParks: with verification enabled and a
-// NEEDS-HUMAN verdict cached at the current work SHA, the drain parks the set
-// cleanly as VERIFY-FAILED (ExitNoRunnable, no crash).
-func TestRunTaskSetVerifyCachedNeedsHumanParks(t *testing.T) {
+// TestRunTaskSetVerifyNeedsHumanParks: with verification enabled, draining the
+// open set to exhaustion runs the pre-approval Verifier fresh (ADR-0109 — an
+// open AFK task carries no reusable verdict); a NEEDS-HUMAN verdict parks the
+// set cleanly as VERIFY-FAILED (ExitNoRunnable, no crash).
+func TestRunTaskSetVerifyNeedsHumanParks(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", openAFKSet())
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
 	d := env.deps()
 	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
-	repo, runtimePath, head := runtimeHead(t, d, env.root)
-	seedVerdict(t, d, store.VerifyVerdict{
-		Repo: repo, SetID: "demo", WorkSHA: head, Verdict: "NEEDS-HUMAN", Findings: "the spec is ambiguous",
-	})
+	_, runtimePath, _ := runtimeHead(t, d, env.root)
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(true, agent, &buf)
 	opts.TaskSetOverride = "demo"
+	opts.verifyRunner = func(string) (string, error) {
+		return "VERDICT: NEEDS-HUMAN\nFINDINGS: the spec is ambiguous\n", nil
+	}
 
 	result, err := RunTaskSetWith(d, nil, func(string) (*config.Config, error) {
 		return verifyEnabledConfig(), nil

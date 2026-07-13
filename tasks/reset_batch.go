@@ -111,13 +111,8 @@ func OpenTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 		ops = append(ops, TransitionOp{TaskID: task.ID, To: TaskOpen, Actor: ActorHuman, Marker: "RESET", Summary: summary})
 		transitions = append(transitions, OpenTransition{TaskID: task.ID, File: task.File, Prior: task.Status})
 	}
-	if err := ApplyTransitions(d, m, ops); err != nil {
+	if err := ApplyTransitions(d, m, resolved.ProjectPath, ops); err != nil {
 		return nil, err
-	}
-	// Leaving the terminal zone ends the verification episode: drop any cached
-	// verdict so the set must re-verify after the batch reopen (ADR-0096).
-	if id, idErr := ResolveRepositoryIdentity(d, resolved.ProjectPath); idErr == nil {
-		invalidateVerifyVerdicts(d, id.CommonDir, taskSetID)
 	}
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)

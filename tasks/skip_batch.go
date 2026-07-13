@@ -114,7 +114,7 @@ func SkipTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 		ops = append(ops, TransitionOp{TaskID: task.ID, To: TaskSkipped, Actor: ActorHuman, Marker: "SKIP", Summary: summary})
 		transitions = append(transitions, SkipTransition{TaskID: task.ID, File: task.File, Prior: task.Status})
 	}
-	if err := ApplyTransitions(d, m, ops); err != nil {
+	if err := ApplyTransitions(d, m, resolved.ProjectPath, ops); err != nil {
 		return nil, err
 	}
 

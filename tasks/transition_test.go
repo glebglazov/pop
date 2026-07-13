@@ -47,7 +47,7 @@ func TestApplyTransitionsLegalEdgesPerActor(t *testing.T) {
 			m := newTransitionManifest(t, []Task{
 				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: string(tc.from)},
 			})
-			err := ApplyTransitions(d, m, []TransitionOp{{
+			err := ApplyTransitions(d, m, "", []TransitionOp{{
 				TaskID:  "01-a",
 				To:      tc.to,
 				Actor:   tc.actor,
@@ -100,7 +100,7 @@ func TestApplyTransitionsIllegalEdgesRejected(t *testing.T) {
 			m := newTransitionManifest(t, []Task{
 				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: string(tc.from)},
 			})
-			err := ApplyTransitions(d, m, []TransitionOp{{
+			err := ApplyTransitions(d, m, "", []TransitionOp{{
 				TaskID:  "01-a",
 				To:      tc.to,
 				Actor:   tc.actor,
@@ -134,7 +134,7 @@ func TestApplyTransitionsAttemptCountSetOnFailed(t *testing.T) {
 	m := newTransitionManifest(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	err := ApplyTransitions(d, m, []TransitionOp{{
+	err := ApplyTransitions(d, m, "", []TransitionOp{{
 		TaskID:       "01-a",
 		To:           TaskFailed,
 		Actor:        ActorExecutor,
@@ -164,7 +164,7 @@ func TestApplyTransitionsAttemptCountClearedOnNonFailed(t *testing.T) {
 			m := newTransitionManifest(t, []Task{
 				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: &prior},
 			})
-			err := ApplyTransitions(d, m, []TransitionOp{{
+			err := ApplyTransitions(d, m, "", []TransitionOp{{
 				TaskID:  "01-a",
 				To:      to.status,
 				Actor:   to.actor,
@@ -204,7 +204,7 @@ func TestApplyTransitionsBatchAtomicOneWrite(t *testing.T) {
 	for i, task := range m.Tasks {
 		ops[i] = TransitionOp{TaskID: task.ID, To: TaskDone, Actor: ActorHuman, Marker: "COMPLETE", Summary: "done " + task.ID}
 	}
-	if err := ApplyTransitions(d, m, ops); err != nil {
+	if err := ApplyTransitions(d, m, "", ops); err != nil {
 		t.Fatal(err)
 	}
 
@@ -240,7 +240,7 @@ func TestApplyTransitionsBatchRejectsWholeBatchOnIllegalEdge(t *testing.T) {
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "done"},
 	})
 	// First op legal (open→done human), second illegal (done→failed human).
-	err := ApplyTransitions(d, m, []TransitionOp{
+	err := ApplyTransitions(d, m, "", []TransitionOp{
 		{TaskID: "01-a", To: TaskDone, Actor: ActorHuman, Marker: "COMPLETE", Summary: "a"},
 		{TaskID: "02-b", To: TaskFailed, Actor: ActorHuman, Marker: "COMPLETE", Summary: "b"},
 	})
@@ -263,7 +263,7 @@ func TestApplyTransitionsUnknownTaskRejected(t *testing.T) {
 	m := newTransitionManifest(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	err := ApplyTransitions(d, m, []TransitionOp{{
+	err := ApplyTransitions(d, m, "", []TransitionOp{{
 		TaskID: "99-z", To: TaskDone, Actor: ActorHuman, Marker: "COMPLETE", Summary: "x",
 	}})
 	if err == nil {

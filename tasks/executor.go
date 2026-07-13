@@ -619,7 +619,7 @@ func completeSuccessfulTask(d *Deps, sel *Selection, runtimePath, summary string
 		result.NoOp = true
 	}
 
-	if err := finalizeTaskDone(d, sel, summary); err != nil {
+	if err := finalizeTaskDone(d, sel, runtimePath, summary); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -721,8 +721,10 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 func finalizeTaskFailed(d *Deps, sel *Selection, attemptsStarted int, summary string) error {
 	// Route the open→failed write through the Task-transition chokepoint as
 	// Executor; the chokepoint owns the FAILED progress record, the attempt-count
-	// bookkeeping (set on →failed), and the atomic manifest write.
-	return ApplyTransitions(d, sel.Manifest, []TransitionOp{{
+	// bookkeeping (set on →failed), and the atomic manifest write. open→failed
+	// never touches the verification episode (ADR-0109 fires only on →open/→done),
+	// so no project path is needed for invalidation.
+	return ApplyTransitions(d, sel.Manifest, "", []TransitionOp{{
 		TaskID:       sel.TaskID,
 		To:           TaskFailed,
 		Actor:        ActorExecutor,
@@ -935,11 +937,14 @@ func createImplementationCommit(d *Deps, runtimePath, taskSetID, taskID, summary
 	return sha, nil
 }
 
-func finalizeTaskDone(d *Deps, sel *Selection, summary string) error {
+func finalizeTaskDone(d *Deps, sel *Selection, runtimePath, summary string) error {
 	// Route the open→done write through the Task-transition chokepoint as
 	// Executor; the chokepoint owns the DONE progress record, clearing the
-	// attempt count under its uniform rule, and the atomic manifest write.
-	return ApplyTransitions(d, sel.Manifest, []TransitionOp{{
+	// attempt count under its uniform rule, and the atomic manifest write. This
+	// open→done flows through the same ADR-0109 invalidation rule as a manual
+	// completion — a no-op mid-drain, since the set has no cached verdicts until
+	// it goes fully done.
+	return ApplyTransitions(d, sel.Manifest, runtimePath, []TransitionOp{{
 		TaskID:  sel.TaskID,
 		To:      TaskDone,
 		Actor:   ActorExecutor,

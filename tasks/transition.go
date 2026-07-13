@@ -75,9 +75,16 @@ type TransitionOp struct {
 // status with attempt-count bookkeeping (the recorded attempt count is set when
 // entering failed and cleared on every other target status), and performs
 // exactly one atomic manifest write for the whole batch (a single op is a batch
-// of one). Verb-level preconditions and verification invalidation stay at the
-// caller; this owns only edge legality and the atomic write.
-func ApplyTransitions(d *Deps, m *Manifest, ops []TransitionOp) error {
+// of one). After the write it ends the set's verification episode (ADR-0109)
+// when the batch changes the done-AFK composition the Verifier judges — see the
+// invalidation block below. Verb-level preconditions stay at the caller; this
+// owns edge legality, the atomic write, and the invalidation trigger.
+//
+// projectPath is the resolved checkout used to resolve the set's repository for
+// invalidation; it is only consulted when a triggering op is present, and an
+// empty projectPath skips invalidation entirely (callers with no repo to
+// invalidate against, e.g. the executor's →failed finalizer).
+func ApplyTransitions(d *Deps, m *Manifest, projectPath string, ops []TransitionOp) error {
 	if m == nil {
 		return fmt.Errorf("apply transitions: nil manifest")
 	}
@@ -123,6 +130,29 @@ func ApplyTransitions(d *Deps, m *Manifest, ops []TransitionOp) error {
 	}
 	if err := WriteManifestAtomic(d, m); err != nil {
 		return manualRepairErr(fmt.Errorf("update manifest after transition progress: %w", err))
+	}
+
+	// ADR-0109: end the set's verification episode when the batch moves an AFK
+	// task into open or into done — the done-AFK body the Verifier judges
+	// (ADR-0102) has changed. HITL transitions never touch it, so a HITL-only
+	// batch never invalidates. One invalidation clears every cached verdict row
+	// for the set, so a single call covers the whole batch. Best-effort in
+	// repository-identity resolution, exactly as the prior per-verb call sites:
+	// an unresolvable repo silently skips.
+	invalidate := false
+	for i, op := range ops {
+		if op.To != TaskOpen && op.To != TaskDone {
+			continue
+		}
+		if m.Tasks[idxs[i]].Type == "AFK" {
+			invalidate = true
+			break
+		}
+	}
+	if invalidate && projectPath != "" {
+		if id, err := ResolveRepositoryIdentity(d, projectPath); err == nil {
+			invalidateVerifyVerdicts(d, id.CommonDir, m.Stem)
+		}
 	}
 	return nil
 }

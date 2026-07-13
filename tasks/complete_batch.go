@@ -167,7 +167,7 @@ func CompleteTasksWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		ops = append(ops, TransitionOp{TaskID: task.ID, To: TaskDone, Actor: ActorHuman, Marker: "COMPLETE", Summary: summary})
 		transitions = append(transitions, CompleteTransition{TaskID: task.ID, File: task.File, Prior: task.Status})
 	}
-	if err := ApplyTransitions(d, m, ops); err != nil {
+	if err := ApplyTransitions(d, m, resolved.ProjectPath, ops); err != nil {
 		return nil, err
 	}
 

@@ -130,6 +130,107 @@ func TestOpenTasksInvalidatesVerifyVerdicts(t *testing.T) {
 	}
 }
 
+// TestResetHITLTaskLeavesVerifyVerdicts: reopening a HITL task never ends the
+// verification episode (ADR-0109) — the Verifier judges only done-AFK work
+// (ADR-0102), so a cached PASS stands across a HITL reopen.
+func TestResetHITLTaskLeavesVerifyVerdicts(t *testing.T) {
+	env := setupCustomTaskFixture(t, []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+		{ID: "02-h", File: "02-h.md", Title: "Sign off", Type: "HITL", Status: "done"},
+	})
+	d := env.deps()
+	repo, _ := repoAndHead(t, d, env.root)
+	seedVerifyVerdict(t, d, store.VerifyVerdict{Repo: repo, SetID: "demo", WorkSHA: "sha1", Verdict: "PASS"})
+
+	_, err := ResetTaskWith(d, nil, nil, ResetTaskOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		TaskPath:     env.demoTaskRef(t, "02-h.md"),
+	})
+	if err != nil {
+		t.Fatalf("ResetTaskWith: %v", err)
+	}
+
+	s := openStore(t, d)
+	defer func() { _ = s.Close() }()
+	got, err := s.GetLatestPassVerifyVerdict(repo, "demo")
+	if err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected the cached PASS to survive a HITL reopen, got nil")
+	}
+}
+
+// TestCompleteSkippedAFKTaskInvalidatesVerifyVerdicts: manually completing a
+// skipped AFK task (skipped→done) ends the episode (ADR-0109), closing the hole
+// where an unjudged done-AFK body would otherwise sit under an immunized PASS.
+func TestCompleteSkippedAFKTaskInvalidatesVerifyVerdicts(t *testing.T) {
+	env := setupCustomTaskFixture(t, []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "skipped"},
+	})
+	d := env.deps()
+	repo, _ := repoAndHead(t, d, env.root)
+	seedVerifyVerdict(t, d, store.VerifyVerdict{Repo: repo, SetID: "demo", WorkSHA: "sha1", Verdict: "PASS"})
+
+	if _, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		TaskPath:     env.demoTaskRef(t, "01-a.md"),
+	}); err != nil {
+		t.Fatalf("CompleteTaskWith: %v", err)
+	}
+
+	s := openStore(t, d)
+	defer func() { _ = s.Close() }()
+	got, err := s.GetLatestPassVerifyVerdict(repo, "demo")
+	if err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected verdicts invalidated on skipped→done, got %+v", got)
+	}
+}
+
+// TestFinalizeTaskDoneAFKNoOpMidDrain: the executor's open→done routes through
+// the same ADR-0109 invalidation rule as a manual completion — it is not
+// special-cased — but is a no-op mid-drain. An open AFK task means no verified
+// episode is in flight, so the set holds no cached verdict to clear; a
+// co-resident set's verdict is untouched and the completion succeeds.
+func TestFinalizeTaskDoneAFKNoOpMidDrain(t *testing.T) {
+	env := setupCustomTaskFixture(t, []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	d := env.deps()
+	repo, _ := repoAndHead(t, d, env.root)
+	// A live store holding an unrelated set's verdict — nothing for "demo".
+	seedVerifyVerdict(t, d, store.VerifyVerdict{Repo: repo, SetID: "other", WorkSHA: "sha1", Verdict: "PASS"})
+
+	refresh, err := RefreshWith(d, env.tasksDir, StatePathFor(env.tasksDir))
+	if err != nil {
+		t.Fatalf("RefreshWith: %v", err)
+	}
+	m := refresh.Manifests["demo"]
+	if m == nil {
+		t.Fatal("refresh missing demo manifest")
+	}
+	sel := &Selection{TaskSetID: "demo", TaskID: "01-a", Manifest: m}
+	if err := finalizeTaskDone(d, sel, env.root, "done"); err != nil {
+		t.Fatalf("finalizeTaskDone: %v", err)
+	}
+
+	s := openStore(t, d)
+	defer func() { _ = s.Close() }()
+	if got, err := s.GetLatestPassVerifyVerdict(repo, "demo"); err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict(demo): %v", err)
+	} else if got != nil {
+		t.Fatalf("demo had no cached verdict mid-drain, got %+v", got)
+	}
+	if got, err := s.GetLatestPassVerifyVerdict(repo, "other"); err != nil {
+		t.Fatalf("GetLatestPassVerifyVerdict(other): %v", err)
+	} else if got == nil {
+		t.Fatal("an unrelated set's verdict must survive the executor completion")
+	}
+}
+
 // TestSpawnRemediationTaskInvalidatesVerifyVerdicts: creating a Remediation
 // task deletes the cached Verify verdicts for the set, so the Verifier re-fires
 // against the new work SHA after the remediation is drained.

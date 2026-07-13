@@ -76,7 +76,7 @@ func SkipTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	summary := fmt.Sprintf("skipped %s/%s", taskSetID, taskID)
 	// Route the status write through the Task-transition chokepoint as Human;
 	// the verb keeps its own open-only precondition above.
-	if err := ApplyTransitions(d, m, []TransitionOp{{
+	if err := ApplyTransitions(d, m, resolved.ProjectPath, []TransitionOp{{
 		TaskID:  taskID,
 		To:      TaskSkipped,
 		Actor:   ActorHuman,

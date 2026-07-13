@@ -76,8 +76,10 @@ func ResetTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 	priorStatus := task.Status
 	summary := fmt.Sprintf("reset %s/%s to open (was %s)", taskSetID, taskID, priorStatus)
 	// Route the status write through the Task-transition chokepoint as Human;
-	// the verb keeps its own CanReopen precondition above.
-	if err := ApplyTransitions(d, m, []TransitionOp{{
+	// the verb keeps its own CanReopen precondition above. The chokepoint owns
+	// the ADR-0109 episode-invalidation trigger (reopening an AFK task ends the
+	// episode; reopening a HITL task leaves the cached verdict standing).
+	if err := ApplyTransitions(d, m, resolved.ProjectPath, []TransitionOp{{
 		TaskID:  taskID,
 		To:      TaskOpen,
 		Actor:   ActorHuman,
@@ -85,11 +87,6 @@ func ResetTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 		Summary: summary,
 	}}); err != nil {
 		return nil, err
-	}
-	// Leaving the terminal zone ends the verification episode: drop any cached
-	// verdict so the set must re-verify after the reset (ADR-0096).
-	if id, idErr := ResolveRepositoryIdentity(d, resolved.ProjectPath); idErr == nil {
-		invalidateVerifyVerdicts(d, id.CommonDir, taskSetID)
 	}
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
