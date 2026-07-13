@@ -75,14 +75,16 @@ func ResetTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.C
 
 	priorStatus := task.Status
 	summary := fmt.Sprintf("reset %s/%s to open (was %s)", taskSetID, taskID, priorStatus)
-	if err := AppendProgress(d, m.Dir, task.File, "RESET", summary); err != nil {
-		return nil, manualRepairErr(err)
-	}
-
-	m.Tasks[idx].Status = "open"
-	m.Tasks[idx].FailedAfter = nil
-	if err := WriteManifestAtomic(d, m); err != nil {
-		return nil, manualRepairErr(fmt.Errorf("update manifest after reset progress: %w", err))
+	// Route the status write through the Task-transition chokepoint as Human;
+	// the verb keeps its own CanReopen precondition above.
+	if err := ApplyTransitions(d, m, []TransitionOp{{
+		TaskID:  taskID,
+		To:      TaskOpen,
+		Actor:   ActorHuman,
+		Marker:  "RESET",
+		Summary: summary,
+	}}); err != nil {
+		return nil, err
 	}
 	// Leaving the terminal zone ends the verification episode: drop any cached
 	// verdict so the set must re-verify after the reset (ADR-0096).

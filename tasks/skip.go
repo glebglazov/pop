@@ -74,14 +74,16 @@ func SkipTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Co
 	}
 
 	summary := fmt.Sprintf("skipped %s/%s", taskSetID, taskID)
-	if err := AppendProgress(d, m.Dir, task.File, "SKIP", summary); err != nil {
-		return nil, manualRepairErr(err)
-	}
-
-	m.Tasks[idx].Status = "skipped"
-	m.Tasks[idx].FailedAfter = nil
-	if err := WriteManifestAtomic(d, m); err != nil {
-		return nil, manualRepairErr(fmt.Errorf("update manifest after skip progress: %w", err))
+	// Route the status write through the Task-transition chokepoint as Human;
+	// the verb keeps its own open-only precondition above.
+	if err := ApplyTransitions(d, m, []TransitionOp{{
+		TaskID:  taskID,
+		To:      TaskSkipped,
+		Actor:   ActorHuman,
+		Marker:  "SKIP",
+		Summary: summary,
+	}}); err != nil {
+		return nil, err
 	}
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
