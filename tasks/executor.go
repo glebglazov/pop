@@ -421,7 +421,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			display.line(ansiRed, "✗ Attempt %d/%d timed out after %s", attempt, maxTries, timeout)
 			printAttemptBreakdown(d, out, streamPaths)
 			if err := finalizeTaskFailed(d, sel, attempt, summary); err != nil {
-				return nil, taskExitErr(sel, ExitOperational, "%v", manualRepairErr(err))
+				return nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
 			return nil, taskExitErr(sel, ExitOperational, "%s", summary)
 		}
@@ -479,7 +479,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		printAttemptBreakdown(d, out, streamPaths)
 		summary := fmt.Sprintf("failed after %d attempts: %s", maxTries, reason)
 		if err := finalizeTaskFailed(d, sel, maxTries, summary); err != nil {
-			return nil, taskExitErr(sel, ExitOperational, "%v", manualRepairErr(err))
+			return nil, taskExitErr(sel, ExitOperational, "%v", err)
 		}
 		return nil, taskExitErr(sel, ExitOperational, "%s", summary)
 	}
@@ -620,7 +620,7 @@ func completeSuccessfulTask(d *Deps, sel *Selection, runtimePath, summary string
 	}
 
 	if err := finalizeTaskDone(d, sel, summary); err != nil {
-		return nil, manualRepairErr(err)
+		return nil, err
 	}
 	return result, nil
 }
@@ -719,13 +719,17 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 }
 
 func finalizeTaskFailed(d *Deps, sel *Selection, attemptsStarted int, summary string) error {
-	if err := AppendProgress(d, sel.Manifest.Dir, sel.TaskFile, "FAILED", summary); err != nil {
-		return fmt.Errorf("append progress: %w", err)
-	}
-	sel.Manifest.Tasks[sel.TaskIndex].Status = "failed"
-	failedAfter := attemptsStarted
-	sel.Manifest.Tasks[sel.TaskIndex].FailedAfter = &failedAfter
-	return WriteManifestAtomic(d, sel.Manifest)
+	// Route the open→failed write through the Task-transition chokepoint as
+	// Executor; the chokepoint owns the FAILED progress record, the attempt-count
+	// bookkeeping (set on →failed), and the atomic manifest write.
+	return ApplyTransitions(d, sel.Manifest, []TransitionOp{{
+		TaskID:       sel.TaskID,
+		To:           TaskFailed,
+		Actor:        ActorExecutor,
+		Marker:       "FAILED",
+		Summary:      summary,
+		AttemptCount: attemptsStarted,
+	}})
 }
 
 func manualRepairErr(err error) *ExitError {
@@ -932,11 +936,16 @@ func createImplementationCommit(d *Deps, runtimePath, taskSetID, taskID, summary
 }
 
 func finalizeTaskDone(d *Deps, sel *Selection, summary string) error {
-	if err := AppendProgress(d, sel.Manifest.Dir, sel.TaskFile, "DONE", summary); err != nil {
-		return err
-	}
-	sel.Manifest.Tasks[sel.TaskIndex].Status = "done"
-	return WriteManifestAtomic(d, sel.Manifest)
+	// Route the open→done write through the Task-transition chokepoint as
+	// Executor; the chokepoint owns the DONE progress record, clearing the
+	// attempt count under its uniform rule, and the atomic manifest write.
+	return ApplyTransitions(d, sel.Manifest, []TransitionOp{{
+		TaskID:  sel.TaskID,
+		To:      TaskDone,
+		Actor:   ActorExecutor,
+		Marker:  "DONE",
+		Summary: summary,
+	}})
 }
 
 func printConciseSummary(w io.Writer, result *RunTaskResult) {
