@@ -1,0 +1,12 @@
+# Verification episode ends when the done-AFK composition changes
+
+Verification invalidation was verb-based — human Open task and Remediation-task spawn cleared the verdict cache. That rule had two defects. Reopening a HITL task force-invalidated a PASS although the Verifier judges only done-AFK work ([ADR-0102](0102-verifier-judges-only-done-afk-work-and-runs-before-the-terminal-hitl-gate.md)), forcing a wasteful re-verify of unchanged work. And manual Complete of a skipped AFK task slipped an unjudged body under an immunized PASS: a set reaches AWAITING-APPROVAL with one AFK task skipped, the Verifier passes the done bodies, the human later completes skipped→done — the new done-AFK body was never judged, yet the cached PASS still immunizes ([ADR-0096](0096-pass-verdict-immunizes-terminal-status-against-sha-drift.md)). This is the transition twin of [ADR-0101](0101-adding-an-afk-task-invalidates-a-verified-sets-pass.md)'s add-task case, which was covered while this was not.
+
+Decision: the episode boundary is a **change in the set's done-AFK composition**. Invalidation fires whenever a task transition moves an **AFK** task into open or into done (Remediation-task spawn stays a trigger, unchanged); HITL transitions never invalidate. The rule is enforced at a single task-transition chokepoint through which every status write flows — legality keyed by (from, to, actor), with the progress record, attempt bookkeeping, one atomic manifest write per batch, and invalidation applied there rather than at each verb site. The executor's open→done also routes through the rule; it is provably a no-op mid-drain (an open AFK task means the episode already ended), so uniformity costs nothing.
+
+## Considered Options
+
+- **Any task re-opens (status quo, verb-based)** — over-invalidates on HITL reopen; leaves the skipped→done AFK hole open.
+- **Set leaves the terminal zone** — broadest boundary; forces re-verify even when done-AFK work is provably unchanged (the skip-HITL→DEFERRED detour).
+- **Human-actor-only invalidation** — same coverage, but encodes "agent work is always pre-PASS" as an assumption instead of letting the uniform rule's no-op prove it.
+- **Treat manual Complete like Accept ([ADR-0103](0103-human-verdict-disposition-is-accept-or-remediate.md))** — conflates "this task needs no agent" with "this work passed verification"; diverges from ADR-0101's precedent that unjudged AFK work ends immunity.
