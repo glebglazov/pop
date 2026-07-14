@@ -3,23 +3,33 @@ name: grill-with-docs
 description: Grilling session that challenges your plan against the existing domain model, sharpens terminology, and updates documentation (CONTEXT.md, ADRs) inline as decisions crystallise — conflict-free under parallel agents and teams via generation-numbered glossary fragments and sequential-id ADRs. Use when user wants to stress-test a plan against their project's language and documented decisions.
 ---
 
-<what-to-do>
+<!--
+base: mattpocock/skills grilling@391a2701 + domain-modeling@391a2701
+
+This file is a marked overlay. Everything from here down to the "POP OVERLAY"
+marker is a verbatim copy of two upstream skills at the pinned refs above,
+concatenated: first the body of grilling/SKILL.md (the interview primitive),
+then the body of domain-modeling/SKILL.md (the glossary/ADR discipline). Pop
+inlines both rather than delegating to `/grilling` + `/domain-modeling`, per
+ADR-0009 (skills are embedded in the binary and ship to machines without
+Matt's skills installed). Pop's parallel-safety additions — the single-writer
+override, grill-consolidate, and the commit-on-close discipline — live below
+that marker. To review upstream drift, diff the region between this header and
+the marker against grilling@<newref> + domain-modeling@<newref>.
+-->
 
 Interview me relentlessly about every aspect of this plan until we reach a shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one-by-one. For each question, provide your recommended answer.
 
-Ask the questions one at a time, waiting for feedback on each question before continuing.
+Ask the questions one at a time, waiting for feedback on each question before continuing. Asking multiple questions at once is bewildering.
 
-If a question can be answered by exploring the codebase, explore the codebase instead.
+If a *fact* can be found by exploring the codebase, look it up rather than asking me. The *decisions*, though, are mine — put each one to me and wait for my answer.
 
-</what-to-do>
+Do not enact the plan until I confirm we have reached a shared understanding.
+# Domain Modeling
 
-<supporting-info>
+Actively build and sharpen the project's domain model as you design. This is the *active* discipline — challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down the moment they crystallise. (Merely *reading* `CONTEXT.md` for vocabulary is not this skill — that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)
 
-## Domain awareness
-
-During codebase exploration, also look for existing documentation:
-
-### File structure
+## File structure
 
 Most repos have a single context:
 
@@ -69,13 +79,11 @@ When domain relationships are being discussed, stress-test them with specific sc
 
 When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible — which is right?"
 
-### Update the glossary inline
+### Update CONTEXT.md inline
 
-When a term is resolved, capture it right there — don't batch. But to stay safe under parallel agents and team use, **don't write the base `CONTEXT.md`**: write a delta op to your own session fragment, and treat the glossary you challenge terms against as the union of base + fragments. The fragment scheme and read-union behavior are in [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md) — read it before your first write.
+When a term is resolved, update `CONTEXT.md` right there. Don't batch these up — capture them as they happen. Use the format in [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md).
 
 `CONTEXT.md` should be totally devoid of implementation details. Do not treat `CONTEXT.md` as a spec, a scratch pad, or a repository for implementation decisions. It is a glossary and nothing else.
-
-If the user asks you to **consolidate** (fold accumulated fragments into the base), use the `grill-consolidate` skill. Consolidation is a separate single-writer maintenance pass, not part of the grilling session.
 
 ### Offer ADRs sparingly
 
@@ -86,6 +94,19 @@ Only offer to create an ADR when all three are true:
 3. **The result of a real trade-off** — there were genuine alternatives and you picked one for specific reasons
 
 If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
+<!-- ═══════════════════════════════ POP OVERLAY ═══════════════════════════════
+Everything below is pop-specific and has no upstream twin. It carries one
+behavioural override of the base — negating domain-modeling's "Update
+CONTEXT.md inline" single-writer instruction in favour of per-session
+fragments — plus the grill-consolidate fold-in path and the commit-on-close
+discipline that make grilling safe under parallel agents and teams.
+-->
+
+## Single-writer override
+
+**Override (negates the "Update CONTEXT.md inline" section above): never write the base `CONTEXT.md` — write a delta op to your own per-session fragment per [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md), and treat the glossary you challenge terms against as the union of base + fragments.** Read [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md) before your first write. This keeps concurrent sessions and teams conflict-free; the "update `CONTEXT.md` right there" wording upstream is the one place pop deviates, and this line is authoritative.
+
+If the user asks you to **consolidate** (fold accumulated fragments into the base), use the `grill-consolidate` skill. Consolidation is a separate single-writer maintenance pass, not part of the grilling session — don't fold fragments in mid-grill.
 
 ## Closing the session
 
@@ -107,5 +128,3 @@ To commit:
 4. **Report.** After committing, show the user the exact files staged and the commit subject. Separately, report any dirty files this session did *not* touch as "left alone — not staged" so nothing is silently swept or split.
 
 After the commit, the plan is settled and persisted; the user will typically move on to a separate step (such as `to-tasks`) themselves.
-
-</supporting-info>
