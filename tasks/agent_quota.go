@@ -11,14 +11,17 @@ import (
 const (
 	opencodeGoFiveHourQuotaSignal   = "5-hour usage limit reached"
 	opencodeGoWeeklyQuotaSignal     = "weekly usage limit reached"
+	opencodeGoMonthlyQuotaSignal    = "monthly usage limit reached"
 	opencodeGoQuotaAssuranceOffset  = 2 * time.Minute
 	opencodeGoFiveHourQuotaFallback = time.Hour
 	opencodeGoWeeklyQuotaFallback   = 24 * time.Hour
+	opencodeGoMonthlyQuotaFallback  = 30 * 24 * time.Hour
 )
 
 var (
 	opencodeGoQuotaResetCompoundPattern = regexp.MustCompile(`(?i)\bResets in\s+([0-9]+)\s*hr\s+([0-9]+)\s*min\b`)
 	opencodeGoQuotaResetMinutesPattern  = regexp.MustCompile(`(?i)\bResets in\s+([0-9]+)\s*min\b`)
+	opencodeGoQuotaResetDaysPattern     = regexp.MustCompile(`(?i)\bResets in\s+([0-9]+)\s*days?\b`)
 )
 
 // opencodeGoQuotaPauseReason scans the raw agent capture line-by-line and
@@ -43,15 +46,17 @@ func opencodeGoQuotaPauseReason(raw string) *AgentQuotaPause {
 func opencodeGoQuotaSignalInLine(line string) bool {
 	lower := strings.ToLower(line)
 	return strings.Contains(lower, opencodeGoFiveHourQuotaSignal) ||
-		strings.Contains(lower, opencodeGoWeeklyQuotaSignal)
+		strings.Contains(lower, opencodeGoWeeklyQuotaSignal) ||
+		strings.Contains(lower, opencodeGoMonthlyQuotaSignal)
 }
 
 // piQuotaResetAt derives PauseResetAt from opencode-go quota diagnostics.
-// When the diagnostic includes "Resets in <N>min" or "Resets in <H>hr <M>min",
-// the reset instant is now + parsed duration + a fixed assurance offset.
-// When the reset phrase is absent or unparseable, a signal-specific backoff
-// applies: one hour for the five-hour signal, one day for the weekly signal
-// (each plus the assurance offset).
+// When the diagnostic includes "Resets in <N>min", "Resets in <H>hr <M>min",
+// or "Resets in <N> days", the reset instant is now + parsed duration + a fixed
+// assurance offset. When the reset phrase is absent or unparseable, a
+// signal-specific backoff applies: one hour for the five-hour signal, one day
+// for the weekly signal, thirty days for the monthly signal (each plus the
+// assurance offset).
 func piQuotaResetAt(reason string, now time.Time) time.Time {
 	if duration, ok := opencodeGoQuotaResetDuration(reason); ok {
 		return now.Add(duration).Add(opencodeGoQuotaAssuranceOffset)
@@ -76,11 +81,20 @@ func opencodeGoQuotaResetDuration(reason string) (time.Duration, bool) {
 			return time.Duration(minutes) * time.Minute, true
 		}
 	}
+	if m := opencodeGoQuotaResetDaysPattern.FindStringSubmatch(reason); m != nil {
+		days, err := strconv.Atoi(m[1])
+		if err == nil {
+			return time.Duration(days) * 24 * time.Hour, true
+		}
+	}
 	return 0, false
 }
 
 func opencodeGoQuotaFallbackDuration(reason string) time.Duration {
 	lower := strings.ToLower(reason)
+	if strings.Contains(lower, opencodeGoMonthlyQuotaSignal) {
+		return opencodeGoMonthlyQuotaFallback
+	}
 	if strings.Contains(lower, opencodeGoWeeklyQuotaSignal) {
 		return opencodeGoWeeklyQuotaFallback
 	}

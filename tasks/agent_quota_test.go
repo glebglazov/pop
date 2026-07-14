@@ -35,6 +35,58 @@ func TestOpencodeGoQuotaPauseReasonDetectsWeeklySignal(t *testing.T) {
 	}
 }
 
+func TestOpencodeGoQuotaPauseReasonDetectsMonthlySignal(t *testing.T) {
+	line := "429 Monthly usage limit reached. Resets in 13 days. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_x/go"
+	pause := opencodeGoQuotaPauseReason(line)
+	if pause == nil {
+		t.Fatal("expected quota pause")
+	}
+	if !strings.Contains(strings.ToLower(pause.Reason), "monthly usage limit reached") {
+		t.Fatalf("reason = %q", pause.Reason)
+	}
+}
+
+func TestPiQuotaResetAtParsesResetsInNDays(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	reason := "429 Monthly usage limit reached. Resets in 13 days. To continue using this model now, enable usage from your available balance."
+	want := now.Add(13 * 24 * time.Hour).Add(opencodeGoQuotaAssuranceOffset)
+	if got := piQuotaResetAt(reason, now); !got.Equal(want) {
+		t.Fatalf("reset = %s, want %s", got, want)
+	}
+	if got := agentQuotaResetAt("opencode", reason, now); !got.Equal(want) {
+		t.Fatalf("reset via opencode preset = %s, want %s", got, want)
+	}
+}
+
+func TestPiQuotaResetAtParsesResetsInSingularDay(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	reason := "429 Monthly usage limit reached. Resets in 1 day."
+	want := now.Add(24 * time.Hour).Add(opencodeGoQuotaAssuranceOffset)
+	if got := piQuotaResetAt(reason, now); !got.Equal(want) {
+		t.Fatalf("reset = %s, want %s", got, want)
+	}
+}
+
+func TestPiQuotaResetAtMonthlyFallbackWhenPatternMissing(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	want := now.Add(opencodeGoMonthlyQuotaFallback).Add(opencodeGoQuotaAssuranceOffset)
+	reason := "429 Monthly usage limit reached."
+	if got := piQuotaResetAt(reason, now); !got.Equal(want) {
+		t.Fatalf("reset = %s, want %s", got, want)
+	}
+}
+
+func TestNormalizeOpenCodeJSONDetectsMonthlyQuotaPause(t *testing.T) {
+	raw := "429 Monthly usage limit reached. Resets in 13 days. To continue using this model now, enable usage from your available balance.\n"
+	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
+	if result.QuotaPause == nil {
+		t.Fatal("expected monthly quota pause")
+	}
+	if !strings.Contains(strings.ToLower(result.QuotaPause.Reason), "monthly usage limit reached") {
+		t.Fatalf("reason = %q", result.QuotaPause.Reason)
+	}
+}
+
 func TestOpencodeGoQuotaPauseReasonIgnoresUnrelatedOutput(t *testing.T) {
 	for _, raw := range []string{
 		"an ordinary error occurred\n",
