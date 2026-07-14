@@ -110,7 +110,11 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			if result.Selected == nil {
 				return nil
 			}
-			return handleWorktreeSelect(ctx, result.Selected)
+			// Selecting an existing worktree gets the same birth-time shaping
+			// as the create/project paths, gated on session-absence (ADR-0075):
+			// no live session → Preferred auto-applies / pick_on_create prompts /
+			// flat fall-through; a live session attaches flat with no reshaping.
+			return openWorktreeWithShaping(defaultWorktreeShapeDeps(), ctx, result.Selected.Path)
 
 		case ui.ActionDelete:
 			if result.Selected != nil {
@@ -340,8 +344,10 @@ func createWorktree(ctx *project.RepoContext) error {
 
 	// Shape the new checkout's session: a Workbench when [workbench]
 	// pick_on_create is on and one resolves (ADR-0075/0076), else today's flat
-	// session. Both paths record the checkout in History.
-	return shapeWorktreeSession(defaultWorktreeShapeDeps(), ctx, path)
+	// session. Both paths record the checkout in History. A freshly-created
+	// worktree has no session yet, so the session-absence gate is transparent
+	// here and this behaves exactly as before.
+	return openWorktreeWithShaping(defaultWorktreeShapeDeps(), ctx, path)
 }
 
 // worktreeShapeDeps carries the seams for shaping a freshly-created worktree's
@@ -357,6 +363,7 @@ type worktreeShapeDeps struct {
 	FindWorkbench             func(workbenches []config.Workbench, name string) (config.Workbench, bool)
 	CreateSession             func(tmpl config.Workbench, sessionName, path string) error
 	SessionName               func(path string) string
+	SessionExists             func(sessionName string) bool
 	RecordHistory             func(path string)
 	Attach                    func(sessionName string) error
 	Flat                      func(ctx *project.RepoContext, item *ui.Item) error
@@ -391,10 +398,27 @@ func defaultWorktreeShapeDeps() *worktreeShapeDeps {
 			return createSessionFromWorkbench(defaultTemplateRuntimeDeps(), tmpl, sessionName, path)
 		},
 		SessionName:   project.SessionName,
+		SessionExists: func(sessionName string) bool { return defaultTmux.HasSession(sessionName) },
 		RecordHistory: recordWorktreeHistory,
 		Attach:        func(sessionName string) error { return switchToTmuxTargetWith(defaultTmux, sessionName) },
 		Flat:          handleWorktreeSelect,
 	}
+}
+
+// openWorktreeWithShaping opens path's checkout with birth-time Workbench
+// shaping, gated on session-absence (ADR-0075). When path's session already
+// exists it attaches flat with no reshaping of the built session; when the
+// session is absent it runs the same shaping the create flow uses — a resolved
+// Preferred workbench auto-applies silently, else pick_on_create prompts, else
+// it falls through to today's flat attach. This is the single shared entry
+// point for the worktree-picker select path and the native create flow (and,
+// later, the queue-dashboard open).
+func openWorktreeWithShaping(d *worktreeShapeDeps, ctx *project.RepoContext, path string) error {
+	if d.SessionExists(d.SessionName(path)) {
+		// Session already built (ADR-0075): attach flat, never reshape.
+		return d.Flat(ctx, &ui.Item{Name: filepath.Base(path), Path: path})
+	}
+	return shapeWorktreeSession(d, ctx, path)
 }
 
 // shapeWorktreeSession honors the [workbench] pick_on_create gate for the native

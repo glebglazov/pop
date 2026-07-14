@@ -284,6 +284,7 @@ func newShapeDeps(pickOn bool, workbenches []config.Workbench, promptName string
 			return nil
 		},
 		SessionName:   func(path string) string { return "sess-" + path },
+		SessionExists: func(sessionName string) bool { return false },
 		RecordHistory: func(path string) { spy.historyPath = path },
 		Attach:        func(sessionName string) error { spy.attached = sessionName; return nil },
 		Flat: func(ctx *project.RepoContext, item *ui.Item) error {
@@ -454,6 +455,59 @@ func TestShapeWorktreeSession_EmptySetSkipsPrompt(t *testing.T) {
 	}
 	if !spy.flatCalled {
 		t.Error("expected the flat session when the resolved Workbench set is empty")
+	}
+}
+
+// TestOpenWorktreeWithShaping_SessionAbsentShapes asserts the select-path gate:
+// when the target session does not exist, openWorktreeWithShaping runs the same
+// birth-time shaping the create flow uses (prompt + build + attach), not a flat
+// attach.
+func TestOpenWorktreeWithShaping_SessionAbsentShapes(t *testing.T) {
+	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
+	d, spy := newShapeDeps(true, wbs, "gs-dev", true)
+	d.SessionExists = func(sessionName string) bool { return false }
+
+	if err := openWorktreeWithShaping(d, &project.RepoContext{}, "/repo/feature"); err != nil {
+		t.Fatalf("openWorktreeWithShaping: %v", err)
+	}
+
+	if !spy.promptCalled {
+		t.Error("expected the Workbench prompt when the session is absent")
+	}
+	if spy.createdTmpl != "gs-dev" {
+		t.Errorf("CreateSession tmpl = %q, want gs-dev", spy.createdTmpl)
+	}
+	if spy.attached != "sess-/repo/feature" {
+		t.Errorf("Attach target = %q, want sess-/repo/feature", spy.attached)
+	}
+	if spy.flatCalled {
+		t.Error("flat attach must not run when the session is absent and a Workbench is chosen")
+	}
+}
+
+// TestOpenWorktreeWithShaping_SessionPresentAttachesFlat asserts ADR-0075: a
+// worktree whose session already exists attaches flat with no reshaping — the
+// config/prompt/build seams are never touched.
+func TestOpenWorktreeWithShaping_SessionPresentAttachesFlat(t *testing.T) {
+	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
+	d, spy := newShapeDeps(true, wbs, "gs-dev", true)
+	d.SessionExists = func(sessionName string) bool { return true }
+
+	if err := openWorktreeWithShaping(d, &project.RepoContext{}, "/repo/feature"); err != nil {
+		t.Fatalf("openWorktreeWithShaping: %v", err)
+	}
+
+	if !spy.flatCalled {
+		t.Error("expected the flat attach when the session already exists")
+	}
+	if spy.resolveCalled || spy.promptCalled {
+		t.Error("an existing session must not be reshaped (no resolve/prompt)")
+	}
+	if spy.createdTmpl != "" {
+		t.Errorf("CreateSession must not run for an existing session, got %q", spy.createdTmpl)
+	}
+	if spy.attached != "" {
+		t.Errorf("shaping Attach must not run for an existing session, got %q", spy.attached)
 	}
 }
 
