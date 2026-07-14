@@ -1205,13 +1205,13 @@ func TestDashboardTableFitsTerminalWidth(t *testing.T) {
 		Project:       "very-long-project-name-here",
 		VerifiedAtSHA: "abcdef123456",
 		Worktree:      "feature/super-long-branch-name-for-testing",
-		Drain:         "config error: no trunk worktree configured",
 		cursorKey:     "pop\x00set1",
 		SetRef: SetRef{
-			SetID:     "set1",
-			RawStatus: tasks.StatusAwaitingApproval,
-			AutoDrain: true,
-			Orphaned:  true,
+			SetID:       "set1",
+			RawStatus:   tasks.StatusAwaitingApproval,
+			AutoDrain:   true,
+			Orphaned:    true,
+			ConfigError: "no trunk worktree configured",
 		},
 	}
 	for _, termW := range []int{40, 60, 80} {
@@ -1576,14 +1576,14 @@ func TestDashboardLiveDrainRefinesReadyToInProgress(t *testing.T) {
 }
 
 // TestDashboardSummaryRunningCountsLiveDrainsOnly confirms the header "N running"
-// tally counts live-drain rows only (ADR-0111): a parked or config-error row
-// carries a non-blank DRAIN string but no live drain, so it no longer inflates
-// the count as it did when the tally keyed on any non-blank DRAIN.
+// tally counts live-drain rows only (ADR-0111): a parked or config-error row is
+// not live-drained, so it no longer inflates the count as it did when the tally
+// keyed on any non-blank DRAIN.
 func TestDashboardSummaryRunningCountsLiveDrainsOnly(t *testing.T) {
 	rows := []DashboardRow{
 		{SetRef: SetRef{RawStatus: tasks.StatusReady, LiveDrain: true}},
-		{Drain: "parked", SetRef: SetRef{RawStatus: tasks.StatusReady}},
-		{Drain: "config error: no trunk", SetRef: SetRef{RawStatus: tasks.StatusReady}},
+		{SetRef: SetRef{RawStatus: tasks.StatusReady, Parked: true}},
+		{SetRef: SetRef{RawStatus: tasks.StatusReady, ConfigError: "no trunk"}},
 	}
 	summary := dashboardSummary(rows)
 	if !strings.Contains(summary, "1 running") {
@@ -2208,8 +2208,12 @@ func TestDashboardShowsUnsatisfiableWorktreeDirective(t *testing.T) {
 	if row == nil {
 		t.Fatalf("set %s not in dashboard rows: %+v", setID, snap.Rows)
 	}
-	if !strings.Contains(row.Drain, "config error") || !strings.Contains(row.Drain, "no worktree of that name") {
-		t.Fatalf("Drain = %q, want a config error for the unsatisfiable named directive", row.Drain)
+	if row.Drain != "" {
+		t.Fatalf("Drain = %q, want empty (config error rides the STATUS suffix now)", row.Drain)
+	}
+	status := dashboardStatusCell(*row)
+	if !strings.Contains(status, "· config error:") || !strings.Contains(status, "no worktree of that name") {
+		t.Fatalf("status = %q, want a config error suffix for the unsatisfiable named directive", status)
 	}
 }
 
@@ -2408,7 +2412,7 @@ func TestDashboardIntegrationTargetDerivedForkFree(t *testing.T) {
 
 // TestDashboardBareWithoutTrunkRendersConfigError covers the rendered half of
 // ADR-0060's bare-without-trunk rule: an unbound set in such a repo shows a
-// config-class error in the drain column and needs bind for its worktree,
+// config-class error as a STATUS suffix and needs bind for its worktree,
 // derived fork-free from the static (no git probe).
 func TestDashboardBareWithoutTrunkRendersConfigError(t *testing.T) {
 	d := dashboardTestDeps(t, []tasks.Row{{ID: "ready", Status: tasks.StatusReady, AutoDrain: true}}, nil)
@@ -2429,9 +2433,15 @@ func TestDashboardBareWithoutTrunkRendersConfigError(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("rows = %+v, want one", got)
 	}
-	wantDrain := "config error: " + repoScanReason
-	if got[0].Drain != wantDrain || got[0].Worktree != dashboardDestLabelNeedsBind {
-		t.Fatalf("row = %+v, want drain %q worktree %q", got[0], wantDrain, dashboardDestLabelNeedsBind)
+	if got[0].Drain != "" {
+		t.Fatalf("row Drain = %q, want empty (config error rides the STATUS suffix now)", got[0].Drain)
+	}
+	if got[0].Worktree != dashboardDestLabelNeedsBind {
+		t.Fatalf("row = %+v, want worktree %q", got[0], dashboardDestLabelNeedsBind)
+	}
+	wantSuffix := "· config error: " + repoScanReason
+	if status := dashboardStatusCell(got[0]); !strings.Contains(status, wantSuffix) {
+		t.Fatalf("status = %q, want config error suffix %q", status, wantSuffix)
 	}
 }
 
@@ -4619,5 +4629,69 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 	twoLine := dashboardTwoLineRowLine2(byID["both"], []int{10, 10, 10, 10})
 	if !strings.Contains(twoLine, "· auto-drain · orphaned") {
 		t.Fatalf("two-line render missing suffixes:\n%s", twoLine)
+	}
+}
+
+// TestDashboardParkedAndConfigErrorSuffixes covers ADR-0111's relocation of the
+// old DRAIN `parked` / `config error: <msg>` values onto the STATUS cell: each
+// renders as a plain ` · parked` / ` · config error: <msg>` suffix in every
+// status and both row layouts, the DRAIN string no longer carries either, the
+// two compose cleanly after verified/auto-drain/orphaned, and the styled cell's
+// measured width matches the plain form (no ANSI leaks into column math).
+func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
+	statusW := []int{10, 10, 80, 10, 10}
+
+	for _, status := range []tasks.TaskSetStatus{tasks.StatusReady, tasks.StatusBlocked, tasks.StatusAwaitingApproval, tasks.StatusFailed} {
+		row := DashboardRow{SetRef: SetRef{RawStatus: status, Parked: true}}
+		if s := dashboardStatusCell(row); !strings.Contains(s, " · parked") {
+			t.Fatalf("status %s parked cell = %q, want a · parked suffix", status, s)
+		}
+		single := dashboardTableLine(dashboardRowValues(row), statusW)
+		if !strings.Contains(single, "· parked") {
+			t.Fatalf("status %s single-line parked render missing suffix:\n%s", status, single)
+		}
+		twoLine := dashboardTwoLineRowLine2(row, []int{10, 10, 10, 10})
+		if !strings.Contains(twoLine, "· parked") {
+			t.Fatalf("status %s two-line parked render missing suffix:\n%s", status, twoLine)
+		}
+	}
+
+	const msg = "no trunk worktree configured"
+	ce := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, ConfigError: msg}}
+	if s := dashboardStatusCell(ce); !strings.Contains(s, " · config error: "+msg) {
+		t.Fatalf("config-error cell = %q, want a · config error suffix", s)
+	}
+	if ce.Drain != "" {
+		t.Fatalf("config-error row Drain = %q, want empty (fact rides the STATUS suffix now)", ce.Drain)
+	}
+	single := dashboardTableLine(dashboardRowValues(ce), statusW)
+	if !strings.Contains(single, "· config error: "+msg) {
+		t.Fatalf("single-line config-error render missing suffix:\n%s", single)
+	}
+	twoLine := dashboardTwoLineRowLine2(ce, []int{10, 10, 10, 10})
+	if !strings.Contains(twoLine, "· config error: "+msg) {
+		t.Fatalf("two-line config-error render missing suffix:\n%s", twoLine)
+	}
+
+	// Multi-suffix compose: verified @, auto-drain, orphaned, parked, config error
+	// all appear in a fixed order, and the styled cell measures the same width as
+	// the plain cell (the two new suffixes stay ANSI-free).
+	multi := DashboardRow{
+		VerifiedAtSHA: "abcdef123456",
+		SetRef: SetRef{
+			RawStatus:   tasks.StatusReady,
+			AutoDrain:   true,
+			Orphaned:    true,
+			Parked:      true,
+			ConfigError: "no trunk",
+		},
+	}
+	plain := dashboardStatusCell(multi)
+	wantOrder := "· verified @ abcdef123456 · auto-drain · orphaned · parked · config error: no trunk"
+	if !strings.Contains(plain, wantOrder) {
+		t.Fatalf("multi-suffix cell = %q, want ordered suffixes %q", plain, wantOrder)
+	}
+	if styled := dashboardStatusCellStyled(multi); lipgloss.Width(styled) != lipgloss.Width(plain) {
+		t.Fatalf("styled width %d != plain width %d (ANSI leaked into width math)", lipgloss.Width(styled), lipgloss.Width(plain))
 	}
 }

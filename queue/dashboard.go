@@ -51,6 +51,14 @@ type SetRef struct {
 	// be orphaned. A set with no binding can never be orphaned.
 	Parked, Bound, Orphaned bool
 	AutoDrain               bool
+	// ConfigError is the message for a config-class defect that keeps the set
+	// from routing to an integration target — a bare repo with no declared trunk
+	// or an unsatisfiable worktree directive (ADR-0059/0060). Non-blank only when
+	// the set is neither live-drained nor parked, mirroring the old DRAIN string's
+	// precedence. Rendered as the plain ` · config error: <msg>` STATUS suffix
+	// (ADR-0111), never in the DRAIN string, which now only ever holds
+	// dashboardDrainPickedUp or blank.
+	ConfigError string
 	// RawStatus is the underlying derived Task-set status, kept for counts and
 	// comparisons so display relabels never leak into logic.
 	RawStatus tasks.TaskSetStatus
@@ -584,24 +592,31 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 		if liveDrain {
 			drain = dashboardDrainPickedUp
 		}
-		if parked {
-			drain = "parked"
-		} else if st.configErr != "" && !hasBinding && drain == "" {
-			// Bare repo with no declared trunk: an unbound set has no integration
-			// target to route to (ADR-0060). Surface the config-class error derived
-			// fork-free during static resolution, never a git probe. A bound set is
-			// still drainable via its binding, so it is left untouched.
-			drain = "config error: " + st.configErr
-		} else if drain == "" && taskRow.Status == tasks.StatusReady {
-			// An unsatisfiable worktree directive is a static config defect, not a
-			// runtime crash (ADR-0059): show it on the set so the operator fixes the
-			// environment. Read the registration intent first (a store read, no git);
-			// only a set that actually carries a directive pays the read-only probe
-			// (which forks git to resolve the trunk/worktree), so the no-directive
-			// common path — and the dashboard's cached rebuild — forks no git.
-			if intent, _ := tasks.RegisteredWorktreeIntent(d.Tasks, st.defPath, taskRow.ID); intent != nil {
-				if msg := d.probeDirective(staticProjectPath(st), taskRow.ID); msg != "" {
-					drain = "config error: " + msg
+		// Parked and config-error facts leave the DRAIN string entirely (ADR-0111):
+		// the string now only ever holds dashboardDrainPickedUp or blank, and these
+		// two ride on the STATUS cell as ` · parked` / ` · config error: <msg>`
+		// suffixes. The mutual exclusion the old single-string DRAIN cell enforced
+		// is preserved by gating the config-error probe on a set that is neither
+		// live-drained nor parked.
+		configErr := ""
+		if !liveDrain && !parked {
+			if st.configErr != "" && !hasBinding {
+				// Bare repo with no declared trunk: an unbound set has no integration
+				// target to route to (ADR-0060). Surface the config-class error derived
+				// fork-free during static resolution, never a git probe. A bound set is
+				// still drainable via its binding, so it is left untouched.
+				configErr = st.configErr
+			} else if taskRow.Status == tasks.StatusReady {
+				// An unsatisfiable worktree directive is a static config defect, not a
+				// runtime crash (ADR-0059): show it on the set so the operator fixes the
+				// environment. Read the registration intent first (a store read, no git);
+				// only a set that actually carries a directive pays the read-only probe
+				// (which forks git to resolve the trunk/worktree), so the no-directive
+				// common path — and the dashboard's cached rebuild — forks no git.
+				if intent, _ := tasks.RegisteredWorktreeIntent(d.Tasks, st.defPath, taskRow.ID); intent != nil {
+					if msg := d.probeDirective(staticProjectPath(st), taskRow.ID); msg != "" {
+						configErr = msg
+					}
 				}
 			}
 		}
@@ -619,6 +634,7 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 				RuntimePath:           wt.runtimePath,
 				DoneStillManagedBound: doneStillManagedBound,
 				Parked:                parked,
+				ConfigError:           configErr,
 				Orphaned:              orphaned,
 				Bound:                 bound,
 				PaneID:                dashboardPaneID(snap, st.repoKey, taskRow.ID),
@@ -687,8 +703,8 @@ func dashboardStatusCellStyled(row DashboardRow) string {
 }
 
 // dashboardComposeStatus assembles the STATUS cell from live row fields. When
-// styled, the verified-at token carries ANSI yellow; the auto-drain and orphaned
-// suffixes are always plain text.
+// styled, the verified-at token carries ANSI yellow; the auto-drain, orphaned,
+// parked, and config-error suffixes are always plain text.
 func dashboardComposeStatus(row DashboardRow, styled bool) string {
 	label := dashboardStatusLabel(row)
 	if styled {
@@ -708,6 +724,16 @@ func dashboardComposeStatus(row DashboardRow, styled bool) string {
 	}
 	if row.Orphaned {
 		label += " · orphaned"
+	}
+	// Parked and config-error relocated off the DRAIN string onto the STATUS cell
+	// (ADR-0111). Both are uncoloured plain text, so they never leak ANSI into the
+	// width-measured (unstyled) form; they trail the auto-drain/orphaned suffixes
+	// in a fixed order.
+	if row.Parked {
+		label += " · parked"
+	}
+	if row.ConfigError != "" {
+		label += " · config error: " + row.ConfigError
 	}
 	return label
 }
