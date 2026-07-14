@@ -460,6 +460,18 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			switch row.Status {
 			case StatusDone:
 				result.TaskSetDone = true
+				if row.AutoDrain {
+					cleared, err := SetTaskSetAutoDrain(d, resolved.DefinitionPath, taskSetID, false)
+					if err != nil {
+						return result, exitErr(ExitOperational, "clear auto-drain for task set %s: %v", taskSetID, err)
+					}
+					if cleared {
+						fmt.Fprintf(out, "Auto-drain cleared for task set %s: all AFK tasks drained; status DONE.\n", taskSetID)
+						if err := AppendSetProgress(d, currentRefresh.Manifests[taskSetID].Dir, "AUTO-DRAIN-CLEARED", "Auto-drain cleared: all AFK tasks drained; status DONE."); err != nil {
+							return result, exitErr(ExitOperational, "record auto-drain clear for task set %s: %v", taskSetID, err)
+						}
+					}
+				}
 				finishRunTaskSet(out, opts.Yes, result)
 				return result, nil
 			case StatusDeferred:

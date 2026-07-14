@@ -2388,6 +2388,84 @@ func TestRunTaskSetInterruptionPropagation(t *testing.T) {
 	assertTaskOpen(t, env.execFixture(), "01-a")
 }
 
+func TestRunTaskSetClearsAutoDrainOnDone(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	if _, err := ToggleAutoDrainWith(env.deps(), env.tasksDir, DefaultStatePath(), "demo"); err != nil {
+		t.Fatal(err)
+	}
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+
+	var buf bytes.Buffer
+	result, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, &buf))
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !result.TaskSetDone {
+		t.Fatalf("result = %#v, want TaskSetDone", result)
+	}
+
+	state, err := LoadGlobalState(DefaultStatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	canon, err := CanonicalDefinitionPathWith(env.deps(), env.tasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Tasks[canon].TaskSets[0].AutoDrain {
+		t.Fatalf("auto_drain should be cleared after DONE drain: %#v", state.Tasks[canon].TaskSets[0])
+	}
+
+	out := buf.String()
+	wantNotice := "Auto-drain cleared for task set demo: all AFK tasks drained; status DONE."
+	if !strings.Contains(out, wantNotice) {
+		t.Fatalf("missing auto-drain clear notice:\n%s", out)
+	}
+
+	progress, err := os.ReadFile(filepath.Join(env.tasksDir, "demo", "progress.txt"))
+	if err != nil {
+		t.Fatalf("read progress.txt: %v", err)
+	}
+	progressText := string(progress)
+	if !strings.Contains(progressText, "[set] AUTO-DRAIN-CLEARED") {
+		t.Fatalf("progress.txt missing set-level clear record:\n%s", progressText)
+	}
+	if !strings.Contains(progressText, "Auto-drain cleared: all AFK tasks drained; status DONE.") {
+		t.Fatalf("progress.txt missing clear summary:\n%s", progressText)
+	}
+}
+
+func TestRunTaskSetNoOpWhenAutoDrainOffOnDone(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
+
+	var buf bytes.Buffer
+	result, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, &buf))
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if !result.TaskSetDone {
+		t.Fatalf("result = %#v, want TaskSetDone", result)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "Auto-drain cleared") {
+		t.Fatalf("unexpected auto-drain clear notice:\n%s", out)
+	}
+
+	progress, err := os.ReadFile(filepath.Join(env.tasksDir, "demo", "progress.txt"))
+	if err != nil {
+		t.Fatalf("read progress.txt: %v", err)
+	}
+	if strings.Contains(string(progress), "AUTO-DRAIN-CLEARED") {
+		t.Fatalf("unexpected auto-drain clear record:\n%s", progress)
+	}
+}
+
 func TestRunTaskSetStopsCleanlyOnDeferred(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},

@@ -32,3 +32,10 @@ func AppendProgress(d *Deps, manifestDir, taskFile, outcome, summary string) err
 	combined := append(existing, []byte(block)...)
 	return WriteAtomicWith(d, path, combined, 0o644)
 }
+
+// AppendSetProgress appends a set-level progress record to progress.txt. It is
+// used for events that belong to the task set as a whole rather than to a
+// single task file.
+func AppendSetProgress(d *Deps, manifestDir, outcome, summary string) error {
+	return AppendProgress(d, manifestDir, "set", outcome, summary)
+}

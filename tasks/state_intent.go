@@ -86,3 +86,32 @@ func ToggleTaskSetAutoDrain(d *Deps, defPath, taskSetID string) (next bool, err 
 	}
 	return next, nil
 }
+
+// SetTaskSetAutoDrain sets one registered task set's auto-drain flag to the
+// requested value and reports whether the value changed. Setting the bit to its
+// current value is a clean no-op under the existing state lock.
+func SetTaskSetAutoDrain(d *Deps, defPath, taskSetID string, value bool) (changed bool, err error) {
+	canon, err := CanonicalDefinitionPathWith(d, defPath)
+	if err != nil {
+		return false, err
+	}
+	statePath := StatePathFor(canon)
+
+	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
+		entry := state.Tasks[canon]
+		idx, _, err := findRegisteredTaskSet(entry, taskSetID)
+		if err != nil {
+			return err
+		}
+		if entry.TaskSets[idx].AutoDrain == value {
+			return nil
+		}
+		entry.TaskSets[idx].AutoDrain = value
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return changed, nil
+}

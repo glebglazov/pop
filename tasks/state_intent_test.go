@@ -225,3 +225,87 @@ func TestToggleTaskSetAutoDrainNotRegistered(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestSetTaskSetAutoDrainSetsAndPersists(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", root)
+	d := DefaultDeps()
+	defPath := root + "/tasks"
+	canon, statePath := seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "demo", AutoDrain: false}})
+
+	changed, err := SetTaskSetAutoDrain(d, defPath, "demo", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("expected change when enabling auto-drain")
+	}
+
+	state, err := LoadGlobalStateWith(d, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Tasks[canon].TaskSets[0].AutoDrain {
+		t.Fatalf("auto_drain not persisted: %#v", state.Tasks[canon].TaskSets[0])
+	}
+}
+
+func TestSetTaskSetAutoDrainIdempotentNoOp(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", root)
+	d := DefaultDeps()
+	defPath := root + "/tasks"
+	canon, statePath := seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "demo", AutoDrain: true}})
+	before := registeredTaskSetsFor(t, d, canon)
+
+	changed, err := SetTaskSetAutoDrain(d, defPath, "demo", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("setting auto-drain to its current value should be a no-op")
+	}
+	after := registeredTaskSetsFor(t, d, canon)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("no-op wrote state:\nbefore=%#v\nafter=%#v", before, after)
+	}
+
+	changed, err = SetTaskSetAutoDrain(d, defPath, "demo", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("expected change when clearing auto-drain")
+	}
+
+	changed, err = SetTaskSetAutoDrain(d, defPath, "demo", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("repeat clear should be a no-op")
+	}
+	state, err := LoadGlobalStateWith(d, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Tasks[canon].TaskSets[0].AutoDrain {
+		t.Fatalf("auto_drain should stay cleared: %#v", state.Tasks[canon].TaskSets[0])
+	}
+}
+
+func TestSetTaskSetAutoDrainUnknownID(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", root)
+	d := DefaultDeps()
+	defPath := root + "/tasks"
+	seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "demo"}})
+
+	_, err := SetTaskSetAutoDrain(d, defPath, "ghost", false)
+	if err == nil {
+		t.Fatal("expected unknown-id error")
+	}
+	if !strings.Contains(err.Error(), `unknown task set "ghost"`) {
+		t.Fatalf("err = %v", err)
+	}
+}
