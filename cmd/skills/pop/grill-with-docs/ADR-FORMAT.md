@@ -1,14 +1,19 @@
+<!--
+base: mattpocock/skills domain-modeling@391a2701
+
+This file is a marked overlay. Everything from here down to the "POP OVERLAY"
+marker is a verbatim copy of domain-modeling/ADR-FORMAT.md at the pinned ref
+above. Pop's additions (clash-tolerant max+1 id selection, the
+grill-consolidate reconciliation note, and filename-link cross-references) live
+below that marker. To review upstream drift, diff the region between this
+header and the marker against domain-modeling@<newref>.
+-->
+
 # ADR Format
 
-ADRs live in `docs/adr/` and use **sequential ids**: `NNNN-slug.md`, zero-padded to four digits (e.g. `0001-event-sourced-orders.md`, `0002-postgres-for-write-model.md`).
+ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
 
 Create the `docs/adr/` directory lazily — only when the first ADR is needed.
-
-## Ids
-
-Pick the next number naively: scan the target `docs/adr/`, take the highest existing `NNNN`, add 1, and zero-pad to four digits. The very first ADR in a directory is `0001`. Numbering is **per directory** — each `docs/adr/` (the system-wide one plus any per-context ones) has its own independent sequence.
-
-Don't lock, and don't hunt for gaps to fill — just take max+1. Under parallel agents or teammates, two ADRs **may** land on the same number. That's expected and fine: `grill-consolidate` resolves clashes later (re-sequencing the loser and fixing links). Drop your ADR and move on.
 
 ## Template
 
@@ -28,9 +33,9 @@ Only include these when they add genuine value. Most ADRs won't need them.
 - **Considered Options** — only when the rejected alternatives are worth remembering
 - **Consequences** — only when non-obvious downstream effects need to be called out
 
-## Cross-references
+## Numbering
 
-Reference another ADR by its number as `ADR-NNNN` (e.g. `superseded by ADR-0007`), or link to its file (`[...](0007-slug.md)`). Filename links are the most robust — the slug survives a renumber, so consolidate can always rewrite them unambiguously. A bare `ADR-NNNN` reference becomes ambiguous if that number was ever involved in a clash, so prefer filename links where you can.
+Scan `docs/adr/` for the highest existing number and increment by one.
 
 ## When to offer an ADR
 
@@ -51,3 +56,20 @@ If a decision is easy to reverse, skip it — you'll just reverse it. If it's no
 - **Deliberate deviations from the obvious path.** "We're using manual SQL instead of an ORM because X." Anything where a reasonable reader would assume the opposite. These stop the next engineer from "fixing" something that was deliberate.
 - **Constraints not visible in the code.** "We can't use AWS because of compliance requirements." "Response times must be under 200ms because of the partner API contract."
 - **Rejected alternatives when the rejection is non-obvious.** If you considered GraphQL and picked REST for subtle reasons, record it — otherwise someone will suggest GraphQL again in six months.
+<!-- ═══════════════════════════════ POP OVERLAY ═══════════════════════════════
+Everything below is pop-specific and has no upstream twin. It sharpens
+domain-modeling's single-writer "scan for the highest number and increment"
+numbering into a clash-tolerant max+1 rule safe under parallel agents and
+teams, hands clash resolution to grill-consolidate, and adds filename-link
+cross-references that survive a renumber.
+-->
+
+## Ids (clash-tolerant)
+
+Pick the next number naively: scan the target `docs/adr/`, take the highest existing `NNNN`, add 1, and zero-pad to four digits. The very first ADR in a directory is `0001`. Numbering is **per directory** — each `docs/adr/` (the system-wide one plus any per-context ones) has its own independent sequence.
+
+Don't lock, and don't hunt for gaps to fill — just take max+1. Under parallel agents or teammates, two ADRs **may** land on the same number. That's expected and fine: `grill-consolidate` resolves clashes later (re-sequencing the loser and fixing links). Drop your ADR and move on.
+
+## Cross-references
+
+Reference another ADR by its number as `ADR-NNNN` (e.g. `superseded by ADR-0007`), or link to its file (`[...](0007-slug.md)`). Filename links are the most robust — the slug survives a renumber, so consolidate can always rewrite them unambiguously. A bare `ADR-NNNN` reference becomes ambiguous if that number was ever involved in a clash, so prefer filename links where you can.
