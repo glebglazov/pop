@@ -826,7 +826,8 @@ func TestExpandProjectsWith_BareRepoExpandsWorktrees(t *testing.T) {
 		t.Errorf("expected no failures, got %v", failed)
 	}
 	got := expandedNames(expanded)
-	want := []string{"bare-proj/feature-x", "bare-proj/main"}
+	// The "main" trunk worktree collapses to just the repo display name.
+	want := []string{"bare-proj", "bare-proj/feature-x"}
 	if !equalStrings(got, want) {
 		t.Errorf("expanded names = %v, want %v", got, want)
 	}
@@ -835,6 +836,49 @@ func TestExpandProjectsWith_BareRepoExpandsWorktrees(t *testing.T) {
 		if !p.IsWorktree {
 			t.Errorf("expected IsWorktree=true for %q", p.Name)
 		}
+	}
+}
+
+func TestExpandProjectsWith_TrunkWorktreeCollapsesDisplayName(t *testing.T) {
+	for _, trunk := range []string{"main", "master"} {
+		t.Run(trunk, func(t *testing.T) {
+			paths := []config.ExpandedPath{
+				{Path: "/home/user/game_server", DisplayDepth: 1},
+			}
+			d := buildExpandDeps([]mockProject{
+				{
+					path:        "/home/user/game_server",
+					hasWorktree: true,
+					worktrees:   []string{trunk, "feature-x"},
+				},
+			})
+
+			expanded, failed := expandProjectsWith(d, paths)
+			if len(failed) != 0 {
+				t.Fatalf("expected no failures, got %v", failed)
+			}
+
+			byName := make(map[string]project.ExpandedProject)
+			for _, p := range expanded {
+				byName[p.Name] = p
+			}
+
+			// Trunk worktree collapses to just the repo display name...
+			trunkEntry, ok := byName["game_server"]
+			if !ok {
+				t.Fatalf("expected collapsed display name %q, got %v", "game_server", expandedNames(expanded))
+			}
+			// ...but its session name is unchanged (still repo/<folder>).
+			wantSession := "game_server/" + trunk
+			if trunkEntry.SessionName != wantSession {
+				t.Errorf("trunk SessionName = %q, want %q", trunkEntry.SessionName, wantSession)
+			}
+
+			// The non-trunk worktree keeps the <repo>/<worktree> form.
+			if _, ok := byName["game_server/feature-x"]; !ok {
+				t.Errorf("expected non-trunk display name %q, got %v", "game_server/feature-x", expandedNames(expanded))
+			}
+		})
 	}
 }
 
