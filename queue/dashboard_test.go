@@ -1230,7 +1230,7 @@ func TestDashboardTableFitsTerminalWidth(t *testing.T) {
 }
 
 func TestDashboardFitColumnWidths(t *testing.T) {
-	natural := []int{1, 20, 30, 40, 25} // indicator, PROJECT, TASK SET, STATUS, WORKTREE
+	natural := []int{20, 30, 40, 25, 1} // PROJECT, TASK SET, STATUS, WORKTREE, indicator
 	fitted := dashboardFitColumnWidths(natural, 50)
 	if dashboardTableLineWidth(fitted) > 50 {
 		t.Fatalf("fitted line width %d exceeds budget 50: %v", dashboardTableLineWidth(fitted), fitted)
@@ -1311,8 +1311,8 @@ func TestDashboardTwoLineRowLine1ShowsIndicatorProjectSetIDWorktree(t *testing.T
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
 	line1 := dashboardTwoLineRowLine1(row, widths)
 
-	// Line 1 carries the live-drain indicator, PROJECT, TASK SET and WORKTREE;
-	// STATUS lives on line 2. A live drain lights the leading ● (ADR-0111).
+	// Line 1 carries PROJECT, TASK SET, WORKTREE and the trailing live-drain
+	// indicator; STATUS lives on line 2. A live drain lights the ● (ADR-0111).
 	for _, want := range []string{dashboardLiveDrainGlyph, "pop", row.SetID, "main"} {
 		if !strings.Contains(line1, want) {
 			t.Fatalf("two-line row line 1 missing expected value %q: %q", want, line1)
@@ -1408,7 +1408,7 @@ func TestDashboardTwoLineSingleLineLayoutUnchanged(t *testing.T) {
 	}
 }
 
-// TestDashboardLiveIndicator pins the leading live-drain indicator (ADR-0111): a
+// TestDashboardLiveIndicator pins the trailing live-drain indicator (ADR-0111): a
 // PID-alive drain lights a single ● in the house working colour, an idle row
 // shows a blank cell, and the plain (width-measurement) form carries no ANSI.
 func TestDashboardLiveIndicator(t *testing.T) {
@@ -1459,9 +1459,9 @@ func TestDashboardLiveIndicatorAcrossStatuses(t *testing.T) {
 }
 
 // TestDashboardSingleLineDropsDrainColumnKeepsIndicator pins the retired DRAIN
-// column and the leading indicator on the single-line layout (ADR-0111): the
-// header carries no DRAIN, the column order is indicator/PROJECT/TASK SET/
-// STATUS/WORKTREE, and a live row leads with the ● glyph.
+// column and the trailing indicator on the single-line layout (ADR-0111): the
+// header carries no DRAIN, the column order is PROJECT/TASK SET/STATUS/WORKTREE/
+// indicator, and a live row carries the ● glyph.
 func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
 	rows := []DashboardRow{
 		{Project: "pop", Worktree: "main", cursorKey: "pop\x00live", SetRef: SetRef{SetID: "live", RawStatus: tasks.StatusReady, LiveDrain: true}},
@@ -1477,8 +1477,8 @@ func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
 	if strings.Contains(view, "DRAIN") {
 		t.Fatalf("single-line view must not carry the retired DRAIN column:\n%s", view)
 	}
-	// Column order (indicator has a blank header): PROJECT, TASK SET, STATUS,
-	// WORKTREE — left to right, WORKTREE last (no DRAIN after it).
+	// Column order: PROJECT, TASK SET, STATUS, WORKTREE — left to right, then the
+	// blank-header indicator column trails (no DRAIN anywhere).
 	header := strings.Split(view, "\n")[dashboardTestLineIndex(strings.Split(view, "\n"), "PROJECT")]
 	iProject := strings.Index(header, "PROJECT")
 	iSet := strings.Index(header, "TASK SET")
@@ -1487,7 +1487,7 @@ func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
 	if !(iProject >= 0 && iProject < iSet && iSet < iStatus && iStatus < iWorktree) {
 		t.Fatalf("single-line header column order wrong: %q", header)
 	}
-	// The live row leads with the ● glyph; the done row does not.
+	// The live row carries the ● glyph; the done row does not.
 	lines := strings.Split(view, "\n")
 	liveIdx := dashboardTestLineIndex(lines, "live")
 	if liveIdx < 0 {
@@ -1507,7 +1507,7 @@ func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
 
 // TestDashboardNarrowPaneKeepsIndicator confirms the fixed-width indicator is
 // never dropped by elastic width fitting even when the pane is very narrow
-// (ADR-0111): the ● still leads a live row's rendered cells.
+// (ADR-0111): the ● still appears in a live row's rendered cells.
 func TestDashboardNarrowPaneKeepsIndicator(t *testing.T) {
 	rows := []DashboardRow{
 		{Project: "a-really-long-project-name", Worktree: "some-long-branch", cursorKey: "a\x00live",
@@ -4740,9 +4740,9 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 	}
 
 	// Both render modes read the same precomputed status; widths are wide enough
-	// that no truncation clips the suffixes. Column order: indicator, PROJECT,
-	// TASK SET, STATUS (index 3, given the width), WORKTREE.
-	widths := []int{20, 20, 20, 60, 20}
+	// that no truncation clips the suffixes. Column order: PROJECT, TASK SET,
+	// STATUS (index 2, given the width), WORKTREE, indicator.
+	widths := []int{20, 20, 60, 20, 20}
 	single := dashboardTableLine(dashboardRowValues(byID["both"]), widths)
 	if !strings.Contains(single, "· auto-drain · orphaned") {
 		t.Fatalf("single-line render missing suffixes:\n%s", single)
@@ -4760,9 +4760,9 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 // two compose cleanly after verified/auto-drain/orphaned, and the styled cell's
 // measured width matches the plain form (no ANSI leaks into column math).
 func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
-	// Column order: indicator, PROJECT, TASK SET, STATUS, WORKTREE — STATUS (index
-	// 3) is given ample width so its suffixes are not truncated at render.
-	statusW := []int{10, 10, 10, 80, 10}
+	// Column order: PROJECT, TASK SET, STATUS, WORKTREE, indicator — STATUS (index
+	// 2) is given ample width so its suffixes are not truncated at render.
+	statusW := []int{10, 10, 80, 10, 10}
 
 	for _, status := range []tasks.TaskSetStatus{tasks.StatusReady, tasks.StatusBlocked, tasks.StatusAwaitingApproval, tasks.StatusFailed} {
 		row := DashboardRow{SetRef: SetRef{RawStatus: status, Parked: true}}

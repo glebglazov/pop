@@ -3647,6 +3647,12 @@ func dashboardTableLine(values []string, widths []int) string {
 func dashboardTableSeparator(widths []int) string {
 	parts := make([]string, len(widths))
 	for i, width := range widths {
+		// The trailing live-drain indicator has no header label, so its rule is
+		// blank (spaces) rather than dashes — nothing to underline (ADR-0111).
+		if i == len(widths)-1 {
+			parts[i] = strings.Repeat(" ", width)
+			continue
+		}
 		parts[i] = strings.Repeat("-", width)
 	}
 	return strings.Join(parts, "  ")
