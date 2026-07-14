@@ -22,10 +22,6 @@ import (
 
 const dashboardPollInterval = 2 * time.Second
 
-// dashboardDrainPickedUp is the Drain-column value for a set whose checkout is
-// held by a live drain (running / Picked-up). It is the tier-1 sort signal.
-const dashboardDrainPickedUp = "picked up"
-
 // SetRef holds the resolved, fork-free coordinates of one registered Task set
 // that the Queue write-path acts on, plus the per-build derived facts the
 // write-path branches on. Nothing re-resolves these; they are carried,
@@ -54,10 +50,9 @@ type SetRef struct {
 	// ConfigError is the message for a config-class defect that keeps the set
 	// from routing to an integration target — a bare repo with no declared trunk
 	// or an unsatisfiable worktree directive (ADR-0059/0060). Non-blank only when
-	// the set is neither live-drained nor parked, mirroring the old DRAIN string's
-	// precedence. Rendered as the plain ` · config error: <msg>` STATUS suffix
-	// (ADR-0111), never in the DRAIN string, which now only ever holds
-	// dashboardDrainPickedUp or blank.
+	// the set is neither live-drained nor parked, preserving the mutual exclusion
+	// the retired single-string DRAIN cell enforced. Rendered as the plain
+	// ` · config error: <msg>` STATUS suffix (ADR-0111).
 	ConfigError string
 	// RawStatus is the underlying derived Task-set status, kept for counts and
 	// comparisons so display relabels never leak into logic.
@@ -70,11 +65,11 @@ type SetRef struct {
 	// none was recorded. It is the fact PreviewDrain branches on.
 	PaneID string
 	// LiveDrain is true when a live (PID-alive) Runtime execution lock holds
-	// this set's checkout — the same fact the DRAIN column's "picked up" cell
-	// reads, promoted to a structured boolean (ADR-0111). Sort's running tier,
-	// the header "N running" count, the auto-drain suffix silencing (ADR-0108),
-	// and the READY→IN PROGRESS refinement all key on this instead of the DRAIN
-	// string. Derived per-build from the live-drain snapshot, never a git fork.
+	// this set's checkout — the structured fact that replaced the retired DRAIN
+	// column (ADR-0111). It lights the leading ● live-drain indicator across every
+	// status, and drives Sort's running tier, the header "N running" count, the
+	// auto-drain suffix silencing (ADR-0108), and the READY→IN PROGRESS
+	// refinement. Derived per-build from the live-drain snapshot, never a git fork.
 	LiveDrain bool
 }
 
@@ -94,7 +89,6 @@ type DashboardRow struct {
 	// time from live fields instead of a pre-baked string (ADR-0108).
 	VerifiedAtSHA string
 	Worktree      string
-	Drain         string
 
 	cursorKey string
 	// destKind selects how the destination column is styled; Worktree holds the
@@ -588,16 +582,11 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 			parked, _ = backoff(taskRow.ID)
 		}
 		liveDrain := dashboardLiveDrain(snap, st.repoKey, taskRow.ID, wt.runtimePath)
-		drain := ""
-		if liveDrain {
-			drain = dashboardDrainPickedUp
-		}
-		// Parked and config-error facts leave the DRAIN string entirely (ADR-0111):
-		// the string now only ever holds dashboardDrainPickedUp or blank, and these
-		// two ride on the STATUS cell as ` · parked` / ` · config error: <msg>`
-		// suffixes. The mutual exclusion the old single-string DRAIN cell enforced
-		// is preserved by gating the config-error probe on a set that is neither
-		// live-drained nor parked.
+		// A live drain lights the leading ● indicator (ADR-0111); parked and
+		// config-error ride the STATUS cell as ` · parked` / ` · config error: <msg>`
+		// suffixes. The mutual exclusion the retired single-string DRAIN cell
+		// enforced is preserved by gating the config-error probe on a set that is
+		// neither live-drained nor parked.
 		configErr := ""
 		if !liveDrain && !parked {
 			if st.configErr != "" && !hasBinding {
@@ -644,7 +633,6 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 			Started:       taskRow.Started,
 			VerifiedAtSHA: taskRow.VerifiedAtSHA,
 			Worktree:      wt.label,
-			Drain:         drain,
 			cursorKey:     st.projectName + "\x00" + taskRow.ID,
 			destKind:      wt.destKind,
 		})
@@ -761,6 +749,30 @@ const (
 
 // dashboardManagedWtStyle colors the [managed wt] destination badge.
 var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+
+// dashboardLiveDrainGlyph is the leading live-drain indicator: a single ● shown
+// on any row whose runtime lock is PID-alive, regardless of STATUS (ADR-0111).
+// It is the cue that `p` (preview the working pane) can reach a pane.
+const dashboardLiveDrainGlyph = "●"
+
+// dashboardLiveDrainStyle colors the live-drain indicator in the house working
+// colour — the same colour (256-color 214) the Monitor dashboard paints active
+// panes (ui.colorWorking).
+var dashboardLiveDrainStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+
+// dashboardLiveIndicator returns the leading indicator cell: the ● glyph when a
+// live drain holds the checkout, blank otherwise. When styled the glyph carries
+// the house working colour; the plain form feeds width measurement so no ANSI
+// reaches column math.
+func dashboardLiveIndicator(row DashboardRow, styled bool) string {
+	if !row.LiveDrain {
+		return ""
+	}
+	if styled {
+		return dashboardLiveDrainStyle.Render(dashboardLiveDrainGlyph)
+	}
+	return dashboardLiveDrainGlyph
+}
 
 // dashboardVerifiedAtStyle colors the immunized "verified @ <shortSHA>" suffix
 // (same ANSI yellow as pop tasks status Details output).
@@ -1373,28 +1385,30 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 }
 
 const (
-	dashboardColProject = iota
+	dashboardColIndicator = iota
+	dashboardColProject
 	dashboardColSetID
 	dashboardColStatus
 	dashboardColWorktree
-	dashboardColDrain
 )
 
 const dashboardColSep = 2
 
-// dashboardColShrinkOrder lists elastic columns in shrink priority: WORKTREE and
-// DRAIN give way first.
+// dashboardColShrinkOrder lists elastic columns in shrink priority: WORKTREE
+// gives way first. The leading live-drain indicator is fixed-width and absent
+// here, so narrow-pane fitting never drops it (ADR-0111).
 var dashboardColShrinkOrder = []int{
-	dashboardColDrain,
 	dashboardColWorktree,
 	dashboardColStatus,
 	dashboardColSetID,
 	dashboardColProject,
 }
 
-// dashboardTableHeaders is the fixed column header row.
+// dashboardTableHeaders is the fixed column header row. The leading column is
+// the live-drain indicator: a blank header (a single space so its natural width
+// floors at 1) over a ● / blank cell.
 func dashboardTableHeaders() []string {
-	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", "DRAIN"}
+	return []string{" ", "PROJECT", "TASK SET", "STATUS", "WORKTREE"}
 }
 
 // dashboardColumnWidths precomputes each column's natural width over the full row
@@ -1518,28 +1532,30 @@ func dashboardTwoLineMode(rows []DashboardRow, termWidth, termHeight int) bool {
 }
 
 // dashboardTwoLineHeaders returns the line-1 column headers for two-line mode:
-// PROJECT, TASK SET, WORKTREE, DRAIN. STATUS is rendered on line 2, indented to
-// sit under the TASK SET column (see dashboardTwoLineStatusHeader).
+// the live-drain indicator (blank header), PROJECT, TASK SET, WORKTREE. STATUS is
+// rendered on line 2, indented to sit under the TASK SET column (see
+// dashboardTwoLineStatusHeader).
 func dashboardTwoLineHeaders() []string {
-	return []string{"PROJECT", "TASK SET", "WORKTREE", "DRAIN"}
+	return []string{" ", "PROJECT", "TASK SET", "WORKTREE"}
 }
 
 // Line-1 column indices for two-line mode.
 const (
-	dashboardTwoLineColProject = iota
+	dashboardTwoLineColIndicator = iota
+	dashboardTwoLineColProject
 	dashboardTwoLineColSetID
 	dashboardTwoLineColWorktree
-	dashboardTwoLineColDrain
 )
 
 // dashboardTwoLineStatusIndent is the leading padding for the line-2 STATUS cell
-// so it aligns under the TASK SET column, past the PROJECT column and its
-// separator.
+// so it aligns under the TASK SET column, past the leading indicator and PROJECT
+// columns and their separators.
 func dashboardTwoLineStatusIndent(line1Widths []int) int {
 	if len(line1Widths) <= dashboardTwoLineColProject {
 		return 0
 	}
-	return line1Widths[dashboardTwoLineColProject] + dashboardColSep
+	return line1Widths[dashboardTwoLineColIndicator] + dashboardColSep +
+		line1Widths[dashboardTwoLineColProject] + dashboardColSep
 }
 
 // dashboardTwoLineStatusHeader renders the line-2 header: STATUS indented under
@@ -1549,13 +1565,13 @@ func dashboardTwoLineStatusHeader(line1Widths []int) string {
 }
 
 // dashboardTwoLineRowValuesLine1 returns the cell values for line 1 of a two-line
-// row: PROJECT, TASK SET (the set id), WORKTREE, DRAIN.
+// row: the live-drain indicator, PROJECT, TASK SET (the set id), WORKTREE.
 func dashboardTwoLineRowValuesLine1(row DashboardRow) []string {
 	return []string{
+		dashboardLiveIndicator(row, true),
 		row.Project,
 		row.SetID,
 		renderDashboardDest(row.destKind, row.Worktree),
-		row.Drain,
 	}
 }
 
@@ -1591,10 +1607,10 @@ func dashboardTwoLineTableLineWidth(widths []int) int {
 }
 
 // dashboardTwoLineColShrinkOrder lists elastic line-1 columns in shrink
-// priority: DRAIN and WORKTREE give way first, then PROJECT, so the TASK SET set
-// id keeps as much width as possible and only truncates as a last resort.
+// priority: WORKTREE gives way first, then PROJECT, so the TASK SET set id keeps
+// as much width as possible and only truncates as a last resort. The leading
+// live-drain indicator is fixed-width and absent here, so it is never dropped.
 var dashboardTwoLineColShrinkOrder = []int{
-	dashboardTwoLineColDrain,
 	dashboardTwoLineColWorktree,
 	dashboardTwoLineColProject,
 	dashboardTwoLineColSetID,
@@ -1655,8 +1671,8 @@ func dashboardTwoLineRowLine2(row DashboardRow, line1Widths []int) string {
 const dashboardTableChromeLines = 3
 
 // dashboardTwoLineChromeLines is the chrome height in two-line mode: the blank
-// line, the line-1 (TASK SET/WORKTREE/DRAIN) header, the line-2 (STATUS) header,
-// and the separator.
+// line, the line-1 (PROJECT/TASK SET/WORKTREE) header, the line-2 (STATUS)
+// header, and the separator.
 const dashboardTwoLineChromeLines = dashboardTableChromeLines + 1
 
 // dashboardChromeLines returns the chrome height above the List rows for the
@@ -3491,8 +3507,9 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 
 // renderDashboardTableTwoLineWithMenu renders the two-line task-set table and,
 // when menu is non-nil, splices the action overlay next to the cursored row.
-// Each row occupies two terminal lines: line 1 holds PROJECT, TASK SET (the set
-// id), WORKTREE and DRAIN; line 2 holds STATUS indented under the TASK SET column.
+// Each row occupies two terminal lines: line 1 holds the live-drain indicator,
+// PROJECT, TASK SET (the set id) and WORKTREE; line 2 holds STATUS indented under
+// the TASK SET column.
 func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
 	line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(rows), dashboardTableBodyBudget(width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), width))
@@ -3598,11 +3615,11 @@ func writeDashboardFooter(b *strings.Builder, height int, hint string) {
 // composed at render time from the row's live fields (styled for display).
 func dashboardRowValues(row DashboardRow) []string {
 	return []string{
+		dashboardLiveIndicator(row, true),
 		row.Project,
 		row.SetID,
 		dashboardStatusCellStyled(row),
 		renderDashboardDest(row.destKind, row.Worktree),
-		row.Drain,
 	}
 }
 
@@ -3611,11 +3628,11 @@ func dashboardRowValues(row DashboardRow) []string {
 // no ANSI ever reaches column-width math (ADR-0108).
 func dashboardRowNaturalValues(row DashboardRow) []string {
 	return []string{
+		dashboardLiveIndicator(row, false),
 		row.Project,
 		row.SetID,
 		dashboardStatusCell(row),
 		renderDashboardDest(row.destKind, row.Worktree),
-		row.Drain,
 	}
 }
 

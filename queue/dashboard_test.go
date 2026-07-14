@@ -257,7 +257,7 @@ func TestDashboardTieredSortOrder(t *testing.T) {
 		{Project: "kilo", SetRef: SetRef{SetID: "2026-05-01-ad", RawStatus: tasks.StatusReady, AutoDrain: true}},
 		{Project: "kilo", SetRef: SetRef{SetID: "2026-05-02-ado", RawStatus: tasks.StatusReady, AutoDrain: true, Orphaned: true}},
 		// Running / Picked-up tier — highest precedence even with auto-drain set.
-		{Project: "delta", Drain: "picked up", SetRef: SetRef{SetID: "2026-06-01-run", RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}},
+		{Project: "delta", SetRef: SetRef{SetID: "2026-06-01-run", RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}},
 	}
 	sortDashboardRows(rows)
 	got := make([]string, len(rows))
@@ -396,11 +396,11 @@ func TestDashboardPickedUpIndicator(t *testing.T) {
 	for _, row := range got {
 		byID[row.SetID] = row
 	}
-	if byID["ready"].Drain != "picked up" {
-		t.Fatalf("ready drain = %q, want picked up", byID["ready"].Drain)
+	if !byID["ready"].LiveDrain {
+		t.Fatalf("ready LiveDrain = false, want true (held by a live drain)")
 	}
-	if byID["other"].Drain != "" {
-		t.Fatalf("other drain = %q, want empty", byID["other"].Drain)
+	if byID["other"].LiveDrain {
+		t.Fatalf("other LiveDrain = true, want false")
 	}
 }
 
@@ -630,12 +630,12 @@ func TestDashboardAutoDrainToggleReflectsInRowAndCount(t *testing.T) {
 // TestDashboardAutoDrainWaitingMarkerAndCount pins the ADR-0108 auto-drain
 // display rules: the `· auto-drain` marker and the header tally both key on the
 // same waiting predicate (consented AND not Picked-up). A consented+idle set
-// shows the marker and is counted; a consented set held by a live drain (Drain
-// == "picked up") hides the marker and drops out of the count while its
-// persisted AutoDrain bit stays true; a non-consented set has neither.
+// shows the marker and is counted; a consented set held by a live drain
+// (LiveDrain) hides the marker and drops out of the count while its persisted
+// AutoDrain bit stays true; a non-consented set has neither.
 func TestDashboardAutoDrainWaitingMarkerAndCount(t *testing.T) {
 	idle := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}}
-	pickedUp := DashboardRow{Drain: dashboardDrainPickedUp, SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}}
+	pickedUp := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}}
 	plain := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}
 
 	// Per-row marker.
@@ -1141,7 +1141,7 @@ func TestDashboardCtrlGUnboundRowShowsStatusAndDoesNotQuit(t *testing.T) {
 
 func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", Worktree: "main", Drain: "picked up", cursorKey: "pop\x00set", SetRef: SetRef{SetID: "set", RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}},
+		{Project: "pop", Worktree: "main", cursorKey: "pop\x00set", SetRef: SetRef{SetID: "set", RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}},
 		{Project: "pop", Worktree: "main", cursorKey: "pop\x00done", SetRef: SetRef{SetID: "done", RawStatus: tasks.StatusDone}},
 	}})
 	m.width = 120
@@ -1152,7 +1152,7 @@ func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 		t.Fatalf("task-set list should use summary instead of dashboard title:\n%s", view)
 	}
 	// The auto-drain set here is Picked-up, so per ADR-0108 it drops out of the
-	// waiting-only auto-drain tally (the DRAIN column already signals it).
+	// waiting-only auto-drain tally (the live-drain indicator already signals it).
 	if !strings.Contains(view, "Queue · 2 task sets · 1 ready · 1 running") {
 		t.Fatalf("task-set list should render useful summary:\n%s", view)
 	}
@@ -1230,7 +1230,7 @@ func TestDashboardTableFitsTerminalWidth(t *testing.T) {
 }
 
 func TestDashboardFitColumnWidths(t *testing.T) {
-	natural := []int{20, 30, 40, 25, 35} // PROJECT, TASK SET, STATUS, WORKTREE, DRAIN
+	natural := []int{1, 20, 30, 40, 25} // indicator, PROJECT, TASK SET, STATUS, WORKTREE
 	fitted := dashboardFitColumnWidths(natural, 50)
 	if dashboardTableLineWidth(fitted) > 50 {
 		t.Fatalf("fitted line width %d exceeds budget 50: %v", dashboardTableLineWidth(fitted), fitted)
@@ -1301,22 +1301,25 @@ func TestDashboardTwoLineModeHeightGate(t *testing.T) {
 	}
 }
 
-func TestDashboardTwoLineRowLine1ShowsProjectSetIDWorktreeDrain(t *testing.T) {
+func TestDashboardTwoLineRowLine1ShowsIndicatorProjectSetIDWorktree(t *testing.T) {
 	row := DashboardRow{
 		Project:   "pop",
 		Worktree:  "main",
-		Drain:     "picked up",
-		SetRef:    SetRef{SetID: "2026-07-05-queue-dashboard-two-line", RawStatus: tasks.StatusReady},
+		SetRef:    SetRef{SetID: "2026-07-05-queue-dashboard-two-line", RawStatus: tasks.StatusReady, LiveDrain: true},
 		cursorKey: "pop\x00set",
 	}
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
 	line1 := dashboardTwoLineRowLine1(row, widths)
 
-	// Line 1 carries PROJECT, TASK SET, WORKTREE and DRAIN; STATUS lives on line 2.
-	for _, want := range []string{"pop", row.SetID, "main", "picked up"} {
+	// Line 1 carries the live-drain indicator, PROJECT, TASK SET and WORKTREE;
+	// STATUS lives on line 2. A live drain lights the leading ● (ADR-0111).
+	for _, want := range []string{dashboardLiveDrainGlyph, "pop", row.SetID, "main"} {
 		if !strings.Contains(line1, want) {
 			t.Fatalf("two-line row line 1 missing expected value %q: %q", want, line1)
 		}
+	}
+	if strings.Contains(line1, "picked up") {
+		t.Fatalf("two-line row line 1 must not carry the retired DRAIN string: %q", line1)
 	}
 	if strings.Contains(line1, "READY") {
 		t.Fatalf("two-line row line 1 must not contain the status: %q", line1)
@@ -1365,7 +1368,6 @@ func TestDashboardTwoLineRowsFitTerminalWidth(t *testing.T) {
 			row := DashboardRow{
 				Project:   "pop",
 				Worktree:  "main",
-				Drain:     "",
 				SetRef:    SetRef{SetID: tc.setID, RawStatus: tasks.StatusReady},
 				cursorKey: "pop\x00" + tc.setID,
 			}
@@ -1389,7 +1391,6 @@ func TestDashboardTwoLineSingleLineLayoutUnchanged(t *testing.T) {
 	row := DashboardRow{
 		Project:   "pop",
 		Worktree:  "main",
-		Drain:     "",
 		SetRef:    SetRef{SetID: "set1", RawStatus: tasks.StatusReady},
 		cursorKey: "pop\x00set1",
 	}
@@ -1404,6 +1405,122 @@ func TestDashboardTwoLineSingleLineLayoutUnchanged(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("single-line layout missing %q:\n%s", want, view)
 		}
+	}
+}
+
+// TestDashboardLiveIndicator pins the leading live-drain indicator (ADR-0111): a
+// PID-alive drain lights a single ● in the house working colour, an idle row
+// shows a blank cell, and the plain (width-measurement) form carries no ANSI.
+func TestDashboardLiveIndicator(t *testing.T) {
+	live := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, LiveDrain: true}}
+	idle := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}
+
+	if got := dashboardLiveIndicator(idle, true); got != "" {
+		t.Fatalf("idle indicator = %q, want blank", got)
+	}
+	if got := dashboardLiveIndicator(idle, false); got != "" {
+		t.Fatalf("idle indicator (plain) = %q, want blank", got)
+	}
+
+	plain := dashboardLiveIndicator(live, false)
+	if plain != dashboardLiveDrainGlyph {
+		t.Fatalf("live indicator (plain) = %q, want %q", plain, dashboardLiveDrainGlyph)
+	}
+	styled := dashboardLiveIndicator(live, true)
+	if !strings.Contains(styled, dashboardLiveDrainGlyph) {
+		t.Fatalf("live indicator (styled) = %q, want it to contain %q", styled, dashboardLiveDrainGlyph)
+	}
+	if styled == plain {
+		t.Fatalf("styled indicator = %q, want ANSI styling distinct from the plain glyph", styled)
+	}
+	if w := lipgloss.Width(styled); w != 1 {
+		t.Fatalf("styled indicator width = %d, want 1 (one-character cell)", w)
+	}
+}
+
+// TestDashboardLiveIndicatorAcrossStatuses confirms the indicator is driven by
+// LiveDrain regardless of STATUS (ADR-0111): an AWAITING-APPROVAL row with a live
+// paused agent carries the ● and keeps its own status label unrefined.
+func TestDashboardLiveIndicatorAcrossStatuses(t *testing.T) {
+	for _, status := range []tasks.TaskSetStatus{
+		tasks.StatusReady, tasks.StatusAwaitingApproval, tasks.StatusNeedsVerify, tasks.StatusBlocked,
+	} {
+		row := DashboardRow{SetRef: SetRef{RawStatus: status, LiveDrain: true}}
+		if got := dashboardLiveIndicator(row, false); got != dashboardLiveDrainGlyph {
+			t.Fatalf("status %s live indicator = %q, want %q", status, got, dashboardLiveDrainGlyph)
+		}
+		// The indicator never rewrites the status label (only READY refines).
+		if status != tasks.StatusReady {
+			if got := dashboardStatusLabel(row); got != string(status) {
+				t.Fatalf("status %s label = %q, want unchanged (indicator does not refine)", status, got)
+			}
+		}
+	}
+}
+
+// TestDashboardSingleLineDropsDrainColumnKeepsIndicator pins the retired DRAIN
+// column and the leading indicator on the single-line layout (ADR-0111): the
+// header carries no DRAIN, the column order is indicator/PROJECT/TASK SET/
+// STATUS/WORKTREE, and a live row leads with the ● glyph.
+func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
+	rows := []DashboardRow{
+		{Project: "pop", Worktree: "main", cursorKey: "pop\x00live", SetRef: SetRef{SetID: "live", RawStatus: tasks.StatusReady, LiveDrain: true}},
+		{Project: "pop", Worktree: "main", cursorKey: "pop\x00idle", SetRef: SetRef{SetID: "idle", RawStatus: tasks.StatusDone}},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	m = updated.(QueueDashboard)
+	if dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
+		t.Fatalf("wide terminal with short ids should stay single-line")
+	}
+	view := m.View().Content
+	if strings.Contains(view, "DRAIN") {
+		t.Fatalf("single-line view must not carry the retired DRAIN column:\n%s", view)
+	}
+	// Column order (indicator has a blank header): PROJECT, TASK SET, STATUS,
+	// WORKTREE — left to right, WORKTREE last (no DRAIN after it).
+	header := strings.Split(view, "\n")[dashboardTestLineIndex(strings.Split(view, "\n"), "PROJECT")]
+	iProject := strings.Index(header, "PROJECT")
+	iSet := strings.Index(header, "TASK SET")
+	iStatus := strings.Index(header, "STATUS")
+	iWorktree := strings.Index(header, "WORKTREE")
+	if !(iProject >= 0 && iProject < iSet && iSet < iStatus && iStatus < iWorktree) {
+		t.Fatalf("single-line header column order wrong: %q", header)
+	}
+	// The live row leads with the ● glyph; the done row does not.
+	lines := strings.Split(view, "\n")
+	liveIdx := dashboardTestLineIndex(lines, "live")
+	if liveIdx < 0 {
+		t.Fatalf("live row missing from view:\n%s", view)
+	}
+	if !strings.Contains(lines[liveIdx], dashboardLiveDrainGlyph) {
+		t.Fatalf("live row missing ● indicator: %q", lines[liveIdx])
+	}
+	doneIdx := dashboardTestLineIndex(lines, "idle")
+	if doneIdx < 0 {
+		t.Fatalf("idle row missing from view:\n%s", view)
+	}
+	if strings.Contains(lines[doneIdx], dashboardLiveDrainGlyph) {
+		t.Fatalf("idle row must not show the ● indicator: %q", lines[doneIdx])
+	}
+}
+
+// TestDashboardNarrowPaneKeepsIndicator confirms the fixed-width indicator is
+// never dropped by elastic width fitting even when the pane is very narrow
+// (ADR-0111): the ● still leads a live row's rendered cells.
+func TestDashboardNarrowPaneKeepsIndicator(t *testing.T) {
+	rows := []DashboardRow{
+		{Project: "a-really-long-project-name", Worktree: "some-long-branch", cursorKey: "a\x00live",
+			SetRef: SetRef{SetID: "live", RawStatus: tasks.StatusReady, LiveDrain: true}},
+	}
+	natural := dashboardColumnWidths(rows)
+	fitted := dashboardFitColumnWidths(natural, 20)
+	if fitted[dashboardColIndicator] < 1 {
+		t.Fatalf("indicator column width = %d, want >= 1 (never dropped)", fitted[dashboardColIndicator])
+	}
+	line := dashboardTableLine(dashboardRowValues(rows[0]), fitted)
+	if !strings.Contains(line, dashboardLiveDrainGlyph) {
+		t.Fatalf("narrow-pane live row missing ● indicator: %q", line)
 	}
 }
 
@@ -2208,8 +2325,8 @@ func TestDashboardShowsUnsatisfiableWorktreeDirective(t *testing.T) {
 	if row == nil {
 		t.Fatalf("set %s not in dashboard rows: %+v", setID, snap.Rows)
 	}
-	if row.Drain != "" {
-		t.Fatalf("Drain = %q, want empty (config error rides the STATUS suffix now)", row.Drain)
+	if row.LiveDrain {
+		t.Fatalf("LiveDrain = true, want false (config error row is not a live drain)")
 	}
 	status := dashboardStatusCell(*row)
 	if !strings.Contains(status, "· config error:") || !strings.Contains(status, "no worktree of that name") {
@@ -2433,8 +2550,8 @@ func TestDashboardBareWithoutTrunkRendersConfigError(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("rows = %+v, want one", got)
 	}
-	if got[0].Drain != "" {
-		t.Fatalf("row Drain = %q, want empty (config error rides the STATUS suffix now)", got[0].Drain)
+	if got[0].LiveDrain {
+		t.Fatalf("row LiveDrain = true, want false (config error row is not a live drain)")
 	}
 	if got[0].Worktree != dashboardDestLabelNeedsBind {
 		t.Fatalf("row = %+v, want worktree %q", got[0], dashboardDestLabelNeedsBind)
@@ -4120,7 +4237,7 @@ func TestQueueDashboardHelpFooterHint(t *testing.T) {
 
 // TestDashboardMainViewTwoLineIntegration wires two-line mode into the default
 // Frame + List path: with a long set id every row renders two physical lines —
-// the "PROJECT · SETID" identity (plus WORKTREE/DRAIN) on line 1 and STATUS on
+// the "PROJECT · SETID" identity (plus WORKTREE) on line 1 and STATUS on
 // line 2 — and the view clamps to the terminal height instead of overflowing.
 func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
 	longID := strings.Repeat("a", 37)
@@ -4145,17 +4262,20 @@ func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
 		t.Fatalf("view line count = %d, want %d (clamped to terminal height):\n%s", got, want, view)
 	}
 
-	// The line-1 header labels the identity, WORKTREE and DRAIN columns; the
-	// line-2 header labels STATUS.
+	// The line-1 header labels the identity and WORKTREE columns (the DRAIN column
+	// is retired, ADR-0111); the line-2 header labels STATUS.
 	headerIdx := dashboardTestLineIndex(lines, "TASK SET")
 	if headerIdx < 0 {
 		t.Fatalf("two-line header missing TASK SET:\n%s", view)
 	}
 	header := lines[headerIdx]
-	for _, want := range []string{"TASK SET", "WORKTREE", "DRAIN"} {
+	for _, want := range []string{"TASK SET", "WORKTREE"} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("two-line line-1 header missing %q:\n%s", want, view)
 		}
+	}
+	if strings.Contains(header, "DRAIN") {
+		t.Fatalf("two-line line-1 header must not carry the retired DRAIN column:\n%s", view)
 	}
 	if !strings.Contains(lines[headerIdx+1], "STATUS") {
 		t.Fatalf("two-line line-2 header missing STATUS:\n%s", view)
@@ -4620,8 +4740,9 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 	}
 
 	// Both render modes read the same precomputed status; widths are wide enough
-	// that no truncation clips the suffixes.
-	widths := []int{20, 20, 60, 20, 20}
+	// that no truncation clips the suffixes. Column order: indicator, PROJECT,
+	// TASK SET, STATUS (index 3, given the width), WORKTREE.
+	widths := []int{20, 20, 20, 60, 20}
 	single := dashboardTableLine(dashboardRowValues(byID["both"]), widths)
 	if !strings.Contains(single, "· auto-drain · orphaned") {
 		t.Fatalf("single-line render missing suffixes:\n%s", single)
@@ -4639,7 +4760,9 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 // two compose cleanly after verified/auto-drain/orphaned, and the styled cell's
 // measured width matches the plain form (no ANSI leaks into column math).
 func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
-	statusW := []int{10, 10, 80, 10, 10}
+	// Column order: indicator, PROJECT, TASK SET, STATUS, WORKTREE — STATUS (index
+	// 3) is given ample width so its suffixes are not truncated at render.
+	statusW := []int{10, 10, 10, 80, 10}
 
 	for _, status := range []tasks.TaskSetStatus{tasks.StatusReady, tasks.StatusBlocked, tasks.StatusAwaitingApproval, tasks.StatusFailed} {
 		row := DashboardRow{SetRef: SetRef{RawStatus: status, Parked: true}}
@@ -4661,8 +4784,8 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 	if s := dashboardStatusCell(ce); !strings.Contains(s, " · config error: "+msg) {
 		t.Fatalf("config-error cell = %q, want a · config error suffix", s)
 	}
-	if ce.Drain != "" {
-		t.Fatalf("config-error row Drain = %q, want empty (fact rides the STATUS suffix now)", ce.Drain)
+	if ce.LiveDrain {
+		t.Fatalf("config-error row LiveDrain = true, want false (config error is not a live drain)")
 	}
 	single := dashboardTableLine(dashboardRowValues(ce), statusW)
 	if !strings.Contains(single, "· config error: "+msg) {
