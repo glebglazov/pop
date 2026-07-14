@@ -1,3 +1,14 @@
+<!--
+base: mattpocock/skills domain-modeling@391a2701
+
+This file is a marked overlay. Everything from here down to the "POP OVERLAY"
+marker is a verbatim copy of domain-modeling/CONTEXT-FORMAT.md at the pinned ref
+above. Pop's additions (the .grill-context fragment scheme, delta ops,
+union-read, collision handling) live below that marker. To review upstream
+drift, diff the region between this header and the marker against
+domain-modeling@<newref>.
+-->
+
 # CONTEXT.md Format
 
 ## Structure
@@ -58,6 +69,13 @@ The skill infers which structure applies:
 - If neither exists, create a root `CONTEXT.md` lazily when the first term is resolved
 
 When multiple contexts exist, infer which one the current topic relates to. If unclear, ask.
+<!-- ═══════════════════════════════ POP OVERLAY ═══════════════════════════════
+Everything below is pop-specific and has no upstream twin. It negates
+domain-modeling's single-writer "update CONTEXT.md right there" instruction in
+favour of writing a per-session delta fragment under .grill-context/, and adds
+the union-read and collision-handling rules that make grilling safe under
+parallel agents and teams.
+-->
 
 A context's **link text** in the map (`Ordering`, `Billing`) is its canonical identifier: it names the context in prose and, slugified, prefixes that context's fragment files (see the fragment scheme below). The bullet-link map layout above is the canonical `CONTEXT-MAP.md` format — keep to it so the slug is derivable.
 

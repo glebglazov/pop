@@ -66,7 +66,7 @@ type SetRef struct {
 	PaneID string
 	// LiveDrain is true when a live (PID-alive) Runtime execution lock holds
 	// this set's checkout — the structured fact that replaced the retired DRAIN
-	// column (ADR-0111). It lights the leading ● live-drain indicator across every
+	// column (ADR-0111). It lights the trailing ● live-drain indicator across every
 	// status, and drives Sort's running tier, the header "N running" count, the
 	// auto-drain suffix silencing (ADR-0108), and the READY→IN PROGRESS
 	// refinement. Derived per-build from the live-drain snapshot, never a git fork.
@@ -582,7 +582,7 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 			parked, _ = backoff(taskRow.ID)
 		}
 		liveDrain := dashboardLiveDrain(snap, st.repoKey, taskRow.ID, wt.runtimePath)
-		// A live drain lights the leading ● indicator (ADR-0111); parked and
+		// A live drain lights the trailing ● indicator (ADR-0111); parked and
 		// config-error ride the STATUS cell as ` · parked` / ` · config error: <msg>`
 		// suffixes. The mutual exclusion the retired single-string DRAIN cell
 		// enforced is preserved by gating the config-error probe on a set that is
@@ -750,7 +750,7 @@ const (
 // dashboardManagedWtStyle colors the [managed wt] destination badge.
 var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 
-// dashboardLiveDrainGlyph is the leading live-drain indicator: a single ● shown
+// dashboardLiveDrainGlyph is the trailing live-drain indicator: a single ● shown
 // on any row whose runtime lock is PID-alive, regardless of STATUS (ADR-0111).
 // It is the cue that `p` (preview the working pane) can reach a pane.
 const dashboardLiveDrainGlyph = "●"
@@ -760,7 +760,7 @@ const dashboardLiveDrainGlyph = "●"
 // panes (ui.colorWorking).
 var dashboardLiveDrainStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 
-// dashboardLiveIndicator returns the leading indicator cell: the ● glyph when a
+// dashboardLiveIndicator returns the trailing indicator cell: the ● glyph when a
 // live drain holds the checkout, blank otherwise. When styled the glyph carries
 // the house working colour; the plain form feeds width measurement so no ANSI
 // reaches column math.
@@ -1385,17 +1385,17 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 }
 
 const (
-	dashboardColIndicator = iota
-	dashboardColProject
+	dashboardColProject = iota
 	dashboardColSetID
 	dashboardColStatus
 	dashboardColWorktree
+	dashboardColIndicator
 )
 
 const dashboardColSep = 2
 
 // dashboardColShrinkOrder lists elastic columns in shrink priority: WORKTREE
-// gives way first. The leading live-drain indicator is fixed-width and absent
+// gives way first. The trailing live-drain indicator is fixed-width and absent
 // here, so narrow-pane fitting never drops it (ADR-0111).
 var dashboardColShrinkOrder = []int{
 	dashboardColWorktree,
@@ -1404,11 +1404,11 @@ var dashboardColShrinkOrder = []int{
 	dashboardColProject,
 }
 
-// dashboardTableHeaders is the fixed column header row. The leading column is
-// the live-drain indicator: a blank header (a single space so its natural width
-// floors at 1) over a ● / blank cell.
+// dashboardTableHeaders is the fixed column header row. The trailing column is
+// the live-drain indicator: an empty header over a ● / blank cell, so no label
+// sits above the glyph.
 func dashboardTableHeaders() []string {
-	return []string{" ", "PROJECT", "TASK SET", "STATUS", "WORKTREE"}
+	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}
 }
 
 // dashboardColumnWidths precomputes each column's natural width over the full row
@@ -1532,30 +1532,29 @@ func dashboardTwoLineMode(rows []DashboardRow, termWidth, termHeight int) bool {
 }
 
 // dashboardTwoLineHeaders returns the line-1 column headers for two-line mode:
-// the live-drain indicator (blank header), PROJECT, TASK SET, WORKTREE. STATUS is
-// rendered on line 2, indented to sit under the TASK SET column (see
-// dashboardTwoLineStatusHeader).
+// PROJECT, TASK SET, WORKTREE, and the trailing live-drain indicator (empty
+// header). STATUS is rendered on line 2, indented to sit under the TASK SET
+// column (see dashboardTwoLineStatusHeader).
 func dashboardTwoLineHeaders() []string {
-	return []string{" ", "PROJECT", "TASK SET", "WORKTREE"}
+	return []string{"PROJECT", "TASK SET", "WORKTREE", ""}
 }
 
 // Line-1 column indices for two-line mode.
 const (
-	dashboardTwoLineColIndicator = iota
-	dashboardTwoLineColProject
+	dashboardTwoLineColProject = iota
 	dashboardTwoLineColSetID
 	dashboardTwoLineColWorktree
+	dashboardTwoLineColIndicator
 )
 
 // dashboardTwoLineStatusIndent is the leading padding for the line-2 STATUS cell
-// so it aligns under the TASK SET column, past the leading indicator and PROJECT
-// columns and their separators.
+// so it aligns under the TASK SET column, past the PROJECT column and its
+// separator.
 func dashboardTwoLineStatusIndent(line1Widths []int) int {
 	if len(line1Widths) <= dashboardTwoLineColProject {
 		return 0
 	}
-	return line1Widths[dashboardTwoLineColIndicator] + dashboardColSep +
-		line1Widths[dashboardTwoLineColProject] + dashboardColSep
+	return line1Widths[dashboardTwoLineColProject] + dashboardColSep
 }
 
 // dashboardTwoLineStatusHeader renders the line-2 header: STATUS indented under
@@ -1565,13 +1564,14 @@ func dashboardTwoLineStatusHeader(line1Widths []int) string {
 }
 
 // dashboardTwoLineRowValuesLine1 returns the cell values for line 1 of a two-line
-// row: the live-drain indicator, PROJECT, TASK SET (the set id), WORKTREE.
+// row: PROJECT, TASK SET (the set id), WORKTREE, and the trailing live-drain
+// indicator.
 func dashboardTwoLineRowValuesLine1(row DashboardRow) []string {
 	return []string{
-		dashboardLiveIndicator(row, true),
 		row.Project,
 		row.SetID,
 		renderDashboardDest(row.destKind, row.Worktree),
+		dashboardLiveIndicator(row, true),
 	}
 }
 
@@ -1608,7 +1608,7 @@ func dashboardTwoLineTableLineWidth(widths []int) int {
 
 // dashboardTwoLineColShrinkOrder lists elastic line-1 columns in shrink
 // priority: WORKTREE gives way first, then PROJECT, so the TASK SET set id keeps
-// as much width as possible and only truncates as a last resort. The leading
+// as much width as possible and only truncates as a last resort. The trailing
 // live-drain indicator is fixed-width and absent here, so it is never dropped.
 var dashboardTwoLineColShrinkOrder = []int{
 	dashboardTwoLineColWorktree,
@@ -3615,11 +3615,11 @@ func writeDashboardFooter(b *strings.Builder, height int, hint string) {
 // composed at render time from the row's live fields (styled for display).
 func dashboardRowValues(row DashboardRow) []string {
 	return []string{
-		dashboardLiveIndicator(row, true),
 		row.Project,
 		row.SetID,
 		dashboardStatusCellStyled(row),
 		renderDashboardDest(row.destKind, row.Worktree),
+		dashboardLiveIndicator(row, true),
 	}
 }
 
@@ -3628,11 +3628,11 @@ func dashboardRowValues(row DashboardRow) []string {
 // no ANSI ever reaches column-width math (ADR-0108).
 func dashboardRowNaturalValues(row DashboardRow) []string {
 	return []string{
-		dashboardLiveIndicator(row, false),
 		row.Project,
 		row.SetID,
 		dashboardStatusCell(row),
 		renderDashboardDest(row.destKind, row.Worktree),
+		dashboardLiveIndicator(row, false),
 	}
 }
 
