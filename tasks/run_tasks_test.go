@@ -2437,6 +2437,104 @@ func TestRunTaskSetClearsAutoDrainOnDone(t *testing.T) {
 	}
 }
 
+func TestRunTaskSetClearsAutoDrainOnAwaitingApproval(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+	})
+	if _, err := ToggleAutoDrainWith(env.deps(), env.tasksDir, DefaultStatePath(), "demo"); err != nil {
+		t.Fatal(err)
+	}
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
+
+	var buf bytes.Buffer
+	result, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, &buf))
+	assertExitCode(t, err, ExitNoRunnable)
+	if !result.TaskSetAwaitingApproval {
+		t.Fatalf("result = %#v, want TaskSetAwaitingApproval", result)
+	}
+
+	state, err := LoadGlobalState(DefaultStatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	canon, err := CanonicalDefinitionPathWith(env.deps(), env.tasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Tasks[canon].TaskSets[0].AutoDrain {
+		t.Fatalf("auto_drain should be cleared after AWAITING-APPROVAL drain: %#v", state.Tasks[canon].TaskSets[0])
+	}
+
+	out := buf.String()
+	wantNotice := "Auto-drain cleared for task set demo: all AFK tasks drained; status AWAITING-APPROVAL."
+	if !strings.Contains(out, wantNotice) {
+		t.Fatalf("missing auto-drain clear notice:\n%s", out)
+	}
+	if !strings.Contains(out, "Agents done — awaiting approval: demo/02-hitl") {
+		t.Fatalf("AWAITING-APPROVAL advice should still appear after clear notice:\n%s", out)
+	}
+	if strings.Index(out, wantNotice) > strings.Index(out, "Agents done — awaiting approval") {
+		t.Fatalf("clear notice should precede AWAITING-APPROVAL advice:\n%s", out)
+	}
+
+	progress, err := os.ReadFile(filepath.Join(env.tasksDir, "demo", "progress.txt"))
+	if err != nil {
+		t.Fatalf("read progress.txt: %v", err)
+	}
+	progressText := string(progress)
+	if !strings.Contains(progressText, "[set] AUTO-DRAIN-CLEARED") {
+		t.Fatalf("progress.txt missing set-level clear record:\n%s", progressText)
+	}
+	if !strings.Contains(progressText, "Auto-drain cleared: all AFK tasks drained; status AWAITING-APPROVAL.") {
+		t.Fatalf("progress.txt missing clear summary:\n%s", progressText)
+	}
+}
+
+func TestRunTaskSetDoesNotClearAutoDrainOnBlocked(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-hitl", File: "01-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
+		{ID: "02-a", File: "02-a.md", Title: "A", Type: "AFK", Status: "open", BlockedBy: []string{"01-hitl"}},
+	})
+	if _, err := ToggleAutoDrainWith(env.deps(), env.tasksDir, DefaultStatePath(), "demo"); err != nil {
+		t.Fatal(err)
+	}
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "should-not-run"})
+
+	var buf bytes.Buffer
+	_, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, &buf))
+	assertExitCode(t, err, ExitNoRunnable)
+
+	state, err := LoadGlobalState(DefaultStatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	canon, err := CanonicalDefinitionPathWith(env.deps(), env.tasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Tasks[canon].TaskSets[0].AutoDrain {
+		t.Fatalf("auto_drain must stay on after BLOCKED drain: %#v", state.Tasks[canon].TaskSets[0])
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "Auto-drain cleared") {
+		t.Fatalf("BLOCKED drain must not emit auto-drain clear notice:\n%s", out)
+	}
+	if !strings.Contains(out, "Human-blocked: demo/01-hitl") {
+		t.Fatalf("BLOCKED advice missing:\n%s", out)
+	}
+
+	progressPath := filepath.Join(env.tasksDir, "demo", "progress.txt")
+	if progress, err := os.ReadFile(progressPath); err == nil {
+		if strings.Contains(string(progress), "AUTO-DRAIN-CLEARED") {
+			t.Fatalf("BLOCKED drain must not record auto-drain clear:\n%s", progress)
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("read progress.txt: %v", err)
+	}
+}
+
 func TestRunTaskSetNoOpWhenAutoDrainOffOnDone(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
