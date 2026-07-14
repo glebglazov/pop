@@ -132,11 +132,25 @@ When the human explicitly requests auto-drain in the planning session, add a top
   ]
 }
 ```
+
+When the human explicitly asks for the set to run in a worktree, add a top-level `"worktree"` key (omit it by default). Two arms, exactly one:
+
+```json
+{
+  "worktree": { "managed": true },
+  "tasks": [ ... ]
+}
+```
+
+- `{ "managed": true }` — pop provisions its own worktree (and a branch named after the set) forked from the Trunk worktree, the first time the Queue drains the set. Use this when the human wants an isolated, pop-owned checkout ("in a worktree", "isolated", "let the queue run it in its own worktree").
+- `{ "name": "<worktree>" }` — pop adopts (never deletes) the existing worktree of that operator-facing name on this machine, as shown by `pop worktree`. Use this when the human names a checkout they already have ("run this in my `feature-x` worktree"). Write the name, never a path — the manifest is portable across machines.
+
 </manifest-schema>
 
 Field rules:
 
 - `auto_drain` — optional top-level boolean. **Omit by default.** Write `"auto_drain": true` only when the human explicitly requests auto-drain in that session (e.g. "with auto-drain", "queue should pick this up"). Never infer it from task content; do not write `"auto_drain": false` unless the human explicitly asks to disable. Pop seeds the Auto-drain bit in Task state once at first registration; the Queue dashboard toggle remains authoritative afterward.
+- `worktree` — optional top-level object, `{ "managed": true }` or `{ "name": "<worktree>" }` (never both). **Omit by default.** Write it only when the human explicitly asks the set to run in a worktree; never infer it. It is a one-time registration seed: pop reads it once at first registration and provisions/adopts lazily on the first Queue drain — editing it later does nothing. A foreground `pop tasks implement` ignores it entirely and binds the current checkout. **Orthogonal to `auto_drain`, but related:** an `auto_drain` set with *no* `worktree` directive is not Queue-drainable — the dashboard shows it as `needs bind` until the human binds a checkout by hand. So when the human asks for `auto_drain`, surface this and offer to add `{ "managed": true }` so the Queue can actually run it unattended; don't force it (they may intend to bind manually or drain foreground).
 - `id` — the filename stem (`<number>-<task-name>`), stable identifier referenced by `blocked_by`.
 - `status` — one of `open` | `done` | `failed` | `skipped`. Always initialize to `open`. Do not write `in_progress`; persisted `in_progress` is malformed.
 - `blocked_by` — array of `id`s of blocking tasks. Empty array if none.
