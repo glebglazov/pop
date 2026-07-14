@@ -1876,3 +1876,149 @@ func TestRunProject_WorkbenchPickStandaloneUnaffected(t *testing.T) {
 		t.Error("standalone selection must not trigger the Workbench prompt")
 	}
 }
+
+// managedFS builds a MockFileSystem whose ReadDir serves the managed-worktrees
+// layout: root -> repoKey dirs, repoKey -> worktree dirs. Any other path errors,
+// modelling an absent directory. Non-dir entries are injected via nonDirs.
+func managedFS(root string, layout map[string][]string, nonDirs map[string]bool) *deps.MockFileSystem {
+	return &deps.MockFileSystem{
+		ReadDirFunc: func(path string) ([]os.DirEntry, error) {
+			// root -> repoKeys
+			if path == root {
+				var entries []os.DirEntry
+				for repoKey := range layout {
+					entries = append(entries, deps.MockDirEntry{NameVal: repoKey, IsDirVal: !nonDirs[repoKey]})
+				}
+				sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+				return entries, nil
+			}
+			// <root>/<repoKey> -> worktrees
+			for repoKey, wts := range layout {
+				if path == filepath.Join(root, repoKey) {
+					var entries []os.DirEntry
+					for _, wt := range wts {
+						entries = append(entries, deps.MockDirEntry{NameVal: wt, IsDirVal: !nonDirs[wt]})
+					}
+					return entries, nil
+				}
+			}
+			return nil, os.ErrNotExist
+		},
+	}
+}
+
+func TestDiscoverManagedWorktreesWith_Discovery(t *testing.T) {
+	root := "/data/pop/queue/worktrees"
+	layout := map[string][]string{
+		"game_server-a1b2c3d4e5f6": {"2026-07-14-feature", "hotfix"},
+		"tooling-0123456789ab":     {"cleanup"},
+	}
+	fs := managedFS(root, layout, nil)
+
+	got := discoverManagedWorktreesWith(fs, root)
+
+	// Index by Name for order-independent assertions.
+	byName := make(map[string]project.ExpandedProject)
+	for _, ep := range got {
+		byName[ep.Name] = ep
+	}
+	if len(byName) != 3 {
+		t.Fatalf("discovered %d worktrees, want 3: %+v", len(byName), got)
+	}
+
+	cases := []struct {
+		name, path, session string
+	}{
+		{"game_server/2026-07-14-feature", filepath.Join(root, "game_server-a1b2c3d4e5f6", "2026-07-14-feature"), "game_server/2026-07-14-feature"},
+		{"game_server/hotfix", filepath.Join(root, "game_server-a1b2c3d4e5f6", "hotfix"), "game_server/hotfix"},
+		{"tooling/cleanup", filepath.Join(root, "tooling-0123456789ab", "cleanup"), "tooling/cleanup"},
+	}
+	for _, c := range cases {
+		ep, ok := byName[c.name]
+		if !ok {
+			t.Fatalf("missing entry %q in %+v", c.name, got)
+		}
+		if ep.Path != c.path {
+			t.Errorf("%q Path = %q, want %q", c.name, ep.Path, c.path)
+		}
+		if ep.SessionName != c.session {
+			t.Errorf("%q SessionName = %q, want %q", c.name, ep.SessionName, c.session)
+		}
+		if ep.ProjectName != strings.SplitN(c.name, "/", 2)[0] {
+			t.Errorf("%q ProjectName = %q, want %q", c.name, ep.ProjectName, strings.SplitN(c.name, "/", 2)[0])
+		}
+		if !ep.IsWorktree {
+			t.Errorf("%q IsWorktree = false, want true", c.name)
+		}
+	}
+}
+
+// A basename that itself contains dashes must survive: only the trailing
+// -<12 hex> short hash is stripped. A "." in the basename is sanitised in the
+// session name (matching the drain) but preserved in the display name.
+func TestDiscoverManagedWorktreesWith_NameAndSessionDerivation(t *testing.T) {
+	root := "/data/pop/queue/worktrees"
+	layout := map[string][]string{
+		"my-cool.repo-abcdef012345": {"wt"},
+	}
+	fs := managedFS(root, layout, nil)
+
+	got := discoverManagedWorktreesWith(fs, root)
+	if len(got) != 1 {
+		t.Fatalf("discovered %d worktrees, want 1: %+v", len(got), got)
+	}
+	ep := got[0]
+	if ep.Name != "my-cool.repo/wt" {
+		t.Errorf("Name = %q, want %q", ep.Name, "my-cool.repo/wt")
+	}
+	if ep.SessionName != "my-cool_repo/wt" {
+		t.Errorf("SessionName = %q, want %q (dot sanitised like the drain)", ep.SessionName, "my-cool_repo/wt")
+	}
+}
+
+func TestDiscoverManagedWorktreesWith_EmptyRoot(t *testing.T) {
+	// ReadDir on the root errors (directory absent) — clean no-op, no error.
+	fs := &deps.MockFileSystem{
+		ReadDirFunc: func(path string) ([]os.DirEntry, error) {
+			return nil, os.ErrNotExist
+		},
+	}
+	got := discoverManagedWorktreesWith(fs, "/data/pop/queue/worktrees")
+	if len(got) != 0 {
+		t.Errorf("absent root should yield no entries, got %+v", got)
+	}
+}
+
+// A stray file at the root level, and a stray file inside a repoKey dir, are
+// both skipped — only directories become entries.
+func TestDiscoverManagedWorktreesWith_SkipsNonDirs(t *testing.T) {
+	root := "/data/pop/queue/worktrees"
+	layout := map[string][]string{
+		"repo-000000000000": {"realwt", "stray.txt"},
+		"loose.file":        {},
+	}
+	fs := managedFS(root, layout, map[string]bool{"stray.txt": true, "loose.file": true})
+
+	got := discoverManagedWorktreesWith(fs, root)
+	if len(got) != 1 {
+		t.Fatalf("want 1 entry (non-dirs skipped), got %+v", got)
+	}
+	if got[0].Name != "repo/realwt" {
+		t.Errorf("Name = %q, want %q", got[0].Name, "repo/realwt")
+	}
+}
+
+func TestRepoKeyBasename(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"game_server-a1b2c3d4e5f6", "game_server"},
+		{"my-cool-repo-abcdef012345", "my-cool-repo"},
+		{"nodash", "nodash"},                       // no dash at all
+		{"repo-short", "repo-short"},               // suffix not 12 chars
+		{"repo-ghijklmnopqr", "repo-ghijklmnopqr"}, // 12 chars but non-hex
+	}
+	for _, c := range cases {
+		if got := repoKeyBasename(c.in); got != c.want {
+			t.Errorf("repoKeyBasename(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

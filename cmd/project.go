@@ -18,6 +18,8 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/session"
+	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -80,6 +82,11 @@ type ProjectDeps struct {
 	// Data loading
 	LoadConfig  func() (*config.Config, error)
 	LoadHistory func() (*history.History, error)
+
+	// ManagedWorktrees discovers pop-managed worktrees under ManagedWorktreesRoot
+	// via a filesystem-only walk — no store open, no git fork (ADR-0110). A seam so
+	// tests supply a fixed set (or none) without a real queue data dir.
+	ManagedWorktrees func() []project.ExpandedProject
 
 	// Picker — the critical testing seam
 	RunPicker func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error)
@@ -147,6 +154,11 @@ func DefaultProjectDeps() *ProjectDeps {
 		},
 		LoadHistory: func() (*history.History, error) {
 			return history.Load(history.DefaultHistoryPath())
+		},
+
+		ManagedWorktrees: func() []project.ExpandedProject {
+			td := tasks.DefaultDeps()
+			return discoverManagedWorktreesWith(td.FS, binding.ManagedWorktreesRoot(td))
 		},
 
 		RunPicker: ui.Run,
@@ -240,10 +252,26 @@ func RunProject(d *ProjectDeps) error {
 		return fmt.Errorf("no projects found. Check your config at %s", cfgPath)
 	}
 
+	// Discover pop-managed worktrees concurrently with the configured-project
+	// expansion (ADR-0110). The walk is filesystem-only — no store, no git — so
+	// it can't slow expansion or fork; a nil seam simply contributes nothing.
+	managedCh := make(chan []project.ExpandedProject, 1)
+	go func() {
+		if d.ManagedWorktrees == nil {
+			managedCh <- nil
+			return
+		}
+		managedCh <- d.ManagedWorktrees()
+	}()
+
 	// Expand projects, showing worktrees for bare repos (parallel).
 	// Per-project errors and panics are captured so one bad project can't
 	// crash the whole project flow.
 	expanded, expansionErrors := expandProjectsWith(d.Project, paths)
+
+	// Fold in the managed worktrees; they sort by History recency alongside
+	// configured entries and dedupe against live sessions like any other entry.
+	expanded = append(expanded, (<-managedCh)...)
 
 	// Get current tmux session name for optional exclusion
 	var excludedSessionNames map[string]bool
@@ -814,6 +842,73 @@ func sendCDToPaneWith(tmux deps.Tmux, paneID, path string) error {
 func yankPathToPaneWith(tmux deps.Tmux, paneID, path string) error {
 	_, err := tmux.Command("send-keys", "-t", paneID, path)
 	return err
+}
+
+// discoverManagedWorktreesWith walks the pop-managed worktrees root with
+// filesystem calls only — it opens no store and forks no git (ADR-0110), so
+// project expansion stays store- and fork-free. Layout is
+// <root>/<repoKey>/<worktreeName>, where repoKey is <basename>-<shortHash>.
+// Each worktree becomes a flat ExpandedProject whose display name and session
+// name are both <basename>/<worktreeName>; the session name matches the drain's
+// own naming so a live drain session dedupes rather than duplicating. A missing
+// root (no managed worktrees yet, or ReadDir error) yields no entries.
+func discoverManagedWorktreesWith(fs deps.FileSystem, root string) []project.ExpandedProject {
+	repoEntries, err := fs.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []project.ExpandedProject
+	for _, repoEntry := range repoEntries {
+		if !repoEntry.IsDir() {
+			continue
+		}
+		repoKey := repoEntry.Name()
+		basename := repoKeyBasename(repoKey)
+		repoPath := filepath.Join(root, repoKey)
+		wtEntries, err := fs.ReadDir(repoPath)
+		if err != nil {
+			continue
+		}
+		for _, wtEntry := range wtEntries {
+			if !wtEntry.IsDir() {
+				continue
+			}
+			name := basename + "/" + wtEntry.Name()
+			out = append(out, project.ExpandedProject{
+				Name:        name,
+				Path:        filepath.Join(repoPath, wtEntry.Name()),
+				ProjectName: basename,
+				IsWorktree:  true,
+				SessionName: sanitizeSessionName(name),
+			})
+		}
+	}
+	return out
+}
+
+// repoKeyBasename strips the trailing "-<shortHash>" from a managed-worktree
+// repoKey to recover the human-readable repository basename. The short hash is
+// exactly tasks.ShortHashLen hex characters; only a suffix matching that shape is
+// stripped, so a basename that itself contains dashes survives intact.
+func repoKeyBasename(repoKey string) string {
+	i := strings.LastIndex(repoKey, "-")
+	if i < 0 {
+		return repoKey
+	}
+	suffix := repoKey[i+1:]
+	if len(suffix) != tasks.ShortHashLen || !isHexString(suffix) {
+		return repoKey
+	}
+	return repoKey[:i]
+}
+
+func isHexString(s string) bool {
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // expandProjects runs expandProjectsWith using the default project dependencies.
