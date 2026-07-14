@@ -61,6 +61,13 @@ type SetRef struct {
 	// PaneID is the tmux pane recorded for a live drain of this set, empty if
 	// none was recorded. It is the fact PreviewDrain branches on.
 	PaneID string
+	// LiveDrain is true when a live (PID-alive) Runtime execution lock holds
+	// this set's checkout — the same fact the DRAIN column's "picked up" cell
+	// reads, promoted to a structured boolean (ADR-0111). Sort's running tier,
+	// the header "N running" count, the auto-drain suffix silencing (ADR-0108),
+	// and the READY→IN PROGRESS refinement all key on this instead of the DRAIN
+	// string. Derived per-build from the live-drain snapshot, never a git fork.
+	LiveDrain bool
 }
 
 // DashboardRow is one read-only Queue dashboard table row.
@@ -477,7 +484,7 @@ const (
 // both orphaned and auto-drain qualifies for the auto-drain tier first.
 func dashboardSortTier(r DashboardRow) int {
 	switch {
-	case r.Drain == dashboardDrainPickedUp:
+	case r.LiveDrain:
 		return dashboardTierRunning
 	case r.AutoDrain:
 		return dashboardTierAutoDrain
@@ -572,7 +579,11 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 		if backoff != nil {
 			parked, _ = backoff(taskRow.ID)
 		}
-		drain := dashboardDrain(snap, st.repoKey, taskRow.ID, wt.runtimePath)
+		liveDrain := dashboardLiveDrain(snap, st.repoKey, taskRow.ID, wt.runtimePath)
+		drain := ""
+		if liveDrain {
+			drain = dashboardDrainPickedUp
+		}
 		if parked {
 			drain = "parked"
 		} else if st.configErr != "" && !hasBinding && drain == "" {
@@ -611,6 +622,7 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 				Orphaned:              orphaned,
 				Bound:                 bound,
 				PaneID:                dashboardPaneID(snap, st.repoKey, taskRow.ID),
+				LiveDrain:             liveDrain,
 			},
 			Project:       st.projectName,
 			Started:       taskRow.Started,
@@ -640,10 +652,16 @@ func staticProjectPath(st dashboardRepoStatic) string {
 }
 
 // dashboardStatusLabel reproduces tasks.StatusLabel from a dashboard row's live
-// fields: a started READY set shows "IN PROGRESS", every other row shows its raw
-// status. It reads RawStatus/Started so the label is recomposed on each render
-// pass rather than baked in at row-build time.
+// fields, extending the READY refinement with the live-drain trigger (ADR-0111):
+// a READY set shows "IN PROGRESS" when it is started (≥1 done) OR held by a live
+// drain; every other row shows its raw status. The refinement is READY-only — a
+// live drain coinciding with a non-READY status leaves that label untouched
+// (needs-you outranks liveness). It reads RawStatus/Started/LiveDrain so the
+// label is recomposed on each render pass rather than baked in at row-build time.
 func dashboardStatusLabel(row DashboardRow) string {
+	if row.RawStatus == tasks.StatusReady && (row.Started || row.LiveDrain) {
+		return "IN PROGRESS"
+	}
 	return tasks.StatusLabel(tasks.Row{Status: row.RawStatus, Started: row.Started})
 }
 
@@ -698,11 +716,12 @@ func dashboardComposeStatus(row DashboardRow, styled bool) string {
 // surface as "waiting to be picked up" — the single predicate the per-row
 // marker and the header tally both read (ADR-0108). A consented set counts and
 // shows the marker only while it is not Picked-up; once a live drain holds the
-// checkout (Drain == "picked up") the DRAIN column already signals the activity,
-// so the marker is silenced and the set drops out of the "still needs picking
-// up" count. The persisted consent bit is untouched — this is display-only.
+// checkout (row.LiveDrain) the IN-PROGRESS refinement already signals the
+// activity, so the marker is silenced and the set drops out of the "still needs
+// picking up" count. The persisted consent bit is untouched — this is
+// display-only.
 func dashboardAutoDrainWaiting(row DashboardRow) bool {
-	return row.AutoDrain && row.Drain != dashboardDrainPickedUp
+	return row.AutoDrain && !row.LiveDrain
 }
 
 type dashboardDestKind int
@@ -837,13 +856,15 @@ func renderDashboardDest(kind dashboardDestKind, label string) string {
 	}
 }
 
-// dashboardDrain reports "picked up" when a live drain holds the set's checkout,
-// reading the per-build snapshot's live-drain map (one RunningDrains read plus
-// in-memory PID-liveness) instead of reopening the runtime lock per row. The
-// snapshot keys live drains by runtime path; a drain at the set's checkout (or
-// its bound checkout) whose SetID matches is the same fact ReadRuntimeLockStatus
-// derived per row before.
-func dashboardDrain(snap *dashboardSnapshot, repoKey, setID, runtimePath string) string {
+// dashboardLiveDrain reports whether a live (PID-alive) drain holds the set's
+// checkout, reading the per-build snapshot's live-drain map (one RunningDrains
+// read plus in-memory PID-liveness) instead of reopening the runtime lock per
+// row. The snapshot keys live drains by runtime path; a drain at the set's
+// checkout (or its bound checkout) whose SetID matches is the same fact
+// ReadRuntimeLockStatus derived per row before. It is the structured boolean
+// the sort tier, header count, auto-drain silencing, and IN-PROGRESS refinement
+// all key on (ADR-0111).
+func dashboardLiveDrain(snap *dashboardSnapshot, repoKey, setID, runtimePath string) bool {
 	paths := map[string]bool{}
 	if runtimePath != "" {
 		paths[runtimePath] = true
@@ -853,10 +874,10 @@ func dashboardDrain(snap *dashboardSnapshot, repoKey, setID, runtimePath string)
 	}
 	for path := range paths {
 		if dr, ok := snap.liveDrains[path]; ok && dr.SetID == setID {
-			return dashboardDrainPickedUp
+			return true
 		}
 	}
-	return ""
+	return false
 }
 
 // dashboardOrphaned reports whether a set's Worktree binding points at a
@@ -2939,7 +2960,7 @@ func dashboardSummary(rows []DashboardRow) string {
 		if row.RawStatus == tasks.StatusReady {
 			ready++
 		}
-		if strings.TrimSpace(row.Drain) != "" {
+		if row.LiveDrain {
 			running++
 		}
 		if dashboardAutoDrainWaiting(row) {

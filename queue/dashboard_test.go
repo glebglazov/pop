@@ -257,7 +257,7 @@ func TestDashboardTieredSortOrder(t *testing.T) {
 		{Project: "kilo", SetRef: SetRef{SetID: "2026-05-01-ad", RawStatus: tasks.StatusReady, AutoDrain: true}},
 		{Project: "kilo", SetRef: SetRef{SetID: "2026-05-02-ado", RawStatus: tasks.StatusReady, AutoDrain: true, Orphaned: true}},
 		// Running / Picked-up tier — highest precedence even with auto-drain set.
-		{Project: "delta", Drain: "picked up", SetRef: SetRef{SetID: "2026-06-01-run", RawStatus: tasks.StatusReady, AutoDrain: true}},
+		{Project: "delta", Drain: "picked up", SetRef: SetRef{SetID: "2026-06-01-run", RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}},
 	}
 	sortDashboardRows(rows)
 	got := make([]string, len(rows))
@@ -635,7 +635,7 @@ func TestDashboardAutoDrainToggleReflectsInRowAndCount(t *testing.T) {
 // persisted AutoDrain bit stays true; a non-consented set has neither.
 func TestDashboardAutoDrainWaitingMarkerAndCount(t *testing.T) {
 	idle := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}}
-	pickedUp := DashboardRow{Drain: dashboardDrainPickedUp, SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}}
+	pickedUp := DashboardRow{Drain: dashboardDrainPickedUp, SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}}
 	plain := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}
 
 	// Per-row marker.
@@ -1141,7 +1141,7 @@ func TestDashboardCtrlGUnboundRowShowsStatusAndDoesNotQuit(t *testing.T) {
 
 func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", Worktree: "main", Drain: "picked up", cursorKey: "pop\x00set", SetRef: SetRef{SetID: "set", RawStatus: tasks.StatusReady, AutoDrain: true}},
+		{Project: "pop", Worktree: "main", Drain: "picked up", cursorKey: "pop\x00set", SetRef: SetRef{SetID: "set", RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}},
 		{Project: "pop", Worktree: "main", cursorKey: "pop\x00done", SetRef: SetRef{SetID: "done", RawStatus: tasks.StatusDone}},
 	}})
 	m.width = 120
@@ -1543,6 +1543,51 @@ func TestDashboardStatusBucketColorOnlyBaseToken(t *testing.T) {
 	}
 	if strings.Contains(styled, "\x1b[33m· auto-drain") || strings.Contains(styled, "\x1b[33m· orphaned") {
 		t.Fatalf("suffixes should not inherit base bucket color: %q", styled)
+	}
+}
+
+// TestDashboardLiveDrainRefinesReadyToInProgress covers ADR-0111's live-drain
+// trigger for the STATUS label: a READY set held by a live drain reads "IN
+// PROGRESS" even with zero done tasks; a started READY set (≥1 done, no live
+// drain) still reads "IN PROGRESS"; an idle READY set stays "READY"; and a live
+// drain coinciding with a non-READY status leaves that status' label untouched —
+// needs-you outranks liveness.
+func TestDashboardLiveDrainRefinesReadyToInProgress(t *testing.T) {
+	liveReady := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, LiveDrain: true}}
+	if got := dashboardStatusLabel(liveReady); got != "IN PROGRESS" {
+		t.Errorf("live READY label = %q, want IN PROGRESS", got)
+	}
+	startedReady := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}, Started: true}
+	if got := dashboardStatusLabel(startedReady); got != "IN PROGRESS" {
+		t.Errorf("started READY label = %q, want IN PROGRESS", got)
+	}
+	idleReady := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}
+	if got := dashboardStatusLabel(idleReady); got != string(tasks.StatusReady) {
+		t.Errorf("idle READY label = %q, want READY", got)
+	}
+	// The refinement is READY-only: a live drain on a non-READY set keeps its
+	// real label.
+	for _, status := range []tasks.TaskSetStatus{tasks.StatusAwaitingApproval, tasks.StatusNeedsVerify, tasks.StatusBlocked} {
+		row := DashboardRow{SetRef: SetRef{RawStatus: status, LiveDrain: true}}
+		if got := dashboardStatusLabel(row); got != string(status) {
+			t.Errorf("live %s label = %q, want %s (needs-you outranks liveness)", status, got, status)
+		}
+	}
+}
+
+// TestDashboardSummaryRunningCountsLiveDrainsOnly confirms the header "N running"
+// tally counts live-drain rows only (ADR-0111): a parked or config-error row
+// carries a non-blank DRAIN string but no live drain, so it no longer inflates
+// the count as it did when the tally keyed on any non-blank DRAIN.
+func TestDashboardSummaryRunningCountsLiveDrainsOnly(t *testing.T) {
+	rows := []DashboardRow{
+		{SetRef: SetRef{RawStatus: tasks.StatusReady, LiveDrain: true}},
+		{Drain: "parked", SetRef: SetRef{RawStatus: tasks.StatusReady}},
+		{Drain: "config error: no trunk", SetRef: SetRef{RawStatus: tasks.StatusReady}},
+	}
+	summary := dashboardSummary(rows)
+	if !strings.Contains(summary, "1 running") {
+		t.Errorf("summary = %q, want exactly 1 running (live-drain rows only)", summary)
 	}
 }
 
