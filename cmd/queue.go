@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/spf13/cobra"
@@ -134,7 +135,22 @@ func runQueueDashboard(cmd *cobra.Command, args []string) error {
 	}
 	d := queue.DefaultDeps()
 	d.LoadConfig = queueConfigLoad
-	return queue.RunDashboard(d, cfg)
+	checkout, err := queue.RunDashboard(d, cfg)
+	if err != nil {
+		return err
+	}
+	if checkout == "" {
+		return nil
+	}
+	// Ctrl-g on a bound row: open that checkout through the shared workbench-aware
+	// open helper (task 02) — birth-time shaping when the session is absent, else
+	// flat attach (ADR-0075). Because a managed worktree's session usually already
+	// exists, this attaches to the running session.
+	ctx, err := project.DetectRepoContextFromPathWith(project.DefaultDeps(), checkout)
+	if err != nil {
+		return err
+	}
+	return openWorktreeWithShaping(defaultWorktreeShapeDeps(), ctx, checkout)
 }
 
 func runQueueLog(cmd *cobra.Command, args []string) error {

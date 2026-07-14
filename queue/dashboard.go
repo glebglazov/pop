@@ -1293,6 +1293,11 @@ type QueueDashboard struct {
 	pendingG    bool
 	statusMsg   string
 	showHelp    bool
+	// openCheckout is the bound checkout path chosen with Ctrl-g on the main
+	// list. It is set alongside a tea.Quit so RunDashboard can surface it out of
+	// the program and the command layer runs the workbench-aware open after the
+	// TUI exits (task 02).
+	openCheckout string
 }
 
 func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
@@ -1701,6 +1706,23 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.MoveUp()
 		case "G":
 			m.list.SetCursor(len(m.snap.Rows) - 1)
+		case "ctrl+g":
+			// Open the highlighted row's bound checkout in pop (task 02). A row
+			// with a bound checkout surfaces its path on quit so the command
+			// layer runs the workbench-aware open after the TUI exits; a row with
+			// no checkout shows an inline status and keeps the dashboard running
+			// (mirroring the shell action).
+			row, ok := m.list.Selected()
+			if !ok {
+				return m, nil
+			}
+			if strings.TrimSpace(row.RuntimePath) == "" {
+				m.statusMsg = "no checkout bound to this task set"
+				return m, nil
+			}
+			m.statusMsg = ""
+			m.openCheckout = row.RuntimePath
+			return m, tea.Quit
 		case "a":
 			row, ok := m.list.Selected()
 			if !ok {
@@ -3579,14 +3601,23 @@ func padDashboardCell(s string, width int) string {
 	return s
 }
 
-// RunDashboard opens the read-only Queue dashboard TUI.
-func RunDashboard(d *Deps, cfg *config.Config) error {
+// RunDashboard opens the read-only Queue dashboard TUI. It returns the bound
+// checkout path chosen with Ctrl-g on the main list (empty when the dashboard
+// quit for any other reason), leaving the workbench-aware open to the command
+// layer (task 02).
+func RunDashboard(d *Deps, cfg *config.Config) (string, error) {
 	snap, err := BuildDashboard(d, cfg)
 	if err != nil {
-		return err
+		return "", err
 	}
 	m := newQueueDashboard(d, cfg, snap)
 	program := tea.NewProgram(m)
-	_, err = program.Run()
-	return err
+	final, err := program.Run()
+	if err != nil {
+		return "", err
+	}
+	if fm, ok := final.(QueueDashboard); ok {
+		return fm.openCheckout, nil
+	}
+	return "", nil
 }

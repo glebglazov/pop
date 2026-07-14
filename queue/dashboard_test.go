@@ -1096,6 +1096,49 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 	}
 }
 
+func TestDashboardCtrlGOpensBoundCheckout(t *testing.T) {
+	// Bound row: Ctrl-g surfaces its checkout path and quits so the command layer
+	// can run the workbench-aware open after the TUI exits (task 02).
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", cursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", RuntimePath: "/repo/wt", Bound: true}},
+	}})
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	got := updated.(QueueDashboard)
+	if got.openCheckout != "/repo/wt" {
+		t.Fatalf("openCheckout = %q, want /repo/wt", got.openCheckout)
+	}
+	if cmd == nil {
+		t.Fatal("Ctrl-g on bound row: expected a quit command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("Ctrl-g command = %T, want tea.QuitMsg", cmd())
+	}
+	if got.statusMsg != "" {
+		t.Fatalf("statusMsg = %q, want empty on bound open", got.statusMsg)
+	}
+}
+
+func TestDashboardCtrlGUnboundRowShowsStatusAndDoesNotQuit(t *testing.T) {
+	// Unbound row (no RuntimePath): Ctrl-g shows an inline status message and keeps
+	// the dashboard running — no quit, no surfaced checkout (task 02).
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", cursorKey: "pop\x00unbound", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "unbound"}},
+	}})
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	got := updated.(QueueDashboard)
+	if cmd != nil {
+		t.Fatalf("Ctrl-g on unbound row should not quit, got cmd %T", cmd())
+	}
+	if got.openCheckout != "" {
+		t.Fatalf("openCheckout = %q, want empty on unbound row", got.openCheckout)
+	}
+	if got.statusMsg != "no checkout bound to this task set" {
+		t.Fatalf("statusMsg = %q, want 'no checkout bound to this task set'", got.statusMsg)
+	}
+}
+
 func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", Worktree: "main", Drain: "picked up", cursorKey: "pop\x00set", SetRef: SetRef{SetID: "set", RawStatus: tasks.StatusReady, AutoDrain: true}},
