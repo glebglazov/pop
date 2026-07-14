@@ -1891,7 +1891,12 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dashboardPreviewMsg:
 		if msg.err != nil {
 			m.err = msg.err
+			return m, nil
 		}
+		// Preview switched the tmux client to the drain's working pane; the
+		// dashboard has handed off attention, so close it rather than leaving it
+		// stranded behind the pane the operator now looks at.
+		return m, tea.Quit
 	case dashboardBindListMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -2070,6 +2075,11 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 		m.cols.syncNatural(m.snap.Rows)
 		return m, m.toggleAutoDrain(row)
 	case menuActionPreview:
+		if strings.TrimSpace(row.PaneID) == "" {
+			m.statusMsg = "no working pane to preview"
+			return m, nil
+		}
+		m.statusMsg = ""
 		return m, m.previewDrain(row)
 	case menuActionUnpark:
 		if !row.Parked {
