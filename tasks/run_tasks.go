@@ -12,7 +12,6 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/store"
 )
 
 // RunTaskSetOptions configures sequential Task-set draining.
@@ -101,208 +100,56 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
 	}
-	plan, err := newRunPlan(loadConfig, runPlanInput{
-		agentPresets:  opts.AgentPresets,
-		agentPreset:   opts.AgentPreset,
-		agentExplicit: opts.AgentExplicit,
-		agentCmd:      opts.AgentCmd,
-		agentOutput:   opts.AgentOutput,
-		allowDirty:    opts.AllowDirty,
-	})
+	run, err := newImplementRun(d, pd, loadConfig, opts)
 	if err != nil {
 		return nil, err
 	}
-	cfg := plan.cfg
-	baseAgentPresets := plan.baseAgentPresets
-	baseAgentPreset := plan.baseAgentPreset
-	agentOutput := plan.agentOutput
-	strategy := plan.strategy
-	commitOverrides := plan.commitOverrides
-	agentQuotaRetryAfter := plan.agentQuotaRetryAfter
-
-	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
-	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
-	}
-
-	runtimePath, err := ResolveRuntimePathWith(d, resolved.ProjectPath, opts.RuntimeOverride)
-	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
-	}
-
-	statePath := StatePathFor(resolved.DefinitionPath)
-	refresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
-	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
-	}
-
-	taskSetOverride, err := ResolveTaskSetTarget(refresh, opts.TaskSetOverride)
-	if err != nil {
-		return nil, err
-	}
-	if taskSetOverride != "" {
-		if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, taskSetOverride); err != nil {
-			return nil, err
-		}
-	}
-
-	taskSetID, hitlFallback, err := SelectTaskSet(refresh, taskSetOverride)
-	if err != nil {
-		return nil, err
-	}
-
-	confirmOut := opts.ConfirmOut
-	if confirmOut == nil {
-		confirmOut = os.Stderr
-	}
-	out := opts.Output
-	if out == nil {
-		out = os.Stdout
-	}
-
-	// Start the Drain: insert a running row keyed by (repository, set) and
-	// enforce mutual exclusion transactionally (ADR-0055), replacing the runtime
-	// execution lock file and the cross-checkout backstop. The Runtime execution
-	// lock is now held only during active execution (ADR-0067): this opening
-	// BeginDrain is the backstop before BindCheckout, but reaching any gate menu
-	// parks (finishes) it so the menu runs lock-free, and resuming AFK work
-	// re-acquires a fresh Drain. `drain` is therefore mutable — nil while parked —
-	// and the deferred finalize reads its latest value.
-	drain, err := BeginDrain(d, runtimePath, taskSetID, confirmOut)
-	if err != nil {
-		return nil, err
-	}
-
 	// This process owns the running Drain: record its exit-reason terminal on
-	// every exit path below (including an error bubbling up), so a reader can see
-	// how it ended without parsing human output. A declined run never executed,
-	// so its Drain row is cancelled rather than terminated (ADR-0056). Registered
-	// before BindCheckout so a bind failure still finalizes the row. When the run
-	// exits parked at a gate (drain == nil) this is a no-op — the park already
+	// every exit path below — a bubbled setup error, a normal terminal, or the
+	// loop returning — reading the run's *latest* Drain handle (nil while parked
+	// at a gate). Registered immediately after the opening BeginDrain, before
+	// BindCheckout, so a later-setup failure still finalizes the row. A declined
+	// run never executed, so its Drain is cancelled rather than terminated
+	// (ADR-0056); exiting parked (drain == nil) is a no-op — the park already
 	// recorded the segment's terminal.
-	defer func() {
-		var (
-			declined     bool
-			quotaPaused  bool
-			verifyFailed bool
-			preset       string
-			pinned       bool
-			resetAt      time.Time
-		)
-		if result != nil {
-			declined = result.Declined
-			quotaPaused = result.QuotaPaused
-			verifyFailed = result.TaskSetVerifyFailed
-			preset = result.PausePreset
-			pinned = result.PausePinnedAgent
-			resetAt = result.PauseResetAt
-		}
-		finalizeDrain(drain, declined, quotaPaused, verifyFailed, preset, pinned, resetAt, err)
-	}()
-
-	// parkDrain releases the Runtime execution lock at a human-wait gate: it
-	// finishes the held Drain with the same clean terminal the --yes path records
-	// at that point (ADR-0056/0067) — the set's blocked/awaiting_approval/failed
-	// disposition stays manifest-derived — and drops the live lock so the gate
-	// menu, assist session, and runtime shell all run lock-free. A no-op when no
-	// Drain is held (already parked).
-	parkDrain := func() {
-		if drain == nil {
-			return
-		}
-		_ = drain.Finish(store.StateFinished, "", false, time.Time{})
-		drain = nil
+	defer run.finalize(&err)
+	if err = run.setup(); err != nil {
+		return run.result, err
 	}
+	return run.loop()
+}
 
-	// parkAtGate parks the drain and registers a checkout gate hold so quota
-	// recovery waiters on the same runtime path cannot resume until the gate
-	// session ends (ADR-0100).
-	parkAtGate := func(m *Manifest, gateTask *Task) {
-		if !gateWillPrompt(opts.ConfirmIn, opts.Yes, m, gateTask) {
-			return
-		}
-		parkDrain()
-		_ = RegisterCheckoutGateHold(d, taskSetID, runtimePath)
-	}
-	releaseGateHold := func() {
-		_ = ReleaseCheckoutGateHold(d, runtimePath)
-	}
-
-	// ensureDrain re-acquires the Runtime execution lock before a contiguous run
-	// of AFK attempts resumes after a gate park (ADR-0067). It is a no-op while a
-	// Drain is already held (the opening BeginDrain, or an unparked segment). A
-	// collision with a concurrent drain on the same checkout refuses cleanly with
-	// the existing "already in progress" error; the gate decision was already
-	// persisted to the manifest, so nothing is lost.
-	ensureDrain := func() error {
-		if drain != nil {
-			return nil
-		}
-		handle, err := BeginDrain(d, runtimePath, taskSetID, confirmOut)
-		if err != nil {
-			return err
-		}
-		drain = handle
-		return nil
-	}
-
-	// Adopt this checkout into the binding model before draining (ADR-0036): a
-	// worktree-locus run records a never-delete adopted binding so the set is
-	// integrateable even if the drain later fails; a trunk-locus run records
-	// nothing. Done before the first task runs so a failed run is not
-	// re-provisioned and orphaned by a later `queue run`.
-	if opts.BindCheckout != nil {
-		if err := opts.BindCheckout(taskSetID, resolved.ProjectPath, runtimePath); err != nil {
-			return nil, exitErr(ExitOperational, "bind checkout: %v", err)
-		}
-	}
-
-	dirty, err := runtimeIsDirty(d, runtimePath)
-	if err != nil {
-		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
-	}
-
-	displayRows := cloneRows(refresh.Rows)
-	MarkNextPick(displayRows)
-	MarkRunTarget(displayRows, taskSetID)
-	displayRefresh := *refresh
-	displayRefresh.Rows = displayRows
-
-	if hitlFallback {
-		outputFor(out).line(ansiYellow, "No runnable AFK work")
-	}
-
-	fmt.Fprintln(out)
-	Render(out, &displayRefresh)
-
-	if m := displayRefresh.Manifests[taskSetID]; m != nil {
-		RenderTaskList(out, taskSetID, m)
-	}
-
-	if dirty {
-		if err := reportDirtyRuntime(d, confirmOut, runtimePath, strategy); err != nil {
-			return nil, exitErr(ExitSetup, "runtime git status: %v", err)
-		}
-	}
-
-	initialGate := selectedTaskSetStartsAtHITLGate(refresh, taskSetID) ||
-		selectedTaskSetStartsAtFailedGate(refresh, taskSetID)
-	var sharedPromptReader *bufio.Reader
-	if initialGate {
-		sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
-	}
-
-	maxTries, err := plan.maxTries(opts.MaxTriesExplicit, opts.MaxTries)
-	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
-	}
-	retryDelays, err := plan.retryDelays()
-	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
-	}
-	timeout := resolveAttemptTimeout(opts.Timeout)
-
-	result = &RunTaskSetResult{TaskSetID: taskSetID, RuntimePath: runtimePath, ProjectPath: resolved.ProjectPath}
+// loop drains the resolved Task set sequentially through eligible AFK tasks:
+// each iteration re-Refreshes, then either runs the next attempt, dispatches the
+// terminal-status switch, or hands off to a gate handler (parking and re-
+// acquiring the Drain around the human-wait). It runs after setup and mutates the
+// run's Drain / prompt-reader / result state through the receiver so the deferred
+// finalize sees the latest values. The body is unchanged from the pre-refactor
+// inline loop; the leading locals just re-bind the run's resolved fields so that
+// body reads exactly as before.
+func (r *implementRun) loop() (*RunTaskSetResult, error) {
+	d := r.d
+	opts := r.opts
+	loadConfig := r.loadConfig
+	cfg := r.plan.cfg
+	baseAgentPresets := r.plan.baseAgentPresets
+	baseAgentPreset := r.plan.baseAgentPreset
+	agentOutput := r.plan.agentOutput
+	strategy := r.plan.strategy
+	commitOverrides := r.plan.commitOverrides
+	agentQuotaRetryAfter := r.plan.agentQuotaRetryAfter
+	resolved := r.resolved
+	runtimePath := r.runtimePath
+	statePath := r.statePath
+	taskSetID := r.taskSetID
+	confirmOut := r.confirmOut
+	out := r.out
+	maxTries := r.maxTries
+	retryDelays := r.retryDelays
+	timeout := r.timeout
+	sharedPromptReader := r.sharedPromptReader
+	result := r.result
+	dirty := r.dirty
 	dirtyStrategyApplied := false
 
 	for {
@@ -356,7 +203,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 						if row := findRow(currentRefresh, taskSetID); row != nil {
 							priority = row.Priority
 						}
-						regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &drain, taskSetID, qp.Preset, qp.ResetAt, runtimePath, priority, out, ensureDrain)
+						regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &r.drain, taskSetID, qp.Preset, qp.ResetAt, runtimePath, priority, out, r.ensureDrain)
 						if waitErr != nil {
 							return result, waitErr
 						}
@@ -410,7 +257,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					// concurrent quota-recovery drain cannot resume mid-gate (ADR-0100).
 					verifyGateWillPrompt := !opts.Yes && canPrompt(opts.ConfirmIn) && m != nil
 					if verifyGateWillPrompt {
-						parkDrain()
+						r.parkDrain()
 						_ = RegisterCheckoutGateHold(d, taskSetID, runtimePath)
 					}
 					sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
@@ -420,7 +267,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					}
 					handled, gateErr := handleInteractiveVerifyFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, repo, runtimePath, taskSetID, m, verifyWorkSHA(d, runtimePath), findings)
 					if verifyGateWillPrompt {
-						releaseGateHold()
+						r.releaseGateHold()
 					}
 					if gateErr != nil {
 						return result, gateErr
@@ -488,7 +335,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 					// Park the Runtime execution lock before the HITL gate menu so it
 					// runs lock-free (ADR-0067); only when the menu will actually prompt,
 					// so a non-prompting fall-through keeps the normal terminal.
-					parkAtGate(currentRefresh.Manifests[taskSetID], hitl)
+					r.parkAtGate(currentRefresh.Manifests[taskSetID], hitl)
 					rv := &reverifyGateContext{
 						cfg:         cfg,
 						agents:      opts.VerifyAgents,
@@ -497,7 +344,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 						runVerifier: opts.verifyRunner,
 					}
 					handled, err := handleInteractiveHITLGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, currentRefresh.Manifests[taskSetID], hitl, rv)
-					releaseGateHold()
+					r.releaseGateHold()
 					if err != nil {
 						return nil, err
 					}
@@ -526,9 +373,9 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
 				// Park the Runtime execution lock before the Failed gate menu so it
 				// runs lock-free (ADR-0067).
-				parkAtGate(m, FailedTask(m))
+				r.parkAtGate(m, FailedTask(m))
 				handled, err := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, m, FailedTask(m))
-				releaseGateHold()
+				r.releaseGateHold()
 				if err != nil {
 					return nil, err
 				}
@@ -547,7 +394,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		// First iteration is a no-op (the opening BeginDrain still holds); after a
 		// gate park this is a fresh BeginDrain, and a collision refuses cleanly
 		// without touching manifest state.
-		if err := ensureDrain(); err != nil {
+		if err := r.ensureDrain(); err != nil {
 			return result, err
 		}
 
@@ -596,9 +443,9 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 				// menu so it runs lock-free (ADR-0067). An interrupt never reaches the
 				// menu (the task is not marked failed), so its `interrupted` terminal is
 				// preserved by the normal finalize.
-				parkAtGate(m, FailedTask(m))
+				r.parkAtGate(m, FailedTask(m))
 				handled, gateErr := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, m, FailedTask(m))
-				releaseGateHold()
+				r.releaseGateHold()
 				if gateErr != nil {
 					return result, gateErr
 				}
@@ -618,7 +465,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 			if row := findRow(currentRefresh, taskSetID); row != nil {
 				priority = row.Priority
 			}
-			regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &drain, taskSetID, taskResult.PausePreset, taskResult.PauseResetAt, runtimePath, priority, out, ensureDrain)
+			regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &r.drain, taskSetID, taskResult.PausePreset, taskResult.PauseResetAt, runtimePath, priority, out, r.ensureDrain)
 			if waitErr != nil {
 				return result, waitErr
 			}
