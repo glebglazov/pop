@@ -19,7 +19,7 @@ func TestVerifyFailedGateAcceptRecordsHumanPass(t *testing.T) {
 
 	var out bytes.Buffer
 	in := strings.NewReader("1\nthe retry is intentional\n")
-	handled, err := handleInteractiveVerifyFailedGate(d, &out, in, nil, false, "/repo/.git", "/rt", "demo", m, "shaGATE", "the retry looks flaky")
+	handled, err := handleInteractiveVerifyFailedGate(gateEnv{d: d, out: &out, in: in, runtimePath: "/rt", taskSetID: "demo"}, "/repo/.git", m, "shaGATE", "the retry looks flaky")
 	if err != nil {
 		t.Fatalf("handleInteractiveVerifyFailedGate: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestVerifyFailedGateRemediateSpawnsTask(t *testing.T) {
 
 	var out bytes.Buffer
 	in := strings.NewReader("2\ncap the retries at 3\n")
-	handled, err := handleInteractiveVerifyFailedGate(d, &out, in, nil, false, "/repo/.git", "/rt", "demo", m, "shaGATE", "the retry policy needs a human call")
+	handled, err := handleInteractiveVerifyFailedGate(gateEnv{d: d, out: &out, in: in, runtimePath: "/rt", taskSetID: "demo"}, "/repo/.git", m, "shaGATE", "the retry policy needs a human call")
 	if err != nil {
 		t.Fatalf("handleInteractiveVerifyFailedGate: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestVerifyFailedGateExitFallsThrough(t *testing.T) {
 
 	var out bytes.Buffer
 	in := strings.NewReader("0\n")
-	handled, err := handleInteractiveVerifyFailedGate(d, &out, in, nil, false, "/repo/.git", "/rt", "demo", m, "shaGATE", "findings")
+	handled, err := handleInteractiveVerifyFailedGate(gateEnv{d: d, out: &out, in: in, runtimePath: "/rt", taskSetID: "demo"}, "/repo/.git", m, "shaGATE", "findings")
 	if err != nil {
 		t.Fatalf("handleInteractiveVerifyFailedGate: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestVerifyFailedGateYesSkipsPrompt(t *testing.T) {
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaGATE", Verdict: "NEEDS-HUMAN", Findings: "findings"})
 
 	var out bytes.Buffer
-	handled, err := handleInteractiveVerifyFailedGate(d, &out, strings.NewReader("1\nnote\n"), nil, true, "/repo/.git", "/rt", "demo", m, "shaGATE", "findings")
+	handled, err := handleInteractiveVerifyFailedGate(gateEnv{d: d, out: &out, in: strings.NewReader("1\nnote\n"), yes: true, runtimePath: "/rt", taskSetID: "demo"}, "/repo/.git", m, "shaGATE", "findings")
 	if err != nil {
 		t.Fatalf("handleInteractiveVerifyFailedGate: %v", err)
 	}

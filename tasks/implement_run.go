@@ -281,6 +281,29 @@ func (r *implementRun) releaseGateHold() {
 	_ = ReleaseCheckoutGateHold(r.d, r.runtimePath)
 }
 
+// newGateEnv builds the shared gate context the three interactive menus run
+// against from the run's threaded state. It reads r.sharedPromptReader at call
+// time, so a caller that (re)seeds the reader before invoking a gate must do so
+// first (the Failed gate does). The handlers are free functions over gateEnv,
+// not methods on implementRun, so the targeted single-task HITL path can build
+// its own env and share them (decision 6).
+func (r *implementRun) newGateEnv() gateEnv {
+	return gateEnv{
+		d:              r.d,
+		out:            r.out,
+		in:             r.opts.ConfirmIn,
+		reader:         r.sharedPromptReader,
+		yes:            r.opts.Yes,
+		agentPreset:    r.opts.AgentPreset,
+		agentCmd:       r.opts.AgentCmd,
+		cwd:            r.opts.CWD,
+		runtimePath:    r.runtimePath,
+		definitionPath: r.resolved.DefinitionPath,
+		statePath:      r.statePath,
+		taskSetID:      r.taskSetID,
+	}
+}
+
 // ensureDrain re-acquires the Runtime execution lock before a contiguous run of
 // AFK attempts resumes after a gate park (ADR-0067). It is a no-op while a Drain
 // is already held (the opening BeginDrain, or an unparked segment). A collision

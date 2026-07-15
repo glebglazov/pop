@@ -146,7 +146,7 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 		if verdict != nil {
 			findings = verdict.Findings
 		}
-		handled, gateErr := handleInteractiveVerifyFailedGate(d, out, opts.ConfirmIn, r.sharedPromptReader, opts.Yes, repo, runtimePath, taskSetID, m, verifyWorkSHA(d, runtimePath), findings)
+		handled, gateErr := handleInteractiveVerifyFailedGate(r.newGateEnv(), repo, m, verifyWorkSHA(d, runtimePath), findings)
 		if verifyGateWillPrompt {
 			r.releaseGateHold()
 		}
