@@ -115,37 +115,19 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	return run.loop()
 }
 
-// loop drains the resolved Task set sequentially through eligible AFK tasks:
-// each iteration re-Refreshes, then either runs the next attempt, dispatches the
-// terminal-status switch, or hands off to a gate handler (parking and re-
-// acquiring the Drain around the human-wait). It runs after setup and mutates the
+// loop drains the resolved Task set sequentially through eligible AFK tasks. It
+// runs after setup and reads as pure orchestration: each iteration re-Refreshes,
+// then dispatches to one of three methods — the pre-approval Verifier phase, the
+// terminal-status switch, or the task-execution branch — each of which owns its
+// choreography and hands back a continue/return directive. The methods mutate the
 // run's Drain / prompt-reader / result state through the receiver so the deferred
-// finalize sees the latest values. The body is unchanged from the pre-refactor
-// inline loop; the leading locals just re-bind the run's resolved fields so that
-// body reads exactly as before.
+// finalize sees the latest values.
 func (r *implementRun) loop() (*RunTaskSetResult, error) {
 	d := r.d
-	opts := r.opts
-	loadConfig := r.loadConfig
-	cfg := r.plan.cfg
-	baseAgentPresets := r.plan.baseAgentPresets
-	baseAgentPreset := r.plan.baseAgentPreset
-	agentOutput := r.plan.agentOutput
-	strategy := r.plan.strategy
-	commitOverrides := r.plan.commitOverrides
-	agentQuotaRetryAfter := r.plan.agentQuotaRetryAfter
 	resolved := r.resolved
-	runtimePath := r.runtimePath
 	statePath := r.statePath
 	taskSetID := r.taskSetID
-	confirmOut := r.confirmOut
-	out := r.out
-	maxTries := r.maxTries
-	retryDelays := r.retryDelays
-	timeout := r.timeout
 	result := r.result
-	dirty := r.dirty
-	dirtyStrategyApplied := false
 
 	for {
 		currentRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
@@ -185,96 +167,15 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 			return res, tErr
 		}
 
-		// An eligible AFK task is about to run: (re-)acquire the Runtime execution
-		// lock for the contiguous run of attempts that starts here (ADR-0067).
-		// First iteration is a no-op (the opening BeginDrain still holds); after a
-		// gate park this is a fresh BeginDrain, and a collision refuses cleanly
-		// without touching manifest state.
-		if err := r.ensureDrain(); err != nil {
-			return result, err
-		}
-
-		if dirty && !dirtyStrategyApplied {
-			if err := applyDirtyRuntimeStrategy(d, runtimePath, sel.TaskSetID, sel.TaskID, strategy, commitOverrides, confirmOut); err != nil {
-				return nil, taskExitErr(sel, ExitOperational, "dirty-runtime strategy: %v", err)
-			}
-			dirtyStrategyApplied = true
-		}
-
-		// Pre-seed the pane's Topic from this task's Title before its first agent
-		// prompt (ADR-0058); the hook guards on the existing @pop_topic, so the
-		// first task in the set wins and the derive hook no-ops thereafter.
-		if opts.PreSeedTopic != nil {
-			opts.PreSeedTopic(sel.Task.Title)
-		}
-
-		basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
-		buildForAgent := func(agentSpec string) (func(string) (*AgentInvocation, error), error) {
-			attemptOutput := agentOutput
-			if agentSpec != baseAgentPreset {
-				var err error
-				attemptOutput, err = resolveAgentOutputMode(loadConfig, agentSpec, opts.AgentOutput)
-				if err != nil {
-					return nil, err
-				}
-			}
-			return func(prompt string) (*AgentInvocation, error) {
-				return ResolveAgentInvocationWithMode(agentSpec, opts.AgentCmd, prompt, runtimePath, attemptOutput)
-			}, nil
-		}
-
-		agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
-		taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays)
-		if execErr != nil {
-			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
-			if refreshErr == nil {
-				result.Refresh = afterRefresh
-				if !opts.Yes {
-					fmt.Fprintln(out)
-					Render(out, afterRefresh)
-				}
-				m := afterRefresh.Manifests[taskSetID]
-				// Park the Runtime execution lock before the post-failure Failed gate
-				// menu so it runs lock-free (ADR-0067). An interrupt never reaches the
-				// menu (the task is not marked failed), so its `interrupted` terminal is
-				// preserved by the normal finalize.
-				handled, gateErr := r.failedGate(m)
-				if gateErr != nil {
-					return result, gateErr
-				}
-				if handled {
-					continue
-				}
-				printFailedStopAdvice(out, taskSetID, m)
-			}
-			return result, execErr
-		}
-		if taskResult.QuotaPaused {
-			// Quota recovery wait (ADR-0100): instead of exiting with ExitQuotaPaused,
-			// park the drain, register a recovery waiter, and poll until the preset's
-			// cooldown elapses and a recovery turn is acquired. Both foreground and
-			// unattended drains enter the wait loop.
-			priority := 0
-			if row := findRow(currentRefresh, taskSetID); row != nil {
-				priority = row.Priority
-			}
-			regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &r.drain, taskSetID, taskResult.PausePreset, taskResult.PauseResetAt, runtimePath, priority, out, r.ensureDrain)
-			if waitErr != nil {
-				return result, waitErr
-			}
-			if regFailed {
-				result.QuotaPaused = true
-				result.PauseReason = taskResult.PauseReason
-				result.PausePreset = taskResult.PausePreset
-				result.PauseResetAt = taskResult.PauseResetAt
-				result.Refresh = currentRefresh
-				printTaskSetSummary(out, result)
-				return result, nil
-			}
+		// An eligible AFK task was selected: the task-execution branch re-acquires
+		// the Drain, applies the one-time dirty strategy, runs the attempts, and
+		// owns the post-failure Failed gate and the quota-pause park-and-wait. It
+		// hands back a directive — keep draining, or return the exact (result, err).
+		directive, res, runErr := r.runSelectedTask(currentRefresh, sel)
+		if directive == runTaskContinue {
 			continue
 		}
-
-		result.Completed = append(result.Completed, taskResult)
+		return res, runErr
 	}
 }
 

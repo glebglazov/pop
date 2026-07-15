@@ -45,6 +45,12 @@ type implementRun struct {
 	refresh *RefreshResult
 
 	dirty bool
+	// dirtyStrategyApplied guards the one-time dirty-runtime strategy application:
+	// runSelectedTask applies the strategy before the first attempt of the run and
+	// records it here so a later task in the same set does not re-apply it (at most
+	// once per Implement run). A struct field, not a loop local, so it survives the
+	// gate parks that re-enter the loop.
+	dirtyStrategyApplied bool
 
 	maxTries    int
 	retryDelays []time.Duration
