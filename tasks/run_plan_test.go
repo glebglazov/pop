@@ -89,3 +89,38 @@ func TestNewRunPlanCommitOverridesSetupError(t *testing.T) {
 		t.Fatalf("error message %q does not mention commit_config_overrides", err.Error())
 	}
 }
+
+// TestRunTaskWithConsumesSharedRunPlan proves the single-task entry point
+// resolves its config bundle through the same newRunPlan seam RunTaskSetWith
+// uses (decision 5): a malformed [tasks.git] commit-config override injected
+// via loadConfig must fail RunTaskWith as an ExitSetup error before any agent
+// runs or Drain is claimed — exactly the setup-error behavior
+// TestNewRunPlanCommitOverridesSetupError proves for the constructor directly.
+func TestRunTaskWithConsumesSharedRunPlan(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	loadConfig := func(string) (*config.Config, error) {
+		return &config.Config{
+			Task: &config.TasksConfig{
+				Git: &config.TaskGitConfig{
+					CommitConfigOverrides: []string{"nokey"},
+				},
+			},
+		}, nil
+	}
+
+	opts := env.runOpts(true, "")
+	_, err := RunTaskWith(env.deps(), nil, loadConfig, opts)
+	if err == nil {
+		t.Fatal("RunTaskWith succeeded, want setup error")
+	}
+	var exit *ExitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("error is not *ExitError: %T (%v)", err, err)
+	}
+	if exit.Code != ExitSetup {
+		t.Fatalf("exit code = %d, want ExitSetup (%d)", exit.Code, ExitSetup)
+	}
+	if !strings.Contains(err.Error(), "commit_config_overrides") {
+		t.Fatalf("error message %q does not mention commit_config_overrides", err.Error())
+	}
+}

@@ -156,3 +156,7 @@ func ApplyTransitions(d *Deps, m *Manifest, projectPath string, ops []Transition
 	}
 	return nil
 }
+
+func manualRepairErr(err error) *ExitError {
+	return exitErr(ExitOperational, "local bookkeeping failed; manual repair required: %v", err)
+}

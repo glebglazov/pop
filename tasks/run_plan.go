@@ -113,3 +113,29 @@ func resolveAttemptTimeout(optTimeout time.Duration) time.Duration {
 	}
 	return optTimeout
 }
+
+func resolveAgentQuotaRetryAfter(cfg *config.Config) (time.Duration, error) {
+	resolved, err := cfg.ResolveQueue()
+	if err != nil {
+		return 0, err
+	}
+	return resolved.AgentQuotaRetryAfter, nil
+}
+
+// resolveCommitConfigOverrides loads config and validates the commit-config
+// overrides for the drain path. A nil loadConfig (or a load that fails to find
+// a config file) yields no overrides — commits behave exactly as today. A
+// malformed entry is returned as a hard error so the caller fails the drain.
+func resolveCommitConfigOverrides(loadConfig func(string) (*config.Config, error)) ([]string, error) {
+	if loadConfig == nil {
+		return nil, nil
+	}
+	cfg, err := loadConfig(config.DefaultConfigPath())
+	if err != nil {
+		// A missing/unreadable config is not a drain-stopping error here; the
+		// rest of the run already tolerates it. Only a present-but-malformed
+		// override entry must fail hard, which ResolveCommitConfigOverrides does.
+		return nil, nil
+	}
+	return cfg.ResolveCommitConfigOverrides()
+}
