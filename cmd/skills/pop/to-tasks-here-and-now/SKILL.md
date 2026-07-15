@@ -5,15 +5,23 @@ description: Break a plan into tasks AND bind the set to run unattended, right h
 
 # To Tasks — Here and Now
 
-A thin wrapper over the `to-tasks` skill. It runs the **entire** `to-tasks`
-process, then pre-answers two manifest decisions so the set drains itself,
-unattended, in the checkout you invoked it from:
+A thin wrapper over the `to-tasks` skill. It runs the task-drafting part of
+`to-tasks`, then **hard-writes** two manifest decisions so the set drains
+itself, unattended, in the checkout you invoked it from:
 
 - `auto_drain: true` — the Queue picks the set up on its own (ADR-0047).
 - `worktree: { "name": "<current-worktree>" }` — pop adopts *this* checkout as
   the drain worktree. "Here" is resolved at the skill layer (this file), so the
   drain engine needs no change: you read the current worktree's operator-facing
   name and write the existing `{ "name": ... }` manifest arm (ADR-0113).
+
+**This skill never prompts about the worktree or auto-drain.** Both keys are
+decided here — they are not questions for the user. In particular, do **not**
+surface `to-tasks`'s own worktree/auto-drain offer (its step 5): that skill
+asks the operator to pick a worktree arm and whether to enable auto-drain, but
+here both are already answered — bind the current checkout by name, always. The
+only thing that can stop the flow is the guard below (an unadoptable checkout);
+that is a refusal, never a menu.
 
 Because pop excludes the trunk, its own managed worktrees, and already-bound
 checkouts from what a set may adopt, this wrapper **refuses** when the current
@@ -68,11 +76,12 @@ the guard.
    `basename "$(git rev-parse --show-toplevel)"`. This is a *name*, never a
    path — the manifest is portable across machines.
 
-3. **Run the full `to-tasks` process** to draft the vertical slices, write the
-   task markdown files, and write `index.json` — following every step of that
-   skill (context gathering, slicing, the task template, the manifest schema,
-   filename scheme, keeping markdown and manifest in sync). Two decisions are
-   already made and are **not** up for negotiation in this flow:
+3. **Run `to-tasks`'s drafting steps** to produce the vertical slices, the task
+   markdown files, and `index.json`: context gathering, slicing, the task
+   template, the manifest schema, the filename scheme, and keeping markdown and
+   manifest in sync. **Skip `to-tasks`'s step-5 prompting about `worktree` and
+   `auto_drain`** — do not read its arms to the user, do not offer a choice.
+   Those two keys are decided here and written verbatim, never negotiated:
 
    - Always write top-level `"auto_drain": true` (this skill's whole point;
      don't ask whether to enable it).
@@ -97,6 +106,16 @@ the guard.
 
 5. **Tell the user** the task-set name, that it is auto-drain **bound to the
    `<current-worktree>` worktree** (so the Queue will drain it there
-   unattended), its status, and how many tasks are open. Then surface the
-   whole-set drain entry point: `pop tasks implement <task-set-name>` — though
-   with auto-drain bound, the Queue will also pick it up on its own.
+   unattended), its status, and how many tasks are open.
+
+   The set drains via the **Queue**, which honours the worktree directive and
+   runs it in `<current-worktree>` (ADR-0113). If the Queue supervisor is not
+   already running, start it with `pop queue run`; watch progress in
+   `pop queue dashboard`.
+
+   **Do not run — or suggest — `pop tasks implement` for a here-and-now set.** A
+   foreground `pop tasks implement` always rebinds to the checkout it runs in
+   and **ignores** the authored directive (ADR-0072); run from any other
+   checkout it silently clobbers the `{ "name": "<current-worktree>" }` binding,
+   and the set then drains in the wrong worktree. The Queue is the only path
+   that respects the directive — let it do the draining.
