@@ -966,15 +966,8 @@ func expandProjectsWith(d *project.Deps, paths []config.ExpandedPath) (expanded 
 				}
 				ctx := &project.RepoContext{RepoName: projectName, IsBare: true}
 				for _, wt := range worktrees {
-					// Collapse a bare repo's trunk worktree (folder named main/master)
-					// to just the repo display name. Session name stays repo/<folder>
-					// so it still matches the tmux session pop creates/attaches.
-					name := displayName + "/" + wt.Name
-					if wt.Name == "main" || wt.Name == "master" {
-						name = displayName
-					}
 					projects = append(projects, project.ExpandedProject{
-						Name:        name,
+						Name:        displayName + "/" + wt.Name,
 						Path:        wt.Path,
 						ProjectName: projectName,
 						IsWorktree:  true,
