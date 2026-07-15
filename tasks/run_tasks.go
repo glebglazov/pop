@@ -101,39 +101,24 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
 	}
-	cfg, err := loadConfigIfPresent(loadConfig)
+	plan, err := newRunPlan(loadConfig, runPlanInput{
+		agentPresets:  opts.AgentPresets,
+		agentPreset:   opts.AgentPreset,
+		agentExplicit: opts.AgentExplicit,
+		agentCmd:      opts.AgentCmd,
+		agentOutput:   opts.AgentOutput,
+		allowDirty:    opts.AllowDirty,
+	})
 	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
+		return nil, err
 	}
-	baseAgentPresets := ResolveDefaultAgentPresets(opts.AgentPresets, opts.AgentPreset, opts.AgentExplicit, cfg)
-	baseAgentPreset := baseAgentPresets[0]
-	agentOutput := AgentOutputAuto
-	if opts.AgentCmd == "" {
-		var err error
-		agentOutput, err = resolveAgentOutputMode(loadConfig, baseAgentPreset, opts.AgentOutput)
-		if err != nil {
-			return nil, exitErr(ExitSetup, "%v", err)
-		}
-	}
-	if err := validateDirtyRuntimeStrategy(opts.AllowDirty); err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
-	}
-	strategy := resolveDirtyRuntimeStrategy(opts.AllowDirty)
-
-	// Resolve commit-config overrides up front (the lazy validation point) so a
-	// malformed [tasks.git] entry fails the drain hard before any commit —
-	// including the per-task dirty-runtime checkpoint, which commits earliest.
-	commitOverrides, err := resolveCommitConfigOverrides(loadConfig)
-	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
-	}
-	agentQuotaRetryAfter, err := resolveAgentQuotaRetryAfter(cfg)
-	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
-	}
-	if _, err := cfg.EffortFor(baseAgentPreset); err != nil {
-		return nil, exitErr(ExitSetup, "config: %v", err)
-	}
+	cfg := plan.cfg
+	baseAgentPresets := plan.baseAgentPresets
+	baseAgentPreset := plan.baseAgentPreset
+	agentOutput := plan.agentOutput
+	strategy := plan.strategy
+	commitOverrides := plan.commitOverrides
+	agentQuotaRetryAfter := plan.agentQuotaRetryAfter
 
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
@@ -307,18 +292,15 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 		sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
 	}
 
-	maxTries, err := resolveImplementMaxTries(cfg, opts.MaxTriesExplicit, opts.MaxTries)
+	maxTries, err := plan.maxTries(opts.MaxTriesExplicit, opts.MaxTries)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
-	retryDelays, err := resolveAttemptRetryDelays(cfg)
+	retryDelays, err := plan.retryDelays()
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DefaultAttemptTimeout
-	}
+	timeout := resolveAttemptTimeout(opts.Timeout)
 
 	result = &RunTaskSetResult{TaskSetID: taskSetID, RuntimePath: runtimePath, ProjectPath: resolved.ProjectPath}
 	dirtyStrategyApplied := false
