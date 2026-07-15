@@ -147,7 +147,6 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 	maxTries := r.maxTries
 	retryDelays := r.retryDelays
 	timeout := r.timeout
-	sharedPromptReader := r.sharedPromptReader
 	result := r.result
 	dirty := r.dirty
 	dirtyStrategyApplied := false
@@ -166,124 +165,17 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 			}
 			result.Refresh = currentRefresh
 
-			// Pre-approval Verifier phase (ADR-0086): with Agent verification
-			// enabled and the set not opted out, a drain that has exhausted the
-			// set's AFK work must clear a SHA-gated Verify verdict before its
-			// terminal status stands. The verdict is cache-first — a re-drain at an
-			// unchanged work SHA reuses the stored verdict and never re-invokes the
-			// Verifier, so a parked set does not loop. A PASS lets DONE / AWAITING-
-			// APPROVAL stand and falls through to the switch. A FIXABLE verdict
-			// makes the Verifier a task producer: while the set is under its
-			// remediation depth cap it spawns a new AFK Remediation task whose body
-			// is the findings and keeps draining — the Drain picks the task up, its
-			// completion moves the work SHA, the cached verdict goes stale, and the
-			// Verifier re-fires, closing the loop. At or over the cap (or on a
-			// NEEDS-HUMAN verdict) the set parks as VERIFY-FAILED and the drain
-			// records the verify_failed terminal. The Runtime execution lock is
-			// still held here, so the Verifier and the remediation write run under it.
-			if m := currentRefresh.Manifests[taskSetID]; verifyEnabled(cfg) && !m.VerifyOptedOut() &&
-				(row.Status == StatusDone || row.Status == StatusAwaitingApproval) {
-				repo := ""
-				if id, idErr := ResolveRepositoryIdentity(d, runtimePath); idErr == nil {
-					repo = id.CommonDir
-				}
-				effective, verdict, verr := drainVerifyPhase(d, cfg, verifyCoreOptions{
-					Repo:        repo,
-					RuntimePath: runtimePath,
-					SetID:       taskSetID,
-					Agents:      opts.VerifyAgents,
-					Effort:      opts.VerifyEffort,
-					Timeout:     timeout,
-					Output:      out,
-					runVerifier: opts.verifyRunner,
-				}, m, row.Status)
-				if verr != nil {
-					if qp, ok := AsVerifyQuotaPause(verr); ok {
-						priority := 0
-						if row := findRow(currentRefresh, taskSetID); row != nil {
-							priority = row.Priority
-						}
-						regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &r.drain, taskSetID, qp.Preset, qp.ResetAt, runtimePath, priority, out, r.ensureDrain)
-						if waitErr != nil {
-							return result, waitErr
-						}
-						if regFailed {
-							result.QuotaPaused = true
-							result.PauseReason = qp.Reason
-							result.PausePreset = qp.Preset
-							result.PauseResetAt = qp.ResetAt
-							result.Refresh = currentRefresh
-							printTaskSetSummary(out, result)
-							return result, nil
-						}
-						continue
-					}
-					return result, verr
-				}
-				if effective == StatusVerifyFailed {
-					// A FIXABLE verdict under the cap spawns a Remediation task and
-					// keeps draining; only a NEEDS-HUMAN verdict or an exhausted cap
-					// actually parks the set.
-					if verdict != nil && Verdict(verdict.Verdict) == VerdictFixable {
-						spawned, remID, rerr := spawnRemediationIfUnderCap(d, m, repo, verdict.WorkSHA, verdict.Findings, maxRemediationDepth(cfg))
-						if rerr != nil {
-							return result, rerr
-						}
-						if spawned {
-							outputFor(out).line(ansiBold+ansiCyan, "━━ Spawned remediation task %s — resuming the drain", remID)
-							continue
-						}
-					}
-					result.TaskSetVerifyFailed = true
-					if verdict != nil {
-						result.VerifyFindings = verdict.Findings
-					}
-					result.VerifyRerunCmd = FormatVerifyCommand(taskSetID, opts.VerifyAgents, opts.VerifyEffort)
-					// Overlay the verdict-derived disposition on the display row so the
-					// rendered table reads VERIFY-FAILED, matching `pop tasks status`.
-					row.Status = StatusVerifyFailed
-					row.Progress = BuildProgress(m, StatusVerifyFailed)
-					row.VerifyFindings = result.VerifyFindings
-					if !opts.Yes {
-						fmt.Fprintln(out)
-						Render(out, currentRefresh)
-					}
-					// Verify-fail gate (ADR-0103): on a TTY, let a human disposition the
-					// set — Accept / Remediate / shell / exit. Accept and Remediate invoke
-					// the same store/spawn behavior as the CLI flags, and both keep the
-					// drain going (Accept flips the set to verified via a human-authored
-					// PASS; Remediate spawns drainable fix work). Park the Runtime
-					// execution lock first so the menu runs lock-free (ADR-0067) and a
-					// concurrent quota-recovery drain cannot resume mid-gate (ADR-0100).
-					verifyGateWillPrompt := !opts.Yes && canPrompt(opts.ConfirmIn) && m != nil
-					if verifyGateWillPrompt {
-						r.parkDrain()
-						_ = RegisterCheckoutGateHold(d, taskSetID, runtimePath)
-					}
-					sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
-					findings := ""
-					if verdict != nil {
-						findings = verdict.Findings
-					}
-					handled, gateErr := handleInteractiveVerifyFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, repo, runtimePath, taskSetID, m, verifyWorkSHA(d, runtimePath), findings)
-					if verifyGateWillPrompt {
-						r.releaseGateHold()
-					}
-					if gateErr != nil {
-						return result, gateErr
-					}
-					if handled {
-						// The human disposed of the set; clear the verify-failed terminal so
-						// the deferred finalize does not record verify_failed, and resume.
-						result.TaskSetVerifyFailed = false
-						result.VerifyFindings = ""
-						continue
-					}
-					if opts.Yes {
-						printTaskSetSummary(out, result)
-					}
-					return result, exitErr(ExitNoRunnable, "Task set %q verification failed — a human must review it\n%s", taskSetID, result.VerifyRerunCmd)
-				}
+			// Pre-approval Verifier phase (ADR-0086): when the set has exhausted its
+			// AFK work at DONE / AWAITING-APPROVAL, clear a SHA-gated Verify verdict
+			// before the terminal status stands. verifyPhase owns the whole choreography
+			// (quota-pause park/wait, FIXABLE remediation spawn, the verify-fail gate)
+			// and returns a directive: keep draining, return the run's result, or fall
+			// through to the terminal-status switch.
+			switch directive, verifyErr := r.verifyPhase(currentRefresh, row); directive {
+			case verifyContinue:
+				continue
+			case verifyReturn:
+				return result, verifyErr
 			}
 
 			switch row.Status {
@@ -343,7 +235,7 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 						timeout:     timeout,
 						runVerifier: opts.verifyRunner,
 					}
-					handled, err := handleInteractiveHITLGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, currentRefresh.Manifests[taskSetID], hitl, rv)
+					handled, err := handleInteractiveHITLGate(d, out, opts.ConfirmIn, r.sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, currentRefresh.Manifests[taskSetID], hitl, rv)
 					r.releaseGateHold()
 					if err != nil {
 						return nil, err
@@ -370,11 +262,11 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 					Render(out, currentRefresh)
 				}
 				m := currentRefresh.Manifests[taskSetID]
-				sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
+				r.sharedPromptReader = ensurePromptReader(r.sharedPromptReader, opts.ConfirmIn, opts.Yes)
 				// Park the Runtime execution lock before the Failed gate menu so it
 				// runs lock-free (ADR-0067).
 				r.parkAtGate(m, FailedTask(m))
-				handled, err := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, m, FailedTask(m))
+				handled, err := handleInteractiveFailedGate(d, out, opts.ConfirmIn, r.sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, m, FailedTask(m))
 				r.releaseGateHold()
 				if err != nil {
 					return nil, err
@@ -438,13 +330,13 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 					Render(out, afterRefresh)
 				}
 				m := afterRefresh.Manifests[taskSetID]
-				sharedPromptReader = ensurePromptReader(sharedPromptReader, opts.ConfirmIn, opts.Yes)
+				r.sharedPromptReader = ensurePromptReader(r.sharedPromptReader, opts.ConfirmIn, opts.Yes)
 				// Park the Runtime execution lock before the post-failure Failed gate
 				// menu so it runs lock-free (ADR-0067). An interrupt never reaches the
 				// menu (the task is not marked failed), so its `interrupted` terminal is
 				// preserved by the normal finalize.
 				r.parkAtGate(m, FailedTask(m))
-				handled, gateErr := handleInteractiveFailedGate(d, out, opts.ConfirmIn, sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, m, FailedTask(m))
+				handled, gateErr := handleInteractiveFailedGate(d, out, opts.ConfirmIn, r.sharedPromptReader, opts.Yes, opts.AgentPreset, opts.AgentCmd, opts.CWD, runtimePath, resolved.DefinitionPath, statePath, taskSetID, m, FailedTask(m))
 				r.releaseGateHold()
 				if gateErr != nil {
 					return result, gateErr
