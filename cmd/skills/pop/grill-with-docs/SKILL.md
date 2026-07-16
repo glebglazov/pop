@@ -100,18 +100,27 @@ Only offer to create an ADR when all three are true:
 
 If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
 <!-- ═══════════════════════════════ POP OVERLAY ═══════════════════════════════
-Everything below is pop-specific and has no upstream twin. It carries one
-behavioural override of the base — negating domain-modeling's "Update
-CONTEXT.md inline" single-writer instruction in favour of per-session
-fragments — plus the grill-consolidate fold-in path and the commit-on-close
-discipline that make grilling safe under parallel agents and teams.
+Everything below is pop-specific and has no upstream twin. It carries the
+behavioural overrides of the base — replacing domain-modeling's "Update
+CONTEXT.md inline" single-writer instruction with per-session fragments written
+once a round, and collapsing the base's scattered fact-finding into one rule —
+plus the grill-consolidate fold-in path and the commit-on-close discipline that
+make grilling safe under parallel agents and teams. Where a line below contradicts
+the verbatim upstream region, the line below wins; the upstream text is kept
+byte-intact only so drift stays diffable.
 -->
 
 ## Single-writer override
 
 **Override (negates the "Update CONTEXT.md inline" section above): never write the base `CONTEXT.md` — write a delta op to your own per-session fragment per [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md), and treat the glossary you challenge terms against as the union of base + fragments.** Read [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md) before your first write. This keeps concurrent sessions and teams conflict-free; the "update `CONTEXT.md` right there" wording upstream is the one place pop deviates, and this line is authoritative.
 
+**Write once a round, not per term.** The primitive resolves decisions in rounds, and glossary writes ride the same beat. Don't append an op the moment a term settles mid-round — at each round's close, if that round settled any terms, write their `+`/`~`/`-` ops to your fragment in a single update, and skip rounds that settled nothing. This supersedes the base's "capture them as they happen … don't batch these up" timing, which assumed per-term writes to a file pop no longer touches.
+
 If the user asks you to **consolidate** (fold accumulated fragments into the base), use the `grill-consolidate` skill. Consolidation is a separate single-writer maintenance pass, not part of the grilling session — don't fold fragments in mid-grill.
+
+## Fact-finding is one activity
+
+The primitive's "find facts yourself, never ask the user," domain-modeling's "Challenge against the glossary," and its "Cross-reference with code" are **the same activity**, not three separate ones. Read the code and the base+fragment glossary-union directly — inline for a cheap check, a non-blocking sub-agent for heavy exploration — and surface any contradiction between what you find and what the user claimed. There is no path where you ask the user to supply a fact you could have looked up.
 
 ## Closing the session
 
