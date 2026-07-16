@@ -42,6 +42,7 @@ var (
 	taskImplementVerifyAgents []string
 	taskImplementVerifyEffort string
 	taskStatusArchived        bool
+	taskAutoDrainOff          bool
 	taskBindWorktreeForce     bool
 	taskUnbindWorktreeYes     bool
 	taskStreamFull            bool
@@ -87,6 +88,13 @@ var taskSetPriorityCmd = &cobra.Command{
 	Short: "Set a registered task-set priority",
 	Args:  cobra.ExactArgs(2),
 	RunE:  runTaskSetPriority,
+}
+
+var taskAutoDrainCmd = &cobra.Command{
+	Use:   "auto-drain TASK_SET",
+	Short: "Set (or clear with --off) a registered task set's auto-drain consent bit",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskAutoDrain,
 }
 
 var taskImplementCmd = &cobra.Command{
@@ -202,6 +210,8 @@ func init() {
 	taskCmd.AddCommand(taskArchiveCmd)
 	taskCmd.AddCommand(taskUnarchiveCmd)
 	taskCmd.AddCommand(taskSetPriorityCmd)
+	taskAutoDrainCmd.Flags().BoolVar(&taskAutoDrainOff, "off", false, "Clear the auto-drain bit instead of setting it")
+	taskCmd.AddCommand(taskAutoDrainCmd)
 	taskCmd.AddCommand(taskImplementCmd)
 	taskCmd.AddCommand(taskVerifyCmd)
 	taskCmd.AddCommand(taskResetTaskCmd)
@@ -602,6 +612,22 @@ func runTaskSetPriorityWith(d *tasks.Deps, w io.Writer, taskSetID, priorityArg s
 	}
 
 	tasks.RenderPriorityUpdate(w, result.TaskSetID, result.OldPriority, result.NewPriority)
+	fmt.Fprintln(w)
+	tasks.Render(w, result.Refresh)
+	return nil
+}
+
+func runTaskAutoDrain(cmd *cobra.Command, args []string) error {
+	return runTaskAutoDrainWith(tasks.DefaultDeps(), os.Stdout, args[0], !taskAutoDrainOff)
+}
+
+func runTaskAutoDrainWith(d *tasks.Deps, w io.Writer, taskSetID string, enabled bool) error {
+	result, err := tasks.SetAutoDrainWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput(), taskSetID, enabled)
+	if err != nil {
+		return fmt.Errorf("tasks auto-drain: %w", err)
+	}
+
+	tasks.RenderAutoDrainUpdate(w, result.TaskSetID, result.AutoDrain)
 	fmt.Fprintln(w)
 	tasks.Render(w, result.Refresh)
 	return nil

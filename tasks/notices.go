@@ -35,6 +35,15 @@ func RenderPriorityUpdate(w io.Writer, taskSetID string, oldPriority, newPriorit
 	outputFor(w).line(ansiCyan, "Updated priority for %s: %d -> %d", taskSetID, oldPriority, newPriority)
 }
 
+// RenderAutoDrainUpdate writes the user-facing set-value auto-drain result.
+func RenderAutoDrainUpdate(w io.Writer, taskSetID string, enabled bool) {
+	if enabled {
+		outputFor(w).line(ansiCyan, "Auto-drain enabled: %s", taskSetID)
+		return
+	}
+	outputFor(w).line(ansiCyan, "Auto-drain disabled: %s", taskSetID)
+}
+
 // RenderTaskReset writes the user-facing open result.
 func RenderTaskReset(w io.Writer, taskSetID, taskID string) {
 	outputFor(w).line(ansiCyan, "Reset task %s/%s to open", taskSetID, taskID)
