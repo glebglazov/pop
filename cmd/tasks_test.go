@@ -471,6 +471,143 @@ func TestTaskRegisterReRegisterKeepsExistingBinding(t *testing.T) {
 	}
 }
 
+// registeredIntent reads the store-backed worktree intent seeded for setID
+// under root's repository, so a test can assert what `register` recorded.
+func registeredIntent(t *testing.T, td *tasks.Deps, root, setID string) *tasks.WorktreeDirective {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(td, root)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
+	if err != nil {
+		t.Fatalf("def path: %v", err)
+	}
+	intent, err := tasks.RegisteredWorktreeIntent(td, defPath, setID)
+	if err != nil {
+		t.Fatalf("read intent: %v", err)
+	}
+	return intent
+}
+
+// TestTaskRegisterManagedRecordsIntentNoEagerBinding covers ADR-0115 slice 03:
+// `register --managed` records a managed worktree intent and does NOT eager-bind
+// the current checkout — the worktree is provisioned lazily at first drain, so
+// nothing is bound the moment the set registers.
+func TestTaskRegisterManagedRecordsIntentNoEagerBinding(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "draft")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	td := tasks.DefaultDeps()
+
+	taskRegisterManaged = true
+	var regOut bytes.Buffer
+	if err := runTaskRegisterWith(td, &regOut, ""); err != nil {
+		t.Fatalf("register --managed failed: %v", err)
+	}
+
+	// No eager binding: nothing is bound the moment a managed set registers.
+	if _, _, bound, err := binding.FindBySetID(td, "draft"); err != nil {
+		t.Fatalf("find binding: %v", err)
+	} else if bound {
+		t.Fatalf("register --managed created an eager binding, want none:\n%s", regOut.String())
+	}
+
+	// The managed intent is recorded, so routing provisions lazily at first drain.
+	intent := registeredIntent(t, td, root, "draft")
+	if intent == nil || !intent.Managed {
+		t.Fatalf("register --managed did not record a managed intent, got %+v", intent)
+	}
+}
+
+// TestTaskRegisterManagedProvisionsLazilyAtFirstDrain covers ADR-0115 slice 03:
+// a `--managed` set provisions no worktree at register time; the recorded intent
+// is consumed by the first Queue drain, which forks a pop-owned worktree and
+// binds it. This wires register's seed to the unchanged lazy-provisioning path.
+func TestTaskRegisterManagedProvisionsLazilyAtFirstDrain(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	// A base commit gives the Trunk worktree a HEAD to fork the managed worktree from.
+	if out, err := exec.Command("git", "-C", root, "commit", "--allow-empty", "-m", "base").CombinedOutput(); err != nil {
+		t.Fatalf("base commit: %v\n%s", err, out)
+	}
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "draft")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: root}}}
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) { return cfg, nil }
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	td := tasks.DefaultDeps()
+
+	taskRegisterManaged = true
+	var regOut bytes.Buffer
+	if err := runTaskRegisterWith(td, &regOut, ""); err != nil {
+		t.Fatalf("register --managed failed: %v", err)
+	}
+
+	// Nothing was provisioned at register time: no managed worktree on disk yet.
+	managedRoot := binding.ManagedWorktreesRoot(td)
+	if entries, err := os.ReadDir(managedRoot); err == nil && len(entries) > 0 {
+		t.Fatalf("register --managed provisioned a worktree eagerly: %v", entries)
+	}
+
+	// The first Queue drain consumes the recorded intent and provisions lazily.
+	got, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
+		TD:              td,
+		PD:              taskProjectDeps(),
+		Config:          cfg,
+		CurrentCheckout: root,
+		SetID:           "draft",
+		Trigger:         binding.TriggerQueueSpawn,
+	})
+	if err != nil {
+		t.Fatalf("route drain: %v", err)
+	}
+	if !got.ProvisionedManaged {
+		t.Fatalf("first drain did not provision a managed worktree: %+v", got)
+	}
+	if !strings.HasPrefix(got.RuntimePath, managedRoot) {
+		t.Fatalf("provisioned worktree %q not under managed root %q", got.RuntimePath, managedRoot)
+	}
+	canonRoot, _ := filepath.EvalSymlinks(root)
+	if got.RuntimePath == canonRoot {
+		t.Fatalf("drain used the current checkout %q, want a distinct managed worktree", canonRoot)
+	}
+	if _, err := os.Stat(got.RuntimePath); err != nil {
+		t.Fatalf("provisioned worktree missing on disk: %v", err)
+	}
+}
+
 func TestTaskArchiveSelectionPrechecksDoneOnlyAndCancelWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	resetTaskFlags()
@@ -1818,6 +1955,7 @@ func resetTaskFlags() {
 	taskDefPath = ""
 	taskRuntimePath = ""
 	taskStatusArchived = false
+	taskRegisterManaged = false
 	taskAgentPreset = ""
 	taskAgentPresets = nil
 	taskAgentCmd = ""

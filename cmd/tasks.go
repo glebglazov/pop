@@ -44,6 +44,7 @@ var (
 	taskImplementVerifyEffort string
 	taskStatusArchived        bool
 	taskAutoDrainOff          bool
+	taskRegisterManaged       bool
 	taskBindWorktreeForce     bool
 	taskUnbindWorktreeYes     bool
 	taskStreamFull            bool
@@ -207,6 +208,7 @@ var taskUnbindWorktreeCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
+	taskRegisterCmd.Flags().BoolVar(&taskRegisterManaged, "managed", false, "Record a managed worktree intent instead of adopting the current checkout: pop provisions its own isolated worktree lazily at first Queue drain")
 	taskCmd.AddCommand(taskRegisterCmd)
 	taskCmd.AddCommand(taskArchiveCmd)
 	taskCmd.AddCommand(taskUnarchiveCmd)
@@ -300,7 +302,15 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return fmt.Errorf("tasks register: %w", err)
 	}
 
-	result, err := tasks.RegisterWith(d, resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
+	// --managed records a managed worktree intent on each new set instead of
+	// eagerly adopting the current checkout (ADR-0115): the worktree is
+	// provisioned lazily at first Queue drain, so the eager-adopt step below is
+	// skipped for managed registrations.
+	register := tasks.RegisterWith
+	if taskRegisterManaged {
+		register = tasks.RegisterManagedWith
+	}
+	result, err := register(d, resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
 	if err != nil {
 		return fmt.Errorf("tasks register: %w", err)
 	}
@@ -319,8 +329,11 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		tasks.ApplyVerifyVerdicts(d, result, cfg, runtimePath)
 		// Eagerly bind the current checkout to each newly-registered set
 		// (ADR-0115): the binding is materialized and visible the moment the set
-		// registers, with no drain required.
-		eagerBindNewRegistrations(d, cfg, runtimePath, result.NewRegistrationIDs, w)
+		// registers, with no drain required. --managed skips this: those sets carry
+		// a managed intent and provision their own worktree lazily at first drain.
+		if !taskRegisterManaged {
+			eagerBindNewRegistrations(d, cfg, runtimePath, result.NewRegistrationIDs, w)
+		}
 	}
 
 	// With a set argument, drill into that one set's per-task breakdown after

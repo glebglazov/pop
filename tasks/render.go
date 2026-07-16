@@ -46,13 +46,13 @@ func Refresh(defPath string) (*RefreshResult, error) {
 // state path. It never writes Task state — discovered-but-unregistered sets
 // are inert (ADR-0061).
 func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
-	return refreshWith(d, defPath, statePath, false, false)
+	return refreshWith(d, defPath, statePath, false, false, false)
 }
 
 // RefreshArchivedWith performs a pure-read refresh and returns only Archived
 // Task sets. Like RefreshWith, it never registers.
 func RefreshArchivedWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
-	return refreshWith(d, defPath, statePath, false, true)
+	return refreshWith(d, defPath, statePath, false, false, true)
 }
 
 // RegisterWith is the sole writer of Task-set registration (ADR-0061): it
@@ -62,10 +62,20 @@ func RefreshArchivedWith(d *Deps, defPath, statePath string) (*RefreshResult, er
 // materialized eagerly by the register command. It must be run from inside the
 // repo so its cwd is a valid checkout.
 func RegisterWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
-	return refreshWith(d, defPath, statePath, true, false)
+	return refreshWith(d, defPath, statePath, true, false, false)
 }
 
-func refreshWith(d *Deps, defPath, statePath string, register, showArchived bool) (*RefreshResult, error) {
+// RegisterManagedWith registers like RegisterWith but records a managed
+// worktree intent on each newly-registered set (ADR-0115): rather than
+// eagerly adopting the current checkout, the set's worktree is provisioned
+// lazily — a pop-owned worktree forked from the Trunk worktree — at its first
+// Queue drain. The register command skips the eager-adopt step for managed
+// registrations.
+func RegisterManagedWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
+	return refreshWith(d, defPath, statePath, true, true, false)
+}
+
+func refreshWith(d *Deps, defPath, statePath string, register, managed, showArchived bool) (*RefreshResult, error) {
 	canon, err := CanonicalDefinitionPathWith(d, defPath)
 	if err != nil {
 		return nil, err
@@ -111,7 +121,7 @@ func refreshWith(d *Deps, defPath, statePath string, register, showArchived bool
 		}
 		if needsSave {
 			err := UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-				mergeNewRegistrations(d, canon, disc, state, &newRegs, &newIDs)
+				mergeNewRegistrations(d, canon, disc, state, managed, &newRegs, &newIDs)
 				return nil
 			})
 			if err != nil {

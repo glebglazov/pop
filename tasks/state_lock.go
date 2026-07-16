@@ -212,8 +212,10 @@ func parseStateLockMetadata(data []byte) (*StateLockMetadata, error) {
 // appends each new set's display id to added (for the "Registered new task
 // set(s)" line) and its raw identifier to addedIDs (which the register command
 // uses to eager-bind the current checkout per ADR-0115). Either out slice may be
-// nil.
-func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *GlobalState, added, addedIDs *[]string) {
+// nil. When managed is true, each new set is seeded with a managed worktree
+// intent instead — its worktree is provisioned lazily at first Queue drain and
+// the register command skips the eager-adopt step.
+func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *GlobalState, managed bool, added, addedIDs *[]string) {
 	entry := state.Entry(defPath)
 	registered := state.RegisteredIDs(defPath)
 	ids := make([]string, 0, len(disc.Manifests))
@@ -226,6 +228,9 @@ func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *Glob
 	sort.Strings(ids)
 	for _, id := range ids {
 		reg := newRegisteredTaskSet(id)
+		if managed {
+			reg.WorktreeIntent = &WorktreeDirective{Managed: true}
+		}
 		entry.TaskSets = append(entry.TaskSets, reg)
 		registered[id] = len(entry.TaskSets) - 1
 		if added != nil {
