@@ -1,11 +1,20 @@
 ---
 name: to-tasks
-description: Break a plan, spec, or PRD into independently-grabbable work items written as local markdown files. Use when the user wants to convert a plan into tasks, create implementation tickets, or break down work into actionable items.
+description: Break a plan, spec, or PRD into independently-grabbable work items written as local markdown files, binding the set to the worktree you run it in. Use when the user wants to convert a plan into tasks, create implementation tickets, or break down work into actionable items. Accepts `managed` (isolated pop-owned worktree) and `auto-drain` (queue drains it unattended) arguments.
 ---
 
 # To Tasks
 
 Break a plan into independently-grabbable work items using vertical slices (tracer bullets).
+
+## Arguments
+
+`to-tasks` reads two optional arguments from the invocation; both default off. They are independent and may be combined.
+
+- **`managed`** / **`isolated`** — write the **Worktree directive** as `{ "managed": true }` (pop forks its own isolated worktree from the Trunk worktree on the first Queue drain) instead of the default `{ "name": "<current-worktree>" }`.
+- **`auto-drain`** / **`drain`** — also set `"auto_drain": true`, so the Queue daemon drains the set unattended. Only these literal keywords enable it — there is no "here and now" phrasing.
+
+With no arguments, the set is bound to the **current** worktree by name and left for manual/foreground draining. `managed auto-drain` gives an isolated worktree that drains unattended — the safest unattended combo.
 
 ## Process
 
@@ -114,43 +123,34 @@ Alongside the markdown files, write `<tasks-dir>/<task-set-name>/index.json` —
 }
 ```
 
-When the human explicitly requests auto-drain in the planning session, add a top-level `"auto_drain": true` key (omit it by default):
+**Always** add a top-level `"worktree"` key — `to-tasks` binds every set to a checkout; there is no "unbound" default. Two arms, exactly one:
 
 ```json
 {
-  "auto_drain": true,
-  "tasks": [
-    {
-      "id": "01-login-form",
-      "file": "01-login-form.md",
-      "title": "Login form",
-      "type": "AFK",
-      "effort": "standard",
-      "status": "open",
-      "blocked_by": []
-    }
-  ]
-}
-```
-
-When the human explicitly asks for the set to run in a worktree, add a top-level `"worktree"` key (omit it by default). Two arms, exactly one:
-
-```json
-{
-  "worktree": { "managed": true },
+  "worktree": { "name": "<current-worktree>" },
   "tasks": [ ... ]
 }
 ```
 
-- `{ "managed": true }` — pop provisions its own worktree (and a branch named after the set) forked from the Trunk worktree, the first time the Queue drains the set. Use this when the human wants an isolated, pop-owned checkout ("in a worktree", "isolated", "let the queue run it in its own worktree").
-- `{ "name": "<worktree>" }` — pop adopts (never deletes) the existing worktree of that operator-facing name on this machine, as shown by `pop worktree`. Use this when the human names a checkout they already have ("run this in my `feature-x` worktree"). Write the name, never a path — the manifest is portable across machines.
+- `{ "name": "<current-worktree>" }` — **the default.** Resolve the current checkout's operator-facing name with `basename "$(git rev-parse --show-toplevel)"` and write it verbatim — a *name*, never a path (the manifest is portable across machines), never the literal `current`. Write it **uniformly** for whatever checkout you are in — feature worktree, Trunk worktree, pop-managed, or already-bound — with no guard, warning, or refusal. pop adopts (never deletes) that worktree the first time the Queue drains the set.
+- `{ "managed": true }` — written **only** for the `managed`/`isolated` argument. pop provisions its own worktree (and a branch named after the set) forked from the Trunk worktree the first time the Queue drains the set.
+
+When the `auto-drain`/`drain` argument is given, also add a top-level `"auto_drain": true` key (omit it otherwise):
+
+```json
+{
+  "auto_drain": true,
+  "worktree": { "name": "<current-worktree>" },
+  "tasks": [ ... ]
+}
+```
 
 </manifest-schema>
 
 Field rules:
 
-- `auto_drain` — optional top-level boolean. **Omit by default.** Write `"auto_drain": true` only when the human explicitly requests auto-drain in that session (e.g. "with auto-drain", "queue should pick this up"). Never infer it from task content; do not write `"auto_drain": false` unless the human explicitly asks to disable. Pop seeds the Auto-drain bit in Task state once at first registration; the Queue dashboard toggle remains authoritative afterward.
-- `worktree` — optional top-level object, `{ "managed": true }` or `{ "name": "<worktree>" }` (never both). **Omit by default.** Write it only when the human explicitly asks the set to run in a worktree; never infer it. It is a one-time registration seed: pop reads it once at first registration and provisions/adopts lazily on the first Queue drain — editing it later does nothing. A foreground `pop tasks implement` ignores it entirely and binds the current checkout. **Orthogonal to `auto_drain`, but related:** an `auto_drain` set with *no* `worktree` directive is not Queue-drainable — the dashboard shows it as `needs bind` until the human binds a checkout by hand. So when the human asks for `auto_drain`, surface this and offer to add `{ "managed": true }` so the Queue can actually run it unattended; don't force it (they may intend to bind manually or drain foreground).
+- `auto_drain` — optional top-level boolean. **Omit by default.** Write `"auto_drain": true` only when the `auto-drain`/`drain` argument is given. Never infer it from task content; do not write `"auto_drain": false`. Written **silently regardless of checkout** — even trunk, pop-managed, or already-bound (no guard). Note the consequence on trunk: the Queue then commits task work onto your main branch unattended. Pop seeds the Auto-drain bit in Task state once at first registration; the Queue dashboard toggle remains authoritative afterward.
+- `worktree` — **always written** — top-level object, `{ "name": "<current-worktree>" }` by default or `{ "managed": true }` for the `managed` argument (never both, never omitted). It is a one-time registration seed: pop reads it once at first registration and provisions/adopts lazily on the first Queue drain — editing it later does nothing. A foreground `pop tasks implement` ignores it entirely and binds the current checkout, so it routes **only** Queue drains. The default `{ "name": ... }` names the checkout you ran `to-tasks` in; combine with `auto_drain` to have the Queue drain unattended there. Writing `{ "name": ... }` for a checkout another set already uses is allowed — pop reference-counts managed-worktree teardown so sharing never strands a set (ADR-0116).
 - `id` — the filename stem (`<number>-<task-name>`), stable identifier referenced by `blocked_by`.
 - `status` — one of `open` | `done` | `failed` | `skipped`. Always initialize to `open`. Do not write `in_progress`; persisted `in_progress` is malformed.
 - `blocked_by` — array of `id`s of blocking tasks. Empty array if none.

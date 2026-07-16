@@ -4,7 +4,7 @@ status: accepted
 
 # Worktree directive is Queue-only; foreground implement binds the current checkout
 
-> **Relates:** amends [ADR-0059](0059-task-set-may-declare-a-worktree-directive.md) (directive now Queue-only, no longer "honoured by every drain"), [ADR-0046](0046-implement-defaults-to-worktree-execution.md) (the `--in-worktree` opt-in keeps its name but re-bases its fork point), and [ADR-0062](0062-no-directive-drain-persists-a-default-binding.md) (Queue no longer persists a default binding). Depends on [ADR-0070](0070-worktree-set-integration-is-removed-merging-is-the-humans-own-concern.md) (no Integration-target fallback).
+> **Relates:** amends [ADR-0059](0059-task-set-may-declare-a-worktree-directive.md) (directive now Queue-only, no longer "honoured by every drain"), [ADR-0046](0046-implement-defaults-to-worktree-execution.md) (the `--in-worktree` opt-in keeps its name but re-bases its fork point), and [ADR-0062](0062-no-directive-drain-persists-a-default-binding.md) (Queue no longer persists a default binding). Depends on [ADR-0070](0070-worktree-set-integration-is-removed-merging-is-the-humans-own-concern.md) (no Integration-target fallback). The managed-worktree teardown it references is later reference-counted by [ADR-0116](0116-managed-worktree-teardown-is-reference-counted.md), retiring the one-checkout-to-one-set exclusivity.
 
 Foreground and Queue drains now route differently, on purpose.
 

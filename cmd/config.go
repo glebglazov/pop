@@ -57,9 +57,24 @@ Examples:
 	RunE: runConfigKeys,
 }
 
+var configShowCmd = &cobra.Command{
+	Use:   "show",
+	Short: "Print the effective config as TOML",
+	Long: `Print pop's effective configuration as TOML.
+
+Where pop config keys lists the schema you may set, pop config show prints the
+values actually in effect: the global config.toml with its includes already
+merged in (not re-listed as an includes array), and every [repo."<path>"] key
+canonicalized to an absolute realpath (~ expanded, symlinks resolved). Effective
+values only — no per-value provenance.`,
+	Args: cobra.NoArgs,
+	RunE: runConfigShow,
+}
+
 func init() {
 	rootCmd.AddCommand(configCmd)
 	configCmd.AddCommand(configKeysCmd)
+	configCmd.AddCommand(configShowCmd)
 	configKeysCmd.Flags().StringVar(&configKeysScope, "scope", "",
 		"limit to one surface: global | pop-toml | repo (default: all)")
 	configKeysCmd.Flags().BoolVar(&configKeysAll, "all", false,
@@ -96,6 +111,15 @@ func runConfigKeys(cmd *cobra.Command, args []string) error {
 		scopes = []config.ConfigScope{config.ConfigScope(configKeysScope)}
 	}
 	renderScopeKeys(os.Stdout, scopes, configKeysAll)
+	return nil
+}
+
+func runConfigShow(cmd *cobra.Command, _ []string) error {
+	out, err := config.EffectiveTOML(config.DefaultConfigPath())
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(cmd.OutOrStdout(), out)
 	return nil
 }
 
