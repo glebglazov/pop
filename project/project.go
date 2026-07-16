@@ -389,9 +389,10 @@ func ListWorktreesForPathWith(d *Deps, path string) ([]Worktree, error) {
 
 // ExpandedProject represents a project that may be a worktree
 type ExpandedProject struct {
-	Name        string // Display name (e.g., "project/worktree" or just "project")
-	Path        string // Full path to the project/worktree
-	ProjectName string // Base project name
-	IsWorktree  bool   // Whether this is a worktree of a bare repo
-	SessionName string // Pre-computed tmux session name
+	Name         string // Display name (e.g., "project/worktree" or just "project")
+	ProjectLabel string // Repository display label — depth-aware Name without the trailing worktree segment (e.g. "project" for "project/worktree")
+	Path         string // Full path to the project/worktree
+	ProjectName  string // Base project name
+	IsWorktree   bool   // Whether this is a worktree of a bare repo
+	SessionName  string // Pre-computed tmux session name
 }

@@ -64,18 +64,20 @@ func expandConfiguredPaths(pd *project.Deps, paths []config.ExpandedPath) ([]pro
 				}
 				for _, wt := range worktrees {
 					projects = append(projects, project.ExpandedProject{
-						Name:        displayName + "/" + wt.Name,
-						Path:        wt.Path,
-						ProjectName: projectName,
-						IsWorktree:  true,
+						Name:         displayName + "/" + wt.Name,
+						ProjectLabel: displayName,
+						Path:         wt.Path,
+						ProjectName:  projectName,
+						IsWorktree:   true,
 					})
 				}
 			} else {
 				projects = append(projects, project.ExpandedProject{
-					Name:        displayName,
-					Path:        ep.Path,
-					ProjectName: projectName,
-					IsWorktree:  false,
+					Name:         displayName,
+					ProjectLabel: displayName,
+					Path:         ep.Path,
+					ProjectName:  projectName,
+					IsWorktree:   false,
 				})
 			}
 		}(i, p)

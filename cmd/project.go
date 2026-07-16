@@ -967,21 +967,23 @@ func expandProjectsWith(d *project.Deps, paths []config.ExpandedPath) (expanded 
 				ctx := &project.RepoContext{RepoName: projectName, IsBare: true}
 				for _, wt := range worktrees {
 					projects = append(projects, project.ExpandedProject{
-						Name:        displayName + "/" + wt.Name,
-						Path:        wt.Path,
-						ProjectName: projectName,
-						IsWorktree:  true,
-						SessionName: project.TmuxSessionName(ctx, wt.Name),
+						Name:         displayName + "/" + wt.Name,
+						ProjectLabel: displayName,
+						Path:         wt.Path,
+						ProjectName:  projectName,
+						IsWorktree:   true,
+						SessionName:  project.TmuxSessionName(ctx, wt.Name),
 					})
 				}
 			} else {
 				// Regular project
 				projects = append(projects, project.ExpandedProject{
-					Name:        displayName,
-					Path:        ep.Path,
-					ProjectName: projectName,
-					IsWorktree:  false,
-					SessionName: project.TmuxSessionName(&project.RepoContext{IsBare: false}, filepath.Base(ep.Path)),
+					Name:         displayName,
+					ProjectLabel: displayName,
+					Path:         ep.Path,
+					ProjectName:  projectName,
+					IsWorktree:   false,
+					SessionName:  project.TmuxSessionName(&project.RepoContext{IsBare: false}, filepath.Base(ep.Path)),
 				})
 			}
 		}(i, p)

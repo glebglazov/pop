@@ -285,9 +285,10 @@ func dashboardRepoStatics(d *Deps, cfg *config.Config, projects []project.Expand
 				// build path never reads it (rendered rows carry no session, and
 				// bind/drain sub-actions recompute it from the row's project path).
 				scans = append(scans, projectScan{
-					Name:        c.p.Name,
-					ProjectPath: c.canon,
-					RuntimePath: c.canon,
+					Name:         c.p.Name,
+					ProjectLabel: c.p.ProjectLabel,
+					ProjectPath:  c.canon,
+					RuntimePath:  c.canon,
 				})
 			}
 		}
@@ -396,16 +397,18 @@ func dashboardScanForCheckout(d *Deps, scans []projectScan, checkoutPath string)
 			return &scans[i]
 		}
 	}
-	name := ""
+	name, label := "", ""
 	if len(scans) > 0 {
 		name = scans[0].Name
+		label = scans[0].ProjectLabel
 	}
 	// SessionName is left unset for the same reason as in dashboardRepoStatics:
 	// deriving it forks git and the build path never reads it.
 	return &projectScan{
-		Name:        name,
-		ProjectPath: canon,
-		RuntimePath: canon,
+		Name:         name,
+		ProjectLabel: label,
+		ProjectPath:  canon,
+		RuntimePath:  canon,
 	}
 }
 

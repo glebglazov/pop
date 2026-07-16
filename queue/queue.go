@@ -306,6 +306,7 @@ func (d *Deps) skipDetailTask(defPath, taskPath string) error {
 // projectScan holds one registered project's resolved coordinates for a scan.
 type projectScan struct {
 	Name           string
+	ProjectLabel   string
 	ProjectPath    string
 	DefinitionPath string
 	RuntimePath    string
@@ -503,9 +504,10 @@ func scanRepoStatics(d *Deps, cfg *config.Config, projects []project.ExpandedPro
 			if pathWithinOrEqual(canons[i], root) || pathWithinOrEqual(root, canons[i]) {
 				matched[i] = true
 				scans = append(scans, projectScan{
-					Name:        projects[i].Name,
-					ProjectPath: canons[i],
-					RuntimePath: canons[i],
+					Name:         projects[i].Name,
+					ProjectLabel: projects[i].ProjectLabel,
+					ProjectPath:  canons[i],
+					RuntimePath:  canons[i],
 				})
 			}
 		}
@@ -608,6 +610,7 @@ func resolveScan(d *Deps, p project.ExpandedProject) (projectScan, error) {
 	}
 	return projectScan{
 		Name:           p.Name,
+		ProjectLabel:   p.ProjectLabel,
 		ProjectPath:    resolved.ProjectPath,
 		DefinitionPath: resolved.DefinitionPath,
 		RuntimePath:    resolved.ProjectPath,

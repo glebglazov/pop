@@ -218,6 +218,7 @@ func scanForCheckout(d *Deps, scans []projectScan, checkoutPath string) *project
 	}
 	return &projectScan{
 		Name:           base.Name,
+		ProjectLabel:   base.ProjectLabel,
 		ProjectPath:    canon,
 		DefinitionPath: base.DefinitionPath,
 		RuntimePath:    runtimePath,
@@ -399,13 +400,24 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 	return decisions
 }
 
-// repoName derives a stable label for a repository scheduling unit, preferring
-// the representative checkout's picker name.
+// repoName derives a stable label for a repository scheduling unit — the
+// repository display label, i.e. the depth-aware picker name without the
+// trailing worktree segment (ProjectLabel), so a bare repo's representative
+// shows "game server" rather than "game server/main". It falls back to the full
+// picker Name when no ProjectLabel is carried (e.g. synthesized scans).
 func repoName(scans []projectScan, rep *projectScan) string {
-	if rep != nil && rep.Name != "" {
-		return rep.Name
+	if rep != nil {
+		if rep.ProjectLabel != "" {
+			return rep.ProjectLabel
+		}
+		if rep.Name != "" {
+			return rep.Name
+		}
 	}
 	if len(scans) > 0 {
+		if scans[0].ProjectLabel != "" {
+			return scans[0].ProjectLabel
+		}
 		return scans[0].Name
 	}
 	return ""
