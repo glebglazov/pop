@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,13 +16,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// showTrunkDeps returns real-git task deps rooted at an isolated XDG data home
-// so the resolver can never accidentally read or write a shared task-binding
-// store.
-func showTrunkDeps(t *testing.T) *tasks.Deps {
+// mockTrunkDeps builds task deps whose git and filesystem are fully mocked, so
+// resolveCurrentRepoTrunk exercises no real git or filesystem. gitInDir routes
+// `git ... ` invocations by their joined args; fsWrite, when non-nil, is
+// installed as a WriteFile/MkdirAll trap that fails the test if the resolver
+// ever tries to write (it must never touch the task-binding store).
+func mockTrunkDeps(t *testing.T, gitInDir func(dir string, args ...string) (string, error)) *tasks.Deps {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdg"))
-	return &tasks.Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit()}
+	failWrite := func(where string) {
+		t.Helper()
+		t.Fatalf("resolver wrote to the filesystem (%s); it must never touch the task-binding store", where)
+	}
+	return &tasks.Deps{
+		FS: &deps.MockFileSystem{
+			WriteFileFunc: func(string, []byte, os.FileMode) error { failWrite("WriteFile"); return nil },
+			MkdirAllFunc:  func(string, os.FileMode) error { failWrite("MkdirAll"); return nil },
+			RenameFunc:    func(string, string) error { failWrite("Rename"); return nil },
+		},
+		Git: &deps.MockGit{CommandInDirFunc: gitInDir},
+	}
 }
 
 func runGitShow(t *testing.T, dir string, args ...string) {
@@ -43,14 +56,19 @@ func realPath(t *testing.T, path string) string {
 
 // TestResolveCurrentRepoTrunkNonBareDerived covers a plain (non-bare) repo with
 // no trunk config: the resolver reports the git-derived main worktree as the
-// trunk and bare = false.
+// trunk and bare = false. Fully mocked git — no real repo.
 func TestResolveCurrentRepoTrunkNonBareDerived(t *testing.T) {
-	td := showTrunkDeps(t)
-	repo := t.TempDir()
-	runGitShow(t, repo, "init")
-	runGitShow(t, repo, "config", "user.email", "a@b.c")
-	runGitShow(t, repo, "config", "user.name", "x")
-	runGitShow(t, repo, "commit", "--allow-empty", "-m", "init")
+	const repo = "/repo"
+	td := mockTrunkDeps(t, func(dir string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "worktree list --porcelain":
+			// A non-bare repo lists its primary working tree first, no `bare`.
+			return "worktree " + repo + "\nHEAD abc123\nbranch refs/heads/main\n", nil
+		case "rev-parse --git-common-dir":
+			return repo + "/.git", nil
+		}
+		return "", fmt.Errorf("unexpected git %v in %q", args, dir)
+	})
 
 	got, err := resolveCurrentRepoTrunk(td, &config.Config{}, repo)
 	if err != nil {
@@ -62,34 +80,34 @@ func TestResolveCurrentRepoTrunkNonBareDerived(t *testing.T) {
 	if got.Bare {
 		t.Errorf("bare = true, want false for a non-bare repo")
 	}
-	if realPath(t, got.Path) != realPath(t, repo) {
+	if got.Path != repo {
 		t.Errorf("trunk = %q, want the main worktree %q", got.Path, repo)
-	}
-
-	// The resolver must never touch the task-binding store.
-	if entries, _ := os.ReadDir(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "repos")); len(entries) != 0 {
-		t.Errorf("resolver wrote to the task-binding store: %v", entries)
 	}
 }
 
 // TestResolveCurrentRepoTrunkBareConfigOverride covers a bare repo whose
 // config-declared trunk = true names one worktree: the resolver reports that
-// worktree as the trunk and bare = true.
+// worktree as the trunk and bare = true. Fully mocked git — no real repo.
 func TestResolveCurrentRepoTrunkBareConfigOverride(t *testing.T) {
-	td := showTrunkDeps(t)
-	base := t.TempDir()
-	seed := filepath.Join(base, "seed")
-	runGitShow(t, base, "init", seed)
-	runGitShow(t, seed, "config", "user.email", "a@b.c")
-	runGitShow(t, seed, "config", "user.name", "x")
-	runGitShow(t, seed, "commit", "--allow-empty", "-m", "init")
-
-	bare := filepath.Join(base, "bare.git")
-	if out, err := exec.Command("git", "clone", "--bare", seed, bare).CombinedOutput(); err != nil {
-		t.Fatalf("clone --bare: %v\n%s", err, out)
-	}
-	wt := filepath.Join(base, "trunkwt")
-	runGitShow(t, bare, "worktree", "add", "-b", "trunk", wt, "HEAD")
+	const (
+		bareDir = "/base/bare.git"
+		wt      = "/base/trunkwt"
+	)
+	td := mockTrunkDeps(t, func(dir string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "worktree list --porcelain":
+			// A bare repo lists its bare entry first, so bareness is reported
+			// even when the current directory is a linked worktree.
+			return "worktree " + bareDir + "\nbare\n\nworktree " + wt + "\nHEAD abc123\nbranch refs/heads/trunk\n", nil
+		case "rev-parse --git-common-dir":
+			// Both the checkout and the config-named candidate share the bare
+			// repo's common dir, so their repo keys match.
+			return bareDir, nil
+		case "rev-parse --show-toplevel":
+			return wt, nil
+		}
+		return "", fmt.Errorf("unexpected git %v in %q", args, dir)
+	})
 
 	cfg := &config.Config{
 		Repo: map[string]config.RepoOverrideConfig{
@@ -107,16 +125,20 @@ func TestResolveCurrentRepoTrunkBareConfigOverride(t *testing.T) {
 	if !got.Bare {
 		t.Errorf("bare = false, want true for a bare repo")
 	}
-	if realPath(t, got.Path) != realPath(t, wt) {
+	if got.Path != wt {
 		t.Errorf("trunk = %q, want the config-declared worktree %q", got.Path, wt)
 	}
 }
 
 // TestResolveCurrentRepoTrunkOutsideRepo covers running outside any git repo:
-// the resolver returns nil so the current-repo section is omitted.
+// git fails the in-repo probe, so the resolver returns nil and the current-repo
+// section is omitted. Fully mocked git — no real repo.
 func TestResolveCurrentRepoTrunkOutsideRepo(t *testing.T) {
-	td := showTrunkDeps(t)
-	dir := t.TempDir() // a plain directory, not a git repo
+	const dir = "/not/a/repo"
+	td := mockTrunkDeps(t, func(_ string, _ ...string) (string, error) {
+		// Outside a git repo every git invocation fails.
+		return "", fmt.Errorf("fatal: not a git repository")
+	})
 
 	got, err := resolveCurrentRepoTrunk(td, &config.Config{}, dir)
 	if err != nil {
