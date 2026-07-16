@@ -45,6 +45,7 @@ var (
 	taskStatusArchived        bool
 	taskAutoDrainOff          bool
 	taskRegisterManaged       bool
+	taskRegisterAutoDrain     bool
 	taskBindWorktreeForce     bool
 	taskUnbindWorktreeYes     bool
 	taskStreamFull            bool
@@ -209,6 +210,7 @@ func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
 	taskRegisterCmd.Flags().BoolVar(&taskRegisterManaged, "managed", false, "Record a managed worktree intent instead of adopting the current checkout: pop provisions its own isolated worktree lazily at first Queue drain")
+	taskRegisterCmd.Flags().BoolVar(&taskRegisterAutoDrain, "auto-drain", false, "Enable the auto-drain consent bit on each newly registered set (default off); `pop tasks auto-drain` and the dashboard `a` toggle remain authoritative afterward")
 	taskCmd.AddCommand(taskRegisterCmd)
 	taskCmd.AddCommand(taskArchiveCmd)
 	taskCmd.AddCommand(taskUnarchiveCmd)
@@ -320,6 +322,15 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	// longer take effect. The set is never MALFORMED for carrying them.
 	warnDeprecatedManifestKeys(w, result)
 
+	// --auto-drain sets the consent bit on each set this register just activated,
+	// reusing the same primitive `pop tasks auto-drain` writes through. Off by
+	// default: unattended draining stays opt-in per invocation. It runs only for
+	// first-time registrations, mirroring eagerBindNewRegistrations, and the
+	// dashboard `a` toggle / `pop tasks auto-drain` remain authoritative afterward.
+	if taskRegisterAutoDrain {
+		applyRegisterAutoDrain(d, resolved.DefinitionPath, result.NewRegistrationIDs, w)
+	}
+
 	// Resolve the runtime checkout once (see runTaskStatusWith): it feeds the
 	// SHA-gated Verify-verdict pass and the overview's runtime-lock/checkout
 	// badges. Register prints status exactly like `pop tasks status`.
@@ -383,6 +394,19 @@ func eagerBindNewRegistrations(d *tasks.Deps, cfg *config.Config, checkoutPath s
 		}
 		if _, err := binding.BindWorktree(d, taskProjectDeps(), cfg, setID, checkoutPath, binding.BindWorktreeOptions{}, binding.LifecycleHooks{}, io.Discard); err != nil {
 			fmt.Fprintf(w, "warning: could not bind %s to current checkout: %v\n", setID, err)
+		}
+	}
+}
+
+// applyRegisterAutoDrain enables the auto-drain consent bit for each set this
+// register just activated (--auto-drain). It writes through
+// tasks.SetTaskSetAutoDrain — the same primitive SetAutoDrainWith uses to back
+// `pop tasks auto-drain` — rather than a parallel writer. Best-effort: a
+// failure is warned, not fatal, so it cannot itself fail a register.
+func applyRegisterAutoDrain(d *tasks.Deps, defPath string, newSetIDs []string, w io.Writer) {
+	for _, setID := range newSetIDs {
+		if _, err := tasks.SetTaskSetAutoDrain(d, defPath, setID, true); err != nil {
+			fmt.Fprintf(w, "warning: could not enable auto-drain for %s: %v\n", setID, err)
 		}
 	}
 }

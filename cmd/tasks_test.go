@@ -608,6 +608,158 @@ func TestTaskRegisterManagedProvisionsLazilyAtFirstDrain(t *testing.T) {
 	}
 }
 
+// registeredAutoDrain reads the store-backed auto-drain bit recorded for
+// setID under root's repository, so a test can assert what `register`
+// enabled (or left off).
+func registeredAutoDrain(t *testing.T, td *tasks.Deps, root, setID string) bool {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(td, root)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
+	if err != nil {
+		t.Fatalf("def path: %v", err)
+	}
+	state, err := tasks.LoadGlobalState(tasks.StatePathFor(defPath))
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	entry := state.Tasks[defPath]
+	if entry == nil {
+		t.Fatalf("no registration entry for %s", defPath)
+	}
+	for _, reg := range entry.TaskSets {
+		if reg.ID == setID {
+			return reg.AutoDrain
+		}
+	}
+	t.Fatalf("set %s not found in registration entry: %+v", setID, entry.TaskSets)
+	return false
+}
+
+// TestTaskRegisterAutoDrainFlagEnablesBit covers the register-time --auto-drain
+// flag (ADR-0115 slice 04): it sets the auto-drain consent bit on a newly
+// registered set through the same SetTaskSetAutoDrain primitive that backs
+// `pop tasks auto-drain`.
+func TestTaskRegisterAutoDrainFlagEnablesBit(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "draft")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	td := tasks.DefaultDeps()
+
+	taskRegisterAutoDrain = true
+	var regOut bytes.Buffer
+	if err := runTaskRegisterWith(td, &regOut, ""); err != nil {
+		t.Fatalf("register --auto-drain failed: %v", err)
+	}
+
+	if !registeredAutoDrain(t, td, root, "draft") {
+		t.Fatalf("register --auto-drain did not enable the bit:\n%s", regOut.String())
+	}
+}
+
+// TestTaskRegisterDefaultAutoDrainOff covers ADR-0115 slice 04: without
+// --auto-drain, a newly registered set's auto-drain bit stays off — unattended
+// draining remains opt-in per invocation.
+func TestTaskRegisterDefaultAutoDrainOff(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "draft")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	td := tasks.DefaultDeps()
+
+	var regOut bytes.Buffer
+	if err := runTaskRegisterWith(td, &regOut, ""); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	if registeredAutoDrain(t, td, root, "draft") {
+		t.Fatalf("register without --auto-drain enabled the bit:\n%s", regOut.String())
+	}
+}
+
+// TestTaskRegisterAutoDrainIdempotentReRun covers ADR-0115 slice 04: re-running
+// `register --auto-drain` against an already-registered set is a clean no-op —
+// SetTaskSetAutoDrain only runs for first-time registrations, and the bit stays
+// on across the re-run.
+func TestTaskRegisterAutoDrainIdempotentReRun(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "draft")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	td := tasks.DefaultDeps()
+
+	taskRegisterAutoDrain = true
+	var first bytes.Buffer
+	if err := runTaskRegisterWith(td, &first, ""); err != nil {
+		t.Fatalf("first register --auto-drain failed: %v", err)
+	}
+	if !registeredAutoDrain(t, td, root, "draft") {
+		t.Fatalf("first register --auto-drain did not enable the bit:\n%s", first.String())
+	}
+
+	var second bytes.Buffer
+	if err := runTaskRegisterWith(td, &second, ""); err != nil {
+		t.Fatalf("second register --auto-drain failed: %v", err)
+	}
+	if !registeredAutoDrain(t, td, root, "draft") {
+		t.Fatalf("re-run of register --auto-drain dropped the bit:\n%s", second.String())
+	}
+}
+
 func TestTaskArchiveSelectionPrechecksDoneOnlyAndCancelWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	resetTaskFlags()
@@ -1956,6 +2108,7 @@ func resetTaskFlags() {
 	taskRuntimePath = ""
 	taskStatusArchived = false
 	taskRegisterManaged = false
+	taskRegisterAutoDrain = false
 	taskAgentPreset = ""
 	taskAgentPresets = nil
 	taskAgentCmd = ""
