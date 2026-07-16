@@ -118,6 +118,19 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
 	})
 
+	t.Run("auto-drain stays set-only without slash drill", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "auto-drain")
+		assertShellCompContains(t, out, "svc")
+		assertShellCompOmitsExact(t, out, "svc/")
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+	})
+
+	t.Run("auto-drain offers no completion for a second positional arg", func(t *testing.T) {
+		out := shellCompNoDescCompleting(t, "tasks", "auto-drain", "svc", "")
+		assertShellCompOmitsExact(t, out, "svc")
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+	})
+
 	t.Run("show-path stays set-only without slash drill", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "show-path")
 		assertShellCompContains(t, out, "svc")
@@ -191,7 +204,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 			out := shellCompNoDesc(t, "tasks", verb)
 			assertShellCompOmitsExact(t, out, "archived/")
 		}
-		for _, verb := range []string{"status", "archive", "set-priority", "show-path"} {
+		for _, verb := range []string{"status", "archive", "set-priority", "show-path", "auto-drain"} {
 			out := shellCompNoDesc(t, "tasks", verb)
 			assertShellCompOmitsExact(t, out, "archived")
 		}
@@ -214,7 +227,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 
 	t.Run("subcommands", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks")
-		for _, sub := range []string{"status", "set-priority", "implement", "open", "stream", "agents"} {
+		for _, sub := range []string{"status", "set-priority", "auto-drain", "implement", "open", "stream", "agents"} {
 			assertShellCompContains(t, out, sub)
 		}
 	})
