@@ -2,36 +2,50 @@
 status: accepted
 ---
 
-# to-tasks always writes the worktree directive; to-tasks-here-and-now is retired
+# to-tasks auto-binds the current worktree at register; worktree & auto-drain leave the manifest
 
-> **Relates:** supersedes [ADR-0113](0113-to-tasks-here-and-now-binds-current-worktree-at-the-skill-layer.md) (the here-and-now wrapper is deleted), amends [ADR-0059](0059-task-set-may-declare-a-worktree-directive.md) (the directive is no longer opt-in), and depends on [ADR-0072](0072-worktree-directive-is-queue-only-foreground-implement-binds-the-current-checkout.md) (the directive stays Queue-only). The N-sets-to-one-checkout sharing it enables is handled by [ADR-0116](0116-managed-worktree-teardown-is-reference-counted.md).
+> **Relates:** supersedes [ADR-0113](0113-to-tasks-here-and-now-binds-current-worktree-at-the-skill-layer.md) (the here-and-now wrapper is deleted), amends [ADR-0059](0059-task-set-may-declare-a-worktree-directive.md) (the `worktree` manifest key is retired), keeps [ADR-0072](0072-worktree-directive-is-queue-only-foreground-implement-binds-the-current-checkout.md) (foreground implement still binds the current checkout), relates [ADR-0104](0104-out-of-band-mutators-require-checkout-quiescence.md) (auto-drain is a runtime consent bit) and [ADR-0116](0116-managed-worktree-teardown-is-reference-counted.md) (N-sets-to-one-checkout teardown stays reference-counted).
 
 ## Context
 
-ADR-0059 made the **Worktree directive** opt-in: planning skills wrote it "only when the human explicitly requests it; otherwise omitted", so the default `to-tasks` output left every set unbound and Queue-undrainable until a human bound a checkout by hand. ADR-0113 then bolted on a second skill, `to-tasks-here-and-now`, that force-bound the current worktree behind a guard refusing the trunk, pop-managed, and already-bound checkouts. Two skills, and the common case (plan from the feature worktree you're sitting in, then let it run there) still took extra ceremony.
+ADR-0059 made the **Worktree directive** an opt-in manifest key, so the default `to-tasks` output left every set unbound and Queue-undrainable until a human bound a checkout by hand. ADR-0113 bolted on a second skill, `to-tasks-here-and-now`, that force-bound the current worktree behind a guard refusing the trunk, pop-managed, and already-bound checkouts.
+
+The first cut of this ADR replaced both with one rule: `to-tasks` **always** wrote a `worktree` directive into the manifest (defaulting to the current checkout's name), killing the here-and-now split and the unbound default. That removed the two-skill ceremony, but left binding as a **lazy manifest seed**: `register` recorded the intent, the *first Queue drain* provisioned or adopted, and nothing was visible in between. Three problems survived:
+
+- **No visible binding until first drain.** Checking the store or dashboard right after `register` showed no binding — it looked broken even when it wasn't.
+- **Dual source of truth for auto-drain.** `auto_drain` lived in both the manifest (a seed) and the store (dashboard-authoritative), a confusing split.
+- **Machine-specific data in a portable artifact.** A worktree *name* baked into the manifest is awkward for `pop tasks transfer` across machines.
+
+And the manual `bind-worktree` step was still needed whenever the manifest name didn't match a checkout on the machine.
 
 ## Decision
 
-`to-tasks` **always** writes a worktree directive — it never omits the key.
+The **intent is unchanged** from the first cut of this ADR: a set auto-binds the current worktree with no ceremony, and the trunk is not special. Only the **mechanism** moves — off the manifest and onto `register`/CLI/dashboard.
 
-- **Default:** `{ "name": "<current-worktree-basename>" }`, resolved via `basename $(git rev-parse --show-toplevel)` — the portable operator-facing name, never a path, never the literal `current`. Written **uniformly** for whatever checkout the skill runs in — feature worktree, **Trunk worktree**, pop-**managed**, or already-bound alike — with no guard, warning, or refusal.
-- **`managed`/`isolated` argument:** overrides to `{ "managed": true }` (pop forks its own isolated worktree). There is no "omit" arm.
-- **`auto_drain`:** off by default; enabled **only** by an explicit `auto-drain`/`drain` argument, written silently alongside whichever worktree arm regardless of checkout.
+- **The manifest (`index.json`) no longer carries `worktree` or `auto_drain`.** It holds only the task list. The registration-seed read of these keys is removed.
+- **`pop tasks register` infers the current checkout** — `basename $(git rev-parse --show-toplevel)` — and **eagerly adopts** it as the set's **Worktree binding** on first registration, the same adopt path as **Bind worktree**, run automatically. The binding exists and is visible the moment the set is registered.
+- **`register --managed`** records a managed intent instead; its worktree is still provisioned **lazily** at first drain (forking a worktree + branch for a set that may never drain is too heavy to do at register).
+- **`register --auto-drain`** (default **off**) sets the auto-drain bit. `pop tasks auto-drain` and the **Queue dashboard** toggle remain authoritative afterward.
+- **`to-tasks` stops writing manifest keys.** Its `managed`/`isolated` and `auto-drain`/`drain` arguments plumb through to `register --managed` / `register --auto-drain`.
+- **Re-register keeps the first binding.** Rebinding is the explicit `pop tasks bind-worktree <set> --force`, run from inside the target checkout.
+- **Foreground `pop tasks implement` is unchanged** (ADR-0072): it binds/rebinds the current checkout regardless.
+- **Legacy manifests** still carrying `worktree`/`auto_drain` are **ignored with a deprecation warning**, not made Malformed; already-registered sets keep their stored binding — no forced migration.
 
-`to-tasks-here-and-now` is deleted; its trigger phrases ("here and now", "let it run here") are **not** absorbed into `to-tasks`.
-
-**Trunk is not special.** ADR-0113 refused the trunk on the premise that a `{ "name": "<trunk>" }` directive "would never be Queue-drainable". That premise is false: `resolveNamedWorktree` matches the directive name against every entry of `git worktree list --porcelain`, and the main/trunk working tree is always in that list — so the Queue *does* adopt and drain there. The real consequence — an unattended `auto_drain` drain committing onto the main branch of the checkout you are actively using — is **accepted, not guarded**.
+The shape it converges on: **binding and auto-drain are a register/CLI/dashboard concern, not a manifest concern.**
 
 ## Considered options
 
-- **Keep the two-skill split (0113).** Rejected — the default skill leaving sets unbound is friction, and the guard's central justification was factually wrong.
-- **Auto-bind only in an adoptable feature worktree; omit/warn/refuse elsewhere.** Rejected — the operator repeatedly chose one uniform rule over per-checkout special-casing; simplicity of "always write the name you're in" won over guarding unlikely footguns.
-- **Fold auto_drain in as the default too.** Rejected — that collapses `to-tasks` into the old here-and-now (every plan auto-drains); auto_drain stays an explicit opt-in.
-- **Guard only the `auto_drain` + trunk combo.** Rejected — the operator chose to keep even that flat, accepting the commit-onto-main consequence.
+- **Keep binding in the manifest as an always-on lazy seed (the first cut of this ADR).** Rejected — invisible binding until first drain, a dual source of truth for auto-drain, and machine-specific names in portable archives.
+- **Mint a new ADR to supersede the first cut.** Rejected — the *decision* (auto-bind the current worktree, no ceremony, trunk not special) did not change; only the mechanism did. A fresh ADR on the same micro-topic days later is churn, so this record is rewritten in place, preserving the prior manifest-seed mechanism above so the "why isn't this in the manifest?" question stays answered.
+- **Provision managed worktrees eagerly at register too.** Rejected — creates real git state for sets that may never drain; managed stays lazy.
+- **Default auto-drain on at register.** Rejected — unattended commits onto the current branch by default is too aggressive; it stays opt-in per invocation via the skill argument.
+- **Foreground implement refuses to drain outside the bound checkout.** Rejected — that supersedes ADR-0072's author-then-implement-elsewhere flow; foreground keeps rebinding the current checkout.
 
 ## Consequences
 
-- Every `to-tasks` set is Queue-routable by name on first registration; the "needs bind" state no longer arises for skill-authored sets (except a `managed` directive with no resolvable trunk).
-- A foreground `pop tasks implement` still ignores the directive and binds the current checkout (ADR-0072), so authoring in a feature worktree and then implementing there is unchanged.
-- Writing `{ "name": ... }` for a checkout another set already uses creates N-sets-to-one-checkout sharing — its teardown hazard is resolved by ADR-0116.
-- `cmd/catalog.go` drops the `to-tasks-here-and-now` source and its listing; `cmd/skills/pop/to-tasks-here-and-now/` is removed.
+- The binding is materialized and visible at `register`, eliminating both the manual-bind step and the invisible-until-drain state that motivated this rework.
+- The manifest is purely tasks; a `transfer` archive carries no machine-specific worktree name, and `register` re-infers per machine.
+- Single source of truth: the store — written via `register`/CLI/dashboard — owns binding and auto-drain.
+- The Registration-seed machinery for `worktree`/`auto_drain` is removed from the register/refresh path.
+- N-sets-to-one-checkout sharing still arises when `register` runs in a checkout another set already uses; ADR-0116 reference-counted teardown still governs it.
+- Code: manifest parsing drops the `worktree`/`auto_drain` keys; `pop tasks register` gains `--managed`/`--auto-drain` and the eager-adopt step; the `to-tasks` skill stops writing the keys and plumbs its arguments to `register`. `to-tasks-here-and-now` remains deleted.
