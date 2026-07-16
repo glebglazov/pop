@@ -59,11 +59,10 @@ type RouteDrainCheckoutResult struct {
 	// it tells the caller RuntimePath is a resolved checkout the executor must be
 	// pointed at rather than the current checkout it resolves on its own.
 	ProvisionedManaged bool
-	// AdoptedNamed is true when this route resolved a `name` worktree directive on
-	// the first unbound drain: it matched the named worktree on this machine and
-	// recorded an adopted (never-deleted) binding to it (ADR-0059). Like
-	// ProvisionedManaged it marks RuntimePath as a resolved checkout the executor
-	// must be pointed at; unlike it, pop never tears the checkout down.
+	// AdoptedNamed is retired (ADR-0115): the `name` worktree directive is no longer
+	// consumed by routing, so this is never set. It survives as a result field only
+	// so callers that switch on the routing outcome keep compiling; a name-bound set
+	// now resumes via its eager binding (step 1).
 	AdoptedNamed bool
 	// BoundDefault is true when this route hit the no-directive final step and
 	// persisted a default Worktree binding to the chosen checkout — the current
@@ -101,11 +100,11 @@ var (
 // precedence binding → runtime-path override → (Queue-only) registration
 // worktree-intent → default binding to the chosen checkout (ADR-0059, ADR-0062,
 // ADR-0072). An existing Worktree binding resumes there; an explicit runtime-path
-// override resolves to that checkout. The worktree directive is Queue-only: on a
-// Queue spawn an unbound set whose registration carries a `managed` directive
-// forks a managed worktree from the Trunk worktree (records a managed binding) and
-// a `name` directive adopts the named worktree, but a foreground implement ignores
-// the directive entirely. Otherwise the first such drain persists a default
+// override resolves to that checkout. The managed worktree directive is Queue-only:
+// on a Queue spawn an unbound set whose registration carries a `managed` directive
+// forks a managed worktree from the Trunk worktree (records a managed binding), but a
+// foreground implement ignores the directive entirely. The retired `name` directive
+// is no longer consumed (ADR-0115). Otherwise the first such drain persists a default
 // (adopted) Worktree binding to the checkout it chose — the current checkout for a
 // foreground implement, the integration target the Queue routes into for a
 // headless spawn — and resumes there on later drains (ADR-0062). The directive and
@@ -222,15 +221,14 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 		return RouteDrainCheckoutResult{RuntimePath: runtimePath}, nil
 	}
 
-	// 3. The Worktree directive is Queue-only (ADR-0072). On a Queue spawn an unbound
-	// set whose registration carries a directive resolves it once, lazily, and binds
-	// the result (ADR-0059); the binding above resumes later drains. The `managed` arm
-	// forks a managed worktree from the Trunk worktree — the only path routing
-	// provisions. The `name` arm adopts the existing worktree of that name on this
-	// machine, matched by its operator-facing name (never a path), recording a
-	// never-delete adopted binding. A foreground implement skips this arm entirely:
-	// it ignores the directive and falls through to step 4, binding the current
-	// checkout (rebinding an already-bound set is a separate slice).
+	// 3. The managed worktree directive is Queue-only (ADR-0072). On a Queue spawn an
+	// unbound set whose registration carries a `managed` intent forks a managed
+	// worktree from the Trunk worktree once, lazily, and binds the result (ADR-0059);
+	// the binding above resumes later drains. It is the only path routing provisions.
+	// The retired `name` directive is no longer consumed here (ADR-0115): a name-bound
+	// set is eagerly bound at register and resumes via step 1, so it never reaches this
+	// arm. A foreground implement skips this step entirely — it ignores the directive
+	// and falls through to step 4, binding the current checkout.
 	if req.Trigger == TriggerQueueSpawn {
 		defPath, err := tasks.CanonicalDefinitionPathWith(req.TD, repoID.TasksDir)
 		if err != nil {
@@ -249,17 +247,6 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 				RuntimePath:        b.RuntimePath,
 				ProvisionedManaged: true,
 				Binding:            b,
-			}, nil
-		}
-		if intent != nil && intent.Name != "" {
-			b, err := adoptNamedWorktree(req, checkout, intent.Name, setID, key, store)
-			if err != nil {
-				return RouteDrainCheckoutResult{}, err
-			}
-			return RouteDrainCheckoutResult{
-				RuntimePath:  b.RuntimePath,
-				AdoptedNamed: true,
-				Binding:      b,
 			}, nil
 		}
 	}
@@ -378,31 +365,6 @@ func provisionManagedWorktree(req RouteDrainCheckoutRequest, checkout, setID, ke
 		return Binding{}, err
 	}
 	if id, err := tasks.ResolveRepositoryIdentity(req.TD, trunkPath); err == nil {
-		b.Project = DetectProject(req.PD, req.TD, req.Config, id)
-	}
-	store.Put(key, b)
-	if err := Save(req.TD, store); err != nil {
-		return Binding{}, err
-	}
-	return b, nil
-}
-
-// adoptNamedWorktree resolves the worktree named by a `name` registration
-// directive on this machine, records an adopted (never-deleted) Worktree binding
-// pointing at it under key, and returns it. Adopted semantics match
-// `bind-worktree`: pop drains into the checkout but never tears it down
-// (Provisioned=false). The worktree is matched by its operator-facing name — its
-// checkout's basename, the label `pop worktree` shows — never by a path, since
-// the manifest carries the portable name resolved per machine (ADR-0059). A name
-// with no such worktree yields ErrNamedWorktreeNotFound; routing never falls back
-// in place.
-func adoptNamedWorktree(req RouteDrainCheckoutRequest, checkout, name, setID, key string, store *Store) (Binding, error) {
-	wt, err := resolveNamedWorktree(req.TD, checkout, name)
-	if err != nil {
-		return Binding{}, err
-	}
-	b := Adopt(wt.Path, CurrentBranch(req.TD, wt.Path), "")
-	if id, err := tasks.ResolveRepositoryIdentity(req.TD, wt.Path); err == nil {
 		b.Project = DetectProject(req.PD, req.TD, req.Config, id)
 	}
 	store.Put(key, b)

@@ -100,8 +100,9 @@ func TestMigrateLegacyStateFileStoreWins(t *testing.T) {
 }
 
 // TestRegisterWritesIntoStoreTable verifies explicit registration writes a
-// newly-seen set's registration (auto-drain seeded from the manifest) into the
-// sets table, read back from the store directly.
+// newly-seen set's registration into the sets table, read back from the store
+// directly. The retired auto_drain manifest key is ignored, so the row registers
+// with auto-drain off (ADR-0115).
 func TestRegisterWritesIntoStoreTable(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	root := t.TempDir()
@@ -128,7 +129,7 @@ func TestRegisterWritesIntoStoreTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	regs := all[canon]
-	if len(regs) != 1 || regs[0].SetID != "tbl-set" || !regs[0].AutoDrain {
-		t.Fatalf("sets table = %#v, want one auto-drain tbl-set under %s", all, canon)
+	if len(regs) != 1 || regs[0].SetID != "tbl-set" || regs[0].AutoDrain {
+		t.Fatalf("sets table = %#v, want one tbl-set (auto-drain off) under %s", all, canon)
 	}
 }

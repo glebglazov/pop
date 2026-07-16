@@ -6,9 +6,10 @@ import (
 	"testing"
 )
 
-// TestDiscoverySeedsManagedWorktreeFromManifest verifies a managed worktree
-// directive is read once at first registration and persisted as intent.
-func TestDiscoverySeedsManagedWorktreeFromManifest(t *testing.T) {
+// TestRegisterIgnoresManagedWorktreeManifestKey verifies a managed worktree
+// directive in the manifest is no longer read as a registration seed (ADR-0115):
+// the set registers with a nil intent.
+func TestRegisterIgnoresManagedWorktreeManifestKey(t *testing.T) {
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "managed-set")
 	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] ok\n")
@@ -21,6 +22,9 @@ func TestDiscoverySeedsManagedWorktreeFromManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(result.Rows) != 1 || result.Rows[0].Status == StatusMalformed {
+		t.Fatalf("rows = %#v, want a non-MALFORMED registration", result.Rows)
+	}
 
 	state, err := LoadGlobalState(statePath)
 	if err != nil {
@@ -30,15 +34,14 @@ func TestDiscoverySeedsManagedWorktreeFromManifest(t *testing.T) {
 	if entry == nil || len(entry.TaskSets) != 1 {
 		t.Fatalf("registration = %#v", entry)
 	}
-	got := entry.TaskSets[0].WorktreeIntent
-	if !reflect.DeepEqual(got, &WorktreeDirective{Managed: true}) {
-		t.Fatalf("worktree intent = %#v, want managed", got)
+	if got := entry.TaskSets[0].WorktreeIntent; got != nil {
+		t.Fatalf("worktree intent = %#v, want nil (key ignored)", got)
 	}
 }
 
-// TestDiscoverySeedsNamedWorktreeFromManifest verifies a named (adopt) worktree
-// directive is persisted with its name.
-func TestDiscoverySeedsNamedWorktreeFromManifest(t *testing.T) {
+// TestRegisterIgnoresNamedWorktreeManifestKey verifies a named worktree directive
+// in the manifest is no longer read as a registration seed (ADR-0115).
+func TestRegisterIgnoresNamedWorktreeManifestKey(t *testing.T) {
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "named-set")
 	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] ok\n")
@@ -51,14 +54,12 @@ func TestDiscoverySeedsNamedWorktreeFromManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	state, err := LoadGlobalState(statePath)
+	st, err := LoadGlobalState(statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := state.Tasks[result.DefinitionPath].TaskSets[0].WorktreeIntent
-	if !reflect.DeepEqual(got, &WorktreeDirective{Name: "feature-wt"}) {
-		t.Fatalf("worktree intent = %#v, want name feature-wt", got)
+	if got := st.Tasks[result.DefinitionPath].TaskSets[0].WorktreeIntent; got != nil {
+		t.Fatalf("worktree intent = %#v, want nil (key ignored)", got)
 	}
 }
 

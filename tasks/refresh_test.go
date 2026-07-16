@@ -258,7 +258,9 @@ func TestUnknownEffortMarksTaskSetMalformed(t *testing.T) {
 	}
 }
 
-func TestInvalidAutoDrainMarksTaskSetMalformed(t *testing.T) {
+// TestInvalidAutoDrainIgnoredNotMalformed asserts a non-boolean auto_drain value
+// on the retired key is ignored, not treated as MALFORMED (ADR-0115).
+func TestInvalidAutoDrainIgnoredNotMalformed(t *testing.T) {
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "bad-auto-drain")
 	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] a\n")
@@ -280,14 +282,8 @@ func TestInvalidAutoDrainMarksTaskSetMalformed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Rows) != 1 || result.Rows[0].Status != StatusMalformed {
-		t.Fatalf("rows = %#v", result.Rows)
-	}
-	var buf bytes.Buffer
-	Render(&buf, result)
-	out := buf.String()
-	if !strings.Contains(out, `invalid auto_drain "yes"`) {
-		t.Fatalf("diagnostic missing offending auto_drain:\n%s", out)
+	if len(result.Rows) != 1 || result.Rows[0].Status == StatusMalformed {
+		t.Fatalf("rows = %#v, want a non-MALFORMED registration", result.Rows)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -288,10 +289,11 @@ func runTaskRegister(cmd *cobra.Command, args []string) error {
 }
 
 // runTaskRegisterWith is the sole entry point that registers discovered task
-// sets (ADR-0061): it activates newly authored on-disk sets — assigning order,
-// seeding auto_drain (ADR-0047) and the worktree directive (ADR-0059) — and then
-// prints status exactly like `pop tasks status`. Run from inside the repo so the
-// cwd is a valid checkout. A read (status/dashboard) never registers.
+// sets (ADR-0061): it activates newly authored on-disk sets — assigning order and
+// eagerly binding the current checkout (ADR-0115) — warns about any retired
+// manifest keys, and then prints status exactly like `pop tasks status`. Run from
+// inside the repo so the cwd is a valid checkout. A read (status/dashboard) never
+// registers.
 func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	resolved, err := tasks.ResolvePathsWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput())
 	if err != nil {
@@ -302,6 +304,11 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	if err != nil {
 		return fmt.Errorf("tasks register: %w", err)
 	}
+
+	// Retired manifest keys (worktree/auto_drain) still register successfully but
+	// are ignored (ADR-0115): warn so a legacy manifest's author learns the keys no
+	// longer take effect. The set is never MALFORMED for carrying them.
+	warnDeprecatedManifestKeys(w, result)
 
 	// Resolve the runtime checkout once (see runTaskStatusWith): it feeds the
 	// SHA-gated Verify-verdict pass and the overview's runtime-lock/checkout
@@ -364,6 +371,27 @@ func eagerBindNewRegistrations(d *tasks.Deps, cfg *config.Config, checkoutPath s
 		if _, err := binding.BindWorktree(d, taskProjectDeps(), cfg, setID, checkoutPath, binding.BindWorktreeOptions{}, binding.LifecycleHooks{}, io.Discard); err != nil {
 			fmt.Fprintf(w, "warning: could not bind %s to current checkout: %v\n", setID, err)
 		}
+	}
+}
+
+// warnDeprecatedManifestKeys prints a deprecation warning for each set whose
+// manifest still carries a retired set-level key (worktree/auto_drain), naming
+// the ignored keys (ADR-0115). Binding is now materialized eagerly at register
+// and auto-drain is a CLI/dashboard concern; the keys are read no longer. Sets
+// are iterated in id order for stable output.
+func warnDeprecatedManifestKeys(w io.Writer, result *tasks.RefreshResult) {
+	ids := make([]string, 0, len(result.Manifests))
+	for id := range result.Manifests {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		m := result.Manifests[id]
+		if m == nil || len(m.DeprecatedKeys) == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "warning: %s: manifest key(s) %s are no longer read and are ignored; binding is set at register and auto-drain via 'pop tasks auto-drain' or the dashboard (ADR-0115)\n",
+			id, strings.Join(m.DeprecatedKeys, ", "))
 	}
 }
 

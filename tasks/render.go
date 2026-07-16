@@ -56,10 +56,11 @@ func RefreshArchivedWith(d *Deps, defPath, statePath string) (*RefreshResult, er
 }
 
 // RegisterWith is the sole writer of Task-set registration (ADR-0061): it
-// discovers on-disk sets, registers the new ones (assigning order, seeding
-// auto_drain per ADR-0047 and the worktree directive per ADR-0059), and
-// returns the resulting status. It must be run from inside the repo so its
-// cwd is a valid checkout.
+// discovers on-disk sets, registers the new ones (assigning order), and returns
+// the resulting status. Registration seeds no worktree/auto-drain state from the
+// manifest — those retired keys are no longer read (ADR-0115); binding is
+// materialized eagerly by the register command. It must be run from inside the
+// repo so its cwd is a valid checkout.
 func RegisterWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
 	return refreshWith(d, defPath, statePath, true, false)
 }

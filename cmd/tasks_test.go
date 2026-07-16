@@ -330,6 +330,75 @@ func TestTaskRegisterEagerBindsCurrentCheckoutAdopted(t *testing.T) {
 	}
 }
 
+// TestTaskRegisterWarnsOnDeprecatedManifestKeys covers ADR-0115: a manifest
+// still carrying the retired worktree/auto_drain keys registers as READY (never
+// MALFORMED) and emits a deprecation warning naming the ignored keys.
+func TestTaskRegisterWarnsOnDeprecatedManifestKeys(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+
+	// A legacy manifest carrying both retired set-level keys.
+	taskDir := filepath.Join(tasksDir, "legacy")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "01-a.md"), []byte("## Acceptance criteria\n\n- [ ] ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}],"auto_drain":true,"worktree":{"name":"whatever"}}`
+	if err := os.WriteFile(filepath.Join(taskDir, "index.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	td := tasks.DefaultDeps()
+	var out bytes.Buffer
+	if err := runTaskRegisterWith(td, &out, ""); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	s := out.String()
+	if !strings.Contains(s, "warning:") || !strings.Contains(s, "auto_drain") || !strings.Contains(s, "worktree") {
+		t.Fatalf("expected a deprecation warning naming both keys:\n%s", s)
+	}
+	// Never MALFORMED for carrying the retired keys.
+	if strings.Contains(s, "MALFORMED") {
+		t.Fatalf("legacy-key set was marked MALFORMED:\n%s", s)
+	}
+	// The keys are ignored: no worktree/auto-drain seeded from the manifest. The
+	// binding is the eager adoption of the current checkout, not the manifest name.
+	_, b, bound, err := binding.FindBySetID(td, "legacy")
+	if err != nil {
+		t.Fatalf("find binding: %v", err)
+	}
+	if !bound {
+		t.Fatalf("register did not eager-bind the legacy set:\n%s", s)
+	}
+	wantPath, err := tasks.ResolveRuntimePathWith(td, root, "")
+	if err != nil {
+		t.Fatalf("resolve runtime path: %v", err)
+	}
+	if b.RuntimePath != wantPath {
+		t.Fatalf("binding at %q, want the current checkout %q (name key ignored)", b.RuntimePath, wantPath)
+	}
+}
+
 // TestTaskRegisterReRegisterKeepsExistingBinding covers ADR-0115: re-running
 // register on an already-registered set — including from a different checkout —
 // never rebinds. Rebinding stays the explicit `bind-worktree --force`, so an

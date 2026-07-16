@@ -225,8 +225,7 @@ func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *Glob
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		manifestPath := disc.Manifests[id]
-		reg := registeredTaskSetFromManifest(d, id, manifestPath)
+		reg := newRegisteredTaskSet(id)
 		entry.TaskSets = append(entry.TaskSets, reg)
 		registered[id] = len(entry.TaskSets) - 1
 		if added != nil {
@@ -238,23 +237,17 @@ func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *Glob
 	}
 }
 
-// registeredTaskSetFromManifest builds a new registration entry, seeding
-// Auto-drain and the worktree directive from the manifest once at first
-// registration (ADR-0059). The worktree seed records intent only — no
-// git/worktree side effect happens here; provisioning is lazy and belongs to
-// drain routing.
-func registeredTaskSetFromManifest(d *Deps, id, manifestPath string) RegisteredTaskSet {
-	reg := RegisteredTaskSet{
+// newRegisteredTaskSet builds a new registration entry for a first-time
+// registration. It seeds no worktree/auto-drain state from the manifest: those
+// retired keys are no longer read (ADR-0115). Binding is materialized eagerly by
+// the register command (it adopts the current checkout); auto-drain defaults off
+// and is toggled via the CLI/dashboard.
+func newRegisteredTaskSet(id string) RegisteredTaskSet {
+	return RegisteredTaskSet{
 		ID:       id,
 		Priority: 0,
 		Archived: false,
 	}
-	if manifestPath != "" {
-		m := LoadManifest(d, id, manifestPath)
-		reg.AutoDrain = m.AutoDrain
-		reg.WorktreeIntent = m.Worktree
-	}
-	return reg
 }
 
 func registrationDisplayID(id string, autoDrain bool) string {

@@ -84,103 +84,36 @@ func TestManifestValidation(t *testing.T) {
 			contains: `invalid effort "extreme"`,
 		},
 		{
-			name: "auto_drain true",
+			// Retired key (ADR-0115): ignored, never MALFORMED.
+			name: "auto_drain ignored not malformed",
 			manifest: `{"tasks":[
 				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
 			],"auto_drain":true}`,
 			valid: true,
 		},
 		{
-			name: "auto_drain absent",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
-			]}`,
-			valid: true,
-		},
-		{
-			name: "auto_drain explicit false",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
-			],"auto_drain":false}`,
-			valid: true,
-		},
-		{
-			name: "invalid auto_drain type",
+			// A malformed value on a retired key is still ignored, not MALFORMED.
+			name: "malformed auto_drain still ignored",
 			manifest: `{"tasks":[
 				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
 			],"auto_drain":"yes"}`,
-			valid:    false,
-			contains: `invalid auto_drain "yes"`,
+			valid: true,
 		},
 		{
-			name: "worktree managed true",
+			// Retired key (ADR-0115): ignored, never MALFORMED.
+			name: "worktree ignored not malformed",
 			manifest: `{"tasks":[
 				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
 			],"worktree":{"managed":true}}`,
 			valid: true,
 		},
 		{
-			name: "worktree name",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
-			],"worktree":{"name":"feature-x"}}`,
-			valid: true,
-		},
-		{
-			name: "worktree both arms",
+			// Even a previously-malformed worktree directive is now just ignored.
+			name: "malformed worktree still ignored",
 			manifest: `{"tasks":[
 				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
 			],"worktree":{"managed":true,"name":"feature-x"}}`,
-			valid:    false,
-			contains: "invalid worktree",
-		},
-		{
-			name: "worktree neither arm",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
-			],"worktree":{}}`,
-			valid:    false,
-			contains: "invalid worktree",
-		},
-		{
-			name: "worktree unknown sub-key",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
-			],"worktree":{"managed":true,"extra":1}}`,
-			valid:    false,
-			contains: `unknown key "extra"`,
-		},
-		{
-			name: "worktree managed not boolean",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
-			],"worktree":{"managed":"yes"}}`,
-			valid:    false,
-			contains: "invalid worktree",
-		},
-		{
-			name: "worktree managed false",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
-			],"worktree":{"managed":false}}`,
-			valid:    false,
-			contains: "invalid worktree",
-		},
-		{
-			name: "worktree empty name",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
-			],"worktree":{"name":""}}`,
-			valid:    false,
-			contains: "invalid worktree",
-		},
-		{
-			name: "worktree name not string",
-			manifest: `{"tasks":[
-				{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}
-			],"worktree":{"name":42}}`,
-			valid:    false,
-			contains: "invalid worktree",
+			valid: true,
 		},
 	}
 
@@ -208,17 +141,13 @@ func TestManifestValidation(t *testing.T) {
 				}
 			}
 			switch tt.name {
-			case "auto_drain true":
-				if !m.AutoDrain || !m.AutoDrainExplicit {
-					t.Fatalf("AutoDrain = %v explicit = %v, want true/true", m.AutoDrain, m.AutoDrainExplicit)
+			case "auto_drain ignored not malformed", "malformed auto_drain still ignored":
+				if !containsStr(m.DeprecatedKeys, "auto_drain") {
+					t.Fatalf("DeprecatedKeys = %v, want auto_drain recorded", m.DeprecatedKeys)
 				}
-			case "auto_drain absent":
-				if m.AutoDrain || m.AutoDrainExplicit {
-					t.Fatalf("AutoDrain = %v explicit = %v, want false/false", m.AutoDrain, m.AutoDrainExplicit)
-				}
-			case "auto_drain explicit false":
-				if m.AutoDrain || !m.AutoDrainExplicit {
-					t.Fatalf("AutoDrain = %v explicit = %v, want false/true", m.AutoDrain, m.AutoDrainExplicit)
+			case "worktree ignored not malformed", "malformed worktree still ignored":
+				if !containsStr(m.DeprecatedKeys, "worktree") {
+					t.Fatalf("DeprecatedKeys = %v, want worktree recorded", m.DeprecatedKeys)
 				}
 			}
 		})
@@ -280,6 +209,9 @@ func TestManifestParsesEffortDefaultAndExplicit(t *testing.T) {
 	}
 }
 
+// TestManifestPreservesAutoDrain asserts the retired auto_drain key is recorded
+// as deprecated (for the register warning) and preserved verbatim across a
+// rewrite — no forced migration strips it (ADR-0115).
 func TestManifestPreservesAutoDrain(t *testing.T) {
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "thoughts/issues/demo")
@@ -306,8 +238,8 @@ func TestManifestPreservesAutoDrain(t *testing.T) {
 	if !m.Valid {
 		t.Fatalf("unexpected invalid: %v", m.Errors)
 	}
-	if !m.AutoDrain {
-		t.Fatal("expected AutoDrain true")
+	if !containsStr(m.DeprecatedKeys, "auto_drain") {
+		t.Fatalf("DeprecatedKeys = %v, want auto_drain recorded", m.DeprecatedKeys)
 	}
 
 	m.Tasks[0].Status = "done"
@@ -328,15 +260,15 @@ func TestManifestPreservesAutoDrain(t *testing.T) {
 	}
 }
 
-func TestManifestParsesWorktreeDirective(t *testing.T) {
+// TestManifestRecordsWorktreeAsDeprecated asserts the retired worktree key is
+// recorded as deprecated and does not make the set MALFORMED (ADR-0115).
+func TestManifestRecordsWorktreeAsDeprecated(t *testing.T) {
 	cases := []struct {
-		name        string
-		raw         string
-		wantManaged bool
-		wantName    string
+		name string
+		raw  string
 	}{
-		{name: "managed", raw: `{"managed":true}`, wantManaged: true},
-		{name: "name", raw: `{"name":"feature-x"}`, wantName: "feature-x"},
+		{name: "managed", raw: `{"managed":true}`},
+		{name: "name", raw: `{"name":"feature-x"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -351,20 +283,11 @@ func TestManifestParsesWorktreeDirective(t *testing.T) {
 				t.Fatal(err)
 			}
 			m := LoadManifest(DefaultDeps(), "demo", path)
-			if len(m.Errors) != 0 {
-				t.Fatalf("unexpected errors: %v", m.Errors)
+			if !m.Valid || len(m.Errors) != 0 {
+				t.Fatalf("expected valid, got valid=%v errors=%v", m.Valid, m.Errors)
 			}
-			if !m.WorktreeExplicit {
-				t.Fatal("expected WorktreeExplicit true")
-			}
-			if m.Worktree == nil {
-				t.Fatal("expected Worktree directive parsed")
-			}
-			if m.Worktree.Managed != tc.wantManaged {
-				t.Fatalf("Managed = %v, want %v", m.Worktree.Managed, tc.wantManaged)
-			}
-			if m.Worktree.Name != tc.wantName {
-				t.Fatalf("Name = %q, want %q", m.Worktree.Name, tc.wantName)
+			if !containsStr(m.DeprecatedKeys, "worktree") {
+				t.Fatalf("DeprecatedKeys = %v, want worktree recorded", m.DeprecatedKeys)
 			}
 		})
 	}
@@ -385,11 +308,8 @@ func TestManifestAbsentWorktree(t *testing.T) {
 	if len(m.Errors) != 0 {
 		t.Fatalf("unexpected errors: %v", m.Errors)
 	}
-	if m.WorktreeExplicit {
-		t.Fatal("expected WorktreeExplicit false when key absent")
-	}
-	if m.Worktree != nil {
-		t.Fatal("expected nil Worktree when key absent")
+	if len(m.DeprecatedKeys) != 0 {
+		t.Fatalf("DeprecatedKeys = %v, want none when keys absent", m.DeprecatedKeys)
 	}
 }
 
@@ -419,8 +339,8 @@ func TestManifestPreservesWorktree(t *testing.T) {
 	if !m.Valid {
 		t.Fatalf("unexpected invalid: %v", m.Errors)
 	}
-	if m.Worktree == nil || m.Worktree.Name != "feature-x" {
-		t.Fatalf("expected Worktree name feature-x, got %+v", m.Worktree)
+	if !containsStr(m.DeprecatedKeys, "worktree") {
+		t.Fatalf("DeprecatedKeys = %v, want worktree recorded", m.DeprecatedKeys)
 	}
 
 	m.Tasks[0].Status = "done"
@@ -519,6 +439,15 @@ func TestAcceptanceCriteriaValidation(t *testing.T) {
 			t.Errorf("%s: valid=%v errors=%v", file, m.Valid, m.Errors)
 		}
 	}
+}
+
+func containsStr(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func writeTaskMD(t *testing.T, dir, name, content string) {

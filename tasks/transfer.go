@@ -357,8 +357,7 @@ func registerImportedTaskSets(d *Deps, statePath, defPath string, taskSetIDs []s
 			if _, ok := registered[taskSetID]; ok {
 				continue
 			}
-			manifestPath := filepath.Join(defPath, taskSetID, "index.json")
-			entry.TaskSets = append(entry.TaskSets, registeredTaskSetFromManifest(d, taskSetID, manifestPath))
+			entry.TaskSets = append(entry.TaskSets, newRegisteredTaskSet(taskSetID))
 			registered[taskSetID] = len(entry.TaskSets) - 1
 		}
 		return nil
