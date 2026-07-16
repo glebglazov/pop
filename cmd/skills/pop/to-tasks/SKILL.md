@@ -9,12 +9,12 @@ Break a plan into independently-grabbable work items using vertical slices (trac
 
 ## Arguments
 
-`to-tasks` reads two optional arguments from the invocation; both default off. They are independent and may be combined.
+`to-tasks` reads two optional arguments from the invocation; both default off. They are independent and may be combined, and they plumb straight through to `pop tasks register` flags (ADR-0115) — they are not written into the manifest.
 
-- **`managed`** / **`isolated`** — write the **Worktree directive** as `{ "managed": true }` (pop forks its own isolated worktree from the Trunk worktree on the first Queue drain) instead of the default `{ "name": "<current-worktree>" }`.
-- **`auto-drain`** / **`drain`** — also set `"auto_drain": true`, so the Queue daemon drains the set unattended. Only these literal keywords enable it — there is no "here and now" phrasing.
+- **`managed`** / **`isolated`** — register with `--managed`: pop records a managed-worktree intent and forks its own isolated worktree from the Trunk worktree on the first Queue drain, instead of eagerly binding the current checkout.
+- **`auto-drain`** / **`drain`** — register with `--auto-drain`: the Queue daemon drains the set unattended. Only these literal keywords enable it — there is no "here and now" phrasing.
 
-With no arguments, the set is bound to the **current** worktree by name and left for manual/foreground draining. `managed auto-drain` gives an isolated worktree that drains unattended — the safest unattended combo.
+With no arguments, plain `pop tasks register <set>` eagerly binds the set to the **current** checkout at register time, left for manual/foreground draining. `managed auto-drain` → `pop tasks register --managed --auto-drain <set>`, giving an isolated worktree that drains unattended — the safest unattended combo.
 
 ## Process
 
@@ -104,7 +104,7 @@ Do NOT close or modify any parent file.
 
 ### 5. Write the sidecar JSON manifest
 
-Alongside the markdown files, write `<tasks-dir>/<task-set-name>/index.json` — a machine-readable manifest that a ralph loop (or any automation) can rely on to track completion and unblock ordering. Each entry mirrors one markdown file.
+Alongside the markdown files, write `<tasks-dir>/<task-set-name>/index.json` — a machine-readable manifest that a ralph loop (or any automation) can rely on to track completion and unblock ordering. Each entry mirrors one markdown file. The manifest carries **only** the tasks array — no `worktree` or `auto_drain` key (ADR-0115); binding and auto-drain are a `register`/CLI/dashboard concern, set via the flags in step 6, not written here.
 
 <manifest-schema>
 ```json
@@ -122,35 +122,10 @@ Alongside the markdown files, write `<tasks-dir>/<task-set-name>/index.json` —
   ]
 }
 ```
-
-**Always** add a top-level `"worktree"` key — `to-tasks` binds every set to a checkout; there is no "unbound" default. Two arms, exactly one:
-
-```json
-{
-  "worktree": { "name": "<current-worktree>" },
-  "tasks": [ ... ]
-}
-```
-
-- `{ "name": "<current-worktree>" }` — **the default.** Resolve the current checkout's operator-facing name with `basename "$(git rev-parse --show-toplevel)"` and write it verbatim — a *name*, never a path (the manifest is portable across machines), never the literal `current`. Write it **uniformly** for whatever checkout you are in — feature worktree, Trunk worktree, pop-managed, or already-bound — with no guard, warning, or refusal. pop adopts (never deletes) that worktree the first time the Queue drains the set.
-- `{ "managed": true }` — written **only** for the `managed`/`isolated` argument. pop provisions its own worktree (and a branch named after the set) forked from the Trunk worktree the first time the Queue drains the set.
-
-When the `auto-drain`/`drain` argument is given, also add a top-level `"auto_drain": true` key (omit it otherwise):
-
-```json
-{
-  "auto_drain": true,
-  "worktree": { "name": "<current-worktree>" },
-  "tasks": [ ... ]
-}
-```
-
 </manifest-schema>
 
 Field rules:
 
-- `auto_drain` — optional top-level boolean. **Omit by default.** Write `"auto_drain": true` only when the `auto-drain`/`drain` argument is given. Never infer it from task content; do not write `"auto_drain": false`. Written **silently regardless of checkout** — even trunk, pop-managed, or already-bound (no guard). Note the consequence on trunk: the Queue then commits task work onto your main branch unattended. Pop seeds the Auto-drain bit in Task state once at first registration; the Queue dashboard toggle remains authoritative afterward.
-- `worktree` — **always written** — top-level object, `{ "name": "<current-worktree>" }` by default or `{ "managed": true }` for the `managed` argument (never both, never omitted). It is a one-time registration seed: pop reads it once at first registration and provisions/adopts lazily on the first Queue drain — editing it later does nothing. A foreground `pop tasks implement` ignores it entirely and binds the current checkout, so it routes **only** Queue drains. The default `{ "name": ... }` names the checkout you ran `to-tasks` in; combine with `auto_drain` to have the Queue drain unattended there. Writing `{ "name": ... }` for a checkout another set already uses is allowed — pop reference-counts managed-worktree teardown so sharing never strands a set (ADR-0116).
 - `id` — the filename stem (`<number>-<task-name>`), stable identifier referenced by `blocked_by`.
 - `status` — one of `open` | `done` | `failed` | `skipped`. Always initialize to `open`. Do not write `in_progress`; persisted `in_progress` is malformed.
 - `blocked_by` — array of `id`s of blocking tasks. Empty array if none.
@@ -165,7 +140,9 @@ Keep `index.json` and the markdown files in sync — every markdown file has exa
 
 ### 6. Register the set
 
-Run `pop tasks register <task-set-name>` to register the set and confirm it activated correctly. Registration is an explicit verb — writing the set files only *drafts* it; until you `register`, the set is inert (invisible to the dashboard, never scheduled, never auto-drained). Reads like `pop tasks status` never register. Pop prints `Registered new task set(s): <task-set-name>` on first registration.
+Run `pop tasks register <task-set-name>`, adding flags per the invocation arguments (step "Arguments" above): plain by default, `--managed` for `managed`/`isolated`, `--auto-drain` for `auto-drain`/`drain`, both together for `managed auto-drain`. Registering is an explicit verb — writing the set files only *drafts* it; until you `register`, the set is inert (invisible to the dashboard, never scheduled, never auto-drained). Reads like `pop tasks status` never register. Pop prints `Registered new task set(s): <task-set-name>` on first registration.
+
+Plain `register` eagerly binds the set to the current checkout the moment it registers — the binding is visible immediately, not deferred to first drain. `register --managed` instead records a managed intent; its worktree provisions lazily at the first Queue drain. Re-registering an already-registered set never rebinds it — to move an already-registered set to a different checkout, run `pop tasks bind-worktree <task-set-name> --force` from inside the target checkout.
 
 Check the output:
 
