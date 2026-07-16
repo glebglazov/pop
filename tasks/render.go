@@ -12,7 +12,12 @@ import (
 type RefreshResult struct {
 	DefinitionPath   string
 	NewRegistrations []string
-	Rows             []Row
+	// NewRegistrationIDs holds the raw identifiers of the sets this register
+	// activated (NewRegistrations carries their display form). The register
+	// command eager-binds the current checkout to each (ADR-0115); it is empty on
+	// pure reads and re-registers, so re-register never rebinds.
+	NewRegistrationIDs []string
+	Rows               []Row
 	Manifests        map[string]*Manifest
 	NeedsSave        bool
 	RuntimeLock      *RuntimeLockStatus
@@ -94,6 +99,7 @@ func refreshWith(d *Deps, defPath, statePath string, register, showArchived bool
 	// a discovered-but-unregistered set stays inert.
 	needsSave := false
 	var newRegs []string
+	var newIDs []string
 	if register {
 		registered := state.RegisteredIDs(canon)
 		for id := range disc.Manifests {
@@ -104,13 +110,14 @@ func refreshWith(d *Deps, defPath, statePath string, register, showArchived bool
 		}
 		if needsSave {
 			err := UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-				mergeNewRegistrations(d, canon, disc, state, &newRegs)
+				mergeNewRegistrations(d, canon, disc, state, &newRegs, &newIDs)
 				return nil
 			})
 			if err != nil {
 				return nil, err
 			}
 			sort.Strings(newRegs)
+			sort.Strings(newIDs)
 			state, err = LoadGlobalStateWith(d, statePath)
 			if err != nil {
 				return nil, err
@@ -124,12 +131,13 @@ func refreshWith(d *Deps, defPath, statePath string, register, showArchived bool
 	}
 
 	result := &RefreshResult{
-		DefinitionPath:   canon,
-		NewRegistrations: newRegs,
-		Manifests:        manifests,
-		NeedsSave:        needsSave,
-		ArchivedCount:    archivedCount(state, canon),
-		ShowArchived:     showArchived,
+		DefinitionPath:     canon,
+		NewRegistrations:   newRegs,
+		NewRegistrationIDs: newIDs,
+		Manifests:          manifests,
+		NeedsSave:          needsSave,
+		ArchivedCount:      archivedCount(state, canon),
+		ShowArchived:       showArchived,
 	}
 	result.Rows = buildRows(state, canon, disc, manifests, showArchived)
 	MarkNextPick(result.Rows)

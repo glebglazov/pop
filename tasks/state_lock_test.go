@@ -292,7 +292,7 @@ func TestConcurrentDistinctProjectUpdates(t *testing.T) {
 			return
 		}
 		err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
-			mergeNewRegistrations(d, defPath, disc, state, nil)
+			mergeNewRegistrations(d, defPath, disc, state, nil, nil)
 			return nil
 		})
 		errs <- err

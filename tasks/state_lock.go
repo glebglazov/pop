@@ -208,7 +208,12 @@ func parseStateLockMetadata(data []byte) (*StateLockMetadata, error) {
 	return &meta, nil
 }
 
-func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *GlobalState, added *[]string) {
+// mergeNewRegistrations activates every discovered-but-unregistered set. It
+// appends each new set's display id to added (for the "Registered new task
+// set(s)" line) and its raw identifier to addedIDs (which the register command
+// uses to eager-bind the current checkout per ADR-0115). Either out slice may be
+// nil.
+func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *GlobalState, added, addedIDs *[]string) {
 	entry := state.Entry(defPath)
 	registered := state.RegisteredIDs(defPath)
 	ids := make([]string, 0, len(disc.Manifests))
@@ -226,6 +231,9 @@ func mergeNewRegistrations(d *Deps, defPath string, disc *Discovery, state *Glob
 		registered[id] = len(entry.TaskSets) - 1
 		if added != nil {
 			*added = append(*added, registrationDisplayID(id, reg.AutoDrain))
+		}
+		if addedIDs != nil {
+			*addedIDs = append(*addedIDs, id)
 		}
 	}
 }

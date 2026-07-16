@@ -310,6 +310,10 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	if runtimeErr == nil {
 		cfg, _ := taskConfigLoad(config.DefaultConfigPath())
 		tasks.ApplyVerifyVerdicts(d, result, cfg, runtimePath)
+		// Eagerly bind the current checkout to each newly-registered set
+		// (ADR-0115): the binding is materialized and visible the moment the set
+		// registers, with no drain required.
+		eagerBindNewRegistrations(d, cfg, runtimePath, result.NewRegistrationIDs, w)
 	}
 
 	// With a set argument, drill into that one set's per-task breakdown after
@@ -338,6 +342,29 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 
 	tasks.Render(w, result)
 	return nil
+}
+
+// eagerBindNewRegistrations adopts the current checkout as the Worktree binding
+// for each set this register just activated (ADR-0115). It reuses the operator
+// bind-worktree adopt path (binding.BindWorktree): an adopted (Provisioned=false)
+// never-delete binding pointing at checkoutPath, created without provisioning any
+// worktree. It runs only for first-time registrations, so re-registering a set —
+// including from a different checkout — never rebinds; a set that already carries
+// a binding is skipped, and explicit `pop tasks bind-worktree --force` remains the
+// rebind path. Binding is best-effort: a failure is warned, not fatal, so a
+// checkout register cannot itself bind (e.g. detached HEAD) still registers.
+func eagerBindNewRegistrations(d *tasks.Deps, cfg *config.Config, checkoutPath string, newSetIDs []string, w io.Writer) {
+	for _, setID := range newSetIDs {
+		if _, _, bound, err := binding.FindBySetID(d, setID); err != nil {
+			fmt.Fprintf(w, "warning: could not check worktree binding for %s: %v\n", setID, err)
+			continue
+		} else if bound {
+			continue
+		}
+		if _, err := binding.BindWorktree(d, taskProjectDeps(), cfg, setID, checkoutPath, binding.BindWorktreeOptions{}, binding.LifecycleHooks{}, io.Discard); err != nil {
+			fmt.Fprintf(w, "warning: could not bind %s to current checkout: %v\n", setID, err)
+		}
+	}
 }
 
 var taskConfigLoad = func(path string) (*config.Config, error) {

@@ -277,6 +277,131 @@ func TestTaskRegisterActivatesAndStatusStaysPure(t *testing.T) {
 	}
 }
 
+// TestTaskRegisterEagerBindsCurrentCheckoutAdopted covers ADR-0115: the first
+// register of a set materializes an adopted (never-delete, no worktree created)
+// Worktree binding to the current checkout, visible in the store the moment the
+// set registers — no drain required.
+func TestTaskRegisterEagerBindsCurrentCheckoutAdopted(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "draft")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	td := tasks.DefaultDeps()
+	wantPath, err := tasks.ResolveRuntimePathWith(td, root, "")
+	if err != nil {
+		t.Fatalf("resolve runtime path: %v", err)
+	}
+
+	var regOut bytes.Buffer
+	if err := runTaskRegisterWith(td, &regOut, ""); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	// The binding exists in the store immediately, with no drain having run.
+	_, b, bound, err := binding.FindBySetID(td, "draft")
+	if err != nil {
+		t.Fatalf("find binding: %v", err)
+	}
+	if !bound {
+		t.Fatalf("register did not eager-bind the set:\n%s", regOut.String())
+	}
+	if b.RuntimePath != wantPath {
+		t.Fatalf("binding points at %q, want current checkout %q", b.RuntimePath, wantPath)
+	}
+	if b.Provisioned {
+		t.Fatalf("eager binding must be adopted (Provisioned=false), got provisioned=true: %+v", b)
+	}
+}
+
+// TestTaskRegisterReRegisterKeepsExistingBinding covers ADR-0115: re-running
+// register on an already-registered set — including from a different checkout —
+// never rebinds. Rebinding stays the explicit `bind-worktree --force`, so an
+// operator's rebind to another checkout survives a subsequent register.
+func TestTaskRegisterReRegisterKeepsExistingBinding(t *testing.T) {
+	root := t.TempDir()
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	initGitRepoCmd(t, root)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
+	tasksDir := cmdTasksDir(t, root)
+	writeTaskThoughts(t, tasksDir, "draft")
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	td := tasks.DefaultDeps()
+
+	// First register eager-binds the current checkout.
+	var firstOut bytes.Buffer
+	if err := runTaskRegisterWith(td, &firstOut, ""); err != nil {
+		t.Fatalf("first register failed: %v", err)
+	}
+	if _, _, bound, err := binding.FindBySetID(td, "draft"); err != nil || !bound {
+		t.Fatalf("first register did not bind (bound=%v, err=%v)", bound, err)
+	}
+
+	// An operator re-points the set at a different checkout with an explicit
+	// force rebind — the only supported rebind path.
+	wt := cmdArchiveTestWorktree(t, root, "rebound-branch")
+	if _, err := binding.BindWorktree(td, taskProjectDeps(),
+		&config.Config{Projects: []config.ProjectEntry{{Path: root}}},
+		"draft", wt, binding.BindWorktreeOptions{Force: true}, binding.LifecycleHooks{}, io.Discard); err != nil {
+		t.Fatalf("force rebind: %v", err)
+	}
+	_, before, _, err := binding.FindBySetID(td, "draft")
+	if err != nil {
+		t.Fatalf("read binding after rebind: %v", err)
+	}
+	if before.RuntimePath != wt {
+		t.Fatalf("force rebind did not take: %+v", before)
+	}
+
+	// Re-registering the already-registered set from a DIFFERENT checkout (cwd is
+	// root, the binding points at wt) must NOT rebind: a spurious eager-bind would
+	// flip the binding to root, so keeping it at wt proves re-register never rebinds.
+	var secondOut bytes.Buffer
+	if err := runTaskRegisterWith(td, &secondOut, ""); err != nil {
+		t.Fatalf("re-register failed: %v", err)
+	}
+	_, after, bound, err := binding.FindBySetID(td, "draft")
+	if err != nil {
+		t.Fatalf("read binding after re-register: %v", err)
+	}
+	if !bound {
+		t.Fatalf("re-register dropped the binding")
+	}
+	if after != before {
+		t.Fatalf("re-register changed the binding: before %+v, after %+v", before, after)
+	}
+}
+
 func TestTaskArchiveSelectionPrechecksDoneOnlyAndCancelWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	resetTaskFlags()
