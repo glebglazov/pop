@@ -26,7 +26,7 @@ func TestRenderEffectiveTOMLDropsIncludes(t *testing.T) {
 		Projects: []ProjectEntry{{Path: "/home/u/Dev/merged-in"}},
 	}
 
-	out, err := renderEffectiveTOML(d, cfg)
+	out, err := renderEffectiveTOML(d, cfg, nil)
 	if err != nil {
 		t.Fatalf("renderEffectiveTOML: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestRenderEffectiveTOMLCanonicalizesRepoKeys(t *testing.T) {
 		},
 	}
 
-	out, err := renderEffectiveTOML(d, cfg)
+	out, err := renderEffectiveTOML(d, cfg, nil)
 	if err != nil {
 		t.Fatalf("renderEffectiveTOML: %v", err)
 	}
@@ -75,5 +75,68 @@ func TestRenderEffectiveTOMLCanonicalizesRepoKeys(t *testing.T) {
 	}
 	if !strings.Contains(out, "preferred_workbench") || !strings.Contains(out, "trunk = true") {
 		t.Errorf("repo block body missing from effective TOML, got:\n%s", out)
+	}
+}
+
+// TestRenderEffectiveTOMLAppendsResolvedTrunk verifies a non-nil resolved trunk
+// is appended as a [current_repo] table with the trunk path canonicalized to an
+// absolute realpath and the bare flag surfaced.
+func TestRenderEffectiveTOMLAppendsResolvedTrunk(t *testing.T) {
+	fs := &deps.MockFileSystem{
+		UserHomeDirFunc: func() (string, error) { return "/home/u", nil },
+		EvalSymlinksFunc: func(path string) (string, error) {
+			if strings.HasPrefix(path, "/home/u/Dev/") {
+				return strings.Replace(path, "/home/u/Dev/", "/home/u/private/Dev/", 1), nil
+			}
+			return path, nil
+		},
+	}
+	d := &Deps{FS: fs}
+	cfg := &Config{}
+
+	out, err := renderEffectiveTOML(d, cfg, &ResolvedTrunk{Path: "~/Dev/app/main", Bare: true})
+	if err != nil {
+		t.Fatalf("renderEffectiveTOML: %v", err)
+	}
+	if !strings.Contains(out, "[current_repo]") {
+		t.Errorf("missing [current_repo] table, got:\n%s", out)
+	}
+	if !strings.Contains(out, `trunk = "/home/u/private/Dev/app/main"`) {
+		t.Errorf("trunk not canonicalized to absolute realpath, got:\n%s", out)
+	}
+	if !strings.Contains(out, "bare = true") {
+		t.Errorf("bare flag missing, got:\n%s", out)
+	}
+	if strings.Contains(out, "~/Dev/app") {
+		t.Errorf("raw ~ trunk path leaked, got:\n%s", out)
+	}
+}
+
+// TestRenderEffectiveTOMLOmitsTrunkSection verifies a nil resolved trunk (run
+// outside any git repo) leaves the current-repo section out entirely.
+func TestRenderEffectiveTOMLOmitsTrunkSection(t *testing.T) {
+	d := &Deps{FS: identityFS("/home/u")}
+	out, err := renderEffectiveTOML(d, &Config{}, nil)
+	if err != nil {
+		t.Fatalf("renderEffectiveTOML: %v", err)
+	}
+	if strings.Contains(out, "current_repo") {
+		t.Errorf("current-repo section should be absent for nil trunk, got:\n%s", out)
+	}
+}
+
+// TestRenderEffectiveTOMLTrunkBareNoOverride verifies a bare repo with no
+// resolvable trunk emits bare = true with no trunk key (path omitted).
+func TestRenderEffectiveTOMLTrunkBareNoOverride(t *testing.T) {
+	d := &Deps{FS: identityFS("/home/u")}
+	out, err := renderEffectiveTOML(d, &Config{}, &ResolvedTrunk{Path: "", Bare: true})
+	if err != nil {
+		t.Fatalf("renderEffectiveTOML: %v", err)
+	}
+	if !strings.Contains(out, "[current_repo]") || !strings.Contains(out, "bare = true") {
+		t.Errorf("expected [current_repo] with bare = true, got:\n%s", out)
+	}
+	if strings.Contains(out, "trunk =") {
+		t.Errorf("trunk key should be omitted when no trunk resolves, got:\n%s", out)
 	}
 }

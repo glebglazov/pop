@@ -7,6 +7,8 @@ import (
 	"text/tabwriter"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/spf13/cobra"
 )
 
@@ -115,12 +117,51 @@ func runConfigKeys(cmd *cobra.Command, args []string) error {
 }
 
 func runConfigShow(cmd *cobra.Command, _ []string) error {
-	out, err := config.EffectiveTOML(config.DefaultConfigPath())
+	out, err := config.EffectiveTOML(config.DefaultConfigPath(), currentRepoTrunk)
 	if err != nil {
 		return err
 	}
 	fmt.Fprint(cmd.OutOrStdout(), out)
 	return nil
+}
+
+// currentRepoTrunk resolves the current repo's effective Trunk worktree for
+// pop config show, from the current working directory. It is the config.
+// CurrentTrunkFunc wired into the effective-config mirror. Outside any git repo
+// it returns (nil, nil) so the current-repo section is omitted.
+func currentRepoTrunk(cfg *config.Config) (*config.ResolvedTrunk, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, nil
+	}
+	return resolveCurrentRepoTrunk(tasks.DefaultDeps(), cfg, cwd)
+}
+
+// resolveCurrentRepoTrunk resolves the current repo's effective Trunk worktree
+// from checkoutPath, reusing pop's own trunk resolver
+// (binding.ResolveTrunkPath) rather than re-deriving it: a bare repo's
+// config-declared trunk = true worktree, or a non-bare repo's git-derived main
+// worktree. It reads config + git only and never touches the task-binding
+// store. The Bare flag is taken from git (whether the underlying repository is
+// bare), independent of where the trunk came from. Outside any git repo it
+// returns (nil, nil) so pop config show omits the current-repo section.
+func resolveCurrentRepoTrunk(td *tasks.Deps, cfg *config.Config, checkoutPath string) (*config.ResolvedTrunk, error) {
+	// GitMainWorktree doubles as the in-repo probe: it errors outside a git
+	// repo and reports bareness from `git worktree list --porcelain`. A bare
+	// repo lists its bare entry first, so bare is true even for a linked
+	// worktree whose config names the trunk.
+	_, bare, err := binding.GitMainWorktree(td, checkoutPath)
+	if err != nil {
+		return nil, nil
+	}
+	// Once we know we are inside a repo, resolve the trunk path. A bare repo
+	// with no trunk = true override has none — surface bare with no trunk
+	// rather than dropping the section entirely.
+	trunkPath, _, terr := binding.ResolveTrunkPath(td, cfg, checkoutPath)
+	if terr != nil {
+		trunkPath = ""
+	}
+	return &config.ResolvedTrunk{Path: trunkPath, Bare: bare}, nil
 }
 
 // renderScopeKeys prints each scope's keys under a scope heading. When recurse
