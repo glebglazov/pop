@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -53,6 +54,47 @@ func EffectiveTOMLWith(d *Deps, path string, trunk CurrentTrunkFunc) (string, er
 		}
 	}
 	return renderEffectiveTOML(d, cfg, rt)
+}
+
+// EffectiveJSON renders the same effective-config mirror as EffectiveTOML —
+// merged global config, canonicalized [repo."<path>"] keys, and the current
+// repo's resolved trunk/bare — but as JSON, for machine consumers. It is built
+// by re-decoding the rendered TOML into a generic value and re-encoding that
+// as JSON, so the JSON keys and nesting always match the TOML form exactly
+// (e.g. current_repo.trunk / current_repo.bare) with no separate struct to
+// drift out of sync. The motivating consumer is the to-tasks-here-and-now
+// guard, which needs the resolved trunk without shell TOML-parsing.
+func EffectiveJSON(path string, trunk CurrentTrunkFunc) (string, error) {
+	return EffectiveJSONWith(defaultDeps, path, trunk)
+}
+
+// EffectiveJSONWith is the injectable variant of EffectiveJSON.
+func EffectiveJSONWith(d *Deps, path string, trunk CurrentTrunkFunc) (string, error) {
+	cfg, err := LoadWith(d, path)
+	if err != nil {
+		return "", err
+	}
+	var rt *ResolvedTrunk
+	if trunk != nil {
+		rt, err = trunk(cfg)
+		if err != nil {
+			return "", err
+		}
+	}
+	tomlOut, err := renderEffectiveTOML(d, cfg, rt)
+	if err != nil {
+		return "", err
+	}
+
+	var generic interface{}
+	if _, err := toml.Decode(tomlOut, &generic); err != nil {
+		return "", err
+	}
+	b, err := json.MarshalIndent(generic, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // renderEffectiveTOML serializes an already-loaded config back to TOML as an

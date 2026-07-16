@@ -1,6 +1,9 @@
 package config
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -138,5 +141,100 @@ func TestRenderEffectiveTOMLTrunkBareNoOverride(t *testing.T) {
 	}
 	if strings.Contains(out, "trunk =") {
 		t.Errorf("trunk key should be omitted when no trunk resolves, got:\n%s", out)
+	}
+}
+
+// writeShowConfig writes a minimal config.toml to a temp dir and returns its
+// path, so EffectiveJSONWith (which loads through toml.DecodeFile) has a real
+// file to read.
+func writeShowConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+// TestEffectiveJSONWithMatchesTOMLShape verifies --json's renderer emits
+// valid JSON carrying the same content as the TOML form: merged includes,
+// canonicalized repo keys, and the current-repo trunk/bare nested under
+// current_repo exactly as it appears as a [current_repo] table in TOML.
+func TestEffectiveJSONWithMatchesTOMLShape(t *testing.T) {
+	fs := &deps.MockFileSystem{
+		UserHomeDirFunc: func() (string, error) { return "/home/u", nil },
+		EvalSymlinksFunc: func(path string) (string, error) {
+			if strings.HasPrefix(path, "/home/u/Dev/") {
+				return strings.Replace(path, "/home/u/Dev/", "/home/u/private/Dev/", 1), nil
+			}
+			return path, nil
+		},
+		ReadFileFunc: func(path string) ([]byte, error) { return os.ReadFile(path) },
+	}
+	d := &Deps{FS: fs}
+	path := writeShowConfig(t, `
+[[projects]]
+path = "/home/u/Dev/merged-in"
+
+[repo."~/Dev/app"]
+trunk = true
+`)
+
+	trunkFn := func(*Config) (*ResolvedTrunk, error) {
+		return &ResolvedTrunk{Path: "~/Dev/app/main", Bare: true}, nil
+	}
+
+	tomlOut, err := EffectiveTOMLWith(d, path, trunkFn)
+	if err != nil {
+		t.Fatalf("EffectiveTOMLWith: %v", err)
+	}
+	jsonOut, err := EffectiveJSONWith(d, path, trunkFn)
+	if err != nil {
+		t.Fatalf("EffectiveJSONWith: %v", err)
+	}
+
+	var got map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonOut), &got); err != nil {
+		t.Fatalf("--json output is not valid JSON: %v\n%s", err, jsonOut)
+	}
+
+	currentRepo, ok := got["current_repo"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("current_repo missing or wrong shape in JSON, got: %v", got)
+	}
+	if currentRepo["trunk"] != "/home/u/private/Dev/app/main" {
+		t.Errorf("current_repo.trunk = %v, want canonical realpath", currentRepo["trunk"])
+	}
+	if currentRepo["bare"] != true {
+		t.Errorf("current_repo.bare = %v, want true", currentRepo["bare"])
+	}
+	if _, ok := got["includes"]; ok {
+		t.Errorf("effective JSON should not re-list includes, got: %v", got)
+	}
+	if !strings.Contains(tomlOut, "/home/u/private/Dev/app/main") {
+		t.Fatalf("sanity: TOML form missing canonical trunk, got:\n%s", tomlOut)
+	}
+}
+
+// TestEffectiveJSONWithOmitsCurrentRepoOutsideRepo verifies a nil resolved
+// trunk (outside any git repo) leaves current_repo out of the JSON entirely,
+// so a consumer sees it absent rather than null-but-present or malformed.
+func TestEffectiveJSONWithOmitsCurrentRepoOutsideRepo(t *testing.T) {
+	d := &Deps{FS: identityFS("/home/u")}
+	path := writeShowConfig(t, "")
+
+	jsonOut, err := EffectiveJSONWith(d, path, func(*Config) (*ResolvedTrunk, error) {
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("EffectiveJSONWith: %v", err)
+	}
+
+	var got map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonOut), &got); err != nil {
+		t.Fatalf("--json output is not valid JSON: %v\n%s", err, jsonOut)
+	}
+	if _, ok := got["current_repo"]; ok {
+		t.Errorf("current_repo should be absent outside a repo, got: %v", got["current_repo"])
 	}
 }

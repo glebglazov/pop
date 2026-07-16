@@ -59,6 +59,8 @@ Examples:
 	RunE: runConfigKeys,
 }
 
+var configShowJSON bool
+
 var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Print the effective config as TOML",
@@ -68,7 +70,11 @@ Where pop config keys lists the schema you may set, pop config show prints the
 values actually in effect: the global config.toml with its includes already
 merged in (not re-listed as an includes array), and every [repo."<path>"] key
 canonicalized to an absolute realpath (~ expanded, symlinks resolved). Effective
-values only — no per-value provenance.`,
+values only — no per-value provenance.
+
+--json emits the same mirror as JSON instead, for machine consumers (e.g. the
+to-tasks-here-and-now guard reading the resolved current_repo.trunk / .bare
+without shell TOML-parsing).`,
 	Args: cobra.NoArgs,
 	RunE: runConfigShow,
 }
@@ -77,6 +83,7 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	configCmd.AddCommand(configKeysCmd)
 	configCmd.AddCommand(configShowCmd)
+	configShowCmd.Flags().BoolVar(&configShowJSON, "json", false, "emit the effective config as JSON instead of TOML")
 	configKeysCmd.Flags().StringVar(&configKeysScope, "scope", "",
 		"limit to one surface: global | pop-toml | repo (default: all)")
 	configKeysCmd.Flags().BoolVar(&configKeysAll, "all", false,
@@ -117,6 +124,14 @@ func runConfigKeys(cmd *cobra.Command, args []string) error {
 }
 
 func runConfigShow(cmd *cobra.Command, _ []string) error {
+	if configShowJSON {
+		out, err := config.EffectiveJSON(config.DefaultConfigPath(), currentRepoTrunk)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), out)
+		return nil
+	}
 	out, err := config.EffectiveTOML(config.DefaultConfigPath(), currentRepoTrunk)
 	if err != nil {
 		return err
