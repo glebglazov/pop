@@ -73,3 +73,5 @@ Don't lock, and don't hunt for gaps to fill — just take max+1. Under parallel 
 ## Cross-references
 
 Reference another ADR by its number as `ADR-NNNN` (e.g. `superseded by ADR-0007`), or link to its file (`[...](0007-slug.md)`). Filename links are the most robust — the slug survives a renumber, so consolidate can always rewrite them unambiguously. A bare `ADR-NNNN` reference becomes ambiguous if that number was ever involved in a clash, so prefer filename links where you can.
+
+When an ADR supersedes an older one, do two things on the **old** ADR: set its frontmatter `status: superseded by ADR-NNNN`, and lead its body with a `> **Superseded by [ADR-NNNN](NNNN-slug.md):** {one-to-three-sentence summary of what changed and why}` blockquote. Write the blockquote so it stands alone — `grill-consolidate` later stubs the superseded ADR down to exactly its frontmatter, title, and this blockquote, cutting the rest of the body (recoverable from git history). An old ADR marked superseded with no such blockquote is held back as contested rather than stubbed, so the blockquote is load-bearing, not decorative.

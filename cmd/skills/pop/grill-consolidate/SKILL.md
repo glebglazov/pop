@@ -1,6 +1,6 @@
 ---
 name: grill-consolidate
-description: Fold accumulated glossary fragments (from `.grill-context/`, plus any legacy colocated CONTEXT.<counter>.<uuid>.md) into canonical CONTEXT.md files, and reconcile clashing sequential ADR numbers (re-sequencing duplicates and fixing the links that pointed at them), as a deliberate single-writer maintenance pass. Use when the user asks to consolidate, fold, merge, reconcile, clean up, or resolve concurrent context/glossary fragments or duplicate ADR numbers produced by grill-with-docs.
+description: Fold accumulated glossary fragments (from `.grill-context/`, plus any legacy colocated CONTEXT.<counter>.<uuid>.md) into canonical CONTEXT.md files, reconcile clashing sequential ADR numbers (re-sequencing duplicates and fixing the links that pointed at them), and stub superseded ADRs down to their forward pointer, as a deliberate single-writer maintenance pass. Use when the user asks to consolidate, fold, merge, reconcile, clean up, or resolve concurrent context/glossary fragments, duplicate ADR numbers, or superseded ADRs produced by grill-with-docs.
 ---
 
 # Grill Consolidate
@@ -9,6 +9,7 @@ Use this skill for the single-writer maintenance pass over the artifacts `grill-
 
 1. Merge session glossary fragments into their base `CONTEXT.md`. Fragments live in `.grill-context/` at the repo root (`<slug>.<counter>.<uuid>.md`, or `CONTEXT.<counter>.<uuid>.md` in a single-context repo), plus any legacy `CONTEXT.<counter>.<uuid>.md` colocated beside a base.
 2. Reconcile sequential ADR numbers under `docs/adr/` — detect duplicate `NNNN`, re-sequence the clash losers, and fix the links that referenced them.
+3. Stub superseded ADRs — reduce each `status: superseded by ADR-NNNN` ADR to its frontmatter, title, and forward-pointing blockquote, cutting the now-dead body (recoverable from git history).
 
 This is a single-writer operation. Do not run it speculatively, automatically, or in parallel with another consolidation pass. If a contested term or an ambiguous link requires a semantic decision, ask the user and wait.
 
@@ -107,6 +108,40 @@ For each directory:
 
 Do not invent ADR content, merge ADRs, or change their bodies beyond the cross-reference fixes above. This pass only reconciles numbers and links.
 
+## Nullify Superseded ADRs
+
+A superseded ADR's rationale now lives in the ADR that replaced it. Keeping its full body in the tree means every reader — LLM or human — burns context on a dead decision before discovering it was retired. This step reduces each superseded ADR to a **stub**: frontmatter, title, and the forward-pointing blockquote, nothing else. The full body stays recoverable from git history.
+
+Run this **after** [Reconcile ADR Numbers](#reconcile-adr-numbers), never before — nullify trusts the `ADR-NNNN` pointer, and reconcile is what makes that pointer correct. Process each `docs/adr/` directory the same way.
+
+The stub is exactly:
+
+```md
+---
+status: superseded by ADR-NNNN
+---
+
+# {original title, unchanged}
+
+> **Superseded by [ADR-NNNN](NNNN-slug.md):** {the existing summary, verbatim}
+```
+
+Cut everything after that blockquote. Keep the frontmatter, the title heading, and the blockquote **verbatim** — this pass deletes, it never authors.
+
+**Gut only when all four hold:**
+
+1. Frontmatter carries `status: superseded by ADR-NNNN`.
+2. `ADR-NNNN` resolves to a real file in this directory.
+3. A `> **Superseded by ...**` blockquote is present.
+4. The body still exceeds the stub (already-stubbed ADRs are a **no-op** — skip them; this is what makes the pass idempotent).
+
+**Otherwise, contested — do not cut, surface it:**
+
+- **Dangling pointer** — status cites `ADR-NNNN` but no such file exists (typo, superseder never landed, or a stale number reconcile didn't repair). Report it; leave the body intact.
+- **No summary** — marked superseded but no blockquote. A stub with neither body nor forward summary is worse than the status quo. Tell the user to add a summary blockquote (or that you left it); never synthesize one yourself.
+
+Report every ADR stubbed (which one, pointing where) and every one held back as contested with the reason.
+
 ## Finish
 
 After all conflicts are resolved:
@@ -114,10 +149,11 @@ After all conflicts are resolved:
 1. Update the base `CONTEXT.md`.
 2. Delete every fragment whose ops are all **applied** — folded this pass *or* already satisfied by the base (see [Already In The Base](#already-in-the-base)) — wherever they live: `.grill-context/` and legacy colocated alike. A fragment that changed nothing because the base already covers it is still done; delete it. Remove `.grill-context/` itself if it ends up empty.
 3. Apply the ADR renumbering: the loser renames (`git mv`) and every link edit they required.
-4. Inspect `git status --short` and identify only the artifacts produced by this consolidation pass — the base `CONTEXT.md` files, folded fragment deletions, ADR renames, and ADR link edits.
-5. Stage exactly those files. Do not stage unrelated existing work.
-6. Commit immediately. First **sample the repo's house style** — `git log -5 --format='%s%n%b'` — and infer the prevailing convention: conventional-commits `type(scope): subject` or not, subject capitalization, and any trailer (e.g. `Co-Authored-By`). Compose the message to match that grammar and reproduce the trailer convention. Infer the *grammar*, don't copy the sampled type/scope verbatim — a skewed window (say five `fix(...)` commits) must not relabel this docs/maintenance pass. When the repo uses conventional commits, default to `docs(context): consolidate glossary fragments` (append `+ reconcile ADR numbers` when this pass renumbered any ADRs); when it has no discernible convention, fall back to `Consolidate context fragments`.
-7. Show the user the commit hash, the changed files, any terms that were added, redefined, retired, or manually resolved, and any ADRs renumbered (old → new) with the link rewrites that followed.
+4. Apply the ADR nullifications: the body cuts for every superseded ADR that passed all four gut conditions.
+5. Inspect `git status --short` and identify only the artifacts produced by this consolidation pass — the base `CONTEXT.md` files, folded fragment deletions, ADR renames, ADR link edits, and stubbed ADR bodies.
+6. Stage exactly those files. Do not stage unrelated existing work.
+7. Commit immediately. First **sample the repo's house style** — `git log -5 --format='%s%n%b'` — and infer the prevailing convention: conventional-commits `type(scope): subject` or not, subject capitalization, and any trailer (e.g. `Co-Authored-By`). Compose the message to match that grammar and reproduce the trailer convention. Infer the *grammar*, don't copy the sampled type/scope verbatim — a skewed window (say five `fix(...)` commits) must not relabel this docs/maintenance pass. When the repo uses conventional commits, default to `docs(context): consolidate glossary fragments` (append `+ reconcile ADR numbers` when this pass renumbered any ADRs, and `+ stub superseded ADRs` when it nullified any); when it has no discernible convention, fall back to `Consolidate context fragments`.
+8. Show the user the commit hash, the changed files, any terms that were added, redefined, retired, or manually resolved, any ADRs renumbered (old → new) with the link rewrites that followed, and any ADRs stubbed (pointing where) or held back as contested.
 
 Never delete a fragment with an unresolved op (contested, or only partially applied). A fully **satisfied** fragment is applied — delete it; do not mistake "changed nothing" for "not applied."
 Never commit if any folded output is ambiguous, contested, only partially applied, or mixed with unrelated edits that cannot be staged separately.
