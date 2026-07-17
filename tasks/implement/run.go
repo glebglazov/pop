@@ -90,10 +90,7 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 	if err != nil {
 		return result, err
 	}
-	if result != nil && result.QuotaPaused {
-		return result, &tasks.ExitError{Code: tasks.ExitQuotaPaused}
-	}
-	return result, nil
+	return result, tasks.QuotaPausedExit(result != nil && result.QuotaPaused)
 }
 
 // ResolveTaskSetRuntime applies drain checkout routing for tests and returns

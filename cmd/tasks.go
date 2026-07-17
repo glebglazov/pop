@@ -842,10 +842,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 	if err != nil {
 		return err
 	}
-	if result != nil && result.QuotaPaused {
-		return &tasks.ExitError{Code: tasks.ExitQuotaPaused}
-	}
-	return nil
+	return tasks.QuotaPausedExit(result != nil && result.QuotaPaused)
 }
 
 func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskSetPath string, agentExplicit, maxTriesExplicit bool) error {

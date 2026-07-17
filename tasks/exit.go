@@ -32,3 +32,15 @@ func (e *ExitError) Error() string {
 func exitErr(code int, format string, args ...any) *ExitError {
 	return &ExitError{Code: code, Err: fmt.Errorf(format, args...)}
 }
+
+// QuotaPausedExit returns the machine-readable ExitQuotaPaused signal when a
+// completed run parked on an agent quota pause, and nil otherwise. It is the
+// single definition of the supervisor-facing exit-code contract (ADR-0100), so
+// every command surface that finishes a drain maps a quota pause to the same
+// code without re-deriving the ExitError inline.
+func QuotaPausedExit(quotaPaused bool) error {
+	if quotaPaused {
+		return &ExitError{Code: ExitQuotaPaused}
+	}
+	return nil
+}

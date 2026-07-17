@@ -2212,42 +2212,15 @@ func writeFileCmd(t *testing.T, path, content string) {
 	}
 }
 
-// TestRunTasksCmdQuotaPauseExitsQuotaPaused pins the machine-readable signal a
-// supervisor reads: a drain that stops on an agent quota pause exits with the
-// dedicated ExitQuotaPaused code rather than a clean ExitSuccess.
-func TestRunTasksCmdQuotaPauseExitsQuotaPaused(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
-	installClaudeQuotaAgentCmd(t, root)
-
-	resetTaskFlags()
-	taskAgentPreset = "claude"
-	taskRunYes = true
-	t.Cleanup(resetTaskFlags)
-
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, tasks.NonInteractiveReader{}, "demo", true, false)
-	var ee *tasks.ExitError
-	if !errors.As(err, &ee) {
-		t.Fatalf("err = %v, want *tasks.ExitError", err)
-	}
-	if ee.Code != tasks.ExitQuotaPaused {
-		t.Fatalf("exit code = %d, want ExitQuotaPaused (%d)", ee.Code, tasks.ExitQuotaPaused)
-	}
-}
-
-func installClaudeQuotaAgentCmd(t *testing.T, root string) {
-	t.Helper()
-	dir := filepath.Join(root, ".agent-bin")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := "#!/bin/sh\n" +
-		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"result\":\"You'\"'\"'ve hit your weekly limit · resets Mon 12:00am\"}'\n"
-	bin := filepath.Join(dir, "claude")
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
+// The quota-pause exit contract (a drain that parks on an agent quota pause
+// surfaces ExitQuotaPaused, not ExitSuccess) is pinned deterministically by
+// tasks.TestQuotaPausedExit (the exit-code mapping) plus
+// tasks.TestRunSelectedTaskQuotaPauseFailedRegistrationExitsWithPauseFields
+// (the run reaching a QuotaPaused result). The former end-to-end cmd test was
+// removed: under ADR-0100's always-wait design a real drain blocks in
+// WaitForRecovery until the agent-reported reset instant, and the cmd entry
+// point exposes no seam to force the reg-fail fast path, so it hung to the
+// go-test timeout depending on wall-clock time of day.
 
 // TestImplementAgentFlagExplicitness pins the distinction between the built-in
 // fallback and an explicitly supplied --agent fallback list.
