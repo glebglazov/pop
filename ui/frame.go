@@ -13,6 +13,7 @@ import (
 // reserved-line count can never drift from what's actually drawn.
 type Frame struct {
 	Width    int
+	TermH    int      // terminal height; 0 = unknown, disables bottom-anchor padding
 	Notice   string   // "" = absent (rendered via renderUpdateNotice)
 	Header   string   // "" = absent
 	InputBox string   // "" = absent; content when present (e.g. input.View() or " Help")
@@ -50,8 +51,13 @@ func (f Frame) BodyHeight(termH int) int {
 
 // Render composes the frame's regions around body in the fixed order notice
 // -> header -> body -> input box -> warnings -> status -> hints, omitting
-// absent ones.
+// absent ones. When TermH is known, a short body is padded to the full
+// BodyHeight budget so trailing regions sit at the bottom of the screen.
 func (f Frame) Render(body string) string {
+	if f.TermH > 0 {
+		body = f.padBody(body)
+	}
+
 	parts := make([]string, 0, 7)
 
 	if f.Notice != "" {
@@ -88,4 +94,16 @@ func (f Frame) Render(body string) string {
 	}
 
 	return strings.Join(parts, "\n")
+}
+
+// padBody appends blank lines so body occupies the full BodyHeight budget,
+// pushing trailing regions to the bottom of the screen. A body that already
+// fills or overfills the budget is returned unchanged (byte-identical).
+func (f Frame) padBody(body string) string {
+	budget := f.BodyHeight(f.TermH)
+	lines := strings.Count(body, "\n") + 1
+	if lines >= budget {
+		return body
+	}
+	return body + strings.Repeat("\n", budget-lines)
 }

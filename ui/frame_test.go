@@ -1,6 +1,10 @@
 package ui
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestFrameBodyHeight(t *testing.T) {
 	tests := []struct {
@@ -145,6 +149,85 @@ func TestFrameRenderOmitsAbsentRegions(t *testing.T) {
 
 	if out != "BODY" {
 		t.Fatalf("Render() with no regions = %q, want %q", out, "BODY")
+	}
+}
+
+// TestFrameRenderPadsShortBody: a short body under a known TermH is padded so
+// the hints land on the very bottom row and the body content stays under the
+// header (the routine dashboard's empty-list case).
+func TestFrameRenderPadsShortBody(t *testing.T) {
+	f := Frame{Width: 20, TermH: 20, Header: "Routines · 0", Hints: "  h/esc quit"}
+	out := f.Render("  no routines")
+
+	lines := strings.Split(out, "\n")
+	if len(lines) != 20 {
+		t.Fatalf("got %d lines, want 20 (padded to full terminal height)", len(lines))
+	}
+	if !strings.Contains(lines[1], "no routines") {
+		t.Fatalf("line 1 = %q, want body hint directly under header", lines[1])
+	}
+	if !strings.Contains(lines[len(lines)-1], "h/esc quit") {
+		t.Fatalf("last line = %q, want hints on the bottom row", lines[len(lines)-1])
+	}
+}
+
+// TestFrameRenderLeavesFullBodyUnchanged: a body that exactly fills or overfills
+// the budget renders byte-identical to the no-height (unpadded) path.
+func TestFrameRenderLeavesFullBodyUnchanged(t *testing.T) {
+	base := Frame{Width: 20, TermH: 20, Header: "H", Status: "S", Hints: "  q"}
+	budget := base.BodyHeight(20)
+
+	for _, extra := range []int{0, 5} { // exact-fit and overfull
+		rows := make([]string, budget+extra)
+		for i := range rows {
+			rows[i] = fmt.Sprintf("row%d", i)
+		}
+		body := strings.Join(rows, "\n")
+
+		unpadded := base
+		unpadded.TermH = 0
+		if got, want := base.Render(body), unpadded.Render(body); got != want {
+			t.Fatalf("body of %d lines (budget %d): padded render differs from unpadded\n got=%q\nwant=%q",
+				budget+extra, budget, got, want)
+		}
+	}
+}
+
+// TestFrameRenderPadBudgetTracksRegions: the padding budget subtracts every
+// present region, so a short body plus all chrome still totals exactly TermH —
+// whether all regions are present or only the minimal ones.
+func TestFrameRenderPadBudgetTracksRegions(t *testing.T) {
+	tests := []struct {
+		name  string
+		frame Frame
+	}{
+		{name: "minimal regions", frame: Frame{Width: 20, TermH: 20, Hints: "  q"}},
+		{
+			name: "all regions",
+			frame: Frame{
+				Width:    20,
+				TermH:    20,
+				Notice:   "Update available",
+				Header:   "Header",
+				InputBox: "> ",
+				Warnings: []string{"warn"},
+				Status:   "Copied",
+				Hints:    "  q",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := tt.frame.Render("  short body")
+			lines := strings.Split(out, "\n")
+			if len(lines) != 20 {
+				t.Fatalf("got %d lines, want 20 (short body padded to full height)", len(lines))
+			}
+			if !strings.Contains(lines[len(lines)-1], "q") {
+				t.Fatalf("last line = %q, want hints on the bottom row", lines[len(lines)-1])
+			}
+		})
 	}
 }
 

@@ -180,6 +180,7 @@ func (m *MultiSelect) viewHelp() string {
 func (m *MultiSelect) frameSpec() Frame {
 	return Frame{
 		Width:  m.width,
+		TermH:  m.height,
 		Header: m.title,
 		Hints:  "  Space toggle · Enter confirm · Esc cancel · C-h help",
 	}

@@ -3165,6 +3165,7 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 	}
 	return ui.Frame{
 		Width:    m.width,
+		TermH:    m.height,
 		Header:   header,
 		InputBox: inputBox,
 		Warnings: warnings,
@@ -3375,10 +3376,10 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	d := m.detail
 	const backHint = "h/esc back"
 	if d.loading {
-		return ui.Frame{Width: m.width, Hints: backHint}, fmt.Sprintf("Loading %s...", d.row.SetID)
+		return ui.Frame{Width: m.width, TermH: m.height, Hints: backHint}, fmt.Sprintf("Loading %s...", d.row.SetID)
 	}
 	if d.err != nil {
-		return ui.Frame{Width: m.width, Hints: backHint}, fmt.Sprintf("error loading %s: %v", d.row.SetID, d.err)
+		return ui.Frame{Width: m.width, TermH: m.height, Hints: backHint}, fmt.Sprintf("error loading %s: %v", d.row.SetID, d.err)
 	}
 
 	manifest := d.manifest
@@ -3395,7 +3396,7 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	header := detailHeader(d.row.SetID, label, progress, verifiedSHA)
 
 	if status == tasks.StatusMissing {
-		return ui.Frame{Width: m.width, Header: header, Hints: backHint}, "  registered task set missing"
+		return ui.Frame{Width: m.width, TermH: m.height, Header: header, Hints: backHint}, "  registered task set missing"
 	}
 	if manifest == nil || !manifest.Valid {
 		lines := []string{"  malformed manifest"}
@@ -3404,11 +3405,12 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 				lines = append(lines, "  - "+e)
 			}
 		}
-		return ui.Frame{Width: m.width, Header: header, Hints: backHint}, strings.Join(lines, "\n")
+		return ui.Frame{Width: m.width, TermH: m.height, Header: header, Hints: backHint}, strings.Join(lines, "\n")
 	}
 
 	frame := ui.Frame{
 		Width:  m.width,
+		TermH:  m.height,
 		Header: header,
 		Status: d.statusMsg,
 		Hints:  "j/k · gg/G top/bottom · l/enter peek · a actions · h/esc back",

@@ -733,6 +733,7 @@ func (m RoutineDashboard) frameSpec() ui.Frame {
 	}
 	return ui.Frame{
 		Width:    m.width,
+		TermH:    m.height,
 		Header:   fmt.Sprintf("Routines · %d", len(m.snap.Rows)),
 		Warnings: warnings,
 		Status:   m.statusMsg,
@@ -768,19 +769,20 @@ func (m RoutineDashboard) viewRunsList() string {
 	d := m.detail
 	const backHint = "h/esc back"
 	if d.loading {
-		return ui.Frame{Width: m.width, Header: fmt.Sprintf("Runs · %s", d.row.ID), Hints: backHint}.
+		return ui.Frame{Width: m.width, TermH: m.height, Header: fmt.Sprintf("Runs · %s", d.row.ID), Hints: backHint}.
 			Render(fmt.Sprintf("Loading runs for %s...", d.row.ID))
 	}
 	if d.err != nil {
-		return ui.Frame{Width: m.width, Header: fmt.Sprintf("Runs · %s", d.row.ID), Hints: backHint}.
+		return ui.Frame{Width: m.width, TermH: m.height, Header: fmt.Sprintf("Runs · %s", d.row.ID), Hints: backHint}.
 			Render(fmt.Sprintf("error loading runs: %v", d.err))
 	}
 	if len(d.runs) == 0 {
-		return ui.Frame{Width: m.width, Header: fmt.Sprintf("Runs · %s", d.row.ID), Hints: backHint}.
+		return ui.Frame{Width: m.width, TermH: m.height, Header: fmt.Sprintf("Runs · %s", d.row.ID), Hints: backHint}.
 			Render("  " + emptyRunsHint)
 	}
 	frame := ui.Frame{
 		Width:  m.width,
+		TermH:  m.height,
 		Header: fmt.Sprintf("Runs · %s", d.row.ID),
 		Status: d.status,
 		Hints:  "j/k · gg/G top/bottom · l/enter report · h/esc back",
