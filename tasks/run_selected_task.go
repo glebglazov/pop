@@ -102,10 +102,24 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 				Render(out, afterRefresh)
 			}
 			m := afterRefresh.Manifests[taskSetID]
+			if isInterrupted(execErr) {
+				// SIGINT tore the attempt down mid-run (ADR-0119): the task is still
+				// open (the interrupt path writes no failed/done transition), so present
+				// the interrupt gate rather than the Failed gate. Continue re-acquires
+				// the lock and re-runs the interrupted task, keeping the drain going;
+				// Exit (or a non-promptable run) falls through to the interrupted
+				// terminal preserved by the normal finalize.
+				cont, gateErr := r.interruptGate(m, findTaskInManifest(m, sel.TaskID))
+				if gateErr != nil {
+					return runTaskReturn, result, gateErr
+				}
+				if cont {
+					return runTaskContinue, nil, nil
+				}
+				return runTaskReturn, result, execErr
+			}
 			// Park the Runtime execution lock before the post-failure Failed gate
-			// menu so it runs lock-free (ADR-0067). An interrupt never reaches the
-			// menu (the task is not marked failed), so its `interrupted` terminal is
-			// preserved by the normal finalize.
+			// menu so it runs lock-free (ADR-0067).
 			handled, gateErr := r.failedGate(m)
 			if gateErr != nil {
 				return runTaskReturn, result, gateErr

@@ -1,6 +1,9 @@
 package tasks
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 const (
 	ExitSuccess     = 0
@@ -31,6 +34,14 @@ func (e *ExitError) Error() string {
 
 func exitErr(code int, format string, args ...any) *ExitError {
 	return &ExitError{Code: code, Err: fmt.Errorf(format, args...)}
+}
+
+// isInterrupted reports whether err carries the ExitInterrupted signal — a SIGINT
+// teardown bubbled up as an ExitError. It is the single test for the interrupt
+// terminal, shared by the drain-loop interrupt gate and the Drain terminal mapping.
+func isInterrupted(err error) bool {
+	var ee *ExitError
+	return errors.As(err, &ee) && ee.Code == ExitInterrupted
 }
 
 // QuotaPausedExit returns the machine-readable ExitQuotaPaused signal when a

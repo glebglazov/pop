@@ -299,8 +299,7 @@ func drainTerminal(declined, quotaPaused, verifyFailed bool, preset string, pinn
 	if quotaPaused {
 		return store.StateQuotaPaused, preset, pinned, resetAt, true
 	}
-	var ee *ExitError
-	if errors.As(err, &ee) && ee.Code == ExitInterrupted {
+	if isInterrupted(err) {
 		return store.StateInterrupted, "", false, time.Time{}, true
 	}
 	if verifyFailed {
