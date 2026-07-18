@@ -224,15 +224,16 @@ func testRepoCommonDir(t *testing.T, td *tasks.Deps, path string) string {
 	return id.CommonDir
 }
 
-// seedAbnormalDrain records one abnormal (interrupted) terminal Drain for a set,
-// the unit the derived backoff/parking counts (ADR-0055).
+// seedAbnormalDrain records one abnormal (crashed) terminal Drain for a set,
+// the unit the derived backoff/parking counts (ADR-0055). Only a genuine crash
+// is abnormal; interrupted is a clean stop (ADR-0120).
 func seedAbnormalDrain(t *testing.T, td *tasks.Deps, runtimePath, setID string) {
 	t.Helper()
 	h, err := tasks.BeginDrain(td, runtimePath, setID, nil)
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	if err := h.Finish(store.StateInterrupted, "", false, time.Time{}); err != nil {
+	if err := h.Finish(store.StateCrashed, "", false, time.Time{}); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 }
@@ -274,6 +275,42 @@ func TestCrashBackoffEscalatesThenParksFromDrainHistory(t *testing.T) {
 	}
 	if parked, _ := setBackoffStatus(info, delays, info.LastAbnormalAt); !parked {
 		t.Fatalf("third abnormal terminal must park the set")
+	}
+}
+
+// TestInterruptedTerminalDoesNotBackoffOrPark locks ADR-0120: repeated
+// interrupted terminals are clean stops, so the derived backoff/park never
+// escalates or parks the set — a manual interrupt clears Auto-drain, so there is
+// no re-spawn thrash to throttle.
+func TestInterruptedTerminalDoesNotBackoffOrPark(t *testing.T) {
+	td := queueDataDeps(t)
+	repo := initGitRepoWithBase(t)
+	commonDir := testRepoCommonDir(t, td, repo)
+	delays := []time.Duration{time.Minute}
+
+	seedInterruptDrain := func() {
+		h, err := tasks.BeginDrain(td, repo, "set-int", nil)
+		if err != nil {
+			t.Fatalf("BeginDrain: %v", err)
+		}
+		if err := h.Finish(store.StateInterrupted, "", false, time.Time{}); err != nil {
+			t.Fatalf("Finish: %v", err)
+		}
+	}
+
+	// Two interrupts would exceed the single-entry schedule if they counted as
+	// abnormal — they must not.
+	seedInterruptDrain()
+	seedInterruptDrain()
+	info, err := tasks.ReadSetBackoff(td, commonDir, "set-int")
+	if err != nil {
+		t.Fatalf("ReadSetBackoff: %v", err)
+	}
+	if info.ConsecutiveAbnormal != 0 {
+		t.Fatalf("consecutive abnormal after interrupts = %d, want 0", info.ConsecutiveAbnormal)
+	}
+	if parked, until := setBackoffStatus(info, delays, time.Now().UTC()); parked || !until.IsZero() {
+		t.Fatalf("interrupted set must stay spawnable, got (parked %v, until %s)", parked, until)
 	}
 }
 

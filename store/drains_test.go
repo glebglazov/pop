@@ -201,7 +201,7 @@ func finishAt(t *testing.T, s *Store, repo, setID, state string, at time.Time) {
 func TestReadSetBackoffCountsConsecutiveAbnormal(t *testing.T) {
 	s := openTestStore(t)
 	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
-	finishAt(t, s, "repo", "set", StateInterrupted, base)
+	finishAt(t, s, "repo", "set", StateCrashed, base)
 	finishAt(t, s, "repo", "set", StateCrashed, base.Add(time.Minute))
 
 	info, err := s.ReadSetBackoff("repo", "set")
@@ -219,7 +219,7 @@ func TestReadSetBackoffCountsConsecutiveAbnormal(t *testing.T) {
 func TestReadSetBackoffCleanTerminalResetsCount(t *testing.T) {
 	s := openTestStore(t)
 	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
-	finishAt(t, s, "repo", "set", StateInterrupted, base)
+	finishAt(t, s, "repo", "set", StateCrashed, base)
 	finishAt(t, s, "repo", "set", StateCrashed, base.Add(time.Minute))
 	// A later clean terminal (quota_paused) breaks the abnormal run.
 	finishAt(t, s, "repo", "set", StateQuotaPaused, base.Add(2*time.Minute))
@@ -253,6 +253,33 @@ func TestVerifyFailedIsCleanTerminal(t *testing.T) {
 	}
 	if info.ConsecutiveAbnormal != 0 {
 		t.Fatalf("consecutive abnormal after verify_failed = %d, want 0", info.ConsecutiveAbnormal)
+	}
+}
+
+// TestInterruptedIsCleanTerminal locks ADR-0120: a manual interrupt is a clean
+// stop that never accrues abnormal backoff, while crashed stays abnormal. A
+// manual interrupt clears Auto-drain, so there is no re-spawn thrash to throttle.
+func TestInterruptedIsCleanTerminal(t *testing.T) {
+	if StateInterrupted != "interrupted" {
+		t.Fatalf("StateInterrupted = %q, want interrupted", StateInterrupted)
+	}
+	if drainStateAbnormal(StateInterrupted) {
+		t.Fatal("interrupted must be a clean (non-abnormal) terminal stop")
+	}
+	if !drainStateAbnormal(StateCrashed) {
+		t.Fatal("crashed must stay abnormal")
+	}
+	s := openTestStore(t)
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	// A crash accrues abnormal backoff; a later interrupt is clean and resets it.
+	finishAt(t, s, "repo", "set", StateCrashed, base)
+	finishAt(t, s, "repo", "set", StateInterrupted, base.Add(time.Minute))
+	info, err := s.ReadSetBackoff("repo", "set")
+	if err != nil {
+		t.Fatalf("ReadSetBackoff: %v", err)
+	}
+	if info.ConsecutiveAbnormal != 0 {
+		t.Fatalf("consecutive abnormal after interrupt = %d, want 0", info.ConsecutiveAbnormal)
 	}
 }
 

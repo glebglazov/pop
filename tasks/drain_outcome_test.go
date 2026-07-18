@@ -187,8 +187,8 @@ func TestRunTaskSetDoneRecordsFinished(t *testing.T) {
 	if rec.SetID != "demo" {
 		t.Fatalf("set id = %q, want demo", rec.SetID)
 	}
-	// finished is a clean stop, never an abnormal teardown (crashed/interrupted).
-	if rec.State == store.StateCrashed || rec.State == store.StateInterrupted {
+	// finished is a clean stop, never an abnormal teardown (crashed).
+	if rec.State == store.StateCrashed {
 		t.Fatalf("finished must be a clean stop, got %q", rec.State)
 	}
 }
@@ -246,11 +246,11 @@ func TestDrainTerminal(t *testing.T) {
 			wantExecuted: true,
 		},
 		{
-			name:         "interrupted is abnormal",
+			name:         "interrupted is a clean stop",
 			err:          exitErr(ExitInterrupted, "interrupted"),
 			wantTerminal: store.StateInterrupted,
 			wantExecuted: true,
-			wantAbnorm:   true,
+			wantAbnorm:   false,
 		},
 		{
 			name:         "declined never executed",
@@ -279,7 +279,8 @@ func TestDrainTerminal(t *testing.T) {
 			if tc.quotaPaused && !gotReset.Equal(tc.resetAt) {
 				t.Fatalf("reset = %v, want %v", gotReset, tc.resetAt)
 			}
-			gotAbnorm := terminal == store.StateInterrupted || terminal == store.StateCrashed
+			// Only crashed is abnormal (ADR-0120); interrupted is now a clean stop.
+			gotAbnorm := terminal == store.StateCrashed
 			if gotAbnorm != tc.wantAbnorm {
 				t.Fatalf("abnormal = %v, want %v", gotAbnorm, tc.wantAbnorm)
 			}

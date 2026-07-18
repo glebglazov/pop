@@ -7,9 +7,10 @@ import (
 
 // Drain states. A row is born running and reaches exactly one terminal — an
 // exit reason describing how the process ended, never the set's work
-// disposition (ADR-0056). Finished, quota_paused, and verify_failed are clean
-// stops; interrupted and crashed are abnormal teardowns (see drainStateAbnormal),
-// the axis that feeds backoff and parking.
+// disposition (ADR-0056). Finished, quota_paused, verify_failed, and interrupted
+// are clean stops; only crashed is an abnormal teardown (see drainStateAbnormal),
+// the axis that feeds backoff and parking. A manual interrupt clears Auto-drain
+// (ADR-0120), so there is no re-spawn thrash for backoff to throttle.
 const (
 	StateRunning      = "running"
 	StateFinished     = "finished"
@@ -300,7 +301,8 @@ func (s *Store) queryDrains(query string, args ...any) ([]Drain, error) {
 
 // SetBackoff summarises a (repo, set)'s recent Drain history for deriving Queue
 // backoff and parking (ADR-0055): the count of consecutive abnormal terminals
-// (crashed/interrupted) since the last clean one (finished/quota_paused), the
+// (crashed) since the last clean one (finished/quota_paused/verify_failed/
+// interrupted), the
 // instant of the most recent abnormal terminal, and the latest park-clear
 // (unpark) event. Backoff delay and the parked decision are computed from these
 // — no timer or flag is persisted.
@@ -415,10 +417,12 @@ func (s *Store) RecordParkClear(repo, setID string, at time.Time) error {
 }
 
 // drainStateAbnormal reports whether a terminal state is an abnormal exit — a
-// process torn down out from under the executor — versus a clean stop. This is
-// the axis that feeds backoff and parking.
+// process that died without finalizing (crashed/hard-kill) — versus a clean
+// stop. A manual interrupt is clean (ADR-0120): it clears Auto-drain, so there
+// is no re-spawn thrash for backoff to throttle. This is the axis that feeds
+// backoff and parking.
 func drainStateAbnormal(state string) bool {
-	return state == StateCrashed || state == StateInterrupted
+	return state == StateCrashed
 }
 
 func scanDrain(row *sql.Row) (*Drain, error) {
