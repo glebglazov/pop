@@ -362,6 +362,130 @@ func TestDashboardBandKeysOnDisplayedLabel(t *testing.T) {
 	}
 }
 
+// TestRenderStatusMirrorsDashboardRows proves `pop queue status` renders the
+// same rows in the same order as the Queue dashboard (ADR-0121): both key on one
+// row builder (dashboardRowsForStatic) and one comparator (sortDashboardRows),
+// so the static status table's TASK SET order equals the sorted dashboard rows'
+// order, under the Summary headline and without any retired inventory section.
+func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
+	rows := []tasks.Row{
+		{ID: "2026-01-01-rdy", Status: tasks.StatusReady},
+		{ID: "2026-01-02-blk", Status: tasks.StatusBlocked},
+		{ID: "2026-01-03-aa", Status: tasks.StatusAwaitingApproval},
+	}
+	d := dashboardTestDeps(t, rows, nil)
+	dataHome := t.TempDir()
+	real := deps.NewRealFileSystem()
+	origFS := d.Tasks.FS.(*deps.MockFileSystem)
+	d.Tasks.FS = &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataHome
+			}
+			return ""
+		},
+		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
+		ReadFileFunc:     real.ReadFile,
+		WriteFileFunc:    real.WriteFile,
+		MkdirAllFunc:     real.MkdirAll,
+		RenameFunc:       real.Rename,
+		StatFunc:         origFS.StatFunc,
+	}
+	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
+
+	// The shared row builder produces one repo group's rows; the shared comparator
+	// orders the full set exactly as BuildDashboard does. The status table must
+	// render these same rows in this same order.
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sortDashboardRows(got)
+	wantOrder := make([]string, len(got))
+	for i, r := range got {
+		wantOrder[i] = r.SetID
+	}
+	// The READY band floats above the rest band; the rest band orders
+	// AWAITING-APPROVAL before BLOCKED. Guard against a fixture that stopped
+	// exercising the comparator.
+	if !reflect.DeepEqual(wantOrder, []string{"2026-01-01-rdy", "2026-01-03-aa", "2026-01-02-blk"}) {
+		t.Fatalf("shared comparator order = %v, unexpected fixture", wantOrder)
+	}
+
+	var out strings.Builder
+	RenderStatus(&out, StatusSnapshot{Tasks: d.Tasks}, got)
+	text := out.String()
+
+	if !strings.Contains(text, "Summary:") {
+		t.Fatalf("status missing Summary headline:\n%s", text)
+	}
+	for _, header := range []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE"} {
+		if !strings.Contains(text, header) {
+			t.Fatalf("status table missing %q column header:\n%s", header, text)
+		}
+	}
+	// The status table's TASK SET column must appear in the shared-comparator
+	// order — the dashboard's row set/order, rendered statically.
+	prev := -1
+	for _, id := range wantOrder {
+		idx := strings.Index(text, id)
+		if idx < 0 {
+			t.Fatalf("status table missing set %q:\n%s", id, text)
+		}
+		if idx <= prev {
+			t.Fatalf("status table order breaks dashboard order at %q:\n%s", id, text)
+		}
+		prev = idx
+	}
+	for _, omit := range []string{
+		"Picked-up sets:",
+		"Active worktrees:",
+		"Queued ready sets:",
+		"Blocked:",
+		"Awaiting approval:",
+		"Skipped repositories:",
+	} {
+		if strings.Contains(text, omit) {
+			t.Fatalf("status output should not contain retired section %q:\n%s", omit, text)
+		}
+	}
+}
+
+// TestRenderStatusTableColumnsAndIndicator pins the static status table's
+// column composition (ADR-0121): the STATUS cell recomposes IN PROGRESS from a
+// live-drained READY set, the trailing ● live-drain indicator survives, and the
+// WORKTREE destination cells render as plain (ANSI-free) labels.
+func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
+	td := queueDataDeps(t)
+	rows := []DashboardRow{
+		{Project: "alpha", Started: true, SetRef: SetRef{SetID: "2026-03-01-inp", RawStatus: tasks.StatusReady, LiveDrain: true}, destKind: dashboardDestManagedDirective},
+		{Project: "bravo", SetRef: SetRef{SetID: "2026-03-02-blk", RawStatus: tasks.StatusBlocked}, destKind: dashboardDestNeedsBind},
+	}
+	sortDashboardRows(rows)
+
+	var out strings.Builder
+	RenderStatus(&out, StatusSnapshot{Tasks: td}, rows)
+	text := out.String()
+
+	for _, want := range []string{
+		"IN PROGRESS",           // live-drained READY → IN PROGRESS
+		dashboardLiveDrainGlyph, // trailing live-drain indicator
+		dashboardDestLabelManagedWt,
+		dashboardDestLabelNeedsBind,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("status table missing %q:\n%s", want, text)
+		}
+	}
+	// Live-drain (running tier) floats above the rest-band BLOCKED set.
+	if strings.Index(text, "2026-03-01-inp") >= strings.Index(text, "2026-03-02-blk") {
+		t.Fatalf("running tier should float above BLOCKED:\n%s", text)
+	}
+	if strings.Contains(text, "\x1b[") {
+		t.Fatalf("status table must be plain text (no ANSI):\n%q", text)
+	}
+}
+
 func TestDashboardColumnDerivation(t *testing.T) {
 	rows := []tasks.Row{
 		{ID: "done", Status: tasks.StatusDone},

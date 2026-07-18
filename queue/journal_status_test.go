@@ -77,15 +77,13 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 	snap.Tasks = td
 
 	var out bytes.Buffer
-	RenderStatus(&out, snap)
+	// Status is now Summary headline + dashboard table + Scan errors (ADR-0121);
+	// this snapshot exercises the Summary roll-up and the trailing Scan errors
+	// section (the table is fed the dashboard's rows by the command).
+	RenderStatus(&out, snap, nil)
 	text := out.String()
 	for _, want := range []string{
 		"Summary:",
-		"Picked-up sets:",
-		"Active worktrees:",
-		"busy: set-busy pid=1234 since 2026-06-14T13:00:00Z",
-		"Queued ready sets:",
-		"waiting [worktree-ready]: waiting ready set set-ready",
 		"Queue: 1 running, 1 queued",
 		"Scan errors:",
 		"idle: /repo/idle/.pop.toml: expected value",
@@ -94,13 +92,22 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 			t.Fatalf("status output missing %q:\n%s", want, text)
 		}
 	}
-	for _, omit := range []string{"Daemon state:", `"version"`} {
+	// The former per-bucket inventory sections are retired; only Summary, the
+	// task-set table, and Scan errors remain.
+	for _, omit := range []string{
+		"Picked-up sets:",
+		"Active worktrees:",
+		"Queued ready sets:",
+		"Blocked:",
+		"Awaiting approval:",
+		"Skipped repositories:",
+		"other project: no ready work",
+		"Daemon state:",
+		`"version"`,
+	} {
 		if strings.Contains(text, omit) {
-			t.Fatalf("status output should not contain %q:\n%s", omit, text)
+			t.Fatalf("status output should not contain retired section %q:\n%s", omit, text)
 		}
-	}
-	if strings.Contains(text, "other project: no ready work") {
-		t.Fatalf("config error project should be a scan error, not collapsed idle:\n%s", text)
 	}
 }
 
@@ -174,17 +181,17 @@ func TestRenderStatusShowsRecoveryWaiter(t *testing.T) {
 	}
 
 	var statusOut bytes.Buffer
-	RenderStatus(&statusOut, snap)
+	// A quota-recovery waiter counts as a blocked set in the Summary roll-up; the
+	// former "Blocked:" inventory section (and its per-waiter detail) is retired —
+	// blocked state now rides the dashboard row's STATUS cell (ADR-0121).
+	RenderStatus(&statusOut, snap, nil)
 	statusText := statusOut.String()
-	for _, want := range []string{
-		"set-1",
-		"Blocked:",
-		"waiting for quota recovery",
-		"agent=codex",
-		"2026-06-15T14:00:00Z",
-	} {
-		if !strings.Contains(statusText, want) {
-			t.Fatalf("status output missing %q:\n%s", want, statusText)
+	if !strings.Contains(statusText, "Summary:") || !strings.Contains(statusText, "blocked") {
+		t.Fatalf("status Summary should roll up the blocked waiter:\n%s", statusText)
+	}
+	for _, omit := range []string{"Blocked:", "waiting for quota recovery", "agent=codex"} {
+		if strings.Contains(statusText, omit) {
+			t.Fatalf("status output should not contain retired detail %q:\n%s", omit, statusText)
 		}
 	}
 }
@@ -358,22 +365,26 @@ func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
 	snap.Tasks = td
 
 	var statusOut bytes.Buffer
-	RenderStatus(&statusOut, snap)
+	// A parked set counts as blocked in the Summary roll-up; the retired
+	// "Blocked:" / "Active worktrees:" inventory sections no longer render — the
+	// dashboard row's STATUS cell carries the parked suffix (ADR-0121).
+	RenderStatus(&statusOut, snap, nil)
 	statusText := statusOut.String()
-	for _, want := range []string{
-		"set-1",
+	if !strings.Contains(statusText, "Summary:") || !strings.Contains(statusText, "blocked") {
+		t.Fatalf("status Summary should roll up the parked set:\n%s", statusText)
+	}
+	for _, omit := range []string{
 		"Blocked:",
 		"Active worktrees:",
 		"test-repo: set-1 branch=set-1 at /runtime/set-1 — bound",
 		"pop: set-1 parked",
+		"Daemon state:",
+		`"version"`,
+		"set_crash_backoffs",
+		"parked_sets",
 	} {
-		if !strings.Contains(statusText, want) {
-			t.Fatalf("status output missing %q:\n%s", want, statusText)
-		}
-	}
-	for _, omit := range []string{"Daemon state:", `"version"`, "set_crash_backoffs", "parked_sets"} {
 		if strings.Contains(statusText, omit) {
-			t.Fatalf("status output should not contain %q:\n%s", omit, statusText)
+			t.Fatalf("status output should not contain retired detail %q:\n%s", omit, statusText)
 		}
 	}
 }

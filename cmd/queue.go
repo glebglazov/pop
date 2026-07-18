@@ -79,10 +79,11 @@ func init() {
 }
 
 var (
-	queueConfigLoad   = config.Load
-	queueRun          = queue.Run
-	queueBuildStatus  = queue.BuildStatus
-	queueRunDashboard = dashboardshell.RunFromQueue
+	queueConfigLoad     = config.Load
+	queueRun            = queue.Run
+	queueBuildStatus    = queue.BuildStatus
+	queueBuildDashboard = queue.BuildDashboard
+	queueRunDashboard   = dashboardshell.RunFromQueue
 )
 
 const queueLogLimit = 50
@@ -135,7 +136,14 @@ func runQueueStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	queue.RenderStatus(os.Stdout, snap)
+	// The task-set table is the Queue dashboard's rows (ADR-0121): status and the
+	// dashboard share one row builder and one comparator, so BuildDashboard yields
+	// the same rows, filter, and sort the dashboard renders.
+	dash, err := queueBuildDashboard(d, cfg)
+	if err != nil {
+		return err
+	}
+	queue.RenderStatus(os.Stdout, snap, dash.Rows)
 	return nil
 }
 

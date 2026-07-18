@@ -1,8 +1,10 @@
 package queue
 
 import (
+	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/config"
@@ -142,10 +144,95 @@ func statusFromDecisions(d *Deps, decisions []Decision) (StatusSnapshot, error) 
 	return snap, nil
 }
 
-// RenderStatus prints a human-readable queue status snapshot.
-func RenderStatus(out io.Writer, snap StatusSnapshot) {
+// RenderStatus prints the static Queue status surface (ADR-0121): a one-line
+// Summary headline, then the Queue dashboard's task-set table (the same rows,
+// columns, row filter, and sort — status and the dashboard key on one row
+// builder and one comparator), then a trailing Scan errors section when there
+// are scan errors. Every former per-bucket inventory section is retired; the
+// STATUS column, live-drain indicator, and status suffixes now encode the
+// picked-up / parked / awaiting / config-error state those sections carried.
+//
+// The Summary headline and Scan errors are derived from the RunView (the
+// existing aggregate) so the summary stays a scheduling roll-up; the table rows
+// are the dashboard rows the command builds via queue.BuildDashboard. Output is
+// plain text (no ANSI, non-interactive) so it stays greppable/pipeable and
+// serves as the Queue run baseline.
+func RenderStatus(out io.Writer, snap StatusSnapshot, rows []DashboardRow) {
 	view := BuildRunView(snap, time.Now())
-	RenderRunBaseline(out, view)
+	RenderRunSummary(out, view)
+	renderStatusTable(out, rows)
+	renderStatusScanErrors(out, view.ScanErrors)
+}
+
+// renderStatusTable renders the dashboard's task-set table as static plain
+// text: the PROJECT / TASK SET / STATUS / WORKTREE columns plus the trailing
+// live-drain indicator. It reuses the dashboard's headers and column-width math
+// (dashboardColumnWidths measures with lipgloss.Width, which strips ANSI, so the
+// widths match the dashboard's) but renders fully plain cells via
+// statusRowValues so no styling leaks into the pipeable surface. Widths are the
+// natural widths (no terminal-fit shrink) so nothing is truncated, and each line
+// is right-trimmed so the empty trailing indicator leaves no dangling
+// whitespace.
+func renderStatusTable(out io.Writer, rows []DashboardRow) {
+	fmt.Fprintln(out)
+	if len(rows) == 0 {
+		fmt.Fprintln(out, "No queue-actionable task sets.")
+		return
+	}
+	widths := dashboardColumnWidths(rows)
+	fmt.Fprintln(out, strings.TrimRight(dashboardTableLine(dashboardTableHeaders(), widths), " "))
+	fmt.Fprintln(out, strings.TrimRight(dashboardTableSeparator(widths), " "))
+	for _, row := range rows {
+		fmt.Fprintln(out, strings.TrimRight(dashboardTableLine(statusRowValues(row), widths), " "))
+	}
+}
+
+// statusRowValues returns a dashboard row's fully plain column cells for the
+// static status table. Unlike dashboardRowValues / dashboardRowNaturalValues —
+// which style the WORKTREE destination badge for the TUI — every cell here is
+// plain text: the composed STATUS cell (already un-styled) and the plain
+// destination label keep the status surface ANSI-free and greppable.
+func statusRowValues(row DashboardRow) []string {
+	return []string{
+		row.Project,
+		row.SetID,
+		dashboardStatusCell(row),
+		statusDestLabel(row.destKind, row.Worktree),
+		dashboardLiveIndicator(row, false),
+	}
+}
+
+// statusDestLabel returns the plain WORKTREE cell for the status table, the
+// un-styled counterpart of renderDashboardDest.
+func statusDestLabel(kind dashboardDestKind, label string) string {
+	switch kind {
+	case dashboardDestManagedDirective:
+		return dashboardDestLabelManagedWt
+	case dashboardDestNeedsBind:
+		return dashboardDestLabelNeedsBind
+	case dashboardDestDoneManagedBound:
+		return "[managed wt " + label + "]"
+	default:
+		return label
+	}
+}
+
+// renderStatusScanErrors prints the trailing Scan errors section, only when
+// there are scan errors, projects sorted for stable output.
+func renderStatusScanErrors(out io.Writer, scanErrors map[string]string) {
+	if len(scanErrors) == 0 {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Scan errors:")
+	projects := make([]string, 0, len(scanErrors))
+	for project := range scanErrors {
+		projects = append(projects, project)
+	}
+	sort.Strings(projects)
+	for _, project := range projects {
+		fmt.Fprintf(out, "  %s: %s\n", project, scanErrors[project])
+	}
 }
 
 // repoLabelFromScan returns the repository-identity basename for a scan when the

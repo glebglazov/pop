@@ -59,6 +59,7 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 	oldCfgFile := cfgFile
 	oldLoad := queueConfigLoad
 	oldStatus := queueBuildStatus
+	oldBuildDash := queueBuildDashboard
 	oldDash := queueRunDashboard
 	oldStatusInc := queueStatusIncludeDone
 	oldDashInc := queueDashboardIncludeDone
@@ -66,6 +67,7 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 		cfgFile = oldCfgFile
 		queueConfigLoad = oldLoad
 		queueBuildStatus = oldStatus
+		queueBuildDashboard = oldBuildDash
 		queueRunDashboard = oldDash
 		queueStatusIncludeDone = oldStatusInc
 		queueDashboardIncludeDone = oldDashInc
@@ -82,6 +84,11 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 	queueBuildStatus = func(d *queue.Deps, _ *config.Config) (queue.StatusSnapshot, error) {
 		statusInclude = d.IncludeDone
 		return queue.StatusSnapshot{Tasks: tasks.DefaultDeps()}, nil
+	}
+	// `pop queue status` renders the dashboard's rows as its table (ADR-0121), so
+	// it builds the dashboard too; stub it to an empty snapshot.
+	queueBuildDashboard = func(d *queue.Deps, _ *config.Config) (queue.DashboardSnapshot, error) {
+		return queue.DashboardSnapshot{}, nil
 	}
 	queueRunDashboard = func(d *queue.Deps, _ *config.Config) (string, error) {
 		dashInclude = d.IncludeDone
