@@ -15,10 +15,13 @@ import (
 // fire for each due, non-paused routine that is not already running.
 func tickRoutines(d *Deps, out io.Writer) {
 	rd := d.routineDeps()
-	routines, err := routine.ListRoutines(rd)
+	routines, warnings, err := routine.ListRoutines(rd)
 	if err != nil {
 		fmt.Fprintf(out, "queue: routines: %v\n", err)
 		return
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(out, "queue: routine %s: manifest load failed: %v\n", w.ID, w.Err)
 	}
 	if len(routines) == 0 {
 		return

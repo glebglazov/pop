@@ -226,6 +226,52 @@ func TestTickRoutinesCatchUpOnceAfterMissedSlots(t *testing.T) {
 	}
 }
 
+func TestTickRoutinesWarnsBrokenAndFiresHealthy(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	qd, rd, home := routineTickDeps(t, now)
+
+	if _, err := routine.AddWith(rd, "hourly", "every 1h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.AddWith(rd, "broken", "every 1h", home); err != nil {
+		t.Fatal(err)
+	}
+
+	// Corrupt the broken routine's manifest so it cannot be loaded.
+	brokenManifest := filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "routines", "broken", "manifest.json")
+	if err := os.WriteFile(brokenManifest, []byte("{ not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"), func(int, string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StartRoutineRun(store.RoutineRun{
+		RoutineID: "hourly",
+		FiredAt:   now.Add(-2 * time.Hour),
+		PID:       1,
+		ProcStart: "dead",
+	}, func(store.RoutineRun) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRoutineRun(1, store.RoutineRunSucceeded, "", "", now.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+
+	var out bytes.Buffer
+	tickRoutines(qd, &out)
+
+	rt := qd.Tmux.(*recordingTmux)
+	if _, ok := extractRoutineSpawnCommand(rt, "hourly"); !ok {
+		t.Fatalf("expected spawn for healthy routine, commands=%v", rt.commands)
+	}
+	if !strings.Contains(out.String(), "broken") || !strings.Contains(out.String(), "manifest load failed") {
+		t.Fatalf("output missing broken-routine warning:\n%s", out.String())
+	}
+}
+
 func TestRoutineSessionUsesRoutinesForNonGitDirectory(t *testing.T) {
 	_, rd, home := routineTickDeps(t, time.Now())
 	session, dir := routine.SessionAndDir(rd, home)

@@ -27,6 +27,9 @@ type DashboardRow struct {
 // DashboardSnapshot is the data model for `pop routine dashboard`.
 type DashboardSnapshot struct {
 	Rows []DashboardRow
+	// Warnings names routines whose manifest could not be loaded; healthy
+	// rows still render.
+	Warnings []string
 }
 
 // BuildDashboard derives Routine dashboard rows from on-disk routine artifacts
@@ -43,7 +46,7 @@ func BuildDashboardWith(d *Deps) (DashboardSnapshot, error) {
 	if _, err := ReconcileRunsWith(d); err != nil {
 		return DashboardSnapshot{}, err
 	}
-	routines, err := ListRoutines(d)
+	routines, warnings, err := ListRoutines(d)
 	if err != nil {
 		return DashboardSnapshot{}, err
 	}
@@ -76,7 +79,11 @@ func BuildDashboardWith(d *Deps) (DashboardSnapshot, error) {
 		}
 		rows = append(rows, row)
 	}
-	return DashboardSnapshot{Rows: rows}, nil
+	snap := DashboardSnapshot{Rows: rows}
+	for _, w := range warnings {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("routine %s: %v", w.ID, w.Err))
+	}
+	return snap, nil
 }
 
 func formatLastRun(t time.Time) string {
@@ -731,6 +738,7 @@ func (m RoutineDashboard) frameSpec() ui.Frame {
 	if m.err != nil {
 		warnings = append(warnings, fmt.Sprintf("refresh error: %v", m.err))
 	}
+	warnings = append(warnings, m.snap.Warnings...)
 	return ui.Frame{
 		Width:    m.width,
 		TermH:    m.height,
