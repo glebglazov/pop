@@ -483,6 +483,187 @@ func routineDashboardTableLines(view string) []string {
 	return lines
 }
 
+// typeSchedule feeds each rune of s to the model as a printable key press,
+// carrying the rune in Text so spaces (e.g. "daily at 09:00") land in the
+// working expression.
+func typeSchedule(t *testing.T, m RoutineDashboard, s string) RoutineDashboard {
+	t.Helper()
+	for _, r := range s {
+		updated, _ := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m = updated.(RoutineDashboard)
+	}
+	return m
+}
+
+// clearScheduleInput backspaces the working expression down to empty.
+func clearScheduleInput(t *testing.T, m RoutineDashboard) RoutineDashboard {
+	t.Helper()
+	for m.sched != nil && len(m.sched.input) > 0 {
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		m = updated.(RoutineDashboard)
+	}
+	return m
+}
+
+func openScheduleModal(t *testing.T, d *Deps) RoutineDashboard {
+	t.Helper()
+	snap, err := BuildDashboardWith(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newRoutineDashboard(d, snap)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(RoutineDashboard)
+	// a opens the action menu; s selects the edit-schedule verb.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, cmd := updated.(RoutineDashboard).Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if cmd != nil {
+		t.Fatal("opening the schedule modal should not schedule a command")
+	}
+	m = updated.(RoutineDashboard)
+	if m.sched == nil {
+		t.Fatal("s in menu should open the edit-schedule modal")
+	}
+	if m.menu != nil {
+		t.Fatal("opening the schedule modal should close the action menu")
+	}
+	return m
+}
+
+func TestRoutineDashboardEditSchedulePrefill(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "alpha", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	m := openScheduleModal(t, d)
+	if m.sched.input != "every 6h" {
+		t.Fatalf("modal pre-fill = %q, want %q", m.sched.input, "every 6h")
+	}
+	view := m.View().Content
+	if !strings.Contains(view, "edit schedule") || !strings.Contains(view, "schedule: every 6h") {
+		t.Fatalf("modal view missing pre-fill:\n%s", view)
+	}
+}
+
+func TestRoutineDashboardEditScheduleValidWrite(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "alpha", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	m := openScheduleModal(t, d)
+	m = clearScheduleInput(t, m)
+	m = typeSchedule(t, m, "daily at 09:00")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(RoutineDashboard)
+	if m.sched != nil {
+		t.Fatal("valid enter should close the modal")
+	}
+	if cmd == nil {
+		t.Fatal("valid enter should schedule a reload")
+	}
+	if !strings.Contains(m.statusMsg, "alpha") || !strings.Contains(m.statusMsg, "daily at 09:00") {
+		t.Fatalf("status message = %q", m.statusMsg)
+	}
+	r, err := loadManifest(d, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Manifest.Schedule != "daily at 09:00" {
+		t.Fatalf("manifest schedule = %q, want %q", r.Manifest.Schedule, "daily at 09:00")
+	}
+
+	// The reload refreshes the row's SCHEDULE column.
+	msg := cmd()
+	rows, ok := msg.(dashboardRowsMsg)
+	if !ok || rows.err != nil {
+		t.Fatalf("reload msg = %#v", msg)
+	}
+	updated, _ = m.Update(rows)
+	m = updated.(RoutineDashboard)
+	if got := m.snap.Rows[0].Schedule; got != "daily at 09:00" {
+		t.Fatalf("row schedule after reload = %q, want %q", got, "daily at 09:00")
+	}
+}
+
+func TestRoutineDashboardEditScheduleInvalidReedit(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "alpha", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	m := openScheduleModal(t, d)
+	m = clearScheduleInput(t, m)
+	m = typeSchedule(t, m, "every 0h")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(RoutineDashboard)
+	if m.sched == nil {
+		t.Fatal("invalid enter should keep the modal open")
+	}
+	if cmd != nil {
+		t.Fatal("invalid enter should not schedule a reload")
+	}
+	if m.sched.err == nil {
+		t.Fatal("invalid enter should record a parse error")
+	}
+	if !strings.Contains(m.View().Content, "error:") {
+		t.Fatalf("modal view should show the inline error:\n%s", m.View().Content)
+	}
+	// The manifest is untouched by the rejected expression.
+	r, err := loadManifest(d, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Manifest.Schedule != "every 6h" {
+		t.Fatalf("manifest schedule after invalid attempt = %q, want unchanged %q", r.Manifest.Schedule, "every 6h")
+	}
+
+	// The user corrects the expression and retries.
+	m = clearScheduleInput(t, m)
+	m = typeSchedule(t, m, "every 12h")
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(RoutineDashboard)
+	if m.sched != nil {
+		t.Fatal("corrected enter should close the modal")
+	}
+	if cmd == nil {
+		t.Fatal("corrected enter should schedule a reload")
+	}
+	r, err = loadManifest(d, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Manifest.Schedule != "every 12h" {
+		t.Fatalf("manifest schedule after correction = %q, want %q", r.Manifest.Schedule, "every 12h")
+	}
+}
+
+func TestRoutineDashboardEditScheduleCancel(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "alpha", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	m := openScheduleModal(t, d)
+	m = clearScheduleInput(t, m)
+	m = typeSchedule(t, m, "daily at 09:00")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = updated.(RoutineDashboard)
+	if cmd != nil {
+		t.Fatal("esc should not schedule a command")
+	}
+	if m.sched != nil {
+		t.Fatal("esc should close the modal")
+	}
+	r, err := loadManifest(d, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Manifest.Schedule != "every 6h" {
+		t.Fatalf("manifest schedule after cancel = %q, want unchanged %q", r.Manifest.Schedule, "every 6h")
+	}
+}
+
 func tmuxHasCommand(rt *recordingTmux, name string) bool {
 	for _, cmd := range rt.commands {
 		if len(cmd) > 0 && cmd[0] == name {

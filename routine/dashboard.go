@@ -150,6 +150,7 @@ type RoutineDashboard struct {
 	height    int
 	detail    *runsDetailView
 	menu      *routineDashboardMenu
+	sched     *routineScheduleModal
 	statusMsg string
 	showHelp  bool
 	pendingG  bool
@@ -163,6 +164,7 @@ const (
 	menuActionPauseResume
 	menuActionPreview
 	menuActionEditPrompt
+	menuActionEditSchedule
 	menuActionRuns
 )
 
@@ -196,8 +198,20 @@ func routineMenuItems(row DashboardRow) []routineMenuItem {
 		{key: "a", label: pauseLabel, action: menuActionPauseResume},
 		{key: "p", label: "preview pane", action: menuActionPreview},
 		{key: "e", label: "edit prompt", action: menuActionEditPrompt},
+		{key: "s", label: "edit schedule", action: menuActionEditSchedule},
 		{key: "l", label: "runs", action: menuActionRuns},
 	}
+}
+
+// routineScheduleModal is the text-input overlay opened by the edit-schedule
+// verb. It carries the row it edits, the working schedule expression (pre-filled
+// with the row's current schedule), and the last parse error so an invalid
+// expression keeps the modal open for correction (mirrors the Queue dashboard's
+// bind-name text-input stage).
+type routineScheduleModal struct {
+	row   DashboardRow
+	input string
+	err   error
 }
 
 // newRoutineDashboardMenu opens the action overlay on row, wrapping its verbs in
@@ -353,7 +367,7 @@ func (m RoutineDashboard) resizeMainList() {
 
 // ViewToggleAllowed reports whether v may switch to the Queue dashboard.
 func (m RoutineDashboard) ViewToggleAllowed() bool {
-	return m.detail == nil
+	return m.detail == nil && m.menu == nil && m.sched == nil
 }
 
 // ListCursor exposes the main-list cursor index for tests.
@@ -375,6 +389,9 @@ func (m RoutineDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showHelp {
 				return m, nil
 			}
+		}
+		if m.sched != nil {
+			return m.updateScheduleModal(msg)
 		}
 		if m.menu != nil {
 			return m.updateMenu(msg)
@@ -698,6 +715,9 @@ func (m RoutineDashboard) dispatchMenuAction(action routineMenuAction, row Dashb
 		return m, m.previewRoutine(row)
 	case menuActionEditPrompt:
 		return m, m.editPrompt(row)
+	case menuActionEditSchedule:
+		m.sched = &routineScheduleModal{row: row, input: row.Schedule}
+		return m, nil
 	case menuActionRuns:
 		m.err = nil
 		m.detail = newRunsDetailView(row)
@@ -732,6 +752,57 @@ func editPromptCommand(d *Deps, id string) *exec.Cmd {
 	}
 	promptPath := filepath.Join(routineDir(d, id), promptFileName)
 	return exec.Command(editor, promptPath)
+}
+
+// updateScheduleModal drives the edit-schedule text-input overlay: esc/ctrl+c
+// cancel without writing, backspace deletes the last rune, enter validates and
+// persists, and any printable key (spaces included, so "every 6h" and cron
+// expressions type cleanly) extends the working expression.
+func (m RoutineDashboard) updateScheduleModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.sched == nil {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.sched = nil
+		return m, nil
+	case "backspace":
+		if r := []rune(m.sched.input); len(r) > 0 {
+			m.sched.input = string(r[:len(r)-1])
+		}
+		return m, nil
+	case "enter":
+		return m.confirmScheduleModal()
+	}
+	if kpm, ok := msg.(tea.KeyPressMsg); ok && kpm.Text != "" {
+		m.sched.input += kpm.Text
+	}
+	return m, nil
+}
+
+// confirmScheduleModal validates the working expression through the schedule
+// parser and, only if it parses, persists it via the shared UpdateScheduleWith
+// helper (the same read-modify-write the CLI edit uses). On success the modal
+// closes, a status message confirms, and a reload refreshes the row's SCHEDULE
+// column. On parse failure the manifest is left untouched and the modal stays
+// open showing the inline error for re-editing.
+func (m RoutineDashboard) confirmScheduleModal() (tea.Model, tea.Cmd) {
+	if m.sched == nil {
+		return m, nil
+	}
+	d := m.d
+	if d == nil {
+		d = DefaultDeps()
+	}
+	row := m.sched.row
+	mani, err := UpdateScheduleWith(d, row.ID, m.sched.input)
+	if err != nil {
+		m.sched.err = err
+		return m, nil
+	}
+	m.sched = nil
+	m.statusMsg = fmt.Sprintf("updated schedule for %s to %s", row.ID, mani.Schedule)
+	return m, m.reload()
 }
 
 func (m RoutineDashboard) previewRoutine(row DashboardRow) tea.Cmd {
@@ -838,12 +909,20 @@ func dashboardTick() tea.Cmd {
 }
 
 func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
+	if m.sched != nil {
+		return []ui.HelpEntry{
+			{Key: "type", Desc: "edit schedule"},
+			{Key: "enter", Desc: "save schedule"},
+			{Key: "esc", Desc: "cancel"},
+		}
+	}
 	if m.menu != nil {
 		return []ui.HelpEntry{
 			{Key: "i", Desc: "fire now"},
 			{Key: "a", Desc: "pause/resume"},
 			{Key: "p", Desc: "preview pane"},
 			{Key: "e", Desc: "edit prompt"},
+			{Key: "s", Desc: "edit schedule"},
 			{Key: "l", Desc: "runs"},
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "enter", Desc: "run action"},
@@ -884,7 +963,9 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 func (m RoutineDashboard) View() tea.View {
 	if m.showHelp {
 		title := "Help · Routines"
-		if m.menu != nil {
+		if m.sched != nil {
+			title = "Help · Routines · edit schedule"
+		} else if m.menu != nil {
 			title = "Help · Routines · actions"
 		} else if m.detail != nil && m.detail.peek != nil {
 			title = "Help · Routines · report"
@@ -905,6 +986,12 @@ func (m RoutineDashboard) View() tea.View {
 	m.cols.width = m.width
 	m.cols.refit()
 	m.resizeMainList()
+	if m.sched != nil {
+		content := m.viewWithScheduleModal()
+		v := tea.NewView(content)
+		v.AltScreen = true
+		return v
+	}
 	if m.menu != nil {
 		content := m.viewWithMenu()
 		v := tea.NewView(content)
@@ -967,6 +1054,58 @@ func routineMenuLines(menu *routineDashboardMenu, width int) []string {
 		}
 		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
 		lines = append(lines, ui.TruncateString(line, width))
+	}
+	return lines
+}
+
+// viewWithScheduleModal renders the edit-schedule text-input overlay: the
+// summary, the full table with the modal block spliced under the cursored row,
+// and a modal footer. It mirrors viewWithMenu's overlay grammar.
+func (m RoutineDashboard) viewWithScheduleModal() string {
+	var b strings.Builder
+	if m.err != nil {
+		fmt.Fprintf(&b, "refresh error: %v\n", m.err)
+	}
+	fmt.Fprintf(&b, "Routines · %d\n\n", len(m.snap.Rows))
+	hint := ui.HintStyle.Render("enter save · esc cancel")
+	if len(m.snap.Rows) == 0 {
+		fmt.Fprintln(&b, emptyListHint)
+		writeRoutineFooter(&b, m.height, hint)
+		return b.String()
+	}
+	fmt.Fprintln(&b, ui.TruncateString("  "+dashboardTableLine(dashboardTableHeaders(), m.cols.widths), m.width))
+	fmt.Fprintln(&b, ui.TruncateString("  "+dashboardTableSeparator(m.cols.widths), m.width))
+	cursor := m.list.Cursor()
+	for i, row := range m.snap.Rows {
+		marker := "  "
+		if i == cursor {
+			marker = ui.IndicatorStyle.Render("█") + " "
+		}
+		cell := ui.TruncateString(dashboardTableLine(dashboardRowValues(row), m.cols.widths), dashboardListCellBudget(m.width))
+		fmt.Fprintln(&b, marker+cell)
+		if i == cursor {
+			for _, ml := range routineScheduleModalLines(m.sched, m.width) {
+				fmt.Fprintln(&b, ml)
+			}
+		}
+	}
+	writeRoutineFooter(&b, m.height, hint)
+	return b.String()
+}
+
+// routineScheduleModalLines renders the edit-schedule modal as a block of lines
+// nested under the cursored row: a dimmed caption, the working expression, and,
+// when the last enter failed to parse, the inline error kept for correction.
+func routineScheduleModalLines(modal *routineScheduleModal, width int) []string {
+	if modal == nil {
+		return nil
+	}
+	lines := []string{
+		ui.TruncateString("    "+ui.HintStyle.Render("edit schedule"), width),
+		ui.TruncateString(fmt.Sprintf("    schedule: %s", modal.input), width),
+	}
+	if modal.err != nil {
+		lines = append(lines, ui.TruncateString(fmt.Sprintf("    error: %v", modal.err), width))
 	}
 	return lines
 }
