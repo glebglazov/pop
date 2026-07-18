@@ -117,6 +117,8 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 		// guard, not by this view patch (see seedSpawnedRunning).
 		runOut.emitPostSpawnView(out, seedSpawnedRunning(BuildRunView(snap, time.Now()), spawned))
 	}
+
+	tickRoutines(d, out)
 }
 
 // prepareWorktreeDrain routes a worktree-ready actionable drain to its checkout.

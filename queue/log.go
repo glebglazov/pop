@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -36,6 +37,10 @@ func BuildLog(td *tasks.Deps) ([]LogEvent, error) {
 		return nil, err
 	}
 	parkClears, err := tasks.AllParkClears(td)
+	if err != nil {
+		return nil, err
+	}
+	routineRuns, err := tasks.AllRoutineRuns(td)
 	if err != nil {
 		return nil, err
 	}
@@ -81,11 +86,40 @@ func BuildLog(td *tasks.Deps) ([]LogEvent, error) {
 			Kind:      "unparked",
 		})
 	}
+	for _, run := range routineRuns {
+		appendRoutineLogEvents(&events, run)
+	}
 
 	sort.SliceStable(events, func(i, j int) bool {
 		return events[i].Timestamp.Before(events[j].Timestamp)
 	})
 	return events, nil
+}
+
+func appendRoutineLogEvents(events *[]LogEvent, run store.RoutineRun) {
+	if run.Outcome == store.RoutineRunSkipped {
+		*events = append(*events, LogEvent{
+			Timestamp: run.FiredAt,
+			SetID:     run.RoutineID,
+			Kind:      "skipped",
+			Detail:    run.SkipReason,
+		})
+		return
+	}
+	*events = append(*events, LogEvent{
+		Timestamp: run.FiredAt,
+		SetID:     run.RoutineID,
+		Kind:      "fired",
+	})
+	if run.Outcome == store.RoutineRunRunning || run.FinishedAt.IsZero() {
+		return
+	}
+	*events = append(*events, LogEvent{
+		Timestamp: run.FinishedAt,
+		SetID:     run.RoutineID,
+		Kind:      run.Outcome,
+		Detail:    run.FailReason,
+	})
 }
 
 // RenderLog prints recent Queue journal events, most recent last.

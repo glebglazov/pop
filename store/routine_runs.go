@@ -130,6 +130,163 @@ func (s *Store) LastRoutineRun(routineID string) (*RoutineRun, error) {
 	return scanRoutineRun(row)
 }
 
+// LastRoutineFireTime returns the fired_at instant of the routine's most recent
+// non-skipped run, or zero when the routine has never fired.
+func (s *Store) LastRoutineFireTime(routineID string) (time.Time, error) {
+	row := s.db.QueryRow(
+		`SELECT fired_at FROM routine_runs
+		 WHERE routine_id = ? AND outcome <> ?
+		 ORDER BY fired_at DESC
+		 LIMIT 1`,
+		routineID, RoutineRunSkipped)
+	var fired string
+	if err := row.Scan(&fired); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, err
+	}
+	t, _ := time.Parse(timeLayout, fired)
+	return t, nil
+}
+
+// LiveRoutineRun returns a live running row for routineID when isAlive reports
+// the owning process is still running. Nil when none is live.
+func (s *Store) LiveRoutineRun(routineID string, isAlive func(RoutineRun) bool) (*RoutineRun, error) {
+	if isAlive == nil {
+		isAlive = func(RoutineRun) bool { return true }
+	}
+	rows, err := s.db.Query(
+		`SELECT id, routine_id, fired_at, outcome, skip_reason, fail_reason, report_path,
+		        pid, proc_start, finished_at
+		 FROM routine_runs
+		 WHERE routine_id = ? AND outcome = ?`,
+		routineID, RoutineRunRunning)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		run, err := scanRoutineRunRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		if isAlive(run) {
+			return &run, nil
+		}
+	}
+	return nil, rows.Err()
+}
+
+// InsertSkippedRoutineRun records a skipped fire with its reason.
+func (s *Store) InsertSkippedRoutineRun(run RoutineRun) (RoutineRun, error) {
+	stamp := run.FiredAt.UTC().Format(timeLayout)
+	res, err := s.db.Exec(
+		`INSERT INTO routine_runs (routine_id, fired_at, outcome, skip_reason, finished_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		run.RoutineID,
+		stamp,
+		RoutineRunSkipped,
+		run.SkipReason,
+		stamp,
+	)
+	if err != nil {
+		return RoutineRun{}, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return RoutineRun{}, err
+	}
+	run.ID = id
+	run.Outcome = RoutineRunSkipped
+	run.FinishedAt = run.FiredAt
+	return run, nil
+}
+
+// ReconcileCrashedRoutineRuns transitions running rows whose owning process is
+// no longer alive to failed, stamping finishedAt. It returns the number of rows
+// transitioned. A nil isAlive treats every row as alive (a no-op).
+func (s *Store) ReconcileCrashedRoutineRuns(isAlive func(RoutineRun) bool, finishedAt time.Time) (int, error) {
+	if isAlive == nil {
+		return 0, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.Query(
+		`SELECT id, routine_id, fired_at, outcome, skip_reason, fail_reason, report_path,
+		        pid, proc_start, finished_at
+		 FROM routine_runs
+		 WHERE outcome = ?`,
+		RoutineRunRunning)
+	if err != nil {
+		return 0, err
+	}
+	var running []RoutineRun
+	for rows.Next() {
+		run, err := scanRoutineRunRow(rows)
+		if err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		running = append(running, run)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	_ = rows.Close()
+
+	stamp := finishedAt.UTC().Format(timeLayout)
+	reason := "process no longer alive"
+	var crashed int
+	for _, run := range running {
+		if isAlive(run) {
+			continue
+		}
+		if _, err := tx.Exec(
+			`UPDATE routine_runs
+			 SET outcome = ?, fail_reason = ?, finished_at = ?
+			 WHERE id = ? AND outcome = ?`,
+			RoutineRunFailed, reason, stamp, run.ID, RoutineRunRunning); err != nil {
+			return 0, err
+		}
+		crashed++
+	}
+	if crashed == 0 {
+		return 0, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return crashed, nil
+}
+
+// ListAllRoutineRuns returns every routine run row, oldest first.
+func (s *Store) ListAllRoutineRuns() ([]RoutineRun, error) {
+	rows, err := s.db.Query(
+		`SELECT id, routine_id, fired_at, outcome, skip_reason, fail_reason, report_path,
+		        pid, proc_start, finished_at
+		 FROM routine_runs
+		 ORDER BY id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var runs []RoutineRun
+	for rows.Next() {
+		run, err := scanRoutineRunRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	return runs, rows.Err()
+}
+
 // ListRoutineRuns returns all run rows for a routine, newest first.
 func (s *Store) ListRoutineRuns(routineID string) ([]RoutineRun, error) {
 	rows, err := s.db.Query(
@@ -146,32 +303,40 @@ func (s *Store) ListRoutineRuns(routineID string) ([]RoutineRun, error) {
 
 	var runs []RoutineRun
 	for rows.Next() {
-		var run RoutineRun
-		var fired string
-		var finished sql.NullString
-		var procStart sql.NullString
-		if err := rows.Scan(
-			&run.ID,
-			&run.RoutineID,
-			&fired,
-			&run.Outcome,
-			&run.SkipReason,
-			&run.FailReason,
-			&run.ReportPath,
-			&run.PID,
-			&procStart,
-			&finished,
-		); err != nil {
+		run, err := scanRoutineRunRow(rows)
+		if err != nil {
 			return nil, err
-		}
-		run.ProcStart = procStart.String
-		run.FiredAt, _ = time.Parse(timeLayout, fired)
-		if finished.Valid {
-			run.FinishedAt, _ = time.Parse(timeLayout, finished.String)
 		}
 		runs = append(runs, run)
 	}
 	return runs, rows.Err()
+}
+
+func scanRoutineRunRow(rows *sql.Rows) (RoutineRun, error) {
+	var run RoutineRun
+	var fired string
+	var finished sql.NullString
+	var procStart sql.NullString
+	if err := rows.Scan(
+		&run.ID,
+		&run.RoutineID,
+		&fired,
+		&run.Outcome,
+		&run.SkipReason,
+		&run.FailReason,
+		&run.ReportPath,
+		&run.PID,
+		&procStart,
+		&finished,
+	); err != nil {
+		return RoutineRun{}, err
+	}
+	run.ProcStart = procStart.String
+	run.FiredAt, _ = time.Parse(timeLayout, fired)
+	if finished.Valid {
+		run.FinishedAt, _ = time.Parse(timeLayout, finished.String)
+	}
+	return run, nil
 }
 
 func scanRoutineRun(row *sql.Row) (*RoutineRun, error) {

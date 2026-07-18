@@ -21,6 +21,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/routine"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 )
@@ -214,6 +215,26 @@ func (d *Deps) reconcile() {
 	fmt.Fprintf(out, "queue: reconcile: %v (continuing with pre-reconcile snapshot)\n", err)
 }
 
+func (d *Deps) reconcileRoutineRuns() {
+	n, err := routine.ReconcileRunsWith(d.routineDeps())
+	if err != nil {
+		out := d.ReconcileOut
+		if out == nil {
+			out = os.Stderr
+		}
+		fmt.Fprintf(out, "queue: reconcile routines: %v\n", err)
+		return
+	}
+	if n == 0 {
+		return
+	}
+	out := d.ReconcileOut
+	if out == nil {
+		out = os.Stderr
+	}
+	fmt.Fprintf(out, "queue: reconciled %d stale routine run(s)\n", n)
+}
+
 func (d *Deps) toggleAutoDrain(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {
 	if d.ToggleAutoDrain != nil {
 		return d.ToggleAutoDrain(defPath, statePath, setID)
@@ -389,6 +410,7 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	// lock/outcome reads below project from them (ADR-0055). This covers
 	// `pop queue status` (BuildStatus → Scan) and each daemon tick (tick → Scan).
 	d.reconcile()
+	d.reconcileRoutineRuns()
 	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
 	if err != nil {
 		return nil, err
