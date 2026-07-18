@@ -227,10 +227,10 @@ func TestTickRoutinesCatchUpOnceAfterMissedSlots(t *testing.T) {
 }
 
 func TestRoutineSessionUsesRoutinesForNonGitDirectory(t *testing.T) {
-	qd, _, home := routineTickDeps(t, time.Now())
-	session, dir := routineSessionAndDir(qd, home)
-	if session != routinesSessionName {
-		t.Fatalf("session = %q, want %q", session, routinesSessionName)
+	_, rd, home := routineTickDeps(t, time.Now())
+	session, dir := routine.SessionAndDir(rd, home)
+	if session != routine.RoutinesSessionName {
+		t.Fatalf("session = %q, want %q", session, routine.RoutinesSessionName)
 	}
 	if dir != home {
 		t.Fatalf("dir = %q, want %q", dir, home)

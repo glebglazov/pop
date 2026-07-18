@@ -18,12 +18,13 @@ Author one with pop routine add from any directory (git-backed or not).`,
 
 var routineAddSchedule string
 var (
-	routineAdd    = routine.Add
-	routineList   = routine.List
-	routineFire   = routine.Fire
-	routinePause  = routine.Pause
-	routineResume = routine.Resume
-	routineRuns   = routine.Runs
+	routineAdd       = routine.Add
+	routineList      = routine.List
+	routineFire      = routine.Fire
+	routinePause     = routine.Pause
+	routineResume    = routine.Resume
+	routineRuns      = routine.Runs
+	routineDashboard = routine.RunDashboard
 )
 
 var routineAddCmd = &cobra.Command{
@@ -68,6 +69,13 @@ var routineRunsCmd = &cobra.Command{
 	RunE:  runRoutineRuns,
 }
 
+var routineDashboardCmd = &cobra.Command{
+	Use:   "dashboard",
+	Short: "Open the interactive routines dashboard",
+	Args:  cobra.NoArgs,
+	RunE:  runRoutineDashboard,
+}
+
 func init() {
 	rootCmd.AddCommand(routineCmd)
 	routineCmd.AddCommand(routineAddCmd)
@@ -76,6 +84,7 @@ func init() {
 	routineCmd.AddCommand(routinePauseCmd)
 	routineCmd.AddCommand(routineResumeCmd)
 	routineCmd.AddCommand(routineRunsCmd)
+	routineCmd.AddCommand(routineDashboardCmd)
 	routineAddCmd.Flags().StringVar(&routineAddSchedule, "schedule", "", "routine schedule (\"every 6h\" or \"daily at 10:00\")")
 	_ = routineAddCmd.MarkFlagRequired("schedule")
 }
@@ -133,4 +142,8 @@ func runRoutineResume(cmd *cobra.Command, args []string) error {
 
 func runRoutineRuns(cmd *cobra.Command, args []string) error {
 	return routineRuns(args[0], cmd.OutOrStdout())
+}
+
+func runRoutineDashboard(cmd *cobra.Command, args []string) error {
+	return routineDashboard(routine.DefaultDeps())
 }

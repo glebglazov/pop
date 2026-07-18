@@ -21,6 +21,7 @@ func TestRoutineCommandTree(t *testing.T) {
 		{path: []string{"routine", "pause"}},
 		{path: []string{"routine", "resume"}},
 		{path: []string{"routine", "runs"}},
+		{path: []string{"routine", "dashboard"}},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.path, " "), func(t *testing.T) {
