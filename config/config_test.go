@@ -94,6 +94,28 @@ func TestTaskAgentOutput(t *testing.T) {
 	}
 }
 
+func TestLoadRoutinesAgents(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[routines]
+agents = ["codex", "claude"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Routines == nil {
+		t.Fatal("expected [routines] section to parse")
+	}
+	want := []string{"codex", "claude"}
+	if !reflect.DeepEqual(cfg.Routines.Agents, want) {
+		t.Fatalf("routines agents = %#v, want %#v", cfg.Routines.Agents, want)
+	}
+}
+
 func TestLoadTasksImplementAgents(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`

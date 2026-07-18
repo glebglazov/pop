@@ -16,10 +16,11 @@ Routines are directory-bound schedules that fire agent runs over time.
 Author one with pop routine add from any directory (git-backed or not).`,
 }
 
+var routineAddSchedule string
 var (
-	routineAddSchedule string
-	routineAdd         = routine.Add
-	routineList        = routine.List
+	routineAdd  = routine.Add
+	routineList = routine.List
+	routineFire = routine.Fire
 )
 
 var routineAddCmd = &cobra.Command{
@@ -36,10 +37,18 @@ var routineListCmd = &cobra.Command{
 	RunE:  runRoutineList,
 }
 
+var routineFireCmd = &cobra.Command{
+	Use:   "fire <id>",
+	Short: "Run a routine immediately in the foreground",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRoutineFire,
+}
+
 func init() {
 	rootCmd.AddCommand(routineCmd)
 	routineCmd.AddCommand(routineAddCmd)
 	routineCmd.AddCommand(routineListCmd)
+	routineCmd.AddCommand(routineFireCmd)
 	routineAddCmd.Flags().StringVar(&routineAddSchedule, "schedule", "", "routine schedule (\"every 6h\" or \"daily at 10:00\")")
 	_ = routineAddCmd.MarkFlagRequired("schedule")
 }
@@ -57,4 +66,14 @@ func runRoutineAdd(cmd *cobra.Command, args []string) error {
 
 func runRoutineList(cmd *cobra.Command, args []string) error {
 	return routineList(cmd.OutOrStdout())
+}
+
+func runRoutineFire(cmd *cobra.Command, args []string) error {
+	res, err := routineFire(args[0])
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Routine %q finished with agent %s\n", res.RoutineID, res.AgentPreset)
+	fmt.Fprintf(cmd.OutOrStdout(), "Report: %s\n", res.ReportPath)
+	return nil
 }

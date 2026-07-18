@@ -160,6 +160,9 @@ func mergeConfigOverlay(dst, src *Config, md toml.MetaData) {
 	if md.IsDefined("queue") {
 		dst.Queue = cloneQueueConfig(src.Queue)
 	}
+	if md.IsDefined("routines") {
+		dst.Routines = cloneRoutinesConfig(src.Routines)
+	}
 	if md.IsDefined("updates") {
 		dst.Updates = cloneUpdatesConfig(src.Updates)
 	}
@@ -316,6 +319,15 @@ func cloneQueueConfig(src *QueueConfig) *QueueConfig {
 		PollInterval:         src.PollInterval,
 		AgentQuotaRetryAfter: src.AgentQuotaRetryAfter,
 		CrashRetryDelays:     append([]string(nil), src.CrashRetryDelays...),
+	}
+}
+
+func cloneRoutinesConfig(src *RoutinesConfig) *RoutinesConfig {
+	if src == nil {
+		return nil
+	}
+	return &RoutinesConfig{
+		Agents: append([]string(nil), src.Agents...),
 	}
 }
 

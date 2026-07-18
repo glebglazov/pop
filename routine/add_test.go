@@ -9,13 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/tasks"
 )
 
 func routineDeps(t *testing.T, dataHome string) *Deps {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", dataHome)
-	return &Deps{
+	d := &Deps{
 		FS:            deps.NewRealFileSystem(),
 		IsInteractive: func() bool { return false },
 		Now: func() time.Time {
@@ -25,7 +27,13 @@ func routineDeps(t *testing.T, dataHome string) *Deps {
 			}
 			return ts
 		},
+		LoadConfig: func() (*config.Config, error) { return &config.Config{}, nil },
+		Tasks:      tasks.DefaultDeps(),
+		PID:        func() int { return 4242 },
+		ProcStartToken: func(pid int) (string, bool) { return "test", true },
+		ProcessAlive: func(pid int, procStart string) bool { return processAlivePID(pid) },
 	}
+	return d
 }
 
 func TestAddScaffoldsRoutineFromNonGitDirectory(t *testing.T) {

@@ -399,6 +399,14 @@ func (c *Config) ResolveCommitConfigOverrides() ([]string, error) {
 	return overrides, nil
 }
 
+// RoutinesConfig holds settings for recurring Routine runs under [routines].
+type RoutinesConfig struct {
+	// Agents is the ordered fallback list for Routine runs. When empty, resolution
+	// falls through to [tasks.implement].agents (and, failing that, the built-in
+	// default agent).
+	Agents []string `toml:"agents" desc:"Ordered fallback agent list for routine runs (falls back to [tasks.implement].agents when omitted)."`
+}
+
 // QueueConfig holds `pop queue` supervisor configuration. Durations are stored
 // as standard duration strings (e.g. "60s", "1h") and parsed by ResolveQueue.
 type QueueConfig struct {
@@ -585,6 +593,7 @@ type Config struct {
 	Workbenches []Workbench `toml:"workbenches" desc:"Global session blueprints (templates)."`
 	// WorkbenchOpts holds the [workbench] options table (pick_on_create, order).
 	WorkbenchOpts *WorkbenchOptions   `toml:"workbench" desc:"Workbench options ([workbench] table)."`
+	Routines      *RoutinesConfig     `toml:"routines" desc:"Routine settings ([routines] table)."`
 	Queue         *QueueConfig        `toml:"queue" desc:"Queue supervisor settings ([queue] table)."`
 	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
 	Integrations  *IntegrationsConfig `toml:"integrations" desc:"AI-agent integration settings ([integrations] table)."`

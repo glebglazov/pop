@@ -336,6 +336,22 @@ var migrations = []string{
 		note   TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (repo, set_id)
 	);`,
+	// 20: routine_runs — one row per Routine run lifecycle. Per-routine exclusivity
+	// is enforced on start: a live running row for the same routine_id blocks
+	// another fire until the owning process finishes or is reconciled dead.
+	`CREATE TABLE routine_runs (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		routine_id   TEXT    NOT NULL,
+		fired_at     TEXT    NOT NULL,
+		outcome      TEXT    NOT NULL,
+		skip_reason  TEXT    NOT NULL DEFAULT '',
+		fail_reason  TEXT    NOT NULL DEFAULT '',
+		report_path  TEXT    NOT NULL DEFAULT '',
+		pid          INTEGER NOT NULL DEFAULT 0,
+		proc_start   TEXT,
+		finished_at  TEXT
+	);
+	CREATE INDEX idx_routine_runs_routine ON routine_runs(routine_id);`,
 }
 
 func (s *Store) migrate() error {
