@@ -17,13 +17,17 @@
 package binding
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -61,25 +65,24 @@ func SetIDFromKey(key string) string {
 	return parts[1]
 }
 
-// Binding records the durable checkout associated with one Task set.
-type Binding struct {
-	RuntimePath string `json:"runtime_path"`
-	Branch      string `json:"branch"`
-	Project     string `json:"project"`
-	// Provisioned is true when pop ran `git worktree add` to create this
-	// checkout. False (or absent) means the binding is adopted — a human
-	// pointed an existing checkout at the set; pop must never delete it.
-	Provisioned bool `json:"provisioned,omitempty"`
-}
+// Binding records the durable checkout associated with one Task set. It is
+// store.Binding directly — the sole Worktree-binding type in the codebase, with
+// no converter layer between this package and the store (ADR-0118). ScopedKey
+// rides along unused by this package's own map access, which keys by the map
+// key instead; Load/Save reconcile the two through the store's whole-set
+// rewrite.
+//
+// Provisioned is true when pop ran `git worktree add` to create the checkout.
+// False (or absent) means the binding is adopted — a human pointed an
+// existing checkout at the set; pop must never delete it.
+type Binding = store.Binding
 
 // Store is the in-memory façade over the shared binding store. It is keyed by
 // Repository identity plus Task set identifier (the caller builds the key);
 // Load/Save back it onto the `bindings` table in pop's global execution-state
-// database (ADR-0055), readable and writable with no daemon process running. The
-// json tags are retained only so a legacy bindings.json can still be unmarshalled
-// during the one-time migration into the store.
+// database (ADR-0055), readable and writable with no daemon process running.
 type Store struct {
-	Bindings map[string]Binding `json:"bindings,omitempty"`
+	Bindings map[string]Binding
 }
 
 // Get returns the binding stored under key.
@@ -133,50 +136,100 @@ func ManagedWorktreesRoot(d *tasks.Deps) string {
 }
 
 // Load reads the shared binding store from the global execution-state database
-// (ADR-0055). A store that does not yet exist yields an empty Store; the retired
-// bindings.json is migrated into the store on first read and is never read here
-// directly. Callers need no daemon and no pre-seeding.
+// (ADR-0055) through the process-cached store accessor. A store that does not
+// yet exist yields an empty Store; the retired bindings.json is migrated into
+// the store on first read and is never read here directly. Callers need no
+// daemon and no pre-seeding.
 func Load(d *tasks.Deps) (*Store, error) {
-	entries, err := tasks.LoadBindingEntries(d)
+	if err := migrateLegacyBindingsFile(d); err != nil {
+		return nil, err
+	}
+	s, ok, err := d.Store(false)
+	if err != nil || !ok {
+		return &Store{}, err
+	}
+	rows, err := s.AllBindings()
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{}
-	for key, e := range entries {
-		s.Put(key, bindingFromEntry(e))
-	}
-	return s, nil
+	return &Store{Bindings: rows}, nil
 }
 
 // Save writes the shared binding store to the global execution-state database,
-// replacing every row in one transaction (ADR-0055).
-func Save(d *tasks.Deps, store *Store) error {
-	if store == nil {
-		store = &Store{}
+// replacing every row in one transaction (ADR-0055), through the process-cached
+// store accessor.
+func Save(d *tasks.Deps, st *Store) error {
+	if st == nil {
+		st = &Store{}
 	}
-	entries := make(map[string]tasks.BindingEntry, len(store.Bindings))
-	for key, b := range store.Bindings {
-		entries[key] = entryFromBinding(b)
+	s, _, err := d.Store(true)
+	if err != nil {
+		return err
 	}
-	return tasks.SaveBindingEntries(d, entries)
+	return s.ReplaceAllBindings(st.Bindings)
 }
 
-func bindingFromEntry(e tasks.BindingEntry) Binding {
-	return Binding{
-		RuntimePath: e.RuntimePath,
-		Branch:      e.Branch,
-		Project:     e.Project,
-		Provisioned: e.Provisioned,
-	}
+// legacyBindingsFile is the standalone JSON binding store ADR-0055 retires. Its
+// contents are folded into the global store on first read, then the file is
+// removed. It lived beside the per-repo storage tree, in pop's data dir.
+const legacyBindingsFile = "bindings.json"
+
+// LegacyBindingsPath returns the retired standalone binding store file path.
+func LegacyBindingsPath(d *tasks.Deps) string {
+	return filepath.Join(filepath.Dir(tasks.TaskStorageRoot(d)), legacyBindingsFile)
 }
 
-func entryFromBinding(b Binding) tasks.BindingEntry {
-	return tasks.BindingEntry{
-		RuntimePath: b.RuntimePath,
-		Branch:      b.Branch,
-		Project:     b.Project,
-		Provisioned: b.Provisioned,
+// migrateLegacyBindingsFile folds a surviving bindings.json into the store and
+// removes the file. A missing file is the steady state after the one-time
+// migration and costs only the read miss — no store is opened. Every active
+// binding and its provisioned bit is preserved; an entry already present in the
+// store is left untouched (the store wins).
+func migrateLegacyBindingsFile(d *tasks.Deps) error {
+	path := LegacyBindingsPath(d)
+	data, err := d.FS.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
+	if err != nil {
+		return err
+	}
+	var legacy struct {
+		Bindings map[string]struct {
+			RuntimePath string `json:"runtime_path"`
+			Branch      string `json:"branch"`
+			Project     string `json:"project"`
+			Provisioned bool   `json:"provisioned"`
+		} `json:"bindings"`
+	}
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return fmt.Errorf("parse legacy bindings file: %w", err)
+	}
+	if len(legacy.Bindings) > 0 {
+		s, _, err := d.Store(true)
+		if err != nil {
+			return err
+		}
+		existing, err := s.AllBindings()
+		if err != nil {
+			return err
+		}
+		for key, b := range legacy.Bindings {
+			if _, ok := existing[key]; ok {
+				continue
+			}
+			if err := s.PutBinding(store.Binding{
+				ScopedKey:   key,
+				RuntimePath: b.RuntimePath,
+				Branch:      b.Branch,
+				Project:     b.Project,
+				Provisioned: b.Provisioned,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	// Retire the file once its contents are safely in the store.
+	return d.FS.RemoveAll(path)
 }
 
 // Adopt builds an adopted binding record (Provisioned=false) for an existing
@@ -219,11 +272,11 @@ func AdoptCurrentCheckout(td *tasks.Deps, pd *project.Deps, cfg *config.Config, 
 	}
 	key := Key(id, setID)
 
-	store, err := Load(td)
+	bindings, err := Load(td)
 	if err != nil {
 		return false, err
 	}
-	if _, ok := store.Get(key); ok {
+	if _, ok := bindings.Get(key); ok {
 		// Already bound — managed (Queue-provisioned) or adopted. Never clobber:
 		// a managed binding owns teardown the adopter must not silently disown.
 		return false, nil
@@ -239,8 +292,8 @@ func AdoptCurrentCheckout(td *tasks.Deps, pd *project.Deps, cfg *config.Config, 
 	}
 
 	branch := CurrentBranch(td, checkoutPath)
-	store.Put(key, Adopt(checkoutPath, branch, DetectProject(pd, td, cfg, id)))
-	if err := Save(td, store); err != nil {
+	bindings.Put(key, Adopt(checkoutPath, branch, DetectProject(pd, td, cfg, id)))
+	if err := Save(td, bindings); err != nil {
 		return false, err
 	}
 	return true, nil

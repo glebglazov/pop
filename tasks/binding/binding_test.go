@@ -1,4 +1,4 @@
-package tasks
+package binding
 
 import (
 	"encoding/json"
@@ -6,14 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/tasks"
 )
-
-func bindingsStoreDeps(t *testing.T) *Deps {
-	t.Helper()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	return &Deps{FS: deps.NewRealFileSystem()}
-}
 
 // legacyBinding mirrors one bindings.json record so a test can hand-write the
 // retired file in its real on-disk shape (NUL-separated scoped keys included).
@@ -24,7 +18,7 @@ type legacyBinding struct {
 	Provisioned bool   `json:"provisioned,omitempty"`
 }
 
-func writeLegacyBindingsFile(t *testing.T, d *Deps, bindings map[string]legacyBinding) {
+func writeLegacyBindingsFile(t *testing.T, d *tasks.Deps, bindings map[string]legacyBinding) {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{"bindings": bindings})
 	if err != nil {
@@ -43,7 +37,7 @@ func writeLegacyBindingsFile(t *testing.T, d *Deps, bindings map[string]legacyBi
 // into the store with every binding's provisioned bit preserved, and the file
 // is retired afterwards (the data must not be lost).
 func TestMigrateLegacyBindingsFile(t *testing.T) {
-	d := bindingsStoreDeps(t)
+	d := bindingTestDeps(t)
 	managedKey := "repo-abc\x00set-managed"
 	adoptedKey := "repo-abc\x00set-adopted"
 	writeLegacyBindingsFile(t, d, map[string]legacyBinding{
@@ -51,18 +45,18 @@ func TestMigrateLegacyBindingsFile(t *testing.T) {
 		adoptedKey: {RuntimePath: "/wt/adopted", Branch: "feature", Project: "proj"},
 	})
 
-	entries, err := LoadBindingEntries(d)
+	store, err := Load(d)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("entries = %+v, want 2", entries)
+	if len(store.Bindings) != 2 {
+		t.Fatalf("bindings = %+v, want 2", store.Bindings)
 	}
-	managed, ok := entries[managedKey]
+	managed, ok := store.Get(managedKey)
 	if !ok || !managed.Provisioned || managed.RuntimePath != "/wt/managed" {
 		t.Fatalf("managed binding = %+v, want provisioned /wt/managed", managed)
 	}
-	adopted, ok := entries[adoptedKey]
+	adopted, ok := store.Get(adoptedKey)
 	if !ok || adopted.Provisioned || adopted.RuntimePath != "/wt/adopted" {
 		t.Fatalf("adopted binding = %+v, want adopted /wt/adopted", adopted)
 	}
@@ -73,61 +67,72 @@ func TestMigrateLegacyBindingsFile(t *testing.T) {
 	}
 
 	// A second load is a no-op that still returns the migrated bindings.
-	again, err := LoadBindingEntries(d)
-	if err != nil || len(again) != 2 {
-		t.Fatalf("reload entries = %+v err = %v, want 2 entries", again, err)
+	again, err := Load(d)
+	if err != nil || len(again.Bindings) != 2 {
+		t.Fatalf("reload bindings = %+v err = %v, want 2 entries", again, err)
 	}
 }
 
 // TestMigrateLegacyBindingsFileStoreWins verifies a binding already present in
 // the store is not clobbered by a stale entry left in bindings.json.
 func TestMigrateLegacyBindingsFileStoreWins(t *testing.T) {
-	d := bindingsStoreDeps(t)
+	d := bindingTestDeps(t)
 	key := "repo-abc\x00set-1"
-	if err := PutBindingEntry(d, key, BindingEntry{RuntimePath: "/wt/current", Provisioned: true}); err != nil {
+	store := &Store{}
+	store.Put(key, Binding{RuntimePath: "/wt/current", Provisioned: true})
+	if err := Save(d, store); err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
 	writeLegacyBindingsFile(t, d, map[string]legacyBinding{
 		key: {RuntimePath: "/wt/stale"},
 	})
 
-	entries, err := LoadBindingEntries(d)
+	loaded, err := Load(d)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	got := entries[key]
-	if got.RuntimePath != "/wt/current" || !got.Provisioned {
+	got, ok := loaded.Get(key)
+	if !ok || got.RuntimePath != "/wt/current" || !got.Provisioned {
 		t.Fatalf("binding = %+v, want store value /wt/current provisioned", got)
 	}
 }
 
-// TestBindingEntriesRoundTrip exercises the store-backed put/delete/replace path
+// TestBindingStoreRoundTrip exercises the store-backed put/delete/replace path
 // the binding façade rides on.
-func TestBindingEntriesRoundTrip(t *testing.T) {
-	d := bindingsStoreDeps(t)
+func TestBindingStoreRoundTrip(t *testing.T) {
+	d := bindingTestDeps(t)
 	key := "repo-xyz\x00set-9"
 
-	if err := PutBindingEntry(d, key, BindingEntry{RuntimePath: "/wt/9", Branch: "b", Project: "p", Provisioned: true}); err != nil {
+	store := &Store{}
+	store.Put(key, Binding{RuntimePath: "/wt/9", Branch: "b", Project: "p", Provisioned: true})
+	if err := Save(d, store); err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	entries, err := LoadBindingEntries(d)
-	if err != nil || entries[key].RuntimePath != "/wt/9" {
-		t.Fatalf("after put entries = %+v err = %v", entries, err)
+	loaded, err := Load(d)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got, _ := loaded.Get(key); got.RuntimePath != "/wt/9" {
+		t.Fatalf("after put binding = %+v", got)
 	}
 
-	if err := SaveBindingEntries(d, map[string]BindingEntry{key: {RuntimePath: "/wt/9b"}}); err != nil {
+	if err := Save(d, &Store{Bindings: map[string]Binding{key: {RuntimePath: "/wt/9b"}}}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	entries, err = LoadBindingEntries(d)
-	if err != nil || len(entries) != 1 || entries[key].RuntimePath != "/wt/9b" || entries[key].Provisioned {
-		t.Fatalf("after replace entries = %+v err = %v", entries, err)
+	loaded, err = Load(d)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got, _ := loaded.Get(key); len(loaded.Bindings) != 1 || got.RuntimePath != "/wt/9b" || got.Provisioned {
+		t.Fatalf("after replace bindings = %+v", loaded.Bindings)
 	}
 
-	if err := DeleteBindingEntry(d, key); err != nil {
-		t.Fatalf("delete: %v", err)
+	loaded.Delete(key)
+	if err := Save(d, loaded); err != nil {
+		t.Fatalf("save after delete: %v", err)
 	}
-	entries, err = LoadBindingEntries(d)
-	if err != nil || len(entries) != 0 {
-		t.Fatalf("after delete entries = %+v err = %v, want empty", entries, err)
+	final, err := Load(d)
+	if err != nil || len(final.Bindings) != 0 {
+		t.Fatalf("after delete bindings = %+v err = %v, want empty", final.Bindings, err)
 	}
 }

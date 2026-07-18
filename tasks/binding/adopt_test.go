@@ -238,11 +238,15 @@ func TestAdoptCurrentCheckoutShapeMatchesBindWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load store: %v", err)
 	}
-	got, _ := store.Get(Key(id, "set-a"))
+	key := Key(id, "set-a")
+	got, _ := store.Get(key)
 
 	// bind-worktree records exactly Adopt(checkout, branch, project); the
-	// implement adopter must produce a byte-identical record.
+	// implement adopter must produce a byte-identical record. ScopedKey is
+	// stamped by the store on read (it isn't part of Adopt()'s output), so it
+	// is set on want explicitly rather than compared away.
 	want := Adopt(wt, "feature", "")
+	want.ScopedKey = key
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("adopted binding = %+v, want %+v (identical to bind-worktree)", got, want)
 	}

@@ -3,12 +3,22 @@ package tasks
 import (
 	"testing"
 	"time"
+
+	"github.com/glebglazov/pop/internal/deps"
 )
+
+// integrationStoreTestDeps isolates the store to a temp XDG_DATA_HOME so a
+// test never touches the developer's real machine-global store.
+func integrationStoreTestDeps(t *testing.T) *Deps {
+	t.Helper()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	return &Deps{FS: deps.NewRealFileSystem()}
+}
 
 // TestRecordIntegrationEvent verifies the durable integration event is appended
 // and read back newest-first, carrying base_ref and branch_sha provenance.
 func TestRecordIntegrationEvent(t *testing.T) {
-	d := bindingsStoreDeps(t)
+	d := integrationStoreTestDeps(t)
 	key := "repo-abc\x00set-1"
 
 	first := IntegrationEvent{
@@ -63,7 +73,7 @@ func TestRecordIntegrationEvent(t *testing.T) {
 // TestIntegrationEventsNoStore confirms a pure reader with no store materialises
 // nothing and returns no events.
 func TestIntegrationEventsNoStore(t *testing.T) {
-	d := bindingsStoreDeps(t)
+	d := integrationStoreTestDeps(t)
 	events, err := IntegrationEventsForSet(d, "set-1")
 	if err != nil {
 		t.Fatalf("read events: %v", err)

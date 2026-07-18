@@ -5,14 +5,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 )
 
-// WorktreeBinding is the binding module's durable checkout record. The alias
-// keeps queue call sites and tests referring to it unchanged while the type is
-// owned by the binding module.
-type WorktreeBinding = binding.Binding
+// WorktreeBinding is the durable checkout record store.Binding IS — the sole
+// Worktree-binding type in the codebase (ADR-0118). The alias keeps queue call
+// sites and tests referring to it unchanged.
+type WorktreeBinding = store.Binding
 
 // bindingProvisioned reports whether the binding stored under key was
 // provisioned by pop (safe to teardown) or adopted (must not delete).
