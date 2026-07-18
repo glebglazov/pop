@@ -240,28 +240,32 @@ func TestDashboardSortOrder(t *testing.T) {
 	}
 }
 
-// TestDashboardTieredSortOrder drives the full agreed total order across a
-// mixed fixture that exercises every membership tier and the per-project
-// status sink. Tier precedence is running → auto-drain → orphaned → the rest;
-// the orphaned + auto-drain set must land in the auto-drain tier; "the rest"
-// groups by project then sinks AWAITING-APPROVAL below normal and DONE below those;
-// and SetID descending is the global tiebreak.
+// TestDashboardTieredSortOrder drives the full Queue surface order (ADR-0121)
+// across a mixed fixture that exercises every membership tier and the status
+// scheme. Tier precedence is running → auto-drain → orphaned → the rest; the
+// orphaned + auto-drain set lands in the auto-drain tier; within the rest tier
+// the status scheme floats the IN PROGRESS band, then the READY band (both
+// cross-project), then every remaining status per-project by the explicit
+// status order; SetID descending is the tiebreak throughout.
 func TestDashboardTieredSortOrder(t *testing.T) {
 	rows := []DashboardRow{
-		// "the rest" — project bravo, status sink within the project.
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-01-done", RawStatus: tasks.StatusDone}},
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-02-unver", RawStatus: tasks.StatusAwaitingApproval}},
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-03-ready", RawStatus: tasks.StatusReady}},
-		// "the rest" — project alpha sorts before bravo.
-		{Project: "alpha", SetRef: SetRef{SetID: "2026-03-01-a", RawStatus: tasks.StatusReady}},
-		{Project: "alpha", SetRef: SetRef{SetID: "2026-03-02-b", RawStatus: tasks.StatusReady}},
+		// Rest tier, rest band — alphabetically-early project with a needs-you status.
+		{Project: "alpha", SetRef: SetRef{SetID: "2026-02-01-blk", RawStatus: tasks.StatusBlocked}},
+		// Rest tier, READY band — floats above alpha's BLOCKED even though bravo sorts later.
+		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-02-rdy", RawStatus: tasks.StatusReady}},
+		{Project: "alpha", SetRef: SetRef{SetID: "2026-02-03-rdy", RawStatus: tasks.StatusReady}},
+		// Rest tier, IN PROGRESS band (started READY) — floats above the READY band.
+		{Project: "bravo", Started: true, SetRef: SetRef{SetID: "2026-02-04-inp", RawStatus: tasks.StatusReady}},
+		// Rest tier, rest band — DONE and AWAITING-APPROVAL, project-first then status order.
+		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-05-done", RawStatus: tasks.StatusDone}},
+		{Project: "charlie", SetRef: SetRef{SetID: "2026-02-06-aa", RawStatus: tasks.StatusAwaitingApproval}},
 		// Orphaned tier.
 		{Project: "zoo", SetRef: SetRef{SetID: "2026-04-01-orph", RawStatus: tasks.StatusReady, Orphaned: true}},
 		// Auto-drain tier — the orphaned+auto-drain set belongs here, not orphaned.
 		{Project: "kilo", SetRef: SetRef{SetID: "2026-05-01-ad", RawStatus: tasks.StatusReady, AutoDrain: true}},
 		{Project: "kilo", SetRef: SetRef{SetID: "2026-05-02-ado", RawStatus: tasks.StatusReady, AutoDrain: true, Orphaned: true}},
-		// Running / Picked-up tier — highest precedence even with auto-drain set.
-		{Project: "delta", SetRef: SetRef{SetID: "2026-06-01-run", RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}},
+		// Running tier — highest precedence even over an auto-drain BLOCKED set.
+		{Project: "delta", SetRef: SetRef{SetID: "2026-06-01-run", RawStatus: tasks.StatusBlocked, AutoDrain: true, LiveDrain: true}},
 	}
 	sortDashboardRows(rows)
 	got := make([]string, len(rows))
@@ -269,20 +273,68 @@ func TestDashboardTieredSortOrder(t *testing.T) {
 		got[i] = r.Project + "/" + r.SetID
 	}
 	want := []string{
-		// Tier 1: running.
+		// Tier 1: running (floats above the whole status scheme, BLOCKED and all).
 		"delta/2026-06-01-run",
-		// Tier 2: auto-drain, project name then SetID descending.
+		// Tier 2: auto-drain, SetID descending.
 		"kilo/2026-05-02-ado",
 		"kilo/2026-05-01-ad",
 		// Tier 3: orphaned.
 		"zoo/2026-04-01-orph",
-		// Tier 4: the rest, grouped by project, status sink per project.
-		"alpha/2026-03-02-b",
-		"alpha/2026-03-01-a",
-		"bravo/2026-02-03-ready", // normal first
-		"bravo/2026-02-02-unver", // AWAITING-APPROVAL sinks below normal
-		"bravo/2026-02-01-done",  // DONE sinks below AWAITING-APPROVAL
+		// Tier 4: the rest, status scheme.
+		"bravo/2026-02-04-inp",  // IN PROGRESS band (started READY) floats first
+		"alpha/2026-02-03-rdy",  // READY band, cross-project: alpha before bravo
+		"bravo/2026-02-02-rdy",  // READY band
+		"alpha/2026-02-01-blk",  // rest band, project-first: alpha BLOCKED
+		"bravo/2026-02-05-done", // rest band: bravo DONE
+		"charlie/2026-02-06-aa", // rest band: charlie AWAITING-APPROVAL
 	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+// TestDashboardReadyBandInterleavesProjects proves the READY band reads
+// cross-project (ADR-0121): every READY row floats above the rest band
+// regardless of project, rather than each project's rows clustering together.
+func TestDashboardReadyBandInterleavesProjects(t *testing.T) {
+	rows := []DashboardRow{
+		{Project: "alpha", SetRef: SetRef{SetID: "2026-01-01-blk", RawStatus: tasks.StatusBlocked}},
+		{Project: "bravo", SetRef: SetRef{SetID: "2026-01-02-rdy", RawStatus: tasks.StatusReady}},
+		{Project: "alpha", SetRef: SetRef{SetID: "2026-01-03-rdy", RawStatus: tasks.StatusReady}},
+		{Project: "bravo", SetRef: SetRef{SetID: "2026-01-04-blk", RawStatus: tasks.StatusBlocked}},
+	}
+	sortDashboardRows(rows)
+	got := make([]string, len(rows))
+	for i, r := range rows {
+		got[i] = r.Project + "/" + r.SetID
+	}
+	// READY band (cross-project, Project asc) first, then the rest band. If the
+	// order were project-grouped it would read alpha/rdy, alpha/blk, bravo/rdy,
+	// bravo/blk instead.
+	want := []string{
+		"alpha/2026-01-03-rdy",
+		"bravo/2026-01-02-rdy",
+		"alpha/2026-01-01-blk",
+		"bravo/2026-01-04-blk",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+// TestDashboardBandKeysOnDisplayedLabel proves a row's band is keyed on its
+// displayed label, not its raw status (ADR-0121): a started READY set renders
+// as IN PROGRESS and sorts in the IN PROGRESS band, floating above a plain
+// READY set even though both carry raw status READY and the IN PROGRESS row's
+// project sorts later alphabetically.
+func TestDashboardBandKeysOnDisplayedLabel(t *testing.T) {
+	rows := []DashboardRow{
+		{Project: "alpha", SetRef: SetRef{SetID: "2026-01-01-rdy", RawStatus: tasks.StatusReady}},
+		{Project: "zeta", Started: true, SetRef: SetRef{SetID: "2026-01-02-inp", RawStatus: tasks.StatusReady}},
+	}
+	sortDashboardRows(rows)
+	got := []string{rows[0].Project + "/" + rows[0].SetID, rows[1].Project + "/" + rows[1].SetID}
+	want := []string{"zeta/2026-01-02-inp", "alpha/2026-01-01-rdy"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)
 	}

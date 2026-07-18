@@ -82,7 +82,7 @@ func TestTickRoutinesSpawnsDueEveryAndDaily(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"))
+	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"), func(int, string) bool { return true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestTickRoutinesSkipsOverlapAndJournals(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"))
+	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"), func(int, string) bool { return true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestTickRoutinesCatchUpOnceAfterMissedSlots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"))
+	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"), func(int, string) bool { return true })
 	if err != nil {
 		t.Fatal(err)
 	}

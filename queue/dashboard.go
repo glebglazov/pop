@@ -500,42 +500,96 @@ func dashboardSortTier(r DashboardRow) int {
 	}
 }
 
-// dashboardStatusRank orders statuses within a single project for the "the
-// rest" tier (Reading A): normal rows first, then AWAITING-APPROVAL, then DONE
-// sink to that project's bottom. The sink is per-project, not global — a
-// project's own terminal statuses cluster at that project's bottom.
-func dashboardStatusRank(s tasks.TaskSetStatus) int {
-	switch s {
-	case tasks.StatusAwaitingApproval, tasks.StatusNeedsVerify, tasks.StatusVerifyFailed:
-		return 1
-	case tasks.StatusDone:
-		return 2
+// Queue surface status bands (ADR-0121). A row's band is keyed on its DISPLAYED
+// label, not its raw status: an IN PROGRESS row (a started or live-drained READY
+// set) sorts in the IN PROGRESS band even though its raw status is READY. The
+// IN PROGRESS and READY bands float running/ready work across projects; every
+// other status reads per-project in dashboardBandRest.
+const (
+	dashboardBandInProgress = iota // displayed label "IN PROGRESS"
+	dashboardBandReady             // displayed label "READY"
+	dashboardBandRest              // every other displayed status
+)
+
+// dashboardStatusBand returns a row's status band, keyed on its displayed label
+// so the READY→IN PROGRESS refinement (dashboardStatusLabel) lands in the
+// IN PROGRESS band rather than the READY band.
+func dashboardStatusBand(r DashboardRow) int {
+	switch dashboardStatusLabel(r) {
+	case "IN PROGRESS":
+		return dashboardBandInProgress
+	case string(tasks.StatusReady):
+		return dashboardBandReady
 	default:
-		return 0
+		return dashboardBandRest
 	}
 }
 
-// sortDashboardRows applies the agreed total order: rows fall into membership
-// tiers (running, auto-drain, orphaned, the rest); within a tier they group by
-// project name ascending; within a project in "the rest" AWAITING-APPROVAL then
-// DONE sink to the bottom; and the global tiebreak is SetID descending.
+// dashboardStatusOrder is the explicit intra-project ordering for the
+// dashboardBandRest band (ADR-0121): the "needs-you" statuses first, then the
+// problem bucket, then the shelved/terminal statuses, then the structural
+// defects. MISSING and MALFORMED share the last rank.
+func dashboardStatusOrder(s tasks.TaskSetStatus) int {
+	switch s {
+	case tasks.StatusAwaitingApproval:
+		return 0
+	case tasks.StatusNeedsVerify:
+		return 1
+	case tasks.StatusVerifyFailed:
+		return 2
+	case tasks.StatusFailed:
+		return 3
+	case tasks.StatusBlocked:
+		return 4
+	case tasks.StatusDeferred:
+		return 5
+	case tasks.StatusDone:
+		return 6
+	case tasks.StatusMissing, tasks.StatusMalformed:
+		return 7
+	default:
+		return 8
+	}
+}
+
+// queueRowLess is the shared Queue surface comparator (ADR-0121), the single
+// source of the total order both `pop queue dashboard` and `pop queue status`
+// read. Rows float by membership tier (live-drain → auto-drain → orphaned),
+// then fall through to the status scheme: the IN PROGRESS and READY bands read
+// cross-project (Project asc, then SetID desc), and every remaining status
+// reads per-project (Project asc, then the explicit status order, then SetID
+// desc). Bands key on the displayed label, so a started or live-drained READY
+// set sorts as IN PROGRESS even though its raw status is READY. The membership
+// tiers float above the whole status scheme — an auto-drain BLOCKED set
+// outranks a plain IN PROGRESS set — and fall through to the same band/status/
+// SetID tiebreak within a tier.
+func queueRowLess(a, b DashboardRow) bool {
+	if ta, tb := dashboardSortTier(a), dashboardSortTier(b); ta != tb {
+		return ta < tb
+	}
+	ba, bb := dashboardStatusBand(a), dashboardStatusBand(b)
+	if ba != bb {
+		return ba < bb
+	}
+	if a.Project != b.Project {
+		return a.Project < b.Project
+	}
+	// The explicit status order breaks ties only within dashboardBandRest; the
+	// IN PROGRESS and READY bands are single-status, so they go straight to the
+	// SetID tiebreak after project name.
+	if ba == dashboardBandRest {
+		if ra, rb := dashboardStatusOrder(a.RawStatus), dashboardStatusOrder(b.RawStatus); ra != rb {
+			return ra < rb
+		}
+	}
+	return a.SetID > b.SetID
+}
+
+// sortDashboardRows applies the shared Queue surface order (queueRowLess) to a
+// dashboard build's rows.
 func sortDashboardRows(rows []DashboardRow) {
 	sort.SliceStable(rows, func(i, j int) bool {
-		a, b := rows[i], rows[j]
-		if ta, tb := dashboardSortTier(a), dashboardSortTier(b); ta != tb {
-			return ta < tb
-		}
-		if a.Project != b.Project {
-			return a.Project < b.Project
-		}
-		// Status sink applies only within "the rest"; tiers 1–3 go straight to
-		// the SetID tiebreak after project name.
-		if dashboardSortTier(a) == dashboardTierRest {
-			if ra, rb := dashboardStatusRank(a.RawStatus), dashboardStatusRank(b.RawStatus); ra != rb {
-				return ra < rb
-			}
-		}
-		return a.SetID > b.SetID
+		return queueRowLess(rows[i], rows[j])
 	})
 }
 

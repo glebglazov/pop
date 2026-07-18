@@ -24,6 +24,12 @@ const (
 	// interruptGateContinueChoice is menu "1": re-acquire the lock and re-run the
 	// interrupted task, then keep draining.
 	interruptGateContinueChoice
+	// interruptGateAssistChoice is menu "2": launch an attended agent session
+	// loaded with the interrupted task + set context, then return to the menu.
+	interruptGateAssistChoice
+	// interruptGateShellChoice is menu "3": open a subshell at the Runtime path,
+	// then return to the menu.
+	interruptGateShellChoice
 	// interruptGateForceQuit is a second SIGINT at the menu: exit the process
 	// immediately, bypassing the clean park-and-resume choreography.
 	interruptGateForceQuit
@@ -37,17 +43,26 @@ type interruptReadResult struct {
 // handleInteractiveInterruptGate is the fourth sibling of the HITL / Failed /
 // Verify-fail gate menus (ADR-0119): when a live AFK attempt is torn down by
 // SIGINT on a TTY, the drain lands here instead of exiting 130. It offers two
-// options — 1 Continue draining (re-run the interrupted task) and 0 Exit
-// (finalize with the interrupted terminal). A second SIGINT while the menu is up
-// force-quits the process immediately (interruptGateExit). Returns (true, nil)
-// when the caller should keep draining (Continue) and (false, nil) when it should
-// fall through to the interrupted terminal (Exit, or a non-promptable run under
-// --yes / a non-interactive input). sigCh delivers the second SIGINT; the caller
-// installs and stops the signal notification around this call.
+// options — 1 Continue draining (re-run the interrupted task), 2 Get agent
+// assistance (an attended session over the interrupted task + set context), 3
+// open a Runtime shell, and 0 Exit (finalize with the interrupted terminal).
+// Assistance and shell are pure side-trips: they reuse the exact gate handlers
+// the HITL/Failed/Verify-fail gates call (runAttendedAssistanceCommand /
+// spawnRuntimeShell), change no task state, and return to the menu on exit. A
+// second SIGINT while the menu is up force-quits the process immediately
+// (interruptGateExit). Returns (true, nil) when the caller should keep draining
+// (Continue) and (false, nil) when it should fall through to the interrupted
+// terminal (Exit, or a non-promptable run under --yes / a non-interactive
+// input). sigCh delivers the second SIGINT; the caller installs and stops the
+// signal notification around this call.
 func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task, sigCh <-chan os.Signal) (bool, error) {
+	d := env.d
 	out := env.out
 	in := env.in
 	reader := env.reader
+	agentPreset := env.agentPreset
+	agentCmd := env.agentCmd
+	runtimePath := env.runtimePath
 	taskSetID := env.taskSetID
 	if env.yes || !canPrompt(in) || m == nil || interrupted == nil {
 		return false, nil
@@ -59,14 +74,39 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 		reader = bufio.NewReader(in)
 	}
 
+	prompt := BuildInterruptAssistancePrompt(d, taskSetID, m, *interrupted, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+	if err != nil {
+		return false, exitErr(ExitSetup, "%v", err)
+	}
+
 	for {
-		action, err := promptInterruptGateAction(out, reader, sigCh, taskSetID, interrupted)
+		action, err := promptInterruptGateAction(out, reader, sigCh, taskSetID, interrupted, invocation)
 		if err != nil {
 			return false, err
 		}
 		switch action {
 		case interruptGateContinueChoice:
 			return true, nil
+		case interruptGateAssistChoice:
+			// Reuse the shared attended-assistance handler (same as HITL/Failed).
+			// The agent advises/edits by hand only: no state change and no refresh,
+			// so we loop straight back to the interrupt menu on exit.
+			fmt.Fprintf(outputFor(out), "Starting interrupt assistance: %s\n", invocation.Display)
+			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
+			if err != nil {
+				fmt.Fprintf(outputFor(out), "Could not start interrupt assistance: %v\n", err)
+				continue
+			}
+			if exitCode != 0 {
+				fmt.Fprintf(outputFor(out), "Interrupt assistance exited with status %d.\n", exitCode)
+			}
+		case interruptGateShellChoice:
+			// Reuse the shared shell side-trip (same as HITL/Failed/Verify-fail):
+			// no state change, no refresh — loop back to the interrupt menu.
+			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
+				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
+			}
 		case interruptGateExitChoice:
 			return false, nil
 		case interruptGateForceQuit:
@@ -78,11 +118,19 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 	}
 }
 
-func promptInterruptGateAction(out io.Writer, reader *bufio.Reader, sigCh <-chan os.Signal, taskSetID string, interrupted *Task) (interruptGateAction, error) {
+func promptInterruptGateAction(out io.Writer, reader *bufio.Reader, sigCh <-chan os.Signal, taskSetID string, interrupted *Task, invocation *AgentAssistanceInvocation) (interruptGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiYellow, "Interrupted: %s/%s was stopped mid-run.", taskSetID, interrupted.ID)
 	fmt.Fprintln(display, "  1. Continue draining (default)")
+	fmt.Fprintln(display, "  2. Agent assistance")
+	if invocation != nil {
+		fmt.Fprintf(display, "     %s\n", invocation.Display)
+		if invocation.Detail != "" {
+			fmt.Fprintf(display, "     %s\n", invocation.Detail)
+		}
+	}
+	fmt.Fprintln(display, "  3. Open a shell in the checkout")
 	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintln(display, "  (press Ctrl-C again to force-quit)")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
@@ -117,7 +165,7 @@ func promptInterruptGateAction(out io.Writer, reader *bufio.Reader, sigCh <-chan
 			return interruptGateExitChoice, nil
 		default:
 			fmt.Fprintln(display, "Choose 1 or 0.")
-			return promptInterruptGateAction(out, reader, sigCh, taskSetID, interrupted)
+			return promptInterruptGateAction(out, reader, sigCh, taskSetID, interrupted, invocation)
 		}
 	}
 }

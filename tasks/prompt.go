@@ -191,6 +191,69 @@ func BuildFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, failed 
 	return b.String()
 }
 
+// BuildInterruptAssistancePrompt generates the attended-agent prompt shown when a
+// live AFK attempt is interrupted (SIGINT) and the drain lands on the interrupt
+// gate (ADR-0119). The agent is loaded with the interrupted task and surrounding
+// Task set context to advise or edit by hand; it deliberately mirrors the HITL
+// assistance contract — it must not mutate task state or resume the drain, since
+// the human resolves the interrupt from the gate menu (Continue / Exit).
+func BuildInterruptAssistancePrompt(d *Deps, taskSetID string, m *Manifest, interrupted Task, runtimePath string) string {
+	if d == nil {
+		d = defaultDeps
+	}
+	if d.FS == nil {
+		d.FS = DefaultDeps().FS
+	}
+
+	taskPath := filepath.Join(m.Dir, interrupted.File)
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are assisting a human with an interrupted task in a Pop task set.\n\n")
+	fmt.Fprintf(&b, "Task set: %s\n", taskSetID)
+	fmt.Fprintf(&b, "Task set path: %s\n", m.Dir)
+	fmt.Fprintf(&b, "Interrupted task: %s", interrupted.ID)
+	if interrupted.Title != "" {
+		fmt.Fprintf(&b, " - %s", interrupted.Title)
+	}
+	fmt.Fprintf(&b, "\n")
+	fmt.Fprintf(&b, "Task path: %s\n", taskPath)
+	if runtimePath != "" {
+		fmt.Fprintf(&b, "Runtime checkout: %s\n", runtimePath)
+	}
+	fmt.Fprintf(&b, "\n")
+
+	fmt.Fprintf(&b, "This task's live attempt was stopped mid-run by an interrupt (SIGINT). The\n")
+	fmt.Fprintf(&b, "human is deciding at the interrupt gate whether to continue draining (re-run\n")
+	fmt.Fprintf(&b, "this task) or exit. You are here to advise and edit by hand only:\n")
+	fmt.Fprintf(&b, "- Do not change task state yourself and do not resume the drain; the human\n")
+	fmt.Fprintf(&b, "  chooses Continue or Exit from the gate menu after you exit.\n")
+	fmt.Fprintf(&b, "- exit without changing task state: leave the interrupted task open and make no manual override.\n\n")
+
+	fmt.Fprintf(&b, "Full interrupted task body:\n")
+	if data, err := d.FS.ReadFile(taskPath); err == nil {
+		fmt.Fprintf(&b, "```markdown\n%s\n```\n\n", strings.TrimRight(string(data), "\n"))
+	} else {
+		fmt.Fprintf(&b, "Could not read %s: %v.\n", taskPath, err)
+		fmt.Fprintf(&b, "Proceed by inspecting the task path manually or asking the human for the missing task body.\n\n")
+	}
+
+	fmt.Fprintf(&b, "Task set context:\n")
+	for _, task := range m.Tasks {
+		fmt.Fprintf(&b, "- %s [%s %s]", task.ID, task.Type, task.Status)
+		if task.Title != "" {
+			fmt.Fprintf(&b, " %s", task.Title)
+		}
+		fmt.Fprintf(&b, " (%s)", filepath.Join(m.Dir, task.File))
+		if len(task.BlockedBy) > 0 {
+			fmt.Fprintf(&b, "; blocked_by: %s", strings.Join(task.BlockedBy, ", "))
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+	fmt.Fprintf(&b, "\n")
+
+	fmt.Fprintf(&b, "Use the repository and task context to help the human decide whether to continue draining this task or exit. Do not mark tasks complete, skipped, or reset unless the human explicitly chooses that outcome.\n")
+	return b.String()
+}
+
 // formatSiblingCompletedBriefs renders the inter-task feed appended to the
 // worker prompt on a retry: briefs of sibling tasks already completed in the
 // same Task set, for cross-task orientation — what already landed, so the

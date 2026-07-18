@@ -8,7 +8,7 @@ import (
 func TestStartRoutineRunRefusesConcurrentLiveRun(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/pop.db"
-	s, err := Open(path)
+	s, err := Open(path, allAlive(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestStartRoutineRunRefusesConcurrentLiveRun(t *testing.T) {
 func TestStartRoutineRunAllowsAfterDeadProcess(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/pop.db"
-	s, err := Open(path)
+	s, err := Open(path, allAlive(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestStartRoutineRunAllowsAfterDeadProcess(t *testing.T) {
 func TestFinishRoutineRunPersistsOutcome(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/pop.db"
-	s, err := Open(path)
+	s, err := Open(path, allAlive(true))
 	if err != nil {
 		t.Fatal(err)
 	}
