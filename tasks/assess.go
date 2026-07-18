@@ -9,6 +9,11 @@ import (
 var (
 	summaryStartRE = regexp.MustCompile(`(?m)^SUMMARY_START\s*$`)
 	summaryEndRE   = regexp.MustCompile(`(?m)^SUMMARY_END\s*$`)
+	// taskCompleteRE matches the completion sentinel anywhere in the output.
+	// Leading \b only (no trailing) so a sentinel glued to prose by some
+	// agents (e.g. Cursor emitting "TASK_COMPLETEThe work is done.") still
+	// counts, while "FOOTASK_COMPLETE" does not.
+	taskCompleteRE = regexp.MustCompile(`\bTASK_COMPLETE`)
 )
 
 // Assessment holds the outcome of verifying agent output and task markdown.
@@ -39,7 +44,7 @@ func AssessCompletion(output string, taskMarkdown []byte) Assessment {
 		return a
 	}
 
-	if lastLine != "TASK_COMPLETE" {
+	if !taskCompleteRE.MatchString(trimmed) {
 		a.FailedReason = "missing TASK_COMPLETE sentinel"
 		return a
 	}
