@@ -2173,6 +2173,21 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
+	case "ctrl+g":
+		// Open the detail's task set checkout in pop, mirroring the main-list
+		// Ctrl-g: surface the bound checkout on quit so the command layer runs the
+		// workbench-aware open after the TUI exits; an unbound set shows an inline
+		// status and keeps the dashboard running.
+		if m.detail == nil {
+			return m, nil
+		}
+		if strings.TrimSpace(m.detail.row.RuntimePath) == "" {
+			m.detail.statusMsg = "no checkout bound to this task set"
+			return m, nil
+		}
+		m.detail.statusMsg = ""
+		m.openCheckout = m.detail.row.RuntimePath
+		return m, tea.Quit
 	case "j", "down":
 		if m.detail != nil {
 			m.detail.list.MoveDown()
@@ -2812,6 +2827,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "G", Desc: "last task"},
 			{Key: "l/enter", Desc: "peek task text"},
 			{Key: "a", Desc: "task actions"},
+			{Key: "ctrl+g", Desc: "open worktree"},
 			{Key: "h/esc", Desc: "back to list"},
 		}
 	case m.filterMode:
@@ -2829,6 +2845,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "G", Desc: "last row"},
 			{Key: "l/enter", Desc: "open detail"},
 			{Key: "a", Desc: "action menu"},
+			{Key: "ctrl+g", Desc: "open worktree"},
 			{Key: "/", Desc: "filter"},
 			{Key: "h/esc", Desc: "quit"},
 		}

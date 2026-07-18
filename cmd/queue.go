@@ -146,6 +146,12 @@ func runQueueDashboard(cmd *cobra.Command, args []string) error {
 	// open helper (task 02) — birth-time shaping when the session is absent, else
 	// flat attach (ADR-0075). Because a managed worktree's session usually already
 	// exists, this attaches to the running session.
+	//
+	// Force the tmux switch: unlike `pop worktree`, the queue command exposes no
+	// -s/--switch flag, so the shared flat-open path (handleWorktreeSelect) would
+	// otherwise print the path instead of switching. The dashboard has already
+	// quit here — the only sensible action is to attach, never echo the path.
+	switchSession = true
 	ctx, err := project.DetectRepoContextFromPathWith(project.DefaultDeps(), checkout)
 	if err != nil {
 		return err
