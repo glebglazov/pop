@@ -29,9 +29,7 @@ func seedLifecycleBinding(t *testing.T, td *tasks.Deps, repoPath, setID string, 
 		t.Fatalf("identity: %v", err)
 	}
 	key := Key(id, setID)
-	store := &Store{}
-	store.Put(key, b)
-	if err := Save(td, store); err != nil {
+	if err := Put(td, key, b); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	return key
@@ -39,18 +37,11 @@ func seedLifecycleBinding(t *testing.T, td *tasks.Deps, repoPath, setID string, 
 
 func loadLifecycleBindings(t *testing.T, td *tasks.Deps) map[string]Binding {
 	t.Helper()
-	store, err := Load(td)
+	all, err := AllBindings(td)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store == nil || len(store.Bindings) == 0 {
-		return nil
-	}
-	out := make(map[string]Binding, len(store.Bindings))
-	for k, v := range store.Bindings {
-		out[k] = v
-	}
-	return out
+	return all
 }
 
 func TestUnbindAdoptedRetainsCheckout(t *testing.T) {

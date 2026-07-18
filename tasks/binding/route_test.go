@@ -26,9 +26,7 @@ func seedBinding(t *testing.T, td *tasks.Deps, checkoutPath, setID string, b Bin
 	if err != nil {
 		t.Fatalf("identity: %v", err)
 	}
-	store := &Store{}
-	store.Put(Key(id, setID), b)
-	if err := Save(td, store); err != nil {
+	if err := Put(td, Key(id, setID), b); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 }
@@ -131,15 +129,14 @@ func TestRouteDrainCheckoutNoDirectiveForegroundBindsCurrentCheckout(t *testing.
 	if err != nil {
 		t.Fatalf("identity: %v", err)
 	}
-	store, err := Load(td)
+	b, ok, err := Lookup(td, Key(id, "set-a"))
 	if err != nil {
-		t.Fatalf("load: %v", err)
+		t.Fatalf("lookup: %v", err)
 	}
-	b, ok := store.Get(Key(id, "set-a"))
 	if !ok || b.RuntimePath != currentRuntime || b.Branch != "feature" {
 		t.Fatalf("persisted binding = %+v ok=%v, want path %q branch feature", b, ok, currentRuntime)
 	}
-	if store.ShouldTeardown(Key(id, "set-a")) {
+	if ShouldTeardown(td, Key(id, "set-a")) {
 		t.Fatalf("default binding must never be torn down")
 	}
 }
@@ -183,11 +180,9 @@ func TestRouteDrainCheckoutNoDirectiveQueueBindsIntegrationTarget(t *testing.T) 
 	if err != nil {
 		t.Fatalf("identity: %v", err)
 	}
-	store, err := Load(td)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if b, ok := store.Get(Key(id, "set-a")); !ok || b.RuntimePath != integrationTarget {
+	if b, ok, err := Lookup(td, Key(id, "set-a")); err != nil {
+		t.Fatalf("lookup: %v", err)
+	} else if !ok || b.RuntimePath != integrationTarget {
 		t.Fatalf("persisted binding = %+v ok=%v, want integration target %q", b, ok, integrationTarget)
 	}
 }
@@ -288,11 +283,9 @@ func TestRouteDrainCheckoutOverrideWinsOverDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identity: %v", err)
 	}
-	store, err := Load(td)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if _, ok := store.Get(Key(id, "set-a")); ok {
+	if _, ok, err := Lookup(td, Key(id, "set-a")); err != nil {
+		t.Fatalf("lookup: %v", err)
+	} else if ok {
 		t.Fatalf("an explicit override must not persist a default binding")
 	}
 }

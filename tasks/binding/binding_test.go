@@ -45,20 +45,20 @@ func TestMigrateLegacyBindingsFile(t *testing.T) {
 		adoptedKey: {RuntimePath: "/wt/adopted", Branch: "feature", Project: "proj"},
 	})
 
-	store, err := Load(d)
+	all, err := AllBindings(d)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(store.Bindings) != 2 {
-		t.Fatalf("bindings = %+v, want 2", store.Bindings)
+	if len(all) != 2 {
+		t.Fatalf("bindings = %+v, want 2", all)
 	}
-	managed, ok := store.Get(managedKey)
-	if !ok || !managed.Provisioned || managed.RuntimePath != "/wt/managed" {
-		t.Fatalf("managed binding = %+v, want provisioned /wt/managed", managed)
+	managed, ok, err := Lookup(d, managedKey)
+	if err != nil || !ok || !managed.Provisioned || managed.RuntimePath != "/wt/managed" {
+		t.Fatalf("managed binding = %+v ok=%v err=%v, want provisioned /wt/managed", managed, ok, err)
 	}
-	adopted, ok := store.Get(adoptedKey)
-	if !ok || adopted.Provisioned || adopted.RuntimePath != "/wt/adopted" {
-		t.Fatalf("adopted binding = %+v, want adopted /wt/adopted", adopted)
+	adopted, ok, err := Lookup(d, adoptedKey)
+	if err != nil || !ok || adopted.Provisioned || adopted.RuntimePath != "/wt/adopted" {
+		t.Fatalf("adopted binding = %+v ok=%v err=%v, want adopted /wt/adopted", adopted, ok, err)
 	}
 
 	// The file is retired once its contents are safely in the store.
@@ -67,8 +67,8 @@ func TestMigrateLegacyBindingsFile(t *testing.T) {
 	}
 
 	// A second load is a no-op that still returns the migrated bindings.
-	again, err := Load(d)
-	if err != nil || len(again.Bindings) != 2 {
+	again, err := AllBindings(d)
+	if err != nil || len(again) != 2 {
 		t.Fatalf("reload bindings = %+v err = %v, want 2 entries", again, err)
 	}
 }
@@ -78,61 +78,54 @@ func TestMigrateLegacyBindingsFile(t *testing.T) {
 func TestMigrateLegacyBindingsFileStoreWins(t *testing.T) {
 	d := bindingTestDeps(t)
 	key := "repo-abc\x00set-1"
-	store := &Store{}
-	store.Put(key, Binding{RuntimePath: "/wt/current", Provisioned: true})
-	if err := Save(d, store); err != nil {
+	if err := Put(d, key, Binding{RuntimePath: "/wt/current", Provisioned: true}); err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
 	writeLegacyBindingsFile(t, d, map[string]legacyBinding{
 		key: {RuntimePath: "/wt/stale"},
 	})
 
-	loaded, err := Load(d)
+	got, ok, err := Lookup(d, key)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	got, ok := loaded.Get(key)
 	if !ok || got.RuntimePath != "/wt/current" || !got.Provisioned {
 		t.Fatalf("binding = %+v, want store value /wt/current provisioned", got)
 	}
 }
 
-// TestBindingStoreRoundTrip exercises the store-backed put/delete/replace path
-// the binding façade rides on.
+// TestBindingStoreRoundTrip exercises the keyed store put/upsert/delete path the
+// binding accessors ride on directly (ADR-0118).
 func TestBindingStoreRoundTrip(t *testing.T) {
 	d := bindingTestDeps(t)
 	key := "repo-xyz\x00set-9"
 
-	store := &Store{}
-	store.Put(key, Binding{RuntimePath: "/wt/9", Branch: "b", Project: "p", Provisioned: true})
-	if err := Save(d, store); err != nil {
+	if err := Put(d, key, Binding{RuntimePath: "/wt/9", Branch: "b", Project: "p", Provisioned: true}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	loaded, err := Load(d)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if got, _ := loaded.Get(key); got.RuntimePath != "/wt/9" {
-		t.Fatalf("after put binding = %+v", got)
+	got, ok, err := Lookup(d, key)
+	if err != nil || !ok || got.RuntimePath != "/wt/9" {
+		t.Fatalf("after put binding = %+v ok=%v err=%v", got, ok, err)
 	}
 
-	if err := Save(d, &Store{Bindings: map[string]Binding{key: {RuntimePath: "/wt/9b"}}}); err != nil {
-		t.Fatalf("save: %v", err)
+	// Put upserts: re-putting the same key overwrites the row in place.
+	if err := Put(d, key, Binding{RuntimePath: "/wt/9b"}); err != nil {
+		t.Fatalf("upsert: %v", err)
 	}
-	loaded, err = Load(d)
+	all, err := AllBindings(d)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if got, _ := loaded.Get(key); len(loaded.Bindings) != 1 || got.RuntimePath != "/wt/9b" || got.Provisioned {
-		t.Fatalf("after replace bindings = %+v", loaded.Bindings)
+	got, _, _ = Lookup(d, key)
+	if len(all) != 1 || got.RuntimePath != "/wt/9b" || got.Provisioned {
+		t.Fatalf("after upsert bindings = %+v", all)
 	}
 
-	loaded.Delete(key)
-	if err := Save(d, loaded); err != nil {
-		t.Fatalf("save after delete: %v", err)
+	if err := Delete(d, key); err != nil {
+		t.Fatalf("delete: %v", err)
 	}
-	final, err := Load(d)
-	if err != nil || len(final.Bindings) != 0 {
-		t.Fatalf("after delete bindings = %+v err = %v, want empty", final.Bindings, err)
+	final, err := AllBindings(d)
+	if err != nil || len(final) != 0 {
+		t.Fatalf("after delete bindings = %+v err = %v, want empty", final, err)
 	}
 }

@@ -113,11 +113,10 @@ func TestAdoptCurrentCheckoutWorktreeLocus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identity: %v", err)
 	}
-	store, err := Load(td)
+	b, ok, err := Lookup(td, Key(id, "set-a"))
 	if err != nil {
-		t.Fatalf("load store: %v", err)
+		t.Fatalf("lookup binding: %v", err)
 	}
-	b, ok := store.Get(Key(id, "set-a"))
 	if !ok {
 		t.Fatalf("expected a binding for set-a")
 	}
@@ -130,7 +129,7 @@ func TestAdoptCurrentCheckoutWorktreeLocus(t *testing.T) {
 	if b.Branch != "feature" {
 		t.Fatalf("Branch = %q, want %q", b.Branch, "feature")
 	}
-	if store.ShouldTeardown(Key(id, "set-a")) {
+	if ShouldTeardown(td, Key(id, "set-a")) {
 		t.Fatalf("adopted binding must never be torn down")
 	}
 }
@@ -153,11 +152,9 @@ func TestAdoptCurrentCheckoutTrunkLocus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identity: %v", err)
 	}
-	store, err := Load(td)
-	if err != nil {
-		t.Fatalf("load store: %v", err)
-	}
-	if _, ok := store.Get(Key(id, "set-a")); ok {
+	if _, ok, err := Lookup(td, Key(id, "set-a")); err != nil {
+		t.Fatalf("lookup binding: %v", err)
+	} else if ok {
 		t.Fatalf("trunk-locus run must leave no worktree binding")
 	}
 }
@@ -195,9 +192,7 @@ func TestAdoptCurrentCheckoutDoesNotClobberManagedBinding(t *testing.T) {
 	key := Key(id, "set-a")
 
 	// Pre-seed a managed binding, as `pop queue run` would after provisioning.
-	store := &Store{}
-	store.Put(key, Binding{RuntimePath: wt, Branch: "feature", Provisioned: true})
-	if err := Save(td, store); err != nil {
+	if err := Put(td, key, Binding{RuntimePath: wt, Branch: "feature", Provisioned: true}); err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
 
@@ -209,11 +204,10 @@ func TestAdoptCurrentCheckoutDoesNotClobberManagedBinding(t *testing.T) {
 		t.Fatalf("must not adopt over an existing binding")
 	}
 
-	after, err := Load(td)
+	b, ok, err := Lookup(td, key)
 	if err != nil {
-		t.Fatalf("load store: %v", err)
+		t.Fatalf("lookup binding: %v", err)
 	}
-	b, ok := after.Get(key)
 	if !ok || !b.Provisioned {
 		t.Fatalf("managed binding must survive untouched, got %+v ok=%v", b, ok)
 	}
@@ -234,12 +228,11 @@ func TestAdoptCurrentCheckoutShapeMatchesBindWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identity: %v", err)
 	}
-	store, err := Load(td)
-	if err != nil {
-		t.Fatalf("load store: %v", err)
-	}
 	key := Key(id, "set-a")
-	got, _ := store.Get(key)
+	got, _, err := Lookup(td, key)
+	if err != nil {
+		t.Fatalf("lookup binding: %v", err)
+	}
 
 	// bind-worktree records exactly Adopt(checkout, branch, project); the
 	// implement adopter must produce a byte-identical record. ScopedKey is

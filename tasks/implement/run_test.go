@@ -110,15 +110,14 @@ func TestResolveTaskSetRuntimeUnboundBindsCurrentCheckout(t *testing.T) {
 		t.Fatalf("runtime = %q, want current checkout %q", gotRuntime, wantRoot)
 	}
 
-	store, err := binding.Load(d.tasksDeps())
-	if err != nil {
-		t.Fatal(err)
-	}
 	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, ok := store.Get(binding.Key(id, "demo"))
+	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatalf("expected a default binding for the unbound foreground drain")
 	}
@@ -142,15 +141,14 @@ func TestResolveTaskSetRuntimeInWorktreeProvisionsAndBinds(t *testing.T) {
 		t.Fatalf("resolve runtime: %v", err)
 	}
 
-	store, err := binding.Load(d.tasksDeps())
-	if err != nil {
-		t.Fatal(err)
-	}
 	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, ok := store.Get(binding.Key(id, "demo"))
+	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatalf("expected provisioned binding for --in-worktree drain")
 	}
@@ -225,11 +223,10 @@ func TestResolveTaskSetRuntimeManagedDirectiveForegroundIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := binding.Load(d.tasksDeps())
+	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, ok := store.Get(binding.Key(id, "demo"))
 	if !ok || b.Provisioned {
 		t.Fatalf("binding = %+v ok=%v, want an adopted default binding (Provisioned=false)", b, ok)
 	}
@@ -269,9 +266,7 @@ func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &binding.Store{}
-	store.Put(binding.Key(id, "demo"), binding.Adopt(wt, "bound", ""))
-	if err := binding.Save(d.tasksDeps(), store); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -284,15 +279,14 @@ func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing
 		t.Fatalf("RuntimeOverride = %q, want empty after silent rebind to current", resolved.RuntimeOverride)
 	}
 
-	after, err := binding.Load(d.tasksDeps())
-	if err != nil {
-		t.Fatal(err)
-	}
 	currentRuntime, err := tasks.ResolveRuntimePathWith(d.tasksDeps(), root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, ok := after.Get(binding.Key(id, "demo"))
+	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok || b.Provisioned || b.RuntimePath != currentRuntime {
 		t.Fatalf("binding = %+v ok=%v, want adopted rebind at current %q", b, ok, currentRuntime)
 	}
@@ -313,9 +307,7 @@ func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &binding.Store{}
-	store.Put(binding.Key(id, "demo"), binding.Adopt(wt, "feature", ""))
-	if err := binding.Save(d.tasksDeps(), store); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "feature", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -398,15 +390,14 @@ func TestResolveTaskSetRuntimeInWorktreeForksFromCurrentCheckoutHEAD(t *testing.
 		t.Fatalf("resolve runtime: %v", err)
 	}
 
-	store, err := binding.Load(d.tasksDeps())
-	if err != nil {
-		t.Fatal(err)
-	}
 	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), featureWT)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, ok := store.Get(binding.Key(id, "demo"))
+	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok || !b.Provisioned {
 		t.Fatalf("binding = %+v ok=%v, want provisioned managed binding", b, ok)
 	}
@@ -484,15 +475,14 @@ func TestResolveTaskSetRuntimeInWorktreeWorksWithoutTrunk(t *testing.T) {
 		t.Fatalf("resolve runtime: %v", err)
 	}
 
-	store, err := binding.Load(d.tasksDeps())
-	if err != nil {
-		t.Fatal(err)
-	}
 	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), wt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, ok := store.Get(binding.Key(id, "demo"))
+	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok || !b.Provisioned {
 		t.Fatalf("binding = %+v ok=%v, want provisioned managed binding without trunk", b, ok)
 	}
@@ -540,9 +530,7 @@ func TestResolveTaskSetRuntimeUsesExistingBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &binding.Store{}
-	store.Put(binding.Key(id, "demo"), binding.Adopt(wt, "feature", ""))
-	if err := binding.Save(d.tasksDeps(), store); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "feature", "")); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1490,27 +1490,29 @@ func testScopedKeyFor(t *testing.T, td *tasks.Deps, projectPath, runtimePath, se
 
 func seedBindingStore(t *testing.T, td *tasks.Deps, bindings map[string]WorktreeBinding) {
 	t.Helper()
-	store := &binding.Store{}
-	for key, b := range bindings {
-		store.Put(key, b)
-	}
-	if err := binding.Save(td, store); err != nil {
+	// Replace the whole set the tests reason about: clear any rows a prior seed
+	// left, then write the given ones. An empty map therefore clears the store.
+	existing, err := binding.AllBindings(td)
+	if err != nil {
 		t.Fatal(err)
+	}
+	for key := range existing {
+		if err := binding.Delete(td, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for key, b := range bindings {
+		if err := binding.Put(td, key, b); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
 func loadBindingStore(t *testing.T, td *tasks.Deps) map[string]WorktreeBinding {
 	t.Helper()
-	store, err := binding.Load(td)
+	all, err := binding.AllBindings(td)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store == nil || len(store.Bindings) == 0 {
-		return nil
-	}
-	out := make(map[string]WorktreeBinding, len(store.Bindings))
-	for k, v := range store.Bindings {
-		out[k] = v
-	}
-	return out
+	return all
 }

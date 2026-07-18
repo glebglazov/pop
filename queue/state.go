@@ -30,16 +30,16 @@ func bindingShouldTeardown(d *tasks.Deps, key string) bool {
 	return binding.ShouldTeardown(d, key)
 }
 
-// bindingForSet returns the shared-store binding for (repoKey, setID).
+// bindingForSet returns the shared-store binding for (repoKey, setID), read as a
+// single keyed store row (ADR-0118).
 func bindingForSet(d *tasks.Deps, repoKey, setID string) (WorktreeBinding, bool) {
 	if d == nil {
 		return WorktreeBinding{}, false
 	}
-	store, err := binding.Load(d)
+	b, ok, err := binding.Lookup(d, setScopedKey(repoKey, setID))
 	if err != nil {
 		return WorktreeBinding{}, false
 	}
-	b, ok := store.Get(setScopedKey(repoKey, setID))
 	return b, ok
 }
 

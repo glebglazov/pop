@@ -52,9 +52,7 @@ func seedArchiveBinding(t *testing.T, td *tasks.Deps, repo, setID string, b Bind
 	if err != nil {
 		t.Fatalf("identity: %v", err)
 	}
-	store := &Store{}
-	store.Put(Key(id, setID), b)
-	if err := Save(td, store); err != nil {
+	if err := Put(td, Key(id, setID), b); err != nil {
 		t.Fatalf("save binding: %v", err)
 	}
 }
@@ -82,12 +80,12 @@ func TestPrepareManagedWorktreesForArchiveConfirmDeletesWorktree(t *testing.T) {
 	if branch := archiveTestGitOutput(t, repo, "branch", "--list", "managed-branch"); strings.TrimSpace(branch) != "" {
 		t.Fatalf("branch should be deleted, still have %q", branch)
 	}
-	store, err := Load(td)
+	all, err := AllBindings(td)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store != nil && len(store.Bindings) != 0 {
-		t.Fatalf("binding should be released: %#v", store.Bindings)
+	if len(all) != 0 {
+		t.Fatalf("binding should be released: %#v", all)
 	}
 }
 
@@ -112,12 +110,12 @@ func TestPrepareManagedWorktreesForArchiveDeclineAborts(t *testing.T) {
 	if _, err := os.Stat(wt); err != nil {
 		t.Fatalf("worktree should remain: %v", err)
 	}
-	store, err := Load(td)
+	all, err := AllBindings(td)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store == nil || len(store.Bindings) != 1 {
-		t.Fatalf("binding should remain: %#v", store)
+	if len(all) != 1 {
+		t.Fatalf("binding should remain: %#v", all)
 	}
 }
 
@@ -164,12 +162,12 @@ func TestPrepareManagedWorktreesForArchiveSkipsAdoptedAndUnbound(t *testing.T) {
 	if _, err := os.Stat(wt); err != nil {
 		t.Fatalf("adopted worktree must remain: %v", err)
 	}
-	store, err := Load(td)
+	all, err := AllBindings(td)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store == nil || len(store.Bindings) != 1 {
-		t.Fatalf("adopted binding must remain: %#v", store)
+	if len(all) != 1 {
+		t.Fatalf("adopted binding must remain: %#v", all)
 	}
 }
 

@@ -102,13 +102,13 @@ func BindWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, c
 	}
 	key := Key(id, setID)
 
-	store, err := Load(td)
+	existing, ok, err := Lookup(td, key)
 	if err != nil {
 		return BindWorktreeResult{}, err
 	}
 
 	var replaced bool
-	if existing, ok := store.Get(key); ok {
+	if ok {
 		lock := readRuntimeLock(hooks, existing.RuntimePath)
 		if lock != nil && lock.Locked {
 			if lock.Metadata != nil && lock.Metadata.SetID != "" && lock.Metadata.SetID != setID {
@@ -186,11 +186,10 @@ func UnbindBindingKey(td *tasks.Deps, pd *project.Deps, cfg *config.Config, bind
 		pd = project.DefaultDeps()
 	}
 
-	store, err := Load(td)
+	b, ok, err := Lookup(td, bindingKey)
 	if err != nil {
 		return UnbindWorktreeResult{}, err
 	}
-	b, ok := store.Get(bindingKey)
 	if !ok {
 		if out == nil {
 			out = io.Discard

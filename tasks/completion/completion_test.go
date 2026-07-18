@@ -31,12 +31,20 @@ func testDeps(t *testing.T) *tasks.Deps {
 
 func seedBindings(t *testing.T, td *tasks.Deps, bindings map[string]binding.Binding) {
 	t.Helper()
-	store := &binding.Store{}
-	for key, b := range bindings {
-		store.Put(key, b)
-	}
-	if err := binding.Save(td, store); err != nil {
+	// Replace the whole set: clear any prior rows, then write the given ones.
+	existing, err := binding.AllBindings(td)
+	if err != nil {
 		t.Fatal(err)
+	}
+	for key := range existing {
+		if err := binding.Delete(td, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for key, b := range bindings {
+		if err := binding.Put(td, key, b); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

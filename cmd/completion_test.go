@@ -236,7 +236,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 func TestTasksUnbindWorktreeShellCompletionCandidates(t *testing.T) {
 	dir := t.TempDir()
 	td := queueShellCompletionDeps(t, dir)
-	if err := binding.Save(td, &binding.Store{Bindings: map[string]binding.Binding{
+	for key, b := range map[string]binding.Binding{
 		"pop-deadbeef\x00set-bound": {
 			RuntimePath: "/wt/bound",
 			Project:     "pop",
@@ -245,8 +245,10 @@ func TestTasksUnbindWorktreeShellCompletionCandidates(t *testing.T) {
 			RuntimePath: "/wt/other",
 			Project:     "pop",
 		},
-	}}); err != nil {
-		t.Fatal(err)
+	} {
+		if err := binding.Put(td, key, b); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	prev := taskCompletionDeps

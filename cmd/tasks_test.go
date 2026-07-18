@@ -1034,14 +1034,12 @@ func TestTaskArchiveManagedWorktreeConfirmAndDecline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &binding.Store{}
-	store.Put(binding.Key(id, "managed-done"), binding.Binding{
+	if err := binding.Put(td, binding.Key(id, "managed-done"), binding.Binding{
 		RuntimePath: wt,
 		Branch:      "managed-branch",
 		Project:     filepath.Base(root),
 		Provisioned: true,
-	})
-	if err := binding.Save(td, store); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1101,20 +1099,20 @@ func TestTaskArchiveManagedWorktreeYesAndMetadataOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &binding.Store{}
-	store.Put(binding.Key(id, "managed-yes"), binding.Binding{
+	if err := binding.Put(td, binding.Key(id, "managed-yes"), binding.Binding{
 		RuntimePath: managedWT,
 		Branch:      "managed-yes-branch",
 		Project:     filepath.Base(root),
 		Provisioned: true,
-	})
-	store.Put(binding.Key(id, "adopted-done"), binding.Binding{
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Put(td, binding.Key(id, "adopted-done"), binding.Binding{
 		RuntimePath: adoptedWT,
 		Branch:      "adopted-branch",
 		Project:     filepath.Base(root),
 		Provisioned: false,
-	})
-	if err := binding.Save(td, store); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1711,15 +1709,14 @@ func TestRunTasksCmdUnboundDrainsInCurrentCheckout(t *testing.T) {
 		t.Fatalf("run task set: %v", err)
 	}
 
-	store, err := binding.Load(tasks.DefaultDeps())
-	if err != nil {
-		t.Fatal(err)
-	}
 	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, ok := store.Get(binding.Key(id, "demo"))
+	b, ok, err := binding.Lookup(tasks.DefaultDeps(), binding.Key(id, "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatalf("expected a default binding for the unbound run")
 	}
@@ -1749,15 +1746,14 @@ func TestRunTasksCmdInWorktreeProvisionsAndBinds(t *testing.T) {
 		t.Fatalf("run task set: %v", err)
 	}
 
-	store, err := binding.Load(tasks.DefaultDeps())
-	if err != nil {
-		t.Fatal(err)
-	}
 	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, ok := store.Get(binding.Key(id, "demo"))
+	b, ok, err := binding.Lookup(tasks.DefaultDeps(), binding.Key(id, "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatalf("expected provisioned worktree binding for --in-worktree run")
 	}
@@ -1785,9 +1781,7 @@ func TestRunTasksCmdInWorktreeRejectsBoundSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &binding.Store{}
-	store.Put(binding.Key(id, "demo"), binding.Adopt(wt, "feature", ""))
-	if err := binding.Save(tasks.DefaultDeps(), store); err != nil {
+	if err := binding.Put(tasks.DefaultDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "feature", "")); err != nil {
 		t.Fatal(err)
 	}
 

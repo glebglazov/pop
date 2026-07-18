@@ -130,19 +130,19 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 	}
 	key := Key(repoID, setID)
 
-	store, err := Load(req.TD)
+	currentRuntime, err := tasks.ResolveRuntimePathWith(req.TD, checkout, "")
 	if err != nil {
 		return RouteDrainCheckoutResult{}, err
 	}
 
-	currentRuntime, err := tasks.ResolveRuntimePathWith(req.TD, checkout, "")
+	existing, ok, err := Lookup(req.TD, key)
 	if err != nil {
 		return RouteDrainCheckoutResult{}, err
 	}
 
 	// 1. An existing Worktree binding resumes there (Queue) or is re-pointed to
 	// the current checkout (foreground implement, ADR-0072).
-	if existing, ok := store.Get(key); ok && strings.TrimSpace(existing.RuntimePath) != "" {
+	if ok && strings.TrimSpace(existing.RuntimePath) != "" {
 		if override := strings.TrimSpace(req.RuntimeOverride); override != "" {
 			overridePath, err := tasks.ResolveRuntimePathWith(req.TD, checkout, override)
 			if err != nil {
@@ -201,8 +201,7 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 			}
 		}
 		b := Adopt(currentRuntime, CurrentBranch(req.TD, currentRuntime), DetectProject(req.PD, req.TD, req.Config, repoID))
-		store.Put(key, b)
-		if err := Save(req.TD, store); err != nil {
+		if err := Put(req.TD, key, b); err != nil {
 			return RouteDrainCheckoutResult{}, err
 		}
 		return RouteDrainCheckoutResult{
@@ -239,7 +238,7 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 			return RouteDrainCheckoutResult{}, err
 		}
 		if intent != nil && intent.Managed {
-			b, err := provisionManagedWorktree(req, checkout, setID, key, store)
+			b, err := provisionManagedWorktree(req, checkout, setID, key)
 			if err != nil {
 				return RouteDrainCheckoutResult{}, err
 			}
@@ -261,8 +260,7 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 	// integration target especially must never be removed. It records the branch
 	// too, so the dashboard reads execution checkout and branch from the table.
 	b := Adopt(currentRuntime, CurrentBranch(req.TD, currentRuntime), DetectProject(req.PD, req.TD, req.Config, repoID))
-	store.Put(key, b)
-	if err := Save(req.TD, store); err != nil {
+	if err := Put(req.TD, key, b); err != nil {
 		return RouteDrainCheckoutResult{}, err
 	}
 	return RouteDrainCheckoutResult{
@@ -303,11 +301,11 @@ func ProbeWorktreeDirective(td *tasks.Deps, pd *project.Deps, cfg *config.Config
 	// An existing Worktree binding means the directive was already satisfied on a
 	// prior drain (or the operator bound the set explicitly); later drains resume
 	// there, so the directive is not re-evaluated and cannot be unsatisfiable.
-	store, err := Load(td)
+	existing, ok, err := Lookup(td, Key(repoID, setID))
 	if err != nil {
 		return err
 	}
-	if existing, ok := store.Get(Key(repoID, setID)); ok && strings.TrimSpace(existing.RuntimePath) != "" {
+	if ok && strings.TrimSpace(existing.RuntimePath) != "" {
 		return nil
 	}
 
@@ -348,7 +346,7 @@ func ProbeWorktreeDirective(td *tasks.Deps, pd *project.Deps, cfg *config.Config
 // current checkout instead; only the Queue has no "current" and uses trunk. A
 // repo with no resolvable trunk yields ErrNoResolvableTrunk; routing never
 // falls back in place.
-func provisionManagedWorktree(req RouteDrainCheckoutRequest, checkout, setID, key string, store *Store) (Binding, error) {
+func provisionManagedWorktree(req RouteDrainCheckoutRequest, checkout, setID, key string) (Binding, error) {
 	trunkPath, bare, err := ResolveTrunkPath(req.TD, req.Config, checkout)
 	if err != nil {
 		return Binding{}, err
@@ -367,8 +365,7 @@ func provisionManagedWorktree(req RouteDrainCheckoutRequest, checkout, setID, ke
 	if id, err := tasks.ResolveRepositoryIdentity(req.TD, trunkPath); err == nil {
 		b.Project = DetectProject(req.PD, req.TD, req.Config, id)
 	}
-	store.Put(key, b)
-	if err := Save(req.TD, store); err != nil {
+	if err := Put(req.TD, key, b); err != nil {
 		return Binding{}, err
 	}
 	return b, nil
@@ -542,45 +539,46 @@ func GetForSet(td *tasks.Deps, checkoutPath, setID string) (string, Binding, boo
 		return "", Binding{}, false, err
 	}
 	key := Key(id, setID)
-	store, err := Load(td)
+	b, ok, err := Lookup(td, key)
 	if err != nil {
 		return "", Binding{}, false, err
 	}
-	b, ok := store.Get(key)
 	return key, b, ok, nil
 }
 
-// Put saves binding under key in the shared store.
+// Put saves binding under key in the shared store, upserting the row. It is an
+// overwrite by design (rebind re-points an existing binding); the never-clobber
+// adopt path goes through store.PutBindingIfAbsent instead.
 func Put(td *tasks.Deps, key string, b Binding) error {
-	store, err := Load(td)
+	s, _, err := bindingStore(td, true)
 	if err != nil {
 		return err
 	}
-	store.Put(key, b)
-	return Save(td, store)
+	b.ScopedKey = key
+	return s.PutBinding(b)
 }
 
-// Delete removes key from the shared store.
+// Delete removes key from the shared store. A store that does not yet exist has
+// nothing to forget.
 func Delete(td *tasks.Deps, key string) error {
-	store, err := Load(td)
-	if err != nil {
+	s, ok, err := bindingStore(td, false)
+	if err != nil || !ok {
 		return err
 	}
-	store.Delete(key)
-	return Save(td, store)
+	return s.DeleteBinding(key)
 }
 
 // FindBySetID finds a binding for setID when it is unambiguous across repos.
 func FindBySetID(td *tasks.Deps, setID string) (string, Binding, bool, error) {
-	store, err := Load(td)
+	all, err := AllBindings(td)
 	if err != nil {
 		return "", Binding{}, false, err
 	}
-	if store == nil || len(store.Bindings) == 0 {
+	if len(all) == 0 {
 		return "", Binding{}, false, nil
 	}
 	var keys []string
-	for key := range store.Bindings {
+	for key := range all {
 		parts := strings.Split(key, keySeparator)
 		if len(parts) != 2 || parts[1] != setID {
 			continue
@@ -591,50 +589,50 @@ func FindBySetID(td *tasks.Deps, setID string) (string, Binding, bool, error) {
 	case 0:
 		return "", Binding{}, false, nil
 	case 1:
-		b, _ := store.Get(keys[0])
-		return keys[0], b, true, nil
+		return keys[0], all[keys[0]], true, nil
 	default:
 		sort.Strings(keys)
 		var b strings.Builder
 		fmt.Fprintf(&b, "queue: set %q is ambiguous; bound in:", setID)
 		for _, key := range keys {
-			rec, _ := store.Get(key)
+			rec := all[key]
 			fmt.Fprintf(&b, "\n  %s (%s)", rec.Project, rec.RuntimePath)
 		}
 		return "", Binding{}, false, fmt.Errorf("%s", b.String())
 	}
 }
 
-// AllBindings returns every binding in the shared store.
+// AllBindings returns every binding in the shared store keyed by scoped key. A
+// store that does not yet exist yields nil.
 func AllBindings(td *tasks.Deps) (map[string]Binding, error) {
-	store, err := Load(td)
+	s, ok, err := bindingStore(td, false)
+	if err != nil || !ok {
+		return nil, err
+	}
+	rows, err := s.AllBindings()
 	if err != nil {
 		return nil, err
 	}
-	if store == nil || len(store.Bindings) == 0 {
+	if len(rows) == 0 {
 		return nil, nil
 	}
-	out := make(map[string]Binding, len(store.Bindings))
-	for k, v := range store.Bindings {
-		out[k] = v
-	}
-	return out, nil
+	return rows, nil
 }
 
 // Provisioned reports whether the binding under key was provisioned by pop.
 func Provisioned(td *tasks.Deps, key string) bool {
-	store, err := Load(td)
-	if err != nil {
-		return false
-	}
-	return store.Provisioned(key)
+	b, ok, err := Lookup(td, key)
+	return err == nil && ok && b.Provisioned
 }
 
-// ShouldTeardown reports whether the checkout under key may be removed.
+// ShouldTeardown reports whether the checkout under key may be removed. It
+// returns true when no binding is recorded (legacy/unknown — pop probably
+// created it) or when the binding is explicitly provisioned, and false only for
+// explicitly adopted bindings, which must never be deleted.
 func ShouldTeardown(td *tasks.Deps, key string) bool {
-	store, err := Load(td)
-	if err != nil {
-		return true
+	b, ok, err := Lookup(td, key)
+	if err != nil || !ok {
+		return true // no binding recorded (or unreadable): legacy path, tear down
 	}
-	return store.ShouldTeardown(key)
+	return b.Provisioned // adopted=false → retain; provisioned=true → tear down
 }

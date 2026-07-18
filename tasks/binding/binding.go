@@ -67,64 +67,15 @@ func SetIDFromKey(key string) string {
 
 // Binding records the durable checkout associated with one Task set. It is
 // store.Binding directly — the sole Worktree-binding type in the codebase, with
-// no converter layer between this package and the store (ADR-0118). ScopedKey
-// rides along unused by this package's own map access, which keys by the map
-// key instead; Load/Save reconcile the two through the store's whole-set
-// rewrite.
+// no converter layer between this package and the store (ADR-0118). Its
+// ScopedKey field is the store key every accessor addresses; the in-memory map
+// façade that used to wrap it is retired, so callers read and write keyed store
+// rows directly.
 //
 // Provisioned is true when pop ran `git worktree add` to create the checkout.
 // False (or absent) means the binding is adopted — a human pointed an
 // existing checkout at the set; pop must never delete it.
 type Binding = store.Binding
-
-// Store is the in-memory façade over the shared binding store. It is keyed by
-// Repository identity plus Task set identifier (the caller builds the key);
-// Load/Save back it onto the `bindings` table in pop's global execution-state
-// database (ADR-0055), readable and writable with no daemon process running.
-type Store struct {
-	Bindings map[string]Binding
-}
-
-// Get returns the binding stored under key.
-func (s *Store) Get(key string) (Binding, bool) {
-	if s == nil || s.Bindings == nil {
-		return Binding{}, false
-	}
-	b, ok := s.Bindings[key]
-	return b, ok
-}
-
-// Put records binding under key, allocating the map on demand.
-func (s *Store) Put(key string, b Binding) {
-	if s.Bindings == nil {
-		s.Bindings = map[string]Binding{}
-	}
-	s.Bindings[key] = b
-}
-
-// Delete forgets the binding under key.
-func (s *Store) Delete(key string) {
-	delete(s.Bindings, key)
-}
-
-// Provisioned reports whether the binding under key was provisioned by pop
-// (safe to teardown) rather than adopted.
-func (s *Store) Provisioned(key string) bool {
-	b, ok := s.Get(key)
-	return ok && b.Provisioned
-}
-
-// ShouldTeardown reports whether the checkout under key may have its directory
-// removed. It returns true when no binding is recorded (legacy/unknown — pop
-// probably created it) or when the binding is explicitly provisioned, and false
-// only for explicitly adopted bindings, which must never be deleted.
-func (s *Store) ShouldTeardown(key string) bool {
-	b, ok := s.Get(key)
-	if !ok {
-		return true // no binding recorded: legacy path, tear down
-	}
-	return b.Provisioned // adopted=false → retain; provisioned=true → tear down
-}
 
 // ManagedWorktreesRoot returns the directory under which pop-provisioned
 // (managed) worktrees live: <pop data dir>/queue/worktrees. It is the single
@@ -135,38 +86,29 @@ func ManagedWorktreesRoot(d *tasks.Deps) string {
 	return filepath.Join(filepath.Dir(tasks.TaskStorageRoot(d)), "queue", "worktrees")
 }
 
-// Load reads the shared binding store from the global execution-state database
-// (ADR-0055) through the process-cached store accessor. A store that does not
-// yet exist yields an empty Store; the retired bindings.json is migrated into
-// the store on first read and is never read here directly. Callers need no
-// daemon and no pre-seeding.
-func Load(d *tasks.Deps) (*Store, error) {
+// bindingStore runs the one-time legacy bindings.json migration (a cheap read
+// miss once the file is gone) then returns the shared store handle through the
+// process-cached accessor (ADR-0055, ADR-0118). It is the single funnel every
+// keyed binding accessor goes through, so the migration still fires on any read
+// or write without a whole-table map in front of the store. create decides
+// whether a missing store is opened: read paths pass false and treat ok=false
+// as "no bindings"; write paths pass true.
+func bindingStore(d *tasks.Deps, create bool) (*store.Store, bool, error) {
 	if err := migrateLegacyBindingsFile(d); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	s, ok, err := d.Store(false)
-	if err != nil || !ok {
-		return &Store{}, err
-	}
-	rows, err := s.AllBindings()
-	if err != nil {
-		return nil, err
-	}
-	return &Store{Bindings: rows}, nil
+	return d.Store(create)
 }
 
-// Save writes the shared binding store to the global execution-state database,
-// replacing every row in one transaction (ADR-0055), through the process-cached
-// store accessor.
-func Save(d *tasks.Deps, st *Store) error {
-	if st == nil {
-		st = &Store{}
+// Lookup returns the binding under key from the shared store, ok=false when the
+// store does not yet exist or has no such row. It is the keyed single-row read
+// that replaced loading the whole table into a map just to index one key.
+func Lookup(d *tasks.Deps, key string) (Binding, bool, error) {
+	s, ok, err := bindingStore(d, false)
+	if err != nil || !ok {
+		return Binding{}, false, err
 	}
-	s, _, err := d.Store(true)
-	if err != nil {
-		return err
-	}
-	return s.ReplaceAllBindings(st.Bindings)
+	return s.LookupBinding(key)
 }
 
 // legacyBindingsFile is the standalone JSON binding store ADR-0055 retires. Its
@@ -272,13 +214,12 @@ func AdoptCurrentCheckout(td *tasks.Deps, pd *project.Deps, cfg *config.Config, 
 	}
 	key := Key(id, setID)
 
-	bindings, err := Load(td)
-	if err != nil {
+	// Fast path: a binding already recorded (managed or adopted) is never
+	// clobbered — a managed binding owns teardown the adopter must not silently
+	// disown. Skip the git worktree probe when we already know the set is bound.
+	if _, ok, err := Lookup(td, key); err != nil {
 		return false, err
-	}
-	if _, ok := bindings.Get(key); ok {
-		// Already bound — managed (Queue-provisioned) or adopted. Never clobber:
-		// a managed binding owns teardown the adopter must not silently disown.
+	} else if ok {
 		return false, nil
 	}
 
@@ -291,12 +232,21 @@ func AdoptCurrentCheckout(td *tasks.Deps, pd *project.Deps, cfg *config.Config, 
 		return false, nil
 	}
 
-	branch := CurrentBranch(td, checkoutPath)
-	bindings.Put(key, Adopt(checkoutPath, branch, DetectProject(pd, td, cfg, id)))
-	if err := Save(td, bindings); err != nil {
+	s, _, err := bindingStore(td, true)
+	if err != nil {
 		return false, err
 	}
-	return true, nil
+	branch := CurrentBranch(td, checkoutPath)
+	b := Adopt(checkoutPath, branch, DetectProject(pd, td, cfg, id))
+	b.ScopedKey = key
+	// PutBindingIfAbsent is the atomic never-clobber guard: even if a concurrent
+	// Bind worktree or Queue provision raced in between the Lookup above and here,
+	// the loser's insert is refused and the existing row stands (ADR-0118).
+	inserted, _, err := s.PutBindingIfAbsent(b)
+	if err != nil {
+		return false, err
+	}
+	return inserted, nil
 }
 
 // DetectProject returns the configured picker project whose repository identity
