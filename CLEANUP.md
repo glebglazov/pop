@@ -92,6 +92,13 @@ message naming the new status (loud-failure preference). Current embedded templa
 | Storage-layout auto-migration `workloads/` → `repos/`, `issues/` → `tasks/`, global state → per-repo | `tasks/migrate_layout.go` (+ `migrate_layout_test.go`) | Auto-runs per-repository on first touch — see sign-off item 3 |
 | Legacy global state path | `tasks/state.go:40-55` (`DefaultStatePath`, `DefaultStatePathWith` → `workloads-state.json`) | Only consumer is `MigrateStorageLayout`; delete together |
 | `prds/` directory — full retirement | pending the PRD co-location feature (ADR-0088) | Co-location moves PRDs to `tasks/<set>/prd.md` and ships a `prds/<slug>.md` → set-folder migration. This cleanup **fully retires the `prds/` directory**: remove the sibling `prds/` read-path, the to-prd/to-tasks fallbacks, and the migration itself, once every repo's PRDs have moved. Verify no `<data-dir>/pop/**/prds/` remain (mirror of the `workloads/` storage check). Blocked on ADR-0088 landing first. |
+| Legacy `bindings.json` → store migration | `migrateLegacyBindingsFile` (moving to `tasks/binding` in the store-seam refactor; currently `tasks/bindings_store.go:101`) | One-time fold of the retired standalone binding file into the execution-state store (ADR-0055). Every machine that ran a post-ADR-0055 build has migrated; sign-off check: no `<data-dir>/pop/bindings.json` remains. |
+
+### D2. Internal code aliases (compile-time only, no user impact — remove in a quiet pass)
+
+| Item | Location | Notes |
+|---|---|---|
+| `queue.WorktreeBinding` type alias | `queue/state.go:15` (`= binding.Binding`; becomes `= store.Binding` after the store-seam refactor) | Kept only to avoid churning 30+ test files in the refactor that deleted the mirror types. Flip call sites to `store.Binding` and delete the alias. |
 
 ### E. Cross-references that go stale (fix in the same change)
 
