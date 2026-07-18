@@ -3,6 +3,7 @@ package tasks
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -10,6 +11,42 @@ import (
 
 	"github.com/glebglazov/pop/store"
 )
+
+// drainSetAutoDrain reads the store-backed auto-drain consent bit recorded for a
+// run's registered set, so interrupt tests can assert clear/revive against the
+// same value the queue's `Ready && AutoDrain` eligibility predicate reads.
+func drainSetAutoDrain(t *testing.T, run *implementRun, setID string) bool {
+	t.Helper()
+	state, err := LoadGlobalState(run.statePath)
+	if err != nil {
+		t.Fatalf("LoadGlobalState: %v", err)
+	}
+	canon, err := CanonicalDefinitionPathWith(run.d, run.resolved.DefinitionPath)
+	if err != nil {
+		t.Fatalf("CanonicalDefinitionPathWith: %v", err)
+	}
+	for _, set := range state.Tasks[canon].TaskSets {
+		if set.ID == setID {
+			return set.AutoDrain
+		}
+	}
+	t.Fatalf("set %q not registered", setID)
+	return false
+}
+
+// readSetProgress returns the set-level progress.txt for the run's manifest dir,
+// or "" when none was written.
+func readSetProgress(t *testing.T, m *Manifest) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(m.Dir, "progress.txt"))
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("read progress.txt: %v", err)
+	}
+	return string(data)
+}
 
 // stubInterruptTask is the minimal manifest+task the interrupt gate menu reads
 // (it renders the set id / task id and guards on non-nil). No store or fixture is
@@ -302,5 +339,142 @@ func TestImplementRunInterruptGateYesKeepsLockHeld(t *testing.T) {
 	rec := latestTerminalDrain(t, run.d, runtimePath)
 	if rec == nil || rec.State != store.StateInterrupted {
 		t.Fatalf("--yes teardown must record the interrupted terminal, got %#v", rec)
+	}
+}
+
+// TestImplementRunInterruptClearsAutoDrainOnExit: interrupting a live drain whose
+// set has Auto-drain on clears the consent bit at interrupt time — announced and
+// left as a durable AUTO-DRAIN-CLEARED per-set trace — and choosing Exit leaves it
+// cleared (ADR-0120). With the bit off, `pop queue run`'s `Ready && AutoDrain`
+// predicate no longer selects the set.
+func TestImplementRunInterruptClearsAutoDrainOnExit(t *testing.T) {
+	var buf bytes.Buffer
+	run, _, refresh, sel := newRunSelectedTaskRun(t,
+		[]Task{{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"}},
+		"", RunTaskSetOptions{ConfirmIn: bytes.NewBufferString("0\n"), Output: &buf})
+	m := refresh.Manifests["demo"]
+	interrupted := findTaskInManifest(m, sel.TaskID)
+
+	if _, err := SetTaskSetAutoDrain(run.d, run.resolved.DefinitionPath, "demo", true); err != nil {
+		t.Fatalf("seed auto-drain: %v", err)
+	}
+
+	cont, err := run.interruptGate(m, interrupted)
+	if err != nil {
+		t.Fatalf("interruptGate: %v", err)
+	}
+	if cont {
+		t.Fatal("Exit must return cont=false")
+	}
+	if drainSetAutoDrain(t, run, "demo") {
+		t.Fatal("interrupt must clear Auto-drain; Exit must leave it cleared")
+	}
+	if !strings.Contains(buf.String(), "Auto-drain cleared for task set demo") {
+		t.Fatalf("clear must be announced:\n%s", buf.String())
+	}
+	if !strings.Contains(readSetProgress(t, m), "AUTO-DRAIN-CLEARED") {
+		t.Fatalf("clear must leave a durable per-set trace:\n%s", readSetProgress(t, m))
+	}
+}
+
+// TestImplementRunInterruptRevivesAutoDrainOnContinue: choosing Continue at the
+// interrupt gate revives the pre-interrupt Auto-drain value (turning the bit back
+// on) and tells the user (ADR-0120), so the daemon may pick the set up again once
+// the resumed drain finishes.
+func TestImplementRunInterruptRevivesAutoDrainOnContinue(t *testing.T) {
+	var buf bytes.Buffer
+	run, _, refresh, sel := newRunSelectedTaskRun(t,
+		[]Task{{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"}},
+		"", RunTaskSetOptions{ConfirmIn: bytes.NewBufferString("1\n"), Output: &buf})
+	m := refresh.Manifests["demo"]
+	interrupted := findTaskInManifest(m, sel.TaskID)
+
+	if _, err := SetTaskSetAutoDrain(run.d, run.resolved.DefinitionPath, "demo", true); err != nil {
+		t.Fatalf("seed auto-drain: %v", err)
+	}
+
+	cont, err := run.interruptGate(m, interrupted)
+	if err != nil {
+		t.Fatalf("interruptGate: %v", err)
+	}
+	if !cont {
+		t.Fatal("Continue must return cont=true")
+	}
+	if !drainSetAutoDrain(t, run, "demo") {
+		t.Fatal("Continue must revive the snapshotted Auto-drain value")
+	}
+	if !strings.Contains(buf.String(), "Auto-drain restored for task set demo") {
+		t.Fatalf("revive must be announced:\n%s", buf.String())
+	}
+	if !strings.Contains(readSetProgress(t, m), "AUTO-DRAIN-RESTORED") {
+		t.Fatalf("revive must leave a durable per-set trace:\n%s", readSetProgress(t, m))
+	}
+
+	// Clean up the live Drain the Continue re-acquired.
+	if run.drain != nil {
+		finalizeDrain(run.drain, false, false, false, "", false, time.Time{}, nil)
+		run.drain = nil
+	}
+}
+
+// TestImplementRunInterruptContinueLeavesOffBitOff: when the set's Auto-drain was
+// already off, an interrupt neither announces nor traces a clear, and Continue does
+// not spuriously enable the bit — revive restores the snapshot, which was off.
+func TestImplementRunInterruptContinueLeavesOffBitOff(t *testing.T) {
+	var buf bytes.Buffer
+	run, _, refresh, sel := newRunSelectedTaskRun(t,
+		[]Task{{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"}},
+		"", RunTaskSetOptions{ConfirmIn: bytes.NewBufferString("1\n"), Output: &buf})
+	m := refresh.Manifests["demo"]
+	interrupted := findTaskInManifest(m, sel.TaskID)
+
+	cont, err := run.interruptGate(m, interrupted)
+	if err != nil {
+		t.Fatalf("interruptGate: %v", err)
+	}
+	if !cont {
+		t.Fatal("Continue must return cont=true")
+	}
+	if drainSetAutoDrain(t, run, "demo") {
+		t.Fatal("an already-off bit must stay off through interrupt + Continue")
+	}
+	if strings.Contains(buf.String(), "Auto-drain cleared") || strings.Contains(buf.String(), "Auto-drain restored") {
+		t.Fatalf("an off bit must not announce clear/revive:\n%s", buf.String())
+	}
+
+	if run.drain != nil {
+		finalizeDrain(run.drain, false, false, false, "", false, time.Time{}, nil)
+		run.drain = nil
+	}
+}
+
+// TestImplementRunInterruptClearsAutoDrainUnattended: an unattended (--yes)
+// interrupt still clears Auto-drain — the clear runs ahead of the prompt guard, so
+// a manually interrupted daemon drain stops `pop queue run` from re-firing the set
+// even though no gate menu is shown (ADR-0120).
+func TestImplementRunInterruptClearsAutoDrainUnattended(t *testing.T) {
+	var buf bytes.Buffer
+	run, _, refresh, sel := newRunSelectedTaskRun(t,
+		[]Task{{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"}},
+		"", RunTaskSetOptions{Yes: true, Output: &buf})
+	m := refresh.Manifests["demo"]
+	interrupted := findTaskInManifest(m, sel.TaskID)
+
+	if _, err := SetTaskSetAutoDrain(run.d, run.resolved.DefinitionPath, "demo", true); err != nil {
+		t.Fatalf("seed auto-drain: %v", err)
+	}
+
+	cont, err := run.interruptGate(m, interrupted)
+	if err != nil {
+		t.Fatalf("interruptGate: %v", err)
+	}
+	if cont {
+		t.Fatal("--yes must return cont=false (no menu)")
+	}
+	if drainSetAutoDrain(t, run, "demo") {
+		t.Fatal("an unattended interrupt must still clear Auto-drain")
+	}
+	if strings.Contains(buf.String(), "Interrupted:") {
+		t.Fatalf("--yes must not render the menu:\n%s", buf.String())
 	}
 }

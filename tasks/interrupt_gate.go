@@ -188,6 +188,18 @@ func promptInterruptGateAction(out io.Writer, reader *bufio.Reader, sigCh <-chan
 // gate does not prompt — it leaves the Drain held and returns (false, nil) so the
 // caller keeps today's teardown-and-exit.
 func (r *implementRun) interruptGate(m *Manifest, interrupted *Task) (bool, error) {
+	// Revoke the set's Auto-drain consent the moment the live drain is interrupted
+	// (ADR-0120), unconditionally and before the human chooses. Clearing drops the
+	// set out of queue eligibility (Ready && AutoDrain) for the whole at-gate window,
+	// so a crash-at-gate cannot let the daemon grab the set mid-decision. This runs
+	// ahead of the prompt guard so an unattended (--yes / non-interactive) interrupt
+	// still stops `pop queue run` from re-firing the set. The snapshot it returns —
+	// the pre-interrupt value — is revived only when the human chooses Continue.
+	autoDrainWasOn, err := r.revokeAutoDrainOnInterrupt(m)
+	if err != nil {
+		return false, err
+	}
+
 	if !gateWillPrompt(r.opts.ConfirmIn, r.opts.Yes, m, interrupted) {
 		return false, nil
 	}
@@ -206,6 +218,16 @@ func (r *implementRun) interruptGate(m *Manifest, interrupted *Task) (bool, erro
 	if err != nil {
 		return cont, err
 	}
+	// Continue revives the snapshotted consent (ADR-0120): the human resumed, so
+	// the auto-drain bit the interrupt cleared is re-granted and the daemon may pick
+	// the set up again once the drain finishes. Exit (or a crash before the human
+	// chose) never reaches here, leaving consent discarded — re-enabling then is a
+	// fresh human mark, consistent with Auto-drain clearing semantics.
+	if cont && autoDrainWasOn {
+		if rerr := r.reviveAutoDrainOnContinue(m); rerr != nil {
+			return cont, rerr
+		}
+	}
 	// Re-acquire the lock the park released (ADR-0067): Continue resumes the
 	// interrupted task, Exit re-holds so the deferred finalize records the
 	// interrupted terminal (today's behavior). A collision refuses cleanly.
@@ -213,4 +235,43 @@ func (r *implementRun) interruptGate(m *Manifest, interrupted *Task) (bool, erro
 		return cont, derr
 	}
 	return cont, nil
+}
+
+// revokeAutoDrainOnInterrupt clears the set's Auto-drain consent bit the moment a
+// live drain is interrupted (ADR-0120) and returns the pre-interrupt value. The
+// clear is unconditional and reuses SetTaskSetAutoDrain — the same primitive the
+// terminal (DONE / AWAITING-APPROVAL) auto-drain clear uses — following that
+// clear's announce-and-trace pattern (a line to the user plus a durable
+// AUTO-DRAIN-CLEARED per-set progress note). SetTaskSetAutoDrain's changed flag is
+// the snapshot: it is true exactly when the bit was on, and only then is the clear
+// announced/traced (setting an already-clear bit is a clean no-op). Continue
+// revives the snapshot; Exit / a crash-at-gate leaves it cleared.
+func (r *implementRun) revokeAutoDrainOnInterrupt(m *Manifest) (bool, error) {
+	wasOn, err := SetTaskSetAutoDrain(r.d, r.resolved.DefinitionPath, r.taskSetID, false)
+	if err != nil {
+		return false, exitErr(ExitOperational, "clear auto-drain for task set %s: %v", r.taskSetID, err)
+	}
+	if wasOn {
+		fmt.Fprintf(r.out, "Auto-drain cleared for task set %s: drain interrupted mid-run.\n", r.taskSetID)
+		if err := AppendSetProgress(r.d, m.Dir, "AUTO-DRAIN-CLEARED", "Auto-drain cleared: drain interrupted mid-run."); err != nil {
+			return false, exitErr(ExitOperational, "record auto-drain clear for task set %s: %v", r.taskSetID, err)
+		}
+	}
+	return wasOn, nil
+}
+
+// reviveAutoDrainOnContinue restores the pre-interrupt Auto-drain value when the
+// human chooses Continue at the interrupt gate (ADR-0120): the consent
+// revokeAutoDrainOnInterrupt cleared is re-granted and the user is told, with a
+// symmetric durable AUTO-DRAIN-RESTORED per-set trace. It is called only when the
+// snapshot was on, so it always re-enables the bit.
+func (r *implementRun) reviveAutoDrainOnContinue(m *Manifest) error {
+	if _, err := SetTaskSetAutoDrain(r.d, r.resolved.DefinitionPath, r.taskSetID, true); err != nil {
+		return exitErr(ExitOperational, "restore auto-drain for task set %s: %v", r.taskSetID, err)
+	}
+	fmt.Fprintf(r.out, "Auto-drain restored for task set %s: continuing drain after interrupt.\n", r.taskSetID)
+	if err := AppendSetProgress(r.d, m.Dir, "AUTO-DRAIN-RESTORED", "Auto-drain restored: drain continued after interrupt."); err != nil {
+		return exitErr(ExitOperational, "record auto-drain restore for task set %s: %v", r.taskSetID, err)
+	}
+	return nil
 }
