@@ -30,7 +30,7 @@ func repoAndHead(t *testing.T, d *Deps, repoRoot string) (string, string) {
 // openStore opens the drain store for a fixture that has already had it created.
 func openStore(t *testing.T, d *Deps) *store.Store {
 	t.Helper()
-	s, err := store.Open(DrainStorePathWith(d))
+	s, err := store.Open(DrainStorePathWith(d), func(int, string) bool { return true })
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

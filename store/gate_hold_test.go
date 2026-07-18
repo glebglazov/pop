@@ -8,7 +8,7 @@ import (
 // aliveHoldsByToken builds a gate-hold liveness predicate over the (pid,
 // proc_start) pairs it should treat as alive. A pair that is absent reads dead —
 // modelling both a dead PID and a reused PID (same pid, different token).
-func aliveHoldsByToken(alive ...CheckoutGateHold) func(pid int, procStart string) bool {
+func aliveHoldsByToken(alive ...CheckoutGateHold) Liveness {
 	type key struct {
 		pid       int
 		procStart string
@@ -21,14 +21,14 @@ func aliveHoldsByToken(alive ...CheckoutGateHold) func(pid int, procStart string
 }
 
 func TestReconcileGateHoldsSweepsDeadOwner(t *testing.T) {
-	s := openTestStore(t)
+	s := openTestStore(t, aliveHoldsByToken()) // nothing alive → dead owner
 	if err := s.PutCheckoutGateHold(CheckoutGateHold{
 		RuntimePath: "/rt", SetID: "s", PID: 100, ProcStart: "t1", RegisteredAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("PutCheckoutGateHold: %v", err)
 	}
 
-	n, err := s.ReconcileGateHolds(aliveHoldsByToken()) // nothing alive → dead owner
+	n, err := s.ReconcileGateHolds()
 	if err != nil {
 		t.Fatalf("ReconcileGateHolds: %v", err)
 	}
@@ -45,13 +45,13 @@ func TestReconcileGateHoldsSweepsDeadOwner(t *testing.T) {
 }
 
 func TestReconcileGateHoldsLeavesLiveOwner(t *testing.T) {
-	s := openTestStore(t)
 	live := CheckoutGateHold{RuntimePath: "/rt", SetID: "s", PID: 100, ProcStart: "t1", RegisteredAt: time.Now()}
+	s := openTestStore(t, aliveHoldsByToken(live))
 	if err := s.PutCheckoutGateHold(live); err != nil {
 		t.Fatalf("PutCheckoutGateHold: %v", err)
 	}
 
-	n, err := s.ReconcileGateHolds(aliveHoldsByToken(live))
+	n, err := s.ReconcileGateHolds()
 	if err != nil {
 		t.Fatalf("ReconcileGateHolds: %v", err)
 	}
@@ -71,17 +71,17 @@ func TestReconcileGateHoldsLeavesLiveOwner(t *testing.T) {
 }
 
 func TestReconcileGateHoldsSweepsReusedPID(t *testing.T) {
-	s := openTestStore(t)
+	// PID 100 is alive again but belongs to a different process (start token t2):
+	// a reused PID must not be mistaken for the original gate owner.
+	reused := CheckoutGateHold{PID: 100, ProcStart: "t2"}
+	s := openTestStore(t, aliveHoldsByToken(reused))
 	if err := s.PutCheckoutGateHold(CheckoutGateHold{
 		RuntimePath: "/rt", SetID: "s", PID: 100, ProcStart: "t1", RegisteredAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("PutCheckoutGateHold: %v", err)
 	}
 
-	// PID 100 is alive again but belongs to a different process (start token t2):
-	// a reused PID must not be mistaken for the original gate owner.
-	reused := CheckoutGateHold{PID: 100, ProcStart: "t2"}
-	n, err := s.ReconcileGateHolds(aliveHoldsByToken(reused))
+	n, err := s.ReconcileGateHolds()
 	if err != nil {
 		t.Fatalf("ReconcileGateHolds: %v", err)
 	}
@@ -94,24 +94,5 @@ func TestReconcileGateHoldsSweepsReusedPID(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("reused-PID hold survived sweep: %+v", got)
-	}
-}
-
-func TestReconcileGateHoldsNilPredicateIsNoOp(t *testing.T) {
-	s := openTestStore(t)
-	if err := s.PutCheckoutGateHold(CheckoutGateHold{
-		RuntimePath: "/rt", SetID: "s", PID: 100, ProcStart: "t1", RegisteredAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("PutCheckoutGateHold: %v", err)
-	}
-	n, err := s.ReconcileGateHolds(nil)
-	if err != nil {
-		t.Fatalf("ReconcileGateHolds: %v", err)
-	}
-	if n != 0 {
-		t.Fatalf("swept %d, want 0", n)
-	}
-	if got, _ := s.GetCheckoutGateHold("/rt"); got == nil {
-		t.Fatal("nil predicate wrongly swept a hold")
 	}
 }

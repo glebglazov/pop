@@ -8,7 +8,7 @@ import (
 // aliveIntentsByToken builds a spawn-intent liveness predicate over the (pid,
 // proc_start) pairs it should treat as alive. A pair that is absent reads dead —
 // modelling both a dead PID and a reused PID (same pid, different token).
-func aliveIntentsByToken(alive ...SpawnIntent) func(pid int, procStart string) bool {
+func aliveIntentsByToken(alive ...SpawnIntent) Liveness {
 	type key struct {
 		pid       int
 		procStart string
@@ -84,15 +84,15 @@ func TestDeleteSpawnIntent(t *testing.T) {
 }
 
 func TestReconcileSpawnIntentsSweepsExpired(t *testing.T) {
-	s := openTestStore(t)
 	now := time.Now().UTC()
 	// Owner is alive, but the intent is older than the cutoff: the spawn never
 	// reached BeginDrain, so expiry must sweep it regardless of liveness.
 	expired := SpawnIntent{Repo: "/repo", SetID: "s1", PID: 100, ProcStart: "t1", CreatedAt: now.Add(-10 * time.Minute)}
+	s := openTestStore(t, aliveIntentsByToken(expired))
 	if err := s.PutSpawnIntent(expired); err != nil {
 		t.Fatalf("PutSpawnIntent: %v", err)
 	}
-	n, err := s.ReconcileSpawnIntents(now.Add(-2*time.Minute), aliveIntentsByToken(expired))
+	n, err := s.ReconcileSpawnIntents(now.Add(-2 * time.Minute))
 	if err != nil {
 		t.Fatalf("ReconcileSpawnIntents: %v", err)
 	}
@@ -105,14 +105,14 @@ func TestReconcileSpawnIntentsSweepsExpired(t *testing.T) {
 }
 
 func TestReconcileSpawnIntentsSweepsDeadOwner(t *testing.T) {
-	s := openTestStore(t)
+	s := openTestStore(t, aliveIntentsByToken()) // nothing alive
 	now := time.Now().UTC()
 	// Fresh (not expired) but its recording process is gone.
 	fresh := SpawnIntent{Repo: "/repo", SetID: "s1", PID: 100, ProcStart: "t1", CreatedAt: now}
 	if err := s.PutSpawnIntent(fresh); err != nil {
 		t.Fatalf("PutSpawnIntent: %v", err)
 	}
-	n, err := s.ReconcileSpawnIntents(now.Add(-2*time.Minute), aliveIntentsByToken()) // nothing alive
+	n, err := s.ReconcileSpawnIntents(now.Add(-2 * time.Minute))
 	if err != nil {
 		t.Fatalf("ReconcileSpawnIntents: %v", err)
 	}
@@ -125,13 +125,13 @@ func TestReconcileSpawnIntentsSweepsDeadOwner(t *testing.T) {
 }
 
 func TestReconcileSpawnIntentsLeavesFreshLiveOwner(t *testing.T) {
-	s := openTestStore(t)
 	now := time.Now().UTC()
 	live := SpawnIntent{Repo: "/repo", SetID: "s1", PID: 100, ProcStart: "t1", CreatedAt: now}
+	s := openTestStore(t, aliveIntentsByToken(live))
 	if err := s.PutSpawnIntent(live); err != nil {
 		t.Fatalf("PutSpawnIntent: %v", err)
 	}
-	n, err := s.ReconcileSpawnIntents(now.Add(-2*time.Minute), aliveIntentsByToken(live))
+	n, err := s.ReconcileSpawnIntents(now.Add(-2 * time.Minute))
 	if err != nil {
 		t.Fatalf("ReconcileSpawnIntents: %v", err)
 	}
@@ -144,14 +144,14 @@ func TestReconcileSpawnIntentsLeavesFreshLiveOwner(t *testing.T) {
 }
 
 func TestReconcileSpawnIntentsSweepsReusedPID(t *testing.T) {
-	s := openTestStore(t)
+	// PID 100 is alive again but a different process (start token t2).
+	reused := SpawnIntent{PID: 100, ProcStart: "t2"}
+	s := openTestStore(t, aliveIntentsByToken(reused))
 	now := time.Now().UTC()
 	if err := s.PutSpawnIntent(SpawnIntent{Repo: "/repo", SetID: "s1", PID: 100, ProcStart: "t1", CreatedAt: now}); err != nil {
 		t.Fatalf("PutSpawnIntent: %v", err)
 	}
-	// PID 100 is alive again but a different process (start token t2).
-	reused := SpawnIntent{PID: 100, ProcStart: "t2"}
-	n, err := s.ReconcileSpawnIntents(now.Add(-2*time.Minute), aliveIntentsByToken(reused))
+	n, err := s.ReconcileSpawnIntents(now.Add(-2 * time.Minute))
 	if err != nil {
 		t.Fatalf("ReconcileSpawnIntents: %v", err)
 	}
@@ -160,21 +160,24 @@ func TestReconcileSpawnIntentsSweepsReusedPID(t *testing.T) {
 	}
 }
 
-func TestReconcileSpawnIntentsNilPredicateSweepsOnlyExpired(t *testing.T) {
-	s := openTestStore(t)
+func TestReconcileSpawnIntentsSweepsOnlyExpiredWhenOwnersLive(t *testing.T) {
 	now := time.Now().UTC()
+	// Both owners read alive, so only the expired intent is swept — expiry is
+	// independent of liveness.
+	s := openTestStore(t, aliveIntentsByToken(
+		SpawnIntent{PID: 1}, SpawnIntent{PID: 2}))
 	if err := s.PutSpawnIntent(SpawnIntent{Repo: "/repo", SetID: "fresh", PID: 1, CreatedAt: now}); err != nil {
 		t.Fatalf("PutSpawnIntent: %v", err)
 	}
 	if err := s.PutSpawnIntent(SpawnIntent{Repo: "/repo", SetID: "old", PID: 2, CreatedAt: now.Add(-10 * time.Minute)}); err != nil {
 		t.Fatalf("PutSpawnIntent: %v", err)
 	}
-	n, err := s.ReconcileSpawnIntents(now.Add(-2*time.Minute), nil)
+	n, err := s.ReconcileSpawnIntents(now.Add(-2 * time.Minute))
 	if err != nil {
 		t.Fatalf("ReconcileSpawnIntents: %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("swept %d, want 1 (only the expired one; nil predicate skips liveness)", n)
+		t.Fatalf("swept %d, want 1 (only the expired one)", n)
 	}
 	if got, _ := s.SpawnIntentsForRepo("/repo", now.Add(-time.Hour)); len(got) != 1 || got[0].SetID != "fresh" {
 		t.Fatalf("nil-predicate sweep should keep the fresh intent: %+v", got)

@@ -34,10 +34,9 @@ func acceptVerdict(setID string) VerifyVerdict {
 
 func TestMutateIfCheckoutQuiescentWritesWhenIdle(t *testing.T) {
 	s := openTestStore(t)
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", allAlive(true),
-		holdAliveByToken(), func(ctx context.Context, ex Execer) error {
-			return PutVerifyVerdictExec(ctx, ex, acceptVerdict("s"))
-		})
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("s"))
+	})
 	if err != nil {
 		t.Fatalf("MutateIfCheckoutQuiescent: %v", err)
 	}
@@ -54,16 +53,15 @@ func TestMutateIfCheckoutQuiescentWritesWhenIdle(t *testing.T) {
 }
 
 func TestMutateIfCheckoutQuiescentRefusedByLiveDrain(t *testing.T) {
-	s := openTestStore(t)
-	if _, err := s.StartDrain(Drain{Repo: "r", SetID: "busyset", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}, allAlive(false)); err != nil {
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}))
+	if _, err := s.StartDrain(Drain{Repo: "r", SetID: "busyset", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
 	ran := false
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", aliveByToken(Drain{PID: 100, ProcStart: "t1"}),
-		holdAliveByToken(), func(ctx context.Context, ex Execer) error {
-			ran = true
-			return PutVerifyVerdictExec(ctx, ex, acceptVerdict("busyset"))
-		})
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		ran = true
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("busyset"))
+	})
 	if !errors.Is(err, ErrCheckoutBusy) {
 		t.Fatalf("err = %v, want ErrCheckoutBusy", err)
 	}
@@ -79,14 +77,13 @@ func TestMutateIfCheckoutQuiescentRefusedByLiveDrain(t *testing.T) {
 }
 
 func TestMutateIfCheckoutQuiescentRefusedByLiveGateHold(t *testing.T) {
-	s := openTestStore(t)
+	s := openTestStore(t, holdAliveByToken([2]string{"200", "h1"}))
 	if err := s.PutCheckoutGateHold(CheckoutGateHold{RuntimePath: "/rt", SetID: "gated", PID: 200, ProcStart: "h1"}); err != nil {
 		t.Fatalf("PutCheckoutGateHold: %v", err)
 	}
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", allAlive(true),
-		holdAliveByToken([2]string{"200", "h1"}), func(ctx context.Context, ex Execer) error {
-			return PutVerifyVerdictExec(ctx, ex, acceptVerdict("gated"))
-		})
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("gated"))
+	})
 	if !errors.Is(err, ErrCheckoutBusy) {
 		t.Fatalf("err = %v, want ErrCheckoutBusy", err)
 	}
@@ -96,15 +93,14 @@ func TestMutateIfCheckoutQuiescentRefusedByLiveGateHold(t *testing.T) {
 }
 
 func TestMutateIfCheckoutQuiescentIgnoresDeadDrain(t *testing.T) {
-	s := openTestStore(t)
-	if _, err := s.StartDrain(Drain{Repo: "r", SetID: "s", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}, allAlive(false)); err != nil {
+	// Owner PID 100/t1 is not in the alive set → dead → does not block.
+	s := openTestStore(t, aliveByToken())
+	if _, err := s.StartDrain(Drain{Repo: "r", SetID: "s", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
-	// Owner PID 100/t1 is not in the alive set → dead → does not block.
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", aliveByToken(),
-		holdAliveByToken(), func(ctx context.Context, ex Execer) error {
-			return PutVerifyVerdictExec(ctx, ex, acceptVerdict("s"))
-		})
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("s"))
+	})
 	if err != nil || occ != nil {
 		t.Fatalf("dead drain must not block: occ=%+v err=%v", occ, err)
 	}
@@ -114,30 +110,28 @@ func TestMutateIfCheckoutQuiescentIgnoresDeadDrain(t *testing.T) {
 }
 
 func TestMutateIfCheckoutQuiescentDetectsReusedDrainPID(t *testing.T) {
-	s := openTestStore(t)
-	if _, err := s.StartDrain(Drain{Repo: "r", SetID: "s", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}, allAlive(false)); err != nil {
+	// PID 100 is alive but now a different process (t2) → not this drain → dead.
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t2"}))
+	if _, err := s.StartDrain(Drain{Repo: "r", SetID: "s", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
-	// PID 100 is alive but now a different process (t2) → not this drain → dead.
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", aliveByToken(Drain{PID: 100, ProcStart: "t2"}),
-		holdAliveByToken(), func(ctx context.Context, ex Execer) error {
-			return PutVerifyVerdictExec(ctx, ex, acceptVerdict("s"))
-		})
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("s"))
+	})
 	if err != nil || occ != nil {
 		t.Fatalf("reused-PID drain must not block: occ=%+v err=%v", occ, err)
 	}
 }
 
 func TestMutateIfCheckoutQuiescentIgnoresDeadGateHold(t *testing.T) {
-	s := openTestStore(t)
+	// Hold owner is dead (empty alive set) → does not block.
+	s := openTestStore(t, holdAliveByToken())
 	if err := s.PutCheckoutGateHold(CheckoutGateHold{RuntimePath: "/rt", SetID: "gated", PID: 200, ProcStart: "h1"}); err != nil {
 		t.Fatalf("PutCheckoutGateHold: %v", err)
 	}
-	// Hold owner is dead (empty alive set) → does not block.
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", allAlive(true),
-		holdAliveByToken(), func(ctx context.Context, ex Execer) error {
-			return PutVerifyVerdictExec(ctx, ex, acceptVerdict("gated"))
-		})
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("gated"))
+	})
 	if err != nil || occ != nil {
 		t.Fatalf("dead gate hold must not block: occ=%+v err=%v", occ, err)
 	}
@@ -146,14 +140,13 @@ func TestMutateIfCheckoutQuiescentIgnoresDeadGateHold(t *testing.T) {
 func TestMutateIfCheckoutQuiescentRollsBackOnMutateError(t *testing.T) {
 	s := openTestStore(t)
 	boom := errors.New("boom")
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", allAlive(true),
-		holdAliveByToken(), func(ctx context.Context, ex Execer) error {
-			// Write, then fail: the transaction must roll back so nothing persists.
-			if e := PutVerifyVerdictExec(ctx, ex, acceptVerdict("s")); e != nil {
-				return e
-			}
-			return boom
-		})
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		// Write, then fail: the transaction must roll back so nothing persists.
+		if e := PutVerifyVerdictExec(ctx, ex, acceptVerdict("s")); e != nil {
+			return e
+		}
+		return boom
+	})
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want boom", err)
 	}
@@ -172,12 +165,12 @@ func TestMutateIfCheckoutQuiescentRollsBackOnMutateError(t *testing.T) {
 // the quiescence check and the mutation — the window ADR-0104 closes.
 func TestMutateIfCheckoutQuiescentBlocksConcurrentStartDrain(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pop.db")
-	s, err := Open(path)
+	s, err := Open(path, allAlive(true))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer s.Close()
-	s2, err := Open(path)
+	s2, err := Open(path, allAlive(true))
 	if err != nil {
 		t.Fatalf("Open second: %v", err)
 	}
@@ -187,22 +180,21 @@ func TestMutateIfCheckoutQuiescentBlocksConcurrentStartDrain(t *testing.T) {
 	drainDone := make(chan error, 1)
 	go func() {
 		<-inWindow
-		_, e := s2.StartDrain(Drain{Repo: "r", SetID: "racer", RuntimePath: "/rt", PID: 222, ProcStart: "t2", StartedAt: time.Now()}, allAlive(true))
+		_, e := s2.StartDrain(Drain{Repo: "r", SetID: "racer", RuntimePath: "/rt", PID: 222, ProcStart: "t2", StartedAt: time.Now()})
 		drainDone <- e
 	}()
 
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", allAlive(true),
-		holdAliveByToken(), func(ctx context.Context, ex Execer) error {
-			close(inWindow)
-			// The competing StartDrain is now racing for the write lock we hold; it
-			// must not commit while we are inside the transaction.
-			select {
-			case e := <-drainDone:
-				t.Errorf("StartDrain committed inside the quiescence window (err=%v)", e)
-			case <-time.After(300 * time.Millisecond):
-			}
-			return PutVerifyVerdictExec(ctx, ex, acceptVerdict("safe"))
-		})
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		close(inWindow)
+		// The competing StartDrain is now racing for the write lock we hold; it
+		// must not commit while we are inside the transaction.
+		select {
+		case e := <-drainDone:
+			t.Errorf("StartDrain committed inside the quiescence window (err=%v)", e)
+		case <-time.After(300 * time.Millisecond):
+		}
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("safe"))
+	})
 	if err != nil || occ != nil {
 		t.Fatalf("gated mutation failed: occ=%+v err=%v", occ, err)
 	}

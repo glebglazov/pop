@@ -59,9 +59,7 @@ func ReadRuntimeLockStatus(d *Deps, runtimeRoot string) *RuntimeLockStatus {
 	if err != nil || !ok {
 		return status
 	}
-	drain, err := s.LiveDrainByRuntimePath(runtimeRoot, func(dr store.Drain) bool {
-		return drainProcessAlive(d, dr.PID, dr.ProcStart)
-	})
+	drain, err := s.LiveDrainByRuntimePath(runtimeRoot)
 	if err != nil || drain == nil {
 		return status
 	}
@@ -143,6 +141,17 @@ func ProcessStartTokenFor(d *Deps, pid int) (string, bool) {
 // contract when a token cannot be compared.
 func ProcessLiveWithToken(d *Deps, pid int, storedToken string) bool {
 	return drainProcessAlive(d, pid, storedToken)
+}
+
+// drainLiveness is the store's construction-time liveness policy (ADR-0118): the
+// single place the tasks package wires PID+start-token liveness into a store
+// handle, so every crash-healing path (reconcile sweeps, StartDrain mutual
+// exclusion, the quiescence gate) shares one predicate instead of each call site
+// passing its own closure.
+func drainLiveness(d *Deps) store.Liveness {
+	return func(pid int, procStart string) bool {
+		return drainProcessAlive(d, pid, procStart)
+	}
 }
 
 // drainProcessAlive reports whether the process that owns a Drain is still

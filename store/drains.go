@@ -43,18 +43,21 @@ type Drain struct {
 
 const timeLayout = time.RFC3339Nano
 
+// drainAlive is the Drain-shaped view of the store's liveness policy: it pairs a
+// row's PID with its recorded start token so a reused PID does not read as live.
+func (s *Store) drainAlive(d Drain) bool {
+	return s.alive(d.PID, d.ProcStart)
+}
+
 // StartDrain inserts a running Drain and enforces mutual exclusion in one
 // transaction: it refuses (ErrDrainInProgress) when a live running Drain
 // already exists for the same (repo, set) or the same runtime checkout. A
 // running row whose PID is no longer alive is stale (a crash the reconciliation
 // slice will heal) and does not block. On refusal the returned Drain describes
-// the conflicting live drain. isAlive reports whether a recorded drain's process
-// is still running (checked against its PID and ProcStart so a reused PID does
-// not read as live); a nil isAlive treats every recorded drain as alive.
-func (s *Store) StartDrain(d Drain, isAlive func(Drain) bool) (Drain, error) {
-	if isAlive == nil {
-		isAlive = func(Drain) bool { return true }
-	}
+// the conflicting live drain. Liveness (whether a recorded drain's process is
+// still running, checked against its PID and ProcStart so a reused PID does not
+// read as live) is the store's construction-time policy (ADR-0118).
+func (s *Store) StartDrain(d Drain) (Drain, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Drain{}, err
@@ -89,7 +92,7 @@ func (s *Store) StartDrain(d Drain, isAlive func(Drain) bool) (Drain, error) {
 	_ = rows.Close()
 
 	for _, c := range live {
-		if isAlive(c) {
+		if s.drainAlive(c) {
 			return c, ErrDrainInProgress
 		}
 	}
@@ -142,10 +145,7 @@ func (s *Store) CancelDrain(id int64) error {
 // runtimePath, or nil when none is running there. A running row whose process is
 // no longer alive (dead PID, or a reused PID with a different start token) is
 // treated as not live.
-func (s *Store) LiveDrainByRuntimePath(runtimePath string, isAlive func(Drain) bool) (*Drain, error) {
-	if isAlive == nil {
-		isAlive = func(Drain) bool { return true }
-	}
+func (s *Store) LiveDrainByRuntimePath(runtimePath string) (*Drain, error) {
 	rows, err := s.db.Query(
 		`SELECT id, repo, set_id, runtime_path, pid, proc_start, started_at FROM drains
 		 WHERE state = ? AND runtime_path = ? ORDER BY id DESC`,
@@ -164,7 +164,7 @@ func (s *Store) LiveDrainByRuntimePath(runtimePath string, isAlive func(Drain) b
 		d.ProcStart = procStart.String
 		d.StartedAt = parseTime(started)
 		d.State = StateRunning
-		if isAlive(d) {
+		if s.drainAlive(d) {
 			return &d, nil
 		}
 	}
@@ -174,14 +174,11 @@ func (s *Store) LiveDrainByRuntimePath(runtimePath string, isAlive func(Drain) b
 // ReconcileCrashed is the opportunistic reconcile pass every layer-2 reader runs
 // before reading (ADR-0055): in one bounded transaction it finds running Drains
 // whose owning process is no longer alive and transitions them to crashed,
-// stamping finishedAt. isAlive is checked against each row's PID and ProcStart so
-// a reused PID is not mistaken for a live drain; a still-live drain is left
-// untouched. It forks nothing — it reads only the drains table — and returns the
-// number of rows transitioned. A nil isAlive treats every row as alive (a no-op).
-func (s *Store) ReconcileCrashed(isAlive func(Drain) bool, finishedAt time.Time) (int, error) {
-	if isAlive == nil {
-		return 0, nil
-	}
+// stamping finishedAt. The store's liveness policy is checked against each row's
+// PID and ProcStart so a reused PID is not mistaken for a live drain; a still-live
+// drain is left untouched. It forks nothing — it reads only the drains table —
+// and returns the number of rows transitioned.
+func (s *Store) ReconcileCrashed(finishedAt time.Time) (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -218,7 +215,7 @@ func (s *Store) ReconcileCrashed(isAlive func(Drain) bool, finishedAt time.Time)
 	stamp := finishedAt.UTC().Format(timeLayout)
 	var crashed int
 	for _, d := range running {
-		if isAlive(d) {
+		if s.drainAlive(d) {
 			continue
 		}
 		if _, err := tx.Exec(

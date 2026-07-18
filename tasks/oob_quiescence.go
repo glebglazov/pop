@@ -15,13 +15,8 @@ import (
 // same PID+start-token standard as drains, so a dead-owner drain row or orphan
 // gate hold does not block. A refusal is translated into a clear, occupant-naming
 // error.
-func mutateWithCheckoutQuiescence(d *Deps, s *store.Store, runtimePath string, mutate func(ctx context.Context, ex store.Execer) error) error {
-	occ, err := s.MutateIfCheckoutQuiescent(
-		runtimePath,
-		func(dr store.Drain) bool { return drainProcessAlive(d, dr.PID, dr.ProcStart) },
-		func(pid int, procStart string) bool { return drainProcessAlive(d, pid, procStart) },
-		mutate,
-	)
+func mutateWithCheckoutQuiescence(s *store.Store, runtimePath string, mutate func(ctx context.Context, ex store.Execer) error) error {
+	occ, err := s.MutateIfCheckoutQuiescent(runtimePath, mutate)
 	if err != nil {
 		if errors.Is(err, store.ErrCheckoutBusy) {
 			return checkoutBusyErr(occ)

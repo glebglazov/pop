@@ -9,10 +9,7 @@ import (
 // cooldown has elapsed, no checkout gate hold or live drain blocks the path, no
 // other turn is held there, and w is first among eligible waiters on that path
 // (priority descending, then registration time ascending).
-func (s *Store) TryAcquireRecoveryTurn(w RecoveryWaiter, now time.Time, isAlive func(Drain) bool) (bool, error) {
-	if isAlive == nil {
-		isAlive = func(Drain) bool { return true }
-	}
+func (s *Store) TryAcquireRecoveryTurn(w RecoveryWaiter, now time.Time) (bool, error) {
 	if w.SetID == "" || w.RuntimePath == "" || now.Before(w.ResetAt.UTC()) {
 		return false, nil
 	}
@@ -52,7 +49,7 @@ func (s *Store) TryAcquireRecoveryTurn(w RecoveryWaiter, now time.Time, isAlive 
 		d.ProcStart = procStart.String
 		d.StartedAt = parseTime(started)
 		d.State = StateRunning
-		if isAlive(d) {
+		if s.drainAlive(d) {
 			_ = rows.Close()
 			return false, nil
 		}

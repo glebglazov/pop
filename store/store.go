@@ -25,15 +25,30 @@ import (
 // (repository, set) or runtime checkout a StartDrain tried to claim.
 var ErrDrainInProgress = errors.New("drain already in progress")
 
+// Liveness reports whether the process identified by pid, paired with the opaque
+// start-time token procStart, is still running. It is the store's crash-healing
+// policy: the reconcile sweeps and the mutual-exclusion / quiescence gates
+// consult it to tell a live owner from a dead one, pairing pid with procStart so
+// a reused PID is not mistaken for the original owner. It is fixed at Open
+// (ADR-0118) rather than threaded through each call, so a missing predicate fails
+// at construction instead of silently disabling crash healing.
+type Liveness func(pid int, procStart string) bool
+
 // Store is an open handle to the global execution-state database.
 type Store struct {
-	db *sql.DB
+	db    *sql.DB
+	alive Liveness
 }
 
 // Open opens (creating if absent) the SQLite database at path in WAL mode and
 // applies any outstanding schema migrations. The containing directory must
-// already exist.
-func Open(path string) (*Store, error) {
+// already exist. alive is the required liveness policy every crash-healing path
+// consults (ADR-0118); Open refuses a nil predicate rather than run with crash
+// detection silently disabled.
+func Open(path string, alive Liveness) (*Store, error) {
+	if alive == nil {
+		return nil, errors.New("store.Open: a liveness policy is required")
+	}
 	// _txlock=immediate makes every transaction BEGIN IMMEDIATE so the
 	// check-then-insert in StartDrain takes the write lock up front and a
 	// competing starter blocks (then sees the inserted row) rather than racing.
@@ -50,7 +65,7 @@ func Open(path string) (*Store, error) {
 	// serialise them across processes. pop's scale (a handful of concurrent
 	// drains) makes this negligible (ADR-0055).
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{db: db, alive: alive}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err

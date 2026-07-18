@@ -98,13 +98,12 @@ func (s *Store) SpawnIntentsForRepo(repo string, freshAfter time.Time) ([]SpawnI
 // pass: in one bounded transaction it deletes intents that have expired (created
 // at or before cutoff) or whose recording process is no longer alive, using the
 // same PID+start-token liveness the drains and gate holds use. It returns the
-// number of intents swept. A nil isAlive treats every intent's owner as alive
-// (only expiry sweeps then).
+// number of intents swept.
 //
 // Rows are fully read and the cursor closed before any DELETE is issued so the
 // store's single connection is never asked to run a follow-up statement with an
 // open result set.
-func (s *Store) ReconcileSpawnIntents(cutoff time.Time, isAlive func(pid int, procStart string) bool) (int, error) {
+func (s *Store) ReconcileSpawnIntents(cutoff time.Time) (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -144,7 +143,7 @@ func (s *Store) ReconcileSpawnIntents(cutoff time.Time, isAlive func(pid int, pr
 	var swept int
 	for _, in := range intents {
 		expired := !in.createdAt.After(cutoffUTC)
-		dead := isAlive != nil && !isAlive(in.pid, in.procStart)
+		dead := !s.alive(in.pid, in.procStart)
 		if !expired && !dead {
 			continue
 		}

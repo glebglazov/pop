@@ -23,7 +23,7 @@ func seedLiveDrain(t *testing.T, d *Deps, runtimePath, setID string, pid int, to
 	if _, err := s.StartDrain(store.Drain{
 		Repo: "/repo/.git", SetID: setID, RuntimePath: runtimePath,
 		PID: pid, ProcStart: token, StartedAt: time.Now().UTC(),
-	}, func(store.Drain) bool { return false }); err != nil {
+	}); err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
 }

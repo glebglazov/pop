@@ -389,10 +389,11 @@ func TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn(t *testing.T) {
 	}
 
 	// The gate owner dies. The reconcile pass (run by whoever next reads) sweeps
-	// the dead-owner hold using the same PID+start-token liveness as drains.
-	dead := *d
-	dead.ProcessAlive = func(int) bool { return false }
-	if _, err := ReconcileDrains(&dead); err != nil {
+	// the dead-owner hold using the same PID+start-token liveness as drains. The
+	// store's liveness policy is fixed at open (ADR-0118) but consults d's process
+	// seam live on each call, so flipping the seam models the owner dying.
+	d.ProcessAlive = func(int) bool { return false }
+	if _, err := ReconcileDrains(d); err != nil {
 		t.Fatalf("ReconcileDrains: %v", err)
 	}
 	if hold, _ := GetCheckoutGateHold(d, repo); hold != nil {

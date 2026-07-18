@@ -137,7 +137,7 @@ func TestDashboardRowsVerifyFailedStatus(t *testing.T) {
 		return "", nil
 	}}
 	mkdirDrainStoreDir(t, td)
-	s, err := store.Open(tasks.DrainStorePathWith(td))
+	s, err := store.Open(tasks.DrainStorePathWith(td), func(int, string) bool { return true })
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

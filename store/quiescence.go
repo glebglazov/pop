@@ -45,10 +45,9 @@ type Execer interface {
 // mutation, and a drain that became live is seen by the check. This is the
 // StartDrain mutual-exclusion pattern applied to human out-of-band writes.
 //
-// drainAlive / holdAlive report whether a recorded owner's process is still
+// The store's liveness policy reports whether a recorded owner's process is still
 // running (checked against its PID and start token so a reused PID does not read
-// as live); a dead-owner drain row or gate hold therefore does not block. A nil
-// predicate treats every owner as alive.
+// as live); a dead-owner drain row or gate hold therefore does not block.
 //
 // mutate runs on the transaction's connection (an Execer) so its writes land
 // inside the same transaction; it may also perform filesystem work (a manifest
@@ -57,18 +56,10 @@ type Execer interface {
 // before the next statement (the rows-close constraint).
 func (s *Store) MutateIfCheckoutQuiescent(
 	runtimePath string,
-	drainAlive func(Drain) bool,
-	holdAlive func(pid int, procStart string) bool,
 	mutate func(ctx context.Context, ex Execer) error,
 ) (*CheckoutOccupant, error) {
 	if runtimePath == "" {
 		return nil, errors.New("MutateIfCheckoutQuiescent: empty runtime path")
-	}
-	if drainAlive == nil {
-		drainAlive = func(Drain) bool { return true }
-	}
-	if holdAlive == nil {
-		holdAlive = func(int, string) bool { return true }
 	}
 
 	ctx := context.Background()
@@ -125,7 +116,7 @@ func (s *Store) MutateIfCheckoutQuiescent(
 	_ = rows.Close()
 
 	for _, c := range drains {
-		if drainAlive(Drain{PID: c.pid, ProcStart: c.procStart}) {
+		if s.alive(c.pid, c.procStart) {
 			return &CheckoutOccupant{Kind: OccupantDrain, SetID: c.setID, PID: c.pid, Since: c.startedAt}, ErrCheckoutBusy
 		}
 	}
@@ -141,7 +132,7 @@ func (s *Store) MutateIfCheckoutQuiescent(
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
-	if err == nil && holdAlive(holdPID, holdProc.String) {
+	if err == nil && s.alive(holdPID, holdProc.String) {
 		return &CheckoutOccupant{Kind: OccupantGateHold, SetID: holdSet, PID: holdPID, Since: parseTime(holdReg.String)}, ErrCheckoutBusy
 	}
 

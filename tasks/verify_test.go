@@ -98,7 +98,7 @@ func stubGit(head, log, diff string) *deps.MockGit {
 
 func readStoredVerdict(t *testing.T, d *Deps, repo, setID, sha string) *store.VerifyVerdict {
 	t.Helper()
-	s, err := store.Open(DrainStorePathWith(d))
+	s, err := store.Open(DrainStorePathWith(d), func(int, string) bool { return true })
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

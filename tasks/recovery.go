@@ -324,9 +324,7 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 		// Check if cooldown has elapsed.
 		if !now.Before(resetAt) {
 			// Cooldown elapsed. Try to acquire a recovery turn.
-			acquired, err := acquireRecoveryTurnWithStore(s, w, func(dr store.Drain) bool {
-				return drainProcessAlive(d, dr.PID, dr.ProcStart)
-			})
+			acquired, err := acquireRecoveryTurnWithStore(s, w)
 			if err != nil {
 				return err
 			}
@@ -397,14 +395,12 @@ func acquireRecoveryTurn(d *Deps, w *RecoveryWaiter) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	return acquireRecoveryTurnWithStore(s, w, func(dr store.Drain) bool {
-		return drainProcessAlive(d, dr.PID, dr.ProcStart)
-	})
+	return acquireRecoveryTurnWithStore(s, w)
 }
 
 // acquireRecoveryTurnWithStore is like acquireRecoveryTurn but takes an already-open
 // store to avoid connection contention when called in a tight loop.
-func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter, isAlive func(store.Drain) bool) (bool, error) {
+func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter) (bool, error) {
 	return s.TryAcquireRecoveryTurn(store.RecoveryWaiter{
 		SetID:        w.SetID,
 		Preset:       w.Preset,
@@ -412,7 +408,7 @@ func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter, isAlive fun
 		RuntimePath:  w.RuntimePath,
 		Priority:     w.Priority,
 		RegisteredAt: w.RegisteredAt,
-	}, time.Now().UTC(), isAlive)
+	}, time.Now().UTC())
 }
 
 // ReleaseRecoveryTurn drops the checkout-scoped recovery turn for one runtime

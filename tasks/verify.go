@@ -251,7 +251,7 @@ func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA str
 	if err != nil {
 		return nil, err
 	}
-	if err := mutateWithCheckoutQuiescence(d, s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
+	if err := mutateWithCheckoutQuiescence(s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
 		return store.PutVerifyVerdictExec(ctx, ex, v)
 	}); err != nil {
 		return nil, err
@@ -282,7 +282,7 @@ func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA 
 		return nil, err
 	}
 	var id string
-	if err := mutateWithCheckoutQuiescence(d, s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
+	if err := mutateWithCheckoutQuiescence(s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
 		var werr error
 		if id, werr = writeRemediationTask(d, m, workSHA, findings, note, RemediationOriginHuman); werr != nil {
 			return werr

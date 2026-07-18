@@ -8,9 +8,17 @@ import (
 	"time"
 )
 
-func openTestStore(t *testing.T) *Store {
+// openTestStore opens a throwaway store with an injected liveness policy
+// (ADR-0118 fixes liveness at construction). With no predicate the store treats
+// every recorded owner as alive; a test exercising crash detection passes its own
+// token-keyed predicate.
+func openTestStore(t *testing.T, alive ...Liveness) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "pop.db"))
+	live := Liveness(func(int, string) bool { return true })
+	if len(alive) > 0 {
+		live = alive[0]
+	}
+	s, err := Open(filepath.Join(t.TempDir(), "pop.db"), live)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -43,23 +51,23 @@ func TestOpenIsWALAndMigrated(t *testing.T) {
 
 func TestMigrateIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pop.db")
-	s, err := Open(path)
+	s, err := Open(path, allAlive(true))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	d, err := s.StartDrain(Drain{Repo: "r", SetID: "s", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()}, allAlive(false))
+	d, err := s.StartDrain(Drain{Repo: "r", SetID: "s", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()})
 	if err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
 	_ = s.Close()
 
 	// Reopening runs migrate again with no outstanding steps and preserves data.
-	s2, err := Open(path)
+	s2, err := Open(path, allAlive(true))
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
-	got, err := s2.LiveDrainByRuntimePath("/rt", allAlive(true))
+	got, err := s2.LiveDrainByRuntimePath("/rt")
 	if err != nil {
 		t.Fatalf("LiveDrainByRuntimePath: %v", err)
 	}
@@ -68,19 +76,19 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	}
 }
 
-func allAlive(v bool) func(Drain) bool { return func(Drain) bool { return v } }
+func allAlive(v bool) Liveness { return func(int, string) bool { return v } }
 
 func TestStartDrainInsertsRunning(t *testing.T) {
 	s := openTestStore(t)
 	start := time.Now().UTC().Truncate(time.Second)
-	d, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 4242, StartedAt: start}, allAlive(false))
+	d, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 4242, StartedAt: start})
 	if err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
 	if d.ID == 0 || d.State != StateRunning {
 		t.Fatalf("unexpected drain %+v", d)
 	}
-	live, err := s.LiveDrainByRuntimePath("/rt", allAlive(true))
+	live, err := s.LiveDrainByRuntimePath("/rt")
 	if err != nil {
 		t.Fatalf("LiveDrainByRuntimePath: %v", err)
 	}
@@ -94,11 +102,11 @@ func TestStartDrainInsertsRunning(t *testing.T) {
 
 func TestStartDrainRefusesConcurrentSameSet(t *testing.T) {
 	s := openTestStore(t)
-	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt-a", PID: 1, StartedAt: time.Now()}, allAlive(false)); err != nil {
+	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt-a", PID: 1, StartedAt: time.Now()}); err != nil {
 		t.Fatalf("first StartDrain: %v", err)
 	}
 	// Same (repo, set) in a different checkout, first PID alive → refused.
-	conflict, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt-b", PID: 2, StartedAt: time.Now()}, allAlive(true))
+	conflict, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt-b", PID: 2, StartedAt: time.Now()})
 	if !errors.Is(err, ErrDrainInProgress) {
 		t.Fatalf("err = %v, want ErrDrainInProgress", err)
 	}
@@ -109,29 +117,30 @@ func TestStartDrainRefusesConcurrentSameSet(t *testing.T) {
 
 func TestStartDrainRefusesConcurrentSameCheckout(t *testing.T) {
 	s := openTestStore(t)
-	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-a", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()}, allAlive(false)); err != nil {
+	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-a", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()}); err != nil {
 		t.Fatalf("first StartDrain: %v", err)
 	}
 	// Different set but same checkout, first PID alive → refused.
-	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-b", RuntimePath: "/rt", PID: 2, StartedAt: time.Now()}, allAlive(true)); !errors.Is(err, ErrDrainInProgress) {
+	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-b", RuntimePath: "/rt", PID: 2, StartedAt: time.Now()}); !errors.Is(err, ErrDrainInProgress) {
 		t.Fatalf("err = %v, want ErrDrainInProgress", err)
 	}
 }
 
 func TestStartDrainStaleRunningDoesNotBlock(t *testing.T) {
-	s := openTestStore(t)
-	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()}, allAlive(false)); err != nil {
+	// The first drain's PID reads dead, so the stale running row must not block.
+	s := openTestStore(t, allAlive(false))
+	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()}); err != nil {
 		t.Fatalf("first StartDrain: %v", err)
 	}
 	// First PID dead → stale running row does not block a new start.
-	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 2, StartedAt: time.Now()}, allAlive(false)); err != nil {
+	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 2, StartedAt: time.Now()}); err != nil {
 		t.Fatalf("second StartDrain over stale row: %v", err)
 	}
 }
 
 func TestFinishDrainTransitionsTerminal(t *testing.T) {
 	s := openTestStore(t)
-	d, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()}, allAlive(false))
+	d, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()})
 	if err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
@@ -139,7 +148,7 @@ func TestFinishDrainTransitionsTerminal(t *testing.T) {
 	if err := s.FinishDrain(d.ID, StateQuotaPaused, "claude", true, reset, time.Now().UTC()); err != nil {
 		t.Fatalf("FinishDrain: %v", err)
 	}
-	if live, _ := s.LiveDrainByRuntimePath("/rt", allAlive(true)); live != nil {
+	if live, _ := s.LiveDrainByRuntimePath("/rt"); live != nil {
 		t.Fatalf("expected no live drain after finish, got %+v", live)
 	}
 	term, err := s.LatestTerminalByRuntimePath("/rt")
@@ -156,14 +165,14 @@ func TestFinishDrainTransitionsTerminal(t *testing.T) {
 		t.Fatalf("reset = %v, want %v", term.ExhaustedResetAt, reset)
 	}
 	// A finished set no longer blocks a fresh drain.
-	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 2, StartedAt: time.Now()}, allAlive(true)); err != nil {
+	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 2, StartedAt: time.Now()}); err != nil {
 		t.Fatalf("StartDrain after terminal: %v", err)
 	}
 }
 
 func TestFinishedTerminalOmitsQuotaFields(t *testing.T) {
 	s := openTestStore(t)
-	d, _ := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()}, allAlive(false))
+	d, _ := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()})
 	if err := s.FinishDrain(d.ID, StateFinished, "", false, time.Time{}, time.Now().UTC()); err != nil {
 		t.Fatalf("FinishDrain: %v", err)
 	}
@@ -180,7 +189,7 @@ func TestFinishedTerminalOmitsQuotaFields(t *testing.T) {
 // used to seed abnormal-history scenarios.
 func finishAt(t *testing.T, s *Store, repo, setID, state string, at time.Time) {
 	t.Helper()
-	d, err := s.StartDrain(Drain{Repo: repo, SetID: setID, RuntimePath: "/rt/" + setID, PID: 1, StartedAt: at}, allAlive(false))
+	d, err := s.StartDrain(Drain{Repo: repo, SetID: setID, RuntimePath: "/rt/" + setID, PID: 1, StartedAt: at})
 	if err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
@@ -277,7 +286,7 @@ func TestRecordParkClearTracksLatest(t *testing.T) {
 func TestStartDrainConcurrentSeparateConnectionsAdmitsOne(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pop.db")
 	// Create the schema once up front so racing opens skip migration writes.
-	if s, err := Open(path); err != nil {
+	if s, err := Open(path, allAlive(true)); err != nil {
 		t.Fatal(err)
 	} else {
 		_ = s.Close()
@@ -291,13 +300,13 @@ func TestStartDrainConcurrentSeparateConnectionsAdmitsOne(t *testing.T) {
 		wg.Add(1)
 		go func(pid int) {
 			defer wg.Done()
-			s, err := Open(path)
+			s, err := Open(path, allAlive(true))
 			if err != nil {
 				t.Errorf("open: %v", err)
 				return
 			}
 			defer s.Close()
-			_, err = s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: pid, StartedAt: time.Now()}, allAlive(true))
+			_, err = s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: pid, StartedAt: time.Now()})
 			mu.Lock()
 			switch {
 			case err == nil:
@@ -318,18 +327,18 @@ func TestStartDrainConcurrentSeparateConnectionsAdmitsOne(t *testing.T) {
 
 func TestCancelDrainRemovesRow(t *testing.T) {
 	s := openTestStore(t)
-	d, _ := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()}, allAlive(false))
+	d, _ := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()})
 	if err := s.CancelDrain(d.ID); err != nil {
 		t.Fatalf("CancelDrain: %v", err)
 	}
-	if live, _ := s.LiveDrainByRuntimePath("/rt", allAlive(true)); live != nil {
+	if live, _ := s.LiveDrainByRuntimePath("/rt"); live != nil {
 		t.Fatalf("expected no live drain after cancel, got %+v", live)
 	}
 	if term, _ := s.LatestTerminalByRuntimePath("/rt"); term != nil {
 		t.Fatalf("cancel must leave no terminal, got %+v", term)
 	}
 	// A cancelled set is free to start again.
-	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 2, StartedAt: time.Now()}, allAlive(true)); err != nil {
+	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 2, StartedAt: time.Now()}); err != nil {
 		t.Fatalf("StartDrain after cancel: %v", err)
 	}
 }

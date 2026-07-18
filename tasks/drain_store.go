@@ -84,7 +84,7 @@ func (d *Deps) Store(createIfMissing bool) (*store.Store, bool, error) {
 		}
 		return nil, false, err
 	}
-	s, err := store.Open(path)
+	s, err := store.Open(path, drainLiveness(d))
 	if err != nil {
 		if createIfMissing {
 			return nil, false, exitErr(ExitOperational, "open execution-state store: %v", err)
@@ -183,24 +183,18 @@ func ReconcileDrains(d *Deps) (int, error) {
 		return 0, err
 	}
 	now := time.Now().UTC()
-	n, err := s.ReconcileCrashed(func(dr store.Drain) bool {
-		return drainProcessAlive(d, dr.PID, dr.ProcStart)
-	}, now)
+	n, err := s.ReconcileCrashed(now)
 	// Sweep dead-owner gate holds in the same pass. A sweep error must not mask a
 	// successful drain reconcile, so it is only surfaced when the drain arm was
 	// clean.
-	if _, sweepErr := s.ReconcileGateHolds(func(pid int, procStart string) bool {
-		return drainProcessAlive(d, pid, procStart)
-	}); sweepErr != nil && err == nil {
+	if _, sweepErr := s.ReconcileGateHolds(); sweepErr != nil && err == nil {
 		err = sweepErr
 	}
 	// Sweep pending-spawn markers whose owner died or whose TTL lapsed (a spawn
 	// that never reached BeginDrain), so a stale intent cannot itself block
 	// re-selection forever. Same rule: a sweep error only surfaces when the drain
 	// arm was clean.
-	if _, sweepErr := s.ReconcileSpawnIntents(now.Add(-spawnIntentTTL), func(pid int, procStart string) bool {
-		return drainProcessAlive(d, pid, procStart)
-	}); sweepErr != nil && err == nil {
+	if _, sweepErr := s.ReconcileSpawnIntents(now.Add(-spawnIntentTTL)); sweepErr != nil && err == nil {
 		err = sweepErr
 	}
 	return n, err
@@ -238,8 +232,6 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 		PID:         pid,
 		ProcStart:   procStart,
 		StartedAt:   time.Now().UTC(),
-	}, func(dr store.Drain) bool {
-		return drainProcessAlive(d, dr.PID, dr.ProcStart)
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrDrainInProgress) {

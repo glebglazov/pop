@@ -81,15 +81,12 @@ func (s *Store) GetCheckoutGateHold(runtimePath string) (*CheckoutGateHold, erro
 // in one bounded transaction it deletes gate holds whose registering process is
 // no longer alive, using the same PID+start-token liveness the drains sweep uses
 // so a reused PID is not mistaken for the original owner. It returns the number
-// of holds swept. A nil isAlive treats every hold as alive (a no-op).
+// of holds swept.
 //
 // Rows are fully read and the cursor closed before any DELETE is issued so the
 // store's single connection is never asked to run a follow-up query with an open
 // result set.
-func (s *Store) ReconcileGateHolds(isAlive func(pid int, procStart string) bool) (int, error) {
-	if isAlive == nil {
-		return 0, nil
-	}
+func (s *Store) ReconcileGateHolds() (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -124,7 +121,7 @@ func (s *Store) ReconcileGateHolds(isAlive func(pid int, procStart string) bool)
 
 	var swept int
 	for _, h := range holds {
-		if isAlive(h.pid, h.procStart) {
+		if s.alive(h.pid, h.procStart) {
 			continue
 		}
 		if _, err := tx.Exec(
