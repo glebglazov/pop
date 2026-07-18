@@ -1,0 +1,10 @@
+# Routines are a directory-bound generator concept, not Task sets
+
+Recurring unattended agent work (fetch NewRelic errors and assess them, produce a daily performance report) needs a schedule, cross-run memory, and no terminal state. We considered expressing this on the existing Task-set machinery — either a "typed" Task set that re-arms after completion, or a generator emitting a dated Task set per firing — and rejected both: the Task set lifecycle is deliberately terminal (DONE, Auto-drain clearing at completion, Verified-at SHA pinning, Archive as end-of-life), and every one of those mechanisms would need a recurring-mode exception, while dated-set emission floods Task storage and the Queue dashboard with ephemeral sets that then need type-filtering anyway.
+
+Instead, **Routine** is a new first-class concept: schedule + prompt + agent-managed **Routine memory**, firing **Routine run**s that produce report files — assessment only in v1, never emitting Task sets. Two consequences are load-bearing:
+
+- **Directory-bound, not repository-bound.** A Routine records the directory it was created from — including non-git directories like `$HOME` — so it cannot key off Repository identity or live under Task storage. Routines live at `routines/<id>/` in pop's data dir (beside `repos/`), which doubles as the Queue daemon's discovery registry, widening Queue scope beyond git-backed projects for routine-firing only.
+- **Shared supervisor, separate surfaces.** The Queue daemon grows the schedule loop (one parked process, reusing pane-spawning, agent quota fall-through, and the Execution-state store for run rows) and the Queue journal records fires; but Routines never appear as Queue dashboard rows — they get a sibling **Routine dashboard** view toggled with `v`, keeping the terminal-lifecycle set surface and the generator surface unmixed.
+
+Routine runs deliberately take no Runtime execution lock: they are assess-and-report work tolerated concurrently with a Drain in the same checkout, with only per-Routine exclusivity (an overdue fire is skipped, never queued, while the previous run lives).
