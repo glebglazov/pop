@@ -110,31 +110,6 @@ func (d *Deps) refresh(defPath string) (*tasks.RefreshResult, error) {
 	return tasks.RefreshWith(d.Tasks, defPath, tasks.StatePathFor(defPath))
 }
 
-// verifyRuntimeForSet returns the checkout whose HEAD gates Verify verdict lookup
-// for setID: its Worktree binding path when bound, else the repo's representative
-// checkout.
-func verifyRuntimeForSet(repoKey, setID, projectPath string, bindings map[string]WorktreeBinding) string {
-	if b, ok := bindings[setScopedKey(repoKey, setID)]; ok && strings.TrimSpace(b.RuntimePath) != "" {
-		return b.RuntimePath
-	}
-	return projectPath
-}
-
-// applyVerifyVerdicts overlays the SHA-gated Verify verdict onto a refresh
-// result, using each set's bound checkout when present (ADR-0086). It mirrors
-// the pass `pop tasks status` runs after RefreshWith so queue surfaces agree.
-func (d *Deps) applyVerifyVerdicts(refresh *tasks.RefreshResult, cfg *config.Config, repoKey, projectPath string, bindings map[string]WorktreeBinding) {
-	if d == nil || d.Tasks == nil || refresh == nil {
-		return
-	}
-	if cfg == nil && d.LoadConfig != nil {
-		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
-	}
-	tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
-		return verifyRuntimeForSet(repoKey, setID, projectPath, bindings)
-	})
-}
-
 // probeDirective resolves the ProbeDirective seam, defaulting to a read-only
 // binding.ProbeWorktreeDirective probe. It returns a config-class error message
 // only for the two unsatisfiable-directive sentinels (ADR-0059); any other probe
@@ -772,7 +747,9 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 	if d.LoadConfig != nil {
 		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
 	}
-	d.applyVerifyVerdicts(refresh, cfg, repoKey, scan.ProjectPath, bindings)
+	tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
+		return binding.RuntimeForSet(bindings, repoKey, setID, scan.ProjectPath)
+	})
 
 	backoff := d.setBackoffLookup(scanRepoCommonDir(d, scan), delays, now)
 	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters)

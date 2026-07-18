@@ -53,6 +53,19 @@ func Key(id *tasks.RepositoryIdentity, setID string) string {
 	return ScopedKey(RepoKey(id), setID)
 }
 
+// RuntimeForSet returns the checkout whose HEAD gates work for setID within a
+// repository: its Worktree binding path when bound (a row present with a
+// non-blank RuntimePath), else the repository's representative checkout. It is
+// the sole home for the bound-checkout-else-representative resolution rule
+// (ADR-0118 bullet 5) — every caller that needs "the checkout whose HEAD gates
+// this set" resolves it here rather than re-deriving the fallback.
+func RuntimeForSet(bindings map[string]Binding, repoKey, setID, representative string) string {
+	if b, ok := bindings[ScopedKey(repoKey, setID)]; ok && strings.TrimSpace(b.RuntimePath) != "" {
+		return b.RuntimePath
+	}
+	return representative
+}
+
 // SetIDFromKey extracts the Task set identifier from a scoped store key built
 // by ScopedKey. It is the inverse of ScopedKey and returns "" for any key not
 // in scoped (repoKey + setID) form. This module owns the key shape, so it owns

@@ -565,7 +565,12 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 	if err != nil {
 		return nil, err
 	}
-	d.applyVerifyVerdicts(refresh, cfg, st.repoKey, staticProjectPath(st), snap.bindings)
+	if cfg == nil && d.LoadConfig != nil {
+		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+	}
+	tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
+		return binding.RuntimeForSet(snap.bindings, st.repoKey, setID, staticProjectPath(st))
+	})
 	intents := dashboardWorktreeIntents(d, st.defPath)
 	backoff := d.setBackoffLookup(st.repoCommonDir, delays, now)
 	var rows []DashboardRow
@@ -2591,7 +2596,9 @@ func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
 		if d.LoadConfig != nil {
 			cfg, _ = d.LoadConfig(config.DefaultConfigPath())
 		}
-		d.applyVerifyVerdicts(refresh, cfg, row.RepoKey, row.ProjectPath, bindings)
+		tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
+			return binding.RuntimeForSet(bindings, row.RepoKey, setID, row.ProjectPath)
+		})
 		taskRow := tasks.FindRow(refresh, row.SetID)
 		manifest := refresh.Manifests[row.SetID]
 		return dashboardDetailMsg{dashRow: row, manifest: manifest, taskRow: taskRow}
