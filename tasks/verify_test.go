@@ -517,7 +517,7 @@ func TestVerifyResolvedSetCacheHitWritesNoRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed verdict: %v", err)
 	}
-	_ = s.Close()
+	_ = d.CloseStore()
 
 	// ensureVerifyVerdict is the cache-first path used by the drain. A cache hit
 	// must not invoke the verifier and therefore must not write a Captured run.
@@ -778,7 +778,7 @@ func TestRunConfiguredVerifierAllAgentsQuotaPausedReturnsQuotaPause(t *testing.T
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = s.Close() }()
+	defer func() { _ = d.CloseStore() }()
 	if v, err := s.GetVerifyVerdict("/repo/.git", "demo", "sha1"); err != nil || v != nil {
 		t.Fatalf("quota pause must not persist a verdict: v=%+v err=%v", v, err)
 	}

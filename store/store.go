@@ -16,21 +16,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
-
-// openCount counts every call to Open process-wide. It is test-only
-// instrumentation — it lets a test assert that a caller (e.g. the queue
-// dashboard build) opens the store a bounded number of times regardless of
-// workload — and carries no production behaviour.
-var openCount atomic.Int64
-
-// OpenCount returns the number of times Open has been called process-wide. It
-// exists so tests can assert a bounded number of store opens.
-func OpenCount() int64 { return openCount.Load() }
 
 // ErrDrainInProgress reports that a live running Drain already holds the
 // (repository, set) or runtime checkout a StartDrain tried to claim.
@@ -45,7 +34,6 @@ type Store struct {
 // applies any outstanding schema migrations. The containing directory must
 // already exist.
 func Open(path string) (*Store, error) {
-	openCount.Add(1)
 	// _txlock=immediate makes every transaction BEGIN IMMEDIATE so the
 	// check-then-insert in StartDrain takes the write lock up front and a
 	// competing starter blocks (then sees the inserted row) rather than racing.

@@ -59,7 +59,6 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 	var s *store.Store
 	if st, ok, err := openDrainStoreIfExists(d); err == nil && ok {
 		s = st
-		defer func() { _ = s.Close() }()
 	}
 
 	// Resolving a checkout's repo identity and HEAD each forks git, and sets

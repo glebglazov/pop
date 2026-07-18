@@ -43,7 +43,6 @@ func RecordSpawnIntent(d *Deps, runtimePath, setID string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = s.Close() }()
 	pid := os.Getpid()
 	procStart, _ := procStartToken(d, pid)
 	return s.PutSpawnIntent(store.SpawnIntent{
@@ -69,7 +68,6 @@ func PendingSpawns(d *Deps, repoCommonDir string) ([]PendingSpawn, error) {
 	if err != nil || !ok {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 	freshAfter := time.Now().UTC().Add(-spawnIntentTTL)
 	rows, err := s.SpawnIntentsForRepo(repoCommonDir, freshAfter)
 	if err != nil {

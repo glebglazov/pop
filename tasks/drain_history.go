@@ -53,7 +53,6 @@ func AllDrains(d *Deps) ([]DrainRecord, error) {
 	if err != nil || !ok {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 	rows, err := s.AllDrains()
 	if err != nil {
 		return nil, err
@@ -85,7 +84,6 @@ func LiveRunningDrains(d *Deps) ([]RunningDrain, error) {
 	if err != nil || !ok {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 	rows, err := s.RunningDrains()
 	if err != nil {
 		return nil, err
@@ -113,7 +111,6 @@ func AllParkClears(d *Deps) ([]ParkClearRecord, error) {
 	if err != nil || !ok {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 	rows, err := s.AllParkClears()
 	if err != nil {
 		return nil, err

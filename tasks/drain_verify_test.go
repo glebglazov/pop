@@ -43,7 +43,7 @@ func seedVerdict(t *testing.T, d *Deps, v store.VerifyVerdict) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = s.Close() }()
+	defer func() { _ = d.CloseStore() }()
 	if v.ComputedAt.IsZero() {
 		v.ComputedAt = time.Unix(1, 0).UTC()
 	}
@@ -259,7 +259,7 @@ func TestDrainVerifyPhaseAfterInvalidationRunsAgain(t *testing.T) {
 	if err := s.InvalidateVerifyVerdicts("/repo/.git", "demo"); err != nil {
 		t.Fatalf("InvalidateVerifyVerdicts: %v", err)
 	}
-	_ = s.Close()
+	_ = d.CloseStore()
 
 	called := false
 	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
@@ -701,7 +701,7 @@ func TestDrainVerifyPhaseQuotaPausePropagates(t *testing.T) {
 		t.Fatalf("open store: %v", storeErr)
 	}
 	if ok {
-		defer func() { _ = s.Close() }()
+		defer func() { _ = d.CloseStore() }()
 		if v, err := s.GetVerifyVerdict("/repo/.git", "demo", "sha1"); err != nil || v != nil {
 			t.Fatalf("quota pause must not store a verdict: v=%+v err=%v", v, err)
 		}

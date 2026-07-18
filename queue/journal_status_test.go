@@ -35,6 +35,9 @@ func queueDataDeps(t *testing.T) *tasks.Deps {
 		RenameFunc:    real.Rename,
 		RemoveAllFunc: real.RemoveAll,
 	}
+	// The store handle is now process-cached; close it at test end so it does not
+	// outlive this test's temp data dir (test cleanup, per ADR-0118).
+	t.Cleanup(func() { _ = d.CloseStore() })
 	return d
 }
 

@@ -59,7 +59,6 @@ func ReadRuntimeLockStatus(d *Deps, runtimeRoot string) *RuntimeLockStatus {
 	if err != nil || !ok {
 		return status
 	}
-	defer func() { _ = s.Close() }()
 	drain, err := s.LiveDrainByRuntimePath(runtimeRoot, func(dr store.Drain) bool {
 		return drainProcessAlive(d, dr.PID, dr.ProcStart)
 	})

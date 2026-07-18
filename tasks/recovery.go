@@ -37,7 +37,6 @@ func RegisterCheckoutGateHold(d *Deps, setID, runtimePath string) error {
 	if err != nil {
 		return exitErr(ExitOperational, "register checkout gate hold: %v", err)
 	}
-	defer func() { _ = s.Close() }()
 	pid := os.Getpid()
 	procStart, _ := procStartToken(d, pid)
 	if err := s.PutCheckoutGateHold(store.CheckoutGateHold{
@@ -65,7 +64,6 @@ func ReleaseCheckoutGateHold(d *Deps, runtimePath string) error {
 	if !ok {
 		return nil
 	}
-	defer func() { _ = s.Close() }()
 	return s.DeleteCheckoutGateHold(runtimePath)
 }
 
@@ -82,7 +80,6 @@ func GetCheckoutGateHold(d *Deps, runtimePath string) (*CheckoutGateHold, error)
 	if !ok {
 		return nil, nil
 	}
-	defer func() { _ = s.Close() }()
 	h, err := s.GetCheckoutGateHold(runtimePath)
 	if err != nil {
 		return nil, err
@@ -177,7 +174,6 @@ func RegisterRecoveryWaiter(d *Deps, w RecoveryWaiter) (*RecoveryWaiter, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 
 	if w.RegisteredAt.IsZero() {
 		w.RegisteredAt = time.Now().UTC()
@@ -209,7 +205,6 @@ func DeregisterRecoveryWaiter(d *Deps, setID string) error {
 	if !ok {
 		return nil
 	}
-	defer func() { _ = s.Close() }()
 	return s.DeleteRecoveryWaiter(setID)
 }
 
@@ -226,7 +221,6 @@ func GetRecoveryWaiter(d *Deps, setID string) (*RecoveryWaiter, error) {
 	if !ok {
 		return nil, nil
 	}
-	defer func() { _ = s.Close() }()
 	w, err := s.GetRecoveryWaiter(setID)
 	if err != nil {
 		return nil, err
@@ -258,7 +252,6 @@ func AllRecoveryWaiters(d *Deps) (map[string]RecoveryWaiter, error) {
 	if !ok {
 		return map[string]RecoveryWaiter{}, nil
 	}
-	defer func() { _ = s.Close() }()
 	list, err := s.AllRecoveryWaiters()
 	if err != nil {
 		return nil, err
@@ -298,7 +291,6 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 	if !ok {
 		return exitErr(ExitOperational, "store not available for recovery wait")
 	}
-	defer func() { _ = s.Close() }()
 
 	// Install signal handler for SIGINT during the wait loop.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -405,7 +397,6 @@ func acquireRecoveryTurn(d *Deps, w *RecoveryWaiter) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	defer func() { _ = s.Close() }()
 	return acquireRecoveryTurnWithStore(s, w, func(dr store.Drain) bool {
 		return drainProcessAlive(d, dr.PID, dr.ProcStart)
 	})
@@ -437,7 +428,6 @@ func ReleaseRecoveryTurn(d *Deps, runtimePath string) error {
 	if !ok {
 		return nil
 	}
-	defer func() { _ = s.Close() }()
 	return s.ReleaseRecoveryTurn(runtimePath)
 }
 

@@ -19,7 +19,7 @@ func seedLiveDrain(t *testing.T, d *Deps, runtimePath, setID string, pid int, to
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = s.Close() }()
+	defer func() { _ = d.CloseStore() }()
 	if _, err := s.StartDrain(store.Drain{
 		Repo: "/repo/.git", SetID: setID, RuntimePath: runtimePath,
 		PID: pid, ProcStart: token, StartedAt: time.Now().UTC(),
@@ -35,7 +35,7 @@ func seedGateHold(t *testing.T, d *Deps, runtimePath, setID string, pid int, tok
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = s.Close() }()
+	defer func() { _ = d.CloseStore() }()
 	if err := s.PutCheckoutGateHold(store.CheckoutGateHold{
 		RuntimePath: runtimePath, SetID: setID, PID: pid, ProcStart: token,
 	}); err != nil {

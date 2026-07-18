@@ -772,6 +772,9 @@ func queueTestTasksDeps(t *testing.T, allFound bool) *tasks.Deps {
 		}
 		return "", fmt.Errorf("missing %s", file)
 	}
+	// The store handle is now process-cached; close it at test end so it does not
+	// outlive this test's temp data dir (test cleanup, per ADR-0118).
+	t.Cleanup(func() { _ = d.CloseStore() })
 	return d
 }
 

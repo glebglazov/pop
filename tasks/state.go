@@ -128,7 +128,6 @@ func LoadGlobalStateWith(d *Deps, path string) (*GlobalState, error) {
 	if err != nil || !ok {
 		return gs, err
 	}
-	defer func() { _ = s.Close() }()
 	all, err := s.AllSets()
 	if err != nil {
 		return nil, err
@@ -163,7 +162,6 @@ func (s *GlobalState) SaveWith(d *Deps) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
 	rows := make(map[string][]store.SetReg, len(s.Tasks))
 	for def, entry := range s.Tasks {
 		if entry == nil {
@@ -257,7 +255,6 @@ func foldLegacyStateFile(d *Deps, statePath string) error {
 		}
 		existing, err := s.AllSets()
 		if err != nil {
-			_ = s.Close()
 			return err
 		}
 		for def, entry := range legacy.Tasks {
@@ -282,14 +279,10 @@ func foldLegacyStateFile(d *Deps, statePath string) error {
 					WorktreeManaged: managed,
 					WorktreeName:    name,
 				}); err != nil {
-					_ = s.Close()
 					return err
 				}
 				seen[reg.ID] = true
 			}
-		}
-		if err := s.Close(); err != nil {
-			return err
 		}
 	}
 	return d.FS.RemoveAll(statePath)

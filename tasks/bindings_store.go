@@ -44,7 +44,6 @@ func LoadBindingEntries(d *Deps) (map[string]BindingEntry, error) {
 	if err != nil || !ok {
 		return map[string]BindingEntry{}, err
 	}
-	defer func() { _ = s.Close() }()
 	rows, err := s.AllBindings()
 	if err != nil {
 		return nil, err
@@ -64,7 +63,6 @@ func SaveBindingEntries(d *Deps, all map[string]BindingEntry) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = s.Close() }()
 	rows := make(map[string]store.Binding, len(all))
 	for key, e := range all {
 		rows[key] = storeBindingFromEntry(key, e)
@@ -78,7 +76,6 @@ func PutBindingEntry(d *Deps, scopedKey string, e BindingEntry) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = s.Close() }()
 	return s.PutBinding(storeBindingFromEntry(scopedKey, e))
 }
 
@@ -89,7 +86,6 @@ func DeleteBindingEntry(d *Deps, scopedKey string) error {
 	if err != nil || !ok {
 		return err
 	}
-	defer func() { _ = s.Close() }()
 	return s.DeleteBinding(scopedKey)
 }
 
@@ -125,7 +121,6 @@ func migrateLegacyBindingsFile(d *Deps) error {
 		}
 		existing, err := s.AllBindings()
 		if err != nil {
-			_ = s.Close()
 			return err
 		}
 		for key, b := range legacy.Bindings {
@@ -139,12 +134,8 @@ func migrateLegacyBindingsFile(d *Deps) error {
 				Project:     b.Project,
 				Provisioned: b.Provisioned,
 			}); err != nil {
-				_ = s.Close()
 				return err
 			}
-		}
-		if err := s.Close(); err != nil {
-			return err
 		}
 	}
 	// Retire the file once its contents are safely in the store.

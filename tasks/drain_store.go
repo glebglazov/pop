@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,29 +23,62 @@ func DrainStorePathWith(d *Deps) string {
 	return filepath.Join(popDataDirWith(d), drainStoreFile)
 }
 
-// openDrainStore opens the store, creating the data directory and the database
-// file on first use. The store is real-disk-only (SQLite cannot ride the
-// filesystem seam), so it uses os directly; the path is still derived through
-// the seam-aware popDataDirWith.
-func openDrainStore(d *Deps) (*store.Store, error) {
-	guardTestStorePath(DrainStorePathWith(d))
-	if err := os.MkdirAll(popDataDirWith(d), 0o755); err != nil {
-		return nil, exitErr(ExitOperational, "create data directory: %v", err)
+// depsStoreInitMu guards the lazy allocation of a Deps's store-cache holder for a
+// Deps built from a bare literal (tests) that never went through DefaultDeps. It
+// is contended only by such a Deps on its very first store touch; production
+// Deps arrive with the holder already set.
+var depsStoreInitMu sync.Mutex
+
+// storeCacheHolder returns the Deps's process-cached store handle holder,
+// allocating it on first use for a literal-built Deps. Production Deps carry a
+// pre-allocated holder (DefaultDeps) so their shallow copies share one handle.
+func (d *Deps) storeCacheHolder() *storeCache {
+	depsStoreInitMu.Lock()
+	defer depsStoreInitMu.Unlock()
+	if d.store == nil {
+		d.store = &storeCache{}
 	}
-	s, err := store.Open(DrainStorePathWith(d))
-	if err != nil {
-		return nil, exitErr(ExitOperational, "open execution-state store: %v", err)
-	}
-	return s, nil
+	return d.store
 }
 
-// openDrainStoreIfExists opens the store only when its file is already present,
-// so pure readers (dashboard polls, status renders) never materialise an empty
-// database as a side effect. The bool reports whether the store was opened.
-func openDrainStoreIfExists(d *Deps) (*store.Store, bool, error) {
+// Store returns the process-cached execution-state store handle, opening it
+// (running the migration step) on first use and reusing it thereafter, so
+// migrations run at most once per process. It is the single chokepoint every
+// open site in the tasks package funnels through — the test-isolation guard
+// fires here.
+//
+// createIfMissing selects the two modes. When true the data directory and the
+// database file are created on first use. When false the store is opened only
+// when its file already exists, so pure readers (dashboard polls, status
+// renders) never materialise an empty database as a side effect; the returned
+// bool reports whether a handle was available. Once a handle is cached it is
+// returned regardless of the mode.
+//
+// The store is real-disk-only (SQLite cannot ride the filesystem seam), so it
+// uses os directly; the path is still derived through the seam-aware
+// popDataDirWith. The handle lives for the process (or until CloseStore); one-shot
+// CLI runs rely on process exit, which is WAL-safe.
+func (d *Deps) Store(createIfMissing bool) (*store.Store, bool, error) {
+	c := d.storeCacheHolder()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	path := DrainStorePathWith(d)
+	if c.handle != nil {
+		if c.path == path {
+			return c.handle, true, nil
+		}
+		// The derived path changed (a test redirected its data dir): the cached
+		// handle points at a different database. Drop it and reopen against path.
+		_ = c.handle.Close()
+		c.handle = nil
+		c.path = ""
+	}
 	guardTestStorePath(path)
-	if _, err := os.Stat(path); err != nil {
+	if createIfMissing {
+		if err := os.MkdirAll(popDataDirWith(d), 0o755); err != nil {
+			return nil, false, exitErr(ExitOperational, "create data directory: %v", err)
+		}
+	} else if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return nil, false, nil
 		}
@@ -52,9 +86,44 @@ func openDrainStoreIfExists(d *Deps) (*store.Store, bool, error) {
 	}
 	s, err := store.Open(path)
 	if err != nil {
+		if createIfMissing {
+			return nil, false, exitErr(ExitOperational, "open execution-state store: %v", err)
+		}
 		return nil, false, err
 	}
+	c.handle = s
+	c.path = path
 	return s, true, nil
+}
+
+// CloseStore closes the process-cached store handle and drops it, so the next
+// Store call reopens. The queue daemon loop and test cleanup call it; one-shot
+// CLI runs rely on process exit (WAL-safe) and need not.
+func (d *Deps) CloseStore() error {
+	c := d.storeCacheHolder()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.handle == nil {
+		return nil
+	}
+	err := c.handle.Close()
+	c.handle = nil
+	c.path = ""
+	return err
+}
+
+// openDrainStore resolves the process-cached store in create-if-needed mode. It
+// funnels through Deps.Store; the boolean it returns is always true on success.
+func openDrainStore(d *Deps) (*store.Store, error) {
+	s, _, err := d.Store(true)
+	return s, err
+}
+
+// openDrainStoreIfExists resolves the process-cached store in if-exists mode: a
+// pure reader never materialises an empty database. The bool reports whether a
+// handle was available.
+func openDrainStoreIfExists(d *Deps) (*store.Store, bool, error) {
+	return d.Store(false)
 }
 
 // prodDataDirAtStartup is the developer's real machine-global data dir,
@@ -113,7 +182,6 @@ func ReconcileDrains(d *Deps) (int, error) {
 	if err != nil || !ok {
 		return 0, err
 	}
-	defer func() { _ = s.Close() }()
 	now := time.Now().UTC()
 	n, err := s.ReconcileCrashed(func(dr store.Drain) bool {
 		return drainProcessAlive(d, dr.PID, dr.ProcStart)
@@ -139,8 +207,9 @@ func ReconcileDrains(d *Deps) (int, error) {
 }
 
 // DrainHandle tracks an in-progress Drain so the caller can record its terminal
-// exit reason — or cancel it — when the drain ends. It holds the store open for
-// the drain's lifetime; Finish and Cancel close it.
+// exit reason — or cancel it — when the drain ends. It borrows the process-cached
+// store handle; Finish and Cancel record the terminal (or remove the row) but no
+// longer close the store, which lives for the process.
 type DrainHandle struct {
 	store *store.Store
 	id    int64
@@ -173,7 +242,6 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 		return drainProcessAlive(d, dr.PID, dr.ProcStart)
 	})
 	if err != nil {
-		_ = s.Close()
 		if errors.Is(err, store.ErrDrainInProgress) {
 			return nil, exitErr(ExitOperational,
 				"runtime execution already in progress (PID %d since %s at %s)",
@@ -190,24 +258,24 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 }
 
 // Finish transitions the Drain to a terminal exit-reason store state (one of the
-// store.State* terminals) and closes the store. The exhausted-preset arguments
-// are meaningful only for a quota-paused terminal. The set's work disposition is
-// never recorded — it stays derived from the manifest (ADR-0056).
+// store.State* terminals). The exhausted-preset arguments are meaningful only for
+// a quota-paused terminal. The set's work disposition is never recorded — it
+// stays derived from the manifest (ADR-0056). It borrows the process-cached store
+// handle and does not close it.
 func (h *DrainHandle) Finish(terminal string, exhaustedPreset string, exhaustedPinned bool, exhaustedResetAt time.Time) error {
 	if h == nil {
 		return nil
 	}
-	defer func() { _ = h.store.Close() }()
 	return h.store.FinishDrain(h.id, terminal, exhaustedPreset, exhaustedPinned, exhaustedResetAt, time.Now().UTC())
 }
 
-// Cancel removes the Drain row and closes the store. It is used when the drain
-// never executed (declined at the confirmation gate), so no terminal applies.
+// Cancel removes the Drain row. It is used when the drain never executed
+// (declined at the confirmation gate), so no terminal applies. It borrows the
+// process-cached store handle and does not close it.
 func (h *DrainHandle) Cancel() error {
 	if h == nil {
 		return nil
 	}
-	defer func() { _ = h.store.Close() }()
 	return h.store.CancelDrain(h.id)
 }
 

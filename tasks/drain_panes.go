@@ -27,7 +27,6 @@ func RecordDrainPane(d *Deps, p DrainPane) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = s.Close() }()
 	return s.PutDrainPane(storeDrainPane(p))
 }
 
@@ -39,7 +38,6 @@ func AllDrainPanes(d *Deps) (map[string]DrainPane, error) {
 	if err != nil || !ok {
 		return map[string]DrainPane{}, err
 	}
-	defer func() { _ = s.Close() }()
 	rows, err := s.AllDrainPanes()
 	if err != nil {
 		return nil, err

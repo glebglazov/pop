@@ -26,7 +26,6 @@ func RecordIntegrationEvent(d *Deps, ev IntegrationEvent) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = s.Close() }()
 	if ev.IntegratedAt.IsZero() {
 		ev.IntegratedAt = time.Now().UTC()
 	}
@@ -47,7 +46,6 @@ func IntegrationEventsForSet(d *Deps, setID string) ([]IntegrationEvent, error) 
 	if err != nil || !ok {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 	rows, err := s.IntegrationsForSet(setID)
 	if err != nil {
 		return nil, err
@@ -62,7 +60,6 @@ func AllIntegrationEvents(d *Deps) ([]IntegrationEvent, error) {
 	if err != nil || !ok {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 	rows, err := s.AllIntegrations()
 	if err != nil {
 		return nil, err

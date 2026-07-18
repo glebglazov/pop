@@ -64,8 +64,12 @@ func dashboardTestDeps(t *testing.T, rows []tasks.Row, locks map[string]*tasks.R
 			}
 		},
 	}
+	tasksDeps := &tasks.Deps{FS: fs, Git: git}
+	// The store handle is now process-cached; close it at test end so it does not
+	// outlive this test's temp data dir (test cleanup, per ADR-0118).
+	t.Cleanup(func() { _ = tasksDeps.CloseStore() })
 	return &Deps{
-		Tasks:   &tasks.Deps{FS: fs, Git: git},
+		Tasks:   tasksDeps,
 		Project: &project.Deps{FS: fs, Git: git},
 		Refresh: func(string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: rows}, nil
@@ -467,77 +471,6 @@ func TestDashboardOrphanedIndicator(t *testing.T) {
 	renderDashboardTable(&rendered, []DashboardRow{byID["missing"]}, 0, 120, 20)
 	if !strings.Contains(rendered.String(), "· orphaned") {
 		t.Fatalf("orphaned suffix missing from row render:\n%s", rendered.String())
-	}
-}
-
-// TestDashboardBuildBoundedStoreOpens asserts the per-build snapshot reads the
-// store a bounded number of times no matter how many rows the build renders: the
-// binding, mergeability, and live-drain reads are served from one snapshot, not
-// reopened per row. It builds the same repo twice — once with a handful of rows,
-// once with ten times as many — and asserts the store-open delta is identical
-// (and small), which it cannot be if any of those reads scaled with row count.
-func TestDashboardBuildBoundedStoreOpens(t *testing.T) {
-	rowsN := func(n int) []tasks.Row {
-		out := make([]tasks.Row, 0, n)
-		for i := 0; i < n; i++ {
-			out = append(out, tasks.Row{ID: fmt.Sprintf("set-%02d", i), Status: tasks.StatusFailed})
-		}
-		return out
-	}
-
-	build := func(t *testing.T, rows []tasks.Row) int64 {
-		t.Helper()
-		d := dashboardTestDeps(t, rows, nil)
-		dataHome := t.TempDir()
-		real := deps.NewRealFileSystem()
-		origFS := d.Tasks.FS.(*deps.MockFileSystem)
-		d.Tasks.FS = &deps.MockFileSystem{
-			GetenvFunc: func(key string) string {
-				if key == "XDG_DATA_HOME" {
-					return dataHome
-				}
-				return ""
-			},
-			EvalSymlinksFunc: origFS.EvalSymlinksFunc,
-			ReadFileFunc: func(path string) ([]byte, error) {
-				if origFS.ReadFileFunc != nil {
-					if data, err := origFS.ReadFileFunc(path); err == nil || !errors.Is(err, os.ErrNotExist) {
-						return data, err
-					}
-				}
-				return real.ReadFile(path)
-			},
-			WriteFileFunc: real.WriteFile,
-			MkdirAllFunc:  real.MkdirAll,
-			RenameFunc:    real.Rename,
-			StatFunc:      origFS.StatFunc,
-		}
-		// Seed the binding store so pop.db exists: the snapshot's reads only open
-		// the store when its file is already present.
-		seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
-			setScopedKey("repo-key", "set-00"): {RuntimePath: "/repo/bound", Branch: "bound-branch"},
-		})
-		scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
-
-		before := store.OpenCount()
-		if _, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false)); err != nil {
-			t.Fatal(err)
-		}
-		return store.OpenCount() - before
-	}
-
-	small := build(t, rowsN(3))
-	large := build(t, rowsN(30))
-	if large == 0 {
-		t.Fatalf("build performed no store opens; the test is not exercising the snapshot reads")
-	}
-	if small != large {
-		t.Fatalf("store opens scaled with row count: 3 rows = %d opens, 30 rows = %d opens", small, large)
-	}
-	// One snapshot per build: AllBindings + LiveRunningDrains. Allow a
-	// little slack for incidental opens, but it must not grow with rows.
-	if large > 6 {
-		t.Fatalf("per-build store opens = %d, want a small bounded count", large)
 	}
 }
 

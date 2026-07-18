@@ -53,7 +53,6 @@ func readAgentCooldowns(d *Deps) (agentCooldownStore, error) {
 	if err != nil || !ok {
 		return agentCooldownStore{}, err
 	}
-	defer func() { _ = s.Close() }()
 	rows, err := s.AllAgentCooldowns()
 	if err != nil {
 		return nil, err
@@ -91,7 +90,6 @@ func updateAgentCooldown(d *Deps, preset string, until time.Time) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = s.Close() }()
 	return s.PutAgentCooldown(preset, until.UTC())
 }
 
@@ -121,7 +119,6 @@ func migrateLegacyAgentCooldownFile(d *Deps) error {
 		}
 		existing, err := s.AllAgentCooldowns()
 		if err != nil {
-			_ = s.Close()
 			return err
 		}
 		for preset, entry := range legacy {
@@ -133,12 +130,8 @@ func migrateLegacyAgentCooldownFile(d *Deps) error {
 				continue
 			}
 			if err := s.PutAgentCooldown(preset, entry.ExhaustedUntil.UTC()); err != nil {
-				_ = s.Close()
 				return err
 			}
-		}
-		if err := s.Close(); err != nil {
-			return err
 		}
 	}
 	// Retire the file once its contents are safely in the store.

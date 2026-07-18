@@ -123,7 +123,7 @@ func TestRegisterWritesIntoStoreTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = s.Close() }()
+	defer func() { _ = d.CloseStore() }()
 	all, err := s.AllSets()
 	if err != nil {
 		t.Fatal(err)

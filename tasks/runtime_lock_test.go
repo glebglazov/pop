@@ -25,7 +25,7 @@ func latestTerminalDrain(t *testing.T, d *Deps, runtimePath string) *store.Drain
 	if !ok {
 		return nil
 	}
-	defer func() { _ = s.Close() }()
+	defer func() { _ = d.CloseStore() }()
 	dr, err := s.LatestTerminalByRuntimePath(runtimePath)
 	if err != nil {
 		t.Fatalf("latest terminal: %v", err)

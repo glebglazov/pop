@@ -44,7 +44,7 @@ func seedVerifyVerdict(t *testing.T, d *Deps, v store.VerifyVerdict) {
 	if err != nil {
 		t.Fatalf("open drain store: %v", err)
 	}
-	defer func() { _ = s.Close() }()
+	defer func() { _ = d.CloseStore() }()
 	if v.ComputedAt.IsZero() {
 		v.ComputedAt = time.Unix(1, 0).UTC()
 	}

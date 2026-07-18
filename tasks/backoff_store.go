@@ -25,7 +25,6 @@ func ReadSetBackoff(d *Deps, repo, setID string) (SetBackoffInfo, error) {
 	if err != nil || !ok {
 		return SetBackoffInfo{}, err
 	}
-	defer func() { _ = s.Close() }()
 	info, err := s.ReadSetBackoff(repo, setID)
 	if err != nil {
 		return SetBackoffInfo{}, err
@@ -41,6 +40,5 @@ func RecordParkClear(d *Deps, repo, setID string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = s.Close() }()
 	return s.RecordParkClear(repo, setID, time.Now().UTC())
 }

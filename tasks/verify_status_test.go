@@ -133,7 +133,7 @@ func putStatusVerdict(t *testing.T, d *Deps, repo, setID, sha, verdict, findings
 	if err != nil {
 		t.Fatalf("openDrainStore: %v", err)
 	}
-	defer func() { _ = s.Close() }()
+	defer func() { _ = d.CloseStore() }()
 	if err := s.PutVerifyVerdict(store.VerifyVerdict{
 		Repo: repo, SetID: setID, WorkSHA: sha, Verdict: verdict, Findings: findings, ComputedAt: time.Now().UTC(),
 	}); err != nil {

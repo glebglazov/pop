@@ -251,7 +251,6 @@ func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA str
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 	if err := mutateWithCheckoutQuiescence(d, s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
 		return store.PutVerifyVerdictExec(ctx, ex, v)
 	}); err != nil {
@@ -282,7 +281,6 @@ func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA 
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 	var id string
 	if err := mutateWithCheckoutQuiescence(d, s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
 		var werr error
@@ -310,7 +308,6 @@ func latestVerdictFindings(d *Deps, repo, setID, workSHA string) string {
 	if err != nil || !ok {
 		return ""
 	}
-	defer func() { _ = s.Close() }()
 	if v, err := s.GetVerifyVerdict(repo, setID, workSHA); err == nil && v != nil {
 		return v.Findings
 	}
@@ -329,7 +326,6 @@ func latestAcceptedNote(d *Deps, repo, setID string) string {
 	if err != nil || !ok {
 		return ""
 	}
-	defer func() { _ = s.Close() }()
 	note, err := s.GetLatestAcceptedNote(repo, setID)
 	if err != nil {
 		return ""
@@ -351,7 +347,6 @@ func takeForwardedNote(d *Deps, repo, setID string) string {
 	if err != nil || !ok {
 		return ""
 	}
-	defer func() { _ = s.Close() }()
 	note, err := s.TakeForwardedNote(repo, setID)
 	if err != nil {
 		return ""
@@ -473,7 +468,6 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 	if err := s.PutVerifyVerdict(v); err != nil {
 		return nil, exitErr(ExitOperational, "record verify verdict: %v", err)
 	}
@@ -492,7 +486,6 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 func ensureVerifyVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, workSHA string) (*store.VerifyVerdict, error) {
 	priorNote := ""
 	if s, ok, err := openDrainStoreIfExists(d); err == nil && ok {
-		defer func() { _ = s.Close() }()
 		if cached, gerr := s.GetVerifyVerdict(opts.Repo, opts.SetID, workSHA); gerr == nil && cached != nil {
 			return cached, nil
 		}
@@ -866,7 +859,6 @@ func invalidateVerifyVerdicts(d *Deps, repo, setID string) {
 	if err != nil || !ok {
 		return
 	}
-	defer func() { _ = s.Close() }()
 	_ = s.CaptureNoteThenInvalidate(repo, setID)
 }
 
