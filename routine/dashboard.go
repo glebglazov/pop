@@ -2,6 +2,8 @@ package routine
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -147,9 +149,64 @@ type RoutineDashboard struct {
 	width     int
 	height    int
 	detail    *runsDetailView
+	menu      *routineDashboardMenu
 	statusMsg string
 	showHelp  bool
 	pendingG  bool
+}
+
+// routineMenuAction identifies the verb a routine action-menu item dispatches.
+type routineMenuAction int
+
+const (
+	menuActionFire routineMenuAction = iota
+	menuActionPauseResume
+	menuActionPreview
+	menuActionEditPrompt
+	menuActionRuns
+)
+
+// routineMenuItem is one verb in the action overlay: the flat shortcut letter it
+// keeps, the label shown beside it, and the verb it dispatches.
+type routineMenuItem struct {
+	key    string
+	label  string
+	action routineMenuAction
+}
+
+// routineDashboardMenu is the layered action overlay opened with `a` over the
+// focused routine row. It carries the snapshot of the row it was opened on and
+// the verbs applicable to that row on a ui.List whose cursor drives j/k + Enter
+// selection.
+type routineDashboardMenu struct {
+	row  DashboardRow
+	list *ui.List[routineMenuItem]
+}
+
+// routineMenuItems returns the verbs applicable to row, in a stable order. The
+// pause/resume label reflects the row's current paused state. New verbs (e.g.
+// the edit-schedule modal added in a later slice) append here.
+func routineMenuItems(row DashboardRow) []routineMenuItem {
+	pauseLabel := "pause"
+	if row.Paused {
+		pauseLabel = "resume"
+	}
+	return []routineMenuItem{
+		{key: "i", label: "fire now", action: menuActionFire},
+		{key: "a", label: pauseLabel, action: menuActionPauseResume},
+		{key: "p", label: "preview pane", action: menuActionPreview},
+		{key: "e", label: "edit prompt", action: menuActionEditPrompt},
+		{key: "l", label: "runs", action: menuActionRuns},
+	}
+}
+
+// newRoutineDashboardMenu opens the action overlay on row, wrapping its verbs in
+// a ui.List with j/k wrap-around navigation.
+func newRoutineDashboardMenu(row DashboardRow) *routineDashboardMenu {
+	return &routineDashboardMenu{
+		row:  row,
+		list: ui.NewList(routineMenuItems(row), ui.Opts[routineMenuItem]{Wrap: true}),
+	}
 }
 
 // NewDashboard constructs a Routine dashboard model from a snapshot.
@@ -319,6 +376,9 @@ func (m RoutineDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		if m.menu != nil {
+			return m.updateMenu(msg)
+		}
 		if m.detail != nil {
 			return m.updateDetailView(msg)
 		}
@@ -354,7 +414,8 @@ func (m RoutineDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.statusMsg = ""
-			return m, m.togglePause(row)
+			m.menu = newRoutineDashboardMenu(row)
+			return m, nil
 		case "p":
 			row, ok := m.list.Selected()
 			if !ok {
@@ -410,6 +471,13 @@ func (m RoutineDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else {
 			m.statusMsg = fmt.Sprintf("toggled pause for %s", msg.id)
+		}
+		return m, m.reload()
+	case dashboardEditMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		} else {
+			m.statusMsg = fmt.Sprintf("edited prompt for %s", msg.id)
 		}
 		return m, m.reload()
 	case dashboardPreviewMsg:
@@ -574,6 +642,98 @@ func (m RoutineDashboard) togglePause(row DashboardRow) tea.Cmd {
 	}
 }
 
+// updateMenu drives the action overlay: esc/ctrl+c close it, j/k move the
+// highlight, Enter runs the highlighted verb, and any matching verb letter runs
+// that verb directly. Non-matching keys are inert while the menu is open.
+func (m RoutineDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.menu == nil {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.menu = nil
+		return m, nil
+	case "j", "down":
+		m.menu.list.MoveDown()
+		return m, nil
+	case "k", "up":
+		m.menu.list.MoveUp()
+		return m, nil
+	case "enter":
+		return m.invokeMenuItem(m.menu.list.Cursor())
+	}
+	for i, item := range m.menu.list.Items() {
+		if msg.String() == item.key {
+			return m.invokeMenuItem(i)
+		}
+	}
+	return m, nil
+}
+
+// invokeMenuItem closes the menu and dispatches the verb at idx against the row
+// the menu was opened on.
+func (m RoutineDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
+	if m.menu == nil {
+		return m, nil
+	}
+	items := m.menu.list.Items()
+	if idx < 0 || idx >= len(items) {
+		return m, nil
+	}
+	item := items[idx]
+	row := m.menu.row
+	m.menu = nil
+	return m.dispatchMenuAction(item.action, row)
+}
+
+// dispatchMenuAction runs the selected verb against row.
+func (m RoutineDashboard) dispatchMenuAction(action routineMenuAction, row DashboardRow) (tea.Model, tea.Cmd) {
+	m.statusMsg = ""
+	switch action {
+	case menuActionFire:
+		return m, m.fireRoutine(row)
+	case menuActionPauseResume:
+		return m, m.togglePause(row)
+	case menuActionPreview:
+		return m, m.previewRoutine(row)
+	case menuActionEditPrompt:
+		return m, m.editPrompt(row)
+	case menuActionRuns:
+		m.err = nil
+		m.detail = newRunsDetailView(row)
+		return m, m.loadRuns(row)
+	}
+	return m, nil
+}
+
+// editPrompt suspends the TUI into $EDITOR on the routine's prompt.md via
+// tea.ExecProcess, returning a status message on return. There is no gate
+// against a live run: the next fire picks up the edited prompt.
+func (m RoutineDashboard) editPrompt(row DashboardRow) tea.Cmd {
+	d := m.d
+	if d == nil {
+		d = DefaultDeps()
+	}
+	cmd := editPromptCommand(d, row.ID)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return dashboardEditMsg{id: row.ID, err: err}
+	})
+}
+
+// editPromptCommand builds the external editor invocation on the routine's
+// prompt.md. The editor is read from $EDITOR, falling back to vi.
+func editPromptCommand(d *Deps, id string) *exec.Cmd {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	editor := strings.TrimSpace(os.Getenv("EDITOR"))
+	if editor == "" {
+		editor = "vi"
+	}
+	promptPath := filepath.Join(routineDir(d, id), promptFileName)
+	return exec.Command(editor, promptPath)
+}
+
 func (m RoutineDashboard) previewRoutine(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		d := m.d
@@ -656,6 +816,10 @@ type dashboardTogglePauseMsg struct {
 	id  string
 	err error
 }
+type dashboardEditMsg struct {
+	id  string
+	err error
+}
 type dashboardPreviewMsg struct {
 	err error
 }
@@ -674,6 +838,18 @@ func dashboardTick() tea.Cmd {
 }
 
 func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
+	if m.menu != nil {
+		return []ui.HelpEntry{
+			{Key: "i", Desc: "fire now"},
+			{Key: "a", Desc: "pause/resume"},
+			{Key: "p", Desc: "preview pane"},
+			{Key: "e", Desc: "edit prompt"},
+			{Key: "l", Desc: "runs"},
+			{Key: "j/k", Desc: "navigate"},
+			{Key: "enter", Desc: "run action"},
+			{Key: "esc", Desc: "close menu"},
+		}
+	}
 	if m.detail != nil && m.detail.peek != nil {
 		return []ui.HelpEntry{
 			{Key: "j/k", Desc: "scroll report"},
@@ -696,7 +872,7 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 		{Key: "gg", Desc: "first row"},
 		{Key: "G", Desc: "last row"},
 		{Key: "i", Desc: "fire now"},
-		{Key: "a", Desc: "toggle pause"},
+		{Key: "a", Desc: "actions"},
 		{Key: "p", Desc: "preview pane"},
 		{Key: "l/enter", Desc: "open runs"},
 		{Key: "v", Desc: "queue view"},
@@ -708,7 +884,9 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 func (m RoutineDashboard) View() tea.View {
 	if m.showHelp {
 		title := "Help · Routines"
-		if m.detail != nil && m.detail.peek != nil {
+		if m.menu != nil {
+			title = "Help · Routines · actions"
+		} else if m.detail != nil && m.detail.peek != nil {
 			title = "Help · Routines · report"
 		} else if m.detail != nil {
 			title = "Help · Routines · runs"
@@ -727,10 +905,70 @@ func (m RoutineDashboard) View() tea.View {
 	m.cols.width = m.width
 	m.cols.refit()
 	m.resizeMainList()
+	if m.menu != nil {
+		content := m.viewWithMenu()
+		v := tea.NewView(content)
+		v.AltScreen = true
+		return v
+	}
 	content := m.frameSpec().Render(m.mainBody())
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
+}
+
+// viewWithMenu renders the action-menu overlay: the summary, the full table with
+// the menu block spliced under the cursored row, and a menu footer. It mirrors
+// the Queue dashboard's overlay grammar.
+func (m RoutineDashboard) viewWithMenu() string {
+	var b strings.Builder
+	if m.err != nil {
+		fmt.Fprintf(&b, "refresh error: %v\n", m.err)
+	}
+	fmt.Fprintf(&b, "Routines · %d\n\n", len(m.snap.Rows))
+	if len(m.snap.Rows) == 0 {
+		fmt.Fprintln(&b, emptyListHint)
+		writeRoutineFooter(&b, m.height, ui.HintStyle.Render("j/k move · enter/letter run · esc close"))
+		return b.String()
+	}
+	fmt.Fprintln(&b, ui.TruncateString("  "+dashboardTableLine(dashboardTableHeaders(), m.cols.widths), m.width))
+	fmt.Fprintln(&b, ui.TruncateString("  "+dashboardTableSeparator(m.cols.widths), m.width))
+	cursor := m.list.Cursor()
+	for i, row := range m.snap.Rows {
+		marker := "  "
+		if i == cursor {
+			marker = ui.IndicatorStyle.Render("█") + " "
+		}
+		cell := ui.TruncateString(dashboardTableLine(dashboardRowValues(row), m.cols.widths), dashboardListCellBudget(m.width))
+		fmt.Fprintln(&b, marker+cell)
+		if i == cursor {
+			for _, ml := range routineMenuLines(m.menu, m.width) {
+				fmt.Fprintln(&b, ml)
+			}
+		}
+	}
+	writeRoutineFooter(&b, m.height, ui.HintStyle.Render("j/k move · enter/letter run · esc close"))
+	return b.String()
+}
+
+// routineMenuLines renders the action overlay as a block of lines indented to
+// nest under the cursored row, with the highlighted item carrying the shared
+// cursor block. The first line is a dimmed "actions" caption.
+func routineMenuLines(menu *routineDashboardMenu, width int) []string {
+	if menu == nil {
+		return nil
+	}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
+	cursor := menu.list.Cursor()
+	for i, item := range menu.list.Items() {
+		marker := "  "
+		if i == cursor {
+			marker = ui.IndicatorStyle.Render("█") + " "
+		}
+		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
+		lines = append(lines, ui.TruncateString(line, width))
+	}
+	return lines
 }
 
 func (m RoutineDashboard) frameSpec() ui.Frame {
@@ -750,7 +988,7 @@ func (m RoutineDashboard) frameSpec() ui.Frame {
 }
 
 func (m RoutineDashboard) mainHint() string {
-	return "j/k move · gg/G top/bottom · i fire · a pause · p preview · l/enter runs · v queue · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · i fire · a actions · p preview · l/enter runs · v queue · C-h help · h/esc quit"
 }
 
 func (m RoutineDashboard) mainBody() string {

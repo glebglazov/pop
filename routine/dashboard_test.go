@@ -208,12 +208,22 @@ func TestRoutineDashboardFirePausePreviewKeys(t *testing.T) {
 	}
 
 	updated, cmd = updated.(RoutineDashboard).Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if cmd != nil {
+		t.Fatal("a should open the action menu, not schedule a command")
+	}
+	if updated.(RoutineDashboard).menu == nil {
+		t.Fatal("a should open the action menu")
+	}
+	updated, cmd = updated.(RoutineDashboard).Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	if cmd == nil {
-		t.Fatal("a should schedule pause toggle")
+		t.Fatal("a in menu should schedule pause toggle")
 	}
 	msg = cmd()
 	if toggle, ok := msg.(dashboardTogglePauseMsg); !ok || toggle.err != nil {
 		t.Fatalf("toggle msg = %#v", msg)
+	}
+	if updated.(RoutineDashboard).menu != nil {
+		t.Fatal("dispatching a menu verb should close the menu")
 	}
 	r, err := loadManifest(d, "alpha")
 	if err != nil || !r.Manifest.Paused {
@@ -227,6 +237,123 @@ func TestRoutineDashboardFirePausePreviewKeys(t *testing.T) {
 	msg = cmd()
 	if preview, ok := msg.(dashboardPreviewMsg); !ok || preview.err != nil {
 		t.Fatalf("preview msg = %#v", msg)
+	}
+}
+
+func TestRoutineDashboardActionMenuOpenClose(t *testing.T) {
+	m := newRoutineDashboard(&Deps{}, DashboardSnapshot{Rows: []DashboardRow{{ID: "gamma", Status: "idle"}}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(RoutineDashboard)
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(RoutineDashboard)
+	if cmd != nil {
+		t.Fatal("opening the menu should not schedule a command")
+	}
+	if m.menu == nil {
+		t.Fatal("a should open the action menu")
+	}
+	view := m.View().Content
+	for _, verb := range []string{"fire now", "pause", "preview pane", "edit prompt", "runs"} {
+		if !strings.Contains(view, verb) {
+			t.Fatalf("menu view missing verb %q:\n%s", verb, view)
+		}
+	}
+
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = updated.(RoutineDashboard)
+	if cmd != nil {
+		t.Fatal("esc should close the menu without acting")
+	}
+	if m.menu != nil {
+		t.Fatal("esc should close the action menu")
+	}
+}
+
+func TestRoutineDashboardActionMenuPauseLabel(t *testing.T) {
+	items := routineMenuItems(DashboardRow{ID: "x"})
+	if items[1].label != "pause" {
+		t.Fatalf("unpaused row menu label = %q, want pause", items[1].label)
+	}
+	pausedItems := routineMenuItems(DashboardRow{ID: "x", Paused: true})
+	if pausedItems[1].label != "resume" {
+		t.Fatalf("paused row menu label = %q, want resume", pausedItems[1].label)
+	}
+
+	m := newRoutineDashboard(&Deps{}, DashboardSnapshot{Rows: []DashboardRow{{ID: "p", Status: "paused", Paused: true}}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(RoutineDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	view := updated.(RoutineDashboard).View().Content
+	if !strings.Contains(view, "resume") {
+		t.Fatalf("paused-row menu should show resume:\n%s", view)
+	}
+}
+
+func TestRoutineDashboardActionMenuVerbDispatch(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "delta", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := BuildDashboardWith(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newRoutineDashboard(d, snap)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(RoutineDashboard)
+
+	// fire via the menu's "i" verb
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, cmd := updated.(RoutineDashboard).Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	if cmd == nil {
+		t.Fatal("i in menu should schedule fire")
+	}
+	if updated.(RoutineDashboard).menu != nil {
+		t.Fatal("dispatching fire should close the menu")
+	}
+	if fire, ok := cmd().(dashboardFireMsg); !ok || fire.err != nil {
+		t.Fatalf("fire msg = %#v", cmd())
+	}
+
+	// runs via the menu's "l" verb opens the detail view
+	m = updated.(RoutineDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, cmd = updated.(RoutineDashboard).Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	got := updated.(RoutineDashboard)
+	if got.menu != nil {
+		t.Fatal("dispatching runs should close the menu")
+	}
+	if got.detail == nil {
+		t.Fatal("l in menu should open the runs detail view")
+	}
+	if cmd == nil {
+		t.Fatal("l in menu should schedule loadRuns")
+	}
+}
+
+func TestRoutineEditPromptCommand(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "epsilon", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", "my-editor")
+	cmd := editPromptCommand(d, "epsilon")
+	wantPath := filepath.Join(routineDir(d, "epsilon"), promptFileName)
+	if len(cmd.Args) != 2 {
+		t.Fatalf("cmd args = %v, want editor + path", cmd.Args)
+	}
+	if !strings.HasSuffix(cmd.Args[0], "my-editor") && cmd.Args[0] != "my-editor" {
+		t.Fatalf("cmd editor = %q, want my-editor", cmd.Args[0])
+	}
+	if cmd.Args[1] != wantPath {
+		t.Fatalf("cmd path = %q, want %q", cmd.Args[1], wantPath)
+	}
+
+	t.Setenv("EDITOR", "")
+	fallback := editPromptCommand(d, "epsilon")
+	if !strings.HasSuffix(fallback.Args[0], "vi") && fallback.Args[0] != "vi" {
+		t.Fatalf("fallback editor = %q, want vi", fallback.Args[0])
 	}
 }
 
