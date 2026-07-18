@@ -18,9 +18,12 @@ Author one with pop routine add from any directory (git-backed or not).`,
 
 var routineAddSchedule string
 var (
-	routineAdd  = routine.Add
-	routineList = routine.List
-	routineFire = routine.Fire
+	routineAdd    = routine.Add
+	routineList   = routine.List
+	routineFire   = routine.Fire
+	routinePause  = routine.Pause
+	routineResume = routine.Resume
+	routineRuns   = routine.Runs
 )
 
 var routineAddCmd = &cobra.Command{
@@ -44,11 +47,35 @@ var routineFireCmd = &cobra.Command{
 	RunE:  runRoutineFire,
 }
 
+var routinePauseCmd = &cobra.Command{
+	Use:   "pause <id>",
+	Short: "Suspend scheduled firing for a routine",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRoutinePause,
+}
+
+var routineResumeCmd = &cobra.Command{
+	Use:   "resume <id>",
+	Short: "Resume scheduled firing for a paused routine",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRoutineResume,
+}
+
+var routineRunsCmd = &cobra.Command{
+	Use:   "runs <id>",
+	Short: "List a routine's run history",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRoutineRuns,
+}
+
 func init() {
 	rootCmd.AddCommand(routineCmd)
 	routineCmd.AddCommand(routineAddCmd)
 	routineCmd.AddCommand(routineListCmd)
 	routineCmd.AddCommand(routineFireCmd)
+	routineCmd.AddCommand(routinePauseCmd)
+	routineCmd.AddCommand(routineResumeCmd)
+	routineCmd.AddCommand(routineRunsCmd)
 	routineAddCmd.Flags().StringVar(&routineAddSchedule, "schedule", "", "routine schedule (\"every 6h\" or \"daily at 10:00\")")
 	_ = routineAddCmd.MarkFlagRequired("schedule")
 }
@@ -76,4 +103,34 @@ func runRoutineFire(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "Routine %q finished with agent %s\n", res.RoutineID, res.AgentPreset)
 	fmt.Fprintf(cmd.OutOrStdout(), "Report: %s\n", res.ReportPath)
 	return nil
+}
+
+func runRoutinePause(cmd *cobra.Command, args []string) error {
+	res, err := routinePause(args[0])
+	if err != nil {
+		return err
+	}
+	if res.AlreadyPaused {
+		fmt.Fprintf(cmd.OutOrStdout(), "Routine %q is already paused\n", res.RoutineID)
+		return nil
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Paused routine %q\n", res.RoutineID)
+	return nil
+}
+
+func runRoutineResume(cmd *cobra.Command, args []string) error {
+	res, err := routineResume(args[0])
+	if err != nil {
+		return err
+	}
+	if res.NotPaused {
+		fmt.Fprintf(cmd.OutOrStdout(), "Routine %q is not paused\n", res.RoutineID)
+		return nil
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Resumed routine %q\n", res.RoutineID)
+	return nil
+}
+
+func runRoutineRuns(cmd *cobra.Command, args []string) error {
+	return routineRuns(args[0], cmd.OutOrStdout())
 }

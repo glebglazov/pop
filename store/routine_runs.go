@@ -130,6 +130,50 @@ func (s *Store) LastRoutineRun(routineID string) (*RoutineRun, error) {
 	return scanRoutineRun(row)
 }
 
+// ListRoutineRuns returns all run rows for a routine, newest first.
+func (s *Store) ListRoutineRuns(routineID string) ([]RoutineRun, error) {
+	rows, err := s.db.Query(
+		`SELECT id, routine_id, fired_at, outcome, skip_reason, fail_reason, report_path,
+		        pid, proc_start, finished_at
+		 FROM routine_runs
+		 WHERE routine_id = ?
+		 ORDER BY id DESC`,
+		routineID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var runs []RoutineRun
+	for rows.Next() {
+		var run RoutineRun
+		var fired string
+		var finished sql.NullString
+		var procStart sql.NullString
+		if err := rows.Scan(
+			&run.ID,
+			&run.RoutineID,
+			&fired,
+			&run.Outcome,
+			&run.SkipReason,
+			&run.FailReason,
+			&run.ReportPath,
+			&run.PID,
+			&procStart,
+			&finished,
+		); err != nil {
+			return nil, err
+		}
+		run.ProcStart = procStart.String
+		run.FiredAt, _ = time.Parse(timeLayout, fired)
+		if finished.Valid {
+			run.FinishedAt, _ = time.Parse(timeLayout, finished.String)
+		}
+		runs = append(runs, run)
+	}
+	return runs, rows.Err()
+}
+
 func scanRoutineRun(row *sql.Row) (*RoutineRun, error) {
 	var run RoutineRun
 	var fired string
