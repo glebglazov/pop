@@ -16,6 +16,7 @@ func TestRoutineCommandTree(t *testing.T) {
 		path []string
 	}{
 		{path: []string{"routine", "add"}},
+		{path: []string{"routine", "edit"}},
 		{path: []string{"routine", "list"}},
 		{path: []string{"routine", "fire"}},
 		{path: []string{"routine", "pause"}},
