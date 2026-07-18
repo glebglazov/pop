@@ -3304,6 +3304,222 @@ func filterTestModel() QueueDashboard {
 	return m
 }
 
+// filterMenuTestModel builds a model with two non-done rows plus one DONE row,
+// with Done inclusion off (the launch default), so allRows/snap.Rows initially
+// hide the DONE set — the state the filter menu's Show-done toggle flips.
+func filterMenuTestModel() QueueDashboard {
+	rows := []DashboardRow{
+		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+		{Project: "beta", cursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	m.width = 120
+	m.height = 20
+	return m
+}
+
+// doneRow is the DONE task set the reload delivers once Show-done is toggled on.
+func doneRow() DashboardRow {
+	return DashboardRow{Project: "gamma", cursorKey: "gamma\x00done-set", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "done-set"}}
+}
+
+func TestDashboardFilterMenuOpenAndClose(t *testing.T) {
+	m := filterMenuTestModel()
+
+	// `f` opens the filter modal without dispatching a command.
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	got := updated.(QueueDashboard)
+	if got.filter == nil {
+		t.Fatal("f did not open the filter menu")
+	}
+	if cmd != nil {
+		t.Fatal("opening the filter menu should not dispatch a command")
+	}
+	if got.filterMode {
+		t.Fatal("f must not enter the fuzzy filter mode")
+	}
+	view := got.View().Content
+	for _, want := range []string{"filters", "show done", "[ ]", "enter/space toggle · esc close"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("filter menu view missing %q:\n%s", want, view)
+		}
+	}
+
+	// `esc` closes the overlay without quitting.
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got = updated.(QueueDashboard)
+	if got.filter != nil {
+		t.Fatal("esc did not close the filter menu")
+	}
+	if cmd != nil {
+		t.Fatal("closing the filter menu should not quit or dispatch")
+	}
+
+	// `f` reopens and `f` again closes (sibling-modal toggle).
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	got = updated.(QueueDashboard)
+	if got.filter == nil {
+		t.Fatal("f did not reopen the filter menu")
+	}
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	got = updated.(QueueDashboard)
+	if got.filter != nil {
+		t.Fatal("second f did not close the filter menu")
+	}
+}
+
+func TestDashboardFilterMenuShowDoneTogglesLive(t *testing.T) {
+	m := filterMenuTestModel()
+	if len(m.snap.Rows) != 2 {
+		t.Fatalf("initial rows = %d, want 2 (done hidden)", len(m.snap.Rows))
+	}
+
+	// Open the menu and flip Show done on via its letter shortcut.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	m = updated.(QueueDashboard)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m = updated.(QueueDashboard)
+	if !m.d.IncludeDone {
+		t.Fatal("toggling Show done did not set IncludeDone")
+	}
+	if cmd == nil {
+		t.Fatal("toggling Show done must trigger a rebuild")
+	}
+	if m.filter == nil {
+		t.Fatal("toggle should leave the filter menu open")
+	}
+	if !strings.Contains(m.View().Content, "[x]") {
+		t.Fatalf("checkbox should render checked after toggle-on:\n%s", m.View().Content)
+	}
+
+	// Simulate the reload the toggle triggered: BuildDashboard now includes the
+	// DONE set and re-sorts (proven by task 02's BuildDashboard tests). The
+	// rebuilt rows flow into the view.
+	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+		{Project: "beta", cursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
+		doneRow(),
+	}}})
+	m = updated.(QueueDashboard)
+	if len(m.snap.Rows) != 3 {
+		t.Fatalf("after toggle-on reload: rows = %d, want 3", len(m.snap.Rows))
+	}
+	if !strings.Contains(m.View().Content, "done-set") {
+		t.Fatalf("DONE set should be visible after toggle-on:\n%s", m.View().Content)
+	}
+
+	// Flip Show done back off: the flag clears and the rebuilt (done-excluded)
+	// rows hide the DONE set again.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m = updated.(QueueDashboard)
+	if m.d.IncludeDone {
+		t.Fatal("toggling Show done again did not clear IncludeDone")
+	}
+	if strings.Contains(m.View().Content, "[x]") {
+		t.Fatalf("checkbox should render unchecked after toggle-off:\n%s", m.View().Content)
+	}
+	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+		{Project: "beta", cursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
+	}}})
+	m = updated.(QueueDashboard)
+	if len(m.snap.Rows) != 2 {
+		t.Fatalf("after toggle-off reload: rows = %d, want 2", len(m.snap.Rows))
+	}
+	if strings.Contains(m.View().Content, "done-set") {
+		t.Fatalf("DONE set should be hidden after toggle-off:\n%s", m.View().Content)
+	}
+}
+
+func TestDashboardFilterMenuEnterTogglesHighlighted(t *testing.T) {
+	m := filterMenuTestModel()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	m = updated.(QueueDashboard)
+	// Enter flips the highlighted toggle just like its letter shortcut.
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(QueueDashboard)
+	if !got.d.IncludeDone {
+		t.Fatal("enter did not toggle the highlighted filter")
+	}
+	if cmd == nil {
+		t.Fatal("enter toggle must trigger a rebuild")
+	}
+}
+
+func TestDashboardFilterMenuSeedsFromIncludeDone(t *testing.T) {
+	// `--include-done` seeds IncludeDone true at launch; the menu opens checked.
+	m := newQueueDashboard(&Deps{IncludeDone: true}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+	}})
+	m.width = 120
+	m.height = 20
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	got := updated.(QueueDashboard)
+	if !strings.Contains(got.View().Content, "[x]") {
+		t.Fatalf("Show done should seed checked from --include-done:\n%s", got.View().Content)
+	}
+}
+
+func TestDashboardFilterMenuIndependentOfSlash(t *testing.T) {
+	// `/` fuzzy filtering is a distinct concept from the filter menu. Opening the
+	// menu never enters fuzzy mode, and a rebuild the menu triggers preserves an
+	// active fuzzy query.
+	m := filterTestModel()
+
+	// A fuzzy query narrows the visible rows.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(QueueDashboard)
+	for _, ch := range "beta" {
+		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+		m = updated.(QueueDashboard)
+	}
+	if len(m.snap.Rows) != 1 {
+		t.Fatalf("after 'beta' query: rows = %d, want 1", len(m.snap.Rows))
+	}
+	if m.filter != nil {
+		t.Fatal("fuzzy filtering must not open the filter menu")
+	}
+
+	// A rebuild triggered while the fuzzy query is active (as the Show-done toggle
+	// would trigger) re-applies the query rather than dropping it.
+	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+		{Project: "beta", cursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
+		{Project: "gamma", cursorKey: "gamma\x00feature", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "feature"}},
+	}}})
+	m = updated.(QueueDashboard)
+	if !m.filterMode {
+		t.Fatal("rebuild dropped the fuzzy filter mode")
+	}
+	if len(m.snap.Rows) != 1 || m.snap.Rows[0].Project != "beta" {
+		t.Fatalf("rebuild did not preserve the 'beta' query: rows = %d", len(m.snap.Rows))
+	}
+
+	// The `f` menu opens independently once out of fuzzy mode.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(QueueDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	got := updated.(QueueDashboard)
+	if got.filter == nil {
+		t.Fatal("f did not open the filter menu after clearing the fuzzy query")
+	}
+	if got.filterMode {
+		t.Fatal("opening the filter menu must not re-enter fuzzy mode")
+	}
+}
+
+func TestDashboardFilterMenuBlocksViewToggle(t *testing.T) {
+	m := filterMenuTestModel()
+	if !m.ViewToggleAllowed() {
+		t.Fatal("view toggle should be allowed on the plain main list")
+	}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	got := updated.(QueueDashboard)
+	if got.ViewToggleAllowed() {
+		t.Fatal("view toggle must be blocked while the filter menu is open")
+	}
+}
+
 func TestDashboardFilterMode_SlashEntersFilterMode(t *testing.T) {
 	m := filterTestModel()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})

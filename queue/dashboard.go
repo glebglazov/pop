@@ -1251,6 +1251,48 @@ func newDashboardMenu(row DashboardRow) *dashboardMenu {
 	}
 }
 
+// dashboardFilterToggle identifies one row-inclusion view filter the filter
+// menu flips. Today the menu carries a single toggle (Show done, wired to the
+// ADR-0121 Done-inclusion flag); the enum and the item list are the extension
+// point for future inclusion filters (by status, by project).
+type dashboardFilterToggle int
+
+const (
+	filterToggleShowDone dashboardFilterToggle = iota
+)
+
+// dashboardFilterItem is one toggle in the filter menu: the flat shortcut letter
+// it keeps, the label shown beside its checkbox, and the view filter it flips.
+type dashboardFilterItem struct {
+	key    string
+	label  string
+	toggle dashboardFilterToggle
+}
+
+// dashboardFilterMenu is the modal opened with `f` over the Queue dashboard. It
+// is a sibling of the `a` action menu but holds row-inclusion toggles rather
+// than row verbs, so it is not anchored to the cursored row. The toggle state
+// lives on the model (m.d.IncludeDone), not the menu — the menu only renders it
+// and dispatches flips — so the checkbox reflects the live view every frame.
+type dashboardFilterMenu struct {
+	list *ui.List[dashboardFilterItem]
+}
+
+// dashboardFilterItems returns the inclusion toggles, in a stable order. New
+// inclusion filters append here.
+func dashboardFilterItems() []dashboardFilterItem {
+	return []dashboardFilterItem{
+		{key: "d", label: "show done", toggle: filterToggleShowDone},
+	}
+}
+
+// newDashboardFilterMenu opens the filter modal with j/k wrap-around navigation.
+func newDashboardFilterMenu() *dashboardFilterMenu {
+	return &dashboardFilterMenu{
+		list: ui.NewList(dashboardFilterItems(), ui.Opts[dashboardFilterItem]{Wrap: true}),
+	}
+}
+
 // taskMenuItem is one verb in the task-level action menu: the flat shortcut
 // letter it keeps (also the verb code passed to applyDetailOverride) and the
 // label shown beside it.
@@ -1416,6 +1458,7 @@ type QueueDashboard struct {
 	detail    *detailView
 	menu      *dashboardMenu
 	taskMenu  *taskMenu
+	filter    *dashboardFilterMenu
 
 	filterMode  bool
 	filterInput ui.TextField
@@ -1799,7 +1842,7 @@ func (m QueueDashboard) resizeMainList() {
 // ViewToggleAllowed reports whether v may switch to the Routine dashboard.
 func (m QueueDashboard) ViewToggleAllowed() bool {
 	return m.bind == nil && m.drainPick == nil && m.abandon == nil &&
-		m.detail == nil && m.menu == nil && m.taskMenu == nil
+		m.detail == nil && m.menu == nil && m.taskMenu == nil && m.filter == nil
 }
 
 // OpenCheckout returns the checkout path chosen with Ctrl-g before quit.
@@ -1851,6 +1894,10 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingG = false
 			return m.updateMenu(msg)
 		}
+		if m.filter != nil {
+			m.pendingG = false
+			return m.updateFilterMenu(msg)
+		}
 		if m.filterMode {
 			m.pendingG = false
 			return m.updateFilterMode(msg)
@@ -1901,6 +1948,14 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.menu = newDashboardMenu(row)
+			m.err = nil
+			m.statusMsg = ""
+			return m, nil
+		case "f":
+			// Open the row-inclusion filter menu (ADR-0121). Unlike `/` (a transient
+			// fuzzy query over the already-included rows) this modal flips which rows
+			// are included at all; the two are independent concepts.
+			m.filter = newDashboardFilterMenu()
 			m.err = nil
 			m.statusMsg = ""
 			return m, nil
@@ -2152,6 +2207,70 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	row := m.menu.row
 	m.menu = nil
 	return m.dispatchMenuAction(item.action, row)
+}
+
+// updateFilterMenu drives the row-inclusion filter modal: esc/ctrl+c/f close it,
+// j/k move the highlight, Enter/space toggles the highlighted filter, and any
+// matching toggle letter flips that filter directly. The menu stays open across
+// a toggle so the checkbox flip is visible and successive toggles are cheap;
+// non-matching keys are inert while it is open (v is gated off by
+// ViewToggleAllowed, so it lands here and is ignored).
+func (m QueueDashboard) updateFilterMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.filter == nil {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+c", "f":
+		m.filter = nil
+		return m, nil
+	case "j", "down":
+		m.filter.list.MoveDown()
+		return m, nil
+	case "k", "up":
+		m.filter.list.MoveUp()
+		return m, nil
+	case "enter", "space":
+		return m.invokeFilterItem(m.filter.list.Cursor())
+	}
+	for i, item := range m.filter.list.Items() {
+		if msg.String() == item.key {
+			return m.invokeFilterItem(i)
+		}
+	}
+	return m, nil
+}
+
+// invokeFilterItem flips the inclusion filter at idx and rebuilds the row set.
+// The menu stays open. Flipping mutates the session view flag on the model's
+// Deps (m.d.IncludeDone) and returns a reload: BuildDashboard re-derives the
+// rows honoring the new flag and re-sorts them (ADR-0121), and the reload's
+// dashboardRowsMsg re-applies any active `/` fuzzy query, so the two filters
+// stay independent. The flag is session-only — a fresh Deps on relaunch resets
+// it to the launch seed (`--include-done`).
+func (m QueueDashboard) invokeFilterItem(idx int) (tea.Model, tea.Cmd) {
+	if m.filter == nil {
+		return m, nil
+	}
+	items := m.filter.list.Items()
+	if idx < 0 || idx >= len(items) {
+		return m, nil
+	}
+	switch items[idx].toggle {
+	case filterToggleShowDone:
+		m.d.IncludeDone = !m.d.IncludeDone
+		return m, m.reload()
+	}
+	return m, nil
+}
+
+// filterToggleOn reports the current on/off state of an inclusion filter, read
+// from the live view flags so the menu checkbox tracks the actual view.
+func (m QueueDashboard) filterToggleOn(toggle dashboardFilterToggle) bool {
+	switch toggle {
+	case filterToggleShowDone:
+		return m.d != nil && m.d.IncludeDone
+	}
+	return false
 }
 
 // dispatchMenuAction runs the verb. The conditional guards mirror
@@ -2916,6 +3035,14 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "enter", Desc: "run action"},
 			{Key: "esc", Desc: "close menu"},
 		}
+	case m.filter != nil:
+		// Row-inclusion filter menu
+		return []ui.HelpEntry{
+			{Key: "d", Desc: "toggle show done"},
+			{Key: "j/k", Desc: "navigate"},
+			{Key: "enter/space", Desc: "toggle filter"},
+			{Key: "esc", Desc: "close menu"},
+		}
 	case m.detail != nil && m.detail.peek != nil:
 		// Detail peek view
 		return []ui.HelpEntry{
@@ -2956,6 +3083,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "a", Desc: "action menu"},
 			{Key: "ctrl+g", Desc: "open worktree"},
 			{Key: "/", Desc: "filter"},
+			{Key: "f", Desc: "filter menu"},
 			{Key: "v", Desc: "routines view"},
 			{Key: "h/esc", Desc: "quit"},
 		}
@@ -2974,6 +3102,8 @@ func (m QueueDashboard) View() tea.View {
 			title = "Help · Queue · detail"
 		} else if m.menu != nil {
 			title = "Help · Queue · action menu"
+		} else if m.filter != nil {
+			title = "Help · Queue · filter menu"
 		} else if m.taskMenu != nil {
 			title = "Help · Queue · task menu"
 		} else if m.bind != nil {
@@ -3003,6 +3133,8 @@ func (m QueueDashboard) View() tea.View {
 	switch {
 	case m.menu != nil:
 		content = m.viewWithMenu()
+	case m.filter != nil:
+		content = m.viewWithFilterMenu()
 	case m.bind != nil || m.drainPick != nil || m.abandon != nil:
 		content = m.viewWithModal()
 	default:
@@ -3052,7 +3184,7 @@ func (m QueueDashboard) mainHint() string {
 	if m.filterMode {
 		return "esc clear filter · j/k navigate · v routines · C-h help"
 	}
-	return "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · v routines · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · f filters · v routines · C-h help · h/esc quit"
 }
 
 // mainBody renders the table body (a blank line, the column header, the
@@ -3102,6 +3234,51 @@ func (m QueueDashboard) viewWithMenu() string {
 	}
 	writeDashboardFooter(&body, m.height, ui.HintStyle.Render("j/k move · enter/letter run · esc close"))
 	return body.String()
+}
+
+// viewWithFilterMenu renders the row-inclusion filter modal: the summary, the
+// full table, and the filter toggles below it, replacing the footer. It mirrors
+// viewWithMenu's chrome — a sibling modal — but the menu is not row-anchored, so
+// it sits below the table rather than splicing next to the cursor.
+func (m QueueDashboard) viewWithFilterMenu() string {
+	var body strings.Builder
+	if m.err != nil {
+		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
+	}
+	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
+	fmt.Fprintln(&body)
+	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height)
+	for _, ml := range m.dashboardFilterMenuLines() {
+		fmt.Fprintf(&body, "%s\n", ml)
+	}
+	writeDashboardFooter(&body, m.height, ui.HintStyle.Render("j/k move · enter/space toggle · esc close"))
+	return body.String()
+}
+
+// dashboardFilterMenuLines renders the filter overlay as a block of lines: a
+// dimmed "filters" caption, then one checkbox line per toggle with the
+// highlighted item carrying the shared cursor block. The checkbox state is read
+// live from the model's view flags (filterToggleOn), so it always reflects the
+// current view.
+func (m QueueDashboard) dashboardFilterMenuLines() []string {
+	if m.filter == nil {
+		return nil
+	}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("filters"), m.width)}
+	cursor := m.filter.list.Cursor()
+	for i, item := range m.filter.list.Items() {
+		marker := "  "
+		if i == cursor {
+			marker = ui.IndicatorStyle.Render("█") + " "
+		}
+		box := "[ ]"
+		if m.filterToggleOn(item.toggle) {
+			box = "[x]"
+		}
+		line := fmt.Sprintf("    %s%s %s %s", marker, item.key, box, item.label)
+		lines = append(lines, ui.TruncateString(line, m.width))
+	}
+	return lines
 }
 
 // viewWithModal renders the summary, the full table, and the active modal below
