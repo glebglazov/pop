@@ -20,7 +20,7 @@ func openExecutionStore(d *Deps) (*store.Store, error) {
 	if err := d.FS.MkdirAll(popDataDir(d), 0o755); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
-	s, err := store.Open(executionStorePath(d))
+	s, err := store.Open(executionStorePath(d), d.ProcessAlive)
 	if err != nil {
 		return nil, fmt.Errorf("open execution-state store: %w", err)
 	}

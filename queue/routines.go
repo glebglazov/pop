@@ -106,7 +106,7 @@ func openRoutineStore(d *routine.Deps) (*store.Store, bool, error) {
 		}
 		return nil, false, err
 	}
-	s, err := store.Open(path)
+	s, err := store.Open(path, d.ProcessAlive)
 	if err != nil {
 		return nil, false, err
 	}
