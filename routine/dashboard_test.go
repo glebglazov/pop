@@ -309,7 +309,7 @@ func TestRoutineDashboardHelpOverlay(t *testing.T) {
 		t.Fatal("C-h should open help")
 	}
 	view := got.View().Content
-	for _, key := range []string{"i", "a", "p", "l/enter", "C-h"} {
+	for _, key := range []string{"i", "a", "p", "l/enter", "v", "C-h"} {
 		if !strings.Contains(view, key) {
 			t.Fatalf("help missing %q:\n%s", key, view)
 		}

@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/dashboardshell"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
@@ -135,7 +136,7 @@ func runQueueDashboard(cmd *cobra.Command, args []string) error {
 	}
 	d := queue.DefaultDeps()
 	d.LoadConfig = queueConfigLoad
-	checkout, err := queue.RunDashboard(d, cfg)
+	checkout, err := dashboardshell.RunFromQueue(d, cfg)
 	if err != nil {
 		return err
 	}

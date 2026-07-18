@@ -1362,6 +1362,24 @@ type QueueDashboard struct {
 	openCheckout string
 }
 
+// TestDashboardRow builds a minimal dashboard row for tests outside the queue
+// package. The cursor key mirrors production derivation from project and set ID.
+func TestDashboardRow(project, setID string, ref SetRef) DashboardRow {
+	if ref.SetID == "" {
+		ref.SetID = setID
+	}
+	return DashboardRow{
+		Project:   project,
+		cursorKey: project + "\x00" + ref.SetID,
+		SetRef:    ref,
+	}
+}
+
+// NewDashboard constructs a Queue dashboard model from a snapshot.
+func NewDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
+	return newQueueDashboard(d, cfg, snap)
+}
+
 func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
 	if d == nil {
 		d = DefaultDeps()
@@ -1709,6 +1727,27 @@ func (m QueueDashboard) resizeMainList() {
 		m.list.SetLinesPerItem(1)
 	}
 	m.list.Resize(listH)
+}
+
+// ViewToggleAllowed reports whether v may switch to the Routine dashboard.
+func (m QueueDashboard) ViewToggleAllowed() bool {
+	return m.bind == nil && m.drainPick == nil && m.abandon == nil &&
+		m.detail == nil && m.menu == nil && m.taskMenu == nil
+}
+
+// OpenCheckout returns the checkout path chosen with Ctrl-g before quit.
+func (m QueueDashboard) OpenCheckout() string {
+	return m.openCheckout
+}
+
+// ListCursor exposes the main-list cursor index for tests.
+func (m QueueDashboard) ListCursor() int {
+	return m.list.Cursor()
+}
+
+// FilterActive reports whether the main-list filter is engaged.
+func (m QueueDashboard) FilterActive() bool {
+	return m.filterMode
 }
 
 func (m QueueDashboard) Init() tea.Cmd {
@@ -2835,6 +2874,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		return []ui.HelpEntry{
 			{Key: "typing", Desc: "filter rows"},
 			{Key: "j/k", Desc: "navigate filtered"},
+			{Key: "v", Desc: "routines view"},
 			{Key: "esc", Desc: "clear filter"},
 		}
 	default:
@@ -2847,6 +2887,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "a", Desc: "action menu"},
 			{Key: "ctrl+g", Desc: "open worktree"},
 			{Key: "/", Desc: "filter"},
+			{Key: "v", Desc: "routines view"},
 			{Key: "h/esc", Desc: "quit"},
 		}
 	}
@@ -2935,14 +2976,14 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 func (m QueueDashboard) mainHint() string {
 	if len(m.snap.Rows) == 0 {
 		if m.filterMode {
-			return "esc clear filter · C-h help"
+			return "esc clear filter · v routines · C-h help"
 		}
-		return "C-h help · h/esc quit"
+		return "v routines · C-h help · h/esc quit"
 	}
 	if m.filterMode {
-		return "esc clear filter · j/k navigate · C-h help"
+		return "esc clear filter · j/k navigate · v routines · C-h help"
 	}
-	return "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · v routines · C-h help · h/esc quit"
 }
 
 // mainBody renders the table body (a blank line, the column header, the

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/glebglazov/pop/dashboardshell"
 	"github.com/glebglazov/pop/routine"
 	"github.com/spf13/cobra"
 )
@@ -24,7 +25,7 @@ var (
 	routinePause     = routine.Pause
 	routineResume    = routine.Resume
 	routineRuns      = routine.Runs
-	routineDashboard = routine.RunDashboard
+	routineDashboard = dashboardshell.RunFromRoutine
 )
 
 var routineAddCmd = &cobra.Command{

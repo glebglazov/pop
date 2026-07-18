@@ -145,6 +145,11 @@ type RoutineDashboard struct {
 	pendingG  bool
 }
 
+// NewDashboard constructs a Routine dashboard model from a snapshot.
+func NewDashboard(d *Deps, snap DashboardSnapshot) RoutineDashboard {
+	return newRoutineDashboard(d, snap)
+}
+
 func newRoutineDashboard(d *Deps, snap DashboardSnapshot) RoutineDashboard {
 	if d == nil {
 		d = DefaultDeps()
@@ -280,6 +285,16 @@ func (m RoutineDashboard) resizeMainList() {
 	}
 	m.list.SetLinesPerItem(1)
 	m.list.Resize(listH)
+}
+
+// ViewToggleAllowed reports whether v may switch to the Queue dashboard.
+func (m RoutineDashboard) ViewToggleAllowed() bool {
+	return m.detail == nil
+}
+
+// ListCursor exposes the main-list cursor index for tests.
+func (m RoutineDashboard) ListCursor() int {
+	return m.list.Cursor()
 }
 
 func (m RoutineDashboard) Init() tea.Cmd {
@@ -677,6 +692,7 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 		{Key: "a", Desc: "toggle pause"},
 		{Key: "p", Desc: "preview pane"},
 		{Key: "l/enter", Desc: "open runs"},
+		{Key: "v", Desc: "queue view"},
 		{Key: "C-h", Desc: "toggle help"},
 		{Key: "h/esc", Desc: "quit"},
 	}
@@ -725,7 +741,7 @@ func (m RoutineDashboard) frameSpec() ui.Frame {
 }
 
 func (m RoutineDashboard) mainHint() string {
-	return "j/k move · gg/G top/bottom · i fire · a pause · p preview · l/enter runs · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · i fire · a pause · p preview · l/enter runs · v queue · C-h help · h/esc quit"
 }
 
 func (m RoutineDashboard) mainBody() string {
