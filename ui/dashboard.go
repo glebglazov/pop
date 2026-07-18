@@ -708,7 +708,7 @@ func (d *MonitorDashboard) dashboardCell(pane AttentionPane, rs RowState) string
 	cellWidth := leftWidth - prefixWidth
 
 	attentionIconStyle := lipgloss.NewStyle().Foreground(colorAttention)
-	workingIconStyle := lipgloss.NewStyle().Foreground(colorWorking)
+	workingIconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	clearIconStyle := lipgloss.NewStyle().Foreground(colorClear)
 
 	var icon string
