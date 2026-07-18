@@ -759,9 +759,10 @@ var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"
 const dashboardLiveDrainGlyph = "●"
 
 // dashboardLiveDrainStyle colors the live-drain indicator in the house working
-// colour — the same colour (256-color 214) the Monitor dashboard paints active
-// panes (ui.colorWorking).
-var dashboardLiveDrainStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+// colour — the same red (ui.ColorWorking, 256-color 196) the Monitor dashboard
+// paints active panes. Working shares the "hot" red with unread/attention;
+// motion (Monitor's spinner) not hue separates them.
+var dashboardLiveDrainStyle = lipgloss.NewStyle().Foreground(ui.ColorWorking)
 
 // dashboardLiveIndicator returns the trailing indicator cell: the ● glyph when a
 // live drain holds the checkout, blank otherwise. When styled the glyph carries

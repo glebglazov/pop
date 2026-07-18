@@ -18,8 +18,13 @@ var (
 	colorPreview   = lipgloss.Color("252")
 	colorSeparator = lipgloss.Color("238")
 	colorAttention = lipgloss.Color("196")
-	colorWorking   = lipgloss.Color("214")
-	colorClear     = lipgloss.Color("241")
+	// colorWorking is the house "live/hot" colour: a running agent pane (Monitor
+	// spinner) or a live drain (queue dashboard dot). Intentionally the same red
+	// (196) as colorAttention — working and unread share the "hot" red and are
+	// told apart by motion (working animates/spins, unread sits still) rather
+	// than hue.
+	colorWorking = lipgloss.Color("196")
+	colorClear   = lipgloss.Color("241")
 
 	indicatorStyle = lipgloss.NewStyle().Foreground(colorAccent)
 	hintStyle      = lipgloss.NewStyle().Foreground(colorDim)
@@ -30,6 +35,9 @@ var (
 	IndicatorStyle = indicatorStyle
 	// HintStyle is the shared dimmed footer hint style; exported for cross-package use.
 	HintStyle = hintStyle
+	// ColorWorking is the shared house "live/hot" colour; exported so other
+	// packages (e.g. the queue dashboard live-drain dot) paint working the same red.
+	ColorWorking = colorWorking
 )
 
 // WriteInputBox writes a bordered input box to b; exported for cross-package use.
