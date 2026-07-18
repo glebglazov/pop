@@ -42,7 +42,7 @@ type interruptReadResult struct {
 
 // handleInteractiveInterruptGate is the fourth sibling of the HITL / Failed /
 // Verify-fail gate menus (ADR-0119): when a live AFK attempt is torn down by
-// SIGINT on a TTY, the drain lands here instead of exiting 130. It offers two
+// SIGINT on a TTY, the drain lands here instead of exiting 130. It offers four
 // options — 1 Continue draining (re-run the interrupted task), 2 Get agent
 // assistance (an attended session over the interrupted task + set context), 3
 // open a Runtime shell, and 0 Exit (finalize with the interrupted terminal).
@@ -161,10 +161,14 @@ func promptInterruptGateAction(out io.Writer, reader *bufio.Reader, sigCh <-chan
 		switch strings.ToLower(strings.TrimSpace(res.answer)) {
 		case "", "1", "c", "continue":
 			return interruptGateContinueChoice, nil
+		case "2":
+			return interruptGateAssistChoice, nil
+		case "3":
+			return interruptGateShellChoice, nil
 		case "0", "q", "quit", "exit":
 			return interruptGateExitChoice, nil
 		default:
-			fmt.Fprintln(display, "Choose 1 or 0.")
+			fmt.Fprintln(display, "Choose 1, 2, 3, or 0.")
 			return promptInterruptGateAction(out, reader, sigCh, taskSetID, interrupted, invocation)
 		}
 	}
