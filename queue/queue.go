@@ -37,6 +37,16 @@ type Deps struct {
 	Tmux       deps.Tmux
 	LoadConfig func(string) (*config.Config, error)
 
+	// IncludeDone is the Done-inclusion view flag (ADR-0121): the single
+	// inclusion state that threads through the shared row layer both Queue read
+	// surfaces (`pop queue status` and `pop queue dashboard`) consume. Default
+	// false hides every DONE Task set — including a DONE set that still holds a
+	// managed Worktree binding (the old teardown-reminder carve-out is retired).
+	// `--include-done` on either command sets it true; the dashboard's `f` filter
+	// menu (task 04) flips it at runtime. It is a view filter, not persisted
+	// consent — Archive (ADR-0071/0116) stays independent and always hides.
+	IncludeDone bool
+
 	// Refresh returns the Task-set rows registered under a definition path.
 	// Defaults to tasks.RefreshWith.
 	Refresh func(defPath string) (*tasks.RefreshResult, error)

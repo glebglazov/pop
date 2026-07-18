@@ -199,9 +199,10 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 		RenameFunc:       real.Rename,
 		StatFunc:         origFS.StatFunc,
 	}
-	// Binding-driven membership (ADR-0070): a Done set stays listed only while it
-	// still holds a managed (pop-provisioned) Worktree binding. done-integrating
-	// has one and still shows as DONE; done-concluded has none and stays hidden.
+	// Done inclusion (ADR-0121): DONE sets are hidden uniformly by default, even
+	// one that still holds a managed (pop-provisioned) Worktree binding — the old
+	// teardown-reminder carve-out is retired. done-integrating carries a managed
+	// binding, done-concluded none; both stay hidden unless Done inclusion is on.
 	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
 		setScopedKey("repo-key", "done-integrating"): {RuntimePath: "/repo/done", Branch: "done-branch", Provisioned: true},
 	})
@@ -212,17 +213,38 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ids []string
+	for _, row := range got {
+		ids = append(ids, row.SetID)
+	}
+	want := []string{"ready", "failed", "blocked", "deferred", "missing", "malformed"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("default ids = %v, want %v (both DONE sets hidden)", ids, want)
+	}
+
+	// With Done inclusion on, both DONE sets — including the managed-bound one —
+	// are revealed, and each still renders as DONE.
+	d.IncludeDone = true
+	got, err = dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids = nil
 	byID := map[string]DashboardRow{}
 	for _, row := range got {
 		ids = append(ids, row.SetID)
 		byID[row.SetID] = row
 	}
-	want := []string{"ready", "failed", "blocked", "deferred", "missing", "malformed", "done-integrating"}
-	if !reflect.DeepEqual(ids, want) {
-		t.Fatalf("ids = %v, want %v", ids, want)
+	wantInclude := []string{"ready", "failed", "blocked", "deferred", "missing", "malformed", "done-integrating", "done-concluded"}
+	if !reflect.DeepEqual(ids, wantInclude) {
+		t.Fatalf("include-done ids = %v, want %v", ids, wantInclude)
 	}
-	if got := byID["done-integrating"]; !strings.HasPrefix(dashboardStatusCell(got), "DONE") {
-		t.Fatalf("done-integrating row = %+v, want DONE", got)
+	for _, id := range []string{"done-integrating", "done-concluded"} {
+		if got := byID[id]; !strings.HasPrefix(dashboardStatusCell(got), "DONE") {
+			t.Fatalf("%s row = %+v, want DONE", id, got)
+		}
+	}
+	if !byID["done-integrating"].DoneStillManagedBound {
+		t.Fatalf("done-integrating should record DoneStillManagedBound")
 	}
 }
 
@@ -377,6 +399,9 @@ func TestDashboardColumnDerivation(t *testing.T) {
 	})
 	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
 
+	// Reveal the DONE row so its column derivation stays under test (ADR-0121
+	// hides DONE by default).
+	d.IncludeDone = true
 	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
@@ -2659,7 +2684,11 @@ func TestDashboardManagedDirectiveDestColumn(t *testing.T) {
 	}
 }
 
-func TestDashboardDoneAdoptedBindingExcluded(t *testing.T) {
+// TestDashboardDoneHiddenUniformly pins the ADR-0121 uniform DONE hide: a DONE
+// set is omitted by default whether its Worktree binding is adopted or managed
+// (the old managed-worktree carve-out is retired). Done inclusion reveals both,
+// and the managed one still carries its clean-up destKind.
+func TestDashboardDoneHiddenUniformly(t *testing.T) {
 	rows := []tasks.Row{
 		{ID: "done-adopted", Status: tasks.StatusDone},
 		{ID: "done-managed", Status: tasks.StatusDone},
@@ -2692,15 +2721,27 @@ func TestDashboardDoneAdoptedBindingExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(got) != 0 {
+		t.Fatalf("default rows = %+v, want both DONE sets hidden", got)
+	}
+
+	// Done inclusion reveals both DONE sets regardless of binding kind.
+	d.IncludeDone = true
+	got, err = dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
+	if err != nil {
+		t.Fatal(err)
+	}
 	byID := map[string]DashboardRow{}
 	for _, row := range got {
 		byID[row.SetID] = row
 	}
-	if _, ok := byID["done-adopted"]; ok {
-		t.Fatalf("adopted Done binding should be excluded, got %+v", byID["done-adopted"])
+	if row, ok := byID["done-adopted"]; !ok {
+		t.Fatal("adopted Done binding should be revealed with include-done")
+	} else if row.Worktree != "adopted-branch" {
+		t.Fatalf("done-adopted row = %+v", row)
 	}
 	if row, ok := byID["done-managed"]; !ok {
-		t.Fatal("managed Done binding should remain visible")
+		t.Fatal("managed Done binding should be revealed with include-done")
 	} else if row.destKind != dashboardDestDoneManagedBound || row.Worktree != "managed-branch" {
 		t.Fatalf("done-managed row = %+v", row)
 	}

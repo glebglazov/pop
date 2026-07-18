@@ -59,17 +59,30 @@ var queueLogCmd = &cobra.Command{
 	RunE:  runQueueLog,
 }
 
+// queueStatusIncludeDone / queueDashboardIncludeDone back the `--include-done`
+// flag on each Queue read surface. The flag sets the initial Done-inclusion
+// state (ADR-0121): off by default hides every DONE Task set; on reveals them.
+var (
+	queueStatusIncludeDone    bool
+	queueDashboardIncludeDone bool
+)
+
 func init() {
 	rootCmd.AddCommand(queueCmd)
 	queueCmd.AddCommand(queueRunCmd)
 	queueCmd.AddCommand(queueStatusCmd)
 	queueCmd.AddCommand(queueDashboardCmd)
 	queueCmd.AddCommand(queueLogCmd)
+
+	queueStatusCmd.Flags().BoolVar(&queueStatusIncludeDone, "include-done", false, "include DONE task sets (hidden by default)")
+	queueDashboardCmd.Flags().BoolVar(&queueDashboardIncludeDone, "include-done", false, "include DONE task sets (hidden by default)")
 }
 
 var (
-	queueConfigLoad = config.Load
-	queueRun        = queue.Run
+	queueConfigLoad   = config.Load
+	queueRun          = queue.Run
+	queueBuildStatus  = queue.BuildStatus
+	queueRunDashboard = dashboardshell.RunFromQueue
 )
 
 const queueLogLimit = 50
@@ -117,7 +130,8 @@ func runQueueStatus(cmd *cobra.Command, args []string) error {
 	}
 	d := queue.DefaultDeps()
 	d.LoadConfig = queueConfigLoad
-	snap, err := queue.BuildStatus(d, cfg)
+	d.IncludeDone = queueStatusIncludeDone
+	snap, err := queueBuildStatus(d, cfg)
 	if err != nil {
 		return err
 	}
@@ -136,7 +150,8 @@ func runQueueDashboard(cmd *cobra.Command, args []string) error {
 	}
 	d := queue.DefaultDeps()
 	d.LoadConfig = queueConfigLoad
-	checkout, err := dashboardshell.RunFromQueue(d, cfg)
+	d.IncludeDone = queueDashboardIncludeDone
+	checkout, err := queueRunDashboard(d, cfg)
 	if err != nil {
 		return err
 	}

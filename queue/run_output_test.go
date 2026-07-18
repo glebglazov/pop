@@ -431,6 +431,42 @@ func TestRepoIdentityLabelAcrossSpawnAndBackoff(t *testing.T) {
 	}
 }
 
+// TestRunViewHidesDoneManagedWorktreeBinding pins the status-surface half of the
+// ADR-0121 uniform DONE hide: a DONE set that still holds a managed Worktree
+// binding is omitted from Active worktrees by default (the old teardown reminder
+// is retired) and revealed by Done inclusion (`--include-done`).
+func TestRunViewHidesDoneManagedWorktreeBinding(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "done-set", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	td := tasks.DefaultDeps()
+	t.Cleanup(func() { _ = td.CloseStore() })
+
+	id, err := tasks.ResolveRepositoryIdentity(td, repo)
+	if err != nil {
+		t.Fatalf("ResolveRepositoryIdentity: %v", err)
+	}
+	repoKey := repoIdentityKey(id)
+	if err := binding.Put(td, setScopedKey(repoKey, setID), WorktreeBinding{
+		RuntimePath: repo, Project: "pop", Branch: "done-branch", Provisioned: true,
+	}); err != nil {
+		t.Fatalf("binding.Put: %v", err)
+	}
+
+	// Default: the DONE set's managed binding is hidden.
+	hidden := BuildRunView(StatusSnapshot{Tasks: td}, time.Now().UTC())
+	if len(hidden.WorktreeBindings) != 0 {
+		t.Fatalf("Active worktrees = %+v, want empty (DONE binding hidden by default)", hidden.WorktreeBindings)
+	}
+
+	// Done inclusion reveals it.
+	shown := BuildRunView(StatusSnapshot{Tasks: td, IncludeDone: true}, time.Now().UTC())
+	if len(shown.WorktreeBindings) != 1 || shown.WorktreeBindings[0].SetID != setID {
+		t.Fatalf("Active worktrees = %+v, want the DONE binding revealed with include-done", shown.WorktreeBindings)
+	}
+}
+
 // TestRepoIdentityLabelBaselineDeltaParity verifies that for a bare repo with
 // multiple picker Projects, every baseline section and every delta line uses the
 // same repo-identity label (the basename), not a picker-Project name.

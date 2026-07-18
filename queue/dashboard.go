@@ -629,13 +629,16 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 	backoff := d.setBackoffLookup(st.repoCommonDir, delays, now)
 	var rows []DashboardRow
 	for _, taskRow := range refresh.Rows {
-		// A Done set keeps its dashboard row only while it still holds a managed
-		// (pop-provisioned) Worktree binding, as a clean-up reminder (ADR-0070).
+		// Done sets are hidden uniformly unless Done inclusion is on (ADR-0121):
+		// the old carve-out that kept a DONE set visible while it still held a
+		// managed (pop-provisioned) Worktree binding is retired — teardown stays
+		// gated at Archive. DoneStillManagedBound is still recorded on the row so a
+		// revealed (`--include-done`) DONE row can be labelled/styled from the fact.
 		bnd, hasBinding := snap.bindingFor(st.repoKey, taskRow.ID)
 		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
 		doneStillManagedBound := taskRow.Status == tasks.StatusDone && bound && bnd.Provisioned
 		orphaned := dashboardOrphaned(d, bnd, hasBinding)
-		if !dashboardShowRow(taskRow, doneStillManagedBound) {
+		if !dashboardShowRow(taskRow, d.IncludeDone) {
 			continue
 		}
 		wt := dashboardWorktree(d, snap, intents, st.repoKey, taskRow.ID, taskRow.Status, bnd, bound)
@@ -702,8 +705,12 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 	return rows, nil
 }
 
-func dashboardShowRow(row tasks.Row, doneStillManagedBound bool) bool {
-	return row.Status != tasks.StatusDone || doneStillManagedBound
+// dashboardShowRow is the shared Done-inclusion row filter (ADR-0121). Every
+// non-DONE set always shows; a DONE set shows only when Done inclusion is on.
+// The filter is uniform — a DONE set holding a managed Worktree binding is no
+// longer carved out (teardown stays gated at Archive).
+func dashboardShowRow(row tasks.Row, includeDone bool) bool {
+	return includeDone || row.Status != tasks.StatusDone
 }
 
 // staticProjectPath returns the repo group's representative checkout, the path

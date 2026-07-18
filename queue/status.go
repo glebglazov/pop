@@ -69,6 +69,11 @@ type StatusSnapshot struct {
 	// length is the park threshold). The run view derives each set's parked /
 	// backed-off status from Drain history against it (ADR-0055).
 	CrashRetryDelays []time.Duration
+	// IncludeDone is the Done-inclusion view flag (ADR-0121) carried from the
+	// Deps so the run view applies the same uniform DONE hide the dashboard row
+	// layer does: a DONE set's managed Worktree binding is omitted from the
+	// Active-worktrees view by default, revealed by `--include-done`.
+	IncludeDone bool
 }
 
 // BuildStatus derives queue status from on-disk lock/state truth.
@@ -88,6 +93,7 @@ func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
 	snap.ActiveAgentCooldowns = cooldowns
 	snap.RecoveryWaiters = loadRecoveryWaiters(d)
 	snap.Tasks = d.Tasks
+	snap.IncludeDone = d.IncludeDone
 	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
 		snap.CrashRetryDelays = qcfg.CrashRetryDelays
 	}

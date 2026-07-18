@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/queue"
+	"github.com/glebglazov/pop/tasks"
 )
 
 func writeQueueConfig(t *testing.T, body string) string {
@@ -44,5 +46,86 @@ poll_interval = "2s"
 	}
 	if got != 2*time.Second {
 		t.Fatalf("queue.Run interval = %s, want 2s", got)
+	}
+}
+
+// TestQueueReadSurfacesThreadIncludeDone pins the ADR-0121 Done-inclusion flag
+// wiring: `--include-done` on both `pop queue status` and `pop queue dashboard`
+// sets the single inclusion flag (queue.Deps.IncludeDone) the shared row layer
+// reads, and it defaults off (DONE hidden).
+func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
+	path := writeQueueConfig(t, "")
+
+	oldCfgFile := cfgFile
+	oldLoad := queueConfigLoad
+	oldStatus := queueBuildStatus
+	oldDash := queueRunDashboard
+	oldStatusInc := queueStatusIncludeDone
+	oldDashInc := queueDashboardIncludeDone
+	defer func() {
+		cfgFile = oldCfgFile
+		queueConfigLoad = oldLoad
+		queueBuildStatus = oldStatus
+		queueRunDashboard = oldDash
+		queueStatusIncludeDone = oldStatusInc
+		queueDashboardIncludeDone = oldDashInc
+	}()
+
+	// RenderStatus reads bindings off the snapshot's Tasks deps; point it at an
+	// empty temp data dir so the render path stays panic-free.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	cfgFile = path
+	queueConfigLoad = func(string) (*config.Config, error) { return &config.Config{}, nil }
+
+	var statusInclude, dashInclude bool
+	queueBuildStatus = func(d *queue.Deps, _ *config.Config) (queue.StatusSnapshot, error) {
+		statusInclude = d.IncludeDone
+		return queue.StatusSnapshot{Tasks: tasks.DefaultDeps()}, nil
+	}
+	queueRunDashboard = func(d *queue.Deps, _ *config.Config) (string, error) {
+		dashInclude = d.IncludeDone
+		return "", nil
+	}
+
+	// Default: both surfaces hide DONE.
+	queueStatusIncludeDone = false
+	queueDashboardIncludeDone = false
+	if err := runQueueStatus(queueStatusCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := runQueueDashboard(queueDashboardCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if statusInclude || dashInclude {
+		t.Fatalf("default IncludeDone: status=%v dashboard=%v, want both false", statusInclude, dashInclude)
+	}
+
+	// --include-done: both surfaces set the inclusion flag.
+	queueStatusIncludeDone = true
+	queueDashboardIncludeDone = true
+	if err := runQueueStatus(queueStatusCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := runQueueDashboard(queueDashboardCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !statusInclude || !dashInclude {
+		t.Fatalf("--include-done IncludeDone: status=%v dashboard=%v, want both true", statusInclude, dashInclude)
+	}
+}
+
+// TestQueueReadSurfacesRegisterIncludeDoneFlag confirms both Queue read
+// surfaces expose the `--include-done` flag, defaulting off.
+func TestQueueReadSurfacesRegisterIncludeDoneFlag(t *testing.T) {
+	if f := queueStatusCmd.Flags().Lookup("include-done"); f == nil {
+		t.Fatal("queue status missing --include-done flag")
+	} else if f.DefValue != "false" {
+		t.Fatalf("queue status --include-done default = %q, want false", f.DefValue)
+	}
+	if f := queueDashboardCmd.Flags().Lookup("include-done"); f == nil {
+		t.Fatal("queue dashboard missing --include-done flag")
+	} else if f.DefValue != "false" {
+		t.Fatalf("queue dashboard --include-done default = %q, want false", f.DefValue)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 )
@@ -168,7 +169,7 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 
 	view.Blocked = append(view.Blocked, blockedItemsFromState(snap.Tasks, snap.CrashRetryDelays, now, blockedProjects)...)
 	view.Blocked = append(view.Blocked, blockedItemsFromRecoveryWaiters(snap.Tasks, snap.RecoveryWaiters, blockedProjects)...)
-	view.WorktreeBindings = buildWorktreeBindingViews(snap.Tasks, view)
+	view.WorktreeBindings = buildWorktreeBindingViews(snap.Tasks, view, snap.IncludeDone)
 	view.Blocked = append(view.Blocked, blockedItemsFromAgentCooldowns(snap.ActiveAgentCooldowns, now)...)
 
 	sort.SliceStable(view.Queued, func(i, j int) bool { return view.Queued[i].Project < view.Queued[j].Project })
@@ -525,7 +526,7 @@ func formatRunningLine(p PickedUpSet) string {
 	return fmt.Sprintf("%s: %s%s%s", projectLabel, setID, pid, started)
 }
 
-func buildWorktreeBindingViews(d *tasks.Deps, view RunView) []WorktreeBindingView {
+func buildWorktreeBindingViews(d *tasks.Deps, view RunView, includeDone bool) []WorktreeBindingView {
 	bindings, err := binding.AllBindings(d)
 	if err != nil || len(bindings) == 0 {
 		return nil
@@ -543,10 +544,24 @@ func buildWorktreeBindingViews(d *tasks.Deps, view RunView) []WorktreeBindingVie
 	}
 	sort.Strings(keys)
 
+	// Done inclusion (ADR-0121): a DONE set's binding is hidden from Active
+	// worktrees by default — the status-surface half of the uniform DONE hide the
+	// dashboard row layer applies. doneCache memoizes per-checkout status probes so
+	// this stays a bounded read even in the supervisor's per-tick run view. cfg is
+	// loaded once so the DONE status matches the dashboard's Verify overlay.
+	doneCache := map[string]bool{}
+	var doneCfg *config.Config
+	if !includeDone {
+		doneCfg, _ = config.Load(config.DefaultConfigPath())
+	}
+
 	items := make([]WorktreeBindingView, 0, len(keys))
 	for _, key := range keys {
 		b := bindings[key]
 		setID := binding.SetIDFromKey(key)
+		if !includeDone && bindingSetDone(d, doneCfg, doneCache, b.RuntimePath, setID) {
+			continue
+		}
 		project := b.Project
 		if project == "" {
 			project = projectForScopedKey(d, key)
@@ -571,6 +586,34 @@ func buildWorktreeBindingViews(d *tasks.Deps, view RunView) []WorktreeBindingVie
 		items = append(items, item)
 	}
 	return items
+}
+
+// bindingSetDone reports whether the set bound to runtimePath is DONE, applying
+// the same SHA-gated Verify overlay the dashboard row layer uses so a set that
+// is done-in-manifest but VERIFY-FAILED at the current SHA is not treated as
+// DONE. Results memoize per (checkout, set); resolution failures (a stale or
+// vanished checkout) report not-DONE so the binding stays visible.
+func bindingSetDone(d *tasks.Deps, cfg *config.Config, cache map[string]bool, runtimePath, setID string) bool {
+	if d == nil || runtimePath == "" || setID == "" {
+		return false
+	}
+	cacheKey := runtimePath + "\x00" + setID
+	if done, ok := cache[cacheKey]; ok {
+		return done
+	}
+	done := false
+	if id, err := tasks.ResolveRepositoryIdentity(d, runtimePath); err == nil {
+		if defPath, err := tasks.CanonicalDefinitionPathWith(d, id.TasksDir); err == nil {
+			if refresh, err := tasks.RefreshWith(d, defPath, tasks.StatePathFor(defPath)); err == nil {
+				tasks.ApplyVerifyVerdictsWith(d, refresh, cfg, func(string) string { return runtimePath })
+				if row := tasks.FindRow(refresh, setID); row != nil {
+					done = row.Status == tasks.StatusDone
+				}
+			}
+		}
+	}
+	cache[cacheKey] = done
+	return done
 }
 
 func formatWorktreeBindingLine(binding WorktreeBindingView) string {
