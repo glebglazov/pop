@@ -14,6 +14,7 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/release"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/wayfinder"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,7 @@ type doctorDeps struct {
 	explicitAgentContext      func() []string
 	agentExecutableAvailable  func(string) bool
 	taskStorageWritable       func() (string, error)
+	scanWayfinderMaps         func() (int, error)
 	legacyTaskSets            func() ([]string, error)
 	orphanedTaskStorage       func() ([]tasks.OrphanedStorage, error)
 	legacyLayoutStorage       func() ([]string, error)
@@ -107,8 +109,15 @@ func defaultDoctorDeps() *doctorDeps {
 		},
 		explicitAgentContext:     func() []string { return nil },
 		agentExecutableAvailable: doctorAgentExecutableAvailable,
-		taskStorageWritable:      func() (string, error) { return tasks.ProbeStorageWritable(tasks.DefaultDeps()) },
-		legacyTaskSets:           func() ([]string, error) { return tasks.LegacyTaskSetIDs(tasks.DefaultDeps(), "") },
+		taskStorageWritable: func() (string, error) { return tasks.ProbeStorageWritable(tasks.DefaultDeps()) },
+		scanWayfinderMaps: func() (int, error) {
+			maps, err := wayfinder.ScanMaps(wayfinder.DefaultDeps(), "")
+			if err != nil {
+				return 0, err
+			}
+			return len(maps), nil
+		},
+		legacyTaskSets: func() ([]string, error) { return tasks.LegacyTaskSetIDs(tasks.DefaultDeps(), "") },
 		orphanedTaskStorage: func() ([]tasks.OrphanedStorage, error) {
 			return tasks.FindOrphanedStorage(tasks.DefaultDeps())
 		},
@@ -178,7 +187,7 @@ var doctorCmd = &cobra.Command{
 	Long: `Report pop's readiness on this machine — strictly read-only.
 
 Doctor prints the canonical command families (project, worktree, monitor,
-pane, task, integrate) and nested checks for each family. When a family
+pane, tasks, wayfinder, integrate) and nested checks for each family. When a family
 depends on agent setup, Doctor reads Pop's existing integration evidence to
 explain that family's readiness; it does not present a support matrix or
 per-agent component inventory as the report.
@@ -215,6 +224,7 @@ var canonicalDoctorCommands = []string{
 	"pop monitor",
 	"pop pane",
 	"pop tasks",
+	"pop wayfinder",
 	"pop integrate",
 }
 
@@ -234,6 +244,7 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 			familyReport("pop monitor", doctorMonitorChecks(d, intent)),
 			familyReport("pop pane", doctorPaneChecks(d)),
 			familyReport("pop tasks", doctorTaskChecks(d)),
+			familyReport("pop wayfinder", doctorWayfinderChecks(d)),
 		},
 	}
 
@@ -395,6 +406,47 @@ func doctorPaneChecks(d *doctorDeps) []doctorCheck {
 // storage layout is left un-migrated, and no Task storage has been orphaned by a
 // vanished repository. Legacy-layout, orphan, and migration reporting are
 // informational only — Doctor never deletes, moves, or modifies storage.
+// doctorWayfinderChecks reports Wayfinder readiness with the same git and Task
+// storage gates as Tasks: a runtime checkout must resolve and pop must be able
+// to write beneath Task storage. Map count is informational only — zero maps is
+// OK, matching Worktree readiness (absence is content, never Degraded).
+func doctorWayfinderChecks(d *doctorDeps) []doctorCheck {
+	ctx, err := d.detectRepoContext()
+	if err != nil {
+		return []doctorCheck{{
+			label:  "git repository detected",
+			status: doctorStatusBlocked,
+			detail: "not in a git repository",
+		}}
+	}
+
+	checks := []doctorCheck{{
+		label:  "git repository detected",
+		status: doctorStatusOK,
+		detail: ctx.GitRoot,
+	}}
+	checks = append(checks, doctorTaskStorageWritableCheck(d))
+
+	if d.scanWayfinderMaps == nil {
+		return checks
+	}
+	count, err := d.scanWayfinderMaps()
+	if err != nil {
+		checks = append(checks, doctorCheck{
+			label:  "maps listed",
+			status: doctorStatusBlocked,
+			detail: fmt.Sprintf("failed to list maps: %v", err),
+		})
+		return checks
+	}
+	checks = append(checks, doctorCheck{
+		label:  "maps listed",
+		status: doctorStatusOK,
+		detail: fmt.Sprintf("%d map(s) listed", count),
+	})
+	return checks
+}
+
 func doctorTaskChecks(d *doctorDeps) []doctorCheck {
 	checks := []doctorCheck{doctorTaskStorageWritableCheck(d)}
 	checks = append(checks, doctorTaskLegacyCheck(d))

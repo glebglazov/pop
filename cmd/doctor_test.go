@@ -65,6 +65,7 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 		taskStorageWritable: func() (string, error) {
 			return "/data/pop/repos", nil
 		},
+		scanWayfinderMaps:   func() (int, error) { return 0, nil },
 		legacyTaskSets:      func() ([]string, error) { return nil, nil },
 		orphanedTaskStorage: func() ([]tasks.OrphanedStorage, error) { return nil, nil },
 		legacyLayoutStorage: func() ([]string, error) { return nil, nil },
@@ -135,6 +136,19 @@ func taskCheck(t *testing.T, report *doctorReport, label string) doctorCheck {
 	return check
 }
 
+func wayfinderCheck(t *testing.T, report *doctorReport, label string) doctorCheck {
+	t.Helper()
+	family, ok := familyByCommand(report, "pop wayfinder")
+	if !ok {
+		t.Fatalf("missing pop wayfinder family")
+	}
+	check, ok := checkByLabel(family, label)
+	if !ok {
+		t.Fatalf("missing %q check", label)
+	}
+	return check
+}
+
 func doctorIntentByAgent(report *doctorAgentIntentReport, agent string) (doctorAgentIntent, bool) {
 	for _, intent := range report.intended {
 		if intent.agent == agent {
@@ -168,6 +182,11 @@ func TestDoctorReportsCanonicalCommandFamilies(t *testing.T) {
 	for i, want := range canonicalDoctorCommands {
 		if got := report.families[i].command; got != want {
 			t.Fatalf("family[%d] = %q, want %q", i, got, want)
+		}
+	}
+	for _, family := range report.families {
+		if family.command == "pop work" {
+			t.Fatalf("pop work should not be a top-level doctor family; it rides tasks/queue readiness")
 		}
 	}
 }
@@ -430,6 +449,7 @@ func TestDoctorHealthyCoreFamiliesRenderOK(t *testing.T) {
 		"OK        pop project    ready",
 		"OK        pop monitor    ready",
 		"OK        pop pane       ready",
+		"OK        pop wayfinder  ready",
 	} {
 		if !strings.Contains(s, line) {
 			t.Fatalf("output missing %q:\n%s", line, s)
@@ -585,6 +605,110 @@ func TestDoctorProjectAllConfiguredExpansionFailuresBlock(t *testing.T) {
 	}
 	if !strings.Contains(family.reason, "failed to discover any selectable") {
 		t.Fatalf("blocked reason should explain expansion failure: %q", family.reason)
+	}
+}
+
+func TestDoctorWayfinderReadinessOKWithZeroMaps(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.scanWayfinderMaps = func() (int, error) { return 0, nil }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop wayfinder")
+	if !ok {
+		t.Fatalf("missing pop wayfinder family")
+	}
+	if family.status != doctorStatusOK {
+		t.Fatalf("wayfinder status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+	}
+	maps := wayfinderCheck(t, report, "maps listed")
+	if maps.status != doctorStatusOK || !strings.Contains(maps.detail, "0 map") {
+		t.Fatalf("maps check = %+v, want OK zero-map detail", maps)
+	}
+}
+
+func TestDoctorWayfinderReadinessOKWithMapsPresent(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.scanWayfinderMaps = func() (int, error) { return 2, nil }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop wayfinder")
+	if !ok {
+		t.Fatalf("missing pop wayfinder family")
+	}
+	if family.status != doctorStatusOK {
+		t.Fatalf("wayfinder status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+	}
+	maps := wayfinderCheck(t, report, "maps listed")
+	if maps.status != doctorStatusOK || !strings.Contains(maps.detail, "2 map") {
+		t.Fatalf("maps check = %+v, want OK two-map detail", maps)
+	}
+}
+
+func TestDoctorWayfinderReadinessBlocksOutsideGit(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.detectRepoContext = func() (*project.RepoContext, error) { return nil, errors.New("not git") }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop wayfinder")
+	if !ok {
+		t.Fatalf("missing pop wayfinder family")
+	}
+	if family.status != doctorStatusBlocked {
+		t.Fatalf("wayfinder status = %s, want %s", family.status, doctorStatusBlocked)
+	}
+	if !strings.Contains(family.reason, "not in a git repository") {
+		t.Fatalf("blocked reason should explain outside-git context: %q", family.reason)
+	}
+}
+
+func TestDoctorWayfinderReadinessBlocksWhenStorageUnwritable(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.taskStorageWritable = func() (string, error) {
+		return "", errors.New("write beneath workloads data dir /data/pop/workloads: permission denied")
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop wayfinder")
+	if !ok {
+		t.Fatalf("missing pop wayfinder family")
+	}
+	if family.status != doctorStatusBlocked {
+		t.Fatalf("wayfinder status = %s, want %s", family.status, doctorStatusBlocked)
+	}
+	writable := wayfinderCheck(t, report, "task storage writable")
+	if writable.status != doctorStatusBlocked {
+		t.Fatalf("writable status = %s, want %s", writable.status, doctorStatusBlocked)
+	}
+}
+
+func TestDoctorWayfinderMapListingFailureBlocks(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.scanWayfinderMaps = func() (int, error) {
+		return 0, errors.New("read wayfinder dir: permission denied")
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop wayfinder")
+	if !ok {
+		t.Fatalf("missing pop wayfinder family")
+	}
+	if family.status != doctorStatusBlocked {
+		t.Fatalf("wayfinder status = %s, want %s (%s)", family.status, doctorStatusBlocked, family.reason)
 	}
 }
 
