@@ -184,15 +184,15 @@ func readTaskSetIDs(d *Deps, tasksDir string) []string {
 	return ids
 }
 
-// ShowPathResult is the resolved absolute path printed by `task show-path`.
+// ShowPathResult is the resolved absolute path printed by show-path commands.
 type ShowPathResult struct {
 	Path string
 }
 
-// ShowPath resolves the Task storage path for the repository containing cwd, creating
-// the storage and marker on demand. With a bare Task-set identifier it resolves that set's
-// directory instead; an unknown identifier fails listing the valid ones.
-func ShowPath(d *Deps, cwd, taskSetID string) (*ShowPathResult, error) {
+// ShowStorageRoot resolves the Task-storage root for the repository containing cwd,
+// creating the storage directory tree and repo.json marker on demand. This is the
+// single storage-root resolver shared by pop work show-path and pop tasks show-path.
+func ShowStorageRoot(d *Deps, cwd string) (*ShowPathResult, error) {
 	id, err := ResolveRepositoryIdentity(d, cwd)
 	if err != nil {
 		return nil, err
@@ -200,12 +200,24 @@ func ShowPath(d *Deps, cwd, taskSetID string) (*ShowPathResult, error) {
 	if err := EnsureStorage(d, id); err != nil {
 		return nil, err
 	}
+	return &ShowPathResult{Path: id.StorageDir}, nil
+}
+
+// ShowPath resolves the Task storage path for the repository containing cwd, creating
+// the storage and marker on demand. With a bare Task-set identifier it resolves that set's
+// directory instead; an unknown identifier fails listing the valid ones.
+func ShowPath(d *Deps, cwd, taskSetID string) (*ShowPathResult, error) {
+	root, err := ShowStorageRoot(d, cwd)
+	if err != nil {
+		return nil, err
+	}
+	tasksDir := filepath.Join(root.Path, "tasks")
 
 	if taskSetID == "" {
-		return &ShowPathResult{Path: id.TasksDir}, nil
+		return &ShowPathResult{Path: tasksDir}, nil
 	}
 
-	setDir := filepath.Join(id.TasksDir, taskSetID)
+	setDir := filepath.Join(tasksDir, taskSetID)
 	info, err := d.FS.Stat(setDir)
 	if err == nil && info.IsDir() {
 		return &ShowPathResult{Path: setDir}, nil
@@ -214,7 +226,7 @@ func ShowPath(d *Deps, cwd, taskSetID string) (*ShowPathResult, error) {
 		return nil, exitErr(ExitOperational, "inspect Task set %q: %v", taskSetID, err)
 	}
 
-	valid := readTaskSetIDs(d, id.TasksDir)
+	valid := readTaskSetIDs(d, tasksDir)
 	if len(valid) == 0 {
 		return nil, exitErr(ExitSetup, "unknown Task set %q (no Task sets in storage)", taskSetID)
 	}

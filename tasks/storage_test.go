@@ -86,6 +86,58 @@ func TestShowPathCreatesStorageAndMarker(t *testing.T) {
 	}
 }
 
+func TestShowStorageRootCreatesStorageAndMarker(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	commonDir := filepath.Join(root, "repo", ".git")
+	if err := os.MkdirAll(commonDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := storageDeps(t, dataHome, commonDir)
+
+	res, err := ShowStorageRoot(d, filepath.Join(root, "repo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantPrefix := filepath.Join(dataHome, "pop", "repos")
+	if !strings.HasPrefix(res.Path, wantPrefix) {
+		t.Fatalf("path %q not under %q", res.Path, wantPrefix)
+	}
+	if filepath.Base(res.Path) == "tasks" {
+		t.Fatalf("path %q is tasks dir, want storage root", res.Path)
+	}
+	if !strings.Contains(filepath.Base(res.Path), "repo-") {
+		t.Fatalf("storage dir %q not named repo-<hash>", res.Path)
+	}
+
+	tasksDir := filepath.Join(res.Path, "tasks")
+	if info, err := os.Stat(tasksDir); err != nil || !info.IsDir() {
+		t.Fatalf("tasks dir not created: %v", err)
+	}
+
+	markerPath := filepath.Join(res.Path, "repo.json")
+	data, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("repo.json not created: %v", err)
+	}
+	var marker RepoMarker
+	if err := json.Unmarshal(data, &marker); err != nil {
+		t.Fatal(err)
+	}
+	if marker.RepositoryPath != canonical(t, commonDir) {
+		t.Fatalf("marker repository_path = %q, want %q", marker.RepositoryPath, canonical(t, commonDir))
+	}
+
+	tasksRes, err := ShowPath(d, filepath.Join(root, "repo"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tasksRes.Path != tasksDir {
+		t.Fatalf("ShowPath = %q, want %q (= ShowStorageRoot/tasks)", tasksRes.Path, tasksDir)
+	}
+}
+
 func TestShowPathIdempotent(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
@@ -250,6 +302,18 @@ func TestShowPathOutsideGitRepo(t *testing.T) {
 	var exit *ExitError
 	if !errors.As(err, &exit) || exit.Code == 0 {
 		t.Fatalf("expected non-zero ExitError, got %v", err)
+	}
+
+	_, rootErr := ShowStorageRoot(d, root)
+	if rootErr == nil {
+		t.Fatal("expected error outside git repository")
+	}
+	var rootExit *ExitError
+	if !errors.As(rootErr, &rootExit) || rootExit.Code == 0 {
+		t.Fatalf("expected non-zero ExitError, got %v", rootErr)
+	}
+	if rootExit.Code != exit.Code {
+		t.Fatalf("exit codes differ: ShowStorageRoot=%d ShowPath=%d", rootExit.Code, exit.Code)
 	}
 }
 
