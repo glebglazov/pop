@@ -255,10 +255,10 @@ type VerifyConfig struct {
 //	[workload.git]             → [tasks.git]
 //	[workload.agents.<name>]   → [tasks.presets.<name>]
 type WorkloadConfig struct {
-	DefaultAgents []string                               `toml:"default_agents" desc:"Deprecated: use [tasks.implement].agents."`
-	Verify        *WorkloadVerifyConfig                  `toml:"verify" desc:"Deprecated: use [tasks.verify]."`
-	Git           *TaskGitConfig                         `toml:"git" desc:"Deprecated: use [tasks.git]."`
-	Agents        map[string]WorkloadAgentConfig         `toml:"agents" desc:"Deprecated: use [tasks.presets]."`
+	DefaultAgents []string                       `toml:"default_agents" desc:"Deprecated: use [tasks.implement].agents."`
+	Verify        *WorkloadVerifyConfig          `toml:"verify" desc:"Deprecated: use [tasks.verify]."`
+	Git           *TaskGitConfig                 `toml:"git" desc:"Deprecated: use [tasks.git]."`
+	Agents        map[string]WorkloadAgentConfig `toml:"agents" desc:"Deprecated: use [tasks.presets]."`
 }
 
 // WorkloadVerifyConfig is the deprecated [workload.verify] table. Fields match
@@ -584,12 +584,12 @@ type Config struct {
 	Select         *ProjectConfig        `toml:"select" desc:"Deprecated: use [project]."`
 	PaneMonitoring *PaneMonitoringConfig `toml:"pane_monitoring" desc:"Pane attention/status monitoring daemon settings ([pane_monitoring] table)."`
 	Dashboard      *DashboardConfig      `toml:"dashboard" desc:"Shared dashboard and cursor behavior ([dashboard] table)."`
-	Task   *TasksConfig            `toml:"tasks" include:"fields" desc:"Task-set execution defaults ([tasks] table)."`
+	Task           *TasksConfig          `toml:"tasks" include:"fields" desc:"Task-set execution defaults ([tasks] table)."`
 	// Deprecated: use Task. The [workload] table was renamed to [tasks] in
 	// ADR-0092. Old configs still load and warn; the alias is structural
 	// (not 1:1). Removal is gated in CLEANUP.md.
-	Workload *WorkloadConfig `toml:"workload" desc:"Deprecated: use [tasks] (ADR-0092)."`
-	Effort map[string]EffortConfig `toml:"effort" include:"map-first-wins" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
+	Workload *WorkloadConfig         `toml:"workload" desc:"Deprecated: use [tasks] (ADR-0092)."`
+	Effort   map[string]EffortConfig `toml:"effort" include:"map-first-wins" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
 	// Workbenches is the canonical TOML key for session blueprints.
 	Workbenches []Workbench `toml:"workbenches" include:"append" desc:"Global session blueprints (templates)."`
 	// WorkbenchOpts holds the [workbench] options table (pick_on_create, order).
@@ -679,8 +679,10 @@ func (c *Config) ProjectEntries() ([]ProjectEntry, error) {
 // trunk is the sole exception — it is per-checkout machine topology, never valid
 // in committed .pop.toml — so it lives on the individual structs, not here.
 type RepoScopeConfig struct {
-	// Workbenches are repo-scope session blueprints (canonical key).
-	Workbenches []Workbench `toml:"workbenches" desc:"Repo-scope session blueprints (templates)."`
+	// Workbenches are repo-scope session blueprints (canonical key). The walker
+	// unions them by name across the repo-scope ladder (ADR-0122), so a
+	// higher-precedence source overrides a same-named blueprint from a lower one.
+	Workbenches []Workbench `toml:"workbenches" merge:"list-by-key=name" desc:"Repo-scope session blueprints (templates)."`
 	// PreferredWorkbench names the repo-default Workbench that auto-applies when
 	// a session is born for any checkout of this repo (ADR-0078). It is keyed by
 	// repository identity, not the exact checkout path, so it is a coarse default
@@ -804,43 +806,11 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 	if err := c.blockingFindingFor("repo"); err != nil {
 		return RepoConfig{}, err
 	}
-	canon := canonicalPath(d, checkoutPath)
-	identity := repoIdentity(d, checkoutPath)
-
-	// Find the matching global override block, if any.
-	var override *RepoOverrideConfig
-	var executionBaseApplies bool
-	if c != nil {
-		for rawKey, block := range c.Repo {
-			keyCanon := canonicalPath(d, rawKey)
-			keyIdentity := repoIdentity(d, rawKey)
-			if keyIdentity != identity {
-				continue
-			}
-			b := block
-			override = &b
-			executionBaseApplies = (keyCanon == canon)
-		}
-	}
-
-	// Load .pop.toml from the repo identity root (may be zero config).
-	popTOML, popErr := LoadRepoConfigWith(d, identity)
-
-	// Merge: start with .pop.toml, then layer global override on top. For any
-	// shared repo-scope key the personal [repo."<path>"] value beats the repo's
-	// committed .pop.toml (ADR-0083 repo-scope ordering). trunk is per-checkout,
-	// applied only when the override's key path exactly matches checkoutPath.
-	result := popTOML
-	if override != nil {
-		if override.PreferredWorkbench != "" {
-			result.PreferredWorkbench = override.PreferredWorkbench
-		}
-		if override.Trunk != nil && executionBaseApplies {
-			result.Trunk = *override.Trunk
-		}
-	}
-
-	return result, popErr
+	// The shared enumerator does the identity walk, the [repo."<path>"] match, and
+	// the identity-root .pop.toml read; the walker merges the shared RepoScopeConfig
+	// down the ladder (ADR-0083, ADR-0122). trunk stays caller-side inside
+	// resolveRepoConfig with its exact-checkout-path condition.
+	return c.newRepoScope(d, checkoutPath).resolveRepoConfig()
 }
 
 // ResolveWorkbenchesWith returns the union of Workbenches from all three homes
@@ -849,70 +819,59 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 // Name collisions emit warnings. A bare repo's .pop.toml templates are visible
 // from all its worktrees via Repository identity.
 func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workbench, []string) {
-	// Start with global templates (lowest precedence, already validated at Load)
-	var result []Workbench
-	seen := make(map[string]string) // name -> source for collision warnings
+	e := c.newRepoScope(d, checkoutPath)
+
+	var merged RepoScopeConfig
 	var warnings []string
+	seen := make(map[string]string) // name -> source for collision warnings
 
-	if c != nil {
-		for _, tmpl := range c.Workbenches {
-			result = append(result, tmpl)
-			seen[tmpl.Name] = "global config"
+	// unionInto walker-merges one source's workbenches into merged by name
+	// (ADR-0122 list-by-key), the later ladder source winning. onCollide (nil for
+	// the base) builds today's per-source warning naming the prior source, read
+	// from seen before this source's names are recorded.
+	unionInto := func(src RepoScopeConfig, source string, onCollide func(name, prior string) string) {
+		pol := repoScopePolicy()
+		if onCollide != nil {
+			pol.onCollision = func(keyPath string) {
+				name := workbenchCollisionName(keyPath)
+				warnings = append(warnings, onCollide(name, seen[name]))
+			}
+		}
+		s := RepoScopeConfig{Workbenches: src.Workbenches}
+		mergeWalk(&merged, &s, repoScopeMetadata(s), pol)
+		for _, tmpl := range src.Workbenches {
+			seen[tmpl.Name] = source
 		}
 	}
 
-	// Load .pop.toml from repo identity root (medium precedence)
-	identity := repoIdentity(d, checkoutPath)
-	popTOML, _ := LoadRepoConfigWith(d, identity)
-	for _, tmpl := range popTOML.Workbenches {
-		if source, exists := seen[tmpl.Name]; exists {
-			warnings = append(warnings, fmt.Sprintf(
+	// Global templates (lowest precedence, already validated at Load).
+	if c != nil {
+		unionInto(RepoScopeConfig{Workbenches: c.Workbenches}, "global config", nil)
+	}
+
+	// .pop.toml from the repo identity root (medium precedence).
+	popTOML, _ := e.popTOML(e.identity)
+	unionInto(RepoScopeConfig{Workbenches: popTOML.Workbenches}, ".pop.toml",
+		func(name, prior string) string {
+			return fmt.Sprintf(
 				"session template %q defined in both %s and .pop.toml; using .pop.toml",
-				tmpl.Name, source,
-			))
-			// Remove the lower-precedence version
-			for i := len(result) - 1; i >= 0; i-- {
-				if result[i].Name == tmpl.Name {
-					result = append(result[:i], result[i+1:]...)
-					break
-				}
-			}
-		}
-		result = append(result, tmpl)
-		seen[tmpl.Name] = ".pop.toml"
+				name, prior,
+			)
+		})
+
+	// The identity-matched [repo."<path>"] override (highest precedence).
+	if e.overrideFound {
+		keyCanon := e.overrideKeyCanon
+		unionInto(e.override.RepoScopeConfig, fmt.Sprintf("[repo.%q]", keyCanon),
+			func(name, prior string) string {
+				return fmt.Sprintf(
+					"session template %q defined in both %s and [repo.%q]; using [repo.%q]",
+					name, prior, keyCanon, keyCanon,
+				)
+			})
 	}
 
-	// Find matching [repo."<path>"] override (highest precedence)
-	if c != nil {
-		for rawKey, block := range c.Repo {
-			keyCanon := canonicalPath(d, rawKey)
-			keyIdentity := repoIdentity(d, rawKey)
-			// Match by identity (repo-level) not exact path (worktree-level)
-			if keyIdentity != identity {
-				continue
-			}
-			for _, tmpl := range block.Workbenches {
-				if source, exists := seen[tmpl.Name]; exists {
-					warnings = append(warnings, fmt.Sprintf(
-						"session template %q defined in both %s and [repo.%q]; using [repo.%q]",
-						tmpl.Name, source, keyCanon, keyCanon,
-					))
-					// Remove the lower-precedence version
-					for i := len(result) - 1; i >= 0; i-- {
-						if result[i].Name == tmpl.Name {
-							result = append(result[:i], result[i+1:]...)
-							break
-						}
-					}
-				}
-				result = append(result, tmpl)
-				seen[tmpl.Name] = fmt.Sprintf("[repo.%q]", keyCanon)
-			}
-			break // Only one override block can match per identity
-		}
-	}
-
-	return result, warnings
+	return merged.Workbenches, warnings
 }
 
 // ResolveAttemptRetryDelays parses [tasks].attempt_retry_delays, applying
@@ -1063,6 +1022,7 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 	if c == nil {
 		return "", nil
 	}
+	e := c.newRepoScope(d, checkoutPath)
 
 	var warnings []string
 	// resolves reports whether name is a real Workbench for this checkout,
@@ -1102,37 +1062,28 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 		return "", false
 	}
 
-	// Layer 1: config.toml [repo."<path>"] — hand-authored, central, repo-specific.
-	if name, done := consider(c.repoPreferredWorkbench(d, checkoutPath)); done {
-		return name, warnings
-	}
-
-	// Layer 2: config.toml global keys — preferred_workbench has no universal
-	// global home, so this position never supplies it.
-
-	// Layer 3: ./.pop.toml — hand-authored, repo in-tree, this worktree.
-	if name, done := consider(c.popTOMLPreferredWorkbench(d, checkoutPath)); done {
-		return name, warnings
-	}
-
-	// Layer 4: <trunk>/.pop.toml — hand-authored, repo in-tree, inherited from the
-	// Trunk worktree (falling back to the Repository identity root for a bare
-	// repo). Skipped when the inherited anchor is this very checkout (read-once
-	// guard: Layer 3 already read it, and re-reading would double-warn a stale name).
-	if anchor := c.inheritedRepoConfigAnchor(d, checkoutPath); anchor != "" &&
-		canonicalPath(d, anchor) != canonicalPath(d, checkoutPath) {
-		if name, done := consider(c.popTOMLPreferredWorkbench(d, anchor)); done {
-			return name, warnings
+	// Iterate the shared ADR-0083 source chain (the enumerator owns the anchor
+	// resolution and the read-once guard). Hand-authored layers fall through when
+	// empty; runtime layers keep their three-valued explicit-none short-circuit.
+	for _, src := range e.preferredSources() {
+		if !src.runtime {
+			if name, done := consider(src.name); done {
+				return name, warnings
+			}
+			continue
 		}
-	}
-
-	// Layer 5: config.runtime.toml[<wt-path>] — runtime, this worktree (ctrl+w).
-	if name, present, err := RuntimePreferredWorkbenchWith(d, checkoutPath); err != nil {
-		debug.Error("config: read runtime preferred workbench for %s: %v", checkoutPath, err)
-	} else if present {
+		name, present, err := RuntimePreferredWorkbenchWith(d, src.runtimePath)
+		if err != nil {
+			debug.Error("config: read %s for %s: %v", src.debugLabel, src.runtimePath, err)
+			continue
+		}
+		if !present {
+			continue
+		}
 		if name == "" {
-			// Explicit none: flat/prompt here, short-circuiting the trunk runtime
-			// layer below (but not the hand-authored layers above, already passed).
+			// Explicit none: flat/prompt here, short-circuiting the remaining
+			// (lower) runtime layer (but not the hand-authored layers above, which
+			// have already been passed).
 			return "", warnings
 		}
 		if resolved, done := consider(name); done {
@@ -1140,79 +1091,8 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 		}
 	}
 
-	// Layer 6: config.runtime.toml[<trunk-path>] — runtime, inherited (ADR-0078).
-	// A worktree with no entry of its own inherits trunk's current choice,
-	// resolved dynamically at open — re-pointing trunk follows through to
-	// un-overridden children. Skipped when there is no trunk anchor (an
-	// unconfigured bare repo) or when this checkout *is* the trunk (Layer 5
-	// already read its own entry, so re-reading would double-warn on a stale name).
-	if d.Trunk != nil {
-		if trunkPath, ok := d.Trunk(checkoutPath); ok && trunkPath != "" &&
-			canonicalPath(d, trunkPath) != canonicalPath(d, checkoutPath) {
-			if name, present, err := RuntimePreferredWorkbenchWith(d, trunkPath); err != nil {
-				debug.Error("config: read trunk preferred workbench for %s: %v", trunkPath, err)
-			} else if present {
-				if name == "" {
-					// Trunk opts out: flat/prompt here.
-					return "", warnings
-				}
-				if resolved, done := consider(name); done {
-					return resolved, warnings
-				}
-			}
-		}
-	}
-
 	// None.
 	return "", warnings
-}
-
-// popTOMLPreferredWorkbench reads preferred_workbench from the committed .pop.toml
-// at dir, or "" when the file is absent, the key is unset, or the file is
-// malformed (the read error degrades to none, logged for debugging — a broken
-// in-tree file must not block getting into a session).
-func (c *Config) popTOMLPreferredWorkbench(d *Deps, dir string) string {
-	cfg, err := LoadRepoConfigWith(d, dir)
-	if err != nil {
-		debug.Error("config: read .pop.toml preferred workbench at %s: %v", dir, err)
-		return ""
-	}
-	return cfg.PreferredWorkbench
-}
-
-// inheritedRepoConfigAnchor returns the checkout whose committed .pop.toml
-// supplies the inherited (layer 4) repo-scope value for checkoutPath: the Trunk
-// worktree when the resolver reports one, otherwise the Repository identity root
-// — where a bare repo's shared .pop.toml lives (ADR-0083). A nil resolver or a
-// non-bare repo with no trunk yields the identity root, which for a non-bare
-// checkout is the checkout itself (Layer 4's read-once guard then skips it).
-func (c *Config) inheritedRepoConfigAnchor(d *Deps, checkoutPath string) string {
-	if d != nil && d.Trunk != nil {
-		if trunkPath, ok := d.Trunk(checkoutPath); ok && trunkPath != "" {
-			return trunkPath
-		}
-	}
-	return repoIdentity(d, checkoutPath)
-}
-
-// repoPreferredWorkbench returns the preferred_workbench declared on the global
-// [repo."<path>"] block whose key shares checkoutPath's repository identity, or
-// "" when none. Unlike trunk (which is per-checkout), this default is keyed by
-// identity so every worktree of the repo shares it.
-func (c *Config) repoPreferredWorkbench(d *Deps, checkoutPath string) string {
-	if c == nil {
-		return ""
-	}
-	identity := repoIdentity(d, checkoutPath)
-	for rawKey, block := range c.Repo {
-		if repoIdentity(d, rawKey) != identity {
-			continue
-		}
-		if block.PreferredWorkbench != "" {
-			return block.PreferredWorkbench
-		}
-	}
-	return ""
 }
 
 // ExpandedPath represents a resolved project path with display metadata

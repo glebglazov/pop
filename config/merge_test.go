@@ -233,6 +233,17 @@ func TestConfigMergeTagsAreLegal(t *testing.T) {
 	}
 }
 
+// TestRepoScopeConfigMergeTagsAreLegal runs the slice-01 drift check over the
+// shared repo-scope schema (ADR-0083), which the repo-scope enumerator (slice
+// 04) merges same-type via the walker. It catches a merge: tag naming an unknown
+// kind, a malformed list-by-key, or a kind the field's Go type cannot support —
+// e.g. workbenches' list-by-key=name key field must exist on Workbench.
+func TestRepoScopeConfigMergeTagsAreLegal(t *testing.T) {
+	if problems := checkMergeTags(reflect.TypeOf(RepoScopeConfig{})); len(problems) != 0 {
+		t.Fatalf("RepoScopeConfig has illegal merge tags:\n%s", strings.Join(problems, "\n"))
+	}
+}
+
 func TestDefaultRuntimeConfigPathWith(t *testing.T) {
 	d := &Deps{FS: &deps.MockFileSystem{
 		GetenvFunc: func(key string) string {
