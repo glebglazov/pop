@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -189,31 +190,31 @@ type TasksConfig struct {
 	// MaxTries is the default started-attempt cap for both implement and verify.
 	// Zero/unset ⇒ DefaultTaskMaxTries. [tasks.implement] and [tasks.verify] may
 	// each override their side independently.
-	MaxTries *int `toml:"max_tries" desc:"Default started-attempt cap for implement and verify (default 3)."`
+	MaxTries *int `toml:"max_tries" include:"replace" desc:"Default started-attempt cap for implement and verify (default 3)."`
 	// AttemptRetryDelays is the ordered inter-attempt wait schedule shared by
 	// implement and verify retries. Omitted ⇒ DefaultTaskAttemptRetryDelays; an
 	// explicit empty array ⇒ zero delay (instant retries).
-	AttemptRetryDelays []string `toml:"attempt_retry_delays" desc:"Inter-attempt retry delay schedule (array of duration strings); shared by implement and verify."`
+	AttemptRetryDelays []string `toml:"attempt_retry_delays" include:"replace" desc:"Inter-attempt retry delay schedule (array of duration strings); shared by implement and verify."`
 	// Implement holds the ordered worker fallback list for `pop tasks implement`.
-	Implement *ImplementConfig `toml:"implement" desc:"Implement sub-command settings ([tasks.implement] table)."`
+	Implement *ImplementConfig `toml:"implement" include:"fields" desc:"Implement sub-command settings ([tasks.implement] table)."`
 	// Presets is the per-preset settings map (e.g. output mode). Keyed by agent
 	// preset name. Renamed from [workload.agents] so "agents" no longer means
 	// both an ordered list and a settings map.
-	Presets map[string]TaskAgentConfig `toml:"presets" desc:"Per-agent preset settings ([tasks.presets.<name>] tables)."`
+	Presets map[string]TaskAgentConfig `toml:"presets" include:"map-first-wins" desc:"Per-agent preset settings ([tasks.presets.<name>] tables)."`
 	// Git holds commit-time git overrides for Pop's own commits.
-	Git *TaskGitConfig `toml:"git" desc:"Commit-time git overrides for Pop's commits ([tasks.git] table)."`
+	Git *TaskGitConfig `toml:"git" include:"replace" desc:"Commit-time git overrides for Pop's commits ([tasks.git] table)."`
 	// Verify holds Agent-verification settings (ADR-0086).
-	Verify *VerifyConfig `toml:"verify" desc:"Agent-verification settings ([tasks.verify] table)."`
+	Verify *VerifyConfig `toml:"verify" include:"replace" desc:"Agent-verification settings ([tasks.verify] table)."`
 }
 
 // ImplementConfig holds settings for the `pop tasks implement` sub-command.
 type ImplementConfig struct {
 	// Agents is the ordered in-process fallback list used by
 	// `pop tasks implement` for unpinned tasks when --agent is absent.
-	Agents []string `toml:"agents" desc:"Ordered fallback agent list for unpinned tasks."`
+	Agents []string `toml:"agents" include:"replace" desc:"Ordered fallback agent list for unpinned tasks."`
 	// MaxTries overrides [tasks].max_tries for implement only. Zero/unset falls
 	// through to the root cap. An explicit --max-tries flag still wins.
-	MaxTries *int `toml:"max_tries" desc:"Implement started-attempt cap override (falls back to [tasks].max_tries)."`
+	MaxTries *int `toml:"max_tries" include:"replace" desc:"Implement started-attempt cap override (falls back to [tasks].max_tries)."`
 }
 
 // VerifyConfig holds Agent-verification settings (ADR-0086). It is the
@@ -298,7 +299,7 @@ type WorkbenchOptions struct {
 	// Workbench shows a quick-search list to pick a Workbench (or "no workbench")
 	// before the session is created. Default false ⇒ the project picker behaves
 	// exactly as today (no prompt).
-	PickOnCreate bool `toml:"pick_on_create" desc:"Prompt to pick a Workbench when creating a session with no live one."`
+	PickOnCreate bool `toml:"pick_on_create" include:"replace" desc:"Prompt to pick a Workbench when creating a session with no live one."`
 
 	// Order fixes the display sequence of the interactive Workbench lists (the
 	// create prompt and the Preferred-workbench picker). Tokens are the literal
@@ -307,7 +308,7 @@ type WorkbenchOptions struct {
 	// follows in default order ("<empty>", Workbenches in resolution order,
 	// "<reset>"). A token that resolves to nothing is ignored. Settable from an
 	// included file (first definition wins; the main config wins over includes).
-	Order []string `toml:"order" desc:"Fixed display order of Workbench-list tokens (array of on-screen labels)."`
+	Order []string `toml:"order" include:"replace" desc:"Fixed display order of Workbench-list tokens (array of on-screen labels)."`
 }
 
 // Workbench is a named blueprint for an ordered list of tmux windows,
@@ -570,7 +571,7 @@ func (f Finding) Error() string { return f.Message }
 
 type Config struct {
 	Includes              []string             `toml:"includes" desc:"Additional config files to merge in (paths, later wins)."`
-	Projects              []ProjectEntry       `toml:"projects" desc:"Directories or globs offered in the project picker."`
+	Projects              []ProjectEntry       `toml:"projects" include:"append" desc:"Directories or globs offered in the project picker."`
 	Commands              []UserDefinedCommand `toml:"commands" desc:"User-defined commands surfaced in the picker."`
 	ExcludeCurrentSession bool                 `toml:"exclude_current_session" desc:"Hide the current tmux session from the picker."`
 	// Deprecated: use ExcludeCurrentSession. TODO: remove after v1.0.
@@ -583,16 +584,16 @@ type Config struct {
 	Select         *ProjectConfig        `toml:"select" desc:"Deprecated: use [project]."`
 	PaneMonitoring *PaneMonitoringConfig `toml:"pane_monitoring" desc:"Pane attention/status monitoring daemon settings ([pane_monitoring] table)."`
 	Dashboard      *DashboardConfig      `toml:"dashboard" desc:"Shared dashboard and cursor behavior ([dashboard] table)."`
-	Task   *TasksConfig            `toml:"tasks" desc:"Task-set execution defaults ([tasks] table)."`
+	Task   *TasksConfig            `toml:"tasks" include:"fields" desc:"Task-set execution defaults ([tasks] table)."`
 	// Deprecated: use Task. The [workload] table was renamed to [tasks] in
 	// ADR-0092. Old configs still load and warn; the alias is structural
 	// (not 1:1). Removal is gated in CLEANUP.md.
 	Workload *WorkloadConfig `toml:"workload" desc:"Deprecated: use [tasks] (ADR-0092)."`
-	Effort map[string]EffortConfig `toml:"effort" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
+	Effort map[string]EffortConfig `toml:"effort" include:"map-first-wins" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
 	// Workbenches is the canonical TOML key for session blueprints.
-	Workbenches []Workbench `toml:"workbenches" desc:"Global session blueprints (templates)."`
+	Workbenches []Workbench `toml:"workbenches" include:"append" desc:"Global session blueprints (templates)."`
 	// WorkbenchOpts holds the [workbench] options table (pick_on_create, order).
-	WorkbenchOpts *WorkbenchOptions   `toml:"workbench" desc:"Workbench options ([workbench] table)."`
+	WorkbenchOpts *WorkbenchOptions   `toml:"workbench" include:"fields" desc:"Workbench options ([workbench] table)."`
 	Routines      *RoutinesConfig     `toml:"routines" desc:"Routine settings ([routines] table)."`
 	Queue         *QueueConfig        `toml:"queue" desc:"Queue supervisor settings ([queue] table)."`
 	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
@@ -601,7 +602,7 @@ type Config struct {
 	// The key is canonicalized (~ expanded, symlinks resolved) at resolution
 	// time; any worktree path or bare dir of the same repo resolves to the
 	// same repository identity.
-	Repo map[string]RepoOverrideConfig `toml:"repo" merge:"map" desc:"Per-repo override blocks keyed by any checkout path ([repo.\"<path>\"] tables)."`
+	Repo map[string]RepoOverrideConfig `toml:"repo" merge:"map" include:"map-first-wins" desc:"Per-repo override blocks keyed by any checkout path ([repo.\"<path>\"] tables)."`
 
 	// Findings holds semantic config problems collected at load time (ADR 0054).
 	// Each is keyed to its config path; callers consult them through value
@@ -1537,18 +1538,26 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	}
 
 	configDir := filepath.Dir(path)
-	// [workbench] options merge with "first definition wins": the main file wins,
-	// and the first include to set a field wins over later includes. Seed the
-	// per-field claims from the main file's MetaData — never from cfg.WorkbenchOpts
-	// being non-nil, since the runtime [workbench.preferred] table (ADR-0078) can
-	// leave it non-nil with pick_on_create/order unset.
-	workbenchPickClaimed := md.IsDefined("workbench", "pick_on_create")
-	workbenchOrderClaimed := md.IsDefined("workbench", "order")
+	// Include merge is first-definition-wins across the ADR-0037 whitelist,
+	// driven by the include: tags through the shared walker (ADR-0122). One
+	// policy threads its claimed ledger across every include so the first source
+	// to set a field wins over later ones; the ledger is seeded from the parent
+	// config so an include never overrides a field the parent already set. The
+	// collision callback reads the walker's dotted key path and rebuilds today's
+	// exact per-section warning strings; whitelist enforcement ("ignored")
+	// stays with includeFileWarnings below, so untagged sections are dropped
+	// silently by the walker and warned once by that helper.
+	var currentInclude string
+	includePol := includePolicy(func(keyPath string) {
+		cfg.Warnings = append(cfg.Warnings, includeCollisionMessage(currentInclude, keyPath))
+	}, nil)
+	seedIncludeClaims(includePol, &cfg, md)
 	for _, include := range cfg.Includes {
 		expanded := expandHomeWith(d, include)
 		if !filepath.IsAbs(expanded) {
 			expanded = filepath.Join(configDir, expanded)
 		}
+		currentInclude = expanded
 
 		var included Config
 		includedMD, err := toml.DecodeFile(expanded, &included)
@@ -1571,42 +1580,138 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		for _, f := range repoBlockWarnings(expanded, includedMD) {
 			cfg.recordFinding(f)
 		}
-		// Migrate deprecated [workload] → [tasks] in included file (ADR-0092)
+		// Migrate deprecated [workload] → [tasks] in included file (ADR-0092).
+		// This resolves included.Task before the merge so [workload]-sourced
+		// fields participate; it carries no [tasks.*] keys in includedMD, so the
+		// task subtree merges from metadata synthesized off the resolved struct.
+		hadWorkload := included.Workload != nil
 		for _, f := range workloadMigrationFindings(&included, expanded) {
 			cfg.recordFinding(f)
 		}
 		cfg.Warnings = append(cfg.Warnings, includeFileWarnings(expanded, &included, d)...)
-
-		cfg.Projects = append(cfg.Projects, included.Projects...)
-		mergeIncludedTask(&cfg, included.Task, expanded)
-		mergeIncludedEffort(&cfg, included.Effort, expanded)
 
 		if included.Workbenches != nil {
 			tmplFindings, validTemplates := workbenchFindings(expanded, included.Workbenches)
 			for _, f := range tmplFindings {
 				cfg.recordFinding(f)
 			}
-			cfg.Workbenches = append(cfg.Workbenches, validTemplates...)
+			included.Workbenches = validTemplates
 		}
 
-		mergeIncludedWorkbenchOpts(&cfg, included.WorkbenchOpts, includedMD, expanded, &workbenchPickClaimed, &workbenchOrderClaimed)
-
-		for key, block := range included.Repo {
-			if _, exists := cfg.Repo[key]; exists {
-				cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-					"%s: [repo.%q] skipped, key already defined (first definition wins)",
-					expanded, key,
-				))
-				continue
+		if hadWorkload {
+			// Merge every whitelisted section except tasks off the include's own
+			// metadata, then the resolved task config off synthesized metadata so
+			// [workload]-migrated fields land too.
+			savedTask := included.Task
+			included.Task = nil
+			mergeWalk(&cfg, &included, includedMD, includePol)
+			included.Task = savedTask
+			if savedTask != nil {
+				taskSrc := Config{Task: savedTask}
+				mergeWalk(&cfg, &taskSrc, taskConfigMetadata(savedTask), includePol)
 			}
-			if cfg.Repo == nil {
-				cfg.Repo = make(map[string]RepoOverrideConfig)
-			}
-			cfg.Repo[key] = block
+		} else {
+			mergeWalk(&cfg, &included, includedMD, includePol)
 		}
 	}
 
 	return &cfg, nil
+}
+
+// seedIncludeClaims marks every first-wins include field the parent config
+// already set as claimed, so a later include loses the collision to it. Map and
+// append sections need no seeding — they collide off the destination's live
+// keys/order. Task claims are value-driven (mirroring the pre-walker
+// mergeIncludedTask checks, so a parent [workload]-migrated field also blocks an
+// include); [workbench] claims are metadata-driven off the parent file, since a
+// runtime [workbench.preferred] table can leave WorkbenchOpts non-nil with
+// pick_on_create/order unset.
+func seedIncludeClaims(policy *mergePolicy, cfg *Config, md toml.MetaData) {
+	if cfg.Task != nil {
+		if cfg.Task.MaxTries != nil {
+			policy.claim("tasks.max_tries")
+		}
+		if cfg.Task.AttemptRetryDelays != nil {
+			policy.claim("tasks.attempt_retry_delays")
+		}
+		if cfg.Task.Implement != nil {
+			if len(cfg.Task.Implement.Agents) > 0 {
+				policy.claim("tasks.implement.agents")
+			}
+			if cfg.Task.Implement.MaxTries != nil {
+				policy.claim("tasks.implement.max_tries")
+			}
+		}
+		if cfg.Task.Git != nil {
+			policy.claim("tasks.git")
+		}
+		if cfg.Task.Verify != nil {
+			policy.claim("tasks.verify")
+		}
+	}
+	if md.IsDefined("workbench", "pick_on_create") {
+		policy.claim("workbench.pick_on_create")
+	}
+	if md.IsDefined("workbench", "order") {
+		policy.claim("workbench.order")
+	}
+}
+
+// taskConfigMetadata synthesizes a toml.MetaData whose defined keys mirror the
+// non-nil fields of a resolved [tasks] config, by round-tripping it through the
+// encoder. It lets the walker merge a [workload]-migrated task subtree, whose
+// fields never appear in the include file's own metadata. Nil pointers and nil
+// slices are omitted by the encoder, so only fields the config actually sets
+// are reported defined.
+func taskConfigMetadata(task *TasksConfig) toml.MetaData {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(struct {
+		Tasks *TasksConfig `toml:"tasks"`
+	}{Tasks: task}); err != nil {
+		return toml.MetaData{}
+	}
+	var probe Config
+	md, err := toml.Decode(buf.String(), &probe)
+	if err != nil {
+		return toml.MetaData{}
+	}
+	return md
+}
+
+// includeCollisionMessage rebuilds the byte-identical first-wins skip warning
+// for a whitelisted include field, from the walker's dotted key path. The
+// per-section wording predates the walker and is pinned by the config test
+// suite: map keys stringify into the path, so the map-backed sections are
+// matched by prefix and the fixed fields by exact key.
+func includeCollisionMessage(path, keyPath string) string {
+	if key, ok := strings.CutPrefix(keyPath, "repo."); ok {
+		return fmt.Sprintf("%s: [repo.%q] skipped, key already defined (first definition wins)", path, key)
+	}
+	if agent, ok := strings.CutPrefix(keyPath, "effort."); ok {
+		return fmt.Sprintf("%s: [effort.%s] skipped, already defined (first definition wins)", path, agent)
+	}
+	if preset, ok := strings.CutPrefix(keyPath, "tasks.presets."); ok {
+		return fmt.Sprintf("%s: [tasks.presets.%s] skipped, already defined (first definition wins)", path, preset)
+	}
+	switch keyPath {
+	case "tasks.implement.agents":
+		return fmt.Sprintf("%s: [tasks.implement].agents skipped, already defined (first definition wins)", path)
+	case "tasks.implement.max_tries":
+		return fmt.Sprintf("%s: [tasks.implement].max_tries skipped, already defined (first definition wins)", path)
+	case "tasks.max_tries":
+		return fmt.Sprintf("%s: [tasks].max_tries skipped, already defined (first definition wins)", path)
+	case "tasks.attempt_retry_delays":
+		return fmt.Sprintf("%s: [tasks].attempt_retry_delays skipped, already defined (first definition wins)", path)
+	case "tasks.git":
+		return fmt.Sprintf("%s: [tasks.git] skipped, already defined (first definition wins)", path)
+	case "tasks.verify":
+		return fmt.Sprintf("%s: [tasks.verify] skipped, already defined (first definition wins)", path)
+	case "workbench.pick_on_create":
+		return fmt.Sprintf("%s: [workbench] pick_on_create skipped, already defined (first definition wins)", path)
+	case "workbench.order":
+		return fmt.Sprintf("%s: [workbench] order skipped, already defined (first definition wins)", path)
+	}
+	return fmt.Sprintf("%s: %s skipped, already defined (first definition wins)", path, keyPath)
 }
 
 // workbenchFindings validates Workbenches at load time. A template with a
@@ -2122,195 +2227,9 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	return warnings
 }
 
-// mergeIncludedWorkbenchOpts folds an included file's [workbench] options block
-// into cfg. Each field merges independently with "first definition wins": the
-// main config's fields win, and among includes the first to set a field wins;
-// a later definition is skipped with a warning. pickClaimed/orderClaimed carry
-// prior definedness across the include loop (seeded from the main file's
-// MetaData). Definedness is driven off the include's MetaData, never off value
-// zero-ness, so an include that sets pick_on_create = false still claims it.
-func mergeIncludedWorkbenchOpts(cfg *Config, included *WorkbenchOptions, md toml.MetaData, path string, pickClaimed, orderClaimed *bool) {
-	if included == nil {
-		return
-	}
-	if md.IsDefined("workbench", "pick_on_create") {
-		if *pickClaimed {
-			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [workbench] pick_on_create skipped, already defined (first definition wins)", path))
-		} else {
-			ensureWorkbenchOpts(cfg).PickOnCreate = included.PickOnCreate
-			*pickClaimed = true
-		}
-	}
-	if md.IsDefined("workbench", "order") {
-		if *orderClaimed {
-			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [workbench] order skipped, already defined (first definition wins)", path))
-		} else {
-			ensureWorkbenchOpts(cfg).Order = append([]string(nil), included.Order...)
-			*orderClaimed = true
-		}
-	}
-}
-
-// ensureWorkbenchOpts returns cfg.WorkbenchOpts, allocating an empty block first
-// when absent so include-only [workbench] fields have somewhere to land.
-func ensureWorkbenchOpts(cfg *Config) *WorkbenchOptions {
-	if cfg.WorkbenchOpts == nil {
-		cfg.WorkbenchOpts = &WorkbenchOptions{}
-	}
-	return cfg.WorkbenchOpts
-}
-
-func mergeIncludedTask(cfg *Config, included *TasksConfig, path string) {
-	if included == nil {
-		return
-	}
-	if cfg.Task == nil {
-		cfg.Task = cloneTaskConfig(included)
-		return
-	}
-	// Merge Implement sub-table (agents list)
-	if included.Implement != nil {
-		if cfg.Task.Implement == nil {
-			cfg.Task.Implement = &ImplementConfig{}
-		}
-		if len(included.Implement.Agents) > 0 {
-			if len(cfg.Task.Implement.Agents) > 0 {
-				cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-					"%s: [tasks.implement].agents skipped, already defined (first definition wins)",
-					path,
-				))
-			} else {
-				cfg.Task.Implement.Agents = append([]string(nil), included.Implement.Agents...)
-			}
-		}
-		if included.Implement.MaxTries != nil {
-			if cfg.Task.Implement.MaxTries != nil {
-				cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-					"%s: [tasks.implement].max_tries skipped, already defined (first definition wins)",
-					path,
-				))
-			} else {
-				v := *included.Implement.MaxTries
-				cfg.Task.Implement.MaxTries = &v
-			}
-		}
-	}
-	if included.MaxTries != nil {
-		if cfg.Task.MaxTries != nil {
-			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [tasks].max_tries skipped, already defined (first definition wins)",
-				path,
-			))
-		} else {
-			v := *included.MaxTries
-			cfg.Task.MaxTries = &v
-		}
-	}
-	if included.AttemptRetryDelays != nil {
-		if cfg.Task.AttemptRetryDelays != nil {
-			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [tasks].attempt_retry_delays skipped, already defined (first definition wins)",
-				path,
-			))
-		} else {
-			cfg.Task.AttemptRetryDelays = append([]string(nil), included.AttemptRetryDelays...)
-		}
-	}
-	// Merge Presets map
-	for preset, block := range included.Presets {
-		if cfg.Task.Presets == nil {
-			cfg.Task.Presets = make(map[string]TaskAgentConfig)
-		}
-		if _, exists := cfg.Task.Presets[preset]; exists {
-			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [tasks.presets.%s] skipped, already defined (first definition wins)",
-				path, preset,
-			))
-			continue
-		}
-		cfg.Task.Presets[preset] = block
-	}
-	if included.Git != nil {
-		if cfg.Task.Git != nil {
-			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [tasks.git] skipped, already defined (first definition wins)",
-				path,
-			))
-		} else {
-			cfg.Task.Git = cloneTaskGitConfig(included.Git)
-		}
-	}
-	if included.Verify != nil {
-		if cfg.Task.Verify != nil {
-			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [tasks.verify] skipped, already defined (first definition wins)",
-				path,
-			))
-		} else {
-			v := *included.Verify
-			cfg.Task.Verify = &v
-		}
-	}
-}
-
-func mergeIncludedEffort(cfg *Config, included map[string]EffortConfig, path string) {
-	if len(included) == 0 {
-		return
-	}
-	if cfg.Effort == nil {
-		cfg.Effort = make(map[string]EffortConfig, len(included))
-	}
-	for agent, ladder := range included {
-		if _, exists := cfg.Effort[agent]; exists {
-			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
-				"%s: [effort.%s] skipped, already defined (first definition wins)",
-				path, agent,
-			))
-			continue
-		}
-		cfg.Effort[agent] = cloneEffortConfig(ladder)
-	}
-}
-
-func cloneTaskConfig(src *TasksConfig) *TasksConfig {
-	if src == nil {
-		return nil
-	}
-	dst := &TasksConfig{}
-	if src.Implement != nil {
-		dst.Implement = &ImplementConfig{
-			Agents: append([]string(nil), src.Implement.Agents...),
-		}
-		if src.Implement.MaxTries != nil {
-			v := *src.Implement.MaxTries
-			dst.Implement.MaxTries = &v
-		}
-	}
-	if src.MaxTries != nil {
-		v := *src.MaxTries
-		dst.MaxTries = &v
-	}
-	if src.AttemptRetryDelays != nil {
-		dst.AttemptRetryDelays = append([]string(nil), src.AttemptRetryDelays...)
-	}
-	if len(src.Presets) > 0 {
-		dst.Presets = make(map[string]TaskAgentConfig, len(src.Presets))
-		for preset, block := range src.Presets {
-			dst.Presets[preset] = block
-		}
-	}
-	if src.Git != nil {
-		dst.Git = cloneTaskGitConfig(src.Git)
-	}
-	if src.Verify != nil {
-		v := *src.Verify
-		dst.Verify = &v
-	}
-	return dst
-}
-
+// cloneTaskGitConfig deep-copies a [tasks.git] block. It survives the ADR-0122
+// walker migration because the [workload] → [tasks] alias migration still needs
+// a hand clone off the deprecated schema.
 func cloneTaskGitConfig(src *TaskGitConfig) *TaskGitConfig {
 	if src == nil {
 		return nil
@@ -2318,21 +2237,6 @@ func cloneTaskGitConfig(src *TaskGitConfig) *TaskGitConfig {
 	return &TaskGitConfig{
 		CommitConfigOverrides: append([]string(nil), src.CommitConfigOverrides...),
 	}
-}
-
-func cloneEffortConfig(src EffortConfig) EffortConfig {
-	return EffortConfig{
-		Heavy:    cloneEffortModels(src.Heavy),
-		Standard: cloneEffortModels(src.Standard),
-		Light:    cloneEffortModels(src.Light),
-	}
-}
-
-func cloneEffortModels(src []EffortModel) []EffortModel {
-	if len(src) == 0 {
-		return nil
-	}
-	return append([]EffortModel(nil), src...)
 }
 
 // ExpandProjects resolves all project paths from the config
