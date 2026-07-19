@@ -97,9 +97,14 @@ func staticForScan(scan projectScan, repBranch string, bare bool) dashboardRepoS
 		s := scan
 		rep = &s
 	}
+	storageDir := ""
+	if scan.DefinitionPath != "" {
+		storageDir = filepath.Dir(scan.DefinitionPath)
+	}
 	return dashboardRepoStatic{
 		defPath:       scan.DefinitionPath,
 		statePath:     tasks.StatePathFor(scan.DefinitionPath),
+		storageDir:    storageDir,
 		repoKey:       scan.RepoKey,
 		repoCommonDir: scan.RepoCommonDir,
 		projectName:   scan.Name,
@@ -5182,5 +5187,232 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 	}
 	if styled := dashboardStatusCellStyled(multi); lipgloss.Width(styled) != lipgloss.Width(plain) {
 		t.Fatalf("styled width %d != plain width %d (ANSI leaked into width math)", lipgloss.Width(styled), lipgloss.Width(plain))
+	}
+}
+
+// withWayfinderMaps overlays wayfinder map folders onto a dashboard test Deps'
+// mock FS so dashboardRowsForStatic can discover Map rows alongside Task sets.
+func withWayfinderMaps(t *testing.T, d *Deps, storageDir string, files map[string]string) {
+	t.Helper()
+	fs := d.Tasks.FS.(*deps.MockFileSystem)
+	origReadFile := fs.ReadFileFunc
+	origReadDir := fs.ReadDirFunc
+	fs.ReadDirFunc = func(path string) ([]os.DirEntry, error) {
+		entries := mapDirEntries(path, files)
+		if entries != nil {
+			return entries, nil
+		}
+		if origReadDir != nil {
+			return origReadDir(path)
+		}
+		return nil, os.ErrNotExist
+	}
+	fs.ReadFileFunc = func(path string) ([]byte, error) {
+		if content, ok := files[path]; ok {
+			return []byte(content), nil
+		}
+		if origReadFile != nil {
+			return origReadFile(path)
+		}
+		return nil, os.ErrNotExist
+	}
+	_ = storageDir // storageDir is encoded in the file paths callers pass
+}
+
+func mapDirEntries(path string, files map[string]string) []os.DirEntry {
+	children := map[string]bool{}
+	for filePath := range files {
+		if !strings.HasPrefix(filePath, path+string(os.PathSeparator)) && filePath != path {
+			continue
+		}
+		rel := strings.TrimPrefix(filePath, path+string(os.PathSeparator))
+		if rel == "" || rel == filePath {
+			continue
+		}
+		parts := strings.Split(rel, string(os.PathSeparator))
+		name := parts[0]
+		children[name] = len(parts) > 1 || children[name]
+	}
+	if len(children) == 0 {
+		return nil
+	}
+	var out []os.DirEntry
+	for name, isDir := range children {
+		out = append(out, deps.MockDirEntry{NameVal: name, IsDirVal: isDir})
+	}
+	return out
+}
+
+func TestDashboardMapRowsMixedAndFiltered(t *testing.T) {
+	storageDir := "/data/repos/repo-aaaa"
+	tasksDir := filepath.Join(storageDir, "tasks")
+	activeMap := filepath.Join(storageDir, "wayfinder", "2026-07-01-active")
+	doneMap := filepath.Join(storageDir, "wayfinder", "2026-07-02-done")
+	abandonedMap := filepath.Join(storageDir, "wayfinder", "2026-07-03-abandoned")
+	archivedMap := filepath.Join(storageDir, "wayfinder", "2026-07-04-archived")
+	files := map[string]string{
+		filepath.Join(activeMap, "map.md"): "Status: active\n\n## Destination\nShip it\n",
+		filepath.Join(activeMap, "issues", "01-research.md"): "" +
+			"Type: research\nStatus: open\n\n# Q\n",
+		filepath.Join(activeMap, "issues", "02-blocked.md"): "" +
+			"Type: research\nStatus: open\nBlocked by: 01\n\n# Q\n",
+		filepath.Join(doneMap, "map.md"):                   "Status: done\n\n## Destination\nDone\n",
+		filepath.Join(abandonedMap, "map.md"):              "Status: abandoned\n\n## Destination\nNope\n",
+		filepath.Join(archivedMap, "map.md"):               "Status: active\n\n## Destination\nHidden\n",
+		filepath.Join(storageDir, "wayfinder-archive.json"): `{"archived":["2026-07-04-archived"]}`,
+	}
+
+	rows := []tasks.Row{
+		{ID: "2026-07-01-set-a", Status: tasks.StatusBlocked},
+		{ID: "2026-07-01-set-b", Status: tasks.StatusReady},
+	}
+	d := dashboardTestDeps(t, rows, nil)
+	withWayfinderMaps(t, d, storageDir, files)
+
+	scan := projectScan{
+		Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main",
+		DefinitionPath: tasksDir, RepoKey: "repo-key",
+	}
+	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sortDashboardRows(got)
+
+	var ids []string
+	byID := map[string]DashboardRow{}
+	for _, r := range got {
+		ids = append(ids, r.SetID)
+		byID[r.SetID] = r
+	}
+	// Active map appears; done/abandoned/archived do not.
+	if !slices.Contains(ids, "2026-07-01-active") {
+		t.Fatalf("missing active map row; got %v", ids)
+	}
+	for _, hidden := range []string{"2026-07-02-done", "2026-07-03-abandoned", "2026-07-04-archived"} {
+		if slices.Contains(ids, hidden) {
+			t.Fatalf("hidden map %q still present: %v", hidden, ids)
+		}
+	}
+	// Both task sets present alongside the map.
+	if !slices.Contains(ids, "2026-07-01-set-a") || !slices.Contains(ids, "2026-07-01-set-b") {
+		t.Fatalf("missing task-set rows; got %v", ids)
+	}
+
+	mapRow := byID["2026-07-01-active"]
+	if !mapRow.IsMap {
+		t.Fatal("active map row IsMap = false")
+	}
+	if mapRow.Project != "pop" {
+		t.Fatalf("map PROJECT = %q, want pop", mapRow.Project)
+	}
+	if mapRow.Worktree != "" {
+		t.Fatalf("map WORKTREE = %q, want blank", mapRow.Worktree)
+	}
+	wantStatus := "WAYFINDING · 2 open / 1 frontier"
+	if got := dashboardStatusCell(mapRow); got != wantStatus {
+		t.Fatalf("map STATUS = %q, want %q", got, wantStatus)
+	}
+
+	// READY floats above rest; within the rest band the project groups map + blocked.
+	wantOrder := []string{"2026-07-01-set-b", "2026-07-01-set-a", "2026-07-01-active"}
+	if !reflect.DeepEqual(ids, wantOrder) {
+		t.Fatalf("interleave order = %v, want %v", ids, wantOrder)
+	}
+}
+
+func TestDashboardMapRowsInterleaveByProject(t *testing.T) {
+	rows := []DashboardRow{
+		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-01-set", RawStatus: tasks.StatusBlocked}},
+		{Project: "alpha", IsMap: true, SetRef: SetRef{SetID: "2026-02-01-map"}, MapOpen: 1, MapFrontier: 1},
+		{Project: "alpha", SetRef: SetRef{SetID: "2026-02-01-set", RawStatus: tasks.StatusBlocked}},
+		{Project: "bravo", IsMap: true, SetRef: SetRef{SetID: "2026-02-01-map"}, MapOpen: 0, MapFrontier: 0},
+	}
+	sortDashboardRows(rows)
+	got := make([]string, len(rows))
+	for i, r := range rows {
+		kind := "set"
+		if r.IsMap {
+			kind = "map"
+		}
+		got[i] = r.Project + "/" + kind + "/" + r.SetID
+	}
+	// Rest band is per-project: alpha's map+set together, then bravo's.
+	want := []string{
+		"alpha/set/2026-02-01-set",
+		"alpha/map/2026-02-01-map",
+		"bravo/set/2026-02-01-set",
+		"bravo/map/2026-02-01-map",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("project interleave = %v, want %v", got, want)
+	}
+}
+
+func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
+	mapRow := DashboardRow{
+		Project: "pop", IsMap: true, cursorKey: "pop\x00map\x00demo",
+		SetRef: SetRef{SetID: "demo"}, MapOpen: 1, MapFrontier: 1,
+	}
+	setRow := DashboardRow{
+		Project: "pop", cursorKey: "pop\x00set",
+		SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json"},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{mapRow, setRow}})
+	m.width, m.height = 120, 40
+	m.list.SetCursor(0)
+
+	if items := dashboardMenuItems(mapRow); len(items) != 0 {
+		t.Fatalf("map menu items = %v, want empty", items)
+	}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(QueueDashboard)
+	if got.menu != nil {
+		t.Fatal("a on map row opened action menu")
+	}
+
+	// Former direct bind/unbind keys stay inert at top level on map rows too.
+	for _, key := range []string{"b", "U"} {
+		updated, _ = got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
+		got = updated.(QueueDashboard)
+		if got.bind != nil || got.abandon != nil || got.menu != nil {
+			t.Fatalf("%s on map row opened a modal", key)
+		}
+	}
+
+	// Set rows still open the action menu on a.
+	got.list.SetCursor(1)
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got = updated.(QueueDashboard)
+	if got.menu == nil {
+		t.Fatal("a on set row did not open action menu")
+	}
+}
+
+func TestDashboardMapRowTwoLineRender(t *testing.T) {
+	row := DashboardRow{
+		Project: "pop", IsMap: true, SetRef: SetRef{SetID: "2026-07-01-wayfinding-map"},
+		MapOpen: 3, MapFrontier: 2,
+	}
+	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
+	line1 := dashboardTwoLineRowLine1(row, widths)
+	line2 := dashboardTwoLineRowLine2(row, widths)
+	if !strings.Contains(line1, "pop") || !strings.Contains(line1, "2026-07-01-wayfinding-map") {
+		t.Fatalf("two-line line1 missing project/map id: %q", line1)
+	}
+	// WORKTREE blank: line1 should not carry needs-bind.
+	if strings.Contains(line1, dashboardDestLabelNeedsBind) {
+		t.Fatalf("two-line line1 shows needs bind for map: %q", line1)
+	}
+	if !strings.Contains(line2, "3 open / 2 frontier") {
+		t.Fatalf("two-line line2 STATUS = %q", line2)
+	}
+	plain := dashboardStatusCell(row)
+	if plain != "WAYFINDING · 3 open / 2 frontier" {
+		t.Fatalf("map STATUS cell = %q", plain)
+	}
+	wantIndent := dashboardTwoLineStatusIndent(widths)
+	if got := len(line2) - len(strings.TrimLeft(line2, " ")); got < wantIndent {
+		t.Fatalf("two-line line2 indent = %d, want >= %d: %q", got, wantIndent, line2)
 	}
 }

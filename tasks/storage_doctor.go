@@ -99,12 +99,26 @@ type TaskStorageRepo struct {
 
 // ListTaskStorageRepos returns every repository that has a Task storage
 // directory containing at least one Task set, reading each repo.json marker for
-// the recorded git common directory. It lets a bulk reader (the Work dashboard)
-// discover the small set of repositories that can actually contribute rows
-// without resolving git coordinates for every registered project. It is strictly
-// read-only: a missing repos dir yields nothing, and directories without a
-// readable, parseable marker or with no Task sets are skipped.
+// the recorded git common directory. It lets a bulk reader (the Queue scan)
+// discover repositories that can contribute Task-set rows without resolving git
+// coordinates for every registered project. It is strictly read-only: a missing
+// repos dir yields nothing, and directories without a readable, parseable marker
+// or with no Task sets are skipped. Wayfinder-only storage is intentionally
+// excluded — Maps are invisible to the Queue (ADR-0130).
 func ListTaskStorageRepos(d *Deps) ([]TaskStorageRepo, error) {
+	return listTaskStorageRepos(d, false)
+}
+
+// ListWorkStorageRepos returns every repository whose Task storage can
+// contribute Work dashboard rows: at least one Task set and/or at least one
+// wayfinder map folder. The Queue keeps ListTaskStorageRepos (sets only);
+// the Work dashboard uses this broader listing so a map-only repository still
+// surfaces (ADR-0130).
+func ListWorkStorageRepos(d *Deps) ([]TaskStorageRepo, error) {
+	return listTaskStorageRepos(d, true)
+}
+
+func listTaskStorageRepos(d *Deps, includeWayfinderOnly bool) ([]TaskStorageRepo, error) {
 	dir := TaskStorageRoot(d)
 	entries, err := d.FS.ReadDir(dir)
 	if os.IsNotExist(err) {
@@ -120,8 +134,7 @@ func ListTaskStorageRepos(d *Deps) ([]TaskStorageRepo, error) {
 			continue
 		}
 		storageDir := filepath.Join(dir, e.Name())
-		sets, err := d.FS.ReadDir(filepath.Join(storageDir, "tasks"))
-		if err != nil || len(sets) == 0 {
+		if !storageHasDashboardWork(d, storageDir, includeWayfinderOnly) {
 			continue
 		}
 		data, err := d.FS.ReadFile(filepath.Join(storageDir, repoMarkerFile))
@@ -136,6 +149,28 @@ func ListTaskStorageRepos(d *Deps) ([]TaskStorageRepo, error) {
 	}
 	sort.Slice(repos, func(i, j int) bool { return repos[i].StorageDir < repos[j].StorageDir })
 	return repos, nil
+}
+
+// storageHasDashboardWork reports whether storageDir holds work the listing
+// should surface. Task sets always qualify; wayfinder map folders qualify only
+// when includeWayfinderOnly is set (Work dashboard discovery).
+func storageHasDashboardWork(d *Deps, storageDir string, includeWayfinderOnly bool) bool {
+	if sets, err := d.FS.ReadDir(filepath.Join(storageDir, "tasks")); err == nil && len(sets) > 0 {
+		return true
+	}
+	if !includeWayfinderOnly {
+		return false
+	}
+	maps, err := d.FS.ReadDir(filepath.Join(storageDir, "wayfinder"))
+	if err != nil || len(maps) == 0 {
+		return false
+	}
+	for _, e := range maps {
+		if e.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 // LegacyTaskSetIDs returns the legacy in-tree Task-set identifiers

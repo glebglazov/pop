@@ -18,6 +18,7 @@ import (
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
+	"github.com/glebglazov/pop/wayfinder"
 )
 
 const dashboardPollInterval = 2 * time.Second
@@ -90,6 +91,13 @@ type DashboardRow struct {
 	VerifiedAtSHA string
 	Worktree      string
 
+	// IsMap marks a Wayfinder Map row (ADR-0130). Map rows reuse SetID for the
+	// map id and leave Worktree blank; queue verbs (a/b/U) are inert on them.
+	IsMap bool
+	// MapOpen and MapFrontier are ticket tallies for map-row STATUS cells
+	// (`WAYFINDING · N open / M frontier`). Zero on Task-set rows.
+	MapOpen, MapFrontier int
+
 	cursorKey string
 	// destKind selects how the destination column is styled; Worktree holds the
 	// plain label (branch name, "[managed wt]", or "needs bind").
@@ -108,6 +116,7 @@ type DashboardSnapshot struct {
 type dashboardRepoStatic struct {
 	defPath       string
 	statePath     string
+	storageDir    string
 	repoKey       string
 	repoCommonDir string
 	projectName   string
@@ -252,7 +261,9 @@ func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
 // (ADR-0042's config intersection). Identity, paths, integration target, and
 // branch are all derived from the marker's common directory plus config: no git.
 func dashboardRepoStatics(d *Deps, cfg *config.Config, projects []project.ExpandedProject) ([]dashboardRepoStatic, error) {
-	repos, err := tasks.ListTaskStorageRepos(d.Tasks)
+	// Work dashboard discovery includes wayfinder-only storage (ADR-0130); the
+	// Queue keeps ListTaskStorageRepos so Maps stay invisible to scheduling.
+	repos, err := tasks.ListWorkStorageRepos(d.Tasks)
 	if err != nil {
 		return nil, err
 	}
@@ -339,6 +350,7 @@ func dashboardRepoStaticFromMarker(d *Deps, cfg *config.Config, commonDir string
 	return dashboardRepoStatic{
 		defPath:       defPath,
 		statePath:     tasks.StatePathFor(defPath),
+		storageDir:    id.StorageDir,
 		repoKey:       repoIdentityKey(id),
 		repoCommonDir: id.CommonDir,
 		projectName:   repoName(scans, rep),
@@ -702,7 +714,65 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 			destKind:      wt.destKind,
 		})
 	}
+	mapRows, err := dashboardMapRowsFromStatic(d, st)
+	if err != nil {
+		return nil, err
+	}
+	rows = append(rows, mapRows...)
 	return rows, nil
+}
+
+// dashboardMapRowsFromStatic walks one repo's wayfinder/ maps and returns
+// Work dashboard rows for active, non-archived maps (ADR-0130). Done,
+// abandoned, archived, and malformed maps are hidden.
+func dashboardMapRowsFromStatic(d *Deps, st dashboardRepoStatic) ([]DashboardRow, error) {
+	storageDir := st.storageDir
+	if storageDir == "" && st.defPath != "" {
+		storageDir = filepath.Dir(st.defPath)
+	}
+	if storageDir == "" {
+		return nil, nil
+	}
+	wd := &wayfinder.Deps{FS: d.Tasks.FS, Tasks: d.Tasks}
+	maps, err := wayfinder.ScanMapsInStorage(wd, storageDir)
+	if err != nil {
+		return nil, err
+	}
+	var rows []DashboardRow
+	for _, m := range maps {
+		if !dashboardMapVisible(m) {
+			continue
+		}
+		counts := wayfinder.CountTickets(m.Tickets)
+		frontier := len(wayfinder.Frontier(m.Tickets))
+		rows = append(rows, DashboardRow{
+			SetRef: SetRef{
+				SetID:         m.ID,
+				DefPath:       st.defPath,
+				StatePath:     st.statePath,
+				RepoKey:       st.repoKey,
+				RepoCommonDir: st.repoCommonDir,
+				ProjectPath:   staticProjectPath(st),
+				ProjectName:   st.projectName,
+			},
+			Project:     st.projectName,
+			IsMap:       true,
+			MapOpen:     counts.Open,
+			MapFrontier: frontier,
+			cursorKey:   st.projectName + "\x00map\x00" + m.ID,
+		})
+	}
+	return rows, nil
+}
+
+// dashboardMapVisible reports whether a Map should appear on the Work dashboard:
+// active and not archived. Done, abandoned, archived, and malformed maps are
+// hidden (ADR-0130).
+func dashboardMapVisible(m wayfinder.Map) bool {
+	if m.Archived || m.Malformed {
+		return false
+	}
+	return m.Status == wayfinder.MapActive
 }
 
 // dashboardShowRow is the shared Done-inclusion row filter (ADR-0121). Every
@@ -731,7 +801,11 @@ func staticProjectPath(st dashboardRepoStatic) string {
 // live drain coinciding with a non-READY status leaves that label untouched
 // (needs-you outranks liveness). It reads RawStatus/Started/LiveDrain so the
 // label is recomposed on each render pass rather than baked in at row-build time.
+// Map rows always show "WAYFINDING" (ADR-0130).
 func dashboardStatusLabel(row DashboardRow) string {
+	if row.IsMap {
+		return "WAYFINDING"
+	}
 	if row.RawStatus == tasks.StatusReady && (row.Started || row.LiveDrain) {
 		return "IN PROGRESS"
 	}
@@ -761,8 +835,18 @@ func dashboardStatusCellStyled(row DashboardRow) string {
 
 // dashboardComposeStatus assembles the STATUS cell from live row fields. When
 // styled, the verified-at token carries ANSI yellow; the auto-drain, orphaned,
-// parked, and config-error suffixes are always plain text.
+// parked, and config-error suffixes are always plain text. Map rows render
+// `WAYFINDING · N open / M frontier` and skip set-only suffixes (ADR-0130).
 func dashboardComposeStatus(row DashboardRow, styled bool) string {
+	if row.IsMap {
+		label := "WAYFINDING"
+		if styled {
+			if st, ok := dashboardStatusBucketStyle[label]; ok {
+				label = st.Render(label)
+			}
+		}
+		return fmt.Sprintf("%s · %d open / %d frontier", label, row.MapOpen, row.MapFrontier)
+	}
 	label := dashboardStatusLabel(row)
 	if styled {
 		if st, ok := dashboardStatusBucketStyle[label]; ok {
@@ -884,6 +968,7 @@ var dashboardStatusBucketStyle = map[string]lipgloss.Style{
 	string(tasks.StatusDone):             lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
 	string(tasks.StatusReady):            lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
 	"IN PROGRESS":                        lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
+	"WAYFINDING":                         lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
 	string(tasks.StatusNeedsVerify):      lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
 	string(tasks.StatusAwaitingApproval): lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
 	string(tasks.StatusBlocked):          lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
@@ -1235,9 +1320,13 @@ type dashboardMenu struct {
 // Conditional verbs are filtered to the row's context: verify only for
 // NEEDS-VERIFY / VERIFY-FAILED rows with no live drain, unbind only for bound
 // rows, auto-drain only for non-orphaned rows, and unpark only for parked rows.
-// Drain, bind, preview, the runtime shell, and archive apply to every row
-// regardless of status.
+// Drain, bind, preview, the runtime shell, and archive apply to every Task-set
+// row regardless of status. Map rows have no queue verbs (ADR-0130): a/b/U and
+// the rest of the action menu are inert.
 func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
+	if row.IsMap {
+		return nil
+	}
 	items := []dashboardMenuItem{
 		{key: "i", label: "drain", action: menuActionDrain},
 	}
@@ -1996,6 +2085,11 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
+			// Queue verbs are inert on Map rows (ADR-0130): do not open the
+			// action menu.
+			if row.IsMap {
+				return m, nil
+			}
 			m.menu = newDashboardMenu(row)
 			m.err = nil
 			m.statusMsg = ""
@@ -2011,6 +2105,11 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "l", "enter":
 			row, ok := m.list.Selected()
 			if !ok {
+				return m, nil
+			}
+			// Map detail view is a later slice; Enter/l is a no-op on Map rows
+			// for now (ADR-0130).
+			if row.IsMap {
 				return m, nil
 			}
 			m.err = nil
@@ -3394,7 +3493,12 @@ func dashboardSummary(rows []DashboardRow) string {
 	ready := 0
 	running := 0
 	autoDrain := 0
+	maps := 0
 	for _, row := range rows {
+		if row.IsMap {
+			maps++
+			continue
+		}
 		if row.RawStatus == tasks.StatusReady {
 			ready++
 		}
@@ -3405,7 +3509,11 @@ func dashboardSummary(rows []DashboardRow) string {
 			autoDrain++
 		}
 	}
-	parts := []string{countPhrase(total, "task set", "task sets")}
+	sets := total - maps
+	parts := []string{countPhrase(sets, "task set", "task sets")}
+	if maps > 0 {
+		parts = append(parts, countPhrase(maps, "map", "maps"))
+	}
 	if ready > 0 {
 		parts = append(parts, countPhrase(ready, "ready", "ready"))
 	}

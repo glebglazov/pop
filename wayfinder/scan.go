@@ -13,15 +13,24 @@ import (
 const mapFileName = "map.md"
 const issuesDirName = "issues"
 
-// ScanMaps lists maps non-recursively under <task-storage-root>/wayfinder/*/.
-// A missing wayfinder directory yields an empty slice, never an error.
-// Unparseable map folders are returned as malformed rows rather than failing the scan.
+// ScanMaps lists maps non-recursively under the current repository's
+// <task-storage-root>/wayfinder/*/. A missing wayfinder directory yields an
+// empty slice, never an error. Unparseable map folders are returned as
+// malformed rows rather than failing the scan.
 func ScanMaps(d *Deps, cwd string) ([]Map, error) {
 	id, err := tasks.ResolveRepositoryIdentity(d.taskDeps(), cwd)
 	if err != nil {
 		return nil, err
 	}
-	root := filepath.Join(id.StorageDir, "wayfinder")
+	return ScanMapsInStorage(d, id.StorageDir)
+}
+
+// ScanMapsInStorage lists maps under <storageDir>/wayfinder/*/ without resolving
+// git identity from cwd. It is the bulk seam the Work dashboard uses when walking
+// every registered repository's Task storage. A missing wayfinder directory
+// yields an empty slice, never an error.
+func ScanMapsInStorage(d *Deps, storageDir string) ([]Map, error) {
+	root := filepath.Join(storageDir, "wayfinder")
 	entries, err := d.FS.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -30,7 +39,7 @@ func ScanMaps(d *Deps, cwd string) ([]Map, error) {
 		return nil, err
 	}
 
-	archived, err := LoadArchivedMapIDs(d, id.StorageDir)
+	archived, err := LoadArchivedMapIDs(d, storageDir)
 	if err != nil {
 		return nil, err
 	}
