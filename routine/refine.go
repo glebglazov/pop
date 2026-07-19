@@ -7,11 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/glebglazov/pop/tasks"
 )
 
-// Refine runs the routine refinement gate using default dependencies.
-func Refine(id string) error {
-	return RefineWith(defaultDeps, id)
+// Refine runs the routine refinement gate using default dependencies. An empty
+// agentOverride resolves the authoring agent from config; a non-empty value
+// overrides the preset for this gate session's chats (ADR-0125).
+func Refine(id, agentOverride string) error {
+	return RefineWith(defaultDeps, id, agentOverride)
 }
 
 // RefineWith runs the HITL refinement loop for a Routine (ADR-0125). It is the
@@ -22,12 +26,19 @@ func Refine(id string) error {
 // single-key TUI grammar. The loop only makes sense on an interactive session,
 // so a non-interactive call errors and names the prompt path so the caller can
 // edit it directly (or use `pop routine edit --schedule`).
-func RefineWith(d *Deps, id string) error {
+func RefineWith(d *Deps, id, agentOverride string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
 	if _, err := loadManifest(d, id); err != nil {
 		return err
+	}
+	// Validate the --agent override up front so an unknown preset is rejected
+	// before the gate opens rather than only when the session is chosen.
+	if strings.TrimSpace(agentOverride) != "" {
+		if _, err := tasks.ResolveAgentAdapter(agentOverride); err != nil {
+			return err
+		}
 	}
 
 	out := d.Stdout
@@ -58,8 +69,7 @@ func RefineWith(d *Deps, id string) error {
 		}
 		switch strings.ToLower(strings.TrimSpace(answer)) {
 		case "", "1":
-			fmt.Fprintln(out, "Agent authoring session is not available yet in this slice.")
-			fmt.Fprintf(out, "Edit the prompt directly at %s (option 4) for now.\n", promptPath)
+			authoringSessionFromGate(d, out, id, agentOverride)
 		case "2", "fire":
 			fireFromGate(d, out, id)
 		case "3":

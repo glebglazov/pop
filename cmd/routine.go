@@ -18,7 +18,9 @@ Author one with pop routine add from any directory (git-backed or not).`,
 }
 
 var routineAddSchedule string
+var routineAddAgent string
 var routineEditSchedule string
+var routineEditAgent string
 var (
 	routineAdd         = routine.Add
 	routineEdit        = routine.Edit
@@ -107,7 +109,9 @@ func init() {
 	routineCmd.AddCommand(routineDashboardCmd)
 	routineAddCmd.Flags().StringVar(&routineAddSchedule, "schedule", "", "routine schedule (\"every 6h\" or \"daily at 10:00\")")
 	_ = routineAddCmd.MarkFlagRequired("schedule")
+	routineAddCmd.Flags().StringVar(&routineAddAgent, "agent", "", "override the authoring-agent preset for the refinement gate session")
 	routineEditCmd.Flags().StringVar(&routineEditSchedule, "schedule", "", "new routine schedule (\"every 6h\" or \"daily at 10:00\"); skips the editor")
+	routineEditCmd.Flags().StringVar(&routineEditAgent, "agent", "", "override the authoring-agent preset for the refinement gate session")
 }
 
 func runRoutineAdd(cmd *cobra.Command, args []string) error {
@@ -122,7 +126,7 @@ func runRoutineAdd(cmd *cobra.Command, args []string) error {
 	// On a TTY, drop straight into the refinement gate; a non-interactive add
 	// just scaffolds paused and prints how to iterate manually.
 	if routineInteractive() {
-		return routineRefine(res.ID)
+		return routineRefine(res.ID, routineAddAgent)
 	}
 	fmt.Fprintf(out, "\nRoutine created paused. Iterate on its prompt, fire it manually with\n")
 	fmt.Fprintf(out, "  pop routine fire %s\nuntil you are happy with the result, then arm it with\n", res.ID)
@@ -141,7 +145,7 @@ func runRoutineEdit(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	// Bare edit opens the refinement gate.
-	return routineRefine(args[0])
+	return routineRefine(args[0], routineEditAgent)
 }
 
 func runRoutineList(cmd *cobra.Command, args []string) error {

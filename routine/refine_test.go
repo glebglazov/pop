@@ -43,7 +43,7 @@ func TestRefineMenuRendersHouseGrammar(t *testing.T) {
 	d := refineDeps(t, dataHome, "0\n", &out)
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	if err := RefineWith(d, "gate"); err != nil {
+	if err := RefineWith(d, "gate", ""); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
@@ -74,7 +74,7 @@ func TestRefineInvalidInputReprompts(t *testing.T) {
 	d := refineDeps(t, dataHome, "9\n0\n", &out)
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	if err := RefineWith(d, "gate"); err != nil {
+	if err := RefineWith(d, "gate", ""); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
@@ -94,7 +94,7 @@ func TestRefineFireIsARealRun(t *testing.T) {
 	d := refineDeps(t, dataHome, "2\n0\n", &out)
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	if err := RefineWith(d, "gate"); err != nil {
+	if err := RefineWith(d, "gate", ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "Fire succeeded") {
@@ -136,7 +136,7 @@ func TestRefineFireFailureLoopsBack(t *testing.T) {
 	d := refineDeps(t, dataHome, "2\n0\n", &out)
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	if err := RefineWith(d, "gate"); err != nil {
+	if err := RefineWith(d, "gate", ""); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
@@ -155,7 +155,7 @@ func TestRefineResumeUnpausesAndExits(t *testing.T) {
 	d := refineDeps(t, dataHome, "6\n", &out)
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	if err := RefineWith(d, "gate"); err != nil {
+	if err := RefineWith(d, "gate", ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "Resumed routine") {
@@ -173,7 +173,7 @@ func TestRefineExitStaysPaused(t *testing.T) {
 	d := refineDeps(t, dataHome, "0\n", &out)
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	if err := RefineWith(d, "gate"); err != nil {
+	if err := RefineWith(d, "gate", ""); err != nil {
 		t.Fatal(err)
 	}
 	if paused := manifestPaused(t, dataHome, "gate"); !paused {
@@ -193,7 +193,7 @@ func TestRefineEditPromptOpensEditor(t *testing.T) {
 	}
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	if err := RefineWith(d, "gate"); err != nil {
+	if err := RefineWith(d, "gate", ""); err != nil {
 		t.Fatal(err)
 	}
 	want := filepath.Join(dataHome, "pop", "routines", "gate", "prompt.md")
@@ -210,7 +210,7 @@ func TestRefineEditScheduleValidatesAndReedits(t *testing.T) {
 	d := refineDeps(t, dataHome, "5\nevery week\nevery 12h\n0\n", &out)
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	if err := RefineWith(d, "gate"); err != nil {
+	if err := RefineWith(d, "gate", ""); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
@@ -241,7 +241,7 @@ func TestRefineViewReportNoReportPrintsPath(t *testing.T) {
 	}
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	if err := RefineWith(d, "gate"); err != nil {
+	if err := RefineWith(d, "gate", ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "No runs yet") {
@@ -265,7 +265,7 @@ func TestRefineViewReportOpensPagerAfterFire(t *testing.T) {
 	}
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	if err := RefineWith(d, "gate"); err != nil {
+	if err := RefineWith(d, "gate", ""); err != nil {
 		t.Fatal(err)
 	}
 	if paged == "" {
@@ -284,7 +284,7 @@ func TestRefineNonInteractiveErrors(t *testing.T) {
 	d.IsInteractive = func() bool { return false }
 	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
 
-	err := RefineWith(d, "gate")
+	err := RefineWith(d, "gate", "")
 	if err == nil {
 		t.Fatal("expected non-interactive refine to error")
 	}
@@ -299,7 +299,7 @@ func TestRefineUnknownIDErrors(t *testing.T) {
 	dataHome := filepath.Join(root, "data")
 	var out bytes.Buffer
 	d := refineDeps(t, dataHome, "0\n", &out)
-	if err := RefineWith(d, "ghost"); err == nil {
+	if err := RefineWith(d, "ghost", ""); err == nil {
 		t.Fatal("expected unknown id error")
 	}
 }
