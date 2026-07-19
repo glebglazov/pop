@@ -355,6 +355,11 @@ var migrations = []string{
 		finished_at  TEXT
 	);
 	CREATE INDEX idx_routine_runs_routine ON routine_runs(routine_id);`,
+	// 21: fingerprint — canonical hash of a Routine's explicitly-set run-affecting
+	// inputs in effect when the run fired (ADR-0128). Pre-migration rows default to
+	// the empty string, which the daemon reads as "no fingerprint recorded" and
+	// never treats as a mismatch.
+	`ALTER TABLE routine_runs ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';`,
 }
 
 func (s *Store) migrate() error {

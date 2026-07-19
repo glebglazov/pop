@@ -54,6 +54,29 @@ func tickRoutines(d *Deps, out io.Writer) {
 		if !routine.IsDue(r.Schedule, lastFired, now) {
 			continue
 		}
+		// Run-affecting drift safety net (ADR-0128): if the current fingerprint
+		// no longer matches the last non-skipped run's, a prompt.md edit no CLI
+		// chokepoint saw slipped in. Pause with reason `changed` instead of
+		// firing; a human re-proves it with a manual fire. An empty last
+		// fingerprint (pre-migration or first fire) is never a mismatch.
+		current, err := routine.Fingerprint(rd, r)
+		if err != nil {
+			fmt.Fprintf(out, "queue: routine %s: fingerprint: %v\n", r.ID, err)
+			continue
+		}
+		last, err := routine.LastFingerprint(s, r.ID)
+		if err != nil {
+			fmt.Fprintf(out, "queue: routine %s: last fingerprint: %v\n", r.ID, err)
+			continue
+		}
+		if last != "" && last != current {
+			if err := routine.PauseChangedWith(rd, r.ID); err != nil {
+				fmt.Fprintf(out, "queue: routine %s: pause on change: %v\n", r.ID, err)
+				continue
+			}
+			fmt.Fprintf(out, "queue: routine %s: paused (changed): run-affecting inputs drifted\n", r.ID)
+			continue
+		}
 		if live, err := s.LiveRoutineRun(r.ID, isAlive); err != nil {
 			fmt.Fprintf(out, "queue: routine %s: live run: %v\n", r.ID, err)
 			continue

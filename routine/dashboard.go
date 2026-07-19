@@ -497,7 +497,17 @@ func (m RoutineDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
-			m.statusMsg = fmt.Sprintf("edited prompt for %s", msg.id)
+			// Editing prompt.md via the dashboard verb is a run-affecting edit
+			// chokepoint: pause with reason `changed` (ADR-0128).
+			d := m.d
+			if d == nil {
+				d = DefaultDeps()
+			}
+			if err := pauseChanged(d, msg.id); err != nil {
+				m.err = err
+			} else {
+				m.statusMsg = fmt.Sprintf("edited prompt for %s", msg.id)
+			}
 		}
 		return m, m.reload()
 	case dashboardRefineMsg:

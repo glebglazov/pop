@@ -287,6 +287,137 @@ func TestTickRoutinesWarnsBrokenAndFiresHealthy(t *testing.T) {
 	}
 }
 
+// recordRoutineRun inserts a finished, non-skipped run carrying fingerprint so
+// tests can seed the daemon's "last non-skipped run" comparison point.
+func recordRoutineRun(t *testing.T, id, fingerprint string, firedAt time.Time) {
+	t.Helper()
+	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"), func(int, string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.StartRoutineRun(store.RoutineRun{
+		RoutineID:   id,
+		FiredAt:     firedAt,
+		PID:         1,
+		ProcStart:   "dead",
+		Fingerprint: fingerprint,
+	}, func(store.RoutineRun) bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRoutineRun(run.ID, store.RoutineRunSucceeded, "", "", firedAt); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+}
+
+func routinePromptPath(id string) string {
+	return filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "routines", id, "prompt.md")
+}
+
+func loadRoutineForTest(t *testing.T, rd *routine.Deps, id string) *routine.Routine {
+	t.Helper()
+	routines, _, err := routine.ListRoutines(rd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range routines {
+		if r.ID == id {
+			return r
+		}
+	}
+	t.Fatalf("routine %q not found", id)
+	return nil
+}
+
+func TestTickRoutinesFiresWhenFingerprintMatches(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	qd, rd, home := routineTickDeps(t, now)
+	if _, err := routine.AddWith(rd, "match", "every 1h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.ResumeWith(rd, "match"); err != nil {
+		t.Fatal(err)
+	}
+	fp, err := routine.Fingerprint(rd, loadRoutineForTest(t, rd, "match"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordRoutineRun(t, "match", fp, now.Add(-2*time.Hour))
+
+	var out bytes.Buffer
+	tickRoutines(qd, &out)
+
+	rt := qd.Tmux.(*recordingTmux)
+	if _, ok := extractRoutineSpawnCommand(rt, "match"); !ok {
+		t.Fatalf("expected spawn when fingerprint matches, commands=%v", rt.commands)
+	}
+}
+
+func TestTickRoutinesPausesChangedOnFingerprintDrift(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	qd, rd, home := routineTickDeps(t, now)
+	if _, err := routine.AddWith(rd, "drift", "every 1h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.ResumeWith(rd, "drift"); err != nil {
+		t.Fatal(err)
+	}
+	fp, err := routine.Fingerprint(rd, loadRoutineForTest(t, rd, "drift"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordRoutineRun(t, "drift", fp, now.Add(-2*time.Hour))
+
+	// A direct prompt.md edit no chokepoint saw moves the fingerprint.
+	if err := os.WriteFile(routinePromptPath("drift"), []byte("edited by a stray $EDITOR\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	tickRoutines(qd, &out)
+
+	rt := qd.Tmux.(*recordingTmux)
+	if _, ok := extractRoutineSpawnCommand(rt, "drift"); ok {
+		t.Fatalf("drifted routine must not fire, commands=%v", rt.commands)
+	}
+	if !strings.Contains(out.String(), "paused (changed)") {
+		t.Fatalf("output missing changed-pause line:\n%s", out.String())
+	}
+	got := loadRoutineForTest(t, rd, "drift")
+	if !got.Manifest.Paused || got.Manifest.PauseReason != routine.PauseReasonChanged {
+		t.Fatalf("manifest = {paused:%v reason:%q}, want paused with reason changed", got.Manifest.Paused, got.Manifest.PauseReason)
+	}
+}
+
+func TestTickRoutinesFiresWhenNoRecordedFingerprint(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	qd, rd, home := routineTickDeps(t, now)
+	if _, err := routine.AddWith(rd, "premig", "every 1h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.ResumeWith(rd, "premig"); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-migration row: empty fingerprint. The current fingerprint is non-empty
+	// (a real prompt.md exists), but an empty last must never be a mismatch.
+	recordRoutineRun(t, "premig", "", now.Add(-2*time.Hour))
+	if err := os.WriteFile(routinePromptPath("premig"), []byte("changed after the run\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	tickRoutines(qd, &out)
+
+	rt := qd.Tmux.(*recordingTmux)
+	if _, ok := extractRoutineSpawnCommand(rt, "premig"); !ok {
+		t.Fatalf("routine with no recorded fingerprint must still fire, commands=%v", rt.commands)
+	}
+	if strings.Contains(out.String(), "paused (changed)") {
+		t.Fatalf("pre-migration row must not pause:\n%s", out.String())
+	}
+}
+
 func TestRoutineSessionUsesRoutinesForNonGitDirectory(t *testing.T) {
 	_, rd, home := routineTickDeps(t, time.Now())
 	session, dir := routine.SessionAndDir(rd, home)

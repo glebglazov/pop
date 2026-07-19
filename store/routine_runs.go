@@ -30,6 +30,10 @@ type RoutineRun struct {
 	PID         int
 	ProcStart   string
 	FinishedAt  time.Time
+	// Fingerprint is the canonical hash of the Routine's explicitly-set
+	// run-affecting inputs in effect when this run fired (ADR-0128). Empty on
+	// pre-migration rows and on skipped rows the daemon never compares against.
+	Fingerprint string
 }
 
 // StartRoutineRun inserts a running row and enforces per-routine exclusivity in
@@ -78,13 +82,14 @@ func (s *Store) StartRoutineRun(run RoutineRun, isAlive func(RoutineRun) bool) (
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO routine_runs (routine_id, fired_at, outcome, pid, proc_start)
-		 VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO routine_runs (routine_id, fired_at, outcome, pid, proc_start, fingerprint)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
 		run.RoutineID,
 		run.FiredAt.UTC().Format(timeLayout),
 		RoutineRunRunning,
 		run.PID,
 		nullString(run.ProcStart),
+		run.Fingerprint,
 	)
 	if err != nil {
 		return RoutineRun{}, err
@@ -121,7 +126,7 @@ func (s *Store) FinishRoutineRun(id int64, outcome, reportPath, failReason strin
 func (s *Store) LastRoutineRun(routineID string) (*RoutineRun, error) {
 	row := s.db.QueryRow(
 		`SELECT id, routine_id, fired_at, outcome, skip_reason, fail_reason, report_path,
-		        pid, proc_start, finished_at
+		        pid, proc_start, finished_at, fingerprint
 		 FROM routine_runs
 		 WHERE routine_id = ?
 		 ORDER BY id DESC
@@ -150,6 +155,27 @@ func (s *Store) LastRoutineFireTime(routineID string) (time.Time, error) {
 	return t, nil
 }
 
+// LastRoutineFingerprint returns the fingerprint recorded on the routine's most
+// recent non-skipped run. It returns the empty string when the routine has no
+// non-skipped run yet or when that run predates the fingerprint migration; the
+// caller reads empty as "nothing to compare against" and never a mismatch.
+func (s *Store) LastRoutineFingerprint(routineID string) (string, error) {
+	row := s.db.QueryRow(
+		`SELECT fingerprint FROM routine_runs
+		 WHERE routine_id = ? AND outcome <> ?
+		 ORDER BY id DESC
+		 LIMIT 1`,
+		routineID, RoutineRunSkipped)
+	var fp string
+	if err := row.Scan(&fp); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return fp, nil
+}
+
 // LiveRoutineRun returns a live running row for routineID when isAlive reports
 // the owning process is still running. Nil when none is live.
 func (s *Store) LiveRoutineRun(routineID string, isAlive func(RoutineRun) bool) (*RoutineRun, error) {
@@ -158,7 +184,7 @@ func (s *Store) LiveRoutineRun(routineID string, isAlive func(RoutineRun) bool) 
 	}
 	rows, err := s.db.Query(
 		`SELECT id, routine_id, fired_at, outcome, skip_reason, fail_reason, report_path,
-		        pid, proc_start, finished_at
+		        pid, proc_start, finished_at, fingerprint
 		 FROM routine_runs
 		 WHERE routine_id = ? AND outcome = ?`,
 		routineID, RoutineRunRunning)
@@ -218,7 +244,7 @@ func (s *Store) ReconcileCrashedRoutineRuns(isAlive func(RoutineRun) bool, finis
 
 	rows, err := tx.Query(
 		`SELECT id, routine_id, fired_at, outcome, skip_reason, fail_reason, report_path,
-		        pid, proc_start, finished_at
+		        pid, proc_start, finished_at, fingerprint
 		 FROM routine_runs
 		 WHERE outcome = ?`,
 		RoutineRunRunning)
@@ -269,7 +295,7 @@ func (s *Store) ReconcileCrashedRoutineRuns(isAlive func(RoutineRun) bool, finis
 func (s *Store) ListAllRoutineRuns() ([]RoutineRun, error) {
 	rows, err := s.db.Query(
 		`SELECT id, routine_id, fired_at, outcome, skip_reason, fail_reason, report_path,
-		        pid, proc_start, finished_at
+		        pid, proc_start, finished_at, fingerprint
 		 FROM routine_runs
 		 ORDER BY id ASC`)
 	if err != nil {
@@ -291,7 +317,7 @@ func (s *Store) ListAllRoutineRuns() ([]RoutineRun, error) {
 func (s *Store) ListRoutineRuns(routineID string) ([]RoutineRun, error) {
 	rows, err := s.db.Query(
 		`SELECT id, routine_id, fired_at, outcome, skip_reason, fail_reason, report_path,
-		        pid, proc_start, finished_at
+		        pid, proc_start, finished_at, fingerprint
 		 FROM routine_runs
 		 WHERE routine_id = ?
 		 ORDER BY id DESC`,
@@ -328,6 +354,7 @@ func scanRoutineRunRow(rows *sql.Rows) (RoutineRun, error) {
 		&run.PID,
 		&procStart,
 		&finished,
+		&run.Fingerprint,
 	); err != nil {
 		return RoutineRun{}, err
 	}
@@ -355,6 +382,7 @@ func scanRoutineRun(row *sql.Row) (*RoutineRun, error) {
 		&run.PID,
 		&procStart,
 		&finished,
+		&run.Fingerprint,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil

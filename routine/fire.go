@@ -57,13 +57,19 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 	}
 	defer func() { _ = s.Close() }()
 
+	// Every run records the fingerprint in effect when it fired (ADR-0128).
+	// A manual fire re-proves an edited Routine by recording the new value; the
+	// daemon compares this against the last run's before firing.
+	fingerprint := fingerprintOf(string(domainPrompt), r.Manifest)
+
 	pid := d.PID()
 	procStart, _ := d.ProcStartToken(pid)
 	run, err := s.StartRoutineRun(store.RoutineRun{
-		RoutineID: id,
-		FiredAt:   firedAt,
-		PID:       pid,
-		ProcStart: procStart,
+		RoutineID:   id,
+		FiredAt:     firedAt,
+		PID:         pid,
+		ProcStart:   procStart,
+		Fingerprint: fingerprint,
 	}, func(live store.RoutineRun) bool {
 		return d.ProcessAlive(live.PID, live.ProcStart)
 	})

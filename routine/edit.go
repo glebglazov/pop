@@ -23,8 +23,10 @@ func UpdateSchedule(id, scheduleRaw string) (Manifest, error) {
 // UpdateScheduleWith validates scheduleRaw through the schedule parser and, only
 // if it parses, persists it to the routine's manifest (read-modify-write). An
 // unparseable expression is rejected before anything is written. The bound
-// directory, pause bit, and creation time are preserved. The dashboard's
-// edit-schedule modal calls this same helper.
+// directory and creation time are preserved. Editing the schedule is a
+// run-affecting change, so this eager chokepoint pauses the Routine with reason
+// `changed` (ADR-0128). The dashboard's edit-schedule modal and the refinement
+// loop call this same helper.
 func UpdateScheduleWith(d *Deps, id, scheduleRaw string) (Manifest, error) {
 	if err := validateID(id); err != nil {
 		return Manifest{}, err
@@ -38,6 +40,8 @@ func UpdateScheduleWith(d *Deps, id, scheduleRaw string) (Manifest, error) {
 		return Manifest{}, err
 	}
 	r.Manifest.Schedule = trimmed
+	r.Manifest.Paused = true
+	r.Manifest.PauseReason = PauseReasonChanged
 	if err := writeManifest(d, id, r.Manifest); err != nil {
 		return Manifest{}, err
 	}
@@ -80,6 +84,11 @@ func EditWith(d *Deps, id, scheduleRaw string, scheduleSet bool) (*EditResult, e
 	}
 	if err := d.OpenEditor(promptPath); err != nil {
 		return nil, fmt.Errorf("open prompt in editor: %w", err)
+	}
+	// Opening the prompt editor is a run-affecting edit chokepoint: pause with
+	// reason `changed` (ADR-0128) so a re-proving manual fire is required.
+	if err := pauseChanged(d, id); err != nil {
+		return nil, err
 	}
 	return &EditResult{RoutineID: id, PromptPath: promptPath, Opened: true}, nil
 }
