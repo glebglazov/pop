@@ -37,8 +37,46 @@ case "$prompt" in
     fi
     ;;
 esac
+printf 'ROUTINE_COMPLETE\n'
 exit ` + strconv.Itoa(exitCode) + `
 `
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// installFakeClaudeSentinel installs a fake claude that emits the given trailing
+// sentinel line (may be empty) and optionally writes the report file, so the
+// sentinel-assessment ladder can be exercised end to end.
+func installFakeClaudeSentinel(t *testing.T, dir, sentinel string, writeReport bool) {
+	t.Helper()
+	script := filepath.Join(dir, "claude")
+	writeBlock := ""
+	if writeReport {
+		writeBlock = `case "$prompt" in
+  *"write your report to "*)
+    rest=${prompt#*write your report to }
+    report=${rest%% and*}
+    if [ -n "$report" ]; then
+      mkdir -p "$(dirname "$report")"
+      printf 'report\n' > "$report"
+    fi
+    ;;
+esac
+`
+	}
+	sentinelLine := ""
+	if sentinel != "" {
+		sentinelLine = "printf '%s\\n' '" + sentinel + "'\n"
+	}
+	content := `#!/bin/sh
+prompt=""
+while [ $# -gt 1 ]; do
+  shift
+done
+prompt=$1
+` + writeBlock + sentinelLine + "exit 0\n"
 	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -246,6 +284,119 @@ func TestFireAgentFailureRecordsFailedRow(t *testing.T) {
 	if !strings.Contains(row.FailReason, "status 2") {
 		t.Fatalf("fail reason = %q", row.FailReason)
 	}
+}
+
+func TestFireCompleteSentinelWithReportSucceeds(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installFakeClaudeSentinel(t, root, "ROUTINE_COMPLETE", true)
+	d := fireDeps(t, dataHome)
+
+	if _, err := AddWith(d, "ok", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FireWith(d, "ok"); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if row := lastRun(t, d, "ok"); row.Outcome != store.RoutineRunSucceeded {
+		t.Fatalf("outcome = %q, reason = %q", row.Outcome, row.FailReason)
+	}
+}
+
+func TestFireFailedSentinelReasonPersisted(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installFakeClaudeSentinel(t, root, "ROUTINE_FAILED: source unreachable", true)
+	d := fireDeps(t, dataHome)
+
+	if _, err := AddWith(d, "boom", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FireWith(d, "boom"); err == nil {
+		t.Fatal("expected failure")
+	}
+	row := lastRun(t, d, "boom")
+	if row.Outcome != store.RoutineRunFailed {
+		t.Fatalf("outcome = %q", row.Outcome)
+	}
+	if row.FailReason != "source unreachable" {
+		t.Fatalf("fail reason = %q", row.FailReason)
+	}
+}
+
+func TestFireMissingSentinelRecordsDistinctFailure(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installFakeClaudeSentinel(t, root, "", true)
+	d := fireDeps(t, dataHome)
+
+	if _, err := AddWith(d, "silent", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FireWith(d, "silent"); err == nil {
+		t.Fatal("expected failure")
+	}
+	row := lastRun(t, d, "silent")
+	if row.Outcome != store.RoutineRunFailed {
+		t.Fatalf("outcome = %q", row.Outcome)
+	}
+	if row.FailReason != "missing ROUTINE_COMPLETE sentinel" {
+		t.Fatalf("fail reason = %q", row.FailReason)
+	}
+}
+
+func TestFireMissingReportRecordsDistinctFailure(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installFakeClaudeSentinel(t, root, "ROUTINE_COMPLETE", false)
+	d := fireDeps(t, dataHome)
+
+	if _, err := AddWith(d, "noreport", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FireWith(d, "noreport"); err == nil {
+		t.Fatal("expected failure")
+	}
+	row := lastRun(t, d, "noreport")
+	if row.Outcome != store.RoutineRunFailed {
+		t.Fatalf("outcome = %q", row.Outcome)
+	}
+	if row.FailReason != "missing report" {
+		t.Fatalf("fail reason = %q", row.FailReason)
+	}
+}
+
+func lastRun(t *testing.T, d *Deps, id string) *store.RoutineRun {
+	t.Helper()
+	s, err := openExecutionStore(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	row, err := s.LastRoutineRun(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row == nil {
+		t.Fatal("no run row")
+	}
+	return row
 }
 
 func TestFakeClaudeOnPath(t *testing.T) {

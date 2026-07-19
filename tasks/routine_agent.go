@@ -11,6 +11,7 @@ import (
 // RoutineAgentAttempt is the outcome of one headless agent invocation for a Routine run.
 type RoutineAgentAttempt struct {
 	ExitCode     int
+	Output       string
 	QuotaPaused  bool
 	QuotaPreset  string
 	QuotaResetAt time.Time
@@ -32,6 +33,7 @@ func RunRoutineAgentInvocation(d *Deps, runtimePath string, liveOut io.Writer, t
 		result.ExitCode = outcome.exitCode
 	}
 	normalized := invocation.NormalizeOutput(raw)
+	result.Output = normalized.Output
 	if normalized.QuotaPause != nil {
 		result.QuotaPaused = true
 		result.QuotaPreset = invocation.AgentPreset()

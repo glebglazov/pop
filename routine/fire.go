@@ -110,6 +110,15 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 		return nil, fmt.Errorf("routine run failed: %s", reason)
 	}
 
+	// Clean exit: the outcome is sentinel-assessed, not exit-status-inferred
+	// (ADR-0127). An agent that exits 0 without ROUTINE_COMPLETE, or without
+	// writing its report, is recorded failed.
+	outcome := assessRoutineOutput(result.Output, reportExists(d, reportAbs))
+	if !outcome.Succeeded {
+		_ = finish(store.RoutineRunFailed, outcome.FailReason)
+		return nil, fmt.Errorf("routine run failed: %s", outcome.FailReason)
+	}
+
 	if err := finish(store.RoutineRunSucceeded, ""); err != nil {
 		return nil, fmt.Errorf("record routine run success: %w", err)
 	}
@@ -120,6 +129,14 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 		ReportPath:  reportAbs,
 		AgentPreset: preset,
 	}, nil
+}
+
+// reportExists reports whether the run's report file landed on disk.
+func reportExists(d *Deps, reportAbs string) bool {
+	if _, err := d.FS.Stat(reportAbs); err != nil {
+		return false
+	}
+	return true
 }
 
 // LoadConfigFunc loads pop configuration.
