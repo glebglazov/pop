@@ -9,12 +9,43 @@ import (
 	"time"
 )
 
+// PauseReason records why a Routine is paused (ADR-0128). Legacy manifests
+// predate the field; an empty value reads as a plain, reasonless pause.
+type PauseReason string
+
+const (
+	// PauseReasonCreated marks the initial paused-on-creation state.
+	PauseReasonCreated PauseReason = "created"
+	// PauseReasonManual marks a user-initiated pause (verb or dashboard).
+	PauseReasonManual PauseReason = "manual"
+	// PauseReasonFailure marks a pause triggered by a failed run.
+	PauseReasonFailure PauseReason = "failure"
+	// PauseReasonChanged marks a pause triggered by the fingerprint/chokepoint
+	// slice detecting a drifted binding; written elsewhere.
+	PauseReasonChanged PauseReason = "changed"
+)
+
 // Manifest is the on-disk record for a Routine.
 type Manifest struct {
-	BoundDirectory string `json:"bound_directory"`
-	Schedule       string `json:"schedule"`
-	Paused         bool   `json:"paused"`
-	CreatedAt      string `json:"created_at"`
+	BoundDirectory string      `json:"bound_directory"`
+	Schedule       string      `json:"schedule"`
+	Paused         bool        `json:"paused"`
+	PauseReason    PauseReason `json:"pause_reason,omitempty"`
+	CreatedAt      string      `json:"created_at"`
+}
+
+// pausedStatusLabel renders a paused Routine's status for the dashboard and the
+// refinement-loop header. Created/manual/legacy paused routines read as plain
+// "paused"; failure and changed carry their cause in parentheses.
+func pausedStatusLabel(reason PauseReason) string {
+	switch reason {
+	case PauseReasonFailure:
+		return "paused (failed)"
+	case PauseReasonChanged:
+		return "paused (changed)"
+	default:
+		return "paused"
+	}
 }
 
 // Routine is a discovered Routine with its identifier and parsed manifest.

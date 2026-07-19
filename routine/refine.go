@@ -103,7 +103,7 @@ func RefineWith(d *Deps, id, agentOverride string) error {
 func renderRefineMenu(out io.Writer, id string, r *Routine, lastRun string) {
 	state := "resumed"
 	if r.Manifest.Paused {
-		state = "paused"
+		state = pausedStatusLabel(r.Manifest.PauseReason)
 	}
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Refine routine %q — %s, schedule %q, %s\n", id, state, r.Manifest.Schedule, lastRun)

@@ -78,7 +78,7 @@ func BuildDashboardWith(d *Deps) (DashboardSnapshot, error) {
 			row.Status = dashboardStatusFor(d, s, r)
 		} else {
 			row.LastRun = "never"
-			row.Status = dashboardIdleStatus(r.Manifest.Paused)
+			row.Status = dashboardIdleStatus(r.Manifest)
 		}
 		rows = append(rows, row)
 	}
@@ -101,17 +101,17 @@ func dashboardStatusFor(d *Deps, s *store.Store, r *Routine) string {
 		return routineProcessAlive(d, run.PID, run.ProcStart)
 	})
 	if err != nil {
-		return dashboardIdleStatus(r.Manifest.Paused)
+		return dashboardIdleStatus(r.Manifest)
 	}
 	if live != nil {
 		return "running"
 	}
-	return dashboardIdleStatus(r.Manifest.Paused)
+	return dashboardIdleStatus(r.Manifest)
 }
 
-func dashboardIdleStatus(paused bool) string {
-	if paused {
-		return "paused"
+func dashboardIdleStatus(m Manifest) string {
+	if m.Paused {
+		return pausedStatusLabel(m.PauseReason)
 	}
 	return "idle"
 }
@@ -1381,10 +1381,10 @@ func dashboardRowNaturalValues(row DashboardRow) []string {
 }
 
 func dashboardStatusStyled(status string) string {
-	switch status {
-	case "running":
+	switch {
+	case status == "running":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render(status)
-	case "paused":
+	case strings.HasPrefix(status, "paused"):
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render(status)
 	default:
 		return status

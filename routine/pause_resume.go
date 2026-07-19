@@ -24,6 +24,7 @@ func PauseWith(d *Deps, id string) (*PauseResult, error) {
 		return &PauseResult{RoutineID: id, AlreadyPaused: true}, nil
 	}
 	r.Manifest.Paused = true
+	r.Manifest.PauseReason = PauseReasonManual
 	if err := writeManifest(d, id, r.Manifest); err != nil {
 		return nil, err
 	}
@@ -54,6 +55,7 @@ func ResumeWith(d *Deps, id string) (*ResumeResult, error) {
 		return &ResumeResult{RoutineID: id, NotPaused: true}, nil
 	}
 	r.Manifest.Paused = false
+	r.Manifest.PauseReason = ""
 	if err := writeManifest(d, id, r.Manifest); err != nil {
 		return nil, err
 	}

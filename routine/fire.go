@@ -77,6 +77,15 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 	finish := func(outcome, failReason string) error {
 		return s.FinishRoutineRun(run.ID, outcome, reportAbs, failReason, nowUTC(d))
 	}
+	// A failed run — daemon-fired or manual — pauses its Routine with reason
+	// `failure` (ADR-0128). The latest cause is the useful one, so an
+	// already-paused Routine is overwritten to `failure`.
+	failAndPause := func(reason string) {
+		_ = finish(store.RoutineRunFailed, reason)
+		r.Manifest.Paused = true
+		r.Manifest.PauseReason = PauseReasonFailure
+		_ = writeManifest(d, id, r.Manifest)
+	}
 
 	out := d.Stdout
 	if out == nil {
@@ -98,7 +107,7 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 		if result != nil && result.ExitCode != 0 {
 			reason = fmt.Sprintf("agent exited with status %d", result.ExitCode)
 		}
-		_ = finish(store.RoutineRunFailed, reason)
+		failAndPause(reason)
 		return nil, fmt.Errorf("routine run failed: %w", errors.New(reason))
 	}
 	if result == nil || result.ExitCode != 0 {
@@ -106,7 +115,7 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 		if result != nil {
 			reason = fmt.Sprintf("agent exited with status %d", result.ExitCode)
 		}
-		_ = finish(store.RoutineRunFailed, reason)
+		failAndPause(reason)
 		return nil, fmt.Errorf("routine run failed: %s", reason)
 	}
 
@@ -115,7 +124,7 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 	// writing its report, is recorded failed.
 	outcome := assessRoutineOutput(result.Output, reportExists(d, reportAbs))
 	if !outcome.Succeeded {
-		_ = finish(store.RoutineRunFailed, outcome.FailReason)
+		failAndPause(outcome.FailReason)
 		return nil, fmt.Errorf("routine run failed: %s", outcome.FailReason)
 	}
 
