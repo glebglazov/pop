@@ -78,7 +78,7 @@ func BuildDashboardWith(d *Deps) (DashboardSnapshot, error) {
 			row.Status = dashboardStatusFor(d, s, r)
 		} else {
 			row.LastRun = "never"
-			row.Status = dashboardIdleStatus(r.Manifest)
+			row.Status = dashboardIdleStatus(r.Manifest, "")
 		}
 		rows = append(rows, row)
 	}
@@ -101,17 +101,30 @@ func dashboardStatusFor(d *Deps, s *store.Store, r *Routine) string {
 		return routineProcessAlive(d, run.PID, run.ProcStart)
 	})
 	if err != nil {
-		return dashboardIdleStatus(r.Manifest)
+		return dashboardIdleStatus(r.Manifest, "")
 	}
 	if live != nil {
 		return "running"
 	}
-	return dashboardIdleStatus(r.Manifest)
+	outcome := ""
+	if last, err := s.LastRoutineRun(r.ID); err == nil && last != nil {
+		outcome = last.Outcome
+	}
+	return dashboardIdleStatus(r.Manifest, outcome)
 }
 
-func dashboardIdleStatus(m Manifest) string {
+// dashboardIdleStatus renders the STATUS cell for a Routine that is not live.
+// A pause wins over everything; otherwise an idle Routine surfaces its last
+// run's terminal outcome (ok/failed) and a never-fired Routine stays plain idle.
+func dashboardIdleStatus(m Manifest, lastOutcome string) string {
 	if m.Paused {
 		return pausedStatusLabel(m.PauseReason)
+	}
+	switch lastOutcome {
+	case store.RoutineRunSucceeded:
+		return "ok"
+	case store.RoutineRunFailed:
+		return "failed"
 	}
 	return "idle"
 }
@@ -931,8 +944,15 @@ func newRunsDetailView(row DashboardRow) *runsDetailView {
 func runDetailLine(r store.RoutineRun) string {
 	stamp := r.FiredAt.UTC().Format("2006-01-02 15:04:05")
 	outcome := r.Outcome
-	if outcome == store.RoutineRunSkipped && r.SkipReason != "" {
-		outcome += " (" + r.SkipReason + ")"
+	switch r.Outcome {
+	case store.RoutineRunSkipped:
+		if r.SkipReason != "" {
+			outcome += " (" + r.SkipReason + ")"
+		}
+	case store.RoutineRunFailed:
+		if r.FailReason != "" {
+			outcome += " (" + r.FailReason + ")"
+		}
 	}
 	return fmt.Sprintf("%s  %s", stamp, outcome)
 }
@@ -1392,8 +1412,10 @@ func dashboardRowNaturalValues(row DashboardRow) []string {
 
 func dashboardStatusStyled(status string) string {
 	switch {
-	case status == "running":
+	case status == "running", status == "ok":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render(status)
+	case status == "failed":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render(status)
 	case strings.HasPrefix(status, "paused"):
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render(status)
 	default:

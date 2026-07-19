@@ -152,7 +152,8 @@ func TestBuildDashboardStatuses(t *testing.T) {
 		status[row.ID] = row.Status
 		lastRun[row.ID] = row.LastRun
 	}
-	if status["idle-r"] != "idle" {
+	// idle-r has a succeeded last run, so its STATUS now surfaces the outcome.
+	if status["idle-r"] != "ok" {
 		t.Fatalf("idle-r status = %q", status["idle-r"])
 	}
 	if status["paused-r"] != "paused" {

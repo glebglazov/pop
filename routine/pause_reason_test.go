@@ -177,7 +177,7 @@ func TestDashboardIdleStatusRendersReason(t *testing.T) {
 		{Manifest{Paused: true}, "paused"},
 	}
 	for _, c := range cases {
-		if got := dashboardIdleStatus(c.m); got != c.want {
+		if got := dashboardIdleStatus(c.m, ""); got != c.want {
 			t.Fatalf("dashboardIdleStatus(%+v) = %q, want %q", c.m, got, c.want)
 		}
 	}
@@ -223,7 +223,7 @@ func TestLegacyManifestLoadsAsPlainPaused(t *testing.T) {
 	if r.Manifest.PauseReason != "" {
 		t.Fatalf("PauseReason = %q, want empty", r.Manifest.PauseReason)
 	}
-	if got := dashboardIdleStatus(r.Manifest); got != "paused" {
+	if got := dashboardIdleStatus(r.Manifest, ""); got != "paused" {
 		t.Fatalf("legacy status = %q, want plain paused", got)
 	}
 }
