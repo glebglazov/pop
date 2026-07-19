@@ -324,27 +324,32 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 		// Check if cooldown has elapsed.
 		if !now.Before(resetAt) {
 			// Cooldown elapsed. Try to acquire a recovery turn.
-			acquired, err := acquireRecoveryTurnWithStore(s, w)
+			acquired, block, err := acquireRecoveryTurnWithStore(s, w)
 			if err != nil {
 				return err
 			}
 			if acquired {
 				return nil
 			}
-			// Turn not acquired yet (another waiter may have priority). Keep
-			// polling.
-		}
-
-		// Print status line.
-		waitDur := time.Until(resetAt)
-		if waitDur < 0 {
-			waitDur = 0
-		}
-		if out != nil {
-			out.line(ansiDim, "⏳ Waiting for quota recovery: %s resets at %s (in %s)",
-				w.Preset,
-				resetAt.Format("15:04:05"),
-				formatDuration(waitDur))
+			// Turn not acquired: the cooldown is over but something on the
+			// checkout still blocks resumption. Name the blocker rather than
+			// pretending we are still waiting on quota.
+			if out != nil && block != nil {
+				out.line(ansiDim, "⏸ Quota recovered; waiting for checkout — %s",
+					recoveryBlockMessage(block))
+			}
+		} else {
+			// Pre-cooldown: still waiting for the preset's quota to reset.
+			waitDur := time.Until(resetAt)
+			if waitDur < 0 {
+				waitDur = 0
+			}
+			if out != nil {
+				out.line(ansiDim, "⏳ Waiting for quota recovery: %s resets at %s (in %s)",
+					w.Preset,
+					resetAt.Format("15:04:05"),
+					formatDuration(waitDur))
+			}
 		}
 
 		// Adjust poll interval if we're getting close.
@@ -386,21 +391,22 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 
 // acquireRecoveryTurn attempts to acquire a recovery turn for the waiter.
 // Returns true when the turn is acquired and the caller can proceed to resume
-// the task. Returns false when the turn is not yet available.
-func acquireRecoveryTurn(d *Deps, w *RecoveryWaiter) (bool, error) {
+// the task. Returns false when the turn is not yet available; the *store.RecoveryBlock
+// names the blocker when the cooldown has elapsed but the turn was denied.
+func acquireRecoveryTurn(d *Deps, w *RecoveryWaiter) (bool, *store.RecoveryBlock, error) {
 	s, ok, err := openDrainStoreIfExists(d)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if !ok {
-		return false, nil
+		return false, nil, nil
 	}
 	return acquireRecoveryTurnWithStore(s, w)
 }
 
 // acquireRecoveryTurnWithStore is like acquireRecoveryTurn but takes an already-open
 // store to avoid connection contention when called in a tight loop.
-func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter) (bool, error) {
+func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter) (bool, *store.RecoveryBlock, error) {
 	return s.TryAcquireRecoveryTurn(store.RecoveryWaiter{
 		SetID:        w.SetID,
 		Preset:       w.Preset,
@@ -409,6 +415,23 @@ func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter) (bool, erro
 		Priority:     w.Priority,
 		RegisteredAt: w.RegisteredAt,
 	}, time.Now().UTC())
+}
+
+// recoveryBlockMessage renders a post-cooldown recovery block as a human phrase
+// naming the actual blocker, with distinct wording per kind.
+func recoveryBlockMessage(b *store.RecoveryBlock) string {
+	switch b.Kind {
+	case store.RecoveryBlockGateHold:
+		return fmt.Sprintf("gate hold by set %s", b.SetID)
+	case store.RecoveryBlockLiveDrain:
+		return fmt.Sprintf("drain running for set %s", b.SetID)
+	case store.RecoveryBlockTurnHeld:
+		return fmt.Sprintf("recovery turn held by set %s", b.SetID)
+	case store.RecoveryBlockBehindWaiter:
+		return fmt.Sprintf("behind waiter %s", b.SetID)
+	default:
+		return fmt.Sprintf("blocked by set %s", b.SetID)
+	}
 }
 
 // ReleaseRecoveryTurn drops the checkout-scoped recovery turn for one runtime

@@ -489,7 +489,7 @@ func TestRunTaskSetFailedGateBlocksRecoveryTurnOnSameCheckout(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter: %v", err)
 	}
 
-	acquired, err := acquireRecoveryTurn(d, &waiter)
+	acquired, _, err := acquireRecoveryTurn(d, &waiter)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn while gate active: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestRunTaskSetFailedGateBlocksRecoveryTurnOnSameCheckout(t *testing.T) {
 		t.Fatalf("checkout gate hold leaked: %#v", hold)
 	}
 
-	acquired, err = acquireRecoveryTurn(d, &waiter)
+	acquired, _, err = acquireRecoveryTurn(d, &waiter)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn after gate cleared: %v", err)
 	}

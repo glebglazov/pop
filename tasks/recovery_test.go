@@ -109,7 +109,7 @@ func TestAcquireRecoveryTurn_PresetAgnosticDifferentCheckouts(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter failed: %v", err)
 	}
 
-	acquired1, err := acquireRecoveryTurn(d, &waiter1)
+	acquired1, _, err := acquireRecoveryTurn(d, &waiter1)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn failed: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestAcquireRecoveryTurn_PresetAgnosticDifferentCheckouts(t *testing.T) {
 		t.Error("waiter1 should acquire turn on its checkout")
 	}
 
-	acquired2, err := acquireRecoveryTurn(d, &waiter2)
+	acquired2, _, err := acquireRecoveryTurn(d, &waiter2)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn failed: %v", err)
 	}
@@ -154,11 +154,11 @@ func TestAcquireRecoveryTurn_PresetAgnosticOnePerCheckout(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter waiter2: %v", err)
 	}
 
-	acquired1, err := acquireRecoveryTurn(d, &waiter1)
+	acquired1, _, err := acquireRecoveryTurn(d, &waiter1)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn waiter1: %v", err)
 	}
-	acquired2, err := acquireRecoveryTurn(d, &waiter2)
+	acquired2, _, err := acquireRecoveryTurn(d, &waiter2)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn waiter2: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestAcquireRecoveryTurn_PresetAgnosticOnePerCheckout(t *testing.T) {
 		t.Fatalf("DeregisterRecoveryWaiter waiter1: %v", err)
 	}
 
-	acquired2, err = acquireRecoveryTurn(d, &waiter2)
+	acquired2, _, err = acquireRecoveryTurn(d, &waiter2)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn waiter2 after release: %v", err)
 	}
@@ -214,11 +214,11 @@ func TestAcquireRecoveryTurn_PrioritySameCheckout(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter high: %v", err)
 	}
 
-	acquiredLow, err := acquireRecoveryTurn(d, &low)
+	acquiredLow, _, err := acquireRecoveryTurn(d, &low)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn low: %v", err)
 	}
-	acquiredHigh, err := acquireRecoveryTurn(d, &high)
+	acquiredHigh, _, err := acquireRecoveryTurn(d, &high)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn high: %v", err)
 	}
@@ -259,11 +259,11 @@ func TestAcquireRecoveryTurn_FIFOEqualPriority(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter second: %v", err)
 	}
 
-	acquiredSecond, err := acquireRecoveryTurn(d, &second)
+	acquiredSecond, _, err := acquireRecoveryTurn(d, &second)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn second: %v", err)
 	}
-	acquiredFirst, err := acquireRecoveryTurn(d, &first)
+	acquiredFirst, _, err := acquireRecoveryTurn(d, &first)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn first: %v", err)
 	}
@@ -305,11 +305,11 @@ func TestAcquireRecoveryTurn_DifferentCheckoutsParallel(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter set-b: %v", err)
 	}
 
-	acquiredA, err := acquireRecoveryTurn(d, &waiterA)
+	acquiredA, _, err := acquireRecoveryTurn(d, &waiterA)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn set-a: %v", err)
 	}
-	acquiredB, err := acquireRecoveryTurn(d, &waiterB)
+	acquiredB, _, err := acquireRecoveryTurn(d, &waiterB)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn set-b: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
 		t.Fatalf("RegisterCheckoutGateHold failed: %v", err)
 	}
 
-	acquired, err := acquireRecoveryTurn(d, &waiter)
+	acquired, _, err := acquireRecoveryTurn(d, &waiter)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn failed: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
 		t.Fatalf("ReleaseCheckoutGateHold failed: %v", err)
 	}
 
-	acquired, err = acquireRecoveryTurn(d, &waiter)
+	acquired, _, err = acquireRecoveryTurn(d, &waiter)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn after release failed: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn(t *testing.T) {
 	if err := RegisterCheckoutGateHold(d, "set-a", repo); err != nil {
 		t.Fatalf("RegisterCheckoutGateHold: %v", err)
 	}
-	acquired, err := acquireRecoveryTurn(d, &waiter)
+	acquired, _, err := acquireRecoveryTurn(d, &waiter)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn (blocked): %v", err)
 	}
@@ -401,7 +401,7 @@ func TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn(t *testing.T) {
 	}
 
 	// With the orphan swept, the waiting set acquires its recovery turn.
-	acquired, err = acquireRecoveryTurn(d, &waiter)
+	acquired, _, err = acquireRecoveryTurn(d, &waiter)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn (after sweep): %v", err)
 	}
@@ -487,7 +487,7 @@ func TestAcquireRecoveryTurn_BeforeReset(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter failed: %v", err)
 	}
 	
-	acquired, err := acquireRecoveryTurn(d, &waiter)
+	acquired, _, err := acquireRecoveryTurn(d, &waiter)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn failed: %v", err)
 	}
