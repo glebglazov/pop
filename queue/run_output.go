@@ -647,7 +647,7 @@ func formatBlockedLine(b BlockedItem) string {
 	case "agent_cooldown":
 		until := ""
 		if !b.Until.IsZero() {
-			until = " until " + b.Until.UTC().Format(time.RFC3339)
+			until = " until " + b.Until.Local().Format(time.RFC3339)
 		}
 		return fmt.Sprintf("agent %s cooling%s", b.Agent, until)
 	case "parked":
@@ -673,7 +673,7 @@ func formatBlockedLine(b BlockedItem) string {
 		project += worktreeSuffix(b.RuntimePath, setID)
 		until := ""
 		if !b.Until.IsZero() {
-			until = " until " + b.Until.UTC().Format(time.RFC3339)
+			until = " until " + b.Until.Local().Format(time.RFC3339)
 		}
 		agent := ""
 		if b.Agent != "" {
@@ -808,7 +808,7 @@ func formatBlockedDelta(b BlockedItem, cleared bool) string {
 	case "agent_cooldown":
 		until := ""
 		if !b.Until.IsZero() {
-			until = b.Until.UTC().Format(time.RFC3339)
+			until = b.Until.Local().Format(time.RFC3339)
 		}
 		return fmt.Sprintf("queue: agent %s cooldown until=%s", b.Agent, until)
 	case "parked":
@@ -816,7 +816,7 @@ func formatBlockedDelta(b BlockedItem, cleared bool) string {
 	case "recovery_wait":
 		until := ""
 		if !b.Until.IsZero() {
-			until = b.Until.UTC().Format(time.RFC3339)
+			until = b.Until.Local().Format(time.RFC3339)
 		}
 		agent := ""
 		if b.Agent != "" {

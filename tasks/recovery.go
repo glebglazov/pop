@@ -424,7 +424,7 @@ func (p *recoveryPrinter) countdown(now time.Time, preset string, resetAt time.T
 	}
 	p.out.line(ansiDim, "⏳ Waiting for quota recovery: %s resets at %s (in %s)",
 		preset,
-		resetAt.Format("15:04:05"),
+		resetAt.Local().Format("15:04:05 MST"),
 		formatDuration(waitDur))
 }
 
