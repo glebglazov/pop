@@ -248,8 +248,8 @@ A resolved ticket is off the frontier. Assets created while resolving are linked
 ## Ticket-type overrides
 
 - **Grilling** (HITL): run the `grill-with-docs` skill (pop's embedded planning skill — not `/grilling` or `/domain-modeling`). One question at a time with the human; never answer your own grilling questions.
-- **Research** (AFK): investigate directly or via a sub-agent. Record findings in the ticket's `## Answer` — **do not** open a throwaway `research/<name>` branch or any other side branch for research output.
-- **Prototype** (HITL): raise fidelity with a cheap, rough, concrete artifact the human can react to — an outline, stub, or minimal UI/logic sketch. There is no separate prototype skill; keep it deliberately rough and link the artifact path from `## Answer`. Use when "how should it look" or "how should it behave" is the key question.
+- **Research** (AFK): run the `research` skill (background agent, primary sources). Record findings in the ticket's `## Answer` with source citations — the Answer holds the gist and cites/links; **do not** open a throwaway `research/<name>` branch or any other side branch for research output.
+- **Prototype** (HITL): run the `prototype` skill (logic vs UI branches, throwaway, one command to run). Link the prototype's path and record the verdict in the ticket's `## Answer` — pop's rule overrides upstream prototype's "commit to a throwaway branch"; the artifact stays in the working tree and the Answer records the validated decision. Use when "how should it look" or "how should it behave" is the key question.
 - **Task** (HITL or AFK): manual work that unblocks a decision — provisioning access, signing up for a service, moving data so its shape can be seen. The agent drives it alone where it can; otherwise hand the human a precise checklist. The answer records what was done and any facts later tickets depend on.
 
 ## Invocation (pop)
@@ -264,7 +264,7 @@ User invokes with a loose idea (no map id).
 2. **Map the frontier** with another `grill-with-docs` pass, breadth-first: fan out across the whole space, surfacing open decisions and first steps takeable now. If the way is already clear and small enough for one session, you don't need a map — stop and ask how to proceed.
 3. **Create the map folder** at `$(pop work show-path)/wayfinder/<YYYY-MM-DD-slug>/` with `map.md` (`Status: active`, Destination, Notes, empty Decisions so far, fog in Not yet specified).
 4. **Create ticket files** you can specify now under `issues/` — wire `Blocked by:` in a second pass once numbers exist. Everything not yet sharp stays in **Not yet specified**.
-5. **Fire research in parallel** for each `Type: research` ticket — resolve them in this session or via sub-agents, writing each answer into its ticket's `## Answer` and setting `Status: resolved`.
+5. **Fire research in parallel** for each `Type: research` ticket — run the `research` skill (this session or background agents), writing each answer into its ticket's `## Answer` with source citations and setting `Status: resolved`.
 6. Stop — charting is one session's work; it hand-resolves nothing beyond research.
 
 ### Work through the map
@@ -273,7 +273,7 @@ User invokes as `work <map-id> [<ticket-id>]` (e.g. `/pop-wayfinder work 2026-07
 
 1. Load `map.md` — the low-res view, not every ticket body.
 2. Choose the ticket. If the user named one, use it; otherwise take the first frontier ticket. **Claim it:** set `Status: claimed` before any work.
-3. Resolve — read related tickets on demand; invoke skills named in **Notes**. Grilling tickets use `grill-with-docs`.
+3. Resolve — read related tickets on demand; invoke skills named in **Notes**. Grilling tickets use `grill-with-docs`; research tickets use `research`; prototype tickets use `prototype`.
 4. Record the resolution in the ticket (`## Answer`, `Status: resolved`) and append to **Decisions so far** on the map.
 5. Add newly-surfaced tickets; graduate fog into new `issues/` files; rule out-of-scope tickets per upstream rules.
 
