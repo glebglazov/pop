@@ -48,13 +48,18 @@ func writeRuntime(d *Deps, id string, agents []string, agentsSet bool, effort st
 	if err := validateID(id); err != nil {
 		return nil, err
 	}
-	if agentsSet {
+	// An explicitly-empty set is a clear back to unset (config-resolved), not a
+	// validation failure — the dashboard agent/effort modal submits empty fields
+	// to reset. Only a non-empty list is validated against the known presets.
+	clearAgents := agentsSet && len(nonEmptyAgentSpecs(agents)) == 0
+	if agentsSet && !clearAgents {
 		if err := validateAgentPresets(agents); err != nil {
 			return nil, err
 		}
 	}
 	trimmedEffort := strings.TrimSpace(effort)
-	if effortSet {
+	clearEffort := effortSet && trimmedEffort == ""
+	if effortSet && !clearEffort {
 		if err := validateEffort(trimmedEffort); err != nil {
 			return nil, err
 		}

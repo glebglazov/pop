@@ -175,10 +175,11 @@ type RoutineDashboard struct {
 	err       error
 	width     int
 	height    int
-	detail    *runsDetailView
-	menu      *routineDashboardMenu
-	sched     *routineScheduleModal
-	statusMsg string
+	detail      *runsDetailView
+	menu        *routineDashboardMenu
+	sched       *routineScheduleModal
+	agentEffort *routineAgentEffortModal
+	statusMsg   string
 	showHelp  bool
 	pendingG  bool
 
@@ -224,6 +225,7 @@ const (
 	menuActionPreview
 	menuActionEditPrompt
 	menuActionEditSchedule
+	menuActionAgentEffort
 	menuActionRefine
 	menuActionRuns
 )
@@ -259,6 +261,7 @@ func routineMenuItems(row DashboardRow) []routineMenuItem {
 		{key: "p", label: "preview pane", action: menuActionPreview},
 		{key: "e", label: "edit prompt", action: menuActionEditPrompt},
 		{key: "s", label: "edit schedule", action: menuActionEditSchedule},
+		{key: "g", label: "agent/effort", action: menuActionAgentEffort},
 		{key: "r", label: "refine", action: menuActionRefine},
 		{key: "l", label: "runs", action: menuActionRuns},
 	}
@@ -273,6 +276,49 @@ type routineScheduleModal struct {
 	row   DashboardRow
 	input string
 	err   error
+}
+
+// routineAgentEffortModal is the text-input overlay opened by the agent/effort
+// verb. It edits both runtime fields from ADR-0128 slice 03: the ordered
+// agent-preset list (comma/space-separated) and the effort tier. Both are
+// pre-filled with the routine's current manifest values; an empty field submits
+// as a clear back to unset (config-resolved). field selects which line the
+// keystrokes land on, and err holds the last validation failure so an invalid
+// submission keeps the modal open for correction (mirrors routineScheduleModal).
+type routineAgentEffortModal struct {
+	row    DashboardRow
+	agents string
+	effort string
+	field  int // 0 = agents, 1 = effort
+	err    error
+}
+
+// current returns a pointer to the field the keystrokes currently edit.
+func (mo *routineAgentEffortModal) current() *string {
+	if mo.field == 1 {
+		return &mo.effort
+	}
+	return &mo.agents
+}
+
+// appendText adds typed text to the active field.
+func (mo *routineAgentEffortModal) appendText(t string) {
+	p := mo.current()
+	*p += t
+}
+
+// deleteRune drops the last rune of the active field.
+func (mo *routineAgentEffortModal) deleteRune() {
+	p := mo.current()
+	if r := []rune(*p); len(r) > 0 {
+		*p = string(r[:len(r)-1])
+	}
+}
+
+// parseAgentSpecList splits a modal agents field into an ordered preset list,
+// accepting commas and/or whitespace as separators and dropping empties.
+func parseAgentSpecList(input string) []string {
+	return strings.Fields(strings.ReplaceAll(input, ",", " "))
 }
 
 // newRoutineDashboardMenu opens the action overlay on row, wrapping its verbs in
@@ -428,7 +474,7 @@ func (m RoutineDashboard) resizeMainList() {
 
 // ViewToggleAllowed reports whether v may switch to the Queue dashboard.
 func (m RoutineDashboard) ViewToggleAllowed() bool {
-	return m.detail == nil && m.menu == nil && m.sched == nil
+	return m.detail == nil && m.menu == nil && m.sched == nil && m.agentEffort == nil
 }
 
 // ListCursor exposes the main-list cursor index for tests.
@@ -453,6 +499,9 @@ func (m RoutineDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.sched != nil {
 			return m.updateScheduleModal(msg)
+		}
+		if m.agentEffort != nil {
+			return m.updateAgentEffortModal(msg)
 		}
 		if m.menu != nil {
 			return m.updateMenu(msg)
@@ -816,6 +865,8 @@ func (m RoutineDashboard) dispatchMenuAction(action routineMenuAction, row Dashb
 	case menuActionEditSchedule:
 		m.sched = &routineScheduleModal{row: row, input: row.Schedule}
 		return m, nil
+	case menuActionAgentEffort:
+		return m.openAgentEffortModal(row)
 	case menuActionRefine:
 		return m, m.refineRoutine(row)
 	case menuActionRuns:
@@ -946,6 +997,79 @@ func (m RoutineDashboard) confirmScheduleModal() (tea.Model, tea.Cmd) {
 	return m, m.reload()
 }
 
+// openAgentEffortModal reads the routine's current manifest to pre-fill the
+// agent/effort modal, then opens it over the cursored row. A load failure
+// surfaces on the dashboard's error line rather than opening a blank modal.
+func (m RoutineDashboard) openAgentEffortModal(row DashboardRow) (tea.Model, tea.Cmd) {
+	d := m.d
+	if d == nil {
+		d = DefaultDeps()
+	}
+	r, err := loadManifest(d, row.ID)
+	if err != nil {
+		m.err = err
+		return m, nil
+	}
+	m.agentEffort = &routineAgentEffortModal{
+		row:    row,
+		agents: strings.Join(r.Manifest.Agents, ", "),
+		effort: r.Manifest.Effort,
+	}
+	return m, nil
+}
+
+// updateAgentEffortModal drives the agent/effort text-input overlay: esc/ctrl+c
+// cancel without writing, tab / up / down move between the agents and effort
+// fields, backspace deletes the last rune of the active field, enter validates
+// and persists, and any printable key extends the active field.
+func (m RoutineDashboard) updateAgentEffortModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.agentEffort == nil {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.agentEffort = nil
+		return m, nil
+	case "tab", "down", "shift+tab", "up":
+		m.agentEffort.field = (m.agentEffort.field + 1) % 2
+		return m, nil
+	case "backspace":
+		m.agentEffort.deleteRune()
+		return m, nil
+	case "enter":
+		return m.confirmAgentEffortModal()
+	}
+	if kpm, ok := msg.(tea.KeyPressMsg); ok && kpm.Text != "" {
+		m.agentEffort.appendText(kpm.Text)
+	}
+	return m, nil
+}
+
+// confirmAgentEffortModal persists both runtime fields through UpdateRuntimeWith
+// — the same validated write path the CLI --agent/--effort flags use, so it also
+// pauses the routine with reason `changed`. Empty fields submit as a clear back
+// to unset. On validation failure the manifest is left untouched and the modal
+// stays open showing the inline error for re-editing; on success the modal
+// closes and a reload refreshes the row.
+func (m RoutineDashboard) confirmAgentEffortModal() (tea.Model, tea.Cmd) {
+	if m.agentEffort == nil {
+		return m, nil
+	}
+	d := m.d
+	if d == nil {
+		d = DefaultDeps()
+	}
+	row := m.agentEffort.row
+	agents := parseAgentSpecList(m.agentEffort.agents)
+	if _, err := UpdateRuntimeWith(d, row.ID, agents, true, m.agentEffort.effort, true); err != nil {
+		m.agentEffort.err = err
+		return m, nil
+	}
+	m.agentEffort = nil
+	m.statusMsg = fmt.Sprintf("updated agents/effort for %s", row.ID)
+	return m, m.reload()
+}
+
 func (m RoutineDashboard) previewRoutine(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		d := m.d
@@ -1068,6 +1192,14 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "esc", Desc: "cancel"},
 		}
 	}
+	if m.agentEffort != nil {
+		return []ui.HelpEntry{
+			{Key: "type", Desc: "edit field"},
+			{Key: "tab", Desc: "switch field"},
+			{Key: "enter", Desc: "save"},
+			{Key: "esc", Desc: "cancel"},
+		}
+	}
 	if m.menu != nil {
 		return []ui.HelpEntry{
 			{Key: "i", Desc: "fire now"},
@@ -1075,6 +1207,7 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "p", Desc: "preview pane"},
 			{Key: "e", Desc: "edit prompt"},
 			{Key: "s", Desc: "edit schedule"},
+			{Key: "g", Desc: "agent/effort"},
 			{Key: "r", Desc: "refine"},
 			{Key: "l", Desc: "runs"},
 			{Key: "j/k", Desc: "navigate"},
@@ -1121,6 +1254,8 @@ func (m RoutineDashboard) View() tea.View {
 		title := "Help · Routines"
 		if m.sched != nil {
 			title = "Help · Routines · edit schedule"
+		} else if m.agentEffort != nil {
+			title = "Help · Routines · agent/effort"
 		} else if m.menu != nil {
 			title = "Help · Routines · actions"
 		} else if m.detail != nil && m.detail.peek != nil {
@@ -1144,6 +1279,12 @@ func (m RoutineDashboard) View() tea.View {
 	m.resizeMainList()
 	if m.sched != nil {
 		content := m.viewWithScheduleModal()
+		v := tea.NewView(content)
+		v.AltScreen = true
+		return v
+	}
+	if m.agentEffort != nil {
+		content := m.viewWithAgentEffortModal()
 		v := tea.NewView(content)
 		v.AltScreen = true
 		return v
@@ -1259,6 +1400,66 @@ func routineScheduleModalLines(modal *routineScheduleModal, width int) []string 
 	lines := []string{
 		ui.TruncateString("    "+ui.HintStyle.Render("edit schedule"), width),
 		ui.TruncateString(fmt.Sprintf("    schedule: %s", modal.input), width),
+	}
+	if modal.err != nil {
+		lines = append(lines, ui.TruncateString(fmt.Sprintf("    error: %v", modal.err), width))
+	}
+	return lines
+}
+
+// viewWithAgentEffortModal renders the agent/effort text-input overlay: the
+// summary, the full table with the modal block spliced under the cursored row,
+// and a modal footer. It mirrors viewWithScheduleModal's overlay grammar.
+func (m RoutineDashboard) viewWithAgentEffortModal() string {
+	var b strings.Builder
+	if m.err != nil {
+		fmt.Fprintf(&b, "refresh error: %v\n", m.err)
+	}
+	fmt.Fprintf(&b, "Routines · %d\n\n", len(m.snap.Rows))
+	hint := ui.HintStyle.Render("tab switch · enter save · esc cancel")
+	if len(m.snap.Rows) == 0 {
+		fmt.Fprintln(&b, emptyListHint)
+		writeRoutineFooter(&b, m.height, hint)
+		return b.String()
+	}
+	fmt.Fprintln(&b, ui.TruncateString("  "+dashboardTableLine(dashboardTableHeaders(), m.cols.widths), m.width))
+	fmt.Fprintln(&b, ui.TruncateString("  "+dashboardTableSeparator(m.cols.widths), m.width))
+	cursor := m.list.Cursor()
+	for i, row := range m.snap.Rows {
+		marker := "  "
+		if i == cursor {
+			marker = ui.IndicatorStyle.Render("█") + " "
+		}
+		cell := ui.TruncateString(dashboardTableLine(dashboardRowValues(row), m.cols.widths), dashboardListCellBudget(m.width))
+		fmt.Fprintln(&b, marker+cell)
+		if i == cursor {
+			for _, ml := range routineAgentEffortModalLines(m.agentEffort, m.width) {
+				fmt.Fprintln(&b, ml)
+			}
+		}
+	}
+	writeRoutineFooter(&b, m.height, hint)
+	return b.String()
+}
+
+// routineAgentEffortModalLines renders the agent/effort modal as a block of
+// lines nested under the cursored row: a dimmed caption, the two working fields
+// (the active one marked with "> "), and, when the last enter failed to
+// validate, the inline error kept for correction.
+func routineAgentEffortModalLines(modal *routineAgentEffortModal, width int) []string {
+	if modal == nil {
+		return nil
+	}
+	marker := func(field int) string {
+		if modal.field == field {
+			return "> "
+		}
+		return "  "
+	}
+	lines := []string{
+		ui.TruncateString("    "+ui.HintStyle.Render("agent / effort"), width),
+		ui.TruncateString(fmt.Sprintf("    %sagents: %s", marker(0), modal.agents), width),
+		ui.TruncateString(fmt.Sprintf("    %seffort: %s", marker(1), modal.effort), width),
 	}
 	if modal.err != nil {
 		lines = append(lines, ui.TruncateString(fmt.Sprintf("    error: %v", modal.err), width))
