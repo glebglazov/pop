@@ -9,7 +9,7 @@ import (
 
 var (
 	everySchedulePattern = regexp.MustCompile(`(?i)^every\s+(\S+)\s*$`)
-	dailySchedulePattern = regexp.MustCompile(`(?i)^daily\s+at\s+(\d{1,2}):(\d{2})\s*$`)
+	dailySchedulePattern = regexp.MustCompile(`(?i)^daily\s+at\s+(\d{1,2})(?::(\d{2}))?(\s+utc)?\s*$`)
 )
 
 // ScheduleKind classifies a Routine schedule form.
@@ -27,6 +27,18 @@ type Schedule struct {
 	Interval time.Duration
 	Hour     int
 	Minute   int
+	// UTC reports whether a daily schedule's slot is computed in UTC. When
+	// false (the default), daily slots use machine-local wall clock. See
+	// ADR-0126.
+	UTC bool
+}
+
+// zone returns the location a daily schedule computes its slots in.
+func (s Schedule) zone() *time.Location {
+	if s.UTC {
+		return time.UTC
+	}
+	return time.Local
 }
 
 // ParseSchedule parses the two supported Routine schedule forms.
@@ -50,15 +62,20 @@ func ParseSchedule(raw string) (Schedule, error) {
 
 	if m := dailySchedulePattern.FindStringSubmatch(raw); m != nil {
 		hour, errH := parseClockComponent(m[1], 23)
-		minute, errM := parseClockComponent(m[2], 59)
+		minute := 0
+		var errM error
+		if m[2] != "" {
+			minute, errM = parseClockComponent(m[2], 59)
+		}
 		if errH != nil || errM != nil {
-			return Schedule{}, fmt.Errorf("invalid schedule %q: daily time must be HH:MM in 24-hour form (e.g. \"10:00\")", raw)
+			return Schedule{}, scheduleFormatError(raw)
 		}
 		return Schedule{
 			Raw:    raw,
 			Kind:   ScheduleDaily,
 			Hour:   hour,
 			Minute: minute,
+			UTC:    m[3] != "",
 		}, nil
 	}
 
@@ -74,7 +91,7 @@ func parseClockComponent(s string, max int) (int, error) {
 }
 
 func scheduleFormatError(raw string) error {
-	return fmt.Errorf("invalid schedule %q: expected \"every <duration>\" (e.g. \"every 6h\") or \"daily at HH:MM\" (e.g. \"daily at 10:00\")", raw)
+	return fmt.Errorf("invalid schedule %q: expected \"every <duration>\" (e.g. \"every 6h\") or \"daily at H[:MM][ utc]\" — local wall clock unless a \"utc\" suffix is given (e.g. \"daily at 11\", \"daily at 10:00\", \"daily at 11:00 utc\")", raw)
 }
 
 // NextAfter returns the next fire instant strictly after lastFired. A zero
@@ -87,10 +104,11 @@ func (s Schedule) NextAfter(lastFired time.Time) time.Time {
 		}
 		return lastFired.Add(s.Interval)
 	case ScheduleDaily:
-		loc := lastFired.Location()
+		loc := s.zone()
 		if lastFired.IsZero() {
-			loc = time.Local
 			lastFired = time.Now().In(loc)
+		} else {
+			lastFired = lastFired.In(loc)
 		}
 		candidate := time.Date(lastFired.Year(), lastFired.Month(), lastFired.Day(), s.Hour, s.Minute, 0, 0, loc)
 		if !candidate.After(lastFired) {

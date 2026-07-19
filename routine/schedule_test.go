@@ -80,61 +80,94 @@ func TestScheduleNextAfterEvery(t *testing.T) {
 }
 
 func TestScheduleNextAfterDailySameDay(t *testing.T) {
-	loc := time.FixedZone("test", -5*3600)
+	// Suffix-less daily computes in machine-local wall clock (ADR-0126).
 	s, err := ParseSchedule("daily at 10:00")
 	if err != nil {
 		t.Fatal(err)
 	}
-	last := time.Date(2026, 7, 18, 9, 0, 0, 0, loc)
+	last := time.Date(2026, 7, 18, 9, 0, 0, 0, time.Local)
 	got := s.NextAfter(last)
-	want := time.Date(2026, 7, 18, 10, 0, 0, 0, loc)
+	want := time.Date(2026, 7, 18, 10, 0, 0, 0, time.Local)
 	if !got.Equal(want) {
 		t.Fatalf("NextAfter = %s, want %s", got, want)
 	}
 }
 
 func TestScheduleNextAfterDailyNextDay(t *testing.T) {
-	loc := time.FixedZone("test", -5*3600)
 	s, err := ParseSchedule("daily at 10:00")
 	if err != nil {
 		t.Fatal(err)
 	}
-	last := time.Date(2026, 7, 18, 11, 0, 0, 0, loc)
+	last := time.Date(2026, 7, 18, 11, 0, 0, 0, time.Local)
 	got := s.NextAfter(last)
-	want := time.Date(2026, 7, 19, 10, 0, 0, 0, loc)
+	want := time.Date(2026, 7, 19, 10, 0, 0, 0, time.Local)
 	if !got.Equal(want) {
 		t.Fatalf("NextAfter = %s, want %s", got, want)
 	}
 }
 
 func TestScheduleNextAfterDailyMidnight(t *testing.T) {
-	loc := time.FixedZone("test", 0)
 	s, err := ParseSchedule("daily at 00:00")
 	if err != nil {
 		t.Fatal(err)
 	}
-	last := time.Date(2026, 7, 18, 23, 30, 0, 0, loc)
+	last := time.Date(2026, 7, 18, 23, 30, 0, 0, time.Local)
 	got := s.NextAfter(last)
-	want := time.Date(2026, 7, 19, 0, 0, 0, 0, loc)
+	want := time.Date(2026, 7, 19, 0, 0, 0, 0, time.Local)
 	if !got.Equal(want) {
 		t.Fatalf("NextAfter = %s, want %s", got, want)
 	}
 }
 
-func TestScheduleNextAfterDailyDSTAgnosticWallClock(t *testing.T) {
-	loc, err := time.LoadLocation("America/New_York")
+func TestParseScheduleDailyBareHour(t *testing.T) {
+	s, err := ParseSchedule("daily at 11")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := ParseSchedule("daily at 02:30")
+	if s.Kind != ScheduleDaily || s.Hour != 11 || s.Minute != 0 || s.UTC {
+		t.Fatalf("got %+v", s)
+	}
+}
+
+func TestParseScheduleDailyUTCSuffix(t *testing.T) {
+	for _, raw := range []string{"daily at 11:00 utc", "daily at 11 UTC"} {
+		s, err := ParseSchedule(raw)
+		if err != nil {
+			t.Fatalf("ParseSchedule(%q): %v", raw, err)
+		}
+		if s.Kind != ScheduleDaily || s.Hour != 11 || !s.UTC {
+			t.Fatalf("ParseSchedule(%q) = %+v", raw, s)
+		}
+	}
+}
+
+func TestScheduleNextAfterDailyUTCSuffix(t *testing.T) {
+	s, err := ParseSchedule("daily at 11:00 utc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Day before US spring-forward 2026 (Mar 8): keep 02:30 wall time next day.
-	last := time.Date(2026, 3, 7, 3, 0, 0, 0, loc)
+	last := time.Date(2026, 7, 18, 9, 0, 0, 0, time.UTC)
 	got := s.NextAfter(last)
-	want := time.Date(2026, 3, 8, 2, 30, 0, 0, loc)
+	want := time.Date(2026, 7, 18, 11, 0, 0, 0, time.UTC)
 	if !got.Equal(want) {
 		t.Fatalf("NextAfter = %s, want %s", got, want)
+	}
+}
+
+// A UTC-parsed last-fired instant (as stored in run rows) must still yield a
+// machine-local wall-clock slot for a suffix-less daily schedule — slot zone
+// comes from the schedule, never the last-fired instant's location (ADR-0126).
+func TestScheduleNextAfterDailyIgnoresLastFiredZone(t *testing.T) {
+	s, err := ParseSchedule("daily at 11:00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
+	got := s.NextAfter(last)
+	if got.Location() != time.Local {
+		t.Fatalf("slot location = %s, want Local", got.Location())
+	}
+	if got.Hour() != 11 || got.Minute() != 0 {
+		t.Fatalf("slot wall clock = %02d:%02d, want 11:00 local", got.Hour(), got.Minute())
 	}
 }
