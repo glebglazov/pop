@@ -17,6 +17,7 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/wayfinder"
 )
 
 func mkdirDrainStoreDir(t *testing.T, td *tasks.Deps) {
@@ -5414,5 +5415,254 @@ func TestDashboardMapRowTwoLineRender(t *testing.T) {
 	wantIndent := dashboardTwoLineStatusIndent(widths)
 	if got := len(line2) - len(strings.TrimLeft(line2, " ")); got < wantIndent {
 		t.Fatalf("two-line line2 indent = %d, want >= %d: %q", got, wantIndent, line2)
+	}
+}
+
+func mapDetailTestFiles() (storageDir string, files map[string]string) {
+	storageDir = "/data/repos/repo-map-detail"
+	activeMap := filepath.Join(storageDir, "wayfinder", "2026-07-01-active")
+	files = map[string]string{
+		filepath.Join(activeMap, "map.md"): "Status: active\n\n## Destination\nShip it\n",
+		filepath.Join(activeMap, "issues", "01-frontier.md"): "" +
+			"Type: research\nStatus: open\n\n# Frontier question\n",
+		filepath.Join(activeMap, "issues", "02-blocked.md"): "" +
+			"Type: prototype\nStatus: open\nBlocked by: 01\n\n# Blocked question\n",
+		filepath.Join(activeMap, "issues", "03-claimed.md"): "" +
+			"Type: grilling\nStatus: claimed\n\n# Claimed question\n",
+		filepath.Join(activeMap, "issues", "04-resolved.md"): "" +
+			"Type: task\nStatus: resolved\n\n# Resolved question\n",
+	}
+	return storageDir, files
+}
+
+func newMapDetailDashboard(t *testing.T) (QueueDashboard, *Deps) {
+	t.Helper()
+	storageDir, files := mapDetailTestFiles()
+	tasksDir := filepath.Join(storageDir, "tasks")
+	d := dashboardTestDeps(t, nil, nil)
+	withWayfinderMaps(t, d, storageDir, files)
+	mapRow := DashboardRow{
+		Project: "pop",
+		IsMap:   true,
+		cursorKey: "pop\x00map\x00" + "2026-07-01-active",
+		SetRef: SetRef{
+			SetID:   "2026-07-01-active",
+			DefPath: tasksDir,
+		},
+		MapOpen: 2, MapFrontier: 1,
+	}
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{mapRow}})
+	m.width, m.height = 120, 24
+	return m, d
+}
+
+func openMapDetailFromList(t *testing.T, m QueueDashboard) (QueueDashboard, tea.Cmd) {
+	t.Helper()
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	got := updated.(QueueDashboard)
+	if got.detail == nil || !got.detail.loading || cmd == nil {
+		t.Fatalf("l on map row = detail %+v, want loading with cmd", got.detail)
+	}
+	return got, cmd
+}
+
+func finishMapDetailLoad(t *testing.T, m QueueDashboard, cmd tea.Cmd) QueueDashboard {
+	t.Helper()
+	updated, _ := m.Update(cmd())
+	got := updated.(QueueDashboard)
+	if got.detail.loading || got.detail.err != nil || got.detail.wfMap == nil {
+		t.Fatalf("loaded detail = loading=%v err=%v map=%+v", got.detail.loading, got.detail.err, got.detail.wfMap)
+	}
+	return got
+}
+
+func loadMapDetail(t *testing.T, m QueueDashboard) QueueDashboard {
+	t.Helper()
+	loading, cmd := openMapDetailFromList(t, m)
+	return finishMapDetailLoad(t, loading, cmd)
+}
+
+func TestDashboardMapDetailViewOpenClose(t *testing.T) {
+	m, _ := newMapDetailDashboard(t)
+
+	loading, cmd := openMapDetailFromList(t, m)
+	view := loading.View().Content
+	if strings.Contains(view, "PROJECT") || strings.Contains(view, "TASK SET") {
+		t.Fatalf("detail view should replace table:\n%s", view)
+	}
+
+	got := finishMapDetailLoad(t, loading, cmd)
+	if !strings.Contains(got.View().Content, "Map · 2026-07-01-active") {
+		t.Fatalf("detail missing map header:\n%s", got.View().Content)
+	}
+
+	for _, tc := range []struct {
+		name string
+		msg  tea.KeyPressMsg
+	}{
+		{name: "h", msg: tea.KeyPressMsg{Code: 'h', Text: "h"}},
+		{name: "left", msg: tea.KeyPressMsg{Code: tea.KeyLeft, Text: "left"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mOpen, _ := newMapDetailDashboard(t)
+			loaded := loadMapDetail(t, mOpen)
+			updated, cmd := loaded.Update(tc.msg)
+			closed := updated.(QueueDashboard)
+			if cmd != nil {
+				t.Fatalf("%s in map detail returned command", tc.name)
+			}
+			if closed.detail != nil {
+				t.Fatalf("%s should close map detail", tc.name)
+			}
+		})
+	}
+
+	m2, _ := newMapDetailDashboard(t)
+	got2 := loadMapDetail(t, m2)
+	updated, cmd := got2.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if cmd != nil || updated.(QueueDashboard).detail != nil {
+		t.Fatal("esc should close map detail without quitting")
+	}
+
+	m3, _ := newMapDetailDashboard(t)
+	updated3, cmd3 := m3.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	loading3 := updated3.(QueueDashboard)
+	if loading3.detail == nil || !loading3.detail.loading || cmd3 == nil {
+		t.Fatal("enter on map row should open loading detail with cmd")
+	}
+	got3 := finishMapDetailLoad(t, loading3, cmd3)
+	if got3.detail.wfMap == nil {
+		t.Fatal("enter should load map detail")
+	}
+}
+
+func TestDashboardMapDetailViewRendersTicketsAndFrontier(t *testing.T) {
+	m, _ := newMapDetailDashboard(t)
+	got := loadMapDetail(t, m)
+	view := got.View().Content
+
+	for _, want := range []string{
+		"01-frontier", "research", "open",
+		"02-blocked", "prototype", "open (blocked)",
+		"03-claimed", "claimed",
+		"04-resolved", "resolved",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("detail missing %q:\n%s", want, view)
+		}
+	}
+
+	// Frontier row is highlighted (cyan); blocked/claimed/resolved are dim.
+	frontierLine := ""
+	blockedLine := ""
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "01-frontier") {
+			frontierLine = line
+		}
+		if strings.Contains(line, "02-blocked") {
+			blockedLine = line
+		}
+	}
+	if frontierLine == "" || blockedLine == "" {
+		t.Fatalf("could not find ticket lines in:\n%s", view)
+	}
+	if !strings.Contains(frontierLine, "\x1b[") {
+		t.Fatalf("frontier line should be styled: %q", frontierLine)
+	}
+	if !strings.Contains(blockedLine, "2m") {
+		t.Fatalf("blocked line should be dimmed: %q", blockedLine)
+	}
+}
+
+func TestDashboardMapDetailViewVimNavigation(t *testing.T) {
+	m, _ := newMapDetailDashboard(t)
+	got := loadMapDetail(t, m)
+
+	selName := func(m QueueDashboard) string {
+		ticket, _ := m.detail.ticketList.Selected()
+		return detailTicketName(ticket)
+	}
+
+	updated, _ := got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	got = updated.(QueueDashboard)
+	if name := selName(got); name != "02-blocked" {
+		t.Fatalf("after j: selected = %q, want 02-blocked", name)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	got = updated.(QueueDashboard)
+	if name := selName(got); name != "04-resolved" {
+		t.Fatalf("G: selected = %q, want 04-resolved", name)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	got = updated.(QueueDashboard)
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	got = updated.(QueueDashboard)
+	if name := selName(got); name != "01-frontier" {
+		t.Fatalf("gg: selected = %q, want 01-frontier", name)
+	}
+}
+
+func TestDashboardMapDetailViewPeekTicketText(t *testing.T) {
+	m, _ := newMapDetailDashboard(t)
+	got := loadMapDetail(t, m)
+
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	got = updated.(QueueDashboard)
+	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.taskID != "01-frontier" {
+		t.Fatalf("peek = %+v, want loading for 01-frontier", got.detail.peek)
+	}
+	if cmd == nil {
+		t.Fatal("l in map detail did not return load command")
+	}
+	updated, _ = got.Update(cmd())
+	got = updated.(QueueDashboard)
+	if got.detail.peek == nil || got.detail.peek.loading || got.detail.peek.err != nil {
+		t.Fatalf("loaded peek = %+v", got.detail.peek)
+	}
+	view := got.View().Content
+	ticketPath := filepath.Join("/data/repos/repo-map-detail/wayfinder/2026-07-01-active/issues/01-frontier.md")
+	for _, want := range []string{
+		"2026-07-01-active / 01-frontier",
+		ticketPath,
+		"# Frontier question",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("peek view missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	got = updated.(QueueDashboard)
+	if cmd != nil {
+		t.Fatal("h from ticket peek returned command")
+	}
+	if got.detail == nil || got.detail.peek != nil {
+		t.Fatalf("h should close peek but keep map detail: detail=%+v", got.detail)
+	}
+	if !strings.Contains(got.View().Content, "Map · 2026-07-01-active") {
+		t.Fatalf("should return to map detail list after closing peek")
+	}
+}
+
+func TestStyledDetailMapTicketLineFrontierVsDim(t *testing.T) {
+	frontier := map[string]bool{"01": true}
+	open := wayfinder.Ticket{ID: "01", Slug: "a", Type: wayfinder.TicketResearch, Status: wayfinder.TicketOpen}
+	blocked := wayfinder.Ticket{ID: "02", Slug: "b", Type: wayfinder.TicketPrototype, Status: wayfinder.TicketOpen}
+	claimed := wayfinder.Ticket{ID: "03", Slug: "c", Type: wayfinder.TicketGrilling, Status: wayfinder.TicketClaimed}
+
+	frontierStyled := styledDetailMapTicketLine(open, 12, frontier)
+	blockedStyled := styledDetailMapTicketLine(blocked, 12, frontier)
+	claimedStyled := styledDetailMapTicketLine(claimed, 12, frontier)
+
+	if !strings.Contains(frontierStyled, "\x1b[") {
+		t.Fatalf("frontier line not styled: %q", frontierStyled)
+	}
+	if !strings.Contains(blockedStyled, "2m") {
+		t.Fatalf("blocked line not dimmed: %q", blockedStyled)
+	}
+	if !strings.Contains(claimedStyled, "2m") {
+		t.Fatalf("claimed line not dimmed: %q", claimedStyled)
 	}
 }
