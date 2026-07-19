@@ -1,6 +1,7 @@
 ---
 name: to-tasks
 description: Break a plan, spec, or PRD into independently-grabbable work items written as local markdown files, binding the set to the worktree you run it in. Use when the user wants to convert a plan into tasks, create implementation tickets, or break down work into actionable items. Accepts `managed` (isolated pop-owned worktree) and `auto-drain` (queue drains it unattended) arguments.
+disable-model-invocation: true
 ---
 
 # To Tasks

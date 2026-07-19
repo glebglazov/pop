@@ -1,6 +1,7 @@
 ---
 name: grill-with-docs
 description: Grilling session that challenges your plan against the existing domain model, sharpens terminology, and updates documentation (CONTEXT.md, ADRs) inline as decisions crystallise — conflict-free under parallel agents and teams via generation-numbered glossary fragments and sequential-id ADRs. Use when user wants to stress-test a plan against their project's language and documented decisions.
+disable-model-invocation: true
 ---
 
 <!--
@@ -14,8 +15,9 @@ round at a time), then the body of domain-modeling/SKILL.md (the glossary/ADR
 discipline). Pop inlines both rather than delegating to `/batch-grill-me` +
 `/domain-modeling`, per ADR-0009 (skills are embedded in the binary and ship to
 machines without Matt's skills installed). batch-grill-me's
-`disable-model-invocation` frontmatter is intentionally dropped so
-grill-with-docs stays model-invocable. Pop's parallel-safety additions — the
+`disable-model-invocation` frontmatter is kept: grilling is a manual-only
+session the user opens with `/grill-with-docs`, never something the model
+starts on its own. Pop's parallel-safety additions — the
 single-writer override, grill-consolidate, and the commit-on-close discipline —
 live below that marker. To review upstream drift, diff the region between this
 header and the marker against batch-grill-me@<newref> + domain-modeling@<newref>.

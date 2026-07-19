@@ -1,6 +1,7 @@
 ---
 name: to-prd
 description: Turn the current conversation context into a PRD and write it as a local markdown file. Use when the user wants to create a PRD from the current context.
+disable-model-invocation: true
 ---
 
 # To PRD

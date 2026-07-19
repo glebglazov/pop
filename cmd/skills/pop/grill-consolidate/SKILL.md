@@ -1,6 +1,7 @@
 ---
 name: grill-consolidate
 description: Fold accumulated glossary fragments (from `.grill-context/`, plus any legacy colocated CONTEXT.<counter>.<uuid>.md) into canonical CONTEXT.md files, reconcile clashing sequential ADR numbers (re-sequencing duplicates and fixing the links that pointed at them), and stub superseded ADRs down to their forward pointer, as a deliberate single-writer maintenance pass. Use when the user asks to consolidate, fold, merge, reconcile, clean up, or resolve concurrent context/glossary fragments, duplicate ADR numbers, or superseded ADRs produced by grill-with-docs.
+disable-model-invocation: true
 ---
 
 # Grill Consolidate
