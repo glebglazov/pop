@@ -2239,6 +2239,12 @@ func TestImplementAgentFlagExplicitness(t *testing.T) {
 }
 
 func TestVerifierSteeringFlagsRegistered(t *testing.T) {
+	// `pop tasks verify --task-runtime-path <checkout>` pins the Verifier to a
+	// specific checkout root instead of resolving from the repo root.
+	if taskVerifyCmd.Flags().Lookup("task-runtime-path") == nil {
+		t.Fatal("tasks verify --task-runtime-path flag not registered")
+	}
+
 	// `pop tasks verify` accepts repeatable --agent and an --effort override.
 	agent := taskVerifyCmd.Flags().Lookup("agent")
 	if agent == nil {
@@ -2269,6 +2275,44 @@ func TestVerifierSteeringFlagsRegistered(t *testing.T) {
 	}
 	if taskImplementCmd.Flags().Lookup("verify-effort") == nil {
 		t.Fatal("tasks implement --verify-effort flag not registered")
+	}
+}
+
+// TestVerifyTaskRuntimePathFlagThreadsIntoResolveInput asserts that
+// `pop tasks verify --task-runtime-path <checkout>` pins the runtime path used
+// for the work-SHA read and verdict key, mirroring `pop tasks implement`'s
+// override instead of resolving from the project root.
+func TestVerifyTaskRuntimePathFlagThreadsIntoResolveInput(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoCmd(t, root)
+	wt := cmdArchiveTestWorktree(t, root, "verify-runtime-flag")
+
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	if err := taskVerifyCmd.Flags().Set("task-runtime-path", wt); err != nil {
+		t.Fatal(err)
+	}
+
+	in := taskResolveInput()
+	if in.RuntimeOverride != wt {
+		t.Fatalf("ResolveInput.RuntimeOverride = %q, want %q", in.RuntimeOverride, wt)
+	}
+
+	d := tasks.DefaultDeps()
+	resolvedRuntime, err := tasks.ResolveRuntimePathWith(d, root, in.RuntimeOverride)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRuntime, err := tasks.ResolveRuntimePathWith(d, wt, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolvedRuntime != wantRuntime {
+		t.Fatalf("resolved runtime path = %q, want worktree %q (project root %q must not win)", resolvedRuntime, wantRuntime, root)
+	}
+	if resolvedRuntime == root {
+		t.Fatalf("resolved runtime path fell back to project root %q, override was ignored", root)
 	}
 }
 

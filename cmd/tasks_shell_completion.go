@@ -110,6 +110,7 @@ func registerTaskPathFlagCompletions() {
 	_ = taskCmd.MarkPersistentFlagDirname("path")
 	_ = taskCmd.MarkPersistentFlagDirname("task-definition-path")
 	_ = taskImplementCmd.MarkFlagDirname("task-runtime-path")
+	_ = taskVerifyCmd.MarkFlagDirname("task-runtime-path")
 }
 
 func completeTaskProjects(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
