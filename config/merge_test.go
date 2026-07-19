@@ -222,6 +222,17 @@ skills = ["nope"]
 	}
 }
 
+// TestConfigMergeTagsAreLegal walks the whole Config type tree with the
+// slice-01 drift check, so any merge:/include: tag naming an unknown kind, a
+// malformed list-by-key, or a kind the field's Go type cannot support fails the
+// test run instead of silently misbehaving when the overlay walker runs at load
+// time.
+func TestConfigMergeTagsAreLegal(t *testing.T) {
+	if problems := checkMergeTags(reflect.TypeOf(Config{})); len(problems) != 0 {
+		t.Fatalf("Config has illegal merge tags:\n%s", strings.Join(problems, "\n"))
+	}
+}
+
 func TestDefaultRuntimeConfigPathWith(t *testing.T) {
 	d := &Deps{FS: &deps.MockFileSystem{
 		GetenvFunc: func(key string) string {

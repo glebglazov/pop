@@ -596,12 +596,12 @@ type Config struct {
 	Routines      *RoutinesConfig     `toml:"routines" desc:"Routine settings ([routines] table)."`
 	Queue         *QueueConfig        `toml:"queue" desc:"Queue supervisor settings ([queue] table)."`
 	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
-	Integrations  *IntegrationsConfig `toml:"integrations" desc:"AI-agent integration settings ([integrations] table)."`
+	Integrations  *IntegrationsConfig `toml:"integrations" merge:"fields" desc:"AI-agent integration settings ([integrations] table)."`
 	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
 	// The key is canonicalized (~ expanded, symlinks resolved) at resolution
 	// time; any worktree path or bare dir of the same repo resolves to the
 	// same repository identity.
-	Repo map[string]RepoOverrideConfig `toml:"repo" desc:"Per-repo override blocks keyed by any checkout path ([repo.\"<path>\"] tables)."`
+	Repo map[string]RepoOverrideConfig `toml:"repo" merge:"map" desc:"Per-repo override blocks keyed by any checkout path ([repo.\"<path>\"] tables)."`
 
 	// Findings holds semantic config problems collected at load time (ADR 0054).
 	// Each is keyed to its config path; callers consult them through value
@@ -1954,34 +1954,6 @@ func cloneWorkloadVerifyAsVerify(src *WorkloadVerifyConfig) *VerifyConfig {
 	if src.MaxRetries > 0 {
 		v := src.MaxRetries
 		dst.MaxRemediationDepth = &v
-	}
-	return dst
-}
-
-// cloneWorkloadConfig deep-copies a WorkloadConfig for layer merge.
-func cloneWorkloadConfig(src *WorkloadConfig) *WorkloadConfig {
-	if src == nil {
-		return nil
-	}
-	dst := &WorkloadConfig{
-		DefaultAgents: append([]string(nil), src.DefaultAgents...),
-	}
-	if src.Verify != nil {
-		dst.Verify = &WorkloadVerifyConfig{
-			Enabled:    src.Verify.Enabled,
-			Agents:     append([]string(nil), src.Verify.Agents...),
-			Effort:     src.Verify.Effort,
-			MaxRetries: src.Verify.MaxRetries,
-		}
-	}
-	if src.Git != nil {
-		dst.Git = cloneTaskGitConfig(src.Git)
-	}
-	if len(src.Agents) > 0 {
-		dst.Agents = make(map[string]WorkloadAgentConfig, len(src.Agents))
-		for name, wac := range src.Agents {
-			dst.Agents[name] = wac
-		}
 	}
 	return dst
 }
