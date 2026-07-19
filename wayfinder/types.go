@@ -41,13 +41,14 @@ type Ticket struct {
 
 // Map is a parsed Wayfinder map folder.
 type Map struct {
-	ID          string
-	Dir         string
-	Status      MapStatus
-	Destination string
-	Archived    bool
-	Tickets     []Ticket
-	Malformed   bool
+	ID              string
+	Dir             string
+	Status          MapStatus
+	Destination     string
+	DecisionsSoFar  string
+	Archived        bool
+	Tickets         []Ticket
+	Malformed       bool
 	// MalformedReason is set when Malformed is true.
 	MalformedReason string
 }

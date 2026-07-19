@@ -76,11 +76,12 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 	}
 
 	return Map{
-		ID:          id,
-		Dir:         dir,
-		Status:      status,
-		Destination: destination,
-		Tickets:     tickets,
+		ID:             id,
+		Dir:            dir,
+		Status:         status,
+		Destination:    destination,
+		DecisionsSoFar: ParseDecisionsSoFar(string(data)),
+		Tickets:        tickets,
 	}, nil
 }
 

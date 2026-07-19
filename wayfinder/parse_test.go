@@ -84,6 +84,17 @@ func TestFrontierDerivation(t *testing.T) {
 	}
 }
 
+func TestParseDecisionsSoFarSection(t *testing.T) {
+	content := "Status: active\n\n## Destination\nShip\n\n## Decisions so far\n\n<!-- index -->\n- [01-first](issues/01-first.md) — use Postgres\n\n## Not yet specified\nfog"
+	got := ParseDecisionsSoFar(content)
+	if !strings.Contains(got, "Postgres") {
+		t.Fatalf("decisions = %q", got)
+	}
+	if strings.Contains(got, "fog") {
+		t.Fatalf("decisions leaked into next section: %q", got)
+	}
+}
+
 func TestFrontierRequiresResolvedBlockers(t *testing.T) {
 	tickets := []Ticket{
 		{Number: 1, ID: "01", Status: TicketClaimed},

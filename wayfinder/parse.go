@@ -12,7 +12,8 @@ var (
 	statusLinePattern = regexp.MustCompile(`(?i)^Status:\s*(.+)$`)
 	typeLinePattern   = regexp.MustCompile(`(?i)^Type:\s*(.+)$`)
 	blockedByPattern  = regexp.MustCompile(`(?i)^Blocked by:\s*(.+)$`)
-	destinationHeader = regexp.MustCompile(`(?i)^##\s+Destination\s*$`)
+	destinationHeader     = regexp.MustCompile(`(?i)^##\s+Destination\s*$`)
+	decisionsSoFarHeader  = regexp.MustCompile(`(?i)^##\s+Decisions so far\s*$`)
 )
 
 // ParseMapMarkdown extracts map status and destination from map.md contents.
@@ -184,6 +185,37 @@ func parseBlockedBy(raw string) []string {
 		out = append(out, normalizeTicketID(part))
 	}
 	return out
+}
+
+// ParseDecisionsSoFar extracts the Decisions so far section from map.md contents.
+func ParseDecisionsSoFar(content string) string {
+	lines := strings.Split(content, "\n")
+	start := -1
+	for i, line := range lines {
+		if decisionsSoFarHeader.MatchString(strings.TrimSpace(line)) {
+			start = i + 1
+			break
+		}
+	}
+	return extractSectionBody(lines, start)
+}
+
+func extractSectionBody(lines []string, start int) string {
+	if start < 0 || start >= len(lines) {
+		return ""
+	}
+	var body []string
+	for _, line := range lines[start:] {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "<!--") {
+			continue
+		}
+		body = append(body, trimmed)
+	}
+	return strings.Join(body, " ")
 }
 
 // DestinationGist returns a short single-line summary of a destination.

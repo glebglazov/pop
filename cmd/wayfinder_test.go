@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,8 +13,100 @@ import (
 )
 
 func TestWayfinderCommandTree(t *testing.T) {
-	if _, _, err := rootCmd.Find([]string{"wayfinder", "status"}); err != nil {
-		t.Fatalf("Find([wayfinder status]): %v", err)
+	for _, path := range [][]string{
+		{"wayfinder", "status"},
+		{"wayfinder", "show"},
+		{"wayfinder", "archive"},
+		{"wayfinder", "unarchive"},
+	} {
+		if _, _, err := rootCmd.Find(path); err != nil {
+			t.Fatalf("Find(%v): %v", path, err)
+		}
+	}
+}
+
+func TestWayfinderShowRendersMap(t *testing.T) {
+	dataHome := "/data"
+	commonDir := "/repo/.git"
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	id, err := tasks.IdentityFromCommonDir(&tasks.Deps{FS: deps.NewRealFileSystem()}, commonDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapDir := filepath.Join(id.StorageDir, "wayfinder", "demo")
+	files := map[string]string{
+		filepath.Join(mapDir, "map.md"): "Status: active\n\n## Destination\nShip it\n\n## Decisions so far\n- one decision",
+		filepath.Join(mapDir, "issues", "01-first.md"):  "Type: research\nStatus: resolved\n",
+		filepath.Join(mapDir, "issues", "02-second.md"): "Type: task\nBlocked by: 01\n",
+	}
+	d := wayfinderTestDepsForCmd(t, dataHome, commonDir, files)
+
+	var buf bytes.Buffer
+	if err := runWayfinderShowWith(d, &buf, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"Destination: Ship it", "Frontier:", "02-second", "Resolved:", "01-first"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestWayfinderArchiveRoundTrip(t *testing.T) {
+	dataHome := "/data"
+	commonDir := "/repo/.git"
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	id, err := tasks.IdentityFromCommonDir(&tasks.Deps{FS: deps.NewRealFileSystem()}, commonDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapDir := filepath.Join(id.StorageDir, "wayfinder", "demo")
+	mapPath := filepath.Join(mapDir, "map.md")
+	original := "## Destination\nShip it"
+	files := map[string]string{mapPath: original}
+	d := wayfinderTestDepsForCmd(t, dataHome, commonDir, files)
+	d.FS.(*deps.MockFileSystem).WriteFileFunc = func(path string, data []byte, perm os.FileMode) error {
+		files[path] = string(data)
+		return nil
+	}
+
+	var archiveBuf bytes.Buffer
+	if err := runWayfinderArchiveWith(d, &archiveBuf, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(archiveBuf.String(), "Archived wayfinder map demo") {
+		t.Fatalf("archive output = %q", archiveBuf.String())
+	}
+	if files[mapPath] != original {
+		t.Fatal("archive mutated map.md")
+	}
+
+	var statusBuf bytes.Buffer
+	if err := runWayfinderStatusWith(d, &statusBuf, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(statusBuf.String(), "demo") {
+		t.Fatalf("archived map visible in default status:\n%s", statusBuf.String())
+	}
+
+	var unarchiveBuf bytes.Buffer
+	if err := runWayfinderUnarchiveWith(d, &unarchiveBuf, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(unarchiveBuf.String(), "Unarchived wayfinder map demo") {
+		t.Fatalf("unarchive output = %q", unarchiveBuf.String())
+	}
+}
+
+func TestWayfinderShowUnknownMap(t *testing.T) {
+	d := wayfinderTestDepsForCmd(t, "/data", "/repo/.git", nil)
+	err := runWayfinderShowWith(d, &bytes.Buffer{}, "missing")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "unknown wayfinder map") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
