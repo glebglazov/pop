@@ -109,3 +109,27 @@ func TestCatalog_StatusWiringConsumedByIntegrate(t *testing.T) {
 		t.Error("integrate did not install the status-wiring component")
 	}
 }
+
+// TestCatalog_TaskSkillsSources pins the task-skills embed catalog order.
+// Integrate outcome lines follow this sequence (ADR: Integrate outcome line).
+func TestCatalog_TaskSkillsSources(t *testing.T) {
+	comp, ok := lookupComponent(ComponentTaskSkills)
+	if !ok {
+		t.Fatal("task-skills component missing")
+	}
+	want := []string{
+		"skills/pop/grill-with-docs",
+		"skills/pop/grill-consolidate",
+		"skills/pop/to-prd",
+		"skills/pop/to-tasks",
+		"skills/pop/wayfinder",
+	}
+	if len(comp.sources) != len(want) {
+		t.Fatalf("sources len = %d, want %d: %v", len(comp.sources), len(want), comp.sources)
+	}
+	for i := range want {
+		if comp.sources[i] != want[i] {
+			t.Fatalf("sources[%d] = %q, want %q", i, comp.sources[i], want[i])
+		}
+	}
+}

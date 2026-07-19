@@ -495,8 +495,8 @@ func TestInstallFileComponentPartialSetInstall(t *testing.T) {
 	if _, linked := fs.symlinks[filepath.Join(skillsDir, "pop-to-tasks")]; linked {
 		t.Fatalf("conflicting skill pop-to-tasks was installed despite bare conflict")
 	}
-	// The other two skills install normally.
-	for _, name := range []string{"pop-grill-with-docs", "pop-to-prd"} {
+	// The other skills install normally.
+	for _, name := range []string{"pop-grill-with-docs", "pop-grill-consolidate", "pop-to-prd", "pop-wayfinder"} {
 		dest := filepath.Join(skillsDir, name)
 		if _, linked := fs.symlinks[dest]; !linked {
 			t.Fatalf("non-conflicting skill %s was not installed: %v", name, fs.symlinks)

@@ -315,7 +315,8 @@ var integrateUpdateExisting bool
 var integratePaneSkill bool
 
 // integrateTaskSkills is the --task-skills component flag. When set,
-// the task planning skills (grill-with-docs, to-prd, to-tasks) are
+// the task planning skills (grill-with-docs, grill-consolidate, to-prd,
+// to-tasks, wayfinder) are
 // installed for the agent alongside the core status wiring.
 var integrateTaskSkills bool
 

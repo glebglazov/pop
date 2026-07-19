@@ -2036,6 +2036,22 @@ func TestRefreshComponent_OpencodeTaskSkillsAddsMissing(t *testing.T) {
 	}
 }
 
+// TestRefreshComponent_TaskSkillsDryRunIncludesWayfinder: the integrate
+// staleness dry-run path reports pop-wayfinder when task-skills is missing it.
+func TestRefreshComponent_TaskSkillsDryRunIncludesWayfinder(t *testing.T) {
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+	dry, real := fakeFactories("/h", fs)
+
+	outcomes, warning := refreshComponent(dry, real, "claude", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
+	if warning != "" {
+		t.Fatalf("unexpected warning: %q", warning)
+	}
+	if !integrateOutcomesInclude(outcomes, "pop-wayfinder", "added") {
+		t.Fatalf("expected pop-wayfinder added outcome, got %v", outcomes)
+	}
+}
+
 func TestRefreshComponent_SkipsUnknownComponentSilently(t *testing.T) {
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)

@@ -13,11 +13,12 @@ var taskSkillDirs = map[string][]string{
 	"pop-grill-consolidate": {},
 	"pop-to-prd":            {},
 	"pop-to-tasks":          {},
+	"pop-wayfinder":         {},
 }
 
 // TestRenderTaskSkillsDirAgents pins the task-skills rendered tree for
 // each agent that hosts skills as directories (claude, codex, pi, cursor,
-// opencode): four skill directories, each with a name-injected SKILL.md, and
+// opencode): five skill directories, each with a name-injected SKILL.md, and
 // grill-with-docs carrying its two companion format documents verbatim alongside
 // the body.
 func TestRenderTaskSkillsDirAgents(t *testing.T) {
@@ -102,13 +103,13 @@ func TestRenderTaskSkillsContentUsesShowPath(t *testing.T) {
 		t.Fatalf("renderComponent: %v", err)
 	}
 
-	for _, skill := range []string{"pop-to-prd", "pop-to-tasks"} {
+	for _, skill := range []string{"pop-to-prd", "pop-to-tasks", "pop-wayfinder"} {
 		body := string(tree[skill+"/SKILL.md"])
 		if strings.Contains(body, "thoughts/") {
 			t.Errorf("%s SKILL.md still mentions thoughts/: %q", skill, body)
 		}
-		if !strings.Contains(body, "pop tasks show-path") {
-			t.Errorf("%s SKILL.md does not route through `pop tasks show-path`", skill)
+		if !strings.Contains(body, "pop tasks show-path") && !strings.Contains(body, "pop work show-path") {
+			t.Errorf("%s SKILL.md does not route through pop storage resolver", skill)
 		}
 		// No leftover issue/workload vocabulary.
 		if strings.Contains(body, "workload") || strings.Contains(body, "to-issues") {
