@@ -27,11 +27,19 @@ const (
 
 // Manifest is the on-disk record for a Routine.
 type Manifest struct {
-	BoundDirectory string      `json:"bound_directory"`
-	Schedule       string      `json:"schedule"`
-	Paused         bool        `json:"paused"`
-	PauseReason    PauseReason `json:"pause_reason,omitempty"`
-	CreatedAt      string      `json:"created_at"`
+	BoundDirectory string `json:"bound_directory"`
+	Schedule       string `json:"schedule"`
+	// Agents is the Routine's own ordered runtime agent-preset list (ADR-0128).
+	// When set it becomes the head of fire-time resolution, ahead of
+	// [routines].agents and the resolved implement list. Absent ⇒ config
+	// resolution, exactly as before this field existed.
+	Agents []string `json:"agents,omitempty"`
+	// Effort selects the Routine's model-strength tier (light, standard, heavy)
+	// for the chosen preset via the [effort.<agent>] ladder. Absent ⇒ standard.
+	Effort      string      `json:"effort,omitempty"`
+	Paused      bool        `json:"paused"`
+	PauseReason PauseReason `json:"pause_reason,omitempty"`
+	CreatedAt   string      `json:"created_at"`
 }
 
 // pausedStatusLabel renders a paused Routine's status for the dashboard and the

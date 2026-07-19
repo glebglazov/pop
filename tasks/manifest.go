@@ -20,6 +20,12 @@ var (
 
 const DefaultTaskEffort = "standard"
 
+// ValidEfforts returns the accepted effort tier names in ladder order.
+func ValidEfforts() []string { return []string{"light", "standard", "heavy"} }
+
+// IsValidEffort reports whether effort names an accepted model-strength tier.
+func IsValidEffort(effort string) bool { return allowedTaskEfforts[effort] }
+
 // Task represents one entry in an task manifest.
 type Task struct {
 	ID          string     `json:"id"`

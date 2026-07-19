@@ -590,6 +590,14 @@ func resolveTaskAgentSpecForEffort(agentSpec, effort string, effortExplicit bool
 	return resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort, effortExplicit, nil)
 }
 
+// ResolveAgentSpecForEffort rewrites an agent preset spec so its model is pinned
+// to the given effort tier via the [effort.<agent>] ladder. It is exported for
+// Routine runs, which resolve effort outside the tasks package. An empty effort
+// resolves to DefaultTaskEffort.
+func ResolveAgentSpecForEffort(agentSpec, effort string, cfg *config.Config) string {
+	return resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort, true, cfg)
+}
+
 func resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort string, effortExplicit bool, cfg *config.Config) string {
 	if !effortExplicit {
 		return agentSpec

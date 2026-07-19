@@ -16,7 +16,7 @@ func TestResolveRoutineAgentPresetsPrefersRoutinesConfig(t *testing.T) {
 			Implement: &config.ImplementConfig{Agents: []string{"cursor"}},
 		},
 	}
-	got := ResolveRoutineAgentPresets(cfg)
+	got := ResolveRoutineAgentPresets(nil, cfg)
 	want := []string{"codex", "claude"}
 	if len(got) != len(want) {
 		t.Fatalf("agents = %#v, want %#v", got, want)
@@ -34,7 +34,7 @@ func TestResolveRoutineAgentPresetsFallsBackToImplementList(t *testing.T) {
 			Implement: &config.ImplementConfig{Agents: []string{"cursor", "claude"}},
 		},
 	}
-	got := ResolveRoutineAgentPresets(cfg)
+	got := ResolveRoutineAgentPresets(nil, cfg)
 	want := []string{"cursor", "claude"}
 	if len(got) != len(want) {
 		t.Fatalf("agents = %#v, want %#v", got, want)
@@ -71,7 +71,8 @@ func TestRunRoutineWithAgentFallbackQuotaFallthrough(t *testing.T) {
 		}
 	}
 
-	result, preset, err := runRoutineWithAgentFallback(d, mustConfig(t, d.LoadConfig), "/tmp", io.Discard, "prompt", attempt)
+	cfg := mustConfig(t, d.LoadConfig)
+	result, preset, err := runRoutineWithAgentFallback(d, cfg, ResolveRoutineAgentPresets(nil, cfg), io.Discard, attempt)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -110,7 +111,8 @@ func TestRunRoutineWithAgentFallbackSkipsCooldownedPreset(t *testing.T) {
 		return &tasks.RoutineAgentAttempt{ExitCode: 0}, nil
 	}
 
-	_, preset, err := runRoutineWithAgentFallback(d, mustConfig(t, d.LoadConfig), "/tmp", io.Discard, "prompt", attempt)
+	cfg := mustConfig(t, d.LoadConfig)
+	_, preset, err := runRoutineWithAgentFallback(d, cfg, ResolveRoutineAgentPresets(nil, cfg), io.Discard, attempt)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -134,7 +136,7 @@ func TestRunRoutineWithAgentFallbackAllQuotaPausedFails(t *testing.T) {
 			QuotaResetAt: time.Now().Add(time.Hour),
 		}, nil
 	}
-	_, _, err := runRoutineWithAgentFallback(d, cfg, "/tmp", io.Discard, "prompt", attempt)
+	_, _, err := runRoutineWithAgentFallback(d, cfg, ResolveRoutineAgentPresets(nil, cfg), io.Discard, attempt)
 	if err == nil {
 		t.Fatal("expected error")
 	}

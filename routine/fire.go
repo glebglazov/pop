@@ -101,7 +101,8 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 		return tasks.RunRoutineAgentInvocation(taskDeps, r.Manifest.BoundDirectory, out, timeout, agentSpec, wrappedPrompt)
 	}
 
-	result, preset, execErr := runRoutineWithAgentFallback(d, cfg, r.Manifest.BoundDirectory, out, wrappedPrompt, attempt)
+	specs := resolveRoutineRunSpecs(cfg, r.Manifest)
+	result, preset, execErr := runRoutineWithAgentFallback(d, cfg, specs, out, attempt)
 	if execErr != nil {
 		reason := execErr.Error()
 		if result != nil && result.ExitCode != 0 {

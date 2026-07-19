@@ -18,20 +18,26 @@ Author one with pop routine add from any directory (git-backed or not).`,
 }
 
 var routineAddSchedule string
-var routineAddAgent string
+var routineAddRefineAgent string
+var routineAddAgents []string
+var routineAddEffort string
 var routineEditSchedule string
-var routineEditAgent string
+var routineEditRefineAgent string
+var routineEditAgents []string
+var routineEditEffort string
 var (
-	routineAdd         = routine.Add
-	routineEdit        = routine.Edit
-	routineRefine      = routine.Refine
-	routineInteractive = routine.Interactive
-	routineList        = routine.List
-	routineFire        = routine.Fire
-	routinePause       = routine.Pause
-	routineResume      = routine.Resume
-	routineRuns        = routine.Runs
-	routineDashboard   = dashboardshell.RunFromRoutine
+	routineAdd              = routine.Add
+	routineEdit             = routine.Edit
+	routineConfigureRuntime = routine.ConfigureRuntime
+	routineUpdateRuntime    = routine.UpdateRuntime
+	routineRefine           = routine.Refine
+	routineInteractive      = routine.Interactive
+	routineList             = routine.List
+	routineFire             = routine.Fire
+	routinePause            = routine.Pause
+	routineResume           = routine.Resume
+	routineRuns             = routine.Runs
+	routineDashboard        = dashboardshell.RunFromRoutine
 )
 
 var routineAddCmd = &cobra.Command{
@@ -46,11 +52,12 @@ var routineEditCmd = &cobra.Command{
 	Short: "Edit a routine's prompt or schedule",
 	Long: `Edit a routine's prompt or schedule.
 
-Plain invocation drops into the refinement gate — a numbered menu to fire test
-runs, view reports, edit the prompt, edit the schedule, and resume the routine
-(interactive TTY only). With --schedule "<expr>" it rewrites the manifest
-schedule directly and opens no gate. The bound directory and id are fixed at
-creation.`,
+Plain invocation drops into the Routine refinement session — a numbered menu to
+fire test runs, view reports, edit the prompt, edit the schedule, and resume the
+routine (interactive TTY only). With --schedule "<expr>" it rewrites the manifest
+schedule directly and opens no session. --agent (repeatable) and --effort are
+also direct writes; editing runtime config pauses the routine (reason changed).
+The bound directory and id are fixed at creation.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRoutineEdit,
 }
@@ -109,12 +116,18 @@ func init() {
 	routineCmd.AddCommand(routineDashboardCmd)
 	routineAddCmd.Flags().StringVar(&routineAddSchedule, "schedule", "", "routine schedule (\"every 6h\" or \"daily at 10:00\")")
 	_ = routineAddCmd.MarkFlagRequired("schedule")
-	routineAddCmd.Flags().StringVar(&routineAddAgent, "agent", "", "override the authoring-agent preset for the refinement gate session")
+	routineAddCmd.Flags().StringArrayVar(&routineAddAgents, "agent", nil, "runtime agent preset for scheduled runs; repeat to define an ordered fallback list")
+	routineAddCmd.Flags().StringVar(&routineAddEffort, "effort", "", "runtime model-strength tier: light, standard, or heavy (default standard)")
+	routineAddCmd.Flags().StringVar(&routineAddRefineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
 	routineEditCmd.Flags().StringVar(&routineEditSchedule, "schedule", "", "new routine schedule (\"every 6h\" or \"daily at 10:00\"); skips the editor")
-	routineEditCmd.Flags().StringVar(&routineEditAgent, "agent", "", "override the authoring-agent preset for the refinement gate session")
+	routineEditCmd.Flags().StringArrayVar(&routineEditAgents, "agent", nil, "set the runtime agent preset list for scheduled runs; repeat for an ordered fallback list (direct write, pauses the routine)")
+	routineEditCmd.Flags().StringVar(&routineEditEffort, "effort", "", "set the runtime model-strength tier: light, standard, or heavy (direct write, pauses the routine)")
+	routineEditCmd.Flags().StringVar(&routineEditRefineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
 }
 
 func runRoutineAdd(cmd *cobra.Command, args []string) error {
+	agentsSet := cmd.Flags().Changed("agent")
+	effortSet := cmd.Flags().Changed("effort")
 	res, err := routineAdd(args[0], routineAddSchedule, "")
 	if err != nil {
 		return err
@@ -123,10 +136,17 @@ func runRoutineAdd(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "Created routine %q at %s\n", res.ID, res.Dir)
 	fmt.Fprintf(out, "Bound directory: %s\n", res.Manifest.BoundDirectory)
 	fmt.Fprintf(out, "Schedule: %s\n", res.Manifest.Schedule)
-	// On a TTY, drop straight into the refinement gate; a non-interactive add
+	// Runtime agents/effort, when supplied, are direct validated writes onto the
+	// freshly-scaffolded (created-paused) routine — no refinement gate involved.
+	if agentsSet || effortSet {
+		if _, err := routineConfigureRuntime(res.ID, routineAddAgents, agentsSet, routineAddEffort, effortSet); err != nil {
+			return err
+		}
+	}
+	// On a TTY, drop straight into the refinement session; a non-interactive add
 	// just scaffolds paused and prints how to iterate manually.
 	if routineInteractive() {
-		return routineRefine(res.ID, routineAddAgent)
+		return routineRefine(res.ID, routineAddRefineAgent)
 	}
 	fmt.Fprintf(out, "\nRoutine created paused. Iterate on its prompt, fire it manually with\n")
 	fmt.Fprintf(out, "  pop routine fire %s\nuntil you are happy with the result, then arm it with\n", res.ID)
@@ -135,17 +155,32 @@ func runRoutineAdd(cmd *cobra.Command, args []string) error {
 }
 
 func runRoutineEdit(cmd *cobra.Command, args []string) error {
-	// --schedule keeps its direct, validated-write behavior with no gate.
-	if cmd.Flags().Changed("schedule") {
-		res, err := routineEdit(args[0], routineEditSchedule, true)
-		if err != nil {
-			return err
+	scheduleSet := cmd.Flags().Changed("schedule")
+	agentsSet := cmd.Flags().Changed("agent")
+	effortSet := cmd.Flags().Changed("effort")
+	// --schedule / --agent / --effort are direct, validated writes with no gate.
+	if scheduleSet || agentsSet || effortSet {
+		out := cmd.OutOrStdout()
+		if scheduleSet {
+			res, err := routineEdit(args[0], routineEditSchedule, true)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "Updated schedule for routine %q to %s\n", res.RoutineID, res.Schedule)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Updated schedule for routine %q to %s\n", res.RoutineID, res.Schedule)
+		// Editing runtime agents/effort is run-affecting: it pauses the routine
+		// with reason `changed`.
+		if agentsSet || effortSet {
+			res, err := routineUpdateRuntime(args[0], routineEditAgents, agentsSet, routineEditEffort, effortSet)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "Updated runtime config for routine %q; paused (changed)\n", res.RoutineID)
+		}
 		return nil
 	}
-	// Bare edit opens the refinement gate.
-	return routineRefine(args[0], routineEditAgent)
+	// Bare edit opens the refinement session.
+	return routineRefine(args[0], routineEditRefineAgent)
 }
 
 func runRoutineList(cmd *cobra.Command, args []string) error {

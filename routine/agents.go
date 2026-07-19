@@ -11,15 +11,31 @@ import (
 )
 
 // ResolveRoutineAgentPresets returns the ordered agent preset list for a Routine run.
-// [routines].agents wins when set; otherwise resolution falls through to
-// [tasks.implement].agents and the built-in default agent.
-func ResolveRoutineAgentPresets(cfg *config.Config) []string {
+// The Routine's own manifest list wins when set; else [routines].agents; else
+// resolution falls through to [tasks.implement].agents and the built-in default
+// agent. Effort is not applied here — see resolveRoutineRunSpecs.
+func ResolveRoutineAgentPresets(manifestAgents []string, cfg *config.Config) []string {
+	if agents := nonEmptyAgentSpecs(manifestAgents); len(agents) > 0 {
+		return agents
+	}
 	if cfg != nil && cfg.Routines != nil {
 		if agents := nonEmptyAgentSpecs(cfg.Routines.Agents); len(agents) > 0 {
 			return agents
 		}
 	}
 	return tasks.ResolveDefaultAgentPresets(nil, "", false, cfg)
+}
+
+// resolveRoutineRunSpecs resolves the ordered agent specs for one Routine run,
+// preferring the manifest's own list and pinning each preset's model via the
+// effort ladder at the Routine's effort (default standard).
+func resolveRoutineRunSpecs(cfg *config.Config, m Manifest) []string {
+	specs := ResolveRoutineAgentPresets(m.Agents, cfg)
+	resolved := make([]string, len(specs))
+	for i, spec := range specs {
+		resolved[i] = tasks.ResolveAgentSpecForEffort(spec, m.Effort, cfg)
+	}
+	return resolved
 }
 
 func nonEmptyAgentSpecs(specs []string) []string {
@@ -35,16 +51,15 @@ func nonEmptyAgentSpecs(specs []string) []string {
 type routineAgentAttemptFunc func(agentSpec string) (*tasks.RoutineAgentAttempt, error)
 
 // runRoutineWithAgentFallback walks the resolved agent list with implement-style
-// quota fall-through, sharing the machine-global cooldown store.
+// quota fall-through, sharing the machine-global cooldown store. The specs are
+// already resolved (manifest/config head + effort-pinned model) by the caller.
 func runRoutineWithAgentFallback(
 	d *Deps,
 	cfg *config.Config,
-	runtimePath string,
+	specs []string,
 	out io.Writer,
-	prompt string,
 	attempt routineAgentAttemptFunc,
 ) (*tasks.RoutineAgentAttempt, string, error) {
-	specs := ResolveRoutineAgentPresets(cfg)
 	taskDeps := d.taskDeps()
 	cooldowns, err := tasks.ActiveAgentCooldownsWith(taskDeps, time.Now().UTC())
 	if err != nil {

@@ -61,7 +61,7 @@ func resolveAuthoringAgentSpec(d *Deps, override string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("load config: %w", err)
 	}
-	specs := ResolveRoutineAgentPresets(cfg)
+	specs := ResolveRoutineAgentPresets(nil, cfg)
 	if len(specs) == 0 {
 		return "", fmt.Errorf("no agent preset is configured")
 	}
