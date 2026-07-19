@@ -312,55 +312,55 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 	ticker := time.NewTicker(pollInterval())
 	defer ticker.Stop()
 
-	// Fast check interval for detecting external deregistration.
+	// Fast check interval for detecting external deregistration. This is a
+	// silent store read only: it never prints and never drives the status line
+	// (ADR-0100 recovery-wait cadence).
 	fastCheckInterval := 2 * time.Second
 	fastTicker := time.NewTicker(fastCheckInterval)
 	defer fastTicker.Stop()
 
-	for {
+	printer := &recoveryPrinter{out: out, heartbeat: recoveryHeartbeat}
+
+	// poll runs one acquisition-or-countdown pass. Called once per regular poll
+	// tick (never on the fast check), so the status line appears at most once
+	// per poll interval. Returns true when recovery is ready.
+	poll := func() (bool, error) {
 		now := time.Now().UTC()
 		resetAt := w.ResetAt.UTC()
-
-		// Check if cooldown has elapsed.
 		if !now.Before(resetAt) {
 			// Cooldown elapsed. Try to acquire a recovery turn.
 			acquired, block, err := acquireRecoveryTurnWithStore(s, w)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if acquired {
-				return nil
+				return true, nil
 			}
 			// Turn not acquired: the cooldown is over but something on the
 			// checkout still blocks resumption. Name the blocker rather than
-			// pretending we are still waiting on quota.
-			if out != nil && block != nil {
-				out.line(ansiDim, "⏸ Quota recovered; waiting for checkout — %s",
-					recoveryBlockMessage(block))
-			}
+			// pretending we are still waiting on quota. Print only on a reason
+			// change or the periodic heartbeat.
+			printer.blocked(now, block)
 		} else {
 			// Pre-cooldown: still waiting for the preset's quota to reset.
-			waitDur := time.Until(resetAt)
-			if waitDur < 0 {
-				waitDur = 0
-			}
-			if out != nil {
-				out.line(ansiDim, "⏳ Waiting for quota recovery: %s resets at %s (in %s)",
-					w.Preset,
-					resetAt.Format("15:04:05"),
-					formatDuration(waitDur))
-			}
+			printer.countdown(now, w.Preset, resetAt)
 		}
+		return false, nil
+	}
 
-		// Adjust poll interval if we're getting close.
-		ticker.Reset(pollInterval())
+	// Print the opening status line immediately so the wait shows life at once;
+	// subsequent countdown/block lines follow the poll cadence.
+	if done, err := poll(); err != nil || done {
+		return err
+	}
+	ticker.Reset(pollInterval())
 
-		// Wait for next tick or signal.
+	for {
 		select {
 		case <-fastTicker.C:
-			// Fast check: see if the waiter still exists in the store. If it was
-			// deregistered externally (e.g., by a test or another process),
-			// exit the wait loop immediately.
+			// Fast check: silent store read to see if the waiter still exists.
+			// If it was deregistered externally (e.g., by a test or another
+			// process), exit the wait loop immediately. No status line here.
 			existing, err := s.GetRecoveryWaiter(w.SetID)
 			if err != nil {
 				return exitErr(ExitOperational, "check recovery waiter: %v", err)
@@ -373,8 +373,12 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 			}
 			// Continue waiting.
 		case <-ticker.C:
-			// Regular poll: print status and check if we can acquire recovery turn.
-			continue
+			// Regular poll: acquire-or-print, then adjust interval as the reset
+			// approaches.
+			if done, err := poll(); err != nil || done {
+				return err
+			}
+			ticker.Reset(pollInterval())
 		case sig := <-sigCh:
 			_ = sig
 			// SIGINT: deregister and exit interrupted.
@@ -387,6 +391,60 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 			return exitErr(ExitInterrupted, "context cancelled during quota recovery wait")
 		}
 	}
+}
+
+// recoveryHeartbeat is how often the post-cooldown block line reprints while
+// the blocking reason is unchanged, so a long-held gate still shows life.
+const recoveryHeartbeat = 60 * time.Second
+
+// recoveryPrinter decides when the recovery wait loop emits a status line,
+// decoupling printing cadence from the poll/fast-check ticker cadence (ADR-0100).
+// The pre-reset countdown prints on every poll tick; the post-reset block line
+// prints only when the reason changes (different kind or blocking set) or when
+// the heartbeat interval elapses.
+type recoveryPrinter struct {
+	out       *output
+	heartbeat time.Duration
+
+	haveBlock   bool
+	lastKind    store.RecoveryBlockKind
+	lastSetID   string
+	lastBlockAt time.Time
+}
+
+// countdown prints the pre-reset waiting line. It is called once per poll tick,
+// so the countdown appears at most once per poll interval.
+func (p *recoveryPrinter) countdown(now time.Time, preset string, resetAt time.Time) {
+	if p == nil || p.out == nil {
+		return
+	}
+	waitDur := resetAt.Sub(now)
+	if waitDur < 0 {
+		waitDur = 0
+	}
+	p.out.line(ansiDim, "⏳ Waiting for quota recovery: %s resets at %s (in %s)",
+		preset,
+		resetAt.Format("15:04:05"),
+		formatDuration(waitDur))
+}
+
+// blocked prints the post-cooldown block line, but only on a reason change or
+// once the heartbeat interval has elapsed since the last print. A nil block is
+// a no-op (nothing blocks, so nothing to say).
+func (p *recoveryPrinter) blocked(now time.Time, block *store.RecoveryBlock) {
+	if p == nil || p.out == nil || block == nil {
+		return
+	}
+	changed := !p.haveBlock || block.Kind != p.lastKind || block.SetID != p.lastSetID
+	if !changed && now.Sub(p.lastBlockAt) < p.heartbeat {
+		return
+	}
+	p.out.line(ansiDim, "⏸ Quota recovered; waiting for checkout — %s",
+		recoveryBlockMessage(block))
+	p.haveBlock = true
+	p.lastKind = block.Kind
+	p.lastSetID = block.SetID
+	p.lastBlockAt = now
 }
 
 // acquireRecoveryTurn attempts to acquire a recovery turn for the waiter.
