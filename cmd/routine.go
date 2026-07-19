@@ -20,14 +20,16 @@ Author one with pop routine add from any directory (git-backed or not).`,
 var routineAddSchedule string
 var routineEditSchedule string
 var (
-	routineAdd       = routine.Add
-	routineEdit      = routine.Edit
-	routineList      = routine.List
-	routineFire      = routine.Fire
-	routinePause     = routine.Pause
-	routineResume    = routine.Resume
-	routineRuns      = routine.Runs
-	routineDashboard = dashboardshell.RunFromRoutine
+	routineAdd         = routine.Add
+	routineEdit        = routine.Edit
+	routineRefine      = routine.Refine
+	routineInteractive = routine.Interactive
+	routineList        = routine.List
+	routineFire        = routine.Fire
+	routinePause       = routine.Pause
+	routineResume      = routine.Resume
+	routineRuns        = routine.Runs
+	routineDashboard   = dashboardshell.RunFromRoutine
 )
 
 var routineAddCmd = &cobra.Command{
@@ -42,9 +44,11 @@ var routineEditCmd = &cobra.Command{
 	Short: "Edit a routine's prompt or schedule",
 	Long: `Edit a routine's prompt or schedule.
 
-Plain invocation opens the routine's prompt.md in $EDITOR (interactive TTY
-only). With --schedule "<expr>" it rewrites the manifest schedule instead and
-opens no editor. The bound directory and id are fixed at creation.`,
+Plain invocation drops into the refinement gate — a numbered menu to fire test
+runs, view reports, edit the prompt, edit the schedule, and resume the routine
+(interactive TTY only). With --schedule "<expr>" it rewrites the manifest
+schedule directly and opens no gate. The bound directory and id are fixed at
+creation.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRoutineEdit,
 }
@@ -111,26 +115,33 @@ func runRoutineAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Created routine %q at %s\n", res.ID, res.Dir)
-	fmt.Fprintf(cmd.OutOrStdout(), "Bound directory: %s\n", res.Manifest.BoundDirectory)
-	fmt.Fprintf(cmd.OutOrStdout(), "Schedule: %s\n", res.Manifest.Schedule)
-	fmt.Fprintf(cmd.OutOrStdout(), "\nRoutine created paused. Iterate on its prompt, fire it manually with\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  pop routine fire %s\nuntil you are happy with the result, then arm it with\n", res.ID)
-	fmt.Fprintf(cmd.OutOrStdout(), "  pop routine resume %s\nThe first fire anchors the schedule.\n", res.ID)
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Created routine %q at %s\n", res.ID, res.Dir)
+	fmt.Fprintf(out, "Bound directory: %s\n", res.Manifest.BoundDirectory)
+	fmt.Fprintf(out, "Schedule: %s\n", res.Manifest.Schedule)
+	// On a TTY, drop straight into the refinement gate; a non-interactive add
+	// just scaffolds paused and prints how to iterate manually.
+	if routineInteractive() {
+		return routineRefine(res.ID)
+	}
+	fmt.Fprintf(out, "\nRoutine created paused. Iterate on its prompt, fire it manually with\n")
+	fmt.Fprintf(out, "  pop routine fire %s\nuntil you are happy with the result, then arm it with\n", res.ID)
+	fmt.Fprintf(out, "  pop routine resume %s\nThe first fire anchors the schedule.\n", res.ID)
 	return nil
 }
 
 func runRoutineEdit(cmd *cobra.Command, args []string) error {
-	res, err := routineEdit(args[0], routineEditSchedule, cmd.Flags().Changed("schedule"))
-	if err != nil {
-		return err
-	}
-	if res.ScheduleUpdated {
+	// --schedule keeps its direct, validated-write behavior with no gate.
+	if cmd.Flags().Changed("schedule") {
+		res, err := routineEdit(args[0], routineEditSchedule, true)
+		if err != nil {
+			return err
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Updated schedule for routine %q to %s\n", res.RoutineID, res.Schedule)
 		return nil
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Opened prompt for routine %q at %s\n", res.RoutineID, res.PromptPath)
-	return nil
+	// Bare edit opens the refinement gate.
+	return routineRefine(args[0])
 }
 
 func runRoutineList(cmd *cobra.Command, args []string) error {

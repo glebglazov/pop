@@ -49,10 +49,13 @@ func TestRunRoutineAddAndList(t *testing.T) {
 
 	oldAdd := routineAdd
 	oldList := routineList
+	oldInteractive := routineInteractive
 	defer func() {
 		routineAdd = oldAdd
 		routineList = oldList
+		routineInteractive = oldInteractive
 	}()
+	routineInteractive = func() bool { return false }
 	routineAdd = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
 		d := routine.DefaultDeps()
 		d.IsInteractive = func() bool { return false }
@@ -111,13 +114,16 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 	oldPause := routinePause
 	oldResume := routineResume
 	oldRuns := routineRuns
+	oldInteractive := routineInteractive
 	defer func() {
 		routineAdd = oldAdd
 		routineList = oldList
 		routinePause = oldPause
 		routineResume = oldResume
 		routineRuns = oldRuns
+		routineInteractive = oldInteractive
 	}()
+	routineInteractive = func() bool { return false }
 	routineAdd = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
 		d := routine.DefaultDeps()
 		d.IsInteractive = func() bool { return false }

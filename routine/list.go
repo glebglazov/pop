@@ -104,10 +104,30 @@ func defaultOpenEditor(path string) error {
 	return cmd.Run()
 }
 
+func defaultOpenPager(path string) error {
+	pager := strings.TrimSpace(os.Getenv("PAGER"))
+	if pager == "" {
+		pager = "less"
+	}
+	fields := strings.Fields(pager)
+	cmd := exec.Command(fields[0], append(fields[1:], path)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func defaultIsInteractive() bool {
 	info, err := os.Stdin.Stat()
 	if err != nil {
 		return false
 	}
 	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+// Interactive reports whether the current session has an interactive TTY on
+// stdin, so the CLI can decide between dropping into the refinement gate and
+// falling back to a non-interactive scaffold + guidance path.
+func Interactive() bool {
+	return defaultIsInteractive()
 }

@@ -15,8 +15,10 @@ import (
 type Deps struct {
 	FS            deps.FileSystem
 	OpenEditor    func(path string) error
+	OpenPager     func(path string) error
 	IsInteractive func() bool
 	Now           func() time.Time
+	Stdin         io.Reader
 	Stdout        io.Writer
 	LoadConfig    LoadConfigFunc
 	Tasks         *tasks.Deps
@@ -34,8 +36,10 @@ func DefaultDeps() *Deps {
 	return &Deps{
 		FS:            deps.NewRealFileSystem(),
 		OpenEditor:    defaultOpenEditor,
+		OpenPager:     defaultOpenPager,
 		IsInteractive: defaultIsInteractive,
 		Now:           time.Now,
+		Stdin:         os.Stdin,
 		Stdout:        os.Stdout,
 		LoadConfig:    DefaultLoadConfig,
 		Tasks:         taskDeps,

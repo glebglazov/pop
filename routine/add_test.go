@@ -140,7 +140,9 @@ func TestAddRejectsDuplicateID(t *testing.T) {
 	}
 }
 
-func TestAddOpensEditorWhenInteractive(t *testing.T) {
+func TestAddDoesNotOpenEditor(t *testing.T) {
+	// Scaffolding no longer opens $EDITOR: the interactive editing entry point is
+	// the refinement gate (RefineWith), which AddWith deliberately does not run.
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	home := filepath.Join(root, "home")
@@ -148,19 +150,18 @@ func TestAddOpensEditorWhenInteractive(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := routineDeps(t, dataHome)
-	var opened string
+	editorCalled := false
 	d.IsInteractive = func() bool { return true }
 	d.OpenEditor = func(path string) error {
-		opened = path
+		editorCalled = true
 		return nil
 	}
 
 	if _, err := AddWith(d, "edit-me", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(dataHome, "pop", "routines", "edit-me", "prompt.md")
-	if opened != want {
-		t.Fatalf("opened = %q, want %q", opened, want)
+	if editorCalled {
+		t.Fatal("AddWith must not open an editor; the refinement gate handles editing")
 	}
 }
 
