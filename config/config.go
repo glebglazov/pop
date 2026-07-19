@@ -786,12 +786,14 @@ func repoIdentity(d *Deps, path string) string {
 
 // ResolveRepoConfig returns the effective RepoConfig for checkoutPath by merging:
 //
-//	global [repo."<path>"] override → .pop.toml → built-in default (false for all bools)
+//	global [repo."<path>"] override → worktree .pop.toml → trunk-anchor .pop.toml → default
 //
-// Fields are merged individually; a nil pointer in the override means "not set"
-// and the next layer wins. trunk exists only in global override blocks and is
-// applied only when the override's key path exactly matches checkoutPath
-// (per-checkout semantics).
+// The committed .pop.toml is read at two anchors (ADR-0083): this worktree
+// first, then the trunk anchor (the Trunk worktree, or the repository-identity
+// root for a bare repo), presence deciding. Fields are merged individually; a
+// nil pointer in the override means "not set" and the next layer wins. trunk
+// exists only in global override blocks and is applied only when the override's
+// key path exactly matches checkoutPath (per-checkout semantics).
 //
 // A missing .pop.toml is not an error. A malformed .pop.toml degrades to the
 // zero config (the error is returned so callers may surface a warning).
@@ -807,17 +809,19 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 		return RepoConfig{}, err
 	}
 	// The shared enumerator does the identity walk, the [repo."<path>"] match, and
-	// the identity-root .pop.toml read; the walker merges the shared RepoScopeConfig
-	// down the ladder (ADR-0083, ADR-0122). trunk stays caller-side inside
-	// resolveRepoConfig with its exact-checkout-path condition.
+	// the two-anchor .pop.toml reads (worktree then trunk); the walker merges the
+	// shared RepoScopeConfig down the ladder (ADR-0083, ADR-0122). trunk stays
+	// caller-side inside resolveRepoConfig with its exact-checkout-path condition.
 	return c.newRepoScope(d, checkoutPath).resolveRepoConfig()
 }
 
-// ResolveWorkbenchesWith returns the union of Workbenches from all three homes
-// (global config, .pop.toml, and [repo."<path>"]), resolved with
-// most-specific-wins precedence: [repo."<path>"] > .pop.toml > global library.
-// Name collisions emit warnings. A bare repo's .pop.toml templates are visible
-// from all its worktrees via Repository identity.
+// ResolveWorkbenchesWith returns the union of Workbenches from all homes (global
+// config, committed .pop.toml, and [repo."<path>"]), resolved with
+// most-specific-wins precedence: [repo."<path>"] > worktree .pop.toml >
+// trunk-anchor .pop.toml > global library. The committed .pop.toml is unioned at
+// two anchors (ADR-0083): this worktree outranks the inherited trunk anchor (the
+// Trunk worktree, or the repository-identity root for a bare repo). Name
+// collisions emit warnings.
 func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workbench, []string) {
 	e := c.newRepoScope(d, checkoutPath)
 
@@ -849,15 +853,21 @@ func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workben
 		unionInto(RepoScopeConfig{Workbenches: c.Workbenches}, "global config", nil)
 	}
 
-	// .pop.toml from the repo identity root (medium precedence).
-	popTOML, _ := e.popTOML(e.identity)
-	unionInto(RepoScopeConfig{Workbenches: popTOML.Workbenches}, ".pop.toml",
-		func(name, prior string) string {
-			return fmt.Sprintf(
-				"session template %q defined in both %s and .pop.toml; using .pop.toml",
-				name, prior,
-			)
-		})
+	// Committed .pop.toml, resolved worktree-first then the trunk anchor (ADR-0083
+	// two-anchor law): the trunk anchor unions first (lower precedence) and the
+	// worktree's own .pop.toml last, so its templates outrank the inherited ones.
+	// The read-once guard in popScopeAnchors collapses to a single union (no
+	// double-warn) when the checkout is itself the trunk anchor.
+	for _, anchor := range e.popScopeAnchors() {
+		popTOML, _ := e.popTOML(anchor)
+		unionInto(RepoScopeConfig{Workbenches: popTOML.Workbenches}, ".pop.toml",
+			func(name, prior string) string {
+				return fmt.Sprintf(
+					"session template %q defined in both %s and .pop.toml; using .pop.toml",
+					name, prior,
+				)
+			})
+	}
 
 	// The identity-matched [repo."<path>"] override (highest precedence).
 	if e.overrideFound {

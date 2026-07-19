@@ -124,14 +124,42 @@ func (e *repoScopeEnumerator) inheritedAnchor() string {
 	return e.identity
 }
 
+// popScopeAnchors returns the in-tree .pop.toml anchors for the checkout in
+// merge order (lowest precedence first) under ADR-0083's two-anchor law: the
+// trunk anchor (inherited — the Trunk worktree, or the repository-identity root
+// for a bare repo) then this worktree, so the worktree's own committed values
+// win. The trunk anchor is dropped when it canonicalizes to this very checkout,
+// the read-once guard: a checkout that is its own trunk anchor is read (and, for
+// workbenches, warned about) exactly once.
+func (e *repoScopeEnumerator) popScopeAnchors() []string {
+	if inherited := e.inheritedAnchor(); canonicalPath(e.d, inherited) != e.canon {
+		return []string{inherited, e.checkoutPath}
+	}
+	return []string{e.checkoutPath}
+}
+
 // resolveRepoConfig returns the effective RepoConfig for the checkout: the
-// identity-root .pop.toml with the identity-matched [repo."<path>"] override
-// walker-merged over the shared RepoScopeConfig (later ladder source wins). The
-// [repo]-only trunk key stays caller-side — per-checkout, applied only when the
-// override's key path exactly matches this checkout. A missing .pop.toml is not
-// an error; a malformed one degrades to the zero config with its error returned.
+// committed .pop.toml (resolved worktree-first then the trunk anchor, presence
+// deciding — ADR-0083) with the identity-matched [repo."<path>"] override
+// walker-merged on top (later ladder source wins). The [repo]-only trunk key
+// stays caller-side — per-checkout, applied only when the override's key path
+// exactly matches this checkout. A missing .pop.toml is not an error; a
+// malformed one degrades to the zero config with its error returned.
 func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
-	result, popErr := e.popTOML(e.identity)
+	var result RepoConfig
+	var popErr error
+	// Merge the anchors lowest precedence first (trunk then worktree) so the
+	// worktree's committed values win; Findings from each anchor read are kept so
+	// scope-legality problems in either file still surface to the picker banner.
+	for _, anchor := range e.popScopeAnchors() {
+		cfg, err := e.popTOML(anchor)
+		if err != nil {
+			popErr = err
+		}
+		src := cfg.RepoScopeConfig
+		mergeWalk(&result.RepoScopeConfig, &src, repoScopeMetadata(src), repoScopePolicy())
+		result.Findings = append(result.Findings, cfg.Findings...)
+	}
 	if e.overrideFound {
 		src := e.override.RepoScopeConfig
 		mergeWalk(&result.RepoScopeConfig, &src, repoScopeMetadata(src), repoScopePolicy())

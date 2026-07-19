@@ -673,6 +673,103 @@ workbenches = [
 	})
 }
 
+// TestResolveWorkbenchesWithTwoAnchor pins ADR-0083's two-anchor law for the
+// workbench union (slice 05): the committed .pop.toml is unioned at this worktree
+// AND the trunk anchor, the worktree outranking the inherited trunk one, with the
+// read-once guard suppressing a self-collision when the checkout is its own
+// trunk anchor and the bare-repo identity-root fallback supplying the trunk
+// anchor. This is a deliberate behaviour change from the prior single-anchor
+// (identity-root only) read, so it gets its own test.
+func TestResolveWorkbenchesWithTwoAnchor(t *testing.T) {
+	// writeWorkbench writes a .pop.toml naming one workbench; the tag rides in
+	// before_apply so the winning template is identifiable after the union.
+	writeWorkbench := func(t *testing.T, dir, name, tag string) {
+		t.Helper()
+		body := "[[workbenches]]\nname = \"" + name + "\"\n" +
+			"before_apply = [\"" + tag + "\"]\n" +
+			"windows = [{name = \"main\", layout = {name = \"editor\", command = \"vim\"}}]\n"
+		if err := os.WriteFile(filepath.Join(dir, ".pop.toml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tagOf := func(t *testing.T, wb Workbench) string {
+		t.Helper()
+		if len(wb.BeforeApply) != 1 {
+			t.Fatalf("workbench %q before_apply = %v, want one tag", wb.Name, wb.BeforeApply)
+		}
+		return wb.BeforeApply[0]
+	}
+
+	t.Run("worktree .pop.toml outranks the trunk anchor, collision warned", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		writeWorkbench(t, trunk, "shared", "trunk")
+		writeWorkbench(t, child, "shared", "child")
+		templates, warnings := (&Config{}).ResolveWorkbenchesWith(d, child)
+		if len(templates) != 1 || templates[0].Name != "shared" {
+			t.Fatalf("templates = %+v, want a single 'shared'", templates)
+		}
+		if got := tagOf(t, templates[0]); got != "child" {
+			t.Fatalf("winning tag = %q, want child (worktree outranks trunk)", got)
+		}
+		if len(warnings) != 1 || !strings.Contains(warnings[0], "shared") {
+			t.Fatalf("warnings = %v, want one naming the collided template", warnings)
+		}
+	})
+
+	t.Run("worktree without .pop.toml inherits the trunk anchor's templates", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		writeWorkbench(t, trunk, "trunk-wb", "trunk")
+		templates, warnings := (&Config{}).ResolveWorkbenchesWith(d, child)
+		if len(warnings) != 0 {
+			t.Fatalf("warnings = %v, want none", warnings)
+		}
+		if len(templates) != 1 || templates[0].Name != "trunk-wb" {
+			t.Fatalf("templates = %+v, want the inherited 'trunk-wb'", templates)
+		}
+	})
+
+	t.Run("read-once guard: checkout is its own trunk anchor, no self-collision", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return root, true }
+		writeWorkbench(t, root, "self-wb", "self")
+		templates, warnings := (&Config{}).ResolveWorkbenchesWith(d, root)
+		if len(warnings) != 0 {
+			t.Fatalf("warnings = %v, want none (the anchor is read/unioned once)", warnings)
+		}
+		if len(templates) != 1 || templates[0].Name != "self-wb" {
+			t.Fatalf("templates = %+v, want a single 'self-wb'", templates)
+		}
+	})
+
+	t.Run("bare repo falls back to the identity root as the trunk anchor", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		bareRoot := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(bareRoot, ".bare"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		worktree := filepath.Join(bareRoot, "main")
+		if err := os.MkdirAll(worktree, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeWorkbench(t, bareRoot, "id-root-wb", "id-root")
+		d.Trunk = func(string) (string, bool) { return "", false }
+		templates, warnings := (&Config{}).ResolveWorkbenchesWith(d, worktree)
+		if len(warnings) != 0 {
+			t.Fatalf("warnings = %v, want none", warnings)
+		}
+		if len(templates) != 1 || templates[0].Name != "id-root-wb" {
+			t.Fatalf("templates = %+v, want the identity-root 'id-root-wb'", templates)
+		}
+	})
+}
+
 func TestLoadEffortConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
@@ -4324,6 +4421,88 @@ func TestResolveRepoConfigTrunkPerCheckout(t *testing.T) {
 	if featureGot.Trunk {
 		t.Errorf("feature: Trunk = true, want false (not the keyed checkout)")
 	}
+}
+
+// TestResolveRepoConfigTwoAnchor pins ADR-0083's two-anchor law for
+// ResolveRepoConfig (slice 05): the committed .pop.toml resolves at this worktree
+// first, then the trunk anchor (the Trunk worktree, or the repository-identity
+// root for a bare repo), presence deciding. This replaces the prior single-anchor
+// (identity-root only) read, so it gets its own test. preferred_workbench is the
+// observable shared repo-scope field.
+func TestResolveRepoConfigTwoAnchor(t *testing.T) {
+	writePref := func(t *testing.T, dir, name string) {
+		t.Helper()
+		body := "preferred_workbench = \"" + name + "\"\n"
+		if err := os.WriteFile(filepath.Join(dir, ".pop.toml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("worktree .pop.toml beats the trunk anchor", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		writePref(t, trunk, "trunk-wb")
+		writePref(t, child, "child-wb")
+		got, err := (&Config{}).ResolveRepoConfig(d, child)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PreferredWorkbench != "child-wb" {
+			t.Fatalf("PreferredWorkbench = %q, want child-wb (worktree beats trunk)", got.PreferredWorkbench)
+		}
+	})
+
+	t.Run("worktree without the key inherits the trunk anchor", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		trunk := t.TempDir()
+		child := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return trunk, true }
+		writePref(t, trunk, "trunk-wb")
+		got, err := (&Config{}).ResolveRepoConfig(d, child)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PreferredWorkbench != "trunk-wb" {
+			t.Fatalf("PreferredWorkbench = %q, want trunk-wb (inherited from trunk anchor)", got.PreferredWorkbench)
+		}
+	})
+
+	t.Run("read-once guard: checkout is its own trunk anchor", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		d.Trunk = func(string) (string, bool) { return root, true }
+		writePref(t, root, "self-wb")
+		got, err := (&Config{}).ResolveRepoConfig(d, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PreferredWorkbench != "self-wb" {
+			t.Fatalf("PreferredWorkbench = %q, want self-wb", got.PreferredWorkbench)
+		}
+	})
+
+	t.Run("bare repo falls back to the identity root as the trunk anchor", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		bareRoot := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(bareRoot, ".bare"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		worktree := filepath.Join(bareRoot, "main")
+		if err := os.MkdirAll(worktree, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writePref(t, bareRoot, "id-root-wb")
+		d.Trunk = func(string) (string, bool) { return "", false }
+		got, err := (&Config{}).ResolveRepoConfig(d, worktree)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PreferredWorkbench != "id-root-wb" {
+			t.Fatalf("PreferredWorkbench = %q, want id-root-wb (bare inherits identity root)", got.PreferredWorkbench)
+		}
+	})
 }
 
 func TestRepoBlockUnknownKeyWarning(t *testing.T) {
