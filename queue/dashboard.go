@@ -1130,6 +1130,11 @@ type dashboardToggleMsg struct {
 type dashboardDrainMsg struct {
 	err error
 }
+type dashboardWayfinderMsg struct {
+	mapID    string
+	ticketID string
+	err      error
+}
 type dashboardUnparkMsg struct {
 	setID string
 	err   error
@@ -2152,6 +2157,13 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.statusMsg = ""
 			return m, nil
+		case "i":
+			row, ok := m.list.Selected()
+			if !ok || !row.IsMap {
+				return m, nil
+			}
+			m.err = nil
+			return m, m.launchWayfinderSession(row, "")
 		case "l", "enter":
 			row, ok := m.list.Selected()
 			if !ok {
@@ -2235,6 +2247,18 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		}
+		return m, m.reload()
+	case dashboardWayfinderMsg:
+		if msg.err != nil {
+			if errors.Is(msg.err, wayfinder.ErrEmptyFrontier) {
+				m.statusMsg = dashboardWayfinderEmptyFrontierMessage()
+			} else {
+				m.err = msg.err
+			}
+			return m, nil
+		}
+		m.statusMsg = fmt.Sprintf("spawned wayfinder session for %s ticket %s", msg.mapID, msg.ticketID)
+		m.err = nil
 		return m, m.reload()
 	case dashboardUnparkMsg:
 		if msg.err != nil {
@@ -2659,6 +2683,20 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.detail.list.SetCursor(len(m.detail.manifest.Tasks) - 1)
 			}
 		}
+	case "i":
+		if m.detail == nil || m.detail.loading || !m.detail.row.IsMap || m.detail.wfMap == nil {
+			return m, nil
+		}
+		ticket, ok := m.detail.ticketList.Selected()
+		if !ok {
+			return m, nil
+		}
+		if !detailTicketOnFrontier(*m.detail.wfMap, ticket) {
+			m.detail.statusMsg = "only frontier tickets can be worked"
+			return m, nil
+		}
+		m.detail.statusMsg = ""
+		return m, m.launchWayfinderSession(m.detail.row, ticket.ID)
 	case "l", "enter":
 		if m.detail == nil || m.detail.loading {
 			return m, nil
@@ -2667,6 +2705,10 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ticket, ok := m.detail.ticketList.Selected()
 			if !ok {
 				return m, nil
+			}
+			if msg.String() == "enter" && detailTicketOnFrontier(*m.detail.wfMap, ticket) {
+				m.detail.statusMsg = ""
+				return m, m.launchWayfinderSession(m.detail.row, ticket.ID)
 			}
 			m.detail.peek = &taskTextPeek{taskID: detailTicketName(ticket), loading: true}
 			return m, m.loadTicketText(m.detail.wfMap, ticket)
@@ -2998,6 +3040,29 @@ func (m QueueDashboard) launchVerify(row DashboardRow) tea.Cmd {
 		_, err := LaunchVerify(m.d, m.cfg, row.SetRef)
 		return dashboardDrainMsg{err: err}
 	}
+}
+
+func (m QueueDashboard) launchWayfinderSession(row DashboardRow, ticketID string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := LaunchWayfinderSession(m.d, m.cfg, row, ticketID)
+		if err != nil {
+			return dashboardWayfinderMsg{err: err}
+		}
+		return dashboardWayfinderMsg{mapID: result.MapID, ticketID: result.TicketID}
+	}
+}
+
+func dashboardWayfinderEmptyFrontierMessage() string {
+	return "no frontier tickets — open tickets are blocked or claimed"
+}
+
+func detailTicketOnFrontier(wfMap wayfinder.Map, ticket wayfinder.Ticket) bool {
+	for _, t := range wayfinder.Frontier(wfMap.Tickets) {
+		if t.ID == ticket.ID {
+			return true
+		}
+	}
+	return false
 }
 
 func (m QueueDashboard) previewDrain(row DashboardRow) tea.Cmd {
@@ -3370,7 +3435,8 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "j/k", Desc: "navigate tickets"},
 			{Key: "gg", Desc: "first ticket"},
 			{Key: "G", Desc: "last ticket"},
-			{Key: "l/enter", Desc: "peek ticket text"},
+			{Key: "i/enter", Desc: "work frontier ticket"},
+			{Key: "l", Desc: "peek ticket text"},
 			{Key: "h/esc", Desc: "back to list"},
 		}
 	case m.detail != nil:
@@ -3394,7 +3460,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		}
 	default:
 		// Main list view
-		return []ui.HelpEntry{
+		entries := []ui.HelpEntry{
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "gg", Desc: "first row"},
 			{Key: "G", Desc: "last row"},
@@ -3406,6 +3472,10 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "v", Desc: "routines view"},
 			{Key: "h/esc", Desc: "quit"},
 		}
+		if row, ok := m.list.Selected(); ok && row.IsMap {
+			entries = append(entries, ui.HelpEntry{Key: "i", Desc: "work next frontier ticket"})
+		}
+		return entries
 	}
 	return nil
 }

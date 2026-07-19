@@ -545,6 +545,17 @@ func AgentPresetName(spec string) (string, error) {
 	return name, nil
 }
 
+// ResolveDefaultInteractiveAgentPreset returns the default Interactive agent
+// preset for attended sessions (wayfinder work, HITL assistance, routine
+// authoring). It follows [tasks.implement].agents when set, otherwise claude.
+func ResolveDefaultInteractiveAgentPreset(cfg *config.Config) string {
+	specs := ResolveDefaultAgentPresets(nil, "", false, cfg)
+	if len(specs) == 0 {
+		return DefaultAgentPreset
+	}
+	return specs[0]
+}
+
 // ResolveDefaultAgentPresets returns the ordered agent preset list for a run.
 // Explicit CLI --agent flags win; otherwise [tasks.implement].agents applies;
 // the final fallback is claude.
