@@ -143,6 +143,51 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 	return DashboardDrainResult{PaneID: spawn.PaneID, RuntimePath: dec.scan.RuntimePath}, nil
 }
 
+// LaunchVerify spawns a Verifier pane on the dashboard row's set (ADR-0123). It
+// is the lighter counterpart to LaunchDrain: it runs `pop tasks verify <set>`
+// pinned to the row's runtime path through the same `spawnDrain` helper (so the
+// pane inherits the `@pop_set` pane-per-set tagging), but records neither a
+// Runtime execution lock, a spawn intent, nor a DrainPane — verify is not a
+// drain, so the `●` live-drain indicator must stay dark and `p` must not reach
+// this pane. An empty runtime path omits the flag and lets `pop tasks verify`
+// default to the project root, matching the drain when no worktree is ready.
+func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	if len(scans) == 0 {
+		return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
+	}
+	// The pane spawns into the checkout the verdict must judge: the row's runtime
+	// path when it resolves to one (a bound worktree or trunk), else the project
+	// root. spawnDrain reuses this set's existing @pop_set pane, so verify lands
+	// in the same session the set's drain would.
+	base := strings.TrimSpace(ref.RuntimePath)
+	if base == "" {
+		base = scans[0].ProjectPath
+	}
+	command := fmt.Sprintf("pop tasks verify %s", shellQuote(ref.SetID))
+	if strings.TrimSpace(ref.RuntimePath) != "" {
+		command += " --task-runtime-path " + shellQuote(ref.RuntimePath)
+	}
+	session := project.SessionNameWith(d.Project, base)
+	paneID, err := spawnDrain(d.Tmux, session, base, ref.SetID, command)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	return DashboardDrainResult{PaneID: paneID, RuntimePath: ref.RuntimePath}, nil
+}
+
 func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([]projectScan, error) {
 	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
 	if err != nil {

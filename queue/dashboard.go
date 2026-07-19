@@ -1192,6 +1192,7 @@ type dashboardMenuAction int
 
 const (
 	menuActionDrain dashboardMenuAction = iota
+	menuActionVerify
 	menuActionBind
 	menuActionUnbind
 	menuActionAutoDrain
@@ -1218,13 +1219,21 @@ type dashboardMenu struct {
 }
 
 // dashboardMenuItems returns the verbs applicable to row, in a stable order.
-// Conditional verbs are filtered to the row's context: unbind only for bound
+// Conditional verbs are filtered to the row's context: verify only for
+// NEEDS-VERIFY / VERIFY-FAILED rows with no live drain, unbind only for bound
 // rows, auto-drain only for non-orphaned rows, and unpark only for parked rows.
 // Drain, bind, preview, the runtime shell, and archive apply to every row
 // regardless of status.
 func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	items := []dashboardMenuItem{
 		{key: "i", label: "drain", action: menuActionDrain},
+	}
+	// Verify is the lighter, explicit Verifier force (ADR-0123): offered only on
+	// rows a verdict can move (NEEDS-VERIFY / VERIFY-FAILED) and hidden while a
+	// live drain holds the set — a plain verify is not quiescence-gated, so the
+	// running drain verifies itself instead.
+	if dashboardVerifyEligible(row) {
+		items = append(items, dashboardMenuItem{key: "v", label: "verify", action: menuActionVerify})
 	}
 	items = append(items, dashboardMenuItem{key: "b", label: "bind worktree", action: menuActionBind})
 	if row.Bound {
@@ -1240,6 +1249,17 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	items = append(items, dashboardMenuItem{key: "O", label: "shell", action: menuActionShell})
 	items = append(items, dashboardMenuItem{key: "A", label: "archive", action: menuActionArchive})
 	return items
+}
+
+// dashboardVerifyEligible reports whether the verify verb applies to row: a set
+// a verdict can still move (NEEDS-VERIFY or VERIFY-FAILED) that no live drain
+// holds (ADR-0123). It is the single guard shared by the menu (inclusion) and
+// dispatch (self-containment).
+func dashboardVerifyEligible(row DashboardRow) bool {
+	if row.LiveDrain {
+		return false
+	}
+	return row.RawStatus == tasks.StatusNeedsVerify || row.RawStatus == tasks.StatusVerifyFailed
 }
 
 // newDashboardMenu opens the action overlay on row, wrapping its verbs in a
@@ -2281,6 +2301,12 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 	switch action {
 	case menuActionDrain:
 		return m, m.launchDrain(row)
+	case menuActionVerify:
+		if !dashboardVerifyEligible(row) {
+			return m, nil
+		}
+		m.statusMsg = ""
+		return m, m.launchVerify(row)
 	case menuActionBind:
 		m.bind = &dashboardBindModal{row: row, loading: true}
 		return m, m.loadBindWorktrees(row)
@@ -2745,6 +2771,17 @@ func defaultDrainCursor(entries []dashboardDrainEntry) int {
 		}
 	}
 	return 0
+}
+
+// launchVerify spawns a Verifier pane on the focused set (ADR-0123). It records
+// no lock, spawn intent, or DrainPane — verify is not a drain — so the verdict
+// surfaces through the next poll's ApplyVerifyVerdicts re-derivation via the
+// reload dashboardDrainMsg drives.
+func (m QueueDashboard) launchVerify(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		_, err := LaunchVerify(m.d, m.cfg, row.SetRef)
+		return dashboardDrainMsg{err: err}
+	}
 }
 
 func (m QueueDashboard) previewDrain(row DashboardRow) tea.Cmd {
