@@ -145,7 +145,7 @@ func statusFromDecisions(d *Deps, decisions []Decision) (StatusSnapshot, error) 
 }
 
 // RenderStatus prints the static Queue status surface (ADR-0121): a one-line
-// Summary headline, then the Queue dashboard's task-set table (the same rows,
+// Summary headline, then the Work dashboard's task-set table (the same rows,
 // columns, row filter, and sort — status and the dashboard key on one row
 // builder and one comparator), then a trailing Scan errors section when there
 // are scan errors. Every former per-bucket inventory section is retired; the

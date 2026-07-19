@@ -39,7 +39,7 @@ type Deps struct {
 
 	// IncludeDone is the Done-inclusion view flag (ADR-0121): the single
 	// inclusion state that threads through the shared row layer both Queue read
-	// surfaces (`pop queue status` and `pop queue dashboard`) consume. Default
+	// surfaces (`pop queue status` and `pop work dashboard`) consume. Default
 	// false hides every DONE Task set — including a DONE set that still holds a
 	// managed Worktree binding (the old teardown-reminder carve-out is retired).
 	// `--include-done` on either command sets it true; the dashboard's `f` filter

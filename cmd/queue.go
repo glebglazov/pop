@@ -9,7 +9,6 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/dashboardshell"
-	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/spf13/cobra"
@@ -45,11 +44,14 @@ var queueStatusCmd = &cobra.Command{
 	RunE:  runQueueStatus,
 }
 
+// Deprecated: use `pop work dashboard` instead. Hidden alias for existing
+// keybindings. TODO: remove at next major release.
 var queueDashboardCmd = &cobra.Command{
-	Use:   "dashboard",
-	Short: "Open the read-only queue dashboard",
-	Args:  cobra.NoArgs,
-	RunE:  runQueueDashboard,
+	Use:    "dashboard",
+	Short:  "Open the work dashboard (alias for work dashboard)",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runWorkDashboard,
 }
 
 var queueLogCmd = &cobra.Command{
@@ -59,13 +61,10 @@ var queueLogCmd = &cobra.Command{
 	RunE:  runQueueLog,
 }
 
-// queueStatusIncludeDone / queueDashboardIncludeDone back the `--include-done`
-// flag on each Queue read surface. The flag sets the initial Done-inclusion
-// state (ADR-0121): off by default hides every DONE Task set; on reveals them.
-var (
-	queueStatusIncludeDone    bool
-	queueDashboardIncludeDone bool
-)
+// queueStatusIncludeDone backs the `--include-done` flag on `pop queue status`.
+// The Work dashboard owns the same flag on `pop work dashboard`; the hidden
+// `pop queue dashboard` alias shares workDashboardIncludeDone.
+var queueStatusIncludeDone bool
 
 func init() {
 	rootCmd.AddCommand(queueCmd)
@@ -75,7 +74,7 @@ func init() {
 	queueCmd.AddCommand(queueLogCmd)
 
 	queueStatusCmd.Flags().BoolVar(&queueStatusIncludeDone, "include-done", false, "include DONE task sets (hidden by default)")
-	queueDashboardCmd.Flags().BoolVar(&queueDashboardIncludeDone, "include-done", false, "include DONE task sets (hidden by default)")
+	queueDashboardCmd.Flags().BoolVar(&workDashboardIncludeDone, "include-done", false, "include DONE task sets (hidden by default)")
 }
 
 var (
@@ -136,7 +135,7 @@ func runQueueStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// The task-set table is the Queue dashboard's rows (ADR-0121): status and the
+	// The task-set table is the Work dashboard's rows (ADR-0121): status and the
 	// dashboard share one row builder and one comparator, so BuildDashboard yields
 	// the same rows, filter, and sort the dashboard renders.
 	dash, err := queueBuildDashboard(d, cfg)
@@ -145,42 +144,6 @@ func runQueueStatus(cmd *cobra.Command, args []string) error {
 	}
 	queue.RenderStatus(os.Stdout, snap, dash.Rows)
 	return nil
-}
-
-func runQueueDashboard(cmd *cobra.Command, args []string) error {
-	cfgPath := cfgFile
-	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
-	}
-	cfg, err := queueConfigLoad(cfgPath)
-	if err != nil {
-		return err
-	}
-	d := queue.DefaultDeps()
-	d.LoadConfig = queueConfigLoad
-	d.IncludeDone = queueDashboardIncludeDone
-	checkout, err := queueRunDashboard(d, cfg)
-	if err != nil {
-		return err
-	}
-	if checkout == "" {
-		return nil
-	}
-	// Ctrl-g on a bound row: open that checkout through the shared workbench-aware
-	// open helper (task 02) — birth-time shaping when the session is absent, else
-	// flat attach (ADR-0075). Because a managed worktree's session usually already
-	// exists, this attaches to the running session.
-	//
-	// Force the tmux switch: unlike `pop worktree`, the queue command exposes no
-	// -s/--switch flag, so the shared flat-open path (handleWorktreeSelect) would
-	// otherwise print the path instead of switching. The dashboard has already
-	// quit here — the only sensible action is to attach, never echo the path.
-	switchSession = true
-	ctx, err := project.DetectRepoContextFromPathWith(project.DefaultDeps(), checkout)
-	if err != nil {
-		return err
-	}
-	return openWorktreeWithShaping(defaultWorktreeShapeDeps(), ctx, checkout)
 }
 
 func runQueueLog(cmd *cobra.Command, args []string) error {

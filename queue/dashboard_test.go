@@ -363,7 +363,7 @@ func TestDashboardBandKeysOnDisplayedLabel(t *testing.T) {
 }
 
 // TestRenderStatusMirrorsDashboardRows proves `pop queue status` renders the
-// same rows in the same order as the Queue dashboard (ADR-0121): both key on one
+// same rows in the same order as the Work dashboard (ADR-0121): both key on one
 // row builder (dashboardRowsForStatic) and one comparator (sortDashboardRows),
 // so the static status table's TASK SET order equals the sorted dashboard rows'
 // order, under the Summary headline and without any retired inventory section.
@@ -2416,7 +2416,7 @@ func TestDashboardLaunchDrainUnboundUsesRepresentativeCheckout(t *testing.T) {
 	assertDashboardPaneMapping(t, d, repo, setID, "%3", "dashboard")
 }
 
-// TestDashboardShowsUnsatisfiableWorktreeDirective asserts the queue dashboard
+// TestDashboardShowsUnsatisfiableWorktreeDirective asserts the Work dashboard
 // shows a set whose `name` worktree directive names a worktree absent on this
 // machine as a config error on the set's row (ADR-0059), read-only — no drain, no
 // provisioning.

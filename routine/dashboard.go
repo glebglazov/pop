@@ -270,7 +270,7 @@ func routineMenuItems(row DashboardRow) []routineMenuItem {
 // routineScheduleModal is the text-input overlay opened by the edit-schedule
 // verb. It carries the row it edits, the working schedule expression (pre-filled
 // with the row's current schedule), and the last parse error so an invalid
-// expression keeps the modal open for correction (mirrors the Queue dashboard's
+// expression keeps the modal open for correction (mirrors the Work dashboard's
 // bind-name text-input stage).
 type routineScheduleModal struct {
 	row   DashboardRow
@@ -472,7 +472,7 @@ func (m RoutineDashboard) resizeMainList() {
 	m.list.Resize(listH)
 }
 
-// ViewToggleAllowed reports whether v may switch to the Queue dashboard.
+// ViewToggleAllowed reports whether v may switch to the Work dashboard.
 func (m RoutineDashboard) ViewToggleAllowed() bool {
 	return m.detail == nil && m.menu == nil && m.sched == nil && m.agentEffort == nil
 }
@@ -1303,7 +1303,7 @@ func (m RoutineDashboard) View() tea.View {
 
 // viewWithMenu renders the action-menu overlay: the summary, the full table with
 // the menu block spliced under the cursored row, and a menu footer. It mirrors
-// the Queue dashboard's overlay grammar.
+// the Work dashboard's overlay grammar.
 func (m RoutineDashboard) viewWithMenu() string {
 	var b strings.Builder
 	if m.err != nil {

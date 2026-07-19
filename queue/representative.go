@@ -91,7 +91,7 @@ func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*p
 	// finding (a config.Finding) before touching .pop.toml, while a per-checkout
 	// .pop.toml problem comes back as a plain error and is still degraded past in
 	// the scan loop below. This keeps the migration tripwire loud for pop queue /
-	// pop tasks drain and the queue dashboard.
+	// pop tasks drain and the Work dashboard.
 	if cfg != nil && len(scans) > 0 {
 		if _, err := resolveRepoConfigFor(d, cfg, scans[0].ProjectPath); err != nil {
 			var f config.Finding

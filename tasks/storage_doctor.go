@@ -99,7 +99,7 @@ type TaskStorageRepo struct {
 
 // ListTaskStorageRepos returns every repository that has a Task storage
 // directory containing at least one Task set, reading each repo.json marker for
-// the recorded git common directory. It lets a bulk reader (the Queue dashboard)
+// the recorded git common directory. It lets a bulk reader (the Work dashboard)
 // discover the small set of repositories that can actually contribute rows
 // without resolving git coordinates for every registered project. It is strictly
 // read-only: a missing repos dir yields nothing, and directories without a

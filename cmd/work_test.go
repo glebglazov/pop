@@ -13,8 +13,10 @@ import (
 )
 
 func TestWorkCommandTree(t *testing.T) {
-	if _, _, err := rootCmd.Find([]string{"work", "show-path"}); err != nil {
-		t.Fatalf("Find([work show-path]): %v", err)
+	for _, path := range [][]string{{"work", "show-path"}, {"work", "dashboard"}} {
+		if _, _, err := rootCmd.Find(path); err != nil {
+			t.Fatalf("Find(%v): %v", path, err)
+		}
 	}
 }
 
@@ -30,7 +32,7 @@ func TestWorkHelpDescribesCrossConceptSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	help := buf.String()
-	for _, want := range []string{"Cross-concept", "show-path", "tasks/", "wayfinder/"} {
+	for _, want := range []string{"Cross-concept", "Work dashboard", "show-path", "tasks/", "wayfinder/"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("work help missing %q:\n%s", want, help)
 		}
@@ -119,5 +121,51 @@ func TestWorkShowPathOutsideGitRepo(t *testing.T) {
 	}
 	if workExit.Code != tasksExit.Code {
 		t.Fatalf("exit codes differ: work=%d tasks=%d", workExit.Code, tasksExit.Code)
+	}
+}
+
+func TestWorkDashboardUsesWorkHandler(t *testing.T) {
+	got, _, err := rootCmd.Find([]string{"work", "dashboard"})
+	if err != nil {
+		t.Fatalf("Find([work dashboard]): %v", err)
+	}
+	if got != workDashboardCmd {
+		t.Fatalf("Find([work dashboard]) = %q, want work dashboard command", got.CommandPath())
+	}
+	if got.RunE == nil {
+		t.Fatal("work dashboard missing RunE")
+	}
+}
+
+func TestQueueDashboardAliasIsHidden(t *testing.T) {
+	got, _, err := rootCmd.Find([]string{"queue", "dashboard"})
+	if err != nil {
+		t.Fatalf("Find([queue dashboard]): %v", err)
+	}
+	if got != queueDashboardCmd {
+		t.Fatalf("Find([queue dashboard]) = %q, want hidden alias", got.CommandPath())
+	}
+	if !queueDashboardCmd.Hidden {
+		t.Fatal("queue dashboard alias must stay hidden")
+	}
+
+	var out bytes.Buffer
+	queueCmd.SetOut(&out)
+	queueCmd.SetErr(&out)
+	t.Cleanup(func() {
+		queueCmd.SetOut(nil)
+		queueCmd.SetErr(nil)
+	})
+	if err := queueCmd.Help(); err != nil {
+		t.Fatal(err)
+	}
+	help := out.String()
+	if strings.Contains(help, "\n  dashboard ") {
+		t.Fatalf("queue help exposes hidden dashboard alias:\n%s", help)
+	}
+	for _, want := range []string{"run", "status", "log"} {
+		if !strings.Contains(help, "\n  "+want+" ") {
+			t.Fatalf("queue help missing %q subcommand:\n%s", want, help)
+		}
 	}
 }

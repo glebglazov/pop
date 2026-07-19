@@ -17,6 +17,7 @@ func TestDashboardCommandTree(t *testing.T) {
 	}{
 		{path: []string{"monitor", "dashboard"}, wantCmd: monitorDashboardCmd, wantRun: runDashboard},
 		{path: []string{"project", "dashboard"}, wantCmd: projectDashboardCmd, wantRun: runProject},
+		{path: []string{"work", "dashboard"}, wantCmd: workDashboardCmd, wantRun: runWorkDashboard},
 		{path: []string{"worktree", "dashboard"}, wantCmd: worktreeDashboardCmd, wantRun: runWorktree},
 		{path: []string{"tasks", "bind-worktree"}, wantCmd: taskBindWorktreeCmd, wantRun: runTaskBindWorktree},
 		{path: []string{"tasks", "unbind-worktree"}, wantCmd: taskUnbindWorktreeCmd, wantRun: runTaskUnbindWorktree},
@@ -95,7 +96,7 @@ func TestLegacyDashboardAliasIsHidden(t *testing.T) {
 	if strings.Contains(help, "\n  dashboard ") {
 		t.Fatalf("root help exposes legacy dashboard alias:\n%s", help)
 	}
-	for _, command := range []string{"monitor", "project", "worktree"} {
+	for _, command := range []string{"monitor", "project", "work", "worktree"} {
 		if !strings.Contains(help, "\n  "+command+" ") {
 			t.Fatalf("root help missing %q namespace:\n%s", command, help)
 		}

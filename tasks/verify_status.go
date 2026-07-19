@@ -23,7 +23,7 @@ func verifyEnabled(cfg *config.Config) bool {
 //
 // Every row shares one runtime checkout — the cwd checkout `pop tasks status`
 // resolves. Call ApplyVerifyVerdictsWith when each set may drain in its own
-// checkout (the queue dashboard, queue scan).
+// checkout (the Work dashboard, queue scan).
 //
 // The verdict lookup first checks the current work SHA. A PASS verdict at HEAD
 // lets the terminal status stand; any non-PASS verdict at HEAD forces

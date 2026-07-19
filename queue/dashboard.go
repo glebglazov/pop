@@ -73,7 +73,7 @@ type SetRef struct {
 	LiveDrain bool
 }
 
-// DashboardRow is one read-only Queue dashboard table row.
+// DashboardRow is one read-only Work dashboard table row.
 type DashboardRow struct {
 	SetRef
 
@@ -96,7 +96,7 @@ type DashboardRow struct {
 	destKind dashboardDestKind
 }
 
-// DashboardSnapshot is the data model for `pop queue dashboard`.
+// DashboardSnapshot is the data model for `pop work dashboard`.
 type DashboardSnapshot struct {
 	Rows []DashboardRow
 }
@@ -177,7 +177,7 @@ func (s *dashboardSnapshot) bindingFor(repoKey, setID string) (WorktreeBinding, 
 	return b, ok
 }
 
-// BuildDashboard derives the Queue dashboard rows from registered projects and
+// BuildDashboard derives the Work dashboard rows from registered projects and
 // on-disk task/queue state. It is read-only except for the same refresh
 // auto-registration behavior used by `pop queue status`.
 //
@@ -474,7 +474,7 @@ func pathWithinOrEqual(p, base string) bool {
 	return p == base || strings.HasPrefix(p, base+string(filepath.Separator))
 }
 
-// Queue dashboard membership tiers, in precedence order. A row lands in the
+// Work dashboard membership tiers, in precedence order. A row lands in the
 // first tier it qualifies for, so an orphaned + auto-drain set sorts under the
 // auto-drain tier (auto-drain is checked before orphaned).
 const (
@@ -553,7 +553,7 @@ func dashboardStatusOrder(s tasks.TaskSetStatus) int {
 }
 
 // queueRowLess is the shared Queue surface comparator (ADR-0121), the single
-// source of the total order both `pop queue dashboard` and `pop queue status`
+// source of the total order both `pop work dashboard` and `pop queue status`
 // read. Rows float by membership tier (live-drain → auto-drain → orphaned),
 // then fall through to the status scheme: the IN PROGRESS and READY bands read
 // cross-project (Project asc, then SetID desc), and every remaining status
@@ -828,7 +828,7 @@ var dashboardLiveDrainGlyph = ui.SpinnerFrames[0]
 
 // dashboardSpinnerFrame is the current working-spinner frame, advanced by the
 // Update loop while any row holds a live drain. It is process-global render
-// state: the queue dashboard's render path is a tree of free functions built once
+// state: the Work dashboard's render path is a tree of free functions built once
 // at construction, so the frame can't ride the (value-receiver) model into
 // dashboardLiveIndicator — a single package var is the seam. Only one queue
 // dashboard runs per process (it owns the terminal), and Bubbletea serialises
@@ -1302,7 +1302,7 @@ type dashboardFilterItem struct {
 	toggle dashboardFilterToggle
 }
 
-// dashboardFilterMenu is the modal opened with `f` over the Queue dashboard. It
+// dashboardFilterMenu is the modal opened with `f` over the Work dashboard. It
 // is a sibling of the `a` action menu but holds row-inclusion toggles rather
 // than row verbs, so it is not anchored to the cursored row. The toggle state
 // lives on the model (m.d.IncludeDone), not the menu — the menu only renders it
@@ -1518,7 +1518,7 @@ func TestDashboardRow(project, setID string, ref SetRef) DashboardRow {
 	}
 }
 
-// NewDashboard constructs a Queue dashboard model from a snapshot.
+// NewDashboard constructs a Work dashboard model from a snapshot.
 func NewDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
 	return newQueueDashboard(d, cfg, snap)
 }
@@ -1673,7 +1673,7 @@ const (
 	dashboardTwoLineHeightFloor = 16
 )
 
-// dashboardTwoLineMode reports whether the Queue dashboard should render each
+// dashboardTwoLineMode reports whether the Work dashboard should render each
 // row on two lines. Two-line mode is height-gated (ADR-0107): it engages only
 // when the pane is roomy (termHeight >= dashboardTwoLineHeightFloor). When
 // roomy, it activates if the terminal is narrow (< 120 columns) or any visible
@@ -4068,7 +4068,7 @@ func padDashboardCell(s string, width int) string {
 	return s
 }
 
-// RunDashboard opens the read-only Queue dashboard TUI. It returns the bound
+// RunDashboard opens the read-only Work dashboard TUI. It returns the bound
 // checkout path chosen with Ctrl-g on the main list (empty when the dashboard
 // quit for any other reason), leaving the workbench-aware open to the command
 // layer (task 02).

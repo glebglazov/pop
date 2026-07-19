@@ -25,7 +25,7 @@ type Shell struct {
 	height int
 }
 
-// RunFromQueue opens the shell on the Queue dashboard. It returns the bound
+// RunFromQueue opens the shell on the Work dashboard. It returns the bound
 // checkout path chosen with Ctrl-g (empty otherwise), matching queue.RunDashboard.
 func RunFromQueue(d *queue.Deps, cfg *config.Config) (string, error) {
 	s, err := newShell(ViewQueue, d, cfg, routine.DefaultDeps())

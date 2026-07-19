@@ -12,7 +12,7 @@ import (
 // RuntimeLockMetadata describes the live Drain holding a runtime checkout. It is
 // no longer persisted to a lock file — it is projected from the running Drain
 // row in the global store (ADR-0055) — but the shape is retained because the
-// queue dashboard, binding lifecycle, and status renderers read it.
+// Work dashboard, binding lifecycle, and status renderers read it.
 type RuntimeLockMetadata struct {
 	PID         int       `json:"pid"`
 	RuntimePath string    `json:"runtime_path"`

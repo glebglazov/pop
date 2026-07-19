@@ -19,7 +19,7 @@ var (
 	colorSeparator = lipgloss.Color("238")
 	colorAttention = lipgloss.Color("196")
 	// colorWorking is the house "live/hot" colour: a running agent pane (Monitor
-	// spinner) or a live drain (queue dashboard dot). Intentionally the same red
+	// spinner) or a live drain (Work dashboard dot). Intentionally the same red
 	// (196) as colorAttention — working and unread share the "hot" red and are
 	// told apart by motion (working animates/spins, unread sits still) rather
 	// than hue.
@@ -40,7 +40,7 @@ var (
 	// HintStyle is the shared dimmed footer hint style; exported for cross-package use.
 	HintStyle = hintStyle
 	// ColorWorking is the shared house "live/hot" colour; exported so other
-	// packages (e.g. the queue dashboard live-drain dot) paint working the same red.
+	// packages (e.g. the Work dashboard live-drain dot) paint working the same red.
 	ColorWorking = colorWorking
 	// ColorWorkingSpinner is the Monitor working-spinner colour (bright yellow);
 	// exported so other dashboards paint the animated working dots identically.

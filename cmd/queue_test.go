@@ -50,7 +50,7 @@ poll_interval = "2s"
 }
 
 // TestQueueReadSurfacesThreadIncludeDone pins the ADR-0121 Done-inclusion flag
-// wiring: `--include-done` on both `pop queue status` and `pop queue dashboard`
+// wiring: `--include-done` on both `pop queue status` and `pop work dashboard`
 // sets the single inclusion flag (queue.Deps.IncludeDone) the shared row layer
 // reads, and it defaults off (DONE hidden).
 func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
@@ -62,7 +62,7 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 	oldBuildDash := queueBuildDashboard
 	oldDash := queueRunDashboard
 	oldStatusInc := queueStatusIncludeDone
-	oldDashInc := queueDashboardIncludeDone
+	oldDashInc := workDashboardIncludeDone
 	defer func() {
 		cfgFile = oldCfgFile
 		queueConfigLoad = oldLoad
@@ -70,7 +70,7 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 		queueBuildDashboard = oldBuildDash
 		queueRunDashboard = oldDash
 		queueStatusIncludeDone = oldStatusInc
-		queueDashboardIncludeDone = oldDashInc
+		workDashboardIncludeDone = oldDashInc
 	}()
 
 	// RenderStatus reads bindings off the snapshot's Tasks deps; point it at an
@@ -97,11 +97,11 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 
 	// Default: both surfaces hide DONE.
 	queueStatusIncludeDone = false
-	queueDashboardIncludeDone = false
+	workDashboardIncludeDone = false
 	if err := runQueueStatus(queueStatusCmd, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := runQueueDashboard(queueDashboardCmd, nil); err != nil {
+	if err := runWorkDashboard(workDashboardCmd, nil); err != nil {
 		t.Fatal(err)
 	}
 	if statusInclude || dashInclude {
@@ -110,11 +110,11 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 
 	// --include-done: both surfaces set the inclusion flag.
 	queueStatusIncludeDone = true
-	queueDashboardIncludeDone = true
+	workDashboardIncludeDone = true
 	if err := runQueueStatus(queueStatusCmd, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := runQueueDashboard(queueDashboardCmd, nil); err != nil {
+	if err := runWorkDashboard(workDashboardCmd, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !statusInclude || !dashInclude {
@@ -130,9 +130,14 @@ func TestQueueReadSurfacesRegisterIncludeDoneFlag(t *testing.T) {
 	} else if f.DefValue != "false" {
 		t.Fatalf("queue status --include-done default = %q, want false", f.DefValue)
 	}
-	if f := queueDashboardCmd.Flags().Lookup("include-done"); f == nil {
-		t.Fatal("queue dashboard missing --include-done flag")
+	if f := workDashboardCmd.Flags().Lookup("include-done"); f == nil {
+		t.Fatal("work dashboard missing --include-done flag")
 	} else if f.DefValue != "false" {
-		t.Fatalf("queue dashboard --include-done default = %q, want false", f.DefValue)
+		t.Fatalf("work dashboard --include-done default = %q, want false", f.DefValue)
+	}
+	if f := queueDashboardCmd.Flags().Lookup("include-done"); f == nil {
+		t.Fatal("queue dashboard alias missing --include-done flag")
+	} else if f.DefValue != "false" {
+		t.Fatalf("queue dashboard alias --include-done default = %q, want false", f.DefValue)
 	}
 }

@@ -23,7 +23,7 @@ func spinnerTick() tea.Cmd {
 }
 
 // SpinnerFrames exposes the Monitor working-spinner frames so other dashboards
-// (e.g. the queue dashboard live-drain dot) reuse the exact same shape.
+// (e.g. the Work dashboard live-drain dot) reuse the exact same shape.
 var SpinnerFrames = spinnerFrames
 
 // SpinnerTickMsg is the exported alias of the working-spinner tick, letting other
