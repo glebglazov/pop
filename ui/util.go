@@ -24,7 +24,11 @@ var (
 	// told apart by motion (working animates/spins, unread sits still) rather
 	// than hue.
 	colorWorking = lipgloss.Color("196")
-	colorClear   = lipgloss.Color("241")
+	// colorWorkingSpinner is the Monitor working-spinner hue: bright yellow (11).
+	// The animated spinner reads as "an agent is live here" through motion + hue
+	// together, so it doesn't need to share colorWorking's red with unread.
+	colorWorkingSpinner = lipgloss.Color("11")
+	colorClear          = lipgloss.Color("241")
 
 	indicatorStyle = lipgloss.NewStyle().Foreground(colorAccent)
 	hintStyle      = lipgloss.NewStyle().Foreground(colorDim)
@@ -38,6 +42,9 @@ var (
 	// ColorWorking is the shared house "live/hot" colour; exported so other
 	// packages (e.g. the queue dashboard live-drain dot) paint working the same red.
 	ColorWorking = colorWorking
+	// ColorWorkingSpinner is the Monitor working-spinner colour (bright yellow);
+	// exported so other dashboards paint the animated working dots identically.
+	ColorWorkingSpinner = colorWorkingSpinner
 )
 
 // WriteInputBox writes a bordered input box to b; exported for cross-package use.

@@ -819,27 +819,40 @@ const (
 // dashboardManagedWtStyle colors the [managed wt] destination badge.
 var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 
-// dashboardLiveDrainGlyph is the trailing live-drain indicator: a single ● shown
-// on any row whose runtime lock is PID-alive, regardless of STATUS (ADR-0111).
-// It is the cue that `p` (preview the working pane) can reach a pane.
-const dashboardLiveDrainGlyph = "●"
+// dashboardLiveDrainGlyph is the stable, single-frame stand-in for the live-drain
+// indicator, used for column-width math: a spinner frame whose display width
+// matches every other frame so the layout never shifts as the animation advances
+// (ADR-0111). The animated indicator borrows the Monitor's working dots wholesale
+// — same colour, shape and motion.
+var dashboardLiveDrainGlyph = ui.SpinnerFrames[0]
 
-// dashboardLiveDrainStyle colors the live-drain indicator in the house working
-// colour — the same red (ui.ColorWorking, 256-color 196) the Monitor dashboard
-// paints active panes. Working shares the "hot" red with unread/attention;
-// motion (Monitor's spinner) not hue separates them.
-var dashboardLiveDrainStyle = lipgloss.NewStyle().Foreground(ui.ColorWorking)
+// dashboardSpinnerFrame is the current working-spinner frame, advanced by the
+// Update loop while any row holds a live drain. It is process-global render
+// state: the queue dashboard's render path is a tree of free functions built once
+// at construction, so the frame can't ride the (value-receiver) model into
+// dashboardLiveIndicator — a single package var is the seam. Only one queue
+// dashboard runs per process (it owns the terminal), and Bubbletea serialises
+// Update and View on one goroutine, so this is race-free.
+var dashboardSpinnerFrame int
 
-// dashboardLiveIndicator returns the trailing indicator cell: the ● glyph when a
-// live drain holds the checkout, blank otherwise. When styled the glyph carries
-// the house working colour; the plain form feeds width measurement so no ANSI
-// reaches column math.
+// dashboardLiveDrainStyle colors the live-drain spinner in the Monitor's working
+// colour (ui.ColorWorkingSpinner, bright yellow). The queue's live-drain
+// indicator now reuses the Monitor working dots outright — colour, animation and
+// shape — so a live agent reads identically across both dashboards.
+var dashboardLiveDrainStyle = lipgloss.NewStyle().Foreground(ui.ColorWorkingSpinner)
+
+// dashboardLiveIndicator returns the trailing indicator cell: the animated
+// working spinner (ui.SpinnerFrames in the house working colour) when a live drain
+// holds the checkout, blank otherwise. When styled the current frame is shown; the
+// plain form returns the fixed-width stand-in so no ANSI reaches column math and
+// the measured width stays constant across frames.
 func dashboardLiveIndicator(row DashboardRow, styled bool) string {
 	if !row.LiveDrain {
 		return ""
 	}
 	if styled {
-		return dashboardLiveDrainStyle.Render(dashboardLiveDrainGlyph)
+		frame := ui.SpinnerFrames[dashboardSpinnerFrame%len(ui.SpinnerFrames)]
+		return dashboardLiveDrainStyle.Render(frame)
 	}
 	return dashboardLiveDrainGlyph
 }
@@ -1881,7 +1894,23 @@ func (m QueueDashboard) FilterActive() bool {
 }
 
 func (m QueueDashboard) Init() tea.Cmd {
-	return dashboardTick()
+	cmds := []tea.Cmd{dashboardTick()}
+	if m.hasLiveDrain() {
+		cmds = append(cmds, ui.SpinnerTick())
+	}
+	return tea.Batch(cmds...)
+}
+
+// hasLiveDrain reports whether any row currently holds a live (PID-alive) drain,
+// gating the working-spinner animation the same way the Monitor gates on
+// hasWorkingPanes: the 100ms tick self-sustains only while there's a dot to spin.
+func (m QueueDashboard) hasLiveDrain() bool {
+	for _, r := range m.allRows {
+		if r.LiveDrain {
+			return true
+		}
+	}
+	return false
 }
 
 func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -2000,9 +2029,16 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.loadDetail(m.detail.row))
 		}
 		return m, tea.Batch(cmds...)
+	case ui.SpinnerTickMsg:
+		dashboardSpinnerFrame = (dashboardSpinnerFrame + 1) % len(ui.SpinnerFrames)
+		if m.hasLiveDrain() {
+			return m, ui.SpinnerTick()
+		}
+		return m, nil
 	case dashboardRowsMsg:
 		m.err = msg.err
 		if msg.err == nil {
+			hadLiveDrain := m.hasLiveDrain()
 			m.allRows = msg.snap.Rows
 			m.snap = msg.snap
 			if m.filterMode {
@@ -2016,6 +2052,11 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						break
 					}
 				}
+			}
+			// A reload can surface a live drain on a dashboard whose spinner loop
+			// had gone idle; re-arm the animation the same way the Monitor does.
+			if !hadLiveDrain && m.hasLiveDrain() {
+				return m, ui.SpinnerTick()
 			}
 		}
 	case dashboardDetailMsg:

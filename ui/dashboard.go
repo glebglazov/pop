@@ -22,6 +22,18 @@ func spinnerTick() tea.Cmd {
 	})
 }
 
+// SpinnerFrames exposes the Monitor working-spinner frames so other dashboards
+// (e.g. the queue dashboard live-drain dot) reuse the exact same shape.
+var SpinnerFrames = spinnerFrames
+
+// SpinnerTickMsg is the exported alias of the working-spinner tick, letting other
+// packages match on it in their own Update loops.
+type SpinnerTickMsg = spinnerTickMsg
+
+// SpinnerTick returns the 100ms working-spinner tick command; exported so other
+// dashboards drive the animation at the same cadence as the Monitor.
+func SpinnerTick() tea.Cmd { return spinnerTick() }
+
 // reloadTickMsg triggers a periodic reload of attention panes
 type reloadTickMsg struct{}
 
@@ -708,7 +720,7 @@ func (d *MonitorDashboard) dashboardCell(pane AttentionPane, rs RowState) string
 	cellWidth := leftWidth - prefixWidth
 
 	attentionIconStyle := lipgloss.NewStyle().Foreground(colorAttention)
-	workingIconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	workingIconStyle := lipgloss.NewStyle().Foreground(colorWorkingSpinner)
 	clearIconStyle := lipgloss.NewStyle().Foreground(colorClear)
 
 	var icon string
