@@ -26,7 +26,8 @@ const (
 	ComponentPaneSkill ComponentID = "pane-skills"
 
 	// ComponentTaskSkills is the opt-in task planning skill set
-	// (grill-with-docs, grill-consolidate, to-prd, to-tasks, wayfinder).
+	// (grill-with-docs, grill-consolidate, to-prd, to-tasks, wayfinder,
+	// prototype, research).
 	ComponentTaskSkills ComponentID = "task-skills"
 )
 
@@ -94,6 +95,8 @@ var integrationCatalog = []integrationComponent{
 			"skills/pop/to-prd",
 			"skills/pop/to-tasks",
 			"skills/pop/wayfinder",
+			"skills/pop/prototype",
+			"skills/pop/research",
 		},
 	},
 }

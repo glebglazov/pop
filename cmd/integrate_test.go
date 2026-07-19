@@ -2052,6 +2052,38 @@ func TestRefreshComponent_TaskSkillsDryRunIncludesWayfinder(t *testing.T) {
 	}
 }
 
+// TestRefreshComponent_TaskSkillsDryRunIncludesPrototype: the integrate
+// staleness dry-run path reports pop-prototype when task-skills is missing it.
+func TestRefreshComponent_TaskSkillsDryRunIncludesPrototype(t *testing.T) {
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+	dry, real := fakeFactories("/h", fs)
+
+	outcomes, warning := refreshComponent(dry, real, "claude", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
+	if warning != "" {
+		t.Fatalf("unexpected warning: %q", warning)
+	}
+	if !integrateOutcomesInclude(outcomes, "pop-prototype", "added") {
+		t.Fatalf("expected pop-prototype added outcome, got %v", outcomes)
+	}
+}
+
+// TestRefreshComponent_TaskSkillsDryRunIncludesResearch: the integrate
+// staleness dry-run path reports pop-research when task-skills is missing it.
+func TestRefreshComponent_TaskSkillsDryRunIncludesResearch(t *testing.T) {
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+	dry, real := fakeFactories("/h", fs)
+
+	outcomes, warning := refreshComponent(dry, real, "claude", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
+	if warning != "" {
+		t.Fatalf("unexpected warning: %q", warning)
+	}
+	if !integrateOutcomesInclude(outcomes, "pop-research", "added") {
+		t.Fatalf("expected pop-research added outcome, got %v", outcomes)
+	}
+}
+
 func TestRefreshComponent_SkipsUnknownComponentSilently(t *testing.T) {
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)

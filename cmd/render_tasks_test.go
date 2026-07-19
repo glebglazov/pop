@@ -14,12 +14,14 @@ var taskSkillDirs = map[string][]string{
 	"pop-to-prd":            {},
 	"pop-to-tasks":          {},
 	"pop-wayfinder":         {},
+	"pop-prototype":         {"LOGIC.md", "UI.md"},
+	"pop-research":          {},
 }
 
 // TestRenderTaskSkillsDirAgents pins the task-skills rendered tree for
 // each agent that hosts skills as directories (claude, codex, pi, cursor,
-// opencode): five skill directories, each with a name-injected SKILL.md, and
-// grill-with-docs carrying its two companion format documents verbatim alongside
+// opencode): seven skill directories, each with a name-injected SKILL.md, and
+// grill-with-docs and prototype carrying companion documents verbatim alongside
 // the body.
 func TestRenderTaskSkillsDirAgents(t *testing.T) {
 	for _, agent := range []string{"claude", "codex", "pi", "cursor", "opencode"} {
