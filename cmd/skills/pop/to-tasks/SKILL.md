@@ -25,6 +25,8 @@ Work from whatever is already in the conversation context. If the user passes a 
 
 If a PRD authored by to-prd is being broken down, it lives **co-located** in its task-set folder as `<tasks-dir>/<task-set-name>/prd.md` (ADR-0088) — not in a separate `prds/` sibling. That folder already exists (to-prd created it early, containing only `prd.md`); read that `prd.md` for context and write the task files into the **same** folder, reusing its `<task-set-name>` so the PRD and its tasks share one directory.
 
+**Wayfinder Map source:** When invoked directly on a Map (user names a map id, no co-located `prd.md` yet), read `$(pop work show-path)/wayfinder/<map-id>/map.md` and each **resolved** ticket under `issues/` — at minimum every ticket linked from **Decisions so far**, plus any other resolved tickets whose `## Answer` should inform the breakdown. After writing the set, append `<task-set-name>` under the map's `## Spawned sets` section in `map.md` (create the section if absent).
+
 ### 2. Explore the codebase (optional)
 
 If you have not already explored the codebase, do so to understand the current state of the code. Use the project's domain glossary vocabulary throughout, and respect ADRs in the area you're touching.
@@ -57,7 +59,7 @@ Write an explicit effort value for each task. Default to `standard` when no name
 
 ### 4. Write the work items to the local filesystem
 
-Resolve the tasks base directory, `<tasks-dir>`, by running `pop tasks show-path` — it prints the absolute path to this repository's task storage (in pop's data dir, outside the repo tree) and creates it on demand.
+Resolve the tasks base directory, `<tasks-dir>`, as `$(pop work show-path)/tasks` — run `pop work show-path` for the storage root and append `/tasks`, or equivalently run `pop tasks show-path` (same directory; ADR-0130 compatibility alias). Both print the absolute path to this repository's task storage (in pop's data dir, outside the repo tree) and create it on demand.
 
 For each slice, write a markdown file to the `<tasks-dir>/<task-set-name>/` directory (create the subdirectory if it doesn't exist; when breaking down a co-located PRD it already exists and holds `prd.md` — write the task files alongside it). `<task-set-name>` is `<timestamp>-<slug>`, where `<slug>` is either the source PRD slug (without its timestamp prefix) or a hyphen-delimited string summarising what you intend to do (infer from context). When a co-located `prd.md` is the source, reuse its existing folder's `<task-set-name>` rather than minting a new one. Use the following template. Write them in dependency order (blockers first) so you can reference real identifiers in the "Blocked by" field.
 

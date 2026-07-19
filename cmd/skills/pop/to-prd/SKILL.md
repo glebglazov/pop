@@ -12,13 +12,17 @@ This skill takes the current conversation context and codebase understanding and
 
 1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the PRD, and respect any ADRs in the area you're touching.
 
+**Wayfinder Map source:** When the breakdown source is a Map (the user names a map id, or the session is handing off from wayfinder), read `$(pop work show-path)/wayfinder/<map-id>/map.md` and each **resolved** ticket under `issues/` — at minimum every ticket linked from **Decisions so far**, plus any other resolved tickets whose `## Answer` should inform the PRD. Synthesize from the map's Destination, **Decisions so far**, and those answers alongside conversation context; you need not load open or unresolved tickets.
+
 2. Sketch out the major modules you will need to build or modify to complete the implementation. Actively look for opportunities to extract deep modules that can be tested in isolation.
 
 A deep module (as opposed to a shallow module) is one which encapsulates a lot of functionality in a simple, testable interface which rarely changes.
 
 Check with the user that these modules match their expectations. Check with the user which modules they want tests written for.
 
-3. Write the PRD using the template below, then save it as `prd.md` **inside its own task-set folder** (ADR-0088), co-located with the task files that to-tasks will add later: `<tasks-dir>/<task-set-name>/prd.md`, where `<tasks-dir>` is the output of `pop tasks show-path` (pop's per-repository storage, outside the repo tree). Create the `<tasks-dir>/<task-set-name>/` directory now — it holds only `prd.md` at this stage; the set stays inert (invisible to the dashboard, never scheduled) until it is later registered with `pop tasks register`.
+3. Write the PRD using the template below, then save it as `prd.md` **inside its own task-set folder** (ADR-0088), co-located with the task files that to-tasks will add later: `<tasks-dir>/<task-set-name>/prd.md`, where `<tasks-dir>` is `$(pop work show-path)/tasks` — run `pop work show-path` for the storage root and append `/tasks`, or equivalently run `pop tasks show-path` (same directory; ADR-0130 compatibility alias). Create the `<tasks-dir>/<task-set-name>/` directory now — it holds only `prd.md` at this stage; the set stays inert (invisible to the dashboard, never scheduled) until it is later registered with `pop tasks register`.
+
+When the source is a Map, include `Source map: <map-id>` as the first line of `prd.md` (before the template headings), then append `<task-set-name>` under the map's `## Spawned sets` section in `map.md` (create the section if absent) — the forward link both ways (ADR-0129).
 
 `<task-set-name>` is `<timestamp>-<slug>`, where `<slug>` is a descriptive hyphen-delimited name (e.g. `user-auth`). The slug carries over to the task set when this PRD is later broken down with to-tasks — to-tasks fills in the task markdown and `index.json` alongside this `prd.md`.
 
