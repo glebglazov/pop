@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,6 +63,49 @@ func newHITLGateRun(t *testing.T, confirmIn io.Reader, yes bool) (*implementRun,
 		}
 	})
 	return run, d, runtimePath, m, hitl
+}
+
+// TestHITLGateShowsBlockedWaiterCount pins the ADR-0100 blocked-waiter line: a
+// hold-registering gate menu prints how many quota-recovery waiters are queued
+// behind the same checkout, and prints nothing when none are registered.
+func TestHITLGateShowsBlockedWaiterCount(t *testing.T) {
+	const blockedLine = "blocked on this checkout"
+
+	t.Run("waiters present", func(t *testing.T) {
+		run, d, runtimePath, m, hitl := newHITLGateRun(t, &checkingPromptReader{
+			t: t, check: func(*testing.T) {}, response: "0\n",
+		}, false)
+		if _, err := RegisterRecoveryWaiter(d, RecoveryWaiter{
+			SetID:       "waiter-set",
+			Preset:      "sonnet",
+			ResetAt:     time.Now().Add(time.Hour),
+			RuntimePath: runtimePath,
+		}); err != nil {
+			t.Fatalf("RegisterRecoveryWaiter: %v", err)
+		}
+
+		if _, err := run.hitlGate(m, hitl); err != nil {
+			t.Fatalf("hitlGate: %v", err)
+		}
+		got := run.out.(*bytes.Buffer).String()
+		if !strings.Contains(got, "1 quota waiter "+blockedLine) {
+			t.Fatalf("gate menu missing blocked-waiter count line; output:\n%s", got)
+		}
+	})
+
+	t.Run("no waiters", func(t *testing.T) {
+		run, _, _, m, hitl := newHITLGateRun(t, &checkingPromptReader{
+			t: t, check: func(*testing.T) {}, response: "0\n",
+		}, false)
+
+		if _, err := run.hitlGate(m, hitl); err != nil {
+			t.Fatalf("hitlGate: %v", err)
+		}
+		got := run.out.(*bytes.Buffer).String()
+		if strings.Contains(got, blockedLine) {
+			t.Fatalf("gate menu printed a blocked-waiter line with zero waiters; output:\n%s", got)
+		}
+	})
 }
 
 // TestImplementRunHITLGateHoldPairsAroundPromptingMenu pins the gate-hold

@@ -238,6 +238,47 @@ func GetRecoveryWaiter(d *Deps, setID string) (*RecoveryWaiter, error) {
 	}, nil
 }
 
+// countRecoveryWaitersOnPath returns how many recovery waiters are registered on
+// one runtime checkout, counting every waiter regardless of whether its cooldown
+// has elapsed — all of them are queued behind whatever holds that checkout. A nil
+// deps, empty path, or store read error yields 0 so a gate menu degrades to
+// showing no count line rather than failing.
+func countRecoveryWaitersOnPath(d *Deps, runtimePath string) int {
+	if d == nil || runtimePath == "" {
+		return 0
+	}
+	waiters, err := AllRecoveryWaiters(d)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, w := range waiters {
+		if w.RuntimePath == runtimePath {
+			n++
+		}
+	}
+	return n
+}
+
+// renderBlockedWaiterCount prints a dim line above a hold-registering gate menu
+// naming how many quota-recovery waiters are queued behind this checkout, so the
+// human sitting at the gate sees they are holding those drains up (ADR-0100).
+// Nothing prints when no waiter is registered on the path.
+func renderBlockedWaiterCount(display *output, d *Deps, runtimePath string) {
+	if display == nil {
+		return
+	}
+	n := countRecoveryWaitersOnPath(d, runtimePath)
+	if n <= 0 {
+		return
+	}
+	noun := "waiters"
+	if n == 1 {
+		noun = "waiter"
+	}
+	display.line(ansiDim, "⏳ %d quota %s blocked on this checkout", n, noun)
+}
+
 // AllRecoveryWaiters returns every registered recovery waiter keyed by set ID.
 // A missing store or read error yields an empty map so queue dispatch degrades
 // to spawnable rather than blocking on a transient store problem.
