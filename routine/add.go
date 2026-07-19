@@ -60,7 +60,7 @@ func AddWith(d *Deps, id, scheduleRaw, cwd string) (*AddResult, error) {
 	manifest := Manifest{
 		BoundDirectory: boundDir,
 		Schedule:       strings.TrimSpace(scheduleRaw),
-		Paused:         false,
+		Paused:         true,
 		CreatedAt:      nowUTC(d).Format(timeRFC3339),
 	}
 	if err := writeManifest(d, id, manifest); err != nil {

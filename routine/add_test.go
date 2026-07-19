@@ -61,8 +61,8 @@ func TestAddScaffoldsRoutineFromNonGitDirectory(t *testing.T) {
 	if res.Manifest.Schedule != "daily at 10:00" {
 		t.Fatalf("Schedule = %q", res.Manifest.Schedule)
 	}
-	if res.Manifest.Paused {
-		t.Fatal("expected paused=false")
+	if !res.Manifest.Paused {
+		t.Fatal("expected paused=true (routines are created paused)")
 	}
 
 	for _, rel := range []string{
@@ -208,7 +208,7 @@ func TestListRoutinesShowsFields(t *testing.T) {
 		"every 6h",
 		"beta",
 		"daily at 10:00",
-		"no",
+		"yes",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("output missing %q:\n%s", want, text)

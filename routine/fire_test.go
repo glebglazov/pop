@@ -121,6 +121,58 @@ func TestFireProducesReportAndWrappedPrompt(t *testing.T) {
 	}
 }
 
+func TestFireAnchorsNeverFiredRoutine(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installFakeClaude(t, root, 0)
+	d := fireDeps(t, dataHome)
+
+	// Created paused with zero runs: the daemon would never fire it.
+	res, err := AddWith(d, "anchor", "every 6h", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Manifest.Paused {
+		t.Fatal("routine should be created paused")
+	}
+
+	sched, err := ParseSchedule("every 6h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+
+	// A manual fire works on a never-fired routine and lays the anchor run row.
+	if _, err := FireWith(d, "anchor"); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := openExecutionStore(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	lastFired, err := LastFireTime(s, "anchor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lastFired.IsZero() {
+		t.Fatal("manual fire should record an anchor run row")
+	}
+
+	// Once anchored, the routine is due at the next slot (not immediately).
+	if IsDue(sched, lastFired, now) {
+		t.Fatal("should not be due at the anchoring instant")
+	}
+	if !IsDue(sched, lastFired, lastFired.Add(6*time.Hour)) {
+		t.Fatal("should be due one interval after the anchor")
+	}
+}
+
 func TestFireRefusesConcurrentRun(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")

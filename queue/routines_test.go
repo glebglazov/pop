@@ -81,6 +81,12 @@ func TestTickRoutinesSpawnsDueEveryAndDaily(t *testing.T) {
 	if _, err := routine.AddWith(rd, "morning", "daily at 10:00", home); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := routine.ResumeWith(rd, "hourly"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.ResumeWith(rd, "morning"); err != nil {
+		t.Fatal(err)
+	}
 
 	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"), func(int, string) bool { return true })
 	if err != nil {
@@ -153,6 +159,9 @@ func TestTickRoutinesSkipsOverlapAndJournals(t *testing.T) {
 	if _, err := routine.AddWith(rd, "busy", "every 1h", home); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := routine.ResumeWith(rd, "busy"); err != nil {
+		t.Fatal(err)
+	}
 
 	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"), func(int, string) bool { return true })
 	if err != nil {
@@ -190,6 +199,9 @@ func TestTickRoutinesCatchUpOnceAfterMissedSlots(t *testing.T) {
 	now := time.Date(2026, 7, 18, 15, 0, 0, 0, time.UTC)
 	qd, rd, home := routineTickDeps(t, now)
 	if _, err := routine.AddWith(rd, "catchup", "every 1h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.ResumeWith(rd, "catchup"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -234,6 +246,9 @@ func TestTickRoutinesWarnsBrokenAndFiresHealthy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := routine.AddWith(rd, "broken", "every 1h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.ResumeWith(rd, "hourly"); err != nil {
 		t.Fatal(err)
 	}
 

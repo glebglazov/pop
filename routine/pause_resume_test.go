@@ -33,6 +33,10 @@ func TestPauseResumePersistBitAndListReflects(t *testing.T) {
 	if _, err := AddWith(d, "daily", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
+	// Routines are created paused; resume so the pause/resume cycle starts armed.
+	if _, err := ResumeWith(d, "daily"); err != nil {
+		t.Fatal(err)
+	}
 
 	res, err := PauseWith(d, "daily")
 	if err != nil {

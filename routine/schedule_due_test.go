@@ -5,14 +5,19 @@ import (
 	"time"
 )
 
-func TestIsDueNeverFired(t *testing.T) {
-	sched, err := ParseSchedule("every 6h")
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestIsDueNeverFiredIsNeverDue(t *testing.T) {
+	// A routine with zero non-skipped runs is anchored by a human's manual
+	// first fire, not by the daemon (ADR-0124). It must never be due,
+	// whatever its schedule form.
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
-	if !IsDue(sched, time.Time{}, now) {
-		t.Fatal("never-fired routine should be due")
+	for _, raw := range []string{"every 6h", "daily at 10:00"} {
+		sched, err := ParseSchedule(raw)
+		if err != nil {
+			t.Fatalf("parse %q: %v", raw, err)
+		}
+		if IsDue(sched, time.Time{}, now) {
+			t.Fatalf("never-fired routine (%q) must not be due", raw)
+		}
 	}
 }
 

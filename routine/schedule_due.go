@@ -12,12 +12,14 @@ const SkipReasonOverlap = "previous run still live"
 
 // IsDue reports whether a routine should fire at now given its schedule and the
 // instant of its most recent non-skipped fire. A zero lastFired means the
-// routine has never fired and is due immediately. When multiple schedule slots
-// were missed, only one fire is due per evaluation — catch-up fires once, not
-// once per missed slot.
+// routine has never fired and is never due: the first fire is a human act
+// (pop routine fire or the refinement gate's fire verb) that anchors the
+// schedule (ADR-0124). Once anchored, when multiple schedule slots were missed
+// only one fire is due per evaluation — catch-up fires once, not once per
+// missed slot.
 func IsDue(sched Schedule, lastFired, now time.Time) bool {
 	if lastFired.IsZero() {
-		return true
+		return false
 	}
 	next := sched.NextAfter(lastFired)
 	return !next.After(now)

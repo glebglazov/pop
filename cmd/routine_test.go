@@ -73,6 +73,11 @@ func TestRunRoutineAddAndList(t *testing.T) {
 	if !strings.Contains(addOut.String(), "Created routine") {
 		t.Fatalf("add output = %q", addOut.String())
 	}
+	for _, want := range []string{"created paused", "pop routine fire home-routine", "pop routine resume home-routine"} {
+		if !strings.Contains(addOut.String(), want) {
+			t.Fatalf("add output missing guidance %q:\n%s", want, addOut.String())
+		}
+	}
 
 	var listOut bytes.Buffer
 	routineListCmd.SetOut(&listOut)
@@ -80,7 +85,7 @@ func TestRunRoutineAddAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := listOut.String()
-	for _, want := range []string{"home-routine", "every 6h", "no"} {
+	for _, want := range []string{"home-routine", "every 6h", "yes"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("list output missing %q:\n%s", want, text)
 		}
@@ -133,6 +138,11 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 
 	routineAddSchedule = "every 6h"
 	if err := runRoutineAdd(routineAddCmd, []string{"cli-routine"}); err != nil {
+		t.Fatal(err)
+	}
+	// Routines are created paused; arm it so the pause/resume cycle starts unpaused.
+	routineResumeCmd.SetOut(io.Discard)
+	if err := runRoutineResume(routineResumeCmd, []string{"cli-routine"}); err != nil {
 		t.Fatal(err)
 	}
 

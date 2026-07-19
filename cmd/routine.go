@@ -114,6 +114,9 @@ func runRoutineAdd(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "Created routine %q at %s\n", res.ID, res.Dir)
 	fmt.Fprintf(cmd.OutOrStdout(), "Bound directory: %s\n", res.Manifest.BoundDirectory)
 	fmt.Fprintf(cmd.OutOrStdout(), "Schedule: %s\n", res.Manifest.Schedule)
+	fmt.Fprintf(cmd.OutOrStdout(), "\nRoutine created paused. Iterate on its prompt, fire it manually with\n")
+	fmt.Fprintf(cmd.OutOrStdout(), "  pop routine fire %s\nuntil you are happy with the result, then arm it with\n", res.ID)
+	fmt.Fprintf(cmd.OutOrStdout(), "  pop routine resume %s\nThe first fire anchors the schedule.\n", res.ID)
 	return nil
 }
 

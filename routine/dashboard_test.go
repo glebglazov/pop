@@ -107,6 +107,13 @@ func TestBuildDashboardStatuses(t *testing.T) {
 	if _, err := AddWith(d, "running-r", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
+	// idle-r and running-r are armed; only paused-r stays paused.
+	if _, err := ResumeWith(d, "idle-r"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResumeWith(d, "running-r"); err != nil {
+		t.Fatal(err)
+	}
 
 	s, err := openExecutionStore(d)
 	if err != nil {
@@ -183,6 +190,10 @@ func TestRoutineDashboardRendersColumns(t *testing.T) {
 func TestRoutineDashboardFirePausePreviewKeys(t *testing.T) {
 	d, home := routineDashboardDeps(t)
 	if _, err := AddWith(d, "alpha", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	// Arm alpha so the pause-toggle verb pauses it (routines are created paused).
+	if _, err := ResumeWith(d, "alpha"); err != nil {
 		t.Fatal(err)
 	}
 	snap, err := BuildDashboardWith(d)
