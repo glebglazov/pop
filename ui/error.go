@@ -23,7 +23,7 @@ type errorModel struct {
 	copyErrMsg string // non-empty if the last copy attempt failed
 
 	// copyFunc performs the actual clipboard write. Injected so tests can
-	// avoid touching the real tmux / /dev/tty. Defaults to copyToClipboard.
+	// avoid touching the real tmux / /dev/tty. Defaults to CopyToClipboard.
 	copyFunc func(string) error
 }
 
@@ -60,7 +60,7 @@ func (m *errorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, errorCopyKey):
 			copy := m.copyFunc
 			if copy == nil {
-				copy = copyToClipboard
+				copy = CopyToClipboard
 			}
 			if err := copy(m.clipboardPayload()); err != nil {
 				m.copied = false
@@ -155,9 +155,9 @@ func ShowError(err error, trace string) {
 	}
 }
 
-// copyToClipboard copies text to the system clipboard.
+// CopyToClipboard copies text to the system clipboard.
 // Prefers `tmux load-buffer` when inside tmux, falls back to OSC 52 otherwise.
-func copyToClipboard(text string) error {
+func CopyToClipboard(text string) error {
 	if os.Getenv("TMUX") != "" {
 		cmd := exec.Command("tmux", "load-buffer", "-w", "-")
 		cmd.Stdin = strings.NewReader(text)

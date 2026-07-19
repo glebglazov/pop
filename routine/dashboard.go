@@ -25,6 +25,10 @@ type DashboardRow struct {
 	LastRun   string
 	Status    string
 	Paused    bool
+	// LastReportPath is the absolute path of the routine's most recent run
+	// report. Empty when the routine has never fired or its latest run has
+	// no report (e.g. skipped).
+	LastReportPath string
 }
 
 // DashboardSnapshot is the data model for `pop routine dashboard`.
@@ -75,7 +79,7 @@ func BuildDashboardWith(d *Deps) (DashboardSnapshot, error) {
 				return DashboardSnapshot{}, err
 			}
 			row.LastRun = formatLastRun(last)
-			row.Status = dashboardStatusFor(d, s, r)
+			row.Status, row.LastReportPath = dashboardStatusFor(d, s, r)
 		} else {
 			row.LastRun = "never"
 			row.Status = dashboardIdleStatus(r.Manifest, "")
@@ -96,21 +100,29 @@ func formatLastRun(t time.Time) string {
 	return t.UTC().Format("2006-01-02 15:04")
 }
 
-func dashboardStatusFor(d *Deps, s *store.Store, r *Routine) string {
+// dashboardStatusFor derives a row's STATUS cell alongside the absolute path
+// of its latest run's report (empty when never-fired, skipped, or still
+// running — the running row itself has no report yet).
+func dashboardStatusFor(d *Deps, s *store.Store, r *Routine) (string, string) {
+	last, lastErr := s.LastRoutineRun(r.ID)
+	reportPath := ""
+	if lastErr == nil && last != nil {
+		reportPath = last.ReportPath
+	}
 	live, err := s.LiveRoutineRun(r.ID, func(run store.RoutineRun) bool {
 		return routineProcessAlive(d, run.PID, run.ProcStart)
 	})
 	if err != nil {
-		return dashboardIdleStatus(r.Manifest, "")
+		return dashboardIdleStatus(r.Manifest, ""), reportPath
 	}
 	if live != nil {
-		return "running"
+		return "running", reportPath
 	}
 	outcome := ""
-	if last, err := s.LastRoutineRun(r.ID); err == nil && last != nil {
+	if lastErr == nil && last != nil {
 		outcome = last.Outcome
 	}
-	return dashboardIdleStatus(r.Manifest, outcome)
+	return dashboardIdleStatus(r.Manifest, outcome), reportPath
 }
 
 // dashboardIdleStatus renders the STATUS cell for a Routine that is not live.
@@ -151,6 +163,7 @@ type reportPeek struct {
 	loading bool
 	err     error
 	scroll  int
+	status  string
 }
 
 type RoutineDashboard struct {
@@ -168,6 +181,38 @@ type RoutineDashboard struct {
 	statusMsg string
 	showHelp  bool
 	pendingG  bool
+
+	// copyFunc performs the clipboard write for the `c` verb. Injected so
+	// tests can avoid touching the real tmux / /dev/tty. Defaults to
+	// ui.CopyToClipboard.
+	copyFunc func(string) error
+}
+
+// clipboardCopy returns the model's copy function, defaulting to
+// ui.CopyToClipboard.
+func (m RoutineDashboard) clipboardCopy() func(string) error {
+	if m.copyFunc != nil {
+		return m.copyFunc
+	}
+	return ui.CopyToClipboard
+}
+
+// noReportStatusMsg is shown when the `c` verb has no report path to copy
+// (never-fired routine, or a skipped run).
+const noReportStatusMsg = "no report to copy"
+
+// copyReportPath is the shared `c`-verb handler for all three dashboard
+// levels: a no-op with a status note when path is empty, otherwise a
+// clipboard write through the shared tmux/OSC52 helper with a brief
+// confirmation (or the error) as the returned status text.
+func (m RoutineDashboard) copyReportPath(path string) string {
+	if path == "" {
+		return noReportStatusMsg
+	}
+	if err := m.clipboardCopy()(path); err != nil {
+		return fmt.Sprintf("copy failed: %v", err)
+	}
+	return "copied report path"
 }
 
 // routineMenuAction identifies the verb a routine action-menu item dispatches.
@@ -464,6 +509,13 @@ func (m RoutineDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.detail = newRunsDetailView(row)
 			return m, m.loadRuns(row)
+		case "c":
+			row, ok := m.list.Selected()
+			if !ok {
+				return m, nil
+			}
+			m.statusMsg = m.copyReportPath(row.LastReportPath)
+			return m, nil
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -584,6 +636,10 @@ func (m RoutineDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			m.moveReportPeek(-1)
 		case "G":
 			m.detail.peek.scroll = m.maxReportPeekScroll()
+		case "c":
+			if !m.detail.peek.loading {
+				m.detail.peek.status = m.copyReportPath(m.detail.peek.path)
+			}
 		}
 		return m, nil
 	}
@@ -627,6 +683,15 @@ func (m RoutineDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		}
 		m.detail.peek = &reportPeek{loading: true}
 		return m, m.loadReport(m.detail.row.ID, run)
+	case "c":
+		if m.detail == nil || m.detail.loading {
+			return m, nil
+		}
+		run, ok := m.detail.list.Selected()
+		if !ok {
+			return m, nil
+		}
+		m.detail.status = m.copyReportPath(run.ReportPath)
 	}
 	return m, nil
 }
@@ -1022,6 +1087,7 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "j/k", Desc: "scroll report"},
 			{Key: "gg", Desc: "top"},
 			{Key: "G", Desc: "bottom"},
+			{Key: "c", Desc: "copy report path"},
 			{Key: "h/esc", Desc: "close report"},
 		}
 	}
@@ -1031,6 +1097,7 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "gg", Desc: "first run"},
 			{Key: "G", Desc: "last run"},
 			{Key: "l/enter", Desc: "view report"},
+			{Key: "c", Desc: "copy report path"},
 			{Key: "h/esc", Desc: "back to list"},
 		}
 	}
@@ -1042,6 +1109,7 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 		{Key: "a", Desc: "actions"},
 		{Key: "p", Desc: "preview pane"},
 		{Key: "l/enter", Desc: "open runs"},
+		{Key: "c", Desc: "copy report path"},
 		{Key: "v", Desc: "queue view"},
 		{Key: "C-h", Desc: "toggle help"},
 		{Key: "h/esc", Desc: "quit"},
@@ -1215,7 +1283,7 @@ func (m RoutineDashboard) frameSpec() ui.Frame {
 }
 
 func (m RoutineDashboard) mainHint() string {
-	return "j/k move · gg/G top/bottom · i fire · a actions · p preview · l/enter runs · v queue · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · i fire · a actions · p preview · l/enter runs · c copy report · v queue · C-h help · h/esc quit"
 }
 
 func (m RoutineDashboard) mainBody() string {
@@ -1258,7 +1326,7 @@ func (m RoutineDashboard) viewRunsList() string {
 		TermH:  m.height,
 		Header: fmt.Sprintf("Runs · %s", d.row.ID),
 		Status: d.status,
-		Hints:  "j/k · gg/G top/bottom · l/enter report · h/esc back",
+		Hints:  "j/k · gg/G top/bottom · l/enter report · c copy · h/esc back",
 	}
 	listH := frame.BodyHeight(m.height) - dashboardTableChromeLines
 	if listH < 1 {
@@ -1318,7 +1386,10 @@ func (m RoutineDashboard) viewReportPeek() string {
 	if maxScroll > 0 {
 		position = fmt.Sprintf(" · %d/%d", p.scroll+1, len(lines))
 	}
-	writeRoutineFooter(&b, m.height, ui.HintStyle.Render("  j/k scroll · gg/G top/bottom · h/esc back"+position))
+	if p.status != "" {
+		fmt.Fprintf(&b, "  %s\n", p.status)
+	}
+	writeRoutineFooter(&b, m.height, ui.HintStyle.Render("  j/k scroll · gg/G top/bottom · c copy · h/esc back"+position))
 	return b.String()
 }
 
