@@ -1,6 +1,7 @@
 package routine
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -340,6 +341,116 @@ func TestRoutineDashboardActionMenuVerbDispatch(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("l in menu should schedule loadRuns")
+	}
+}
+
+func TestRoutineDashboardActionMenuRefine(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "eta", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := BuildDashboardWith(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newRoutineDashboard(d, snap)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(RoutineDashboard)
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(RoutineDashboard)
+	if !strings.Contains(m.View().Content, "refine") {
+		t.Fatalf("action menu missing refine verb:\n%s", m.View().Content)
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	m = updated.(RoutineDashboard)
+	if cmd == nil {
+		t.Fatal("r in menu should suspend into the refinement gate")
+	}
+	if m.menu != nil {
+		t.Fatal("dispatching refine should close the menu")
+	}
+}
+
+// TestRoutineDashboardRefineExecEntersGate drives the tea.ExecCommand wrapper
+// directly with scripted stdin, proving selecting refine enters the gate for the
+// row and a resume inside it is persisted (created-paused routine unpauses).
+func TestRoutineDashboardRefineExecEntersGate(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "zeta", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	r, err := loadManifest(d, "zeta")
+	if err != nil || !r.Manifest.Paused {
+		t.Fatalf("routine should start paused: %v paused=%v", err, r != nil && r.Manifest.Paused)
+	}
+
+	var out bytes.Buffer
+	ex := &refineExec{d: d, id: "zeta"}
+	ex.SetStdin(strings.NewReader("6\n"))
+	ex.SetStdout(&out)
+	ex.SetStderr(&out)
+	if err := ex.Run(); err != nil {
+		t.Fatalf("refine gate run: %v", err)
+	}
+	if !strings.Contains(out.String(), "Refine routine") {
+		t.Fatalf("gate did not render its menu:\n%s", out.String())
+	}
+	r, err = loadManifest(d, "zeta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Manifest.Paused {
+		t.Fatal("resume inside the gate should unpause the routine")
+	}
+	// The dashboard's own deps are left untouched by the gate session.
+	if d.IsInteractive == nil || d.IsInteractive() {
+		t.Fatal("refineExec must not mutate the dashboard's deps")
+	}
+}
+
+// TestRoutineDashboardRefineReturnReloads proves returning from the gate lands
+// back in the dashboard with rows refreshed: a resume applied while the gate was
+// open is reflected after the return message reloads.
+func TestRoutineDashboardRefineReturnReloads(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "theta", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := BuildDashboardWith(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newRoutineDashboard(d, snap)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(RoutineDashboard)
+	if m.snap.Rows[0].Status != "paused" {
+		t.Fatalf("row should start paused, got %q", m.snap.Rows[0].Status)
+	}
+
+	// Simulate a resume that happened inside the suspended gate.
+	if _, err := ResumeWith(d, "theta"); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, cmd := m.Update(dashboardRefineMsg{id: "theta"})
+	m = updated.(RoutineDashboard)
+	if m.statusMsg != "refined theta" {
+		t.Fatalf("status = %q, want refined theta", m.statusMsg)
+	}
+	if cmd == nil {
+		t.Fatal("return from the gate should schedule a reload")
+	}
+	msg := cmd()
+	rows, ok := msg.(dashboardRowsMsg)
+	if !ok || rows.err != nil {
+		t.Fatalf("reload msg = %#v", msg)
+	}
+	updated, _ = m.Update(rows)
+	m = updated.(RoutineDashboard)
+	if got := m.snap.Rows[0].Status; got != "idle" {
+		t.Fatalf("row status after reload = %q, want idle (resume reflected)", got)
 	}
 }
 

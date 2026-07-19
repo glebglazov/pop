@@ -2,6 +2,7 @@ package routine
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,6 +166,7 @@ const (
 	menuActionPreview
 	menuActionEditPrompt
 	menuActionEditSchedule
+	menuActionRefine
 	menuActionRuns
 )
 
@@ -199,6 +201,7 @@ func routineMenuItems(row DashboardRow) []routineMenuItem {
 		{key: "p", label: "preview pane", action: menuActionPreview},
 		{key: "e", label: "edit prompt", action: menuActionEditPrompt},
 		{key: "s", label: "edit schedule", action: menuActionEditSchedule},
+		{key: "r", label: "refine", action: menuActionRefine},
 		{key: "l", label: "runs", action: menuActionRuns},
 	}
 }
@@ -497,6 +500,13 @@ func (m RoutineDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("edited prompt for %s", msg.id)
 		}
 		return m, m.reload()
+	case dashboardRefineMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		} else {
+			m.statusMsg = fmt.Sprintf("refined %s", msg.id)
+		}
+		return m, m.reload()
 	case dashboardPreviewMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -718,6 +728,8 @@ func (m RoutineDashboard) dispatchMenuAction(action routineMenuAction, row Dashb
 	case menuActionEditSchedule:
 		m.sched = &routineScheduleModal{row: row, input: row.Schedule}
 		return m, nil
+	case menuActionRefine:
+		return m, m.refineRoutine(row)
 	case menuActionRuns:
 		m.err = nil
 		m.detail = newRunsDetailView(row)
@@ -752,6 +764,47 @@ func editPromptCommand(d *Deps, id string) *exec.Cmd {
 	}
 	promptPath := filepath.Join(routineDir(d, id), promptFileName)
 	return exec.Command(editor, promptPath)
+}
+
+// refineRoutine suspends the TUI into the Routine refinement gate for the row
+// (ADR-0125), the same suspend mechanism the edit-prompt verb uses. The gate is
+// a foreground Go loop rather than an external process, so it rides on tea.Exec
+// via refineExec: bubbletea hands the resumed terminal's std streams to the
+// wrapper, which drives RefineWith and then returns control to the dashboard. On
+// return a reload refreshes the rows, since a resume or fire inside the gate
+// may have changed the row's pause state or last run.
+func (m RoutineDashboard) refineRoutine(row DashboardRow) tea.Cmd {
+	d := m.d
+	if d == nil {
+		d = DefaultDeps()
+	}
+	return tea.Exec(&refineExec{d: d, id: row.ID}, func(err error) tea.Msg {
+		return dashboardRefineMsg{id: row.ID, err: err}
+	})
+}
+
+// refineExec adapts the RefineWith gate to tea.ExecCommand so bubbletea can run
+// it in the foreground with the terminal restored. bubbletea injects the
+// resumed terminal's streams via the setters; Run threads them into a shallow
+// deps copy (leaving the dashboard's own deps untouched) and marks the session
+// interactive, since the suspended TUI implies a TTY.
+type refineExec struct {
+	d   *Deps
+	id  string
+	in  io.Reader
+	out io.Writer
+}
+
+func (e *refineExec) SetStdin(r io.Reader)  { e.in = r }
+func (e *refineExec) SetStdout(w io.Writer) { e.out = w }
+func (e *refineExec) SetStderr(io.Writer)   {}
+
+func (e *refineExec) Run() error {
+	d := *e.d
+	d.Stdin = e.in
+	d.Stdout = e.out
+	d.IsInteractive = func() bool { return true }
+	return RefineWith(&d, e.id, "")
 }
 
 // updateScheduleModal drives the edit-schedule text-input overlay: esc/ctrl+c
@@ -891,6 +944,10 @@ type dashboardEditMsg struct {
 	id  string
 	err error
 }
+type dashboardRefineMsg struct {
+	id  string
+	err error
+}
 type dashboardPreviewMsg struct {
 	err error
 }
@@ -923,6 +980,7 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "p", Desc: "preview pane"},
 			{Key: "e", Desc: "edit prompt"},
 			{Key: "s", Desc: "edit schedule"},
+			{Key: "r", Desc: "refine"},
 			{Key: "l", Desc: "runs"},
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "enter", Desc: "run action"},
