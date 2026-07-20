@@ -244,7 +244,7 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 			familyReport("pop monitor", doctorMonitorChecks(d, intent)),
 			familyReport("pop pane", doctorPaneChecks(d)),
 			familyReport("pop tasks", doctorTaskChecks(d)),
-			familyReport("pop wayfinder", doctorWayfinderChecks(d)),
+			familyReport("pop wayfinder", doctorWayfinderChecks(d, intent)),
 		},
 	}
 
@@ -409,8 +409,10 @@ func doctorPaneChecks(d *doctorDeps) []doctorCheck {
 // doctorWayfinderChecks reports Wayfinder readiness with the same git and Task
 // storage gates as Tasks: a runtime checkout must resolve and pop must be able
 // to write beneath Task storage. Map count is informational only — zero maps is
-// OK, matching Worktree readiness (absence is content, never Degraded).
-func doctorWayfinderChecks(d *doctorDeps) []doctorCheck {
+// OK, matching Worktree readiness (absence is content, never Degraded). When
+// maps exist, a second gate checks that at least one intended agent has the
+// task-skills component (which ships the wayfinder planning skill).
+func doctorWayfinderChecks(d *doctorDeps, intent *doctorAgentIntentReport) []doctorCheck {
 	ctx, err := d.detectRepoContext()
 	if err != nil {
 		return []doctorCheck{{
@@ -444,6 +446,19 @@ func doctorWayfinderChecks(d *doctorDeps) []doctorCheck {
 		status: doctorStatusOK,
 		detail: fmt.Sprintf("%d map(s) listed", count),
 	})
+
+	if count > 0 {
+		taskSkills, err := doctorIntendedAgentTaskSkills(d.integrate, intent)
+		if err != nil {
+			checks = append(checks, doctorCheck{
+				label:  "wayfinder planning skill installed",
+				status: doctorStatusDegraded,
+				detail: fmt.Sprintf("failed to inspect intended agent task-skills: %v", err),
+			})
+		} else if check, ok := doctorIntendedAgentTaskSkillsCheck(taskSkills); ok {
+			checks = append(checks, check)
+		}
+	}
 	return checks
 }
 
@@ -697,6 +712,77 @@ func doctorIntendedAgentStatusWiringCheck(wiring []doctorAgentStatusWiring) (doc
 			detail: fmt.Sprintf("wired for intended agent(s): %s", strings.Join(ok, ", ")),
 		}, true
 	}
+}
+
+func doctorIntendedAgentTaskSkillsCheck(wiring []doctorAgentStatusWiring) (doctorCheck, bool) {
+	if len(wiring) == 0 {
+		return doctorCheck{
+			label:  "wayfinder planning skill installed",
+			status: doctorStatusOK,
+			detail: "no intended agents detected",
+		}, true
+	}
+
+	var installed, needsAttention []string
+	var firstActionAgent string
+	for _, w := range wiring {
+		if w.state.kind == stateNotSupported {
+			continue
+		}
+		if firstActionAgent == "" {
+			firstActionAgent = w.agent
+		}
+		switch w.state.kind {
+		case stateInstalledCurrent, stateStale:
+			installed = append(installed, w.agent)
+		case stateConflict:
+			needsAttention = append(needsAttention, w.agent+" (conflicting)")
+		default:
+			needsAttention = append(needsAttention, w.agent+" (missing)")
+		}
+	}
+
+	if len(installed) > 0 {
+		return doctorCheck{
+			label:  "wayfinder planning skill installed",
+			status: doctorStatusOK,
+			detail: fmt.Sprintf("installed for intended agent(s): %s", strings.Join(installed, ", ")),
+		}, true
+	}
+
+	detail := "maps exist but no intended agent has task planning skills installed"
+	if len(needsAttention) > 0 {
+		detail = fmt.Sprintf("maps exist but task planning skills are not installed for intended agent(s): %s", strings.Join(needsAttention, ", "))
+	}
+	check := doctorCheck{
+		label:  "wayfinder planning skill installed",
+		status: doctorStatusDegraded,
+		detail: detail,
+	}
+	if firstActionAgent != "" {
+		check.nextAction = integrateInvocation(firstActionAgent, ComponentTaskSkills)
+	}
+	return check, true
+}
+
+func doctorIntendedAgentTaskSkills(d *integrateDeps, intent *doctorAgentIntentReport) ([]doctorAgentStatusWiring, error) {
+	if intent == nil {
+		return nil, nil
+	}
+	home, err := d.userHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	var out []doctorAgentStatusWiring
+	for _, intended := range intent.intended {
+		agent := intended.agent
+		state, err := doctorComponentState(d, home, ComponentTaskSkills, agent)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, doctorAgentStatusWiring{agent: agent, state: state})
+	}
+	return out, nil
 }
 
 func doctorIntendedAgentStatusWiring(d *integrateDeps, intent *doctorAgentIntentReport) ([]doctorAgentStatusWiring, error) {

@@ -630,7 +630,12 @@ func TestDoctorWayfinderReadinessOKWithZeroMaps(t *testing.T) {
 }
 
 func TestDoctorWayfinderReadinessOKWithMapsPresent(t *testing.T) {
-	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	fs := newFakeFS()
+	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	setDoctorIntent(d, "claude")
+	if err := installFileComponent(fakeDeps(installerHome, fs, nil), installerHome, ComponentTaskSkills, "claude"); err != nil {
+		t.Fatalf("install task-skills: %v", err)
+	}
 	d.scanWayfinderMaps = func() (int, error) { return 2, nil }
 
 	report, err := buildDoctorReport(d)
@@ -647,6 +652,91 @@ func TestDoctorWayfinderReadinessOKWithMapsPresent(t *testing.T) {
 	maps := wayfinderCheck(t, report, "maps listed")
 	if maps.status != doctorStatusOK || !strings.Contains(maps.detail, "2 map") {
 		t.Fatalf("maps check = %+v, want OK two-map detail", maps)
+	}
+	skill := wayfinderCheck(t, report, "wayfinder planning skill installed")
+	if skill.status != doctorStatusOK || !strings.Contains(skill.detail, "claude") {
+		t.Fatalf("skill check = %+v, want OK with claude installed", skill)
+	}
+}
+
+func TestDoctorWayfinderDegradedWhenMapsExistWithoutTaskSkills(t *testing.T) {
+	fs := newFakeFS()
+	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	setDoctorIntent(d, "claude")
+	d.scanWayfinderMaps = func() (int, error) { return 1, nil }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop wayfinder")
+	if !ok {
+		t.Fatalf("missing pop wayfinder family")
+	}
+	if family.status != doctorStatusDegraded {
+		t.Fatalf("wayfinder status = %s, want %s (%s)", family.status, doctorStatusDegraded, family.reason)
+	}
+	skill := wayfinderCheck(t, report, "wayfinder planning skill installed")
+	if skill.status != doctorStatusDegraded {
+		t.Fatalf("skill check status = %s, want %s", skill.status, doctorStatusDegraded)
+	}
+	if !strings.Contains(skill.detail, "maps exist") || !strings.Contains(skill.detail, "claude (missing)") {
+		t.Fatalf("skill detail = %q, want maps-exist missing-agent detail", skill.detail)
+	}
+	if skill.nextAction != "pop integrate claude --task-skills" {
+		t.Fatalf("nextAction = %q, want pop integrate claude --task-skills", skill.nextAction)
+	}
+}
+
+func TestDoctorWayfinderZeroMapsSkipsTaskSkillsCheck(t *testing.T) {
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	setDoctorIntent(d, "claude")
+	d.scanWayfinderMaps = func() (int, error) { return 0, nil }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop wayfinder")
+	if !ok {
+		t.Fatalf("missing pop wayfinder family")
+	}
+	if family.status != doctorStatusOK {
+		t.Fatalf("wayfinder status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+	}
+	if _, ok := checkByLabel(family, "wayfinder planning skill installed"); ok {
+		t.Fatalf("zero maps should not add wayfinder planning skill check")
+	}
+}
+
+func TestDoctorWayfinderPathOnlyAgentDoesNotDegradeTaskSkills(t *testing.T) {
+	fs := newFakeFS()
+	detectDeps := fakeDeps(installerHome, fs, nil)
+	intent, err := doctorDetectAgentIntent(detectDeps, installerHome, func(string) (*config.Config, error) {
+		return nil, os.ErrNotExist
+	}, nil, func(agent string) bool { return agent == "codex" })
+	if err != nil {
+		t.Fatalf("doctorDetectAgentIntent: %v", err)
+	}
+
+	d := readOnlyDoctorDeps(t, fs, true, true, true)
+	d.agentIntent = func() (*doctorAgentIntentReport, error) { return intent, nil }
+	d.scanWayfinderMaps = func() (int, error) { return 1, nil }
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop wayfinder")
+	if !ok {
+		t.Fatalf("missing pop wayfinder family")
+	}
+	if family.status != doctorStatusOK {
+		t.Fatalf("PATH-only codex should not degrade wayfinder: status = %s (%s)", family.status, family.reason)
+	}
+	skill := wayfinderCheck(t, report, "wayfinder planning skill installed")
+	if skill.status != doctorStatusOK || skill.detail != "no intended agents detected" {
+		t.Fatalf("skill check = %+v, want OK with no intended agents", skill)
 	}
 }
 
