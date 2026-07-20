@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -49,15 +51,16 @@ func renderComponent(id ComponentID, agent, prefix string) (map[string][]byte, e
 //     files ride alongside the skill body so the body's relative references
 //     resolve (grill-with-docs and its two format documents).
 func renderSkillComponent(comp integrationComponent, agent, prefix string) (map[string][]byte, error) {
+	baseNames := fileBasedSkillBaseNames()
 	tree := make(map[string][]byte, len(comp.sources))
 	for _, src := range comp.sources {
 		if strings.HasSuffix(src, ".md") {
-			if err := renderSingleFileSkill(tree, agent, prefix, src); err != nil {
+			if err := renderSingleFileSkill(tree, agent, prefix, src, baseNames); err != nil {
 				return nil, err
 			}
 			continue
 		}
-		if err := renderMultiFileSkill(tree, agent, prefix, src); err != nil {
+		if err := renderMultiFileSkill(tree, agent, prefix, src, baseNames); err != nil {
 			return nil, err
 		}
 	}
@@ -65,17 +68,18 @@ func renderSkillComponent(comp integrationComponent, agent, prefix string) (map[
 }
 
 // renderSingleFileSkill renders a one-file skill source into the agent's layout.
-func renderSingleFileSkill(tree map[string][]byte, agent, prefix, src string) error {
+func renderSingleFileSkill(tree map[string][]byte, agent, prefix, src string, baseNames []string) error {
 	data, err := skillFiles.ReadFile(src)
 	if err != nil {
 		return fmt.Errorf("failed to read embedded skill %s: %w", src, err)
 	}
 	skillName := prefix + strings.TrimSuffix(filepath.Base(src), ".md")
-	rel, content, err := renderSkillFile(agent, skillName, string(data))
+	content := rewriteSkillReferences(string(data), prefix, baseNames)
+	rel, rendered, err := renderSkillFile(agent, skillName, content)
 	if err != nil {
 		return err
 	}
-	tree[rel] = []byte(content)
+	tree[rel] = []byte(rendered)
 	return nil
 }
 
@@ -84,7 +88,7 @@ func renderSingleFileSkill(tree map[string][]byte, agent, prefix, src string) er
 // file is emitted verbatim alongside it under `<prefix><base>/`. Directory-hosting
 // agents (claude, codex, pi, cursor, opencode) preserve companion documents
 // so relative references in the skill body resolve.
-func renderMultiFileSkill(tree map[string][]byte, agent, prefix, dir string) error {
+func renderMultiFileSkill(tree map[string][]byte, agent, prefix, dir string, baseNames []string) error {
 	skillName := prefix + path.Base(dir)
 	switch agent {
 	case "claude", "codex", "pi", "cursor", "opencode":
@@ -103,12 +107,12 @@ func renderMultiFileSkill(tree map[string][]byte, agent, prefix, dir string) err
 		if err != nil {
 			return fmt.Errorf("failed to read embedded skill file %s/%s: %w", dir, e.Name(), err)
 		}
+		content := rewriteSkillReferences(string(data), prefix, baseNames)
 		if e.Name() == "SKILL.md" {
-			tree[skillName+"/SKILL.md"] = []byte(injectOwnershipMarker(injectFrontmatterName(string(data), skillName)))
+			tree[skillName+"/SKILL.md"] = []byte(injectOwnershipMarker(injectFrontmatterName(content, skillName)))
 			continue
 		}
-		// Companion document — rides alongside the body, byte-for-byte.
-		tree[skillName+"/"+e.Name()] = data
+		tree[skillName+"/"+e.Name()] = []byte(content)
 	}
 	return nil
 }
@@ -135,4 +139,52 @@ func renderSkillFile(agent, skillName, content string) (rel, rendered string, er
 	default:
 		return "", "", fmt.Errorf("agent %q has no skill render layout", agent)
 	}
+}
+
+// fileBasedSkillBaseNames returns the base name of every embedded skill source
+// listed in the integration catalog, longest first so shorter names cannot
+// partially match inside longer hyphenated names during rewrite.
+func fileBasedSkillBaseNames() []string {
+	seen := make(map[string]struct{})
+	var names []string
+	for _, c := range integrationCatalog {
+		for _, src := range c.sources {
+			base := skillBaseNameFromSource(src)
+			if _, ok := seen[base]; ok {
+				continue
+			}
+			seen[base] = struct{}{}
+			names = append(names, base)
+		}
+	}
+	sort.Slice(names, func(i, j int) bool {
+		return len(names[i]) > len(names[j])
+	})
+	return names
+}
+
+func skillBaseNameFromSource(src string) string {
+	if strings.HasSuffix(src, ".md") {
+		return strings.TrimSuffix(filepath.Base(src), ".md")
+	}
+	return path.Base(src)
+}
+
+// rewriteSkillReferences rewrites cross-skill references in rendered bodies and
+// companion documents to their resolved installed names (<prefix><base>). An
+// empty prefix is a no-op — embedded sources already carry bare base names.
+func rewriteSkillReferences(content, prefix string, baseNames []string) string {
+	if prefix == "" || len(baseNames) == 0 {
+		return content
+	}
+	for _, base := range baseNames {
+		content = rewriteSkillReference(content, prefix, base)
+	}
+	return content
+}
+
+func rewriteSkillReference(content, prefix, base string) string {
+	pat := `((?:^|[^a-zA-Z0-9_-]))` + regexp.QuoteMeta(base) + `((?:$|[^a-zA-Z0-9_-]))`
+	re := regexp.MustCompile(pat)
+	return re.ReplaceAllString(content, "${1}"+prefix+base+"${2}")
 }

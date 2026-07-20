@@ -132,3 +132,51 @@ func keysOf(m map[string][]byte) []string {
 	}
 	return out
 }
+
+// TestRewriteSkillReferencesWordBoundary pins word-boundary safety and
+// idempotency: hyphenated names match whole identifiers only and re-render
+// does not double-prefix.
+func TestRewriteSkillReferencesWordBoundary(t *testing.T) {
+	baseNames := fileBasedSkillBaseNames()
+	const prefix = "pop-"
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "bare backtick name",
+			input: "run the `grill-with-docs` skill",
+			want:  "run the `pop-grill-with-docs` skill",
+		},
+		{
+			name:  "already prefixed is unchanged",
+			input: "run the `pop-grill-with-docs` skill",
+			want:  "run the `pop-grill-with-docs` skill",
+		},
+		{
+			name:  "hyphenated partial word not matched",
+			input: "not-pop-to-prd-here",
+			want:  "not-pop-to-prd-here",
+		},
+		{
+			name:  "to-prd standalone",
+			input: "suggest to-prd and to-tasks",
+			want:  "suggest pop-to-prd and pop-to-tasks",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := rewriteSkillReferences(tc.input, prefix, baseNames)
+			if got != tc.want {
+				t.Fatalf("rewriteSkillReferences() = %q, want %q", got, tc.want)
+			}
+			// Idempotent on second pass.
+			if again := rewriteSkillReferences(got, prefix, baseNames); again != tc.want {
+				t.Fatalf("second rewrite = %q, want %q", again, tc.want)
+			}
+		})
+	}
+}
