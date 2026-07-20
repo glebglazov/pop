@@ -1,7 +1,6 @@
 package routine
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,6 +50,8 @@ func routineDashboardDeps(t *testing.T) (*Deps, string) {
 		LoadConfig:    func() (*config.Config, error) { return &config.Config{}, nil },
 		Tasks:         td,
 		Tmux:          newRecordingTmux(false, "0"),
+		InTmux:        func() bool { return true },
+		Executable:    func() (string, error) { return "/mock/bin/pop", nil },
 		IsInteractive: func() bool { return false },
 		PID:           func() int { return 4242 },
 		ProcStartToken: func(pid int) (string, bool) { return "test", true },
@@ -62,9 +63,10 @@ func routineDashboardDeps(t *testing.T) (*Deps, string) {
 type recordingTmux struct {
 	deps.MockTmux
 	commands [][]string
+	paneList string
 }
 
-func newRecordingTmux(hasSession bool, listOut string) deps.Tmux {
+func newRecordingTmux(hasSession bool, listOut string) *recordingTmux {
 	rt := &recordingTmux{}
 	rt.HasSessionFunc = func(name string) bool { return hasSession }
 	rt.NewSessionFunc = func(name, dir string) error {
@@ -77,6 +79,9 @@ func newRecordingTmux(hasSession bool, listOut string) deps.Tmux {
 			return listOut, nil
 		}
 		if len(args) > 0 && args[0] == "list-panes" {
+			if rt.paneList != "" {
+				return rt.paneList, nil
+			}
 			return "", nil
 		}
 		if len(args) > 0 && args[0] == "new-window" {
@@ -88,6 +93,15 @@ func newRecordingTmux(hasSession bool, listOut string) deps.Tmux {
 		return "", nil
 	}
 	return rt
+}
+
+func (rt *recordingTmux) findCommand(verb string) ([]string, bool) {
+	for _, c := range rt.commands {
+		if len(c) > 0 && c[0] == verb {
+			return c, true
+		}
+	}
+	return nil, false
 }
 
 func tmuxRecorder(d *Deps) *recordingTmux {
@@ -367,56 +381,128 @@ func TestRoutineDashboardActionMenuRefine(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	m = updated.(RoutineDashboard)
 	if cmd == nil {
-		t.Fatal("r in menu should suspend into the refinement gate")
+		t.Fatal("r in menu should spawn the refinement loop into tmux")
 	}
 	if m.menu != nil {
 		t.Fatal("dispatching refine should close the menu")
 	}
+	msg := cmd()
+	refineMsg, ok := msg.(dashboardRefineMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want dashboardRefineMsg", msg)
+	}
+	if refineMsg.err != nil {
+		t.Fatalf("refine spawn: %v", refineMsg.err)
+	}
+	rt := tmuxRecorder(d)
+	sendKeys, ok := rt.findCommand("send-keys")
+	if !ok {
+		t.Fatalf("expected send-keys for fresh refine spawn, commands=%v", rt.commands)
+	}
+	joined := strings.Join(sendKeys, " ")
+	if !strings.Contains(joined, "/mock/bin/pop routine edit eta") {
+		t.Fatalf("send-keys = %v, want resolved pop routine edit eta", sendKeys)
+	}
+	newWindow, ok := rt.findCommand("new-window")
+	if !ok {
+		t.Fatal("expected new-window for refine")
+	}
+	if !argPresent(newWindow, "-d") || !containsArg(newWindow, "-n", "eta") {
+		t.Fatalf("new-window = %v, want -d and -n eta", newWindow)
+	}
+
+	updated, _ = m.Update(refineMsg)
+	m = updated.(RoutineDashboard)
+	if m.statusMsg != "refining eta" {
+		t.Fatalf("status = %q, want refining eta", m.statusMsg)
+	}
+	if m.err != nil {
+		t.Fatalf("dashboard should stay interactive after spawn, err=%v", m.err)
+	}
 }
 
-// TestRoutineDashboardRefineExecEntersGate drives the tea.ExecCommand wrapper
-// directly with scripted stdin, proving selecting refine enters the gate for the
-// row and a resume inside it is persisted (created-paused routine unpauses).
-func TestRoutineDashboardRefineExecEntersGate(t *testing.T) {
+func TestRoutineDashboardRefineReusesExistingWindow(t *testing.T) {
 	d, home := routineDashboardDeps(t)
-	if _, err := AddWith(d, "zeta", "every 6h", home); err != nil {
+	if _, err := AddWith(d, "reuse", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
-	r, err := loadManifest(d, "zeta")
-	if err != nil || !r.Manifest.Paused {
-		t.Fatalf("routine should start paused: %v paused=%v", err, r != nil && r.Manifest.Paused)
-	}
+	rt := newRecordingTmux(true, "reuse")
+	rt.paneList = "%9"
+	d.Tmux = rt
 
-	var out bytes.Buffer
-	ex := &refineExec{d: d, id: "zeta"}
-	ex.SetStdin(strings.NewReader("6\n"))
-	ex.SetStdout(&out)
-	ex.SetStderr(&out)
-	if err := ex.Run(); err != nil {
-		t.Fatalf("refine gate run: %v", err)
-	}
-	if !strings.Contains(out.String(), "Refine routine") {
-		t.Fatalf("gate did not render its menu:\n%s", out.String())
-	}
-	r, err = loadManifest(d, "zeta")
+	snap, err := BuildDashboardWith(d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Manifest.Paused {
-		t.Fatal("resume inside the gate should unpause the routine")
+	m := newRoutineDashboard(d, snap)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(RoutineDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(RoutineDashboard)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	m = updated.(RoutineDashboard)
+	if cmd == nil {
+		t.Fatal("expected refine command")
 	}
-	// The dashboard's own deps are left untouched by the gate session.
-	if d.IsInteractive == nil || d.IsInteractive() {
-		t.Fatal("refineExec must not mutate the dashboard's deps")
+	msg := cmd()
+	refineMsg, ok := msg.(dashboardRefineMsg)
+	if !ok || refineMsg.err != nil {
+		t.Fatalf("refine msg = %#v", msg)
+	}
+	if _, ok := rt.findCommand("send-keys"); ok {
+		t.Fatalf("existing refine window must not receive a command, commands=%v", rt.commands)
+	}
+	if _, ok := rt.findCommand("new-window"); ok {
+		t.Fatalf("existing refine window must not create a new window, commands=%v", rt.commands)
+	}
+	switchClient, ok := rt.findCommand("switch-client")
+	if !ok || !containsArg(switchClient, "-t", "%9") {
+		t.Fatalf("switch-client = %v, want pane %%9", switchClient)
 	}
 }
 
-// TestRoutineDashboardRefineReturnReloads proves returning from the gate lands
-// back in the dashboard with rows refreshed: a resume applied while the gate was
-// open is reflected after the return message reloads.
-func TestRoutineDashboardRefineReturnReloads(t *testing.T) {
+func TestRoutineDashboardRefineForwardsRefineAgent(t *testing.T) {
 	d, home := routineDashboardDeps(t)
-	if _, err := AddWith(d, "theta", "every 6h", home); err != nil {
+	if _, err := AddWith(d, "agented", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := BuildDashboardWith(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newRoutineDashboard(d, snap)
+	m.refineAgent = "codex"
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(RoutineDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(RoutineDashboard)
+	// Preserve refineAgent across Update (value receiver copies the field).
+	m.refineAgent = "codex"
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	_ = updated
+	if cmd == nil {
+		t.Fatal("expected refine command")
+	}
+	msg := cmd()
+	refineMsg, ok := msg.(dashboardRefineMsg)
+	if !ok || refineMsg.err != nil {
+		t.Fatalf("refine msg = %#v", msg)
+	}
+	rt := tmuxRecorder(d)
+	sendKeys, ok := rt.findCommand("send-keys")
+	if !ok {
+		t.Fatal("expected send-keys")
+	}
+	joined := strings.Join(sendKeys, " ")
+	if !strings.Contains(joined, "--refine-agent codex") {
+		t.Fatalf("send-keys = %v, want --refine-agent codex", sendKeys)
+	}
+}
+
+func TestRoutineDashboardRefineRefusesOutsideTmux(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	d.InTmux = func() bool { return false }
+	if _, err := AddWith(d, "notmux", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
 	snap, err := BuildDashboardWith(d)
@@ -426,33 +512,54 @@ func TestRoutineDashboardRefineReturnReloads(t *testing.T) {
 	m := newRoutineDashboard(d, snap)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m = updated.(RoutineDashboard)
-	if m.snap.Rows[0].Status != "paused" {
-		t.Fatalf("row should start paused, got %q", m.snap.Rows[0].Status)
-	}
-
-	// Simulate a resume that happened inside the suspended gate.
-	if _, err := ResumeWith(d, "theta"); err != nil {
-		t.Fatal(err)
-	}
-
-	updated, cmd := m.Update(dashboardRefineMsg{id: "theta"})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = updated.(RoutineDashboard)
-	if m.statusMsg != "refined theta" {
-		t.Fatalf("status = %q, want refined theta", m.statusMsg)
-	}
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	m = updated.(RoutineDashboard)
 	if cmd == nil {
-		t.Fatal("return from the gate should schedule a reload")
+		t.Fatal("expected refine command")
 	}
 	msg := cmd()
-	rows, ok := msg.(dashboardRowsMsg)
-	if !ok || rows.err != nil {
-		t.Fatalf("reload msg = %#v", msg)
+	refineMsg, ok := msg.(dashboardRefineMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want dashboardRefineMsg", msg)
 	}
-	updated, _ = m.Update(rows)
+	if refineMsg.err == nil {
+		t.Fatal("outside tmux must refuse")
+	}
+	if !strings.Contains(refineMsg.err.Error(), "pop routine edit notmux") {
+		t.Fatalf("refusal = %v, want CLI equivalent named", refineMsg.err)
+	}
+	rt := tmuxRecorder(d)
+	if len(rt.commands) != 0 {
+		t.Fatalf("outside tmux must not touch tmux, commands=%v", rt.commands)
+	}
+	updated, _ = m.Update(refineMsg)
 	m = updated.(RoutineDashboard)
-	if got := m.snap.Rows[0].Status; got != "idle" {
-		t.Fatalf("row status after reload = %q, want idle (resume reflected)", got)
+	if m.err == nil || !strings.Contains(m.err.Error(), "pop routine edit notmux") {
+		t.Fatalf("dashboard err = %v, want refusal message", m.err)
 	}
+}
+
+func containsArg(args []string, flag, value string) bool {
+	if value == "" {
+		return argPresent(args, flag)
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func argPresent(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRoutineEditPromptCommand(t *testing.T) {

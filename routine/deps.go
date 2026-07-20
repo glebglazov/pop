@@ -17,6 +17,8 @@ type Deps struct {
 	OpenEditor    func(path string) error
 	OpenPager     func(path string) error
 	IsInteractive func() bool
+	InTmux        func() bool
+	Executable    func() (string, error)
 	Now           func() time.Time
 	Stdin         io.Reader
 	Stdout        io.Writer
@@ -38,6 +40,8 @@ func DefaultDeps() *Deps {
 		OpenEditor:    defaultOpenEditor,
 		OpenPager:     defaultOpenPager,
 		IsInteractive: defaultIsInteractive,
+		InTmux:        func() bool { return os.Getenv("TMUX") != "" },
+		Executable:    os.Executable,
 		Now:           time.Now,
 		Stdin:         os.Stdin,
 		Stdout:        os.Stdout,

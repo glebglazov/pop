@@ -2,7 +2,6 @@ package routine
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -182,6 +181,9 @@ type RoutineDashboard struct {
 	statusMsg   string
 	showHelp  bool
 	pendingG  bool
+	// refineAgent is an optional --refine-agent override forwarded when the
+	// refine verb spawns `pop routine edit <id>` into tmux (ADR-0132).
+	refineAgent string
 
 	// copyFunc performs the clipboard write for the `c` verb. Injected so
 	// tests can avoid touching the real tmux / /dev/tty. Defaults to
@@ -628,9 +630,11 @@ func (m RoutineDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
-			m.statusMsg = fmt.Sprintf("refined %s", msg.id)
+			m.statusMsg = fmt.Sprintf("refining %s", msg.id)
 		}
-		return m, m.reload()
+		// Dashboard stays live; row state refreshes on the normal tick from
+		// the execution-state store rather than on a gate return (ADR-0132).
+		return m, nil
 	case dashboardPreviewMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -905,45 +909,18 @@ func editPromptCommand(d *Deps, id string) *exec.Cmd {
 	return exec.Command(editor, promptPath)
 }
 
-// refineRoutine suspends the TUI into the Routine refinement gate for the row
-// (ADR-0125), the same suspend mechanism the edit-prompt verb uses. The gate is
-// a foreground Go loop rather than an external process, so it rides on tea.Exec
-// via refineExec: bubbletea hands the resumed terminal's std streams to the
-// wrapper, which drives RefineWith and then returns control to the dashboard. On
-// return a reload refreshes the rows, since a resume or fire inside the gate
-// may have changed the row's pause state or last run.
+// refineRoutine spawns the whole refinement loop into a tmux window named after
+// the Routine (ADR-0132) and returns immediately so the dashboard stays live.
+// Outside tmux the spawn refuses with a pointer to `pop routine edit <id>`.
 func (m RoutineDashboard) refineRoutine(row DashboardRow) tea.Cmd {
-	d := m.d
-	if d == nil {
-		d = DefaultDeps()
-	}
-	return tea.Exec(&refineExec{d: d, id: row.ID}, func(err error) tea.Msg {
+	return func() tea.Msg {
+		d := m.d
+		if d == nil {
+			d = DefaultDeps()
+		}
+		err := RefinePaneWith(d, row.ID, m.refineAgent)
 		return dashboardRefineMsg{id: row.ID, err: err}
-	})
-}
-
-// refineExec adapts the RefineWith gate to tea.ExecCommand so bubbletea can run
-// it in the foreground with the terminal restored. bubbletea injects the
-// resumed terminal's streams via the setters; Run threads them into a shallow
-// deps copy (leaving the dashboard's own deps untouched) and marks the session
-// interactive, since the suspended TUI implies a TTY.
-type refineExec struct {
-	d   *Deps
-	id  string
-	in  io.Reader
-	out io.Writer
-}
-
-func (e *refineExec) SetStdin(r io.Reader)  { e.in = r }
-func (e *refineExec) SetStdout(w io.Writer) { e.out = w }
-func (e *refineExec) SetStderr(io.Writer)   {}
-
-func (e *refineExec) Run() error {
-	d := *e.d
-	d.Stdin = e.in
-	d.Stdout = e.out
-	d.IsInteractive = func() bool { return true }
-	return RefineWith(&d, e.id, "")
+	}
 }
 
 // updateScheduleModal drives the edit-schedule text-input overlay: esc/ctrl+c
