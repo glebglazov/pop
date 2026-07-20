@@ -173,18 +173,160 @@ func skillBaseNameFromSource(src string) string {
 // rewriteSkillReferences rewrites cross-skill references in rendered bodies and
 // companion documents to their resolved installed names (<prefix><base>). An
 // empty prefix is a no-op — embedded sources already carry bare base names.
+//
+// Only reference-shaped occurrences are rewritten: backticked names, slash
+// invocations, "the <name> skill", and (for hyphenated names only) bare
+// word-boundary hits. Frontmatter and HTML attribution comments are protected
+// so descriptions and upstream drift pointers stay intact. Common-word skill
+// names like research and prototype are limited to those reference shapes so
+// ticket-type vocabulary and ordinary prose are not corrupted.
 func rewriteSkillReferences(content, prefix string, baseNames []string) string {
 	if prefix == "" || len(baseNames) == 0 {
 		return content
 	}
+	protected, placeholders := protectRewriteRegions(content)
 	for _, base := range baseNames {
-		content = rewriteSkillReference(content, prefix, base)
+		protected = rewriteSkillReference(protected, prefix, base)
+	}
+	return restoreRewriteRegions(protected, placeholders)
+}
+
+const rewriteProtectSentinel = "\x00POP_REWRITE_PROTECT_"
+
+func protectRewriteRegions(content string) (string, []string) {
+	var placeholders []string
+	if strings.HasPrefix(content, "---\n") {
+		if end := strings.Index(content[4:], "\n---"); end >= 0 {
+			end += 4
+			closing := end
+			if strings.HasPrefix(content[end:], "\n---\n") {
+				closing = end + 5
+			} else if strings.HasPrefix(content[end:], "\n---") {
+				closing = end + 4
+			}
+			placeholders = append(placeholders, content[:closing])
+			content = rewriteProtectPlaceholder(len(placeholders)-1) + content[closing:]
+		}
+	}
+	commentRE := regexp.MustCompile(`<!--[\s\S]*?-->`)
+	content = commentRE.ReplaceAllStringFunc(content, func(match string) string {
+		placeholders = append(placeholders, match)
+		return rewriteProtectPlaceholder(len(placeholders) - 1)
+	})
+	return content, placeholders
+}
+
+func rewriteProtectPlaceholder(i int) string {
+	return rewriteProtectSentinel + fmt.Sprintf("%d", i) + "\x00"
+}
+
+func restoreRewriteRegions(content string, placeholders []string) string {
+	for i, ph := range placeholders {
+		content = strings.Replace(content, rewriteProtectPlaceholder(i), ph, 1)
 	}
 	return content
 }
 
 func rewriteSkillReference(content, prefix, base string) string {
+	rewritten := prefix + base
+	if strings.Contains(base, "-") {
+		return rewriteHyphenatedSkillReference(content, rewritten, base)
+	}
+	return rewriteAmbiguousSkillReference(content, rewritten, base)
+}
+
+func rewriteHyphenatedSkillReference(content, rewritten, base string) string {
+	content = rewriteBacktickSkillReference(content, rewritten, base)
+	content = rewriteSlashSkillReference(content, rewritten, base)
+	content = rewriteTheSkillReference(content, rewritten, base)
+	content = rewriteBareHyphenatedReference(content, rewritten, base)
+	return content
+}
+
+func rewriteAmbiguousSkillReference(content, rewritten, base string) string {
+	content = rewriteSlashSkillReference(content, rewritten, base)
+	content = rewriteTheSkillReference(content, rewritten, base)
+	content = rewriteInvocationBacktickReferences(content, rewritten, base)
+	return content
+}
+
+func rewriteBacktickSkillReference(content, rewritten, base string) string {
+	old := "`" + base + "`"
+	if strings.Contains(content, old) {
+		content = strings.ReplaceAll(content, old, "`"+rewritten+"`")
+	}
+	return content
+}
+
+// rewriteInvocationBacktickReferences rewrites backticked skill names that
+// appear only in cross-skill invocation contexts. Bare backticks on common-word
+// names (ticket types, branch paths) are left alone.
+func rewriteInvocationBacktickReferences(content, rewritten, base string) string {
+	q := "`" + base + "`"
+	rq := "`" + rewritten + "`"
+	for _, pat := range []string{
+		"run the " + q + " skill",
+		"tickets use " + q,
+		"with " + q,
+		"suggest " + q,
+		"when " + q + " writes",
+		"use the " + q + " skill",
+	} {
+		content = strings.ReplaceAll(content, pat, strings.Replace(pat, q, rq, 1))
+	}
+	return content
+}
+
+func rewriteSlashSkillReference(content, rewritten, base string) string {
+	needle := "/" + base
+	var b strings.Builder
+	b.Grow(len(content))
+	for i := 0; i < len(content); {
+		j := strings.Index(content[i:], needle)
+		if j < 0 {
+			b.WriteString(content[i:])
+			break
+		}
+		j += i
+		if j > 0 && isSkillRefWordChar(content[j-1]) {
+			b.WriteString(content[i : j+len(needle)])
+			i = j + len(needle)
+			continue
+		}
+		nextIdx := j + len(needle)
+		if nextIdx < len(content) {
+			next := content[nextIdx]
+			if next == '/' || next == '<' {
+				b.WriteString(content[i:nextIdx])
+				i = nextIdx
+				continue
+			}
+			if isSkillRefWordChar(next) {
+				b.WriteString(content[i:nextIdx])
+				i = nextIdx
+				continue
+			}
+		}
+		b.WriteString(content[i:j])
+		b.WriteString("/")
+		b.WriteString(rewritten)
+		i = nextIdx
+	}
+	return b.String()
+}
+
+func isSkillRefWordChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+}
+
+func rewriteTheSkillReference(content, rewritten, base string) string {
+	pat := `((?:^|[^a-zA-Z0-9_-]))` + regexp.QuoteMeta(base) + ` skill((?:$|[^a-zA-Z0-9_-]))`
+	re := regexp.MustCompile(pat)
+	return re.ReplaceAllString(content, "${1}"+rewritten+" skill${2}")
+}
+
+func rewriteBareHyphenatedReference(content, rewritten, base string) string {
 	pat := `((?:^|[^a-zA-Z0-9_-]))` + regexp.QuoteMeta(base) + `((?:$|[^a-zA-Z0-9_-]))`
 	re := regexp.MustCompile(pat)
-	return re.ReplaceAllString(content, "${1}"+prefix+base+"${2}")
+	return re.ReplaceAllString(content, "${1}"+rewritten+"${2}")
 }
