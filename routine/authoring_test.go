@@ -43,6 +43,133 @@ func (f *fakeAttendedRunner) RunAttended(ctx context.Context, dir string, stdin 
 	return f.exitCode, f.err
 }
 
+func TestIsCreateModePrompt(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "scaffolded stub", input: promptStub, want: true},
+		{name: "blank", input: "", want: true},
+		{name: "whitespace only", input: "  \n\t\n  ", want: true},
+		{name: "authored", input: "# My routine\n\nDo the thing.\n", want: false},
+		{name: "stub with trailing space", input: promptStub + " ", want: false},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isCreateModePrompt(tc.input); got != tc.want {
+				t.Fatalf("isCreateModePrompt(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildAuthoringPromptCreateModeStub(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	d := refineDeps(t, dataHome, "", &bytes.Buffer{})
+	addRoutineForGate(t, d, "gate", home)
+
+	r, err := loadManifest(d, "gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := buildAuthoringPrompt(d, "gate", r)
+
+	for _, want := range []string{
+		"interview me and write a good prompt.md",
+		"## Interview checklist",
+		"Interview me until you can answer each of these",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("create-mode prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, absent := range []string{
+		"already exists",
+		"## Current prompt.md",
+		"## Refinement checklist",
+		"work out which of these items it already settles",
+	} {
+		if strings.Contains(prompt, absent) {
+			t.Fatalf("create-mode prompt should not contain %q:\n%s", absent, prompt)
+		}
+	}
+}
+
+func TestBuildAuthoringPromptCreateModeWhitespaceOnly(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	d := refineDeps(t, dataHome, "", &bytes.Buffer{})
+	addRoutineForGate(t, d, "gate", home)
+
+	promptPath := filepath.Join(dataHome, "pop", "routines", "gate", "prompt.md")
+	if err := d.FS.WriteFile(promptPath, []byte("  \n\t  "), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := loadManifest(d, "gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := buildAuthoringPrompt(d, "gate", r)
+
+	if !strings.Contains(prompt, "## Interview checklist") {
+		t.Fatalf("whitespace-only prompt should use create mode:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "already exists") {
+		t.Fatalf("whitespace-only prompt should not use revise mode:\n%s", prompt)
+	}
+}
+
+func TestBuildAuthoringPromptReviseMode(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	d := refineDeps(t, dataHome, "", &bytes.Buffer{})
+	addRoutineForGate(t, d, "gate", home)
+
+	authored := "# Daily triage\n\nReview open PRs assigned to me and summarize blockers.\n"
+	promptPath := filepath.Join(dataHome, "pop", "routines", "gate", "prompt.md")
+	if err := d.FS.WriteFile(promptPath, []byte(authored), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := loadManifest(d, "gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := buildAuthoringPrompt(d, "gate", r)
+
+	for _, want := range []string{
+		"routine already exists",
+		"this session changes its prompt.md",
+		"## Current prompt.md",
+		authored,
+		"## Refinement checklist",
+		"work out which of these items it already",
+		"settles. Ask me only about what I want changed",
+		"Goal",
+		"Empty-run behavior",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("revise-mode prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, absent := range []string{
+		"## Interview checklist",
+		"Interview me until you can answer each of these",
+	} {
+		if strings.Contains(prompt, absent) {
+			t.Fatalf("revise-mode prompt should not contain %q:\n%s", absent, prompt)
+		}
+	}
+}
+
 func TestRefineAgentSessionSpawnsInBoundDirWithFrontLoadedRules(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")

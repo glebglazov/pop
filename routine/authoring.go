@@ -87,21 +87,41 @@ func runRoutineAttendedAgent(d *Deps, dir string, out io.Writer, invocation *tas
 	return runner.Run(context.Background(), dir, out, out, invocation.Command.Name, invocation.Command.Args...)
 }
 
+// isCreateModePrompt reports whether prompt.md is still unauthored: the
+// scaffolded add stub, or blank/whitespace-only (ADR-0132). Anything else is
+// revise mode.
+func isCreateModePrompt(content string) bool {
+	if strings.TrimSpace(content) == "" {
+		return true
+	}
+	return content == promptStub
+}
+
 // buildAuthoringPrompt returns the front-loaded rules the authoring agent starts
-// with (ADR-0125): the routine framework contract, this routine's concrete
-// paths, and an interview checklist. It directs the agent to edit prompt.md
-// directly but to change the schedule only through `pop routine edit --schedule`
-// so the parser's validation is never bypassed.
+// with (ADR-0125, ADR-0132): the routine framework contract, this routine's
+// concrete paths, and either an interview checklist (create mode) or the
+// current prompt plus an audit checklist (revise mode). It directs the agent
+// to edit prompt.md directly but to change the schedule only through
+// `pop routine edit --schedule` so the parser's validation is never bypassed.
 func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	dir := routineDir(d, id)
 	promptPath := filepath.Join(dir, promptFileName)
 	memoryDir := filepath.Join(dir, memoryDirName)
 	runsDir := filepath.Join(dir, runsDirName)
 
+	promptContent, _ := d.FS.ReadFile(promptPath)
+	createMode := isCreateModePrompt(string(promptContent))
+
 	var b strings.Builder
-	fmt.Fprintf(&b, "You are helping author the prompt for a pop routine (id %q). Pop routines are\n", id)
-	b.WriteString("directory-bound schedules that fire an unattended agent run over time. Your job\n")
-	b.WriteString("in this session is to interview me and write a good prompt.md for this routine.\n\n")
+	if createMode {
+		fmt.Fprintf(&b, "You are helping author the prompt for a pop routine (id %q). Pop routines are\n", id)
+		b.WriteString("directory-bound schedules that fire an unattended agent run over time. Your job\n")
+		b.WriteString("in this session is to interview me and write a good prompt.md for this routine.\n\n")
+	} else {
+		fmt.Fprintf(&b, "You are helping refine an existing pop routine (id %q). Pop routines are\n", id)
+		b.WriteString("directory-bound schedules that fire an unattended agent run over time. This\n")
+		b.WriteString("routine already exists; this session changes its prompt.md.\n\n")
+	}
 
 	b.WriteString("## Framework contract\n\n")
 	b.WriteString("When the routine fires, pop wraps your prompt.md — it does NOT run prompt.md\n")
@@ -132,18 +152,21 @@ func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	fmt.Fprintf(&b, "  - Reports directory: %s\n", runsDir)
 	fmt.Fprintf(&b, "  - Current schedule: %s\n\n", r.Manifest.Schedule)
 
-	b.WriteString("## Interview checklist\n\n")
-	b.WriteString("Interview me until you can answer each of these, then write prompt.md:\n")
-	b.WriteString("  1. Goal — what should each run accomplish?\n")
-	b.WriteString("  2. Data source — where does the data come from? Test it live now (this\n")
-	b.WriteString("     session runs in the bound directory with repo context and MCP tooling; e.g.\n")
-	b.WriteString("     run the actual JQL query rather than guessing).\n")
-	b.WriteString("  3. Definition of seen/new — how does a run tell already-processed items from\n")
-	b.WriteString("     fresh ones (usually via the memory directory)?\n")
-	b.WriteString("  4. Memory format — what should the routine record in the memory directory,\n")
-	b.WriteString("     and in what shape?\n")
-	b.WriteString("  5. Report format — what should each run's report contain?\n")
-	b.WriteString("  6. Empty-run behavior — what should a run do when there is nothing new?\n\n")
+	if createMode {
+		b.WriteString("## Interview checklist\n\n")
+		b.WriteString("Interview me until you can answer each of these, then write prompt.md:\n")
+	} else {
+		b.WriteString("## Current prompt.md\n\n")
+		b.WriteString(string(promptContent))
+		if len(promptContent) > 0 && promptContent[len(promptContent)-1] != '\n' {
+			b.WriteByte('\n')
+		}
+		b.WriteString("\n## Refinement checklist\n\n")
+		b.WriteString("Review the current prompt above and work out which of these items it already\n")
+		b.WriteString("settles. Ask me only about what I want changed or what the prompt genuinely\n")
+		b.WriteString("leaves ambiguous:\n")
+	}
+	writeAuthoringChecklistItems(&b)
 
 	b.WriteString("## How to apply your work\n\n")
 	fmt.Fprintf(&b, "  - Edit the prompt directly: write %s.\n", promptPath)
@@ -154,4 +177,17 @@ func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	b.WriteString("    a test run and resume the routine.\n")
 
 	return b.String()
+}
+
+func writeAuthoringChecklistItems(b *strings.Builder) {
+	b.WriteString("  1. Goal — what should each run accomplish?\n")
+	b.WriteString("  2. Data source — where does the data come from? Test it live now (this\n")
+	b.WriteString("     session runs in the bound directory with repo context and MCP tooling; e.g.\n")
+	b.WriteString("     run the actual JQL query rather than guessing).\n")
+	b.WriteString("  3. Definition of seen/new — how does a run tell already-processed items from\n")
+	b.WriteString("     fresh ones (usually via the memory directory)?\n")
+	b.WriteString("  4. Memory format — what should the routine record in the memory directory,\n")
+	b.WriteString("     and in what shape?\n")
+	b.WriteString("  5. Report format — what should each run's report contain?\n")
+	b.WriteString("  6. Empty-run behavior — what should a run do when there is nothing new?\n\n")
 }
