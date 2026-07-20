@@ -71,9 +71,10 @@ func (RealCommandRunner) RunAttended(ctx context.Context, dir string, stdin io.R
 	var savedPgrp int
 	if isTTY {
 		// Foreground:true makes the child its own process group and hands it the
-		// terminal foreground via tcsetpgrp(Ctty). Ctty:0 is the child's stdin,
-		// which we wired to the tty above.
-		cmd.SysProcAttr = &syscall.SysProcAttr{Foreground: true, Ctty: 0}
+		// terminal foreground via tcsetpgrp(Ctty). Ctty must be the resolved tty
+		// fd in this process — not fd 0, which may be a different (non-tty) stream
+		// when the caller redirected stdin.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Foreground: true, Ctty: ttyFd}
 		if pgrp, err := unix.IoctlGetInt(ttyFd, unix.TIOCGPGRP); err == nil {
 			savedPgrp = pgrp
 		}
