@@ -10,7 +10,7 @@ func TestIsDueNeverFiredIsNeverDue(t *testing.T) {
 	// first fire, not by the daemon (ADR-0124). It must never be due,
 	// whatever its schedule form.
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
-	for _, raw := range []string{"every 6h", "daily at 10:00"} {
+	for _, raw := range []string{"every 6h", "daily at 10:00", "every 2d at 10:00", "on mon at 09:00"} {
 		sched, err := ParseSchedule(raw)
 		if err != nil {
 			t.Fatalf("parse %q: %v", raw, err)
@@ -72,5 +72,38 @@ func TestIsDueCatchUpOnceNotPerMissedSlot(t *testing.T) {
 	}
 	if !IsDue(sched, now, now.Add(time.Hour)) {
 		t.Fatal("next interval after fire should be due")
+	}
+}
+
+func TestIsDueSlotAnchoredAndCatchUpOnce(t *testing.T) {
+	sched, err := ParseSchedule("every 2d at 10:00 utc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor := time.Date(2026, 7, 18, 8, 0, 0, 0, time.UTC)
+	firstSlot := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+
+	if IsDue(sched, anchor, firstSlot.Add(-time.Minute)) {
+		t.Fatal("should not be due before the first slot after the anchor")
+	}
+	if !IsDue(sched, anchor, firstSlot) {
+		t.Fatal("should be due at the first slot after the anchor")
+	}
+
+	// Miss several 2-day slots; catch-up fires once from lastFired, not once per miss.
+	last := firstSlot
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	if !IsDue(sched, last, now) {
+		t.Fatal("missed slot schedule should still evaluate as due once")
+	}
+	if IsDue(sched, now, now) {
+		t.Fatal("immediately after a catch-up fire, should not be due again")
+	}
+	next := sched.NextAfter(now)
+	if IsDue(sched, now, next.Add(-time.Minute)) {
+		t.Fatal("should not be due before the next slot after catch-up")
+	}
+	if !IsDue(sched, now, next) {
+		t.Fatal("should be due at the next slot after catch-up")
 	}
 }
