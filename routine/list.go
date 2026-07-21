@@ -10,7 +10,7 @@ import (
 	"text/tabwriter"
 )
 
-const emptyListHint = "No routines yet. Run `pop routine add <id> --schedule \"daily at 10:00\"` to create one."
+const emptyListHint = "No routines yet. Run `pop routine add <id> --schedule \"every 6h\"` to create one. " + ScheduleGrammar
 
 // RoutineWarning names a routine whose manifest could not be loaded during
 // listing. A broken manifest suspends only that routine; the rest are returned.

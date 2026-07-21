@@ -30,6 +30,11 @@ const (
 	ScheduleSlot
 )
 
+// ScheduleGrammar is the canonical user-facing description of the routine
+// schedule clause production (ADR-0133). Every surface that advertises valid
+// schedule syntax must read from this constant.
+const ScheduleGrammar = "[every <N><unit>] [on <days>] [at H[:MM]] [utc] — at least one clause required; e.g. \"every 6h\", \"at 10:00\", \"on mon-fri at 09:00\", \"every 2d at 10:00\", \"every 2w on mon at 10:00\"; wall-clock forms use the machine's local time unless suffixed \"utc\""
+
 // allWeekdays is the 7-bit mask with every weekday set (bit i = time.Weekday(i)).
 const allWeekdays uint8 = 0x7f
 
@@ -306,7 +311,7 @@ func parseClockComponent(s string, max int) (int, error) {
 }
 
 func scheduleFormatError(raw string) error {
-	return fmt.Errorf("invalid schedule %q: expected \"every <duration>\" (e.g. \"every 6h\") or \"daily at H[:MM][ utc]\" — local wall clock unless a \"utc\" suffix is given (e.g. \"daily at 11\", \"daily at 10:00\", \"daily at 11:00 utc\")", raw)
+	return fmt.Errorf("invalid schedule %q: expected %s", raw, ScheduleGrammar)
 }
 
 func hmWithClauseError(raw string) error {

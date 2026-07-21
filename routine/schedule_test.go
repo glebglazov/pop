@@ -6,6 +6,29 @@ import (
 	"time"
 )
 
+func TestScheduleGrammarAdvertisesProduction(t *testing.T) {
+	for _, ex := range []string{
+		"every 6h",
+		"at 10:00",
+		"on mon-fri at 09:00",
+		"every 2d at 10:00",
+		"every 2w on mon at 10:00",
+	} {
+		if !strings.Contains(ScheduleGrammar, ex) {
+			t.Fatalf("ScheduleGrammar missing example %q", ex)
+		}
+	}
+	if !strings.Contains(ScheduleGrammar, "[every <N><unit>]") {
+		t.Fatal("ScheduleGrammar missing production")
+	}
+	if !strings.Contains(ScheduleGrammar, "utc") {
+		t.Fatal("ScheduleGrammar missing utc rule")
+	}
+	if strings.Contains(strings.ToLower(ScheduleGrammar), "daily at") {
+		t.Fatal("ScheduleGrammar must not advertise daily at alias")
+	}
+}
+
 func TestParseScheduleEvery(t *testing.T) {
 	s, err := ParseSchedule("every 6h")
 	if err != nil {
@@ -143,7 +166,7 @@ func TestParseScheduleTargetedErrors(t *testing.T) {
 		if !strings.Contains(err.Error(), tc.wantSub) {
 			t.Fatalf("ParseSchedule(%q) error = %v, want substring %q", tc.raw, err, tc.wantSub)
 		}
-		if strings.Contains(err.Error(), "expected \"every <duration>\"") {
+		if strings.Contains(err.Error(), ScheduleGrammar) {
 			t.Fatalf("ParseSchedule(%q) should be targeted, got generic blurb: %v", tc.raw, err)
 		}
 	}

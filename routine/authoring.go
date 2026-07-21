@@ -140,10 +140,7 @@ func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	b.WriteString("written for it; write it as the routine's task, not as setup/teardown.\n\n")
 	fmt.Fprintf(&b, "  - Memory directory: %s (persists across runs; you define its format)\n", memoryDir)
 	fmt.Fprintf(&b, "  - Reports directory: %s (one timestamped .md report per run)\n", runsDir)
-	b.WriteString("  - Schedule grammar: \"every <duration>\" (e.g. \"every 6h\", \"every 30m\") or\n")
-	b.WriteString("    \"daily at H[:MM][ utc]\" (e.g. \"daily at 11\", \"daily at 10:00\", \"daily at\n")
-	b.WriteString("    11:00 utc\"). Daily uses the machine's local wall clock unless a \"utc\"\n")
-	b.WriteString("    suffix is given.\n\n")
+	fmt.Fprintf(&b, "  - Schedule grammar: %s\n\n", ScheduleGrammar)
 
 	b.WriteString("## This routine's concrete paths\n\n")
 	fmt.Fprintf(&b, "  - Bound directory (cwd for every run, incl. this session): %s\n", r.Manifest.BoundDirectory)
