@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,6 +84,8 @@ func TestBuildAuthoringPromptCreateModeStub(t *testing.T) {
 		"interview me and write a good prompt.md",
 		"## Interview checklist",
 		"Interview me until you can answer each of these",
+		"A schedule is optional",
+		"manual-fire-only",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("create-mode prompt missing %q:\n%s", want, prompt)
@@ -155,6 +158,9 @@ func TestBuildAuthoringPromptReviseMode(t *testing.T) {
 		"settles. Ask me only about what I want changed",
 		"Goal",
 		"Empty-run behavior",
+		"A schedule is optional",
+		"manual-fire-only",
+		"Current schedule: every 6h",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("revise-mode prompt missing %q:\n%s", want, prompt)
@@ -166,6 +172,35 @@ func TestBuildAuthoringPromptReviseMode(t *testing.T) {
 	} {
 		if strings.Contains(prompt, absent) {
 			t.Fatalf("revise-mode prompt should not contain %q:\n%s", absent, prompt)
+		}
+	}
+}
+
+func TestBuildAuthoringPromptReflectsUnscheduledState(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	d := refineDeps(t, dataHome, "", &bytes.Buffer{})
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AddWith(d, "gate", "", home); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := loadManifest(d, "gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := buildAuthoringPrompt(d, "gate", r)
+
+	for _, want := range []string{
+		"Current schedule: manual",
+		"unscheduled",
+		"only ever fires when I run `pop routine fire`",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("unscheduled-routine prompt missing %q:\n%s", want, prompt)
 		}
 	}
 }

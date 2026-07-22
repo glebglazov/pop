@@ -140,14 +140,22 @@ func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	b.WriteString("written for it; write it as the routine's task, not as setup/teardown.\n\n")
 	fmt.Fprintf(&b, "  - Memory directory: %s (persists across runs; you define its format)\n", memoryDir)
 	fmt.Fprintf(&b, "  - Reports directory: %s (one timestamped .md report per run)\n", runsDir)
-	fmt.Fprintf(&b, "  - Schedule grammar: %s\n\n", ScheduleGrammar)
+	fmt.Fprintf(&b, "  - Schedule grammar: %s\n", ScheduleGrammar)
+	b.WriteString("  - A schedule is optional: an unscheduled routine is a valid, durable end\n")
+	b.WriteString("    state (manual-fire-only — the daemon never fires it). Don't push for a\n")
+	b.WriteString("    cadence if I don't want one yet.\n\n")
 
 	b.WriteString("## This routine's concrete paths\n\n")
 	fmt.Fprintf(&b, "  - Bound directory (cwd for every run, incl. this session): %s\n", r.Manifest.BoundDirectory)
 	fmt.Fprintf(&b, "  - Prompt file to edit: %s\n", promptPath)
 	fmt.Fprintf(&b, "  - Memory directory: %s\n", memoryDir)
 	fmt.Fprintf(&b, "  - Reports directory: %s\n", runsDir)
-	fmt.Fprintf(&b, "  - Current schedule: %s\n\n", r.Manifest.Schedule)
+	fmt.Fprintf(&b, "  - Current schedule: %s\n", ScheduleLabel(r.Manifest.Schedule))
+	if !r.Manifest.IsScheduled() {
+		b.WriteString("    (unscheduled — this routine only ever fires when I run `pop routine fire`;\n")
+		b.WriteString("    if I want a cadence, ask what I want and settle it in conversation)\n")
+	}
+	b.WriteString("\n")
 
 	if createMode {
 		b.WriteString("## Interview checklist\n\n")

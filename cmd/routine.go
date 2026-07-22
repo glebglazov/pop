@@ -150,6 +150,10 @@ func runRoutineNew(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "\nRoutine created paused. Iterate on its prompt, fire it manually with\n")
 	fmt.Fprintf(out, "  pop routine fire %s\nuntil you are happy with the result, then arm it with\n", res.ID)
 	fmt.Fprintf(out, "  pop routine resume %s\nThe first fire anchors the schedule.\n", res.ID)
+	if !res.Manifest.IsScheduled() {
+		fmt.Fprintf(out, "No schedule was set; the routine stays manual-fire-only until you set one with\n")
+		fmt.Fprintf(out, "  pop routine edit %s --schedule \"<expr>\"\n", res.ID)
+	}
 	return nil
 }
 

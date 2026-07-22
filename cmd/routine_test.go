@@ -95,6 +95,49 @@ func TestRunRoutineNewAndList(t *testing.T) {
 	}
 }
 
+func TestRunRoutineNewUnscheduledHint(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(home); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	oldNew := routineNew
+	oldInteractive := routineInteractive
+	oldSchedule := routineNewSchedule
+	defer func() {
+		routineNew = oldNew
+		routineInteractive = oldInteractive
+		routineNewSchedule = oldSchedule
+	}()
+	routineInteractive = func() bool { return false }
+	routineNew = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
+		d := routine.DefaultDeps()
+		d.IsInteractive = func() bool { return false }
+		return routine.AddWith(d, id, scheduleRaw, cwd)
+	}
+
+	var newOut bytes.Buffer
+	routineNewCmd.SetOut(&newOut)
+	routineNewCmd.SetErr(&newOut)
+	routineNewSchedule = ""
+	if err := runRoutineNew(routineNewCmd, []string{"unscheduled-routine"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Schedule: manual", "No schedule was set", "pop routine edit unscheduled-routine --schedule"} {
+		if !strings.Contains(newOut.String(), want) {
+			t.Fatalf("new output missing %q:\n%s", want, newOut.String())
+		}
+	}
+}
+
 func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
