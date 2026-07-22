@@ -230,6 +230,7 @@ const (
 	menuActionAgentEffort
 	menuActionRefine
 	menuActionRuns
+	menuActionHandoff
 )
 
 // routineMenuItem is one verb in the action overlay: the flat shortcut letter it
@@ -266,6 +267,7 @@ func routineMenuItems(row DashboardRow) []routineMenuItem {
 		{key: "g", label: "agent/effort", action: menuActionAgentEffort},
 		{key: "r", label: "refine", action: menuActionRefine},
 		{key: "l", label: "runs", action: menuActionRuns},
+		{key: "y", label: "handoff", action: menuActionHandoff},
 	}
 }
 
@@ -877,8 +879,31 @@ func (m RoutineDashboard) dispatchMenuAction(action routineMenuAction, row Dashb
 		m.err = nil
 		m.detail = newRunsDetailView(row)
 		return m, m.loadRuns(row)
+	case menuActionHandoff:
+		m.statusMsg = m.copyHandoff(row.ID)
+		return m, nil
 	}
 	return m, nil
+}
+
+// copyHandoff assembles the routine's handoff prompt (task 06's builder) and
+// copies the whole prompt to the clipboard through the shared tmux/OSC52
+// helper, returning a status note. A build or copy failure surfaces as a
+// status note rather than crashing the dashboard. Unlike the `c` verb (which
+// copies a report path), this copies a full continuation prompt (ADR-0134).
+func (m RoutineDashboard) copyHandoff(id string) string {
+	d := m.d
+	if d == nil {
+		d = DefaultDeps()
+	}
+	prompt, err := buildHandoff(d, id)
+	if err != nil {
+		return fmt.Sprintf("handoff failed: %v", err)
+	}
+	if err := m.clipboardCopy()(prompt); err != nil {
+		return fmt.Sprintf("copy failed: %v", err)
+	}
+	return "copied handoff prompt"
 }
 
 // editPrompt suspends the TUI into $EDITOR on the routine's prompt.md via
@@ -1188,6 +1213,7 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "g", Desc: "agent/effort"},
 			{Key: "r", Desc: "refine"},
 			{Key: "l", Desc: "runs"},
+			{Key: "y", Desc: "handoff"},
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "enter", Desc: "run action"},
 			{Key: "esc", Desc: "close menu"},

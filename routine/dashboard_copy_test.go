@@ -3,6 +3,7 @@ package routine
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,6 +178,77 @@ func TestRoutineDashboardCopyRunsDetail(t *testing.T) {
 	}
 	if m.detail.status != noReportStatusMsg {
 		t.Fatalf("detail.status = %q, want %q", m.detail.status, noReportStatusMsg)
+	}
+}
+
+// TestRoutineDashboardHandoffVerb covers the `y` handoff verb in the action
+// menu: it assembles the routine's handoff prompt and copies the whole prompt
+// through the injected clipboard helper with a status-line confirmation.
+func TestRoutineDashboardHandoffVerb(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "beta", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := BuildDashboardWith(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newRoutineDashboard(d, snap)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(RoutineDashboard)
+
+	var captured string
+	callCount := 0
+	m.copyFunc = func(s string) error {
+		callCount++
+		captured = s
+		return nil
+	}
+
+	// Open the action menu, then invoke the handoff verb by its letter.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(RoutineDashboard)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd != nil {
+		t.Fatal("y should not schedule a command")
+	}
+	m = updated.(RoutineDashboard)
+	if callCount != 1 {
+		t.Fatalf("copyFunc called %d times, want 1", callCount)
+	}
+	if !strings.Contains(captured, "routine \"beta\"") {
+		t.Fatalf("copied prompt missing routine name: %q", captured)
+	}
+	if m.statusMsg != "copied handoff prompt" {
+		t.Fatalf("statusMsg = %q, want copied confirmation", m.statusMsg)
+	}
+	if m.menu != nil {
+		t.Fatal("menu should be closed after invoking handoff")
+	}
+}
+
+// TestRoutineDashboardHandoffCopyErrorSurfaces confirms a failing clipboard
+// write during handoff is surfaced in the status line, not a crash.
+func TestRoutineDashboardHandoffCopyErrorSurfaces(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "beta", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := BuildDashboardWith(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newRoutineDashboard(d, snap)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(RoutineDashboard)
+	m.copyFunc = func(string) error { return errors.New("boom") }
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(RoutineDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	m = updated.(RoutineDashboard)
+	if m.statusMsg != "copy failed: boom" {
+		t.Fatalf("statusMsg = %q, want copy failed message", m.statusMsg)
 	}
 }
 
