@@ -145,7 +145,7 @@ func mustReadFile(t *testing.T, path string) []byte {
 	return data
 }
 
-func TestRunTaskTimeoutMarksFailedWithoutRetry(t *testing.T) {
+func TestRunTaskTimeoutRetriesInstantlyThenFailsAtCap(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	agent := writeSlowAgent(t, env.root, 2*time.Second)
 
@@ -154,31 +154,76 @@ func TestRunTaskTimeoutMarksFailedWithoutRetry(t *testing.T) {
 	opts.Timeout = 100 * time.Millisecond
 	var buf bytes.Buffer
 	opts.Output = &buf
+	start := time.Now()
 	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	elapsed := time.Since(start)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "timed out after 100ms on attempt 1") {
-		t.Fatalf("err = %v", err)
+	// A timeout on a non-final attempt retries with zero delay, so three 100ms
+	// timeouts finish well under the 2s the slow agent would take to complete.
+	if elapsed > 2*time.Second {
+		t.Fatalf("timeout retries took %s, want instant retries", elapsed)
 	}
-	if !strings.Contains(buf.String(), "Agent killed (timeout) for demo/01-a") {
-		t.Fatalf("missing kill banner:\n%s", buf.String())
+	if !strings.Contains(err.Error(), "timed out after 100ms on attempt 3") {
+		t.Fatalf("err = %v", err)
 	}
 	if !strings.Contains(buf.String(), "✗ Attempt 1/3 timed out after 100ms") {
 		t.Fatalf("missing timeout failure line:\n%s", buf.String())
 	}
-	assertTaskFailed(t, env, "01-a", 1)
+	if got := strings.Count(buf.String(), "Retrying instantly with preserved changes"); got != 2 {
+		t.Fatalf("instant retry notices = %d, want 2:\n%s", got, buf.String())
+	}
+	// The cap is exhausted by timeouts: task Failed with a Failed progress record
+	// and the drain stops at the Failed gate.
+	assertTaskFailed(t, env, "01-a", 3)
 	assertProgressContains(t, env, "FAILED", "timed out")
 }
 
-func TestRunTaskTimeoutRecordsAttemptsStarted(t *testing.T) {
+// One timeout plus two assessment failures share the same max_tries budget: the
+// timeout counts as one attempt, so the task Fails at the default cap of 3.
+func TestRunTaskTimeoutSharesRetryBudget(t *testing.T) {
 	env := setupExecutorFixture(t, false)
-	agent := writeSlowAgent(t, env.root, 2*time.Second)
+	agent := writeAttemptAgent(t, env.root, []attemptScript{
+		{sleep: 3 * time.Second}, // attempt 1: times out
+		{changeFile: "impl.txt", changeData: "a\n", checkTask: true, skipSentinel: true}, // attempt 2: assessment failure
+		{changeFile: "impl.txt", changeData: "b\n", checkTask: true, skipSentinel: true}, // attempt 3: assessment failure → Failed
+	})
 
 	opts := env.runOpts(true, agent)
-	opts.MaxTries = 4
-	opts.Timeout = 100 * time.Millisecond
+	opts.MaxTries = 3
+	opts.Timeout = 700 * time.Millisecond
+	var buf bytes.Buffer
+	opts.Output = &buf
 	_, err := RunTaskWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	assertTaskFailed(t, env, "01-a", 1)
+	if !strings.Contains(err.Error(), "failed after 3 attempts") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(buf.String(), "✗ Attempt 1/3 timed out after 700ms") {
+		t.Fatalf("missing timeout line for attempt 1:\n%s", buf.String())
+	}
+	// The timeout consumed one slot, leaving two assessment-failure attempts
+	// before the shared cap is hit.
+	assertTaskFailed(t, env, "01-a", 3)
+}
+
+func TestRunTaskTimeoutCarriesContinueDigestForward(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	installClaudeHangingAgent(t, env.root, false)
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 2
+	opts.Timeout = 500 * time.Millisecond
+	opts.Output = io.Discard
+	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+
+	// The prior-attempt "continue" digest is built from the persisted timed-out
+	// stream, so a retry carries the ADR-0040 continue lesson forward.
+	digest := buildPriorAttemptDigest(env.deps(), env.demoDir(), "01-a.md")
+	if !strings.Contains(digest, lessonContinue) {
+		t.Fatalf("timeout digest missing continue lesson:\n%s", digest)
+	}
 }
 
 func TestRunTaskTimeoutKillsProcessGroup(t *testing.T) {
@@ -186,7 +231,9 @@ func TestRunTaskTimeoutKillsProcessGroup(t *testing.T) {
 	agent := writeProcessGroupAgent(t, env.root, 5*time.Second)
 
 	opts := env.runOpts(true, agent)
-	opts.MaxTries = 3
+	// A single attempt keeps this focused on the process-group kill, not the
+	// timeout retry policy exercised elsewhere.
+	opts.MaxTries = 1
 	opts.Timeout = 200 * time.Millisecond
 	_, err := RunTaskWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
@@ -435,6 +482,7 @@ type attemptScript struct {
 	checkTask    bool
 	skipSentinel bool
 	summary      string
+	sleep        time.Duration
 }
 
 func writeAttemptAgent(t *testing.T, root string, scripts []attemptScript) string {
@@ -448,11 +496,18 @@ func writeAttemptAgent(t *testing.T, root string, scripts []attemptScript) strin
 	b.WriteString("#!/bin/sh\n")
 	fmt.Fprintf(&b, "COUNTER=%q\n", counter)
 	b.WriteString("n=1\nif [ -f \"$COUNTER\" ]; then n=$(cat \"$COUNTER\"); fi\n")
+	// Advance the counter before running the case body so a timeout kill mid-sleep
+	// still records the attempt as started; otherwise a killed attempt would replay
+	// the same case on the next try.
+	b.WriteString("echo $((n+1)) > \"$COUNTER\"\n")
 	b.WriteString("case \"$n\" in\n")
 	for i, script := range scripts {
 		fmt.Fprintf(&b, "%d)\n", i+1)
 		if script.changeFile != "" {
 			fmt.Fprintf(&b, "printf %q >> %q\n", script.changeData, script.changeFile)
+		}
+		if script.sleep > 0 {
+			fmt.Fprintf(&b, "sleep %f\n", script.sleep.Seconds())
 		}
 		if script.checkTask {
 			b.WriteString("TASK=$(printf '%s' \"$1\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n")
@@ -471,7 +526,6 @@ func writeAttemptAgent(t *testing.T, root string, scripts []attemptScript) strin
 	}
 	b.WriteString("*) echo unexpected attempt; exit 2;;\n")
 	b.WriteString("esac\n")
-	b.WriteString("echo $((n+1)) > \"$COUNTER\"\n")
 	if err := os.WriteFile(path, []byte(b.String()), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -689,6 +689,9 @@ func TestRunTaskTimeoutFinalizesStream(t *testing.T) {
 
 	opts := env.runOpts(true, "")
 	opts.AgentPreset = "claude"
+	// A single attempt keeps this focused on stream finalization, not the
+	// timeout retry policy exercised in the retry tests.
+	opts.MaxTries = 1
 	opts.Timeout = 500 * time.Millisecond
 	_, err := RunTaskWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)

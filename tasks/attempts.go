@@ -113,9 +113,19 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		if outcome.timedOut {
 			timeoutReason := fmt.Sprintf("timed out after %s", timeout)
 			persist(outcome.stream, attempt, streamOutcomeTimedOut, timeoutReason, outcome.exitCode)
-			summary := fmt.Sprintf("timed out after %s on attempt %d", timeout, attempt)
 			display.line(ansiRed, "✗ Attempt %d/%d timed out after %s", attempt, maxTries, timeout)
+			// A timeout almost always means execution ran too long (an oversized
+			// context window), not a doomed approach. The retry restarts from the
+			// compact prior-attempt "continue" digest (ADR 0040), carried forward at
+			// the top of the loop, rather than the bloated transcript — so a wait
+			// adds nothing and the retry fires instantly. It consumes one slot of the
+			// shared max_tries budget; only the final attempt finalizes Failed.
+			if attempt < maxTries {
+				display.line(ansiYellow, "↻ Retrying instantly with preserved changes...")
+				continue
+			}
 			printAttemptBreakdown(d, out, streamPaths)
+			summary := fmt.Sprintf("timed out after %s on attempt %d", timeout, attempt)
 			if err := finalizeTaskFailed(d, sel, attempt, summary); err != nil {
 				return nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
