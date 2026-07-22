@@ -612,14 +612,16 @@ func verdictCleanlyParsed(raw string) bool {
 }
 
 // verifyAttemptRetryEligible reports whether a verifier invocation failure should
-// be retried on the current preset. Timeout stops the whole verify run;
-// quota pause is handled by the caller; clean verdict parses are not retried.
+// be retried on the current preset. A cleanly parsed verdict (PASS, FIXABLE, or
+// NEEDS-HUMAN) is the Verifier succeeding and is never retried, even on a
+// timeout. An unparseable timeout retries on the Task attempt retry delay until
+// the verify cap is spent; quota pause is handled by the caller.
 func verifyAttemptRetryEligible(outcome *attemptOutcome, raw string) bool {
-	if outcome != nil && outcome.timedOut {
-		return false
-	}
 	if verdictCleanlyParsed(raw) {
 		return false
+	}
+	if outcome != nil && outcome.timedOut {
+		return true
 	}
 	if outcome != nil && (outcome.runErr != nil || outcome.exitCode != 0) {
 		return true
@@ -693,8 +695,9 @@ func nonEmptyStrings(specs []string) []string {
 // runConfiguredVerifier walks the resolved Verifier agent list at the resolved
 // effort, retrying each available preset up to the verify cap with Task attempt
 // retry delays between invocation failures, then falling through to the next
-// agent on quota pause or exhausted retries. A timeout stops immediately with
-// no further attempts. A missing binary skips to the next agent. An empty
+// agent on quota pause or exhausted retries. A timeout is retry-eligible: it
+// waits the Task attempt retry delay and consumes the verify cap like any other
+// failure. A missing binary skips to the next agent. An empty
 // result or an exhausted list yields empty output, which ParseVerdict turns
 // into a NEEDS-HUMAN the human is told about.
 //
@@ -783,11 +786,14 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 				}
 				break
 			}
-			// Timeout stops immediately with no further attempts on any preset.
-			if outcome != nil && outcome.timedOut {
-				verdict, _ := ParseVerdict(normalized.Output)
-				_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, outcomeStr, reason, exitCode, string(verdict))
-				return normalized.Output, nil
+			// A Verifier timeout is a retry-eligible failure. Unlike an implement
+			// timeout (which restarts instantly from a compact digest), a verify
+			// hang is more likely a genuine stall than a bloated context, so it
+			// falls through to the shared retry path below and waits the Task
+			// attempt retry delay. It consumes the verify cap and, once exhausted,
+			// follows the existing next-preset agent fall-through.
+			if outcome != nil && outcome.timedOut && out != nil {
+				outputFor(out).line(ansiRed, "   Attempt %d/%d timed out after %s", try, maxTries, timeout)
 			}
 
 			verdict, _ := ParseVerdict(normalized.Output)

@@ -883,22 +883,48 @@ func TestRunConfiguredVerifierFallsThroughAfterRetryExhausted(t *testing.T) {
 	}
 }
 
-func TestRunConfiguredVerifierTimeoutStopsWithoutRetryOrFallback(t *testing.T) {
+func TestRunConfiguredVerifierTimeoutRetriesThenFallsThrough(t *testing.T) {
 	taskSetDir := t.TempDir()
 	runner := &slowVerifyRunner{delay: 2 * time.Second}
 	d := verifyRetryDeps(t, runner)
 
-	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(3), verifierSelection{
+	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(2), verifierSelection{
 		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
 	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
-	if runner.calls != 1 {
-		t.Fatalf("calls = %d, want 1 (timeout stops immediately)", runner.calls)
+	// Every attempt times out: 2 tries on the first agent (retry consumes the
+	// verify cap), then a fall-through to the second agent for 2 more.
+	if runner.calls != 4 {
+		t.Fatalf("calls = %d, want 4 (2 tries per agent, timeout retries)", runner.calls)
 	}
 	if strings.TrimSpace(raw) != "" {
-		t.Fatalf("raw = %q, want empty output on timeout", raw)
+		t.Fatalf("raw = %q, want empty output when every attempt times out", raw)
+	}
+}
+
+func TestRunConfiguredVerifierTimeoutRetriesThenParses(t *testing.T) {
+	taskSetDir := t.TempDir()
+	// First attempt hangs past the deadline (timeout); the retry returns a
+	// clean PASS, proving a verify timeout is retry-eligible and consumes a slot.
+	runner := &timeoutThenScriptRunner{
+		timeoutBefore: 1,
+		script:        `{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\nFINDINGS:\n"}`,
+	}
+	d := verifyRetryDeps(t, runner)
+
+	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(3), verifierSelection{
+		Agents: []string{"claude"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "VERDICT: PASS") {
+		t.Fatalf("raw = %q, want PASS on retry after timeout", raw)
+	}
+	if runner.calls != 2 {
+		t.Fatalf("calls = %d, want 2 (timeout then parsed pass)", runner.calls)
 	}
 }
 
@@ -951,5 +977,41 @@ func (r *slowVerifyRunner) Start(ctx context.Context, dir string, stdout, stderr
 		time.Sleep(r.delay)
 		proc.done <- waitResult{exitCode: 0}
 	}()
+	return proc, nil
+}
+
+// timeoutThenScriptRunner hangs past the deadline for the first timeoutBefore
+// calls, then emits script and returns immediately on subsequent calls.
+type timeoutThenScriptRunner struct {
+	timeoutBefore int
+	script        string
+	calls         int
+}
+
+func (r *timeoutThenScriptRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	proc, err := r.Start(ctx, dir, stdout, stderr, name, args...)
+	if err != nil {
+		return 1, err
+	}
+	return proc.Wait()
+}
+
+func (r *timeoutThenScriptRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	r.calls++
+	proc := &ManagedProcess{done: make(chan waitResult, 1)}
+	if r.calls <= r.timeoutBefore {
+		go func() {
+			time.Sleep(2 * time.Second)
+			proc.done <- waitResult{exitCode: 0}
+		}()
+		return proc, nil
+	}
+	for _, line := range strings.Split(r.script, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fmt.Fprintln(stdout, line)
+	}
+	proc.done <- waitResult{exitCode: 0}
 	return proc, nil
 }
