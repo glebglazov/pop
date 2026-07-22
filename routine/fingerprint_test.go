@@ -97,6 +97,8 @@ func TestUpdateScheduleWithPausesChanged(t *testing.T) {
 	if _, err := AddWith(d, "sched", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
+	// A prior run anchors the routine so the edit pauses with `changed` (ADR-0134).
+	seedFiredRun(t, d, "sched")
 	// Start from resumed so the pause is attributable to the edit.
 	if _, err := ResumeWith(d, "sched"); err != nil {
 		t.Fatal(err)
@@ -107,6 +109,54 @@ func TestUpdateScheduleWithPausesChanged(t *testing.T) {
 	m := readManifest(t, d, "sched")
 	if !m.Paused || m.PauseReason != PauseReasonChanged {
 		t.Fatalf("manifest = {paused:%v reason:%q}, want paused reason changed", m.Paused, m.PauseReason)
+	}
+}
+
+// TestUpdateScheduleWithNeverFiredKeepsCreated proves the `changed` pause reason
+// requires an anchor (ADR-0134): editing the schedule of a never-fired Routine
+// leaves it paused with reason `created`, not `changed`.
+func TestUpdateScheduleWithNeverFiredKeepsCreated(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := routineDeps(t, dataHome)
+	if _, err := AddWith(d, "sched", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	// No prior run: the schedule edit must not flip created→changed.
+	if _, err := UpdateScheduleWith(d, "sched", "daily at 09:30"); err != nil {
+		t.Fatal(err)
+	}
+	m := readManifest(t, d, "sched")
+	if !m.Paused || m.PauseReason != PauseReasonCreated {
+		t.Fatalf("manifest = {paused:%v reason:%q}, want paused reason created", m.Paused, m.PauseReason)
+	}
+}
+
+// TestEditPromptNeverFiredKeepsCreated proves the prompt-edit chokepoint keeps a
+// never-fired Routine at reason `created` (ADR-0134).
+func TestEditPromptNeverFiredKeepsCreated(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := routineDeps(t, dataHome)
+	if _, err := AddWith(d, "prompt", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	d.IsInteractive = func() bool { return true }
+	d.OpenEditor = func(string) error { return nil }
+	if _, err := EditWith(d, "prompt", "", false); err != nil {
+		t.Fatal(err)
+	}
+	m := readManifest(t, d, "prompt")
+	if !m.Paused || m.PauseReason != PauseReasonCreated {
+		t.Fatalf("manifest = {paused:%v reason:%q}, want paused reason created", m.Paused, m.PauseReason)
 	}
 }
 
@@ -123,6 +173,8 @@ func TestEditPromptPausesChanged(t *testing.T) {
 	if _, err := AddWith(d, "prompt", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
+	// A prior run anchors the routine so the edit pauses with `changed` (ADR-0134).
+	seedFiredRun(t, d, "prompt")
 	if _, err := ResumeWith(d, "prompt"); err != nil {
 		t.Fatal(err)
 	}

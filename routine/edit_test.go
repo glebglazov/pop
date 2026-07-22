@@ -131,6 +131,8 @@ func TestEditClearsScheduleToUnset(t *testing.T) {
 	if _, err := AddWith(d, "sched", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
+	// A prior run anchors the routine so the clear pauses with `changed` (ADR-0134).
+	seedFiredRun(t, d, "sched")
 
 	res, err := EditWith(d, "sched", "", true)
 	if err != nil {

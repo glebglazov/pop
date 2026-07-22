@@ -73,10 +73,63 @@ func pauseChanged(d *Deps, id string) error {
 
 // PauseChangedWith pauses id with reason `changed` using the given deps. The
 // Queue daemon calls it when a due routine's fingerprint no longer matches its
-// last run.
+// last run. The daemon only reaches this for a Routine with a non-empty last
+// fingerprint (i.e. one that has fired), so the anchor rule below is already
+// satisfied and it does not need re-checking here.
 func PauseChangedWith(d *Deps, id string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
 	return pauseChanged(d, id)
+}
+
+// routineHasFired reports whether the Routine has at least one non-skipped run
+// on record — the anchor the daemon uses to decide a schedule is live. A
+// missing execution store means it has never fired.
+func routineHasFired(d *Deps, id string) (bool, error) {
+	s, ok, err := openExecutionStoreIfExists(d)
+	if err != nil || !ok {
+		return false, err
+	}
+	defer func() { _ = s.Close() }()
+	last, err := s.LastRoutineFireTime(id)
+	if err != nil {
+		return false, err
+	}
+	return !last.IsZero(), nil
+}
+
+// editPauseReason returns the pause reason a run-affecting edit chokepoint should
+// apply. The `changed` reason requires an anchor (ADR-0134): it means
+// "run-affecting drift since runs existed", so it applies only once the Routine
+// has fired at least once. A never-fired Routine has nothing to drift from and
+// keeps reason `created` through any edit — this is what lets an agent set the
+// schedule while refining a freshly created Routine without flipping created→changed.
+func editPauseReason(d *Deps, id string) (PauseReason, error) {
+	fired, err := routineHasFired(d, id)
+	if err != nil {
+		return "", err
+	}
+	if fired {
+		return PauseReasonChanged, nil
+	}
+	return PauseReasonCreated, nil
+}
+
+// pauseAfterEdit pauses id following a run-affecting edit, choosing the reason
+// via the anchor rule in editPauseReason. It is the load-modify-write companion
+// used by the prompt-editor chokepoint; the schedule/runtime chokepoints fold
+// the same reason into their own single write.
+func pauseAfterEdit(d *Deps, id string) error {
+	reason, err := editPauseReason(d, id)
+	if err != nil {
+		return err
+	}
+	r, err := loadManifest(d, id)
+	if err != nil {
+		return err
+	}
+	r.Manifest.Paused = true
+	r.Manifest.PauseReason = reason
+	return writeManifest(d, id, r.Manifest)
 }

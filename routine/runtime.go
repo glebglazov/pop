@@ -64,6 +64,16 @@ func writeRuntime(d *Deps, id string, agents []string, agentsSet bool, effort st
 			return nil, err
 		}
 	}
+	// The `changed` pause requires an anchor (ADR-0134): compute the reason so a
+	// never-fired Routine keeps `created` instead of flipping to `changed`.
+	var editReason PauseReason
+	if markChanged {
+		reason, err := editPauseReason(d, id)
+		if err != nil {
+			return nil, err
+		}
+		editReason = reason
+	}
 	r, err := loadManifest(d, id)
 	if err != nil {
 		return nil, err
@@ -76,7 +86,7 @@ func writeRuntime(d *Deps, id string, agents []string, agentsSet bool, effort st
 	}
 	if markChanged {
 		r.Manifest.Paused = true
-		r.Manifest.PauseReason = PauseReasonChanged
+		r.Manifest.PauseReason = editReason
 	}
 	if err := writeManifest(d, id, r.Manifest); err != nil {
 		return nil, err

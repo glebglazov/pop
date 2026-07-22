@@ -97,6 +97,30 @@ func fireDeps(t *testing.T, dataHome string) *Deps {
 	return d
 }
 
+// seedFiredRun records one finished, non-skipped run for id so the Routine
+// counts as "fired at least once" — the anchor the `changed` pause reason
+// requires (ADR-0134).
+func seedFiredRun(t *testing.T, d *Deps, id string) {
+	t.Helper()
+	s, err := openExecutionStore(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	run, err := s.StartRoutineRun(store.RoutineRun{
+		RoutineID: id,
+		FiredAt:   time.Now().UTC(),
+		PID:       4242,
+		ProcStart: "seed",
+	}, func(store.RoutineRun) bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRoutineRun(run.ID, store.RoutineRunSucceeded, "", "", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFireProducesReportAndWrappedPrompt(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")

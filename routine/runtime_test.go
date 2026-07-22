@@ -81,6 +81,8 @@ func TestUpdateRuntimeValidatesAndPausesChanged(t *testing.T) {
 	if _, err := AddWith(d, "daily", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
+	// A prior run anchors the routine so the `changed` reason applies (ADR-0134).
+	seedFiredRun(t, d, "daily")
 	// Arm it so the changed-pause is observable.
 	if _, err := ResumeWith(d, "daily"); err != nil {
 		t.Fatal(err)
@@ -110,6 +112,37 @@ func TestUpdateRuntimeValidatesAndPausesChanged(t *testing.T) {
 	m := readManifest(t, d, "daily")
 	if !m.Paused || m.PauseReason != PauseReasonChanged {
 		t.Fatalf("manifest paused=%v reason=%q, want true/changed", m.Paused, m.PauseReason)
+	}
+	if strings.Join(m.Agents, ",") != "claude" || m.Effort != "light" {
+		t.Fatalf("manifest agents=%v effort=%q, want [claude]/light", m.Agents, m.Effort)
+	}
+}
+
+// TestUpdateRuntimeWithNeverFiredKeepsCreated proves editing runtime
+// agents/effort on a never-fired Routine leaves reason `created` — the `changed`
+// pause reason requires an anchor (ADR-0134).
+func TestUpdateRuntimeWithNeverFiredKeepsCreated(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := routineDeps(t, dataHome)
+	if _, err := AddWith(d, "daily", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	// No prior run: the runtime edit must not flip created→changed.
+	res, err := UpdateRuntimeWith(d, "daily", []string{"claude"}, true, "light", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Paused {
+		t.Fatal("result should report paused")
+	}
+	m := readManifest(t, d, "daily")
+	if !m.Paused || m.PauseReason != PauseReasonCreated {
+		t.Fatalf("manifest paused=%v reason=%q, want true/created", m.Paused, m.PauseReason)
 	}
 	if strings.Join(m.Agents, ",") != "claude" || m.Effort != "light" {
 		t.Fatalf("manifest agents=%v effort=%q, want [claude]/light", m.Agents, m.Effort)

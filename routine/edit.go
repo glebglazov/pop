@@ -27,8 +27,9 @@ func UpdateSchedule(id, scheduleRaw string) (Manifest, error) {
 // ADR-0134) rather than a parser error — mirroring the agent/effort modal's
 // clear-to-unset semantics. The bound directory and creation time are preserved.
 // Editing the schedule is a run-affecting change, so this eager chokepoint pauses
-// the Routine with reason `changed` (ADR-0128). The dashboard's edit-schedule
-// modal and the refinement loop call this same helper.
+// the Routine. The pause reason follows the anchor rule (ADR-0134): `changed`
+// only once the Routine has fired at least once, otherwise it keeps `created`.
+// The dashboard's edit-schedule modal and the refinement loop call this same helper.
 func UpdateScheduleWith(d *Deps, id, scheduleRaw string) (Manifest, error) {
 	if err := validateID(id); err != nil {
 		return Manifest{}, err
@@ -41,13 +42,17 @@ func UpdateScheduleWith(d *Deps, id, scheduleRaw string) (Manifest, error) {
 			return Manifest{}, err
 		}
 	}
+	reason, err := editPauseReason(d, id)
+	if err != nil {
+		return Manifest{}, err
+	}
 	r, err := loadManifest(d, id)
 	if err != nil {
 		return Manifest{}, err
 	}
 	r.Manifest.Schedule = trimmed
 	r.Manifest.Paused = true
-	r.Manifest.PauseReason = PauseReasonChanged
+	r.Manifest.PauseReason = reason
 	if err := writeManifest(d, id, r.Manifest); err != nil {
 		return Manifest{}, err
 	}
@@ -91,9 +96,10 @@ func EditWith(d *Deps, id, scheduleRaw string, scheduleSet bool) (*EditResult, e
 	if err := d.OpenEditor(promptPath); err != nil {
 		return nil, fmt.Errorf("open prompt in editor: %w", err)
 	}
-	// Opening the prompt editor is a run-affecting edit chokepoint: pause with
-	// reason `changed` (ADR-0128) so a re-proving manual fire is required.
-	if err := pauseChanged(d, id); err != nil {
+	// Opening the prompt editor is a run-affecting edit chokepoint: pause so a
+	// re-proving manual fire is required. The reason follows the anchor rule
+	// (ADR-0134) — `changed` once fired, otherwise `created`.
+	if err := pauseAfterEdit(d, id); err != nil {
 		return nil, err
 	}
 	return &EditResult{RoutineID: id, PromptPath: promptPath, Opened: true}, nil

@@ -82,6 +82,8 @@ func TestRoutineDashboardAgentEffortValidWrite(t *testing.T) {
 	if _, err := AddWith(d, "alpha", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
+	// A prior run anchors the routine so the edit pauses with `changed` (ADR-0134).
+	seedFiredRun(t, d, "alpha")
 	// Arm it so the changed-pause is observable.
 	if _, err := ResumeWith(d, "alpha"); err != nil {
 		t.Fatal(err)
