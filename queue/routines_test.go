@@ -153,6 +153,44 @@ func TestTickRoutinesSkipsPaused(t *testing.T) {
 	}
 }
 
+func TestTickRoutinesSkipsUnscheduled(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	qd, rd, home := routineTickDeps(t, now)
+	// An unscheduled routine is durable manual-fire-only (ADR-0134): the daemon
+	// never fires it even when resumed and anchored by a prior manual fire.
+	if _, err := routine.AddWith(rd, "manual-only", "", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.ResumeWith(rd, "manual-only"); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"), func(int, string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StartRoutineRun(store.RoutineRun{
+		RoutineID: "manual-only",
+		FiredAt:   now.Add(-24 * time.Hour),
+		PID:       1,
+		ProcStart: "dead",
+	}, func(store.RoutineRun) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRoutineRun(1, store.RoutineRunSucceeded, "", "", now.Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+
+	var out bytes.Buffer
+	tickRoutines(qd, &out)
+
+	rt := qd.Tmux.(*recordingTmux)
+	if _, ok := extractRoutineSpawnCommand(rt, "manual-only"); ok {
+		t.Fatalf("unscheduled routine must not spawn, commands=%v", rt.commands)
+	}
+}
+
 func TestTickRoutinesSkipsOverlapAndJournals(t *testing.T) {
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	qd, rd, home := routineTickDeps(t, now)

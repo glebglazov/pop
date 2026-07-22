@@ -46,6 +46,11 @@ func tickRoutines(d *Deps, out io.Writer) {
 		if r.Manifest.Paused {
 			continue
 		}
+		// An unscheduled Routine is durable manual-fire-only (ADR-0134): the
+		// daemon never fires it regardless of its pause bit or anchor.
+		if !r.Manifest.IsScheduled() {
+			continue
+		}
 		lastFired, err := routine.LastFireTime(s, r.ID)
 		if err != nil {
 			fmt.Fprintf(out, "queue: routine %s: last fire: %v\n", r.ID, err)

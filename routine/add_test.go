@@ -93,6 +93,42 @@ func TestAddScaffoldsRoutineFromNonGitDirectory(t *testing.T) {
 	}
 }
 
+func TestAddScaffoldsUnscheduledRoutine(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := routineDeps(t, dataHome)
+
+	res, err := AddWith(d, "manual-only", "", home)
+	if err != nil {
+		t.Fatalf("creating without a schedule should succeed: %v", err)
+	}
+	if res.Manifest.Schedule != "" {
+		t.Fatalf("Schedule = %q, want empty", res.Manifest.Schedule)
+	}
+	if res.Manifest.IsScheduled() {
+		t.Fatal("IsScheduled() = true, want false for an unscheduled routine")
+	}
+
+	// The manifest persists and reloads with no schedule and no parser error.
+	r, err := loadManifest(d, "manual-only")
+	if err != nil {
+		t.Fatalf("reload of an unscheduled routine should not error: %v", err)
+	}
+	if r.Manifest.Schedule != "" {
+		t.Fatalf("reloaded schedule = %q, want empty", r.Manifest.Schedule)
+	}
+	if r.Manifest.IsScheduled() {
+		t.Fatal("reloaded IsScheduled() = true, want false")
+	}
+	if ScheduleLabel(r.Manifest.Schedule) != "manual" {
+		t.Fatalf("ScheduleLabel = %q, want %q", ScheduleLabel(r.Manifest.Schedule), "manual")
+	}
+}
+
 func canonical(t *testing.T, path string) string {
 	t.Helper()
 	resolved, err := filepath.EvalSymlinks(path)

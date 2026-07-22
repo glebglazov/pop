@@ -211,6 +211,39 @@ func TestFireAnchorsNeverFiredRoutine(t *testing.T) {
 	}
 }
 
+func TestFireRunsUnscheduledRoutine(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installFakeClaude(t, root, 0)
+	d := fireDeps(t, dataHome)
+
+	// An unscheduled routine is manual-fire-only (ADR-0134): a manual fire is
+	// its whole point and runs normally, laying the anchor run row.
+	if _, err := AddWith(d, "manual-only", "", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FireWith(d, "manual-only"); err != nil {
+		t.Fatalf("manual fire on an unscheduled routine should succeed: %v", err)
+	}
+
+	s, err := openExecutionStore(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	lastFired, err := LastFireTime(s, "manual-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lastFired.IsZero() {
+		t.Fatal("manual fire should record a run row for an unscheduled routine")
+	}
+}
+
 func TestFireRefusesConcurrentRun(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")

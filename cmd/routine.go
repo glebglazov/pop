@@ -114,8 +114,7 @@ func init() {
 	routineCmd.AddCommand(routineResumeCmd)
 	routineCmd.AddCommand(routineRunsCmd)
 	routineCmd.AddCommand(routineDashboardCmd)
-	routineNewCmd.Flags().StringVar(&routineNewSchedule, "schedule", "", "routine schedule: "+routine.ScheduleGrammar)
-	_ = routineNewCmd.MarkFlagRequired("schedule")
+	routineNewCmd.Flags().StringVar(&routineNewSchedule, "schedule", "", "routine schedule (optional; omit for a manual-fire-only routine): "+routine.ScheduleGrammar)
 	routineNewCmd.Flags().StringArrayVar(&routineNewAgents, "agent", nil, "runtime agent preset for scheduled runs; repeat to define an ordered fallback list")
 	routineNewCmd.Flags().StringVar(&routineNewEffort, "effort", "", "runtime model-strength tier: light, standard, or heavy (default standard)")
 	routineNewCmd.Flags().StringVar(&routineNewRefineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
@@ -135,7 +134,7 @@ func runRoutineNew(cmd *cobra.Command, args []string) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Created routine %q at %s\n", res.ID, res.Dir)
 	fmt.Fprintf(out, "Bound directory: %s\n", res.Manifest.BoundDirectory)
-	fmt.Fprintf(out, "Schedule: %s\n", res.Manifest.Schedule)
+	fmt.Fprintf(out, "Schedule: %s\n", routine.ScheduleLabel(res.Manifest.Schedule))
 	// Runtime agents/effort, when supplied, are direct validated writes onto the
 	// freshly-scaffolded (created-paused) routine — no refinement gate involved.
 	if agentsSet || effortSet {

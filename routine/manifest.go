@@ -56,6 +56,22 @@ func pausedStatusLabel(reason PauseReason) string {
 	}
 }
 
+// IsScheduled reports whether the Routine carries a schedule. An absent schedule
+// is a durable manual-fire-only state (ADR-0134): the Queue daemon never fires
+// it, and surfaces render it as "manual".
+func (m Manifest) IsScheduled() bool {
+	return strings.TrimSpace(m.Schedule) != ""
+}
+
+// ScheduleLabel renders a manifest schedule for display; an absent schedule
+// reads as "manual" (ADR-0134).
+func ScheduleLabel(schedule string) string {
+	if strings.TrimSpace(schedule) == "" {
+		return "manual"
+	}
+	return schedule
+}
+
 // Routine is a discovered Routine with its identifier and parsed manifest.
 type Routine struct {
 	ID       string
@@ -77,9 +93,16 @@ func loadManifest(d *Deps, id string) (*Routine, error) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse routine manifest %q: %w", id, err)
 	}
-	sched, err := ParseSchedule(m.Schedule)
-	if err != nil {
-		return nil, fmt.Errorf("routine %q has invalid schedule: %w", id, err)
+	// An unscheduled Routine is a durable manual-only state (ADR-0134): the
+	// absence is handled before the parser, which still rejects an empty
+	// expression. Only a present schedule is parsed.
+	var sched Schedule
+	if m.IsScheduled() {
+		var err error
+		sched, err = ParseSchedule(m.Schedule)
+		if err != nil {
+			return nil, fmt.Errorf("routine %q has invalid schedule: %w", id, err)
+		}
 	}
 	return &Routine{ID: id, Manifest: m, Schedule: sched}, nil
 }

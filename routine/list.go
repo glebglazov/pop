@@ -45,7 +45,7 @@ func ListWith(d *Deps, out io.Writer) error {
 			if r.Manifest.Paused {
 				paused = "yes"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.ID, r.Manifest.BoundDirectory, r.Manifest.Schedule, paused)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.ID, r.Manifest.BoundDirectory, ScheduleLabel(r.Manifest.Schedule), paused)
 		}
 		if err := tw.Flush(); err != nil {
 			return err

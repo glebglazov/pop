@@ -29,8 +29,13 @@ func AddWith(d *Deps, id, scheduleRaw, cwd string) (*AddResult, error) {
 	if err := validateID(id); err != nil {
 		return nil, err
 	}
-	if _, err := ParseSchedule(scheduleRaw); err != nil {
-		return nil, err
+	// A schedule is optional (ADR-0134): omitting it scaffolds an unscheduled,
+	// manual-fire-only Routine. A provided schedule still validates through the
+	// parser exactly as before.
+	if strings.TrimSpace(scheduleRaw) != "" {
+		if _, err := ParseSchedule(scheduleRaw); err != nil {
+			return nil, err
+		}
 	}
 
 	boundDir, err := canonicalBoundDirectory(d, cwd)

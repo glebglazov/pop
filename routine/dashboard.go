@@ -1643,7 +1643,7 @@ func dashboardRowValues(row DashboardRow) []string {
 	return []string{
 		row.ID,
 		row.Directory,
-		row.Schedule,
+		ScheduleLabel(row.Schedule),
 		row.LastRun,
 		dashboardStatusStyled(row.Status),
 	}
@@ -1653,7 +1653,7 @@ func dashboardRowNaturalValues(row DashboardRow) []string {
 	return []string{
 		row.ID,
 		row.Directory,
-		row.Schedule,
+		ScheduleLabel(row.Schedule),
 		row.LastRun,
 		row.Status,
 	}
