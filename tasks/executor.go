@@ -13,7 +13,7 @@ import (
 
 const (
 	DefaultMaxTries       = config.DefaultTaskMaxTries
-	DefaultAttemptTimeout = 1 * time.Hour
+	DefaultAttemptTimeout = 45 * time.Minute
 )
 
 // RunTaskOptions configures a single-task execution.

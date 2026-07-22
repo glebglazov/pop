@@ -1871,7 +1871,7 @@ func TestImplementCmdRejectsMoreThanOnePositional(t *testing.T) {
 }
 
 func TestImplementTimeoutDefaultMatchesAttemptTimeout(t *testing.T) {
-	// The flag default is a clean literal ("1h") for pretty help text, while the
+	// The flag default is a clean literal ("45m") for pretty help text, while the
 	// executor's zero-value fallback is the DefaultAttemptTimeout constant. They
 	// are independent sources; this guards them against drift.
 	def := taskImplementCmd.Flags().Lookup("timeout").DefValue
