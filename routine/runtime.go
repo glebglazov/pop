@@ -37,7 +37,7 @@ func ConfigureRuntime(id string, agents []string, agentsSet bool, effort string,
 	return ConfigureRuntimeWith(defaultDeps, id, agents, agentsSet, effort, effortSet)
 }
 
-// ConfigureRuntimeWith writes runtime config as part of `pop routine add`. The
+// ConfigureRuntimeWith writes runtime config as part of `pop routine new`. The
 // routine is already paused-on-creation, so this leaves the pause reason
 // untouched rather than marking it `changed`.
 func ConfigureRuntimeWith(d *Deps, id string, agents []string, agentsSet bool, effort string, effortSet bool) (*RuntimeResult, error) {

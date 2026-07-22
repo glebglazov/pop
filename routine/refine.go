@@ -19,7 +19,7 @@ func Refine(id, agentOverride string) error {
 }
 
 // RefineWith runs the HITL refinement loop for a Routine (ADR-0125). It is the
-// gate `pop routine add` drops into after scaffolding on a TTY and the gate bare
+// gate `pop routine new` drops into after scaffolding on a TTY and the gate bare
 // `pop routine edit <id>` opens. The menu follows the house numbered gate
 // grammar — line-based items, a `Choose [1]:` prompt read through a shared
 // reader, word aliases accepted, static default 1 — not the dashboards'

@@ -68,9 +68,9 @@ func AddWith(d *Deps, id, scheduleRaw, cwd string) (*AddResult, error) {
 		return nil, err
 	}
 
-	// Editing is no longer kicked off here: an interactive `pop routine add`
+	// Editing is no longer kicked off here: an interactive `pop routine new`
 	// drops into the refinement gate (RefineWith) after scaffolding, and a
-	// non-interactive add just scaffolds paused and prints the paths.
+	// non-interactive new just scaffolds paused and prints the paths.
 	return &AddResult{ID: id, Dir: dir, Manifest: manifest}, nil
 }
 

@@ -15,7 +15,7 @@ func TestRoutineCommandTree(t *testing.T) {
 	tests := []struct {
 		path []string
 	}{
-		{path: []string{"routine", "add"}},
+		{path: []string{"routine", "new"}},
 		{path: []string{"routine", "edit"}},
 		{path: []string{"routine", "list"}},
 		{path: []string{"routine", "fire"}},
@@ -33,7 +33,7 @@ func TestRoutineCommandTree(t *testing.T) {
 	}
 }
 
-func TestRunRoutineAddAndList(t *testing.T) {
+func TestRunRoutineNewAndList(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	home := filepath.Join(root, "home")
@@ -47,16 +47,16 @@ func TestRunRoutineAddAndList(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	oldAdd := routineAdd
+	oldNew := routineNew
 	oldList := routineList
 	oldInteractive := routineInteractive
 	defer func() {
-		routineAdd = oldAdd
+		routineNew = oldNew
 		routineList = oldList
 		routineInteractive = oldInteractive
 	}()
 	routineInteractive = func() bool { return false }
-	routineAdd = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
+	routineNew = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
 		d := routine.DefaultDeps()
 		d.IsInteractive = func() bool { return false }
 		return routine.AddWith(d, id, scheduleRaw, cwd)
@@ -66,19 +66,19 @@ func TestRunRoutineAddAndList(t *testing.T) {
 		return routine.ListWith(d, out)
 	}
 
-	var addOut bytes.Buffer
-	routineAddCmd.SetOut(&addOut)
-	routineAddCmd.SetErr(&addOut)
-	routineAddSchedule = "every 6h"
-	if err := runRoutineAdd(routineAddCmd, []string{"home-routine"}); err != nil {
+	var newOut bytes.Buffer
+	routineNewCmd.SetOut(&newOut)
+	routineNewCmd.SetErr(&newOut)
+	routineNewSchedule = "every 6h"
+	if err := runRoutineNew(routineNewCmd, []string{"home-routine"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(addOut.String(), "Created routine") {
-		t.Fatalf("add output = %q", addOut.String())
+	if !strings.Contains(newOut.String(), "Created routine") {
+		t.Fatalf("new output = %q", newOut.String())
 	}
 	for _, want := range []string{"created paused", "pop routine fire home-routine", "pop routine resume home-routine"} {
-		if !strings.Contains(addOut.String(), want) {
-			t.Fatalf("add output missing guidance %q:\n%s", want, addOut.String())
+		if !strings.Contains(newOut.String(), want) {
+			t.Fatalf("new output missing guidance %q:\n%s", want, newOut.String())
 		}
 	}
 
@@ -109,14 +109,14 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	oldAdd := routineAdd
+	oldNew := routineNew
 	oldList := routineList
 	oldPause := routinePause
 	oldResume := routineResume
 	oldRuns := routineRuns
 	oldInteractive := routineInteractive
 	defer func() {
-		routineAdd = oldAdd
+		routineNew = oldNew
 		routineList = oldList
 		routinePause = oldPause
 		routineResume = oldResume
@@ -124,7 +124,7 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 		routineInteractive = oldInteractive
 	}()
 	routineInteractive = func() bool { return false }
-	routineAdd = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
+	routineNew = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
 		d := routine.DefaultDeps()
 		d.IsInteractive = func() bool { return false }
 		return routine.AddWith(d, id, scheduleRaw, cwd)
@@ -142,8 +142,8 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 		return routine.RunsWith(routine.DefaultDeps(), id, out)
 	}
 
-	routineAddSchedule = "every 6h"
-	if err := runRoutineAdd(routineAddCmd, []string{"cli-routine"}); err != nil {
+	routineNewSchedule = "every 6h"
+	if err := runRoutineNew(routineNewCmd, []string{"cli-routine"}); err != nil {
 		t.Fatal(err)
 	}
 	// Routines are created paused; arm it so the pause/resume cycle starts unpaused.

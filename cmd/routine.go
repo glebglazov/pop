@@ -14,19 +14,19 @@ var routineCmd = &cobra.Command{
 	Long: `Manage recurring unattended agent routines.
 
 Routines are directory-bound schedules that fire agent runs over time.
-Author one with pop routine add from any directory (git-backed or not).`,
+Author one with pop routine new from any directory (git-backed or not).`,
 }
 
-var routineAddSchedule string
-var routineAddRefineAgent string
-var routineAddAgents []string
-var routineAddEffort string
+var routineNewSchedule string
+var routineNewRefineAgent string
+var routineNewAgents []string
+var routineNewEffort string
 var routineEditSchedule string
 var routineEditRefineAgent string
 var routineEditAgents []string
 var routineEditEffort string
 var (
-	routineAdd              = routine.Add
+	routineNew              = routine.Add
 	routineEdit             = routine.Edit
 	routineConfigureRuntime = routine.ConfigureRuntime
 	routineUpdateRuntime    = routine.UpdateRuntime
@@ -40,11 +40,11 @@ var (
 	routineDashboard        = dashboardshell.RunFromRoutine
 )
 
-var routineAddCmd = &cobra.Command{
-	Use:   "add <id>",
+var routineNewCmd = &cobra.Command{
+	Use:   "new <id>",
 	Short: "Scaffold a new routine from the current directory",
 	Args:  cobra.ExactArgs(1),
-	RunE:  runRoutineAdd,
+	RunE:  runRoutineNew,
 }
 
 var routineEditCmd = &cobra.Command{
@@ -106,7 +106,7 @@ var routineDashboardCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(routineCmd)
-	routineCmd.AddCommand(routineAddCmd)
+	routineCmd.AddCommand(routineNewCmd)
 	routineCmd.AddCommand(routineEditCmd)
 	routineCmd.AddCommand(routineListCmd)
 	routineCmd.AddCommand(routineFireCmd)
@@ -114,21 +114,21 @@ func init() {
 	routineCmd.AddCommand(routineResumeCmd)
 	routineCmd.AddCommand(routineRunsCmd)
 	routineCmd.AddCommand(routineDashboardCmd)
-	routineAddCmd.Flags().StringVar(&routineAddSchedule, "schedule", "", "routine schedule: "+routine.ScheduleGrammar)
-	_ = routineAddCmd.MarkFlagRequired("schedule")
-	routineAddCmd.Flags().StringArrayVar(&routineAddAgents, "agent", nil, "runtime agent preset for scheduled runs; repeat to define an ordered fallback list")
-	routineAddCmd.Flags().StringVar(&routineAddEffort, "effort", "", "runtime model-strength tier: light, standard, or heavy (default standard)")
-	routineAddCmd.Flags().StringVar(&routineAddRefineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
+	routineNewCmd.Flags().StringVar(&routineNewSchedule, "schedule", "", "routine schedule: "+routine.ScheduleGrammar)
+	_ = routineNewCmd.MarkFlagRequired("schedule")
+	routineNewCmd.Flags().StringArrayVar(&routineNewAgents, "agent", nil, "runtime agent preset for scheduled runs; repeat to define an ordered fallback list")
+	routineNewCmd.Flags().StringVar(&routineNewEffort, "effort", "", "runtime model-strength tier: light, standard, or heavy (default standard)")
+	routineNewCmd.Flags().StringVar(&routineNewRefineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
 	routineEditCmd.Flags().StringVar(&routineEditSchedule, "schedule", "", "new routine schedule: "+routine.ScheduleGrammar+"; skips the editor")
 	routineEditCmd.Flags().StringArrayVar(&routineEditAgents, "agent", nil, "set the runtime agent preset list for scheduled runs; repeat for an ordered fallback list (direct write, pauses the routine)")
 	routineEditCmd.Flags().StringVar(&routineEditEffort, "effort", "", "set the runtime model-strength tier: light, standard, or heavy (direct write, pauses the routine)")
 	routineEditCmd.Flags().StringVar(&routineEditRefineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
 }
 
-func runRoutineAdd(cmd *cobra.Command, args []string) error {
+func runRoutineNew(cmd *cobra.Command, args []string) error {
 	agentsSet := cmd.Flags().Changed("agent")
 	effortSet := cmd.Flags().Changed("effort")
-	res, err := routineAdd(args[0], routineAddSchedule, "")
+	res, err := routineNew(args[0], routineNewSchedule, "")
 	if err != nil {
 		return err
 	}
@@ -139,14 +139,14 @@ func runRoutineAdd(cmd *cobra.Command, args []string) error {
 	// Runtime agents/effort, when supplied, are direct validated writes onto the
 	// freshly-scaffolded (created-paused) routine — no refinement gate involved.
 	if agentsSet || effortSet {
-		if _, err := routineConfigureRuntime(res.ID, routineAddAgents, agentsSet, routineAddEffort, effortSet); err != nil {
+		if _, err := routineConfigureRuntime(res.ID, routineNewAgents, agentsSet, routineNewEffort, effortSet); err != nil {
 			return err
 		}
 	}
-	// On a TTY, drop straight into the refinement session; a non-interactive add
+	// On a TTY, drop straight into the refinement session; a non-interactive new
 	// just scaffolds paused and prints how to iterate manually.
 	if routineInteractive() {
-		return routineRefine(res.ID, routineAddRefineAgent)
+		return routineRefine(res.ID, routineNewRefineAgent)
 	}
 	fmt.Fprintf(out, "\nRoutine created paused. Iterate on its prompt, fire it manually with\n")
 	fmt.Fprintf(out, "  pop routine fire %s\nuntil you are happy with the result, then arm it with\n", res.ID)

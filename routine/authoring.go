@@ -88,7 +88,7 @@ func runRoutineAttendedAgent(d *Deps, dir string, out io.Writer, invocation *tas
 }
 
 // isCreateModePrompt reports whether prompt.md is still unauthored: the
-// scaffolded add stub, or blank/whitespace-only (ADR-0132). Anything else is
+// scaffolded new stub, or blank/whitespace-only (ADR-0132). Anything else is
 // revise mode.
 func isCreateModePrompt(content string) bool {
 	if strings.TrimSpace(content) == "" {
