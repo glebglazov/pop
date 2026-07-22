@@ -951,10 +951,11 @@ func (m RoutineDashboard) updateScheduleModal(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 // confirmScheduleModal validates the working expression through the schedule
 // parser and, only if it parses, persists it via the shared UpdateScheduleWith
-// helper (the same read-modify-write the CLI edit uses). On success the modal
-// closes, a status message confirms, and a reload refreshes the row's SCHEDULE
-// column. On parse failure the manifest is left untouched and the modal stays
-// open showing the inline error for re-editing.
+// helper (the same read-modify-write the CLI edit uses). An empty submit clears
+// the schedule back to unscheduled (manual-only, ADR-0134). On success the modal
+// closes, a status message confirms (SCHEDULE reads `manual` when cleared), and a
+// reload refreshes the row's SCHEDULE column. On parse failure the manifest is
+// left untouched and the modal stays open showing the inline error for re-editing.
 func (m RoutineDashboard) confirmScheduleModal() (tea.Model, tea.Cmd) {
 	if m.sched == nil {
 		return m, nil
@@ -970,7 +971,7 @@ func (m RoutineDashboard) confirmScheduleModal() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.sched = nil
-	m.statusMsg = fmt.Sprintf("updated schedule for %s to %s", row.ID, mani.Schedule)
+	m.statusMsg = fmt.Sprintf("updated schedule for %s to %s", row.ID, ScheduleLabel(mani.Schedule))
 	return m, m.reload()
 }
 

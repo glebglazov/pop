@@ -165,7 +165,12 @@ func runRoutineEdit(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "Updated schedule for routine %q to %s\n", res.RoutineID, res.Schedule)
+			label := res.Schedule
+			if label == "" {
+				// An empty schedule was cleared to unscheduled (manual-only).
+				label = "manual"
+			}
+			fmt.Fprintf(out, "Updated schedule for routine %q to %s\n", res.RoutineID, label)
 		}
 		// Editing runtime agents/effort is run-affecting: it pauses the routine
 		// with reason `changed`.

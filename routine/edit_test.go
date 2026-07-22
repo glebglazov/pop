@@ -120,6 +120,41 @@ func TestEditWritesSchedule(t *testing.T) {
 	}
 }
 
+func TestEditClearsScheduleToUnset(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := routineDeps(t, dataHome)
+	if _, err := AddWith(d, "sched", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := EditWith(d, "sched", "", true)
+	if err != nil {
+		t.Fatalf("clearing schedule should succeed, got %v", err)
+	}
+	if !res.ScheduleUpdated || res.Schedule != "" {
+		t.Fatalf("result = %+v, want cleared schedule", res)
+	}
+
+	r, err := loadManifest(d, "sched")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Manifest.IsScheduled() {
+		t.Fatalf("manifest still scheduled after clear: %q", r.Manifest.Schedule)
+	}
+	if ScheduleLabel(r.Manifest.Schedule) != "manual" {
+		t.Fatalf("schedule label = %q, want manual", ScheduleLabel(r.Manifest.Schedule))
+	}
+	if !r.Manifest.Paused || r.Manifest.PauseReason != PauseReasonChanged {
+		t.Fatalf("clear should pause with reason changed: paused=%v reason=%q", r.Manifest.Paused, r.Manifest.PauseReason)
+	}
+}
+
 func TestEditRejectsInvalidScheduleLeavingManifest(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")

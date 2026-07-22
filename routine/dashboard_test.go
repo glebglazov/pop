@@ -816,6 +816,50 @@ func TestRoutineDashboardEditScheduleValidWrite(t *testing.T) {
 	}
 }
 
+func TestRoutineDashboardEditScheduleClearToUnset(t *testing.T) {
+	d, home := routineDashboardDeps(t)
+	if _, err := AddWith(d, "alpha", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	m := openScheduleModal(t, d)
+	// Empty the input and submit: an empty submit clears back to unscheduled.
+	m = clearScheduleInput(t, m)
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(RoutineDashboard)
+	if m.sched != nil {
+		t.Fatal("empty enter should close the modal (clear-to-unset)")
+	}
+	if cmd == nil {
+		t.Fatal("empty enter should schedule a reload")
+	}
+	if !strings.Contains(m.statusMsg, "alpha") || !strings.Contains(m.statusMsg, "manual") {
+		t.Fatalf("status message = %q, want cleared-to-manual", m.statusMsg)
+	}
+	r, err := loadManifest(d, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Manifest.IsScheduled() {
+		t.Fatalf("manifest still scheduled after clear: %q", r.Manifest.Schedule)
+	}
+
+	// The reload refreshes the row's SCHEDULE column to manual.
+	msg := cmd()
+	rows, ok := msg.(dashboardRowsMsg)
+	if !ok || rows.err != nil {
+		t.Fatalf("reload msg = %#v", msg)
+	}
+	updated, _ = m.Update(rows)
+	m = updated.(RoutineDashboard)
+	if got := m.snap.Rows[0].Schedule; got != "" {
+		t.Fatalf("row schedule after reload = %q, want empty (unscheduled)", got)
+	}
+	if !strings.Contains(m.View().Content, "manual") {
+		t.Fatalf("SCHEDULE column should render manual after clear:\n%s", m.View().Content)
+	}
+}
+
 func TestRoutineDashboardEditScheduleInvalidReedit(t *testing.T) {
 	d, home := routineDashboardDeps(t)
 	if _, err := AddWith(d, "alpha", "every 6h", home); err != nil {

@@ -22,18 +22,24 @@ func UpdateSchedule(id, scheduleRaw string) (Manifest, error) {
 
 // UpdateScheduleWith validates scheduleRaw through the schedule parser and, only
 // if it parses, persists it to the routine's manifest (read-modify-write). An
-// unparseable expression is rejected before anything is written. The bound
-// directory and creation time are preserved. Editing the schedule is a
-// run-affecting change, so this eager chokepoint pauses the Routine with reason
-// `changed` (ADR-0128). The dashboard's edit-schedule modal and the refinement
-// loop call this same helper.
+// unparseable expression is rejected before anything is written. An
+// explicitly-empty expression is a clear back to unscheduled (manual-only,
+// ADR-0134) rather than a parser error — mirroring the agent/effort modal's
+// clear-to-unset semantics. The bound directory and creation time are preserved.
+// Editing the schedule is a run-affecting change, so this eager chokepoint pauses
+// the Routine with reason `changed` (ADR-0128). The dashboard's edit-schedule
+// modal and the refinement loop call this same helper.
 func UpdateScheduleWith(d *Deps, id, scheduleRaw string) (Manifest, error) {
 	if err := validateID(id); err != nil {
 		return Manifest{}, err
 	}
 	trimmed := strings.TrimSpace(scheduleRaw)
-	if _, err := ParseSchedule(trimmed); err != nil {
-		return Manifest{}, err
+	// An empty expression clears the schedule to unscheduled; only a non-empty
+	// expression is validated through the grammar parser.
+	if trimmed != "" {
+		if _, err := ParseSchedule(trimmed); err != nil {
+			return Manifest{}, err
+		}
 	}
 	r, err := loadManifest(d, id)
 	if err != nil {
