@@ -37,6 +37,7 @@ var (
 	routinePause            = routine.Pause
 	routineResume           = routine.Resume
 	routineRuns             = routine.Runs
+	routineHandoff          = routine.Handoff
 	routineDashboard        = dashboardshell.RunFromRoutine
 )
 
@@ -97,6 +98,18 @@ var routineRunsCmd = &cobra.Command{
 	RunE:  runRoutineRuns,
 }
 
+var routineHandoffCmd = &cobra.Command{
+	Use:   "handoff <id>",
+	Short: "Print a continuation prompt assembled from a routine's artifacts",
+	Long: `Print a continuation prompt for a fresh agent session, assembled from a
+routine's artifacts (its prompt, latest run report, memory directory, and bound
+directory). The prompt bakes in no task of its own — pipe it into another agent
+and follow up with the task you want done, e.g. "fix all the bugs this routine
+found".`,
+	Args: cobra.ExactArgs(1),
+	RunE: runRoutineHandoff,
+}
+
 var routineDashboardCmd = &cobra.Command{
 	Use:   "dashboard",
 	Short: "Open the interactive routines dashboard",
@@ -113,6 +126,7 @@ func init() {
 	routineCmd.AddCommand(routinePauseCmd)
 	routineCmd.AddCommand(routineResumeCmd)
 	routineCmd.AddCommand(routineRunsCmd)
+	routineCmd.AddCommand(routineHandoffCmd)
 	routineCmd.AddCommand(routineDashboardCmd)
 	routineNewCmd.Flags().StringVar(&routineNewSchedule, "schedule", "", "routine schedule (optional; omit for a manual-fire-only routine): "+routine.ScheduleGrammar)
 	routineNewCmd.Flags().StringArrayVar(&routineNewAgents, "agent", nil, "runtime agent preset for scheduled runs; repeat to define an ordered fallback list")
@@ -233,6 +247,10 @@ func runRoutineResume(cmd *cobra.Command, args []string) error {
 
 func runRoutineRuns(cmd *cobra.Command, args []string) error {
 	return routineRuns(args[0], cmd.OutOrStdout())
+}
+
+func runRoutineHandoff(cmd *cobra.Command, args []string) error {
+	return routineHandoff(args[0], cmd.OutOrStdout())
 }
 
 func runRoutineDashboard(cmd *cobra.Command, args []string) error {

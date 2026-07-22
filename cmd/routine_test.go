@@ -22,6 +22,7 @@ func TestRoutineCommandTree(t *testing.T) {
 		{path: []string{"routine", "pause"}},
 		{path: []string{"routine", "resume"}},
 		{path: []string{"routine", "runs"}},
+		{path: []string{"routine", "handoff"}},
 		{path: []string{"routine", "dashboard"}},
 	}
 	for _, tt := range tests {
