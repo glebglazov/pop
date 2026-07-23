@@ -385,7 +385,20 @@ type reverifyGateContext struct {
 // `pop tasks verify` — runAndStoreVerdict always re-invokes the Verifier and
 // overwrites the verdict at the current SHA, so a human who made inline changes
 // re-checks the work without kicking off a fresh drain.
+//
+// The Verifier touches the checkout, so — like any execution — the re-verify
+// re-acquires the Runtime execution lock via BeginDrain and releases it on
+// return to the gate menu (ADR-0135). The gate is parked lock-free, so this is
+// the point that must reassert the Checkout claim: if another set claimed the
+// checkout while the human read the menu, BeginDrain refuses with the claim
+// reason and the human can retry after the claimant finishes. Assist sessions
+// and the runtime shell stay lock-free — human-owned side trips are not claims.
 func reverifyAtGate(d *Deps, rv *reverifyGateContext, out io.Writer, repo, runtimePath, setID string, m *Manifest) error {
+	handle, err := BeginDrain(d, runtimePath, setID, out)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = handle.Finish(store.StateFinished, "", false, time.Time{}) }()
 	opts := verifyCoreOptions{
 		Repo:        repo,
 		RuntimePath: runtimePath,
