@@ -211,7 +211,7 @@ func blockedItemFromIdle(idle IdleProject) BlockedItem {
 		Project:     idle.Project,
 		RepoLabel:   repoLabel,
 		SetID:       idle.Deferral.SetID,
-		Reason:      idle.Deferral.Reason.Message(),
+		Reason:      idle.Deferral.Message(),
 		Kind:        idle.Deferral.Reason.Kind(),
 		Until:       idle.Deferral.Until,
 		RuntimePath: idle.RuntimePath,

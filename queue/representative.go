@@ -334,8 +334,14 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 		return []Decision{skel}
 	}
 
+	bindings, bindErr := binding.AllBindings(d.Tasks)
+	if bindErr != nil {
+		bindings = nil
+	}
+
 	backoff := d.setBackoffLookup(scanRepoCommonDir(d, base), delays, now)
-	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters)
+	claimFor := d.checkoutClaimLookup(bindings, repoKey, base.ProjectPath)
+	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters, claimFor)
 	if !ok {
 		if deferral.Deferred() {
 			applyDeferral(&skel, deferral)
@@ -343,11 +349,6 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 			skel.Reason = "no ready set"
 		}
 		return []Decision{skel}
-	}
-
-	bindings, bindErr := binding.AllBindings(d.Tasks)
-	if bindErr != nil {
-		bindings = nil
 	}
 
 	var decisions []Decision

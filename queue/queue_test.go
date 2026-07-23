@@ -70,7 +70,7 @@ func TestSelectReadySet(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ids, _, ok := selectReadySets(&tasks.RefreshResult{Rows: tt.rows}, nil, nil)
+			ids, _, ok := selectReadySets(&tasks.RefreshResult{Rows: tt.rows}, nil, nil, nil)
 			got := ""
 			if ok && len(ids) > 0 {
 				got = ids[0]
@@ -672,9 +672,9 @@ func TestUnsatisfiableDirectiveSurfacesInStatusNotBackoff(t *testing.T) {
 // returning only its top pick the way the retired selectReadySet wrapper read:
 // the highest-priority spawnable set, or the wait instant/reason on none.
 func firstReadySet(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter) (string, time.Time, string, bool) {
-	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters)
+	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters, nil)
 	if !ok || len(ids) == 0 {
-		return "", deferral.Until, deferral.Reason.Message(), false
+		return "", deferral.Until, deferral.Message(), false
 	}
 	return ids[0], time.Time{}, "", true
 }

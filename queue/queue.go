@@ -22,6 +22,7 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/routine"
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 )
@@ -365,7 +366,7 @@ type Decision struct {
 // run output all read one source (ADR-0106).
 func applyDeferral(dec *Decision, d SpawnDeferral) {
 	dec.Deferral = d
-	dec.Reason = d.Reason.Message()
+	dec.Reason = d.Message()
 	dec.WaitUntil = d.Until
 	dec.BlockedSetID = d.SetID
 }
@@ -762,7 +763,8 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 	})
 
 	backoff := d.setBackoffLookup(scanRepoCommonDir(d, scan), delays, now)
-	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters)
+	claimFor := d.checkoutClaimLookup(bindings, repoKey, scan.ProjectPath)
+	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters, claimFor)
 	if !ok {
 		if deferral.Deferred() {
 			applyDeferral(&dec, deferral)
@@ -950,6 +952,36 @@ func firstAwaitingApprovalSetID(rows []tasks.Row) string {
 // a nil func (tests, callers without a store) means "always spawnable".
 type setBackoffFunc func(setID string) (parked bool, until time.Time)
 
+// checkoutClaimFunc reports the live Checkout claim on a Ready set's bound
+// checkout, or nil when nothing claims it (ADR-0135). Deriving it needs the
+// set→checkout resolution (bindings + representative), so the caller builds the
+// closure and selectReadySets consults it per candidate. A nil func (tests,
+// callers without a store) means "no checkout claim".
+type checkoutClaimFunc func(setID string) *store.CheckoutClaim
+
+// checkoutClaimLookup builds the per-set Checkout-claim probe used during
+// dispatch: it resolves each set's bound checkout (its Worktree binding path,
+// else the repository's representative) and reads the live claim on it. A read
+// error or missing store degrades to "no claim", never blocking dispatch on a
+// transient store problem — the transactional BeginDrain chokepoint still
+// refuses a genuine double-spawn.
+func (d *Deps) checkoutClaimLookup(bindings map[string]WorktreeBinding, repoKey, representative string) checkoutClaimFunc {
+	if d == nil || d.Tasks == nil {
+		return nil
+	}
+	return func(setID string) *store.CheckoutClaim {
+		runtimePath := binding.RuntimeForSet(bindings, repoKey, setID, representative)
+		if strings.TrimSpace(runtimePath) == "" {
+			return nil
+		}
+		claim, err := tasks.ReadCheckoutClaim(d.Tasks, runtimePath)
+		if err != nil {
+			return nil
+		}
+		return claim
+	}
+}
+
 // selectReadySets is the single queue-side readiness selector: it returns the
 // Auto-drain Ready sets eligible for supervisor dispatch, highest priority
 // first. RefreshWith returns only non-Archived sets, so Archived sets are
@@ -960,7 +992,7 @@ type setBackoffFunc func(setID string) (parked bool, until time.Time)
 // On no eligible set it reports why via a single SpawnDeferral (ADR-0106) —
 // reason species, the blocked set, and an optional until-instant — so every
 // caller renders the same decision without re-deriving per-subsystem strings.
-func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter) ([]string, SpawnDeferral, bool) {
+func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter, claimFor checkoutClaimFunc) ([]string, SpawnDeferral, bool) {
 	if refresh == nil {
 		return nil, SpawnDeferral{}, false
 	}
@@ -980,7 +1012,8 @@ func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recov
 		return ready[i].RegIndex < ready[j].RegIndex
 	})
 	var earliest time.Time
-	var parkedID, backoffID, recoveryID string
+	var parkedID, backoffID, recoveryID, claimID string
+	var claimHolder *store.CheckoutClaim
 	var ids []string
 	for _, row := range ready {
 		if backoff != nil {
@@ -1008,6 +1041,34 @@ func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recov
 			}
 			continue
 		}
+		// Checkout-scoped claim (ADR-0135): the set's own waiter was handled above
+		// (set-scoped); here a candidate whose bound checkout carries *another*
+		// set's live claim defers rather than burning a spawn attempt BeginDrain
+		// would only refuse. A quota-waiter claim reuses the DeferQuotaRecovery
+		// path so its reset instant feeds the earliest-eligible display; a dirty
+		// Failed-gate (or shared running-drain) claim reports DeferCheckoutClaim
+		// naming the holding set. Non-claiming gate holds return no claim and so
+		// never defer dispatch.
+		if claimFor != nil {
+			if claim := claimFor(row.ID); claim != nil && claim.SetID != row.ID {
+				if claim.Kind == store.ClaimQuotaWaiter {
+					if w, ok := recoveryWaiters[claim.SetID]; ok {
+						if recoveryID == "" {
+							recoveryID = row.ID
+						}
+						if earliest.IsZero() || w.ResetAt.Before(earliest) {
+							earliest = w.ResetAt
+						}
+						continue
+					}
+				}
+				if claimID == "" {
+					claimID = row.ID
+					claimHolder = claim
+				}
+				continue
+			}
+		}
 		ids = append(ids, row.ID)
 	}
 	if len(ids) > 0 {
@@ -1018,6 +1079,8 @@ func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recov
 		return nil, SpawnDeferral{Reason: DeferCrashBackoff, SetID: backoffID, Until: earliest}, false
 	case !earliest.IsZero() && recoveryID != "":
 		return nil, SpawnDeferral{Reason: DeferQuotaRecovery, SetID: recoveryID, Until: earliest}, false
+	case claimID != "":
+		return nil, SpawnDeferral{Reason: DeferCheckoutClaim, SetID: claimID, Claim: claimHolder}, false
 	case parkedID != "":
 		return nil, SpawnDeferral{Reason: DeferParked, SetID: parkedID}, false
 	default:
