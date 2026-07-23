@@ -52,12 +52,18 @@ func (s *Store) drainAlive(d Drain) bool {
 
 // StartDrain inserts a running Drain and enforces mutual exclusion in one
 // transaction: it refuses (ErrDrainInProgress) when a live running Drain
-// already exists for the same (repo, set) or the same runtime checkout. A
-// running row whose PID is no longer alive is stale (a crash the reconciliation
-// slice will heal) and does not block. On refusal the returned Drain describes
-// the conflicting live drain. Liveness (whether a recorded drain's process is
-// still running, checked against its PID and ProcStart so a reused PID does not
-// read as live) is the store's construction-time policy (ADR-0118).
+// already exists for the same (repo, set) or the same runtime checkout, and it
+// refuses (*CheckoutClaimedError, errors.Is ErrCheckoutClaimed) when another
+// set's live Checkout claim holds the runtime checkout — a live Recovery waiter
+// parked on the path (ADR-0135). A set's own still-registered waiter never
+// blocks its own resume start (a quota-parked set re-starts past it before
+// deregistering). A running row whose PID is no longer alive is stale (a crash
+// the reconcile heals) and does not block; likewise a dead-owner waiter. On the
+// running-drain refusal the returned Drain describes the conflicting live drain;
+// on the claim refusal the error carries the claiming set and kind. Liveness
+// (whether a recorded owner's process is still running, checked against its PID
+// and ProcStart so a reused PID does not read as live) is the store's
+// construction-time policy (ADR-0118).
 func (s *Store) StartDrain(d Drain) (Drain, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -96,6 +102,20 @@ func (s *Store) StartDrain(d Drain) (Drain, error) {
 		if s.drainAlive(c) {
 			return c, ErrDrainInProgress
 		}
+	}
+
+	// Beyond a live running Drain, another set's live Recovery waiter parked on
+	// this checkout also claims it (ADR-0135): admitting a second set would
+	// clobber the tree the waiter will resume into. The set's own waiter is
+	// excluded so its resume start (which precedes deregistration today) is not
+	// self-blocked. The claim query runs on the same transaction, under the write
+	// lock the BEGIN IMMEDIATE already took.
+	claim, err := s.liveWaiterClaim(tx, d.RuntimePath, d.SetID)
+	if err != nil {
+		return Drain{}, err
+	}
+	if claim != nil {
+		return Drain{}, &CheckoutClaimedError{Claim: *claim}
 	}
 
 	res, err := tx.Exec(

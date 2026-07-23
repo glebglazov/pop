@@ -249,6 +249,12 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 				"runtime execution already in progress (PID %d since %s at %s)",
 				drain.PID, drain.StartedAt.Format(time.RFC3339), drain.RuntimePath)
 		}
+		var claimed *store.CheckoutClaimedError
+		if errors.As(err, &claimed) {
+			return nil, exitErr(ExitOperational,
+				"checkout claimed by set %s (%s)",
+				claimed.Claim.SetID, claimed.Claim.Reason())
+		}
 		return nil, exitErr(ExitOperational, "record drain start: %v", err)
 	}
 	// The running Drain row now covers this set, so its pending-spawn marker (if
