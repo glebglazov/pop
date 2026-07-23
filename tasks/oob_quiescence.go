@@ -38,6 +38,14 @@ func checkoutBusyErr(occ *store.CheckoutOccupant) error {
 		return exitErr(ExitOperational,
 			"checkout is held at a verification gate by set %q (PID %d since %s): resolve it at the interactive gate before accepting or remediating out of band",
 			occ.SetID, occ.PID, occ.Since.Format(time.RFC3339))
+	case store.OccupantWaiter:
+		turn := "queued behind another waiter under the recovery turn"
+		if occ.NextInTurn {
+			turn = "next under the recovery turn (resume imminent)"
+		}
+		return exitErr(ExitOperational,
+			"set %q is quota-recovering on this checkout (PID %d since %s), %s: it will resume and re-verify, so accepting or remediating out of band now would be overwritten — retry after it resumes or deregisters",
+			occ.SetID, occ.PID, occ.Since.Format(time.RFC3339), turn)
 	default:
 		return exitErr(ExitOperational,
 			"a drain is running on this checkout for set %q (PID %d since %s): retry after it parks or finishes",

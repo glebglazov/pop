@@ -92,6 +92,85 @@ func TestMutateIfCheckoutQuiescentRefusedByLiveGateHold(t *testing.T) {
 	}
 }
 
+func TestMutateIfCheckoutQuiescentRefusedByLiveWaiter(t *testing.T) {
+	s := openTestStore(t, aliveByToken(Drain{PID: 300, ProcStart: "w1"}))
+	if err := s.PutRecoveryWaiter(RecoveryWaiter{
+		SetID: "waiting", Preset: "p", ResetAt: time.Now().Add(time.Hour),
+		RuntimePath: "/rt", PID: 300, ProcStart: "w1", RegisteredAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("PutRecoveryWaiter: %v", err)
+	}
+	ran := false
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		ran = true
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("waiting"))
+	})
+	if !errors.Is(err, ErrCheckoutBusy) {
+		t.Fatalf("err = %v, want ErrCheckoutBusy", err)
+	}
+	if ran {
+		t.Fatalf("mutation must not run while a live waiter occupies the checkout")
+	}
+	if occ == nil || occ.Kind != OccupantWaiter || occ.SetID != "waiting" || occ.PID != 300 {
+		t.Fatalf("occupant = %+v, want live waiter waiting/300", occ)
+	}
+	if !occ.NextInTurn {
+		t.Fatalf("sole waiter with no turn held should be next in turn: %+v", occ)
+	}
+	if v, _ := s.GetVerifyVerdict("r", "waiting", "sha1"); v != nil {
+		t.Fatalf("no verdict must be written on refusal, got %+v", v)
+	}
+}
+
+func TestMutateIfCheckoutQuiescentIgnoresDeadWaiter(t *testing.T) {
+	// Waiter owner is dead (nothing alive) → does not block; it is swept elsewhere.
+	s := openTestStore(t, aliveByToken())
+	if err := s.PutRecoveryWaiter(RecoveryWaiter{
+		SetID: "waiting", Preset: "p", ResetAt: time.Now().Add(time.Hour),
+		RuntimePath: "/rt", PID: 300, ProcStart: "w1", RegisteredAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("PutRecoveryWaiter: %v", err)
+	}
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("waiting"))
+	})
+	if err != nil || occ != nil {
+		t.Fatalf("dead waiter must not block: occ=%+v err=%v", occ, err)
+	}
+	if v, _ := s.GetVerifyVerdict("r", "waiting", "sha1"); v == nil {
+		t.Fatalf("verdict should be committed past a dead waiter")
+	}
+}
+
+func TestMutateIfCheckoutQuiescentWaiterQueuedBehindTurn(t *testing.T) {
+	// A live waiter occupies the checkout, but another set holds the recovery turn:
+	// the named occupant is queued behind it (NextInTurn=false).
+	s := openTestStore(t, aliveByToken(Drain{PID: 300, ProcStart: "w1"}))
+	if err := s.PutRecoveryWaiter(RecoveryWaiter{
+		SetID: "waiting", Preset: "p", ResetAt: time.Now().Add(time.Hour),
+		RuntimePath: "/rt", PID: 300, ProcStart: "w1", RegisteredAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("PutRecoveryWaiter: %v", err)
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO recovery_turns (runtime_path, set_id, acquired_at) VALUES (?, ?, ?)`,
+		"/rt", "ahead", time.Now().UTC().Format(timeLayout)); err != nil {
+		t.Fatalf("seed recovery turn: %v", err)
+	}
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("waiting"))
+	})
+	if !errors.Is(err, ErrCheckoutBusy) {
+		t.Fatalf("err = %v, want ErrCheckoutBusy", err)
+	}
+	if occ == nil || occ.Kind != OccupantWaiter || occ.SetID != "waiting" {
+		t.Fatalf("occupant = %+v, want live waiter waiting", occ)
+	}
+	if occ.NextInTurn {
+		t.Fatalf("waiter behind a held turn must not be next in turn: %+v", occ)
+	}
+}
+
 func TestMutateIfCheckoutQuiescentIgnoresDeadDrain(t *testing.T) {
 	// Owner PID 100/t1 is not in the alive set → dead → does not block.
 	s := openTestStore(t, aliveByToken())
