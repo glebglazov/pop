@@ -55,9 +55,10 @@ func (s *Store) drainAlive(d Drain) bool {
 // already exists for the same (repo, set) or the same runtime checkout, and it
 // refuses (*CheckoutClaimedError, errors.Is ErrCheckoutClaimed) when another
 // set's live Checkout claim holds the runtime checkout — a live Recovery waiter
-// parked on the path (ADR-0135). A set's own still-registered waiter never
-// blocks its own resume start (a quota-parked set re-starts past it before
-// deregistering). A running row whose PID is no longer alive is stale (a crash
+// parked on the path, or a live claim-bearing gate hold (another set at a Failed
+// gate over a dirty tree) (ADR-0135). A set's own still-registered waiter or
+// gate hold never blocks its own resume/re-acquire start (a quota-parked set
+// re-starts past it before deregistering; a gate-launched action re-acquires). A running row whose PID is no longer alive is stale (a crash
 // the reconcile heals) and does not block; likewise a dead-owner waiter. On the
 // running-drain refusal the returned Drain describes the conflicting live drain;
 // on the claim refusal the error carries the claiming set and kind. Liveness
@@ -116,6 +117,19 @@ func (s *Store) StartDrain(d Drain) (Drain, error) {
 	}
 	if claim != nil {
 		return Drain{}, &CheckoutClaimedError{Claim: *claim}
+	}
+
+	// A live claim-bearing gate hold — another set parked at a Failed gate over a
+	// dirty tree — is the third claim arm (ADR-0135). A non-claiming hold (HITL,
+	// verify-fail, clean Failed gate) is skipped by the claim=1 filter and never
+	// blocks admission. The set's own hold is excluded so a gate-launched
+	// re-acquire (e.g. reverify) is not self-blocked.
+	gateClaim, err := s.liveGateHoldClaim(tx, d.RuntimePath, d.SetID)
+	if err != nil {
+		return Drain{}, err
+	}
+	if gateClaim != nil {
+		return Drain{}, &CheckoutClaimedError{Claim: *gateClaim}
 	}
 
 	res, err := tx.Exec(

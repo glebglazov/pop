@@ -16,8 +16,8 @@ import (
 var ErrCheckoutClaimed = errors.New("checkout claimed by another set")
 
 // CheckoutClaimKind names what holds a Checkout claim on a runtime path. The
-// claim union is derived at read time (no table): a live running Drain, or a live
-// Recovery waiter (the Checkout gate-hold arm lands in a later slice).
+// claim union is derived at read time (no table): a live running Drain, a live
+// Recovery waiter, or a live claim-bearing Checkout gate hold.
 type CheckoutClaimKind string
 
 const (
@@ -27,6 +27,12 @@ const (
 	// its preset's cooldown before resuming — an automatic process that will
 	// resume, so it claims the checkout (ADR-0135).
 	ClaimQuotaWaiter CheckoutClaimKind = "quota_waiter"
+	// ClaimFailedGate: a live claim-bearing Checkout gate hold — a set parked at a
+	// Failed gate over uncommitted work (dirtiness snapshotted at park time,
+	// ADR-0135). Admitting another set would rewrite the dirty tree the human is
+	// mid-review of. A non-claiming gate hold (HITL, verify-fail, clean Failed
+	// gate) is not a claim.
+	ClaimFailedGate CheckoutClaimKind = "failed_gate"
 )
 
 // CheckoutClaim is a live claim on a runtime checkout, derived at read time from
@@ -48,6 +54,8 @@ func (c CheckoutClaim) Reason() string {
 		return "running drain"
 	case ClaimQuotaWaiter:
 		return "quota wait"
+	case ClaimFailedGate:
+		return "failed gate, uncommitted changes"
 	default:
 		return string(c.Kind)
 	}
@@ -88,7 +96,60 @@ func (s *Store) ReadCheckoutClaim(runtimePath string) (*CheckoutClaim, error) {
 	if claim, err := s.liveDrainClaim(s.db, runtimePath); err != nil || claim != nil {
 		return claim, err
 	}
-	return s.liveWaiterClaim(s.db, runtimePath, "")
+	if claim, err := s.liveWaiterClaim(s.db, runtimePath, ""); err != nil || claim != nil {
+		return claim, err
+	}
+	return s.liveGateHoldClaim(s.db, runtimePath, "")
+}
+
+// liveGateHoldClaim returns the live claim-bearing Checkout gate hold on
+// runtimePath (skipping excludeSet, empty excludes nothing) as a Checkout claim,
+// or nil when none is live. Only holds flagged claim=1 are considered — a
+// non-claiming hold (HITL, verify-fail, clean Failed gate) contributes quiescence
+// occupancy but no admission claim (ADR-0135). excludeSet lets StartDrain admit a
+// set's own gate-launched re-acquire past its own hold, mirroring the waiter arm.
+// The runtime_path is UNIQUE so there is at most one row, but it is still read to
+// completion before liveness is evaluated so the single connection is free.
+func (s *Store) liveGateHoldClaim(q claimQuerier, runtimePath, excludeSet string) (*CheckoutClaim, error) {
+	rows, err := q.Query(
+		`SELECT set_id, pid, proc_start, registered_at FROM checkout_gate_holds
+		 WHERE runtime_path = ? AND claim = 1`, runtimePath)
+	if err != nil {
+		return nil, err
+	}
+	type candidate struct {
+		setID     string
+		pid       int
+		procStart string
+		since     time.Time
+	}
+	var cands []candidate
+	for rows.Next() {
+		var c candidate
+		var procStart, registered sql.NullString
+		if err := rows.Scan(&c.setID, &c.pid, &procStart, &registered); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		c.procStart = procStart.String
+		c.since = parseTime(registered.String)
+		cands = append(cands, c)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	_ = rows.Close()
+
+	for _, c := range cands {
+		if c.setID == excludeSet {
+			continue
+		}
+		if s.alive(c.pid, c.procStart) {
+			return &CheckoutClaim{Kind: ClaimFailedGate, SetID: c.setID, PID: c.pid, Since: c.since}, nil
+		}
+	}
+	return nil, nil
 }
 
 // liveDrainClaim returns the first live running Drain on runtimePath as a Checkout

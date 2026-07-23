@@ -332,7 +332,7 @@ func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter failed: %v", err)
 	}
 
-	if err := RegisterCheckoutGateHold(d, "set-a", repo); err != nil {
+	if err := RegisterCheckoutGateHold(d, "set-a", repo, false); err != nil {
 		t.Fatalf("RegisterCheckoutGateHold failed: %v", err)
 	}
 
@@ -344,7 +344,7 @@ func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
 		t.Fatal("recovery turn must not be acquired while checkout gate hold is active")
 	}
 
-	if err := ReleaseCheckoutGateHold(d, repo); err != nil {
+	if err := ReleaseCheckoutGateHold(d, "set-a", repo); err != nil {
 		t.Fatalf("ReleaseCheckoutGateHold failed: %v", err)
 	}
 
@@ -379,7 +379,7 @@ func TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn(t *testing.T) {
 
 	// A gate hold owned by a *different* process (gate-token) blocks acquisition.
 	d.ProcessStartToken = func(int) (string, bool) { return "gate-token", true }
-	if err := RegisterCheckoutGateHold(d, "set-a", repo); err != nil {
+	if err := RegisterCheckoutGateHold(d, "set-a", repo, false); err != nil {
 		t.Fatalf("RegisterCheckoutGateHold: %v", err)
 	}
 	acquired, _, err := acquireRecoveryTurn(d, &waiter)
@@ -423,7 +423,7 @@ func TestReconcileLeavesLiveGateHold(t *testing.T) {
 	d, repo := drainTestRepo(t)
 	d.ProcessStartToken = func(int) (string, bool) { return "gate-token", true }
 
-	if err := RegisterCheckoutGateHold(d, "set-a", repo); err != nil {
+	if err := RegisterCheckoutGateHold(d, "set-a", repo, false); err != nil {
 		t.Fatalf("RegisterCheckoutGateHold: %v", err)
 	}
 	// d.ProcessAlive reports the current process (the hold owner) alive.
@@ -445,7 +445,7 @@ func TestReconcileLeavesLiveGateHold(t *testing.T) {
 func TestRegisterCheckoutGateHold(t *testing.T) {
 	d, repo := drainTestRepo(t)
 
-	if err := RegisterCheckoutGateHold(d, "set-a", repo); err != nil {
+	if err := RegisterCheckoutGateHold(d, "set-a", repo, false); err != nil {
 		t.Fatalf("RegisterCheckoutGateHold failed: %v", err)
 	}
 
@@ -466,7 +466,7 @@ func TestRegisterCheckoutGateHold(t *testing.T) {
 		t.Error("RegisteredAt should be set")
 	}
 
-	if err := ReleaseCheckoutGateHold(d, repo); err != nil {
+	if err := ReleaseCheckoutGateHold(d, "set-a", repo); err != nil {
 		t.Fatalf("ReleaseCheckoutGateHold failed: %v", err)
 	}
 	hold, err = GetCheckoutGateHold(d, repo)

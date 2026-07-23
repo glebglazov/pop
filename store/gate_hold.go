@@ -2,8 +2,15 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 )
+
+// ErrGateHoldHeld reports that PutCheckoutGateHold refused to register because a
+// different live owner already holds the gate on that runtime path (ADR-0135, no
+// steal). A dead owner's hold is replaced silently; only a live foreign owner
+// triggers this refusal.
+var ErrGateHoldHeld = errors.New("checkout gate hold held by another live owner")
 
 // CheckoutGateHold records that a drain is parked at a human-wait gate (Failed
 // or HITL) on a runtime checkout. While active it blocks recovery turn
@@ -11,16 +18,28 @@ import (
 // owner identity (PID plus start token, the same pairing drains use) so a hold
 // whose owner died can be swept by the opportunistic reconcile pass instead of
 // blocking that checkout forever.
+//
+// Claim distinguishes a claim-bearing hold — a Failed gate parked over a dirty
+// tree (ADR-0135) — from a non-claiming hold (HITL gate, verify-fail gate,
+// clean-tree Failed gate). A non-claiming hold contributes only quiescence
+// occupancy; a claim-bearing one also blocks another set's admission via the
+// checkout claim union. Dirtiness is snapshotted onto the row at park time and
+// never re-evaluated, so cleaning the tree mid-gate does not release the claim.
 type CheckoutGateHold struct {
 	RuntimePath  string
 	SetID        string
 	PID          int
 	ProcStart    string
+	Claim        bool
 	RegisteredAt time.Time
 }
 
 // PutCheckoutGateHold registers (or refreshes) a gate hold for one runtime path.
-// The runtime_path is UNIQUE: at most one gate session per checkout at a time.
+// The runtime_path is UNIQUE: at most one gate session per checkout at a time. It
+// refuses (ErrGateHoldHeld) to replace a hold whose owner is a *different live*
+// process — no steal — but replaces a dead owner's hold or refreshes the caller's
+// own. The read-then-write runs in one BEGIN IMMEDIATE transaction so the liveness
+// check and the upsert share the write lock.
 func (s *Store) PutCheckoutGateHold(h CheckoutGateHold) error {
 	if h.RuntimePath == "" || h.SetID == "" {
 		return nil
@@ -29,29 +48,62 @@ func (s *Store) PutCheckoutGateHold(h CheckoutGateHold) error {
 	if registeredAt.IsZero() {
 		registeredAt = time.Now().UTC()
 	}
-	_, err := s.db.Exec(
-		`INSERT INTO checkout_gate_holds (runtime_path, set_id, pid, proc_start, registered_at)
-		 VALUES (?, ?, ?, ?, ?)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRow(
+		`SELECT set_id, pid, proc_start FROM checkout_gate_holds WHERE runtime_path = ?`,
+		h.RuntimePath)
+	var exSet string
+	var exPID int
+	var exProc sql.NullString
+	switch err := row.Scan(&exSet, &exPID, &exProc); err {
+	case nil:
+		// A different set's hold may only be replaced when its owner is dead; a live
+		// foreign owner is never stolen from.
+		if exSet != h.SetID && s.alive(exPID, exProc.String) {
+			return ErrGateHoldHeld
+		}
+	case sql.ErrNoRows:
+		// No existing hold — free to register.
+	default:
+		return err
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO checkout_gate_holds (runtime_path, set_id, pid, proc_start, claim, registered_at)
+		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(runtime_path) DO UPDATE SET
 		   set_id = excluded.set_id,
 		   pid = excluded.pid,
 		   proc_start = excluded.proc_start,
+		   claim = excluded.claim,
 		   registered_at = excluded.registered_at`,
 		h.RuntimePath,
 		h.SetID,
 		h.PID,
 		nullString(h.ProcStart),
-		registeredAt.UTC().Format(timeLayout))
-	return err
+		boolToInt(h.Claim),
+		registeredAt.UTC().Format(timeLayout)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-// DeleteCheckoutGateHold removes the gate hold for one runtime path. A missing
-// row is not an error.
-func (s *Store) DeleteCheckoutGateHold(runtimePath string) error {
-	if runtimePath == "" {
+// DeleteCheckoutGateHold removes the gate hold for one runtime path, but only when
+// it belongs to setID — release deletes the caller's own hold, never another
+// set's (ADR-0135). A missing row, or a row owned by a different set, is not an
+// error.
+func (s *Store) DeleteCheckoutGateHold(runtimePath, setID string) error {
+	if runtimePath == "" || setID == "" {
 		return nil
 	}
-	_, err := s.db.Exec(`DELETE FROM checkout_gate_holds WHERE runtime_path = ?`, runtimePath)
+	_, err := s.db.Exec(
+		`DELETE FROM checkout_gate_holds WHERE runtime_path = ? AND set_id = ?`,
+		runtimePath, setID)
 	return err
 }
 
@@ -62,17 +114,19 @@ func (s *Store) GetCheckoutGateHold(runtimePath string) (*CheckoutGateHold, erro
 		return nil, nil
 	}
 	row := s.db.QueryRow(
-		`SELECT runtime_path, set_id, pid, proc_start, registered_at
+		`SELECT runtime_path, set_id, pid, proc_start, claim, registered_at
 		 FROM checkout_gate_holds WHERE runtime_path = ?`, runtimePath)
 	var h CheckoutGateHold
 	var procStart, registeredAt sql.NullString
-	if err := row.Scan(&h.RuntimePath, &h.SetID, &h.PID, &procStart, &registeredAt); err != nil {
+	var claim int
+	if err := row.Scan(&h.RuntimePath, &h.SetID, &h.PID, &procStart, &claim, &registeredAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
 	h.ProcStart = procStart.String
+	h.Claim = claim != 0
 	h.RegisteredAt = parseTime(registeredAt.String)
 	return &h, nil
 }

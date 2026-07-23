@@ -300,7 +300,7 @@ func runTargetedHITLGate(d *Deps, opts targetedHITLGateOptions) (*RunTaskResult,
 	// (ADR-0100); a non-promptable run leaves no hold and falls straight to advice.
 	willPrompt := gateWillPrompt(opts.in, opts.yes, m, hitl)
 	if willPrompt {
-		_ = RegisterCheckoutGateHold(d, taskSetID, opts.runtimePath)
+		_ = RegisterCheckoutGateHold(d, taskSetID, opts.runtimePath, false)
 	}
 	rv := &reverifyGateContext{cfg: opts.cfg, timeout: opts.timeout}
 	// The targeted single-task HITL path reuses the whole-set drain's HITL menu,
@@ -321,7 +321,7 @@ func runTargetedHITLGate(d *Deps, opts targetedHITLGateOptions) (*RunTaskResult,
 	}
 	handled, err := handleInteractiveHITLGate(env, m, hitl, rv)
 	if willPrompt {
-		_ = ReleaseCheckoutGateHold(d, opts.runtimePath)
+		_ = ReleaseCheckoutGateHold(d, taskSetID, opts.runtimePath)
 	}
 	if err != nil {
 		return nil, err

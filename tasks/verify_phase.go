@@ -139,7 +139,9 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 		verifyGateWillPrompt := !opts.Yes && canPrompt(opts.ConfirmIn) && m != nil
 		if verifyGateWillPrompt {
 			r.parkDrain()
-			_ = RegisterCheckoutGateHold(d, taskSetID, runtimePath)
+			// A verify-fail gate is a human wait that claims nothing (ADR-0135): a
+			// non-claiming hold for quiescence occupancy only.
+			_ = RegisterCheckoutGateHold(d, taskSetID, runtimePath, false)
 		}
 		r.sharedPromptReader = ensurePromptReader(r.sharedPromptReader, opts.ConfirmIn, opts.Yes)
 		findings := ""

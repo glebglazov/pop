@@ -371,6 +371,14 @@ var migrations = []string{
 	// process is long gone.
 	`ALTER TABLE recovery_waiters ADD COLUMN pid INTEGER NOT NULL DEFAULT 0;
 	 ALTER TABLE recovery_waiters ADD COLUMN proc_start TEXT;`,
+	// 23: checkout_gate_holds claim flag — whether the hold claims the checkout for
+	// admission (ADR-0135), distinct from mere quiescence occupancy. Only a Failed
+	// gate parked over a dirty tree (uncommitted work, snapshotted at park time and
+	// never re-evaluated live) claims; the HITL gate, the verify-fail gate, and a
+	// clean-tree Failed gate register non-claiming holds. A live claim-bearing hold
+	// blocks another set's StartDrain via the checkout claim union. Legacy rows
+	// default to 0 (non-claiming) — the historical occupancy-only behaviour.
+	`ALTER TABLE checkout_gate_holds ADD COLUMN claim INTEGER NOT NULL DEFAULT 0;`,
 }
 
 func (s *Store) migrate() error {

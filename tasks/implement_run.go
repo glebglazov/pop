@@ -274,17 +274,19 @@ func (r *implementRun) parkDrain() {
 // parkAtGate parks the drain and registers a checkout gate hold so quota recovery
 // waiters on the same runtime path cannot resume until the gate session ends
 // (ADR-0100). Only when the gate will actually prompt, so a non-prompting
-// fall-through keeps the normal terminal.
-func (r *implementRun) parkAtGate(m *Manifest, gateTask *Task) {
+// fall-through keeps the normal terminal. claim marks a claim-bearing hold — the
+// Failed gate over a dirty tree — which additionally blocks another set's
+// admission (ADR-0135); the HITL and interrupt gates pass false.
+func (r *implementRun) parkAtGate(m *Manifest, gateTask *Task, claim bool) {
 	if !gateWillPrompt(r.opts.ConfirmIn, r.opts.Yes, m, gateTask) {
 		return
 	}
 	r.parkDrain()
-	_ = RegisterCheckoutGateHold(r.d, r.taskSetID, r.runtimePath)
+	_ = RegisterCheckoutGateHold(r.d, r.taskSetID, r.runtimePath, claim)
 }
 
 func (r *implementRun) releaseGateHold() {
-	_ = ReleaseCheckoutGateHold(r.d, r.runtimePath)
+	_ = ReleaseCheckoutGateHold(r.d, r.taskSetID, r.runtimePath)
 }
 
 // newGateEnv builds the shared gate context the three interactive menus run

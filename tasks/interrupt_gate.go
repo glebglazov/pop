@@ -212,7 +212,7 @@ func (r *implementRun) interruptGate(m *Manifest, interrupted *Task) (bool, erro
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	r.parkAtGate(m, interrupted)
+	r.parkAtGate(m, interrupted, false)
 	cont, err := handleInteractiveInterruptGate(r.newGateEnv(), m, interrupted, sigCh)
 	r.releaseGateHold()
 	if err != nil {

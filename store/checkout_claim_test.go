@@ -21,6 +21,124 @@ func putWaiter(t *testing.T, s *Store, setID, path string, pid int, procStart st
 	}
 }
 
+func putGateHold(t *testing.T, s *Store, setID, path string, pid int, procStart string, claim bool) {
+	t.Helper()
+	if err := s.PutCheckoutGateHold(CheckoutGateHold{
+		SetID:        setID,
+		RuntimePath:  path,
+		PID:          pid,
+		ProcStart:    procStart,
+		Claim:        claim,
+		RegisteredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("PutCheckoutGateHold: %v", err)
+	}
+}
+
+func TestReadCheckoutClaimFailedGate(t *testing.T) {
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}))
+	putGateHold(t, s, "set-a", "/rt", 100, "t1", true)
+	claim, err := s.ReadCheckoutClaim("/rt")
+	if err != nil {
+		t.Fatalf("ReadCheckoutClaim: %v", err)
+	}
+	if claim == nil || claim.Kind != ClaimFailedGate || claim.SetID != "set-a" {
+		t.Fatalf("claim = %+v, want failed-gate claim by set-a", claim)
+	}
+	if claim.Reason() != "failed gate, uncommitted changes" {
+		t.Fatalf("reason = %q, want %q", claim.Reason(), "failed gate, uncommitted changes")
+	}
+}
+
+func TestReadCheckoutClaimNonClaimingGateHoldUnclaimed(t *testing.T) {
+	// A non-claiming hold (HITL / verify-fail / clean Failed gate) contributes
+	// quiescence occupancy but never a checkout claim.
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}))
+	putGateHold(t, s, "set-a", "/rt", 100, "t1", false)
+	claim, err := s.ReadCheckoutClaim("/rt")
+	if err != nil {
+		t.Fatalf("ReadCheckoutClaim: %v", err)
+	}
+	if claim != nil {
+		t.Fatalf("claim = %+v, want nil (non-claiming hold does not claim)", claim)
+	}
+}
+
+func TestReadCheckoutClaimDeadGateHoldUnclaimed(t *testing.T) {
+	// A claim-bearing hold whose owner is dead does not claim (swept by reconcile,
+	// filtered by the read regardless).
+	s := openTestStore(t, aliveByToken()) // nothing alive
+	putGateHold(t, s, "set-a", "/rt", 100, "t1", true)
+	claim, err := s.ReadCheckoutClaim("/rt")
+	if err != nil {
+		t.Fatalf("ReadCheckoutClaim: %v", err)
+	}
+	if claim != nil {
+		t.Fatalf("claim = %+v, want nil (dead-owner gate hold does not claim)", claim)
+	}
+}
+
+func TestStartDrainRefusesOtherSetClaimingGateHold(t *testing.T) {
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}))
+	putGateHold(t, s, "set-a", "/rt", 100, "t1", true)
+
+	_, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-b", RuntimePath: "/rt", PID: 2, ProcStart: "t2", StartedAt: time.Now()})
+	if !errors.Is(err, ErrCheckoutClaimed) {
+		t.Fatalf("err = %v, want ErrCheckoutClaimed", err)
+	}
+	var claimed *CheckoutClaimedError
+	if !errors.As(err, &claimed) {
+		t.Fatalf("err = %v, want *CheckoutClaimedError", err)
+	}
+	if claimed.Claim.SetID != "set-a" || claimed.Claim.Kind != ClaimFailedGate {
+		t.Fatalf("claim = %+v, want failed-gate claim by set-a", claimed.Claim)
+	}
+}
+
+func TestStartDrainAdmittedAlongsideNonClaimingGateHold(t *testing.T) {
+	// A non-claiming gate hold (a human at a HITL / clean Failed gate) must not
+	// block another set's admission — queue liveness over gate-time safety.
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}))
+	putGateHold(t, s, "set-a", "/rt", 100, "t1", false)
+
+	d, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-b", RuntimePath: "/rt", PID: 2, ProcStart: "t2", StartedAt: time.Now()})
+	if err != nil {
+		t.Fatalf("non-claiming gate hold wrongly blocked admission: %v", err)
+	}
+	if d.ID == 0 || d.State != StateRunning {
+		t.Fatalf("drain not started alongside a non-claiming hold: %+v", d)
+	}
+}
+
+func TestStartDrainSameSetClaimingGateHoldDoesNotBlockReacquire(t *testing.T) {
+	// A gate-launched, checkout-mutating action (e.g. reverify) re-acquires the
+	// drain while the set's own claim-bearing hold is still registered; its own
+	// hold must not self-block.
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}))
+	putGateHold(t, s, "set-a", "/rt", 100, "t1", true)
+
+	d, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-a", RuntimePath: "/rt", PID: 3, ProcStart: "t3", StartedAt: time.Now()})
+	if err != nil {
+		t.Fatalf("same-set re-acquire refused by own gate hold: %v", err)
+	}
+	if d.ID == 0 || d.State != StateRunning {
+		t.Fatalf("re-acquire drain not started: %+v", d)
+	}
+}
+
+func TestStartDrainDeadClaimingGateHoldDoesNotBlock(t *testing.T) {
+	s := openTestStore(t, aliveByToken()) // nothing alive
+	putGateHold(t, s, "set-a", "/rt", 100, "t1", true)
+
+	d, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-b", RuntimePath: "/rt", PID: 2, ProcStart: "t2", StartedAt: time.Now()})
+	if err != nil {
+		t.Fatalf("dead-owner gate hold wrongly blocked admission: %v", err)
+	}
+	if d.ID == 0 || d.State != StateRunning {
+		t.Fatalf("drain not started over dead-owner gate hold: %+v", d)
+	}
+}
+
 func TestReadCheckoutClaimNoneWhenIdle(t *testing.T) {
 	s := openTestStore(t)
 	claim, err := s.ReadCheckoutClaim("/rt")

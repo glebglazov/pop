@@ -133,7 +133,7 @@ func (r *implementRun) terminalStatus(currentRefresh *RefreshResult, row *Row, s
 // caller keeps draining on a handled disposition or prints advice and exits
 // otherwise (ADR-0067/0100).
 func (r *implementRun) hitlGate(m *Manifest, hitl *Task) (bool, error) {
-	r.parkAtGate(m, hitl)
+	r.parkAtGate(m, hitl, false)
 	rv := &reverifyGateContext{
 		cfg:         r.plan.cfg,
 		agents:      r.opts.VerifyAgents,
@@ -152,9 +152,17 @@ func (r *implementRun) hitlGate(m *Manifest, hitl *Task) (bool, error) {
 // then release the hold. It returns the handler's (handled, err) verbatim. Shared
 // by the terminal-status FAILED case and the post-attempt failure path in the
 // drain loop, which run the identical park → menu → release trio.
+//
+// The hold is claim-bearing (ADR-0135) iff the working tree is dirty at park
+// time (uncommitted work another set would clobber). Dirtiness is snapshotted
+// here — via the injected Git/FS deps, untracked files included — and recorded on
+// the row; cleaning the tree mid-gate does not release the claim until the gate
+// session ends. A read error is treated as not-dirty (a non-claiming hold), never
+// blocking the gate on a git failure.
 func (r *implementRun) failedGate(m *Manifest) (bool, error) {
 	r.sharedPromptReader = ensurePromptReader(r.sharedPromptReader, r.opts.ConfirmIn, r.opts.Yes)
-	r.parkAtGate(m, FailedTask(m))
+	dirty, _ := runtimeIsDirty(r.d, r.runtimePath)
+	r.parkAtGate(m, FailedTask(m), dirty)
 	handled, err := handleInteractiveFailedGate(r.newGateEnv(), m, FailedTask(m))
 	r.releaseGateHold()
 	return handled, err

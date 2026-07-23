@@ -16,20 +16,28 @@ import (
 // runtime checkout. While active it blocks recovery turn acquisition on that
 // path (ADR-0100). PID and ProcStart identify the registering process so a hold
 // whose owner dies (a crash while a human sat at the gate) is swept by the
-// reconcile pass rather than blocking the checkout forever.
+// reconcile pass rather than blocking the checkout forever. Claim marks a
+// claim-bearing hold (a Failed gate over a dirty tree, ADR-0135) that also blocks
+// another set's admission.
 type CheckoutGateHold struct {
 	SetID        string
 	RuntimePath  string
 	PID          int
 	ProcStart    string
+	Claim        bool
 	RegisteredAt time.Time
 }
 
 // RegisterCheckoutGateHold records a gate hold for one runtime path. The
 // runtime_path is UNIQUE: a second registration for the same checkout replaces
-// the first. The hold captures the registering process's PID and start token so
-// the reconcile pass can sweep it if that process dies while parked at the gate.
-func RegisterCheckoutGateHold(d *Deps, setID, runtimePath string) error {
+// the first — unless a *different live* owner already holds it, which the store
+// refuses (no steal, ADR-0135). The hold captures the registering process's PID
+// and start token so the reconcile pass can sweep it if that process dies while
+// parked at the gate. claim marks a claim-bearing hold — a Failed gate parked
+// over a dirty tree — which blocks another set's admission via the checkout claim
+// union; a non-claiming hold (HITL, verify-fail, clean Failed gate) is quiescence
+// occupancy only.
+func RegisterCheckoutGateHold(d *Deps, setID, runtimePath string, claim bool) error {
 	if setID == "" || runtimePath == "" {
 		return nil
 	}
@@ -44,6 +52,7 @@ func RegisterCheckoutGateHold(d *Deps, setID, runtimePath string) error {
 		RuntimePath:  runtimePath,
 		PID:          pid,
 		ProcStart:    procStart,
+		Claim:        claim,
 		RegisteredAt: time.Now().UTC(),
 	}); err != nil {
 		return exitErr(ExitOperational, "register checkout gate hold: %v", err)
@@ -51,10 +60,11 @@ func RegisterCheckoutGateHold(d *Deps, setID, runtimePath string) error {
 	return nil
 }
 
-// ReleaseCheckoutGateHold removes the gate hold for one runtime path. A missing
-// row is not an error.
-func ReleaseCheckoutGateHold(d *Deps, runtimePath string) error {
-	if runtimePath == "" {
+// ReleaseCheckoutGateHold removes the caller's own gate hold for one runtime path
+// (owner-checked: another set's hold is left untouched, ADR-0135). A missing row
+// is not an error.
+func ReleaseCheckoutGateHold(d *Deps, setID, runtimePath string) error {
+	if runtimePath == "" || setID == "" {
 		return nil
 	}
 	s, ok, err := openDrainStoreIfExists(d)
@@ -64,7 +74,7 @@ func ReleaseCheckoutGateHold(d *Deps, runtimePath string) error {
 	if !ok {
 		return nil
 	}
-	return s.DeleteCheckoutGateHold(runtimePath)
+	return s.DeleteCheckoutGateHold(runtimePath, setID)
 }
 
 // GetCheckoutGateHold returns the active gate hold for one runtime path, or nil
@@ -92,6 +102,7 @@ func GetCheckoutGateHold(d *Deps, runtimePath string) (*CheckoutGateHold, error)
 		RuntimePath:  h.RuntimePath,
 		PID:          h.PID,
 		ProcStart:    h.ProcStart,
+		Claim:        h.Claim,
 		RegisteredAt: h.RegisteredAt,
 	}, nil
 }
