@@ -58,10 +58,47 @@ func TestTryAcquireRecoveryTurnNoBlockBeforeCooldown(t *testing.T) {
 	}
 }
 
-func TestTryAcquireRecoveryTurnBlockedByGateHold(t *testing.T) {
-	s := openTestStore(t)
+// TestTryAcquireRecoveryTurnAcquiresPastNonClaimingGateHold pins ADR-0135: a
+// non-claiming gate hold (claim=0 — HITL, approval, verify-fail, or a clean
+// Failed gate) is quiescence occupancy only and does not defer a quota-recovered
+// waiter. The waiter resumes past an open human-wait menu on its checkout.
+func TestTryAcquireRecoveryTurnAcquiresPastNonClaimingGateHold(t *testing.T) {
+	for _, gate := range []string{"hitl", "approval", "verify-fail", "clean-failed-gate"} {
+		t.Run(gate, func(t *testing.T) {
+			s := openTestStore(t) // default liveness: every owner is alive
+			if err := s.PutCheckoutGateHold(CheckoutGateHold{
+				RuntimePath: "/rt", SetID: "set-gate", PID: 10, ProcStart: "t1",
+				Claim: false, RegisteredAt: time.Now(),
+			}); err != nil {
+				t.Fatalf("PutCheckoutGateHold: %v", err)
+			}
+			w := elapsedWaiter("set-a", 0, time.Now())
+			if err := s.PutRecoveryWaiter(w); err != nil {
+				t.Fatalf("PutRecoveryWaiter: %v", err)
+			}
+
+			acquired, block, err := s.TryAcquireRecoveryTurn(w, time.Now().UTC())
+			if err != nil {
+				t.Fatalf("TryAcquireRecoveryTurn: %v", err)
+			}
+			if !acquired {
+				t.Fatalf("expected acquisition past a non-claiming gate hold, got block %+v", block)
+			}
+			if block != nil {
+				t.Fatalf("expected nil block when acquired, got %+v", block)
+			}
+		})
+	}
+}
+
+// TestTryAcquireRecoveryTurnBlockedByClaimBearingGateHold pins that a live
+// claim-bearing Failed-gate hold (claim=1, a dirty tree under review) of another
+// set defers the turn and surfaces as a claim block naming that set and kind.
+func TestTryAcquireRecoveryTurnBlockedByClaimBearingGateHold(t *testing.T) {
+	s := openTestStore(t) // default liveness: every owner is alive
 	if err := s.PutCheckoutGateHold(CheckoutGateHold{
-		RuntimePath: "/rt", SetID: "set-gate", PID: 10, ProcStart: "t1", RegisteredAt: time.Now(),
+		RuntimePath: "/rt", SetID: "set-gate", PID: 10, ProcStart: "t1",
+		Claim: true, RegisteredAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("PutCheckoutGateHold: %v", err)
 	}
@@ -75,10 +112,38 @@ func TestTryAcquireRecoveryTurnBlockedByGateHold(t *testing.T) {
 		t.Fatalf("TryAcquireRecoveryTurn: %v", err)
 	}
 	if acquired {
-		t.Fatal("expected denial while a gate hold is parked")
+		t.Fatal("expected denial while a claim-bearing gate hold is parked")
 	}
-	if block == nil || block.Kind != RecoveryBlockGateHold || block.SetID != "set-gate" {
-		t.Fatalf("want gate_hold block for set-gate, got %+v", block)
+	if block == nil || block.Kind != RecoveryBlockClaimed || block.SetID != "set-gate" {
+		t.Fatalf("want claimed block for set-gate, got %+v", block)
+	}
+	if block.Claim == nil || block.Claim.Kind != ClaimFailedGate {
+		t.Fatalf("want failed_gate claim, got %+v", block.Claim)
+	}
+}
+
+// TestTryAcquireRecoveryTurnOwnGateHoldDoesNotSelfBlock pins that the acquiring
+// waiter's own claim-bearing gate hold is excluded from the claim check, so a set
+// never blocks itself.
+func TestTryAcquireRecoveryTurnOwnGateHoldDoesNotSelfBlock(t *testing.T) {
+	s := openTestStore(t) // default liveness: every owner is alive
+	w := elapsedWaiter("set-a", 0, time.Now())
+	if err := s.PutCheckoutGateHold(CheckoutGateHold{
+		RuntimePath: "/rt", SetID: "set-a", PID: 10, ProcStart: "t1",
+		Claim: true, RegisteredAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("PutCheckoutGateHold: %v", err)
+	}
+	if err := s.PutRecoveryWaiter(w); err != nil {
+		t.Fatalf("PutRecoveryWaiter: %v", err)
+	}
+
+	acquired, block, err := s.TryAcquireRecoveryTurn(w, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("TryAcquireRecoveryTurn: %v", err)
+	}
+	if !acquired {
+		t.Fatalf("expected acquisition past own gate hold, got block %+v", block)
 	}
 }
 
@@ -101,8 +166,11 @@ func TestTryAcquireRecoveryTurnBlockedByLiveDrain(t *testing.T) {
 	if acquired {
 		t.Fatal("expected denial while a live drain runs on the path")
 	}
-	if block == nil || block.Kind != RecoveryBlockLiveDrain || block.SetID != "set-drain" {
-		t.Fatalf("want live_drain block for set-drain, got %+v", block)
+	if block == nil || block.Kind != RecoveryBlockClaimed || block.SetID != "set-drain" {
+		t.Fatalf("want claimed block for set-drain, got %+v", block)
+	}
+	if block.Claim == nil || block.Claim.Kind != ClaimRunningDrain {
+		t.Fatalf("want running_drain claim, got %+v", block.Claim)
 	}
 }
 

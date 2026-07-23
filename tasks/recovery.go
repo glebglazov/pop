@@ -471,10 +471,11 @@ type recoveryPrinter struct {
 	out       *output
 	heartbeat time.Duration
 
-	haveBlock   bool
-	lastKind    store.RecoveryBlockKind
-	lastSetID   string
-	lastBlockAt time.Time
+	haveBlock    bool
+	lastKind     store.RecoveryBlockKind
+	lastClaimKnd store.CheckoutClaimKind
+	lastSetID    string
+	lastBlockAt  time.Time
 }
 
 // countdown prints the pre-reset waiting line. It is called once per poll tick,
@@ -500,7 +501,12 @@ func (p *recoveryPrinter) blocked(now time.Time, block *store.RecoveryBlock) {
 	if p == nil || p.out == nil || block == nil {
 		return
 	}
-	changed := !p.haveBlock || block.Kind != p.lastKind || block.SetID != p.lastSetID
+	var claimKnd store.CheckoutClaimKind
+	if block.Claim != nil {
+		claimKnd = block.Claim.Kind
+	}
+	changed := !p.haveBlock || block.Kind != p.lastKind ||
+		block.SetID != p.lastSetID || claimKnd != p.lastClaimKnd
 	if !changed && now.Sub(p.lastBlockAt) < p.heartbeat {
 		return
 	}
@@ -508,6 +514,7 @@ func (p *recoveryPrinter) blocked(now time.Time, block *store.RecoveryBlock) {
 		recoveryBlockMessage(block))
 	p.haveBlock = true
 	p.lastKind = block.Kind
+	p.lastClaimKnd = claimKnd
 	p.lastSetID = block.SetID
 	p.lastBlockAt = now
 }
@@ -543,13 +550,17 @@ func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter) (bool, *sto
 }
 
 // recoveryBlockMessage renders a post-cooldown recovery block as a human phrase
-// naming the actual blocker, with distinct wording per kind.
+// naming the actual blocker, with distinct wording per kind. A claim block names
+// the claiming set and claim kind (e.g. "claimed by set X — failed gate,
+// uncommitted changes"); turn-held and behind-waiter blocks are queue positions,
+// not claims.
 func recoveryBlockMessage(b *store.RecoveryBlock) string {
 	switch b.Kind {
-	case store.RecoveryBlockGateHold:
-		return fmt.Sprintf("gate hold by set %s", b.SetID)
-	case store.RecoveryBlockLiveDrain:
-		return fmt.Sprintf("drain running for set %s", b.SetID)
+	case store.RecoveryBlockClaimed:
+		if b.Claim != nil {
+			return fmt.Sprintf("claimed by set %s — %s", b.Claim.SetID, b.Claim.Reason())
+		}
+		return fmt.Sprintf("claimed by set %s", b.SetID)
 	case store.RecoveryBlockTurnHeld:
 		return fmt.Sprintf("recovery turn held by set %s", b.SetID)
 	case store.RecoveryBlockBehindWaiter:

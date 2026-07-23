@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/glebglazov/pop/store"
 )
 
 func TestRegisterRecoveryWaiter(t *testing.T) {
@@ -318,7 +320,10 @@ func TestAcquireRecoveryTurn_DifferentCheckoutsParallel(t *testing.T) {
 	}
 }
 
-func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
+// TestAcquireRecoveryTurn_BlockedByClaimBearingGateHold pins ADR-0135: a live
+// claim-bearing Failed-gate hold (a dirty tree under review) of another set
+// defers a quota-recovered waiter's turn; releasing it lets the waiter acquire.
+func TestAcquireRecoveryTurn_BlockedByClaimBearingGateHold(t *testing.T) {
 	d, repo := drainTestRepo(t)
 
 	waiter := RecoveryWaiter{
@@ -332,16 +337,20 @@ func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter failed: %v", err)
 	}
 
-	if err := RegisterCheckoutGateHold(d, "set-a", repo, false); err != nil {
+	if err := RegisterCheckoutGateHold(d, "set-a", repo, true); err != nil {
 		t.Fatalf("RegisterCheckoutGateHold failed: %v", err)
 	}
 
-	acquired, _, err := acquireRecoveryTurn(d, &waiter)
+	acquired, block, err := acquireRecoveryTurn(d, &waiter)
 	if err != nil {
 		t.Fatalf("acquireRecoveryTurn failed: %v", err)
 	}
 	if acquired {
-		t.Fatal("recovery turn must not be acquired while checkout gate hold is active")
+		t.Fatal("recovery turn must not be acquired while a claim-bearing gate hold is active")
+	}
+	if block == nil || block.Kind != store.RecoveryBlockClaimed || block.Claim == nil ||
+		block.Claim.Kind != store.ClaimFailedGate || block.Claim.SetID != "set-a" {
+		t.Fatalf("want failed_gate claim block for set-a, got %+v", block)
 	}
 
 	if err := ReleaseCheckoutGateHold(d, "set-a", repo); err != nil {
@@ -358,10 +367,39 @@ func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
 	_ = ReleaseRecoveryTurn(d, repo)
 }
 
+// TestAcquireRecoveryTurn_AcquiresPastNonClaimingGateHold pins ADR-0135: a
+// non-claiming gate hold (HITL/approval/verify-fail/clean Failed gate) of another
+// set is quiescence occupancy only and does not defer a quota-recovered waiter.
+func TestAcquireRecoveryTurn_AcquiresPastNonClaimingGateHold(t *testing.T) {
+	d, repo := drainTestRepo(t)
+
+	waiter := RecoveryWaiter{
+		SetID:       "set-b",
+		Preset:      "claude",
+		ResetAt:     time.Now().Add(-time.Hour),
+		RuntimePath: repo,
+	}
+	if _, err := RegisterRecoveryWaiter(d, waiter); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter failed: %v", err)
+	}
+	if err := RegisterCheckoutGateHold(d, "set-a", repo, false); err != nil {
+		t.Fatalf("RegisterCheckoutGateHold failed: %v", err)
+	}
+
+	acquired, block, err := acquireRecoveryTurn(d, &waiter)
+	if err != nil {
+		t.Fatalf("acquireRecoveryTurn failed: %v", err)
+	}
+	if !acquired {
+		t.Fatalf("recovery turn should be acquired past a non-claiming gate hold, got block %+v", block)
+	}
+	_ = ReleaseRecoveryTurn(d, repo)
+}
+
 // TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn exercises the full path:
-// a gate hold registered by a process that then dies must not block a recovery
-// turn on that checkout forever — the reconcile pass sweeps the dead-owner hold,
-// after which the waiting set acquires its turn.
+// a claim-bearing gate hold registered by a process that then dies must not block
+// a recovery turn on that checkout forever — the reconcile pass sweeps the
+// dead-owner hold, after which the waiting set acquires its turn.
 func TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn(t *testing.T) {
 	d, repo := drainTestRepo(t)
 
@@ -377,9 +415,10 @@ func TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter: %v", err)
 	}
 
-	// A gate hold owned by a *different* process (gate-token) blocks acquisition.
+	// A claim-bearing gate hold owned by a *different* process (gate-token) blocks
+	// acquisition.
 	d.ProcessStartToken = func(int) (string, bool) { return "gate-token", true }
-	if err := RegisterCheckoutGateHold(d, "set-a", repo, false); err != nil {
+	if err := RegisterCheckoutGateHold(d, "set-a", repo, true); err != nil {
 		t.Fatalf("RegisterCheckoutGateHold: %v", err)
 	}
 	acquired, _, err := acquireRecoveryTurn(d, &waiter)

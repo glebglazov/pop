@@ -45,30 +45,40 @@ func TestRecoveryPrinterBlockedReasonChange(t *testing.T) {
 	p := &recoveryPrinter{out: outputFor(&buf), heartbeat: recoveryHeartbeat}
 
 	base := time.Now().UTC()
-	gate := &store.RecoveryBlock{Kind: store.RecoveryBlockGateHold, SetID: "set-a"}
+	held := &store.RecoveryBlock{Kind: store.RecoveryBlockTurnHeld, SetID: "set-a"}
 
 	// First observation prints.
-	p.blocked(base, gate)
+	p.blocked(base, held)
 	// Same reason within heartbeat: silent for several ticks.
 	for i := 1; i <= 20; i++ { // 20 ticks of 2s = 40s, under the 60s heartbeat
-		p.blocked(base.Add(time.Duration(i)*2*time.Second), gate)
+		p.blocked(base.Add(time.Duration(i)*2*time.Second), held)
 	}
 	if got := countLines(&buf); got != 1 {
 		t.Fatalf("unchanged block within heartbeat printed %d lines, want 1", got)
 	}
 
-	// Different kind: prints again.
-	drain := &store.RecoveryBlock{Kind: store.RecoveryBlockLiveDrain, SetID: "set-a"}
+	// Different kind (a claim block): prints again.
+	drain := &store.RecoveryBlock{Kind: store.RecoveryBlockClaimed, SetID: "set-a",
+		Claim: &store.CheckoutClaim{Kind: store.ClaimRunningDrain, SetID: "set-a"}}
 	p.blocked(base.Add(41*time.Second), drain)
 	if got := countLines(&buf); got != 2 {
 		t.Fatalf("reason-kind change printed total %d lines, want 2", got)
 	}
 
 	// Same kind, different blocking set: prints again.
-	drainOther := &store.RecoveryBlock{Kind: store.RecoveryBlockLiveDrain, SetID: "set-b"}
+	drainOther := &store.RecoveryBlock{Kind: store.RecoveryBlockClaimed, SetID: "set-b",
+		Claim: &store.CheckoutClaim{Kind: store.ClaimRunningDrain, SetID: "set-b"}}
 	p.blocked(base.Add(42*time.Second), drainOther)
 	if got := countLines(&buf); got != 3 {
 		t.Fatalf("blocking-set change printed total %d lines, want 3", got)
+	}
+
+	// Same set, different claim kind (drain → failed gate): prints again.
+	gateClaim := &store.RecoveryBlock{Kind: store.RecoveryBlockClaimed, SetID: "set-b",
+		Claim: &store.CheckoutClaim{Kind: store.ClaimFailedGate, SetID: "set-b"}}
+	p.blocked(base.Add(43*time.Second), gateClaim)
+	if got := countLines(&buf); got != 4 {
+		t.Fatalf("claim-kind change printed total %d lines, want 4", got)
 	}
 }
 
@@ -80,7 +90,8 @@ func TestRecoveryPrinterBlockedHeartbeat(t *testing.T) {
 	p := &recoveryPrinter{out: outputFor(&buf), heartbeat: recoveryHeartbeat}
 
 	base := time.Now().UTC()
-	gate := &store.RecoveryBlock{Kind: store.RecoveryBlockGateHold, SetID: "set-a"}
+	gate := &store.RecoveryBlock{Kind: store.RecoveryBlockClaimed, SetID: "set-a",
+		Claim: &store.CheckoutClaim{Kind: store.ClaimFailedGate, SetID: "set-a"}}
 
 	// Drive 150 seconds of 2s fast-tick-equivalent calls with an unchanged
 	// reason. Expect an initial print plus one per elapsed 60s heartbeat.

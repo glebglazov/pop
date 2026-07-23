@@ -12,10 +12,13 @@ import (
 type RecoveryBlockKind string
 
 const (
-	// RecoveryBlockGateHold: a checkout gate hold is parked on the path.
-	RecoveryBlockGateHold RecoveryBlockKind = "gate_hold"
-	// RecoveryBlockLiveDrain: a live drain is still running on the path.
-	RecoveryBlockLiveDrain RecoveryBlockKind = "live_drain"
+	// RecoveryBlockClaimed: a live Checkout claim holds the path (ADR-0135) — a
+	// running Drain of another set, or another set's claim-bearing Failed-gate
+	// hold (a dirty tree under review). The Claim field carries the owning set and
+	// claim kind so the status line can name it. A non-claiming gate hold (HITL,
+	// verify-fail, clean Failed gate) and peer quota waiters are not blockers here:
+	// peers are resolved by the waiter-ordering check below.
+	RecoveryBlockClaimed RecoveryBlockKind = "claimed"
 	// RecoveryBlockTurnHeld: another set already holds the recovery turn there.
 	RecoveryBlockTurnHeld RecoveryBlockKind = "turn_held"
 	// RecoveryBlockBehindWaiter: another waiter is first in the ordering.
@@ -23,21 +26,31 @@ const (
 )
 
 // RecoveryBlock is the reason a recovery turn was denied after the waiter's
-// cooldown elapsed: a kind plus the ID of the set that is blocking the path.
+// cooldown elapsed: a kind plus the ID of the set that is blocking the path. For
+// a RecoveryBlockClaimed block, Claim carries the live Checkout claim (owning set
+// + claim kind) so the status line can render "claimed by set X — <reason>".
 type RecoveryBlock struct {
 	Kind  RecoveryBlockKind
 	SetID string
+	Claim *CheckoutClaim
 }
 
 // TryAcquireRecoveryTurn atomically grants a recovery turn to w when its preset
-// cooldown has elapsed, no checkout gate hold or live drain blocks the path, no
-// other turn is held there, and w is first among eligible waiters on that path
+// cooldown has elapsed, no other set's Checkout claim blocks the path (ADR-0135),
+// no other turn is held there, and w is first among eligible waiters on that path
 // (priority descending, then registration time ascending).
 //
+// The claim union — a live running Drain or a live claim-bearing Failed-gate hold
+// of another set — defers the turn; a non-claiming gate hold (HITL, approval,
+// verify-fail, clean Failed gate) does not, so a quota-recovered waiter resumes
+// past an open human-wait menu. The acquiring waiter's own registration is
+// excluded from the claim check so a set never self-blocks, and peer quota waiters
+// are left to the ordering check so two waiters never deadlock claiming each other.
+//
 // When the turn is granted the returned *RecoveryBlock is nil. When it is denied
-// after the cooldown has elapsed, the block names the actual blocker (kind + the
-// blocking set's ID), computed inside the same acquisition transaction so there
-// is no second query and no TOCTOU. Before the cooldown elapses the block is nil.
+// after the cooldown has elapsed, the block names the actual blocker, computed
+// inside the same acquisition transaction so there is no second query and no
+// TOCTOU. Before the cooldown elapses the block is nil.
 func (s *Store) TryAcquireRecoveryTurn(w RecoveryWaiter, now time.Time) (bool, *RecoveryBlock, error) {
 	if w.SetID == "" || w.RuntimePath == "" || now.Before(w.ResetAt.UTC()) {
 		return false, nil, nil
@@ -49,45 +62,16 @@ func (s *Store) TryAcquireRecoveryTurn(w RecoveryWaiter, now time.Time) (bool, *
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var holdSetID sql.NullString
-	err = tx.QueryRow(
-		`SELECT set_id FROM checkout_gate_holds WHERE runtime_path = ?`, w.RuntimePath).
-		Scan(&holdSetID)
-	if err != nil && err != sql.ErrNoRows {
+	if claim, err := s.liveDrainClaim(tx, w.RuntimePath); err != nil {
 		return false, nil, err
+	} else if claim != nil {
+		return false, &RecoveryBlock{Kind: RecoveryBlockClaimed, SetID: claim.SetID, Claim: claim}, nil
 	}
-	if holdSetID.Valid {
-		return false, &RecoveryBlock{Kind: RecoveryBlockGateHold, SetID: holdSetID.String}, nil
-	}
-
-	rows, err := tx.Query(
-		`SELECT id, repo, set_id, runtime_path, pid, proc_start, started_at FROM drains
-		 WHERE state = ? AND runtime_path = ?`,
-		StateRunning, w.RuntimePath)
-	if err != nil {
+	if claim, err := s.liveGateHoldClaim(tx, w.RuntimePath, w.SetID); err != nil {
 		return false, nil, err
+	} else if claim != nil {
+		return false, &RecoveryBlock{Kind: RecoveryBlockClaimed, SetID: claim.SetID, Claim: claim}, nil
 	}
-	for rows.Next() {
-		var d Drain
-		var started string
-		var procStart sql.NullString
-		if err := rows.Scan(&d.ID, &d.Repo, &d.SetID, &d.RuntimePath, &d.PID, &procStart, &started); err != nil {
-			_ = rows.Close()
-			return false, nil, err
-		}
-		d.ProcStart = procStart.String
-		d.StartedAt = parseTime(started)
-		d.State = StateRunning
-		if s.drainAlive(d) {
-			_ = rows.Close()
-			return false, &RecoveryBlock{Kind: RecoveryBlockLiveDrain, SetID: d.SetID}, nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return false, nil, err
-	}
-	_ = rows.Close()
 
 	var turnSetID sql.NullString
 	err = tx.QueryRow(
