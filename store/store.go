@@ -360,6 +360,17 @@ var migrations = []string{
 	// the empty string, which the daemon reads as "no fingerprint recorded" and
 	// never treats as a mismatch.
 	`ALTER TABLE routine_runs ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';`,
+	// 22: recovery_waiters owner identity — the PID and process start token of the
+	// process that registered the waiter, mirroring the drains and gate-hold tables
+	// so the same opportunistic reconcile pass can sweep a waiter whose owner died
+	// (ADR-0135). A kill -9 or terminal close would otherwise leak the waiter row
+	// forever, permanently deferring that set in the Queue and blocking the
+	// checkout claim union. proc_start is nullable and pid defaults to 0: a legacy
+	// row (written before these columns existed) carries no owner and reads dead, so
+	// the first reconcile sweeps it — the correct outcome, since its registering
+	// process is long gone.
+	`ALTER TABLE recovery_waiters ADD COLUMN pid INTEGER NOT NULL DEFAULT 0;
+	 ALTER TABLE recovery_waiters ADD COLUMN proc_start TEXT;`,
 }
 
 func (s *Store) migrate() error {

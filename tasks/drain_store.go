@@ -173,10 +173,13 @@ func realProductionDataDir() string {
 // whoever next reads — no always-on daemon. The same pass also sweeps checkout
 // gate holds whose registering process died (a crash while a human sat at a
 // Failed/HITL gate would otherwise orphan the hold and block Recovery-turn
-// acquisition on that checkout forever). It opens the store only when it already
-// exists (a pure reader never materialises an empty database), forks nothing (it
-// reads only the drains and checkout_gate_holds tables), and does bounded
-// transactions. It returns the number of Drains transitioned to crashed.
+// acquisition on that checkout forever). It likewise sweeps recovery waiters
+// whose registering process died, so a dead owner's waiter (a kill -9 or terminal
+// close mid-quota-wait) is not left deferring its set in the Queue forever
+// (ADR-0135). It opens the store only when it already exists (a pure reader never
+// materialises an empty database), forks nothing (it reads only the drains,
+// checkout_gate_holds, spawn_intents and recovery_waiters tables), and does
+// bounded transactions. It returns the number of Drains transitioned to crashed.
 func ReconcileDrains(d *Deps) (int, error) {
 	s, ok, err := openDrainStoreIfExists(d)
 	if err != nil || !ok {
@@ -195,6 +198,13 @@ func ReconcileDrains(d *Deps) (int, error) {
 	// re-selection forever. Same rule: a sweep error only surfaces when the drain
 	// arm was clean.
 	if _, sweepErr := s.ReconcileSpawnIntents(now.Add(-spawnIntentTTL)); sweepErr != nil && err == nil {
+		err = sweepErr
+	}
+	// Sweep recovery waiters whose registering process died (a kill -9 or terminal
+	// close mid-quota-wait), so a dead owner's waiter is not left claiming the
+	// checkout and permanently deferring its set in the Queue (ADR-0135). Same
+	// rule: a sweep error only surfaces when the drain arm was clean.
+	if _, sweepErr := s.ReconcileRecoveryWaiters(); sweepErr != nil && err == nil {
 		err = sweepErr
 	}
 	return n, err

@@ -364,8 +364,9 @@ func TestAcquireRecoveryTurn_BlockedByCheckoutGateHold(t *testing.T) {
 // after which the waiting set acquires its turn.
 func TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn(t *testing.T) {
 	d, repo := drainTestRepo(t)
-	d.ProcessStartToken = func(int) (string, bool) { return "gate-token", true }
 
+	// The recovery waiter is owned by a live process (waiter-token).
+	d.ProcessStartToken = func(int) (string, bool) { return "waiter-token", true }
 	waiter := RecoveryWaiter{
 		SetID:       "set-b",
 		Preset:      "claude",
@@ -376,7 +377,8 @@ func TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn(t *testing.T) {
 		t.Fatalf("RegisterRecoveryWaiter: %v", err)
 	}
 
-	// A gate hold owned by this process (its PID, gate-token) blocks acquisition.
+	// A gate hold owned by a *different* process (gate-token) blocks acquisition.
+	d.ProcessStartToken = func(int) (string, bool) { return "gate-token", true }
 	if err := RegisterCheckoutGateHold(d, "set-a", repo); err != nil {
 		t.Fatalf("RegisterCheckoutGateHold: %v", err)
 	}
@@ -388,16 +390,20 @@ func TestReconcileSweepsDeadGateHoldUnblocksRecoveryTurn(t *testing.T) {
 		t.Fatal("recovery turn must not be acquired while a gate hold is active")
 	}
 
-	// The gate owner dies. The reconcile pass (run by whoever next reads) sweeps
-	// the dead-owner hold using the same PID+start-token liveness as drains. The
-	// store's liveness policy is fixed at open (ADR-0118) but consults d's process
-	// seam live on each call, so flipping the seam models the owner dying.
-	d.ProcessAlive = func(int) bool { return false }
+	// The gate owner dies while the waiter's process lives on: the live process's
+	// start token is the waiter's, so the reconcile pass sweeps the gate hold
+	// (gate-token no longer matches) but leaves the still-live waiter. The store's
+	// liveness policy is fixed at open (ADR-0118) but consults d's process seam
+	// live on each call, so pointing the token at the survivor models this.
+	d.ProcessStartToken = func(int) (string, bool) { return "waiter-token", true }
 	if _, err := ReconcileDrains(d); err != nil {
 		t.Fatalf("ReconcileDrains: %v", err)
 	}
 	if hold, _ := GetCheckoutGateHold(d, repo); hold != nil {
 		t.Fatalf("dead-owner gate hold survived reconcile: %+v", hold)
+	}
+	if w, _ := GetRecoveryWaiter(d, "set-b"); w == nil {
+		t.Fatal("live-owner waiter was wrongly swept alongside the dead gate hold")
 	}
 
 	// With the orphan swept, the waiting set acquires its recovery turn.
@@ -469,6 +475,81 @@ func TestRegisterCheckoutGateHold(t *testing.T) {
 	}
 	if hold != nil {
 		t.Error("gate hold should be nil after release")
+	}
+}
+
+// TestReconcileSweepsDeadRecoveryWaiter exercises the queue-deferral chokepoint:
+// a recovery waiter registered by a process that then dies must not linger and
+// defer its set in the Queue forever (ADR-0135). The reconcile pass sweeps the
+// dead-owner waiter, after which the queue's waiter reader (AllRecoveryWaiters)
+// no longer sees it.
+func TestReconcileSweepsDeadRecoveryWaiter(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	d.ProcessStartToken = func(int) (string, bool) { return "waiter-token", true }
+
+	waiter := RecoveryWaiter{
+		SetID:       "set-a",
+		Preset:      "claude",
+		ResetAt:     time.Now().Add(-time.Hour),
+		RuntimePath: repo,
+	}
+	if _, err := RegisterRecoveryWaiter(d, waiter); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter: %v", err)
+	}
+
+	// The registering process dies. The reconcile pass (run by whoever next
+	// reads) sweeps the dead-owner waiter using the same PID+start-token liveness
+	// as drains. The store's liveness policy is fixed at open (ADR-0118) but
+	// consults d's process seam live on each call, so flipping the seam models
+	// the owner dying.
+	d.ProcessAlive = func(int) bool { return false }
+	if _, err := ReconcileDrains(d); err != nil {
+		t.Fatalf("ReconcileDrains: %v", err)
+	}
+
+	// The queue-deferral reader observes the post-sweep view.
+	waiters, err := AllRecoveryWaiters(d)
+	if err != nil {
+		t.Fatalf("AllRecoveryWaiters: %v", err)
+	}
+	if _, ok := waiters["set-a"]; ok {
+		t.Fatalf("dead-owner waiter survived reconcile: %+v", waiters["set-a"])
+	}
+	if got, _ := GetRecoveryWaiter(d, "set-a"); got != nil {
+		t.Fatalf("dead-owner waiter row survived reconcile: %+v", got)
+	}
+}
+
+// TestReconcileLeavesLiveRecoveryWaiter guards the survival case: a recovery
+// waiter whose owner is still alive must never be swept, and its owner identity
+// (PID + start token) round-trips through the store.
+func TestReconcileLeavesLiveRecoveryWaiter(t *testing.T) {
+	d, repo := drainTestRepo(t)
+	d.ProcessStartToken = func(int) (string, bool) { return "waiter-token", true }
+
+	waiter := RecoveryWaiter{
+		SetID:       "set-a",
+		Preset:      "claude",
+		ResetAt:     time.Now().Add(-time.Hour),
+		RuntimePath: repo,
+	}
+	if _, err := RegisterRecoveryWaiter(d, waiter); err != nil {
+		t.Fatalf("RegisterRecoveryWaiter: %v", err)
+	}
+
+	// d.ProcessAlive reports the current process (the waiter owner) alive.
+	if _, err := ReconcileDrains(d); err != nil {
+		t.Fatalf("ReconcileDrains: %v", err)
+	}
+	got, err := GetRecoveryWaiter(d, "set-a")
+	if err != nil {
+		t.Fatalf("GetRecoveryWaiter: %v", err)
+	}
+	if got == nil {
+		t.Fatal("live recovery waiter was wrongly swept by reconcile")
+	}
+	if got.PID != os.Getpid() || got.ProcStart != "waiter-token" {
+		t.Fatalf("waiter owner identity not persisted: %+v", got)
 	}
 }
 

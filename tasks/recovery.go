@@ -160,12 +160,17 @@ type RecoveryWaiter struct {
 	ResetAt      time.Time
 	RuntimePath  string
 	Priority     int
+	PID          int
+	ProcStart    string
 	RegisteredAt time.Time
 }
 
 // RegisterRecoveryWaiter records a quota-recovery wait in the global store. The
 // set_id is UNIQUE: a second registration for the same set replaces the first,
-// so a crash-restart does not duplicate the row. Returns the registered waiter.
+// so a crash-restart does not duplicate the row. The waiter captures the
+// registering process's PID and start token (the same pairing drains and gate
+// holds use) so the reconcile pass can sweep it if that process dies while
+// parked (ADR-0135). Returns the registered waiter.
 func RegisterRecoveryWaiter(d *Deps, w RecoveryWaiter) (*RecoveryWaiter, error) {
 	if w.SetID == "" || w.Preset == "" || w.ResetAt.IsZero() || w.RuntimePath == "" {
 		return nil, exitErr(ExitOperational, "invalid recovery waiter: missing required fields")
@@ -178,12 +183,16 @@ func RegisterRecoveryWaiter(d *Deps, w RecoveryWaiter) (*RecoveryWaiter, error) 
 	if w.RegisteredAt.IsZero() {
 		w.RegisteredAt = time.Now().UTC()
 	}
+	w.PID = os.Getpid()
+	w.ProcStart, _ = procStartToken(d, w.PID)
 	if err := s.PutRecoveryWaiter(store.RecoveryWaiter{
 		SetID:        w.SetID,
 		Preset:       w.Preset,
 		ResetAt:      w.ResetAt,
 		RuntimePath:  w.RuntimePath,
 		Priority:     w.Priority,
+		PID:          w.PID,
+		ProcStart:    w.ProcStart,
 		RegisteredAt: w.RegisteredAt,
 	}); err != nil {
 		return nil, exitErr(ExitOperational, "register recovery waiter: %v", err)
@@ -234,6 +243,8 @@ func GetRecoveryWaiter(d *Deps, setID string) (*RecoveryWaiter, error) {
 		ResetAt:      w.ResetAt,
 		RuntimePath:  w.RuntimePath,
 		Priority:     w.Priority,
+		PID:          w.PID,
+		ProcStart:    w.ProcStart,
 		RegisteredAt: w.RegisteredAt,
 	}, nil
 }
@@ -305,6 +316,8 @@ func AllRecoveryWaiters(d *Deps) (map[string]RecoveryWaiter, error) {
 			ResetAt:      w.ResetAt,
 			RuntimePath:  w.RuntimePath,
 			Priority:     w.Priority,
+			PID:          w.PID,
+			ProcStart:    w.ProcStart,
 			RegisteredAt: w.RegisteredAt,
 		}
 	}
@@ -512,6 +525,8 @@ func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter) (bool, *sto
 		ResetAt:      w.ResetAt,
 		RuntimePath:  w.RuntimePath,
 		Priority:     w.Priority,
+		PID:          w.PID,
+		ProcStart:    w.ProcStart,
 		RegisteredAt: w.RegisteredAt,
 	}, time.Now().UTC())
 }
