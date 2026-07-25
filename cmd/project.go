@@ -419,13 +419,23 @@ func RunProject(d *ProjectDeps) error {
 			if isStandaloneSession(*result.Selected) {
 				return d.SwitchToTarget(d.Tmux, standaloneSessionName(*result.Selected))
 			}
-			if !d.NoHistory {
+			// History records an actual Switch (glossary gen 0038): a selection
+			// abandoned at the Workbench prompt (Esc) leaves no entry. So the
+			// record is deferred to fire only just before each terminal action,
+			// after every prompt is confirmed — never on the picker-loop return
+			// path. recordSwitch honors --no-history and stays best-effort; it is
+			// never gated on tmux attach success.
+			recordSwitch := func() {
+				if d.NoHistory {
+					return
+				}
 				hist.Record(result.Selected.Path)
 				if err := hist.Save(); err != nil {
 					debug.Error("project: save history: %v", err)
 				}
 			}
 			if d.TMuxCDPane != "" {
+				recordSwitch()
 				return d.SendCDToPane(d.Tmux, d.TMuxCDPane, result.Selected.Path)
 			}
 			// Preferred workbench (ADR-0078): a resolved per-checkout default
@@ -439,6 +449,7 @@ func RunProject(d *ProjectDeps) error {
 					debug.Error("project: %s", w)
 				}
 				if preferred != "" {
+					recordSwitch()
 					return d.OpenSessionWithWorkbench(d.Tmux, result.Selected, preferred)
 				}
 			}
@@ -454,17 +465,20 @@ func RunProject(d *ProjectDeps) error {
 						return err
 					}
 					if !confirmed {
-						// Esc in the Workbench list: nothing created, return
-						// to the project picker with the cursor preserved.
+						// Esc in the Workbench list: nothing created, no Switch,
+						// so no History entry. Return to the project picker with
+						// the cursor preserved.
 						restoreCursorIdx = result.CursorIndex
 						continue
 					}
 					if name != "" {
+						recordSwitch()
 						return d.OpenSessionWithWorkbench(d.Tmux, result.Selected, name)
 					}
 					// "no workbench": fall through to today's flat session.
 				}
 			}
+			recordSwitch()
 			return d.OpenSession(d.Tmux, result.Selected)
 
 		case ui.ActionOpenWindow:

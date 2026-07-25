@@ -1599,6 +1599,59 @@ func TestRunProject_WorkbenchPickNoWorkbenchYieldsFlat(t *testing.T) {
 	}
 }
 
+// TestRunProject_WorkbenchPickEscLeavesHistoryUnchanged asserts that backing out
+// of the Workbench prompt with Esc records no History entry — History marks an
+// actual Switch (glossary gen 0038), and an abandoned selection never switched.
+// The loop returns to the project picker, which then cancels.
+func TestRunProject_WorkbenchPickEscLeavesHistoryUnchanged(t *testing.T) {
+	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
+
+	var hist *history.History
+	origLoadHistory := d.LoadHistory
+	d.LoadHistory = func() (*history.History, error) {
+		h, err := origLoadHistory()
+		hist = h
+		return h, err
+	}
+
+	openFlat := false
+	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	openWB := false
+	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+
+	calls := 0
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		calls++
+		switch calls {
+		case 1:
+			// Project picker: confirm the (only) project.
+			return ui.Result{Action: ui.ActionConfirm, Selected: &items[0], CursorIndex: 0}, nil
+		case 2:
+			// Workbench prompt: Esc (cancel) — back out, create nothing.
+			return ui.Result{Action: ui.ActionCancel}, nil
+		default:
+			// Back at the project picker: cancel out of the loop.
+			return ui.Result{Action: ui.ActionCancel}, nil
+		}
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if openFlat || openWB {
+		t.Error("no session must be opened when Esc backs out of the Workbench prompt")
+	}
+	if calls != 3 {
+		t.Errorf("picker shown %d times, want 3 (project, workbench-Esc, project-cancel)", calls)
+	}
+	if hist == nil {
+		t.Fatal("LoadHistory was not called")
+	}
+	if len(hist.Entries) != 0 {
+		t.Errorf("expected 0 history entries after Esc-at-Workbench, got %d", len(hist.Entries))
+	}
+}
+
 // TestRunProject_PreferredWorkbenchAutoApplies asserts that a resolved preferred
 // workbench (ADR-0078) auto-applies silently and suppresses the prompt whether
 // pick_on_create is off or on — one picker, straight to OpenSessionWithWorkbench.
