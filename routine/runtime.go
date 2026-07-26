@@ -45,6 +45,12 @@ func ConfigureRuntimeWith(d *Deps, id string, agents []string, agentsSet bool, e
 }
 
 func writeRuntime(d *Deps, id string, agents []string, agentsSet bool, effort string, effortSet bool, markChanged bool) (*RuntimeResult, error) {
+	// A Project routine's agents/effort live in its committed
+	// `.pop/routines/<name>.md` frontmatter, the source of truth (ADR-0138). The
+	// edit rewrites that file in place — no state.json, no pause, no git.
+	if resolvesToProjectRoutine(d, id) {
+		return writeProjectRuntime(d, id, agents, agentsSet, effort, effortSet)
+	}
 	if err := validateID(id); err != nil {
 		return nil, err
 	}

@@ -306,13 +306,16 @@ type routineDashboardMenu struct {
 //
 // A Project routine is a committed prompt edited in its checkout, not an
 // authored manifest in pop's data dir (ADR-0138): it has no pause state and no
-// schedule, so only the verbs that read its per-checkout run state apply —
-// fire, preview, runs, and handoff. Pause/resume and edit-schedule are absent.
+// schedule, so pause/resume and edit-schedule are absent. Edit-prompt and refine
+// target its in-repo file (never committing); fire, preview, runs, and handoff
+// read its per-checkout run state.
 func routineMenuItems(row DashboardRow) []routineMenuItem {
 	if row.Project {
 		return []routineMenuItem{
 			{key: "i", label: "fire now", action: menuActionFire},
 			{key: "p", label: "preview pane", action: menuActionPreview},
+			{key: "e", label: "edit prompt", action: menuActionEditPrompt},
+			{key: "r", label: "refine", action: menuActionRefine},
 			{key: "l", label: "runs", action: menuActionRuns},
 			{key: "y", label: "handoff", action: menuActionHandoff},
 		}
@@ -677,9 +680,14 @@ func (m RoutineDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dashboardEditMsg:
 		if msg.err != nil {
 			m.err = msg.err
+		} else if _, ok := parseProjectRef(msg.id); ok {
+			// A Project routine is a committed prompt with no pause state (ADR-0138):
+			// the edit writes only the in-repo file — pop never pauses, stages, or
+			// commits.
+			m.statusMsg = fmt.Sprintf("edited prompt for %s", msg.id)
 		} else {
-			// Editing prompt.md via the dashboard verb is a run-affecting edit
-			// chokepoint: pause with reason `changed` (ADR-0128).
+			// Editing an authored routine's prompt.md via the dashboard verb is a
+			// run-affecting edit chokepoint: pause with reason `changed` (ADR-0128).
 			d := m.d
 			if d == nil {
 				d = DefaultDeps()
@@ -984,7 +992,9 @@ func (m RoutineDashboard) editPrompt(row DashboardRow) tea.Cmd {
 }
 
 // editPromptCommand builds the external editor invocation on the routine's
-// prompt.md. The editor is read from $EDITOR, falling back to vi.
+// prompt file. The editor is read from $EDITOR, falling back to vi. A Project
+// routine's prompt is its committed `.pop/routines/<name>.md` (ADR-0138), the
+// source of truth the editor opens directly.
 func editPromptCommand(d *Deps, id string) *exec.Cmd {
 	if d == nil {
 		d = DefaultDeps()
@@ -993,8 +1003,20 @@ func editPromptCommand(d *Deps, id string) *exec.Cmd {
 	if editor == "" {
 		editor = "vi"
 	}
-	promptPath := filepath.Join(routineDir(d, id), promptFileName)
-	return exec.Command(editor, promptPath)
+	return exec.Command(editor, promptPathForEdit(d, id))
+}
+
+// promptPathForEdit resolves the file the edit-prompt verb opens: a Project
+// routine's committed in-repo file, else the authored routine's data-dir
+// prompt.md. A Project routine whose file cannot be resolved falls back to the
+// authored path so the editor still opens something rather than nothing.
+func promptPathForEdit(d *Deps, id string) string {
+	if resolvesToProjectRoutine(d, id) {
+		if path, err := projectRoutineFilePath(d, projectRoutineName(id)); err == nil {
+			return path
+		}
+	}
+	return filepath.Join(routineDir(d, id), promptFileName)
 }
 
 // refineRoutine spawns the whole refinement loop into a tmux window named after
@@ -1271,6 +1293,8 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 			return []ui.HelpEntry{
 				{Key: "i", Desc: "fire now"},
 				{Key: "p", Desc: "preview pane"},
+				{Key: "e", Desc: "edit prompt"},
+				{Key: "r", Desc: "refine"},
 				{Key: "l", Desc: "runs"},
 				{Key: "y", Desc: "handoff"},
 				{Key: "j/k", Desc: "navigate"},

@@ -90,6 +90,13 @@ func EditWith(d *Deps, id, scheduleRaw string, scheduleSet bool) (*EditResult, e
 		return &EditResult{RoutineID: id, ScheduleUpdated: true, Schedule: m.Schedule}, nil
 	}
 
+	// A Project routine's prompt is its committed `.pop/routines/<name>.md`, the
+	// sole source of truth (ADR-0138): the edit opens that file itself and never
+	// pauses (a Project routine has no pause state) or touches git.
+	if resolvesToProjectRoutine(d, id) {
+		return editProjectPrompt(d, projectRoutineName(id))
+	}
+
 	if err := validateID(id); err != nil {
 		return nil, err
 	}

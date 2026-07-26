@@ -27,7 +27,9 @@ func RefinePaneWith(d *Deps, routineID, refineAgent string) error {
 	if !inTmux() {
 		return fmt.Errorf("refine requires tmux; run: %s", refineCLICommand("pop", routineID, refineAgent))
 	}
-	r, err := loadManifest(d, routineID)
+	// A Project routine's pane runs in its checkout (ADR-0138); paneBoundDir
+	// resolves either world's bound directory.
+	boundDir, err := paneBoundDir(d, routineID)
 	if err != nil {
 		return err
 	}
@@ -39,9 +41,19 @@ func RefinePaneWith(d *Deps, routineID, refineAgent string) error {
 	if err != nil {
 		return fmt.Errorf("resolve pop executable: %w", err)
 	}
-	session, dir := sessionAndDir(d, r.Manifest.BoundDirectory)
+	session, dir := sessionAndDir(d, boundDir)
 	command := refineCLICommand(exe, routineID, refineAgent)
-	return spawnRefineWindow(tmuxDeps(d), session, dir, routineID, command)
+	return spawnRefineWindow(tmuxDeps(d), session, dir, refineWindowName(routineID), command)
+}
+
+// refineWindowName is the tmux window name a refine pane lands in. A Project
+// routine's `project:<name>` id carries a `:`, which tmux would misread inside a
+// `session:window` target, so it is folded to `_`. Authored ids are unchanged.
+func refineWindowName(routineID string) string {
+	if _, ok := parseProjectRef(routineID); ok {
+		return strings.ReplaceAll(routineID, ":", "_")
+	}
+	return routineID
 }
 
 // refineCLICommand builds the shell command for the refinement loop.

@@ -27,6 +27,12 @@ func Refine(id, agentOverride string) error {
 // so a non-interactive call errors and names the prompt path so the caller can
 // edit it directly (or use `pop routine edit --schedule`).
 func RefineWith(d *Deps, id, agentOverride string) error {
+	// A Project routine is a committed prompt refined in its checkout, not an
+	// authored manifest in pop's data dir (ADR-0138): it has no schedule and no
+	// pause state, so it runs its own gate with a project-aware briefing.
+	if resolvesToProjectRoutine(d, id) {
+		return refineProjectRoutine(d, id, agentOverride)
+	}
 	if err := validateID(id); err != nil {
 		return err
 	}
@@ -73,7 +79,7 @@ func RefineWith(d *Deps, id, agentOverride string) error {
 		case "2", "fire":
 			fireFromGate(d, out, id)
 		case "3":
-			viewLastReport(d, out, id)
+			viewLastReport(d, out, id, filepath.Join(routineDir(d, id), runsDirName))
 		case "4":
 			if _, err := EditWith(d, id, "", false); err != nil {
 				fmt.Fprintf(out, "Could not open the prompt: %v\n", err)
@@ -143,8 +149,10 @@ func fireFromGate(d *Deps, out io.Writer, id string) {
 }
 
 // viewLastReport opens the most recent run's report in $PAGER, or prints the
-// expected path when there is no report to show yet.
-func viewLastReport(d *Deps, out io.Writer, id string) {
+// expected path when there is no report to show yet. It keys the run lookup on
+// storeID and resolves a report-less run against runsDir, so authored and
+// per-checkout Project routines (ADR-0138) share the one seam.
+func viewLastReport(d *Deps, out io.Writer, storeID, runsDir string) {
 	s, ok, err := openExecutionStoreIfExists(d)
 	if err != nil {
 		fmt.Fprintf(out, "Could not open the run store: %v\n", err)
@@ -154,7 +162,7 @@ func viewLastReport(d *Deps, out io.Writer, id string) {
 		fmt.Fprintln(out, "No runs yet. Fire a test run first (option 2).")
 		return
 	}
-	run, err := s.LastRoutineRun(id)
+	run, err := s.LastRoutineRun(storeID)
 	if err != nil {
 		fmt.Fprintf(out, "Could not read the last run: %v\n", err)
 		return
@@ -165,7 +173,7 @@ func viewLastReport(d *Deps, out io.Writer, id string) {
 	}
 	path := run.ReportPath
 	if path == "" {
-		path = reportPathForRun(filepath.Join(routineDir(d, id), runsDirName), run.FiredAt)
+		path = reportPathForRun(runsDir, run.FiredAt)
 	}
 	if _, err := d.FS.Stat(path); err != nil {
 		fmt.Fprintf(out, "No report for the last run yet: %s\n", path)

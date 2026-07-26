@@ -208,7 +208,14 @@ func runRoutineEdit(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "Updated runtime config for routine %q; paused (changed)\n", res.RoutineID)
+			// An authored routine pauses (reason changed) on a runtime edit; a
+			// Project routine has no pause state, so its committed file is rewritten
+			// in place without pausing (ADR-0138).
+			if res.Paused {
+				fmt.Fprintf(out, "Updated runtime config for routine %q; paused (changed)\n", res.RoutineID)
+			} else {
+				fmt.Fprintf(out, "Updated runtime config for routine %q\n", res.RoutineID)
+			}
 		}
 		return nil
 	}
