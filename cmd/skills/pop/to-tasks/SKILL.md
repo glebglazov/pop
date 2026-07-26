@@ -1,6 +1,6 @@
 ---
 name: to-tasks
-description: Break a plan, spec, or PRD into independently-grabbable work items written as local markdown files, binding the set to the worktree you run it in. Use when the user wants to convert a plan into tasks, create implementation tickets, or break down work into actionable items. Accepts `managed` (isolated pop-owned worktree) and `auto-drain` (queue drains it unattended) arguments.
+description: Break a plan or spec into independently-grabbable work items written as local markdown files, binding the set to the worktree you run it in. Use when the user wants to convert a plan into tasks, create implementation tickets, or break down work into actionable items. Accepts `managed` (isolated pop-owned worktree) and `auto-drain` (queue drains it unattended) arguments.
 disable-model-invocation: true
 ---
 
@@ -23,9 +23,9 @@ With no arguments, plain `pop tasks register <set>` eagerly binds the set to the
 
 Work from whatever is already in the conversation context. If the user passes a task reference (task id, URL, or path) as an argument, fetch it and read its full body.
 
-If a PRD authored by to-prd is being broken down, it lives **co-located** in its task-set folder as `<tasks-dir>/<task-set-name>/prd.md` (ADR-0088) — not in a separate `prds/` sibling. That folder already exists (to-prd created it early, containing only `prd.md`); read that `prd.md` for context and write the task files into the **same** folder, reusing its `<task-set-name>` so the PRD and its tasks share one directory.
+If a spec authored by to-prd is being broken down, it lives **co-located** in its task-set folder as `<tasks-dir>/<task-set-name>/spec.md` (ADR-0088, amended by ADR-0136) — not in a separate `prds/` sibling. That folder already exists (to-prd created it early, containing only `spec.md`); read that `spec.md` for context and write the task files into the **same** folder, reusing its `<task-set-name>` so the spec and its tasks share one directory.
 
-**Wayfinder Map source:** When invoked directly on a Map (user names a map id, no co-located `prd.md` yet), read `$(pop work show-path)/wayfinder/<map-id>/map.md` and each **resolved** ticket under `issues/` — at minimum every ticket linked from **Decisions so far**, plus any other resolved tickets whose `## Answer` should inform the breakdown. After writing the set, append `<task-set-name>` under the map's `## Spawned sets` section in `map.md` (create the section if absent).
+**Wayfinder Map source:** When invoked directly on a Map (user names a map id, no co-located `spec.md` yet), read `$(pop work show-path)/wayfinder/<map-id>/map.md` and each **resolved** ticket under `issues/` — at minimum every ticket linked from **Decisions so far**, plus any other resolved tickets whose `## Answer` should inform the breakdown. After writing the set, append `<task-set-name>` under the map's `## Spawned sets` section in `map.md` (create the section if absent).
 
 ### 2. Explore the codebase (optional)
 
@@ -61,7 +61,7 @@ Write an explicit effort value for each task. Default to `standard` when no name
 
 Resolve the tasks base directory, `<tasks-dir>`, as `$(pop work show-path)/tasks` — run `pop work show-path` for the storage root and append `/tasks`, or equivalently run `pop tasks show-path` (same directory; ADR-0130 compatibility alias). Both print the absolute path to this repository's task storage (in pop's data dir, outside the repo tree) and create it on demand.
 
-For each slice, write a markdown file to the `<tasks-dir>/<task-set-name>/` directory (create the subdirectory if it doesn't exist; when breaking down a co-located PRD it already exists and holds `prd.md` — write the task files alongside it). `<task-set-name>` is `<timestamp>-<slug>`, where `<slug>` is either the source PRD slug (without its timestamp prefix) or a hyphen-delimited string summarising what you intend to do (infer from context). When a co-located `prd.md` is the source, reuse its existing folder's `<task-set-name>` rather than minting a new one. Use the following template. Write them in dependency order (blockers first) so you can reference real identifiers in the "Blocked by" field.
+For each slice, write a markdown file to the `<tasks-dir>/<task-set-name>/` directory (create the subdirectory if it doesn't exist; when breaking down a co-located spec it already exists and holds `spec.md` — write the task files alongside it). `<task-set-name>` is `<timestamp>-<slug>`, where `<slug>` is either the source spec's slug (without its timestamp prefix) or a hyphen-delimited string summarising what you intend to do (infer from context). When a co-located `spec.md` is the source, reuse its existing folder's `<task-set-name>` rather than minting a new one. Use the following template. Write them in dependency order (blockers first) so you can reference real identifiers in the "Blocked by" field.
 
 <naming-convention>
 `<timestamp>` is a human-readable local date/time prefix so task sets sort chronologically:

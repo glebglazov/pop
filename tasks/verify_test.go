@@ -244,11 +244,11 @@ func TestVerifyResolvedSetIncludesWorkDiffInPrompt(t *testing.T) {
 	}
 }
 
-func TestVerifyResolvedSetIncludesPRDInPromptWhenPresent(t *testing.T) {
+func TestVerifyResolvedSetIncludesSpecInPromptWhenPresent(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
-	prdPath := filepath.Join(defPath, "demo", "prd.md")
-	if err := os.WriteFile(prdPath, []byte("PRD-BODY-MARKER\n"), 0o644); err != nil {
-		t.Fatalf("write prd.md: %v", err)
+	specPath := filepath.Join(defPath, "demo", "spec.md")
+	if err := os.WriteFile(specPath, []byte("SPEC-BODY-MARKER\n"), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
 	}
 	var gotPrompt string
 	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
@@ -261,15 +261,15 @@ func TestVerifyResolvedSetIncludesPRDInPromptWhenPresent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("verifyResolvedSet: %v", err)
 	}
-	if !strings.Contains(gotPrompt, "PRD-BODY-MARKER") {
-		t.Fatalf("prompt missing PRD content:\n%s", gotPrompt)
+	if !strings.Contains(gotPrompt, "SPEC-BODY-MARKER") {
+		t.Fatalf("prompt missing spec content:\n%s", gotPrompt)
 	}
 	if !strings.Contains(gotPrompt, "acceptance criteria above remain authoritative") {
-		t.Fatalf("prompt missing PRD-is-context-only framing:\n%s", gotPrompt)
+		t.Fatalf("prompt missing spec-is-context-only framing:\n%s", gotPrompt)
 	}
 }
 
-func TestVerifyResolvedSetOmitsPRDSectionWhenAbsent(t *testing.T) {
+func TestVerifyResolvedSetOmitsSpecSectionWhenAbsent(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
 	var gotPrompt string
 	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
@@ -282,30 +282,64 @@ func TestVerifyResolvedSetOmitsPRDSectionWhenAbsent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("verifyResolvedSet: %v", err)
 	}
-	if strings.Contains(gotPrompt, "## PRD") {
-		t.Fatalf("prompt should omit PRD section when prd.md is absent:\n%s", gotPrompt)
+	if strings.Contains(gotPrompt, "## Spec") {
+		t.Fatalf("prompt should omit Spec section when spec.md is absent:\n%s", gotPrompt)
 	}
 }
 
-func TestReadPRDAbsentIsNotError(t *testing.T) {
+func TestVerifyResolvedSetTreatsLegacyPRDAsSpecLess(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
+	legacyPath := filepath.Join(defPath, "demo", "prd.md")
+	if err := os.WriteFile(legacyPath, []byte("LEGACY-PRD-BODY-MARKER\n"), 0o644); err != nil {
+		t.Fatalf("write prd.md: %v", err)
+	}
+	var gotPrompt string
+	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output: &bytes.Buffer{},
+		runVerifier: func(prompt string) (string, error) {
+			gotPrompt = prompt
+			return "VERDICT: PASS\n", nil
+		},
+	}); err != nil {
+		t.Fatalf("verifyResolvedSet: %v", err)
+	}
+	if strings.Contains(gotPrompt, "## Spec") || strings.Contains(gotPrompt, "LEGACY-PRD-BODY-MARKER") {
+		t.Fatalf("a set with only a legacy prd.md must be treated as spec-less, no fallback read:\n%s", gotPrompt)
+	}
+}
+
+func TestReadSpecAbsentIsNotError(t *testing.T) {
 	root := t.TempDir()
 	m := &Manifest{Dir: root}
 	d := &Deps{FS: deps.NewRealFileSystem()}
-	if _, ok := readPRD(d, m); ok {
-		t.Fatal("readPRD: expected false for absent prd.md")
+	if _, ok := readSpec(d, m); ok {
+		t.Fatal("readSpec: expected false for absent spec.md")
 	}
 }
 
-func TestReadPRDPresentReturnsContent(t *testing.T) {
+func TestReadSpecPresentReturnsContent(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "prd.md"), []byte("  hello prd  \n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "spec.md"), []byte("  hello spec  \n"), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+	m := &Manifest{Dir: root}
+	d := &Deps{FS: deps.NewRealFileSystem()}
+	got, ok := readSpec(d, m)
+	if !ok || got != "hello spec" {
+		t.Fatalf("readSpec = %q, %v, want %q, true", got, ok, "hello spec")
+	}
+}
+
+func TestReadSpecDoesNotFallBackToLegacyPRD(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "prd.md"), []byte("legacy prd\n"), 0o644); err != nil {
 		t.Fatalf("write prd.md: %v", err)
 	}
 	m := &Manifest{Dir: root}
 	d := &Deps{FS: deps.NewRealFileSystem()}
-	got, ok := readPRD(d, m)
-	if !ok || got != "hello prd" {
-		t.Fatalf("readPRD = %q, %v, want %q, true", got, ok, "hello prd")
+	if _, ok := readSpec(d, m); ok {
+		t.Fatal("readSpec: expected false when only a legacy prd.md is present, no fallback read")
 	}
 }
 

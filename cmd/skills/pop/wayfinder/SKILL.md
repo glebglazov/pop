@@ -286,6 +286,6 @@ When the way to the destination is clear — or an early-splittable chunk is —
 Record the forward link both ways:
 
 1. **On the map:** append each spawned task-set id under `## Spawned sets` in `map.md`.
-2. **On the set:** when `to-prd` writes `prd.md`, include a **Source map** line naming this map's id (e.g. `Source map: 2026-07-19-feature`).
+2. **On the set:** when `to-prd` writes `spec.md`, include a **Source map** line naming this map's id (e.g. `Source map: 2026-07-19-feature`).
 
 Then set `Status: done` in `map.md`. One map may spawn many sets over time; only mark `done` when wayfinding for this destination is finished (individual chunks may hand off earlier while the map stays `active` if fog remains).

@@ -915,9 +915,11 @@ func commitSubjectPrefix(taskSetID string) string {
 	return fmt.Sprintf("tasks(%s):", taskSetSlug(taskSetID))
 }
 
-// prdFileName is the optional co-located enrichment file a Verifier prompt
-// includes when present (see buildVerifierPrompt).
-const prdFileName = "prd.md"
+// specFileName is the optional co-located enrichment file a Verifier prompt
+// includes when present (see buildVerifierPrompt). There is no backward-compat
+// read of the retired prd.md filename (ADR-0136): a set folder holding only a
+// legacy prd.md is treated as spec-less, not as an error.
+const specFileName = "spec.md"
 
 // buildVerifierPrompt assembles the Verifier's input: the authoritative
 // acceptance criteria and task bodies for the set's `done` AFK tasks only, plus
@@ -926,7 +928,7 @@ const prdFileName = "prd.md"
 // excluded (ADR-0102): an agent cannot judge a human sign-off, and a not-yet-run
 // task is not an unmet criterion — emitting either made a still-open terminal
 // HITL gate read as a failing criterion, deadlocking the drain before the gate
-// that would clear it. When the set folder has a co-located prd.md, its content
+// that would clear it. When the set folder has a co-located spec.md, its content
 // is folded in as optional context that sharpens judgment — it never replaces
 // the acceptance criteria as the authoritative contract, and its absence is not
 // an error. A non-empty priorNote carries a human's earlier Accept rationale
@@ -954,9 +956,9 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff, priorNote string) 
 		b.WriteString("\n\n")
 	}
 
-	if prd, ok := readPRD(d, m); ok {
-		b.WriteString("## PRD (context only — the acceptance criteria above remain authoritative)\n")
-		b.WriteString(prd)
+	if spec, ok := readSpec(d, m); ok {
+		b.WriteString("## Spec (context only — the acceptance criteria above remain authoritative)\n")
+		b.WriteString(spec)
 		b.WriteString("\n\n")
 	}
 
@@ -1003,12 +1005,13 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff, priorNote string) 
 	return b.String()
 }
 
-// readPRD returns the trimmed content of the set folder's co-located prd.md
+// readSpec returns the trimmed content of the set folder's co-located spec.md
 // and true when it exists and is non-blank. Any read failure (most commonly:
-// the file does not exist) is treated as "no PRD" rather than an error — a
-// missing prd.md must never fail verification.
-func readPRD(d *Deps, m *Manifest) (string, bool) {
-	body, err := d.FS.ReadFile(filepath.Join(m.Dir, prdFileName))
+// the file does not exist) is treated as "no spec" rather than an error — a
+// missing spec.md must never fail verification. There is no fallback read of
+// the retired prd.md filename (ADR-0136).
+func readSpec(d *Deps, m *Manifest) (string, bool) {
+	body, err := d.FS.ReadFile(filepath.Join(m.Dir, specFileName))
 	if err != nil {
 		return "", false
 	}

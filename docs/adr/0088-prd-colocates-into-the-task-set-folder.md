@@ -4,6 +4,8 @@ status: accepted
 
 # PRD co-locates into the task-set folder
 
+> Amended by [ADR-0136](0136-planning-skills-publish-through-a-work-store-seam.md): the co-located artifact this ADR named `prd.md` is renamed `spec.md`, with no backward-compat read of the old filename. The co-location decision itself (one folder holds a feature's whole context) is unchanged.
+
 A PRD moves from the sibling `prds/<slug>.md` into its Task set's own directory as `tasks/<set>/prd.md`, so one folder holds a feature's whole context — the PRD, the task markdown, and `index.json` together. `to-prd` creates the set directory early (writing only `prd.md`); `to-tasks` fills in the task files and manifest; the set stays inert until `pop tasks register`. The `prds/` directory is retired and existing PRDs are migrated by slug (full removal tracked in CLEANUP.md, section D).
 
 ## Why
