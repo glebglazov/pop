@@ -305,13 +305,14 @@ func TestRefineUnknownIDErrors(t *testing.T) {
 
 func manifestPaused(t *testing.T, dataHome, id string) bool {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(dataHome, "pop", "routines", id, "manifest.json"))
+	// The pause bit lives in state.json (ADR-0139).
+	data, err := os.ReadFile(filepath.Join(dataHome, "pop", "routines", id, "state.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
+	var st stateFile
+	if err := json.Unmarshal(data, &st); err != nil {
 		t.Fatal(err)
 	}
-	return m.Paused
+	return st.Paused
 }

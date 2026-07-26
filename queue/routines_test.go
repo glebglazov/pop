@@ -10,11 +10,34 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/frontmatter"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/routine"
 	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
+
+// editRoutineBody rewrites a routine's prompt.md body while preserving its
+// intent frontmatter (ADR-0139), mimicking a stray $EDITOR touch below the fence.
+func editRoutineBody(t *testing.T, id, body string) {
+	t.Helper()
+	path := routinePromptPath(id)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, _, err := frontmatter.Parse(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := frontmatter.Marshal(fields, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func routineTickDeps(t *testing.T, now time.Time) (*Deps, *routine.Deps, string) {
 	t.Helper()
@@ -290,9 +313,10 @@ func TestTickRoutinesWarnsBrokenAndFiresHealthy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Corrupt the broken routine's manifest so it cannot be loaded.
-	brokenManifest := filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "routines", "broken", "manifest.json")
-	if err := os.WriteFile(brokenManifest, []byte("{ not json"), 0o644); err != nil {
+	// Corrupt the broken routine's state.json so it cannot be loaded (ADR-0139:
+	// state.json is the read half; manifest.json is never read).
+	brokenState := filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "routines", "broken", "state.json")
+	if err := os.WriteFile(brokenState, []byte("{ not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -320,8 +344,66 @@ func TestTickRoutinesWarnsBrokenAndFiresHealthy(t *testing.T) {
 	if _, ok := extractRoutineSpawnCommand(rt, "hourly"); !ok {
 		t.Fatalf("expected spawn for healthy routine, commands=%v", rt.commands)
 	}
-	if !strings.Contains(out.String(), "broken") || !strings.Contains(out.String(), "manifest load failed") {
+	if !strings.Contains(out.String(), "broken") || !strings.Contains(out.String(), "load failed") {
 		t.Fatalf("output missing broken-routine warning:\n%s", out.String())
+	}
+}
+
+// TestTickRoutinesSurvivesUnparseableScheduleFrontmatter proves that an
+// unparseable schedule in a routine's frontmatter suspends only that routine
+// with a warning; the daemon survives and still fires healthy siblings, never
+// treating the broken one as silently unscheduled (ADR-0139).
+func TestTickRoutinesSurvivesUnparseableScheduleFrontmatter(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	qd, rd, home := routineTickDeps(t, now)
+
+	if _, err := routine.AddWith(rd, "hourly", "every 1h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.AddWith(rd, "bad-sched", "every 1h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.ResumeWith(rd, "hourly"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.ResumeWith(rd, "bad-sched"); err != nil {
+		t.Fatal(err)
+	}
+	// Valid YAML, but a schedule the parser rejects — this must warn, not silently
+	// pass through as unscheduled.
+	if err := os.WriteFile(routinePromptPath("bad-sched"), []byte("---\nschedule: every week\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := store.Open(filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db"), func(int, string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StartRoutineRun(store.RoutineRun{
+		RoutineID: "hourly",
+		FiredAt:   now.Add(-2 * time.Hour),
+		PID:       1,
+		ProcStart: "dead",
+	}, func(store.RoutineRun) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRoutineRun(1, store.RoutineRunSucceeded, "", "", now.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+
+	var out bytes.Buffer
+	tickRoutines(qd, &out)
+
+	rt := qd.Tmux.(*recordingTmux)
+	if _, ok := extractRoutineSpawnCommand(rt, "hourly"); !ok {
+		t.Fatalf("expected spawn for healthy routine, commands=%v", rt.commands)
+	}
+	if _, ok := extractRoutineSpawnCommand(rt, "bad-sched"); ok {
+		t.Fatalf("routine with an unparseable schedule must not fire, commands=%v", rt.commands)
+	}
+	if !strings.Contains(out.String(), "bad-sched") || !strings.Contains(out.String(), "load failed") {
+		t.Fatalf("output missing warning for the unparseable-schedule routine:\n%s", out.String())
 	}
 }
 
@@ -407,10 +489,8 @@ func TestTickRoutinesPausesChangedOnFingerprintDrift(t *testing.T) {
 	}
 	recordRoutineRun(t, "drift", fp, now.Add(-2*time.Hour))
 
-	// A direct prompt.md edit no chokepoint saw moves the fingerprint.
-	if err := os.WriteFile(routinePromptPath("drift"), []byte("edited by a stray $EDITOR\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// A direct prompt.md body edit no chokepoint saw moves the fingerprint.
+	editRoutineBody(t, "drift", "edited by a stray $EDITOR\n")
 
 	var out bytes.Buffer
 	tickRoutines(qd, &out)
@@ -440,9 +520,7 @@ func TestTickRoutinesFiresWhenNoRecordedFingerprint(t *testing.T) {
 	// Pre-migration row: empty fingerprint. The current fingerprint is non-empty
 	// (a real prompt.md exists), but an empty last must never be a mismatch.
 	recordRoutineRun(t, "premig", "", now.Add(-2*time.Hour))
-	if err := os.WriteFile(routinePromptPath("premig"), []byte("changed after the run\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	editRoutineBody(t, "premig", "changed after the run\n")
 
 	var out bytes.Buffer
 	tickRoutines(qd, &out)

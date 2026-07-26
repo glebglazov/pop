@@ -40,10 +40,11 @@ func buildHandoff(d *Deps, id string) (string, error) {
 	}
 
 	dir := routineDir(d, id)
-	promptPath := filepath.Join(dir, promptFileName)
-	domainPrompt, err := d.FS.ReadFile(promptPath)
+	// The handoff describes what the routine does, which is its prompt body — not
+	// the settings frontmatter above the fence (ADR-0139).
+	_, domainPrompt, err := readPromptFrontmatter(d, dir, id)
 	if err != nil {
-		return "", fmt.Errorf("read routine prompt: %w", err)
+		return "", err
 	}
 	memoryDir := filepath.Join(dir, memoryDirName)
 
@@ -61,7 +62,7 @@ func buildHandoff(d *Deps, id string) (string, error) {
 	b.WriteString("the user will follow up with the task they want done.\n\n")
 
 	b.WriteString("## What the routine does\n\n")
-	b.WriteString(strings.TrimRight(string(domainPrompt), "\n"))
+	b.WriteString(strings.TrimRight(domainPrompt, "\n"))
 	b.WriteString("\n\n")
 
 	b.WriteString("## Latest run\n\n")

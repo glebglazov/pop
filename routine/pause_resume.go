@@ -25,7 +25,7 @@ func PauseWith(d *Deps, id string) (*PauseResult, error) {
 	}
 	r.Manifest.Paused = true
 	r.Manifest.PauseReason = PauseReasonManual
-	if err := writeManifest(d, id, r.Manifest); err != nil {
+	if err := writeState(d, id, r.Manifest); err != nil {
 		return nil, err
 	}
 	return &PauseResult{RoutineID: id}, nil
@@ -56,7 +56,7 @@ func ResumeWith(d *Deps, id string) (*ResumeResult, error) {
 	}
 	r.Manifest.Paused = false
 	r.Manifest.PauseReason = ""
-	if err := writeManifest(d, id, r.Manifest); err != nil {
+	if err := writeState(d, id, r.Manifest); err != nil {
 		return nil, err
 	}
 	return &ResumeResult{RoutineID: id}, nil

@@ -109,8 +109,11 @@ func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	memoryDir := filepath.Join(dir, memoryDirName)
 	runsDir := filepath.Join(dir, runsDirName)
 
-	promptContent, _ := d.FS.ReadFile(promptPath)
-	createMode := isCreateModePrompt(string(promptContent))
+	// The frontmatter carries settings (ADR-0139); the authoring agent edits and
+	// reasons about the body, so create-mode detection and the "current prompt"
+	// echo both work from the body below the fence.
+	_, promptBody, _ := readPromptFrontmatter(d, dir, id)
+	createMode := isCreateModePrompt(promptBody)
 
 	var b strings.Builder
 	if createMode {
@@ -162,8 +165,8 @@ func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 		b.WriteString("Interview me until you can answer each of these, then write prompt.md:\n")
 	} else {
 		b.WriteString("## Current prompt.md\n\n")
-		b.WriteString(string(promptContent))
-		if len(promptContent) > 0 && promptContent[len(promptContent)-1] != '\n' {
+		b.WriteString(promptBody)
+		if len(promptBody) > 0 && promptBody[len(promptBody)-1] != '\n' {
 			b.WriteByte('\n')
 		}
 		b.WriteString("\n## Refinement checklist\n\n")

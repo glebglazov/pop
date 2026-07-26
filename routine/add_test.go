@@ -2,7 +2,6 @@ package routine
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/frontmatter"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -72,8 +72,11 @@ func TestAddScaffoldsRoutineFromNonGitDirectory(t *testing.T) {
 		t.Fatal("expected paused=true (routines are created paused)")
 	}
 
+	// The scaffold splits the manifest by ownership (ADR-0139): intent into
+	// prompt.md frontmatter, machine state into state.json — and never writes a
+	// manifest.json.
 	for _, rel := range []string{
-		"manifest.json",
+		"state.json",
 		"prompt.md",
 		"memory",
 		"runs",
@@ -83,20 +86,30 @@ func TestAddScaffoldsRoutineFromNonGitDirectory(t *testing.T) {
 			t.Fatalf("missing %s: %v", rel, err)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(wantDir, "manifest.json")); !os.IsNotExist(err) {
+		t.Fatalf("scaffold must not create manifest.json, stat err = %v", err)
+	}
 
-	data, err := os.ReadFile(filepath.Join(wantDir, "manifest.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var loaded Manifest
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		t.Fatal(err)
-	}
+	// state.json holds the bound directory (a registry fact), the schedule rides
+	// in prompt.md frontmatter — readManifest reassembles both halves.
+	loaded := readManifest(t, d, "daily-report")
 	if loaded.BoundDirectory != wantBound {
 		t.Fatalf("loaded bound dir = %q", loaded.BoundDirectory)
 	}
 	if loaded.Schedule != "daily at 10:00" {
 		t.Fatalf("loaded schedule = %q", loaded.Schedule)
+	}
+
+	// The schedule is genuinely persisted in the prompt.md frontmatter fence.
+	promptData, err := os.ReadFile(filepath.Join(wantDir, "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(promptData), "---\n") {
+		t.Fatalf("prompt.md missing frontmatter fence:\n%s", promptData)
+	}
+	if !strings.Contains(string(promptData), "schedule: daily at 10:00") {
+		t.Fatalf("prompt.md frontmatter missing schedule:\n%s", promptData)
 	}
 }
 
@@ -133,6 +146,29 @@ func TestAddScaffoldsUnscheduledRoutine(t *testing.T) {
 	}
 	if ScheduleLabel(r.Manifest.Schedule) != "manual" {
 		t.Fatalf("ScheduleLabel = %q, want %q", ScheduleLabel(r.Manifest.Schedule), "manual")
+	}
+}
+
+// setRoutineBody replaces a routine's prompt.md body while preserving its
+// frontmatter, mirroring an agent (or human) editing the prompt below the fence
+// without disturbing the authored intent (ADR-0139).
+func setRoutineBody(t *testing.T, d *Deps, id, body string) {
+	t.Helper()
+	promptPath := filepath.Join(routineDir(d, id), promptFileName)
+	data, err := d.FS.ReadFile(promptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, _, err := frontmatter.Parse(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := frontmatter.Marshal(fields, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.FS.WriteFile(promptPath, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

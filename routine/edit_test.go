@@ -1,7 +1,6 @@
 package routine
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,15 +102,9 @@ func TestEditWritesSchedule(t *testing.T) {
 		t.Fatal("schedule edit must not open an editor")
 	}
 
-	manifestPath := filepath.Join(dataHome, "pop", "routines", "sched", "manifest.json")
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		t.Fatal(err)
-	}
+	// The schedule now persists in prompt.md frontmatter; the bound directory in
+	// state.json (ADR-0139). readManifest reassembles both halves.
+	m := readManifest(t, d, "sched")
 	if m.Schedule != "daily at 09:30" {
 		t.Fatalf("persisted schedule = %q", m.Schedule)
 	}
@@ -169,8 +162,10 @@ func TestEditRejectsInvalidScheduleLeavingManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	manifestPath := filepath.Join(dataHome, "pop", "routines", "sched", "manifest.json")
-	before, err := os.ReadFile(manifestPath)
+	// An invalid schedule is rejected before either on-disk half is touched, so
+	// prompt.md (which now carries the schedule frontmatter) must be byte-identical.
+	promptPath := filepath.Join(dataHome, "pop", "routines", "sched", "prompt.md")
+	before, err := os.ReadFile(promptPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,12 +178,12 @@ func TestEditRejectsInvalidScheduleLeavingManifest(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 
-	after, err := os.ReadFile(manifestPath)
+	after, err := os.ReadFile(promptPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(before) != string(after) {
-		t.Fatalf("manifest changed on invalid schedule:\nbefore=%s\nafter=%s", before, after)
+		t.Fatalf("prompt.md changed on invalid schedule:\nbefore=%s\nafter=%s", before, after)
 	}
 }
 

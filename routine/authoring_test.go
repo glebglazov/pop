@@ -137,10 +137,9 @@ func TestBuildAuthoringPromptReviseMode(t *testing.T) {
 	addRoutineForGate(t, d, "gate", home)
 
 	authored := "# Daily triage\n\nReview open PRs assigned to me and summarize blockers.\n"
-	promptPath := filepath.Join(dataHome, "pop", "routines", "gate", "prompt.md")
-	if err := d.FS.WriteFile(promptPath, []byte(authored), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// Editing the body must keep the schedule frontmatter intact (ADR-0139) so
+	// revise mode still reports the current schedule.
+	setRoutineBody(t, d, "gate", authored)
 
 	r, err := loadManifest(d, "gate")
 	if err != nil {

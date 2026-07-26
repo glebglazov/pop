@@ -2,7 +2,6 @@ package routine
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,15 +10,7 @@ import (
 
 func readManifestPaused(t *testing.T, d *Deps, id string) bool {
 	t.Helper()
-	data, err := d.FS.ReadFile(filepath.Join(routineDir(d, id), manifestFileName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		t.Fatal(err)
-	}
-	return m.Paused
+	return readManifest(t, d, id).Paused
 }
 
 func TestPauseResumePersistBitAndListReflects(t *testing.T) {

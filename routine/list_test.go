@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-// breakManifest overwrites a routine's manifest.json with unparseable JSON so it
-// fails to load.
+// breakManifest overwrites a routine's state.json with unparseable JSON so it
+// fails to load (ADR-0139: state.json is the read half, manifest.json is not).
 func breakManifest(t *testing.T, dataHome, id string) {
 	t.Helper()
-	path := filepath.Join(dataHome, "pop", "routines", id, "manifest.json")
+	path := filepath.Join(dataHome, "pop", "routines", id, "state.json")
 	if err := os.WriteFile(path, []byte("{ this is not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}

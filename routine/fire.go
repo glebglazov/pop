@@ -39,17 +39,19 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
-	promptPath := filepath.Join(routineDir(d, id), promptFileName)
-	domainPrompt, err := d.FS.ReadFile(promptPath)
+	// The frontmatter carries settings only (ADR-0139); the run's actual prompt
+	// is the body below the fence. Strip the frontmatter so the agent never sees
+	// the YAML and the fingerprint hashes the same body the daemon would.
+	_, domainPrompt, err := readPromptFrontmatter(d, routineDir(d, id), id)
 	if err != nil {
-		return nil, fmt.Errorf("read routine prompt: %w", err)
+		return nil, err
 	}
 
 	firedAt := nowUTC(d)
 	reportRel := filepath.Join(runsDirName, firedAt.Format("2006-01-02T15-04-05Z")+".md")
 	reportAbs := filepath.Join(routineDir(d, id), reportRel)
 	memoryDir := filepath.Join(routineDir(d, id), memoryDirName)
-	wrappedPrompt := wrapRoutinePrompt(memoryDir, reportAbs, string(domainPrompt))
+	wrappedPrompt := wrapRoutinePrompt(memoryDir, reportAbs, domainPrompt)
 
 	s, err := openExecutionStore(d)
 	if err != nil {
@@ -59,7 +61,7 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 	// Every run records the fingerprint in effect when it fired (ADR-0128).
 	// A manual fire re-proves an edited Routine by recording the new value; the
 	// daemon compares this against the last run's before firing.
-	fingerprint := fingerprintOf(string(domainPrompt), r.Manifest)
+	fingerprint := fingerprintOf(domainPrompt, r.Manifest)
 
 	pid := d.PID()
 	procStart, _ := d.ProcStartToken(pid)
@@ -89,7 +91,7 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 		_ = finish(store.RoutineRunFailed, reason)
 		r.Manifest.Paused = true
 		r.Manifest.PauseReason = PauseReasonFailure
-		_ = writeManifest(d, id, r.Manifest)
+		_ = writeState(d, id, r.Manifest)
 	}
 
 	out := d.Stdout

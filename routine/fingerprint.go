@@ -7,13 +7,17 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/glebglazov/pop/internal/frontmatter"
 	"github.com/glebglazov/pop/store"
 )
 
 // fingerprintInputs is the run-affecting surface a Routine's fingerprint hashes
-// (ADR-0128): prompt.md content plus the explicitly-set schedule, runtime agent
-// list, and effort. Fields serialize in fixed struct order and optional ones
-// carry omitempty, so introducing a future criterion never moves an existing
+// (ADR-0128, ADR-0139): the prompt.md body plus the explicitly-set schedule,
+// runtime agent list, and effort read from its frontmatter. Splitting the file
+// this way — frontmatter as settings, body as prompt — keeps a settings-only
+// edit and a prompt-only edit landing in different fields, so they fingerprint
+// differently. Fields serialize in fixed struct order and optional ones carry
+// omitempty, so introducing a future criterion never moves an existing
 // fingerprint until a human sets that criterion — the safety net stays quiet
 // for routines that never opted in.
 type fingerprintInputs struct {
@@ -37,16 +41,22 @@ func fingerprintOf(prompt string, m Manifest) string {
 }
 
 // Fingerprint returns the canonical run-affecting fingerprint of a Routine: a
-// hash over its prompt.md content and explicitly-set schedule/agents/effort
-// (ADR-0128). The daemon compares this against the fingerprint recorded on the
-// last non-skipped run to detect prompt.md edits no chokepoint saw.
+// hash over its prompt.md body and explicitly-set schedule/agents/effort
+// (ADR-0128, ADR-0139). The frontmatter's parsed settings ride in r.Manifest;
+// only the body is folded in as the prompt, so a hand-edit to either half moves
+// the fingerprint. The daemon compares this against the fingerprint recorded on
+// the last non-skipped run to detect edits no chokepoint saw.
 func Fingerprint(d *Deps, r *Routine) (string, error) {
 	promptPath := filepath.Join(routineDir(d, r.ID), promptFileName)
-	prompt, err := d.FS.ReadFile(promptPath)
+	data, err := d.FS.ReadFile(promptPath)
 	if err != nil {
 		return "", fmt.Errorf("read routine prompt: %w", err)
 	}
-	return fingerprintOf(string(prompt), r.Manifest), nil
+	_, body, err := frontmatter.Parse(string(data))
+	if err != nil {
+		return "", fmt.Errorf("routine %q has invalid frontmatter: %w", r.ID, err)
+	}
+	return fingerprintOf(body, r.Manifest), nil
 }
 
 // LastFingerprint returns the fingerprint recorded on the routine's most recent
@@ -68,7 +78,7 @@ func pauseChanged(d *Deps, id string) error {
 	}
 	r.Manifest.Paused = true
 	r.Manifest.PauseReason = PauseReasonChanged
-	return writeManifest(d, id, r.Manifest)
+	return writeState(d, id, r.Manifest)
 }
 
 // PauseChangedWith pauses id with reason `changed` using the given deps. The
@@ -130,5 +140,5 @@ func pauseAfterEdit(d *Deps, id string) error {
 	}
 	r.Manifest.Paused = true
 	r.Manifest.PauseReason = reason
-	return writeManifest(d, id, r.Manifest)
+	return writeState(d, id, r.Manifest)
 }

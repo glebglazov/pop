@@ -20,7 +20,7 @@ func tickRoutines(d *Deps, out io.Writer) {
 		return
 	}
 	for _, w := range warnings {
-		fmt.Fprintf(out, "queue: routine %s: manifest load failed: %v\n", w.ID, w.Err)
+		fmt.Fprintf(out, "queue: routine %s: load failed: %v\n", w.ID, w.Err)
 	}
 	if len(routines) == 0 {
 		return

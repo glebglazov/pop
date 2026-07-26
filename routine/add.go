@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/glebglazov/pop/internal/frontmatter"
 )
 
 const promptStub = `# Routine prompt
@@ -57,11 +59,9 @@ func AddWith(d *Deps, id, scheduleRaw, cwd string) (*AddResult, error) {
 		return nil, fmt.Errorf("create routine runs directory: %w", err)
 	}
 
-	promptPath := filepath.Join(dir, promptFileName)
-	if err := d.FS.WriteFile(promptPath, []byte(promptStub), 0o644); err != nil {
-		return nil, fmt.Errorf("write routine prompt: %w", err)
-	}
-
+	// Intent lives in prompt.md frontmatter (ADR-0139); the scaffold always emits
+	// the fence — even when no schedule is set — so the authored format is
+	// discoverable to the humans and refinement agents that edit it.
 	manifest := Manifest{
 		BoundDirectory: boundDir,
 		Schedule:       strings.TrimSpace(scheduleRaw),
@@ -69,7 +69,15 @@ func AddWith(d *Deps, id, scheduleRaw, cwd string) (*AddResult, error) {
 		PauseReason:    PauseReasonCreated,
 		CreatedAt:      nowUTC(d).Format(timeRFC3339),
 	}
-	if err := writeManifest(d, id, manifest); err != nil {
+	promptContent, err := frontmatter.Marshal(manifestFields(manifest), promptStub)
+	if err != nil {
+		return nil, fmt.Errorf("encode routine prompt: %w", err)
+	}
+	promptPath := filepath.Join(dir, promptFileName)
+	if err := d.FS.WriteFile(promptPath, []byte(promptContent), 0o644); err != nil {
+		return nil, fmt.Errorf("write routine prompt: %w", err)
+	}
+	if err := writeState(d, id, manifest); err != nil {
 		return nil, err
 	}
 

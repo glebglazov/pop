@@ -7,19 +7,42 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/glebglazov/pop/internal/frontmatter"
 )
 
+// readManifest reads a routine's two on-disk halves back into a Manifest: the
+// machine state from state.json and the authored intent from prompt.md
+// frontmatter (ADR-0139). It reads the files directly (not through
+// loadManifest) so tests can assert on what was actually persisted.
 func readManifest(t *testing.T, d *Deps, id string) Manifest {
 	t.Helper()
-	data, err := d.FS.ReadFile(filepath.Join(routineDir(d, id), manifestFileName))
+	dir := routineDir(d, id)
+	data, err := d.FS.ReadFile(filepath.Join(dir, stateFileName))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
+	var st stateFile
+	if err := json.Unmarshal(data, &st); err != nil {
 		t.Fatal(err)
 	}
-	return m
+	promptData, err := d.FS.ReadFile(filepath.Join(dir, promptFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, _, err := frontmatter.Parse(string(promptData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Manifest{
+		BoundDirectory: st.BoundDirectory,
+		Schedule:       strings.TrimSpace(fields.Schedule),
+		Agents:         nonEmptyAgentSpecs(fields.Agents),
+		Effort:         strings.TrimSpace(fields.Effort),
+		Paused:         st.Paused,
+		PauseReason:    st.PauseReason,
+		CreatedAt:      st.CreatedAt,
+	}
 }
 
 func TestAddWritesCreatedPauseReason(t *testing.T) {
@@ -195,7 +218,7 @@ func TestRefineMenuHeaderShowsPauseReason(t *testing.T) {
 	}
 }
 
-func TestLegacyManifestLoadsAsPlainPaused(t *testing.T) {
+func TestStateWithoutPauseReasonLoadsAsPlainPaused(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	home := filepath.Join(root, "home")
@@ -206,10 +229,11 @@ func TestLegacyManifestLoadsAsPlainPaused(t *testing.T) {
 	if _, err := AddWith(d, "legacy", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
-	// Rewrite the manifest without the pause_reason field to mimic a routine
-	// created before ADR-0128.
-	path := filepath.Join(routineDir(d, "legacy"), manifestFileName)
-	legacy := `{"bound_directory":"` + canonical(t, home) + `","schedule":"every 6h","paused":true,"created_at":"2026-07-18T12:00:00Z"}` + "\n"
+	// Rewrite state.json without the pause_reason field to mimic a routine paused
+	// before ADR-0128 added the reason. The schedule lives in prompt.md
+	// frontmatter now (ADR-0139) and is left untouched.
+	path := filepath.Join(routineDir(d, "legacy"), stateFileName)
+	legacy := `{"bound_directory":"` + canonical(t, home) + `","paused":true,"created_at":"2026-07-18T12:00:00Z"}` + "\n"
 	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
 		t.Fatal(err)
 	}

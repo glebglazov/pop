@@ -5,10 +5,16 @@ import (
 )
 
 const (
-	manifestFileName = "manifest.json"
-	promptFileName   = "prompt.md"
-	memoryDirName    = "memory"
-	runsDirName      = "runs"
+	// stateFileName is the slim machine-state sidecar (ADR-0139): the pause bit
+	// with its reason, creation time, and bound directory. Authored intent —
+	// schedule, agents, effort — lives in prompt.md frontmatter instead.
+	stateFileName = "state.json"
+	// legacyManifestFileName is the pre-ADR-0139 combined manifest. It is never
+	// read for intent; its presence without a state.json only earns a warning.
+	legacyManifestFileName = "manifest.json"
+	promptFileName         = "prompt.md"
+	memoryDirName          = "memory"
+	runsDirName            = "runs"
 )
 
 // popDataDir returns pop's base data directory, respecting XDG_DATA_HOME with the

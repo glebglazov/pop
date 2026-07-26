@@ -53,7 +53,12 @@ func UpdateScheduleWith(d *Deps, id, scheduleRaw string) (Manifest, error) {
 	r.Manifest.Schedule = trimmed
 	r.Manifest.Paused = true
 	r.Manifest.PauseReason = reason
-	if err := writeManifest(d, id, r.Manifest); err != nil {
+	// The schedule lives in prompt.md frontmatter and the pause bit in state.json
+	// (ADR-0139), so a schedule edit rewrites both halves.
+	if err := writeFrontmatter(d, id, r.Manifest); err != nil {
+		return Manifest{}, err
+	}
+	if err := writeState(d, id, r.Manifest); err != nil {
 		return Manifest{}, err
 	}
 	return r.Manifest, nil

@@ -88,8 +88,16 @@ func writeRuntime(d *Deps, id string, agents []string, agentsSet bool, effort st
 		r.Manifest.Paused = true
 		r.Manifest.PauseReason = editReason
 	}
-	if err := writeManifest(d, id, r.Manifest); err != nil {
+	// Agents and effort live in prompt.md frontmatter and the pause bit in
+	// state.json (ADR-0139): rewrite the frontmatter always, and the state when
+	// the edit flipped the pause bit.
+	if err := writeFrontmatter(d, id, r.Manifest); err != nil {
 		return nil, err
+	}
+	if markChanged {
+		if err := writeState(d, id, r.Manifest); err != nil {
+			return nil, err
+		}
 	}
 	return &RuntimeResult{
 		RoutineID: id,
