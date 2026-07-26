@@ -40,9 +40,18 @@ func BuildLog(td *tasks.Deps) ([]LogEvent, error) {
 	if err != nil {
 		return nil, err
 	}
-	routineRuns, err := tasks.AllRoutineRuns(td)
-	if err != nil {
-		return nil, err
+	// Routine runs are read directly off the store handle borrowed through the
+	// tasks accessor in if-exists mode: a machine without a store yields an empty
+	// contribution without creating the database, and the shared handle is never
+	// closed (closing it would poison the process cache for later store calls).
+	var routineRuns []store.RoutineRun
+	if s, ok, storeErr := td.Store(false); storeErr != nil {
+		return nil, storeErr
+	} else if ok {
+		routineRuns, err = s.ListAllRoutineRuns()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var events []LogEvent

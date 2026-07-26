@@ -157,6 +157,37 @@ func TestBuildLogFromStore(t *testing.T) {
 	}
 }
 
+// TestBuildLogDoesNotPoisonSharedHandle guards the regression from ADR-0140:
+// building the journal borrows the process-cached store handle in if-exists mode
+// to read routine runs and must never close it. Closing the shared handle would
+// poison the cache for every later store call in the process. After BuildLog, a
+// read through the same cached handle must still succeed.
+func TestBuildLogDoesNotPoisonSharedHandle(t *testing.T) {
+	td := queueDataDeps(t)
+
+	// Materialise and cache the shared handle.
+	if _, _, err := td.Store(true); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	if _, err := BuildLog(td); err != nil {
+		t.Fatalf("BuildLog: %v", err)
+	}
+
+	// The handle BuildLog borrowed must still be open: a read through the
+	// process-cached handle succeeds rather than hitting a closed database.
+	s, ok, err := td.Store(false)
+	if err != nil {
+		t.Fatalf("Store after BuildLog: %v", err)
+	}
+	if !ok {
+		t.Fatal("store handle unexpectedly unavailable after BuildLog")
+	}
+	if _, err := s.ListAllRoutineRuns(); err != nil {
+		t.Fatalf("read through shared handle poisoned by BuildLog: %v", err)
+	}
+}
+
 func TestRenderStatusShowsRecoveryWaiter(t *testing.T) {
 	resetAt := time.Date(2026, 6, 15, 14, 0, 0, 0, time.UTC)
 	td := queueDataDeps(t)
