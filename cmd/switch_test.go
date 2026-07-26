@@ -6,43 +6,29 @@ import (
 
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 )
 
-func mockSwitchDeps() (*SwitchDeps, *history.History, *[]string) {
+func mockSwitchDeps() (*SwitchDeps, *history.History, *tmuxtest.Fake) {
 	hist := &history.History{}
-	var tmuxCalls []string
+	fake := &tmuxtest.Fake{Inside: true}
 	d := &SwitchDeps{
 		FS: &deps.MockFileSystem{
 			StatFunc: func(path string) (os.FileInfo, error) {
 				return deps.MockFileInfo{NameVal: "dir", IsDirVal: true}, nil
 			},
 		},
-		Tmux: &deps.MockTmux{
-			HasSessionFunc: func(name string) bool { return false },
-			NewSessionFunc: func(name, dir string) error {
-				tmuxCalls = append(tmuxCalls, "new:"+name+":"+dir)
-				return nil
-			},
-			SwitchClientFunc: func(name string) error {
-				tmuxCalls = append(tmuxCalls, "switch:"+name)
-				return nil
-			},
-			AttachSessionFunc: func(name string) error {
-				tmuxCalls = append(tmuxCalls, "attach:"+name)
-				return nil
-			},
-		},
+		Tmux:        fake,
 		SessionName: func(path string) string { return "session-name" },
 		LoadHistory: func() (*history.History, error) { return hist, nil },
 		SaveHistory: func(h *history.History) error { return nil },
-		InTmux:      func() bool { return true },
 	}
-	return d, hist, &tmuxCalls
+	return d, hist, fake
 }
 
 func TestRunProjectSwitch(t *testing.T) {
 	t.Run("records history and creates+switches session", func(t *testing.T) {
-		d, hist, tmuxCalls := mockSwitchDeps()
+		d, hist, fake := mockSwitchDeps()
 
 		if err := RunProjectSwitch(d, "/repo/feature"); err != nil {
 			t.Fatal(err)
@@ -51,41 +37,52 @@ func TestRunProjectSwitch(t *testing.T) {
 		if len(hist.Entries) != 1 || hist.Entries[0].Path != "/repo/feature" {
 			t.Errorf("history entries = %+v, want single /repo/feature", hist.Entries)
 		}
-		want := []string{"new:session-name:/repo/feature", "switch:session-name"}
-		if len(*tmuxCalls) != 2 || (*tmuxCalls)[0] != want[0] || (*tmuxCalls)[1] != want[1] {
-			t.Errorf("tmux calls = %v, want %v", *tmuxCalls, want)
+		if fake.Live["session-name"] != "/repo/feature" {
+			t.Errorf("created sessions = %v, want session-name -> /repo/feature", fake.Live)
+		}
+		if len(fake.Switched) != 1 || fake.Switched[0] != "session-name" {
+			t.Errorf("switched = %v, want [session-name]", fake.Switched)
+		}
+		if len(fake.Attached) != 0 {
+			t.Errorf("attached = %v, want none", fake.Attached)
 		}
 	})
 
 	t.Run("skips session creation when it exists", func(t *testing.T) {
-		d, _, tmuxCalls := mockSwitchDeps()
-		d.Tmux.(*deps.MockTmux).HasSessionFunc = func(name string) bool { return true }
+		d, _, fake := mockSwitchDeps()
+		fake.Live = map[string]string{"session-name": "/old"}
 
 		if err := RunProjectSwitch(d, "/repo/feature"); err != nil {
 			t.Fatal(err)
 		}
 
-		if len(*tmuxCalls) != 1 || (*tmuxCalls)[0] != "switch:session-name" {
-			t.Errorf("tmux calls = %v, want [switch:session-name]", *tmuxCalls)
+		if fake.Live["session-name"] != "/old" {
+			t.Errorf("session dir = %q, want /old (not recreated)", fake.Live["session-name"])
+		}
+		if len(fake.Switched) != 1 || fake.Switched[0] != "session-name" {
+			t.Errorf("switched = %v, want [session-name]", fake.Switched)
 		}
 	})
 
 	t.Run("attaches when outside tmux", func(t *testing.T) {
-		d, _, tmuxCalls := mockSwitchDeps()
-		d.InTmux = func() bool { return false }
-		d.Tmux.(*deps.MockTmux).HasSessionFunc = func(name string) bool { return true }
+		d, _, fake := mockSwitchDeps()
+		fake.Inside = false
+		fake.Live = map[string]string{"session-name": "/old"}
 
 		if err := RunProjectSwitch(d, "/repo/feature"); err != nil {
 			t.Fatal(err)
 		}
 
-		if len(*tmuxCalls) != 1 || (*tmuxCalls)[0] != "attach:session-name" {
-			t.Errorf("tmux calls = %v, want [attach:session-name]", *tmuxCalls)
+		if len(fake.Attached) != 1 || fake.Attached[0] != "session-name" {
+			t.Errorf("attached = %v, want [session-name]", fake.Attached)
+		}
+		if len(fake.Switched) != 0 {
+			t.Errorf("switched = %v, want none", fake.Switched)
 		}
 	})
 
 	t.Run("missing directory errors without touching history", func(t *testing.T) {
-		d, hist, tmuxCalls := mockSwitchDeps()
+		d, hist, fake := mockSwitchDeps()
 		d.FS.(*deps.MockFileSystem).StatFunc = func(path string) (os.FileInfo, error) {
 			return nil, os.ErrNotExist
 		}
@@ -96,8 +93,8 @@ func TestRunProjectSwitch(t *testing.T) {
 		if len(hist.Entries) != 0 {
 			t.Errorf("history entries = %+v, want none", hist.Entries)
 		}
-		if len(*tmuxCalls) != 0 {
-			t.Errorf("tmux calls = %v, want none", *tmuxCalls)
+		if len(fake.Live) != 0 || len(fake.Switched) != 0 || len(fake.Attached) != 0 {
+			t.Errorf("tmux touched: live=%v switched=%v attached=%v, want none", fake.Live, fake.Switched, fake.Attached)
 		}
 	})
 

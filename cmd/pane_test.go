@@ -12,9 +12,21 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
 )
+
+// withTmuxMod swaps the package-level tmux module handle for the duration of a
+// test, restoring it afterwards. resolveSessionWith's session-creation path
+// (--project) goes through defaultTmuxMod (ADR-0142), so tests that exercise
+// it inject a stateful fake here.
+func withTmuxMod(t *testing.T, f *tmuxtest.Fake) {
+	t.Helper()
+	prev := defaultTmuxMod
+	defaultTmuxMod = f
+	t.Cleanup(func() { defaultTmuxMod = prev })
+}
 
 func TestFindPaneWith(t *testing.T) {
 	tmux := &deps.MockTmux{
@@ -154,21 +166,10 @@ func TestResolveSessionWith_WithProject(t *testing.T) {
 	defer func() { paneProject = oldProject }()
 	paneProject = "/home/user/my.project"
 
-	var createdSession string
-	tmux := &deps.MockTmux{
-		HasSessionFunc: func(name string) bool {
-			return false
-		},
-		NewSessionFunc: func(name, dir string) error {
-			createdSession = name
-			if dir != paneProject {
-				t.Errorf("new session dir = %q, want %q", dir, paneProject)
-			}
-			return nil
-		},
-	}
+	mod := &tmuxtest.Fake{}
+	withTmuxMod(t, mod)
 
-	session, err := resolveSessionWith(tmux)
+	session, err := resolveSessionWith(&deps.MockTmux{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,8 +177,8 @@ func TestResolveSessionWith_WithProject(t *testing.T) {
 	if session != want {
 		t.Errorf("got %q, want %q", session, want)
 	}
-	if createdSession != want {
-		t.Errorf("created session %q, want %q", createdSession, want)
+	if mod.Live[want] != paneProject {
+		t.Errorf("created sessions = %v, want %q -> %q", mod.Live, want, paneProject)
 	}
 }
 
@@ -186,17 +187,14 @@ func TestResolveSessionWith_ExistingSession(t *testing.T) {
 	defer func() { paneProject = oldProject }()
 	paneProject = "/home/user/project"
 
-	tmux := &deps.MockTmux{
-		HasSessionFunc: func(name string) bool {
-			return name == project.SessionName(paneProject)
-		},
-	}
+	want := project.SessionName(paneProject)
+	mod := &tmuxtest.Fake{Live: map[string]string{want: paneProject}}
+	withTmuxMod(t, mod)
 
-	session, err := resolveSessionWith(tmux)
+	session, err := resolveSessionWith(&deps.MockTmux{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := project.SessionName(paneProject)
 	if session != want {
 		t.Errorf("got %q, want %q", session, want)
 	}
@@ -287,6 +285,9 @@ func TestRunPaneCreateWith(t *testing.T) {
 	oldProject := paneProject
 	defer func() { paneProject = oldProject }()
 	paneProject = "/home/user/project"
+	// resolveSessionWith's --project path creates the session via the tmux
+	// module; keep it in-memory so the test never shells out to tmux.
+	withTmuxMod(t, &tmuxtest.Fake{})
 
 	t.Run("returns existing alive pane", func(t *testing.T) {
 		var cmds []string

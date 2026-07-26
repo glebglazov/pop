@@ -13,6 +13,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
 )
@@ -569,48 +570,30 @@ func TestSortBaseItemsByHistory(t *testing.T) {
 
 func TestOpenTmuxSessionWith(t *testing.T) {
 	t.Run("top-level project uses SessionName from path", func(t *testing.T) {
-		t.Setenv("TMUX", "1")
-
-		var sessionUsed string
-		tmux := &deps.MockTmux{
-			HasSessionFunc: func(name string) bool { return false },
-			NewSessionFunc: func(name, dir string) error {
-				sessionUsed = name
-				return nil
-			},
-		}
+		mod := &tmuxtest.Fake{Inside: true}
 
 		ti := testItem("user/myapp", "/home/user/myapp")
 		item := &ti
-		if err := openTmuxSessionWith(tmux, item); err != nil {
+		if err := openTmuxSessionWith(mod, item); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		want := project.SessionName("/home/user/myapp")
-		if sessionUsed != want {
-			t.Errorf("session name = %q, want %q (from SessionName(path), not display label)", sessionUsed, want)
+		if _, ok := mod.Live[want]; !ok {
+			t.Errorf("created sessions = %v, want to contain %q (from SessionName(path), not display label)", mod.Live, want)
 		}
 	})
 
 	t.Run("bare-repo worktree uses SessionName from path", func(t *testing.T) {
-		t.Setenv("TMUX", "1")
-
-		var sessionUsed string
-		tmux := &deps.MockTmux{
-			HasSessionFunc: func(name string) bool { return false },
-			NewSessionFunc: func(name, dir string) error {
-				sessionUsed = name
-				return nil
-			},
-		}
+		mod := &tmuxtest.Fake{Inside: true}
 
 		ti := testItem("projects/myrepo/feature", "/projects/myrepo/feature")
 		item := &ti
-		if err := openTmuxSessionWith(tmux, item); err != nil {
+		if err := openTmuxSessionWith(mod, item); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		want := project.SessionName("/projects/myrepo/feature")
-		if sessionUsed != want {
-			t.Errorf("session name = %q, want %q (from SessionName(path), not display label)", sessionUsed, want)
+		if _, ok := mod.Live[want]; !ok {
+			t.Errorf("created sessions = %v, want to contain %q (from SessionName(path), not display label)", mod.Live, want)
 		}
 	})
 }

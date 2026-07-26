@@ -9,9 +9,8 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
-	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/session"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -400,7 +399,7 @@ func defaultWorktreeShapeDeps() *worktreeShapeDeps {
 		SessionName:   project.SessionName,
 		SessionExists: func(sessionName string) bool { return defaultTmux.HasSession(sessionName) },
 		RecordHistory: recordWorktreeHistory,
-		Attach:        func(sessionName string) error { return switchToTmuxTargetWith(defaultTmux, sessionName) },
+		Attach:        func(sessionName string) error { return switchToTmuxTargetWith(defaultTmuxMod, sessionName) },
 		Flat:          handleWorktreeSelect,
 	}
 }
@@ -505,14 +504,11 @@ func recordWorktreeHistory(path string) {
 }
 
 func switchTmuxSession(item *ui.Item) error {
-	return switchTmuxSessionWith(defaultTmux, item)
+	return switchTmuxSessionWith(defaultTmuxMod, item)
 }
 
-func switchTmuxSessionWith(tmux deps.Tmux, item *ui.Item) error {
-	return session.AttachWith(&session.Deps{
-		Tmux:   tmux,
-		InTmux: func() bool { return os.Getenv("TMUX") != "" },
-	}, project.SessionName(item.Path), item.Path)
+func switchTmuxSessionWith(mod tmuxmod.Tmux, item *ui.Item) error {
+	return tmuxmod.Attach(mod, project.SessionName(item.Path), item.Path)
 }
 
 func deleteWorktree(path string, force bool) {

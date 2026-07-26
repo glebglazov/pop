@@ -2,14 +2,13 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/session"
 	"github.com/spf13/cobra"
 )
 
@@ -36,25 +35,23 @@ func init() {
 // SwitchDeps holds dependencies for the project switch command.
 type SwitchDeps struct {
 	FS   deps.FileSystem
-	Tmux deps.Tmux
+	Tmux tmuxmod.Tmux
 
 	SessionName func(path string) string
 	LoadHistory func() (*history.History, error)
 	SaveHistory func(h *history.History) error
-	InTmux      func() bool
 }
 
 // DefaultSwitchDeps returns SwitchDeps wired to real production implementations.
 func DefaultSwitchDeps() *SwitchDeps {
 	return &SwitchDeps{
 		FS:          deps.NewRealFileSystem(),
-		Tmux:        defaultTmux,
+		Tmux:        defaultTmuxMod,
 		SessionName: project.SessionName,
 		LoadHistory: func() (*history.History, error) {
 			return history.Load(history.DefaultHistoryPath())
 		},
 		SaveHistory: func(h *history.History) error { return h.Save() },
-		InTmux:      func() bool { return os.Getenv("TMUX") != "" },
 	}
 }
 
@@ -83,10 +80,7 @@ func RunProjectSwitch(d *SwitchDeps, dir string) error {
 		debug.Error("project switch: save history: %v", err)
 	}
 
-	return session.AttachWith(&session.Deps{
-		Tmux:   d.Tmux,
-		InTmux: d.InTmux,
-	}, d.SessionName(path), path)
+	return tmuxmod.Attach(d.Tmux, d.SessionName(path), path)
 }
 
 // canonicalDir resolves dir to an absolute, symlink-free path and verifies it

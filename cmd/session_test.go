@@ -9,6 +9,7 @@ import (
 
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/ui"
 )
@@ -341,65 +342,46 @@ func TestCapturePanePreviewWith(t *testing.T) {
 }
 
 func TestKillTmuxSessionByNameWith(t *testing.T) {
-	var killedSession string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "kill-session" {
-				killedSession = args[2] // "-t", sessionName
-				return "", nil
-			}
-			return "", nil
-		},
-	}
+	mod := &tmuxtest.Fake{Live: map[string]string{"my-session": "/proj"}}
 
-	killTmuxSessionByNameWith(tmux, "my-session")
-	if killedSession != "my-session" {
-		t.Errorf("killed %q, want %q", killedSession, "my-session")
+	killTmuxSessionByNameWith(mod, "my-session")
+	if len(mod.Killed) != 1 || mod.Killed[0] != "my-session" {
+		t.Errorf("killed = %v, want [my-session]", mod.Killed)
+	}
+	if _, ok := mod.Live["my-session"]; ok {
+		t.Error("session still live after kill")
 	}
 }
 
 func TestSwitchToTmuxTargetWith_InTmux(t *testing.T) {
-	t.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+	mod := &tmuxtest.Fake{Inside: true}
 
-	var switchedTo string
-	tmux := &deps.MockTmux{
-		SwitchClientFunc: func(name string) error {
-			switchedTo = name
-			return nil
-		},
-	}
-
-	err := switchToTmuxTargetWith(tmux, "target-session")
+	err := switchToTmuxTargetWith(mod, "target-session")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if switchedTo != "target-session" {
-		t.Errorf("switched to %q, want %q", switchedTo, "target-session")
+	if len(mod.Switched) != 1 || mod.Switched[0] != "target-session" {
+		t.Errorf("switched = %v, want [target-session]", mod.Switched)
 	}
 }
 
 func TestSwitchToTmuxTargetAndZoomWith_InTmux(t *testing.T) {
-	t.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+	mod := &tmuxtest.Fake{Inside: true}
 
-	var switchClientCalled bool
 	var gotArgs []string
 	tmux := &deps.MockTmux{
-		SwitchClientFunc: func(name string) error {
-			switchClientCalled = true
-			return nil
-		},
 		CommandFunc: func(args ...string) (string, error) {
 			gotArgs = args
 			return "", nil
 		},
 	}
 
-	err := switchToTmuxTargetAndZoomWith(tmux, "%5")
+	err := switchToTmuxTargetAndZoomWith(tmux, mod, "%5")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if switchClientCalled {
-		t.Error("SwitchClient called — expected single chained Command with switch-client and zoom")
+	if len(mod.Switched) != 0 {
+		t.Error("SwitchClient path used — expected single chained Command with switch-client and zoom")
 	}
 
 	expected := []string{

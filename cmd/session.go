@@ -8,13 +8,18 @@ import (
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/session"
 	"github.com/glebglazov/pop/ui"
 )
 
 var defaultTmux deps.Tmux = deps.NewRealTmux()
+
+// defaultTmuxMod is the production tmux module handle used by session-lifecycle
+// verbs (create/attach/switch/kill). Command-based tmux calls still go through
+// defaultTmux until their packages migrate (ADR-0142).
+var defaultTmuxMod tmuxmod.Tmux = tmuxmod.New()
 
 const (
 	tmuxSessionPathPrefix = "tmux:"
@@ -46,21 +51,20 @@ func standaloneSessionName(item ui.Item) string {
 
 // switchToTmuxTarget switches to or attaches to a tmux target (session name or pane ID)
 func switchToTmuxTarget(target string) error {
-	return switchToTmuxTargetWith(defaultTmux, target)
+	return switchToTmuxTargetWith(defaultTmuxMod, target)
 }
 
-func switchToTmuxTargetWith(tmux deps.Tmux, target string) error {
-	return session.SwitchTargetWith(sessionDeps(tmux), target)
+func switchToTmuxTargetWith(mod tmuxmod.Tmux, target string) error {
+	return tmuxmod.SwitchTarget(mod, target)
 }
 
 // switchToTmuxTargetAndZoom switches to a tmux pane and zooms it
 func switchToTmuxTargetAndZoom(target string) error {
-	return switchToTmuxTargetAndZoomWith(defaultTmux, target)
+	return switchToTmuxTargetAndZoomWith(defaultTmux, defaultTmuxMod, target)
 }
 
-func switchToTmuxTargetAndZoomWith(tmux deps.Tmux, target string) error {
-	d := sessionDeps(tmux)
-	if d.InTmux() {
+func switchToTmuxTargetAndZoomWith(tmux deps.Tmux, mod tmuxmod.Tmux, target string) error {
+	if mod.InTmux() {
 		// Single tmux invocation: switch to pane and zoom it if not already zoomed
 		_, err := tmux.Command(
 			"switch-client", "-t", target, ";",
@@ -76,14 +80,7 @@ func switchToTmuxTargetAndZoomWith(tmux deps.Tmux, target string) error {
 	); err != nil {
 		debug.Error("switchToTmuxTargetAndZoom: pre-attach zoom: %v", err)
 	}
-	return session.SwitchTargetWith(d, target)
-}
-
-func sessionDeps(tmux deps.Tmux) *session.Deps {
-	return &session.Deps{
-		Tmux:   tmux,
-		InTmux: func() bool { return os.Getenv("TMUX") != "" },
-	}
+	return tmuxmod.SwitchTarget(mod, target)
 }
 
 // loadMonitorState returns the monitor state if the daemon is running, or nil otherwise
@@ -259,11 +256,11 @@ func attentionCallbacks() ui.AttentionCallbacks {
 }
 
 func killTmuxSessionByName(sessionName string) {
-	killTmuxSessionByNameWith(defaultTmux, sessionName)
+	killTmuxSessionByNameWith(defaultTmuxMod, sessionName)
 }
 
-func killTmuxSessionByNameWith(tmux deps.Tmux, sessionName string) {
-	_, err := tmux.Command("kill-session", "-t", sessionName)
+func killTmuxSessionByNameWith(mod tmuxmod.Tmux, sessionName string) {
+	err := mod.KillSession(sessionName)
 	if err != nil {
 		debug.Error("killTmuxSessionByName %s: %v", sessionName, err)
 		fmt.Fprintf(os.Stderr, "Failed to kill session: %s\n", sessionName)

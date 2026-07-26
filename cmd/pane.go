@@ -18,9 +18,9 @@ import (
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/session"
 	"github.com/spf13/cobra"
 )
 
@@ -75,7 +75,10 @@ func resolveSession() (string, error) {
 func resolveSessionWith(tmux deps.Tmux) (string, error) {
 	if paneProject != "" {
 		name := project.SessionName(paneProject)
-		if err := session.EnsureWith(sessionDeps(tmux), name, paneProject); err != nil {
+		// Session creation runs through the tmux module (ADR-0142); the
+		// current-session lookup below still uses the deps.Tmux Command seam
+		// until pane's tmux calls migrate.
+		if err := tmuxmod.Ensure(defaultTmuxMod, name, paneProject); err != nil {
 			return "", err
 		}
 		return name, nil

@@ -16,8 +16,8 @@ import (
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/session"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
@@ -166,14 +166,28 @@ func DefaultProjectDeps() *ProjectDeps {
 		SessionActivity:   history.TmuxSessionActivity,
 		AttentionSessions: monitorAttentionSessions,
 
-		OpenSession:              openTmuxSessionWith,
-		OpenSessionWithWorkbench: openTmuxSessionWithWorkbenchWith,
-		OpenWindow:               openTmuxWindowWith,
-		KillSession:              killTmuxSessionWith,
-		SendCDToPane:             sendCDToPaneWith,
-		YankPathToPane:           yankPathToPaneWith,
-		SwitchToTarget:           switchToTmuxTargetWith,
-		SwitchAndZoom:            switchToTmuxTargetAndZoomWith,
+		// Session-lifecycle side effects run through the tmux module (ADR-0142);
+		// the deps.Tmux the picker threads is ignored by these adapters, which
+		// use the module handle. Command-based verbs (OpenWindow, SendCDToPane,
+		// YankPathToPane) still take deps.Tmux until their migration.
+		OpenSession: func(_ deps.Tmux, item *ui.Item) error {
+			return openTmuxSessionWith(defaultTmuxMod, item)
+		},
+		OpenSessionWithWorkbench: func(tmux deps.Tmux, item *ui.Item, workbenchName string) error {
+			return openTmuxSessionWithWorkbenchWith(tmux, defaultTmuxMod, item, workbenchName)
+		},
+		OpenWindow: openTmuxWindowWith,
+		KillSession: func(_ deps.Tmux, name string) {
+			killTmuxSessionWith(defaultTmuxMod, name)
+		},
+		SendCDToPane:   sendCDToPaneWith,
+		YankPathToPane: yankPathToPaneWith,
+		SwitchToTarget: func(_ deps.Tmux, target string) error {
+			return switchToTmuxTargetWith(defaultTmuxMod, target)
+		},
+		SwitchAndZoom: func(tmux deps.Tmux, target string) error {
+			return switchToTmuxTargetAndZoomWith(tmux, defaultTmuxMod, target)
+		},
 		RunCustomCommand:         executeProjectCustomCommand,
 		EnsureSystemState:        ensureSystemState,
 		RunConfigure: func() error {
@@ -663,14 +677,11 @@ func sortByUnifiedRecency(items []ui.Item, hist *history.History, sessionActivit
 }
 
 func openTmuxSession(item *ui.Item) error {
-	return openTmuxSessionWith(defaultTmux, item)
+	return openTmuxSessionWith(defaultTmuxMod, item)
 }
 
-func openTmuxSessionWith(tmux deps.Tmux, item *ui.Item) error {
-	return session.AttachWith(&session.Deps{
-		Tmux:   tmux,
-		InTmux: func() bool { return os.Getenv("TMUX") != "" },
-	}, item.SessionName, item.Path)
+func openTmuxSessionWith(mod tmuxmod.Tmux, item *ui.Item) error {
+	return tmuxmod.Attach(mod, item.SessionName, item.Path)
 }
 
 // noWorkbenchLabel is the "<empty>" no-workbench entry in the create-path
@@ -758,7 +769,7 @@ func promptWorkbenchForCreate(d *ProjectDeps, order []string, workbenches []conf
 // exactly the named Workbench (stray shell window removed) and attaches to it.
 // It is the production implementation of ProjectDeps.OpenSessionWithWorkbench
 // (ADR-0075 picker create-path).
-func openTmuxSessionWithWorkbenchWith(tmux deps.Tmux, item *ui.Item, workbenchName string) error {
+func openTmuxSessionWithWorkbenchWith(tmux deps.Tmux, mod tmuxmod.Tmux, item *ui.Item, workbenchName string) error {
 	td := defaultTemplateRuntimeDeps()
 	td.Tmux = tmux
 	cfg, err := td.LoadConfig()
@@ -776,7 +787,7 @@ func openTmuxSessionWithWorkbenchWith(tmux deps.Tmux, item *ui.Item, workbenchNa
 	if err := createSessionFromWorkbench(td, tmpl, item.SessionName, item.Path); err != nil {
 		return err
 	}
-	return switchToTmuxTargetWith(tmux, item.SessionName)
+	return switchToTmuxTargetWith(mod, item.SessionName)
 }
 
 func openTmuxWindow(item *ui.Item) error {
@@ -815,12 +826,12 @@ func sanitizeSessionName(name string) string {
 }
 
 func killTmuxSession(name string) {
-	killTmuxSessionWith(defaultTmux, name)
+	killTmuxSessionWith(defaultTmuxMod, name)
 }
 
-func killTmuxSessionWith(tmux deps.Tmux, name string) {
+func killTmuxSessionWith(mod tmuxmod.Tmux, name string) {
 	sessionName := sanitizeSessionName(name)
-	_, err := tmux.Command("kill-session", "-t", sessionName)
+	err := mod.KillSession(sessionName)
 	if err != nil {
 		debug.Error("killTmuxSession %s: %v", sessionName, err)
 		fmt.Fprintf(os.Stderr, "Failed to kill session: %s\n", sessionName)

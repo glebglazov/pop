@@ -14,10 +14,25 @@ type SessionActivity struct {
 
 // Tmux is the public surface for tmux operations. Verbs are added per
 // migration slice; a consumer that needs tmux gets a named verb, never a
-// generic Command escape hatch.
+// generic Command escape hatch. Higher-level composites (Ensure, Attach,
+// SwitchTarget) are package functions over these primitives — see
+// lifecycle.go.
 type Tmux interface {
 	// Sessions lists live tmux sessions with their last-activity timestamps.
 	Sessions() ([]SessionActivity, error)
+	// HasSession reports whether a session named name exists.
+	HasSession(name string) bool
+	// NewSession creates a new detached session named name rooted at dir.
+	NewSession(name, dir string) error
+	// SwitchClient switches the attached client to target (used inside tmux).
+	SwitchClient(target string) error
+	// AttachSession attaches the terminal to target (used outside tmux); it
+	// wires the process's stdio to the tmux client.
+	AttachSession(target string) error
+	// KillSession kills the session named name.
+	KillSession(name string) error
+	// InTmux reports whether the caller is running inside a tmux client.
+	InTmux() bool
 }
 
 // realTmux implements Tmux against the tmux binary via the runner seam.
