@@ -24,19 +24,38 @@ func Fire(id string) (*FireResult, error) {
 	return FireWith(defaultDeps, id)
 }
 
-// FireWith executes one Routine run to completion in the foreground.
+// FireWith fires the Routine addressed by id. Addressing follows ADR-0138: an
+// explicit `project:<name>` fires the current checkout's Project routine; a bare
+// name resolves to an authored Routine first on exact match, else the current
+// checkout's Project routine of that name. When an authored id shadows a Project
+// routine of the same name, the authored one wins and a warning names the
+// `project:` escape hatch.
 func FireWith(d *Deps, id string) (*FireResult, error) {
+	if name, ok := parseProjectRef(id); ok {
+		return fireProjectRoutine(d, name)
+	}
+	if authoredRoutineExists(d, id) {
+		if projectRoutineExists(d, id) {
+			fmt.Fprintf(fireWarnWriter(d), "warning: authored routine %q shadows a Project routine of the same name; fire the Project one with `pop routine fire %s%s`\n", id, ProjectOrigin, id)
+		}
+		return fireAuthored(d, id)
+	}
+	if projectRoutineExists(d, id) {
+		return fireProjectRoutine(d, id)
+	}
+	// No authored routine and no Project routine: fall through to the authored
+	// path so the caller gets the familiar "not found" error.
+	return fireAuthored(d, id)
+}
+
+// fireAuthored executes one authored Routine run to completion in the foreground.
+func fireAuthored(d *Deps, id string) (*FireResult, error) {
 	if err := validateID(id); err != nil {
 		return nil, err
 	}
 	r, err := loadManifest(d, id)
 	if err != nil {
 		return nil, err
-	}
-
-	cfg, err := d.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
 	}
 
 	// The frontmatter carries settings only (ADR-0139); the run's actual prompt
@@ -47,36 +66,87 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 		return nil, err
 	}
 
+	// A failed run — daemon-fired or manual — pauses its Routine with reason
+	// `failure` (ADR-0128). The latest cause is the useful one, so an
+	// already-paused Routine is overwritten to `failure`.
+	onFail := func(string) {
+		r.Manifest.Paused = true
+		r.Manifest.PauseReason = PauseReasonFailure
+		_ = writeState(d, id, r.Manifest)
+	}
+
+	return executeFire(d, firePlan{
+		storeID:   id,
+		displayID: id,
+		boundDir:  r.Manifest.BoundDirectory,
+		prompt:    domainPrompt,
+		root:      routineDir(d, id),
+		agents:    r.Manifest.Agents,
+		effort:    r.Manifest.Effort,
+		// Every run records the fingerprint in effect when it fired (ADR-0128).
+		// A manual fire re-proves an edited Routine by recording the new value;
+		// the daemon compares this against the last run's before firing.
+		fingerprint: fingerprintOf(domainPrompt, r.Manifest),
+		onFail:      onFail,
+	})
+}
+
+// firePlan is the resolved surface a single Routine run needs, independent of
+// whether it came from an authored Routine or a Project routine (ADR-0138). The
+// two differ only in where storeID/root point and whether onFail pauses.
+type firePlan struct {
+	// storeID is the routine_id run rows key on; displayID is the human-facing
+	// id (a Project routine renders `project:<name>`).
+	storeID   string
+	displayID string
+	// boundDir is the directory the agent runs in.
+	boundDir string
+	// prompt is the frontmatter-stripped body.
+	prompt string
+	// root is the directory holding the run's memory/ and runs/ subdirectories.
+	root        string
+	agents      []string
+	effort      string
+	fingerprint string
+	// onFail, when set, runs after a failed run is recorded — authored Routines
+	// pause; Project routines have no pause state so leave it nil.
+	onFail func(reason string)
+}
+
+// executeFire runs one plan to completion in the foreground: it enforces
+// per-storeID exclusivity, invokes the agent with the standard wrapper, and
+// sentinel-assesses the outcome.
+func executeFire(d *Deps, p firePlan) (*FireResult, error) {
+	cfg, err := d.LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
 	firedAt := nowUTC(d)
 	reportRel := filepath.Join(runsDirName, firedAt.Format("2006-01-02T15-04-05Z")+".md")
-	reportAbs := filepath.Join(routineDir(d, id), reportRel)
-	memoryDir := filepath.Join(routineDir(d, id), memoryDirName)
-	wrappedPrompt := wrapRoutinePrompt(memoryDir, reportAbs, domainPrompt)
+	reportAbs := filepath.Join(p.root, reportRel)
+	memoryDir := filepath.Join(p.root, memoryDirName)
+	wrappedPrompt := wrapRoutinePrompt(memoryDir, reportAbs, p.prompt)
 
 	s, err := openExecutionStore(d)
 	if err != nil {
 		return nil, err
 	}
 
-	// Every run records the fingerprint in effect when it fired (ADR-0128).
-	// A manual fire re-proves an edited Routine by recording the new value; the
-	// daemon compares this against the last run's before firing.
-	fingerprint := fingerprintOf(domainPrompt, r.Manifest)
-
 	pid := d.PID()
 	procStart, _ := d.ProcStartToken(pid)
 	run, err := s.StartRoutineRun(store.RoutineRun{
-		RoutineID:   id,
+		RoutineID:   p.storeID,
 		FiredAt:     firedAt,
 		PID:         pid,
 		ProcStart:   procStart,
-		Fingerprint: fingerprint,
+		Fingerprint: p.fingerprint,
 	}, func(live store.RoutineRun) bool {
 		return d.ProcessAlive(live.PID, live.ProcStart)
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrRoutineRunInProgress) {
-			return nil, fmt.Errorf("routine %q is already running", id)
+			return nil, fmt.Errorf("routine %q is already running", p.displayID)
 		}
 		return nil, fmt.Errorf("record routine run start: %w", err)
 	}
@@ -84,14 +154,11 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 	finish := func(outcome, failReason string) error {
 		return s.FinishRoutineRun(run.ID, outcome, reportAbs, failReason, nowUTC(d))
 	}
-	// A failed run — daemon-fired or manual — pauses its Routine with reason
-	// `failure` (ADR-0128). The latest cause is the useful one, so an
-	// already-paused Routine is overwritten to `failure`.
-	failAndPause := func(reason string) {
+	fail := func(reason string) {
 		_ = finish(store.RoutineRunFailed, reason)
-		r.Manifest.Paused = true
-		r.Manifest.PauseReason = PauseReasonFailure
-		_ = writeState(d, id, r.Manifest)
+		if p.onFail != nil {
+			p.onFail(reason)
+		}
 	}
 
 	out := d.Stdout
@@ -105,17 +172,17 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 
 	taskDeps := d.taskDeps()
 	attempt := func(agentSpec string) (*tasks.RoutineAgentAttempt, error) {
-		return tasks.RunRoutineAgentInvocation(taskDeps, r.Manifest.BoundDirectory, out, timeout, agentSpec, wrappedPrompt)
+		return tasks.RunRoutineAgentInvocation(taskDeps, p.boundDir, out, timeout, agentSpec, wrappedPrompt)
 	}
 
-	specs := resolveRoutineRunSpecs(cfg, r.Manifest)
+	specs := resolveRoutineRunSpecs(cfg, Manifest{Agents: p.agents, Effort: p.effort})
 	result, preset, execErr := runRoutineWithAgentFallback(d, cfg, specs, out, attempt)
 	if execErr != nil {
 		reason := execErr.Error()
 		if result != nil && result.ExitCode != 0 {
 			reason = fmt.Sprintf("agent exited with status %d", result.ExitCode)
 		}
-		failAndPause(reason)
+		fail(reason)
 		return nil, fmt.Errorf("routine run failed: %w", errors.New(reason))
 	}
 	if result == nil || result.ExitCode != 0 {
@@ -123,7 +190,7 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 		if result != nil {
 			reason = fmt.Sprintf("agent exited with status %d", result.ExitCode)
 		}
-		failAndPause(reason)
+		fail(reason)
 		return nil, fmt.Errorf("routine run failed: %s", reason)
 	}
 
@@ -132,7 +199,7 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 	// writing its report, is recorded failed.
 	outcome := assessRoutineOutput(result.Output, reportExists(d, reportAbs))
 	if !outcome.Succeeded {
-		failAndPause(outcome.FailReason)
+		fail(outcome.FailReason)
 		return nil, fmt.Errorf("routine run failed: %s", outcome.FailReason)
 	}
 
@@ -142,10 +209,19 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 
 	return &FireResult{
 		ID:          run.ID,
-		RoutineID:   id,
+		RoutineID:   p.displayID,
 		ReportPath:  reportAbs,
 		AgentPreset: preset,
 	}, nil
+}
+
+// fireWarnWriter is where addressing warnings (e.g. a shadowed Project routine)
+// are printed. It falls back to discarding when no stdout is wired.
+func fireWarnWriter(d *Deps) io.Writer {
+	if d.Stdout != nil {
+		return d.Stdout
+	}
+	return io.Discard
 }
 
 // reportExists reports whether the run's report file landed on disk.

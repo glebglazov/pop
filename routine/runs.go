@@ -15,8 +15,17 @@ func Runs(id string, out io.Writer) error {
 	return RunsWith(defaultDeps, id, out)
 }
 
-// RunsWith lists run history for one Routine, newest first.
+// RunsWith lists run history for one Routine, newest first. Addressing follows
+// ADR-0138: `project:<name>` (or a bare name that resolves to a Project routine)
+// lists the current checkout's Project routine history, keyed per checkout.
 func RunsWith(d *Deps, id string, out io.Writer) error {
+	if resolvesToProjectRoutine(d, id) {
+		name := id
+		if bare, ok := parseProjectRef(id); ok {
+			name = bare
+		}
+		return projectRoutineRuns(d, name, out)
+	}
 	if err := validateID(id); err != nil {
 		return err
 	}
@@ -24,12 +33,29 @@ func RunsWith(d *Deps, id string, out io.Writer) error {
 		return err
 	}
 
+	runsDir := filepath.Join(routineDir(d, id), runsDirName)
+	return renderRuns(d, id, runsDir, out)
+}
+
+// projectRoutineRuns lists a Project routine's per-checkout run history (ADR-0138).
+func projectRoutineRuns(d *Deps, name string, out io.Writer) error {
+	pr, err := findProjectRoutine(d, name)
+	if err != nil {
+		return err
+	}
+	key := checkoutKey(pr.Dir)
+	runsDir := filepath.Join(projectRoutineDataDir(d, key, name), runsDirName)
+	return renderRuns(d, projectStoreID(key, name), runsDir, out)
+}
+
+// renderRuns prints the run history for one store routine id, newest first.
+func renderRuns(d *Deps, storeID, runsDir string, out io.Writer) error {
 	s, err := openExecutionStore(d)
 	if err != nil {
 		return err
 	}
 
-	rows, err := s.ListRoutineRuns(id)
+	rows, err := s.ListRoutineRuns(storeID)
 	if err != nil {
 		return fmt.Errorf("list routine runs: %w", err)
 	}
@@ -38,7 +64,6 @@ func RunsWith(d *Deps, id string, out io.Writer) error {
 		return nil
 	}
 
-	runsDir := filepath.Join(routineDir(d, id), runsDirName)
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "FIRED AT\tOUTCOME\tREPORT")
 	for _, row := range rows {

@@ -77,6 +77,12 @@ func Edit(id, scheduleRaw string, scheduleSet bool) (*EditResult, error) {
 // at creation.
 func EditWith(d *Deps, id, scheduleRaw string, scheduleSet bool) (*EditResult, error) {
 	if scheduleSet {
+		// Project routines are manual-fire-only by design (ADR-0138): the
+		// schedule-edit surface rejects them outright rather than writing a
+		// schedule pop would never honor.
+		if resolvesToProjectRoutine(d, id) {
+			return nil, fmt.Errorf("routine %q is a Project routine; Project routines are manual-fire-only and cannot be scheduled (edit .pop/routines/%s.md instead)", id, projectRoutineName(id))
+		}
 		m, err := UpdateScheduleWith(d, id, scheduleRaw)
 		if err != nil {
 			return nil, err
