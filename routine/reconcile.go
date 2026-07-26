@@ -1,9 +1,6 @@
 package routine
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
@@ -16,7 +13,6 @@ func ReconcileRunsWith(d *Deps) (int, error) {
 	if err != nil || !ok {
 		return 0, err
 	}
-	defer func() { _ = s.Close() }()
 	return s.ReconcileCrashedRoutineRuns(func(run store.RoutineRun) bool {
 		return routineProcessAlive(d, run.PID, run.ProcStart)
 	}, nowUTC(d))
@@ -32,18 +28,11 @@ func routineProcessAlive(d *Deps, pid int, procStart string) bool {
 	return processAlivePID(pid)
 }
 
+// openExecutionStoreIfExists borrows the process-cached store handle through the
+// tasks accessor in if-exists mode (ADR-0140): a machine without a store yields
+// (nil, false, nil) without materialising an empty database, so pure readers
+// never create one as a side effect. The borrowed handle is shared for process
+// life and must not be closed.
 func openExecutionStoreIfExists(d *Deps) (*store.Store, bool, error) {
-	path := executionStorePath(d)
-	guardTestStorePath(path)
-	if _, err := d.FS.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("stat execution-state store: %w", err)
-	}
-	s, err := openExecutionStore(d)
-	if err != nil {
-		return nil, false, err
-	}
-	return s, true, nil
+	return d.taskDeps().Store(false)
 }

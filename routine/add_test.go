@@ -33,6 +33,13 @@ func routineDeps(t *testing.T, dataHome string) *Deps {
 		ProcStartToken: func(pid int) (string, bool) { return "test", true },
 		ProcessAlive: func(pid int, procStart string) bool { return processAlivePID(pid) },
 	}
+	// Borrowers never close the process-cached store handle (ADR-0140); close it
+	// once at test end through the accessor's closer rather than per call.
+	t.Cleanup(func() {
+		if d.Tasks != nil {
+			_ = d.Tasks.CloseStore()
+		}
+	})
 	return d
 }
 

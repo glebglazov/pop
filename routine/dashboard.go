@@ -56,12 +56,9 @@ func BuildDashboardWith(d *Deps) (DashboardSnapshot, error) {
 	if err != nil {
 		return DashboardSnapshot{}, err
 	}
-	s, ok, err := openExecutionStoreIfExists(d)
+	s, _, err := openExecutionStoreIfExists(d)
 	if err != nil {
 		return DashboardSnapshot{}, err
-	}
-	if ok {
-		defer func() { _ = s.Close() }()
 	}
 
 	rows := make([]DashboardRow, 0, len(routines))
@@ -1094,7 +1091,6 @@ func (m RoutineDashboard) loadRuns(row DashboardRow) tea.Cmd {
 		if err != nil {
 			return dashboardRunsMsg{err: err}
 		}
-		defer func() { _ = s.Close() }()
 		runs, err := s.ListRoutineRuns(row.ID)
 		return dashboardRunsMsg{runs: runs, err: err}
 	}

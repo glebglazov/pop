@@ -106,7 +106,6 @@ func seedFiredRun(t *testing.T, d *Deps, id string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = s.Close() }()
 	run, err := s.StartRoutineRun(store.RoutineRun{
 		RoutineID: id,
 		FiredAt:   time.Now().UTC(),
@@ -173,7 +172,6 @@ func TestFireProducesReportAndWrappedPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = s.Close() }()
 	row, err := s.LastRoutineRun("daily")
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +215,6 @@ func TestFireAnchorsNeverFiredRoutine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = s.Close() }()
 	lastFired, err := LastFireTime(s, "anchor")
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +255,6 @@ func TestFireRunsUnscheduledRoutine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = s.Close() }()
 	lastFired, err := LastFireTime(s, "manual-only")
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +291,6 @@ func TestFireRefusesConcurrentRun(t *testing.T) {
 	}, func(live store.RoutineRun) bool { return true }); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Close()
 
 	if _, err := FireWith(d, "serial"); err == nil {
 		t.Fatal("expected concurrent fire to fail")
@@ -330,7 +325,6 @@ func TestFireAgentFailureRecordsFailedRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = s.Close() }()
 	row, err := s.LastRoutineRun("fail-me")
 	if err != nil {
 		t.Fatal(err)
@@ -445,7 +439,6 @@ func lastRun(t *testing.T, d *Deps, id string) *store.RoutineRun {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = s.Close() }()
 	row, err := s.LastRoutineRun(id)
 	if err != nil {
 		t.Fatal(err)

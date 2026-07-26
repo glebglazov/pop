@@ -55,7 +55,6 @@ func FireWith(d *Deps, id string) (*FireResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = s.Close() }()
 
 	// Every run records the fingerprint in effect when it fired (ADR-0128).
 	// A manual fire re-proves an edited Routine by recording the new value; the

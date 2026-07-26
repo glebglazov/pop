@@ -52,7 +52,6 @@ func buildHandoff(d *Deps, id string) (string, error) {
 		return "", err
 	}
 	run, runErr := s.LastRoutineRun(id)
-	_ = s.Close()
 	if runErr != nil {
 		return "", fmt.Errorf("read last routine run: %w", runErr)
 	}

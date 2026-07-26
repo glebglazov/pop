@@ -91,7 +91,6 @@ func routineHasFired(d *Deps, id string) (bool, error) {
 	if err != nil || !ok {
 		return false, err
 	}
-	defer func() { _ = s.Close() }()
 	last, err := s.LastRoutineFireTime(id)
 	if err != nil {
 		return false, err

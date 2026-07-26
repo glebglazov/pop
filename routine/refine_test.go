@@ -107,7 +107,6 @@ func TestRefineFireIsARealRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	row, err := s.LastRoutineRun("gate")
-	_ = s.Close()
 	if err != nil {
 		t.Fatal(err)
 	}

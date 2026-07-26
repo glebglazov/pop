@@ -28,7 +28,6 @@ func RunsWith(d *Deps, id string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = s.Close() }()
 
 	rows, err := s.ListRoutineRuns(id)
 	if err != nil {

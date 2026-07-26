@@ -123,7 +123,6 @@ func lastRunSummary(d *Deps, id string) string {
 	if err != nil || !ok {
 		return "no runs yet"
 	}
-	defer func() { _ = s.Close() }()
 	run, err := s.LastRoutineRun(id)
 	if err != nil || run == nil {
 		return "no runs yet"
@@ -156,7 +155,6 @@ func viewLastReport(d *Deps, out io.Writer, id string) {
 		return
 	}
 	run, err := s.LastRoutineRun(id)
-	_ = s.Close()
 	if err != nil {
 		fmt.Fprintf(out, "Could not read the last run: %v\n", err)
 		return

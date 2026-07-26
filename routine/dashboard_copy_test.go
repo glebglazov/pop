@@ -50,7 +50,6 @@ func TestBuildDashboardReportPath(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Close()
 
 	snap, err := BuildDashboardWith(d)
 	if err != nil {

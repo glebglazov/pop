@@ -88,7 +88,6 @@ func TestHandoffNotesFailedRun(t *testing.T) {
 	if err := s.FinishRoutineRun(run.ID, store.RoutineRunFailed, report, "agent exited with status 1", firedAt); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Close()
 
 	var out bytes.Buffer
 	if err := HandoffWith(d, "bugfinder", &out); err != nil {
@@ -132,7 +131,6 @@ func TestHandoffNotesSucceededRunWithoutFailReason(t *testing.T) {
 	if err := s.FinishRoutineRun(run.ID, store.RoutineRunSucceeded, report, "", firedAt); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Close()
 
 	var out bytes.Buffer
 	if err := HandoffWith(d, "bugfinder", &out); err != nil {

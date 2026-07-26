@@ -57,6 +57,9 @@ func routineDashboardDeps(t *testing.T) (*Deps, string) {
 		ProcStartToken: func(pid int) (string, bool) { return "test", true },
 		ProcessAlive:  func(pid int, procStart string) bool { return pid == 9999 },
 	}
+	// Borrowers never close the process-cached store handle (ADR-0140); close it
+	// once at test end through the accessor's closer.
+	t.Cleanup(func() { _ = td.CloseStore() })
 	return d, home
 }
 
@@ -154,7 +157,6 @@ func TestBuildDashboardStatuses(t *testing.T) {
 	if err := s.FinishRoutineRun(2, store.RoutineRunSucceeded, "", "", now.Add(-2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Close()
 
 	snap, err := BuildDashboardWith(d)
 	if err != nil {
@@ -615,7 +617,6 @@ func TestRoutineDashboardRunsDetailAndReport(t *testing.T) {
 	if err := s.FinishRoutineRun(1, store.RoutineRunSucceeded, reportPath, "", fired); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Close()
 
 	snap, err := BuildDashboardWith(d)
 	if err != nil {

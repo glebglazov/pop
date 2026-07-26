@@ -75,7 +75,6 @@ func TestRunsListsNewestFirstWithReportPath(t *testing.T) {
 	if err := s.FinishRoutineRun(run2.ID, store.RoutineRunFailed, secondReport, "agent exited with status 1", secondAt); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Close()
 
 	var out bytes.Buffer
 	if err := RunsWith(d, "history", &out); err != nil {
