@@ -9,13 +9,14 @@ import (
 // renders, with the companion files each one is expected to carry alongside its
 // SKILL.md body.
 var taskSkillDirs = map[string][]string{
-	"pop-grill-with-docs":   {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
-	"pop-grill-consolidate": {},
-	"pop-to-spec":           {},
-	"pop-to-tasks":          {},
-	"pop-wayfinder":         {},
-	"pop-prototype":         {"LOGIC.md", "UI.md"},
-	"pop-research":          {},
+	"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
+	"pop-grill-consolidate":        {},
+	"pop-to-spec":                  {},
+	"pop-to-tasks":                 {},
+	"pop-wayfinder":                {},
+	"pop-prototype":                {"LOGIC.md", "UI.md"},
+	"pop-research":                 {},
+	"pop-setup-matt-pocock-skills": {},
 }
 
 // TestRenderTaskSkillsDirAgents pins the task-skills rendered tree for

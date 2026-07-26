@@ -125,6 +125,7 @@ func TestCatalog_TaskSkillsSources(t *testing.T) {
 		"skills/pop/wayfinder",
 		"skills/pop/prototype",
 		"skills/pop/research",
+		"skills/pop/setup-matt-pocock-skills",
 	}
 	if len(comp.sources) != len(want) {
 		t.Fatalf("sources len = %d, want %d: %v", len(comp.sources), len(want), comp.sources)
