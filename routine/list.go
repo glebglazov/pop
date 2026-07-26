@@ -31,13 +31,17 @@ func ListWith(d *Deps, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Project routines are discovered live from the current checkout and appended
+	// to the authored table (ADR-0138); outside a checkout this is empty, leaving
+	// output identical to authored-only listing.
+	projectRoutines, projectWarnings := DiscoverProjectRoutines(d)
 
-	if len(routines) == 0 && len(warnings) == 0 {
+	if len(routines) == 0 && len(projectRoutines) == 0 && len(warnings) == 0 && len(projectWarnings) == 0 {
 		fmt.Fprintln(out, emptyListHint)
 		return nil
 	}
 
-	if len(routines) > 0 {
+	if len(routines) > 0 || len(projectRoutines) > 0 {
 		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "ID\tDIRECTORY\tSCHEDULE\tPAUSED")
 		for _, r := range routines {
@@ -47,12 +51,20 @@ func ListWith(d *Deps, out io.Writer) error {
 			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.ID, r.Manifest.BoundDirectory, ScheduleLabel(r.Manifest.Schedule), paused)
 		}
+		// Project routines render with the project: origin marker, a manual
+		// schedule, and a bare `-` pause column — they carry no pause bit.
+		for _, r := range projectRoutines {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", ProjectOrigin+r.Name, r.Dir, "manual", "-")
+		}
 		if err := tw.Flush(); err != nil {
 			return err
 		}
 	}
 
 	for _, w := range warnings {
+		fmt.Fprintf(out, "warning: routine %s: %v\n", w.ID, w.Err)
+	}
+	for _, w := range projectWarnings {
 		fmt.Fprintf(out, "warning: routine %s: %v\n", w.ID, w.Err)
 	}
 	return nil

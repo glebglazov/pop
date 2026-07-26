@@ -7,6 +7,7 @@ package frontmatter
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -38,13 +39,45 @@ func (f Fields) IsEmpty() bool {
 // suspends only that routine with a warning rather than treating it as
 // silently unscheduled (ADR-0139).
 func Parse(content string) (Fields, string, error) {
+	f, body, _, err := ParseWithKeys(content)
+	return f, body, err
+}
+
+// ParseWithKeys is Parse plus the sorted set of top-level keys present in the
+// frontmatter block. Callers that accept only a subset of the intent keys —
+// Project routines take agents/effort only and treat a schedule (or any unknown
+// key) as warn-and-ignore (ADR-0138) — use the key set to report what they
+// dropped without re-implementing the fence scan.
+func ParseWithKeys(content string) (Fields, string, []string, error) {
+	yamlText, body, hadFence, err := split(content)
+	if err != nil {
+		return Fields{}, "", nil, err
+	}
+	if !hadFence {
+		return Fields{}, body, nil, nil
+	}
+	f, err := decodeFields(yamlText)
+	if err != nil {
+		return Fields{}, "", nil, err
+	}
+	keys, err := topLevelKeys(yamlText)
+	if err != nil {
+		return Fields{}, "", nil, err
+	}
+	return f, body, keys, nil
+}
+
+// split scans the fenced frontmatter block, returning the raw YAML text between
+// the fences and the body after the closing fence. hadFence is false when the
+// content has no opening `---` fence (the whole content is the body).
+func split(content string) (yamlText, body string, hadFence bool, err error) {
 	first, rest, hadNewline := cutLine(content)
 	if strings.TrimRight(first, "\r") != fence {
 		// No opening fence: the entire file is the body.
-		return Fields{}, content, nil
+		return "", content, false, nil
 	}
 	if !hadNewline {
-		return Fields{}, "", fmt.Errorf("unterminated frontmatter: opening %q fence has no closing fence", fence)
+		return "", "", false, fmt.Errorf("unterminated frontmatter: opening %q fence has no closing fence", fence)
 	}
 
 	var yamlLines []string
@@ -52,22 +85,37 @@ func Parse(content string) (Fields, string, error) {
 	for {
 		line, next, hadNewline := cutLine(remaining)
 		if strings.TrimRight(line, "\r") == fence {
-			body := ""
+			b := ""
 			if hadNewline {
-				body = next
+				b = next
 			}
-			f, err := decodeFields(strings.Join(yamlLines, "\n"))
-			if err != nil {
-				return Fields{}, "", err
-			}
-			return f, body, nil
+			return strings.Join(yamlLines, "\n"), b, true, nil
 		}
 		if !hadNewline {
-			return Fields{}, "", fmt.Errorf("unterminated frontmatter: opening %q fence has no closing fence", fence)
+			return "", "", false, fmt.Errorf("unterminated frontmatter: opening %q fence has no closing fence", fence)
 		}
 		yamlLines = append(yamlLines, line)
 		remaining = next
 	}
+}
+
+// topLevelKeys returns the sorted top-level mapping keys of the frontmatter
+// block. An empty block has no keys. A non-mapping block is a parse error,
+// consistent with decodeFields rejecting it.
+func topLevelKeys(yamlText string) ([]string, error) {
+	if strings.TrimSpace(yamlText) == "" {
+		return nil, nil
+	}
+	var m map[string]yaml.Node
+	if err := yaml.Unmarshal([]byte(yamlText), &m); err != nil {
+		return nil, fmt.Errorf("parse frontmatter: %w", err)
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys, nil
 }
 
 // Marshal renders Fields and body back into a prompt file. The frontmatter fence
