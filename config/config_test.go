@@ -16,6 +16,17 @@ func strPtr(s string) *string {
 	return &s
 }
 
+// popConfigPath returns <dir>/.pop/config.toml, creating the .pop directory so
+// a subsequent os.WriteFile succeeds. Repo-scope config moved from the flat
+// .pop.toml into .pop/config.toml (ADR-0137).
+func popConfigPath(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".pop"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, ".pop", "config.toml")
+}
+
 func TestDefaultConfigPathWith(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -593,14 +604,14 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 		}
 	})
 
-	t.Run(".pop.toml [[workbenches]] resolves", func(t *testing.T) {
+	t.Run(".pop/config.toml [[workbenches]] resolves", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.toml")
 		if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
 			t.Fatal(err)
 		}
 
-		popTomlPath := filepath.Join(tmpDir, ".pop.toml")
+		popTomlPath := popConfigPath(t, tmpDir)
 		if err := os.WriteFile(popTomlPath, []byte(`
 [[workbenches]]
 name = "repo-wb"
@@ -674,21 +685,21 @@ workbenches = [
 }
 
 // TestResolveWorkbenchesWithTwoAnchor pins ADR-0083's two-anchor law for the
-// workbench union (slice 05): the committed .pop.toml is unioned at this worktree
+// workbench union (slice 05): the committed .pop/config.toml is unioned at this worktree
 // AND the trunk anchor, the worktree outranking the inherited trunk one, with the
 // read-once guard suppressing a self-collision when the checkout is its own
 // trunk anchor and the bare-repo identity-root fallback supplying the trunk
 // anchor. This is a deliberate behaviour change from the prior single-anchor
 // (identity-root only) read, so it gets its own test.
 func TestResolveWorkbenchesWithTwoAnchor(t *testing.T) {
-	// writeWorkbench writes a .pop.toml naming one workbench; the tag rides in
+	// writeWorkbench writes a .pop/config.toml naming one workbench; the tag rides in
 	// before_apply so the winning template is identifiable after the union.
 	writeWorkbench := func(t *testing.T, dir, name, tag string) {
 		t.Helper()
 		body := "[[workbenches]]\nname = \"" + name + "\"\n" +
 			"before_apply = [\"" + tag + "\"]\n" +
 			"windows = [{name = \"main\", layout = {name = \"editor\", command = \"vim\"}}]\n"
-		if err := os.WriteFile(filepath.Join(dir, ".pop.toml"), []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(popConfigPath(t, dir), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -700,7 +711,7 @@ func TestResolveWorkbenchesWithTwoAnchor(t *testing.T) {
 		return wb.BeforeApply[0]
 	}
 
-	t.Run("worktree .pop.toml outranks the trunk anchor, collision warned", func(t *testing.T) {
+	t.Run("worktree .pop/config.toml outranks the trunk anchor, collision warned", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -719,7 +730,7 @@ func TestResolveWorkbenchesWithTwoAnchor(t *testing.T) {
 		}
 	})
 
-	t.Run("worktree without .pop.toml inherits the trunk anchor's templates", func(t *testing.T) {
+	t.Run("worktree without .pop/config.toml inherits the trunk anchor's templates", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -1181,14 +1192,14 @@ func TestLoadRepoConfigDirectives(t *testing.T) {
 		{name: "worktree_ready causes error", body: strPtr("worktree_ready = true\n"), wantErr: "worktree_ready was removed"},
 		{name: "execution_base causes error", body: strPtr("execution_base = true\n"), wantErr: "execution_base was renamed to trunk"},
 		{name: "queue_base causes error", body: strPtr("queue_base = true\n"), wantErr: "queue_base was renamed to trunk"},
-		{name: "malformed", body: strPtr("trunk =\n"), wantErr: ".pop.toml"},
+		{name: "malformed", body: strPtr("trunk =\n"), wantErr: ".pop/config.toml"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			if tt.body != nil {
-				if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte(*tt.body), 0o644); err != nil {
+				if err := os.WriteFile(popConfigPath(t, root), []byte(*tt.body), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -1209,7 +1220,7 @@ func TestLoadRepoConfigDirectives(t *testing.T) {
 	}
 }
 
-// TestPopTOMLScopeLegality asserts that .pop.toml accepts only shared repo-scope
+// TestPopTOMLScopeLegality asserts that .pop/config.toml accepts only shared repo-scope
 // keys (ADR-0083): a global-only key or the [repo]-only trunk is ignored but
 // surfaces a non-fatal finding, while valid repo-scope keys still load
 // (ADR-0054 degrade-not-abort).
@@ -1217,7 +1228,7 @@ func TestPopTOMLScopeLegality(t *testing.T) {
 	loadBody := func(t *testing.T, body string) RepoConfig {
 		t.Helper()
 		root := t.TempDir()
-		if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(popConfigPath(t, root), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		cfg, err := LoadRepoConfig(root)
@@ -1269,7 +1280,7 @@ func TestPopTOMLScopeLegality(t *testing.T) {
 			t.Fatalf("trunk should produce a [repo]-only finding: %+v", cfg.Findings)
 		}
 		if cfg.Trunk {
-			t.Error("trunk in .pop.toml must not be honored")
+			t.Error("trunk in .pop/config.toml must not be honored")
 		}
 	})
 
@@ -1286,7 +1297,7 @@ func TestPopTOMLScopeLegality(t *testing.T) {
 	})
 
 	// Criterion: adding a repo-scope key to the shared schema makes it accepted
-	// in .pop.toml with no change to validation code — the legal set is generated.
+	// in .pop/config.toml with no change to validation code — the legal set is generated.
 	t.Run("legal set derived from shared schema", func(t *testing.T) {
 		legal := repoScopeLegalKeys()
 		if !legal["workbenches"] || !legal["preferred_workbench"] {
@@ -1311,7 +1322,7 @@ func TestPopTOMLPresenceDoesNotRegisterProject(t *testing.T) {
 	if err := os.MkdirAll(unregistered, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(unregistered, ".pop.toml"), []byte("# pop repo config\n"), 0o644); err != nil {
+	if err := os.WriteFile(popConfigPath(t, unregistered), []byte("# pop repo config\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3773,7 +3784,7 @@ func TestResolvePreferredWorkbench(t *testing.T) {
 }
 
 // preferredResolverDeps builds a *Deps whose runtime file lands under a temp
-// XDG_DATA_HOME while repo-identity / .pop.toml reads hit the real filesystem.
+// XDG_DATA_HOME while repo-identity / .pop/config.toml reads hit the real filesystem.
 func preferredResolverDeps(t *testing.T) *Deps {
 	t.Helper()
 	dataDir := filepath.Join(t.TempDir(), "data")
@@ -3913,7 +3924,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 // inheritance layer (layer 6 under ADR-0083: config.runtime.toml[<trunk-path>]),
 // the lowest layer that carries this key. A worktree with no runtime entry of
 // its own inherits the Trunk worktree's runtime entry, resolved dynamically at
-// open. These cases isolate the runtime tier (no hand-authored [repo]/.pop.toml
+// open. These cases isolate the runtime tier (no hand-authored [repo]/.pop/config.toml
 // value above), since anything hand-authored now beats runtime. The Trunk
 // resolver is injected via Deps.Trunk (config cannot import tasks/binding).
 func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
@@ -4078,14 +4089,14 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 // TestResolvePreferredWorkbenchUserFirstLadder exercises the ADR-0083 user-first
 // precedence ladder end to end: each layer that carries preferred_workbench in
 // isolation, the slice-01 reversal (hand-authored beats runtime), the
-// global-shadow ([repo] beats committed .pop.toml), and the two-anchor .pop.toml
+// global-shadow ([repo] beats committed .pop/config.toml), and the two-anchor .pop/config.toml
 // inheritance (this worktree vs the Trunk worktree, identity-root fallback for a
 // bare repo).
 func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 	writePopTOML := func(t *testing.T, dir, name string) {
 		t.Helper()
 		body := "preferred_workbench = \"" + name + "\"\n"
-		if err := os.WriteFile(filepath.Join(dir, ".pop.toml"), []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(popConfigPath(t, dir), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -4102,7 +4113,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 	})
 
-	t.Run("layer 3: this worktree's committed .pop.toml supplies the value", func(t *testing.T) {
+	t.Run("layer 3: this worktree's committed .pop/config.toml supplies the value", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		writePopTOML(t, root, "committed-wb")
@@ -4112,7 +4123,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 	})
 
-	t.Run("layer 4: inherited trunk .pop.toml supplies the value", func(t *testing.T) {
+	t.Run("layer 4: inherited trunk .pop/config.toml supplies the value", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -4120,7 +4131,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		writePopTOML(t, trunk, "trunk-wb")
 		cfg := &Config{Workbenches: []Workbench{{Name: "trunk-wb"}}}
 		if name, warns := cfg.ResolvePreferredWorkbench(d, child); name != "trunk-wb" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want trunk-wb/none (child inherits trunk .pop.toml)", name, warns)
+			t.Fatalf("name=%q warns=%v, want trunk-wb/none (child inherits trunk .pop/config.toml)", name, warns)
 		}
 	})
 
@@ -4165,7 +4176,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 	})
 
-	t.Run("reversal: committed .pop.toml beats a worktree runtime entry", func(t *testing.T) {
+	t.Run("reversal: committed .pop/config.toml beats a worktree runtime entry", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		writePopTOML(t, root, "committed-wb")
@@ -4178,7 +4189,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 	})
 
-	t.Run("global-shadow: [repo] beats committed .pop.toml for the key", func(t *testing.T) {
+	t.Run("global-shadow: [repo] beats committed .pop/config.toml for the key", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		writePopTOML(t, root, "committed-wb")
@@ -4187,11 +4198,11 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 			Repo:        map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "central-wb"}}},
 		}
 		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "central-wb" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want central-wb/none (central config.toml shadows committed .pop.toml)", name, warns)
+			t.Fatalf("name=%q warns=%v, want central-wb/none (central config.toml shadows committed .pop/config.toml)", name, warns)
 		}
 	})
 
-	t.Run("two-anchor: worktree's own .pop.toml overrides the inherited trunk one", func(t *testing.T) {
+	t.Run("two-anchor: worktree's own .pop/config.toml overrides the inherited trunk one", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -4200,11 +4211,11 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		writePopTOML(t, child, "child-wb")
 		cfg := &Config{Workbenches: []Workbench{{Name: "trunk-wb"}, {Name: "child-wb"}}}
 		if name, warns := cfg.ResolvePreferredWorkbench(d, child); name != "child-wb" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want child-wb/none (own .pop.toml overrides inherited)", name, warns)
+			t.Fatalf("name=%q warns=%v, want child-wb/none (own .pop/config.toml overrides inherited)", name, warns)
 		}
 	})
 
-	t.Run("two-anchor: bare repo falls back to the identity-root .pop.toml", func(t *testing.T) {
+	t.Run("two-anchor: bare repo falls back to the identity-root .pop/config.toml", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		bareRoot := t.TempDir()
 		if err := os.MkdirAll(filepath.Join(bareRoot, ".bare"), 0o755); err != nil {
@@ -4219,11 +4230,11 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		d.Trunk = func(string) (string, bool) { return "", false }
 		cfg := &Config{Workbenches: []Workbench{{Name: "id-root-wb"}}}
 		if name, warns := cfg.ResolvePreferredWorkbench(d, worktree); name != "id-root-wb" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want id-root-wb/none (bare repo inherits identity-root .pop.toml)", name, warns)
+			t.Fatalf("name=%q warns=%v, want id-root-wb/none (bare repo inherits identity-root .pop/config.toml)", name, warns)
 		}
 	})
 
-	t.Run("stale .pop.toml name warns and falls through to the runtime entry", func(t *testing.T) {
+	t.Run("stale .pop/config.toml name warns and falls through to the runtime entry", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		writePopTOML(t, root, "ghost")
@@ -4236,16 +4247,16 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 			t.Fatalf("name=%q, want rt-wb (stale in-tree skips to runtime gap-filler)", name)
 		}
 		if len(warns) != 1 || !strings.Contains(warns[0], "ghost") {
-			t.Fatalf("warns=%v, want one naming the stale .pop.toml name", warns)
+			t.Fatalf("warns=%v, want one naming the stale .pop/config.toml name", warns)
 		}
 	})
 }
 
 // TestResolveRepoConfigSharedSchema exercises the unified repo-scope schema
 // (ADR-0083): preferred_workbench now rides the shared key set, so it parses
-// from a committed .pop.toml as well as from a global [repo."<path>"] block, and
-// the personal override beats .pop.toml for the same key. trunk stays
-// [repo]-only and is rejected in .pop.toml.
+// from a committed .pop/config.toml as well as from a global [repo."<path>"] block, and
+// the personal override beats .pop/config.toml for the same key. trunk stays
+// [repo]-only and is rejected in .pop/config.toml.
 func TestResolveRepoConfigSharedSchema(t *testing.T) {
 	real := deps.NewRealFileSystem()
 	newDeps := func() *Deps {
@@ -4258,12 +4269,12 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 	}
 	writePopTOML := func(t *testing.T, dir, body string) {
 		t.Helper()
-		if err := os.WriteFile(filepath.Join(dir, ".pop.toml"), []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(popConfigPath(t, dir), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	t.Run("preferred_workbench parses from .pop.toml", func(t *testing.T) {
+	t.Run("preferred_workbench parses from .pop/config.toml", func(t *testing.T) {
 		root := t.TempDir()
 		writePopTOML(t, root, "preferred_workbench = \"gs-dev\"\n")
 		cfg := &Config{}
@@ -4272,7 +4283,7 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got.PreferredWorkbench != "gs-dev" {
-			t.Errorf("PreferredWorkbench = %q, want %q (parsed from committed .pop.toml)", got.PreferredWorkbench, "gs-dev")
+			t.Errorf("PreferredWorkbench = %q, want %q (parsed from committed .pop/config.toml)", got.PreferredWorkbench, "gs-dev")
 		}
 	})
 
@@ -4290,7 +4301,7 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 		}
 	})
 
-	t.Run("[repo] block beats .pop.toml for the same key", func(t *testing.T) {
+	t.Run("[repo] block beats .pop/config.toml for the same key", func(t *testing.T) {
 		root := t.TempDir()
 		writePopTOML(t, root, "preferred_workbench = \"committed\"\n")
 		cfg := &Config{Repo: map[string]RepoOverrideConfig{
@@ -4301,11 +4312,11 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got.PreferredWorkbench != "personal" {
-			t.Errorf("PreferredWorkbench = %q, want %q (personal [repo] beats committed .pop.toml)", got.PreferredWorkbench, "personal")
+			t.Errorf("PreferredWorkbench = %q, want %q (personal [repo] beats committed .pop/config.toml)", got.PreferredWorkbench, "personal")
 		}
 	})
 
-	t.Run(".pop.toml retained when [repo] leaves the key unset", func(t *testing.T) {
+	t.Run(".pop/config.toml retained when [repo] leaves the key unset", func(t *testing.T) {
 		root := t.TempDir()
 		writePopTOML(t, root, "preferred_workbench = \"committed\"\n")
 		cfg := &Config{Repo: map[string]RepoOverrideConfig{
@@ -4316,21 +4327,21 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got.PreferredWorkbench != "committed" {
-			t.Errorf("PreferredWorkbench = %q, want %q (.pop.toml retained when override unset)", got.PreferredWorkbench, "committed")
+			t.Errorf("PreferredWorkbench = %q, want %q (.pop/config.toml retained when override unset)", got.PreferredWorkbench, "committed")
 		}
 	})
 
-	t.Run("trunk stays [repo]-only: rejected in .pop.toml", func(t *testing.T) {
+	t.Run("trunk stays [repo]-only: rejected in .pop/config.toml", func(t *testing.T) {
 		root := t.TempDir()
 		writePopTOML(t, root, "trunk = true\n")
-		// Scope-legality (slice 03): trunk in .pop.toml is now non-fatal — it is
+		// Scope-legality (slice 03): trunk in .pop/config.toml is now non-fatal — it is
 		// ignored and surfaced as a finding rather than aborting the load.
 		cfg, err := LoadRepoConfig(root)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if cfg.Trunk {
-			t.Error("trunk in .pop.toml must not be honored")
+			t.Error("trunk in .pop/config.toml must not be honored")
 		}
 		var warned bool
 		for _, f := range cfg.Findings {
@@ -4345,13 +4356,13 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 }
 
 // As of slice 02 (ADR-0083), ResolvePreferredWorkbench's ladder consults the
-// committed .pop.toml at layer 3, so a .pop.toml-only preferred_workbench (with
+// committed .pop/config.toml at layer 3, so a .pop/config.toml-only preferred_workbench (with
 // no [repo] override above it) now supplies the resolved value.
 func TestPreferredWorkbenchFromPopTOML(t *testing.T) {
 	root := t.TempDir()
 	popTOML := "preferred_workbench = \"gs-dev\"\n" +
 		"[[workbenches]]\nname = \"gs-dev\"\n"
-	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte(popTOML), 0o644); err != nil {
+	if err := os.WriteFile(popConfigPath(t, root), []byte(popTOML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	real := deps.NewRealFileSystem()
@@ -4364,7 +4375,7 @@ func TestPreferredWorkbenchFromPopTOML(t *testing.T) {
 	cfg := &Config{}
 	name, warns := cfg.ResolvePreferredWorkbench(d, root)
 	if name != "gs-dev" {
-		t.Errorf("name = %q, want gs-dev (committed .pop.toml supplies the preferred workbench)", name)
+		t.Errorf("name = %q, want gs-dev (committed .pop/config.toml supplies the preferred workbench)", name)
 	}
 	if len(warns) != 0 {
 		t.Errorf("unexpected warnings: %v", warns)
@@ -4372,7 +4383,7 @@ func TestPreferredWorkbenchFromPopTOML(t *testing.T) {
 }
 
 func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
-	// Global override sets trunk for a repo with no .pop.toml
+	// Global override sets trunk for a repo with no .pop/config.toml
 	dir := t.TempDir()
 	real := deps.NewRealFileSystem()
 	d := &Deps{FS: &deps.MockFileSystem{
@@ -4424,7 +4435,7 @@ func TestResolveRepoConfigTrunkPerCheckout(t *testing.T) {
 }
 
 // TestResolveRepoConfigTwoAnchor pins ADR-0083's two-anchor law for
-// ResolveRepoConfig (slice 05): the committed .pop.toml resolves at this worktree
+// ResolveRepoConfig (slice 05): the committed .pop/config.toml resolves at this worktree
 // first, then the trunk anchor (the Trunk worktree, or the repository-identity
 // root for a bare repo), presence deciding. This replaces the prior single-anchor
 // (identity-root only) read, so it gets its own test. preferred_workbench is the
@@ -4433,12 +4444,12 @@ func TestResolveRepoConfigTwoAnchor(t *testing.T) {
 	writePref := func(t *testing.T, dir, name string) {
 		t.Helper()
 		body := "preferred_workbench = \"" + name + "\"\n"
-		if err := os.WriteFile(filepath.Join(dir, ".pop.toml"), []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(popConfigPath(t, dir), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	t.Run("worktree .pop.toml beats the trunk anchor", func(t *testing.T) {
+	t.Run("worktree .pop/config.toml beats the trunk anchor", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -4585,13 +4596,86 @@ queue_base = true
 
 func TestRepoLocalExecutionBaseHardError(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("execution_base = true\n"), 0o644); err != nil {
+	if err := os.WriteFile(popConfigPath(t, root), []byte("execution_base = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := LoadRepoConfigWith(&Deps{FS: deps.NewRealFileSystem()}, root)
 	if err == nil || !strings.Contains(err.Error(), "execution_base was renamed to trunk") {
 		t.Fatalf("LoadRepoConfig err = %v, want execution_base rename error", err)
 	}
+}
+
+// TestLegacyPopTOMLIgnoredWithWarning asserts the ADR-0137 no-dual-read cut: a
+// flat .pop.toml is never parsed, its presence draws exactly one finding
+// naming .pop/config.toml, and when both files exist only .pop/config.toml is
+// read (warn-and-ignore, so committed config never silently vanishes).
+func TestLegacyPopTOMLIgnoredWithWarning(t *testing.T) {
+	fs := deps.NewRealFileSystem()
+
+	t.Run("flat .pop.toml alone is ignored and warns", func(t *testing.T) {
+		root := t.TempDir()
+		// A legacy flat file with a real value; it must NOT be read.
+		if err := os.WriteFile(filepath.Join(root, ".pop.toml"),
+			[]byte("preferred_workbench = \"legacy\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadRepoConfigWith(&Deps{FS: fs}, root)
+		if err != nil {
+			t.Fatalf("LoadRepoConfig err = %v, want nil", err)
+		}
+		if cfg.PreferredWorkbench != "" {
+			t.Errorf("PreferredWorkbench = %q, want empty (flat .pop.toml must not be read)", cfg.PreferredWorkbench)
+		}
+		if len(cfg.Findings) != 1 {
+			t.Fatalf("Findings = %+v, want exactly one legacy warning", cfg.Findings)
+		}
+		if !strings.Contains(cfg.Findings[0].Message, ".pop/config.toml") {
+			t.Errorf("finding %q must name the new path .pop/config.toml", cfg.Findings[0].Message)
+		}
+	})
+
+	t.Run("no-dual-read: .pop/config.toml wins, legacy still warned", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, ".pop.toml"),
+			[]byte("preferred_workbench = \"legacy\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(popConfigPath(t, root),
+			[]byte("preferred_workbench = \"current\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadRepoConfigWith(&Deps{FS: fs}, root)
+		if err != nil {
+			t.Fatalf("LoadRepoConfig err = %v, want nil", err)
+		}
+		if cfg.PreferredWorkbench != "current" {
+			t.Errorf("PreferredWorkbench = %q, want %q (only .pop/config.toml is read)", cfg.PreferredWorkbench, "current")
+		}
+		var warned bool
+		for _, f := range cfg.Findings {
+			if strings.Contains(f.Message, ".pop.toml is ignored") {
+				warned = true
+			}
+		}
+		if !warned {
+			t.Errorf("Findings = %+v, want a legacy .pop.toml warning even when the new file is present", cfg.Findings)
+		}
+	})
+
+	t.Run("no legacy file, no legacy finding", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.WriteFile(popConfigPath(t, root),
+			[]byte("preferred_workbench = \"current\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadRepoConfigWith(&Deps{FS: fs}, root)
+		if err != nil {
+			t.Fatalf("LoadRepoConfig err = %v, want nil", err)
+		}
+		if len(cfg.Findings) != 0 {
+			t.Errorf("Findings = %+v, want none when no flat .pop.toml exists", cfg.Findings)
+		}
+	})
 }
 
 func TestRepoBlockGlobalOnlyKeysIgnored(t *testing.T) {
@@ -4844,7 +4928,7 @@ func TestPaneMonitoringTopicDerivationTimeout(t *testing.T) {
 
 func TestWorkbenchThreeHomeResolution(t *testing.T) {
 	// Test that templates are resolved from three homes with most-specific-wins:
-	// [repo."<path>"] > .pop.toml > global library
+	// [repo."<path>"] > .pop/config.toml > global library
 
 	t.Run("global templates only", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -4865,7 +4949,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 		d := &Deps{
 			FS: &deps.MockFileSystem{
 				StatFunc: func(path string) (os.FileInfo, error) {
-					// No .bare directory, no .pop.toml
+					// No .bare directory, no .pop/config.toml
 					return nil, os.ErrNotExist
 				},
 				ReadFileFunc: func(path string) ([]byte, error) {
@@ -4895,14 +4979,14 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 		}
 	})
 
-	t.Run(".pop.toml templates only", func(t *testing.T) {
+	t.Run(".pop/config.toml templates only", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.toml")
 		if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
 			t.Fatal(err)
 		}
 
-		popTomlPath := filepath.Join(tmpDir, ".pop.toml")
+		popTomlPath := popConfigPath(t, tmpDir)
 		if err := os.WriteFile(popTomlPath, []byte(`
 [[workbenches]]
 name = "work"
@@ -5003,7 +5087,7 @@ workbenches = [
 		}
 	})
 
-	t.Run("precedence: [repo] > .pop.toml > global", func(t *testing.T) {
+	t.Run("precedence: [repo] > .pop/config.toml > global", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.toml")
 		// Global template named "dev"
@@ -5021,8 +5105,8 @@ workbenches = [
 			t.Fatal(err)
 		}
 
-		// .pop.toml also has "dev"
-		popTomlPath := filepath.Join(tmpDir, ".pop.toml")
+		// .pop/config.toml also has "dev"
+		popTomlPath := popConfigPath(t, tmpDir)
 		if err := os.WriteFile(popTomlPath, []byte(`
 [[workbenches]]
 name = "dev"
@@ -5060,7 +5144,7 @@ windows = [{name = "main", layout = {name = "editor", command = "nano"}}]
 		}
 
 		templates, warnings := cfg.ResolveWorkbenchesWith(d, tmpDir)
-		// Should have 2 warnings: global vs .pop.toml, and .pop.toml vs [repo]
+		// Should have 2 warnings: global vs .pop/config.toml, and .pop/config.toml vs [repo]
 		if len(warnings) != 2 {
 			t.Errorf("expected 2 warnings, got %d: %v", len(warnings), warnings)
 		}
@@ -5080,7 +5164,7 @@ windows = [{name = "main", layout = {name = "editor", command = "nano"}}]
 		}
 	})
 
-	t.Run("bare repo .pop.toml applies to all worktrees", func(t *testing.T) {
+	t.Run("bare repo .pop/config.toml applies to all worktrees", func(t *testing.T) {
 		// Create a bare repo structure: bare/.bare/ and bare/worktrees/...
 		bareDir := t.TempDir()
 		bareSubdir := filepath.Join(bareDir, ".bare")
@@ -5093,8 +5177,8 @@ windows = [{name = "main", layout = {name = "editor", command = "nano"}}]
 			t.Fatal(err)
 		}
 
-		// .pop.toml in bare repo root
-		popTomlPath := filepath.Join(bareDir, ".pop.toml")
+		// .pop/config.toml in bare repo root
+		popTomlPath := popConfigPath(t, bareDir)
 		if err := os.WriteFile(popTomlPath, []byte(`
 [[workbenches]]
 name = "bare-template"
@@ -5130,7 +5214,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 					if path == configPath {
 						return os.ReadFile(configPath)
 					}
-					// .pop.toml is in bareDir, not worktreeDir
+					// .pop/config.toml is in bareDir, not worktreeDir
 					if path == popTomlPath {
 						return os.ReadFile(popTomlPath)
 					}
@@ -5145,7 +5229,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 			},
 		}
 
-		// Resolve from worktree path - should find .pop.toml in bare repo root
+		// Resolve from worktree path - should find .pop/config.toml in bare repo root
 		templates, warnings := cfg.ResolveWorkbenchesWith(d, worktreeDir)
 		if len(warnings) != 0 {
 			t.Errorf("expected no warnings, got %v", warnings)

@@ -36,7 +36,7 @@ var configKeysCmd = &cobra.Command{
 
 pop has three config surfaces:
   global    the user's central config.toml (~/.config/pop/config.toml)
-  pop-toml  the committed repo-root .pop.toml (shared, checked in)
+  pop-toml  the committed repo-root .pop/config.toml (shared, checked in)
   repo      a [repo."<path>"] override block in the global config.toml
 
 With no arguments, top-level keys for all three surfaces are printed. Restrict
@@ -49,7 +49,7 @@ placeholder <name> is optional — write it or omit it, both resolve.
 
 Examples:
   pop config keys                      # top-level keys, all surfaces
-  pop config keys --scope pop-toml     # top-level keys of .pop.toml
+  pop config keys --scope pop-toml     # top-level keys of .pop/config.toml
   pop config keys worktree             # keys inside the [worktree] table
   pop config keys repo.workbenches     # drill two levels: [repo] then workbenches
   pop config keys effort.heavy         # keys of an effort tier ([effort.<agent>.heavy])

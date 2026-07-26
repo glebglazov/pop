@@ -250,7 +250,7 @@ func statusProjectLabel(project string, worktreeReady bool, configError string) 
 		label += " [worktree-ready]"
 	}
 	if configError != "" {
-		label += " [.pop.toml error: " + configError + "]"
+		label += " [.pop/config.toml error: " + configError + "]"
 	}
 	return label
 }

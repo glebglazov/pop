@@ -88,8 +88,8 @@ func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*p
 	// A renamed execution key (queue_base/execution_base → trunk) is a
 	// config-global blocking finding (ADR 0054). The queue consumes execution
 	// config, so surface it as fatal up front: ResolveRepoConfig returns the
-	// finding (a config.Finding) before touching .pop.toml, while a per-checkout
-	// .pop.toml problem comes back as a plain error and is still degraded past in
+	// finding (a config.Finding) before touching .pop/config.toml, while a per-checkout
+	// .pop/config.toml problem comes back as a plain error and is still degraded past in
 	// the scan loop below. This keeps the migration tripwire loud for pop queue /
 	// pop tasks drain and the Work dashboard.
 	if cfg != nil && len(scans) > 0 {
@@ -425,7 +425,7 @@ func repoName(scans []projectScan, rep *projectScan) string {
 }
 
 // resolveRepoConfigFor resolves the effective RepoConfig for a checkout, merging
-// global [repo."<path>"] overrides over repo-root .pop.toml. trunk is honored
+// global [repo."<path>"] overrides over repo-root .pop/config.toml. trunk is honored
 // only for the keyed checkout path.
 func resolveRepoConfigFor(d *Deps, cfg *config.Config, checkoutPath string) (config.RepoConfig, error) {
 	pd := d.Project

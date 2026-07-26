@@ -133,8 +133,8 @@ Available environment variables: `POP_WORKTREE_PATH`, `POP_WORKTREE_NAME`, `POP_
 ## Session templates
 
 A session template is a named blueprint for a tmux session's windows and their
-pane geometry. Define them in `~/.config/pop/config.toml` (a repo `.pop.toml` or a
-global `[repo."<path>"]` block can add or override templates per checkout). Apply
+pane geometry. Define them in `~/.config/pop/config.toml` (a repo `.pop/config.toml`
+or a global `[repo."<path>"]` block can add or override templates per checkout). Apply
 one with [`pop layout apply <name>`](#pop-layout).
 
 A window's `layout` is a tree. A leaf runs a `command`; a container splits its

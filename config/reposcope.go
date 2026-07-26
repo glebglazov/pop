@@ -10,15 +10,15 @@ import (
 // This file is the shared repo-scope source enumerator (ADR-0122, folding in the
 // architecture-review triplication of ADR-0083 repo-scope resolution). One
 // enumerator maps a checkout to its ordered repo-scope sources — the
-// identity-matched [repo."<path>"] override, the in-tree .pop.toml anchor(s),
+// identity-matched [repo."<path>"] override, the in-tree .pop/config.toml anchor(s),
 // and the runtime entries where legal — doing the repo-identity walk,
-// canonicalization, and .pop.toml reads once (caching each anchor by its
+// canonicalization, and .pop/config.toml reads once (caching each anchor by its
 // canonical path, the read-once guard). ResolveRepoConfig, ResolveWorkbenchesWith,
 // and ResolvePreferredWorkbench consume it instead of each hand-walking identity
-// and re-reading .pop.toml.
+// and re-reading .pop/config.toml.
 //
 // Enumeration is lazy (ADR-0054): it happens at query time per checkout, a
-// source is read only when a resolver asks for it, and a malformed .pop.toml
+// source is read only when a resolver asks for it, and a malformed .pop/config.toml
 // degrades to the zero config exactly as before. Walker merges stay same-type:
 // the enumerator hands over the embedded RepoScopeConfig, never the outer
 // RepoOverrideConfig/RepoConfig — the [repo]-only trunk key stays caller-side
@@ -42,7 +42,7 @@ type repoScopeEnumerator struct {
 	overrideKeyCanon string
 	overrideExact    bool
 
-	// popCache memoizes .pop.toml reads by canonical anchor path (read-once guard).
+	// popCache memoizes .pop/config.toml reads by canonical anchor path (read-once guard).
 	popCache map[string]popTOMLRead
 }
 
@@ -53,7 +53,7 @@ type popTOMLRead struct {
 
 // newRepoScope builds the enumerator for checkoutPath, doing the repo-identity
 // walk and the [repo."<path>"] match up front (both cheap, filesystem-stat only)
-// and deferring the .pop.toml and runtime reads until a resolver asks for them.
+// and deferring the .pop/config.toml and runtime reads until a resolver asks for them.
 func (c *Config) newRepoScope(d *Deps, checkoutPath string) *repoScopeEnumerator {
 	e := &repoScopeEnumerator{
 		d:            d,
@@ -87,7 +87,7 @@ func (e *repoScopeEnumerator) matchOverride() {
 	}
 }
 
-// popTOML reads the committed .pop.toml at anchor, caching by canonical path so
+// popTOML reads the committed .pop/config.toml at anchor, caching by canonical path so
 // an anchor shared by several layers (or by two resolvers) is read exactly once.
 func (e *repoScopeEnumerator) popTOML(anchor string) (RepoConfig, error) {
 	key := canonicalPath(e.d, anchor)
@@ -99,22 +99,22 @@ func (e *repoScopeEnumerator) popTOML(anchor string) (RepoConfig, error) {
 	return cfg, err
 }
 
-// popPreferred reads preferred_workbench from the committed .pop.toml at anchor,
+// popPreferred reads preferred_workbench from the committed .pop/config.toml at anchor,
 // degrading a malformed file to "" with a debug log (a broken in-tree file must
 // not block getting into a session).
 func (e *repoScopeEnumerator) popPreferred(anchor string) string {
 	cfg, err := e.popTOML(anchor)
 	if err != nil {
-		debug.Error("config: read .pop.toml preferred workbench at %s: %v", anchor, err)
+		debug.Error("config: read .pop/config.toml preferred workbench at %s: %v", anchor, err)
 		return ""
 	}
 	return cfg.PreferredWorkbench
 }
 
-// inheritedAnchor returns the checkout whose committed .pop.toml supplies the
+// inheritedAnchor returns the checkout whose committed .pop/config.toml supplies the
 // inherited (layer-4) repo-scope value: the Trunk worktree when the resolver
 // reports one, otherwise the repository identity root — where a bare repo's
-// shared .pop.toml lives (ADR-0083). Reuses the identity computed once.
+// shared .pop/config.toml lives (ADR-0083). Reuses the identity computed once.
 func (e *repoScopeEnumerator) inheritedAnchor() string {
 	if e.d != nil && e.d.Trunk != nil {
 		if trunkPath, ok := e.d.Trunk(e.checkoutPath); ok && trunkPath != "" {
@@ -124,7 +124,7 @@ func (e *repoScopeEnumerator) inheritedAnchor() string {
 	return e.identity
 }
 
-// popScopeAnchors returns the in-tree .pop.toml anchors for the checkout in
+// popScopeAnchors returns the in-tree .pop/config.toml anchors for the checkout in
 // merge order (lowest precedence first) under ADR-0083's two-anchor law: the
 // trunk anchor (inherited — the Trunk worktree, or the repository-identity root
 // for a bare repo) then this worktree, so the worktree's own committed values
@@ -139,11 +139,11 @@ func (e *repoScopeEnumerator) popScopeAnchors() []string {
 }
 
 // resolveRepoConfig returns the effective RepoConfig for the checkout: the
-// committed .pop.toml (resolved worktree-first then the trunk anchor, presence
+// committed .pop/config.toml (resolved worktree-first then the trunk anchor, presence
 // deciding — ADR-0083) with the identity-matched [repo."<path>"] override
 // walker-merged on top (later ladder source wins). The [repo]-only trunk key
 // stays caller-side — per-checkout, applied only when the override's key path
-// exactly matches this checkout. A missing .pop.toml is not an error; a
+// exactly matches this checkout. A missing .pop/config.toml is not an error; a
 // malformed one degrades to the zero config with its error returned.
 func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 	var result RepoConfig
@@ -182,14 +182,14 @@ type preferredSource struct {
 }
 
 // preferredSources returns the ordered preferred_workbench chain for the
-// checkout (ADR-0083). The .pop.toml anchors are read here (cached), so the
+// checkout (ADR-0083). The .pop/config.toml anchors are read here (cached), so the
 // consider-chain iterates a flat list instead of hand-walking anchors; the
 // runtime layers stay descriptors read in the chain so their three-valued
 // semantics and per-layer debug logs are preserved.
 //
 //	1  config.toml [repo."<path>"]        hand-authored, central, repo-specific
-//	3  ./.pop.toml                        hand-authored, in-tree, this worktree
-//	4  <trunk-or-id-root>/.pop.toml       hand-authored, in-tree, inherited
+//	3  ./.pop/config.toml                        hand-authored, in-tree, this worktree
+//	4  <trunk-or-id-root>/.pop/config.toml       hand-authored, in-tree, inherited
 //	5  config.runtime.toml[<wt-path>]     runtime, this worktree
 //	6  config.runtime.toml[<trunk-path>]  runtime, inherited from the Trunk
 //

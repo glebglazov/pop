@@ -21,7 +21,7 @@ func TestBuildRunViewConfigErrorIsScanError(t *testing.T) {
 		{
 			Project:            "broken",
 			Reason:             "no ready set",
-			ProjectConfigError: "/repo/broken/.pop.toml: expected value",
+			ProjectConfigError: "/repo/broken/.pop/config.toml: expected value",
 		},
 	})
 	if err != nil {
@@ -33,8 +33,8 @@ func TestBuildRunViewConfigErrorIsScanError(t *testing.T) {
 	if view.IdleCount != 0 {
 		t.Fatalf("IdleCount = %d, want 0 for config error project", view.IdleCount)
 	}
-	if got := view.ScanErrors["broken"]; !strings.Contains(got, ".pop.toml") {
-		t.Fatalf("ScanErrors[broken] = %q, want .pop.toml parse error", got)
+	if got := view.ScanErrors["broken"]; !strings.Contains(got, ".pop/config.toml") {
+		t.Fatalf("ScanErrors[broken] = %q, want .pop/config.toml parse error", got)
 	}
 }
 

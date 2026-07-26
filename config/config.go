@@ -673,11 +673,11 @@ func (c *Config) ProjectEntries() ([]ProjectEntry, error) {
 }
 
 // RepoScopeConfig is the single shared repo-scope key set (ADR-0083). Every key
-// here is accepted at BOTH repo-scope loci: the committed repo-root .pop.toml
+// here is accepted at BOTH repo-scope loci: the committed repo-root .pop/config.toml
 // and the user's central global [repo."<path>"] override block. Adding a
 // repo-scope key here makes both surfaces accept it without touching two structs.
 // trunk is the sole exception — it is per-checkout machine topology, never valid
-// in committed .pop.toml — so it lives on the individual structs, not here.
+// in committed .pop/config.toml — so it lives on the individual structs, not here.
 type RepoScopeConfig struct {
 	// Workbenches are repo-scope session blueprints (canonical key). The walker
 	// unions them by name across the repo-scope ladder (ADR-0122), so a
@@ -686,27 +686,27 @@ type RepoScopeConfig struct {
 	// PreferredWorkbench names the repo-default Workbench that auto-applies when
 	// a session is born for any checkout of this repo (ADR-0078). It is keyed by
 	// repository identity, not the exact checkout path, so it is a coarse default
-	// shared by every worktree of the repo. Readable from committed .pop.toml as
+	// shared by every worktree of the repo. Readable from committed .pop/config.toml as
 	// well as the global override; the override wins for the same key (ADR-0083).
 	PreferredWorkbench string `toml:"preferred_workbench" desc:"Repo-default Workbench that auto-applies to new sessions of this repo."`
 }
 
-// RepoConfig is the repo-root .pop.toml surface. It is deliberately separate
-// from Config: global config.toml registers projects, while .pop.toml only
+// RepoConfig is the repo-root .pop/config.toml surface. It is deliberately separate
+// from Config: global config.toml registers projects, while .pop/config.toml only
 // describes behavior for an already-registered project. It carries the shared
 // repo-scope key set plus a non-decoded Trunk slot (populated only by resolution
-// from a global override, never parsed from .pop.toml).
+// from a global override, never parsed from .pop/config.toml).
 type RepoConfig struct {
 	RepoScopeConfig
 	// Trunk marks a specific checkout as the Trunk worktree — the repository's
 	// fork base for managed worktrees. Meaningful only in a [repo."<path>"]
 	// global override block keyed to that checkout; a bare repo must declare
-	// trunk = true to enable managed-worktree provisioning. Repo-local .pop.toml
+	// trunk = true to enable managed-worktree provisioning. Repo-local .pop/config.toml
 	// cannot name a machine-specific trunk, so this is never decoded (toml:"-").
 	Trunk bool `toml:"-"`
 
 	// Findings holds non-fatal scope-legality problems collected while loading
-	// this .pop.toml (ADR-0054, ADR-0083): top-level keys that are not repo-scope
+	// this .pop/config.toml (ADR-0054, ADR-0083): top-level keys that are not repo-scope
 	// keys (global/machine-only settings, or the [repo]-only trunk) are ignored
 	// but surfaced here so a command can render them in the picker warning banner.
 	Findings []Finding `toml:"-"`
@@ -722,20 +722,22 @@ type RepoOverrideConfig struct {
 	Trunk *bool `toml:"trunk" desc:"Mark this exact checkout as the repo's Trunk (fork base for managed worktrees)."`
 }
 
-// LoadRepoConfig reads repo-root .pop.toml. A missing file is not an error and
+// LoadRepoConfig reads repo-root .pop/config.toml. A missing file is not an error and
 // resolves to the zero config. Malformed TOML is returned to the caller so it
 // can be reported while degrading behavior to defaults.
 func LoadRepoConfig(repoRoot string) (RepoConfig, error) {
 	return LoadRepoConfigWith(defaultDeps, repoRoot)
 }
 
-// LoadRepoConfigWith reads repo-root .pop.toml using injected dependencies.
+// LoadRepoConfigWith reads repo-root .pop/config.toml using injected dependencies.
 func LoadRepoConfigWith(d *Deps, repoRoot string) (RepoConfig, error) {
-	path := filepath.Join(repoRoot, ".pop.toml")
+	path := filepath.Join(repoRoot, ".pop", "config.toml")
 	data, err := d.FS.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return RepoConfig{}, nil
+			// No committed config at this anchor. Still warn about a legacy flat
+			// file so a teammate's config never silently vanishes (ADR-0137).
+			return RepoConfig{Findings: legacyPopTOMLFindings(d, repoRoot)}, nil
 		}
 		return RepoConfig{}, err
 	}
@@ -748,10 +750,27 @@ func LoadRepoConfigWith(d *Deps, repoRoot string) (RepoConfig, error) {
 		return RepoConfig{}, err
 	}
 	// Scope-legality (ADR-0083): only shared repo-scope keys are honored in
-	// .pop.toml. Global/machine-only keys (and the [repo]-only trunk) are ignored
+	// .pop/config.toml. Global/machine-only keys (and the [repo]-only trunk) are ignored
 	// but surfaced as non-fatal findings so the rest of the file still loads.
 	cfg.Findings = popTOMLScopeFindings(path, md)
+	cfg.Findings = append(cfg.Findings, legacyPopTOMLFindings(d, repoRoot)...)
 	return cfg, nil
+}
+
+// legacyPopTOMLFindings warns when a legacy flat .pop.toml sits at repoRoot.
+// That file is no longer read (ADR-0137): the committed in-tree home is now
+// .pop/config.toml. This is warn-and-ignore — the flat file's contents are
+// never parsed, but its mere presence draws a one-line finding pointing at the
+// new path so committed config never silently vanishes.
+func legacyPopTOMLFindings(d *Deps, repoRoot string) []Finding {
+	legacy := filepath.Join(repoRoot, ".pop.toml")
+	if _, err := d.FS.Stat(legacy); err != nil {
+		return nil
+	}
+	return []Finding{{
+		Path:    "deprecated.pop_toml",
+		Message: fmt.Sprintf("%s is ignored; move repo-scope config to .pop/config.toml (ADR-0137)", legacy),
+	}}
 }
 
 // canonicalPath expands ~ and resolves symlinks, returning a clean absolute path.
@@ -786,16 +805,16 @@ func repoIdentity(d *Deps, path string) string {
 
 // ResolveRepoConfig returns the effective RepoConfig for checkoutPath by merging:
 //
-//	global [repo."<path>"] override → worktree .pop.toml → trunk-anchor .pop.toml → default
+//	global [repo."<path>"] override → worktree .pop/config.toml → trunk-anchor .pop/config.toml → default
 //
-// The committed .pop.toml is read at two anchors (ADR-0083): this worktree
+// The committed .pop/config.toml is read at two anchors (ADR-0083): this worktree
 // first, then the trunk anchor (the Trunk worktree, or the repository-identity
 // root for a bare repo), presence deciding. Fields are merged individually; a
 // nil pointer in the override means "not set" and the next layer wins. trunk
 // exists only in global override blocks and is applied only when the override's
 // key path exactly matches checkoutPath (per-checkout semantics).
 //
-// A missing .pop.toml is not an error. A malformed .pop.toml degrades to the
+// A missing .pop/config.toml is not an error. A malformed .pop/config.toml degrades to the
 // zero config (the error is returned so callers may surface a warning).
 func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, error) {
 	// A renamed execution key (queue_base/execution_base → trunk) is recorded at
@@ -803,22 +822,22 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 	// is the execution-config consumption point, so it surfaces that finding as
 	// its error (ADR 0054): consuming commands treat it as fatal, the migration
 	// tripwire stays loud, while a command that never resolves repo config (the
-	// project dashboard) is unaffected. Checked before touching .pop.toml so the
+	// project dashboard) is unaffected. Checked before touching .pop/config.toml so the
 	// fatal config-global finding always wins over a per-checkout problem.
 	if err := c.blockingFindingFor("repo"); err != nil {
 		return RepoConfig{}, err
 	}
 	// The shared enumerator does the identity walk, the [repo."<path>"] match, and
-	// the two-anchor .pop.toml reads (worktree then trunk); the walker merges the
+	// the two-anchor .pop/config.toml reads (worktree then trunk); the walker merges the
 	// shared RepoScopeConfig down the ladder (ADR-0083, ADR-0122). trunk stays
 	// caller-side inside resolveRepoConfig with its exact-checkout-path condition.
 	return c.newRepoScope(d, checkoutPath).resolveRepoConfig()
 }
 
 // ResolveWorkbenchesWith returns the union of Workbenches from all homes (global
-// config, committed .pop.toml, and [repo."<path>"]), resolved with
-// most-specific-wins precedence: [repo."<path>"] > worktree .pop.toml >
-// trunk-anchor .pop.toml > global library. The committed .pop.toml is unioned at
+// config, committed .pop/config.toml, and [repo."<path>"]), resolved with
+// most-specific-wins precedence: [repo."<path>"] > worktree .pop/config.toml >
+// trunk-anchor .pop/config.toml > global library. The committed .pop/config.toml is unioned at
 // two anchors (ADR-0083): this worktree outranks the inherited trunk anchor (the
 // Trunk worktree, or the repository-identity root for a bare repo). Name
 // collisions emit warnings.
@@ -853,17 +872,17 @@ func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workben
 		unionInto(RepoScopeConfig{Workbenches: c.Workbenches}, "global config", nil)
 	}
 
-	// Committed .pop.toml, resolved worktree-first then the trunk anchor (ADR-0083
+	// Committed .pop/config.toml, resolved worktree-first then the trunk anchor (ADR-0083
 	// two-anchor law): the trunk anchor unions first (lower precedence) and the
-	// worktree's own .pop.toml last, so its templates outrank the inherited ones.
+	// worktree's own .pop/config.toml last, so its templates outrank the inherited ones.
 	// The read-once guard in popScopeAnchors collapses to a single union (no
 	// double-warn) when the checkout is itself the trunk anchor.
 	for _, anchor := range e.popScopeAnchors() {
 		popTOML, _ := e.popTOML(anchor)
-		unionInto(RepoScopeConfig{Workbenches: popTOML.Workbenches}, ".pop.toml",
+		unionInto(RepoScopeConfig{Workbenches: popTOML.Workbenches}, ".pop/config.toml",
 			func(name, prior string) string {
 				return fmt.Sprintf(
-					"session template %q defined in both %s and .pop.toml; using .pop.toml",
+					"session template %q defined in both %s and .pop/config.toml; using .pop/config.toml",
 					name, prior,
 				)
 			})
@@ -993,25 +1012,25 @@ func (c *Config) WorkbenchOrder() []string {
 // non-fatal warnings the caller should surface. Resolution follows the
 // user-first precedence law (ADR-0083): hand-authored config beats
 // runtime-generated config at any scope, and the user's central config.toml
-// beats the repo's in-tree .pop.toml. Highest → lowest, the layers that carry
+// beats the repo's in-tree .pop/config.toml. Highest → lowest, the layers that carry
 // this key:
 //
 //	1  config.toml [repo."<path>"]        user central · repo-specific
 //	   config.toml (global keys)          n/a for this key (no global home)
-//	3  ./.pop.toml                        repo in-tree, this worktree
-//	4  <trunk>/.pop.toml (→ id-root)      repo in-tree, inherited from the Trunk
+//	3  ./.pop/config.toml                        repo in-tree, this worktree
+//	4  <trunk>/.pop/config.toml (→ id-root)      repo in-tree, inherited from the Trunk
 //	5  config.runtime.toml[<wt-path>]     runtime, this worktree (ctrl+w)
 //	6  config.runtime.toml[<trunk-path>]  runtime, inherited from the Trunk
 //	   → none
 //
 // Everything hand-authored (1–4) beats everything runtime (5–6): a repo default
-// or committed .pop.toml therefore wins over a worktree runtime entry (the
+// or committed .pop/config.toml therefore wins over a worktree runtime entry (the
 // reverse of the shipped scope-first ordering), and runtime is now a gap-filler
-// applying only where nothing hand-authored sets the key. The in-tree .pop.toml
+// applying only where nothing hand-authored sets the key. The in-tree .pop/config.toml
 // is read at two anchors — this worktree (layer 3) and the Trunk worktree, the
 // trunk read falling back to the Repository identity root for a bare repo (layer
 // 4) — with presence deciding which supplies the value: a worktree with its own
-// .pop.toml overrides the inherited trunk one, and a worktree without inherits
+// .pop/config.toml overrides the inherited trunk one, and a worktree without inherits
 // trunk's. Layer 4 reuses ADR-0078's Deps.Trunk resolver and its this-is-trunk
 // read-once guard (skipped when the inherited anchor is this very checkout, so a
 // stale name never double-warns).
@@ -1780,7 +1799,7 @@ func repoRenameFindings(path string, md toml.MetaData) []Finding {
 		findings = append(findings, Finding{Path: "repo", Message: msg})
 	}
 	for _, key := range md.Undecoded() {
-		// .pop.toml-level / top-level (len==1) renames
+		// .pop/config.toml-level / top-level (len==1) renames
 		if len(key) == 1 {
 			switch key[0] {
 			case "worktree_ready":
@@ -1806,12 +1825,12 @@ func repoRenameFindings(path string, md toml.MetaData) []Finding {
 	return findings
 }
 
-// validateRepoConfigMetadata keeps the repo-local .pop.toml path hard-failing on
+// validateRepoConfigMetadata keeps the repo-local .pop/config.toml path hard-failing on
 // the same migration tripwires (LoadRepoConfig has no Config to carry findings
 // on, and a stale key there still surfaces fatally via ResolveRepoConfig's
 // returned error). It returns a plain error — deliberately NOT a Finding — so a
 // caller iterating checkouts (the queue's representative resolver) can tell a
-// fatal config-global migration finding apart from a per-checkout .pop.toml
+// fatal config-global migration finding apart from a per-checkout .pop/config.toml
 // problem it should degrade past.
 func validateRepoConfigMetadata(path string, md toml.MetaData) error {
 	if findings := repoRenameFindings(path, md); len(findings) > 0 {
@@ -1973,7 +1992,7 @@ func queueAgentsWarnings(path string, md toml.MetaData) []Finding {
 
 // repoScopeLegalKeys returns the set of TOML keys that are legal at repo scope,
 // derived by reflection from the shared RepoScopeConfig schema (ADR-0083). It is
-// the single source of truth for both repo-scope loci — the committed .pop.toml
+// the single source of truth for both repo-scope loci — the committed .pop/config.toml
 // and the global [repo."<path>"] override — so adding a repo-scope key to that
 // struct makes both surfaces accept it with no change to validation code. trunk
 // is deliberately absent (it is [repo]-only, not shared).
@@ -1989,7 +2008,7 @@ func repoScopeLegalKeys() map[string]bool {
 	return legal
 }
 
-// popTOMLScopeFindings enforces scope-legality for a committed .pop.toml
+// popTOMLScopeFindings enforces scope-legality for a committed .pop/config.toml
 // (ADR-0083, ADR-0054): only shared repo-scope keys (repoScopeLegalKeys) are
 // honored there. Any global/machine-only top-level key (projects, queue,
 // pane_monitoring, dashboard/daemon knobs, …) and the [repo]-only trunk key are
@@ -2011,7 +2030,7 @@ func popTOMLScopeFindings(path string, md toml.MetaData) []Finding {
 			continue
 		}
 		seen[name] = true
-		msg := fmt.Sprintf("%s: %q is not valid in .pop.toml and was ignored (only repo-scope keys are accepted)", path, name)
+		msg := fmt.Sprintf("%s: %q is not valid in .pop/config.toml and was ignored (only repo-scope keys are accepted)", path, name)
 		if name == "trunk" {
 			msg = fmt.Sprintf("%s: trunk is only valid in a global [repo.%q] override block and was ignored", path, "<path>")
 		}
@@ -2024,7 +2043,7 @@ func popTOMLScopeFindings(path string, md toml.MetaData) []Finding {
 // [repo."<path>"] blocks. Only the shared repo-scope key set (plus the
 // [repo]-only trunk) is valid there; any other key is silently degraded but
 // surfaced as a finding. The valid set is derived from the shared schema
-// (repoScopeLegalKeys), so it stays in sync with .pop.toml scope-legality.
+// (repoScopeLegalKeys), so it stays in sync with .pop/config.toml scope-legality.
 func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 	validRepoKeys := repoScopeLegalKeys()
 	validRepoKeys["trunk"] = true // [repo]-only machine topology, not shared

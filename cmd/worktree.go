@@ -82,8 +82,8 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 				Exit:    cc.Exit,
 			})
 		}
-		// Surface non-fatal .pop.toml scope-legality findings (ADR-0083): a
-		// global/machine-only or [repo]-only key committed to .pop.toml is ignored
+		// Surface non-fatal .pop/config.toml scope-legality findings (ADR-0083): a
+		// global/machine-only or [repo]-only key committed to .pop/config.toml is ignored
 		// but warned about here. The error is deliberately dropped — findings are
 		// carried regardless and this flow degrades rather than aborts (ADR-0054).
 		if rc, _ := cfg.ResolveRepoConfig(config.DefaultDeps(), ctx.GitRoot); len(rc.Findings) > 0 {

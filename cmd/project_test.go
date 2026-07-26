@@ -1429,7 +1429,7 @@ func TestRunProject_UnparseableTOMLAborts(t *testing.T) {
 
 // projectDepsForWorkbenchPrompt builds a ProjectDeps with [workbench]
 // pick_on_create = true and a fixed resolved-Workbench set, so the create-path
-// prompt can be exercised without touching .pop.toml or the global library.
+// prompt can be exercised without touching .pop/config.toml or the global library.
 func projectDepsForWorkbenchPrompt(t *testing.T, workbenches []config.Workbench) *ProjectDeps {
 	t.Helper()
 	d := testProjectDeps(t)

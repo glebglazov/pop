@@ -25,7 +25,7 @@ func TestScopeKeyDocsPopTOML(t *testing.T) {
 		t.Fatal("ScopePopTOML reported unknown")
 	}
 	got := keySet(docs)
-	// .pop.toml accepts only the shared repo-scope keys — trunk is toml:"-" here
+	// .pop/config.toml accepts only the shared repo-scope keys — trunk is toml:"-" here
 	// and must never appear, and no global-only key may leak in.
 	want := map[string]bool{"workbenches": true, "preferred_workbench": true}
 	if len(got) != len(want) {

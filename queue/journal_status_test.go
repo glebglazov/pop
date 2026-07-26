@@ -68,7 +68,7 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 		{
 			Project:            "idle",
 			Reason:             "no ready set",
-			ProjectConfigError: "/repo/idle/.pop.toml: expected value",
+			ProjectConfigError: "/repo/idle/.pop/config.toml: expected value",
 		},
 	})
 	if err != nil {
@@ -86,7 +86,7 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 		"Summary:",
 		"Queue: 1 running, 1 queued",
 		"Scan errors:",
-		"idle: /repo/idle/.pop.toml: expected value",
+		"idle: /repo/idle/.pop/config.toml: expected value",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status output missing %q:\n%s", want, text)

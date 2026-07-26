@@ -161,7 +161,7 @@ The middle layer in pop's three-layer config merge: `$XDG_DATA_HOME/pop/config.r
 _Avoid_: runtime settings, persisted opt-out json, integrations.toml
 
 **Config merge order**:
-How pop resolves effective configuration, by an ownership/modality-first law: (1) hand-authored (user-written) config always beats runtime-generated config at any scope; (2) the user's central `config.toml` beats a repo's in-tree `.pop.toml`. Ladder, highest→lowest: `config.toml` `[repo."<path>"]` → `config.toml` global → this worktree's `.pop.toml` → the **Trunk worktree**'s `.pop.toml` (→ **Repository identity** root fallback) → runtime (`config.runtime.toml`: worktree, then trunk, then global integrations) → embedded default. Runtime is a gap-filler: to override, remove or edit the hand-authored value. Integrations (`config.toml` beats runtime skills) is preserved as the tier-1-over-tier-3 case.
+How pop resolves effective configuration, by an ownership/modality-first law: (1) hand-authored (user-written) config always beats runtime-generated config at any scope; (2) the user's central `config.toml` beats a repo's in-tree `.pop/config.toml`. Ladder, highest→lowest: `config.toml` `[repo."<path>"]` → `config.toml` global → this worktree's `.pop/config.toml` → the **Trunk worktree**'s `.pop/config.toml` (→ **Repository identity** root fallback) → runtime (`config.runtime.toml`: worktree, then trunk, then global integrations) → embedded default. Runtime is a gap-filler: to override, remove or edit the hand-authored value. Integrations (`config.toml` beats runtime skills) is preserved as the tier-1-over-tier-3 case.
 _Avoid_: three-layer integrate-only merge
 
 **Component opt-out**:
@@ -277,7 +277,7 @@ _Avoid_: Hook, plugin (when you mean the whole setup), worktree-set integration,
 ### Workbench
 
 **Workbench**:
-A named blueprint for the shape of a whole tmux **Session** — its named windows and, within each window, a **Layout** (an explicit weighted split tree of **Pane spec**s). Defined in global config, a repo's `.pop.toml`, or a global `[repo."<path>"]` block; resolved per checkout as a most-specific-wins union by name. Instantiated into a live **Session** by `pop workbench apply` (alias `wb`). The whole-session thing, one tier above a **Layout**. Formerly called "Session template".
+A named blueprint for the shape of a whole tmux **Session** — its named windows and, within each window, a **Layout** (an explicit weighted split tree of **Pane spec**s). Defined in global config, a repo's `.pop/config.toml`, or a global `[repo."<path>"]` block; resolved per checkout as a most-specific-wins union by name. Instantiated into a live **Session** by `pop workbench apply` (alias `wb`). The whole-session thing, one tier above a **Layout**. Formerly called "Session template".
 _Avoid_: Session template, layout (that is the per-window tier), workspace, desk, session preset
 
 **Layout**:
@@ -289,7 +289,7 @@ A leaf node in a **Workbench** window's **Layout**: a declaration of a pane to c
 _Avoid_: Pane (the live tracked pane), pane template, pane definition
 
 **Preferred workbench**:
-A personal, per-checkout choice of which **Workbench** auto-applies when a session is born for that checkout, skipping the create-time prompt. Stored per-worktree in **Integration runtime config** (`[workbench.preferred]`, path-keyed; set via the picker's `ctrl+w` or `pop workbench prefer`), with a coarser per-repo `preferred_workbench` default on a global `[repo."<path>"]` block. Never in `.pop.toml` — it is personal taste, not committed team config. Resolves finest-first: this worktree's entry → the **Trunk worktree**'s entry (inheritance, dynamic at open) → the repo default → none (then `pick_on_create` decides prompt vs flat). Three-valued per worktree: unset (inherit), a name, or explicit none (flat/prompt here, overriding any inherited default). A resolved value that auto-applies suppresses the create-time prompt regardless of `pick_on_create`; a stored name that no longer resolves is skipped with a warning and resolution continues.
+A personal, per-checkout choice of which **Workbench** auto-applies when a session is born for that checkout, skipping the create-time prompt. Stored per-worktree in **Integration runtime config** (`[workbench.preferred]`, path-keyed; set via the picker's `ctrl+w` or `pop workbench prefer`), with a coarser per-repo `preferred_workbench` default on a global `[repo."<path>"]` block. Never in `.pop/config.toml` — it is personal taste, not committed team config. Resolves finest-first: this worktree's entry → the **Trunk worktree**'s entry (inheritance, dynamic at open) → the repo default → none (then `pick_on_create` decides prompt vs flat). Three-valued per worktree: unset (inherit), a name, or explicit none (flat/prompt here, overriding any inherited default). A resolved value that auto-applies suppresses the create-time prompt regardless of `pick_on_create`; a stored name that no longer resolves is skipped with a warning and resolution continues.
 _Avoid_: preferred layout, default workbench, preferred worktree, default worktree
 
 **Workbench order**:
@@ -935,7 +935,7 @@ The live stdout of `pop queue run` — an operator-facing event stream, not a re
 _Avoid_: Per-tick status dump, queue log replay
 
 **Queue run baseline**:
-The one-time inventory printed when `pop queue run` starts. It opens with a **Queue status summary** — aggregate queue work (running, queued, blocked) — then lists every scheduling-relevant bucket the supervisor is watching: running drains, queued ready sets, blocked state (parked sets, crash backoffs, agent cooldowns), and scan errors for in-scope projects that failed to scan or have a broken repo-root `.pop.toml` — in the same human-readable shape as `pop queue status`. Projects outside **Queue scope** and in-scope projects with no ready work and no active drain are not listed individually; they collapse into a single count line (e.g. "12 other projects: no ready work").
+The one-time inventory printed when `pop queue run` starts. It opens with a **Queue status summary** — aggregate queue work (running, queued, blocked) — then lists every scheduling-relevant bucket the supervisor is watching: running drains, queued ready sets, blocked state (parked sets, crash backoffs, agent cooldowns), and scan errors for in-scope projects that failed to scan or have a broken repo-root `.pop/config.toml` — in the same human-readable shape as `pop queue status`. Projects outside **Queue scope** and in-scope projects with no ready work and no active drain are not listed individually; they collapse into a single count line (e.g. "12 other projects: no ready work").
 _Avoid_: Per-project idle listing, repeating status table
 
 **Queue status summary**:
@@ -1015,11 +1015,11 @@ _Avoid_: Upgrade nag, degraded status, update row
 ### Configuration
 
 **Repo override**:
-`.pop.toml` (flat, in the repo) and `[repo."<path>"]` (central, in global `config.toml`) decode ONE shared repo-scope key schema: authoring a repo-scoped setting in either place is equivalent, and adding a new repo key makes both accept it. Per the **Config merge order**, the user's central `config.toml` (including its `[repo]` blocks) outranks the committed `.pop.toml`. Repo scope is a curated set of genuinely repo-specific keys (`workbenches`, `preferred_workbench`), never a mirror of global config — `projects`, `queue`, and daemon knobs stay global-only. `trunk` is the one central-only exception (per-checkout machine topology, never in `.pop.toml`).
+`.pop/config.toml` (in the repo's `.pop/` dir) and `[repo."<path>"]` (central, in global `config.toml`) decode ONE shared repo-scope key schema: authoring a repo-scoped setting in either place is equivalent, and adding a new repo key makes both accept it. Per the **Config merge order**, the user's central `config.toml` (including its `[repo]` blocks) outranks the committed `.pop/config.toml`. Repo scope is a curated set of genuinely repo-specific keys (`workbenches`, `preferred_workbench`), never a mirror of global config — `projects`, `queue`, and daemon knobs stay global-only. `trunk` is the one central-only exception (per-checkout machine topology, never in `.pop/config.toml`).
 _Avoid_: project entry override, glob-scoped behaviour
 
 **In-tree config anchors**:
-How pop finds repo-scope in-tree config (`.pop.toml`): at two anchors — this worktree and the **Trunk worktree** (falling back to the **Repository identity** root for a bare repo). Presence decides: a worktree with its own `.pop.toml` overrides the inherited trunk one; a worktree without inherits trunk's, dynamically. Reuses the trunk resolver of **Preferred workbench** inheritance.
+How pop finds repo-scope in-tree config (`.pop/config.toml`): at two anchors — this worktree and the **Trunk worktree** (falling back to the **Repository identity** root for a bare repo). Presence decides: a worktree with its own `.pop/config.toml` overrides the inherited trunk one; a worktree without inherits trunk's, dynamically. Reuses the trunk resolver of **Preferred workbench** inheritance.
 _Avoid_: pop.toml inheritance, config walk, trunk snapshot
 
 **Trunk worktree**:
@@ -1035,11 +1035,11 @@ The one thing a command must produce to be worth running — e.g. the project li
 _Avoid_: command feature, required config
 
 **Include**:
-A sidecar TOML file the global `config.toml` pulls in via `includes`, carrying only a whitelisted subset of config — registered **Project**s and **Repo override** blocks — so a user can keep which directories they work on out of the main file. Precedence is parent first, then includes in listed order; the first definition of a repo key sticks, and any other config section in an include is ignored. Distinct from `.pop.toml`, which rides in a repo and describes one already-registered project.
+A sidecar TOML file the global `config.toml` pulls in via `includes`, carrying only a whitelisted subset of config — registered **Project**s and **Repo override** blocks — so a user can keep which directories they work on out of the main file. Precedence is parent first, then includes in listed order; the first definition of a repo key sticks, and any other config section in an include is ignored. Distinct from `.pop/config.toml`, which rides in a repo and describes one already-registered project.
 _Avoid_: Import, partial, sidecar config, overlay
 
 **Config show**:
-`pop config show`: prints the effective configuration as pop resolves it from the current directory — includes merged, repo keys canonicalized to absolute realpaths, folder-local overrides (`.pop.toml` + the current `[repo]` block) collapsed into effective values, and the current repo's resolved **Trunk worktree** (config-declared *or* git-derived) surfaced as an effective `trunk`/`bare`. Run outside any repo, the current-repo/trunk section is absent. Effective values only, no provenance annotation. TOML by default, `--json` for machines. Reaches config + git (for the derived trunk), never the task-binding store. The value counterpart to `pop config keys` (the accepted schema); renders the result of config resolution.
+`pop config show`: prints the effective configuration as pop resolves it from the current directory — includes merged, repo keys canonicalized to absolute realpaths, folder-local overrides (`.pop/config.toml` + the current `[repo]` block) collapsed into effective values, and the current repo's resolved **Trunk worktree** (config-declared *or* git-derived) surfaced as an effective `trunk`/`bare`. Run outside any repo, the current-repo/trunk section is absent. Effective values only, no provenance annotation. TOML by default, `--json` for machines. Reaches config + git (for the derived trunk), never the task-binding store. The value counterpart to `pop config keys` (the accepted schema); renders the result of config resolution.
 _Avoid_: config dump, config export
 
 ## Deprecated aliases

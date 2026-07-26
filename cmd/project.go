@@ -119,7 +119,7 @@ type ProjectDeps struct {
 
 	// ResolveWorkbenches returns the Workbenches resolved for a project path,
 	// used by the create-path prompt (ADR-0075). A seam so tests can supply a
-	// fixed set without touching .pop.toml or the global library.
+	// fixed set without touching .pop/config.toml or the global library.
 	ResolveWorkbenches func(cfg *config.Config, path string) []config.Workbench
 
 	// ResolvePreferredWorkbench returns the preferred-Workbench name to

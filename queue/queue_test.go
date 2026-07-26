@@ -271,7 +271,10 @@ func TestDecideProjectNoReadySet(t *testing.T) {
 
 func TestDecideProjectWorktreeReadyCausesConfigError(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".pop"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".pop", "config.toml"), []byte("worktree_ready = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	d := &Deps{
@@ -291,7 +294,7 @@ func TestDecideProjectWorktreeReadyCausesConfigError(t *testing.T) {
 		t.Fatalf("WorktreeReady must always be false from config, got %+v", dec)
 	}
 	if dec.ProjectConfigError == "" {
-		t.Fatalf("worktree_ready in .pop.toml must cause ProjectConfigError, got empty: %+v", dec)
+		t.Fatalf("worktree_ready in .pop/config.toml must cause ProjectConfigError, got empty: %+v", dec)
 	}
 	if !strings.Contains(dec.ProjectConfigError, "worktree_ready was removed") {
 		t.Fatalf("ProjectConfigError = %q, want 'worktree_ready was removed'", dec.ProjectConfigError)
@@ -300,7 +303,10 @@ func TestDecideProjectWorktreeReadyCausesConfigError(t *testing.T) {
 
 func TestDecideProjectMalformedRepoConfigReportsAndDegrades(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, ".pop.toml"), []byte("worktree_ready =\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".pop"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".pop", "config.toml"), []byte("worktree_ready =\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	d := &Deps{
@@ -317,10 +323,10 @@ func TestDecideProjectMalformedRepoConfigReportsAndDegrades(t *testing.T) {
 	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, time.Now())
 
 	if dec.WorktreeReady {
-		t.Fatalf("malformed .pop.toml must degrade to not worktree-ready: %+v", dec)
+		t.Fatalf("malformed .pop/config.toml must degrade to not worktree-ready: %+v", dec)
 	}
-	if !strings.Contains(dec.ProjectConfigError, ".pop.toml") {
-		t.Fatalf("ProjectConfigError = %q, want .pop.toml parse error", dec.ProjectConfigError)
+	if !strings.Contains(dec.ProjectConfigError, ".pop/config.toml") {
+		t.Fatalf("ProjectConfigError = %q, want .pop/config.toml parse error", dec.ProjectConfigError)
 	}
 }
 

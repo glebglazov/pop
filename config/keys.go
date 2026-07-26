@@ -16,7 +16,7 @@ const (
 	ScopeGlobal ConfigScope = "global"
 	// ScopeRepo is a [repo."<path>"] override block in the global config.toml.
 	ScopeRepo ConfigScope = "repo"
-	// ScopePopTOML is the committed repo-root .pop.toml (shared, checked in).
+	// ScopePopTOML is the committed repo-root .pop/config.toml (shared, checked in).
 	ScopePopTOML ConfigScope = "pop-toml"
 )
 
@@ -29,7 +29,7 @@ func ScopeTitle(scope ConfigScope) string {
 	case ScopeGlobal:
 		return "global config.toml (~/.config/pop/config.toml)"
 	case ScopePopTOML:
-		return "committed .pop.toml (repo root, shared)"
+		return "committed .pop/config.toml (repo root, shared)"
 	case ScopeRepo:
 		return `[repo."<path>"] block in global config.toml`
 	default:
@@ -61,7 +61,7 @@ func scopeType(scope ConfigScope) (reflect.Type, bool) {
 // ScopeKeyDocs returns the top-level keys legal in the given scope, reflected
 // from the backing struct's toml/desc tags — the same single source of truth as
 // repoScopeLegalKeys (ADR-0083). Embedded structs (the shared RepoScopeConfig)
-// are flattened, and fields tagged toml:"-" (never decoded, e.g. .pop.toml's
+// are flattened, and fields tagged toml:"-" (never decoded, e.g. .pop/config.toml's
 // trunk) are omitted, so the catalog matches exactly what each surface accepts.
 // Keys follow struct declaration order. The bool is false for an unknown scope.
 func ScopeKeyDocs(scope ConfigScope) ([]ConfigKeyDoc, bool) {
