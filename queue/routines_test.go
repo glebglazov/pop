@@ -456,6 +456,33 @@ func TestTickRoutinesFiresWhenNoRecordedFingerprint(t *testing.T) {
 	}
 }
 
+func TestTickRoutinesMissingStoreFiresNoneAndCreatesNoDatabase(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	qd, rd, home := routineTickDeps(t, now)
+	if _, err := routine.AddWith(rd, "hourly", "every 1h", home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routine.ResumeWith(rd, "hourly"); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(os.Getenv("XDG_DATA_HOME"), "pop", "pop.db")
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("pop.db must not exist before tick, stat err = %v", err)
+	}
+
+	var out bytes.Buffer
+	tickRoutines(qd, &out)
+
+	rt := qd.Tmux.(*recordingTmux)
+	if _, ok := extractRoutineSpawnCommand(rt, "hourly"); ok {
+		t.Fatalf("routine must not fire without a store, commands=%v", rt.commands)
+	}
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("tickRoutines must not materialise pop.db when it is missing, stat err = %v", err)
+	}
+}
+
 func TestRoutineSessionUsesRoutinesForNonGitDirectory(t *testing.T) {
 	_, rd, home := routineTickDeps(t, time.Now())
 	session, dir := routine.SessionAndDir(rd, home)

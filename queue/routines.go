@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/glebglazov/pop/routine"
 	"github.com/glebglazov/pop/store"
@@ -27,7 +26,7 @@ func tickRoutines(d *Deps, out io.Writer) {
 		return
 	}
 
-	s, ok, err := openRoutineStore(rd)
+	s, ok, err := rd.Tasks.Store(false)
 	if err != nil {
 		fmt.Fprintf(out, "queue: routines: %v\n", err)
 		return
@@ -35,7 +34,6 @@ func tickRoutines(d *Deps, out io.Writer) {
 	if !ok {
 		return
 	}
-	defer func() { _ = s.Close() }()
 
 	now := d.now().UTC()
 	isAlive := func(run store.RoutineRun) bool {
@@ -127,30 +125,4 @@ func (d *Deps) routineDeps() *routine.Deps {
 	}
 	rd.PID = os.Getpid
 	return rd
-}
-
-func openRoutineStore(d *routine.Deps) (*store.Store, bool, error) {
-	path := routineStorePath(d)
-	if _, err := d.FS.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil, false, nil
-		}
-		return nil, false, err
-	}
-	s, err := store.Open(path, d.ProcessAlive)
-	if err != nil {
-		return nil, false, err
-	}
-	return s, true, nil
-}
-
-func routineStorePath(d *routine.Deps) string {
-	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
-		return filepath.Join(xdgData, "pop", "pop.db")
-	}
-	home, err := d.FS.UserHomeDir()
-	if err != nil {
-		return filepath.Join("/tmp", "pop", "pop.db")
-	}
-	return filepath.Join(home, ".local", "share", "pop", "pop.db")
 }
