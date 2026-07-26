@@ -39,6 +39,7 @@ var (
 	routineRuns             = routine.Runs
 	routineHandoff          = routine.Handoff
 	routineDashboard        = dashboardshell.RunFromRoutine
+	routineMigrateManifests = routine.MigrateManifests
 )
 
 var routineNewCmd = &cobra.Command{
@@ -117,6 +118,15 @@ var routineDashboardCmd = &cobra.Command{
 	RunE:  runRoutineDashboard,
 }
 
+var routineMigrateManifestsCmd = &cobra.Command{
+	Use:    "migrate-manifests",
+	Short:  "One-shot migration of legacy manifest.json routines to frontmatter + state.json",
+	Long:   "Migrates every routine still carrying a legacy manifest.json (pre-ADR-0139) to the split format: schedule/agents/effort move into prompt.md frontmatter and machine state moves into state.json. Idempotent — already-migrated routines are left untouched — and conservative — a directory it cannot parse is reported and skipped. Meant to be run once by the machine owner.",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runRoutineMigrateManifests,
+}
+
 func init() {
 	rootCmd.AddCommand(routineCmd)
 	routineCmd.AddCommand(routineNewCmd)
@@ -128,6 +138,7 @@ func init() {
 	routineCmd.AddCommand(routineRunsCmd)
 	routineCmd.AddCommand(routineHandoffCmd)
 	routineCmd.AddCommand(routineDashboardCmd)
+	routineCmd.AddCommand(routineMigrateManifestsCmd)
 	routineNewCmd.Flags().StringVar(&routineNewSchedule, "schedule", "", "routine schedule (optional; omit for a manual-fire-only routine): "+routine.ScheduleGrammar)
 	routineNewCmd.Flags().StringArrayVar(&routineNewAgents, "agent", nil, "runtime agent preset for scheduled runs; repeat to define an ordered fallback list")
 	routineNewCmd.Flags().StringVar(&routineNewEffort, "effort", "", "runtime model-strength tier: light, standard, or heavy (default standard)")
@@ -255,4 +266,8 @@ func runRoutineHandoff(cmd *cobra.Command, args []string) error {
 
 func runRoutineDashboard(cmd *cobra.Command, args []string) error {
 	return routineDashboard(routine.DefaultDeps())
+}
+
+func runRoutineMigrateManifests(cmd *cobra.Command, args []string) error {
+	return routineMigrateManifests(cmd.OutOrStdout())
 }
