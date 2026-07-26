@@ -4,156 +4,178 @@ description: Break a plan or spec into independently-grabbable work items writte
 disable-model-invocation: true
 ---
 
-# To Tasks
+<!--
+base: mattpocock/skills engineering/to-tickets@ed37663cc5fbef691ddfecd080dff42f7e7e350d
 
-Break a plan into independently-grabbable work items using vertical slices (tracer bullets).
+This file is a marked overlay. Everything from here down to the "POP OVERLAY"
+marker is a byte-verbatim copy of upstream engineering/to-tickets/SKILL.md body
+at the pinned ref above. Pop inlines rather than delegating to Matt's skills, per
+ADR-0009 (skills are embedded in the binary and ship to machines without them
+installed). Pop-authored frontmatter is kept (name `to-tasks`, pop description,
+`disable-model-invocation`: to-tasks is a manual-only planning skill). Pop's
+Work-store seam, quiz negation, invocation arguments, and the wayfinder-map
+source live below the marker (ADR-0136). To review upstream drift, diff the
+region between this header and the marker against engineering/to-tickets@<newref>.
+-->
 
-## Arguments
+# To Tickets
 
-`to-tasks` reads two optional arguments from the invocation; both default off. They are independent and may be combined, and they plumb straight through to `pop tasks register` flags (ADR-0115) — they are not written into the manifest.
+Break a plan, spec, or conversation into a set of **tickets** — tracer-bullet vertical slices, each declaring the tickets that **block** it.
 
-- **`managed`** / **`isolated`** — register with `--managed`: pop records a managed-worktree intent and forks its own isolated worktree from the Trunk worktree on the first Queue drain, instead of eagerly binding the current checkout.
-- **`auto-drain`** / **`drain`** — register with `--auto-drain`: the Queue daemon drains the set unattended. Only these literal keywords enable it — there is no "here and now" phrasing.
-
-With no arguments, plain `pop tasks register <set>` eagerly binds the set to the **current** checkout at register time, left for manual/foreground draining. `managed auto-drain` → `pop tasks register --managed --auto-drain <set>`, giving an isolated worktree that drains unattended — the safest unattended combo.
+The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.
 
 ## Process
 
 ### 1. Gather context
 
-Work from whatever is already in the conversation context. If the user passes a task reference (task id, URL, or path) as an argument, fetch it and read its full body.
-
-If a spec authored by to-prd is being broken down, it lives **co-located** in its task-set folder as `<tasks-dir>/<task-set-name>/spec.md` (ADR-0088, amended by ADR-0136) — not in a separate `prds/` sibling. That folder already exists (to-prd created it early, containing only `spec.md`); read that `spec.md` for context and write the task files into the **same** folder, reusing its `<task-set-name>` so the spec and its tasks share one directory.
-
-**Wayfinder Map source:** When invoked directly on a Map (user names a map id, no co-located `spec.md` yet), read `$(pop work show-path)/wayfinder/<map-id>/map.md` and each **resolved** ticket under `issues/` — at minimum every ticket linked from **Decisions so far**, plus any other resolved tickets whose `## Answer` should inform the breakdown. After writing the set, append `<task-set-name>` under the map's `## Spawned sets` section in `map.md` (create the section if absent).
+Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments.
 
 ### 2. Explore the codebase (optional)
 
-If you have not already explored the codebase, do so to understand the current state of the code. Use the project's domain glossary vocabulary throughout, and respect ADRs in the area you're touching.
+If you have not already explored the codebase, do so to understand the current state of the code. Ticket titles and descriptions should use the project's domain glossary vocabulary, and respect ADRs in the area you're touching.
+
+Look for opportunities to prefactor the code to make the implementation easier. "Make the change easy, then make the easy change."
 
 ### 3. Draft vertical slices
 
-Break the plan into **tracer bullet** slices. Each slice is a thin vertical slice that cuts through ALL integration layers end-to-end, NOT a horizontal slice of one layer.
-
-Slices may be 'HITL' or 'AFK'. HITL slices contain ONLY human work — verification, decisions, manual testing; the executor never runs them. AFK slices can be implemented and merged without human interaction. Prefer AFK over HITL where possible.
-
-If a HITL slice needs an artifact built first (a report command, test data, a harness), split it: the agent work goes in an AFK slice, and the HITL slice depends on it via "Blocked by" and contains only the human steps. A HITL slice whose "What to build" describes software is mis-typed. Write the HITL body as instructions to the human — the exact steps to verify.
-
-HITL slices have two roles, at opposite ends of a set. **Approval at the end** — the agents are done (and have already verified their own work) and the human signs off; nothing depends on it, so the set reaches `AWAITING-APPROVAL`. This is the common, expected HITL. **Setup at the bottom** — the human provisions something the agent genuinely cannot, before agents can run; AFK slices depend on it, so the set sits `BLOCKED` until you act. Create a setup HITL only when *absolutely necessary*: mainly accounts and secrets the agent can't self-issue. It is **not** for things the model can discover or do itself — devices, environment details, config it can read — so don't manufacture a setup HITL for those. A HITL in the middle is still valid (a genuine mid-flow human decision), but the set will park at `BLOCKED` mid-drain — the correct signal that real agent work waits behind a human.
-
-Assign an `effort` to every slice using this named-signal heuristic:
-
-- `heavy` — architectural or cross-cutting refactors, or genuinely tricky algorithms.
-- `light` — large but mechanical work such as renames, codemods, config, or boilerplate.
-- `standard` — everything else.
-
-Write an explicit effort value for each task. Default to `standard` when no named signal clearly applies. Do not consult `pop tasks agents` in the default flow: effort is model-strength intent, not an agent choice.
+Break the work into **tracer bullet** tickets.
 
 <vertical-slice-rules>
-- Each slice delivers a narrow but COMPLETE path through every layer (schema, API, UI, tests)
+
+- Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests) — vertical, NOT a horizontal slice of one layer
 - A completed slice is demoable or verifiable on its own
-- Prefer many thin slices over few thick ones
+- Each slice is sized to fit in a single fresh context window
+- Any prefactoring should be done first
+
 </vertical-slice-rules>
 
-> **Artifacts must already be committed.** Task sets are often worked in a fresh git worktree forked from the current branch's HEAD, so any CONTEXT/ADR/code a prior session generated must already be on HEAD for the worktree to carry it. This skill does **not** commit — committing belongs to the session that produced the artifacts (e.g. `grill-with-docs` offers it at the close of a grilling session). Assume that has happened; if you spot uncommitted session artifacts, flag them, but don't commit here.
+Give each ticket its **blocking edges** — the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
 
-### 4. Write the work items to the local filesystem
+**Wide refactors are the exception to vertical slicing.** A **wide refactor** is one mechanical change — rename a column, retype a shared symbol — whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no vertical slice can land green. Don't force it into a tracer bullet; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch that all block a final integrate-and-verify ticket — green is promised only there.
 
-Resolve the tasks base directory, `<tasks-dir>`, as `$(pop work show-path)/tasks` — run `pop work show-path` for the storage root and append `/tasks`, or equivalently run `pop tasks show-path` (same directory; ADR-0130 compatibility alias). Both print the absolute path to this repository's task storage (in pop's data dir, outside the repo tree) and create it on demand.
+### 4. Quiz the user
 
-For each slice, write a markdown file to the `<tasks-dir>/<task-set-name>/` directory (create the subdirectory if it doesn't exist; when breaking down a co-located spec it already exists and holds `spec.md` — write the task files alongside it). `<task-set-name>` is `<timestamp>-<slug>`, where `<slug>` is either the source spec's slug (without its timestamp prefix) or a hyphen-delimited string summarising what you intend to do (infer from context). When a co-located `spec.md` is the source, reuse its existing folder's `<task-set-name>` rather than minting a new one. Use the following template. Write them in dependency order (blockers first) so you can reference real identifiers in the "Blocked by" field.
+Present the proposed breakdown as a numbered list. For each ticket, show:
 
-<naming-convention>
-`<timestamp>` is a human-readable local date/time prefix so task sets sort chronologically:
+- **Title**: short descriptive name
+- **Blocked by**: which other tickets (if any) must complete first
+- **What it delivers**: the end-to-end behaviour this ticket makes work
 
-- Default: `YYYY-MM-DD` (e.g. `2026-05-31`)
-- If a folder with the same date and slug already exists: `YYYY-MM-DD-HHMM` (24-hour local time, e.g. `2026-05-31-2036`)
+Ask the user:
 
-Examples: `2026-05-31-user-auth`, `2026-05-31-2036-user-auth`
-</naming-convention>
+- Does the granularity feel right? (too coarse / too fine)
+- Are the blocking edges correct — does each ticket only depend on tickets that genuinely gate it?
+- Should any tickets be merged or split further?
 
-<task-template>
+Iterate until the user approves the breakdown.
+
+### 5. Publish the tickets to the configured tracker
+
+Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured — the tickets are the same either way, only the shape of the blocking edges changes:
+
+- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below — one ticket per file, never a single combined file.
+- **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking / sub-issue relationship where it has one; otherwise set each ticket's "Blocked by" to the blocking issues. Apply the `ready-for-agent` triage label unless instructed otherwise — the tickets are agent-grabbable by construction.
+
+Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
+
+Do NOT close or modify any parent issue.
+
+<local-ticket-template>
+
+# <NN> — <Ticket title>
+
+**What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective — not a layer-by-layer implementation list.
+
+**Blocked by:** the numbers/titles of the tickets that gate this one, or "None — can start immediately".
+
+**Status:** ready-for-agent
+
+- [ ] Acceptance criterion 1
+- [ ] Acceptance criterion 2
+
+</local-ticket-template>
+
+<issue-template>
+
 ## Parent
 
-A reference to the parent item (if the source was an existing file, otherwise omit this section).
+A reference to the parent issue on the tracker (if the source was an existing issue, otherwise omit this section).
 
 ## What to build
 
-A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation.
-
-Avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it here and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
-
-## Type
-
-HITL or AFK.
+The end-to-end behaviour this ticket makes work, from the user's perspective — not layer-by-layer implementation.
 
 ## Acceptance criteria
 
 - [ ] Criterion 1
 - [ ] Criterion 2
-- [ ] Criterion 3
 
 ## Blocked by
 
-- A reference to the blocking item (if any)
+- A reference to each blocking ticket, or "None — can start immediately".
 
-Or "None - can start immediately" if no blockers.
+</issue-template>
 
-</task-template>
+In either form, avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
+<!-- ═══════════════════════════════ POP OVERLAY ═══════════════════════════════
+Everything below is pop-specific and replaces the tracker-doc seam in the
+verbatim region above. It swaps upstream's `/setup-matt-pocock-skills` line and
+its step-5 publish mechanics for pop's Work-store doc, negates the Quiz step,
+and adds pop's invocation arguments (ADR-0136). Where a line below contradicts
+the verbatim upstream region, the line below wins; the upstream text is kept
+byte-intact only so drift stays diffable.
+-->
 
-Use a consistent filename scheme: `<number>-<task-name>.md`, e.g. `01-login-form.md`. The set-relative task target reference for that task is `<task-set-name>/<number>-<task-name>.md`, e.g. `2026-05-31-user-auth/01-login-form.md`.
+## Work store resolution
 
-Do NOT close or modify any parent file.
+Ignore upstream's "run `/setup-matt-pocock-skills`" line **and** its step-5
+publish mechanics (templates, `ready-for-agent` label, `.scratch/…` paths).
+Resolve the Work store two-layer instead:
 
-### 5. Write the sidecar JSON manifest
+1. If the repo has `docs/agents/issue-tracker.md`, that store wins.
+2. Otherwise read the machine-global pop doc at
+   `${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md`.
 
-Alongside the markdown files, write `<tasks-dir>/<task-set-name>/index.json` — a machine-readable manifest that a ralph loop (or any automation) can rely on to track completion and unblock ordering. Each entry mirrors one markdown file. The manifest carries **only** the tasks array — no `worktree` or `auto_drain` key (ADR-0115); binding and auto-drain are a `register`/CLI/dashboard concern, set via the flags in step 6, not written here.
+Publish the tickets per the resolved doc's **"Publishing tickets"** section. That
+section owns every publish mechanic — the task-markdown template, the `index.json`
+manifest, the effort heuristic, HITL/AFK typing, `pop tasks register`, the
+MALFORMED fix loop, and the whole-set drain suggestion. None of it is restated
+here; consult the doc.
 
-<manifest-schema>
-```json
-{
-  "tasks": [
-    {
-      "id": "01-login-form",
-      "file": "01-login-form.md",
-      "title": "Login form",
-      "type": "AFK",
-      "effort": "standard",
-      "status": "open",
-      "blocked_by": []
-    }
-  ]
-}
-```
-</manifest-schema>
+## No quiz
 
-Field rules:
+Skip upstream's **"### 4. Quiz the user"** step entirely — do not present the
+breakdown for approval or iterate on it. Breakdown approval belongs to the
+planning session that precedes `to-tasks`; publish without a second gate.
 
-- `id` — the filename stem (`<number>-<task-name>`), stable identifier referenced by `blocked_by`.
-- `status` — one of `open` | `done` | `failed` | `skipped`. Always initialize to `open`. Do not write `in_progress`; persisted `in_progress` is malformed.
-- `blocked_by` — array of `id`s of blocking tasks. Empty array if none.
-- `type` — `HITL` or `AFK`, matching the markdown.
-- `effort` — one of `light` | `standard` | `heavy`. Write it explicitly for new tasks using the named-signal heuristic above. If absent in an existing manifest, it means `standard`.
-- `agent` — optional escape hatch from ADR-0018. Fill it only when the user explicitly asks for a specific agent or model for a task; it is not part of the default planning flow.
-- `failed_after` — optional integer; the number of attempts after which a runner gave up. Written only when `status` becomes `failed`.
+## Arguments
 
-The JSON is the source of truth for automation. The rules above — the eligibility condition (`status == "open"` and every `blocked_by` id is satisfied by a task whose status is `done` or `skipped`, preferring `AFK` over `HITL` among eligible tasks), the done-condition (all `## Acceptance criteria` boxes checked), and the commit format `tasks(<task-set-slug>): <id>` (set name without its timestamp prefix) — are the **contract** implemented by `pop tasks implement`, which drains the whole set or runs one task when given a `<task-set>/<file>.md` target.
+`to-tasks` reads two optional keyword arguments from the invocation; both default
+off, are independent, and may be combined. They map straight to `pop tasks
+register` flags (their register-time semantics are documented in the doc's
+"Publishing tickets" → "Register the set" section):
 
-Keep `index.json` and the markdown files in sync — every markdown file has exactly one manifest entry and vice versa.
+- **`managed`** / **`isolated`** → `--managed`.
+- **`auto-drain`** / **`drain`** → `--auto-drain`. Only these literal keywords
+  enable it — there is no "here and now" phrasing.
 
-### 6. Register the set
+`managed auto-drain` → `--managed --auto-drain`. With no arguments, the set is
+registered plain (no flags).
 
-Run `pop tasks register <task-set-name>`, adding flags per the invocation arguments (step "Arguments" above): plain by default, `--managed` for `managed`/`isolated`, `--auto-drain` for `auto-drain`/`drain`, both together for `managed auto-drain`. Registering is an explicit verb — writing the set files only *drafts* it; until you `register`, the set is inert (invisible to the dashboard, never scheduled, never auto-drained). Reads like `pop tasks status` never register. Pop prints `Registered new task set(s): <task-set-name>` on first registration.
+**Non-pop stores.** These arguments are pop-store-only. When the resolved Work
+store is **not** pop (a repo `docs/agents/issue-tracker.md` points at a real
+tracker), warn the user, **ignore** both arguments, and publish to the configured
+store per that doc — do not attempt to plumb `managed`/`auto-drain` there.
 
-Plain `register` eagerly binds the set to the current checkout the moment it registers — the binding is visible immediately, not deferred to first drain. `register --managed` instead records a managed intent; its worktree provisions lazily at the first Queue drain. Re-registering an already-registered set never rebinds it — to move an already-registered set to a different checkout, run `pop tasks bind-worktree <task-set-name> --force` from inside the target checkout.
+## Wayfinder Map source
 
-Check the output:
+*(Irreducible pop bit: reading a Map as the breakdown source has no home in the
+doc's publish sections — it is an input mode of `to-tasks`, not a publish
+mechanic.)*
 
-- The task set appears in the table with status `READY` (or `DEFERRED` if every open task is HITL).
-- It is **not** `MALFORMED` or `MISSING`.
-
-If `MALFORMED`, read the diagnostics, fix the markdown/manifest issues they name, and re-run `pop tasks register <task-set-name>` until the set is `READY` or `DEFERRED`.
-
-Tell the user the task-set name, its status, and how many tasks are open.
-
-Then suggest draining the **whole set**: `pop tasks implement <task-set-name>` (no file target). Do not suggest implementing a single task such as the first file in the list — `pop tasks implement` drains the entire set in dependency order on its own, and that whole-set drain is the intended entry point. The targeted single-task form (`<task-set-name>/<file>.md`) exists only for re-running one specific task, not for kicking off the set.
+When invoked directly on a Map (the user names a map id, with no co-located
+`spec.md` yet), read `$(pop work show-path)/wayfinder/<map-id>/map.md` and each
+**resolved** ticket under `issues/` — at minimum every ticket linked from
+**Decisions so far**, plus any other resolved tickets whose `## Answer` should
+inform the breakdown. After writing the set, append `<task-set-name>` under the
+map's `## Spawned sets` section in `map.md` (create the section if absent).
