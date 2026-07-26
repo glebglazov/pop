@@ -1663,21 +1663,23 @@ func TestEnsureIntegrations_SkipsUninstalledAgents(t *testing.T) {
 	// warnings, and stamp the new revision.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
-	realCalls := 0
-	dry := func() *integrateDeps {
-		return withDryRun(fakeDeps("/h", fs, io.Discard))
-	}
-	real := func() *integrateDeps {
-		realCalls++
-		return fakeDeps("/h", fs, io.Discard)
-	}
+	dry, real := fakeFactories("/h", fs)
 
 	warnings := ensureIntegrationsForRevisionWith("rev1", dry, real)
 	if warnings != nil {
 		t.Errorf("expected nil warnings for no-install case, got %v", warnings)
 	}
-	if realCalls != 0 {
-		t.Errorf("expected no real install calls, got %d", realCalls)
+	// No agent artifacts are installed for uninstalled agents.
+	if len(fs.symlinks) != 0 {
+		t.Errorf("expected no agent artifacts for uninstalled agents, got symlinks %v", fs.symlinks)
+	}
+	// Refresh still seeds the machine-global Work store doc (agent-agnostic).
+	docPath, err := workStoreDocPath(fakeDeps("/h", fs, io.Discard))
+	if err != nil {
+		t.Fatalf("resolve work store doc path: %v", err)
+	}
+	if _, ok := fs.files[docPath]; !ok {
+		t.Error("refresh must seed the Work store doc even with no agents integrated")
 	}
 	if got := readStateRevision(t); got != "rev1" {
 		t.Errorf("state.json revision = %q, want %q", got, "rev1")
@@ -1872,6 +1874,15 @@ func TestEnsureIntegrations_NeverAddsUninstalledFileComponent(t *testing.T) {
 	if len(fs.symlinks) != 0 {
 		t.Errorf("refresh must never add a component: created symlinks %v", fs.symlinks)
 	}
+	// The Work store doc is seeded on every refresh; it is not a component.
+	docPath, err := workStoreDocPath(fakeDeps("/h", fs, io.Discard))
+	if err != nil {
+		t.Fatalf("resolve work store doc path: %v", err)
+	}
+	if _, ok := fs.files[docPath]; !ok {
+		t.Error("refresh must seed the Work store doc")
+	}
+	delete(fs.files, docPath)
 	if len(fs.files) != 0 {
 		t.Errorf("refresh must never add a component: wrote files %v", sortedKeys(fs.files))
 	}

@@ -18,6 +18,9 @@ import (
 //go:embed all:skills/pop
 var skillFiles embed.FS
 
+//go:embed work-store.md
+var workStoreDoc []byte
+
 //go:embed extensions/pi/pop-status-sync.ts
 var piExtensionFile []byte
 
@@ -245,6 +248,41 @@ func popDataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".local", "share", "pop"), nil
+}
+
+// workStoreDocPath returns the machine-global pop Work store doc path,
+// ${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md (ADR-0136). The home fallback
+// resolves through the deps so tests can redirect it into a fake filesystem.
+func workStoreDocPath(d *integrateDeps) (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "pop", "work-store.md"), nil
+	}
+	home, err := d.userHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "pop", "work-store.md"), nil
+}
+
+// seedWorkStoreDoc writes the embedded pop Work store doc to its machine-global
+// path create-if-absent, and never overwrites an existing (possibly user-edited)
+// file — the doc is config, and a user's edits are the machine-global override
+// (ADR-0136). Agent-agnostic: callers invoke it once per Integration refresh,
+// not once per agent.
+func seedWorkStoreDoc(d *integrateDeps) error {
+	path, err := workStoreDocPath(d)
+	if err != nil {
+		return err
+	}
+	if _, err := d.readFile(path); err == nil {
+		return nil // already present — user edits are the override, never overwrite
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := d.mkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return d.writeFile(path, workStoreDoc, 0o644)
 }
 
 // dryRunIntegrateDeps returns an integrateDeps that reports what would change
@@ -1233,6 +1271,14 @@ type integrationUpdateResult struct {
 // binary revision, and does not emit output. Callers layer those behaviors
 // on top (see ensureIntegrationsForRevisionWith and runIntegrateUpdateExistingWith).
 func updateStaleIntegrations(newDry, newReal func() *integrateDeps) integrationUpdateResult {
+	// Seed the machine-global Work store doc create-if-absent (ADR-0136). It is
+	// agent-agnostic and written once here, before the per-agent loop, regardless
+	// of how many agents are integrated. A seed failure is logged, not surfaced:
+	// it must never block make install / brew install.
+	if err := seedWorkStoreDoc(newReal()); err != nil {
+		debug.Error("updateStaleIntegrations: seed work store doc: %v", err)
+	}
+
 	baseline, err := integrationBaselineLoader()
 	if err != nil {
 		debug.Error("updateStaleIntegrations: baseline: %v", err)
