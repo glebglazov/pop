@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
 )
 
@@ -490,22 +492,28 @@ func TestDedupeEntriesBy(t *testing.T) {
 
 func TestTmuxSessionActivityWith(t *testing.T) {
 	tests := []struct {
-		name       string
-		tmuxOutput string
-		tmuxErr    error
-		expected   map[string]int64
+		name     string
+		sessions []tmux.SessionActivity
+		tmuxErr  error
+		expected map[string]int64
 	}{
 		{
-			name:       "parses session activity",
-			tmuxOutput: "session1\t1234567890\nsession2\t1234567891",
+			name: "maps sessions to activity",
+			sessions: []tmux.SessionActivity{
+				{Name: "session1", Activity: 1234567890},
+				{Name: "session2", Activity: 1234567891},
+			},
 			expected: map[string]int64{
 				"session1": 1234567890,
 				"session2": 1234567891,
 			},
 		},
 		{
-			name:       "preserves spaces in session names",
-			tmuxOutput: "rails (work)\t1234567890\nrails (mixed)\t1234567891",
+			name: "preserves spaces in session names",
+			sessions: []tmux.SessionActivity{
+				{Name: "rails (work)", Activity: 1234567890},
+				{Name: "rails (mixed)", Activity: 1234567891},
+			},
 			expected: map[string]int64{
 				"rails (work)":  1234567890,
 				"rails (mixed)": 1234567891,
@@ -517,21 +525,21 @@ func TestTmuxSessionActivityWith(t *testing.T) {
 			expected: map[string]int64{},
 		},
 		{
-			name:       "handles empty output",
-			tmuxOutput: "",
-			expected:   map[string]int64{},
+			name:     "handles no sessions",
+			sessions: nil,
+			expected: map[string]int64{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := &Deps{
-				Tmux: &deps.MockTmux{
-					ListSessionsFunc: func() (string, error) {
-						return tt.tmuxOutput, tt.tmuxErr
-					},
-				},
+			fake := &tmuxtest.Fake{SessionList: tt.sessions}
+			if tt.tmuxErr != nil {
+				fake.SessionsFunc = func() ([]tmux.SessionActivity, error) {
+					return nil, tt.tmuxErr
+				}
 			}
+			d := &Deps{Tmux: fake}
 
 			result := TmuxSessionActivityWith(d)
 

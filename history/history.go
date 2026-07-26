@@ -5,26 +5,25 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 )
 
 // Deps holds external dependencies for the history package
 type Deps struct {
 	FS   deps.FileSystem
-	Tmux deps.Tmux
+	Tmux tmux.Tmux
 }
 
 // DefaultDeps returns dependencies using real implementations
 func DefaultDeps() *Deps {
 	return &Deps{
 		FS:   deps.NewRealFileSystem(),
-		Tmux: deps.NewRealTmux(),
+		Tmux: tmux.New(),
 	}
 }
 
@@ -244,23 +243,13 @@ func TmuxSessionActivity() map[string]int64 {
 func TmuxSessionActivityWith(d *Deps) map[string]int64 {
 	activity := make(map[string]int64)
 
-	out, err := d.Tmux.ListSessions()
+	sessions, err := d.Tmux.Sessions()
 	if err != nil {
 		return activity
 	}
 
-	for _, line := range strings.Split(out, "\n") {
-		// Split on tab so session names containing spaces (e.g. disambiguated
-		// names like "rails (work)") stay intact.
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) == 2 {
-			name := parts[0]
-			ts, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
-			if err != nil {
-				debug.Error("TmuxSessionActivity: parse timestamp %q: %v", parts[1], err)
-			}
-			activity[name] = ts
-		}
+	for _, s := range sessions {
+		activity[s.Name] = s.Activity
 	}
 
 	return activity
