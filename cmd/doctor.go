@@ -109,7 +109,7 @@ func defaultDoctorDeps() *doctorDeps {
 		},
 		explicitAgentContext:     func() []string { return nil },
 		agentExecutableAvailable: doctorAgentExecutableAvailable,
-		taskStorageWritable: func() (string, error) { return tasks.ProbeStorageWritable(tasks.DefaultDeps()) },
+		taskStorageWritable:      func() (string, error) { return tasks.ProbeStorageWritable(tasks.DefaultDeps()) },
 		scanWayfinderMaps: func() (int, error) {
 			maps, err := wayfinder.ScanMaps(wayfinder.DefaultDeps(), "")
 			if err != nil {

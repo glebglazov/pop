@@ -156,17 +156,17 @@ func (f *fakeFS) readDirNames(dir string) ([]string, error) {
 // fakeDeps wires a fakeFS into the integrateDeps shape.
 func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 	return &integrateDeps{
-		userHomeDir: func() (string, error) { return home, nil },
-		readFile:    fs.readFile,
-		writeFile:   fs.writeFile,
-		mkdirAll:    fs.mkdirAll,
-		removeAll:   fs.removeAll,
-		stdout:      stdout,
-		logf:        func(string, ...any) {}, // no-op; override per-test to capture
-		dataDir:     func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
-		symlink:     fs.symlink,
-		readlink:    fs.readlink,
-		lstatMode:   fs.lstatMode,
+		userHomeDir:  func() (string, error) { return home, nil },
+		readFile:     fs.readFile,
+		writeFile:    fs.writeFile,
+		mkdirAll:     fs.mkdirAll,
+		removeAll:    fs.removeAll,
+		stdout:       stdout,
+		logf:         func(string, ...any) {}, // no-op; override per-test to capture
+		dataDir:      func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
+		symlink:      fs.symlink,
+		readlink:     fs.readlink,
+		lstatMode:    fs.lstatMode,
 		readDirNames: fs.readDirNames,
 	}
 }
@@ -2927,19 +2927,19 @@ func TestOptOutRemoval_NoPrompt(t *testing.T) {
 
 	// deps with nil stdin — any prompt would return an error from bufio.Reader.
 	d := &integrateDeps{
-		userHomeDir: func() (string, error) { return home, nil },
-		readFile:    fs.readFile,
-		writeFile:   fs.writeFile,
-		mkdirAll:    fs.mkdirAll,
-		removeAll:   fs.removeAll,
-		stdout:      io.Discard,
-		logf:        func(string, ...any) {},
-		dataDir:     func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
-		symlink:     fs.symlink,
-		readlink:    fs.readlink,
-		lstatMode:   fs.lstatMode,
+		userHomeDir:  func() (string, error) { return home, nil },
+		readFile:     fs.readFile,
+		writeFile:    fs.writeFile,
+		mkdirAll:     fs.mkdirAll,
+		removeAll:    fs.removeAll,
+		stdout:       io.Discard,
+		logf:         func(string, ...any) {},
+		dataDir:      func() (string, error) { return filepath.Join(home, ".local", "share", "pop"), nil },
+		symlink:      fs.symlink,
+		readlink:     fs.readlink,
+		lstatMode:    fs.lstatMode,
 		readDirNames: fs.readDirNames,
-		stdin:       nil, // no stdin → any prompt read would return EOF (decline), but removal must not need it
+		stdin:        nil, // no stdin → any prompt read would return EOF (decline), but removal must not need it
 	}
 
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}

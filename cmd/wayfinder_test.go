@@ -35,7 +35,7 @@ func TestWayfinderShowRendersMap(t *testing.T) {
 	}
 	mapDir := filepath.Join(id.StorageDir, "wayfinder", "demo")
 	files := map[string]string{
-		filepath.Join(mapDir, "map.md"): "Status: active\n\n## Destination\nShip it\n\n## Decisions so far\n- one decision",
+		filepath.Join(mapDir, "map.md"):                 "Status: active\n\n## Destination\nShip it\n\n## Decisions so far\n- one decision",
 		filepath.Join(mapDir, "issues", "01-first.md"):  "Type: research\nStatus: resolved\n",
 		filepath.Join(mapDir, "issues", "02-second.md"): "Type: task\nBlocked by: 01\n",
 	}

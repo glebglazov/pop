@@ -157,13 +157,13 @@ func TestRewriteSkillReferencesWordBoundary(t *testing.T) {
 		},
 		{
 			name:  "hyphenated partial word not matched",
-			input: "not-pop-to-prd-here",
-			want:  "not-pop-to-prd-here",
+			input: "not-pop-to-spec-here",
+			want:  "not-pop-to-spec-here",
 		},
 		{
-			name:  "to-prd standalone",
-			input: "suggest to-prd and to-tasks",
-			want:  "suggest pop-to-prd and pop-to-tasks",
+			name:  "to-spec standalone",
+			input: "suggest to-spec and to-tasks",
+			want:  "suggest pop-to-spec and pop-to-tasks",
 		},
 	}
 

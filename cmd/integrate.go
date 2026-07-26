@@ -297,13 +297,13 @@ func dryRunIntegrateDeps() *integrateDeps {
 // without touching the real filesystem.
 func withDryRun(base *integrateDeps) *integrateDeps {
 	d := &integrateDeps{
-		userHomeDir: base.userHomeDir,
-		readFile:    base.readFile,
-		dataDir:     base.dataDir,
-		logf:        base.logf,
+		userHomeDir:  base.userHomeDir,
+		readFile:     base.readFile,
+		dataDir:      base.dataDir,
+		logf:         base.logf,
 		skillsPrefix: base.skillsPrefix,
 		readDirNames: base.readDirNames,
-		DryRun:      true,
+		DryRun:       true,
 	}
 	// File-component refresh inspects the link installer's render tree and the
 	// agent-location symlinks to decide installed/stale/conflict, so the dry-run
@@ -353,7 +353,7 @@ var integrateUpdateExisting bool
 var integratePaneSkill bool
 
 // integrateTaskSkills is the --task-skills component flag. When set,
-// the task planning skills (grill-with-docs, grill-consolidate, to-prd,
+// the task planning skills (grill-with-docs, grill-consolidate, to-spec,
 // to-tasks, wayfinder, prototype, research) are
 // installed for the agent alongside the core status wiring.
 var integrateTaskSkills bool
@@ -495,7 +495,7 @@ func init() {
 	integrateCmd.Flags().BoolVar(&integratePaneSkill, "pane-skill", false,
 		"Install the pane skill (lets the agent drive tmux panes) alongside the status wiring")
 	integrateCmd.Flags().BoolVar(&integrateTaskSkills, "task-skills", false,
-		"Install the task planning skills (grill-with-docs, to-prd, to-tasks) alongside the status wiring")
+		"Install the task planning skills (grill-with-docs, to-spec, to-tasks) alongside the status wiring")
 	integrateCmd.Flags().BoolVar(&integrateNoPaneSkill, "no-pane-skills", false,
 		"Remove the pane skill if installed (pop-owned only) and record the opt-out")
 	integrateCmd.Flags().BoolVar(&integrateNoTaskSkills, "no-task-skills", false,

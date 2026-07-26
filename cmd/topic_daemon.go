@@ -43,7 +43,7 @@ type topicDerivationWriter func(paneID, topic, kind string) error
 // simply drops its result.
 type topicDerivationDispatcher struct {
 	mu      sync.Mutex
-	latest  map[string]uint64            // paneID -> newest enqueued generation
+	latest  map[string]uint64             // paneID -> newest enqueued generation
 	cancels map[string]context.CancelFunc // paneID -> in-flight ctx cancel
 
 	// Dependencies for each background derivation. The production wiring
@@ -303,4 +303,3 @@ func deriveTopicSeedWith(r io.Reader, args []string, cfg *config.Config, label s
 	}
 	return job, false
 }
-

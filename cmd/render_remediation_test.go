@@ -64,7 +64,7 @@ func TestRewriteSkillReferencesNoCommonWordCorruption(t *testing.T) {
 			t.Errorf("wayfinder ticket vocabulary corrupted: contains %q", bad)
 		}
 	}
-	for _, want := range []string{"`pop-grill-with-docs`", "`pop-to-prd`", "`pop-to-tasks`", "run the `pop-research` skill"} {
+	for _, want := range []string{"`pop-grill-with-docs`", "`pop-to-spec`", "`pop-to-tasks`", "run the `pop-research` skill"} {
 		if !strings.Contains(wayfinder, want) {
 			t.Errorf("wayfinder overlay missing rewritten skill reference %q", want)
 		}

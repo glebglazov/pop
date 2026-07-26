@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -50,7 +51,7 @@ func taskAgents() []taskAgent {
 
 // taskSkillNames is the set of skill directory names the task-skills
 // component installs.
-var taskSkillNames = []string{"pop-grill-with-docs", "pop-grill-consolidate", "pop-to-prd", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research"}
+var taskSkillNames = []string{"pop-grill-with-docs", "pop-grill-consolidate", "pop-to-spec", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research"}
 
 // TestInstallTaskSkillsAllAgents covers the clean install for claude, codex,
 // pi, and cursor: all seven planning skills land as render trees under the data
@@ -192,6 +193,56 @@ func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
 			// The old-name skill pop does not own is left untouched.
 			if _, ok := fs.files[oldBody]; !ok {
 				t.Fatalf("leftover old-name skill %s was deleted", leftover)
+			}
+		})
+	}
+}
+
+// TestInstallTaskSkillsPrunesStaleToPRD covers the to-prd → to-spec rename
+// (ADR-0136) as a base-name change within the task-skills component: a machine
+// that previously installed `pop-to-prd` (a symlink into this component's render
+// root) must, on the next refresh, end up with `pop-to-spec` linked and the
+// stale `pop-to-prd` pruned — not both names live. This is the same
+// set-subtraction prune path ADR-0063 built for the pane → tmux-pane rename,
+// exercised here for the skill this slice renames.
+func TestInstallTaskSkillsPrunesStaleToPRD(t *testing.T) {
+	for _, a := range taskAgents() {
+		t.Run(a.name, func(t *testing.T) {
+			fs := newFakeFS()
+
+			// Simulate the prior-binary install: a pop-owned `pop-to-prd`
+			// symlink pointing into this component's render root, exactly as an
+			// older pop would have created it.
+			staleName := "pop-to-prd"
+			staleLink := filepath.Join(a.skillDir, staleName)
+			staleTarget := filepath.Join(a.renderDir, staleName)
+			fs.symlinks[staleLink] = staleTarget
+
+			var logs []string
+			d := fakeDeps(installerHome, fs, nil)
+			d.logf = func(format string, args ...any) {
+				logs = append(logs, fmt.Sprintf(format, args...))
+			}
+
+			if err := installFileComponent(d, installerHome, ComponentTaskSkills, a.name); err != nil {
+				t.Fatalf("installFileComponent(%s): %v", a.name, err)
+			}
+
+			// The renamed skill is linked...
+			specLink := filepath.Join(a.skillDir, "pop-to-spec")
+			if fs.symlinks[specLink] != filepath.Join(a.renderDir, "pop-to-spec") {
+				t.Fatalf("pop-to-spec not linked: %q -> %q", specLink, fs.symlinks[specLink])
+			}
+			// ...and the stale pop-to-prd is pruned — no duplicate left behind.
+			if _, ok := fs.symlinks[staleLink]; ok {
+				t.Fatalf("stale pop-to-prd not pruned: %s still -> %q", staleLink, fs.symlinks[staleLink])
+			}
+			// Exactly the current set survives, no stale extra.
+			if len(fs.symlinks) != len(taskSkillNames) {
+				t.Fatalf("expected %d symlinks after rename refresh, got %d: %v", len(taskSkillNames), len(fs.symlinks), fs.symlinks)
+			}
+			if !containsSubstr(logs, "pruning stale "+staleLink) {
+				t.Fatalf("expected a prune log line for %s, got: %v", staleLink, logs)
 			}
 		})
 	}

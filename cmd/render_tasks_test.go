@@ -11,7 +11,7 @@ import (
 var taskSkillDirs = map[string][]string{
 	"pop-grill-with-docs":   {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-grill-consolidate": {},
-	"pop-to-prd":            {},
+	"pop-to-spec":           {},
 	"pop-to-tasks":          {},
 	"pop-wayfinder":         {},
 	"pop-prototype":         {"LOGIC.md", "UI.md"},
@@ -107,7 +107,7 @@ func TestRenderTaskSkillsContentUsesShowPath(t *testing.T) {
 		t.Fatalf("renderComponent: %v", err)
 	}
 
-	for _, skill := range []string{"pop-to-prd", "pop-to-tasks", "pop-wayfinder"} {
+	for _, skill := range []string{"pop-to-spec", "pop-to-tasks", "pop-wayfinder"} {
 		body := string(tree[skill+"/SKILL.md"])
 		if strings.Contains(body, "thoughts/") {
 			t.Errorf("%s SKILL.md still mentions thoughts/: %q", skill, body)
@@ -131,12 +131,12 @@ func TestRenderTaskSkillsBodyRewritesCrossSkillReferences(t *testing.T) {
 	}
 
 	wayfinder := string(tree["pop-wayfinder/SKILL.md"])
-	for _, want := range []string{"pop-grill-with-docs", "pop-to-prd", "pop-to-tasks"} {
+	for _, want := range []string{"pop-grill-with-docs", "pop-to-spec", "pop-to-tasks"} {
 		if !strings.Contains(wayfinder, want) {
 			t.Errorf("wayfinder body missing rewritten reference %q", want)
 		}
 	}
-	for _, bare := range []string{"`grill-with-docs`", "`to-prd`", "`to-tasks`"} {
+	for _, bare := range []string{"`grill-with-docs`", "`to-spec`", "`to-tasks`"} {
 		if strings.Contains(wayfinder, bare) {
 			t.Errorf("wayfinder body still has bare reference %q", bare)
 		}
@@ -197,7 +197,7 @@ func TestRenderTaskSkillsCustomPrefixRewritesReferences(t *testing.T) {
 	if !strings.Contains(wayfinder, "\nname: x-wayfinder\n") {
 		t.Fatalf("wayfinder missing injected x- name")
 	}
-	for _, want := range []string{"x-grill-with-docs", "x-to-prd", "x-to-tasks"} {
+	for _, want := range []string{"x-grill-with-docs", "x-to-spec", "x-to-tasks"} {
 		if !strings.Contains(wayfinder, want) {
 			t.Errorf("wayfinder body missing rewritten reference %q", want)
 		}

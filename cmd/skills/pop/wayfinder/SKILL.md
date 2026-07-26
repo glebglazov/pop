@@ -200,7 +200,7 @@ Status: active
 
 ## Spawned sets
 
-<!-- forward links to Task sets this map spawned via to-prd/to-tasks -->
+<!-- forward links to Task sets this map spawned via to-spec/to-tasks -->
 
 - <task-set-id>
 ```
@@ -281,11 +281,11 @@ Expect parallel sessions — re-read ticket status before claiming.
 
 ## Handoff to implementation
 
-When the way to the destination is clear — or an early-splittable chunk is — **suggest `to-prd` and/or `to-tasks`** to the user. Wayfinding produces decisions; implementation happens in ordinary registered Task sets.
+When the way to the destination is clear — or an early-splittable chunk is — **suggest `to-spec` and/or `to-tasks`** to the user. Wayfinding produces decisions; implementation happens in ordinary registered Task sets.
 
 Record the forward link both ways:
 
 1. **On the map:** append each spawned task-set id under `## Spawned sets` in `map.md`.
-2. **On the set:** when `to-prd` writes `spec.md`, include a **Source map** line naming this map's id (e.g. `Source map: 2026-07-19-feature`).
+2. **On the set:** when `to-spec` writes `spec.md`, include a **Source map** line naming this map's id (e.g. `Source map: 2026-07-19-feature`).
 
 Then set `Status: done` in `map.md`. One map may spawn many sets over time; only mark `done` when wayfinding for this destination is finished (individual chunks may hand off earlier while the map stays `active` if fog remains).

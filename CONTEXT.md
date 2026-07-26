@@ -133,7 +133,7 @@ The embedded skill that teaches an agent to drive `pop pane`. Installed via the 
 _Avoid_: Agent integration, hooks
 
 **Task planning skills**:
-The embedded, pop-independent skills (grill-with-docs, to-prd, to-tasks) whose output feeds Task sets. Versioned with the pop binary and installed only by explicit opt-in; pop's task scheduling and execution do not depend on them being installed. grill-consolidate also ships embedded, but is a glossary-maintenance pass that folds CONTEXT fragments into the base — not a Task-set producer.
+The embedded, pop-independent skills (grill-with-docs, to-spec, to-tasks) whose output feeds Task sets. Versioned with the pop binary and installed only by explicit opt-in; pop's task scheduling and execution do not depend on them being installed. grill-consolidate also ships embedded, but is a glossary-maintenance pass that folds CONTEXT fragments into the base — not a Task-set producer.
 _Avoid_: Workload framework, workload skills bundle, agent integration
 
 **Skills prefix**:
@@ -193,7 +193,7 @@ An **Integrate outcome line** emitted when **Stale agent entry cleanup** deletes
 _Avoid_: pruned line, stale prune report
 
 **Integrate outcome ordering**:
-**Integrate outcome line**s group by agent (existing configured agent order). Within an agent: status wiring first, then file-based skills in embed catalog source order (`tmux-pane`; then `grill-with-docs`, `grill-consolidate`, `to-prd`, `to-tasks`). For each embed base, emit any **Stale skill removal line** for superseded resolved names immediately before that base's current line — so `pop-grill-consolidate  removed (stale)` sits next to `grill-consolidate  updated`, not in a separate trailing block.
+**Integrate outcome line**s group by agent (existing configured agent order). Within an agent: status wiring first, then file-based skills in embed catalog source order (`tmux-pane`; then `grill-with-docs`, `grill-consolidate`, `to-spec`, `to-tasks`). For each embed base, emit any **Stale skill removal line** for superseded resolved names immediately before that base's current line — so `pop-grill-consolidate  removed (stale)` sits next to `grill-consolidate  updated`, not in a separate trailing block.
 _Avoid_: alphabetical integrate output, sort by label
 
 ### Pickers

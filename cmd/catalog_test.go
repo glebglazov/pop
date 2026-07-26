@@ -12,7 +12,7 @@ import (
 func TestCatalog_StableIdentifiers(t *testing.T) {
 	want := map[ComponentID]bool{
 		"status-wiring": true,
-		"pane-skills":    true,
+		"pane-skills":   true,
 		"task-skills":   true,
 	}
 
@@ -120,7 +120,7 @@ func TestCatalog_TaskSkillsSources(t *testing.T) {
 	want := []string{
 		"skills/pop/grill-with-docs",
 		"skills/pop/grill-consolidate",
-		"skills/pop/to-prd",
+		"skills/pop/to-spec",
 		"skills/pop/to-tasks",
 		"skills/pop/wayfinder",
 		"skills/pop/prototype",
