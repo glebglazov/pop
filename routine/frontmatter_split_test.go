@@ -75,6 +75,40 @@ func TestFingerprintSplitsFrontmatterFromBody(t *testing.T) {
 	}
 }
 
+// TestSettingsEditLeavesBodyIdentical proves a frontmatter-only edit
+// (schedule, then agents/effort) rewrites the settings while preserving the
+// prompt body below the fence byte-for-byte (ADR-0139).
+func TestSettingsEditLeavesBodyIdentical(t *testing.T) {
+	d, _ := newFrontmatterSplitRoutine(t, "keep-body")
+
+	body := "# Triage\n\nReview open PRs and summarize blockers.\n\n- step one\n- step two\n"
+	setRoutineBody(t, d, "keep-body", body)
+
+	if _, err := UpdateScheduleWith(d, "keep-body", "daily at 09:30"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateRuntimeWith(d, "keep-body", []string{"claude"}, true, "heavy", true); err != nil {
+		t.Fatal(err)
+	}
+
+	// The frontmatter now carries the edited settings...
+	r, err := loadManifest(d, "keep-body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Manifest.Schedule != "daily at 09:30" || r.Manifest.Effort != "heavy" {
+		t.Fatalf("settings not applied: %+v", r.Manifest)
+	}
+	// ...while the prompt body below the fence is byte-for-byte the original.
+	_, gotBody, err := readPromptFrontmatter(d, routineDir(d, "keep-body"), "keep-body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBody != body {
+		t.Fatalf("body changed by settings edit:\n got %q\nwant %q", gotBody, body)
+	}
+}
+
 // TestListWarnsInvalidFrontmatter proves unparseable YAML frontmatter suspends
 // only that routine with a warning; healthy siblings still load (ADR-0139).
 func TestListWarnsInvalidFrontmatter(t *testing.T) {

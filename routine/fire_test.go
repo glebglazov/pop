@@ -337,6 +337,52 @@ func TestFireAgentFailureRecordsFailedRow(t *testing.T) {
 	}
 }
 
+// TestFireFailureLeavesPromptUntouched proves a live run keeps the prompt it
+// already read: its failure-pause writes only state.json, never rewriting the
+// prompt.md the run resolved its body from (ADR-0139).
+func TestFireFailureLeavesPromptUntouched(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installFakeClaude(t, root, 3) // non-zero exit → failed run → failure-pause
+	d := fireDeps(t, dataHome)
+
+	if _, err := AddWith(d, "daily", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	promptPath := filepath.Join(dataHome, "pop", "routines", "daily", "prompt.md")
+	if err := os.WriteFile(promptPath, []byte("---\nschedule: every 6h\n---\nAssess the service.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := FireWith(d, "daily"); err == nil {
+		t.Fatal("expected the failing run to error")
+	}
+
+	after, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("failure-pause must not rewrite prompt.md:\n got %q\nwant %q", after, before)
+	}
+	// The failure landed in state.json instead.
+	r, err := loadManifest(d, "daily")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Manifest.Paused || r.Manifest.PauseReason != PauseReasonFailure {
+		t.Fatalf("manifest = {paused:%v reason:%q}, want paused with reason failure", r.Manifest.Paused, r.Manifest.PauseReason)
+	}
+}
+
 func TestFireCompleteSentinelWithReportSucceeds(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")

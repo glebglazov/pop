@@ -177,10 +177,14 @@ func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	writeAuthoringChecklistItems(&b)
 
 	b.WriteString("## How to apply your work\n\n")
-	fmt.Fprintf(&b, "  - Edit the prompt directly: write %s.\n", promptPath)
+	fmt.Fprintf(&b, "  - %s opens with a YAML frontmatter block fenced by `---` lines that\n", promptPath)
+	b.WriteString("    carries this routine's settings (schedule, agents, effort); the prompt\n")
+	b.WriteString("    itself is the body below the closing fence.\n")
+	b.WriteString("  - Edit the prompt by rewriting the body below the fence directly (as before);\n")
+	b.WriteString("    leave the frontmatter block in place.\n")
 	fmt.Fprintf(&b, "  - Change the schedule ONLY via `pop routine edit %s --schedule \"<expr>\"`\n", id)
-	b.WriteString("    (do not hand-edit the manifest — that command validates the expression\n")
-	b.WriteString("    through the parser, so validation is never bypassed).\n")
+	b.WriteString("    (do not hand-edit the `schedule:` frontmatter — that command validates the\n")
+	b.WriteString("    expression through the parser, so validation is never bypassed on write).\n")
 	b.WriteString("  - When you exit, control returns to the pop refinement menu, where I can fire\n")
 	b.WriteString("    a test run and resume the routine.\n")
 
