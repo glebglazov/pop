@@ -5,17 +5,21 @@ disable-model-invocation: true
 ---
 
 <!--
-base: mattpocock/skills engineering/wayfinder@260225724133
+base: mattpocock/skills engineering/wayfinder@ed37663cc5fbef691ddfecd080dff42f7e7e350d
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
-marker is a verbatim copy of upstream engineering/wayfinder/SKILL.md at the
-pinned ref above. Pop inlines rather than delegating to Matt's skills, per
+marker is a byte-verbatim copy of upstream engineering/wayfinder/SKILL.md body at
+the pinned ref above. Pop inlines rather than delegating to Matt's skills, per
 ADR-0009 (skills are embedded in the binary and ship to machines without them
-installed). Upstream's `disable-model-invocation` frontmatter is kept:
-wayfinding is a manual-only session the user opens with `/pop-wayfinder`, never
-something the model starts on its own. Pop's storage, claim, resolution, and
-handoff overrides live below that marker. To review upstream drift, diff the
-region between this header and the marker against engineering/wayfinder@<newref>.
+installed). Pop-authored frontmatter is kept (name `wayfinder`, pop description,
+`disable-model-invocation`: wayfinding is a manual-only session the user opens
+with `/pop-wayfinder`, never something the model starts on its own). Pop's
+Work-store seam and its irreducible invocation deltas live below the marker
+(ADR-0136). Upstream already routes the map, its tickets, blocking, claiming,
+resolution, and the frontier through the tracker doc's "Wayfinding operations"
+section (see "The Map"); the pop doc now carries those, so the overlay only names
+which doc and states the deltas with no home there. To review upstream drift, diff
+the region between this header and the marker against engineering/wayfinder@<newref>.
 -->
 
 A loose idea has arrived — too big for one agent session, and wrapped in fog: the way from here to the **destination** isn't visible yet. Wayfinding is about finding that way, not charging at the destination. This skill charts the way as a **shared map** on the repo's issue tracker, then works its **decision tickets** — questions whose resolution is a decision, not slices of a build to execute — one at a time until the route is clear.
@@ -141,151 +145,49 @@ User invokes with a map (URL or number). A ticket is **optional** — without on
 
 The user may run unblocked tickets in parallel, so expect other sessions to be editing the tracker concurrently.
 <!-- ═══════════════════════════════ POP OVERLAY ═══════════════════════════════
-Everything below is pop-specific and has no upstream twin. It replaces upstream's
-tracker-doc seam with pop's Task-storage layout and the behavioural overrides
-listed in ADR-0129. Where a line below contradicts the verbatim upstream
-region, the line below wins; the upstream text is kept byte-intact only so drift
-stays diffable.
+Everything below is pop-specific and replaces the tracker-doc seam in the
+verbatim region above. Upstream already routes the map, its tickets, blocking,
+claiming, resolution, and the frontier through the tracker doc's "Wayfinding
+operations" section (see "The Map"); the pop doc now carries those, so this
+overlay only resolves which doc and states the deltas that live in upstream's
+`## Invocation` flow rather than behind that seam (ADR-0136). Where a line below
+contradicts the verbatim upstream region, the line below wins; the upstream text
+is kept byte-intact only so drift stays diffable.
 -->
 
-## Pop storage layout
+## Work store resolution
 
-Resolve the per-repository Task-storage root once per session:
+Ignore upstream's "run `/setup-matt-pocock-skills`" line and its default
+local-markdown tracker. Resolve the Work store two-layer instead:
 
-```bash
-pop work show-path
-```
+1. If the repo has `docs/agents/issue-tracker.md`, that store wins.
+2. Otherwise read the machine-global pop doc at
+   `${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md`.
 
-Maps live under a `wayfinder/` sibling of `tasks/`:
+Resolve this repository's Task-storage root once per session with
+`pop work show-path`; the doc lays maps out under a `wayfinder/` sibling of that
+root's `tasks/`.
 
-```
-$(pop work show-path)/wayfinder/<YYYY-MM-DD-slug>/
-├── map.md
-└── issues/
-    ├── 01-<slug>.md
-    ├── 02-<slug>.md
-    └── ...
-```
+Everywhere the verbatim region above defers to "the tracker doc's 'Wayfinding
+operations' section", and wherever it names a tracker-native operation —
+labelling `wayfinder:map`, assigning a ticket to claim it, native blocking
+edges, posting a resolution comment and closing the issue, querying the frontier
+— read it through the resolved doc's **"Wayfinding operations"** section. That
+section owns every pop mechanic: the storage layout, the `map.md` and
+ticket-file shapes, claiming, resolution and its ticket-type overrides, the
+out-of-scope rule, the one-non-research-ticket-per-session rule, and handoff to
+`to-spec` / `to-tasks`. None of it is restated here; consult the doc.
 
-`<YYYY-MM-DD-slug>` is the map id (e.g. `2026-07-19-wayfinder-work-dashboard`). Ticket files are `NN-<slug>.md` where `NN` is a zero-padded ticket number (`01`, `02`, …). A map exists because its folder exists — no registration step.
+## Skill and invocation deltas
 
-**Ignore upstream's tracker setup.** There is no issue tracker, no labels, and no `/setup-matt-pocock-skills`. All map and ticket state is plain markdown in Task storage.
+*(Irreducible pop bits: these live in upstream's `## Invocation` flow, not behind
+the tracker-doc seam, so the resolved doc has no place to carry them.)*
 
-### `map.md`
-
-The map body follows upstream's section shape, with pop additions at the top and bottom:
-
-```markdown
-Status: active
-
-## Destination
-
-<one or two lines — every session orients here first>
-
-## Notes
-
-<domain; skills to consult; standing preferences>
-
-## Decisions so far
-
-- [01-first-ticket](issues/01-first-ticket.md) — one-line gist of the answer
-
-## Not yet specified
-
-<fog — graduates into tickets as the frontier advances>
-
-## Out of scope
-
-<work ruled beyond the destination>
-
-## Spawned sets
-
-<!-- forward links to Task sets this map spawned via to-spec/to-tasks -->
-
-- <task-set-id>
-```
-
-**Map `Status:` line** (top of `map.md`, before headings): `active` (default while wayfinding), `done` (way found — write this at handoff), or `abandoned` (closed without reaching the destination). Charting writes `Status: active`. Handoff writes `Status: done`.
-
-Open tickets are **not** listed in `map.md` — they are files under `issues/`, discovered by reading the directory.
-
-### Ticket files (`issues/NN-<slug>.md`)
-
-Metadata lines come first (parsed by `pop wayfinder` and the Work dashboard):
-
-```markdown
-Type: research|prototype|grilling|task
-Status: open|claimed|resolved
-Blocked by: 01, 02
-
-## Question
-
-<the decision or investigation this ticket resolves>
-
-## Answer
-
-<written on resolution — prose answer, links to assets>
-```
-
-- **`Type:`** — one of `research`, `prototype`, `grilling`, `task` (same vocabulary as upstream ticket types).
-- **`Status:`** — `open` (default), `claimed` (this session owns it), or `resolved` (decision recorded). Omitting `Status:` means `open`.
-- **`Blocked by:`** — comma-separated blocker ticket numbers (e.g. `01, 02`). A ticket is **unblocked** when every blocker is `resolved`; the **frontier** is open, unblocked, unclaimed tickets — the edge of the known.
-
-### Claiming, resolving, and the frontier
-
-**Claim before work:** set `Status: claimed` in the ticket file **first**, before any investigation or conversation. Concurrent sessions must skip claimed tickets. An open, unclaimed ticket is takeable.
-
-**Resolve a ticket:**
-
-1. Write the decision under `## Answer` in the ticket file.
-2. Set `Status: resolved`.
-3. Append one line to the map's **Decisions so far**: `[<ticket title>](issues/NN-<slug>.md) — <one-line gist>`.
-
-A resolved ticket is off the frontier. Assets created while resolving are linked from the answer, not pasted in full.
-
-**Out of scope:** set a mis-scoped ticket to `Status: resolved` with a brief answer explaining why, and add one line to **Out of scope** on the map (not Decisions so far).
-
-## Ticket-type overrides
-
-- **Grilling** (HITL): run the `grill-with-docs` skill (pop's embedded planning skill — not `/grilling` or `/domain-modeling`). One question at a time with the human; never answer your own grilling questions.
-- **Research** (AFK): run the `research` skill (background agent, primary sources). Record findings in the ticket's `## Answer` with source citations — the Answer holds the gist and cites/links; **do not** open a throwaway `research/<name>` branch or any other side branch for research output.
-- **Prototype** (HITL): run the `prototype` skill (logic vs UI branches, throwaway, one command to run). Link the prototype's path and record the verdict in the ticket's `## Answer` — pop's rule overrides upstream prototype's "commit to a throwaway branch"; the artifact stays in the working tree and the Answer records the validated decision. Use when "how should it look" or "how should it behave" is the key question.
-- **Task** (HITL or AFK): manual work that unblocks a decision — provisioning access, signing up for a service, moving data so its shape can be seen. The agent drives it alone where it can; otherwise hand the human a precise checklist. The answer records what was done and any facts later tickets depend on.
-
-## Invocation (pop)
-
-Two modes. Either way, **never resolve more than one non-research ticket per session** — research tickets may be burned down in parallel.
-
-### Chart the map
-
-User invokes with a loose idea (no map id).
-
-1. **Name the destination** with `grill-with-docs` — pin down what this map is finding its way to. The destination fixes scope; settle it first.
-2. **Map the frontier** with another `grill-with-docs` pass, breadth-first: fan out across the whole space, surfacing open decisions and first steps takeable now. If the way is already clear and small enough for one session, you don't need a map — stop and ask how to proceed.
-3. **Create the map folder** at `$(pop work show-path)/wayfinder/<YYYY-MM-DD-slug>/` with `map.md` (`Status: active`, Destination, Notes, empty Decisions so far, fog in Not yet specified).
-4. **Create ticket files** you can specify now under `issues/` — wire `Blocked by:` in a second pass once numbers exist. Everything not yet sharp stays in **Not yet specified**.
-5. **Fire research in parallel** for each `Type: research` ticket — run the `research` skill (this session or background agents), writing each answer into its ticket's `## Answer` with source citations and setting `Status: resolved`.
-6. Stop — charting is one session's work; it hand-resolves nothing beyond research.
-
-### Work through the map
-
-User invokes as `work <map-id> [<ticket-id>]` (e.g. `/pop-wayfinder work 2026-07-19-feature 03`). Ticket id is optional — without one, take the first frontier ticket.
-
-1. Load `map.md` — the low-res view, not every ticket body.
-2. Choose the ticket. If the user named one, use it; otherwise take the first frontier ticket. **Claim it:** set `Status: claimed` before any work.
-3. Resolve — read related tickets on demand; invoke skills named in **Notes**. Grilling tickets use `grill-with-docs`; research tickets use `research`; prototype tickets use `prototype`.
-4. Record the resolution in the ticket (`## Answer`, `Status: resolved`) and append to **Decisions so far** on the map.
-5. Add newly-surfaced tickets; graduate fog into new `issues/` files; rule out-of-scope tickets per upstream rules.
-
-Expect parallel sessions — re-read ticket status before claiming.
-
-## Handoff to implementation
-
-When the way to the destination is clear — or an early-splittable chunk is — **suggest `to-spec` and/or `to-tasks`** to the user. Wayfinding produces decisions; implementation happens in ordinary registered Task sets.
-
-Record the forward link both ways:
-
-1. **On the map:** append each spawned task-set id under `## Spawned sets` in `map.md`.
-2. **On the set:** when `to-spec` writes `spec.md`, include a **Source map** line naming this map's id (e.g. `Source map: 2026-07-19-feature`).
-
-Then set `Status: done` in `map.md`. One map may spawn many sets over time; only mark `done` when wayfinding for this destination is finished (individual chunks may hand off earlier while the map stays `active` if fog remains).
+- **Charting skills.** Where upstream's *Chart the map* runs `/grilling` and
+  `/domain-modeling` (steps 1–2) to name the destination and map the frontier,
+  run pop's `grill-with-docs` instead. The `research` subagents fired in step 5
+  write their findings into the ticket's `## Answer` (per the doc's research
+  override), **not** onto a throwaway `research/<name>` branch.
+- **Invocation form.** `/pop-wayfinder` charts a new map from a bare loose idea
+  (no map id), and works an existing one as `work <map-id> [<ticket-id>]` — the
+  ticket id optional, defaulting to the first frontier ticket.

@@ -46,8 +46,10 @@ func TestRewriteSkillReferencesNoCommonWordCorruption(t *testing.T) {
 	}
 
 	wayfinder := string(tree["pop-wayfinder/SKILL.md"])
+	// The ticket-type vocabulary rides in the verbatim upstream base (the pop
+	// overlay's own copy moved to the Work-store doc, ADR-0136). The rewriter
+	// must leave the enum and the `research/<name>` branch path untouched.
 	for _, want := range []string{
-		"Type: research|prototype|grilling|task",
 		"one of `research`, `prototype`, `grilling`, `task`",
 		"`research/<name>`",
 	} {
@@ -56,7 +58,6 @@ func TestRewriteSkillReferencesNoCommonWordCorruption(t *testing.T) {
 		}
 	}
 	for _, bad := range []string{
-		"Type: pop-research|pop-prototype",
 		"one of `pop-research`",
 		"`pop-research/<name>`",
 	} {
@@ -64,7 +65,9 @@ func TestRewriteSkillReferencesNoCommonWordCorruption(t *testing.T) {
 			t.Errorf("wayfinder ticket vocabulary corrupted: contains %q", bad)
 		}
 	}
-	for _, want := range []string{"`pop-grill-with-docs`", "`pop-to-spec`", "`pop-to-tasks`", "run the `pop-research` skill"} {
+	// Real cross-skill references still rewrite: the overlay's handoff/charting
+	// skills and the base's `/research` subagent invocation.
+	for _, want := range []string{"`pop-grill-with-docs`", "`pop-to-spec`", "`pop-to-tasks`", "`/pop-research`"} {
 		if !strings.Contains(wayfinder, want) {
 			t.Errorf("wayfinder overlay missing rewritten skill reference %q", want)
 		}
