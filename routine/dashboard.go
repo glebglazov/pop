@@ -28,6 +28,18 @@ type DashboardRow struct {
 	// report. Empty when the routine has never fired or its latest run has
 	// no report (e.g. skipped).
 	LastReportPath string
+	// Project marks a Project routine row (ADR-0138): discovered live from the
+	// current checkout's `.pop/routines/`, it renders distinct-styled and badged,
+	// carries no pause state, is manual-fire-only, and its verbs address it by its
+	// `project:<name>` id (which is what ID holds).
+	Project bool
+	// StoreID is the execution-store routine_id this row's run history keys on.
+	// For an authored routine it equals ID; for a Project routine it is the
+	// synthetic per-checkout id, so sibling worktrees never share history.
+	StoreID string
+	// RunsDir is the directory holding this row's run reports, used to resolve a
+	// report path when a run row carries none.
+	RunsDir string
 }
 
 // DashboardSnapshot is the data model for `pop routine dashboard`.
@@ -68,6 +80,8 @@ func BuildDashboardWith(d *Deps) (DashboardSnapshot, error) {
 			Directory: r.Manifest.BoundDirectory,
 			Schedule:  r.Manifest.Schedule,
 			Paused:    r.Manifest.Paused,
+			StoreID:   r.ID,
+			RunsDir:   filepath.Join(routineDir(d, r.ID), runsDirName),
 		}
 		if s != nil {
 			last, err := LastFireTime(s, r.ID)
@@ -75,15 +89,52 @@ func BuildDashboardWith(d *Deps) (DashboardSnapshot, error) {
 				return DashboardSnapshot{}, err
 			}
 			row.LastRun = formatLastRun(last)
-			row.Status, row.LastReportPath = dashboardStatusFor(d, s, r)
+			row.Status, row.LastReportPath = dashboardStatusFor(d, s, r.ID, r.Manifest)
 		} else {
 			row.LastRun = "never"
 			row.Status = dashboardIdleStatus(r.Manifest, "")
 		}
 		rows = append(rows, row)
 	}
+
+	// Project routines are discovered live from the current checkout and appended
+	// to the authored rows (ADR-0138): distinct-styled, badged, manual-only, with
+	// per-checkout run state. Outside a checkout this is empty, so the dashboard
+	// is byte-for-byte the authored-only one.
+	projectRoutines, projectWarnings := DiscoverProjectRoutines(d)
+	for _, pr := range projectRoutines {
+		key := checkoutKey(pr.Dir)
+		storeID := projectStoreID(key, pr.Name)
+		row := DashboardRow{
+			ID:        ProjectOrigin + pr.Name,
+			Directory: pr.Dir,
+			// A Project routine carries no schedule; SCHEDULE reads `manual`.
+			Schedule: "",
+			Project:  true,
+			StoreID:  storeID,
+			RunsDir:  filepath.Join(projectRoutineDataDir(d, key, pr.Name), runsDirName),
+		}
+		if s != nil {
+			last, err := LastFireTime(s, storeID)
+			if err != nil {
+				return DashboardSnapshot{}, err
+			}
+			row.LastRun = formatLastRun(last)
+			// Project routines have no pause state, so status derives from an empty
+			// manifest — never `paused`, only running / ok / failed / idle.
+			row.Status, row.LastReportPath = dashboardStatusFor(d, s, storeID, Manifest{})
+		} else {
+			row.LastRun = "never"
+			row.Status = dashboardIdleStatus(Manifest{}, "")
+		}
+		rows = append(rows, row)
+	}
+
 	snap := DashboardSnapshot{Rows: rows}
 	for _, w := range warnings {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("routine %s: %v", w.ID, w.Err))
+	}
+	for _, w := range projectWarnings {
 		snap.Warnings = append(snap.Warnings, fmt.Sprintf("routine %s: %v", w.ID, w.Err))
 	}
 	return snap, nil
@@ -98,18 +149,20 @@ func formatLastRun(t time.Time) string {
 
 // dashboardStatusFor derives a row's STATUS cell alongside the absolute path
 // of its latest run's report (empty when never-fired, skipped, or still
-// running — the running row itself has no report yet).
-func dashboardStatusFor(d *Deps, s *store.Store, r *Routine) (string, string) {
-	last, lastErr := s.LastRoutineRun(r.ID)
+// running — the running row itself has no report yet). It keys the store lookup
+// on storeID and derives the idle label from m, so a Project routine (empty
+// manifest) can share the same seam yet never surface a paused status.
+func dashboardStatusFor(d *Deps, s *store.Store, storeID string, m Manifest) (string, string) {
+	last, lastErr := s.LastRoutineRun(storeID)
 	reportPath := ""
 	if lastErr == nil && last != nil {
 		reportPath = last.ReportPath
 	}
-	live, err := s.LiveRoutineRun(r.ID, func(run store.RoutineRun) bool {
+	live, err := s.LiveRoutineRun(storeID, func(run store.RoutineRun) bool {
 		return routineProcessAlive(d, run.PID, run.ProcStart)
 	})
 	if err != nil {
-		return dashboardIdleStatus(r.Manifest, ""), reportPath
+		return dashboardIdleStatus(m, ""), reportPath
 	}
 	if live != nil {
 		return "running", reportPath
@@ -118,7 +171,7 @@ func dashboardStatusFor(d *Deps, s *store.Store, r *Routine) (string, string) {
 	if lastErr == nil && last != nil {
 		outcome = last.Outcome
 	}
-	return dashboardIdleStatus(r.Manifest, outcome), reportPath
+	return dashboardIdleStatus(m, outcome), reportPath
 }
 
 // dashboardIdleStatus renders the STATUS cell for a Routine that is not live.
@@ -163,21 +216,21 @@ type reportPeek struct {
 }
 
 type RoutineDashboard struct {
-	d         *Deps
-	snap      DashboardSnapshot
-	allRows   []DashboardRow
-	list      *ui.List[DashboardRow]
-	cols      *dashboardColumns
-	err       error
-	width     int
-	height    int
+	d           *Deps
+	snap        DashboardSnapshot
+	allRows     []DashboardRow
+	list        *ui.List[DashboardRow]
+	cols        *dashboardColumns
+	err         error
+	width       int
+	height      int
 	detail      *runsDetailView
 	menu        *routineDashboardMenu
 	sched       *routineScheduleModal
 	agentEffort *routineAgentEffortModal
 	statusMsg   string
-	showHelp  bool
-	pendingG  bool
+	showHelp    bool
+	pendingG    bool
 	// refineAgent is an optional --refine-agent override forwarded when the
 	// refine verb spawns `pop routine edit <id>` into tmux (ADR-0132).
 	refineAgent string
@@ -250,7 +303,20 @@ type routineDashboardMenu struct {
 // routineMenuItems returns the verbs applicable to row, in a stable order. The
 // pause/resume label reflects the row's current paused state. New verbs (e.g.
 // the edit-schedule modal added in a later slice) append here.
+//
+// A Project routine is a committed prompt edited in its checkout, not an
+// authored manifest in pop's data dir (ADR-0138): it has no pause state and no
+// schedule, so only the verbs that read its per-checkout run state apply —
+// fire, preview, runs, and handoff. Pause/resume and edit-schedule are absent.
 func routineMenuItems(row DashboardRow) []routineMenuItem {
+	if row.Project {
+		return []routineMenuItem{
+			{key: "i", label: "fire now", action: menuActionFire},
+			{key: "p", label: "preview pane", action: menuActionPreview},
+			{key: "l", label: "runs", action: menuActionRuns},
+			{key: "y", label: "handoff", action: menuActionHandoff},
+		}
+	}
 	pauseLabel := "pause"
 	if row.Paused {
 		pauseLabel = "resume"
@@ -734,7 +800,7 @@ func (m RoutineDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			return m, nil
 		}
 		m.detail.peek = &reportPeek{loading: true}
-		return m, m.loadReport(m.detail.row.ID, run)
+		return m, m.loadReport(m.detail.row.RunsDir, run)
 	case "c":
 		if m.detail == nil || m.detail.loading {
 			return m, nil
@@ -1091,12 +1157,12 @@ func (m RoutineDashboard) loadRuns(row DashboardRow) tea.Cmd {
 		if err != nil {
 			return dashboardRunsMsg{err: err}
 		}
-		runs, err := s.ListRoutineRuns(row.ID)
+		runs, err := s.ListRoutineRuns(row.StoreID)
 		return dashboardRunsMsg{runs: runs, err: err}
 	}
 }
 
-func (m RoutineDashboard) loadReport(routineID string, run store.RoutineRun) tea.Cmd {
+func (m RoutineDashboard) loadReport(runsDir string, run store.RoutineRun) tea.Cmd {
 	return func() tea.Msg {
 		d := m.d
 		if d == nil {
@@ -1104,8 +1170,7 @@ func (m RoutineDashboard) loadReport(routineID string, run store.RoutineRun) tea
 		}
 		path := run.ReportPath
 		if path == "" {
-			path = filepath.Join(routineDir(d, routineID), runsDirName,
-				run.FiredAt.UTC().Format("2006-01-02T15-04-05Z")+".md")
+			path = reportPathForRun(runsDir, run.FiredAt)
 		}
 		data, err := d.FS.ReadFile(path)
 		if err != nil {
@@ -1200,6 +1265,19 @@ func (m RoutineDashboard) helpEntries() []ui.HelpEntry {
 		}
 	}
 	if m.menu != nil {
+		// A Project routine's menu carries only the verbs that read its
+		// per-checkout state (ADR-0138); pause/resume and edit-schedule are absent.
+		if m.menu.row.Project {
+			return []ui.HelpEntry{
+				{Key: "i", Desc: "fire now"},
+				{Key: "p", Desc: "preview pane"},
+				{Key: "l", Desc: "runs"},
+				{Key: "y", Desc: "handoff"},
+				{Key: "j/k", Desc: "navigate"},
+				{Key: "enter", Desc: "run action"},
+				{Key: "esc", Desc: "close menu"},
+			}
+		}
 		return []ui.HelpEntry{
 			{Key: "i", Desc: "fire now"},
 			{Key: "a", Desc: "pause/resume"},
@@ -1664,7 +1742,7 @@ func padDashboardCell(s string, width int) string {
 
 func dashboardRowValues(row DashboardRow) []string {
 	return []string{
-		row.ID,
+		dashboardRoutineCellStyled(row),
 		row.Directory,
 		ScheduleLabel(row.Schedule),
 		row.LastRun,
@@ -1674,12 +1752,39 @@ func dashboardRowValues(row DashboardRow) []string {
 
 func dashboardRowNaturalValues(row DashboardRow) []string {
 	return []string{
-		row.ID,
+		dashboardRoutineCellPlain(row),
 		row.Directory,
 		ScheduleLabel(row.Schedule),
 		row.LastRun,
 		row.Status,
 	}
+}
+
+// projectRoutineBadge prefixes a Project routine's ROUTINE cell so it reads as
+// not-a-usual-routine at a glance (ADR-0138), beside its `project:<name>` id.
+const projectRoutineBadge = "◆"
+
+// projectRoutineStyle is the distinct color a Project routine's ROUTINE cell
+// carries, setting it apart from the authored rows it sits among.
+var projectRoutineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+
+// dashboardRoutineCellPlain is the unstyled ROUTINE cell used for column-width
+// measurement: a Project row carries its origin badge so the badge's width is
+// accounted for in the layout.
+func dashboardRoutineCellPlain(row DashboardRow) string {
+	if row.Project {
+		return projectRoutineBadge + " " + row.ID
+	}
+	return row.ID
+}
+
+// dashboardRoutineCellStyled is the rendered ROUTINE cell: a Project row's badge
+// and id carry the distinct project color; an authored row is plain.
+func dashboardRoutineCellStyled(row DashboardRow) string {
+	if row.Project {
+		return projectRoutineStyle.Render(projectRoutineBadge + " " + row.ID)
+	}
+	return row.ID
 }
 
 func dashboardStatusStyled(status string) string {

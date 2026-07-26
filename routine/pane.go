@@ -14,30 +14,26 @@ const (
 )
 
 // FirePaneWith spawns `pop routine fire <id>` into a tmux pane for the routine,
-// reusing the same pane when one is already tagged for that routine.
+// reusing the same pane when one is already tagged for that routine. The id may
+// be an authored routine or a Project routine's `project:<name>` (ADR-0138);
+// the pane runs in the routine's bound directory (a Project routine's checkout).
 func FirePaneWith(d *Deps, routineID string) error {
-	if err := validateID(routineID); err != nil {
-		return err
-	}
-	r, err := loadManifest(d, routineID)
+	dir, err := paneBoundDir(d, routineID)
 	if err != nil {
 		return err
 	}
-	session, dir := sessionAndDir(d, r.Manifest.BoundDirectory)
-	return spawnFirePane(tmuxDeps(d), session, dir, routineID)
+	session, paneDir := sessionAndDir(d, dir)
+	return spawnFirePane(tmuxDeps(d), session, paneDir, routineID)
 }
 
 // PreviewPaneWith switches the active tmux client to the pane tagged for the
 // routine. When no pane exists the call is a no-op.
 func PreviewPaneWith(d *Deps, routineID string) error {
-	if err := validateID(routineID); err != nil {
-		return err
-	}
-	r, err := loadManifest(d, routineID)
+	dir, err := paneBoundDir(d, routineID)
 	if err != nil {
 		return err
 	}
-	session, dir := sessionAndDir(d, r.Manifest.BoundDirectory)
+	session, dir := sessionAndDir(d, dir)
 	windowTarget, _, err := resolveDrainWindowTarget(tmuxDeps(d), session, dir)
 	if err != nil {
 		return err
@@ -55,6 +51,27 @@ func PreviewPaneWith(d *Deps, routineID string) error {
 	}
 	_, err = tmux.Command("switch-client", "-t", paneID)
 	return err
+}
+
+// paneBoundDir resolves the directory a routine's pane runs in. An authored
+// routine's bound directory comes from its manifest; a Project routine's
+// (`project:<name>`) comes from the checkout it was discovered in (ADR-0138).
+func paneBoundDir(d *Deps, routineID string) (string, error) {
+	if name, ok := parseProjectRef(routineID); ok {
+		pr, err := findProjectRoutine(d, name)
+		if err != nil {
+			return "", err
+		}
+		return pr.Dir, nil
+	}
+	if err := validateID(routineID); err != nil {
+		return "", err
+	}
+	r, err := loadManifest(d, routineID)
+	if err != nil {
+		return "", err
+	}
+	return r.Manifest.BoundDirectory, nil
 }
 
 func tmuxDeps(d *Deps) deps.Tmux {
