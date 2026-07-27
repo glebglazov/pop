@@ -35,3 +35,22 @@ Measurement for this ADR shrank that picture. The blockers are: 247 `t.Setenv` c
 - A future reader finding serial tests (PATH stubs, `interruptGateExit`, `newRunID`, TMUX-env `cmd` tests) should not "fix" them by seaming — serial is the chosen trade for those families.
 - Races introduced by new parallel tests surface in `make test-race` at release, not in the fast loop; a flaky-under-shuffle failure there is a real bug, not test noise.
 - No glossary changes: like ADR-0144, test-suite parallelism is architecture, not domain language.
+
+## Addendum: measured result (slices 01-07 landed)
+
+Cold `-count=1` timings, measured isolated per package (`go test -count=1 ./<pkg>/...`) plus one cold `go test -count=1 ./...` for the real `make test` total:
+
+| Package | ADR-0144 baseline | After ADR-0145 | Note |
+|---|---|---|---|
+| `tasks` | 93.7s | 35.2s | slices 01–03 migrated to per-test `Deps` + `t.Parallel()`; deliberate-serial PATH/`interruptGateExit`/`newRunID` families remain |
+| `cmd` | 52.1s | 16.0s | slices 04–05 migrated; TMUX/env-behavior tests deliberately serial |
+| `queue` | 29.0s | 15.4s | slice 06 **skipped** (stop rule) — no intra-package migration; timing reflects package-level `./...` concurrency only |
+| **cold `make test` total** (`go test -count=1 ./...`) | **103.2s** | **48.0s** | wall time; `tasks` (~35s) is still the critical path |
+
+Result: cold total dropped ~103s → ~48s (~53% cut), moving toward but not reaching the ADR's ~15–20s stop-rule target. `tasks` at ~35s isolated remains the suite ceiling — within-package parallelism cut it from 93.7s, but deliberate-serial families and less-than-full saturation on an 8-core machine leave headroom above the ~10s projection.
+
+**Slice 06 (`queue`) skipped:** after slices 01–05, cold `./...` total was ~54s with `tasks` (~48s in the concurrent run) as the wall-time ceiling; queue (~29s) could not shrink total further, and the ~19 `XDG_DATA_HOME` setenv migration cost exceeded the marginal suite win — per the stop rule.
+
+**Slice 07 (`make test-race` release gate):** no timing impact; `make test-race` (`go test -race -shuffle=on ./...`) passes at ~211s wall time.
+
+No package regressed against its ADR-0144 baseline.
